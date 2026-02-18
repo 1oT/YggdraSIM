@@ -1,3 +1,4 @@
+import os
 from SCP03.config import Config
 
 class ShellGuides:
@@ -14,6 +15,7 @@ class ShellGuides:
 
     @classmethod
     def print_guide(cls, topic: str):
+        os.system('cls' if os.name == 'nt' else 'clear')
         topic = topic.upper()
         if topic == 'GP':
             cls._print_gp_guide()
