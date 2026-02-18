@@ -56,13 +56,13 @@ class ShellDispatcher:
 
             # SGP.32 (IoT) - Aliased to SGP.22 logic for now
             'LIST-IOT': self.gp_ctrl.sgp22.list_profiles,
-            'GET-SGP32': self.gp_ctrl.sgp22.run_sgp22_scan,
+            'GET-IOT': self.gp_ctrl.sgp22.run_sgp22_scan,
             'ENABLE-IOT': self._handle_enable,
             'DISABLE-IOT': self._handle_disable,
             'DELETE-IOT': self._handle_delete_profile,
             
             # SGP.02 (M2M)
-            'GET-SGP02': self.gp_ctrl.sgp22.run_sgp02_scan,
+            'GET-M2M': self.gp_ctrl.sgp22.run_sgp02_scan,
             'GET-ECASD': self.gp_ctrl.sgp22.run_sgp02_scan,
             
             # GlobalPlatform Registry
@@ -338,7 +338,7 @@ class ShellDispatcher:
                         "label": "GSMA SGP.02 (M2M)", 
                         "url": "https://www.gsma.com/solutions-and-impact/technologies/esim/gsma_resources/sgp-02-v4-3/",
                         "cmds": [
-                            ("GET-SGP02", "", "Scan SGP.02")
+                            ("GET-M2M", "", "Scan SGP.02")
                         ]
                     },
                     {

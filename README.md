@@ -5,7 +5,7 @@
 ## 🚀 Key Features
 
 ### 🌐 GlobalPlatform & Lifecycle
-* **Secure Channels:** Full support for **SCP03** (GlobalPlatform) authentication and session management. Experimental support for **SCP11** and **SCP80** (OTA).
+* **Secure Channels:** Full support for **SCP03** (GlobalPlatform) authentication, session management and and **SCP80** (OTA). Experimental support for **SCP11** 
 * **Registry Management:** List installed Applets, Packages, and Security Domains (`APPS`, `PKGS`, `SD`).
 * **Lifecycle Management:** Install (`LOAD`, `INSTALL`), Lock, Unlock, and Delete applications.
 * **Key Management:** Retrieve CPLC data and Key Information Templates.
@@ -13,7 +13,7 @@
 ### 📱 GSMA eSIM (SGP.22 / SGP.32 / SGP.02)
 * **Profile Management:** List, Enable, Disable, and Delete eSIM profiles via ISD-R.
 * **SGP.22 (Consumer):** Full support for retrieving and decoding `EuiccInfo1`, `EuiccInfo2`, and `EuiccConfiguredData`.
-* **SGP.32 (IoT):** Dedicated commands for the new IoT eSIM standard (`LIST-IOT`, `GET-SGP32`).
+* **SGP.32 (IoT):** Dedicated commands for the new IoT eSIM standard (`LIST-IOT`, `GET-IOT`).
 * **SGP.02 (M2M):** Support for ECASD data retrieval and M2M specific tags.
 * **Crisp Decoding:** Automatic, context-aware decoding of complex TLV structures (e.g., Extended Card Resources, Capabilities).
 
@@ -57,7 +57,7 @@ YggdraSIM features a persistent shell with **tab completion** and **command hist
 [APDU] > AUTH-SD              # Authenticate via SCP03
 [A0...00] > APPS              # List installed applets
 [A0...00] > LIST              # List eSIM profiles (SGP.22)
-[A0...00] > GET-SGP32         # Deep scan of IoT eUICC settings
+[A0...00] > GET-IOT           # Deep scan of IoT eUICC settings
 [A0...00] > SELECT USIM/IMSI  # Select IMSI file
 [A0...00] > READ              # Read binary content
 ```
