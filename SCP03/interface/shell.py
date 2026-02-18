@@ -1,9 +1,17 @@
 import sys
 import os
 import configparser
+import atexit
+import io
+import re
+import datetime
 from typing import Dict, Optional
 
-# Internal Project Imports
+try:
+    import readline
+except ImportError:
+    readline = None
+
 from SCP03.config import Config
 from SCP03.core.utils import HexUtils, TlvParser
 from SCP03.core.decoders import ContentDecoder
@@ -25,12 +33,9 @@ class ShellDispatcher:
             print(f"{Config.Colors.FAIL}[!] Critical: {e}{Config.Colors.ENDC}")
 
         self._initialize_controllers()
-        
-        # Initialize Prompt
         self.prompt_str = ""
         self._update_prompt_state() 
         
-        # --- Command Definitions ---
         self.commands = {
             # Session
             'AUTH-SD': self._handle_auth,
@@ -40,14 +45,25 @@ class ShellDispatcher:
             'CPLC': self.gp_ctrl.get_cplc,
             'LOGOUT': self._handle_logout,
             'CLS': lambda: os.system('cls' if os.name=='nt' else 'clear'),
-
             'OTA': self._run_scp80_tool,
             
-            # SGP.22
-            'LIST': self.gp_ctrl.sgp22.list_profiles,
-            'ENABLE': self._handle_enable,
-            'DISABLE': self._handle_disable,
-            'DELETE-PROFILE': self._handle_delete_profile,
+            # SGP.22 (Consumer)
+            'LIST-CONS': self.gp_ctrl.sgp22.list_profiles,
+            'GET-CONS': self.gp_ctrl.sgp22.run_sgp22_scan,
+            'ENABLE-CONS': self._handle_enable,
+            'DISABLE-CONS': self._handle_disable,
+            'DELETE-CONS': self._handle_delete_profile,
+
+            # SGP.32 (IoT) - Aliased to SGP.22 logic for now
+            'LIST-IOT': self.gp_ctrl.sgp22.list_profiles,
+            'GET-SGP32': self.gp_ctrl.sgp22.run_sgp22_scan,
+            'ENABLE-IOT': self._handle_enable,
+            'DISABLE-IOT': self._handle_disable,
+            'DELETE-IOT': self._handle_delete_profile,
+            
+            # SGP.02 (M2M)
+            'GET-SGP02': self.gp_ctrl.sgp22.run_sgp02_scan,
+            'GET-ECASD': self.gp_ctrl.sgp22.run_sgp02_scan,
             
             # GlobalPlatform Registry
             'APPS': lambda: self.gp_ctrl.list_registry('APPS'),
@@ -63,6 +79,9 @@ class ShellDispatcher:
             # Applet Loading
             'INSTALL': lambda x: self.gp_ctrl.install_cap_file(x, instantiate=True),
             'LOAD': lambda x: self.gp_ctrl.install_cap_file(x, instantiate=False),
+            'INSTALL-SELECTABLE': self._handle_install_selectable,
+            'INSTALL-EXTRADITION': self._handle_install_extradition,
+            'INSTALL-PERSO': lambda x: self.gp_ctrl.install_personalization(x),
 
             # File System
             'SCAN': self.fs_ctrl.scan_tree,
@@ -88,14 +107,14 @@ class ShellDispatcher:
             # Config
             'SHOW': self.show_config,
             'AIDS': self.list_aids,
+            'SET-AID-ALIAS': self._set_aid_alias,
             'SET-KENC': lambda x: self._update_config('kenc', x),
             'SET-KMAC': lambda x: self._update_config('kmac', x),
             'SET-AID':  lambda x: self._update_config('aid', x),
             'SET-KVN':  lambda x: self._update_config('kvn', x),
             'SET-ADM':  lambda x: self._update_config('adm', x),
             'SET-DEFAULT': self._set_defaults,
-            'SET-AID-ALIAS': self._set_aid_alias,
-
+            
             # System
             'RUN': self.run_script,
             'SCRIPT': self.run_script,
@@ -103,8 +122,40 @@ class ShellDispatcher:
             'EXIT': self._exit,
             'Q': self._exit
         }
+        self._setup_readline()
 
-    # --- Prompt & State Management ---
+    def _setup_readline(self):
+        if readline is None:
+            return
+        self.hist_file = os.path.join(os.path.expanduser("~"), ".yggdrasim_history")
+        try:
+            if os.path.exists(self.hist_file):
+                readline.read_history_file(self.hist_file)
+            readline.set_history_length(1000)
+        except:
+            pass
+        atexit.register(self._save_history)
+        readline.set_completer(self._completer)
+        if 'libedit' in readline.__doc__:
+            readline.parse_and_bind("bind ^I rl_complete")
+        else:
+            readline.parse_and_bind("tab: complete")
+
+    def _save_history(self):
+        if readline:
+            try:
+                readline.write_history_file(self.hist_file)
+            except:
+                pass
+
+    def _completer(self, text, state):
+        line_buffer = readline.get_line_buffer().lstrip()
+        if ' ' not in line_buffer:
+            options = [cmd for cmd in self.commands.keys() if cmd.startswith(text.upper())]
+            if state < len(options):
+                return options[state]
+        return None
+
     def _update_prompt_state(self):
         is_auth = False
         if self.transport and self.transport.session and self.transport.session.is_authenticated:
@@ -126,7 +177,6 @@ class ShellDispatcher:
         self.logout()
         self._update_prompt_state()
 
-    # --- Handlers ---
     def _resolve_mixed_aid(self, arg: str) -> str:
         if not arg:
             return ""
@@ -135,28 +185,39 @@ class ShellDispatcher:
             print(f"{Config.Colors.CYAN}[*] Resolved '{clean}' -> {self.aid_registry[clean]}{Config.Colors.ENDC}")
             return self.aid_registry[clean]
         return arg
+    
+    def _handle_install_selectable(self, arg_line):
+        parts = arg_line.split()
+        if len(parts) < 1:
+            print(f"{Config.Colors.FAIL}Usage: INSTALL-SELECTABLE <AID> [Privileges]{Config.Colors.ENDC}")
+            return
+        aid = parts[0]
+        privs = parts[1] if len(parts) > 1 else "00"
+        self.gp_ctrl.install_make_selectable(aid, privs)
+
+    def _handle_install_extradition(self, arg_line):
+        parts = arg_line.split()
+        if len(parts) < 2:
+            print(f"{Config.Colors.FAIL}Usage: INSTALL-EXTRADITION <App_AID> <SD_AID>{Config.Colors.ENDC}")
+            return
+        self.gp_ctrl.install_extradition(parts[0], parts[1])
 
     def _handle_keys(self, arg: Optional[str] = None):
-        target = None
-        if arg:
-            target = self._resolve_mixed_aid(arg)
+        target = self._resolve_mixed_aid(arg) if arg else None
         self.gp_ctrl.get_keys_info(target_aid_hex=target)
 
     def _handle_enable(self, arg: str):
-        target = self._resolve_mixed_aid(arg)
-        if self.gp_ctrl.sgp22.enable_profile(target):
+        if self.gp_ctrl.sgp22.enable_profile(self._resolve_mixed_aid(arg)):
             print(f"{Config.Colors.WARNING}[*] Performing automated card reset...{Config.Colors.ENDC}")
             self._handle_reset()
 
     def _handle_disable(self, arg: str):
-        target = self._resolve_mixed_aid(arg)
-        if self.gp_ctrl.sgp22.disable_profile(target):
+        if self.gp_ctrl.sgp22.disable_profile(self._resolve_mixed_aid(arg)):
             print(f"{Config.Colors.WARNING}[*] Performing automated card reset...{Config.Colors.ENDC}")
             self._handle_reset()
 
     def _handle_delete_profile(self, arg: str):
-        target = self._resolve_mixed_aid(arg)
-        if self.gp_ctrl.sgp22.delete_profile(target):
+        if self.gp_ctrl.sgp22.delete_profile(self._resolve_mixed_aid(arg)):
             print(f"{Config.Colors.WARNING}[*] Performing automated card reset...{Config.Colors.ENDC}")
             self._handle_reset()
 
@@ -227,96 +288,219 @@ class ShellDispatcher:
 
     # --- Core Methods ---
     def _print_help(self):
-        print(f"\n{Config.Colors.HEADER}=== YggdraSIM SCP03 Help ==={Config.Colors.ENDC}")
-        help_map = {
-            "Session": [
-                ("AUTH-SD", "", "Authenticate via SCP03"),
-                ("RESET", "", "Cold Reset"),
-                ("INFO", "", "Card Info (ATR, ICCID, Spec)"),
-                ("CPLC", "", "Get CPLC Data"),
-                ("KEYS", "[AID]", "Get Key Info"),
-                ("LOGOUT", "", "Close Session"),
-                ("CLS", "", "Clear Screen")
-            ],
-            "SGP.22 (eSIM)": [
-                ("LIST", "", "List Profiles"),
-                ("ENABLE", "<ID/AID>", "Enable Profile"),
-                ("DISABLE", "<ID/AID>", "Disable Profile"),
-                ("DELETE-PROFILE", "<ID/AID>", "Delete Profile")
-            ],
-            "GlobalPlatform": [
-                ("APPS", "", "List Installed Applets"),
-                ("PKGS", "", "List Executable Load Files"),
-                ("SD", "", "List Security Domains"),
-                ("GET", "<P1> <P2>", "Get Data (GlobalPlatform)")
-            ],
-            "Lifecycle & Mgmt": [
-                ("LOCK", "<AID>", "Lock Application (0x80)"),
-                ("UNLOCK", "<AID>", "Unlock Application (0x07)"),
-                ("DEL", "<AID>", "Delete Object"),
-                ("ADM", "[Key]", "Verify ADM (External Auth)"),
-                ("INSTALL", "<Cap>", "Load + Install CAP"),
-                ("LOAD", "<Cap>", "Load CAP Only")
-            ],
-            "File System": [
-                ("SELECT", "<Path>", "Select File (e.g. USIM/IMSI)"),
-                ("READ", "[Path]", "Read Binary"),
-                ("RECORD", "<N/All> [Path]", "Read Record(s)"),
-                ("UPDATE", "BINARY <Hex>", "Update Transparent EF"),
-                ("UPDATE", "RECORD <N> <Hex>", "Update Linear Fixed EF"),
-                ("SCAN", "", "Scan File System Tree"),
-                ("REPORT", "[File]", "Generate Full Content Report")
-            ],
-            "Security": [
-                ("VERIFY", "<ID> <Val>", "Verify PIN (1=PIN1, 81=PIN2)"),
-                ("CHANGE-PIN", "<ID> <O> <N>", "Change PIN Value"),
-                ("ENABLE-PIN", "<ID> <Val>", "Enable PIN Verification"),
-                ("DISABLE-PIN", "<ID> <Val>", "Disable PIN Verification"),
-                ("UNBLOCK", "<ID> <PUK> <N>", "Unblock PIN using PUK"),
-                ("AUTH-GSM", "<RAND>", "Run GSM Algo (2G)"),
-                ("AUTH-USIM", "<R> <AUTN>", "Run USIM Algo (3G/4G/5G)")
-            ],
-            "Configuration": [
-                ("SHOW", "", "Show Current Config"),
-                ("AIDS", "", "Show AID Aliases"),
-                ("SET-AID-ALIAS", "<Nm> <AID>", "Add/Update AID Alias"),
-                ("SET-KENC", "<Key>", "Set Static K-ENC"),
-                ("SET-KMAC", "<Key>", "Set Static K-MAC"),
-                ("SET-KVN", "<Val>", "Set Key Version Number"),
-                ("SET-AID", "<AID>", "Set Target AID"),
-                ("SET-ADM", "<Key>", "Set ADM Key"),
-                ("SET-DEFAULT", "", "Restore Default Config")
-            ],
-            "System": [
-                ("OTA", "", "Switch to SCP80/OTA Tool"),
-                ("RUN/SCRIPT", "<File>", "Run Script File"),
-                ("HELP", "", "Show this help"),
-                ("EXIT", "", "Exit Shell")
-            ]
-        }
+        """Prints help with links and structure."""
+        def link(text, url):
+            if not url: return text
+            return f"\033]8;;{url}\033\\{text}\033]8;;\033\\"
+
+        structure = [
+            {
+                "label": "GlobalPlatform",
+                "url": "https://globalplatform.org/wp-content/uploads/2025/05/GPC_CardSpecification_v2.3.1.49_PublicRvw.pdf",
+                "subgroups": [
+                    {
+                        "label": "Session (SCP03)", "url": None,
+                        "cmds": [
+                            ("AUTH-SD", "", "Authenticate"),
+                            ("RESET", "", "Cold Reset"),
+                            ("INFO", "", "Card Info"),
+                            ("CPLC", "", "Get CPLC"),
+                            ("KEYS", "[AID]", "Get Keys"),
+                            ("LOGOUT", "", "Close Session")
+                        ]
+                    },
+                    {
+                        "label": "Registry", "url": None,
+                        "cmds": [
+                            ("APPS", "", "List Applets"),
+                            ("PKGS", "", "List Packages"),
+                            ("SD", "", "List SDs"),
+                            ("GET", "<P1><P2>", "Get Data")
+                        ]
+                    },
+                    {
+                        "label": "Lifecycle", "url": None,
+                        "cmds": [
+                            ("INSTALL", "<Cap>", "Install CAP"),
+                            ("LOAD", "<Cap>", "Load CAP"),
+                            ("INSTALL-SELECTABLE", "", "Make Selectable"),
+                            ("INSTALL-EXTRADITION", "", "Extradition"),
+                            ("LOCK/UNLOCK/DEL", "", "Mgmt Object")
+                        ]
+                    }
+                ]
+            },
+            {
+                "label": "GSMA",
+                "url": "https://www.gsma.com/esim",
+                "subgroups": [
+                    {
+                        "label": "GSMA SGP.02 (M2M)", 
+                        "url": "https://www.gsma.com/solutions-and-impact/technologies/esim/gsma_resources/sgp-02-v4-3/",
+                        "cmds": [
+                            ("GET-SGP02", "", "Scan SGP.02")
+                        ]
+                    },
+                    {
+                        "label": "GSMA SGP.22 (Consumer)", 
+                        "url": "https://www.gsma.com/esim/wp-content/uploads/2020/06/SGP.22-v2.2.2.pdf",
+                        "cmds": [
+                            ("LIST-CONS", "", "List Profiles"),
+                            ("ENABLE/DISABLE-CONS", "", "State Mgmt"),
+                            ("DELETE-CONS", "", "Delete"),
+                            ("GET-CONS", "", "Scan SGP.22")
+                        ]
+                    },
+                    {
+                        "label": "GSMA SGP.32 (IoT)", 
+                        "url": "https://www.gsma.com/solutions-and-impact/technologies/esim/gsma_resources/sgp-32-v1-2/",
+                        "cmds": [
+                            ("LIST-IOT", "", "List Profiles"),
+                            ("ENABLE/DISABLE-IOT", "", "State Mgmt"),
+                            ("DELETE-IOT", "", "Delete"),
+                            ("GET-IOT", "", "Scan SGP.32")
+                        ]
+                    }
+                ]
+            },
+            {
+                "label": "ETSI / 3GPP",
+                "url": "https://www.etsi.org",
+                "subgroups": [
+                    {
+                        "label": "File System", "url": None,
+                        "cmds": [
+                            ("SELECT", "<Path>", "Select File"),
+                            ("READ", "", "Read Binary"),
+                            ("RECORD", "", "Read Record"),
+                            ("UPDATE", "", "Update File"),
+                            ("SCAN", "", "Scan FS"),
+                            ("REPORT", "", "Gen Report")
+                        ]
+                    },
+                    {
+                        "label": "Security", "url": None,
+                        "cmds": [
+                            ("VERIFY", "", "Verify PIN"),
+                            ("CHANGE-PIN", "", "Change PIN"),
+                            ("UNBLOCK", "", "Unblock PIN")
+                        ]
+                    },
+                    {
+                        "label": "Auth", "url": None,
+                        "cmds": [
+                            ("AUTH-GSM", "", "GSM Auth"),
+                            ("AUTH-USIM", "", "USIM Auth"),
+                            ("AUTH-ISIM", "", "ISIM Auth")
+                        ]
+                    }
+                ]
+            },
+            {
+                "label": "System", "url": None,
+                "subgroups": [
+                    {
+                        "label": "General", "url": None,
+                        "cmds": [
+                            ("SHOW", "", "Config"),
+                            ("SET-AID", "", "Set Target"),
+                            ("OTA", "", "SCP80 Tool"),
+                            ("RUN", "<File>", "Run Script"),
+                            ("HELP", "", "Help"),
+                            ("EXIT", "", "Exit")
+                        ]
+                    }
+                ]
+            }
+        ]
         
-        for cat, items in help_map.items():
-            print(f"\n{Config.Colors.BOLD}{cat}:{Config.Colors.ENDC}")
-            for c, a, d in items: 
-                print(f"  {Config.Colors.GREEN}{c:<15}{Config.Colors.ENDC} {a:<15} : {d}")
+        print(f"\n{Config.Colors.HEADER}=== YggdraSIM SCP03 Help ==={Config.Colors.ENDC}")
+        for section in structure:
+            print(f"\n{Config.Colors.BOLD}{link(section['label'], section['url'])}{Config.Colors.ENDC}")
+            for i, grp in enumerate(section["subgroups"]):
+                print(f"  {Config.Colors.CYAN}{link(grp['label'], grp['url'])}:{Config.Colors.ENDC}")
+                for c, a, d in grp["cmds"]:
+                    print(f"    {Config.Colors.GREEN}{c:<24}{Config.Colors.ENDC} {a:<10} : {d}")
+                
+                # Breathing room
+                if i < len(section["subgroups"]) - 1:
+                    print("")
         print("")
 
-    def run_script(self, filename: str):
+    def run_script(self, arg_line: str):
+        """Runs a script file. Usage: RUN <script.txt> [output.yaml]"""
+        parts = arg_line.split()
+        if not parts:
+            print(f"{Config.Colors.FAIL}[!] Usage: RUN <script_file> [output.yaml]{Config.Colors.ENDC}")
+            return
+
+        filename = parts[0]
+        yaml_out = parts[1] if len(parts) > 1 else None
+        
         if not os.path.exists(filename):
             print(f"{Config.Colors.FAIL}[!] Script not found: {filename}{Config.Colors.ENDC}")
             return
+
         print(f"{Config.Colors.CYAN}[*] Running script: {filename}{Config.Colors.ENDC}")
+        if yaml_out:
+            print(f"{Config.Colors.CYAN}[*] Recording output to: {yaml_out}{Config.Colors.ENDC}")
+
+        results = []
+
         try:
             with open(filename, 'r') as f:
                 lines = f.readlines()
+            
             for i, line in enumerate(lines):
                 line = line.strip()
                 if not line or line.startswith('#'):
                     continue
+                
                 print(f"\n{Config.Colors.YELLOW}[SCRIPT:{i+1}] > {line}{Config.Colors.ENDC}")
-                self._exec_line(line)
+                
+                # Capture output if YAML requested
+                captured_output = ""
+                if yaml_out:
+                    # Redirect stdout to capture output of the command
+                    old_stdout = sys.stdout
+                    sys.stdout = mystdout = io.StringIO()
+                    
+                    try:
+                        self._exec_line(line)
+                    except Exception as e:
+                        print(f"Error: {e}")
+                    finally:
+                        sys.stdout = old_stdout
+                        captured_output = mystdout.getvalue()
+                        print(captured_output, end="") # Echo back to console
+                else:
+                    self._exec_line(line)
+
+                if yaml_out:
+                    # Clean ANSI codes for YAML
+                    ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
+                    clean_text = ansi_escape.sub('', captured_output).strip()
+                    results.append({'command': line, 'output': clean_text})
+
         except Exception as e:
-            print(f"{Config.Colors.FAIL}[!] Script Error on line {i+1}: {e}{Config.Colors.ENDC}")
+            print(f"{Config.Colors.FAIL}[!] Script Error: {e}{Config.Colors.ENDC}")
+
+        if yaml_out and results:
+            try:
+                with open(yaml_out, 'w') as f:
+                    f.write(f"# YggdraSIM Script Report\n")
+                    f.write(f"# Date: {datetime.datetime.now()}\n")
+                    f.write(f"# Script: {filename}\n\n")
+                    f.write("steps:\n")
+                    for step in results:
+                        f.write(f"  - command: \"{step['command']}\"\n")
+                        # Indent multiline strings for YAML block literal
+                        f.write("    output: |\n")
+                        for out_line in step['output'].split('\n'):
+                            f.write(f"      {out_line}\n")
+                print(f"{Config.Colors.GREEN}[+] Report saved to {yaml_out}{Config.Colors.ENDC}")
+            except Exception as e:
+                print(f"{Config.Colors.FAIL}[!] Failed to write YAML: {e}{Config.Colors.ENDC}")
 
     def _exec_line(self, line: str):
         if not line or line.startswith('#'):
@@ -326,15 +510,18 @@ class ShellDispatcher:
         arg = parts[1] if len(parts) > 1 else ""
 
         if cmd in self.commands:
-            # [FIXED] Added Security Commands to required args list
+            # [FIXED] Updated args requirement list
             args_required = [
                 'SET-KENC', 'SET-KMAC', 'SET-AID', 'SET-KVN', 'SET-ADM', 'SET-AID-ALIAS', 
-                'SELECT', 'UPDATE', 'GET', 'LOCK', 'UNLOCK', 'DEL', 'RUN', 'SCRIPT', 
+                'SELECT', 'UPDATE', 'GET', 'LOCK', 'UNLOCK', 'DEL', 'SCRIPT', 
                 'INSTALL', 'LOAD', 'ENABLE', 'DISABLE', 'DELETE-PROFILE',
+                'ENABLE-IOT', 'DISABLE-IOT', 'DELETE-IOT',
                 'VERIFY', 'CHANGE-PIN', 'ENABLE-PIN', 'DISABLE-PIN', 'UNBLOCK', 
-                'AUTH-GSM', 'AUTH-USIM', 'AUTH-ISIM'
+                'AUTH-GSM', 'AUTH-USIM', 'AUTH-ISIM', 
+                'INSTALL-SELECTABLE', 'INSTALL-EXTRADITION', 'INSTALL-PERSO'
             ]
-            args_optional = ['REPORT', 'ADM', 'KEYS', 'READ', 'RECORD']
+            # RUN is optional arg if interactive, but handled separately above
+            args_optional = ['REPORT', 'ADM', 'KEYS', 'READ', 'RECORD', 'RUN']
             try:
                 if cmd in args_required:
                     if not arg: 
@@ -366,7 +553,6 @@ class ShellDispatcher:
             return
         ins = apdu[1]
         
-        # SELECT (0xA4)
         if ins == 0xA4:
             selected_hex = None
             if len(apdu) > 5:
@@ -378,29 +564,23 @@ class ShellDispatcher:
                 self.fs_ctrl._parse_fcp_internal(data, selected_hex)
                 self.fs_ctrl.print_fcp_info()
         
-        # READ BINARY (0xB0)
-        elif ins == 0xB0:
-            if data:
-                decoded = ContentDecoder.decode(self.fs_ctrl.current_fid, data.hex())
-                if decoded:
-                    print(f"{Config.Colors.GREEN}{decoded}{Config.Colors.ENDC}")
+        elif ins == 0xB0 and data:
+            decoded = ContentDecoder.decode(self.fs_ctrl.current_fid, data.hex())
+            if decoded:
+                print(f"{Config.Colors.GREEN}{decoded}{Config.Colors.ENDC}")
 
-        # READ RECORD (0xB2)
-        elif ins == 0xB2:
-            if data:
-                decoded = ContentDecoder.decode(self.fs_ctrl.current_fid, data.hex())
-                if decoded and "None" not in decoded:
-                    for line in decoded.strip().split('\n'):
-                        print(f"          | {Config.Colors.CYAN}{line}{Config.Colors.ENDC}")
+        elif ins == 0xB2 and data:
+            decoded = ContentDecoder.decode(self.fs_ctrl.current_fid, data.hex())
+            if decoded and "None" not in decoded:
+                for line in decoded.strip().split('\n'):
+                    print(f"          | {Config.Colors.CYAN}{line}{Config.Colors.ENDC}")
 
-        # GET DATA (0xCA)
-        elif ins == 0xCA:
-            if data:
-                try:
-                    parsed = TlvParser.parse(data)
-                    self.gp_ctrl.print_tlv_data(parsed)
-                except:
-                    pass
+        elif ins == 0xCA and data:
+            try:
+                parsed = TlvParser.parse(data)
+                self.gp_ctrl.print_tlv_data(parsed)
+            except:
+                pass
 
     def _print_card_info(self):
         print(f"\n{Config.Colors.HEADER}=== CARD INFO ==={Config.Colors.ENDC}")
@@ -503,11 +683,7 @@ class ShellDispatcher:
         if 'KEYS' in self.config: 
             keys.update(dict(self.config['KEYS']))
         self.gp_ctrl = GlobalPlatformManager(self.transport, keys)
-        
-        # Initialize FS First
         self.fs_ctrl = FileSystemController(self.transport, self.aid_registry)
-        
-        # Pass FS to Security for Smart-Select
         self.sec_ctrl = SecurityController(self.transport, self.fs_ctrl)
 
     def _update_config(self, key: str, value: Optional[str]):
@@ -595,7 +771,8 @@ class ShellDispatcher:
     def _exit(self):
         if self.transport:
             self.transport.disconnect()
-        print("Bye.")
+        # Ensure history is saved on manual exit
+        self._save_history()
         sys.exit(0)
 
     def _run_scp80_tool(self):

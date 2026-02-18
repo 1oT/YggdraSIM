@@ -3,6 +3,7 @@ SCP03/keys.ini
 SCP03/aid.txt
 SCP03/fids.txt
 SCP80/ota_config.ini
+SCP03/script.txt
 
 # Python internals (Global)
 **/__pycache__/

@@ -366,3 +366,139 @@ class GlobalPlatformManager:
         _, sw1, sw2 = self.tp.transmit(cmd, silent=True)
         if sw1 == 0x90: print(f"{Config.Colors.GREEN}[+] Deleted.{Config.Colors.ENDC}")
         else: print(f"{Config.Colors.FAIL}[-] Failed: {sw1:02X}{sw2:02X}{Config.Colors.ENDC}")
+
+    def _send_install_cmd(self, p1: int, data: bytes, description: str) -> bool:
+        """Generic helper for INSTALL commands."""
+        print(f"{Config.Colors.CYAN}[*] INSTALL [{description}]...{Config.Colors.ENDC}")
+        cmd = f"80E6{p1:02X}00{len(data):02X}{data.hex()}"
+        _, sw1, sw2 = self.tp.transmit(cmd, silent=True)
+        
+        if sw1 == 0x90:
+            print(f"{Config.Colors.GREEN}[+] Success.{Config.Colors.ENDC}")
+            return True
+        else:
+            print(f"{Config.Colors.FAIL}[-] Failed: {sw1:02X}{sw2:02X}{Config.Colors.ENDC}")
+            return False
+
+    def install_make_selectable(self, aid_hex: str, privileges: str = "00"):
+        """
+        GP INSTALL [for make selectable] (P1=0x08).
+        Makes a loaded executable load file or application selectable.
+        """
+        if not self.tp.session or not self.tp.session.is_authenticated:
+            print(f"{Config.Colors.FAIL}[!] Error: Must be authenticated.{Config.Colors.ENDC}")
+            return
+
+        aid_bytes = HexUtils.to_bytes(aid_hex)
+        priv_bytes = HexUtils.to_bytes(privileges)
+
+        # Structure: [ExLF AID L+V] [Module AID L+V] [Privileges L+V] [Install Params L+V] [Token L+V]
+        # For Make Selectable, usually targeting the Applet AID directly.
+        payload = bytearray()
+        payload.append(0x00) # ExLF AID (Empty/Present in previous context)
+        
+        payload.append(len(aid_bytes))
+        payload.extend(aid_bytes) # Module AID
+        
+        payload.append(len(priv_bytes))
+        payload.extend(priv_bytes) # Privileges
+        
+        payload.append(0x00) # Install Params (Empty)
+        payload.append(0x00) # Token (Empty)
+
+        self._send_install_cmd(0x08, payload, "Make Selectable")
+
+    def install_extradition(self, aid_hex: str, sd_aid_hex: str):
+        """
+        GP INSTALL [for extradition] (P1=0x10).
+        Moves an application/package to a different Security Domain.
+        """
+        if not self.tp.session or not self.tp.session.is_authenticated:
+            print(f"{Config.Colors.FAIL}[!] Error: Must be authenticated.{Config.Colors.ENDC}")
+            return
+
+        aid_bytes = HexUtils.to_bytes(aid_hex)
+        sd_bytes = HexUtils.to_bytes(sd_aid_hex)
+
+        # Structure: [SD AID L+V] [Zero] [Application AID L+V] [Zero] [Token]
+        payload = bytearray()
+        
+        payload.append(len(sd_bytes))
+        payload.extend(sd_bytes) # Security Domain AID
+        
+        payload.append(0x00) 
+        
+        payload.append(len(aid_bytes))
+        payload.extend(aid_bytes) # Application AID
+        
+        payload.append(0x00)
+        payload.append(0x00)
+
+        self._send_install_cmd(0x10, payload, "Extradition")
+
+    def install_personalization(self, aid_hex: str):
+        """
+        GP INSTALL [for personalization] (P1=0x20).
+        """
+        if not self.tp.session or not self.tp.session.is_authenticated:
+            print(f"{Config.Colors.FAIL}[!] Error: Must be authenticated.{Config.Colors.ENDC}")
+            return
+            
+        aid_bytes = HexUtils.to_bytes(aid_hex)
+        
+        # Structure: [00] [App AID L+V] [00] [00] [00]
+        payload = bytearray()
+        payload.append(0x00)
+        payload.append(len(aid_bytes))
+        payload.extend(aid_bytes)
+        payload.append(0x00)
+        payload.append(0x00)
+        payload.append(0x00)
+
+        self._send_install_cmd(0x20, payload, "Personalization")
+
+    def get_ecasd_data(self):
+        """
+        Retrieves SGP.02/SGP.22 metadata from ECASD.
+        Target: A0000005591010FFFFFFFF8900000200
+        """
+        ECASD_AID = "A0000005591010FFFFFFFF8900000200"
+        
+        # We must select ECASD first
+        print(f"{Config.Colors.CYAN}[*] Selecting ECASD...{Config.Colors.ENDC}")
+        self.tp.transmit(f"00A40400{len(ECASD_AID)//2:02X}{ECASD_AID}", silent=True)
+        
+        # Tags to query
+        queries = {
+            "EID (5A)": "5A",
+            "CIN (45)": "45",
+            "IIN (42)": "42",
+            "CPLC (9F7F)": "9F7F",
+            "Key Info (E0)": "E0" 
+        }
+
+        print(f"{Config.Colors.HEADER}--- ECASD Data (SGP.02/22) ---{Config.Colors.ENDC}")
+        
+        for label, tag in queries.items():
+            cmd = f"80CA{tag}00"
+            if len(tag) > 2:
+                # Handle 2-byte tags like 9F7F
+                cmd = f"80CA{tag}00"
+            
+            data, sw1, sw2 = self.tp.transmit(cmd, silent=True)
+            if sw1 == 0x90 or sw1 == 0x61:
+                hex_val = data.hex().upper()
+                # Basic TLV strip if present
+                parsed = TlvParser.parse(data)
+                
+                # Check if parsed dict has the tag we asked for
+                # Note: TlvParser returns integers for keys
+                tag_int = int(tag, 16)
+                if tag_int in parsed:
+                     val = parsed[tag_int]
+                     if isinstance(val, bytes):
+                         hex_val = val.hex().upper()
+                
+                print(f"{label:<15}: {hex_val}")
+            else:
+                print(f"{label:<15}: {Config.Colors.FAIL}Not Found / Error {sw1:02X}{sw2:02X}{Config.Colors.ENDC}")
