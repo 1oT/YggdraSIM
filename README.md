@@ -5,7 +5,7 @@
 ## 🚀 Key Features
 
 ### 🌐 GlobalPlatform & Lifecycle
-* **Secure Channels:** Full support for **SCP03** (GlobalPlatform) authentication, session management and and **SCP80** (OTA). Experimental support for **SCP11** 
+* **Secure Channels:** Full support for **SCP03** (GlobalPlatform) authentication, session management and and **SCP80** (OTA).
 * **Registry Management:** List installed Applets, Packages, and Security Domains (`APPS`, `PKGS`, `SD`).
 * **Lifecycle Management:** Install (`LOAD`, `INSTALL`), Lock, Unlock, and Delete applications.
 * **Key Management:** Retrieve CPLC data and Key Information Templates.
@@ -103,7 +103,6 @@ ECASD: A0000005591010FFFFFFFF8900000200
     * `logic/`: Business logic for GP, FS, Security, and eSIM (SGP.22).
     * `interface/`: Shell dispatcher and CLI handling.
     * `transport/`: PC/SC card abstraction.
-* **`SCP11/`**: Certificate-based secure channel implementation.
 * **`SCP80/`**: OTA/SMS secure channel tools.
 
 ---
