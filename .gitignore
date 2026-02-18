@@ -1,0 +1,14 @@
+# Sensitive keys and data
+SCP03/keys.ini
+SCP03/aid.txt
+SCP03/fids.txt
+SCP80/ota_config.ini
+
+# Python internals (Global)
+**/__pycache__/
+*.pyc
+Documents.code-workspace
+YggdraSIM.code-workspace
+
+# Automation logs
+git_agent.log

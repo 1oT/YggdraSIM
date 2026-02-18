@@ -1,0 +1,38 @@
+import sys
+import os
+
+# 1. Setup Path Context
+# This ensures that when running this file directly, Python understands 
+# that 'SCP03' is a package located in the parent directory.
+current_dir = os.path.dirname(os.path.abspath(__file__))
+parent_dir = os.path.dirname(current_dir)
+if parent_dir not in sys.path:
+    sys.path.insert(0, parent_dir)
+
+# 2. Internal Imports
+try:
+    from SCP03.interface.shell import ShellDispatcher
+except ImportError as e:
+    print(f"Critical Import Error: {e}")
+    print("Ensure you are running this from the correct directory or that 'SCP03' is strictly a subdirectory.")
+    sys.exit(1)
+
+def entry():
+    """
+    Public entry point. 
+    The high-level wrapper should import this function to start the module.
+    Example: 
+        import SCP03.main as scp03_feature
+        scp03_feature.entry()
+    """
+    try:
+        app = ShellDispatcher()
+        app.run()
+    except KeyboardInterrupt:
+        print("\n[SCP03] Session terminated by user.")
+    except Exception as e:
+        print(f"\n[SCP03] Fatal Error: {e}")
+
+if __name__ == "__main__":
+    # Standalone execution
+    entry()

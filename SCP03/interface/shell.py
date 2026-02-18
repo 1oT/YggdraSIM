@@ -1,0 +1,682 @@
+import sys
+import os
+import configparser
+from typing import Dict, Optional
+
+# Internal Project Imports
+from SCP03.config import Config
+from SCP03.core.utils import HexUtils, TlvParser
+from SCP03.core.decoders import ContentDecoder
+from SCP03.transport.card import CardTransporter
+from SCP03.logic.gp import GlobalPlatformManager
+from SCP03.logic.fs import FileSystemController
+from SCP03.logic.security import SecurityController
+
+class ShellDispatcher:
+    def __init__(self):
+        self.config = configparser.ConfigParser()
+        self._load_config_file()
+        self.aid_registry = self._load_aid_registry()
+        self.aid_lookup = {bytes.fromhex(v): k for k, v in self.aid_registry.items()}
+        self.transport = None
+        try:
+            self.transport = CardTransporter()
+        except Exception as e:
+            print(f"{Config.Colors.FAIL}[!] Critical: {e}{Config.Colors.ENDC}")
+
+        self._initialize_controllers()
+        
+        # Initialize Prompt
+        self.prompt_str = ""
+        self._update_prompt_state() 
+        
+        # --- Command Definitions ---
+        self.commands = {
+            # Session
+            'AUTH-SD': self._handle_auth,
+            'RESET': self._handle_reset,
+            'INFO': self._print_card_info,
+            'KEYS': self._handle_keys,
+            'CPLC': self.gp_ctrl.get_cplc,
+            'LOGOUT': self._handle_logout,
+            'CLS': lambda: os.system('cls' if os.name=='nt' else 'clear'),
+
+            'OTA': self._run_scp80_tool,
+            
+            # SGP.22
+            'LIST': self.gp_ctrl.sgp22.list_profiles,
+            'ENABLE': self._handle_enable,
+            'DISABLE': self._handle_disable,
+            'DELETE-PROFILE': self._handle_delete_profile,
+            
+            # GlobalPlatform Registry
+            'APPS': lambda: self.gp_ctrl.list_registry('APPS'),
+            'PKGS': lambda: self.gp_ctrl.list_registry('PACKAGES'),
+            'SD': lambda: self.gp_ctrl.list_registry('SD'),
+            
+            # Lifecycle
+            'LOCK': lambda x: self.gp_ctrl.set_status(x, 0x80),
+            'UNLOCK': lambda x: self.gp_ctrl.set_status(x, 0x07),
+            'DEL': lambda x: self.gp_ctrl.delete_object(x, True),
+            'ADM': self.gp_ctrl.verify_adm,
+
+            # Applet Loading
+            'INSTALL': lambda x: self.gp_ctrl.install_cap_file(x, instantiate=True),
+            'LOAD': lambda x: self.gp_ctrl.install_cap_file(x, instantiate=False),
+
+            # File System
+            'SCAN': self.fs_ctrl.scan_tree,
+            'REPORT': lambda x=None: self.fs_ctrl.generate_report(x) if x else self.fs_ctrl.generate_report(),
+            'SELECT': lambda x: self.fs_ctrl.select(x),
+            'READ': self.fs_ctrl.read_binary,
+            'RECORD': self.fs_ctrl.read_record,
+            'UPDATE': self._handle_update,
+            'GET': lambda x: self.gp_ctrl.get_data(*[int(i, 16) for i in x.split()[:2]]) if len(x.split()) >= 2 else print("Usage: GET <P1> <P2>"),
+
+            # Security (PINs)
+            'VERIFY': lambda x: self._handle_pin_cmd(self.sec_ctrl.verify_pin, x, 2, "VERIFY <ID> <PIN>"),
+            'CHANGE-PIN': lambda x: self._handle_pin_cmd(self.sec_ctrl.change_pin, x, 3, "CHANGE-PIN <ID> <OLD> <NEW>"),
+            'DISABLE-PIN': lambda x: self._handle_pin_cmd(self.sec_ctrl.disable_pin, x, 2, "DISABLE-PIN <ID> <PIN>"),
+            'ENABLE-PIN': lambda x: self._handle_pin_cmd(self.sec_ctrl.enable_pin, x, 2, "ENABLE-PIN <ID> <PIN>"),
+            'UNBLOCK': lambda x: self._handle_pin_cmd(self.sec_ctrl.unblock_pin, x, 3, "UNBLOCK <ID> <PUK> <NEW_PIN>"),
+
+            # Security (Auth)
+            'AUTH-GSM': lambda x: self.sec_ctrl.run_auth(x, app_context="GSM") if x else print("Usage: AUTH-GSM <RAND>"),
+            'AUTH-USIM': lambda x: self._handle_auth_general(x, "USIM"),
+            'AUTH-ISIM': lambda x: self._handle_auth_general(x, "ISIM"),
+
+            # Config
+            'SHOW': self.show_config,
+            'AIDS': self.list_aids,
+            'SET-KENC': lambda x: self._update_config('kenc', x),
+            'SET-KMAC': lambda x: self._update_config('kmac', x),
+            'SET-AID':  lambda x: self._update_config('aid', x),
+            'SET-KVN':  lambda x: self._update_config('kvn', x),
+            'SET-ADM':  lambda x: self._update_config('adm', x),
+            'SET-DEFAULT': self._set_defaults,
+            'SET-AID-ALIAS': self._set_aid_alias,
+
+            # System
+            'RUN': self.run_script,
+            'SCRIPT': self.run_script,
+            'HELP': self._print_help,
+            'EXIT': self._exit,
+            'Q': self._exit
+        }
+
+    # --- Prompt & State Management ---
+    def _update_prompt_state(self):
+        is_auth = False
+        if self.transport and self.transport.session and self.transport.session.is_authenticated:
+            is_auth = True
+        
+        if not is_auth:
+            self.prompt_str = f"\n{Config.Colors.CYAN}[APDU] > {Config.Colors.ENDC}"
+        else:
+            current_aid = self.gp_ctrl.target_aid 
+            name = self.aid_lookup.get(current_aid)
+            display = name if name else current_aid.hex().upper()
+            self.prompt_str = f"\n{Config.Colors.GREEN}[{display}] > {Config.Colors.ENDC}"
+
+    def _handle_auth(self):
+        if self.gp_ctrl.authenticate():
+            self._update_prompt_state()
+
+    def _handle_logout(self):
+        self.logout()
+        self._update_prompt_state()
+
+    # --- Handlers ---
+    def _resolve_mixed_aid(self, arg: str) -> str:
+        if not arg:
+            return ""
+        clean = arg.strip().upper()
+        if clean in self.aid_registry:
+            print(f"{Config.Colors.CYAN}[*] Resolved '{clean}' -> {self.aid_registry[clean]}{Config.Colors.ENDC}")
+            return self.aid_registry[clean]
+        return arg
+
+    def _handle_keys(self, arg: Optional[str] = None):
+        target = None
+        if arg:
+            target = self._resolve_mixed_aid(arg)
+        self.gp_ctrl.get_keys_info(target_aid_hex=target)
+
+    def _handle_enable(self, arg: str):
+        target = self._resolve_mixed_aid(arg)
+        if self.gp_ctrl.sgp22.enable_profile(target):
+            print(f"{Config.Colors.WARNING}[*] Performing automated card reset...{Config.Colors.ENDC}")
+            self._handle_reset()
+
+    def _handle_disable(self, arg: str):
+        target = self._resolve_mixed_aid(arg)
+        if self.gp_ctrl.sgp22.disable_profile(target):
+            print(f"{Config.Colors.WARNING}[*] Performing automated card reset...{Config.Colors.ENDC}")
+            self._handle_reset()
+
+    def _handle_delete_profile(self, arg: str):
+        target = self._resolve_mixed_aid(arg)
+        if self.gp_ctrl.sgp22.delete_profile(target):
+            print(f"{Config.Colors.WARNING}[*] Performing automated card reset...{Config.Colors.ENDC}")
+            self._handle_reset()
+
+    def _handle_reset(self):
+        print(f"{Config.Colors.WARNING}[*] Resetting card...{Config.Colors.ENDC}")
+        was_authenticated = False
+        if self.transport.session and self.transport.session.is_authenticated:
+            was_authenticated = True
+            print(f"{Config.Colors.CYAN}[*] Secure Session is active. Will auto-restore.{Config.Colors.ENDC}")
+        
+        if self.transport.reset():
+            if self.transport.session:
+                self.transport.session.is_authenticated = False
+                self.transport.session.chaining_value = b'\x00' * 16
+            
+            print(f"{Config.Colors.GREEN}[+] Reset Successful.{Config.Colors.ENDC}")
+            
+            if was_authenticated: 
+                if self.gp_ctrl.authenticate():
+                    self._update_prompt_state()
+            else:
+                self._update_prompt_state()
+        else:
+            print(f"{Config.Colors.FAIL}[-] Card Reset Failed.{Config.Colors.ENDC}")
+
+    def _handle_update(self, arg_line: str):
+        parts = arg_line.strip().split()
+        if not parts:
+            print(f"{Config.Colors.FAIL}[-] Usage: UPDATE BINARY [Hex] or UPDATE RECORD [Num] [Hex]{Config.Colors.ENDC}")
+            return
+
+        sub_cmd = parts[0].upper()
+
+        if sub_cmd == "BINARY":
+            if len(parts) < 2:
+                print(f"{Config.Colors.FAIL}[-] Usage: UPDATE BINARY [Hex]{Config.Colors.ENDC}")
+                return
+            hex_val = "".join(parts[1:])
+            self.fs_ctrl.update_binary(hex_val)
+
+        elif sub_cmd == "RECORD":
+            if len(parts) < 3:
+                print(f"{Config.Colors.FAIL}[-] Usage: UPDATE RECORD [Num] [Hex]{Config.Colors.ENDC}")
+                return
+            rec_str = parts[1]
+            hex_val = "".join(parts[2:])
+            self.fs_ctrl.update_record(rec_str, hex_val)
+        else:
+            hex_val = "".join(parts)
+            self.fs_ctrl.update_binary(hex_val)
+            
+    def _handle_pin_cmd(self, func, arg_line, required_args, usage_msg):
+        if not arg_line:
+            print(f"{Config.Colors.FAIL}[-] Usage: {usage_msg}{Config.Colors.ENDC}")
+            return
+        parts = arg_line.split()
+        if len(parts) < required_args:
+            print(f"{Config.Colors.FAIL}[-] Usage: {usage_msg}{Config.Colors.ENDC}")
+            return
+        func(*parts)
+
+    def _handle_auth_general(self, arg_line, context):
+        parts = arg_line.split() if arg_line else []
+        if len(parts) != 2:
+            print(f"{Config.Colors.FAIL}[-] Usage: AUTH-{context} <RAND> <AUTN>{Config.Colors.ENDC}")
+            return
+        self.sec_ctrl.run_auth(parts[0], parts[1], app_context=context)
+
+    # --- Core Methods ---
+    def _print_help(self):
+        print(f"\n{Config.Colors.HEADER}=== YggdraSIM SCP03 Help ==={Config.Colors.ENDC}")
+        help_map = {
+            "Session": [
+                ("AUTH-SD", "", "Authenticate via SCP03"),
+                ("RESET", "", "Cold Reset"),
+                ("INFO", "", "Card Info (ATR, ICCID, Spec)"),
+                ("CPLC", "", "Get CPLC Data"),
+                ("KEYS", "[AID]", "Get Key Info"),
+                ("LOGOUT", "", "Close Session"),
+                ("CLS", "", "Clear Screen")
+            ],
+            "SGP.22 (eSIM)": [
+                ("LIST", "", "List Profiles"),
+                ("ENABLE", "<ID/AID>", "Enable Profile"),
+                ("DISABLE", "<ID/AID>", "Disable Profile"),
+                ("DELETE-PROFILE", "<ID/AID>", "Delete Profile")
+            ],
+            "GlobalPlatform": [
+                ("APPS", "", "List Installed Applets"),
+                ("PKGS", "", "List Executable Load Files"),
+                ("SD", "", "List Security Domains"),
+                ("GET", "<P1> <P2>", "Get Data (GlobalPlatform)")
+            ],
+            "Lifecycle & Mgmt": [
+                ("LOCK", "<AID>", "Lock Application (0x80)"),
+                ("UNLOCK", "<AID>", "Unlock Application (0x07)"),
+                ("DEL", "<AID>", "Delete Object"),
+                ("ADM", "[Key]", "Verify ADM (External Auth)"),
+                ("INSTALL", "<Cap>", "Load + Install CAP"),
+                ("LOAD", "<Cap>", "Load CAP Only")
+            ],
+            "File System": [
+                ("SELECT", "<Path>", "Select File (e.g. USIM/IMSI)"),
+                ("READ", "[Path]", "Read Binary"),
+                ("RECORD", "<N/All> [Path]", "Read Record(s)"),
+                ("UPDATE", "BINARY <Hex>", "Update Transparent EF"),
+                ("UPDATE", "RECORD <N> <Hex>", "Update Linear Fixed EF"),
+                ("SCAN", "", "Scan File System Tree"),
+                ("REPORT", "[File]", "Generate Full Content Report")
+            ],
+            "Security": [
+                ("VERIFY", "<ID> <Val>", "Verify PIN (1=PIN1, 81=PIN2)"),
+                ("CHANGE-PIN", "<ID> <O> <N>", "Change PIN Value"),
+                ("ENABLE-PIN", "<ID> <Val>", "Enable PIN Verification"),
+                ("DISABLE-PIN", "<ID> <Val>", "Disable PIN Verification"),
+                ("UNBLOCK", "<ID> <PUK> <N>", "Unblock PIN using PUK"),
+                ("AUTH-GSM", "<RAND>", "Run GSM Algo (2G)"),
+                ("AUTH-USIM", "<R> <AUTN>", "Run USIM Algo (3G/4G/5G)")
+            ],
+            "Configuration": [
+                ("SHOW", "", "Show Current Config"),
+                ("AIDS", "", "Show AID Aliases"),
+                ("SET-AID-ALIAS", "<Nm> <AID>", "Add/Update AID Alias"),
+                ("SET-KENC", "<Key>", "Set Static K-ENC"),
+                ("SET-KMAC", "<Key>", "Set Static K-MAC"),
+                ("SET-KVN", "<Val>", "Set Key Version Number"),
+                ("SET-AID", "<AID>", "Set Target AID"),
+                ("SET-ADM", "<Key>", "Set ADM Key"),
+                ("SET-DEFAULT", "", "Restore Default Config")
+            ],
+            "System": [
+                ("OTA", "", "Switch to SCP80/OTA Tool"),
+                ("RUN/SCRIPT", "<File>", "Run Script File"),
+                ("HELP", "", "Show this help"),
+                ("EXIT", "", "Exit Shell")
+            ]
+        }
+        
+        for cat, items in help_map.items():
+            print(f"\n{Config.Colors.BOLD}{cat}:{Config.Colors.ENDC}")
+            for c, a, d in items: 
+                print(f"  {Config.Colors.GREEN}{c:<15}{Config.Colors.ENDC} {a:<15} : {d}")
+        print("")
+
+    def run_script(self, filename: str):
+        if not os.path.exists(filename):
+            print(f"{Config.Colors.FAIL}[!] Script not found: {filename}{Config.Colors.ENDC}")
+            return
+        print(f"{Config.Colors.CYAN}[*] Running script: {filename}{Config.Colors.ENDC}")
+        try:
+            with open(filename, 'r') as f:
+                lines = f.readlines()
+            for i, line in enumerate(lines):
+                line = line.strip()
+                if not line or line.startswith('#'):
+                    continue
+                print(f"\n{Config.Colors.YELLOW}[SCRIPT:{i+1}] > {line}{Config.Colors.ENDC}")
+                self._exec_line(line)
+        except Exception as e:
+            print(f"{Config.Colors.FAIL}[!] Script Error on line {i+1}: {e}{Config.Colors.ENDC}")
+
+    def _exec_line(self, line: str):
+        if not line or line.startswith('#'):
+            return
+        parts = line.split(None, 1)
+        cmd = parts[0].upper()
+        arg = parts[1] if len(parts) > 1 else ""
+
+        if cmd in self.commands:
+            # [FIXED] Added Security Commands to required args list
+            args_required = [
+                'SET-KENC', 'SET-KMAC', 'SET-AID', 'SET-KVN', 'SET-ADM', 'SET-AID-ALIAS', 
+                'SELECT', 'UPDATE', 'GET', 'LOCK', 'UNLOCK', 'DEL', 'RUN', 'SCRIPT', 
+                'INSTALL', 'LOAD', 'ENABLE', 'DISABLE', 'DELETE-PROFILE',
+                'VERIFY', 'CHANGE-PIN', 'ENABLE-PIN', 'DISABLE-PIN', 'UNBLOCK', 
+                'AUTH-GSM', 'AUTH-USIM', 'AUTH-ISIM'
+            ]
+            args_optional = ['REPORT', 'ADM', 'KEYS', 'READ', 'RECORD']
+            try:
+                if cmd in args_required:
+                    if not arg: 
+                        print(f"{Config.Colors.WARNING}[!] Argument required for {cmd}{Config.Colors.ENDC}")
+                    else: 
+                        self.commands[cmd](arg)
+                elif cmd in args_optional:
+                    if arg: 
+                        self.commands[cmd](arg)
+                    else: 
+                        self.commands[cmd]()
+                else: 
+                    self.commands[cmd]()
+            except Exception as e: 
+                print(f"{Config.Colors.FAIL}[!] Command Execution Error: {e}{Config.Colors.ENDC}")
+        elif len(cmd) >= 4 and all(c in '0123456789ABCDEFabcdef' for c in cmd):
+            if self.transport:
+                apdu_bytes = HexUtils.to_bytes(line)
+                data, sw1, sw2 = self.transport.transmit(line, silent=False)
+                if sw1 == 0x90 or sw1 == 0x61: 
+                    self._sync_manual_command(apdu_bytes, data)
+            else: 
+                print("No card reader connected.")
+        else: 
+            print(f"{Config.Colors.FAIL}Unknown command: {cmd}{Config.Colors.ENDC}")
+
+    def _sync_manual_command(self, apdu: bytes, data: bytes):
+        if len(apdu) < 4:
+            return
+        ins = apdu[1]
+        
+        # SELECT (0xA4)
+        if ins == 0xA4:
+            selected_hex = None
+            if len(apdu) > 5:
+                lc = apdu[4]
+                if len(apdu) >= 5 + lc:
+                    selected_hex = apdu[5 : 5+lc].hex().upper()
+                    self.fs_ctrl.current_fid = selected_hex
+            if data:
+                self.fs_ctrl._parse_fcp_internal(data, selected_hex)
+                self.fs_ctrl.print_fcp_info()
+        
+        # READ BINARY (0xB0)
+        elif ins == 0xB0:
+            if data:
+                decoded = ContentDecoder.decode(self.fs_ctrl.current_fid, data.hex())
+                if decoded:
+                    print(f"{Config.Colors.GREEN}{decoded}{Config.Colors.ENDC}")
+
+        # READ RECORD (0xB2)
+        elif ins == 0xB2:
+            if data:
+                decoded = ContentDecoder.decode(self.fs_ctrl.current_fid, data.hex())
+                if decoded and "None" not in decoded:
+                    for line in decoded.strip().split('\n'):
+                        print(f"          | {Config.Colors.CYAN}{line}{Config.Colors.ENDC}")
+
+        # GET DATA (0xCA)
+        elif ins == 0xCA:
+            if data:
+                try:
+                    parsed = TlvParser.parse(data)
+                    self.gp_ctrl.print_tlv_data(parsed)
+                except:
+                    pass
+
+    def _print_card_info(self):
+        print(f"\n{Config.Colors.HEADER}=== CARD INFO ==={Config.Colors.ENDC}")
+        if not self.transport: 
+            print(f"{Config.Colors.FAIL}[-] No reader connected.{Config.Colors.ENDC}")
+            return
+        
+        if self.transport.reset():
+            try: 
+                atr = self.transport.connection.getATR()
+            except: 
+                pass
+        else: 
+            print(f"{Config.Colors.FAIL}[-] Card Reset Failed.{Config.Colors.ENDC}")
+            return
+            
+        iccid = "Unknown"
+        self.transport.transmit("00A40004023F00", silent=True)
+        self.transport.transmit("00A40004022FE2", silent=True)
+        data, sw1, sw2 = self.transport.transmit("00B000000A", silent=True)
+        if sw1 == 0x90:
+            def swap_nibbles(s):
+                res = []
+                for i in range(0, len(s), 2):
+                    if i+1 < len(s): 
+                        res.append(s[i+1] + s[i])
+                    else: 
+                        res.append(s[i])
+                return "".join(res).replace('F', '')
+            iccid = swap_nibbles(data.hex().upper())
+        print(f"{Config.Colors.BOLD}ICCID :{Config.Colors.ENDC} {iccid}")
+        
+        eid = None
+        std = "Unknown / Legacy UICC"
+        channel_data, sw1, sw2 = self.transport.transmit("0070000001", silent=True)
+        if sw1 == 0x90 and len(channel_data) > 0:
+            log_chan = channel_data[0]; ecasd_aid = "A0000005591010FFFFFFFF8900000200"
+            def send_chan(cla, ins, p1, p2, data=""):
+                cla_byte = int(cla, 16) | log_chan
+                cmd = f"{cla_byte:02X}{ins}{p1}{p2}{len(data)//2:02X}{data}" if data else f"{cla_byte:02X}{ins}{p1}{p2}00"
+                return self.transport.transmit(cmd, silent=True)
+            
+            send_chan("00", "A4", "04", "00", ecasd_aid) 
+            payload = "BF3E035C015A"
+            res, sw1, sw2 = send_chan("80", "E2", "91", "00", payload)
+            is_sgp22_confirmed = False
+            
+            if sw1 == 0x90:
+                if b'\x5A' in res: 
+                    std = f"{Config.Colors.GREEN}SGP.22/32 (Consumer/IoT){Config.Colors.ENDC}"
+                    is_sgp22_confirmed = True
+            elif sw1 == 0x69 and sw2 == 0x82: 
+                std = f"{Config.Colors.GREEN}SGP.22/32 (Consumer/IoT) - [Locked]{Config.Colors.ENDC}"
+                is_sgp22_confirmed = True
+            
+            if not eid:
+                res, sw1, sw2 = send_chan("00", "CA", "00", "5A") 
+                if sw1 == 0x90: 
+                    eid = res.hex().upper()
+                    if not is_sgp22_confirmed:
+                        std = f"{Config.Colors.BLUE}SGP.02 (M2M){Config.Colors.ENDC}"
+                    else:
+                        std += " (Read via Legacy mode)"
+            
+            self.transport.transmit(f"007080{log_chan:02X}", silent=True)
+        
+        if eid: 
+            print(f"{Config.Colors.BOLD}eID   :{Config.Colors.ENDC} {eid}")
+        print(f"{Config.Colors.BOLD}Spec  :{Config.Colors.ENDC} {std}")
+        self.transport.reset()
+        self.fs_ctrl.current_fid = "3F00"
+        print("="*40 + "\n")
+
+    def _load_config_file(self):
+        if os.path.exists(Config.INI_FILE):
+            self.config.read(Config.INI_FILE)
+        if 'KEYS' not in self.config:
+            self.config['KEYS'] = {}
+
+    def _load_aid_registry(self) -> Dict[str, str]:
+        registry = {}
+        if os.path.exists(Config.AID_FILE):
+            try:
+                with open(Config.AID_FILE, 'r') as f:
+                    for line in f:
+                        line = line.split('#')[0].strip()
+                        if ':' in line:
+                            parts = line.split(':')
+                            name, aid = parts[0].strip().upper(), parts[1].strip().upper()
+                            registry[name] = aid
+                print(f"{Config.Colors.CYAN}AIDs loaded ({len(registry)}){Config.Colors.ENDC}")
+            except Exception as e:
+                print(f"{Config.Colors.FAIL}[-] aid.txt error: {e}{Config.Colors.ENDC}")
+        else:
+            registry = {'ISDR': 'A0000005591010FFFFFFFF8900000100'}
+        return registry
+
+    def _initialize_controllers(self):
+        keys = Config.DEFAULT_KEYS.copy()
+        if 'KEYS' in self.config: 
+            keys.update(dict(self.config['KEYS']))
+        self.gp_ctrl = GlobalPlatformManager(self.transport, keys)
+        
+        # Initialize FS First
+        self.fs_ctrl = FileSystemController(self.transport, self.aid_registry)
+        
+        # Pass FS to Security for Smart-Select
+        self.sec_ctrl = SecurityController(self.transport, self.fs_ctrl)
+
+    def _update_config(self, key: str, value: Optional[str]):
+        if not value:
+            print(f"{Config.Colors.FAIL}[-] Usage: SET-{key.upper()} <VALUE>{Config.Colors.ENDC}")
+            return
+        self.config['KEYS'][key] = value.strip().upper()
+        
+        try:
+            with open(Config.INI_FILE, 'w') as configfile:
+                self.config.write(configfile)
+        except Exception as e:
+            print(f"{Config.Colors.FAIL}[-] IO Error: {e}{Config.Colors.ENDC}")
+            
+        print(f"{Config.Colors.GREEN}[+] {key.upper()} updated.{Config.Colors.ENDC}")
+        self._initialize_controllers()
+        self._update_prompt_state()
+
+    def _set_defaults(self):
+        print(f"{Config.Colors.WARNING}[!] Resetting configuration to defaults...{Config.Colors.ENDC}")
+        self.config['KEYS'] = Config.DEFAULT_KEYS.copy()
+        if 'adm' not in self.config['KEYS']:
+            self.config['KEYS']['adm'] = '0000000000000000'
+        
+        self._save_to_disk()
+        self._initialize_controllers()
+        print(f"{Config.Colors.GREEN}[+] Reset complete.{Config.Colors.ENDC}")
+        self._update_prompt_state()
+
+    def _save_to_disk(self):
+        try:
+            with open(Config.INI_FILE, 'w') as configfile:
+                self.config.write(configfile)
+        except Exception as e:
+            print(f"{Config.Colors.FAIL}[-] IO Error: {e}{Config.Colors.ENDC}")
+
+    def show_config(self):
+        print(f"{Config.Colors.HEADER}--- Configuration (keys.ini) ---{Config.Colors.ENDC}")
+        for section in self.config.sections():
+            print(f"[{section}]")
+            for key, value in self.config.items(section):
+                print(f"  {key} = {value}")
+
+    def list_aids(self):
+        print(f"{Config.Colors.HEADER}--- AID Registry (aid.txt) ---{Config.Colors.ENDC}")
+        if not self.aid_registry:
+            print("  (Registry is empty)")
+            return
+        for name, aid in sorted(self.aid_registry.items()):
+            print(f"  {name:<10} : {aid}")
+
+    def _set_aid_alias(self, arg_line: Optional[str]):
+        if not arg_line or len(arg_line.split()) < 2:
+            print(f"{Config.Colors.FAIL}[-] Usage: SET-AID-ALIAS <NAME> <AID_HEX>{Config.Colors.ENDC}")
+            return
+        name, aid_hex = arg_line.split(None, 1)
+        name = name.strip().upper()
+        aid_hex = aid_hex.strip().replace(' ', '').upper()
+        self.aid_registry[name] = aid_hex
+        self.aid_lookup = {bytes.fromhex(v): k for k, v in self.aid_registry.items()}
+        try:
+            with open(Config.AID_FILE, 'w') as f:
+                for n, a in sorted(self.aid_registry.items()):
+                    f.write(f"{n}:{a}\n")
+            print(f"{Config.Colors.GREEN}[+] AID alias '{name}' saved.{Config.Colors.ENDC}")
+        except Exception as e:
+            print(f"{Config.Colors.FAIL}[-] Failed to save aid.txt: {e}{Config.Colors.ENDC}")
+
+    def set_prompt(self, name: str):
+        if name == "ISD-SECURE":
+            self.prompt_str = f"\n[{Config.Colors.GREEN}ISD-SECURE{Config.Colors.ENDC}] > "
+        else:
+            self.prompt_str = f"\n[{Config.Colors.GREEN}{name}{Config.Colors.ENDC}] > "
+
+    def logout(self):
+        if not self.transport:
+            print(f"{Config.Colors.WARNING}[!] No reader connected.{Config.Colors.ENDC}")
+            return
+        was_active = self.transport.logout()
+        if was_active:
+            print(f"{Config.Colors.GREEN}[+] Secure session closed.{Config.Colors.ENDC}")
+        else:
+            print(f"{Config.Colors.WARNING}[!] No active secure session.{Config.Colors.ENDC}")
+
+    def _exit(self):
+        if self.transport:
+            self.transport.disconnect()
+        print("Bye.")
+        sys.exit(0)
+
+    def _run_scp80_tool(self):
+        print(f"{Config.Colors.HEADER}=== Switching to SCP80 OTA Tool ==={Config.Colors.ENDC}")
+        print(f"{Config.Colors.WARNING}[*] Releasing Card Reader...{Config.Colors.ENDC}")
+        
+        # 1. Disconnect SCP03 Session
+        if self.transport:
+            self.transport.disconnect()
+            
+        try:
+            print(f"{Config.Colors.CYAN}[*] Starting SCP80 Module...{Config.Colors.ENDC}")
+            
+            # --- CONTEXT SWITCH ---
+            import sys
+            import importlib.util
+
+            # 1. Get path to SCP80/main.py
+            current_dir = os.path.dirname(os.path.abspath(__file__))
+            scp80_root = os.path.abspath(os.path.join(current_dir, '../../SCP80'))
+            
+            # 2. Add SCP80 to sys.path so it can resolve its own 'import cli'
+            if scp80_root not in sys.path:
+                sys.path.insert(0, scp80_root)
+
+            # 3. Dynamic Import of SCP80.main
+            # We use import_module to ensure we get the module defined in that directory
+            import main as scp80_entry
+            
+            # 4. Run the correct entry point function
+            # [FIXED] Call run_standalone() instead of main()
+            scp80_entry.run_standalone()
+            # ---------------------------
+
+        except SystemExit:
+            pass # Clean exit from OTA tool
+        except ImportError as e:
+            print(f"{Config.Colors.FAIL}[!] Import Error: {e}{Config.Colors.ENDC}")
+            print(f"{Config.Colors.FAIL}[!] Check if 'SCP80/main.py' and 'cli.py' exist.{Config.Colors.ENDC}")
+        except AttributeError:
+             print(f"{Config.Colors.FAIL}[!] Error: SCP80/main.py has no 'run_standalone()' function.{Config.Colors.ENDC}")
+        except Exception as e:
+            print(f"{Config.Colors.FAIL}[!] SCP80 Tool Crashed: {e}{Config.Colors.ENDC}")
+        
+        # 3. Restore SCP03 Context
+        print(f"\n{Config.Colors.HEADER}=== Returning to SCP03 Shell ==={Config.Colors.ENDC}")
+        print(f"{Config.Colors.WARNING}[*] Re-acquiring Card Reader...{Config.Colors.ENDC}")
+        
+        try:
+            # Clean up sys.path to avoid pollution (optional)
+            if scp80_root in sys.path:
+                sys.path.remove(scp80_root)
+
+            self.transport = CardTransporter()
+            self.gp_ctrl.tp = self.transport
+            self.fs_ctrl.tp = self.transport
+            self.sec_ctrl.tp = self.transport
+            
+            self.transport.reset()
+            print(f"{Config.Colors.GREEN}[+] Card Reader Re-connected.{Config.Colors.ENDC}")
+        except Exception as e:
+            print(f"{Config.Colors.FAIL}[!] Failed to reconnect reader: {e}{Config.Colors.ENDC}")
+
+        self._update_prompt_state()
+
+    def run(self):
+        if self.transport:
+            try:
+                self._print_card_info()
+            except Exception as e:
+                print(f"{Config.Colors.FAIL}[!] Startup Check Failed: {e}{Config.Colors.ENDC}")
+        
+        self._update_prompt_state()
+        print(f"{Config.Colors.HEADER}--- YggdraSIM SCP03 Shell ---{Config.Colors.ENDC}")
+        print(f"Type 'help' for commands, 'aids' for known AIDs, 'exit' to quit.")
+        
+        while True:
+            try:
+                line = input(self.prompt_str).strip()
+                self._exec_line(line)
+            except KeyboardInterrupt:
+                print("\nType 'exit' to quit.")
+            except Exception as e:
+                print(f"{Config.Colors.FAIL}[-] Critical Error: {e}{Config.Colors.ENDC}")
