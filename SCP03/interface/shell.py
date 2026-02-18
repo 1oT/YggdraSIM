@@ -19,6 +19,7 @@ from SCP03.transport.card import CardTransporter
 from SCP03.logic.gp import GlobalPlatformManager
 from SCP03.logic.fs import FileSystemController
 from SCP03.logic.security import SecurityController
+from SCP03.interface.guides import ShellGuides # New Import
 
 class ShellDispatcher:
     def __init__(self):
@@ -36,12 +37,8 @@ class ShellDispatcher:
         self.prompt_str = ""
         self._update_prompt_state() 
         
-        # --- Documentation / Guides ---
-        self.guides = {
-            'GP': self._guide_gp,
-            'ETSI': self._guide_etsi,
-            'GSMA': self._guide_gsma
-        }
+        # Guide Topics for Auto-complete
+        self.guide_topics = ['GP', 'ETSI', 'GSMA']
 
         self.command_map = {
             # Session
@@ -142,97 +139,13 @@ class ShellDispatcher:
     def _handle_guide(self, arg_line):
         topic = arg_line.strip().upper()
         if not topic:
-            print(f"{Config.Colors.FAIL}Usage: GUIDE <TOPIC>. Topics: {', '.join(self.guides.keys())}{Config.Colors.ENDC}")
+            print(f"{Config.Colors.FAIL}Usage: GUIDE <TOPIC>. Topics: {', '.join(self.guide_topics)}{Config.Colors.ENDC}")
             return
         
-        if topic in self.guides:
-            print(f"\n{Config.Colors.HEADER}=== YggdraSIM Guide: {topic} ==={Config.Colors.ENDC}")
-            self.guides[topic]()
-            print("")
+        if topic in self.guide_topics:
+            ShellGuides.print_guide(topic)
         else:
-            print(f"{Config.Colors.FAIL}[!] Unknown topic. Available: {', '.join(self.guides.keys())}{Config.Colors.ENDC}")
-
-    def _guide_gp(self):
-        print(f"""
-{Config.Colors.BOLD}GlobalPlatform Management{Config.Colors.ENDC}
-All commands require authentication first ({Config.Colors.GREEN}AUTH-SD{Config.Colors.ENDC}).
-
-{Config.Colors.CYAN}1. Authentication{Config.Colors.ENDC}
-   - {Config.Colors.GREEN}AUTH-SD{Config.Colors.ENDC}: Performs mutual authentication (SCP03) with the Security Domain.
-     Uses keys from 'keys.ini' (K-ENC, K-MAC, DEK).
-
-{Config.Colors.CYAN}2. Registry & Info{Config.Colors.ENDC}
-   - {Config.Colors.GREEN}APPS{Config.Colors.ENDC} / {Config.Colors.GREEN}PKGS{Config.Colors.ENDC} / {Config.Colors.GREEN}SD{Config.Colors.ENDC}: Lists installed Applets, Packages, or Security Domains.
-   - {Config.Colors.GREEN}GET-KEYS{Config.Colors.ENDC}: Retrieves Key Information Template (IDs/Versions).
-   - {Config.Colors.GREEN}CPLC{Config.Colors.ENDC}: Reads Card Production Life Cycle data.
-
-{Config.Colors.CYAN}3. Applet Installation{Config.Colors.ENDC}
-   - {Config.Colors.GREEN}LOAD <CapFile>{Config.Colors.ENDC}:
-     Loads the CAP file libraries but does not instantiate the applet.
-   
-   - {Config.Colors.GREEN}INSTALL-INSTALL <CapFile> [Privileges] [Params]{Config.Colors.ENDC}:
-     Full installation (Load + Install).
-     - {Config.Colors.YELLOW}Privileges{Config.Colors.ENDC}: Hex byte (e.g., '04' for Default Selected, '00' None).
-     - {Config.Colors.YELLOW}Params{Config.Colors.ENDC}: Install Parameters TLV (e.g., 'C900' for empty).
-
-{Config.Colors.CYAN}4. Key Management{Config.Colors.ENDC}
-   - {Config.Colors.GREEN}PUT-KEY <NewKVN> <KeyID_Start> <K-ENC> <K-MAC> <K-DEK>{Config.Colors.ENDC}:
-     Rotates the keyset of the current SD.
-     - {Config.Colors.YELLOW}NewKVN{Config.Colors.ENDC}: New Key Version Number (hex).
-     - {Config.Colors.YELLOW}KeyID_Start{Config.Colors.ENDC}: Starting Key ID (usually 81 for Key 1).
-     - {Config.Colors.YELLOW}Keys{Config.Colors.ENDC}: The three 16-byte AES keys in Hex.
-     *Example*: PUT-KEY 30 81 <EncHex> <MacHex> <DekHex>
-
-{Config.Colors.CYAN}5. Data Management{Config.Colors.ENDC}
-   - {Config.Colors.GREEN}STORE-DATA <Hex> [P1] [P2]{Config.Colors.ENDC}: Sends raw data to the SD (Command 80E2).
-   - {Config.Colors.GREEN}DELETE-CONS <AID>{Config.Colors.ENDC}: Deletes an object (Applet/Package) and its related data.
-""")
-
-    def _guide_etsi(self):
-        print(f"""
-{Config.Colors.BOLD}ETSI / 3GPP File System & Security{Config.Colors.ENDC}
-Commands for interacting with the UICC/USIM file system.
-
-{Config.Colors.CYAN}1. Navigation{Config.Colors.ENDC}
-   - {Config.Colors.GREEN}SELECT <Path/FID>{Config.Colors.ENDC}:
-     Selects a file by Hex FID (e.g., '3F00') or Path (e.g., 'USIM/IMSI').
-     Displays the File Control Parameters (FCP) decoded.
-
-{Config.Colors.CYAN}2. I/O Operations{Config.Colors.ENDC}
-   - {Config.Colors.GREEN}READ [Path]{Config.Colors.ENDC}: Reads a Transparent (Binary) EF.
-   - {Config.Colors.GREEN}RECORD <N|ALL> [Path]{Config.Colors.ENDC}: Reads Linear Fixed records. Use 'ALL' to dump all.
-   - {Config.Colors.GREEN}UPDATE BINARY <Hex>{Config.Colors.ENDC}: Overwrites current Binary EF.
-   - {Config.Colors.GREEN}UPDATE RECORD <N> <Hex>{Config.Colors.ENDC}: Overwrites specific Record N.
-
-{Config.Colors.CYAN}3. PIN Management{Config.Colors.ENDC}
-   - {Config.Colors.GREEN}VERIFY <ID> <PIN>{Config.Colors.ENDC}:
-     Verifies a PIN. ID '1' is usually Global PIN1 (or 01).
-   - {Config.Colors.GREEN}CHANGE-PIN <ID> <Old> <New>{Config.Colors.ENDC}: Updates PIN value.
-   - {Config.Colors.GREEN}UNBLOCK <ID> <PUK> <NewPIN>{Config.Colors.ENDC}: Resets a blocked PIN using PUK.
-   - {Config.Colors.GREEN}DISABLE-PIN / ENABLE-PIN{Config.Colors.ENDC}: Toggles PIN verification requirement.
-
-{Config.Colors.CYAN}4. Authentication{Config.Colors.ENDC}
-   - {Config.Colors.GREEN}AUTH-USIM <RAND> <AUTN>{Config.Colors.ENDC}:
-     Runs the Milenage algorithm (3G/4G/5G). Input random challenge and auth token.
-   - {Config.Colors.GREEN}AUTH-GSM <RAND>{Config.Colors.ENDC}: Runs 2G COMP128 algo.
-""")
-
-    def _guide_gsma(self):
-        print(f"""
-{Config.Colors.BOLD}GSMA eSIM (SGP.22 / SGP.32 / SGP.02){Config.Colors.ENDC}
-
-{Config.Colors.CYAN}1. Consumer eSIM (SGP.22){Config.Colors.ENDC}
-   - {Config.Colors.GREEN}LIST-CONS{Config.Colors.ENDC}: List profiles installed in ISD-R.
-   - {Config.Colors.GREEN}ENABLE-CONS <AID>{Config.Colors.ENDC}: Enable a profile (triggers Refresh).
-   - {Config.Colors.GREEN}GET-CONS{Config.Colors.ENDC}: Fetch EuiccInfo1, Info2, and Configured Data.
-
-{Config.Colors.CYAN}2. IoT eSIM (SGP.32){Config.Colors.ENDC}
-   - {Config.Colors.GREEN}GET-IOT{Config.Colors.ENDC}: Fetch IoT specific eUICC Configuration.
-   - {Config.Colors.GREEN}LIST-IOT{Config.Colors.ENDC}: List IoT Profiles.
-
-{Config.Colors.CYAN}3. M2M (SGP.02){Config.Colors.ENDC}
-   - {Config.Colors.GREEN}GET-M2M{Config.Colors.ENDC}: Read ECASD data (EID, Certs) and ISD-P list.
-""")
+            print(f"{Config.Colors.FAIL}[!] Unknown topic. Available: {', '.join(self.guide_topics)}{Config.Colors.ENDC}")
 
     # --- Setup & Core ---
     def _setup_readline(self):
@@ -278,15 +191,16 @@ Commands for interacting with the UICC/USIM file system.
             
             # Guide Topic Completion
             if cmd == 'GUIDE':
-                # current text being typed for argument
-                # If space exists, parts has 2 elements (cmd, arg) or more. 
-                # If cursor is at start of arg, text is empty string.
                 arg_prefix = text.upper()
-                options = [topic for topic in self.guides.keys() if topic.startswith(arg_prefix)]
+                options = [topic for topic in self.guide_topics if topic.startswith(arg_prefix)]
                 if state < len(options):
                     return options[state]
 
         return None
+
+    # ... [Rest of the Dispatcher Methods (install handlers, etc.) remain identical] ...
+    # (Including _handle_install_file, _handle_store_data, _handle_put_key, 
+    #  _update_prompt_state, _handle_auth, etc. - ensure previous code is preserved)
 
     def _handle_install_file(self, arg_line):
         parts = arg_line.split()
@@ -569,7 +483,7 @@ Commands for interacting with the UICC/USIM file system.
                     {
                         "label": "General", "url": None,
                         "cmds": [
-                            ("GUIDE", "<Topic>", "Open User Guide"), # Added
+                            ("GUIDE", "<Topic>", "Open User Guide"),
                             ("SHOW", "", "Config"),
                             ("SET-AID", "", "Set Target"),
                             ("SET-DEK", "", "Set DEK"),
@@ -682,13 +596,14 @@ Commands for interacting with the UICC/USIM file system.
             args_required = [
                 'SET-KENC', 'SET-KMAC', 'SET-AID', 'SET-KVN', 'SET-ADM', 'SET-AID-ALIAS', 'SET-DEK',
                 'SELECT', 'UPDATE', 'GET', 'LOCK', 'UNLOCK', 'DEL', 'SCRIPT', 
-                'INSTALL-INSTALL', 'LOAD', 'STORE-DATA', 'PUT-KEY', 'GUIDE', # Added GUIDE
+                'INSTALL-INSTALL', 'LOAD', 'STORE-DATA', 'PUT-KEY', 'GUIDE',
                 'ENABLE-CONS', 'DISABLE-CONS', 'DELETE-CONS',
                 'ENABLE-IOT', 'DISABLE-IOT', 'DELETE-IOT',
                 'VERIFY', 'CHANGE-PIN', 'ENABLE-PIN', 'DISABLE-PIN', 'UNBLOCK', 
                 'AUTH-GSM', 'AUTH-USIM', 'AUTH-ISIM', 
                 'INSTALL-SELECTABLE', 'INSTALL-EXTRADITION', 'INSTALL-PERSO'
             ]
+            # RUN is optional arg if interactive, but handled separately above
             args_optional = ['REPORT', 'ADM', 'KEYS', 'READ', 'RECORD', 'RUN']
             try:
                 if cmd in args_required:
