@@ -9,14 +9,19 @@ from SCP03.core.decoders import AdvancedDecoders
 from SCP03.core.cap import CapFileParser
 from SCP03.crypto.session import Scp03Session
 from SCP03.logic.sgp22 import Sgp22Manager
-from cryptography.hazmat.primitives.ciphers import algorithms
+from cryptography.hazmat.primitives.ciphers import algorithms, Cipher, modes
 from cryptography.hazmat.primitives import cmac
 
 class GlobalPlatformManager:
     def __init__(self, transport, config_keys):
         self.tp = transport
         self.raw_keys = config_keys 
-        self.keys = {k: HexUtils.to_bytes(v) for k, v in config_keys.items() if k != 'kvn'}
+        # Pass all keys including dek to session logic via self.keys if needed or handle in Scp03Session
+        self.keys = {
+            'kenc': HexUtils.to_bytes(config_keys.get('kenc', Config.DEFAULT_KEYS['kenc'])),
+            'kmac': HexUtils.to_bytes(config_keys.get('kmac', Config.DEFAULT_KEYS['kmac'])),
+            'dek':  HexUtils.to_bytes(config_keys.get('dek',  Config.DEFAULT_KEYS['dek']))
+        }
         self.target_aid = HexUtils.to_bytes(config_keys.get('aid', Config.DEFAULT_KEYS['aid']))
         self.kvn = int(config_keys.get('kvn', Config.DEFAULT_KEYS['kvn']), 16)
         
@@ -105,7 +110,83 @@ class GlobalPlatformManager:
             print(f"{Config.Colors.FAIL}[-] EXTERNAL AUTH Failed: {sw1:02X}{sw2:02X}{Config.Colors.ENDC}")
             return False
 
-    def install_cap_file(self, filename: str, instantiate: bool = True):
+    def store_data(self, data_hex: str, p1: int = 0x00, p2: int = 0x00):
+        """
+        GlobalPlatform STORE DATA (80 E2).
+        P1: Reference Control (00=Last block, 80=More blocks)
+        P2: Block Number
+        """
+        if not self.tp.session or not self.tp.session.is_authenticated:
+            print(f"{Config.Colors.FAIL}[!] Error: Must be authenticated.{Config.Colors.ENDC}")
+            return
+
+        payload = HexUtils.to_bytes(data_hex)
+        print(f"{Config.Colors.CYAN}[*] STORE DATA (P1={p1:02X}, P2={p2:02X}) Len={len(payload)}...{Config.Colors.ENDC}")
+        
+        cmd = f"80E2{p1:02X}{p2:02X}{len(payload):02X}{payload.hex()}"
+        _, sw1, sw2 = self.tp.transmit(cmd, silent=True)
+        
+        if sw1 == 0x90:
+            print(f"{Config.Colors.GREEN}[+] STORE DATA Success.{Config.Colors.ENDC}")
+        else:
+            print(f"{Config.Colors.FAIL}[-] Failed: {sw1:02X}{sw2:02X}{Config.Colors.ENDC}")
+
+    def put_key(self, new_kvn: int, key_id_start: int, new_keys: List[str]):
+        """
+        GlobalPlatform PUT KEY (80 D8).
+        Rotates keys by encrypting the new key values with the current session's DEK.
+        """
+        if not self.tp.session or not self.tp.session.is_authenticated:
+            print(f"{Config.Colors.FAIL}[!] Error: Must be authenticated.{Config.Colors.ENDC}")
+            return
+
+        if len(new_keys) != 3:
+            print(f"{Config.Colors.FAIL}[!] Error: PUT KEY requires 3 keys (ENC, MAC, DEK).{Config.Colors.ENDC}")
+            return
+
+        print(f"{Config.Colors.CYAN}[*] Rotating Keys (Target KVN: 0x{new_kvn:02X})...{Config.Colors.ENDC}")
+        
+        payload = bytearray()
+        payload.append(new_kvn) # New Key Version Number
+        
+        for i, key_hex in enumerate(new_keys):
+            raw_key = HexUtils.to_bytes(key_hex)
+            if len(raw_key) != 16:
+                print(f"{Config.Colors.FAIL}[!] Error: Key {i+1} must be 16 bytes (AES-128).{Config.Colors.ENDC}")
+                return
+            
+            # Encrypt key data with DEK
+            try:
+                encrypted_key = self.tp.session.encrypt_key_data(raw_key)
+            except Exception as e:
+                print(f"{Config.Colors.FAIL}[!] DEK Encryption Failed: {e}{Config.Colors.ENDC}")
+                return
+
+            # Calculate KCV (3 bytes of Enc(00..00))
+            kcv_check = Cipher(algorithms.AES(raw_key), modes.ECB()).encryptor().update(b'\x00'*16)[:3]
+
+            # Construct Key Block: [Type] [Len] [Value] [Len] [KCV]
+            payload.append(0x88) # AES
+            payload.append(len(encrypted_key))
+            payload.extend(encrypted_key)
+            payload.append(len(kcv_check))
+            payload.extend(kcv_check)
+
+        # PUT KEY Command: 80 D8 [OldKVN/00] [KeyID/81] [Lc] [Data]
+        # P1=00 (Add/Replace), P2=81 (Base Key ID for SCP03 usually 80, 81, 82?) 
+        # Actually usually P2 is the starting Key Identifier. Typically 0x81 for 01, 02, 03 relative to base? 
+        # Standard SCP03 uses Key IDs 1, 2, 3 in the SD. 
+        # We assume replacing existing keys in the same slots (P2=0x81 is common for Key 1).
+        
+        cmd = f"80D800{key_id_start:02X}{len(payload):02X}{payload.hex()}"
+        _, sw1, sw2 = self.tp.transmit(cmd, silent=True)
+
+        if sw1 == 0x90:
+            print(f"{Config.Colors.GREEN}[+] PUT KEY Success. New Keys active on next session.{Config.Colors.ENDC}")
+        else:
+            print(f"{Config.Colors.FAIL}[-] PUT KEY Failed: {sw1:02X}{sw2:02X}{Config.Colors.ENDC}")
+
+    def install_cap_file(self, filename: str, privileges: str = "00", install_params: str = "C900", instantiate: bool = True):
         if not self.tp.session or not self.tp.session.is_authenticated:
             print(f"{Config.Colors.FAIL}[!] Error: Must be authenticated (AUTH) first.{Config.Colors.ENDC}")
             return
@@ -174,14 +255,21 @@ class GlobalPlatformManager:
 
         applet_aid = app_aids[0] 
         print(f"{Config.Colors.CYAN}[*] INSTALL [for install] Applet: {applet_aid.hex().upper()}...{Config.Colors.ENDC}")
+        print(f"    Privileges: {privileges}")
+        print(f"    Params    : {install_params}")
+
+        # Convert args
+        priv_bytes = HexUtils.to_bytes(privileges)
+        param_bytes = HexUtils.to_bytes(install_params)
 
         install_data = bytearray()
-        install_data.append(len(pkg_aid)); install_data.extend(pkg_aid)
-        install_data.append(len(applet_aid)); install_data.extend(applet_aid)
-        install_data.append(len(applet_aid)); install_data.extend(applet_aid)
-        install_data.append(0x01); install_data.append(0x00)
-        install_data.append(0x02); install_data.extend(b'\xC9\x00')
-        install_data.append(0x00)
+        install_data.append(len(pkg_aid)); install_data.extend(pkg_aid)         # Executable Load File AID
+        install_data.append(len(applet_aid)); install_data.extend(applet_aid)   # Executable Module AID
+        install_data.append(len(applet_aid)); install_data.extend(applet_aid)   # Application AID
+        
+        install_data.append(len(priv_bytes)); install_data.extend(priv_bytes)   # Privileges
+        install_data.append(len(param_bytes)); install_data.extend(param_bytes) # Install Parameters
+        install_data.append(0x00)                                               # Install Token
 
         cmd = f"80E60C00{len(install_data):02X}{install_data.hex()}"
         _, sw1, sw2 = self.tp.transmit(cmd, silent=True)

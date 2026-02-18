@@ -36,92 +36,98 @@ class ShellDispatcher:
         self.prompt_str = ""
         self._update_prompt_state() 
         
-        self.commands = {
+        self.command_map = {
             # Session
-            'AUTH-SD': self._handle_auth,
-            'RESET': self._handle_reset,
-            'INFO': self._print_card_info,
-            'KEYS': self._handle_keys,
-            'CPLC': self.gp_ctrl.get_cplc,
-            'LOGOUT': self._handle_logout,
-            'CLS': lambda: os.system('cls' if os.name=='nt' else 'clear'),
-            'OTA': self._run_scp80_tool,
+            'AUTH-SD': (self._handle_auth, ""),
+            'RESET': (self._handle_reset, ""),
+            'INFO': (self._print_card_info, ""),
+            'KEYS': (self._handle_keys, "[AID]"),
+            'CPLC': (self.gp_ctrl.get_cplc, ""),
+            'LOGOUT': (self._handle_logout, ""),
+            'CLS': (lambda: os.system('cls' if os.name=='nt' else 'clear'), ""),
+            'OTA': (self._run_scp80_tool, ""),
             
             # SGP.22 (Consumer)
-            'LIST-CONS': self.gp_ctrl.sgp22.list_profiles,
-            'GET-CONS': self.gp_ctrl.sgp22.run_sgp22_scan,
-            'ENABLE-CONS': self._handle_enable,
-            'DISABLE-CONS': self._handle_disable,
-            'DELETE-CONS': self._handle_delete_profile,
+            'LIST-CONS': (self.gp_ctrl.sgp22.list_profiles, ""),
+            'GET-CONS': (self.gp_ctrl.sgp22.run_sgp22_scan, ""),
+            'ENABLE-CONS': (self._handle_enable, "<AID/ICCID>"),
+            'DISABLE-CONS': (self._handle_disable, "<AID/ICCID>"),
+            'DELETE-CONS': (self._handle_delete_profile, "<AID/ICCID>"),
 
-            # SGP.32 (IoT) - Aliased to SGP.22 logic for now
-            'LIST-IOT': self.gp_ctrl.sgp22.list_profiles,
-            'GET-IOT': self.gp_ctrl.sgp22.run_sgp22_scan,
-            'ENABLE-IOT': self._handle_enable,
-            'DISABLE-IOT': self._handle_disable,
-            'DELETE-IOT': self._handle_delete_profile,
+            # SGP.32 (IoT)
+            'LIST-IOT': (self.gp_ctrl.sgp22.list_profiles, ""),
+            'GET-IOT': (self.gp_ctrl.sgp22.run_sgp22_scan, ""),
+            'ENABLE-IOT': (self._handle_enable, "<AID/ICCID>"),
+            'DISABLE-IOT': (self._handle_disable, "<AID/ICCID>"),
+            'DELETE-IOT': (self._handle_delete_profile, "<AID/ICCID>"),
             
             # SGP.02 (M2M)
-            'GET-M2M': self.gp_ctrl.sgp22.run_sgp02_scan,
-            'GET-ECASD': self.gp_ctrl.sgp22.run_sgp02_scan,
+            'GET-M2M': (self.gp_ctrl.sgp22.run_sgp02_scan, ""),
+            'GET-ECASD': (self.gp_ctrl.sgp22.run_sgp02_scan, ""),
             
             # GlobalPlatform Registry
-            'APPS': lambda: self.gp_ctrl.list_registry('APPS'),
-            'PKGS': lambda: self.gp_ctrl.list_registry('PACKAGES'),
-            'SD': lambda: self.gp_ctrl.list_registry('SD'),
+            'APPS': (lambda: self.gp_ctrl.list_registry('APPS'), ""),
+            'PKGS': (lambda: self.gp_ctrl.list_registry('PACKAGES'), ""),
+            'SD': (lambda: self.gp_ctrl.list_registry('SD'), ""),
             
             # Lifecycle
-            'LOCK': lambda x: self.gp_ctrl.set_status(x, 0x80),
-            'UNLOCK': lambda x: self.gp_ctrl.set_status(x, 0x07),
-            'DEL': lambda x: self.gp_ctrl.delete_object(x, True),
-            'ADM': self.gp_ctrl.verify_adm,
+            'LOCK': (lambda x: self.gp_ctrl.set_status(x, 0x80), "<AID>"),
+            'UNLOCK': (lambda x: self.gp_ctrl.set_status(x, 0x07), "<AID>"),
+            'DEL': (lambda x: self.gp_ctrl.delete_object(x, True), "<AID>"),
+            'ADM': (self.gp_ctrl.verify_adm, "[Key]"),
+            'STORE-DATA': (self._handle_store_data, "<Hex> [P1] [P2]"), # New
+            'PUT-KEY': (self._handle_put_key, "<KVN> <KeyID> <K1> <K2> <K3>"), # New
 
-            # Applet Loading
-            'INSTALL': lambda x: self.gp_ctrl.install_cap_file(x, instantiate=True),
-            'LOAD': lambda x: self.gp_ctrl.install_cap_file(x, instantiate=False),
-            'INSTALL-SELECTABLE': self._handle_install_selectable,
-            'INSTALL-EXTRADITION': self._handle_install_extradition,
-            'INSTALL-PERSO': lambda x: self.gp_ctrl.install_personalization(x),
+            # Applet Loading (Renamed INSTALL -> INSTALL-INSTALL)
+            'INSTALL-INSTALL': (self._handle_install_file, "<CAP> [Priv] [Params]"),
+            'LOAD': (lambda x: self.gp_ctrl.install_cap_file(x, instantiate=False), "<CAP>"),
+            'INSTALL-SELECTABLE': (self._handle_install_selectable, "<AID> [Priv]"),
+            'INSTALL-EXTRADITION': (self._handle_install_extradition, "<App> <SD>"),
+            'INSTALL-PERSO': (lambda x: self.gp_ctrl.install_personalization(x), "<AID>"),
 
             # File System
-            'SCAN': self.fs_ctrl.scan_tree,
-            'REPORT': lambda x=None: self.fs_ctrl.generate_report(x) if x else self.fs_ctrl.generate_report(),
-            'SELECT': lambda x: self.fs_ctrl.select(x),
-            'READ': self.fs_ctrl.read_binary,
-            'RECORD': self.fs_ctrl.read_record,
-            'UPDATE': self._handle_update,
-            'GET': lambda x: self.gp_ctrl.get_data(*[int(i, 16) for i in x.split()[:2]]) if len(x.split()) >= 2 else print("Usage: GET <P1> <P2>"),
+            'SCAN': (self.fs_ctrl.scan_tree, ""),
+            'REPORT': (lambda x=None: self.fs_ctrl.generate_report(x) if x else self.fs_ctrl.generate_report(), "[File]"),
+            'SELECT': (lambda x: self.fs_ctrl.select(x), "<Path/FID>"),
+            'READ': (self.fs_ctrl.read_binary, "[Path]"),
+            'RECORD': (self.fs_ctrl.read_record, "<N/All> [Path]"),
+            'UPDATE': (self._handle_update, "BINARY/RECORD <Data>"),
+            'GET': (lambda x: self.gp_ctrl.get_data(*[int(i, 16) for i in x.split()[:2]]) if len(x.split()) >= 2 else print("Usage: GET <P1> <P2>"), "<P1> <P2>"),
 
-            # Security (PINs)
-            'VERIFY': lambda x: self._handle_pin_cmd(self.sec_ctrl.verify_pin, x, 2, "VERIFY <ID> <PIN>"),
-            'CHANGE-PIN': lambda x: self._handle_pin_cmd(self.sec_ctrl.change_pin, x, 3, "CHANGE-PIN <ID> <OLD> <NEW>"),
-            'DISABLE-PIN': lambda x: self._handle_pin_cmd(self.sec_ctrl.disable_pin, x, 2, "DISABLE-PIN <ID> <PIN>"),
-            'ENABLE-PIN': lambda x: self._handle_pin_cmd(self.sec_ctrl.enable_pin, x, 2, "ENABLE-PIN <ID> <PIN>"),
-            'UNBLOCK': lambda x: self._handle_pin_cmd(self.sec_ctrl.unblock_pin, x, 3, "UNBLOCK <ID> <PUK> <NEW_PIN>"),
+            # Security
+            'VERIFY': (lambda x: self._handle_pin_cmd(self.sec_ctrl.verify_pin, x, 2, "VERIFY <ID> <PIN>"), "<ID> <PIN>"),
+            'CHANGE-PIN': (lambda x: self._handle_pin_cmd(self.sec_ctrl.change_pin, x, 3, "CHANGE-PIN <ID> <OLD> <NEW>"), "<ID> <Old> <New>"),
+            'DISABLE-PIN': (lambda x: self._handle_pin_cmd(self.sec_ctrl.disable_pin, x, 2, "DISABLE-PIN <ID> <PIN>"), "<ID> <PIN>"),
+            'ENABLE-PIN': (lambda x: self._handle_pin_cmd(self.sec_ctrl.enable_pin, x, 2, "ENABLE-PIN <ID> <PIN>"), "<ID> <PIN>"),
+            'UNBLOCK': (lambda x: self._handle_pin_cmd(self.sec_ctrl.unblock_pin, x, 3, "UNBLOCK <ID> <PUK> <NEW_PIN>"), "<ID> <PUK> <New>"),
 
-            # Security (Auth)
-            'AUTH-GSM': lambda x: self.sec_ctrl.run_auth(x, app_context="GSM") if x else print("Usage: AUTH-GSM <RAND>"),
-            'AUTH-USIM': lambda x: self._handle_auth_general(x, "USIM"),
-            'AUTH-ISIM': lambda x: self._handle_auth_general(x, "ISIM"),
+            # Auth
+            'AUTH-GSM': (lambda x: self.sec_ctrl.run_auth(x, app_context="GSM") if x else print("Usage: AUTH-GSM <RAND>"), "<RAND>"),
+            'AUTH-USIM': (lambda x: self._handle_auth_general(x, "USIM"), "<R> <AUTN>"),
+            'AUTH-ISIM': (lambda x: self._handle_auth_general(x, "ISIM"), "<R> <AUTN>"),
 
             # Config
-            'SHOW': self.show_config,
-            'AIDS': self.list_aids,
-            'SET-AID-ALIAS': self._set_aid_alias,
-            'SET-KENC': lambda x: self._update_config('kenc', x),
-            'SET-KMAC': lambda x: self._update_config('kmac', x),
-            'SET-AID':  lambda x: self._update_config('aid', x),
-            'SET-KVN':  lambda x: self._update_config('kvn', x),
-            'SET-ADM':  lambda x: self._update_config('adm', x),
-            'SET-DEFAULT': self._set_defaults,
+            'SHOW': (self.show_config, ""),
+            'AIDS': (self.list_aids, ""),
+            'SET-AID-ALIAS': (self._set_aid_alias, "<Name> <AID>"),
+            'SET-KENC': (lambda x: self._update_config('kenc', x), "<Key>"),
+            'SET-KMAC': (lambda x: self._update_config('kmac', x), "<Key>"),
+            'SET-DEK': (lambda x: self._update_config('dek', x), "<Key>"), # New
+            'SET-AID':  (lambda x: self._update_config('aid', x), "<AID>"),
+            'SET-KVN':  (lambda x: self._update_config('kvn', x), "<Val>"),
+            'SET-ADM':  (lambda x: self._update_config('adm', x), "<Key>"),
+            'SET-DEFAULT': (self._set_defaults, ""),
             
             # System
-            'RUN': self.run_script,
-            'SCRIPT': self.run_script,
-            'HELP': self._print_help,
-            'EXIT': self._exit,
-            'Q': self._exit
+            'OTA': (self._run_scp80_tool, ""),
+            'RUN': (self.run_script, "<File> [Out.yaml]"),
+            'SCRIPT': (self.run_script, "<File>"),
+            'HELP': (self._print_help, ""),
+            'EXIT': (self._exit, ""),
+            'Q': (self._exit, "")
         }
+        
+        self.commands = {k: v[0] for k, v in self.command_map.items()}
         self._setup_readline()
 
     def _setup_readline(self):
@@ -135,7 +141,10 @@ class ShellDispatcher:
         except:
             pass
         atexit.register(self._save_history)
+        
         readline.set_completer(self._completer)
+        readline.set_completer_delims(' \t\n')
+        
         if 'libedit' in readline.__doc__:
             readline.parse_and_bind("bind ^I rl_complete")
         else:
@@ -155,6 +164,39 @@ class ShellDispatcher:
             if state < len(options):
                 return options[state]
         return None
+
+    def _handle_install_file(self, arg_line):
+        parts = arg_line.split()
+        if len(parts) < 1:
+            print(f"{Config.Colors.FAIL}Usage: INSTALL-INSTALL <File> [Privileges] [Params]{Config.Colors.ENDC}")
+            return
+        f = parts[0]
+        p = parts[1] if len(parts) > 1 else "00"
+        par = parts[2] if len(parts) > 2 else "C900"
+        self.gp_ctrl.install_cap_file(f, privileges=p, install_params=par, instantiate=True)
+
+    def _handle_store_data(self, arg_line):
+        parts = arg_line.split()
+        if len(parts) < 1:
+            print(f"{Config.Colors.FAIL}Usage: STORE-DATA <HexData> [P1=00] [P2=00]{Config.Colors.ENDC}")
+            return
+        data = parts[0]
+        p1 = int(parts[1], 16) if len(parts) > 1 else 0x00
+        p2 = int(parts[2], 16) if len(parts) > 2 else 0x00
+        self.gp_ctrl.store_data(data, p1, p2)
+
+    def _handle_put_key(self, arg_line):
+        parts = arg_line.split()
+        if len(parts) < 5:
+            print(f"{Config.Colors.FAIL}Usage: PUT-KEY <NewKVN> <KeyID_Start> <K-ENC> <K-MAC> <K-DEK>{Config.Colors.ENDC}")
+            return
+        try:
+            kvn = int(parts[0], 16)
+            kid = int(parts[1], 16)
+            keys = parts[2:5]
+            self.gp_ctrl.put_key(kvn, kid, keys)
+        except ValueError:
+            print(f"{Config.Colors.FAIL}[!] Invalid integer args.{Config.Colors.ENDC}")
 
     def _update_prompt_state(self):
         is_auth = False
@@ -286,7 +328,6 @@ class ShellDispatcher:
             return
         self.sec_ctrl.run_auth(parts[0], parts[1], app_context=context)
 
-    # --- Core Methods ---
     def _print_help(self):
         """Prints help with links and structure."""
         def link(text, url):
@@ -315,17 +356,19 @@ class ShellDispatcher:
                             ("APPS", "", "List Applets"),
                             ("PKGS", "", "List Packages"),
                             ("SD", "", "List SDs"),
-                            ("GET", "<P1><P2>", "Get Data")
+                            ("GET", "<P1><P2>", "Get Data"),
+                            ("STORE-DATA", "<Hex>", "Store Data") # Added
                         ]
                     },
                     {
                         "label": "Lifecycle", "url": None,
                         "cmds": [
-                            ("INSTALL", "<Cap>", "Install CAP"),
+                            ("INSTALL-INSTALL", "<Cap>", "Install CAP"),
                             ("LOAD", "<Cap>", "Load CAP"),
                             ("INSTALL-SELECTABLE", "", "Make Selectable"),
                             ("INSTALL-EXTRADITION", "", "Extradition"),
-                            ("LOCK/UNLOCK/DEL", "", "Mgmt Object")
+                            ("LOCK/UNLOCK/DEL", "", "Mgmt Object"),
+                            ("PUT-KEY", "<KVN>", "Rotate Keys") # Added
                         ]
                     }
                 ]
@@ -338,7 +381,8 @@ class ShellDispatcher:
                         "label": "GSMA SGP.02 (M2M)", 
                         "url": "https://www.gsma.com/solutions-and-impact/technologies/esim/gsma_resources/sgp-02-v4-3/",
                         "cmds": [
-                            ("GET-M2M", "", "Scan SGP.02")
+                            ("GET-M2M", "", "Scan SGP.02"),
+                            ("GET-ECASD", "", "Scan ECASD")
                         ]
                     },
                     {
@@ -404,6 +448,7 @@ class ShellDispatcher:
                         "cmds": [
                             ("SHOW", "", "Config"),
                             ("SET-AID", "", "Set Target"),
+                            ("SET-DEK", "<Key>", "Set DEK Key"), # Added
                             ("OTA", "", "SCP80 Tool"),
                             ("RUN", "<File>", "Run Script"),
                             ("HELP", "", "Help"),
@@ -422,7 +467,6 @@ class ShellDispatcher:
                 for c, a, d in grp["cmds"]:
                     print(f"    {Config.Colors.GREEN}{c:<24}{Config.Colors.ENDC} {a:<10} : {d}")
                 
-                # Breathing room
                 if i < len(section["subgroups"]) - 1:
                     print("")
         print("")
@@ -512,15 +556,15 @@ class ShellDispatcher:
         if cmd in self.commands:
             # [FIXED] Updated args requirement list
             args_required = [
-                'SET-KENC', 'SET-KMAC', 'SET-AID', 'SET-KVN', 'SET-ADM', 'SET-AID-ALIAS', 
+                'SET-KENC', 'SET-KMAC', 'SET-AID', 'SET-KVN', 'SET-ADM', 'SET-AID-ALIAS', 'SET-DEK', # Added SET-DEK
                 'SELECT', 'UPDATE', 'GET', 'LOCK', 'UNLOCK', 'DEL', 'SCRIPT', 
-                'INSTALL', 'LOAD', 'ENABLE', 'DISABLE', 'DELETE-PROFILE',
+                'INSTALL-INSTALL', 'LOAD', 'STORE-DATA', 'PUT-KEY', # Added
+                'ENABLE-CONS', 'DISABLE-CONS', 'DELETE-CONS',
                 'ENABLE-IOT', 'DISABLE-IOT', 'DELETE-IOT',
                 'VERIFY', 'CHANGE-PIN', 'ENABLE-PIN', 'DISABLE-PIN', 'UNBLOCK', 
                 'AUTH-GSM', 'AUTH-USIM', 'AUTH-ISIM', 
                 'INSTALL-SELECTABLE', 'INSTALL-EXTRADITION', 'INSTALL-PERSO'
             ]
-            # RUN is optional arg if interactive, but handled separately above
             args_optional = ['REPORT', 'ADM', 'KEYS', 'READ', 'RECORD', 'RUN']
             try:
                 if cmd in args_required:
