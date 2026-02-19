@@ -2,29 +2,78 @@ import os
 from SCP03.config import Config
 
 class ShellGuides:
-    """
-    Manages detailed interactive documentation and usage guides.
-    """
+    """Manages detailed interactive documentation and usage guides."""
 
     @staticmethod
     def _link(text: str, url: str) -> str:
-        """Generates an OSC 8 clickable hyperlink."""
         if not url: 
             return text
         return f"\033]8;;{url}\033\\{text}\033]8;;\033\\"
 
     @classmethod
-    def print_guide(cls, topic: str):
-        os.system('cls' if os.name == 'nt' else 'clear')
-        topic = topic.upper()
-        if topic == 'GP':
-            cls._print_gp_guide()
-        elif topic == 'ETSI':
-            cls._print_etsi_guide()
-        elif topic == 'GSMA':
-            cls._print_gsma_guide()
-        else:
-            print(f"{Config.Colors.FAIL}[!] Unknown guide topic: {topic}{Config.Colors.ENDC}")
+    def print_guide(cls, topic: str = ""):
+        original_topic = topic.upper().strip()
+
+        while True:
+            os.system('cls' if os.name == 'nt' else 'clear')
+            current_topic = original_topic
+
+            if not current_topic or current_topic == 'WIZARD':
+                print(f"\n{Config.Colors.HEADER}=== YggdraSIM Guide Wizard ==={Config.Colors.ENDC}")
+                print("Select a topic to explore:")
+                print(f"  {Config.Colors.CYAN}1.{Config.Colors.ENDC} GlobalPlatform (GP)")
+                print(f"  {Config.Colors.CYAN}2.{Config.Colors.ENDC} ETSI / 3GPP File System (ETSI)")
+                print(f"  {Config.Colors.CYAN}3.{Config.Colors.ENDC} GSMA eSIM Architecture (GSMA)")
+                print(f"  {Config.Colors.CYAN}4.{Config.Colors.ENDC} Install Wizard & APDU Builder (INSTALL)")
+                print(f"  {Config.Colors.CYAN}q.{Config.Colors.ENDC} Return to Shell")
+                
+                choice = input(f"\nChoice [1-4, q]: ").strip().lower()
+                if choice == 'q':
+                    break
+                elif choice == 'exit':
+                    break
+                elif choice == '1': 
+                    current_topic = 'GP'
+                elif choice == '2': 
+                    current_topic = 'ETSI'
+                elif choice == '3': 
+                    current_topic = 'GSMA'
+                elif choice == '4': 
+                    current_topic = 'INSTALL'
+                else:
+                    print(f"{Config.Colors.FAIL}[!] Invalid choice.{Config.Colors.ENDC}")
+                    input(f"\n{Config.Colors.CYAN}[Press Enter to continue]{Config.Colors.ENDC}")
+                    continue
+
+            os.system('cls' if os.name == 'nt' else 'clear')
+
+            if current_topic == 'GP':
+                cls._print_gp_guide()
+            elif current_topic == 'ETSI':
+                cls._print_etsi_guide()
+            elif current_topic == 'GSMA':
+                cls._print_gsma_guide()
+            elif current_topic == 'INSTALL':
+                cls._print_install_guide()
+            else:
+                print(f"{Config.Colors.FAIL}[!] Unknown guide topic: {current_topic}{Config.Colors.ENDC}")
+                break
+
+            prompt_msg = f"\n{Config.Colors.CYAN}[Press Enter to return to menu, or 'q' to exit to shell]{Config.Colors.ENDC}: "
+            if original_topic:
+                if original_topic != 'WIZARD':
+                    prompt_msg = f"\n{Config.Colors.CYAN}[Press Enter to return to shell]{Config.Colors.ENDC}: "
+
+            exit_choice = input(prompt_msg).strip().lower()
+            
+            if original_topic:
+                if original_topic != 'WIZARD':
+                    break
+                    
+            if exit_choice == 'q':
+                break
+            if exit_choice == 'exit':
+                break
 
     @classmethod
     def _print_gp_guide(cls):
@@ -34,37 +83,36 @@ class ShellGuides:
 {Config.Colors.BOLD}Standard:{Config.Colors.ENDC} {cls._link("GPC Card Specification v2.3.1", spec_url)}
 
 {Config.Colors.CYAN}1. Secure Channel Protocol (SCP03){Config.Colors.ENDC}
-   YggdraSIM uses SCP03 (AES) for mutual authentication and session encryption.
-   - {Config.Colors.GREEN}AUTH-SD{Config.Colors.ENDC}: Initiates the handshake (INITIALIZE UPDATE + EXTERNAL AUTHENTICATE).
-     It uses the static keys defined in {Config.Colors.YELLOW}keys.ini{Config.Colors.ENDC} (K-ENC, K-MAC, DEK).
-     Successful auth promotes the session security level to {Config.Colors.BOLD}0x33{Config.Colors.ENDC} (C-ENC + C-MAC + R-MAC).
+   YggdraSIM utilizes SCP03 (AES-based) for establishing a secure tunnel.
+   - {Config.Colors.BOLD}Handshake:{Config.Colors.ENDC} Initiated via {Config.Colors.GREEN}AUTH-SD{Config.Colors.ENDC}. It sends INITIALIZE UPDATE (80 50) and EXTERNAL AUTHENTICATE (84 82).
+   - {Config.Colors.BOLD}Keys:{Config.Colors.ENDC} Pulled from 'keys.ini'. 
+     - K-ENC: Derives Session-ENC (Payload Encryption).
+     - K-MAC: Derives Session-MAC (CMAC validation).
+     - K-DEK: Used exclusively for encrypting static keys during PUT KEY.
 
-{Config.Colors.CYAN}2. Content Management (Registry){Config.Colors.ENDC}
-   - {Config.Colors.GREEN}APPS{Config.Colors.ENDC} / {Config.Colors.GREEN}PKGS{Config.Colors.ENDC} / {Config.Colors.GREEN}SD{Config.Colors.ENDC}:
-     These commands run {Config.Colors.YELLOW}GET STATUS (80 F2){Config.Colors.ENDC} to list Executable Load Files (Packages),
-     Applications, or Security Domains present in the registry.
+{Config.Colors.CYAN}2. Registry & Content{Config.Colors.ENDC}
+   The card maintains an internal registry of its objects.
+   - {Config.Colors.GREEN}APPS / PKGS / SD{Config.Colors.ENDC}: Wrappers for GET STATUS (80 F2). Returns TLV blocks describing the lifecycle state (e.g. LOADED, INSTALLED, LOCKED) and privileges.
+   - {Config.Colors.GREEN}DELETE-CONS <AID>{Config.Colors.ENDC}: Sends DELETE (80 E4). If deleting a Package, all instantiated applets must be deleted first unless a recursive flag (P2=80) is used.
+
+{Config.Colors.CYAN}3. Applet Installation (Lifecycle - GPCS 11.5){Config.Colors.ENDC}
+   Installation requires precise APDU chaining, handled natively by {Config.Colors.GREEN}INSTALL-INSTALL{Config.Colors.ENDC}.
+   It accepts both standard ZIP-compressed `.cap` files and pre-linked `.ijc` binaries.
    
-   - {Config.Colors.GREEN}DELETE-CONS <AID>{Config.Colors.ENDC}:
-     Sends {Config.Colors.YELLOW}DELETE (80 E4){Config.Colors.ENDC}. If the object is a Package, all associated Applets are also removed.
+   {Config.Colors.BOLD}Lifecycle Commands:{Config.Colors.ENDC}
+   - {Config.Colors.GREEN}INSTALL-INSTALL <cap/ijc>{Config.Colors.ENDC}: Executes the full [for load] and [for install] sequence.
+   - {Config.Colors.GREEN}INSTALL-LOAD <cap/ijc>{Config.Colors.ENDC}: Loads the package into memory without instantiating it.
+   - {Config.Colors.GREEN}INSTALL-APP <Pkg> <App>{Config.Colors.ENDC}: Instantiates an applet from an already loaded package.
+   - {Config.Colors.GREEN}INSTALL-REGISTRY <AID>{Config.Colors.ENDC}: Updates the registry parameters for a specific AID.
+   - {Config.Colors.GREEN}INSTALL-PERSO <AID>{Config.Colors.ENDC}: Transitions an application to the personalization state.
 
-{Config.Colors.CYAN}3. Applet Installation (Lifecycle){Config.Colors.ENDC}
-   Installation is a multi-step process handled automatically by {Config.Colors.GREEN}INSTALL-INSTALL{Config.Colors.ENDC}:
-   1. {Config.Colors.BOLD}INSTALL [for load]{Config.Colors.ENDC}: Prepares the SD to receive the CAP file.
-   2. {Config.Colors.BOLD}LOAD{Config.Colors.ENDC}: Transmits the CAP file bytecode in blocks (80 E8).
-   3. {Config.Colors.BOLD}INSTALL [for install]{Config.Colors.ENDC}: Instantiates an applet from the loaded package.
-   
-   {Config.Colors.BOLD}Arguments:{Config.Colors.ENDC}
-   - {Config.Colors.YELLOW}Privileges{Config.Colors.ENDC}: Bitmask defining applet rights (e.g., 0x04 = Default Selected).
-   - {Config.Colors.YELLOW}Install Params (C9){Config.Colors.ENDC}: Application Specific Parameters passed to the Applet's `install()` method.
+   {Config.Colors.BOLD}Interactive Tooling:{Config.Colors.ENDC}
+   - {Config.Colors.GREEN}INSTALL-WIZARD-SD{Config.Colors.ENDC}: Interactive CLI for crafting all 7 GPCS 11.5 INSTALL variants.
+   - {Config.Colors.GREEN}INSTALL-WIZARD-APDU <cap/ijc>{Config.Colors.ENDC}: Parses the binary offline and builds the 80E6 / 80E8 chain for manual debugging.
 
-{Config.Colors.CYAN}4. Key Rotation{Config.Colors.ENDC}
-   - {Config.Colors.GREEN}PUT-KEY <KVN> <ID> <K1> <K2> <K3>{Config.Colors.ENDC}:
-     Replaces the keys in the connected Security Domain.
-     New keys are encrypted using the current session's {Config.Colors.YELLOW}DEK{Config.Colors.ENDC} before transmission.
-     *Warning*: Incorrect usage will lock you out of the card.
-
-{Config.Colors.CYAN}5. Raw Data{Config.Colors.ENDC}
-   - {Config.Colors.GREEN}STORE-DATA <Hex>{Config.Colors.ENDC}: Sends raw TLV objects to the ISD (80 E2).
+{Config.Colors.CYAN}4. Data & Keys (GPCS 11.11 & 11.8){Config.Colors.ENDC}
+   - {Config.Colors.GREEN}STORE-DATA <Hex>{Config.Colors.ENDC}: The 80 E2 command. Required for pushing personalization data (like DGI structures). YggdraSIM auto-chunks data > 240 bytes.
+   - {Config.Colors.GREEN}PUT-KEY{Config.Colors.ENDC}: Safely rolls the SD keys (80 D8), enforcing DEK wrapping.
 """)
 
     @classmethod
@@ -74,60 +122,91 @@ class ShellGuides:
 {Config.Colors.HEADER}=== ETSI / 3GPP File System Guide ==={Config.Colors.ENDC}
 {Config.Colors.BOLD}Standard:{Config.Colors.ENDC} {cls._link("ETSI TS 102 221 (UICC)", spec_url)}
 
-{Config.Colors.CYAN}1. File System Hierarchy{Config.Colors.ENDC}
-   The UICC file system is tree-based:
-   - {Config.Colors.BOLD}MF (3F00){Config.Colors.ENDC}: Master File (Root).
-   - {Config.Colors.BOLD}DF{Config.Colors.ENDC}: Dedicated File (Directory), e.g., ADF-USIM (7FFF).
-   - {Config.Colors.BOLD}EF{Config.Colors.ENDC}: Elementary File (Data), containing the actual bytes.
+{Config.Colors.CYAN}1. Hierarchy & Selection{Config.Colors.ENDC}
+   The UICC mimics a traditional file tree.
+   - {Config.Colors.BOLD}MF (3F00){Config.Colors.ENDC}: Master File. The absolute root.
+   - {Config.Colors.BOLD}DF / ADF{Config.Colors.ENDC}: Dedicated Files (Folders). Example: ADF-USIM is usually 7FFF.
+   - {Config.Colors.BOLD}EF{Config.Colors.ENDC}: Elementary Files (Data). Example: EF-IMSI is 6F07.
 
-{Config.Colors.CYAN}2. Addressing & Navigation{Config.Colors.ENDC}
-   - {Config.Colors.GREEN}SELECT <Path>{Config.Colors.ENDC}:
-     Supports standard IDs (e.g., '3F00') or named paths (e.g., 'USIM/IMSI').
-     The tool parses the returned {Config.Colors.YELLOW}FCP (File Control Parameters){Config.Colors.ENDC} to show
-     file size, type, and security attributes (PIN requirements).
+   {Config.Colors.GREEN}SELECT <Path/FID>{Config.Colors.ENDC} translates to APDU `00 A4 00 04 02 <FID>`. 
+   Selecting a file returns an FCP (File Control Parameter) template (Tag 62), which YggdraSIM parses to show access conditions and structure.
 
-{Config.Colors.CYAN}3. EF Types & I/O{Config.Colors.ENDC}
-   - {Config.Colors.BOLD}Transparent EF:{Config.Colors.ENDC} A flat sequence of bytes.
-     - {Config.Colors.GREEN}READ{Config.Colors.ENDC}: Uses `READ BINARY (00 B0)`.
-     - {Config.Colors.GREEN}UPDATE BINARY{Config.Colors.ENDC}: Overwrites data.
+{Config.Colors.CYAN}2. File Structures & I/O{Config.Colors.ENDC}
+   - {Config.Colors.BOLD}Transparent EF (Binary):{Config.Colors.ENDC} A flat array of bytes.
+     - {Config.Colors.GREEN}READ [Path]{Config.Colors.ENDC} -> `00 B0 00 00 <Len>`
+     - {Config.Colors.GREEN}UPDATE BINARY <Hex>{Config.Colors.ENDC} -> `00 D6 00 00 <Len> <Hex>`
    
-   - {Config.Colors.BOLD}Linear Fixed EF:{Config.Colors.ENDC} A list of fixed-length records.
-     - {Config.Colors.GREEN}RECORD <N>{Config.Colors.ENDC}: Uses `READ RECORD (00 B2)`.
-     - {Config.Colors.GREEN}UPDATE RECORD <N>{Config.Colors.ENDC}: Overwrites specific record.
+   - {Config.Colors.BOLD}Linear Fixed EF (Record):{Config.Colors.ENDC} A list of fixed-length blocks (like a CSV).
+     - {Config.Colors.GREEN}RECORD <N | ALL>{Config.Colors.ENDC} -> `00 B2 <N> 04 <Len>` (04 = Absolute Mode).
+     - {Config.Colors.GREEN}UPDATE RECORD <N> <Hex>{Config.Colors.ENDC} -> `00 DC <N> 04 <Len> <Hex>`
 
-{Config.Colors.CYAN}4. Security (PINs){Config.Colors.ENDC}
-   - {Config.Colors.GREEN}VERIFY{Config.Colors.ENDC}: Checks PIN1 (ID 01) or PIN2 (ID 81).
-   - {Config.Colors.GREEN}UNBLOCK{Config.Colors.ENDC}: Uses PUK to reset the Retry Counter and set a new PIN.
-   - Status words like {Config.Colors.FAIL}63C3{Config.Colors.ENDC} indicate "Verification Failed, 3 retries left".
+{Config.Colors.CYAN}3. Security (Access Conditions){Config.Colors.ENDC}
+   Operations are gated by Security Conditions evaluated against PIN or ADM states.
+   - {Config.Colors.GREEN}VERIFY-ADM [Key]{Config.Colors.ENDC}: Validates the Administrative key (usually mapped to ID 0A) configured in keys.ini.
+   - {Config.Colors.GREEN}VERIFY-PIN <ID> <PIN>{Config.Colors.ENDC}: Validates the secret against `00 20 00 <ID> <Len> <PIN>`. ID 01 is Global PIN1.
+   - {Config.Colors.GREEN}UNBLOCK <ID> <PUK> <New>{Config.Colors.ENDC}: `00 2C 00 <ID>`. Replaces the blocked PIN.
+
+{Config.Colors.CYAN}4. Network Authentication{Config.Colors.ENDC}
+   - {Config.Colors.GREEN}AUTH-USIM <RAND> <AUTN>{Config.Colors.ENDC}: Executes APDU `00 88 00 81` (3G context).
+   - Returns RES, CK, IK if successful, or AUTS in the event of a sequence number synchronization failure (SQN desync).
 """)
 
     @classmethod
     def _print_gsma_guide(cls):
-        sgp22_url = "https://www.gsma.com/esim/wp-content/uploads/2020/06/SGP.22-v2.2.2.pdf"
-        sgp32_url = "https://www.gsma.com/solutions-and-impact/technologies/esim/gsma_resources/sgp-32-v1-2/"
-        sgp02_url = "https://www.gsma.com/solutions-and-impact/technologies/esim/gsma_resources/sgp-02-v4-3/"
-        
+        main_url = "https://www.gsma.com/solutions-and-impact/technologies/esim/esim-specification/"
         print(f"""
 {Config.Colors.HEADER}=== GSMA eSIM Guide ==={Config.Colors.ENDC}
+{Config.Colors.BOLD}Standard:{Config.Colors.ENDC} {cls._link("GSMA eSIM Specs", main_url)}
 
 {Config.Colors.CYAN}1. Consumer eSIM (SGP.22){Config.Colors.ENDC}
-   {cls._link("Standard: SGP.22 Spec", sgp22_url)}
-   The {Config.Colors.BOLD}ISD-R{Config.Colors.ENDC} acts as the root for Profile Management.
-   - {Config.Colors.GREEN}LIST-CONS{Config.Colors.ENDC}: Calls `ES10c.GetProfilesInfo` to list installed profiles.
-   - {Config.Colors.GREEN}ENABLE/DISABLE-CONS{Config.Colors.ENDC}: Toggles profile state. Enabling a profile triggers a
-     {Config.Colors.YELLOW}REFRESH{Config.Colors.ENDC} proactive command, forcing the OS to re-read the USIM.
-   - {Config.Colors.GREEN}GET-CONS{Config.Colors.ENDC}: A full diagnostic scan of the eUICC (EuiccInfo1, Info2, ConfiguredData).
+   Designed for User-Equipment (Phones, Tablets) driven by an LPA (Local Profile Assistant).
+   - {Config.Colors.BOLD}Architecture:{Config.Colors.ENDC} Managed via the ISD-R (Issuer Security Domain Root).
+   - {Config.Colors.GREEN}LIST-CONS{Config.Colors.ENDC}: Triggers `ES10c.GetProfilesInfo`. Reads the profile registry.
+   - {Config.Colors.GREEN}ENABLE/DISABLE-CONS <AID>{Config.Colors.ENDC}: Alters the state of an ISD-P (Profile). State changes trigger a REFRESH command to the baseband.
+   - {Config.Colors.GREEN}GET-CONS{Config.Colors.ENDC}: Dumps eUICC properties (EuiccInfo1 & Info2), OS version, and SM-DP+ configurations.
 
 {Config.Colors.CYAN}2. IoT eSIM (SGP.32){Config.Colors.ENDC}
-   {cls._link("Standard: SGP.32 Spec", sgp32_url)}
-   Designed for constrained devices (eIM).
-   - {Config.Colors.GREEN}GET-IOT{Config.Colors.ENDC}: Similar to SGP.22 scan but interprets tags specific to IoT eUICC configuration.
-   - {Config.Colors.GREEN}LIST-IOT{Config.Colors.ENDC}: Lists profiles managed by the IPA (IoT Profile Assistant).
+   Designed for constrained devices, leveraging an eIM (eSIM IoT Remote Manager) to act on behalf of the device.
+   - {Config.Colors.BOLD}Architecture:{Config.Colors.ENDC} Managed via the IoT Profile Assistant (IPA).
+   - {Config.Colors.GREEN}GET-IOT{Config.Colors.ENDC} & {Config.Colors.GREEN}LIST-IOT{Config.Colors.ENDC}: Functions similar to SGP.22 but scoped to the constraints and tag definitions of SGP.32.
 
-{Config.Colors.CYAN}3. M2M (SGP.02){Config.Colors.ENDC}
-   {cls._link("Standard: SGP.02 Spec", sgp02_url)}
-   The legacy M2M standard managed by SM-SR/SM-DP.
-   - {Config.Colors.GREEN}GET-ECASD{Config.Colors.ENDC}: Selects the Security Domain of the ECASD to read:
-     - {Config.Colors.BOLD}EID (Tag 5A){Config.Colors.ENDC}: The unique eUICC Identifier.
-     - {Config.Colors.BOLD}CERT.ECASD{Config.Colors.ENDC}: The root certificate for the eUICC.
+{Config.Colors.CYAN}3. M2M eSIM (SGP.02){Config.Colors.ENDC}
+   The legacy push-model where profiles are deployed by backend servers (SM-SR).
+   - {Config.Colors.BOLD}Architecture:{Config.Colors.ENDC} ISD-R coordinates with the SM-SR via SCP03/SCP80/SCP81.
+   - {Config.Colors.GREEN}GET-ECASD{Config.Colors.ENDC}: Selects the ECASD (A0000005591010FFFFFFFF8900000200) to retrieve immutable cryptographic properties:
+     - {Config.Colors.YELLOW}EID (Tag 5A){Config.Colors.ENDC}: The 32-digit serial number of the chip.
+     - {Config.Colors.YELLOW}Certificates (Tag E0 / 7F21){Config.Colors.ENDC}: Extract public keys for DP/SR authentication.
+""")
+
+    @classmethod
+    def _print_install_guide(cls):
+        print(f"""
+{Config.Colors.HEADER}=== Install Wizard & APDU Builder Guide ==={Config.Colors.ENDC}
+
+{Config.Colors.CYAN}1. Overview{Config.Colors.ENDC}
+   YggdraSIM provides interactive tools to dynamically build complex GPCS 11.5 INSTALL APDUs 
+   without manually calculating Hex TLVs or bitmasks. These are dry-run tools and will not 
+   transmit data to the card automatically.
+
+{Config.Colors.CYAN}2. INSTALL-WIZARD-SD (Command Builder){Config.Colors.ENDC}
+   Run {Config.Colors.GREEN}INSTALL-WIZARD-SD{Config.Colors.ENDC} to craft a specific INSTALL command variant.
+   - Supports all 7 variants (e.g., [for load], [for install], [for extradition]).
+   - Automatically prompts for the required AIDs, Privileges, and Parameters based on your choice.
+   - Enforces correct Length-Value (LV) formatting and mandatory zero-length boundaries.
+
+{Config.Colors.CYAN}3. INSTALL-WIZARD-APDU <cap/ijc> (Sequence Builder){Config.Colors.ENDC}
+   Run {Config.Colors.GREEN}INSTALL-WIZARD-APDU <filename>{Config.Colors.ENDC} to generate the full installation sequence:
+   1. Parses the CAP/IJC file to extract the Package and Applet AIDs.
+   2. Generates the `INSTALL [for load]` APDU.
+   3. Chunks the binary into `LOAD` APDUs (Supports chunking for OTA 3DES/AES limits).
+   4. Generates the `INSTALL [for install]` APDU.
+
+{Config.Colors.CYAN}4. Install Parameters (TLV Builder){Config.Colors.ENDC}
+   Both tools allow you to launch the Interactive TLV Builder for Install Parameters:
+   - {Config.Colors.BOLD}Tag C9 (Application Specific):{Config.Colors.ENDC} Passed directly to the applet's `install()` method.
+   - {Config.Colors.BOLD}Tag EF (GP System Specific):{Config.Colors.ENDC} Defines Memory Quotas (Tag C6/C7) and Global Service Parameters (Tag C8).
+   - {Config.Colors.BOLD}Tag EA (UICC System Specific):{Config.Colors.ENDC} Defined in ETSI TS 102 226. Configures Toolkit Parameters (Tag 80), Access Parameters (Tag 81), and Admin Access (Tag 82).
+     - The wizard includes the Access Domain Parameter (ADP) constructor (00 = Full, 02 = UICC, FF = None).
+   - {Config.Colors.BOLD}Tag CA (SIM File Access):{Config.Colors.ENDC} Legacy 2G parameter. 
+     {Config.Colors.WARNING}Note:{Config.Colors.ENDC} ETSI TS 102 226 strictly forbids Tags CA and EA from coexisting. The wizard automatically enforces this rule.
 """)
