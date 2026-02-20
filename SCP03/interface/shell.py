@@ -246,7 +246,7 @@ class ShellDispatcher:
             
         self.gp_ctrl.install_cap_file(f, privileges=p, install_params=par, target_app_aid=app_aid, target_module_aid=mod_aid, instantiate=True)
 
-    def _handle_install_wizard_sd(self) -> None:
+    def _handle_install_wizard(self, arg: str = "") -> None:
         target_aid = "A000000151000000"
         
         has_config = False
@@ -295,7 +295,7 @@ class ShellDispatcher:
             print("[-] Error: No active transport controller found in shell.")
             return
 
-        InteractiveWizards.run_install_wizard(active_ctrl, target_aid)
+        InteractiveWizards.run_wizard_menu(active_ctrl, target_aid)
 
     def _handle_install_app(self, arg_line):
         parts = arg_line.split()

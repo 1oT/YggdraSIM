@@ -361,19 +361,37 @@ class InteractiveWizards:
         return res
 
     @staticmethod
-    def run_install_wizard(tp_ctrl=None, target_aid: str = "A000000151000000"):
-        print(f"\n{Config.Colors.HEADER}=== GPCS INSTALL Command Builder ==={Config.Colors.ENDC}")
-        print("Select INSTALL variant (GPCS 11.5.2.3):")
-        print("  1. INSTALL [for load] (11.5.2.3.1, P1=0x02)")
-        print("  2. INSTALL [for install] (11.5.2.3.2, P1=0x04)")
-        print("  3. INSTALL [for make selectable] (11.5.2.3.3, P1=0x08)")
-        print("  4. INSTALL [for extradition] (11.5.2.3.4, P1=0x10)")
-        print("  5. INSTALL [for registry update] (11.5.2.3.5, P1=0x40)")
+    def run_wizard_menu(tp_ctrl=None, target_aid: str = "A000000151000000"):
+        print(f"\n{Config.Colors.HEADER}=== GlobalPlatform Execution Wizards ==={Config.Colors.ENDC}")
+        print("Select Execution Variant:")
+        print("  1. INSTALL [for load] (GPCS 11.5.2.3.1)")
+        print("  2. INSTALL [for install] (GPCS 11.5.2.3.2)")
+        print("  3. INSTALL [for make selectable] (GPCS 11.5.2.3.3)")
+        print("  4. INSTALL [for extradition] (GPCS 11.5.2.3.4)")
+        print("  5. INSTALL [for registry update] (GPCS 11.5.2.3.5)")
         print("  6. INSTALL [for personalization] (Safe DGI/Data Store Update)")
-        print("  7. INSTALL [for install and make selectable] (11.5.2.3.7, P1=0x0C)")
+        print("  7. INSTALL [for install and make selectable] (GPCS 11.5.2.3.7)")
+        print("  8. Full CAP Install Sequence Builder (Requires CAP/IJC File)")
+        print("  0. Exit Menu")
         
-        choice = input(f"\nChoice [1-7]: ").strip()
+        choice = input(f"\nChoice [0-8]: ").strip()
         
+        is_zero = False
+        if choice == '0':
+            is_zero = True
+            
+        if is_zero:
+            return
+            
+        is_eight = False
+        if choice == '8':
+            is_eight = True
+            
+        if is_eight:
+            filename = input("Enter path to CAP/IJC file: ").strip()
+            InteractiveWizards.build_install_apdu(tp_ctrl, filename)
+            return
+            
         layouts = {
             '1': ('02', 'INSTALL [for load]', [
                 ('Load File AID', '', False),
@@ -527,10 +545,35 @@ class InteractiveWizards:
                 except ValueError:
                     print(f"{Config.Colors.FAIL}[!] Invalid Hex string.{Config.Colors.ENDC}")
                     
-        print(f"\n{Config.Colors.HEADER}=== GENERATED APDU (Dry Run) ==={Config.Colors.ENDC}")
+        print(f"\n{Config.Colors.HEADER}=== GENERATED APDU ==={Config.Colors.ENDC}")
         apdu = f"80E6{p1}00{len(payload):02X}{payload.hex().upper()}"
         print(f"{Config.Colors.GREEN}{apdu}{Config.Colors.ENDC}")
-        print("To execute, you can paste this directly into the prompt.")
+
+        is_tp_present = False
+        if tp_ctrl is not None:
+            is_tp_present = True
+            
+        if is_tp_present:
+            ans = input("\n[?] Send to card? [y/N]: ").strip().lower()
+            
+            do_send = False
+            if ans == 'y':
+                do_send = True
+                
+            if do_send:
+                print("[*] Transmitting APDU...")
+                res, sw1, sw2 = tp_ctrl.transmit(apdu)
+                
+                is_success = False
+                if sw1 == 0x90:
+                    if sw2 == 0x00:
+                        is_success = True
+                        
+                if is_success:
+                    print("[+] Command executed successfully.")
+                    
+                if is_success == False:
+                    print(f"[-] Command failed: {sw1:02X}{sw2:02X}")
 
     @staticmethod
     def build_install_apdu(filename: str):
@@ -752,6 +795,14 @@ class InteractiveWizards:
         print("Leave field blank to keep existing value from the baseline DGI.")
         print("Provide full TLV (Tag + Length + Value) for any field you wish to update.")
         
+        # GPCS Standard Tags
+        tag_42 = input("Issuer/SD ID (Tag 42) [e.g. 4204...]: ").strip().upper()
+        tag_45 = input("Card/SD Image Number (Tag 45) [e.g. 4504...]: ").strip().upper()
+        tag_66 = input("Card/SD Recognition Data (Tag 66) [e.g. 6604...]: ").strip().upper()
+        tag_67 = input("Card Capability Info (Tag 67) [e.g. 6704...]: ").strip().upper()
+        tag_5f50 = input("SD Manager URL (Tag 5F50) [e.g. 5F5008...]: ").strip().upper()
+        
+        # MNO/Telecom Specific Tags
         scp_ef = input("System Params for SCP (Tag EF) [e.g. EF04...]: ").strip().upper()
         sec_level = input("Security Level (Tag 86) [e.g. 8607...]: ").strip().upper()
         admin_ip = input("Admin IP/Host (Tag 8A) [e.g. 8A0D...]: ").strip().upper()
@@ -759,6 +810,41 @@ class InteractiveWizards:
         custom_tlv = input("Custom/Other TLV to insert [e.g. 8B05...]: ").strip().upper()
         
         updated_dgi = base_dgi
+
+        has_tag_42 = False
+        if len(tag_42) > 0:
+            has_tag_42 = True
+            
+        if has_tag_42:
+            updated_dgi = InteractiveWizards._patch_dgi(updated_dgi, tag_42)
+
+        has_tag_45 = False
+        if len(tag_45) > 0:
+            has_tag_45 = True
+            
+        if has_tag_45:
+            updated_dgi = InteractiveWizards._patch_dgi(updated_dgi, tag_45)
+
+        has_tag_66 = False
+        if len(tag_66) > 0:
+            has_tag_66 = True
+            
+        if has_tag_66:
+            updated_dgi = InteractiveWizards._patch_dgi(updated_dgi, tag_66)
+
+        has_tag_67 = False
+        if len(tag_67) > 0:
+            has_tag_67 = True
+            
+        if has_tag_67:
+            updated_dgi = InteractiveWizards._patch_dgi(updated_dgi, tag_67)
+
+        has_tag_5f50 = False
+        if len(tag_5f50) > 0:
+            has_tag_5f50 = True
+            
+        if has_tag_5f50:
+            updated_dgi = InteractiveWizards._patch_dgi(updated_dgi, tag_5f50)
         
         has_scp = False
         if len(scp_ef) > 0:
