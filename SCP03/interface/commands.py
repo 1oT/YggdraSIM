@@ -14,33 +14,15 @@ class CommandRegistry:
             'RESET': (shell._handle_reset, ""),
             'INFO': (shell._print_card_info, ""),
             'KEYS': (shell._handle_keys, "[AID]"),
-            'CPLC': (shell.gp_ctrl.get_cplc, ""),
             'LOGOUT': (shell._handle_logout, ""),
             'CLS': (lambda: os.system('cls' if os.name == 'nt' else 'clear'), ""),
             'OTA': (shell._run_scp80_tool, ""),
             
-            # SGP.22 (Consumer)
-            'LIST-CONS': (shell.gp_ctrl.sgp22.list_profiles, ""),
-            'GET-CONS': (shell.gp_ctrl.sgp22.run_sgp22_scan, ""),
-            'ENABLE-CONS': (shell._handle_enable, "<AID/ICCID>"),
-            'DISABLE-CONS': (shell._handle_disable, "<AID/ICCID>"),
-            'DELETE-CONS': (shell._handle_delete_profile, "<AID/ICCID>"),
-
-            # SGP.32 (IoT)
-            'LIST-IOT': (shell.gp_ctrl.sgp22.list_profiles, ""),
-            'GET-IOT': (shell.gp_ctrl.sgp22.run_sgp22_scan, ""),
-            'ENABLE-IOT': (shell._handle_enable, "<AID/ICCID>"),
-            'DISABLE-IOT': (shell._handle_disable, "<AID/ICCID>"),
-            'DELETE-IOT': (shell._handle_delete_profile, "<AID/ICCID>"),
+            # eSIM Profile Management
+            'MANAGE-PROFILE': (shell._handle_manage_profile_wizard, ""),
             
-            # SGP.02 (M2M)
-            'GET-M2M': (shell.gp_ctrl.sgp22.run_sgp02_scan, ""),
-            'GET-ECASD': (shell.gp_ctrl.sgp22.run_sgp02_scan, ""),
-            
-            # GlobalPlatform Registry
-            'APPS': (lambda: shell.gp_ctrl.list_registry('APPS'), ""),
-            'PKGS': (lambda: shell.gp_ctrl.list_registry('PACKAGES'), ""),
-            'SD': (lambda: shell.gp_ctrl.list_registry('SD'), ""),
+            # GlobalPlatform Registry & Data
+            'GET-DATA': (shell._handle_get_data_wizard, ""),
             
             # Lifecycle
             'LOCK': (lambda x: shell.gp_ctrl.set_status(x, 0x80), "<AID>"),
@@ -48,22 +30,12 @@ class CommandRegistry:
             'DEL': (lambda x: shell.gp_ctrl.delete_object(x, True), "<AID>"),
             'VERIFY-ADM': (shell.gp_ctrl.verify_adm, "[Key]"),
             'STORE-DATA': (shell._handle_store_data, "<Hex> [P1] [P2]"),
-            'PUT-KEY': (shell._handle_put_key, "<oldKVN> <KeyID> <newKVN> <K1> <K2> <K3> [Algo]>"),
-            'PUT-KEY-ROTATE': (shell._handle_put_key_rotate, "<KeyID> <newKVN> <K1> <K2> <K3> [Algo]"),
-            'PUT-KEY-NEW': (shell._handle_put_key_new, "<KVN> <KeyID> <K1> <K2> <K3> [Algo]"),
-
-            # Applet Loading & Installation
-            'INSTALL-INSTALL': (shell._handle_install_file, "<cap/ijc> [Priv] [Par] [App] [Mod]"),
-            'INSTALL-LOAD': (lambda x: shell.gp_ctrl.install_cap_file(x, instantiate=False), "<cap/ijc>"),
-            'INSTALL-APP': (shell._handle_install_app, "<Pkg> <App> [Mod] [Priv] [Par]"),
-            'INSTALL-SELECTABLE': (shell._handle_install_selectable, "<AID> [Priv]"),
-            'INSTALL-EXTRADITION': (shell._handle_install_extradition, "<AppAID> <SDAID>"),
-            'INSTALL-REGISTRY': (shell._handle_install_registry, "<AID> [Priv] [Par]"),
-            'INSTALL-PERSO': (lambda x: shell.gp_ctrl.install_personalization(x), "<AID>"),
+            'PUT-KEY': (shell._handle_put_key_wizard, ""),
+            'SET-STATUS': (lambda: shell._handle_set_status(), ""),
+            'MANAGE-CHANNEL': (lambda: shell._handle_manage_channel(), ""),
 
             # Wizards / Builders
-            'INSTALL-WIZARD-SD': (lambda: self._handle_install_wizard_sd(), ""),
-            'INSTALL-WIZARD-APDU': (lambda x: InteractiveWizards.build_install_apdu(x), "<cap/ijc>"),
+            'WIZARD': (lambda: shell._handle_install_wizard(), ""),
 
             # File System
             'SCAN': (shell.fs_ctrl.scan_tree, ""),
@@ -72,32 +44,21 @@ class CommandRegistry:
             'READ': (shell.fs_ctrl.read_binary, "[Path]"),
             'RECORD': (shell.fs_ctrl.read_record, "<N/ALL> [Path]"),
             'UPDATE': (shell._handle_update, "BINARY/RECORD <Data>"),
-            'GET': (lambda x: shell.gp_ctrl.get_data(*[int(i, 16) for i in x.split()[:2]]) if len(x.split()) >= 2 else print("Usage: GET <P1> <P2>"), "<P1> <P2>"),
+            'GET-DATA': (lambda x: shell.gp_ctrl.get_data(*[int(i, 16) for i in x.split()[:2]]) if len(x.split()) >= 2 else print("Usage: GET <P1> <P2>"), "<P1> <P2>"),
             'DUMP-FS': (shell.do_dump_fs, "[OutputDir]"),
 
             # Security
-            'VERIFY-PIN': (lambda x: shell._handle_pin_cmd(shell.sec_ctrl.verify_pin, x, 2, "VERIFY-PIN <ID> <PIN>"), "<ID> <PIN>"),
-            'CHANGE-PIN': (lambda x: shell._handle_pin_cmd(shell.sec_ctrl.change_pin, x, 3, "CHANGE-PIN <ID> <OLD> <NEW>"), "<ID> <Old> <New>"),
-            'DISABLE-PIN': (lambda x: shell._handle_pin_cmd(shell.sec_ctrl.disable_pin, x, 2, "DISABLE-PIN <ID> <PIN>"), "<ID> <PIN>"),
-            'ENABLE-PIN': (lambda x: shell._handle_pin_cmd(shell.sec_ctrl.enable_pin, x, 2, "ENABLE-PIN <ID> <PIN>"), "<ID> <PIN>"),
-            'UNBLOCK': (lambda x: shell._handle_pin_cmd(shell.sec_ctrl.unblock_pin, x, 3, "UNBLOCK <ID> <PUK> <NEW_PIN>"), "<ID> <PUK> <New>"),
+            'MANAGE-PIN': (shell._handle_manage_pin_wizard, ""),
 
             # Auth
-            'AUTH-GSM': (lambda x: shell.sec_ctrl.run_auth(x, app_context="GSM") if x else print("Usage: AUTH-GSM <RAND>"), "<RAND>"),
-            'AUTH-USIM': (lambda x: shell._handle_auth_general(x, "USIM"), "<R> <AUTN>"),
-            'AUTH-ISIM': (lambda x: shell._handle_auth_general(x, "ISIM"), "<R> <AUTN>"),
+            'RUN-AUTH': (shell._handle_run_auth_wizard, ""),
 
             # Config
             'SHOW': (shell.show_config, ""),
             'AIDS': (shell.list_aids, ""),
             'SET-AID-ALIAS': (shell._set_aid_alias, "<Name> <AID>"),
-            'SET-KENC': (lambda x: shell._update_config('kenc', x), "<Key>"),
-            'SET-KMAC': (lambda x: shell._update_config('kmac', x), "<Key>"),
-            'SET-DEK': (lambda x: shell._update_config('dek', x), "<Key>"),
-            'SET-AID':  (lambda x: shell._update_config('aid', x), "<AID>"),
-            'SET-KVN':  (lambda x: shell._update_config('kvn', x), "<Val>"),
-            'SET-ADM':  (lambda x: shell._update_config('adm', x), "<Key>"),
             'SET-DEFAULT': (shell._set_defaults, ""),
+            'CONFIG': (shell._handle_config_wizard, ""),
             
             # Hidden / Developer
             'DEBUG': (shell._toggle_debug, ""),
@@ -118,16 +79,11 @@ class CommandRegistry:
     def get_arg_requirements():
         """Returns tuples of commands that require mandatory or optional arguments."""
         args_required = [
-            'SET-KENC', 'SET-KMAC', 'SET-AID', 'SET-KVN', 'SET-ADM', 'SET-AID-ALIAS', 'SET-DEK',
-            'SELECT', 'UPDATE', 'GET', 'LOCK', 'UNLOCK', 'DEL', 'SCRIPT', 
-            'INSTALL-INSTALL', 'LOAD', 'STORE-DATA', 'PUT-KEY', 'PUT-KEY-ROTATE', 'PUT-KEY-NEW',
+            'SELECT', 'UPDATE', 'LOCK', 'UNLOCK', 'DEL', 'SCRIPT', 
+            'INSTALL-INSTALL', 'LOAD', 'STORE-DATA',
             'INSTALL-WIZARD-APDU', 'INSTALL-APP', 'INSTALL-REGISTRY',
-            'ENABLE-CONS', 'DISABLE-CONS', 'DELETE-CONS',
-            'ENABLE-IOT', 'DISABLE-IOT', 'DELETE-IOT',
-            'VERIFY-PIN', 'CHANGE-PIN', 'ENABLE-PIN', 'DISABLE-PIN', 'UNBLOCK', 
-            'AUTH-GSM', 'AUTH-USIM', 'AUTH-ISIM', 
             'INSTALL-SELECTABLE', 'INSTALL-EXTRADITION', 'INSTALL-PERSO', 'DECODE'
         ]
-        args_optional = ['REPORT', 'VERIFY-ADM', 'KEYS', 'READ', 'RECORD', 'RUN', 'GUIDE', 'DEBUG', 'VERBOSE', 'DUMP-FS']
+        args_optional = ['REPORT', 'VERIFY-ADM', 'KEYS', 'READ', 'RECORD', 'RUN', 'GUIDE', 'DEBUG', 'VERBOSE', 'DUMP-FS', 'PUT-KEY',]
         
         return args_required, args_optional

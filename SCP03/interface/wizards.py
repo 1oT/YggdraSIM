@@ -9,6 +9,121 @@ class InteractiveWizards:
     """Provides interactive prompts and dry-run APDU builders for complex GP commands."""
 
     @staticmethod
+    def run_wizard_menu(tp_ctrl=None, target_aid: str = "A000000151000000"):
+        is_nt = False
+        if os.name == 'nt':
+            is_nt = True
+            
+        if is_nt:
+            os.system('cls')
+            
+        is_posix = False
+        if os.name != 'nt':
+            is_posix = True
+            
+        if is_posix:
+            os.system('clear')
+
+        print(f"\n{Config.Colors.HEADER}=== GlobalPlatform Execution Wizards ==={Config.Colors.ENDC}")
+        print("Select Execution Variant:")
+        print("  1. INSTALL [for load] (GPCS 11.5.2.3.1)")
+        print("  2. INSTALL [for install] (GPCS 11.5.2.3.2)")
+        print("  3. INSTALL [for make selectable] (GPCS 11.5.2.3.3)")
+        print("  4. INSTALL [for extradition] (GPCS 11.5.2.3.4)")
+        print("  5. INSTALL [for registry update] (GPCS 11.5.2.3.5)")
+        print("  6. INSTALL [for personalization] (Safe DGI/Data Store Update)")
+        print("  7. INSTALL [for install and make selectable] (GPCS 11.5.2.3.7)")
+        print("  8. Full CAP Install Sequence Builder (Requires CAP/IJC File)")
+        print("  0. Exit Menu")
+        
+        choice = input(f"\nChoice [0-8]: ").strip()
+        
+        is_zero = False
+        if choice == '0':
+            is_zero = True
+            
+        if is_zero:
+            return
+
+        is_one = False
+        if choice == '1':
+            is_one = True
+            
+        if is_one:
+            InteractiveWizards._run_install_load(tp_ctrl)
+            return
+
+        is_two = False
+        if choice == '2':
+            is_two = True
+            
+        if is_two:
+            InteractiveWizards._run_install_install(tp_ctrl, "04", "INSTALL [for install]")
+            return
+
+        is_three = False
+        if choice == '3':
+            is_three = True
+            
+        if is_three:
+            print("[-] Granular builder for 'make selectable' not implemented. Using generic install builder.")
+            InteractiveWizards._run_install_install(tp_ctrl, "08", "INSTALL [for make selectable]")
+            return
+            
+        is_four = False
+        if choice == '4':
+            is_four = True
+            
+        if is_four:
+            print("[-] Granular builder for 'extradition' not implemented. Using generic install builder.")
+            InteractiveWizards._run_install_install(tp_ctrl, "10", "INSTALL [for extradition]")
+            return
+            
+        is_five = False
+        if choice == '5':
+            is_five = True
+            
+        if is_five:
+            print("[-] Granular builder for 'registry update' not implemented. Using generic install builder.")
+            InteractiveWizards._run_install_install(tp_ctrl, "40", "INSTALL [for registry update]")
+            return
+
+        is_six = False
+        if choice == '6':
+            is_six = True
+            
+        if is_six:
+            is_tp_missing = False
+            if tp_ctrl is None:
+                is_tp_missing = True
+                
+            if is_tp_missing:
+                print(f"{Config.Colors.FAIL}[!] Transmission controller required for Option 6.{Config.Colors.ENDC}")
+                return
+                
+            InteractiveWizards.run_dgi_personalization(tp_ctrl, target_aid)
+            return
+            
+        is_seven = False
+        if choice == '7':
+            is_seven = True
+            
+        if is_seven:
+            InteractiveWizards._run_install_install(tp_ctrl, "0C", "INSTALL [for install and make selectable]")
+            return
+            
+        is_eight = False
+        if choice == '8':
+            is_eight = True
+            
+        if is_eight:
+            filename = input("Enter path to CAP/IJC file: ").strip()
+            InteractiveWizards.build_install_apdu(tp_ctrl, filename)
+            return
+
+        print(f"{Config.Colors.FAIL}[!] Invalid choice.{Config.Colors.ENDC}")
+
+    @staticmethod
     def _build_system_parameters_ef() -> bytes:
         print(f"\n{Config.Colors.CYAN}--- GP System Specific Parameters (Tag EF) Builder ---{Config.Colors.ENDC}")
         print("Reference: GPCS 11.1.5")
@@ -282,14 +397,14 @@ class InteractiveWizards:
         
         payload = bytearray()
         
-        c9_val = input("\nTag C9 (Application Specific Params) [Raw Hex Value, Default: 00 (Empty), 'SKIP' to omit]: ").strip().replace(" ", "")
+        c9_val = input("\nTag C9 (Application Specific Params) [Raw Hex Value, Default: Empty (C900), 'SKIP' to omit]: ").strip().replace(" ", "")
         
         is_c9_empty = False
         if len(c9_val) == 0:
             is_c9_empty = True
             
         if is_c9_empty:
-            c9_val = "00"
+            c9_val = ""
             
         is_skip = False
         if c9_val.upper() == "SKIP":
@@ -361,219 +476,237 @@ class InteractiveWizards:
         return res
 
     @staticmethod
-    def run_wizard_menu(tp_ctrl=None, target_aid: str = "A000000151000000"):
-        print(f"\n{Config.Colors.HEADER}=== GlobalPlatform Execution Wizards ==={Config.Colors.ENDC}")
-        print("Select Execution Variant:")
-        print("  1. INSTALL [for load] (GPCS 11.5.2.3.1)")
-        print("  2. INSTALL [for install] (GPCS 11.5.2.3.2)")
-        print("  3. INSTALL [for make selectable] (GPCS 11.5.2.3.3)")
-        print("  4. INSTALL [for extradition] (GPCS 11.5.2.3.4)")
-        print("  5. INSTALL [for registry update] (GPCS 11.5.2.3.5)")
-        print("  6. INSTALL [for personalization] (Safe DGI/Data Store Update)")
-        print("  7. INSTALL [for install and make selectable] (GPCS 11.5.2.3.7)")
-        print("  8. Full CAP Install Sequence Builder (Requires CAP/IJC File)")
-        print("  0. Exit Menu")
-        
-        choice = input(f"\nChoice [0-8]: ").strip()
-        
-        is_zero = False
-        if choice == '0':
-            is_zero = True
+    def _build_lv_field(hex_val: str) -> bytes:
+        is_empty = False
+        if len(hex_val) == 0:
+            is_empty = True
             
-        if is_zero:
-            return
+        if is_empty:
+            return bytes([0x00])
             
-        is_eight = False
-        if choice == '8':
-            is_eight = True
+        try:
+            b = bytes.fromhex(hex_val)
             
-        if is_eight:
-            filename = input("Enter path to CAP/IJC file: ").strip()
-            InteractiveWizards.build_install_apdu(tp_ctrl, filename)
-            return
-            
-        layouts = {
-            '1': ('02', 'INSTALL [for load]', [
-                ('Load File AID', '', False),
-                ('Security Domain AID', '', False),
-                ('Load File Data Block Hash', '', False),
-                ('Load Parameters (TLV)', '', True),
-                ('Load Token', '', False)
-            ]),
-            '2': ('04', 'INSTALL [for install]', [
-                ('Executable Load File AID', '', False),
-                ('Executable Module AID', '', False),
-                ('Application AID', '', False),
-                ('Privileges (Hex Bitmask)', '00', False),
-                ('Install Parameters (TLV)', 'C900', True),
-                ('Install Token', '', False)
-            ]),
-            '3': ('08', 'INSTALL [for make selectable]', [
-                ('Executable Load File AID', '', False),
-                ('Executable Module AID', '', False),
-                ('Application AID', '', False),
-                ('Privileges (Hex Bitmask)', '00', False),
-                ('Make Selectable Parameters', '', False),
-                ('Make Selectable Token', '', False)
-            ]),
-            '4': ('10', 'INSTALL [for extradition]', [
-                ('Security Domain AID', '', False),
-                ('Executable Module AID (Must be empty)', '', False),
-                ('Application / Load File AID', '', False),
-                ('Privileges (Must be empty)', '', False),
-                ('Extradition Parameters (Must be empty)', '', False),
-                ('Extradition Token', '', False)
-            ]),
-            '5': ('40', 'INSTALL [for registry update]', [
-                ('Executable Load File AID', '', False),
-                ('Executable Module AID (Must be empty)', '', False),
-                ('Application AID', '', False),
-                ('Privileges (Hex Bitmask)', '00', False),
-                ('Registry Update Parameters', '', False),
-                ('Registry Update Token', '', False)
-            ]),
-            '7': ('0C', 'INSTALL [for install and make selectable]', [
-                ('Executable Load File AID', '', False),
-                ('Executable Module AID', '', False),
-                ('Application AID', '', False),
-                ('Privileges (Hex Bitmask)', '00', False),
-                ('Install Parameters (TLV)', 'C900', True),
-                ('Install Token', '', False)
-            ])
-        }
+            is_too_long = False
+            if len(b) > 255:
+                is_too_long = True
+                
+            if is_too_long:
+                print("[-] Warning: Field length exceeds 255 bytes. Truncating to 255.")
+                b = b[:255]
+                
+            return bytes([len(b)]) + b
+        except ValueError:
+            print("[-] Invalid hex string provided. Defaulting to empty field (00).")
+            return bytes([0x00])
 
-        is_six = False
-        if choice == '6':
-            is_six = True
-            
-        if is_six:
-            is_tp_missing = False
-            if tp_ctrl is None:
-                is_tp_missing = True
-                
-            if is_tp_missing:
-                print(f"{Config.Colors.FAIL}[!] Transmission controller required for Option 6.{Config.Colors.ENDC}")
-                return
-                
-            InteractiveWizards.run_dgi_personalization(tp_ctrl, target_aid)
-            return
+    @staticmethod
+    def _build_privileges() -> str:
+        print("\n--- Privileges Builder (GPCS 11.1.2) ---")
+        priv = 0x00
         
-        is_valid_choice = False
-        if choice in layouts:
-            is_valid_choice = True
+        ans_sd = input("  Security Domain (Bit 7)? [y/N]: ").strip().lower()
+        is_sd = False
+        if ans_sd == 'y':
+            is_sd = True
             
-        if is_valid_choice == False:
-            print(f"{Config.Colors.FAIL}[!] Invalid choice.{Config.Colors.ENDC}")
-            return
+        if is_sd:
+            priv = priv | 0x80
+
+        ans_dap = input("  DAP Verification (Bit 6)? [y/N]: ").strip().lower()
+        is_dap = False
+        if ans_dap == 'y':
+            is_dap = True
             
-        p1, desc, fields = layouts[choice]
-        print(f"\n{Config.Colors.CYAN}--- Building {desc} ---{Config.Colors.ENDC}")
-        print(f"{Config.Colors.WARNING}Leave blank for default/empty (Length = 00). Provide all values in Hex.{Config.Colors.ENDC}\n")
-        
+        if is_dap:
+            priv = priv | 0x40
+
+        ans_dm = input("  Delegated Management (Bit 5)? [y/N]: ").strip().lower()
+        is_dm = False
+        if ans_dm == 'y':
+            is_dm = True
+            
+        if is_dm:
+            priv = priv | 0x20
+
+        ans_lock = input("  Card Lock (Bit 4)? [y/N]: ").strip().lower()
+        is_lock = False
+        if ans_lock == 'y':
+            is_lock = True
+            
+        if is_lock:
+            priv = priv | 0x10
+
+        ans_term = input("  Card Terminate (Bit 3)? [y/N]: ").strip().lower()
+        is_term = False
+        if ans_term == 'y':
+            is_term = True
+            
+        if is_term:
+            priv = priv | 0x08
+
+        ans_def = input("  Default Selected (Bit 2)? [y/N]: ").strip().lower()
+        is_def = False
+        if ans_def == 'y':
+            is_def = True
+            
+        if is_def:
+            priv = priv | 0x04
+
+        ans_cvm = input("  CVM Management (Bit 1)? [y/N]: ").strip().lower()
+        is_cvm = False
+        if ans_cvm == 'y':
+            is_cvm = True
+            
+        if is_cvm:
+            priv = priv | 0x02
+
+        ans_mdap = input("  Mandated DAP Verification (Bit 0)? [y/N]: ").strip().lower()
+        is_mdap = False
+        if ans_mdap == 'y':
+            is_mdap = True
+            
+        if is_mdap:
+            priv = priv | 0x01
+
+        res = f"{priv:02X}"
+        print(f"[+] Generated Privilege Bitmask: {res}")
+        return res
+
+    @staticmethod
+    def _run_install_load(tp_ctrl) -> None:
+        print("\n--- Building INSTALL [for load] (P1=02) ---")
         payload = bytearray()
         
-        for name, default, is_builder in fields:
-            while True:
-                if is_builder:
-                    run_b = input(f"Launch TLV Builder for {name}? [y/N]: ").strip().lower()
-                    
-                    is_run_b_y = False
-                    if run_b == 'y':
-                        is_run_b_y = True
-                        
-                    if is_run_b_y:
-                        val_hex = InteractiveWizards._build_install_parameters_tlv()
-                        
-                    is_run_b_n = False
-                    if is_run_b_y == False:
-                        is_run_b_n = True
-                        
-                    if is_run_b_n:
-                        val_hex = input(f"{name} [Raw Hex, Default: {default}]: ").strip()
-                else:
-                    is_default_present = False
-                    if len(default) > 0:
-                        is_default_present = True
-                        
-                    if is_default_present:
-                        prompt_str = f"{name} [Default: {default}]: "
-                        
-                    is_default_missing = False
-                    if is_default_present == False:
-                        is_default_missing = True
-                        
-                    if is_default_missing:
-                        prompt_str = f"{name} [Default: <Empty>]: "
-                        
-                    val_hex = input(prompt_str).strip()
-                
-                is_val_empty = False
-                if len(val_hex) == 0:
-                    is_val_empty = True
-                    
-                if is_val_empty:
-                    val_hex = default
-                    
-                val_hex = val_hex.replace(" ", "")
-                
-                try:
-                    has_val_hex = False
-                    if len(val_hex) > 0:
-                        has_val_hex = True
-                        
-                    if has_val_hex:
-                        val_bytes = bytes.fromhex(val_hex)
-                        
-                    is_val_hex_missing = False
-                    if has_val_hex == False:
-                        is_val_hex_missing = True
-                        
-                    if is_val_hex_missing:
-                        val_bytes = b''
-                    
-                    is_len_invalid = False
-                    if len(val_bytes) > 255:
-                        is_len_invalid = True
-                        
-                    if is_len_invalid:
-                        print(f"{Config.Colors.FAIL}[!] Field length exceeds 255 bytes.{Config.Colors.ENDC}")
-                        continue
-                        
-                    payload.append(len(val_bytes))
-                    payload.extend(val_bytes)
-                    break
-                except ValueError:
-                    print(f"{Config.Colors.FAIL}[!] Invalid Hex string.{Config.Colors.ENDC}")
-                    
-        print(f"\n{Config.Colors.HEADER}=== GENERATED APDU ==={Config.Colors.ENDC}")
-        apdu = f"80E6{p1}00{len(payload):02X}{payload.hex().upper()}"
-        print(f"{Config.Colors.GREEN}{apdu}{Config.Colors.ENDC}")
+        lf_aid = input("Load File AID [Hex, Default: Empty]: ").strip().replace(" ", "")
+        payload.extend(InteractiveWizards._build_lv_field(lf_aid))
+        
+        sd_aid = input("Security Domain AID [Hex, Default: Empty]: ").strip().replace(" ", "")
+        payload.extend(InteractiveWizards._build_lv_field(sd_aid))
+        
+        lf_hash = input("Load File Data Block Hash [Hex, Default: Empty]: ").strip().replace(" ", "")
+        payload.extend(InteractiveWizards._build_lv_field(lf_hash))
+        
+        ans_params = input("Launch Load Parameters TLV Builder? [y/N]: ").strip().lower()
+        is_params_y = False
+        if ans_params == 'y':
+            is_params_y = True
+            
+        params_hex = ""
+        if is_params_y:
+            params_hex = InteractiveWizards._build_install_parameters_tlv()
+            
+        is_params_n = False
+        if is_params_y == False:
+            is_params_n = True
+            
+        if is_params_n:
+            params_hex = input("Load Parameters [Raw Hex, Default: Empty]: ").strip().replace(" ", "")
+            
+        payload.extend(InteractiveWizards._build_lv_field(params_hex))
+        
+        token = input("Load Token [Hex, Default: Empty]: ").strip().replace(" ", "")
+        payload.extend(InteractiveWizards._build_lv_field(token))
+        
+        InteractiveWizards._finalize_and_transmit(tp_ctrl, "02", payload)
 
+    @staticmethod
+    def _run_install_install(tp_ctrl, p1_hex: str, desc: str) -> None:
+        print(f"\n--- Building {desc} (P1={p1_hex}) ---")
+        payload = bytearray()
+        
+        elf_aid = input("Executable Load File AID [Hex, Default: Empty]: ").strip().replace(" ", "")
+        payload.extend(InteractiveWizards._build_lv_field(elf_aid))
+        
+        em_aid = input("Executable Module AID [Hex, Default: Empty]: ").strip().replace(" ", "")
+        payload.extend(InteractiveWizards._build_lv_field(em_aid))
+        
+        app_aid = input("Application AID [Hex, Default: Empty]: ").strip().replace(" ", "")
+        payload.extend(InteractiveWizards._build_lv_field(app_aid))
+        
+        ans_priv = input("Launch Privileges Builder? [y/N]: ").strip().lower()
+        is_priv_y = False
+        if ans_priv == 'y':
+            is_priv_y = True
+            
+        priv_hex = "00"
+        if is_priv_y:
+            priv_hex = InteractiveWizards._build_privileges()
+            
+        is_priv_n = False
+        if is_priv_y == False:
+            is_priv_n = True
+            
+        if is_priv_n:
+            raw_priv = input("Privileges [Raw Hex, Default: 00]: ").strip().replace(" ", "")
+            has_raw = False
+            if len(raw_priv) > 0:
+                has_raw = True
+            if has_raw:
+                priv_hex = raw_priv
+                
+        payload.extend(InteractiveWizards._build_lv_field(priv_hex))
+        
+        ans_params = input("Launch Install Parameters TLV Builder? [y/N]: ").strip().lower()
+        is_params_y = False
+        if ans_params == 'y':
+            is_params_y = True
+            
+        params_hex = "C900"
+        if is_params_y:
+            built_params = InteractiveWizards._build_install_parameters_tlv()
+            has_built = False
+            if len(built_params) > 0:
+                has_built = True
+            if has_built:
+                params_hex = built_params
+                
+        is_params_n = False
+        if is_params_y == False:
+            is_params_n = True
+            
+        if is_params_n:
+            raw_params = input("Install Parameters [Raw Hex, Default: C900]: ").strip().replace(" ", "")
+            has_raw_params = False
+            if len(raw_params) > 0:
+                has_raw_params = True
+            if has_raw_params:
+                params_hex = raw_params
+                
+        payload.extend(InteractiveWizards._build_lv_field(params_hex))
+        
+        token = input("Install Token [Hex, Default: Empty]: ").strip().replace(" ", "")
+        payload.extend(InteractiveWizards._build_lv_field(token))
+        
+        InteractiveWizards._finalize_and_transmit(tp_ctrl, p1_hex, payload)
+
+    @staticmethod
+    def _finalize_and_transmit(tp_ctrl, p1_hex: str, payload: bytearray) -> None:
+        apdu = f"80E6{p1_hex}00{len(payload):02X}{payload.hex().upper()}"
+        print(f"\n[*] Generated APDU:\n    {apdu}")
+        
         is_tp_present = False
         if tp_ctrl is not None:
             is_tp_present = True
             
         if is_tp_present:
-            ans = input("\n[?] Send to card? [y/N]: ").strip().lower()
-            
+            ans = input("\n[?] Transmit APDU to card? [yes/NO]: ").strip().lower()
             do_send = False
-            if ans == 'y':
+            if ans == "yes":
                 do_send = True
                 
             if do_send:
-                print("[*] Transmitting APDU...")
                 res, sw1, sw2 = tp_ctrl.transmit(apdu)
-                
                 is_success = False
                 if sw1 == 0x90:
                     if sw2 == 0x00:
                         is_success = True
                         
                 if is_success:
-                    print("[+] Command executed successfully.")
+                    print("[+] Sequence executed successfully.")
                     
                 if is_success == False:
-                    print(f"[-] Command failed: {sw1:02X}{sw2:02X}")
+                    print(f"[-] Command rejected: {sw1:02X}{sw2:02X}")
 
     @staticmethod
     def build_install_apdu(filename: str):
@@ -779,128 +912,122 @@ class InteractiveWizards:
     @staticmethod
     def run_dgi_personalization(tp_ctrl, target_aid: str) -> None:
         print("\n--- INSTALL [for personalization] & STORE DATA Wizard ---")
-        print("This wizard safely updates the Security Domain Data Store (DGI).")
+        print("This wizard updates the Security Domain Data Store using pure BER-TLV (P1=90).")
         
-        base_dgi = input("Enter FULL baseline DGI (Hex) [Mandatory]: ").strip().upper()
-        
-        is_empty_dgi = False
-        if len(base_dgi) == 0:
-            is_empty_dgi = True
-            
-        if is_empty_dgi:
-            print("[-] Baseline DGI is required to prevent card corruption. Aborting.")
-            return
-
         print("\n--- Parameter Update Selection ---")
-        print("Leave field blank to keep existing value from the baseline DGI.")
-        print("Provide full TLV (Tag + Length + Value) for any field you wish to update.")
+        print("Answer 'y' to construct a specific tag.")
+        print("Note: Dynamic tags (D3, 2F00, FF21, C2, C1) are read-only and will be rejected by the card.")
         
-        # GPCS Standard Tags
-        tag_42 = input("Issuer/SD ID (Tag 42) [e.g. 4204...]: ").strip().upper()
-        tag_45 = input("Card/SD Image Number (Tag 45) [e.g. 4504...]: ").strip().upper()
-        tag_66 = input("Card/SD Recognition Data (Tag 66) [e.g. 6604...]: ").strip().upper()
-        tag_67 = input("Card Capability Info (Tag 67) [e.g. 6704...]: ").strip().upper()
-        tag_5f50 = input("SD Manager URL (Tag 5F50) [e.g. 5F5008...]: ").strip().upper()
-        
-        # MNO/Telecom Specific Tags
-        scp_ef = input("System Params for SCP (Tag EF) [e.g. EF04...]: ").strip().upper()
-        sec_level = input("Security Level (Tag 86) [e.g. 8607...]: ").strip().upper()
-        admin_ip = input("Admin IP/Host (Tag 8A) [e.g. 8A0D...]: ").strip().upper()
-        admin_url = input("Admin URL (Tag 8C) [e.g. 8C10...]: ").strip().upper()
-        custom_tlv = input("Custom/Other TLV to insert [e.g. 8B05...]: ").strip().upper()
-        
-        updated_dgi = base_dgi
+        payload = ""
 
-        has_tag_42 = False
-        if len(tag_42) > 0:
-            has_tag_42 = True
+        res_42 = InteractiveWizards._prompt_flat_tag("42", "Issuer/SD ID")
+        has_42 = False
+        if len(res_42) > 0:
+            has_42 = True
             
-        if has_tag_42:
-            updated_dgi = InteractiveWizards._patch_dgi(updated_dgi, tag_42)
+        if has_42:
+            payload += res_42
 
-        has_tag_45 = False
-        if len(tag_45) > 0:
-            has_tag_45 = True
+        res_45 = InteractiveWizards._prompt_flat_tag("45", "Card/SD Image Number")
+        has_45 = False
+        if len(res_45) > 0:
+            has_45 = True
             
-        if has_tag_45:
-            updated_dgi = InteractiveWizards._patch_dgi(updated_dgi, tag_45)
+        if has_45:
+            payload += res_45
 
-        has_tag_66 = False
-        if len(tag_66) > 0:
-            has_tag_66 = True
+        res_4f = InteractiveWizards._prompt_flat_tag("4F", "Issuer Security Domain AID")
+        has_4f = False
+        if len(res_4f) > 0:
+            has_4f = True
             
-        if has_tag_66:
-            updated_dgi = InteractiveWizards._patch_dgi(updated_dgi, tag_66)
+        if has_4f:
+            payload += res_4f
 
-        has_tag_67 = False
-        if len(tag_67) > 0:
-            has_tag_67 = True
+        res_66 = InteractiveWizards._prompt_flat_tag("66", "Card/SD Recognition Data")
+        has_66 = False
+        if len(res_66) > 0:
+            has_66 = True
             
-        if has_tag_67:
-            updated_dgi = InteractiveWizards._patch_dgi(updated_dgi, tag_67)
+        if has_66:
+            payload += res_66
 
-        has_tag_5f50 = False
-        if len(tag_5f50) > 0:
-            has_tag_5f50 = True
+        res_67 = InteractiveWizards._build_tag_67()
+        has_67 = False
+        if len(res_67) > 0:
+            has_67 = True
             
-        if has_tag_5f50:
-            updated_dgi = InteractiveWizards._patch_dgi(updated_dgi, tag_5f50)
-        
-        has_scp = False
-        if len(scp_ef) > 0:
-            has_scp = True
+        if has_67:
+            payload += res_67
+
+        res_5f50 = InteractiveWizards._prompt_flat_tag("5F50", "SD Manager URL")
+        has_5f50 = False
+        if len(res_5f50) > 0:
+            has_5f50 = True
             
-        if has_scp:
-            updated_dgi = InteractiveWizards._patch_dgi(updated_dgi, scp_ef)
+        if has_5f50:
+            payload += res_5f50
+
+        res_86 = InteractiveWizards._prompt_flat_tag("86", "Security Level")
+        has_86 = False
+        if len(res_86) > 0:
+            has_86 = True
             
-        has_sec = False
-        if len(sec_level) > 0:
-            has_sec = True
+        if has_86:
+            payload += res_86
+
+        res_8a = InteractiveWizards._prompt_flat_tag("8A", "Admin IP/Host")
+        has_8a = False
+        if len(res_8a) > 0:
+            has_8a = True
             
-        if has_sec:
-            updated_dgi = InteractiveWizards._patch_dgi(updated_dgi, sec_level)
+        if has_8a:
+            payload += res_8a
+
+        res_8c = InteractiveWizards._prompt_flat_tag("8C", "Admin URL")
+        has_8c = False
+        if len(res_8c) > 0:
+            has_8c = True
             
-        has_ip = False
-        if len(admin_ip) > 0:
-            has_ip = True
+        if has_8c:
+            payload += res_8c
+
+        ans_custom = input("Add Custom/Other TLV? [y/N]: ").strip().lower()
+        is_custom_y = False
+        if ans_custom == 'y':
+            is_custom_y = True
             
-        if has_ip:
-            updated_dgi = InteractiveWizards._patch_dgi(updated_dgi, admin_ip)
+        if is_custom_y:
+            custom_tlv = input("  Enter Full TLV (Hex) [e.g. 8B05...]: ").strip().replace(" ", "")
+            has_custom_tlv = False
+            if len(custom_tlv) > 0:
+                has_custom_tlv = True
+                
+            if has_custom_tlv:
+                payload += custom_tlv.upper()
+                
+        is_payload_empty = False
+        if len(payload) == 0:
+            is_payload_empty = True
             
-        has_url = False
-        if len(admin_url) > 0:
-            has_url = True
-            
-        if has_url:
-            updated_dgi = InteractiveWizards._patch_dgi(updated_dgi, admin_url)
-            
-        has_custom = False
-        if len(custom_tlv) > 0:
-            has_custom = True
-            
-        if has_custom:
-            updated_dgi = InteractiveWizards._patch_dgi(updated_dgi, custom_tlv)
-            
-        is_patch_failed = False
-        if len(updated_dgi) == 0:
-            is_patch_failed = True
-            
-        if is_patch_failed:
-            print("[-] DGI patching failed due to parser error. Aborting.")
+        if is_payload_empty:
+            print("[-] No parameters provided. Aborting.")
             return
 
-        print(f"\n[+] Final Constructed DGI: {updated_dgi}")
+        print(f"\n[+] Final Constructed TLV Payload: {payload}")
 
         install_apdu = InteractiveWizards._build_install_perso(target_aid)
-        store_data_apdu = InteractiveWizards._build_store_data(updated_dgi)
+        
+        # P1=90 indicates BER-TLV formatting and last block.
+        store_data_apdu = f"80E29000{len(payload)//2:02X}{payload}"
 
         print(f"\n[*] Generated INSTALL APDU:\n    {install_apdu}")
-        print(f"[*] Generated STORE DATA APDU:\n    {store_data_apdu}")
+        print(f"[*] Generated STORE DATA APDU (BER-TLV P1=90):\n    {store_data_apdu}")
 
-        ans = input("\n[?] Transmit sequence to card? [yes/NO]: ").strip().lower()
+        ans_tx = input("\n[?] Transmit sequence to card? [yes/NO]: ").strip().lower()
         
         do_transmit = False
-        if ans == "yes":
+        if ans_tx == "yes":
             do_transmit = True
             
         if do_transmit:
@@ -1068,3 +1195,120 @@ class InteractiveWizards:
             
         if is_store_success == False:
             print(f"[-] STORE DATA rejected: {sw1:02X}{sw2:02X}.")
+
+
+    @staticmethod
+    def _prompt_flat_tag(tag_hex_str: str, tag_name: str) -> str:
+        ans = input(f"Add {tag_name} (Tag {tag_hex_str})? [y/N]: ").strip().lower()
+        
+        is_y = False
+        if ans == 'y':
+            is_y = True
+            
+        if is_y == False:
+            return ""
+
+        val = input(f"  Enter Value for {tag_name} (Hex): ").strip().replace(" ", "")
+        
+        is_empty = False
+        if len(val) == 0:
+            is_empty = True
+            
+        if is_empty:
+            return ""
+
+        try:
+            val_bytes = bytes.fromhex(val)
+            len_hex = InteractiveWizards._encode_ber_tlv_length(len(val_bytes))
+            return tag_hex_str + len_hex + val.upper()
+        except ValueError:
+            print(f"[-] Invalid Hex. Skipping Tag {tag_hex_str}.")
+            return ""
+
+    @staticmethod
+    def _build_tag_67() -> str:
+        ans = input("Add Card Capability Info (Tag 67)? [y/N]: ").strip().lower()
+        
+        is_y = False
+        if ans == 'y':
+            is_y = True
+            
+        if is_y == False:
+            return ""
+
+        payload_67 = ""
+
+        ans_a0 = input("  Add Secure Channel Protocol (SCP) Info (Tag A0)? [y/N]: ").strip().lower()
+        
+        is_a0_y = False
+        if ans_a0 == 'y':
+            is_a0_y = True
+
+        if is_a0_y:
+            payload_a0 = ""
+
+            scp_id = input("    SCP Identifier (Tag 80) [Hex, e.g. 03]: ").strip().replace(" ", "")
+            
+            has_scp_id = False
+            if len(scp_id) > 0:
+                has_scp_id = True
+                
+            if has_scp_id:
+                try:
+                    b = bytes.fromhex(scp_id)
+                    payload_a0 += "80" + InteractiveWizards._encode_ber_tlv_length(len(b)) + scp_id.upper()
+                except ValueError:
+                    print("[-] Invalid Hex. Skipping Tag 80.")
+
+            scp_opt = input("    SCP Options (Tag 81) [Hex, e.g. 70 or 7071]: ").strip().replace(" ", "")
+            
+            has_scp_opt = False
+            if len(scp_opt) > 0:
+                has_scp_opt = True
+                
+            if has_scp_opt:
+                try:
+                    b = bytes.fromhex(scp_opt)
+                    payload_a0 += "81" + InteractiveWizards._encode_ber_tlv_length(len(b)) + scp_opt.upper()
+                except ValueError:
+                    print("[-] Invalid Hex. Skipping Tag 81.")
+
+            scp_mask = input("    SCP Mask Options (Tag 91) [Hex, Default: Empty]: ").strip().replace(" ", "")
+            
+            has_scp_mask = False
+            if len(scp_mask) > 0:
+                has_scp_mask = True
+                
+            if has_scp_mask:
+                try:
+                    b = bytes.fromhex(scp_mask)
+                    payload_a0 += "91" + InteractiveWizards._encode_ber_tlv_length(len(b)) + scp_mask.upper()
+                except ValueError:
+                    print("[-] Invalid Hex. Skipping Tag 91.")
+
+            has_a0_payload = False
+            if len(payload_a0) > 0:
+                has_a0_payload = True
+                
+            if has_a0_payload:
+                a0_len = InteractiveWizards._encode_ber_tlv_length(len(payload_a0) // 2)
+                payload_67 += "A0" + a0_len + payload_a0
+
+        other_67 = input("  Add other capabilities to Tag 67 [Raw Hex, Default: Empty]: ").strip().replace(" ", "")
+        
+        has_other = False
+        if len(other_67) > 0:
+            has_other = True
+            
+        if has_other:
+            payload_67 += other_67.upper()
+
+        has_67_payload = False
+        if len(payload_67) > 0:
+            has_67_payload = True
+            
+        if has_67_payload:
+            len_67 = InteractiveWizards._encode_ber_tlv_length(len(payload_67) // 2)
+            return "67" + len_67 + payload_67
+
+        return ""
