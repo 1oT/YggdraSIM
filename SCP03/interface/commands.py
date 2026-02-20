@@ -48,7 +48,9 @@ class CommandRegistry:
             'DEL': (lambda x: shell.gp_ctrl.delete_object(x, True), "<AID>"),
             'VERIFY-ADM': (shell.gp_ctrl.verify_adm, "[Key]"),
             'STORE-DATA': (shell._handle_store_data, "<Hex> [P1] [P2]"),
-            'PUT-KEY': (shell._handle_put_key, "<KVN> <KeyID> <K1> <K2> <K3>"),
+            'PUT-KEY': (shell._handle_put_key, "<oldKVN> <KeyID> <newKVN> <K1> <K2> <K3> [Algo]>"),
+            'PUT-KEY-ROTATE': (shell._handle_put_key_rotate, "<KeyID> <newKVN> <K1> <K2> <K3> [Algo]"),
+            'PUT-KEY-NEW': (shell._handle_put_key_new, "<KVN> <KeyID> <K1> <K2> <K3> [Algo]"),
 
             # Applet Loading & Installation
             'INSTALL-INSTALL': (shell._handle_install_file, "<cap/ijc> [Priv] [Par] [App] [Mod]"),
@@ -60,7 +62,7 @@ class CommandRegistry:
             'INSTALL-PERSO': (lambda x: shell.gp_ctrl.install_personalization(x), "<AID>"),
 
             # Wizards / Builders
-            'INSTALL-WIZARD-SD': (lambda: InteractiveWizards.run_install_wizard(), ""),
+            'INSTALL-WIZARD-SD': (lambda: self._handle_install_wizard_sd(), ""),
             'INSTALL-WIZARD-APDU': (lambda x: InteractiveWizards.build_install_apdu(x), "<cap/ijc>"),
 
             # File System
@@ -71,6 +73,7 @@ class CommandRegistry:
             'RECORD': (shell.fs_ctrl.read_record, "<N/ALL> [Path]"),
             'UPDATE': (shell._handle_update, "BINARY/RECORD <Data>"),
             'GET': (lambda x: shell.gp_ctrl.get_data(*[int(i, 16) for i in x.split()[:2]]) if len(x.split()) >= 2 else print("Usage: GET <P1> <P2>"), "<P1> <P2>"),
+            'DUMP-FS': (shell.do_dump_fs, "[OutputDir]"),
 
             # Security
             'VERIFY-PIN': (lambda x: shell._handle_pin_cmd(shell.sec_ctrl.verify_pin, x, 2, "VERIFY-PIN <ID> <PIN>"), "<ID> <PIN>"),
@@ -99,6 +102,7 @@ class CommandRegistry:
             # Hidden / Developer
             'DEBUG': (shell._toggle_debug, ""),
             'VERBOSE': (shell._toggle_debug, ""),
+            'DECODE': (shell._handle_decode, "<Hex>"),
             
             # System
             'GUIDE': (shell._handle_guide, "[Topic]"),
@@ -116,14 +120,14 @@ class CommandRegistry:
         args_required = [
             'SET-KENC', 'SET-KMAC', 'SET-AID', 'SET-KVN', 'SET-ADM', 'SET-AID-ALIAS', 'SET-DEK',
             'SELECT', 'UPDATE', 'GET', 'LOCK', 'UNLOCK', 'DEL', 'SCRIPT', 
-            'INSTALL-INSTALL', 'LOAD', 'STORE-DATA', 'PUT-KEY',
+            'INSTALL-INSTALL', 'LOAD', 'STORE-DATA', 'PUT-KEY', 'PUT-KEY-ROTATE', 'PUT-KEY-NEW',
             'INSTALL-WIZARD-APDU', 'INSTALL-APP', 'INSTALL-REGISTRY',
             'ENABLE-CONS', 'DISABLE-CONS', 'DELETE-CONS',
             'ENABLE-IOT', 'DISABLE-IOT', 'DELETE-IOT',
             'VERIFY-PIN', 'CHANGE-PIN', 'ENABLE-PIN', 'DISABLE-PIN', 'UNBLOCK', 
             'AUTH-GSM', 'AUTH-USIM', 'AUTH-ISIM', 
-            'INSTALL-SELECTABLE', 'INSTALL-EXTRADITION', 'INSTALL-PERSO'
+            'INSTALL-SELECTABLE', 'INSTALL-EXTRADITION', 'INSTALL-PERSO', 'DECODE'
         ]
-        args_optional = ['REPORT', 'VERIFY-ADM', 'KEYS', 'READ', 'RECORD', 'RUN', 'GUIDE', 'DEBUG', 'VERBOSE']
+        args_optional = ['REPORT', 'VERIFY-ADM', 'KEYS', 'READ', 'RECORD', 'RUN', 'GUIDE', 'DEBUG', 'VERBOSE', 'DUMP-FS']
         
         return args_required, args_optional

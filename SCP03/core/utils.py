@@ -70,3 +70,51 @@ class TlvParser:
                 parsed[tag_val] = val
                 
         return parsed
+
+class StatusWordTranslator:
+    """Translates ISO 7816-4 and GlobalPlatform Status Words into human-readable strings."""
+    
+    SW_MAP = {
+        0x9000: "Success",
+        0x6100: "More data available",
+        0x6283: "Selected file invalidated",
+        0x6300: "Authentication failed",
+        0x6400: "State of non-volatile memory unchanged",
+        0x6700: "Wrong length",
+        0x6881: "Logical channel not supported",
+        0x6882: "Secure messaging not supported",
+        0x6982: "Security status not satisfied",
+        0x6983: "Authentication method blocked",
+        0x6984: "Referenced data invalidated",
+        0x6985: "Conditions of use not satisfied",
+        0x6A80: "Incorrect parameters in data field",
+        0x6A81: "Function not supported",
+        0x6A82: "File not found / Applet not found",
+        0x6A83: "Record not found",
+        0x6A84: "Not enough memory space in file",
+        0x6A86: "Incorrect parameters P1-P2",
+        0x6A88: "Referenced data not found",
+        0x6D00: "Instruction code not supported or invalid",
+        0x6E00: "Class not supported",
+        0x6F00: "Unknown error / No precise diagnosis"
+    }
+
+    @staticmethod
+    def translate(sw1: int, sw2: int) -> str:
+        sw = (sw1 << 8) | sw2
+        
+        if sw in StatusWordTranslator.SW_MAP:
+            return StatusWordTranslator.SW_MAP[sw]
+            
+        if sw1 == 0x61:
+            return f"Success. {sw2} bytes of data available to read."
+            
+        if sw1 == 0x6C:
+            return f"Wrong Le length. Correct length is {sw2}."
+            
+        if sw1 == 0x63:
+            if (sw2 & 0xF0) == 0xC0:
+                retries = sw2 & 0x0F
+                return f"Verification failed. {retries} retries remaining."
+                
+        return "Unknown Status"

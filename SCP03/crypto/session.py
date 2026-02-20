@@ -134,3 +134,77 @@ class Scp03Session:
                 pass
         
         return payload
+
+    def encrypt_key_data(self, key_bytes: bytes) -> bytes:
+        from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+        import binascii
+        import configparser
+        import os
+        
+        target_dek = None
+        
+        dek_names = ['dek', 'k_dek', 'kdek', 'key_dek', 'static_dek']
+        for name in dek_names:
+            has_attr = False
+            if hasattr(self, name):
+                has_attr = True
+                
+            if has_attr:
+                val = getattr(self, name)
+                
+                is_valid = False
+                if val is not None:
+                    is_valid = True
+                    
+                if is_valid:
+                    target_dek = val
+                    break
+                    
+        is_missing = False
+        if target_dek is None:
+            is_missing = True
+            
+        if is_missing:
+            config_exists = False
+            if os.path.exists('keys.ini'):
+                config_exists = True
+                
+            if config_exists:
+                config = configparser.ConfigParser()
+                config.read('keys.ini')
+                
+                has_keys_section = False
+                if 'KEYS' in config:
+                    has_keys_section = True
+                    
+                if has_keys_section:
+                    has_dek_entry = False
+                    if 'dek' in config['KEYS']:
+                        has_dek_entry = True
+                        
+                    if has_dek_entry:
+                        target_dek = config['KEYS']['dek'].strip()
+                        is_missing = False
+                        
+        if is_missing:
+            raise Exception("DEK attribute is missing from session and keys.ini.")
+            
+        is_string = False
+        if isinstance(target_dek, str):
+            is_string = True
+            
+        if is_string:
+            target_dek = binascii.unhexlify(target_dek)
+            
+        iv = b'\x00' * 16
+        cipher = Cipher(algorithms.AES(target_dek), modes.CBC(iv))
+        encryptor = cipher.encryptor()
+        
+        encrypted_chunk = encryptor.update(key_bytes)
+        encrypted_final = encryptor.finalize()
+        
+        result = bytearray()
+        result.extend(encrypted_chunk)
+        result.extend(encrypted_final)
+        
+        return bytes(result)

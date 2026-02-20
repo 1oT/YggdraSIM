@@ -205,11 +205,21 @@ class FileSystemController:
     def __init__(self, transport, aid_registry: Dict[str, str] = None):
         self.tp = transport
         self.fid_map = self._load_fid_map()
-        self.aid_registry = aid_registry if aid_registry else {}
+        
+        has_registry = False
+        if aid_registry:
+            has_registry = True
+            
+        if has_registry:
+            self.aid_registry = aid_registry
+        if has_registry == False:
+            self.aid_registry = {}
+            
         self.current_fcp = {} 
         self.current_fid = None
+        self.scan_cache = {}
+        
         ContentDecoder.init_registry()
-        print(f"{Config.Colors.CYAN}[*] Loaded {len(self.fid_map)} file aliases and {len(self.aid_registry)} AIDs.{Config.Colors.ENDC}")
 
     def _load_fid_map(self) -> Dict[str, List[str]]:
         """
@@ -291,25 +301,49 @@ class FileSystemController:
         except ValueError:
             return int(arg, 16) # Try raw hex (0B, FF)
 
-    # [UPDATED] Added 'silent' parameter to suppress output
     def select(self, target_path: str, silent: bool = False) -> bool:
         target_path = target_path.strip().upper()
         
+        # 0. Scan Cache Resolution
+        has_cache = False
+        if hasattr(self, 'scan_cache'):
+            has_cache = True
+            
+        if has_cache:
+            if target_path in self.scan_cache:
+                resolved_path = self.scan_cache[target_path]
+                if not silent:
+                    print(f"{Config.Colors.CYAN}[*] Resolved Index [{target_path}] -> {resolved_path}{Config.Colors.ENDC}")
+                target_path = resolved_path
+
         # 1. Path Selection
         if '/' in target_path:
             if not silent:
                 print(f"{Config.Colors.CYAN}[*] Path Selection Detected: '{target_path}'{Config.Colors.ENDC}")
             
-            # MF select is always silent unless it fails
-            if not self._select_single("MF", silent=True, resolve=False): return False
+            mf_success = self._select_single("MF", silent=True, resolve=False)
+            if mf_success == False:
+                return False
             
-            segments = [x for x in target_path.split('/') if x]
+            segments = []
+            for x in target_path.split('/'):
+                if x:
+                    segments.append(x)
+                    
             for i, segment in enumerate(segments):
-                is_last = (i == len(segments) - 1)
-                # Only resolve/print on the last segment, unless global silent is True
-                step_silent = True if silent else (not is_last)
+                is_last = False
+                if i == len(segments) - 1:
+                    is_last = True
+                    
+                step_silent = True
+                if silent == False:
+                    if is_last == False:
+                        step_silent = True
+                    if is_last == True:
+                        step_silent = False
                 
-                if not self._select_single(segment, silent=step_silent, resolve=is_last):
+                segment_success = self._select_single(segment, silent=step_silent, resolve=is_last)
+                if segment_success == False:
                     if not silent:
                         print(f"{Config.Colors.FAIL}[-] Path broken at segment: '{segment}'{Config.Colors.ENDC}")
                     return False
@@ -477,7 +511,6 @@ class FileSystemController:
         print(f"{Config.Colors.CYAN}--- {tmpl} ---{Config.Colors.ENDC}")
         info = self.current_fcp
 
-        # Print AID if extracted from FCP or FCI
         if info.get('aid'):
             print(f"    [AID]      {info.get('aid')}")
 
@@ -485,18 +518,38 @@ class FileSystemController:
             print(f"    [Type]     {info.get('type')}")
             print(f"    [Max Len]  {info.get('max_len')}")
             print(f"    [LCS]      {info.get('lcs')}")
-            if info.get('sd_data'): print(f"    [SD Data]  {info.get('sd_data')}")
-        elif tmpl == 'FCP':
+            if info.get('sd_data'):
+                print(f"    [SD Data]  {info.get('sd_data')}")
+                
+        if tmpl == 'FCP':
             print(f"    [Type]     {info.get('type')} ({info.get('structure')})")
             print(f"    [Size]     {info.get('size')} bytes")
-            if info.get('rec_len', 0) > 0: print(f"    [Rec]      {info.get('rec_count')} records x {info.get('rec_len')} bytes")
+            if info.get('rec_len', 0) > 0:
+                print(f"    [Rec]      {info.get('rec_count')} records x {info.get('rec_len')} bytes")
             print(f"    [Sec]      {info.get('security')}")
-            if info.get('rules'):
-                for line in info['rules'].split('\n'):
-                    print(f"               | {line}")
+            
+            rules = info.get('rules')
+            if rules:
+                is_list = False
+                if isinstance(rules, list):
+                    is_list = True
+                    
+                if is_list:
+                    for line in rules:
+                        print(f"               | {line}")
+                if is_list == False:
+                    for line in rules.split('\n'):
+                        print(f"               | {line}")
+                        
             print(f"    [LCS]      {info.get('lcs')}")
-        else:
+            
+        is_unknown = False
+        if tmpl != 'FCI':
+            if tmpl != 'FCP':
+                is_unknown = True
+        if is_unknown:
             print(f"    (Raw Data): {info.get('raw')}")
+            
         print(f"{Config.Colors.ENDC}")
 
     def read_binary(self, path: Optional[str] = None):
@@ -588,37 +641,111 @@ class FileSystemController:
 
     def scan_tree(self):
         print(f"{Config.Colors.HEADER}[*] Auditing File System (Live)...{Config.Colors.ENDC}")
-        if not os.path.exists(Config.FIDS_FILE): print(f"{Config.Colors.FAIL}fids.txt missing{Config.Colors.ENDC}"); return
         
+        file_exists = os.path.exists(Config.FIDS_FILE)
+        if file_exists == False:
+            print(f"{Config.Colors.FAIL}fids.txt missing{Config.Colors.ENDC}")
+            return
+            
         roots = self._load_tree_structure() 
+        self.scan_cache = {}
+        scan_counter = [0] 
 
-        def live_scan(nodes, parent_fid, level=0):
+        def live_scan(nodes, parent_fid, parent_path, level=0):
             for node in nodes:
-                p_cmd = f"00A40400{len(parent_fid)//2:02X}{parent_fid}" if len(parent_fid) > 4 else f"00A4000002{parent_fid}"
+                p_cmd = f"00A4000002{parent_fid}"
+                if len(parent_fid) > 4:
+                    p_cmd = f"00A40400{len(parent_fid)//2:02X}{parent_fid}"
+                    
                 self.tp.transmit(p_cmd, silent=True)
                 selected_fid = None
-                if any('X' in f for f in node['fids']): continue 
+                
+                has_wildcard = False
+                for f in node['fids']:
+                    if 'X' in f:
+                        has_wildcard = True
+                if has_wildcard:
+                    continue 
+                    
                 for fid in node['fids']:
-                    cmd = f"00A40404{len(fid)//2:02X}{fid}" if len(fid) > 4 else f"00A4000402{fid}"
+                    cmd = f"00A4000402{fid}"
+                    if len(fid) > 4:
+                        cmd = f"00A40404{len(fid)//2:02X}{fid}"
+                        
                     _, sw1, sw2 = self.tp.transmit(cmd, silent=True)
-                    if sw1 == 0x90 or sw1 == 0x61:
+                    
+                    valid_sel = False
+                    if sw1 == 0x90:
+                        valid_sel = True
+                    if sw1 == 0x61:
+                        valid_sel = True
+                        
+                    if valid_sel:
                         selected_fid = fid
                         break 
+                        
                 if selected_fid:
-                    connector = "└── " if level > 0 else ""; indent = "    " * level
-                    print(f"{indent}{connector}{Config.Colors.GREEN}{node['name']}{Config.Colors.ENDC} ({selected_fid})")
-                    if node['children']: live_scan(node['children'], selected_fid, level + 1)
+                    scan_counter[0] += 1
+                    idx = str(scan_counter[0])
+                    
+                    current_path = node['name']
+                    if parent_path != "":
+                        current_path = f"{parent_path}/{node['name']}"
+                        
+                    self.scan_cache[idx] = current_path
+                    
+                    connector = ""
+                    if level > 0:
+                        connector = "└── "
+                        
+                    indent = "    " * level
+                    print(f"{indent}{connector}[{Config.Colors.YELLOW}{idx}{Config.Colors.ENDC}] {Config.Colors.GREEN}{node['name']}{Config.Colors.ENDC} ({selected_fid})")
+                    
+                    if node['children']:
+                        live_scan(node['children'], selected_fid, current_path, level + 1)
 
-        try: self.tp.transmit("00A40000023F00", silent=True); live_scan(roots, "3F00", 0)
-        finally: self.tp.transmit("00A40004023F00", silent=True); self.current_fid = "3F00"; print(f"\n{Config.Colors.CYAN}Scan complete. Pointer reset to MF.{Config.Colors.ENDC}")
+        try:
+            self.tp.transmit("00A40000023F00", silent=True)
+            live_scan(roots, "3F00", "", 0)
+        finally:
+            self.tp.transmit("00A40004023F00", silent=True)
+            self.current_fid = "3F00"
+            print(f"\n{Config.Colors.CYAN}Scan complete. Use 'SELECT <ID>' to navigate.{Config.Colors.ENDC}")
 
     def _sanitize_yaml(self, data):
-        if data is None: return None
-        if isinstance(data, (bytes, bytearray, memoryview)): return data.hex().upper() if hasattr(data, 'hex') else bytes(data).hex().upper()
-        if isinstance(data, str): return str(data)
-        if isinstance(data, (int, float, bool)): return data
-        if isinstance(data, dict) or hasattr(data, 'items'): return {str(k): self._sanitize_yaml(v) for k, v in data.items()}
-        if isinstance(data, (list, tuple)): return [self._sanitize_yaml(v) for v in data]
+        if data is None:
+            return None
+            
+        if isinstance(data, (bytes, bytearray, memoryview)):
+            if hasattr(data, 'hex'):
+                return data.hex().upper()
+            return bytes(data).hex().upper()
+            
+        if isinstance(data, str):
+            return str(data)
+            
+        if isinstance(data, (int, float, bool)):
+            return data
+            
+        is_dict = False
+        if isinstance(data, dict):
+            is_dict = True
+        if hasattr(data, 'items'):
+            is_dict = True
+            
+        if is_dict:
+            clean_dict = {}
+            for k, v in data.items():
+                if v is not None:
+                    clean_dict[str(k)] = self._sanitize_yaml(v)
+            return clean_dict
+            
+        if isinstance(data, (list, tuple)):
+            clean_list = []
+            for v in data:
+                clean_list.append(self._sanitize_yaml(v))
+            return clean_list
+            
         return str(data)
 
     def generate_report(self, filename: str = "scan_report.yaml"):
@@ -726,3 +853,224 @@ class FileSystemController:
             print(f"{Config.Colors.GREEN}[+] Report saved to {filename}{Config.Colors.ENDC}")
         except Exception as e: print(f"{Config.Colors.FAIL}[!] Report Generation Failed: {e}{Config.Colors.ENDC}")
         finally: self.tp.transmit("00A40004023F00", silent=True); self.current_fid = "3F00"
+
+    def _get_live_iccid(self) -> str:
+        self.tp.transmit("00A40000023F00", silent=True)
+        data, sw1, sw2 = self.tp.transmit("00A40004022FE2", silent=True)
+        
+        valid_select = False
+        if sw1 == 0x90:
+            valid_select = True
+        if sw1 == 0x61:
+            valid_select = True
+            
+        if valid_select == False:
+            return "UNKNOWN_ICCID"
+            
+        data, sw1, sw2 = self.tp.transmit("00B000000A", silent=True)
+        if sw1 != 0x90:
+            return "UNKNOWN_ICCID"
+            
+        hex_str = data.hex().upper()
+        remainder = len(hex_str) % 2
+        
+        if remainder != 0:
+            hex_str = hex_str + "F"
+            
+        decoded_iccid = ""
+        for i in range(0, len(hex_str), 2):
+            nibble1 = hex_str[i]
+            nibble2 = hex_str[i+1]
+            decoded_iccid += nibble2 + nibble1
+            
+        return decoded_iccid.rstrip("F")
+
+    def dump_live_fs(self, output_dir: str):
+        import shutil
+        from pathlib import Path
+        import yaml
+        
+        print(f"{Config.Colors.HEADER}[*] Initiating Deep Live File System Dump...{Config.Colors.ENDC}")
+        
+        file_exists = os.path.exists(Config.FIDS_FILE)
+        if file_exists == False:
+            print(f"{Config.Colors.FAIL}fids.txt missing. Tree navigation impossible.{Config.Colors.ENDC}")
+            return
+
+        iccid_val = self._get_live_iccid()
+        root_dir = Path(output_dir).resolve() / iccid_val
+        
+        dir_exists = root_dir.exists()
+        if dir_exists:
+            shutil.rmtree(root_dir)
+            
+        root_dir.mkdir(parents=True, exist_ok=True)
+        roots = self._load_tree_structure()
+
+        def _write_ef_content(fid: str, file_path_base: Path):
+            struct = self.current_fcp.get('structure', 'Unknown')
+            content_file = file_path_base.with_suffix('.txt')
+            
+            with open(content_file, 'w') as f:
+                f.write(f"--- File Metadata ---\n")
+                f.write(f"FID: {fid}\n")
+                f.write(f"Type: {self.current_fcp.get('type')} ({struct})\n\n")
+                f.write(f"--- FCP Data ---\n")
+                yaml.dump(self._sanitize_yaml(self.current_fcp), f, default_flow_style=False, sort_keys=False)
+                f.write(f"\n--- File Data ---\n")
+
+                if struct == 'Transparent':
+                    data, sw1, sw2 = self.tp.transmit("00B0000000", silent=True)
+                    if sw1 == 0x90:
+                        hex_data = data.hex().upper()
+                        f.write(f"Raw: {hex_data}\n")
+                        decoded = ContentDecoder.decode_obj(fid, hex_data)
+                        if decoded:
+                            yaml.dump(self._sanitize_yaml(decoded), f, default_flow_style=False, sort_keys=False)
+                    if sw1 != 0x90:
+                        f.write(f"Read Error: {sw1:02X}{sw2:02X}\n")
+
+                if struct == 'Linear Fixed':
+                    _read_records(fid, f)
+                    
+                if struct == 'Cyclic':
+                    _read_records(fid, f)
+
+        def _read_records(fid: str, file_handle):
+            le = f"{self.current_fcp.get('rec_len', 0):02X}"
+            for r in range(1, 255):
+                cmd = f"00B2{r:02X}04{le}" 
+                data, sw1, sw2 = self.tp.transmit(cmd, silent=True)
+                
+                if sw1 == 0x90:
+                    hex_data = data.hex().upper()
+                    file_handle.write(f"Record {r:02X}: Raw: {hex_data}\n")
+                    decoded = ContentDecoder.decode_obj(fid, hex_data)
+                    if decoded:
+                        yaml.dump(self._sanitize_yaml(decoded), file_handle, default_flow_style=False, sort_keys=False)
+                        file_handle.write("\n")
+                        
+                if sw1 == 0x6A:
+                    break
+                if sw1 != 0x90:
+                    if sw1 != 0x6A:
+                        break
+
+        def _live_deep_scan(nodes, parent_fid, current_path: Path):
+            processed_fids = set()
+            
+            explicit_nodes = []
+            for n in nodes:
+                has_wildcard = False
+                for f in n['fids']:
+                    if 'X' in f:
+                        has_wildcard = True
+                if has_wildcard == False:
+                    explicit_nodes.append(n)
+
+            wildcard_nodes = []
+            for n in nodes:
+                has_wildcard = False
+                for f in n['fids']:
+                    if 'X' in f:
+                        has_wildcard = True
+                if has_wildcard:
+                    wildcard_nodes.append(n)
+
+            for node in explicit_nodes:
+                if len(parent_fid) > 4:
+                    p_cmd = f"00A40400{len(parent_fid)//2:02X}{parent_fid}"
+                if len(parent_fid) <= 4:
+                    p_cmd = f"00A4000002{parent_fid}"
+                    
+                self.tp.transmit(p_cmd, silent=True)
+                
+                selected_fid = None
+                last_data = None
+                
+                for fid in node['fids']:
+                    if len(fid) > 4:
+                        cmd = f"00A40404{len(fid)//2:02X}{fid}"
+                    if len(fid) <= 4:
+                        cmd = f"00A4000402{fid}"
+                        
+                    data, sw1, sw2 = self.tp.transmit(cmd, silent=True)
+                    
+                    valid_sel = False
+                    if sw1 == 0x90:
+                        valid_sel = True
+                    if sw1 == 0x61:
+                        valid_sel = True
+                        
+                    if valid_sel:
+                        selected_fid = fid
+                        last_data = data
+                        break 
+                
+                if selected_fid:
+                    processed_fids.add(selected_fid)
+                    self.current_fid = selected_fid
+                    self._parse_fcp_internal(last_data, target_fid=selected_fid)
+                    
+                    node_dir = current_path
+                    if self.current_fcp.get('type') == 'DF':
+                        node_dir = current_path / node['name']
+                        node_dir.mkdir(parents=True, exist_ok=True)
+                        
+                    if self.current_fcp.get('type') == 'EF':
+                        file_base = current_path / node['name']
+                        print(f"  > Dumping: {file_base}")
+                        _write_ef_content(selected_fid, file_base)
+                    
+                    if node['children']:
+                        _live_deep_scan(node['children'], selected_fid, node_dir)
+
+            for wc in wildcard_nodes:
+                template = wc['fids'][0]
+                prefix = template.replace('X', '')
+                
+                for i in range(256):
+                    target_fid = f"{prefix}{i:02X}"
+                    
+                    is_processed = False
+                    if target_fid in processed_fids:
+                        is_processed = True
+                    if is_processed:
+                        continue
+                    
+                    if len(parent_fid) > 4:
+                        p_cmd = f"00A40400{len(parent_fid)//2:02X}{parent_fid}"
+                    if len(parent_fid) <= 4:
+                        p_cmd = f"00A4000002{parent_fid}"
+                        
+                    self.tp.transmit(p_cmd, silent=True)
+                    
+                    cmd = f"00A4000402{target_fid}"
+                    data, sw1, sw2 = self.tp.transmit(cmd, silent=True)
+                    
+                    valid_wc_sel = False
+                    if sw1 == 0x90:
+                        valid_wc_sel = True
+                    if sw1 == 0x61:
+                        valid_wc_sel = True
+                        
+                    if valid_wc_sel:
+                        self.current_fid = target_fid
+                        self._parse_fcp_internal(data, target_fid=target_fid)
+                        
+                        name = f"UNKNOWN_{target_fid}"
+                        file_base = current_path / name
+                        print(f"  > Found & Dumping Wildcard: {file_base}")
+                        
+                        if self.current_fcp.get('type') == 'EF':
+                            _write_ef_content(target_fid, file_base)
+
+        try:
+            self.tp.transmit("00A40000023F00", silent=True)
+            _live_deep_scan(roots, "3F00", root_dir)
+            print(f"{Config.Colors.GREEN}[+] Live dump complete. Output saved to {root_dir}{Config.Colors.ENDC}")
+        except Exception as e:
+            print(f"{Config.Colors.FAIL}[!] Dump Execution Failed: {e}{Config.Colors.ENDC}")
+        finally:
+            self.tp.transmit("00A40004023F00", silent=True)
+            self.current_fid = "3F00"

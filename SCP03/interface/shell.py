@@ -13,7 +13,7 @@ except ImportError:
     readline = None
 
 from SCP03.config import Config
-from SCP03.core.utils import HexUtils, TlvParser
+from SCP03.core.utils import HexUtils, TlvParser, StatusWordTranslator
 from SCP03.core.decoders import ContentDecoder
 from SCP03.transport.card import CardTransporter
 from SCP03.logic.gp import GlobalPlatformManager
@@ -57,7 +57,9 @@ class ShellDispatcher:
         self._setup_readline()
 
     def _patch_transport(self):
-        """Monkey-patches the transport layer to override silent flags dynamically and log outgoing APDUs."""
+        """Monkey-patches the transport layer to log outgoing APDUs and decode SW responses."""
+        from SCP03.core.utils import StatusWordTranslator
+        
         if not self.transport:
             return
             
@@ -83,9 +85,41 @@ class ShellDispatcher:
                     
                 print(f"{Config.Colors.YELLOW}[-->] {display_cmd}{Config.Colors.ENDC}")
                 
-            return self.transport._original_transmit(cmd, silent=actual_silent)
+            data, sw1, sw2 = self.transport._original_transmit(cmd, silent=actual_silent)
+            
+            if not actual_silent:
+                sw_str = StatusWordTranslator.translate(sw1, sw2)
+                color = Config.Colors.GREEN
+                if sw1 != 0x90 and sw1 != 0x61:
+                    color = Config.Colors.FAIL
+                print(f"      {color}=> {sw_str}{Config.Colors.ENDC}")
+                
+            return data, sw1, sw2
             
         self.transport.transmit = _verbose_transmit
+
+    def _handle_decode(self, arg_line: str):
+        if not arg_line:
+            print(f"{Config.Colors.FAIL}[-] Usage: DECODE <Hex>{Config.Colors.ENDC}")
+            return
+            
+        hex_data = arg_line.replace(" ", "")
+        
+        try:
+            data = bytes.fromhex(hex_data)
+            parsed = TlvParser.parse(data)
+            self.gp_ctrl.print_tlv_data(parsed)
+        except ValueError:
+            print(f"{Config.Colors.FAIL}[!] Invalid Hex string provided.{Config.Colors.ENDC}")
+        except Exception as e:
+            print(f"{Config.Colors.FAIL}[!] Decode Error: {e}{Config.Colors.ENDC}")
+
+    def _handle_dump_fs(self, arg_line: str = ""):
+        target = "ALL"
+        if arg_line:
+            target = arg_line.strip()
+            
+        self.fs_ctrl.dump_fs(target)
 
     def _toggle_debug(self):
         self.debug_mode = not self.debug_mode
@@ -212,6 +246,57 @@ class ShellDispatcher:
             
         self.gp_ctrl.install_cap_file(f, privileges=p, install_params=par, target_app_aid=app_aid, target_module_aid=mod_aid, instantiate=True)
 
+    def _handle_install_wizard_sd(self) -> None:
+        target_aid = "A000000151000000"
+        
+        has_config = False
+        if hasattr(self, 'config'):
+            has_config = True
+            
+        if has_config:
+            has_keys = False
+            if 'KEYS' in self.config:
+                has_keys = True
+                
+            if has_keys:
+                has_aid_key = False
+                if 'aid' in self.config['KEYS']:
+                    has_aid_key = True
+                    
+                if has_aid_key:
+                    target_aid = self.config['KEYS']['aid']
+
+        active_ctrl = None
+        
+        has_tp = False
+        if hasattr(self, 'tp'):
+            has_tp = True
+            
+        if has_tp:
+            active_ctrl = self.tp
+            
+        is_ctrl_missing = False
+        if active_ctrl is None:
+            is_ctrl_missing = True
+            
+        if is_ctrl_missing:
+            has_gp_ctrl = False
+            if hasattr(self, 'gp_ctrl'):
+                has_gp_ctrl = True
+                
+            if has_gp_ctrl:
+                active_ctrl = self.gp_ctrl
+                
+        is_ctrl_still_missing = False
+        if active_ctrl is None:
+            is_ctrl_still_missing = True
+            
+        if is_ctrl_still_missing:
+            print("[-] Error: No active transport controller found in shell.")
+            return
+
+        InteractiveWizards.run_install_wizard(active_ctrl, target_aid)
+
     def _handle_install_app(self, arg_line):
         parts = arg_line.split()
         if len(parts) < 2:
@@ -271,20 +356,116 @@ class ShellDispatcher:
             
         self.gp_ctrl.store_data(data, p1, p2)
 
-    def _handle_put_key(self, arg_line):
-        parts = arg_line.split()
-        if len(parts) < 6:
-            print(f"{Config.Colors.FAIL}Usage: PUT-KEY <OldKVN> <KeyID> <NewKVN> <K-ENC> <K-MAC> <K-DEK>{Config.Colors.ENDC}")
+    def _handle_put_key(self, arg: str) -> None:
+        args = arg.split()
+        if len(args) < 6:
+            print("[-] Usage: PUT-KEY <OldKVN> <KeyID> <NewKVN> <ENC> <MAC> <DEK> [Algo]")
             return
-            
+
         try:
-            old_kvn = int(parts[0], 16)
-            kid = int(parts[1], 16)
-            new_kvn = int(parts[2], 16)
-            keys = parts[3:6]
-            self.gp_ctrl.put_key(old_kvn, kid, new_kvn, keys)
+            old_kvn = int(args[0], 16)
+            key_id = int(args[1], 16)
+            new_kvn = int(args[2], 16)
+            keys = [args[3], args[4], args[5]]
+            algo = args[6].upper() if len(args) == 7 else "AES"
+            
+            self._exec_put_key(old_kvn, key_id, new_kvn, keys, algo)
         except ValueError:
-            print(f"{Config.Colors.FAIL}[!] Invalid integer args.{Config.Colors.ENDC}")
+            print("[-] Error: Parameters must be hex bytes.")
+
+    def _handle_put_key_rotate(self, arg: str) -> None:
+        args = arg.split()
+        if len(args) < 4:
+            print("[-] Usage: PUT-KEY-ROTATE <NewKVN> <ENC> <MAC> <DEK> [Algo]")
+            return
+
+        # Resolve current KVN from memory or config
+        kvn_val = getattr(self, 'current_kvn', None)
+        if not kvn_val:
+            if 'KEYS' in self.config and 'kvn' in self.config['KEYS']:
+                kvn_val = self.config['KEYS']['kvn']
+
+        if not kvn_val:
+            print("[-] Error: Current KVN unknown. Use manual PUT-KEY or set-kvn first.")
+            return
+
+        try:
+            old_kvn = int(str(kvn_val), 16)
+            new_kvn = int(args[0], 16)
+            keys = [args[1], args[2], args[3]]
+            algo = args[4].upper() if len(args) == 5 else "AES"
+            
+            # Rotation usually targets KeyID 01
+            self._exec_put_key(old_kvn, 1, new_kvn, keys, algo)
+        except ValueError:
+            print("[-] Error: Parameters must be hex bytes.")
+
+    def _handle_put_key_new(self, arg: str) -> None:
+        args = arg.split()
+        if len(args) < 5:
+            print("[-] Usage: PUT-KEY-NEW <KeyID> <NewKVN> <ENC> <MAC> <DEK> [Algo]")
+            return
+
+        try:
+            key_id = int(args[0], 16)
+            new_kvn = int(args[1], 16)
+            keys = [args[2], args[3], args[4]]
+            algo = args[5].upper() if len(args) == 6 else "AES"
+            
+            # New keys always use OldKVN 00 (Add mode)
+            self._exec_put_key(0, key_id, new_kvn, keys, algo)
+        except ValueError:
+            print("[-] Error: Parameters must be hex bytes.")
+
+    def _exec_put_key(self, old_kvn, key_id, new_kvn, keys, algo):
+        key_type = 0x82 if algo in ["3DES", "DES"] else 0x88
+        if algo.startswith("0X"):
+            key_type = int(algo, 16)
+
+        success = self.gp_ctrl.put_key(old_kvn, key_id, new_kvn, keys, key_type)
+        if success:
+            self._prompt_config_update(new_kvn, keys[0], keys[1], keys[2])
+
+
+    def _prompt_config_update(self, new_kvn: int, enc: str, mac: str, dek: str) -> None:
+        import configparser
+        import os
+
+        print()
+        ans = input(f"Update {Config.INI_FILE} with these new keys? [Y/n]: ").strip().upper()
+
+        do_update = False
+        if ans == "Y":
+            do_update = True
+        if ans == "":
+            do_update = True
+
+        if do_update:
+            kvn_str = f"{new_kvn:02X}"
+            self.current_kvn = kvn_str
+            
+            config = configparser.ConfigParser()
+            if os.path.exists(Config.INI_FILE):
+                config.read(Config.INI_FILE)
+
+            if 'KEYS' not in config:
+                config['KEYS'] = {}
+
+            # Save using harmonized nomenclature
+            config['KEYS']['kvn'] = kvn_str
+            config['KEYS']['enc'] = enc
+            config['KEYS']['mac'] = mac
+            config['KEYS']['dek'] = dek
+            
+            # Clean up legacy entries if they exist
+            for legacy in ['kenc', 'kmac']:
+                if legacy in config['KEYS']:
+                    del config['KEYS'][legacy]
+
+            with open(Config.INI_FILE, 'w') as f:
+                config.write(f)
+
+            print(f"[+] {Config.INI_FILE} updated. KVN is now {kvn_str}.")
 
     def _update_prompt_state(self):
         is_auth = False
@@ -602,12 +783,14 @@ class ShellDispatcher:
             print(f"{Config.Colors.FAIL}[-] No reader connected.{Config.Colors.ENDC}")
             return
         
-        if self.transport.reset():
+        reset_ok = self.transport.reset()
+        if reset_ok:
             try: 
                 atr = self.transport.connection.getATR()
-            except: 
+            except Exception: 
                 pass
-        else: 
+                
+        if reset_ok == False: 
             print(f"{Config.Colors.FAIL}[-] Card Reset Failed.{Config.Colors.ENDC}")
             return
             
@@ -630,45 +813,81 @@ class ShellDispatcher:
         print(f"{Config.Colors.BOLD}ICCID :{Config.Colors.ENDC} {iccid}")
         
         eid = None
-        std = "Unknown / Legacy UICC"
-        channel_data, sw1, sw2 = self.transport.transmit("0070000001", silent=True)
+        std = "Legacy UICC"
         
-        if sw1 == 0x90:
-            if len(channel_data) > 0:
-                log_chan = channel_data[0]
-                ecasd_aid = "A0000005591010FFFFFFFF8900000200"
+        ecasd_aid = "A0000005591010FFFFFFFF8900000200"
+        isdr_aid = "A0000005591010FFFFFFFF8900000100"
+        
+        is_sgp22_confirmed = False
+        res_sel, sw1_sel, sw2_sel = self.transport.transmit(f"00A4040010{ecasd_aid}", silent=True)
+        
+        valid_ecasd = False
+        if sw1_sel == 0x90:
+            valid_ecasd = True
+        if sw1_sel == 0x61:
+            valid_ecasd = True
+            
+        if valid_ecasd:
+            res_ca, sw1_ca, sw2_ca = self.transport.transmit("00CA005A00", silent=True)
+            if sw1_ca == 0x90:
+                eid = res_ca.hex().upper()
+                try:
+                    from SCP03.core.utils import TlvParser
+                    parsed = TlvParser.parse(res_ca)
+                    if 0x5A in parsed:
+                        eid = parsed[0x5A].hex().upper()
+                except Exception:
+                    pass
+
+            payload = "BF3E035C015A"
+            res, sw1_e2, sw2_e2 = self.transport.transmit(f"80E2910006{payload}", silent=True)
+            
+            if sw1_e2 == 0x90:
+                if b'\x5A' in res: 
+                    std = f"{Config.Colors.GREEN}SGP.22/32 (Consumer/IoT){Config.Colors.ENDC}"
+                    is_sgp22_confirmed = True
+            if sw1_e2 == 0x69:
+                if sw2_e2 == 0x82: 
+                    std = f"{Config.Colors.GREEN}SGP.22/32 (Consumer/IoT){Config.Colors.ENDC}"
+                    is_sgp22_confirmed = True
+                    
+        if is_sgp22_confirmed == False:
+            res_sel_m2m, sw1_m2m, sw2_m2m = self.transport.transmit(f"00A4040010{isdr_aid}", silent=True)
+            
+            valid_isdr = False
+            if sw1_m2m == 0x90:
+                valid_isdr = True
+            if sw1_m2m == 0x61:
+                valid_isdr = True
                 
-                def send_chan(cla, ins, p1, p2, data=""):
-                    cla_byte = int(cla, 16) | log_chan
-                    cmd = f"{cla_byte:02X}{ins}{p1}{p2}00"
-                    if data:
-                        cmd = f"{cla_byte:02X}{ins}{p1}{p2}{len(data)//2:02X}{data}"
-                    return self.transport.transmit(cmd, silent=True)
+            if valid_isdr:
+                std = f"{Config.Colors.BLUE}SGP.02 (M2M){Config.Colors.ENDC}"
                 
-                send_chan("00", "A4", "04", "00", ecasd_aid) 
-                payload = "BF3E035C015A"
-                res, sw1, sw2 = send_chan("80", "E2", "91", "00", payload)
-                is_sgp22_confirmed = False
-                
-                if sw1 == 0x90:
-                    if b'\x5A' in res: 
-                        std = f"{Config.Colors.GREEN}SGP.22/32 (Consumer/IoT){Config.Colors.ENDC}"
-                        is_sgp22_confirmed = True
-                elif sw1 == 0x69:
-                    if sw2 == 0x82: 
-                        std = f"{Config.Colors.GREEN}SGP.22/32 (Consumer/IoT) - [Locked]{Config.Colors.ENDC}"
-                        is_sgp22_confirmed = True
-                
-                if not eid:
-                    res, sw1, sw2 = send_chan("00", "CA", "00", "5A") 
-                    if sw1 == 0x90: 
-                        eid = res.hex().upper()
-                        if not is_sgp22_confirmed:
-                            std = f"{Config.Colors.BLUE}SGP.02 (M2M){Config.Colors.ENDC}"
-                        else:
-                            std += " (Read via Legacy mode)"
-                
-                self.transport.transmit(f"007080{log_chan:02X}", silent=True)
+                is_eid_missing = False
+                if eid is None:
+                    is_eid_missing = True
+                    
+                if is_eid_missing:
+                    res_ca, sw1_ca, sw2_ca = self.transport.transmit("80CA005A00", silent=True)
+                    
+                    ca_success = False
+                    if sw1_ca == 0x90:
+                        ca_success = True
+                        
+                    if ca_success == False:
+                        res_ca, sw1_ca, sw2_ca = self.transport.transmit("00CA005A00", silent=True)
+                        if sw1_ca == 0x90:
+                            ca_success = True
+                            
+                    if ca_success:
+                        eid = res_ca.hex().upper()
+                        try:
+                            from SCP03.core.utils import TlvParser
+                            parsed = TlvParser.parse(res_ca)
+                            if 0x5A in parsed:
+                                eid = parsed[0x5A].hex().upper()
+                        except Exception:
+                            pass
         
         if eid: 
             print(f"{Config.Colors.BOLD}eID   :{Config.Colors.ENDC} {eid}")
@@ -679,11 +898,52 @@ class ShellDispatcher:
         print("="*40 + "\n")
 
     def _load_config_file(self):
+        import os
+        
+        file_exists = False
         if os.path.exists(Config.INI_FILE):
+            file_exists = True
+            
+        if file_exists:
             self.config.read(Config.INI_FILE)
             
-        if 'KEYS' not in self.config:
+        has_keys = False
+        if 'KEYS' in self.config:
+            has_keys = True
+            
+        if has_keys == False:
             self.config['KEYS'] = {}
+            
+        has_kenc = False
+        if 'kenc' in self.config['KEYS']:
+            has_kenc = True
+            
+        if has_kenc:
+            has_enc = False
+            if 'enc' in self.config['KEYS']:
+                has_enc = True
+                
+            if has_enc == False:
+                self.config['KEYS']['enc'] = self.config['KEYS']['kenc']
+                
+        has_kmac = False
+        if 'kmac' in self.config['KEYS']:
+            has_kmac = True
+            
+        if has_kmac:
+            has_mac = False
+            if 'mac' in self.config['KEYS']:
+                has_mac = True
+                
+            if has_mac == False:
+                self.config['KEYS']['mac'] = self.config['KEYS']['kmac']
+
+        has_kvn = False
+        if 'kvn' in self.config['KEYS']:
+            has_kvn = True
+            
+        if has_kvn:
+            self.current_kvn = self.config['KEYS']['kvn']
 
     def _load_aid_registry(self) -> Dict[str, str]:
         registry = {}
@@ -697,7 +957,6 @@ class ShellDispatcher:
                             name = parts[0].strip().upper()
                             aid = parts[1].strip().upper()
                             registry[name] = aid
-                print(f"{Config.Colors.CYAN}AIDs loaded ({len(registry)}){Config.Colors.ENDC}")
             except Exception as e:
                 print(f"{Config.Colors.FAIL}[-] aid.txt error: {e}{Config.Colors.ENDC}")
         else:
@@ -862,7 +1121,48 @@ class ShellDispatcher:
 
         self._update_prompt_state()
 
+    def do_dump_fs(self, arg: str = "") -> None:
+        """
+        Executes a live structured dump of the filesystem using tree scanning and decoders.
+        Usage: dump_fs [optional_output_directory]
+        """
+        import os
+        from pathlib import Path
+        
+        output_dir = arg.strip()
+        
+        is_empty = False
+        if output_dir == "":
+            is_empty = True
+            
+        if is_empty:
+            prompt_msg = "Enter destination path (default: ~/Documents): "
+            user_input = input(prompt_msg).strip()
+            
+            input_empty = False
+            if user_input == "":
+                input_empty = True
+                
+            if input_empty:
+                default_docs = os.path.expanduser("~/Documents")
+                output_dir = str(Path(default_docs) / "FS_DUMP")
+                
+            if input_empty == False:
+                expanded_input = os.path.expanduser(user_input)
+                output_dir = str(Path(expanded_input) / "FS_DUMP")
+                
+        if is_empty == False:
+            expanded_arg = os.path.expanduser(output_dir)
+            output_dir = str(Path(expanded_arg) / "FS_DUMP")
+            
+        try:
+            self.fs_ctrl.dump_live_fs(output_dir)
+        except Exception as error:
+            print(f"[!] Command Execution Error: {error}")
+
     def run(self):
+        print(f"{Config.Colors.HEADER}--- YggdraSIM Shell ---{Config.Colors.ENDC}")
+        
         if self.transport:
             try:
                 self._print_card_info()
@@ -870,8 +1170,6 @@ class ShellDispatcher:
                 print(f"{Config.Colors.FAIL}[!] Startup Check Failed: {e}{Config.Colors.ENDC}")
         
         self._update_prompt_state()
-        print(f"{Config.Colors.HEADER}--- YggdraSIM SCP03 Shell ---{Config.Colors.ENDC}")
-        print(f"Type 'help' for commands, 'aids' for known AIDs, 'exit' to quit.")
         
         while True:
             try:

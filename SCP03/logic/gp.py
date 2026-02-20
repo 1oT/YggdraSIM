@@ -159,51 +159,100 @@ class GlobalPlatformManager:
             
         print(f"\n{Config.Colors.GREEN}[+] STORE DATA Success ({total_chunks} blocks).{Config.Colors.ENDC}")
 
-    def put_key(self, old_kvn: int, key_id_start: int, new_kvn: int, new_keys: List[str]):
-        """
-        GlobalPlatform PUT KEY (GPCS 11.8).
-        Rotates keys by encrypting the new key values with the current session's DEK.
-        """
-        if not self.tp.session or not self.tp.session.is_authenticated:
-            print(f"{Config.Colors.FAIL}[!] Error: Must be authenticated.{Config.Colors.ENDC}")
-            return
-
-        if len(new_keys) != 3:
-            print(f"{Config.Colors.FAIL}[!] Error: PUT KEY requires 3 keys (ENC, MAC, DEK).{Config.Colors.ENDC}")
-            return
-
-        print(f"{Config.Colors.CYAN}[*] Rotating Keys (Replace KVN: {old_kvn:02X} -> New KVN: {new_kvn:02X})...{Config.Colors.ENDC}")
+    def put_key(self, old_kvn: int, key_id: int, new_kvn: int, new_keys: list, key_type: int = 0x88) -> bool:
+        from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+        from SCP03.core.utils import HexUtils
         
         payload = bytearray()
-        payload.append(new_kvn) 
+        payload.append(new_kvn)
         
-        for i, key_hex in enumerate(new_keys):
+        for i in range(len(new_keys)):
+            key_hex = new_keys[i]
             raw_key = HexUtils.to_bytes(key_hex)
-            if len(raw_key) != 16:
-                print(f"{Config.Colors.FAIL}[!] Error: Key {i+1} must be 16 bytes (AES-128).{Config.Colors.ENDC}")
-                return
             
-            try:
-                encrypted_key = self.tp.session.encrypt_key_data(raw_key)
-            except Exception as e:
-                print(f"{Config.Colors.FAIL}[!] DEK Encryption Failed: {e}{Config.Colors.ENDC}")
-                return
+            valid_len = False
+            if len(raw_key) == 16:
+                valid_len = True
+            if len(raw_key) == 24:
+                valid_len = True
+            if len(raw_key) == 32:
+                valid_len = True
+                
+            if valid_len == False:
+                print(f"[-] Error: Key {i+1} length invalid for crypto operations.")
+                return False
+                
+            encrypted_key = raw_key
+            
+            has_session = False
+            if hasattr(self.tp, 'session'):
+                has_session = True
+                
+            is_active = False
+            if has_session:
+                if self.tp.session is not None:
+                    is_active = True
+                        
+            if is_active:
+                try:
+                    encrypted_key = self.tp.session.encrypt_key_data(raw_key)
+                except Exception as e:
+                    print(f"[-] Encryption Error: {e}")
+                    return False
+                
+            kcv_check = b'\x00\x00\x00'
+            
+            is_aes = False
+            if key_type == 0x88:
+                is_aes = True
+                
+            if is_aes:
+                cipher = Cipher(algorithms.AES(raw_key), modes.ECB())
+                encryptor = cipher.encryptor()
+                kcv_check = encryptor.update(b'\x01' * 16)[:3]
+                
+            is_des = False
+            if key_type == 0x81:
+                is_des = True
+            if key_type == 0x82:
+                is_des = True
+            if key_type == 0x83:
+                is_des = True
+                
+            if is_des:
+                cipher = Cipher(algorithms.TripleDES(raw_key), modes.ECB())
+                encryptor = cipher.encryptor()
+                kcv_check = encryptor.update(b'\x00' * 8)[:3]
 
-            kcv_check = Cipher(algorithms.AES(raw_key), modes.ECB()).encryptor().update(b'\x00'*16)[:3]
-
-            payload.append(0x88)
+            payload.append(key_type)
             payload.append(len(encrypted_key))
             payload.extend(encrypted_key)
             payload.append(len(kcv_check))
             payload.extend(kcv_check)
 
-        cmd = f"80D8{old_kvn:02X}{key_id_start:02X}{len(payload):02X}{payload.hex()}"
-        _, sw1, sw2 = self.tp.transmit(cmd, silent=True)
-
+        p1 = old_kvn
+        p2 = key_id
+        
+        has_multiple = False
+        if len(new_keys) > 1:
+            has_multiple = True
+            
+        if has_multiple:
+            p2 = p2 | 0x80
+            
+        cmd = f"80D8{p1:02X}{p2:02X}{len(payload):02X}{payload.hex().upper()}"
+        res, sw1, sw2 = self.tp.transmit(cmd)
+        
+        is_success = False
         if sw1 == 0x90:
-            print(f"{Config.Colors.GREEN}[+] PUT KEY Success. New Keys active on next session.{Config.Colors.ENDC}")
-        else:
-            print(f"{Config.Colors.FAIL}[-] PUT KEY Failed: {sw1:02X}{sw2:02X}{Config.Colors.ENDC}")
+            is_success = True
+            
+        if is_success:
+            print(f"[+] PUT KEY (Type 0x{key_type:02X}) Successful.")
+            return True
+            
+        print(f"[-] PUT KEY Failed: {sw1:02X}{sw2:02X}")
+        return False
 
     def install_cap_file(self, filename: str, privileges: str = "00", install_params: str = "C900", instantiate: bool = True, target_app_aid: str = None, target_module_aid: str = None):
         """

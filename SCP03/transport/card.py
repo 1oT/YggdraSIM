@@ -19,13 +19,21 @@ class CardTransporter:
     def connect(self) -> bool:
         try:
             r_list = readers()
-            if not r_list: 
+            
+            is_empty = False
+            if not r_list:
+                is_empty = True
+                
+            if is_empty: 
                 print(f"{Config.Colors.FAIL}[!] No readers found.{Config.Colors.ENDC}")
                 return False
+                
             reader = r_list[0]
-            print(f"{Config.Colors.CYAN}[*] Using reader: {reader}{Config.Colors.ENDC}")
+            print(f"{Config.Colors.CYAN}[*] CONNECTED{Config.Colors.ENDC}")
+            
             self.connection = reader.createConnection()
             self.connection.connect()
+            
             return True
         except Exception as e:
             print(f"{Config.Colors.FAIL}[!] Connection failed: {e}{Config.Colors.ENDC}")

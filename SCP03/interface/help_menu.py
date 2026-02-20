@@ -26,7 +26,7 @@ class HelpMenu:
 
   {Config.Colors.CYAN}Lifecycle:{Config.Colors.ENDC}
     {Config.Colors.GREEN}INSTALL-INSTALL{Config.Colors.ENDC}          <cap/ijc> [Priv] [Par] [App] [Mod] : Install CAP
-    {Config.Colors.GREEN}INSTALL-LOAD{Config.Colors.ENDC}                     <cap/ijc>                          : Load CAP
+    {Config.Colors.GREEN}INSTALL-LOAD{Config.Colors.ENDC}             <cap/ijc>                          : Load CAP
     {Config.Colors.GREEN}INSTALL-APP{Config.Colors.ENDC}              <Pkg> <App> [Mod] [Priv] [Par]     : Instantiate Applet
     {Config.Colors.GREEN}INSTALL-SELECTABLE{Config.Colors.ENDC}       <AID> [Priv]                       : Make Selectable
     {Config.Colors.GREEN}INSTALL-EXTRADITION{Config.Colors.ENDC}      <AppAID> <SDAID>                   : Extradition
@@ -61,6 +61,7 @@ class HelpMenu:
     {Config.Colors.GREEN}UPDATE RECORD{Config.Colors.ENDC}            <N> <Hex>                          : Update Linear Fixed EF
     {Config.Colors.GREEN}SCAN{Config.Colors.ENDC}                                                        : Scan FS
     {Config.Colors.GREEN}REPORT{Config.Colors.ENDC}                   [File]                             : Gen Report
+    {Config.Colors.GREEN}DUMP-FS{Config.Colors.ENDC}                  [Dir]                              : Dump EFs to Local Disk
 
   {Config.Colors.CYAN}Security:{Config.Colors.ENDC}
     {Config.Colors.GREEN}VERIFY-ADM{Config.Colors.ENDC}               [Key]                              : Verify ADM Key
@@ -93,6 +94,7 @@ class HelpMenu:
     {Config.Colors.GREEN}SET-DEFAULT{Config.Colors.ENDC}                                                 : Reset to Defaults
 
   {Config.Colors.CYAN}General:{Config.Colors.ENDC}
+    {Config.Colors.GREEN}DECODE{Config.Colors.ENDC}                    <Hex>                             : Standalone TLV Decoder
     {Config.Colors.GREEN}OTA{Config.Colors.ENDC}                                                         : Launch SCP80 Tool
     {Config.Colors.GREEN}RUN / SCRIPT{Config.Colors.ENDC}              <File> [Out.yaml]                 : Execute Script
     {Config.Colors.GREEN}CLS{Config.Colors.ENDC}                                                         : Clear Screen
