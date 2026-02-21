@@ -1,0 +1,14 @@
+YggdraSIM
+Copyright 2026 Hampus Hellsberg
+
+This product includes software developed by Hampus Hellsberg.
+
+Standard Compliance Notice:
+This software implements portions of specifications defined by the 
+GSMA (SGP.22, SGP.32), ETSI (TS 102 221), and GlobalPlatform. 
+Attribution to these bodies is for technical descriptive purposes only 
+and does not imply endorsement.
+
+External Credits:
+- Original implementation of YggdraSIM
+  by Hampus Hellsberg.

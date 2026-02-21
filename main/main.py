@@ -1,3 +1,11 @@
+# -----------------------------------------------------------------------------
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+#
+# Copyright (c) 2026 Hampus Hellsberg
+# -----------------------------------------------------------------------------
+
 import sys
 import os
 import importlib
@@ -103,7 +111,7 @@ def run_scp11():
 
 def show_license():
     clear_screen()
-    print(f"{Colors.HEADER}=== GPL LICENSE ==={Colors.ENDC}\n")
+    print(f"{Colors.HEADER}=== MPL 2.0 LICENSE ==={Colors.ENDC}\n")
     license_path = DIRS["LICENSE"]
     if os.path.exists(license_path):
         with open(license_path, 'r') as f:
@@ -156,7 +164,7 @@ def main_menu():
             " [3] SCP11 Client",
             "",
             " [A] About",
-            " [L] License (GPL)",
+            " [L] License (MPL 2.0)",
             " [Q] Quit",
             f"{Colors.GREEN}-------------------------------{Colors.ENDC}"
         ]

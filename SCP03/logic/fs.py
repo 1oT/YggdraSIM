@@ -1,3 +1,11 @@
+# -----------------------------------------------------------------------------
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+#
+# Copyright (c) 2026 Hampus Hellsberg
+# -----------------------------------------------------------------------------
+
 import os
 import time
 import yaml 
@@ -1074,3 +1082,63 @@ class FileSystemController:
         finally:
             self.tp.transmit("00A40004023F00", silent=True)
             self.current_fid = "3F00"
+
+    def activate_file(self, fid: str = "") -> None:
+        """TS 102 221: Activate File (0044)."""
+        apdu = "00440000"
+        has_fid = False
+        if len(fid) > 0:
+            has_fid = True
+        
+        if has_fid:
+            apdu = f"0044000002{fid}"
+            
+        self.tp.transmit(apdu)
+
+    def deactivate_file(self, fid: str = "") -> None:
+        """TS 102 221: Deactivate File (0004)."""
+        apdu = "00040000"
+        has_fid = False
+        if len(fid) > 0:
+            has_fid = True
+            
+        if has_fid:
+            apdu = f"0004000002{fid}"
+            
+        self.tp.transmit(apdu)
+
+    def suspend_uicc(self) -> None:
+        """TS 102 221: Suspend UICC (8076)."""
+        # P1=00: Minimum duration, P2=00: Suggested duration
+        self.tp.transmit("8076000000")
+
+    def search_record(self, search_hex: str) -> None:
+        """TS 102 221: Search Record (00A2)."""
+        # P2=04: Forward search from the beginning
+        apdu = f"00A20104{len(search_hex)//2:02X}{search_hex}"
+        self.tp.transmit(apdu)
+
+    def create_file(self, data_hex: str) -> None:
+        """TS 102 222: Create File (00E0)."""
+        apdu = f"00E00000{len(data_hex)//2:02X}{data_hex}"
+        self.tp.transmit(apdu)
+
+    def delete_file(self, fid: str) -> None:
+        """TS 102 222: Delete File (00E4)."""
+        apdu = f"00E4000002{fid}"
+        self.tp.transmit(apdu)
+
+    def terminate_df(self, fid: str) -> None:
+        """TS 102 222: Terminate DF (00E6)."""
+        apdu = f"00E6000002{fid}"
+        self.tp.transmit(apdu)
+
+    def terminate_ef(self, fid: str) -> None:
+        """TS 102 222: Terminate EF (00E8)."""
+        apdu = f"00E8000002{fid}"
+        self.tp.transmit(apdu)
+
+    def resize_file(self, data_hex: str) -> None:
+        """TS 102 222: Resize File (80D4)."""
+        apdu = f"80D40000{len(data_hex)//2:02X}{data_hex}"
+        self.tp.transmit(apdu)
