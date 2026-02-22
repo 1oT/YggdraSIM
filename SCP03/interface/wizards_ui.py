@@ -9,7 +9,7 @@ class InteractiveWizard:
         self.results = {}
         self.colors = colors_ref
 
-    def add_step(self, step_id, prompt, default=None, is_bool=False, indent=0, warning=None):
+    def add_step(self, step_id, prompt, default=None, is_bool=False, indent=0, warning=None, is_mandatory=False):
         step = {
             "id": step_id,
             "prompt": prompt,
@@ -17,6 +17,7 @@ class InteractiveWizard:
             "is_bool": is_bool,
             "indent": indent,
             "warning": warning,
+            "is_mandatory": is_mandatory,
             "value": None,
             "status": "pending"
         }
@@ -46,7 +47,7 @@ class InteractiveWizard:
             has_desc = True
             
         if has_desc:
-            print(f"{self.description}")
+            print(f"{self.description}\n")
         
         idx = 0
         for step in self.steps:
@@ -63,13 +64,23 @@ class InteractiveWizard:
                     is_skipped = True
                     
                 if is_skipped:
-                    print(f"{indent_str}{self.colors.WARNING}[-] {prompt_text} SKIPPED{self.colors.ENDC}")
+                    print(f"{indent_str}{self.colors.WARNING}> {prompt_text} SKIPPED{self.colors.ENDC}")
                     
                 is_completed = False
                 if step["status"] == "completed":
                     is_completed = True
                     
+                is_defaulted = False
+                if step["status"] == "defaulted":
+                    is_defaulted = True
+                    
+                is_done = False
                 if is_completed:
+                    is_done = True
+                if is_defaulted:
+                    is_done = True
+                    
+                if is_done:
                     val_str = str(step["value"])
                     
                     is_bool_step = False
@@ -84,7 +95,11 @@ class InteractiveWizard:
                         if is_false:
                             val_str = "N"
                             
-                    print(f"{indent_str}{self.colors.GREEN}[+] {prompt_text} {val_str}{self.colors.ENDC}")
+                    if is_completed:
+                        print(f"{indent_str}{self.colors.GREEN}> {prompt_text} {val_str}{self.colors.ENDC}")
+                        
+                    if is_defaulted:
+                        print(f"{indent_str}{self.colors.WARNING}> {prompt_text} {val_str}{self.colors.ENDC}")
 
             is_current = False
             if idx == self.current_idx:
@@ -98,26 +113,21 @@ class InteractiveWizard:
                 if has_warning:
                     print(f"{indent_str}{self.colors.WARNING}[!] {step['warning']}{self.colors.ENDC}")
                     
-                print(f"{indent_str}{self.colors.BOLD}> {prompt_text}{self.colors.ENDC} ", end="", flush=True)
-
-            is_future = False
-            if idx > self.current_idx:
-                is_future = True
-                
-            if is_future:
-                print(f"{indent_str}    {prompt_text}")
-                
             idx += 1
 
     def run(self):
         while self.current_idx < len(self.steps):
             self._render()
-            step = self.steps[self.current_idx]
             
-            user_input = input().strip()
+            step = self.steps[self.current_idx]
+            indent_str = "  " * step["indent"]
+            
+            prompt_str = f"{indent_str}{self.colors.BOLD}> {step['prompt']}{self.colors.ENDC} "
+            
+            user_input = input(prompt_str).strip()
             
             is_empty = False
-            if not user_input:
+            if len(user_input) == 0:
                 is_empty = True
                 
             if is_empty:
@@ -127,7 +137,7 @@ class InteractiveWizard:
                     
                 if has_default:
                     step["value"] = step["default"]
-                    step["status"] = "completed"
+                    step["status"] = "defaulted"
                     
                 no_default = False
                 if step["default"] is None:
@@ -161,7 +171,7 @@ class InteractiveWizard:
                         
                     if is_no:
                         step["value"] = False
-                        step["status"] = "skipped"
+                        step["status"] = "defaulted"
                         
                 is_str = False
                 if is_bool == False:
@@ -184,6 +194,33 @@ class InteractiveWizard:
                         step["value"] = user_input
                         step["status"] = "completed"
             
+            is_mandatory = False
+            if step["is_mandatory"]:
+                is_mandatory = True
+                
+            if is_mandatory:
+                val = step["value"]
+                
+                is_val_none = False
+                if val is None:
+                    is_val_none = True
+                    
+                is_val_empty_str = False
+                if val == "":
+                    is_val_empty_str = True
+                    
+                is_missing_req = False
+                if is_val_none:
+                    is_missing_req = True
+                if is_val_empty_str:
+                    is_missing_req = True
+                    
+                if is_missing_req:
+                    step["status"] = "pending"
+                    step["warning"] = "This field is mandatory and cannot be empty."
+                    continue
+                    
+            step["warning"] = None
             self.results[step["id"]] = step["value"]
             self.current_idx += 1
             
