@@ -23,24 +23,48 @@ class InteractiveWizard:
         }
         self.steps.append(step)
 
-    def _clear(self):
-        is_nt = False
-        if os.name == 'nt':
-            is_nt = True
+    def _render_completed_step(self, step):
+        indent_str = "  " * step["indent"]
+        prompt_text = step["prompt"]
+        
+        is_skipped = False
+        if step["status"] == "skipped":
+            is_skipped = True
             
-        if is_nt:
-            os.system('cls')
+        if is_skipped:
+            print(f"{indent_str}{self.colors.WARNING}> {prompt_text} SKIPPED{self.colors.ENDC}")
+            return
             
-        is_posix = False
-        if is_nt == False:
-            is_posix = True
+        is_completed = False
+        if step["status"] == "completed":
+            is_completed = True
             
-        if is_posix:
-            os.system('clear')
+        is_defaulted = False
+        if step["status"] == "defaulted":
+            is_defaulted = True
+            
+        val_str = str(step["value"])
+        
+        is_bool_step = False
+        if step["is_bool"]:
+            is_bool_step = True
+            
+        if is_bool_step:
+            val_str = "Y"
+            is_false = False
+            if step["value"] == False:
+                is_false = True
+            if is_false:
+                val_str = "N"
+                
+        if is_completed:
+            print(f"{indent_str}{self.colors.GREEN}> {prompt_text} {val_str}{self.colors.ENDC}")
+            
+        if is_defaulted:
+            print(f"{indent_str}{self.colors.WARNING}> {prompt_text} {val_str}{self.colors.ENDC}")
 
-    def _render(self):
-        self._clear()
-        print(f"{self.colors.HEADER}--- {self.title} ---{self.colors.ENDC}")
+    def run(self):
+        print(f"\n{self.colors.HEADER}--- {self.title} ---{self.colors.ENDC}")
         
         has_desc = False
         if self.description:
@@ -48,80 +72,18 @@ class InteractiveWizard:
             
         if has_desc:
             print(f"{self.description}\n")
-        
-        idx = 0
-        for step in self.steps:
-            indent_str = "  " * step["indent"]
-            prompt_text = step["prompt"]
-            
-            is_past = False
-            if idx < self.current_idx:
-                is_past = True
-                
-            if is_past:
-                is_skipped = False
-                if step["status"] == "skipped":
-                    is_skipped = True
-                    
-                if is_skipped:
-                    print(f"{indent_str}{self.colors.WARNING}> {prompt_text} SKIPPED{self.colors.ENDC}")
-                    
-                is_completed = False
-                if step["status"] == "completed":
-                    is_completed = True
-                    
-                is_defaulted = False
-                if step["status"] == "defaulted":
-                    is_defaulted = True
-                    
-                is_done = False
-                if is_completed:
-                    is_done = True
-                if is_defaulted:
-                    is_done = True
-                    
-                if is_done:
-                    val_str = str(step["value"])
-                    
-                    is_bool_step = False
-                    if step["is_bool"]:
-                        is_bool_step = True
-                        
-                    if is_bool_step:
-                        val_str = "Y"
-                        is_false = False
-                        if step["value"] == False:
-                            is_false = True
-                        if is_false:
-                            val_str = "N"
-                            
-                    if is_completed:
-                        print(f"{indent_str}{self.colors.GREEN}> {prompt_text} {val_str}{self.colors.ENDC}")
-                        
-                    if is_defaulted:
-                        print(f"{indent_str}{self.colors.WARNING}> {prompt_text} {val_str}{self.colors.ENDC}")
 
-            is_current = False
-            if idx == self.current_idx:
-                is_current = True
-                
-            if is_current:
-                has_warning = False
-                if step["warning"]:
-                    has_warning = True
-                    
-                if has_warning:
-                    print(f"{indent_str}{self.colors.WARNING}[!] {step['warning']}{self.colors.ENDC}")
-                    
-            idx += 1
-
-    def run(self):
         while self.current_idx < len(self.steps):
-            self._render()
-            
             step = self.steps[self.current_idx]
             indent_str = "  " * step["indent"]
             
+            has_warning = False
+            if step["warning"]:
+                has_warning = True
+                
+            if has_warning:
+                print(f"{indent_str}{self.colors.WARNING}[!] {step['warning']}{self.colors.ENDC}")
+                
             prompt_str = f"{indent_str}{self.colors.BOLD}> {step['prompt']}{self.colors.ENDC} "
             
             user_input = input(prompt_str).strip()
@@ -216,13 +178,34 @@ class InteractiveWizard:
                     is_missing_req = True
                     
                 if is_missing_req:
+                    has_old_warning = False
+                    if step["warning"]:
+                        has_old_warning = True
+                        
                     step["status"] = "pending"
                     step["warning"] = "This field is mandatory and cannot be empty."
+                    
+                    if has_old_warning:
+                        print("\033[1A\033[2K\033[1A\033[2K", end="")
+                        
+                    if has_old_warning == False:
+                        print("\033[1A\033[2K", end="")
                     continue
                     
+            has_old_warning = False
+            if step["warning"]:
+                has_old_warning = True
+                
             step["warning"] = None
             self.results[step["id"]] = step["value"]
             self.current_idx += 1
             
-        self._render()
+            if has_old_warning:
+                print("\033[1A\033[2K\033[1A\033[2K", end="")
+                
+            if has_old_warning == False:
+                print("\033[1A\033[2K", end="")
+                
+            self._render_completed_step(step)
+            
         return self.results
