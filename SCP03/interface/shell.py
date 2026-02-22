@@ -936,40 +936,80 @@ class ShellDispatcher:
         print(f"{Config.Colors.HEADER}=== Switching to SCP80 OTA Tool ==={Config.Colors.ENDC}")
         print(f"{Config.Colors.WARNING}[*] Releasing Card Reader...{Config.Colors.ENDC}")
         
+        has_tp = False
         if self.transport:
+            has_tp = True
+            
+        if has_tp:
             self.transport.disconnect()
             
         try:
             print(f"{Config.Colors.CYAN}[*] Starting SCP80 Module...{Config.Colors.ENDC}")
             import sys
-            import importlib.util
+            import os
+            import importlib
+
             current_dir = os.path.dirname(os.path.abspath(__file__))
             scp80_root = os.path.abspath(os.path.join(current_dir, '../../SCP80'))
             
+            is_missing = False
             if scp80_root not in sys.path:
+                is_missing = True
+                
+            if is_missing:
                 sys.path.insert(0, scp80_root)
 
-            import main as scp80_entry
-            scp80_entry.run_standalone()
+            import main as scp80_main
+            importlib.reload(scp80_main)
+            
+            # Execute the OTA tool
+            scp80_main.run_standalone()
 
         except SystemExit:
-            pass 
-        except ImportError as e:
-            print(f"{Config.Colors.FAIL}[!] Import Error: {e}{Config.Colors.ENDC}")
-        except AttributeError:
-             print(f"{Config.Colors.FAIL}[!] Error: SCP80/main.py has no 'run_standalone()' function.{Config.Colors.ENDC}")
+            # This catches 'q' or 'exit' from the child
+            pass
         except Exception as e:
-            print(f"{Config.Colors.FAIL}[!] SCP80 Tool Crashed: {e}{Config.Colors.ENDC}")
+            print(f"{Config.Colors.FAIL}[!] SCP80 Switch Failed: {e}{Config.Colors.ENDC}")
+        
+        # --- CLEAR SCREEN HERE ---
+        # Moving this outside ensure it always clears upon return
+        is_nt = False
+        if os.name == 'nt':
+            is_nt = True
+            
+        if is_nt:
+            os.system('cls')
+        
+        if is_nt == False:
+            os.system('clear')
+
+        # Redraw the SCP03 Admin Banner
+        print(f"{Config.Colors.HEADER}")
+        print(r" __   __               _               ____ ___ __  __ ")
+        print(r" \ \ / /__ _  __ _  __| | _ __  __ _  / ___|_ _|  \/  |")
+        print(r"  \ V / _` | / _` |/ _` || '__|/ _` | \___ \| || |\/| |")
+        print(r"   | | (_| || (_| | (_| || |  | (_| |  ___) | || |  | |")
+        print(r"   |_|\__, | \__, |\__,_||_|   \__,_| |____/___|_|  |_|")
+        print(r"      |___/  |___/                                     ")
+        print(r"             _    ____  __  __ ___ _   _ ")
+        print(r"            / \  |  _ \|  \/  |_ _| \ | |")
+        print(r"           / _ \ | | | | |\/| || ||  \| |")
+        print(r"          / ___ \| |_| | |  | || || |\  |")
+        print(r"         /_/   \_\____/|_|  |_|___|_| \_|")
+        print(f"")
+        print(f"=== YggdraSIM Administration Shell ===")
+        print(f" [ GlobalPlatform | ETSI FS | SGP.22 eUICC | Telecom Auth ]")
+        print(f" Created and maintained by Hampus Hellsberg")
+        print(f"{Config.Colors.ENDC}")
         
         print(f"\n{Config.Colors.HEADER}=== Returning to SCP03 Shell ==={Config.Colors.ENDC}")
         print(f"{Config.Colors.WARNING}[*] Re-acquiring Card Reader...{Config.Colors.ENDC}")
         
         try:
-            if scp80_root in sys.path:
-                sys.path.remove(scp80_root)
-
+            # Re-initialize the transport stack for SCP03
             self.transport = CardTransporter()
             self._patch_transport()
+            
             self.gp_ctrl.tp = self.transport
             self.fs_ctrl.tp = self.transport
             self.sec_ctrl.tp = self.transport
@@ -979,6 +1019,7 @@ class ShellDispatcher:
         except Exception as e:
             print(f"{Config.Colors.FAIL}[!] Failed to reconnect reader: {e}{Config.Colors.ENDC}")
 
+        self._print_card_info() 
         self._update_prompt_state()
 
     def do_dump_fs(self, arg: str = "") -> None:
@@ -1042,10 +1083,15 @@ class ShellDispatcher:
         print(r"   | | (_| || (_| | (_| || |  | (_| |  ___) | || |  | |")
         print(r"   |_|\__, | \__, |\__,_||_|   \__,_| |____/___|_|  |_|")
         print(r"      |___/  |___/                                     ")
+        print(r"             _    ____  __  __ ___ _   _ ")
+        print(r"            / \  |  _ \|  \/  |_ _| \ | |")
+        print(r"           / _ \ | | | | |\/| || ||  \| |")
+        print(r"          / ___ \| |_| | |  | || || |\  |")
+        print(r"         /_/   \_\____/|_|  |_|___|_| \_|")
         print(f"")
-        print(f"=== YggdraSIM Shell ===")
-        print(f"Created and maintained as Open Source under MPL.2.0 license.")
-        print(f"Hampus Hellsberg 2026")
+        print(f"=== YggdraSIM Administration Shell ===")
+        print(f" [ GlobalPlatform | ETSI FS | SGP.22 eUICC | Telecom Auth ]")
+        print(f" Created and maintained by Hampus Hellsberg")
         print(f"{Config.Colors.ENDC}")
         
         has_transport = False

@@ -111,25 +111,87 @@ def run_scp11():
 
 def show_license():
     clear_screen()
+    # Fleshed out License Header
+    print(f"{Colors.HEADER}")
+    print(r" __   __               _               ____ ___ __  __ ")
+    print(r" \ \ / /__ _  __ _  __| | _ __  __ _  / ___|_ _|  \/  |")
+    print(r"  \ V / _` | / _` |/ _` || '__|/ _` | \___ \| || |\/| |")
+    print(r"   | | (_| || (_| | (_| || |  | (_| |  ___) | || |  | |")
+    print(r"   |_|\__, | \__, |\__,_||_|   \__,_| |____/___|_|  |_|")
+    print(r"      |___/  |___/                                     ")
+    print(r"            _     ___ ____ _____ _   _ ____  _____     ")
+    print(r"           | |   |_ _/ ___| ____| \ | / ___|| ____|    ")
+    print(r"           | |    | | |   |  _| |  \| \___ \|  _|      ")
+    print(r"           | |___ | | |___| |___| |\  |___) | |___     ")
+    print(r"           |_____|___\____|_____|_| \_|____/|_____|    ")
+    print(f"{Colors.ENDC}")
+
     print(f"{Colors.HEADER}=== MPL 2.0 LICENSE ==={Colors.ENDC}\n")
     license_path = DIRS["LICENSE"]
+    
     if os.path.exists(license_path):
         with open(license_path, 'r') as f:
-            print(f.read())
+            lines = f.readlines()
+            for i, line in enumerate(lines):
+                print(line, end='')
+                # Pause every 20 lines to prevent auto-scrolling to the bottom
+                if (i + 1) % 20 == 0:
+                    input(f"\n{Colors.CYAN}-- More ({i+1}/{len(lines)}) - Press Enter to continue --{Colors.ENDC}")
     else:
         print(f"{Colors.FAIL}License file not found at: {license_path}{Colors.ENDC}")
+    
     pause()
 
 def show_about():
     clear_screen()
-    print(f"{Colors.HEADER}=== ABOUT YGGDRASIM ==={Colors.ENDC}")
+    print(f"{Colors.HEADER}")
+    print(r" __   __               _               ____ ___ __  __ ")
+    print(r" \ \ / /__ _  __ _  __| | _ __  __ _  / ___|_ _|  \/  |")
+    print(r"  \ V / _` | / _` |/ _` || '__|/ _` | \___ \| || |\/| |")
+    print(r"   | | (_| || (_| | (_| || |  | (_| |  ___) | || |  | |")
+    print(r"   |_|\__, | \__, |\__,_||_|   \__,_| |____/___|_|  |_|")
+    print(r"      |___/  |___/                                     ")
+    print(r"                _    ____   ___  _   _ _____           ")
+    print(r"               / \  | __ ) / _ \| | | |_   _|          ")
+    print(r"              / _ \ |  _ \| | | | | | | | |            ")
+    print(r"             / ___ \| |_) | |_| | |_| | | |            ")
+    print(r"            /_/   \_\____/ \___/ \___/  |_|            ")
+    print(f"{Colors.ENDC}")
     print(f"""
     {Colors.BOLD}YggdraSIM Suite v2.0{Colors.ENDC}
     Copyright (C) 2026 Hampus Hellsberg
     
-    A comprehensive toolkit for SIM/eUICC research.
-    As Yggdrasil connects the Nine Realms, this suite 
-    connects the layers of secure element communication.
+    YggdraSIM is a specialized research and security auditing toolkit 
+    designed for deep interaction with SIM, USIM, and eUICC platforms. 
+    The suite facilitates lower-layer communication to analyze secure 
+    element behavior and protocol compliance.
+
+    {Colors.BOLD}Core Sub-Systems:{Colors.ENDC}
+    
+    * {Colors.CYAN}SCP03 Admin Shell (Local Management):{Colors.ENDC}
+      A high-privilege administrative interface utilizing GlobalPlatform 
+      Secure Channel Protocol 03. It enables direct ETSI TS 102 221/222 
+      file system operations, security attribute (ARR) decoding, and 
+      eUICC interaction via SGP.22 logic.
+
+    * {Colors.CYAN}SCP80 OTA Simulator (Remote Management):{Colors.ENDC}
+      Implements Remote File Management (RFM) and Over-The-Air (OTA) 
+      payload generation. It allows for auditing card security via 
+      3GPP TS 31.115 and ETSI TS 102 225 security layering without 
+      requiring a live network core.
+
+    * {Colors.CYAN}SCP11 Client (eUICC Provisioning - BETA):{Colors.ENDC}
+      {Colors.WARNING}[UNDER CONSTRUCTION]{Colors.ENDC}
+      This module simulates an SM-DP+ locally to load profiles from 
+      disk directly to the eUICC. It functions as a standalone 
+      simulator that handles communication between the SIM and PC 
+      with zero reliance on internet or production SM-DP+ servers.
+
+    {Colors.BOLD}Philosophy:{Colors.ENDC}
+    As Yggdrasil connects the Nine Realms in Norse mythology, this 
+    suite connects the various layers of secure element communication. 
+    It acts as the central conduit between local hardware, remote 
+    file systems, and asymmetric provisioning realms.
     """)
     pause()
 
@@ -137,46 +199,39 @@ def show_about():
 
 def main_menu():
     setup_paths()
-
-    tree_art = [
-        f"      {Colors.GREEN}.--.  .--.  .--.{Colors.ENDC}",
-        f"    {Colors.GREEN}.(          )  )  ).{Colors.ENDC}",
-        f"  {Colors.GREEN}(                      ){Colors.ENDC}",
-        f"   {Colors.GREEN}'._  .  ..  ..  ..  _.'{Colors.ENDC}",
-        f"       {Colors.BROWN}| \\  ||  / |{Colors.ENDC}",
-        f"       {Colors.BROWN}|  \\ || /  |{Colors.ENDC}",
-        f"       {Colors.BROWN}|   \\||/   |{Colors.ENDC}",
-        f"       {Colors.BROWN}|    ||    |{Colors.ENDC}",
-        f"       {Colors.BROWN}|    ||    |{Colors.ENDC}",
-        f"  {Colors.BROWN}/\\__/\\____||____/\\__/\\{Colors.ENDC}",
-        f" {Colors.BROWN}/                      \\{Colors.ENDC}"
-    ]
-
     while True:
         clear_screen()
+
+        print(f"{Colors.HEADER}")
+        print(r" __   __               _               ____ ___ __  __ ")
+        print(r" \ \ / /__ _  __ _  __| | _ __  __ _  / ___|_ _|  \/  |")
+        print(r"  \ V / _` | / _` |/ _` || '__|/ _` | \___ \| || |\/| |")
+        print(r"   | | (_| || (_| | (_| || |  | (_| |  ___) | || |  | |")
+        print(r"   |_|\__, | \__, |\__,_||_|   \__,_| |____/___|_|  |_|")
+        print(r"      |___/  |___/                                     ")
+        print(r"        __  __       _        __  __                  ")
+        print(r"       |  \/  | __ _(_)_ __  |  \/  | ___ _ __  _   _ ")
+        print(r"       | |\/| |/ _` | | '_ \ | |\/| |/ _ \ '_ \| | | |")
+        print(r"       | |  | | (_| | | | | || |  | |  __/ | | | |_| |")
+        print(r"       |_|  |_|\__,_|_|_| |_||_|  |_|\___|_| |_|\__,_|")
+        print(f"")
+        print(f"=== Unified Secure Element Research & Auditing Suite ===")
+        print(f" [ Admin Shell | OTA Simulator | Local SM-DP+ Simulation ]")
+        print(f" Created and maintained by Hampus Hellsberg")
+        print(f"{Colors.ENDC}")
         
         menu_lines = [
-            f"{Colors.GREEN}==============================={Colors.ENDC}",
-            f"{Colors.BOLD}   YGGDRASIM - CORE WRAPPER    {Colors.ENDC}",
-            f"{Colors.GREEN}==============================={Colors.ENDC}",
-            " [1] SCP03 Shell",
-            " [2] SCP80 OTA Simulator",
-            " [3] SCP11 Client",
+            f"{Colors.HEADER}==============================={Colors.ENDC}",
+            f"{Colors.GREEN} [1] Admin Shell (SCP03) - Local Management{Colors.ENDC}",
+            f"{Colors.CYAN} [2] OTA Simulator (SCP80) - Remote Management{Colors.ENDC}",
+            f" {Colors.WARNING}[3] eSIM Management (SCP11) - eUICC Provisioning (BETA){Colors.ENDC}",
             "",
             " [A] About",
             " [L] License (MPL 2.0)",
             " [Q] Quit",
-            f"{Colors.GREEN}-------------------------------{Colors.ENDC}"
+            f"{Colors.HEADER}==============================={Colors.ENDC}"
         ]
-
-        max_idx = max(len(menu_lines), len(tree_art))
-
-        for i in range(max_idx):
-            menu_part = menu_lines[i] if i < len(menu_lines) else ""
-            raw_len = len(menu_part.replace(Colors.CYAN, "").replace(Colors.GREEN, "").replace(Colors.ENDC, "").replace(Colors.BOLD, "").replace(Colors.HEADER, "").replace(Colors.BROWN, "").replace(Colors.WARNING, "").replace(Colors.FAIL, ""))
-            padding = " " * (35 - raw_len)
-            tree_part = tree_art[i] if i < len(tree_art) else ""
-            print(f"{menu_part}{padding}{tree_part}")
+        print("\n".join(menu_lines))
 
         choice = input("\nSelect module: ").strip().upper()
 

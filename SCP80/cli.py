@@ -103,28 +103,108 @@ class OtaShell:
         except: pass
 
     def run(self):
-        print(f"{Colors.GREEN}[+] {APP_NAME} v{VERSION}{Colors.ENDC}")
+        is_nt = False
+        if os.name == 'nt':
+            is_nt = True
+            
+        if is_nt:
+            os.system('cls')
+            
+        is_posix = False
+        if os.name != 'nt':
+            is_posix = True
+            
+        if is_posix:
+            os.system('clear')
+
+        print(f"{Colors.HEADER}")
+        print(r" __   __               _               ____ ___ __  __ ")
+        print(r" \ \ / /__ _  __ _  __| | _ __  __ _  / ___|_ _|  \/  |")
+        print(r"  \ V / _` | / _` |/ _` || '__|/ _` | \___ \| || |\/| |")
+        print(r"   | | (_| || (_| | (_| || |  | (_| |  ___) | || |  | |")
+        print(r"   |_|\__, | \__, |\__,_||_|   \__,_| |____/___|_|  |_|")
+        print(r"      |___/  |___/                                     ")
+        print(r"                    ___ _____  _    ")
+        print(r"                   / _ \_   _|/ \   ")
+        print(r"                  | | | || | / _ \  ")
+        print(r"                  | |_| || |/ ___ \ ")
+        print(r"                   \___/ |_/_/   \_" + "\\")
+        print(f"")
+        print(f"=== Remote File Management & Over-The-Air Payload Generator ===")
+        print(f" Created and maintained by Hampus Hellsberg")
+        print(f"{Colors.ENDC}")
+
         self._setup_history()
-        if self.config.get("transport") == "reader": self.transport.connect()
-        print("Type 'help' for commands. Use Arrow Keys to scroll history.")
+        
+        is_reader = False
+        if self.config.get("transport") == "reader":
+            is_reader = True
+            
+        if is_reader:
+            self.transport.connect()
+        
         while True:
             try:
-                mode = "OTA" if self.config.get("transport") == "reader" else "PRINT"
+                mode = "PRINT"
+                if is_reader:
+                    mode = "OTA"
+                    
                 line = input(f"\n{Colors.CYAN}[{mode}]{Colors.ENDC} > ").strip()
-                if not line: continue
-                if readline: 
-                    try: readline.write_history_file(self.history_file)
-                    except: pass
-                if not self._process_line(line): break
-            except EOFError: 
-                print("\nExiting..."); self._process_line("quit"); break
-            except KeyboardInterrupt: 
-                print("\nUse 'quit' to exit."); continue
-            except Exception as e: print(f"{Colors.FAIL}Error: {e}{Colors.ENDC}")
+                
+                is_empty = False
+                if not line:
+                    is_empty = True
+                    
+                if is_empty:
+                    continue
+                    
+                has_readline = False
+                if 'readline' in globals() or 'readline' in locals():
+                    has_readline = True
+                    
+                if has_readline:
+                    try:
+                        import readline
+                        readline.write_history_file(self.history_file)
+                    except Exception:
+                        pass
+                        
+                processed = self._process_line(line)
+                
+                is_processed = False
+                if processed:
+                    is_processed = True
+                    
+                is_failed = False
+                if is_processed == False:
+                    is_failed = True
+                    
+                if is_failed:
+                    break
+                    
+            except EOFError:
+                print("\nExiting...")
+                self._process_line("quit")
+                break
+                
+            except KeyboardInterrupt:
+                print("\nUse 'quit' to exit.")
+                continue
+                
+            except Exception as e:
+                print(f"{Colors.FAIL}Error: {e}{Colors.ENDC}")
 
     def _process_line(self, line: str) -> bool:
-        parts = line.split()
-        cmd, args = parts[0].lower(), parts[1:]
+        cmd_parts = line.split()
+        cmd = cmd_parts[0].lower()
+        
+        is_admin = False
+        if cmd == "admin":
+            is_admin = True
+            
+        if is_admin:
+            self._run_scp03_tool()
+            return True
         if cmd in ["quit", "exit", "q"]:
             self.config.save(); self.transport.disconnect(); return False
         if hasattr(self, f"do_{cmd}"): getattr(self, f"do_{cmd}")(*args)
@@ -290,3 +370,103 @@ class OtaShell:
         print("  sendraw <hex>   - Send raw APDU (no OTA)")
         print("  reset           - Re-initialize STK")
         print("  quit            - Exit")
+
+    def _run_scp03_tool(self):
+        print(f"{Colors.HEADER}=== Switching to SCP03 Admin Shell ==={Colors.ENDC}")
+        print(f"{Colors.WARNING}[*] Releasing Card Reader...{Colors.ENDC}")
+        
+        has_transport = False
+        if self.transport:
+            has_transport = True
+            
+        if has_transport:
+            try:
+                self.transport.disconnect()
+            except Exception:
+                pass
+            
+        try:
+            print(f"{Colors.CYAN}[*] Starting SCP03 Module...{Colors.ENDC}")
+            import sys
+            import importlib
+            import os
+
+            current_dir = os.path.dirname(os.path.abspath(__file__))
+            root_path = os.path.abspath(os.path.join(current_dir, '..'))
+            
+            is_missing_path = False
+            if root_path not in sys.path:
+                is_missing_path = True
+                
+            if is_missing_path:
+                sys.path.insert(0, root_path)
+
+            import SCP03.main as scp03_entry
+            importlib.reload(scp03_entry)
+            
+            scp03_entry.entry()
+
+        except SystemExit:
+            # Re-emerging from SCP03
+            is_nt = False
+            if os.name == 'nt':
+                is_nt = True
+            
+            if is_nt:
+                os.system('cls')
+            
+            if is_nt == False:
+                os.system('clear')
+                
+        except ImportError as e:
+            print(f"{Colors.FAIL}[!] Import Error: {e}{Colors.ENDC}")
+        except Exception as e:
+            print(f"{Colors.FAIL}[!] SCP03 Tool Crashed: {e}{Colors.ENDC}")
+        
+        # Redraw the SCP80 banner so the user knows where they are after the clear
+        print(f"{Colors.HEADER}")
+        print(r" __   __               _               ____ ___ __  __ ")
+        print(r" \ \ / /__ _  __ _  __| | _ __  __ _  / ___|_ _|  \/  |")
+        print(r"  \ V / _` | / _` |/ _` || '__|/ _` | \___ \| || |\/| |")
+        print(r"   | | (_| || (_| | (_| || |  | (_| |  ___) | || |  | |")
+        print(r"   |_|\__, | \__, |\__,_||_|   \__,_| |____/___|_|  |_|")
+        print(r"      |___/  |___/                                     ")
+        print(r"                   ___ _____ / \  ")
+        print(r"                  / _ \_   _/ _ \ ")
+        print(r"                 | | | || |/ ___ \ ")
+        print(r"                 | |_| || / ___  \ ")
+        print(r"                  \___/ |_/_/   \_" + "\\")
+        print(f"")
+        print(f"=== Remote File Management & Over-The-Air Payload Generator ===")
+        print(f" Created and maintained by Hampus Hellsberg")
+        print(f"{Colors.ENDC}")
+
+        print(f"\n{Colors.HEADER}=== Returning to SCP80 OTA Tool ==={Colors.ENDC}")
+        print(f"{Colors.WARNING}[*] Re-acquiring Card Reader...{Colors.ENDC}")
+        
+        try:
+            is_reader_mode = False
+            if self.config.get("transport") == "reader":
+                is_reader_mode = True
+                
+            if is_reader_mode:
+                self.transport.connect()
+                print(f"{Colors.GREEN}[+] Card Reader Re-connected.{Colors.ENDC}")
+                
+        except Exception as e:
+            print(f"{Colors.FAIL}[!] Failed to reconnect reader: {e}{Colors.ENDC}")
+
+        self._setup_history() # Ensure history/readline state is preserved
+
+    def run_standalone():
+        """Entry point for switching from other modules."""
+        from cli import OtaShell
+    
+        try:
+            # Initialize the shell with default config
+            # Adjust class name 'OtaShell' to match your actual class
+            shell = OtaShell()
+            shell.run()
+        except Exception as e:
+            # Using print to avoid dependency on global Color objects if not imported
+            print(f"[-] SCP80 Execution Error: {e}")

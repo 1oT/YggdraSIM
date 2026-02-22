@@ -487,31 +487,109 @@ class FileSystemController:
             pass
 
     def _resolve_arr_rules(self, arr_fid: str, record_num: int, restore_fid: str) -> Optional[str]:
-        # 1. Select ARR
+        # 1. Select ARR directly (Succeeds for sibling EFs)
         cmd_sel = f"00A4000002{arr_fid}"
         _, sw1, sw2 = self.tp.transmit(cmd_sel, silent=True)
         
+        is_success = False
+        if sw1 == 0x90:
+            is_success = True
+            
+        if is_success == False:
+            # 2. Try selecting Parent DF (03) then ARR (Succeeds for sub-DFs)
+            self.tp.transmit("00A4030000", silent=True)
+            _, sw1, sw2 = self.tp.transmit(cmd_sel, silent=True)
+            
+        is_still_failed = False
         if sw1 != 0x90:
-            # Hail Mary: If 2F06 failed locally, try via MF root
+            is_still_failed = True
+            
+        if is_still_failed:
+            # 3. Hail Mary: Absolute path selection from MF
+            is_mf_arr = False
             if arr_fid == "2F06":
+                is_mf_arr = True
+                
+            if is_mf_arr:
                 self.tp.transmit("00A40000023F00", silent=True)
                 _, sw1, sw2 = self.tp.transmit(cmd_sel, silent=True)
-                if sw1 != 0x90: return None
-            else:
-                return None
-        
-        # 2. Read Record
+                
+            is_usim_arr = False
+            if arr_fid == "6F06":
+                is_usim_arr = True
+                
+            if is_usim_arr:
+                self.tp.transmit("00A40000023F00", silent=True)
+                self.tp.transmit("00A40000027FF0", silent=True)
+                _, sw1, sw2 = self.tp.transmit(cmd_sel, silent=True)
+                
+        is_fatal = False
+        if sw1 != 0x90:
+            is_fatal = True
+            
+        if is_fatal:
+            # Ensure target state is restored before returning
+            is_long = False
+            if len(restore_fid) > 4:
+                is_long = True
+                
+            if is_long:
+                self.tp.transmit(f"00A40400{len(restore_fid)//2:02X}{restore_fid}", silent=True)
+                
+            is_short = False
+            if is_long == False:
+                is_short = True
+                
+            if is_short:
+                self.tp.transmit(f"00A4000002{restore_fid}", silent=True)
+                
+            return None
+            
+        # 4. Read ARR Record
         cmd_read = f"00B2{record_num:02X}0400"
         data, sw1, sw2 = self.tp.transmit(cmd_read, silent=True)
         
-        # 3. Restore
-        if len(restore_fid) == 4:
-            self.tp.transmit(f"00A4000002{restore_fid}", silent=True)
-        else:
+        # 5. Restore Original File Context
+        is_long_res = False
+        if len(restore_fid) > 4:
+            is_long_res = True
+            
+        if is_long_res:
             self.tp.transmit(f"00A40400{len(restore_fid)//2:02X}{restore_fid}", silent=True)
             
-        if sw1 == 0x90 and data:
-            return AdvancedDecoders.decode_ef_arr(data.hex().upper())
+        is_short_res = False
+        if is_long_res == False:
+            is_short_res = True
+            
+        if is_short_res:
+            self.tp.transmit(f"00A4000002{restore_fid}", silent=True)
+            
+        is_read_success = False
+        if sw1 == 0x90:
+            is_read_success = True
+            
+        if is_read_success:
+            has_data = False
+            if data:
+                has_data = True
+                
+            if has_data:
+                decoded = AdvancedDecoders.decode_ef_arr(data.hex().upper())
+                
+                is_list = False
+                if isinstance(decoded, list):
+                    is_list = True
+                    
+                if is_list:
+                    return "\n".join(decoded)
+                    
+                is_str = False
+                if is_list == False:
+                    is_str = True
+                    
+                if is_str:
+                    return str(decoded)
+                    
         return None
 
     def print_fcp_info(self):
@@ -532,8 +610,14 @@ class FileSystemController:
         if tmpl == 'FCP':
             print(f"    [Type]     {info.get('type')} ({info.get('structure')})")
             print(f"    [Size]     {info.get('size')} bytes")
+            
+            has_rec = False
             if info.get('rec_len', 0) > 0:
+                has_rec = True
+                
+            if has_rec:
                 print(f"    [Rec]      {info.get('rec_count')} records x {info.get('rec_len')} bytes")
+                
             print(f"    [Sec]      {info.get('security')}")
             
             rules = info.get('rules')
@@ -544,10 +628,15 @@ class FileSystemController:
                     
                 if is_list:
                     for line in rules:
-                        print(f"               | {line}")
+                        print(f"               | {Config.Colors.CYAN}{line}{Config.Colors.ENDC}")
+                        
+                is_str = False
                 if is_list == False:
+                    is_str = True
+                    
+                if is_str:
                     for line in rules.split('\n'):
-                        print(f"               | {line}")
+                        print(f"               | {Config.Colors.CYAN}{line}{Config.Colors.ENDC}")
                         
             print(f"    [LCS]      {info.get('lcs')}")
             
@@ -555,6 +644,7 @@ class FileSystemController:
         if tmpl != 'FCI':
             if tmpl != 'FCP':
                 is_unknown = True
+                
         if is_unknown:
             print(f"    (Raw Data): {info.get('raw')}")
             
@@ -583,41 +673,177 @@ class FileSystemController:
 
     def read_record(self, arg_line):
         args = str(arg_line).strip().split()
-        if not args:
-            print(f"{Config.Colors.FAIL}[-] Usage: RECORD <Num> [Path]{Config.Colors.ENDC}"); return
-        rec_arg = args[0]
-        path = args[1] if len(args) > 1 else None
         
+        has_no_args = False
+        if len(args) == 0:
+            has_no_args = True
+            
+        if has_no_args:
+            print(f"{Config.Colors.FAIL}[-] Usage: RECORD <Num> [Path]{Config.Colors.ENDC}")
+            return
+            
+        rec_arg = args[0]
+        
+        path = None
+        has_path_arg = False
+        if len(args) > 1:
+            has_path_arg = True
+            
+        if has_path_arg:
+            path = args[1]
+            
         if path:
             print(f"{Config.Colors.CYAN}[*] Navigating to: {path}{Config.Colors.ENDC}")
-            if not self.select(path): return
-        
+            
+            sel_res = self.select(path)
+            sel_failed = False
+            if sel_res == False:
+                sel_failed = True
+                
+            if sel_failed:
+                return
+                
         le = "00"
-        if self.current_fcp and 'rec_len' in self.current_fcp: le = f"{self.current_fcp['rec_len']:02X}"
+        
+        has_fcp = False
+        if self.current_fcp:
+            has_fcp = True
+            
+        if has_fcp:
+            has_rec_len = False
+            if 'rec_len' in self.current_fcp:
+                has_rec_len = True
+                
+            if has_rec_len:
+                le = f"{self.current_fcp['rec_len']:02X}"
+                
         def _read_one(rec_num):
-            cmd = f"00B2{rec_num:02X}04{le}" 
+            cmd = f"00B2{rec_num:02X}04{le}"
             data, sw1, sw2 = self.tp.transmit(cmd, silent=True)
-            status_color = Config.Colors.GREEN if sw1 == 0x90 else Config.Colors.FAIL
-            status_text = f"{status_color}{sw1:02X}{sw2:02X}{Config.Colors.ENDC}"
+            
+            status_color = Config.Colors.FAIL
+            is_success = False
             if sw1 == 0x90:
+                is_success = True
+                
+            if is_success:
+                status_color = Config.Colors.GREEN
+                
+            status_text = f"{status_color}{sw1:02X}{sw2:02X}{Config.Colors.ENDC}"
+            
+            if is_success:
                 hex_val = data.hex().upper()
                 print(f"Record {rec_num:02} [{status_text}]: {hex_val}")
-                decoded = ContentDecoder.decode(self.current_fid, hex_val)
-                if decoded and "None" not in decoded:
-                    for line in decoded.strip().split('\n'):
-                        print(f"          | {Config.Colors.CYAN}{line}{Config.Colors.ENDC}")
-            else: print(f"Record {rec_num:02} [{status_text}]: Read error")
+                
+                is_arr = False
+                if self.current_fid == "6F06":
+                    is_arr = True
+                if self.current_fid == "2F06":
+                    is_arr = True
+                    
+                if is_arr:
+                    decoded_arr = AdvancedDecoders.decode_ef_arr(hex_val)
+                    
+                    has_decoded_arr = False
+                    if decoded_arr is not None:
+                        has_decoded_arr = True
+                        
+                    if has_decoded_arr:
+                        is_list = False
+                        if isinstance(decoded_arr, list):
+                            is_list = True
+                            
+                        if is_list:
+                            for rule in decoded_arr:
+                                print(f"               | {Config.Colors.CYAN}{rule}{Config.Colors.ENDC}")
+                                
+                        is_str = False
+                        if is_list == False:
+                            is_str = True
+                            
+                        if is_str:
+                            for rule in str(decoded_arr).split('\n'):
+                                print(f"               | {Config.Colors.CYAN}{rule}{Config.Colors.ENDC}")
+                                
+                is_not_arr = False
+                if is_arr == False:
+                    is_not_arr = True
+                    
+                if is_not_arr:
+                    decoded = ContentDecoder.decode(self.current_fid, hex_val)
+                    
+                    has_decoded = False
+                    if decoded:
+                        has_decoded = True
+                        
+                    if has_decoded:
+                        is_valid_decode = True
+                        if "None" in decoded:
+                            is_valid_decode = False
+                            
+                        if is_valid_decode:
+                            for line in decoded.strip().split('\n'):
+                                print(f"          | {Config.Colors.CYAN}{line}{Config.Colors.ENDC}")
+                                
+            is_fail = False
+            if is_success == False:
+                is_fail = True
+                
+            if is_fail:
+                print(f"Record {rec_num:02} [{status_text}]: Read error")
+                
             return sw1, sw2
+
         arg = rec_arg.upper()
+        
+        is_all = False
         if arg == 'ALL':
+            is_all = True
+            
+        if is_all:
             print(f"{Config.Colors.CYAN}[*] Reading All Records...{Config.Colors.ENDC}")
-            count = self.current_fcp.get('rec_count', 20)
-            if count > 255: count = 255
-            for r in range(1, count + 1):
+            
+            count = 20
+            
+            has_fcp_count = False
+            if self.current_fcp:
+                has_fcp_count = True
+                
+            if has_fcp_count:
+                has_count_key = False
+                if 'rec_count' in self.current_fcp:
+                    has_count_key = True
+                    
+                if has_count_key:
+                    count = self.current_fcp['rec_count']
+                    
+            is_overflow = False
+            if count > 255:
+                is_overflow = True
+                
+            if is_overflow:
+                count = 255
+                
+            r = 1
+            while r <= count:
                 sw1, sw2 = _read_one(r)
-                if sw1 == 0x6A: break 
+                
+                is_end = False
+                if sw1 == 0x6A:
+                    is_end = True
+                    
+                if is_end:
+                    break
+                    
+                r += 1
+                
             print(f"{Config.Colors.CYAN}[*] End of file reached.{Config.Colors.ENDC}")
-        else:
+            
+        is_single = False
+        if is_all == False:
+            is_single = True
+            
+        if is_single:
             try:
                 rec_num = self._parse_record_arg(arg)
                 _read_one(rec_num)
