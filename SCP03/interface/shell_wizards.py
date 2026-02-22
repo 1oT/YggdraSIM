@@ -14,6 +14,11 @@ class ShellInteractiveWizards:
 
     @staticmethod
     def run_put_key_wizard(shell) -> None:
+        print(f"\n{Config.Colors.FAIL}!!! WARNING: CRITICAL CRYPTOGRAPHIC OPERATION !!!{Config.Colors.ENDC}")
+        print(f"{Config.Colors.FAIL}Executing PUT KEY overwrites the active session keys for the Security Domain.{Config.Colors.ENDC}")
+        print(f"{Config.Colors.FAIL}Loss of the new keys or incorrect KVN assignment will permanently cryptographic-lock the card.{Config.Colors.ENDC}")
+        print(f"{Config.Colors.WARNING}Ensure backup of the new ENC, MAC, and DEK keys in your configuration before proceeding.{Config.Colors.ENDC}")
+        
         print("\n--- GP PUT KEY Command (GPCS 11.8) ---")
         print("Select Action:")
         print("  1. Add New Key Set (Add)")
@@ -332,21 +337,12 @@ class ShellInteractiveWizards:
         if is_five:
             is_valid = True
             
-        is_invalid = False
         if is_valid == False:
-            is_invalid = True
-            
-        if is_invalid:
             print("[-] Invalid selection. Aborting.")
             return
 
         pin_id = input("Enter PIN ID [Hex, Default: 01 (CHV1)]: ").strip().upper()
-        
-        is_id_empty = False
         if len(pin_id) == 0:
-            is_id_empty = True
-            
-        if is_id_empty:
             pin_id = "01"
 
         need_current = False
@@ -372,67 +368,35 @@ class ShellInteractiveWizards:
         current_pin = ""
         if need_current:
             current_pin = input("Enter Current PIN [ASCII]: ").strip()
-            
-            is_cur_empty = False
             if len(current_pin) == 0:
-                is_cur_empty = True
-                
-            if is_cur_empty:
                 print("[-] Current PIN required. Aborting.")
                 return
 
         puk_val = ""
         if need_puk:
             puk_val = input("Enter PUK [ASCII]: ").strip()
-            
-            is_puk_empty = False
             if len(puk_val) == 0:
-                is_puk_empty = True
-                
-            if is_puk_empty:
                 print("[-] PUK required. Aborting.")
                 return
 
         new_pin = ""
         if need_new:
             new_pin = input("Enter New PIN [ASCII]: ").strip()
-            
-            is_new_empty = False
             if len(new_pin) == 0:
-                is_new_empty = True
-                
-            if is_new_empty:
                 print("[-] New PIN required. Aborting.")
                 return
 
-        ans = input("\n[?] Execute PIN operation? [y/N]: ").strip().lower()
-        
-        do_execute = False
-        if ans == "yes":
-            do_execute = True
-            
-        if ans == "y":
-            do_execute = True
-            
-        if do_execute:
-            print("\n[*] Executing PIN Command...")
-            if is_one:
-                shell.sec_ctrl.verify_pin(pin_id, current_pin)
-            if is_two:
-                shell.sec_ctrl.change_pin(pin_id, current_pin, new_pin)
-            if is_three:
-                shell.sec_ctrl.disable_pin(pin_id, current_pin)
-            if is_four:
-                shell.sec_ctrl.enable_pin(pin_id, current_pin)
-            if is_five:
-                shell.sec_ctrl.unblock_pin(pin_id, puk_val, new_pin)
-                
-        is_aborted = False
-        if do_execute == False:
-            is_aborted = True
-            
-        if is_aborted:
-            print("[-] Execution aborted by user.")
+        print("\n[*] Executing PIN Command...")
+        if is_one:
+            shell.sec_ctrl.verify_pin(pin_id, current_pin)
+        if is_two:
+            shell.sec_ctrl.change_pin(pin_id, current_pin, new_pin)
+        if is_three:
+            shell.sec_ctrl.disable_pin(pin_id, current_pin)
+        if is_four:
+            shell.sec_ctrl.enable_pin(pin_id, current_pin)
+        if is_five:
+            shell.sec_ctrl.unblock_pin(pin_id, puk_val, new_pin)
 
     @staticmethod
     def run_manage_profile_wizard(shell) -> None:
@@ -519,50 +483,33 @@ class ShellInteractiveWizards:
                     
                 resolved_target = shell._resolve_mixed_aid(target)
                 
-                ans = input(f"\n[?] Execute action on {resolved_target}? [y/N]: ").strip().lower()
-                
-                do_execute = False
-                if ans == "yes":
-                    do_execute = True
-                    
-                if ans == "y":
-                    do_execute = True
-                    
-                if do_execute:
-                    print("\n[*] Executing Profile Command...")
-                    if is_three:
-                        res = shell.gp_ctrl.sgp22.enable_profile(resolved_target)
-                        is_res = False
-                        if res:
-                            is_res = True
-                        if is_res:
-                            print(f"{Config.Colors.WARNING}[*] Performing automated card reset...{Config.Colors.ENDC}")
-                            shell._handle_reset()
-                            
-                    if is_four:
-                        res = shell.gp_ctrl.sgp22.disable_profile(resolved_target)
-                        is_res = False
-                        if res:
-                            is_res = True
-                        if is_res:
-                            print(f"{Config.Colors.WARNING}[*] Performing automated card reset...{Config.Colors.ENDC}")
-                            shell._handle_reset()
-                            
-                    if is_five:
-                        res = shell.gp_ctrl.sgp22.delete_profile(resolved_target)
-                        is_res = False
-                        if res:
-                            is_res = True
-                        if is_res:
-                            print(f"{Config.Colors.WARNING}[*] Performing automated card reset...{Config.Colors.ENDC}")
-                            shell._handle_reset()
-                            
-                is_aborted = False
-                if do_execute == False:
-                    is_aborted = True
-                    
-                if is_aborted:
-                    print("[-] Execution aborted by user.")
+                print("\n[*] Executing Profile Command...")
+                if is_three:
+                    res = shell.gp_ctrl.sgp22.enable_profile(resolved_target)
+                    is_res = False
+                    if res:
+                        is_res = True
+                    if is_res:
+                        print(f"{Config.Colors.WARNING}[*] Performing automated card reset...{Config.Colors.ENDC}")
+                        shell._handle_reset()
+                        
+                if is_four:
+                    res = shell.gp_ctrl.sgp22.disable_profile(resolved_target)
+                    is_res = False
+                    if res:
+                        is_res = True
+                    if is_res:
+                        print(f"{Config.Colors.WARNING}[*] Performing automated card reset...{Config.Colors.ENDC}")
+                        shell._handle_reset()
+                        
+                if is_five:
+                    res = shell.gp_ctrl.sgp22.delete_profile(resolved_target)
+                    is_res = False
+                    if res:
+                        is_res = True
+                    if is_res:
+                        print(f"{Config.Colors.WARNING}[*] Performing automated card reset...{Config.Colors.ENDC}")
+                        shell._handle_reset()
                 return
                 
             print("[-] Invalid action. Aborting.")
@@ -649,33 +596,16 @@ class ShellInteractiveWizards:
                 print(f"[-] AUTN is required for {context}. Aborting.")
                 return
 
-        ans = input(f"\n[?] Execute {context} Authentication? [y/N]: ").strip().lower()
-        
-        do_execute = False
-        if ans == "yes":
-            do_execute = True
+        print(f"\n[*] Executing {context} AUTH...")
+        if is_gsm:
+            shell.sec_ctrl.run_auth(rand_val, app_context="GSM")
             
-        if ans == "y":
-            do_execute = True
+        is_not_gsm = False
+        if is_gsm == False:
+            is_not_gsm = True
             
-        if do_execute:
-            print(f"\n[*] Executing {context} AUTH...")
-            if is_gsm:
-                shell.sec_ctrl.run_auth(rand_val, app_context="GSM")
-                
-            is_not_gsm = False
-            if is_gsm == False:
-                is_not_gsm = True
-                
-            if is_not_gsm:
-                shell.sec_ctrl.run_auth(rand_val, autn_val, app_context=context)
-                
-        is_aborted = False
-        if do_execute == False:
-            is_aborted = True
-            
-        if is_aborted:
-            print("[-] Execution aborted by user.")
+        if is_not_gsm:
+            shell.sec_ctrl.run_auth(rand_val, autn_val, app_context=context)
 
     @staticmethod
     def run_config_wizard(shell) -> None:
@@ -760,25 +690,8 @@ class ShellInteractiveWizards:
             print("[-] Value is required. Aborting.")
             return
 
-        ans = input(f"\n[?] Update {key_name} to {val}? [y/N]: ").strip().lower()
-        
-        do_execute = False
-        if ans == "yes":
-            do_execute = True
-            
-        if ans == "y":
-            do_execute = True
-            
-        if do_execute:
-            print(f"\n[*] Updating configuration...")
-            shell._update_config(key_name, val)
-            
-        is_aborted = False
-        if do_execute == False:
-            is_aborted = True
-            
-        if is_aborted:
-            print("[-] Configuration update aborted by user.")
+        print(f"\n[*] Updating configuration...")
+        shell._update_config(key_name, val)
 
     @staticmethod
     def run_get_data_wizard(shell) -> None:
@@ -880,6 +793,11 @@ class ShellInteractiveWizards:
 
     @staticmethod
     def run_set_status(shell) -> None:
+        print(f"\n{Config.Colors.FAIL}!!! WARNING: CRITICAL GLOBALPLATFORM OPERATION !!!{Config.Colors.ENDC}")
+        print(f"{Config.Colors.FAIL}Modifying core lifecycle states via SET STATUS is an irreversible operation.{Config.Colors.ENDC}")
+        print(f"{Config.Colors.FAIL}Transitioning to an unsupported state (e.g., TERMINATED) will permanently brick the eUICC.{Config.Colors.ENDC}")
+        print(f"{Config.Colors.WARNING}Verify all parameters against GPCS / SGP.22 specifications before executing.{Config.Colors.ENDC}")
+
         print("\n--- GP SET STATUS Command (GPCS 11.10) ---")
         print("Select target element:")
         print("  1. Issuer Security Domain / Card (P1=80)")
@@ -1089,88 +1007,71 @@ class ShellInteractiveWizards:
             print("[-] Invalid selection.")
             return
 
-        ans = input("[?] Execute MANAGE CHANNEL? [y/N]: ").strip().lower()
+        has_gp_ctrl = False
+        if hasattr(shell, 'gp_ctrl'):
+            has_gp_ctrl = True
+            
+        active_ctrl = None
+        if has_gp_ctrl:
+            active_ctrl = shell.gp_ctrl
+            
+        has_tp = False
+        if hasattr(shell, 'tp'):
+            has_tp = True
+            
+        if has_tp:
+            active_ctrl = shell.tp
+            
+        is_ctrl_missing = False
+        if active_ctrl is None:
+            is_ctrl_missing = True
+            
+        if is_ctrl_missing:
+            print("[-] Error: No active transport controller found.")
+            return
+            
+        print("[*] Transmitting APDU...")
+        res, sw1, sw2 = active_ctrl.transmit(apdu)
         
-        do_execute = False
-        if ans == "yes":
-            do_execute = True
-            
-        if ans == "y":
-            do_execute = True
-            
-        if do_execute:
-            has_gp_ctrl = False
-            if hasattr(shell, 'gp_ctrl'):
-                has_gp_ctrl = True
+        is_success = False
+        if sw1 == 0x90:
+            if sw2 == 0x00:
+                is_success = True
                 
-            active_ctrl = None
-            if has_gp_ctrl:
-                active_ctrl = shell.gp_ctrl
+        if is_success:
+            is_open = False
+            if is_one:
+                is_open = True
                 
-            has_tp = False
-            if hasattr(shell, 'tp'):
-                has_tp = True
-                
-            if has_tp:
-                active_ctrl = shell.tp
-                
-            is_ctrl_missing = False
-            if active_ctrl is None:
-                is_ctrl_missing = True
-                
-            if is_ctrl_missing:
-                print("[-] Error: No active transport controller found.")
-                return
-                
-            print("[*] Transmitting APDU...")
-            res, sw1, sw2 = active_ctrl.transmit(apdu)
-            
-            is_success = False
-            if sw1 == 0x90:
-                if sw2 == 0x00:
-                    is_success = True
+            if is_open:
+                has_res = False
+                if len(res) > 0:
+                    has_res = True
                     
-            if is_success:
-                is_open = False
-                if is_one:
-                    is_open = True
+                if has_res:
+                    chan_assigned = res.hex().upper()
+                    print(f"[+] Logical channel opened successfully. Assigned channel: {chan_assigned}")
                     
-                if is_open:
-                    has_res = False
-                    if len(res) > 0:
-                        has_res = True
-                        
-                    if has_res:
-                        chan_assigned = res.hex().upper()
-                        print(f"[+] Logical channel opened successfully. Assigned channel: {chan_assigned}")
-                        
-                    is_res_empty = False
-                    if has_res == False:
-                        is_res_empty = True
-                        
-                    if is_res_empty:
-                        print("[+] Logical channel opened successfully, but no channel number returned.")
-                        
-                is_close = False
-                if is_two:
-                    is_close = True
+                is_res_empty = False
+                if has_res == False:
+                    is_res_empty = True
                     
-                if is_close:
-                    print("[+] Logical channel closed successfully.")
+                if is_res_empty:
+                    print("[+] Logical channel opened successfully, but no channel number returned.")
                     
-            is_failed = False
-            if is_success == False:
-                is_failed = True
+            is_close = False
+            if is_two:
+                is_close = True
                 
-            if is_failed:
-                print(f"[-] Command failed: {sw1:02X}{sw2:02X}")
+            if is_close:
+                print("[+] Logical channel closed successfully.")
                 
-        is_aborted = False
-        if do_execute == False:
-            is_aborted = True
+        is_failed = False
+        if is_success == False:
+            is_failed = True
             
-        if is_aborted:
-            print("[-] Execution aborted by user.")
+        if is_failed:
+            print(f"[-] Command failed: {sw1:02X}{sw2:02X}")
 
     @staticmethod
     def run_fs_report_wizard(shell) -> None:
@@ -1228,6 +1129,284 @@ class ShellInteractiveWizards:
             print(f"[+] Full file system report saved to {filename}")
 
     @staticmethod
+    def _build_fcp_template() -> dict:
+        print("\n--- ETSI TS 102 222 FCP Builder ---")
+        print("1. Dedicated File (DF) / Application Dedicated File (ADF)")
+        print("2. Transparent Working EF")
+        print("3. Linear Fixed Working EF")
+        
+        type_choice = input("Select File Type [1-3]: ").strip()
+        
+        full_path = input("Enter Full Path for new file [Hex, e.g. 3F007F105F01]: ").strip().upper()
+        
+        is_path_short = False
+        if len(full_path) < 4:
+            is_path_short = True
+            
+        is_path_odd = False
+        if len(full_path) % 4 != 0:
+            is_path_odd = True
+            
+        if is_path_short:
+            print("[-] Invalid path length.")
+            return {}
+            
+        if is_path_odd:
+            print("[-] Invalid path length.")
+            return {}
+            
+        fid = full_path[-4:]
+        parent_path = full_path[:-4]
+        
+        tag_83 = f"8302{fid}"
+        tag_8a = "8A0105"  
+        
+        sec_attr = input("Enter Security Attribute TLV (Tag 8C/8B/AB) [Hex, e.g. 8B032F060E]: ").strip().upper()
+        
+        is_sec_empty = False
+        if len(sec_attr) == 0:
+            is_sec_empty = True
+            
+        if is_sec_empty:
+            print("[-] Security Attribute is mandatory per ETSI TS 102 222. Aborting.")
+            return {}
+            
+        is_df = False
+        if type_choice == '1':
+            is_df = True
+            
+        is_transparent = False
+        if type_choice == '2':
+            is_transparent = True
+            
+        is_linear = False
+        if type_choice == '3':
+            is_linear = True
+            
+        tag_82 = ""
+        tag_80_81 = ""
+        tag_c6 = ""
+        tag_88 = ""
+        tag_84 = ""
+        f_size_int = 0
+        rec_len_int = 0
+        
+        if is_df:
+            tag_82 = "82027821" 
+            
+            f_size = input("Enter Total Memory Allocation for DF/ADF [Hex, e.g. 0400 for 1KB]: ").strip().upper()
+            
+            is_size_empty = False
+            if len(f_size) == 0:
+                is_size_empty = True
+                
+            if is_size_empty:
+                print("[-] Memory size required.")
+                return {}
+                
+            f_size_int = int(f_size, 16)
+            f_size_hex = f"{f_size_int:04X}"
+            size_len = len(f_size_hex) // 2
+            tag_80_81 = f"81{size_len:02X}{f_size_hex}"
+
+            aid_input = input("Enter AID for ADF (Tag 84) [Hex, Leave blank for standard DF]: ").strip().upper()
+            has_aid = False
+            if len(aid_input) > 0:
+                has_aid = True
+                
+            if has_aid:
+                aid_len = len(aid_input) // 2
+                tag_84 = f"84{aid_len:02X}{aid_input}"
+            
+            c6_attr = input("Enter PIN Status Template DO (Tag C6) [Hex, e.g. C60C...]: ").strip().upper()
+            
+            is_c6_empty = False
+            if len(c6_attr) == 0:
+                is_c6_empty = True
+                
+            if is_c6_empty:
+                print("[-] Tag C6 is mandatory for DF/ADF creation. Aborting.")
+                return {}
+                
+            tag_c6 = c6_attr
+            
+        is_ef = False
+        if is_transparent:
+            is_ef = True
+            
+        if is_linear:
+            is_ef = True
+
+        if is_ef:
+            sfi_input = input("Enter Short File Identifier (SFI) [Hex, e.g. 01, Leave blank for none]: ").strip().upper()
+            
+            is_sfi_empty = False
+            if len(sfi_input) == 0:
+                is_sfi_empty = True
+                
+            if is_sfi_empty:
+                tag_88 = "8800"
+                
+            has_sfi = False
+            if is_sfi_empty == False:
+                has_sfi = True
+                
+            if has_sfi:
+                tag_88 = f"8801{sfi_input}"
+            
+        if is_transparent:
+            tag_82 = "82024121" 
+            
+            f_size = input("Enter File Size [Hex, e.g. 0100 for 256 bytes]: ").strip().upper()
+            
+            is_size_empty = False
+            if len(f_size) == 0:
+                is_size_empty = True
+                
+            if is_size_empty:
+                print("[-] File size is required.")
+                return {}
+                
+            f_size_int = int(f_size, 16)
+            f_size_hex = f"{f_size_int:04X}"
+            size_len = len(f_size_hex) // 2
+            tag_80_81 = f"80{size_len:02X}{f_size_hex}"
+            
+        if is_linear:
+            rec_len = input("Enter Record Length [Hex, e.g. 10]: ").strip().upper()
+            num_rec = input("Enter Number of Records [Hex, e.g. 0A]: ").strip().upper()
+            
+            is_rec_empty = False
+            if len(rec_len) == 0:
+                is_rec_empty = True
+                
+            if len(num_rec) == 0:
+                is_rec_empty = True
+                
+            if is_rec_empty:
+                print("[-] Record length and count required.")
+                return {}
+                
+            rec_len_int = int(rec_len, 16)
+            num_rec_int = int(num_rec, 16)
+            
+            tag_82 = f"82044221{rec_len_int:04X}"
+            
+            f_size_int = rec_len_int * num_rec_int
+            size_hex = f"{f_size_int:04X}"
+            size_len = len(size_hex) // 2
+            tag_80_81 = f"80{size_len:02X}{size_hex}"
+
+        tag_a5 = ""
+        prop_info = input("Enter Proprietary Information (Tag A5) internal TLV [Hex, e.g. C00100, Leave blank to skip]: ").strip().upper()
+        
+        has_prop = False
+        if len(prop_info) > 0:
+            has_prop = True
+            
+        if has_prop:
+            prop_len = len(prop_info) // 2
+            tag_a5 = f"A5{prop_len:02X}{prop_info}"
+
+        fcp_content = tag_82 + tag_83 + tag_84 + tag_8a + sec_attr + tag_80_81 + tag_88 + tag_c6 + tag_a5
+        fcp_len = len(fcp_content) // 2
+        fcp_hex = f"62{fcp_len:02X}{fcp_content}"
+        
+        return {
+            "fcp": fcp_hex,
+            "type_choice": type_choice,
+            "fid": fid,
+            "parent_path": parent_path,
+            "file_size": f_size_int,
+            "rec_len": rec_len_int
+        }
+
+    @staticmethod
+    def _resolve_target_path(shell, prompt_text: str, allow_empty: bool) -> str:
+        user_input = input(prompt_text).strip().upper()
+        
+        is_empty = False
+        if len(user_input) == 0:
+            is_empty = True
+            
+        if is_empty:
+            is_allowed = False
+            if allow_empty:
+                is_allowed = True
+                
+            if is_allowed:
+                return ""
+                
+            is_denied = False
+            if allow_empty == False:
+                is_denied = True
+                
+            if is_denied:
+                print("[-] Target is required. Aborting.")
+                return "ERROR"
+                
+        is_long = False
+        if len(user_input) > 4:
+            is_long = True
+            
+        if is_long:
+            parent_path = user_input[:-4]
+            target = user_input[-4:]
+            print(f"[*] Selecting Path: {parent_path}")
+            
+            tp_obj = None
+            
+            has_tp = False
+            if hasattr(shell, 'tp'):
+                has_tp = True
+                
+            if has_tp:
+                tp_obj = shell.tp
+                
+            has_gp_ctrl = False
+            if hasattr(shell, 'gp_ctrl'):
+                has_gp_ctrl = True
+                
+            if has_gp_ctrl:
+                has_gp_tp = False
+                if hasattr(shell.gp_ctrl, 'tp'):
+                    has_gp_tp = True
+                    
+                if has_gp_tp:
+                    tp_obj = shell.gp_ctrl.tp
+                    
+            has_fs_ctrl = False
+            if hasattr(shell, 'fs_ctrl'):
+                has_fs_ctrl = True
+                
+            if has_fs_ctrl:
+                has_fs_tp = False
+                if hasattr(shell.fs_ctrl, 'tp'):
+                    has_fs_tp = True
+                    
+                if has_fs_tp:
+                    tp_obj = shell.fs_ctrl.tp
+            
+            is_tp_none = False
+            if tp_obj is None:
+                is_tp_none = True
+                
+            if is_tp_none:
+                print("[-] Transport layer not found.")
+                return "ERROR"
+            
+            offset = 0
+            while offset < len(parent_path):
+                chunk = parent_path[offset:offset+4]
+                apdu = f"00A4000402{chunk}"
+                tp_obj.transmit(apdu)
+                offset += 4
+                
+            return target
+            
+        return user_input
+
+    @staticmethod
     def run_fs_admin_wizard(shell) -> None:
         print("\n--- ETSI File System Administration ---")
         print("Select Operation:")
@@ -1243,38 +1422,329 @@ class ShellInteractiveWizards:
         
         choice = input("Choice [1-9]: ").strip()
         
-        # Action routing
+        is_one = False
         if choice == '1':
-            fid = input("Enter FID to activate [Hex, Leave blank for current]: ").strip()
-            shell.fs_ctrl.activate_file(fid)
-        
-        if choice == '2':
-            fid = input("Enter FID to deactivate [Hex, Leave blank for current]: ").strip()
-            shell.fs_ctrl.deactivate_file(fid)
+            is_one = True
             
+        if is_one:
+            target = ShellInteractiveWizards._resolve_target_path(shell, "Enter Target FID or Path to activate [Hex, Leave blank for current]: ", True)
+            
+            is_error = False
+            if target == "ERROR":
+                is_error = True
+                
+            if is_error == False:
+                shell.fs_ctrl.activate_file(target)
+        
+        is_two = False
+        if choice == '2':
+            is_two = True
+            
+        if is_two:
+            target = ShellInteractiveWizards._resolve_target_path(shell, "Enter Target FID or Path to deactivate [Hex, Leave blank for current]: ", True)
+            
+            is_error = False
+            if target == "ERROR":
+                is_error = True
+                
+            if is_error == False:
+                shell.fs_ctrl.deactivate_file(target)
+            
+        is_three = False
         if choice == '3':
+            is_three = True
+            
+        if is_three:
             shell.fs_ctrl.suspend_uicc()
             
+        is_four = False
         if choice == '4':
-            search = input("Enter search string [Hex]: ").strip()
-            shell.fs_ctrl.search_record(search)
+            is_four = True
             
+        if is_four:
+            target = ShellInteractiveWizards._resolve_target_path(shell, "Enter EF FID or Path to select before search [Hex, Leave blank for current]: ", True)
+            
+            is_error = False
+            if target == "ERROR":
+                is_error = True
+                
+            if is_error == False:
+                has_target = False
+                if len(target) > 0:
+                    has_target = True
+                    
+                if has_target:
+                    print(f"[*] Selecting Target EF: {target}")
+                    shell.fs_ctrl.select(target)
+                    
+                search = input("Enter search string [Hex]: ").strip()
+                shell.fs_ctrl.search_record(search)
+            
+        is_five = False
         if choice == '5':
-            data = input("Enter file creation parameters [Hex]: ").strip()
-            shell.fs_ctrl.create_file(data)
+            is_five = True
             
+        if is_five:
+            print("  1. Enter raw FCP Template (Hex)")
+            print("  2. Use FCP Builder")
+            create_choice = input("Choice [1-2]: ").strip()
+            
+            is_raw = False
+            if create_choice == '1':
+                is_raw = True
+                
+            if is_raw:
+                parent_path = input("Enter Parent Path to select before creation [Hex, e.g. 3F007F10, or leave blank]: ").strip().upper()
+                
+                has_parent = False
+                if len(parent_path) > 0:
+                    has_parent = True
+                    
+                if has_parent:
+                    print(f"[*] Selecting Parent Path: {parent_path}")
+                    shell.fs_ctrl.select(parent_path)
+                    
+                data = input("Enter raw FCP parameters [Hex]: ").strip()
+                shell.fs_ctrl.create_file(data)
+                
+            is_build = False
+            if create_choice == '2':
+                is_build = True
+                
+            if is_build:
+                build_info = ShellInteractiveWizards._build_fcp_template()
+                
+                has_fcp = False
+                if "fcp" in build_info:
+                    has_fcp = True
+                    
+                if has_fcp:
+                    parent = build_info["parent_path"]
+                    
+                    has_parent_path = False
+                    if len(parent) > 0:
+                        has_parent_path = True
+                        
+                    if has_parent_path:
+                        print(f"[*] Selecting Parent Path: {parent}")
+                        shell.fs_ctrl.select(parent)
+                        
+                    fcp = build_info["fcp"]
+                    print(f"[*] Generated FCP Template: {fcp}")
+                    shell.fs_ctrl.create_file(fcp)
+                    
+                    is_df = False
+                    if build_info["type_choice"] == '1':
+                        is_df = True
+                        
+                    is_ef = False
+                    if is_df == False:
+                        is_ef = True
+                        
+                    if is_ef:
+                        ans = input("Update data? [y/N]: ").strip().lower()
+                        
+                        do_update = False
+                        if ans == "y":
+                            do_update = True
+                        if ans == "yes":
+                            do_update = True
+                            
+                        if do_update:
+                            print(f"[*] Selecting newly created file: {build_info['fid']}")
+                            shell.fs_ctrl.select(build_info['fid'])
+                            
+                            tp_obj = None
+                            
+                            has_fs_tp = False
+                            if hasattr(shell.fs_ctrl, 'tp'):
+                                has_fs_tp = True
+                                
+                            if has_fs_tp:
+                                tp_obj = shell.fs_ctrl.tp
+                                
+                            has_fs_transport = False
+                            if hasattr(shell.fs_ctrl, 'transport'):
+                                has_fs_transport = True
+                                
+                            if has_fs_transport:
+                                tp_obj = shell.fs_ctrl.transport
+                                
+                            has_gp_ctrl = False
+                            if hasattr(shell, 'gp_ctrl'):
+                                has_gp_ctrl = True
+                                
+                            if has_gp_ctrl:
+                                has_gp_inner = False
+                                if hasattr(shell.gp_ctrl, 'tp'):
+                                    has_gp_inner = True
+                                    
+                                if has_gp_inner:
+                                    tp_obj = shell.gp_ctrl.tp
+                            
+                            is_transparent = False
+                            if build_info["type_choice"] == '2':
+                                is_transparent = True
+                                
+                            if is_transparent:
+                                t_data = input(f"Enter data for Transparent EF (Max {build_info['file_size']} bytes) [Hex]: ").strip().upper()
+                                target_len = build_info['file_size'] * 2
+                                
+                                needs_pad = False
+                                if len(t_data) < target_len:
+                                    needs_pad = True
+                                    
+                                if needs_pad:
+                                    pad_len = target_len - len(t_data)
+                                    t_data += "F" * pad_len
+                                    
+                                apdu = f"00D60000{len(t_data)//2:02X}{t_data}"
+                                
+                                has_tp = False
+                                if tp_obj is not None:
+                                    has_tp = True
+                                    
+                                if has_tp:
+                                    tp_obj.transmit(apdu)
+                                    print("[+] Transparent EF update transmitted.")
+                                
+                            is_linear = False
+                            if build_info["type_choice"] == '3':
+                                is_linear = True
+                                
+                            if is_linear:
+                                rec_num_str = input("Enter Record Number to update [Hex, e.g. 01]: ").strip().upper()
+                                l_data = input(f"Enter data for Record (Max {build_info['rec_len']} bytes) [Hex]: ").strip().upper()
+                                
+                                target_len = build_info['rec_len'] * 2
+                                
+                                needs_pad = False
+                                if len(l_data) < target_len:
+                                    needs_pad = True
+                                    
+                                if needs_pad:
+                                    pad_len = target_len - len(l_data)
+                                    l_data += "F" * pad_len
+                                    
+                                apdu = f"00DC{rec_num_str}04{len(l_data)//2:02X}{l_data}"
+                                
+                                has_tp = False
+                                if tp_obj is not None:
+                                    has_tp = True
+                                    
+                                if has_tp:
+                                    tp_obj.transmit(apdu)
+                                    print(f"[+] Linear EF Record {rec_num_str} update transmitted.")
+            
+        is_six = False
         if choice == '6':
-            fid = input("Enter FID to delete [Hex]: ").strip()
-            shell.fs_ctrl.delete_file(fid)
+            is_six = True
             
+        if is_six:
+            target = ShellInteractiveWizards._resolve_target_path(shell, "Enter Target FID or Path to delete [Hex]: ", False)
+            
+            is_error = False
+            if target == "ERROR":
+                is_error = True
+                
+            if is_error == False:
+                shell.fs_ctrl.delete_file(target)
+            
+        is_seven = False
         if choice == '7':
-            fid = input("Enter DF FID to terminate [Hex]: ").strip()
-            shell.fs_ctrl.terminate_df(fid)
+            is_seven = True
             
+        if is_seven:
+            target = ShellInteractiveWizards._resolve_target_path(shell, "Enter DF FID or Path to terminate [Hex]: ", False)
+            
+            is_error = False
+            if target == "ERROR":
+                is_error = True
+                
+            if is_error == False:
+                shell.fs_ctrl.terminate_df(target)
+            
+        is_eight = False
         if choice == '8':
-            fid = input("Enter EF FID to terminate [Hex]: ").strip()
-            shell.fs_ctrl.terminate_ef(fid)
+            is_eight = True
             
+        if is_eight:
+            target = ShellInteractiveWizards._resolve_target_path(shell, "Enter EF FID or Path to terminate [Hex]: ", False)
+            
+            is_error = False
+            if target == "ERROR":
+                is_error = True
+                
+            if is_error == False:
+                shell.fs_ctrl.terminate_ef(target)
+            
+        is_nine = False
         if choice == '9':
-            data = input("Enter resize data [Hex]: ").strip()
-            shell.fs_ctrl.resize_file(data)
+            is_nine = True
+            
+        if is_nine:
+            target = ShellInteractiveWizards._resolve_target_path(shell, "Enter EF/DF FID or Path to select before resize [Hex, Leave blank for current]: ", True)
+            
+            is_error = False
+            if target == "ERROR":
+                is_error = True
+                
+            if is_error == False:
+                has_target = False
+                if len(target) > 0:
+                    has_target = True
+                    
+                if has_target:
+                    print(f"[*] Selecting Target: {target}")
+                    shell.fs_ctrl.select(target)
+                    
+                target_fid = target
+                is_fid_empty = False
+                if len(target_fid) == 0:
+                    is_fid_empty = True
+                    
+                if is_fid_empty:
+                    target_fid = input("Enter FID of the file to resize (Mandatory Tag 83) [Hex, e.g. 0100]: ").strip().upper()
+                    
+                tag_83 = f"8302{target_fid}"
+                
+                new_size_80 = input("Enter new File Size (Tag 80) [Hex, e.g. 0200, Leave blank to skip]: ").strip().upper()
+                tag_80 = ""
+                has_80 = False
+                if len(new_size_80) > 0:
+                    has_80 = True
+                    
+                if has_80:
+                    size_int = int(new_size_80, 16)
+                    size_hex = f"{size_int:04X}"
+                    size_len = len(size_hex) // 2
+                    tag_80 = f"80{size_len:02X}{size_hex}"
+                    
+                new_size_81 = input("Enter new Total File Size (Tag 81) [Hex, e.g. 0400, Leave blank to skip]: ").strip().upper()
+                tag_81 = ""
+                has_81 = False
+                if len(new_size_81) > 0:
+                    has_81 = True
+                    
+                if has_81:
+                    size_int = int(new_size_81, 16)
+                    size_hex = f"{size_int:04X}"
+                    size_len = len(size_hex) // 2
+                    tag_81 = f"81{size_len:02X}{size_hex}"
+                    
+                tag_a5 = ""
+                prop_info = input("Enter Proprietary Information (Tag A5/85) internal TLV [Hex, Leave blank to skip]: ").strip().upper()
+                has_prop = False
+                if len(prop_info) > 0:
+                    has_prop = True
+                    
+                if has_prop:
+                    prop_len = len(prop_info) // 2
+                    tag_a5 = f"A5{prop_len:02X}{prop_info}"
+                    
+                fcp_content = tag_83 + tag_80 + tag_81 + tag_a5
+                fcp_len = len(fcp_content) // 2
+                fcp = f"62{fcp_len:02X}{fcp_content}"
+                
+                print(f"[*] Generated Resize FCP Template: {fcp}")
+                shell.fs_ctrl.resize_file(fcp)

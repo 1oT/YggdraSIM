@@ -1021,6 +1021,20 @@ class ShellDispatcher:
             print(f"[!] Command Execution Error: {error}")
 
     def run(self):
+        is_nt = False
+        if os.name == 'nt':
+            is_nt = True
+            
+        if is_nt:
+            os.system('cls')
+            
+        is_posix = False
+        if os.name != 'nt':
+            is_posix = True
+            
+        if is_posix:
+            os.system('clear')
+            
         print(f"{Config.Colors.HEADER}")
         print(r" __   __               _               ____ ___ __  __ ")
         print(r" \ \ / /__ _  __ _  __| | _ __  __ _  / ___|_ _|  \/  |")
