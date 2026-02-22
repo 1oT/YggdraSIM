@@ -1,0 +1,16 @@
+# Forensic Isolation: Stop AI from leaving the USB
+../**
+~/**
+/etc/**
+/var/**
+
+# Metadata Isolation
+.git/
+.vscode/
+
+# Project Inclusion
+!/src/**
+!/tests/**
+!/docs/**
+!/main.py
+!/.cursorrules
