@@ -40,7 +40,7 @@ class HelpMenu:
         print("  LIST           : List eSIM profiles (GetProfilesInfo, SGP.22/SGP.32).")
         print("  LIST-IOT       : Alias for LIST (IoT eUICC profile list).")
         print("  GET-IOT        : Deep scan: EuiccInfo1/2, EuiccConfiguredData, capabilities.")
-        print("  MANAGE-PROFILE : Unified wizard for List/Scan/Enable/Disable/Delete + SGP.32 retrieval (RAT, Notifications, eIM config).")
+        print("  MANAGE-PROFILE : Spec-aware wizard with separate SGP.22, SGP.32, and SGP.02 command sets.")
         print("  EXPORT-EUICC   : [Path.yaml] - Single-command eUICC report (profiles, EuiccInfo, CPLC).")
         print("  RUN-AUTH       : Execute GSM, USIM, or ISIM authentication algorithms.")
         print("  RUN-AUTH-TEST  : Run 3GPP TS 35.207 test vector (OPc derivation + card auth).")

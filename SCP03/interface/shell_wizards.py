@@ -445,24 +445,65 @@ class ShellInteractiveWizards:
     @staticmethod
     def run_manage_profile_wizard(shell) -> None:
         wiz = InteractiveWizard("eSIM Profile Management", Config.Colors)
-        wiz.add_step("spec", "Target Spec [1=SGP.22/32, 2=SGP.02]:", default="1")
-        
-        def action_cond(res):
+        wiz.add_step("spec", "Target Spec [1=SGP.22, 2=SGP.32, 3=SGP.02]:", default="2")
+
+        def action22_cond(res):
             spec = res.get("spec")
             is_sgp22 = False
             if spec == '1':
                 is_sgp22 = True
             return is_sgp22
-            
+
         wiz.add_step(
-            "action",
-            "Action [1=List, 2=Scan, 3=Enable, 4=Disable, 5=Delete, 6=GetRAT, 7=GetNotifications, 8=GetEimConfig, 9=GetConfiguredData, 10=GetCerts, 11=GetEID]:",
+            "action22",
+            "SGP.22 Action [1=List, 2=Scan, 3=Enable, 4=Disable, 5=Delete, 6=GetConfiguredData, 7=GetCerts, 8=GetEID]:",
             default="1",
-            condition=action_cond
+            condition=action22_cond
         )
-        
+
+        def action32_cond(res):
+            spec = res.get("spec")
+            is_sgp32 = False
+            if spec == '2':
+                is_sgp32 = True
+            return is_sgp32
+
+        wiz.add_step(
+            "action32",
+            "SGP.32 Action [1=List, 2=Scan, 3=Enable, 4=Disable, 5=Delete, 6=GetRAT, 7=GetNotifications, 8=GetEimConfig, 9=GetConfiguredData, 10=GetCerts, 11=GetEID]:",
+            default="1",
+            condition=action32_cond
+        )
+
+        def action02_cond(res):
+            spec = res.get("spec")
+            is_sgp02 = False
+            if spec == '3':
+                is_sgp02 = True
+            return is_sgp02
+
+        wiz.add_step(
+            "action02",
+            "SGP.02 Action [1=Scan]:",
+            default="1",
+            condition=action02_cond
+        )
+
         def target_cond(res):
-            action = res.get("action")
+            spec = res.get("spec")
+            action = ""
+            is_spec_22 = False
+            if spec == '1':
+                is_spec_22 = True
+            if is_spec_22:
+                action = res.get("action22")
+
+            is_spec_32 = False
+            if spec == '2':
+                is_spec_32 = True
+            if is_spec_32:
+                action = res.get("action32")
+
             is_req = False
             if action == '3':
                 is_req = True
@@ -476,18 +517,29 @@ class ShellInteractiveWizards:
 
         res = wiz.run()
 
-        is_cons = False
+        is_sgp22 = False
         if res.get("spec") == '1':
-            is_cons = True
+            is_sgp22 = True
 
-        is_m2m = False
+        is_sgp32 = False
         if res.get("spec") == '2':
-            is_m2m = True
+            is_sgp32 = True
 
-        action = res.get("action")
+        is_sgp02 = False
+        if res.get("spec") == '3':
+            is_sgp02 = True
+
+        action = ""
+        if is_sgp22:
+            action = res.get("action22")
+        if is_sgp32:
+            action = res.get("action32")
+        if is_sgp02:
+            action = res.get("action02")
+
         target = res.get("target")
 
-        if is_cons:
+        if is_sgp22:
             is_one = False
             if action == '1':
                 is_one = True
@@ -500,6 +552,93 @@ class ShellInteractiveWizards:
             if action == '2':
                 is_two = True
                 
+            if is_two:
+                shell.gp_ctrl.sgp22.run_sgp22_scan()
+                return
+
+            is_six = False
+            if action == '6':
+                is_six = True
+            if is_six:
+                shell.gp_ctrl.sgp22.get_euicc_configured_data()
+                return
+
+            is_seven = False
+            if action == '7':
+                is_seven = True
+            if is_seven:
+                shell.gp_ctrl.sgp22.get_euicc_certs()
+                return
+
+            is_eight = False
+            if action == '8':
+                is_eight = True
+            if is_eight:
+                shell.gp_ctrl.sgp22.get_eid()
+                return
+
+            is_three = False
+            if action == '3':
+                is_three = True
+            is_four = False
+            if action == '4':
+                is_four = True
+            is_five = False
+            if action == '5':
+                is_five = True
+
+            needs_target = False
+            if is_three:
+                needs_target = True
+            if is_four:
+                needs_target = True
+            if is_five:
+                needs_target = True
+
+            if needs_target:
+                is_skip = False
+                if target == "SKIP":
+                    is_skip = True
+                    
+                if is_skip:
+                    print("[-] Target required. Aborting.")
+                    return
+
+                resolved_target = shell._resolve_mixed_aid(target)
+
+                if is_three:
+                    r = shell.gp_ctrl.sgp22.enable_profile(resolved_target)
+                    is_r = False
+                    if r:
+                        is_r = True
+                    if is_r:
+                        shell._handle_reset()
+                if is_four:
+                    r = shell.gp_ctrl.sgp22.disable_profile(resolved_target)
+                    is_r = False
+                    if r:
+                        is_r = True
+                    if is_r:
+                        shell._handle_reset()
+                if is_five:
+                    r = shell.gp_ctrl.sgp22.delete_profile(resolved_target)
+                    is_r = False
+                    if r:
+                        is_r = True
+                    if is_r:
+                        shell._handle_reset()
+
+        if is_sgp32:
+            is_one = False
+            if action == '1':
+                is_one = True
+            if is_one:
+                shell.gp_ctrl.sgp22.list_profiles()
+                return
+
+            is_two = False
+            if action == '2':
+                is_two = True
             if is_two:
                 shell.gp_ctrl.sgp22.run_sgp22_scan()
                 return
@@ -568,7 +707,7 @@ class ShellInteractiveWizards:
                 is_skip = False
                 if target == "SKIP":
                     is_skip = True
-                    
+
                 if is_skip:
                     print("[-] Target required. Aborting.")
                     return
@@ -597,7 +736,7 @@ class ShellInteractiveWizards:
                     if is_r:
                         shell._handle_reset()
 
-        if is_m2m:
+        if is_sgp02:
             is_one_m2m = False
             if action == '1':
                 is_one_m2m = True

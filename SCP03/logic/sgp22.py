@@ -501,6 +501,20 @@ class Sgp22Manager:
                 return f"{eim_id_type[v]} ({v})"
             return f"{v} (0x{hex_str})"
 
+        if tag == 0x87 and parent_tag == 0xA0:
+            bitmask = int.from_bytes(val, "big", signed=False)
+            width = len(val) * 8
+            set_bits = []
+            for bit_idx in range(width - 1, -1, -1):
+                is_set = False
+                if ((bitmask >> bit_idx) & 0x01) == 0x01:
+                    is_set = True
+                if is_set:
+                    set_bits.append(str(bit_idx))
+            if len(set_bits) == 0:
+                return f"{hex_str} (bitmask: none)"
+            return f"{hex_str} (bitmask set: {', '.join(set_bits)})"
+
         # 6. Time values used in certificates
         if tag == 0x17 or tag == 0x18:
             try:
@@ -960,6 +974,80 @@ class Sgp22Manager:
             else:
                 print(f"    {line}")
 
+    def _short_display(self, value: Any, max_len: int = 84) -> str:
+        text = str(value)
+        is_short = False
+        if len(text) <= max_len:
+            is_short = True
+        if is_short:
+            return text
+        return text[:max_len] + "..."
+
+    def _print_pipe_line(self, label: str, value: Any, depth: int = 0) -> None:
+        prefix = "  " * depth
+        print(f"    | {prefix}{label:<20}: {Config.Colors.CYAN}{self._short_display(value)}{Config.Colors.ENDC}")
+
+    def _print_compact_pipe_map(self, node: Dict[str, Any], depth: int = 0) -> None:
+        for key, value in node.items():
+            if isinstance(value, dict):
+                self._print_pipe_line(str(key), "Present", depth)
+                self._print_compact_pipe_map(value, depth + 1)
+                continue
+
+            if isinstance(value, list):
+                list_len = len(value)
+                self._print_pipe_line(str(key), f"[{list_len}]", depth)
+                if list_len == 0:
+                    continue
+
+                all_scalars = True
+                for item in value:
+                    is_scalar = False
+                    if not isinstance(item, dict):
+                        if not isinstance(item, list):
+                            is_scalar = True
+                    if is_scalar == False:
+                        all_scalars = False
+                        break
+
+                if all_scalars:
+                    preview_count = 2
+                    if list_len < 2:
+                        preview_count = list_len
+                    for idx in range(preview_count):
+                        self._print_pipe_line(f"  Item {idx + 1}", value[idx], depth)
+                    if list_len > preview_count:
+                        remaining = list_len - preview_count
+                        self._print_pipe_line("  Remaining", remaining, depth)
+                    continue
+
+                first = value[0]
+                if isinstance(first, dict):
+                    self._print_pipe_line("  First Entry", "Present", depth)
+                    self._print_compact_pipe_map(first, depth + 1)
+                elif isinstance(first, list):
+                    nested_count = len(first)
+                    self._print_pipe_line("  First Entry", f"list[{nested_count}]", depth)
+                else:
+                    self._print_pipe_line("  Item 1", first, depth)
+                continue
+
+            self._print_pipe_line(str(key), value, depth)
+
+    def _print_compact_tlv_section(self, section_title: str, parsed: Dict[int, Any], root_tag: Optional[int]) -> None:
+        print(f"\n{Config.Colors.BOLD}[+] {section_title}{Config.Colors.ENDC}")
+        compact = self._compact_tlv_node(parsed, root_tag)
+        is_empty = False
+        if not isinstance(compact, dict):
+            is_empty = True
+        if isinstance(compact, dict):
+            if len(compact) == 0:
+                is_empty = True
+        if is_empty:
+            print("    | (Empty)")
+            return
+        self._print_compact_pipe_map(compact, 0)
+
     def _decode_text_value(self, tag: int, value: Any, parent_tag: Optional[int]) -> str:
         if not isinstance(value, bytes):
             return ""
@@ -1212,9 +1300,22 @@ class Sgp22Manager:
                 public_keys = section_value.get("publicKeys", [])
                 signatures = section_value.get("signatures", [])
                 object_identifiers = section_value.get("objectIdentifiers", [])
+                cert_count_display = str(_count_items(certificates))
+                has_unsigned_evidence = False
+                if _count_items(certificates) == 0:
+                    has_pub = False
+                    if _count_items(public_keys) > 0:
+                        has_pub = True
+                    has_sig = False
+                    if _count_items(signatures) > 0:
+                        has_sig = True
+                    if has_pub or has_sig:
+                        has_unsigned_evidence = True
+                if has_unsigned_evidence:
+                    cert_count_display = "n/a (summary unavailable)"
 
                 print(f"    | {section_name:<20}: {Config.Colors.CYAN}Present{Config.Colors.ENDC}")
-                print(f"    | {'  Certificates':<20}: {Config.Colors.CYAN}{_count_items(certificates)}{Config.Colors.ENDC}")
+                print(f"    | {'  Certificates':<20}: {Config.Colors.CYAN}{cert_count_display}{Config.Colors.ENDC}")
                 print(f"    | {'  Public Keys':<20}: {Config.Colors.CYAN}{_count_items(public_keys)}{Config.Colors.ENDC}")
                 print(f"    | {'  Signatures':<20}: {Config.Colors.CYAN}{_count_items(signatures)}{Config.Colors.ENDC}")
                 print(f"    | {'  OIDs':<20}: {Config.Colors.CYAN}{_count_items(object_identifiers)}{Config.Colors.ENDC}")
@@ -1274,7 +1375,7 @@ class Sgp22Manager:
                 if compact_json and not debug_enabled and root_tag == 0xBF55:
                     self._print_eim_configuration_compact_json(parsed)
                 elif compact_json and not debug_enabled:
-                    self._print_compact_json(parsed, root_tag)
+                    self._print_compact_tlv_section(title, parsed, root_tag)
                 else:
                     self._print_tlv_tree(parsed, indent=1, parent_tag=root_tag)
             except Exception:
@@ -1321,17 +1422,22 @@ class Sgp22Manager:
         if len(summaries) == 0:
             return False
 
-        print(f"{Config.Colors.HEADER}--- {title} (summary) ---{Config.Colors.ENDC}")
+        print(f"\n{Config.Colors.BOLD}[+] {title}{Config.Colors.ENDC}")
         for idx, info in enumerate(summaries, start=1):
-            print(f"  [{idx}] Subject : {info.get('subject', '')}")
-            print(f"      Issuer  : {info.get('issuer', '')}")
-            print(f"      Serial  : {info.get('serial', '')}")
-            print(f"      Valid   : {info.get('not_valid_before', '')} -> {info.get('not_valid_after', '')}")
+            has_multi = False
+            if len(summaries) > 1:
+                has_multi = True
+            if has_multi:
+                print(f"    | Entry                : {Config.Colors.CYAN}{idx}{Config.Colors.ENDC}")
+            print(f"    | Subject              : {Config.Colors.CYAN}{self._short_display(info.get('subject', ''))}{Config.Colors.ENDC}")
+            print(f"    | Issuer               : {Config.Colors.CYAN}{self._short_display(info.get('issuer', ''))}{Config.Colors.ENDC}")
+            print(f"    | Serial               : {Config.Colors.CYAN}{info.get('serial', '')}{Config.Colors.ENDC}")
+            print(f"    | Validity             : {Config.Colors.CYAN}{info.get('not_valid_before', '')} -> {info.get('not_valid_after', '')}{Config.Colors.ENDC}")
         return True
 
     def get_euicc_configured_data(self) -> None:
         """ES10a.GetEuiccConfiguredData / GetEuiccConfiguredAddresses (retrieval)."""
-        self._es10_retrieve("BF3C00", "EuiccConfiguredData", root_tag=0xBF3C)
+        self._es10_retrieve("BF3C00", "EuiccConfiguredData", root_tag=0xBF3C, compact_json=True)
 
     def get_euicc_certs(self) -> None:
         """ES10b.GetCerts (SGP.22/32 retrieval)."""
@@ -1384,11 +1490,11 @@ class Sgp22Manager:
 
     def get_rat(self) -> None:
         """ES10b.GetRAT (SGP.22/32) – Rules Authorisation Table. Retrieval only."""
-        self._es10_retrieve("BF4300", "GetRAT (Rules Authorisation Table)", root_tag=0xBF43)
+        self._es10_retrieve("BF4300", "GetRAT (Rules Authorisation Table)", root_tag=0xBF43, compact_json=True)
 
     def get_notifications_list(self) -> None:
         """ES10b.RetrieveNotificationsList (SGP.22/32) – Pending notifications. Retrieval only."""
-        self._es10_retrieve("BF2B00", "RetrieveNotificationsList", root_tag=0xBF2B)
+        self._es10_retrieve("BF2B00", "RetrieveNotificationsList", root_tag=0xBF2B, compact_json=True)
 
     def get_eim_configuration_data(self) -> None:
         """ES10b.GetEimConfigurationData (SGP.32 IoT) – eIM configuration data. Retrieval only."""
