@@ -237,13 +237,117 @@ class ShellInteractiveWizards:
             print(f"[+] {Config.INI_FILE} updated. KVN is now {kvn_str}.")
 
     @staticmethod
-    def run_manage_pin_wizard(shell) -> None:
+    def run_manage_pin_wizard(shell, arg_str="") -> None:
+        has_args = False
+        if len(arg_str.strip()) > 0:
+            has_args = True
+            
+        if has_args:
+            parts = arg_str.strip().split()
+            action = parts[0].lower()
+            
+            pin_id = "01"
+            if len(parts) > 1:
+                pin_id = parts[1].upper()
+                
+            print("\n[*] Executing PIN Command via Macro...")
+            
+            is_verify = False
+            if action == "verify":
+                is_verify = True
+                
+            if is_verify:
+                pin = ""
+                if len(parts) > 2:
+                    pin = parts[2]
+                shell.sec_ctrl.verify_pin(pin_id, pin)
+                return
+                
+            is_change = False
+            if action == "change":
+                is_change = True
+                
+            if is_change:
+                curr = ""
+                new_pin = ""
+                if len(parts) > 2:
+                    curr = parts[2]
+                if len(parts) > 3:
+                    new_pin = parts[3]
+                shell.sec_ctrl.change_pin(pin_id, curr, new_pin)
+                return
+                
+            is_disable = False
+            if action == "disable":
+                is_disable = True
+                
+            if is_disable:
+                curr = ""
+                if len(parts) > 2:
+                    curr = parts[2]
+                shell.sec_ctrl.disable_pin(pin_id, curr)
+                return
+                
+            is_enable = False
+            if action == "enable":
+                is_enable = True
+                
+            if is_enable:
+                curr = ""
+                if len(parts) > 2:
+                    curr = parts[2]
+                shell.sec_ctrl.enable_pin(pin_id, curr)
+                return
+                
+            is_unblock = False
+            if action == "unblock":
+                is_unblock = True
+                
+            if is_unblock:
+                puk = ""
+                new_pin = ""
+                if len(parts) > 2:
+                    puk = parts[2]
+                if len(parts) > 3:
+                    new_pin = parts[3]
+                shell.sec_ctrl.unblock_pin(pin_id, puk, new_pin)
+                return
+                
+            print("[-] Unknown action for MANAGE-PIN macro.")
+            return
+
         wiz = InteractiveWizard("GP PIN Management Command", Config.Colors)
         wiz.add_step("action", "Action [1=Verify, 2=Change, 3=Disable, 4=Enable, 5=Unblock]:", default="1")
         wiz.add_step("pin_id", "PIN ID [Hex, Default: 01]:", default="01")
-        wiz.add_step("curr", "Current PIN [ASCII, SKIP if Unblock]:", default="SKIP")
-        wiz.add_step("new", "New PIN [ASCII, SKIP if not Change/Unblock]:", default="SKIP")
-        wiz.add_step("puk", "PUK [ASCII, SKIP if not Unblock]:", default="SKIP")
+        
+        def curr_cond(res):
+            action = res.get("action")
+            is_unblock = False
+            if action == '5':
+                is_unblock = True
+            return not is_unblock
+            
+        wiz.add_step("curr", "Current PIN [ASCII]:", default="SKIP", condition=curr_cond)
+        
+        def new_cond(res):
+            action = res.get("action")
+            is_change_or_unblock = False
+            if action == '2':
+                is_change_or_unblock = True
+            if action == '5':
+                is_change_or_unblock = True
+            return is_change_or_unblock
+            
+        wiz.add_step("new", "New PIN [ASCII]:", default="SKIP", condition=new_cond)
+        
+        def puk_cond(res):
+            action = res.get("action")
+            is_unblock = False
+            if action == '5':
+                is_unblock = True
+            return is_unblock
+            
+        wiz.add_step("puk", "PUK [ASCII]:", default="SKIP", condition=puk_cond)
 
         res = wiz.run()
         choice = res.get("action")
@@ -265,9 +369,27 @@ class ShellInteractiveWizards:
             is_five = True
 
         pin_id = res.get("pin_id").upper()
+        
         curr = res.get("curr")
+        is_curr_skip = False
+        if curr == "SKIP":
+            is_curr_skip = True
+        if is_curr_skip:
+            curr = ""
+            
         new_pin = res.get("new")
+        is_new_skip = False
+        if new_pin == "SKIP":
+            is_new_skip = True
+        if is_new_skip:
+            new_pin = ""
+            
         puk = res.get("puk")
+        is_puk_skip = False
+        if puk == "SKIP":
+            is_puk_skip = True
+        if is_puk_skip:
+            puk = ""
 
         print("\n[*] Executing PIN Command...")
         if is_one:
@@ -285,8 +407,28 @@ class ShellInteractiveWizards:
     def run_manage_profile_wizard(shell) -> None:
         wiz = InteractiveWizard("eSIM Profile Management", Config.Colors)
         wiz.add_step("spec", "Target Spec [1=SGP.22/32, 2=SGP.02]:", default="1")
-        wiz.add_step("action", "Action [1=List, 2=Scan, 3=Enable, 4=Disable, 5=Delete]:", default="1")
-        wiz.add_step("target", "Target Profile AID/ICCID/Alias [SKIP for List/Scan]:", default="SKIP")
+        
+        def action_cond(res):
+            spec = res.get("spec")
+            is_sgp22 = False
+            if spec == '1':
+                is_sgp22 = True
+            return is_sgp22
+            
+        wiz.add_step("action", "Action [1=List, 2=Scan, 3=Enable, 4=Disable, 5=Delete]:", default="1", condition=action_cond)
+        
+        def target_cond(res):
+            action = res.get("action")
+            is_req = False
+            if action == '3':
+                is_req = True
+            if action == '4':
+                is_req = True
+            if action == '5':
+                is_req = True
+            return is_req
+            
+        wiz.add_step("target", "Target Profile AID/ICCID/Alias:", default="SKIP", condition=target_cond)
 
         res = wiz.run()
 
@@ -382,7 +524,15 @@ class ShellInteractiveWizards:
         wiz = InteractiveWizard("Telecom Authentication Command", Config.Colors)
         wiz.add_step("ctx", "Context [1=GSM, 2=USIM, 3=ISIM]:", default="1")
         wiz.add_step("rand", "RAND [Hex]:", default="")
-        wiz.add_step("autn", "AUTN [Hex, SKIP for GSM]:", default="SKIP")
+        
+        def autn_cond(res):
+            ctx = res.get("ctx")
+            is_gsm = False
+            if ctx == '1':
+                is_gsm = True
+            return not is_gsm
+            
+        wiz.add_step("autn", "AUTN [Hex]:", default="SKIP", condition=autn_cond)
 
         res = wiz.run()
         ctx = res.get("ctx")

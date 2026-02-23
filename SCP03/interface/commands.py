@@ -91,7 +91,7 @@ class CommandRegistry:
             'DUMP-FS': (shell.do_dump_fs, "[OutputDir]"),
 
             # Security
-            'MANAGE-PIN': (lambda: ShellInteractiveWizards.run_manage_pin_wizard(shell), ""),
+            'MANAGE-PIN': (lambda x="": ShellInteractiveWizards.run_manage_pin_wizard(shell, x), "[Args]"),
             
             # Auth
             'RUN-AUTH': (lambda: ShellInteractiveWizards.run_auth_wizard(shell), ""),
@@ -124,6 +124,6 @@ class CommandRegistry:
             'SET-AID-ALIAS', 'SELECT', 'UPDATE', 'LOCK', 'UNLOCK', 'DEL', 'SCRIPT', 
             'STORE-DATA', 'DECODE'
         ]
-        args_optional = ['REPORT', 'KEYS', 'READ', 'RECORD', 'RUN', 'GUIDE', 'DEBUG', 'VERBOSE', 'DUMP-FS']
+        args_optional = ['REPORT', 'KEYS', 'READ', 'RECORD', 'RUN', 'GUIDE', 'DEBUG', 'VERBOSE', 'DUMP-FS', 'MANAGE-PIN']
         
         return args_required, args_optional
