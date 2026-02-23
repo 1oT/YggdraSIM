@@ -10,6 +10,15 @@ import binascii
 from typing import Dict, Any, List, Optional
 from SCP03.core.utils import TlvParser
 
+try:
+    from cryptography import x509
+    from cryptography.hazmat.backends import default_backend
+    _CERT_BACKEND = default_backend()
+except ImportError:
+    x509 = None
+    _CERT_BACKEND = None
+
+
 class AdvancedDecoders:
     @staticmethod
     def decode_ef_arr(data_hex: str) -> list:
@@ -96,6 +105,29 @@ class AdvancedDecoders:
         if len(output) > 0:
             return output
         return ["No Rules"]
+
+    @staticmethod
+    def decode_cert_der(data: bytes) -> Optional[Dict[str, Any]]:
+        """Parse DER-encoded X.509 certificate; return subject, issuer, validity or None."""
+        if not data or len(data) < 4:
+            return None
+        if data[0] != 0x30:
+            return None
+        if x509 is None or _CERT_BACKEND is None:
+            return {"raw_len": len(data), "note": "cryptography not available for full decode"}
+        try:
+            cert = x509.load_der_x509_certificate(data, _CERT_BACKEND)
+            nb = getattr(cert, "not_valid_before_utc", None) or getattr(cert, "not_valid_before", None)
+            na = getattr(cert, "not_valid_after_utc", None) or getattr(cert, "not_valid_after", None)
+            return {
+                "subject": cert.subject.rfc4514_string(),
+                "issuer": cert.issuer.rfc4514_string(),
+                "not_valid_before": nb.isoformat() if nb else "",
+                "not_valid_after": na.isoformat() if na else "",
+                "serial": hex(cert.serial_number),
+            }
+        except Exception:
+            return None
 
     @staticmethod
     def decode_plmn_list(data_hex: str) -> list:

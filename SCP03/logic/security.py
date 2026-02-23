@@ -10,6 +10,25 @@ from typing import Optional, Tuple
 from SCP03.config import Config
 from SCP03.core.utils import TlvParser
 
+try:
+    from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+    from cryptography.hazmat.backends import default_backend
+    _AES_AVAILABLE = True
+except ImportError:
+    _AES_AVAILABLE = False
+
+# 3GPP TS 35.207 Table 1 – Test set 1 (Milenage)
+AUTH_TEST_VECTOR = {
+    "RAND": "23553CBE9637A89D218AE64DAE47BF35",
+    "Ki": "465B5CE8B199B49FAA5F0A2EE238A6BC",
+    "OP": "CDC202D5123E20F62B6D676AC72CB318",
+    "OPc": "CD63CB71954A9F4E481A7B2EA79631D2",
+    "RES": "A54211D5E3BA50BF",
+    "CK": "B40BA9A3C58B2A05BBF0D987B21BF8CB",
+    "IK": "F769BC432284C6FE2B7066554707B8D0",
+}
+
+
 class SecurityController:
     # [UPDATED] Init now accepts fs_ctrl to sync state during auto-selection
     def __init__(self, transport, fs_ctrl=None):
@@ -81,6 +100,47 @@ class SecurityController:
             if sw1 == 0x90: print(f"{Config.Colors.GREEN}[+] PIN Unblocked.{Config.Colors.ENDC}")
             else: print(f"{Config.Colors.FAIL}[-] Failed: {sw1:02X}{sw2:02X}{Config.Colors.ENDC}")
         except Exception as e: print(f"{Config.Colors.FAIL}[!] Error: {e}{Config.Colors.ENDC}")
+
+    @staticmethod
+    def derive_opc(ki_hex: str, op_hex: str) -> str:
+        """
+        Derive OPc from Ki and OP per 3GPP TS 35.206: OPc = E(Ki, OP).
+        ki_hex, op_hex: 32 hex chars (16 bytes). Returns 32 hex chars OPc.
+        """
+        if not _AES_AVAILABLE:
+            raise RuntimeError("cryptography required for OPc derivation")
+        ki_hex = ki_hex.replace(" ", "").upper()
+        op_hex = op_hex.replace(" ", "").upper()
+        if len(ki_hex) != 32 or len(op_hex) != 32:
+            raise ValueError("Ki and OP must be 32 hex chars (16 bytes) each")
+        key = bytes.fromhex(ki_hex)
+        plain = bytes.fromhex(op_hex)
+        cipher = Cipher(algorithms.AES(key), modes.ECB(), backend=default_backend())
+        encryptor = cipher.encryptor()
+        opc = encryptor.update(plain) + encryptor.finalize()
+        return opc.hex().upper()
+
+    def run_auth_test_vector(self):
+        """
+        Run authentication using 3GPP TS 35.207 test set 1 and print expected vs card output.
+        """
+        print(f"{Config.Colors.HEADER}=== Milenage Test Vector (3GPP TS 35.207) ==={Config.Colors.ENDC}")
+        print(f"  RAND: {AUTH_TEST_VECTOR['RAND']}")
+        print(f"  Ki:   {AUTH_TEST_VECTOR['Ki']}")
+        print(f"  OP:   {AUTH_TEST_VECTOR['OP']}")
+        try:
+            derived = self.derive_opc(AUTH_TEST_VECTOR["Ki"], AUTH_TEST_VECTOR["OP"])
+            print(f"  OPc (derived): {derived}")
+            print(f"  OPc (expected): {AUTH_TEST_VECTOR['OPc']}")
+            match = "OK" if derived == AUTH_TEST_VECTOR["OPc"] else "MISMATCH"
+            print(f"  OPc check: {Config.Colors.GREEN if match == 'OK' else Config.Colors.FAIL}{match}{Config.Colors.ENDC}")
+        except Exception as e:
+            print(f"  OPc derivation: {Config.Colors.FAIL}{e}{Config.Colors.ENDC}")
+        print(f"  Expected RES: {AUTH_TEST_VECTOR['RES']}")
+        print(f"  Expected CK:  {AUTH_TEST_VECTOR['CK']}")
+        print(f"  Expected IK:  {AUTH_TEST_VECTOR['IK']}")
+        print(f"{Config.Colors.CYAN}[*] Sending RAND to card (USIM auth)...{Config.Colors.ENDC}")
+        self.run_auth(AUTH_TEST_VECTOR["RAND"], autn=None, app_context="USIM")
 
     def _smart_select_app(self, target_type: str) -> bool:
         # 1. Silent Scan Setup

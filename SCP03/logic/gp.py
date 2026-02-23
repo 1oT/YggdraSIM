@@ -8,7 +8,7 @@
 
 import os
 import math
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Tuple
 
 from SCP03.config import Config
 from SCP03.core.utils import HexUtils, TlvParser
@@ -539,10 +539,16 @@ class GlobalPlatformManager:
     def get_cplc(self):
         cmd = "80CA9F7F00"
         data, sw1, sw2 = self.tp.transmit(cmd, silent=False)
-        if sw1 == 0x90: 
+        if sw1 == 0x90:
             AdvancedDecoders.print_cplc(data)
         else:
-             print(f"{Config.Colors.FAIL}[-] Failed: {sw1:02X}{sw2:02X}{Config.Colors.ENDC}")
+            print(f"{Config.Colors.FAIL}[-] Failed: {sw1:02X}{sw2:02X}{Config.Colors.ENDC}")
+
+    def get_cplc_data(self) -> Tuple[Optional[bytes], int, int]:
+        """Return CPLC data and status without printing. For use in export/report."""
+        cmd = "80CA9F7F00"
+        data, sw1, sw2 = self.tp.transmit(cmd, silent=True)
+        return (data if sw1 == 0x90 else None, sw1, sw2)
 
     def get_data(self, p1: int, p2: int):
         print(f"{Config.Colors.CYAN}[*] GET DATA Tag: {p1:02X}{p2:02X}...{Config.Colors.ENDC}")

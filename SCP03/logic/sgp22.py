@@ -6,7 +6,7 @@
 # Copyright (c) 2026 Hampus Hellsberg
 # -----------------------------------------------------------------------------
 
-from typing import List, Dict, Optional, Tuple
+from typing import List, Dict, Optional, Tuple, Any
 from SCP03.config import Config
 from SCP03.core.utils import HexUtils, TlvParser
 
@@ -78,6 +78,112 @@ class Sgp22Manager:
     def run_sgp02_scan(self):
         """Executes the custom SGP.02 scanning sequence."""
         self._execute_sequence(self.SEQUENCE_SGP02, "SGP.02 Scan")
+
+    def get_euicc_report(self) -> Dict[str, Any]:
+        """
+        Runs SGP.22 sequence and returns structured data for export (no print).
+        Returns dict with: profiles, eid, euicc_info1, euicc_info2, euicc_configured_data,
+        key_info, sd_mgmt_data (hex strings where applicable).
+        """
+        collected = self._run_sequence_collect(self.SEQUENCE_SGP22)
+        report = {
+            "profiles": [],
+            "eid": collected.get("EID", ""),
+            "euicc_info1": collected.get("EuiccInfo1", ""),
+            "euicc_info2": collected.get("EuiccInfo2", ""),
+            "euicc_configured_data": collected.get("EuiccConfiguredData", ""),
+            "key_info": collected.get("Key Information Template", ""),
+            "sd_mgmt_data": collected.get("Security Domain Mgmt Data", ""),
+        }
+        list_hex = collected.get("List Profiles", "")
+        if list_hex:
+            try:
+                data = bytes.fromhex(list_hex)
+                report["profiles"] = self._profile_list_to_dicts(data)
+            except Exception:
+                report["profiles"] = []
+        return report
+
+    def _profile_list_to_dicts(self, data: bytes) -> List[Dict]:
+        """Parse BF2D profile list response into list of dicts."""
+        out = []
+        i = 0
+        while i < len(data):
+            if data[i] == 0xE3:
+                length = data[i + 1]
+                offset = 2
+                if length & 0x80:
+                    n = length & 0x7F
+                    length = int.from_bytes(data[i + 2 : i + 2 + n], "big")
+                    offset = 2 + n
+                blob = data[i + offset : i + offset + length]
+                entry = self._single_profile_to_dict(blob)
+                if entry:
+                    out.append(entry)
+                i += offset + length
+            else:
+                i += 1
+        return out
+
+    def _single_profile_to_dict(self, data: bytes) -> Optional[Dict]:
+        """Convert one profile TLV blob to dict."""
+        try:
+            info = TlvParser.parse(data)
+            aid_bytes = info.get(self.TAG_AID) or info.get(self.TAG_CTX_0)
+            iccid_bytes = info.get(self.TAG_ICCID)
+            aid_hex = aid_bytes.hex().upper() if isinstance(aid_bytes, bytes) else ""
+            iccid_raw = iccid_bytes.hex().upper() if isinstance(iccid_bytes, bytes) else ""
+            iccid_display = self._swap_nibbles(iccid_raw)
+            state_val = info.get(self.TAG_STATE, b"\x00")
+            state_int = int.from_bytes(state_val, "big") if isinstance(state_val, bytes) else 0
+            state_str = "ENABLED" if state_int == 1 else "DISABLED"
+            class_val = info.get(self.TAG_CLASS, b"\x02")
+            class_int = int.from_bytes(class_val, "big") if isinstance(class_val, bytes) else 2
+            class_map = {0: "TEST", 1: "PROV", 2: "OPER"}
+            class_str = class_map.get(class_int, "OPER")
+            name_bytes = info.get(self.TAG_NICKNAME) or info.get(self.TAG_NAME) or info.get(self.TAG_SP_NAME)
+            name_str = "Unknown"
+            if isinstance(name_bytes, bytes):
+                try:
+                    name_str = name_bytes.decode("utf-8", "ignore").strip()
+                except Exception:
+                    name_str = name_bytes.hex()
+            if name_str == "Unknown" and iccid_display:
+                name_str = f"ICCID-{iccid_display[-4:]}"
+            return {
+                "state": state_str,
+                "class": class_str,
+                "iccid": iccid_display,
+                "name": name_str,
+                "aid": aid_hex,
+            }
+        except Exception:
+            return None
+
+    def _run_sequence_collect(self, sequence: List[Tuple[str, str]]) -> Dict[str, str]:
+        """Run sequence and return dict of description -> response hex (successful only)."""
+        channel_id = 0
+        result = {}
+        for apdu_hex, desc in sequence:
+            if desc == "OPEN CHANNEL":
+                resp, sw1, sw2 = self.tp.transmit(apdu_hex, silent=True)
+                if sw1 == 0x90 and len(resp) >= 1:
+                    channel_id = resp[0]
+                else:
+                    return result
+                continue
+            cmd_bytes = bytearray(HexUtils.to_bytes(apdu_hex))
+            if desc == "CLOSE CHANNEL":
+                if len(cmd_bytes) >= 4:
+                    cmd_bytes[3] = channel_id
+            elif channel_id > 0:
+                if not (cmd_bytes[0] == 0x00 and cmd_bytes[1] == 0x70):
+                    cmd_bytes[0] = (cmd_bytes[0] & 0xF0) | channel_id
+            resp, sw1, sw2 = self.tp.transmit(cmd_bytes.hex().upper(), silent=True)
+            if sw1 == 0x90 or sw1 == 0x61:
+                if resp:
+                    result[desc] = resp.hex().upper()
+        return result
 
     def _execute_sequence(self, sequence, title):
         print(f"\n{Config.Colors.HEADER}=== Running {title} ==={Config.Colors.ENDC}")
