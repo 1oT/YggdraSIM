@@ -52,7 +52,7 @@ class ShellDispatcher:
         self.prompt_str = ""
         self._update_prompt_state() 
         
-        self.guide_topics = ['GP', 'ETSI', 'GSMA', 'INSTALL']
+        self.guide_topics = ['GP', 'ETSI', 'GSMA', 'INSTALL', 'SECURITY']
 
         self.command_map = CommandRegistry.build(self)
         self.commands = {}
