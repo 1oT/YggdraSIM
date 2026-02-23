@@ -1596,7 +1596,22 @@ class Sgp22Manager:
             print(f"    | {'  Signature (1st)':<20}: {Config.Colors.CYAN}{_short(signatures[0])}{Config.Colors.ENDC}")
 
     def _print_get_certs_compact(self, parsed: Dict[int, Any]) -> None:
-        root = TlvParser.get_first(parsed, 0xBF56, parsed)
+        root_candidate = TlvParser.get_first(parsed, 0xBF56, parsed)
+        root = root_candidate
+        is_root_bytes = False
+        if isinstance(root_candidate, bytes):
+            is_root_bytes = True
+        if is_root_bytes:
+            try:
+                root = TlvParser.parse(root_candidate)
+            except Exception:
+                root = parsed
+        is_root_dict = False
+        if isinstance(root, dict):
+            is_root_dict = True
+        if is_root_dict == False:
+            root = parsed
+
         print(f"\n{Config.Colors.BOLD}[+] GetCerts{Config.Colors.ENDC}")
         if not isinstance(root, dict):
             print("    | (Empty)")
@@ -1610,6 +1625,9 @@ class Sgp22Manager:
         if tls_pub is not None:
             has_any = True
         if has_any == False:
+            has_summary = self._print_cert_summary_from_parsed(parsed, "GetCerts Summary")
+            if has_summary:
+                return
             print("    | (No certificate blocks found)")
             return
 
@@ -1692,14 +1710,56 @@ class Sgp22Manager:
         Includes GET-IOT-equivalent scan and additional SGP.32 retrieval commands.
         """
         print(f"\n{Config.Colors.HEADER}=== SGP.32 Consolidated Data Retrieval ==={Config.Colors.ENDC}")
-        print(f"{Config.Colors.CYAN}[*] Phase 1/2: Running GET-IOT-equivalent scan...{Config.Colors.ENDC}")
         self.run_sgp22_scan()
+        self._select_isd_r()
 
-        print(f"\n{Config.Colors.CYAN}[*] Phase 2/2: Running additional SGP.32 retrievals...{Config.Colors.ENDC}")
-        self.get_rat()
-        self.get_notifications_list()
-        self.get_eim_configuration_data()
-        self.get_euicc_certs()
+        rat_data = self._es10_retrieve_data("BF4300")
+        if rat_data:
+            try:
+                rat_parsed = TlvParser.parse(rat_data)
+                self._print_compact_tlv_section("GetRAT (Rules Authorisation Table)", rat_parsed, 0xBF43)
+            except Exception:
+                print(f"\n{Config.Colors.BOLD}[+] GetRAT (Rules Authorisation Table){Config.Colors.ENDC}")
+                print(f"    | {rat_data.hex().upper()}")
+        else:
+            print(f"\n{Config.Colors.BOLD}[+] GetRAT (Rules Authorisation Table){Config.Colors.ENDC}")
+            print(f"    | {Config.Colors.FAIL}Failed / Empty{Config.Colors.ENDC}")
+
+        notif_data = self._es10_retrieve_data("BF2B00")
+        if notif_data:
+            try:
+                notif_parsed = TlvParser.parse(notif_data)
+                self._print_compact_tlv_section("RetrieveNotificationsList", notif_parsed, 0xBF2B)
+            except Exception:
+                print(f"\n{Config.Colors.BOLD}[+] RetrieveNotificationsList{Config.Colors.ENDC}")
+                print(f"    | {notif_data.hex().upper()}")
+        else:
+            print(f"\n{Config.Colors.BOLD}[+] RetrieveNotificationsList{Config.Colors.ENDC}")
+            print(f"    | {Config.Colors.FAIL}Failed / Empty{Config.Colors.ENDC}")
+
+        eim_data = self._es10_retrieve_data("BF5500")
+        if eim_data:
+            try:
+                eim_parsed = TlvParser.parse(eim_data)
+                self._print_eim_configuration_compact_json(eim_parsed)
+            except Exception:
+                print(f"\n{Config.Colors.BOLD}[+] eIM Configuration Data{Config.Colors.ENDC}")
+                print(f"    | {eim_data.hex().upper()}")
+        else:
+            print(f"\n{Config.Colors.BOLD}[+] eIM Configuration Data{Config.Colors.ENDC}")
+            print(f"    | {Config.Colors.FAIL}Failed / Empty{Config.Colors.ENDC}")
+
+        cert_data = self._es10_retrieve_data("BF5600")
+        if cert_data:
+            try:
+                cert_parsed = TlvParser.parse(cert_data)
+                self._print_get_certs_compact(cert_parsed)
+            except Exception:
+                print(f"\n{Config.Colors.BOLD}[+] GetCerts{Config.Colors.ENDC}")
+                print(f"    | {cert_data.hex().upper()}")
+        else:
+            print(f"\n{Config.Colors.BOLD}[+] GetCerts{Config.Colors.ENDC}")
+            print(f"    | {Config.Colors.FAIL}Failed / Empty{Config.Colors.ENDC}")
 
     def enable_profile(self, identifier: str) -> bool:
         return self._send_cmd(identifier, self.TAG_ENABLE_PROFILE, "Enabling")
