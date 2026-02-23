@@ -62,7 +62,7 @@ class HelpMenu:
         print("  FS-ADMIN       : Administrative tasks (Activate, Delete, Create, Terminate, Resize).")
         
         print(f"\n{Config.Colors.CYAN}[ System & Developer ]{Config.Colors.ENDC}")
-        print("  GUIDE [Topic]  : Show documentation (Topics: GP, ETSI, GSMA, INSTALL, SECURITY).")
+        print("  GUIDE [Topic]  : Show documentation (Topics: GP, ETSI, GSMA, INSTALL, SECURITY, OTA).")
         print("  DECODE         : <Hex> - Parse and decode a raw BER-TLV string.")
         print("  RUN / SCRIPT   : <File> [Out.yaml] - Execute a batch script of APDU commands.")
         print("  DEBUG/VERBOSE  : Toggle raw APDU hex transmission logging.")

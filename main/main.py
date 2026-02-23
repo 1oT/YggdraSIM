@@ -199,6 +199,14 @@ def show_license():
     
     pause()
 
+def show_guides():
+    try:
+        from SCP03.interface.guides import ShellGuides
+        ShellGuides.print_guide()
+    except Exception as e:
+        print(f"{Colors.FAIL}[!] Guide Error: {e}{Colors.ENDC}")
+        pause()
+
 def show_about():
     clear_screen()
     print(f"{Colors.HEADER}")
@@ -279,15 +287,16 @@ def main_menu():
         
         menu_lines = [
             f"{Colors.HEADER}==============================={Colors.ENDC}",
-            f"{Colors.GREEN} [1] Admin Shell (SCP03) - Local Management{Colors.ENDC}",
-            f"{Colors.CYAN} [2] OTA Simulator (SCP80) - Remote Management{Colors.ENDC}",
-            f" {Colors.WARNING}[3] eSIM Management (SCP11) - eUICC Provisioning (BETA){Colors.ENDC}",
+            f"{Colors.GREEN} [1] Admin Shell - Local Management{Colors.ENDC}",
+            f"{Colors.CYAN} [2] OTA Simulator - Remote Management{Colors.ENDC}",
+            f" {Colors.WARNING}[3] eSIM Management - eUICC Provisioning (BETA){Colors.ENDC}",
             "",
             f"{Colors.HEADER}--- Automated Tasks ---{Colors.ENDC}",
-            f"{Colors.GREEN} [4] Admin Shell (SCP03) - Script Execution{Colors.ENDC}",
-            f"{Colors.GREEN} [5] Admin Shell (SCP03) - Report & DUMP-FS{Colors.ENDC}",
-            f"{Colors.CYAN} [6] OTA Simulator (SCP80) - Script Execution{Colors.ENDC}",
+            f"{Colors.GREEN} [4] Admin Shell - Script Execution{Colors.ENDC}",
+            f"{Colors.GREEN} [5] Admin Shell - Report & DUMP-FS{Colors.ENDC}",
+            f"{Colors.CYAN} [6] OTA Simulator - Script Execution{Colors.ENDC}",
             "",
+            " [G] Guides & Documentation",
             " [A] About",
             " [L] License (MPL 2.0)",
             " [Q] Quit",
@@ -309,6 +318,8 @@ def main_menu():
             run_scp03_report()
         elif choice == '6':
             run_scp80_script()
+        elif choice == 'G':
+            show_guides()
         elif choice == 'A':
             show_about()
         elif choice == 'L':

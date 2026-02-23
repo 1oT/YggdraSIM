@@ -34,9 +34,10 @@ class ShellGuides:
                 print(f"  {Config.Colors.CYAN}3.{Config.Colors.ENDC} GSMA eSIM & eUICC (GSMA)")
                 print(f"  {Config.Colors.CYAN}4.{Config.Colors.ENDC} Installation & APDU Chaining (INSTALL)")
                 print(f"  {Config.Colors.CYAN}5.{Config.Colors.ENDC} Cryptography & Security (SECURITY)")
+                print(f"  {Config.Colors.CYAN}6.{Config.Colors.ENDC} SCP80 / OTA Remote Management (OTA)")
                 print(f"  {Config.Colors.CYAN}q.{Config.Colors.ENDC} Return to Shell")
                 
-                choice = input(f"\nChoice [1-5, q]: ").strip().lower()
+                choice = input(f"\nChoice [1-6, q]: ").strip().lower()
                 if choice == 'q':
                     break
                 elif choice == 'exit':
@@ -51,6 +52,8 @@ class ShellGuides:
                     current_topic = 'INSTALL'
                 elif choice == '5': 
                     current_topic = 'SECURITY'
+                elif choice == '6': 
+                    current_topic = 'OTA'
                 else:
                     print(f"{Config.Colors.FAIL}[!] Invalid choice.{Config.Colors.ENDC}")
                     input(f"\n{Config.Colors.CYAN}[Press Enter to continue]{Config.Colors.ENDC}")
@@ -68,6 +71,8 @@ class ShellGuides:
                 cls._print_install_guide()
             elif current_topic == 'SECURITY':
                 cls._print_security_guide()
+            elif current_topic == 'OTA':
+                cls._print_ota_guide()
             else:
                 print(f"{Config.Colors.FAIL}[!] Unknown guide topic: {current_topic}{Config.Colors.ENDC}")
                 break
@@ -291,4 +296,39 @@ class ShellGuides:
    - {Config.Colors.BOLD}2G Context (GSM):{Config.Colors.ENDC} Uses COMP128.
      - Inputs: `RAND` (16 bytes) only. No network verification (AUTN).
      - Returns `SRES` and `Kc`.
+""")
+
+    @classmethod
+    def _print_ota_guide(cls):
+        print(f"""
+{Config.Colors.HEADER}=== SCP80 OTA (Remote Management) Guide ==={Config.Colors.ENDC}
+{Config.Colors.BOLD}Standard:{Config.Colors.ENDC} ETSI TS 102 225 / 3GPP TS 31.115
+
+{Config.Colors.CYAN}1. OTA Architecture Overview{Config.Colors.ENDC}
+   Over-The-Air (OTA) allows remote servers (OTA servers) to securely push commands to a SIM card.
+   Commands are structured as Secured Packets (SMS-PP, HTTP, or CAT_TP), utilizing the Secure Channel 
+   Protocol 80 (SCP80).
+   - {Config.Colors.BOLD}SPI (Security Parameter Indicator):{Config.Colors.ENDC} Determines if payloads are ciphered (encrypted) and/or 
+     appended with a CC (Cryptographic Checksum/MAC).
+   - {Config.Colors.BOLD}KIC / KID:{Config.Colors.ENDC} Key Identifier parameters. They point to specific OTA keys located inside the 
+     card's OTA Security Domain (e.g., TAR `000000` or `B00010`).
+   - {Config.Colors.BOLD}TAR (Toolkit Application Reference):{Config.Colors.ENDC} 3-byte hex routing ID. Defines which application 
+     or Remote File Manager (RFM) processes the payload.
+
+{Config.Colors.CYAN}2. Supported OTA Operations in YggdraSIM{Config.Colors.ENDC}
+   - {Config.Colors.BOLD}READ/UPDATE:{Config.Colors.ENDC} Modifies files remotely. Wraps `00 B0` or `00 D6` inside the secured command packet.
+   - {Config.Colors.BOLD}INSTALL / DELETE:{Config.Colors.ENDC} Manages Applets and Packages via the Remote Applet Manager (RAM).
+   - {Config.Colors.BOLD}STORE DATA:{Config.Colors.ENDC} Push large or multi-block payloads over SMS (via chunking) or HTTP.
+
+{Config.Colors.CYAN}3. Configuration & Key Management{Config.Colors.ENDC}
+   OTA Security requires KIC (Encryption) and KID (MAC/CC) keys. 
+   - Ensure the OTA keys are properly configured in `ota_config.ini` in the `SCP80` module folder.
+   - The ciphering algorithm (DES, 3DES, AES) and CC algorithm must match the profile loaded on the SIM.
+
+{Config.Colors.CYAN}4. APDU Packaging (Command Packet){Config.Colors.ENDC}
+   The OTA module takes standard APDUs (e.g., `00 A4...`) and packages them:
+   1. Appends Command Headers (CHL, SPI, KIC, KID, TAR, CNTR, PCNTR).
+   2. Computes the CC over the header + payload using the KID.
+   3. Encrypts the payload + CC (if required by SPI) using the KIC.
+   4. Sends the final block wrapped in an Envelope command (`80 C2 00 00 <Len> <Secured_Packet>`).
 """)
