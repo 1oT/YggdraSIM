@@ -120,7 +120,7 @@ def run_scp80 ():
             SCP80 .shell ()
         else :
 
-            from cli import OtaShell 
+            from SCP80 .cli import OtaShell 
             OtaShell ().run ()
 
     except SystemExit :
@@ -145,7 +145,7 @@ def run_scp80_script ():
         import SCP80 
         importlib .reload (SCP80 )
 
-        from cli import OtaShell 
+        from SCP80 .cli import OtaShell 
         app =OtaShell ()
         app .do_script (script_path )
         pause ()
@@ -156,18 +156,9 @@ def run_scp80_script ():
         pause ()
 
 def run_scp11 ():
-    """Wrapper for SCP11."""
-    try :
-        import SCP11 .main as scp11_client 
-        importlib .reload (scp11_client )
-        client =scp11_client .SGP22Client ()
-        client .run_flow ()
-        pause ()
-    except SystemExit :
-        pass 
-    except Exception as e :
-        print (f"{Colors.FAIL}[!] SCP11 Error: {e}{Colors.ENDC}")
-        pause ()
+    """SCP11 is intentionally disabled in this build profile."""
+    print (f"{Colors.WARNING}[!] SCP11 is disabled in this build profile.{Colors.ENDC}")
+    pause ()
 
 def show_license ():
     clear_screen ()
@@ -250,12 +241,8 @@ def show_about ():
       3GPP TS 31.115 and ETSI TS 102 225 security layering without 
       requiring a live network core.
 
-    * {Colors.CYAN}SCP11 Client (eUICC Provisioning - BETA):{Colors.ENDC}
-      {Colors.WARNING}[UNDER CONSTRUCTION]{Colors.ENDC}
-      This module simulates an SM-DP+ locally to load profiles from 
-      disk directly to the eUICC. It functions as a standalone 
-      simulator that handles communication between the SIM and PC 
-      with zero reliance on internet or production SM-DP+ servers.
+    * {Colors.CYAN}SCP11 Client (eUICC Provisioning):{Colors.ENDC}
+      {Colors.WARNING}[CURRENTLY DISABLED IN THIS BUILD PROFILE]{Colors.ENDC}
 
     {Colors.BOLD}Philosophy:{Colors.ENDC}
     As Yggdrasil connects the Nine Realms in Norse mythology, this 
@@ -294,7 +281,7 @@ def main_menu ():
         f"{Colors.HEADER}==============================={Colors.ENDC}",
         f"{Colors.GREEN} [1] Admin Shell - Local Management{Colors.ENDC}",
         f"{Colors.CYAN} [2] OTA Simulator - Remote Management{Colors.ENDC}",
-        f" {Colors.WARNING}[3] eSIM Management - eUICC Provisioning (BETA){Colors.ENDC}",
+        f" {Colors.WARNING}[3] eSIM Management (SCP11) - Disabled in this build{Colors.ENDC}",
         "",
         f"{Colors.HEADER}--- Automated Tasks ---{Colors.ENDC}",
         f"{Colors.GREEN} [4] Admin Shell - Script Execution{Colors.ENDC}",

@@ -6,9 +6,14 @@
 # Copyright (c) 2026 Hampus Hellsberg
 # -----------------------------------------------------------------------------
 
-from utils import Utils ,Colors 
-from crypto import CryptoEngine 
-from config import ConfigManager 
+if __package__ :
+    from .utils import Utils ,Colors 
+    from .crypto import CryptoEngine 
+    from .config import ConfigManager 
+else :
+    from utils import Utils ,Colors 
+    from crypto import CryptoEngine 
+    from config import ConfigManager 
 
 class OtaPacketBuilder :
     def __init__ (self ,config :ConfigManager ):

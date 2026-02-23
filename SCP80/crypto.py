@@ -8,7 +8,10 @@
 
 from Crypto .Cipher import AES ,DES3 
 from Crypto .Hash import CMAC 
-from utils import Utils 
+if __package__ :
+    from .utils import Utils 
+else :
+    from utils import Utils 
 
 class CryptoEngine :
     @staticmethod 
