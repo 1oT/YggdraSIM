@@ -40,7 +40,7 @@ class InteractiveWizards:
         print("  3. INSTALL [for make selectable] (GPCS 11.5.2.3.3)")
         print("  4. INSTALL [for extradition] (GPCS 11.5.2.3.4)")
         print("  5. INSTALL [for registry update] (GPCS 11.5.2.3.5)")
-        print("  6. INSTALL [for personalization] (Safe DGI/Data Store Update)")
+        print("  6. INSTALL [for personalization] (GPCS 11.5.2.3.6 - Safe DGI/Data Store Update)")
         print("  7. INSTALL [for install and make selectable] (GPCS 11.5.2.3.7)")
         print("  8. Full CAP Install Sequence Builder (Requires CAP/IJC File)")
         print("  0. Exit Menu")
@@ -75,8 +75,7 @@ class InteractiveWizards:
             is_three = True
             
         if is_three:
-            print("[-] Granular builder for 'make selectable' not implemented. Using generic install builder.")
-            InteractiveWizards._run_install_install(tp_ctrl, "08", "INSTALL [for make selectable]")
+            InteractiveWizards._run_install_make_selectable(tp_ctrl)
             return
             
         is_four = False
@@ -84,8 +83,7 @@ class InteractiveWizards:
             is_four = True
             
         if is_four:
-            print("[-] Granular builder for 'extradition' not implemented. Using generic install builder.")
-            InteractiveWizards._run_install_install(tp_ctrl, "10", "INSTALL [for extradition]")
+            InteractiveWizards._run_install_extradition(tp_ctrl)
             return
             
         is_five = False
@@ -93,8 +91,7 @@ class InteractiveWizards:
             is_five = True
             
         if is_five:
-            print("[-] Granular builder for 'registry update' not implemented. Using generic install builder.")
-            InteractiveWizards._run_install_install(tp_ctrl, "40", "INSTALL [for registry update]")
+            InteractiveWizards._run_install_registry_update(tp_ctrl)
             return
 
         is_six = False
@@ -138,6 +135,9 @@ class InteractiveWizards:
         wiz.add_step("c6", "Volatile Memory Quota (Tag C6) [Hex, e.g. 0100 for 256B]:", default="SKIP")
         wiz.add_step("c7", "Non-Volatile Memory Quota (Tag C7) [Hex, e.g. 0100]:", default="SKIP")
         wiz.add_step("c8", "Global Service Parameters (Tag C8) [Hex]:", default="SKIP")
+        wiz.add_step("c9", "Implicit Selection Parameter (Tag C9) [Hex]:", default="SKIP")
+        wiz.add_step("ca", "Volatile Reserved Memory (Tag CA) [Hex]:", default="SKIP")
+        wiz.add_step("cb", "Non-Volatile Reserved Memory (Tag CB) [Hex]:", default="SKIP")
         
         res = wiz.run()
         payload = bytearray()
@@ -170,6 +170,33 @@ class InteractiveWizards:
                 b = bytes.fromhex(gsp.replace(" ", ""))
                 payload.extend(bytes([0xC8, len(b)]) + b)
                 
+            isp = res.get("c9")
+            has_isp = False
+            if isp != "SKIP":
+                has_isp = True
+                
+            if has_isp:
+                b = bytes.fromhex(isp.replace(" ", ""))
+                payload.extend(bytes([0xC9, len(b)]) + b)
+                
+            vrm = res.get("ca")
+            has_vrm = False
+            if vrm != "SKIP":
+                has_vrm = True
+                
+            if has_vrm:
+                b = bytes.fromhex(vrm.replace(" ", ""))
+                payload.extend(bytes([0xCA, len(b)]) + b)
+                
+            nrm = res.get("cb")
+            has_nrm = False
+            if nrm != "SKIP":
+                has_nrm = True
+                
+            if has_nrm:
+                b = bytes.fromhex(nrm.replace(" ", ""))
+                payload.extend(bytes([0xCB, len(b)]) + b)
+                
             is_payload_empty = False
             if len(payload) == 0:
                 is_payload_empty = True
@@ -200,14 +227,16 @@ class InteractiveWizards:
             is_opt_1 = True
             
         if is_opt_1:
-            return bytes([tag_hex, 0x02, 0x00, 0x00])
+            val = bytes([0x00])
+            return bytes([tag_hex, len(val)]) + val
             
         is_opt_3 = False
         if choice == '3':
             is_opt_3 = True
             
         if is_opt_3:
-            return bytes([tag_hex, 0x02, 0x00, 0xFF])
+            val = bytes([0xFF])
+            return bytes([tag_hex, len(val)]) + val
             
         is_opt_2 = False
         if choice == '2':
@@ -224,7 +253,7 @@ class InteractiveWizards:
                 
             try:
                 add_bytes = bytes.fromhex(add_hex)
-                val = bytes([len(add_bytes), 0x02]) + add_bytes
+                val = bytes([0x02]) + add_bytes
                 return bytes([tag_hex, len(val)]) + val
             except ValueError:
                 print(f"{Config.Colors.FAIL}[!] Invalid Hex. Skipping Tag {tag_hex:02X}.{Config.Colors.ENDC}")
@@ -258,8 +287,10 @@ class InteractiveWizards:
     def _build_toolkit_parameters_ea() -> bytes:
         wiz_main = InteractiveWizard("UICC System Specific Parameters (Tag EA) Builder", Config.Colors, "Reference: ETSI TS 102 226 Section 8.2.1.3.2.2")
         wiz_main.add_step("inc_80", "Include Toolkit Parameters (Tag 80)? [y/N]:", default=False, is_bool=True)
+        wiz_main.add_step("inc_c3", "Include Toolkit Parameters DAP (Tag C3)? [y/N]:", default=False, is_bool=True)
         wiz_main.add_step("inc_81", "Include Access Parameters (Tag 81)? [y/N]:", default=False, is_bool=True)
         wiz_main.add_step("inc_82", "Include Admin Access Parameters (Tag 82)? [y/N]:", default=False, is_bool=True)
+        wiz_main.add_step("inc_83", "Include Update Access Parameters (Tag 83)? [y/N]:", default=False, is_bool=True)
         res_main = wiz_main.run()
         
         payload_ea = bytearray()
@@ -274,9 +305,11 @@ class InteractiveWizards:
             wiz_80.add_step("timers", "Max Timers (00-08) [Default: 00]:", default="00")
             wiz_80.add_step("text", "Max Menu Text Length (Hex) [Default: 00]:", default="00")
             wiz_80.add_step("menu", "Max Menu Entries (Hex) [Default: 00]:", default="00")
+            wiz_80.add_step("menu_list", "Menu Entries List (Position + ID hex string) [SKIP]:", default="SKIP")
             wiz_80.add_step("msl", "Minimum Security Level (MSL) [Hex]:", default="SKIP")
             wiz_80.add_step("tar", "TAR Value(s) (3 bytes each) [Hex]:", default="SKIP")
             wiz_80.add_step("chan", "Max BIP Channels (Hex, 1 byte):", default="SKIP")
+            wiz_80.add_step("srv", "Max Services (Hex, 1 byte):", default="SKIP")
             res_80 = wiz_80.run()
             
             try:
@@ -285,6 +318,13 @@ class InteractiveWizards:
                 payload_80.append(int(res_80.get("timers"), 16))
                 payload_80.append(int(res_80.get("text"), 16))
                 payload_80.append(int(res_80.get("menu"), 16))
+                
+                menu_list = res_80.get("menu_list")
+                has_menu_list = False
+                if menu_list != "SKIP":
+                    has_menu_list = True
+                if has_menu_list:
+                    payload_80.extend(bytes.fromhex(menu_list.replace(" ", "")))
                 
                 msl_val = res_80.get("msl")
                 has_msl = False
@@ -301,12 +341,19 @@ class InteractiveWizards:
                 if chan_val != "SKIP":
                     has_channels = True
                     
+                srv_val = res_80.get("srv")
+                has_services = False
+                if srv_val != "SKIP":
+                    has_services = True
+                    
                 has_any_opt = False
                 if has_msl:
                     has_any_opt = True
                 if has_tar:
                     has_any_opt = True
                 if has_channels:
+                    has_any_opt = True
+                if has_services:
                     has_any_opt = True
                 
                 if has_any_opt:
@@ -322,6 +369,8 @@ class InteractiveWizards:
                         has_tar_or_channels = True
                     if has_channels:
                         has_tar_or_channels = True
+                    if has_services:
+                        has_tar_or_channels = True
                         
                     if has_tar_or_channels:
                         tar_bytes = b''
@@ -333,11 +382,33 @@ class InteractiveWizards:
                         
                         if has_channels:
                             payload_80.append(int(chan_val, 16))
+                        else:
+                            if has_services:
+                                payload_80.append(0x00)
+                            
+                        if has_services:
+                            payload_80.append(int(srv_val, 16))
                             
                 payload_ea.extend(bytes([0x80, len(payload_80)]) + payload_80)
             except ValueError:
                 print(f"{Config.Colors.FAIL}[!] Invalid Hex provided. Skipping Tag 80.{Config.Colors.ENDC}")
         
+        is_c3_y = False
+        if res_main.get("inc_c3"):
+            is_c3_y = True
+            
+        if is_c3_y:
+            wiz_c3 = InteractiveWizard("Toolkit Parameters DAP (Tag C3)", Config.Colors)
+            wiz_c3.add_step("dap", "DAP [Raw Hex]:", default="SKIP")
+            res_c3 = wiz_c3.run()
+            dap_val = res_c3.get("dap")
+            if dap_val != "SKIP":
+                try:
+                    dap_bytes = bytes.fromhex(dap_val.replace(" ", ""))
+                    payload_ea.extend(bytes([0xC3, len(dap_bytes)]) + dap_bytes)
+                except ValueError:
+                    print(f"{Config.Colors.FAIL}[!] Invalid Hex provided. Skipping Tag C3.{Config.Colors.ENDC}")
+                    
         is_81_y = False
         if res_main.get("inc_81"):
             is_81_y = True
@@ -353,6 +424,14 @@ class InteractiveWizards:
         if is_82_y:
             tag_82_bytes = InteractiveWizards._build_access_domain_parameter(0x82, "Admin Access Parameters")
             payload_ea.extend(tag_82_bytes)
+            
+        is_83_y = False
+        if res_main.get("inc_83"):
+            is_83_y = True
+            
+        if is_83_y:
+            tag_83_bytes = InteractiveWizards._build_access_domain_parameter(0x83, "Update Access Parameters")
+            payload_ea.extend(tag_83_bytes)
 
         is_ea_empty = False
         if len(payload_ea) == 0:
@@ -370,7 +449,7 @@ class InteractiveWizards:
         wiz = InteractiveWizard("Install Parameters (TLV Builder)", Config.Colors, "Constructs the concatenated TLV field for Install Parameters.")
         wiz.add_step("c9", "Tag C9 (Application Specific) [Hex, Default: C900]:", default="C900")
         wiz.add_step("ef", "Build GP System Specific Parameters (Tag EF)? [y/N]:", default=False, is_bool=True, builder_func=InteractiveWizards._build_system_parameters_ef)
-        wiz.add_step("ca", "Tag CA (SIM File Access / Toolkit Params) [Raw Hex]:", default="SKIP", warning="ETSI TS 102 226: Tag 'CA' and 'EA' cannot coexist.")
+        wiz.add_step("ca", "Tag CA (SIM File Access) [Raw Hex]:", default="SKIP", warning="ETSI TS 102 226: Tag 'CA' and 'EA' cannot coexist.")
         
         def ea_cond(res):
             ca_val = res.get("ca")
@@ -673,6 +752,186 @@ class InteractiveWizards:
         payload.extend(InteractiveWizards._build_lv_field(res.get("token")))
         
         InteractiveWizards._finalize_and_transmit(tp_ctrl, p1_hex, payload)
+
+    @staticmethod
+    def _run_install_make_selectable(tp_ctrl) -> None:
+        wiz = InteractiveWizard("Building INSTALL [for make selectable] (P1=08)", Config.Colors)
+        wiz.add_step("app_aid", "Application AID [Hex]:", default="", is_mandatory=True)
+        wiz.add_step("priv", "Launch Privileges Builder? [y/N]:", default=False, is_bool=True, builder_func=InteractiveWizards._build_privileges)
+        
+        def priv_cond(res):
+            is_y = False
+            if res.get("priv") == True:
+                is_y = True
+            return not is_y
+            
+        wiz.add_step("raw_priv", "Privileges [Raw Hex, for when builder skipped]:", default="00", condition=priv_cond)
+        wiz.add_step("params", "Launch Install Parameters TLV Builder? [y/N]:", default=False, is_bool=True, builder_func=InteractiveWizards._build_install_parameters_tlv)
+        
+        def params_cond(res):
+            is_y = False
+            if res.get("params") == True:
+                is_y = True
+            return not is_y
+            
+        wiz.add_step("raw_params", "Install Parameters [Raw Hex, for when builder skipped]:", default="", condition=params_cond)
+        wiz.add_step("token", "Install Token [Hex, Default: Empty]:", default="")
+        
+        res = wiz.run()
+        payload = bytearray()
+        
+        payload.append(0x00)
+        payload.append(0x00)
+        
+        payload.extend(InteractiveWizards._build_lv_field(res.get("app_aid")))
+        
+        is_priv_y = False
+        if res.get("priv"):
+            is_priv_y = True
+            
+        priv_hex = "00"
+        if is_priv_y:
+            built_val = res.get("priv_built")
+            has_built = False
+            if built_val is not None:
+                has_built = True
+            if has_built:
+                priv_hex = built_val
+                
+        is_priv_n = False
+        if is_priv_y == False:
+            is_priv_n = True
+            
+        if is_priv_n:
+            priv_hex = res.get("raw_priv")
+            
+        payload.extend(InteractiveWizards._build_lv_field(priv_hex))
+        
+        is_params_y = False
+        if res.get("params"):
+            is_params_y = True
+            
+        params_hex = ""
+        if is_params_y:
+            built_params = res.get("params_built")
+            has_built = False
+            if built_params is not None:
+                if len(built_params) > 0:
+                    has_built = True
+            if has_built:
+                params_hex = built_params
+                
+        is_params_n = False
+        if is_params_y == False:
+            is_params_n = True
+            
+        if is_params_n:
+            params_hex = res.get("raw_params")
+                
+        payload.extend(InteractiveWizards._build_lv_field(params_hex))
+        
+        payload.extend(InteractiveWizards._build_lv_field(res.get("token")))
+        
+        InteractiveWizards._finalize_and_transmit(tp_ctrl, "08", payload)
+
+    @staticmethod
+    def _run_install_extradition(tp_ctrl) -> None:
+        wiz = InteractiveWizard("Building INSTALL [for extradition] (P1=10)", Config.Colors)
+        wiz.add_step("sd_aid", "Security Domain AID [Hex]:", default="", is_mandatory=True)
+        wiz.add_step("app_aid", "Application/ELF AID [Hex]:", default="", is_mandatory=True)
+        
+        res = wiz.run()
+        payload = bytearray()
+        
+        payload.extend(InteractiveWizards._build_lv_field(res.get("sd_aid")))
+        payload.append(0x00)
+        payload.extend(InteractiveWizards._build_lv_field(res.get("app_aid")))
+        payload.append(0x00)
+        payload.append(0x00)
+        payload.append(0x00)
+        
+        InteractiveWizards._finalize_and_transmit(tp_ctrl, "10", payload)
+
+    @staticmethod
+    def _run_install_registry_update(tp_ctrl) -> None:
+        wiz = InteractiveWizard("Building INSTALL [for registry update] (P1=40)", Config.Colors)
+        wiz.add_step("app_aid", "Application/ELF AID [Hex]:", default="", is_mandatory=True)
+        wiz.add_step("priv", "Launch Privileges Builder? [y/N]:", default=False, is_bool=True, builder_func=InteractiveWizards._build_privileges)
+        
+        def priv_cond(res):
+            is_y = False
+            if res.get("priv") == True:
+                is_y = True
+            return not is_y
+            
+        wiz.add_step("raw_priv", "Privileges [Raw Hex, for when builder skipped]:", default="00", condition=priv_cond)
+        wiz.add_step("params", "Launch Install Parameters TLV Builder? [y/N]:", default=False, is_bool=True, builder_func=InteractiveWizards._build_install_parameters_tlv)
+        
+        def params_cond(res):
+            is_y = False
+            if res.get("params") == True:
+                is_y = True
+            return not is_y
+            
+        wiz.add_step("raw_params", "Install Parameters [Raw Hex, for when builder skipped]:", default="", condition=params_cond)
+        wiz.add_step("token", "Install Token [Hex, Default: Empty]:", default="")
+        
+        res = wiz.run()
+        payload = bytearray()
+        
+        payload.append(0x00)
+        payload.append(0x00)
+        
+        payload.extend(InteractiveWizards._build_lv_field(res.get("app_aid")))
+        
+        is_priv_y = False
+        if res.get("priv"):
+            is_priv_y = True
+            
+        priv_hex = "00"
+        if is_priv_y:
+            built_val = res.get("priv_built")
+            has_built = False
+            if built_val is not None:
+                has_built = True
+            if has_built:
+                priv_hex = built_val
+                
+        is_priv_n = False
+        if is_priv_y == False:
+            is_priv_n = True
+            
+        if is_priv_n:
+            priv_hex = res.get("raw_priv")
+            
+        payload.extend(InteractiveWizards._build_lv_field(priv_hex))
+        
+        is_params_y = False
+        if res.get("params"):
+            is_params_y = True
+            
+        params_hex = ""
+        if is_params_y:
+            built_params = res.get("params_built")
+            has_built = False
+            if built_params is not None:
+                if len(built_params) > 0:
+                    has_built = True
+            if has_built:
+                params_hex = built_params
+                
+        is_params_n = False
+        if is_params_y == False:
+            is_params_n = True
+            
+        if is_params_n:
+            params_hex = res.get("raw_params")
+                
+        payload.extend(InteractiveWizards._build_lv_field(params_hex))
+        
+        payload.extend(InteractiveWizards._build_lv_field(res.get("token")))
+        
+        InteractiveWizards._finalize_and_transmit(tp_ctrl, "40", payload)
 
     @staticmethod
     def _finalize_and_transmit(tp_ctrl, p1_hex: str, payload: bytearray) -> None:
