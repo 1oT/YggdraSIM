@@ -39,7 +39,6 @@ class HelpMenu:
         print(f"\n{Config.Colors.CYAN}[ Telecom & eSIM (SGP.22 / SGP.32 / SGP.02) – retrieval + local profile state ]{Config.Colors.ENDC}")
         print("  LIST           : List eSIM profiles (GetProfilesInfo, SGP.22/SGP.32).")
         print("  MANAGE-PROFILE : Spec-aware wizard with separate SGP.22, SGP.32, and SGP.02 command sets.")
-        print("  READ-METADATA  : [SGP.22|SGP.32] - Guarded metadata read entry (requires authenticated provisioning context).")
         print("  RUN-AUTH       : Execute GSM, USIM, or ISIM authentication algorithms.")
         print("  RUN-AUTH-TEST  : Run 3GPP TS 35.207 test vector (OPc derivation + card auth).")
         print("  DERIVE-OPC     : <Ki_hex> <OP_hex> - Derive OPc per 3GPP TS 35.206.")
