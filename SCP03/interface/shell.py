@@ -801,6 +801,51 @@ class ShellDispatcher:
         except Exception as e:
             print(f"{Config.Colors.FAIL}[!] Export failed: {e}{Config.Colors.ENDC}")
 
+    def _handle_read_metadata(self, arg: str = ""):
+        """
+        Guarded metadata read entry point.
+        Metadata retrieval for SGP.32 provisioning flows requires authenticated context
+        (typically SCP11/ES10b server authentication and profile/eIM trust context).
+        """
+        raw = arg.strip().upper()
+        spec = "SGP.32"
+        is_raw_present = False
+        if len(raw) > 0:
+            is_raw_present = True
+        if is_raw_present:
+            is_sgp22 = False
+            if raw == "SGP.22":
+                is_sgp22 = True
+            if raw == "22":
+                is_sgp22 = True
+            if is_sgp22:
+                spec = "SGP.22"
+
+            is_sgp32 = False
+            if raw == "SGP.32":
+                is_sgp32 = True
+            if raw == "32":
+                is_sgp32 = True
+            if is_sgp32:
+                spec = "SGP.32"
+
+            is_valid = False
+            if is_sgp22:
+                is_valid = True
+            if is_sgp32:
+                is_valid = True
+            if is_valid == False:
+                print(f"{Config.Colors.WARNING}[!] Unknown spec '{raw}'. Using SGP.32.{Config.Colors.ENDC}")
+                spec = "SGP.32"
+
+        print(f"{Config.Colors.CYAN}[*] READ-METADATA requested for {spec}.{Config.Colors.ENDC}")
+        print(f"{Config.Colors.WARNING}[-] Not executed: metadata retrieval is gated behind authenticated provisioning context.{Config.Colors.ENDC}")
+        print("    Required preconditions:")
+        print("    | 1) SCP11 channel and ES10b server authentication established")
+        print("    | 2) Matching eIM/profile trust context for metadata access")
+        print("    | 3) Provisioning flow support enabled (planned SCP11 module)")
+        print("    This command is currently a guarded placeholder to prevent unauthenticated metadata operations.")
+
     def _handle_arr(self, arg: str = ""):
         """Decode Application Reference Data (security attributes) for MF or USIM."""
         path = arg.strip() if arg else None
