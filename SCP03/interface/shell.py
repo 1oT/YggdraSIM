@@ -768,20 +768,33 @@ class ShellDispatcher:
             
         self.gp_ctrl.get_keys_info(target_aid_hex=target)
 
-    def _handle_export_euicc(self, arg: str = ""):
-        """Single-command eUICC report: profiles, EuiccInfo, CPLC to YAML."""
+    def _build_euicc_export_report(self, standard: str = "SGP.32") -> Dict:
+        report = self.gp_ctrl.sgp22.get_euicc_report_extended(standard=standard)
+        cplc_data, sw1, sw2 = self.gp_ctrl.get_cplc_data()
+        has_cplc = False
+        if cplc_data and sw1 == 0x90:
+            has_cplc = True
+        if has_cplc:
+            report["cplc_hex"] = cplc_data.hex().upper()
+        report["generated"] = datetime.datetime.now().isoformat()
+        return report
+
+    def _handle_export_euicc(self, arg: str = "", standard: str = "SGP.32"):
+        """Single-command eUICC report export to YAML."""
         out_path = (arg.strip() if arg else "euicc_report.yaml").strip()
         if not out_path:
             out_path = "euicc_report.yaml"
         if not out_path.endswith(".yaml") and not out_path.endswith(".yml"):
             out_path = out_path + ".yaml"
-        print(f"{Config.Colors.CYAN}[*] Generating eUICC report...{Config.Colors.ENDC}")
+        std = standard.strip().upper()
+        is_std_empty = False
+        if len(std) == 0:
+            is_std_empty = True
+        if is_std_empty:
+            std = "SGP.32"
+        print(f"{Config.Colors.CYAN}[*] Generating eUICC report ({std})...{Config.Colors.ENDC}")
         try:
-            report = self.gp_ctrl.sgp22.get_euicc_report()
-            cplc_data, sw1, sw2 = self.gp_ctrl.get_cplc_data()
-            if cplc_data and sw1 == 0x90:
-                report["cplc_hex"] = cplc_data.hex().upper()
-            report["generated"] = datetime.datetime.now().isoformat()
+            report = self._build_euicc_export_report(standard=std)
             with open(out_path, "w") as f:
                 yaml.dump(report, f, default_flow_style=False, allow_unicode=True, sort_keys=False)
             print(f"{Config.Colors.GREEN}[+] Report written to {out_path}{Config.Colors.ENDC}")
