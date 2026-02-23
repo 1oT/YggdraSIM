@@ -64,6 +64,9 @@ class CommandRegistry:
             'LIST': (lambda: shell.gp_ctrl.sgp22.list_profiles(), ""),
             'LIST-IOT': (lambda: shell.gp_ctrl.sgp22.list_profiles(), ""),
             'GET-IOT': (lambda: shell.gp_ctrl.sgp22.run_sgp22_scan(), ""),
+            'GET-RAT': (lambda: shell.gp_ctrl.sgp22.get_rat(), ""),
+            'GET-NOTIFICATIONS': (lambda: shell.gp_ctrl.sgp22.get_notifications_list(), ""),
+            'GET-EIM-CONFIG': (lambda: shell.gp_ctrl.sgp22.get_eim_configuration_data(), ""),
             
             # GlobalPlatform Registry & Data
             'APPS': (lambda: shell.gp_ctrl.list_registry('APPS'), ""),
