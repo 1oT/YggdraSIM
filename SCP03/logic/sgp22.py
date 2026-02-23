@@ -259,10 +259,51 @@ class Sgp22Manager:
                 return "Root SM-DS Address"
             if tag == 0x82:
                 return "Additional Root SM-DS Addresses"
+            if tag == 0xA2:
+                return "Additional Root SM-DS Addresses"
             if tag == 0x83:
                 return "Allowed CI PKID"
             if tag == 0x84:
                 return "CI List"
+            if tag == 0xA4:
+                return "CI List"
+
+        # Context: RetrieveNotificationsList (BF2B)
+        if parent == 0xBF2B:
+            if tag == 0xA0:
+                return "Notification List"
+            if tag == 0x81:
+                return "Notifications List Error"
+            if tag == 0xA2:
+                return "eUICC Package Result List"
+
+        # Context: GetEimConfigurationData (BF55)
+        if parent == 0xBF55:
+            if tag == 0xA0:
+                return "eIM Configuration Data List"
+
+        # Context: EimConfigurationData entry
+        if parent in [0xA0, 0x30]:
+            if tag == 0x80:
+                return "eimId"
+            if tag == 0x81:
+                return "eimFqdn"
+            if tag == 0x82:
+                return "eimIdType"
+            if tag == 0x83:
+                return "counterValue"
+            if tag == 0x84:
+                return "associationToken"
+            if tag == 0xA5:
+                return "eimPublicKeyData"
+            if tag == 0xA6:
+                return "trustedPublicKeyDataTls"
+            if tag == 0x87:
+                return "eimSupportedProtocol"
+            if tag == 0x88:
+                return "euiccCiPKId"
+            if tag == 0x89:
+                return "indirectProfileDownload"
 
         # Context: Extended Card Resources (84)
         if parent == 0x84:
@@ -447,6 +488,18 @@ class Sgp22Manager:
                 return "FALSE"
             return "TRUE"
 
+        # 5b. Enumerations
+        if tag == 0x82 and parent_tag == 0xA0 and len(val) == 1:
+            eim_id_type = {
+                1: "eimIdTypeOid",
+                2: "eimIdTypeFqdn",
+                3: "eimIdTypeProprietary",
+            }
+            v = val[0]
+            if v in eim_id_type:
+                return f"{eim_id_type[v]} ({v})"
+            return f"{v} (0x{hex_str})"
+
         # 6. Time values used in certificates
         if tag == 0x17 or tag == 0x18:
             try:
@@ -550,7 +603,7 @@ class Sgp22Manager:
                     child_context = context_label
 
                     if x509_mode and tag == 0x30:
-                        if parent_tag == 0xA5 or parent_tag == 0xA6:
+                        if parent_tag == 0xA5 or parent_tag == 0xA6 or context_label == "Certificate":
                             if idx == 1:
                                 item_label = "#1 TBSCertificate"
                                 child_context = "TBSCertificate"
@@ -626,6 +679,8 @@ class Sgp22Manager:
                 else:
                     print(f"{prefix}{Config.Colors.CYAN}{name}{Config.Colors.ENDC}")
                     child_context = context_label
+                    if x509_mode and tag == 0x30 and (parent_tag == 0xA5 or parent_tag == 0xA6):
+                        child_context = "Certificate"
                     if x509_mode and name == "Extensions [3] EXPLICIT":
                         child_context = "Extensions [3] EXPLICIT"
                     self._print_tlv_tree(
