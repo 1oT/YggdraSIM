@@ -6,6 +6,7 @@
 # Copyright (c) 2026 Hampus Hellsberg
 # -----------------------------------------------------------------------------
 
+import json
 from typing import List, Dict, Optional, Tuple, Any
 from SCP03.config import Config
 from SCP03.core.utils import HexUtils, TlvParser
@@ -864,7 +865,82 @@ class Sgp22Manager:
         else:
             print(f"{Config.Colors.FAIL}[-] Failed: {sw1:02X}{sw2:02X}{Config.Colors.ENDC}")
 
-    def _es10_retrieve(self, payload: str, title: str, root_tag: Optional[int] = None) -> None:
+    def _store_named_value(self, target: Dict[str, Any], key: str, value: Any) -> None:
+        if key not in target:
+            target[key] = value
+            return
+
+        existing = target[key]
+        if isinstance(existing, list):
+            existing.append(value)
+            return
+
+        target[key] = [existing, value]
+
+    def _is_generic_asn1_container_tag(self, tag: int, parent_tag: Optional[int]) -> bool:
+        name = self._resolve_tag_name(tag, parent_tag)
+        if tag in [0x30, 0x31]:
+            return True
+        generic_names = {"SEQUENCE", "SET", "[0] EXPLICIT", "[1] EXPLICIT", "[2] EXPLICIT", "[3] EXPLICIT"}
+        if name in generic_names:
+            return True
+        if name.endswith("EXPLICIT") and "[" in name:
+            return True
+        return False
+
+    def _compact_tlv_value(self, tag: int, val: Any, parent_tag: Optional[int]) -> Any:
+        if isinstance(val, bytes):
+            return self._decode_value(tag, val, parent_tag)
+
+        if isinstance(val, dict):
+            return self._compact_tlv_node(val, tag)
+
+        if isinstance(val, list):
+            out = []
+            for item in val:
+                if isinstance(item, bytes):
+                    out.append(self._decode_value(tag, item, parent_tag))
+                    continue
+                if isinstance(item, dict):
+                    out.append(self._compact_tlv_node(item, tag))
+                    continue
+                out.append(item)
+            return out
+
+        return str(val)
+
+    def _compact_tlv_node(self, node: Dict[int, Any], parent_tag: Optional[int]) -> Dict[str, Any]:
+        out: Dict[str, Any] = {}
+        for tag, val in node.items():
+            if self._is_generic_asn1_container_tag(tag, parent_tag):
+                flattened = self._compact_tlv_value(tag, val, parent_tag)
+                if isinstance(flattened, dict):
+                    for child_key, child_val in flattened.items():
+                        self._store_named_value(out, child_key, child_val)
+                elif isinstance(flattened, list):
+                    self._store_named_value(out, "items", flattened)
+                else:
+                    self._store_named_value(out, "value", flattened)
+                continue
+
+            key = self._resolve_tag_name(tag, parent_tag)
+            value = self._compact_tlv_value(tag, val, parent_tag)
+            self._store_named_value(out, key, value)
+        return out
+
+    def _print_compact_json(self, parsed: Dict[int, Any], root_tag: Optional[int]) -> None:
+        compact = self._compact_tlv_node(parsed, root_tag)
+        text = json.dumps(compact, indent=2, ensure_ascii=True)
+        for line in text.splitlines():
+            print(f"    {line}")
+
+    def _es10_retrieve(
+        self,
+        payload: str,
+        title: str,
+        root_tag: Optional[int] = None,
+        compact_json: bool = False,
+    ) -> None:
         """
         Generic ES10 retrieval helper using STORE DATA (80 E2 91 00).
         payload must include full TLV request object (e.g. BF4300).
@@ -877,7 +953,11 @@ class Sgp22Manager:
             print(f"{Config.Colors.HEADER}--- {title} ---{Config.Colors.ENDC}")
             try:
                 parsed = TlvParser.parse(data)
-                self._print_tlv_tree(parsed, indent=1, parent_tag=root_tag)
+                debug_enabled = bool(getattr(self.tp, "debug", False))
+                if compact_json and not debug_enabled:
+                    self._print_compact_json(parsed, root_tag)
+                else:
+                    self._print_tlv_tree(parsed, indent=1, parent_tag=root_tag)
             except Exception:
                 print(f"    {data.hex().upper()}")
             return
@@ -993,7 +1073,12 @@ class Sgp22Manager:
 
     def get_eim_configuration_data(self) -> None:
         """ES10b.GetEimConfigurationData (SGP.32 IoT) – eIM configuration data. Retrieval only."""
-        self._es10_retrieve("BF5500", "GetEimConfigurationData (eIM config, SGP.32)", root_tag=0xBF55)
+        self._es10_retrieve(
+            "BF5500",
+            "GetEimConfigurationData (eIM config, SGP.32)",
+            root_tag=0xBF55,
+            compact_json=True,
+        )
 
     def enable_profile(self, identifier: str) -> bool:
         return self._send_cmd(identifier, self.TAG_ENABLE_PROFILE, "Enabling")
