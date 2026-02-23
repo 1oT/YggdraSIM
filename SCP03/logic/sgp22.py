@@ -1611,6 +1611,21 @@ class Sgp22Manager:
             compact_json=True,
         )
 
+    def get_sgp32_all_data(self) -> None:
+        """
+        Consolidated SGP.32 read-only retrieval bundle.
+        Includes GET-IOT-equivalent scan and additional SGP.32 retrieval commands.
+        """
+        print(f"\n{Config.Colors.HEADER}=== SGP.32 Consolidated Data Retrieval ==={Config.Colors.ENDC}")
+        print(f"{Config.Colors.CYAN}[*] Phase 1/2: Running GET-IOT-equivalent scan...{Config.Colors.ENDC}")
+        self.run_sgp22_scan()
+
+        print(f"\n{Config.Colors.CYAN}[*] Phase 2/2: Running additional SGP.32 retrievals...{Config.Colors.ENDC}")
+        self.get_rat()
+        self.get_notifications_list()
+        self.get_eim_configuration_data()
+        self.get_euicc_certs()
+
     def enable_profile(self, identifier: str) -> bool:
         return self._send_cmd(identifier, self.TAG_ENABLE_PROFILE, "Enabling")
 
