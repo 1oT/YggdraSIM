@@ -6,6 +6,7 @@ SCP80/ota_config.ini
 SCP03/script.txt
 SCP03/interface/binds.json
 docs
+SCP03/binds.json
 
 # Python internals (Global)
 **/__pycache__/
@@ -15,3 +16,7 @@ YggdraSIM.code-workspace
 
 # Automation logs
 git_agent.log
+.cursorrules
+.cursorignore
+.gitignore
+.github/workflows

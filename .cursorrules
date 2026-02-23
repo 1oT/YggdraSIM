@@ -12,6 +12,7 @@
 - Logic: Cross-reference state machines with GSMA SGP.02/22/32.
 - APDU Handling: Adhere strictly to ETSI TS 102 221 and GlobalPlatform Card Specification v2.3.
 - Verification: Validate all file modifications against aforementioned standards prior to execution.
+- When applicable, to dry-run tests on modifications to ensure output is as expected
 
 # Security & Operations
 - Boundary: Strictly confined to workspace root. No external file access.
