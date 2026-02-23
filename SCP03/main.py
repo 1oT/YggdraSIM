@@ -25,6 +25,25 @@ except ImportError as e:
     print("Ensure you are running this from the correct directory or that 'SCP03' is strictly a subdirectory.")
     sys.exit(1)
 
+def run_script(file_path):
+    try:
+        app = ShellDispatcher()
+        app.run_script(file_path)
+    except KeyboardInterrupt:
+        print("\n[SCP03] Script execution terminated by user.")
+    except Exception as e:
+        print(f"\n[SCP03] Fatal Error: {e}")
+
+def run_report_wizard():
+    from SCP03.interface.shell_wizards import ShellInteractiveWizards
+    try:
+        app = ShellDispatcher()
+        ShellInteractiveWizards.run_fs_report_wizard(app)
+    except KeyboardInterrupt:
+        print("\n[SCP03] Report wizard terminated by user.")
+    except Exception as e:
+        print(f"\n[SCP03] Fatal Error: {e}")
+
 def entry():
     """
     Public entry point. 

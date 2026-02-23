@@ -70,6 +70,37 @@ def run_scp03():
         print(f"{Colors.FAIL}[!] SCP03 Error: {e}{Colors.ENDC}")
         pause()
 
+def run_scp03_script():
+    """Wrapper for SCP03 Script Execution."""
+    clear_screen()
+    print(f"{Colors.HEADER}=== SCP03 Script Execution ==={Colors.ENDC}")
+    script_path = input("Enter path to script file: ").strip()
+    if not script_path:
+        return
+    try:
+        import SCP03.main as scp03_entry
+        importlib.reload(scp03_entry)
+        scp03_entry.run_script(script_path)
+        pause()
+    except SystemExit:
+        pass 
+    except Exception as e:
+        print(f"{Colors.FAIL}[!] SCP03 Script Error: {e}{Colors.ENDC}")
+        pause()
+
+def run_scp03_report():
+    """Wrapper for SCP03 Report & DUMP-FS."""
+    try:
+        import SCP03.main as scp03_entry
+        importlib.reload(scp03_entry)
+        scp03_entry.run_report_wizard()
+        pause()
+    except SystemExit:
+        pass 
+    except Exception as e:
+        print(f"{Colors.FAIL}[!] SCP03 Report Error: {e}{Colors.ENDC}")
+        pause()
+
 def run_scp80():
     """Wrapper for modularized SCP80 Package."""
     # Inject SCP80 directory into path to allow absolute imports (cli, config, etc)
@@ -93,6 +124,32 @@ def run_scp80():
         pass
     except Exception as e:
         print(f"{Colors.FAIL}[!] SCP80 Error: {e}{Colors.ENDC}")
+        pause()
+
+def run_scp80_script():
+    """Wrapper for SCP80 Script Execution."""
+    clear_screen()
+    print(f"{Colors.CYAN}=== SCP80 OTA Script Execution ==={Colors.ENDC}")
+    script_path = input("Enter path to script file: ").strip()
+    if not script_path:
+        return
+        
+    scp80_path = os.path.join(PROJECT_ROOT, "SCP80")
+    if scp80_path not in sys.path:
+        sys.path.insert(0, scp80_path)
+    
+    try:
+        import SCP80
+        importlib.reload(SCP80)
+        
+        from cli import OtaShell
+        app = OtaShell()
+        app.do_script(script_path)
+        pause()
+    except SystemExit:
+        pass
+    except Exception as e:
+        print(f"{Colors.FAIL}[!] SCP80 Script Error: {e}{Colors.ENDC}")
         pause()
 
 def run_scp11():
@@ -223,8 +280,11 @@ def main_menu():
         menu_lines = [
             f"{Colors.HEADER}==============================={Colors.ENDC}",
             f"{Colors.GREEN} [1] Admin Shell (SCP03) - Local Management{Colors.ENDC}",
-            f"{Colors.CYAN} [2] OTA Simulator (SCP80) - Remote Management{Colors.ENDC}",
-            f" {Colors.WARNING}[3] eSIM Management (SCP11) - eUICC Provisioning (BETA){Colors.ENDC}",
+            f"{Colors.GREEN} [2] Admin Shell (SCP03) - Script Execution{Colors.ENDC}",
+            f"{Colors.GREEN} [3] Admin Shell (SCP03) - Report & DUMP-FS{Colors.ENDC}",
+            f"{Colors.CYAN} [4] OTA Simulator (SCP80) - Remote Management{Colors.ENDC}",
+            f"{Colors.CYAN} [5] OTA Simulator (SCP80) - Script Execution{Colors.ENDC}",
+            f" {Colors.WARNING}[6] eSIM Management (SCP11) - eUICC Provisioning (BETA){Colors.ENDC}",
             "",
             " [A] About",
             " [L] License (MPL 2.0)",
@@ -238,8 +298,14 @@ def main_menu():
         if choice == '1':
             run_scp03()
         elif choice == '2':
-            run_scp80()
+            run_scp03_script()
         elif choice == '3':
+            run_scp03_report()
+        elif choice == '4':
+            run_scp80()
+        elif choice == '5':
+            run_scp80_script()
+        elif choice == '6':
             run_scp11()
         elif choice == 'A':
             show_about()
