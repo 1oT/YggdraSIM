@@ -25,6 +25,34 @@ class InteractiveWizard:
         }
         self.steps.append(step)
 
+    @staticmethod
+    def _looks_like_hex_prompt(prompt: str) -> bool:
+        if prompt is None:
+            return False
+        prompt_l = prompt.lower()
+        has_hex = False
+        if "hex" in prompt_l:
+            has_hex = True
+        return has_hex
+
+    @staticmethod
+    def _is_valid_hex_string(raw_val: str) -> bool:
+        cleaned = raw_val.replace(" ", "")
+        is_even = False
+        if (len(cleaned) % 2) == 0:
+            is_even = True
+        if is_even == False:
+            return False
+        is_ok = True
+        for ch in cleaned:
+            is_hex = False
+            if ch in "0123456789abcdefABCDEF":
+                is_hex = True
+            if is_hex == False:
+                is_ok = False
+                break
+        return is_ok
+
     def _render_completed_step(self, step):
         indent_str = "  " * step["indent"]
         prompt_text = step["prompt"]
@@ -172,6 +200,20 @@ class InteractiveWizard:
                         is_val = True
                         
                     if is_val:
+                        looks_hex = InteractiveWizard._looks_like_hex_prompt(step["prompt"])
+                        if looks_hex:
+                            is_valid_hex = InteractiveWizard._is_valid_hex_string(user_input)
+                            if is_valid_hex == False:
+                                has_old_warning = False
+                                if step["warning"]:
+                                    has_old_warning = True
+                                step["status"] = "pending"
+                                step["warning"] = "Invalid hex string. Use even-length hexadecimal characters only."
+                                if has_old_warning:
+                                    print("\033[1A\033[2K\033[1A\033[2K", end="")
+                                if has_old_warning == False:
+                                    print("\033[1A\033[2K", end="")
+                                continue
                         step["value"] = user_input
                         step["status"] = "completed"
             
