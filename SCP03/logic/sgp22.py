@@ -574,8 +574,8 @@ class Sgp22Manager:
         context_label: Optional[str] = None,
     ):
         """Recursive pretty printer with inline flattening."""
-        
-        for tag, val in tlv_dict.items():
+        items = list(tlv_dict.items())
+        for item_idx, (tag, val) in enumerate(items):
             name = self._resolve_tag_name(tag, parent_tag)
             prefix = "    " * indent + "| "
 
@@ -660,6 +660,8 @@ class Sgp22Manager:
                         print(f"{'    ' * (base_indent + 1)}| {decoded_item}")
                     else:
                         print(f"{'    ' * (base_indent + 1)}| {str(item)}")
+                if item_idx < len(items) - 1:
+                    print("")
                 continue
             
             # --- Inline Optimization ---
@@ -686,6 +688,8 @@ class Sgp22Manager:
                         else:
                             print(f"{prefix}{Config.Colors.CYAN}{name}{Config.Colors.ENDC}")
                             self._print_tlv_tree(nested, indent + 1, parent_tag=tag, x509_mode=x509_mode, context_label=context_label)
+                        if item_idx < len(items) - 1:
+                            print("")
                         continue
                 except: pass
 
@@ -723,15 +727,25 @@ class Sgp22Manager:
                             x509_mode=x509_mode,
                             context_label=child_context,
                         )
+                if item_idx < len(items) - 1:
+                    print("")
             
             elif isinstance(val, bytes):
                 if len(val) == 0:
-                    print(f"{prefix}{name:<20} : (Empty)")
+                    if name == "OBJECT IDENTIFIER":
+                        print(f"{prefix}{name:<20} : (Empty)")
+                    else:
+                        print(f"{prefix}{Config.Colors.CYAN}{name:<20}{Config.Colors.ENDC} : (Empty)")
                 else:
                     decoded = self._decode_value(tag, val, parent_tag)
                     if len(decoded) > 50 and " " not in decoded and "." not in decoded:
                         decoded = decoded[:50] + "..."
-                    print(f"{prefix}{name:<20} : {decoded}")
+                    if name == "OBJECT IDENTIFIER":
+                        print(f"{prefix}{name:<20} : {decoded}")
+                    else:
+                        print(f"{prefix}{Config.Colors.CYAN}{name:<20}{Config.Colors.ENDC} : {decoded}")
+                if item_idx < len(items) - 1:
+                    print("")
 
     def _swap_nibbles(self, s: str) -> str:
         if not s: return ""
