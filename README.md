@@ -24,7 +24,7 @@
 * **Scope:** Data retrieval and local profile state (list, enable, disable, delete) only. This tool does **not** authenticate to ISD-R for provisioning; that is planned for the SCP11 module. Commands such as StoreMetadata, UpdateMetadata, LoadProfile, PrepareDownload, and LoadBoundProfilePackage are **not** supported.
 * **Profile Management:** List, Enable, Disable, and Delete eSIM profiles via ISD-R (ES10c/ES10b.GetProfilesInfo and profile state commands).
 * **SGP.22 (Consumer):** Retrieve and decode `EuiccInfo1`, `EuiccInfo2`, `EuiccConfiguredData`, GetRAT, RetrieveNotificationsList.
-* **SGP.32 (IoT):** Dedicated commands: `LIST-IOT`, `GET-IOT`, `GET-RAT`, `GET-NOTIFICATIONS`, `GET-EIM-CONFIG` (eIM configuration data).
+* **SGP.32 (IoT):** `LIST-IOT` / `GET-IOT` plus wizard-based retrieval actions for RAT, notifications, and eIM configuration data.
 * **SGP.02 (M2M):** ECASD data retrieval and M2M specific tags.
 * **Crisp Decoding:** Automatic, context-aware decoding of complex TLV structures (e.g., Extended Card Resources, Capabilities).
 
