@@ -327,7 +327,7 @@ class ShellInteractiveWizards:
                 is_unblock = True
             return not is_unblock
             
-        wiz.add_step("curr", "Current PIN [ASCII]:", default="SKIP", condition=curr_cond)
+        wiz.add_step("curr", "Enter PIN [ASCII]:", default="SKIP", condition=curr_cond)
         
         def new_cond(res):
             action = res.get("action")

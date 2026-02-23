@@ -404,7 +404,7 @@ class Sgp22Manager:
         val_bytes = bytes.fromhex(value_hex)
         tlv_id = bytes([tag_type, len(val_bytes)]) + val_bytes
         tlv_choice = bytes([self.TAG_CTX_0, len(tlv_id)]) + tlv_id
-        tlv_refresh = bytes([self.TAG_CTX_1, 0x01, 0x00]) # Refresh=False
+        tlv_refresh = bytes([0x81, 0x01, 0x00]) # RefreshFlag = False
         
         inner = tlv_choice + tlv_refresh
         payload = bytes([func_tag >> 8, func_tag & 0xFF, len(inner)]) + inner
@@ -433,7 +433,7 @@ class Sgp22Manager:
                 print(f"{Config.Colors.GREEN}[+] Success.{Config.Colors.ENDC}")
                 return True
             else:
-                errs = {1: "Profile Not Found", 2: "Already in State", 7: "Command Error (Struct)"}
+                errs = {1: "Profile Not Found", 2: "Already in State", 7: "Command Error (Struct)", 127: "Undefined Error"}
                 print(f"{Config.Colors.FAIL}[-] Error 0x{res_code:02X}: {errs.get(res_code, 'Unknown')}{Config.Colors.ENDC}")
                 return False
         
