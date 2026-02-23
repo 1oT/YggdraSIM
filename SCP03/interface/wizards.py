@@ -134,39 +134,40 @@ class InteractiveWizards:
 
     @staticmethod
     def _build_system_parameters_ef() -> bytes:
-        print(f"\n{Config.Colors.CYAN}--- GP System Specific Parameters (Tag EF) Builder ---{Config.Colors.ENDC}")
-        print("Reference: GPCS 11.1.5")
+        wiz = InteractiveWizard("GP System Specific Parameters (Tag EF) Builder", Config.Colors, "Reference: GPCS 11.1.5")
+        wiz.add_step("c6", "Volatile Memory Quota (Tag C6) [Hex, e.g. 0100 for 256B]:", default="SKIP")
+        wiz.add_step("c7", "Non-Volatile Memory Quota (Tag C7) [Hex, e.g. 0100]:", default="SKIP")
+        wiz.add_step("c8", "Global Service Parameters (Tag C8) [Hex]:", default="SKIP")
         
+        res = wiz.run()
         payload = bytearray()
+        
         try:
-            vol = input("Volatile Memory Quota (Tag C6) [Hex, e.g. 0100 for 256B] [Default: Skip]: ").strip().replace(" ", "")
-            
+            vol = res.get("c6")
             has_vol = False
-            if len(vol) > 0:
+            if vol != "SKIP":
                 has_vol = True
                 
             if has_vol:
-                b = bytes.fromhex(vol)
+                b = bytes.fromhex(vol.replace(" ", ""))
                 payload.extend(bytes([0xC6, len(b)]) + b)
                 
-            nvol = input("Non-Volatile Memory Quota (Tag C7) [Hex, e.g. 0100] [Default: Skip]: ").strip().replace(" ", "")
-            
+            nvol = res.get("c7")
             has_nvol = False
-            if len(nvol) > 0:
+            if nvol != "SKIP":
                 has_nvol = True
                 
             if has_nvol:
-                b = bytes.fromhex(nvol)
+                b = bytes.fromhex(nvol.replace(" ", ""))
                 payload.extend(bytes([0xC7, len(b)]) + b)
                 
-            gsp = input("Global Service Parameters (Tag C8) [Hex] [Default: Skip]: ").strip().replace(" ", "")
-            
+            gsp = res.get("c8")
             has_gsp = False
-            if len(gsp) > 0:
+            if gsp != "SKIP":
                 has_gsp = True
                 
             if has_gsp:
-                b = bytes.fromhex(gsp)
+                b = bytes.fromhex(gsp.replace(" ", ""))
                 payload.extend(bytes([0xC8, len(b)]) + b)
                 
             is_payload_empty = False
@@ -186,13 +187,13 @@ class InteractiveWizards:
 
     @staticmethod
     def _build_access_domain_parameter(tag_hex: int, tag_name: str) -> bytes:
-        print(f"  {Config.Colors.CYAN}--- {tag_name} (ETSI TS 102 226 8.2.1.3.2.5) ---{Config.Colors.ENDC}")
-        print("  1. Full access to File System (00)")
-        print("  2. UICC access mechanism (02)")
-        print("  3. No access to File System (FF)")
-        print("  4. Raw Hex Input")
+        wiz = InteractiveWizard(f"{tag_name} (ETSI TS 102 226 8.2.1.3.2.5)", Config.Colors)
+        wiz.add_step("choice", "1=Full(00), 2=UICC(02), 3=No Access(FF), 4=Raw Hex [Default: 4]:", default="4")
+        wiz.add_step("add", "Access Domain Data (ADD) [Hex, for choice 2]:", default="SKIP")
+        wiz.add_step("raw", "Raw Hex [for choice 4]:", default="SKIP")
         
-        choice = input("  Choice [1-4, Default: 4]: ").strip()
+        res = wiz.run()
+        choice = res.get("choice")
         
         is_opt_1 = False
         if choice == '1':
@@ -213,11 +214,17 @@ class InteractiveWizards:
             is_opt_2 = True
             
         if is_opt_2:
-            add_hex = input("  Enter Access Domain Data (ADD) [Hex, e.g. 7F0A01]: ").strip().replace(" ", "")
+            add_hex = res.get("add").replace(" ", "")
+            is_add_skip = False
+            if add_hex == "SKIP":
+                is_add_skip = True
+                
+            if is_add_skip:
+                return b''
+                
             try:
                 add_bytes = bytes.fromhex(add_hex)
-                len_add = len(add_bytes)
-                val = bytes([len_add, 0x02]) + add_bytes
+                val = bytes([len(add_bytes), 0x02]) + add_bytes
                 return bytes([tag_hex, len(val)]) + val
             except ValueError:
                 print(f"{Config.Colors.FAIL}[!] Invalid Hex. Skipping Tag {tag_hex:02X}.{Config.Colors.ENDC}")
@@ -230,93 +237,68 @@ class InteractiveWizards:
                     is_raw = True
                     
         if is_raw:
-            raw_hex = input(f"  {tag_name} [Raw Hex]: ").strip().replace(" ", "")
-            
-            has_raw_hex = False
-            if len(raw_hex) > 0:
-                has_raw_hex = True
+            raw_hex = res.get("raw").replace(" ", "")
+            is_raw_skip = False
+            if raw_hex == "SKIP":
+                is_raw_skip = True
                 
-            if has_raw_hex:
-                try:
-                    b_raw = bytes.fromhex(raw_hex)
-                    return bytes([tag_hex, len(b_raw)]) + b_raw
-                except ValueError:
-                    print(f"{Config.Colors.FAIL}[!] Invalid Hex. Skipping Tag {tag_hex:02X}.{Config.Colors.ENDC}")
-                    return b''
-            return b''
+            if is_raw_skip:
+                return b''
+                
+            try:
+                b_raw = bytes.fromhex(raw_hex)
+                return bytes([tag_hex, len(b_raw)]) + b_raw
+            except ValueError:
+                print(f"{Config.Colors.FAIL}[!] Invalid Hex. Skipping Tag {tag_hex:02X}.{Config.Colors.ENDC}")
+                return b''
+        
+        return b''
 
     @staticmethod
     def _build_toolkit_parameters_ea() -> bytes:
-        print(f"\n{Config.Colors.CYAN}--- UICC System Specific Parameters (Tag EA) Builder ---{Config.Colors.ENDC}")
-        print("Reference: ETSI TS 102 226 Section 8.2.1.3.2.2")
+        wiz_main = InteractiveWizard("UICC System Specific Parameters (Tag EA) Builder", Config.Colors, "Reference: ETSI TS 102 226 Section 8.2.1.3.2.2")
+        wiz_main.add_step("inc_80", "Include Toolkit Parameters (Tag 80)? [y/N]:", default=False, is_bool=True)
+        wiz_main.add_step("inc_81", "Include Access Parameters (Tag 81)? [y/N]:", default=False, is_bool=True)
+        wiz_main.add_step("inc_82", "Include Admin Access Parameters (Tag 82)? [y/N]:", default=False, is_bool=True)
+        res_main = wiz_main.run()
         
         payload_ea = bytearray()
         
-        ans_80 = input("\nInclude Toolkit Parameters (Tag 80)? [y/N]: ").strip().lower()
-        
-        is_ans_80_y = False
-        if ans_80 == 'y':
-            is_ans_80_y = True
+        is_80_y = False
+        if res_main.get("inc_80"):
+            is_80_y = True
             
-        if is_ans_80_y:
+        if is_80_y:
+            wiz_80 = InteractiveWizard("Toolkit Parameters (8.2.1.3.2.2.1)", Config.Colors)
+            wiz_80.add_step("prio", "Priority Level (01-FF) [Default: 01]:", default="01")
+            wiz_80.add_step("timers", "Max Timers (00-08) [Default: 00]:", default="00")
+            wiz_80.add_step("text", "Max Menu Text Length (Hex) [Default: 00]:", default="00")
+            wiz_80.add_step("menu", "Max Menu Entries (Hex) [Default: 00]:", default="00")
+            wiz_80.add_step("msl", "Minimum Security Level (MSL) [Hex]:", default="SKIP")
+            wiz_80.add_step("tar", "TAR Value(s) (3 bytes each) [Hex]:", default="SKIP")
+            wiz_80.add_step("chan", "Max BIP Channels (Hex, 1 byte):", default="SKIP")
+            res_80 = wiz_80.run()
+            
             try:
-                print(f"  {Config.Colors.CYAN}--- Toolkit Parameters (8.2.1.3.2.2.1) ---{Config.Colors.ENDC}")
-                priority = input("  Priority Level (01-FF) [Default: 01]: ").strip()
-                
-                is_prio_empty = False
-                if len(priority) == 0:
-                    is_prio_empty = True
-                    
-                if is_prio_empty:
-                    priority = "01"
-                
-                timers = input("  Max Timers (00-08) [Default: 00]: ").strip()
-                
-                is_timers_empty = False
-                if len(timers) == 0:
-                    is_timers_empty = True
-                    
-                if is_timers_empty:
-                    timers = "00"
-                    
-                text_len = input("  Max Menu Text Length (Hex) [Default: 00]: ").strip()
-                
-                is_text_empty = False
-                if len(text_len) == 0:
-                    is_text_empty = True
-                    
-                if is_text_empty:
-                    text_len = "00"
-                    
-                menu_entries = input("  Max Menu Entries (Hex) [Default: 00]: ").strip()
-                
-                is_menu_empty = False
-                if len(menu_entries) == 0:
-                    is_menu_empty = True
-                    
-                if is_menu_empty:
-                    menu_entries = "00"
-                
-                msl = input("  Minimum Security Level (MSL) [Hex, Default: Empty]: ").strip().replace(" ", "")
-                tar = input("  TAR Value(s) (3 bytes each) [Hex, Default: Empty]: ").strip().replace(" ", "")
-                channels = input("  Max BIP Channels (Hex, 1 byte) [Default: Empty]: ").strip()
-                
                 payload_80 = bytearray()
-                payload_80.append(int(priority, 16))
-                payload_80.append(int(timers, 16))
-                payload_80.append(int(text_len, 16))
-                payload_80.append(int(menu_entries, 16))
+                payload_80.append(int(res_80.get("prio"), 16))
+                payload_80.append(int(res_80.get("timers"), 16))
+                payload_80.append(int(res_80.get("text"), 16))
+                payload_80.append(int(res_80.get("menu"), 16))
                 
+                msl_val = res_80.get("msl")
                 has_msl = False
-                if len(msl) > 0:
+                if msl_val != "SKIP":
                     has_msl = True
                     
+                tar_val = res_80.get("tar")
                 has_tar = False
-                if len(tar) > 0:
+                if tar_val != "SKIP":
                     has_tar = True
                     
+                chan_val = res_80.get("chan")
                 has_channels = False
-                if len(channels) > 0:
+                if chan_val != "SKIP":
                     has_channels = True
                     
                 has_any_opt = False
@@ -328,15 +310,9 @@ class InteractiveWizards:
                     has_any_opt = True
                 
                 if has_any_opt:
+                    msl_bytes = b''
                     if has_msl:
-                        msl_bytes = bytes.fromhex(msl)
-                    
-                    is_msl_missing = False
-                    if has_msl == False:
-                        is_msl_missing = True
-                        
-                    if is_msl_missing:
-                        msl_bytes = b''
+                        msl_bytes = bytes.fromhex(msl_val.replace(" ", ""))
                         
                     payload_80.append(len(msl_bytes))
                     payload_80.extend(msl_bytes)
@@ -348,43 +324,33 @@ class InteractiveWizards:
                         has_tar_or_channels = True
                         
                     if has_tar_or_channels:
+                        tar_bytes = b''
                         if has_tar:
-                            tar_bytes = bytes.fromhex(tar)
-                            
-                        is_tar_missing = False
-                        if has_tar == False:
-                            is_tar_missing = True
-                            
-                        if is_tar_missing:
-                            tar_bytes = b''
+                            tar_bytes = bytes.fromhex(tar_val.replace(" ", ""))
                             
                         payload_80.append(len(tar_bytes))
                         payload_80.extend(tar_bytes)
                         
                         if has_channels:
-                            payload_80.append(int(channels, 16))
+                            payload_80.append(int(chan_val, 16))
                             
                 payload_ea.extend(bytes([0x80, len(payload_80)]) + payload_80)
             except ValueError:
                 print(f"{Config.Colors.FAIL}[!] Invalid Hex provided. Skipping Tag 80.{Config.Colors.ENDC}")
         
-        ans_81 = input("\nInclude Access Parameters (Tag 81)? [y/N]: ").strip().lower()
-        
-        is_ans_81_y = False
-        if ans_81 == 'y':
-            is_ans_81_y = True
+        is_81_y = False
+        if res_main.get("inc_81"):
+            is_81_y = True
             
-        if is_ans_81_y:
+        if is_81_y:
             tag_81_bytes = InteractiveWizards._build_access_domain_parameter(0x81, "Access Parameters")
             payload_ea.extend(tag_81_bytes)
         
-        ans_82 = input("\nInclude Admin Access Parameters (Tag 82)? [y/N]: ").strip().lower()
-        
-        is_ans_82_y = False
-        if ans_82 == 'y':
-            is_ans_82_y = True
+        is_82_y = False
+        if res_main.get("inc_82"):
+            is_82_y = True
             
-        if is_ans_82_y:
+        if is_82_y:
             tag_82_bytes = InteractiveWizards._build_access_domain_parameter(0x82, "Admin Access Parameters")
             payload_ea.extend(tag_82_bytes)
 
@@ -402,10 +368,20 @@ class InteractiveWizards:
     @staticmethod
     def _build_install_parameters_tlv() -> str:
         wiz = InteractiveWizard("Install Parameters (TLV Builder)", Config.Colors, "Constructs the concatenated TLV field for Install Parameters.")
-        wiz.add_step("c9", "Tag C9 (Application Specific) [Hex, Default: C900, SKIP to omit]:", default="C900")
-        wiz.add_step("ef", "Build GP System Specific Parameters (Tag EF)? [y/N]:", default=False, is_bool=True)
-        wiz.add_step("ca", "Tag CA (SIM File Access / Toolkit Params) [Raw Hex, Default: Skip]:", default="SKIP", warning="ETSI TS 102 226: Tag 'CA' and 'EA' cannot coexist.")
-        wiz.add_step("ea", "Build UICC System Specific Parameters (Tag EA)? [y/N]:", default=False, is_bool=True)
+        wiz.add_step("c9", "Tag C9 (Application Specific) [Hex, Default: C900]:", default="C900")
+        wiz.add_step("ef", "Build GP System Specific Parameters (Tag EF)? [y/N]:", default=False, is_bool=True, builder_func=InteractiveWizards._build_system_parameters_ef)
+        wiz.add_step("ca", "Tag CA (SIM File Access / Toolkit Params) [Raw Hex]:", default="SKIP", warning="ETSI TS 102 226: Tag 'CA' and 'EA' cannot coexist.")
+        
+        def ea_cond(res):
+            ca_val = res.get("ca")
+            is_ca_skip = False
+            if ca_val == "SKIP":
+                is_ca_skip = True
+            if ca_val is None:
+                is_ca_skip = True
+            return is_ca_skip
+            
+        wiz.add_step("ea", "Build UICC System Specific Parameters (Tag EA)? [y/N]:", default=False, is_bool=True, condition=ea_cond, builder_func=InteractiveWizards._build_toolkit_parameters_ea)
 
         res = wiz.run()
         payload = bytearray()
@@ -417,7 +393,7 @@ class InteractiveWizards:
             
         if has_c9:
             try:
-                b = bytes.fromhex(c9_val)
+                b = bytes.fromhex(c9_val.replace(" ", ""))
                 payload.extend(bytes([0xC9, len(b)]) + b)
             except ValueError:
                 print(f"{Config.Colors.FAIL}[!] Invalid hex. Skipping C9.{Config.Colors.ENDC}")
@@ -427,8 +403,12 @@ class InteractiveWizards:
             is_ef = True
             
         if is_ef:
-            ef_bytes = InteractiveWizards._build_system_parameters_ef()
-            payload.extend(ef_bytes)
+            ef_bytes = res.get("ef_built")
+            has_ef_bytes = False
+            if ef_bytes is not None:
+                has_ef_bytes = True
+            if has_ef_bytes:
+                payload.extend(ef_bytes)
 
         ca_val = res.get("ca")
         has_ca = False
@@ -437,7 +417,7 @@ class InteractiveWizards:
             
         if has_ca:
             try:
-                b = bytes.fromhex(ca_val)
+                b = bytes.fromhex(ca_val.replace(" ", ""))
                 payload.extend(bytes([0xCA, len(b)]) + b)
                 print(f"{Config.Colors.GREEN}[+] CA Tag Generated: CA{len(b):02X}{ca_val.upper()}{Config.Colors.ENDC}")
             except ValueError:
@@ -453,8 +433,12 @@ class InteractiveWizards:
                 is_ea = True
                 
             if is_ea:
-                ea_bytes = InteractiveWizards._build_toolkit_parameters_ea()
-                payload.extend(ea_bytes)
+                ea_bytes = res.get("ea_built")
+                has_ea_bytes = False
+                if ea_bytes is not None:
+                    has_ea_bytes = True
+                if has_ea_bytes:
+                    payload.extend(ea_bytes)
 
         res_hex = payload.hex().upper()
         
@@ -496,7 +480,6 @@ class InteractiveWizards:
     @staticmethod
     def _build_privileges() -> str:
         wiz = InteractiveWizard("Privileges Builder (GPCS 11.1.2)", Config.Colors)
-        
         wiz.add_step("b7", "Security Domain (Bit 7)? [y/N]:", default=False, is_bool=True, indent=1)
         wiz.add_step("b6", "DAP Verification (Bit 6)? [y/N]:", default=False, is_bool=True, indent=1)
         wiz.add_step("b5", "Delegated Management (Bit 5)? [y/N]:", default=False, is_bool=True, indent=1)
@@ -558,17 +541,24 @@ class InteractiveWizards:
             priv |= 0x01
 
         res_hex = f"{priv:02X}"
-        print(f"{Config.Colors.GREEN}[+] Generated Privilege Bitmask: {res_hex}{Config.Colors.ENDC}")
+        print(f"[+] Generated Privilege Bitmask: {res_hex}")
         return res_hex
 
     @staticmethod
     def _run_install_load(tp_ctrl) -> None:
         wiz = InteractiveWizard("Building INSTALL [for load] (P1=02)", Config.Colors)
-        
         wiz.add_step("lf_aid", "Load File AID [Hex, Default: Empty]:", default="")
         wiz.add_step("sd_aid", "Security Domain AID [Hex, Default: Empty]:", default="")
         wiz.add_step("lf_hash", "Load File Data Block Hash [Hex, Default: Empty]:", default="")
-        wiz.add_step("params", "Launch Load Parameters TLV Builder? [y/N]:", default=False, is_bool=True)
+        wiz.add_step("params", "Launch Load Parameters TLV Builder? [y/N]:", default=False, is_bool=True, builder_func=InteractiveWizards._build_install_parameters_tlv)
+        
+        def params_cond(res):
+            is_y = False
+            if res.get("params") == True:
+                is_y = True
+            return not is_y
+            
+        wiz.add_step("raw_params", "Load Parameters [Raw Hex, for when builder skipped]:", default="", condition=params_cond)
         wiz.add_step("token", "Load Token [Hex, Default: Empty]:", default="")
         
         res = wiz.run()
@@ -578,20 +568,26 @@ class InteractiveWizards:
         payload.extend(InteractiveWizards._build_lv_field(res.get("sd_aid")))
         payload.extend(InteractiveWizards._build_lv_field(res.get("lf_hash")))
         
-        params_hex = ""
         is_params_y = False
         if res.get("params"):
             is_params_y = True
             
+        params_hex = ""
         if is_params_y:
-            built_params = InteractiveWizards._build_install_parameters_tlv()
+            built_val = res.get("params_built")
             has_built = False
-            if len(built_params) > 0:
+            if built_val is not None:
                 has_built = True
-                
             if has_built:
-                params_hex = built_params
-                
+                params_hex = built_val
+            
+        is_params_n = False
+        if is_params_y == False:
+            is_params_n = True
+            
+        if is_params_n:
+            params_hex = res.get("raw_params")
+            
         payload.extend(InteractiveWizards._build_lv_field(params_hex))
         payload.extend(InteractiveWizards._build_lv_field(res.get("token")))
         
@@ -600,12 +596,27 @@ class InteractiveWizards:
     @staticmethod
     def _run_install_install(tp_ctrl, p1_hex: str, desc: str) -> None:
         wiz = InteractiveWizard(f"Building {desc} (P1={p1_hex})", Config.Colors)
+        wiz.add_step("elf_aid", "Executable Load File AID [Hex]:", default="", is_mandatory=True)
+        wiz.add_step("em_aid", "Executable Module AID [Hex]:", default="", is_mandatory=True)
+        wiz.add_step("app_aid", "Application AID [Hex]:", default="", is_mandatory=True)
+        wiz.add_step("priv", "Launch Privileges Builder? [y/N]:", default=False, is_bool=True, builder_func=InteractiveWizards._build_privileges)
         
-        wiz.add_step("elf_aid", "Executable Load File AID [Hex, Default: Empty]:", default="")
-        wiz.add_step("em_aid", "Executable Module AID [Hex, Default: Empty]:", default="")
-        wiz.add_step("app_aid", "Application AID [Hex, Default: Empty]:", default="")
-        wiz.add_step("priv", "Launch Privileges Builder? [y/N]:", default=False, is_bool=True)
-        wiz.add_step("params", "Launch Install Parameters TLV Builder? [y/N]:", default=False, is_bool=True)
+        def priv_cond(res):
+            is_y = False
+            if res.get("priv") == True:
+                is_y = True
+            return not is_y
+            
+        wiz.add_step("raw_priv", "Privileges [Raw Hex, for when builder skipped]:", default="00", condition=priv_cond)
+        wiz.add_step("params", "Launch Install Parameters TLV Builder? [y/N]:", default=False, is_bool=True, builder_func=InteractiveWizards._build_install_parameters_tlv)
+        
+        def params_cond(res):
+            is_y = False
+            if res.get("params") == True:
+                is_y = True
+            return not is_y
+            
+        wiz.add_step("raw_params", "Install Parameters [Raw Hex, for when builder skipped]:", default="C900", condition=params_cond)
         wiz.add_step("token", "Install Token [Hex, Default: Empty]:", default="")
         
         res = wiz.run()
@@ -615,29 +626,48 @@ class InteractiveWizards:
         payload.extend(InteractiveWizards._build_lv_field(res.get("em_aid")))
         payload.extend(InteractiveWizards._build_lv_field(res.get("app_aid")))
         
-        priv_hex = "00"
         is_priv_y = False
         if res.get("priv"):
             is_priv_y = True
             
+        priv_hex = "00"
         if is_priv_y:
-            priv_hex = InteractiveWizards._build_privileges()
+            built_val = res.get("priv_built")
+            has_built = False
+            if built_val is not None:
+                has_built = True
+            if has_built:
+                priv_hex = built_val
             
+        is_priv_n = False
+        if is_priv_y == False:
+            is_priv_n = True
+            
+        if is_priv_n:
+            priv_hex = res.get("raw_priv")
+                
         payload.extend(InteractiveWizards._build_lv_field(priv_hex))
         
-        params_hex = "C900"
         is_params_y = False
         if res.get("params"):
             is_params_y = True
             
+        params_hex = "C900"
         if is_params_y:
-            built_params = InteractiveWizards._build_install_parameters_tlv()
+            built_params = res.get("params_built")
             has_built = False
-            if len(built_params) > 0:
-                has_built = True
-                
+            if built_params is not None:
+                if len(built_params) > 0:
+                    has_built = True
             if has_built:
                 params_hex = built_params
+                
+        is_params_n = False
+        if is_params_y == False:
+            is_params_n = True
+            
+        if is_params_n:
+            params_hex = res.get("raw_params")
                 
         payload.extend(InteractiveWizards._build_lv_field(params_hex))
         payload.extend(InteractiveWizards._build_lv_field(res.get("token")))
@@ -654,9 +684,12 @@ class InteractiveWizards:
             is_tp_present = True
             
         if is_tp_present:
-            ans = input("\n[?] Transmit APDU to card? [yes/NO]: ").strip().lower()
+            wiz = InteractiveWizard("Transmit Confirmation", Config.Colors)
+            wiz.add_step("tx", "Transmit APDU to card? [y/N]:", default=False, is_bool=True)
+            res_wiz = wiz.run()
+            
             do_send = False
-            if ans == "yes":
+            if res_wiz.get("tx"):
                 do_send = True
                 
             if do_send:
@@ -669,7 +702,11 @@ class InteractiveWizards:
                 if is_success:
                     print("[+] Sequence executed successfully.")
                     
+                is_fail = False
                 if is_success == False:
+                    is_fail = True
+                    
+                if is_fail:
                     print(f"[-] Command rejected: {sw1:02X}{sw2:02X}")
 
     @staticmethod
@@ -704,26 +741,25 @@ class InteractiveWizards:
             
         print(f"Extracted Applet AID : {def_app_aid}")
         
-        print(f"\n{Config.Colors.CYAN}--- AIDs & Overrides ---{Config.Colors.ENDC}")
-        app_aid_input = input(f"Target Applet AID [Default: {def_app_aid}]: ").strip()
-        app_aid_hex = def_app_aid
+        wiz = InteractiveWizard("CAP File Install Configuration", Config.Colors)
+        wiz.add_step("app_aid", f"Target Applet AID [Default: {def_app_aid}]:", default=def_app_aid)
+        wiz.add_step("mod_aid", "Target Module AID [Default: Mirrors Applet AID]:", default="MIRROR")
+        wiz.add_step("priv", "Privileges (Hex Bitmask) [Default: 00]:", default="00")
+        wiz.add_step("run_b", "Launch interactive TLV builder for Install Parameters? [y/N]:", default=False, is_bool=True, builder_func=InteractiveWizards._build_install_parameters_tlv)
         
-        has_app_input = False
-        if len(app_aid_input) > 0:
-            has_app_input = True
+        def run_b_cond(res):
+            is_y = False
+            if res.get("run_b") == True:
+                is_y = True
+            return not is_y
             
-        if has_app_input:
-            app_aid_hex = app_aid_input
+        wiz.add_step("raw_p", "Install Parameters [Raw Hex TLV, Default: C900]:", default="C900", condition=run_b_cond)
+        wiz.add_step("ota", "Format blocks for OTA (SMS-PP DOWNLOAD)? [y/N]:", default=False, is_bool=True)
+        wiz.add_step("algo", "Encryption algorithm [1=3DES, 2=AES, for OTA]:", default="1")
         
-        mod_aid_input = input(f"Target Module AID [Default: {app_aid_hex}]: ").strip()
-        mod_aid_hex = app_aid_hex
+        res = wiz.run()
         
-        has_mod_input = False
-        if len(mod_aid_input) > 0:
-            has_mod_input = True
-            
-        if has_mod_input:
-            mod_aid_hex = mod_aid_input
+        app_aid_hex = res.get("app_aid")
         
         is_app_aid_none = False
         if app_aid_hex == "None":
@@ -733,40 +769,36 @@ class InteractiveWizards:
             print(f"{Config.Colors.FAIL}[!] No Applet AID found in CAP. Aborting.{Config.Colors.ENDC}")
             return
             
-        print(f"\n{Config.Colors.CYAN}--- Configuration ---{Config.Colors.ENDC}")
-        priv_input = input("Privileges (Hex Bitmask) [Default: 00]: ").strip()
-        priv_hex = "00"
-        
-        has_priv_input = False
-        if len(priv_input) > 0:
-            has_priv_input = True
+        mod_aid_hex = res.get("mod_aid")
+        is_mirror = False
+        if mod_aid_hex == "MIRROR":
+            is_mirror = True
             
-        if has_priv_input:
-            priv_hex = priv_input
-        
-        run_builder = input("Launch interactive TLV builder for Install Parameters? [y/N]: ").strip().lower()
-        params_hex = "C900"
+        if is_mirror:
+            mod_aid_hex = app_aid_hex
+            
+        priv_hex = res.get("priv")
         
         is_run_builder_y = False
-        if run_builder == 'y':
+        if res.get("run_b"):
             is_run_builder_y = True
             
+        params_hex = "C900"
         if is_run_builder_y:
-            params_hex = InteractiveWizards._build_install_parameters_tlv()
+            built_params = res.get("run_b_built")
+            has_built = False
+            if built_params is not None:
+                if len(built_params) > 0:
+                    has_built = True
+            if has_built:
+                params_hex = built_params
             
         is_run_builder_n = False
         if is_run_builder_y == False:
             is_run_builder_n = True
             
         if is_run_builder_n:
-            params_input = input("Install Parameters (Raw Hex TLV) [Default: C900]: ").strip()
-            
-            has_params_input = False
-            if len(params_input) > 0:
-                has_params_input = True
-                
-            if has_params_input:
-                params_hex = params_input
+            params_hex = res.get("raw_p")
         
         is_params_empty = False
         if len(params_hex) == 0:
@@ -775,21 +807,14 @@ class InteractiveWizards:
         if is_params_empty:
             params_hex = "C900"
 
-        print(f"\n{Config.Colors.CYAN}--- Transport Formatting ---{Config.Colors.ENDC}")
-        ota_prompt = input("Format blocks for OTA (SMS-PP DOWNLOAD)? [y/N]: ").strip().lower()
-        
         chunk_size = 240
         
         is_ota_y = False
-        if ota_prompt == 'y':
+        if res.get("ota"):
             is_ota_y = True
             
         if is_ota_y:
-            print("  Select encryption algorithm (dictates MAC size and available payload):")
-            print("  1. 3DES (8-byte MAC, Max Payload: 111 bytes)")
-            print("  2. AES  (16-byte MAC, Max Payload: 103 bytes)")
-            
-            algo_choice = input("  Choice [1-2, Default: 1]: ").strip()
+            algo_choice = res.get("algo")
             
             is_algo_2 = False
             if algo_choice == '2':
@@ -875,13 +900,13 @@ class InteractiveWizards:
 
     @staticmethod
     def run_dgi_personalization(tp_ctrl, target_aid: str) -> None:
-        wiz = InteractiveWizard("STORE DATA Builder (GPCS 11.11)", Config.Colors, "Updates the Security Domain Data Store using pure BER-TLV (P1=90).")
+        wiz = InteractiveWizard("Security Domain Data Store Update (P1=90)", Config.Colors, "Dynamic tags (D3, 2F00, FF21, C2, C1) are read-only and will be rejected.")
         
         wiz.add_step("42", "Issuer/SD ID (Tag 42) [Hex, Default: SKIP]:", default="SKIP")
         wiz.add_step("45", "Card/SD Image Number (Tag 45) [Hex, Default: SKIP]:", default="SKIP")
         wiz.add_step("4F", "Issuer Security Domain AID (Tag 4F) [Hex, Default: SKIP]:", default="SKIP")
         wiz.add_step("66", "Card/SD Recognition Data (Tag 66) [Hex, Default: SKIP]:", default="SKIP")
-        wiz.add_step("67", "Launch Card Capability Info Builder (Tag 67)? [y/N]:", default=False, is_bool=True)
+        wiz.add_step("67", "Launch Card Capability Info Builder (Tag 67)? [y/N]:", default=False, is_bool=True, builder_func=InteractiveWizards._build_tag_67)
         wiz.add_step("5F50", "SD Manager URL (Tag 5F50) [Hex, Default: SKIP]:", default="SKIP")
         wiz.add_step("86", "Security Level (Tag 86) [Hex, Default: SKIP]:", default="SKIP")
         wiz.add_step("8A", "Admin IP/Host (Tag 8A) [Hex, Default: SKIP]:", default="SKIP")
@@ -923,10 +948,11 @@ class InteractiveWizards:
         if res.get("67"):
             is_67 = True
         if is_67:
-            res_67 = InteractiveWizards._build_tag_67()
+            res_67 = res.get("67_built")
             has_67_val = False
-            if len(res_67) > 0:
-                has_67_val = True
+            if res_67 is not None:
+                if len(res_67) > 0:
+                    has_67_val = True
             if has_67_val:
                 payload += res_67
 
@@ -977,16 +1003,17 @@ class InteractiveWizards:
 
         install_apdu = InteractiveWizards._build_install_perso(target_aid)
         
-        # P1=90 indicates BER-TLV formatting and last block.
         store_data_apdu = f"80E29000{len(payload)//2:02X}{payload}"
 
         print(f"\n[*] Generated INSTALL APDU:\n    {install_apdu}")
         print(f"[*] Generated STORE DATA APDU (BER-TLV P1=90):\n    {store_data_apdu}")
 
-        ans_tx = input("\n[?] Transmit sequence to card? [yes/NO]: ").strip().lower()
+        tx_wiz = InteractiveWizard("Transmit Confirmation", Config.Colors)
+        tx_wiz.add_step("tx", "Transmit sequence to card? [y/N]:", default=False, is_bool=True)
+        res_tx = tx_wiz.run()
         
         do_transmit = False
-        if ans_tx == "yes":
+        if res_tx.get("tx"):
             do_transmit = True
             
         if do_transmit:
@@ -1155,25 +1182,27 @@ class InteractiveWizards:
         if is_store_success == False:
             print(f"[-] STORE DATA rejected: {sw1:02X}{sw2:02X}.")
 
-
     @staticmethod
     def _prompt_flat_tag(tag_hex_str: str, tag_name: str) -> str:
-        ans = input(f"Add {tag_name} (Tag {tag_hex_str})? [y/N]: ").strip().lower()
+        wiz = InteractiveWizard(f"Build {tag_name}", Config.Colors)
+        wiz.add_step("add", f"Add {tag_name} (Tag {tag_hex_str})? [y/N]:", default=False, is_bool=True)
+        wiz.add_step("val", "Enter Value (Hex):", default="SKIP")
+        res = wiz.run()
         
         is_y = False
-        if ans == 'y':
+        if res.get("add"):
             is_y = True
             
         if is_y == False:
             return ""
 
-        val = input(f"  Enter Value for {tag_name} (Hex): ").strip().replace(" ", "")
+        val = res.get("val").replace(" ", "")
         
-        is_empty = False
-        if len(val) == 0:
-            is_empty = True
+        is_skip = False
+        if val == "SKIP":
+            is_skip = True
             
-        if is_empty:
+        if is_skip:
             return ""
 
         try:
@@ -1186,61 +1215,56 @@ class InteractiveWizards:
 
     @staticmethod
     def _build_tag_67() -> str:
-        ans = input("Add Card Capability Info (Tag 67)? [y/N]: ").strip().lower()
+        wiz = InteractiveWizard("Card Capability Info (Tag 67)", Config.Colors)
+        wiz.add_step("scp", "Add Secure Channel Protocol (SCP) Info (Tag A0)? [y/N]:", default=False, is_bool=True)
+        wiz.add_step("scp_id", "SCP Identifier (Tag 80) [Hex, e.g. 03]:", default="SKIP")
+        wiz.add_step("scp_opt", "SCP Options (Tag 81) [Hex, e.g. 70 or 7071]:", default="SKIP")
+        wiz.add_step("scp_mask", "SCP Mask Options (Tag 91) [Hex]:", default="SKIP")
+        wiz.add_step("other", "Add other capabilities to Tag 67 [Raw Hex]:", default="SKIP")
         
-        is_y = False
-        if ans == 'y':
-            is_y = True
-            
-        if is_y == False:
-            return ""
+        res = wiz.run()
 
         payload_67 = ""
-
-        ans_a0 = input("  Add Secure Channel Protocol (SCP) Info (Tag A0)? [y/N]: ").strip().lower()
         
         is_a0_y = False
-        if ans_a0 == 'y':
+        if res.get("scp"):
             is_a0_y = True
 
         if is_a0_y:
             payload_a0 = ""
 
-            scp_id = input("    SCP Identifier (Tag 80) [Hex, e.g. 03]: ").strip().replace(" ", "")
-            
+            scp_id = res.get("scp_id")
             has_scp_id = False
-            if len(scp_id) > 0:
+            if scp_id != "SKIP":
                 has_scp_id = True
                 
             if has_scp_id:
                 try:
-                    b = bytes.fromhex(scp_id)
+                    b = bytes.fromhex(scp_id.replace(" ", ""))
                     payload_a0 += "80" + InteractiveWizards._encode_ber_tlv_length(len(b)) + scp_id.upper()
                 except ValueError:
                     print("[-] Invalid Hex. Skipping Tag 80.")
 
-            scp_opt = input("    SCP Options (Tag 81) [Hex, e.g. 70 or 7071]: ").strip().replace(" ", "")
-            
+            scp_opt = res.get("scp_opt")
             has_scp_opt = False
-            if len(scp_opt) > 0:
+            if scp_opt != "SKIP":
                 has_scp_opt = True
                 
             if has_scp_opt:
                 try:
-                    b = bytes.fromhex(scp_opt)
+                    b = bytes.fromhex(scp_opt.replace(" ", ""))
                     payload_a0 += "81" + InteractiveWizards._encode_ber_tlv_length(len(b)) + scp_opt.upper()
                 except ValueError:
                     print("[-] Invalid Hex. Skipping Tag 81.")
 
-            scp_mask = input("    SCP Mask Options (Tag 91) [Hex, Default: Empty]: ").strip().replace(" ", "")
-            
+            scp_mask = res.get("scp_mask")
             has_scp_mask = False
-            if len(scp_mask) > 0:
+            if scp_mask != "SKIP":
                 has_scp_mask = True
                 
             if has_scp_mask:
                 try:
-                    b = bytes.fromhex(scp_mask)
+                    b = bytes.fromhex(scp_mask.replace(" ", ""))
                     payload_a0 += "91" + InteractiveWizards._encode_ber_tlv_length(len(b)) + scp_mask.upper()
                 except ValueError:
                     print("[-] Invalid Hex. Skipping Tag 91.")
@@ -1253,14 +1277,13 @@ class InteractiveWizards:
                 a0_len = InteractiveWizards._encode_ber_tlv_length(len(payload_a0) // 2)
                 payload_67 += "A0" + a0_len + payload_a0
 
-        other_67 = input("  Add other capabilities to Tag 67 [Raw Hex, Default: Empty]: ").strip().replace(" ", "")
-        
+        other_67 = res.get("other")
         has_other = False
-        if len(other_67) > 0:
+        if other_67 != "SKIP":
             has_other = True
             
         if has_other:
-            payload_67 += other_67.upper()
+            payload_67 += other_67.replace(" ", "").upper()
 
         has_67_payload = False
         if len(payload_67) > 0:

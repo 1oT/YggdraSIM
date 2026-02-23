@@ -9,7 +9,7 @@ class InteractiveWizard:
         self.results = {}
         self.colors = colors_ref
 
-    def add_step(self, step_id, prompt, default=None, is_bool=False, indent=0, warning=None, is_mandatory=False):
+    def add_step(self, step_id, prompt, default=None, is_bool=False, indent=0, warning=None, is_mandatory=False, condition=None, builder_func=None):
         step = {
             "id": step_id,
             "prompt": prompt,
@@ -18,6 +18,8 @@ class InteractiveWizard:
             "indent": indent,
             "warning": warning,
             "is_mandatory": is_mandatory,
+            "condition": condition,
+            "builder_func": builder_func,
             "value": None,
             "status": "pending"
         }
@@ -76,6 +78,23 @@ class InteractiveWizard:
         while self.current_idx < len(self.steps):
             step = self.steps[self.current_idx]
             indent_str = "  " * step["indent"]
+            
+            has_cond = False
+            if step["condition"] is not None:
+                has_cond = True
+                
+            if has_cond:
+                is_cond_met = step["condition"](self.results)
+                is_skip_cond = False
+                if is_cond_met == False:
+                    is_skip_cond = True
+                    
+                if is_skip_cond:
+                    step["status"] = "skipped"
+                    step["value"] = None
+                    self.results[step["id"]] = None
+                    self.current_idx += 1
+                    continue
             
             has_warning = False
             if step["warning"]:
@@ -207,5 +226,19 @@ class InteractiveWizard:
                 print("\033[1A\033[2K", end="")
                 
             self._render_completed_step(step)
+            
+            has_builder = False
+            if step["builder_func"] is not None:
+                has_builder = True
+                
+            if has_builder:
+                is_true_bool = False
+                if step["is_bool"]:
+                    if step["value"] == True:
+                        is_true_bool = True
+                
+                if is_true_bool:
+                    built_val = step["builder_func"]()
+                    self.results[step["id"] + "_built"] = built_val
             
         return self.results
