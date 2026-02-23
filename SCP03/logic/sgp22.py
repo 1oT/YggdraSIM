@@ -512,21 +512,75 @@ class Sgp22Manager:
 
         return hex_str
 
-    def _print_tlv_tree(self, tlv_dict: Dict[int, any], indent: int = 0, parent_tag: Optional[int] = None):
+    def _print_tlv_tree(
+        self,
+        tlv_dict: Dict[int, any],
+        indent: int = 0,
+        parent_tag: Optional[int] = None,
+        x509_mode: bool = False,
+        context_label: Optional[str] = None,
+    ):
         """Recursive pretty printer with inline flattening."""
         
         for tag, val in tlv_dict.items():
             name = self._resolve_tag_name(tag, parent_tag)
             prefix = "    " * indent + "| "
 
+            # X.509 context-aware tag naming (only when explicitly enabled).
+            if x509_mode:
+                if context_label == "TBSCertificate":
+                    if tag == 0xA0:
+                        name = "Version [0] EXPLICIT"
+                    elif tag == 0x02:
+                        name = "Serial Number"
+                    elif tag == 0xA3:
+                        name = "Extensions [3] EXPLICIT"
+                elif context_label == "Validity":
+                    if tag == 0x17:
+                        name = "notBefore (UTCTime)"
+                    elif tag == 0x18:
+                        name = "notAfter (GeneralizedTime)"
+
             # Duplicate tags are preserved as lists; print each occurrence.
             if isinstance(val, list):
                 print(f"{prefix}{Config.Colors.CYAN}{name}{Config.Colors.ENDC}")
                 for idx, item in enumerate(val, start=1):
                     idx_prefix = "    " * (indent + 1) + "| "
-                    print(f"{idx_prefix}{Config.Colors.BOLD}#{idx}{Config.Colors.ENDC}")
+                    item_label = f"#{idx}"
+                    child_context = context_label
+
+                    if x509_mode and tag == 0x30:
+                        if parent_tag == 0xA5 or parent_tag == 0xA6:
+                            if idx == 1:
+                                item_label = "#1 TBSCertificate"
+                                child_context = "TBSCertificate"
+                            elif idx == 2:
+                                item_label = "#2 SignatureAlgorithm"
+                                child_context = "SignatureAlgorithm"
+                        elif context_label == "TBSCertificate":
+                            tbs_map = {
+                                1: "Signature",
+                                2: "Issuer",
+                                3: "Validity",
+                                4: "Subject",
+                                5: "SubjectPublicKeyInfo",
+                            }
+                            if idx in tbs_map:
+                                item_label = f"#{idx} {tbs_map[idx]}"
+                                child_context = tbs_map[idx]
+                        elif context_label == "Extensions [3] EXPLICIT":
+                            item_label = f"#{idx} Extension"
+                            child_context = "Extension"
+
+                    print(f"{idx_prefix}{Config.Colors.BOLD}{item_label}{Config.Colors.ENDC}")
                     if isinstance(item, dict):
-                        self._print_tlv_tree(item, indent + 2, parent_tag=tag)
+                        self._print_tlv_tree(
+                            item,
+                            indent + 2,
+                            parent_tag=tag,
+                            x509_mode=x509_mode,
+                            context_label=child_context,
+                        )
                     elif isinstance(item, bytes):
                         decoded_item = self._decode_value(tag, item, parent_tag)
                         print(f"{'    ' * (indent + 2)}| {decoded_item}")
@@ -562,10 +616,25 @@ class Sgp22Manager:
             if isinstance(val, dict):
                 # Skip wrapper label if it matches parent
                 if indent == 1 and tag == parent_tag:
-                    self._print_tlv_tree(val, indent, parent_tag=tag)
+                    self._print_tlv_tree(
+                        val,
+                        indent,
+                        parent_tag=tag,
+                        x509_mode=x509_mode,
+                        context_label=context_label,
+                    )
                 else:
                     print(f"{prefix}{Config.Colors.CYAN}{name}{Config.Colors.ENDC}")
-                    self._print_tlv_tree(val, indent + 1, parent_tag=tag)
+                    child_context = context_label
+                    if x509_mode and name == "Extensions [3] EXPLICIT":
+                        child_context = "Extensions [3] EXPLICIT"
+                    self._print_tlv_tree(
+                        val,
+                        indent + 1,
+                        parent_tag=tag,
+                        x509_mode=x509_mode,
+                        context_label=child_context,
+                    )
             
             elif isinstance(val, bytes):
                 if len(val) == 0:
@@ -754,7 +823,7 @@ class Sgp22Manager:
             debug_enabled = bool(getattr(self.tp, "debug", False))
             if debug_enabled:
                 print(f"{Config.Colors.HEADER}--- GetCerts ---{Config.Colors.ENDC}")
-                self._print_tlv_tree(parsed, indent=1, parent_tag=0xBF56)
+                self._print_tlv_tree(parsed, indent=1, parent_tag=0xBF56, x509_mode=True)
                 return
 
             if self._print_cert_summary_from_parsed(parsed, "GetCerts"):
