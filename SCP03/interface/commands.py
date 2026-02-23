@@ -61,6 +61,9 @@ class CommandRegistry:
             
             # eSIM Profile Management
             'MANAGE-PROFILE': (lambda: ShellInteractiveWizards.run_manage_profile_wizard(shell), ""),
+            'LIST': (lambda: shell.gp_ctrl.sgp22.list_profiles(), ""),
+            'LIST-IOT': (lambda: shell.gp_ctrl.sgp22.list_profiles(), ""),
+            'GET-IOT': (lambda: shell.gp_ctrl.sgp22.run_sgp22_scan(), ""),
             
             # GlobalPlatform Registry & Data
             'APPS': (lambda: shell.gp_ctrl.list_registry('APPS'), ""),
@@ -95,6 +98,8 @@ class CommandRegistry:
             
             # Auth
             'RUN-AUTH': (lambda: ShellInteractiveWizards.run_auth_wizard(shell), ""),
+            'RUN-AUTH-TEST': (lambda: shell.sec_ctrl.run_auth_test_vector(), ""),
+            'DERIVE-OPC': (shell._handle_derive_opc, "<Ki_hex> <OP_hex>"),
 
             # Config
             'SHOW': (shell.show_config, ""),
@@ -109,6 +114,15 @@ class CommandRegistry:
             'VERBOSE': (shell._toggle_debug, ""),
             'DECODE': (shell._handle_decode, "<Hex>"),
             
+            # eUICC Report Export
+            'EXPORT-EUICC': (shell._handle_export_euicc, "[OutputPath.yaml]"),
+            
+            # ARR / Security Attributes
+            'ARR': (shell._handle_arr, "[Path]"),
+            
+            # ECASD / Certificate Diagnostics
+            'CERT-INFO': (shell._handle_cert_info, ""),
+            
             # System
             'GUIDE': (shell._handle_guide, "[Topic]"),
             'RUN': (shell.run_script, "<File> [Out.yaml]"),
@@ -122,9 +136,9 @@ class CommandRegistry:
     def get_arg_requirements():
         """Returns tuples of commands that require mandatory or optional arguments."""
         args_required = [
-            'SET-AID-ALIAS', 'SELECT', 'UPDATE', 'LOCK', 'UNLOCK', 'DEL', 'SCRIPT', 
-            'STORE-DATA', 'DECODE'
+            'SET-AID-ALIAS', 'SELECT', 'UPDATE', 'LOCK', 'UNLOCK', 'DEL', 'SCRIPT',
+            'STORE-DATA', 'DECODE', 'DERIVE-OPC'
         ]
-        args_optional = ['REPORT', 'KEYS', 'READ', 'RECORD', 'RUN', 'GUIDE', 'DEBUG', 'VERBOSE', 'DUMP-FS', 'MANAGE-PIN']
+        args_optional = ['REPORT', 'KEYS', 'READ', 'RECORD', 'RUN', 'GUIDE', 'DEBUG', 'VERBOSE', 'DUMP-FS', 'MANAGE-PIN', 'EXPORT-EUICC', 'ARR']
         
         return args_required, args_optional

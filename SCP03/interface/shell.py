@@ -13,6 +13,7 @@ import atexit
 import io
 import re
 import datetime
+import yaml
 from typing import Dict, Optional
 
 try:
@@ -339,6 +340,22 @@ class ShellDispatcher:
             cmd = line_buffer[:first_space_idx].upper()
             arg_typed = text.upper()
             
+            is_select = False
+            if cmd == 'SELECT':
+                is_select = True
+            if is_select:
+                options = []
+                try:
+                    for path_name in self.fs_ctrl.fid_map.keys():
+                        if path_name.upper().startswith(arg_typed):
+                            options.append(path_name)
+                    options.sort(key=lambda x: x.upper())
+                except Exception:
+                    pass
+                if state < len(options):
+                    return options[state] + " "
+                return None
+
             is_guide = False
             if cmd == 'GUIDE':
                 is_guide = True
@@ -741,6 +758,80 @@ class ShellDispatcher:
             
         self.gp_ctrl.get_keys_info(target_aid_hex=target)
 
+    def _handle_export_euicc(self, arg: str = ""):
+        """Single-command eUICC report: profiles, EuiccInfo, CPLC to YAML."""
+        out_path = (arg.strip() if arg else "euicc_report.yaml").strip()
+        if not out_path:
+            out_path = "euicc_report.yaml"
+        if not out_path.endswith(".yaml") and not out_path.endswith(".yml"):
+            out_path = out_path + ".yaml"
+        print(f"{Config.Colors.CYAN}[*] Generating eUICC report...{Config.Colors.ENDC}")
+        try:
+            report = self.gp_ctrl.sgp22.get_euicc_report()
+            cplc_data, sw1, sw2 = self.gp_ctrl.get_cplc_data()
+            if cplc_data and sw1 == 0x90:
+                report["cplc_hex"] = cplc_data.hex().upper()
+            report["generated"] = datetime.datetime.now().isoformat()
+            with open(out_path, "w") as f:
+                yaml.dump(report, f, default_flow_style=False, allow_unicode=True, sort_keys=False)
+            print(f"{Config.Colors.GREEN}[+] Report written to {out_path}{Config.Colors.ENDC}")
+        except Exception as e:
+            print(f"{Config.Colors.FAIL}[!] Export failed: {e}{Config.Colors.ENDC}")
+
+    def _handle_arr(self, arg: str = ""):
+        """Decode Application Reference Data (security attributes) for MF or USIM."""
+        path = arg.strip() if arg else None
+        self.fs_ctrl.get_arr(path=path)
+
+    def _handle_derive_opc(self, arg: str):
+        """Derive OPc from Ki and OP (3GPP TS 35.206). Usage: DERIVE-OPC <Ki_hex> <OP_hex>."""
+        parts = arg.split()
+        if len(parts) < 2:
+            print(f"{Config.Colors.FAIL}[!] Usage: DERIVE-OPC <Ki_hex> <OP_hex> (32 hex chars each){Config.Colors.ENDC}")
+            return
+        try:
+            opc = self.sec_ctrl.derive_opc(parts[0], parts[1])
+            print(f"{Config.Colors.GREEN}OPc: {opc}{Config.Colors.ENDC}")
+        except Exception as e:
+            print(f"{Config.Colors.FAIL}[!] {e}{Config.Colors.ENDC}")
+
+    def _handle_cert_info(self):
+        """Decode ECASD/card certificates (subject, issuer, validity)."""
+        from SCP03.core.decoders import AdvancedDecoders
+        ECASD_AID = "A0000005591010FFFFFFFF8900000200"
+        print(f"{Config.Colors.CYAN}[*] Selecting ECASD...{Config.Colors.ENDC}")
+        self.transport.transmit(f"00A40400{len(ECASD_AID)//2:02X}{ECASD_AID}", silent=True)
+        cert_tags = [("5A", "EID"), ("45", "CIN"), ("42", "IIN"), ("E0", "Key Info"), ("7F21", "Certificate")]
+        print(f"{Config.Colors.HEADER}--- ECASD / Certificate Info ---{Config.Colors.ENDC}")
+        for tag_hex, label in cert_tags:
+            cmd = f"80CA{tag_hex}00"
+            data, sw1, sw2 = self.transport.transmit(cmd, silent=True)
+            if sw1 != 0x90 and sw1 != 0x61:
+                print(f"  {label}: Not found ({sw1:02X}{sw2:02X})")
+                continue
+            if not data:
+                print(f"  {label}: (empty)")
+                continue
+            raw = data
+            try:
+                from SCP03.core.utils import TlvParser
+                parsed = TlvParser.parse(data)
+                tag_int = int(tag_hex, 16)
+                if tag_int in parsed:
+                    raw = parsed[tag_int] if isinstance(parsed[tag_int], bytes) else data
+            except Exception:
+                pass
+            if len(raw) >= 4 and raw[0] == 0x30:
+                info = AdvancedDecoders.decode_cert_der(raw)
+                if info:
+                    print(f"  {label}:")
+                    for k, v in info.items():
+                        print(f"    {k}: {v}")
+                else:
+                    print(f"  {label}: {raw.hex().upper()[:64]}...")
+            else:
+                print(f"  {label}: {raw.hex().upper()}")
+
     def _handle_reset(self):
         print(f"{Config.Colors.WARNING}[*] Resetting card...{Config.Colors.ENDC}")
         was_authenticated = False
@@ -857,6 +948,46 @@ class ShellDispatcher:
 
     def _print_help(self):
         HelpMenu.print_help()
+
+    def run_commands(self, cmd_line: str, yaml_out: Optional[str] = None):
+        """
+        Execute semicolon-separated commands (e.g. "AUTH-SD; LIST") without interactive loop.
+        If yaml_out is set, capture each command output and write to YAML file.
+        """
+        commands = [c.strip() for c in cmd_line.split(";") if c.strip()]
+        results = []
+        for line in commands:
+            if line.startswith("#"):
+                continue
+            if yaml_out:
+                old_stdout = sys.stdout
+                sys.stdout = mystdout = io.StringIO()
+                try:
+                    self._exec_line(line)
+                except Exception as e:
+                    print(f"Error: {e}")
+                finally:
+                    sys.stdout = old_stdout
+                captured = mystdout.getvalue()
+                ansi_escape = re.compile(r"\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])")
+                clean = ansi_escape.sub("", captured).strip()
+                results.append({"command": line, "output": clean})
+                print(captured, end="")
+            else:
+                self._exec_line(line)
+        if yaml_out and results:
+            try:
+                with open(yaml_out, "w") as f:
+                    f.write("# YggdraSIM CLI Report\n")
+                    f.write(f"# Date: {datetime.datetime.now()}\n\n")
+                    f.write("steps:\n")
+                    for step in results:
+                        f.write(f"  - command: \"{step['command']}\"\n")
+                        f.write("    output: |\n")
+                        for ln in step["output"].split("\n"):
+                            f.write(f"      {ln}\n")
+            except Exception as e:
+                print(f"{Config.Colors.FAIL}[!] Failed to write YAML: {e}{Config.Colors.ENDC}")
 
     def run_script(self, arg_line: str):
         parts = arg_line.split()

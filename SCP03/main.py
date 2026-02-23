@@ -60,6 +60,29 @@ def entry():
     except Exception as e:
         print(f"\n[SCP03] Fatal Error: {e}")
 
+
+def entry_cmd(cmd_line: str, yaml_out: str = None):
+    """
+    Non-interactive entry: run semicolon-separated commands and optionally write output to YAML.
+    Example: entry_cmd("AUTH-SD; LIST", "report.yaml")
+    """
+    try:
+        app = ShellDispatcher()
+        app.run_commands(cmd_line, yaml_out=yaml_out)
+    except KeyboardInterrupt:
+        print("\n[SCP03] Interrupted.")
+    except Exception as e:
+        print(f"\n[SCP03] Fatal Error: {e}")
+        raise
+
+
 if __name__ == "__main__":
-    # Standalone execution
-    entry()
+    import argparse
+    parser = argparse.ArgumentParser(description="YggdraSIM SCP03 Admin Shell")
+    parser.add_argument("--cmd", type=str, help="Semicolon-separated commands (non-interactive)")
+    parser.add_argument("--out", type=str, help="Output YAML file for --cmd")
+    args = parser.parse_args()
+    if args.cmd:
+        entry_cmd(args.cmd, yaml_out=args.out)
+    else:
+        entry()

@@ -330,7 +330,28 @@ def main_menu():
         elif choice == 'Q':
             sys.exit(0)
 
+def run_scp03_cmd(cmd_line: str, yaml_out: str = None):
+    """Run SCP03 commands non-interactively (for --cmd entrypoint)."""
+    try:
+        import SCP03.main as scp03_entry
+        scp03_entry.entry_cmd(cmd_line, yaml_out=yaml_out)
+    except SystemExit:
+        pass
+    except Exception as e:
+        print(f"{Colors.FAIL}[!] SCP03 Error: {e}{Colors.ENDC}")
+        raise
+
+
 if __name__ == "__main__":
+    import argparse
+    parser = argparse.ArgumentParser(description="YggdraSIM Suite")
+    parser.add_argument("--scp03", action="store_true", help="Use SCP03 Admin Shell")
+    parser.add_argument("--cmd", type=str, help="Semicolon-separated commands (non-interactive, use with --scp03)")
+    parser.add_argument("--out", type=str, help="Output YAML file for --cmd")
+    args = parser.parse_args()
+    if args.scp03 and args.cmd:
+        run_scp03_cmd(args.cmd, yaml_out=args.out)
+        sys.exit(0)
     try:
         main_menu()
     except KeyboardInterrupt:

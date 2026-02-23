@@ -37,10 +37,18 @@ class HelpMenu:
         print("  STORE-DATA     : <Hex> [P1] [P2] - Send raw STORE DATA payload.")
         
         print(f"\n{Config.Colors.CYAN}[ Telecom & eSIM (SGP.22 / SGP.32 / SGP.02) ]{Config.Colors.ENDC}")
+        print("  LIST           : List eSIM profiles (GetProfilesInfo, SGP.22/SGP.32).")
+        print("  LIST-IOT       : Alias for LIST (IoT eUICC profile list).")
+        print("  GET-IOT        : Deep scan: EuiccInfo1/2, EuiccConfiguredData, capabilities.")
         print("  MANAGE-PROFILE : Unified wizard for Listing, Scanning, Enabling, and Deleting profiles.")
+        print("  EXPORT-EUICC   : [Path.yaml] - Single-command eUICC report (profiles, EuiccInfo, CPLC).")
         print("  RUN-AUTH       : Execute GSM, USIM, or ISIM authentication algorithms.")
+        print("  RUN-AUTH-TEST  : Run 3GPP TS 35.207 test vector (OPc derivation + card auth).")
+        print("  DERIVE-OPC     : <Ki_hex> <OP_hex> - Derive OPc per 3GPP TS 35.206.")
         
         print(f"\n{Config.Colors.CYAN}[ Security & PIN Management ]{Config.Colors.ENDC}")
+        print("  ARR [Path]     : Decode Application Reference Data (security attributes) for MF/USIM.")
+        print("  CERT-INFO      : Decode ECASD/card certificates (CI, subject, issuer, validity).")
         print("  MANAGE-PIN     : Unified wizard to Verify, Change, Enable, Disable, or Unblock PINs.")
         
         print(f"\n{Config.Colors.CYAN}[ Environment Configuration ]{Config.Colors.ENDC}")

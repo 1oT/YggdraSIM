@@ -79,6 +79,18 @@ You can automate tasks using script files and export results to YAML.
 * **Input:** A text file with one command per line.
 * **Output:** A structured YAML file containing the command execution log and decoded outputs.
 
+**Non-interactive CLI (one-shot commands):**
+```bash
+python main/main.py --scp03 --cmd "AUTH-SD; LIST; GET-IOT" --out report.yaml
+python SCP03/main.py --cmd "AUTH-SD; APPS" --out report.yaml
+```
+
+**Single-command eUICC report:**
+```bash
+[APDU] > EXPORT-EUICC euicc_report.yaml
+```
+Writes profiles, EuiccInfo1/2, EuiccConfiguredData, CPLC, and key info to a YAML file.
+
 ---
 
 ## ⚙️ Configuration
@@ -132,6 +144,8 @@ Certificates used by the SCP11 module (`CERT.DPauth.ECDSA.der`, `SK.DPauth.ECDSA
     * `interface/`: Shell dispatcher and CLI handling.
     * `transport/`: PC/SC card abstraction.
 * **`SCP80/`**: OTA/SMS secure channel tools.
+
+**CAP / Load File Install:** Full CAP install from file is supported: WIZARD option 8 builds the APDU sequence (dry run); for live install, `gp.install_cap_file()` in `SCP03/logic/gp.py` implements INSTALL [for load], LOAD (chunked), and INSTALL [for install]. No further change needed unless you need different CAP formats or OTA-specific chunking.
 
 ---
 

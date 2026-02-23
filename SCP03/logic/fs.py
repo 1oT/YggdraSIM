@@ -592,6 +592,54 @@ class FileSystemController:
                     
         return None
 
+    def get_arr(self, path: Optional[str] = None) -> None:
+        """
+        Read and decode Application Reference Data (ARR) for MF or USIM context.
+        path: None (use current), 'MF', 'USIM', or FID. Prints decoded security rules.
+        """
+        prev_fid = self.current_fid
+        arr_fid = "2F06"
+        if path:
+            path_upper = path.strip().upper()
+            if not self.select(path_upper):
+                return
+            if path_upper in ("USIM", "7FF0", "7FFF", "ADF_USIM") or (len(path_upper) == 4 and path_upper.startswith("7FF")):
+                arr_fid = "6F06"
+            else:
+                arr_fid = "2F06"
+        else:
+            if self.current_fid == "6F06":
+                arr_fid = "6F06"
+            elif self.current_fid == "2F06":
+                arr_fid = "2F06"
+            elif self.current_fid and (self.current_fid == "7FF0" or self.current_fid == "7FFF" or (len(self.current_fid) == 4 and self.current_fid.startswith("6F"))):
+                arr_fid = "6F06"
+            else:
+                arr_fid = "2F06"
+        cmd_sel = f"00A4000002{arr_fid}"
+        _, sw1, _ = self.tp.transmit(cmd_sel, silent=True)
+        if sw1 != 0x90:
+            self.tp.transmit("00A4030000", silent=True)
+            _, sw1, _ = self.tp.transmit(cmd_sel, silent=True)
+        if sw1 != 0x90:
+            print(f"{Config.Colors.FAIL}[-] Could not select ARR (FID {arr_fid}).{Config.Colors.ENDC}")
+            if prev_fid:
+                self.select(prev_fid)
+            return
+        data, sw1, sw2 = self.tp.transmit("00B2010400", silent=True)
+        if prev_fid:
+            if len(prev_fid) > 4:
+                self.tp.transmit(f"00A40400{len(prev_fid)//2:02X}{prev_fid}", silent=True)
+            else:
+                self.tp.transmit(f"00A4000002{prev_fid}", silent=True)
+        if sw1 == 0x90 and data:
+            decoded = AdvancedDecoders.decode_ef_arr(data.hex().upper())
+            print(f"{Config.Colors.HEADER}--- ARR (FID {arr_fid}) ---{Config.Colors.ENDC}")
+            for line in decoded:
+                print(f"  {Config.Colors.CYAN}{line}{Config.Colors.ENDC}")
+        else:
+            print(f"{Config.Colors.FAIL}[-] Read ARR failed: {sw1:02X}{sw2:02X}{Config.Colors.ENDC}")
+
     def print_fcp_info(self):
         tmpl = self.current_fcp.get('template', 'Unknown')
         print(f"{Config.Colors.CYAN}--- {tmpl} ---{Config.Colors.ENDC}")
