@@ -14,17 +14,20 @@ import importlib
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = None
 
-# Scan up to 2 levels up to find the project root
-possible_roots = [
-    CURRENT_DIR,
-    os.path.dirname(CURRENT_DIR),
-    os.path.dirname(os.path.dirname(CURRENT_DIR))
-]
+if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'):
+    PROJECT_ROOT = sys._MEIPASS
+else:
+    # Scan up to 2 levels up to find the project root
+    possible_roots = [
+        CURRENT_DIR,
+        os.path.dirname(CURRENT_DIR),
+        os.path.dirname(os.path.dirname(CURRENT_DIR))
+    ]
 
-for candidate in possible_roots:
-    if os.path.exists(os.path.join(candidate, "SCP03")):
-        PROJECT_ROOT = candidate
-        break
+    for candidate in possible_roots:
+        if os.path.exists(os.path.join(candidate, "SCP03")):
+            PROJECT_ROOT = candidate
+            break
 
 if PROJECT_ROOT is None:
     PROJECT_ROOT = CURRENT_DIR

@@ -7,14 +7,34 @@
 # -----------------------------------------------------------------------------
 
 import os
+import sys
+import shutil
 
 class Config:
     """Centralized configuration and constants."""
     # Paths are relative to this file location
     BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-    INI_FILE = os.path.join(BASE_DIR, 'keys.ini')
-    FIDS_FILE = os.path.join(BASE_DIR, 'fids.txt')
-    AID_FILE = os.path.join(BASE_DIR, 'aid.txt')
+    
+    # Determine directory for configuration files
+    if getattr(sys, 'frozen', False):
+        CONFIG_DIR = os.path.dirname(sys.executable)
+    else:
+        CONFIG_DIR = BASE_DIR
+        
+    INI_FILE = os.path.join(CONFIG_DIR, 'keys.ini')
+    FIDS_FILE = os.path.join(CONFIG_DIR, 'fids.txt')
+    AID_FILE = os.path.join(CONFIG_DIR, 'aid.txt')
+
+    # Ensure default files exist in the user's config directory when frozen
+    if getattr(sys, 'frozen', False):
+        for filename in ['fids.txt', 'aid.txt']:
+            user_path = os.path.join(CONFIG_DIR, filename)
+            bundled_path = os.path.join(BASE_DIR, filename)
+            if not os.path.exists(user_path) and os.path.exists(bundled_path):
+                try:
+                    shutil.copy2(bundled_path, user_path)
+                except Exception as e:
+                    print(f"Warning: Could not copy default {filename} to {CONFIG_DIR}: {e}")
 
     DEFAULT_KEYS = {
         'kenc': '1122334455667788AABBCCDDEEFF0011',

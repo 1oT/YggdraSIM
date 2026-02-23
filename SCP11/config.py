@@ -6,17 +6,28 @@
 # Copyright (c) 2026 Hampus Hellsberg
 # -----------------------------------------------------------------------------
 
-from dataclasses import dataclass
+import os
+import sys
+import shutil
+from dataclasses import dataclass, field
+
+def _get_config_dir():
+    if getattr(sys, 'frozen', False):
+        return os.path.dirname(sys.executable)
+    return os.path.dirname(os.path.abspath(__file__))
+
+def _get_bundled_dir():
+    return os.path.dirname(os.path.abspath(__file__))
 
 @dataclass(frozen=True)
 class SGPConfig:
     """Configuration constants for SGP.26 emulation."""
     
     # Paths
-    CERT_PATH_AUTH: str = "CERT.DPauth.ECDSA.der"
-    KEY_PATH_AUTH: str = "SK.DPauth.ECDSA.pem"
-    CERT_PATH_PB: str = "CERT.DPpb.ECDSA.der"
-    KEY_PATH_PB: str = "SK.DPpb.ECDSA.pem"
+    CERT_PATH_AUTH: str = field(default_factory=lambda: os.path.join(_get_config_dir(), "CERT.DPauth.ECDSA.der"))
+    KEY_PATH_AUTH: str = field(default_factory=lambda: os.path.join(_get_config_dir(), "SK.DPauth.ECDSA.pem"))
+    CERT_PATH_PB: str = field(default_factory=lambda: os.path.join(_get_config_dir(), "CERT.DPpb.ECDSA.der"))
+    KEY_PATH_PB: str = field(default_factory=lambda: os.path.join(_get_config_dir(), "SK.DPpb.ECDSA.pem"))
 
     # Profile Protection Keys (Static fallback)
     STATIC_PPK_ENC: bytes = bytes.fromhex("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA")
@@ -29,7 +40,7 @@ class SGPConfig:
 
     # Device Info
     TAC: bytes = bytes.fromhex("01020304")
-    CAPABILITIES: dict = None
+    CAPABILITIES: dict = field(default=None)
 
     def __post_init__(self):
         # Initialize mutable defaults if necessary
@@ -39,3 +50,15 @@ class SGPConfig:
                 'utranSupportedRelease': b'\x99\x00\x00',
                 'eutranEpcSupportedRelease': b'\x99\x00\x00'
             })
+            
+        # Copy bundled certs/keys to config dir if missing in frozen environment
+        if getattr(sys, 'frozen', False):
+            bundled_dir = _get_bundled_dir()
+            for filename in ["CERT.DPauth.ECDSA.der", "SK.DPauth.ECDSA.pem", "CERT.DPpb.ECDSA.der", "SK.DPpb.ECDSA.pem"]:
+                user_path = os.path.join(_get_config_dir(), filename)
+                bundled_path = os.path.join(bundled_dir, filename)
+                if not os.path.exists(user_path) and os.path.exists(bundled_path):
+                    try:
+                        shutil.copy2(bundled_path, user_path)
+                    except Exception as e:
+                        print(f"Warning: Could not copy default {filename} to {_get_config_dir()}: {e}")

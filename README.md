@@ -83,8 +83,13 @@ You can automate tasks using script files and export results to YAML.
 
 ## ⚙️ Configuration
 
+### Standalone Executable vs Source Source Code
+When running YggdraSIM from the source code, configuration files are read from and saved to their respective module directories (e.g. `SCP03/keys.ini`, `SCP03/aid.txt`, `SCP80/ota_config.ini`).
+
+When using the compiled single-file executable (built with PyInstaller), the configuration files are located in the **same directory as the executable**. If you are running the executable for the first time, it will automatically extract the default configuration files (such as `aid.txt`, `fids.txt`, and certificates) into the directory where the executable is located, allowing you to modify them easily.
+
 ### Keys (`keys.ini`)
-To perform authenticated GlobalPlatform operations (`AUTH-SD`), you must define your keys in `SCP03/keys.ini`. If the file does not exist, the tool will create a default one.
+To perform authenticated GlobalPlatform operations (`AUTH-SD`), you must define your keys in `keys.ini` (located in `SCP03/keys.ini` or next to the executable). If the file does not exist, the tool will create a default one.
 
 ```ini
 [KEYS]
@@ -97,11 +102,17 @@ kvn  = 20
 ```
 
 ### AID Registry (`aid.txt`)
-Map AIDs to friendly names for easier navigation.
+Map AIDs to friendly names for easier navigation. Located in `SCP03/aid.txt` or next to the executable.
 ```text
 ISD-R: A0000005591010FFFFFFFF8900000100
 ECASD: A0000005591010FFFFFFFF8900000200
 ```
+
+### File Identifier (FID) Paths (`fids.txt`)
+Contains predefined File IDs mapping to textual paths for tree navigation. This file is copied to the executable directory on first run and can be modified.
+
+### SCP11 Certificates
+Certificates used by the SCP11 module (`CERT.DPauth.ECDSA.der`, `SK.DPauth.ECDSA.pem`, etc.) are also copied alongside the executable. They can be modified by replacing them with your own certificates of the same name.
 
 ---
 
