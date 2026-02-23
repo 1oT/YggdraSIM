@@ -47,8 +47,6 @@ class HelpMenu:
         print("  DERIVE-OPC     : <Ki_hex> <OP_hex> - Derive OPc per 3GPP TS 35.206.")
         
         print(f"\n{Config.Colors.CYAN}[ Security & PIN Management ]{Config.Colors.ENDC}")
-        print("  ARR [Path]     : Decode Application Reference Data (security attributes) for MF/USIM.")
-        print("  CERT-INFO      : Decode ECASD/card certificates (CI, subject, issuer, validity).")
         print("  MANAGE-PIN     : Unified wizard to Verify, Change, Enable, Disable, or Unblock PINs.")
         
         print(f"\n{Config.Colors.CYAN}[ Environment Configuration ]{Config.Colors.ENDC}")
@@ -61,12 +59,11 @@ class HelpMenu:
         
         print(f"\n{Config.Colors.CYAN}[ File System Operations ]{Config.Colors.ENDC}")
         print("  SCAN           : Traverse and discover the UICC file tree.")
-        print("  REPORT         : Unified wizard for Single File, Tree Dump, or Full YAML reports.")
+        print("  REPORT         : Unified FS wizard (export tree to disk or generate full YAML report).")
         print("  SELECT         : <Path/FID> - Select a DF or EF.")
         print("  READ [Path]    : Read binary data from the selected EF.")
         print("  RECORD         : <N/ALL> [Path] - Read record(s) from a linear fixed/cyclic EF.")
         print("  UPDATE         : BINARY <Hex> | RECORD <N> <Hex> - Write data to an EF.")
-        print("  DUMP-FS [Dir]  : Export the file system tree to a local directory.")
         print("  FS-ADMIN       : Administrative tasks (Activate, Delete, Create, Terminate, Resize).")
         
         print(f"\n{Config.Colors.CYAN}[ System & Developer ]{Config.Colors.ENDC}")
