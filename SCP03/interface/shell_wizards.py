@@ -456,7 +456,7 @@ class ShellInteractiveWizards:
             
         wiz.add_step(
             "action",
-            "Action [1=List, 2=Scan, 3=Enable, 4=Disable, 5=Delete, 6=GetRAT, 7=GetNotifications, 8=GetEimConfig]:",
+            "Action [1=List, 2=Scan, 3=Enable, 4=Disable, 5=Delete, 6=GetRAT, 7=GetNotifications, 8=GetEimConfig, 9=GetConfiguredData, 10=GetCerts, 11=GetEID]:",
             default="1",
             condition=action_cond
         )
@@ -523,6 +523,27 @@ class ShellInteractiveWizards:
                 is_eight = True
             if is_eight:
                 shell.gp_ctrl.sgp22.get_eim_configuration_data()
+                return
+
+            is_nine = False
+            if action == '9':
+                is_nine = True
+            if is_nine:
+                shell.gp_ctrl.sgp22.get_euicc_configured_data()
+                return
+
+            is_ten = False
+            if action == '10':
+                is_ten = True
+            if is_ten:
+                shell.gp_ctrl.sgp22.get_euicc_certs()
+                return
+
+            is_eleven = False
+            if action == '11':
+                is_eleven = True
+            if is_eleven:
+                shell.gp_ctrl.sgp22.get_eid()
                 return
 
             is_three = False

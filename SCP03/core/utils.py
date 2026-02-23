@@ -26,6 +26,30 @@ class HexUtils:
 class TlvParser:
     """Robust TLV Decoding Engine with Multi-byte Tag Support."""
     @staticmethod
+    def get_first(parsed: Dict[int, Any], tag: int, default: Any = None) -> Any:
+        """
+        Return the first value for a tag from parsed TLV dict.
+        Supports duplicate-tag representation where parsed[tag] may be a list.
+        """
+        if tag not in parsed:
+            return default
+        value = parsed[tag]
+        if isinstance(value, list):
+            if len(value) == 0:
+                return default
+            return value[0]
+        return value
+
+    @staticmethod
+    def as_list(value: Any) -> List[Any]:
+        """Normalize parsed TLV value to list form."""
+        if value is None:
+            return []
+        if isinstance(value, list):
+            return value
+        return [value]
+
+    @staticmethod
     def _store_tag(parsed: Dict[int, Any], tag_val: int, value: Any) -> None:
         """
         Store TLV value while preserving duplicate tags.

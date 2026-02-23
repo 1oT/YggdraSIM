@@ -132,12 +132,8 @@ class Sgp22Manager:
         """Convert one profile TLV blob to dict."""
         try:
             info = TlvParser.parse(data)
-            aid_bytes = info.get(self.TAG_AID) or info.get(self.TAG_CTX_0)
-            iccid_bytes = info.get(self.TAG_ICCID)
-            if isinstance(aid_bytes, list) and len(aid_bytes) > 0:
-                aid_bytes = aid_bytes[0]
-            if isinstance(iccid_bytes, list) and len(iccid_bytes) > 0:
-                iccid_bytes = iccid_bytes[0]
+            aid_bytes = TlvParser.get_first(info, self.TAG_AID) or TlvParser.get_first(info, self.TAG_CTX_0)
+            iccid_bytes = TlvParser.get_first(info, self.TAG_ICCID)
             aid_hex = aid_bytes.hex().upper() if isinstance(aid_bytes, bytes) else ""
             iccid_raw = iccid_bytes.hex().upper() if isinstance(iccid_bytes, bytes) else ""
             iccid_display = self._swap_nibbles(iccid_raw)
@@ -513,62 +509,66 @@ class Sgp22Manager:
         else:
             print(f"{Config.Colors.FAIL}[-] Failed: {sw1:02X}{sw2:02X}{Config.Colors.ENDC}")
 
-    def get_rat(self) -> None:
-        """ES10b.GetRAT (SGP.22/32) – Rules Authorisation Table. Retrieval only."""
+    def _es10_retrieve(self, payload: str, title: str, root_tag: Optional[int] = None) -> None:
+        """
+        Generic ES10 retrieval helper using STORE DATA (80 E2 91 00).
+        payload must include full TLV request object (e.g. BF4300).
+        """
         self._select_isd_r()
-        payload = "BF4300"
         cmd = f"80E29100{len(bytes.fromhex(payload)):02X}{payload}"
-        print(f"{Config.Colors.CYAN}[*] GetRAT (Rules Authorisation Table)...{Config.Colors.ENDC}")
+        print(f"{Config.Colors.CYAN}[*] {title}...{Config.Colors.ENDC}")
         data, sw1, sw2 = self.tp.transmit(cmd, silent=True)
         if sw1 == 0x90 and data:
-            print(f"{Config.Colors.HEADER}--- RAT ---{Config.Colors.ENDC}")
+            print(f"{Config.Colors.HEADER}--- {title} ---{Config.Colors.ENDC}")
             try:
                 parsed = TlvParser.parse(data)
-                self._print_tlv_tree(parsed, indent=1, parent_tag=0xBF43)
+                self._print_tlv_tree(parsed, indent=1, parent_tag=root_tag)
             except Exception:
                 print(f"    {data.hex().upper()}")
-        elif sw1 != 0x90:
+            return
+        if sw1 != 0x90:
             print(f"{Config.Colors.FAIL}[-] Failed: {sw1:02X}{sw2:02X}{Config.Colors.ENDC}")
-        else:
-            print("    (Empty)")
+            return
+        print("    (Empty)")
+
+    def get_euicc_configured_data(self) -> None:
+        """ES10a.GetEuiccConfiguredData / GetEuiccConfiguredAddresses (retrieval)."""
+        self._es10_retrieve("BF3C00", "EuiccConfiguredData", root_tag=0xBF3C)
+
+    def get_euicc_certs(self) -> None:
+        """ES10b.GetCerts (SGP.22/32 retrieval)."""
+        self._es10_retrieve("BF5600", "GetCerts", root_tag=0xBF56)
+
+    def get_eid(self) -> None:
+        """Retrieve EID from ECASD via GET DATA tag 5A."""
+        ECASD_AID = "A0000005591010FFFFFFFF8900000200"
+        self.tp.transmit(f"00A40400{len(ECASD_AID)//2:02X}{ECASD_AID}", silent=True)
+        data, sw1, sw2 = self.tp.transmit("00CA005A00", silent=True)
+        if sw1 == 0x90 and data:
+            print(f"{Config.Colors.HEADER}--- EID ---{Config.Colors.ENDC}")
+            try:
+                parsed = TlvParser.parse(data)
+                eid = TlvParser.get_first(parsed, 0x5A, data)
+                if isinstance(eid, bytes):
+                    print(f"    {eid.hex().upper()}")
+                else:
+                    print(f"    {data.hex().upper()}")
+            except Exception:
+                print(f"    {data.hex().upper()}")
+            return
+        print(f"{Config.Colors.FAIL}[-] Failed: {sw1:02X}{sw2:02X}{Config.Colors.ENDC}")
+
+    def get_rat(self) -> None:
+        """ES10b.GetRAT (SGP.22/32) – Rules Authorisation Table. Retrieval only."""
+        self._es10_retrieve("BF4300", "GetRAT (Rules Authorisation Table)", root_tag=0xBF43)
 
     def get_notifications_list(self) -> None:
         """ES10b.RetrieveNotificationsList (SGP.22/32) – Pending notifications. Retrieval only."""
-        self._select_isd_r()
-        payload = "BF2B00"
-        cmd = f"80E29100{len(bytes.fromhex(payload)):02X}{payload}"
-        print(f"{Config.Colors.CYAN}[*] RetrieveNotificationsList (pending notifications)...{Config.Colors.ENDC}")
-        data, sw1, sw2 = self.tp.transmit(cmd, silent=True)
-        if sw1 == 0x90 and data:
-            print(f"{Config.Colors.HEADER}--- Notifications / eUICC Package Results ---{Config.Colors.ENDC}")
-            try:
-                parsed = TlvParser.parse(data)
-                self._print_tlv_tree(parsed, indent=1, parent_tag=0xBF2B)
-            except Exception:
-                print(f"    {data.hex().upper()}")
-        elif sw1 != 0x90:
-            print(f"{Config.Colors.FAIL}[-] Failed: {sw1:02X}{sw2:02X}{Config.Colors.ENDC}")
-        else:
-            print("    (Empty)")
+        self._es10_retrieve("BF2B00", "RetrieveNotificationsList", root_tag=0xBF2B)
 
     def get_eim_configuration_data(self) -> None:
         """ES10b.GetEimConfigurationData (SGP.32 IoT) – eIM configuration data. Retrieval only."""
-        self._select_isd_r()
-        payload = "BF5500"
-        cmd = f"80E29100{len(bytes.fromhex(payload)):02X}{payload}"
-        print(f"{Config.Colors.CYAN}[*] GetEimConfigurationData (eIM config, SGP.32)...{Config.Colors.ENDC}")
-        data, sw1, sw2 = self.tp.transmit(cmd, silent=True)
-        if sw1 == 0x90 and data:
-            print(f"{Config.Colors.HEADER}--- eIM Configuration Data ---{Config.Colors.ENDC}")
-            try:
-                parsed = TlvParser.parse(data)
-                self._print_tlv_tree(parsed, indent=1, parent_tag=0xBF55)
-            except Exception:
-                print(f"    {data.hex().upper()}")
-        elif sw1 != 0x90:
-            print(f"{Config.Colors.FAIL}[-] Failed: {sw1:02X}{sw2:02X}{Config.Colors.ENDC}")
-        else:
-            print("    (Empty)")
+        self._es10_retrieve("BF5500", "GetEimConfigurationData (eIM config, SGP.32)", root_tag=0xBF55)
 
     def enable_profile(self, identifier: str) -> bool:
         return self._send_cmd(identifier, self.TAG_ENABLE_PROFILE, "Enabling")
@@ -611,9 +611,7 @@ class Sgp22Manager:
             print(f"{Config.Colors.WARNING}[*] Proactive Command Pending (SW=91xx).{Config.Colors.ENDC}")
 
         parsed = TlvParser.parse(data)
-        outer = parsed.get(outer_tag)
-        if isinstance(outer, list) and len(outer) > 0:
-            outer = outer[0]
+        outer = TlvParser.get_first(parsed, outer_tag)
         content = outer if isinstance(outer, dict) else (TlvParser.parse(outer) if isinstance(outer, bytes) else parsed)
 
         if self.TAG_RESULT in content:
