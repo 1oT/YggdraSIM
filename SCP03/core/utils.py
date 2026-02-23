@@ -26,6 +26,28 @@ class HexUtils:
 class TlvParser:
     """Robust TLV Decoding Engine with Multi-byte Tag Support."""
     @staticmethod
+    def _store_tag(parsed: Dict[int, Any], tag_val: int, value: Any) -> None:
+        """
+        Store TLV value while preserving duplicate tags.
+        - First occurrence: parsed[tag] = value
+        - Repeated occurrence: parsed[tag] = [first, second, ...]
+        """
+        has_tag = False
+        if tag_val in parsed:
+            has_tag = True
+
+        if has_tag == False:
+            parsed[tag_val] = value
+            return
+
+        current = parsed[tag_val]
+        if isinstance(current, list):
+            current.append(value)
+            return
+
+        parsed[tag_val] = [current, value]
+
+    @staticmethod
     def parse(data: bytes) -> Dict[int, Any]:
         i, parsed = 0, {}
         while i < len(data):
@@ -70,12 +92,12 @@ class TlvParser:
             while first_tag_byte > 0xFF:
                 first_tag_byte >>= 8
             
-            if first_tag_byte & 0x20: 
+            if first_tag_byte & 0x20:
                 # Constructed -> Recurse
-                parsed[tag_val] = TlvParser.parse(val)
-            else: 
+                TlvParser._store_tag(parsed, tag_val, TlvParser.parse(val))
+            else:
                 # Primitive -> Raw Bytes
-                parsed[tag_val] = val
+                TlvParser._store_tag(parsed, tag_val, val)
                 
         return parsed
 

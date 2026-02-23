@@ -134,6 +134,10 @@ class Sgp22Manager:
             info = TlvParser.parse(data)
             aid_bytes = info.get(self.TAG_AID) or info.get(self.TAG_CTX_0)
             iccid_bytes = info.get(self.TAG_ICCID)
+            if isinstance(aid_bytes, list) and len(aid_bytes) > 0:
+                aid_bytes = aid_bytes[0]
+            if isinstance(iccid_bytes, list) and len(iccid_bytes) > 0:
+                iccid_bytes = iccid_bytes[0]
             aid_hex = aid_bytes.hex().upper() if isinstance(aid_bytes, bytes) else ""
             iccid_raw = iccid_bytes.hex().upper() if isinstance(iccid_bytes, bytes) else ""
             iccid_display = self._swap_nibbles(iccid_raw)
@@ -365,6 +369,21 @@ class Sgp22Manager:
         for tag, val in tlv_dict.items():
             name = self._resolve_tag_name(tag, parent_tag)
             prefix = "    " * indent + "| "
+
+            # Duplicate tags are preserved as lists; print each occurrence.
+            if isinstance(val, list):
+                print(f"{prefix}{Config.Colors.CYAN}{name}{Config.Colors.ENDC}")
+                for idx, item in enumerate(val, start=1):
+                    idx_prefix = "    " * (indent + 1) + "| "
+                    print(f"{idx_prefix}{Config.Colors.BOLD}#{idx}{Config.Colors.ENDC}")
+                    if isinstance(item, dict):
+                        self._print_tlv_tree(item, indent + 2, parent_tag=tag)
+                    elif isinstance(item, bytes):
+                        decoded_item = self._decode_value(tag, item, parent_tag)
+                        print(f"{'    ' * (indent + 2)}| {decoded_item}")
+                    else:
+                        print(f"{'    ' * (indent + 2)}| {str(item)}")
+                continue
             
             # --- Inline Optimization ---
             # If the value is a dict with exactly 1 primitive child, print "Parent : ChildValue" inline
@@ -593,6 +612,8 @@ class Sgp22Manager:
 
         parsed = TlvParser.parse(data)
         outer = parsed.get(outer_tag)
+        if isinstance(outer, list) and len(outer) > 0:
+            outer = outer[0]
         content = outer if isinstance(outer, dict) else (TlvParser.parse(outer) if isinstance(outer, bytes) else parsed)
 
         if self.TAG_RESULT in content:
