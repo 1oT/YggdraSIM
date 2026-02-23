@@ -389,29 +389,6 @@ class Sgp22Manager:
             if tag == 0xA0:
                 return "eIM Configuration Data List"
 
-        # Context: EimConfigurationData entry
-        if parent in [0xA0, 0x30]:
-            if tag == 0x80:
-                return "eimId"
-            if tag == 0x81:
-                return "eimFqdn"
-            if tag == 0x82:
-                return "eimIdType"
-            if tag == 0x83:
-                return "counterValue"
-            if tag == 0x84:
-                return "associationToken"
-            if tag == 0xA5:
-                return "eimPublicKeyData"
-            if tag == 0xA6:
-                return "trustedPublicKeyDataTls"
-            if tag == 0x87:
-                return "eimSupportedProtocol"
-            if tag == 0x88:
-                return "euiccCiPKId"
-            if tag == 0x89:
-                return "indirectProfileDownload"
-
         # Context: Extended Card Resources (84)
         if parent == 0x84:
             if tag == 0x81: return "Installed Apps"
@@ -596,7 +573,7 @@ class Sgp22Manager:
             return "TRUE"
 
         # 5b. Enumerations
-        if tag == 0x82 and parent_tag == 0xA0 and len(val) == 1:
+        if tag == 0x82 and parent_tag == 0xE1 and len(val) == 1:
             eim_id_type = {
                 1: "eimIdTypeOid",
                 2: "eimIdTypeFqdn",
@@ -607,7 +584,7 @@ class Sgp22Manager:
                 return f"{eim_id_type[v]} ({v})"
             return f"{v} (0x{hex_str})"
 
-        if tag == 0x87 and parent_tag == 0xA0:
+        if tag == 0x87 and parent_tag == 0xE1:
             bitmask = int.from_bytes(val, "big", signed=False)
             width = len(val) * 8
             set_bits = []
@@ -1312,11 +1289,11 @@ class Sgp22Manager:
         result_entries: List[Dict[str, Any]] = []
         for entry in entries:
             row: Dict[str, Any] = {}
-            row["eimId"] = self._decode_text_value(0x80, TlvParser.get_first(entry, 0x80), 0xA0)
-            row["eimFqdn"] = self._decode_text_value(0x81, TlvParser.get_first(entry, 0x81), 0xA0)
-            row["eimIdType"] = self._decode_text_value(0x82, TlvParser.get_first(entry, 0x82), 0xA0)
-            row["counterValue"] = self._decode_text_value(0x83, TlvParser.get_first(entry, 0x83), 0xA0)
-            row["associationToken"] = self._decode_text_value(0x84, TlvParser.get_first(entry, 0x84), 0xA0)
+            row["eimId"] = self._decode_text_value(0x80, TlvParser.get_first(entry, 0x80), 0xE1)
+            row["eimFqdn"] = self._decode_text_value(0x81, TlvParser.get_first(entry, 0x81), 0xE1)
+            row["eimIdType"] = self._decode_text_value(0x82, TlvParser.get_first(entry, 0x82), 0xE1)
+            row["counterValue"] = self._decode_text_value(0x83, TlvParser.get_first(entry, 0x83), 0xE1)
+            row["associationToken"] = self._decode_text_value(0x84, TlvParser.get_first(entry, 0x84), 0xE1)
 
             eim_pub_block = TlvParser.get_first(entry, 0xA5)
             if eim_pub_block is not None:
@@ -1326,9 +1303,9 @@ class Sgp22Manager:
             if tls_pub_block is not None:
                 row["trustedPublicKeyDataTls"] = self._summarize_cert_block(tls_pub_block)
 
-            row["eimSupportedProtocol"] = self._decode_text_value(0x87, TlvParser.get_first(entry, 0x87), 0xA0)
-            row["euiccCiPKId"] = self._decode_text_value(0x88, TlvParser.get_first(entry, 0x88), 0xA0)
-            row["indirectProfileDownload"] = self._decode_text_value(0x89, TlvParser.get_first(entry, 0x89), 0xA0)
+            row["eimSupportedProtocol"] = self._decode_text_value(0x87, TlvParser.get_first(entry, 0x87), 0xE1)
+            row["euiccCiPKId"] = self._decode_text_value(0x88, TlvParser.get_first(entry, 0x88), 0xE1)
+            row["indirectProfileDownload"] = self._decode_text_value(0x89, TlvParser.get_first(entry, 0x89), 0xE1)
 
             cleaned_row = {}
             for k, v in row.items():
@@ -1541,6 +1518,109 @@ class Sgp22Manager:
             print(f"    | Validity             : {Config.Colors.CYAN}{info.get('not_valid_before', '')} -> {info.get('not_valid_after', '')}{Config.Colors.ENDC}")
         return True
 
+    def _print_cert_block_summary_lines(self, section_name: str, section_value: Dict[str, Any]) -> None:
+        def _short(val: Any, max_len: int = 72) -> str:
+            text = str(val)
+            is_short = False
+            if len(text) <= max_len:
+                is_short = True
+            if is_short:
+                return text
+            return text[:max_len] + "..."
+
+        def _first_dict(items: Any) -> Optional[Dict[str, Any]]:
+            if not isinstance(items, list):
+                return None
+            for item in items:
+                if isinstance(item, dict):
+                    return item
+            return None
+
+        def _count_items(items: Any) -> int:
+            if not isinstance(items, list):
+                return 0
+            return len(items)
+
+        certificates = section_value.get("certificates", [])
+        public_keys = section_value.get("publicKeys", [])
+        signatures = section_value.get("signatures", [])
+        object_identifiers = section_value.get("objectIdentifiers", [])
+
+        cert_count_display = str(_count_items(certificates))
+        has_unsigned_evidence = False
+        if _count_items(certificates) == 0:
+            has_pub = False
+            if _count_items(public_keys) > 0:
+                has_pub = True
+            has_sig = False
+            if _count_items(signatures) > 0:
+                has_sig = True
+            if has_pub or has_sig:
+                has_unsigned_evidence = True
+        if has_unsigned_evidence:
+            cert_count_display = "n/a (summary unavailable)"
+
+        print(f"    | {section_name:<20}: {Config.Colors.CYAN}Present{Config.Colors.ENDC}")
+        print(f"    | {'  Certificates':<20}: {Config.Colors.CYAN}{cert_count_display}{Config.Colors.ENDC}")
+        print(f"    | {'  Public Keys':<20}: {Config.Colors.CYAN}{_count_items(public_keys)}{Config.Colors.ENDC}")
+        print(f"    | {'  Signatures':<20}: {Config.Colors.CYAN}{_count_items(signatures)}{Config.Colors.ENDC}")
+        print(f"    | {'  OIDs':<20}: {Config.Colors.CYAN}{_count_items(object_identifiers)}{Config.Colors.ENDC}")
+
+        first_cert = _first_dict(certificates)
+        has_cert = False
+        if first_cert is not None:
+            has_cert = True
+        if has_cert:
+            cert_subject = first_cert.get("subject", "")
+            cert_issuer = first_cert.get("issuer", "")
+            cert_serial = first_cert.get("serial", "")
+            cert_not_before = first_cert.get("notBefore", "")
+            cert_not_after = first_cert.get("notAfter", "")
+            print(f"    | {'  Subject':<20}: {Config.Colors.CYAN}{_short(cert_subject)}{Config.Colors.ENDC}")
+            print(f"    | {'  Issuer':<20}: {Config.Colors.CYAN}{_short(cert_issuer)}{Config.Colors.ENDC}")
+            print(f"    | {'  Serial':<20}: {Config.Colors.CYAN}{cert_serial}{Config.Colors.ENDC}")
+            print(f"    | {'  Validity':<20}: {Config.Colors.CYAN}{cert_not_before} -> {cert_not_after}{Config.Colors.ENDC}")
+
+        has_pub_key = False
+        if isinstance(public_keys, list):
+            if len(public_keys) > 0:
+                has_pub_key = True
+        if has_pub_key:
+            print(f"    | {'  Public Key (1st)':<20}: {Config.Colors.CYAN}{_short(public_keys[0])}{Config.Colors.ENDC}")
+
+        has_signature = False
+        if isinstance(signatures, list):
+            if len(signatures) > 0:
+                has_signature = True
+        if has_signature:
+            print(f"    | {'  Signature (1st)':<20}: {Config.Colors.CYAN}{_short(signatures[0])}{Config.Colors.ENDC}")
+
+    def _print_get_certs_compact(self, parsed: Dict[int, Any]) -> None:
+        root = TlvParser.get_first(parsed, 0xBF56, parsed)
+        print(f"\n{Config.Colors.BOLD}[+] GetCerts{Config.Colors.ENDC}")
+        if not isinstance(root, dict):
+            print("    | (Empty)")
+            return
+
+        eim_pub = TlvParser.get_first(root, 0xA5)
+        tls_pub = TlvParser.get_first(root, 0xA6)
+        has_any = False
+        if eim_pub is not None:
+            has_any = True
+        if tls_pub is not None:
+            has_any = True
+        if has_any == False:
+            print("    | (No certificate blocks found)")
+            return
+
+        if eim_pub is not None:
+            eim_sum = self._summarize_cert_block(eim_pub)
+            self._print_cert_block_summary_lines("eIM Public Key Data", eim_sum)
+
+        if tls_pub is not None:
+            tls_sum = self._summarize_cert_block(tls_pub)
+            self._print_cert_block_summary_lines("Trusted TLS Key Data", tls_sum)
+
     def get_euicc_configured_data(self) -> None:
         """ES10a.GetEuiccConfiguredData / GetEuiccConfiguredAddresses (retrieval)."""
         self._es10_retrieve("BF3C00", "EuiccConfiguredData", root_tag=0xBF3C, compact_json=True)
@@ -1566,12 +1646,7 @@ class Sgp22Manager:
                 self._print_tlv_tree(parsed, indent=1, parent_tag=0xBF56, x509_mode=True)
                 return
 
-            if self._print_cert_summary_from_parsed(parsed, "GetCerts"):
-                return
-
-            # Fallback when cert extraction fails
-            print(f"{Config.Colors.HEADER}--- GetCerts ---{Config.Colors.ENDC}")
-            self._print_tlv_tree(parsed, indent=1, parent_tag=0xBF56)
+            self._print_get_certs_compact(parsed)
         except Exception:
             print(f"    {data.hex().upper()}")
 
