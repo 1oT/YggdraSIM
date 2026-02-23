@@ -817,8 +817,9 @@ class ShellDispatcher:
                 from SCP03.core.utils import TlvParser
                 parsed = TlvParser.parse(data)
                 tag_int = int(tag_hex, 16)
-                if tag_int in parsed:
-                    raw = parsed[tag_int] if isinstance(parsed[tag_int], bytes) else data
+                extracted = TlvParser.get_first(parsed, tag_int)
+                if isinstance(extracted, bytes):
+                    raw = extracted
             except Exception:
                 pass
             if len(raw) >= 4 and raw[0] == 0x30:
