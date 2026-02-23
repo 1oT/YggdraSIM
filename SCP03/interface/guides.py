@@ -197,6 +197,8 @@ class ShellGuides:
 {Config.Colors.HEADER}=== GSMA eSIM & eUICC Provisioning Guide ==={Config.Colors.ENDC}
 {Config.Colors.BOLD}Standard:{Config.Colors.ENDC} {cls._link("GSMA SGP.22 / SGP.02 / SGP.32", main_url)}
 
+{Config.Colors.WARNING}Scope (this tool):{Config.Colors.ENDC} Data retrieval only. We do NOT authenticate to ISD-R for provisioning (that is planned for the SCP11 module). Supported: LIST, Enable/Disable/Delete profile, GET DATA, GetProfilesInfo, GetRAT, RetrieveNotificationsList, GetEimConfigurationData (SGP.32), EuiccInfo1/2, EuiccConfiguredData. NOT supported: StoreMetadata, UpdateMetadata, LoadProfile, PrepareDownload, LoadBoundProfilePackage, AuthenticateServer, or any ES10b provisioning flow.
+
 {Config.Colors.CYAN}1. Consumer eUICC Architecture (SGP.22){Config.Colors.ENDC}
    Profiles are downloaded and managed via the Local Profile Assistant (LPA) over the ES10c interface (APDU to ISD-R).
    - {Config.Colors.BOLD}ISD-R (Issuer Security Domain Root):{Config.Colors.ENDC} Management application. AID: `A0 00 00 05 59 10 10 FF FF FF FF 89 00 00 01 00`. Select with 00 A4 04 00 Lc AID; then ES10c commands via STORE DATA (80 E2) with BER-TLV.
@@ -216,7 +218,12 @@ class ShellGuides:
    - {Config.Colors.BOLD}EuiccInfo2 (BF 22):{Config.Colors.ENDC} `80 E2 91 00 03 BF 22 00`. Returns capabilities (ExtExtCardResource, supported crypto, default SM-DP+ address list).
    - {Config.Colors.BOLD}EID:{Config.Colors.ENDC} Retrieved via GET DATA (00 CA 00 5A 00) from ECASD context or from EuiccInfo2; 20-byte BCD EID.
 
-{Config.Colors.CYAN}4. Legacy M2M (SGP.02){Config.Colors.ENDC}
+{Config.Colors.CYAN}4. SGP.32 IoT retrieval (ES10b, no auth){Config.Colors.ENDC}
+   - {Config.Colors.BOLD}GetRAT (BF 43):{Config.Colors.ENDC} Rules Authorisation Table. Command: GET-RAT.
+   - {Config.Colors.BOLD}RetrieveNotificationsList (BF 2B):{Config.Colors.ENDC} Pending notifications. Command: GET-NOTIFICATIONS.
+   - {Config.Colors.BOLD}GetEimConfigurationData (BF 55):{Config.Colors.ENDC} eIM configuration (SGP.32 only). Command: GET-EIM-CONFIG.
+
+{Config.Colors.CYAN}5. Legacy M2M (SGP.02){Config.Colors.ENDC}
    No LPA on device; SM-SR pushes Profiles via SCP03/SCP80 remote scripts. MANAGE-PROFILE in YggdraSIM can scan/list Profiles via ETSI SELECT and registry read to the ISD-R, without using SGP.22 STORE DATA tags.
 """)
 
