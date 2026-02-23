@@ -1148,79 +1148,105 @@ class Sgp22Manager:
             if cleaned_row:
                 result_entries.append(cleaned_row)
 
-        print("    eimConfigurationData")
+        print(f"\n{Config.Colors.BOLD}[+] eIM Configuration Data{Config.Colors.ENDC}")
         if len(result_entries) == 0:
-            print("      (Empty)")
+            print("    | (Empty)")
             return
 
+        def _short(val: Any, max_len: int = 72) -> str:
+            text = str(val)
+            is_short = False
+            if len(text) <= max_len:
+                is_short = True
+            if is_short:
+                return text
+            return text[:max_len] + "..."
+
+        def _first_dict(items: Any) -> Optional[Dict[str, Any]]:
+            if not isinstance(items, list):
+                return None
+            for item in items:
+                if isinstance(item, dict):
+                    return item
+            return None
+
+        def _count_items(items: Any) -> int:
+            if not isinstance(items, list):
+                return 0
+            return len(items)
+
         for idx, row in enumerate(result_entries, start=1):
-            print(f"      [{idx}] Entry")
+            has_multiple = False
+            if len(result_entries) > 1:
+                has_multiple = True
+            if has_multiple:
+                print(f"    | Entry                : {Config.Colors.CYAN}{idx}{Config.Colors.ENDC}")
 
             field_order = [
-                "eimId",
-                "eimFqdn",
-                "eimIdType",
-                "counterValue",
-                "associationToken",
-                "eimSupportedProtocol",
-                "euiccCiPKId",
-                "indirectProfileDownload",
+                ("eimId", "eIM ID"),
+                ("eimFqdn", "eIM FQDN"),
+                ("eimIdType", "eIM ID Type"),
+                ("counterValue", "Counter Value"),
+                ("associationToken", "Association Token"),
+                ("eimSupportedProtocol", "Supported Protocol"),
+                ("euiccCiPKId", "eUICC CI PKId"),
+                ("indirectProfileDownload", "Indirect Profile DL"),
             ]
-            for field in field_order:
-                if field not in row:
+            for field_key, field_name in field_order:
+                if field_key not in row:
                     continue
-                print(f"        - {field:<24}: {Config.Colors.CYAN}{row[field]}{Config.Colors.ENDC}")
+                print(f"    | {field_name:<20}: {Config.Colors.CYAN}{row[field_key]}{Config.Colors.ENDC}")
 
-            cert_sections = ["eimPublicKeyData", "trustedPublicKeyDataTls"]
-            for section_name in cert_sections:
-                if section_name not in row:
+            cert_sections = [
+                ("eimPublicKeyData", "eIM Public Key Data"),
+                ("trustedPublicKeyDataTls", "Trusted TLS Key Data"),
+            ]
+            for section_key, section_name in cert_sections:
+                if section_key not in row:
                     continue
-                section_value = row[section_name]
+                section_value = row[section_key]
                 if not isinstance(section_value, dict):
                     continue
 
-                print(f"        - {section_name}")
-                sec_order = [
-                    "publicKeys",
-                    "signatures",
-                    "objectIdentifiers",
-                    "utf8Strings",
-                    "printableStrings",
-                    "utcTimes",
-                    "generalizedTimes",
-                    "booleans",
-                    "octetStrings",
-                    "integers",
-                    "certificates",
-                ]
-                for sec_key in sec_order:
-                    if sec_key not in section_value:
-                        continue
-                    sec_val = section_value[sec_key]
+                certificates = section_value.get("certificates", [])
+                public_keys = section_value.get("publicKeys", [])
+                signatures = section_value.get("signatures", [])
+                object_identifiers = section_value.get("objectIdentifiers", [])
 
-                    if sec_key == "certificates" and isinstance(sec_val, list):
-                        print("            certificates")
-                        for cert_idx, cert in enumerate(sec_val, start=1):
-                            if not isinstance(cert, dict):
-                                continue
-                            print(f"              [{cert_idx}]")
-                            subj = cert.get("subject", "")
-                            issuer = cert.get("issuer", "")
-                            serial = cert.get("serial", "")
-                            not_before = cert.get("notBefore", "")
-                            not_after = cert.get("notAfter", "")
-                            print(f"                subject : {Config.Colors.CYAN}{subj}{Config.Colors.ENDC}")
-                            print(f"                issuer  : {Config.Colors.CYAN}{issuer}{Config.Colors.ENDC}")
-                            print(f"                serial  : {Config.Colors.CYAN}{serial}{Config.Colors.ENDC}")
-                            print(f"                valid   : {Config.Colors.CYAN}{not_before} -> {not_after}{Config.Colors.ENDC}")
-                        continue
+                print(f"    | {section_name:<20}: {Config.Colors.CYAN}Present{Config.Colors.ENDC}")
+                print(f"    | {'  Certificates':<20}: {Config.Colors.CYAN}{_count_items(certificates)}{Config.Colors.ENDC}")
+                print(f"    | {'  Public Keys':<20}: {Config.Colors.CYAN}{_count_items(public_keys)}{Config.Colors.ENDC}")
+                print(f"    | {'  Signatures':<20}: {Config.Colors.CYAN}{_count_items(signatures)}{Config.Colors.ENDC}")
+                print(f"    | {'  OIDs':<20}: {Config.Colors.CYAN}{_count_items(object_identifiers)}{Config.Colors.ENDC}")
 
-                    print(f"            {sec_key}")
-                    if isinstance(sec_val, list):
-                        for item in sec_val:
-                            print(f"              - {Config.Colors.CYAN}{item}{Config.Colors.ENDC}")
-                    else:
-                        print(f"              - {Config.Colors.CYAN}{sec_val}{Config.Colors.ENDC}")
+                first_cert = _first_dict(certificates)
+                has_cert = False
+                if first_cert is not None:
+                    has_cert = True
+                if has_cert:
+                    cert_subject = first_cert.get("subject", "")
+                    cert_issuer = first_cert.get("issuer", "")
+                    cert_serial = first_cert.get("serial", "")
+                    cert_not_before = first_cert.get("notBefore", "")
+                    cert_not_after = first_cert.get("notAfter", "")
+                    print(f"    | {'  Subject':<20}: {Config.Colors.CYAN}{_short(cert_subject)}{Config.Colors.ENDC}")
+                    print(f"    | {'  Issuer':<20}: {Config.Colors.CYAN}{_short(cert_issuer)}{Config.Colors.ENDC}")
+                    print(f"    | {'  Serial':<20}: {Config.Colors.CYAN}{cert_serial}{Config.Colors.ENDC}")
+                    print(f"    | {'  Validity':<20}: {Config.Colors.CYAN}{cert_not_before} -> {cert_not_after}{Config.Colors.ENDC}")
+
+                has_pub_key = False
+                if isinstance(public_keys, list):
+                    if len(public_keys) > 0:
+                        has_pub_key = True
+                if has_pub_key:
+                    print(f"    | {'  Public Key (1st)':<20}: {Config.Colors.CYAN}{_short(public_keys[0])}{Config.Colors.ENDC}")
+
+                has_signature = False
+                if isinstance(signatures, list):
+                    if len(signatures) > 0:
+                        has_signature = True
+                if has_signature:
+                    print(f"    | {'  Signature (1st)':<20}: {Config.Colors.CYAN}{_short(signatures[0])}{Config.Colors.ENDC}")
 
             if idx < len(result_entries):
                 print("")
