@@ -960,6 +960,139 @@ class Sgp22Manager:
             else:
                 print(f"    {line}")
 
+    def _decode_text_value(self, tag: int, value: Any, parent_tag: Optional[int]) -> str:
+        if not isinstance(value, bytes):
+            return ""
+        decoded = self._decode_value(tag, value, parent_tag)
+        if isinstance(decoded, str) and len(decoded) >= 2 and decoded[0] == '"' and decoded[-1] == '"':
+            return decoded[1:-1]
+        return str(decoded)
+
+    def _collect_tag_bytes(self, node: Any, wanted_tag: int) -> List[bytes]:
+        out: List[bytes] = []
+        if isinstance(node, dict):
+            for k, v in node.items():
+                if k == wanted_tag:
+                    if isinstance(v, bytes):
+                        out.append(v)
+                    elif isinstance(v, list):
+                        for item in v:
+                            if isinstance(item, bytes):
+                                out.append(item)
+                            else:
+                                out.extend(self._collect_tag_bytes(item, wanted_tag))
+                    else:
+                        out.extend(self._collect_tag_bytes(v, wanted_tag))
+                else:
+                    out.extend(self._collect_tag_bytes(v, wanted_tag))
+            return out
+        if isinstance(node, list):
+            for item in node:
+                out.extend(self._collect_tag_bytes(item, wanted_tag))
+            return out
+        return out
+
+    def _summarize_cert_block(self, node: Any) -> Dict[str, Any]:
+        out: Dict[str, Any] = {}
+
+        summaries: List[Dict[str, str]] = []
+        seen_serials = set()
+        for blob in self._iter_byte_values(node):
+            if len(blob) < 32:
+                continue
+            info = AdvancedDecoders.decode_cert_der(blob)
+            if not info:
+                continue
+            serial = str(info.get("serial", ""))
+            if serial in seen_serials:
+                continue
+            seen_serials.add(serial)
+            summaries.append(
+                {
+                    "subject": str(info.get("subject", "")),
+                    "issuer": str(info.get("issuer", "")),
+                    "serial": serial,
+                    "notBefore": str(info.get("not_valid_before", "")),
+                    "notAfter": str(info.get("not_valid_after", "")),
+                }
+            )
+        if summaries:
+            out["certificates"] = summaries
+
+        bit_strings = self._collect_tag_bytes(node, 0x03)
+        public_keys: List[str] = []
+        signatures: List[str] = []
+        for bit_val in bit_strings:
+            label = self._decode_value(0x03, bit_val, None)
+            if isinstance(label, str) and label.startswith("PublicKey:"):
+                public_keys.append(label.replace("PublicKey:", "", 1).strip())
+            elif isinstance(label, str) and label.startswith("Signature:"):
+                signatures.append(label.replace("Signature:", "", 1).strip())
+        if public_keys:
+            out["publicKeys"] = public_keys
+        if signatures:
+            out["signatures"] = signatures
+
+        return out
+
+    def _print_eim_configuration_compact_json(self, parsed: Dict[int, Any]) -> None:
+        root = TlvParser.get_first(parsed, 0xBF55)
+        if not isinstance(root, dict):
+            self._print_compact_json(parsed, 0xBF55)
+            return
+
+        entries_raw = TlvParser.get_first(root, 0xA0)
+        entries: List[Any] = []
+        if isinstance(entries_raw, list):
+            entries = entries_raw
+        elif entries_raw is not None:
+            entries = [entries_raw]
+
+        result_entries: List[Dict[str, Any]] = []
+        for entry in entries:
+            if not isinstance(entry, dict):
+                continue
+            row: Dict[str, Any] = {}
+            row["eimId"] = self._decode_text_value(0x80, TlvParser.get_first(entry, 0x80), 0xA0)
+            row["eimFqdn"] = self._decode_text_value(0x81, TlvParser.get_first(entry, 0x81), 0xA0)
+            row["eimIdType"] = self._decode_text_value(0x82, TlvParser.get_first(entry, 0x82), 0xA0)
+            row["associationToken"] = self._decode_text_value(0x84, TlvParser.get_first(entry, 0x84), 0xA0)
+
+            eim_pub_block = TlvParser.get_first(entry, 0xA5)
+            if eim_pub_block is not None:
+                row["eimPublicKeyData"] = self._summarize_cert_block(eim_pub_block)
+
+            tls_pub_block = TlvParser.get_first(entry, 0xA6)
+            if tls_pub_block is not None:
+                row["trustedPublicKeyDataTls"] = self._summarize_cert_block(tls_pub_block)
+
+            row["eimSupportedProtocol"] = self._decode_text_value(0x87, TlvParser.get_first(entry, 0x87), 0xA0)
+            row["euiccCiPKId"] = self._decode_text_value(0x88, TlvParser.get_first(entry, 0x88), 0xA0)
+
+            cleaned_row = {}
+            for k, v in row.items():
+                if v is None:
+                    continue
+                if isinstance(v, str) and v == "":
+                    continue
+                if isinstance(v, dict) and len(v) == 0:
+                    continue
+                cleaned_row[k] = v
+            if cleaned_row:
+                result_entries.append(cleaned_row)
+
+        output = {"eimConfigurationData": result_entries}
+        text = json.dumps(output, indent=2, ensure_ascii=True)
+        for line in text.splitlines():
+            stripped = line.lstrip()
+            if stripped.startswith('"') and ":" in stripped:
+                colon_idx = line.find(":")
+                key_part = line[: colon_idx + 1]
+                value_part = line[colon_idx + 1 :]
+                print(f"    {key_part}{Config.Colors.CYAN}{value_part}{Config.Colors.ENDC}")
+            else:
+                print(f"    {line}")
+
     def _es10_retrieve(
         self,
         payload: str,
@@ -980,7 +1113,9 @@ class Sgp22Manager:
             try:
                 parsed = TlvParser.parse(data)
                 debug_enabled = bool(getattr(self.tp, "debug", False))
-                if compact_json and not debug_enabled:
+                if compact_json and not debug_enabled and root_tag == 0xBF55:
+                    self._print_eim_configuration_compact_json(parsed)
+                elif compact_json and not debug_enabled:
                     self._print_compact_json(parsed, root_tag)
                 else:
                     self._print_tlv_tree(parsed, indent=1, parent_tag=root_tag)
