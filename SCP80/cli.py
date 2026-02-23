@@ -196,7 +196,10 @@ class OtaShell:
 
     def _process_line(self, line: str) -> bool:
         cmd_parts = line.split()
+        if not cmd_parts:
+            return True
         cmd = cmd_parts[0].lower()
+        args = cmd_parts[1:]
         
         is_admin = False
         if cmd == "admin":
