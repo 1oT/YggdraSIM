@@ -583,22 +583,36 @@ class Sgp22Manager:
             if x509_mode:
                 if context_label == "TBSCertificate":
                     if tag == 0xA0:
-                        name = "Version [0] EXPLICIT"
+                        name = "Version"
                     elif tag == 0x02:
                         name = "Serial Number"
                     elif tag == 0xA3:
-                        name = "Extensions [3] EXPLICIT"
+                        name = "Extensions"
                 elif context_label == "Validity":
                     if tag == 0x17:
                         name = "notBefore (UTCTime)"
                     elif tag == 0x18:
                         name = "notAfter (GeneralizedTime)"
 
+            def _is_generic_asn1_container(tag_val: int, tag_name: str) -> bool:
+                generic_names = {"SEQUENCE", "SET", "[0] EXPLICIT", "[1] EXPLICIT", "[2] EXPLICIT", "[3] EXPLICIT"}
+                if tag_name in generic_names:
+                    return True
+                if tag_name.endswith("EXPLICIT") and "[" in tag_name:
+                    return True
+                if tag_val in [0x30, 0x31]:
+                    return True
+                return False
+
             # Duplicate tags are preserved as lists; print each occurrence.
             if isinstance(val, list):
-                print(f"{prefix}{Config.Colors.CYAN}{name}{Config.Colors.ENDC}")
+                is_generic_container = _is_generic_asn1_container(tag, name)
+                base_indent = indent
+                if not is_generic_container:
+                    print(f"{prefix}{Config.Colors.CYAN}{name}{Config.Colors.ENDC}")
+                    base_indent = indent + 1
                 for idx, item in enumerate(val, start=1):
-                    idx_prefix = "    " * (indent + 1) + "| "
+                    idx_prefix = "    " * base_indent + "| "
                     item_label = f"#{idx}"
                     child_context = context_label
 
@@ -621,24 +635,31 @@ class Sgp22Manager:
                             if idx in tbs_map:
                                 item_label = f"#{idx} {tbs_map[idx]}"
                                 child_context = tbs_map[idx]
-                        elif context_label == "Extensions [3] EXPLICIT":
+                        elif context_label == "Extensions":
                             item_label = f"#{idx} Extension"
                             child_context = "Extension"
 
-                    print(f"{idx_prefix}{Config.Colors.BOLD}{item_label}{Config.Colors.ENDC}")
+                    is_semantic_item = item_label != f"#{idx}"
+                    if is_semantic_item:
+                        print(f"{idx_prefix}{Config.Colors.BOLD}{item_label}{Config.Colors.ENDC}")
                     if isinstance(item, dict):
+                        recurse_indent = base_indent + 1
+                        if is_semantic_item:
+                            recurse_indent = base_indent + 1
+                        elif is_generic_container:
+                            recurse_indent = base_indent
                         self._print_tlv_tree(
                             item,
-                            indent + 2,
+                            recurse_indent,
                             parent_tag=tag,
                             x509_mode=x509_mode,
                             context_label=child_context,
                         )
                     elif isinstance(item, bytes):
                         decoded_item = self._decode_value(tag, item, parent_tag)
-                        print(f"{'    ' * (indent + 2)}| {decoded_item}")
+                        print(f"{'    ' * (base_indent + 1)}| {decoded_item}")
                     else:
-                        print(f"{'    ' * (indent + 2)}| {str(item)}")
+                        print(f"{'    ' * (base_indent + 1)}| {str(item)}")
                 continue
             
             # --- Inline Optimization ---
@@ -660,8 +681,11 @@ class Sgp22Manager:
                 try:
                     nested = TlvParser.parse(val)
                     if nested:
-                        print(f"{prefix}{Config.Colors.CYAN}{name}{Config.Colors.ENDC}")
-                        self._print_tlv_tree(nested, indent + 1, parent_tag=tag)
+                        if _is_generic_asn1_container(tag, name):
+                            self._print_tlv_tree(nested, indent, parent_tag=tag, x509_mode=x509_mode, context_label=context_label)
+                        else:
+                            print(f"{prefix}{Config.Colors.CYAN}{name}{Config.Colors.ENDC}")
+                            self._print_tlv_tree(nested, indent + 1, parent_tag=tag, x509_mode=x509_mode, context_label=context_label)
                         continue
                 except: pass
 
@@ -677,19 +701,28 @@ class Sgp22Manager:
                         context_label=context_label,
                     )
                 else:
-                    print(f"{prefix}{Config.Colors.CYAN}{name}{Config.Colors.ENDC}")
                     child_context = context_label
                     if x509_mode and tag == 0x30 and (parent_tag == 0xA5 or parent_tag == 0xA6):
                         child_context = "Certificate"
-                    if x509_mode and name == "Extensions [3] EXPLICIT":
-                        child_context = "Extensions [3] EXPLICIT"
-                    self._print_tlv_tree(
-                        val,
-                        indent + 1,
-                        parent_tag=tag,
-                        x509_mode=x509_mode,
-                        context_label=child_context,
-                    )
+                    if x509_mode and name == "Extensions":
+                        child_context = "Extensions"
+                    if _is_generic_asn1_container(tag, name):
+                        self._print_tlv_tree(
+                            val,
+                            indent,
+                            parent_tag=tag,
+                            x509_mode=x509_mode,
+                            context_label=child_context,
+                        )
+                    else:
+                        print(f"{prefix}{Config.Colors.CYAN}{name}{Config.Colors.ENDC}")
+                        self._print_tlv_tree(
+                            val,
+                            indent + 1,
+                            parent_tag=tag,
+                            x509_mode=x509_mode,
+                            context_label=child_context,
+                        )
             
             elif isinstance(val, bytes):
                 if len(val) == 0:
