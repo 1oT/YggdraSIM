@@ -1709,6 +1709,63 @@ class Sgp22Manager:
                 sig_count += 1
         print(f"    | Signature Items      : {Config.Colors.CYAN}{sig_count}{Config.Colors.ENDC}")
 
+    def _print_rat_compact(self, parsed: Dict[int, Any]) -> None:
+        print(f"\n{Config.Colors.BOLD}[+] GetRAT (Rules Authorisation Table){Config.Colors.ENDC}")
+        compact = self._compact_tlv_node(parsed, 0xBF43)
+        rat_obj = compact.get("RAT (Rules Authorisation Table)", compact)
+        is_dict = False
+        if isinstance(rat_obj, dict):
+            is_dict = True
+        if is_dict == False:
+            print("    | (Empty)")
+            return
+
+        emitted = 0
+        for key, value in rat_obj.items():
+            key_text = str(key)
+            is_tag_hex = False
+            if len(key_text) == 2:
+                try:
+                    int(key_text, 16)
+                    is_tag_hex = True
+                except Exception:
+                    is_tag_hex = False
+            label = key_text
+            if is_tag_hex:
+                label = f"Tag {key_text}"
+
+            if isinstance(value, str):
+                is_empty = False
+                if len(value.strip()) == 0:
+                    is_empty = True
+                if is_empty:
+                    continue
+                print(f"    | {label:<20}: {Config.Colors.CYAN}{value}{Config.Colors.ENDC}")
+                emitted += 1
+                continue
+
+            if isinstance(value, list):
+                filtered = []
+                for item in value:
+                    text = str(item)
+                    if len(text.strip()) == 0:
+                        continue
+                    filtered.append(text)
+                if len(filtered) == 0:
+                    continue
+                preview = ", ".join(filtered[:3])
+                if len(filtered) > 3:
+                    preview = preview + f", +{len(filtered) - 3} more"
+                print(f"    | {label:<20}: {Config.Colors.CYAN}{preview}{Config.Colors.ENDC}")
+                emitted += 1
+                continue
+
+            print(f"    | {label:<20}: {Config.Colors.CYAN}{self._short_display(value)}{Config.Colors.ENDC}")
+            emitted += 1
+
+        if emitted == 0:
+            print("    | (Empty)")
+
     def get_euicc_configured_data(self) -> None:
         """ES10a.GetEuiccConfiguredData / GetEuiccConfiguredAddresses (retrieval)."""
         self._es10_retrieve("BF3C00", "EuiccConfiguredData", root_tag=0xBF3C, compact_json=True)
@@ -1759,7 +1816,28 @@ class Sgp22Manager:
 
     def get_rat(self) -> None:
         """ES10b.GetRAT (SGP.22/32) – Rules Authorisation Table. Retrieval only."""
-        self._es10_retrieve("BF4300", "GetRAT (Rules Authorisation Table)", root_tag=0xBF43, compact_json=True)
+        self._select_isd_r()
+        payload = "BF4300"
+        cmd = f"80E29100{len(bytes.fromhex(payload)):02X}{payload}"
+        print(f"{Config.Colors.CYAN}[*] GetRAT (Rules Authorisation Table)...{Config.Colors.ENDC}")
+        data, sw1, sw2 = self.tp.transmit(cmd, silent=True)
+        if sw1 != 0x90:
+            print(f"{Config.Colors.FAIL}[-] Failed: {sw1:02X}{sw2:02X}{Config.Colors.ENDC}")
+            return
+        if not data:
+            print(f"\n{Config.Colors.BOLD}[+] GetRAT (Rules Authorisation Table){Config.Colors.ENDC}")
+            print("    | (Empty)")
+            return
+        try:
+            parsed = TlvParser.parse(data)
+            debug_enabled = bool(getattr(self.tp, "debug", False))
+            if debug_enabled:
+                print(f"{Config.Colors.HEADER}--- GetRAT (Rules Authorisation Table) ---{Config.Colors.ENDC}")
+                self._print_tlv_tree(parsed, indent=1, parent_tag=0xBF43)
+                return
+            self._print_rat_compact(parsed)
+        except Exception:
+            print(f"    {data.hex().upper()}")
 
     def get_notifications_list(self) -> None:
         """ES10b.RetrieveNotificationsList (SGP.22/32) – Pending notifications. Retrieval only."""
@@ -1808,7 +1886,7 @@ class Sgp22Manager:
         if rat_data:
             try:
                 rat_parsed = TlvParser.parse(rat_data)
-                self._print_compact_tlv_section("GetRAT (Rules Authorisation Table)", rat_parsed, 0xBF43)
+                self._print_rat_compact(rat_parsed)
             except Exception:
                 print(f"\n{Config.Colors.BOLD}[+] GetRAT (Rules Authorisation Table){Config.Colors.ENDC}")
                 print(f"    | {rat_data.hex().upper()}")
