@@ -252,8 +252,16 @@ class Sgp22Manager:
         
         # Context: EuiccConfiguredData (BF3C)
         if parent == 0xBF3C:
-            if tag == 0x80: return "SM-DP+ Address"
-            if tag == 0x81: return "SM-DS Address"
+            if tag == 0x80:
+                return "SM-DP+ Address"
+            if tag == 0x81:
+                return "Root SM-DS Address"
+            if tag == 0x82:
+                return "Additional Root SM-DS Addresses"
+            if tag == 0x83:
+                return "Allowed CI PKID"
+            if tag == 0x84:
+                return "CI List"
 
         # Context: Extended Card Resources (84)
         if parent == 0x84:
@@ -288,13 +296,51 @@ class Sgp22Manager:
 
         # Context: Security Domain Management (Recursively inside 66/73/60/63/64)
         if parent in [0x66, 0x73, 0x60, 0x63, 0x64]:
-            if tag == 0x73: return "SD Mgmt Data"
-            if tag == 0x06: return "OID"
-            if tag == 0x60: return "Card Mgmt"
-            if tag == 0x63: return "Content Mgmt"
-            if tag == 0x64: return "Security Mgmt"
-            if tag == 0x65: return "App Lifecycle"
-            if tag == 0x66: return "Card Lifecycle"
+            if tag == 0x73:
+                return "SD Mgmt Data"
+            if tag == 0x06:
+                return "OID"
+            if tag == 0x60:
+                return "Card Mgmt"
+            if tag == 0x63:
+                return "Content Mgmt"
+            if tag == 0x64:
+                return "Security Mgmt"
+            if tag == 0x65:
+                return "App Lifecycle"
+            if tag == 0x66:
+                return "Card Lifecycle"
+
+        # Context: GetCerts / ASN.1 X.509 tree (BF56)
+        if parent == 0xBF56:
+            if tag == 0xA0:
+                return "Certificate Set"
+            if tag == 0xA5:
+                return "EUM Certificate"
+            if tag == 0xA6:
+                return "eUICC Certificate"
+
+        # Generic ASN.1 universal / context tags often found in certs and signed objects
+        asn1_names = {
+            0x30: "SEQUENCE",
+            0x31: "SET",
+            0x02: "INTEGER",
+            0x03: "BIT STRING",
+            0x04: "OCTET STRING",
+            0x05: "NULL",
+            0x06: "OBJECT IDENTIFIER",
+            0x0C: "UTF8String",
+            0x13: "PrintableString",
+            0x17: "UTCTime",
+            0x18: "GeneralizedTime",
+            0x01: "BOOLEAN",
+            0xA0: "[0] EXPLICIT",
+            0xA1: "[1] EXPLICIT",
+            0xA2: "[2] EXPLICIT",
+            0xA3: "[3] EXPLICIT",
+        }
+        if tag in asn1_names:
+            return asn1_names[tag]
 
         # Global / Fallbacks
         if tag == 0x5A: return "EID/ICCID"
@@ -305,6 +351,7 @@ class Sgp22Manager:
         if tag == 0xBF43: return "RAT (Rules Authorisation Table)"
         if tag == 0xBF2B: return "NotificationsList"
         if tag == 0xBF55: return "EimConfigurationData"
+        if tag == 0xBF56: return "GetCertsResponse"
         if tag == 0xE0: return "Key Info Template"
         if tag == 0x66: return "SD Mgmt Data"
         if tag == 0x67: return "Card Cap Info"
@@ -314,6 +361,53 @@ class Sgp22Manager:
             0x92: "Profile Name", 0x95: "Profile Class"
         }
         return common.get(tag, f"{tag:02X}")
+
+    def _decode_oid(self, raw_oid: bytes) -> str:
+        """
+        Basic ASN.1 OID decoder from BER value bytes.
+        Returns dotted string and well-known name if mapped.
+        """
+        if not raw_oid:
+            return ""
+
+        first = raw_oid[0]
+        oid_parts = [str(first // 40), str(first % 40)]
+
+        value = 0
+        idx = 1
+        while idx < len(raw_oid):
+            b = raw_oid[idx]
+            value = (value << 7) | (b & 0x7F)
+            if (b & 0x80) == 0:
+                oid_parts.append(str(value))
+                value = 0
+            idx += 1
+
+        dotted = ".".join(oid_parts)
+        known = {
+            "1.2.840.113549.1.1.11": "sha256WithRSAEncryption",
+            "1.2.840.10045.4.3.2": "ecdsa-with-SHA256",
+            "1.2.840.10045.2.1": "id-ecPublicKey",
+            "1.2.840.10045.3.1.7": "prime256v1",
+            "2.5.4.3": "commonName",
+            "2.5.4.6": "countryName",
+            "2.5.4.10": "organizationName",
+            "2.5.4.11": "organizationalUnitName",
+            "2.5.4.5": "serialNumber",
+            "2.5.29.14": "subjectKeyIdentifier",
+            "2.5.29.15": "keyUsage",
+            "2.5.29.17": "subjectAltName",
+            "2.5.29.19": "basicConstraints",
+            "2.5.29.20": "cRLNumber",
+            "2.5.29.23": "holdInstructionCode",
+            "2.5.29.30": "nameConstraints",
+            "2.5.29.31": "cRLDistributionPoints",
+            "2.5.29.35": "authorityKeyIdentifier",
+            "1.3.6.1.4.1.11129.2.1.2": "GSMA RSP Policy OID",
+        }
+        if dotted in known:
+            return f"{known[dotted]} ({dotted})"
+        return dotted
 
     def _decode_value(self, tag: int, val: bytes, parent_tag: Optional[int]) -> str:
         """Heuristic value decoder."""
@@ -330,7 +424,10 @@ class Sgp22Manager:
         # 2. Version Numbers (3 bytes)
         # 81 (ProfVer), 82 (VerSup), 86 (TSCP), 87 (Category), 88 (PPrules), 99 (PPver)
         is_version_tag = tag in [0x81, 0x82, 0x86, 0x87, 0x88, 0x99]
-        if len(val) == 3 and (is_version_tag or (tag == 0x04 and parent_tag == 0xA0)):
+        is_euicc_context = False
+        if parent_tag in [0xBF20, 0xBF22, 0xA9, 0xAA, 0xB4, 0xAF, 0xA0]:
+            is_euicc_context = True
+        if len(val) == 3 and is_euicc_context and (is_version_tag or (tag == 0x04 and parent_tag == 0xA0)):
             return f"v{val[0]}.{val[1]}.{val[2]} ({hex_str})"
 
         # 3. Key Info (C0)
@@ -341,19 +438,74 @@ class Sgp22Manager:
 
         # 4. OID (06)
         if tag == 0x06:
-            oids = {
-                "2A864886FC6B01": "GlobalPlatform",
-                "2A864886FC6B02": "GP SCP02",
-                "2A864886FC6B020202": "GP SCP02",
-                "2A864886FC6B03": "GP SCP03",
-                "2A864886FC6B04": "GP Content Mgmt",
-                "2A864886FC6B040370": "GP Content Mgmt",
-                "2A864886FC6B05": "GP Security",
-            }
-            for oid, name in oids.items():
-                if hex_str.startswith(oid): return f"{name} ({hex_str})"
+            return self._decode_oid(val)
 
-        # 5. ASCII check
+        # 5. BOOLEAN
+        if tag == 0x01 and len(val) == 1:
+            if val[0] == 0x00:
+                return "FALSE"
+            return "TRUE"
+
+        # 6. Time values used in certificates
+        if tag == 0x17 or tag == 0x18:
+            try:
+                return "\"" + val.decode("ascii", "ignore") + "\""
+            except Exception:
+                return hex_str
+
+        # 7. UTF8/Printable strings
+        if tag == 0x0C or tag == 0x13:
+            try:
+                return "\"" + val.decode("utf-8", "ignore") + "\""
+            except Exception:
+                return hex_str
+
+        # 8. INTEGER
+        if tag == 0x02 and len(val) > 0 and len(val) <= 8:
+            as_int = int.from_bytes(val, "big", signed=False)
+            return f"{as_int} (0x{hex_str})"
+
+        # 9. BIT STRING
+        if tag == 0x03 and len(val) > 1:
+            unused_bits = val[0]
+            bit_data = val[1:]
+            if len(bit_data) <= 24:
+                return f"unused={unused_bits}, bits=0x{bit_data.hex().upper()}"
+            short_hex = bit_data.hex().upper()
+            return f"unused={unused_bits}, bits=0x{short_hex[:64]}..."
+
+        # 10. OCTET STRING
+        if tag == 0x04 and len(val) > 0:
+            # If inner payload is TLV-looking, annotate briefly.
+            try:
+                nested = TlvParser.parse(val)
+                if nested:
+                    return f"TLV[{len(val)}]: {hex_str[:64]}..."
+            except Exception:
+                pass
+            if len(val) > 32:
+                return hex_str[:64] + "..."
+            return hex_str
+
+        # 11. Profile state / class quick decode
+        if tag == 0x9F70 and len(val) > 0:
+            state_map = {
+                0x00: "Disabled",
+                0x01: "Enabled",
+            }
+            state = state_map.get(val[0], f"0x{val[0]:02X}")
+            return f"{state} ({hex_str})"
+
+        if tag == 0x95 and len(val) > 0:
+            class_map = {
+                0: "Test",
+                1: "Provisioning",
+                2: "Operational",
+            }
+            cls_name = class_map.get(val[0], f"0x{val[0]:02X}")
+            return f"{cls_name} ({hex_str})"
+
+        # 12. ASCII check
         if len(val) > 2 and all(0x20 <= c <= 0x7E for c in val):
              return f"\"{val.decode('ascii')}\""
 
@@ -457,23 +609,27 @@ class Sgp22Manager:
     def _print_single_profile(self, data: bytes):
         info = TlvParser.parse(data)
         
-        aid_bytes = info.get(self.TAG_AID) or info.get(self.TAG_CTX_0)
-        iccid_bytes = info.get(self.TAG_ICCID)
+        aid_bytes = TlvParser.get_first(info, self.TAG_AID) or TlvParser.get_first(info, self.TAG_CTX_0)
+        iccid_bytes = TlvParser.get_first(info, self.TAG_ICCID)
         
         aid_hex = aid_bytes.hex().upper() if isinstance(aid_bytes, bytes) else ""
         iccid_raw = iccid_bytes.hex().upper() if isinstance(iccid_bytes, bytes) else ""
         iccid_display = self._swap_nibbles(iccid_raw)
 
-        state_val = info.get(self.TAG_STATE, b'\x00')
+        state_val = TlvParser.get_first(info, self.TAG_STATE, b'\x00')
         state_int = int.from_bytes(state_val, 'big') if isinstance(state_val, bytes) else 0
         state_str = f"{Config.Colors.GREEN}ENABLED  {Config.Colors.ENDC}" if state_int == 1 else "DISABLED "
 
-        class_val = info.get(self.TAG_CLASS, b'\x02')
+        class_val = TlvParser.get_first(info, self.TAG_CLASS, b'\x02')
         class_int = int.from_bytes(class_val, 'big') if isinstance(class_val, bytes) else 2
         class_map = {0: 'TEST ', 1: 'PROV ', 2: 'OPER '}
         class_str = class_map.get(class_int, 'UNK  ')
 
-        name_bytes = info.get(self.TAG_NICKNAME) or info.get(self.TAG_NAME) or info.get(self.TAG_SP_NAME)
+        name_bytes = (
+            TlvParser.get_first(info, self.TAG_NICKNAME)
+            or TlvParser.get_first(info, self.TAG_NAME)
+            or TlvParser.get_first(info, self.TAG_SP_NAME)
+        )
         name_str = "Unknown"
         if isinstance(name_bytes, bytes):
             try: name_str = name_bytes.decode('utf-8', 'ignore').strip()
