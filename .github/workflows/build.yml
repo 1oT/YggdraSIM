@@ -46,10 +46,11 @@ jobs:
       run: |
         python -m pip install --upgrade pip
         pip install -r requirements.txt
+        python -m pip install pyinstaller
 
     - name: Build with PyInstaller spec
       run: |
-        pyinstaller --noconfirm --clean yggdrasim.spec
+        python -m PyInstaller --noconfirm --clean yggdrasim.spec
 
     - name: Smoke test binary (Linux)
       if: runner.os == 'Linux'
