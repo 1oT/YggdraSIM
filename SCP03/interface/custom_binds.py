@@ -3,14 +3,14 @@ import os
 import sys
 
 current_dir = os.path.dirname(os.path.abspath(__file__))
-root_dir = os.path.abspath(os.path.join(current_dir, '../'))
+root_dir = os.path.abspath(os.path.join(current_dir, '../../'))
 is_missing = False
 if root_dir not in sys.path:
     is_missing = True
 if is_missing:
     sys.path.insert(0, root_dir)
 
-from utils.wizard_ui import InteractiveWizard
+from SCP03.interface.wizards_ui import InteractiveWizard
 
 class CommandBinder:
     def __init__(self, filepath="binds.json"):
