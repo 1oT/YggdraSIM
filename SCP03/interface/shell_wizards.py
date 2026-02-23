@@ -454,7 +454,12 @@ class ShellInteractiveWizards:
                 is_sgp22 = True
             return is_sgp22
             
-        wiz.add_step("action", "Action [1=List, 2=Scan, 3=Enable, 4=Disable, 5=Delete]:", default="1", condition=action_cond)
+        wiz.add_step(
+            "action",
+            "Action [1=List, 2=Scan, 3=Enable, 4=Disable, 5=Delete, 6=GetRAT, 7=GetNotifications, 8=GetEimConfig]:",
+            default="1",
+            condition=action_cond
+        )
         
         def target_cond(res):
             action = res.get("action")
@@ -497,6 +502,27 @@ class ShellInteractiveWizards:
                 
             if is_two:
                 shell.gp_ctrl.sgp22.run_sgp22_scan()
+                return
+
+            is_six = False
+            if action == '6':
+                is_six = True
+            if is_six:
+                shell.gp_ctrl.sgp22.get_rat()
+                return
+
+            is_seven = False
+            if action == '7':
+                is_seven = True
+            if is_seven:
+                shell.gp_ctrl.sgp22.get_notifications_list()
+                return
+
+            is_eight = False
+            if action == '8':
+                is_eight = True
+            if is_eight:
+                shell.gp_ctrl.sgp22.get_eim_configuration_data()
                 return
 
             is_three = False

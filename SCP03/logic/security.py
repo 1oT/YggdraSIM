@@ -22,7 +22,7 @@ AUTH_TEST_VECTOR = {
     "RAND": "23553CBE9637A89D218AE64DAE47BF35",
     "Ki": "465B5CE8B199B49FAA5F0A2EE238A6BC",
     "OP": "CDC202D5123E20F62B6D676AC72CB318",
-    "OPc": "CD63CB71954A9F4E481A7B2EA79631D2",
+    "OPc": "CD63CB71954A9F4E48A5994E37A02BAF",
     "RES": "A54211D5E3BA50BF",
     "CK": "B40BA9A3C58B2A05BBF0D987B21BF8CB",
     "IK": "F769BC432284C6FE2B7066554707B8D0",
@@ -104,7 +104,8 @@ class SecurityController:
     @staticmethod
     def derive_opc(ki_hex: str, op_hex: str) -> str:
         """
-        Derive OPc from Ki and OP per 3GPP TS 35.206: OPc = E(Ki, OP).
+        Derive OPc from Ki and OP per 3GPP TS 35.206:
+        OPc = AES-128(Ki, OP) XOR OP.
         ki_hex, op_hex: 32 hex chars (16 bytes). Returns 32 hex chars OPc.
         """
         if not _AES_AVAILABLE:
@@ -117,7 +118,8 @@ class SecurityController:
         plain = bytes.fromhex(op_hex)
         cipher = Cipher(algorithms.AES(key), modes.ECB(), backend=default_backend())
         encryptor = cipher.encryptor()
-        opc = encryptor.update(plain) + encryptor.finalize()
+        enc = encryptor.update(plain) + encryptor.finalize()
+        opc = bytes(a ^ b for a, b in zip(enc, plain))
         return opc.hex().upper()
 
     def run_auth_test_vector(self):
