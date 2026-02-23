@@ -27,13 +27,29 @@ class ShellInteractiveWizards:
     def run_put_key_wizard(shell) -> None:
         wiz = InteractiveWizard("GP PUT KEY Command (GPCS 11.8)", Config.Colors, "WARNING: CRITICAL CRYPTOGRAPHIC OPERATION\nExecuting PUT KEY overwrites the active session keys. Loss of keys bricks the card.")
         wiz.add_step("action", "Action [1=Add New, 2=Rotate (ID 01), 3=Replace Specific]:", default="1")
-        wiz.add_step("okvn", "Old KVN to replace [Hex, SKIP for Add/Rotate]:", default="SKIP")
-        wiz.add_step("okid", "Key ID to replace [Hex, SKIP for Add/Rotate]:", default="SKIP")
-        wiz.add_step("nkid", "New Key ID [Hex, SKIP for Rotate]:", default="SKIP")
+        
+        def action_cond(res):
+            action = res.get("action")
+            is_replace = False
+            if action == '3':
+                is_replace = True
+            return is_replace
+            
+        wiz.add_step("okvn", "Old KVN to replace [Hex]:", default="SKIP", condition=action_cond)
+        wiz.add_step("okid", "Key ID to replace [Hex]:", default="SKIP", condition=action_cond)
+        
+        def nkid_cond(res):
+            action = res.get("action")
+            is_rotate = False
+            if action == '2':
+                is_rotate = True
+            return not is_rotate
+            
+        wiz.add_step("nkid", "New Key ID [Hex]:", default="SKIP", condition=nkid_cond)
         wiz.add_step("nkvn", "New KVN [Hex]:", default="")
-        wiz.add_step("enc", "New ENC Key [Hex, 16 bytes]:", default="")
-        wiz.add_step("mac", "New MAC Key [Hex, 16 bytes]:", default="")
-        wiz.add_step("dek", "New DEK Key [Hex, 16 bytes]:", default="")
+        wiz.add_step("enc", "New ENC Key [Hex, 32/48/64 chars]:", default="")
+        wiz.add_step("mac", "New MAC Key [Hex, 32/48/64 chars]:", default="")
+        wiz.add_step("dek", "New DEK Key [Hex, 32/48/64 chars]:", default="")
         wiz.add_step("algo", "Algorithm [AES/3DES, Default: AES]:", default="AES")
         wiz.add_step("exec", "Execute PUT KEY? [y/N]:", default=False, is_bool=True)
 
@@ -523,7 +539,7 @@ class ShellInteractiveWizards:
     def run_auth_wizard(shell) -> None:
         wiz = InteractiveWizard("Telecom Authentication Command", Config.Colors)
         wiz.add_step("ctx", "Context [1=GSM, 2=USIM, 3=ISIM]:", default="1")
-        wiz.add_step("rand", "RAND [Hex]:", default="")
+        wiz.add_step("rand", "RAND [Hex, 32 chars (16 bytes)]:", default="")
         
         def autn_cond(res):
             ctx = res.get("ctx")
@@ -532,7 +548,7 @@ class ShellInteractiveWizards:
                 is_gsm = True
             return not is_gsm
             
-        wiz.add_step("autn", "AUTN [Hex]:", default="SKIP", condition=autn_cond)
+        wiz.add_step("autn", "AUTN [Hex, 32 chars (16 bytes)]:", default="SKIP", condition=autn_cond)
 
         res = wiz.run()
         ctx = res.get("ctx")
