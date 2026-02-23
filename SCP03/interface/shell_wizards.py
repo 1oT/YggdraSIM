@@ -22,6 +22,29 @@ from SCP03.config import Config
 from SCP03.interface.wizards_ui import InteractiveWizard
 
 class ShellInteractiveWizards:
+    @staticmethod
+    def _is_hex_string(val: str) -> bool:
+        cleaned = val.replace(" ", "")
+        is_even = False
+        if (len(cleaned) % 2) == 0:
+            is_even = True
+        if is_even == False:
+            return False
+        try:
+            bytes.fromhex(cleaned)
+            return True
+        except ValueError:
+            return False
+
+    @staticmethod
+    def _is_fid_hex(val: str) -> bool:
+        cleaned = val.replace(" ", "").upper()
+        is_len_ok = False
+        if len(cleaned) == 4:
+            is_len_ok = True
+        if is_len_ok == False:
+            return False
+        return ShellInteractiveWizards._is_hex_string(cleaned)
 
     @staticmethod
     def run_put_key_wizard(shell) -> None:
@@ -982,8 +1005,8 @@ class ShellInteractiveWizards:
 
         res = wiz.run()
         type_choice = res.get("type")
-        full_path = res.get("path").upper()
-        sec_attr = res.get("sec").upper()
+        full_path = res.get("path").replace(" ", "").upper()
+        sec_attr = res.get("sec").replace(" ", "").upper()
 
         is_path_short = False
         if len(full_path) < 4:
@@ -997,6 +1020,14 @@ class ShellInteractiveWizards:
             return {}
 
         if is_path_odd:
+            return {}
+            
+        is_path_hex = ShellInteractiveWizards._is_hex_string(full_path)
+        if is_path_hex == False:
+            return {}
+            
+        is_sec_hex = ShellInteractiveWizards._is_hex_string(sec_attr)
+        if is_sec_hex == False:
             return {}
 
         fid = full_path[-4:]
@@ -1035,6 +1066,10 @@ class ShellInteractiveWizards:
 
             if is_size_empty:
                 return {}
+                
+            is_size_hex = ShellInteractiveWizards._is_hex_string(f_size)
+            if is_size_hex == False:
+                return {}
 
             f_size_int = int(f_size, 16)
             f_size_hex = f"{f_size_int:04X}"
@@ -1047,6 +1082,9 @@ class ShellInteractiveWizards:
                 has_aid = True
 
             if has_aid:
+                is_aid_hex = ShellInteractiveWizards._is_hex_string(aid_input)
+                if is_aid_hex == False:
+                    return {}
                 aid_len = len(aid_input) // 2
                 tag_84 = f"84{aid_len:02X}{aid_input}"
 
@@ -1056,6 +1094,10 @@ class ShellInteractiveWizards:
                 is_c6_empty = True
 
             if is_c6_empty:
+                return {}
+                
+            is_c6_hex = ShellInteractiveWizards._is_hex_string(c6_attr)
+            if is_c6_hex == False:
                 return {}
 
             tag_c6 = c6_attr
@@ -1081,6 +1123,9 @@ class ShellInteractiveWizards:
                 has_sfi = True
 
             if has_sfi:
+                is_sfi_hex = ShellInteractiveWizards._is_hex_string(sfi_input)
+                if is_sfi_hex == False:
+                    return {}
                 tag_88 = f"8801{sfi_input}"
 
         if is_transparent:
@@ -1092,6 +1137,10 @@ class ShellInteractiveWizards:
                 is_size_empty = True
 
             if is_size_empty:
+                return {}
+                
+            is_size_hex = ShellInteractiveWizards._is_hex_string(f_size)
+            if is_size_hex == False:
                 return {}
 
             f_size_int = int(f_size, 16)
@@ -1112,6 +1161,13 @@ class ShellInteractiveWizards:
 
             if is_rec_empty:
                 return {}
+                
+            is_rec_hex = ShellInteractiveWizards._is_hex_string(rec_len)
+            if is_rec_hex == False:
+                return {}
+            is_num_hex = ShellInteractiveWizards._is_hex_string(num_rec)
+            if is_num_hex == False:
+                return {}
 
             rec_len_int = int(rec_len, 16)
             num_rec_int = int(num_rec, 16)
@@ -1130,6 +1186,9 @@ class ShellInteractiveWizards:
             has_prop = True
 
         if has_prop:
+            is_prop_hex = ShellInteractiveWizards._is_hex_string(prop_info)
+            if is_prop_hex == False:
+                return {}
             prop_len = len(prop_info) // 2
             tag_a5 = f"A5{prop_len:02X}{prop_info}"
 
@@ -1239,6 +1298,23 @@ class ShellInteractiveWizards:
             
         if is_error:
             return
+            
+        target_fid_only = ""
+        has_target = False
+        if len(target) > 0:
+            has_target = True
+        if has_target:
+            is_target_path = False
+            if len(target) > 4:
+                is_target_path = True
+            if is_target_path:
+                target_fid_only = target[-4:]
+            if is_target_path == False:
+                target_fid_only = target
+            is_target_fid_valid = ShellInteractiveWizards._is_fid_hex(target_fid_only)
+            if is_target_fid_valid == False:
+                print("[-] Invalid target FID/path. Expected hexadecimal FID/path.")
+                return
 
         is_one = False
         if choice == '1':
@@ -1275,6 +1351,18 @@ class ShellInteractiveWizards:
                 shell.fs_ctrl.select(target)
                 
             search = res.get("search")
+            is_search_skip = False
+            if search == "SKIP":
+                is_search_skip = True
+            if is_search_skip:
+                print("[-] Search value required for SEARCH.")
+                return
+            search_clean = search.replace(" ", "").upper()
+            is_search_hex = ShellInteractiveWizards._is_hex_string(search_clean)
+            if is_search_hex == False:
+                print("[-] Search value must be valid even-length hex.")
+                return
+            search = search_clean
             shell.fs_ctrl.search_record(search)
             
         is_five = False
@@ -1299,6 +1387,18 @@ class ShellInteractiveWizards:
                     shell.fs_ctrl.select(parent_path)
                     
                 data = res.get("raw_fcp")
+                data_clean = data.replace(" ", "").upper()
+                is_data_skip = False
+                if data == "SKIP":
+                    is_data_skip = True
+                if is_data_skip:
+                    print("[-] Raw FCP is required for CREATE mode 1.")
+                    return
+                is_data_hex = ShellInteractiveWizards._is_hex_string(data_clean)
+                if is_data_hex == False:
+                    print("[-] Raw FCP must be valid even-length hex.")
+                    return
+                data = data_clean
                 shell.fs_ctrl.create_file(data)
                 
             is_build = False
@@ -1441,6 +1541,12 @@ class ShellInteractiveWizards:
             is_six = True
             
         if is_six:
+            has_delete_target = False
+            if len(target_fid_only) > 0:
+                has_delete_target = True
+            if has_delete_target == False:
+                print("[-] DELETE requires a target FID/path.")
+                return
             shell.fs_ctrl.delete_file(target)
             
         is_seven = False
@@ -1448,6 +1554,12 @@ class ShellInteractiveWizards:
             is_seven = True
             
         if is_seven:
+            has_term_df_target = False
+            if len(target_fid_only) > 0:
+                has_term_df_target = True
+            if has_term_df_target == False:
+                print("[-] TERM DF requires a target FID/path.")
+                return
             shell.fs_ctrl.terminate_df(target)
             
         is_eight = False
@@ -1455,6 +1567,12 @@ class ShellInteractiveWizards:
             is_eight = True
             
         if is_eight:
+            has_term_ef_target = False
+            if len(target_fid_only) > 0:
+                has_term_ef_target = True
+            if has_term_ef_target == False:
+                print("[-] TERM EF requires a target FID/path.")
+                return
             shell.fs_ctrl.terminate_ef(target)
             
         is_nine = False
@@ -1478,6 +1596,12 @@ class ShellInteractiveWizards:
             if is_fid_empty:
                 target_fid = res.get("resize83")
                 
+            target_fid = target_fid.replace(" ", "").upper()
+            is_resize_fid_ok = ShellInteractiveWizards._is_fid_hex(target_fid)
+            if is_resize_fid_ok == False:
+                print("[-] Resize requires a valid 2-byte FID (Tag 83).")
+                return
+                
             tag_83 = f"8302{target_fid}"
             
             new_size_80 = res.get("resize80")
@@ -1487,6 +1611,10 @@ class ShellInteractiveWizards:
                 has_80 = True
                 
             if has_80:
+                is_80_hex = ShellInteractiveWizards._is_hex_string(new_size_80)
+                if is_80_hex == False:
+                    print("[-] Tag 80 size must be valid even-length hex.")
+                    return
                 size_int = int(new_size_80, 16)
                 size_hex = f"{size_int:04X}"
                 size_len = len(size_hex) // 2
@@ -1499,6 +1627,10 @@ class ShellInteractiveWizards:
                 has_81 = True
                 
             if has_81:
+                is_81_hex = ShellInteractiveWizards._is_hex_string(new_size_81)
+                if is_81_hex == False:
+                    print("[-] Tag 81 size must be valid even-length hex.")
+                    return
                 size_int = int(new_size_81, 16)
                 size_hex = f"{size_int:04X}"
                 size_len = len(size_hex) // 2
