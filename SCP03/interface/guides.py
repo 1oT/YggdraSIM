@@ -35,9 +35,10 @@ class ShellGuides:
                 print(f"  {Config.Colors.CYAN}4.{Config.Colors.ENDC} Installation & APDU Chaining (INSTALL)")
                 print(f"  {Config.Colors.CYAN}5.{Config.Colors.ENDC} Cryptography & Security (SECURITY)")
                 print(f"  {Config.Colors.CYAN}6.{Config.Colors.ENDC} SCP80 / OTA Remote Management (OTA)")
+                print(f"  {Config.Colors.CYAN}7.{Config.Colors.ENDC} Configuration Files & Persistence (CONFIG)")
                 print(f"  {Config.Colors.CYAN}q.{Config.Colors.ENDC} Return to Shell")
                 
-                choice = input(f"\nChoice [1-6, q]: ").strip().lower()
+                choice = input(f"\nChoice [1-7, q]: ").strip().lower()
                 if choice == 'q':
                     break
                 elif choice == 'exit':
@@ -54,6 +55,8 @@ class ShellGuides:
                     current_topic = 'SECURITY'
                 elif choice == '6': 
                     current_topic = 'OTA'
+                elif choice == '7':
+                    current_topic = 'CONFIG'
                 else:
                     print(f"{Config.Colors.FAIL}[!] Invalid choice.{Config.Colors.ENDC}")
                     input(f"\n{Config.Colors.CYAN}[Press Enter to continue]{Config.Colors.ENDC}")
@@ -73,6 +76,8 @@ class ShellGuides:
                 cls._print_security_guide()
             elif current_topic == 'OTA':
                 cls._print_ota_guide()
+            elif current_topic == 'CONFIG':
+                cls._print_config_guide()
             else:
                 print(f"{Config.Colors.FAIL}[!] Unknown guide topic: {current_topic}{Config.Colors.ENDC}")
                 break
@@ -296,6 +301,41 @@ class ShellGuides:
    - {Config.Colors.BOLD}2G Context (GSM):{Config.Colors.ENDC} Uses COMP128.
      - Inputs: `RAND` (16 bytes) only. No network verification (AUTN).
      - Returns `SRES` and `Kc`.
+""")
+
+    @classmethod
+    def _print_config_guide(cls):
+        print(f"""
+{Config.Colors.HEADER}=== Configuration Files & Persistence Guide ==={Config.Colors.ENDC}
+
+{Config.Colors.CYAN}1. Standalone Executable vs Source Code{Config.Colors.ENDC}
+   YggdraSIM handles configuration files differently depending on how it is launched:
+   - {Config.Colors.BOLD}Source Code (Python):{Config.Colors.ENDC} Config files are read from and saved to their respective 
+     module directories (e.g., `SCP03/keys.ini`, `SCP03/aid.txt`, `SCP80/ota_config.ini`).
+   - {Config.Colors.BOLD}Standalone Executable (.exe / Linux binary):{Config.Colors.ENDC} The executable extracts and reads 
+     configuration files from the {Config.Colors.YELLOW}same directory as the executable{Config.Colors.ENDC}. This ensures 
+     that your changes are persistent and not lost when the temporary bundle closes.
+
+{Config.Colors.CYAN}2. Modifying Configuration Files{Config.Colors.ENDC}
+   If you run the executable for the first time, default versions of the required files 
+   will automatically be copied to your current directory. You can open them in any text editor.
+
+   - {Config.Colors.BOLD}keys.ini:{Config.Colors.ENDC} Contains static GlobalPlatform keys (K-ENC, K-MAC, K-DEK). 
+     You can manually edit the hex strings, or use the `WIZARD` > `UPDATE KEYS` command in 
+     the shell to securely rotate and auto-save the new keys here.
+   - {Config.Colors.BOLD}aid.txt:{Config.Colors.ENDC} A registry mapping Applet IDs (AIDs) to human-readable names. 
+     Add your custom AIDs to quickly select them in the shell (e.g., `SELECT MyCustomApplet`).
+   - {Config.Colors.BOLD}fids.txt:{Config.Colors.ENDC} Maps File IDs (FIDs) to their telecom file paths (e.g., `USIM/IMSI`).
+     The internal file system navigator uses this to build the `TREE` map.
+   - {Config.Colors.BOLD}ota_config.ini:{Config.Colors.ENDC} Used exclusively by the SCP80 OTA module. Configures 
+     Transport settings (SMS/HTTP), TAR, SPI, KIC, and KID for remote management.
+
+{Config.Colors.CYAN}3. SCP11 Certificates (.pem / .der){Config.Colors.ENDC}
+   The Local SM-DP+ Simulation (SCP11) relies on cryptographic certificates:
+   - {Config.Colors.BOLD}CERT.DPauth.ECDSA.der / SK.DPauth.ECDSA.pem{Config.Colors.ENDC}
+   - {Config.Colors.BOLD}CERT.DPpb.ECDSA.der / SK.DPpb.ECDSA.pem{Config.Colors.ENDC}
+   These are also extracted next to the executable. You can replace them with your own 
+   test certificates to simulate custom provisioning scenarios.
 """)
 
     @classmethod
