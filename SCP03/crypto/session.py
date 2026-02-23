@@ -174,12 +174,13 @@ class Scp03Session:
             
         if is_missing:
             config_exists = False
-            if os.path.exists('keys.ini'):
+            from SCP03.config import Config
+            if os.path.exists(Config.INI_FILE):
                 config_exists = True
                 
             if config_exists:
                 config = configparser.ConfigParser()
-                config.read('keys.ini')
+                config.read(Config.INI_FILE)
                 
                 has_keys_section = False
                 if 'KEYS' in config:

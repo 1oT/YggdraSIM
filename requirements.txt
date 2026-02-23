@@ -1,0 +1,5 @@
+pyscard
+cryptography
+pycryptodome
+asn1crypto
+pyyaml

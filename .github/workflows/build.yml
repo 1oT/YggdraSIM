@@ -1,0 +1,66 @@
+name: Build Executable
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+
+    - name: Install System Dependencies (Linux)
+      if: runner.os == 'Linux'
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y pcscd libpcsclite-dev swig
+
+    - name: Install Dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install pyinstaller
+        pip install -r requirements.txt
+
+    - name: Build with PyInstaller
+      shell: bash
+      run: |
+        if [ "$RUNNER_OS" == "Windows" ]; then
+          SEP=";"
+        else
+          SEP=":"
+        fi
+        
+        pyinstaller --onefile --clean \
+          --name "YggdraSIM" \
+          --paths "." \
+          --add-data "SCP03${SEP}SCP03" \
+          --add-data "SCP80${SEP}SCP80" \
+          --add-data "SCP11${SEP}SCP11" \
+          --add-data "LICENSE${SEP}." \
+          --collect-all "SCP03" \
+          --collect-all "SCP80" \
+          --collect-all "SCP11" \
+          --hidden-import "SCP03.interface.shell" \
+          --hidden-import "SCP03.interface.guides" \
+          --hidden-import "SCP80.cli" \
+          main/main.py
+
+    - name: Upload Artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: YggdraSIM-${{ matrix.os }}
+        path: dist/
