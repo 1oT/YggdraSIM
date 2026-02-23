@@ -6,102 +6,102 @@
 # Copyright (c) 2026 Hampus Hellsberg
 # -----------------------------------------------------------------------------
 
-import os
-from SCP03.config import Config
+import os 
+from SCP03 .config import Config 
 
-class ShellGuides:
+class ShellGuides :
     """Manages detailed interactive documentation and usage guides."""
 
-    @staticmethod
-    def _link(text: str, url: str) -> str:
-        if not url: 
-            return text
+    @staticmethod 
+    def _link (text :str ,url :str )->str :
+        if not url :
+            return text 
         return f"\033]8;;{url}\033\\{text}\033]8;;\033\\"
 
-    @classmethod
-    def print_guide(cls, topic: str = ""):
-        original_topic = topic.upper().strip()
+    @classmethod 
+    def print_guide (cls ,topic :str =""):
+        original_topic =topic .upper ().strip ()
 
-        while True:
-            os.system('cls' if os.name == 'nt' else 'clear')
-            current_topic = original_topic
+        while True :
+            os .system ('cls'if os .name =='nt'else 'clear')
+            current_topic =original_topic 
 
-            if not current_topic or current_topic == 'WIZARD':
-                print(f"\n{Config.Colors.HEADER}=== YggdraSIM Guide Wizard ==={Config.Colors.ENDC}")
-                print("Select a topic to explore:")
-                print(f"  {Config.Colors.CYAN}1.{Config.Colors.ENDC} GlobalPlatform Architecture (GP)")
-                print(f"  {Config.Colors.CYAN}2.{Config.Colors.ENDC} ETSI / 3GPP File System (ETSI)")
-                print(f"  {Config.Colors.CYAN}3.{Config.Colors.ENDC} GSMA eSIM & eUICC (GSMA)")
-                print(f"  {Config.Colors.CYAN}4.{Config.Colors.ENDC} Installation & APDU Chaining (INSTALL)")
-                print(f"  {Config.Colors.CYAN}5.{Config.Colors.ENDC} Cryptography & Security (SECURITY)")
-                print(f"  {Config.Colors.CYAN}6.{Config.Colors.ENDC} SCP80 / OTA Remote Management (OTA)")
-                print(f"  {Config.Colors.CYAN}7.{Config.Colors.ENDC} Configuration Files & Persistence (CONFIG)")
-                print(f"  {Config.Colors.CYAN}q.{Config.Colors.ENDC} Return to Shell")
-                
-                choice = input(f"\nChoice [1-7, q]: ").strip().lower()
-                if choice == 'q':
-                    break
-                elif choice == 'exit':
-                    break
-                elif choice == '1': 
-                    current_topic = 'GP'
-                elif choice == '2': 
-                    current_topic = 'ETSI'
-                elif choice == '3': 
-                    current_topic = 'GSMA'
-                elif choice == '4': 
-                    current_topic = 'INSTALL'
-                elif choice == '5': 
-                    current_topic = 'SECURITY'
-                elif choice == '6': 
-                    current_topic = 'OTA'
-                elif choice == '7':
-                    current_topic = 'CONFIG'
-                else:
-                    print(f"{Config.Colors.FAIL}[!] Invalid choice.{Config.Colors.ENDC}")
-                    input(f"\n{Config.Colors.CYAN}[Press Enter to continue]{Config.Colors.ENDC}")
-                    continue
+            if not current_topic or current_topic =='WIZARD':
+                print (f"\n{Config.Colors.HEADER}=== YggdraSIM Guide Wizard ==={Config.Colors.ENDC}")
+                print ("Select a topic to explore:")
+                print (f"  {Config.Colors.CYAN}1.{Config.Colors.ENDC} GlobalPlatform Architecture (GP)")
+                print (f"  {Config.Colors.CYAN}2.{Config.Colors.ENDC} ETSI / 3GPP File System (ETSI)")
+                print (f"  {Config.Colors.CYAN}3.{Config.Colors.ENDC} GSMA eSIM & eUICC (GSMA)")
+                print (f"  {Config.Colors.CYAN}4.{Config.Colors.ENDC} Installation & APDU Chaining (INSTALL)")
+                print (f"  {Config.Colors.CYAN}5.{Config.Colors.ENDC} Cryptography & Security (SECURITY)")
+                print (f"  {Config.Colors.CYAN}6.{Config.Colors.ENDC} SCP80 / OTA Remote Management (OTA)")
+                print (f"  {Config.Colors.CYAN}7.{Config.Colors.ENDC} Configuration Files & Persistence (CONFIG)")
+                print (f"  {Config.Colors.CYAN}q.{Config.Colors.ENDC} Return to Shell")
 
-            os.system('cls' if os.name == 'nt' else 'clear')
+                choice =input (f"\nChoice [1-7, q]: ").strip ().lower ()
+                if choice =='q':
+                    break 
+                elif choice =='exit':
+                    break 
+                elif choice =='1':
+                    current_topic ='GP'
+                elif choice =='2':
+                    current_topic ='ETSI'
+                elif choice =='3':
+                    current_topic ='GSMA'
+                elif choice =='4':
+                    current_topic ='INSTALL'
+                elif choice =='5':
+                    current_topic ='SECURITY'
+                elif choice =='6':
+                    current_topic ='OTA'
+                elif choice =='7':
+                    current_topic ='CONFIG'
+                else :
+                    print (f"{Config.Colors.FAIL}[!] Invalid choice.{Config.Colors.ENDC}")
+                    input (f"\n{Config.Colors.CYAN}[Press Enter to continue]{Config.Colors.ENDC}")
+                    continue 
 
-            if current_topic == 'GP':
-                cls._print_gp_guide()
-            elif current_topic == 'ETSI':
-                cls._print_etsi_guide()
-            elif current_topic == 'GSMA':
-                cls._print_gsma_guide()
-            elif current_topic == 'INSTALL':
-                cls._print_install_guide()
-            elif current_topic == 'SECURITY':
-                cls._print_security_guide()
-            elif current_topic == 'OTA':
-                cls._print_ota_guide()
-            elif current_topic == 'CONFIG':
-                cls._print_config_guide()
-            else:
-                print(f"{Config.Colors.FAIL}[!] Unknown guide topic: {current_topic}{Config.Colors.ENDC}")
-                break
+            os .system ('cls'if os .name =='nt'else 'clear')
 
-            prompt_msg = f"\n{Config.Colors.CYAN}[Press Enter to return to menu, or 'q' to exit to shell]{Config.Colors.ENDC}: "
-            if original_topic:
-                if original_topic != 'WIZARD':
-                    prompt_msg = f"\n{Config.Colors.CYAN}[Press Enter to return to shell]{Config.Colors.ENDC}: "
+            if current_topic =='GP':
+                cls ._print_gp_guide ()
+            elif current_topic =='ETSI':
+                cls ._print_etsi_guide ()
+            elif current_topic =='GSMA':
+                cls ._print_gsma_guide ()
+            elif current_topic =='INSTALL':
+                cls ._print_install_guide ()
+            elif current_topic =='SECURITY':
+                cls ._print_security_guide ()
+            elif current_topic =='OTA':
+                cls ._print_ota_guide ()
+            elif current_topic =='CONFIG':
+                cls ._print_config_guide ()
+            else :
+                print (f"{Config.Colors.FAIL}[!] Unknown guide topic: {current_topic}{Config.Colors.ENDC}")
+                break 
 
-            exit_choice = input(prompt_msg).strip().lower()
-            
-            if original_topic:
-                if original_topic != 'WIZARD':
-                    break
-                    
-            if exit_choice == 'q':
-                break
-            if exit_choice == 'exit':
-                break
+            prompt_msg =f"\n{Config.Colors.CYAN}[Press Enter to return to menu, or 'q' to exit to shell]{Config.Colors.ENDC}: "
+            if original_topic :
+                if original_topic !='WIZARD':
+                    prompt_msg =f"\n{Config.Colors.CYAN}[Press Enter to return to shell]{Config.Colors.ENDC}: "
 
-    @classmethod
-    def _print_gp_guide(cls):
-        spec_url = "https://globalplatform.org/wp-content/uploads/2025/05/GPC_CardSpecification_v2.3.1.49_PublicRvw.pdf"
-        print(f"""
+            exit_choice =input (prompt_msg ).strip ().lower ()
+
+            if original_topic :
+                if original_topic !='WIZARD':
+                    break 
+
+            if exit_choice =='q':
+                break 
+            if exit_choice =='exit':
+                break 
+
+    @classmethod 
+    def _print_gp_guide (cls ):
+        spec_url ="https://globalplatform.org/wp-content/uploads/2025/05/GPC_CardSpecification_v2.3.1.49_PublicRvw.pdf"
+        print (f"""
 {Config.Colors.HEADER}=== GlobalPlatform Architecture & APDU Guide ==={Config.Colors.ENDC}
 {Config.Colors.BOLD}Standard:{Config.Colors.ENDC} {cls._link("GPC Card Specification v2.3.1", spec_url)}
 
@@ -156,10 +156,10 @@ class ShellGuides:
    - {Config.Colors.YELLOW}CLA:{Config.Colors.ENDC} For extended length and channel: CLA = 0x00 | (channel & 0x03). Commands on that channel use this CLA.
 """)
 
-    @classmethod
-    def _print_etsi_guide(cls):
-        spec_url = "https://www.etsi.org/deliver/etsi_ts/102200_102299/102221/16.00.00_60/ts_102221v160000p.pdf"
-        print(f"""
+    @classmethod 
+    def _print_etsi_guide (cls ):
+        spec_url ="https://www.etsi.org/deliver/etsi_ts/102200_102299/102221/16.00.00_60/ts_102221v160000p.pdf"
+        print (f"""
 {Config.Colors.HEADER}=== ETSI / 3GPP File System & Access Control Guide ==={Config.Colors.ENDC}
 {Config.Colors.BOLD}Standard:{Config.Colors.ENDC} {cls._link("ETSI TS 102 221 (UICC)", spec_url)}
 
@@ -190,10 +190,10 @@ class ShellGuides:
    - {Config.Colors.BOLD}ACTIVATE FILE (00 44):{Config.Colors.ENDC} `00 44 00 00 00`. Life cycle 05 = Operational (activated).
 """)
 
-    @classmethod
-    def _print_gsma_guide(cls):
-        main_url = "https://www.gsma.com/solutions-and-impact/technologies/esim/esim-specification/"
-        print(f"""
+    @classmethod 
+    def _print_gsma_guide (cls ):
+        main_url ="https://www.gsma.com/solutions-and-impact/technologies/esim/esim-specification/"
+        print (f"""
 {Config.Colors.HEADER}=== GSMA eSIM & eUICC Provisioning Guide ==={Config.Colors.ENDC}
 {Config.Colors.BOLD}Standard:{Config.Colors.ENDC} {cls._link("GSMA SGP.22 / SGP.02 / SGP.32", main_url)}
 
@@ -238,9 +238,9 @@ class ShellGuides:
    No LPA on device; SM-SR pushes Profiles via SCP03/SCP80 remote scripts. MANAGE-PROFILE in YggdraSIM can scan/list Profiles via ETSI SELECT and registry read to the ISD-R, without using SGP.22 STORE DATA tags.
 """)
 
-    @classmethod
-    def _print_install_guide(cls):
-        print(f"""
+    @classmethod 
+    def _print_install_guide (cls ):
+        print (f"""
 {Config.Colors.HEADER}=== Install Wizard & APDU Builder Guide ==={Config.Colors.ENDC}
 
 {Config.Colors.CYAN}1. INSTALL Command Overview (GPCS 11.5){Config.Colors.ENDC}
@@ -269,9 +269,9 @@ class ShellGuides:
    - {Config.Colors.BOLD}CA (SIM File Access):{Config.Colors.ENDC} Legacy 2G. ETSI TS 102 226 forbids CA and EA in the same install parameters; wizard enforces this.
 """)
 
-    @classmethod
-    def _print_security_guide(cls):
-        print(f"""
+    @classmethod 
+    def _print_security_guide (cls ):
+        print (f"""
 {Config.Colors.HEADER}=== Cryptography & Security Guide ==={Config.Colors.ENDC}
 
 {Config.Colors.CYAN}1. Secure Channel Protocol 03 (SCP03){Config.Colors.ENDC}
@@ -295,9 +295,9 @@ class ShellGuides:
    - {Config.Colors.BOLD}GSM (COMP128):{Config.Colors.ENDC} Input: RAND (16). Returns SRES (4), Kc (8).
 """)
 
-    @classmethod
-    def _print_config_guide(cls):
-        print(f"""
+    @classmethod 
+    def _print_config_guide (cls ):
+        print (f"""
 {Config.Colors.HEADER}=== Configuration Files & Persistence Guide ==={Config.Colors.ENDC}
 
 {Config.Colors.CYAN}1. Config Directory (CONFIG_DIR){Config.Colors.ENDC}
@@ -317,9 +317,9 @@ class ShellGuides:
    Certificates (e.g. CERT.DPauth.ECDSA.der, SK.DPauth.ECDSA.pem, CERT.DPpb.ECDSA.der, SK.DPpb.ECDSA.pem) are read from CONFIG_DIR when using local SM-DP+ simulation. Replace with test certs for custom provisioning.
 """)
 
-    @classmethod
-    def _print_ota_guide(cls):
-        print(f"""
+    @classmethod 
+    def _print_ota_guide (cls ):
+        print (f"""
 {Config.Colors.HEADER}=== SCP80 OTA (Remote Management) Guide ==={Config.Colors.ENDC}
 {Config.Colors.BOLD}Standard:{Config.Colors.ENDC} ETSI TS 102 225 (Secured Packet Structure), 3GPP TS 31.115 (OTA)
 
