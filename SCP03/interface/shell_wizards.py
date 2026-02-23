@@ -472,7 +472,7 @@ class ShellInteractiveWizards:
 
         wiz.add_step(
             "action32",
-            "SGP.32 Action [1=List (LIST/LIST-IOT), 2=Scan (GET-IOT), 3=Enable, 4=Disable, 5=Delete, 6=GetRAT, 7=GetNotifications, 8=GetEimConfig, 9=GetConfiguredData, 10=GetCerts, 11=GetEID, 12=ReadMetadata]:",
+            "SGP.32 Action [1=List, 2=Scan, 3=Enable, 4=Disable, 5=Delete, 6=GetAllData, 7=ReadMetadata]:",
             default="1",
             condition=action32_cond
         )
@@ -656,48 +656,13 @@ class ShellInteractiveWizards:
             if action == '6':
                 is_six = True
             if is_six:
-                shell.gp_ctrl.sgp22.get_rat()
+                shell.gp_ctrl.sgp22.get_sgp32_all_data()
                 return
 
             is_seven = False
             if action == '7':
                 is_seven = True
             if is_seven:
-                shell.gp_ctrl.sgp22.get_notifications_list()
-                return
-
-            is_eight = False
-            if action == '8':
-                is_eight = True
-            if is_eight:
-                shell.gp_ctrl.sgp22.get_eim_configuration_data()
-                return
-
-            is_nine = False
-            if action == '9':
-                is_nine = True
-            if is_nine:
-                shell.gp_ctrl.sgp22.get_euicc_configured_data()
-                return
-
-            is_ten = False
-            if action == '10':
-                is_ten = True
-            if is_ten:
-                shell.gp_ctrl.sgp22.get_euicc_certs()
-                return
-
-            is_eleven = False
-            if action == '11':
-                is_eleven = True
-            if is_eleven:
-                shell.gp_ctrl.sgp22.get_eid()
-                return
-
-            is_twelve = False
-            if action == '12':
-                is_twelve = True
-            if is_twelve:
                 shell._handle_read_metadata("SGP.32")
                 return
 
