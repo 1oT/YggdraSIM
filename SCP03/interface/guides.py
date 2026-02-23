@@ -258,8 +258,8 @@ class ShellGuides:
 
 {Config.Colors.CYAN}4. Install Parameters (TLV Builder){Config.Colors.ENDC}
    - {Config.Colors.BOLD}Tag C9 (Application Specific):{Config.Colors.ENDC} Passed directly to the applet's `install()` method.
-   - {Config.Colors.BOLD}Tag EF (GP System Specific):{Config.Colors.ENDC} Defines Memory Quotas (Tag C6/C7) and Global Service Parameters (Tag C8).
-   - {Config.Colors.BOLD}Tag EA (UICC System Specific):{Config.Colors.ENDC} Defined in ETSI TS 102 226. Configures Toolkit Parameters (Tag 80), Access Parameters (Tag 81), and Admin Access (Tag 82).
+   - {Config.Colors.BOLD}Tag EF (GP System Specific):{Config.Colors.ENDC} Defines Memory Quotas (Tag C6/C7), Global Service Parameters (Tag C8), Implicit Selection Parameter (Tag C9), and Reserved Memory (Tag CA/CB).
+   - {Config.Colors.BOLD}Tag EA (UICC System Specific):{Config.Colors.ENDC} Defined in ETSI TS 102 226. Configures Toolkit Parameters (Tag 80), Access Parameters (Tag 81), Admin Access (Tag 82), Update Access (Tag 83), and DAP (Tag C3).
      - The Access Domain Parameter (ADP) defines access conditions (00=Full, 02=UICC, FF=None).
    - {Config.Colors.BOLD}Tag CA (SIM File Access):{Config.Colors.ENDC} Legacy 2G parameter. 
      {Config.Colors.WARNING}Note:{Config.Colors.ENDC} ETSI TS 102 226 strictly forbids Tags CA and EA from coexisting. The wizard automatically enforces this rule.
