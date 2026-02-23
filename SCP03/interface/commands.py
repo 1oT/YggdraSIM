@@ -64,6 +64,7 @@ class CommandRegistry:
             'LIST': (lambda: shell.gp_ctrl.sgp22.list_profiles(), ""),
             'LIST-IOT': (lambda: shell.gp_ctrl.sgp22.list_profiles(), ""),
             'GET-IOT': (lambda: shell.gp_ctrl.sgp22.run_sgp22_scan(), ""),
+            'READ-METADATA': (shell._handle_read_metadata, "[SGP.22|SGP.32]"),
             
             # GlobalPlatform Registry & Data
             'APPS': (lambda: shell.gp_ctrl.list_registry('APPS'), ""),
@@ -139,6 +140,6 @@ class CommandRegistry:
             'SET-AID-ALIAS', 'SELECT', 'UPDATE', 'LOCK', 'UNLOCK', 'DEL', 'SCRIPT',
             'STORE-DATA', 'DECODE', 'DERIVE-OPC'
         ]
-        args_optional = ['REPORT', 'KEYS', 'READ', 'RECORD', 'RUN', 'GUIDE', 'DEBUG', 'VERBOSE', 'DUMP-FS', 'MANAGE-PIN', 'EXPORT-EUICC', 'ARR']
+        args_optional = ['REPORT', 'KEYS', 'READ', 'RECORD', 'RUN', 'GUIDE', 'DEBUG', 'VERBOSE', 'DUMP-FS', 'MANAGE-PIN', 'EXPORT-EUICC', 'ARR', 'READ-METADATA']
         
         return args_required, args_optional
