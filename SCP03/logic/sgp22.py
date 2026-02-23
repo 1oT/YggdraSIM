@@ -890,7 +890,10 @@ class Sgp22Manager:
 
     def _compact_tlv_value(self, tag: int, val: Any, parent_tag: Optional[int]) -> Any:
         if isinstance(val, bytes):
-            return self._decode_value(tag, val, parent_tag)
+            decoded = self._decode_value(tag, val, parent_tag)
+            if isinstance(decoded, str) and len(decoded) >= 2 and decoded[0] == '"' and decoded[-1] == '"':
+                return decoded[1:-1]
+            return decoded
 
         if isinstance(val, dict):
             return self._compact_tlv_node(val, tag)
@@ -899,10 +902,21 @@ class Sgp22Manager:
             out = []
             for item in val:
                 if isinstance(item, bytes):
-                    out.append(self._decode_value(tag, item, parent_tag))
+                    decoded = self._decode_value(tag, item, parent_tag)
+                    if isinstance(decoded, str) and len(decoded) >= 2 and decoded[0] == '"' and decoded[-1] == '"':
+                        out.append(decoded[1:-1])
+                    else:
+                        out.append(decoded)
                     continue
                 if isinstance(item, dict):
                     out.append(self._compact_tlv_node(item, tag))
+                    continue
+                if isinstance(item, list):
+                    nested_list = self._compact_tlv_value(tag, item, parent_tag)
+                    if isinstance(nested_list, list):
+                        out.extend(nested_list)
+                    else:
+                        out.append(nested_list)
                     continue
                 out.append(item)
             return out
@@ -918,7 +932,12 @@ class Sgp22Manager:
                     for child_key, child_val in flattened.items():
                         self._store_named_value(out, child_key, child_val)
                 elif isinstance(flattened, list):
-                    self._store_named_value(out, "items", flattened)
+                    for elem in flattened:
+                        if isinstance(elem, dict):
+                            for child_key, child_val in elem.items():
+                                self._store_named_value(out, child_key, child_val)
+                        else:
+                            self._store_named_value(out, "values", elem)
                 else:
                     self._store_named_value(out, "value", flattened)
                 continue
@@ -932,7 +951,14 @@ class Sgp22Manager:
         compact = self._compact_tlv_node(parsed, root_tag)
         text = json.dumps(compact, indent=2, ensure_ascii=True)
         for line in text.splitlines():
-            print(f"    {line}")
+            stripped = line.lstrip()
+            if stripped.startswith('"') and ":" in stripped:
+                colon_idx = line.find(":")
+                key_part = line[: colon_idx + 1]
+                value_part = line[colon_idx + 1 :]
+                print(f"    {key_part}{Config.Colors.CYAN}{value_part}{Config.Colors.ENDC}")
+            else:
+                print(f"    {line}")
 
     def _es10_retrieve(
         self,
