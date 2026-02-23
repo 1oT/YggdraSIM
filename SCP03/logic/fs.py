@@ -1136,6 +1136,13 @@ class FileSystemController:
         except Exception as e: print(f"{Config.Colors.FAIL}[!] Report Generation Failed: {e}{Config.Colors.ENDC}")
         finally: self.tp.transmit("00A40004023F00", silent=True); self.current_fid = "3F00"
 
+    def dump_fs_to_yaml(self, filename: str = "fs_report.yaml"):
+        """
+        Backward-compatible wrapper used by REPORT wizards.
+        Produces a full deep file system YAML report.
+        """
+        self.generate_report(filename)
+
     def _get_live_iccid(self) -> str:
         self.tp.transmit("00A40000023F00", silent=True)
         data, sw1, sw2 = self.tp.transmit("00A40004022FE2", silent=True)
