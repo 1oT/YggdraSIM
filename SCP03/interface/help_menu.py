@@ -28,6 +28,12 @@ class HelpMenu:
         print("  SET-STATUS     : Modify lifecycle state of Card, Applet, or Load File.")
         print("  MANAGE-CHANNEL : Open or close logical channels.")
         print("  GET-DATA       : Retrieve registry (APPS/PKGS/SD), CPLC, or custom tags.")
+        print("  APPS           : Shortcut to retrieve Applications registry.")
+        print("  PKGS           : Shortcut to retrieve Packages registry.")
+        print("  SD             : Shortcut to retrieve Security Domains registry.")
+        print("  LOCK <AID>     : Shortcut to set state to LOCKED (0x80).")
+        print("  UNLOCK <AID>   : Shortcut to set state to SELECTABLE (0x07).")
+        print("  DEL <AID>      : Shortcut to delete an object.")
         print("  STORE-DATA     : <Hex> [P1] [P2] - Send raw STORE DATA payload.")
         
         print(f"\n{Config.Colors.CYAN}[ Telecom & eSIM (SGP.22 / SGP.32 / SGP.02) ]{Config.Colors.ENDC}")
@@ -43,6 +49,7 @@ class HelpMenu:
         print("  AIDS           : List registered AID aliases from `aid.txt`.")
         print("  SET-AID-ALIAS  : <Name> <AID> - Map a friendly name to an AID.")
         print("  SET-DEFAULT    : Factory reset configuration to default test keys.")
+        print("  BINDS          : Manage custom macro commands and parameters.")
         
         print(f"\n{Config.Colors.CYAN}[ File System Operations ]{Config.Colors.ENDC}")
         print("  SCAN           : Traverse and discover the UICC file tree.")

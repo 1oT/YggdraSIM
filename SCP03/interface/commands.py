@@ -102,6 +102,7 @@ class CommandRegistry:
             'SET-AID-ALIAS': (shell._set_aid_alias, "<Name> <AID>"),
             'SET-DEFAULT': (shell._set_defaults, ""),
             'CONFIG': (lambda: ShellInteractiveWizards.run_config_wizard(shell), ""),
+            'BINDS': (shell.do_manage_binds, ""),
             
             # Hidden / Developer
             'DEBUG': (shell._toggle_debug, ""),
