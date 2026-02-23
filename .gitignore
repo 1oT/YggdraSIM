@@ -5,6 +5,7 @@ SCP03/fids.txt
 SCP80/ota_config.ini
 SCP03/script.txt
 SCP03/interface/binds.json
+docs
 
 # Python internals (Global)
 **/__pycache__/

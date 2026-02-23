@@ -6,6 +6,7 @@
 - Prohibited: Compounded statements. Never combine `if`, `try`, `except`, `with`, or `for` with their blocks on a single line.
 - Structure: Always provide full class or function definitions in code blocks.
 - Documentation: Technical, dry, and supportive. Focus on specifications over prose.
+- Interactive wizards need to be tag granular. All wizards shall be split down into each nestled tag to ensur a smooth user experience using them
 
 # Compliance Protocols
 - Logic: Cross-reference state machines with GSMA SGP.02/22/32.
