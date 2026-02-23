@@ -9,6 +9,8 @@
 import os
 import sys
 import configparser
+import tempfile
+import yaml
 
 current_dir = os.path.dirname(os.path.abspath(__file__))
 root_dir = os.path.abspath(os.path.join(current_dir, '../../'))
@@ -456,7 +458,7 @@ class ShellInteractiveWizards:
 
         wiz.add_step(
             "action22",
-            "SGP.22 Action [1=List, 2=Scan, 3=Enable, 4=Disable, 5=Delete, 6=GetConfiguredData, 7=GetCerts, 8=GetEID]:",
+            "SGP.22 Action [1=List (LIST/LIST-IOT), 2=Scan (GET-IOT), 3=Enable, 4=Disable, 5=Delete, 6=GetConfiguredData, 7=GetCerts, 8=GetEID]:",
             default="1",
             condition=action22_cond
         )
@@ -470,7 +472,7 @@ class ShellInteractiveWizards:
 
         wiz.add_step(
             "action32",
-            "SGP.32 Action [1=List, 2=Scan, 3=Enable, 4=Disable, 5=Delete, 6=GetRAT, 7=GetNotifications, 8=GetEimConfig, 9=GetConfiguredData, 10=GetCerts, 11=GetEID]:",
+            "SGP.32 Action [1=List (LIST/LIST-IOT), 2=Scan (GET-IOT), 3=Enable, 4=Disable, 5=Delete, 6=GetRAT, 7=GetNotifications, 8=GetEimConfig, 9=GetConfiguredData, 10=GetCerts, 11=GetEID]:",
             default="1",
             condition=action32_cond
         )
@@ -1119,7 +1121,11 @@ class ShellInteractiveWizards:
     @staticmethod
     def run_fs_report_wizard(shell) -> None:
         wiz = InteractiveWizard("File System Reporting Wizard", Config.Colors)
-        wiz.add_step("choice", "Action [1=Export FS to Disk (DUMP-FS), 2=Generate Full YAML Report]:", default="1")
+        wiz.add_step(
+            "choice",
+            "Action [1=Export FS to Disk (DUMP-FS), 2=Generate Full YAML Report, 3=Export eUICC YAML, 4=Combined FS+eUICC YAML]:",
+            default="1"
+        )
         
         def dest_cond(res):
             choice = res.get("choice")
@@ -1135,12 +1141,53 @@ class ShellInteractiveWizards:
             is_two = False
             if choice == '2':
                 is_two = True
-            return is_two
+            is_three = False
+            if choice == '3':
+                is_three = True
+            is_four = False
+            if choice == '4':
+                is_four = True
+            should_ask = False
+            if is_two:
+                should_ask = True
+            if is_three:
+                should_ask = True
+            if is_four:
+                should_ask = True
+            return should_ask
             
-        wiz.add_step("yaml", "YAML Filename [SKIP for fs_report.yaml]:", default="SKIP", condition=yaml_cond)
+        wiz.add_step("yaml", "YAML Filename [SKIP for default]:", default="SKIP", condition=yaml_cond)
+
+        def std_cond(res):
+            choice = res.get("choice")
+            is_three = False
+            if choice == '3':
+                is_three = True
+            is_four = False
+            if choice == '4':
+                is_four = True
+            should_ask = False
+            if is_three:
+                should_ask = True
+            if is_four:
+                should_ask = True
+            return should_ask
+
+        wiz.add_step("std", "Target Standard [1=SGP.22, 2=SGP.32]:", default="2", condition=std_cond)
         
         res = wiz.run()
         choice = res.get("choice")
+
+        def _normalize_yaml_name(name: str) -> str:
+            cleaned = name.strip()
+            has_yaml_ext = False
+            if cleaned.endswith(".yaml"):
+                has_yaml_ext = True
+            if cleaned.endswith(".yml"):
+                has_yaml_ext = True
+            if has_yaml_ext == False:
+                cleaned = cleaned + ".yaml"
+            return cleaned
 
         is_one = False
         if choice == '1':
@@ -1171,9 +1218,91 @@ class ShellInteractiveWizards:
                 
             if is_filename_skip:
                 filename = "fs_report.yaml"
+            else:
+                filename = _normalize_yaml_name(filename)
                 
             shell.fs_ctrl.dump_fs_to_yaml(filename)
             print(f"[+] Full file system report saved to {filename}")
+            return
+
+        is_three = False
+        if choice == '3':
+            is_three = True
+
+        if is_three:
+            filename = res.get("yaml")
+            is_filename_skip = False
+            if filename == "SKIP":
+                is_filename_skip = True
+
+            if is_filename_skip:
+                filename = "euicc_report.yaml"
+            else:
+                filename = _normalize_yaml_name(filename)
+
+            std_raw = res.get("std")
+            standard = "SGP.32"
+            is_std_22 = False
+            if std_raw == '1':
+                is_std_22 = True
+            if is_std_22:
+                standard = "SGP.22"
+
+            shell._handle_export_euicc(filename, standard=standard)
+            return
+
+        is_four = False
+        if choice == '4':
+            is_four = True
+
+        if is_four:
+            filename = res.get("yaml")
+            is_filename_skip = False
+            if filename == "SKIP":
+                is_filename_skip = True
+
+            if is_filename_skip:
+                filename = "combined_report.yaml"
+            else:
+                filename = _normalize_yaml_name(filename)
+
+            std_raw = res.get("std")
+            standard = "SGP.32"
+            is_std_22 = False
+            if std_raw == '1':
+                is_std_22 = True
+            if is_std_22:
+                standard = "SGP.22"
+
+            print("[*] Building combined FS + eUICC report... this may take a moment.")
+            temp_name = ""
+            with tempfile.NamedTemporaryFile(prefix="fs_report_", suffix=".yaml", delete=False) as temp_file:
+                temp_name = temp_file.name
+
+            try:
+                shell.fs_ctrl.dump_fs_to_yaml(temp_name)
+                fs_data = {}
+                with open(temp_name, "r") as fsf:
+                    loaded = yaml.safe_load(fsf)
+                    if isinstance(loaded, dict):
+                        fs_data = loaded
+                euicc_report = shell._build_euicc_export_report(standard=standard)
+                combined = {
+                    "generated": euicc_report.get("generated"),
+                    "standard": standard,
+                    "file_system_report": fs_data,
+                    "euicc_report": euicc_report,
+                }
+                with open(filename, "w") as out:
+                    yaml.dump(combined, out, default_flow_style=False, allow_unicode=True, sort_keys=False)
+                print(f"[+] Combined report saved to {filename}")
+            finally:
+                is_temp_exists = False
+                if len(temp_name) > 0:
+                    if os.path.exists(temp_name):
+                        is_temp_exists = True
+                if is_temp_exists:
+                    os.remove(temp_name)
 
     @staticmethod
     def _build_fcp_template() -> dict:

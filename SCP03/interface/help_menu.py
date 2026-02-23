@@ -38,10 +38,7 @@ class HelpMenu:
         
         print(f"\n{Config.Colors.CYAN}[ Telecom & eSIM (SGP.22 / SGP.32 / SGP.02) – retrieval + local profile state ]{Config.Colors.ENDC}")
         print("  LIST           : List eSIM profiles (GetProfilesInfo, SGP.22/SGP.32).")
-        print("  LIST-IOT       : Alias for LIST (IoT eUICC profile list).")
-        print("  GET-IOT        : Deep scan: EuiccInfo1/2, EuiccConfiguredData, capabilities.")
         print("  MANAGE-PROFILE : Spec-aware wizard with separate SGP.22, SGP.32, and SGP.02 command sets.")
-        print("  EXPORT-EUICC   : [Path.yaml] - Single-command eUICC report (profiles, EuiccInfo, CPLC).")
         print("  RUN-AUTH       : Execute GSM, USIM, or ISIM authentication algorithms.")
         print("  RUN-AUTH-TEST  : Run 3GPP TS 35.207 test vector (OPc derivation + card auth).")
         print("  DERIVE-OPC     : <Ki_hex> <OP_hex> - Derive OPc per 3GPP TS 35.206.")
@@ -59,7 +56,7 @@ class HelpMenu:
         
         print(f"\n{Config.Colors.CYAN}[ File System Operations ]{Config.Colors.ENDC}")
         print("  SCAN           : Traverse and discover the UICC file tree.")
-        print("  REPORT         : Unified FS wizard (export tree to disk or generate full YAML report).")
+        print("  REPORT         : Unified report wizard (FS dump, FS YAML, eUICC YAML, or combined FS+eUICC YAML).")
         print("  SELECT         : <Path/FID> - Select a DF or EF.")
         print("  READ [Path]    : Read binary data from the selected EF.")
         print("  RECORD         : <N/ALL> [Path] - Read record(s) from a linear fixed/cyclic EF.")

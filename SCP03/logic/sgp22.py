@@ -109,6 +109,112 @@ class Sgp22Manager:
                 report["profiles"] = []
         return report
 
+    def _es10_retrieve_data(self, payload: str) -> bytes:
+        self._select_isd_r()
+        cmd = f"80E29100{len(bytes.fromhex(payload)):02X}{payload}"
+        data, sw1, sw2 = self.tp.transmit(cmd, silent=True)
+        is_ok = False
+        if sw1 == 0x90:
+            is_ok = True
+        if is_ok:
+            return data
+        return b""
+
+    def _safe_parse_tlv(self, data: bytes) -> Dict[int, Any]:
+        if not data:
+            return {}
+        try:
+            parsed = TlvParser.parse(data)
+            if isinstance(parsed, dict):
+                return parsed
+        except Exception:
+            pass
+        return {}
+
+    def _compact_from_payload(self, payload: str, root_tag: Optional[int]) -> Dict[str, Any]:
+        data = self._es10_retrieve_data(payload)
+        if not data:
+            return {}
+        parsed = self._safe_parse_tlv(data)
+        if not parsed:
+            return {"raw_hex": data.hex().upper()}
+        compact = self._compact_tlv_node(parsed, root_tag)
+        if not isinstance(compact, dict):
+            return {"raw_hex": data.hex().upper()}
+        return compact
+
+    def _collect_cert_summaries(self, parsed: Dict[int, Any]) -> List[Dict[str, Any]]:
+        summaries: List[Dict[str, Any]] = []
+        seen_serials = set()
+        for blob in self._iter_byte_values(parsed):
+            is_short = False
+            if len(blob) < 32:
+                is_short = True
+            if is_short:
+                continue
+            info = AdvancedDecoders.decode_cert_der(blob)
+            is_missing = False
+            if not info:
+                is_missing = True
+            if is_missing:
+                continue
+            serial = str(info.get("serial", ""))
+            is_dup = False
+            if serial in seen_serials:
+                is_dup = True
+            if is_dup:
+                continue
+            seen_serials.add(serial)
+            summaries.append(
+                {
+                    "subject": str(info.get("subject", "")),
+                    "issuer": str(info.get("issuer", "")),
+                    "serial": serial,
+                    "not_valid_before": str(info.get("not_valid_before", "")),
+                    "not_valid_after": str(info.get("not_valid_after", "")),
+                }
+            )
+        return summaries
+
+    def get_euicc_report_extended(self, standard: str = "SGP.32") -> Dict[str, Any]:
+        """
+        Build eUICC export payload for REPORT/EXPORT-EUICC.
+        Base set is equivalent to GET-IOT scan.
+        For SGP.32, include additional retrievals not covered by GET-IOT
+        (excluding notifications and EID as requested).
+        """
+        std = standard.strip().upper()
+        is_empty = False
+        if len(std) == 0:
+            is_empty = True
+        if is_empty:
+            std = "SGP.32"
+
+        report = self.get_euicc_report()
+        report["standard"] = std
+
+        if std != "SGP.32":
+            return report
+
+        sgp32_section: Dict[str, Any] = {}
+
+        sgp32_section["get_rat"] = self._compact_from_payload("BF4300", 0xBF43)
+        sgp32_section["get_eim_configuration_data"] = self._compact_from_payload("BF5500", 0xBF55)
+
+        cert_data = self._es10_retrieve_data("BF5600")
+        cert_parsed = self._safe_parse_tlv(cert_data)
+        if cert_parsed:
+            sgp32_section["get_certs_summary"] = self._collect_cert_summaries(cert_parsed)
+            if len(sgp32_section["get_certs_summary"]) == 0:
+                sgp32_section["get_certs_raw"] = cert_data.hex().upper()
+        elif cert_data:
+            sgp32_section["get_certs_raw"] = cert_data.hex().upper()
+        else:
+            sgp32_section["get_certs_summary"] = []
+
+        report["sgp32_extra"] = sgp32_section
+        return report
+
     def _profile_list_to_dicts(self, data: bytes) -> List[Dict]:
         """Parse BF2D profile list response into list of dicts."""
         out = []
