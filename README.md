@@ -10,6 +10,8 @@
 
 **YggdraSIM** is a comprehensive, Python-based toolkit for interacting with, analyzing, and managing SIM, USIM, and eUICC (eSIM) cards. It provides a robust interactive shell for GlobalPlatform management, GSMA eSIM profile handling (Consumer, IoT, and M2M), and low-level file system operations via PC/SC smart card readers.
 
+**Note:** Some commands are experimental and have not been fully tested on all card types or firmware versions.
+
 ## 🚀 Key Features
 
 ### 🌐 GlobalPlatform & Lifecycle
@@ -18,11 +20,12 @@
 * **Lifecycle Management:** Install (`LOAD`, `INSTALL`), Lock, Unlock, and Delete applications.
 * **Key Management:** Retrieve CPLC data and Key Information Templates.
 
-### 📱 GSMA eSIM (SGP.22 / SGP.32 / SGP.02)
-* **Profile Management:** List, Enable, Disable, and Delete eSIM profiles via ISD-R.
-* **SGP.22 (Consumer):** Full support for retrieving and decoding `EuiccInfo1`, `EuiccInfo2`, and `EuiccConfiguredData`.
-* **SGP.32 (IoT):** Dedicated commands for the new IoT eSIM standard (`LIST-IOT`, `GET-IOT`).
-* **SGP.02 (M2M):** Support for ECASD data retrieval and M2M specific tags.
+### 📱 GSMA eSIM (SGP.22 / SGP.32 / SGP.02) — retrieval and local profile ops only
+* **Scope:** Data retrieval and local profile state (list, enable, disable, delete) only. This tool does **not** authenticate to ISD-R for provisioning; that is planned for the SCP11 module. Commands such as StoreMetadata, UpdateMetadata, LoadProfile, PrepareDownload, and LoadBoundProfilePackage are **not** supported.
+* **Profile Management:** List, Enable, Disable, and Delete eSIM profiles via ISD-R (ES10c/ES10b.GetProfilesInfo and profile state commands).
+* **SGP.22 (Consumer):** Retrieve and decode `EuiccInfo1`, `EuiccInfo2`, `EuiccConfiguredData`, GetRAT, RetrieveNotificationsList.
+* **SGP.32 (IoT):** `LIST-IOT` / `GET-IOT` plus wizard-based retrieval actions for RAT, notifications, and eIM configuration data.
+* **SGP.02 (M2M):** ECASD data retrieval and M2M specific tags.
 * **Crisp Decoding:** Automatic, context-aware decoding of complex TLV structures (e.g., Extended Card Resources, Capabilities).
 
 ### 📂 ETSI / 3GPP File System
@@ -79,6 +82,18 @@ You can automate tasks using script files and export results to YAML.
 * **Input:** A text file with one command per line.
 * **Output:** A structured YAML file containing the command execution log and decoded outputs.
 
+**Non-interactive CLI (one-shot commands):**
+```bash
+python main/main.py --scp03 --cmd "AUTH-SD; LIST; GET-IOT" --out report.yaml
+python SCP03/main.py --cmd "AUTH-SD; APPS" --out report.yaml
+```
+
+**Single-command eUICC report:**
+```bash
+[APDU] > EXPORT-EUICC euicc_report.yaml
+```
+Writes profiles, EuiccInfo1/2, EuiccConfiguredData, CPLC, and key info to a YAML file.
+
 ---
 
 ## ⚙️ Configuration
@@ -132,6 +147,8 @@ Certificates used by the SCP11 module (`CERT.DPauth.ECDSA.der`, `SK.DPauth.ECDSA
     * `interface/`: Shell dispatcher and CLI handling.
     * `transport/`: PC/SC card abstraction.
 * **`SCP80/`**: OTA/SMS secure channel tools.
+
+**CAP / Load File Install:** Full CAP install from file is supported: WIZARD option 8 builds the APDU sequence (dry run); for live install, `gp.install_cap_file()` in `SCP03/logic/gp.py` implements INSTALL [for load], LOAD (chunked), and INSTALL [for install]. No further change needed unless you need different CAP formats or OTA-specific chunking.
 
 ---
 
