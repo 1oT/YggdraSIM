@@ -107,6 +107,253 @@ class AdvancedDecoders:
         return ["No Rules"]
 
     @staticmethod
+    def decode_gp_seac_arf(data_hex: str) -> list:
+        """
+        Decode GP SEAC ARF-related files (e.g. EF_ACRF/EF_ACCF) as BER-TLV.
+        This is a structural decoder focused on tag-level visibility.
+        """
+        if not data_hex:
+            return ["GP_SEAC: Empty/Invalid"]
+
+        cleaned = data_hex.strip().upper()
+        is_only_ff = True
+        for c in cleaned:
+            if c != "F":
+                is_only_ff = False
+                break
+        if is_only_ff:
+            return ["GP_SEAC: Empty/Invalid"]
+
+        try:
+            data = bytes.fromhex(cleaned)
+        except Exception:
+            return ["GP_SEAC: Hex Decode Error"]
+
+        tag_names = {
+            0xE2: "REF-AR-DO",
+            0xE1: "REF-DO",
+            0xE3: "AR-DO",
+            0x4F: "AID-REF-DO",
+            0xC1: "DeviceAppID-REF-DO",
+            0xCA: "PkgRef-DO / Ref-DO",
+            0xDB: "PERM-AR-DO",
+            0xD0: "APDU-AR-DO",
+            0xD1: "NFC-AR-DO",
+            0xD2: "CarrierPrivilege-AR-DO",
+            0xD3: "Access-Rule-DO",
+            0xD4: "Access-Rule-Ext-DO",
+            0xD5: "Hash-Ref-DO",
+            0xD6: "BundleRef-DO",
+            0xD7: "APDU-Filter-DO",
+        }
+
+        parsed = TlvParser.parse(data)
+        lines: List[str] = []
+
+        def _tag_to_hex(tag: int) -> str:
+            if tag <= 0xFF:
+                return f"{tag:02X}"
+            if tag <= 0xFFFF:
+                return f"{tag:04X}"
+            return f"{tag:X}"
+
+        def _tag_label(tag: int) -> str:
+            name = tag_names.get(tag)
+            if name is not None:
+                return name
+            return "Unknown"
+
+        def _short_hex(raw: bytes, max_chars: int = 96) -> str:
+            hex_text = raw.hex().upper()
+            is_short = False
+            if len(hex_text) <= max_chars:
+                is_short = True
+            if is_short:
+                return hex_text
+            return hex_text[:max_chars] + "..."
+
+        def _walk(node: Any, level: int) -> None:
+            if isinstance(node, dict):
+                for tag, val in node.items():
+                    tag_hex = _tag_to_hex(tag)
+                    label = _tag_label(tag)
+
+                    is_dict = False
+                    if isinstance(val, dict):
+                        is_dict = True
+                    if is_dict:
+                        lines.append(f"{'  ' * level}{tag_hex} {label}")
+                        _walk(val, level + 1)
+                        continue
+
+                    is_list = False
+                    if isinstance(val, list):
+                        is_list = True
+                    if is_list:
+                        lines.append(f"{'  ' * level}{tag_hex} {label} [{len(val)}]")
+                        for item in val:
+                            _walk({tag: item}, level + 1)
+                        continue
+
+                    is_bytes = False
+                    if isinstance(val, bytes):
+                        is_bytes = True
+                    if is_bytes:
+                        lines.append(f"{'  ' * level}{tag_hex} {label}: {_short_hex(val)}")
+                        continue
+
+                    lines.append(f"{'  ' * level}{tag_hex} {label}: {val}")
+                return
+
+            is_list = False
+            if isinstance(node, list):
+                is_list = True
+            if is_list:
+                for item in node:
+                    _walk(item, level)
+                return
+
+            lines.append(f"{'  ' * level}{node}")
+
+        _walk(parsed, 0)
+        if len(lines) == 0:
+            return ["GP_SEAC: No TLV entries"]
+        return lines
+
+    @staticmethod
+    def decode_pkcs15_acrf(data_hex: str) -> list:
+        """
+        Decode PKCS#15 EF_ACRF (FID 4300) into compact rule references.
+        Typical shape: SEQUENCE of rules, each with AID/Ref-DO and ACCF path reference.
+        """
+        if not data_hex:
+            return ["PKCS15 ACRF: Empty/Invalid"]
+        cleaned = data_hex.strip().upper()
+        try:
+            raw = bytes.fromhex(cleaned)
+        except Exception:
+            return ["PKCS15 ACRF: Hex Decode Error"]
+
+        while len(raw) > 0 and raw[-1] == 0xFF:
+            raw = raw[:-1]
+        if len(raw) == 0:
+            return ["PKCS15 ACRF: Empty/Invalid"]
+
+        try:
+            parsed = TlvParser.parse(raw)
+        except Exception:
+            return ["PKCS15 ACRF: TLV Parse Error"]
+
+        seq = TlvParser.get_first(parsed, 0x30, parsed)
+        rules = []
+
+        def _collect_rules(node: Any) -> None:
+            if isinstance(node, dict):
+                has_ref = False
+                if 0xA0 in node:
+                    has_ref = True
+                if 0x30 in node:
+                    has_ref = True
+                if has_ref:
+                    rules.append(node)
+                for v in node.values():
+                    _collect_rules(v)
+                return
+            if isinstance(node, list):
+                for item in node:
+                    _collect_rules(item)
+
+        _collect_rules(seq)
+        out: List[str] = []
+        if len(rules) == 0:
+            return ["PKCS15 ACRF: No Rule Entries"]
+
+        for idx, rule in enumerate(rules, start=1):
+            aid_ref = "N/A"
+            accf_ref = "N/A"
+
+            ref_a0 = TlvParser.get_first(rule, 0xA0)
+            if isinstance(ref_a0, dict):
+                aid_oct = TlvParser.get_first(ref_a0, 0x04)
+                if isinstance(aid_oct, bytes):
+                    aid_ref = aid_oct.hex().upper()
+
+            ref_30 = TlvParser.get_first(rule, 0x30)
+            if isinstance(ref_30, dict):
+                path_oct = TlvParser.get_first(ref_30, 0x04)
+                if isinstance(path_oct, bytes):
+                    accf_ref = path_oct.hex().upper()
+            if isinstance(ref_30, bytes):
+                try:
+                    parsed_30 = TlvParser.parse(ref_30)
+                    path_oct = TlvParser.get_first(parsed_30, 0x04)
+                    if isinstance(path_oct, bytes):
+                        accf_ref = path_oct.hex().upper()
+                except Exception:
+                    pass
+
+            out.append(f"Rule {idx}: AID Ref={aid_ref} | ACCF Ref={accf_ref}")
+
+        return out
+
+    @staticmethod
+    def decode_pkcs15_accf(data_hex: str) -> list:
+        """
+        Decode PKCS#15 EF_ACCF (FID 4310) access condition file entries.
+        Common payload contains certificate hash references (OCTET STRING).
+        """
+        if not data_hex:
+            return ["PKCS15 ACCF: Empty/Invalid"]
+        cleaned = data_hex.strip().upper()
+        try:
+            raw = bytes.fromhex(cleaned)
+        except Exception:
+            return ["PKCS15 ACCF: Hex Decode Error"]
+
+        while len(raw) > 0 and raw[-1] == 0xFF:
+            raw = raw[:-1]
+        if len(raw) == 0:
+            return ["PKCS15 ACCF: Empty/Invalid"]
+
+        try:
+            parsed = TlvParser.parse(raw)
+        except Exception:
+            return ["PKCS15 ACCF: TLV Parse Error"]
+
+        octets: List[bytes] = []
+
+        def _collect_octets(node: Any) -> None:
+            if isinstance(node, dict):
+                for k, v in node.items():
+                    if k == 0x04:
+                        if isinstance(v, bytes):
+                            octets.append(v)
+                        elif isinstance(v, list):
+                            for item in v:
+                                if isinstance(item, bytes):
+                                    octets.append(item)
+                    _collect_octets(v)
+                return
+            if isinstance(node, list):
+                for item in node:
+                    _collect_octets(item)
+
+        _collect_octets(parsed)
+        if len(octets) == 0:
+            return ["PKCS15 ACCF: No OCTET Entries"]
+
+        out: List[str] = []
+        for idx, item in enumerate(octets, start=1):
+            h = item.hex().upper()
+            algo = "raw"
+            if len(item) == 32:
+                algo = "sha256"
+            if len(item) == 20:
+                algo = "sha1"
+            out.append(f"Entry {idx}: Cert Hash ({algo}) = {h}")
+        return out
+
+    @staticmethod
     def decode_cert_der(data: bytes) -> Optional[Dict[str, Any]]:
         """Parse DER-encoded X.509 certificate; return subject, issuer, validity or None."""
         if not data or len(data) < 4:
@@ -297,7 +544,13 @@ class ContentDecoder:
             '2FE2': cls.decode_iccid,
             '2F00': cls.decode_dir,
             '2F06': AdvancedDecoders.decode_ef_arr,
-            '2F05': lambda x: {"Preferred Languages": x},
+            '2F08': cls.decode_hex_chunks,
+            '4300': AdvancedDecoders.decode_pkcs15_acrf,
+            '4310': AdvancedDecoders.decode_pkcs15_accf,
+            '4200': cls.decode_tlv_as_map,
+            '5031': cls.decode_tlv_as_map,
+            '5207': cls.decode_tlv_as_map,
+            '2F05': cls.decode_language_indicators,
             '6F07': cls.decode_imsi,
             '6FAD': cls.decode_ad,
             '6F08': lambda x: {"Ciphering Keys (Raw)": x},
@@ -316,7 +569,7 @@ class ContentDecoder:
             '6FE3': AdvancedDecoders.decode_loci,
             '4F01': AdvancedDecoders.decode_loci,
             '6F42': cls.decode_sms_params,
-            '6F3C': lambda x: {"SMS Record": f"{x[:30]}..."},
+            '6F3C': cls.decode_sms_record,
             '6F5B': lambda x: {"START-HFN": x},
             '6F5C': lambda x: {"Threshold": x},
             '6F05': lambda x: {"LI": x},
@@ -325,7 +578,276 @@ class ContentDecoder:
             '6F3E': lambda x: {"GID1": x},
             '6F3F': lambda x: {"GID2": x},
             '6F56': AdvancedDecoders.decode_ust,
+            '6F41': cls.decode_puct,
+            '6FB7': cls.decode_ecc,
+            '6F3A': cls.decode_adn_like_record,
+            '6F3B': cls.decode_adn_like_record,
+            '6F3D': cls.decode_adn_like_record,
+            '6F49': cls.decode_adn_like_record,
+            '6F43': cls.decode_smss,
+            '6F47': cls.decode_smsr,
+            '6FC5': cls.decode_pnn,
+            '6FC6': cls.decode_opl,
+            '6FCD': cls.decode_spdi,
+            '6FE4': cls.decode_epsnsc,
+            '6FDA': cls.decode_gbanl,
+            '6FDD': cls.decode_nafkca,
+            '6F45': cls.decode_cbmi_list,
+            '6F48': cls.decode_cbmi_list,
+            '6F50': cls.decode_cbmid_range_list,
+            '6FEC': cls.decode_hex_chunks,
+            '6FDE': cls.decode_utf8_or_hex,
+            '6FDF': cls.decode_utf8_or_hex,
+            '6FE2': cls.decode_utf8_or_hex,
+            '6FE6': cls.decode_tlv_as_map,
+            '6FE7': cls.decode_tlv_as_map,
+            '6FE8': cls.decode_tlv_as_map,
+            '6FED': cls.decode_utf8_or_hex,
+            '6FEE': cls.decode_utf8_or_hex,
+            '6FEF': cls.decode_utf8_or_hex,
+            '6FF0': cls.decode_utf8_or_hex,
+            '6FF1': cls.decode_utf8_or_hex,
+            '6FF2': cls.decode_utf8_or_hex,
+            '6FF3': cls.decode_utf8_or_hex,
+            '6FF4': cls.decode_tlv_as_map,
+            '6FF5': cls.decode_utf8_or_hex,
+            '6FF6': cls.decode_tlv_as_map,
+            '6FF7': cls.decode_utf8_or_hex,
+            '6FF8': cls.decode_tlv_as_map,
+            '6FF9': cls.decode_service_table_bits,
+            '6FFA': cls.decode_tlv_as_map,
+            '6FFC': cls.decode_tlv_as_map,
+            '6FFD': cls.decode_hex_chunks,
+            '6FFE': cls.decode_tlv_as_map,
         }
+
+        cls._register_context_decoders()
+
+    @classmethod
+    def _register_context_decoders(cls):
+        # TELECOM context
+        cls._registry['TELECOM/6F3A'] = cls.decode_adn_like_record
+        cls._registry['TELECOM/6F3B'] = cls.decode_adn_like_record
+        cls._registry['TELECOM/6F3C'] = cls.decode_sms_record
+        cls._registry['TELECOM/6F3D'] = cls.decode_adn_like_record
+        cls._registry['TELECOM/6F40'] = cls.decode_msisdn
+        cls._registry['TELECOM/6F42'] = cls.decode_sms_params
+        cls._registry['TELECOM/6F43'] = cls.decode_smss
+        cls._registry['TELECOM/6F47'] = cls.decode_smsr
+        cls._registry['TELECOM/6F49'] = cls.decode_adn_like_record
+        cls._registry['TELECOM/6F4A'] = cls.decode_hex_chunks
+        cls._registry['TELECOM/6F4B'] = cls.decode_hex_chunks
+        cls._registry['TELECOM/6F4C'] = cls.decode_hex_chunks
+        cls._registry['TELECOM/6F4F'] = cls.decode_hex_chunks
+
+        # PHONEBOOK context
+        cls._registry['PHONEBOOK/4F22'] = cls.decode_hex_chunks
+        cls._registry['PHONEBOOK/4F23'] = cls.decode_hex_chunks
+        cls._registry['PHONEBOOK/4F24'] = cls.decode_hex_chunks
+        cls._registry['PHONEBOOK/4F30'] = cls.decode_tlv_as_map
+        cls._registry['PHONEBOOK/4F38'] = cls.decode_hex_chunks
+        cls._registry['PHONEBOOK/4F40'] = cls.decode_utf8_or_hex
+        cls._registry['PHONEBOOK/4F48'] = cls.decode_utf8_or_hex
+        cls._registry['PHONEBOOK/4F50'] = cls.decode_hex_chunks
+        cls._registry['PHONEBOOK/4F58'] = cls.decode_adn_like_record
+        cls._registry['PHONEBOOK/4F60'] = cls.decode_hex_chunks
+        cls._registry['PHONEBOOK/4F68'] = cls.decode_hex_chunks
+        cls._registry['PHONEBOOK/4F70'] = cls.decode_utf8_or_hex
+        cls._registry['PHONEBOOK/4F78'] = cls.decode_utf8_or_hex
+        cls._registry['PHONEBOOK/4F80'] = cls.decode_utf8_or_hex
+        cls._registry['PHONEBOOK/4F88'] = cls.decode_hex_chunks
+        cls._registry['PHONEBOOK/4F90'] = cls.decode_hex_chunks
+        cls._registry['PHONEBOOK/4F98'] = cls.decode_hex_chunks
+
+        # GRAPHICS / MULTIMEDIA / MMSS context
+        cls._registry['GRAPHICS/4F20'] = cls.decode_hex_chunks
+        cls._registry['GRAPHICS/4F21'] = cls.decode_hex_chunks
+        cls._registry['GRAPHICS/4F40'] = cls.decode_hex_chunks
+        cls._registry['MULTIMEDIA/4F47'] = cls.decode_hex_chunks
+        cls._registry['MULTIMEDIA/4F48'] = cls.decode_hex_chunks
+        cls._registry['MMSS/4F20'] = cls.decode_hex_chunks
+        cls._registry['MMSS/4F21'] = cls.decode_hex_chunks
+        cls._registry['MMSS/4F22'] = cls.decode_hex_chunks
+
+        # MCS / V2X / A2X service tables
+        cls._registry['MCS/4F01'] = cls.decode_service_table_bits
+        cls._registry['MCS/4F02'] = cls.decode_tlv_as_map
+        cls._registry['V2X/4F01'] = cls.decode_service_table_bits
+        cls._registry['V2X/4F02'] = cls.decode_tlv_as_map
+        cls._registry['V2X/4F03'] = cls.decode_tlv_as_map
+        cls._registry['V2X/4F04'] = cls.decode_tlv_as_map
+        cls._registry['A2X/4F01'] = cls.decode_service_table_bits
+        cls._registry['A2X/4F02'] = cls.decode_tlv_as_map
+        cls._registry['A2X/4F03'] = cls.decode_tlv_as_map
+        cls._registry['A2X/4F04'] = cls.decode_tlv_as_map
+        cls._registry['A2X/4F05'] = cls.decode_tlv_as_map
+        cls._registry['A2X/4F06'] = cls.decode_tlv_as_map
+
+        # EAP context (collides with 4F01/4F02/6F01/6F02)
+        cls._registry['EAP/4F01'] = cls.decode_hex_chunks
+        cls._registry['EAP/4F02'] = cls.decode_hex_chunks
+        cls._registry['EAP/4F04'] = cls.decode_tlv_as_map
+        cls._registry['EAP/4F20'] = cls.decode_hex_chunks
+        cls._registry['EAP/4F21'] = cls.decode_hex_chunks
+        cls._registry['EAP/4F22'] = cls.decode_utf8_or_hex
+        cls._registry['EAP/6F01'] = cls.decode_utf8_or_hex
+        cls._registry['EAP/6F02'] = cls.decode_tlv_as_map
+
+        # ISIM context-specific (collisions with USIM)
+        cls._registry['ISIM/6F02'] = cls.decode_isim_tlv80_text
+        cls._registry['ISIM/6F03'] = cls.decode_isim_tlv80_text
+        cls._registry['ISIM/6F04'] = cls.decode_isim_tlv80_text
+        cls._registry['ISIM/6F07'] = cls.decode_isim_ist
+        cls._registry['ISIM/6F09'] = cls.decode_isim_pcscf
+        cls._registry['ISIM/6FFA'] = cls.decode_isim_tlv80_text
+
+        # 5GS / SNPN / SAIP / 5G_PROSE context-specific 4Fxx collisions
+        cls._registry['5GS/4F01'] = cls.decode_5gs_loci
+        cls._registry['5GS/4F02'] = cls.decode_5gs_loci
+        cls._registry['5GS/4F03'] = cls.decode_5gs_nsc
+        cls._registry['5GS/4F04'] = cls.decode_5gs_nsc
+        cls._registry['5GS/4F05'] = cls.decode_5gs_auth_keys
+        cls._registry['5GS/4F06'] = cls.decode_5gs_uac_aic
+        cls._registry['5GS/4F07'] = cls.decode_tlv_as_map
+        cls._registry['5GS/4F08'] = cls.decode_opl
+        cls._registry['5GS/4F09'] = cls.decode_utf8_or_hex
+        cls._registry['5GS/4F0A'] = cls.decode_routing_indicator
+        cls._registry['5GS/4F0B'] = cls.decode_tlv_as_map
+        cls._registry['5GS/4F0C'] = cls.decode_utf8_or_hex
+        cls._registry['5GS/4F0D'] = cls.decode_hex_chunks
+        cls._registry['5GS/4F0E'] = cls.decode_5gs_sor_cmci
+        cls._registry['5GS/4F0F'] = cls.decode_dri
+        cls._registry['5GS/4F10'] = cls.decode_hex_chunks
+        cls._registry['5GS/4F11'] = cls.decode_hex_chunks
+        cls._registry['5GS/4F15'] = cls.decode_hex_chunks
+        cls._registry['5GS/4F16'] = cls.decode_tlv_as_map
+
+        cls._registry['SNPN/4F01'] = cls.decode_hex_chunks
+        cls._registry['SNPN/4F02'] = cls.decode_hex_chunks
+        cls._registry['SAIP/4F01'] = cls.decode_tlv_as_map
+        cls._registry['5G_PROSE/4F01'] = cls.decode_hex_chunks
+        cls._registry['5G_PROSE/4F02'] = cls.decode_hex_chunks
+        cls._registry['5G_PROSE/4F03'] = cls.decode_hex_chunks
+        cls._registry['5G_PROSE/4F04'] = cls.decode_hex_chunks
+        cls._registry['5G_PROSE/4F05'] = cls.decode_hex_chunks
+        cls._registry['5G_PROSE/4F06'] = cls.decode_hex_chunks
+        cls._registry['5G_PROSE/4F07'] = cls.decode_hex_chunks
+        cls._registry['5G_PROSE/4F08'] = cls.decode_hex_chunks
+
+    @staticmethod
+    def _decode_bcd_digits(data: bytes) -> str:
+        out = []
+        for b in data:
+            low = b & 0x0F
+            high = (b >> 4) & 0x0F
+            if low != 0x0F:
+                out.append(str(low))
+            if high != 0x0F:
+                out.append(str(high))
+        return "".join(out)
+
+    @staticmethod
+    def _decode_plmn_bytes(plmn_bytes: bytes) -> str:
+        if len(plmn_bytes) < 3:
+            return plmn_bytes.hex().upper()
+        b1 = plmn_bytes[0]
+        b2 = plmn_bytes[1]
+        b3 = plmn_bytes[2]
+        mcc = f"{b1 & 0x0F}{b1 >> 4}{b2 & 0x0F}"
+        mnc = f"{b3 & 0x0F}{b3 >> 4}"
+        if (b2 & 0xF0) != 0xF0:
+            mnc = f"{b2 >> 4}{mnc}"
+        return f"{mcc}-{mnc}"
+
+    @staticmethod
+    def decode_language_indicators(hex_str: str) -> dict:
+        try:
+            data = bytes.fromhex(hex_str)
+            langs = []
+            for i in range(0, len(data), 2):
+                chunk = data[i:i + 2]
+                if len(chunk) < 2:
+                    break
+                if chunk == b"\xFF\xFF":
+                    continue
+                langs.append(chunk.decode("ascii", "ignore"))
+            return {"Preferred Languages": langs, "Raw": hex_str}
+        except Exception:
+            return {"Preferred Languages (Raw)": hex_str}
+
+    @staticmethod
+    def decode_service_table_bits(hex_str: str) -> dict:
+        try:
+            data = bytes.fromhex(hex_str)
+            active = []
+            for byte_idx, byte_val in enumerate(data):
+                for bit_idx in range(8):
+                    service_num = (byte_idx * 8) + bit_idx + 1
+                    if byte_val & (1 << bit_idx):
+                        active.append(service_num)
+            return {"Services Active": active, "Raw": hex_str}
+        except Exception:
+            return {"Service Table (Raw)": hex_str}
+
+    @staticmethod
+    def decode_cbmi_list(hex_str: str) -> dict:
+        try:
+            data = bytes.fromhex(hex_str)
+            ids = []
+            for i in range(0, len(data), 2):
+                chunk = data[i:i + 2]
+                if len(chunk) < 2:
+                    break
+                if chunk == b"\xFF\xFF":
+                    continue
+                ids.append(int.from_bytes(chunk, "big"))
+            return {"Message Identifiers": ids, "Raw": hex_str}
+        except Exception:
+            return {"CBMI (Raw)": hex_str}
+
+    @staticmethod
+    def decode_cbmid_range_list(hex_str: str) -> dict:
+        try:
+            data = bytes.fromhex(hex_str)
+            ranges = []
+            for i in range(0, len(data), 4):
+                chunk = data[i:i + 4]
+                if len(chunk) < 4:
+                    break
+                if chunk == b"\xFF\xFF\xFF\xFF":
+                    continue
+                first = int.from_bytes(chunk[0:2], "big")
+                last = int.from_bytes(chunk[2:4], "big")
+                ranges.append(f"{first}-{last}")
+            return {"Message Identifier Ranges": ranges, "Raw": hex_str}
+        except Exception:
+            return {"CBMID (Raw)": hex_str}
+
+    @staticmethod
+    def _context_tokens(context_path: Optional[str]) -> List[str]:
+        if not context_path:
+            return []
+        raw = str(context_path).strip().upper()
+        if raw == "":
+            return []
+        parts = [p for p in raw.split('/') if p]
+        out = []
+        for p in parts:
+            v = p
+            if v.startswith("EF_"):
+                v = v[3:]
+            out.append(v)
+        return out
+
+    @classmethod
+    def _resolve_handler(cls, fid_upper: str, context_path: Optional[str] = None):
+        tokens = cls._context_tokens(context_path)
+        for tok in reversed(tokens):
+            key = f"{tok}/{fid_upper}"
+            handler = cls._registry.get(key)
+            if handler:
+                return handler
+        return cls._registry.get(fid_upper)
 
     @staticmethod
     def decode_spn(hex_str: str) -> dict:
@@ -341,7 +863,7 @@ class ContentDecoder:
             return {"SPN": "Invalid SPN"}
 
     @classmethod
-    def decode_raw(cls, fid: str, hex_data: str) -> Any:
+    def decode_raw(cls, fid: str, hex_data: str, context_path: Optional[str] = None) -> Any:
         if not fid:
             return None
         fid_upper = fid.upper()
@@ -352,14 +874,14 @@ class ContentDecoder:
         if is_empty:
             cls.init_registry()
             
-        handler = cls._registry.get(fid_upper)
+        handler = cls._resolve_handler(fid_upper, context_path)
         if handler:
             return handler(hex_data)
         return None
 
     @classmethod
-    def decode(cls, fid: str, hex_data: str) -> Optional[str]:
-        raw = cls.decode_raw(fid, hex_data)
+    def decode(cls, fid: str, hex_data: str, context_path: Optional[str] = None) -> Optional[str]:
+        raw = cls.decode_raw(fid, hex_data, context_path=context_path)
         if raw is None:
             return None
             
@@ -381,8 +903,8 @@ class ContentDecoder:
         return str(raw)
 
     @classmethod
-    def decode_obj(cls, fid: str, hex_data: str) -> Optional[Dict[str, Any]]:
-        raw = cls.decode_raw(fid, hex_data)
+    def decode_obj(cls, fid: str, hex_data: str, context_path: Optional[str] = None) -> Optional[Dict[str, Any]]:
+        raw = cls.decode_raw(fid, hex_data, context_path=context_path)
         if raw is None:
             return None
             
@@ -515,4 +1037,450 @@ class ContentDecoder:
 
     @staticmethod
     def decode_sms_params(hex_str: str) -> dict:
-        return {"SMS Params (Raw)": f"{hex_str[:20]}..."}
+        try:
+            data = bytes.fromhex(hex_str)
+            if len(data) < 12:
+                return {"SMS Params (Raw)": hex_str}
+            alpha_len = max(0, len(data) - 28)
+            alpha = ""
+            if alpha_len > 0:
+                alpha = data[:alpha_len].decode("utf-8", "ignore").strip("\x00").strip()
+            p_ind = data[alpha_len]
+            tp_da = data[alpha_len + 1:alpha_len + 13]
+            sca = data[alpha_len + 13:alpha_len + 25]
+            out = {
+                "Parameter Indicators": f"{p_ind:02X}",
+                "TP-Destination Address": tp_da.hex().upper(),
+                "Service Center Address": sca.hex().upper(),
+                "TP-PID": f"{data[alpha_len + 25]:02X}",
+                "TP-DCS": f"{data[alpha_len + 26]:02X}",
+                "TP-Validity": f"{data[alpha_len + 27]:02X}",
+            }
+            if alpha:
+                out["Alpha ID"] = alpha
+            return out
+        except Exception:
+            return {"SMS Params (Raw)": f"{hex_str[:64]}..."}
+
+    @staticmethod
+    def decode_puct(hex_str: str) -> dict:
+        try:
+            data = bytes.fromhex(hex_str)
+            if len(data) < 5:
+                return {"PUCT (Raw)": hex_str}
+            currency = data[0:3].decode("ascii", "ignore").strip() or data[0:3].hex().upper()
+            eppu = (data[3] << 4) | (data[4] & 0x0F)
+            exp_nibble = (data[4] >> 4) & 0x0F
+            sign = -1 if (exp_nibble & 0x08) else 1
+            exponent = sign * (exp_nibble & 0x07)
+            return {
+                "Currency": currency,
+                "EPPU": eppu,
+                "Exponent": exponent,
+                "Price per Unit Formula": f"{eppu} * 10^{exponent}"
+            }
+        except Exception:
+            return {"PUCT (Raw)": hex_str}
+
+    @staticmethod
+    def decode_ecc(hex_str: str) -> dict:
+        try:
+            data = bytes.fromhex(hex_str)
+            codes = []
+            for i in range(0, len(data), 3):
+                block = data[i:i + 3]
+                if len(block) < 3:
+                    break
+                if block == b"\xFF\xFF\xFF":
+                    continue
+                digits = ContentDecoder._decode_bcd_digits(block)
+                if digits:
+                    codes.append(digits)
+            return {"Emergency Codes": codes}
+        except Exception:
+            return {"ECC (Raw)": hex_str}
+
+    @staticmethod
+    def decode_adn_like_record(hex_str: str) -> dict:
+        try:
+            data = bytes.fromhex(hex_str)
+            if len(data) < 14:
+                return {"ADN-like (Raw)": hex_str}
+            alpha_len = len(data) - 14
+            alpha = ""
+            if alpha_len > 0:
+                alpha = data[:alpha_len].decode("utf-8", "ignore").strip("\x00").strip()
+            footer = data[alpha_len:]
+            number_len = footer[0]
+            ton_npi = footer[1]
+            number_bcd = footer[2:12]
+            ext_id = footer[13]
+            digits = ContentDecoder._decode_bcd_digits(number_bcd)
+            if number_len > 1:
+                max_digits = (number_len - 1) * 2
+                digits = digits[:max_digits]
+            out = {
+                "Length of BCD Number": number_len,
+                "TON/NPI": f"{ton_npi:02X}",
+                "Dialing Number": digits,
+                "Ext Record ID": f"{ext_id:02X}"
+            }
+            if alpha:
+                out["Alpha ID"] = alpha
+            return out
+        except Exception:
+            return {"ADN-like (Raw)": hex_str}
+
+    @staticmethod
+    def decode_smss(hex_str: str) -> dict:
+        try:
+            data = bytes.fromhex(hex_str)
+            if len(data) < 2:
+                return {"SMSS (Raw)": hex_str}
+            return {
+                "Last Used TP-MR": data[0],
+                "Memory Capacity Exceeded Flag": "set" if (data[1] & 0x01) == 0 else "unset",
+                "Raw": hex_str
+            }
+        except Exception:
+            return {"SMSS (Raw)": hex_str}
+
+    @staticmethod
+    def decode_sms_record(hex_str: str) -> dict:
+        try:
+            data = bytes.fromhex(hex_str)
+            if len(data) == 0:
+                return {"SMS": "Empty"}
+            status = data[0]
+            payload = data[1:]
+            return {
+                "Record Status": f"{status:02X}",
+                "Record State": ContentDecoder._decode_sms_status(status),
+                "TPDU (raw)": payload.hex().upper()
+            }
+        except Exception:
+            return {"SMS Record (Raw)": hex_str}
+
+    @staticmethod
+    def _decode_sms_status(status: int) -> str:
+        if (status & 0x01) == 0:
+            return "Free"
+        if (status & 0x07) == 0x01:
+            return "Received Read"
+        if (status & 0x07) == 0x03:
+            return "Received Unread"
+        if (status & 0x07) == 0x05:
+            return "Stored Sent"
+        if (status & 0x07) == 0x07:
+            return "Stored Unsent"
+        return "Unknown"
+
+    @staticmethod
+    def decode_smsr(hex_str: str) -> dict:
+        try:
+            data = bytes.fromhex(hex_str)
+            if len(data) < 1:
+                return {"SMSR (Raw)": hex_str}
+            return {
+                "SMS Record Identifier": data[0],
+                "Status Report TPDU": data[1:].hex().upper()
+            }
+        except Exception:
+            return {"SMSR (Raw)": hex_str}
+
+    @staticmethod
+    def decode_pnn(hex_str: str) -> dict:
+        try:
+            data = bytes.fromhex(hex_str)
+            if len(data) == 0:
+                return {"PNN": "Empty"}
+            parsed = TlvParser.parse(data)
+            full_name = None
+            short_name = None
+            if isinstance(parsed, dict):
+                if 0x43 in parsed and isinstance(parsed[0x43], bytes):
+                    full_name = parsed[0x43].decode("utf-8", "ignore").strip()
+                if 0x45 in parsed and isinstance(parsed[0x45], bytes):
+                    short_name = parsed[0x45].decode("utf-8", "ignore").strip()
+            out = {"Raw": hex_str}
+            if full_name:
+                out["Full Name"] = full_name
+            if short_name:
+                out["Short Name"] = short_name
+            return out
+        except Exception:
+            return {"PNN (Raw)": hex_str}
+
+    @staticmethod
+    def decode_opl(hex_str: str) -> dict:
+        try:
+            data = bytes.fromhex(hex_str)
+            if len(data) < 8:
+                return {"OPL (Raw)": hex_str}
+            plmn = ContentDecoder._decode_plmn_bytes(data[0:3])
+            lac1 = int.from_bytes(data[3:5], "big")
+            lac2 = int.from_bytes(data[5:7], "big")
+            pnn_id = data[7]
+            return {
+                "PLMN": plmn,
+                "LAC Start": f"{lac1:04X}",
+                "LAC End": f"{lac2:04X}",
+                "PNN Record Identifier": pnn_id
+            }
+        except Exception:
+            return {"OPL (Raw)": hex_str}
+
+    @staticmethod
+    def decode_spdi(hex_str: str) -> dict:
+        try:
+            data = bytes.fromhex(hex_str)
+            parsed = TlvParser.parse(data)
+            plmn_list = []
+            a3 = TlvParser.get_first(parsed, 0xA3)
+            if isinstance(a3, bytes):
+                a3 = TlvParser.parse(a3)
+            sp_list = TlvParser.get_first(a3, 0x80)
+            if isinstance(sp_list, bytes):
+                for i in range(0, len(sp_list), 3):
+                    chunk = sp_list[i:i + 3]
+                    if len(chunk) < 3:
+                        break
+                    if chunk == b"\xFF\xFF\xFF":
+                        continue
+                    plmn_list.append(ContentDecoder._decode_plmn_bytes(chunk))
+            return {"Service Provider PLMN List": plmn_list, "Raw": hex_str}
+        except Exception:
+            return {"SPDI (Raw)": hex_str}
+
+    @staticmethod
+    def decode_epsnsc(hex_str: str) -> dict:
+        try:
+            data = bytes.fromhex(hex_str)
+            out = {"Raw": hex_str}
+            if len(data) > 0:
+                out["KSI / Header"] = f"{data[0]:02X}"
+            if len(data) >= 17:
+                out["KASME (first 16 bytes)"] = data[1:17].hex().upper()
+            if len(data) > 17:
+                out["Remainder"] = data[17:].hex().upper()
+            return out
+        except Exception:
+            return {"EPSNSC (Raw)": hex_str}
+
+    @staticmethod
+    def decode_gbanl(hex_str: str) -> dict:
+        try:
+            data = bytes.fromhex(hex_str)
+            parsed = TlvParser.parse(data)
+            naf = TlvParser.get_first(parsed, 0x80)
+            b_tid = TlvParser.get_first(parsed, 0x81)
+            out = {"Raw": hex_str}
+            if isinstance(naf, bytes):
+                out["NAF_ID"] = naf.hex().upper()
+            if isinstance(b_tid, bytes):
+                out["B-TID"] = b_tid.hex().upper()
+            return out
+        except Exception:
+            return {"GBANL (Raw)": hex_str}
+
+    @staticmethod
+    def decode_nafkca(hex_str: str) -> dict:
+        try:
+            data = bytes.fromhex(hex_str)
+            parsed = TlvParser.parse(data)
+            val = TlvParser.get_first(parsed, 0x80)
+            if isinstance(val, bytes):
+                return {
+                    "NAF Key Centre Address": val.decode("utf-8", "ignore").strip(),
+                    "Raw": hex_str
+                }
+            return {"NAFKCA (Raw)": hex_str}
+        except Exception:
+            return {"NAFKCA (Raw)": hex_str}
+
+    @staticmethod
+    def decode_isim_tlv80_text(hex_str: str) -> dict:
+        try:
+            data = bytes.fromhex(hex_str)
+            parsed = TlvParser.parse(data)
+            val = TlvParser.get_first(parsed, 0x80)
+            if isinstance(val, bytes):
+                text = val.decode("utf-8", "ignore").strip()
+                return {"Value": text, "Raw Value": val.hex().upper()}
+            return {"ISIM (Raw)": hex_str}
+        except Exception:
+            return {"ISIM (Raw)": hex_str}
+
+    @staticmethod
+    def decode_isim_ist(hex_str: str) -> dict:
+        try:
+            data = bytes.fromhex(hex_str)
+            service_map = {
+                1: "P-CSCF address",
+                2: "GBA",
+                3: "HTTP Digest",
+                4: "GBA-based Local Key Establishment",
+                5: "P-CSCF discovery for IMS Local Break Out",
+                6: "SMS",
+                7: "SMSR",
+                8: "SM-over-IP via SMS-PP",
+                9: "Communication Control for IMS",
+                10: "UICC access to IMS",
+                11: "URI support by UICC",
+                12: "Media Type support",
+                13: "IMS call disconnection cause",
+                14: "URI support for MO SMS CONTROL",
+                15: "Mission Critical Services",
+                16: "URI support for SMS-PP DOWNLOAD",
+                17: "From Preferred",
+                18: "IMS configuration data",
+                19: "XCAP configuration data",
+                20: "WebRTC URI",
+                21: "MuD/MiD configuration data",
+            }
+            services = []
+            for byte_idx, byte_val in enumerate(data):
+                for bit_idx in range(8):
+                    service_num = (byte_idx * 8) + bit_idx + 1
+                    if byte_val & (1 << bit_idx):
+                        services.append(f"{service_num}: {service_map.get(service_num, f'Service {service_num}')}")
+            return {"ISIM Services": services}
+        except Exception:
+            return {"IST (Raw)": hex_str}
+
+    @staticmethod
+    def decode_isim_pcscf(hex_str: str) -> dict:
+        try:
+            data = bytes.fromhex(hex_str)
+            parsed = TlvParser.parse(data)
+            t80 = TlvParser.get_first(parsed, 0x80)
+            if isinstance(t80, bytes) and len(t80) > 1:
+                addr_type = t80[0]
+                addr_raw = t80[1:]
+                addr_type_map = {0x00: "FQDN", 0x01: "IPv4", 0x02: "IPv6"}
+                addr_text = addr_raw.decode("utf-8", "ignore").strip() if addr_type == 0x00 else addr_raw.hex().upper()
+                return {
+                    "Address Type": addr_type_map.get(addr_type, f"0x{addr_type:02X}"),
+                    "Address": addr_text
+                }
+            return {"P-CSCF (Raw)": hex_str}
+        except Exception:
+            return {"P-CSCF (Raw)": hex_str}
+
+    @staticmethod
+    def decode_tlv_as_map(hex_str: str) -> dict:
+        try:
+            data = bytes.fromhex(hex_str)
+            parsed = TlvParser.parse(data)
+            return {"TLV": ContentDecoder._tlv_to_obj(parsed)}
+        except Exception:
+            return {"Raw": hex_str}
+
+    @staticmethod
+    def _tlv_to_obj(node: Any) -> Any:
+        if isinstance(node, dict):
+            out = {}
+            for k, v in node.items():
+                out[f"{k:02X}" if isinstance(k, int) else str(k)] = ContentDecoder._tlv_to_obj(v)
+            return out
+        if isinstance(node, list):
+            return [ContentDecoder._tlv_to_obj(v) for v in node]
+        if isinstance(node, bytes):
+            return node.hex().upper()
+        return node
+
+    @staticmethod
+    def decode_utf8_or_hex(hex_str: str) -> dict:
+        try:
+            data = bytes.fromhex(hex_str)
+            return {"Text": data.decode("utf-8", "ignore").strip(), "Raw": hex_str}
+        except Exception:
+            return {"Raw": hex_str}
+
+    @staticmethod
+    def decode_hex_chunks(hex_str: str) -> dict:
+        return {"Raw": hex_str}
+
+    @staticmethod
+    def decode_5gs_loci(hex_str: str) -> dict:
+        try:
+            data = bytes.fromhex(hex_str)
+            out = {"Raw": hex_str}
+            if len(data) >= 7:
+                out["PLMN"] = ContentDecoder._decode_plmn_bytes(data[0:3])
+                out["TAI/TAC (raw)"] = data[3:5].hex().upper()
+                out["5G-TMSI (part)"] = data[5:9].hex().upper()
+            return out
+        except Exception:
+            return {"Raw": hex_str}
+
+    @staticmethod
+    def decode_5gs_nsc(hex_str: str) -> dict:
+        try:
+            data = bytes.fromhex(hex_str)
+            out = {"Raw": hex_str}
+            if len(data) > 0:
+                out["Security Header"] = f"{data[0]:02X}"
+            if len(data) > 1:
+                out["Security Context Data"] = data[1:].hex().upper()
+            return out
+        except Exception:
+            return {"Raw": hex_str}
+
+    @staticmethod
+    def decode_5gs_auth_keys(hex_str: str) -> dict:
+        try:
+            data = bytes.fromhex(hex_str)
+            return {
+                "Length": len(data),
+                "Auth Keys Blob": data.hex().upper()
+            }
+        except Exception:
+            return {"Raw": hex_str}
+
+    @staticmethod
+    def decode_5gs_uac_aic(hex_str: str) -> dict:
+        try:
+            data = bytes.fromhex(hex_str)
+            if len(data) == 0:
+                return {"UAC_AIC": "Empty"}
+            b = data[0]
+            return {
+                "Byte0": f"{b:02X}",
+                "Bits Set": [bit for bit in range(8) if b & (1 << bit)],
+                "Raw": hex_str
+            }
+        except Exception:
+            return {"Raw": hex_str}
+
+    @staticmethod
+    def decode_routing_indicator(hex_str: str) -> dict:
+        try:
+            data = bytes.fromhex(hex_str)
+            digits = ContentDecoder._decode_bcd_digits(data)
+            return {"Routing Indicator": digits, "Raw": hex_str}
+        except Exception:
+            return {"Raw": hex_str}
+
+    @staticmethod
+    def decode_5gs_sor_cmci(hex_str: str) -> dict:
+        try:
+            data = bytes.fromhex(hex_str)
+            if len(data) == 0:
+                return {"SOR-CMCI": "Empty"}
+            return {
+                "Control Byte": f"{data[0]:02X}",
+                "Raw": hex_str
+            }
+        except Exception:
+            return {"Raw": hex_str}
+
+    @staticmethod
+    def decode_dri(hex_str: str) -> dict:
+        try:
+            data = bytes.fromhex(hex_str)
+            if len(data) == 0:
+                return {"DRI": "Empty"}
+            return {"DRI": data.hex().upper()}
+        except Exception:
+            return {"Raw": hex_str}
