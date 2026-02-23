@@ -15,3 +15,7 @@ YggdraSIM.code-workspace
 
 # Automation logs
 git_agent.log
+.cursorrules
+.cursorignore
+.gitignore
+.github/workflows
