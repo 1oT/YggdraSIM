@@ -18,6 +18,24 @@ class InteractiveWizards:
     """Provides interactive prompts and dry-run APDU builders for complex GP commands."""
 
     @staticmethod
+    def _encode_ber_length_bytes(length: int) -> bytes:
+        len_hex = InteractiveWizards._encode_ber_tlv_length(length)
+        return bytes.fromhex(len_hex)
+
+    @staticmethod
+    def _build_tlv(tag_hex: str, value: bytes) -> bytes:
+        tag_bytes = bytes.fromhex(tag_hex)
+        return tag_bytes + InteractiveWizards._encode_ber_length_bytes(len(value)) + value
+
+    @staticmethod
+    def _encode_apdu_lc(data_len: int) -> str:
+        if data_len <= 0xFF:
+            return f"{data_len:02X}"
+        if data_len <= 0xFFFF:
+            return f"00{data_len:04X}"
+        raise ValueError("APDU data field exceeds extended length capability.")
+
+    @staticmethod
     def run_wizard_menu(tp_ctrl=None, target_aid: str = "A000000151000000"):
         is_nt = False
         if os.name == 'nt':
@@ -150,7 +168,7 @@ class InteractiveWizards:
                 
             if has_vol:
                 b = bytes.fromhex(vol.replace(" ", ""))
-                payload.extend(bytes([0xC6, len(b)]) + b)
+                payload.extend(InteractiveWizards._build_tlv("C6", b))
                 
             nvol = res.get("c7")
             has_nvol = False
@@ -159,7 +177,7 @@ class InteractiveWizards:
                 
             if has_nvol:
                 b = bytes.fromhex(nvol.replace(" ", ""))
-                payload.extend(bytes([0xC7, len(b)]) + b)
+                payload.extend(InteractiveWizards._build_tlv("C7", b))
                 
             gsp = res.get("c8")
             has_gsp = False
@@ -168,7 +186,7 @@ class InteractiveWizards:
                 
             if has_gsp:
                 b = bytes.fromhex(gsp.replace(" ", ""))
-                payload.extend(bytes([0xC8, len(b)]) + b)
+                payload.extend(InteractiveWizards._build_tlv("C8", b))
                 
             isp = res.get("c9")
             has_isp = False
@@ -177,7 +195,7 @@ class InteractiveWizards:
                 
             if has_isp:
                 b = bytes.fromhex(isp.replace(" ", ""))
-                payload.extend(bytes([0xC9, len(b)]) + b)
+                payload.extend(InteractiveWizards._build_tlv("C9", b))
                 
             vrm = res.get("ca")
             has_vrm = False
@@ -186,7 +204,7 @@ class InteractiveWizards:
                 
             if has_vrm:
                 b = bytes.fromhex(vrm.replace(" ", ""))
-                payload.extend(bytes([0xCA, len(b)]) + b)
+                payload.extend(InteractiveWizards._build_tlv("CA", b))
                 
             nrm = res.get("cb")
             has_nrm = False
@@ -195,7 +213,7 @@ class InteractiveWizards:
                 
             if has_nrm:
                 b = bytes.fromhex(nrm.replace(" ", ""))
-                payload.extend(bytes([0xCB, len(b)]) + b)
+                payload.extend(InteractiveWizards._build_tlv("CB", b))
                 
             is_payload_empty = False
             if len(payload) == 0:
@@ -204,7 +222,7 @@ class InteractiveWizards:
             if is_payload_empty:
                 return b''
                 
-            ef_tlv = bytes([0xEF, len(payload)]) + payload
+            ef_tlv = InteractiveWizards._build_tlv("EF", bytes(payload))
             print(f"{Config.Colors.GREEN}[+] EF Tag Generated: {ef_tlv.hex().upper()}{Config.Colors.ENDC}")
             return ef_tlv
             
@@ -216,7 +234,7 @@ class InteractiveWizards:
     def _build_access_domain_parameter(tag_hex: int, tag_name: str) -> bytes:
         wiz = InteractiveWizard(f"{tag_name} (ETSI TS 102 226 8.2.1.3.2.5)", Config.Colors)
         wiz.add_step("choice", "1=Full(00), 2=UICC(02), 3=No Access(FF), 4=Raw Hex [Default: 4]:", default="4")
-        wiz.add_step("add", "Access Domain Data (ADD) [Hex, for choice 2]:", default="SKIP")
+        wiz.add_step("add", "Access Domain Data (ADD, exactly 3 bytes) [Hex, for choice 2]:", default="SKIP")
         wiz.add_step("raw", "Raw Hex [for choice 4]:", default="SKIP")
         
         res = wiz.run()
@@ -228,7 +246,7 @@ class InteractiveWizards:
             
         if is_opt_1:
             val = bytes([0x00])
-            return bytes([tag_hex, len(val)]) + val
+            return InteractiveWizards._build_tlv(f"{tag_hex:02X}", val)
             
         is_opt_3 = False
         if choice == '3':
@@ -236,7 +254,7 @@ class InteractiveWizards:
             
         if is_opt_3:
             val = bytes([0xFF])
-            return bytes([tag_hex, len(val)]) + val
+            return InteractiveWizards._build_tlv(f"{tag_hex:02X}", val)
             
         is_opt_2 = False
         if choice == '2':
@@ -253,8 +271,14 @@ class InteractiveWizards:
                 
             try:
                 add_bytes = bytes.fromhex(add_hex)
+                is_add_len_invalid = False
+                if len(add_bytes) != 3:
+                    is_add_len_invalid = True
+                if is_add_len_invalid:
+                    print(f"{Config.Colors.FAIL}[!] ADD must be exactly 3 bytes for ADP=02 (ETSI TS 102 226). Skipping Tag {tag_hex:02X}.{Config.Colors.ENDC}")
+                    return b''
                 val = bytes([0x02]) + add_bytes
-                return bytes([tag_hex, len(val)]) + val
+                return InteractiveWizards._build_tlv(f"{tag_hex:02X}", val)
             except ValueError:
                 print(f"{Config.Colors.FAIL}[!] Invalid Hex. Skipping Tag {tag_hex:02X}.{Config.Colors.ENDC}")
                 return b''
@@ -276,7 +300,7 @@ class InteractiveWizards:
                 
             try:
                 b_raw = bytes.fromhex(raw_hex)
-                return bytes([tag_hex, len(b_raw)]) + b_raw
+                return InteractiveWizards._build_tlv(f"{tag_hex:02X}", b_raw)
             except ValueError:
                 print(f"{Config.Colors.FAIL}[!] Invalid Hex. Skipping Tag {tag_hex:02X}.{Config.Colors.ENDC}")
                 return b''
@@ -315,7 +339,13 @@ class InteractiveWizards:
             try:
                 payload_80 = bytearray()
                 payload_80.append(int(res_80.get("prio"), 16))
-                payload_80.append(int(res_80.get("timers"), 16))
+                timers_count = int(res_80.get("timers"), 16)
+                is_timers_invalid = False
+                if timers_count > 0x08:
+                    is_timers_invalid = True
+                if is_timers_invalid:
+                    raise ValueError("Max Timers exceeds ETSI limit (08).")
+                payload_80.append(timers_count)
                 payload_80.append(int(res_80.get("text"), 16))
                 payload_80.append(int(res_80.get("menu"), 16))
                 
@@ -377,21 +407,46 @@ class InteractiveWizards:
                         if has_tar:
                             tar_bytes = bytes.fromhex(tar_val.replace(" ", ""))
                             
+                        is_tar_len_invalid = False
+                        if len(tar_bytes) % 3 != 0:
+                            is_tar_len_invalid = True
+                        if is_tar_len_invalid:
+                            raise ValueError("TAR field length must be a multiple of 3 bytes.")
+                            
                         payload_80.append(len(tar_bytes))
                         payload_80.extend(tar_bytes)
                         
                         if has_channels:
-                            payload_80.append(int(chan_val, 16))
+                            channels_count = int(chan_val, 16)
+                            is_channels_invalid = False
+                            if channels_count > 0x07:
+                                is_channels_invalid = True
+                            if is_channels_invalid:
+                                raise ValueError("Max BIP Channels exceeds ETSI limit (07).")
+                            payload_80.append(channels_count)
                         else:
                             if has_services:
                                 payload_80.append(0x00)
                             
                         if has_services:
-                            payload_80.append(int(srv_val, 16))
+                            services_count = int(srv_val, 16)
+                            is_services_invalid = False
+                            if services_count > 0x08:
+                                is_services_invalid = True
+                            if is_services_invalid:
+                                raise ValueError("Max Services exceeds ETSI limit (08).")
+                            payload_80.append(services_count)
                             
-                payload_ea.extend(bytes([0x80, len(payload_80)]) + payload_80)
-            except ValueError:
-                print(f"{Config.Colors.FAIL}[!] Invalid Hex provided. Skipping Tag 80.{Config.Colors.ENDC}")
+                payload_ea.extend(InteractiveWizards._build_tlv("80", bytes(payload_80)))
+            except ValueError as e:
+                msg = str(e)
+                is_msg_empty = False
+                if len(msg) == 0:
+                    is_msg_empty = True
+                if is_msg_empty:
+                    print(f"{Config.Colors.FAIL}[!] Invalid Hex provided. Skipping Tag 80.{Config.Colors.ENDC}")
+                if is_msg_empty == False:
+                    print(f"{Config.Colors.FAIL}[!] {msg} Skipping Tag 80.{Config.Colors.ENDC}")
         
         is_c3_y = False
         if res_main.get("inc_c3"):
@@ -405,7 +460,7 @@ class InteractiveWizards:
             if dap_val != "SKIP":
                 try:
                     dap_bytes = bytes.fromhex(dap_val.replace(" ", ""))
-                    payload_ea.extend(bytes([0xC3, len(dap_bytes)]) + dap_bytes)
+                    payload_ea.extend(InteractiveWizards._build_tlv("C3", dap_bytes))
                 except ValueError:
                     print(f"{Config.Colors.FAIL}[!] Invalid Hex provided. Skipping Tag C3.{Config.Colors.ENDC}")
                     
@@ -440,7 +495,7 @@ class InteractiveWizards:
         if is_ea_empty:
             return b''
             
-        ea_tlv = bytes([0xEA, len(payload_ea)]) + payload_ea
+        ea_tlv = InteractiveWizards._build_tlv("EA", bytes(payload_ea))
         print(f"{Config.Colors.GREEN}[+] EA Tag Generated: {ea_tlv.hex().upper()}{Config.Colors.ENDC}")
         return ea_tlv
 
@@ -473,7 +528,7 @@ class InteractiveWizards:
         if has_c9:
             try:
                 b = bytes.fromhex(c9_val.replace(" ", ""))
-                payload.extend(bytes([0xC9, len(b)]) + b)
+                payload.extend(InteractiveWizards._build_tlv("C9", b))
             except ValueError:
                 print(f"{Config.Colors.FAIL}[!] Invalid hex. Skipping C9.{Config.Colors.ENDC}")
 
@@ -497,7 +552,7 @@ class InteractiveWizards:
         if has_ca:
             try:
                 b = bytes.fromhex(ca_val.replace(" ", ""))
-                payload.extend(bytes([0xCA, len(b)]) + b)
+                payload.extend(InteractiveWizards._build_tlv("CA", b))
                 print(f"{Config.Colors.GREEN}[+] CA Tag Generated: CA{len(b):02X}{ca_val.upper()}{Config.Colors.ENDC}")
             except ValueError:
                 print(f"{Config.Colors.FAIL}[!] Invalid hex. Skipping CA.{Config.Colors.ENDC}")
@@ -935,7 +990,12 @@ class InteractiveWizards:
 
     @staticmethod
     def _finalize_and_transmit(tp_ctrl, p1_hex: str, payload: bytearray) -> None:
-        apdu = f"80E6{p1_hex}00{len(payload):02X}{payload.hex().upper()}"
+        try:
+            lc_hex = InteractiveWizards._encode_apdu_lc(len(payload))
+        except ValueError as e:
+            print(f"{Config.Colors.FAIL}[!] {e}{Config.Colors.ENDC}")
+            return
+        apdu = f"80E6{p1_hex}00{lc_hex}{payload.hex().upper()}"
         print(f"\n[*] Generated APDU:\n    {apdu}")
         
         is_tp_present = False
@@ -1100,7 +1160,8 @@ class InteractiveWizards:
         install_load_data.append(0x00)
         
         print(f"{Config.Colors.BOLD}1. INSTALL [for load]{Config.Colors.ENDC}")
-        print(f"80E60200{len(install_load_data):02X}{install_load_data.hex().upper()}\n")
+        il_lc = InteractiveWizards._encode_apdu_lc(len(install_load_data))
+        print(f"80E60200{il_lc}{install_load_data.hex().upper()}\n")
         
         total_chunks = math.ceil(len(load_data) / chunk_size)
         print(f"{Config.Colors.BOLD}2. LOAD (Transmitted in {total_chunks} blocks){Config.Colors.ENDC}")
@@ -1155,7 +1216,8 @@ class InteractiveWizards:
         install_data.append(0x00)
         
         print(f"\n{Config.Colors.BOLD}3. INSTALL [for install]{Config.Colors.ENDC}")
-        print(f"80E60C00{len(install_data):02X}{install_data.hex().upper()}\n")
+        i_lc = InteractiveWizards._encode_apdu_lc(len(install_data))
+        print(f"80E60C00{i_lc}{install_data.hex().upper()}\n")
 
     @staticmethod
     def run_dgi_personalization(tp_ctrl, target_aid: str) -> None:
@@ -1262,7 +1324,8 @@ class InteractiveWizards:
 
         install_apdu = InteractiveWizards._build_install_perso(target_aid)
         
-        store_data_apdu = f"80E29000{len(payload)//2:02X}{payload}"
+        sd_lc = InteractiveWizards._encode_apdu_lc(len(payload) // 2)
+        store_data_apdu = f"80E29000{sd_lc}{payload}"
 
         print(f"\n[*] Generated INSTALL APDU:\n    {install_apdu}")
         print(f"[*] Generated STORE DATA APDU (BER-TLV P1=90):\n    {store_data_apdu}")
@@ -1405,12 +1468,14 @@ class InteractiveWizards:
         data += "00"
         data += "00"
         
-        apdu = f"80E62000{len(data)//2:02X}{data}"
+        lc_hex = InteractiveWizards._encode_apdu_lc(len(data) // 2)
+        apdu = f"80E62000{lc_hex}{data}"
         return apdu
 
     @staticmethod
     def _build_store_data(payload: str) -> str:
-        apdu = f"80E28000{len(payload)//2:02X}{payload}"
+        lc_hex = InteractiveWizards._encode_apdu_lc(len(payload) // 2)
+        apdu = f"80E28000{lc_hex}{payload}"
         return apdu
 
     @staticmethod
