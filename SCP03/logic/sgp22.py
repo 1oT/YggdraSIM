@@ -523,10 +523,21 @@ class Sgp22Manager:
         if tag == 0x03 and len(val) > 1:
             unused_bits = val[0]
             bit_data = val[1:]
-            if len(bit_data) <= 24:
-                return f"unused={unused_bits}, bits=0x{bit_data.hex().upper()}"
-            short_hex = bit_data.hex().upper()
-            return f"unused={unused_bits}, bits=0x{short_hex[:64]}..."
+            bit_hex = bit_data.hex().upper()
+            short_hex = bit_hex if len(bit_hex) <= 64 else bit_hex[:64] + "..."
+
+            # Human-friendly BIT STRING labeling for cert/public-key material.
+            kind = "bits"
+            if len(bit_data) > 0:
+                first_byte = bit_data[0]
+                if first_byte == 0x30:
+                    kind = "Signature"
+                elif first_byte in [0x02, 0x03, 0x04]:
+                    kind = "PublicKey"
+
+            if unused_bits == 0:
+                return f"{kind}: 0x{short_hex}"
+            return f"{kind}: 0x{short_hex} (unused bits={unused_bits})"
 
         # 10. OCTET STRING
         if tag == 0x04 and len(val) > 0:
