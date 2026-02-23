@@ -1,4 +1,4 @@
-from cli import OtaShell
+from cli import OtaShell 
 
-def shell():
-    OtaShell().run()
+def shell ():
+    OtaShell ().run ()
