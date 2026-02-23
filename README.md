@@ -127,7 +127,7 @@ ECASD: A0000005591010FFFFFFFF8900000200
 Contains predefined File IDs mapping to textual paths for tree navigation. This file is copied to the executable directory on first run and can be modified.
 
 ### Custom Macros/Keybinds (`binds.json`)
-Defines custom command aliases for the interactive shell. You can chain commands using semicolons (`;`) and pass arguments using `{0}`, `{1}`. Located in `SCP03/interface/binds.json` or next to the executable.
+Defines custom command aliases for the interactive shell. You can chain commands using semicolons (`;`) and pass arguments using `{0}`, `{1}`. Located in `SCP03/binds.json` or next to the executable.
 ```json
 {
     "adm": "manage-pin verify 0a {0}",

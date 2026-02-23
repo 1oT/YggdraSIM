@@ -10,7 +10,6 @@ a = Analysis(
         ('SCP03/fids.txt', 'SCP03'),
         ('SCP03/keys.ini', 'SCP03'),
         ('SCP03/binds.json', 'SCP03'),
-        ('SCP03/interface/binds.json', 'SCP03/interface'),
         ('SCP80/ota_config.ini', 'SCP80'),
     ],
     hiddenimports=[

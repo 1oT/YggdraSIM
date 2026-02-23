@@ -40,8 +40,7 @@ class Config :
 
         user_binds_path =os .path .join (CONFIG_DIR ,'binds.json')
         bundled_binds_candidates =[
-        os .path .join (BASE_DIR ,'binds.json'),
-        os .path .join (BASE_DIR ,'interface','binds.json')
+        os .path .join (BASE_DIR ,'binds.json')
         ]
         if not os .path .exists (user_binds_path ):
             for bundled_binds_path in bundled_binds_candidates :
