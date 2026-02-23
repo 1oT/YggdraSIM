@@ -1,4 +1,3 @@
-from cli import OtaShell 
-
 def shell ():
+    from .cli import OtaShell 
     OtaShell ().run ()

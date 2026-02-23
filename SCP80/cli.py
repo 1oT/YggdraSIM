@@ -8,11 +8,18 @@
 
 import os 
 import sys 
-from config import ConfigManager 
-from builder import OtaPacketBuilder 
-from transport import Transport 
-from crypto import CryptoEngine 
-from utils import Colors 
+if __package__ :
+    from .config import ConfigManager 
+    from .builder import OtaPacketBuilder 
+    from .transport import Transport 
+    from .crypto import CryptoEngine 
+    from .utils import Colors 
+else :
+    from config import ConfigManager 
+    from builder import OtaPacketBuilder 
+    from transport import Transport 
+    from crypto import CryptoEngine 
+    from utils import Colors 
 
 try :
     current_dir =os .path .dirname (os .path .abspath (__file__ ))
@@ -463,7 +470,10 @@ class OtaShell :
 
     def run_standalone ():
         """Entry point for switching from other modules."""
-        from cli import OtaShell 
+        if __package__ :
+            from .cli import OtaShell 
+        else :
+            from cli import OtaShell 
 
         try :
 

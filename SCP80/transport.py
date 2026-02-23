@@ -7,8 +7,12 @@
 # -----------------------------------------------------------------------------
 
 from typing import Tuple ,Optional ,Dict ,Any 
-from config import ConfigManager 
-from utils import Utils ,Colors 
+if __package__ :
+    from .config import ConfigManager 
+    from .utils import Utils ,Colors 
+else :
+    from config import ConfigManager 
+    from utils import Utils ,Colors 
 
 try :
     from smartcard .System import readers 
