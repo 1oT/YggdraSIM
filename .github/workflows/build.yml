@@ -1,18 +1,25 @@
-name: Build Executable
+name: Build Executables
 
 on:
   push:
-    branches: [ main ]
+    branches: [ main, master ]
   pull_request:
-    branches: [ main ]
+    branches: [ main, master ]
   workflow_dispatch:
 
 jobs:
-  build:
+  build-matrix:
     runs-on: ${{ matrix.os }}
     strategy:
+      fail-fast: false
       matrix:
-        os: [windows-latest, ubuntu-latest]
+        include:
+          - os: ubuntu-latest
+            artifact_name: YggdraSIM-linux
+            binary_path: dist/YggdraSIM
+          - os: windows-latest
+            artifact_name: YggdraSIM-windows
+            binary_path: dist/YggdraSIM.exe
 
     steps:
     - name: Checkout Code
@@ -29,36 +36,35 @@ jobs:
         sudo apt-get update
         sudo apt-get install -y pcscd libpcsclite-dev swig
 
+    - name: Install System Dependencies (Windows)
+      if: runner.os == 'Windows'
+      shell: pwsh
+      run: |
+        choco install swig -y
+
     - name: Install Dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install pyinstaller
         pip install -r requirements.txt
 
-    - name: Build with PyInstaller
-      shell: bash
+    - name: Build with PyInstaller spec
       run: |
-        if [ "$RUNNER_OS" == "Windows" ]; then
-          SEP=";"
-        else
-          SEP=":"
-        fi
-        
-        pyinstaller --onefile --clean \
-          --name "YggdraSIM" \
-          --paths "." \
-          --add-data "SCP03${SEP}SCP03" \
-          --add-data "SCP80${SEP}SCP80" \
-          --add-data "LICENSE${SEP}." \
-          --collect-all "SCP03" \
-          --collect-all "SCP80" \
-          --hidden-import "SCP03.interface.shell" \
-          --hidden-import "SCP03.interface.guides" \
-          --hidden-import "SCP80.cli" \
-          main/main.py
+        pyinstaller --noconfirm --clean yggdrasim.spec
+
+    - name: Smoke test binary (Linux)
+      if: runner.os == 'Linux'
+      run: |
+        chmod +x dist/YggdraSIM
+        ./dist/YggdraSIM --help
+
+    - name: Smoke test binary (Windows)
+      if: runner.os == 'Windows'
+      shell: pwsh
+      run: |
+        .\dist\YggdraSIM.exe --help
 
     - name: Upload Artifact
       uses: actions/upload-artifact@v4
       with:
-        name: YggdraSIM-${{ matrix.os }}
-        path: dist/
+        name: ${{ matrix.artifact_name }}
+        path: ${{ matrix.binary_path }}
