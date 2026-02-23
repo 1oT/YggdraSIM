@@ -31,6 +31,7 @@ class ConfigManager :
     def __init__ (self ):
         self .file_path =self ._resolve_config_path ()
         self .data =self .DEFAULTS .copy ()
+        self ._copy_bundled_default_if_missing ()
         self .load ()
 
     def _resolve_config_path (self )->Path :
@@ -39,6 +40,29 @@ class ConfigManager :
         else :
             base =Path (__file__ ).resolve ().parent 
         return base /"ota_config.ini"
+
+    def _copy_bundled_default_if_missing (self ):
+        is_frozen =False 
+        if getattr (sys ,'frozen',False ):
+            is_frozen =True 
+        if is_frozen ==False :
+            return 
+        has_user_file =False 
+        if self .file_path .exists ():
+            has_user_file =True 
+        if has_user_file :
+            return 
+        bundled_dir =Path (__file__ ).resolve ().parent 
+        bundled_default =bundled_dir /"ota_config.ini"
+        has_bundled_default =False 
+        if bundled_default .exists ():
+            has_bundled_default =True 
+        if has_bundled_default ==False :
+            return 
+        try :
+            self .file_path .write_text (bundled_default .read_text ())
+        except Exception :
+            pass 
 
     def load (self ):
         if not self .file_path .exists ():return 

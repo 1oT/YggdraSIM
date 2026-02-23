@@ -1,12 +1,6 @@
 # Sensitive keys and data
-SCP03/keys.ini
-SCP03/aid.txt
-SCP03/fids.txt
-SCP80/ota_config.ini
 SCP03/script.txt
-SCP03/interface/binds.json
 docs
-SCP03/binds.json
 
 # Python internals (Global)
 **/__pycache__/

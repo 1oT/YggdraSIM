@@ -28,7 +28,7 @@ class Config :
 
 
     if getattr (sys ,'frozen',False ):
-        for filename in ['fids.txt','aid.txt']:
+        for filename in ['fids.txt','aid.txt','keys.ini']:
             user_path =os .path .join (CONFIG_DIR ,filename )
             bundled_path =os .path .join (BASE_DIR ,filename )
             if not os .path .exists (user_path )and os .path .exists (bundled_path ):
@@ -39,12 +39,19 @@ class Config :
 
 
         user_binds_path =os .path .join (CONFIG_DIR ,'binds.json')
-        bundled_binds_path =os .path .join (BASE_DIR ,'interface','binds.json')
-        if not os .path .exists (user_binds_path )and os .path .exists (bundled_binds_path ):
-            try :
-                shutil .copy2 (bundled_binds_path ,user_binds_path )
-            except Exception as e :
-                print (f"Warning: Could not copy default binds.json to {CONFIG_DIR}: {e}")
+        bundled_binds_candidates =[
+        os .path .join (BASE_DIR ,'binds.json'),
+        os .path .join (BASE_DIR ,'interface','binds.json')
+        ]
+        if not os .path .exists (user_binds_path ):
+            for bundled_binds_path in bundled_binds_candidates :
+                has_bundled =os .path .exists (bundled_binds_path )
+                if has_bundled :
+                    try :
+                        shutil .copy2 (bundled_binds_path ,user_binds_path )
+                    except Exception as e :
+                        print (f"Warning: Could not copy default binds.json to {CONFIG_DIR}: {e}")
+                    break 
 
     DEFAULT_KEYS ={
     'kenc':'1122334455667788AABBCCDDEEFF0011',
