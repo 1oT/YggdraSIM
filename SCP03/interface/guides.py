@@ -323,12 +323,33 @@ class ShellGuides:
    - {Config.Colors.BOLD}keys.ini:{Config.Colors.ENDC} Contains static GlobalPlatform keys (K-ENC, K-MAC, K-DEK). 
      You can manually edit the hex strings, or use the `WIZARD` > `UPDATE KEYS` command in 
      the shell to securely rotate and auto-save the new keys here.
+     {Config.Colors.YELLOW}Syntax Example:{Config.Colors.ENDC}
+       [KEYS]
+       kenc = 404142434445464748494A4B4C4D4E4F
+       kmac = 404142434445464748494A4B4C4D4E4F
+       dek  = 404142434445464748494A4B4C4D4E4F
+       kvn  = 20
+       
    - {Config.Colors.BOLD}aid.txt:{Config.Colors.ENDC} A registry mapping Applet IDs (AIDs) to human-readable names. 
      Add your custom AIDs to quickly select them in the shell (e.g., `SELECT MyCustomApplet`).
+     {Config.Colors.YELLOW}Syntax Example:{Config.Colors.ENDC}
+       ISD-R: A0000005591010FFFFFFFF8900000100
+       MyApp: 112233445566
+       
    - {Config.Colors.BOLD}fids.txt:{Config.Colors.ENDC} Maps File IDs (FIDs) to their telecom file paths (e.g., `USIM/IMSI`).
      The internal file system navigator uses this to build the `TREE` map.
+     {Config.Colors.YELLOW}Syntax Example:{Config.Colors.ENDC}
+       USIM: 7FFF
+       USIM/IMSI: 6F07
+       
    - {Config.Colors.BOLD}ota_config.ini:{Config.Colors.ENDC} Used exclusively by the SCP80 OTA module. Configures 
      Transport settings (SMS/HTTP), TAR, SPI, KIC, and KID for remote management.
+     {Config.Colors.YELLOW}Syntax Example:{Config.Colors.ENDC}
+       [ota]
+       tar = B00000
+       spi = 1621
+       key_enc = 1111111111111111
+       key_mac = 1111111111111111
 
 {Config.Colors.CYAN}3. SCP11 Certificates (.pem / .der){Config.Colors.ENDC}
    The Local SM-DP+ Simulation (SCP11) relies on cryptographic certificates:
