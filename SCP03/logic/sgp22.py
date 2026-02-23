@@ -1163,6 +1163,24 @@ class Sgp22Manager:
             return out
         return out
 
+    def _collect_tag_nodes(self, node: Any, wanted_tag: int) -> List[Any]:
+        out: List[Any] = []
+        if isinstance(node, dict):
+            for k, v in node.items():
+                if k == wanted_tag:
+                    if isinstance(v, list):
+                        for item in v:
+                            out.append(item)
+                    else:
+                        out.append(v)
+                out.extend(self._collect_tag_nodes(v, wanted_tag))
+            return out
+        if isinstance(node, list):
+            for item in node:
+                out.extend(self._collect_tag_nodes(item, wanted_tag))
+            return out
+        return out
+
     def _collect_decoded_values(self, node: Any, tag: int, parent_tag: Optional[int]) -> List[str]:
         raw_values = self._collect_tag_bytes(node, tag)
         out: List[str] = []
@@ -1617,8 +1635,14 @@ class Sgp22Manager:
             print("    | (Empty)")
             return
 
-        eim_pub = TlvParser.get_first(root, 0xA5)
-        tls_pub = TlvParser.get_first(root, 0xA6)
+        eim_blocks = self._collect_tag_nodes(root, 0xA5)
+        tls_blocks = self._collect_tag_nodes(root, 0xA6)
+        eim_pub = None
+        if len(eim_blocks) > 0:
+            eim_pub = eim_blocks[0]
+        tls_pub = None
+        if len(tls_blocks) > 0:
+            tls_pub = tls_blocks[0]
         has_any = False
         if eim_pub is not None:
             has_any = True
@@ -1638,6 +1662,52 @@ class Sgp22Manager:
         if tls_pub is not None:
             tls_sum = self._summarize_cert_block(tls_pub)
             self._print_cert_block_summary_lines("Trusted TLS Key Data", tls_sum)
+
+    def _print_notifications_list_compact(self, parsed: Dict[int, Any]) -> None:
+        print(f"\n{Config.Colors.BOLD}[+] RetrieveNotificationsList{Config.Colors.ENDC}")
+        root = TlvParser.get_first(parsed, 0xBF2B, parsed)
+        entries = self._collect_tag_nodes(root, 0xBF2F)
+        has_entries = False
+        if len(entries) > 0:
+            has_entries = True
+        if has_entries == False:
+            print("    | Notification Entries : (Empty)")
+            return
+
+        print(f"    | Notification Entries : {Config.Colors.CYAN}{len(entries)}{Config.Colors.ENDC}")
+        first = entries[0]
+        if not isinstance(first, dict):
+            print(f"    | First Entry          : {Config.Colors.CYAN}(Unparsed){Config.Colors.ENDC}")
+            return
+
+        seq_val = self._decode_text_value(0x80, TlvParser.get_first(first, 0x80), 0xBF2F)
+        if len(seq_val) > 0:
+            print(f"    | Seq Number           : {Config.Colors.CYAN}{seq_val}{Config.Colors.ENDC}")
+
+        op_val = self._decode_text_value(0x81, TlvParser.get_first(first, 0x81), 0xBF2F)
+        if len(op_val) > 0:
+            print(f"    | Operation            : {Config.Colors.CYAN}{op_val}{Config.Colors.ENDC}")
+
+        fqdn_values = self._collect_decoded_values(first, 0x0C, None)
+        has_fqdn = False
+        if len(fqdn_values) > 0:
+            has_fqdn = True
+        if has_fqdn:
+            print(f"    | Server/FQDN          : {Config.Colors.CYAN}{self._short_display(fqdn_values[0])}{Config.Colors.ENDC}")
+
+        id_values = self._collect_decoded_values(first, 0x5A, None)
+        has_id = False
+        if len(id_values) > 0:
+            has_id = True
+        if has_id:
+            print(f"    | EID/ICCID            : {Config.Colors.CYAN}{id_values[0]}{Config.Colors.ENDC}")
+
+        sig_values = self._collect_decoded_values(first, 0x03, None)
+        sig_count = 0
+        for item in sig_values:
+            if str(item).startswith("Signature:"):
+                sig_count += 1
+        print(f"    | Signature Items      : {Config.Colors.CYAN}{sig_count}{Config.Colors.ENDC}")
 
     def get_euicc_configured_data(self) -> None:
         """ES10a.GetEuiccConfiguredData / GetEuiccConfiguredAddresses (retrieval)."""
@@ -1693,7 +1763,28 @@ class Sgp22Manager:
 
     def get_notifications_list(self) -> None:
         """ES10b.RetrieveNotificationsList (SGP.22/32) – Pending notifications. Retrieval only."""
-        self._es10_retrieve("BF2B00", "RetrieveNotificationsList", root_tag=0xBF2B, compact_json=True)
+        self._select_isd_r()
+        payload = "BF2B00"
+        cmd = f"80E29100{len(bytes.fromhex(payload)):02X}{payload}"
+        print(f"{Config.Colors.CYAN}[*] RetrieveNotificationsList...{Config.Colors.ENDC}")
+        data, sw1, sw2 = self.tp.transmit(cmd, silent=True)
+        if sw1 != 0x90:
+            print(f"{Config.Colors.FAIL}[-] Failed: {sw1:02X}{sw2:02X}{Config.Colors.ENDC}")
+            return
+        if not data:
+            print(f"\n{Config.Colors.BOLD}[+] RetrieveNotificationsList{Config.Colors.ENDC}")
+            print("    | (Empty)")
+            return
+        try:
+            parsed = TlvParser.parse(data)
+            debug_enabled = bool(getattr(self.tp, "debug", False))
+            if debug_enabled:
+                print(f"{Config.Colors.HEADER}--- RetrieveNotificationsList ---{Config.Colors.ENDC}")
+                self._print_tlv_tree(parsed, indent=1, parent_tag=0xBF2B)
+                return
+            self._print_notifications_list_compact(parsed)
+        except Exception:
+            print(f"    {data.hex().upper()}")
 
     def get_eim_configuration_data(self) -> None:
         """ES10b.GetEimConfigurationData (SGP.32 IoT) – eIM configuration data. Retrieval only."""
@@ -1729,7 +1820,7 @@ class Sgp22Manager:
         if notif_data:
             try:
                 notif_parsed = TlvParser.parse(notif_data)
-                self._print_compact_tlv_section("RetrieveNotificationsList", notif_parsed, 0xBF2B)
+                self._print_notifications_list_compact(notif_parsed)
             except Exception:
                 print(f"\n{Config.Colors.BOLD}[+] RetrieveNotificationsList{Config.Colors.ENDC}")
                 print(f"    | {notif_data.hex().upper()}")
