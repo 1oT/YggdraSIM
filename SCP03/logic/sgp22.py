@@ -607,6 +607,21 @@ class Sgp22Manager:
                     return True
                 return False
 
+            def _should_print_object_separator() -> bool:
+                """
+                Add blank lines only between semantic object blocks.
+                Keep primitive/value rows compact, especially in ASN.1 internals.
+                """
+                if has_next_item is False:
+                    return False
+                if indent > 2:
+                    return False
+                if isinstance(val, bytes):
+                    return False
+                if _is_generic_asn1_container(tag, name):
+                    return False
+                return True
+
             # Duplicate tags are preserved as lists; print each occurrence.
             if isinstance(val, list):
                 is_generic_container = _is_generic_asn1_container(tag, name)
@@ -663,7 +678,7 @@ class Sgp22Manager:
                         print(f"{'    ' * (base_indent + 1)}| {decoded_item}")
                     else:
                         print(f"{'    ' * (base_indent + 1)}| {str(item)}")
-                if has_next_item:
+                if _should_print_object_separator():
                     print("")
                 continue
             
@@ -691,7 +706,7 @@ class Sgp22Manager:
                         else:
                             print(f"{prefix}{Config.Colors.CYAN}{name}{Config.Colors.ENDC}")
                             self._print_tlv_tree(nested, indent + 1, parent_tag=tag, x509_mode=x509_mode, context_label=context_label)
-                        if has_next_item:
+                        if _should_print_object_separator():
                             print("")
                         continue
                 except: pass
@@ -730,7 +745,7 @@ class Sgp22Manager:
                             x509_mode=x509_mode,
                             context_label=child_context,
                         )
-                if has_next_item:
+                if _should_print_object_separator():
                     print("")
             
             elif isinstance(val, bytes):
