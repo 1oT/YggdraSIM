@@ -1372,7 +1372,11 @@ class ShellDispatcher:
                 has_data = True
                 
             if has_data:
-                decoded = ContentDecoder.decode(self.fs_ctrl.current_fid, data.hex())
+                decoded = ContentDecoder.decode(
+                    self.fs_ctrl.current_fid,
+                    data.hex(),
+                    context_path=getattr(self.fs_ctrl, "current_path_hint", "")
+                )
                 has_decoded = False
                 if decoded:
                     has_decoded = True
@@ -1390,7 +1394,11 @@ class ShellDispatcher:
                 has_data = True
                 
             if has_data:
-                decoded = ContentDecoder.decode(self.fs_ctrl.current_fid, data.hex())
+                decoded = ContentDecoder.decode(
+                    self.fs_ctrl.current_fid,
+                    data.hex(),
+                    context_path=getattr(self.fs_ctrl, "current_path_hint", "")
+                )
                 has_decoded = False
                 if decoded:
                     has_decoded = True

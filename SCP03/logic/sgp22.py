@@ -1720,6 +1720,30 @@ class Sgp22Manager:
             print("    | (Empty)")
             return
 
+        def _bitmap_set_bits(hex_text: str) -> str:
+            try:
+                raw = bytes.fromhex(hex_text)
+            except Exception:
+                return ""
+            bitmask = int.from_bytes(raw, "big", signed=False)
+            width = len(raw) * 8
+            set_bits = []
+            for bit_idx in range(width - 1, -1, -1):
+                is_set = False
+                if ((bitmask >> bit_idx) & 0x01) == 0x01:
+                    is_set = True
+                if is_set:
+                    set_bits.append(str(bit_idx))
+            if len(set_bits) == 0:
+                return "none"
+            return ", ".join(set_bits)
+
+        label_map = {
+            "80": "Field 80 Values",
+            "81": "Field 81 Value",
+            "82": "Field 82 Bitmap",
+        }
+
         emitted = 0
         for key, value in rat_obj.items():
             key_text = str(key)
@@ -1732,7 +1756,7 @@ class Sgp22Manager:
                     is_tag_hex = False
             label = key_text
             if is_tag_hex:
-                label = f"Tag {key_text}"
+                label = label_map.get(key_text, f"Tag {key_text}")
 
             if isinstance(value, str):
                 is_empty = False
@@ -1740,7 +1764,15 @@ class Sgp22Manager:
                     is_empty = True
                 if is_empty:
                     continue
-                print(f"    | {label:<20}: {Config.Colors.CYAN}{value}{Config.Colors.ENDC}")
+                suffix = ""
+                is_tag82 = False
+                if key_text == "82":
+                    is_tag82 = True
+                if is_tag82:
+                    bits = _bitmap_set_bits(value)
+                    if len(bits) > 0:
+                        suffix = f" (set bits: {bits})"
+                print(f"    | {label:<20}: {Config.Colors.CYAN}{value}{suffix}{Config.Colors.ENDC}")
                 emitted += 1
                 continue
 
@@ -1756,7 +1788,17 @@ class Sgp22Manager:
                 preview = ", ".join(filtered[:3])
                 if len(filtered) > 3:
                     preview = preview + f", +{len(filtered) - 3} more"
+                count = len(filtered)
+                suffix = ""
+                is_tag82 = False
+                if key_text == "82":
+                    is_tag82 = True
+                if is_tag82:
+                    bits = _bitmap_set_bits(filtered[0])
+                    if len(bits) > 0:
+                        suffix = f" (set bits: {bits})"
                 print(f"    | {label:<20}: {Config.Colors.CYAN}{preview}{Config.Colors.ENDC}")
+                print(f"    | {'  Count':<20}: {Config.Colors.CYAN}{count}{suffix}{Config.Colors.ENDC}")
                 emitted += 1
                 continue
 

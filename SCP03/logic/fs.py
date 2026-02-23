@@ -226,6 +226,7 @@ class FileSystemController:
         self.current_fcp = {} 
         self.current_fid = None
         self.scan_cache = {}
+        self.current_path_hint = ""
         
         ContentDecoder.init_registry()
 
@@ -355,6 +356,7 @@ class FileSystemController:
                     if not silent:
                         print(f"{Config.Colors.FAIL}[-] Path broken at segment: '{segment}'{Config.Colors.ENDC}")
                     return False
+            self.current_path_hint = target_path
             return True
         
         # 2. AID Registry
@@ -386,6 +388,7 @@ class FileSystemController:
             
             if sw1 == 0x90 or sw1 == 0x61:
                 self.current_fid = fid 
+                self.current_path_hint = target
                 if data: 
                     # Pass resolve flag and target_fid
                     self._parse_fcp_internal(data, target_fid=fid, resolve=resolve)
@@ -712,7 +715,11 @@ class FileSystemController:
         if sw1 == 0x90:
             hex_data = data.hex().upper()
             print(f"Data [{status_text}]: {hex_data}")
-            decoded = ContentDecoder.decode(self.current_fid, hex_data)
+            decoded = ContentDecoder.decode(
+                self.current_fid,
+                hex_data,
+                context_path=self.current_path_hint
+            )
             if decoded:
                 for line in decoded.strip().split('\n'):
                     print(f"          | {Config.Colors.CYAN}{line}{Config.Colors.ENDC}")
@@ -818,7 +825,11 @@ class FileSystemController:
                     is_not_arr = True
                     
                 if is_not_arr:
-                    decoded = ContentDecoder.decode(self.current_fid, hex_val)
+                    decoded = ContentDecoder.decode(
+                        self.current_fid,
+                        hex_val,
+                        context_path=self.current_path_hint
+                    )
                     
                     has_decoded = False
                     if decoded:
@@ -1037,7 +1048,7 @@ class FileSystemController:
         roots = self._load_tree_structure()
         report_data = {}
 
-        def extract_file_content(fid):
+        def extract_file_content(fid, context_path):
             content = {}
             struct = self.current_fcp.get('structure', 'Unknown')
             if struct == 'Transparent':
@@ -1046,7 +1057,7 @@ class FileSystemController:
                     hex_data = data.hex().upper()
                     if not all(c == 'F' for c in hex_data) and not all(c == '0' for c in hex_data):
                         content['hex'] = hex_data
-                        decoded = ContentDecoder.decode_obj(fid, hex_data)
+                        decoded = ContentDecoder.decode_obj(fid, hex_data, context_path=context_path)
                         if decoded: content['decoded'] = self._sanitize_yaml(decoded)
             elif struct in ['Linear Fixed', 'Cyclic']:
                 records = {}
@@ -1058,7 +1069,7 @@ class FileSystemController:
                         hex_data = data.hex().upper()
                         if all(c == 'F' for c in hex_data) or all(c == '0' for c in hex_data): continue
                         rec_data = {'hex': hex_data}
-                        decoded = ContentDecoder.decode_obj(fid, hex_data)
+                        decoded = ContentDecoder.decode_obj(fid, hex_data, context_path=context_path)
                         if decoded: rec_data['decoded'] = self._sanitize_yaml(decoded)
                         records[r] = rec_data
                     elif sw1 == 0x6A: break 
@@ -1091,10 +1102,11 @@ class FileSystemController:
                     
                     path = "/".join(parent_path_list + [node['name']])
                     print(f"  > Scanning: {path}")
+                    self.current_path_hint = path
                     file_entry = {'fid': selected_fid, 'name': node['name'], 'meta': self.current_fcp.copy()}
                     
                     if self.current_fcp.get('type') == 'EF':
-                        content = extract_file_content(selected_fid)
+                        content = extract_file_content(selected_fid, path)
                         if content: file_entry.update(content)
                         
                     report_data[path] = file_entry
@@ -1121,9 +1133,10 @@ class FileSystemController:
                         
                         name = f"UNKNOWN_{target_fid}"; path = "/".join(parent_path_list + [name])
                         print(f"  > Found Wildcard: {path}")
+                        self.current_path_hint = path
                         file_entry = {'fid': target_fid, 'name': name, 'meta': self.current_fcp.copy()}
                         if self.current_fcp.get('type') == 'EF':
-                            content = extract_file_content(target_fid)
+                            content = extract_file_content(target_fid, path)
                             if content: file_entry.update(content)
                         report_data[path] = file_entry
 
@@ -1213,7 +1226,11 @@ class FileSystemController:
                     if sw1 == 0x90:
                         hex_data = data.hex().upper()
                         f.write(f"Raw: {hex_data}\n")
-                        decoded = ContentDecoder.decode_obj(fid, hex_data)
+                        decoded = ContentDecoder.decode_obj(
+                            fid,
+                            hex_data,
+                            context_path=self.current_path_hint
+                        )
                         if decoded:
                             yaml.dump(self._sanitize_yaml(decoded), f, default_flow_style=False, sort_keys=False)
                     if sw1 != 0x90:
@@ -1234,7 +1251,11 @@ class FileSystemController:
                 if sw1 == 0x90:
                     hex_data = data.hex().upper()
                     file_handle.write(f"Record {r:02X}: Raw: {hex_data}\n")
-                    decoded = ContentDecoder.decode_obj(fid, hex_data)
+                    decoded = ContentDecoder.decode_obj(
+                        fid,
+                        hex_data,
+                        context_path=self.current_path_hint
+                    )
                     if decoded:
                         yaml.dump(self._sanitize_yaml(decoded), file_handle, default_flow_style=False, sort_keys=False)
                         file_handle.write("\n")
@@ -1309,6 +1330,7 @@ class FileSystemController:
                     if self.current_fcp.get('type') == 'EF':
                         file_base = current_path / node['name']
                         print(f"  > Dumping: {file_base}")
+                        self.current_path_hint = str(file_base)
                         _write_ef_content(selected_fid, file_base)
                     
                     if node['children']:
@@ -1350,6 +1372,7 @@ class FileSystemController:
                         name = f"UNKNOWN_{target_fid}"
                         file_base = current_path / name
                         print(f"  > Found & Dumping Wildcard: {file_base}")
+                        self.current_path_hint = str(file_base)
                         
                         if self.current_fcp.get('type') == 'EF':
                             _write_ef_content(target_fid, file_base)
