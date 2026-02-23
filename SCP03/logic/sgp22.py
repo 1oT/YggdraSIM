@@ -576,6 +576,9 @@ class Sgp22Manager:
         """Recursive pretty printer with inline flattening."""
         items = list(tlv_dict.items())
         for item_idx, (tag, val) in enumerate(items):
+            has_next_item = False
+            if item_idx + 1 < len(items):
+                has_next_item = True
             name = self._resolve_tag_name(tag, parent_tag)
             prefix = "    " * indent + "| "
 
@@ -660,7 +663,7 @@ class Sgp22Manager:
                         print(f"{'    ' * (base_indent + 1)}| {decoded_item}")
                     else:
                         print(f"{'    ' * (base_indent + 1)}| {str(item)}")
-                if item_idx < len(items) - 1:
+                if has_next_item:
                     print("")
                 continue
             
@@ -688,7 +691,7 @@ class Sgp22Manager:
                         else:
                             print(f"{prefix}{Config.Colors.CYAN}{name}{Config.Colors.ENDC}")
                             self._print_tlv_tree(nested, indent + 1, parent_tag=tag, x509_mode=x509_mode, context_label=context_label)
-                        if item_idx < len(items) - 1:
+                        if has_next_item:
                             print("")
                         continue
                 except: pass
@@ -727,7 +730,7 @@ class Sgp22Manager:
                             x509_mode=x509_mode,
                             context_label=child_context,
                         )
-                if item_idx < len(items) - 1:
+                if has_next_item:
                     print("")
             
             elif isinstance(val, bytes):
@@ -744,8 +747,6 @@ class Sgp22Manager:
                         print(f"{prefix}{name:<20} : {decoded}")
                     else:
                         print(f"{prefix}{Config.Colors.CYAN}{name:<20}{Config.Colors.ENDC} : {decoded}")
-                if item_idx < len(items) - 1:
-                    print("")
 
     def _swap_nibbles(self, s: str) -> str:
         if not s: return ""
