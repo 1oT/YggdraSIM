@@ -239,6 +239,16 @@ class ShellDispatcher:
             
         if is_off:
             state = "OFF"
+
+        # Keep transport debug flag in sync for downstream decoders/helpers.
+        has_tp = False
+        if self.transport:
+            has_tp = True
+        if has_tp:
+            try:
+                self.transport.debug = self.debug_mode
+            except Exception:
+                pass
             
         print(f"{Config.Colors.WARNING}[*] VERBOSE / DEBUG Mode is now {state}.{Config.Colors.ENDC}")
 
@@ -798,6 +808,7 @@ class ShellDispatcher:
     def _handle_cert_info(self):
         """Decode ECASD/card certificates (subject, issuer, validity)."""
         from SCP03.core.decoders import AdvancedDecoders
+        from SCP03.core.utils import TlvParser
         ECASD_AID = "A0000005591010FFFFFFFF8900000200"
         print(f"{Config.Colors.CYAN}[*] Selecting ECASD...{Config.Colors.ENDC}")
         self.transport.transmit(f"00A40400{len(ECASD_AID)//2:02X}{ECASD_AID}", silent=True)
@@ -814,7 +825,6 @@ class ShellDispatcher:
                 continue
             raw = data
             try:
-                from SCP03.core.utils import TlvParser
                 parsed = TlvParser.parse(data)
                 tag_int = int(tag_hex, 16)
                 extracted = TlvParser.get_first(parsed, tag_int)
@@ -822,6 +832,18 @@ class ShellDispatcher:
                     raw = extracted
             except Exception:
                 pass
+
+            debug_enabled = bool(self.debug_mode)
+            if debug_enabled:
+                try:
+                    parsed_full = TlvParser.parse(data)
+                    print(f"  {label}:")
+                    self.gp_ctrl.sgp22._print_tlv_tree(parsed_full, indent=2, parent_tag=None)
+                    continue
+                except Exception:
+                    print(f"  {label}: {raw.hex().upper()}")
+                    continue
+
             if len(raw) >= 4 and raw[0] == 0x30:
                 info = AdvancedDecoders.decode_cert_der(raw)
                 if info:

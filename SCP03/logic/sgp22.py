@@ -9,6 +9,7 @@
 from typing import List, Dict, Optional, Tuple, Any
 from SCP03.config import Config
 from SCP03.core.utils import HexUtils, TlvParser
+from SCP03.core.decoders import AdvancedDecoders
 
 class Sgp22Manager:
     """
@@ -687,13 +688,83 @@ class Sgp22Manager:
             return
         print("    (Empty)")
 
+    def _iter_byte_values(self, node: Any):
+        """Yield every bytes leaf from nested parsed TLV structures."""
+        if isinstance(node, bytes):
+            yield node
+            return
+        if isinstance(node, dict):
+            for v in node.values():
+                yield from self._iter_byte_values(v)
+            return
+        if isinstance(node, list):
+            for item in node:
+                yield from self._iter_byte_values(item)
+            return
+
+    def _print_cert_summary_from_parsed(self, parsed: Dict[int, Any], title: str) -> bool:
+        """
+        Print a compact certificate summary.
+        Returns True if at least one certificate was decoded.
+        """
+        summaries = []
+        seen_serials = set()
+        for blob in self._iter_byte_values(parsed):
+            if len(blob) < 32:
+                continue
+            info = AdvancedDecoders.decode_cert_der(blob)
+            if not info:
+                continue
+            serial = str(info.get("serial", ""))
+            if serial in seen_serials:
+                continue
+            seen_serials.add(serial)
+            summaries.append(info)
+
+        if len(summaries) == 0:
+            return False
+
+        print(f"{Config.Colors.HEADER}--- {title} (summary) ---{Config.Colors.ENDC}")
+        for idx, info in enumerate(summaries, start=1):
+            print(f"  [{idx}] Subject : {info.get('subject', '')}")
+            print(f"      Issuer  : {info.get('issuer', '')}")
+            print(f"      Serial  : {info.get('serial', '')}")
+            print(f"      Valid   : {info.get('not_valid_before', '')} -> {info.get('not_valid_after', '')}")
+        return True
+
     def get_euicc_configured_data(self) -> None:
         """ES10a.GetEuiccConfiguredData / GetEuiccConfiguredAddresses (retrieval)."""
         self._es10_retrieve("BF3C00", "EuiccConfiguredData", root_tag=0xBF3C)
 
     def get_euicc_certs(self) -> None:
         """ES10b.GetCerts (SGP.22/32 retrieval)."""
-        self._es10_retrieve("BF5600", "GetCerts", root_tag=0xBF56)
+        self._select_isd_r()
+        payload = "BF5600"
+        cmd = f"80E29100{len(bytes.fromhex(payload)):02X}{payload}"
+        print(f"{Config.Colors.CYAN}[*] GetCerts...{Config.Colors.ENDC}")
+        data, sw1, sw2 = self.tp.transmit(cmd, silent=True)
+        if sw1 != 0x90:
+            print(f"{Config.Colors.FAIL}[-] Failed: {sw1:02X}{sw2:02X}{Config.Colors.ENDC}")
+            return
+        if not data:
+            print("    (Empty)")
+            return
+        try:
+            parsed = TlvParser.parse(data)
+            debug_enabled = bool(getattr(self.tp, "debug", False))
+            if debug_enabled:
+                print(f"{Config.Colors.HEADER}--- GetCerts ---{Config.Colors.ENDC}")
+                self._print_tlv_tree(parsed, indent=1, parent_tag=0xBF56)
+                return
+
+            if self._print_cert_summary_from_parsed(parsed, "GetCerts"):
+                return
+
+            # Fallback when cert extraction fails
+            print(f"{Config.Colors.HEADER}--- GetCerts ---{Config.Colors.ENDC}")
+            self._print_tlv_tree(parsed, indent=1, parent_tag=0xBF56)
+        except Exception:
+            print(f"    {data.hex().upper()}")
 
     def get_eid(self) -> None:
         """Retrieve EID from ECASD via GET DATA tag 5A."""
