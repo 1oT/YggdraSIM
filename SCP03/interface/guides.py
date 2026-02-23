@@ -95,34 +95,52 @@ class ShellGuides:
 {Config.Colors.HEADER}=== GlobalPlatform Architecture & APDU Guide ==={Config.Colors.ENDC}
 {Config.Colors.BOLD}Standard:{Config.Colors.ENDC} {cls._link("GPC Card Specification v2.3.1", spec_url)}
 
-{Config.Colors.CYAN}1. The Card Manager and Security Domains{Config.Colors.ENDC}
-   GlobalPlatform smart cards are managed by the Issuer Security Domain (ISD), which acts as the root 
-   authority. Supplementary Security Domains (SDs) can be created for third-party service providers.
-   - {Config.Colors.BOLD}ISD AID:{Config.Colors.ENDC} Commonly `A0 00 00 01 51 00 00 00` (GlobalPlatform defaults).
-   - {Config.Colors.BOLD}Selection:{Config.Colors.ENDC} `00 A4 04 00 <Lc> <AID>`. Once selected, commands are routed to the SD.
+{Config.Colors.CYAN}1. Security Domain (SD) Architecture{Config.Colors.ENDC}
+   The Issuer Security Domain (ISD) is the primary root of trust on the card, possessing the `Token Verification` 
+   and `Authorized Management` privileges. Supplementary Security Domains (SSD) govern application provisioning 
+   for Application Providers (APs) or Controlling Authorities (CAs).
+   - {Config.Colors.BOLD}ISD Selection:{Config.Colors.ENDC} `00 A4 04 00 <Lc> <AID>`. Standard GP ISD is `A0 00 00 01 51 00 00 00`. 
+     Selecting an SD routes subsequent APDUs (e.g., `80 50`, `80 82`) to its internal SCP handler.
+   - {Config.Colors.BOLD}Privilege Bitmask (Tag C5):{Config.Colors.ENDC} Determines SD capabilities.
+     `0x80` = Security Domain, `0x40` = DAP Verification, `0x20` = Delegated Management, `0x10` = Card Lock, `0x08` = Card Terminate, `0x04` = Default Selected, `0x02` = CVM Management.
 
-{Config.Colors.CYAN}2. Lifecycle Management (GET STATUS & SET STATUS){Config.Colors.ENDC}
-   Entities (ISD, SDs, Executable Load Files, Applications) follow strict lifecycle states.
-   - {Config.Colors.BOLD}GET STATUS (80 F2):{Config.Colors.ENDC} `80 F2 <P1> <P2> <Lc> <Search_Criteria>`.
-     - {Config.Colors.YELLOW}P1:{Config.Colors.ENDC} 80 (ISD/SD), 40 (Applications), 20 (Executable Load Files), 10 (Executable Modules).
-     - {Config.Colors.YELLOW}P2:{Config.Colors.ENDC} 00 (First block), 01 (Next block).
-     - {Config.Colors.YELLOW}Return Format:{Config.Colors.ENDC} A sequence of TLVs. Tag E3 (GlobalPlatform Registry Data). 
-       Format: `[Length] [AID Length] [AID] [Lifecycle State] [Privileges]`.
-   - {Config.Colors.BOLD}SET STATUS (80 F0):{Config.Colors.ENDC} `80 F0 <P1> <Lifecycle_State> <Lc> [AID]`.
-     - {Config.Colors.YELLOW}P1:{Config.Colors.ENDC} 80 (ISD), 40 (Application), 20 (Load File).
-     - {Config.Colors.YELLOW}State (P2):{Config.Colors.ENDC} e.g., 80 (LOCKED), 07 (SELECTABLE), 03 (INSTALLED), 0F (TERMINATED).
+{Config.Colors.CYAN}2. Registry Discovery (GET STATUS - 80 F2){Config.Colors.ENDC}
+   The GP Registry maps Executable Load Files (ELF), Executable Modules (EM), and Applications (Applets) 
+   to their respective lifecycles.
+   - {Config.Colors.BOLD}APDU:{Config.Colors.ENDC} `80 F2 <P1> <P2> <Lc> <Search_Criteria>`. 
+     - {Config.Colors.YELLOW}P1 (Target):{Config.Colors.ENDC} 80 (ISD/SD), 40 (Applications), 20 (Load Files), 10 (Modules).
+     - {Config.Colors.YELLOW}P2 (Control):{Config.Colors.ENDC} 00 (Initial Block), 01 (Next Block). `xxxxxx0x` bits indicate return format.
+   - {Config.Colors.BOLD}Response (Tag E3 - GlobalPlatform Registry Data):{Config.Colors.ENDC} 
+     Format per entry: `[Length] [AID_Len] [AID] [Lifecycle_State] [Privileges_Bitmask]`.
+     - {Config.Colors.YELLOW}State Mappings:{Config.Colors.ENDC} `01` (LOADED), `03` (INSTALLED), `07` (SELECTABLE), `0F` (PERSONALIZED), `80` (LOCKED).
 
-{Config.Colors.CYAN}3. Secure Channel & Key Management (PUT KEY){Config.Colors.ENDC}
-   - {Config.Colors.BOLD}PUT KEY (80 D8):{Config.Colors.ENDC} Replaces or adds keys to the SD. `80 D8 <Old_KVN> <Key_ID> <Lc> <Data>`.
-     - {Config.Colors.YELLOW}Old KVN:{Config.Colors.ENDC} Key Version Number to replace (00 to add new).
-     - {Config.Colors.YELLOW}Key Format:{Config.Colors.ENDC} `[Key Type] [Length] [Key Data] [Length] [MAC Data]`.
-     - {Config.Colors.YELLOW}Key Types:{Config.Colors.ENDC} 88 (AES), 80 (DES-CBC), 81 (DES-ECB).
-   - All static keys sent over the wire MUST be encrypted using the Session-DEK key.
+{Config.Colors.CYAN}3. Object State Transitions (SET STATUS - 80 F0){Config.Colors.ENDC}
+   Transitions object states in the registry. Irreversible states include `TERMINATED` (0F for Applets, FF for Card).
+   - {Config.Colors.BOLD}APDU:{Config.Colors.ENDC} `80 F0 <P1> <P2> <Lc> [Target_AID]`.
+     - {Config.Colors.YELLOW}P1 (Target Component):{Config.Colors.ENDC} 80 (ISD/Card State), 40 (Application), 20 (Load File).
+     - {Config.Colors.YELLOW}P2 (State):{Config.Colors.ENDC} E.g., `80` locks an Applet. `07` restores Selectable state.
 
-{Config.Colors.CYAN}4. APDU Transmission & Logical Channels{Config.Colors.ENDC}
-   - {Config.Colors.BOLD}MANAGE CHANNEL (00 70):{Config.Colors.ENDC} `00 70 00 00 01` (Open), `00 70 80 <Channel_No> 00` (Close).
-   - Allows communicating with multiple applets simultaneously without losing session state.
-   - The logical channel number is embedded in the CLA byte (e.g., `01 A4...` for Channel 1).
+{Config.Colors.CYAN}4. Key Rotation & Wrapping (PUT KEY - 80 D8){Config.Colors.ENDC}
+   Static keys inside an SD must be rotated via secure wrapping. SCP03 enforces DEK wrapping for key material.
+   - {Config.Colors.BOLD}APDU:{Config.Colors.ENDC} `80 D8 <Old_KVN> <Key_ID> <Lc> <KeyData>`.
+   - {Config.Colors.YELLOW}Old KVN (P1):{Config.Colors.ENDC} Target Key Version Number to rotate. `00` provisions a new KVN.
+   - {Config.Colors.YELLOW}Key Format Structure:{Config.Colors.ENDC} For AES, the payload iterates: 
+     `[Key Type (88)] [Key Length (10/18/20)] [AES-ECB Encrypted Key Data] [KCV Length (03)] [KCV Data]`.
+   - {Config.Colors.YELLOW}Cryptographic Note:{Config.Colors.ENDC} Key Data must be padded to block sizes and encrypted using the Session-DEK key. The KCV is computed as the first 3 bytes of `AES-ECB(Target_Key, '0101...01')`.
+
+{Config.Colors.CYAN}5. Data Personalization (STORE DATA - 80 E2){Config.Colors.ENDC}
+   Used for pushing Data Grouping Identifiers (DGIs) or generic TLVs into an SD/Application.
+   - {Config.Colors.BOLD}APDU:{Config.Colors.ENDC} `80 E2 <P1> <P2> <Lc> <Data>`.
+   - {Config.Colors.YELLOW}P1 (Control Reference):{Config.Colors.ENDC} `80` (Last block), `00` (More blocks to follow).
+   - {Config.Colors.YELLOW}P2 (Block Number):{Config.Colors.ENDC} Increments `00, 01, 02...` per sequential STORE DATA command.
+   - {Config.Colors.BOLD}DGI Parsing (Tag 90):{Config.Colors.ENDC} When personalizing SDs via P1=90, the data expects a Tag-Length-Value format. YggdraSIM utilizes this to update tags like `4F` (ISD AID) and `66` (Card Recognition Data).
+
+{Config.Colors.CYAN}6. APDU Transmission via Logical Channels (MANAGE CHANNEL - 00 70){Config.Colors.ENDC}
+   GlobalPlatform supports interacting with multiple applications simultaneously without interrupting SCP03 sessions.
+   - {Config.Colors.BOLD}Open Channel:{Config.Colors.ENDC} `00 70 00 00 01`. Returns the newly assigned channel ID in the Response Data.
+   - {Config.Colors.BOLD}Close Channel:{Config.Colors.ENDC} `00 70 80 <Channel_ID> 00`.
+   - {Config.Colors.YELLOW}CLA Byte Modification:{Config.Colors.ENDC} Once opened, the channel ID is embedded in the Class Byte. 
+     (e.g., `00` -> Basic Channel, `01` -> Channel 1, `02` -> Channel 2).
 """)
 
     @classmethod
