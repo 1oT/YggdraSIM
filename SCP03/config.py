@@ -24,6 +24,7 @@ class Config:
     INI_FILE = os.path.join(CONFIG_DIR, 'keys.ini')
     FIDS_FILE = os.path.join(CONFIG_DIR, 'fids.txt')
     AID_FILE = os.path.join(CONFIG_DIR, 'aid.txt')
+    BINDS_FILE = os.path.join(CONFIG_DIR, 'binds.json')
 
     # Ensure default files exist in the user's config directory when frozen
     if getattr(sys, 'frozen', False):
@@ -35,6 +36,15 @@ class Config:
                     shutil.copy2(bundled_path, user_path)
                 except Exception as e:
                     print(f"Warning: Could not copy default {filename} to {CONFIG_DIR}: {e}")
+                    
+        # binds.json is located in the interface directory initially
+        user_binds_path = os.path.join(CONFIG_DIR, 'binds.json')
+        bundled_binds_path = os.path.join(BASE_DIR, 'interface', 'binds.json')
+        if not os.path.exists(user_binds_path) and os.path.exists(bundled_binds_path):
+            try:
+                shutil.copy2(bundled_binds_path, user_binds_path)
+            except Exception as e:
+                print(f"Warning: Could not copy default binds.json to {CONFIG_DIR}: {e}")
 
     DEFAULT_KEYS = {
         'kenc': '1122334455667788AABBCCDDEEFF0011',

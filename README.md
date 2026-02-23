@@ -111,6 +111,15 @@ ECASD: A0000005591010FFFFFFFF8900000200
 ### File Identifier (FID) Paths (`fids.txt`)
 Contains predefined File IDs mapping to textual paths for tree navigation. This file is copied to the executable directory on first run and can be modified.
 
+### Custom Macros/Keybinds (`binds.json`)
+Defines custom command aliases for the interactive shell. You can chain commands using semicolons (`;`) and pass arguments using `{0}`, `{1}`. Located in `SCP03/interface/binds.json` or next to the executable.
+```json
+{
+    "adm": "manage-pin verify 0a {0}",
+    "init": "auth-sd; select usim"
+}
+```
+
 ### SCP11 Certificates
 Certificates used by the SCP11 module (`CERT.DPauth.ECDSA.der`, `SK.DPauth.ECDSA.pem`, etc.) are also copied alongside the executable. They can be modified by replacing them with your own certificates of the same name.
 

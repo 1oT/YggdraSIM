@@ -350,6 +350,14 @@ class ShellGuides:
        spi = 1621
        key_enc = 1111111111111111
        key_mac = 1111111111111111
+       
+   - {Config.Colors.BOLD}binds.json:{Config.Colors.ENDC} Defines custom command macros (aliases) for the shell. 
+     Use `{0}`, `{1}`, etc. to pass arguments. Semicolons (`;`) separate multiple commands.
+     {Config.Colors.YELLOW}Syntax Example:{Config.Colors.ENDC}
+       {
+           "adm": "manage-pin verify 0a {0}",
+           "init": "auth-sd; select usim"
+       }
 
 {Config.Colors.CYAN}3. SCP11 Certificates (.pem / .der){Config.Colors.ENDC}
    The Local SM-DP+ Simulation (SCP11) relies on cryptographic certificates:

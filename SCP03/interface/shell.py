@@ -73,7 +73,7 @@ class ShellDispatcher:
 
     def _init_binder(self):
         from SCP03.interface.custom_binds import CommandBinder
-        binds_file = os.path.join(os.path.dirname(__file__), "binds.json")
+        binds_file = Config.BINDS_FILE
         self.binder = CommandBinder(filepath=binds_file)
 
     def do_manage_binds(self, arg_line: str = ""):
