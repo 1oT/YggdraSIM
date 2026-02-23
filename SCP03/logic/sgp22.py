@@ -1148,17 +1148,82 @@ class Sgp22Manager:
             if cleaned_row:
                 result_entries.append(cleaned_row)
 
-        output = {"eimConfigurationData": result_entries}
-        text = json.dumps(output, indent=2, ensure_ascii=True)
-        for line in text.splitlines():
-            stripped = line.lstrip()
-            if stripped.startswith('"') and ":" in stripped:
-                colon_idx = line.find(":")
-                key_part = line[: colon_idx + 1]
-                value_part = line[colon_idx + 1 :]
-                print(f"    {key_part}{Config.Colors.CYAN}{value_part}{Config.Colors.ENDC}")
-            else:
-                print(f"    {line}")
+        print("    eimConfigurationData")
+        if len(result_entries) == 0:
+            print("      (Empty)")
+            return
+
+        for idx, row in enumerate(result_entries, start=1):
+            print(f"      [{idx}] Entry")
+
+            field_order = [
+                "eimId",
+                "eimFqdn",
+                "eimIdType",
+                "counterValue",
+                "associationToken",
+                "eimSupportedProtocol",
+                "euiccCiPKId",
+                "indirectProfileDownload",
+            ]
+            for field in field_order:
+                if field not in row:
+                    continue
+                print(f"        - {field:<24}: {Config.Colors.CYAN}{row[field]}{Config.Colors.ENDC}")
+
+            cert_sections = ["eimPublicKeyData", "trustedPublicKeyDataTls"]
+            for section_name in cert_sections:
+                if section_name not in row:
+                    continue
+                section_value = row[section_name]
+                if not isinstance(section_value, dict):
+                    continue
+
+                print(f"        - {section_name}")
+                sec_order = [
+                    "publicKeys",
+                    "signatures",
+                    "objectIdentifiers",
+                    "utf8Strings",
+                    "printableStrings",
+                    "utcTimes",
+                    "generalizedTimes",
+                    "booleans",
+                    "octetStrings",
+                    "integers",
+                    "certificates",
+                ]
+                for sec_key in sec_order:
+                    if sec_key not in section_value:
+                        continue
+                    sec_val = section_value[sec_key]
+
+                    if sec_key == "certificates" and isinstance(sec_val, list):
+                        print("            certificates")
+                        for cert_idx, cert in enumerate(sec_val, start=1):
+                            if not isinstance(cert, dict):
+                                continue
+                            print(f"              [{cert_idx}]")
+                            subj = cert.get("subject", "")
+                            issuer = cert.get("issuer", "")
+                            serial = cert.get("serial", "")
+                            not_before = cert.get("notBefore", "")
+                            not_after = cert.get("notAfter", "")
+                            print(f"                subject : {Config.Colors.CYAN}{subj}{Config.Colors.ENDC}")
+                            print(f"                issuer  : {Config.Colors.CYAN}{issuer}{Config.Colors.ENDC}")
+                            print(f"                serial  : {Config.Colors.CYAN}{serial}{Config.Colors.ENDC}")
+                            print(f"                valid   : {Config.Colors.CYAN}{not_before} -> {not_after}{Config.Colors.ENDC}")
+                        continue
+
+                    print(f"            {sec_key}")
+                    if isinstance(sec_val, list):
+                        for item in sec_val:
+                            print(f"              - {Config.Colors.CYAN}{item}{Config.Colors.ENDC}")
+                    else:
+                        print(f"              - {Config.Colors.CYAN}{sec_val}{Config.Colors.ENDC}")
+
+            if idx < len(result_entries):
+                print("")
 
     def _es10_retrieve(
         self,
