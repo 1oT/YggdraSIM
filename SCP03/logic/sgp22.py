@@ -1035,23 +1035,43 @@ class Sgp22Manager:
 
         return out
 
+    def _find_eim_entries(self, node: Any) -> List[Dict[int, Any]]:
+        wanted_tags = {0x80, 0x81, 0x82, 0x84, 0xA5, 0xA6, 0x87, 0x88}
+        found: List[Dict[int, Any]] = []
+
+        def walk(current: Any):
+            if isinstance(current, dict):
+                keys = set(current.keys())
+                has_entry_shape = False
+                for k in keys:
+                    if k in wanted_tags:
+                        has_entry_shape = True
+                        break
+                if has_entry_shape:
+                    found.append(current)
+                for child in current.values():
+                    walk(child)
+                return
+
+            if isinstance(current, list):
+                for item in current:
+                    walk(item)
+                return
+
+        walk(node)
+        return found
+
     def _print_eim_configuration_compact_json(self, parsed: Dict[int, Any]) -> None:
-        root = TlvParser.get_first(parsed, 0xBF55)
-        if not isinstance(root, dict):
+        root = TlvParser.get_first(parsed, 0xBF55, parsed)
+        entries = self._find_eim_entries(root)
+        if len(entries) == 0:
+            entries = self._find_eim_entries(parsed)
+        if len(entries) == 0:
             self._print_compact_json(parsed, 0xBF55)
             return
 
-        entries_raw = TlvParser.get_first(root, 0xA0)
-        entries: List[Any] = []
-        if isinstance(entries_raw, list):
-            entries = entries_raw
-        elif entries_raw is not None:
-            entries = [entries_raw]
-
         result_entries: List[Dict[str, Any]] = []
         for entry in entries:
-            if not isinstance(entry, dict):
-                continue
             row: Dict[str, Any] = {}
             row["eimId"] = self._decode_text_value(0x80, TlvParser.get_first(entry, 0x80), 0xA0)
             row["eimFqdn"] = self._decode_text_value(0x81, TlvParser.get_first(entry, 0x81), 0xA0)
