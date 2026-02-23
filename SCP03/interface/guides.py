@@ -223,7 +223,18 @@ class ShellGuides:
    - {Config.Colors.BOLD}RetrieveNotificationsList (BF 2B):{Config.Colors.ENDC} Pending notifications. Use MANAGE-PROFILE action 7.
    - {Config.Colors.BOLD}GetEimConfigurationData (BF 55):{Config.Colors.ENDC} eIM configuration (SGP.32 only). Use MANAGE-PROFILE action 8.
 
-{Config.Colors.CYAN}5. Legacy M2M (SGP.02){Config.Colors.ENDC}
+{Config.Colors.CYAN}5. SGP Retrieval Matrix (Wizard Mapping){Config.Colors.ENDC}
+   - {Config.Colors.BOLD}Action 1 - List:{Config.Colors.ENDC} ES10c.GetProfilesInfo / ES10b.GetProfilesInfo. Spec: SGP.22 5.7.15, SGP.32 5.9.14. Request tag `BF2D` (`80 E2 91 00 03 BF 2D 00`).
+   - {Config.Colors.BOLD}Action 2 - Scan:{Config.Colors.ENDC} Composite retrieval sequence (EuiccInfo1/2, EuiccConfiguredData, key/domain data, EID). Uses ES10 retrieval APDUs and GET DATA in read-only mode.
+   - {Config.Colors.BOLD}Action 3/4/5 - Enable/Disable/Delete:{Config.Colors.ENDC} Local profile state operations via ES10c profile management tags `BF31/BF32/BF33`.
+   - {Config.Colors.BOLD}Action 6 - GetRAT:{Config.Colors.ENDC} ES10b.GetRAT. Spec: SGP.22 5.7.22 / SGP.32 5.9.13. Request tag `BF43`.
+   - {Config.Colors.BOLD}Action 7 - GetNotifications:{Config.Colors.ENDC} ES10b.RetrieveNotificationsList. Spec: SGP.22 5.7.10 / SGP.32 5.9.11. Request tag `BF2B`.
+   - {Config.Colors.BOLD}Action 8 - GetEimConfig:{Config.Colors.ENDC} ES10b.GetEimConfigurationData (IoT). Spec: SGP.32 5.9.18. Request tag `BF55`.
+   - {Config.Colors.BOLD}Action 9 - GetConfiguredData:{Config.Colors.ENDC} ES10a.GetEuiccConfiguredData (formerly GetEuiccConfiguredAddresses). Spec: SGP.22 5.7.3 / SGP.32 5.8.1. Request tag `BF3C`.
+   - {Config.Colors.BOLD}Action 10 - GetCerts:{Config.Colors.ENDC} ES10b.GetCerts. Spec: SGP.22 5.7.9 / SGP.32 5.9.10. Request tag `BF56`.
+   - {Config.Colors.BOLD}Action 11 - GetEID:{Config.Colors.ENDC} ES10c.GetEID / ES10b.GetEID. Spec: SGP.22 5.7.20 / SGP.32 5.9.19. Also readable via ECASD GET DATA tag `5A`.
+
+{Config.Colors.CYAN}6. Legacy M2M (SGP.02){Config.Colors.ENDC}
    No LPA on device; SM-SR pushes Profiles via SCP03/SCP80 remote scripts. MANAGE-PROFILE in YggdraSIM can scan/list Profiles via ETSI SELECT and registry read to the ISD-R, without using SGP.22 STORE DATA tags.
 """)
 
