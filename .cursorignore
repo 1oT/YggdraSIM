@@ -7,10 +7,14 @@
 # Metadata Isolation
 .git/
 .vscode/
+**/__pycache__/**
 
-# Project Inclusion
-!/src/**
-!/tests/**
+# Project Inclusion - Updated for YggdraSIM structure
+!/SCP03/**
+!/SCP11/**
+!/SCP80/**
+!/main/**
 !/docs/**
+!/requirements.txt
 !/main.py
 !/.cursorrules
