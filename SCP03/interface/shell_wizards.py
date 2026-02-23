@@ -910,10 +910,25 @@ class ShellInteractiveWizards:
     @staticmethod
     def run_fs_report_wizard(shell) -> None:
         wiz = InteractiveWizard("File System Reporting Wizard", Config.Colors)
-        wiz.add_step("choice", "Report [1=Single FCP, 2=Live Tree, 3=YAML Dump]:", default="1")
-        wiz.add_step("target", "Target FID/Path [SKIP for current]:", default="SKIP")
-        wiz.add_step("dest", "Destination Dir [SKIP for FS_DUMP]:", default="SKIP")
-        wiz.add_step("yaml", "YAML Filename [SKIP for fs_report.yaml]:", default="SKIP")
+        wiz.add_step("choice", "Action [1=Export FS to Disk (DUMP-FS), 2=Generate Full YAML Report]:", default="1")
+        
+        def dest_cond(res):
+            choice = res.get("choice")
+            is_one = False
+            if choice == '1':
+                is_one = True
+            return is_one
+            
+        wiz.add_step("dest", "Destination Directory [SKIP for default FS_DUMP]:", default="SKIP", condition=dest_cond)
+        
+        def yaml_cond(res):
+            choice = res.get("choice")
+            is_two = False
+            if choice == '2':
+                is_two = True
+            return is_two
+            
+        wiz.add_step("yaml", "YAML Filename [SKIP for fs_report.yaml]:", default="SKIP", condition=yaml_cond)
         
         res = wiz.run()
         choice = res.get("choice")
@@ -923,23 +938,6 @@ class ShellInteractiveWizards:
             is_one = True
             
         if is_one:
-            target = res.get("target")
-            has_target = False
-            if target != "SKIP":
-                has_target = True
-                
-            if has_target:
-                shell.fs_ctrl.generate_report(target)
-            
-            if has_target == False:
-                shell.fs_ctrl.generate_report()
-            return
-
-        is_two = False
-        if choice == '2':
-            is_two = True
-            
-        if is_two:
             dest = res.get("dest")
             is_dest_skip = False
             if dest == "SKIP":
@@ -951,11 +949,11 @@ class ShellInteractiveWizards:
             shell.do_dump_fs(dest)
             return
 
-        is_three = False
-        if choice == '3':
-            is_three = True
+        is_two = False
+        if choice == '2':
+            is_two = True
             
-        if is_three:
+        if is_two:
             print("[*] Traversing entire file system... this may take a moment.")
             filename = res.get("yaml")
             is_filename_skip = False

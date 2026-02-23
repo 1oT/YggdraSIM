@@ -280,11 +280,13 @@ def main_menu():
         menu_lines = [
             f"{Colors.HEADER}==============================={Colors.ENDC}",
             f"{Colors.GREEN} [1] Admin Shell (SCP03) - Local Management{Colors.ENDC}",
-            f"{Colors.GREEN} [2] Admin Shell (SCP03) - Script Execution{Colors.ENDC}",
-            f"{Colors.GREEN} [3] Admin Shell (SCP03) - Report & DUMP-FS{Colors.ENDC}",
-            f"{Colors.CYAN} [4] OTA Simulator (SCP80) - Remote Management{Colors.ENDC}",
-            f"{Colors.CYAN} [5] OTA Simulator (SCP80) - Script Execution{Colors.ENDC}",
-            f" {Colors.WARNING}[6] eSIM Management (SCP11) - eUICC Provisioning (BETA){Colors.ENDC}",
+            f"{Colors.CYAN} [2] OTA Simulator (SCP80) - Remote Management{Colors.ENDC}",
+            f" {Colors.WARNING}[3] eSIM Management (SCP11) - eUICC Provisioning (BETA){Colors.ENDC}",
+            "",
+            f"{Colors.HEADER}--- Automated Tasks ---{Colors.ENDC}",
+            f"{Colors.GREEN} [4] Admin Shell (SCP03) - Script Execution{Colors.ENDC}",
+            f"{Colors.GREEN} [5] Admin Shell (SCP03) - Report & DUMP-FS{Colors.ENDC}",
+            f"{Colors.CYAN} [6] OTA Simulator (SCP80) - Script Execution{Colors.ENDC}",
             "",
             " [A] About",
             " [L] License (MPL 2.0)",
@@ -298,15 +300,15 @@ def main_menu():
         if choice == '1':
             run_scp03()
         elif choice == '2':
-            run_scp03_script()
-        elif choice == '3':
-            run_scp03_report()
-        elif choice == '4':
             run_scp80()
-        elif choice == '5':
-            run_scp80_script()
-        elif choice == '6':
+        elif choice == '3':
             run_scp11()
+        elif choice == '4':
+            run_scp03_script()
+        elif choice == '5':
+            run_scp03_report()
+        elif choice == '6':
+            run_scp80_script()
         elif choice == 'A':
             show_about()
         elif choice == 'L':
