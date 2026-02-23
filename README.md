@@ -10,6 +10,8 @@
 
 **YggdraSIM** is a comprehensive, Python-based toolkit for interacting with, analyzing, and managing SIM, USIM, and eUICC (eSIM) cards. It provides a robust interactive shell for GlobalPlatform management, GSMA eSIM profile handling (Consumer, IoT, and M2M), and low-level file system operations via PC/SC smart card readers.
 
+**Note:** Some commands are experimental and have not been fully tested on all card types or firmware versions.
+
 ## 🚀 Key Features
 
 ### 🌐 GlobalPlatform & Lifecycle

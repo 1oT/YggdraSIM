@@ -197,7 +197,7 @@ class ShellGuides:
 {Config.Colors.HEADER}=== GSMA eSIM & eUICC Provisioning Guide ==={Config.Colors.ENDC}
 {Config.Colors.BOLD}Standard:{Config.Colors.ENDC} {cls._link("GSMA SGP.22 / SGP.02 / SGP.32", main_url)}
 
-{Config.Colors.WARNING}Scope (this tool):{Config.Colors.ENDC} Data retrieval only. We do NOT authenticate to ISD-R for provisioning (that is planned for the SCP11 module). Supported: LIST, Enable/Disable/Delete profile, GET DATA, GetProfilesInfo, GetRAT, RetrieveNotificationsList, GetEimConfigurationData (SGP.32), EuiccInfo1/2, EuiccConfiguredData. NOT supported: StoreMetadata, UpdateMetadata, LoadProfile, PrepareDownload, LoadBoundProfilePackage, AuthenticateServer, or any ES10b provisioning flow.
+{Config.Colors.WARNING}Scope (this tool):{Config.Colors.ENDC} Data retrieval only. We do NOT authenticate to ISD-R for provisioning (that is planned for the SCP11 module). Supported: LIST, Enable/Disable/Delete profile, GET DATA, GetProfilesInfo, GetRAT, RetrieveNotificationsList, GetEimConfigurationData (SGP.32), EuiccInfo1/2, EuiccConfiguredData. NOT supported: StoreMetadata, UpdateMetadata, LoadProfile, PrepareDownload, LoadBoundProfilePackage, AuthenticateServer, or any ES10b provisioning flow. Some of these commands are experimental and have not been fully tested on all card types.
 
 {Config.Colors.CYAN}1. Consumer eUICC Architecture (SGP.22){Config.Colors.ENDC}
    Profiles are downloaded and managed via the Local Profile Assistant (LPA) over the ES10c interface (APDU to ISD-R).

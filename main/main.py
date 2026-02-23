@@ -234,6 +234,8 @@ def show_about():
     The suite facilitates lower-layer communication to analyze secure 
     element behavior and protocol compliance.
 
+    {Colors.WARNING}Some commands are experimental and have not been fully tested.{Colors.ENDC}
+
     {Colors.BOLD}Core Sub-Systems:{Colors.ENDC}
     
     * {Colors.CYAN}SCP03 Admin Shell (Local Management):{Colors.ENDC}

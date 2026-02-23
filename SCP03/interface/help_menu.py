@@ -12,7 +12,7 @@ class HelpMenu:
     @staticmethod
     def print_help() -> None:
         print(f"\n{Config.Colors.HEADER}=== YggdraSIM Command Reference ==={Config.Colors.ENDC}")
-        
+        print(f"{Config.Colors.WARNING}Note: Some commands are experimental and have not been fully tested on all card types.{Config.Colors.ENDC}")
         print(f"\n{Config.Colors.CYAN}[ Session & Card Info ]{Config.Colors.ENDC}")
         print("  AUTH-SD        : Authenticate with Security Domain (SCP03).")
         print("  RESET          : Reset the card connection (ATR).")
