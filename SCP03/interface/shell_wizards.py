@@ -458,7 +458,7 @@ class ShellInteractiveWizards:
 
         wiz.add_step(
             "action22",
-            "SGP.22 Action [1=List (LIST/LIST-IOT), 2=Scan (GET-IOT), 3=Enable, 4=Disable, 5=Delete, 6=GetConfiguredData, 7=GetCerts, 8=GetEID]:",
+            "SGP.22 Action [1=List (LIST/LIST-IOT), 2=Scan (GET-IOT), 3=Enable, 4=Disable, 5=Delete, 6=GetConfiguredData, 7=GetCerts, 8=GetEID, 9=ReadMetadata]:",
             default="1",
             condition=action22_cond
         )
@@ -472,7 +472,7 @@ class ShellInteractiveWizards:
 
         wiz.add_step(
             "action32",
-            "SGP.32 Action [1=List (LIST/LIST-IOT), 2=Scan (GET-IOT), 3=Enable, 4=Disable, 5=Delete, 6=GetRAT, 7=GetNotifications, 8=GetEimConfig, 9=GetConfiguredData, 10=GetCerts, 11=GetEID]:",
+            "SGP.32 Action [1=List (LIST/LIST-IOT), 2=Scan (GET-IOT), 3=Enable, 4=Disable, 5=Delete, 6=GetRAT, 7=GetNotifications, 8=GetEimConfig, 9=GetConfiguredData, 10=GetCerts, 11=GetEID, 12=ReadMetadata]:",
             default="1",
             condition=action32_cond
         )
@@ -577,6 +577,13 @@ class ShellInteractiveWizards:
                 is_eight = True
             if is_eight:
                 shell.gp_ctrl.sgp22.get_eid()
+                return
+
+            is_nine = False
+            if action == '9':
+                is_nine = True
+            if is_nine:
+                shell._handle_read_metadata("SGP.22")
                 return
 
             is_three = False
@@ -685,6 +692,13 @@ class ShellInteractiveWizards:
                 is_eleven = True
             if is_eleven:
                 shell.gp_ctrl.sgp22.get_eid()
+                return
+
+            is_twelve = False
+            if action == '12':
+                is_twelve = True
+            if is_twelve:
+                shell._handle_read_metadata("SGP.32")
                 return
 
             is_three = False
