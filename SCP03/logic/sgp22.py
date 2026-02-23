@@ -992,6 +992,19 @@ class Sgp22Manager:
             return out
         return out
 
+    def _collect_decoded_values(self, node: Any, tag: int, parent_tag: Optional[int]) -> List[str]:
+        raw_values = self._collect_tag_bytes(node, tag)
+        out: List[str] = []
+        for raw in raw_values:
+            decoded = self._decode_value(tag, raw, parent_tag)
+            text = str(decoded)
+            if len(text) >= 2:
+                if text[0] == '"' and text[-1] == '"':
+                    text = text[1:-1]
+            if text not in out:
+                out.append(text)
+        return out
+
     def _summarize_cert_block(self, node: Any) -> Dict[str, Any]:
         out: Dict[str, Any] = {}
 
@@ -1032,6 +1045,38 @@ class Sgp22Manager:
             out["publicKeys"] = public_keys
         if signatures:
             out["signatures"] = signatures
+
+        object_identifiers = self._collect_decoded_values(node, 0x06, None)
+        if len(object_identifiers) > 0:
+            out["objectIdentifiers"] = object_identifiers
+
+        utf8_values = self._collect_decoded_values(node, 0x0C, None)
+        if len(utf8_values) > 0:
+            out["utf8Strings"] = utf8_values
+
+        printable_values = self._collect_decoded_values(node, 0x13, None)
+        if len(printable_values) > 0:
+            out["printableStrings"] = printable_values
+
+        utc_values = self._collect_decoded_values(node, 0x17, None)
+        if len(utc_values) > 0:
+            out["utcTimes"] = utc_values
+
+        generalized_values = self._collect_decoded_values(node, 0x18, None)
+        if len(generalized_values) > 0:
+            out["generalizedTimes"] = generalized_values
+
+        boolean_values = self._collect_decoded_values(node, 0x01, None)
+        if len(boolean_values) > 0:
+            out["booleans"] = boolean_values
+
+        octet_values = self._collect_decoded_values(node, 0x04, None)
+        if len(octet_values) > 0:
+            out["octetStrings"] = octet_values
+
+        integer_values = self._collect_decoded_values(node, 0x02, None)
+        if len(integer_values) > 0:
+            out["integers"] = integer_values
 
         return out
 
@@ -1076,6 +1121,7 @@ class Sgp22Manager:
             row["eimId"] = self._decode_text_value(0x80, TlvParser.get_first(entry, 0x80), 0xA0)
             row["eimFqdn"] = self._decode_text_value(0x81, TlvParser.get_first(entry, 0x81), 0xA0)
             row["eimIdType"] = self._decode_text_value(0x82, TlvParser.get_first(entry, 0x82), 0xA0)
+            row["counterValue"] = self._decode_text_value(0x83, TlvParser.get_first(entry, 0x83), 0xA0)
             row["associationToken"] = self._decode_text_value(0x84, TlvParser.get_first(entry, 0x84), 0xA0)
 
             eim_pub_block = TlvParser.get_first(entry, 0xA5)
@@ -1088,6 +1134,7 @@ class Sgp22Manager:
 
             row["eimSupportedProtocol"] = self._decode_text_value(0x87, TlvParser.get_first(entry, 0x87), 0xA0)
             row["euiccCiPKId"] = self._decode_text_value(0x88, TlvParser.get_first(entry, 0x88), 0xA0)
+            row["indirectProfileDownload"] = self._decode_text_value(0x89, TlvParser.get_first(entry, 0x89), 0xA0)
 
             cleaned_row = {}
             for k, v in row.items():
