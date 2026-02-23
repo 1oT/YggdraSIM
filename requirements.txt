@@ -3,3 +3,4 @@ cryptography
 pycryptodome
 asn1crypto
 pyyaml
+pyinstaller
