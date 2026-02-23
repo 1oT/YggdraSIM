@@ -40,7 +40,7 @@ class InteractiveWizards:
         print("  3. INSTALL [for make selectable] (GPCS 11.5.2.3.3)")
         print("  4. INSTALL [for extradition] (GPCS 11.5.2.3.4)")
         print("  5. INSTALL [for registry update] (GPCS 11.5.2.3.5)")
-        print("  6. INSTALL [for personalization] (GPCS 11.5.2.3.6 - Safe DGI/Data Store Update)")
+        print("  6. INSTALL [for personalization] (GPCS 11.5.2.3.6)")
         print("  7. INSTALL [for install and make selectable] (GPCS 11.5.2.3.7)")
         print("  8. Full CAP Install Sequence Builder (Requires CAP/IJC File)")
         print("  0. Exit Menu")
