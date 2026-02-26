@@ -91,14 +91,30 @@ class Sgp22Manager :
         key_info, sd_mgmt_data (hex strings where applicable).
         """
         collected =self ._run_sequence_collect (self .SEQUENCE_SGP22 )
+        euicc_info1_raw =collected .get ("EuiccInfo1","")
+        euicc_info2_raw =collected .get ("EuiccInfo2","")
+        euicc_cfg_raw =collected .get ("EuiccConfiguredData","")
+        key_info_raw =collected .get ("Key Information Template","")
+        sd_mgmt_raw =collected .get ("Security Domain Mgmt Data","")
+
+        euicc_info1_decoded =self ._compact_from_hex (euicc_info1_raw ,0xBF20 )
+        euicc_info2_decoded =self ._compact_from_hex (euicc_info2_raw ,0xBF22 )
+        euicc_cfg_decoded =self ._compact_from_hex (euicc_cfg_raw ,0xBF3C )
+        key_info_decoded =self ._compact_from_hex (key_info_raw ,0xE0 )
+        sd_mgmt_decoded =self ._compact_from_hex (sd_mgmt_raw ,0x66 )
         report ={
         "profiles":[],
         "eid":collected .get ("EID",""),
-        "euicc_info1":collected .get ("EuiccInfo1",""),
-        "euicc_info2":collected .get ("EuiccInfo2",""),
-        "euicc_configured_data":collected .get ("EuiccConfiguredData",""),
-        "key_info":collected .get ("Key Information Template",""),
-        "sd_mgmt_data":collected .get ("Security Domain Mgmt Data",""),
+        "euicc_info1":euicc_info1_decoded if euicc_info1_decoded else euicc_info1_raw ,
+        "euicc_info2":euicc_info2_decoded if euicc_info2_decoded else euicc_info2_raw ,
+        "euicc_configured_data":euicc_cfg_decoded if euicc_cfg_decoded else euicc_cfg_raw ,
+        "key_info":key_info_decoded if key_info_decoded else key_info_raw ,
+        "sd_mgmt_data":sd_mgmt_decoded if sd_mgmt_decoded else sd_mgmt_raw ,
+        "euicc_info1_raw":euicc_info1_raw ,
+        "euicc_info2_raw":euicc_info2_raw ,
+        "euicc_configured_data_raw":euicc_cfg_raw ,
+        "key_info_raw":key_info_raw ,
+        "sd_mgmt_data_raw":sd_mgmt_raw ,
         }
         list_hex =collected .get ("List Profiles","")
         if list_hex :
@@ -108,6 +124,174 @@ class Sgp22Manager :
             except Exception :
                 report ["profiles"]=[]
         return report 
+
+    def _compact_from_hex (self ,data_hex :str ,root_tag :Optional [int ])->Dict [str ,Any ]:
+        if not data_hex :
+            return {}
+        try :
+            data =bytes .fromhex (data_hex )
+        except Exception :
+            return {}
+
+        parsed =self ._safe_parse_tlv (data )
+        if not parsed :
+            return {}
+
+        compact =self ._compact_tlv_node (parsed ,root_tag )
+        if isinstance (compact ,dict ):
+            return compact 
+        return {}
+
+    def _read_der_length (self ,data :bytes ,length_idx :int )->Tuple [int ,int ]:
+        has_len =False 
+        if length_idx <len (data ):
+            has_len =True 
+        if has_len ==False :
+            return (0 ,0 )
+
+        first =data [length_idx ]
+        is_short =False 
+        if (first &0x80 )==0 :
+            is_short =True 
+        if is_short :
+            return (first ,1 )
+
+        n_len =first &0x7F 
+        has_len_bytes =False 
+        if n_len >0 :
+            if n_len <=4 :
+                has_len_bytes =True 
+        if has_len_bytes ==False :
+            return (0 ,0 )
+
+        end =length_idx +1 +n_len 
+        in_range =False 
+        if end <=len (data ):
+            in_range =True 
+        if in_range ==False :
+            return (0 ,0 )
+
+        length =int .from_bytes (data [length_idx +1 :end ],"big")
+        return (length ,1 +n_len )
+
+    def _collect_cert_summaries_from_raw (self ,data :bytes )->List [Dict [str ,Any ]]:
+        out :List [Dict [str ,Any ]]=[]
+        seen_serials =set ()
+        i =0 
+        while i <len (data ):
+            is_seq =False 
+            if data [i ]==0x30 :
+                is_seq =True 
+
+            if is_seq ==False :
+                i +=1 
+                continue 
+
+            der_len ,len_octets =self ._read_der_length (data ,i +1 )
+            has_len =False 
+            if der_len >0 :
+                if len_octets >0 :
+                    has_len =True 
+            if has_len ==False :
+                i +=1 
+                continue 
+
+            total_len =1 +len_octets +der_len 
+            end_idx =i +total_len 
+            in_range =False 
+            if end_idx <=len (data ):
+                in_range =True 
+            if in_range ==False :
+                i +=1 
+                continue 
+
+            candidate =data [i :end_idx ]
+            info =AdvancedDecoders .decode_cert_der (candidate )
+            has_info =False 
+            if info :
+                has_info =True 
+            if has_info :
+                serial =str (info .get ("serial",""))
+                is_new =False 
+                if serial not in seen_serials :
+                    is_new =True 
+                if is_new :
+                    seen_serials .add (serial )
+                    out .append (
+                    {
+                    "subject":str (info .get ("subject","")),
+                    "issuer":str (info .get ("issuer","")),
+                    "serial":serial ,
+                    "not_valid_before":str (info .get ("not_valid_before","")),
+                    "not_valid_after":str (info .get ("not_valid_after","")),
+                    }
+                    )
+                    i =end_idx 
+                    continue 
+
+            i +=1 
+        return out 
+
+    def _export_eim_configuration_data (self )->Dict [str ,Any ]:
+        data =self ._es10_retrieve_data ("BF5500")
+        if not data :
+            return {}
+
+        parsed =self ._safe_parse_tlv (data )
+        if not parsed :
+            return {"raw_hex":data .hex ().upper ()}
+
+        root =TlvParser .get_first (parsed ,0xBF55 ,parsed )
+        entries =self ._find_eim_entries (root )
+        if len (entries )==0 :
+            entries =self ._find_eim_entries (parsed )
+
+        out_entries :List [Dict [str ,Any ]]=[]
+        for entry in entries :
+            row :Dict [str ,Any ]={}
+            row ["eim_id"]=self ._decode_text_value (0x80 ,TlvParser .get_first (entry ,0x80 ),0xE1 )
+            row ["eim_fqdn"]=self ._decode_text_value (0x81 ,TlvParser .get_first (entry ,0x81 ),0xE1 )
+            row ["eim_id_type"]=self ._decode_text_value (0x82 ,TlvParser .get_first (entry ,0x82 ),0xE1 )
+            row ["counter_value"]=self ._decode_text_value (0x83 ,TlvParser .get_first (entry ,0x83 ),0xE1 )
+            row ["association_token"]=self ._decode_text_value (0x84 ,TlvParser .get_first (entry ,0x84 ),0xE1 )
+            row ["supported_protocol"]=self ._decode_text_value (0x87 ,TlvParser .get_first (entry ,0x87 ),0xE1 )
+            row ["euicc_ci_pkid"]=self ._decode_text_value (0x88 ,TlvParser .get_first (entry ,0x88 ),0xE1 )
+            row ["indirect_profile_download"]=self ._decode_text_value (0x89 ,TlvParser .get_first (entry ,0x89 ),0xE1 )
+
+            eim_pub =TlvParser .get_first (entry ,0xA5 )
+            if eim_pub is not None :
+                row ["eim_public_key_data"]=self ._summarize_cert_block (eim_pub )
+
+            tls_pub =TlvParser .get_first (entry ,0xA6 )
+            if tls_pub is not None :
+                row ["trusted_tls_key_data"]=self ._summarize_cert_block (tls_pub )
+
+            clean_row :Dict [str ,Any ]={}
+            for key ,value in row .items ():
+                if value is None :
+                    continue 
+                if isinstance (value ,str ):
+                    if len (value )==0 :
+                        continue 
+                if isinstance (value ,dict ):
+                    if len (value )==0 :
+                        continue 
+                clean_row [key ]=value 
+
+            if len (clean_row )>0 :
+                out_entries .append (clean_row )
+
+        if len (out_entries )>0 :
+            return {
+            "entries":out_entries ,
+            "raw_hex":data .hex ().upper ()
+            }
+
+        compact =self ._compact_tlv_node (parsed ,0xBF55 )
+        return {
+        "compact":compact ,
+        "raw_hex":data .hex ().upper ()
+        }
 
     def _es10_retrieve_data (self ,payload :str )->bytes :
         self ._select_isd_r ()
@@ -199,16 +383,24 @@ class Sgp22Manager :
         sgp32_section :Dict [str ,Any ]={}
 
         sgp32_section ["get_rat"]=self ._compact_from_payload ("BF4300",0xBF43 )
-        sgp32_section ["get_eim_configuration_data"]=self ._compact_from_payload ("BF5500",0xBF55 )
+        sgp32_section ["get_eim_configuration_data"]=self ._export_eim_configuration_data ()
 
         cert_data =self ._es10_retrieve_data ("BF5600")
         cert_parsed =self ._safe_parse_tlv (cert_data )
         if cert_parsed :
             sgp32_section ["get_certs_summary"]=self ._collect_cert_summaries (cert_parsed )
             if len (sgp32_section ["get_certs_summary"])==0 :
-                sgp32_section ["get_certs_raw"]=cert_data .hex ().upper ()
+                from_raw =self ._collect_cert_summaries_from_raw (cert_data )
+                if len (from_raw )>0 :
+                    sgp32_section ["get_certs_summary"]=from_raw 
+                else :
+                    sgp32_section ["get_certs_raw"]=cert_data .hex ().upper ()
         elif cert_data :
-            sgp32_section ["get_certs_raw"]=cert_data .hex ().upper ()
+            from_raw =self ._collect_cert_summaries_from_raw (cert_data )
+            if len (from_raw )>0 :
+                sgp32_section ["get_certs_summary"]=from_raw 
+            else :
+                sgp32_section ["get_certs_raw"]=cert_data .hex ().upper ()
         else :
             sgp32_section ["get_certs_summary"]=[]
 

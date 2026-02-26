@@ -133,6 +133,7 @@ class StatusWordTranslator :
     0x6100 :"More data available",
     0x6283 :"Selected file invalidated",
     0x6300 :"Authentication failed",
+    0x6310 :"More data available (GET STATUS continuation)",
     0x6400 :"State of non-volatile memory unchanged",
     0x6700 :"Wrong length",
     0x6881 :"Logical channel not supported",

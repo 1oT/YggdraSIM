@@ -1185,14 +1185,41 @@ class FileSystemController :
 
             for node in explicit_nodes :
                 p_cmd =f"00A40400{len(parent_fid)//2:02X}{parent_fid}"if len (parent_fid )>4 else f"00A4000002{parent_fid}"
-                self .tp .transmit (p_cmd ,silent =True )
+                p_data ,p_sw1 ,p_sw2 =self .tp .transmit (p_cmd ,silent =True )
+                retry_parent_short =False 
+                if p_sw1 !=0x90 and p_sw1 !=0x61 and p_sw1 !=0x9F :
+                    if len (parent_fid )==4 :
+                        retry_parent_short =True 
+                if retry_parent_short :
+                    p_data ,p_sw1 ,p_sw2 =self .tp .transmit (f"00A4000402{parent_fid}",silent =True )
                 selected_fid =None 
                 data =None 
 
+                is_root_self =False 
+                if len (node ['fids'])>0 :
+                    first_fid =node ['fids'][0 ]
+                    if first_fid ==parent_fid :
+                        is_root_self =True 
+                if is_root_self :
+                    parent_ok =False 
+                    if p_sw1 ==0x90 or p_sw1 ==0x61 or p_sw1 ==0x9F :
+                        parent_ok =True 
+                    if parent_ok :
+                        selected_fid =parent_fid 
+                        data =p_data 
+
                 for fid in node ['fids']:
+                    if selected_fid is not None :
+                        break 
                     cmd =f"00A40404{len(fid)//2:02X}{fid}"if len (fid )>4 else f"00A4000402{fid}"
                     data ,sw1 ,sw2 =self .tp .transmit (cmd ,silent =True )
-                    if sw1 ==0x90 or sw1 ==0x61 :
+                    retry_short_fid =False 
+                    if sw1 !=0x90 and sw1 !=0x61 and sw1 !=0x9F :
+                        if len (fid )==4 :
+                            retry_short_fid =True 
+                    if retry_short_fid :
+                        data ,sw1 ,sw2 =self .tp .transmit (f"00A4000002{fid}",silent =True )
+                    if sw1 ==0x90 or sw1 ==0x61 or sw1 ==0x9F :
                         selected_fid =fid 
                         break 
 
@@ -1228,7 +1255,7 @@ class FileSystemController :
                     cmd =f"00A4000402{target_fid}"
                     data ,sw1 ,sw2 =self .tp .transmit (cmd ,silent =True )
 
-                    if sw1 ==0x90 or sw1 ==0x61 :
+                    if sw1 ==0x90 or sw1 ==0x61 or sw1 ==0x9F :
                         self .current_fid =target_fid 
                         self ._parse_fcp_internal (data ,target_fid =target_fid )
 
@@ -1394,23 +1421,52 @@ class FileSystemController :
                 if len (parent_fid )<=4 :
                     p_cmd =f"00A4000002{parent_fid}"
 
-                self .tp .transmit (p_cmd ,silent =True )
+                p_data ,p_sw1 ,p_sw2 =self .tp .transmit (p_cmd ,silent =True )
+                retry_parent_short =False 
+                if p_sw1 !=0x90 and p_sw1 !=0x61 and p_sw1 !=0x9F :
+                    if len (parent_fid )==4 :
+                        retry_parent_short =True 
+                if retry_parent_short :
+                    p_data ,p_sw1 ,p_sw2 =self .tp .transmit (f"00A4000402{parent_fid}",silent =True )
 
                 selected_fid =None 
                 last_data =None 
 
+                is_root_self =False 
+                if len (node ['fids'])>0 :
+                    first_fid =node ['fids'][0 ]
+                    if first_fid ==parent_fid :
+                        is_root_self =True 
+                if is_root_self :
+                    parent_ok =False 
+                    if p_sw1 ==0x90 or p_sw1 ==0x61 or p_sw1 ==0x9F :
+                        parent_ok =True 
+                    if parent_ok :
+                        selected_fid =parent_fid 
+                        last_data =p_data 
+
                 for fid in node ['fids']:
+                    if selected_fid is not None :
+                        break 
                     if len (fid )>4 :
                         cmd =f"00A40404{len(fid)//2:02X}{fid}"
                     if len (fid )<=4 :
                         cmd =f"00A4000402{fid}"
 
                     data ,sw1 ,sw2 =self .tp .transmit (cmd ,silent =True )
+                    retry_short_fid =False 
+                    if sw1 !=0x90 and sw1 !=0x61 and sw1 !=0x9F :
+                        if len (fid )==4 :
+                            retry_short_fid =True 
+                    if retry_short_fid :
+                        data ,sw1 ,sw2 =self .tp .transmit (f"00A4000002{fid}",silent =True )
 
                     valid_sel =False 
                     if sw1 ==0x90 :
                         valid_sel =True 
                     if sw1 ==0x61 :
+                        valid_sel =True 
+                    if sw1 ==0x9F :
                         valid_sel =True 
 
                     if valid_sel :
@@ -1464,6 +1520,8 @@ class FileSystemController :
                     if sw1 ==0x90 :
                         valid_wc_sel =True 
                     if sw1 ==0x61 :
+                        valid_wc_sel =True 
+                    if sw1 ==0x9F :
                         valid_wc_sel =True 
 
                     if valid_wc_sel :

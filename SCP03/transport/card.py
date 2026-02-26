@@ -113,4 +113,10 @@ class CardTransporter :
                 chunk ,sw1 ,sw2 =self .connection .transmit ([0x00 ,0xC0 ,0x00 ,0x00 ,sw2 ])
                 accumulated .extend (chunk )
             return accumulated ,sw1 ,sw2 
+        if sw1 ==0x9F :
+            accumulated =list (data )
+            while sw1 ==0x9F :
+                chunk ,sw1 ,sw2 =self .connection .transmit ([0x00 ,0xC0 ,0x00 ,0x00 ,sw2 ])
+                accumulated .extend (chunk )
+            return accumulated ,sw1 ,sw2 
         return data ,sw1 ,sw2 

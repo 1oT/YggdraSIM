@@ -545,6 +545,7 @@ class ContentDecoder :
         '2FE2':cls .decode_iccid ,
         '2F00':cls .decode_dir ,
         '2F06':AdvancedDecoders .decode_ef_arr ,
+        '6F06':AdvancedDecoders .decode_ef_arr ,
         '2F08':cls .decode_hex_chunks ,
         '4300':cls .decode_pkcs15_acrf_json ,
         '4310':cls .decode_pkcs15_accf_json ,
