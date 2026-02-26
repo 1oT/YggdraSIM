@@ -1253,24 +1253,47 @@ class ShellInteractiveWizards :
             if is_std_22 :
                 standard ="SGP.22"
 
+            adm_input =input ("Enter ADM: (Skip if no) ").strip ()
+            auth_input =input ("Authenticate SD? (Y/N) ").strip ().upper ()
+            do_auth =False 
+            if auth_input =="Y":
+                do_auth =True 
+            if auth_input =="YES":
+                do_auth =True 
+
             print ("[*] Building combined FS + eUICC report... this may take a moment.")
             temp_name =""
             with tempfile .NamedTemporaryFile (prefix ="fs_report_",suffix =".yaml",delete =False )as temp_file :
                 temp_name =temp_file .name 
 
             try :
+                print ("[*] Resetting card before File System collection...")
+                shell ._handle_reset ()
+                has_adm =False 
+                adm_clean =adm_input .strip ().upper ()
+                if len (adm_clean )>0 :
+                    if adm_clean !="SKIP":
+                        has_adm =True 
+                if has_adm :
+                    shell .gp_ctrl .verify_adm (adm_input )
                 shell .fs_ctrl .dump_fs_to_yaml (temp_name )
                 fs_data ={}
                 with open (temp_name ,"r")as fsf :
                     loaded =yaml .safe_load (fsf )
                     if isinstance (loaded ,dict ):
                         fs_data =loaded 
+                print ("[*] Resetting card before eUICC collection...")
+                shell ._handle_reset ()
                 euicc_report =shell ._build_euicc_export_report (standard =standard )
+                print ("[*] Resetting card before MNO-SD collection...")
+                shell ._handle_reset ()
+                mnosd_report =shell ._build_mnosd_export_report (adm_hex =adm_input ,authenticate_sd =do_auth )
                 combined ={
                 "generated":euicc_report .get ("generated"),
                 "standard":standard ,
                 "file_system_report":fs_data ,
                 "euicc_report":euicc_report ,
+                "mnosd_report":mnosd_report ,
                 }
                 with open (filename ,"w")as out :
                     yaml .dump (combined ,out ,default_flow_style =False ,allow_unicode =True ,sort_keys =False )

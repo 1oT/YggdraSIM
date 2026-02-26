@@ -390,6 +390,62 @@ class GlobalPlatformManager :
         elif sw1 !=0x90 and not silent :
             print (f"{Config.Colors.FAIL}[-] Error: {sw1:02X}{sw2:02X}{Config.Colors.ENDC}")
 
+    def _parse_key_template_entries (self ,data :bytes )->List [Dict [str ,Any ]]:
+        entries :List [Dict [str ,Any ]]=[]
+        i =0 
+        while i <len (data )-5 :
+            has_c0 =False 
+            if data [i ]==0xC0 :
+                if data [i +1 ]==0x04 :
+                    has_c0 =True 
+            if has_c0 :
+                kid =data [i +2 ]
+                kver =data [i +3 ]
+                ktype =data [i +4 ]
+                klen =data [i +5 ]
+                type_map ={
+                0x80 :"DES",
+                0x81 :"DES",
+                0x88 :"AES",
+                0xFF :"Ext"
+                }
+                entries .append (
+                {
+                "version":f"{kver:02X}",
+                "id":f"{kid:02X}",
+                "type":type_map .get (ktype ,f"{ktype:02X}"),
+                "length":klen 
+                }
+                )
+                i +=6 
+                continue 
+            i +=1 
+        return entries 
+
+    def get_keys_info_data (self ,target_aid_hex :Optional [str ]=None )->Dict [str ,Any ]:
+        if target_aid_hex :
+            self .tp .transmit (f"00A40400{len(target_aid_hex)//2:02X}{target_aid_hex}",silent =True )
+        else :
+            has_session =False 
+            if self .tp .session :
+                has_session =True 
+            is_auth =False 
+            if has_session :
+                if self .tp .session .is_authenticated :
+                    is_auth =True 
+            if is_auth ==False :
+                aid_hex =self .target_aid .hex ().upper ()
+                self .tp .transmit (f"00A40400{len(self.target_aid):02X}{aid_hex}",silent =True )
+
+        data ,sw1 ,sw2 =self .tp .transmit ("80CA00E000",silent =True )
+        out :Dict [str ,Any ]={
+        "status":f"{sw1:02X}{sw2:02X}",
+        "raw_hex":data .hex ().upper ()
+        }
+        if sw1 ==0x90 :
+            out ["entries"]=self ._parse_key_template_entries (data )
+        return out 
+
     def list_registry (self ,kind ='APPS'):
         p1_map ={'APPS':0x40 ,'PACKAGES':0x20 ,'SD':0x80 }
 
@@ -505,6 +561,168 @@ class GlobalPlatformManager :
         state_str =state_map .get (lcs_byte ,f"0x{lcs_byte:02X}")
         print (f"{aid:<34} | {state_str:<12} | {extra}")
 
+    def _state_to_string (self ,lcs_byte :int )->str :
+        state_map ={
+        0x00 :"LOADED",
+        0x01 :"OP_READY",
+        0x03 :"INSTALLED",
+        0x07 :"SELECTABLE",
+        0x0F :"PERSONALIZED",
+        0x80 :"LOCKED",
+        0x83 :"TERMINATED"
+        }
+        return state_map .get (lcs_byte ,f"0x{lcs_byte:02X}")
+
+    def _registry_entries_from_data (self ,data :bytes ,kind :str )->List [Dict [str ,Any ]]:
+        entries :List [Dict [str ,Any ]]=[]
+        if any (b ==0xE3 for b in data ):
+            i =0 
+            while i <len (data ):
+                is_e3 =False 
+                if data [i ]==0xE3 :
+                    is_e3 =True 
+                if is_e3 ==False :
+                    i +=1 
+                    continue 
+                has_len =False 
+                if i +1 <len (data ):
+                    has_len =True 
+                if has_len ==False :
+                    break 
+                tag_len =data [i +1 ]
+                end =i +2 +tag_len 
+                in_range =False 
+                if end <=len (data ):
+                    in_range =True 
+                if in_range ==False :
+                    break 
+                entry =data [i +2 :end ]
+                i =end 
+                parsed =TlvParser .parse (entry )
+
+                aid =""
+                if 0x4F in parsed :
+                    aid =parsed [0x4F ].hex ().upper ()
+
+                lcs_byte =0 
+                if 0x9F70 in parsed :
+                    lcs_byte =parsed [0x9F70 ][0 ]
+
+                extra =""
+                if 0xC5 in parsed :
+                    extra =parsed [0xC5 ].hex ().upper ()
+
+                entries .append (
+                {
+                "aid":aid ,
+                "state":self ._state_to_string (lcs_byte ),
+                "extra":extra 
+                }
+                )
+            return entries 
+
+        i =0 
+        while i <len (data ):
+            try :
+                has_pair =False 
+                if i <len (data )-1 :
+                    has_pair =True 
+                if has_pair :
+                    length_byte =data [i ]
+                    next_byte =data [i +1 ]
+                    valid_prefix =False 
+                    if 5 <=length_byte <=16 :
+                        if next_byte ==0xA0 :
+                            valid_prefix =True 
+                    if valid_prefix ==False :
+                        i +=1 
+                        continue 
+
+                aid_len =data [i ]
+                i +=1 
+                if i +aid_len >len (data ):
+                    break 
+                aid =data [i :i +aid_len ].hex ().upper ()
+                i +=aid_len 
+
+                lcs_byte =0 
+                if i <len (data ):
+                    lcs_byte =data [i ]
+                i +=1 
+
+                extra_byte =0 
+                if i <len (data ):
+                    extra_byte =data [i ]
+                i +=1 
+
+                extra =f"{extra_byte:02X}"
+                is_pkg =False 
+                if kind =='PACKAGES':
+                    is_pkg =True 
+                if is_pkg :
+                    if extra_byte >0 :
+                        extra =f"Len={extra_byte}"
+                        i +=extra_byte 
+
+                entries .append (
+                {
+                "aid":aid ,
+                "state":self ._state_to_string (lcs_byte ),
+                "extra":extra 
+                }
+                )
+            except Exception :
+                break 
+        return entries 
+
+    def get_registry_data (self ,kind :str ='APPS')->Dict [str ,Any ]:
+        p1_map ={'APPS':0x40 ,'PACKAGES':0x20 ,'SD':0x80 }
+        p1 =p1_map .get (kind ,0x40 )
+        p2 =0x00 
+        full_data =bytearray ()
+        pages =0 
+        last_sw1 =0x6F 
+        last_sw2 =0x00 
+
+        while True :
+            cmd =f"80F2{p1:02X}{p2:02X}024F00"
+            data ,sw1 ,sw2 =self .tp .transmit (cmd ,silent =True )
+            last_sw1 =sw1 
+            last_sw2 =sw2 
+            pages +=1 
+
+            has_chunk =False 
+            if sw1 ==0x90 or sw1 ==0x63 :
+                if len (data )>0 :
+                    has_chunk =True 
+            if has_chunk :
+                full_data .extend (data )
+
+            is_done =False 
+            if sw1 ==0x90 :
+                is_done =True 
+            if is_done :
+                break 
+
+            has_more =False 
+            if sw1 ==0x63 :
+                if sw2 ==0x10 :
+                    has_more =True 
+            if has_more :
+                p2 +=1 
+                continue 
+            break 
+
+        entries =self ._registry_entries_from_data (bytes (full_data ),kind )
+        return {
+        "kind":kind ,
+        "status":f"{last_sw1:02X}{last_sw2:02X}",
+        "pages":pages ,
+        "count":len (entries ),
+        "entries":entries ,
+        "raw_hex":bytes (full_data ).hex ().upper ()
+        }
+
     def _decode_key_template (self ,data :bytes ):
         from SCP03 .config import Config 
         print (f"\n{Config.Colors.HEADER}--- Card Key Registry ---{Config.Colors.ENDC}")
@@ -549,6 +767,13 @@ class GlobalPlatformManager :
         cmd ="80CA9F7F00"
         data ,sw1 ,sw2 =self .tp .transmit (cmd ,silent =True )
         return (data if sw1 ==0x90 else None ,sw1 ,sw2 )
+
+    def get_data_raw (self ,p1 :int ,p2 :int )->Tuple [bytes ,int ,int ]:
+        if p1 ==0x2F and p2 ==0x00 :
+            cmd =f"80CA{p1:02X}{p2:02X}025C0000"
+        else :
+            cmd =f"80CA{p1:02X}{p2:02X}00"
+        return self .tp .transmit (cmd ,silent =True )
 
     def get_data (self ,p1 :int ,p2 :int ):
         print (f"{Config.Colors.CYAN}[*] GET DATA Tag: {p1:02X}{p2:02X}...{Config.Colors.ENDC}")

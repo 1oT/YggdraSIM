@@ -14,7 +14,7 @@ import io
 import re 
 import datetime 
 import yaml 
-from typing import Dict ,Optional 
+from typing import Dict ,Optional ,Any 
 
 try :
     import readline 
@@ -776,6 +776,92 @@ class ShellDispatcher :
             has_cplc =True 
         if has_cplc :
             report ["cplc_hex"]=cplc_data .hex ().upper ()
+        report ["generated"]=datetime .datetime .now ().isoformat ()
+        return report 
+
+    def _build_mnosd_export_report (self ,adm_hex :str ="",authenticate_sd :bool =True )->Dict :
+        report :Dict [str ,Any ]={}
+        adm_clean =adm_hex .strip ().replace (" ","").upper ()
+        has_adm =False 
+        if len (adm_clean )>0 :
+            if adm_clean !="SKIP":
+                has_adm =True 
+        report ["adm_attempted"]=has_adm 
+        if has_adm :
+            print (f"{Config.Colors.CYAN}[*] Verifying ADM before MNO-SD sequence...{Config.Colors.ENDC}")
+            self .gp_ctrl .verify_adm (adm_clean )
+
+        report ["auth_attempted"]=authenticate_sd 
+        auth_ok =False 
+        if authenticate_sd :
+            print (f"{Config.Colors.CYAN}[*] Authenticating SD before MNO-SD sequence...{Config.Colors.ENDC}")
+            auth_ok =self .gp_ctrl .authenticate ()
+            report ["auth_ok"]=auth_ok 
+        else :
+            report ["auth_ok"]=False 
+
+        def _print_sw (label :str ,status :str )->None :
+            is_ok =False 
+            if status =="9000":
+                is_ok =True 
+            if is_ok ==False :
+                print (f"{Config.Colors.WARNING}[!] {label} SW={status}{Config.Colors.ENDC}")
+
+        report ["keys"]=self .gp_ctrl .get_keys_info_data ()
+        _print_sw ("MNO-SD KEYS",str (report ["keys"].get ("status","")))
+
+        report ["apps"]=self .gp_ctrl .get_registry_data ("APPS")
+        _print_sw ("MNO-SD APPS",str (report ["apps"].get ("status","")))
+
+        report ["pkgs"]=self .gp_ctrl .get_registry_data ("PACKAGES")
+        _print_sw ("MNO-SD PKGS",str (report ["pkgs"].get ("status","")))
+
+        report ["sd"]=self .gp_ctrl .get_registry_data ("SD")
+        _print_sw ("MNO-SD SD",str (report ["sd"].get ("status","")))
+
+        def _tlv_to_plain (node ):
+            if isinstance (node ,dict ):
+                out ={}
+                for key ,value in node .items ():
+                    k_text =str (key )
+                    if isinstance (key ,int ):
+                        if key <=0xFF :
+                            k_text =f"{key:02X}"
+                        else :
+                            k_text =f"{key:04X}"
+                    out [k_text ]=_tlv_to_plain (value )
+                return out 
+            if isinstance (node ,list ):
+                out_list =[]
+                for item in node :
+                    out_list .append (_tlv_to_plain (item ))
+                return out_list 
+            if isinstance (node ,bytes ):
+                return node .hex ().upper ()
+            return node 
+
+        get_data_tags =[
+        ("sd_management_data",0x00 ,0x66 ),
+        ("cplc",0x9F ,0x7F ),
+        ("apps_in_sd",0x2F ,0x00 ),
+        ]
+        get_data_out :Dict [str ,Any ]={}
+        for name ,p1 ,p2 in get_data_tags :
+            data ,sw1 ,sw2 =self .gp_ctrl .get_data_raw (p1 ,p2 )
+            entry :Dict [str ,Any ]={
+            "tag":f"{p1:02X}{p2:02X}",
+            "status":f"{sw1:02X}{sw2:02X}",
+            "raw_hex":data .hex ().upper ()
+            }
+            if sw1 ==0x90 and len (data )>0 :
+                try :
+                    parsed =TlvParser .parse (data )
+                    entry ["decoded"]=_tlv_to_plain (parsed )
+                except Exception :
+                    pass 
+            get_data_out [name ]=entry 
+            _print_sw (f"MNO-SD GET-DATA {p1:02X}{p2:02X}",entry ["status"])
+        report ["get_data"]=get_data_out 
         report ["generated"]=datetime .datetime .now ().isoformat ()
         return report 
 
