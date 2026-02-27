@@ -1,0 +1,2796 @@
+import atexit
+import hashlib
+import os
+import shutil
+import socket
+import ssl
+import sys
+from urllib.parse import urlparse
+from dataclasses import dataclass
+from typing import Any, Callable, Dict, List, Optional, Tuple
+
+try:
+    from SCP03.core.utils import TlvParser
+except Exception:
+    TlvParser = None
+
+try:
+    from SCP03.config import Config as SCP03Config
+except Exception:
+    SCP03Config = None
+
+try:
+    import readline
+except ImportError:
+    readline = None
+
+
+def _encode_length(length: int) -> bytes:
+    if length < 0x80:
+        return bytes([length])
+    if length <= 0xFF:
+        return bytes([0x81, length])
+    return bytes([0x82, (length >> 8) & 0xFF, length & 0xFF])
+
+
+def _build_tlv(tag: bytes, value: bytes) -> bytes:
+    return tag + _encode_length(len(value)) + value
+
+
+@dataclass
+class ProfileRow:
+    iccid: str
+    state: str
+    profile_class: str
+    nickname: str
+    aid: str
+
+
+@dataclass
+class ProfileMetadataView:
+    iccid: str
+    aid: str
+    state: str
+    profile_class: str
+    nickname: str
+    service_provider: str
+    profile_name: str
+    profile_policy_rules_hex: str
+
+
+@dataclass
+class CommandSpec:
+    name: str
+    usage: str
+    description: str
+    handler: Callable[[str], bool]
+    scaffold: bool
+
+
+@dataclass
+class CardSnapshot:
+    eid: str
+    configured_raw: bytes
+    configured_decoded: Dict[str, Any]
+    profiles: List[ProfileRow]
+
+
+@dataclass
+class ConsoleStyle:
+    header: str
+    cyan: str
+    green: str
+    yellow: str
+    red: str
+    bold: str
+    end: str
+
+
+class SCP11Console:
+    """Interactive SCP11 command shell with persistent card session."""
+    TAG_ENABLE_PROFILE = 0xBF31
+    TAG_DISABLE_PROFILE = 0xBF32
+    TAG_DELETE_PROFILE = 0xBF33
+    TAG_REMOVE_NOTIFICATION = 0xBF30
+    TAG_RESULT = 0x80
+    TAG_CTX_0 = 0xA0
+    TAG_AID = 0x4F
+    TAG_ICCID = 0x5A
+    DEFAULT_AID_REGISTRY_PATH = os.path.normpath(
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "SCP03", "aid.txt")
+    )
+    HELP_USAGE_WIDTH = 31
+
+    def __init__(self, client: Any):
+        self.client = client
+        self.cfg = client.cfg
+        self.apdu_channel = client.apdu_channel
+        self.orchestrator = client.orchestrator
+        self.current_smdp_address = self.cfg.RSP_SERVER_URL
+        self.current_es9_base_url = self.cfg.ES9_BASE_URL
+        self.current_es9_verify_tls = self.cfg.ES9_VERIFY_TLS
+        self.current_es9_ca_bundle_path = self.cfg.ES9_CA_BUNDLE_PATH
+        self._es9_auto_derived = False
+        self._style = self._build_style()
+        self._commands: Dict[str, CommandSpec] = {}
+        self._primary_commands: List[str] = []
+        self._history_file = ""
+        self._help_pane_locked = False
+        self._help_pane_rows = 0
+        self._terminal_rows = 0
+        self._pane_two_col = False
+        self._pane_left_width = 0
+        self._pane_gutter = 0
+        self._latest_snapshot: Optional[CardSnapshot] = None
+        self._aid_registry = self._load_aid_registry()
+        self._register_commands()
+        self._setup_readline()
+
+    def run(self) -> None:
+        self._initialize_session()
+        self._activate_locked_help_pane_if_supported()
+        self._print_start_snapshot()
+        if self._help_pane_locked is False:
+            self._print_help()
+
+        try:
+            while True:
+                try:
+                    raw_line = input("\n[SCP11] > ").strip()
+                except KeyboardInterrupt:
+                    print("\n[*] Exiting SCP11 shell.")
+                    break
+                except EOFError:
+                    print("\n[*] Exiting SCP11 shell.")
+                    break
+
+                if len(raw_line) == 0:
+                    continue
+
+                command, argument = self._split_command(raw_line)
+                command_upper = command.upper()
+                if command_upper not in self._commands:
+                    print(f"[!] Unknown command: {command}")
+                    if self._help_pane_locked:
+                        print("[*] Help pane is pinned in the top half.")
+                        self._refresh_locked_help_pane()
+                    else:
+                        self._print_help()
+                    continue
+
+                handler = self._commands[command_upper].handler
+                keep_running = handler(argument)
+                if keep_running is False:
+                    break
+        finally:
+            self._deactivate_locked_help_pane()
+
+    def _activate_locked_help_pane_if_supported(self) -> None:
+        if sys.stdout.isatty() is False:
+            return
+
+        term_name = os.environ.get("TERM", "")
+        if len(term_name.strip()) == 0:
+            return
+        if term_name.lower() == "dumb":
+            return
+
+        size = shutil.get_terminal_size(fallback=(120, 40))
+        rows = size.lines
+        if rows < 24:
+            return
+
+        self._help_pane_locked = True
+        self._terminal_rows = rows
+        self._help_pane_rows = rows // 2
+        if self._help_pane_rows < 10:
+            self._help_pane_rows = 10
+
+        sys.stdout.write("\033[2J\033[H")
+        sys.stdout.flush()
+        self._refresh_locked_help_pane()
+        self._set_lower_scroll_region()
+
+    def _deactivate_locked_help_pane(self) -> None:
+        if self._help_pane_locked is False:
+            return
+        sys.stdout.write("\033[r")
+        sys.stdout.flush()
+        self._help_pane_locked = False
+
+    def _set_lower_scroll_region(self) -> None:
+        if self._help_pane_locked is False:
+            return
+        lower_start = self._help_pane_rows + 1
+        sys.stdout.write(f"\033[{lower_start};{self._terminal_rows}r")
+        sys.stdout.write(f"\033[{lower_start};1H")
+        sys.stdout.flush()
+
+    def _refresh_locked_help_pane(self) -> None:
+        if self._help_pane_locked is False:
+            return
+
+        size = shutil.get_terminal_size(fallback=(120, 40))
+        self._terminal_rows = size.lines
+        self._help_pane_rows = self._terminal_rows // 2
+        if self._help_pane_rows < 10:
+            self._help_pane_rows = 10
+
+        width = size.columns
+        lines = self._build_locked_help_lines(width=width, max_lines=self._help_pane_rows)
+
+        sys.stdout.write("\0337")
+        sys.stdout.write("\033[r")
+        for index in range(self._help_pane_rows):
+            row = index + 1
+            text = ""
+            if index < len(lines):
+                text = lines[index]
+            clipped = text[:width]
+            padded = clipped.ljust(width)
+            rendered = self._colorize_pinned_line(padded)
+            sys.stdout.write(f"\033[{row};1H{rendered}")
+        self._set_lower_scroll_region()
+        sys.stdout.write("\0338")
+        sys.stdout.flush()
+
+    def _build_locked_help_lines(self, width: int, max_lines: int) -> List[str]:
+        left_lines: List[str] = []
+        left_lines.append("SCP11 Command Pane")
+        left_lines.append("-" * 74)
+        left_lines.append("Core SCP11:")
+        for usage, description in self._get_core_help_rows():
+            left_lines.append(f"  {usage:<{self.HELP_USAGE_WIDTH}} {description}")
+        left_lines.append("")
+        left_lines.append("SGP.22 / SGP.32:")
+        for usage, description in self._get_extended_help_rows():
+            left_lines.append(f"  {usage:<{self.HELP_USAGE_WIDTH}} {description}")
+
+        if width < 120:
+            self._pane_two_col = False
+            self._pane_left_width = 0
+            self._pane_gutter = 0
+            if len(left_lines) > max_lines:
+                clipped: List[str] = left_lines[: max_lines - 1]
+                clipped.append("  ... use HELP to refresh this pane")
+                return clipped
+            return left_lines
+
+        gutter = 2
+        left_width = width // 2
+        if left_width < 64:
+            left_width = 64
+        right_width = width - left_width - gutter
+        if right_width < 28:
+            right_width = 28
+            left_width = width - right_width - gutter
+        self._pane_two_col = True
+        self._pane_left_width = left_width
+        self._pane_gutter = gutter
+
+        right_lines = self._build_snapshot_pane_lines(right_width)
+        if len(left_lines) > max_lines:
+            left_lines = left_lines[: max_lines - 1] + ["  ... use HELP to refresh this pane"]
+        if len(right_lines) > max_lines:
+            right_lines = right_lines[: max_lines - 1] + ["... run SCAN to refresh"]
+
+        merged: List[str] = []
+        for index in range(max_lines):
+            left = ""
+            right = ""
+            if index < len(left_lines):
+                left = left_lines[index][:left_width].ljust(left_width)
+            else:
+                left = " " * left_width
+            if index < len(right_lines):
+                right = right_lines[index][:right_width]
+            merged.append(f"{left}{' ' * gutter}{right}")
+        return merged
+
+    def _colorize_pinned_line(self, line: str) -> str:
+        if self._style.end == "":
+            return line
+
+        if self._pane_two_col is False:
+            return self._colorize_left_pane_text(line)
+
+        left = line[: self._pane_left_width]
+        middle = line[self._pane_left_width : self._pane_left_width + self._pane_gutter]
+        right = line[self._pane_left_width + self._pane_gutter :]
+        colored_left = self._colorize_left_pane_text(left)
+        colored_right = self._colorize_right_pane_text(right)
+        return f"{colored_left}{middle}{colored_right}"
+
+    def _colorize_left_pane_text(self, text: str) -> str:
+        stripped = text.strip()
+        if len(stripped) == 0:
+            return text
+
+        if stripped.startswith("SCP11 Command Pane"):
+            return f"{self._style.bold}{self._style.header}{text}{self._style.end}"
+        if stripped.startswith("Core SCP11:") or stripped.startswith("SGP.22 / SGP.32:"):
+            return f"{self._style.bold}{self._style.cyan}{text}{self._style.end}"
+        if stripped.startswith("---"):
+            return f"{self._style.header}{text}{self._style.end}"
+
+        if text.startswith("  "):
+            min_len = 2 + self.HELP_USAGE_WIDTH
+            if len(text) >= min_len:
+                usage = text[2 : 2 + self.HELP_USAGE_WIDTH]
+                description = text[2 + self.HELP_USAGE_WIDTH :]
+                return (
+                    f"  {self._style.green}{usage}{self._style.end}"
+                    f"{self._style.cyan}{description}{self._style.end}"
+                )
+            return f"{self._style.cyan}{text}{self._style.end}"
+
+        return text
+
+    def _colorize_right_pane_text(self, text: str) -> str:
+        stripped = text.strip()
+        if len(stripped) == 0:
+            return text
+
+        if stripped.startswith("Session Snapshot") or stripped.startswith("Profiles on Card:"):
+            return f"{self._style.bold}{self._style.header}{text}{self._style.end}"
+        if stripped.startswith("---"):
+            return f"{self._style.header}{text}{self._style.end}"
+        if stripped.startswith("ENABLED"):
+            return f"{self._style.green}{text}{self._style.end}"
+        if stripped.startswith("DISABLED"):
+            return f"{self._style.yellow}{text}{self._style.end}"
+
+        if ":" in text:
+            lead_len = len(text) - len(text.lstrip(" "))
+            lead = text[:lead_len]
+            content = text[lead_len:]
+            key, value = content.split(":", 1)
+            return (
+                f"{lead}{self._style.yellow}{key}:{self._style.end}"
+                f"{self._style.cyan}{value}{self._style.end}"
+            )
+        return f"{self._style.cyan}{text}{self._style.end}"
+
+    def _build_snapshot_pane_lines(self, width: int) -> List[str]:
+        lines: List[str] = []
+        lines.append("Session Snapshot")
+        lines.append("-" * min(width, 38))
+
+        snapshot = self._latest_snapshot
+        if snapshot is None:
+            lines.append("(snapshot not loaded)")
+            return lines
+
+        default_smdp = snapshot.configured_decoded.get("default_smdp", "")
+        root_smds_primary = snapshot.configured_decoded.get("root_smds_primary", "")
+        root_smds_additional = snapshot.configured_decoded.get("root_smds_additional", [])
+
+        if len(default_smdp) == 0:
+            default_smdp = "(not present)"
+        if len(root_smds_primary) == 0:
+            root_smds_primary = "(not present)"
+        additional_smds = "(none)"
+        if len(root_smds_additional) > 0:
+            additional_smds = ", ".join(root_smds_additional)
+
+        eid_value = snapshot.eid
+        if len(eid_value) == 0:
+            eid_value = "(unavailable)"
+        key_width = 19
+        lines.append(f"{'EID':<{key_width}}: {eid_value}")
+        lines.append(f"{'Card Default SM-DP+':<{key_width}}: {default_smdp}")
+        lines.append(f"{'Root SM-DS':<{key_width}}: {root_smds_primary}")
+        lines.append(f"{'Additional SM-DS':<{key_width}}: {additional_smds}")
+        lines.append(f"{'Active Flow Target':<{key_width}}: {self.current_smdp_address}")
+        lines.append(f"{'Active ES9 URL':<{key_width}}: {self.current_es9_base_url}")
+        lines.append("")
+        lines.append("Profiles on Card:")
+        lines.append("State    Class ICCID                Nickname")
+        lines.append("-" * min(width, 48))
+
+        if len(snapshot.profiles) == 0:
+            lines.append("(none decoded)")
+            return lines
+
+        max_profile_rows = 6
+        profile_count = len(snapshot.profiles)
+        shown = snapshot.profiles[:max_profile_rows]
+        for row in shown:
+            nickname_width = width - 37
+            if nickname_width < 8:
+                nickname_width = 8
+            lines.append(
+                f"{row.state:<8} {row.profile_class:<5} {row.iccid:<20} {row.nickname[:nickname_width]:<{nickname_width}}"
+            )
+            aid_alias = self._resolve_alias_for_aid(row.aid)
+            if aid_alias is None:
+                lines.append(f"  AID: {row.aid[: max(0, width - 7)]}")
+            else:
+                aid_text = f"{row.aid} ({aid_alias})"
+                lines.append(f"  AID: {aid_text[: max(0, width - 7)]}")
+        if profile_count > max_profile_rows:
+            lines.append(f"... {profile_count - max_profile_rows} more profiles")
+        return lines
+
+    def _initialize_session(self) -> None:
+        print(f"{self._style.cyan}[*] Connecting and loading SCP11 credentials...{self._style.end}")
+        self.orchestrator._phase_connect()
+        self.orchestrator._phase_load_credentials()
+        print(f"{self._style.green}[+] SCP11 session initialized.{self._style.end}")
+
+    def _print_start_snapshot(self, announce_when_pinned: bool = False) -> None:
+        snapshot = self._collect_snapshot()
+        self._latest_snapshot = snapshot
+
+        if self._help_pane_locked:
+            self._refresh_locked_help_pane()
+            if announce_when_pinned:
+                print("[*] Snapshot refreshed in pinned pane.")
+            return
+
+        print(f"\n{self._style.header}{'=' * 74}{self._style.end}")
+        print(f"{self._style.bold}SCP11 Session Ready{self._style.end}")
+        print(f"{self._style.header}{'=' * 74}{self._style.end}")
+        print(
+            f"EID:                "
+            f"{self._style.cyan}{snapshot.eid if len(snapshot.eid) > 0 else '(unavailable)'}{self._style.end}"
+        )
+
+        default_smdp = snapshot.configured_decoded.get("default_smdp", "")
+        root_smds_primary = snapshot.configured_decoded.get("root_smds_primary", "")
+        root_smds_additional = snapshot.configured_decoded.get("root_smds_additional", [])
+
+        if len(default_smdp) == 0:
+            default_smdp = "(not present)"
+        if len(root_smds_primary) == 0:
+            root_smds_primary = "(not present)"
+        if len(root_smds_additional) == 0:
+            additional_smds = "(none)"
+        else:
+            additional_smds = ", ".join(root_smds_additional)
+
+        print(f"Card Default SM-DP+: {self._style.cyan}{default_smdp}{self._style.end}")
+        print(f"Root SM-DS:          {self._style.cyan}{root_smds_primary}{self._style.end}")
+        print(f"Additional SM-DS:    {self._style.cyan}{additional_smds}{self._style.end}")
+        print(f"Active Flow Target:  {self._style.cyan}{self.current_smdp_address}{self._style.end}")
+        print(f"Active ES9 Base URL: {self._style.cyan}{self.current_es9_base_url}{self._style.end}")
+        self._print_profiles_table(snapshot.profiles, title="Profiles on Card")
+
+    def _print_help(self) -> None:
+        print(f"\n{self._style.bold}Core SCP11 commands:{self._style.end}")
+        core_rows = self._get_core_help_rows()
+        self._print_help_rows(core_rows)
+
+        print(f"\n{self._style.bold}SGP.22 / SGP.32 commands:{self._style.end}")
+        extended_rows = self._get_extended_help_rows()
+        self._print_help_rows(extended_rows)
+
+    def _get_core_help_rows(self) -> List[Tuple[str, str]]:
+        return [
+            ("HELP", "Show command list"),
+            ("SCAN", "Refresh card snapshot"),
+            ("GET-EID", "Read and decode EID value"),
+            ("STATUS", "Decode EuiccConfiguredData fields"),
+            ("LIST", "List profiles with metadata"),
+            ("GET-SMDP", "Show card default SM-DP+ and SM-DS roots"),
+            ("SET-SMDP <address>", "Set default SM-DP+ address on card"),
+            ("GET-ES9", "Show active ES9 base URL in tool"),
+            ("SET-ES9 [--persist] <url>", "Set active ES9 base URL in tool"),
+            ("SET-ES9-TLS [--persist] <on|off>", "Set ES9 TLS verification mode"),
+            ("SET-ES9-CA [--persist] <pemPath|NONE>", "Set ES9 CA bundle path for TLS verification"),
+            ("ES9-CERT-INFO", "Inspect ES9 server TLS certificate and trust status"),
+            ("VERIFY-SCP11 [matchingId]", "Run SCP11 auth verification only"),
+            ("FLOW [matchingId]", "Run SCP11 flow with active SM-DP+ target"),
+            ("DOWNLOAD-AC <activation>", "Parse activation code and run FLOW"),
+            ("EXIT", "Leave SCP11 shell"),
+        ]
+
+    def _get_extended_help_rows(self) -> List[Tuple[str, str]]:
+        return [
+            ("GET-EUICC-INFO1", "ES10a.GetEuiccInfo1"),
+            ("GET-EUICC-INFO2", "ES10a.GetEuiccInfo2"),
+            ("GET-RAT", "ES10b.GetRAT"),
+            ("GET-NOTIFICATIONS", "ES10b.RetrieveNotificationsList"),
+            ("REMOVE-NOTIFICATION <seq>", "ES10b.RemoveNotificationFromList"),
+            ("ENABLE-PROFILE <id|aid|alias>", "ES10c.EnableProfile"),
+            ("DISABLE-PROFILE <id|aid|alias>", "ES10c.DisableProfile"),
+            ("DELETE-PROFILE <id|aid|alias>", "ES10c.DeleteProfile"),
+            ("AIDS", "List AID aliases loaded from Admin registry"),
+            ("READ-METADATA [22|32]", "Read profile metadata from GetProfilesInfo"),
+            ("GET-POL <id|aid|alias>", "Read profilePolicyRules (PPR) from metadata"),
+            ("SET-POL <id|aid|alias> <hex>", "Guarded profile policy update placeholder"),
+            ("GET-METADATA <id|aid|alias>", "Read metadata for one profile"),
+            ("STORE-METADATA <id|aid|alias> <hex>", "Guarded profile metadata update placeholder"),
+            ("GET-CERTS", "ES10b.GetCerts"),
+            ("GET-EIM-CONFIG", "ES10b.GetEimConfigurationData (SGP.32)"),
+            ("EIM-DISCOVER", "SGP.32 eIM capability discovery"),
+            ("EIM-AUTHENTICATE [matchingId]", "SGP.32/SGP.22 authentication phase"),
+            ("EIM-DOWNLOAD", "SGP.32 eIM profile operation (scaffold)"),
+        ]
+
+    def _split_command(self, line: str) -> Tuple[str, str]:
+        parts = line.split(maxsplit=1)
+        if len(parts) == 1:
+            return parts[0], ""
+        return parts[0], parts[1].strip()
+
+    def _register_commands(self) -> None:
+        self._add_command("HELP", "HELP", "Show command list", self._cmd_help, aliases=["H", "?"])
+        self._add_command("SCAN", "SCAN", "Refresh card snapshot", self._cmd_scan, aliases=["INFO"])
+        self._add_command("GET-EID", "GET-EID", "Read and decode EID value", self._cmd_get_eid)
+        self._add_command("STATUS", "STATUS", "Decode EuiccConfiguredData fields", self._cmd_status)
+        self._add_command("LIST", "LIST", "List profile metadata", self._cmd_list)
+        self._add_command("GET-SMDP", "GET-SMDP", "Show default SM-DP+ values", self._cmd_get_smdp)
+        self._add_command("GET-ES9", "GET-ES9", "Show active ES9 base URL", self._cmd_get_es9)
+        self._add_command(
+            "SET-ES9",
+            "SET-ES9 [--persist] <url>",
+            "Set active ES9 base URL",
+            self._cmd_set_es9,
+        )
+        self._add_command(
+            "SET-ES9-TLS",
+            "SET-ES9-TLS [--persist] <on|off>",
+            "Set ES9 TLS verification mode",
+            self._cmd_set_es9_tls,
+        )
+        self._add_command(
+            "SET-ES9-CA",
+            "SET-ES9-CA [--persist] <pemPath|NONE>",
+            "Set ES9 CA bundle path",
+            self._cmd_set_es9_ca,
+        )
+        self._add_command(
+            "ES9-CERT-INFO",
+            "ES9-CERT-INFO",
+            "Inspect ES9 TLS certificate",
+            self._cmd_es9_cert_info,
+        )
+        self._add_command(
+            "SET-SMDP",
+            "SET-SMDP <address>",
+            "Set default SM-DP+ address on card",
+            self._cmd_set_smdp,
+        )
+        self._add_command(
+            "VERIFY-SCP11",
+            "VERIFY-SCP11 [matchingId]",
+            "Run SCP11 auth verification only",
+            self._cmd_verify_scp11,
+        )
+        self._add_command("FLOW", "FLOW [matchingId]", "Run SCP11 flow", self._cmd_flow)
+        self._add_command(
+            "DOWNLOAD-AC",
+            "DOWNLOAD-AC <activation>",
+            "Parse activation code and run FLOW",
+            self._cmd_download_activation_code,
+        )
+        self._add_command("EXIT", "EXIT", "Leave SCP11 shell", self._cmd_exit, aliases=["QUIT", "Q"])
+
+        self._add_command("GET-EUICC-INFO1", "GET-EUICC-INFO1", "ES10a.GetEuiccInfo1", self._cmd_get_euicc_info1)
+        self._add_command("GET-EUICC-INFO2", "GET-EUICC-INFO2", "ES10a.GetEuiccInfo2", self._cmd_get_euicc_info2)
+        self._add_command("GET-RAT", "GET-RAT", "ES10b.GetRAT", self._cmd_get_rat)
+        self._add_command(
+            "GET-NOTIFICATIONS",
+            "GET-NOTIFICATIONS",
+            "ES10b.RetrieveNotificationsList",
+            self._cmd_get_notifications,
+        )
+        self._add_command(
+            "REMOVE-NOTIFICATION",
+            "REMOVE-NOTIFICATION <seq>",
+            "ES10b.RemoveNotificationFromList",
+            self._cmd_remove_notification,
+        )
+        self._add_command("ENABLE-PROFILE", "ENABLE-PROFILE <iccid-or-aid>", "ES10c.EnableProfile", self._cmd_enable_profile)
+        self._add_command(
+            "DISABLE-PROFILE",
+            "DISABLE-PROFILE <iccid-or-aid>",
+            "ES10c.DisableProfile",
+            self._cmd_disable_profile,
+        )
+        self._add_command(
+            "DELETE-PROFILE",
+            "DELETE-PROFILE <iccid-or-aid>",
+            "ES10c.DeleteProfile",
+            self._cmd_delete_profile,
+        )
+        self._add_command("AIDS", "AIDS", "List AID aliases loaded from Admin registry", self._cmd_aids)
+        self._add_command("READ-METADATA", "READ-METADATA [22|32]", "Read metadata", self._cmd_read_metadata)
+        self._add_command("GET-POL", "GET-POL <id|aid|alias>", "Read profile policy", self._cmd_get_pol)
+        self._add_command("SET-POL", "SET-POL <id|aid|alias> <hex>", "Guarded POL update", self._cmd_set_pol)
+        self._add_command("GET-METADATA", "GET-METADATA <id|aid|alias>", "Read profile metadata", self._cmd_get_metadata)
+        self._add_command(
+            "STORE-METADATA",
+            "STORE-METADATA <id|aid|alias> <hex>",
+            "Guarded metadata update",
+            self._cmd_store_metadata,
+        )
+        self._add_command("GET-CERTS", "GET-CERTS", "ES10b.GetCerts", self._cmd_get_certs)
+        self._add_command(
+            "GET-EIM-CONFIG",
+            "GET-EIM-CONFIG",
+            "ES10b.GetEimConfigurationData (SGP.32)",
+            self._cmd_get_eim_config,
+        )
+        self._add_command("EIM-DISCOVER", "EIM-DISCOVER", "SGP.32 eIM capability discovery", self._cmd_eim_discover)
+        self._add_command(
+            "EIM-AUTHENTICATE",
+            "EIM-AUTHENTICATE [matchingId]",
+            "SGP.32/SGP.22 authentication phase",
+            self._cmd_eim_authenticate,
+        )
+        self._add_scaffold("EIM-DOWNLOAD", "EIM-DOWNLOAD", "SGP.32 eIM profile operation")
+
+    def _add_command(
+        self,
+        name: str,
+        usage: str,
+        description: str,
+        handler: Callable[[str], bool],
+        aliases: Optional[List[str]] = None,
+    ) -> None:
+        spec = CommandSpec(
+            name=name,
+            usage=usage,
+            description=description,
+            handler=handler,
+            scaffold=False,
+        )
+        self._commands[name] = spec
+        self._primary_commands.append(name)
+
+        if aliases is not None:
+            for alias in aliases:
+                self._commands[alias] = spec
+
+    def _add_scaffold(self, name: str, usage: str, description: str) -> None:
+        def scaffold_handler(_: str, command_name: str = name) -> bool:
+            return self._cmd_scaffold(command_name)
+
+        spec = CommandSpec(
+            name=name,
+            usage=usage,
+            description=description,
+            handler=scaffold_handler,
+            scaffold=True,
+        )
+        self._commands[name] = spec
+        self._primary_commands.append(name)
+
+    def _cmd_help(self, _: str) -> bool:
+        if self._help_pane_locked:
+            self._refresh_locked_help_pane()
+            print("[*] Help pane refreshed (pinned on top half).")
+        else:
+            self._print_help()
+        return True
+
+    def _cmd_scan(self, _: str) -> bool:
+        self._print_start_snapshot(announce_when_pinned=True)
+        return True
+
+    def _cmd_get_eid(self, _: str) -> bool:
+        eid = self._get_eid()
+        if len(eid) == 0:
+            print("[*] EID: (unavailable)")
+            return True
+        print(f"[*] EID: {eid}")
+        return True
+
+    def _cmd_status(self, _: str) -> bool:
+        self._print_configured_status()
+        return True
+
+    def _cmd_list(self, _: str) -> bool:
+        self._print_profiles()
+        return True
+
+    def _cmd_get_smdp(self, _: str) -> bool:
+        self._get_smdp_address()
+        return True
+
+    def _cmd_set_smdp(self, argument: str) -> bool:
+        self._set_smdp_address(argument)
+        return True
+
+    def _cmd_get_es9(self, _: str) -> bool:
+        self._print_es9_base_url()
+        return True
+
+    def _cmd_set_es9(self, argument: str) -> bool:
+        tokens = argument.strip().split()
+        if len(tokens) == 0:
+            print("[!] Usage: SET-ES9 [--persist] <https://host[:port][/base]>")
+            return True
+
+        persist = False
+        url_tokens: List[str] = []
+        for token in tokens:
+            if token == "--persist":
+                persist = True
+                continue
+            url_tokens.append(token)
+
+        if len(url_tokens) != 1:
+            print("[!] Usage: SET-ES9 [--persist] <https://host[:port][/base]>")
+            return True
+
+        url_text = url_tokens[0]
+        if url_text.lower().startswith("http://") is False and url_text.lower().startswith("https://") is False:
+            print("[!] ES9 URL must start with http:// or https://")
+            return True
+
+        set_ok = self._set_es9_base_url(url_text, source="manual")
+        if set_ok is False:
+            return True
+
+        if persist:
+            self._persist_es9_base_url(self.current_es9_base_url)
+        return True
+
+    def _cmd_set_es9_tls(self, argument: str) -> bool:
+        tokens = argument.strip().split()
+        if len(tokens) == 0:
+            print("[!] Usage: SET-ES9-TLS [--persist] <on|off>")
+            return True
+
+        persist = False
+        mode_tokens: List[str] = []
+        for token in tokens:
+            if token == "--persist":
+                persist = True
+                continue
+            mode_tokens.append(token)
+
+        if len(mode_tokens) != 1:
+            print("[!] Usage: SET-ES9-TLS [--persist] <on|off>")
+            return True
+
+        value = mode_tokens[0].strip().lower()
+        if value in ["on", "true", "1", "yes"]:
+            enabled = True
+        elif value in ["off", "false", "0", "no"]:
+            enabled = False
+        else:
+            print("[!] TLS mode must be on|off.")
+            return True
+
+        set_ok = self._set_es9_tls_verify(enabled)
+        if set_ok is False:
+            return True
+
+        if persist:
+            self._persist_es9_verify_tls(self.current_es9_verify_tls)
+        return True
+
+    def _cmd_set_es9_ca(self, argument: str) -> bool:
+        tokens = argument.strip().split()
+        if len(tokens) == 0:
+            print("[!] Usage: SET-ES9-CA [--persist] <pemPath|NONE>")
+            return True
+
+        persist = False
+        path_tokens: List[str] = []
+        for token in tokens:
+            if token == "--persist":
+                persist = True
+                continue
+            path_tokens.append(token)
+
+        if len(path_tokens) != 1:
+            print("[!] Usage: SET-ES9-CA [--persist] <pemPath|NONE>")
+            return True
+
+        ca_input = path_tokens[0].strip()
+        if ca_input.upper() == "NONE":
+            ca_input = ""
+
+        set_ok = self._set_es9_ca_bundle_path(ca_input)
+        if set_ok is False:
+            return True
+
+        if persist:
+            self._persist_es9_ca_bundle_path(self.current_es9_ca_bundle_path)
+        return True
+
+    def _cmd_es9_cert_info(self, _: str) -> bool:
+        self._print_es9_cert_info()
+        return True
+
+    def _cmd_flow(self, argument: str) -> bool:
+        self._run_full_flow(argument)
+        return True
+
+    def _cmd_verify_scp11(self, argument: str) -> bool:
+        matching_id = argument.strip()
+        self._verify_scp11_authentication(matching_id=matching_id)
+        return True
+
+    def _cmd_download_activation_code(self, argument: str) -> bool:
+        self._download_activation_code(argument)
+        return True
+
+    def _cmd_exit(self, _: str) -> bool:
+        self._save_history()
+        print(f"{self._style.cyan}[*] Session closed.{self._style.end}")
+        return False
+
+    def _cmd_scaffold(self, command_name: str) -> bool:
+        print(
+            f"{self._style.yellow}[*] {command_name} is scaffolded and reserved for upcoming "
+            f"SGP.22/SGP.32 expansion.{self._style.end}"
+        )
+        print(f"{self._style.yellow}[*] Keep using SCAN / STATUS / LIST / FLOW for now.{self._style.end}")
+        return True
+
+    def _cmd_get_euicc_info1(self, _: str) -> bool:
+        self._run_retrieve_command("GetEuiccInfo1", bytes.fromhex("BF2000"), root_tag=0xBF20)
+        return True
+
+    def _cmd_get_euicc_info2(self, _: str) -> bool:
+        self._run_retrieve_command("GetEuiccInfo2", bytes.fromhex("BF2200"), root_tag=0xBF22)
+        return True
+
+    def _cmd_get_rat(self, _: str) -> bool:
+        self._run_retrieve_command("GetRAT", bytes.fromhex("BF4300"), root_tag=0xBF43)
+        return True
+
+    def _cmd_get_notifications(self, _: str) -> bool:
+        self._run_retrieve_command("RetrieveNotificationsList", bytes.fromhex("BF2B00"), root_tag=0xBF2B)
+        return True
+
+    def _cmd_remove_notification(self, argument: str) -> bool:
+        seq_text = argument.strip()
+        if len(seq_text) == 0:
+            print("[!] Usage: REMOVE-NOTIFICATION <seq>")
+            return True
+
+        seq_value = self._parse_integer_value(seq_text)
+        if seq_value is None:
+            print("[!] Sequence number must be decimal or hex (prefix 0x).")
+            return True
+        if seq_value < 0:
+            print("[!] Sequence number must be non-negative.")
+            return True
+
+        payload = self._build_remove_notification_payload(seq_value)
+        self._execute_result_command(
+            title=f"RemoveNotificationFromList seq={seq_value}",
+            payload=payload,
+            result_outer_tag=self.TAG_REMOVE_NOTIFICATION,
+        )
+        return True
+
+    def _cmd_enable_profile(self, argument: str) -> bool:
+        self._run_profile_state_command(
+            identifier=argument.strip(),
+            func_tag=self.TAG_ENABLE_PROFILE,
+            action_label="EnableProfile",
+            command_name="ENABLE-PROFILE",
+        )
+        return True
+
+    def _cmd_disable_profile(self, argument: str) -> bool:
+        self._run_profile_state_command(
+            identifier=argument.strip(),
+            func_tag=self.TAG_DISABLE_PROFILE,
+            action_label="DisableProfile",
+            command_name="DISABLE-PROFILE",
+        )
+        return True
+
+    def _cmd_delete_profile(self, argument: str) -> bool:
+        self._run_profile_state_command(
+            identifier=argument.strip(),
+            func_tag=self.TAG_DELETE_PROFILE,
+            action_label="DeleteProfile",
+            command_name="DELETE-PROFILE",
+        )
+        return True
+
+    def _cmd_aids(self, _: str) -> bool:
+        self._print_aid_registry()
+        return True
+
+    def _cmd_read_metadata(self, argument: str) -> bool:
+        _ = argument
+        entries = self._collect_profile_metadata()
+        print(f"\n{self._style.bold}[+] Profile Metadata Summary{self._style.end}")
+        if len(entries) == 0:
+            print("    | (No metadata entries)")
+            return True
+
+        print("ICCID                 AID / Alias                               State     Class  PPR")
+        print("-" * 104)
+        for entry in entries:
+            aid_alias = self._resolve_alias_for_aid(entry.aid)
+            aid_display = entry.aid
+            if aid_alias is not None:
+                aid_display = f"{entry.aid} ({aid_alias})"
+            ppr_display = entry.profile_policy_rules_hex
+            if len(ppr_display) == 0:
+                ppr_display = "-"
+            print(
+                f"{entry.iccid:<20} {aid_display[:40]:<40} {entry.state:<9} "
+                f"{entry.profile_class:<6} {ppr_display}"
+            )
+        return True
+
+    def _cmd_get_pol(self, argument: str) -> bool:
+        target = argument.strip()
+        if len(target) == 0:
+            print("[!] Usage: GET-POL <id|aid|alias>")
+            return True
+
+        metadata = self._find_profile_metadata(target)
+        if metadata is None:
+            print(f"{self._style.red}[!] Profile target not found: {target}{self._style.end}")
+            return True
+
+        print(f"\n{self._style.bold}[+] Profile Policy Rules{self._style.end}")
+        print(f"    | ICCID               : {metadata.iccid}")
+        print(f"    | AID                 : {metadata.aid}")
+        if len(metadata.profile_policy_rules_hex) == 0:
+            print("    | PPR Raw             : (not present)")
+            print("    | Decoded             : none")
+            return True
+
+        decoded = self._decode_ppr_ids(metadata.profile_policy_rules_hex)
+        print(f"    | PPR Raw             : {metadata.profile_policy_rules_hex}")
+        print(f"    | Decoded             : {decoded}")
+        return True
+
+    def _cmd_set_pol(self, argument: str) -> bool:
+        parts = argument.strip().split(maxsplit=1)
+        if len(parts) < 2:
+            print("[!] Usage: SET-POL <id|aid|alias> <polHex>")
+            return True
+        target = parts[0]
+        pol_hex = parts[1].strip().upper()
+        if self._is_hex(pol_hex) is False:
+            print("[!] POL payload must be valid hex.")
+            return True
+        print(f"{self._style.yellow}[*] SET-POL requested for target: {target}{self._style.end}")
+        self._print_guarded_provisioning_message()
+        return True
+
+    def _cmd_get_metadata(self, argument: str) -> bool:
+        target = argument.strip()
+        if len(target) == 0:
+            print("[!] Usage: GET-METADATA <id|aid|alias>")
+            return True
+
+        metadata = self._find_profile_metadata(target)
+        if metadata is None:
+            print(f"{self._style.red}[!] Profile target not found: {target}{self._style.end}")
+            return True
+
+        print(f"\n{self._style.bold}[+] Profile Metadata{self._style.end}")
+        print(f"    | ICCID               : {metadata.iccid}")
+        aid_alias = self._resolve_alias_for_aid(metadata.aid)
+        aid_display = metadata.aid
+        if aid_alias is not None:
+            aid_display = f"{metadata.aid} ({aid_alias})"
+        print(f"    | AID                 : {aid_display}")
+        print(f"    | State               : {metadata.state}")
+        print(f"    | Profile Class       : {metadata.profile_class}")
+        print(f"    | Nickname            : {metadata.nickname}")
+        print(f"    | Service Provider    : {metadata.service_provider}")
+        print(f"    | Profile Name        : {metadata.profile_name}")
+        ppr_display = metadata.profile_policy_rules_hex
+        if len(ppr_display) == 0:
+            ppr_display = "(not present)"
+        print(f"    | Profile Policy Rules: {ppr_display}")
+        return True
+
+    def _cmd_store_metadata(self, argument: str) -> bool:
+        parts = argument.strip().split(maxsplit=1)
+        if len(parts) < 2:
+            print("[!] Usage: STORE-METADATA <id|aid|alias> <metadataHex>")
+            return True
+        metadata_hex = parts[1].strip().upper()
+        if self._is_hex(metadata_hex) is False:
+            print("[!] Metadata payload must be valid hex.")
+            return True
+        target = parts[0]
+        print(f"{self._style.yellow}[*] STORE-METADATA requested for target: {target}{self._style.end}")
+        self._print_guarded_provisioning_message()
+        return True
+
+    def _cmd_get_certs(self, _: str) -> bool:
+        self._run_retrieve_command("GetCerts", bytes.fromhex("BF5600"), root_tag=0xBF56)
+        return True
+
+    def _cmd_get_eim_config(self, _: str) -> bool:
+        self._run_retrieve_command("GetEimConfigurationData", bytes.fromhex("BF5500"), root_tag=0xBF55)
+        return True
+
+    def _cmd_eim_discover(self, _: str) -> bool:
+        print(f"{self._style.cyan}[*] Running SGP.32 discovery retrieval sequence...{self._style.end}")
+        self._cmd_get_eim_config("")
+        self._cmd_get_certs("")
+        self._cmd_get_rat("")
+        self._cmd_get_notifications("")
+        return True
+
+    def _cmd_eim_authenticate(self, argument: str) -> bool:
+        matching_id = argument.strip()
+        print(f"{self._style.cyan}[*] Running authentication phase only...{self._style.end}")
+        try:
+            self.orchestrator._phase_connect()
+            self.orchestrator._phase_load_credentials()
+            auth_seed = self.orchestrator._phase_authentication_seed(
+                matching_id=matching_id,
+                smdp_address=self.current_smdp_address,
+            )
+            self.orchestrator._phase_authenticate_server(auth_seed, matching_id=matching_id)
+        except Exception as error:
+            print(f"{self._style.red}[!] EIM-AUTHENTICATE failed: {error}{self._style.end}")
+            return True
+
+        transaction_id_hex = self.orchestrator.state.transaction_id.hex().upper()
+        if len(transaction_id_hex) == 0:
+            transaction_id_hex = "(not available)"
+        print(f"{self._style.green}[+] Authentication phase completed.{self._style.end}")
+        print(f"[*] Transaction ID: {transaction_id_hex}")
+        return True
+
+    def _collect_snapshot(self) -> CardSnapshot:
+        eid = self._get_eid()
+        configured_raw = self._get_configured_addresses_raw()
+        configured_decoded = self._decode_euicc_configured_data(configured_raw)
+        profiles = self._fetch_profiles()
+
+        card_default_smdp = configured_decoded.get("default_smdp", "")
+        if len(card_default_smdp) > 0:
+            self.current_smdp_address = card_default_smdp
+            self._apply_es9_autoderive_from_card(card_default_smdp)
+        else:
+            self._warn_es9_placeholder_without_card_default()
+
+        return CardSnapshot(
+            eid=eid,
+            configured_raw=configured_raw,
+            configured_decoded=configured_decoded,
+            profiles=profiles,
+        )
+
+    def _get_eid(self) -> str:
+        try:
+            payload = _build_tlv(bytes.fromhex("BF3E"), _build_tlv(bytes.fromhex("5C"), bytes.fromhex("5A")))
+            apdu = self._build_store_data_apdu(payload)
+            response = self.apdu_channel.send(apdu, "GET: EID")
+            parsed = self._parse_tlv_simple(response)
+            root_value = self._first_bytes(parsed.get(0xBF3E))
+            if root_value is None:
+                return response.hex().upper()
+            inner = self._parse_tlv_simple(root_value)
+            eid_value = self._first_bytes(inner.get(0x5A))
+            if eid_value is None:
+                return response.hex().upper()
+            return eid_value.hex().upper()
+        except Exception as error:
+            print(f"{self._style.red}[!] Could not read EID: {error}{self._style.end}")
+            return ""
+
+    def _get_configured_addresses_raw(self) -> bytes:
+        try:
+            payload = bytes.fromhex("BF3C00")
+            apdu = self._build_store_data_apdu(payload)
+            response = self.apdu_channel.send(apdu, "GET: EuiccConfiguredData")
+            return response
+        except Exception as error:
+            print(f"{self._style.red}[!] Could not read EuiccConfiguredData: {error}{self._style.end}")
+            return b""
+
+    def _get_smdp_address(self) -> None:
+        raw_data = self._get_configured_addresses_raw()
+        decoded = self._decode_euicc_configured_data(raw_data)
+
+        default_smdp = decoded.get("default_smdp", "")
+        root_smds_primary = decoded.get("root_smds_primary", "")
+        root_smds_additional = decoded.get("root_smds_additional", [])
+
+        print(f"\n{self._style.bold}--- Card Configured Addresses ---{self._style.end}")
+        if len(default_smdp) > 0:
+            print(f"{self._style.green}[+] Default SM-DP+: {default_smdp}{self._style.end}")
+        else:
+            print("[*] Default SM-DP+: (not present)")
+
+        if len(root_smds_primary) > 0:
+            print(f"{self._style.green}[+] Root SM-DS: {root_smds_primary}{self._style.end}")
+        else:
+            print("[*] Root SM-DS: (not present)")
+
+        if len(root_smds_additional) == 0:
+            print("[*] Additional Root SM-DS: (none)")
+        else:
+            for index, value in enumerate(root_smds_additional, start=1):
+                print(f"{self._style.green}[+] Additional Root SM-DS #{index}: {value}{self._style.end}")
+
+        print(f"[*] Raw EuiccConfiguredData: {raw_data.hex().upper()}")
+
+    def _print_configured_status(self) -> None:
+        raw_data = self._get_configured_addresses_raw()
+        decoded = self._decode_euicc_configured_data(raw_data)
+
+        print(f"\n{self._style.bold}=== STATUS: EuiccConfiguredData ==={self._style.end}")
+        print(f"Active FLOW target: {self.current_smdp_address}")
+        print(f"Active ES9 base URL: {self.current_es9_base_url}")
+
+        default_smdp = decoded.get("default_smdp", "")
+        root_smds_primary = decoded.get("root_smds_primary", "")
+        root_smds_additional = decoded.get("root_smds_additional", [])
+        allowed_ci_pkids = decoded.get("allowed_ci_pkid", [])
+
+        if len(default_smdp) > 0:
+            print(f"SM-DP+ (default):       {default_smdp}")
+        else:
+            print("SM-DP+ (default):       (not present)")
+
+        if len(root_smds_primary) > 0:
+            print(f"SM-DS (root):           {root_smds_primary}")
+        else:
+            print("SM-DS (root):           (not present)")
+
+        if len(root_smds_additional) == 0:
+            print("SM-DS (additional):     (none)")
+        else:
+            for index, value in enumerate(root_smds_additional, start=1):
+                print(f"SM-DS (additional #{index}): {value}")
+
+        if len(allowed_ci_pkids) == 0:
+            print("Allowed CI PKID values: (none)")
+        else:
+            for index, value in enumerate(allowed_ci_pkids, start=1):
+                print(f"Allowed CI PKID #{index}: {value}")
+
+        print(f"Raw EuiccConfiguredData: {raw_data.hex().upper()}")
+
+    def _set_smdp_address(self, address: str) -> None:
+        address_text = address.strip()
+        if len(address_text) == 0:
+            print("[!] Usage: SET-SMDP <fqdn-or-address>")
+            return
+
+        try:
+            encoded_address = address_text.encode("utf-8")
+            inner = _build_tlv(bytes.fromhex("80"), encoded_address)
+            payload = _build_tlv(bytes.fromhex("BF3F"), inner)
+            apdu = self._build_store_data_apdu(payload)
+            response = self.apdu_channel.send(apdu, "SET: Default SM-DP+ Address")
+            print(
+                f"{self._style.green}[+] Default SM-DP+ APDU response: "
+                f"{response.hex().upper()}{self._style.end}"
+            )
+            self.current_smdp_address = address_text
+            print(
+                f"{self._style.green}[+] Active SM-DP+ target updated to: "
+                f"{self.current_smdp_address}{self._style.end}"
+            )
+        except Exception as error:
+            print(f"{self._style.red}[!] Failed to set SM-DP+ address: {error}{self._style.end}")
+
+    def _print_es9_base_url(self) -> None:
+        print(f"[*] Active ES9 base URL: {self.current_es9_base_url}")
+        tls_mode = "ON"
+        if self.current_es9_verify_tls is False:
+            tls_mode = "OFF"
+        print(f"[*] ES9 TLS verify: {tls_mode}")
+        ca_path = self.current_es9_ca_bundle_path
+        if len(ca_path.strip()) == 0:
+            ca_path = "(system trust store)"
+        print(f"[*] ES9 CA bundle: {ca_path}")
+        if self._is_placeholder_es9_url(self.current_es9_base_url):
+            print(f"{self._style.yellow}[*] Warning: ES9 base URL still points to placeholder host.{self._style.end}")
+
+    def _print_es9_cert_info(self) -> None:
+        parsed = urlparse(self.current_es9_base_url)
+        hostname = parsed.hostname
+        port = parsed.port
+        if port is None:
+            if parsed.scheme.lower() == "https":
+                port = 443
+            else:
+                port = 80
+
+        if hostname is None or len(hostname.strip()) == 0:
+            print(f"{self._style.red}[!] Invalid ES9 URL: {self.current_es9_base_url}{self._style.end}")
+            return
+
+        print(f"\n{self._style.bold}=== ES9 TLS Certificate Info ==={self._style.end}")
+        print(f"Endpoint: {hostname}:{port}")
+        print(f"URL:      {self.current_es9_base_url}")
+
+        verify_ok, verify_error = self._probe_es9_tls_verify(hostname, port)
+        if verify_ok:
+            print(f"{self._style.green}[+] TLS verify result: PASS{self._style.end}")
+        else:
+            print(f"{self._style.red}[-] TLS verify result: FAIL{self._style.end}")
+            print(f"    Reason: {verify_error}")
+
+        cert_der = self._fetch_server_leaf_certificate(hostname, port)
+        if cert_der is None:
+            print(f"{self._style.red}[!] Could not fetch server certificate details.{self._style.end}")
+            return
+
+        cert_dict = self._decode_leaf_certificate_dict(hostname, port)
+        fingerprint = hashlib.sha256(cert_der).hexdigest().upper()
+        print(f"Leaf SHA256: {fingerprint}")
+
+        if cert_dict is None:
+            print("[*] Leaf certificate parsed in binary form only.")
+            return
+
+        subject = cert_dict.get("subject")
+        issuer = cert_dict.get("issuer")
+        not_before = cert_dict.get("notBefore", "")
+        not_after = cert_dict.get("notAfter", "")
+        san = cert_dict.get("subjectAltName", [])
+
+        print(f"Subject:    {self._format_x509_name(subject)}")
+        print(f"Issuer:     {self._format_x509_name(issuer)}")
+        if len(not_before) > 0:
+            print(f"Not Before: {not_before}")
+        if len(not_after) > 0:
+            print(f"Not After:  {not_after}")
+
+        dns_names: List[str] = []
+        for entry in san:
+            if isinstance(entry, tuple) and len(entry) == 2:
+                if str(entry[0]).upper() == "DNS":
+                    dns_names.append(str(entry[1]))
+        if len(dns_names) > 0:
+            joined = ", ".join(dns_names[:8])
+            print(f"SAN DNS:    {joined}")
+
+    def _probe_es9_tls_verify(self, hostname: str, port: int) -> Tuple[bool, str]:
+        context = ssl.create_default_context()
+        if len(self.current_es9_ca_bundle_path.strip()) > 0:
+            try:
+                context = ssl.create_default_context(cafile=self.current_es9_ca_bundle_path)
+            except Exception as error:
+                return False, f"invalid CA bundle ({error})"
+
+        try:
+            with socket.create_connection((hostname, port), timeout=8) as tcp_socket:
+                with context.wrap_socket(tcp_socket, server_hostname=hostname):
+                    pass
+        except Exception as error:
+            return False, str(error)
+        return True, ""
+
+    def _fetch_server_leaf_certificate(self, hostname: str, port: int) -> Optional[bytes]:
+        context = ssl._create_unverified_context()
+        try:
+            with socket.create_connection((hostname, port), timeout=8) as tcp_socket:
+                with context.wrap_socket(tcp_socket, server_hostname=hostname) as tls_socket:
+                    return tls_socket.getpeercert(binary_form=True)
+        except Exception as error:
+            print(f"{self._style.red}[!] TLS fetch failed: {error}{self._style.end}")
+            return None
+
+    def _decode_leaf_certificate_dict(self, hostname: str, port: int) -> Optional[Dict[str, Any]]:
+        context = ssl._create_unverified_context()
+        try:
+            with socket.create_connection((hostname, port), timeout=8) as tcp_socket:
+                with context.wrap_socket(tcp_socket, server_hostname=hostname) as tls_socket:
+                    cert = tls_socket.getpeercert()
+                    if isinstance(cert, dict):
+                        return cert
+                    return None
+        except Exception:
+            return None
+
+    def _format_x509_name(self, value: Any) -> str:
+        if value is None:
+            return ""
+        if isinstance(value, tuple) is False:
+            return str(value)
+        parts: List[str] = []
+        for item in value:
+            if isinstance(item, tuple) is False:
+                continue
+            for pair in item:
+                if isinstance(pair, tuple) and len(pair) == 2:
+                    parts.append(f"{pair[0]}={pair[1]}")
+        return ", ".join(parts)
+
+    def _set_es9_base_url(self, base_url: str, source: str) -> bool:
+        normalized = base_url.strip().rstrip("/")
+        if len(normalized) == 0:
+            print("[!] ES9 base URL cannot be empty.")
+            return False
+
+        provider = self.orchestrator.profile_provider
+        if hasattr(provider, "set_base_url") is False:
+            print(
+                f"{self._style.yellow}[*] Active provider does not support runtime ES9 URL updates.{self._style.end}"
+            )
+            print(f"[*] Requested ES9 base URL was: {normalized}")
+            return False
+
+        try:
+            provider.set_base_url(normalized)
+            self.current_es9_base_url = normalized
+            if source == "auto":
+                print(
+                    f"{self._style.green}[+] Auto-derived ES9 base URL from card SM-DP+: "
+                    f"{normalized}{self._style.end}"
+                )
+            else:
+                print(f"{self._style.green}[+] Active ES9 base URL set to: {normalized}{self._style.end}")
+            if self._is_placeholder_es9_url(self.current_es9_base_url):
+                print(f"{self._style.yellow}[*] Warning: placeholder ES9 host still configured.{self._style.end}")
+            return True
+        except Exception as error:
+            print(f"{self._style.red}[!] Failed to set ES9 base URL: {error}{self._style.end}")
+            return False
+
+    def _set_es9_tls_verify(self, enabled: bool) -> bool:
+        provider = self.orchestrator.profile_provider
+        if hasattr(provider, "set_verify_tls") is False:
+            print(
+                f"{self._style.yellow}[*] Active provider does not support ES9 TLS mode updates.{self._style.end}"
+            )
+            return False
+        try:
+            provider.set_verify_tls(enabled)
+            self.current_es9_verify_tls = enabled
+            mode = "ON"
+            if enabled is False:
+                mode = "OFF"
+            print(f"{self._style.green}[+] ES9 TLS verification is now: {mode}{self._style.end}")
+            return True
+        except Exception as error:
+            print(f"{self._style.red}[!] Failed to set ES9 TLS mode: {error}{self._style.end}")
+            return False
+
+    def _set_es9_ca_bundle_path(self, path: str) -> bool:
+        provider = self.orchestrator.profile_provider
+        if hasattr(provider, "set_ca_bundle_path") is False:
+            print(
+                f"{self._style.yellow}[*] Active provider does not support ES9 CA bundle updates.{self._style.end}"
+            )
+            return False
+        try:
+            provider.set_ca_bundle_path(path)
+            self.current_es9_ca_bundle_path = path.strip()
+            if len(self.current_es9_ca_bundle_path) == 0:
+                print(f"{self._style.green}[+] ES9 CA bundle cleared (using system trust store).{self._style.end}")
+            else:
+                print(
+                    f"{self._style.green}[+] ES9 CA bundle set to: "
+                    f"{self.current_es9_ca_bundle_path}{self._style.end}"
+                )
+            return True
+        except Exception as error:
+            print(f"{self._style.red}[!] Failed to set ES9 CA bundle: {error}{self._style.end}")
+            return False
+
+    def _persist_es9_base_url(self, base_url: str) -> None:
+        escaped_url = base_url.replace("\\", "\\\\").replace('"', '\\"')
+        self._persist_config_line("ES9_BASE_URL: str =", f'"{escaped_url}"', "ES9_BASE_URL")
+
+    def _persist_es9_verify_tls(self, enabled: bool) -> None:
+        literal = "True"
+        if enabled is False:
+            literal = "False"
+        self._persist_config_line("ES9_VERIFY_TLS: bool =", literal, "ES9_VERIFY_TLS")
+
+    def _persist_es9_ca_bundle_path(self, path: str) -> None:
+        escaped_path = path.replace("\\", "\\\\").replace('"', '\\"')
+        self._persist_config_line("ES9_CA_BUNDLE_PATH: str =", f'"{escaped_path}"', "ES9_CA_BUNDLE_PATH")
+
+    def _persist_config_line(self, key_prefix: str, literal_value: str, human_key: str) -> None:
+        config_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.py")
+        if os.path.exists(config_path) is False:
+            print(f"{self._style.red}[!] Cannot persist {human_key}. Missing file: {config_path}{self._style.end}")
+            return
+
+        try:
+            with open(config_path, "r", encoding="utf-8") as config_file:
+                lines = config_file.readlines()
+        except Exception as error:
+            print(f"{self._style.red}[!] Failed reading config.py: {error}{self._style.end}")
+            return
+
+        found = False
+        updated_lines: List[str] = []
+        for line in lines:
+            stripped = line.lstrip()
+            if stripped.startswith(key_prefix):
+                indent = line[: len(line) - len(stripped)]
+                updated_lines.append(f"{indent}{key_prefix} {literal_value}\n")
+                found = True
+                continue
+            updated_lines.append(line)
+
+        if found is False:
+            print(f"{self._style.red}[!] Could not find {human_key} entry in config.py{self._style.end}")
+            return
+
+        try:
+            with open(config_path, "w", encoding="utf-8") as config_file:
+                config_file.writelines(updated_lines)
+        except Exception as error:
+            print(f"{self._style.red}[!] Failed writing config.py: {error}{self._style.end}")
+            return
+
+        print(f"{self._style.green}[+] Persisted {human_key} in SCP11/config.py{self._style.end}")
+
+    def _apply_es9_autoderive_from_card(self, card_default_smdp: str) -> None:
+        if self._is_placeholder_es9_url(self.current_es9_base_url) is False:
+            return
+        if len(card_default_smdp.strip()) == 0:
+            return
+
+        derived_url = self._as_https_url(card_default_smdp)
+        if len(derived_url) == 0:
+            return
+
+        set_ok = self._set_es9_base_url(derived_url, source="auto")
+        if set_ok:
+            self._es9_auto_derived = True
+
+    def _warn_es9_placeholder_without_card_default(self) -> None:
+        if self._is_placeholder_es9_url(self.current_es9_base_url) is False:
+            return
+        if self._es9_auto_derived:
+            return
+        print(
+            f"{self._style.yellow}[*] ES9 base URL is placeholder and card has no default SM-DP+ to derive from."
+            f"{self._style.end}"
+        )
+        print(
+            f"{self._style.yellow}[*] Use SET-ES9 [--persist] <url> or configure ES9_BASE_URL in SCP11/config.py."
+            f"{self._style.end}"
+        )
+
+    def _print_profiles(self) -> None:
+        rows = self._fetch_profiles()
+        self._print_profiles_table(rows, title="Profiles on Card")
+
+    def _fetch_profiles(self) -> List[ProfileRow]:
+        try:
+            response = self._fetch_profiles_raw()
+            rows = self._decode_profiles(response)
+            return rows
+        except Exception as error:
+            print(f"{self._style.red}[!] Failed to list profiles: {error}{self._style.end}")
+            return []
+
+    def _fetch_profiles_raw(self) -> bytes:
+        payload = bytes.fromhex("BF2D00")
+        apdu = self._build_store_data_apdu(payload)
+        response = self.apdu_channel.send(apdu, "GET: ProfilesInfo")
+        return response
+
+    def _print_profiles_table(self, rows: List[ProfileRow], title: str) -> None:
+        print(f"\n{title}:")
+        if len(rows) == 0:
+            print("[*] No profile metadata decoded from response.")
+            return
+
+        print("State     Class  ICCID                 Nickname                  AID / Alias")
+        print("-" * 112)
+        for row in rows:
+            aid_alias = self._resolve_alias_for_aid(row.aid)
+            aid_display = row.aid
+            if aid_alias is not None:
+                aid_display = f"{row.aid} ({aid_alias})"
+            print(
+                f"{row.state:<9} {row.profile_class:<6} {row.iccid:<20} "
+                f"{row.nickname[:24]:<24} {aid_display[:44]}"
+            )
+
+    def _run_full_flow(self, matching_id: str) -> None:
+        effective_matching_id = matching_id.strip()
+        try:
+            self.orchestrator.run_flow(
+                matching_id=effective_matching_id,
+                smdp_address=self.current_smdp_address,
+            )
+        except Exception as error:
+            print(f"{self._style.red}[!] FLOW failed: {error}{self._style.end}")
+
+    def _verify_scp11_authentication(self, matching_id: str) -> None:
+        print(f"\n{self._style.bold}=== VERIFY-SCP11 ==={self._style.end}")
+        checks: List[Tuple[str, bool, str]] = []
+
+        connect_ok = False
+        credentials_ok = False
+        challenge_ok = False
+        authenticate_ok = False
+        transaction_ok = False
+        signature_ok = False
+
+        try:
+            self.orchestrator._phase_connect()
+            connect_ok = True
+            checks.append(("Connect / select ISD-R", True, "ok"))
+        except Exception as error:
+            checks.append(("Connect / select ISD-R", False, str(error)))
+
+        auth_seed: Optional[Dict[str, Any]] = None
+        if connect_ok:
+            try:
+                self.orchestrator._phase_load_credentials()
+                credentials_ok = True
+                checks.append(("Load SCP11 credentials", True, "ok"))
+            except Exception as error:
+                checks.append(("Load SCP11 credentials", False, str(error)))
+
+        if connect_ok and credentials_ok:
+            try:
+                auth_seed = self.orchestrator._phase_authentication_seed(
+                    matching_id=matching_id,
+                    smdp_address=self.current_smdp_address,
+                )
+                challenge_len = len(self.orchestrator.state.card_challenge)
+                challenge_ok = challenge_len == 16
+                if challenge_ok:
+                    checks.append(("Get eUICC challenge", True, f"len={challenge_len}"))
+                else:
+                    checks.append(("Get eUICC challenge", False, f"unexpected len={challenge_len}"))
+            except Exception as error:
+                checks.append(("Get eUICC challenge", False, str(error)))
+
+        if connect_ok and credentials_ok and challenge_ok and auth_seed is not None:
+            try:
+                self.orchestrator._phase_authenticate_server(auth_seed, matching_id=matching_id)
+                authenticate_ok = True
+                checks.append(("AuthenticateServer exchange", True, "ok"))
+            except Exception as error:
+                checks.append(("AuthenticateServer exchange", False, str(error)))
+
+        if authenticate_ok:
+            transaction_ok = len(self.orchestrator.state.transaction_id) > 0
+            signature_ok = len(self.orchestrator.state.euicc_signature1) > 0
+            checks.append(
+                (
+                    "Transaction ID captured",
+                    transaction_ok,
+                    self.orchestrator.state.transaction_id.hex().upper() if transaction_ok else "missing",
+                )
+            )
+            checks.append(
+                (
+                    "euiccSignature1 captured",
+                    signature_ok,
+                    f"len={len(self.orchestrator.state.euicc_signature1)}" if signature_ok else "missing",
+                )
+            )
+
+        print("Check                                Result   Details")
+        print("-" * 72)
+        for title, passed, details in checks:
+            status = "PASS"
+            status_color = self._style.green
+            if passed is False:
+                status = "FAIL"
+                status_color = self._style.red
+            print(
+                f"{title:<36} {status_color}{status:<6}{self._style.end} "
+                f"{details}"
+            )
+
+        overall = connect_ok and credentials_ok and challenge_ok and authenticate_ok and transaction_ok and signature_ok
+        if overall:
+            print(f"{self._style.green}[+] VERIFY-SCP11: PASS (authenticated SCP11 path confirmed){self._style.end}")
+            return
+        print(f"{self._style.red}[-] VERIFY-SCP11: FAIL (see failed checkpoints above){self._style.end}")
+
+    def _download_activation_code(self, activation_code: str) -> None:
+        code = activation_code.strip()
+        if len(code) == 0:
+            print("[!] Usage: DOWNLOAD-AC <activation_code>")
+            return
+
+        parsed = self._parse_activation_code(code)
+        if parsed is None:
+            print("[!] Invalid activation code format.")
+            print("[*] Expected format includes '$' and at least server+matchingId parts.")
+            return
+
+        server_address, matching_id = parsed
+        print(f"[*] Parsed activation code server: {server_address}")
+        print(f"[*] Parsed activation code matchingId: {matching_id}")
+        self.current_smdp_address = server_address
+        self._run_full_flow(matching_id)
+
+    def _run_retrieve_command(self, title: str, payload: bytes, root_tag: Optional[int]) -> None:
+        try:
+            apdu = self._build_store_data_apdu(payload)
+            response = self.apdu_channel.send(apdu, f"GET: {title}")
+        except Exception as error:
+            print(f"{self._style.red}[!] {title} failed: {error}{self._style.end}")
+            return
+
+        print(f"\n{self._style.bold}[+] {title}{self._style.end}")
+        if len(response) == 0:
+            print("    | (Empty)")
+            return
+
+        if title == "RetrieveNotificationsList":
+            self._print_notifications_list_compact(response)
+            return
+        if title == "GetEuiccInfo1":
+            self._print_euicc_info1_compact(response)
+            return
+        if title == "GetEuiccInfo2":
+            self._print_euicc_info2_compact(response)
+            return
+        if title == "GetRAT":
+            self._print_rat_compact(response)
+            return
+        if title == "GetCerts":
+            self._print_get_certs_compact(response)
+            return
+        if title == "GetEimConfigurationData":
+            self._print_eim_configuration_compact(response)
+            return
+
+        self._print_tlv_tree_bytes(response, indent=1, parent_tag=root_tag)
+
+    def _run_profile_state_command(
+        self,
+        identifier: str,
+        func_tag: int,
+        action_label: str,
+        command_name: str,
+    ) -> None:
+        if len(identifier) == 0:
+            print(f"[!] Usage: {command_name} <iccid-or-aid>")
+            return
+
+        resolved = self._resolve_profile_target(identifier)
+        if resolved is None:
+            print(f"{self._style.red}[!] Could not resolve profile: {identifier}{self._style.end}")
+            print("[*] Run LIST and use ICCID or AID from output.")
+            return
+
+        tag_type, value_hex = resolved
+        target_type = "ICCID"
+        if tag_type == self.TAG_AID:
+            target_type = "AID"
+        print(f"{self._style.cyan}[*] {action_label}: {target_type}={value_hex}{self._style.end}")
+
+        payload = self._build_profile_command_payload(func_tag, tag_type, value_hex)
+        self._execute_result_command(
+            title=action_label,
+            payload=payload,
+            result_outer_tag=func_tag,
+        )
+
+    def _execute_result_command(self, title: str, payload: bytes, result_outer_tag: int) -> None:
+        try:
+            apdu = self._build_store_data_apdu(payload)
+            response = self.apdu_channel.send(apdu, f"CMD: {title}")
+        except Exception as error:
+            print(f"{self._style.red}[!] {title} failed: {error}{self._style.end}")
+            return
+
+        result_code = self._extract_result_code(response, result_outer_tag)
+        if result_code is None:
+            print(f"{self._style.green}[+] {title}: success (no explicit result code).{self._style.end}")
+            if len(response) > 0:
+                print(f"[*] Raw response: {response.hex().upper()}")
+            return
+
+        if result_code == 0:
+            print(f"{self._style.green}[+] {title}: success.{self._style.end}")
+            return
+
+        error_map: Dict[int, str] = {
+            1: "Profile Not Found",
+            2: "Already in requested state",
+            3: "Invalid input parameter",
+            7: "Command structure error",
+            127: "Undefined error",
+        }
+        error_text = "Unknown error"
+        if result_code in error_map:
+            error_text = error_map[result_code]
+        print(f"{self._style.red}[-] {title} failed, code 0x{result_code:02X}: {error_text}{self._style.end}")
+
+    def _build_profile_command_payload(self, func_tag: int, tag_type: int, value_hex: str) -> bytes:
+        value_bytes = bytes.fromhex(value_hex)
+        id_tlv = _build_tlv(bytes([tag_type]), value_bytes)
+        ctx_tlv = _build_tlv(bytes([self.TAG_CTX_0]), id_tlv)
+        refresh_required_tlv = _build_tlv(bytes.fromhex("81"), bytes.fromhex("00"))
+        inner = ctx_tlv + refresh_required_tlv
+        return _build_tlv(func_tag.to_bytes(2, "big"), inner)
+
+    def _build_remove_notification_payload(self, seq_value: int) -> bytes:
+        seq_length = 1
+        if seq_value > 0xFF:
+            seq_length = 2
+        if seq_value > 0xFFFF:
+            seq_length = 4
+        seq_bytes = seq_value.to_bytes(seq_length, "big")
+        seq_tlv = _build_tlv(bytes.fromhex("80"), seq_bytes)
+        return _build_tlv(self.TAG_REMOVE_NOTIFICATION.to_bytes(2, "big"), seq_tlv)
+
+    def _extract_result_code(self, response: bytes, result_outer_tag: int) -> Optional[int]:
+        if len(response) == 0:
+            return None
+
+        parsed = self._parse_tlv_simple(response)
+        outer_payload = b""
+        if result_outer_tag in parsed:
+            value = parsed[result_outer_tag]
+            if isinstance(value, bytes):
+                outer_payload = value
+            elif isinstance(value, list):
+                if len(value) > 0 and isinstance(value[0], bytes):
+                    outer_payload = value[0]
+
+        if len(outer_payload) == 0:
+            if self.TAG_RESULT not in parsed:
+                return None
+            direct_value = parsed[self.TAG_RESULT]
+            if isinstance(direct_value, bytes):
+                return int.from_bytes(direct_value, "big")
+            return None
+
+        outer_parsed = self._parse_tlv_simple(outer_payload)
+        if self.TAG_RESULT not in outer_parsed:
+            return None
+        result_value = outer_parsed[self.TAG_RESULT]
+        if isinstance(result_value, bytes):
+            return int.from_bytes(result_value, "big")
+        if isinstance(result_value, list):
+            if len(result_value) > 0 and isinstance(result_value[0], bytes):
+                return int.from_bytes(result_value[0], "big")
+        return None
+
+    def _resolve_profile_target(self, identifier: str) -> Optional[Tuple[int, str]]:
+        clean = identifier.strip().upper()
+        if len(clean) == 0:
+            return None
+
+        alias_match = self._resolve_aid_from_alias(clean)
+        if alias_match is not None:
+            return self.TAG_AID, alias_match
+
+        if self._is_hex(clean):
+            if clean.startswith("A0") and len(clean) >= 10:
+                return self.TAG_AID, clean
+            if clean.startswith("98") and len(clean) >= 18:
+                return self.TAG_ICCID, clean
+
+        decimal_iccid = self._extract_decimal_iccid(clean)
+        if decimal_iccid is not None:
+            return self.TAG_ICCID, self._encode_iccid_for_command(decimal_iccid)
+
+        profiles = self._fetch_profiles()
+        for row in profiles:
+            if row.iccid.upper() == clean:
+                return self.TAG_ICCID, self._encode_iccid_for_command(row.iccid)
+            if row.aid.upper() == clean:
+                return self.TAG_AID, row.aid
+        return None
+
+    def _resolve_aid_from_alias(self, alias: str) -> Optional[str]:
+        if alias in self._aid_registry:
+            return self._aid_registry[alias]
+        return None
+
+    def _resolve_alias_for_aid(self, aid_hex: str) -> Optional[str]:
+        target = aid_hex.strip().upper()
+        for alias, aid_value in self._aid_registry.items():
+            if aid_value == target:
+                return alias
+        return None
+
+    def _print_aid_registry(self) -> None:
+        print(f"\n{self._style.bold}--- Admin AID Registry ---{self._style.end}")
+        if len(self._aid_registry) == 0:
+            print("[*] No aliases loaded.")
+            return
+        for alias, aid in sorted(self._aid_registry.items()):
+            print(f"{alias:<12} {aid}")
+
+    def _load_aid_registry(self) -> Dict[str, str]:
+        registry: Dict[str, str] = {}
+        path = self.DEFAULT_AID_REGISTRY_PATH
+        if os.path.exists(path) is False:
+            return registry
+
+        try:
+            with open(path, "r", encoding="utf-8") as aid_file:
+                for line in aid_file:
+                    clean_line = line.split("#", 1)[0].strip()
+                    if len(clean_line) == 0:
+                        continue
+                    if ":" not in clean_line:
+                        continue
+
+                    left, right = clean_line.split(":", 1)
+                    alias = left.strip().upper()
+                    aid_hex = right.strip().upper()
+                    if len(alias) == 0:
+                        continue
+                    if self._is_hex(aid_hex) is False:
+                        continue
+                    registry[alias] = aid_hex
+        except Exception as error:
+            print(f"{self._style.red}[!] Failed to load shared AID registry: {error}{self._style.end}")
+        return registry
+
+    def _extract_decimal_iccid(self, value: str) -> Optional[str]:
+        digits = ""
+        for char in value:
+            if char.isdigit():
+                digits += char
+                continue
+            return None
+        if len(digits) < 18:
+            return None
+        return digits
+
+    def _encode_iccid_for_command(self, iccid_digits: str) -> str:
+        padded = iccid_digits
+        if len(padded) % 2 != 0:
+            padded += "F"
+
+        output = ""
+        index = 0
+        while index < len(padded):
+            first = padded[index]
+            second = padded[index + 1]
+            output += second + first
+            index += 2
+        return output
+
+    def _parse_integer_value(self, text: str) -> Optional[int]:
+        raw = text.strip().lower()
+        if len(raw) == 0:
+            return None
+
+        try:
+            if raw.startswith("0x"):
+                return int(raw, 16)
+            return int(raw, 10)
+        except ValueError:
+            return None
+
+    def _is_hex(self, value: str) -> bool:
+        if len(value) == 0:
+            return False
+        if len(value) % 2 != 0:
+            return False
+        try:
+            bytes.fromhex(value)
+        except ValueError:
+            return False
+        return True
+
+    def _print_tlv_tree_bytes(self, data: bytes, indent: int, parent_tag: Optional[int]) -> None:
+        if indent > 6:
+            print(f"{'    ' * indent}| ...")
+            return
+        nodes = self._parse_tlv_nodes(data)
+        if len(nodes) == 0:
+            print(f"{'    ' * indent}| {data.hex().upper()}")
+            return
+
+        for tag, value, is_constructed in nodes:
+            label = self._resolve_tag_name(tag, parent_tag)
+            prefix = "    " * indent
+            if is_constructed:
+                print(f"{prefix}| {self._style.cyan}{label}{self._style.end}")
+                self._print_tlv_tree_bytes(value, indent + 1, tag)
+                continue
+
+            display = self._decode_scalar_value(tag, value)
+            print(f"{prefix}| {self._style.cyan}{label:<24}{self._style.end}: {display}")
+
+    def _parse_tlv_nodes(self, data: bytes) -> List[Tuple[int, bytes, bool]]:
+        nodes: List[Tuple[int, bytes, bool]] = []
+        index = 0
+        while index < len(data):
+            tag, index_after_tag, constructed = self._read_tag(data, index)
+            if index_after_tag <= index:
+                break
+            length, length_size = self._decode_length(data, index_after_tag)
+            if length_size == 0:
+                break
+            value_start = index_after_tag + length_size
+            value_end = value_start + length
+            if value_end > len(data):
+                break
+            value = data[value_start:value_end]
+            nodes.append((tag, value, constructed))
+            index = value_end
+        return nodes
+
+    def _read_tag(self, data: bytes, offset: int) -> Tuple[int, int, bool]:
+        if offset >= len(data):
+            return 0, offset, False
+        first = data[offset]
+        tag_value = first
+        index = offset + 1
+        constructed = (first & 0x20) != 0
+
+        if (first & 0x1F) == 0x1F:
+            while index < len(data):
+                octet = data[index]
+                tag_value = (tag_value << 8) | octet
+                index += 1
+                if (octet & 0x80) == 0:
+                    break
+        return tag_value, index, constructed
+
+    def _decode_scalar_value(self, tag: int, value: bytes) -> str:
+        ascii_safe = True
+        for byte in value:
+            if byte < 0x20 or byte > 0x7E:
+                ascii_safe = False
+                break
+
+        if ascii_safe:
+            text = value.decode("ascii", "ignore").strip()
+            if len(text) > 0:
+                return text
+
+        if tag in [0x80, 0x81, 0x82]:
+            return self._decode_text_or_hex(value)
+        return self._short_display_hex(value.hex().upper())
+
+    def _resolve_tag_name(self, tag: int, parent_tag: Optional[int]) -> str:
+        if parent_tag == 0xBF3C:
+            if tag == 0x80:
+                return "SM-DP+ Address"
+            if tag == 0x81:
+                return "Root SM-DS Address"
+            if tag == 0x82:
+                return "Additional Root SM-DS"
+            if tag == 0xA2:
+                return "Additional Root SM-DS List"
+            if tag == 0x83:
+                return "Allowed CI PKID"
+            if tag == 0x84:
+                return "CI List"
+            if tag == 0xA4:
+                return "CI List"
+
+        if parent_tag == 0xBF2B:
+            if tag == 0xA0:
+                return "Notification List"
+            if tag == 0x81:
+                return "Notifications List Error"
+            if tag == 0xA2:
+                return "eUICC Package Result List"
+
+        if parent_tag == 0xBF55:
+            if tag == 0xA0:
+                return "eIM Configuration Data List"
+
+        known: Dict[int, str] = {
+            0x5A: "EID/ICCID",
+            0x4F: "AID",
+            0xBF20: "EuiccInfo1",
+            0xBF22: "EuiccInfo2",
+            0xBF3C: "EuiccConfiguredData",
+            0xBF43: "RAT (Rules Authorisation Table)",
+            0xBF2B: "NotificationsList",
+            0xBF55: "EimConfigurationData",
+            0xBF56: "GetCertsResponse",
+            0x90: "Nickname",
+            0x91: "Service Provider",
+            0x92: "Profile Name",
+            0x95: "Profile Class",
+            0x9F70: "State",
+        }
+        if tag in known:
+            return known[tag]
+        return f"{tag:02X}"
+
+    def _build_style(self) -> ConsoleStyle:
+        use_color = True
+        if sys.stdout.isatty() is False:
+            use_color = False
+
+        if SCP03Config is not None and use_color:
+            colors = SCP03Config.Colors
+            return ConsoleStyle(
+                header=colors.HEADER,
+                cyan=colors.CYAN,
+                green=colors.GREEN,
+                yellow=colors.WARNING,
+                red=colors.FAIL,
+                bold=colors.BOLD,
+                end=colors.ENDC,
+            )
+
+        if use_color:
+            return ConsoleStyle(
+                header="\033[95m",
+                cyan="\033[96m",
+                green="\033[92m",
+                yellow="\033[93m",
+                red="\033[91m",
+                bold="\033[1m",
+                end="\033[0m",
+            )
+
+        return ConsoleStyle(header="", cyan="", green="", yellow="", red="", bold="", end="")
+
+    def _setup_readline(self) -> None:
+        if readline is None:
+            return
+
+        self._history_file = os.path.join(os.path.expanduser("~"), ".yggdrasim_scp11_history")
+        try:
+            if os.path.exists(self._history_file):
+                readline.read_history_file(self._history_file)
+            readline.set_history_length(1000)
+        except Exception:
+            pass
+
+        atexit.register(self._save_history)
+        readline.set_completer(self._completer)
+        readline.set_completer_delims(" \t\n")
+
+        has_libedit = False
+        if readline.__doc__ is not None and "libedit" in readline.__doc__:
+            has_libedit = True
+
+        if has_libedit:
+            readline.parse_and_bind("bind ^I rl_complete")
+        else:
+            readline.parse_and_bind("tab: complete")
+
+        try:
+            readline.parse_and_bind("set show-all-if-ambiguous on")
+        except Exception:
+            pass
+
+    def _save_history(self) -> None:
+        if readline is None:
+            return
+        if len(self._history_file) == 0:
+            return
+        try:
+            readline.write_history_file(self._history_file)
+        except Exception:
+            pass
+
+    def _completer(self, text: str, state: int) -> Optional[str]:
+        if readline is None:
+            return None
+
+        line_buffer = readline.get_line_buffer().lstrip()
+        if " " not in line_buffer:
+            options: List[str] = []
+            typed = text.upper()
+            for command in self._primary_commands:
+                if command.startswith(typed):
+                    options.append(command)
+            if state >= len(options):
+                return None
+            if len(options) == 1:
+                return options[state] + " "
+            return options[state]
+        return None
+
+    def _parse_activation_code(self, activation_code: str) -> Optional[Tuple[str, str]]:
+        if "$" not in activation_code:
+            return None
+        parts = activation_code.split("$")
+        if len(parts) < 3:
+            return None
+        server_address = parts[1].strip()
+        matching_id = parts[2].strip()
+        if len(server_address) == 0:
+            return None
+        if len(matching_id) == 0:
+            return None
+        return server_address, matching_id
+
+    def _as_https_url(self, value: str) -> str:
+        cleaned = value.strip()
+        if len(cleaned) == 0:
+            return ""
+        lowered = cleaned.lower()
+        if lowered.startswith("http://") or lowered.startswith("https://"):
+            return cleaned.rstrip("/")
+        return f"https://{cleaned.rstrip('/')}"
+
+    def _is_placeholder_es9_url(self, value: str) -> bool:
+        lowered = value.strip().lower()
+        if len(lowered) == 0:
+            return True
+        if "rsp.example.com" in lowered:
+            return True
+        if "example.com" in lowered:
+            return True
+        return False
+
+    def _build_store_data_apdu(self, payload: bytes, p1: int = 0x91, p2: int = 0x00) -> bytes:
+        if len(payload) > 255:
+            raise ValueError("Payload too long for single APDU. Use chunking path for large payloads.")
+        return bytes([0x80, 0xE2, p1, p2, len(payload)]) + payload
+
+    def _decode_euicc_configured_data(self, raw_data: bytes) -> Dict[str, Any]:
+        result: Dict[str, Any] = {
+            "default_smdp": "",
+            "root_smds_primary": "",
+            "root_smds_additional": [],
+            "allowed_ci_pkid": [],
+        }
+        if len(raw_data) == 0:
+            return result
+
+        parsed = self._parse_tlv_simple(raw_data)
+        root_value = b""
+        if 0xBF3C in parsed:
+            bf3c_value = parsed[0xBF3C]
+            if isinstance(bf3c_value, list):
+                if len(bf3c_value) > 0 and isinstance(bf3c_value[0], bytes):
+                    root_value = bf3c_value[0]
+            elif isinstance(bf3c_value, bytes):
+                root_value = bf3c_value
+        else:
+            root_value = raw_data
+
+        inner = self._parse_tlv_simple(root_value)
+
+        default_values = self._extract_text_values(inner, 0x80)
+        if len(default_values) > 0:
+            result["default_smdp"] = default_values[0]
+
+        primary_smds_values = self._extract_text_values(inner, 0x81)
+        if len(primary_smds_values) > 0:
+            result["root_smds_primary"] = primary_smds_values[0]
+
+        additional_smds_values: List[str] = []
+        additional_smds_values.extend(self._extract_text_values(inner, 0x82))
+        additional_smds_values.extend(self._extract_nested_additional_smds(inner))
+        result["root_smds_additional"] = self._dedupe_preserving_order(additional_smds_values)
+
+        pkid_values = self._extract_text_values(inner, 0x83)
+        result["allowed_ci_pkid"] = self._dedupe_preserving_order(pkid_values)
+        return result
+
+    def _extract_nested_additional_smds(self, parsed_tlv: Dict[int, Any]) -> List[str]:
+        output: List[str] = []
+        if 0xA2 not in parsed_tlv:
+            return output
+
+        values = parsed_tlv[0xA2]
+        blobs: List[bytes] = []
+        if isinstance(values, list):
+            for item in values:
+                if isinstance(item, bytes):
+                    blobs.append(item)
+        elif isinstance(values, bytes):
+            blobs.append(values)
+
+        for blob in blobs:
+            nested = self._parse_tlv_simple(blob)
+            nested_values = self._extract_text_values(nested, 0x82)
+            if len(nested_values) > 0:
+                output.extend(nested_values)
+            else:
+                output.append(self._decode_text_or_hex(blob))
+        return output
+
+    def _extract_text_values(self, parsed_tlv: Dict[int, Any], tag: int) -> List[str]:
+        if tag not in parsed_tlv:
+            return []
+
+        raw_values = parsed_tlv[tag]
+        normalized: List[bytes] = []
+        if isinstance(raw_values, list):
+            for item in raw_values:
+                if isinstance(item, bytes):
+                    normalized.append(item)
+        elif isinstance(raw_values, bytes):
+            normalized.append(raw_values)
+
+        output: List[str] = []
+        for value in normalized:
+            output.append(self._decode_text_or_hex(value))
+        return output
+
+    def _decode_text_or_hex(self, value: bytes) -> str:
+        try:
+            text = value.decode("utf-8", "ignore")
+        except Exception:
+            return value.hex().upper()
+
+        clean_text = text.replace("\x00", "").strip()
+        if len(clean_text) == 0:
+            return value.hex().upper()
+        for char in clean_text:
+            code = ord(char)
+            if code < 0x20 or code > 0x7E:
+                return value.hex().upper()
+        return clean_text
+
+    def _print_guarded_provisioning_message(self) -> None:
+        print(
+            f"{self._style.yellow}[-] Not executed: operation requires authenticated provisioning context."
+            f"{self._style.end}"
+        )
+        print("    Required preconditions:")
+        print("    | 1) SCP11 channel and ES10b server authentication established")
+        print("    | 2) Matching eIM/profile trust context")
+        print("    | 3) Provisioning flow support enabled for metadata/POL operations")
+
+    def _collect_profile_metadata(self) -> List[ProfileMetadataView]:
+        raw_data = self._fetch_profiles_raw()
+        if len(raw_data) == 0:
+            return []
+        rows = self._decode_profile_metadata_rows(raw_data)
+        return rows
+
+    def _find_profile_metadata(self, identifier: str) -> Optional[ProfileMetadataView]:
+        target = identifier.strip().upper()
+        if len(target) == 0:
+            return None
+
+        entries = self._collect_profile_metadata()
+        for entry in entries:
+            if entry.iccid.upper() == target:
+                return entry
+            if entry.aid.upper() == target:
+                return entry
+            alias = self._resolve_alias_for_aid(entry.aid)
+            if alias is None:
+                continue
+            if alias == target:
+                return entry
+
+        resolved = self._resolve_profile_target(identifier)
+        if resolved is None:
+            return None
+        tag_type, value_hex = resolved
+        for entry in entries:
+            if tag_type == self.TAG_AID:
+                if entry.aid.upper() == value_hex.upper():
+                    return entry
+                continue
+            if tag_type == self.TAG_ICCID:
+                if self._encode_iccid_for_command(entry.iccid).upper() == value_hex.upper():
+                    return entry
+        return None
+
+    def _decode_profile_metadata_rows(self, raw_data: bytes) -> List[ProfileMetadataView]:
+        rows: List[ProfileMetadataView] = []
+        index = 0
+        while index < len(raw_data):
+            if raw_data[index] != 0xE3:
+                index += 1
+                continue
+
+            length, length_size = self._decode_length(raw_data, index + 1)
+            if length_size == 0:
+                break
+
+            value_start = index + 1 + length_size
+            value_end = value_start + length
+            if value_end > len(raw_data):
+                break
+
+            blob = raw_data[value_start:value_end]
+            parsed = self._parse_tlv_simple(blob)
+            row = self._profile_metadata_from_parsed(parsed)
+            if row is not None:
+                rows.append(row)
+            index = value_end
+        return rows
+
+    def _profile_metadata_from_parsed(self, parsed: Dict[int, Any]) -> Optional[ProfileMetadataView]:
+        iccid_bytes = self._get_tag(parsed, 0x5A)
+        if not isinstance(iccid_bytes, bytes):
+            return None
+
+        iccid = self._swap_nibbles(iccid_bytes.hex().upper())
+
+        aid = ""
+        aid_bytes = self._get_tag(parsed, 0x4F) or self._get_tag(parsed, 0xA0)
+        if isinstance(aid_bytes, bytes):
+            aid = aid_bytes.hex().upper()
+
+        state = "DISABLED"
+        state_bytes = self._get_tag(parsed, 0x9F70)
+        if isinstance(state_bytes, bytes):
+            state_value = int.from_bytes(state_bytes, "big")
+            if state_value == 1:
+                state = "ENABLED"
+
+        profile_class = "OPER"
+        class_bytes = self._get_tag(parsed, 0x95)
+        if isinstance(class_bytes, bytes):
+            class_value = int.from_bytes(class_bytes, "big")
+            class_map = {0: "TEST", 1: "PROV", 2: "OPER"}
+            profile_class = class_map.get(class_value, "OPER")
+
+        nickname = self._decode_optional_text(self._get_tag(parsed, 0x90))
+        service_provider = self._decode_optional_text(self._get_tag(parsed, 0x91))
+        profile_name = self._decode_optional_text(self._get_tag(parsed, 0x92))
+
+        ppr_hex = ""
+        ppr_bytes = self._get_tag(parsed, 0x99)
+        if isinstance(ppr_bytes, bytes):
+            ppr_hex = ppr_bytes.hex().upper()
+
+        return ProfileMetadataView(
+            iccid=iccid,
+            aid=aid,
+            state=state,
+            profile_class=profile_class,
+            nickname=nickname,
+            service_provider=service_provider,
+            profile_name=profile_name,
+            profile_policy_rules_hex=ppr_hex,
+        )
+
+    def _decode_optional_text(self, value: Any) -> str:
+        if not isinstance(value, bytes):
+            return ""
+        decoded = self._decode_text_or_hex(value)
+        if len(decoded) == 0:
+            return ""
+        return decoded
+
+    def _decode_ppr_ids(self, ppr_hex: str) -> str:
+        if len(ppr_hex) < 4:
+            return "unknown"
+        try:
+            raw = bytes.fromhex(ppr_hex)
+        except ValueError:
+            return "invalid"
+        if len(raw) < 2:
+            return "unknown"
+
+        unused_bits = raw[0]
+        payload = raw[1:]
+        if len(payload) == 0:
+            return "none"
+
+        labels: List[str] = []
+        bit_index = 0
+        for byte_index, byte_value in enumerate(payload):
+            for mask_bit in range(7, -1, -1):
+                is_last_byte = byte_index == len(payload) - 1
+                if is_last_byte:
+                    if mask_bit < unused_bits:
+                        continue
+                is_set = ((byte_value >> mask_bit) & 0x01) == 0x01
+                if is_set:
+                    if bit_index == 0:
+                        labels.append("pprUpdateControl")
+                    elif bit_index == 1:
+                        labels.append("ppr1-disable-not-allowed")
+                    elif bit_index == 2:
+                        labels.append("ppr2-delete-not-allowed")
+                    else:
+                        labels.append(f"bit{bit_index}")
+                bit_index += 1
+        if len(labels) == 0:
+            return "none"
+        return ", ".join(labels)
+
+    def _print_euicc_info1_compact(self, response: bytes) -> None:
+        parsed = self._parse_tlv_simple(response)
+        root = self._first_bytes(parsed.get(0xBF20))
+        if root is None:
+            self._print_tlv_tree_bytes(response, indent=1, parent_tag=0xBF20)
+            return
+
+        root_parsed = self._parse_tlv_simple(root)
+        version = self._first_bytes(root_parsed.get(0x82))
+        ci_pk_verify = root_parsed.get(0xA9)
+        ci_pk_sign = root_parsed.get(0xAA)
+
+        if version is not None:
+            print(f"    | Profile Version       : {version.hex().upper()}")
+
+        verify_items = self._count_tag_occurrences(ci_pk_verify, 0x04)
+        sign_items = self._count_tag_occurrences(ci_pk_sign, 0x04)
+        print(f"    | CI PK Verify Entries  : {verify_items}")
+        print(f"    | CI PK Sign Entries    : {sign_items}")
+
+    def _print_euicc_info2_compact(self, response: bytes) -> None:
+        parsed = self._parse_tlv_simple(response)
+        root = self._first_bytes(parsed.get(0xBF22))
+        if root is None:
+            self._print_tlv_tree_bytes(response, indent=1, parent_tag=0xBF22)
+            return
+
+        root_parsed = self._parse_tlv_simple(root)
+        summary_tags: List[Tuple[int, str]] = [
+            (0x81, "Profile Version"),
+            (0x82, "Ver Supported"),
+            (0x83, "Firmware Ver"),
+            (0x84, "Ext Card Res"),
+            (0x85, "UICC Cap"),
+            (0x86, "TSCP Base"),
+            (0x87, "eUICC Category"),
+            (0x88, "PP Rules"),
+            (0x99, "PP Version"),
+            (0x0C, "SAS Accr Number"),
+        ]
+        for tag, label in summary_tags:
+            value = self._first_bytes(root_parsed.get(tag))
+            if value is None:
+                continue
+            rendered = self._decode_text_or_hex(value)
+            print(f"    | {label:<20}: {rendered}")
+
+        eim_block = self._first_bytes(root_parsed.get(0xB4))
+        if eim_block is not None:
+            block_parsed = self._parse_tlv_simple(eim_block)
+            field_81 = self._first_bytes(block_parsed.get(0x81))
+            field_82 = self._first_bytes(block_parsed.get(0x82))
+            has_81 = field_81 is not None
+            has_82 = field_82 is not None
+            print(f"    | eIM Support Fields    : 81={has_81} 82={has_82}")
+
+    def _print_rat_compact(self, response: bytes) -> None:
+        parsed = self._parse_tlv_simple(response)
+        root = self._first_bytes(parsed.get(0xBF43))
+        if root is None:
+            self._print_tlv_tree_bytes(response, indent=1, parent_tag=0xBF43)
+            return
+
+        root_parsed = self._parse_tlv_simple(root)
+        for tag, label in [(0x80, "Field 80"), (0x81, "Field 81"), (0x82, "Field 82 Bitmap")]:
+            value = self._first_bytes(root_parsed.get(tag))
+            if value is None:
+                continue
+            rendered = value.hex().upper()
+            if tag == 0x82:
+                bits = self._bitmap_set_bits(rendered)
+                print(f"    | {label:<20}: {rendered} (set bits: {bits})")
+                continue
+            print(f"    | {label:<20}: {rendered}")
+
+    def _print_get_certs_compact(self, response: bytes) -> None:
+        parsed = self._parse_tlv_simple(response)
+        root = self._first_bytes(parsed.get(0xBF56))
+        if root is None:
+            print(f"    | Raw response          : {self._short_display_hex(response.hex().upper(), 120)}")
+            return
+
+        total_sequences = self._count_tag_recursive(root, 0x30)
+        total_oids = self._count_tag_recursive(root, 0x06)
+        print(f"    | Certificate Sets      : {total_sequences}")
+        print(f"    | OID Items             : {total_oids}")
+        print(f"    | Payload Bytes         : {len(root)}")
+
+    def _print_eim_configuration_compact(self, response: bytes) -> None:
+        parsed = self._parse_tlv_simple(response)
+        root = self._first_bytes(parsed.get(0xBF55))
+        if root is None:
+            self._print_tlv_tree_bytes(response, indent=1, parent_tag=0xBF55)
+            return
+
+        entries = self._collect_tag_recursive(root, 0xE1)
+        print(f"    | eIM Entries           : {len(entries)}")
+        if len(entries) == 0:
+            return
+
+        first = entries[0]
+        first_parsed = self._parse_tlv_simple(first)
+        fqdn = self._first_bytes(first_parsed.get(0x80))
+        eim_id = self._first_bytes(first_parsed.get(0x81))
+        if fqdn is not None:
+            print(f"    | First eIM FQDN        : {self._decode_text_or_hex(fqdn)}")
+        if eim_id is not None:
+            print(f"    | First eIM ID          : {self._decode_text_or_hex(eim_id)}")
+
+    def _first_bytes(self, value: Any) -> Optional[bytes]:
+        if isinstance(value, bytes):
+            return value
+        if isinstance(value, list):
+            if len(value) == 0:
+                return None
+            if isinstance(value[0], bytes):
+                return value[0]
+        return None
+
+    def _print_help_rows(self, rows: List[Tuple[str, str]]) -> None:
+        for usage, description in rows:
+            print(f"  {usage:<{self.HELP_USAGE_WIDTH}} {description}")
+
+    def _print_notifications_list_compact(self, response: bytes) -> None:
+        parsed = self._parse_tlv_simple(response)
+        root_bytes = self._first_bytes(parsed.get(0xBF2B))
+        if root_bytes is None:
+            print("    | Notification Entries : (Empty)")
+            return
+
+        entry_count = 0
+        first_entry: Optional[bytes] = None
+        nodes = self._parse_tlv_nodes(root_bytes)
+        for tag, value, _ in nodes:
+            if tag != 0xBF2F:
+                continue
+            entry_count += 1
+            if first_entry is None:
+                first_entry = value
+
+        print(f"    | Notification Entries : {entry_count}")
+        if first_entry is None:
+            return
+
+        first = self._parse_tlv_simple(first_entry)
+        seq_value = self._first_bytes(first.get(0x80))
+        if seq_value is not None:
+            print(f"    | Seq Number           : {int.from_bytes(seq_value, 'big')}")
+
+        op_value = self._first_bytes(first.get(0x81))
+        if op_value is not None:
+            print(f"    | Operation            : {op_value.hex().upper()}")
+
+        fqdn_value = self._first_bytes(first.get(0x0C))
+        if fqdn_value is not None:
+            print(f"    | Server/FQDN          : {self._decode_text_or_hex(fqdn_value)}")
+
+        id_value = self._first_bytes(first.get(0x5A))
+        if id_value is not None:
+            print(f"    | EID/ICCID            : {self._swap_nibbles(id_value.hex().upper())}")
+
+    def _short_display_hex(self, text: str, max_len: int = 64) -> str:
+        if len(text) <= max_len:
+            return text
+        return text[:max_len] + "..."
+
+    def _bitmap_set_bits(self, hex_text: str) -> str:
+        try:
+            raw = bytes.fromhex(hex_text)
+        except ValueError:
+            return "n/a"
+        bitmask = int.from_bytes(raw, "big", signed=False)
+        width = len(raw) * 8
+        bits: List[str] = []
+        bit_index = width - 1
+        while bit_index >= 0:
+            is_set = ((bitmask >> bit_index) & 0x01) == 0x01
+            if is_set:
+                bits.append(str(bit_index))
+            bit_index -= 1
+        if len(bits) == 0:
+            return "none"
+        return ", ".join(bits)
+
+    def _count_tag_occurrences(self, value: Any, wanted_tag: int) -> int:
+        blob = self._first_bytes(value)
+        if blob is None:
+            return 0
+        count = 0
+        nodes = self._parse_tlv_nodes(blob)
+        for tag, _, _ in nodes:
+            if tag == wanted_tag:
+                count += 1
+        return count
+
+    def _count_tag_recursive(self, data: bytes, wanted_tag: int) -> int:
+        count = 0
+        nodes = self._parse_tlv_nodes(data)
+        for tag, value, is_constructed in nodes:
+            if tag == wanted_tag:
+                count += 1
+            if is_constructed:
+                count += self._count_tag_recursive(value, wanted_tag)
+        return count
+
+    def _collect_tag_recursive(self, data: bytes, wanted_tag: int) -> List[bytes]:
+        collected: List[bytes] = []
+        nodes = self._parse_tlv_nodes(data)
+        for tag, value, is_constructed in nodes:
+            if tag == wanted_tag:
+                collected.append(value)
+            if is_constructed:
+                nested = self._collect_tag_recursive(value, wanted_tag)
+                for entry in nested:
+                    collected.append(entry)
+        return collected
+
+    def _dedupe_preserving_order(self, values: List[str]) -> List[str]:
+        seen: Dict[str, bool] = {}
+        output: List[str] = []
+        for value in values:
+            if value in seen:
+                continue
+            seen[value] = True
+            output.append(value)
+        return output
+
+    def _decode_profiles(self, raw_data: bytes) -> List[ProfileRow]:
+        if TlvParser is None:
+            return self._decode_profiles_with_local_parser(raw_data)
+        return self._decode_profiles_with_tlv_parser(raw_data)
+
+    def _decode_profiles_with_tlv_parser(self, raw_data: bytes) -> List[ProfileRow]:
+        rows: List[ProfileRow] = []
+        index = 0
+        while index < len(raw_data):
+            if raw_data[index] != 0xE3:
+                index += 1
+                continue
+
+            length, length_size = self._decode_length(raw_data, index + 1)
+            if length_size == 0:
+                break
+
+            value_start = index + 1 + length_size
+            value_end = value_start + length
+            if value_end > len(raw_data):
+                break
+
+            blob = raw_data[value_start:value_end]
+            row = self._decode_single_profile(blob)
+            if row is not None:
+                rows.append(row)
+            index = value_end
+        return rows
+
+    def _decode_single_profile(self, blob: bytes) -> Optional[ProfileRow]:
+        parsed = TlvParser.parse(blob)
+        return self._profile_row_from_parsed(parsed)
+
+    def _decode_profiles_with_local_parser(self, raw_data: bytes) -> List[ProfileRow]:
+        rows: List[ProfileRow] = []
+        index = 0
+        while index < len(raw_data):
+            if raw_data[index] != 0xE3:
+                index += 1
+                continue
+
+            length, length_size = self._decode_length(raw_data, index + 1)
+            if length_size == 0:
+                break
+
+            value_start = index + 1 + length_size
+            value_end = value_start + length
+            if value_end > len(raw_data):
+                break
+
+            blob = raw_data[value_start:value_end]
+            parsed = self._parse_tlv_simple(blob)
+            row = self._profile_row_from_parsed(parsed)
+            if row is not None:
+                rows.append(row)
+            index = value_end
+        return rows
+
+    def _profile_row_from_parsed(self, parsed: Dict[int, Any]) -> Optional[ProfileRow]:
+        aid_bytes = self._get_tag(parsed, 0x4F) or self._get_tag(parsed, 0xA0)
+        iccid_bytes = self._get_tag(parsed, 0x5A)
+        state_bytes = self._get_tag(parsed, 0x9F70, b"\x00")
+        class_bytes = self._get_tag(parsed, 0x95, b"\x02")
+        name_bytes = self._get_tag(parsed, 0x90) or self._get_tag(parsed, 0x92) or self._get_tag(parsed, 0x91)
+
+        if iccid_bytes is None:
+            return None
+
+        if isinstance(aid_bytes, bytes):
+            aid = aid_bytes.hex().upper()
+        else:
+            aid = ""
+
+        if isinstance(iccid_bytes, bytes):
+            iccid_raw = iccid_bytes.hex().upper()
+        else:
+            iccid_raw = ""
+        iccid = self._swap_nibbles(iccid_raw)
+
+        if isinstance(state_bytes, bytes):
+            state_value = int.from_bytes(state_bytes, "big")
+        else:
+            state_value = 0
+        state = "ENABLED" if state_value == 1 else "DISABLED"
+
+        if isinstance(class_bytes, bytes):
+            class_value = int.from_bytes(class_bytes, "big")
+        else:
+            class_value = 2
+        class_map = {0: "TEST", 1: "PROV", 2: "OPER"}
+        profile_class = class_map.get(class_value, "OPER")
+
+        nickname = "Unknown"
+        if isinstance(name_bytes, bytes):
+            try:
+                nickname = name_bytes.decode("utf-8", "ignore").strip()
+            except Exception:
+                nickname = name_bytes.hex().upper()
+        if nickname == "Unknown" and len(iccid) > 0:
+            nickname = f"ICCID-{iccid[-4:]}"
+
+        return ProfileRow(
+            iccid=iccid,
+            state=state,
+            profile_class=profile_class,
+            nickname=nickname,
+            aid=aid,
+        )
+
+    def _get_tag(self, parsed: Dict[int, Any], tag: int, default: Any = None) -> Any:
+        if TlvParser is not None:
+            return TlvParser.get_first(parsed, tag, default)
+
+        if tag not in parsed:
+            return default
+        value = parsed[tag]
+        if isinstance(value, list):
+            if len(value) == 0:
+                return default
+            return value[0]
+        return value
+
+    def _parse_tlv_simple(self, data: bytes) -> Dict[int, Any]:
+        parsed: Dict[int, Any] = {}
+        index = 0
+        while index < len(data):
+            tag = data[index]
+            index += 1
+
+            if (tag & 0x1F) == 0x1F:
+                if index >= len(data):
+                    break
+                tag = (tag << 8) | data[index]
+                index += 1
+                while index < len(data):
+                    octet = data[index]
+                    if (octet & 0x80) == 0:
+                        break
+                    tag = (tag << 8) | octet
+                    index += 1
+
+            if index >= len(data):
+                break
+
+            length, length_size = self._decode_length(data, index)
+            if length_size == 0:
+                break
+            index += length_size
+
+            value_end = index + length
+            if value_end > len(data):
+                break
+            value = data[index:value_end]
+            index = value_end
+
+            if tag in parsed:
+                existing = parsed[tag]
+                if isinstance(existing, list):
+                    existing.append(value)
+                else:
+                    parsed[tag] = [existing, value]
+            else:
+                parsed[tag] = value
+
+        return parsed
+
+    def _decode_length(self, data: bytes, offset: int) -> Tuple[int, int]:
+        if offset >= len(data):
+            return 0, 0
+        first = data[offset]
+        if first < 0x80:
+            return first, 1
+        count = first & 0x7F
+        if count == 0:
+            return 0, 0
+        end = offset + 1 + count
+        if end > len(data):
+            return 0, 0
+        return int.from_bytes(data[offset + 1 : end], "big"), 1 + count
+
+    def _swap_nibbles(self, text: str) -> str:
+        output = []
+        i = 0
+        while i < len(text):
+            if i + 1 < len(text):
+                output.append(text[i + 1] + text[i])
+            else:
+                output.append(text[i])
+            i += 2
+        return "".join(output).replace("F", "")

@@ -840,16 +840,31 @@ class ShellDispatcher :
                 return node .hex ().upper ()
             return node 
 
-        get_data_tags =[
+        covered_get_data_tags =[]
+        covered_get_data_tags .append ("00E0")
+        get_data_candidates =[
         ("sd_management_data",0x00 ,0x66 ),
+        ("card_capabilities",0x00 ,0x67 ),
         ("cplc",0x9F ,0x7F ),
-        ("apps_in_sd",0x2F ,0x00 ),
+        ("issuer_identification_number",0x00 ,0x42 ),
+        ("card_image_number",0x00 ,0x45 ),
+        ("eid",0x00 ,0x5A ),
+        ("isd_aid",0x00 ,0x4F ),
         ]
         get_data_out :Dict [str ,Any ]={}
-        for name ,p1 ,p2 in get_data_tags :
+        executed_tags =[]
+        skipped_tags =[]
+        for name ,p1 ,p2 in get_data_candidates :
+            tag_text =f"{p1:02X}{p2:02X}"
+            is_covered =False
+            if tag_text in covered_get_data_tags :
+                is_covered =True
+            if is_covered :
+                skipped_tags .append (tag_text )
+                continue
             data ,sw1 ,sw2 =self .gp_ctrl .get_data_raw (p1 ,p2 )
             entry :Dict [str ,Any ]={
-            "tag":f"{p1:02X}{p2:02X}",
+            "tag":tag_text ,
             "status":f"{sw1:02X}{sw2:02X}",
             "raw_hex":data .hex ().upper ()
             }
@@ -860,8 +875,15 @@ class ShellDispatcher :
                 except Exception :
                     pass 
             get_data_out [name ]=entry 
-            _print_sw (f"MNO-SD GET-DATA {p1:02X}{p2:02X}",entry ["status"])
-        report ["get_data"]=get_data_out 
+            executed_tags .append (tag_text )
+            _print_sw (f"MNO-SD GET-DATA {tag_text}",entry ["status"])
+        report ["get_data"]={
+        "policy":"Execute only additional GET DATA P1/P2 combinations not covered by KEYS/APPS/PKGS/SD commands.",
+        "covered_by_commands":covered_get_data_tags ,
+        "skipped_tags":skipped_tags ,
+        "executed_tags":executed_tags ,
+        "entries":get_data_out 
+        }
         report ["generated"]=datetime .datetime .now ().isoformat ()
         return report 
 
