@@ -374,6 +374,16 @@ class Sgp22Manager :
         if is_empty :
             std ="SGP.32"
 
+        is_sgp02 =False
+        if std =="SGP.02":
+            is_sgp02 =True
+        if std =="02":
+            is_sgp02 =True
+        if is_sgp02 :
+            report_02 =self ._get_euicc_report_sgp02_dual_path ()
+            report_02 ["standard"]="SGP.02"
+            return report_02
+
         report =self .get_euicc_report ()
         report ["standard"]=std 
 
@@ -405,6 +415,166 @@ class Sgp22Manager :
             sgp32_section ["get_certs_summary"]=[]
 
         report ["sgp32_extra"]=sgp32_section 
+        return report 
+
+    def _tlv_to_plain (self ,node :Any )->Any :
+        if isinstance (node ,dict ):
+            out :Dict [str ,Any ]={}
+            for key ,value in node .items ():
+                key_text =str (key )
+                if isinstance (key ,int ):
+                    if key <=0xFF :
+                        key_text =f"{key:02X}"
+                    else :
+                        key_text =f"{key:04X}"
+                out [key_text ]=self ._tlv_to_plain (value )
+            return out 
+        if isinstance (node ,list ):
+            out_list :List [Any ]=[]
+            for item in node :
+                out_list .append (self ._tlv_to_plain (item ))
+            return out_list 
+        if isinstance (node ,bytes ):
+            return node .hex ().upper ()
+        return node 
+
+    def _is_success_sw (self ,sw1 :int )->bool :
+        if sw1 ==0x90 :
+            return True
+        if sw1 ==0x61 :
+            return True
+        return False
+
+    def _probe_get_data_with_cla_candidates (self ,cla_values :List [int ],p1 :int ,p2 :int )->Dict [str ,Any ]:
+        attempts :List [Dict [str ,Any ]]=[]
+        selected_entry :Dict [str ,Any ]={}
+        has_selected =False
+        for cla in cla_values :
+            apdu =f"{cla:02X}CA{p1:02X}{p2:02X}00"
+            data ,sw1 ,sw2 =self .tp .transmit (apdu ,silent =True )
+            entry :Dict [str ,Any ]={
+            "apdu":apdu ,
+            "status":f"{sw1:02X}{sw2:02X}",
+            "raw_hex":data .hex ().upper (),
+            }
+            can_decode =False
+            if self ._is_success_sw (sw1 ):
+                if len (data )>0 :
+                    can_decode =True
+            if can_decode :
+                try :
+                    parsed =TlvParser .parse (data )
+                    entry ["decoded"]=self ._tlv_to_plain (parsed )
+                except Exception :
+                    pass 
+            attempts .append (entry )
+            if has_selected ==False :
+                has_selected =True
+                selected_entry =entry 
+            if self ._is_success_sw (sw1 ):
+                selected_entry =entry 
+                break
+        out :Dict [str ,Any ]={}
+        out ["attempts"]=attempts 
+        out ["result"]=selected_entry 
+        return out 
+
+    def _run_sgp02_domain_probe (self ,mode_name :str ,use_logical_channel :bool )->Dict [str ,Any ]:
+        mode_report :Dict [str ,Any ]={}
+        mode_report ["mode"]=mode_name 
+        mode_report ["uses_logical_channel"]=use_logical_channel 
+        channel_id =0 
+        open_status ="SKIPPED"
+        if use_logical_channel :
+            open_resp ,open_sw1 ,open_sw2 =self .tp .transmit ("0070000001",silent =True )
+            open_status =f"{open_sw1:02X}{open_sw2:02X}"
+            is_open_ok =False
+            if self ._is_success_sw (open_sw1 ):
+                if len (open_resp )>=1 :
+                    is_open_ok =True
+            if is_open_ok :
+                channel_id =open_resp [0 ]
+            else :
+                mode_report ["open_channel_status"]=open_status 
+                mode_report ["channel_id"]=channel_id 
+                mode_report ["domains"]={}
+                mode_report ["close_channel_status"]="SKIPPED"
+                return mode_report
+        mode_report ["open_channel_status"]=open_status 
+        mode_report ["channel_id"]=channel_id 
+
+        domains :List [Tuple [str ,str ,List [Tuple [str ,int ,int ]]]]=[]
+        domains .append (
+        (
+        "ecasd",
+        "A0000005591010FFFFFFFF8900000200",
+        [
+        ("eid",0x00 ,0x5A ),
+        ("sd_management_data",0x00 ,0x66 ),
+        ("card_capabilities",0x00 ,0x67 ),
+        ("issuer_identification_number",0x00 ,0x42 ),
+        ("card_image_number",0x00 ,0x45 ),
+        ],
+        )
+        )
+        domains .append (
+        (
+        "isdr",
+        "A0000005591010FFFFFFFF8900000100",
+        [
+        ("key_information_template",0x00 ,0xE0 ),
+        ("sd_management_data",0x00 ,0x66 ),
+        ("card_capabilities",0x00 ,0x67 ),
+        ("applications_in_sd",0x2F ,0x00 ),
+        ],
+        )
+        )
+
+        domain_report :Dict [str ,Any ]={}
+        for domain_name ,aid_hex ,tags in domains :
+            select_cla =0x00
+            if use_logical_channel :
+                select_cla =channel_id 
+            select_apdu =f"{select_cla:02X}A40400{len(aid_hex)//2:02X}{aid_hex}"
+            select_data ,sel_sw1 ,sel_sw2 =self .tp .transmit (select_apdu ,silent =True )
+            entry :Dict [str ,Any ]={}
+            entry ["aid"]=aid_hex 
+            entry ["select_apdu"]=select_apdu 
+            entry ["select_status"]=f"{sel_sw1:02X}{sel_sw2:02X}"
+            entry ["select_raw_hex"]=select_data .hex ().upper ()
+            entry ["tags"]={}
+            if self ._is_success_sw (sel_sw1 ):
+                for tag_name ,p1 ,p2 in tags :
+                    cla_values :List [int ]=[]
+                    if use_logical_channel :
+                        cla_values .append (channel_id )
+                        cla_values .append (0x80 |channel_id )
+                    else :
+                        cla_values .append (0x00 )
+                        cla_values .append (0x80 )
+                    probe =self ._probe_get_data_with_cla_candidates (cla_values ,p1 ,p2 )
+                    tag_entry :Dict [str ,Any ]={}
+                    tag_entry ["tag"]=f"{p1:02X}{p2:02X}"
+                    tag_entry ["attempts"]=probe .get ("attempts",[])
+                    tag_entry ["result"]=probe .get ("result",{})
+                    entry ["tags"][tag_name ]=tag_entry 
+            domain_report [domain_name ]=entry 
+        mode_report ["domains"]=domain_report 
+
+        close_status ="SKIPPED"
+        if use_logical_channel :
+            close_apdu =f"007080{channel_id:02X}00"
+            _close_data ,close_sw1 ,close_sw2 =self .tp .transmit (close_apdu ,silent =True )
+            close_status =f"{close_sw1:02X}{close_sw2:02X}"
+        mode_report ["close_channel_status"]=close_status 
+        return mode_report 
+
+    def _get_euicc_report_sgp02_dual_path (self )->Dict [str ,Any ]:
+        report :Dict [str ,Any ]={}
+        report ["approach"]="Dual-path SGP.02 probe (basic channel and logical channel 01)."
+        report ["probe_modes"]={}
+        report ["probe_modes"]["basic"]=self ._run_sgp02_domain_probe ("basic",False )
+        report ["probe_modes"]["logical_channel_01"]=self ._run_sgp02_domain_probe ("logical_channel_01",True )
         return report 
 
     def _profile_list_to_dicts (self ,data :bytes )->List [Dict ]:

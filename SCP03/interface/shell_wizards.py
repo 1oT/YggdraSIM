@@ -1152,7 +1152,7 @@ class ShellInteractiveWizards :
                 should_ask =True 
             return should_ask 
 
-        wiz .add_step ("std","Target Standard [1=SGP.22, 2=SGP.32]:",default ="2",condition =std_cond )
+        wiz .add_step ("std","Target Standard [1=SGP.22, 2=SGP.32, 3=SGP.02]:",default ="2",condition =std_cond )
 
         res =wiz .run ()
         choice =res .get ("choice")
@@ -1226,6 +1226,11 @@ class ShellInteractiveWizards :
                 is_std_22 =True 
             if is_std_22 :
                 standard ="SGP.22"
+            is_std_02 =False
+            if std_raw =='3':
+                is_std_02 =True
+            if is_std_02 :
+                standard ="SGP.02"
 
             shell ._handle_export_euicc (filename ,standard =standard )
             return 
@@ -1252,6 +1257,11 @@ class ShellInteractiveWizards :
                 is_std_22 =True 
             if is_std_22 :
                 standard ="SGP.22"
+            is_std_02 =False
+            if std_raw =='3':
+                is_std_02 =True
+            if is_std_02 :
+                standard ="SGP.02"
 
             adm_input =input ("Enter ADM: (Skip if no) ").strip ()
             auth_input =input ("Authenticate SD? (Y/N) ").strip ().upper ()

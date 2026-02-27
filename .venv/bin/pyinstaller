@@ -1,0 +1,6 @@
+#!/mnt/usb_storage/YggdraSIM/.venv/bin/python
+import sys
+from PyInstaller.__main__ import _console_script_run
+if __name__ == '__main__':
+    sys.argv[0] = sys.argv[0].removesuffix('.exe')
+    sys.exit(_console_script_run())

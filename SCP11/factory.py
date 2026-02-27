@@ -1,0 +1,55 @@
+try:
+    from .es9_client import Es9LikeClient
+    from .models import (
+        BACKEND_MODE_LOCAL_SGP26,
+        BACKEND_MODE_REMOTE_DP,
+        TRANSPORT_MODE_PCSC,
+        TRANSPORT_MODE_RELAY,
+    )
+    from .providers import RemoteEs9Provider, Sgp26LocalProvider
+    from .transport import PcscApduChannel, RelayApduChannel, RelayHttpClientJsonHex
+except ImportError:
+    from es9_client import Es9LikeClient
+    from models import (
+        BACKEND_MODE_LOCAL_SGP26,
+        BACKEND_MODE_REMOTE_DP,
+        TRANSPORT_MODE_PCSC,
+        TRANSPORT_MODE_RELAY,
+    )
+    from providers import RemoteEs9Provider, Sgp26LocalProvider
+    from transport import PcscApduChannel, RelayApduChannel, RelayHttpClientJsonHex
+
+
+def build_apdu_channel(cfg):
+    if cfg.TRANSPORT_MODE == TRANSPORT_MODE_PCSC:
+        return PcscApduChannel(reader_index=cfg.READER_INDEX)
+
+    if cfg.TRANSPORT_MODE == TRANSPORT_MODE_RELAY:
+        relay_client = RelayHttpClientJsonHex(
+            endpoint=cfg.RELAY_URL,
+            timeout_seconds=cfg.RELAY_TIMEOUT_SECONDS,
+            verify_tls=cfg.RELAY_VERIFY_TLS,
+        )
+        return RelayApduChannel(relay_client=relay_client, session_id=cfg.RELAY_SESSION_ID)
+
+    raise ValueError(f"Unsupported transport mode: {cfg.TRANSPORT_MODE}")
+
+
+def build_profile_provider(cfg):
+    if cfg.BACKEND_MODE == BACKEND_MODE_REMOTE_DP:
+        es9_client = Es9LikeClient(
+            base_url=cfg.ES9_BASE_URL,
+            timeout_seconds=cfg.ES9_TIMEOUT_SECONDS,
+            verify_tls=cfg.ES9_VERIFY_TLS,
+            ca_bundle_path=cfg.ES9_CA_BUNDLE_PATH,
+        )
+        return RemoteEs9Provider(es9_client=es9_client)
+
+    if cfg.BACKEND_MODE == BACKEND_MODE_LOCAL_SGP26:
+        return Sgp26LocalProvider(
+            trust_anchor_path=cfg.LOCAL_SGP26_TRUST_ANCHOR_PATH,
+            intermediate_paths=cfg.LOCAL_SGP26_INTERMEDIATE_PATHS,
+            issuer_cert_path=cfg.LOCAL_SGP26_ISSUER_CERT_PATH,
+        )
+
+    raise ValueError(f"Unsupported backend mode: {cfg.BACKEND_MODE}")
