@@ -1,14 +1,34 @@
 # -----------------------------------------------------------------------------
-# This Source Code Form is subject to the terms of the Mozilla Public
-# License, v. 2.0. If a copy of the MPL was not distributed with this
-# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
 #
-# Copyright (c) 2026 Hampus Hellsberg
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program. If not, see <https://www.gnu.org/licenses/>.
+#
+# Copyright (c) 2026 Hampus Hellsberg and contributors
 # -----------------------------------------------------------------------------
 
 from sgp_utils import CryptoEngine 
 from cryptography .hazmat .primitives import hashes 
 from cryptography .hazmat .primitives .asymmetric import ec 
+
+def _hex_to_ansi (hex_color :str )->str :
+    hex_value =hex_color .lstrip ('#')
+    red =int (hex_value [0 :2 ],16 )
+    green =int (hex_value [2 :4 ],16 )
+    blue =int (hex_value [4 :6 ],16 )
+    return f"\033[38;2;{red};{green};{blue}m"
+
+PASS_COLOR =_hex_to_ansi ('#8DFF8D')
+ERROR_COLOR =_hex_to_ansi ('#FF9A9A')
+END_COLOR ='\033[0m'
 
 class KeyDiagnostics :
     @staticmethod 
@@ -22,12 +42,12 @@ class KeyDiagnostics :
             signature =priv_key .sign (data ,ec .ECDSA (hashes .SHA256 ()))
 
             pub_key .verify (signature ,data ,ec .ECDSA (hashes .SHA256 ()))
-            print (f"\033[92m[PASS] Key Pair matches for {cert_name}.\033[0m\n")
+            print (f"{PASS_COLOR}[PASS] Key Pair matches for {cert_name}.{END_COLOR}\n")
 
         except FileNotFoundError :
-            print (f"\033[91m[ERROR] Files not found.\033[0m\n")
+            print (f"{ERROR_COLOR}[ERROR] Files not found.{END_COLOR}\n")
         except Exception as e :
-            print (f"\033[91m[FAIL] Verification Failed: {e}\033[0m\n")
+            print (f"{ERROR_COLOR}[FAIL] Verification Failed: {e}{END_COLOR}\n")
 
 if __name__ =="__main__":
     KeyDiagnostics .verify_pair ("CERT.DPauth.ECDSA.der","SK.DPauth.ECDSA.pem")

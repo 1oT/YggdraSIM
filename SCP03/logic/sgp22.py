@@ -1,24 +1,48 @@
 # -----------------------------------------------------------------------------
-# This Source Code Form is subject to the terms of the Mozilla Public
-# License, v. 2.0. If a copy of the MPL was not distributed with this
-# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
 #
-# Copyright (c) 2026 Hampus Hellsberg
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program. If not, see <https://www.gnu.org/licenses/>.
+#
+# Copyright (c) 2026 Hampus Hellsberg and contributors
 # -----------------------------------------------------------------------------
 
 import json 
+import re
+import shutil 
+import textwrap 
+from datetime import datetime
 from typing import List ,Dict ,Optional ,Tuple ,Any 
 from SCP03 .config import Config 
 from SCP03 .core .utils import HexUtils ,TlvParser 
 from SCP03 .core .decoders import AdvancedDecoders 
+from SCP03 .logic .euicc_info2 import build_euicc_info2_detail_lines 
+from SCP03 .logic .euicc_info2 import decode_euicc_info2_value 
+from SCP03 .logic .euicc_info2 import resolve_euicc_info2_tag_name 
+from SCP03 .logic .sgp32_decode import decode_eim_configuration_entries 
+from SCP03 .logic .sgp32_decode import decode_euicc_info1_summary 
+from SCP03 .logic .sgp32_decode import decode_get_certs_response 
+from SCP03 .logic .sgp32_decode import decode_notifications_response 
+from SCP03 .logic .sgp32_decode import decode_rat_rules 
+from SCP03 .logic .sgp32_decode import EIM_SUPPORTED_PROTOCOL_FLAGS 
+from SCP03 .logic .sgp32_decode import format_named_bit_string 
 
 class Sgp22Manager :
     """
     Implements GSMA SGP.22/SGP.32 data retrieval and local profile state (list, enable, disable, delete).
     Supports ES10c/ES10b retrieval: GetProfilesInfo, GetRAT, RetrieveNotificationsList,
     GetEimConfigurationData (SGP.32 IoT), EuiccInfo1/2, EuiccConfiguredData.
-    Does NOT authenticate to ISD-R for provisioning (StoreMetadata, LoadProfile, PrepareDownload, etc.);
-    that is planned for the SCP11 module.
+    SCP11 provisioning is handled by the dedicated SCP11 live/test/local_access modules.
+    Local STORE DATA retrievals use the retry ladder: base channel, then logical channel 1,
+    then STK mode after reset when cards reject the direct path.
     """
     AID_ISD_R ="A0000005591010FFFFFFFF8900000100"
 
@@ -77,8 +101,13 @@ class Sgp22Manager :
 
 
     def run_sgp22_scan (self ):
-        """Executes the custom SGP.22/SGP.32 scanning sequence."""
-        self ._execute_sequence (self .SEQUENCE_SGP22 ,"SGP.22/SGP.32 Scan")
+        """Executes SGP.22/SGP.32 retrievals using the local retry ladder."""
+        print (f"\n{Config.Colors.HEADER}=== Running SGP.22/SGP.32 Scan ==={Config.Colors.ENDC}")
+        self .get_eid ()
+        self .list_profiles ()
+        self .get_euicc_configured_data ()
+        self ._es10_retrieve ("BF2000","EuiccInfo1",root_tag =0xBF20 )
+        self ._es10_retrieve ("BF2200","EuiccInfo2",root_tag =0xBF22 )
 
     def run_sgp02_scan (self ):
         """Executes the custom SGP.02 scanning sequence."""
@@ -86,16 +115,25 @@ class Sgp22Manager :
 
     def get_euicc_report (self )->Dict [str ,Any ]:
         """
-        Runs SGP.22 sequence and returns structured data for export (no print).
+        Runs SGP.22 retrieval set and returns structured data for export (no print).
         Returns dict with: profiles, eid, euicc_info1, euicc_info2, euicc_configured_data,
         key_info, sd_mgmt_data (hex strings where applicable).
         """
-        collected =self ._run_sequence_collect (self .SEQUENCE_SGP22 )
-        euicc_info1_raw =collected .get ("EuiccInfo1","")
-        euicc_info2_raw =collected .get ("EuiccInfo2","")
-        euicc_cfg_raw =collected .get ("EuiccConfiguredData","")
-        key_info_raw =collected .get ("Key Information Template","")
-        sd_mgmt_raw =collected .get ("Security Domain Mgmt Data","")
+        list_data =self ._es10_retrieve_data ("BF2D00")
+        euicc_info1_data =self ._es10_retrieve_data ("BF2000")
+        euicc_info2_data =self ._es10_retrieve_data ("BF2200")
+        euicc_cfg_data =self ._es10_retrieve_data ("BF3C00")
+        eid_data ,_eid_sw1 ,_eid_sw2 =self ._retrieve_eid_response ()
+
+        list_hex =list_data .hex ().upper ()if list_data else ""
+        euicc_info1_raw =euicc_info1_data .hex ().upper ()if euicc_info1_data else ""
+        euicc_info2_raw =euicc_info2_data .hex ().upper ()if euicc_info2_data else ""
+        euicc_cfg_raw =euicc_cfg_data .hex ().upper ()if euicc_cfg_data else ""
+        key_info_raw =""
+        sd_mgmt_raw =""
+        eid_hex =""
+        if eid_data :
+            eid_hex =self ._extract_eid_hex (eid_data )
 
         euicc_info1_decoded =self ._compact_from_hex (euicc_info1_raw ,0xBF20 )
         euicc_info2_decoded =self ._compact_from_hex (euicc_info2_raw ,0xBF22 )
@@ -104,7 +142,7 @@ class Sgp22Manager :
         sd_mgmt_decoded =self ._compact_from_hex (sd_mgmt_raw ,0x66 )
         report ={
         "profiles":[],
-        "eid":collected .get ("EID",""),
+        "eid":eid_hex ,
         "euicc_info1":euicc_info1_decoded if euicc_info1_decoded else euicc_info1_raw ,
         "euicc_info2":euicc_info2_decoded if euicc_info2_decoded else euicc_info2_raw ,
         "euicc_configured_data":euicc_cfg_decoded if euicc_cfg_decoded else euicc_cfg_raw ,
@@ -116,7 +154,6 @@ class Sgp22Manager :
         "key_info_raw":key_info_raw ,
         "sd_mgmt_data_raw":sd_mgmt_raw ,
         }
-        list_hex =collected .get ("List Profiles","")
         if list_hex :
             try :
                 data =bytes .fromhex (list_hex )
@@ -238,33 +275,17 @@ class Sgp22Manager :
             return {}
 
         parsed =self ._safe_parse_tlv (data )
-        if not parsed :
-            return {"raw_hex":data .hex ().upper ()}
-
-        root =TlvParser .get_first (parsed ,0xBF55 ,parsed )
-        entries =self ._find_eim_entries (root )
-        if len (entries )==0 :
-            entries =self ._find_eim_entries (parsed )
-
         out_entries :List [Dict [str ,Any ]]=[]
-        for entry in entries :
-            row :Dict [str ,Any ]={}
-            row ["eim_id"]=self ._decode_text_value (0x80 ,TlvParser .get_first (entry ,0x80 ),0xE1 )
-            row ["eim_fqdn"]=self ._decode_text_value (0x81 ,TlvParser .get_first (entry ,0x81 ),0xE1 )
-            row ["eim_id_type"]=self ._decode_text_value (0x82 ,TlvParser .get_first (entry ,0x82 ),0xE1 )
-            row ["counter_value"]=self ._decode_text_value (0x83 ,TlvParser .get_first (entry ,0x83 ),0xE1 )
-            row ["association_token"]=self ._decode_text_value (0x84 ,TlvParser .get_first (entry ,0x84 ),0xE1 )
-            row ["supported_protocol"]=self ._decode_text_value (0x87 ,TlvParser .get_first (entry ,0x87 ),0xE1 )
-            row ["euicc_ci_pkid"]=self ._decode_text_value (0x88 ,TlvParser .get_first (entry ,0x88 ),0xE1 )
-            row ["indirect_profile_download"]=self ._decode_text_value (0x89 ,TlvParser .get_first (entry ,0x89 ),0xE1 )
-
-            eim_pub =TlvParser .get_first (entry ,0xA5 )
-            if eim_pub is not None :
+        for entry in decode_eim_configuration_entries (data ):
+            row :Dict [str ,Any ]=dict (entry )
+            eim_pub =entry .get ("eim_public_key_data")
+            if isinstance (eim_pub ,bytes ):
+                row ["eim_public_key_data_raw_hex"]=eim_pub .hex ().upper ()
                 row ["eim_public_key_data"]=self ._summarize_cert_block (eim_pub )
-
-            tls_pub =TlvParser .get_first (entry ,0xA6 )
-            if tls_pub is not None :
-                row ["trusted_tls_key_data"]=self ._summarize_cert_block (tls_pub )
+            tls_pub =entry .get ("trusted_tls_public_key_data")
+            if isinstance (tls_pub ,bytes ):
+                row ["trusted_tls_public_key_data_raw_hex"]=tls_pub .hex ().upper ()
+                row ["trusted_tls_public_key_data"]=self ._summarize_cert_block (tls_pub )
 
             clean_row :Dict [str ,Any ]={}
             for key ,value in row .items ():
@@ -287,16 +308,88 @@ class Sgp22Manager :
             "raw_hex":data .hex ().upper ()
             }
 
+        if not parsed :
+            return {"raw_hex":data .hex ().upper ()}
+
         compact =self ._compact_tlv_node (parsed ,0xBF55 )
         return {
         "compact":compact ,
         "raw_hex":data .hex ().upper ()
         }
 
+    def _export_notifications_list (self )->Dict [str ,Any ]:
+        data =self ._es10_retrieve_data ("BF2B00")
+        if not data :
+            return {
+            "notifications":[],
+            "package_results":[],
+            }
+
+        decoded =decode_notifications_response (data )
+        out :Dict [str ,Any ]={
+        "notifications":decoded .get ("notifications",[]),
+        "package_results":[],
+        "raw_hex":data .hex ().upper (),
+        }
+        if "error"in decoded :
+            error_text =str (decoded .get ("error","")).strip ()
+            if len (error_text )>0 :
+                out ["error"]=error_text
+
+        package_results =decoded .get ("package_results",[])
+        if isinstance (package_results ,list ):
+            out ["package_results"]=[
+            item .hex ().upper ()
+            for item in package_results
+            if isinstance (item ,bytes )
+            ]
+        return out
+
+    def _export_get_certs (self )->Dict [str ,Any ]:
+        data =self ._es10_retrieve_data ("BF5600")
+        if not data :
+            return {}
+
+        decoded =decode_get_certs_response (data )
+        out :Dict [str ,Any ]={
+        "raw_hex":data .hex ().upper ()
+        }
+        error_text =str (decoded .get ("error","")).strip ()
+        if len (error_text )>0 :
+            out ["error"]=error_text
+            return out
+
+        for source_key ,target_key in [
+        ("eumCertificate","eum_certificate"),
+        ("euiccCertificate","euicc_certificate"),
+        ]:
+            value =decoded .get (source_key )
+            if not isinstance (value ,bytes ):
+                continue
+            entry :Dict [str ,Any ]={
+            "raw_hex":value .hex ().upper ()
+            }
+            summary =self ._summarize_cert_block (value )
+            if len (summary )>0 :
+                entry ["summary"]=summary
+            out [target_key ]=entry
+
+        has_cert_entries =False
+        for key in ("eum_certificate","euicc_certificate"):
+            if key in out :
+                has_cert_entries =True
+                break
+        if has_cert_entries :
+            return out
+
+        fallback =self ._summarize_cert_block (data )
+        if len (fallback )>0 :
+            out ["summary"]=fallback
+        return out
+
     def _es10_retrieve_data (self ,payload :str )->bytes :
         self ._select_isd_r ()
-        cmd =f"80E29100{len(bytes.fromhex(payload)):02X}{payload}"
-        data ,sw1 ,sw2 =self .tp .transmit (cmd ,silent =True )
+        data ,sw1 ,sw2 =self ._send_store_data_with_retry_ladder (payload )
         is_ok =False 
         if sw1 ==0x90 :
             is_ok =True 
@@ -364,8 +457,9 @@ class Sgp22Manager :
         """
         Build eUICC export payload for REPORT/EXPORT-EUICC.
         Base set is equivalent to GET-IOT scan.
-        For SGP.32, include additional retrievals not covered by GET-IOT
-        (excluding notifications and EID as requested).
+        For SGP.32, include additional retrievals not covered by GET-IOT,
+        preserving the decoded structure for notifications, eIM configuration,
+        and certificate material.
         """
         std =standard .strip ().upper ()
         is_empty =False 
@@ -393,26 +487,9 @@ class Sgp22Manager :
         sgp32_section :Dict [str ,Any ]={}
 
         sgp32_section ["get_rat"]=self ._compact_from_payload ("BF4300",0xBF43 )
+        sgp32_section ["retrieve_notifications_list"]=self ._export_notifications_list ()
         sgp32_section ["get_eim_configuration_data"]=self ._export_eim_configuration_data ()
-
-        cert_data =self ._es10_retrieve_data ("BF5600")
-        cert_parsed =self ._safe_parse_tlv (cert_data )
-        if cert_parsed :
-            sgp32_section ["get_certs_summary"]=self ._collect_cert_summaries (cert_parsed )
-            if len (sgp32_section ["get_certs_summary"])==0 :
-                from_raw =self ._collect_cert_summaries_from_raw (cert_data )
-                if len (from_raw )>0 :
-                    sgp32_section ["get_certs_summary"]=from_raw 
-                else :
-                    sgp32_section ["get_certs_raw"]=cert_data .hex ().upper ()
-        elif cert_data :
-            from_raw =self ._collect_cert_summaries_from_raw (cert_data )
-            if len (from_raw )>0 :
-                sgp32_section ["get_certs_summary"]=from_raw 
-            else :
-                sgp32_section ["get_certs_raw"]=cert_data .hex ().upper ()
-        else :
-            sgp32_section ["get_certs_summary"]=[]
+        sgp32_section ["get_certs"]=self ._export_get_certs ()
 
         report ["sgp32_extra"]=sgp32_section 
         return report 
@@ -720,6 +797,10 @@ class Sgp22Manager :
     def _resolve_tag_name (self ,tag :int ,parent :Optional [int ])->str :
         """Context-aware tag naming for SGP.22 & GlobalPlatform."""
 
+        euicc_info2_name =resolve_euicc_info2_tag_name (tag ,parent )
+        if euicc_info2_name :
+            return euicc_info2_name 
+
 
         if parent ==0xBF3C :
             if tag ==0x80 :
@@ -758,25 +839,12 @@ class Sgp22Manager :
             if tag ==0x83 :return "Free RAM"
 
 
-        if parent in [0xBF20 ,0xBF22 ,0xA9 ,0xAA ,0xB4 ,0xAF ,0xA0 ]:
+        if parent in [0xBF20 ,0xA9 ,0xAA ]:
             if tag ==0x82 :return "Ver Supported"
             if tag ==0x81 :return "Profile Version"
-            if tag ==0x83 :return "Firmware Ver"
-            if tag ==0x84 :return "Ext Card Res"
-            if tag ==0x85 :return "UICC Cap"
-            if tag ==0x86 :return "TSCP Base"
-            if tag ==0x87 :return "eUICC Category"
-            if tag ==0x88 :return "PP Rules"
-            if tag ==0x99 :return "PP Version"
-            if tag ==0x0C :return "SAS Accr No"
+            if tag ==0x04 :return "CI PKId"
             if tag ==0xA9 :return "CI PK (Verif)"
             if tag ==0xAA :return "CI PK (Sign)"
-            if tag ==0x04 :return "Value"
-            if tag ==0xAF :return "Forbidden Rules"
-            if tag ==0x90 :return "Nickname"
-            if tag ==0xB4 :return "Device Capability"
-            if tag ==0xA0 :return "GSM/LTE Cap"
-            if tag ==0x89 :return "12V Support"
 
 
         if parent ==0xE0 :
@@ -901,6 +969,10 @@ class Sgp22Manager :
         """Heuristic value decoder."""
         hex_str =val .hex ().upper ()
 
+        euicc_info2_value =decode_euicc_info2_value (tag ,val ,parent_tag )
+        if euicc_info2_value is not None :
+            return euicc_info2_value 
+
 
         if parent_tag ==0x84 and tag in [0x81 ,0x82 ,0x83 ]:
             int_val =int .from_bytes (val ,'big')
@@ -911,9 +983,9 @@ class Sgp22Manager :
 
 
 
-        is_version_tag =tag in [0x81 ,0x82 ,0x86 ,0x87 ,0x88 ,0x99 ]
+        is_version_tag =tag in [0x81 ,0x82 ,0x86 ,0x87 ]
         is_euicc_context =False 
-        if parent_tag in [0xBF20 ,0xBF22 ,0xA9 ,0xAA ,0xB4 ,0xAF ,0xA0 ]:
+        if parent_tag in [0xBF20 ,0xA0 ]:
             is_euicc_context =True 
         if len (val )==3 and is_euicc_context and (is_version_tag or (tag ==0x04 and parent_tag ==0xA0 )):
             return f"v{val[0]}.{val[1]}.{val[2]} ({hex_str})"
@@ -946,19 +1018,14 @@ class Sgp22Manager :
                 return f"{eim_id_type[v]} ({v})"
             return f"{v} (0x{hex_str})"
 
+        if tag in [0x83 ,0x84 ]and parent_tag ==0xE1 :
+            return str (int .from_bytes (val ,"big",signed =False ))
+
         if tag ==0x87 and parent_tag ==0xE1 :
-            bitmask =int .from_bytes (val ,"big",signed =False )
-            width =len (val )*8 
-            set_bits =[]
-            for bit_idx in range (width -1 ,-1 ,-1 ):
-                is_set =False 
-                if ((bitmask >>bit_idx )&0x01 )==0x01 :
-                    is_set =True 
-                if is_set :
-                    set_bits .append (str (bit_idx ))
-            if len (set_bits )==0 :
-                return f"{hex_str} (bitmask: none)"
-            return f"{hex_str} (bitmask set: {', '.join(set_bits)})"
+            return format_named_bit_string (val ,EIM_SUPPORTED_PROTOCOL_FLAGS )
+
+        if tag ==0x89 and parent_tag ==0xE1 :
+            return "Present"
 
 
         if tag ==0x17 or tag ==0x18 :
@@ -984,7 +1051,6 @@ class Sgp22Manager :
             unused_bits =val [0 ]
             bit_data =val [1 :]
             bit_hex =bit_data .hex ().upper ()
-            short_hex =bit_hex if len (bit_hex )<=64 else bit_hex [:64 ]+"..."
 
 
             kind ="bits"
@@ -996,8 +1062,8 @@ class Sgp22Manager :
                     kind ="PublicKey"
 
             if unused_bits ==0 :
-                return f"{kind}: 0x{short_hex}"
-            return f"{kind}: 0x{short_hex} (unused bits={unused_bits})"
+                return f"{kind}: 0x{bit_hex}"
+            return f"{kind}: 0x{bit_hex} (unused bits={unused_bits})"
 
 
         if tag ==0x04 and len (val )>0 :
@@ -1005,11 +1071,9 @@ class Sgp22Manager :
             try :
                 nested =TlvParser .parse (val )
                 if nested :
-                    return f"TLV[{len(val)}]: {hex_str[:64]}..."
+                    return f"TLV[{len(val)}]: {hex_str}"
             except Exception :
                 pass 
-            if len (val )>32 :
-                return hex_str [:64 ]+"..."
             return hex_str 
 
 
@@ -1098,7 +1162,7 @@ class Sgp22Manager :
                 is_generic_container =_is_generic_asn1_container (tag ,name )
                 base_indent =indent 
                 if not is_generic_container :
-                    print (f"{prefix}{Config.Colors.CYAN}{name}{Config.Colors.ENDC}")
+                    print (f"{prefix}{name}")
                     base_indent =indent +1 
                 for idx ,item in enumerate (val ,start =1 ):
                     idx_prefix ="    "*base_indent +"| "
@@ -1146,9 +1210,9 @@ class Sgp22Manager :
                         )
                     elif isinstance (item ,bytes ):
                         decoded_item =self ._decode_value (tag ,item ,parent_tag )
-                        print (f"{'    ' * (base_indent + 1)}| {decoded_item}")
+                        print (f"{'    ' * (base_indent + 1)}| {Config.Colors.CYAN}{decoded_item}{Config.Colors.ENDC}")
                     else :
-                        print (f"{'    ' * (base_indent + 1)}| {str(item)}")
+                        print (f"{'    ' * (base_indent + 1)}| {Config.Colors.CYAN}{str(item)}{Config.Colors.ENDC}")
                 if _should_print_object_separator ():
                     print ("")
                 continue 
@@ -1164,7 +1228,7 @@ class Sgp22Manager :
                     decoded_sub =self ._decode_value (sub_tag ,sub_val ,tag )
 
                     if sub_tag in [0x06 ,0x04 ]:
-                        print (f"{prefix}{name:<20} : {decoded_sub}")
+                        print (f"{prefix}{name:<22}: {Config.Colors.CYAN}{decoded_sub}{Config.Colors.ENDC}")
                         continue 
 
 
@@ -1175,7 +1239,7 @@ class Sgp22Manager :
                         if _is_generic_asn1_container (tag ,name ):
                             self ._print_tlv_tree (nested ,indent ,parent_tag =tag ,x509_mode =x509_mode ,context_label =context_label )
                         else :
-                            print (f"{prefix}{Config.Colors.CYAN}{name}{Config.Colors.ENDC}")
+                            print (f"{prefix}{name}")
                             self ._print_tlv_tree (nested ,indent +1 ,parent_tag =tag ,x509_mode =x509_mode ,context_label =context_label )
                         if _should_print_object_separator ():
                             print ("")
@@ -1208,7 +1272,7 @@ class Sgp22Manager :
                         context_label =child_context ,
                         )
                     else :
-                        print (f"{prefix}{Config.Colors.CYAN}{name}{Config.Colors.ENDC}")
+                        print (f"{prefix}{name}")
                         self ._print_tlv_tree (
                         val ,
                         indent +1 ,
@@ -1221,18 +1285,12 @@ class Sgp22Manager :
 
             elif isinstance (val ,bytes ):
                 if len (val )==0 :
-                    if name =="OBJECT IDENTIFIER":
-                        print (f"{prefix}{name:<20} : (Empty)")
-                    else :
-                        print (f"{prefix}{Config.Colors.CYAN}{name:<20}{Config.Colors.ENDC} : (Empty)")
+                    print (f"{prefix}{name:<22}: {Config.Colors.CYAN}(Empty){Config.Colors.ENDC}")
                 else :
                     decoded =self ._decode_value (tag ,val ,parent_tag )
                     if len (decoded )>50 and " "not in decoded and "."not in decoded :
                         decoded =decoded [:50 ]+"..."
-                    if name =="OBJECT IDENTIFIER":
-                        print (f"{prefix}{name:<20} : {decoded}")
-                    else :
-                        print (f"{prefix}{Config.Colors.CYAN}{name:<20}{Config.Colors.ENDC} : {decoded}")
+                    print (f"{prefix}{name:<22}: {Config.Colors.CYAN}{decoded}{Config.Colors.ENDC}")
 
     def _swap_nibbles (self ,s :str )->str :
         if not s :return ""
@@ -1277,7 +1335,11 @@ class Sgp22Manager :
 
         state_val =TlvParser .get_first (info ,self .TAG_STATE ,b'\x00')
         state_int =int .from_bytes (state_val ,'big')if isinstance (state_val ,bytes )else 0 
-        state_str =f"{Config.Colors.GREEN}ENABLED  {Config.Colors.ENDC}"if state_int ==1 else "DISABLED "
+        state_str =(
+        f"{Config.Colors.GREEN}ENABLED  {Config.Colors.ENDC}"
+        if state_int ==1
+        else f"{Config.Colors.FAIL}DISABLED {Config.Colors.ENDC}"
+        )
 
         class_val =TlvParser .get_first (info ,self .TAG_CLASS ,b'\x02')
         class_int =int .from_bytes (class_val ,'big')if isinstance (class_val ,bytes )else 2 
@@ -1313,12 +1375,94 @@ class Sgp22Manager :
         cmd =f"00A40400{len(self.AID_ISD_R)//2:02X}{self.AID_ISD_R}"
         self .tp .transmit (cmd ,silent =True )
 
+    def _reset_before_retry (self )->None :
+        reset_method =getattr (self .tp ,"reset",None )
+        if callable (reset_method ):
+            try :
+                reset_method ()
+            except Exception :
+                pass
+
+    def _send_store_data_with_retry_ladder (self ,payload :str )->Tuple [bytes ,int ,int ]:
+        base_cmd =f"80E29100{len(bytes.fromhex(payload)):02X}{payload}"
+        data ,sw1 ,sw2 =self .tp .transmit (base_cmd ,silent =True )
+        if sw1 ==0x90 :
+            return data ,sw1 ,sw2
+
+        self ._reset_before_retry ()
+        ch1_data ,ch1_sw1 ,ch1_sw2 =self ._send_store_data_on_logical_channel (payload )
+        if ch1_sw1 ==0x90 :
+            return ch1_data ,ch1_sw1 ,ch1_sw2
+
+        self ._reset_before_retry ()
+        stk_data ,stk_sw1 ,stk_sw2 =self ._send_store_data_with_stk_mode (payload )
+        if stk_sw1 ==0x90 :
+            return stk_data ,stk_sw1 ,stk_sw2
+        return stk_data ,stk_sw1 ,stk_sw2
+
+    def _send_store_data_on_logical_channel (self ,payload :str )->Tuple [bytes ,int ,int ]:
+        open_resp ,open_sw1 ,open_sw2 =self .tp .transmit ("0070000001",silent =True )
+        has_channel =False
+        if open_sw1 ==0x90 :
+            if len (open_resp )>=1 :
+                has_channel =True
+        if has_channel ==False :
+            return open_resp ,open_sw1 ,open_sw2
+
+        channel_id =open_resp [0 ]
+        try :
+            select_apdu =f"{channel_id:02X}A40400{len(self.AID_ISD_R)//2:02X}{self.AID_ISD_R}"
+            _sel_data ,sel_sw1 ,sel_sw2 =self .tp .transmit (select_apdu ,silent =True )
+            if sel_sw1 !=0x90 :
+                return b"" ,sel_sw1 ,sel_sw2
+            cmd =f"{0x80 |channel_id:02X}E29100{len(bytes.fromhex(payload)):02X}{payload}"
+            return self .tp .transmit (cmd ,silent =True )
+        finally :
+            self .tp .transmit (f"007080{channel_id:02X}00",silent =True )
+
+    def _send_store_data_with_stk_mode (self ,payload :str )->Tuple [bytes ,int ,int ]:
+        self .tp .transmit ("80AA00000DA90B8100820101830107840101",silent =True )
+        self ._select_isd_r ()
+        self .tp .transmit ("80100000010C",silent =True )
+        cmd =f"81E29100{len(bytes.fromhex(payload)):02X}{payload}"
+        return self .tp .transmit (cmd ,silent =True )
+
+    def _retrieve_eid_response (self )->Tuple [bytes ,int ,int ]:
+        data ,sw1 ,sw2 =self ._send_store_data_with_retry_ladder ("BF3E00")
+        if sw1 ==0x90 and data :
+            return data ,sw1 ,sw2
+        tagged_data ,tagged_sw1 ,tagged_sw2 =self ._send_store_data_with_retry_ladder ("BF3E035C015A")
+        if tagged_sw1 ==0x90 and tagged_data :
+            return tagged_data ,tagged_sw1 ,tagged_sw2
+        return tagged_data ,tagged_sw1 ,tagged_sw2
+
+    def _extract_eid_hex (self ,data :bytes )->str :
+        if not data :
+            return ""
+        try :
+            parsed =TlvParser .parse (data )
+            eid =TlvParser .get_first (parsed ,0x5A )
+            if not isinstance (eid ,bytes ):
+                root =TlvParser .get_first (parsed ,0xBF3E )
+                if isinstance (root ,dict ):
+                    eid =TlvParser .get_first (root ,0x5A )
+                elif isinstance (root ,bytes ):
+                    try :
+                        root_parsed =TlvParser .parse (root )
+                        eid =TlvParser .get_first (root_parsed ,0x5A )
+                    except Exception :
+                        eid =None
+            if isinstance (eid ,bytes ):
+                return eid .hex ().upper ()
+        except Exception :
+            pass
+        return data .hex ().upper ()
+
     def list_profiles (self ):
         self ._select_isd_r ()
         payload ="BF2D00"
-        cmd =f"80E29100{len(bytes.fromhex(payload)):02X}{payload}"
         print (f"{Config.Colors.CYAN}[*] Retrieving Profile List (ES10c/ES10b.GetProfilesInfo)...{Config.Colors.ENDC}")
-        data ,sw1 ,sw2 =self .tp .transmit (cmd ,silent =True )
+        data ,sw1 ,sw2 =self ._send_store_data_with_retry_ladder (payload )
         if sw1 ==0x90 :
             self ._parse_profile_list (data )
         else :
@@ -1430,7 +1574,10 @@ class Sgp22Manager :
 
     def _print_pipe_line (self ,label :str ,value :Any ,depth :int =0 )->None :
         prefix ="  "*depth 
-        print (f"    | {prefix}{label:<20}: {Config.Colors.CYAN}{self._short_display(value)}{Config.Colors.ENDC}")
+        effective_width =22 -len (prefix )
+        if effective_width <len (label ):
+            effective_width =len (label )
+        self ._print_wrapped_pipe_value (f"{prefix}{label:<{effective_width}}",self ._short_display (value ))
 
     def _print_compact_pipe_map (self ,node :Dict [str ,Any ],depth :int =0 )->None :
         for key ,value in node .items ():
@@ -1558,32 +1705,55 @@ class Sgp22Manager :
 
     def _summarize_cert_block (self ,node :Any )->Dict [str ,Any ]:
         out :Dict [str ,Any ]={}
+        analysis_node =node
+        if isinstance (node ,bytes ):
+            out ["rawHex"]=node .hex ().upper ()
+        if isinstance (node ,bytes ):
+            try :
+                parsed_node =TlvParser .parse (node )
+                if isinstance (parsed_node ,dict ):
+                    analysis_node =parsed_node
+            except Exception :
+                analysis_node =node
 
         summaries :List [Dict [str ,str ]]=[]
         seen_serials =set ()
-        for blob in self ._iter_byte_values (node ):
-            if len (blob )<32 :
-                continue 
-            info =AdvancedDecoders .decode_cert_der (blob )
-            if not info :
-                continue 
-            serial =str (info .get ("serial",""))
-            if serial in seen_serials :
-                continue 
-            seen_serials .add (serial )
-            summaries .append (
-            {
-            "subject":str (info .get ("subject","")),
-            "issuer":str (info .get ("issuer","")),
-            "serial":serial ,
-            "notBefore":str (info .get ("not_valid_before","")),
-            "notAfter":str (info .get ("not_valid_after","")),
-            }
-            )
+        seen_blobs =set ()
+        byte_sources =[node ]
+        if analysis_node is not node :
+            byte_sources .append (analysis_node )
+        for source in byte_sources :
+            for blob in self ._iter_byte_values (source ):
+                blob_hex =blob .hex ()
+                if blob_hex in seen_blobs :
+                    continue
+                seen_blobs .add (blob_hex )
+                if len (blob )<32 :
+                    continue 
+                info =AdvancedDecoders .decode_cert_der (blob )
+                if not info :
+                    continue 
+                serial =str (info .get ("serial",""))
+                if serial in seen_serials :
+                    continue 
+                seen_serials .add (serial )
+                summaries .append (
+                {
+                "subject":str (info .get ("subject","")),
+                "issuer":str (info .get ("issuer","")),
+                "serial":serial ,
+                "notBefore":str (info .get ("not_valid_before","")),
+                "notAfter":str (info .get ("not_valid_after","")),
+                }
+                )
+        if len (summaries )==0 and isinstance (node ,bytes ):
+            summaries =self ._collect_cert_summaries_from_raw (node )
+            if len (summaries )>0 :
+                seen_serials ={str (item .get ("serial",""))for item in summaries }
         if summaries :
             out ["certificates"]=summaries 
 
-        bit_strings =self ._collect_tag_bytes (node ,0x03 )
+        bit_strings =self ._collect_tag_bytes (analysis_node ,0x03 )
         public_keys :List [str ]=[]
         signatures :List [str ]=[]
         for bit_val in bit_strings :
@@ -1597,35 +1767,35 @@ class Sgp22Manager :
         if signatures :
             out ["signatures"]=signatures 
 
-        object_identifiers =self ._collect_decoded_values (node ,0x06 ,None )
+        object_identifiers =self ._collect_decoded_values (analysis_node ,0x06 ,None )
         if len (object_identifiers )>0 :
             out ["objectIdentifiers"]=object_identifiers 
 
-        utf8_values =self ._collect_decoded_values (node ,0x0C ,None )
+        utf8_values =self ._collect_decoded_values (analysis_node ,0x0C ,None )
         if len (utf8_values )>0 :
             out ["utf8Strings"]=utf8_values 
 
-        printable_values =self ._collect_decoded_values (node ,0x13 ,None )
+        printable_values =self ._collect_decoded_values (analysis_node ,0x13 ,None )
         if len (printable_values )>0 :
             out ["printableStrings"]=printable_values 
 
-        utc_values =self ._collect_decoded_values (node ,0x17 ,None )
+        utc_values =self ._collect_decoded_values (analysis_node ,0x17 ,None )
         if len (utc_values )>0 :
             out ["utcTimes"]=utc_values 
 
-        generalized_values =self ._collect_decoded_values (node ,0x18 ,None )
+        generalized_values =self ._collect_decoded_values (analysis_node ,0x18 ,None )
         if len (generalized_values )>0 :
             out ["generalizedTimes"]=generalized_values 
 
-        boolean_values =self ._collect_decoded_values (node ,0x01 ,None )
+        boolean_values =self ._collect_decoded_values (analysis_node ,0x01 ,None )
         if len (boolean_values )>0 :
             out ["booleans"]=boolean_values 
 
-        octet_values =self ._collect_decoded_values (node ,0x04 ,None )
+        octet_values =self ._collect_decoded_values (analysis_node ,0x04 ,None )
         if len (octet_values )>0 :
             out ["octetStrings"]=octet_values 
 
-        integer_values =self ._collect_decoded_values (node ,0x02 ,None )
+        integer_values =self ._collect_decoded_values (analysis_node ,0x02 ,None )
         if len (integer_values )>0 :
             out ["integers"]=integer_values 
 
@@ -1658,10 +1828,18 @@ class Sgp22Manager :
         return found 
 
     def _print_eim_configuration_compact_json (self ,parsed :Dict [int ,Any ])->None :
-        root =TlvParser .get_first (parsed ,0xBF55 ,parsed )
-        entries =self ._find_eim_entries (root )
-        if len (entries )==0 :
-            entries =self ._find_eim_entries (parsed )
+        def _encode_length (length :int )->bytes :
+            if length <0x80 :
+                return bytes ([length ])
+            if length <=0xFF :
+                return bytes ([0x81 ,length ])
+            return bytes ([0x82 ,(length >>8 )&0xFF ,length &0xFF ])
+
+        raw_hex_values =self ._collect_tag_bytes (parsed ,0xBF55 )
+        raw_response =b""
+        if len (raw_hex_values )>0 :
+            raw_response =bytes .fromhex ("BF55")+_encode_length (len (raw_hex_values [0 ]))+raw_hex_values [0 ]
+        entries =decode_eim_configuration_entries (raw_response )
         if len (entries )==0 :
             self ._print_compact_json (parsed ,0xBF55 )
             return 
@@ -1669,23 +1847,27 @@ class Sgp22Manager :
         result_entries :List [Dict [str ,Any ]]=[]
         for entry in entries :
             row :Dict [str ,Any ]={}
-            row ["eimId"]=self ._decode_text_value (0x80 ,TlvParser .get_first (entry ,0x80 ),0xE1 )
-            row ["eimFqdn"]=self ._decode_text_value (0x81 ,TlvParser .get_first (entry ,0x81 ),0xE1 )
-            row ["eimIdType"]=self ._decode_text_value (0x82 ,TlvParser .get_first (entry ,0x82 ),0xE1 )
-            row ["counterValue"]=self ._decode_text_value (0x83 ,TlvParser .get_first (entry ,0x83 ),0xE1 )
-            row ["associationToken"]=self ._decode_text_value (0x84 ,TlvParser .get_first (entry ,0x84 ),0xE1 )
+            field_map =[
+            ("eim_id","eimId"),
+            ("eim_fqdn","eimFqdn"),
+            ("eim_id_type","eimIdType"),
+            ("counter_value","counterValue"),
+            ("association_token","associationToken"),
+            ("supported_protocol","eimSupportedProtocol"),
+            ("euicc_ci_pkid","euiccCiPKId"),
+            ("indirect_profile_download","indirectProfileDownload"),
+            ]
+            for source_key ,target_key in field_map :
+                if source_key in entry :
+                    row [target_key ]=entry [source_key ]
 
-            eim_pub_block =TlvParser .get_first (entry ,0xA5 )
-            if eim_pub_block is not None :
+            eim_pub_block =entry .get ("eim_public_key_data")
+            if isinstance (eim_pub_block ,bytes ):
                 row ["eimPublicKeyData"]=self ._summarize_cert_block (eim_pub_block )
 
-            tls_pub_block =TlvParser .get_first (entry ,0xA6 )
-            if tls_pub_block is not None :
+            tls_pub_block =entry .get ("trusted_tls_public_key_data")
+            if isinstance (tls_pub_block ,bytes ):
                 row ["trustedPublicKeyDataTls"]=self ._summarize_cert_block (tls_pub_block )
-
-            row ["eimSupportedProtocol"]=self ._decode_text_value (0x87 ,TlvParser .get_first (entry ,0x87 ),0xE1 )
-            row ["euiccCiPKId"]=self ._decode_text_value (0x88 ,TlvParser .get_first (entry ,0x88 ),0xE1 )
-            row ["indirectProfileDownload"]=self ._decode_text_value (0x89 ,TlvParser .get_first (entry ,0x89 ),0xE1 )
 
             cleaned_row ={}
             for k ,v in row .items ():
@@ -1731,26 +1913,27 @@ class Sgp22Manager :
             if len (result_entries )>1 :
                 has_multiple =True 
             if has_multiple :
-                print (f"    | Entry                : {Config.Colors.CYAN}{idx}{Config.Colors.ENDC}")
+                print (f"    | eimEntry             : {Config.Colors.CYAN}{idx}{Config.Colors.ENDC}")
 
             field_order =[
-            ("eimId","eIM ID"),
-            ("eimFqdn","eIM FQDN"),
-            ("eimIdType","eIM ID Type"),
-            ("counterValue","Counter Value"),
-            ("associationToken","Association Token"),
-            ("eimSupportedProtocol","Supported Protocol"),
-            ("euiccCiPKId","eUICC CI PKId"),
-            ("indirectProfileDownload","Indirect Profile DL"),
+            ("eimId","eimId"),
+            ("eimFqdn","eimFqdn"),
+            ("eimIdType","eimIdType"),
+            ("counterValue","counterValue"),
+            ("associationToken","associationToken"),
+            ("eimSupportedProtocol","eimSupportedProtocol"),
+            ("euiccCiPKId","euiccCiPKId"),
+            ("indirectProfileDownload","indirectProfileDownload"),
             ]
             for field_key ,field_name in field_order :
                 if field_key not in row :
                     continue 
-                print (f"    | {field_name:<20}: {Config.Colors.CYAN}{row[field_key]}{Config.Colors.ENDC}")
+                field_value =row [field_key ]
+                self ._print_wrapped_pipe_value (field_name ,field_value )
 
             cert_sections =[
-            ("eimPublicKeyData","eIM Public Key Data"),
-            ("trustedPublicKeyDataTls","Trusted TLS Key Data"),
+            ("eimPublicKeyData","eimPublicKeyData"),
+            ("trustedPublicKeyDataTls","trustedPublicKeyDataTls"),
             ]
             for section_key ,section_name in cert_sections :
                 if section_key not in row :
@@ -1758,62 +1941,282 @@ class Sgp22Manager :
                 section_value =row [section_key ]
                 if not isinstance (section_value ,dict ):
                     continue 
-
-                certificates =section_value .get ("certificates",[])
-                public_keys =section_value .get ("publicKeys",[])
-                signatures =section_value .get ("signatures",[])
-                object_identifiers =section_value .get ("objectIdentifiers",[])
-                cert_count_display =str (_count_items (certificates ))
-                has_unsigned_evidence =False 
-                if _count_items (certificates )==0 :
-                    has_pub =False 
-                    if _count_items (public_keys )>0 :
-                        has_pub =True 
-                    has_sig =False 
-                    if _count_items (signatures )>0 :
-                        has_sig =True 
-                    if has_pub or has_sig :
-                        has_unsigned_evidence =True 
-                if has_unsigned_evidence :
-                    cert_count_display ="n/a (summary unavailable)"
-
-                print (f"    | {section_name:<20}: {Config.Colors.CYAN}Present{Config.Colors.ENDC}")
-                print (f"    | {'  Certificates':<20}: {Config.Colors.CYAN}{cert_count_display}{Config.Colors.ENDC}")
-                print (f"    | {'  Public Keys':<20}: {Config.Colors.CYAN}{_count_items(public_keys)}{Config.Colors.ENDC}")
-                print (f"    | {'  Signatures':<20}: {Config.Colors.CYAN}{_count_items(signatures)}{Config.Colors.ENDC}")
-                print (f"    | {'  OIDs':<20}: {Config.Colors.CYAN}{_count_items(object_identifiers)}{Config.Colors.ENDC}")
-
-                first_cert =_first_dict (certificates )
-                has_cert =False 
-                if first_cert is not None :
-                    has_cert =True 
-                if has_cert :
-                    cert_subject =first_cert .get ("subject","")
-                    cert_issuer =first_cert .get ("issuer","")
-                    cert_serial =first_cert .get ("serial","")
-                    cert_not_before =first_cert .get ("notBefore","")
-                    cert_not_after =first_cert .get ("notAfter","")
-                    print (f"    | {'  Subject':<20}: {Config.Colors.CYAN}{_short(cert_subject)}{Config.Colors.ENDC}")
-                    print (f"    | {'  Issuer':<20}: {Config.Colors.CYAN}{_short(cert_issuer)}{Config.Colors.ENDC}")
-                    print (f"    | {'  Serial':<20}: {Config.Colors.CYAN}{cert_serial}{Config.Colors.ENDC}")
-                    print (f"    | {'  Validity':<20}: {Config.Colors.CYAN}{cert_not_before} -> {cert_not_after}{Config.Colors.ENDC}")
-
-                has_pub_key =False 
-                if isinstance (public_keys ,list ):
-                    if len (public_keys )>0 :
-                        has_pub_key =True 
-                if has_pub_key :
-                    print (f"    | {'  Public Key (1st)':<20}: {Config.Colors.CYAN}{_short(public_keys[0])}{Config.Colors.ENDC}")
-
-                has_signature =False 
-                if isinstance (signatures ,list ):
-                    if len (signatures )>0 :
-                        has_signature =True 
-                if has_signature :
-                    print (f"    | {'  Signature (1st)':<20}: {Config.Colors.CYAN}{_short(signatures[0])}{Config.Colors.ENDC}")
+                self ._print_cert_block_summary_lines (section_name ,section_value )
 
             if idx <len (result_entries ):
                 print ("")
+
+    def _print_eim_configuration_compact (self ,response :bytes )->None :
+        print (f"\n{Config.Colors.BOLD}[+] eIM Configuration Data{Config.Colors.ENDC}")
+        entries =decode_eim_configuration_entries (response )
+        if len (entries )==0 :
+            print ("    | (Empty)")
+            return
+
+        self ._print_wrapped_pipe_value ("eIM Entries",len (entries ))
+        for idx ,entry in enumerate (entries ,start =1 ):
+            if len (entries )>1 :
+                self ._print_wrapped_pipe_value ("eimEntry",idx )
+
+            field_order =[
+            ("eim_id","eimId"),
+            ("eim_fqdn","eimFqdn"),
+            ("eim_id_type","eimIdType"),
+            ("counter_value","counterValue"),
+            ("association_token","associationToken"),
+            ("supported_protocol","eimSupportedProtocol"),
+            ("euicc_ci_pkid","euiccCiPKId"),
+            ("indirect_profile_download","indirectProfileDownload"),
+            ]
+            for source_key ,field_name in field_order :
+                value =entry .get (source_key )
+                if value is None :
+                    continue
+                text =str (value ).strip ()
+                if len (text )==0 :
+                    continue
+                self ._print_wrapped_pipe_value (field_name ,text )
+
+            cert_sections =[
+            ("eim_public_key_data","eimPublicKeyData"),
+            ("trusted_tls_public_key_data","trustedPublicKeyDataTls"),
+            ]
+            for source_key ,section_name in cert_sections :
+                value =entry .get (source_key )
+                if not isinstance (value ,bytes ):
+                    continue
+                summary =self ._summarize_cert_block (value )
+                self ._print_cert_block_summary_lines (section_name ,summary )
+
+            if idx <len (entries ):
+                print ("")
+
+    def _print_eim_public_key_data_lines (self ,section_name :str ,section_value :Any )->None :
+        """
+        eIM configuration output should remain config-centric.
+        Show the EimConfigurationData CHOICE presence only.
+        """
+        summary :Dict [str ,Any ]={}
+        if isinstance (section_value ,bytes ):
+            summary =self ._summarize_cert_block (section_value )
+        elif isinstance (section_value ,dict ):
+            summary =section_value
+
+        certificates =summary .get ("certificates",[])
+        public_keys =summary .get ("publicKeys",[])
+        has_certificate =False
+        if isinstance (certificates ,list ):
+            if len (certificates )>0 :
+                has_certificate =True
+        has_public_key =False
+        if isinstance (public_keys ,list ):
+            if len (public_keys )>0 :
+                has_public_key =True
+
+        self ._print_wrapped_pipe_value (section_name ,"Present")
+        self ._print_wrapped_pipe_value (
+        "  eimCertificate",
+        "Present"if has_certificate else "Absent",
+        )
+        self ._print_wrapped_pipe_value (
+        "  eimPublicKey",
+        "Present"if has_public_key else "Absent",
+        )
+        if has_public_key :
+            first_key =public_keys [0 ]
+            self ._print_wrapped_pipe_value ("  eimPublicKey (1st)",first_key )
+            decoded_key =self ._decode_public_key_hex_summary (first_key )
+            key_summary =decoded_key .get ("summary","")
+            if len (key_summary )>0 :
+                self ._print_wrapped_pipe_value ("  eimPublicKey Decode",key_summary )
+            key_x =decoded_key .get ("x","")
+            if len (key_x )>0 :
+                self ._print_wrapped_pipe_value ("  eimPublicKey X",key_x )
+            key_y =decoded_key .get ("y","")
+            if len (key_y )>0 :
+                self ._print_wrapped_pipe_value ("  eimPublicKey Y",key_y )
+
+    def _decode_public_key_hex_summary (self ,value :Any )->Dict [str ,str ]:
+        """
+        Decode common raw public-key encodings for compact EIMCFG display.
+        """
+        out :Dict [str ,str ]={}
+        if not isinstance (value ,str ):
+            return out
+        text =value .strip ()
+        if len (text )==0 :
+            return out
+        if text .startswith ("0x")or text .startswith ("0X"):
+            text =text [2 :]
+        hex_chars ="0123456789abcdefABCDEF"
+        for ch in text :
+            if ch not in hex_chars :
+                return out
+        if (len (text )%2 )!=0 :
+            return out
+
+        try :
+            raw =bytes .fromhex (text )
+        except Exception :
+            return out
+        if len (raw )==0 :
+            return out
+
+        first =raw [0 ]
+        key_len =len (raw )
+        if first ==0x04 and key_len >=3 and (key_len %2 )==1 :
+            coord_len =(key_len -1 )//2
+            x_hex =raw [1 :1 +coord_len ].hex ().upper ()
+            y_hex =raw [1 +coord_len :].hex ().upper ()
+            curve_name ="unknown"
+            if coord_len ==32 :
+                curve_name ="prime256v1 / secp256r1"
+            elif coord_len ==48 :
+                curve_name ="secp384r1"
+            elif coord_len ==66 :
+                curve_name ="secp521r1"
+            out ["summary"]=f"EC uncompressed point ({curve_name}, {key_len} bytes)"
+            out ["x"]=f"0x{x_hex}"
+            out ["y"]=f"0x{y_hex}"
+            return out
+        if first in [0x02 ,0x03 ]:
+            out ["summary"]=f"EC compressed point ({key_len} bytes, sign=0x{first:02X})"
+            return out
+        out ["summary"]=f"Raw key bytes={key_len}, prefix=0x{first:02X}"
+        return out
+
+    def _decode_pkid_hex_summary (self ,value :Any )->str :
+        if not isinstance (value ,str ):
+            return ""
+        text =value .strip ()
+        if len (text )==0 :
+            return ""
+        if text .startswith ("0x")or text .startswith ("0X"):
+            text =text [2 :]
+        hex_chars ="0123456789abcdefABCDEF"
+        for ch in text :
+            if ch not in hex_chars :
+                return ""
+        if (len (text )%2 )!=0 :
+            return ""
+        try :
+            raw =bytes .fromhex (text )
+        except Exception :
+            return ""
+        if len (raw )==0 :
+            return ""
+        grouped =":".join ([f"{b:02X}"for b in raw ])
+        if len (raw )==20 :
+            return f"SubjectKeyIdentifier (20 bytes, hash identifier); fingerprint={grouped}"
+        return f"SubjectKeyIdentifier ({len(raw)} bytes, hash identifier); value={grouped}"
+
+    def _extract_hex_from_display (self ,value :Any )->str :
+        if not isinstance (value ,str ):
+            return ""
+        text =value .strip ().upper ()
+        if len (text )==0 :
+            return ""
+        if ":" in text :
+            text =text .split (":",1 )[1 ].strip ()
+        compact ="".join ([ch for ch in text if ch in "0123456789ABCDEF"])
+        if (len (compact )%2 )!=0 :
+            return ""
+        return compact
+
+    def _decode_extension_blob_lines (self ,value :Any )->List [Tuple [str ,str ]]:
+        lines :List [Tuple [str ,str ]]=[]
+        hex_text =self ._extract_hex_from_display (value )
+        if len (hex_text )==0 :
+            return lines
+        try :
+            raw =bytes .fromhex (hex_text )
+        except Exception :
+            return lines
+        if len (raw )==0 :
+            return lines
+
+        # BasicConstraints: 30 06 01 01 FF 02 01 00
+        if hex_text .startswith ("30060101FF0201")and len (raw )>=8 :
+            path_len =raw [-1 ]
+            lines .append (("  basicConstraints","CA=TRUE"))
+            lines .append (("  pathLenConstraint",str (path_len )))
+            return lines
+
+        # KeyUsage BIT STRING blob, e.g. 03 02 01 06
+        if len (raw )>=4 and raw [0 ]==0x03 :
+            try :
+                length =raw [1 ]
+                if length +2 <=len (raw ):
+                    unused_bits =raw [2 ]
+                    bit_bytes =raw [3 :2 +length ]
+                    bit_string ="".join (f"{b:08b}"for b in bit_bytes )
+                    if unused_bits >0 and unused_bits <8 :
+                        bit_string =bit_string [:len (bit_string )-unused_bits ]
+                    ku_names =[
+                    "digitalSignature",
+                    "nonRepudiation",
+                    "keyEncipherment",
+                    "dataEncipherment",
+                    "keyAgreement",
+                    "keyCertSign",
+                    "cRLSign",
+                    "encipherOnly",
+                    "decipherOnly",
+                    ]
+                    active :List [str ]=[]
+                    for idx ,name in enumerate (ku_names ):
+                        if idx <len (bit_string ):
+                            if bit_string [idx ]=="1":
+                                active .append (name )
+                    if len (active )>0 :
+                        lines .append (("  keyUsage",", ".join (active )))
+                        return lines
+            except Exception :
+                pass
+
+        # subjectKeyIdentifier: 04 14 <20 bytes>
+        if len (raw )==22 and raw [0 ]==0x04 and raw [1 ]==0x14 :
+            ski =raw [2 :22 ].hex ().upper ()
+            lines .append (("  subjectKeyIdentifier",ski ))
+            return lines
+
+        # authorityKeyIdentifier: 30 16 80 14 <20 bytes>
+        if len (raw )>=24 and raw [0 ]==0x30 and raw [1 ]==0x16 and raw [2 ]==0x80 and raw [3 ]==0x14 :
+            aki =raw [4 :24 ].hex ().upper ()
+            lines .append (("  authorityKeyIdentifier",aki ))
+            return lines
+
+        # subjectAltName with registeredID
+        if len (raw )>=5 and raw [0 ]==0x30 :
+            idx =0
+            while idx +2 <=len (raw ):
+                if raw [idx ]==0x88 and idx +2 <=len (raw ):
+                    oid_len =raw [idx +1 ]
+                    end =idx +2 +oid_len
+                    if end <=len (raw ):
+                        oid_value =raw [idx +2 :end ]
+                        oid_text =self ._decode_oid (oid_value )
+                        lines .append (("  subjectAltName registeredID",oid_text ))
+                        return lines
+                idx +=1
+
+        # CRL Distribution Point URI inside blob
+        marker =b"http://"
+        uri_at =raw .find (marker )
+        if uri_at >=0 :
+            tail =raw [uri_at :]
+            uri_chars :List [str ]=[]
+            for b in tail :
+                if 32 <=b <=126 :
+                    uri_chars .append (chr (b ))
+                else :
+                    break
+            uri ="".join (uri_chars )
+            if len (uri )>0 :
+                lines .append (("  cRLDistributionPoints",uri ))
+                return lines
+
+        return lines
 
     def _es10_retrieve (
     self ,
@@ -1827,9 +2230,8 @@ class Sgp22Manager :
         payload must include full TLV request object (e.g. BF4300).
         """
         self ._select_isd_r ()
-        cmd =f"80E29100{len(bytes.fromhex(payload)):02X}{payload}"
         print (f"{Config.Colors.CYAN}[*] {title}...{Config.Colors.ENDC}")
-        data ,sw1 ,sw2 =self .tp .transmit (cmd ,silent =True )
+        data ,sw1 ,sw2 =self ._send_store_data_with_retry_ladder (payload )
         if sw1 ==0x90 and data :
             print (f"{Config.Colors.HEADER}--- {title} ---{Config.Colors.ENDC}")
             try :
@@ -1837,6 +2239,8 @@ class Sgp22Manager :
                 debug_enabled =bool (getattr (self .tp ,"debug",False ))
                 if compact_json and not debug_enabled and root_tag ==0xBF55 :
                     self ._print_eim_configuration_compact_json (parsed )
+                elif root_tag ==0xBF22 and not debug_enabled :
+                    self ._print_euicc_info2_detailed (data )
                 elif compact_json and not debug_enabled :
                     self ._print_compact_tlv_section (title ,parsed ,root_tag )
                 else :
@@ -1848,6 +2252,145 @@ class Sgp22Manager :
             print (f"{Config.Colors.FAIL}[-] Failed: {sw1:02X}{sw2:02X}{Config.Colors.ENDC}")
             return 
         print ("    (Empty)")
+
+    def _print_euicc_info2_detailed (self ,data :bytes )->None :
+        print (f"{Config.Colors.BOLD}[+] EuiccInfo2{Config.Colors.ENDC}")
+        detail_lines =build_euicc_info2_detail_lines (data )
+        label_width =22
+        for indent_level ,label ,value in detail_lines :
+            display_label =self ._format_euicc_info2_label (label )
+            prefix ="  "*indent_level
+            effective_width =label_width -len (prefix )
+            if effective_width <len (display_label ):
+                effective_width =len (display_label )
+            label_text =f"{prefix}{display_label:<{effective_width}}"
+            self ._print_wrapped_pipe_value (label_text ,value )
+
+    def _get_console_width (self )->int :
+        width =120
+        try :
+            width =shutil .get_terminal_size ((120 ,20 )).columns
+        except Exception :
+            width =120
+        if width <80 :
+            return 80
+        return width
+
+    def _print_wrapped_pipe_value (self ,label_text :str ,value :Any )->None :
+        console_width =self ._get_console_width ()
+        stripped_label =label_text .rstrip ()
+        min_label_width =25
+        if console_width <=90 :
+            # Narrow terminal panes should keep ':' and value visible.
+            min_label_width =max (8 ,min (16 ,console_width //3 ))
+        padded_label =stripped_label
+        stripped_len =len (stripped_label )
+        if stripped_len <min_label_width :
+            padded_label =f"{stripped_label:<{min_label_width}}"
+        lead =f"    | {padded_label}: "
+        continuation_lead ="    | " +(" "*(len (padded_label )+2 ))
+        label_only_mode =False
+        if len (lead )>=console_width -4 :
+            label_only_mode =True
+            lead ="    |   "
+            continuation_lead ="    |   "
+        wrap_width =console_width -len (continuation_lead )
+        if wrap_width <20 :
+            wrap_width =20
+        value_text =str (value )
+        if self ._looks_like_hex_blob (value_text ):
+            wrapped_lines =self ._wrap_hex_blob_text (value_text ,wrap_width )
+        else :
+            wrapped_lines =textwrap .wrap (
+            value_text ,
+            width =wrap_width ,
+            break_long_words =True ,
+            break_on_hyphens =False ,
+            )
+        if len (wrapped_lines )==0 :
+            wrapped_lines =[""]
+        if label_only_mode :
+            print (f"    | {Config.Colors.CYAN}{stripped_label}{Config.Colors.ENDC}")
+        print (f"{lead}{Config.Colors.CYAN}{wrapped_lines[0]}{Config.Colors.ENDC}")
+        for wrapped_line in wrapped_lines [1 :]:
+            print (f"{continuation_lead}{Config.Colors.CYAN}{wrapped_line}{Config.Colors.ENDC}")
+
+    def _looks_like_hex_blob (self ,value_text :str )->bool :
+        normalized =value_text .strip ()
+        if len (normalized )==0 :
+            return False
+        if normalized .startswith ("0x")or normalized .startswith ("0X"):
+            normalized =normalized [2 :]
+        if len (normalized )<16 :
+            return False
+        if re .fullmatch (r"[0-9A-Fa-f]+",normalized )is None :
+            return False
+        return True
+
+    def _wrap_hex_blob_text (self ,value_text :str ,wrap_width :int )->List [str ]:
+        normalized =value_text .strip ()
+        prefix =""
+        if normalized .startswith ("0x")or normalized .startswith ("0X"):
+            prefix =normalized [:2 ]
+            normalized =normalized [2 :]
+        if len (normalized )==0 :
+            if len (prefix )>0 :
+                return [prefix ]
+            return [""]
+        chunk_width =wrap_width
+        if len (prefix )>0 :
+            chunk_width -=len (prefix )
+        if chunk_width <2 :
+            chunk_width =2
+        if chunk_width %2 !=0 :
+            chunk_width -=1
+        if chunk_width <2 :
+            chunk_width =2
+        wrapped_lines :List [str ]=[]
+        start_index =0
+        while start_index <len (normalized ):
+            end_index =start_index +chunk_width
+            if end_index >len (normalized ):
+                end_index =len (normalized )
+            chunk =normalized [start_index :end_index ]
+            if start_index ==0 and len (prefix )>0 :
+                wrapped_lines .append (prefix +chunk )
+            else :
+                wrapped_lines .append (chunk )
+            start_index =end_index
+        return wrapped_lines
+
+    def _format_euicc_info2_label (self ,label :str )->str :
+        label_map ={
+        "Profile Version":"Profile Version",
+        "Ver Supported (SGP.22 SVN)":"Ver Supported",
+        "Firmware Ver":"Firmware Ver",
+        "Ext Card Res":"Ext Card Res",
+        "Installed Apps":"Installed Apps",
+        "Free NVM":"Free NVM",
+        "Free RAM":"Free RAM",
+        "UICC Capability":"UICC Capability",
+        "TS102.241 Version":"TS102.241 Ver",
+        "GlobalPlatform Version":"GP Version",
+        "RSP Capability":"RSP Capability",
+        "CI PKId List For Verification":"CI PKId Verify",
+        "CI PKId List For Signing":"CI PKId Sign",
+        "Forbidden Profile Policy Rules":"Forbidden PPR",
+        "PP Version":"PP Version",
+        "SAS Accreditation Number":"SAS Accr. Number",
+        "Additional eUICC Profile Package Versions":"Additional PP Vers.",
+        "Additional PP Version 1":"Additional PP Ver 1",
+        "IPA Mode":"IPA Mode",
+        "IoT Specific Info":"IoT Specific Info",
+        "IoT Version 1":"IoT Version 1",
+        "eCall Supported":"eCall Supported",
+        "Fallback Supported":"Fallback Supported",
+        "SGP.32 Validation":"SGP.32 Validation",
+        "Mandatory Fields":"Mandatory Fields",
+        }
+        if label in label_map :
+            return label_map [label ]
+        return label
 
     def _iter_byte_values (self ,node :Any ):
         """Yield every bytes leaf from nested parsed TLV structures."""
@@ -1899,14 +2442,88 @@ class Sgp22Manager :
         return True 
 
     def _print_cert_block_summary_lines (self ,section_name :str ,section_value :Dict [str ,Any ])->None :
-        def _short (val :Any ,max_len :int =72 )->str :
-            text =str (val )
-            is_short =False 
-            if len (text )<=max_len :
-                is_short =True 
-            if is_short :
-                return text 
-            return text [:max_len ]+"..."
+        group_print_state =[False ]
+
+        def _print_group (title :str )->None :
+            if group_print_state [0 ]:
+                print ("    |")
+            print (f"    |   {title}")
+            group_print_state [0 ]=True
+
+        def _extract_oid_dotted (oid_text :Any )->str :
+            if not isinstance (oid_text ,str ):
+                return ""
+            text =oid_text .strip ()
+            if len (text )==0 :
+                return ""
+            dotted_match =re .match (r"^(\d+(?:\.\d+)+)",text )
+            if dotted_match is not None :
+                dotted =dotted_match .group (1 )
+                if len (dotted )>0 :
+                    return dotted
+            if text .endswith (")"):
+                left =text .rfind ("(")
+                if left >=0 :
+                    candidate =text [left +1 :-1 ].strip ()
+                    if len (candidate )>0 :
+                        return candidate
+            return text
+
+        def _oid_legend (oid_text :Any )->str :
+            dotted =_extract_oid_dotted (oid_text )
+            if len (dotted )==0 :
+                return "other"
+            if dotted in ["1.2.840.10045.4.3.2","1.2.840.113549.1.1.11"]:
+                return "signatureAlgorithm"
+            if dotted =="1.2.840.10045.2.1":
+                return "subjectPublicKeyInfo"
+            if dotted .startswith ("1.2.840.10045.3."):
+                return "ecCurve"
+            if dotted .startswith ("2.5.4."):
+                return "distinguishedName"
+            if dotted .startswith ("2.5.29."):
+                return "x509Extension"
+            if dotted .startswith ("1.3.6.1.5.5.7.3."):
+                return "extendedKeyUsage"
+            return "other"
+
+        def _oid_dn_name (oid_text :Any )->str :
+            dotted =_extract_oid_dotted (oid_text )
+            if dotted =="2.5.4.3":
+                return "commonName"
+            if dotted =="2.5.4.6":
+                return "countryName"
+            if dotted =="2.5.4.7":
+                return "localityName"
+            if dotted =="2.5.4.10":
+                return "organizationName"
+            if dotted =="2.5.4.11":
+                return "organizationalUnitName"
+            if dotted =="2.5.4.5":
+                return "serialNumber"
+            return ""
+
+        def _friendly_dn_label (dn_name :str ,idx :int )->str :
+            if len (dn_name )>0 :
+                return f"  {dn_name}"
+            return f"  nameText {idx}"
+
+        def _decode_x509_time_text (time_text :Any )->str :
+            if not isinstance (time_text ,str ):
+                return ""
+            text =time_text .strip ()
+            if len (text )==0 :
+                return ""
+            try :
+                if len (text )==13 and text .endswith ("Z"):
+                    parsed =datetime .strptime (text ,"%y%m%d%H%M%SZ")
+                    return parsed .strftime ("%Y-%m-%d %H:%M:%SZ")
+                if len (text )==15 and text .endswith ("Z"):
+                    parsed =datetime .strptime (text ,"%Y%m%d%H%M%SZ")
+                    return parsed .strftime ("%Y-%m-%d %H:%M:%SZ")
+            except Exception :
+                return ""
+            return ""
 
         def _first_dict (items :Any )->Optional [Dict [str ,Any ]]:
             if not isinstance (items ,list ):
@@ -1925,6 +2542,13 @@ class Sgp22Manager :
         public_keys =section_value .get ("publicKeys",[])
         signatures =section_value .get ("signatures",[])
         object_identifiers =section_value .get ("objectIdentifiers",[])
+        utf8_values =section_value .get ("utf8Strings",[])
+        printable_values =section_value .get ("printableStrings",[])
+        utc_values =section_value .get ("utcTimes",[])
+        generalized_values =section_value .get ("generalizedTimes",[])
+        octet_values =section_value .get ("octetStrings",[])
+        integer_values =section_value .get ("integers",[])
+        raw_hex =section_value .get ("rawHex","")
 
         cert_count_display =str (_count_items (certificates ))
         has_unsigned_evidence =False 
@@ -1937,238 +2561,303 @@ class Sgp22Manager :
                 has_sig =True 
             if has_pub or has_sig :
                 has_unsigned_evidence =True 
-        if has_unsigned_evidence :
-            cert_count_display ="n/a (summary unavailable)"
 
-        print (f"    | {section_name:<20}: {Config.Colors.CYAN}Present{Config.Colors.ENDC}")
-        print (f"    | {'  Certificates':<20}: {Config.Colors.CYAN}{cert_count_display}{Config.Colors.ENDC}")
-        print (f"    | {'  Public Keys':<20}: {Config.Colors.CYAN}{_count_items(public_keys)}{Config.Colors.ENDC}")
-        print (f"    | {'  Signatures':<20}: {Config.Colors.CYAN}{_count_items(signatures)}{Config.Colors.ENDC}")
-        print (f"    | {'  OIDs':<20}: {Config.Colors.CYAN}{_count_items(object_identifiers)}{Config.Colors.ENDC}")
+        self ._print_wrapped_pipe_value (f"{section_name:<20}","Present")
+        self ._print_wrapped_pipe_value (f"{'  Certificate Objects':<20}",cert_count_display )
+        self ._print_wrapped_pipe_value (f"{'  Public Key Entries':<20}",_count_items (public_keys ))
+        self ._print_wrapped_pipe_value (f"{'  Signature Entries':<20}",_count_items (signatures ))
+        self ._print_wrapped_pipe_value (f"{'  Identifier OIDs':<20}",_count_items (object_identifiers ))
+        if has_unsigned_evidence :
+            self ._print_wrapped_pipe_value (
+            f"{'  Structure':<20}",
+            "Signed key container (no DER certificate object found)",
+            )
 
         first_cert =_first_dict (certificates )
         has_cert =False 
         if first_cert is not None :
             has_cert =True 
         if has_cert :
+            _print_group ("Certificate")
             cert_subject =first_cert .get ("subject","")
             cert_issuer =first_cert .get ("issuer","")
             cert_serial =first_cert .get ("serial","")
             cert_not_before =first_cert .get ("notBefore","")
             cert_not_after =first_cert .get ("notAfter","")
-            print (f"    | {'  Subject':<20}: {Config.Colors.CYAN}{_short(cert_subject)}{Config.Colors.ENDC}")
-            print (f"    | {'  Issuer':<20}: {Config.Colors.CYAN}{_short(cert_issuer)}{Config.Colors.ENDC}")
-            print (f"    | {'  Serial':<20}: {Config.Colors.CYAN}{cert_serial}{Config.Colors.ENDC}")
-            print (f"    | {'  Validity':<20}: {Config.Colors.CYAN}{cert_not_before} -> {cert_not_after}{Config.Colors.ENDC}")
+            self ._print_wrapped_pipe_value (f"{'  Subject':<20}",cert_subject )
+            self ._print_wrapped_pipe_value (f"{'  Issuer':<20}",cert_issuer )
+            self ._print_wrapped_pipe_value (f"{'  Serial Number':<20}",cert_serial )
+            self ._print_wrapped_pipe_value (f"{'  Validity':<20}",f"{cert_not_before} -> {cert_not_after}" )
 
         has_pub_key =False 
         if isinstance (public_keys ,list ):
             if len (public_keys )>0 :
                 has_pub_key =True 
         if has_pub_key :
-            print (f"    | {'  Public Key (1st)':<20}: {Config.Colors.CYAN}{_short(public_keys[0])}{Config.Colors.ENDC}")
+            _print_group ("Subject Public Key Info")
+            self ._print_wrapped_pipe_value (f"{'  Public Key (1st)':<20}",public_keys [0 ])
 
         has_signature =False 
         if isinstance (signatures ,list ):
             if len (signatures )>0 :
                 has_signature =True 
         if has_signature :
-            print (f"    | {'  Signature (1st)':<20}: {Config.Colors.CYAN}{_short(signatures[0])}{Config.Colors.ENDC}")
+            _print_group ("Certificate Signature")
+            self ._print_wrapped_pipe_value (f"{'  Signature DER (1st)':<20}",signatures [0 ])
+
+        if isinstance (object_identifiers ,list ):
+            if len (object_identifiers )>0 :
+                _print_group ("Object Identifiers")
+        preview_oids :List [Any ]=[]
+        if isinstance (object_identifiers ,list ):
+            for value in object_identifiers :
+                legend =_oid_legend (value )
+                if legend =="distinguishedName":
+                    continue
+                preview_oids .append (value )
+                if len (preview_oids )>=3 :
+                    break
+        for value in preview_oids :
+            legend =_oid_legend (value )
+            label_text =legend
+            if label_text =="other":
+                label_text ="identifier"
+            label =f"  {label_text}"
+            self ._print_wrapped_pipe_value (f"{label:<20}",value )
+
+        dn_oid_names :List [str ]=[]
+        if isinstance (object_identifiers ,list ):
+            for item in object_identifiers :
+                dn_name =_oid_dn_name (item )
+                if len (dn_name )>0 :
+                    dn_oid_names .append (dn_name )
+        dn_name_cursor =0
+
+        preview_utf8 =utf8_values [:2 ]if isinstance (utf8_values ,list )else []
+        if len (preview_utf8 )>0 or (isinstance (printable_values ,list )and len (printable_values )>0 ):
+            _print_group ("Subject Name Attributes")
+        for idx ,value in enumerate (preview_utf8 ,start =1 ):
+            dn_name =""
+            if dn_name_cursor <len (dn_oid_names ):
+                dn_name =dn_oid_names [dn_name_cursor ]
+            dn_name_cursor +=1
+            label =_friendly_dn_label (dn_name ,idx )
+            self ._print_wrapped_pipe_value (f"{label:<20}",value )
+
+        preview_printable =printable_values [:2 ]if isinstance (printable_values ,list )else []
+        for idx ,value in enumerate (preview_printable ,start =1 ):
+            dn_name =""
+            if dn_name_cursor <len (dn_oid_names ):
+                dn_name =dn_oid_names [dn_name_cursor ]
+            dn_name_cursor +=1
+            label =_friendly_dn_label (dn_name ,idx +len (preview_utf8 ))
+            self ._print_wrapped_pipe_value (f"{label:<20}",value )
+
+        preview_times :List [str ]=[]
+        if isinstance (utc_values ,list ):
+            preview_times .extend ([str (item )for item in utc_values [:2 ]])
+        if isinstance (generalized_values ,list ):
+            preview_times .extend ([str (item )for item in generalized_values [:2 ]])
+        if len (preview_times )>0 :
+            _print_group ("Validity Period")
+        for idx ,value in enumerate (preview_times [:2 ],start =1 ):
+            label ="  Not Before"
+            if idx >1 :
+                label ="  Not After"
+            self ._print_wrapped_pipe_value (f"{label:<20}",value )
+            decoded_time =_decode_x509_time_text (value )
+            if len (decoded_time )>0 :
+                self ._print_wrapped_pipe_value (f"{'  Time Decoded':<20}",decoded_time )
+
+        preview_integers =integer_values [:2 ]if isinstance (integer_values ,list )else []
+        if len (preview_integers )>0 :
+            _print_group ("Version / Serial Hints")
+        for idx ,value in enumerate (preview_integers ,start =1 ):
+            label ="  Certificate Version"
+            if idx >1 :
+                label ="  Certificate Serial"
+            self ._print_wrapped_pipe_value (f"{label:<20}",value )
+
+        preview_octets =octet_values [:3 ]if isinstance (octet_values ,list )else []
+        if len (preview_octets )>0 :
+            _print_group ("Extensions")
+        for idx ,value in enumerate (preview_octets ,start =1 ):
+            self ._print_wrapped_pipe_value (f"{f'  Extension Blob {idx}':<20}",value )
+            decoded_lines =self ._decode_extension_blob_lines (value )
+            for decoded_label ,decoded_value in decoded_lines :
+                self ._print_wrapped_pipe_value (f"{decoded_label:<20}",decoded_value )
+
+        if isinstance (raw_hex ,str ):
+            has_raw_hex =False 
+            if len (raw_hex )>0 :
+                has_raw_hex =True 
+            if has_raw_hex :
+                self ._print_wrapped_pipe_value (f"{'  Raw Hex (1st)':<20}",raw_hex )
 
     def _print_get_certs_compact (self ,parsed :Dict [int ,Any ])->None :
-        root_candidate =TlvParser .get_first (parsed ,0xBF56 ,parsed )
-        root =root_candidate 
-        is_root_bytes =False 
-        if isinstance (root_candidate ,bytes ):
-            is_root_bytes =True 
-        if is_root_bytes :
-            try :
-                root =TlvParser .parse (root_candidate )
-            except Exception :
-                root =parsed 
-        is_root_dict =False 
-        if isinstance (root ,dict ):
-            is_root_dict =True 
-        if is_root_dict ==False :
-            root =parsed 
-
         print (f"\n{Config.Colors.BOLD}[+] GetCerts{Config.Colors.ENDC}")
-        if not isinstance (root ,dict ):
-            print ("    | (Empty)")
-            return 
-
-        eim_blocks =self ._collect_tag_nodes (root ,0xA5 )
-        tls_blocks =self ._collect_tag_nodes (root ,0xA6 )
-        eim_pub =None 
-        if len (eim_blocks )>0 :
-            eim_pub =eim_blocks [0 ]
-        tls_pub =None 
-        if len (tls_blocks )>0 :
-            tls_pub =tls_blocks [0 ]
-        has_any =False 
-        if eim_pub is not None :
-            has_any =True 
-        if tls_pub is not None :
-            has_any =True 
-        if has_any ==False :
-            has_summary =self ._print_cert_summary_from_parsed (parsed ,"GetCerts Summary")
-            if has_summary :
-                return 
+        root_value =TlvParser .get_first (parsed ,0xBF56 )
+        if not isinstance (root_value ,bytes ):
             print ("    | (No certificate blocks found)")
             return 
 
-        if eim_pub is not None :
-            eim_sum =self ._summarize_cert_block (eim_pub )
-            self ._print_cert_block_summary_lines ("eIM Public Key Data",eim_sum )
+        raw_response =bytes .fromhex ("BF56")
+        if len (root_value )<0x80 :
+            raw_response +=bytes ([len (root_value )])
+        else :
+            raw_response +=bytes ([0x81 ,len (root_value )])
+        raw_response +=root_value 
+        certs =decode_get_certs_response (raw_response )
+        if "error"in certs :
+            print (f"    | Result               : {Config.Colors.FAIL}{certs['error']}{Config.Colors.ENDC}")
+            return 
 
-        if tls_pub is not None :
-            tls_sum =self ._summarize_cert_block (tls_pub )
-            self ._print_cert_block_summary_lines ("Trusted TLS Key Data",tls_sum )
+        eum_cert =certs .get ("eumCertificate")
+        euicc_cert =certs .get ("euiccCertificate")
+        if not isinstance (eum_cert ,bytes )and not isinstance (euicc_cert ,bytes ):
+            print ("    | (No certificate blocks found)")
+            return 
+
+        if isinstance (eum_cert ,bytes ):
+            eum_sum =self ._summarize_cert_block (eum_cert )
+            self ._print_cert_block_summary_lines ("EUM Certificate",eum_sum )
+
+        if isinstance (euicc_cert ,bytes ):
+            euicc_sum =self ._summarize_cert_block (euicc_cert )
+            self ._print_cert_block_summary_lines ("eUICC Certificate",euicc_sum )
+
+    def _print_get_certs_compact_response (self ,response :bytes )->None :
+        print (f"\n{Config.Colors.BOLD}[+] GetCerts{Config.Colors.ENDC}")
+        certs =decode_get_certs_response (response )
+        if "error"in certs :
+            print (f"    | Result               : {Config.Colors.FAIL}{certs['error']}{Config.Colors.ENDC}")
+            return
+
+        eum_cert =certs .get ("eumCertificate")
+        euicc_cert =certs .get ("euiccCertificate")
+        if not isinstance (eum_cert ,bytes )and not isinstance (euicc_cert ,bytes ):
+            fallback =self ._summarize_cert_block (response )
+            if len (fallback )==0 :
+                print ("    | (No certificate blocks found)")
+                return
+            self ._print_cert_block_summary_lines ("Certificate Data",fallback )
+            return
+
+        if isinstance (eum_cert ,bytes ):
+            eum_sum =self ._summarize_cert_block (eum_cert )
+            self ._print_cert_block_summary_lines ("EUM Certificate",eum_sum )
+
+        if isinstance (euicc_cert ,bytes ):
+            euicc_sum =self ._summarize_cert_block (euicc_cert )
+            self ._print_cert_block_summary_lines ("eUICC Certificate",euicc_sum )
 
     def _print_notifications_list_compact (self ,parsed :Dict [int ,Any ])->None :
         print (f"\n{Config.Colors.BOLD}[+] RetrieveNotificationsList{Config.Colors.ENDC}")
-        root =TlvParser .get_first (parsed ,0xBF2B ,parsed )
-        entries =self ._collect_tag_nodes (root ,0xBF2F )
-        has_entries =False 
-        if len (entries )>0 :
-            has_entries =True 
-        if has_entries ==False :
-            print ("    | Notification Entries : (Empty)")
+        root_value =TlvParser .get_first (parsed ,0xBF2B )
+        if not isinstance (root_value ,bytes ):
+            self ._print_wrapped_pipe_value ("Notification Entries","(Empty)")
             return 
-
-        print (f"    | Notification Entries : {Config.Colors.CYAN}{len(entries)}{Config.Colors.ENDC}")
-        first =entries [0 ]
-        if not isinstance (first ,dict ):
-            print (f"    | First Entry          : {Config.Colors.CYAN}(Unparsed){Config.Colors.ENDC}")
+        raw_response =bytes .fromhex ("BF2B")
+        if len (root_value )<0x80 :
+            raw_response +=bytes ([len (root_value )])
+        else :
+            raw_response +=bytes ([0x81 ,len (root_value )])
+        raw_response +=root_value 
+        decoded =decode_notifications_response (raw_response )
+        if len (decoded .get ("error",""))>0 :
+            self ._print_wrapped_pipe_value ("Result",decoded ["error"])
             return 
-
-        seq_val =self ._decode_text_value (0x80 ,TlvParser .get_first (first ,0x80 ),0xBF2F )
-        if len (seq_val )>0 :
-            print (f"    | Seq Number           : {Config.Colors.CYAN}{seq_val}{Config.Colors.ENDC}")
-
-        op_val =self ._decode_text_value (0x81 ,TlvParser .get_first (first ,0x81 ),0xBF2F )
-        if len (op_val )>0 :
-            print (f"    | Operation            : {Config.Colors.CYAN}{op_val}{Config.Colors.ENDC}")
-
-        fqdn_values =self ._collect_decoded_values (first ,0x0C ,None )
-        has_fqdn =False 
-        if len (fqdn_values )>0 :
-            has_fqdn =True 
-        if has_fqdn :
-            print (f"    | Server/FQDN          : {Config.Colors.CYAN}{self._short_display(fqdn_values[0])}{Config.Colors.ENDC}")
-
-        id_values =self ._collect_decoded_values (first ,0x5A ,None )
-        has_id =False 
-        if len (id_values )>0 :
-            has_id =True 
-        if has_id :
-            print (f"    | EID/ICCID            : {Config.Colors.CYAN}{id_values[0]}{Config.Colors.ENDC}")
-
-        sig_values =self ._collect_decoded_values (first ,0x03 ,None )
-        sig_count =0 
-        for item in sig_values :
-            if str (item ).startswith ("Signature:"):
-                sig_count +=1 
-        print (f"    | Signature Items      : {Config.Colors.CYAN}{sig_count}{Config.Colors.ENDC}")
+        notifications =decoded .get ("notifications",[])
+        package_results =decoded .get ("package_results",[])
+        self ._print_wrapped_pipe_value ("Notification Entries",len (notifications ))
+        if len (package_results )>0 :
+            self ._print_wrapped_pipe_value ("Package Results",len (package_results ))
+        if len (notifications )==0 :
+            return 
+        first =notifications [0 ]
+        if "seqNumber"in first :
+            self ._print_wrapped_pipe_value ("Seq Number",first ["seqNumber"])
+        if "operation"in first :
+            self ._print_wrapped_pipe_value ("Operation",first ["operation"])
+        if "notificationAddress"in first :
+            self ._print_wrapped_pipe_value ("Server/FQDN",first ["notificationAddress"])
+        if "iccid"in first :
+            self ._print_wrapped_pipe_value ("ICCID",first ["iccid"])
 
     def _print_rat_compact (self ,parsed :Dict [int ,Any ])->None :
         print (f"\n{Config.Colors.BOLD}[+] GetRAT (Rules Authorisation Table){Config.Colors.ENDC}")
-        compact =self ._compact_tlv_node (parsed ,0xBF43 )
-        rat_obj =compact .get ("RAT (Rules Authorisation Table)",compact )
-        is_dict =False 
-        if isinstance (rat_obj ,dict ):
-            is_dict =True 
-        if is_dict ==False :
+        root_value =TlvParser .get_first (parsed ,0xBF43 )
+        if not isinstance (root_value ,bytes ):
             print ("    | (Empty)")
             return 
 
-        def _bitmap_set_bits (hex_text :str )->str :
-            try :
-                raw =bytes .fromhex (hex_text )
-            except Exception :
-                return ""
-            bitmask =int .from_bytes (raw ,"big",signed =False )
-            width =len (raw )*8 
-            set_bits =[]
-            for bit_idx in range (width -1 ,-1 ,-1 ):
-                is_set =False 
-                if ((bitmask >>bit_idx )&0x01 )==0x01 :
-                    is_set =True 
-                if is_set :
-                    set_bits .append (str (bit_idx ))
-            if len (set_bits )==0 :
-                return "none"
-            return ", ".join (set_bits )
-
-        label_map ={
-        "80":"Field 80 Values",
-        "81":"Field 81 Value",
-        "82":"Field 82 Bitmap",
-        }
-
-        emitted =0 
-        for key ,value in rat_obj .items ():
-            key_text =str (key )
-            is_tag_hex =False 
-            if len (key_text )==2 :
-                try :
-                    int (key_text ,16 )
-                    is_tag_hex =True 
-                except Exception :
-                    is_tag_hex =False 
-            label =key_text 
-            if is_tag_hex :
-                label =label_map .get (key_text ,f"Tag {key_text}")
-
-            if isinstance (value ,str ):
-                is_empty =False 
-                if len (value .strip ())==0 :
-                    is_empty =True 
-                if is_empty :
-                    continue 
-                suffix =""
-                is_tag82 =False 
-                if key_text =="82":
-                    is_tag82 =True 
-                if is_tag82 :
-                    bits =_bitmap_set_bits (value )
-                    if len (bits )>0 :
-                        suffix =f" (set bits: {bits})"
-                print (f"    | {label:<20}: {Config.Colors.CYAN}{value}{suffix}{Config.Colors.ENDC}")
-                emitted +=1 
-                continue 
-
-            if isinstance (value ,list ):
-                filtered =[]
-                for item in value :
-                    text =str (item )
-                    if len (text .strip ())==0 :
-                        continue 
-                    filtered .append (text )
-                if len (filtered )==0 :
-                    continue 
-                preview =", ".join (filtered [:3 ])
-                if len (filtered )>3 :
-                    preview =preview +f", +{len(filtered) - 3} more"
-                count =len (filtered )
-                suffix =""
-                is_tag82 =False 
-                if key_text =="82":
-                    is_tag82 =True 
-                if is_tag82 :
-                    bits =_bitmap_set_bits (filtered [0 ])
-                    if len (bits )>0 :
-                        suffix =f" (set bits: {bits})"
-                print (f"    | {label:<20}: {Config.Colors.CYAN}{preview}{Config.Colors.ENDC}")
-                print (f"    | {'  Count':<20}: {Config.Colors.CYAN}{count}{suffix}{Config.Colors.ENDC}")
-                emitted +=1 
-                continue 
-
-            print (f"    | {label:<20}: {Config.Colors.CYAN}{self._short_display(value)}{Config.Colors.ENDC}")
-            emitted +=1 
-
-        if emitted ==0 :
+        raw_response =bytes .fromhex ("BF43")
+        if len (root_value )<0x80 :
+            raw_response +=bytes ([len (root_value )])
+        else :
+            raw_response +=bytes ([0x81 ,len (root_value )])
+        raw_response +=root_value 
+        rules =decode_rat_rules (raw_response )
+        if len (rules )==0 :
             print ("    | (Empty)")
+            return 
+
+        self ._print_wrapped_pipe_value ("Rules",len (rules ))
+        first_rule =rules [0 ]
+        if "pprIdsRaw"in first_rule :
+            self ._print_wrapped_pipe_value ("PPR IDs Raw",first_rule ["pprIdsRaw"])
+        if "pprIds"in first_rule :
+            self ._print_wrapped_pipe_value ("PPR IDs Meaning",first_rule ["pprIds"])
+        operators =first_rule .get ("allowedOperators",[])
+        if isinstance (operators ,list ):
+            self ._print_wrapped_pipe_value ("Allowed Operators",len (operators ))
+            if len (operators )>0 :
+                first_operator =operators [0 ]
+                operator_parts =[]
+                if "mccMnc"in first_operator :
+                    operator_parts .append (f"mccMnc={first_operator['mccMnc']}")
+                if "gid1"in first_operator :
+                    operator_parts .append (f"gid1={first_operator['gid1']}")
+                if "gid2"in first_operator :
+                    operator_parts .append (f"gid2={first_operator['gid2']}")
+                self ._print_wrapped_pipe_value ("First Operator",", ".join (operator_parts ))
+        if "pprFlagsRaw"in first_rule :
+            self ._print_wrapped_pipe_value ("PPR Flags Raw",first_rule ["pprFlagsRaw"])
+        if "pprFlags"in first_rule :
+            self ._print_wrapped_pipe_value ("PPR Flags Meaning",first_rule ["pprFlags"])
+
+    def _print_rat_compact_response (self ,response :bytes )->None :
+        print (f"\n{Config.Colors.BOLD}[+] GetRAT (Rules Authorisation Table){Config.Colors.ENDC}")
+        rules =decode_rat_rules (response )
+        if len (rules )==0 :
+            print ("    | (Empty)")
+            if len (response )>0 :
+                self ._print_wrapped_pipe_value ("Raw Hex",response .hex ().upper ())
+            return
+
+        self ._print_wrapped_pipe_value ("Rules",len (rules ))
+        first_rule =rules [0 ]
+        if "pprIdsRaw"in first_rule :
+            self ._print_wrapped_pipe_value ("PPR IDs Raw",first_rule ["pprIdsRaw"])
+        if "pprIds"in first_rule :
+            self ._print_wrapped_pipe_value ("PPR IDs Meaning",first_rule ["pprIds"])
+        operators =first_rule .get ("allowedOperators",[])
+        if isinstance (operators ,list ):
+            self ._print_wrapped_pipe_value ("Allowed Operators",len (operators ))
+            if len (operators )>0 :
+                first_operator =operators [0 ]
+                operator_parts =[]
+                if "mccMnc"in first_operator :
+                    operator_parts .append (f"mccMnc={first_operator['mccMnc']}")
+                if "gid1"in first_operator :
+                    operator_parts .append (f"gid1={first_operator['gid1']}")
+                if "gid2"in first_operator :
+                    operator_parts .append (f"gid2={first_operator['gid2']}")
+                self ._print_wrapped_pipe_value ("First Operator",", ".join (operator_parts ))
+        if "pprFlagsRaw"in first_rule :
+            self ._print_wrapped_pipe_value ("PPR Flags Raw",first_rule ["pprFlagsRaw"])
+        if "pprFlags"in first_rule :
+            self ._print_wrapped_pipe_value ("PPR Flags Meaning",first_rule ["pprFlags"])
 
     def get_euicc_configured_data (self )->None :
         """ES10a.GetEuiccConfiguredData / GetEuiccConfiguredAddresses (retrieval)."""
@@ -2178,9 +2867,8 @@ class Sgp22Manager :
         """ES10b.GetCerts (SGP.22/32 retrieval)."""
         self ._select_isd_r ()
         payload ="BF5600"
-        cmd =f"80E29100{len(bytes.fromhex(payload)):02X}{payload}"
         print (f"{Config.Colors.CYAN}[*] GetCerts...{Config.Colors.ENDC}")
-        data ,sw1 ,sw2 =self .tp .transmit (cmd ,silent =True )
+        data ,sw1 ,sw2 =self ._send_store_data_with_retry_ladder (payload )
         if sw1 !=0x90 :
             print (f"{Config.Colors.FAIL}[-] Failed: {sw1:02X}{sw2:02X}{Config.Colors.ENDC}")
             return 
@@ -2195,26 +2883,16 @@ class Sgp22Manager :
                 self ._print_tlv_tree (parsed ,indent =1 ,parent_tag =0xBF56 ,x509_mode =True )
                 return 
 
-            self ._print_get_certs_compact (parsed )
+            self ._print_get_certs_compact_response (data )
         except Exception :
             print (f"    {data.hex().upper()}")
 
     def get_eid (self )->None :
-        """Retrieve EID from ECASD via GET DATA tag 5A."""
-        ECASD_AID ="A0000005591010FFFFFFFF8900000200"
-        self .tp .transmit (f"00A40400{len(ECASD_AID)//2:02X}{ECASD_AID}",silent =True )
-        data ,sw1 ,sw2 =self .tp .transmit ("00CA005A00",silent =True )
+        """Retrieve EID from ES10 GetEuiccData / GetEID style retrieval."""
+        data ,sw1 ,sw2 =self ._retrieve_eid_response ()
         if sw1 ==0x90 and data :
             print (f"{Config.Colors.HEADER}--- EID ---{Config.Colors.ENDC}")
-            try :
-                parsed =TlvParser .parse (data )
-                eid =TlvParser .get_first (parsed ,0x5A ,data )
-                if isinstance (eid ,bytes ):
-                    print (f"    {eid.hex().upper()}")
-                else :
-                    print (f"    {data.hex().upper()}")
-            except Exception :
-                print (f"    {data.hex().upper()}")
+            print (f"    {self._extract_eid_hex(data)}")
             return 
         print (f"{Config.Colors.FAIL}[-] Failed: {sw1:02X}{sw2:02X}{Config.Colors.ENDC}")
 
@@ -2222,9 +2900,8 @@ class Sgp22Manager :
         """ES10b.GetRAT (SGP.22/32) – Rules Authorisation Table. Retrieval only."""
         self ._select_isd_r ()
         payload ="BF4300"
-        cmd =f"80E29100{len(bytes.fromhex(payload)):02X}{payload}"
         print (f"{Config.Colors.CYAN}[*] GetRAT (Rules Authorisation Table)...{Config.Colors.ENDC}")
-        data ,sw1 ,sw2 =self .tp .transmit (cmd ,silent =True )
+        data ,sw1 ,sw2 =self ._send_store_data_with_retry_ladder (payload )
         if sw1 !=0x90 :
             print (f"{Config.Colors.FAIL}[-] Failed: {sw1:02X}{sw2:02X}{Config.Colors.ENDC}")
             return 
@@ -2239,7 +2916,7 @@ class Sgp22Manager :
                 print (f"{Config.Colors.HEADER}--- GetRAT (Rules Authorisation Table) ---{Config.Colors.ENDC}")
                 self ._print_tlv_tree (parsed ,indent =1 ,parent_tag =0xBF43 )
                 return 
-            self ._print_rat_compact (parsed )
+            self ._print_rat_compact_response (data )
         except Exception :
             print (f"    {data.hex().upper()}")
 
@@ -2247,9 +2924,8 @@ class Sgp22Manager :
         """ES10b.RetrieveNotificationsList (SGP.22/32) – Pending notifications. Retrieval only."""
         self ._select_isd_r ()
         payload ="BF2B00"
-        cmd =f"80E29100{len(bytes.fromhex(payload)):02X}{payload}"
         print (f"{Config.Colors.CYAN}[*] RetrieveNotificationsList...{Config.Colors.ENDC}")
-        data ,sw1 ,sw2 =self .tp .transmit (cmd ,silent =True )
+        data ,sw1 ,sw2 =self ._send_store_data_with_retry_ladder (payload )
         if sw1 !=0x90 :
             print (f"{Config.Colors.FAIL}[-] Failed: {sw1:02X}{sw2:02X}{Config.Colors.ENDC}")
             return 
@@ -2289,8 +2965,7 @@ class Sgp22Manager :
         rat_data =self ._es10_retrieve_data ("BF4300")
         if rat_data :
             try :
-                rat_parsed =TlvParser .parse (rat_data )
-                self ._print_rat_compact (rat_parsed )
+                self ._print_rat_compact_response (rat_data )
             except Exception :
                 print (f"\n{Config.Colors.BOLD}[+] GetRAT (Rules Authorisation Table){Config.Colors.ENDC}")
                 print (f"    | {rat_data.hex().upper()}")
@@ -2313,8 +2988,7 @@ class Sgp22Manager :
         eim_data =self ._es10_retrieve_data ("BF5500")
         if eim_data :
             try :
-                eim_parsed =TlvParser .parse (eim_data )
-                self ._print_eim_configuration_compact_json (eim_parsed )
+                self ._print_eim_configuration_compact (eim_data )
             except Exception :
                 print (f"\n{Config.Colors.BOLD}[+] eIM Configuration Data{Config.Colors.ENDC}")
                 print (f"    | {eim_data.hex().upper()}")
@@ -2325,8 +2999,7 @@ class Sgp22Manager :
         cert_data =self ._es10_retrieve_data ("BF5600")
         if cert_data :
             try :
-                cert_parsed =TlvParser .parse (cert_data )
-                self ._print_get_certs_compact (cert_parsed )
+                self ._print_get_certs_compact_response (cert_data )
             except Exception :
                 print (f"\n{Config.Colors.BOLD}[+] GetCerts{Config.Colors.ENDC}")
                 print (f"    | {cert_data.hex().upper()}")
@@ -2361,8 +3034,7 @@ class Sgp22Manager :
         inner =tlv_choice +tlv_refresh 
         payload =bytes ([func_tag >>8 ,func_tag &0xFF ,len (inner )])+inner 
 
-        cmd =f"80E29100{len(payload):02X}{payload.hex()}"
-        data ,sw1 ,sw2 =self .tp .transmit (cmd ,silent =True )
+        data ,sw1 ,sw2 =self ._send_store_data_with_retry_ladder (payload .hex ())
 
         return self ._check_result (data ,sw1 ,sw2 ,func_tag )
 

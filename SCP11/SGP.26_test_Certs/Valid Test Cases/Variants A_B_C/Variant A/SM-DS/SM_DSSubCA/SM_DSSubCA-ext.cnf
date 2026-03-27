@@ -1,0 +1,21 @@
+# openssl x509 extfile params
+extensions = extend
+# This prevent the user to be prompted for values
+prompt = no
+
+[extend] # openssl extensions
+authorityKeyIdentifier=keyid,issuer
+
+subjectKeyIdentifier=hash
+
+subjectAltName = RID:2.999.321
+
+keyUsage = critical, keyCertSign, cRLSign
+
+certificatePolicies = 2.23.146.1.2.1.0.0.2
+
+basicConstraints = critical, CA:TRUE, pathlen:0
+
+crlDistributionPoints=URI:http://ci.test.example.com/CRL-1.crl, URI:http://ci.test.example.com/CRL-2.crl
+
+

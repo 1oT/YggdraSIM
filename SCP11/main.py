@@ -1,62 +1,40 @@
 # -----------------------------------------------------------------------------
-# This Source Code Form is subject to the terms of the Mozilla Public
-# License, v. 2.0. If a copy of the MPL was not distributed with this
-# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
 #
-# Copyright (c) 2026 Hampus Hellsberg
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program. If not, see <https://www.gnu.org/licenses/>.
+#
+# Copyright (c) 2026 Hampus Hellsberg and contributors
 # -----------------------------------------------------------------------------
 
-import sys
-import argparse
+from yggdrasim_common.quit_control import QuitAllRequested
 
-try:
-    from .config import SGPConfig
-    from .console import SCP11Console
-    from .factory import build_apdu_channel, build_profile_provider
-    from .orchestrator import SGP22Orchestrator
-except ImportError:
-    from config import SGPConfig
-    from console import SCP11Console
-    from factory import build_apdu_channel, build_profile_provider
-    from orchestrator import SGP22Orchestrator
+def _load_live_main ():
+    try:
+        from .live.main import SCP11StartupError, SGP22Client, entry
+    except ImportError:
+        from SCP11.live.main import SCP11StartupError, SGP22Client, entry
+    return SCP11StartupError, SGP22Client, entry
 
 
-class SGP22Client:
-    """Compatibility wrapper preserving the previous main entrypoint."""
-
-    def __init__(self):
-        self.cfg = SGPConfig()
-        self.apdu_channel = build_apdu_channel(self.cfg)
-        self.profile_provider = build_profile_provider(self.cfg)
-        self.orchestrator = SGP22Orchestrator(
-            cfg=self.cfg,
-            apdu_channel=self.apdu_channel,
-            profile_provider=self.profile_provider,
-        )
-
-    def run_flow(self):
-        try:
-            self.orchestrator.run_flow()
-        except Exception as error:
-            print(f"\n[CRITICAL ERROR] {error}")
-            sys.exit(1)
-
-    def run_shell(self):
-        console = SCP11Console(self)
-        console.run()
+def entry ():
+    _, _, live_entry =_load_live_main ()
+    live_entry ()
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="SCP11 relay/local orchestration shell")
-    parser.add_argument(
-        "--flow",
-        action="store_true",
-        help="Run one-shot SCP11 flow instead of interactive shell",
-    )
-    args = parser.parse_args()
-
-    client = SGP22Client()
-    if args.flow:
-        client.run_flow()
-    else:
-        client.run_shell()
+    startup_error_cls, _, live_entry =_load_live_main ()
+    try:
+        live_entry ()
+    except QuitAllRequested:
+        raise SystemExit(0)
+    except startup_error_cls as error:
+        print (f"\n[STARTUP ERROR] {error}")

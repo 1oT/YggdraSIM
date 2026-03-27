@@ -1,0 +1,96 @@
+{
+  "document_type": "fake_eim_peer_addition_info",
+  "document_version": "1.0.0",
+  "summary": "Provisioning reference for adding the seeded YggdraSIM fake eIM from another eIM or compatible local harness.",
+  "identity": {
+    "display_name": "SGP.26 Seeded eIM Test",
+    "eim_id": "2.25.311782205282738360923618091971140414400",
+    "eim_id_type": "oid",
+    "eim_fqdn": "yggdrasim.eim.test.1ot.com",
+    "default_matching_id": "EIM-FIRST-TEST",
+    "organization": "RSPTEST",
+    "certificate_subject_cn": "yggdrasim.eim.test.1ot.com",
+    "eim_endpoint": "https://yggdrasim.eim.test.1ot.com/gsma/rsp2/asn1",
+    "smdpp_endpoint": "https://yggdrasim.smdpp.test.1ot.com/gsma/rsp2/es9plus",
+    "smdp_address": "yggdrasim.smdpp.test.1ot.com",
+    "euicc_ci_pk_id": "F54172BDF98A95D65CBEB88A38A1C11D800A85C3"
+  },
+  "provisioning_artifacts": {
+    "canonical_add_eim_package_path": "SCP11/eim_local/eim_packages/fake_eim_add_eim_package.json",
+    "legacy_add_eim_package_path": "SCP11/eim_local/eim_packages/first_test_add_eim_other_eim.json",
+    "identity_reference_path": "SCP11/eim_local/eim_identity.json"
+  },
+  "required_files": [
+    {
+      "role": "eim_signing_certificate",
+      "path": "SCP11/eim_local/certs/eim/CERT_S_EIMsign_YGGDRASIM_NIST.pem",
+      "format": "PEM",
+      "used_by": [
+        "sgp32.add_eim_request.eim_configuration_data_list[0].eim_public_key_data",
+        "runtime.cert_der_path"
+      ]
+    },
+    {
+      "role": "eim_signing_private_key",
+      "path": "SCP11/eim_local/certs/eim/SK_S_EIMsign_YGGDRASIM_NIST.pem",
+      "format": "PEM",
+      "used_by": [
+        "local signing workflows",
+        "external harness export"
+      ]
+    },
+    {
+      "role": "eim_tls_certificate",
+      "path": "SCP11/eim_local/certs/eim/CERT_S_EIM_TLS_YGGDRASIM_NIST.pem",
+      "format": "PEM",
+      "used_by": [
+        "sgp32.add_eim_request.eim_configuration_data_list[0].trusted_public_key_data_tls",
+        "localized TLS termination"
+      ]
+    },
+    {
+      "role": "eim_tls_private_key",
+      "path": "SCP11/eim_local/certs/eim/SK_S_EIM_TLS_YGGDRASIM_NIST.pem",
+      "format": "PEM",
+      "used_by": [
+        "localized TLS termination",
+        "external harness export"
+      ]
+    },
+    {
+      "role": "ci_root_certificate",
+      "path": "SCP11/eim_local/certs/eim/CA.EIM.Root.cert.pem",
+      "format": "PEM",
+      "used_by": [
+        "reference trust anchor",
+        "CI PKID confirmation"
+      ]
+    }
+  ],
+  "add_eim_defaults": {
+    "counter_value": 0,
+    "next_counter_after_success": 1,
+    "association_token_value": -1,
+    "association_token_note": "-1 encodes the FF request sentinel used by the first-test package.",
+    "indirect_profile_download": true,
+    "supported_protocol": {
+      "eimRetrieveHttps": true,
+      "eimRetrieveCoaps": false,
+      "eimInjectHttps": false,
+      "eimInjectCoaps": false,
+      "eimProprietary": false
+    }
+  },
+  "runtime_hints": {
+    "matching_id": "EIM-FIRST-TEST",
+    "smdp_address": "yggdrasim.smdpp.test.1ot.com",
+    "bip_endpoints": {
+      "eim": "https://yggdrasim.eim.test.1ot.com/gsma/rsp2/asn1",
+      "smdpp": "https://yggdrasim.smdpp.test.1ot.com/gsma/rsp2/es9plus"
+    }
+  },
+  "operator_examples": {
+    "local_eim_shell": "ADD-EIM package \"SCP11/eim_local/certs/eim/CERT_S_EIMsign_YGGDRASIM_NIST.pem\" SCP11/eim_local/eim_packages/fake_eim_add_eim_package.json",
+    "local_isdr_shell": "LOAD-EIM-PACKAGE SCP11/eim_local/eim_packages/fake_eim_add_eim_package.json SCP11/eim_local/certs/eim/CERT_S_EIMsign_YGGDRASIM_NIST.pem"
+  }
+}

@@ -1,0 +1,32 @@
+{
+  "package_type": "profile_download_trigger_result",
+  "package_version": "2.1.2.3",
+  "spec_target": "SGP.32 eIM Package Result / ProfileDownloadTriggerResult",
+  "sgp32": {
+    "profile_download_trigger_result": {
+      "include": true,
+      "transaction_id": {
+        "include": true,
+        "value_hex": "0102030405060708090A0B0C0D0E0F10"
+      },
+      "result_code": {
+        "include": true,
+        "value": "ok"
+      },
+      "result_detail": {
+        "include": false,
+        "value": ""
+      },
+      "euicc_package_result": {
+        "include": false,
+        "value_hex": ""
+      }
+    }
+  },
+  "runtime": {
+    "matching_id": "EIM-PROFILE-DOWNLOAD-RESULT",
+    "transaction_id_hex": "0102030405060708090A0B0C0D0E0F10"
+  },
+  "additional_tlvs": [],
+  "optional_tags": {}
+}

@@ -1,156 +1,261 @@
-```
- __   __               _               ____ ___ __  __ 
- \ \ / /__ _  __ _  __| | _ __  __ _  / ___|_ _|  \/  |
-  \ V / _` | / _` |/ _` || '__|/ _` | \___ \| || |\/| |
-   | | (_| || (_| | (_| || |  | (_| |  ___) | || |  | |
-   |_|\__, | \__, |\__,_||_|   \__,_| |____/___|_|  |_|
-      |___/  |___/
-      An eSIM Management Suite
-```
+# YggdraSIM
 
-**YggdraSIM** is a comprehensive, Python-based toolkit for interacting with, analyzing, and managing SIM, USIM, and eUICC (eSIM) cards. It provides a robust interactive shell for GlobalPlatform management, GSMA eSIM profile handling (Consumer, IoT, and M2M), and low-level file system operations via PC/SC smart card readers.
+YggdraSIM is a Python toolkit for secure-element research, eUICC analysis, SIM/eSIM management, OTA payload work, SCP11 relay/local flows, and SAIP profile-package tooling. The repository keeps the operator surfaces, protocol helpers, vendored `pysim/` tree, and test suite in one workspace so card work, relay work, and package work can be exercised without switching projects.
 
-**Note:** Some commands are experimental and have not been fully tested on all card types or firmware versions.
+## Authors
 
-## 🚀 Key Features
+- Hampus Hellsberg - Creator, Lead Architect, Lead Maintainer
 
-### 🌐 GlobalPlatform & Lifecycle
-* **Secure Channels:** Full support for **SCP03** (GlobalPlatform) authentication, session management and and **SCP80** (OTA).
-* **Registry Management:** List installed Applets, Packages, and Security Domains (`APPS`, `PKGS`, `SD`).
-* **Lifecycle Management:** Install (`LOAD`, `INSTALL`), Lock, Unlock, and Delete applications.
-* **Key Management:** Retrieve CPLC data and Key Information Templates.
+## What YggdraSIM contains
 
-### 📱 GSMA eSIM (SGP.22 / SGP.32 / SGP.02) — retrieval and local profile ops only
-* **Scope:** Data retrieval and local profile state (list, enable, disable, delete) only. This tool does **not** authenticate to ISD-R for provisioning; that is planned for the SCP11 module. Commands such as StoreMetadata, UpdateMetadata, LoadProfile, PrepareDownload, and LoadBoundProfilePackage are **not** supported.
-* **Profile Management:** List, Enable, Disable, and Delete eSIM profiles via ISD-R (ES10c/ES10b.GetProfilesInfo and profile state commands).
-* **SGP.22 (Consumer):** Retrieve and decode `EuiccInfo1`, `EuiccInfo2`, `EuiccConfiguredData`, GetRAT, RetrieveNotificationsList.
-* **SGP.32 (IoT):** `LIST-IOT` / `GET-IOT` plus wizard-based retrieval actions for RAT, notifications, and eIM configuration data.
-* **SGP.02 (M2M):** ECASD data retrieval and M2M specific tags.
-* **Crisp Decoding:** Automatic, context-aware decoding of complex TLV structures (e.g., Extended Card Resources, Capabilities).
+| Subsystem | Role | Primary operator surface |
+|-----------|------|--------------------------|
+| `main/` | Unified launcher, path setup, and in-process module dispatch | `python main/main.py` |
+| `SCP03/` | GlobalPlatform-style admin shell, filesystem work, GSMA retrieval, report/export | interactive shell + one-shot commands |
+| `SCP80/` | OTA packet construction, decode, and reader/send flows | OTA CLI |
+| `SCP11/live/` | Live relay shell for LPAd / IPAd / IPAe work | interactive SCP11 console |
+| `SCP11/test/` | Test relay shell mirroring the live surface | interactive SCP11 console |
+| `SCP11/local_access/` | Direct local `ISD-R` bring-up and one-shot `LOAD-PROFILE` | local SCP11 shell |
+| `SCP11/eim_local/` | eIM-local package generation, localized polling, hotfolder queues, and handover flows | eIM local shell |
+| `Tools/ProfilePackage/` | SAIP shell, transcode UI, lint engine, JSON↔DER bridge | profile-package shell + TUI |
+| `Tools/SuciTool/` | SUCI helper tooling | helper shell |
+| `pysim/` | Vendored upstream runtime dependency used by SAIP and SCP11 flows | library / vendored source |
 
-### 📂 ETSI / 3GPP File System
-* **Navigation:** Browse the file system (`SELECT`) by Path (e.g., `USIM/IMSI`) or FID.
-* **I/O Operations:** `READ` and `UPDATE` Transparent (Binary) and Linear Fixed (Record) EFs.
-* **FCP Analysis:** Detailed decoding of File Control Parameters (File Type, Size, Access Conditions).
-* **Tree Scan:** Recursively scan and map the file system.
+## Core capabilities
 
-### 🔐 Security & Auth
-* **PIN Management:** Verify, Change, Disable, Enable, and Unblock PINs.
-* **Network Auth:** Execute Authentication algorithms (Milenage) for GSM (2G), USIM (3G/4G), and ISIM contexts.
+- PC/SC-based GlobalPlatform and UICC/eUICC administration through `SCP03`.
+- OTA packet generation, wrapping, transport, and decode through `SCP80`.
+- Split SCP11 relay environments for live and test work, with `SCP11/relay`
+  retained as the compatibility namespace.
+- Direct local SCP11 provisioning and metadata handling through `SCP11/local_access`.
+- eIM-centric local package work, localized polling, hotfolder campaigns, and response tracking through `SCP11/eim_local`.
+- SAIP / UPP profile inspection, linting, JSON↔DER transcode, and shell automation through `Tools/ProfilePackage`.
+- Centralized mutable state in SQLite, with optional `gpg`-based encryption for sensitive payloads.
 
----
+## Quick start
 
-## 🛠️ Installation
+### Prerequisites
 
-1.  **Prerequisites:**
-    * Python 3.8+
-    * A PC/SC compatible Smart Card Reader.
+- Python 3.10+
+- A PC/SC-compatible smart-card reader for card flows
+- Optional: `gpg` when encrypted SQLite inventory payloads are enabled
 
-2.  **Install Dependencies:**
-    ```bash
-    pip install -r requirements.txt
-    ```
-    *(Note: Primarily requires `pyscard`, `cryptography`, `click`, `requests`)*
-
-## ⚡ Usage
-
-Run the interactive shell:
+### Install Python dependencies
 
 ```bash
-python SCP03/main.py
+pip install -r requirements.txt
 ```
 
-### 🎮 The Interactive Shell
-YggdraSIM features a persistent shell with **tab completion** and **command history**.
+### Launch the main menu
 
-**Example Session:**
+```bash
+python main/main.py
+```
+
+### Direct module entry points
+
+```bash
+python -m SCP03
+python -m SCP80
+python -m SCP11
+python -m SCP11.live
+python -m SCP11.test
+python -m SCP11.relay
+python -m SCP11.local_access
+python -m SCP11.eim_local
+python -m Tools.ProfilePackage
+python -m Tools.SuciTool
+```
+
+## Persistent state and security model
+
+YggdraSIM now uses `state/device_inventory.sqlite3` as the primary mutable state store for:
+
+- per-card `ICCID` inventory payloads
+- per-card `EID` inventory payloads
+- per-eIM identity counters and runtime markers
+- module-level mutable settings such as the migrated `SCP03` and `SCP80` runtime state
+
+Current migration model:
+
+- `SCP03/keys.ini` is a legacy import source. Live SCP03 state is now SQLite-primary.
+- `SCP80/ota_config.ini` is a legacy import source. Live SCP80 state is now SQLite-primary.
+- `SCP11/eim_local/eim_runtime_state.json` is a legacy import source. Live runtime state is now SQLite-primary.
+- `SCP03/aid.txt`, `SCP03/fids.txt`, and `SCP03/binds.json` remain plain files because they are still better suited to manual editing and diff review.
+
+Optional encryption:
+
+- `state/inventory_crypto.json` controls SQLite payload encryption.
+- Default is `enabled: false` to keep onboarding friction low.
+- When enabled, inventory and module-state payloads are encrypted on write and decrypted only on demand.
+- Current provider is `gpg` via the system binary and agent/keyring model.
+
+Frozen executable runtime model:
+
+- source runs continue to use the repository tree directly
+- frozen builds spawn a writable runtime tree under `YggdraSIM-data` next to
+  the executable when possible
+- if that location is not writable, the runtime tree falls back to
+  `~/YggdraSIM-data`
+- set `YGGDRASIM_RUNTIME_ROOT` to force a specific runtime root
+- user-editable certs, keys, package templates, hotfolders, caches, and state
+  are read from that writable runtime tree in frozen mode
+- `plugins/` is scanned at launch from the writable runtime root so optional
+  capabilities can be dropped in after publication without rebuilding the core
+
+## Optional plugins
+
+YggdraSIM supports runtime plugins through `plugins/`.
+
+- the loader scans `plugins/` at launch and registers plugin-provided
+  capabilities
+- the folder is intended for optional or restricted features that should not be
+  shipped in the published core
+- plugin implementation files are ignored by default; keep the loader contract
+  and drop local plugins into `plugins/` when needed
+- see `plugins/README.md` for the expected `register_plugins(manager)` entry
+  point
+
+## Typical operator paths
+
+### SCP03 admin shell
+
+Use `SCP03` for:
+
+- GlobalPlatform authentication and registry operations
+- ETSI / 3GPP filesystem navigation
+- GSMA retrieval and local profile-state work
+- report/export generation
+
+Example:
+
 ```text
-[APDU] > AUTH-SD              # Authenticate via SCP03
-[A0...00] > APPS              # List installed applets
-[A0...00] > LIST              # List eSIM profiles (SGP.22)
-[A0...00] > GET-IOT           # Deep scan of IoT eUICC settings
-[A0...00] > SELECT USIM/IMSI  # Select IMSI file
-[A0...00] > READ              # Read binary content
+[APDU] > AUTH-SD
+[A0...00] > APPS
+[A0...00] > LIST
+[A0...00] > SELECT USIM/IMSI
+[A0...00] > READ
 ```
 
-### 📜 Scripting & Reporting
-You can automate tasks using script files and export results to YAML.
+### SCP80 OTA shell
 
-```bash
-[APDU] > RUN scripts/setup_card.txt output_report.yaml
-```
-* **Input:** A text file with one command per line.
-* **Output:** A structured YAML file containing the command execution log and decoded outputs.
+Use `SCP80` for:
 
-**Non-interactive CLI (one-shot commands):**
-```bash
-python main/main.py --scp03 --cmd "AUTH-SD; LIST; GET-IOT" --out report.yaml
-python SCP03/main.py --cmd "AUTH-SD; APPS" --out report.yaml
-```
+- OTA payload wrapping
+- secured packet field tuning
+- direct reader-mode or print-only flows
+- `ICCID`-specific OTA state reuse through the shared inventory
 
-**Single-command eUICC report:**
-```bash
-[APDU] > EXPORT-EUICC euicc_report.yaml
-```
-Writes profiles, EuiccInfo1/2, EuiccConfiguredData, CPLC, and key info to a YAML file.
+### SCP11 relay shells
 
----
+Use `SCP11/live` or `SCP11/test` for:
 
-## ⚙️ Configuration
+- `LPAd`: `DOWNLOAD-PROFILE <activation>`
+- `IPAd`: `DISCOVER`, `DOWNLOAD [matchingId]`
+- `IPAe` polling / compatibility work in relay mode
 
-### Standalone Executable vs Source Source Code
-When running YggdraSIM from the source code, configuration files are read from and saved to their respective module directories (e.g. `SCP03/keys.ini`, `SCP03/aid.txt`, `SCP80/ota_config.ini`).
+Example:
 
-When using the compiled single-file executable (built with PyInstaller), the configuration files are located in the **same directory as the executable**. If you are running the executable for the first time, it will automatically extract the default configuration files (such as `aid.txt`, `fids.txt`, and certificates) into the directory where the executable is located, allowing you to modify them easily.
-
-### Keys (`keys.ini`)
-To perform authenticated GlobalPlatform operations (`AUTH-SD`), you must define your keys in `keys.ini` (located in `SCP03/keys.ini` or next to the executable). If the file does not exist, the tool will create a default one.
-
-```ini
-[KEYS]
-# Static Keys (Hex)
-kenc = 404142434445464748494A4B4C4D4E4F
-kmac = 404142434445464748494A4B4C4D4E4F
-dek  = 404142434445464748494A4B4C4D4E4F
-# Key Version Number (usually 0x20 or 0x30)
-kvn  = 20
-```
-
-### AID Registry (`aid.txt`)
-Map AIDs to friendly names for easier navigation. Located in `SCP03/aid.txt` or next to the executable.
 ```text
-ISD-R: A0000005591010FFFFFFFF8900000100
-ECASD: A0000005591010FFFFFFFF8900000200
+[eSIM Live] > HELP
+[eSIM Live] > DISCOVER
+[eSIM Live] > DOWNLOAD-PROFILE LPA:1$...
 ```
 
-### File Identifier (FID) Paths (`fids.txt`)
-Contains predefined File IDs mapping to textual paths for tree navigation. This file is copied to the executable directory on first run and can be modified.
+See:
 
-### Custom Macros/Keybinds (`binds.json`)
-Defines custom command aliases for the interactive shell. You can chain commands using semicolons (`;`) and pass arguments using `{0}`, `{1}`. Located in `SCP03/binds.json` or next to the executable.
-```json
-{
-    "adm": "manage-pin verify 0a {0}",
-    "init": "auth-sd; select usim"
-}
+- `SCP11/README.md`
+- `SCP11/live/README.md`
+- `SCP11/test/README.md`
+
+### Local SMDPP
+
+Use `SCP11/local_access` for direct on-card local provisioning without the relay shells:
+
+```text
+[Local SMDPP] > STATUS
+[Local SMDPP] > PROFILE /path/to/profile.der
+[Local SMDPP] > METADATA /path/to/metadata.json
+[Local SMDPP] > LOAD-PROFILE
 ```
 
-### SCP11 Certificates
-Certificates used by the SCP11 module (`CERT.DPauth.ECDSA.der`, `SK.DPauth.ECDSA.pem`, etc.) are also copied alongside the executable. They can be modified by replacing them with your own certificates of the same name.
+This path now restores per-card local choices by `EID` from the shared SQLite inventory.
 
----
+### Local eIM
 
-## 📂 Project Structure
+Use `SCP11/eim_local` when you need:
 
-* **`SCP03/`**: Core logic for GlobalPlatform, SGP.22, and the interactive shell.
-    * `logic/`: Business logic for GP, FS, Security, and eSIM (SGP.22).
-    * `interface/`: Shell dispatcher and CLI handling.
-    * `transport/`: PC/SC card abstraction.
-* **`SCP80/`**: OTA/SMS secure channel tools.
+- eIM identity and package fixtures
+- local handover simulation
+- hotfolder and poll campaign exercises
+- AddInitialEim / AddEim command generation
+- eIM response logs and counter control
 
-**CAP / Load File Install:** Full CAP install from file is supported: WIZARD option 8 builds the APDU sequence (dry run); for live install, `gp.install_cap_file()` in `SCP03/logic/gp.py` implements INSTALL [for load], LOAD (chunked), and INSTALL [for install]. No further change needed unless you need different CAP formats or OTA-specific chunking.
+See:
 
----
+- `SCP11/eim_local/README.md`
+- `SCP11/eim_local/GUIDE.md`
 
-## ⚖️ License
-[MIT License](LICENSE) - Free to use and modify.
+### Profile package tooling
+
+Use `Tools/ProfilePackage` for:
+
+- SAIP shell operations
+- JSON↔DER transcode
+- linting and package inspection
+- `saip-tool` bridge work
+
+The transcode UI now uses a configurable transcode output directory and stores the setting in the workspace.
+
+## Documentation map
+
+- `CAPABILITIES.md` - suite-level capability reference grouped by subsystem and workflow
+- `ARCHITECTURE.md` - system structure, interdependency matrix, state model, and flow charts
+- `NOTICE` - standards and third-party notice
+- `AUTHORS` - project attribution
+- `SCP11/README.md` - eSIM module selection and guide map
+- `SCP11/live/README.md` - live relay operator guide
+- `SCP11/test/README.md` - test relay operator guide
+- `SCP11/local_access/README.md` - local SCP11 shell guide
+- `SCP11/eim_local/README.md` - eIM module overview
+- `SCP11/eim_local/GUIDE.md` - detailed eIM operational guide
+- `SCP11/relay/README.md` - relay compatibility namespace note
+- `SCP11/shared/README.md` - shared SCP11 helper layer
+- `plugins/README.md` - runtime plugin contract and publication-ignore model
+
+## Repository layout
+
+- `main/` - top-level launcher
+- `yggdrasim_common/registry.py` - discoverable map of subsystems, entry points, and stable symbols
+- `SCP03/` - admin shell, transport, controllers, decoders, reports
+- `SCP80/` - OTA CLI, builder, transport, decode helpers
+- `SCP11/` - relay, local, shared, and eIM-related flows
+- `Tools/ProfilePackage/` - SAIP shell, linter, transcode UI
+- `Tools/SuciTool/` - SUCI helper shell
+- `tests/` - first-party test suite
+- `state/` - shared SQLite inventory and crypto bootstrap config
+- `pysim/` - vendored upstream pySim source used by several subsystems
+
+## Acknowledgements
+
+A big-hearted thank you to the Osmocom community, the `pySim` maintainers and
+contributors, and Martin Paljak for `GlobalPlatformPro`. Their published
+tooling, interoperability references, and operator-focused ergonomics have
+materially improved the card, relay, and profile-package workflows that
+YggdraSIM builds on.
+
+## Scope notes
+
+- `SCP03` is not a generic SCP11 provisioning shell. It is the admin / filesystem / retrieval environment.
+- `SCP11/live` and `SCP11/test` are the primary relay-facing shells.
+- historical `SCP11/experimental` references are obsolete; relay work is now
+  split between `SCP11/live`, `SCP11/test`, and the compatibility namespace
+  `SCP11/relay`.
+- `SCP11/local_access` is the direct local SCP11 path against `ISD-R`.
+- `SCP11/eim_local` is the dedicated eIM-local package, polling, and handover shell.
+- Compatibility helpers remain where card policy, certificate trust, or transport behavior can differ across eUICCs.
+
+## License and notice
+
+- License: [GNU GPL v3.0](LICENSE)
+- Notice: [NOTICE](NOTICE)

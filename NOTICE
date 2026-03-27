@@ -1,14 +1,39 @@
 YggdraSIM
-Copyright 2026 Hampus Hellsberg
+Copyright 2026 Hampus Hellsberg and contributors.
 
-This product includes software developed by Hampus Hellsberg.
+Project attribution:
+- Hampus Hellsberg - Creator, Lead Architect, Lead Maintainer
 
-Standard Compliance Notice:
-This software implements portions of specifications defined by the 
-GSMA (SGP.22, SGP.32), ETSI (TS 102 221), and GlobalPlatform. 
-Attribution to these bodies is for technical descriptive purposes only 
-and does not imply endorsement.
+Standards notice:
+YggdraSIM implements, tests against, or models portions of specifications and
+technical material published by GSMA, GlobalPlatform, ETSI, 3GPP, and ISO/IEC.
+References to SGP.02, SGP.22, SGP.32, ETSI TS 102 221, GlobalPlatform Card
+Specification, and ISO 7816 are technical references only. They do not imply
+endorsement, certification, partnership, or approval by the originating bodies.
 
-External Credits:
-- Original implementation of YggdraSIM
-  by Hampus Hellsberg.
+Third-party notice:
+This repository includes or depends on third-party software components,
+including but not limited to:
+- `pysim/`, which is kept as a vendored runtime dependency for several flows
+- Python packages listed in `requirements.txt`
+- Optional external system tooling such as `gpg` when encrypted inventory
+  payloads are enabled
+
+Acknowledgements:
+With a big-hearted thank you to the Osmocom community, the `pySim`
+maintainers and contributors, and Martin Paljak for `GlobalPlatformPro`.
+Their published tooling and operator references have been valuable for
+interoperability validation, package inspection, and practical day-to-day
+card work.
+
+Repository notice:
+- `SCP03`, `SCP80`, `SCP11`, `Tools/ProfilePackage`, and `Tools/SuciTool` are
+  operator-facing subsystems within the same repository and share selected
+  helpers and state stores
+- mutable runtime state may be stored in `state/device_inventory.sqlite3`
+- optional encryption for stored payloads is controlled by
+  `state/inventory_crypto.json`
+
+License notice:
+This project is distributed under the GNU General Public License v3.0 or, at
+your option, any later version. See `LICENSE` for the full text.

@@ -1,9 +1,18 @@
 # -----------------------------------------------------------------------------
-# This Source Code Form is subject to the terms of the Mozilla Public
-# License, v. 2.0. If a copy of the MPL was not distributed with this
-# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
 #
-# Copyright (c) 2026 Hampus Hellsberg
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program. If not, see <https://www.gnu.org/licenses/>.
+#
+# Copyright (c) 2026 Hampus Hellsberg and contributors
 # -----------------------------------------------------------------------------
 
 from typing import List ,Dict ,Any ,Union 
@@ -72,58 +81,69 @@ class TlvParser :
         parsed [tag_val ]=[current ,value ]
 
     @staticmethod 
-    def parse (data :bytes )->Dict [int ,Any ]:
+    def parse_detailed (data :bytes )->Dict [str ,Any ]:
         i ,parsed =0 ,{}
         while i <len (data ):
-            if i >=len (data ):break 
-
+            item_offset =i 
+            if i >=len (data ):
+                break 
 
             tag_val =data [i ]
             i +=1 
 
-
             if (tag_val &0x1F )==0x1F :
                 tag_val =tag_val <<8 
+                saw_terminal =False 
                 while i <len (data ):
                     next_byte =data [i ]
                     tag_val |=next_byte 
                     i +=1 
-
                     if not (next_byte &0x80 ):
+                        saw_terminal =True 
                         break 
                     tag_val =tag_val <<8 
+                if saw_terminal ==False :
+                    return {"parsed":parsed ,"consumed":item_offset ,"complete":False ,"error":"Truncated multi-byte tag."}
 
-            if i >=len (data ):break 
-
+            if i >=len (data ):
+                return {"parsed":parsed ,"consumed":item_offset ,"complete":False ,"error":"Missing TLV length field."}
 
             length =data [i ]
             i +=1 
 
             if length &0x80 :
                 n_bytes =length &0x7F 
-                if i +n_bytes >len (data ):break 
+                if n_bytes ==0 :
+                    return {"parsed":parsed ,"consumed":item_offset ,"complete":False ,"error":"Indefinite BER length is not supported."}
+                if i +n_bytes >len (data ):
+                    return {"parsed":parsed ,"consumed":item_offset ,"complete":False ,"error":"Truncated BER length field."}
                 length =int .from_bytes (data [i :i +n_bytes ],'big')
                 i +=n_bytes 
 
-            if i +length >len (data ):break 
+            if i +length >len (data ):
+                return {"parsed":parsed ,"consumed":item_offset ,"complete":False ,"error":"TLV value overruns input buffer."}
             val =data [i :i +length ]
             i +=length 
-
-
-
 
             first_tag_byte =tag_val 
             while first_tag_byte >0xFF :
                 first_tag_byte >>=8 
 
             if first_tag_byte &0x20 :
-
-                TlvParser ._store_tag (parsed ,tag_val ,TlvParser .parse (val ))
+                nested_info =TlvParser .parse_detailed (val )
+                nested =nested_info ["parsed"]
+                if nested_info ["complete"]and nested_info ["consumed"]==len (val ):
+                    TlvParser ._store_tag (parsed ,tag_val ,nested )
+                else :
+                    TlvParser ._store_tag (parsed ,tag_val ,val )
             else :
-
                 TlvParser ._store_tag (parsed ,tag_val ,val )
 
-        return parsed 
+        return {"parsed":parsed ,"consumed":i ,"complete":True ,"error":None }
+
+    @staticmethod 
+    def parse (data :bytes )->Dict [int ,Any ]:
+        return TlvParser .parse_detailed (data )["parsed"]
 
 class StatusWordTranslator :
     """Translates ISO 7816-4 and GlobalPlatform Status Words into human-readable strings."""

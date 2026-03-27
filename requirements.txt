@@ -1,6 +1,21 @@
+# Core smart-card and cryptographic runtime
 pyscard
 cryptography
 pycryptodome
+
+# ASN.1, schema, and profile-package handling
 asn1crypto
+asn1tools
+pySim
 pyyaml
+
+# Interactive tooling and local packaging
+textual>=0.47.0
 pyinstaller
+
+# Test tooling
+pytest
+
+# External system tools used by selected features are not installed here.
+# Example: `gpg` is optional and only required when encrypted inventory
+# payloads are enabled through `state/inventory_crypto.json`.

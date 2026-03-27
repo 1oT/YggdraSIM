@@ -1,6 +1,8 @@
 import unittest
 import importlib.util
 import sys
+import io
+import contextlib
 from pathlib import Path
 
 CONSOLE_PATH = Path(__file__).resolve().parent.parent / "SCP11" / "console.py"
@@ -27,13 +29,46 @@ def tlv(tag: bytes, value: bytes) -> bytes:
 
 class DummyCfg:
     RSP_SERVER_URL = "rsp.default.example"
+    ES9_BASE_URL = "https://rsp.default.example"
+    ES9_VERIFY_TLS = True
+    ES9_CA_BUNDLE_PATH = ""
+
+
+class DummyApduChannel:
+    def __init__(self):
+        self.send_calls = []
+        self.response = bytes.fromhex("BF3203800100")
+        self.configured_data_response = tlv(
+            bytes.fromhex("BF3C"),
+            tlv(bytes.fromhex("80"), b"rsp.default.example"),
+        )
+
+    def send(self, apdu: bytes, log_name: str) -> bytes:
+        self.send_calls.append((log_name, apdu))
+        if log_name == "GET: EuiccConfiguredData":
+            return self.configured_data_response
+        if log_name == "SET: Default SM-DP+ Address":
+            return bytes.fromhex("BF3F03800100")
+        return self.response
+
+
+class DummyOrchestrator:
+    def __init__(self):
+        self.sync_calls = []
+        self.eim_poll_calls = []
+
+    def _sync_pending_notifications(self, response: bytes = b"") -> None:
+        self.sync_calls.append(response)
+
+    def run_eim_poll(self, matching_id: str = "", entry_index: int = 0) -> None:
+        self.eim_poll_calls.append((matching_id, entry_index))
 
 
 class DummyClient:
     def __init__(self):
         self.cfg = DummyCfg()
-        self.apdu_channel = None
-        self.orchestrator = None
+        self.apdu_channel = DummyApduChannel()
+        self.orchestrator = DummyOrchestrator()
 
 
 class SCP11ConsoleStatusDecodeTests(unittest.TestCase):
@@ -78,6 +113,32 @@ class SCP11ConsoleStatusDecodeTests(unittest.TestCase):
         decoded = self.console._decode_euicc_configured_data(inner)
         self.assertEqual(decoded["default_smdp"], "rsp.inner.example")
 
+    def test_print_euicc_info2_compact_uses_sgp32_field_mapping(self):
+        response = bytes.fromhex(
+            "BF228192810302030182030206008303260116840D81010882040002EC08830224"
+            "DF8505007FB6F3C1860311020087030203008802029CA916041481370F5125D0B1D4"
+            "08D4C3B232E6D25E795BEBFBAA16041481370F5125D0B1D408D4C3B232E6D25E795BEBFB"
+            "990206400403FFFFFF0C0D4B4E2D444E2D55502D30333237AF050403030301900101"
+            "B40BA005040301020081008200"
+        )
+
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            self.console._print_euicc_info2_compact(response)
+
+        rendered = output.getvalue()
+
+        self.assertIn("Forbidden Profile Policy Rules", rendered)
+        self.assertIn("PP Version", rendered)
+        self.assertIn("v255.255.255 (FFFFFF)", rendered)
+        self.assertIn("IPA Mode", rendered)
+        self.assertIn("ipae (IPAe is active)", rendered)
+        self.assertIn("IoT Specific Info", rendered)
+        self.assertIn("eCall Supported", rendered)
+        self.assertIn("SGP.32 Validation", rendered)
+        self.assertNotIn("PP Rules", rendered)
+        self.assertNotIn("eUICC Category       : v2.3.0", rendered)
+
     def test_build_enable_profile_payload_matches_expected_shape(self):
         payload = self.console._build_profile_command_payload(
             func_tag=self.console.TAG_ENABLE_PROFILE,
@@ -85,6 +146,14 @@ class SCP11ConsoleStatusDecodeTests(unittest.TestCase):
             value_hex="981032547698103254F6",
         )
         self.assertEqual(payload.hex().upper(), "BF3111A00C5A0A981032547698103254F6810100")
+
+    def test_build_delete_profile_payload_matches_expected_shape(self):
+        payload = self.console._build_profile_command_payload(
+            func_tag=self.console.TAG_DELETE_PROFILE,
+            tag_type=self.console.TAG_AID,
+            value_hex="A0000005591010FFFFFFFF8900001100",
+        )
+        self.assertEqual(payload.hex().upper(), "BF33124F10A0000005591010FFFFFFFF8900001100")
 
     def test_build_remove_notification_payload(self):
         payload = self.console._build_remove_notification_payload(7)
@@ -97,6 +166,152 @@ class SCP11ConsoleStatusDecodeTests(unittest.TestCase):
     def test_resolve_profile_target_by_alias(self):
         resolved = self.console._resolve_profile_target("isdp1")
         self.assertEqual(resolved, (self.console.TAG_AID, "A0000005591010FFFFFFFF8900001000"))
+
+    def test_enable_profile_auto_disables_current_enabled_profile(self):
+        profiles = [
+            console_module.ProfileMetadataView(
+                iccid="8901000000000000001",
+                aid="A0000005591010FFFFFFFF8900001000",
+                state="ENABLED",
+                profile_class="OPER",
+                nickname="Primary",
+                service_provider="",
+                profile_name="",
+                profile_policy_rules_hex="",
+            ),
+            console_module.ProfileMetadataView(
+                iccid="8901000000000000002",
+                aid="A0000005591010FFFFFFFF8900001100",
+                state="DISABLED",
+                profile_class="OPER",
+                nickname="Secondary",
+                service_provider="",
+                profile_name="",
+                profile_policy_rules_hex="",
+            ),
+        ]
+        executed = []
+        self.console._collect_profile_metadata = lambda: profiles
+        self.console._execute_profile_state_command = lambda resolved, func_tag, action_label: executed.append(
+            (resolved, func_tag, action_label)
+        ) or True
+
+        self.console._run_profile_state_command(
+            identifier="8901000000000000002",
+            func_tag=self.console.TAG_ENABLE_PROFILE,
+            action_label="EnableProfile",
+            command_name="ENABLE-PROFILE",
+        )
+
+        self.assertEqual(
+            executed,
+            [
+                ((self.console.TAG_AID, "A0000005591010FFFFFFFF8900001000"), self.console.TAG_DISABLE_PROFILE, "DisableProfile"),
+                ((self.console.TAG_ICCID, "981000000000000000F2"), self.console.TAG_ENABLE_PROFILE, "EnableProfile"),
+            ],
+        )
+
+    def test_disable_profile_noops_when_target_already_disabled(self):
+        profiles = [
+            console_module.ProfileMetadataView(
+                iccid="8901000000000000002",
+                aid="A0000005591010FFFFFFFF8900001100",
+                state="DISABLED",
+                profile_class="OPER",
+                nickname="Secondary",
+                service_provider="",
+                profile_name="",
+                profile_policy_rules_hex="",
+            ),
+        ]
+        executed = []
+        self.console._collect_profile_metadata = lambda: profiles
+        self.console._execute_profile_state_command = lambda resolved, func_tag, action_label: executed.append(
+            (resolved, func_tag, action_label)
+        ) or True
+
+        self.console._run_profile_state_command(
+            identifier="8901000000000000002",
+            func_tag=self.console.TAG_DISABLE_PROFILE,
+            action_label="DisableProfile",
+            command_name="DISABLE-PROFILE",
+        )
+
+        self.assertEqual(executed, [])
+
+    def test_delete_enabled_profile_auto_switches_before_delete(self):
+        profiles = [
+            console_module.ProfileMetadataView(
+                iccid="8901000000000000001",
+                aid="A0000005591010FFFFFFFF8900001000",
+                state="ENABLED",
+                profile_class="OPER",
+                nickname="Primary",
+                service_provider="",
+                profile_name="",
+                profile_policy_rules_hex="",
+            ),
+            console_module.ProfileMetadataView(
+                iccid="8901000000000000002",
+                aid="A0000005591010FFFFFFFF8900001100",
+                state="DISABLED",
+                profile_class="OPER",
+                nickname="Secondary",
+                service_provider="",
+                profile_name="",
+                profile_policy_rules_hex="",
+            ),
+        ]
+        executed = []
+        self.console._collect_profile_metadata = lambda: profiles
+        self.console._execute_profile_state_command = lambda resolved, func_tag, action_label: executed.append(
+            (resolved, func_tag, action_label)
+        ) or True
+
+        self.console._run_profile_state_command(
+            identifier="8901000000000000001",
+            func_tag=self.console.TAG_DELETE_PROFILE,
+            action_label="DeleteProfile",
+            command_name="DELETE-PROFILE",
+        )
+
+        self.assertEqual(
+            executed,
+            [
+                ((self.console.TAG_AID, "A0000005591010FFFFFFFF8900001000"), self.console.TAG_DISABLE_PROFILE, "DisableProfile"),
+                ((self.console.TAG_AID, "A0000005591010FFFFFFFF8900001100"), self.console.TAG_ENABLE_PROFILE, "EnableProfile"),
+                ((self.console.TAG_ICCID, "981000000000000000F1"), self.console.TAG_DELETE_PROFILE, "DeleteProfile"),
+            ],
+        )
+
+    def test_execute_result_command_syncs_notifications_on_success(self):
+        self.console._execute_result_command(
+            title="DisableProfile",
+            payload=bytes.fromhex("BF3200"),
+            result_outer_tag=self.console.TAG_DISABLE_PROFILE,
+        )
+
+        self.assertEqual(len(self.console.apdu_channel.send_calls), 1)
+        self.assertEqual(self.console.apdu_channel.send_calls[0][0], "CMD: DisableProfile")
+        self.assertEqual(
+            self.console.orchestrator.sync_calls,
+            [bytes.fromhex("BF3203800100")],
+        )
+
+    def test_set_smdp_address_uses_verified_card_value(self):
+        self.console.apdu_channel.configured_data_response = tlv(
+            bytes.fromhex("BF3C"),
+            tlv(bytes.fromhex("80"), b"smdpplus2.esim.tst.1ot.mobi"),
+        )
+
+        self.console._set_smdp_address("smdpplus2.esim.tst.1ot")
+
+        self.assertEqual(self.console.current_smdp_address, "smdpplus2.esim.tst.1ot.mobi")
+
+    def test_eim_download_routes_into_orchestrator_flow(self):
+        self.console._cmd_eim_download("MATCH-55")
+
+        self.assertEqual(self.console.orchestrator.eim_poll_calls, [("MATCH-55", 0)])
 
 
 if __name__ == "__main__":

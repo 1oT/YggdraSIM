@@ -1,4 +1,4 @@
-#!/mnt/usb_storage/YggdraSIM/.venv/bin/python
+#!/home/hampushellsberg/Downloads/YggdraSIM/.venv/bin/python3
 # -*- coding: utf-8 -*-
 import re
 import sys

@@ -1,0 +1,79 @@
+{
+  "package_type": "add_initial_eim",
+  "package_version": "2.0.0",
+  "spec_target": "SGP.32 first-test ES10b.AddInitialEimRequest (BF57)",
+  "sgp32": {
+    "add_initial_eim_request": {
+      "include": true,
+      "command_tag_hex": "BF57",
+      "eim_configuration_data_list": [
+        {
+          "include": true,
+          "eim_id": {
+            "include": true,
+            "value": "2.25.311782205282738360923618091971140414400"
+          },
+          "eim_fqdn": {
+            "include": true,
+            "value": "yggdrasim.eim.test.1ot.com"
+          },
+          "eim_id_type": {
+            "include": true,
+            "value": "eimIdTypeOid"
+          },
+          "counter_value": {
+            "include": true,
+            "value": 0
+          },
+          "association_token": {
+            "include": true,
+            "value": -1
+          },
+          "eim_public_key_data": {
+            "include": true,
+            "choice": "eim_certificate",
+            "eim_certificate_der_path": "SCP11/eim_local/certs/eim/CERT_S_EIMsign_YGGDRASIM_ACCEPTED.der",
+            "eim_certificate_der_hex": "",
+            "eim_public_key_spki_hex": ""
+          },
+          "trusted_public_key_data_tls": {
+            "include": true,
+            "choice": "trusted_certificate_tls",
+            "trusted_certificate_der_path": "SCP11/eim_local/certs/eim/CERT_S_EIM_TLS_YGGDRASIM_NIST.der",
+            "trusted_certificate_der_hex": "",
+            "trusted_eim_pk_tls_spki_hex": ""
+          },
+          "eim_supported_protocol": {
+            "include": true,
+            "eimRetrieveHttps": true,
+            "eimRetrieveCoaps": false,
+            "eimInjectHttps": false,
+            "eimInjectCoaps": false,
+            "eimProprietary": false
+          },
+          "euicc_ci_pk_id": {
+            "include": true,
+            "value_hex": "F54172BDF98A95D65CBEB88A38A1C11D800A85C3"
+          },
+          "indirect_profile_download": {
+            "include": true
+          }
+        }
+      ]
+    }
+  },
+  "runtime": {
+    "matching_id": "EIM-FIRST-TEST",
+    "cert_der_path": "SCP11/eim_local/certs/eim/CERT_S_EIMsign_YGGDRASIM_ACCEPTED.der",
+    "smdp_address": "yggdrasim.smdpp.test.1ot.com",
+    "bip_endpoints": {
+      "eim": "https://yggdrasim.eim.test.1ot.com/gsma/rsp2/asn1",
+      "smdpp": "https://yggdrasim.smdpp.test.1ot.com/gsma/rsp2/es9plus"
+    }
+  },
+  "include_cert_tag": true,
+  "include_endpoint_tag": true,
+  "include_matching_id_tag": true,
+  "additional_tlvs": [],
+  "optional_tags": {}
+}

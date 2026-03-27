@@ -1,0 +1,17 @@
+
+# openssl EUM certificate creation configuration file
+
+
+authorityKeyIdentifier=keyid, issuer
+subjectKeyIdentifier=hash
+
+# Misaligment in SGP.26 v3.0.1 files (this value is correct and is updated in SGP.26v3.0.2 spec)
+keyUsage=critical, keyCertSign
+
+certificatePolicies=2.23.146.1.2.1.0.0.0.0   #OID id-rspRole-eum
+subjectAltName=RID:2.999.101
+basicConstraints=critical,CA:TRUE, pathlen:0
+crlDistributionPoints=URI:http://eum.test.example.com/CRL.crl
+
+
+          

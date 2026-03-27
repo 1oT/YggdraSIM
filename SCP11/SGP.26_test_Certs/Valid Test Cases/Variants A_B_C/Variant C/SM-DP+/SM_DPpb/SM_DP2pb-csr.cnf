@@ -1,0 +1,11 @@
+#openssl x509 extfile params
+extensions = extend
+# This prevent the user to be prompted for values
+prompt = no
+
+distinguished_name = dn-param
+[dn-param] # DN fields
+O = ACME
+CN = TEST SM-DP+2
+
+[extend] # openssl extensions

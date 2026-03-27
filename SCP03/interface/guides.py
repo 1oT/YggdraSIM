@@ -1,9 +1,18 @@
 # -----------------------------------------------------------------------------
-# This Source Code Form is subject to the terms of the Mozilla Public
-# License, v. 2.0. If a copy of the MPL was not distributed with this
-# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
 #
-# Copyright (c) 2026 Hampus Hellsberg
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program. If not, see <https://www.gnu.org/licenses/>.
+#
+# Copyright (c) 2026 Hampus Hellsberg and contributors
 # -----------------------------------------------------------------------------
 
 import os 
@@ -36,9 +45,12 @@ class ShellGuides :
                 print (f"  {Config.Colors.CYAN}5.{Config.Colors.ENDC} Cryptography & Security (SECURITY)")
                 print (f"  {Config.Colors.CYAN}6.{Config.Colors.ENDC} SCP80 / OTA Remote Management (OTA)")
                 print (f"  {Config.Colors.CYAN}7.{Config.Colors.ENDC} Configuration Files & Persistence (CONFIG)")
+                print (f"  {Config.Colors.CYAN}8.{Config.Colors.ENDC} SAIP Tool Workflows (SAIP)")
+                print (f"  {Config.Colors.CYAN}9.{Config.Colors.ENDC} SUCI Key Tool Workflows (SUCI)")
+                print (f"  {Config.Colors.CYAN}10.{Config.Colors.ENDC} CLI Entry Points & Piping (CLI)")
                 print (f"  {Config.Colors.CYAN}q.{Config.Colors.ENDC} Return to Shell")
 
-                choice =input (f"\nChoice [1-7, q]: ").strip ().lower ()
+                choice =input (f"\nChoice [1-10, q]: ").strip ().lower ()
                 if choice =='q':
                     break 
                 elif choice =='exit':
@@ -57,6 +69,12 @@ class ShellGuides :
                     current_topic ='OTA'
                 elif choice =='7':
                     current_topic ='CONFIG'
+                elif choice =='8':
+                    current_topic ='SAIP'
+                elif choice =='9':
+                    current_topic ='SUCI'
+                elif choice =='10':
+                    current_topic ='CLI'
                 else :
                     print (f"{Config.Colors.FAIL}[!] Invalid choice.{Config.Colors.ENDC}")
                     input (f"\n{Config.Colors.CYAN}[Press Enter to continue]{Config.Colors.ENDC}")
@@ -78,6 +96,12 @@ class ShellGuides :
                 cls ._print_ota_guide ()
             elif current_topic =='CONFIG':
                 cls ._print_config_guide ()
+            elif current_topic =='SAIP':
+                cls ._print_saip_guide ()
+            elif current_topic =='SUCI':
+                cls ._print_suci_guide ()
+            elif current_topic =='CLI':
+                cls ._print_cli_guide ()
             else :
                 print (f"{Config.Colors.FAIL}[!] Unknown guide topic: {current_topic}{Config.Colors.ENDC}")
                 break 
@@ -197,7 +221,7 @@ class ShellGuides :
 {Config.Colors.HEADER}=== GSMA eSIM & eUICC Provisioning Guide ==={Config.Colors.ENDC}
 {Config.Colors.BOLD}Standard:{Config.Colors.ENDC} {cls._link("GSMA SGP.22 / SGP.02 / SGP.32", main_url)}
 
-{Config.Colors.WARNING}Scope (this tool):{Config.Colors.ENDC} Retrieval + local profile state operations only. We do NOT authenticate to ISD-R for provisioning (that is planned for the SCP11 module). Supported: LIST, Enable/Disable/Delete profile, GET DATA, GetProfilesInfo, GetRAT, RetrieveNotificationsList, GetEimConfigurationData (SGP.32), EuiccInfo1/2, EuiccConfiguredData. NOT supported: StoreMetadata, UpdateMetadata, LoadProfile, PrepareDownload, LoadBoundProfilePackage, AuthenticateServer, or any ES10b provisioning flow. Some of these commands are experimental and have not been fully tested on all card types.
+{Config.Colors.WARNING}Scope split:{Config.Colors.ENDC} `SCP03` handles retrieval, local profile state, GP access, and read-only eUICC analysis. SCP11 provisioning is no longer a future placeholder: it now lives in the dedicated `SCP11/live`, `SCP11/test`, and `SCP11/local_access` modules. `SCP03` therefore supports LIST, Enable/Disable/Delete profile, GetProfilesInfo, GetRAT, RetrieveNotificationsList, GetEimConfigurationData, EuiccInfo1/2, EuiccConfiguredData, EID, and related read paths, but not SCP11 provisioning steps such as AuthenticateServer, PrepareDownload, LoadBoundProfilePackage, or relay-side metadata writes.
 
 {Config.Colors.CYAN}1. Consumer eUICC Architecture (SGP.22){Config.Colors.ENDC}
    Profiles are downloaded and managed via the Local Profile Assistant (LPA) over the ES10c interface (APDU to ISD-R).
@@ -211,12 +235,12 @@ class ShellGuides :
    - {Config.Colors.BOLD}EnableProfile (BF 31):{Config.Colors.ENDC} `80 E2 91 00 <Lc> BF 31 <Len> [A0 | A1 <ICCID>]`. Enables the Profile. Only one Enabled at a time unless MEP.
    - {Config.Colors.BOLD}DisableProfile (BF 32):{Config.Colors.ENDC} `80 E2 91 00 <Lc> BF 32 <Len> [A0 | A1 <ICCID>]`. Disables the current or specified Profile.
    - {Config.Colors.BOLD}DeleteProfile (BF 33):{Config.Colors.ENDC} `80 E2 91 00 <Lc> BF 33 <Len> [A0 | A1 <ICCID>]`. Permanently deletes the ISD-P and Profile.
-   - {Config.Colors.YELLOW}SW 91 xx:{Config.Colors.ENDC} Proactive command pending; terminal should perform REFRESH (01) so EF-DIR and network state are updated.
+   - {Config.Colors.YELLOW}Card access fallback:{Config.Colors.ENDC} On strict cards, YggdraSIM now retries local STORE DATA reads in three passes: base channel, logical channel 1 after reset, then STK mode after another reset. This is now the normal read path for `LIST`, EID, EuiccConfiguredData, and related retrievals.
 
 {Config.Colors.CYAN}3. eUICC Information (ES10b/ES10c){Config.Colors.ENDC}
    - {Config.Colors.BOLD}EuiccInfo1 (BF 20):{Config.Colors.ENDC} `80 E2 91 00 03 BF 20 00`. Returns eUICC firmware version (e.g. SVN).
    - {Config.Colors.BOLD}EuiccInfo2 (BF 22):{Config.Colors.ENDC} `80 E2 91 00 03 BF 22 00`. Returns capabilities (ExtExtCardResource, supported crypto, default SM-DP+ address list).
-   - {Config.Colors.BOLD}EID:{Config.Colors.ENDC} Retrieved via GET DATA (00 CA 00 5A 00) from ECASD context or from EuiccInfo2; 20-byte BCD EID.
+   - {Config.Colors.BOLD}EID:{Config.Colors.ENDC} In practice the tool first tries direct `BF3E00` retrieval and only falls back to tagged forms when needed, because many cards expose EID more reliably through ES10 retrieval than classic GET DATA.
 
 {Config.Colors.CYAN}4. SGP.32 IoT retrieval (ES10b, no auth){Config.Colors.ENDC}
    - {Config.Colors.BOLD}GetRAT (BF 43):{Config.Colors.ENDC} Rules Authorisation Table. Use MANAGE-PROFILE action 6.
@@ -225,7 +249,7 @@ class ShellGuides :
 
 {Config.Colors.CYAN}5. SGP Retrieval Matrix (Wizard Mapping){Config.Colors.ENDC}
    - {Config.Colors.BOLD}Action 1 - List:{Config.Colors.ENDC} ES10c.GetProfilesInfo / ES10b.GetProfilesInfo. Spec: SGP.22 5.7.15, SGP.32 5.9.14. Request tag `BF2D` (`80 E2 91 00 03 BF 2D 00`).
-   - {Config.Colors.BOLD}Action 2 - Scan:{Config.Colors.ENDC} Composite retrieval sequence (EuiccInfo1/2, EuiccConfiguredData, key/domain data, EID). Uses ES10 retrieval APDUs and GET DATA in read-only mode.
+   - {Config.Colors.BOLD}Action 2 - Scan:{Config.Colors.ENDC} Composite retrieval sequence (EuiccInfo1/2, EuiccConfiguredData, key/domain data, EID). The scan now uses the same retry ladder as individual reads instead of assuming one fixed ISD-R access path.
    - {Config.Colors.BOLD}Action 3/4/5 - Enable/Disable/Delete:{Config.Colors.ENDC} Local profile state operations via ES10c profile management tags `BF31/BF32/BF33`.
    - {Config.Colors.BOLD}Action 6 - GetRAT:{Config.Colors.ENDC} ES10b.GetRAT. Spec: SGP.22 5.7.22 / SGP.32 5.9.13. Request tag `BF43`.
    - {Config.Colors.BOLD}Action 7 - GetNotifications:{Config.Colors.ENDC} ES10b.RetrieveNotificationsList. Spec: SGP.22 5.7.10 / SGP.32 5.9.11. Request tag `BF2B`.
@@ -302,7 +326,7 @@ class ShellGuides :
 
 {Config.Colors.CYAN}1. Config Directory (CONFIG_DIR){Config.Colors.ENDC}
    - {Config.Colors.BOLD}Source (Python):{Config.Colors.ENDC} Config files are read/written under the module directory (e.g. SCP03/keys.ini, SCP03/aid.txt, SCP03/fids.txt, SCP03/binds.json). SCP80 uses SCP80/ota_config.ini.
-   - {Config.Colors.BOLD}Frozen executable:{Config.Colors.ENDC} CONFIG_DIR = directory of the executable. All config files are read from and saved to that directory so changes persist. Default fids.txt, aid.txt, binds.json are copied there on first run if missing.
+   - {Config.Colors.BOLD}Frozen executable:{Config.Colors.ENDC} Config files are read from a spawned writable runtime tree under `YggdraSIM-data` next to the executable when possible, else under `~/YggdraSIM-data`. Set `YGGDRASIM_RUNTIME_ROOT` to force a specific writable root. Default files are copied there on first run if missing.
 
 {Config.Colors.CYAN}2. SCP03 Configuration Files{Config.Colors.ENDC}
    - {Config.Colors.BOLD}keys.ini:{Config.Colors.ENDC} [KEYS] section: kenc, kmac, dek (32/48/64 hex chars for AES-128/192/256), kvn (hex), aid (default SD AID), adm (ADM key for ETSI VERIFY). CONFIG wizard or WIZARD > Update Keys can rotate and save.
@@ -314,7 +338,10 @@ class ShellGuides :
    - {Config.Colors.BOLD}ota_config.ini:{Config.Colors.ENDC} In SCP80 module folder. [ota]: tar (3-byte hex), spi, key_enc, key_mac (KIC/KID keys), transport (SMS/HTTP), etc.
 
 {Config.Colors.CYAN}4. SCP11 / SM-DP+ Simulation{Config.Colors.ENDC}
-   Certificates (e.g. CERT.DPauth.ECDSA.der, SK.DPauth.ECDSA.pem, CERT.DPpb.ECDSA.der, SK.DPpb.ECDSA.pem) are read from CONFIG_DIR when using local SM-DP+ simulation. Replace with test certs for custom provisioning.
+   SCP11 is now split into relay and local-access paths:
+   - {Config.Colors.BOLD}`SCP11/live`:{Config.Colors.ENDC} live-certificate relay shell with `LPAd`, `IPAd`, and `IPAe`.
+   - {Config.Colors.BOLD}`SCP11/test`:{Config.Colors.ENDC} test-certificate relay shell with the same relay model, but a smaller default command surface.
+   - {Config.Colors.BOLD}`SCP11/local_access`:{Config.Colors.ENDC} local `AuthenticateServer` and `LOAD-PROFILE` path using certificate material in `SCP11/local_access/certs`.
 """)
 
     @classmethod 
@@ -339,4 +366,145 @@ class ShellGuides :
 
 {Config.Colors.CYAN}4. Configuration{Config.Colors.ENDC}
    Configure TAR, SPI, KIC, KID, and keys in `ota_config.ini` (SCP80 module). Cipher and CC algorithm must match the card profile.
+""")
+
+    @classmethod 
+    def _print_saip_guide (cls ):
+        spec_url ="https://downloads.osmocom.org/docs/pysim/master/html/saip-tool.html"
+        print (f"""
+{Config.Colors.HEADER}=== SAIP Tool Guide ==={Config.Colors.ENDC}
+{Config.Colors.BOLD}Reference:{Config.Colors.ENDC} {cls._link("SAIP tool manual", spec_url)}
+
+{Config.Colors.CYAN}1. Scope{Config.Colors.ENDC}
+   The SAIP Tool module is intended for inspection and transformation of SAIP / UPP profile packages.
+   Use it when you have a `.der` package, or a `.txt` / `.hex` payload containing hex-encoded DER.
+   The wrapper keeps the active input path in session and routes commands to `saip-tool`.
+
+{Config.Colors.CYAN}2. Recommended Read Flow{Config.Colors.ENDC}
+   Start with low-risk read operations before any modification:
+   - {Config.Colors.BOLD}USE:{Config.Colors.ENDC} Select the package input.
+   - {Config.Colors.BOLD}INFO:{Config.Colors.ENDC} Show package information, optionally with applications.
+   - {Config.Colors.BOLD}TREE:{Config.Colors.ENDC} Show the PE tree / hierarchy.
+   - {Config.Colors.BOLD}DUMP ALL DECODED:{Config.Colors.ENDC} Render the decoded package content through the YggdraSIM formatter.
+   - {Config.Colors.BOLD}CHECK:{Config.Colors.ENDC} Run the package constraints / consistency checks.
+
+{Config.Colors.CYAN}3. Hex Input Support{Config.Colors.ENDC}
+   If the selected input ends in `.txt` or `.hex`, the wrapper interprets it as a hex stream, removes whitespace,
+   validates the payload, converts it to DER, and stores a cached `.der` form under `.profilepackage-cache`
+   before invoking the backend tool. This is useful when package material is delivered as raw hex rather than
+   as a binary DER file. A practical reference sample in this workspace is `reference_test_profile.txt`, which is
+   a single-line hex-encoded UPP / DER payload and therefore suitable for direct `USE` followed by `TREE`,
+   `INFO`, or `DUMP ALL DECODED`.
+
+{Config.Colors.CYAN}4. Write / Export Operations{Config.Colors.ENDC}
+   The wrapper allows raw inspection of the full backend feature set, but for normal workflows the common
+   high-level operations are:
+   - {Config.Colors.BOLD}SPLIT:{Config.Colors.ENDC} Break the PE sequence into separate pieces.
+   - {Config.Colors.BOLD}EXTRACT-APPS:{Config.Colors.ENDC} Export applet load blocks as CAP or IJC-like content.
+   - {Config.Colors.BOLD}REMOVE-NAA:{Config.Colors.ENDC} Remove USIM / ISIM / CSIM network application content.
+   - {Config.Colors.BOLD}RAW:{Config.Colors.ENDC} Pass through backend subcommands directly when advanced operations are needed.
+   Generated output paths remain workspace-confined to reduce accidental writes outside the project.
+
+{Config.Colors.CYAN}5. Typical Session Examples{Config.Colors.ENDC}
+   - {Config.Colors.BOLD}Inspect a package:{Config.Colors.ENDC}
+     `USE reference_test_profile.txt`
+     `INFO`
+     `TREE`
+     `DUMP ALL DECODED`
+     `CHECK`
+   - {Config.Colors.BOLD}Work from hex:{Config.Colors.ENDC}
+     `USE reference_test_profile.txt`
+     `TREE`
+   - {Config.Colors.BOLD}Advanced backend pass-through:{Config.Colors.ENDC}
+     `RAW extract-pe --pe-file tests/header.der --identification 4`
+""")
+
+    @classmethod 
+    def _print_suci_guide (cls ):
+        spec_url ="https://downloads.osmocom.org/docs/pysim/master/html/suci-keytool.html"
+        print (f"""
+{Config.Colors.HEADER}=== SUCI Key Tool Guide ==={Config.Colors.ENDC}
+{Config.Colors.BOLD}Reference:{Config.Colors.ENDC} {cls._link("SUCI key tool manual", spec_url)}
+
+{Config.Colors.CYAN}1. Scope{Config.Colors.ENDC}
+   The SUCI Tool module is intended for generation of SUCI key pairs and export of the public key material
+   used in 5GS subscriber concealment workflows. The shell maintains an active key file path and invokes
+   `suci-keytool` for generation and export operations.
+
+{Config.Colors.CYAN}2. Supported Curves{Config.Colors.ENDC}
+   The tool currently supports:
+   - {Config.Colors.BOLD}secp256r1:{Config.Colors.ENDC} NIST P-256 style ECC key generation.
+   - {Config.Colors.BOLD}curve25519:{Config.Colors.ENDC} X25519 / modern elliptic-curve workflow where supported.
+
+{Config.Colors.CYAN}3. Recommended Workflow{Config.Colors.ENDC}
+   - {Config.Colors.BOLD}USE:{Config.Colors.ENDC} Select the target key file path.
+   - {Config.Colors.BOLD}GENERATE:{Config.Colors.ENDC} Create the key pair in that file.
+   - {Config.Colors.BOLD}DUMP:{Config.Colors.ENDC} Export the public key in uncompressed form.
+   - {Config.Colors.BOLD}DUMP COMPRESSED:{Config.Colors.ENDC} Export the compressed public key form when needed.
+
+{Config.Colors.CYAN}4. Operational Notes{Config.Colors.ENDC}
+   The shell keeps key files inside the workspace path model used by the module wrapper. This makes generated
+   key material easier to track alongside related profile and provisioning data. If the backend tool path needs
+   to be overridden, use `TOOL <command>`.
+
+{Config.Colors.CYAN}5. Typical Session Examples{Config.Colors.ENDC}
+   - {Config.Colors.BOLD}Generate a P-256 key pair:{Config.Colors.ENDC}
+     `USE tests/demo_suci.key`
+     `GENERATE SECP256R1`
+     `DUMP`
+   - {Config.Colors.BOLD}Generate a Curve25519 key pair:{Config.Colors.ENDC}
+     `USE tests/demo_x25519.key`
+     `GENERATE CURVE25519`
+     `DUMP COMPRESSED`
+""")
+
+    @classmethod 
+    def _print_cli_guide (cls ):
+        print (f"""
+{Config.Colors.HEADER}=== CLI Entry Points & Piping Guide ==={Config.Colors.ENDC}
+
+{Config.Colors.CYAN}1. Unified Launcher vs Module Entry Points{Config.Colors.ENDC}
+   YggdraSIM can be started either from the unified launcher or directly from individual modules.
+   This makes it possible to break out only the component you need for automation, packaging, or shell piping.
+   - {Config.Colors.BOLD}Unified launcher:{Config.Colors.ENDC} `python3 main/main.py`
+   - {Config.Colors.BOLD}Standalone module form:{Config.Colors.ENDC} `python3 -m <module>`
+
+{Config.Colors.CYAN}2. Verified Standalone Module Entry Points{Config.Colors.ENDC}
+   - {Config.Colors.BOLD}SCP03 Admin:{Config.Colors.ENDC} `python3 -m SCP03`
+   - {Config.Colors.BOLD}SCP80 OTA:{Config.Colors.ENDC} `python3 -m SCP80`
+   - {Config.Colors.BOLD}SAIP Tool:{Config.Colors.ENDC} `python3 -m Tools.ProfilePackage`
+   - {Config.Colors.BOLD}SUCI Tool:{Config.Colors.ENDC} `python3 -m Tools.SuciTool`
+   - {Config.Colors.BOLD}SCP11 default relay:{Config.Colors.ENDC} `python3 -m SCP11`
+   - {Config.Colors.BOLD}SCP11 live relay:{Config.Colors.ENDC} `python3 -m SCP11.live`
+   - {Config.Colors.BOLD}SCP11 test relay:{Config.Colors.ENDC} `python3 -m SCP11.test`
+   - {Config.Colors.BOLD}SCP11 relay compatibility path:{Config.Colors.ENDC} `python3 -m SCP11.relay`
+   - {Config.Colors.BOLD}SCP11 local access:{Config.Colors.ENDC} `python3 -m SCP11.local_access`
+   - {Config.Colors.BOLD}SCP11 eIM local:{Config.Colors.ENDC} `python3 -m SCP11.eim_local`
+
+{Config.Colors.CYAN}3. Non-Interactive Command Execution{Config.Colors.ENDC}
+   Some modules expose a direct `--cmd` entrypoint for shell automation.
+   - {Config.Colors.BOLD}SCP03:{Config.Colors.ENDC} `python3 -m SCP03 --cmd "SCP03-SD; LIST" --out report.yaml`
+   - {Config.Colors.BOLD}SAIP Tool:{Config.Colors.ENDC} `python3 -m Tools.ProfilePackage --cmd "USE reference_test_profile.txt; DUMP ALL DECODED > reports/profile.yaml"`
+   - {Config.Colors.BOLD}SUCI Tool:{Config.Colors.ENDC} `python3 -m Tools.SuciTool --cmd "USE keys/demo.key; GENERATE SECP256R1; DUMP"`
+
+{Config.Colors.CYAN}4. Piping Command Streams{Config.Colors.ENDC}
+   Interactive shells also accept standard input, so they can be driven through pipes.
+   This is useful when commands are generated by another program or a shell script.
+   - {Config.Colors.BOLD}SAIP Tool via pipe:{Config.Colors.ENDC}
+     `printf 'USE reference_test_profile.txt\\nINFO\\nTREE\\nQ\\n' | python3 -m Tools.ProfilePackage`
+   - {Config.Colors.BOLD}SUCI Tool via pipe:{Config.Colors.ENDC}
+     `printf 'USE keys/demo.key\\nGENERATE CURVE25519\\nDUMP\\nQ\\n' | python3 -m Tools.SuciTool`
+   - {Config.Colors.BOLD}SCP03 via pipe:{Config.Colors.ENDC}
+     `printf 'HELP\\nQ\\n' | python3 -m SCP03`
+
+{Config.Colors.CYAN}5. Redirecting Output{Config.Colors.ENDC}
+   Shell output can be redirected at the process level, and module-specific commands may also support native report export.
+   - {Config.Colors.BOLD}Process stdout redirect:{Config.Colors.ENDC} `python3 -m Tools.ProfilePackage --cmd "USE reference_test_profile.txt; INFO" > saip_stdout.txt`
+   - {Config.Colors.BOLD}Native SAIP dump export:{Config.Colors.ENDC} `python3 -m Tools.ProfilePackage --cmd "USE reference_test_profile.txt; DUMP ALL DECODED > reports/profile_dump.yaml"`
+   - {Config.Colors.BOLD}Native SCP03 YAML export:{Config.Colors.ENDC} `python3 -m SCP03 --cmd "SCP03-SD; LIST" --out scp03_report.yaml`
+
+{Config.Colors.CYAN}6. Shell Script Integration Notes{Config.Colors.ENDC}
+   - Prefer `--cmd` when the module supports it, because it avoids prompt text in stdin handling.
+   - Prefer `python3 -m <module>` over direct relative file execution when packaging or relocating modules.
+   - For machine parsing, prefer native YAML / JSON report outputs instead of scraping colored terminal text.
 """)

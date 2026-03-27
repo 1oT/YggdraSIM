@@ -1,6 +1,46 @@
-# Sensitive keys and data
+# Sensitive keys, certs, secrets, and mutable operator data
 SCP03/script.txt
 docs
+YggdraSIM-data/
+state/
+eim_last_response.bin
+eim_last_response_hex.txt
+tmp_*.bin
+tmp_*.pem
+tmp_*.txt
+
+# SCP11 mutable runtime caches and reports
+SCP11/es9_ca_lookup.json
+SCP11/live/es9_ca_lookup.json
+SCP11/test/es9_ca_lookup.json
+SCP11/dynamic_ca/
+SCP11/live/dynamic_ca/
+SCP11/test/dynamic_ca/
+SCP11/local_access/debug/
+SCP11/eim_local/eim_last_response.bin
+SCP11/eim_local/eim_last_response_hex.txt
+SCP11/eim_local/eim_response_log.jsonl
+SCP11/eim_local/eim_poll_audit.sqlite3
+SCP11/eim_local/eim_runtime_state.json
+
+# Sensitive material: do not ship or push
+*.pem
+*.der
+*.crt
+*.csr
+*.key
+*.p8
+*.p12
+*.pfx
+*.jks
+*.keystore
+*.srl
+*.sqlite3
+*.db
+.env
+.env.*
+*.secret
+*.secrets
 
 # Python internals (Global)
 **/__pycache__/
@@ -12,6 +52,18 @@ YggdraSIM.code-workspace
 git_agent.log
 .cursorrules
 .cursorignore
-.gitignore
-.cursor
-SGP.26_v3.0.2-20240828_Files_draft3_2025
+.cursor/
+
+pysim/
+reference_test_profile.transcode.json
+reference_test_profile.transcode.der
+
+Tools/ProfilePackage/profile/transcoded/1oT_test_profile.transcode.der
+Tools/ProfilePackage/profile/transcoded/reference_test_profile.transcode.json
+Tools/ProfilePackage/profile/transcode/1oT_test_profile.transcode.der
+Tools/ProfilePackage/profile/transcode/1oT_test_profile.transcode.json
+state/gpg_key.fingerprint
+SCP11/local_access/profile/Test_Profile_dummyvalues.txt
+**/polling_plugin.py
+**/polling_plugin_support.py
+**/test_scp11_live_stk_polling.py

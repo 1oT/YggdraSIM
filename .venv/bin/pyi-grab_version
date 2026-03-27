@@ -1,6 +1,0 @@
-#!/mnt/usb_storage/YggdraSIM/.venv/bin/python
-import sys
-from PyInstaller.utils.cliutils.grab_version import run
-if __name__ == '__main__':
-    sys.argv[0] = sys.argv[0].removesuffix('.exe')
-    sys.exit(run())

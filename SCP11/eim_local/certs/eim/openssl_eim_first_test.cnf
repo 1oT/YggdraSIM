@@ -1,0 +1,34 @@
+[ req ]
+default_bits = 256
+distinguished_name = req_dn
+prompt = no
+default_md = sha256
+req_extensions = v3_req
+
+[ req_dn ]
+C = EE
+ST = Harjumaa
+L = Tallinn
+O = YggdraSIM
+OU = Subscription Management
+CN = yggdrasim.eim.test.1ot.com
+emailAddress = certificate.automation@yggdrasim.local
+
+[ v3_req ]
+basicConstraints = critical, CA:FALSE
+keyUsage = critical, digitalSignature, keyEncipherment, keyAgreement
+extendedKeyUsage = clientAuth, serverAuth
+subjectKeyIdentifier = hash
+subjectAltName = @alt_names
+
+[ v3_leaf ]
+basicConstraints = critical, CA:FALSE
+keyUsage = critical, digitalSignature, keyEncipherment, keyAgreement
+extendedKeyUsage = clientAuth, serverAuth
+subjectKeyIdentifier = hash
+authorityKeyIdentifier = keyid,issuer
+subjectAltName = @alt_names
+
+[ alt_names ]
+DNS.1 = yggdrasim.eim.test.1ot.com
+URI.1 = urn:oid:2.25.311782205282738360923618091971140414400

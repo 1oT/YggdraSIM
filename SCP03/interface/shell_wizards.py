@@ -1,15 +1,23 @@
 # -----------------------------------------------------------------------------
-# This Source Code Form is subject to the terms of the Mozilla Public
-# License, v. 2.0. If a copy of the MPL was not distributed with this
-# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
 #
-# Copyright (c) 2026 Hampus Hellsberg
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program. If not, see <https://www.gnu.org/licenses/>.
+#
+# Copyright (c) 2026 Hampus Hellsberg and contributors
 # -----------------------------------------------------------------------------
 
 import os 
 import sys 
 import configparser 
-import tempfile 
 import yaml 
 
 current_dir =os .path .dirname (os .path .abspath (__file__ ))
@@ -114,7 +122,7 @@ class ShellInteractiveWizards :
 
         if is_two :
             key_id =1 
-            kvn_val =getattr (shell ,'current_kvn',None )
+            kvn_val =shell .gp_ctrl .get_active_kvn_hex ()
 
             is_kvn_missing =False 
             if kvn_val is None :
@@ -126,12 +134,13 @@ class ShellInteractiveWizards :
                     has_keys_config =True 
 
                 if has_keys_config :
+                    _enc_key ,_mac_key ,_dek_key ,kvn_key =shell .gp_ctrl .get_config_key_fields_for_protocol ()
                     has_kvn_key =False 
-                    if 'kvn'in shell .config ['KEYS']:
+                    if kvn_key in shell .config ['KEYS']:
                         has_kvn_key =True 
 
                     if has_kvn_key :
-                        kvn_val =shell .config ['KEYS']['kvn']
+                        kvn_val =shell .config ['KEYS'][kvn_key ]
 
             is_still_missing =False 
             if kvn_val is None :
@@ -222,7 +231,7 @@ class ShellInteractiveWizards :
     @staticmethod 
     def _prompt_config_update (shell ,new_kvn :int ,enc :str ,mac :str ,dek :str )->None :
         wiz =InteractiveWizard ("Configuration Synchronization",Config .Colors )
-        wiz .add_step ("upd",f"Update keys.ini with new keys? [y/N]:",default =False ,is_bool =True )
+        wiz .add_step ("upd",f"Update SQLite-backed SCP03 state with new keys? [y/N]:",default =False ,is_bool =True )
         res =wiz .run ()
 
         is_upd =False 
@@ -231,51 +240,22 @@ class ShellInteractiveWizards :
 
         if is_upd :
             kvn_str =f"{new_kvn:02X}"
-            shell .current_kvn =kvn_str 
-
-            config =configparser .ConfigParser ()
-
-            is_exists =False 
-            if os .path .exists (Config .INI_FILE ):
-                is_exists =True 
-
-            if is_exists :
-                config .read (Config .INI_FILE )
-
-            has_keys =False 
-            if 'KEYS'in config :
-                has_keys =True 
-
-            is_missing_keys =False 
-            if has_keys ==False :
-                is_missing_keys =True 
-
-            if is_missing_keys :
+            config =shell .config 
+            if 'KEYS'not in config :
                 config ['KEYS']={}
 
-            config ['KEYS']['kvn']=kvn_str 
-            config ['KEYS']['enc']=enc 
-            config ['KEYS']['mac']=mac 
-            config ['KEYS']['dek']=dek 
+            enc_key ,mac_key ,dek_key ,kvn_key =shell .gp_ctrl .get_config_key_fields_for_protocol ()
+            config ['KEYS'][kvn_key ]=kvn_str 
+            config ['KEYS'][enc_key ]=enc 
+            config ['KEYS'][mac_key ]=mac 
+            config ['KEYS'][dek_key ]=dek 
 
-            has_kenc =False 
-            if 'kenc'in config ['KEYS']:
-                has_kenc =True 
+            shell ._save_to_disk ()
+            shell ._initialize_controllers ()
+            shell ._update_prompt_state ()
 
-            if has_kenc :
-                del config ['KEYS']['kenc']
-
-            has_kmac =False 
-            if 'kmac'in config ['KEYS']:
-                has_kmac =True 
-
-            if has_kmac :
-                del config ['KEYS']['kmac']
-
-            with open (Config .INI_FILE ,'w')as f :
-                config .write (f )
-
-            print (f"[+] {Config.INI_FILE} updated. KVN is now {kvn_str}.")
+            protocol_name =shell .gp_ctrl .get_active_protocol_name ()
+            print (f"[+] SQLite-backed SCP03 state updated for {protocol_name}. KVN is now {kvn_str}.")
 
     @staticmethod 
     def run_manage_pin_wizard (shell ,arg_str ="")->None :
@@ -776,7 +756,7 @@ class ShellInteractiveWizards :
     @staticmethod 
     def run_config_wizard (shell )->None :
         wiz =InteractiveWizard ("Environment Configuration",Config .Colors )
-        wiz .add_step ("key","Update [1=ENC, 2=MAC, 3=DEK, 4=KVN, 5=ADM, 6=AID]:",default ="1")
+        wiz .add_step ("key","Update [1=SCP03 ENC, 2=SCP03 MAC, 3=SCP03 DEK, 4=SCP03 KVN, 5=SCP02 ENC, 6=SCP02 MAC, 7=SCP02 DEK, 8=SCP02 KVN, 9=ADM, 10=AID]:",default ="1")
         wiz .add_step ("val","New Value [Hex]:",default ="")
 
         res =wiz .run ()
@@ -788,36 +768,60 @@ class ShellInteractiveWizards :
         if choice =='1':
             is_one =True 
         if is_one :
-            key_name ="kenc"
+            key_name ="scp03_kenc"
 
         is_two =False 
         if choice =='2':
             is_two =True 
         if is_two :
-            key_name ="kmac"
+            key_name ="scp03_kmac"
 
         is_three =False 
         if choice =='3':
             is_three =True 
         if is_three :
-            key_name ="dek"
+            key_name ="scp03_dek"
 
         is_four =False 
         if choice =='4':
             is_four =True 
         if is_four :
-            key_name ="kvn"
+            key_name ="scp03_kvn"
 
         is_five =False 
         if choice =='5':
             is_five =True 
         if is_five :
-            key_name ="adm"
+            key_name ="scp02_enc"
 
         is_six =False 
         if choice =='6':
             is_six =True 
         if is_six :
+            key_name ="scp02_mac"
+
+        is_seven =False 
+        if choice =='7':
+            is_seven =True 
+        if is_seven :
+            key_name ="scp02_dek"
+
+        is_eight =False 
+        if choice =='8':
+            is_eight =True 
+        if is_eight :
+            key_name ="scp02_kvn"
+
+        is_nine =False 
+        if choice =='9':
+            is_nine =True 
+        if is_nine :
+            key_name ="adm"
+
+        is_ten =False 
+        if choice =='10':
+            is_ten =True 
+        if is_ten :
             key_name ="aid"
 
         print (f"\n[*] Updating configuration...")
@@ -1272,49 +1276,14 @@ class ShellInteractiveWizards :
                 do_auth =True 
 
             print ("[*] Building combined FS + eUICC report... this may take a moment.")
-            temp_name =""
-            with tempfile .NamedTemporaryFile (prefix ="fs_report_",suffix =".yaml",delete =False )as temp_file :
-                temp_name =temp_file .name 
-
-            try :
-                print ("[*] Resetting card before File System collection...")
-                shell ._handle_reset ()
-                has_adm =False 
-                adm_clean =adm_input .strip ().upper ()
-                if len (adm_clean )>0 :
-                    if adm_clean !="SKIP":
-                        has_adm =True 
-                if has_adm :
-                    shell .gp_ctrl .verify_adm (adm_input )
-                shell .fs_ctrl .dump_fs_to_yaml (temp_name )
-                fs_data ={}
-                with open (temp_name ,"r")as fsf :
-                    loaded =yaml .safe_load (fsf )
-                    if isinstance (loaded ,dict ):
-                        fs_data =loaded 
-                print ("[*] Resetting card before eUICC collection...")
-                shell ._handle_reset ()
-                euicc_report =shell ._build_euicc_export_report (standard =standard )
-                print ("[*] Resetting card before MNO-SD collection...")
-                shell ._handle_reset ()
-                mnosd_report =shell ._build_mnosd_export_report (adm_hex =adm_input ,authenticate_sd =do_auth )
-                combined ={
-                "generated":euicc_report .get ("generated"),
-                "standard":standard ,
-                "file_system_report":fs_data ,
-                "euicc_report":euicc_report ,
-                "mnosd_report":mnosd_report ,
-                }
-                with open (filename ,"w")as out :
-                    yaml .dump (combined ,out ,default_flow_style =False ,allow_unicode =True ,sort_keys =False )
-                print (f"[+] Combined report saved to {filename}")
-            finally :
-                is_temp_exists =False 
-                if len (temp_name )>0 :
-                    if os .path .exists (temp_name ):
-                        is_temp_exists =True 
-                if is_temp_exists :
-                    os .remove (temp_name )
+            combined =shell ._build_combined_profile_dict (
+                standard =standard ,
+                adm_hex =adm_input ,
+                authenticate_sd =do_auth ,
+            )
+            with open (filename ,"w",encoding ="utf-8")as out :
+                yaml .dump (combined ,out ,default_flow_style =False ,allow_unicode =True ,sort_keys =False )
+            print (f"[+] Combined report saved to {filename}")
 
     @staticmethod 
     def _build_fcp_template ()->dict :
