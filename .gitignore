@@ -67,3 +67,4 @@ SCP11/local_access/profile/Test_Profile_dummyvalues.txt
 **/polling_plugin.py
 **/polling_plugin_support.py
 **/test_scp11_live_stk_polling.py
+**/1oT_Test_Profile.txt
