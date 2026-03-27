@@ -1,0 +1,9 @@
+{
+  "theme": "nord",
+  "splits": {
+    "json_outline_width": 34,
+    "json_col_width": 172,
+    "inspect_width": 141,
+    "bottom_height": 14
+  }
+}

@@ -1,9 +1,18 @@
 # -----------------------------------------------------------------------------
-# This Source Code Form is subject to the terms of the Mozilla Public
-# License, v. 2.0. If a copy of the MPL was not distributed with this
-# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
 #
-# Copyright (c) 2026 Hampus Hellsberg
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program. If not, see <https://www.gnu.org/licenses/>.
+#
+# Copyright (c) 2026 Hampus Hellsberg and contributors
 # -----------------------------------------------------------------------------
 
 import os
@@ -11,20 +20,34 @@ import shutil
 import sys
 from dataclasses import dataclass, field
 
+from yggdrasim_common.runtime_paths import bundle_path, ensure_runtime_dir, ensure_seeded_runtime_file, runtime_path
+
 try:
-    from .models import BACKEND_MODE_REMOTE_DP, TRANSPORT_MODE_PCSC
+    from .models import (
+        BACKEND_MODE_LOCAL_SGP26,
+        BACKEND_MODE_REMOTE_DP,
+        EIM_TRANSPORT_MODE_ESIPA,
+        EIM_TRANSPORT_MODE_REST_RESOURCE,
+        TRANSPORT_MODE_PCSC,
+        TRANSPORT_MODE_RELAY,
+    )
 except ImportError:
-    from models import BACKEND_MODE_REMOTE_DP, TRANSPORT_MODE_PCSC
+    from models import (
+        BACKEND_MODE_LOCAL_SGP26,
+        BACKEND_MODE_REMOTE_DP,
+        EIM_TRANSPORT_MODE_ESIPA,
+        EIM_TRANSPORT_MODE_REST_RESOURCE,
+        TRANSPORT_MODE_PCSC,
+        TRANSPORT_MODE_RELAY,
+    )
 
 
 def _get_config_dir():
-    if getattr(sys, "frozen", False):
-        return os.path.dirname(sys.executable)
-    return os.path.dirname(os.path.abspath(__file__))
+    return runtime_path("SCP11")
 
 
 def _get_bundled_dir():
-    return os.path.dirname(os.path.abspath(__file__))
+    return bundle_path("SCP11")
 
 
 @dataclass(frozen=True)
@@ -63,9 +86,27 @@ class SGPConfig:
 
     BACKEND_MODE: str = BACKEND_MODE_REMOTE_DP
     ES9_BASE_URL: str = "https://rsp.example.com"
-    ES9_TIMEOUT_SECONDS: int = 30
+    ES9_TIMEOUT_SECONDS: int = 15
     ES9_VERIFY_TLS: bool = True
-    ES9_CA_BUNDLE_PATH: str = ""
+    ES9_CA_BUNDLE_PATH: str = field(
+        default_factory=lambda: os.path.join(_get_config_dir(), "ES9_TEST_CI_CA.pem")
+    )
+    EIM_BASE_URL: str = ""
+    EIM_TIMEOUT_SECONDS: int = 30
+    EIM_TRANSPORT_MODE: str = EIM_TRANSPORT_MODE_ESIPA
+    EIM_HTTP_PATH: str = "/gsma/rsp2/asn1"
+    EIM_HTTP_PROTOCOL: str = "gsma/rsp/v2.1.0"
+    EIM_EUICC_CHALLENGE_ASN1: bool = True
+    EIM_REQUEST_VARIANT: int = 0
+    EIM_GET_PACKAGE_NOTIFY_STATE_CHANGE: bool = False
+    EIM_GET_PACKAGE_STATE_CHANGE_CAUSE: str = ""
+    EIM_GET_PACKAGE_RPLMN: str = ""
+    EIM_CLEAR_ACK_ON_NO_PACKAGE: bool = False
+    EIM_CLEAR_ACK_GENERIC_ERROR_HEX: str = ""
+    EIM_CLEAR_ACK_RESULT_ERROR: str = "undefinedError"
+    EIM_PROFILE_DOWNLOAD_ERROR_REASON: str = "undefinedError"
+    EIM_REST_CREATE_PATH: str = "/edr/create"
+    EIM_REST_LOOKUP_PATH_TEMPLATE: str = "/edr/lookup/{resource_id}"
     REMOTE_DP_ALLOW_LOCAL_FALLBACK: bool = False
 
     LOCAL_SGP26_TRUST_ANCHOR_PATH: str = field(
@@ -77,6 +118,43 @@ class SGPConfig:
     )
 
     def __post_init__(self):
+        ensure_runtime_dir("SCP11")
+        ensure_runtime_dir("SCP11", "dynamic_ca")
+        ev = os.environ.get("EIM_REQUEST_VARIANT", "").strip()
+        if ev != "":
+            try:
+                object.__setattr__(self, "EIM_REQUEST_VARIANT", int(ev))
+            except ValueError:
+                pass
+        ev_notify = os.environ.get("EIM_GET_PACKAGE_NOTIFY_STATE_CHANGE", "").strip().lower()
+        if ev_notify in ("1", "true", "yes"):
+            object.__setattr__(self, "EIM_GET_PACKAGE_NOTIFY_STATE_CHANGE", True)
+        ev_cause = os.environ.get("EIM_GET_PACKAGE_STATE_CHANGE_CAUSE", "").strip()
+        if ev_cause != "":
+            object.__setattr__(self, "EIM_GET_PACKAGE_STATE_CHANGE_CAUSE", ev_cause)
+        ev_rplmn = os.environ.get("EIM_GET_PACKAGE_RPLMN", "").strip()
+        if ev_rplmn != "":
+            object.__setattr__(self, "EIM_GET_PACKAGE_RPLMN", ev_rplmn)
+        ev_eim_timeout = os.environ.get("EIM_TIMEOUT_SECONDS", "").strip()
+        if ev_eim_timeout != "":
+            try:
+                parsed_timeout = int(ev_eim_timeout, 10)
+            except ValueError:
+                parsed_timeout = 0
+            if parsed_timeout > 0:
+                object.__setattr__(self, "EIM_TIMEOUT_SECONDS", parsed_timeout)
+        ev_clear = os.environ.get("EIM_CLEAR_ACK_ON_NO_PACKAGE", "").strip().lower()
+        if ev_clear in ("1", "true", "yes"):
+            object.__setattr__(self, "EIM_CLEAR_ACK_ON_NO_PACKAGE", True)
+        ev_err = os.environ.get("EIM_CLEAR_ACK_GENERIC_ERROR_HEX", "").strip()
+        if ev_err != "":
+            object.__setattr__(self, "EIM_CLEAR_ACK_GENERIC_ERROR_HEX", ev_err)
+        ev_clear_result = os.environ.get("EIM_CLEAR_ACK_RESULT_ERROR", "").strip()
+        if ev_clear_result != "":
+            object.__setattr__(self, "EIM_CLEAR_ACK_RESULT_ERROR", ev_clear_result)
+        ev_pd_reason = os.environ.get("EIM_PROFILE_DOWNLOAD_ERROR_REASON", "").strip()
+        if ev_pd_reason != "":
+            object.__setattr__(self, "EIM_PROFILE_DOWNLOAD_ERROR_REASON", ev_pd_reason)
         if self.CAPABILITIES is None:
             object.__setattr__(
                 self,
@@ -88,20 +166,89 @@ class SGPConfig:
                 },
             )
 
-        if getattr(sys, "frozen", False):
-            bundled_dir = _get_bundled_dir()
-            for filename in [
-                "CERT.DPauth.ECDSA.der",
-                "SK.DPauth.ECDSA.pem",
-                "CERT.DPpb.ECDSA.der",
-                "SK.DPpb.ECDSA.pem",
-            ]:
-                user_path = os.path.join(_get_config_dir(), filename)
-                bundled_path = os.path.join(bundled_dir, filename)
-                user_missing = os.path.exists(user_path) is False
-                bundled_exists = os.path.exists(bundled_path)
-                if user_missing and bundled_exists:
-                    try:
-                        shutil.copy2(bundled_path, user_path)
-                    except Exception as error:
-                        print(f"Warning: Could not copy default {filename} to {_get_config_dir()}: {error}")
+        bundled_dir = _get_bundled_dir()
+        for filename in [
+            "CERT.DPauth.ECDSA.der",
+            "SK.DPauth.ECDSA.pem",
+            "CERT.DPpb.ECDSA.der",
+            "SK.DPpb.ECDSA.pem",
+            "ES9_TEST_CI_CA.pem",
+            "es9_ca_lookup.json",
+        ]:
+            bundled_path = os.path.join(bundled_dir, filename)
+            if os.path.isfile(bundled_path) is False:
+                continue
+            try:
+                ensure_seeded_runtime_file("SCP11", filename)
+            except Exception as error:
+                print(f"Warning: Could not copy default {filename} to {_get_config_dir()}: {error}")
+
+    def local_credential_paths(self):
+        return [
+            ("DPauth certificate", self.CERT_PATH_AUTH),
+            ("DPauth private key", self.KEY_PATH_AUTH),
+            ("DPpb certificate", self.CERT_PATH_PB),
+            ("DPpb private key", self.KEY_PATH_PB),
+        ]
+
+    def collect_startup_diagnostics(self):
+        errors = []
+        warnings = []
+
+        supported_transports = [TRANSPORT_MODE_PCSC, TRANSPORT_MODE_RELAY]
+        if self.TRANSPORT_MODE not in supported_transports:
+            errors.append(
+                f"Unsupported TRANSPORT_MODE '{self.TRANSPORT_MODE}'. Supported values: {', '.join(supported_transports)}."
+            )
+
+        supported_backends = [BACKEND_MODE_REMOTE_DP, BACKEND_MODE_LOCAL_SGP26]
+        if self.BACKEND_MODE not in supported_backends:
+            errors.append(
+                f"Unsupported BACKEND_MODE '{self.BACKEND_MODE}'. Supported values: {', '.join(supported_backends)}."
+            )
+
+        supported_eim_transports = [EIM_TRANSPORT_MODE_ESIPA, EIM_TRANSPORT_MODE_REST_RESOURCE]
+        if self.EIM_TRANSPORT_MODE not in supported_eim_transports:
+            errors.append(
+                f"Unsupported EIM_TRANSPORT_MODE '{self.EIM_TRANSPORT_MODE}'. "
+                f"Supported values: {', '.join(supported_eim_transports)}."
+            )
+
+        if self.READER_INDEX < 0:
+            errors.append("READER_INDEX must be zero or greater.")
+
+        relay_url = str(self.RELAY_URL).strip()
+        if self.TRANSPORT_MODE == TRANSPORT_MODE_RELAY:
+            if len(relay_url) == 0:
+                errors.append("RELAY_URL is empty while TRANSPORT_MODE is set to relay.")
+            elif relay_url.startswith(("http://", "https://")) is False:
+                errors.append("RELAY_URL must start with http:// or https://.")
+
+        es9_url = str(self.ES9_BASE_URL).strip()
+        smdp_address = str(self.RSP_SERVER_URL).strip()
+        if self.BACKEND_MODE == BACKEND_MODE_REMOTE_DP:
+            if len(es9_url) == 0:
+                errors.append("ES9_BASE_URL is empty while BACKEND_MODE is remote_dp.")
+            elif "example.com" in es9_url.lower():
+                warnings.append("ES9_BASE_URL still points to an example endpoint.")
+
+            if len(smdp_address) == 0:
+                warnings.append("RSP_SERVER_URL is empty. FLOW will need an SM-DP+ address before use.")
+            elif "example.com" in smdp_address.lower():
+                warnings.append("RSP_SERVER_URL still points to an example endpoint.")
+
+        require_local_credentials = self.BACKEND_MODE == BACKEND_MODE_LOCAL_SGP26 or self.REMOTE_DP_ALLOW_LOCAL_FALLBACK
+        missing_local = []
+        for label, path in self.local_credential_paths():
+            if os.path.exists(path) is False:
+                missing_local.append(f"{label}: {path}")
+
+        if require_local_credentials and missing_local:
+            if self.BACKEND_MODE == BACKEND_MODE_REMOTE_DP:
+                warnings.append("Local fallback is enabled but local SCP11 credential files are missing.")
+                warnings.extend(missing_local)
+            else:
+                errors.append("Local SGP.26 mode requires SCP11 credential files that are missing.")
+                errors.extend(missing_local)
+
+        return errors, warnings

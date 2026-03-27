@@ -1,9 +1,18 @@
 # -----------------------------------------------------------------------------
-# This Source Code Form is subject to the terms of the Mozilla Public
-# License, v. 2.0. If a copy of the MPL was not distributed with this
-# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
 #
-# Copyright (c) 2026 Hampus Hellsberg
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program. If not, see <https://www.gnu.org/licenses/>.
+#
+# Copyright (c) 2026 Hampus Hellsberg and contributors
 # -----------------------------------------------------------------------------
 
 import os 
@@ -419,7 +428,7 @@ class FileSystemController :
                 'template':'FCP','type':'Unknown','structure':'Unknown',
                 'size':0 ,'rec_len':0 ,'rec_count':0 ,
                 'lcs':'Unknown','security':'None','rules':None ,
-                'aid':None 
+                'aid':None ,'file_descriptor':None ,'sfi':None 
                 }
 
 
@@ -429,6 +438,7 @@ class FileSystemController :
 
                 fd =fcp_body .get (0x82 ,b'')
                 if fd :
+                    self .current_fcp ['file_descriptor']=fd .hex ().upper ()
                     byte1 =fd [0 ]
                     if (byte1 &0x38 )==0x38 :self .current_fcp ['type']='DF';self .current_fcp ['structure']='Tree'
                     elif (byte1 &0x07 )==1 :self .current_fcp ['type']='EF';self .current_fcp ['structure']='Transparent'
@@ -449,6 +459,10 @@ class FileSystemController :
 
                 lcs =fcp_body .get (0x8A ,b'')
                 if lcs :self .current_fcp ['lcs']=lcs .hex ().upper ()
+
+                sfi =fcp_body .get (0x88 ,b'')
+                if sfi :
+                    self .current_fcp ['sfi']=sfi .hex ().upper ()
 
 
                 sec =fcp_body .get (0x8B )
@@ -491,7 +505,7 @@ class FileSystemController :
 
     def _resolve_arr_rules (self ,arr_fid :str ,record_num :int ,restore_fid :str )->Optional [str ]:
 
-        cmd_sel =f"00A4000002{arr_fid}"
+        cmd_sel =f"00A4000402{arr_fid}"
         _ ,sw1 ,sw2 =self .tp .transmit (cmd_sel ,silent =True )
 
         is_success =False 
@@ -514,7 +528,7 @@ class FileSystemController :
                 is_mf_arr =True 
 
             if is_mf_arr :
-                self .tp .transmit ("00A40000023F00",silent =True )
+                self .tp .transmit ("00A40004023F00",silent =True )
                 _ ,sw1 ,sw2 =self .tp .transmit (cmd_sel ,silent =True )
 
             is_usim_arr =False 
@@ -522,8 +536,8 @@ class FileSystemController :
                 is_usim_arr =True 
 
             if is_usim_arr :
-                self .tp .transmit ("00A40000023F00",silent =True )
-                self .tp .transmit ("00A40000027FF0",silent =True )
+                self .tp .transmit ("00A40004023F00",silent =True )
+                self .tp .transmit ("00A40004027FF0",silent =True )
                 _ ,sw1 ,sw2 =self .tp .transmit (cmd_sel ,silent =True )
 
         is_fatal =False 
@@ -544,7 +558,7 @@ class FileSystemController :
                 is_short =True 
 
             if is_short :
-                self .tp .transmit (f"00A4000002{restore_fid}",silent =True )
+                self .tp .transmit (f"00A4000402{restore_fid}",silent =True )
 
             return None 
 
@@ -565,7 +579,7 @@ class FileSystemController :
             is_short_res =True 
 
         if is_short_res :
-            self .tp .transmit (f"00A4000002{restore_fid}",silent =True )
+            self .tp .transmit (f"00A4000402{restore_fid}",silent =True )
 
         is_read_success =False 
         if sw1 ==0x90 :
@@ -619,7 +633,7 @@ class FileSystemController :
                 arr_fid ="6F06"
             else :
                 arr_fid ="2F06"
-        cmd_sel =f"00A4000002{arr_fid}"
+        cmd_sel =f"00A4000402{arr_fid}"
         _ ,sw1 ,_ =self .tp .transmit (cmd_sel ,silent =True )
         if sw1 !=0x90 :
             self .tp .transmit ("00A4030000",silent =True )
@@ -634,7 +648,7 @@ class FileSystemController :
             if len (prev_fid )>4 :
                 self .tp .transmit (f"00A40400{len(prev_fid)//2:02X}{prev_fid}",silent =True )
             else :
-                self .tp .transmit (f"00A4000002{prev_fid}",silent =True )
+                self .tp .transmit (f"00A4000402{prev_fid}",silent =True )
         if sw1 ==0x90 and data :
             decoded =AdvancedDecoders .decode_ef_arr (data .hex ().upper ())
             print (f"{Config.Colors.HEADER}--- ARR (FID {arr_fid}) ---{Config.Colors.ENDC}")
@@ -1034,6 +1048,7 @@ class FileSystemController :
         except Exception as e :print (f"{Config.Colors.FAIL}[!] Update Error: {e}{Config.Colors.ENDC}")
 
     def scan_tree (self ):
+        self ._reset_before_scan ("scan")
         print (f"{Config.Colors.HEADER}[*] Auditing File System (Live)...{Config.Colors.ENDC}")
 
         file_exists =os .path .exists (Config .FIDS_FILE )
@@ -1047,7 +1062,7 @@ class FileSystemController :
 
         def live_scan (nodes ,parent_fid ,parent_path ,level =0 ):
             for node in nodes :
-                p_cmd =f"00A4000002{parent_fid}"
+                p_cmd =f"00A4000402{parent_fid}"
                 if len (parent_fid )>4 :
                     p_cmd =f"00A40400{len(parent_fid)//2:02X}{parent_fid}"
 
@@ -1099,7 +1114,7 @@ class FileSystemController :
                         live_scan (node ['children'],selected_fid ,current_path ,level +1 )
 
         try :
-            self .tp .transmit ("00A40000023F00",silent =True )
+            self .tp .transmit ("00A40004023F00",silent =True )
             live_scan (roots ,"3F00","",0 )
         finally :
             self .tp .transmit ("00A40004023F00",silent =True )
@@ -1143,6 +1158,7 @@ class FileSystemController :
         return str (data )
 
     def generate_report (self ,filename :str ="scan_report.yaml"):
+        self ._reset_before_scan ("report generation")
         print (f"{Config.Colors.HEADER}[*] Generating Deep Report to {filename}...{Config.Colors.ENDC}")
         if not os .path .exists (Config .FIDS_FILE ):print (f"{Config.Colors.FAIL}fids.txt missing{Config.Colors.ENDC}");return 
 
@@ -1184,14 +1200,8 @@ class FileSystemController :
             wildcard_nodes =[n for n in nodes if any ('X'in f for f in n ['fids'])]
 
             for node in explicit_nodes :
-                p_cmd =f"00A40400{len(parent_fid)//2:02X}{parent_fid}"if len (parent_fid )>4 else f"00A4000002{parent_fid}"
+                p_cmd =f"00A40400{len(parent_fid)//2:02X}{parent_fid}"if len (parent_fid )>4 else f"00A4000402{parent_fid}"
                 p_data ,p_sw1 ,p_sw2 =self .tp .transmit (p_cmd ,silent =True )
-                retry_parent_short =False 
-                if p_sw1 !=0x90 and p_sw1 !=0x61 and p_sw1 !=0x9F :
-                    if len (parent_fid )==4 :
-                        retry_parent_short =True 
-                if retry_parent_short :
-                    p_data ,p_sw1 ,p_sw2 =self .tp .transmit (f"00A4000402{parent_fid}",silent =True )
                 selected_fid =None 
                 data =None 
 
@@ -1213,12 +1223,6 @@ class FileSystemController :
                         break 
                     cmd =f"00A40404{len(fid)//2:02X}{fid}"if len (fid )>4 else f"00A4000402{fid}"
                     data ,sw1 ,sw2 =self .tp .transmit (cmd ,silent =True )
-                    retry_short_fid =False 
-                    if sw1 !=0x90 and sw1 !=0x61 and sw1 !=0x9F :
-                        if len (fid )==4 :
-                            retry_short_fid =True 
-                    if retry_short_fid :
-                        data ,sw1 ,sw2 =self .tp .transmit (f"00A4000002{fid}",silent =True )
                     if sw1 ==0x90 or sw1 ==0x61 or sw1 ==0x9F :
                         selected_fid =fid 
                         break 
@@ -1249,7 +1253,7 @@ class FileSystemController :
                     target_fid =f"{prefix}{i:02X}"
                     if target_fid in processed_fids :continue 
 
-                    p_cmd =f"00A40400{len(parent_fid)//2:02X}{parent_fid}"if len (parent_fid )>4 else f"00A4000002{parent_fid}"
+                    p_cmd =f"00A40400{len(parent_fid)//2:02X}{parent_fid}"if len (parent_fid )>4 else f"00A4000402{parent_fid}"
                     self .tp .transmit (p_cmd ,silent =True )
 
                     cmd =f"00A4000402{target_fid}"
@@ -1269,7 +1273,7 @@ class FileSystemController :
                         report_data [path ]=file_entry 
 
         try :
-            self .tp .transmit ("00A40000023F00",silent =True )
+            self .tp .transmit ("00A40004023F00",silent =True )
             deep_scan (roots ,"3F00",[])
             clean_data =self ._sanitize_yaml (report_data )
             with open (filename ,'w')as outfile :yaml .dump (clean_data ,outfile ,default_flow_style =False ,sort_keys =False )
@@ -1284,8 +1288,18 @@ class FileSystemController :
         """
         self .generate_report (filename )
 
+    def _reset_before_scan (self ,operation_name :str )->None :
+        print (f"{Config.Colors.WARNING}[*] Resetting card before file system {operation_name}...{Config.Colors.ENDC}")
+        reset_ok =self .tp .reset ()
+        if self .tp .session :
+            self .tp .reset_session_state ()
+        if reset_ok :
+            print (f"{Config.Colors.GREEN}[+] Reset Successful.{Config.Colors.ENDC}")
+        if reset_ok ==False :
+            print (f"{Config.Colors.WARNING}[!] Reset failed. Continuing with best effort traversal.{Config.Colors.ENDC}")
+
     def _get_live_iccid (self )->str :
-        self .tp .transmit ("00A40000023F00",silent =True )
+        self .tp .transmit ("00A40004023F00",silent =True )
         data ,sw1 ,sw2 =self .tp .transmit ("00A40004022FE2",silent =True )
 
         valid_select =False 
@@ -1419,15 +1433,9 @@ class FileSystemController :
                 if len (parent_fid )>4 :
                     p_cmd =f"00A40400{len(parent_fid)//2:02X}{parent_fid}"
                 if len (parent_fid )<=4 :
-                    p_cmd =f"00A4000002{parent_fid}"
+                    p_cmd =f"00A4000402{parent_fid}"
 
                 p_data ,p_sw1 ,p_sw2 =self .tp .transmit (p_cmd ,silent =True )
-                retry_parent_short =False 
-                if p_sw1 !=0x90 and p_sw1 !=0x61 and p_sw1 !=0x9F :
-                    if len (parent_fid )==4 :
-                        retry_parent_short =True 
-                if retry_parent_short :
-                    p_data ,p_sw1 ,p_sw2 =self .tp .transmit (f"00A4000402{parent_fid}",silent =True )
 
                 selected_fid =None 
                 last_data =None 
@@ -1454,12 +1462,6 @@ class FileSystemController :
                         cmd =f"00A4000402{fid}"
 
                     data ,sw1 ,sw2 =self .tp .transmit (cmd ,silent =True )
-                    retry_short_fid =False 
-                    if sw1 !=0x90 and sw1 !=0x61 and sw1 !=0x9F :
-                        if len (fid )==4 :
-                            retry_short_fid =True 
-                    if retry_short_fid :
-                        data ,sw1 ,sw2 =self .tp .transmit (f"00A4000002{fid}",silent =True )
 
                     valid_sel =False 
                     if sw1 ==0x90 :
@@ -1509,7 +1511,7 @@ class FileSystemController :
                     if len (parent_fid )>4 :
                         p_cmd =f"00A40400{len(parent_fid)//2:02X}{parent_fid}"
                     if len (parent_fid )<=4 :
-                        p_cmd =f"00A4000002{parent_fid}"
+                        p_cmd =f"00A4000402{parent_fid}"
 
                     self .tp .transmit (p_cmd ,silent =True )
 
@@ -1537,7 +1539,7 @@ class FileSystemController :
                             _write_ef_content (target_fid ,file_base )
 
         try :
-            self .tp .transmit ("00A40000023F00",silent =True )
+            self .tp .transmit ("00A40004023F00",silent =True )
             _live_deep_scan (roots ,"3F00",root_dir )
             print (f"{Config.Colors.GREEN}[+] Live dump complete. Output saved to {root_dir}{Config.Colors.ENDC}")
         except Exception as e :

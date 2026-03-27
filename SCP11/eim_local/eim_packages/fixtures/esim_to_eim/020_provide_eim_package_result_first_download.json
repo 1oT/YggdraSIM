@@ -1,0 +1,58 @@
+{
+  "package_type": "provide_eim_package_result",
+  "package_version": "2.0.0",
+  "spec_target": "SGP.32 first-test fixed fixture BF50 response snapshot",
+  "sgp32": {
+    "provide_eim_package_result": {
+      "include": true,
+      "command_tag_hex": "BF50",
+      "eid_value": {
+        "include": false,
+        "tag_hex": "5A",
+        "value_hex": ""
+      },
+      "eim_transaction_id": {
+        "include": false,
+        "value_hex": ""
+      },
+      "result_choice": "profile_download_trigger_result",
+      "profile_download_trigger_result": {
+        "include": true,
+        "transaction_id_hex": "10000000000000000000000000000001",
+        "profile_download_error": {
+          "include": false,
+          "value": "undefinedError(127)"
+        },
+        "notifications": {
+          "include": false,
+          "pending_notification_list_hex": ""
+        }
+      },
+      "euicc_package_result": {
+        "include": false,
+        "value_hex": ""
+      },
+      "ipa_euicc_data_response": {
+        "include": false,
+        "value_hex": ""
+      },
+      "eim_package_result_response_error": {
+        "include": false,
+        "error_code": "undefinedError(127)"
+      }
+    }
+  },
+  "runtime": {
+    "queue_id": 20,
+    "matching_id": "EIM-FIRST-TEST-FIXTURE",
+    "transaction_id_hex": "10000000000000000000000000000001",
+    "profile_path": "SCP11/eim_local/profile/test_profile.txt",
+    "bip_endpoints": {
+      "eim": "https://yggdrasim.eim.test.1ot.com/gsma/rsp2/asn1",
+      "smdpp": "https://yggdrasim.smdpp.test.1ot.com/gsma/rsp2/es9plus"
+    },
+    "smdp_address": "yggdrasim.smdpp.test.1ot.com"
+  },
+  "additional_tlvs": [],
+  "optional_tags": {}
+}

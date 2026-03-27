@@ -1,0 +1,10 @@
+# openssl x509 extfile params
+extensions = extend
+prompt = no
+
+distinguished_name = dn-param
+[dn-param] # DN fields
+O = ACME
+CN = TEST SM-DS
+
+[extend] # openssl extensions

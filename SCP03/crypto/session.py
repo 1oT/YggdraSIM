@@ -1,9 +1,18 @@
 # -----------------------------------------------------------------------------
-# This Source Code Form is subject to the terms of the Mozilla Public
-# License, v. 2.0. If a copy of the MPL was not distributed with this
-# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
 #
-# Copyright (c) 2026 Hampus Hellsberg
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program. If not, see <https://www.gnu.org/licenses/>.
+#
+# Copyright (c) 2026 Hampus Hellsberg and contributors
 # -----------------------------------------------------------------------------
 
 from typing import List ,Dict ,Optional 
@@ -18,6 +27,7 @@ class Scp03Session :
     def __init__ (self ,static_keys :Dict [str ,bytes ]):
         self .k_enc =static_keys ['kenc']
         self .k_mac =static_keys ['kmac']
+        self .dek =static_keys .get ('dek',b'')
         self .s_enc =None 
         self .s_mac =None 
         self .s_rmac =None 
@@ -27,6 +37,16 @@ class Scp03Session :
         self .card_challenge =b''
         self .host_challenge =b''
         self .sec_level =0x33 
+        self .proprietary_iv =None 
+        self .last_cmd_header =b''
+        self .protocol_name ="SCP03"
+
+    def reset_state (self )->None :
+        self .chaining_value =b'\x00'*16 
+        self .ssc =0 
+        self .is_authenticated =False 
+        self .card_challenge =b''
+        self .host_challenge =b''
         self .proprietary_iv =None 
         self .last_cmd_header =b''
 
@@ -173,30 +193,24 @@ class Scp03Session :
             is_missing =True 
 
         if is_missing :
-            config_exists =False 
-            from SCP03 .config import Config 
-            if os .path .exists (Config .INI_FILE ):
-                config_exists =True 
+            from SCP03 .config import load_scp03_runtime_parser 
+            config =load_scp03_runtime_parser ()
 
-            if config_exists :
-                config =configparser .ConfigParser ()
-                config .read (Config .INI_FILE )
+            has_keys_section =False 
+            if 'KEYS'in config :
+                has_keys_section =True 
 
-                has_keys_section =False 
-                if 'KEYS'in config :
-                    has_keys_section =True 
+            if has_keys_section :
+                has_dek_entry =False 
+                if 'dek'in config ['KEYS']:
+                    has_dek_entry =True 
 
-                if has_keys_section :
-                    has_dek_entry =False 
-                    if 'dek'in config ['KEYS']:
-                        has_dek_entry =True 
-
-                    if has_dek_entry :
-                        target_dek =config ['KEYS']['dek'].strip ()
-                        is_missing =False 
+                if has_dek_entry :
+                    target_dek =config ['KEYS']['dek'].strip ()
+                    is_missing =False 
 
         if is_missing :
-            raise Exception ("DEK attribute is missing from session and keys.ini.")
+            raise Exception ("DEK attribute is missing from the active SCP03 SQLite state.")
 
         is_string =False 
         if isinstance (target_dek ,str ):

@@ -1,0 +1,121 @@
+{
+  "profile": {
+    "name": "Sample Lab",
+    "profile_type": "Sample Lab",
+    "profile_class": "OPERATIONAL",
+    "iccid": "89460811111111111112",
+    "icon": {
+      "type": "NONE",
+      "data_hex": ""
+    }
+  },
+  "operator": {
+    "name": "Sample Lab",
+    "mcc": "999",
+    "mnc": "99",
+    "gid1": "FFFFFFFFFFFFFFFF",
+    "gid2": "FFFFFFFFFFFFFFFF"
+  },
+  "notification_events": {
+    "install": false,
+    "enable": true,
+    "disable": true,
+    "delete": true,
+    "rpm_enable": false,
+    "rpm_disable": false,
+    "rpm_delete": false,
+    "load_rpm_package_result": false,
+    "address": ""
+  },
+  "policy_rules": {
+    "update_control_forbidden": false,
+    "disable_not_allowed": false,
+    "delete_not_allowed": false
+  },
+  "custom": {
+    "sgp22_metadata_tags": {
+      "BF25": {
+        "include": false,
+        "value_hex": ""
+      },
+      "BF2A": {
+        "include": false,
+        "value_hex": ""
+      },
+      "5A": {
+        "include": false,
+        "value_hex": ""
+      },
+      "91": {
+        "include": false,
+        "value_hex": ""
+      },
+      "92": {
+        "include": false,
+        "value_hex": ""
+      },
+      "93": {
+        "include": false,
+        "value_hex": ""
+      },
+      "94": {
+        "include": false,
+        "value_hex": ""
+      },
+      "95": {
+        "include": false,
+        "value_hex": ""
+      },
+      "99": {
+        "include": false,
+        "value_hex": ""
+      },
+      "B7": {
+        "include": false,
+        "value_hex": ""
+      }
+    },
+    "sgp22_profile_state_tags": {
+      "BF31": {
+        "include": false,
+        "value_hex": ""
+      },
+      "BF32": {
+        "include": false,
+        "value_hex": ""
+      },
+      "BF33": {
+        "include": false,
+        "value_hex": ""
+      }
+    },
+    "sgp32_discovery_tags": {
+      "BF55": {
+        "include": false,
+        "value_hex": ""
+      },
+      "BF56": {
+        "include": false,
+        "value_hex": ""
+      },
+      "BF43": {
+        "include": false,
+        "value_hex": ""
+      },
+      "BF2B": {
+        "include": false,
+        "value_hex": ""
+      },
+      "BF30": {
+        "include": false,
+        "value_hex": ""
+      }
+    },
+    "aosp_tags": {
+      "BF76": {
+        "include": false,
+        "value_hex": ""
+      }
+    }
+  }
+}

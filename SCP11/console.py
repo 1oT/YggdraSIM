@@ -1,3 +1,20 @@
+# -----------------------------------------------------------------------------
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program. If not, see <https://www.gnu.org/licenses/>.
+#
+# Copyright (c) 2026 Hampus Hellsberg and contributors
+# -----------------------------------------------------------------------------
+
 import atexit
 import hashlib
 import os
@@ -9,6 +26,8 @@ from urllib.parse import urlparse
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
+from yggdrasim_common.quit_control import quit_all
+
 try:
     from SCP03.core.utils import TlvParser
 except Exception:
@@ -18,6 +37,26 @@ try:
     from SCP03.config import Config as SCP03Config
 except Exception:
     SCP03Config = None
+
+from SCP11.shared.device_inventory_support import EidInventoryNamespace
+
+try:
+    from SCP03.logic.euicc_info2 import build_euicc_info2_detail_lines
+except Exception:
+    build_euicc_info2_detail_lines = None
+
+try:
+    from SCP03.logic.sgp32_decode import decode_eim_configuration_entries
+    from SCP03.logic.sgp32_decode import decode_euicc_info1_summary
+    from SCP03.logic.sgp32_decode import decode_get_certs_response
+    from SCP03.logic.sgp32_decode import decode_notifications_response
+    from SCP03.logic.sgp32_decode import decode_rat_rules
+except Exception:
+    decode_eim_configuration_entries = None
+    decode_euicc_info1_summary = None
+    decode_get_certs_response = None
+    decode_notifications_response = None
+    decode_rat_rules = None
 
 try:
     import readline
@@ -86,6 +125,14 @@ class ConsoleStyle:
     end: str
 
 
+def _hex_to_ansi(hex_color: str) -> str:
+    hex_value = hex_color.lstrip("#")
+    red = int(hex_value[0:2], 16)
+    green = int(hex_value[2:4], 16)
+    blue = int(hex_value[4:6], 16)
+    return f"\033[38;2;{red};{green};{blue}m"
+
+
 class SCP11Console:
     """Interactive SCP11 command shell with persistent card session."""
     TAG_ENABLE_PROFILE = 0xBF31
@@ -97,7 +144,7 @@ class SCP11Console:
     TAG_AID = 0x4F
     TAG_ICCID = 0x5A
     DEFAULT_AID_REGISTRY_PATH = os.path.normpath(
-        os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "SCP03", "aid.txt")
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "SCP03", "aid.txt")
     )
     HELP_USAGE_WIDTH = 31
 
@@ -110,6 +157,8 @@ class SCP11Console:
         self.current_es9_base_url = self.cfg.ES9_BASE_URL
         self.current_es9_verify_tls = self.cfg.ES9_VERIFY_TLS
         self.current_es9_ca_bundle_path = self.cfg.ES9_CA_BUNDLE_PATH
+        self.current_eid = ""
+        self._inventory = EidInventoryNamespace("scp11")
         self._es9_auto_derived = False
         self._style = self._build_style()
         self._commands: Dict[str, CommandSpec] = {}
@@ -127,16 +176,22 @@ class SCP11Console:
         self._setup_readline()
 
     def run(self) -> None:
-        self._initialize_session()
-        self._activate_locked_help_pane_if_supported()
-        self._print_start_snapshot()
-        if self._help_pane_locked is False:
-            self._print_help()
+        try:
+            self._initialize_session()
+            self._activate_locked_help_pane_if_supported()
+            self._print_start_snapshot()
+            if self._help_pane_locked is False:
+                self._print_help()
+        except Exception as error:
+            self._deactivate_locked_help_pane()
+            raise RuntimeError(f"SCP11 session initialization failed: {error}") from error
 
         try:
             while True:
                 try:
-                    raw_line = input("\n[SCP11] > ").strip()
+                    raw_line = input(
+                        f"\n{self._style.header}[SCP11] > {self._style.end}"
+                    ).strip()
                 except KeyboardInterrupt:
                     print("\n[*] Exiting SCP11 shell.")
                     break
@@ -144,28 +199,55 @@ class SCP11Console:
                     print("\n[*] Exiting SCP11 shell.")
                     break
 
-                if len(raw_line) == 0:
-                    continue
-
-                command, argument = self._split_command(raw_line)
-                command_upper = command.upper()
-                if command_upper not in self._commands:
-                    print(f"[!] Unknown command: {command}")
-                    if self._help_pane_locked:
-                        print("[*] Help pane is pinned in the top half.")
-                        self._refresh_locked_help_pane()
-                    else:
-                        self._print_help()
-                    continue
-
-                handler = self._commands[command_upper].handler
-                keep_running = handler(argument)
+                keep_running = self._run_command_line(raw_line)
                 if keep_running is False:
                     break
         finally:
             self._deactivate_locked_help_pane()
 
+    def run_commands(self, cmd_line: str) -> None:
+        try:
+            self._initialize_session()
+        except Exception as error:
+            raise RuntimeError(f"SCP11 session initialization failed: {error}") from error
+        try:
+            for raw_command in self._split_batch_commands(cmd_line):
+                keep_running = self._run_command_line(raw_command, show_help_on_unknown=False)
+                if keep_running is False:
+                    break
+        finally:
+            self._deactivate_locked_help_pane()
+
+    @staticmethod
+    def _split_batch_commands(cmd_line: str) -> list[str]:
+        commands: list[str] = []
+        for raw_command in str(cmd_line or "").split(";"):
+            command_text = str(raw_command or "").strip()
+            if len(command_text) == 0:
+                continue
+            commands.append(command_text)
+        return commands
+
+    def _run_command_line(self, raw_line: str, show_help_on_unknown: bool = True) -> bool:
+        if len(str(raw_line or "").strip()) == 0:
+            return True
+        command, argument = self._split_command(raw_line)
+        command_upper = command.upper()
+        if command_upper not in self._commands:
+            print(f"[!] Unknown command: {command}")
+            if show_help_on_unknown:
+                if self._help_pane_locked:
+                    print("[*] Help pane is pinned in the top half.")
+                    self._refresh_locked_help_pane()
+                else:
+                    self._print_help()
+            return True
+        handler = self._commands[command_upper].handler
+        return handler(argument)
+
     def _activate_locked_help_pane_if_supported(self) -> None:
+        if self._locked_help_pane_requested() is False:
+            return
         if sys.stdout.isatty() is False:
             return
 
@@ -190,6 +272,13 @@ class SCP11Console:
         sys.stdout.flush()
         self._refresh_locked_help_pane()
         self._set_lower_scroll_region()
+
+    def _locked_help_pane_requested(self) -> bool:
+        raw_value = os.environ.get("SCP11_PINNED_HELP", "")
+        normalized = raw_value.strip().lower()
+        if normalized in ["1", "true", "yes", "on"]:
+            return True
+        return False
 
     def _deactivate_locked_help_pane(self) -> None:
         if self._help_pane_locked is False:
@@ -457,11 +546,12 @@ class SCP11Console:
         self._print_profiles_table(snapshot.profiles, title="Profiles on Card")
 
     def _print_help(self) -> None:
-        print(f"\n{self._style.bold}Core SCP11 commands:{self._style.end}")
+        print(f"\n{self._style.bold}{self._style.header}eSIM Relay Command Groups{self._style.end}")
+        print(f"\n{self._style.cyan}--- Session & Utilities ---{self._style.end}")
         core_rows = self._get_core_help_rows()
         self._print_help_rows(core_rows)
 
-        print(f"\n{self._style.bold}SGP.22 / SGP.32 commands:{self._style.end}")
+        print(f"\n{self._style.header}--- SGP.22 / SGP.32 Operations ---{self._style.end}")
         extended_rows = self._get_extended_help_rows()
         self._print_help_rows(extended_rows)
 
@@ -483,6 +573,7 @@ class SCP11Console:
             ("FLOW [matchingId]", "Run SCP11 flow with active SM-DP+ target"),
             ("DOWNLOAD-AC <activation>", "Parse activation code and run FLOW"),
             ("EXIT", "Leave SCP11 shell"),
+            ("QA", "Leave SCP11 shell and exit YggdraSIM"),
         ]
 
     def _get_extended_help_rows(self) -> List[Tuple[str, str]]:
@@ -505,7 +596,7 @@ class SCP11Console:
             ("GET-EIM-CONFIG", "ES10b.GetEimConfigurationData (SGP.32)"),
             ("EIM-DISCOVER", "SGP.32 eIM capability discovery"),
             ("EIM-AUTHENTICATE [matchingId]", "SGP.32/SGP.22 authentication phase"),
-            ("EIM-DOWNLOAD", "SGP.32 eIM profile operation (scaffold)"),
+            ("EIM-DOWNLOAD [matchingId]", "SGP.32 eIM poll and relay flow"),
         ]
 
     def _split_command(self, line: str) -> Tuple[str, str]:
@@ -566,6 +657,7 @@ class SCP11Console:
             self._cmd_download_activation_code,
         )
         self._add_command("EXIT", "EXIT", "Leave SCP11 shell", self._cmd_exit, aliases=["QUIT", "Q"])
+        self._add_command("QA", "QA", "Leave SCP11 shell and exit YggdraSIM", self._cmd_quit_all)
 
         self._add_command("GET-EUICC-INFO1", "GET-EUICC-INFO1", "ES10a.GetEuiccInfo1", self._cmd_get_euicc_info1)
         self._add_command("GET-EUICC-INFO2", "GET-EUICC-INFO2", "ES10a.GetEuiccInfo2", self._cmd_get_euicc_info2)
@@ -620,7 +712,12 @@ class SCP11Console:
             "SGP.32/SGP.22 authentication phase",
             self._cmd_eim_authenticate,
         )
-        self._add_scaffold("EIM-DOWNLOAD", "EIM-DOWNLOAD", "SGP.32 eIM profile operation")
+        self._add_command(
+            "EIM-DOWNLOAD",
+            "EIM-DOWNLOAD [matchingId]",
+            "SGP.32 eIM poll and relay flow",
+            self._cmd_eim_download,
+        )
 
     def _add_command(
         self,
@@ -643,20 +740,6 @@ class SCP11Console:
         if aliases is not None:
             for alias in aliases:
                 self._commands[alias] = spec
-
-    def _add_scaffold(self, name: str, usage: str, description: str) -> None:
-        def scaffold_handler(_: str, command_name: str = name) -> bool:
-            return self._cmd_scaffold(command_name)
-
-        spec = CommandSpec(
-            name=name,
-            usage=usage,
-            description=description,
-            handler=scaffold_handler,
-            scaffold=True,
-        )
-        self._commands[name] = spec
-        self._primary_commands.append(name)
 
     def _cmd_help(self, _: str) -> bool:
         if self._help_pane_locked:
@@ -815,6 +898,11 @@ class SCP11Console:
         self._save_history()
         print(f"{self._style.cyan}[*] Session closed.{self._style.end}")
         return False
+
+    def _cmd_quit_all(self, _: str) -> bool:
+        self._save_history()
+        print(f"{self._style.cyan}[*] Session closed.{self._style.end}")
+        quit_all()
 
     def _cmd_scaffold(self, command_name: str) -> bool:
         print(
@@ -1036,18 +1124,39 @@ class SCP11Console:
         print(f"[*] Transaction ID: {transaction_id_hex}")
         return True
 
+    def _cmd_eim_download(self, argument: str) -> bool:
+        matching_id = argument.strip()
+        print(f"{self._style.cyan}[*] Running eIM poll and relay flow...{self._style.end}")
+        try:
+            self.orchestrator.run_eim_poll(matching_id=matching_id)
+        except Exception as error:
+            print(f"{self._style.red}[!] EIM-DOWNLOAD failed: {error}{self._style.end}")
+            return True
+        print(f"{self._style.green}[+] eIM poll flow completed.{self._style.end}")
+        return True
+
     def _collect_snapshot(self) -> CardSnapshot:
         eid = self._get_eid()
+        self.current_eid = eid
         configured_raw = self._get_configured_addresses_raw()
         configured_decoded = self._decode_euicc_configured_data(configured_raw)
         profiles = self._fetch_profiles()
 
+        inventory_profile = self._inventory.load(eid)
+        inventory_target_loaded = False
+        inventory_es9_loaded = False
+        if len(eid) > 0 and len(inventory_profile) > 0:
+            inventory_target_loaded, inventory_es9_loaded = self._apply_inventory_profile(inventory_profile)
+
         card_default_smdp = configured_decoded.get("default_smdp", "")
         if len(card_default_smdp) > 0:
-            self.current_smdp_address = card_default_smdp
-            self._apply_es9_autoderive_from_card(card_default_smdp)
+            if inventory_target_loaded is False:
+                self.current_smdp_address = card_default_smdp
+            if inventory_es9_loaded is False:
+                self._apply_es9_autoderive_from_card(card_default_smdp)
         else:
-            self._warn_es9_placeholder_without_card_default()
+            if inventory_es9_loaded is False:
+                self._warn_es9_placeholder_without_card_default()
 
         return CardSnapshot(
             eid=eid,
@@ -1164,10 +1273,32 @@ class SCP11Console:
                 f"{self._style.green}[+] Default SM-DP+ APDU response: "
                 f"{response.hex().upper()}{self._style.end}"
             )
-            self.current_smdp_address = address_text
+            verified_raw = self._get_configured_addresses_raw()
+            verified = self._decode_euicc_configured_data(verified_raw)
+            card_default_smdp = str(verified.get("default_smdp", "")).strip()
+            if len(card_default_smdp) == 0:
+                self.current_smdp_address = address_text
+                self._persist_inventory_profile()
+                print(
+                    f"{self._style.yellow}[*] Could not verify updated card SM-DP+ value. "
+                    f"Active target kept as requested: {self.current_smdp_address}{self._style.end}"
+                )
+                return
+            self.current_smdp_address = card_default_smdp
+            self._persist_inventory_profile()
+            if card_default_smdp == address_text:
+                print(
+                    f"{self._style.green}[+] Card default SM-DP+ verified as: "
+                    f"{self.current_smdp_address}{self._style.end}"
+                )
+                return
             print(
-                f"{self._style.green}[+] Active SM-DP+ target updated to: "
-                f"{self.current_smdp_address}{self._style.end}"
+                f"{self._style.yellow}[*] Card default SM-DP+ remains: "
+                f"{card_default_smdp}{self._style.end}"
+            )
+            print(
+                f"{self._style.yellow}[*] Requested value was not persisted on card: "
+                f"{address_text}{self._style.end}"
             )
         except Exception as error:
             print(f"{self._style.red}[!] Failed to set SM-DP+ address: {error}{self._style.end}")
@@ -1314,6 +1445,8 @@ class SCP11Console:
         try:
             provider.set_base_url(normalized)
             self.current_es9_base_url = normalized
+            if source == "manual":
+                self._persist_inventory_profile()
             if source == "auto":
                 print(
                     f"{self._style.green}[+] Auto-derived ES9 base URL from card SM-DP+: "
@@ -1338,6 +1471,7 @@ class SCP11Console:
         try:
             provider.set_verify_tls(enabled)
             self.current_es9_verify_tls = enabled
+            self._persist_inventory_profile()
             mode = "ON"
             if enabled is False:
                 mode = "OFF"
@@ -1357,6 +1491,7 @@ class SCP11Console:
         try:
             provider.set_ca_bundle_path(path)
             self.current_es9_ca_bundle_path = path.strip()
+            self._persist_inventory_profile()
             if len(self.current_es9_ca_bundle_path) == 0:
                 print(f"{self._style.green}[+] ES9 CA bundle cleared (using system trust store).{self._style.end}")
             else:
@@ -1383,7 +1518,67 @@ class SCP11Console:
         escaped_path = path.replace("\\", "\\\\").replace('"', '\\"')
         self._persist_config_line("ES9_CA_BUNDLE_PATH: str =", f'"{escaped_path}"', "ES9_CA_BUNDLE_PATH")
 
+    def _inventory_payload(self) -> Dict[str, Any]:
+        return {
+            "smdp_address": self.current_smdp_address,
+            "es9_base_url": self.current_es9_base_url,
+            "es9_verify_tls": bool(self.current_es9_verify_tls),
+            "es9_ca_bundle_path": self.current_es9_ca_bundle_path,
+        }
+
+    def _apply_inventory_profile(self, profile: Dict[str, Any]) -> Tuple[bool, bool]:
+        provider = self.orchestrator.profile_provider
+        target_loaded = False
+        es9_loaded = False
+
+        stored_target = str(profile.get("smdp_address", "")).strip()
+        if len(stored_target) > 0:
+            self.current_smdp_address = stored_target
+            target_loaded = True
+
+        stored_url = str(profile.get("es9_base_url", "")).strip().rstrip("/")
+        if len(stored_url) > 0:
+            self.current_es9_base_url = stored_url
+            if hasattr(provider, "set_base_url"):
+                try:
+                    provider.set_base_url(stored_url)
+                except Exception:
+                    pass
+            es9_loaded = True
+
+        if "es9_verify_tls" in profile:
+            stored_verify_tls = bool(profile.get("es9_verify_tls"))
+            self.current_es9_verify_tls = stored_verify_tls
+            if hasattr(provider, "set_verify_tls"):
+                try:
+                    provider.set_verify_tls(stored_verify_tls)
+                except Exception:
+                    pass
+
+        if "es9_ca_bundle_path" in profile:
+            stored_ca_bundle_path = str(profile.get("es9_ca_bundle_path", "")).strip()
+            self.current_es9_ca_bundle_path = stored_ca_bundle_path
+            if hasattr(provider, "set_ca_bundle_path"):
+                try:
+                    provider.set_ca_bundle_path(stored_ca_bundle_path)
+                except Exception:
+                    pass
+
+        return target_loaded, es9_loaded
+
+    def _persist_inventory_profile(self) -> None:
+        if len(self.current_eid) == 0:
+            return
+        self._inventory.replace(self.current_eid, self._inventory_payload())
+
     def _persist_config_line(self, key_prefix: str, literal_value: str, human_key: str) -> None:
+        if len(self.current_eid) > 0:
+            self._persist_inventory_profile()
+            print(
+                f"{self._style.green}[+] Persisted {human_key} in SCP11 inventory "
+                f"for EID {self.current_eid}{self._style.end}"
+            )
+            return
         config_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.py")
         if os.path.exists(config_path) is False:
             print(f"{self._style.red}[!] Cannot persist {human_key}. Missing file: {config_path}{self._style.end}")
@@ -1488,6 +1683,8 @@ class SCP11Console:
     def _run_full_flow(self, matching_id: str) -> None:
         effective_matching_id = matching_id.strip()
         try:
+            print(f"[*] Active Flow Target: {self.current_smdp_address}")
+            print(f"[*] Active ES9 Base URL: {self.current_es9_base_url}")
             self.orchestrator.run_flow(
                 matching_id=effective_matching_id,
                 smdp_address=self.current_smdp_address,
@@ -1651,37 +1848,38 @@ class SCP11Console:
             print("[*] Run LIST and use ICCID or AID from output.")
             return
 
-        tag_type, value_hex = resolved
-        target_type = "ICCID"
-        if tag_type == self.TAG_AID:
-            target_type = "AID"
-        print(f"{self._style.cyan}[*] {action_label}: {target_type}={value_hex}{self._style.end}")
+        target_metadata = self._find_profile_metadata(identifier)
+        if func_tag == self.TAG_ENABLE_PROFILE:
+            self._run_enable_profile_state_command(resolved, target_metadata)
+            return
+        if func_tag == self.TAG_DISABLE_PROFILE:
+            self._run_disable_profile_state_command(resolved, target_metadata)
+            return
+        if func_tag == self.TAG_DELETE_PROFILE:
+            self._run_delete_profile_state_command(resolved, target_metadata)
+            return
+        self._execute_profile_state_command(resolved, func_tag, action_label)
 
-        payload = self._build_profile_command_payload(func_tag, tag_type, value_hex)
-        self._execute_result_command(
-            title=action_label,
-            payload=payload,
-            result_outer_tag=func_tag,
-        )
-
-    def _execute_result_command(self, title: str, payload: bytes, result_outer_tag: int) -> None:
+    def _execute_result_command(self, title: str, payload: bytes, result_outer_tag: int) -> bool:
         try:
             apdu = self._build_store_data_apdu(payload)
             response = self.apdu_channel.send(apdu, f"CMD: {title}")
         except Exception as error:
             print(f"{self._style.red}[!] {title} failed: {error}{self._style.end}")
-            return
+            return False
 
         result_code = self._extract_result_code(response, result_outer_tag)
         if result_code is None:
             print(f"{self._style.green}[+] {title}: success (no explicit result code).{self._style.end}")
             if len(response) > 0:
                 print(f"[*] Raw response: {response.hex().upper()}")
-            return
+            self._sync_notifications_after_success(response)
+            return True
 
         if result_code == 0:
             print(f"{self._style.green}[+] {title}: success.{self._style.end}")
-            return
+            self._sync_notifications_after_success(response)
+            return True
 
         error_map: Dict[int, str] = {
             1: "Profile Not Found",
@@ -1694,10 +1892,198 @@ class SCP11Console:
         if result_code in error_map:
             error_text = error_map[result_code]
         print(f"{self._style.red}[-] {title} failed, code 0x{result_code:02X}: {error_text}{self._style.end}")
+        return False
+
+    def _execute_profile_state_command(
+        self,
+        resolved: Tuple[int, str],
+        func_tag: int,
+        action_label: str,
+    ) -> bool:
+        tag_type, value_hex = resolved
+        target_type = "ICCID"
+        if tag_type == self.TAG_AID:
+            target_type = "AID"
+        print(f"{self._style.cyan}[*] {action_label}: {target_type}={value_hex}{self._style.end}")
+        payload = self._build_profile_command_payload(func_tag, tag_type, value_hex)
+        return self._execute_result_command(
+            title=action_label,
+            payload=payload,
+            result_outer_tag=func_tag,
+        )
+
+    def _run_enable_profile_state_command(
+        self,
+        resolved: Tuple[int, str],
+        target_metadata: Optional[ProfileMetadataView],
+    ) -> None:
+        if target_metadata is None:
+            self._execute_profile_state_command(resolved, self.TAG_ENABLE_PROFILE, "EnableProfile")
+            return
+
+        if target_metadata.state.upper() == "ENABLED":
+            print(f"{self._style.green}[+] EnableProfile: target is already enabled.{self._style.end}")
+            return
+
+        profiles = self._collect_profile_metadata()
+        active_profile = self._find_enabled_profile(profiles, exclude_profile=target_metadata)
+        if active_profile is not None:
+            print(
+                f"{self._style.yellow}[*] EnableProfile: auto-disabling active profile "
+                f"{self._describe_profile_metadata(active_profile)}.{self._style.end}"
+            )
+            if self._execute_profile_state_command(
+                self._profile_metadata_to_resolved(active_profile),
+                self.TAG_DISABLE_PROFILE,
+                "DisableProfile",
+            ) is False:
+                return
+
+        self._execute_profile_state_command(resolved, self.TAG_ENABLE_PROFILE, "EnableProfile")
+
+    def _run_disable_profile_state_command(
+        self,
+        resolved: Tuple[int, str],
+        target_metadata: Optional[ProfileMetadataView],
+    ) -> None:
+        if target_metadata is not None:
+            if target_metadata.state.upper() != "ENABLED":
+                print(f"{self._style.green}[+] DisableProfile: target is already disabled.{self._style.end}")
+                return
+        self._execute_profile_state_command(resolved, self.TAG_DISABLE_PROFILE, "DisableProfile")
+
+    def _run_delete_profile_state_command(
+        self,
+        resolved: Tuple[int, str],
+        target_metadata: Optional[ProfileMetadataView],
+    ) -> None:
+        if target_metadata is None:
+            self._execute_profile_state_command(resolved, self.TAG_DELETE_PROFILE, "DeleteProfile")
+            return
+
+        if target_metadata.state.upper() == "ENABLED":
+            profiles = self._collect_profile_metadata()
+            replacement = self._find_replacement_profile_for_delete(profiles, target_metadata)
+            if replacement is None:
+                print(
+                    f"{self._style.red}[!] DeleteProfile: target is enabled and no replacement profile "
+                    f"is available to switch to first.{self._style.end}"
+                )
+                return
+            print(
+                f"{self._style.yellow}[*] DeleteProfile: target is enabled, auto-switching to "
+                f"{self._describe_profile_metadata(replacement)} first.{self._style.end}"
+            )
+            if self._run_enable_profile_sequence_for_metadata(replacement) is False:
+                return
+
+        self._execute_profile_state_command(resolved, self.TAG_DELETE_PROFILE, "DeleteProfile")
+
+    def _run_enable_profile_sequence_for_metadata(self, target_metadata: ProfileMetadataView) -> bool:
+        resolved = self._profile_metadata_to_resolved(target_metadata)
+        if target_metadata.state.upper() == "ENABLED":
+            print(
+                f"{self._style.green}[+] EnableProfile: replacement target is already enabled "
+                f"({self._describe_profile_metadata(target_metadata)}).{self._style.end}"
+            )
+            return True
+
+        profiles = self._collect_profile_metadata()
+        active_profile = self._find_enabled_profile(profiles, exclude_profile=target_metadata)
+        if active_profile is not None:
+            print(
+                f"{self._style.yellow}[*] EnableProfile: auto-disabling active profile "
+                f"{self._describe_profile_metadata(active_profile)}.{self._style.end}"
+            )
+            if self._execute_profile_state_command(
+                self._profile_metadata_to_resolved(active_profile),
+                self.TAG_DISABLE_PROFILE,
+                "DisableProfile",
+            ) is False:
+                return False
+        return self._execute_profile_state_command(resolved, self.TAG_ENABLE_PROFILE, "EnableProfile")
+
+    def _find_enabled_profile(
+        self,
+        profiles: List[ProfileMetadataView],
+        exclude_profile: Optional[ProfileMetadataView] = None,
+    ) -> Optional[ProfileMetadataView]:
+        for entry in profiles:
+            if exclude_profile is not None:
+                if self._profile_metadata_matches(entry, exclude_profile):
+                    continue
+            if entry.state.upper() == "ENABLED":
+                return entry
+        return None
+
+    def _find_replacement_profile_for_delete(
+        self,
+        profiles: List[ProfileMetadataView],
+        target_profile: ProfileMetadataView,
+    ) -> Optional[ProfileMetadataView]:
+        disabled_candidates = []
+        enabled_candidates = []
+        for entry in profiles:
+            if self._profile_metadata_matches(entry, target_profile):
+                continue
+            if entry.state.upper() == "ENABLED":
+                enabled_candidates.append(entry)
+                continue
+            disabled_candidates.append(entry)
+        if len(enabled_candidates) > 0:
+            return enabled_candidates[0]
+        if len(disabled_candidates) == 0:
+            return None
+        disabled_candidates.sort(
+            key=lambda entry: (
+                self._profile_replacement_priority(entry),
+                entry.iccid,
+                entry.aid,
+            )
+        )
+        return disabled_candidates[0]
+
+    def _profile_replacement_priority(self, entry: ProfileMetadataView) -> int:
+        class_rank = {"OPER": 0, "PROV": 1, "TEST": 2}
+        return class_rank.get(entry.profile_class.upper(), 3)
+
+    def _profile_metadata_to_resolved(self, entry: ProfileMetadataView) -> Tuple[int, str]:
+        if len(entry.aid) > 0:
+            return self.TAG_AID, entry.aid.upper()
+        return self.TAG_ICCID, self._encode_iccid_for_command(entry.iccid)
+
+    def _profile_metadata_matches(self, left: ProfileMetadataView, right: ProfileMetadataView) -> bool:
+        left_aid = left.aid.strip().upper()
+        right_aid = right.aid.strip().upper()
+        if len(left_aid) > 0 and len(right_aid) > 0:
+            return left_aid == right_aid
+        return left.iccid.strip().upper() == right.iccid.strip().upper()
+
+    def _describe_profile_metadata(self, entry: ProfileMetadataView) -> str:
+        alias = self._resolve_alias_for_aid(entry.aid)
+        if alias is not None:
+            return f"{entry.iccid} ({alias})"
+        if len(entry.iccid) > 0:
+            return entry.iccid
+        return entry.aid
+
+    def _sync_notifications_after_success(self, response: bytes) -> None:
+        orchestrator = self.orchestrator
+        if orchestrator is None:
+            return
+        sync_method = getattr(orchestrator, "_sync_pending_notifications", None)
+        if callable(sync_method) is False:
+            return
+        try:
+            sync_method(response)
+        except Exception as error:
+            print(f"{self._style.yellow}[*] Notification sync skipped ({error}).{self._style.end}")
 
     def _build_profile_command_payload(self, func_tag: int, tag_type: int, value_hex: str) -> bytes:
         value_bytes = bytes.fromhex(value_hex)
         id_tlv = _build_tlv(bytes([tag_type]), value_bytes)
+        if func_tag == self.TAG_DELETE_PROFILE:
+            return _build_tlv(func_tag.to_bytes(2, "big"), id_tlv)
         ctx_tlv = _build_tlv(bytes([self.TAG_CTX_0]), id_tlv)
         refresh_required_tlv = _build_tlv(bytes.fromhex("81"), bytes.fromhex("00"))
         inner = ctx_tlv + refresh_required_tlv
@@ -1997,7 +2383,7 @@ class SCP11Console:
         if SCP03Config is not None and use_color:
             colors = SCP03Config.Colors
             return ConsoleStyle(
-                header=colors.HEADER,
+                header=colors.MINT,
                 cyan=colors.CYAN,
                 green=colors.GREEN,
                 yellow=colors.WARNING,
@@ -2008,11 +2394,11 @@ class SCP11Console:
 
         if use_color:
             return ConsoleStyle(
-                header="\033[95m",
-                cyan="\033[96m",
-                green="\033[92m",
-                yellow="\033[93m",
-                red="\033[91m",
+                header=_hex_to_ansi("#5FDCCB"),
+                cyan=_hex_to_ansi("#93F7FF"),
+                green=_hex_to_ansi("#8DFF8D"),
+                yellow=_hex_to_ansi("#FFF08F"),
+                red=_hex_to_ansi("#FF9A9A"),
                 bold="\033[1m",
                 end="\033[0m",
             )
@@ -2378,113 +2764,103 @@ class SCP11Console:
         return ", ".join(labels)
 
     def _print_euicc_info1_compact(self, response: bytes) -> None:
-        parsed = self._parse_tlv_simple(response)
-        root = self._first_bytes(parsed.get(0xBF20))
-        if root is None:
+        if decode_euicc_info1_summary is None:
             self._print_tlv_tree_bytes(response, indent=1, parent_tag=0xBF20)
             return
 
-        root_parsed = self._parse_tlv_simple(root)
-        version = self._first_bytes(root_parsed.get(0x82))
-        ci_pk_verify = root_parsed.get(0xA9)
-        ci_pk_sign = root_parsed.get(0xAA)
+        summary = decode_euicc_info1_summary(response)
+        if len(summary) == 0:
+            self._print_tlv_tree_bytes(response, indent=1, parent_tag=0xBF20)
+            return
 
-        if version is not None:
-            print(f"    | Profile Version       : {version.hex().upper()}")
-
-        verify_items = self._count_tag_occurrences(ci_pk_verify, 0x04)
-        sign_items = self._count_tag_occurrences(ci_pk_sign, 0x04)
-        print(f"    | CI PK Verify Entries  : {verify_items}")
-        print(f"    | CI PK Sign Entries    : {sign_items}")
+        svn = str(summary.get("svn", "")).strip()
+        if len(svn) > 0:
+            print(f"    | SVN                  : {svn}")
+        print(f"    | CI PK Verify Entries  : {summary.get('ci_pk_verify_entries', 0)}")
+        print(f"    | CI PK Sign Entries    : {summary.get('ci_pk_sign_entries', 0)}")
 
     def _print_euicc_info2_compact(self, response: bytes) -> None:
-        parsed = self._parse_tlv_simple(response)
-        root = self._first_bytes(parsed.get(0xBF22))
-        if root is None:
-            self._print_tlv_tree_bytes(response, indent=1, parent_tag=0xBF22)
-            return
-
-        root_parsed = self._parse_tlv_simple(root)
-        summary_tags: List[Tuple[int, str]] = [
-            (0x81, "Profile Version"),
-            (0x82, "Ver Supported"),
-            (0x83, "Firmware Ver"),
-            (0x84, "Ext Card Res"),
-            (0x85, "UICC Cap"),
-            (0x86, "TSCP Base"),
-            (0x87, "eUICC Category"),
-            (0x88, "PP Rules"),
-            (0x99, "PP Version"),
-            (0x0C, "SAS Accr Number"),
-        ]
-        for tag, label in summary_tags:
-            value = self._first_bytes(root_parsed.get(tag))
-            if value is None:
-                continue
-            rendered = self._decode_text_or_hex(value)
-            print(f"    | {label:<20}: {rendered}")
-
-        eim_block = self._first_bytes(root_parsed.get(0xB4))
-        if eim_block is not None:
-            block_parsed = self._parse_tlv_simple(eim_block)
-            field_81 = self._first_bytes(block_parsed.get(0x81))
-            field_82 = self._first_bytes(block_parsed.get(0x82))
-            has_81 = field_81 is not None
-            has_82 = field_82 is not None
-            print(f"    | eIM Support Fields    : 81={has_81} 82={has_82}")
-
-    def _print_rat_compact(self, response: bytes) -> None:
-        parsed = self._parse_tlv_simple(response)
-        root = self._first_bytes(parsed.get(0xBF43))
-        if root is None:
-            self._print_tlv_tree_bytes(response, indent=1, parent_tag=0xBF43)
-            return
-
-        root_parsed = self._parse_tlv_simple(root)
-        for tag, label in [(0x80, "Field 80"), (0x81, "Field 81"), (0x82, "Field 82 Bitmap")]:
-            value = self._first_bytes(root_parsed.get(tag))
-            if value is None:
-                continue
-            rendered = value.hex().upper()
-            if tag == 0x82:
-                bits = self._bitmap_set_bits(rendered)
-                print(f"    | {label:<20}: {rendered} (set bits: {bits})")
-                continue
-            print(f"    | {label:<20}: {rendered}")
-
-    def _print_get_certs_compact(self, response: bytes) -> None:
-        parsed = self._parse_tlv_simple(response)
-        root = self._first_bytes(parsed.get(0xBF56))
-        if root is None:
+        if build_euicc_info2_detail_lines is None:
             print(f"    | Raw response          : {self._short_display_hex(response.hex().upper(), 120)}")
             return
 
-        total_sequences = self._count_tag_recursive(root, 0x30)
-        total_oids = self._count_tag_recursive(root, 0x06)
-        print(f"    | Certificate Sets      : {total_sequences}")
-        print(f"    | OID Items             : {total_oids}")
-        print(f"    | Payload Bytes         : {len(root)}")
+        for indent_level, label, value in build_euicc_info2_detail_lines(response):
+            prefix = "    | "
+            if indent_level > 0:
+                prefix = "    | " + ("  " * indent_level)
+            print(f"{prefix}{label:<20}: {value}")
+
+    def _print_rat_compact(self, response: bytes) -> None:
+        if decode_rat_rules is None:
+            self._print_tlv_tree_bytes(response, indent=1, parent_tag=0xBF43)
+            return
+
+        rules = decode_rat_rules(response)
+        print(f"    | Rules                : {len(rules)}")
+        if len(rules) == 0:
+            return
+
+        first_rule = rules[0]
+        if "pprIdsRaw" in first_rule:
+            print(f"    | PPR IDs Raw          : {first_rule['pprIdsRaw']}")
+        if "pprIds" in first_rule:
+            print(f"    | PPR IDs Meaning      : {first_rule['pprIds']}")
+        operators = first_rule.get("allowedOperators", [])
+        print(f"    | Allowed Operators    : {len(operators) if isinstance(operators, list) else 0}")
+        if isinstance(operators, list) and len(operators) > 0:
+            operator = operators[0]
+            details = []
+            if "mccMnc" in operator:
+                details.append(f"mccMnc={operator['mccMnc']}")
+            if "gid1" in operator:
+                details.append(f"gid1={operator['gid1']}")
+            if "gid2" in operator:
+                details.append(f"gid2={operator['gid2']}")
+            print(f"    | First Operator       : {', '.join(details)}")
+        if "pprFlagsRaw" in first_rule:
+            print(f"    | PPR Flags Raw        : {first_rule['pprFlagsRaw']}")
+        if "pprFlags" in first_rule:
+            print(f"    | PPR Flags Meaning    : {first_rule['pprFlags']}")
+
+    def _print_get_certs_compact(self, response: bytes) -> None:
+        if decode_get_certs_response is None:
+            print(f"    | Raw response          : {self._short_display_hex(response.hex().upper(), 120)}")
+            return
+
+        decoded = decode_get_certs_response(response)
+        if len(decoded) == 0:
+            print(f"    | Raw response          : {self._short_display_hex(response.hex().upper(), 120)}")
+            return
+        if "error" in decoded:
+            print(f"    | Result               : {decoded['error']}")
+            return
+
+        eum = decoded.get("eumCertificate", b"")
+        euicc = decoded.get("euiccCertificate", b"")
+        print(f"    | EUM Certificate      : {'Present' if isinstance(eum, bytes) and len(eum) > 0 else 'Absent'}")
+        print(f"    | eUICC Certificate    : {'Present' if isinstance(euicc, bytes) and len(euicc) > 0 else 'Absent'}")
+        if isinstance(eum, bytes) and len(eum) > 0:
+            print(f"    | EUM Cert Bytes       : {len(eum)}")
+        if isinstance(euicc, bytes) and len(euicc) > 0:
+            print(f"    | eUICC Cert Bytes     : {len(euicc)}")
 
     def _print_eim_configuration_compact(self, response: bytes) -> None:
-        parsed = self._parse_tlv_simple(response)
-        root = self._first_bytes(parsed.get(0xBF55))
-        if root is None:
+        if self.orchestrator is None or decode_eim_configuration_entries is None:
             self._print_tlv_tree_bytes(response, indent=1, parent_tag=0xBF55)
             return
 
-        entries = self._collect_tag_recursive(root, 0xE1)
+        entries = decode_eim_configuration_entries(response)
         print(f"    | eIM Entries           : {len(entries)}")
         if len(entries) == 0:
             return
 
         first = entries[0]
-        first_parsed = self._parse_tlv_simple(first)
-        fqdn = self._first_bytes(first_parsed.get(0x80))
-        eim_id = self._first_bytes(first_parsed.get(0x81))
-        if fqdn is not None:
-            print(f"    | First eIM FQDN        : {self._decode_text_or_hex(fqdn)}")
-        if eim_id is not None:
-            print(f"    | First eIM ID          : {self._decode_text_or_hex(eim_id)}")
+        fqdn = str(first.get("eim_fqdn", "")).strip()
+        eim_id = str(first.get("eim_id", "")).strip()
+        if len(fqdn) > 0:
+            print(f"    | First eIM FQDN        : {fqdn}")
+        if len(eim_id) > 0:
+            print(f"    | First eIM ID          : {eim_id}")
 
     def _first_bytes(self, value: Any) -> Optional[bytes]:
         if isinstance(value, bytes):
@@ -2501,76 +2877,38 @@ class SCP11Console:
             print(f"  {usage:<{self.HELP_USAGE_WIDTH}} {description}")
 
     def _print_notifications_list_compact(self, response: bytes) -> None:
-        parsed = self._parse_tlv_simple(response)
-        root_bytes = self._first_bytes(parsed.get(0xBF2B))
-        if root_bytes is None:
+        if decode_notifications_response is None:
             print("    | Notification Entries : (Empty)")
             return
 
-        entry_count = 0
-        first_entry: Optional[bytes] = None
-        nodes = self._parse_tlv_nodes(root_bytes)
-        for tag, value, _ in nodes:
-            if tag != 0xBF2F:
-                continue
-            entry_count += 1
-            if first_entry is None:
-                first_entry = value
-
-        print(f"    | Notification Entries : {entry_count}")
-        if first_entry is None:
+        decoded = decode_notifications_response(response)
+        notifications = decoded.get("notifications", [])
+        package_results = decoded.get("package_results", [])
+        error_text = str(decoded.get("error", "")).strip()
+        if len(error_text) > 0:
+            print(f"    | Result               : {error_text}")
             return
 
-        first = self._parse_tlv_simple(first_entry)
-        seq_value = self._first_bytes(first.get(0x80))
-        if seq_value is not None:
-            print(f"    | Seq Number           : {int.from_bytes(seq_value, 'big')}")
+        print(f"    | Notification Entries : {len(notifications)}")
+        if len(package_results) > 0:
+            print(f"    | Package Results      : {len(package_results)}")
+        if len(notifications) == 0:
+            return
 
-        op_value = self._first_bytes(first.get(0x81))
-        if op_value is not None:
-            print(f"    | Operation            : {op_value.hex().upper()}")
-
-        fqdn_value = self._first_bytes(first.get(0x0C))
-        if fqdn_value is not None:
-            print(f"    | Server/FQDN          : {self._decode_text_or_hex(fqdn_value)}")
-
-        id_value = self._first_bytes(first.get(0x5A))
-        if id_value is not None:
-            print(f"    | EID/ICCID            : {self._swap_nibbles(id_value.hex().upper())}")
+        first = notifications[0]
+        if "seqNumber" in first:
+            print(f"    | Seq Number           : {first['seqNumber']}")
+        if "operation" in first:
+            print(f"    | Operation            : {first['operation']}")
+        if "notificationAddress" in first:
+            print(f"    | Server/FQDN          : {first['notificationAddress']}")
+        if "iccid" in first:
+            print(f"    | ICCID                : {first['iccid']}")
 
     def _short_display_hex(self, text: str, max_len: int = 64) -> str:
         if len(text) <= max_len:
             return text
         return text[:max_len] + "..."
-
-    def _bitmap_set_bits(self, hex_text: str) -> str:
-        try:
-            raw = bytes.fromhex(hex_text)
-        except ValueError:
-            return "n/a"
-        bitmask = int.from_bytes(raw, "big", signed=False)
-        width = len(raw) * 8
-        bits: List[str] = []
-        bit_index = width - 1
-        while bit_index >= 0:
-            is_set = ((bitmask >> bit_index) & 0x01) == 0x01
-            if is_set:
-                bits.append(str(bit_index))
-            bit_index -= 1
-        if len(bits) == 0:
-            return "none"
-        return ", ".join(bits)
-
-    def _count_tag_occurrences(self, value: Any, wanted_tag: int) -> int:
-        blob = self._first_bytes(value)
-        if blob is None:
-            return 0
-        count = 0
-        nodes = self._parse_tlv_nodes(blob)
-        for tag, _, _ in nodes:
-            if tag == wanted_tag:
-                count += 1
-        return count
 
     def _count_tag_recursive(self, data: bytes, wanted_tag: int) -> int:
         count = 0

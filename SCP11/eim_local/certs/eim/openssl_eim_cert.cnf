@@ -1,0 +1,28 @@
+[ req ]
+default_bits = 256
+distinguished_name = req_dn
+prompt = no
+default_md = sha256
+x509_extensions = v3_eim
+
+[ req_dn ]
+C = SE
+ST = Stockholm
+L = Stockholm
+O = YggdraSIM
+OU = eSIM Simulator
+CN = YggdraSIM.eSIM.Simulator.Cert
+emailAddress = certops@yggdrasim.local
+
+[ v3_eim ]
+basicConstraints = critical, CA:FALSE
+keyUsage = critical, digitalSignature, keyEncipherment, keyAgreement
+extendedKeyUsage = clientAuth, serverAuth
+subjectKeyIdentifier = hash
+authorityKeyIdentifier = keyid,issuer
+subjectAltName = @alt_names
+
+[ alt_names ]
+DNS.1 = YggdraSIM.eSIM.Simulator.Cert
+DNS.2 = eim.local.yggdrasim
+URI.1 = urn:yggdrasim:eim:simulator:cert

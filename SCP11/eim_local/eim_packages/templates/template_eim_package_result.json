@@ -1,0 +1,54 @@
+{
+  "package_type": "eim_package_result",
+  "package_version": "2.1.2",
+  "spec_target": "SGP.32 eIM Package Result (2.11.2) with all result CHOICE branches",
+  "sgp32": {
+    "eim_package_result": {
+      "include": true,
+      "choice": "euicc_package_result",
+      "euicc_package_result": {
+        "include": true,
+        "transaction_id": {
+          "include": true,
+          "value_hex": "0102030405060708090A0B0C0D0E0F10"
+        },
+        "result_payload": {
+          "include": true,
+          "value_hex": ""
+        }
+      },
+      "ipa_euicc_data_response": {
+        "include": false,
+        "transaction_id": {
+          "include": true,
+          "value_hex": "0102030405060708090A0B0C0D0E0F10"
+        },
+        "response_payload": {
+          "include": true,
+          "value_hex": ""
+        }
+      },
+      "profile_download_trigger_result": {
+        "include": false,
+        "transaction_id": {
+          "include": true,
+          "value_hex": "0102030405060708090A0B0C0D0E0F10"
+        },
+        "result_code": {
+          "include": true,
+          "value": "ok"
+        },
+        "result_detail": {
+          "include": false,
+          "value": ""
+        }
+      }
+    }
+  },
+  "runtime": {
+    "matching_id": "EIM-PKG-RES",
+    "transaction_id_hex": "0102030405060708090A0B0C0D0E0F10"
+  },
+  "additional_tlvs": [],
+  "optional_tags": {}
+}

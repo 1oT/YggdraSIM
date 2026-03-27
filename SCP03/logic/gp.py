@@ -1,9 +1,18 @@
 # -----------------------------------------------------------------------------
-# This Source Code Form is subject to the terms of the Mozilla Public
-# License, v. 2.0. If a copy of the MPL was not distributed with this
-# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
 #
-# Copyright (c) 2026 Hampus Hellsberg
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program. If not, see <https://www.gnu.org/licenses/>.
+#
+# Copyright (c) 2026 Hampus Hellsberg and contributors
 # -----------------------------------------------------------------------------
 
 import os 
@@ -15,6 +24,7 @@ from SCP03 .core .utils import HexUtils ,TlvParser
 from SCP03 .core .decoders import AdvancedDecoders 
 from SCP03 .core .cap import CapFileParser 
 from SCP03 .crypto .session import Scp03Session 
+from SCP03 .crypto .scp02_session import Scp02SessionAdapter 
 from SCP03 .logic .sgp22 import Sgp22Manager 
 from cryptography .hazmat .primitives .ciphers import algorithms ,Cipher ,modes 
 from cryptography .hazmat .primitives import cmac 
@@ -23,15 +33,38 @@ class GlobalPlatformManager :
     def __init__ (self ,transport ,config_keys ):
         self .tp =transport 
         self .raw_keys =config_keys 
-        self .keys ={
-        'kenc':HexUtils .to_bytes (config_keys .get ('kenc',Config .DEFAULT_KEYS ['kenc'])),
-        'kmac':HexUtils .to_bytes (config_keys .get ('kmac',Config .DEFAULT_KEYS ['kmac'])),
-        'dek':HexUtils .to_bytes (config_keys .get ('dek',Config .DEFAULT_KEYS ['dek']))
+        self .scp03_keys ={
+        'kenc':HexUtils .to_bytes (config_keys .get ('scp03_kenc',Config .DEFAULT_KEYS ['scp03_kenc'])),
+        'kmac':HexUtils .to_bytes (config_keys .get ('scp03_kmac',Config .DEFAULT_KEYS ['scp03_kmac'])),
+        'dek':HexUtils .to_bytes (config_keys .get ('scp03_dek',Config .DEFAULT_KEYS ['scp03_dek']))
+        }
+        self .scp02_keys ={
+        'enc':HexUtils .to_bytes (config_keys .get ('scp02_enc',Config .DEFAULT_KEYS ['scp02_enc'])),
+        'mac':HexUtils .to_bytes (config_keys .get ('scp02_mac',Config .DEFAULT_KEYS ['scp02_mac'])),
+        'dek':HexUtils .to_bytes (config_keys .get ('scp02_dek',Config .DEFAULT_KEYS ['scp02_dek']))
         }
         self .target_aid =HexUtils .to_bytes (config_keys .get ('aid',Config .DEFAULT_KEYS ['aid']))
-        self .kvn =int (config_keys .get ('kvn',Config .DEFAULT_KEYS ['kvn']),16 )
+        self .scp03_kvn =int (config_keys .get ('scp03_kvn',Config .DEFAULT_KEYS ['scp03_kvn']),16 )
+        self .scp02_kvn =int (config_keys .get ('scp02_kvn',Config .DEFAULT_KEYS ['scp02_kvn']),16 )
+        self .active_scp_protocol ="SCP03"
 
         self .sgp22 =Sgp22Manager (transport )
+
+    def get_active_protocol_name (self )->str :
+        return self .active_scp_protocol 
+
+    def get_active_kvn_hex (self )->str :
+        if self .active_scp_protocol =="SCP02":
+            return f"{self.scp02_kvn:02X}"
+        return f"{self.scp03_kvn:02X}"
+
+    def get_config_key_fields_for_protocol (self ,protocol_name :str =None )->Tuple [str ,str ,str ,str ]:
+        protocol =self .active_scp_protocol 
+        if protocol_name is not None :
+            protocol =str (protocol_name ).strip ().upper ()
+        if protocol =="SCP02":
+            return ("scp02_enc","scp02_mac","scp02_dek","scp02_kvn")
+        return ("scp03_kenc","scp03_kmac","scp03_dek","scp03_kvn")
 
     def verify_adm (self ,key_hex :Optional [str ]=None ):
         target_key =key_hex 
@@ -47,8 +80,9 @@ class GlobalPlatformManager :
             print (f"{Config.Colors.WARNING}[!] Warning: ADM key should be 16 hex digits.{Config.Colors.ENDC}")
 
         if self .tp .session and self .tp .session .is_authenticated :
-            print (f"{Config.Colors.WARNING}[!] Warning: Switching to MF will terminate SCP03 session.{Config.Colors.ENDC}")
-            self .tp .session .is_authenticated =False 
+            active_protocol =getattr (self .tp .session ,'protocol_name',"SCP")
+            print (f"{Config.Colors.WARNING}[!] Warning: Switching to MF will terminate {active_protocol} session.{Config.Colors.ENDC}")
+            self .tp .reset_session_state ()
 
         print (f"{Config.Colors.CYAN}[*] Selecting MF (3F00)...{Config.Colors.ENDC}")
         self .tp .transmit ("00A40004023F00",silent =True )
@@ -67,26 +101,44 @@ class GlobalPlatformManager :
         else :
             print (f"{Config.Colors.FAIL}[-] ADM Failed: SW {sw1:02X}{sw2:02X}{Config.Colors.ENDC}")
 
-    def authenticate (self )->bool :
-        """SCP03 Handshake."""
+    def authenticate (self ,protocol_name :str ="SCP03")->bool :
+        protocol =str (protocol_name ).strip ().upper ()
+        if protocol =="SCP02":
+            return self .authenticate_scp02 ()
+        return self .authenticate_scp03 ()
+
+    def authenticate_scp03 (self )->bool :
         if self .tp .session :
-            self .tp .session .is_authenticated =False 
+            self .tp .reset_session_state ()
 
         target_hex =self .target_aid .hex ().upper ()
-        print (f"{Config.Colors.CYAN}[*] Authenticating to Security Domain: {target_hex}...{Config.Colors.ENDC}")
+        print (f"{Config.Colors.CYAN}[*] Authenticating to Security Domain via SCP03: {target_hex}...{Config.Colors.ENDC}")
 
         self .tp .transmit (f"00A40400{len(self.target_aid):02X}{target_hex}",silent =True )
 
-        host_challenge =os .urandom (8 )
-        cmd =f"8050000008{host_challenge.hex()}"
-        data ,sw1 ,sw2 =self .tp .transmit (cmd ,silent =True )
+        attempted_kvns =[self .scp03_kvn ]
+        if self .scp03_kvn !=0 :
+            attempted_kvns .append (0 )
+
+        data =b''
+        sw1 =0x6F 
+        sw2 =0x00 
+        host_challenge =b''
+        used_kvn =self .scp03_kvn 
+        for kvn_candidate in attempted_kvns :
+            host_challenge =os .urandom (8 )
+            cmd =f"8050{kvn_candidate:02X}0008{host_challenge.hex()}"
+            data ,sw1 ,sw2 =self .tp .transmit (cmd ,silent =True )
+            if sw1 ==0x90 :
+                used_kvn =kvn_candidate 
+                break 
 
         if sw1 !=0x90 :
             print (f"{Config.Colors.FAIL}[-] INITIALIZE UPDATE Failed: {sw1:02X}{sw2:02X}{Config.Colors.ENDC}")
             return False 
 
         try :
-            self .tp .session =Scp03Session (self .keys )
+            self .tp .session =Scp03Session (self .scp03_keys )
             self .tp .session .sec_level =0x33 
             self .tp .session .derive_keys (host_challenge ,data )
         except Exception as e :
@@ -107,15 +159,57 @@ class GlobalPlatformManager :
         data ,sw1 ,sw2 =self .tp .connection .transmit (cmd_bytes )
 
         if sw1 ==0x90 :
+            self .scp03_kvn =used_kvn 
+            self .active_scp_protocol ="SCP03"
             self .tp .session .ssc =1 
             self .tp .session .is_authenticated =True 
-            print (f"{Config.Colors.GREEN}[+] SCP03 Authenticated (Level 0x33){Config.Colors.ENDC}")
+            print (f"{Config.Colors.GREEN}[+] SCP03 Authenticated (Level 0x33, KVN 0x{used_kvn:02X}){Config.Colors.ENDC}")
             self .get_keys_info (silent =True )
             return True 
-        else :
-            self .tp .session .is_authenticated =False 
+        self .tp .reset_session_state ()
+        print (f"{Config.Colors.FAIL}[-] EXTERNAL AUTH Failed: {sw1:02X}{sw2:02X}{Config.Colors.ENDC}")
+        return False 
+
+    def authenticate_scp02 (self )->bool :
+        if self .tp .session :
+            self .tp .reset_session_state ()
+
+        target_hex =self .target_aid .hex ().upper ()
+        print (f"{Config.Colors.CYAN}[*] Authenticating to Security Domain via SCP02: {target_hex}...{Config.Colors.ENDC}")
+
+        self .tp .transmit (f"00A40400{len(self.target_aid):02X}{target_hex}",silent =True )
+
+        session =Scp02SessionAdapter (
+        self .scp02_keys ['enc'],
+        self .scp02_keys ['mac'],
+        self .scp02_keys ['dek'],
+        self .scp02_kvn 
+        )
+        host_challenge =os .urandom (8 )
+        init_apdu =session .gen_init_update_apdu (host_challenge )
+        data ,sw1 ,sw2 =self .tp .connection .transmit (list (init_apdu ))
+        if sw1 !=0x90 :
+            print (f"{Config.Colors.FAIL}[-] INITIALIZE UPDATE Failed: {sw1:02X}{sw2:02X}{Config.Colors.ENDC}")
+            return False 
+
+        try :
+            session .parse_init_update_resp (bytes (data ))
+            ext_auth_apdu =session .gen_ext_auth_apdu (0x03 )
+        except Exception as e :
+            print (f"{Config.Colors.FAIL}[-] SCP02 Session Setup Failed: {e}{Config.Colors.ENDC}")
+            return False 
+
+        _ ,sw1 ,sw2 =self .tp .connection .transmit (list (ext_auth_apdu ))
+        if sw1 !=0x90 :
             print (f"{Config.Colors.FAIL}[-] EXTERNAL AUTH Failed: {sw1:02X}{sw2:02X}{Config.Colors.ENDC}")
             return False 
+
+        session .is_authenticated =True 
+        self .tp .session =session 
+        self .active_scp_protocol ="SCP02"
+        print (f"{Config.Colors.GREEN}[+] SCP02 Authenticated (Level 0x03, KVN 0x{self.scp02_kvn:02X}){Config.Colors.ENDC}")
+        self .get_keys_info (silent =True )
+        return True 
 
     def store_data (self ,data_hex :str ,p1 :Optional [int ]=None ,p2 :Optional [int ]=None ):
         """
@@ -262,7 +356,7 @@ class GlobalPlatformManager :
         print (f"[-] PUT KEY Failed: {sw1:02X}{sw2:02X}")
         return False 
 
-    def install_cap_file (self ,filename :str ,privileges :str ="00",install_params :str ="C900",instantiate :bool =True ,target_app_aid :str =None ,target_module_aid :str =None ):
+    def install_cap_file (self ,filename :str ,privileges :str ="00",install_params :str ="C900",instantiate :bool =True ,target_app_aid :str =None ,target_module_aid :str =None ,load_chunk_size :Optional [int ]=None ):
         """
         GlobalPlatform INSTALL (GPCS 11.5).
         Handles INSTALL [for load], LOAD (80 E8), and INSTALL [for install].
@@ -277,10 +371,14 @@ class GlobalPlatformManager :
 
         print (f"{Config.Colors.CYAN}[*] Parsing CAP file: {filename}...{Config.Colors.ENDC}")
         try :
-            load_data ,pkg_aid ,app_aids =CapFileParser .parse (filename )
+            parsed_cap =CapFileParser .parse_with_metadata (filename )
         except Exception as e :
             print (f"{Config.Colors.FAIL}[-] Parse Error: {e}{Config.Colors.ENDC}")
             return 
+
+        load_data =parsed_cap .load_block 
+        pkg_aid =parsed_cap .package_aid 
+        app_aids =parsed_cap .applet_aids 
 
         print (f"    Package AID: {pkg_aid.hex().upper()}")
         print (f"    Size: {len(load_data)} bytes")
@@ -300,15 +398,32 @@ class GlobalPlatformManager :
 
         print (f"{Config.Colors.CYAN}[*] Loading {len(load_data)} bytes...{Config.Colors.ENDC}")
         chunk_size =240 
-        total_chunks =math .ceil (len (load_data )/chunk_size )
+        if load_chunk_size is not None :
+            if load_chunk_size >0 :
+                chunk_size =load_chunk_size 
 
-        for i in range (total_chunks ):
-            start =i *chunk_size 
-            end =min (start +chunk_size ,len (load_data ))
-            chunk =load_data [start :end ]
+        is_secure_load =False 
+        if self .tp .session :
+            if self .tp .session .is_authenticated :
+                if self .tp .session .sec_level &0x02 :
+                    is_secure_load =True 
+
+        if is_secure_load :
+            if chunk_size >239 :
+                chunk_size =239 
+        try :
+            load_chunks =CapFileParser .plan_load_chunks (parsed_cap ,chunk_size )
+        except Exception as e :
+            print (f"{Config.Colors.FAIL}[-] Chunk Plan Error: {e}{Config.Colors.ENDC}")
+            return 
+
+        total_chunks =len (load_chunks )
+
+        for i ,chunk_info in enumerate (load_chunks ):
+            chunk =chunk_info .payload 
 
             p1 =0x00 
-            if i <total_chunks -1 :
+            if i >=total_chunks -1 :
                 p1 =0x80 
 
             p2 =i %256 
@@ -807,6 +922,15 @@ class GlobalPlatformManager :
         for tag ,val in tlv_dict .items ():
             tag_hex =f"{tag:02X}"if tag <=0xFF else f"{tag:04X}"
 
+            if isinstance (val ,list ):
+                for item in val :
+                    if isinstance (item ,dict ):
+                        print (f"{indent_str}{Config.Colors.BOLD}Tag {tag_hex}:{Config.Colors.ENDC}")
+                        self .print_tlv_data (item ,indent +1 )
+                    elif isinstance (item ,bytes ):
+                        item_hex =item .hex ().upper ()
+                        print (f"{indent_str}Tag {tag_hex} (L={len(item)}): {item_hex}")
+                continue 
             if isinstance (val ,dict ):
                 print (f"{indent_str}{Config.Colors.BOLD}Tag {tag_hex}:{Config.Colors.ENDC}")
                 self .print_tlv_data (val ,indent +1 )
@@ -867,7 +991,7 @@ class GlobalPlatformManager :
             print (f"{Config.Colors.FAIL}[-] Failed: {sw1:02X}{sw2:02X}{Config.Colors.ENDC}")
             return False 
 
-    def install_make_selectable (self ,aid_hex :str ,privileges :str ="00"):
+    def install_make_selectable (self ,aid_hex :str ,privileges :str ="00",params :str ="",token :str =""):
         """GP INSTALL [for make selectable] (P1=0x08)."""
         if not self .tp .session or not self .tp .session .is_authenticated :
             print (f"{Config.Colors.FAIL}[!] Error: Must be authenticated.{Config.Colors.ENDC}")
@@ -875,6 +999,12 @@ class GlobalPlatformManager :
 
         aid_bytes =HexUtils .to_bytes (aid_hex )
         priv_bytes =HexUtils .to_bytes (privileges )
+        param_bytes =b''
+        if params :
+            param_bytes =HexUtils .to_bytes (params )
+        token_bytes =b''
+        if token :
+            token_bytes =HexUtils .to_bytes (token )
 
         payload =bytearray ()
         payload .append (0x00 )
@@ -882,12 +1012,14 @@ class GlobalPlatformManager :
         payload .extend (aid_bytes )
         payload .append (len (priv_bytes ))
         payload .extend (priv_bytes )
-        payload .append (0x00 )
-        payload .append (0x00 )
+        payload .append (len (param_bytes ))
+        payload .extend (param_bytes )
+        payload .append (len (token_bytes ))
+        payload .extend (token_bytes )
 
         self ._send_install_cmd (0x08 ,payload ,"Make Selectable")
 
-    def install_extradition (self ,aid_hex :str ,sd_aid_hex :str ):
+    def install_extradition (self ,aid_hex :str ,sd_aid_hex :str ,token :str =""):
         """GP INSTALL [for extradition] (P1=0x10)."""
         if not self .tp .session or not self .tp .session .is_authenticated :
             print (f"{Config.Colors.FAIL}[!] Error: Must be authenticated.{Config.Colors.ENDC}")
@@ -895,6 +1027,9 @@ class GlobalPlatformManager :
 
         aid_bytes =HexUtils .to_bytes (aid_hex )
         sd_bytes =HexUtils .to_bytes (sd_aid_hex )
+        token_bytes =b''
+        if token :
+            token_bytes =HexUtils .to_bytes (token )
 
         payload =bytearray ()
         payload .append (len (sd_bytes ))
@@ -902,7 +1037,8 @@ class GlobalPlatformManager :
         payload .append (0x00 )
         payload .append (len (aid_bytes ))
         payload .extend (aid_bytes )
-        payload .append (0x00 )
+        payload .append (len (token_bytes ))
+        payload .extend (token_bytes )
         payload .append (0x00 )
 
         self ._send_install_cmd (0x10 ,payload ,"Extradition")

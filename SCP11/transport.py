@@ -1,3 +1,20 @@
+# -----------------------------------------------------------------------------
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program. If not, see <https://www.gnu.org/licenses/>.
+#
+# Copyright (c) 2026 Hampus Hellsberg and contributors
+# -----------------------------------------------------------------------------
+
 import json
 import ssl
 import urllib.error
@@ -5,11 +22,76 @@ import urllib.request
 from typing import Optional, Protocol, Tuple
 
 from smartcard.System import readers
-from smartcard.util import toHexString
+
+
+_TRACE_RESET = "\033[0m"
+_TRACE_LOCAL = "\033[38;2;147;247;255m"
+_TRACE_EIM = "\033[38;2;95;220;203m"
+_TRACE_SMDP = "\033[38;2;138;167;255m"
+_TRACE_OK = "\033[38;2;141;255;141m"
+_TRACE_FAIL = "\033[38;2;255;154;154m"
+_TRACE_INFO = "\033[38;2;247;252;255m"
+
+
+def _trace_label_color(log_name: str) -> str:
+    label = str(log_name or "").strip()
+    if label.startswith("[eIM]"):
+        return _TRACE_EIM
+    if label.startswith("[SM-DP+]"):
+        return _TRACE_SMDP
+    if label.startswith("LOCAL:"):
+        return _TRACE_LOCAL
+    return _TRACE_INFO
+
+
+def _trace_status_color(sw1: int, sw2: int) -> str:
+    status_hex = f"{sw1:02X}{sw2:02X}"
+    if status_hex in ("9000", "9100"):
+        return _TRACE_OK
+    return _TRACE_FAIL
+
+
+def _print_apdu_exchange(
+    log_name: str,
+    apdu: bytes,
+    response: bytes,
+    sw1: int,
+    sw2: int,
+    *,
+    raw: bool,
+) -> None:
+    label = str(log_name or "").strip() or "APDU"
+    label_color = _trace_label_color(label)
+    status_hex = f"{sw1:02X}{sw2:02X}"
+    if raw:
+        status_color = _trace_status_color(sw1, sw2)
+        print(f"\n{label_color}[{label}] > {apdu.hex().upper()}{_TRACE_RESET}")
+        print(
+            f"{status_color}[{label}] < SW: {status_hex} Data: "
+            f"{bytes(response).hex().upper()}{_TRACE_RESET}"
+        )
+        return
+    print(f"\n{label_color}[*] {label}{_TRACE_RESET}")
+    if status_hex in ("9000", "9100"):
+        return
+    status_color = _trace_status_color(sw1, sw2)
+    print(f"{status_color}    -> SW {status_hex} len={len(response)}{_TRACE_RESET}")
+
+
+def _print_chunk_banner(log_name: str, total: int, *, raw: bool) -> None:
+    label = str(log_name or "").strip() or "APDU"
+    label_color = _trace_label_color(label)
+    if raw:
+        print(f"\n{label_color}--- Transmitting {label} ({total} bytes) ---{_TRACE_RESET}")
+        return
+    print(f"\n{label_color}[*] {label} total_bytes={total}{_TRACE_RESET}")
 
 
 class ApduChannel(Protocol):
     def send(self, apdu: bytes, log_name: str) -> bytes:
+        pass
+
+    def reset(self) -> bool:
         pass
 
     def send_chunked(
@@ -22,6 +104,12 @@ class ApduChannel(Protocol):
         log_name: str,
         chunk_size: int = 250,
     ) -> bytes:
+        pass
+
+    def set_raw_apdu_logging(self, enabled: bool) -> None:
+        pass
+
+    def get_raw_apdu_logging(self) -> bool:
         pass
 
 
@@ -86,7 +174,9 @@ class PcscApduChannel:
     """Local PC/SC APDU channel with SW handling."""
 
     def __init__(self, reader_index: int = 0):
+        self._reader_index = reader_index
         self._conn = self._connect(reader_index)
+        self._raw_apdu_logging = True
 
     def _connect(self, index: int):
         reader_list = readers()
@@ -96,8 +186,15 @@ class PcscApduChannel:
         connection.connect()
         return connection
 
+    def reset(self) -> bool:
+        try:
+            self._conn.disconnect()
+        except Exception:
+            pass
+        self._conn = self._connect(self._reader_index)
+        return True
+
     def send(self, apdu: bytes, log_name: str) -> bytes:
-        print(f"\n[{log_name}] > {toHexString(list(apdu))}")
         response, sw1, sw2 = self._conn.transmit(list(apdu))
 
         while sw1 == 0x61:
@@ -109,7 +206,14 @@ class PcscApduChannel:
             return self.send(corrected_apdu, log_name)
 
         status_hex = f"{sw1:02X}{sw2:02X}"
-        print(f"[{log_name}] < SW: {status_hex} Data: {toHexString(response)}")
+        _print_apdu_exchange(
+            log_name,
+            apdu,
+            bytes(response),
+            sw1,
+            sw2,
+            raw=bool(self._raw_apdu_logging),
+        )
 
         if status_hex not in ("9000", "9100"):
             raise IOError(f"APDU Failed: {status_hex}")
@@ -131,7 +235,7 @@ class PcscApduChannel:
         block = p2_start
         response = b""
 
-        print(f"\n--- Transmitting {log_name} ({total} bytes) ---")
+        _print_chunk_banner(log_name, total, raw=bool(self._raw_apdu_logging))
         while offset < total:
             end_offset = offset + chunk_size
             chunk = payload[offset:end_offset]
@@ -140,12 +244,19 @@ class PcscApduChannel:
             if not is_last_chunk:
                 current_p1 = 0x11
             apdu = bytes([cla, ins, current_p1, block, len(chunk)]) + chunk
-            print(f"  > Block {block:02X} (Len={len(chunk)}) P1={current_p1:02X}")
+            if self._raw_apdu_logging:
+                print(f"  > Block {block:02X} (Len={len(chunk)}) P1={current_p1:02X}")
             response = self.send(apdu, f"{log_name} [Block {block}]")
             offset += chunk_size
             block += 1
 
         return response
+
+    def set_raw_apdu_logging(self, enabled: bool) -> None:
+        self._raw_apdu_logging = bool(enabled)
+
+    def get_raw_apdu_logging(self) -> bool:
+        return bool(self._raw_apdu_logging)
 
 
 class RelayApduChannel:
@@ -154,9 +265,12 @@ class RelayApduChannel:
     def __init__(self, relay_client: RelayHttpClientJsonHex, session_id: str = ""):
         self._relay_client = relay_client
         self._session_id = session_id
+        self._raw_apdu_logging = True
+
+    def reset(self) -> bool:
+        return False
 
     def send(self, apdu: bytes, log_name: str) -> bytes:
-        print(f"\n[{log_name}] > {apdu.hex().upper()}")
         response, sw1, sw2 = self._relay_client.send_apdu(apdu, session_id=self._session_id)
 
         while sw1 == 0x61:
@@ -169,7 +283,14 @@ class RelayApduChannel:
             return self.send(corrected_apdu, log_name)
 
         status_hex = f"{sw1:02X}{sw2:02X}"
-        print(f"[{log_name}] < SW: {status_hex} Data: {response.hex().upper()}")
+        _print_apdu_exchange(
+            log_name,
+            apdu,
+            response,
+            sw1,
+            sw2,
+            raw=bool(self._raw_apdu_logging),
+        )
         if status_hex not in ("9000", "9100"):
             raise IOError(f"APDU Failed: {status_hex}")
 
@@ -190,7 +311,7 @@ class RelayApduChannel:
         block = p2_start
         response = b""
 
-        print(f"\n--- Transmitting {log_name} ({total} bytes) ---")
+        _print_chunk_banner(log_name, total, raw=bool(self._raw_apdu_logging))
         while offset < total:
             end_offset = offset + chunk_size
             chunk = payload[offset:end_offset]
@@ -199,12 +320,19 @@ class RelayApduChannel:
             if not is_last_chunk:
                 current_p1 = 0x11
             apdu = bytes([cla, ins, current_p1, block, len(chunk)]) + chunk
-            print(f"  > Block {block:02X} (Len={len(chunk)}) P1={current_p1:02X}")
+            if self._raw_apdu_logging:
+                print(f"  > Block {block:02X} (Len={len(chunk)}) P1={current_p1:02X}")
             response = self.send(apdu, f"{log_name} [Block {block}]")
             offset += chunk_size
             block += 1
 
         return response
+
+    def set_raw_apdu_logging(self, enabled: bool) -> None:
+        self._raw_apdu_logging = bool(enabled)
+
+    def get_raw_apdu_logging(self) -> bool:
+        return bool(self._raw_apdu_logging)
 
 
 class SGP22Transport:
@@ -227,6 +355,19 @@ class SGP22Transport:
     def send(self, apdu: bytes, log_name: str) -> bytes:
         return self._channel.send(apdu, log_name)
 
+    def exchange(self, apdu: bytes, log_name: str) -> Tuple[bytes, int, int]:
+        exchange_method = getattr(self._channel, "exchange", None)
+        if callable(exchange_method):
+            return exchange_method(apdu, log_name)
+        response = self._channel.send(apdu, log_name)
+        return response, 0x90, 0x00
+
+    def reset(self) -> bool:
+        reset_method = getattr(self._channel, "reset", None)
+        if callable(reset_method):
+            return bool(reset_method())
+        return False
+
     def send_chunked(
         self,
         cla: int,
@@ -246,3 +387,14 @@ class SGP22Transport:
             log_name=log_name,
             chunk_size=chunk_size,
         )
+
+    def set_raw_apdu_logging(self, enabled: bool) -> None:
+        setter = getattr(self._channel, "set_raw_apdu_logging", None)
+        if callable(setter):
+            setter(bool(enabled))
+
+    def get_raw_apdu_logging(self) -> bool:
+        getter = getattr(self._channel, "get_raw_apdu_logging", None)
+        if callable(getter):
+            return bool(getter())
+        return True

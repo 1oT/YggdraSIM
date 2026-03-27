@@ -1,0 +1,25 @@
+{
+  "package_type": "eim_acknowledgements",
+  "package_version": "2.0.0",
+  "spec_target": "SGP.32 first-test fixed fixture cleanup acknowledgement",
+  "sgp32": {
+    "eim_acknowledgements": {
+      "include": true,
+      "ack_rows": [
+        {
+          "include": true,
+          "transaction_id_hex": "10000000000000000000000000000001",
+          "status": "acknowledged",
+          "status_info_hex": ""
+        }
+      ]
+    }
+  },
+  "runtime": {
+    "queue_id": 30,
+    "matching_id": "EIM-FIRST-TEST-FIXTURE",
+    "transaction_id_hex": "10000000000000000000000000000001"
+  },
+  "additional_tlvs": [],
+  "optional_tags": {}
+}

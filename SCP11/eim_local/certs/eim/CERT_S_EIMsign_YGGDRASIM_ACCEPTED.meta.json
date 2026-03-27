@@ -1,0 +1,9 @@
+{
+  "role": "signing",
+  "private_key_path": "SK_S_EIMsign_YGGDRASIM_ACCEPTED.pem",
+  "root_ci_pkid": "F54172BDF98A95D65CBEB88A38A1C11D800A85C3",
+  "subject": "CN=YggdraSIM.Accepted.Reference,OU=Lab,O=YggdraSIM,C=SE",
+  "issuer": "CN=YggdraSIM.Accepted.Reference,OU=Lab,O=YggdraSIM,C=SE",
+  "subject_cn": "1.3.6.1.4.1.54916.999.100.101",
+  "curve": "NIST"
+}

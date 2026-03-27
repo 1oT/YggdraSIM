@@ -1,0 +1,10 @@
+# openssl EIM certificate request configuration file
+
+[req] 
+prompt = no
+
+distinguished_name = dn-name
+[dn-name] 
+
+countryName		= DE
+commonName		= eim.example.com 

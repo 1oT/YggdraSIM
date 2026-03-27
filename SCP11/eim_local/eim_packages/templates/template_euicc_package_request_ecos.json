@@ -1,0 +1,31 @@
+{
+  "package_type": "euicc_package_request_ecos",
+  "package_version": "2.0.0",
+  "spec_target": "SGP.32 eIM Package Request / EuiccPackageRequest Containing eCOs",
+  "sgp32": {
+    "euicc_package_request": {
+      "include": true,
+      "choice": "euicc_package_request_containing_ecos",
+      "euicc_package_request_containing_ecos": {
+        "include": true,
+        "ecos": [
+          {
+            "include": true,
+            "description": "Example eCO payload container",
+            "value_hex": ""
+          }
+        ],
+        "compression": {
+          "include": false,
+          "algorithm": "none"
+        }
+      }
+    }
+  },
+  "runtime": {
+    "matching_id": "EIM-ECO-REQ",
+    "transaction_id_hex": ""
+  },
+  "additional_tlvs": [],
+  "optional_tags": {}
+}

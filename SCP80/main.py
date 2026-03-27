@@ -1,13 +1,25 @@
 # -----------------------------------------------------------------------------
-# This Source Code Form is subject to the terms of the Mozilla Public
-# License, v. 2.0. If a copy of the MPL was not distributed with this
-# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
 #
-# Copyright (c) 2026 Hampus Hellsberg
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program. If not, see <https://www.gnu.org/licenses/>.
+#
+# Copyright (c) 2026 Hampus Hellsberg and contributors
 # -----------------------------------------------------------------------------
 
+import argparse
 import sys 
 import os 
+
+from yggdrasim_common.quit_control import QuitAllRequested
 
 def run_standalone ():
     current_dir =os .path .dirname (os .path .abspath (__file__ ))
@@ -18,7 +30,29 @@ def run_standalone ():
         from .cli import OtaShell 
     else :
         from cli import OtaShell 
-    OtaShell ().run ()
+    parser =argparse .ArgumentParser (description ="YggdraSIM SCP80 OTA Shell")
+    parser .add_argument ("--cmd",type =str ,help ="Semicolon-separated commands for non-interactive execution")
+    parser .add_argument ("--stdin",action ="store_true",help ="Read newline-separated commands from stdin for non-interactive execution")
+    args =parser .parse_args ()
+    shell =OtaShell ()
+    if args .cmd :
+        shell .run_commands (args .cmd )
+        return
+    if args .stdin :
+        command_lines =[]
+        for raw_line in sys .stdin .read ().splitlines ():
+            command_text =str (raw_line or "").strip ()
+            if len (command_text )==0 :
+                continue
+            if command_text .startswith ("#"):
+                continue
+            command_lines .append (command_text )
+        shell .run_commands ("; ".join (command_lines ))
+        return
+    shell .run ()
 
 if __name__ =="__main__":
-    run_standalone ()
+    try :
+        run_standalone ()
+    except QuitAllRequested :
+        raise SystemExit (0 )

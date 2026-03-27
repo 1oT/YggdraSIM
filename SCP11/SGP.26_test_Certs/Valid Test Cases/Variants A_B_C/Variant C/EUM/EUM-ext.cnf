@@ -1,0 +1,25 @@
+
+# openssl EUM certificate creation configuration file
+
+
+authorityKeyIdentifier=keyid, issuer
+subjectKeyIdentifier=hash
+keyUsage=critical, keyCertSign, cRLSign
+certificatePolicies=critical,2.23.146.1.2.1.0.0.0   #OID id-rspRole-eum
+subjectAltName=RID:2.999.101
+basicConstraints=critical,CA:TRUE, pathlen:1
+crlDistributionPoints=URI:http://ci.test.example.com/CRL-2.crl
+
+nameConstraints=critical,permitted;dirName:permittedOrganizations
+
+# GSMA-specific extension for permittedEins
+2.23.146.1.2.2.0 = ASN1:SEQUENCE:permittedEins
+
+[permittedEins]
+ein1=PRINTABLESTRING:89049032
+
+[permittedOrganizations]
+organizationName = RSP Test EUM
+
+
+          

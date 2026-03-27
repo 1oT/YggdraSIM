@@ -1,0 +1,1204 @@
+.
+├── Invalid Test Cases
+│   ├── Variant A
+│   │   ├── SM-DP+
+│   │   │   ├── SM_DPauth
+│   │   │   │   ├── Invalid Curve
+│   │   │   │   │   ├── CERT_S_SM_DPauth_INV_CURVE_BRP192_VARA.der
+│   │   │   │   │   ├── CERT_S_SM_DPauth_INV_CURVE_NIST192_VARA.der
+│   │   │   │   │   ├── PK_S_SM_DPauth_SIG_BRP192.pem
+│   │   │   │   │   ├── PK_S_SM_DPauth_SIG_NIST192.pem
+│   │   │   │   │   ├── SK_S_SM_DPauth_SIG_BRP192.pem
+│   │   │   │   │   ├── SK_S_SM_DPauth_SIG_NIST192.pem
+│   │   │   │   │   ├── SM_DPauth-csr.cnf
+│   │   │   │   │   └── SM_DPauth-ext.cnf
+│   │   │   │   └── Invalid Signature
+│   │   │   │       ├── CERT_S_SM_DPauth_INV_SIGN_BRP_VARA.der
+│   │   │   │       └── CERT_S_SM_DPauth_INV_SIGN_NIST_VARA.der
+│   │   │   ├── SM_DPpb
+│   │   │   │   ├── Invalid Curve
+│   │   │   │   │   ├── CERT_S_SM_DPpb_INV_CURVE_BRP192_VARA.der
+│   │   │   │   │   ├── CERT_S_SM_DPpb_INV_CURVE_NIST192_VARA.der
+│   │   │   │   │   ├── PK_S_SM_DPpb_SIG_BRP192.pem
+│   │   │   │   │   ├── PK_S_SM_DPpb_SIG_NIST192.pem
+│   │   │   │   │   ├── SK_S_SM_DPpb_SIG_BRP192.pem
+│   │   │   │   │   ├── SK_S_SM_DPpb_SIG_NIST192.pem
+│   │   │   │   │   ├── SM_DPpb-csr.cnf
+│   │   │   │   │   └── SM_DPpb-ext.cnf
+│   │   │   │   └── Invalid Signature
+│   │   │   │       ├── CERT_S_SM_DPpb_INV_SIGN_BRP_VARA.der
+│   │   │   │       └── CERT_S_SM_DPpb_INV_SIGN_NIST_VARA.der
+│   │   │   └── SM_DPtls
+│   │   │       ├── Expired Certificate
+│   │   │       │   ├── CERT_S_SM_DP_TLS_EXPIRED_VARA.der
+│   │   │       │   ├── PK_S_SM_DP_TLS_NIST.pem
+│   │   │       │   ├── SK_S_SM_DP_TLS_NIST.pem
+│   │   │       │   ├── SM_DPtls-csr.cnf
+│   │   │       │   └── SM_DPtls-ext.cnf
+│   │   │       ├── Invalid Certificate Policy
+│   │   │       │   ├── CERT_S_SM_DP_TLS_INV_CERT_POL_VARA.der
+│   │   │       │   ├── PK_S_SM_DP_TLS_NIST.pem
+│   │   │       │   ├── SK_S_SM_DP_TLS_NIST.pem
+│   │   │       │   ├── SM_DPtls-csr.cnf
+│   │   │       │   ├── SM_DPtls-ext.cnf
+│   │   │       │   └── old_TLS_Expired_2025
+│   │   │       │       └── CERT_S_SM_DP_TLS_INV_CERT_POL_VARA.der
+│   │   │       ├── Invalid Curve
+│   │   │       │   ├── CERT_S_SM_DP_TLS_INV_CURVE_VARA.der
+│   │   │       │   ├── PK_S_SM_DP_TLS_NIST_P384.pem
+│   │   │       │   ├── SK_S_SM_DP_TLS_NIST_P384.pem
+│   │   │       │   ├── SM_DPtls-csr.cnf
+│   │   │       │   ├── SM_DPtls-ext.cnf
+│   │   │       │   └── old_TLS_Expired_2025
+│   │   │       │       └── CERT_S_SM_DP_TLS_INV_CURVE_VARA.der
+│   │   │       ├── Invalid Extended Key Usage
+│   │   │       │   ├── CERT_S_SM_DP_TLS_INV_EXT_KEY_USAGE_VARA.der
+│   │   │       │   ├── PK_S_SM_DP_TLS_NIST.pem
+│   │   │       │   ├── SK_S_SM_DP_TLS_NIST.pem
+│   │   │       │   ├── SM_DPtls-csr.cnf
+│   │   │       │   ├── SM_DPtls-ext.cnf
+│   │   │       │   └── old_TLS_Expired_2025
+│   │   │       │       └── CERT_S_SM_DP_TLS_INV_EXT_KEY_USAGE_VARA.der
+│   │   │       ├── Invalid Key Usage
+│   │   │       │   ├── CERT_S_SM_DP_TLS_INV_KEY_USAGE_VARA.der
+│   │   │       │   ├── PK_S_SM_DP_TLS_NIST.pem
+│   │   │       │   ├── SK_S_SM_DP_TLS_NIST.pem
+│   │   │       │   ├── SM_DPtls-csr.cnf
+│   │   │       │   ├── SM_DPtls-ext.cnf
+│   │   │       │   └── old_TLS_Expired_2025
+│   │   │       │       └── CERT_S_SM_DP_TLS_INV_KEY_USAGE_VARA.der
+│   │   │       ├── Invalid Signature
+│   │   │       │   ├── CERT_S_SM_DP_TLS_INV_SIGN_BRP_VARA.der
+│   │   │       │   ├── CERT_S_SM_DP_TLS_INV_SIGN_NIST_VARA.der
+│   │   │       │   └── old_TLS_Expired_2025
+│   │   │       │       ├── CERT_S_SM_DP_TLS_INV_SIGN_BRP_VARA.der
+│   │   │       │       └── CERT_S_SM_DP_TLS_INV_SIGN_NIST_VARA.der
+│   │   │       └── Missing Critical Extension
+│   │   │           ├── CERT_S_SM_DP_TLS_INV_CRITICAL_EXT_VARA.der
+│   │   │           ├── PK_S_SM_DP_TLS_NIST.pem
+│   │   │           ├── SK_S_SM_DP_TLS_NIST.pem
+│   │   │           ├── SM_DPtls-csr.cnf
+│   │   │           ├── SM_DPtls-ext.cnf
+│   │   │           └── old_TLS_Expired_2025
+│   │   │               └── CERT_S_SM_DP_TLS_INV_CRITICAL_EXT_VARA.der
+│   │   └── SM-DS
+│   │       ├── SM_DSauth
+│   │       │   ├── Invalid curve
+│   │       │   │   ├── CERT_S_SM_DSauth_INV_CURVE_BRP192_VARA.der
+│   │       │   │   ├── CERT_S_SM_DSauth_INV_CURVE_NIST192_VARA.der
+│   │       │   │   ├── PK_S_SM_DSauth_SIG_BRP192.pem
+│   │       │   │   ├── PK_S_SM_DSauth_SIG_NIST192.pem
+│   │       │   │   ├── SK_S_SM_DSauth_SIG_BRP192.pem
+│   │       │   │   ├── SK_S_SM_DSauth_SIG_NIST192.pem
+│   │       │   │   ├── SM_DSauth-csr.cnf
+│   │       │   │   └── SM_DSauth-ext.cnf
+│   │       │   └── Invalid signature
+│   │       │       ├── CERT_S_SM_DSauth_INV_SIGN_BRP_VARA.der
+│   │       │       └── CERT_S_SM_DSauth_INV_SIGN_NIST_VARA.der
+│   │       └── SM_DStls
+│   │           ├── Expired Certificate
+│   │           │   ├── CERT_S_SM_DS_TLS_EXPIRED_VARA.der
+│   │           │   ├── PK_S_SM_DS_TLS_NIST.pem
+│   │           │   ├── SK_S_SM_DS_TLS_NIST.pem
+│   │           │   ├── SM_DStls-csr.cnf
+│   │           │   └── SM_DStls-ext.cnf
+│   │           ├── Invalid Certificate Policy
+│   │           │   ├── CERT_S_SM_DS_TLS_INV_CERT_POL_VARA.der
+│   │           │   ├── PK_S_SM_DS_TLS_NIST.pem
+│   │           │   ├── SK_S_SM_DS_TLS_NIST.pem
+│   │           │   ├── SM_DStls-csr.cnf
+│   │           │   ├── SM_DStls-ext.cnf
+│   │           │   └── old_TLS_Expired_2025
+│   │           │       └── CERT_S_SM_DS_TLS_INV_CERT_POL_VARA.der
+│   │           ├── Invalid Curve
+│   │           │   ├── CERT_S_SM_DS_TLS_INV_CURVE_VARA.der
+│   │           │   ├── PK_S_SM_DS_TLS_NIST_P384.pem
+│   │           │   ├── SK_S_SM_DS_TLS_NIST_P384.pem
+│   │           │   ├── SM_DStls-csr.cnf
+│   │           │   ├── SM_DStls-ext.cnf
+│   │           │   └── old_TLS_Expired_2025
+│   │           │       └── CERT_S_SM_DS_TLS_INV_CURVE_VARA.der
+│   │           ├── Invalid Extended Key Usage
+│   │           │   ├── CERT_S_SM_DS_TLS_INV_EXT_KEY_USAGE_VARA.der
+│   │           │   ├── PK_S_SM_DS_TLS_NIST.pem
+│   │           │   ├── SK_S_SM_DS_TLS_NIST.pem
+│   │           │   ├── SM_DStls-csr.cnf
+│   │           │   ├── SM_DStls-ext.cnf
+│   │           │   └── old_TLS_Expired_2025
+│   │           │       └── CERT_S_SM_DS_TLS_INV_EXT_KEY_USAGE_VARA.der
+│   │           ├── Invalid Key Usage
+│   │           │   ├── CERT_S_SM_DS_TLS_INV_KEY_USAGE_VARA.der
+│   │           │   ├── PK_S_SM_DS_TLS_NIST.pem
+│   │           │   ├── SK_S_SM_DS_TLS_NIST.pem
+│   │           │   ├── SM_DStls-csr.cnf
+│   │           │   ├── SM_DStls-ext.cnf
+│   │           │   └── old_TLS_Expired_2025
+│   │           │       └── CERT_S_SM_DS_TLS_INV_KEY_USAGE_VARA.der
+│   │           ├── Invalid Signature
+│   │           │   ├── CERT_S_SM_DS_TLS_INV_SIGN_BRP_VARA.der
+│   │           │   ├── CERT_S_SM_DS_TLS_INV_SIGN_NIST_VARA.der
+│   │           │   └── old_TLS_Expired_2025
+│   │           │       ├── CERT_S_SM_DS_TLS_INV_SIGN_BRP_VARA.der
+│   │           │       └── CERT_S_SM_DS_TLS_INV_SIGN_NIST_VARA.der
+│   │           └── Missing Critical Extension
+│   │               ├── CERT_S_SM_DS_TLS_INV_CRITICAL_EXT_VARA.der
+│   │               ├── PK_S_SM_DS_TLS_NIST.pem
+│   │               ├── SK_S_SM_DS_TLS_NIST.pem
+│   │               ├── SM_DStls-csr.cnf
+│   │               ├── SM_DStls-ext.cnf
+│   │               └── old_TLS_Expired_2025
+│   │                   └── CERT_S_SM_DS_TLS_INV_CRITICAL_EXT_VARA.der
+│   ├── Variant B
+│   │   ├── SM-DP+
+│   │   │   ├── SM_DPauth
+│   │   │   │   ├── Invalid Curve
+│   │   │   │   │   ├── CERT_S_SM_DPauth_INV_CURVE_BRP192_VARB.der
+│   │   │   │   │   ├── CERT_S_SM_DPauth_INV_CURVE_NIST192_VARB.der
+│   │   │   │   │   ├── PK_S_SM_DPauth_SIG_BRP192.pem
+│   │   │   │   │   ├── PK_S_SM_DPauth_SIG_NIST192.pem
+│   │   │   │   │   ├── SK_S_SM_DPauth_SIG_BRP192.pem
+│   │   │   │   │   ├── SK_S_SM_DPauth_SIG_NIST192.pem
+│   │   │   │   │   ├── SM_DPauth-csr.cnf
+│   │   │   │   │   └── SM_DPauth-ext.cnf
+│   │   │   │   └── Invalid Signature
+│   │   │   │       ├── CERT_S_SM_DPauth_INV_SIGN_BRP_VARB.der
+│   │   │   │       └── CERT_S_SM_DPauth_INV_SIGN_NIST_VARB.der
+│   │   │   ├── SM_DPpb
+│   │   │   │   ├── Invalid Curve
+│   │   │   │   │   ├── CERT_S_SM_DPpb_INV_CURVE_BRP192_VARB.der
+│   │   │   │   │   ├── CERT_S_SM_DPpb_INV_CURVE_NIST192_VARB.der
+│   │   │   │   │   ├── PK_S_SM_DPpb_SIG_BRP192.pem
+│   │   │   │   │   ├── PK_S_SM_DPpb_SIG_NIST192.pem
+│   │   │   │   │   ├── SK_S_SM_DPpb_SIG_BRP192.pem
+│   │   │   │   │   ├── SK_S_SM_DPpb_SIG_NIST192.pem
+│   │   │   │   │   ├── SM_DPpb-csr.cnf
+│   │   │   │   │   └── SM_DPpb-ext.cnf
+│   │   │   │   └── Invalid Signature
+│   │   │   │       ├── CERT_S_SM_DPpb_INV_SIGN_BRP_VARB.der
+│   │   │   │       └── CERT_S_SM_DPpb_INV_SIGN_NIST_VARB.der
+│   │   │   └── SM_DPtls
+│   │   │       ├── Expired Certificate
+│   │   │       │   ├── CERT_S_SM_DP_TLS_EXPIRED_VARB.der
+│   │   │       │   ├── PK_S_SM_DP_TLS_NIST.pem
+│   │   │       │   ├── SK_S_SM_DP_TLS_NIST.pem
+│   │   │       │   ├── SM_DPtls-csr.cnf
+│   │   │       │   └── SM_DPtls-ext.cnf
+│   │   │       ├── Invalid Certificate Policy
+│   │   │       │   ├── CERT_S_SM_DP_TLS_INV_CERT_POL_VARB.der
+│   │   │       │   ├── PK_S_SM_DP_TLS_NIST.pem
+│   │   │       │   ├── SK_S_SM_DP_TLS_NIST.pem
+│   │   │       │   ├── SM_DPtls-csr.cnf
+│   │   │       │   ├── SM_DPtls-ext.cnf
+│   │   │       │   └── old_TLS_Expired_2025
+│   │   │       │       └── CERT_S_SM_DP_TLS_INV_CERT_POL_VARB.der
+│   │   │       ├── Invalid Curve
+│   │   │       │   ├── CERT_S_SM_DP_TLS_INV_CURVE_VARB.der
+│   │   │       │   ├── PK_S_SM_DP_TLS_NIST_P384.pem
+│   │   │       │   ├── SK_S_SM_DP_TLS_NIST_P384.pem
+│   │   │       │   ├── SM_DPtls-csr.cnf
+│   │   │       │   ├── SM_DPtls-ext.cnf
+│   │   │       │   └── old_TLS_Expired_2025
+│   │   │       │       └── CERT_S_SM_DP_TLS_INV_CURVE_VARB.der
+│   │   │       ├── Invalid Extended Key Usage
+│   │   │       │   ├── CERT_S_SM_DP_TLS_INV_EXT_KEY_USAGE_VARB.der
+│   │   │       │   ├── PK_S_SM_DP_TLS_NIST.pem
+│   │   │       │   ├── SK_S_SM_DP_TLS_NIST.pem
+│   │   │       │   ├── SM_DPtls-csr.cnf
+│   │   │       │   ├── SM_DPtls-ext.cnf
+│   │   │       │   └── old_TLS_Expired_2025
+│   │   │       │       └── CERT_S_SM_DP_TLS_INV_EXT_KEY_USAGE_VARB.der
+│   │   │       ├── Invalid Key Usage
+│   │   │       │   ├── CERT_S_SM_DP_TLS_INV_KEY_USAGE_VARB.der
+│   │   │       │   ├── PK_S_SM_DP_TLS_NIST.pem
+│   │   │       │   ├── SK_S_SM_DP_TLS_NIST.pem
+│   │   │       │   ├── SM_DPtls-csr.cnf
+│   │   │       │   ├── SM_DPtls-ext.cnf
+│   │   │       │   └── old_TLS_Expired_2025
+│   │   │       │       └── CERT_S_SM_DP_TLS_INV_KEY_USAGE_VARB.der
+│   │   │       ├── Invalid Signature
+│   │   │       │   ├── CERT_S_SM_DP_TLS_INV_SIGN_BRP_VARB.der
+│   │   │       │   ├── CERT_S_SM_DP_TLS_INV_SIGN_NIST_VARB.der
+│   │   │       │   └── old_TLS_Expired_2025
+│   │   │       │       ├── CERT_S_SM_DP_TLS_INV_SIGN_BRP_VARB.der
+│   │   │       │       └── CERT_S_SM_DP_TLS_INV_SIGN_NIST_VARB.der
+│   │   │       └── Missing Critical Extension
+│   │   │           ├── CERT_S_SM_DP_TLS_INV_CRITICAL_EXT_VARB.der
+│   │   │           ├── PK_S_SM_DP_TLS_NIST.pem
+│   │   │           ├── SK_S_SM_DP_TLS_NIST.pem
+│   │   │           ├── SM_DPtls-csr.cnf
+│   │   │           ├── SM_DPtls-ext.cnf
+│   │   │           └── old_TLS_Expired_2025
+│   │   │               └── CERT_S_SM_DP_TLS_INV_CRITICAL_EXT_VARB.der
+│   │   └── SM-DS
+│   │       ├── SM_DSauth
+│   │       │   ├── Invalid curve
+│   │       │   │   ├── CERT_S_SM_DSauth_INV_CURVE_BRP192_VARB.der
+│   │       │   │   ├── CERT_S_SM_DSauth_INV_CURVE_NIST192_VARB.der
+│   │       │   │   ├── PK_S_SM_DSauth_SIG_BRP192.pem
+│   │       │   │   ├── PK_S_SM_DSauth_SIG_NIST192.pem
+│   │       │   │   ├── SK_S_SM_DSauth_SIG_BRP192.pem
+│   │       │   │   ├── SK_S_SM_DSauth_SIG_NIST192.pem
+│   │       │   │   ├── SM_DSauth-csr.cnf
+│   │       │   │   └── SM_DSauth-ext.cnf
+│   │       │   └── Invalid signature
+│   │       │       ├── CERT_S_SM_DSauth_INV_SIGN_BRP_VARB.der
+│   │       │       └── CERT_S_SM_DSauth_INV_SIGN_NIST_VARB.der
+│   │       └── SM_DStls
+│   │           ├── Expired Certificate
+│   │           │   ├── CERT_S_SM_DS_TLS_EXPIRED_VARB.der
+│   │           │   ├── PK_S_SM_DS_TLS_NIST.pem
+│   │           │   ├── SK_S_SM_DS_TLS_NIST.pem
+│   │           │   ├── SM_DStls-csr.cnf
+│   │           │   └── SM_DStls-ext.cnf
+│   │           ├── Invalid Certificate Policy
+│   │           │   ├── CERT_S_SM_DS_TLS_INV_CERT_POL_VARB.der
+│   │           │   ├── PK_S_SM_DS_TLS_NIST.pem
+│   │           │   ├── SK_S_SM_DS_TLS_NIST.pem
+│   │           │   ├── SM_DStls-csr.cnf
+│   │           │   ├── SM_DStls-ext.cnf
+│   │           │   └── old_TLS_Expired_2025
+│   │           │       └── CERT_S_SM_DS_TLS_INV_CERT_POL_VARB.der
+│   │           ├── Invalid Curve
+│   │           │   ├── CERT_S_SM_DS_TLS_INV_CURVE_VARB.der
+│   │           │   ├── PK_S_SM_DS_TLS_NIST_P384.pem
+│   │           │   ├── SK_S_SM_DS_TLS_NIST_P384.pem
+│   │           │   ├── SM_DStls-csr.cnf
+│   │           │   ├── SM_DStls-ext.cnf
+│   │           │   └── old_TLS_Expired_2025
+│   │           │       └── CERT_S_SM_DS_TLS_INV_CURVE_VARB.der
+│   │           ├── Invalid Extended Key Usage
+│   │           │   ├── CERT_S_SM_DS_TLS_INV_EXT_KEY_USAGE_VARB.der
+│   │           │   ├── PK_S_SM_DS_TLS_NIST.pem
+│   │           │   ├── SK_S_SM_DS_TLS_NIST.pem
+│   │           │   ├── SM_DStls-csr.cnf
+│   │           │   ├── SM_DStls-ext.cnf
+│   │           │   └── old_TLS_Expired_2025
+│   │           │       └── CERT_S_SM_DS_TLS_INV_EXT_KEY_USAGE_VARB.der
+│   │           ├── Invalid Key Usage
+│   │           │   ├── CERT_S_SM_DS_TLS_INV_KEY_USAGE_VARB.der
+│   │           │   ├── PK_S_SM_DS_TLS_NIST.pem
+│   │           │   ├── SK_S_SM_DS_TLS_NIST.pem
+│   │           │   ├── SM_DStls-csr.cnf
+│   │           │   ├── SM_DStls-ext.cnf
+│   │           │   └── old_TLS_Expired_2025
+│   │           │       └── CERT_S_SM_DS_TLS_INV_KEY_USAGE_VARB.der
+│   │           ├── Invalid Signature
+│   │           │   ├── CERT_S_SM_DS_TLS_INV_SIGN_BRP_VARB.der
+│   │           │   ├── CERT_S_SM_DS_TLS_INV_SIGN_NIST_VARB.der
+│   │           │   └── old_TLS_Expired_2025
+│   │           │       ├── CERT_S_SM_DS_TLS_INV_SIGN_BRP_VARB.der
+│   │           │       └── CERT_S_SM_DS_TLS_INV_SIGN_NIST_VARB.der
+│   │           └── Missing Critical Extension
+│   │               ├── CERT_S_SM_DS_TLS_INV_CRITICAL_EXT_VARB.der
+│   │               ├── PK_S_SM_DS_TLS_NIST.pem
+│   │               ├── SK_S_SM_DS_TLS_NIST.pem
+│   │               ├── SM_DStls-csr.cnf
+│   │               ├── SM_DStls-ext.cnf
+│   │               └── old_TLS_Expired_2025
+│   │                   └── CERT_S_SM_DS_TLS_INV_CRITICAL_EXT_VARB.der
+│   ├── Variant C
+│   │   ├── SM-DP+
+│   │   │   ├── SM_DPauth
+│   │   │   │   ├── Invalid Curve
+│   │   │   │   │   ├── CERT_S_SM_DPauth_INV_CURVE_BRP192_VARC.der
+│   │   │   │   │   ├── CERT_S_SM_DPauth_INV_CURVE_NIST192_VARC.der
+│   │   │   │   │   ├── PK_S_SM_DPauth_SIG_BRP192.pem
+│   │   │   │   │   ├── PK_S_SM_DPauth_SIG_NIST192.pem
+│   │   │   │   │   ├── SK_S_SM_DPauth_SIG_BRP192.pem
+│   │   │   │   │   ├── SK_S_SM_DPauth_SIG_NIST192.pem
+│   │   │   │   │   ├── SM_DPauth-csr.cnf
+│   │   │   │   │   └── SM_DPauth-ext.cnf
+│   │   │   │   └── Invalid Signature
+│   │   │   │       ├── CERT_S_SM_DPauth_INV_SIGN_BRP_VARC.der
+│   │   │   │       └── CERT_S_SM_DPauth_INV_SIGN_NIST_VARC.der
+│   │   │   ├── SM_DPpb
+│   │   │   │   ├── Invalid Curve
+│   │   │   │   │   ├── CERT_S_SM_DPpb_INV_CURVE_BRP192_VARC.der
+│   │   │   │   │   ├── CERT_S_SM_DPpb_INV_CURVE_NIST192_VARC.der
+│   │   │   │   │   ├── PK_S_SM_DPpb_SIG_BRP192.pem
+│   │   │   │   │   ├── PK_S_SM_DPpb_SIG_NIST192.pem
+│   │   │   │   │   ├── SK_S_SM_DPpb_SIG_BRP192.pem
+│   │   │   │   │   ├── SK_S_SM_DPpb_SIG_NIST192.pem
+│   │   │   │   │   ├── SM_DPpb-csr.cnf
+│   │   │   │   │   └── SM_DPpb-ext.cnf
+│   │   │   │   └── Invalid Signature
+│   │   │   │       ├── CERT_S_SM_DPpb_INV_SIGN_BRP_VARC.der
+│   │   │   │       └── CERT_S_SM_DPpb_INV_SIGN_NIST_VARC.der
+│   │   │   └── SM_DPtls
+│   │   │       ├── Expired Certificate
+│   │   │       │   ├── CERT_S_SM_DP_TLS_EXPIRED_VARC.der
+│   │   │       │   ├── PK_S_SM_DP_TLS_NIST.pem
+│   │   │       │   ├── SK_S_SM_DP_TLS_NIST.pem
+│   │   │       │   ├── SM_DPtls-csr.cnf
+│   │   │       │   └── SM_DPtls-ext.cnf
+│   │   │       ├── Invalid Certificate Policy
+│   │   │       │   ├── CERT_S_SM_DP_TLS_INV_CERT_POL_VARC.der
+│   │   │       │   ├── PK_S_SM_DP_TLS_NIST.pem
+│   │   │       │   ├── SK_S_SM_DP_TLS_NIST.pem
+│   │   │       │   ├── SM_DPtls-csr.cnf
+│   │   │       │   ├── SM_DPtls-ext.cnf
+│   │   │       │   └── old_TLS_Expired_2025
+│   │   │       │       └── CERT_S_SM_DP_TLS_INV_CERT_POL_VARC.der
+│   │   │       ├── Invalid Curve
+│   │   │       │   ├── CERT_S_SM_DP_TLS_INV_CURVE_VARC.der
+│   │   │       │   ├── PK_S_SM_DP_TLS_NIST_P384.pem
+│   │   │       │   ├── SK_S_SM_DP_TLS_NIST_P384.pem
+│   │   │       │   ├── SM_DPtls-csr.cnf
+│   │   │       │   ├── SM_DPtls-ext.cnf
+│   │   │       │   └── old_TLS_Expired_2025
+│   │   │       │       └── CERT_S_SM_DP_TLS_INV_CURVE_VARC.der
+│   │   │       ├── Invalid Extended Key Usage
+│   │   │       │   ├── CERT_S_SM_DP_TLS_INV_EXT_KEY_USAGE_VARC.der
+│   │   │       │   ├── PK_S_SM_DP_TLS_NIST.pem
+│   │   │       │   ├── SK_S_SM_DP_TLS_NIST.pem
+│   │   │       │   ├── SM_DPtls-csr.cnf
+│   │   │       │   ├── SM_DPtls-ext.cnf
+│   │   │       │   └── old_TLS_Expired_2025
+│   │   │       │       └── CERT_S_SM_DP_TLS_INV_EXT_KEY_USAGE_VARC.der
+│   │   │       ├── Invalid Key Usage
+│   │   │       │   ├── CERT_S_SM_DP_TLS_INV_KEY_USAGE_VARC.der
+│   │   │       │   ├── PK_S_SM_DP_TLS_NIST.pem
+│   │   │       │   ├── SK_S_SM_DP_TLS_NIST.pem
+│   │   │       │   ├── SM_DPtls-csr.cnf
+│   │   │       │   ├── SM_DPtls-ext.cnf
+│   │   │       │   └── old_TLS_Expired_2025
+│   │   │       │       └── CERT_S_SM_DP_TLS_INV_KEY_USAGE_VARC.der
+│   │   │       ├── Invalid Signature
+│   │   │       │   ├── CERT_S_SM_DP_TLS_INV_SIGN_BRP_VARC.der
+│   │   │       │   ├── CERT_S_SM_DP_TLS_INV_SIGN_NIST_VARC.der
+│   │   │       │   └── old_TLS_Expired_2025
+│   │   │       │       ├── CERT_S_SM_DP_TLS_INV_SIGN_BRP_VARC.der
+│   │   │       │       └── CERT_S_SM_DP_TLS_INV_SIGN_NIST_VARC.der
+│   │   │       └── Missing Critical Extension
+│   │   │           ├── CERT_S_SM_DP_TLS_INV_CRITICAL_EXT_VARC.der
+│   │   │           ├── PK_S_SM_DP_TLS_NIST.pem
+│   │   │           ├── SK_S_SM_DP_TLS_NIST.pem
+│   │   │           ├── SM_DPtls-csr.cnf
+│   │   │           ├── SM_DPtls-ext.cnf
+│   │   │           └── old_TLS_Expired_2025
+│   │   │               └── CERT_S_SM_DP_TLS_INV_CRITICAL_EXT_VARC.der
+│   │   └── SM-DS
+│   │       ├── SM_DSauth
+│   │       │   ├── Invalid curve
+│   │       │   │   ├── CERT_S_SM_DSauth_INV_CURVE_BRP192_VARC.der
+│   │       │   │   ├── CERT_S_SM_DSauth_INV_CURVE_NIST192_VARC.der
+│   │       │   │   ├── PK_S_SM_DSauth_SIG_BRP192.pem
+│   │       │   │   ├── PK_S_SM_DSauth_SIG_NIST192.pem
+│   │       │   │   ├── SK_S_SM_DSauth_SIG_BRP192.pem
+│   │       │   │   ├── SK_S_SM_DSauth_SIG_NIST192.pem
+│   │       │   │   ├── SM_DSauth-csr.cnf
+│   │       │   │   └── SM_DSauth-ext.cnf
+│   │       │   └── Invalid signature
+│   │       │       ├── CERT_S_SM_DSauth_INV_SIGN_BRP_VARC.der
+│   │       │       └── CERT_S_SM_DSauth_INV_SIGN_NIST_VARC.der
+│   │       └── SM_DStls
+│   │           ├── Expired Certificate
+│   │           │   ├── CERT_S_SM_DS_TLS_EXPIRED_VARC.der
+│   │           │   ├── PK_S_SM_DS_TLS_NIST.pem
+│   │           │   ├── SK_S_SM_DS_TLS_NIST.pem
+│   │           │   ├── SM_DStls-csr.cnf
+│   │           │   └── SM_DStls-ext.cnf
+│   │           ├── Invalid Certificate Policy
+│   │           │   ├── CERT_S_SM_DS_TLS_INV_CERT_POL_VARC.der
+│   │           │   ├── PK_S_SM_DS_TLS_NIST.pem
+│   │           │   ├── SK_S_SM_DS_TLS_NIST.pem
+│   │           │   ├── SM_DStls-csr.cnf
+│   │           │   ├── SM_DStls-ext.cnf
+│   │           │   └── old_TLS_Expired_2025
+│   │           │       └── CERT_S_SM_DS_TLS_INV_CERT_POL_VARC.der
+│   │           ├── Invalid Curve
+│   │           │   ├── CERT_S_SM_DS_TLS_INV_CURVE_VARC.der
+│   │           │   ├── PK_S_SM_DS_TLS_NIST_P384.pem
+│   │           │   ├── SK_S_SM_DS_TLS_NIST_P384.pem
+│   │           │   ├── SM_DStls-csr.cnf
+│   │           │   ├── SM_DStls-ext.cnf
+│   │           │   └── old_TLS_Expired_2025
+│   │           │       └── CERT_S_SM_DS_TLS_INV_CURVE_VARC.der
+│   │           ├── Invalid Extended Key Usage
+│   │           │   ├── CERT_S_SM_DS_TLS_INV_EXT_KEY_USAGE_VARC.der
+│   │           │   ├── PK_S_SM_DS_TLS_NIST.pem
+│   │           │   ├── SK_S_SM_DS_TLS_NIST.pem
+│   │           │   ├── SM_DStls-csr.cnf
+│   │           │   ├── SM_DStls-ext.cnf
+│   │           │   └── old_TLS_Expired_2025
+│   │           │       └── CERT_S_SM_DS_TLS_INV_EXT_KEY_USAGE_VARC.der
+│   │           ├── Invalid Key Usage
+│   │           │   ├── CERT_S_SM_DS_TLS_INV_KEY_USAGE_VARC.der
+│   │           │   ├── PK_S_SM_DS_TLS_NIST.pem
+│   │           │   ├── SK_S_SM_DS_TLS_NIST.pem
+│   │           │   ├── SM_DStls-csr.cnf
+│   │           │   ├── SM_DStls-ext.cnf
+│   │           │   └── old_TLS_Expired_2025
+│   │           │       └── CERT_S_SM_DS_TLS_INV_KEY_USAGE_VARC.der
+│   │           ├── Invalid Signature
+│   │           │   ├── CERT_S_SM_DS_TLS_INV_SIGN_BRP_VARC.der
+│   │           │   ├── CERT_S_SM_DS_TLS_INV_SIGN_NIST_VARC.der
+│   │           │   └── old_TLS_Expired_2025
+│   │           │       ├── CERT_S_SM_DS_TLS_INV_SIGN_BRP_VARC.der
+│   │           │       └── CERT_S_SM_DS_TLS_INV_SIGN_NIST_VARC.der
+│   │           └── Missing Critical Extension
+│   │               ├── CERT_S_SM_DS_TLS_INV_CRITICAL_EXT_VARC.der
+│   │               ├── PK_S_SM_DS_TLS_NIST.pem
+│   │               ├── SK_S_SM_DS_TLS_NIST.pem
+│   │               ├── SM_DStls-csr.cnf
+│   │               ├── SM_DStls-ext.cnf
+│   │               └── old_TLS_Expired_2025
+│   │                   └── CERT_S_SM_DS_TLS_INV_CRITICAL_EXT_VARC.der
+│   └── Variant O
+│       ├── SM-DP+
+│       │   ├── SM_DPauth
+│       │   │   ├── Invalid Curve
+│       │   │   │   ├── CERT_S_SM_DPauth_INV_CURVE_BRP192_VARO.der
+│       │   │   │   ├── CERT_S_SM_DPauth_INV_CURVE_NIST192_VARO.der
+│       │   │   │   ├── PK_S_SM_DPauth_SIG_BRP192.pem
+│       │   │   │   ├── PK_S_SM_DPauth_SIG_NIST192.pem
+│       │   │   │   ├── SK_S_SM_DPauth_SIG_BRP192.pem
+│       │   │   │   ├── SK_S_SM_DPauth_SIG_NIST192.pem
+│       │   │   │   ├── SM_DPauth-csr.cnf
+│       │   │   │   └── SM_DPauth-ext.cnf
+│       │   │   └── Invalid Signature
+│       │   │       ├── CERT_S_SM_DPauth_INV_SIGN_BRP_VARO.der
+│       │   │       └── CERT_S_SM_DPauth_INV_SIGN_NIST_VARO.der
+│       │   ├── SM_DPpb
+│       │   │   ├── Invalid Curve
+│       │   │   │   ├── CERT_S_SM_DPpb_INV_CURVE_BRP192_VARO.der
+│       │   │   │   ├── CERT_S_SM_DPpb_INV_CURVE_NIST192_VARO.der
+│       │   │   │   ├── PK_S_SM_DPpb_SIG_BRP192.pem
+│       │   │   │   ├── PK_S_SM_DPpb_SIG_NIST192.pem
+│       │   │   │   ├── SK_S_SM_DPpb_SIG_BRP192.pem
+│       │   │   │   ├── SK_S_SM_DPpb_SIG_NIST192.pem
+│       │   │   │   ├── SM_DPpb-csr.cnf
+│       │   │   │   └── SM_DPpb-ext.cnf
+│       │   │   └── Invalid Signature
+│       │   │       ├── CERT_S_SM_DPpb_INV_SIGN_BRP_VARO.der
+│       │   │       └── CERT_S_SM_DPpb_INV_SIGN_NIST_VARO.der
+│       │   └── SM_DPtls
+│       │       ├── Expired Certificate
+│       │       │   ├── CERT_S_SM_DP_TLS_EXPIRED_VARO.der
+│       │       │   ├── PK_S_SM_DP_TLS_NIST.pem
+│       │       │   ├── SK_S_SM_DP_TLS_NIST.pem
+│       │       │   ├── SM_DPtls-csr.cnf
+│       │       │   └── SM_DPtls-ext.cnf
+│       │       ├── Invalid Certificate Policy
+│       │       │   ├── CERT_S_SM_DP_TLS_INV_CERT_POL_VARO.der
+│       │       │   ├── PK_S_SM_DP_TLS_NIST.pem
+│       │       │   ├── SK_S_SM_DP_TLS_NIST.pem
+│       │       │   ├── SM_DPtls-csr.cnf
+│       │       │   ├── SM_DPtls-ext.cnf
+│       │       │   └── old_TLS_Expired_2025
+│       │       │       └── CERT_S_SM_DP_TLS_INV_CERT_POL_VARO.der
+│       │       ├── Invalid Curve
+│       │       │   ├── CERT_S_SM_DP_TLS_INV_CURVE_VARO.der
+│       │       │   ├── PK_S_SM_DP_TLS_NIST_P384.pem
+│       │       │   ├── SK_S_SM_DP_TLS_NIST_P384.pem
+│       │       │   ├── SM_DPtls-csr.cnf
+│       │       │   ├── SM_DPtls-ext.cnf
+│       │       │   └── old_TLS_Expired_2025
+│       │       │       └── CERT_S_SM_DP_TLS_INV_CURVE_VARO.der
+│       │       ├── Invalid Extended Key Usage
+│       │       │   ├── CERT_S_SM_DP_TLS_INV_EXT_KEY_USAGE_VARO.der
+│       │       │   ├── PK_S_SM_DP_TLS_NIST.pem
+│       │       │   ├── SK_S_SM_DP_TLS_NIST.pem
+│       │       │   ├── SM_DPtls-csr.cnf
+│       │       │   ├── SM_DPtls-ext.cnf
+│       │       │   └── old_TLS_Expired_2025
+│       │       │       └── CERT_S_SM_DP_TLS_INV_EXT_KEY_USAGE_VARO.der
+│       │       ├── Invalid Key Usage
+│       │       │   ├── CERT_S_SM_DP_TLS_INV_KEY_USAGE_VARO.der
+│       │       │   ├── PK_S_SM_DP_TLS_NIST.pem
+│       │       │   ├── SK_S_SM_DP_TLS_NIST.pem
+│       │       │   ├── SM_DPtls-csr.cnf
+│       │       │   ├── SM_DPtls-ext.cnf
+│       │       │   └── old_TLS_Expired_2025
+│       │       │       └── CERT_S_SM_DP_TLS_INV_KEY_USAGE_VARO.der
+│       │       ├── Invalid Signature
+│       │       │   ├── CERT_S_SM_DP_TLS_INV_SIGN_BRP_VARO.der
+│       │       │   ├── CERT_S_SM_DP_TLS_INV_SIGN_NIST_VARO.der
+│       │       │   └── old_TLS_Expired_2025
+│       │       │       ├── CERT_S_SM_DP_TLS_INV_SIGN_BRP_VARO.der
+│       │       │       └── CERT_S_SM_DP_TLS_INV_SIGN_NIST_VARO.der
+│       │       └── Missing Critical Extension
+│       │           ├── CERT_S_SM_DP_TLS_INV_CRITICAL_EXT_VARO.der
+│       │           ├── PK_S_SM_DP_TLS_NIST.pem
+│       │           ├── SK_S_SM_DP_TLS_NIST.pem
+│       │           ├── SM_DPtls-csr.cnf
+│       │           ├── SM_DPtls-ext.cnf
+│       │           └── old_TLS_Expired_2025
+│       │               └── CERT_S_SM_DP_TLS_INV_CRITICAL_EXT_VARO.der
+│       └── SM-DS
+│           ├── SM_DSauth
+│           │   ├── Invalid curve
+│           │   │   ├── CERT_S_SM_DSauth_INV_CURVE_BRP192_VARO.der
+│           │   │   ├── CERT_S_SM_DSauth_INV_CURVE_NIST192_VARO.der
+│           │   │   ├── PK_S_SM_DSauth_SIG_BRP192.pem
+│           │   │   ├── PK_S_SM_DSauth_SIG_NIST192.pem
+│           │   │   ├── SK_S_SM_DSauth_SIG_BRP192.pem
+│           │   │   ├── SK_S_SM_DSauth_SIG_NIST192.pem
+│           │   │   ├── SM_DSauth-csr.cnf
+│           │   │   └── SM_DSauth-ext.cnf
+│           │   └── Invalid signature
+│           │       ├── CERT_S_SM_DSauth_INV_SIGN_BRP_VARO.der
+│           │       └── CERT_S_SM_DSauth_INV_SIGN_NIST_VARO.der
+│           └── SM_DStls
+│               ├── Expired Certificate
+│               │   ├── CERT_S_SM_DS_TLS_EXPIRED_VARO.der
+│               │   ├── PK_S_SM_DS_TLS_NIST.pem
+│               │   ├── SK_S_SM_DS_TLS_NIST.pem
+│               │   ├── SM_DStls-csr.cnf
+│               │   └── SM_DStls-ext.cnf
+│               ├── Invalid Certificate Policy
+│               │   ├── CERT_S_SM_DS_TLS_INV_CERT_POL_VARO.der
+│               │   ├── PK_S_SM_DS_TLS_NIST.pem
+│               │   ├── SK_S_SM_DS_TLS_NIST.pem
+│               │   ├── SM_DStls-csr.cnf
+│               │   ├── SM_DStls-ext.cnf
+│               │   └── old_TLS_Expired_2025
+│               │       └── CERT_S_SM_DS_TLS_INV_CERT_POL_VARO.der
+│               ├── Invalid Curve
+│               │   ├── CERT_S_SM_DS_TLS_INV_CURVE_VARO.der
+│               │   ├── PK_S_SM_DS_TLS_NIST_P384.pem
+│               │   ├── SK_S_SM_DS_TLS_NIST_P384.pem
+│               │   ├── SM_DStls-csr.cnf
+│               │   ├── SM_DStls-ext.cnf
+│               │   └── old_TLS_Expired_2025
+│               │       └── CERT_S_SM_DS_TLS_INV_CURVE_VARO.der
+│               ├── Invalid Extended Key Usage
+│               │   ├── CERT_S_SM_DS_TLS_INV_EXT_KEY_USAGE_VARO.der
+│               │   ├── PK_S_SM_DS_TLS_NIST.pem
+│               │   ├── SK_S_SM_DS_TLS_NIST.pem
+│               │   ├── SM_DStls-csr.cnf
+│               │   ├── SM_DStls-ext.cnf
+│               │   └── old_TLS_Expired_2025
+│               │       └── CERT_S_SM_DS_TLS_INV_EXT_KEY_USAGE_VARO.der
+│               ├── Invalid Key Usage
+│               │   ├── CERT_S_SM_DS_TLS_INV_KEY_USAGE_VARO.der
+│               │   ├── PK_S_SM_DS_TLS_NIST.pem
+│               │   ├── SK_S_SM_DS_TLS_NIST.pem
+│               │   ├── SM_DStls-csr.cnf
+│               │   ├── SM_DStls-ext.cnf
+│               │   └── old_TLS_Expired_2025
+│               │       └── CERT_S_SM_DS_TLS_INV_KEY_USAGE_VARO.der
+│               ├── Invalid Signature
+│               │   ├── CERT_S_SM_DS_TLS_INV_SIGN_BRP_VARO.der
+│               │   ├── CERT_S_SM_DS_TLS_INV_SIGN_NIST_VARO.der
+│               │   └── old_TLS_Expired_2025
+│               │       ├── CERT_S_SM_DS_TLS_INV_SIGN_BRP_VARO.der
+│               │       └── CERT_S_SM_DS_TLS_INV_SIGN_NIST_VARO.der
+│               └── Missing Critical Extension
+│                   ├── CERT_S_SM_DS_TLS_INV_CRITICAL_EXT_VARO.der
+│                   ├── PK_S_SM_DS_TLS_NIST.pem
+│                   ├── SK_S_SM_DS_TLS_NIST.pem
+│                   ├── SM_DStls-csr.cnf
+│                   ├── SM_DStls-ext.cnf
+│                   └── old_TLS_Expired_2025
+│                       └── CERT_S_SM_DS_TLS_INV_CRITICAL_EXT_VARO.der
+├── Valid Test Cases
+│   ├── Variant O
+│   │   ├── CI
+│   │   │   ├── CERT_CI_SIG_BRP.der
+│   │   │   ├── CERT_CI_SIG_BRP.pem
+│   │   │   ├── CERT_CI_SIG_NIST.der
+│   │   │   ├── CERT_CI_SIG_NIST.pem
+│   │   │   ├── CI-csr.cnf
+│   │   │   ├── PK_CI_SIG_BRP.pem
+│   │   │   ├── PK_CI_SIG_NIST.pem
+│   │   │   ├── SK_CI_SIG_BRP.pem
+│   │   │   └── SK_CI_SIG_NIST.pem
+│   │   ├── EIM
+│   │   │   ├── CERT_S_EIMsign_ECDSA_BRP.der
+│   │   │   ├── CERT_S_EIMsign_ECDSA_NIST.der
+│   │   │   ├── EIM_csr.cnf
+│   │   │   ├── EIM_ext.cnf
+│   │   │   ├── PK_S_EIMsign_ECDSA_BRP.pem
+│   │   │   ├── PK_S_EIMsign_ECDSA_NIST.pem
+│   │   │   ├── SK_S_EIMsign_ECDSA_BRP.pem
+│   │   │   └── SK_S_EIMsign_ECDSA_NIST.pem
+│   │   ├── EIM_tls-dptls
+│   │   │   ├── CERT_S_EIM_TLS_BRP.der
+│   │   │   ├── CERT_S_EIM_TLS_NIST.der
+│   │   │   ├── EIMtls-csr.cnf
+│   │   │   ├── EIMtls-ext.cnf
+│   │   │   ├── PK_S_EIM_TLS_BRP.pem
+│   │   │   ├── PK_S_EIM_TLS_NIST.pem
+│   │   │   ├── SK_S_EIM_TLS_BRP.pem
+│   │   │   ├── SK_S_EIM_TLS_NIST.pem
+│   │   │   └── old_TLS_Expired_2025
+│   │   │       ├── CERT_S_EIM_TLS_BRP.der
+│   │   │       └── CERT_S_EIM_TLS_NIST.der
+│   │   ├── EUM
+│   │   │   ├── CERT_EUM_SIG_BRP.der
+│   │   │   ├── CERT_EUM_SIG_BRP.pem
+│   │   │   ├── CERT_EUM_SIG_NIST.der
+│   │   │   ├── CERT_EUM_SIG_NIST.pem
+│   │   │   ├── EUM-csr.cnf
+│   │   │   ├── EUM-ext.cnf
+│   │   │   ├── PK_EUM_SIG_BRP.pem
+│   │   │   ├── PK_EUM_SIG_NIST.pem
+│   │   │   ├── SK_EUM_SIG_BRP.pem
+│   │   │   └── SK_EUM_SIG_NIST.pem
+│   │   ├── SM-DP+
+│   │   │   ├── SM_DPauth
+│   │   │   │   ├── CERT_S_SM_DP2auth_VARO_SIG_BRP.der
+│   │   │   │   ├── CERT_S_SM_DP2auth_VARO_SIG_NIST.der
+│   │   │   │   ├── CERT_S_SM_DPauth_VARO_SIG_BRP.der
+│   │   │   │   ├── CERT_S_SM_DPauth_VARO_SIG_NIST.der
+│   │   │   │   ├── PK_S_SM_DP2auth_SIG_BRP.pem
+│   │   │   │   ├── PK_S_SM_DP2auth_SIG_NIST.pem
+│   │   │   │   ├── PK_S_SM_DPauth_SIG_BRP.pem
+│   │   │   │   ├── PK_S_SM_DPauth_SIG_NIST.pem
+│   │   │   │   ├── SK_S_SM_DP2auth_SIG_BRP.pem
+│   │   │   │   ├── SK_S_SM_DP2auth_SIG_NIST.pem
+│   │   │   │   ├── SK_S_SM_DPauth_SIG_BRP.pem
+│   │   │   │   ├── SK_S_SM_DPauth_SIG_NIST.pem
+│   │   │   │   ├── SM_DP2auth-csr.cnf
+│   │   │   │   ├── SM_DP2auth-ext.cnf
+│   │   │   │   ├── SM_DPauth-csr.cnf
+│   │   │   │   └── SM_DPauth-ext.cnf
+│   │   │   ├── SM_DPpb
+│   │   │   │   ├── CERT_S_SM_DP2pb_VARO_SIG_BRP.der
+│   │   │   │   ├── CERT_S_SM_DP2pb_VARO_SIG_NIST.der
+│   │   │   │   ├── CERT_S_SM_DPpb_VARO_SIG_BRP.der
+│   │   │   │   ├── CERT_S_SM_DPpb_VARO_SIG_NIST.der
+│   │   │   │   ├── PK_S_SM_DP2pb_SIG_BRP.pem
+│   │   │   │   ├── PK_S_SM_DP2pb_SIG_NIST.pem
+│   │   │   │   ├── PK_S_SM_DPpb_SIG_BRP.pem
+│   │   │   │   ├── PK_S_SM_DPpb_SIG_NIST.pem
+│   │   │   │   ├── SK_S_SM_DP2pb_SIG_BRP.pem
+│   │   │   │   ├── SK_S_SM_DP2pb_SIG_NIST.pem
+│   │   │   │   ├── SK_S_SM_DPpb_SIG_BRP.pem
+│   │   │   │   ├── SK_S_SM_DPpb_SIG_NIST.pem
+│   │   │   │   ├── SM_DP2pb-csr.cnf
+│   │   │   │   ├── SM_DP2pb-ext.cnf
+│   │   │   │   ├── SM_DPpb-csr.cnf
+│   │   │   │   └── SM_DPpb-ext.cnf
+│   │   │   └── SM_DPtls
+│   │   │       ├── CERT_S_SM_DP2_VARO_TLS_NIST.der
+│   │   │       ├── CERT_S_SM_DP4_VARO_TLS_NIST.der
+│   │   │       ├── CERT_S_SM_DP8_VARO_TLS_NIST.der
+│   │   │       ├── CERT_S_SM_DP_VARO_TLS_BRP.der
+│   │   │       ├── CERT_S_SM_DP_VARO_TLS_NIST.der
+│   │   │       ├── PK_S_SM_DP2_TLS_NIST.pem
+│   │   │       ├── PK_S_SM_DP4_TLS.pem
+│   │   │       ├── PK_S_SM_DP8_TLS.pem
+│   │   │       ├── PK_S_SM_DP_TLS_BRP.pem
+│   │   │       ├── PK_S_SM_DP_TLS_NIST.pem
+│   │   │       ├── SK_S_SM_DP2_TLS_NIST.pem
+│   │   │       ├── SK_S_SM_DP4_TLS_NIST.pem
+│   │   │       ├── SK_S_SM_DP8_TLS_NIST.pem
+│   │   │       ├── SK_S_SM_DP_TLS_BRP.pem
+│   │   │       ├── SK_S_SM_DP_TLS_NIST.pem
+│   │   │       ├── SM_DP2tls-csr.cnf
+│   │   │       ├── SM_DP2tls-ext.cnf
+│   │   │       ├── SM_DP4tls-csr.cnf
+│   │   │       ├── SM_DP4tls-ext.cnf
+│   │   │       ├── SM_DP8tls-csr.cnf
+│   │   │       ├── SM_DP8tls-ext.cnf
+│   │   │       ├── SM_DPtls-csr.cnf
+│   │   │       ├── SM_DPtls-ext.cnf
+│   │   │       └── old_TLS_Expired_2025
+│   │   │           ├── CERT_S_SM_DP2_VARO_TLS_NIST.der
+│   │   │           ├── CERT_S_SM_DP4_VARO_TLS_NIST.der
+│   │   │           ├── CERT_S_SM_DP8_VARO_TLS_NIST.der
+│   │   │           ├── CERT_S_SM_DP_VARO_TLS_BRP.der
+│   │   │           └── CERT_S_SM_DP_VARO_TLS_NIST.der
+│   │   ├── SM-DS
+│   │   │   ├── SM_DSauth
+│   │   │   │   ├── CERT_S_SM_DSauth_VARO_SIG_BRP.der
+│   │   │   │   ├── CERT_S_SM_DSauth_VARO_SIG_NIST.der
+│   │   │   │   ├── PK_S_SM_DSauth_SIG_BRP.pem
+│   │   │   │   ├── PK_S_SM_DSauth_SIG_NIST.pem
+│   │   │   │   ├── SK_S_SM_DSauth_SIG_BRP.pem
+│   │   │   │   ├── SK_S_SM_DSauth_SIG_NIST.pem
+│   │   │   │   ├── SM_DSauth-csr.cnf
+│   │   │   │   └── SM_DSauth-ext.cnf
+│   │   │   └── SM_DStls
+│   │   │       ├── CERT_S_SM_DS2_VARO_TLS_NIST.der
+│   │   │       ├── CERT_S_SM_DS_VARO_TLS_BRP.der
+│   │   │       ├── CERT_S_SM_DS_VARO_TLS_NIST.der
+│   │   │       ├── PK_S_SM_DS2_TLS_NIST.pem
+│   │   │       ├── PK_S_SM_DS_TLS_BRP.pem
+│   │   │       ├── PK_S_SM_DS_TLS_NIST.pem
+│   │   │       ├── SK_S_SM_DS2_TLS_NIST.pem
+│   │   │       ├── SK_S_SM_DS_TLS_BRP.pem
+│   │   │       ├── SK_S_SM_DS_TLS_NIST.pem
+│   │   │       ├── SM_DS2tls-csr.cnf
+│   │   │       ├── SM_DS2tls-ext.cnf
+│   │   │       ├── SM_DStls-csr.cnf
+│   │   │       ├── SM_DStls-ext.cnf
+│   │   │       └── old_TLS_Expired_2025
+│   │   │           ├── CERT_S_SM_DS2_VARO_TLS_NIST.der
+│   │   │           ├── CERT_S_SM_DS_VARO_TLS_BRP.der
+│   │   │           └── CERT_S_SM_DS_VARO_TLS_NIST.der
+│   │   └── eUICC
+│   │       ├── CERT_EUICC_SIG_BRP.der
+│   │       ├── CERT_EUICC_SIG_NIST.der
+│   │       ├── PK_EUICC_SIG_BRP.pem
+│   │       ├── PK_EUICC_SIG_NIST.pem
+│   │       ├── SK_EUICC_SIG_BRP.pem
+│   │       ├── SK_EUICC_SIG_NIST.pem
+│   │       ├── eUICC-csr.cnf
+│   │       └── eUICC-ext.cnf
+│   ├── Variant Ov3
+│   │   ├── CI
+│   │   │   ├── CERT_CI_SIG_BRP.der
+│   │   │   ├── CERT_CI_SIG_BRP.pem
+│   │   │   ├── CERT_CI_SIG_NIST.der
+│   │   │   ├── CERT_CI_SIG_NIST.pem
+│   │   │   ├── CI-csr.cnf
+│   │   │   ├── PK_CI_SIG_BRP.pem
+│   │   │   ├── PK_CI_SIG_NIST.pem
+│   │   │   ├── SK_CI_SIG_BRP.pem
+│   │   │   └── SK_CI_SIG_NIST.pem
+│   │   ├── EUM
+│   │   │   ├── CERT_EUM_SIG_BRP.der
+│   │   │   ├── CERT_EUM_SIG_BRP.pem
+│   │   │   ├── CERT_EUM_SIG_NIST.der
+│   │   │   ├── CERT_EUM_SIG_NIST.pem
+│   │   │   ├── EUM-csr.cnf
+│   │   │   ├── EUM-ext.cnf
+│   │   │   ├── PK_EUM_SIG_BRP.pem
+│   │   │   ├── PK_EUM_SIG_NIST.pem
+│   │   │   ├── SK_EUM_SIG_BRP.pem
+│   │   │   └── SK_EUM_SIG_NIST.pem
+│   │   └── eUICC
+│   │       ├── CERT_EUICC_SIG_BRP.der
+│   │       ├── CERT_EUICC_SIG_NIST.der
+│   │       ├── PK_EUICC_SIG_BRP.pem
+│   │       ├── PK_EUICC_SIG_NIST.pem
+│   │       ├── SK_EUICC_SIG_BRP.pem
+│   │       ├── SK_EUICC_SIG_NIST.pem
+│   │       ├── eUICC-csr.cnf
+│   │       └── eUICC-ext.cnf
+│   └── Variants A_B_C
+│       ├── CI
+│       │   ├── CERT_CI_SIG_BRP.der
+│       │   ├── CERT_CI_SIG_BRP.pem
+│       │   ├── CERT_CI_SIG_NIST.der
+│       │   ├── CERT_CI_SIG_NIST.pem
+│       │   ├── CI-csr.cnf
+│       │   ├── PK_CI_SIG_BRP.pem
+│       │   ├── PK_CI_SIG_NIST.pem
+│       │   ├── SK_CI_SIG_BRP.pem
+│       │   └── SK_CI_SIG_NIST.pem
+│       ├── CI_subCA
+│       │   ├── CERT_CISubCA_SIG_BRP.der
+│       │   ├── CERT_CISubCA_SIG_BRP.pem
+│       │   ├── CERT_CISubCA_SIG_NIST.der
+│       │   ├── CERT_CISubCA_SIG_NIST.pem
+│       │   ├── CISubCA-csr.cnf
+│       │   ├── CISubCA-ext.cnf
+│       │   ├── PK_CISubCA_SIG_BRP.pem
+│       │   ├── PK_CISubCA_SIG_NIST.pem
+│       │   ├── SK_CISubCA_SIG_BRP.pem
+│       │   └── SK_CISubCA_SIG_NIST.pem
+│       ├── Variant A
+│       │   ├── EUICC
+│       │   │   ├── CERT_EUICC_VARA_SIG_BRP.der
+│       │   │   ├── CERT_EUICC_VARA_SIG_NIST.der
+│       │   │   ├── PK_EUICC_SIG_BRP.pem
+│       │   │   ├── PK_EUICC_SIG_NIST.pem
+│       │   │   ├── SK_EUICC_SIG_BRP.pem
+│       │   │   ├── SK_EUICC_SIG_NIST.pem
+│       │   │   ├── eUICC-csr.cnf
+│       │   │   └── eUICC-ext.cnf
+│       │   ├── EUM
+│       │   │   ├── CERT_EUM_VARA_SIG_BRP.der
+│       │   │   ├── CERT_EUM_VARA_SIG_BRP.pem
+│       │   │   ├── CERT_EUM_VARA_SIG_NIST.der
+│       │   │   ├── CERT_EUM_VARA_SIG_NIST.pem
+│       │   │   ├── EUM-csr.cnf
+│       │   │   ├── EUM-ext.cnf
+│       │   │   ├── PK_EUM_SIG_BRP.pem
+│       │   │   ├── PK_EUM_SIG_NIST.pem
+│       │   │   ├── SK_EUM_SIG_BRP.pem
+│       │   │   └── SK_EUM_SIG_NIST.pem
+│       │   ├── EUM_SUB_CA
+│       │   │   ├── CERT_EUMSubCA_VARA_SIG_BRP.der
+│       │   │   ├── CERT_EUMSubCA_VARA_SIG_BRP.pem
+│       │   │   ├── CERT_EUMSubCA_VARA_SIG_NIST.der
+│       │   │   ├── CERT_EUMSubCA_VARA_SIG_NIST.pem
+│       │   │   ├── EUMSubCA-csr.cnf
+│       │   │   ├── EUMSubCA-ext.cnf
+│       │   │   ├── PK_EUMSubCA_SIG_BRP.pem
+│       │   │   ├── PK_EUMSubCA_SIG_NIST.pem
+│       │   │   ├── SK_EUMSubCA_SIG_BRP.pem
+│       │   │   └── SK_EUMSubCA_SIG_NIST.pem
+│       │   ├── SM-DP+
+│       │   │   ├── SM_DPSubCA
+│       │   │   │   ├── CERT_SM_DPSubCA_VARA_SIG_BRP.der
+│       │   │   │   ├── CERT_SM_DPSubCA_VARA_SIG_BRP.pem
+│       │   │   │   ├── CERT_SM_DPSubCA_VARA_SIG_NIST.der
+│       │   │   │   ├── CERT_SM_DPSubCA_VARA_SIG_NIST.pem
+│       │   │   │   ├── PK_DPSubCA_SIG_BRP.pem
+│       │   │   │   ├── PK_DPSubCA_SIG_NIST.pem
+│       │   │   │   ├── SK_SM_DPSubCA_SIG_BRP.pem
+│       │   │   │   ├── SK_SM_DPSubCA_SIG_NIST.pem
+│       │   │   │   ├── SM_DPSubCA-csr.cnf
+│       │   │   │   └── SM_DPSubCA-ext.cnf
+│       │   │   ├── SM_DPauth
+│       │   │   │   ├── CERT_S_SM_DP2auth_VARA_SIG_BRP.der
+│       │   │   │   ├── CERT_S_SM_DP2auth_VARA_SIG_NIST.der
+│       │   │   │   ├── CERT_S_SM_DPauth_VARA_SIG_BRP.der
+│       │   │   │   ├── CERT_S_SM_DPauth_VARA_SIG_NIST.der
+│       │   │   │   ├── PK_S_SM_DP2auth_SIG_BRP.pem
+│       │   │   │   ├── PK_S_SM_DP2auth_SIG_NIST.pem
+│       │   │   │   ├── PK_S_SM_DPauth_SIG_BRP.pem
+│       │   │   │   ├── PK_S_SM_DPauth_SIG_NIST.pem
+│       │   │   │   ├── SK_S_SM_DP2auth_SIG_BRP.pem
+│       │   │   │   ├── SK_S_SM_DP2auth_SIG_NIST.pem
+│       │   │   │   ├── SK_S_SM_DPauth_SIG_BRP.pem
+│       │   │   │   ├── SK_S_SM_DPauth_SIG_NIST.pem
+│       │   │   │   ├── SM_DP2auth-csr.cnf
+│       │   │   │   ├── SM_DP2auth-ext.cnf
+│       │   │   │   ├── SM_DPauth-csr.cnf
+│       │   │   │   └── SM_DPauth-ext.cnf
+│       │   │   ├── SM_DPpb
+│       │   │   │   ├── CERT_S_SM_DP2pb_VARA_SIG_BRP.der
+│       │   │   │   ├── CERT_S_SM_DP2pb_VARA_SIG_NIST.der
+│       │   │   │   ├── CERT_S_SM_DPpb_VARA_SIG_BRP.der
+│       │   │   │   ├── CERT_S_SM_DPpb_VARA_SIG_NIST.der
+│       │   │   │   ├── PK_S_SM_DP2pb_SIG_BRP.pem
+│       │   │   │   ├── PK_S_SM_DP2pb_SIG_NIST.pem
+│       │   │   │   ├── PK_S_SM_DPpb_SIG_BRP.pem
+│       │   │   │   ├── PK_S_SM_DPpb_SIG_NIST.pem
+│       │   │   │   ├── SK_S_SM_DP2pb_SIG_BRP.pem
+│       │   │   │   ├── SK_S_SM_DP2pb_SIG_NIST.pem
+│       │   │   │   ├── SK_S_SM_DPpb_SIG_BRP.pem
+│       │   │   │   ├── SK_S_SM_DPpb_SIG_NIST.pem
+│       │   │   │   ├── SM_DP2pb-csr.cnf
+│       │   │   │   ├── SM_DP2pb-ext.cnf
+│       │   │   │   ├── SM_DPpb-csr.cnf
+│       │   │   │   └── SM_DPpb-ext.cnf
+│       │   │   └── SM_DPtls
+│       │   │       ├── CERT_S_SM_DP2_VARA_TLS_NIST.der
+│       │   │       ├── CERT_S_SM_DP4_VARA_TLS_NIST.der
+│       │   │       ├── CERT_S_SM_DP8_VARA_TLS_NIST.der
+│       │   │       ├── CERT_S_SM_DP_VARA_TLS_BRP.der
+│       │   │       ├── CERT_S_SM_DP_VARA_TLS_NIST.der
+│       │   │       ├── PK_S_SM_DP2_TLS_NIST.pem
+│       │   │       ├── PK_S_SM_DP4_TLS_NIST.pem
+│       │   │       ├── PK_S_SM_DP8_TLS_NIST.pem
+│       │   │       ├── PK_S_SM_DP_TLS_BRP.pem
+│       │   │       ├── PK_S_SM_DP_TLS_NIST.pem
+│       │   │       ├── SK_S_SM_DP2_TLS_NIST.pem
+│       │   │       ├── SK_S_SM_DP4_TLS_NIST.pem
+│       │   │       ├── SK_S_SM_DP8_TLS_NIST.pem
+│       │   │       ├── SK_S_SM_DP_TLS_BRP.pem
+│       │   │       ├── SK_S_SM_DP_TLS_NIST.pem
+│       │   │       ├── SM_DP2tls-csr.cnf
+│       │   │       ├── SM_DP2tls-ext.cnf
+│       │   │       ├── SM_DP4tls-csr.cnf
+│       │   │       ├── SM_DP4tls-ext.cnf
+│       │   │       ├── SM_DP8tls-csr.cnf
+│       │   │       ├── SM_DP8tls-ext.cnf
+│       │   │       ├── SM_DPtls-csr.cnf
+│       │   │       ├── SM_DPtls-ext.cnf
+│       │   │       └── old_TLS_Expired_2025
+│       │   │           ├── CERT_S_SM_DP2_VARA_TLS_NIST.der
+│       │   │           ├── CERT_S_SM_DP4_VARA_TLS_NIST.der
+│       │   │           ├── CERT_S_SM_DP8_VARA_TLS_NIST.der
+│       │   │           ├── CERT_S_SM_DP_VARA_TLS_BRP.der
+│       │   │           └── CERT_S_SM_DP_VARA_TLS_NIST.der
+│       │   └── SM-DS
+│       │       ├── SM_DSSubCA
+│       │       │   ├── CERT_SM_DSSubCA_VARA_SIG_BRP.der
+│       │       │   ├── CERT_SM_DSSubCA_VARA_SIG_BRP.pem
+│       │       │   ├── CERT_SM_DSSubCA_VARA_SIG_NIST.der
+│       │       │   ├── CERT_SM_DSSubCA_VARA_SIG_NIST.pem
+│       │       │   ├── PK_DSSubCA_SIG_BRP.pem
+│       │       │   ├── PK_DSSubCA_SIG_NIST.pem
+│       │       │   ├── SK_SM_DSSubCA_SIG_BRP.pem
+│       │       │   ├── SK_SM_DSSubCA_SIG_NIST.pem
+│       │       │   ├── SM_DSSubCA-csr.cnf
+│       │       │   └── SM_DSSubCA-ext.cnf
+│       │       ├── SM_DSauth
+│       │       │   ├── CERT_S_SM_DSauth_VARA_SIG_BRP.der
+│       │       │   ├── CERT_S_SM_DSauth_VARA_SIG_NIST.der
+│       │       │   ├── PK_S_SM_DSauth_SIG_BRP.pem
+│       │       │   ├── PK_S_SM_DSauth_SIG_NIST.pem
+│       │       │   ├── SK_S_SM_DSauth_SIG_BRP.pem
+│       │       │   ├── SK_S_SM_DSauth_SIG_NIST.pem
+│       │       │   ├── SM_DSauth-csr.cnf
+│       │       │   └── SM_DSauth-ext.cnf
+│       │       └── SM_DStls
+│       │           ├── CERT_S_SM_DS2_VARA_TLS_NIST.der
+│       │           ├── CERT_S_SM_DS_VARA_TLS_BRP.der
+│       │           ├── CERT_S_SM_DS_VARA_TLS_NIST.der
+│       │           ├── PK_S_SM_DS2_TLS_NIST.pem
+│       │           ├── PK_S_SM_DS_TLS_BRP.pem
+│       │           ├── PK_S_SM_DS_TLS_NIST.pem
+│       │           ├── SK_S_SM_DS2_TLS_NIST.pem
+│       │           ├── SK_S_SM_DS_TLS_BRP.pem
+│       │           ├── SK_S_SM_DS_TLS_NIST.pem
+│       │           ├── SM_DS2tls-csr.cnf
+│       │           ├── SM_DS2tls-ext.cnf
+│       │           ├── SM_DStls-csr.cnf
+│       │           ├── SM_DStls-ext.cnf
+│       │           └── old_TLS_Expired_2025
+│       │               ├── CERT_S_SM_DS2_VARA_TLS_NIST.der
+│       │               ├── CERT_S_SM_DS_VARA_TLS_BRP.der
+│       │               └── CERT_S_SM_DS_VARA_TLS_NIST.der
+│       ├── Variant B
+│       │   ├── EUICC
+│       │   │   ├── CERT_EUICC_VARB_SIG_BRP.der
+│       │   │   ├── CERT_EUICC_VARB_SIG_NIST.der
+│       │   │   ├── PK_EUICC_SIG_BRP.pem
+│       │   │   ├── PK_EUICC_SIG_NIST.pem
+│       │   │   ├── SK_EUICC_SIG_BRP.pem
+│       │   │   ├── SK_EUICC_SIG_NIST.pem
+│       │   │   ├── eUICC-csr.cnf
+│       │   │   └── eUICC-ext.cnf
+│       │   ├── EUM
+│       │   │   ├── CERT_EUM_VARB_SIG_BRP.der
+│       │   │   ├── CERT_EUM_VARB_SIG_BRP.pem
+│       │   │   ├── CERT_EUM_VARB_SIG_NIST.der
+│       │   │   ├── CERT_EUM_VARB_SIG_NIST.pem
+│       │   │   ├── EUM-csr.cnf
+│       │   │   ├── EUM-ext.cnf
+│       │   │   ├── PK_EUM_SIG_BRP.pem
+│       │   │   ├── PK_EUM_SIG_NIST.pem
+│       │   │   ├── SK_EUM_SIG_BRP.pem
+│       │   │   └── SK_EUM_SIG_NIST.pem
+│       │   ├── SM-DP+
+│       │   │   ├── SM_DPauth
+│       │   │   │   ├── CERT_S_SM_DP2auth_VARB_SIG_BRP.der
+│       │   │   │   ├── CERT_S_SM_DP2auth_VARB_SIG_NIST.der
+│       │   │   │   ├── CERT_S_SM_DPauth_VARB_SIG_BRP.der
+│       │   │   │   ├── CERT_S_SM_DPauth_VARB_SIG_NIST.der
+│       │   │   │   ├── PK_S_SM_DP2auth_SIG_BRP.pem
+│       │   │   │   ├── PK_S_SM_DP2auth_SIG_NIST.pem
+│       │   │   │   ├── PK_S_SM_DPauth_SIG_BRP.pem
+│       │   │   │   ├── PK_S_SM_DPauth_SIG_NIST.pem
+│       │   │   │   ├── SK_S_SM_DP2auth_SIG_BRP.pem
+│       │   │   │   ├── SK_S_SM_DP2auth_SIG_NIST.pem
+│       │   │   │   ├── SK_S_SM_DPauth_SIG_BRP.pem
+│       │   │   │   ├── SK_S_SM_DPauth_SIG_NIST.pem
+│       │   │   │   ├── SM_DP2auth-csr.cnf
+│       │   │   │   ├── SM_DP2auth-ext.cnf
+│       │   │   │   ├── SM_DPauth-csr.cnf
+│       │   │   │   └── SM_DPauth-ext.cnf
+│       │   │   ├── SM_DPpb
+│       │   │   │   ├── CERT_S_SM_DP2pb_VARB_SIG_BRP.der
+│       │   │   │   ├── CERT_S_SM_DP2pb_VARB_SIG_NIST.der
+│       │   │   │   ├── CERT_S_SM_DPpb_VARB_SIG_BRP.der
+│       │   │   │   ├── CERT_S_SM_DPpb_VARB_SIG_NIST.der
+│       │   │   │   ├── PK_S_SM_DP2pb_SIG_BRP.pem
+│       │   │   │   ├── PK_S_SM_DP2pb_SIG_NIST.pem
+│       │   │   │   ├── PK_S_SM_DPpb_SIG_BRP.pem
+│       │   │   │   ├── PK_S_SM_DPpb_SIG_NIST.pem
+│       │   │   │   ├── SK_S_SM_DP2pb_SIG_BRP.pem
+│       │   │   │   ├── SK_S_SM_DP2pb_SIG_NIST.pem
+│       │   │   │   ├── SK_S_SM_DPpb_SIG_BRP.pem
+│       │   │   │   ├── SK_S_SM_DPpb_SIG_NIST.pem
+│       │   │   │   ├── SM_DP2pb-csr.cnf
+│       │   │   │   ├── SM_DP2pb-ext.cnf
+│       │   │   │   ├── SM_DPpb-csr.cnf
+│       │   │   │   └── SM_DPpb-ext.cnf
+│       │   │   └── SM_DPtls
+│       │   │       ├── CERT_S_SM_DP2_VARB_TLS_NIST.der
+│       │   │       ├── CERT_S_SM_DP4_VARB_TLS_NIST.der
+│       │   │       ├── CERT_S_SM_DP8_VARB_TLS_NIST.der
+│       │   │       ├── CERT_S_SM_DP_VARB_TLS_BRP.der
+│       │   │       ├── CERT_S_SM_DP_VARB_TLS_NIST.der
+│       │   │       ├── PK_S_SM_DP2_TLS_NIST.pem
+│       │   │       ├── PK_S_SM_DP4_TLS_NIST.pem
+│       │   │       ├── PK_S_SM_DP8_TLS_NIST.pem
+│       │   │       ├── PK_S_SM_DP_TLS_BRP.pem
+│       │   │       ├── PK_S_SM_DP_TLS_NIST.pem
+│       │   │       ├── SK_S_SM_DP2_TLS_NIST.pem
+│       │   │       ├── SK_S_SM_DP4_TLS_NIST.pem
+│       │   │       ├── SK_S_SM_DP8_TLS_NIST.pem
+│       │   │       ├── SK_S_SM_DP_TLS_BRP.pem
+│       │   │       ├── SK_S_SM_DP_TLS_NIST.pem
+│       │   │       ├── SM_DP2tls-csr.cnf
+│       │   │       ├── SM_DP2tls-ext.cnf
+│       │   │       ├── SM_DP4tls-csr.cnf
+│       │   │       ├── SM_DP4tls-ext.cnf
+│       │   │       ├── SM_DP8tls-csr.cnf
+│       │   │       ├── SM_DP8tls-ext.cnf
+│       │   │       ├── SM_DPtls-csr.cnf
+│       │   │       ├── SM_DPtls-ext.cnf
+│       │   │       └── old_TLS_Expired_2025
+│       │   │           ├── CERT_S_SM_DP2_VARB_TLS_NIST.der
+│       │   │           ├── CERT_S_SM_DP4_VARB_TLS_NIST.der
+│       │   │           ├── CERT_S_SM_DP8_VARB_TLS_NIST.der
+│       │   │           ├── CERT_S_SM_DP_VARB_TLS_BRP.der
+│       │   │           └── CERT_S_SM_DP_VARB_TLS_NIST.der
+│       │   └── SM-DS
+│       │       ├── SM_DSauth
+│       │       │   ├── CERT_S_SM_DSauth_VARB_SIG_BRP.der
+│       │       │   ├── CERT_S_SM_DSauth_VARB_SIG_NIST.der
+│       │       │   ├── PK_S_SM_DSauth_SIG_BRP.pem
+│       │       │   ├── PK_S_SM_DSauth_SIG_NIST.pem
+│       │       │   ├── SK_S_SM_DSauth_SIG_BRP.pem
+│       │       │   ├── SK_S_SM_DSauth_SIG_NIST.pem
+│       │       │   ├── SM_DSauth-csr.cnf
+│       │       │   └── SM_DSauth-ext.cnf
+│       │       └── SM_DStls
+│       │           ├── CERT_S_SM_DS2_VARB_TLS_NIST.der
+│       │           ├── CERT_S_SM_DS_VARB_TLS_BRP.der
+│       │           ├── CERT_S_SM_DS_VARB_TLS_NIST.der
+│       │           ├── PK_S_SM_DS2_TLS_NIST.pem
+│       │           ├── PK_S_SM_DS_TLS_BRP.pem
+│       │           ├── PK_S_SM_DS_TLS_NIST.pem
+│       │           ├── SK_S_SM_DS2_TLS_NIST.pem
+│       │           ├── SK_S_SM_DS_TLS_BRP.pem
+│       │           ├── SK_S_SM_DS_TLS_NIST.pem
+│       │           ├── SM_DS2tls-csr.cnf
+│       │           ├── SM_DS2tls-ext.cnf
+│       │           ├── SM_DStls-csr.cnf
+│       │           ├── SM_DStls-ext.cnf
+│       │           └── old_TLS_Expired_2025
+│       │               ├── CERT_S_SM_DS2_VARB_TLS_NIST.der
+│       │               ├── CERT_S_SM_DS_VARB_TLS_BRP.der
+│       │               └── CERT_S_SM_DS_VARB_TLS_NIST.der
+│       └── Variant C
+│           ├── EUICC
+│           │   ├── CERT_EUICC_VARC_SIG_BRP.der
+│           │   ├── CERT_EUICC_VARC_SIG_NIST.der
+│           │   ├── PK_EUICC_SIG_BRP.pem
+│           │   ├── PK_EUICC_SIG_NIST.pem
+│           │   ├── SK_EUICC_SIG_BRP.pem
+│           │   ├── SK_EUICC_SIG_NIST.pem
+│           │   ├── eUICC-csr.cnf
+│           │   └── eUICC-ext.cnf
+│           ├── EUM
+│           │   ├── CERT_EUM_VARC_SIG_BRP.der
+│           │   ├── CERT_EUM_VARC_SIG_BRP.pem
+│           │   ├── CERT_EUM_VARC_SIG_NIST.der
+│           │   ├── CERT_EUM_VARC_SIG_NIST.pem
+│           │   ├── EUM-csr.cnf
+│           │   ├── EUM-ext.cnf
+│           │   ├── PK_EUM_SIG_BRP.pem
+│           │   ├── PK_EUM_SIG_NIST.pem
+│           │   ├── SK_EUM_SIG_BRP.pem
+│           │   └── SK_EUM_SIG_NIST.pem
+│           ├── EUM_SUB_CA
+│           │   ├── CERT_EUMSubCA_VARC_SIG_BRP.der
+│           │   ├── CERT_EUMSubCA_VARC_SIG_BRP.pem
+│           │   ├── CERT_EUMSubCA_VARC_SIG_NIST.der
+│           │   ├── CERT_EUMSubCA_VARC_SIG_NIST.pem
+│           │   ├── EUMSubCA-csr.cnf
+│           │   ├── EUMSubCA-ext.cnf
+│           │   ├── PK_EUMSubCA_SIG_BRP.pem
+│           │   ├── PK_EUMSubCA_SIG_NIST.pem
+│           │   ├── SK_EUMSubCA_SIG_BRP.pem
+│           │   └── SK_EUMSubCA_SIG_NIST.pem
+│           ├── SM-DP+
+│           │   ├── SM_DPSubCA
+│           │   │   ├── CERT_SM_DPSubCA_VARC_SIG_BRP.der
+│           │   │   ├── CERT_SM_DPSubCA_VARC_SIG_BRP.pem
+│           │   │   ├── CERT_SM_DPSubCA_VARC_SIG_NIST.der
+│           │   │   ├── CERT_SM_DPSubCA_VARC_SIG_NIST.pem
+│           │   │   ├── PK_DPSubCA_SIG_BRP.pem
+│           │   │   ├── PK_DPSubCA_SIG_NIST.pem
+│           │   │   ├── SK_SM_DPSubCA_SIG_BRP.pem
+│           │   │   ├── SK_SM_DPSubCA_SIG_NIST.pem
+│           │   │   ├── SM_DPSubCA-csr.cnf
+│           │   │   └── SM_DPSubCA-ext.cnf
+│           │   ├── SM_DPauth
+│           │   │   ├── CERT_S_SM_DP2auth_VARC_SIG_BRP.der
+│           │   │   ├── CERT_S_SM_DP2auth_VARC_SIG_NIST.der
+│           │   │   ├── CERT_S_SM_DPauth_VARC_SIG_BRP.der
+│           │   │   ├── CERT_S_SM_DPauth_VARC_SIG_NIST.der
+│           │   │   ├── PK_S_SM_DP2auth_SIG_BRP.pem
+│           │   │   ├── PK_S_SM_DP2auth_SIG_NIST.pem
+│           │   │   ├── PK_S_SM_DPauth_SIG_BRP.pem
+│           │   │   ├── PK_S_SM_DPauth_SIG_NIST.pem
+│           │   │   ├── SK_S_SM_DP2auth_SIG_BRP.pem
+│           │   │   ├── SK_S_SM_DP2auth_SIG_NIST.pem
+│           │   │   ├── SK_S_SM_DPauth_SIG_BRP.pem
+│           │   │   ├── SK_S_SM_DPauth_SIG_NIST.pem
+│           │   │   ├── SM_DP2auth-csr.cnf
+│           │   │   ├── SM_DP2auth-ext.cnf
+│           │   │   ├── SM_DPauth-csr.cnf
+│           │   │   └── SM_DPauth-ext.cnf
+│           │   ├── SM_DPpb
+│           │   │   ├── CERT_S_SM_DP2pb_VARC_SIG_BRP.der
+│           │   │   ├── CERT_S_SM_DP2pb_VARC_SIG_NIST.der
+│           │   │   ├── CERT_S_SM_DPpb_VARC_SIG_BRP.der
+│           │   │   ├── CERT_S_SM_DPpb_VARC_SIG_NIST.der
+│           │   │   ├── PK_S_SM_DP2pb_SIG_BRP.pem
+│           │   │   ├── PK_S_SM_DP2pb_SIG_NIST.pem
+│           │   │   ├── PK_S_SM_DPpb_SIG_BRP.pem
+│           │   │   ├── PK_S_SM_DPpb_SIG_NIST.pem
+│           │   │   ├── SK_S_SM_DP2pb_SIG_BRP.pem
+│           │   │   ├── SK_S_SM_DP2pb_SIG_NIST.pem
+│           │   │   ├── SK_S_SM_DPpb_SIG_BRP.pem
+│           │   │   ├── SK_S_SM_DPpb_SIG_NIST.pem
+│           │   │   ├── SM_DP2pb-csr.cnf
+│           │   │   ├── SM_DP2pb-ext.cnf
+│           │   │   ├── SM_DPpb-csr.cnf
+│           │   │   └── SM_DPpb-ext.cnf
+│           │   └── SM_DPtls
+│           │       ├── CERT_S_SM_DP2_VARC_TLS_NIST.der
+│           │       ├── CERT_S_SM_DP4_VARC_TLS_NIST.der
+│           │       ├── CERT_S_SM_DP8_VARC_TLS_NIST.der
+│           │       ├── CERT_S_SM_DP_VARC_TLS_BRP.der
+│           │       ├── CERT_S_SM_DP_VARC_TLS_NIST.der
+│           │       ├── PK_S_SM_DP2_TLS_NIST.pem
+│           │       ├── PK_S_SM_DP4_TLS_NIST.pem
+│           │       ├── PK_S_SM_DP8_TLS_NIST.pem
+│           │       ├── PK_S_SM_DP_TLS_BRP.pem
+│           │       ├── PK_S_SM_DP_TLS_NIST.pem
+│           │       ├── SK_S_SM_DP2_TLS_NIST.pem
+│           │       ├── SK_S_SM_DP4_TLS_NIST.pem
+│           │       ├── SK_S_SM_DP8_TLS_NIST.pem
+│           │       ├── SK_S_SM_DP_TLS_BRP.pem
+│           │       ├── SK_S_SM_DP_TLS_NIST.pem
+│           │       ├── SM_DP2tls-csr.cnf
+│           │       ├── SM_DP2tls-ext.cnf
+│           │       ├── SM_DP4tls-csr.cnf
+│           │       ├── SM_DP4tls-ext.cnf
+│           │       ├── SM_DP8tls-csr.cnf
+│           │       ├── SM_DP8tls-ext.cnf
+│           │       ├── SM_DPtls-csr.cnf
+│           │       ├── SM_DPtls-ext.cnf
+│           │       └── old_TLS_Expired_2025
+│           │           ├── CERT_S_SM_DP2_VARC_TLS_NIST.der
+│           │           ├── CERT_S_SM_DP4_VARC_TLS_NIST.der
+│           │           ├── CERT_S_SM_DP8_VARC_TLS_NIST.der
+│           │           ├── CERT_S_SM_DP_VARC_TLS_BRP.der
+│           │           └── CERT_S_SM_DP_VARC_TLS_NIST.der
+│           └── SM-DS
+│               ├── SM_DSSubCA
+│               │   ├── CERT_SM_DSSubCA_VARC_SIG_BRP.der
+│               │   ├── CERT_SM_DSSubCA_VARC_SIG_BRP.pem
+│               │   ├── CERT_SM_DSSubCA_VARC_SIG_NIST.der
+│               │   ├── CERT_SM_DSSubCA_VARC_SIG_NIST.pem
+│               │   ├── PK_DSSubCA_SIG_BRP.pem
+│               │   ├── PK_DSSubCA_SIG_NIST.pem
+│               │   ├── SK_SM_DSSubCA_SIG_BRP.pem
+│               │   ├── SK_SM_DSSubCA_SIG_NIST.pem
+│               │   ├── SM_DSSubCA-csr.cnf
+│               │   └── SM_DSSubCA-ext.cnf
+│               ├── SM_DSauth
+│               │   ├── CERT_S_SM_DSauth_VARC_SIG_BRP.der
+│               │   ├── CERT_S_SM_DSauth_VARC_SIG_NIST.der
+│               │   ├── PK_S_SM_DSauth_SIG_BRP.pem
+│               │   ├── PK_S_SM_DSauth_SIG_NIST.pem
+│               │   ├── SK_S_SM_DSauth_SIG_BRP.pem
+│               │   ├── SK_S_SM_DSauth_SIG_NIST.pem
+│               │   ├── SM_DSauth-csr.cnf
+│               │   └── SM_DSauth-ext.cnf
+│               └── SM_DStls
+│                   ├── CERT_S_SM_DS2_VARC_TLS_NIST.der
+│                   ├── CERT_S_SM_DS_VARC_TLS_BRP.der
+│                   ├── CERT_S_SM_DS_VARC_TLS_NIST.der
+│                   ├── PK_S_SM_DS2_TLS_NIST.pem
+│                   ├── PK_S_SM_DS_TLS_BRP.pem
+│                   ├── PK_S_SM_DS_TLS_NIST.pem
+│                   ├── SK_S_SM_DS2_TLS_NIST.pem
+│                   ├── SK_S_SM_DS_TLS_BRP.pem
+│                   ├── SK_S_SM_DS_TLS_NIST.pem
+│                   ├── SM_DS2tls-csr.cnf
+│                   ├── SM_DS2tls-ext.cnf
+│                   ├── SM_DStls-csr.cnf
+│                   ├── SM_DStls-ext.cnf
+│                   └── old_TLS_Expired_2025
+│                       ├── CERT_S_SM_DS2_VARC_TLS_NIST.der
+│                       ├── CERT_S_SM_DS_VARC_TLS_BRP.der
+│                       └── CERT_S_SM_DS_VARC_TLS_NIST.der
+└── tree.txt
+
+228 directories, 974 files

@@ -1,9 +1,18 @@
 # -----------------------------------------------------------------------------
-# This Source Code Form is subject to the terms of the Mozilla Public
-# License, v. 2.0. If a copy of the MPL was not distributed with this
-# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
 #
-# Copyright (c) 2026 Hampus Hellsberg
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program. If not, see <https://www.gnu.org/licenses/>.
+#
+# Copyright (c) 2026 Hampus Hellsberg and contributors
 # -----------------------------------------------------------------------------
 
 import binascii 
@@ -220,6 +229,152 @@ class AdvancedDecoders :
         if len (lines )==0 :
             return ["GP_SEAC: No TLV entries"]
         return lines 
+
+    @staticmethod
+    def decode_ara_rulesets (data_hex :str )->list :
+        """
+        Decode ARA-M / ARA-C GET DATA [All] payloads into compact ruleset lines.
+        """
+        if not data_hex :
+            return ["ARA Rules: Empty/Invalid"]
+
+        cleaned =data_hex .strip ().upper ()
+        if len (cleaned )==0 :
+            return ["ARA Rules: Empty/Invalid"]
+
+        is_only_ff =True 
+        for char in cleaned :
+            if char !="F":
+                is_only_ff =False 
+                break 
+        if is_only_ff :
+            return ["ARA Rules: Empty/Invalid"]
+
+        try :
+            raw =bytes .fromhex (cleaned )
+        except Exception :
+            return ["ARA Rules: Hex Decode Error"]
+
+        try :
+            parsed =TlvParser .parse (raw )
+        except Exception :
+            return ["ARA Rules: TLV Parse Error"]
+
+        rule_nodes :List [Dict [int ,Any ]]=[]
+
+        def _as_dict (node :Any )->Optional [Dict [int ,Any ]]:
+            if isinstance (node ,dict ):
+                return node 
+            if isinstance (node ,bytes ):
+                try :
+                    return TlvParser .parse (node )
+                except Exception :
+                    return None 
+            return None 
+
+        def _collect_rules (node :Any )->None :
+            if isinstance (node ,dict ):
+                for tag ,value in node .items ():
+                    if tag ==0xE2 :
+                        for item in TlvParser .as_list (value ):
+                            rule_dict =_as_dict (item )
+                            if rule_dict is not None :
+                                rule_nodes .append (rule_dict )
+                        continue 
+                    _collect_rules (value )
+                return 
+            if isinstance (node ,list ):
+                for item in node :
+                    _collect_rules (item )
+
+        def _ascii_or_hex (value :Any )->str :
+            if isinstance (value ,bytes )==False :
+                return ""
+            if len (value )==0 :
+                return ""
+            try :
+                return value .decode ("ascii")
+            except Exception :
+                return value .hex ().upper ()
+
+        def _decode_apdu_rule (value :Any )->str :
+            if isinstance (value ,bytes )==False :
+                return ""
+            if len (value )==1 :
+                if value [0 ]==0x00 :
+                    return "never"
+                if value [0 ]==0x01 :
+                    return "always"
+                return value .hex ().upper ()
+            if len (value )%8 !=0 :
+                return value .hex ().upper ()
+            filters =[]
+            offset =0 
+            while offset <len (value ):
+                header =value [offset :offset +4 ].hex ().upper ()
+                mask =value [offset +4 :offset +8 ].hex ().upper ()
+                filters .append (f"{header}/{mask}")
+                offset +=8 
+            return "filter " +", ".join (filters )
+
+        def _decode_nfc_rule (value :Any )->str :
+            if isinstance (value ,bytes )==False :
+                return ""
+            if len (value )!=1 :
+                return value .hex ().upper ()
+            if value [0 ]==0x00 :
+                return "never"
+            if value [0 ]==0x01 :
+                return "always"
+            return value .hex ().upper ()
+
+        _collect_rules (parsed )
+        if len (rule_nodes )==0 :
+            return ["ARA Rules: No rulesets returned"]
+
+        output =[]
+        for idx ,rule_node in enumerate (rule_nodes ,start =1 ):
+            ref_do =_as_dict (TlvParser .get_first (rule_node ,0xE1 ,{}))
+            ar_do =_as_dict (TlvParser .get_first (rule_node ,0xE3 ,{}))
+            if ref_do is None :
+                ref_do ={}
+            if ar_do is None :
+                ar_do ={}
+
+            parts =[]
+
+            aid_ref =TlvParser .get_first (ref_do ,0x4F )
+            if isinstance (aid_ref ,bytes )and len (aid_ref )>0 :
+                parts .append (f"AID={aid_ref .hex ().upper ()}")
+            elif 0xC0 in ref_do :
+                parts .append ("AID=Implicit")
+
+            dev_app_id =TlvParser .get_first (ref_do ,0xC1 )
+            if isinstance (dev_app_id ,bytes )and len (dev_app_id )>0 :
+                parts .append (f"DeviceAppID={dev_app_id .hex ().upper ()}")
+
+            pkg_ref =_ascii_or_hex (TlvParser .get_first (ref_do ,0xCA ))
+            if len (pkg_ref )>0 :
+                parts .append (f"Package={pkg_ref}")
+
+            apdu_rule =_decode_apdu_rule (TlvParser .get_first (ar_do ,0xD0 ))
+            if len (apdu_rule )>0 :
+                parts .append (f"APDU={apdu_rule}")
+
+            nfc_rule =_decode_nfc_rule (TlvParser .get_first (ar_do ,0xD1 ))
+            if len (nfc_rule )>0 :
+                parts .append (f"NFC={nfc_rule}")
+
+            perm_rule =TlvParser .get_first (ar_do ,0xDB )
+            if isinstance (perm_rule ,bytes )and len (perm_rule )>0 :
+                parts .append (f"Permissions={perm_rule .hex ().upper ()}")
+
+            if len (parts )==0 :
+                parts .append ("Empty")
+
+            output .append (f"Ruleset {idx}: " +" | ".join (parts ))
+
+        return output 
 
     @staticmethod 
     def decode_pkcs15_acrf (data_hex :str )->list :

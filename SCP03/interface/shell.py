@@ -1,9 +1,18 @@
 # -----------------------------------------------------------------------------
-# This Source Code Form is subject to the terms of the Mozilla Public
-# License, v. 2.0. If a copy of the MPL was not distributed with this
-# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
 #
-# Copyright (c) 2026 Hampus Hellsberg
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program. If not, see <https://www.gnu.org/licenses/>.
+#
+# Copyright (c) 2026 Hampus Hellsberg and contributors
 # -----------------------------------------------------------------------------
 
 import sys 
@@ -13,8 +22,20 @@ import atexit
 import io 
 import re 
 import datetime 
+import shlex
 import yaml 
-from typing import Dict ,Optional ,Any 
+from typing import Dict ,Optional ,Any ,Tuple 
+from pathlib import Path
+
+try :
+    from yggdrasim_common.device_inventory import DeviceInventoryStore 
+except ImportError :
+    repo_root =Path (__file__ ).resolve ().parents [2 ]
+    if str (repo_root )not in sys .path :
+        sys .path .insert (0 ,str (repo_root ))
+    from yggdrasim_common.device_inventory import DeviceInventoryStore 
+
+from yggdrasim_common.quit_control import quit_all
 
 try :
     import readline 
@@ -23,7 +44,7 @@ except ImportError :
 
 from SCP03 .config import Config 
 from SCP03 .core .utils import HexUtils ,TlvParser ,StatusWordTranslator 
-from SCP03 .core .decoders import ContentDecoder 
+from SCP03 .core .decoders import ContentDecoder ,AdvancedDecoders 
 from SCP03 .transport .card import CardTransporter 
 from SCP03 .logic .gp import GlobalPlatformManager 
 from SCP03 .logic .fs import FileSystemController 
@@ -32,11 +53,16 @@ from SCP03 .interface .guides import ShellGuides
 from SCP03 .interface .commands import CommandRegistry 
 from SCP03 .interface .help_menu import HelpMenu 
 from SCP03 .interface .wizards import InteractiveWizards 
+from SCP03 .logic .profile_snapshot_diff import combined_profile_unified_diff 
 
 class ShellDispatcher :
     def __init__ (self ):
         self .config =configparser .ConfigParser ()
+        self .inventory =DeviceInventoryStore ()
+        self .current_iccid =""
+        self .current_eid =""
         self ._load_config_file ()
+        self .aid_rule_roles ={}
         self .aid_registry =self ._load_aid_registry ()
         self .aid_lookup ={bytes .fromhex (v ):k for k ,v in self .aid_registry .items ()}
 
@@ -53,7 +79,7 @@ class ShellDispatcher :
         self .prompt_str =""
         self ._update_prompt_state ()
 
-        self .guide_topics =['GP','ETSI','GSMA','INSTALL','SECURITY','OTA']
+        self .guide_topics =['GP','ETSI','GSMA','INSTALL','SECURITY','OTA','CONFIG','SAIP','SUCI','CLI']
 
         self .command_map =CommandRegistry .build (self )
         self .commands ={}
@@ -71,6 +97,7 @@ class ShellDispatcher :
                 self .visible_commands .append (cmd )
 
         self ._setup_readline ()
+        self ._prime_inventory_profile ()
 
     def _init_binder (self ):
         from SCP03 .interface .custom_binds import CommandBinder 
@@ -203,12 +230,55 @@ class ShellDispatcher :
 
         try :
             data =bytes .fromhex (hex_data )
-            parsed =TlvParser .parse (data )
+            parse_info =TlvParser .parse_detailed (data )
+            parsed =parse_info ["parsed"]
+            if parse_info ["complete"]==False or len (parsed )==0 :
+                if self ._try_decode_simple_registry_stream (data ):
+                    return 
+                print (f"{Config.Colors.WARNING}[!] Input does not appear to be valid BER-TLV.{Config.Colors.ENDC}")
+                if parse_info ["error"]:
+                    print (f"{Config.Colors.WARNING}[!] Parser note: {parse_info['error']}{Config.Colors.ENDC}")
+                consumed =parse_info .get ("consumed",0 )
+                print (f"{Config.Colors.WARNING}[!] Consumed {consumed} of {len(data)} bytes before stopping.{Config.Colors.ENDC}")
+                return 
             self .gp_ctrl .print_tlv_data (parsed )
         except ValueError :
             print (f"{Config.Colors.FAIL}[!] Invalid Hex string provided.{Config.Colors.ENDC}")
         except Exception as e :
             print (f"{Config.Colors.FAIL}[!] Decode Error: {e}{Config.Colors.ENDC}")
+
+    def _try_decode_simple_registry_stream (self ,data :bytes )->bool :
+        entries =[]
+        i =0 
+        while i <len (data ):
+            if i +3 >len (data ):
+                return False 
+            aid_len =data [i ]
+            if aid_len <5 or aid_len >16 :
+                return False 
+            i +=1 
+            if i +aid_len +2 >len (data ):
+                return False 
+            aid =data [i :i +aid_len ]
+            if len (aid )==0 or aid [0 ]!=0xA0 :
+                return False 
+            i +=aid_len 
+            state_byte =data [i ]
+            extra_byte =data [i +1 ]
+            i +=2 
+            entries .append ((aid .hex ().upper (),state_byte ,extra_byte ))
+
+        if len (entries )==0 :
+            return False 
+
+        print (f"{Config.Colors.CYAN}[i] Detected simple LV registry stream (not BER-TLV).{Config.Colors.ENDC}")
+        print (f"{Config.Colors.HEADER}--- Decoded Registry Stream ---{Config.Colors.ENDC}")
+        print (f"{'AID':<34} | {'State':<12} | Extra")
+        print ("-"*65 )
+        for aid_hex ,state_byte ,extra_byte in entries :
+            state_str =self .gp_ctrl ._state_to_string (state_byte )
+            print (f"{aid_hex:<34} | {state_str:<12} | {extra_byte:02X}")
+        return True 
 
     def _handle_dump_fs (self ,arg_line :str =""):
         target ="ALL"
@@ -359,6 +429,10 @@ class ShellDispatcher :
                     for path_name in self .fs_ctrl .fid_map .keys ():
                         if path_name .upper ().startswith (arg_typed ):
                             options .append (path_name )
+                    for aid_name in self .aid_registry .keys ():
+                        if aid_name .upper ().startswith (arg_typed ):
+                            if aid_name not in options :
+                                options .append (aid_name )
                     options .sort (key =lambda x :x .upper ())
                 except Exception :
                     pass 
@@ -510,6 +584,19 @@ class ShellDispatcher :
     def _handle_install_wizard (self ,arg :str ="")->None :
         target_aid ="A000000151000000"
 
+        has_gp_ctrl =False 
+        if hasattr (self ,'gp_ctrl'):
+            has_gp_ctrl =True 
+
+        if has_gp_ctrl :
+            current_target =self .gp_ctrl .target_aid
+            has_current_target =False 
+            if current_target is not None :
+                if len (current_target )>0 :
+                    has_current_target =True 
+            if has_current_target :
+                target_aid =current_target .hex ().upper ()
+
         has_config =False 
         if hasattr (self ,'config'):
             has_config =True 
@@ -527,36 +614,19 @@ class ShellDispatcher :
                 if has_aid_key :
                     target_aid =self .config ['KEYS']['aid']
 
-        active_ctrl =None 
+        transport_ctrl =None 
+        if hasattr (self ,'transport'):
+            transport_ctrl =self .transport 
 
-        has_tp =False 
-        if hasattr (self ,'tp'):
-            has_tp =True 
+        gp_ctrl =None 
+        if hasattr (self ,'gp_ctrl'):
+            gp_ctrl =self .gp_ctrl 
 
-        if has_tp :
-            active_ctrl =self .tp 
-
-        is_ctrl_missing =False 
-        if active_ctrl is None :
-            is_ctrl_missing =True 
-
-        if is_ctrl_missing :
-            has_gp_ctrl =False 
-            if hasattr (self ,'gp_ctrl'):
-                has_gp_ctrl =True 
-
-            if has_gp_ctrl :
-                active_ctrl =self .gp_ctrl 
-
-        is_ctrl_still_missing =False 
-        if active_ctrl is None :
-            is_ctrl_still_missing =True 
-
-        if is_ctrl_still_missing :
+        if transport_ctrl is None and gp_ctrl is None :
             print ("[-] Error: No active transport controller found in shell.")
             return 
 
-        InteractiveWizards .run_wizard_menu (active_ctrl ,target_aid )
+        InteractiveWizards .run_wizard_menu (transport_ctrl ,target_aid ,gp_ctrl )
 
     def _handle_install_app (self ,arg_line ):
         parts =arg_line .split ()
@@ -679,6 +749,9 @@ class ShellDispatcher :
         if is_auth :
             current_aid =self .gp_ctrl .target_aid 
             name =self .aid_lookup .get (current_aid )
+            protocol_name ="SCP"
+            if self .transport .session :
+                protocol_name =getattr (self .transport .session ,'protocol_name',"SCP")
 
             display =current_aid .hex ().upper ()
 
@@ -689,11 +762,22 @@ class ShellDispatcher :
             if has_name :
                 display =name 
 
-            self .prompt_str =f"\n{Config.Colors.GREEN}[{display}] > {Config.Colors.ENDC}"
+            self .prompt_str =f"\n{Config.Colors.GREEN}[{protocol_name}:{display}] > {Config.Colors.ENDC}"
 
     def _handle_auth (self ):
+        self ._handle_auth_scp03 ()
+
+    def _handle_auth_scp03 (self ):
         is_success =False 
-        if self .gp_ctrl .authenticate ():
+        if self .gp_ctrl .authenticate ("SCP03"):
+            is_success =True 
+
+        if is_success :
+            self ._update_prompt_state ()
+
+    def _handle_auth_scp02 (self ):
+        is_success =False 
+        if self .gp_ctrl .authenticate ("SCP02"):
             is_success =True 
 
         if is_success :
@@ -723,6 +807,154 @@ class ShellDispatcher :
 
         return arg 
 
+    @staticmethod
+    def _is_hex_aid_value (value :str )->bool :
+        cleaned =str (value ).strip ().replace (" ","").upper ()
+        if len (cleaned )==0 :
+            return False 
+        if len (cleaned )%2 !=0 :
+            return False 
+        for char in cleaned :
+            if char not in "0123456789ABCDEF":
+                return False 
+        return True 
+
+    @staticmethod
+    def _parse_aid_registry_line (raw_line :str )->Tuple [str ,str ,str ]:
+        raw_text =str (raw_line ).strip ()
+        if len (raw_text )==0 :
+            return "","",""
+        if raw_text .startswith ("#"):
+            return "","",""
+
+        body =raw_text 
+        comment ="" 
+        if "#"in raw_text :
+            body ,comment =raw_text .split ("#",1 )
+
+        part_values =[]
+        for part in body .split (":"):
+            cleaned_part =part .strip ().upper ()
+            if len (cleaned_part )>0 :
+                part_values .append (cleaned_part )
+
+        if len (part_values )<2 :
+            return "","",""
+
+        name =part_values [0 ]
+        aid_hex =""
+        role_name =""
+
+        if len (part_values )>=3 :
+            second_value =part_values [1 ]
+            third_value =part_values [2 ]
+            if second_value in ("ARAM","ARAC")and ShellDispatcher ._is_hex_aid_value (third_value ):
+                role_name =second_value 
+                aid_hex =third_value 
+            elif third_value in ("ARAM","ARAC")and ShellDispatcher ._is_hex_aid_value (second_value ):
+                aid_hex =second_value 
+                role_name =third_value 
+            elif ShellDispatcher ._is_hex_aid_value (second_value ):
+                aid_hex =second_value 
+
+        if len (aid_hex )==0 :
+            second_value =part_values [1 ]
+            if ShellDispatcher ._is_hex_aid_value (second_value ):
+                aid_hex =second_value 
+
+        if len (aid_hex )==0 :
+            return "","",""
+
+        if len (role_name )==0 :
+            if re .search (r"\bARAM\b",comment .upper ()):
+                role_name ="ARAM"
+            elif re .search (r"\bARAC\b",comment .upper ()):
+                role_name ="ARAC"
+
+        if len (role_name )==0 :
+            if name in ("ARAM","ARAC"):
+                role_name =name 
+
+        return name ,aid_hex ,role_name 
+
+    def _resolve_aid_rule_role (self ,alias_name :str )->str :
+        clean_name =str (alias_name ).strip ().upper ()
+        if len (clean_name )==0 :
+            return ""
+        if clean_name in self .aid_rule_roles :
+            return str (self .aid_rule_roles [clean_name ]).strip ().upper ()
+        if clean_name in ("ARAM","ARAC"):
+            return clean_name 
+        return ""
+
+    def _resolve_selected_ara_target (self ,arg_line :str )->Tuple [str ,str ,str ]:
+        current_aid =""
+        current_fcp =getattr (self .fs_ctrl ,"current_fcp",{})
+        if isinstance (current_fcp ,dict ):
+            current_aid =str (current_fcp .get ("aid","")).strip ().upper ()
+
+        for alias_name ,role_name in self .aid_rule_roles .items ():
+            aid_hex =str (self .aid_registry .get (alias_name ,"")).strip ().upper ()
+            if len (aid_hex )==0 :
+                continue 
+            if aid_hex ==current_aid :
+                return alias_name ,aid_hex ,role_name 
+
+        clean_arg =str (arg_line ).strip ().upper ()
+        if clean_arg in self .aid_registry :
+            aid_hex =str (self .aid_registry [clean_arg ]).strip ().upper ()
+            role_name =self ._resolve_aid_rule_role (clean_arg )
+            return clean_arg ,aid_hex ,role_name 
+
+        return "","",""
+
+    def _read_ara_rules_for_selection (self ,alias_name :str ,aid_hex :str ,role_name :str )->None :
+        has_tp =False 
+        if self .transport :
+            has_tp =True 
+
+        if has_tp ==False :
+            return 
+
+        role_label ="ARA-M"
+        if role_name =="ARAC":
+            role_label ="ARA-C"
+
+        print (f"{Config.Colors.HEADER}--- {role_label} Rulesets ---{Config.Colors.ENDC}")
+        print (
+            f"{Config.Colors.CYAN}[*] READ RULES after selecting "
+            f"{alias_name} ({aid_hex}).{Config.Colors.ENDC}"
+        )
+
+        data ,sw1 ,sw2 =self .transport .transmit ("80CAFF4000",silent =True )
+        if sw1 !=0x90 :
+            sw_text =StatusWordTranslator .translate (sw1 ,sw2 )
+            print (
+                f"{Config.Colors.FAIL}[-] READ RULES failed: "
+                f"{sw1:02X}{sw2:02X} {sw_text}{Config.Colors.ENDC}"
+            )
+            return 
+
+        decoded_rules =AdvancedDecoders .decode_ara_rulesets (data .hex ().upper ())
+        if len (decoded_rules )==0 :
+            print (f"{Config.Colors.WARNING}[!] No ARA rulesets returned.{Config.Colors.ENDC}")
+            return 
+
+        for line in decoded_rules :
+            print (f"  {Config.Colors.CYAN}{line}{Config.Colors.ENDC}")
+
+    def _maybe_read_ara_rules_for_current_selection (self ,arg_line :str )->None :
+        alias_name ,aid_hex ,role_name =self ._resolve_selected_ara_target (arg_line )
+        if len (role_name )==0 :
+            return 
+        self ._read_ara_rules_for_selection (alias_name ,aid_hex ,role_name )
+
+    def _handle_select (self ,arg_line :str )->None :
+        did_select =self .fs_ctrl .select (arg_line )
+        if did_select ==False :
+            return 
+        self ._maybe_read_ara_rules_for_current_selection (arg_line )
+
     def _handle_install_selectable (self ,arg_line ):
         parts =arg_line .split ()
         is_short =False 
@@ -730,7 +962,7 @@ class ShellDispatcher :
             is_short =True 
 
         if is_short :
-            print (f"{Config.Colors.FAIL}Usage: INSTALL-SELECTABLE <AID> [Privileges]{Config.Colors.ENDC}")
+            print (f"{Config.Colors.FAIL}Usage: INSTALL-SELECTABLE <AID> [Privileges] [Params] [Token]{Config.Colors.ENDC}")
             return 
 
         aid =parts [0 ]
@@ -743,7 +975,21 @@ class ShellDispatcher :
         if has_privs :
             privs =parts [1 ]
 
-        self .gp_ctrl .install_make_selectable (aid ,privs )
+        params =""
+        has_params =False 
+        if len (parts )>2 :
+            has_params =True 
+        if has_params :
+            params =parts [2 ]
+
+        token =""
+        has_token =False 
+        if len (parts )>3 :
+            has_token =True 
+        if has_token :
+            token =parts [3 ]
+
+        self .gp_ctrl .install_make_selectable (aid ,privs ,params ,token )
 
     def _handle_install_extradition (self ,arg_line ):
         parts =arg_line .split ()
@@ -752,10 +998,17 @@ class ShellDispatcher :
             is_short =True 
 
         if is_short :
-            print (f"{Config.Colors.FAIL}Usage: INSTALL-EXTRADITION <App_AID> <SD_AID>{Config.Colors.ENDC}")
+            print (f"{Config.Colors.FAIL}Usage: INSTALL-EXTRADITION <App_AID> <SD_AID> [Token]{Config.Colors.ENDC}")
             return 
 
-        self .gp_ctrl .install_extradition (parts [0 ],parts [1 ])
+        token =""
+        has_token =False 
+        if len (parts )>2 :
+            has_token =True 
+        if has_token :
+            token =parts [2 ]
+
+        self .gp_ctrl .install_extradition (parts [0 ],parts [1 ],token )
 
     def _handle_keys (self ,arg :Optional [str ]=None ):
         target =None 
@@ -887,6 +1140,232 @@ class ShellDispatcher :
         report ["generated"]=datetime .datetime .now ().isoformat ()
         return report 
 
+    def _build_combined_profile_dict (
+        self ,
+        standard :str ,
+        adm_hex :str ="" ,
+        authenticate_sd :bool =False ,
+    )->Dict [str ,Any ]:
+        """
+        Same structure as REPORT wizard combined export: FS YAML + eUICC report + MNO-SD report.
+        Performs card resets between phases (matches wizard behaviour).
+        """
+        import tempfile 
+
+        temp_name =""
+        with tempfile .NamedTemporaryFile (prefix ="fs_report_",suffix =".yaml",delete =False )as temp_file :
+            temp_name =temp_file .name 
+
+        try :
+            print (f"{Config.Colors.CYAN}[*] Resetting card before File System collection...{Config.Colors.ENDC}")
+            self ._handle_reset ()
+            adm_clean =adm_hex .strip ().upper ()
+            has_adm =False 
+            if len (adm_clean )>0 :
+                if adm_clean !="SKIP":
+                    has_adm =True 
+            if has_adm :
+                self .gp_ctrl .verify_adm (adm_hex )
+
+            self .fs_ctrl .dump_fs_to_yaml (temp_name )
+            fs_data :Dict [str ,Any ]={}
+            with open (temp_name ,"r",encoding ="utf-8")as fsf :
+                loaded =yaml .safe_load (fsf )
+                if isinstance (loaded ,dict ):
+                    fs_data =loaded 
+
+            print (f"{Config.Colors.CYAN}[*] Resetting card before eUICC collection...{Config.Colors.ENDC}")
+            self ._handle_reset ()
+            euicc_report =self ._build_euicc_export_report (standard =standard )
+
+            print (f"{Config.Colors.CYAN}[*] Resetting card before MNO-SD collection...{Config.Colors.ENDC}")
+            self ._handle_reset ()
+            mnosd_report =self ._build_mnosd_export_report (
+                adm_hex =adm_hex ,
+                authenticate_sd =authenticate_sd ,
+            )
+
+            return {
+                "generated":euicc_report .get ("generated"),
+                "standard":standard ,
+                "file_system_report":fs_data ,
+                "euicc_report":euicc_report ,
+                "mnosd_report":mnosd_report ,
+            }
+        finally :
+            if len (temp_name )>0 :
+                if os .path .exists (temp_name ):
+                    os .remove (temp_name )
+
+    def _get_gold_profile_settings (self )->Dict [str ,Any ]:
+        out :Dict [str ,Any ]={
+        "path":"",
+        "standard":"SGP.32",
+        "authenticate_sd":False ,
+        }
+        has_gp =False 
+        if 'GOLD_PROFILE'in self .config :
+            has_gp =True 
+        if has_gp ==False :
+            return out 
+
+        sec =self .config ['GOLD_PROFILE']
+        path_raw =str (sec .get ('path','')or '').strip ()
+        if path_raw !="":
+            out ['path']=os .path .expanduser (path_raw )
+
+        std_raw =str (sec .get ('standard','SGP.32')or 'SGP.32').strip ().upper ()
+        if len (std_raw )>0 :
+            out ['standard']=std_raw 
+
+        auth_raw =str (sec .get ('authenticate_sd','false')or 'false').strip ().lower ()
+        out ['authenticate_sd']=auth_raw in ('1','true','yes','on')
+        return out 
+
+    def _handle_set_gold_profile (self ,arg_line :str =""):
+        parts =shlex .split (arg_line .strip ())
+        if len (parts )<1 :
+            print (
+                f"{Config.Colors.FAIL}[!] Usage: SET-GOLD-PROFILE <path> [SGP.32|SGP.22|SGP.02] "
+                f"[AUTH=Y|AUTH=N]{Config.Colors.ENDC}"
+            )
+            return 
+
+        path_exp =os .path .expanduser (parts [0 ].strip ())
+        std ="SGP.32"
+        if len (parts )>=2 :
+            std =parts [1 ].strip ().upper ()
+        allowed =("SGP.32","SGP.22","SGP.02")
+        if std not in allowed :
+            print (f"{Config.Colors.FAIL}[!] Standard must be one of: {', '.join (allowed)}{Config.Colors.ENDC}")
+            return 
+
+        if 'GOLD_PROFILE'not in self .config :
+            self .config ['GOLD_PROFILE']={}
+
+        auth_token =""
+        if len (parts )>=3 :
+            auth_token =parts [2 ].strip ().upper ()
+
+        auth_val ='false'
+        if auth_token in ("AUTH=Y","Y","YES","TRUE","1"):
+            auth_val ='true'
+        if auth_token in ("AUTH=N","N","NO","FALSE","0"):
+            auth_val ='false'
+
+        self .config ['GOLD_PROFILE']['path']=path_exp 
+        self .config ['GOLD_PROFILE']['standard']=std 
+        if auth_token !="":
+            self .config ['GOLD_PROFILE']['authenticate_sd']=auth_val 
+        if 'authenticate_sd'not in self .config ['GOLD_PROFILE']:
+            self .config ['GOLD_PROFILE']['authenticate_sd']='false'
+
+        self ._save_to_disk ()
+        print (f"{Config.Colors.GREEN}[+] Gold combined profile YAML path saved to SQLite state.{Config.Colors.ENDC}")
+        print (f"    path={path_exp}")
+        print (f"    standard={std}")
+        print (
+            f"    authenticate_sd={self .config ['GOLD_PROFILE']['authenticate_sd']} "
+            f"(optional 3rd arg AUTH=Y|AUTH=N)"
+        )
+
+    def _handle_show_gold_profile (self ,arg_line :str =""):
+        settings =self ._get_gold_profile_settings ()
+        print (f"{Config.Colors.HEADER}--- Gold profile reference (SQLite [GOLD_PROFILE]) ---{Config.Colors.ENDC}")
+        print (f"  path             : {settings ['path']or '(not set)'}")
+        print (f"  standard         : {settings ['standard']}")
+        print (f"  authenticate_sd  : {settings ['authenticate_sd']}")
+        print ("  PROFILE-DIFF reads the card and diffs against this YAML (or an override path).")
+
+    def _handle_clear_gold_profile (self ,arg_line :str =""):
+        if 'GOLD_PROFILE'not in self .config :
+            self .config ['GOLD_PROFILE']={}
+        self .config ['GOLD_PROFILE']['path']=''
+        self ._save_to_disk ()
+        print (f"{Config.Colors.GREEN}[+] Cleared gold profile path (standard/auth prefs kept).{Config.Colors.ENDC}")
+
+    def _handle_profile_diff (self ,arg_line :str =""):
+        parts =shlex .split (arg_line .strip ())
+        settings =self ._get_gold_profile_settings ()
+        gold_path =settings ['path']
+
+        if len (parts )>=1 :
+            gold_path =os .path .expanduser (parts [0 ].strip ())
+
+        if gold_path =="" or gold_path is None :
+            print (
+                f"{Config.Colors.FAIL}[!] No gold YAML: use SET-GOLD-PROFILE <path> or "
+                f"PROFILE-DIFF <path.yaml>{Config.Colors.ENDC}"
+            )
+            return 
+
+        if os .path .isfile (gold_path )is False :
+            print (f"{Config.Colors.FAIL}[!] Gold YAML not found: {gold_path}{Config.Colors.ENDC}")
+            return 
+
+        arg_standard =""
+        if len (parts )>=2 :
+            arg_standard =parts [1 ].strip ().upper ()
+
+        with open (gold_path ,"r",encoding ="utf-8")as gf :
+            gold_doc =yaml .safe_load (gf )
+        if isinstance (gold_doc ,dict )is False :
+            print (f"{Config.Colors.FAIL}[!] Gold file must decode to a YAML mapping.{Config.Colors.ENDC}")
+            return 
+
+        std =arg_standard 
+        if std =="":
+            loaded_std =gold_doc .get ("standard")
+            if isinstance (loaded_std ,str )and len (loaded_std .strip ())>0 :
+                std =loaded_std .strip ().upper ()
+        if std =="":
+            std =settings ['standard']
+        if std =="":
+            std ="SGP.32"
+
+        auth_sd =settings ['authenticate_sd']
+        if len (parts )>=3 :
+            third =parts [2 ].strip ().upper ()
+            if third in ("AUTH=Y","Y","YES","TRUE","1"):
+                auth_sd =True 
+            if third in ("AUTH=N","N","NO","FALSE","0"):
+                auth_sd =False 
+
+        adm =""
+        has_keys =False 
+        if 'KEYS'in self .config :
+            has_keys =True 
+        if has_keys :
+            adm =str (self .config ['KEYS'].get ('adm',''))
+
+        print (
+            f"{Config.Colors.CYAN}[*] PROFILE-DIFF: standard={std} authenticate_sd={auth_sd} "
+            f"(timestamps stripped){Config.Colors.ENDC}"
+        )
+        try :
+            live =self ._build_combined_profile_dict (
+                standard =std ,
+                adm_hex =adm ,
+                authenticate_sd =auth_sd ,
+            )
+        except Exception as exc :
+            print (f"{Config.Colors.FAIL}[!] Live snapshot failed: {exc}{Config.Colors.ENDC}")
+            return 
+
+        ok ,diff_text =combined_profile_unified_diff (
+            gold_doc ,
+            live ,
+            gold_label ="gold:"+gold_path ,
+            live_label ="live:pcsc",
+        )
+
+        if ok :
+            print (f"{Config.Colors.GREEN}[+] PROFILE-DIFF: OK (no differences after normalization).{Config.Colors.ENDC}")
+            return 
+
+        print (f"{Config.Colors.WARNING}[!] PROFILE-DIFF: mismatch — unified diff:{Config.Colors.ENDC}")
+        print (diff_text )
+
     def _handle_export_euicc (self ,arg :str ="",standard :str ="SGP.32"):
         """Single-command eUICC report export to YAML."""
         out_path =(arg .strip ()if arg else "euicc_report.yaml").strip ()
@@ -959,6 +1438,41 @@ class ShellDispatcher :
         path =arg .strip ()if arg else None 
         self .fs_ctrl .get_arr (path =path )
 
+    def _handle_validate (self ,arg :str =""):
+        scope ="ALL"
+        metadata =None 
+        parts =shlex .split (arg .strip ())
+        if len (parts )>0 :
+            first_token =parts [0 ].strip ()
+            first_upper =first_token .upper ()
+            if first_upper in ("ALL","MF","USIM","ISIM"):
+                scope =first_upper 
+                if len (parts )>1 :
+                    metadata =self ._load_validate_metadata (parts [1 ])
+            else :
+                metadata =self ._load_validate_metadata (first_token )
+
+        from SCP03 .logic .profile_validator import ProfileValidator 
+
+        validator =ProfileValidator (self .fs_ctrl ,profile_metadata =metadata )
+        validator .run (scope =scope )
+
+    def _load_validate_metadata (self ,metadata_path :str )->dict :
+        workspace_root =Path (Config .BASE_DIR ).resolve ().parent
+        candidate_path =Path (metadata_path ).expanduser ()
+        if candidate_path .is_absolute ()==False :
+            candidate_path =workspace_root /candidate_path
+        resolved_path =candidate_path .resolve ()
+        try :
+            resolved_path .relative_to (workspace_root )
+        except ValueError as error :
+            raise ValueError (f"Metadata path is outside workspace root: {resolved_path}")from error
+        if resolved_path .exists ()==False :
+            raise FileNotFoundError (f"Metadata path not found: {resolved_path}")
+        from SCP03 .logic .profile_validator import ProfileValidator 
+        print (f"{Config.Colors.CYAN}[*] Using profile metadata: {resolved_path}{Config.Colors.ENDC}")
+        return ProfileValidator .load_profile_metadata (str (resolved_path ))
+
     def _handle_derive_opc (self ,arg :str ):
         """Derive OPc from Ki and OP (3GPP TS 35.206). Usage: DERIVE-OPC <Ki_hex> <OP_hex>."""
         parts =arg .split ()
@@ -1024,6 +1538,7 @@ class ShellDispatcher :
     def _handle_reset (self ):
         print (f"{Config.Colors.WARNING}[*] Resetting card...{Config.Colors.ENDC}")
         was_authenticated =False 
+        active_protocol ="SCP03"
 
         has_tp =False 
         if self .transport :
@@ -1041,6 +1556,7 @@ class ShellDispatcher :
 
                 if is_auth_flag :
                     was_authenticated =True 
+                    active_protocol =getattr (self .transport .session ,'protocol_name',"SCP03")
                     print (f"{Config.Colors.CYAN}[*] Secure Session is active. Will auto-restore.{Config.Colors.ENDC}")
 
         is_reset_ok =False 
@@ -1048,19 +1564,13 @@ class ShellDispatcher :
             is_reset_ok =True 
 
         if is_reset_ok :
-            has_sess =False 
-            if self .transport .session :
-                has_sess =True 
-
-            if has_sess :
-                self .transport .session .is_authenticated =False 
-                self .transport .session .chaining_value =b'\x00'*16 
+            self .transport .reset_session_state ()
 
             print (f"{Config.Colors.GREEN}[+] Reset Successful.{Config.Colors.ENDC}")
 
             if was_authenticated :
                 is_auth_success =False 
-                if self .gp_ctrl .authenticate ():
+                if self .gp_ctrl .authenticate (active_protocol ):
                     is_auth_success =True 
 
                 if is_auth_success :
@@ -1312,125 +1822,127 @@ class ShellDispatcher :
 
         if is_comment :
             return 
+        try :
+            parts =line .split (None ,1 )
+            cmd =parts [0 ].upper ()
 
-        parts =line .split (None ,1 )
-        cmd =parts [0 ].upper ()
+            arg =""
+            has_arg =False 
+            if len (parts )>1 :
+                has_arg =True 
 
-        arg =""
-        has_arg =False 
-        if len (parts )>1 :
-            has_arg =True 
+            if has_arg :
+                arg =parts [1 ]
 
-        if has_arg :
-            arg =parts [1 ]
+            is_known =False 
+            if cmd in self .commands :
+                is_known =True 
 
-        is_known =False 
-        if cmd in self .commands :
-            is_known =True 
+            if is_known :
+                args_required ,args_optional =CommandRegistry .get_arg_requirements ()
+                try :
+                    is_req =False 
+                    if cmd in args_required :
+                        is_req =True 
 
-        if is_known :
-            args_required ,args_optional =CommandRegistry .get_arg_requirements ()
-            try :
-                is_req =False 
-                if cmd in args_required :
-                    is_req =True 
+                    if is_req :
+                        is_arg_missing =False 
+                        if len (arg )==0 :
+                            is_arg_missing =True 
 
-                if is_req :
-                    is_arg_missing =False 
-                    if len (arg )==0 :
-                        is_arg_missing =True 
+                        if is_arg_missing :
+                            print (f"{Config.Colors.WARNING}[!] Argument required for {cmd}{Config.Colors.ENDC}")
 
-                    if is_arg_missing :
-                        print (f"{Config.Colors.WARNING}[!] Argument required for {cmd}{Config.Colors.ENDC}")
+                        has_argument =False 
+                        if is_arg_missing ==False :
+                            has_argument =True 
 
-                    has_argument =False 
-                    if is_arg_missing ==False :
-                        has_argument =True 
+                        if has_argument :
+                            self .commands [cmd ](arg )
 
-                    if has_argument :
-                        self .commands [cmd ](arg )
+                    is_opt =False 
+                    if cmd in args_optional :
+                        is_opt =True 
 
-                is_opt =False 
-                if cmd in args_optional :
-                    is_opt =True 
+                    if is_opt :
+                        has_argument =False 
+                        if len (arg )>0 :
+                            has_argument =True 
 
-                if is_opt :
-                    has_argument =False 
-                    if len (arg )>0 :
-                        has_argument =True 
+                        if has_argument :
+                            self .commands [cmd ](arg )
 
-                    if has_argument :
-                        self .commands [cmd ](arg )
+                        is_arg_missing =False 
+                        if has_argument ==False :
+                            is_arg_missing =True 
 
-                    is_arg_missing =False 
-                    if has_argument ==False :
-                        is_arg_missing =True 
+                        if is_arg_missing :
+                            self .commands [cmd ]()
 
-                    if is_arg_missing :
+                    is_none =False 
+                    if is_req ==False :
+                        if is_opt ==False :
+                            is_none =True 
+
+                    if is_none :
                         self .commands [cmd ]()
+                except Exception as e :
+                    print (f"{Config.Colors.FAIL}[!] Command Execution Error: {e}{Config.Colors.ENDC}")
 
-                is_none =False 
-                if is_req ==False :
-                    if is_opt ==False :
-                        is_none =True 
+            is_unknown =False 
+            if is_known ==False :
+                is_unknown =True 
 
-                if is_none :
-                    self .commands [cmd ]()
-            except Exception as e :
-                print (f"{Config.Colors.FAIL}[!] Command Execution Error: {e}{Config.Colors.ENDC}")
+            if is_unknown :
+                is_apdu =False 
+                is_long_enough =False 
+                if len (cmd )>=4 :
+                    is_long_enough =True 
 
-        is_unknown =False 
-        if is_known ==False :
-            is_unknown =True 
+                if is_long_enough :
+                    is_valid_hex =True 
+                    for c in cmd :
+                        is_hex_char =False 
+                        if c in '0123456789ABCDEFabcdef':
+                            is_hex_char =True 
+                        if is_hex_char ==False :
+                            is_valid_hex =False 
+                    if is_valid_hex :
+                        is_apdu =True 
 
-        if is_unknown :
-            is_apdu =False 
-            is_long_enough =False 
-            if len (cmd )>=4 :
-                is_long_enough =True 
+                if is_apdu :
+                    has_tp =False 
+                    if self .transport :
+                        has_tp =True 
 
-            if is_long_enough :
-                is_valid_hex =True 
-                for c in cmd :
-                    is_hex_char =False 
-                    if c in '0123456789ABCDEFabcdef':
-                        is_hex_char =True 
-                    if is_hex_char ==False :
-                        is_valid_hex =False 
-                if is_valid_hex :
-                    is_apdu =True 
+                    if has_tp :
+                        apdu_bytes =HexUtils .to_bytes (line )
+                        data ,sw1 ,sw2 =self .transport .transmit (line ,silent =False )
 
-            if is_apdu :
-                has_tp =False 
-                if self .transport :
-                    has_tp =True 
+                        is_success =False 
+                        if sw1 ==0x90 :
+                            is_success =True 
+                        if sw1 ==0x61 :
+                            is_success =True 
 
-                if has_tp :
-                    apdu_bytes =HexUtils .to_bytes (line )
-                    data ,sw1 ,sw2 =self .transport .transmit (line ,silent =False )
+                        if is_success :
+                            self ._sync_manual_command (apdu_bytes ,data )
 
-                    is_success =False 
-                    if sw1 ==0x90 :
-                        is_success =True 
-                    if sw1 ==0x61 :
-                        is_success =True 
+                    is_no_tp =False 
+                    if has_tp ==False :
+                        is_no_tp =True 
 
-                    if is_success :
-                        self ._sync_manual_command (apdu_bytes ,data )
+                    if is_no_tp :
+                        print ("No card reader connected.")
 
-                is_no_tp =False 
-                if has_tp ==False :
-                    is_no_tp =True 
+                is_invalid =False 
+                if is_apdu ==False :
+                    is_invalid =True 
 
-                if is_no_tp :
-                    print ("No card reader connected.")
-
-            is_invalid =False 
-            if is_apdu ==False :
-                is_invalid =True 
-
-            if is_invalid :
-                print (f"{Config.Colors.FAIL}Unknown command: {cmd}{Config.Colors.ENDC}")
+                if is_invalid :
+                    print (f"{Config.Colors.FAIL}Unknown command: {cmd}{Config.Colors.ENDC}")
+        finally :
+            self ._update_prompt_state ()
 
     def _sync_manual_command (self ,apdu :bytes ,data :bytes ):
         is_short =False 
@@ -1555,9 +2067,11 @@ class ShellDispatcher :
         if reset_ok :
             is_reset_ok =True 
 
+        atr_hex ="Unknown"
         if is_reset_ok :
             try :
                 atr =self .transport .connection .getATR ()
+                atr_hex =bytes (atr ).hex ().upper ()
             except Exception :
                 pass 
 
@@ -1598,6 +2112,7 @@ class ShellDispatcher :
                 return "".join (res ).replace ('F','')
             iccid =swap_nibbles (data .hex ().upper ())
 
+        print (f"{Config.Colors.BOLD}ATR   :{Config.Colors.ENDC} {atr_hex}")
         print (f"{Config.Colors.BOLD}ICCID :{Config.Colors.ENDC} {iccid}")
 
         eid =None 
@@ -1606,9 +2121,7 @@ class ShellDispatcher :
         ecasd_aid ="A0000005591010FFFFFFFF8900000200"
         isdr_aid ="A0000005591010FFFFFFFF8900000100"
 
-        is_sgp22_confirmed =False 
         res_sel ,sw1_sel ,sw2_sel =self .transport .transmit (f"00A4040010{ecasd_aid}",silent =True )
-
         valid_ecasd =False 
         if sw1_sel ==0x90 :
             valid_ecasd =True 
@@ -1617,101 +2130,68 @@ class ShellDispatcher :
 
         if valid_ecasd :
             res_ca ,sw1_ca ,sw2_ca =self .transport .transmit ("00CA005A00",silent =True )
-
-            is_ca_success =False 
             if sw1_ca ==0x90 :
-                is_ca_success =True 
-
-            if is_ca_success :
-                eid =res_ca .hex ().upper ()
                 try :
-                    from SCP03 .core .utils import TlvParser 
-                    parsed =TlvParser .parse (res_ca )
-                    has_5a =False 
-                    if 0x5A in parsed :
-                        has_5a =True 
-                    if has_5a :
-                        eid =parsed [0x5A ].hex ().upper ()
+                    eid =self .gp_ctrl .sgp22 ._extract_eid_hex (res_ca )
                 except Exception :
-                    pass 
+                    eid =res_ca .hex ().upper ()
 
-            payload ="BF3E035C015A"
-            res ,sw1_e2 ,sw2_e2 =self .transport .transmit (f"80E2910006{payload}",silent =True )
+        e2_data ,e2_sw1 ,e2_sw2 =self .gp_ctrl .sgp22 ._retrieve_eid_response ()
+        has_es10_eid =False 
+        if e2_sw1 ==0x90 and e2_data :
+            has_es10_eid =True 
+            try :
+                eid =self .gp_ctrl .sgp22 ._extract_eid_hex (e2_data )
+            except Exception :
+                eid =e2_data .hex ().upper ()
 
-            is_e2_90 =False 
-            if sw1_e2 ==0x90 :
-                is_e2_90 =True 
-
-            if is_e2_90 :
-                has_5a_byte =False 
-                if b'\x5A'in res :
-                    has_5a_byte =True 
-
-                if has_5a_byte :
+        sgp32_probe =self .gp_ctrl .sgp22 ._es10_retrieve_data ("BF5500")
+        if sgp32_probe :
+            std =f"{Config.Colors.GREEN}SGP.32 (IoT){Config.Colors.ENDC}"
+        else :
+            if has_es10_eid :
+                std =f"{Config.Colors.GREEN}SGP.22/32 (Consumer/IoT){Config.Colors.ENDC}"
+            else :
+                configured_probe =self .gp_ctrl .sgp22 ._es10_retrieve_data ("BF3C00")
+                info1_probe =self .gp_ctrl .sgp22 ._es10_retrieve_data ("BF2000")
+                info2_probe =self .gp_ctrl .sgp22 ._es10_retrieve_data ("BF2200")
+                has_es10_profile =False 
+                if configured_probe :
+                    has_es10_profile =True 
+                if info1_probe :
+                    has_es10_profile =True 
+                if info2_probe :
+                    has_es10_profile =True 
+                if has_es10_profile :
                     std =f"{Config.Colors.GREEN}SGP.22/32 (Consumer/IoT){Config.Colors.ENDC}"
-                    is_sgp22_confirmed =True 
+                else :
+                    res_sel_m2m ,sw1_m2m ,sw2_m2m =self .transport .transmit (f"00A4040010{isdr_aid}",silent =True )
+                    valid_isdr =False 
+                    if sw1_m2m ==0x90 :
+                        valid_isdr =True 
+                    if sw1_m2m ==0x61 :
+                        valid_isdr =True 
+                    if valid_isdr :
+                        std =f"{Config.Colors.BLUE}SGP.02 (M2M){Config.Colors.ENDC}"
 
-            is_e2_69 =False 
-            if sw1_e2 ==0x69 :
-                is_e2_69 =True 
+                        is_eid_missing =False 
+                        if eid is None :
+                            is_eid_missing =True 
 
-            if is_e2_69 :
-                is_e2_82 =False 
-                if sw2_e2 ==0x82 :
-                    is_e2_82 =True 
-
-                if is_e2_82 :
-                    std =f"{Config.Colors.GREEN}SGP.22/32 (Consumer/IoT){Config.Colors.ENDC}"
-                    is_sgp22_confirmed =True 
-
-        is_unconfirmed =False 
-        if is_sgp22_confirmed ==False :
-            is_unconfirmed =True 
-
-        if is_unconfirmed :
-            res_sel_m2m ,sw1_m2m ,sw2_m2m =self .transport .transmit (f"00A4040010{isdr_aid}",silent =True )
-
-            valid_isdr =False 
-            if sw1_m2m ==0x90 :
-                valid_isdr =True 
-            if sw1_m2m ==0x61 :
-                valid_isdr =True 
-
-            if valid_isdr :
-                std =f"{Config.Colors.BLUE}SGP.02 (M2M){Config.Colors.ENDC}"
-
-                is_eid_missing =False 
-                if eid is None :
-                    is_eid_missing =True 
-
-                if is_eid_missing :
-                    res_ca ,sw1_ca ,sw2_ca =self .transport .transmit ("80CA005A00",silent =True )
-
-                    ca_success =False 
-                    if sw1_ca ==0x90 :
-                        ca_success =True 
-
-                    is_ca_fail =False 
-                    if ca_success ==False :
-                        is_ca_fail =True 
-
-                    if is_ca_fail :
-                        res_ca ,sw1_ca ,sw2_ca =self .transport .transmit ("00CA005A00",silent =True )
-                        if sw1_ca ==0x90 :
-                            ca_success =True 
-
-                    if ca_success :
-                        eid =res_ca .hex ().upper ()
-                        try :
-                            from SCP03 .core .utils import TlvParser 
-                            parsed =TlvParser .parse (res_ca )
-                            has_5a_tag =False 
-                            if 0x5A in parsed :
-                                has_5a_tag =True 
-                            if has_5a_tag :
-                                eid =parsed [0x5A ].hex ().upper ()
-                        except Exception :
-                            pass 
+                        if is_eid_missing :
+                            res_ca ,sw1_ca ,sw2_ca =self .transport .transmit ("80CA005A00",silent =True )
+                            ca_success =False 
+                            if sw1_ca ==0x90 :
+                                ca_success =True 
+                            if ca_success ==False :
+                                res_ca ,sw1_ca ,sw2_ca =self .transport .transmit ("00CA005A00",silent =True )
+                                if sw1_ca ==0x90 :
+                                    ca_success =True 
+                            if ca_success :
+                                try :
+                                    eid =self .gp_ctrl .sgp22 ._extract_eid_hex (res_ca )
+                                except Exception :
+                                    eid =res_ca .hex ().upper ()
 
         has_eid =False 
         if eid :
@@ -1721,9 +2201,215 @@ class ShellDispatcher :
             print (f"{Config.Colors.BOLD}eID   :{Config.Colors.ENDC} {eid}")
 
         print (f"{Config.Colors.BOLD}Spec  :{Config.Colors.ENDC} {std}")
+        if iccid !="Unknown":
+            self .current_iccid =''.join (ch for ch in str (iccid )if ch .isdigit ())
+        if eid :
+            self .current_eid =str (eid ).strip ().upper ()
+        self ._apply_inventory_profile_for_identifiers (self .current_iccid ,self .current_eid ,announce =True )
         self .transport .reset ()
         self .fs_ctrl .current_fid ="3F00"
         print ("="*40 +"\n")
+
+    def _print_atr_details (self ):
+        print (f"\n{Config.Colors.HEADER}=== ATR DETAILS ==={Config.Colors.ENDC}")
+        has_tp =False 
+        if self .transport :
+            has_tp =True 
+
+        if has_tp ==False :
+            print (f"{Config.Colors.FAIL}[-] No reader connected.{Config.Colors.ENDC}")
+            return 
+
+        reset_ok =self .transport .reset ()
+        if reset_ok ==False :
+            print (f"{Config.Colors.FAIL}[-] Card Reset Failed.{Config.Colors.ENDC}")
+            return 
+
+        try :
+            for line in self .transport .describe_atr ():
+                print (line )
+        except Exception as e :
+            print (f"{Config.Colors.FAIL}[!] ATR Parse Error: {e}{Config.Colors.ENDC}")
+        print ("")
+
+    @staticmethod
+    def _decode_iccid_bcd (data :bytes )->str :
+        hex_value =bytes (data ).hex ().upper ()
+        digits =[]
+        for index in range (0 ,len (hex_value ),2 ):
+            pair =hex_value [index :index +2 ]
+            if len (pair )<2 :
+                continue 
+            digits .append (pair [1 ])
+            digits .append (pair [0 ])
+        return "".join (digits ).replace ("F","")
+
+    def _probe_card_identity (self )->Tuple [str ,str ]:
+        has_tp =False 
+        if self .transport :
+            has_tp =True 
+        if has_tp ==False :
+            return "",""
+
+        reset_ok =self .transport .reset ()
+        if reset_ok ==False :
+            return "",""
+
+        iccid =""
+        try :
+            self .transport .transmit ("00A40004023F00",silent =True )
+            self .transport .transmit ("00A40004022FE2",silent =True )
+            data ,sw1 ,sw2 =self .transport .transmit ("00B000000A",silent =True )
+            if sw1 ==0x90 :
+                iccid =self ._decode_iccid_bcd (data )
+        except Exception :
+            iccid =""
+
+        eid =""
+        try :
+            ecasd_aid ="A0000005591010FFFFFFFF8900000200"
+            isdr_aid ="A0000005591010FFFFFFFF8900000100"
+            res_sel ,sw1_sel ,sw2_sel =self .transport .transmit (f"00A4040010{ecasd_aid}",silent =True )
+            valid_ecasd =False 
+            if sw1_sel ==0x90 :
+                valid_ecasd =True 
+            if sw1_sel ==0x61 :
+                valid_ecasd =True 
+            if valid_ecasd :
+                res_ca ,sw1_ca ,sw2_ca =self .transport .transmit ("00CA005A00",silent =True )
+                if sw1_ca ==0x90 :
+                    try :
+                        eid =self .gp_ctrl .sgp22 ._extract_eid_hex (res_ca )
+                    except Exception :
+                        eid =res_ca .hex ().upper ()
+
+            e2_data ,e2_sw1 ,e2_sw2 =self .gp_ctrl .sgp22 ._retrieve_eid_response ()
+            if e2_sw1 ==0x90 and e2_data :
+                try :
+                    eid =self .gp_ctrl .sgp22 ._extract_eid_hex (e2_data )
+                except Exception :
+                    eid =e2_data .hex ().upper ()
+
+            if len (eid )==0 :
+                res_sel_m2m ,sw1_m2m ,sw2_m2m =self .transport .transmit (f"00A4040010{isdr_aid}",silent =True )
+                valid_isdr =False 
+                if sw1_m2m ==0x90 :
+                    valid_isdr =True 
+                if sw1_m2m ==0x61 :
+                    valid_isdr =True 
+                if valid_isdr :
+                    res_ca ,sw1_ca ,sw2_ca =self .transport .transmit ("80CA005A00",silent =True )
+                    ca_success =False 
+                    if sw1_ca ==0x90 :
+                        ca_success =True 
+                    if ca_success ==False :
+                        res_ca ,sw1_ca ,sw2_ca =self .transport .transmit ("00CA005A00",silent =True )
+                        if sw1_ca ==0x90 :
+                            ca_success =True 
+                    if ca_success :
+                        try :
+                            eid =self .gp_ctrl .sgp22 ._extract_eid_hex (res_ca )
+                        except Exception :
+                            eid =res_ca .hex ().upper ()
+        except Exception :
+            eid =""
+
+        try :
+            self .transport .reset ()
+        except Exception :
+            pass 
+        self .fs_ctrl .current_fid ="3F00"
+        return iccid ,eid 
+
+    def _inventory_keys_payload (self )->dict :
+        payload ={}
+        for key_name in Config .DEFAULT_KEYS .keys ():
+            raw_value =""
+            if key_name in self .config ['KEYS']:
+                raw_value =self .config ['KEYS'][key_name ]
+            payload [key_name ]=str (raw_value ).strip ().upper ()
+        if len (self .current_eid )>0 :
+            payload ["card_eid"]=self .current_eid 
+        return payload 
+
+    def _persist_inventory_profile (self )->None :
+        if len (self .current_iccid )==0 :
+            return 
+        self .inventory .replace_namespace (
+        "iccid",
+        self .current_iccid ,
+        "scp03",
+        self ._inventory_keys_payload (),
+        )
+
+    def _module_state_payload (self )->dict :
+        payload ={
+        "KEYS":{},
+        "GOLD_PROFILE":{},
+        }
+        if 'KEYS'in self .config :
+            payload ["KEYS"]=dict (self .config ['KEYS'])
+        if 'GOLD_PROFILE'in self .config :
+            payload ["GOLD_PROFILE"]=dict (self .config ['GOLD_PROFILE'])
+        return payload 
+
+    def _apply_module_state_payload (self ,payload :dict )->None :
+        keys_payload =payload .get ("KEYS",{})
+        if isinstance (keys_payload ,dict ):
+            if 'KEYS'not in self .config :
+                self .config ['KEYS']={}
+            for key_name ,value in keys_payload .items ():
+                self .config ['KEYS'][str (key_name )]=str (value ).strip ().upper ()
+        gold_payload =payload .get ("GOLD_PROFILE",{})
+        if isinstance (gold_payload ,dict ):
+            if 'GOLD_PROFILE'not in self .config :
+                self .config ['GOLD_PROFILE']={}
+            for key_name ,value in gold_payload .items ():
+                self .config ['GOLD_PROFILE'][str (key_name )]=str (value )
+
+    def _persist_module_state (self )->None :
+        self .inventory .replace_module_state (Config .MODULE_STATE_NAME ,self ._module_state_payload ())
+
+    def _apply_inventory_profile_for_identifiers (self ,iccid :str ,eid :str ,announce :bool =False )->None :
+        normalized_iccid =''.join (ch for ch in str (iccid or "")if ch .isdigit ())
+        normalized_eid =str (eid or "").strip ().upper ()
+        if len (normalized_iccid )>0 :
+            self .current_iccid =normalized_iccid 
+        if len (normalized_eid )>0 :
+            self .current_eid =normalized_eid 
+        if len (self .current_iccid )==0 :
+            return 
+
+        payload =self .inventory .get_namespace ("iccid",self .current_iccid ,"scp03")
+        loaded_profile =False 
+        if isinstance (payload ,dict )and len (payload )>0 :
+            for key_name in Config .DEFAULT_KEYS .keys ():
+                if key_name not in payload :
+                    continue 
+                self .config ['KEYS'][key_name ]=str (payload [key_name ]).strip ().upper ()
+            loaded_profile =True 
+            self ._initialize_controllers ()
+            self ._update_prompt_state ()
+
+        self ._persist_inventory_profile ()
+        if announce :
+            if loaded_profile :
+                print (
+                f"{Config.Colors.GREEN}[+] Loaded SCP03 inventory profile for ICCID "
+                f"{self.current_iccid}.{Config.Colors.ENDC}"
+                )
+            else :
+                print (
+                f"{Config.Colors.HEADER}[*] Seeded SCP03 inventory profile for ICCID "
+                f"{self.current_iccid} using current SCP03 defaults.{Config.Colors.ENDC}"
+                )
+
+    def _prime_inventory_profile (self )->None :
+        try :
+            iccid ,eid =self ._probe_card_identity ()
+        except Exception :
+            return 
+        self ._apply_inventory_profile_for_identifiers (iccid ,eid ,announce =False )
 
     def _load_config_file (self ):
         import os 
@@ -1746,47 +2432,55 @@ class ShellDispatcher :
         if is_no_keys :
             self .config ['KEYS']={}
 
-        has_kenc =False 
-        if 'kenc'in self .config ['KEYS']:
-            has_kenc =True 
+        legacy_map ={
+        'kenc':'scp03_kenc',
+        'enc':'scp03_kenc',
+        'kmac':'scp03_kmac',
+        'mac':'scp03_kmac',
+        'dek':'scp03_dek',
+        'kvn':'scp03_kvn'
+        }
+        for legacy_key ,new_key in legacy_map .items ():
+            has_legacy =False 
+            if legacy_key in self .config ['KEYS']:
+                has_legacy =True 
+            has_new =False 
+            if new_key in self .config ['KEYS']:
+                has_new =True 
+            if has_legacy and has_new ==False :
+                self .config ['KEYS'][new_key ]=self .config ['KEYS'][legacy_key ]
 
-        if has_kenc :
-            has_enc =False 
-            if 'enc'in self .config ['KEYS']:
-                has_enc =True 
+        for key_name ,default_value in Config .DEFAULT_KEYS .items ():
+            if key_name not in self .config ['KEYS']:
+                self .config ['KEYS'][key_name ]=default_value 
 
-            is_no_enc =False 
-            if has_enc ==False :
-                is_no_enc =True 
+        has_gold =False 
+        if 'GOLD_PROFILE'in self .config :
+            has_gold =True 
+        if has_gold ==False :
+            self .config ['GOLD_PROFILE']={}
 
-            if is_no_enc :
-                self .config ['KEYS']['enc']=self .config ['KEYS']['kenc']
+        gold_sec =self .config ['GOLD_PROFILE']
+        if 'path'not in gold_sec :
+            gold_sec ['path']=''
+        if 'standard'not in gold_sec :
+            gold_sec ['standard']='SGP.32'
+        if 'authenticate_sd'not in gold_sec :
+            gold_sec ['authenticate_sd']='false'
 
-        has_kmac =False 
-        if 'kmac'in self .config ['KEYS']:
-            has_kmac =True 
-
-        if has_kmac :
-            has_mac =False 
-            if 'mac'in self .config ['KEYS']:
-                has_mac =True 
-
-            is_no_mac =False 
-            if has_mac ==False :
-                is_no_mac =True 
-
-            if is_no_mac :
-                self .config ['KEYS']['mac']=self .config ['KEYS']['kmac']
-
-        has_kvn =False 
-        if 'kvn'in self .config ['KEYS']:
-            has_kvn =True 
-
-        if has_kvn :
-            self .current_kvn =self .config ['KEYS']['kvn']
+        module_state ={}
+        try :
+            module_state =self .inventory .get_module_state (Config .MODULE_STATE_NAME )
+        except Exception :
+            module_state ={}
+        if isinstance (module_state ,dict )and len (module_state )>0 :
+            self ._apply_module_state_payload (module_state )
+        else :
+            self ._persist_module_state ()
 
     def _load_aid_registry (self )->Dict [str ,str ]:
         registry ={}
+        self .aid_rule_roles ={}
         is_exists =False 
         if os .path .exists (Config .AID_FILE ):
             is_exists =True 
@@ -1795,16 +2489,12 @@ class ShellDispatcher :
             try :
                 with open (Config .AID_FILE ,'r')as f :
                     for line in f :
-                        line =line .split ('#')[0 ].strip ()
-                        has_colon =False 
-                        if ':'in line :
-                            has_colon =True 
-
-                        if has_colon :
-                            parts =line .split (':')
-                            name =parts [0 ].strip ().upper ()
-                            aid =parts [1 ].strip ().upper ()
-                            registry [name ]=aid 
+                        name ,aid ,role_name =self ._parse_aid_registry_line (line )
+                        if len (name )==0 :
+                            continue 
+                        registry [name ]=aid 
+                        if len (role_name )>0 :
+                            self .aid_rule_roles [name ]=role_name 
             except Exception as e :
                 print (f"{Config.Colors.FAIL}[-] aid.txt error: {e}{Config.Colors.ENDC}")
 
@@ -1842,12 +2532,7 @@ class ShellDispatcher :
 
         self .config ['KEYS'][key ]=value .strip ().upper ()
 
-        try :
-            with open (Config .INI_FILE ,'w')as configfile :
-                self .config .write (configfile )
-        except Exception as e :
-            print (f"{Config.Colors.FAIL}[-] IO Error: {e}{Config.Colors.ENDC}")
-
+        self ._save_to_disk ()
         print (f"{Config.Colors.GREEN}[+] {key.upper()} updated.{Config.Colors.ENDC}")
         self ._initialize_controllers ()
         self ._update_prompt_state ()
@@ -1874,13 +2559,17 @@ class ShellDispatcher :
 
     def _save_to_disk (self ):
         try :
-            with open (Config .INI_FILE ,'w')as configfile :
-                self .config .write (configfile )
+            self ._persist_module_state ()
+            self ._persist_inventory_profile ()
         except Exception as e :
             print (f"{Config.Colors.FAIL}[-] IO Error: {e}{Config.Colors.ENDC}")
 
     def show_config (self ):
-        print (f"{Config.Colors.HEADER}--- Configuration (keys.ini) ---{Config.Colors.ENDC}")
+        print (f"{Config.Colors.HEADER}--- Configuration (SQLite-backed SCP03 state) ---{Config.Colors.ENDC}")
+        if len (self .current_iccid )>0 :
+            print (f"Active ICCID: {self.current_iccid}")
+        if len (self .current_eid )>0 :
+            print (f"Observed eID: {self.current_eid}")
         for section in self .config .sections ():
             print (f"[{section}]")
             for key ,value in self .config .items (section ):
@@ -1902,7 +2591,11 @@ class ShellDispatcher :
             return 
 
         for name ,aid in sorted (self .aid_registry .items ()):
-            print (f"  {name:<10} : {aid}")
+            role_name =self ._resolve_aid_rule_role (name )
+            role_suffix =""
+            if len (role_name )>0 :
+                role_suffix =f" [{role_name}]"
+            print (f"  {name:<10} : {aid}{role_suffix}")
 
     def _set_aid_alias (self ,arg_line :Optional [str ]):
         is_empty =False 
@@ -1927,6 +2620,11 @@ class ShellDispatcher :
         aid_hex =parts [1 ].strip ().replace (' ','').upper ()
 
         self .aid_registry [name ]=aid_hex 
+        if name in ("ARAM","ARAC"):
+            self .aid_rule_roles [name ]=name 
+        else :
+            if name in self .aid_rule_roles :
+                del self .aid_rule_roles [name ]
         self .aid_lookup ={bytes .fromhex (v ):k for k ,v in self .aid_registry .items ()}
         try :
             with open (Config .AID_FILE ,'w')as f :
@@ -1979,6 +2677,7 @@ class ShellDispatcher :
 
         if is_inactive :
             print (f"{Config.Colors.WARNING}[!] No active secure session.{Config.Colors.ENDC}")
+        self ._update_prompt_state ()
 
     def _exit (self ):
         has_tp =False 
@@ -1990,6 +2689,17 @@ class ShellDispatcher :
 
         self ._save_history ()
         sys .exit (0 )
+
+    def _quit_all (self ):
+        has_tp =False 
+        if self .transport :
+            has_tp =True 
+
+        if has_tp :
+            self .transport .disconnect ()
+
+        self ._save_history ()
+        quit_all ()
 
     def _run_scp80_tool (self ):
         print (f"{Config.Colors.HEADER}=== Switching to SCP80 OTA Tool ==={Config.Colors.ENDC}")
@@ -2057,7 +2767,7 @@ class ShellDispatcher :
         print (f"")
         print (f"=== YggdraSIM Administration Shell ===")
         print (f" [ GlobalPlatform | ETSI FS | SGP.22 eUICC | Telecom Auth ]")
-        print (f" Created and maintained by Hampus Hellsberg")
+        print (f" Created and maintained by Hampus Hellsberg and contributors")
         print (f"{Config.Colors.ENDC}")
 
         print (f"\n{Config.Colors.HEADER}=== Returning to SCP03 Shell ==={Config.Colors.ENDC}")
@@ -2139,7 +2849,7 @@ class ShellDispatcher :
         if is_posix :
             os .system ('clear')
 
-        print (f"{Config.Colors.HEADER}")
+        print (f"{Config.Colors.MINT}")
         print (r" __   __               _               ____ ___ __  __ ")
         print (r" \ \ / /__ _  __ _  __| | _ __  __ _  / ___|_ _|  \/  |")
         print (r"  \ V / _` | / _` |/ _` || '__|/ _` | \___ \| || |\/| |")
@@ -2154,8 +2864,8 @@ class ShellDispatcher :
         print (f"")
         print (f"=== YggdraSIM Administration Shell ===")
         print (f" [ GlobalPlatform | ETSI FS | SGP.22 eUICC | Telecom Auth ]")
-        print (f" Created and maintained by Hampus Hellsberg")
-        print (f"{Config.Colors.ENDC}")
+        print (f" Created and maintained by Hampus Hellsberg and contributors")
+        print (f"{Config.Colors.MINT}")
 
         has_transport =False 
         if self .transport :

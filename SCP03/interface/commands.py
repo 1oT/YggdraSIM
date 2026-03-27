@@ -1,9 +1,18 @@
 # -----------------------------------------------------------------------------
-# This Source Code Form is subject to the terms of the Mozilla Public
-# License, v. 2.0. If a copy of the MPL was not distributed with this
-# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
 #
-# Copyright (c) 2026 Hampus Hellsberg
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program. If not, see <https://www.gnu.org/licenses/>.
+#
+# Copyright (c) 2026 Hampus Hellsberg and contributors
 # -----------------------------------------------------------------------------
 
 import os 
@@ -31,29 +40,16 @@ class CommandRegistry :
             os .system ('clear')
 
     @staticmethod 
-    def _run_report (shell ,x =None )->None :
-        has_x =False 
-        if x is not None :
-            has_x =True 
-
-        if has_x :
-            shell .fs_ctrl .generate_report (x )
-
-        is_x_missing =False 
-        if x is None :
-            is_x_missing =True 
-
-        if is_x_missing :
-            shell .fs_ctrl .generate_report ()
-
-    @staticmethod 
     def build (shell )->Dict [str ,Tuple [Callable ,str ]]:
         """Builds the main command map, binding commands to shell instance methods."""
         return {
 
-        'AUTH-SD':(shell ._handle_auth ,""),
+        'AUTH-SD':(shell ._handle_auth_scp03 ,""),
+        'SCP03-SD':(shell ._handle_auth_scp03 ,""),
+        'SCP02-SD':(shell ._handle_auth_scp02 ,""),
         'RESET':(shell ._handle_reset ,""),
         'INFO':(shell ._print_card_info ,""),
+        'ATR':(shell ._print_atr_details ,""),
         'KEYS':(shell ._handle_keys ,"[AID]"),
         'LOGOUT':(shell ._handle_logout ,""),
         'CLS':(lambda :CommandRegistry ._clear_screen (),""),
@@ -81,17 +77,18 @@ class CommandRegistry :
         'MANAGE-CHANNEL':(lambda :ShellInteractiveWizards .run_manage_channel (shell ),""),
 
 
-        'WIZARD':(lambda :InteractiveWizards .run_wizard_menu (shell .transport ,"A000000151000000"),""),
+        'WIZARD':(lambda :shell ._handle_install_wizard (),""),
 
 
         'FS-ADMIN':(lambda :ShellInteractiveWizards .run_fs_admin_wizard (shell ),""),
         'SCAN':(shell .fs_ctrl .scan_tree ,""),
         'REPORT':(lambda :ShellInteractiveWizards .run_fs_report_wizard (shell ),""),
-        'SELECT':(lambda x :shell .fs_ctrl .select (x ),"<Path/FID>"),
+        'SELECT':(shell ._handle_select ,"<Path/FID>"),
         'READ':(shell .fs_ctrl .read_binary ,"[Path]"),
         'RECORD':(shell .fs_ctrl .read_record ,"<N/ALL/Start-End> [Path]"),
         'UPDATE':(shell ._handle_update ,"BINARY/RECORD <Data>"),
         'DUMP-FS':(shell .do_dump_fs ,"[OutputDir]"),
+        'VALIDATE':(shell ._handle_validate ,"[ALL|MF|USIM|ISIM] [ProfileDump.yaml|ProfileDump.json]"),
 
 
         'MANAGE-PIN':(lambda x ="":ShellInteractiveWizards .run_manage_pin_wizard (shell ,x ),"[Args]"),
@@ -117,6 +114,16 @@ class CommandRegistry :
 
         'EXPORT-EUICC':(shell ._handle_export_euicc ,"[OutputPath.yaml]"),
 
+        'SET-GOLD-PROFILE':(
+        shell ._handle_set_gold_profile ,
+        "<path> [SGP.32|SGP.22|SGP.02] [AUTH=Y|AUTH=N]",
+        ),
+        'GOLD-PROFILE':(shell ._handle_show_gold_profile ,""),
+        'CLEAR-GOLD-PROFILE':(shell ._handle_clear_gold_profile ,""),
+        'PROFILE-DIFF':(
+        shell ._handle_profile_diff ,
+        "[gold.yaml] [STANDARD] [AUTH=Y|AUTH=N]",
+        ),
 
         'ARR':(shell ._handle_arr ,"[Path]"),
 
@@ -129,6 +136,7 @@ class CommandRegistry :
         'SCRIPT':(shell .run_script ,"<File>"),
         'HELP':(shell ._print_help ,""),
         'EXIT':(shell ._exit ,""),
+        'QA':(shell ._quit_all ,""),
         'Q':(shell ._exit ,"")
         }
 
@@ -136,9 +144,35 @@ class CommandRegistry :
     def get_arg_requirements ():
         """Returns tuples of commands that require mandatory or optional arguments."""
         args_required =[
-        'SET-AID-ALIAS','SELECT','UPDATE','LOCK','UNLOCK','DEL','SCRIPT',
-        'STORE-DATA','DECODE','DERIVE-OPC'
+        'SET-AID-ALIAS',
+        'SELECT',
+        'UPDATE',
+        'LOCK',
+        'UNLOCK',
+        'DEL',
+        'SCRIPT',
+        'STORE-DATA',
+        'DECODE',
+        'DERIVE-OPC',
+        'SET-GOLD-PROFILE',
         ]
-        args_optional =['REPORT','KEYS','READ','RECORD','RUN','GUIDE','DEBUG','VERBOSE','DUMP-FS','MANAGE-PIN','EXPORT-EUICC','ARR']
+        args_optional =[
+        'REPORT',
+        'KEYS',
+        'READ',
+        'RECORD',
+        'RUN',
+        'GUIDE',
+        'DEBUG',
+        'VERBOSE',
+        'DUMP-FS',
+        'MANAGE-PIN',
+        'EXPORT-EUICC',
+        'ARR',
+        'VALIDATE',
+        'GOLD-PROFILE',
+        'CLEAR-GOLD-PROFILE',
+        'PROFILE-DIFF',
+        ]
 
         return args_required ,args_optional 

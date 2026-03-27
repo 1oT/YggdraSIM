@@ -1,18 +1,32 @@
 # -----------------------------------------------------------------------------
-# This Source Code Form is subject to the terms of the Mozilla Public
-# License, v. 2.0. If a copy of the MPL was not distributed with this
-# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
 #
-# Copyright (c) 2026 Hampus Hellsberg
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program. If not, see <https://www.gnu.org/licenses/>.
+#
+# Copyright (c) 2026 Hampus Hellsberg and contributors
 # -----------------------------------------------------------------------------
 
 import os 
-import math 
 from typing import Tuple ,List ,Dict ,Any 
 from SCP03 .config import Config 
 from SCP03 .core .cap import CapFileParser 
 from SCP03 .core .utils import HexUtils 
 from SCP03 .interface .wizards_ui import InteractiveWizard 
+
+try :
+    from SCP80 .builder import OtaPacketBuilder 
+    SCP80_PREVIEW_AVAIL =True 
+except ImportError :
+    SCP80_PREVIEW_AVAIL =False 
 
 class InteractiveWizards :
     """Provides interactive prompts and dry-run APDU builders for complex GP commands."""
@@ -35,8 +49,28 @@ class InteractiveWizards :
             return f"00{data_len:04X}"
         raise ValueError ("APDU data field exceeds extended length capability.")
 
+    @staticmethod
+    def _normalize_numeric_choice (value :str ,default :str ="")->str :
+        if value is None :
+            return default
+
+        cleaned =str (value ).strip ().lower ()
+        if len (cleaned )==0 :
+            return default
+
+        if cleaned .startswith ("0x"):
+            cleaned =cleaned [2 :]
+
+        if len (cleaned )==0 :
+            return default
+
+        try :
+            return str (int (cleaned ,16 ))
+        except ValueError :
+            return cleaned
+
     @staticmethod 
-    def run_wizard_menu (tp_ctrl =None ,target_aid :str ="A000000151000000"):
+    def run_wizard_menu (tp_ctrl =None ,target_aid :str ="A000000151000000",gp_ctrl =None ):
         is_nt =False 
         if os .name =='nt':
             is_nt =True 
@@ -53,17 +87,17 @@ class InteractiveWizards :
 
         print (f"\n{Config.Colors.HEADER}=== GlobalPlatform Execution Wizards ==={Config.Colors.ENDC}")
         print ("Select Execution Variant:")
-        print ("  1. INSTALL [for load] (GPCS 11.5.2.3.1)")
-        print ("  2. INSTALL [for install] (GPCS 11.5.2.3.2)")
-        print ("  3. INSTALL [for make selectable] (GPCS 11.5.2.3.3)")
-        print ("  4. INSTALL [for extradition] (GPCS 11.5.2.3.4)")
-        print ("  5. INSTALL [for registry update] (GPCS 11.5.2.3.5)")
-        print ("  6. INSTALL [for personalization] (GPCS 11.5.2.3.6)")
-        print ("  7. INSTALL [for install and make selectable] (GPCS 11.5.2.3.7)")
-        print ("  8. Full CAP Install Sequence Builder (Requires CAP/IJC File)")
+        print ("  1. INSTALL [for load] - open load context for an Executable Load File")
+        print ("  2. INSTALL [for install] - instantiate an applet from a loaded package")
+        print ("  3. INSTALL [for make selectable] - make an existing applet selectable")
+        print ("  4. INSTALL [for extradition] - transfer control to another Security Domain")
+        print ("  5. INSTALL [for registry update] - update registry data for an application/ELF")
+        print ("  6. INSTALL [for personalization] / STORE DATA helper")
+        print ("  7. INSTALL [for install and make selectable] - single-step instantiate + selectable")
+        print ("  8. Full CAP Install Sequence - build or execute INSTALL/LOAD/INSTALL from CAP/IJC")
         print ("  0. Exit Menu")
 
-        choice =input (f"\nChoice [0-8]: ").strip ()
+        choice =InteractiveWizards ._normalize_numeric_choice (input (f"\nChoice [0-8]: ").strip ())
 
         is_zero =False 
         if choice =='0':
@@ -77,7 +111,7 @@ class InteractiveWizards :
             is_one =True 
 
         if is_one :
-            InteractiveWizards ._run_install_load (tp_ctrl )
+            InteractiveWizards ._run_install_load (tp_ctrl ,gp_ctrl )
             return 
 
         is_two =False 
@@ -85,7 +119,7 @@ class InteractiveWizards :
             is_two =True 
 
         if is_two :
-            InteractiveWizards ._run_install_install (tp_ctrl ,"04","INSTALL [for install]")
+            InteractiveWizards ._run_install_install (tp_ctrl ,gp_ctrl ,"04","INSTALL [for install]")
             return 
 
         is_three =False 
@@ -93,7 +127,7 @@ class InteractiveWizards :
             is_three =True 
 
         if is_three :
-            InteractiveWizards ._run_install_make_selectable (tp_ctrl )
+            InteractiveWizards ._run_install_make_selectable (tp_ctrl ,gp_ctrl )
             return 
 
         is_four =False 
@@ -101,7 +135,7 @@ class InteractiveWizards :
             is_four =True 
 
         if is_four :
-            InteractiveWizards ._run_install_extradition (tp_ctrl )
+            InteractiveWizards ._run_install_extradition (tp_ctrl ,gp_ctrl )
             return 
 
         is_five =False 
@@ -109,7 +143,7 @@ class InteractiveWizards :
             is_five =True 
 
         if is_five :
-            InteractiveWizards ._run_install_registry_update (tp_ctrl )
+            InteractiveWizards ._run_install_registry_update (tp_ctrl ,gp_ctrl )
             return 
 
         is_six =False 
@@ -125,7 +159,7 @@ class InteractiveWizards :
                 print (f"{Config.Colors.FAIL}[!] Transmission controller required for Option 6.{Config.Colors.ENDC}")
                 return 
 
-            InteractiveWizards .run_dgi_personalization (tp_ctrl ,target_aid )
+            InteractiveWizards .run_dgi_personalization (tp_ctrl ,gp_ctrl ,target_aid )
             return 
 
         is_seven =False 
@@ -133,7 +167,7 @@ class InteractiveWizards :
             is_seven =True 
 
         if is_seven :
-            InteractiveWizards ._run_install_install (tp_ctrl ,"0C","INSTALL [for install and make selectable]")
+            InteractiveWizards ._run_install_install (tp_ctrl ,gp_ctrl ,"0C","INSTALL [for install and make selectable]")
             return 
 
         is_eight =False 
@@ -142,7 +176,7 @@ class InteractiveWizards :
 
         if is_eight :
             filename =input ("Enter path to CAP/IJC file: ").strip ()
-            InteractiveWizards .build_install_apdu (tp_ctrl ,filename )
+            InteractiveWizards .build_install_apdu (tp_ctrl ,filename ,gp_ctrl )
             return 
 
         print (f"{Config.Colors.FAIL}[!] Invalid choice.{Config.Colors.ENDC}")
@@ -238,7 +272,7 @@ class InteractiveWizards :
         wiz .add_step ("raw","Raw Hex [for choice 4]:",default ="SKIP")
 
         res =wiz .run ()
-        choice =res .get ("choice")
+        choice =InteractiveWizards ._normalize_numeric_choice (res .get ("choice"))
 
         is_opt_1 =False 
         if choice =='1':
@@ -679,11 +713,11 @@ class InteractiveWizards :
         return res_hex 
 
     @staticmethod 
-    def _run_install_load (tp_ctrl )->None :
+    def _run_install_load (tp_ctrl ,gp_ctrl =None )->None :
         wiz =InteractiveWizard ("Building INSTALL [for load] (P1=02)",Config .Colors )
-        wiz .add_step ("lf_aid","Load File AID [Hex, Default: Empty]:",default ="")
-        wiz .add_step ("sd_aid","Security Domain AID [Hex, Default: Empty]:",default ="")
-        wiz .add_step ("lf_hash","Load File Data Block Hash [Hex, Default: Empty]:",default ="")
+        wiz .add_step ("lf_aid","Executable Load File AID [Hex, optional]:",default ="")
+        wiz .add_step ("sd_aid","Target Security Domain AID [Hex, optional]:",default ="")
+        wiz .add_step ("lf_hash","Load File Data Block Hash [Hex, optional]:",default ="")
         wiz .add_step ("params","Launch Load Parameters TLV Builder? [y/N]:",default =False ,is_bool =True ,builder_func =InteractiveWizards ._build_install_parameters_tlv )
 
         def params_cond (res ):
@@ -692,8 +726,8 @@ class InteractiveWizards :
                 is_y =True 
             return not is_y 
 
-        wiz .add_step ("raw_params","Load Parameters [Raw Hex, for when builder skipped]:",default ="",condition =params_cond )
-        wiz .add_step ("token","Load Token [Hex, Default: Empty]:",default ="")
+        wiz .add_step ("raw_params","Load Parameters [Raw Hex only, optional]:",default ="",condition =params_cond )
+        wiz .add_step ("token","Load Token [Hex, optional]:",default ="")
 
         res =wiz .run ()
         payload =bytearray ()
@@ -725,14 +759,14 @@ class InteractiveWizards :
         payload .extend (InteractiveWizards ._build_lv_field (params_hex ))
         payload .extend (InteractiveWizards ._build_lv_field (res .get ("token")))
 
-        InteractiveWizards ._finalize_and_transmit (tp_ctrl ,"02",payload )
+        InteractiveWizards ._finalize_and_transmit (tp_ctrl ,gp_ctrl ,"02",payload )
 
     @staticmethod 
-    def _run_install_install (tp_ctrl ,p1_hex :str ,desc :str )->None :
+    def _run_install_install (tp_ctrl ,gp_ctrl ,p1_hex :str ,desc :str )->None :
         wiz =InteractiveWizard (f"Building {desc} (P1={p1_hex})",Config .Colors )
-        wiz .add_step ("elf_aid","Executable Load File AID [Hex]:",default ="",is_mandatory =True )
+        wiz .add_step ("elf_aid","Executable Load File AID / Package AID [Hex]:",default ="",is_mandatory =True )
         wiz .add_step ("em_aid","Executable Module AID [Hex]:",default ="",is_mandatory =True )
-        wiz .add_step ("app_aid","Application AID [Hex]:",default ="",is_mandatory =True )
+        wiz .add_step ("app_aid","Target Application / Applet AID [Hex]:",default ="",is_mandatory =True )
         wiz .add_step ("priv","Launch Privileges Builder? [y/N]:",default =False ,is_bool =True ,builder_func =InteractiveWizards ._build_privileges )
 
         def priv_cond (res ):
@@ -741,7 +775,7 @@ class InteractiveWizards :
                 is_y =True 
             return not is_y 
 
-        wiz .add_step ("raw_priv","Privileges [Raw Hex, for when builder skipped]:",default ="00",condition =priv_cond )
+        wiz .add_step ("raw_priv","Privileges [Raw Hex bitmask, default 00]:",default ="00",condition =priv_cond )
         wiz .add_step ("params","Launch Install Parameters TLV Builder? [y/N]:",default =False ,is_bool =True ,builder_func =InteractiveWizards ._build_install_parameters_tlv )
 
         def params_cond (res ):
@@ -750,8 +784,8 @@ class InteractiveWizards :
                 is_y =True 
             return not is_y 
 
-        wiz .add_step ("raw_params","Install Parameters [Raw Hex, for when builder skipped]:",default ="C900",condition =params_cond )
-        wiz .add_step ("token","Install Token [Hex, Default: Empty]:",default ="")
+        wiz .add_step ("raw_params","Install Parameters [Raw Hex TLV, default C900]:",default ="C900",condition =params_cond )
+        wiz .add_step ("token","Install Token [Hex, optional]:",default ="")
 
         res =wiz .run ()
         payload =bytearray ()
@@ -806,12 +840,12 @@ class InteractiveWizards :
         payload .extend (InteractiveWizards ._build_lv_field (params_hex ))
         payload .extend (InteractiveWizards ._build_lv_field (res .get ("token")))
 
-        InteractiveWizards ._finalize_and_transmit (tp_ctrl ,p1_hex ,payload )
+        InteractiveWizards ._finalize_and_transmit (tp_ctrl ,gp_ctrl ,p1_hex ,payload )
 
     @staticmethod 
-    def _run_install_make_selectable (tp_ctrl )->None :
+    def _run_install_make_selectable (tp_ctrl ,gp_ctrl =None )->None :
         wiz =InteractiveWizard ("Building INSTALL [for make selectable] (P1=08)",Config .Colors )
-        wiz .add_step ("app_aid","Application AID [Hex]:",default ="",is_mandatory =True )
+        wiz .add_step ("app_aid","Target Application / Applet AID [Hex]:",default ="",is_mandatory =True )
         wiz .add_step ("priv","Launch Privileges Builder? [y/N]:",default =False ,is_bool =True ,builder_func =InteractiveWizards ._build_privileges )
 
         def priv_cond (res ):
@@ -820,7 +854,7 @@ class InteractiveWizards :
                 is_y =True 
             return not is_y 
 
-        wiz .add_step ("raw_priv","Privileges [Raw Hex, for when builder skipped]:",default ="00",condition =priv_cond )
+        wiz .add_step ("raw_priv","Privileges [Raw Hex bitmask, default 00]:",default ="00",condition =priv_cond )
         wiz .add_step ("params","Launch Install Parameters TLV Builder? [y/N]:",default =False ,is_bool =True ,builder_func =InteractiveWizards ._build_install_parameters_tlv )
 
         def params_cond (res ):
@@ -829,15 +863,13 @@ class InteractiveWizards :
                 is_y =True 
             return not is_y 
 
-        wiz .add_step ("raw_params","Install Parameters [Raw Hex, for when builder skipped]:",default ="",condition =params_cond )
-        wiz .add_step ("token","Install Token [Hex, Default: Empty]:",default ="")
+        wiz .add_step ("raw_params","Install Parameters [Raw Hex TLV, optional]:",default ="",condition =params_cond )
+        wiz .add_step ("token","Install Token [Hex, optional]:",default ="")
 
         res =wiz .run ()
         payload =bytearray ()
 
-        payload .append (0x00 )
-        payload .append (0x00 )
-
+        payload .extend (InteractiveWizards ._build_lv_field (""))
         payload .extend (InteractiveWizards ._build_lv_field (res .get ("app_aid")))
 
         is_priv_y =False 
@@ -887,30 +919,30 @@ class InteractiveWizards :
 
         payload .extend (InteractiveWizards ._build_lv_field (res .get ("token")))
 
-        InteractiveWizards ._finalize_and_transmit (tp_ctrl ,"08",payload )
+        InteractiveWizards ._finalize_and_transmit (tp_ctrl ,gp_ctrl ,"08",payload )
 
     @staticmethod 
-    def _run_install_extradition (tp_ctrl )->None :
+    def _run_install_extradition (tp_ctrl ,gp_ctrl =None )->None :
         wiz =InteractiveWizard ("Building INSTALL [for extradition] (P1=10)",Config .Colors )
-        wiz .add_step ("sd_aid","Security Domain AID [Hex]:",default ="",is_mandatory =True )
-        wiz .add_step ("app_aid","Application/ELF AID [Hex]:",default ="",is_mandatory =True )
+        wiz .add_step ("sd_aid","Destination Security Domain AID [Hex]:",default ="",is_mandatory =True )
+        wiz .add_step ("app_aid","Application / ELF AID being extradited [Hex]:",default ="",is_mandatory =True )
+        wiz .add_step ("token","Extradition Token [Hex, optional]:",default ="")
 
         res =wiz .run ()
         payload =bytearray ()
 
         payload .extend (InteractiveWizards ._build_lv_field (res .get ("sd_aid")))
-        payload .append (0x00 )
+        payload .extend (InteractiveWizards ._build_lv_field (""))
         payload .extend (InteractiveWizards ._build_lv_field (res .get ("app_aid")))
-        payload .append (0x00 )
-        payload .append (0x00 )
-        payload .append (0x00 )
+        payload .extend (InteractiveWizards ._build_lv_field (res .get ("token")))
+        payload .extend (InteractiveWizards ._build_lv_field (""))
 
-        InteractiveWizards ._finalize_and_transmit (tp_ctrl ,"10",payload )
+        InteractiveWizards ._finalize_and_transmit (tp_ctrl ,gp_ctrl ,"10",payload )
 
     @staticmethod 
-    def _run_install_registry_update (tp_ctrl )->None :
+    def _run_install_registry_update (tp_ctrl ,gp_ctrl =None )->None :
         wiz =InteractiveWizard ("Building INSTALL [for registry update] (P1=40)",Config .Colors )
-        wiz .add_step ("app_aid","Application/ELF AID [Hex]:",default ="",is_mandatory =True )
+        wiz .add_step ("app_aid","Application / ELF AID to update [Hex]:",default ="",is_mandatory =True )
         wiz .add_step ("priv","Launch Privileges Builder? [y/N]:",default =False ,is_bool =True ,builder_func =InteractiveWizards ._build_privileges )
 
         def priv_cond (res ):
@@ -919,7 +951,7 @@ class InteractiveWizards :
                 is_y =True 
             return not is_y 
 
-        wiz .add_step ("raw_priv","Privileges [Raw Hex, for when builder skipped]:",default ="00",condition =priv_cond )
+        wiz .add_step ("raw_priv","Privileges [Raw Hex bitmask, default 00]:",default ="00",condition =priv_cond )
         wiz .add_step ("params","Launch Install Parameters TLV Builder? [y/N]:",default =False ,is_bool =True ,builder_func =InteractiveWizards ._build_install_parameters_tlv )
 
         def params_cond (res ):
@@ -928,8 +960,8 @@ class InteractiveWizards :
                 is_y =True 
             return not is_y 
 
-        wiz .add_step ("raw_params","Install Parameters [Raw Hex, for when builder skipped]:",default ="",condition =params_cond )
-        wiz .add_step ("token","Install Token [Hex, Default: Empty]:",default ="")
+        wiz .add_step ("raw_params","Install Parameters [Raw Hex TLV, optional]:",default ="",condition =params_cond )
+        wiz .add_step ("token","Install Token [Hex, optional]:",default ="")
 
         res =wiz .run ()
         payload =bytearray ()
@@ -986,10 +1018,22 @@ class InteractiveWizards :
 
         payload .extend (InteractiveWizards ._build_lv_field (res .get ("token")))
 
-        InteractiveWizards ._finalize_and_transmit (tp_ctrl ,"40",payload )
+        InteractiveWizards ._finalize_and_transmit (tp_ctrl ,gp_ctrl ,"40",payload )
 
     @staticmethod 
-    def _finalize_and_transmit (tp_ctrl ,p1_hex :str ,payload :bytearray )->None :
+    def _ensure_auth_sd (gp_ctrl )->bool :
+        if gp_ctrl is None :
+            print (f"{Config.Colors.FAIL}[!] AUTH-SD controller unavailable. Cannot open SCP03 session for live transmission.{Config.Colors.ENDC}")
+            return False 
+        print (f"{Config.Colors.CYAN}[*] AUTH-SD: opening SCP03 session before transmission...{Config.Colors.ENDC}")
+        auth_ok =gp_ctrl .authenticate ()
+        if auth_ok ==False :
+            print (f"{Config.Colors.FAIL}[-] AUTH-SD failed. Transmission aborted.{Config.Colors.ENDC}")
+            return False 
+        return True 
+
+    @staticmethod 
+    def _finalize_and_transmit (tp_ctrl ,gp_ctrl ,p1_hex :str ,payload :bytearray )->None :
         try :
             lc_hex =InteractiveWizards ._encode_apdu_lc (len (payload ))
         except ValueError as e :
@@ -1012,6 +1056,9 @@ class InteractiveWizards :
                 do_send =True 
 
             if do_send :
+                auth_ok =InteractiveWizards ._ensure_auth_sd (gp_ctrl )
+                if auth_ok ==False :
+                    return 
                 res ,sw1 ,sw2 =tp_ctrl .transmit (apdu )
                 is_success =False 
                 if sw1 ==0x90 :
@@ -1029,7 +1076,7 @@ class InteractiveWizards :
                     print (f"[-] Command rejected: {sw1:02X}{sw2:02X}")
 
     @staticmethod 
-    def build_install_apdu (tp_ctrl ,filename :str ):
+    def build_install_apdu (tp_ctrl ,filename :str ,gp_ctrl =None ):
         is_valid_file =False 
         if filename :
             if os .path .exists (filename ):
@@ -1039,13 +1086,16 @@ class InteractiveWizards :
             print (f"{Config.Colors.FAIL}[!] Valid CAP file required: {filename}{Config.Colors.ENDC}")
             return 
 
-        print (f"\n{Config.Colors.HEADER}=== APDU Builder: Full CAP Install Sequence ==={Config.Colors.ENDC}")
+        print (f"\n{Config.Colors.HEADER}=== Full CAP Install Sequence ==={Config.Colors.ENDC}")
 
         try :
-            load_data ,pkg_aid ,app_aids =CapFileParser .parse (filename )
+            parsed_cap =CapFileParser .parse_with_metadata (filename )
         except Exception as e :
             print (f"{Config.Colors.FAIL}[-] Parse Error: {e}{Config.Colors.ENDC}")
             return 
+
+        pkg_aid =parsed_cap .package_aid 
+        app_aids =parsed_cap .applet_aids 
 
         print (f"Extracted Package AID: {pkg_aid.hex().upper()}")
 
@@ -1060,10 +1110,10 @@ class InteractiveWizards :
 
         print (f"Extracted Applet AID : {def_app_aid}")
 
-        wiz =InteractiveWizard ("CAP File Install Configuration",Config .Colors )
-        wiz .add_step ("app_aid",f"Target Applet AID [Default: {def_app_aid}]:",default =def_app_aid )
-        wiz .add_step ("mod_aid","Target Module AID [Default: Mirrors Applet AID]:",default ="MIRROR")
-        wiz .add_step ("priv","Privileges (Hex Bitmask) [Default: 00]:",default ="00")
+        wiz =InteractiveWizard ("CAP File Install Configuration",Config .Colors ,"Build dry-run APDUs, or execute the full CAP load directly on the connected SIM.")
+        wiz .add_step ("app_aid",f"Target Applet AID [Hex, default from CAP: {def_app_aid}]:",default =def_app_aid )
+        wiz .add_step ("mod_aid","Target Module AID [Hex, default=MIRROR -> same as applet AID]:",default ="MIRROR")
+        wiz .add_step ("priv","Privileges [Hex bitmask, default 00]:",default ="00")
         wiz .add_step ("run_b","Launch interactive TLV builder for Install Parameters? [y/N]:",default =False ,is_bool =True ,builder_func =InteractiveWizards ._build_install_parameters_tlv )
 
         def run_b_cond (res ):
@@ -1072,9 +1122,11 @@ class InteractiveWizards :
                 is_y =True 
             return not is_y 
 
-        wiz .add_step ("raw_p","Install Parameters [Raw Hex TLV, Default: C900]:",default ="C900",condition =run_b_cond )
-        wiz .add_step ("ota","Format blocks for OTA (SMS-PP DOWNLOAD)? [y/N]:",default =False ,is_bool =True )
-        wiz .add_step ("algo","Encryption algorithm [1=3DES, 2=AES, for OTA]:",default ="1")
+        wiz .add_step ("raw_p","Install Parameters [Raw Hex TLV, default C900]:",default ="C900",condition =run_b_cond )
+        wiz .add_step ("ota","Format LOAD blocks for OTA / SMS-PP size limits? [y/N]:",default =False ,is_bool =True )
+        wiz .add_step ("algo","OTA encryption profile [1=3DES-sized chunks, 2=AES-sized chunks]:",default ="1")
+        if gp_ctrl is not None :
+            wiz .add_step ("execute","Execute full CAP install directly on the connected SIM after generation? [y/N]:",default =False ,is_bool =True )
 
         res =wiz .run ()
 
@@ -1133,7 +1185,7 @@ class InteractiveWizards :
             is_ota_y =True 
 
         if is_ota_y :
-            algo_choice =res .get ("algo")
+            algo_choice =InteractiveWizards ._normalize_numeric_choice (res .get ("algo"),"1")
 
             is_algo_2 =False 
             if algo_choice =='2':
@@ -1163,39 +1215,42 @@ class InteractiveWizards :
         il_lc =InteractiveWizards ._encode_apdu_lc (len (install_load_data ))
         print (f"80E60200{il_lc}{install_load_data.hex().upper()}\n")
 
-        total_chunks =math .ceil (len (load_data )/chunk_size )
+        try :
+            load_chunks =CapFileParser .plan_load_chunks (parsed_cap ,chunk_size )
+        except Exception as e :
+            print (f"{Config.Colors.FAIL}[-] Chunk Plan Error: {e}{Config.Colors.ENDC}")
+            return 
+
+        total_chunks =len (load_chunks )
         print (f"{Config.Colors.BOLD}2. LOAD (Transmitted in {total_chunks} blocks){Config.Colors.ENDC}")
 
         if is_ota_y :
-            print (f"   (Formatted for non-concatenated SMS-PP, Chunk Size: {chunk_size} bytes)")
+            print (f"   (Formatted for SMS-PP, Chunk Size: {chunk_size} bytes)")
+            if SCP80_PREVIEW_AVAIL :
+                print ("   (SCP80 transport auto-falls back to concatenated SMS when required)")
 
-        for i in range (total_chunks ):
-            start =i *chunk_size 
-            end =min (start +chunk_size ,len (load_data ))
-            chunk =load_data [start :end ]
+        ota_cipher_mode ="3DES"
+        if is_ota_y and algo_choice =='2':
+            ota_cipher_mode ="AES"
+
+        for i ,chunk_info in enumerate (load_chunks ):
+            chunk =chunk_info .payload 
 
             p1 =0x00 
-
-            is_not_last =False 
-            if i <(total_chunks -1 ):
-                is_not_last =True 
-
-            if is_not_last :
+            if i >=(total_chunks -1 ):
                 p1 =0x80 
 
             p2 =i %256 
 
             chunk_hex =chunk .hex ().upper ()
-            chunk_display =chunk_hex 
-
-            is_chunk_long =False 
-            if len (chunk_hex )>60 :
-                is_chunk_long =True 
-
-            if is_chunk_long :
-                chunk_display =chunk_hex [:60 ]+"..."
-
-            print (f"  [Block {i+1}] 80E8{p1:02X}{p2:02X}{len(chunk):02X}{chunk_display}")
+            print (f"  [Block {i+1}] 80E8{p1:02X}{p2:02X}{len(chunk):02X}{chunk_hex}")
+            if is_ota_y and SCP80_PREVIEW_AVAIL :
+                inner_apdu_len =5 +len (chunk )
+                sms_segments =OtaPacketBuilder .estimate_segment_count (inner_apdu_len ,ota_cipher_mode )
+                if sms_segments >1 :
+                    print (f"           -> SCP80 SMS: {sms_segments} concatenated segments")
+                else :
+                    print ("           -> SCP80 SMS: single segment")
 
         app_aid_bytes =HexUtils .to_bytes (app_aid_hex )
         mod_aid_bytes =HexUtils .to_bytes (mod_aid_hex )
@@ -1219,98 +1274,144 @@ class InteractiveWizards :
         i_lc =InteractiveWizards ._encode_apdu_lc (len (install_data ))
         print (f"80E60C00{i_lc}{install_data.hex().upper()}\n")
 
+        do_execute =False 
+        if gp_ctrl is not None :
+            if res .get ("execute"):
+                do_execute =True 
+
+        if do_execute :
+            live_module_aid =None 
+            if is_mirror ==False :
+                live_module_aid =mod_aid_hex 
+
+            auth_ok =InteractiveWizards ._ensure_auth_sd (gp_ctrl )
+            if auth_ok ==False :
+                return 
+            print (f"{Config.Colors.CYAN}[*] Executing CAP install sequence on connected SIM...{Config.Colors.ENDC}")
+            gp_ctrl .install_cap_file (
+            filename ,
+            privileges =priv_hex ,
+            install_params =params_hex ,
+            target_app_aid =app_aid_hex ,
+            target_module_aid =live_module_aid ,
+            instantiate =True ,
+            load_chunk_size =chunk_size
+            )
+
     @staticmethod 
-    def run_dgi_personalization (tp_ctrl ,target_aid :str )->None :
-        wiz =InteractiveWizard ("Security Domain Data Store Update (P1=90)",Config .Colors ,"Dynamic tags (D3, 2F00, FF21, C2, C1) are read-only and will be rejected.")
+    def run_dgi_personalization (tp_ctrl ,gp_ctrl ,target_aid :str )->None :
+        mode_wiz =InteractiveWizard ("Personalization / STORE DATA",Config .Colors ,"Choose whether to open INSTALL [for personalization] against a target AID first, or to send STORE DATA directly.")
+        mode_wiz .add_step ("target_mode","Mode [1=Target AID via INSTALL for personalization, 2=Direct STORE DATA only]:",default ="1")
 
-        wiz .add_step ("42","Issuer/SD ID (Tag 42) [Hex, Default: SKIP]:",default ="SKIP")
-        wiz .add_step ("45","Card/SD Image Number (Tag 45) [Hex, Default: SKIP]:",default ="SKIP")
-        wiz .add_step ("4F","Issuer Security Domain AID (Tag 4F) [Hex, Default: SKIP]:",default ="SKIP")
-        wiz .add_step ("66","Card/SD Recognition Data (Tag 66) [Hex, Default: SKIP]:",default ="SKIP")
-        wiz .add_step ("67","Launch Card Capability Info Builder (Tag 67)? [y/N]:",default =False ,is_bool =True ,builder_func =InteractiveWizards ._build_tag_67 )
-        wiz .add_step ("5F50","SD Manager URL (Tag 5F50) [Hex, Default: SKIP]:",default ="SKIP")
-        wiz .add_step ("86","Security Level (Tag 86) [Hex, Default: SKIP]:",default ="SKIP")
-        wiz .add_step ("8A","Admin IP/Host (Tag 8A) [Hex, Default: SKIP]:",default ="SKIP")
-        wiz .add_step ("8C","Admin URL (Tag 8C) [Hex, Default: SKIP]:",default ="SKIP")
-        wiz .add_step ("custom","Add Custom TLV String [Hex, Default: SKIP]:",default ="SKIP")
+        def target_aid_cond (res ):
+            return InteractiveWizards ._normalize_numeric_choice (res .get ("target_mode","1"),"1")=='1'
 
-        res =wiz .run ()
+        def raw_mode_cond (res ):
+            return InteractiveWizards ._normalize_numeric_choice (res .get ("input_mode","1"),"1")=='2'
+
+        def builder_mode_cond (res ):
+            return InteractiveWizards ._normalize_numeric_choice (res .get ("input_mode","1"),"1")!='2'
+
+        mode_wiz .add_step ("target_aid",f"Target AID for INSTALL [for personalization] [Hex, default: {target_aid}]:",default =target_aid ,condition =target_aid_cond )
+        mode_wiz .add_step ("input_mode","STORE DATA payload input [1=Structured TLV builder, 2=Raw payload hex only]:",default ="2")
+        mode_wiz .add_step ("store_p1","STORE DATA P1 [Hex, default 90]:",default ="90")
+        mode_wiz .add_step ("store_p2","STORE DATA P2 [Hex, default 00]:",default ="00")
+        mode_wiz .add_step ("raw_payload","STORE DATA payload only [Hex, no CLA/INS/P1/P2/Lc]:",default ="",condition =raw_mode_cond )
+        mode_wiz .add_step ("42","Issuer/SD ID (Tag 42) [Hex, Default: SKIP]:",default ="SKIP",condition =builder_mode_cond )
+        mode_wiz .add_step ("45","Card/SD Image Number (Tag 45) [Hex, Default: SKIP]:",default ="SKIP",condition =builder_mode_cond )
+        mode_wiz .add_step ("4F","Issuer Security Domain AID (Tag 4F) [Hex, Default: SKIP]:",default ="SKIP",condition =builder_mode_cond )
+        mode_wiz .add_step ("66","Card/SD Recognition Data (Tag 66) [Hex, Default: SKIP]:",default ="SKIP",condition =builder_mode_cond )
+        mode_wiz .add_step ("67","Launch Card Capability Info Builder (Tag 67)? [y/N]:",default =False ,is_bool =True ,builder_func =InteractiveWizards ._build_tag_67 ,condition =builder_mode_cond )
+        mode_wiz .add_step ("5F50","SD Manager URL (Tag 5F50) [Hex, Default: SKIP]:",default ="SKIP",condition =builder_mode_cond )
+        mode_wiz .add_step ("86","Security Level (Tag 86) [Hex, Default: SKIP]:",default ="SKIP",condition =builder_mode_cond )
+        mode_wiz .add_step ("8A","Admin IP/Host (Tag 8A) [Hex, Default: SKIP]:",default ="SKIP",condition =builder_mode_cond )
+        mode_wiz .add_step ("8C","Admin URL (Tag 8C) [Hex, Default: SKIP]:",default ="SKIP",condition =builder_mode_cond )
+        mode_wiz .add_step ("custom","Add Custom TLV String [Hex, Default: SKIP]:",default ="SKIP",condition =builder_mode_cond )
+
+        res =mode_wiz .run ()
+
         payload =""
+        is_raw_mode =False 
+        if InteractiveWizards ._normalize_numeric_choice (res .get ("input_mode","1"),"1")=='2':
+            is_raw_mode =True 
 
-        val_42 =res .get ("42")
-        has_42 =False 
-        if val_42 !="SKIP":
-            has_42 =True 
-        if has_42 :
-            payload +="42"+InteractiveWizards ._encode_ber_tlv_length (len (bytes .fromhex (val_42 )))+val_42 .upper ()
+        if is_raw_mode :
+            payload =res .get ("raw_payload","").replace (" ","").upper ()
+        else :
+            val_42 =res .get ("42")
+            has_42 =False 
+            if val_42 !="SKIP":
+                has_42 =True 
+            if has_42 :
+                payload +="42"+InteractiveWizards ._encode_ber_tlv_length (len (bytes .fromhex (val_42 )))+val_42 .upper ()
 
-        val_45 =res .get ("45")
-        has_45 =False 
-        if val_45 !="SKIP":
-            has_45 =True 
-        if has_45 :
-            payload +="45"+InteractiveWizards ._encode_ber_tlv_length (len (bytes .fromhex (val_45 )))+val_45 .upper ()
+            val_45 =res .get ("45")
+            has_45 =False 
+            if val_45 !="SKIP":
+                has_45 =True 
+            if has_45 :
+                payload +="45"+InteractiveWizards ._encode_ber_tlv_length (len (bytes .fromhex (val_45 )))+val_45 .upper ()
 
-        val_4f =res .get ("4F")
-        has_4f =False 
-        if val_4f !="SKIP":
-            has_4f =True 
-        if has_4f :
-            payload +="4F"+InteractiveWizards ._encode_ber_tlv_length (len (bytes .fromhex (val_4f )))+val_4f .upper ()
+            val_4f =res .get ("4F")
+            has_4f =False 
+            if val_4f !="SKIP":
+                has_4f =True 
+            if has_4f :
+                payload +="4F"+InteractiveWizards ._encode_ber_tlv_length (len (bytes .fromhex (val_4f )))+val_4f .upper ()
 
-        val_66 =res .get ("66")
-        has_66 =False 
-        if val_66 !="SKIP":
-            has_66 =True 
-        if has_66 :
-            payload +="66"+InteractiveWizards ._encode_ber_tlv_length (len (bytes .fromhex (val_66 )))+val_66 .upper ()
+            val_66 =res .get ("66")
+            has_66 =False 
+            if val_66 !="SKIP":
+                has_66 =True 
+            if has_66 :
+                payload +="66"+InteractiveWizards ._encode_ber_tlv_length (len (bytes .fromhex (val_66 )))+val_66 .upper ()
 
-        is_67 =False 
-        if res .get ("67"):
-            is_67 =True 
-        if is_67 :
-            res_67 =res .get ("67_built")
-            has_67_val =False 
-            if res_67 is not None :
-                if len (res_67 )>0 :
-                    has_67_val =True 
-            if has_67_val :
-                payload +=res_67 
+            is_67 =False 
+            if res .get ("67"):
+                is_67 =True 
+            if is_67 :
+                res_67 =res .get ("67_built")
+                has_67_val =False 
+                if res_67 is not None :
+                    if len (res_67 )>0 :
+                        has_67_val =True 
+                if has_67_val :
+                    payload +=res_67 
 
-        val_5f50 =res .get ("5F50")
-        has_5f50 =False 
-        if val_5f50 !="SKIP":
-            has_5f50 =True 
-        if has_5f50 :
-            payload +="5F50"+InteractiveWizards ._encode_ber_tlv_length (len (bytes .fromhex (val_5f50 )))+val_5f50 .upper ()
+            val_5f50 =res .get ("5F50")
+            has_5f50 =False 
+            if val_5f50 !="SKIP":
+                has_5f50 =True 
+            if has_5f50 :
+                payload +="5F50"+InteractiveWizards ._encode_ber_tlv_length (len (bytes .fromhex (val_5f50 )))+val_5f50 .upper ()
 
-        val_86 =res .get ("86")
-        has_86 =False 
-        if val_86 !="SKIP":
-            has_86 =True 
-        if has_86 :
-            payload +="86"+InteractiveWizards ._encode_ber_tlv_length (len (bytes .fromhex (val_86 )))+val_86 .upper ()
+            val_86 =res .get ("86")
+            has_86 =False 
+            if val_86 !="SKIP":
+                has_86 =True 
+            if has_86 :
+                payload +="86"+InteractiveWizards ._encode_ber_tlv_length (len (bytes .fromhex (val_86 )))+val_86 .upper ()
 
-        val_8a =res .get ("8A")
-        has_8a =False 
-        if val_8a !="SKIP":
-            has_8a =True 
-        if has_8a :
-            payload +="8A"+InteractiveWizards ._encode_ber_tlv_length (len (bytes .fromhex (val_8a )))+val_8a .upper ()
+            val_8a =res .get ("8A")
+            has_8a =False 
+            if val_8a !="SKIP":
+                has_8a =True 
+            if has_8a :
+                payload +="8A"+InteractiveWizards ._encode_ber_tlv_length (len (bytes .fromhex (val_8a )))+val_8a .upper ()
 
-        val_8c =res .get ("8C")
-        has_8c =False 
-        if val_8c !="SKIP":
-            has_8c =True 
-        if has_8c :
-            payload +="8C"+InteractiveWizards ._encode_ber_tlv_length (len (bytes .fromhex (val_8c )))+val_8c .upper ()
+            val_8c =res .get ("8C")
+            has_8c =False 
+            if val_8c !="SKIP":
+                has_8c =True 
+            if has_8c :
+                payload +="8C"+InteractiveWizards ._encode_ber_tlv_length (len (bytes .fromhex (val_8c )))+val_8c .upper ()
 
-        val_custom =res .get ("custom")
-        has_custom =False 
-        if val_custom !="SKIP":
-            has_custom =True 
-        if has_custom :
-            payload +=val_custom .upper ()
+            val_custom =res .get ("custom")
+            has_custom =False 
+            if val_custom !="SKIP":
+                has_custom =True 
+            if has_custom :
+                payload +=val_custom .upper ()
 
         is_payload_empty =False 
         if len (payload )==0 :
@@ -1320,18 +1421,23 @@ class InteractiveWizards :
             print ("[-] No parameters provided. Aborting.")
             return 
 
-        print (f"\n[+] Final Constructed TLV Payload: {payload}")
+        p1_hex =res .get ("store_p1","90").replace (" ","").upper ()
+        p2_hex =res .get ("store_p2","00").replace (" ","").upper ()
+        target_mode =InteractiveWizards ._normalize_numeric_choice (res .get ("target_mode","1"),"1")
 
-        install_apdu =InteractiveWizards ._build_install_perso (target_aid )
+        print (f"\n[+] Final STORE DATA Payload: {payload}")
 
-        sd_lc =InteractiveWizards ._encode_apdu_lc (len (payload )//2 )
-        store_data_apdu =f"80E29000{sd_lc}{payload}"
+        install_apdu =None 
+        if target_mode =='1':
+            target_val =res .get ("target_aid",target_aid ).replace (" ","").upper ()
+            install_apdu =InteractiveWizards ._build_install_perso (target_val )
+            print (f"\n[*] Generated INSTALL APDU:\n    {install_apdu}")
 
-        print (f"\n[*] Generated INSTALL APDU:\n    {install_apdu}")
-        print (f"[*] Generated STORE DATA APDU (BER-TLV P1=90):\n    {store_data_apdu}")
+        store_data_apdu =InteractiveWizards ._build_store_data_with_params (payload ,p1_hex ,p2_hex )
+        print (f"[*] Generated STORE DATA APDU (P1={p1_hex}, P2={p2_hex}):\n    {store_data_apdu}")
 
         tx_wiz =InteractiveWizard ("Transmit Confirmation",Config .Colors )
-        tx_wiz .add_step ("tx","Transmit sequence to card? [y/N]:",default =False ,is_bool =True )
+        tx_wiz .add_step ("tx","Transmit the generated INSTALL / STORE DATA sequence to the card now? [y/N]:",default =False ,is_bool =True )
         res_tx =tx_wiz .run ()
 
         do_transmit =False 
@@ -1339,7 +1445,7 @@ class InteractiveWizards :
             do_transmit =True 
 
         if do_transmit :
-            InteractiveWizards ._execute_sequence (tp_ctrl ,install_apdu ,store_data_apdu )
+            InteractiveWizards ._execute_sequence (tp_ctrl ,gp_ctrl ,install_apdu ,store_data_apdu )
 
     @staticmethod 
     def _patch_dgi (base_dgi :str ,new_tlv :str )->str :
@@ -1478,21 +1584,33 @@ class InteractiveWizards :
         apdu =f"80E28000{lc_hex}{payload}"
         return apdu 
 
+    @staticmethod
+    def _build_store_data_with_params (payload :str ,p1_hex :str ="80",p2_hex :str ="00")->str :
+        lc_hex =InteractiveWizards ._encode_apdu_lc (len (payload )//2 )
+        apdu =f"80E2{p1_hex}{p2_hex}{lc_hex}{payload}"
+        return apdu 
+
     @staticmethod 
-    def _execute_sequence (tp_ctrl ,install_apdu :str ,store_data_apdu :str )->None :
-        print ("\n[*] Transmitting INSTALL [for personalization]...")
-        res ,sw1 ,sw2 =tp_ctrl .transmit (install_apdu )
-
-        is_install_success =False 
-        if sw1 ==0x90 :
-            if sw2 ==0x00 :
-                is_install_success =True 
-
-        if is_install_success ==False :
-            print (f"[-] INSTALL rejected: {sw1:02X}{sw2:02X}. Process aborted.")
+    def _execute_sequence (tp_ctrl ,gp_ctrl ,install_apdu :str ,store_data_apdu :str )->None :
+        auth_ok =InteractiveWizards ._ensure_auth_sd (gp_ctrl )
+        if auth_ok ==False :
             return 
+        if install_apdu is not None :
+            print ("\n[*] Transmitting INSTALL [for personalization]...")
+            res ,sw1 ,sw2 =tp_ctrl .transmit (install_apdu )
 
-        print ("[+] Session opened. Transmitting STORE DATA...")
+            is_install_success =False 
+            if sw1 ==0x90 :
+                if sw2 ==0x00 :
+                    is_install_success =True 
+
+            if is_install_success ==False :
+                print (f"[-] INSTALL rejected: {sw1:02X}{sw2:02X}. Process aborted.")
+                return 
+
+            print ("[+] Session opened. Transmitting STORE DATA...")
+        else :
+            print ("\n[*] Transmitting STORE DATA...")
         res ,sw1 ,sw2 =tp_ctrl .transmit (store_data_apdu )
 
         is_store_success =False 

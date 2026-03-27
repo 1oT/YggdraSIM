@@ -1,0 +1,10 @@
+[ req ]
+prompt              = no
+distinguished_name  = req_distinguished_name
+
+[ req_distinguished_name ]
+O       = ACME
+
+# This value is disaligment with SGP26.v3.0.1 but this change is update in SGP26v.3.0.2
+CN      = testsmds2.example.com
+
