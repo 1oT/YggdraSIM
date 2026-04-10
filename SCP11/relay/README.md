@@ -28,6 +28,11 @@ The compatibility namespace follows the same broad relay shape:
 - `IPAd` discovery and eIM-driven download
 - compatibility and expert commands behind `HELP EXPERT`
 
+Simulator note:
+
+- when the shared card backend is set to `sim`, the simulated card's default BF55 eIM identity comes from `Workspace/SIMCARD/eim_identity.json`
+- `Workspace/LocalEIM/eim_identity.json` remains the Local eIM shell identity and is configured separately
+
 ## Documentation rule
 
 Point users to these guides unless the namespace itself is the topic:
@@ -35,6 +40,7 @@ Point users to these guides unless the namespace itself is the topic:
 - `SCP11/README.md`
 - `SCP11/live/README.md`
 - `SCP11/test/README.md`
+- `../../PROFILE_LIFECYCLE_CLI_CHEATSHEET.md`
 
 Keep this file short and compatibility-focused. Do not duplicate the primary
 relay operator guides here.

@@ -16,11 +16,14 @@
 # -----------------------------------------------------------------------------
 
 import os
-import shutil
-import sys
 from dataclasses import dataclass, field
 
-from yggdrasim_common.runtime_paths import bundle_path, ensure_runtime_dir, ensure_seeded_runtime_file, runtime_path
+from yggdrasim_common.runtime_paths import (
+    ensure_runtime_dir,
+    ensure_seeded_workspace_file,
+    ensure_workspace_dir,
+    workspace_path,
+)
 
 try:
     from .models import (
@@ -41,11 +44,7 @@ except ImportError:
 
 
 def _get_config_dir():
-    return runtime_path("SCP11", "live")
-
-
-def _get_bundled_dir():
-    return bundle_path("SCP11", "live")
+    return workspace_path("SCP11", "live")
 
 
 @dataclass(frozen=True)
@@ -96,6 +95,12 @@ class SGPConfig:
     EIM_HTTP_PROTOCOL: str = "gsma/rsp/v2.1.0"
     EIM_EUICC_CHALLENGE_ASN1: bool = True
     REMOTE_DP_ALLOW_LOCAL_FALLBACK: bool = False
+    # Prefer ES10b STORE DATA on a dedicated logical channel, matching the
+    # channel layout used by commercial LPAs on physical cards.
+    ES10B_USE_LOGICAL_CHANNEL: bool = True
+    # Preserve top-level BPP section framing during ES10b install for physical
+    # cards that reject flattened member-only A0/A1/A2/A3 payloads.
+    BPP_INSTALL_USE_SECTION_FRAMING: bool = True
 
     LOCAL_SGP26_TRUST_ANCHOR_PATH: str = field(
         default_factory=lambda: os.path.join(_get_config_dir(), "SGP26_TRUST_ANCHOR.pem")
@@ -106,7 +111,7 @@ class SGPConfig:
     )
 
     def __post_init__(self):
-        ensure_runtime_dir("SCP11", "live")
+        ensure_workspace_dir("SCP11", "live")
         ensure_runtime_dir("SCP11", "live", "dynamic_ca")
         ev_eim_timeout = os.environ.get("EIM_TIMEOUT_SECONDS", "").strip()
         if ev_eim_timeout != "":
@@ -127,20 +132,17 @@ class SGPConfig:
                 },
             )
 
-        bundled_dir = _get_bundled_dir()
         for filename in [
             "CERT.DPauth.ECDSA.der",
             "SK.DPauth.ECDSA.pem",
             "CERT.DPpb.ECDSA.der",
             "SK.DPpb.ECDSA.pem",
             "ES9_TEST_CI_CA.pem",
-            "es9_ca_lookup.json",
+            "SGP26_TRUST_ANCHOR.pem",
+            "SGP26_ISSUER.pem",
         ]:
-            bundled_path = os.path.join(bundled_dir, filename)
-            if os.path.isfile(bundled_path) is False:
-                continue
             try:
-                ensure_seeded_runtime_file("SCP11", "live", filename)
+                ensure_seeded_workspace_file(("SCP11", "live", filename), "SCP11", "live", filename)
             except Exception as error:
                 print(f"Warning: Could not copy default {filename} to {_get_config_dir()}: {error}")
 

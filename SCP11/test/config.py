@@ -16,11 +16,14 @@
 # -----------------------------------------------------------------------------
 
 import os
-import shutil
-import sys
 from dataclasses import dataclass, field
 
-from yggdrasim_common.runtime_paths import bundle_path, ensure_runtime_dir, ensure_seeded_runtime_file, runtime_path
+from yggdrasim_common.runtime_paths import (
+    ensure_runtime_dir,
+    ensure_seeded_workspace_file,
+    ensure_workspace_dir,
+    workspace_path,
+)
 
 try:
     from .models import (
@@ -43,11 +46,7 @@ except ImportError:
 
 
 def _get_config_dir():
-    return runtime_path("SCP11", "test")
-
-
-def _get_bundled_dir():
-    return bundle_path("SCP11", "test")
+    return workspace_path("SCP11", "test")
 
 
 @dataclass(frozen=True)
@@ -118,7 +117,7 @@ class SGPConfig:
     )
 
     def __post_init__(self):
-        ensure_runtime_dir("SCP11", "test")
+        ensure_workspace_dir("SCP11", "test")
         ensure_runtime_dir("SCP11", "test", "dynamic_ca")
         ev = os.environ.get("EIM_REQUEST_VARIANT", "").strip()
         if ev != "":
@@ -166,20 +165,17 @@ class SGPConfig:
                 },
             )
 
-        bundled_dir = _get_bundled_dir()
         for filename in [
             "CERT.DPauth.ECDSA.der",
             "SK.DPauth.ECDSA.pem",
             "CERT.DPpb.ECDSA.der",
             "SK.DPpb.ECDSA.pem",
             "ES9_TEST_CI_CA.pem",
-            "es9_ca_lookup.json",
+            "SGP26_TRUST_ANCHOR.pem",
+            "SGP26_ISSUER.pem",
         ]:
-            bundled_path = os.path.join(bundled_dir, filename)
-            if os.path.isfile(bundled_path) is False:
-                continue
             try:
-                ensure_seeded_runtime_file("SCP11", "test", filename)
+                ensure_seeded_workspace_file(("SCP11", "test", filename), "SCP11", "test", filename)
             except Exception as error:
                 print(f"Warning: Could not copy default {filename} to {_get_config_dir()}: {error}")
 

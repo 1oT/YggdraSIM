@@ -24,7 +24,7 @@ try:
         TRANSPORT_MODE_RELAY,
     )
     from .providers import RemoteEs9Provider, Sgp26LocalProvider
-    from .transport import PcscApduChannel, RelayApduChannel, RelayHttpClientJsonHex
+    from ..live.transport import PcscApduChannel, RelayApduChannel, RelayHttpClientJsonHex
 except ImportError:
     from es9_client import Es9LikeClient
     from models import (
@@ -34,7 +34,7 @@ except ImportError:
         TRANSPORT_MODE_RELAY,
     )
     from providers import RemoteEs9Provider, Sgp26LocalProvider
-    from transport import PcscApduChannel, RelayApduChannel, RelayHttpClientJsonHex
+    from SCP11.live.transport import PcscApduChannel, RelayApduChannel, RelayHttpClientJsonHex
 
 
 def build_apdu_channel(cfg):

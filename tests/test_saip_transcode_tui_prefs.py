@@ -3,7 +3,9 @@ import unittest
 from pathlib import Path
 
 from Tools.ProfilePackage.saip_transcode_tui_prefs import (
+    load_pane_layout_prefs,
     load_split_size_prefs,
+    persist_pane_layout_prefs,
     load_transcode_tui_prefs,
     persist_split_sizes,
     persist_theme,
@@ -58,6 +60,49 @@ class SaipTranscodeTuiPrefsTests(unittest.TestCase):
             load_split_size_prefs(self.workspace_root),
             {
                 "inspect_width": 44,
+            },
+        )
+
+    def test_persist_pane_layout_round_trip_and_keep_theme(self) -> None:
+        persist_theme(self.workspace_root, "nord")
+
+        persist_pane_layout_prefs(
+            self.workspace_root,
+            outline_visible=False,
+            right_mode="lint",
+            bottom_left_mode="der",
+            bottom_right_mode="none",
+        )
+
+        self.assertEqual(
+            load_pane_layout_prefs(self.workspace_root),
+            {
+                "outline_visible": False,
+                "right_mode": "lint",
+                "bottom_left_mode": "der",
+                "bottom_right_mode": "none",
+            },
+        )
+        self.assertEqual(load_transcode_tui_prefs(self.workspace_root).get("theme"), "nord")
+
+    def test_load_pane_layout_prefs_ignores_invalid_values(self) -> None:
+        save_transcode_tui_prefs(
+            self.workspace_root,
+            {
+                "panes": {
+                    "outline_visible": "maybe",
+                    "right_mode": "lint",
+                    "bottom_left_mode": "bad",
+                    "bottom_right_mode": "DER",
+                },
+            },
+        )
+
+        self.assertEqual(
+            load_pane_layout_prefs(self.workspace_root),
+            {
+                "right_mode": "lint",
+                "bottom_right_mode": "der",
             },
         )
 

@@ -1,14 +1,21 @@
 import argparse
 import atexit
-import json
 import os
 import re
+import shlex
 import shutil
 import sys
 import textwrap
 from typing import Any, Dict, List, Optional
 
 from yggdrasim_common.quit_control import quit_all, QuitAllRequested
+from yggdrasim_common.process_debug import (
+    add_debug_argument,
+    is_global_debug_enabled,
+    set_global_debug,
+)
+from yggdrasim_common.session_recording import ShellSessionRecorder
+from yggdrasim_common.structured_output import dump_structured_payload
 from SCP11.shared.discovery_snapshot import render_consolidated_discovery_snapshot
 
 try:
@@ -31,6 +38,7 @@ _COMMANDS = (
     "CERTS",
     "SMDP-CERTS",
     "DISCOVER",
+    "EXPLAIN-LAST",
     "INFO",
     "LOAD-PROFILE",
     "ENABLE-PROFILE",
@@ -48,6 +56,7 @@ _COMMANDS = (
     "METADATA",
     "METADATA-LINT",
     "METADATA-CLEAR",
+    "RECORD",
     "STATUS",
     "HELP",
     "EXIT",
@@ -60,18 +69,24 @@ _COMMAND_ALIASES = {
     "ENABLE": "ENABLE-PROFILE",
     "DISABLE": "DISABLE-PROFILE",
     "DELETE": "DELETE-PROFILE",
+    "PROFILE-RESET": "PROFILE-CLEAR",
+    "METADATA-RESET": "METADATA-CLEAR",
     "QUIT": "EXIT",
     "Q": "EXIT",
 }
 
 _COMMAND_DOCS = {
     "CERTS": {
-        "usage": "CERTS [--json]",
+        "usage": "CERTS [--json|--yaml]",
         "summary": "Show local SM-DP+ certificate inventory and current selection.",
     },
     "DISCOVER": {
         "usage": "DISCOVER",
         "summary": "Run the shared SCP11 SGP.22/SGP.32 discovery snapshot.",
+    },
+    "EXPLAIN-LAST": {
+        "usage": "EXPLAIN-LAST [--json|--yaml]",
+        "summary": "Explain the last local SCP11 command state, selections, and response payloads.",
     },
     "STATUS": {
         "usage": "STATUS",
@@ -122,12 +137,16 @@ _COMMAND_DOCS = {
         "summary": "Show or set the active metadata JSON file.",
     },
     "METADATA-LINT": {
-        "usage": "METADATA-LINT [path]",
+        "usage": "METADATA-LINT [path] [--json|--yaml]",
         "summary": "Validate metadata JSON, ASN.1 encodes, and enabled custom rows.",
     },
     "METADATA-CLEAR": {
         "usage": "METADATA-CLEAR",
         "summary": "Clear the active metadata override path.",
+    },
+    "RECORD": {
+        "usage": "RECORD [STATUS|START [outputPath]|STOP [outputPath]|CANCEL]",
+        "summary": "Capture replayable shell commands plus the underlying APDU trace.",
     },
     "HELP": {
         "usage": "HELP [command]",
@@ -166,6 +185,11 @@ class LocalAccessShell:
         self._session_cls = session_cls
         self.cfg = config_cls()
         self.session = None
+        self._global_debug = is_global_debug_enabled()
+        self._recorder = ShellSessionRecorder(
+            shell_name="scp11_local_access",
+            module_entry_point="python -m SCP11.local_access",
+        )
         self._history_file = os.path.join(
             os.path.expanduser("~"), ".yggdrasim_local_scp11_history"
         )
@@ -239,6 +263,8 @@ class LocalAccessShell:
             raise LocalAccessStartupError(
                 f"Local SCP11 transport initialization failed: {error}"
             ) from error
+        if self._global_debug:
+            self._set_transport_debug(True)
 
     @staticmethod
     def _extract_debug_flag(arguments: list[str]) -> tuple[list[str], bool]:
@@ -275,6 +301,84 @@ class LocalAccessShell:
         setter = getattr(apdu_channel, "set_raw_apdu_logging", None)
         if callable(setter):
             setter(bool(previous))
+
+    @staticmethod
+    def _render_command_line(command: str, arguments: list[str]) -> str:
+        normalized_command = str(command or "").strip()
+        if len(normalized_command) == 0:
+            return ""
+        tokens = [normalized_command]
+        for argument in arguments:
+            text = str(argument or "").strip()
+            if len(text) == 0:
+                continue
+            tokens.append(text)
+        return shlex.join(tokens)
+
+    def _print_record_status(self) -> None:
+        status = self._recorder.status_payload()
+        state = "active" if status.get("active") else "idle"
+        print(f"[*] Recorder status: {state}")
+        print(f"    entry      : {status.get('module_entry_point', '-')}")
+        pending_path = str(status.get("pending_output_path", "") or "").strip()
+        print(f"    output     : {pending_path or '-'}")
+        print(f"    commands   : {status.get('command_count', 0)}")
+        print(f"    apdus      : {status.get('apdu_count', 0)}")
+        started_at = str(status.get("started_at_utc", "") or "").strip()
+        print(f"    started_at : {started_at or '-'}")
+        last_export = str(status.get("last_export_path", "") or "").strip()
+        if len(last_export) > 0:
+            print(f"    last_file  : {last_export}")
+
+    def _cmd_record(self, arguments: list[str]) -> None:
+        parts = [str(value or "").strip() for value in arguments if len(str(value or "").strip()) > 0]
+        if len(parts) == 0 or parts[0].upper() == "STATUS":
+            self._print_record_status()
+            return
+        action = parts[0].upper()
+        output_path = " ".join(parts[1:]).strip()
+        if action == "START":
+            target_path = self._recorder.start(output_path=output_path)
+            print("[+] Recording started.")
+            print(f"    output   : {target_path}")
+            print("    capture  : shell commands + APDU trace")
+            print("    format   : YAML by default, JSON when outputPath ends with .json")
+            return
+        if action == "STOP":
+            if self._recorder.is_active() is False:
+                print("[*] Recording is not active.")
+                self._print_record_status()
+                return
+            target_path, payload = self._recorder.stop(output_path=output_path)
+            summary = payload.get("summary", {})
+            print("[+] Recording saved.")
+            print(f"    file     : {target_path}")
+            print(f"    commands : {summary.get('command_count', 0)}")
+            print(f"    apdus    : {summary.get('apdu_count', 0)}")
+            return
+        if action == "CANCEL":
+            if self._recorder.is_active() is False:
+                print("[*] Recording is not active.")
+                return
+            self._recorder.cancel()
+            print("[+] Recording cancelled. Discarded in-memory command/APDU capture.")
+            return
+        raise ValueError("Usage: RECORD [STATUS|START [outputPath]|STOP [outputPath]|CANCEL]")
+
+    def _finalize_recording_on_exit(self) -> None:
+        if self._recorder.is_active() is False:
+            return
+        try:
+            target_path, payload = self._recorder.stop()
+        except Exception as error:
+            self._recorder.cancel()
+            print(f"[-] Could not save active recording: {error}")
+            return
+        summary = payload.get("summary", {})
+        print("[*] Active recording auto-saved on shell exit.")
+        print(f"    file     : {target_path}")
+        print(f"    commands : {summary.get('command_count', 0)}")
+        print(f"    apdus    : {summary.get('apdu_count', 0)}")
 
     @staticmethod
     def _hex_preview(value: bytes, max_chars: int = 48) -> str:
@@ -349,6 +453,233 @@ class LocalAccessShell:
         if len(base) > 0:
             return base
         return cleaned
+
+    @staticmethod
+    def _extract_output_mode(arguments: list[str]) -> tuple[list[str], str]:
+        filtered: list[str] = []
+        output_mode = "text"
+        for argument in arguments:
+            normalized = str(argument or "").strip().lower()
+            if normalized not in ("--json", "--yaml"):
+                filtered.append(argument)
+                continue
+            requested_mode = "json" if normalized == "--json" else "yaml"
+            if output_mode not in ("text", requested_mode):
+                raise ValueError("Choose only one structured output mode: --json or --yaml.")
+            output_mode = requested_mode
+        return filtered, output_mode
+
+    @staticmethod
+    def _print_structured_payload(payload: Any, output_mode: str) -> None:
+        print(dump_structured_payload(payload, output_mode=output_mode))
+
+    @staticmethod
+    def _payload_summary(value: bytes, *, max_chars: int = 96) -> dict[str, Any]:
+        raw_value = bytes(value or b"")
+        return {
+            "present": len(raw_value) > 0,
+            "len": len(raw_value),
+            "preview_hex": LocalAccessShell._hex_preview(raw_value, max_chars=max_chars),
+        }
+
+    def _build_metadata_lint_payload(self, metadata_path: str = "") -> dict[str, Any]:
+        report = dict(self.session.lint_metadata(metadata_path=metadata_path))
+        store_metadata_der = self.session.encode_metadata_asn1(override_path=metadata_path)
+        report["store_metadata_tag_hex"] = "BF25"
+        report["store_metadata_preview_hex"] = self._hex_preview(
+            store_metadata_der,
+            max_chars=120,
+        )
+        update_error = str(report.get("update_metadata_error", "") or "").strip()
+        if len(update_error) == 0:
+            update_metadata_der = self.session.encode_update_metadata_asn1(
+                override_path=metadata_path
+            )
+            report["update_metadata_tag_hex"] = "BF2A"
+            report["update_metadata_preview_hex"] = self._hex_preview(
+                update_metadata_der,
+                max_chars=120,
+            )
+        else:
+            report["update_metadata_tag_hex"] = "BF2A"
+            report["update_metadata_preview_hex"] = "-"
+        custom_rows = self.session.load_enabled_custom_metadata_entries(
+            override_path=metadata_path
+        )
+        report["enabled_custom_rows"] = [
+            {
+                "tag_hex": str(row.get("tag_hex", "")).upper(),
+                "path": str(row.get("path", "")).strip(),
+                "source_key": str(row.get("source_key", "")).strip(),
+            }
+            for row in custom_rows
+        ]
+        return report
+
+    def _build_last_operation_report(self) -> dict[str, Any]:
+        if self.session is None:
+            return {
+                "session_initialized": False,
+                "reason": "session object is not initialized",
+            }
+
+        state = self.session.state
+        resolved_profile = ""
+        resolved_profile_error = ""
+        try:
+            resolved_profile = self.session.resolve_profile_path()
+        except Exception as error:
+            resolved_profile_error = str(error)
+        resolved_metadata = ""
+        resolved_metadata_error = ""
+        try:
+            resolved_metadata = self.session.resolve_metadata_path()
+        except Exception as error:
+            resolved_metadata_error = str(error)
+
+        return {
+            "session_initialized": True,
+            "session": {
+                "session_open": bool(state.session_open),
+                "isdr_selected": bool(state.isdr_selected),
+                "active_eid": self.session.current_eid or "",
+                "transaction_id_hex": state.transaction_id.hex().upper(),
+                "card_challenge_hex": state.card_challenge.hex().upper(),
+                "server_challenge_hex": state.server_challenge.hex().upper(),
+                "load_notifications_synced": bool(state.load_notifications_synced),
+            },
+            "selection": {
+                "allowed_ci_pkids": list(state.allowed_ci_pkids),
+                "selected_ci_pkid": state.selected_ci_pkid,
+                "auth_certificate_path": state.selected_auth_certificate_path,
+                "auth_private_key_path": state.selected_auth_private_key_path,
+                "auth_selection_reason": state.selected_auth_certificate_reason,
+                "pb_certificate_path": state.selected_pb_certificate_path,
+                "pb_private_key_path": state.selected_pb_private_key_path,
+                "pb_selection_reason": state.selected_pb_certificate_reason,
+                "local_smdp_address": state.selected_local_smdp_address,
+            },
+            "targets": {
+                "profile_override_path": state.profile_override_path,
+                "resolved_profile_path": resolved_profile,
+                "resolved_profile_error": resolved_profile_error,
+                "metadata_override_path": state.metadata_override_path,
+                "resolved_metadata_path": resolved_metadata,
+                "resolved_metadata_error": resolved_metadata_error,
+            },
+            "responses": {
+                "select_isdr": self._payload_summary(state.select_response),
+                "euicc_info1": self._payload_summary(state.euicc_info1),
+                "configured_data": self._payload_summary(state.configured_data),
+                "authenticate_server_request": self._payload_summary(
+                    state.authenticate_server_request
+                ),
+                "authenticate_server_response": self._payload_summary(
+                    state.authenticate_server_response
+                ),
+                "euicc_signed1": self._payload_summary(state.euicc_signed1),
+                "euicc_signature1": self._payload_summary(state.euicc_signature1),
+                "prepare_download_response": self._payload_summary(
+                    state.prepare_download_response
+                ),
+                "last_load_bpp_response": self._payload_summary(
+                    state.last_load_bpp_response
+                ),
+                "cancel_session_response": self._payload_summary(
+                    state.cancel_session_response
+                ),
+            },
+            "bpp": {
+                "command_descriptions": list(state.bpp_command_descriptions),
+                "protected_command_descriptions": list(
+                    state.upp_protected_command_descriptions
+                ),
+                "layout_summary": self._summarize_bpp_layout_lines(
+                    list(state.last_bpp_layout_lines)
+                ),
+                "crypto_summary": self._summarize_bpp_crypto_lines(
+                    list(state.last_bpp_crypto_debug_lines)
+                ),
+                "debug_artifacts": {
+                    "pre_bsp_payload_bin_path": state.last_pre_bsp_payload_bin_path,
+                    "pre_bsp_payload_hex_path": state.last_pre_bsp_payload_hex_path,
+                },
+            },
+        }
+
+    def _print_last_operation_report(self, payload: dict[str, Any]) -> None:
+        if payload.get("session_initialized") is False:
+            print("[*] No local SCP11 session state is available yet.")
+            reason = str(payload.get("reason", "")).strip()
+            if len(reason) > 0:
+                print(f"    reason: {reason}")
+            return
+
+        session = payload.get("session", {})
+        selection = payload.get("selection", {})
+        targets = payload.get("targets", {})
+        responses = payload.get("responses", {})
+        bpp = payload.get("bpp", {})
+
+        print("\n--- Local SCP11 Explain Last ---")
+        print(f"Session open          : {'yes' if session.get('session_open') else 'no'}")
+        print(f"ISD-R selected        : {'yes' if session.get('isdr_selected') else 'no'}")
+        print(f"Active EID            : {session.get('active_eid') or '-'}")
+        print(f"Transaction ID        : {session.get('transaction_id_hex') or '-'}")
+        print(f"Card challenge        : {session.get('card_challenge_hex') or '-'}")
+        print(f"Server challenge      : {session.get('server_challenge_hex') or '-'}")
+        print(
+            f"Notifications synced  : {'yes' if session.get('load_notifications_synced') else 'no'}"
+        )
+        print(f"Allowed CI PKIDs      : {', '.join(selection.get('allowed_ci_pkids', [])) or '-'}")
+        print(f"Selected CI PKID      : {selection.get('selected_ci_pkid') or '-'}")
+        print(f"Auth certificate      : {selection.get('auth_certificate_path') or '-'}")
+        print(f"Auth selection rule   : {selection.get('auth_selection_reason') or '-'}")
+        print(f"PB certificate        : {selection.get('pb_certificate_path') or '-'}")
+        print(f"PB selection rule     : {selection.get('pb_selection_reason') or '-'}")
+        print(f"Local SM-DP+ address  : {selection.get('local_smdp_address') or '-'}")
+        print(f"Resolved profile      : {targets.get('resolved_profile_path') or '-'}")
+        if targets.get("resolved_profile_error"):
+            print(f"Profile resolution err: {targets.get('resolved_profile_error')}")
+        print(f"Resolved metadata     : {targets.get('resolved_metadata_path') or '-'}")
+        if targets.get("resolved_metadata_error"):
+            print(f"Metadata resolution err: {targets.get('resolved_metadata_error')}")
+        print("Response digests      :")
+        for key, row in responses.items():
+            label = key.replace("_", " ")
+            preview = row.get("preview_hex", "-")
+            size = int(row.get("len", 0))
+            print(f"  - {label:<28} {size:>5} bytes  {preview}")
+        command_rows = bpp.get("command_descriptions", [])
+        if isinstance(command_rows, list) and len(command_rows) > 0:
+            print("BPP commands          :")
+            for line in command_rows:
+                print(f"  - {line}")
+        protected_rows = bpp.get("protected_command_descriptions", [])
+        if isinstance(protected_rows, list) and len(protected_rows) > 0:
+            print("Protected commands    :")
+            for line in protected_rows:
+                print(f"  - {line}")
+        layout_rows = bpp.get("layout_summary", [])
+        if isinstance(layout_rows, list) and len(layout_rows) > 0:
+            print("BPP layout summary    :")
+            for line in layout_rows:
+                print(f"  - {line}")
+        crypto_rows = bpp.get("crypto_summary", [])
+        if isinstance(crypto_rows, list) and len(crypto_rows) > 0:
+            print("BPP crypto summary    :")
+            for line in crypto_rows:
+                print(f"  - {line}")
+        debug_artifacts = bpp.get("debug_artifacts", {})
+        if isinstance(debug_artifacts, dict):
+            bin_path = str(debug_artifacts.get("pre_bsp_payload_bin_path", "")).strip()
+            hex_path = str(debug_artifacts.get("pre_bsp_payload_hex_path", "")).strip()
+            if len(bin_path) > 0 or len(hex_path) > 0:
+                print("Debug artifacts       :")
+                if len(bin_path) > 0:
+                    print(f"  - pre_bsp_payload_bin: {bin_path}")
+                if len(hex_path) > 0:
+                    print(f"  - pre_bsp_payload_hex: {hex_path}")
 
     @staticmethod
     def _summarize_bpp_layout_lines(lines: List[str]) -> List[str]:
@@ -481,6 +812,10 @@ class LocalAccessShell:
         if len(cleaned) <= max_len:
             return cleaned
         return cleaned[:max_len] + "..."
+
+    @staticmethod
+    def _format_error_message(error: BaseException) -> str:
+        return str(error).strip() or error.__class__.__name__
 
     def _print_profile_state_response(self, action_label: str, response: bytes) -> None:
         print(f"[+] {action_label} completed. Last response: {len(response)} bytes.")
@@ -775,11 +1110,30 @@ class LocalAccessShell:
             header_color=ShellStyle.HEADER,
             end_color=ShellStyle.END,
         )
+        profiles_decode_error = str(snapshot.get("profiles_decode_error", "") or "").strip()
+        if len(profiles_decode_error) > 0:
+            print(f"[-] Profile metadata decode failed: {profiles_decode_error}")
+        configured_decode_error = str(snapshot.get("configured_decode_error", "") or "").strip()
+        if len(configured_decode_error) > 0:
+            print(f"[-] eUICC configured-data decode failed: {configured_decode_error}")
+
+    def _cmd_explain_last(self, arguments: list[str]) -> None:
+        filtered_arguments, output_mode = self._extract_output_mode(arguments)
+        if len(filtered_arguments) > 0:
+            raise ValueError("Usage: EXPLAIN-LAST [--json|--yaml]")
+        payload = self._build_last_operation_report()
+        if output_mode != "text":
+            self._print_structured_payload(payload, output_mode)
+            return
+        self._print_last_operation_report(payload)
 
     def _cmd_certs(self, arguments: list[str]) -> None:
+        filtered_arguments, output_mode = self._extract_output_mode(arguments)
+        if len(filtered_arguments) > 0:
+            raise ValueError("Usage: CERTS [--json|--yaml]")
         report = self.session.list_local_smdp_certificate_inventory()
-        if "--json" in arguments:
-            print(json.dumps(report, indent=2))
+        if output_mode != "text":
+            self._print_structured_payload(report, output_mode)
             return
 
         allowed = report.get("allowed_ci_pkids", [])
@@ -858,14 +1212,20 @@ class LocalAccessShell:
         print(f"[+] Metadata override set: {resolved_path}")
 
     def _cmd_metadata_lint(self, arguments: list[str]) -> None:
-        metadata_path = " ".join(arguments).strip()
-        report = self.session.lint_metadata(metadata_path=metadata_path)
+        filtered_arguments, output_mode = self._extract_output_mode(arguments)
+        metadata_path = " ".join(filtered_arguments).strip()
+        report = self._build_metadata_lint_payload(metadata_path=metadata_path)
+        if output_mode != "text":
+            self._print_structured_payload(report, output_mode)
+            return
         print("[+] Metadata lint passed.")
         print(f"    file: {report.get('metadata_path', '-')}")
         print(f"    StoreMetadataRequest len: {report.get('store_metadata_len', 0)}")
+        print(f"    StoreMetadataRequest hex: {report.get('store_metadata_preview_hex', '-')}")
         update_error = str(report.get("update_metadata_error", "") or "")
         if len(update_error) == 0:
             print(f"    UpdateMetadataRequest len: {report.get('update_metadata_len', 0)}")
+            print(f"    UpdateMetadataRequest hex: {report.get('update_metadata_preview_hex', '-')}")
         else:
             print(f"    UpdateMetadataRequest: not encodable ({update_error})")
         custom_tags = report.get("enabled_custom_tags", [])
@@ -1001,12 +1361,14 @@ class LocalAccessShell:
         print(f"\n{ShellStyle.BOLD}{ShellStyle.HEADER}Local SMDPP Command Groups{ShellStyle.END}")
         print("  Use HELP <command> for usage and alias details.")
         print("  Add --debug to card-facing commands for full raw APDU hex tracing.")
+        print("  Use --yaml when you want structured output without defaulting to JSON.")
+        print("  Use RECORD START/STOP to capture replayable commands plus APDU trace to file.")
         print("  Canonical command names are listed here; compatibility aliases still resolve.\n")
 
         self._print_help_section(
             "Session & Discovery",
             ShellStyle.CYAN,
-            ["CERTS", "DISCOVER", "STATUS", "LOAD-PROFILE"],
+            ["CERTS", "DISCOVER", "EXPLAIN-LAST", "STATUS", "LOAD-PROFILE"],
             alias_note="Aliases: SMDP-CERTS -> CERTS, INFO -> DISCOVER",
         )
         self._print_help_section(
@@ -1036,7 +1398,7 @@ class LocalAccessShell:
         self._print_help_section(
             "Shell",
             ShellStyle.WHITE,
-            ["HELP", "EXIT", "QA"],
+            ["RECORD", "HELP", "EXIT", "QA"],
             alias_note="Aliases: QUIT, Q -> EXIT",
         )
 
@@ -1045,43 +1407,68 @@ class LocalAccessShell:
         self._setup_readline()
         self._print_info_shield()
         self._cmd_help()
+        try:
+            while True:
+                try:
+                    raw_line = input(
+                        f"\n{ShellStyle.HEADER}[Local SMDPP] > {ShellStyle.END}"
+                    ).strip()
+                except EOFError:
+                    raw_line = "EXIT"
+                except KeyboardInterrupt:
+                    print("")
+                    raw_line = "EXIT"
 
-        while True:
-            try:
-                raw_line = input(
-                    f"\n{ShellStyle.HEADER}[Local SMDPP] > {ShellStyle.END}"
-                ).strip()
-            except EOFError:
-                raw_line = "EXIT"
-            except KeyboardInterrupt:
-                print("")
-                raw_line = "EXIT"
+                if len(raw_line) == 0:
+                    continue
 
-            if len(raw_line) == 0:
-                continue
+                parts = raw_line.split()
+                command = parts[0].upper()
+                arguments = parts[1:]
 
-            parts = raw_line.split()
-            command = parts[0].upper()
-            arguments = parts[1:]
-
-            try:
-                keep_running = self._execute_command(command, arguments)
-                if keep_running is False:
-                    return
-            except Exception as error:
-                print(f"[-] {error}")
+                try:
+                    keep_running = self._execute_command(
+                        command,
+                        arguments,
+                        raw_command=raw_line,
+                        source="interactive",
+                    )
+                    if keep_running is False:
+                        return
+                except Exception as error:
+                    print(f"[-] {self._format_error_message(error)}")
+        finally:
+            self._finalize_recording_on_exit()
 
     def run_commands(self, cmd_line: str) -> None:
         self._build_session()
-        for raw_command in self._split_batch_commands(cmd_line):
-            parts = raw_command.split()
-            if len(parts) == 0:
-                continue
-            command = parts[0].upper()
-            arguments = parts[1:]
-            keep_running = self._execute_command(command, arguments)
-            if keep_running is False:
-                break
+        had_error = False
+        try:
+            for raw_command in self._split_batch_commands(cmd_line):
+                parts = raw_command.split()
+                if len(parts) == 0:
+                    continue
+                command = parts[0].upper()
+                arguments = parts[1:]
+                try:
+                    keep_running = self._execute_command(
+                        command,
+                        arguments,
+                        raw_command=raw_command,
+                        source="batch",
+                    )
+                except QuitAllRequested:
+                    raise
+                except Exception as error:
+                    had_error = True
+                    print(f"[-] {self._format_error_message(error)}")
+                    continue
+                if keep_running is False:
+                    break
+        finally:
+            self._finalize_recording_on_exit()
+        if had_error:
+            raise SystemExit(1)
 
     @staticmethod
     def _split_batch_commands(cmd_line: str) -> list[str]:
@@ -1093,73 +1480,114 @@ class LocalAccessShell:
             commands.append(command_text)
         return commands
 
-    def _execute_command(self, command: str, arguments: list[str]) -> bool:
+    def _execute_command(
+        self,
+        command: str,
+        arguments: list[str],
+        *,
+        raw_command: str = "",
+        source: str = "interactive",
+    ) -> bool:
+        command = str(command or "").strip().upper()
+        canonical_command = self._canonical_command(command)
         filtered_arguments, debug = self._extract_debug_flag(arguments)
+        command_record: Optional[dict[str, Any]] = None
+        if canonical_command != "RECORD":
+            issued_command = str(raw_command or "").strip()
+            if len(issued_command) == 0:
+                issued_command = self._render_command_line(command, arguments)
+            replay_command = self._render_command_line(
+                canonical_command or command,
+                filtered_arguments,
+            )
+            command_record = self._recorder.begin_command(
+                raw_command=issued_command,
+                canonical_command=canonical_command or command,
+                replay_command=replay_command,
+                debug_enabled=debug,
+                source=source,
+            )
         previous_debug = None
         if debug:
             previous_debug = self._set_transport_debug(True)
         try:
-            if command in ("CERTS", "SMDP-CERTS"):
+            if canonical_command == "CERTS":
                 self._cmd_certs(filtered_arguments)
-                return True
-            if command in ("DISCOVER", "INFO"):
+            elif canonical_command == "DISCOVER":
                 self._cmd_discover()
-                return True
-            if command == "LOAD-PROFILE":
+            elif canonical_command == "EXPLAIN-LAST":
+                self._cmd_explain_last(filtered_arguments)
+            elif canonical_command == "LOAD-PROFILE":
                 self._cmd_load_profile(filtered_arguments)
-                return True
-            if command in ("ENABLE-PROFILE", "ENABLE"):
+            elif canonical_command == "ENABLE-PROFILE":
                 self._cmd_enable_profile(filtered_arguments)
-                return True
-            if command in ("DISABLE-PROFILE", "DISABLE"):
+            elif canonical_command == "DISABLE-PROFILE":
                 self._cmd_disable_profile(filtered_arguments)
-                return True
-            if command in ("DELETE-PROFILE", "DELETE"):
+            elif canonical_command == "DELETE-PROFILE":
                 self._cmd_delete_profile(filtered_arguments)
-                return True
-            if command == "STORE-METADATA":
+            elif canonical_command == "STORE-METADATA":
                 self._cmd_store_metadata(filtered_arguments)
-                return True
-            if command == "UPDATE-METADATA":
+            elif canonical_command == "UPDATE-METADATA":
                 self._cmd_update_metadata(filtered_arguments)
-                return True
-            if command == "STORE-METADATA-CUSTOM":
+            elif canonical_command == "STORE-METADATA-CUSTOM":
                 self._cmd_store_metadata_custom(filtered_arguments)
-                return True
-            if command == "STORE-METADATA-CUSTOM-ALL":
+            elif canonical_command == "STORE-METADATA-CUSTOM-ALL":
                 self._cmd_store_metadata_custom_all(filtered_arguments)
-                return True
-            if command == "PROFILE":
+            elif canonical_command == "PROFILE":
                 self._cmd_profile(filtered_arguments)
-                return True
-            if command in ("PROFILE-CLEAR", "PROFILE-RESET"):
+            elif canonical_command == "PROFILE-CLEAR":
                 self._cmd_profile_clear()
-                return True
-            if command == "METADATA":
+            elif canonical_command == "METADATA":
                 self._cmd_metadata(filtered_arguments)
-                return True
-            if command == "METADATA-LINT":
+            elif canonical_command == "METADATA-LINT":
                 self._cmd_metadata_lint(filtered_arguments)
-                return True
-            if command in ("METADATA-CLEAR", "METADATA-RESET"):
+            elif canonical_command == "METADATA-CLEAR":
                 self._cmd_metadata_clear()
-                return True
-            if command == "STATUS":
+            elif canonical_command == "RECORD":
+                self._cmd_record(filtered_arguments)
+            elif canonical_command == "STATUS":
                 self._print_status()
-                return True
-            if command == "HELP":
+            elif canonical_command == "HELP":
                 self._cmd_help(filtered_arguments)
-                return True
-            if command == "QA":
+            elif canonical_command == "QA":
                 self._close_session_quietly()
                 print("[*] Leaving local SCP11 shell.")
                 quit_all()
-            if command in ("EXIT", "QUIT", "Q"):
+            elif canonical_command == "EXIT":
                 self._close_session_quietly()
                 print("[*] Leaving local SCP11 shell.")
+                if command_record is not None:
+                    self._recorder.finish_command(command_record, success=True)
+                    command_record = None
                 return False
-            print(f"[-] Unknown command: {command}")
+            else:
+                print(f"[-] Unknown command: {command}")
+                if command_record is not None:
+                    self._recorder.finish_command(
+                        command_record,
+                        success=False,
+                        error=f"Unknown command: {command}",
+                    )
+                    command_record = None
+                return True
+            if command_record is not None:
+                self._recorder.finish_command(command_record, success=True)
+                command_record = None
             return True
+        except QuitAllRequested:
+            if command_record is not None:
+                self._recorder.finish_command(command_record, success=True)
+                command_record = None
+            raise
+        except Exception as error:
+            if command_record is not None:
+                self._recorder.finish_command(
+                    command_record,
+                    success=False,
+                    error=str(error),
+                )
+                command_record = None
+            raise
         finally:
             self._restore_transport_debug(previous_debug)
 
@@ -1202,6 +1630,10 @@ def entry_stdin() -> None:
 
 def run_standalone() -> None:
     parser = argparse.ArgumentParser(description="SCP11 local SM-DP+ shell")
+    add_debug_argument(
+        parser,
+        help_text="Enable verbose debug output for this local SCP11 session.",
+    )
     parser.add_argument(
         "--cmd",
         type=str,
@@ -1213,6 +1645,7 @@ def run_standalone() -> None:
         help="Read newline-separated commands from stdin for non-interactive execution",
     )
     args = parser.parse_args()
+    set_global_debug(bool(getattr(args, "debug", False)))
     if args.cmd:
         entry_cmd(args.cmd)
         return

@@ -37,3 +37,8 @@ Compatibility note:
   and `CERT.DPpb.ECDSA.der` / `SK.DPpb.ECDSA.pem` remain valid.
 - The DPauth pair is still required for local `AuthenticateServer`.
 - The DPpb pair remains optional, but is used when the local flow needs to sign download-side payloads such as `PrepareDownload`.
+
+Related operator docs:
+
+- `../README.md`
+- `../../../PROFILE_LIFECYCLE_CLI_CHEATSHEET.md`

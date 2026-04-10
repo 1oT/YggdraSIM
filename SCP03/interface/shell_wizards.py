@@ -527,7 +527,7 @@ class ShellInteractiveWizards :
                 is_one =True 
 
             if is_one :
-                shell .gp_ctrl .sgp22 .list_profiles ()
+                shell ._handle_list_profiles ()
                 return 
 
             is_two =False 
@@ -535,28 +535,28 @@ class ShellInteractiveWizards :
                 is_two =True 
 
             if is_two :
-                shell .gp_ctrl .sgp22 .run_sgp22_scan ()
+                shell ._handle_profile_scan ()
                 return 
 
             is_six =False 
             if action =='6':
                 is_six =True 
             if is_six :
-                shell .gp_ctrl .sgp22 .get_euicc_configured_data ()
+                shell ._handle_get_euicc_configured_data ()
                 return 
 
             is_seven =False 
             if action =='7':
                 is_seven =True 
             if is_seven :
-                shell .gp_ctrl .sgp22 .get_euicc_certs ()
+                shell ._handle_get_euicc_certs ()
                 return 
 
             is_eight =False 
             if action =='8':
                 is_eight =True 
             if is_eight :
-                shell .gp_ctrl .sgp22 .get_eid ()
+                shell ._handle_get_eid ()
                 return 
 
             is_nine =False 
@@ -593,24 +593,22 @@ class ShellInteractiveWizards :
                     print ("[-] Target required. Aborting.")
                     return 
 
-                resolved_target =shell ._resolve_mixed_aid (target )
-
                 if is_three :
-                    r =shell .gp_ctrl .sgp22 .enable_profile (resolved_target )
+                    r =shell ._handle_enable_profile (target )
                     is_r =False 
                     if r :
                         is_r =True 
                     if is_r :
                         shell ._handle_reset ()
                 if is_four :
-                    r =shell .gp_ctrl .sgp22 .disable_profile (resolved_target )
+                    r =shell ._handle_disable_profile (target )
                     is_r =False 
                     if r :
                         is_r =True 
                     if is_r :
                         shell ._handle_reset ()
                 if is_five :
-                    r =shell .gp_ctrl .sgp22 .delete_profile (resolved_target )
+                    r =shell ._handle_delete_profile (target )
                     is_r =False 
                     if r :
                         is_r =True 
@@ -622,21 +620,21 @@ class ShellInteractiveWizards :
             if action =='1':
                 is_one =True 
             if is_one :
-                shell .gp_ctrl .sgp22 .list_profiles ()
+                shell ._handle_list_profiles ()
                 return 
 
             is_two =False 
             if action =='2':
                 is_two =True 
             if is_two :
-                shell .gp_ctrl .sgp22 .run_sgp22_scan ()
+                shell ._handle_profile_scan ()
                 return 
 
             is_six =False 
             if action =='6':
                 is_six =True 
             if is_six :
-                shell .gp_ctrl .sgp22 .get_sgp32_all_data ()
+                shell ._handle_get_sgp32_all_data ()
                 return 
 
             is_seven =False 
@@ -673,24 +671,22 @@ class ShellInteractiveWizards :
                     print ("[-] Target required. Aborting.")
                     return 
 
-                resolved_target =shell ._resolve_mixed_aid (target )
-
                 if is_three :
-                    r =shell .gp_ctrl .sgp22 .enable_profile (resolved_target )
+                    r =shell ._handle_enable_profile (target )
                     is_r =False 
                     if r :
                         is_r =True 
                     if is_r :
                         shell ._handle_reset ()
                 if is_four :
-                    r =shell .gp_ctrl .sgp22 .disable_profile (resolved_target )
+                    r =shell ._handle_disable_profile (target )
                     is_r =False 
                     if r :
                         is_r =True 
                     if is_r :
                         shell ._handle_reset ()
                 if is_five :
-                    r =shell .gp_ctrl .sgp22 .delete_profile (resolved_target )
+                    r =shell ._handle_delete_profile (target )
                     is_r =False 
                     if r :
                         is_r =True 
@@ -703,6 +699,7 @@ class ShellInteractiveWizards :
                 is_one_m2m =True 
 
             if is_one_m2m :
+                shell ._set_prompt_context ("ISD-R")
                 shell .gp_ctrl .sgp22 .run_sgp02_scan ()
 
     @staticmethod 
@@ -745,6 +742,7 @@ class ShellInteractiveWizards :
         print (f"\n[*] Executing {context} AUTH...")
         if is_gsm :
             shell .sec_ctrl .run_auth (rand_val ,app_context ="GSM")
+            shell ._set_prompt_context ("GSM")
 
         is_not_gsm =False 
         if is_gsm ==False :
@@ -752,6 +750,7 @@ class ShellInteractiveWizards :
 
         if is_not_gsm :
             shell .sec_ctrl .run_auth (rand_val ,autn_val ,app_context =context )
+            shell ._set_prompt_context (context )
 
     @staticmethod 
     def run_config_wizard (shell )->None :

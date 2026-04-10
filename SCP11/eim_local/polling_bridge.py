@@ -1,4 +1,5 @@
 import base64
+import binascii
 import json
 import os
 import socketserver
@@ -412,12 +413,19 @@ class LocalizedPollingBridge:
             self._smdp_server = server
 
     def _resolve_eim_tls_material(self) -> tuple[str, str]:
+        certificate_setting = self.session._effective_trusted_tls_cert_path()
+        private_key_setting = str(self.session.eim_identity.get("tls_private_key_path", "")).strip()
+        if len(certificate_setting) == 0 or len(private_key_setting) == 0:
+            raise RuntimeError(
+                "Local eIM TLS material is not configured. "
+                "Set trusted_tls_cert_path and tls_private_key_path in eim_identity.json."
+            )
         certificate_path = self.session._normalize_user_path(
-            self.session._effective_trusted_tls_cert_path(),
+            certificate_setting,
             base_dir=self.cfg.EIM_CERTS_DIR,
         )
         private_key_path = self.session._normalize_user_path(
-            str(self.session.eim_identity.get("tls_private_key_path", "")).strip(),
+            private_key_setting,
             base_dir=self.cfg.EIM_CERTS_DIR,
         )
         pem_path = self._ensure_pem_certificate_path(certificate_path, role="eim")
@@ -623,7 +631,7 @@ class LocalizedPollingBridge:
 
     def _handle_smdp_initiate_authentication(self, payload: dict[str, Any]) -> dict[str, Any]:
         self.session._ensure_local_material_loaded()
-        euicc_challenge = self.session._decode_string_payload(str(payload.get("euiccChallenge", "")).strip())
+        euicc_challenge = self._decode_flexible_bytes(str(payload.get("euiccChallenge", "")).strip())
         if len(euicc_challenge) == 0:
             raise ValueError("euiccChallenge is missing or empty.")
         smdp_address = str(payload.get("smdpAddress", "")).strip()
@@ -787,13 +795,54 @@ class LocalizedPollingBridge:
             offset = next_offset
         return b""
 
-    def _decode_flexible_bytes(self, value: str) -> bytes:
-        return self.session._decode_string_payload(value)
+    @staticmethod
+    def _looks_like_hex(value: str) -> bool:
+        text = str(value or "").strip()
+        if len(text) == 0 or len(text) % 2 != 0:
+            return False
+        try:
+            bytes.fromhex(text)
+        except ValueError:
+            return False
+        return True
 
-    def _b64encode(self, value: bytes) -> str:
-        if len(value) == 0:
+    def _decode_flexible_bytes(self, value: str) -> bytes:
+        text = str(value or "").strip()
+        if len(text) == 0:
+            return b""
+        if self._looks_like_hex(text):
+            return bytes.fromhex(text)
+        try:
+            return base64.b64decode(text.encode("utf-8"), validate=True)
+        except (binascii.Error, ValueError):
+            return text.encode("utf-8")
+
+    @staticmethod
+    def _coerce_bytes(value: Any) -> bytes:
+        if value is None:
+            return b""
+        if isinstance(value, bytes):
+            return value
+        if isinstance(value, bytearray):
+            return bytes(value)
+        dump_method = getattr(value, "dump", None)
+        if callable(dump_method):
+            try:
+                dumped = dump_method()
+            except Exception:
+                dumped = b""
+            if isinstance(dumped, bytes):
+                return dumped
+        try:
+            return bytes(value)
+        except Exception:
+            return b""
+
+    def _b64encode(self, value: Any) -> str:
+        raw_value = self._coerce_bytes(value)
+        if len(raw_value) == 0:
             return ""
-        return base64.b64encode(value).decode("ascii")
+        return base64.b64encode(raw_value).decode("ascii")
 
     def _endpoint_hostname(self, endpoint: str) -> str:
         text = str(endpoint).strip()

@@ -667,7 +667,7 @@ def transcode_sidecar_paths(
     source_profile_path: Path,
     transcode_root: Path | None = None,
     source_root: Path | None = None,
-) -> tuple[Path, Path]:
+) -> tuple[Path, Path, Path]:
     """
     Resolve TRANSCODE-TUI persist paths for the opened profile input.
 
@@ -677,7 +677,8 @@ def transcode_sidecar_paths(
     file lives under it, the relative subdirectory layout is preserved below the dedicated
     transcode folder.
 
-    Returns ``(json_path, der_path)`` for the JSON editor snapshot and last re-encoded DER.
+    Returns ``(json_path, der_path, txt_path)`` for the JSON editor snapshot, the
+    last re-encoded DER, and a plain uppercase hex text export of the DER payload.
     """
     src = Path(source_profile_path).resolve()
     output_parent = src.parent
@@ -695,7 +696,8 @@ def transcode_sidecar_paths(
                 output_parent = output_parent / relative_parent
     json_path = output_parent / f"{output_stem}.transcode.json"
     der_path = output_parent / f"{output_stem}.transcode.der"
-    return (json_path, der_path)
+    txt_path = output_parent / f"{output_stem}.transcode.txt"
+    return (json_path, der_path, txt_path)
 
 
 def parse_editor_json(text: str) -> dict[str, Any]:

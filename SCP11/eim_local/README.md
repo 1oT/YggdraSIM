@@ -21,6 +21,25 @@ the simpler shell.
 - standalone: `python -m SCP11.eim_local`
 - launcher: use the Local eIM entry in `main/main.py`
 
+Batch automation examples:
+
+```bash
+python -m SCP11.eim_local --cmd "STATUS; PATHS; LIST; DISCOVER; EXIT"
+python -m SCP11.eim_local --cmd "HOTFOLDER-LIST --json; POLL-CAMPAIGN --until-empty --max-cycles 20 --json; EXIT"
+```
+
+```bash
+python -m SCP11.eim_local --stdin <<'EOF'
+IPAE-AUTHENTICATE EIM-TEST-001
+HANDOVER-STATUS
+IPAE-DOWNLOAD Workspace/LocalEIM/profile/test_profile.txt EIM-TEST-001
+EXIT
+EOF
+```
+
+Use `../../PROFILE_LIFECYCLE_CLI_CHEATSHEET.md` for ready-to-paste lifecycle,
+handover, and polling sequences.
+
 ## Three execution paths
 
 Direct Auth:
@@ -34,6 +53,12 @@ Localized `IPAd` polling:
 - use the same relay `IPAd` download flow as the live/test shells
 - intercept the eIM / SM-DP+ target locally
 - terminate and acknowledge the relay exchange internally instead of externally
+
+Simulator card note:
+
+- `Workspace/LocalEIM/eim_identity.json` defines the local eIM / SM-DP+ side for this module
+- `Workspace/SIMCARD/eim_identity.json` defines the simulated card's default BF55 eIM identity
+- use the wrapper `eIM identity` setting or `--sim-eim-identity` when you want the simulated card to advertise a different eIM without changing the Local eIM shell identity
 
 Localized `IPAe` polling:
 
@@ -118,15 +143,19 @@ Primary mutable state:
 
 Dedicated file roots:
 
-- `SCP11/eim_local/profile`
-- `SCP11/eim_local/profile/metadata`
-- `SCP11/eim_local/eim_packages`
-- `SCP11/eim_local/certs/eim`
-- `SCP11/eim_local/eim_identity.json`
+- `Workspace/LocalEIM/profile`
+- `Workspace/LocalEIM/profile/metadata`
+- `Workspace/LocalEIM/eim_packages`
+- `Workspace/LocalEIM/certs/eim`
+- `Workspace/LocalEIM/eim_identity.json`
+
+Related simulator file:
+
+- `Workspace/SIMCARD/eim_identity.json`
 
 Compatibility file:
 
-- `SCP11/eim_local/eim_runtime_state.json`
+- `Workspace/LocalEIM/eim_runtime_state.json`
 
 Runtime-root note:
 
@@ -142,7 +171,7 @@ Effects:
 
 ## Identity and package model
 
-Identity defaults come from `eim_identity.json`, including:
+Identity defaults for the Local eIM shell come from `eim_identity.json`, including:
 
 - eIM ID
 - eIM FQDN
@@ -150,24 +179,31 @@ Identity defaults come from `eim_identity.json`, including:
 - endpoint addresses
 - certificate paths
 
+Card-side distinction:
+
+- the simulated card does not read `Workspace/LocalEIM/eim_identity.json` as its BF55 default
+- the simulator uses `Workspace/SIMCARD/eim_identity.json` unless a stronger card-side override such as `Workspace/SIMCARD/isdr_config.json` with `eim_entries` is applied
+
 Package templates live under:
 
-- `SCP11/eim_local/eim_packages/templates`
+- `Workspace/LocalEIM/eim_packages/templates`
 
 Seeded fake eIM peer-provisioning artifacts live under:
 
-- `SCP11/eim_local/eim_packages/fake_eim_add_eim_package.json`
-- `SCP11/eim_local/eim_packages/fake_eim_peer_addition_info.json`
+- `Workspace/LocalEIM/eim_packages/fake_eim_add_eim_package.json`
+- `Workspace/LocalEIM/eim_packages/fake_eim_peer_addition_info.json`
 
 Operational queue roots live under:
 
-- `SCP11/eim_local/eim_packages/fixtures`
-- `SCP11/eim_local/eim_packages/hotfolder`
+- `Workspace/LocalEIM/eim_packages/fixtures`
+- `Workspace/LocalEIM/eim_packages/hotfolder`
 
 ## Recommended reading order
 
 1. this overview for module selection and execution paths
-2. `SCP11/eim_local/GUIDE.md` for operator workflows
-3. `SCP11/local_access/README.md` for the baseline local SCP11 behavior this
+2. `../../PROFILE_LIFECYCLE_CLI_CHEATSHEET.md` for non-interactive lifecycle
+   and poll recipes
+3. `SCP11/eim_local/GUIDE.md` for operator workflows
+4. `SCP11/local_access/README.md` for the baseline local SCP11 behavior this
    module extends
-4. `SCP11/eim_local/eim_packages/templates/README.md` for template inventory
+5. `Workspace/LocalEIM/eim_packages/templates/README.md` for template inventory

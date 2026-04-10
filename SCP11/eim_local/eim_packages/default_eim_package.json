@@ -46,7 +46,7 @@
     "matching_id": "EIM-FIRST-TEST-FIXTURE",
     "transaction_id_hex": "10000000000000000000000000000001",
     "profile_path": "SCP11/eim_local/profile/test_profile.txt",
-    "cert_der_path": "SCP11/eim_local/certs/eim/CERT_S_EIMsign_YGGDRASIM_ACCEPTED.der",
+    "cert_der_path": "/path/to/local_eim_signing_cert.pem",
     "smdp_address": "yggdrasim.smdpp.test.1ot.com",
     "bip_endpoints": {
       "eim": "https://yggdrasim.eim.test.1ot.com/gsma/rsp2/asn1",

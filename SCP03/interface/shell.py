@@ -77,6 +77,7 @@ class ShellDispatcher :
 
         self ._initialize_controllers ()
         self .prompt_str =""
+        self ._prompt_context_label =""
         self ._update_prompt_state ()
 
         self .guide_topics =['GP','ETSI','GSMA','INSTALL','SECURITY','OTA','CONFIG','SAIP','SUCI','CLI']
@@ -720,6 +721,125 @@ class ShellDispatcher :
 
         self .gp_ctrl .store_data (data ,p1 ,p2 )
 
+    def _clear_prompt_context (self )->None :
+        self ._prompt_context_label =""
+
+    def _set_prompt_context (self ,label :str )->None :
+        self ._prompt_context_label =str (label or "").strip ()
+
+    def _clear_prompt_context_tracking (self )->None :
+        self ._clear_prompt_context ()
+        fs_ctrl =getattr (self ,'fs_ctrl',None )
+        if fs_ctrl is None :
+            return
+        fs_ctrl .current_path_hint =""
+
+    def _context_label_from_aid (self ,aid_value :Any )->str :
+        cleaned =""
+        if isinstance (aid_value ,(bytes ,bytearray ,memoryview )):
+            cleaned =bytes (aid_value ).hex ().upper ()
+        else :
+            cleaned =str (aid_value or "").strip ().replace (" ","").upper ()
+        if len (cleaned )==0 :
+            return ""
+
+        alias_name =None
+        try :
+            alias_name =self .aid_lookup .get (bytes .fromhex (cleaned ))
+        except Exception :
+            alias_name =None
+        if alias_name :
+            return str (alias_name )
+
+        if cleaned =="A0000005591010FFFFFFFF8900000100":
+            return "ISD-R"
+        if cleaned =="A0000005591010FFFFFFFF8900000200":
+            return "ECASD"
+        return cleaned
+
+    def _context_label_from_fid (self ,fid_value :str )->str :
+        cleaned =str (fid_value or "").strip ().replace (" ","").upper ()
+        if len (cleaned )==0 :
+            return ""
+        if cleaned =="3F00":
+            return "MF"
+
+        matches =[]
+        fs_ctrl =getattr (self ,'fs_ctrl',None )
+        fid_map =getattr (fs_ctrl ,'fid_map',{})
+        for name ,values in fid_map .items ():
+            normalized_values =values
+            if isinstance (values ,list )==False :
+                normalized_values =[values ]
+            for candidate in normalized_values :
+                if str (candidate or "").strip ().upper ()==cleaned :
+                    matches .append (str (name ))
+                    break
+
+        if len (matches )==0 :
+            return cleaned
+
+        if "MF"in matches :
+            return "MF"
+        for prefix in ["ADF_","EF_"]:
+            for name in matches :
+                if name .startswith (prefix ):
+                    return name
+        return matches [0 ]
+
+    def _context_label_from_selection (self ,selected_value :str )->str :
+        cleaned =str (selected_value or "").strip ().upper ()
+        if len (cleaned )==0 :
+            return ""
+        if "/"in cleaned :
+            return cleaned
+        if len (cleaned )>4 :
+            return self ._context_label_from_aid (cleaned )
+        return self ._context_label_from_fid (cleaned )
+
+    def _current_prompt_context (self )->str :
+        label =str (getattr (self ,'_prompt_context_label',"")or "").strip ()
+        if len (label )>0 :
+            return label
+        fs_ctrl =getattr (self ,'fs_ctrl',None )
+        path_hint =str (getattr (fs_ctrl ,'current_path_hint',"")or "").strip ()
+        if len (path_hint )>0 :
+            return self ._context_label_from_selection (path_hint )
+        return ""
+
+    def _set_prompt_context_from_gp_target (self ,target_aid_hex :Optional [str ]=None )->None :
+        target =target_aid_hex
+        has_target =False
+        if target is not None :
+            if len (str (target ).strip ())>0 :
+                has_target =True
+        if has_target :
+            self ._set_prompt_context (self ._context_label_from_aid (target ))
+            return
+
+        gp_ctrl =getattr (self ,'gp_ctrl',None )
+        aid_bytes =getattr (gp_ctrl ,'target_aid',b"")
+        self ._set_prompt_context (self ._context_label_from_aid (aid_bytes ))
+
+    def _set_prompt_context_from_fs_state (self ,fallback :str ="")->None :
+        fs_ctrl =getattr (self ,'fs_ctrl',None )
+        path_hint =str (getattr (fs_ctrl ,'current_path_hint',"")or "").strip ()
+        if len (path_hint )>0 :
+            self ._set_prompt_context (self ._context_label_from_selection (path_hint ))
+            return
+
+        fallback_text =str (fallback or "").strip ()
+        if len (fallback_text )>0 :
+            self ._set_prompt_context (self ._context_label_from_selection (fallback_text ))
+            return
+
+        current_fid =str (getattr (fs_ctrl ,'current_fid',"")or "").strip ()
+        if len (current_fid )>0 :
+            self ._set_prompt_context (self ._context_label_from_selection (current_fid ))
+            return
+
+        self ._clear_prompt_context ()
+
     def _update_prompt_state (self ):
         is_auth =False 
         has_tp =False 
@@ -743,8 +863,13 @@ class ShellDispatcher :
         if is_auth ==False :
             is_not_auth =True 
 
+        context_label =self ._current_prompt_context ()
+
         if is_not_auth :
-            self .prompt_str =f"\n{Config.Colors.CYAN}[APDU] > {Config.Colors.ENDC}"
+            prompt_label ="APDU"
+            if len (context_label )>0 :
+                prompt_label =f"APDU -> {context_label}"
+            self .prompt_str =f"\n{Config.Colors.CYAN}[{prompt_label}] > {Config.Colors.ENDC}"
 
         if is_auth :
             current_aid =self .gp_ctrl .target_aid 
@@ -762,7 +887,13 @@ class ShellDispatcher :
             if has_name :
                 display =name 
 
-            self .prompt_str =f"\n{Config.Colors.GREEN}[{protocol_name}:{display}] > {Config.Colors.ENDC}"
+            prompt_label =f"{protocol_name}:{display}"
+            if len (context_label )>0 :
+                context_upper =context_label .upper ()
+                if context_upper !=display .upper ()and context_upper !=prompt_label .upper ():
+                    prompt_label =f"{prompt_label} -> {context_label}"
+
+            self .prompt_str =f"\n{Config.Colors.GREEN}[{prompt_label}] > {Config.Colors.ENDC}"
 
     def _handle_auth (self ):
         self ._handle_auth_scp03 ()
@@ -773,6 +904,7 @@ class ShellDispatcher :
             is_success =True 
 
         if is_success :
+            self ._set_prompt_context_from_gp_target ()
             self ._update_prompt_state ()
 
     def _handle_auth_scp02 (self ):
@@ -781,6 +913,7 @@ class ShellDispatcher :
             is_success =True 
 
         if is_success :
+            self ._set_prompt_context_from_gp_target ()
             self ._update_prompt_state ()
 
     def _handle_logout (self ):
@@ -953,7 +1086,32 @@ class ShellDispatcher :
         did_select =self .fs_ctrl .select (arg_line )
         if did_select ==False :
             return 
+        self ._set_prompt_context_from_fs_state (arg_line )
         self ._maybe_read_ara_rules_for_current_selection (arg_line )
+
+    def _handle_scan_tree (self )->None :
+        self ._clear_prompt_context_tracking ()
+        self .fs_ctrl .scan_tree ()
+        self .fs_ctrl .current_path_hint ="MF"
+        self ._set_prompt_context_from_fs_state ("MF")
+
+    def _handle_read_binary (self ,arg_line :str ="")->None :
+        normalized_arg =str (arg_line or "").strip ()
+        if len (normalized_arg )>0 :
+            self .fs_ctrl .read_binary (normalized_arg )
+            self ._set_prompt_context_from_fs_state (normalized_arg )
+            return
+        self .fs_ctrl .read_binary ()
+        self ._set_prompt_context_from_fs_state ()
+
+    def _handle_read_record (self ,arg_line :str )->None :
+        normalized_arg =str (arg_line or "").strip ()
+        self .fs_ctrl .read_record (normalized_arg )
+        path_hint =""
+        parts =normalized_arg .split ()
+        if len (parts )>1 :
+            path_hint =parts [1 ]
+        self ._set_prompt_context_from_fs_state (path_hint )
 
     def _handle_install_selectable (self ,arg_line ):
         parts =arg_line .split ()
@@ -1019,7 +1177,51 @@ class ShellDispatcher :
         if has_arg :
             target =self ._resolve_mixed_aid (arg )
 
+        self ._set_prompt_context_from_gp_target (target )
         self .gp_ctrl .get_keys_info (target_aid_hex =target )
+
+    def _handle_registry (self ,kind :str )->None :
+        self ._set_prompt_context_from_gp_target ()
+        self .gp_ctrl .list_registry (kind )
+
+    def _handle_list_profiles (self )->None :
+        self ._set_prompt_context ("ISD-R")
+        self .gp_ctrl .sgp22 .list_profiles ()
+
+    def _handle_profile_scan (self )->None :
+        self ._set_prompt_context ("ISD-R")
+        self .gp_ctrl .sgp22 .run_sgp22_scan ()
+
+    def _handle_get_euicc_configured_data (self )->None :
+        self ._set_prompt_context ("ISD-R")
+        self .gp_ctrl .sgp22 .get_euicc_configured_data ()
+
+    def _handle_get_euicc_certs (self )->None :
+        self ._set_prompt_context ("ISD-R")
+        self .gp_ctrl .sgp22 .get_euicc_certs ()
+
+    def _handle_get_eid (self )->None :
+        self ._set_prompt_context ("ISD-R")
+        self .gp_ctrl .sgp22 .get_eid ()
+
+    def _handle_get_sgp32_all_data (self )->None :
+        self ._set_prompt_context ("ISD-R")
+        self .gp_ctrl .sgp22 .get_sgp32_all_data ()
+
+    def _handle_enable_profile (self ,target :str )->bool :
+        resolved_target =self ._resolve_mixed_aid (target )
+        self ._set_prompt_context ("ISD-R")
+        return bool (self .gp_ctrl .sgp22 .enable_profile (resolved_target ))
+
+    def _handle_disable_profile (self ,target :str )->bool :
+        resolved_target =self ._resolve_mixed_aid (target )
+        self ._set_prompt_context ("ISD-R")
+        return bool (self .gp_ctrl .sgp22 .disable_profile (resolved_target ))
+
+    def _handle_delete_profile (self ,target :str )->bool :
+        resolved_target =self ._resolve_mixed_aid (target )
+        self ._set_prompt_context ("ISD-R")
+        return bool (self .gp_ctrl .sgp22 .delete_profile (resolved_target ))
 
     def _build_euicc_export_report (self ,standard :str ="SGP.32")->Dict :
         report =self .gp_ctrl .sgp22 .get_euicc_report_extended (standard =standard )
@@ -1490,6 +1692,7 @@ class ShellDispatcher :
         from SCP03 .core .decoders import AdvancedDecoders 
         from SCP03 .core .utils import TlvParser 
         ECASD_AID ="A0000005591010FFFFFFFF8900000200"
+        self ._set_prompt_context ("ECASD")
         print (f"{Config.Colors.CYAN}[*] Selecting ECASD...{Config.Colors.ENDC}")
         self .transport .transmit (f"00A40400{len(ECASD_AID)//2:02X}{ECASD_AID}",silent =True )
         cert_tags =[("5A","EID"),("45","CIN"),("42","IIN"),("E0","Key Info"),("7F21","Certificate")]
@@ -1565,6 +1768,7 @@ class ShellDispatcher :
 
         if is_reset_ok :
             self .transport .reset_session_state ()
+            self ._clear_prompt_context_tracking ()
 
             print (f"{Config.Colors.GREEN}[+] Reset Successful.{Config.Colors.ENDC}")
 
@@ -1574,6 +1778,7 @@ class ShellDispatcher :
                     is_auth_success =True 
 
                 if is_auth_success :
+                    self ._set_prompt_context_from_gp_target ()
                     self ._update_prompt_state ()
 
             is_not_auth =False 
@@ -1973,6 +2178,9 @@ class ShellDispatcher :
                 if has_payload :
                     selected_hex =apdu [5 :5 +lc ].hex ().upper ()
                     self .fs_ctrl .current_fid =selected_hex 
+                    context_label =self ._context_label_from_selection (selected_hex )
+                    self .fs_ctrl .current_path_hint =context_label 
+                    self ._set_prompt_context (context_label )
 
             has_data =False 
             if data :
@@ -2208,6 +2416,7 @@ class ShellDispatcher :
         self ._apply_inventory_profile_for_identifiers (self .current_iccid ,self .current_eid ,announce =True )
         self .transport .reset ()
         self .fs_ctrl .current_fid ="3F00"
+        self ._clear_prompt_context_tracking ()
         print ("="*40 +"\n")
 
     def _print_atr_details (self ):
@@ -2230,6 +2439,7 @@ class ShellDispatcher :
                 print (line )
         except Exception as e :
             print (f"{Config.Colors.FAIL}[!] ATR Parse Error: {e}{Config.Colors.ENDC}")
+        self ._clear_prompt_context_tracking ()
         print ("")
 
     @staticmethod
@@ -2677,6 +2887,8 @@ class ShellDispatcher :
 
         if is_inactive :
             print (f"{Config.Colors.WARNING}[!] No active secure session.{Config.Colors.ENDC}")
+        if is_active :
+            self ._set_prompt_context_from_gp_target ()
         self ._update_prompt_state ()
 
     def _exit (self ):
@@ -2788,6 +3000,46 @@ class ShellDispatcher :
 
         self ._print_card_info ()
         self ._update_prompt_state ()
+
+    def _run_stk_shell (self ,arg_line :str ="")->None :
+        from SCP03 .interface .stk_shell import StkShell
+
+        has_tp =False
+        if self .transport :
+            has_tp =True
+        if has_tp ==False :
+            print (f"{Config.Colors.FAIL}[-] No reader connected.{Config.Colors.ENDC}")
+            return
+
+        was_authenticated =False
+        if self .transport .session :
+            if self .transport .session .is_authenticated :
+                was_authenticated =True
+        if was_authenticated :
+            print (
+                f"{Config.Colors.WARNING}[!] Entering STK mode will close the active secure session "
+                f"and use plain APDUs.{Config.Colors.ENDC}"
+            )
+
+        stk_shell =StkShell (self .transport ,debug =self .debug_mode )
+        try :
+            clean_arg =str (arg_line or "").strip ()
+            if len (clean_arg )>0 :
+                stk_shell .run_commands (clean_arg )
+            else :
+                stk_shell .run ()
+        finally :
+            try :
+                self .transport .reset_session_state ()
+            except Exception :
+                pass
+            try :
+                self .fs_ctrl .current_fid =None
+                self .fs_ctrl .current_fcp ={}
+            except Exception :
+                pass
+            self ._clear_prompt_context_tracking ()
+            self ._update_prompt_state ()
 
     def do_dump_fs (self ,arg :str ="")->None :
         import os 

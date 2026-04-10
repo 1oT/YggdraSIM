@@ -3,6 +3,7 @@ import base64
 import copy
 import unittest
 from dataclasses import dataclass
+from unittest import mock
 
 from asn1crypto import core, x509
 from cryptography import x509 as crypto_x509
@@ -10,6 +11,8 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.x509.oid import NameOID
 
+import SCP11.live.pysim_support as live_pysim_support
+import SCP11.test.pysim_support as test_pysim_support
 from SCP11.asn1_registry import ASN1Registry
 from SCP11.models import BACKEND_MODE_LOCAL_SGP26, EimPollRequest, EimPollResponse
 from SCP11.orchestrator import SGP22Orchestrator
@@ -88,6 +91,7 @@ class FakeApduChannel:
         notification_retrieve_response: bytes = b"",
         euicc_package_result_list_response: bytes = b"",
         load_bpp_response: bytes = bytes.fromhex("BF3700"),
+        load_bpp_response_sequence = None,
         eim_configuration_response: bytes = b"",
         configured_data_response: bytes = b"",
         euicc_info2_response: bytes = bytes.fromhex("BF2200"),
@@ -102,6 +106,7 @@ class FakeApduChannel:
         self.notification_retrieve_response = notification_retrieve_response
         self.euicc_package_result_list_response = euicc_package_result_list_response
         self.load_bpp_response = load_bpp_response
+        self.load_bpp_response_sequence = list(load_bpp_response_sequence or [])
         self.eim_configuration_response = eim_configuration_response
         self.configured_data_response = configured_data_response
         self.euicc_info2_response = euicc_info2_response
@@ -114,11 +119,11 @@ class FakeApduChannel:
         self.send_calls.append((log_name, apdu))
         if "GetEuiccInfo1" in log_name:
             return bytes.fromhex("BF2000")
-        if "EIM: GetEuiccConfiguredData" in log_name:
+        if "EuiccConfiguredData" in log_name:
             return self.configured_data_response
-        if "EIM: GetEimConfigurationData" in log_name:
+        if "EimConfigurationData" in log_name:
             return self.eim_configuration_response
-        if "EIM: GetEuiccInfo2" in log_name:
+        if "GetEuiccInfo2" in log_name:
             return self.euicc_info2_response
         if "GetCerts" in log_name:
             return self.certs_response
@@ -126,12 +131,12 @@ class FakeApduChannel:
             return self.notification_retrieve_response
         if "RetrieveEuiccPackageResults" in log_name:
             return self.euicc_package_result_list_response
-        if "EIM: GetEID" in log_name:
+        if "GetEID" in log_name:
             return self.eid_response
         if "GetEuiccChallenge" in log_name:
             return bytes.fromhex("AA55AA55AA55AA55AA55AA55AA55AA55")
         if "DOWNLOAD: CancelSession" in log_name:
-            return bytes.fromhex("BF4600")
+            return bytes.fromhex("BF4103810102")
         if "ListNotifications" in log_name:
             return self.notification_list_response
         if "RetrieveNotification" in log_name:
@@ -141,6 +146,8 @@ class FakeApduChannel:
         if "LoadBoundProfilePackage" in log_name:
             if self.fail_load:
                 raise IOError("APDU Failed: 6982")
+            if len(self.load_bpp_response_sequence) > 0:
+                return self.load_bpp_response_sequence.pop(0)
             return self.load_bpp_response
         if "EIM: RelayPackage" in log_name:
             return self.eim_package_response
@@ -222,6 +229,34 @@ class FakeApduChannel:
         choice_bytes = choice.dump()
         outer = bytes.fromhex("BF38") + encode_der_length(len(choice_bytes)) + choice_bytes
         return outer
+
+
+class StkBootstrapRetryApduChannel(FakeApduChannel):
+    def __init__(self):
+        super().__init__()
+        self._fail_info1_once = True
+
+    def send(self, apdu: bytes, log_name: str) -> bytes:
+        if log_name == "HANDSHAKE: GetEuiccInfo1" and self._fail_info1_once:
+            self.send_calls.append((log_name, apdu))
+            self._fail_info1_once = False
+            raise IOError("APDU Failed: 6985")
+        if "[STK MODE TERMINAL CAPABILITY]" in log_name:
+            self.send_calls.append((log_name, apdu))
+            return b""
+        if "[STK MODE SELECT ISD-R]" in log_name:
+            self.send_calls.append((log_name, apdu))
+            return b""
+        if "[STK MODE TERMINAL PROFILE]" in log_name:
+            self.send_calls.append((log_name, apdu))
+            return b""
+        if "[STK MODE CH1]" in log_name and "GetEuiccInfo1" in log_name:
+            self.send_calls.append((log_name, apdu))
+            return bytes.fromhex("BF2000")
+        if "[STK MODE CH1]" in log_name and "GetEuiccChallenge" in log_name:
+            self.send_calls.append((log_name, apdu))
+            return bytes.fromhex("AA55AA55AA55AA55AA55AA55AA55AA55")
+        return super().send(apdu, log_name)
 
 
 @dataclass
@@ -315,6 +350,46 @@ class OrchestratorFlowTests(unittest.TestCase):
         self.assertTrue(len(orchestrator.state.euicc_signature1) == 64)
         self.assertTrue(len(orchestrator.state.prepare_download_response_b64) > 0)
 
+    def test_authentication_seed_retries_with_stk_mode_after_6985(self):
+        apdu_channel = StkBootstrapRetryApduChannel()
+        orchestrator = SGP22Orchestrator(
+            cfg=FakeCfg(),
+            apdu_channel=apdu_channel,
+            profile_provider=None,
+        )
+        mocked_auth = mock.Mock(return_value={"provider": "mock"})
+        orchestrator._initiate_authentication_with_provider = mocked_auth
+
+        orchestrator._phase_connect()
+        auth_seed = orchestrator._phase_authentication_seed(
+            matching_id="MATCH-6985",
+            smdp_address="rsp.example.com",
+        )
+
+        mocked_auth.assert_called_once_with(bytes.fromhex("BF2000"), smdp_address="rsp.example.com")
+        self.assertEqual(auth_seed["provider"], "mock")
+        self.assertEqual(auth_seed["matching_id"], "MATCH-6985")
+        self.assertEqual(
+            orchestrator.state.card_challenge,
+            bytes.fromhex("AA55AA55AA55AA55AA55AA55AA55AA55"),
+        )
+        self.assertEqual(
+            [name for name, _ in apdu_channel.send_calls],
+            [
+                "INIT: TERMINAL CAPABILITY",
+                "INIT: SELECT ISD-R",
+                "HANDSHAKE: GetEuiccInfo1",
+                "HANDSHAKE: GetEuiccInfo1 [STK MODE TERMINAL CAPABILITY]",
+                "HANDSHAKE: GetEuiccInfo1 [STK MODE SELECT ISD-R]",
+                "HANDSHAKE: GetEuiccInfo1 [STK MODE TERMINAL PROFILE]",
+                "HANDSHAKE: GetEuiccInfo1 [STK MODE CH1]",
+                "HANDSHAKE: GetEuiccChallenge [STK MODE TERMINAL CAPABILITY]",
+                "HANDSHAKE: GetEuiccChallenge [STK MODE SELECT ISD-R]",
+                "HANDSHAKE: GetEuiccChallenge [STK MODE TERMINAL PROFILE]",
+                "HANDSHAKE: GetEuiccChallenge [STK MODE CH1]",
+            ],
+        )
+
     def test_prepare_download_error_response_raises(self):
         orchestrator = SGP22Orchestrator(cfg=FakeCfg(), apdu_channel=FakeApduChannel(), profile_provider=None)
 
@@ -348,6 +423,27 @@ class OrchestratorFlowTests(unittest.TestCase):
         self.assertIn("81(len=1, resultDetail)=08", formatted)
         self.assertIn("failureResult.resultCode=5", formatted)
         self.assertIn("failureResult.resultDetail=8", formatted)
+
+    def test_successful_terminal_profile_install_result_is_not_described_as_failure(self):
+        orchestrator = SGP22Orchestrator(cfg=FakeCfg(), apdu_channel=FakeApduChannel(), profile_provider=None)
+
+        meaning = orchestrator._describe_profile_installation_result_code(5, 0, b"\xA0")
+
+        self.assertEqual(meaning, "card completed the final profile installation step")
+
+    def test_duplicate_iccid_profile_install_result_is_described_clearly(self):
+        orchestrator = SGP22Orchestrator(cfg=FakeCfg(), apdu_channel=FakeApduChannel(), profile_provider=None)
+
+        meaning = orchestrator._describe_profile_installation_result_code(5, 9, b"\xA1")
+
+        self.assertEqual(meaning, "card rejected the profile because its ICCID is already installed")
+
+    def test_notification_metadata_decodes_iccid_in_semi_octet_order(self):
+        orchestrator = SGP22Orchestrator(cfg=FakeCfg(), apdu_channel=FakeApduChannel(), profile_provider=None)
+
+        details = orchestrator._decode_notification_metadata_fields(wrap_tlv("5A", bytes.fromhex("980103")))
+
+        self.assertEqual(details["iccid"], "891030")
 
     def test_install_bootstrap_rejects_transaction_id_mismatch(self):
         bf23_value = b"".join(
@@ -456,7 +552,9 @@ class OrchestratorFlowTests(unittest.TestCase):
                 + wrap_tlv("5F37", b"\x22" * 64),
             ),
         )
-        apdu_channel = FakeApduChannel(load_bpp_response=inline_notification)
+        apdu_channel = FakeApduChannel(
+            load_bpp_response_sequence=[b""] * 7 + [inline_notification],
+        )
         orchestrator = SGP22Orchestrator(
             cfg=FakeCfg(),
             apdu_channel=apdu_channel,
@@ -483,60 +581,55 @@ class OrchestratorFlowTests(unittest.TestCase):
         self.assertEqual(len(remove_calls), 1)
         self.assertEqual(remove_calls[0][1], bytes.fromhex("80E2910007BF3004800201FD"))
         load_calls = [call for call in apdu_channel.send_calls if call[0].startswith("DOWNLOAD: LoadBoundProfilePackage")]
-        self.assertEqual(len(load_calls), 9)
+        self.assertEqual(len(load_calls), 8)
 
-        expected_head = wrap_tlv("BF36", bf23_tlv)
-        self.assertEqual(load_calls[0][0], "DOWNLOAD: LoadBoundProfilePackage [1/7] [Block 0]")
+        expected_segments = orchestrator._segment_bound_profile_package(bpp_bytes)
+        expected_head = expected_segments[0]
+        self.assertEqual(load_calls[0][0], "DOWNLOAD: LoadBoundProfilePackage [1/5] [Block 0]")
         self.assertEqual(
             load_calls[0][1],
-            bytes([0x80, 0xE2, 0x91, 0x00, len(expected_head)]) + expected_head,
+            bytes([0x80, 0xE2, 0x11, 0x00, 120]) + expected_head[:120],
         )
 
-        self.assertEqual(load_calls[1][0], "DOWNLOAD: LoadBoundProfilePackage [2/7] [Block 0]")
+        self.assertEqual(load_calls[1][0], "DOWNLOAD: LoadBoundProfilePackage [1/5] [Block 1]")
         self.assertEqual(
             load_calls[1][1],
-            bytes([0x80, 0xE2, 0x91, 0x00, len(a0_tlv)]) + a0_tlv,
+            bytes([0x80, 0xE2, 0x91, 0x01, len(expected_head[120:])]) + expected_head[120:],
         )
 
-        a1_header = bytes.fromhex("A181FD")
-        self.assertEqual(load_calls[2][0], "DOWNLOAD: LoadBoundProfilePackage [3/7] [Block 0]")
+        self.assertEqual(load_calls[2][0], "DOWNLOAD: LoadBoundProfilePackage [2/5] [Block 0]")
+        a0_member = wrap_tlv("87", b"\xAA\xBB")
         self.assertEqual(
             load_calls[2][1],
-            bytes([0x80, 0xE2, 0x91, 0x00, len(a1_header)]) + a1_header,
+            bytes([0x80, 0xE2, 0x91, 0x00, len(a0_member)]) + a0_member,
         )
+
         a1_first_member = wrap_tlv("88", b"\x01" * 247)
-        self.assertEqual(load_calls[3][0], "DOWNLOAD: LoadBoundProfilePackage [4/7] [Block 0]")
+        self.assertEqual(load_calls[3][0], "DOWNLOAD: LoadBoundProfilePackage [3/5] [Block 0]")
         self.assertEqual(
             load_calls[3][1],
             bytes([0x80, 0xE2, 0x11, 0x00, 120]) + a1_first_member[:120],
         )
-        self.assertEqual(load_calls[4][0], "DOWNLOAD: LoadBoundProfilePackage [4/7] [Block 1]")
+        self.assertEqual(load_calls[4][0], "DOWNLOAD: LoadBoundProfilePackage [3/5] [Block 1]")
         self.assertEqual(
             load_calls[4][1],
             bytes([0x80, 0xE2, 0x11, 0x01, 120]) + a1_first_member[120:240],
         )
-        self.assertEqual(load_calls[5][0], "DOWNLOAD: LoadBoundProfilePackage [4/7] [Block 2]")
+        self.assertEqual(load_calls[5][0], "DOWNLOAD: LoadBoundProfilePackage [3/5] [Block 2]")
         self.assertEqual(
             load_calls[5][1],
             bytes([0x80, 0xE2, 0x91, 0x02, len(a1_first_member[240:])]) + a1_first_member[240:],
         )
 
         a1_second_member = wrap_tlv("89", b"\x02")
-        self.assertEqual(load_calls[6][0], "DOWNLOAD: LoadBoundProfilePackage [5/7] [Block 0]")
+        self.assertEqual(load_calls[6][0], "DOWNLOAD: LoadBoundProfilePackage [4/5] [Block 0]")
         self.assertEqual(
             load_calls[6][1],
             bytes([0x80, 0xE2, 0x91, 0x00, len(a1_second_member)]) + a1_second_member,
         )
-
-        a3_header = bytes.fromhex("A304")
-        self.assertEqual(load_calls[7][0], "DOWNLOAD: LoadBoundProfilePackage [6/7] [Block 0]")
+        self.assertEqual(load_calls[7][0], "DOWNLOAD: LoadBoundProfilePackage [5/5] [Block 0]")
         self.assertEqual(
             load_calls[7][1],
-            bytes([0x80, 0xE2, 0x91, 0x00, len(a3_header)]) + a3_header,
-        )
-        self.assertEqual(load_calls[8][0], "DOWNLOAD: LoadBoundProfilePackage [7/7] [Block 0]")
-        self.assertEqual(
-            load_calls[8][1],
             bytes([0x80, 0xE2, 0x91, 0x00, len(wrap_tlv("86", b"\xCC\xDD"))]) + wrap_tlv("86", b"\xCC\xDD"),
         )
 
@@ -599,7 +692,9 @@ class OrchestratorFlowTests(unittest.TestCase):
                 + wrap_tlv("5F37", b"\x22" * 64),
             ),
         )
-        apdu_channel = FakeApduChannel(load_bpp_response=inline_failure)
+        apdu_channel = FakeApduChannel(
+            load_bpp_response_sequence=[b"", inline_failure],
+        )
         orchestrator = SGP22Orchestrator(
             cfg=FakeCfg(),
             apdu_channel=apdu_channel,
@@ -618,7 +713,7 @@ class OrchestratorFlowTests(unittest.TestCase):
         self.assertIn("resultDetail=8", str(raised.exception))
         self.assertEqual(orchestrator.state.load_bpp_response, inline_failure)
         load_calls = [call for call in apdu_channel.send_calls if call[0].startswith("DOWNLOAD: LoadBoundProfilePackage")]
-        self.assertEqual(len(load_calls), 1)
+        self.assertEqual(len(load_calls), 2)
 
     def test_install_failure_triggers_cancel_session_cleanup(self):
         bf23_value = b"".join(
@@ -677,7 +772,10 @@ class OrchestratorFlowTests(unittest.TestCase):
         self.assertEqual(cancel_session_calls[0][1], bytes.fromhex("80E2910010BF410D80081010101010101010810102"))
         self.assertEqual(len(provider.cancel_session_calls), 1)
         self.assertEqual(provider.cancel_session_calls[0].transaction_id, "EBAQEBAQEBAQEBAQEBAQEA==")
-        self.assertEqual(provider.cancel_session_calls[0].cancel_session_response, base64.b64encode(bytes.fromhex("BF4600")).decode("utf-8"))
+        self.assertEqual(
+            provider.cancel_session_calls[0].cancel_session_response,
+            base64.b64encode(bytes.fromhex("BF4103810102")).decode("utf-8"),
+        )
 
     def test_install_failure_syncs_notification_list(self):
         bf23_value = b"".join(
@@ -786,7 +884,7 @@ class OrchestratorFlowTests(unittest.TestCase):
         bf23_value = b"".join(
             [
                 wrap_tlv("82", b"\x01"),
-                wrap_tlv("80", b"\x03" * 8),
+                wrap_tlv("80", b"\x10" * 8),
                 wrap_tlv(
                     "A6",
                     b"".join(
@@ -886,6 +984,46 @@ class OrchestratorFlowTests(unittest.TestCase):
         expected_notification = base64.b64encode(pending_notification).decode("utf-8")
         self.assertEqual(provider.handle_notification_calls[0].pending_notification, expected_notification)
 
+    def test_notification_sync_reselects_isd_r_and_retries_after_6e00(self):
+        cfg = FakeCfg()
+        provider = FakeProvider(b"")
+        apdu_channel = FakeApduChannel(notification_list_response=bytes.fromhex("BF2800"))
+        original_send = apdu_channel.send
+        list_attempts = {"count": 0}
+
+        def send_with_retry(apdu: bytes, log_name: str) -> bytes:
+            if log_name == "DOWNLOAD: ListNotifications":
+                apdu_channel.send_calls.append((log_name, apdu))
+                list_attempts["count"] += 1
+                if list_attempts["count"] == 1:
+                    raise IOError("APDU Failed: 6E00")
+                return apdu_channel.notification_list_response
+            return original_send(apdu, log_name)
+
+        apdu_channel.send = send_with_retry
+        orchestrator = SGP22Orchestrator(
+            cfg=cfg,
+            apdu_channel=apdu_channel,
+            profile_provider=provider,
+        )
+
+        orchestrator._sync_pending_notifications()
+
+        self.assertEqual(list_attempts["count"], 2)
+        self.assertEqual(provider.handle_notification_calls, [])
+        self.assertEqual(
+            [name for name, _ in apdu_channel.send_calls],
+            [
+                "DOWNLOAD: ListNotifications",
+                "DOWNLOAD: RESELECT ISD-R",
+                "DOWNLOAD: ListNotifications",
+            ],
+        )
+        self.assertEqual(
+            apdu_channel.send_calls[1][1],
+            bytes([0x00, 0xA4, 0x04, 0x00, len(cfg.AID_ISD_R)]) + cfg.AID_ISD_R,
+        )
+
     def test_decode_eim_configuration_entries_extracts_bf55_fields(self):
         tls_key_material = bytes.fromhex(
             "301306072A8648CE3D020106082A8648CE3D03010703420004"
@@ -918,12 +1056,12 @@ class OrchestratorFlowTests(unittest.TestCase):
         self.assertEqual(len(entries), 1)
         self.assertEqual(entries[0]["eim_fqdn"], "eim.example.com")
         self.assertEqual(entries[0]["eim_id"], "manager-1")
-        self.assertEqual(entries[0]["eim_id_type"], "3")
+        self.assertEqual(entries[0]["eim_id_type"], "eimIdTypeProprietary (3)")
         self.assertEqual(entries[0]["counter_value"], "4")
-        self.assertEqual(entries[0]["association_token"], "A1B2C3D4")
-        self.assertEqual(entries[0]["supported_protocol"], "2")
+        self.assertEqual(entries[0]["association_token"], "2712847316")
+        self.assertEqual(entries[0]["supported_protocol"], "02 (set: none)")
         self.assertEqual(entries[0]["euicc_ci_pkid"], "01020304")
-        self.assertEqual(entries[0]["indirect_profile_download"], "1")
+        self.assertEqual(entries[0]["indirect_profile_download"], "Present")
         self.assertEqual(
             entries[0]["trusted_tls_public_key_data"],
             wrap_tlv("30", tls_key_material),
@@ -1118,7 +1256,7 @@ class OrchestratorFlowTests(unittest.TestCase):
 
         self.assertEqual(
             payload,
-            bytes.fromhex("BF50195A1089044045930000000000001492294428BF5103800101"),
+            bytes.fromhex("BF50185A1089044045930000000000001492294428BF5103800101"),
         )
 
     def test_run_eim_poll_builds_request_and_relays_package(self):
@@ -1186,7 +1324,7 @@ class OrchestratorFlowTests(unittest.TestCase):
         self.assertEqual(first_request.eim_fqdn, "eim.example.com")
         self.assertEqual(first_request.eim_id, "manager-1")
         self.assertEqual(first_request.matching_id, "MATCH-1")
-        self.assertEqual(first_request.association_token, "DEADBEEF")
+        self.assertEqual(first_request.association_token, "3735928559")
         self.assertEqual(first_request.euicc_configured_data, base64.b64encode(configured_data).decode("utf-8"))
         self.assertEqual(first_request.eim_configuration_data, base64.b64encode(eim_configuration).decode("utf-8"))
         self.assertEqual(first_request.euicc_package_result, "")
@@ -1369,6 +1507,7 @@ class OrchestratorFlowTests(unittest.TestCase):
         )
         orchestrator._phase_connect = lambda: None
         orchestrator._phase_eim_card_challenge = lambda: None
+        orchestrator._resolve_eim_poll_entry_indices = lambda entry_index=None: [0]
         orchestrator._build_eim_poll_request = lambda matching_id="", entry_index=0: EimPollRequest(
             eim_fqdn="eim1.sm.1ot.com",
             eim_id="manager-1",
@@ -1416,7 +1555,19 @@ class OrchestratorFlowTests(unittest.TestCase):
         self.assertEqual(captured["matching_id"], "MATCH-54")
         self.assertEqual(captured["smdp_address"], "rsp.example.com")
         self.assertEqual(provider.base_url_calls, ["https://rsp.example.com"])
-        self.assertEqual(response, bytes.fromhex("BF5408820401020304BF3700"))
+        self.assertEqual(response, bytes.fromhex("BF5409820401020304BF3700"))
+
+    def test_provider_certificate_payload_supported_accepts_raw_der_x509(self):
+        orchestrator = SGP22Orchestrator(
+            cfg=FakeCfg(),
+            apdu_channel=FakeApduChannel(),
+            profile_provider=None,
+        )
+
+        self.assertTrue(
+            orchestrator._provider_certificate_payload_supported(build_self_signed_cert().dump())
+        )
+        self.assertFalse(orchestrator._provider_certificate_payload_supported(b"not-a-certificate"))
 
     def test_relay_ipa_euicc_data_request_builds_local_bf52_response(self):
         configured_data = wrap_tlv(
@@ -1502,7 +1653,11 @@ class OrchestratorFlowTests(unittest.TestCase):
         self.assertIn(bytes.fromhex("A808800202C481020780"), response)
         self.assertNotIn(bytes.fromhex("A9"), response)
         self.assertIn(bytes.fromhex("870800000000000004A1"), response)
-        relay_calls = [call for call in orchestrator.apdu_channel.send_calls if call[0].startswith("EIM: RelayPackage")]
+        relay_calls = [
+            call
+            for call in orchestrator.apdu_channel.send_calls
+            if call[0] == "EIM: RelayPackage [poll=1 package=1]"
+        ]
         self.assertEqual(relay_calls, [])
 
     def test_relay_ipa_euicc_data_request_returns_empty_a2_when_card_returns_other_choice(self):
@@ -1659,6 +1814,22 @@ class OrchestratorFlowTests(unittest.TestCase):
         self.assertEqual(provider.poll_eim_calls[1].eim_fqdn, "eim2.example.com")
         self.assertEqual(provider.poll_eim_calls[0].eim_id, "manager-1")
         self.assertEqual(provider.poll_eim_calls[1].eim_id, "manager-2")
+
+
+class PySimSupportTests(unittest.TestCase):
+    def test_test_and_live_pysim_support_decode_certificate_with_vendored_repo_path(self):
+        certificate_der = build_self_signed_cert().dump()
+
+        self.assertTrue(test_pysim_support.pysim_available())
+        self.assertTrue(live_pysim_support.pysim_available())
+        self.assertIsNotNone(test_pysim_support.decode_certificate(certificate_der))
+        self.assertIsNotNone(live_pysim_support.decode_certificate(certificate_der))
+
+    def test_test_and_live_pysim_support_missing_aki_returns_empty_bytes(self):
+        certificate_der = build_self_signed_cert().dump()
+
+        self.assertEqual(test_pysim_support.get_certificate_authority_key_identifier(certificate_der), b"")
+        self.assertEqual(live_pysim_support.get_certificate_authority_key_identifier(certificate_der), b"")
 
 
 if __name__ == "__main__":

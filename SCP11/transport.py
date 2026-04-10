@@ -21,7 +21,8 @@ import urllib.error
 import urllib.request
 from typing import Optional, Protocol, Tuple
 
-from smartcard.System import readers
+from yggdrasim_common.session_recording import emit_apdu_trace_event
+from yggdrasim_common.card_backend import create_card_connection
 
 
 _TRACE_RESET = "\033[0m"
@@ -89,6 +90,9 @@ def _print_chunk_banner(log_name: str, total: int, *, raw: bool) -> None:
 
 class ApduChannel(Protocol):
     def send(self, apdu: bytes, log_name: str) -> bytes:
+        pass
+
+    def exchange(self, apdu: bytes, log_name: str) -> Tuple[bytes, int, int]:
         pass
 
     def reset(self) -> bool:
@@ -176,15 +180,10 @@ class PcscApduChannel:
     def __init__(self, reader_index: int = 0):
         self._reader_index = reader_index
         self._conn = self._connect(reader_index)
-        self._raw_apdu_logging = True
+        self._raw_apdu_logging = False
 
     def _connect(self, index: int):
-        reader_list = readers()
-        if len(reader_list) == 0:
-            raise RuntimeError("No smart card readers found.")
-        connection = reader_list[index].createConnection()
-        connection.connect()
-        return connection
+        return create_card_connection(reader_index=index)
 
     def reset(self) -> bool:
         try:
@@ -194,11 +193,35 @@ class PcscApduChannel:
         self._conn = self._connect(self._reader_index)
         return True
 
-    def send(self, apdu: bytes, log_name: str) -> bytes:
+    def exchange(self, apdu: bytes, log_name: str) -> Tuple[bytes, int, int]:
         response, sw1, sw2 = self._conn.transmit(list(apdu))
+        payload = bytes(response)
+        _print_apdu_exchange(
+            log_name,
+            apdu,
+            payload,
+            sw1,
+            sw2,
+            raw=bool(self._raw_apdu_logging),
+        )
+        emit_apdu_trace_event(
+            log_name=log_name,
+            apdu=apdu,
+            response=payload,
+            sw1=sw1,
+            sw2=sw2,
+            transport=self.__class__.__name__,
+        )
+        return payload, sw1, sw2
+
+    def send(self, apdu: bytes, log_name: str) -> bytes:
+        response, sw1, sw2 = self.exchange(apdu, log_name)
 
         while sw1 == 0x61:
-            ext, sw1, sw2 = self._conn.transmit([0x00, 0xC0, 0x00, 0x00, sw2])
+            ext, sw1, sw2 = self.exchange(
+                bytes([0x00, 0xC0, 0x00, 0x00, sw2]),
+                f"{log_name} [GET RESPONSE]",
+            )
             response += ext
 
         if sw1 == 0x6C:
@@ -206,15 +229,6 @@ class PcscApduChannel:
             return self.send(corrected_apdu, log_name)
 
         status_hex = f"{sw1:02X}{sw2:02X}"
-        _print_apdu_exchange(
-            log_name,
-            apdu,
-            bytes(response),
-            sw1,
-            sw2,
-            raw=bool(self._raw_apdu_logging),
-        )
-
         if status_hex not in ("9000", "9100"):
             raise IOError(f"APDU Failed: {status_hex}")
 
@@ -265,24 +279,13 @@ class RelayApduChannel:
     def __init__(self, relay_client: RelayHttpClientJsonHex, session_id: str = ""):
         self._relay_client = relay_client
         self._session_id = session_id
-        self._raw_apdu_logging = True
+        self._raw_apdu_logging = False
 
     def reset(self) -> bool:
         return False
 
-    def send(self, apdu: bytes, log_name: str) -> bytes:
+    def exchange(self, apdu: bytes, log_name: str) -> Tuple[bytes, int, int]:
         response, sw1, sw2 = self._relay_client.send_apdu(apdu, session_id=self._session_id)
-
-        while sw1 == 0x61:
-            get_response = bytes([0x00, 0xC0, 0x00, 0x00, sw2])
-            ext, sw1, sw2 = self._relay_client.send_apdu(get_response, session_id=self._session_id)
-            response += ext
-
-        if sw1 == 0x6C:
-            corrected_apdu = apdu[:-1] + bytes([sw2])
-            return self.send(corrected_apdu, log_name)
-
-        status_hex = f"{sw1:02X}{sw2:02X}"
         _print_apdu_exchange(
             log_name,
             apdu,
@@ -291,6 +294,31 @@ class RelayApduChannel:
             sw2,
             raw=bool(self._raw_apdu_logging),
         )
+        emit_apdu_trace_event(
+            log_name=log_name,
+            apdu=apdu,
+            response=response,
+            sw1=sw1,
+            sw2=sw2,
+            transport=self.__class__.__name__,
+        )
+        return response, sw1, sw2
+
+    def send(self, apdu: bytes, log_name: str) -> bytes:
+        response, sw1, sw2 = self.exchange(apdu, log_name)
+
+        while sw1 == 0x61:
+            ext, sw1, sw2 = self.exchange(
+                bytes([0x00, 0xC0, 0x00, 0x00, sw2]),
+                f"{log_name} [GET RESPONSE]",
+            )
+            response += ext
+
+        if sw1 == 0x6C:
+            corrected_apdu = apdu[:-1] + bytes([sw2])
+            return self.send(corrected_apdu, log_name)
+
+        status_hex = f"{sw1:02X}{sw2:02X}"
         if status_hex not in ("9000", "9100"):
             raise IOError(f"APDU Failed: {status_hex}")
 

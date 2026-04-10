@@ -19,7 +19,7 @@ HELP
 HANDOVER-SET 11223344556677889900AABBCCDDEEFF EIM-FIRST-TEST
 HANDOVER-STATUS
 # Runtime will auto-handover BIP route to SM-DP+ during IPAE-DOWNLOAD.
-IPAE-DOWNLOAD SCP11/eim_local/profile/test_profile.txt EIM-FIRST-TEST
+IPAE-DOWNLOAD Workspace/LocalEIM/profile/test_profile.txt EIM-FIRST-TEST
 NOTIF-HYGIENE 0
 Q
 ```
@@ -28,10 +28,10 @@ Q
 
 ```
 HELP
-EIM-PACKAGE SCP11/eim_local/eim_packages/default_eim_package.json
+EIM-PACKAGE Workspace/LocalEIM/eim_packages/default_eim_package.json
 EIM-PACKAGE-LINT
-ADD-INITIAL-EIM isdr "SCP11/eim_local/certs/eim/CERT_S_EIMsign_YGGDRASIM_NIST.pem"
-ADD-EIM package "SCP11/eim_local/certs/eim/CERT_S_EIMsign_YGGDRASIM_NIST.pem" SCP11/eim_local/eim_packages/fake_eim_add_eim_package.json
+ADD-INITIAL-EIM isdr "/path/to/local_eim_signing_cert.pem"
+ADD-EIM package "/path/to/local_eim_signing_cert.pem" Workspace/LocalEIM/eim_packages/fake_eim_add_eim_package.json
 EIM-ACKNOWLEDGE
 NOTIF-HYGIENE 0
 Q

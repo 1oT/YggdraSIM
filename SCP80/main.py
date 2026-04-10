@@ -19,6 +19,7 @@ import argparse
 import sys 
 import os 
 
+from yggdrasim_common.process_debug import add_debug_argument, set_global_debug
 from yggdrasim_common.quit_control import QuitAllRequested
 
 def run_standalone ():
@@ -33,7 +34,12 @@ def run_standalone ():
     parser =argparse .ArgumentParser (description ="YggdraSIM SCP80 OTA Shell")
     parser .add_argument ("--cmd",type =str ,help ="Semicolon-separated commands for non-interactive execution")
     parser .add_argument ("--stdin",action ="store_true",help ="Read newline-separated commands from stdin for non-interactive execution")
+    add_debug_argument (
+    parser ,
+    help_text ="Enable verbose debug output for this SCP80 session.",
+    )
     args =parser .parse_args ()
+    set_global_debug (bool (getattr (args ,"debug",False )))
     shell =OtaShell ()
     if args .cmd :
         shell .run_commands (args .cmd )

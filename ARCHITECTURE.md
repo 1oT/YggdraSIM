@@ -211,12 +211,12 @@ Primary runtime state:
 
 Legacy compatibility sources retained for import or fallback:
 
-- `SCP03/keys.ini`
+- `Workspace/SCP03/keys.ini`
 - `SCP80/ota_config.ini`
 
 ```mermaid
 flowchart LR
-    Legacy["Legacy files<br/>keys.ini<br/>ota_config.ini"] --> Import["import / fallback loaders"]
+    Legacy["Legacy files<br/>Workspace/SCP03/keys.ini<br/>ota_config.ini"] --> Import["import / fallback loaders"]
     Import --> SQLite["state/device_inventory.sqlite3"]
 
     SCP03["SCP03"] --> SQLite
@@ -338,6 +338,11 @@ Shared state in SCP11:
   capability when that plugin is present
 - eIM local persists eIM identity counters and runtime markers in the shared
   inventory and keeps poll-result evidence in SQLite and JSONL logs
+- the Local eIM endpoint identity in `Workspace/LocalEIM/eim_identity.json` is
+  intentionally separate from the simulated card's default BF55 identity in
+  `Workspace/SIMCARD/eim_identity.json`
+- full card-side eIM layouts can still override the seeded BF55 default through
+  `Workspace/SIMCARD/isdr_config.json` with explicit `eim_entries`
 
 Optional plugin extension path:
 
@@ -362,7 +367,10 @@ Plugin notes:
 - `SCP11.eim_local/ipad_standalone.py` is intentionally separate from the
   plugin runtime so it can be exported into external Python environments
 - seeded fake-eIM peer-provisioning artifacts live under
-  `SCP11/eim_local/eim_packages/` and remain file-based rather than plugin-owned
+  `Workspace/LocalEIM/eim_packages/` and remain file-based rather than plugin-owned
+- the wrapper-level simulator override surface owns card-side defaults such as
+  `Workspace/SIMCARD/eim_identity.json`, rather than reusing the Local eIM
+  identity file directly
 
 ## 11. Profile package tooling architecture
 
@@ -387,6 +395,10 @@ Responsibilities:
 - profile linting
 - JSON↔DER transcode
 - configurable transcode output directory persisted in workspace config
+- transcode sidecar persistence as `*.transcode.json`, `*.transcode.der`, and
+  `*.transcode.txt`
+- transcode UI clipboard integration plus persisted pane-layout preferences
+- uncapped inspector/decode reporting in the transcode UI panes
 
 ## 12. Dependencies
 
@@ -410,6 +422,8 @@ Non-Python operational dependencies:
 Documentation and architecture changes should stay aligned with:
 
 - `README.md`
+- `CLI_AND_PIPING_GUIDE.md`
+- `PROFILE_LIFECYCLE_CLI_CHEATSHEET.md`
 - `NOTICE`
 - `requirements.txt`
 - `yggdrasim_common/registry.py`

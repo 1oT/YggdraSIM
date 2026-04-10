@@ -31,6 +31,17 @@ One-shot flow mode is also available:
 python -m SCP11.test --flow
 ```
 
+Batch automation examples:
+
+```bash
+python -m SCP11.test --cmd "DISCOVER; STATUS; LIST; EXIT"
+python -m SCP11.test --cmd "DOWNLOAD-PROFILE LPA:1$SMDP.TEST$TOKEN; STATUS; EXIT"
+python -m SCP11.test --cmd "POLL 3 30 --debug; EXIT"
+```
+
+See `../../PROFILE_LIFECYCLE_CLI_CHEATSHEET.md` for ready-to-paste lifecycle
+sequences and log-capture patterns.
+
 ## Startup preflight
 
 The same preflight model as `SCP11/live` is applied:
@@ -49,6 +60,12 @@ The shell keeps the standard relay snapshot and command layout:
 - relay utilities plus grouped `LPAd` and `IPAd` commands
 - hidden expert commands behind `HELP EXPERT`
 - automatic notification sync for transactional commands
+
+Simulator card note:
+
+- when the shared card backend is set to `sim`, the relay shell still exercises the normal card-facing test flow but against the simulator
+- the simulated card's default BF55 eIM identity comes from `Workspace/SIMCARD/eim_identity.json`
+- this is separate from `Workspace/LocalEIM/eim_identity.json`, which belongs to the Local eIM shell
 
 Difference from `SCP11/live`:
 
@@ -184,6 +201,8 @@ the `SCP11/live` operator model.
 ## Related guides
 
 - `SCP11/README.md`
+- `../../CLI_AND_PIPING_GUIDE.md`
+- `../../PROFILE_LIFECYCLE_CLI_CHEATSHEET.md`
 - `SCP11/live/README.md`
 - `SCP11/local_access/README.md`
 - `SCP11/eim_local/README.md`

@@ -26,6 +26,7 @@ from SCP03 .core .cap import CapFileParser
 from SCP03 .crypto .session import Scp03Session 
 from SCP03 .crypto .scp02_session import Scp02SessionAdapter 
 from SCP03 .logic .sgp22 import Sgp22Manager 
+from yggdrasim_common .card_backend import is_simulated_card_backend
 from cryptography .hazmat .primitives .ciphers import algorithms ,Cipher ,modes 
 from cryptography .hazmat .primitives import cmac 
 
@@ -178,6 +179,14 @@ class GlobalPlatformManager :
         print (f"{Config.Colors.CYAN}[*] Authenticating to Security Domain via SCP02: {target_hex}...{Config.Colors.ENDC}")
 
         self .tp .transmit (f"00A40400{len(self.target_aid):02X}{target_hex}",silent =True )
+
+        if is_simulated_card_backend ():
+            from SIMCARD .gp import SimulatedSecureSession
+
+            self .tp .session =SimulatedSecureSession ("SCP02")
+            self .active_scp_protocol ="SCP02"
+            print (f"{Config.Colors.GREEN}[+] SCP02 simulated session activated (plaintext simulator mode).{Config.Colors.ENDC}")
+            return True 
 
         session =Scp02SessionAdapter (
         self .scp02_keys ['enc'],

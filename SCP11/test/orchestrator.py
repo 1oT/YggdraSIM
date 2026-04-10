@@ -130,6 +130,7 @@ class SGP22Orchestrator(LiveStkPollingMixin):
         self._stk_open_channel_socket = None
         self._stk_open_channel_request_fields: dict[str, Any] = {}
         self._eim_poll_debug_enabled = False
+        self._use_stk_mode_for_es10b_store_data = False
 
     def run_flow(self, matching_id: str = "", smdp_address: Optional[str] = None) -> None:
         effective_smdp_address = smdp_address
@@ -291,21 +292,115 @@ class SGP22Orchestrator(LiveStkPollingMixin):
 
     def _phase_connect(self) -> None:
         print("\n[*] Phase: Connect")
-        reset_method = getattr(self.apdu_channel, "reset", None)
-        if callable(reset_method):
-            try:
-                did_reset = bool(reset_method())
-                if did_reset:
-                    print("[*] Card transport reset before flow start.")
-            except Exception as error:
-                print(f"[*] Card transport reset skipped ({error}).")
+        self._use_stk_mode_for_es10b_store_data = False
+        if bool(getattr(self.cfg, "RESET_CARD_BEFORE_FLOW", False)):
+            reset_method = getattr(self.apdu_channel, "reset", None)
+            if callable(reset_method):
+                try:
+                    did_reset = bool(reset_method())
+                    if did_reset:
+                        print("[*] Card transport reset before flow start.")
+                except Exception as error:
+                    print(f"[*] Card transport reset skipped ({error}).")
         try:
             self.apdu_channel.send(bytes.fromhex("80AA000007A9058303170000"), "INIT: TERMINAL CAPABILITY")
         except IOError:
             pass
 
+        self._select_isd_r("INIT: SELECT ISD-R")
+
+    def _select_isd_r(self, log_name: str) -> None:
         select_apdu = b"\x00\xA4\x04\x00" + bytes([len(self.cfg.AID_ISD_R)]) + self.cfg.AID_ISD_R
-        self.apdu_channel.send(select_apdu, "INIT: SELECT ISD-R")
+        self.apdu_channel.send(select_apdu, log_name)
+
+    @staticmethod
+    def _should_retry_with_stk_bootstrap(error: Exception) -> bool:
+        return "6985" in str(error).upper()
+
+    @staticmethod
+    def _should_retry_notification_sync_after_reselect(error: Exception) -> bool:
+        return "6E00" in str(error).upper()
+
+    @staticmethod
+    def _build_es10b_store_data_apdu(
+        payload: bytes,
+        p1: int = 0x91,
+        p2: int = 0x00,
+        cla: int = 0x80,
+    ) -> bytes:
+        return bytes([cla & 0xFF, 0xE2, p1 & 0xFF, p2 & 0xFF, len(payload)]) + payload
+
+    def _send_es10b_store_data_with_stk_mode(self, payload: bytes, log_name: str) -> bytes:
+        print(f"[*] {log_name}: entering STK mode bootstrap.")
+        self.apdu_channel.send(
+            bytes.fromhex("80AA00000DA90B8100820101830107840101"),
+            f"{log_name} [STK MODE TERMINAL CAPABILITY]",
+        )
+        self._select_isd_r(f"{log_name} [STK MODE SELECT ISD-R]")
+        self.apdu_channel.send(
+            bytes.fromhex("80100000010C"),
+            f"{log_name} [STK MODE TERMINAL PROFILE]",
+        )
+        response = self.apdu_channel.send(
+            self._build_es10b_store_data_apdu(payload, cla=0x81),
+            f"{log_name} [STK MODE CH1]",
+        )
+        self._use_stk_mode_for_es10b_store_data = True
+        return response
+
+    def _send_es10b_store_data(
+        self,
+        payload: bytes,
+        log_name: str,
+        *,
+        allow_stk_retry: bool = False,
+    ) -> bytes:
+        if self._use_stk_mode_for_es10b_store_data:
+            return self._send_es10b_store_data_with_stk_mode(payload, log_name)
+        apdu = self._build_es10b_store_data_apdu(payload)
+        try:
+            return self.apdu_channel.send(apdu, log_name)
+        except Exception as error:
+            if allow_stk_retry is False or self._should_retry_with_stk_bootstrap(error) is False:
+                raise
+            print(f"[*] {log_name} failed with 6985; attempting STK mode retry.")
+            try:
+                return self._send_es10b_store_data_with_stk_mode(payload, log_name)
+            except Exception as stk_mode_error:
+                raise RuntimeError(
+                    f"{log_name} failed ({error}); STK mode retry failed: {stk_mode_error}"
+                ) from stk_mode_error
+
+    def _reselect_isd_r_for_es10b_store_data(self, log_name: str) -> None:
+        active_channel = int(getattr(self, "_es10b_logical_channel", 0) or 0)
+        if self._use_stk_mode_for_es10b_store_data:
+            self._select_isd_r(f"{log_name} [STK MODE SELECT ISD-R]")
+            return
+        select_on_channel = getattr(self, "_select_isd_r_on_channel", None)
+        if active_channel > 0 and callable(select_on_channel):
+            select_on_channel(active_channel, f"{log_name} [SELECT ISD-R CH{active_channel}]")
+            return
+        self._select_isd_r(log_name)
+
+    def _list_pending_notifications_with_context_recovery(self) -> bytes:
+        payload = bytes.fromhex("BF2800")
+        log_name = "DOWNLOAD: ListNotifications"
+        try:
+            return self._send_es10b_store_data(
+                payload,
+                log_name,
+                allow_stk_retry=True,
+            )
+        except Exception as error:
+            if self._should_retry_notification_sync_after_reselect(error) is False:
+                raise
+            print("[*] Notification sync: listNotifications hit 6E00; reselecting ISD-R and retrying.")
+            self._reselect_isd_r_for_es10b_store_data("DOWNLOAD: RESELECT ISD-R")
+            return self._send_es10b_store_data(
+                payload,
+                log_name,
+                allow_stk_retry=True,
+            )
 
     def _phase_eim_card_challenge(self) -> None:
         print("\n[*] Phase: eIM card challenge (GetEuiccChallenge)")
@@ -503,8 +598,7 @@ class SGP22Orchestrator(LiveStkPollingMixin):
         )
 
     def _retrieve_es10b_data(self, payload: bytes, log_name: str) -> bytes:
-        apdu = bytes([0x80, 0xE2, 0x91, 0x00, len(payload)]) + payload
-        return self.apdu_channel.send(apdu, log_name)
+        return self._send_es10b_store_data(payload, log_name)
 
     def _read_card_eid(self, reselect_isdr: bool = True) -> str:
         try:
@@ -1023,6 +1117,13 @@ class SGP22Orchestrator(LiveStkPollingMixin):
             return cleaned.rstrip("/")
         return f"https://{cleaned.rstrip('/')}"
 
+    def _profile_download_provider_base_url(self, smdp_address: str) -> str:
+        bridge = getattr(self, "localized_poll_bridge", None)
+        bridge_base_url = str(getattr(bridge, "smdp_base_url", "") or "").strip()
+        if len(bridge_base_url) > 0:
+            return bridge_base_url.rstrip("/")
+        return self._as_https_smdp(smdp_address)
+
     def _relay_eim_package_to_card(self, package_bytes: bytes, poll_round: int, package_index: int) -> bytes:
         log_name = f"EIM: RelayPackage [poll={poll_round} package={package_index}]"
         print(
@@ -1038,7 +1139,9 @@ class SGP22Orchestrator(LiveStkPollingMixin):
                 "running SGP.22 profile download."
             )
             if self.profile_provider is not None and hasattr(self.profile_provider, "set_base_url"):
-                base_url = self._as_https_smdp(parsed.smdp_address)
+                # Keep localized IPAd pinned to the bridge while the ES9 payload
+                # still carries the activation-code SM-DP+ address.
+                base_url = self._profile_download_provider_base_url(parsed.smdp_address)
                 if len(base_url) > 0:
                     self.profile_provider.set_base_url(base_url)
             download_error = None
@@ -1073,7 +1176,9 @@ class SGP22Orchestrator(LiveStkPollingMixin):
                 f"matchingId={parsed.matching_id}; running SGP.22 profile download."
             )
             if self.profile_provider is not None and hasattr(self.profile_provider, "set_base_url"):
-                base_url = self._as_https_smdp(parsed.smdp_address)
+                # Keep localized IPAd pinned to the bridge while the ES9 payload
+                # still carries the activation-code SM-DP+ address.
+                base_url = self._profile_download_provider_base_url(parsed.smdp_address)
                 if len(base_url) > 0:
                     self.profile_provider.set_base_url(base_url)
             download_error = None
@@ -1456,10 +1561,15 @@ class SGP22Orchestrator(LiveStkPollingMixin):
 
     def _phase_authentication_seed(self, matching_id: str, smdp_address: str) -> dict:
         print("\n[*] Phase: Authentication Seed")
-        euicc_info1 = self.apdu_channel.send(b"\x80\xE2\x91\x00\x03\xBF\x20\x00", "HANDSHAKE: GetEuiccInfo1")
-        challenge_response = self.apdu_channel.send(
-            b"\x80\xE2\x91\x00\x03\xBF\x2E\x00",
+        euicc_info1 = self._send_es10b_store_data(
+            bytes.fromhex("BF2000"),
+            "HANDSHAKE: GetEuiccInfo1",
+            allow_stk_retry=True,
+        )
+        challenge_response = self._send_es10b_store_data(
+            bytes.fromhex("BF2E00"),
             "HANDSHAKE: GetEuiccChallenge",
+            allow_stk_retry=True,
         )
         self.state.card_challenge = challenge_response[-16:]
         print(f"[+] Card Challenge: {self.state.card_challenge.hex().upper()}")
@@ -1843,7 +1953,7 @@ class SGP22Orchestrator(LiveStkPollingMixin):
                 raise RuntimeError("Provider authenticateClient returned incomplete payload.")
             return None
 
-        if decode_certificate(smdp_certificate_raw) is None:
+        if self._provider_certificate_payload_supported(smdp_certificate_raw) is False:
             if self._local_fallback_enabled() is False:
                 raise RuntimeError("Provider authenticateClient payload parse failed: invalid smdpCertificate.")
             print("[*] Provider authenticateClient payload parse failed (invalid smdpCertificate), fallback to local signing.")
@@ -1854,6 +1964,27 @@ class SGP22Orchestrator(LiveStkPollingMixin):
             smdp_signature2=smdp_signature2_raw,
             cert=smdp_certificate_raw,
         )
+
+    @staticmethod
+    def _provider_certificate_payload_supported(certificate_bytes: bytes) -> bool:
+        raw_value = bytes(certificate_bytes or b"")
+        if len(raw_value) == 0:
+            return False
+        try:
+            if decode_certificate(raw_value) is not None:
+                return True
+        except Exception:
+            pass
+        try:
+            crypto_x509.load_der_x509_certificate(raw_value)
+            return True
+        except Exception:
+            pass
+        try:
+            crypto_x509.load_pem_x509_certificate(raw_value)
+            return True
+        except Exception:
+            return False
 
     def _phase_get_bound_profile_package(self, smdp_address: str) -> bool:
         print("\n[*] Phase: Get Bound Profile Package")
@@ -1995,9 +2126,10 @@ class SGP22Orchestrator(LiveStkPollingMixin):
     def _send_cancel_session_request(self, reason: int) -> bytes:
         print(f"[*] Install failure cleanup: cancelSession reason={reason}.")
         payload = self._build_cancel_session_request_payload(reason)
-        response = self.apdu_channel.send(
-            bytes([0x80, 0xE2, 0x91, 0x00, len(payload)]) + payload,
+        response = self._send_es10b_store_data(
+            payload,
             "DOWNLOAD: CancelSession",
+            allow_stk_retry=True,
         )
         return response
 
@@ -2056,10 +2188,7 @@ class SGP22Orchestrator(LiveStkPollingMixin):
             if self._forward_pending_notification(inline_notification, inline_seq_number, "inline"):
                 self._remove_notification_from_list(inline_seq_number)
         try:
-            response = self.apdu_channel.send(
-                bytes([0x80, 0xE2, 0x91, 0x00, 0x03]) + bytes.fromhex("BF2800"),
-                "DOWNLOAD: ListNotifications",
-            )
+            response = self._list_pending_notifications_with_context_recovery()
         except Exception as error:
             print(f"[*] Notification sync: listNotifications failed ({error}).")
             return
@@ -2148,7 +2277,11 @@ class SGP22Orchestrator(LiveStkPollingMixin):
         result_detail = details.get("resultDetail")
         if isinstance(result_detail, int):
             fragments.append(f"resultDetail={result_detail}")
-        result_meaning = self._describe_profile_installation_result_code(result_code, result_detail)
+        result_meaning = self._describe_profile_installation_result_code(
+            result_code,
+            result_detail,
+            details.get("finalResultTag"),
+        )
         if len(result_meaning) > 0:
             fragments.append(f"meaning={result_meaning}")
         smdp_oid = details.get("smdpOid")
@@ -2164,8 +2297,11 @@ class SGP22Orchestrator(LiveStkPollingMixin):
             if len(payload) == 0:
                 seq_bytes = self._encode_notification_sequence(seq_number)
                 payload = self._wrap_tlv(bytes.fromhex("BF30"), self._wrap_tlv(b"\x80", seq_bytes))
-            apdu = bytes([0x80, 0xE2, 0x91, 0x00, len(payload)]) + payload
-            self.apdu_channel.send(apdu, f"DOWNLOAD: RemoveNotificationFromList [{seq_number}]")
+            self._send_es10b_store_data(
+                payload,
+                f"DOWNLOAD: RemoveNotificationFromList [{seq_number}]",
+                allow_stk_retry=True,
+            )
         except Exception as error:
             print(f"[*] Notification sync: removeNotificationFromList failed for seq={seq_number} ({error}).")
 
@@ -2298,7 +2434,7 @@ class SGP22Orchestrator(LiveStkPollingMixin):
             elif field_tag == b"\x0C":
                 details["notificationAddress"] = field_value.decode("utf-8", "ignore")
             elif field_tag == b"\x5A":
-                details["iccid"] = self._decode_bcd_digits(field_value)
+                details["iccid"] = self._decode_iccid_digits(field_value)
             offset = next_offset
         return details
 
@@ -2339,7 +2475,7 @@ class SGP22Orchestrator(LiveStkPollingMixin):
                         details.setdefault("notificationAddress", value.decode("utf-8", "ignore"))
                 elif key == "iccid":
                     if isinstance(value, bytes):
-                        details.setdefault("iccid", self._decode_bcd_digits(value))
+                        details.setdefault("iccid", self._decode_iccid_digits(value))
                     elif isinstance(value, str):
                         details.setdefault("iccid", value)
                 elif key == "smdpOid":
@@ -2377,7 +2513,11 @@ class SGP22Orchestrator(LiveStkPollingMixin):
         result_detail = details.get("resultDetail")
         if isinstance(result_detail, int):
             fragments.append(f"resultDetail={result_detail}")
-        result_meaning = self._describe_profile_installation_result_code(result_code, result_detail)
+        result_meaning = self._describe_profile_installation_result_code(
+            result_code,
+            result_detail,
+            details.get("finalResultTag"),
+        )
         if len(result_meaning) > 0:
             fragments.append(f"meaning={result_meaning}")
         aid = details.get("aid")
@@ -2392,12 +2532,17 @@ class SGP22Orchestrator(LiveStkPollingMixin):
         self,
         result_code: Optional[int],
         result_detail: Optional[int],
+        final_result_tag: Optional[bytes] = None,
     ) -> str:
         if isinstance(result_code, int) is False:
             return ""
         if result_code == 5:
+            if final_result_tag == b"\xA0" and result_detail == 0:
+                return "card completed the final profile installation step"
             if result_detail == 8:
                 return "card rejected the bound profile package content during installation"
+            if result_detail == 9:
+                return "card rejected the profile because its ICCID is already installed"
             return "card reported a profile installation failure"
         return ""
 
@@ -2689,6 +2834,17 @@ class SGP22Orchestrator(LiveStkPollingMixin):
                 digits += str(nibble)
         return digits
 
+    def _decode_iccid_digits(self, value: bytes) -> str:
+        digits = ""
+        for byte in value:
+            low = byte & 0x0F
+            high = (byte >> 4) & 0x0F
+            for nibble in [low, high]:
+                if nibble == 0x0F:
+                    continue
+                digits += str(nibble)
+        return digits
+
     def _decode_oid(self, value: bytes) -> str:
         if len(value) == 0:
             return ""
@@ -2734,9 +2890,10 @@ class SGP22Orchestrator(LiveStkPollingMixin):
     def _retrieve_pending_notification(self, seq_number: int) -> bytes:
         payload = self._build_retrieve_notification_request_payload(seq_number)
         try:
-            response = self.apdu_channel.send(
-                bytes([0x80, 0xE2, 0x91, 0x00, len(payload)]) + payload,
+            response = self._send_es10b_store_data(
+                payload,
                 f"DOWNLOAD: RetrieveNotification [{seq_number}]",
+                allow_stk_retry=True,
             )
         except Exception as error:
             print(f"[*] Notification sync: retrieveNotification failed for seq={seq_number} ({error}).")
@@ -2824,10 +2981,7 @@ class SGP22Orchestrator(LiveStkPollingMixin):
             if child_tag == bytes.fromhex("BF23"):
                 bootstrap_end = next_offset + (len(bpp_bytes) - len(root_value))
                 segments.append(bpp_bytes[:bootstrap_end])
-            elif child_tag == b"\xA0":
-                segments.append(child_raw)
-            elif child_tag in [b"\xA1", b"\xA2", b"\xA3"]:
-                segments.append(self._encode_tlv_header(child_tag, len(child_value)))
+            elif child_tag in [b"\xA0", b"\xA1", b"\xA2", b"\xA3"]:
                 if len(child_value) > 0:
                     segments.extend(self._extract_sequence_members(child_value))
             else:

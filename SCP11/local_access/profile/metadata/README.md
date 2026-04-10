@@ -115,7 +115,7 @@ Behavior:
 
 Set active metadata file:
 
-- `METADATA SCP11/local_access/profile/metadata/default_profile_metadata.json`
+- `METADATA Workspace/LocalSMDPP/profile/metadata/default_profile_metadata.json`
 
 Use active metadata file:
 
@@ -127,7 +127,12 @@ Use active metadata file:
 
 Or pass path directly:
 
-- `STORE-METADATA SCP11/local_access/profile/metadata/default_profile_metadata.json`
-- `UPDATE-METADATA SCP11/local_access/profile/metadata/default_profile_metadata.json`
-- `STORE-METADATA-CUSTOM BF76 SCP11/local_access/profile/metadata/default_profile_metadata.json`
-- `STORE-METADATA-CUSTOM-ALL SCP11/local_access/profile/metadata/default_profile_metadata.json`
+- `STORE-METADATA Workspace/LocalSMDPP/profile/metadata/default_profile_metadata.json`
+- `UPDATE-METADATA Workspace/LocalSMDPP/profile/metadata/default_profile_metadata.json`
+- `STORE-METADATA-CUSTOM BF76 Workspace/LocalSMDPP/profile/metadata/default_profile_metadata.json`
+- `STORE-METADATA-CUSTOM-ALL Workspace/LocalSMDPP/profile/metadata/default_profile_metadata.json`
+
+Related operator docs:
+
+- `../../README.md`
+- `../../../../PROFILE_LIFECYCLE_CLI_CHEATSHEET.md`

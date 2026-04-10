@@ -1,8 +1,10 @@
 import json
 import sqlite3
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from yggdrasim_common.device_inventory import DeviceInventoryStore
 from yggdrasim_common.inventory_crypto import InventoryCryptoManager
@@ -99,6 +101,100 @@ class DeviceInventoryTests(unittest.TestCase):
         self.assertEqual(
             manager._gpg_recipients(),
             ["FC9E9424840E8909AB94D39922C93CC882B98FC5"],
+        )
+
+    def test_inventory_crypto_encrypt_invokes_gpg_subprocess(self) -> None:
+        config_path = self.temp_path / "inventory_crypto.json"
+        config_path.write_text(
+            json.dumps(
+                {
+                    "enabled": True,
+                    "provider": "gpg",
+                    "gpg": {
+                        "binary": "gpg",
+                        "recipients": ["ABCDEF0123456789"],
+                    },
+                },
+                indent=2,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        manager = InventoryCryptoManager(config_path=str(config_path))
+        completed = subprocess.CompletedProcess(
+            ["gpg", "--batch", "--yes", "--quiet", "--armor", "--encrypt"],
+            0,
+            stdout=b"ciphertext\n",
+            stderr=b"",
+        )
+
+        with mock.patch(
+            "yggdrasim_common.inventory_crypto.shutil.which",
+            return_value="/usr/bin/gpg",
+        ):
+            with mock.patch(
+                "yggdrasim_common.inventory_crypto.subprocess.run",
+                return_value=completed,
+            ) as mocked_run:
+                ciphertext = manager._gpg_encrypt(b'{"secret": true}')
+
+        self.assertEqual(ciphertext, "ciphertext\n")
+        mocked_run.assert_called_once_with(
+            [
+                "gpg",
+                "--batch",
+                "--yes",
+                "--quiet",
+                "--armor",
+                "--encrypt",
+                "--recipient",
+                "ABCDEF0123456789",
+            ],
+            input=b'{"secret": true}',
+            capture_output=True,
+            check=False,
+        )
+
+    def test_inventory_crypto_decrypt_invokes_gpg_subprocess(self) -> None:
+        config_path = self.temp_path / "inventory_crypto.json"
+        config_path.write_text(
+            json.dumps(
+                {
+                    "enabled": True,
+                    "provider": "gpg",
+                    "gpg": {
+                        "binary": "gpg",
+                    },
+                },
+                indent=2,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        manager = InventoryCryptoManager(config_path=str(config_path))
+        completed = subprocess.CompletedProcess(
+            ["gpg", "--batch", "--yes", "--quiet", "--decrypt"],
+            0,
+            stdout=b'{"secret": true}',
+            stderr=b"",
+        )
+
+        with mock.patch(
+            "yggdrasim_common.inventory_crypto.shutil.which",
+            return_value="/usr/bin/gpg",
+        ):
+            with mock.patch(
+                "yggdrasim_common.inventory_crypto.subprocess.run",
+                return_value=completed,
+            ) as mocked_run:
+                plaintext = manager._gpg_decrypt("ciphertext")
+
+        self.assertEqual(plaintext, b'{"secret": true}')
+        mocked_run.assert_called_once_with(
+            ["gpg", "--batch", "--yes", "--quiet", "--decrypt"],
+            input=b"ciphertext",
+            capture_output=True,
+            check=False,
         )
 
     def test_store_round_trip_per_namespace(self) -> None:

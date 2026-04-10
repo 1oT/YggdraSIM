@@ -18,6 +18,11 @@
 import sys 
 import os 
 
+from yggdrasim_common.process_debug import (
+    add_debug_argument,
+    is_global_debug_enabled,
+    set_global_debug,
+)
 from yggdrasim_common.quit_control import QuitAllRequested
 
 
@@ -36,7 +41,14 @@ def _build_dispatcher ():
         print (f"Critical Import Error: {e}")
         print ("Ensure you are running this from the correct directory or that 'SCP03' is strictly a subdirectory.")
         sys .exit (1 )
-    return ShellDispatcher ()
+    dispatcher =ShellDispatcher ()
+    if is_global_debug_enabled ():
+        dispatcher .debug_mode =True
+        try :
+            dispatcher .transport .debug =True
+        except Exception :
+            pass
+    return dispatcher
 
 def run_script (file_path ):
     try :
@@ -106,7 +118,12 @@ def run_standalone ():
     parser .add_argument ("--cmd",type =str ,help ="Semicolon-separated commands (non-interactive)")
     parser .add_argument ("--stdin",action ="store_true",help ="Read newline-separated commands from stdin (non-interactive)")
     parser .add_argument ("--out",type =str ,help ="Output YAML file for --cmd")
+    add_debug_argument (
+    parser ,
+    help_text ="Enable verbose debug output for this SCP03 session.",
+    )
     args =parser .parse_args ()
+    set_global_debug (bool (getattr (args ,"debug",False )))
     if args .cmd :
         entry_cmd (args .cmd ,yaml_out =args .out )
         return 

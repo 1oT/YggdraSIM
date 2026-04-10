@@ -1,5 +1,9 @@
 import hashlib
 import os
+import re
+import sys
+import types
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -7,7 +11,8 @@ from cryptography import x509 as crypto_x509
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.x509.oid import ExtensionOID
-from yggdrasim_common.runtime_paths import runtime_root
+from yggdrasim_common.euicc_issuer import infer_ecasd_issuer_identity
+from yggdrasim_common.runtime_paths import ensure_seeded_workspace_file, remap_legacy_workspace_relative, runtime_root
 
 try:
     from ..pysim_path import ensure_repo_pysim_on_path
@@ -16,28 +21,215 @@ except ImportError:
 
 ensure_repo_pysim_on_path()
 
-try:
-    from pySim.esim.es8p import (
-        BspInstance,
-        BoundProfilePackage,
-        ProfileMetadata,
-        ProtectedProfilePackage,
-        UnprotectedProfilePackage,
-        gen_replace_session_keys,
-    )
-    from pySim.esim import saip as pysim_saip
-    from pySim.esim.rsp import RspSessionState as PySimRspSessionState
-    from pySim.esim.x509_cert import CertAndPrivkey
-except Exception:
-    BspInstance = None
-    BoundProfilePackage = None
-    gen_replace_session_keys = None
-    ProfileMetadata = None
-    ProtectedProfilePackage = None
-    UnprotectedProfilePackage = None
-    pysim_saip = None
-    PySimRspSessionState = None
-    CertAndPrivkey = None
+_MODULE_NOT_PRESENT = object()
+_SMARTCARD_STUB_MODULES = [
+    "smartcard",
+    "smartcard.util",
+    "smartcard.CardConnection",
+    "smartcard.System",
+]
+_SMPP_STUB_MODULES = [
+    "smpp",
+    "smpp.pdu",
+    "smpp.pdu.pdu_types",
+    "smpp.pdu.operations",
+]
+
+
+def _install_minimal_smartcard_stubs() -> None:
+    try:
+        from smartcard.util import toBytes as _smartcard_to_bytes  # type: ignore
+    except Exception:
+        _smartcard_to_bytes = None
+    if callable(_smartcard_to_bytes):
+        return
+
+    def _to_bytes(value: Any) -> list[int]:
+        if isinstance(value, (bytes, bytearray, memoryview)):
+            return [int(item) & 0xFF for item in bytes(value)]
+        if isinstance(value, str):
+            cleaned = str(value).strip().replace(" ", "").replace(":", "")
+            if len(cleaned) == 0:
+                return []
+            if len(cleaned) % 2 != 0:
+                raise ValueError("Hex string must contain an even number of digits.")
+            return [int(cleaned[index : index + 2], 16) for index in range(0, len(cleaned), 2)]
+        if isinstance(value, (list, tuple)):
+            return [int(item) & 0xFF for item in value]
+        return [int(item) & 0xFF for item in bytes(value)]
+
+    smartcard_module = sys.modules.get("smartcard")
+    if smartcard_module is None:
+        smartcard_module = types.ModuleType("smartcard")
+        sys.modules["smartcard"] = smartcard_module
+
+    util_module = types.ModuleType("smartcard.util")
+    util_module.toBytes = _to_bytes
+    sys.modules["smartcard.util"] = util_module
+    setattr(smartcard_module, "util", util_module)
+
+    card_connection_module = types.ModuleType("smartcard.CardConnection")
+
+    class _CardConnection:
+        T0_protocol = 1
+        T1_protocol = 2
+        RAW_protocol = 4
+
+    card_connection_module.CardConnection = _CardConnection
+    sys.modules["smartcard.CardConnection"] = card_connection_module
+    setattr(smartcard_module, "CardConnection", card_connection_module)
+
+    system_module = types.ModuleType("smartcard.System")
+    system_module.readers = lambda: []
+    sys.modules["smartcard.System"] = system_module
+    setattr(smartcard_module, "System", system_module)
+
+
+def _install_minimal_smpp_stubs() -> None:
+    try:
+        from smpp.pdu import pdu_types as _pdu_types  # type: ignore
+        from smpp.pdu import operations as _operations  # type: ignore
+    except Exception:
+        _pdu_types = None
+        _operations = None
+    if _pdu_types is not None and _operations is not None:
+        return
+
+    class _Placeholder:
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            self.args = args
+            self.kwargs = kwargs
+
+    smpp_module = sys.modules.get("smpp")
+    if smpp_module is None:
+        smpp_module = types.ModuleType("smpp")
+        sys.modules["smpp"] = smpp_module
+
+    pdu_module = types.ModuleType("smpp.pdu")
+    pdu_types_module = types.ModuleType("smpp.pdu.pdu_types")
+    operations_module = types.ModuleType("smpp.pdu.operations")
+
+    pdu_types_module.DataCoding = _Placeholder
+    pdu_types_module.PDU = _Placeholder
+    operations_module.DeliverSM = _Placeholder
+    operations_module.SubmitSM = _Placeholder
+
+    pdu_module.pdu_types = pdu_types_module
+    pdu_module.operations = operations_module
+
+    sys.modules["smpp.pdu"] = pdu_module
+    sys.modules["smpp.pdu.pdu_types"] = pdu_types_module
+    sys.modules["smpp.pdu.operations"] = operations_module
+    setattr(smpp_module, "pdu", pdu_module)
+
+
+def _snapshot_modules(module_names: list[str]) -> dict[str, Any]:
+    return {name: sys.modules.get(name, _MODULE_NOT_PRESENT) for name in module_names}
+
+
+def _restore_module_snapshot(snapshot: dict[str, Any]) -> None:
+    for name, module in snapshot.items():
+        if module is _MODULE_NOT_PRESENT:
+            sys.modules.pop(name, None)
+        else:
+            sys.modules[name] = module
+
+
+def _smartcard_support_available() -> bool:
+    try:
+        from smartcard.util import toBytes as _smartcard_to_bytes  # type: ignore
+    except Exception:
+        return False
+    return callable(_smartcard_to_bytes)
+
+
+def _smpp_support_available() -> bool:
+    try:
+        from smpp.pdu import pdu_types as _pdu_types  # type: ignore
+        from smpp.pdu import operations as _operations  # type: ignore
+    except Exception:
+        return False
+    return hasattr(_pdu_types, "DataCoding") and hasattr(_operations, "SubmitSM")
+
+
+@contextmanager
+def _temporary_session_bound_dependency_stubs():
+    snapshot: dict[str, Any] = {}
+    if _smartcard_support_available() is False:
+        snapshot.update(_snapshot_modules(_SMARTCARD_STUB_MODULES))
+        _install_minimal_smartcard_stubs()
+    if _smpp_support_available() is False:
+        snapshot.update(_snapshot_modules(_SMPP_STUB_MODULES))
+        _install_minimal_smpp_stubs()
+    try:
+        yield
+    finally:
+        _restore_module_snapshot(snapshot)
+
+
+BspInstance = None
+BoundProfilePackage = None
+gen_replace_session_keys = None
+ProfileMetadata = None
+ProtectedProfilePackage = None
+UnprotectedProfilePackage = None
+pysim_saip = None
+PySimRspSessionState = None
+CertAndPrivkey = None
+
+
+def _ensure_pysim_session_bound_support() -> None:
+    global BspInstance
+    global BoundProfilePackage
+    global gen_replace_session_keys
+    global ProfileMetadata
+    global ProtectedProfilePackage
+    global UnprotectedProfilePackage
+    global pysim_saip
+    global PySimRspSessionState
+    global CertAndPrivkey
+
+    if all(
+        component is not None
+        for component in (
+            BspInstance,
+            BoundProfilePackage,
+            gen_replace_session_keys,
+            ProfileMetadata,
+            ProtectedProfilePackage,
+            UnprotectedProfilePackage,
+            pysim_saip,
+            PySimRspSessionState,
+            CertAndPrivkey,
+        )
+    ):
+        return
+
+    with _temporary_session_bound_dependency_stubs():
+        try:
+            from pySim.esim.es8p import (
+                BspInstance as _BspInstance,
+                BoundProfilePackage as _BoundProfilePackage,
+                ProfileMetadata as _ProfileMetadata,
+                ProtectedProfilePackage as _ProtectedProfilePackage,
+                UnprotectedProfilePackage as _UnprotectedProfilePackage,
+                gen_replace_session_keys as _gen_replace_session_keys,
+            )
+            from pySim.esim import saip as _pysim_saip
+            from pySim.esim.rsp import RspSessionState as _PySimRspSessionState
+            from pySim.esim.x509_cert import CertAndPrivkey as _CertAndPrivkey
+        except Exception:
+            return
+
+    BspInstance = _BspInstance
+    BoundProfilePackage = _BoundProfilePackage
+    gen_replace_session_keys = _gen_replace_session_keys
+    ProfileMetadata = _ProfileMetadata
+    ProtectedProfilePackage = _ProtectedProfilePackage
+    UnprotectedProfilePackage = _UnprotectedProfilePackage
+    pysim_saip = _pysim_saip
+    PySimRspSessionState = _PySimRspSessionState
+    CertAndPrivkey = _CertAndPrivkey
 
 try:
     from ..shared.crypto_engine import CryptoEngine
@@ -195,6 +387,21 @@ class LocalIsdrSession:
         self._workspace_root = self._detect_workspace_root()
         self._workspace_root_entries = self._list_workspace_root_entries(self._workspace_root)
 
+    @staticmethod
+    def _describe_exception_chain(error: BaseException) -> str:
+        parts: list[str] = []
+        current: BaseException | None = error
+        while current is not None:
+            text = str(current).strip() or current.__class__.__name__
+            if len(parts) == 0 or parts[-1] != text:
+                parts.append(text)
+            next_error = getattr(current, "__cause__", None)
+            if isinstance(next_error, BaseException):
+                current = next_error
+                continue
+            break
+        return " | ".join(parts)
+
     def select_isdr(self) -> bytes:
         aid = bytes(self.cfg.AID_ISD_R)
         apdu = bytes([0x00, 0xA4, 0x04, 0x00, len(aid)]) + aid
@@ -261,12 +468,39 @@ class LocalIsdrSession:
         self.select_isdr()
         profiles_raw = self.get_profiles_info()
         configured_raw = self.get_euicc_configured_data()
-        return {
-            "eid": self.get_eid(),
+        eid_value = self.get_eid()
+        issuer_identity = infer_ecasd_issuer_identity("")
+        try:
+            issuer_identity = self._read_card_ecasd_issuer_identity()
+        except Exception:
+            issuer_identity = infer_ecasd_issuer_identity("")
+        profiles: list[ProfileMetadataView] = []
+        profiles_decode_error = ""
+        try:
+            profiles = self.decode_profile_metadata_rows(profiles_raw)
+        except Exception as error:
+            profiles_decode_error = self._describe_exception_chain(error)
+
+        configured_decoded: dict[str, Any] = {
+            "default_smdp": "",
+            "root_smds_primary": "",
+            "root_smds_additional": [],
+            "allowed_ci_pkid": [],
+        }
+        configured_decode_error = ""
+        try:
+            configured_decoded = self.decode_euicc_configured_data(configured_raw)
+        except Exception as error:
+            configured_decode_error = self._describe_exception_chain(error)
+
+        snapshot = {
+            "eid": eid_value,
+            "issuer_number": str(issuer_identity.get("issuer_number", "")).strip(),
+            "issuer_name": str(issuer_identity.get("issuer_name", "")).strip(),
             "profiles_raw": profiles_raw,
-            "profiles": self.decode_profile_metadata_rows(profiles_raw),
+            "profiles": profiles,
             "configured_raw": configured_raw,
-            "configured_decoded": self.decode_euicc_configured_data(configured_raw),
+            "configured_decoded": configured_decoded,
             "euicc_info1": self.get_euicc_info1(),
             "euicc_info2": self.get_euicc_info2(),
             "rat": self.get_rat(),
@@ -274,11 +508,21 @@ class LocalIsdrSession:
             "eim_configuration": self.get_eim_configuration_data(),
             "certs": self.get_certs(),
         }
+        if len(profiles_decode_error) > 0:
+            snapshot["profiles_decode_error"] = profiles_decode_error
+        if len(configured_decode_error) > 0:
+            snapshot["configured_decode_error"] = configured_decode_error
+        return snapshot
 
     def collect_profile_metadata(self) -> list[ProfileMetadataView]:
         self.reset_state()
         self.select_isdr()
-        return self.decode_profile_metadata_rows(self.get_profiles_info())
+        raw_profiles = self.get_profiles_info()
+        try:
+            return self.decode_profile_metadata_rows(raw_profiles)
+        except Exception as error:
+            detail = self._describe_exception_chain(error)
+            raise ValueError(f"Profile metadata decode failed: {detail}") from error
 
     def resolve_profile_target(self, identifier: str) -> Optional[tuple[bytes, str]]:
         return self._resolve_profile_target(identifier)
@@ -480,15 +724,7 @@ class LocalIsdrSession:
         return None
 
     def _resolve_aid_from_alias(self, alias: str) -> Optional[str]:
-        registry_path = os.path.normpath(
-            os.path.join(
-                os.path.dirname(os.path.abspath(__file__)),
-                "..",
-                "..",
-                "SCP03",
-                "aid.txt",
-            )
-        )
+        registry_path = ensure_seeded_workspace_file(("SCP03", "aid.txt"), "SCP03", "aid.txt")
         if os.path.isfile(registry_path) is False:
             return None
 
@@ -958,6 +1194,11 @@ class LocalIsdrSession:
         (BF23) so that AuthenticateServer, PrepareDownload and the loaded BPP all match;
         otherwise the card will reject the load.
         """
+        # Each LOAD-PROFILE attempt must start from a fresh SCP11 session context.
+        # Reusing a previous PrepareDownload response mixes old transaction/session
+        # material with the new AuthenticateServer exchange and leads to
+        # invalidTransactionId on retries inside the same shell session.
+        self.reset_state()
         resolved = self.resolve_profile_path(override_path=profile_path)
         if len(resolved) == 0:
             raise FileNotFoundError(
@@ -1084,70 +1325,78 @@ class LocalIsdrSession:
         return bpp_bytes, transaction_id
 
     def _build_session_bound_profile_package(self, upp_bytes: bytes) -> bytes:
-        if BoundProfilePackage is None or UnprotectedProfilePackage is None:
-            raise RuntimeError(
-                "pySim session-bound BPP generation is unavailable in this environment."
+        with _temporary_session_bound_dependency_stubs():
+            _ensure_pysim_session_bound_support()
+            if BoundProfilePackage is None or UnprotectedProfilePackage is None:
+                raise RuntimeError(
+                    "pySim session-bound BPP generation is unavailable in this environment."
+                )
+            if len(upp_bytes) == 0:
+                raise ValueError("Local profile payload is empty.")
+            if self._cert_pb is None or self._key_pb is None:
+                raise RuntimeError("DPpb credential required for local session-bound BPP generation.")
+
+            prepare_download = self._decode_prepare_download_response_ok(self.state.prepare_download_response)
+            euicc_otpk = bytes(prepare_download.get("euiccOtpk", b""))
+            transaction_id = bytes(prepare_download.get("transactionId", b"")) or bytes(self.state.transaction_id)
+
+            if len(transaction_id) == 0:
+                raise RuntimeError("PrepareDownload did not yield a transactionId for local BPP generation.")
+            if len(euicc_otpk) == 0:
+                raise RuntimeError("PrepareDownload did not yield euiccOtpk for local BPP generation.")
+
+            self._persist_pre_bsp_payload_debug(upp_bytes)
+            profile_metadata = self._build_pysim_profile_metadata(upp_bytes)
+            rsp_session = self._build_local_rsp_session(
+                transaction_id=transaction_id,
+                euicc_otpk=euicc_otpk,
+                profile_metadata=profile_metadata,
             )
-        if len(upp_bytes) == 0:
-            raise ValueError("Local profile payload is empty.")
-        if self._cert_pb is None or self._key_pb is None:
-            raise RuntimeError("DPpb credential required for local session-bound BPP generation.")
-
-        prepare_download = self._decode_prepare_download_response_ok(self.state.prepare_download_response)
-        euicc_otpk = bytes(prepare_download.get("euiccOtpk", b""))
-        transaction_id = bytes(prepare_download.get("transactionId", b"")) or bytes(self.state.transaction_id)
-
-        if len(transaction_id) == 0:
-            raise RuntimeError("PrepareDownload did not yield a transactionId for local BPP generation.")
-        if len(euicc_otpk) == 0:
-            raise RuntimeError("PrepareDownload did not yield euiccOtpk for local BPP generation.")
-
-        self._persist_pre_bsp_payload_debug(upp_bytes)
-        profile_metadata = self._build_pysim_profile_metadata(upp_bytes)
-        rsp_session = self._build_local_rsp_session(
-            transaction_id=transaction_id,
-            euicc_otpk=euicc_otpk,
-            profile_metadata=profile_metadata,
-        )
-        a3_plaintext_chunk_size = self._resolve_a3_plaintext_chunk_size()
-        use_ppk_replace_session_keys = self._should_use_ppk_replace_session_keys_experiment(
-            a3_plaintext_chunk_size
-        )
-        self.state.upp_protected_command_descriptions = self._describe_upp_protected_command_sequence(
-            upp_bytes,
-            chunk_size=a3_plaintext_chunk_size,
-        )
-        self.state.last_bpp_crypto_debug_lines = self._describe_bpp_crypto_debug(
-            upp_bytes,
-            rsp_session,
-            profile_metadata,
-            a3_plaintext_chunk_size=a3_plaintext_chunk_size,
-            use_ppk_replace_session_keys=use_ppk_replace_session_keys,
-        )
-        dp_pb = self._build_pysim_dp_pb_pair()
-        if a3_plaintext_chunk_size > 0:
-            bpp_bytes = self._encode_bound_profile_package_with_custom_a3_chunk_size(
+            a3_plaintext_chunk_size = self._resolve_a3_plaintext_chunk_size()
+            use_ppk_replace_session_keys = self._should_use_ppk_replace_session_keys_experiment(
+                a3_plaintext_chunk_size
+            )
+            self.state.upp_protected_command_descriptions = self._describe_upp_protected_command_sequence(
+                upp_bytes,
+                chunk_size=a3_plaintext_chunk_size,
+            )
+            self.state.last_bpp_crypto_debug_lines = self._describe_bpp_crypto_debug(
                 upp_bytes,
                 rsp_session,
                 profile_metadata,
-                dp_pb,
-                a3_plaintext_chunk_size,
+                a3_plaintext_chunk_size=a3_plaintext_chunk_size,
+                use_ppk_replace_session_keys=use_ppk_replace_session_keys,
             )
+            dp_pb = self._build_pysim_dp_pb_pair()
+            if a3_plaintext_chunk_size > 0:
+                bpp_bytes = self._encode_bound_profile_package_with_custom_a3_chunk_size(
+                    upp_bytes,
+                    rsp_session,
+                    profile_metadata,
+                    dp_pb,
+                    a3_plaintext_chunk_size,
+                )
+                self._update_bpp_structure_debug(bpp_bytes)
+                return bpp_bytes
+            try:
+                upp = UnprotectedProfilePackage.from_der(bytes(upp_bytes), metadata=profile_metadata)
+            except Exception as error:
+                detail = self._describe_exception_chain(error)
+                raise ValueError(
+                    f"Profile decode failed while building the local session-bound BPP: {detail}"
+                ) from error
+            if use_ppk_replace_session_keys:
+                ppk_enc = bytes(getattr(self.cfg, "BPP_PPK_ENC", b""))
+                ppk_mac = bytes(getattr(self.cfg, "BPP_PPK_MAC", b""))
+                if len(ppk_enc) != 16 or len(ppk_mac) != 16:
+                    raise ValueError("BPP_PPK_ENC and BPP_PPK_MAC must both be 16 bytes.")
+                ppk_bsp = BspInstance(ppk_enc, ppk_mac, bytes(16))
+                ppp = ProtectedProfilePackage.from_upp(upp, ppk_bsp)
+                bpp_bytes = BoundProfilePackage.from_ppp(ppp).encode(rsp_session, dp_pb)
+            else:
+                bpp_bytes = BoundProfilePackage.from_upp(upp).encode(rsp_session, dp_pb)
             self._update_bpp_structure_debug(bpp_bytes)
             return bpp_bytes
-        upp = UnprotectedProfilePackage.from_der(bytes(upp_bytes), metadata=profile_metadata)
-        if use_ppk_replace_session_keys:
-            ppk_enc = bytes(getattr(self.cfg, "BPP_PPK_ENC", b""))
-            ppk_mac = bytes(getattr(self.cfg, "BPP_PPK_MAC", b""))
-            if len(ppk_enc) != 16 or len(ppk_mac) != 16:
-                raise ValueError("BPP_PPK_ENC and BPP_PPK_MAC must both be 16 bytes.")
-            ppk_bsp = BspInstance(ppk_enc, ppk_mac, bytes(16))
-            ppp = ProtectedProfilePackage.from_upp(upp, ppk_bsp)
-            bpp_bytes = BoundProfilePackage.from_ppp(ppp).encode(rsp_session, dp_pb)
-        else:
-            bpp_bytes = BoundProfilePackage.from_upp(upp).encode(rsp_session, dp_pb)
-        self._update_bpp_structure_debug(bpp_bytes)
-        return bpp_bytes
 
     def _persist_pre_bsp_payload_debug(self, upp_bytes: bytes) -> None:
         self.state.last_pre_bsp_payload_bin_path = ""
@@ -1194,6 +1443,7 @@ class LocalIsdrSession:
         return value
 
     def _build_session_bsp(self, rsp_session: Any):
+        _ensure_pysim_session_bound_support()
         if BspInstance is None:
             raise RuntimeError("pySim eSIM BSP support is unavailable.")
         if not isinstance(getattr(rsp_session, "eid", None), str) or len(rsp_session.eid) == 0:
@@ -1210,6 +1460,7 @@ class LocalIsdrSession:
 
     @staticmethod
     def _advance_session_bsp_to_a3_prelude(session_bsp: Any, profile_metadata: Any) -> bytes:
+        _ensure_pysim_session_bound_support()
         try:
             from pySim.esim import rsp as pysim_rsp
         except Exception as error:
@@ -1224,6 +1475,7 @@ class LocalIsdrSession:
     def _advance_session_bsp_through_a2(
         session_bsp: Any, ppk_enc: bytes, ppk_mac: bytes, initial_mcv: bytes
     ) -> None:
+        _ensure_pysim_session_bound_support()
         if gen_replace_session_keys is None:
             raise RuntimeError("pySim gen_replace_session_keys is unavailable.")
         rsk_bin = gen_replace_session_keys(ppk_enc, ppk_mac, initial_mcv)
@@ -1253,9 +1505,7 @@ class LocalIsdrSession:
                 if element_end <= start or element_start >= end:
                     continue
                 overlaps.append(label)
-            overlap_text = ", ".join(overlaps[:4])
-            if len(overlaps) > 4:
-                overlap_text += ", ..."
+            overlap_text = ", ".join(overlaps)
             summary = f"plaintext[{start}:{end}]"
             if len(overlap_text) > 0:
                 summary += f" overlaps {overlap_text}"
@@ -1266,41 +1516,72 @@ class LocalIsdrSession:
 
     @staticmethod
     def _upp_protected_chunk_size() -> int:
+        _ensure_pysim_session_bound_support()
         if BspInstance is None:
             raise RuntimeError("pySim eSIM support is unavailable.")
         return int(BspInstance(b"\x00" * 16, b"\x11" * 16, b"\x22" * 16).max_payload_size)
 
     def _describe_upp_element_ranges(self, profile_bytes: bytes) -> list[tuple[int, int, str]]:
-        labels: list[str] = []
-        if pysim_saip is not None:
-            try:
-                pes = list(pysim_saip.ProfileElementSequence.from_der(bytes(profile_bytes)))
-                for pe in pes:
-                    pe_type = str(getattr(pe, "type", "") or "").strip()
-                    header_name = str(getattr(pe, "header_name", "") or "").strip()
-                    template_id = str(getattr(pe, "templateID", "") or "").strip()
-                    label = pe_type or header_name or "profileElement"
-                    if len(template_id) > 0:
-                        label += f" ({template_id})"
-                    labels.append(label)
-            except Exception:
-                labels = []
-
-        ranges: list[tuple[int, int, str]] = []
+        raw_elements: list[tuple[int, int, bytes, bytes]] = []
         offset = 0
-        index = 0
         while offset < len(profile_bytes):
             try:
-                tag_bytes, _value, _raw_tlv, next_offset = self._read_tlv(profile_bytes, offset)
+                tag_bytes, _value, raw_tlv, next_offset = self._read_tlv(profile_bytes, offset)
             except Exception:
                 break
-            label = f"TLV[{index + 1}] {tag_bytes.hex().upper()}"
-            if index < len(labels):
-                label += f" {labels[index]}"
-            ranges.append((offset, next_offset, label))
+            raw_elements.append((offset, next_offset, tag_bytes, raw_tlv))
             offset = next_offset
-            index += 1
+
+        labels = self._describe_upp_element_labels(bytes(profile_bytes), raw_elements)
+
+        ranges: list[tuple[int, int, str]] = []
+        for index, (start_offset, next_offset, tag_bytes, _raw_tlv) in enumerate(raw_elements):
+            label = f"TLV[{index + 1}] {tag_bytes.hex().upper()}"
+            if index < len(labels) and len(labels[index]) > 0:
+                label += f" {labels[index]}"
+            ranges.append((start_offset, next_offset, label))
         return ranges
+
+    def _describe_upp_element_labels(
+        self,
+        profile_bytes: bytes,
+        raw_elements: list[tuple[int, int, bytes, bytes]],
+    ) -> list[str]:
+        labels = ["" for _ in raw_elements]
+        _ensure_pysim_session_bound_support()
+        if pysim_saip is None:
+            return labels
+
+        try:
+            pes = list(pysim_saip.ProfileElementSequence.from_der(bytes(profile_bytes)))
+        except Exception:
+            pes = []
+        for index, pe in enumerate(pes[: len(labels)]):
+            labels[index] = self._format_profile_element_label(pe)
+
+        profile_element_cls = getattr(pysim_saip, "ProfileElement", None)
+        if profile_element_cls is None:
+            return labels
+
+        for index, (_start, _end, _tag_bytes, raw_tlv) in enumerate(raw_elements):
+            if len(labels[index]) > 0:
+                continue
+            try:
+                pe = profile_element_cls.from_der(raw_tlv)
+            except Exception:
+                continue
+            labels[index] = self._format_profile_element_label(pe)
+        return labels
+
+    @staticmethod
+    def _format_profile_element_label(pe: Any) -> str:
+        pe_type = str(getattr(pe, "type", "") or "").strip()
+        header_name = str(getattr(pe, "header_name", "") or "").strip()
+        template_id = str(getattr(pe, "templateID", "") or "").strip()
+        label = pe_type or header_name or "profileElement"
+        if len(template_id) > 0:
+            label += f" ({template_id})"
+        return label
 
     def _describe_bpp_crypto_debug(
         self,
@@ -1310,6 +1591,7 @@ class LocalIsdrSession:
         a3_plaintext_chunk_size: int = 0,
         use_ppk_replace_session_keys: bool = False,
     ) -> list[str]:
+        _ensure_pysim_session_bound_support()
         if BspInstance is None:
             return []
         if rsp_session is None:
@@ -1432,6 +1714,7 @@ class LocalIsdrSession:
         dp_pb: Any,
         a3_plaintext_chunk_size: int,
     ) -> bytes:
+        _ensure_pysim_session_bound_support()
         try:
             import pySim.esim.es8p as pysim_es8p
             from pySim.esim import rsp as pysim_rsp
@@ -1487,6 +1770,7 @@ class LocalIsdrSession:
         euicc_otpk: bytes,
         profile_metadata: Any,
     ):
+        _ensure_pysim_session_bound_support()
         if PySimRspSessionState is None:
             raise RuntimeError("pySim RspSessionState is unavailable in this environment.")
         host_id = bytes(self.cfg.BPP_HOST_ID)
@@ -1518,6 +1802,7 @@ class LocalIsdrSession:
         return rsp_session
 
     def _build_pysim_dp_pb_pair(self):
+        _ensure_pysim_session_bound_support()
         if CertAndPrivkey is None:
             raise RuntimeError("pySim certificate wrapper is unavailable in this environment.")
         if self._cert_pb is None or self._key_pb is None:
@@ -1526,6 +1811,7 @@ class LocalIsdrSession:
         return CertAndPrivkey(cert=certificate, priv_key=self._key_pb)
 
     def _build_pysim_profile_metadata(self, profile_bytes: bytes):
+        _ensure_pysim_session_bound_support()
         if ProfileMetadata is None:
             raise RuntimeError("pySim profile metadata builder is unavailable in this environment.")
         metadata = self._build_effective_metadata_document(profile_bytes)
@@ -1606,18 +1892,31 @@ class LocalIsdrSession:
         return sanitized
 
     def _derive_metadata_document_from_profile(self, profile_bytes: bytes) -> dict[str, Any]:
+        _ensure_pysim_session_bound_support()
         profile_name = "Local profile"
         profile_iccid = ""
+        # Some UPPs trip full pySim SAIP decoding on later PEs. The header is
+        # still the first TLV and already carries the identity fields we need.
+        header_profile_name, header_profile_iccid = self._extract_profile_identity_from_header_tlv(profile_bytes)
+        if len(header_profile_name) > 0:
+            profile_name = header_profile_name
+        if len(header_profile_iccid) > 0:
+            profile_iccid = header_profile_iccid
         if pysim_saip is not None:
             try:
                 pes = pysim_saip.ProfileElementSequence.from_der(bytes(profile_bytes))
                 header = pes.get_pe_for_type("header")
                 if header is not None and isinstance(header.decoded, dict):
                     decoded_header = header.decoded
-                    profile_name = str(decoded_header.get("profileType", "")).strip() or profile_name
+                    profile_type = decoded_header.get("profileType", "")
+                    if isinstance(profile_type, (bytes, bytearray, memoryview)):
+                        decoded_profile_name = self._decode_text_or_hex(bytes(profile_type)).strip()
+                    else:
+                        decoded_profile_name = str(profile_type or "").strip()
+                    profile_name = decoded_profile_name or profile_name
                     iccid_value = decoded_header.get("iccid", b"")
-                    if isinstance(iccid_value, bytes) and len(iccid_value) > 0:
-                        profile_iccid = self._decode_bcd_digits(iccid_value)
+                    if isinstance(iccid_value, (bytes, bytearray, memoryview)) and len(iccid_value) > 0:
+                        profile_iccid = self._decode_bcd_digits(bytes(iccid_value))
             except Exception:
                 pass
         return {
@@ -1656,6 +1955,29 @@ class LocalIsdrSession:
             },
         }
 
+    def _extract_profile_identity_from_header_tlv(self, profile_bytes: bytes) -> tuple[str, str]:
+        profile_name = ""
+        profile_iccid = ""
+        try:
+            tag_bytes, value, _, _ = self._read_tlv(profile_bytes, 0)
+        except Exception:
+            return profile_name, profile_iccid
+        if tag_bytes != b"\xA0":
+            return profile_name, profile_iccid
+
+        offset = 0
+        while offset < len(value):
+            try:
+                child_tag, child_value, _, next_offset = self._read_tlv(value, offset)
+            except Exception:
+                break
+            if child_tag == b"\x82" and len(profile_name) == 0:
+                profile_name = self._decode_text_or_hex(child_value).strip()
+            elif child_tag == b"\x83" and len(profile_iccid) == 0:
+                profile_iccid = self._decode_bcd_digits(child_value)
+            offset = next_offset
+        return profile_name, profile_iccid
+
     @staticmethod
     def _merge_metadata_documents(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
         if len(override) == 0:
@@ -1691,6 +2013,27 @@ class LocalIsdrSession:
             raise ValueError(f"GetEID returned unexpected tag {tag.hex().upper()}.")
         return self._decode_bcd_digits(value)
 
+    def _read_card_ecasd_issuer_identity(self) -> dict[str, str]:
+        aid_ecasd = bytes.fromhex("A0000005591010FFFFFFFF8900000200")
+        select_ecasd = bytes([0x00, 0xA4, 0x04, 0x00, len(aid_ecasd)]) + aid_ecasd
+        original_selected = self.state.isdr_selected
+        try:
+            self.apdu_channel.send(select_ecasd, "LOCAL: Select ECASD")
+            response = self.apdu_channel.send(bytes.fromhex("80CA004200"), "LOCAL: GetIssuerIdentificationNumber")
+        finally:
+            if original_selected:
+                try:
+                    self.select_isdr()
+                except Exception:
+                    pass
+        tag, value, _, _ = self._read_tlv(response, 0)
+        if tag != b"\x42":
+            raise ValueError(
+                f"GetIssuerIdentificationNumber returned unexpected tag {tag.hex().upper()}."
+            )
+        issuer_number = self._decode_bcd_digits(value)
+        return infer_ecasd_issuer_identity(issuer_number)
+
     def _load_profile_from_bytes(self, bpp_bytes: bytes) -> bytes:
         if self.state.session_open is False:
             raise RuntimeError("No active local SCP11 session.")
@@ -1700,7 +2043,7 @@ class LocalIsdrSession:
             raise ValueError("BPP is empty.")
         self.state.last_bpp_layout_lines = self._describe_bpp_layout(bpp_bytes)
         self._update_bpp_structure_debug(bpp_bytes)
-        self.state.bpp_command_descriptions = self._describe_bpp_command_sequence(bpp_bytes)
+        self.state.bpp_command_descriptions = self._describe_bpp_command_id_sequence(bpp_bytes)
         segments = self._segment_bound_profile_package(bpp_bytes)
         last_response = b""
         for index, segment in enumerate(segments, start=1):
@@ -1717,10 +2060,11 @@ class LocalIsdrSession:
             failure_summary = self._summarize_profile_installation_result(last_response)
             if len(failure_summary) == 0:
                 failure_summary = "ProfileInstallationResult reported failure."
+            indented_failure_summary = self._indent_text_block(failure_summary, prefix="  ")
             raise RuntimeError(
                 f"\n{'=' * 64}\n"
                 f"  LOAD-PROFILE FAILED\n"
-                f"  {failure_summary}\n"
+                f"{indented_failure_summary}\n"
                 f"{'=' * 64}"
             )
         return last_response
@@ -1918,6 +2262,27 @@ class LocalIsdrSession:
             child_offset = next_offset
         return descriptions
 
+    def _describe_bpp_command_id_sequence(self, bpp_bytes: bytes) -> list[str]:
+        descriptions: list[str] = []
+        root_tag, root_value, _, _ = self._read_tlv(bpp_bytes, 0)
+        if root_tag != bytes.fromhex("BF36"):
+            return descriptions
+        child_offset = 0
+        while child_offset < len(root_value):
+            child_tag, _child_value, _child_raw, next_offset = self._read_tlv(root_value, child_offset)
+            if child_tag == bytes.fromhex("BF23"):
+                descriptions.append("BF23.InitialiseSecureChannelRequest")
+            elif child_tag == b"\xA0":
+                descriptions.append("A0.ConfigureISDPRequest")
+            elif child_tag == b"\xA1":
+                descriptions.append("A1.StoreMetadataRequest")
+            elif child_tag == b"\xA2":
+                descriptions.append("A2.ReplaceSessionKeys")
+            elif child_tag == b"\xA3":
+                descriptions.append("A3.ProtectedProfilePackageCommand")
+            child_offset = next_offset
+        return descriptions
+
     def _describe_bpp_layout(self, bpp_bytes: bytes) -> list[str]:
         lines: list[str] = []
         if len(bpp_bytes) == 0:
@@ -1974,6 +2339,112 @@ class LocalIsdrSession:
                 lines.append(f"{child_tag.hex().upper()} total={len(child_raw)} value={len(child_value)}")
             child_offset = next_offset
         return lines
+
+    @staticmethod
+    def _split_overlap_labels(overlap_text: str) -> list[str]:
+        labels: list[str] = []
+        for raw_label in str(overlap_text or "").split(","):
+            label = str(raw_label).strip()
+            if len(label) == 0:
+                continue
+            if label == "...":
+                continue
+            labels.append(label)
+        return labels
+
+    def _parse_a3_layout_members(self) -> list[dict[str, Any]]:
+        members: list[dict[str, Any]] = []
+        pattern = re.compile(
+            r"^A3\[(?P<index>\d+)\] len=(?P<length>\d+) "
+            r"plaintext\[(?P<start>\d+):(?P<end>\d+)\]"
+            r"(?: overlaps (?P<overlap>.*))?$"
+        )
+        for line in self.state.last_bpp_layout_lines:
+            match = pattern.match(str(line))
+            if match is None:
+                continue
+            members.append(
+                {
+                    "index": int(match.group("index")),
+                    "length": int(match.group("length")),
+                    "start": int(match.group("start")),
+                    "end": int(match.group("end")),
+                    "overlap": str(match.group("overlap") or "").strip(),
+                }
+            )
+        return members
+
+    @staticmethod
+    def _a3_member_block_window(member_index: int, protected_length: int, apdu_chunk_size: int = 120) -> str:
+        if apdu_chunk_size <= 0:
+            return f"{member_index}.0"
+        if protected_length <= 0:
+            return f"{member_index}.0"
+        block_count = (protected_length + apdu_chunk_size - 1) // apdu_chunk_size
+        return f"{member_index}.0 -> {member_index}.{block_count - 1}"
+
+    def _describe_a3_failure_focus_parts(self) -> list[str]:
+        members = self._parse_a3_layout_members()
+        if len(members) == 0:
+            return []
+
+        terminal_label = ""
+        for member in reversed(members):
+            labels = self._split_overlap_labels(str(member.get("overlap", "")))
+            if len(labels) == 0:
+                continue
+            terminal_label = labels[-1]
+            break
+        if len(terminal_label) == 0:
+            return []
+
+        candidates: list[dict[str, Any]] = []
+        for member in members:
+            labels = self._split_overlap_labels(str(member.get("overlap", "")))
+            if terminal_label not in labels:
+                continue
+            candidate = dict(member)
+            candidate["labels"] = labels
+            candidates.append(candidate)
+        if len(candidates) == 0:
+            return []
+
+        likely = candidates[0]
+        for member in candidates:
+            labels = member.get("labels", [])
+            if isinstance(labels, list) and len(labels) > 1:
+                likely = member
+                break
+
+        likely_index = int(likely.get("index", 0))
+        likely_length = int(likely.get("length", 0))
+        likely_start = int(likely.get("start", 0))
+        likely_end = int(likely.get("end", 0))
+        likely_overlap = str(likely.get("overlap", "")).strip()
+        parts = [f"likelyProtectedChunk=A3[{likely_index}]"]
+        parts.append(f"  blocks={self._a3_member_block_window(likely_index, likely_length)}")
+        parts.append(f"  plaintext[{likely_start}:{likely_end}]")
+        if len(likely_overlap) > 0:
+            parts.append("  overlaps:")
+            for label in self._split_overlap_labels(likely_overlap):
+                parts.append(f"    {label}")
+
+        tail = candidates[-1]
+        tail_index = int(tail.get("index", 0))
+        if tail_index != likely_index:
+            tail_length = int(tail.get("length", 0))
+            tail_start = int(tail.get("start", 0))
+            tail_end = int(tail.get("end", 0))
+            tail_overlap = str(tail.get("overlap", "")).strip()
+            continuation = f"terminalChunkContinuation=A3[{tail_index}]"
+            parts.append(continuation)
+            parts.append(f"  blocks={self._a3_member_block_window(tail_index, tail_length)}")
+            parts.append(f"  plaintext[{tail_start}:{tail_end}]")
+            if len(tail_overlap) > 0:
+                parts.append("  overlaps:")
+                for label in self._split_overlap_labels(tail_overlap):
+                    parts.append(f"    {label}")
+        return parts
 
     def _update_bpp_structure_debug(self, bpp_bytes: bytes) -> None:
         has_replace_session_keys = self._bpp_contains_sequence_tag(bpp_bytes, b"\xA2")
@@ -2306,6 +2777,7 @@ class LocalIsdrSession:
         candidate = os.path.expandvars(os.path.expanduser(str(path_text).strip()))
         if os.path.isabs(candidate):
             return os.path.abspath(candidate)
+        candidate = remap_legacy_workspace_relative(candidate)
         repo_resolved = self._resolve_repo_relative_candidate(candidate)
         if repo_resolved is not None:
             return repo_resolved
@@ -2942,36 +3414,42 @@ class LocalIsdrSession:
         elif isinstance(result_detail, int):
             headline = f"[ERROR {result_detail}]"
 
-        context_parts = []
+        lines = []
+        if len(headline) > 0:
+            lines.append(headline)
         if isinstance(result_detail, int):
-            context_parts.append(f"errorReason={result_detail}")
+            lines.append(f"errorReason={result_detail}")
         result_code = details.get("resultCode")
         if isinstance(result_code, int):
             cmd_desc = self._describe_bpp_command_id(result_code)
-            context_parts.append(f"bppCommandId={result_code}")
+            lines.append(f"bppCommandId={result_code}")
             if len(cmd_desc) > 0:
-                context_parts.append(f"command={cmd_desc}")
+                lines.append(f"command={cmd_desc}")
+                if cmd_desc == "A3.ProtectedProfilePackageCommand":
+                    lines.extend(self._describe_a3_failure_focus_parts())
         iccid = details.get("iccid")
         if isinstance(iccid, str) and len(iccid) > 0:
-            context_parts.append(f"iccid={iccid}")
+            lines.append(f"iccid={iccid}")
         aid = details.get("aid")
         if isinstance(aid, bytes) and len(aid) > 0:
-            context_parts.append(f"aid={aid.hex().upper()}")
+            lines.append(f"aid={aid.hex().upper()}")
         sima_response = details.get("simaResponse")
         if isinstance(sima_response, bytes) and len(sima_response) > 0:
-            context_parts.append(f"simaResponse={sima_response.hex().upper()}")
+            lines.append(f"simaResponse={sima_response.hex().upper()}")
         smdp_oid = details.get("smdpOid")
         if isinstance(smdp_oid, str) and len(smdp_oid) > 0:
-            context_parts.append(f"smdpOid={smdp_oid}")
+            lines.append(f"smdpOid={smdp_oid}")
         notification_address = details.get("notificationAddress")
         if isinstance(notification_address, str) and len(notification_address) > 0:
-            context_parts.append(f"notificationAddress={notification_address}")
+            lines.append(f"notificationAddress={notification_address}")
+        return "\n".join(lines)
 
-        if len(headline) > 0 and len(context_parts) > 0:
-            return f"{headline} | {', '.join(context_parts)}"
-        if len(headline) > 0:
-            return headline
-        return ", ".join(context_parts)
+    @staticmethod
+    def _indent_text_block(text: str, prefix: str = "  ") -> str:
+        lines = str(text).splitlines()
+        if len(lines) == 0:
+            return prefix.rstrip()
+        return "\n".join(f"{prefix}{line}" if len(line) > 0 else prefix.rstrip() for line in lines)
 
     def _describe_bpp_command_id(self, command_id: int) -> str:
         if command_id <= 0:

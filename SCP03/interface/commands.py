@@ -54,17 +54,18 @@ class CommandRegistry :
         'LOGOUT':(shell ._handle_logout ,""),
         'CLS':(lambda :CommandRegistry ._clear_screen (),""),
         'OTA':(shell ._run_scp80_tool ,""),
+        'STK':(shell ._run_stk_shell ,"[Commands]"),
 
 
         'MANAGE-PROFILE':(lambda :ShellInteractiveWizards .run_manage_profile_wizard (shell ),""),
-        'LIST':(lambda :shell .gp_ctrl .sgp22 .list_profiles (),""),
-        'LIST-IOT':(lambda :shell .gp_ctrl .sgp22 .list_profiles (),""),
-        'GET-IOT':(lambda :shell .gp_ctrl .sgp22 .run_sgp22_scan (),""),
+        'LIST':(shell ._handle_list_profiles ,""),
+        'LIST-IOT':(shell ._handle_list_profiles ,""),
+        'GET-IOT':(shell ._handle_profile_scan ,""),
 
 
-        'APPS':(lambda :shell .gp_ctrl .list_registry ('APPS'),""),
-        'PKGS':(lambda :shell .gp_ctrl .list_registry ('PACKAGES'),""),
-        'SD':(lambda :shell .gp_ctrl .list_registry ('SD'),""),
+        'APPS':(lambda :shell ._handle_registry ('APPS'),""),
+        'PKGS':(lambda :shell ._handle_registry ('PACKAGES'),""),
+        'SD':(lambda :shell ._handle_registry ('SD'),""),
         'GET-DATA':(lambda :ShellInteractiveWizards .run_get_data_wizard (shell ),""),
 
 
@@ -81,11 +82,11 @@ class CommandRegistry :
 
 
         'FS-ADMIN':(lambda :ShellInteractiveWizards .run_fs_admin_wizard (shell ),""),
-        'SCAN':(shell .fs_ctrl .scan_tree ,""),
+        'SCAN':(shell ._handle_scan_tree ,""),
         'REPORT':(lambda :ShellInteractiveWizards .run_fs_report_wizard (shell ),""),
         'SELECT':(shell ._handle_select ,"<Path/FID>"),
-        'READ':(shell .fs_ctrl .read_binary ,"[Path]"),
-        'RECORD':(shell .fs_ctrl .read_record ,"<N/ALL/Start-End> [Path]"),
+        'READ':(shell ._handle_read_binary ,"[Path]"),
+        'RECORD':(shell ._handle_read_record ,"<N/ALL/Start-End> [Path]"),
         'UPDATE':(shell ._handle_update ,"BINARY/RECORD <Data>"),
         'DUMP-FS':(shell .do_dump_fs ,"[OutputDir]"),
         'VALIDATE':(shell ._handle_validate ,"[ALL|MF|USIM|ISIM] [ProfileDump.yaml|ProfileDump.json]"),
@@ -163,6 +164,7 @@ class CommandRegistry :
         'RECORD',
         'RUN',
         'GUIDE',
+        'STK',
         'DEBUG',
         'VERBOSE',
         'DUMP-FS',

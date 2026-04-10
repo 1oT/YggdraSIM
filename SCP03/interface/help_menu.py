@@ -33,6 +33,7 @@ class HelpMenu :
         print ("  LOGOUT         : Close the secure session.")
         print ("  CLS            : Clear the terminal screen.")
         print ("  OTA            : Switch to SCP80 Over-The-Air toolkit.")
+        print ("  STK [Commands] : Enter the SCP03 STK subsystem (INIT/SMS/CALL/DATA simulation shell).")
 
         print (f"\n{Config.Colors.CYAN}[ GlobalPlatform Execution Wizards ]{Config.Colors.ENDC}")
         print ("  WIZARD         : Unified installer for Applets, Packages, and Extradition.")
@@ -67,7 +68,7 @@ class HelpMenu :
         print (f"\n{Config.Colors.CYAN}[ Environment Configuration ]{Config.Colors.ENDC}")
         print ("  CONFIG         : Wizard to update SCP03 keys, SCP02 keys, ADM, or Target AID.")
         print ("  SHOW           : Display current SQLite-backed SCP03 configuration.")
-        print ("  AIDS           : List registered AID aliases from `aid.txt`.")
+        print ("  AIDS           : List registered AID aliases from `Workspace/SCP03/aid.txt`.")
         print ("  SET-AID-ALIAS  : <Name> <AID> - Map a friendly name to an AID.")
         print ("  SET-DEFAULT    : Factory reset configuration to default test keys.")
         print ("  BINDS          : Manage custom macro commands and parameters.")

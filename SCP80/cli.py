@@ -19,6 +19,7 @@ import os
 import re
 import sys 
 
+from yggdrasim_common.process_debug import is_global_debug_enabled
 from yggdrasim_common.quit_control import quit_all
 
 if __package__ :
@@ -116,6 +117,7 @@ class OtaShell :
         self .decoder =SmartDecoder ()
         self .last_command_ok =True 
         self .current_iccid =""
+        self .global_debug =is_global_debug_enabled ()
 
     def _bind_inventory_profile (self ,iccid :str ,announce :bool =True )->bool :
         normalized_iccid =''.join (ch for ch in str (iccid or "")if ch .isdigit ())
@@ -383,7 +385,7 @@ class OtaShell :
         return [apdu .apdu_hex for apdu in plan .apdus ]
 
     def do_build (self ,*args ):
-        verbose ="-v"in args 
+        verbose =bool (getattr (self ,"global_debug",False ))or "-v"in args 
         override_payload =self ._override_payload_from_args (args )
         try :
             payload_override =None 
@@ -395,7 +397,7 @@ class OtaShell :
             print (f"Error: {e}")
 
     def do_send (self ,*args ):
-        verbose ="-v"in args 
+        verbose =bool (getattr (self ,"global_debug",False ))or "-v"in args 
         try :
             override_payload =self ._override_payload_from_args (args )
             payload_override =None 
@@ -439,10 +441,11 @@ class OtaShell :
         fid ,le =self .decoder .sniff_context (raw_apdu )
 
         try :
-            plan =self .builder .build_plan (verbose =False ,override_payload =raw_apdu )
+            verbose =bool (getattr (self ,"global_debug",False ))
+            plan =self .builder .build_plan (verbose =verbose ,override_payload =raw_apdu )
             if plan .is_concatenated :
                 self ._print_reader_protocol_caveat (multipart_required =True )
-            result =self .transport .send_ota_sequence (self ._plan_apdu_list_for_transport (plan ),verbose =False )
+            result =self .transport .send_ota_sequence (self ._plan_apdu_list_for_transport (plan ),verbose =verbose )
             self .last_command_ok =bool (result .get ("delivered"))
             self ._print_result (result )
 

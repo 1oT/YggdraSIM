@@ -9,7 +9,14 @@ import textwrap
 from typing import Any, Callable, Optional
 
 from yggdrasim_common.plugin_runtime import ensure_plugins_loaded, extend_target_with_plugins
+from yggdrasim_common.process_debug import (
+    add_debug_argument,
+    is_global_debug_enabled,
+    set_global_debug,
+)
 from yggdrasim_common.quit_control import quit_all, QuitAllRequested
+from yggdrasim_common.session_recording import ShellSessionRecorder
+from yggdrasim_common.structured_output import dump_structured_payload
 from SCP11.shared.discovery_snapshot import render_consolidated_discovery_snapshot
 
 try:
@@ -23,6 +30,7 @@ except Exception:
     decode_eim_configuration_entries = None
 
 from .config import EimLocalConfig
+from .eim_package_codec import resolve_package_runtime_hints
 from .polling_bridge import LocalizedPollingBridge
 from .session import EimLocalSession
 from yggdrasim_common.polling_plugin_support import (
@@ -60,7 +68,15 @@ class EimLocalShell:
     def __init__(self) -> None:
         self.cfg = EimLocalConfig()
         self.session = EimLocalSession(cfg=self.cfg)
+        self._global_debug = is_global_debug_enabled()
+        self._cached_poll_target_fqdns: list[str] = []
+        if self._global_debug:
+            self._set_transport_debug(True)
         self._poll_bridge: Optional[LocalizedPollingBridge] = None
+        self._recorder = ShellSessionRecorder(
+            shell_name="scp11_eim_local",
+            module_entry_point="python -m SCP11.eim_local",
+        )
         self._history_file = os.path.join(
             os.path.expanduser("~"),
             ".yggdrasim_eim_local_history",
@@ -68,6 +84,7 @@ class EimLocalShell:
         self._commands: dict[str, Callable[[str], None]] = {
             "HELP": self._cmd_help,
             "PATHS": self._cmd_paths,
+            "RECORD": self._cmd_record,
             "STATUS": self._cmd_status,
             "LIST": self._cmd_list_profiles,
             "DISCOVER": self._cmd_discover,
@@ -97,6 +114,7 @@ class EimLocalShell:
             "EIM-PACKAGE": self._cmd_eim_package,
             "EIM-PACKAGE-CLEAR": self._cmd_eim_package_clear,
             "EIM-PACKAGE-LINT": self._cmd_eim_package_lint,
+            "EIM-PACKAGE-EXPLAIN": self._cmd_eim_package_explain,
             "EIM-PACKAGE-ISSUE": self._cmd_eim_package_issue,
             "EIM-PACKAGE-ISSUE-ALL": self._cmd_eim_package_issue_all,
             "EIM-CERTS": self._cmd_eim_certs,
@@ -150,10 +168,19 @@ class EimLocalShell:
                 "summary": "Show Direct Auth, IPAd polling, IPAe polling, and localized bridge endpoints.",
                 "examples": ["PATHS"],
             },
+            "RECORD": {
+                "usage": "RECORD [STATUS|START [outputPath]|STOP [outputPath]|CANCEL]",
+                "summary": "Capture replayable shell commands plus the underlying APDU trace.",
+                "examples": [
+                    "RECORD STATUS",
+                    "RECORD START reports/eim_session.yaml",
+                    "RECORD STOP",
+                ],
+            },
             "STATUS": {"usage": "STATUS", "summary": "Show current runtime/session state.", "examples": ["STATUS"]},
             "LIST": {"usage": "LIST", "summary": "List known profile aliases (AID registry) for profile state commands.", "examples": ["LIST"]},
             "DISCOVER": {"usage": "DISCOVER", "summary": "Run the shared SCP11 SGP.22/SGP.32 discovery snapshot.", "examples": ["DISCOVER"]},
-            "LOAD-PROFILE": {"usage": "LOAD-PROFILE [profilePath]", "summary": "Run PrepareDownload + profile load chain.", "examples": ["LOAD-PROFILE", "LOAD-PROFILE SCP11/eim_local/profile/test_profile.txt"]},
+            "LOAD-PROFILE": {"usage": "LOAD-PROFILE [profilePath]", "summary": "Run PrepareDownload + profile load chain.", "examples": ["LOAD-PROFILE", "LOAD-PROFILE Workspace/LocalEIM/profile/test_profile.txt"]},
             "ENABLE-PROFILE": {"usage": "ENABLE-PROFILE <iccid|aid|alias>", "summary": "Enable profile by ICCID, AID, or alias.", "examples": ["ENABLE-PROFILE ISDP1", "ENABLE-PROFILE 8904903200000000000F"]},
             "DISABLE-PROFILE": {"usage": "DISABLE-PROFILE <iccid|aid|alias>", "summary": "Disable profile by ICCID, AID, or alias.", "examples": ["DISABLE-PROFILE ISDP1"]},
             "DELETE-PROFILE": {"usage": "DELETE-PROFILE <iccid|aid|alias>", "summary": "Delete profile by ICCID, AID, or alias.", "examples": ["DELETE-PROFILE ISDP1"]},
@@ -171,7 +198,7 @@ class EimLocalShell:
                 "summary": "Run template-driven ES10c eUICCMemoryReset directly on ISD-R.",
                 "examples": [
                     "EUICC-MEMORY-RESET",
-                    "EUICC-MEMORY-RESET SCP11/eim_local/eim_packages/templates/template_euicc_memory_reset.json",
+                    "EUICC-MEMORY-RESET Workspace/LocalEIM/eim_packages/templates/template_euicc_memory_reset.json",
                 ],
             },
             "ISDR-GET-EIM-CONFIG": {"usage": "ISDR-GET-EIM-CONFIG", "summary": "Decode/report live BF55 eIM rows from the card.", "examples": ["ISDR-GET-EIM-CONFIG"]},
@@ -190,34 +217,35 @@ class EimLocalShell:
             "IPAE-AUTHENTICATE": {"usage": "IPAE-AUTHENTICATE [matchingId]", "summary": "Seed handover context with transactionId.", "examples": ["IPAE-AUTHENTICATE", "IPAE-AUTHENTICATE EIM-TEST-001"]},
             "IPAE-DOWNLOAD": {"usage": "IPAE-DOWNLOAD [profilePath] [matchingId]", "summary": "Run handover-linked download/load profile sequence.", "examples": ["IPAE-DOWNLOAD", "IPAE-DOWNLOAD test_profile.txt EIM-TEST-001"]},
             "HANDOVER-SET": {"usage": "HANDOVER-SET <transactionIdHex> [matchingId]", "summary": "Manually seed handover context.", "examples": ["HANDOVER-SET 01020304AABBCCDD MID-1"]},
-            "HANDOVER-STATUS": {"usage": "HANDOVER-STATUS", "summary": "Print handover context JSON.", "examples": ["HANDOVER-STATUS"]},
+            "HANDOVER-STATUS": {"usage": "HANDOVER-STATUS [--json|--yaml]", "summary": "Print the current handover context.", "examples": ["HANDOVER-STATUS", "HANDOVER-STATUS --yaml"]},
             "EIM-PACKAGE": {"usage": "EIM-PACKAGE [packagePath]", "summary": "Show active package or set package override.", "examples": ["EIM-PACKAGE", "EIM-PACKAGE default_eim_package.json"]},
             "EIM-PACKAGE-CLEAR": {"usage": "EIM-PACKAGE-CLEAR", "summary": "Clear eIM package override path.", "examples": ["EIM-PACKAGE-CLEAR"]},
-            "EIM-PACKAGE-LINT": {"usage": "EIM-PACKAGE-LINT [packagePath] [--strict-exec]", "summary": "Run detailed package lint + spec checks.", "examples": ["EIM-PACKAGE-LINT", "EIM-PACKAGE-LINT --strict-exec"]},
+            "EIM-PACKAGE-LINT": {"usage": "EIM-PACKAGE-LINT [packagePath] [--strict-exec] [--json|--yaml]", "summary": "Run detailed package lint + spec checks.", "examples": ["EIM-PACKAGE-LINT", "EIM-PACKAGE-LINT --strict-exec", "EIM-PACKAGE-LINT --yaml"]},
+            "EIM-PACKAGE-EXPLAIN": {"usage": "EIM-PACKAGE-EXPLAIN [packagePath] [--strict-exec] [--json|--yaml]", "summary": "Explain runtime hints, spec checks, and signing-cert selection for a package.", "examples": ["EIM-PACKAGE-EXPLAIN", "EIM-PACKAGE-EXPLAIN --strict-exec", "EIM-PACKAGE-EXPLAIN Workspace/LocalEIM/eim_packages/templates/template_add_initial_eim.json --yaml"]},
             "EIM-PACKAGE-ISSUE": {"usage": "EIM-PACKAGE-ISSUE [packagePath]", "summary": "Issue one package based on package_type.", "examples": ["EIM-PACKAGE-ISSUE"]},
-            "EIM-PACKAGE-ISSUE-ALL": {"usage": "EIM-PACKAGE-ISSUE-ALL [directory]", "summary": "Issue all JSON package files in directory.", "examples": ["EIM-PACKAGE-ISSUE-ALL", "EIM-PACKAGE-ISSUE-ALL SCP11/eim_local/eim_packages"]},
-            "EIM-CERTS": {"usage": "EIM-CERTS [--json] [packagePath] [certPath]", "summary": "List signing cert inventory and preview the auto-selected match for the card.", "examples": ["EIM-CERTS", "EIM-CERTS --json", "EIM-CERTS SCP11/eim_local/eim_packages/templates/template_add_initial_eim.json"]},
-            "HOTFOLDER": {"usage": "HOTFOLDER [directory]", "summary": "Show active hotfolder or set hotfolder override.", "examples": ["HOTFOLDER", "HOTFOLDER SCP11/eim_local/eim_packages/hotfolder"]},
+            "EIM-PACKAGE-ISSUE-ALL": {"usage": "EIM-PACKAGE-ISSUE-ALL [directory]", "summary": "Issue all JSON package files in directory.", "examples": ["EIM-PACKAGE-ISSUE-ALL", "EIM-PACKAGE-ISSUE-ALL Workspace/LocalEIM/eim_packages"]},
+            "EIM-CERTS": {"usage": "EIM-CERTS [--json|--yaml] [packagePath] [certPath]", "summary": "List signing cert inventory and preview the auto-selected match for the card.", "examples": ["EIM-CERTS", "EIM-CERTS --json", "EIM-CERTS --yaml", "EIM-CERTS Workspace/LocalEIM/eim_packages/templates/template_add_initial_eim.json"]},
+            "HOTFOLDER": {"usage": "HOTFOLDER [directory]", "summary": "Show active hotfolder or set hotfolder override.", "examples": ["HOTFOLDER", "HOTFOLDER Workspace/LocalEIM/eim_packages/hotfolder"]},
             "HOTFOLDER-CLEAR": {"usage": "HOTFOLDER-CLEAR", "summary": "Clear hotfolder override path.", "examples": ["HOTFOLDER-CLEAR"]},
-            "HOTFOLDER-LIST": {"usage": "HOTFOLDER-LIST [directory] [--json]", "summary": "Preview the effective poll queue (fixed fixtures + hotfolder) without issuing.", "examples": ["HOTFOLDER-LIST", "HOTFOLDER-LIST --json", "HOTFOLDER-LIST SCP11/eim_local/eim_packages/hotfolder --json"]},
-            "HOTFOLDER-POLL": {"usage": "HOTFOLDER-POLL [directory]", "summary": "Return effective poll metadata JSON for harnesses.", "examples": ["HOTFOLDER-POLL"]},
-            "HOTFOLDER-FETCH": {"usage": "HOTFOLDER-FETCH [directory] [--json]", "summary": "Issue the effective poll queue in deterministic order.", "examples": ["HOTFOLDER-FETCH", "HOTFOLDER-FETCH --json"]},
-            "POLL-CAMPAIGN": {"usage": "POLL-CAMPAIGN [cycles] [intervalMs] [hotfolderDir] [--until-empty] [--max-cycles <n>] [--json]", "summary": "Run the effective poll queue campaign (fixed fixtures + hotfolder) and issue one package per cycle.", "examples": ["POLL-CAMPAIGN", "POLL-CAMPAIGN 10 1000", "POLL-CAMPAIGN --until-empty --max-cycles 50 --json"]},
+            "HOTFOLDER-LIST": {"usage": "HOTFOLDER-LIST [directory] [--json|--yaml]", "summary": "Preview the effective poll queue (fixed fixtures + hotfolder) without issuing.", "examples": ["HOTFOLDER-LIST", "HOTFOLDER-LIST --json", "HOTFOLDER-LIST --yaml", "HOTFOLDER-LIST Workspace/LocalEIM/eim_packages/hotfolder --json"]},
+            "HOTFOLDER-POLL": {"usage": "HOTFOLDER-POLL [directory] [--json|--yaml]", "summary": "Return effective poll metadata for harnesses.", "examples": ["HOTFOLDER-POLL", "HOTFOLDER-POLL --yaml"]},
+            "HOTFOLDER-FETCH": {"usage": "HOTFOLDER-FETCH [directory] [--json|--yaml]", "summary": "Issue the effective poll queue in deterministic order.", "examples": ["HOTFOLDER-FETCH", "HOTFOLDER-FETCH --json", "HOTFOLDER-FETCH --yaml"]},
+            "POLL-CAMPAIGN": {"usage": "POLL-CAMPAIGN [cycles] [intervalMs] [hotfolderDir] [--until-empty] [--max-cycles <n>] [--json|--yaml]", "summary": "Run the effective poll queue campaign (fixed fixtures + hotfolder) and issue one package per cycle.", "examples": ["POLL-CAMPAIGN", "POLL-CAMPAIGN 10 1000", "POLL-CAMPAIGN --until-empty --max-cycles 50 --json", "POLL-CAMPAIGN --yaml"]},
             "POLL-EXPORT": {"usage": "POLL-EXPORT [cycles] [intervalMs] [hotfolderDir] [--until-empty] [--max-cycles <n>] [outputPath]", "summary": "Run poll campaign and export JSON report file.", "examples": ["POLL-EXPORT", "POLL-EXPORT --until-empty --max-cycles 200", "POLL-EXPORT 20 250 reports/my_campaign.json"]},
-            "POLL-AGGREGATE": {"usage": "POLL-AGGREGATE [reportsDir] [--json] [--export [outputPath]]", "summary": "Aggregate exported poll campaign reports.", "examples": ["POLL-AGGREGATE", "POLL-AGGREGATE reports --json", "POLL-AGGREGATE reports --export reports/aggregate.json"]},
-            "ADD-INITIAL-EIM": {"usage": "ADD-INITIAL-EIM [package|isdr] [certPath] [packagePath]", "summary": "Issue AddInitialEim using package or ISDR mode, with card-aware cert auto-selection when certPath is omitted.", "examples": ["ADD-INITIAL-EIM isdr", "ADD-INITIAL-EIM package SCP11/eim_local/eim_packages/templates/template_add_initial_eim.json"]},
-            "ADD-EIM": {"usage": "ADD-EIM [package|isdr] [certPath] [packagePath]", "summary": "Issue AddEim using package or ISDR mode, with card-aware cert auto-selection when certPath is omitted.", "examples": ["ADD-EIM package", "ADD-EIM package SCP11/eim_local/eim_packages/templates/template_add_eim.json"]},
-            "ISDR-ADD-INITIAL-EIM": {"usage": "ISDR-ADD-INITIAL-EIM [certPath] [packagePath]", "summary": "Validate AddInitialEim directly on-card, with package-through-local-auth when packagePath is supplied.", "examples": ["ISDR-ADD-INITIAL-EIM \"SCP11/eim_local/certs/eim/CERT_S_EIMsign_YGGDRASIM_NIST.pem\"", "ISDR-ADD-INITIAL-EIM SCP11/eim_local/eim_packages/templates/template_add_initial_eim.json"]},
-            "ISDR-ADD-EIM": {"usage": "ISDR-ADD-EIM [certPath] [packagePath]", "summary": "Validate AddEim directly on-card, with package-through-local-auth when packagePath is supplied.", "examples": ["ISDR-ADD-EIM \"SCP11/eim_local/certs/eim/CERT_S_EIMsign_YGGDRASIM_NIST.pem\"", "ISDR-ADD-EIM SCP11/eim_local/eim_packages/fake_eim_add_eim_package.json"]},
-            "LOAD-EIM-PACKAGE": {"usage": "LOAD-EIM-PACKAGE [packagePath] [certPath]", "summary": "Execute a card-facing package directly toward ISD-R, bypassing poll/hotfolder routing.", "examples": ["LOAD-EIM-PACKAGE SCP11/eim_local/eim_packages/fake_eim_add_eim_package.json", "LOAD-EIM-PACKAGE SCP11/eim_local/eim_packages/templates/template_add_initial_eim.json SCP11/eim_local/certs/eim/CERT_S_EIMsign_YGGDRASIM_NIST.pem"]},
+            "POLL-AGGREGATE": {"usage": "POLL-AGGREGATE [reportsDir] [--json|--yaml] [--export [outputPath]]", "summary": "Aggregate exported poll campaign reports.", "examples": ["POLL-AGGREGATE", "POLL-AGGREGATE reports --json", "POLL-AGGREGATE reports --yaml", "POLL-AGGREGATE reports --export reports/aggregate.json"]},
+            "ADD-INITIAL-EIM": {"usage": "ADD-INITIAL-EIM [package|isdr] [certPath] [packagePath]", "summary": "Issue AddInitialEim using package or ISDR mode, with card-aware cert auto-selection when certPath is omitted.", "examples": ["ADD-INITIAL-EIM isdr", "ADD-INITIAL-EIM package Workspace/LocalEIM/eim_packages/templates/template_add_initial_eim.json"]},
+            "ADD-EIM": {"usage": "ADD-EIM [package|isdr] [certPath] [packagePath]", "summary": "Issue AddEim using package or ISDR mode, with card-aware cert auto-selection when certPath is omitted.", "examples": ["ADD-EIM package", "ADD-EIM package Workspace/LocalEIM/eim_packages/templates/template_add_eim.json"]},
+            "ISDR-ADD-INITIAL-EIM": {"usage": "ISDR-ADD-INITIAL-EIM [certPath] [packagePath]", "summary": "Validate AddInitialEim directly on-card, with package-through-local-auth when packagePath is supplied.", "examples": ["ISDR-ADD-INITIAL-EIM /path/to/local_eim_signing_cert.pem", "ISDR-ADD-INITIAL-EIM Workspace/LocalEIM/eim_packages/templates/template_add_initial_eim.json"]},
+            "ISDR-ADD-EIM": {"usage": "ISDR-ADD-EIM [certPath] [packagePath]", "summary": "Validate AddEim directly on-card, with package-through-local-auth when packagePath is supplied.", "examples": ["ISDR-ADD-EIM /path/to/local_eim_signing_cert.pem", "ISDR-ADD-EIM Workspace/LocalEIM/eim_packages/fake_eim_add_eim_package.json"]},
+            "LOAD-EIM-PACKAGE": {"usage": "LOAD-EIM-PACKAGE [packagePath] [certPath]", "summary": "Execute a card-facing package directly toward ISD-R, bypassing poll/hotfolder routing.", "examples": ["LOAD-EIM-PACKAGE Workspace/LocalEIM/eim_packages/fake_eim_add_eim_package.json", "LOAD-EIM-PACKAGE Workspace/LocalEIM/eim_packages/templates/template_add_initial_eim.json /path/to/local_eim_signing_cert.pem"]},
             "EIM-ACKNOWLEDGE": {"usage": "EIM-ACKNOWLEDGE [transactionIdHex] [matchingId]", "summary": "Close pending eIM operations and sync notifications.", "examples": ["EIM-ACKNOWLEDGE", "EIM-ACKNOWLEDGE 01020304AABBCCDD MID-1"]},
             "ERROR-CODES": {"usage": "ERROR-CODES [SGP.02|SGP.22|SGP.32|ALL]", "summary": "List known GSMA error code tables.", "examples": ["ERROR-CODES", "ERROR-CODES SGP.32"]},
-            "ERROR-CODE-SET": {"usage": "ERROR-CODE-SET <family> <code|name> [packagePath]", "summary": "Apply resolved symbolic/numeric error code into package JSON.", "examples": ["ERROR-CODE-SET sgp32_profile_download_error_reason ecallActive", "ERROR-CODE-SET sgp32_eim_package_result_error 1 SCP11/eim_local/eim_packages/templates/template_provide_eim_package_result.json"]},
+            "ERROR-CODE-SET": {"usage": "ERROR-CODE-SET <family> <code|name> [packagePath]", "summary": "Apply resolved symbolic/numeric error code into package JSON.", "examples": ["ERROR-CODE-SET sgp32_profile_download_error_reason ecallActive", "ERROR-CODE-SET sgp32_eim_package_result_error 1 Workspace/LocalEIM/eim_packages/templates/template_provide_eim_package_result.json"]},
             "COUNTERS": {"usage": "COUNTERS", "summary": "List persisted counters by eIM ID.", "examples": ["COUNTERS"]},
             "COUNTER": {"usage": "COUNTER <eimId> [set <n>] | COUNTER set <n>", "summary": "Inspect or override next counter value.", "examples": ["COUNTER 2.25.311782205282738360923618091971140414400", "COUNTER 2.25.311782205282738360923618091971140414400 set 1", "COUNTER set 1"]},
             "NOTIF-HYGIENE": {"usage": "NOTIF-HYGIENE [maxPending]", "summary": "Drain/check pending notifications threshold.", "examples": ["NOTIF-HYGIENE", "NOTIF-HYGIENE 0"]},
-            "RESP-LOG": {"usage": "RESP-LOG [n]", "summary": "Show last n response log entries.", "examples": ["RESP-LOG", "RESP-LOG 50"]},
-            "RESP-LOG-FILTER": {"usage": "RESP-LOG-FILTER <query> [n]", "summary": "Filter response log entries by txid/matchingId/path/action.", "examples": ["RESP-LOG-FILTER MID-1", "RESP-LOG-FILTER 01020304 100"]},
+            "RESP-LOG": {"usage": "RESP-LOG [n] [--json|--yaml]", "summary": "Show last n response log entries.", "examples": ["RESP-LOG", "RESP-LOG 50", "RESP-LOG --yaml"]},
+            "RESP-LOG-FILTER": {"usage": "RESP-LOG-FILTER <query> [n] [--json|--yaml]", "summary": "Filter response log entries by txid/matchingId/path/action.", "examples": ["RESP-LOG-FILTER MID-1", "RESP-LOG-FILTER 01020304 100", "RESP-LOG-FILTER MID-1 --yaml"]},
             "RESP-LOG-CLEAR": {"usage": "RESP-LOG-CLEAR", "summary": "Clear response log JSONL file.", "examples": ["RESP-LOG-CLEAR"]},
             "QA": {"usage": "QA", "summary": "Exit shell and leave YggdraSIM immediately.", "examples": ["QA"]},
             "EXIT": {"usage": "EXIT", "summary": "Exit shell and close session if open.", "examples": ["EXIT"]},
@@ -294,6 +322,141 @@ class EimLocalShell:
     def _help_row(self, label: str, command_key: str) -> tuple[str, str]:
         doc = self._command_docs.get(command_key, {})
         return (label, str(doc.get("summary", "")).strip())
+
+    @staticmethod
+    def _extract_output_mode_tokens(tokens: list[str]) -> tuple[list[str], str]:
+        filtered: list[str] = []
+        output_mode = "text"
+        for token in tokens:
+            normalized = str(token or "").strip().lower()
+            if normalized not in ("--json", "--yaml"):
+                filtered.append(token)
+                continue
+            requested_mode = "json" if normalized == "--json" else "yaml"
+            if output_mode not in ("text", requested_mode):
+                raise ValueError("Choose only one structured output mode: --json or --yaml.")
+            output_mode = requested_mode
+        return filtered, output_mode
+
+    def _parse_output_mode_argument(self, argument: str = "") -> tuple[list[str], str]:
+        return self._extract_output_mode_tokens(shlex.split(argument or ""))
+
+    @staticmethod
+    def _print_structured_payload(payload: Any, output_mode: str) -> None:
+        print(dump_structured_payload(payload, output_mode=output_mode))
+
+    def _parse_package_report_argument(self, argument: str = "") -> tuple[str, bool, str]:
+        tokens, output_mode = self._parse_output_mode_argument(argument)
+        filtered_tokens: list[str] = []
+        strict_exec = False
+        for token in tokens:
+            if str(token).strip().lower() == "--strict-exec":
+                strict_exec = True
+                continue
+            filtered_tokens.append(token)
+        return " ".join(filtered_tokens).strip(), strict_exec, output_mode
+
+    def _render_eim_package_lint_report(self, report: dict[str, Any]) -> None:
+        print(f"[+] eIM package lint: {'ok' if report.get('ok') else 'failed'}")
+        print(f"    file: {report.get('package_path', '-')}")
+        print(f"    type: {report.get('package_type', '-')}")
+        print(f"    version: {report.get('package_version', '-')}")
+        print(f"    additional_tlvs: {report.get('additional_tlv_count', 0)}")
+        print(f"    optional_tlvs: {report.get('optional_tlv_count', 0)}")
+        print(
+            "    spec_compliance: "
+            f"{report.get('spec_passed', 0)} passed, {report.get('spec_failed', 0)} failed"
+        )
+        spec_checks = report.get("spec_checks", [])
+        if isinstance(spec_checks, list) and len(spec_checks) > 0:
+            print("    spec checks:")
+            for row in spec_checks:
+                status = str(row.get("status", "")).upper()
+                check_name = str(row.get("check", ""))
+                detail = str(row.get("detail", ""))
+                print(f"      [{status}] {check_name}")
+                if len(detail) > 0:
+                    print(f"             {detail}")
+        for warning in report.get("warnings", []):
+            print(f"    [warn] {warning}")
+        errors = report.get("errors", [])
+        for error in errors:
+            print(f"    [error] {error}")
+
+    def _build_eim_package_explain_payload(
+        self,
+        package_path: str = "",
+        *,
+        strict_exec: bool = False,
+    ) -> dict[str, Any]:
+        resolved_path = self.session.resolve_eim_package_path(override_path=package_path)
+        document = self.session.load_eim_package_document(package_path)
+        lint_report = self.session.lint_eim_package(
+            package_path=package_path,
+            strict_executable=strict_exec,
+        )
+        runtime_hints = resolve_package_runtime_hints(document)
+        certificate_preview = self.session.preview_eim_signing_certificate(
+            package_path=resolved_path
+        )
+        identity = self.session.identity_summary()
+        return {
+            "package": {
+                "path": resolved_path,
+                "type": str(lint_report.get("package_type", "")).strip(),
+                "version": str(lint_report.get("package_version", "")).strip(),
+                "strict_executable": bool(strict_exec),
+                "command_tag_hex": str(document.get("command_tag_hex", "")).strip().upper(),
+            },
+            "runtime_hints": runtime_hints,
+            "signing_certificate": certificate_preview,
+            "identity_defaults": {
+                "eim_id": identity.get("eim_id", ""),
+                "eim_fqdn": identity.get("eim_fqdn", ""),
+                "default_matching_id": identity.get("default_matching_id", ""),
+                "eim_endpoint": identity.get("eim_endpoint", ""),
+                "smdp_address": identity.get("smdp_address", ""),
+            },
+            "lint": lint_report,
+        }
+
+    def _render_eim_package_explain_text(self, payload: dict[str, Any]) -> None:
+        package = payload.get("package", {})
+        runtime_hints = payload.get("runtime_hints", {})
+        signing_certificate = payload.get("signing_certificate", {})
+        identity_defaults = payload.get("identity_defaults", {})
+        lint_report = payload.get("lint", {})
+
+        print("[+] eIM package explain")
+        print(f"    file        : {package.get('path', '-')}")
+        print(f"    type        : {package.get('type', '-')}")
+        print(f"    version     : {package.get('version', '-')}")
+        print(f"    strict_exec : {'yes' if package.get('strict_executable') else 'no'}")
+        command_tag = str(package.get("command_tag_hex", "")).strip()
+        if len(command_tag) > 0:
+            print(f"    command_tag : {command_tag}")
+        print("    runtime hints:")
+        print(f"      matching_id       : {runtime_hints.get('matching_id', '-') or '-'}")
+        print(f"      transaction_id    : {runtime_hints.get('transaction_id_hex', '-') or '-'}")
+        print(f"      profile_path      : {runtime_hints.get('profile_path', '-') or '-'}")
+        print(f"      cert_der_path     : {runtime_hints.get('cert_der_path', '-') or '-'}")
+        print(f"      smdp_address      : {runtime_hints.get('smdp_address', '-') or '-'}")
+        print(f"      bip_endpoint      : {runtime_hints.get('bip_endpoint', '-') or '-'}")
+        print("    cert selection:")
+        print(f"      selected_path     : {signing_certificate.get('path', '-') or '-'}")
+        print(f"      private_key_path  : {signing_certificate.get('private_key_path', '-') or '-'}")
+        print(f"      rule              : {signing_certificate.get('reason', '-') or '-'}")
+        root_ci_pkids = signing_certificate.get("root_ci_pkids", [])
+        if isinstance(root_ci_pkids, list) and len(root_ci_pkids) > 0:
+            print(f"      root_ci_pkids     : {', '.join(str(value) for value in root_ci_pkids)}")
+        preferred_ci_pkids = signing_certificate.get("preferred_ci_pkids", [])
+        if isinstance(preferred_ci_pkids, list) and len(preferred_ci_pkids) > 0:
+            print(f"      preferred_ci_pkids: {', '.join(str(value) for value in preferred_ci_pkids)}")
+        print("    identity defaults:")
+        print(f"      eim_id            : {identity_defaults.get('eim_id', '-') or '-'}")
+        print(f"      eim_fqdn          : {identity_defaults.get('eim_fqdn', '-') or '-'}")
+        print(f"      default_matchingId: {identity_defaults.get('default_matching_id', '-') or '-'}")
+        self._render_eim_package_lint_report(lint_report)
 
     @staticmethod
     def _render_help_row(
@@ -683,6 +846,60 @@ class EimLocalShell:
             return []
         return decoded
 
+    def _set_cached_poll_target_fqdns(self, targets: list[str]) -> None:
+        cached_targets: list[str] = []
+        for fqdn_value in targets:
+            normalized_fqdn = str(fqdn_value).strip()
+            if len(normalized_fqdn) == 0:
+                continue
+            if normalized_fqdn in cached_targets:
+                continue
+            cached_targets.append(normalized_fqdn)
+        self._cached_poll_target_fqdns = cached_targets
+
+    def _cache_poll_target_fqdns_from_entries(
+        self,
+        entries: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        targets: list[str] = []
+        for entry in entries:
+            if isinstance(entry, dict) is False:
+                continue
+            fqdn_value = str(entry.get("eim_fqdn", "")).strip()
+            if len(fqdn_value) == 0:
+                continue
+            targets.append(fqdn_value)
+        self._set_cached_poll_target_fqdns(targets)
+        return entries
+
+    def _cache_poll_target_fqdns_from_eim_response(
+        self,
+        response: bytes,
+    ) -> list[dict[str, Any]]:
+        entries = self._decode_eim_entries(response)
+        return self._cache_poll_target_fqdns_from_entries(entries)
+
+    def _cache_poll_target_fqdns_from_discovery_snapshot(
+        self,
+        snapshot: dict[str, Any],
+    ) -> None:
+        if isinstance(snapshot, dict) is False:
+            self._invalidate_poll_target_cache()
+            return
+        response = snapshot.get("eim_configuration", b"")
+        if isinstance(response, bytearray):
+            response = bytes(response)
+        if isinstance(response, bytes) is False:
+            self._invalidate_poll_target_cache()
+            return
+        self._cache_poll_target_fqdns_from_eim_response(response)
+
+    def _resolve_cached_poll_target_fqdns(self) -> list[str]:
+        return list(self._cached_poll_target_fqdns)
+
+    def _invalidate_poll_target_cache(self) -> None:
+        self._cached_poll_target_fqdns = []
+
     def _print_command_response(self, label: str, response: bytes, transport: str = "") -> None:
         print(f"[+] {label} completed ({len(response)} bytes).")
         if len(transport.strip()) > 0:
@@ -715,6 +932,7 @@ class EimLocalShell:
         title: str = "ISDR post-state GetEimConfigurationData",
     ) -> list[dict[str, Any]]:
         response = self.session.get_eim_configuration_data()
+        self._cache_poll_target_fqdns_from_eim_response(response)
         return self._print_eim_configuration_report(response, title=title)
 
     def _resolve_isdr_add_package_path(
@@ -776,7 +994,7 @@ class EimLocalShell:
     def _default_euicc_memory_reset_package_path(self) -> str:
         return self.session.resolve_eim_package_path(
             override_path=(
-                "SCP11/eim_local/eim_packages/templates/"
+                "Workspace/LocalEIM/eim_packages/templates/"
                 "template_euicc_memory_reset.json"
             )
         )
@@ -806,6 +1024,8 @@ class EimLocalShell:
         print(f"\n{ShellStyle.BOLD}{ShellStyle.HEADER}Local eIM Command Groups{ShellStyle.END}")
         print("  Use HELP <command> for full usage, examples, and alias information.")
         print("  Add --debug to card-facing commands for full raw APDU hex tracing.")
+        print("  Use --yaml when you want structured output without defaulting to JSON.")
+        print("  Use RECORD START/STOP to capture replayable commands plus APDU trace to file.")
         print("  Canonical command names are listed here; legacy aliases still resolve.\n")
 
         local_flow_rows = [
@@ -837,16 +1057,17 @@ class EimLocalShell:
         localized_rows.extend(
             [
                 self._help_row("HANDOVER-SET <txidHex> [matchingId]", "HANDOVER-SET"),
-                self._help_row("HANDOVER-STATUS", "HANDOVER-STATUS"),
+                self._help_row("HANDOVER-STATUS [--yaml]", "HANDOVER-STATUS"),
             ]
         )
         package_rows = [
             self._help_row("EIM-PACKAGE [path]", "EIM-PACKAGE"),
             self._help_row("EIM-PACKAGE-CLEAR", "EIM-PACKAGE-CLEAR"),
             self._help_row("EIM-PACKAGE-LINT [path] [--strict-exec]", "EIM-PACKAGE-LINT"),
+            self._help_row("EIM-PACKAGE-EXPLAIN [path] [--yaml]", "EIM-PACKAGE-EXPLAIN"),
             self._help_row("EIM-PACKAGE-ISSUE [path]", "EIM-PACKAGE-ISSUE"),
             self._help_row("EIM-PACKAGE-ISSUE-ALL [dir]", "EIM-PACKAGE-ISSUE-ALL"),
-            self._help_row("EIM-CERTS [--json] [pkg] [cert]", "EIM-CERTS"),
+            self._help_row("EIM-CERTS [--json|--yaml] [pkg] [cert]", "EIM-CERTS"),
             self._help_row("ADD-INITIAL-EIM [mode] [cert] [pkg]", "ADD-INITIAL-EIM"),
             self._help_row("ADD-EIM [mode] [cert] [pkg]", "ADD-EIM"),
             self._help_row("GET-EIM-CONFIG", "GET-EIM-CONFIG"),
@@ -862,12 +1083,12 @@ class EimLocalShell:
         queue_rows = [
             self._help_row("HOTFOLDER [dir]", "HOTFOLDER"),
             self._help_row("HOTFOLDER-CLEAR", "HOTFOLDER-CLEAR"),
-            self._help_row("HOTFOLDER-LIST [dir] [--json]", "HOTFOLDER-LIST"),
-            self._help_row("HOTFOLDER-POLL [dir]", "HOTFOLDER-POLL"),
-            self._help_row("HOTFOLDER-FETCH [dir] [--json]", "HOTFOLDER-FETCH"),
-            self._help_row("POLL-CAMPAIGN [cycles] [intervalMs] [...]", "POLL-CAMPAIGN"),
+            self._help_row("HOTFOLDER-LIST [dir] [--json|--yaml]", "HOTFOLDER-LIST"),
+            self._help_row("HOTFOLDER-POLL [dir] [--yaml]", "HOTFOLDER-POLL"),
+            self._help_row("HOTFOLDER-FETCH [dir] [--json|--yaml]", "HOTFOLDER-FETCH"),
+            self._help_row("POLL-CAMPAIGN [cycles] [intervalMs] [...] [--yaml]", "POLL-CAMPAIGN"),
             self._help_row("POLL-EXPORT [cycles] [intervalMs] [...] [out]", "POLL-EXPORT"),
-            self._help_row("POLL-AGGREGATE [dir] [--json] [--export ...]", "POLL-AGGREGATE"),
+            self._help_row("POLL-AGGREGATE [dir] [--json|--yaml] [--export ...]", "POLL-AGGREGATE"),
         ]
         diagnostic_rows = [
             self._help_row("STATUS", "STATUS"),
@@ -876,11 +1097,12 @@ class EimLocalShell:
             self._help_row("COUNTER <eimId> [set <n>]", "COUNTER"),
             self._help_row("ERROR-CODES [spec]", "ERROR-CODES"),
             self._help_row("ERROR-CODE-SET <family> <code> [path]", "ERROR-CODE-SET"),
-            self._help_row("RESP-LOG [n]", "RESP-LOG"),
-            self._help_row("RESP-LOG-FILTER <query> [n]", "RESP-LOG-FILTER"),
+            self._help_row("RESP-LOG [n] [--json|--yaml]", "RESP-LOG"),
+            self._help_row("RESP-LOG-FILTER <query> [n] [--json|--yaml]", "RESP-LOG-FILTER"),
             self._help_row("RESP-LOG-CLEAR", "RESP-LOG-CLEAR"),
         ]
         shell_rows = [
+            self._help_row("RECORD [STATUS|START|STOP|CANCEL] [path]", "RECORD"),
             self._help_row("HELP [command]", "HELP"),
             self._help_row("EXIT", "EXIT"),
             self._help_row("QA", "QA"),
@@ -954,6 +1176,7 @@ class EimLocalShell:
 
     def _cmd_discover(self, _: str = "") -> None:
         snapshot = self.session.discover_card()
+        self._cache_poll_target_fqdns_from_discovery_snapshot(snapshot)
         render_consolidated_discovery_snapshot(
             snapshot,
             header_color=ShellStyle.HEADER,
@@ -1046,6 +1269,7 @@ class EimLocalShell:
 
     def _cmd_get_eim_config(self, _: str = "") -> None:
         response = self.session.get_eim_configuration_data()
+        self._cache_poll_target_fqdns_from_eim_response(response)
         self._print_eim_configuration_report(response)
 
     def _cmd_delete_eim(self, argument: str = "") -> None:
@@ -1054,9 +1278,11 @@ class EimLocalShell:
             raise ValueError("Usage: DELETE-EIM <eimId>")
         response = self.session.delete_eim(eim_id)
         self._print_command_response("DeleteEim", response)
+        self._invalidate_poll_target_cache()
 
     def _cmd_isdr_get_eim_config(self, _: str = "") -> None:
         response = self.session.get_eim_configuration_data()
+        self._cache_poll_target_fqdns_from_eim_response(response)
         self._print_eim_configuration_report(
             response,
             title="ISDR GetEimConfigurationData",
@@ -1072,6 +1298,7 @@ class EimLocalShell:
             response,
             transport="direct_card",
         )
+        self._invalidate_poll_target_cache()
         self._print_post_eim_configuration_snapshot()
 
     def _cmd_ipad_discover(self, argument: str = "") -> None:
@@ -1122,6 +1349,7 @@ class EimLocalShell:
         *,
         debug: bool = False,
     ) -> None:
+        effective_debug = bool(debug or self._global_debug)
         try:
             from SCP11.eim_local.ipad_standalone import LocalizedIPAdRunner
         except ImportError:
@@ -1137,7 +1365,7 @@ class EimLocalShell:
         runner.run(
             profile_name=profile_name,
             matching_id=matching_id,
-            debug=debug,
+            debug=effective_debug,
         )
 
     def _cmd_ipad_live(self, argument: str = "") -> None:
@@ -1162,18 +1390,13 @@ class EimLocalShell:
         dispatch_poll_command("scp11.eim_local", "IPAE-TEST", self, argument)
 
     def _cmd_poll_campaign(self, argument: str = "") -> None:
-        parts = argument.split()
-        json_mode = False
+        parts, output_mode = self._parse_output_mode_argument(argument)
         until_empty = False
         max_cycles = None
         filtered: list[str] = []
         index = 0
         while index < len(parts):
             part = parts[index]
-            if part.strip().lower() == "--json":
-                json_mode = True
-                index += 1
-                continue
             if part.strip().lower() == "--until-empty":
                 until_empty = True
                 index += 1
@@ -1202,8 +1425,8 @@ class EimLocalShell:
             until_empty=until_empty,
             max_cycles=max_cycles,
         )
-        if json_mode:
-            print(json.dumps(report, indent=2))
+        if output_mode != "text":
+            self._print_structured_payload(report, output_mode)
             return
         rows = report.get("rows", [])
         if isinstance(rows, list) is False:
@@ -1293,8 +1516,7 @@ class EimLocalShell:
         )
 
     def _cmd_poll_aggregate(self, argument: str = "") -> None:
-        parts = argument.split()
-        json_mode = False
+        parts, output_mode = self._parse_output_mode_argument(argument)
         do_export = False
         export_path = ""
         filtered: list[str] = []
@@ -1302,10 +1524,6 @@ class EimLocalShell:
         while index < len(parts):
             part = parts[index]
             lowered = part.strip().lower()
-            if lowered == "--json":
-                json_mode = True
-                index += 1
-                continue
             if lowered == "--export":
                 do_export = True
                 if index + 1 < len(parts):
@@ -1325,8 +1543,8 @@ class EimLocalShell:
         if do_export:
             saved = self.session.export_aggregate_campaign_report(report, output_path=export_path)
             report["exported_path"] = saved
-        if json_mode:
-            print(json.dumps(report, indent=2))
+        if output_mode != "text":
+            self._print_structured_payload(report, output_mode)
             return
         print("[+] Poll campaign aggregate:")
         print(f"    directory      : {report.get('reports_dir', '-')}")
@@ -1355,9 +1573,20 @@ class EimLocalShell:
         print(f"    transactionId: {handover.transaction_id.hex().upper()}")
         print(f"    matchingId   : {handover.matching_id or '-'}")
 
-    def _cmd_handover_status(self, _: str = "") -> None:
+    def _cmd_handover_status(self, argument: str = "") -> None:
+        filtered_tokens, output_mode = self._parse_output_mode_argument(argument)
+        if len(filtered_tokens) > 0:
+            raise ValueError("Usage: HANDOVER-STATUS [--json|--yaml]")
         payload = self.session.handover_context()
-        print(json.dumps(payload, indent=2))
+        if output_mode != "text":
+            self._print_structured_payload(payload, output_mode)
+            return
+        print("[+] Handover context")
+        print(f"    transactionId: {payload.get('transaction_id_hex', '-') or '-'}")
+        print(f"    matchingId   : {payload.get('matching_id', '-') or '-'}")
+        print(f"    profile_path : {payload.get('profile_path', '-') or '-'}")
+        print(f"    policy       : {payload.get('notification_policy', '-') or '-'}")
+        print(f"    source       : {payload.get('source', '-') or '-'}")
 
     def _cmd_eim_package(self, argument: str = "") -> None:
         path_text = argument.strip()
@@ -1371,43 +1600,30 @@ class EimLocalShell:
         print("[+] eIM package override cleared.")
 
     def _cmd_eim_package_lint(self, argument: str = "") -> None:
-        parts = argument.split()
-        strict_exec = False
-        filtered_parts: list[str] = []
-        for part in parts:
-            if part.strip().lower() == "--strict-exec":
-                strict_exec = True
-                continue
-            filtered_parts.append(part)
-        package_path = " ".join(filtered_parts).strip()
-        report = self.session.lint_eim_package(package_path=package_path, strict_executable=strict_exec)
-        print(f"[+] eIM package lint: {'ok' if report.get('ok') else 'failed'}")
-        print(f"    file: {report.get('package_path', '-')}")
-        print(f"    type: {report.get('package_type', '-')}")
-        print(f"    version: {report.get('package_version', '-')}")
-        print(f"    additional_tlvs: {report.get('additional_tlv_count', 0)}")
-        print(f"    optional_tlvs: {report.get('optional_tlv_count', 0)}")
-        print(
-            "    spec_compliance: "
-            f"{report.get('spec_passed', 0)} passed, {report.get('spec_failed', 0)} failed"
+        package_path, strict_exec, output_mode = self._parse_package_report_argument(
+            argument
         )
-        spec_checks = report.get("spec_checks", [])
-        if isinstance(spec_checks, list) and len(spec_checks) > 0:
-            print("    spec checks:")
-            for row in spec_checks:
-                status = str(row.get("status", "")).upper()
-                check_name = str(row.get("check", ""))
-                detail = str(row.get("detail", ""))
-                print(f"      [{status}] {check_name}")
-                if len(detail) > 0:
-                    print(f"             {detail}")
-        for warning in report.get("warnings", []):
-            print(f"    [warn] {warning}")
+        report = self.session.lint_eim_package(package_path=package_path, strict_executable=strict_exec)
+        if output_mode != "text":
+            self._print_structured_payload(report, output_mode)
+        else:
+            self._render_eim_package_lint_report(report)
         errors = report.get("errors", [])
-        for error in errors:
-            print(f"    [error] {error}")
         if len(errors) > 0:
             raise RuntimeError("eIM package lint reported errors.")
+
+    def _cmd_eim_package_explain(self, argument: str = "") -> None:
+        package_path, strict_exec, output_mode = self._parse_package_report_argument(
+            argument
+        )
+        payload = self._build_eim_package_explain_payload(
+            package_path=package_path,
+            strict_exec=strict_exec,
+        )
+        if output_mode != "text":
+            self._print_structured_payload(payload, output_mode)
+            return
+        self._render_eim_package_explain_text(payload)
 
     def _cmd_eim_package_issue(self, argument: str = "") -> None:
         package_path = argument.strip()
@@ -1428,16 +1644,9 @@ class EimLocalShell:
                 print(f"    - {package_type:<18} {result_len:>5} bytes  {package_file}")
 
     def _cmd_eim_certs(self, argument: str = "") -> None:
-        parts = shlex.split(argument)
-        json_mode = False
-        filtered_parts: list[str] = []
-        for part in parts:
-            if part.strip().lower() == "--json":
-                json_mode = True
-                continue
-            filtered_parts.append(part)
+        filtered_parts, output_mode = self._parse_output_mode_argument(argument)
         if len(filtered_parts) > 2:
-            raise ValueError("Usage: EIM-CERTS [--json] [packagePath] [certPath]")
+            raise ValueError("Usage: EIM-CERTS [--json|--yaml] [packagePath] [certPath]")
         package_path = ""
         cert_path = ""
         if len(filtered_parts) > 0:
@@ -1458,8 +1667,8 @@ class EimLocalShell:
             package_path=package_path,
             cert_path=cert_path,
         )
-        if json_mode:
-            print(json.dumps(payload, indent=2))
+        if output_mode != "text":
+            self._print_structured_payload(payload, output_mode)
             return
         print(f"[+] eIM signing certificate inventory ({payload.get('count', 0)} candidate(s)).")
         card_allowed = payload.get("card_allowed_ci_pkids", [])
@@ -1500,23 +1709,16 @@ class EimLocalShell:
         print("[+] Hotfolder override cleared.")
 
     def _cmd_hotfolder_list(self, argument: str = "") -> None:
-        parts = argument.split()
-        json_mode = False
-        filtered_parts: list[str] = []
-        for part in parts:
-            if part.strip().lower() == "--json":
-                json_mode = True
-                continue
-            filtered_parts.append(part)
+        filtered_parts, output_mode = self._parse_output_mode_argument(argument)
         target_dir = " ".join(filtered_parts).strip()
         rows = self.session.list_hotfolder_preview(hotfolder_dir=target_dir)
-        if json_mode:
+        if output_mode != "text":
             payload = {
                 "hotfolder_dir": self.session.resolve_hotfolder_path(override_path=target_dir),
                 "count": len(rows),
                 "rows": rows,
             }
-            print(json.dumps(payload, indent=2))
+            self._print_structured_payload(payload, output_mode)
             return
         if len(rows) == 0:
             print("[*] Effective poll queue is empty.")
@@ -1546,26 +1748,28 @@ class EimLocalShell:
                 print(f"        [error] {error_text}")
 
     def _cmd_hotfolder_poll(self, argument: str = "") -> None:
-        target_dir = argument.strip()
+        filtered_parts, output_mode = self._parse_output_mode_argument(argument)
+        target_dir = " ".join(filtered_parts).strip()
         payload = self.session.hotfolder_poll_metadata(hotfolder_dir=target_dir)
-        print(json.dumps(payload, indent=2))
+        if output_mode != "text":
+            self._print_structured_payload(payload, output_mode)
+            return
+        print("[+] Hotfolder poll metadata")
+        print(f"    hotfolder_dir   : {payload.get('hotfolder_dir', '-')}")
+        print(f"    queue_count     : {payload.get('queue_count', 0)}")
+        print(f"    eim_result_code : {payload.get('eim_result_code', '-')}")
+        print(f"    eim_result_name : {payload.get('eim_result_name', '-')}")
+        print(f"    response_tlv_hex: {payload.get('response_tlv_hex', '-')}")
 
     def _cmd_hotfolder_fetch(self, argument: str = "") -> None:
-        parts = argument.split()
-        json_mode = False
-        filtered_parts: list[str] = []
-        for part in parts:
-            if part.strip().lower() == "--json":
-                json_mode = True
-                continue
-            filtered_parts.append(part)
+        filtered_parts, output_mode = self._parse_output_mode_argument(argument)
         target_dir = " ".join(filtered_parts).strip()
         poll_meta = self.session.hotfolder_poll_response_meta(hotfolder_dir=target_dir)
         eim_result_code = poll_meta.get("eim_result_code")
         if eim_result_code == self.cfg.EIM_NO_PACKAGE_RESULT_CODE:
             response_tlv_hex = str(poll_meta.get("response_tlv_hex", "")).strip().upper()
             self.session.issue_hotfolder_packages(hotfolder_dir=target_dir)
-            if json_mode:
+            if output_mode != "text":
                 payload = {
                     "hotfolder_dir": self.session.resolve_hotfolder_path(override_path=target_dir),
                     "summary": {
@@ -1581,7 +1785,7 @@ class EimLocalShell:
                     },
                     "rows": [],
                 }
-                print(json.dumps(payload, indent=2))
+                self._print_structured_payload(payload, output_mode)
                 return
             print("[*] Effective poll queue is empty.")
             print("[*] eIM response to card: noEimPackageAvailable(1) per SGP.32 GetEimPackageResponse.")
@@ -1590,7 +1794,7 @@ class EimLocalShell:
             return
         results = self.session.issue_hotfolder_packages(hotfolder_dir=target_dir)
         summary = self.session.summarize_issue_results(results)
-        if json_mode:
+        if output_mode != "text":
             rows: list[dict[str, Any]] = []
             for package_file, package_type, result_len in results:
                 rows.append(
@@ -1606,7 +1810,7 @@ class EimLocalShell:
                 "summary": summary,
                 "rows": rows,
             }
-            print(json.dumps(payload, indent=2))
+            self._print_structured_payload(payload, output_mode)
             return
         print(f"[+] Effective poll queue fetched {len(results)} package file(s).")
         print(
@@ -1630,6 +1834,7 @@ class EimLocalShell:
         print(f"[+] AddInitialEim completed ({len(response)} bytes).")
         print(f"    {self._hex_preview(response)}")
         self._print_selected_eim_certificate()
+        self._invalidate_poll_target_cache()
 
     def _cmd_add_eim(self, argument: str = "") -> None:
         source_mode, cert, package = self._parse_add_eim_args(argument)
@@ -1641,6 +1846,7 @@ class EimLocalShell:
         print(f"[+] AddEim completed ({len(response)} bytes).")
         print(f"    {self._hex_preview(response)}")
         self._print_selected_eim_certificate()
+        self._invalidate_poll_target_cache()
 
     def _cmd_isdr_add_initial_eim(self, argument: str = "") -> None:
         source_mode, cert, package = self._parse_isdr_add_args(
@@ -1660,6 +1866,7 @@ class EimLocalShell:
             transport=transport,
         )
         self._print_selected_eim_certificate()
+        self._invalidate_poll_target_cache()
         self._print_post_eim_configuration_snapshot()
 
     def _cmd_isdr_add_eim(self, argument: str = "") -> None:
@@ -1680,6 +1887,7 @@ class EimLocalShell:
             transport=transport,
         )
         self._print_selected_eim_certificate()
+        self._invalidate_poll_target_cache()
         self._print_post_eim_configuration_snapshot()
 
     def _cmd_euicc_memory_reset(self, argument: str = "") -> None:
@@ -1691,6 +1899,7 @@ class EimLocalShell:
             transport="isdr_store_data",
         )
         print(f"    package   : {package_path}")
+        self._invalidate_poll_target_cache()
         self._print_post_eim_configuration_snapshot(
             title="ISDR post-reset GetEimConfigurationData",
         )
@@ -1721,6 +1930,7 @@ class EimLocalShell:
             "addeim",
             "euicc_memory_reset",
         ):
+            self._invalidate_poll_target_cache()
             self._print_post_eim_configuration_snapshot()
 
     def _cmd_eim_acknowledge(self, argument: str = "") -> None:
@@ -1890,32 +2100,53 @@ class EimLocalShell:
         print(f"[+] Notification hygiene check passed. pending={pending}")
 
     def _cmd_response_log(self, argument: str = "") -> None:
-        raw = argument.strip()
+        tokens, output_mode = self._parse_output_mode_argument(argument)
+        raw = " ".join(tokens).strip()
         limit = 25
         if len(raw) > 0:
             limit = int(raw, 10)
         rows = self.session.read_response_log(limit=limit)
-        print(f"[*] Response log file: {self.session.response_log_path()}")
         if len(rows) == 0:
+            print(f"[*] Response log file: {self.session.response_log_path()}")
             print("[*] No response log entries yet.")
             return
-        print(json.dumps(rows, indent=2))
+        if output_mode != "text":
+            payload = {
+                "response_log_file": self.session.response_log_path(),
+                "count": len(rows),
+                "rows": rows,
+            }
+            self._print_structured_payload(payload, output_mode)
+            return
+        print(f"[*] Response log file: {self.session.response_log_path()}")
+        self._print_structured_payload(rows, "yaml")
 
     def _cmd_response_log_filter(self, argument: str = "") -> None:
-        parts = argument.split()
+        parts, output_mode = self._parse_output_mode_argument(argument)
         if len(parts) == 0:
-            raise ValueError("Usage: RESP-LOG-FILTER <query> [limit]")
+            raise ValueError("Usage: RESP-LOG-FILTER <query> [limit] [--json|--yaml]")
         query = parts[0].strip()
         limit = 50
         if len(parts) > 1:
             limit = int(parts[1].strip(), 10)
         rows = self.session.filter_response_log(query=query, limit=limit)
-        print(f"[*] Response log file: {self.session.response_log_path()}")
-        print(f"[*] Filter query: {query}")
         if len(rows) == 0:
+            print(f"[*] Response log file: {self.session.response_log_path()}")
+            print(f"[*] Filter query: {query}")
             print("[*] No matching response log entries.")
             return
-        print(json.dumps(rows, indent=2))
+        if output_mode != "text":
+            payload = {
+                "response_log_file": self.session.response_log_path(),
+                "query": query,
+                "count": len(rows),
+                "rows": rows,
+            }
+            self._print_structured_payload(payload, output_mode)
+            return
+        print(f"[*] Response log file: {self.session.response_log_path()}")
+        print(f"[*] Filter query: {query}")
+        self._print_structured_payload(rows, "yaml")
 
     def _cmd_response_log_clear(self, _: str = "") -> None:
         count = self.session.clear_response_log()
@@ -1995,7 +2226,84 @@ class EimLocalShell:
         if callable(setter):
             setter(bool(previous))
 
-    def _execute_command_line(self, raw_line: str) -> bool:
+    @staticmethod
+    def _render_command_line(command: str, argument: str = "") -> str:
+        normalized_command = str(command or "").strip()
+        normalized_argument = str(argument or "").strip()
+        if len(normalized_command) == 0:
+            return ""
+        if len(normalized_argument) == 0:
+            return normalized_command
+        return f"{normalized_command} {normalized_argument}"
+
+    def _print_record_status(self) -> None:
+        status = self._recorder.status_payload()
+        state = "active" if status.get("active") else "idle"
+        print(f"[*] Recorder status: {state}")
+        print(f"    entry      : {status.get('module_entry_point', '-')}")
+        pending_path = str(status.get("pending_output_path", "") or "").strip()
+        print(f"    output     : {pending_path or '-'}")
+        print(f"    commands   : {status.get('command_count', 0)}")
+        print(f"    apdus      : {status.get('apdu_count', 0)}")
+        started_at = str(status.get("started_at_utc", "") or "").strip()
+        print(f"    started_at : {started_at or '-'}")
+        last_export = str(status.get("last_export_path", "") or "").strip()
+        if len(last_export) > 0:
+            print(f"    last_file  : {last_export}")
+
+    def _cmd_record(self, argument: str = "") -> None:
+        parts = shlex.split(argument or "")
+        if len(parts) == 0 or parts[0].strip().upper() == "STATUS":
+            self._print_record_status()
+            return
+        action = parts[0].strip().upper()
+        output_path = ""
+        if len(parts) > 1:
+            output_path = " ".join(parts[1:]).strip()
+        if action == "START":
+            target_path = self._recorder.start(output_path=output_path)
+            print("[+] Recording started.")
+            print(f"    output   : {target_path}")
+            print("    capture  : shell commands + APDU trace")
+            print("    format   : YAML by default, JSON when outputPath ends with .json")
+            return
+        if action == "STOP":
+            if self._recorder.is_active() is False:
+                print("[*] Recording is not active.")
+                self._print_record_status()
+                return
+            target_path, payload = self._recorder.stop(output_path=output_path)
+            summary = payload.get("summary", {})
+            print("[+] Recording saved.")
+            print(f"    file     : {target_path}")
+            print(f"    commands : {summary.get('command_count', 0)}")
+            print(f"    apdus    : {summary.get('apdu_count', 0)}")
+            return
+        if action == "CANCEL":
+            if self._recorder.is_active() is False:
+                print("[*] Recording is not active.")
+                return
+            self._recorder.cancel()
+            print("[+] Recording cancelled. Discarded in-memory command/APDU capture.")
+            return
+        raise ValueError("Usage: RECORD [STATUS|START [outputPath]|STOP [outputPath]|CANCEL]")
+
+    def _finalize_recording_on_exit(self) -> None:
+        if self._recorder.is_active() is False:
+            return
+        try:
+            target_path, payload = self._recorder.stop()
+        except Exception as error:
+            self._recorder.cancel()
+            print(f"[-] Could not save active recording: {error}")
+            return
+        summary = payload.get("summary", {})
+        print("[*] Active recording auto-saved on shell exit.")
+        print(f"    file     : {target_path}")
+        print(f"    commands : {summary.get('command_count', 0)}")
+        print(f"    apdus    : {summary.get('apdu_count', 0)}")
+
+    def _execute_command_line(self, raw_line: str, *, source: str = "interactive") -> bool:
         parts = str(raw_line or "").strip().split(maxsplit=1)
         if len(parts) == 0:
             return True
@@ -2010,6 +2318,15 @@ class EimLocalShell:
             argument, debug = self._strip_debug_flag_from_argument(argument)
             if debug:
                 previous_debug = self._set_transport_debug(True)
+        command_record: Optional[dict[str, Any]] = None
+        if canonical_command != "RECORD":
+            command_record = self._recorder.begin_command(
+                raw_command=str(raw_line or "").strip(),
+                canonical_command=canonical_command or command,
+                replay_command=self._render_command_line(canonical_command or command, argument),
+                debug_enabled=debug,
+                source=source,
+            )
         handler = self._commands.get(canonical_command)
         if handler is None:
             print(f"[-] Unknown command: {command}")
@@ -2017,50 +2334,86 @@ class EimLocalShell:
             if len(candidates) > 0:
                 print(f"[*] Did you mean: {', '.join(candidates[:6])}")
             print("[*] Use HELP or HELP <command>.")
+            if command_record is not None:
+                self._recorder.finish_command(
+                    command_record,
+                    success=False,
+                    error=f"Unknown command: {command}",
+                )
             self._restore_transport_debug(previous_debug)
             return True
         try:
             handler(argument)
         except SystemExit:
+            if command_record is not None:
+                self._recorder.finish_command(command_record, success=True)
+                command_record = None
             print("[*] Leaving eIM local shell.")
             return False
+        except QuitAllRequested:
+            if command_record is not None:
+                self._recorder.finish_command(command_record, success=True)
+                command_record = None
+            raise
         except ValueError as error:
+            if command_record is not None:
+                self._recorder.finish_command(
+                    command_record,
+                    success=False,
+                    error=str(error),
+                )
+                command_record = None
             print(f"[-] {error}")
             self._show_command_help(canonical_command or command)
             return True
         except Exception as error:
+            if command_record is not None:
+                self._recorder.finish_command(
+                    command_record,
+                    success=False,
+                    error=str(error),
+                )
+                command_record = None
             print(f"[-] {error}")
             return True
         finally:
             self._restore_transport_debug(previous_debug)
+        if command_record is not None:
+            self._recorder.finish_command(command_record, success=True)
         return True
 
     def run(self) -> None:
         self._setup_readline()
         self._print_banner()
         self._cmd_help()
-        while True:
-            try:
-                raw_line = input(
-                    f"\n{ShellStyle.HEADER}[Local eIM] > {ShellStyle.END}"
-                ).strip()
-            except EOFError:
-                raw_line = "EXIT"
-            except KeyboardInterrupt:
-                print("")
-                raw_line = "EXIT"
+        try:
+            while True:
+                try:
+                    raw_line = input(
+                        f"\n{ShellStyle.HEADER}[Local eIM] > {ShellStyle.END}"
+                    ).strip()
+                except EOFError:
+                    raw_line = "EXIT"
+                except KeyboardInterrupt:
+                    print("")
+                    raw_line = "EXIT"
 
-            if len(raw_line) == 0:
-                continue
-            keep_running = self._execute_command_line(raw_line)
-            if keep_running is False:
-                return
+                if len(raw_line) == 0:
+                    continue
+                keep_running = self._execute_command_line(raw_line, source="interactive")
+                if keep_running is False:
+                    return
+        finally:
+            self._finalize_recording_on_exit()
 
     def run_commands(self, cmd_line: str) -> None:
-        for raw_command in self._split_batch_commands(cmd_line):
-            keep_running = self._execute_command_line(raw_command)
-            if keep_running is False:
-                break
+        try:
+            for raw_command in self._split_batch_commands(cmd_line):
+                keep_running = self._execute_command_line(raw_command, source="batch")
+                if keep_running is False:
+                    break
+        finally:
+            self._finalize_recording_on_exit()
 
 
 def entry() -> None:
@@ -2094,6 +2447,10 @@ def entry_stdin() -> None:
 def run_standalone() -> None:
     ensure_plugins_loaded()
     parser = argparse.ArgumentParser(description="SCP11 local eIM shell")
+    add_debug_argument(
+        parser,
+        help_text="Enable verbose debug output for this local eIM session.",
+    )
     parser.add_argument(
         "--cmd",
         type=str,
@@ -2105,6 +2462,7 @@ def run_standalone() -> None:
         help="Read newline-separated commands from stdin for non-interactive execution",
     )
     args = parser.parse_args()
+    set_global_debug(bool(getattr(args, "debug", False)))
     if args.cmd:
         entry_cmd(args.cmd)
         return

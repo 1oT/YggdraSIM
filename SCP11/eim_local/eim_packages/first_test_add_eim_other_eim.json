@@ -32,14 +32,14 @@
           "eim_public_key_data": {
             "include": true,
             "choice": "eim_certificate",
-            "eim_certificate_der_path": "SCP11/eim_local/certs/eim/CERT_S_EIMsign_YGGDRASIM_ACCEPTED.der",
+            "eim_certificate_der_path": "/path/to/local_eim_signing_cert.pem",
             "eim_certificate_der_hex": "",
             "eim_public_key_spki_hex": ""
           },
           "trusted_public_key_data_tls": {
             "include": true,
             "choice": "trusted_certificate_tls",
-            "trusted_certificate_der_path": "SCP11/eim_local/certs/eim/CERT_S_EIM_TLS_YGGDRASIM_NIST.der",
+            "trusted_certificate_der_path": "/path/to/local_eim_tls_cert.pem",
             "trusted_certificate_der_hex": "",
             "trusted_eim_pk_tls_spki_hex": ""
           },
@@ -64,7 +64,7 @@
   },
   "runtime": {
     "matching_id": "EIM-FIRST-TEST",
-    "cert_der_path": "SCP11/eim_local/certs/eim/CERT_S_EIMsign_YGGDRASIM_ACCEPTED.der",
+    "cert_der_path": "/path/to/local_eim_signing_cert.pem",
     "smdp_address": "yggdrasim.smdpp.test.1ot.com",
     "bip_endpoints": {
       "eim": "https://yggdrasim.eim.test.1ot.com/gsma/rsp2/asn1",

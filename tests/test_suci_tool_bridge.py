@@ -1,6 +1,8 @@
+import os
 import subprocess
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from Tools.SuciTool.tool import SuciKeyToolBridge
 
@@ -53,6 +55,43 @@ class SuciKeyToolBridgeTests(unittest.TestCase):
     def test_set_key_file_accepts_nonexistent_workspace_file(self) -> None:
         key_file = self.bridge.set_key_file("tests/generated_suci.key")
         self.assertTrue(str(key_file).startswith(str(self.workspace_root)))
+
+    def test_get_tool_command_uses_environment_override(self) -> None:
+        bridge = SuciKeyToolBridge(workspace_root=self.workspace_root)
+
+        with mock.patch.dict(
+            os.environ,
+            {"YGGDRASIM_SUCI_TOOL": "python -m suci_keytool"},
+            clear=False,
+        ):
+            self.assertEqual(
+                bridge.get_tool_command(),
+                ["python", "-m", "suci_keytool"],
+            )
+
+    def test_run_subprocess_passes_capture_and_text_flags(self) -> None:
+        completed = subprocess.CompletedProcess(
+            ["suci-keytool.py", "--key-file", "demo.key", "dump-pub-key"],
+            0,
+            stdout="ok\n",
+            stderr="",
+        )
+
+        with mock.patch(
+            "Tools.SuciTool.tool.subprocess.run",
+            return_value=completed,
+        ) as mocked_run:
+            result = self.bridge._run_subprocess(
+                ["suci-keytool.py", "--key-file", "demo.key", "dump-pub-key"]
+            )
+
+        self.assertIs(result, completed)
+        mocked_run.assert_called_once_with(
+            ["suci-keytool.py", "--key-file", "demo.key", "dump-pub-key"],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
 
 
 if __name__ == "__main__":

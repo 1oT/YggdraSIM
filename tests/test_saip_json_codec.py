@@ -175,10 +175,11 @@ class SaipJsonCodecTests(unittest.TestCase):
 
     def test_transcode_sidecar_paths(self) -> None:
         base = Path("workspace") / "in" / "profile.der"
-        jp, dp = transcode_sidecar_paths(base)
+        jp, dp, tp = transcode_sidecar_paths(base)
         r = base.resolve()
         self.assertEqual(jp, r.parent / "profile.transcode.json")
         self.assertEqual(dp, r.parent / "profile.transcode.der")
+        self.assertEqual(tp, r.parent / "profile.transcode.txt")
 
     def test_transcode_sidecar_paths_use_dedicated_transcode_root(self) -> None:
         workspace_root = Path("workspace").resolve()
@@ -186,7 +187,7 @@ class SaipJsonCodecTests(unittest.TestCase):
         transcode_root = workspace_root / "Tools" / "ProfilePackage" / "transcode"
         base = source_root / "profile.der"
 
-        jp, dp = transcode_sidecar_paths(
+        jp, dp, tp = transcode_sidecar_paths(
             base,
             transcode_root=transcode_root,
             source_root=source_root,
@@ -194,6 +195,7 @@ class SaipJsonCodecTests(unittest.TestCase):
 
         self.assertEqual(jp, transcode_root / "profile.transcode.json")
         self.assertEqual(dp, transcode_root / "profile.transcode.der")
+        self.assertEqual(tp, transcode_root / "profile.transcode.txt")
 
     def test_reapply_nested_tuple_fill_file_content(self) -> None:
         pre_loaded = {

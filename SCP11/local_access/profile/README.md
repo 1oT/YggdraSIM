@@ -16,3 +16,8 @@ Notes:
 - `README.md` is ignored by the resolver.
 - Hidden files are ignored by the resolver.
 - The `metadata/` subdirectory is reserved for optional metadata JSON overrides used by local SCP11 profile loading.
+
+Related operator docs:
+
+- `../README.md`
+- `../../../PROFILE_LIFECYCLE_CLI_CHEATSHEET.md`

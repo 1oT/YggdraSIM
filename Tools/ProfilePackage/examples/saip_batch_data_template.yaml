@@ -1,0 +1,17 @@
+# SAIP Tool batch data template
+#
+# One mapping entry generates one concrete DER profile.
+# Keys must match placeholder names used in the tagged template JSON.
+# Quote digit strings so ICCID / IMSI values keep leading zeros intact.
+# Unknown keys are rejected unless the template contains matching placeholders.
+#
+# Example usage:
+#   GENERATE-BATCH reports/profile_template.json \
+#     Tools/ProfilePackage/examples/saip_batch_data_template.yaml \
+#     reports/generated_profiles
+#
+- ICCID: "89461111111111111112"
+  IMSI: "123456781234567"
+
+- ICCID: "89461111111111111113"
+  IMSI: "123456781234568"

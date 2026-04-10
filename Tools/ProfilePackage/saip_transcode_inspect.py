@@ -1,5 +1,5 @@
 """
-TRANSCODE-TUI left inspector: decode the JSON selection (or whole profile) via SCP03/pySim.
+TRANSCODE-TUI left inspector: decode the JSON selection or whole profile.
 """
 
 from __future__ import annotations
@@ -31,15 +31,15 @@ def build_transcode_inspector_text(
     focus_key_hint: str | None = None,
 ) -> str:
     """
-    ``left_mode``: ``selection`` (nearest JSON value + subtree decode) or ``profile_scp03``
-    (full-document walk, same engine as former single-panel F4).
+    ``left_mode``: ``selection`` (nearest JSON value + subtree decode) or
+    ``profile_asn1`` (full-document walk across all profile elements).
     """
     stripped = str(editor_text or "").strip()
     if len(stripped) == 0:
         return "JSON empty."
 
-    if left_mode == "profile_scp03":
-        from Tools.ProfilePackage.saip_scp03_decode import build_scp03_decode_report
+    if left_mode == "profile_asn1":
+        from Tools.ProfilePackage.saip_asn1_decode import build_profile_asn1_report
 
         try:
             loaded = json.loads(stripped)
@@ -47,9 +47,9 @@ def build_transcode_inspector_text(
             return f"JSON parse error — cannot run profile decode:\n{exc}"
         if isinstance(loaded, dict) is False:
             return "Root must be a JSON object for profile-wide decode."
-        return build_scp03_decode_report(loaded)
+        return build_profile_asn1_report(loaded)
 
-    from Tools.ProfilePackage.saip_scp03_decode import build_inspector_report_for_subtree
+    from Tools.ProfilePackage.saip_asn1_decode import build_inspector_report_for_subtree
 
     if fixed_span is None:
         s, e = enclosing_json_value_span(editor_text, sel_start, sel_end)

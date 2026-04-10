@@ -74,6 +74,13 @@ Current plugin-owned command families:
 - relay `POLL` on `SCP11/test`
 - localized `IPAE-LIVE` / `IPAE-TEST` on `SCP11/eim_local`
 
+Operator-facing references for those command families:
+
+- `../SCP11/live/README.md`
+- `../SCP11/test/README.md`
+- `../SCP11/eim_local/GUIDE.md`
+- `../PROFILE_LIFECYCLE_CLI_CHEATSHEET.md`
+
 ## Publication model
 
 This folder is intended for publication-time exclusion.

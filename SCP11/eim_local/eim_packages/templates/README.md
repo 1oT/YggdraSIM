@@ -12,6 +12,12 @@ to keep the operator surface clean.
 3. Fill any `value`, `value_hex`, or path fields you enable.
 4. Run `EIM-PACKAGE-LINT <path>` before issuing.
 
+Card-side note:
+
+- these templates are for Local eIM package construction and relay-side/localized execution
+- they do not change the simulated card's seeded BF55 identity by themselves
+- use `Workspace/SIMCARD/eim_identity.json` or `Workspace/SIMCARD/isdr_config.json` when the card-side default also needs to move
+
 Templates use `sgp32` or `sgp22` sections plus `runtime` hints for the current
 eIM local shell and localized bridge.
 

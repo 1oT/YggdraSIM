@@ -1,7 +1,13 @@
 import os
 from dataclasses import dataclass, field
 
-from yggdrasim_common.runtime_paths import ensure_runtime_dir, ensure_seeded_runtime_file, ensure_seeded_runtime_tree, runtime_path
+from yggdrasim_common.runtime_paths import (
+    ensure_runtime_dir,
+    ensure_seeded_workspace_file,
+    ensure_seeded_workspace_tree,
+    ensure_workspace_dir,
+    workspace_path,
+)
 
 try:
     from SCP11.local_access.config import LocalAccessConfig
@@ -10,7 +16,7 @@ except ImportError:
 
 
 def _module_dir() -> str:
-    return runtime_path("SCP11", "eim_local")
+    return workspace_path("LocalEIM")
 
 
 def _certs_dir() -> str:
@@ -23,6 +29,10 @@ def _profile_dir() -> str:
 
 def _metadata_dir() -> str:
     return os.path.join(_profile_dir(), "metadata")
+
+
+def _debug_dir() -> str:
+    return os.path.join(_module_dir(), "debug")
 
 
 def _eim_packages_dir() -> str:
@@ -76,6 +86,7 @@ class EimLocalConfig(LocalAccessConfig):
     CERTS_DIR: str = field(default_factory=_certs_dir)
     PROFILE_DIR: str = field(default_factory=_profile_dir)
     METADATA_DIR: str = field(default_factory=_metadata_dir)
+    DEBUG_DIR: str = field(default_factory=_debug_dir)
 
     EIM_PACKAGES_DIR: str = field(default_factory=_eim_packages_dir)
     EIM_PACKAGE_TEMPLATES_DIR: str = field(default_factory=_eim_package_templates_dir)
@@ -106,7 +117,8 @@ class EimLocalConfig(LocalAccessConfig):
     def __post_init__(self) -> None:
         super().__post_init__()
         ensure_runtime_dir("SCP11", "eim_local")
-        ensure_seeded_runtime_tree("SCP11", "eim_local", "certs")
-        ensure_seeded_runtime_tree("SCP11", "eim_local", "profile")
-        ensure_seeded_runtime_tree("SCP11", "eim_local", "eim_packages")
-        ensure_seeded_runtime_file("SCP11", "eim_local", "eim_identity.json")
+        ensure_workspace_dir("LocalEIM", "debug")
+        ensure_seeded_workspace_tree(("SCP11", "eim_local", "certs"), "LocalEIM", "certs")
+        ensure_seeded_workspace_tree(("SCP11", "eim_local", "profile"), "LocalEIM", "profile")
+        ensure_seeded_workspace_tree(("SCP11", "eim_local", "eim_packages"), "LocalEIM", "eim_packages")
+        ensure_seeded_workspace_file(("SCP11", "eim_local", "eim_identity.json"), "LocalEIM", "eim_identity.json")

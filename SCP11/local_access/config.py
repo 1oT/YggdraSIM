@@ -1,11 +1,16 @@
 import os
 from dataclasses import dataclass, field
 
-from yggdrasim_common.runtime_paths import bundle_path, ensure_runtime_dir, ensure_seeded_runtime_tree, runtime_path
+from yggdrasim_common.runtime_paths import (
+    ensure_runtime_dir,
+    ensure_seeded_workspace_tree,
+    ensure_workspace_dir,
+    workspace_path,
+)
 
 
 def _module_dir() -> str:
-    return runtime_path("SCP11", "local_access")
+    return workspace_path("LocalSMDPP")
 
 
 def _certs_dir() -> str:
@@ -25,7 +30,7 @@ def _metadata_dir() -> str:
 
 
 def _sgp26_valid_cert_dir() -> str:
-    return bundle_path("SCP11", "SGP.26_test_Certs", "Valid Test Cases")
+    return workspace_path("SCP11", "SGP.26_test_Certs", "Valid Test Cases")
 
 
 @dataclass(frozen=True)
@@ -113,6 +118,12 @@ class LocalAccessConfig:
 
     def __post_init__(self) -> None:
         ensure_runtime_dir("SCP11", "local_access")
-        ensure_runtime_dir("SCP11", "local_access", "debug")
-        ensure_seeded_runtime_tree("SCP11", "local_access", "certs")
-        ensure_seeded_runtime_tree("SCP11", "local_access", "profile")
+        ensure_workspace_dir("LocalSMDPP", "debug")
+        ensure_seeded_workspace_tree(
+            ("SCP11", "SGP.26_test_Certs", "Valid Test Cases"),
+            "SCP11",
+            "SGP.26_test_Certs",
+            "Valid Test Cases",
+        )
+        ensure_seeded_workspace_tree(("SCP11", "local_access", "certs"), "LocalSMDPP", "certs")
+        ensure_seeded_workspace_tree(("SCP11", "local_access", "profile"), "LocalSMDPP", "profile")
