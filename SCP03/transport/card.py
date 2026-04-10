@@ -16,14 +16,13 @@
 # -----------------------------------------------------------------------------
 
 import traceback 
-from typing import Tuple ,List ,Optional 
-from smartcard .System import readers 
-from smartcard .CardConnection import CardConnection 
+from typing import Tuple ,List ,Optional ,Any 
 
 
 from SCP03 .config import Config 
 from SCP03 .core .utils import HexUtils 
 from SCP03 .crypto .session import Scp03Session 
+from yggdrasim_common .card_backend import create_card_connection ,is_simulated_card_backend
 
 class CardTransporter :
     FI_TABLE ={
@@ -51,7 +50,7 @@ class CardTransporter :
     }
 
     def __init__ (self ):
-        self .connection :Optional [CardConnection ]=None 
+        self .connection :Optional [Any ]=None 
         self .session =Scp03Session ({'kenc':b'','kmac':b'','dek':b''})
         self .verbose =False 
         self .debug =False 
@@ -59,22 +58,11 @@ class CardTransporter :
 
     def connect (self )->bool :
         try :
-            r_list =readers ()
-
-            is_empty =False 
-            if not r_list :
-                is_empty =True 
-
-            if is_empty :
-                print (f"{Config.Colors.FAIL}[!] No readers found.{Config.Colors.ENDC}")
-                return False 
-
-            reader =r_list [0 ]
-            print (f"{Config.Colors.CYAN}[*] CONNECTED{Config.Colors.ENDC}")
-
-            self .connection =reader .createConnection ()
-            self .connection .connect ()
-
+            self .connection =create_card_connection (reader_index =0 )
+            if is_simulated_card_backend ():
+                print (f"{Config.Colors.CYAN}[*] CONNECTED (SIMULATED CARD){Config.Colors.ENDC}")
+            else :
+                print (f"{Config.Colors.CYAN}[*] CONNECTED{Config.Colors.ENDC}")
             return True 
         except Exception as e :
             print (f"{Config.Colors.FAIL}[!] Connection failed: {e}{Config.Colors.ENDC}")

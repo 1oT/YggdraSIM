@@ -1,7 +1,7 @@
 {
   "document_type": "fake_eim_peer_addition_info",
   "document_version": "1.0.0",
-  "summary": "Provisioning reference for adding the seeded YggdraSIM fake eIM from another eIM or compatible local harness.",
+  "summary": "Provisioning reference for adding the seeded YggdraSIM fake eIM from another eIM or compatible local harness. Operator-provided Local eIM certificate material is required.",
   "identity": {
     "display_name": "SGP.26 Seeded eIM Test",
     "eim_id": "2.25.311782205282738360923618091971140414400",
@@ -23,7 +23,7 @@
   "required_files": [
     {
       "role": "eim_signing_certificate",
-      "path": "SCP11/eim_local/certs/eim/CERT_S_EIMsign_YGGDRASIM_NIST.pem",
+      "path": "/path/to/local_eim_signing_cert.pem",
       "format": "PEM",
       "used_by": [
         "sgp32.add_eim_request.eim_configuration_data_list[0].eim_public_key_data",
@@ -32,7 +32,7 @@
     },
     {
       "role": "eim_signing_private_key",
-      "path": "SCP11/eim_local/certs/eim/SK_S_EIMsign_YGGDRASIM_NIST.pem",
+      "path": "/path/to/local_eim_signing_key.pem",
       "format": "PEM",
       "used_by": [
         "local signing workflows",
@@ -41,7 +41,7 @@
     },
     {
       "role": "eim_tls_certificate",
-      "path": "SCP11/eim_local/certs/eim/CERT_S_EIM_TLS_YGGDRASIM_NIST.pem",
+      "path": "/path/to/local_eim_tls_cert.pem",
       "format": "PEM",
       "used_by": [
         "sgp32.add_eim_request.eim_configuration_data_list[0].trusted_public_key_data_tls",
@@ -50,7 +50,7 @@
     },
     {
       "role": "eim_tls_private_key",
-      "path": "SCP11/eim_local/certs/eim/SK_S_EIM_TLS_YGGDRASIM_NIST.pem",
+      "path": "/path/to/local_eim_tls_key.pem",
       "format": "PEM",
       "used_by": [
         "localized TLS termination",
@@ -59,7 +59,7 @@
     },
     {
       "role": "ci_root_certificate",
-      "path": "SCP11/eim_local/certs/eim/CA.EIM.Root.cert.pem",
+      "path": "/path/to/local_eim_ci_root_cert.pem",
       "format": "PEM",
       "used_by": [
         "reference trust anchor",
@@ -90,7 +90,7 @@
     }
   },
   "operator_examples": {
-    "local_eim_shell": "ADD-EIM package \"SCP11/eim_local/certs/eim/CERT_S_EIMsign_YGGDRASIM_NIST.pem\" SCP11/eim_local/eim_packages/fake_eim_add_eim_package.json",
-    "local_isdr_shell": "LOAD-EIM-PACKAGE SCP11/eim_local/eim_packages/fake_eim_add_eim_package.json SCP11/eim_local/certs/eim/CERT_S_EIMsign_YGGDRASIM_NIST.pem"
+    "local_eim_shell": "ADD-EIM package \"/path/to/local_eim_signing_cert.pem\" SCP11/eim_local/eim_packages/fake_eim_add_eim_package.json",
+    "local_isdr_shell": "LOAD-EIM-PACKAGE SCP11/eim_local/eim_packages/fake_eim_add_eim_package.json /path/to/local_eim_signing_cert.pem"
   }
 }

@@ -2,7 +2,13 @@ import argparse
 import sys
 
 from yggdrasim_common.plugin_runtime import ensure_plugins_loaded
+from yggdrasim_common.process_debug import (
+    add_debug_argument,
+    is_global_debug_enabled,
+    set_global_debug,
+)
 from yggdrasim_common.quit_control import QuitAllRequested
+from yggdrasim_common.card_backend import is_simulated_card_backend
 
 class SCP11StartupError(RuntimeError):
     """Readable SCP11 startup failure."""
@@ -63,7 +69,7 @@ class SGP22Client:
     def _run_startup_preflight(self):
         errors, warnings = self.cfg.collect_startup_diagnostics()
 
-        if self.cfg.TRANSPORT_MODE == self._transport_mode_pcsc:
+        if self.cfg.TRANSPORT_MODE == self._transport_mode_pcsc and not is_simulated_card_backend():
             try:
                 from smartcard.System import readers
             except Exception as error:
@@ -94,6 +100,7 @@ class SGP22Client:
             self.apdu_channel = self._build_apdu_channel(self.cfg)
         except Exception as error:
             raise SCP11StartupError(f"SCP11 test transport initialization failed: {error}") from error
+        self._apply_global_debug()
 
         try:
             self.profile_provider = self._build_profile_provider(self.cfg)
@@ -105,6 +112,11 @@ class SGP22Client:
             apdu_channel=self.apdu_channel,
             profile_provider=self.profile_provider,
         )
+
+    def _apply_global_debug(self) -> None:
+        setter = getattr(self.apdu_channel, "set_raw_apdu_logging", None)
+        if callable(setter):
+            setter(bool(is_global_debug_enabled()))
 
     def _print_startup_warnings(self):
         return
@@ -139,6 +151,10 @@ class SGP22Client:
 def entry() -> None:
     ensure_plugins_loaded()
     parser = argparse.ArgumentParser(description="SCP11 test relay orchestration shell")
+    add_debug_argument(
+        parser,
+        help_text="Enable verbose debug output for this SCP11 test session.",
+    )
     parser.add_argument(
         "--flow",
         action="store_true",
@@ -155,6 +171,7 @@ def entry() -> None:
         help="Read newline-separated commands from stdin for non-interactive execution",
     )
     args = parser.parse_args()
+    set_global_debug(bool(getattr(args, "debug", False)))
 
     client = SGP22Client()
     if args.flow:

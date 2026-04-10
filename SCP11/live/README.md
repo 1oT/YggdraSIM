@@ -31,6 +31,17 @@ One-shot flow mode is also available:
 python -m SCP11.live --flow
 ```
 
+Batch automation examples:
+
+```bash
+python -m SCP11.live --cmd "DISCOVER; STATUS; LIST; EXIT"
+python -m SCP11.live --cmd "DOWNLOAD-PROFILE LPA:1$SMDP.EXAMPLE$TOKEN; STATUS; EXIT"
+python -m SCP11.live --cmd "POLL 3 30 --debug; EXIT"
+```
+
+See `../../PROFILE_LIFECYCLE_CLI_CHEATSHEET.md` for ready-to-paste lifecycle
+sequences and log-capture patterns.
+
 ## Startup preflight
 
 Before the shell starts, it validates:
@@ -54,6 +65,12 @@ The live relay shell is stateful while the shell is open:
   notifications, profile versions, and eIM summary data
 - transactional commands trigger notification sync and cleanup automatically
   when appropriate
+
+Simulator card note:
+
+- when the shared card backend is set to `sim`, the relay shell still runs the normal card-facing flow but against the simulator
+- the simulated card's default BF55 eIM identity comes from `Workspace/SIMCARD/eim_identity.json`
+- this is separate from `Workspace/LocalEIM/eim_identity.json`, which belongs to the Local eIM shell
 
 Primary runtime dimensions:
 
@@ -197,6 +214,8 @@ Practical rule:
 ## Related guides
 
 - `SCP11/README.md`
+- `../../CLI_AND_PIPING_GUIDE.md`
+- `../../PROFILE_LIFECYCLE_CLI_CHEATSHEET.md`
 - `SCP11/test/README.md`
 - `SCP11/local_access/README.md`
 - `SCP11/eim_local/README.md`

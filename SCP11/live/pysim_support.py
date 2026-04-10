@@ -4,6 +4,13 @@ from typing import Any, List, Optional
 from cryptography import x509 as crypto_x509
 
 try:
+    from ..pysim_path import ensure_repo_pysim_on_path
+except ImportError:
+    from SCP11.pysim_path import ensure_repo_pysim_on_path
+
+ensure_repo_pysim_on_path()
+
+try:
     from pySim.esim import compile_asn1_subdir
     from pySim.esim import rsp as pysim_rsp
     from pySim.esim import x509_cert as pysim_x509
@@ -251,8 +258,11 @@ def verify_certificate_against_ca_bundle(certificate_der: bytes, ca_bundle_path:
 def get_certificate_authority_key_identifier(certificate_der: bytes) -> bytes:
     if pysim_available() is False:
         return b""
-    certificate = crypto_x509.load_der_x509_certificate(certificate_der)
-    return pysim_x509.cert_get_auth_key_id(certificate)
+    try:
+        certificate = crypto_x509.load_der_x509_certificate(certificate_der)
+        return pysim_x509.cert_get_auth_key_id(certificate)
+    except Exception:
+        return b""
 
 
 def _load_pem_certificates(bundle_path: str) -> List[crypto_x509.Certificate]:

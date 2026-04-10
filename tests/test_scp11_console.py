@@ -52,16 +52,29 @@ class DummyApduChannel:
         return self.response
 
 
+class DummyProfileProvider:
+    def __init__(self):
+        self.base_url = DummyCfg.ES9_BASE_URL
+
+    def set_base_url(self, base_url: str) -> None:
+        self.base_url = base_url
+
+
 class DummyOrchestrator:
     def __init__(self):
         self.sync_calls = []
         self.eim_poll_calls = []
+        self.run_flow_calls = []
+        self.profile_provider = DummyProfileProvider()
 
     def _sync_pending_notifications(self, response: bytes = b"") -> None:
         self.sync_calls.append(response)
 
     def run_eim_poll(self, matching_id: str = "", entry_index: int = 0) -> None:
         self.eim_poll_calls.append((matching_id, entry_index))
+
+    def run_flow(self, matching_id: str = "", smdp_address: str = "") -> None:
+        self.run_flow_calls.append((matching_id, smdp_address))
 
 
 class DummyClient:
@@ -75,8 +88,8 @@ class SCP11ConsoleStatusDecodeTests(unittest.TestCase):
     def setUp(self):
         self.console = SCP11Console(DummyClient())
         self.console._aid_registry = {
-            "ISDP1": "A0000005591010FFFFFFFF8900001000",
-            "ISDP2": "A0000005591010FFFFFFFF8900001100",
+            "ISDP1": "A0000005591010FFFFFFFF8900001100",
+            "ISDP2": "A0000005591010FFFFFFFF8900001200",
         }
 
     def test_decode_euicc_configured_data_extracts_addresses(self):
@@ -159,19 +172,39 @@ class SCP11ConsoleStatusDecodeTests(unittest.TestCase):
         payload = self.console._build_remove_notification_payload(7)
         self.assertEqual(payload.hex().upper(), "BF3003800107")
 
+    def test_build_remove_notification_payload_encodes_high_bit_sequence_as_positive_integer(self):
+        payload = self.console._build_remove_notification_payload(148)
+        self.assertEqual(payload.hex().upper(), "BF300480020094")
+
+    def test_remove_notification_uses_delete_notification_status_labels(self):
+        self.console.apdu_channel.response = bytes.fromhex("BF3003800101")
+
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            keep_running = self.console._cmd_remove_notification("148")
+
+        rendered = output.getvalue()
+
+        self.assertTrue(keep_running)
+        self.assertIn("nothingToDelete(1)", rendered)
+        self.assertEqual(
+            self.console.apdu_channel.send_calls[-1][1],
+            bytes.fromhex("80E2910007BF300480020094"),
+        )
+
     def test_encode_iccid_for_command(self):
         encoded = self.console._encode_iccid_for_command("8901234567890123456")
         self.assertEqual(encoded, "981032547698103254F6")
 
     def test_resolve_profile_target_by_alias(self):
         resolved = self.console._resolve_profile_target("isdp1")
-        self.assertEqual(resolved, (self.console.TAG_AID, "A0000005591010FFFFFFFF8900001000"))
+        self.assertEqual(resolved, (self.console.TAG_AID, "A0000005591010FFFFFFFF8900001100"))
 
     def test_enable_profile_auto_disables_current_enabled_profile(self):
         profiles = [
             console_module.ProfileMetadataView(
                 iccid="8901000000000000001",
-                aid="A0000005591010FFFFFFFF8900001000",
+                aid="A0000005591010FFFFFFFF8900001100",
                 state="ENABLED",
                 profile_class="OPER",
                 nickname="Primary",
@@ -181,7 +214,7 @@ class SCP11ConsoleStatusDecodeTests(unittest.TestCase):
             ),
             console_module.ProfileMetadataView(
                 iccid="8901000000000000002",
-                aid="A0000005591010FFFFFFFF8900001100",
+                aid="A0000005591010FFFFFFFF8900001200",
                 state="DISABLED",
                 profile_class="OPER",
                 nickname="Secondary",
@@ -206,7 +239,7 @@ class SCP11ConsoleStatusDecodeTests(unittest.TestCase):
         self.assertEqual(
             executed,
             [
-                ((self.console.TAG_AID, "A0000005591010FFFFFFFF8900001000"), self.console.TAG_DISABLE_PROFILE, "DisableProfile"),
+                ((self.console.TAG_AID, "A0000005591010FFFFFFFF8900001100"), self.console.TAG_DISABLE_PROFILE, "DisableProfile"),
                 ((self.console.TAG_ICCID, "981000000000000000F2"), self.console.TAG_ENABLE_PROFILE, "EnableProfile"),
             ],
         )
@@ -215,7 +248,7 @@ class SCP11ConsoleStatusDecodeTests(unittest.TestCase):
         profiles = [
             console_module.ProfileMetadataView(
                 iccid="8901000000000000002",
-                aid="A0000005591010FFFFFFFF8900001100",
+                aid="A0000005591010FFFFFFFF8900001200",
                 state="DISABLED",
                 profile_class="OPER",
                 nickname="Secondary",
@@ -243,7 +276,7 @@ class SCP11ConsoleStatusDecodeTests(unittest.TestCase):
         profiles = [
             console_module.ProfileMetadataView(
                 iccid="8901000000000000001",
-                aid="A0000005591010FFFFFFFF8900001000",
+                aid="A0000005591010FFFFFFFF8900001100",
                 state="ENABLED",
                 profile_class="OPER",
                 nickname="Primary",
@@ -253,7 +286,7 @@ class SCP11ConsoleStatusDecodeTests(unittest.TestCase):
             ),
             console_module.ProfileMetadataView(
                 iccid="8901000000000000002",
-                aid="A0000005591010FFFFFFFF8900001100",
+                aid="A0000005591010FFFFFFFF8900001200",
                 state="DISABLED",
                 profile_class="OPER",
                 nickname="Secondary",
@@ -278,8 +311,8 @@ class SCP11ConsoleStatusDecodeTests(unittest.TestCase):
         self.assertEqual(
             executed,
             [
-                ((self.console.TAG_AID, "A0000005591010FFFFFFFF8900001000"), self.console.TAG_DISABLE_PROFILE, "DisableProfile"),
-                ((self.console.TAG_AID, "A0000005591010FFFFFFFF8900001100"), self.console.TAG_ENABLE_PROFILE, "EnableProfile"),
+                ((self.console.TAG_AID, "A0000005591010FFFFFFFF8900001100"), self.console.TAG_DISABLE_PROFILE, "DisableProfile"),
+                ((self.console.TAG_AID, "A0000005591010FFFFFFFF8900001200"), self.console.TAG_ENABLE_PROFILE, "EnableProfile"),
                 ((self.console.TAG_ICCID, "981000000000000000F1"), self.console.TAG_DELETE_PROFILE, "DeleteProfile"),
             ],
         )
@@ -312,6 +345,20 @@ class SCP11ConsoleStatusDecodeTests(unittest.TestCase):
         self.console._cmd_eim_download("MATCH-55")
 
         self.assertEqual(self.console.orchestrator.eim_poll_calls, [("MATCH-55", 0)])
+
+    def test_download_activation_code_updates_es9_base_url_from_server(self):
+        self.console._download_activation_code("1$smdpplus2.esim.tst.1ot.mobi$MATCH-55$1.2.3")
+
+        self.assertEqual(self.console.current_smdp_address, "smdpplus2.esim.tst.1ot.mobi")
+        self.assertEqual(self.console.current_es9_base_url, "https://smdpplus2.esim.tst.1ot.mobi")
+        self.assertEqual(
+            self.console.orchestrator.run_flow_calls,
+            [("MATCH-55", "smdpplus2.esim.tst.1ot.mobi")],
+        )
+        self.assertEqual(
+            self.console.orchestrator.profile_provider.base_url,
+            "https://smdpplus2.esim.tst.1ot.mobi",
+        )
 
 
 if __name__ == "__main__":

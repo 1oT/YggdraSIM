@@ -50,7 +50,18 @@ pip install -r requirements.txt
 
 ```bash
 python main/main.py
+python main/main.py --debug
+python main/main.py --card-backend sim --sim-eim-identity /path/to/card_side_eim_identity.json
 ```
+
+Use `--debug` (or `--verbose`) on the wrapper when you want debug to become the
+global default for modules launched from the main menu. Without it,
+module-specific debug flags remain opt-in.
+
+Simulator note:
+
+- `--sim-eim-identity` selects the simulated card's default BF55 eIM identity file.
+- `Workspace/LocalEIM/eim_identity.json` remains the Local eIM shell identity and does not automatically reconfigure the simulated card.
 
 ### Direct module entry points
 
@@ -67,6 +78,12 @@ python -m Tools.ProfilePackage
 python -m Tools.SuciTool
 ```
 
+For non-interactive automation, piping, and ready-to-run profile lifecycle
+examples, see:
+
+- `CLI_AND_PIPING_GUIDE.md`
+- `PROFILE_LIFECYCLE_CLI_CHEATSHEET.md`
+
 ## Persistent state and security model
 
 YggdraSIM now uses `state/device_inventory.sqlite3` as the primary mutable state store for:
@@ -78,10 +95,13 @@ YggdraSIM now uses `state/device_inventory.sqlite3` as the primary mutable state
 
 Current migration model:
 
-- `SCP03/keys.ini` is a legacy import source. Live SCP03 state is now SQLite-primary.
+- `Workspace/SCP03/keys.ini` is a legacy import source. Live SCP03 state is now SQLite-primary.
 - `SCP80/ota_config.ini` is a legacy import source. Live SCP80 state is now SQLite-primary.
-- `SCP11/eim_local/eim_runtime_state.json` is a legacy import source. Live runtime state is now SQLite-primary.
-- `SCP03/aid.txt`, `SCP03/fids.txt`, and `SCP03/binds.json` remain plain files because they are still better suited to manual editing and diff review.
+- `Workspace/LocalEIM/eim_runtime_state.json` is a legacy import source. Live runtime state is now SQLite-primary.
+- `Workspace/LocalEIM/eim_identity.json` defines the Local eIM shell identity, endpoint defaults, and certificate paths.
+- `Workspace/SCP03/aid.txt`, `Workspace/SCP03/fids.txt`, and `Workspace/SCP03/binds.json` remain plain files because they are still better suited to manual editing and diff review.
+- `Workspace/SIMCARD/eim_identity.json` controls the simulator's default BF55 eIM identity and is intentionally separate from `Workspace/LocalEIM/eim_identity.json`.
+- use `Workspace/SIMCARD/isdr_config.json` with `eim_entries` when you need a full custom card-side eIM layout instead of the single seeded simulator default
 
 Optional encryption:
 
@@ -167,6 +187,7 @@ See:
 - `SCP11/README.md`
 - `SCP11/live/README.md`
 - `SCP11/test/README.md`
+- `PROFILE_LIFECYCLE_CLI_CHEATSHEET.md`
 
 ### Local SMDPP
 
@@ -181,6 +202,9 @@ Use `SCP11/local_access` for direct on-card local provisioning without the relay
 
 This path now restores per-card local choices by `EID` from the shared SQLite inventory.
 
+For `--cmd`, `--stdin`, and log-capture examples, use
+`PROFILE_LIFECYCLE_CLI_CHEATSHEET.md`.
+
 ### Local eIM
 
 Use `SCP11/eim_local` when you need:
@@ -191,10 +215,16 @@ Use `SCP11/eim_local` when you need:
 - AddInitialEim / AddEim command generation
 - eIM response logs and counter control
 
+When the card side is simulated:
+
+- `Workspace/LocalEIM/eim_identity.json` still describes the local eIM / SM-DP+ side
+- `Workspace/SIMCARD/eim_identity.json`, the wrapper settings screen, or `--sim-eim-identity` controls what the simulated card advertises in BF55
+
 See:
 
 - `SCP11/eim_local/README.md`
 - `SCP11/eim_local/GUIDE.md`
+- `PROFILE_LIFECYCLE_CLI_CHEATSHEET.md`
 
 ### Profile package tooling
 
@@ -205,12 +235,16 @@ Use `Tools/ProfilePackage` for:
 - linting and package inspection
 - `saip-tool` bridge work
 
-The transcode UI now uses a configurable transcode output directory and stores the setting in the workspace.
+The transcode UI now uses a configurable transcode output directory, persists
+its pane layout in the workspace, supports OS clipboard copy/paste, and writes
+`*.transcode.json`, `*.transcode.der`, and `*.transcode.txt` sidecars.
 
 ## Documentation map
 
 - `CAPABILITIES.md` - suite-level capability reference grouped by subsystem and workflow
 - `ARCHITECTURE.md` - system structure, interdependency matrix, state model, and flow charts
+- `CLI_AND_PIPING_GUIDE.md` - shared non-interactive command and piping conventions
+- `PROFILE_LIFECYCLE_CLI_CHEATSHEET.md` - ready-to-run lifecycle, polling, and logging command recipes
 - `NOTICE` - standards and third-party notice
 - `AUTHORS` - project attribution
 - `SCP11/README.md` - eSIM module selection and guide map

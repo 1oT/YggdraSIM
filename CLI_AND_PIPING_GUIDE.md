@@ -3,6 +3,9 @@
 This guide documents the non-interactive command surfaces intended for CI/CD,
 automation runners, and scripted local operation.
 
+For task-oriented download, enable, disable, delete, and poll examples, also
+use `PROFILE_LIFECYCLE_CLI_CHEATSHEET.md`.
+
 ## Scope
 
 The following modules support direct command automation:
@@ -19,6 +22,32 @@ The following modules support direct command automation:
 | `python -m Tools.ProfilePackage` | Yes | Yes | Yes | SAIP/profile package shell. |
 | `python -m Tools.SuciTool` | Yes | Yes | Yes | SUCI key tool shell. |
 
+## Wrapper simulator flags
+
+`python main/main.py` is not a `--cmd` shell, but it does accept launch-time
+simulator override flags that affect card-facing modules started through the
+wrapper.
+
+Useful wrapper flags:
+
+- `--card-backend sim`
+- `--sim-isdr-config /path/to/isdr_config.json`
+- `--sim-quirks /path/to/sim_quirks.py`
+- `--sim-eim-identity /path/to/card_side_eim_identity.json`
+- `--sim-euicc-store /path/to/euicc_root`
+- `--sim-profile-store /path/to/profile_store`
+
+Example:
+
+```bash
+python main/main.py --card-backend sim --sim-eim-identity /path/to/card_side_eim_identity.json
+```
+
+Practical note:
+
+- `--sim-eim-identity` controls the simulated card's default BF55 eIM identity
+- `Workspace/LocalEIM/eim_identity.json` remains the Local eIM shell identity file and is configured separately
+
 ## Batch conventions
 
 - `--cmd` expects a semicolon-separated command list.
@@ -28,6 +57,11 @@ The following modules support direct command automation:
 - Use `EXIT` to end the current shell cleanly in batch mode.
 - Avoid `QA` in CI/CD unless the calling wrapper explicitly expects a full-suite quit.
 - Commands run in the same order as provided.
+
+Practical shortcut:
+
+- if the task is profile lifecycle work rather than generic shell automation,
+  start from `PROFILE_LIFECYCLE_CLI_CHEATSHEET.md`
 
 ## Semicolon mode
 
@@ -71,6 +105,37 @@ USE keys/demo_suci.key
 DUMP
 EXIT
 EOF
+```
+
+## Profile lifecycle fast path
+
+Relay snapshot:
+
+```bash
+python -m SCP11.live --cmd "DISCOVER; STATUS; LIST; EXIT"
+```
+
+Relay `LPAd` download:
+
+```bash
+python -m SCP11.live --cmd "DOWNLOAD-PROFILE LPA:1$SMDP.EXAMPLE$TOKEN; STATUS; EXIT"
+```
+
+Local direct load:
+
+```bash
+python -m SCP11.local_access --stdin <<'EOF'
+PROFILE Workspace/LocalSMDPP/profile/test_profile.txt
+METADATA Workspace/LocalSMDPP/profile/metadata/default_profile_metadata.json
+LOAD-PROFILE
+EXIT
+EOF
+```
+
+Local eIM queue run:
+
+```bash
+python -m SCP11.eim_local --cmd "HOTFOLDER-LIST --json; POLL-CAMPAIGN --until-empty --max-cycles 20 --json; EXIT"
 ```
 
 ## Module examples
@@ -189,6 +254,13 @@ EXIT
 EOF
 ```
 
+Interactive note:
+
+- `TRANSCODE-TUI` remains interactive, but the same profile selection and path
+  resolution rules apply before entering the UI
+- the transcode workspace writes `*.transcode.json`, `*.transcode.der`, and
+  `*.transcode.txt` sidecars for saved edits
+
 ### SUCI Tool
 
 ```bash
@@ -202,6 +274,28 @@ GENERATE SECP256R1
 DUMP
 EXIT
 EOF
+```
+
+## Interactive Recording
+
+The local SCP11 shells can capture a replayable command transcript together with
+the underlying APDU trace. YAML is the default artifact format; use a `.json`
+suffix when you want machine-oriented JSON instead.
+
+```bash
+python -m SCP11.local_access
+RECORD START reports/local_smdpp_session.yaml
+DISCOVER
+LOAD-PROFILE
+RECORD STOP
+```
+
+```bash
+python -m SCP11.eim_local
+RECORD START reports/eim_local_session.yaml
+DISCOVER
+ADD-EIM package
+RECORD STOP
 ```
 
 ## Output handling

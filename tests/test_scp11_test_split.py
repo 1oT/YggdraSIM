@@ -1,8 +1,10 @@
 import datetime
+import os
 import tempfile
 import types
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from cryptography import x509 as crypto_x509
 from cryptography.hazmat.primitives import hashes, serialization
@@ -154,6 +156,14 @@ class TestSplitPinningTests(unittest.TestCase):
             self.assertIsNotNone(live_console)
             self.assertIsNotNone(test_console)
             self.assertEqual(test_client.last_poll_kwargs, live_client.last_poll_kwargs)
+
+    def test_console_poll_uses_global_debug_when_enabled(self):
+        with mock.patch.dict(os.environ, {"YGGDRASIM_GLOBAL_DEBUG": "1"}, clear=False):
+            _, live_client = self._run_console_poll(LiveConsole, "")
+            _, test_client = self._run_console_poll(Scp11TestConsole, "")
+
+        self.assertTrue(bool(live_client.last_poll_kwargs["debug"]))
+        self.assertTrue(bool(test_client.last_poll_kwargs["debug"]))
 
     def test_test_console_rejects_same_invalid_poll_tokens_as_live_console(self):
         live_client = PollDummyClient()

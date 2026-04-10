@@ -7,6 +7,11 @@ and eIM-local modules expose the user-facing commands.
 
 For operator-facing module selection, start with `SCP11/README.md`.
 
+Automation references:
+
+- `../../CLI_AND_PIPING_GUIDE.md`
+- `../../PROFILE_LIFECYCLE_CLI_CHEATSHEET.md`
+
 ## Primary consumers
 
 - `SCP11/live`

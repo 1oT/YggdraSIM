@@ -77,6 +77,11 @@ python -m Tools.SuciTool
 
 Automation-oriented entry points currently include:
 
+- `SCP11.relay` command-mode and stdin execution
+- `SCP11.live` command-mode and stdin execution
+- `SCP11.test` command-mode and stdin execution
+- `SCP11.local_access` command-mode and stdin execution
+- `SCP11.eim_local` command-mode and stdin execution
 - `SCP03` command-mode execution and script-mode execution
 - `SCP03` report/export mode
 - `SCP80` script execution
@@ -274,12 +279,16 @@ Supported profile-state control includes:
 current capability set includes:
 
 - direct eIM lifecycle command generation and send paths
-- eIM identity defaults and identity-file management
+- Local eIM identity defaults and identity-file management through
+  `Workspace/LocalEIM/eim_identity.json`
 - eIM package authoring from JSON templates
 - canonical fake-eIM peer-provisioning artifacts for `AddEim`
 - eIM package linting and issue workflows
 - localized `IPAd` execution through live/test relay orchestrators
 - adapter-first standalone `IPAd` runner export through `ipad_standalone.py`
+- simulator-side default BF55 eIM identity override through
+  `Workspace/SIMCARD/eim_identity.json`, with full card-side layouts still
+  overridable through `Workspace/SIMCARD/isdr_config.json` and `eim_entries`
 - optional plugin-backed localized `IPAe` watchdog execution through live/test relay orchestrators
 - built-in localized handover-state management and linked download helpers
 - hotfolder queue polling and fetch flows
@@ -344,8 +353,8 @@ Current diagnostics and runtime-control operations include:
 
 Current seeded fake-eIM peer artifacts include:
 
-- `SCP11/eim_local/eim_packages/fake_eim_add_eim_package.json`
-- `SCP11/eim_local/eim_packages/fake_eim_peer_addition_info.json`
+- `Workspace/LocalEIM/eim_packages/fake_eim_add_eim_package.json`
+- `Workspace/LocalEIM/eim_packages/fake_eim_peer_addition_info.json`
 
 ## 9. SAIP And SUCI Tooling Capabilities
 
@@ -368,6 +377,11 @@ The SAIP/profile-package tool currently supports:
   - JSON or YAML output redirection
 - structured dump/export in decoded or raw-oriented forms
 - split-pane `TRANSCODE-TUI` with live JSON editing, live decode, and live lint
+- persistent pane-layout selection for the transcode UI
+- OS clipboard copy/paste integration inside the transcode UI
+- transcode sidecar persistence as `*.transcode.json`, `*.transcode.der`, and
+  `*.transcode.txt`
+- uncapped inspector/decode retention for the current transcode UI report panes
 - tagged SAIP JSON to DER rebuild through `ENCODE-JSON`
 - package splitting
 - app extraction in `CAP` or `IJC` form
@@ -441,7 +455,11 @@ Certificate and trust-management capabilities currently include:
 - drop-in override support for local SCP11 certificate material
 - test-default and live-default trust separation in the relay shells
 - eIM-local identity and certificate-path defaults through
-  `SCP11/eim_local/eim_identity.json`
+  `Workspace/LocalEIM/eim_identity.json`
+- simulator card-side default BF55 identity through
+  `Workspace/SIMCARD/eim_identity.json`
+- full simulator card-side eIM row override through
+  `Workspace/SIMCARD/isdr_config.json` with `eim_entries`
 
 ## 11. Diagnostics, Reporting, And Validation Capabilities
 
@@ -461,6 +479,8 @@ The repository currently includes:
 Use the following documents together with this capability reference:
 
 - `README.md` for launch paths, runtime model, and repository map
+- `CLI_AND_PIPING_GUIDE.md` for shared `--cmd` / `--stdin` automation rules
+- `PROFILE_LIFECYCLE_CLI_CHEATSHEET.md` for ready-to-run lifecycle and polling examples
 - `ARCHITECTURE.md` for dependency and state-flow structure
 - `SCP11/README.md` for eSIM module selection
 - `SCP11/live/README.md` for live relay operation

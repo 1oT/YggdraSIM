@@ -122,12 +122,29 @@ class DummyApduChannel:
         return b""
 
 
+class DummyProfileProvider:
+    def __init__(self):
+        self.base_url = DummyCfg.ES9_BASE_URL
+
+    def set_base_url(self, base_url: str) -> None:
+        self.base_url = base_url
+
+
 class DummyOrchestrator:
     def __init__(self):
         self.sync_calls = []
+        self.run_flow_calls = []
+        self.eim_poll_calls = []
+        self.profile_provider = DummyProfileProvider()
 
     def _sync_pending_notifications(self, response: bytes = b"") -> None:
         self.sync_calls.append(response)
+
+    def run_flow(self, matching_id: str = "", smdp_address: str = "") -> None:
+        self.run_flow_calls.append((matching_id, smdp_address))
+
+    def run_eim_poll(self, matching_id: str = "", entry_index: int = 0) -> None:
+        self.eim_poll_calls.append((matching_id, entry_index))
 
 
 class RelayShellHelpTests(unittest.TestCase):
@@ -160,7 +177,7 @@ class RelayShellHelpTests(unittest.TestCase):
         self.assertIn("Relay Utilities:", rendered)
         self.assertIn("LPAd:", rendered)
         self.assertIn("IPAd:", rendered)
-        self.assertIn("IPAe:", rendered)
+        self.assertNotIn("IPAe:", rendered)
         self.assertIn("HELP [EXPERT]", rendered)
         self.assertIn("METADATA <id|aid|alias>", rendered)
         self.assertIn("DOWNLOAD-PROFILE <activation>", rendered)
@@ -169,7 +186,7 @@ class RelayShellHelpTests(unittest.TestCase):
         self.assertIn("DELETE-PROFILE <iccid-or-aid>", rendered)
         self.assertIn("DISCOVER", rendered)
         self.assertIn("DOWNLOAD", rendered)
-        self.assertIn("POLL", rendered)
+        self.assertNotIn("POLL", rendered)
         self.assertNotIn("DOWNLOAD [matchingId]", rendered)
         self.assertNotIn("POLL [legacy-profile]", rendered)
         self.assertNotIn("FLOW [matchingId]", rendered)
@@ -240,6 +257,49 @@ class RelayShellHelpTests(unittest.TestCase):
         self.assertIn("EID: 89044045930000000000001492294428", rendered)
         self.assertEqual(console.apdu_channel.send_calls[0][0], "GET: EID")
 
+    def test_get_notifications_uses_logical_fallback_helper(self):
+        for module in [self.live_module, self.test_module]:
+            console = self._build_console(module)
+            fallback_calls = []
+
+            def fake_send(payload: bytes, log_name: str) -> bytes:
+                fallback_calls.append((payload, log_name))
+                return _large_realistic_notification_list_response([154])
+
+            console._send_store_data_with_logical_fallback = fake_send
+            buffer = io.StringIO()
+
+            with redirect_stdout(buffer):
+                keep_running = console._commands["GET-NOTIFICATIONS"].handler("")
+
+            rendered = buffer.getvalue()
+            self.assertTrue(keep_running)
+            self.assertEqual(
+                fallback_calls,
+                [(bytes.fromhex("BF2B00"), "GET: RetrieveNotificationsList")],
+            )
+            self.assertIn("Notification Entries : 1", rendered)
+            self.assertIn("Seq Number           : 154", rendered)
+
+    def test_notification_count_uses_logical_fallback_helper(self):
+        for module in [self.live_module, self.test_module]:
+            console = self._build_console(module)
+            fallback_calls = []
+
+            def fake_send(payload: bytes, log_name: str) -> bytes:
+                fallback_calls.append((payload, log_name))
+                return _notification_list_response([154])
+
+            console._send_store_data_with_logical_fallback = fake_send
+
+            count = console._get_notification_count()
+
+            self.assertEqual(count, 1)
+            self.assertEqual(
+                fallback_calls,
+                [(bytes.fromhex("BF2B00"), "GET: RetrieveNotificationsList")],
+            )
+
     def test_clear_notifications_drains_queue_in_live_and_test_shells(self):
         for module in [self.live_module, self.test_module]:
             console = self._build_console(module)
@@ -259,6 +319,58 @@ class RelayShellHelpTests(unittest.TestCase):
             self.assertIn("GET: RetrieveNotificationsList", send_logs)
             self.assertIn("CMD: RemoveNotificationFromList seq=7", send_logs)
             self.assertIn("CMD: RemoveNotificationFromList seq=9", send_logs)
+
+    def test_clear_notifications_encodes_high_bit_sequences_with_positive_integer_prefix(self):
+        for module in [self.live_module, self.test_module]:
+            console = self._build_console(module)
+            console.apdu_channel.notification_responses = [
+                _notification_list_response([0x94]),
+                _notification_list_response([]),
+            ]
+            buffer = io.StringIO()
+
+            with redirect_stdout(buffer):
+                keep_running = console._commands["CLEAR-NOTIFICATIONS"].handler("")
+
+            rendered = buffer.getvalue()
+            remove_calls = [
+                entry for entry in console.apdu_channel.send_calls
+                if entry[0] == "CMD: RemoveNotificationFromList seq=148"
+            ]
+
+            self.assertTrue(keep_running)
+            self.assertIn("removed 1 notification(s)", rendered)
+            self.assertEqual(len(remove_calls), 1)
+            self.assertEqual(remove_calls[0][1], bytes.fromhex("80E2910007BF300480020094"))
+
+    def test_remove_notification_reports_nothing_to_delete_for_bf30_code_one(self):
+        for module in [self.live_module, self.test_module]:
+            console = self._build_console(module)
+            original_send = console.apdu_channel.send
+
+            def send_with_delete_status_one(apdu: bytes, log_name: str) -> bytes:
+                if log_name.startswith("CMD: RemoveNotificationFromList seq="):
+                    console.apdu_channel.send_calls.append((log_name, apdu))
+                    return _tlv(bytes.fromhex("BF30"), _tlv(bytes.fromhex("80"), b"\x01"))
+                return original_send(apdu, log_name)
+
+            console.apdu_channel.send = send_with_delete_status_one
+            buffer = io.StringIO()
+
+            with redirect_stdout(buffer):
+                keep_running = console._commands["REMOVE-NOTIFICATION"].handler("148")
+
+            rendered = buffer.getvalue()
+            remove_calls = [
+                entry for entry in console.apdu_channel.send_calls
+                if entry[0] == "CMD: RemoveNotificationFromList seq=148"
+            ]
+
+            self.assertTrue(keep_running)
+            self.assertIn("nothingToDelete(1)", rendered)
+            self.assertNotIn("iccidOrAidNotFound", rendered)
+            self.assertEqual(len(remove_calls), 1)
+            self.assertEqual(remove_calls[0][1], bytes.fromhex("80E2910007BF300480020094"))
 
     def test_clear_notifications_handles_nested_notification_entries(self):
         for module in [self.live_module, self.test_module]:
@@ -414,6 +526,10 @@ class RelayShellHelpTests(unittest.TestCase):
         for module in [self.live_module, self.test_module]:
             console = self._build_console(module)
             console._get_eid = lambda: "89044045930000000000001492294428"
+            console._get_ecasd_issuer_identity = lambda eid="": {
+                "issuer_number": "89044045",
+                "issuer_name": "Kigen",
+            }
             console._get_configured_addresses_raw = lambda: b""
             console._decode_euicc_configured_data = lambda raw: {}
             console._fetch_profiles = lambda: []
@@ -431,6 +547,10 @@ class RelayShellHelpTests(unittest.TestCase):
         for module in [self.live_module, self.test_module]:
             console = self._build_console(module)
             console._get_eid = lambda: "89044045930000000000001492294428"
+            console._get_ecasd_issuer_identity = lambda eid="": {
+                "issuer_number": "89044045",
+                "issuer_name": "Kigen",
+            }
             console._get_configured_addresses_raw = lambda: b""
             console._decode_euicc_configured_data = lambda raw: {}
             console._fetch_profiles = lambda: []
@@ -453,6 +573,8 @@ class RelayShellHelpTests(unittest.TestCase):
 
             self.assertEqual(snapshot.euicc_info2_summary["profile_version"], "v2.3.1 (020301)")
             self.assertEqual(snapshot.eim_summary["eim_fqdn"], "yggdrasim.eim.test.1ot.com")
+            self.assertEqual(snapshot.issuer_name, "Kigen")
+            self.assertTrue(any("Issuer" in line and "Kigen" in line for line in lines))
             self.assertTrue(any("Profile Version" in line and "v2.3.1 (020301)" in line for line in lines))
             self.assertTrue(any("eIM FQDN" in line and "yggdrasim.eim.test.1ot.com" in line for line in lines))
             self.assertFalse(any("Active Flow Target" in line for line in lines))
@@ -465,6 +587,8 @@ class RelayShellHelpTests(unittest.TestCase):
                 print("NOISY-TRACE-LINE"),
                 module.CardSnapshot(
                     eid="89044045930000000000001492294428",
+                    issuer_number="89044045",
+                    issuer_name="Kigen",
                     configured_raw=b"",
                     configured_decoded={},
                     profiles=[],
@@ -511,6 +635,28 @@ class RelayShellHelpTests(unittest.TestCase):
             self.assertIn("GET: RetrieveNotificationsList", send_logs)
             self.assertIn("CMD: RemoveNotificationFromList seq=7", send_logs)
             self.assertIn("CMD: RemoveNotificationFromList seq=9", send_logs)
+
+    def test_download_profile_uses_activation_code_server_for_es9_target(self):
+        for module in [self.live_module, self.test_module]:
+            console = self._build_console(module)
+
+            console._download_activation_code("1$dpp1.esim.tst.1ot.mobi$MATCH-55$1.2.3")
+
+            self.assertEqual(console.current_smdp_address, "dpp1.esim.tst.1ot.mobi")
+            self.assertEqual(console.current_es9_base_url, "https://dpp1.esim.tst.1ot.mobi")
+            self.assertEqual(console.orchestrator.run_flow_calls, [("MATCH-55", "dpp1.esim.tst.1ot.mobi")])
+            self.assertEqual(console.orchestrator.profile_provider.base_url, "https://dpp1.esim.tst.1ot.mobi")
+
+    def test_download_redirects_activation_code_into_profile_flow(self):
+        for module in [self.live_module, self.test_module]:
+            console = self._build_console(module)
+
+            keep_running = console._cmd_eim_download("1$dpp1.esim.tst.1ot.mobi$MATCH-55$1.2.3")
+
+            self.assertTrue(keep_running)
+            self.assertEqual(console.orchestrator.eim_poll_calls, [])
+            self.assertEqual(console.orchestrator.run_flow_calls, [("MATCH-55", "dpp1.esim.tst.1ot.mobi")])
+            self.assertEqual(console.current_es9_base_url, "https://dpp1.esim.tst.1ot.mobi")
 
     def test_execute_command_does_not_double_sync_when_handler_already_synced(self):
         for module in [self.live_module, self.test_module]:

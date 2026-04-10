@@ -9,7 +9,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Optional, Sequence
 
+from yggdrasim_common.runtime_paths import remap_legacy_workspace_relative
 from .saip_json_codec import transcode_sidecar_paths
+
+_DEFAULT_TOOL_TIMEOUT_SECONDS = 60
+_TOOL_TIMEOUT_ENV = "YGGDRASIM_SAIP_TOOL_TIMEOUT_SECONDS"
 
 
 @dataclass
@@ -23,6 +27,31 @@ class SaipCommandResult:
 def _repo_root_from_saip_module() -> Path:
     """Resolve YggdraSIM tree root from this file (.../Tools/ProfilePackage/saip_tool.py)."""
     return Path(__file__).resolve().parents[2]
+
+
+def _describe_exception_chain(error: BaseException) -> str:
+    parts: list[str] = []
+    current: BaseException | None = error
+    while current is not None:
+        text = str(current).strip() or current.__class__.__name__
+        if len(parts) == 0 or parts[-1] != text:
+            parts.append(text)
+        next_error = getattr(current, "__cause__", None)
+        if isinstance(next_error, BaseException):
+            current = next_error
+            continue
+        break
+    return " | ".join(parts)
+
+
+def _parse_timeout_seconds(raw_value: object) -> int:
+    try:
+        parsed = int(str(raw_value or "").strip())
+    except Exception:
+        return _DEFAULT_TOOL_TIMEOUT_SECONDS
+    if parsed <= 0:
+        return _DEFAULT_TOOL_TIMEOUT_SECONDS
+    return parsed
 
 
 class SaipToolBridge:
@@ -44,18 +73,30 @@ class SaipToolBridge:
     ) -> None:
         self.workspace_root = Path(workspace_root).resolve()
         self.runner = runner if runner is not None else self._run_subprocess
+        self.command_timeout_seconds = _parse_timeout_seconds(
+            os.environ.get(_TOOL_TIMEOUT_ENV, _DEFAULT_TOOL_TIMEOUT_SECONDS)
+        )
         self._tool_command = list(tool_command) if tool_command is not None else None
         self.config_path = (
             Path(config_path).resolve()
             if config_path is not None
-            else (self.workspace_root / "Tools" / "ProfilePackage" / "saip_tool_config.json")
+            else (self.workspace_root / "Workspace" / "SAIP" / "saip_tool_config.json")
         )
-        self.default_profile_dir = self.workspace_root / "Tools" / "ProfilePackage" / "profile"
-        self.default_transcode_dir = self.workspace_root / "Tools" / "ProfilePackage" / "transcode"
+        self.default_profile_dir = self.workspace_root / "Workspace" / "SAIP" / "profile"
+        self.default_transcode_dir = self.workspace_root / "Workspace" / "SAIP" / "transcode"
         self.current_input_file: Optional[Path] = None
         self._load_config()
+        self._seed_tree_if_missing(
+            self.workspace_root / "Tools" / "ProfilePackage" / "profile",
+            self.default_profile_dir,
+        )
+        self._seed_tree_if_missing(
+            self.workspace_root / "Tools" / "ProfilePackage" / "examples",
+            self.workspace_root / "Workspace" / "SAIP" / "examples",
+        )
         self.default_profile_dir.mkdir(parents=True, exist_ok=True)
         self.default_transcode_dir.mkdir(parents=True, exist_ok=True)
+        self.config_path.parent.mkdir(parents=True, exist_ok=True)
 
     def set_input_file(self, path_text: str) -> Path:
         resolved_path = self.resolve_input_path(path_text, must_exist=True)
@@ -94,11 +135,37 @@ class SaipToolBridge:
         return profiles
 
     @staticmethod
+    def _seed_tree_if_missing(source_dir: Path, target_dir: Path) -> None:
+        source = Path(source_dir).resolve()
+        target = Path(target_dir).resolve()
+        if source == target:
+            return
+        if source.exists() is False or source.is_dir() is False:
+            return
+        target.mkdir(parents=True, exist_ok=True)
+        for current_root, dir_names, file_names in os.walk(source):
+            relative_root = Path(current_root).resolve().relative_to(source)
+            destination_root = target / relative_root
+            destination_root.mkdir(parents=True, exist_ok=True)
+            for directory_name in dir_names:
+                (destination_root / directory_name).mkdir(parents=True, exist_ok=True)
+            for file_name in file_names:
+                source_file = Path(current_root) / file_name
+                target_file = destination_root / file_name
+                if target_file.exists():
+                    continue
+                shutil.copy2(source_file, target_file)
+
+    @staticmethod
     def is_transcode_sidecar(path_value: Path) -> bool:
         name = Path(path_value).name.lower()
-        return name.endswith(".transcode.json") or name.endswith(".transcode.der")
+        return (
+            name.endswith(".transcode.json")
+            or name.endswith(".transcode.der")
+            or name.endswith(".transcode.txt")
+        )
 
-    def resolve_transcode_sidecar_paths(self, source_profile_path: Path) -> tuple[Path, Path]:
+    def resolve_transcode_sidecar_paths(self, source_profile_path: Path) -> tuple[Path, Path, Path]:
         return transcode_sidecar_paths(
             source_profile_path,
             transcode_root=self.default_transcode_dir,
@@ -205,6 +272,8 @@ class SaipToolBridge:
             raw_value,
             must_exist=must_exist,
         )
+        if Path(raw_value).expanduser().is_absolute() is False:
+            raw_value = remap_legacy_workspace_relative(raw_value)
 
         candidate_path = Path(raw_value).expanduser()
         if candidate_path.is_absolute() is False:
@@ -227,6 +296,8 @@ class SaipToolBridge:
         raw_value = str(path_text or "").strip()
         if len(raw_value) == 0:
             raise ValueError("Path cannot be empty.")
+        if Path(raw_value).expanduser().is_absolute() is False:
+            raw_value = remap_legacy_workspace_relative(raw_value)
 
         candidate_path = Path(raw_value).expanduser()
         if candidate_path.is_absolute() is False:
@@ -276,7 +347,13 @@ class SaipToolBridge:
 
         from pySim.esim.saip import ProfileElementSequence
 
-        pes = ProfileElementSequence.from_der(prepared_input.read_bytes())
+        try:
+            pes = ProfileElementSequence.from_der(prepared_input.read_bytes())
+        except Exception as error:
+            detail = _describe_exception_chain(error)
+            raise ValueError(
+                f"Profile decode failed for {resolved_input}: {detail}"
+            ) from error
         document: dict[str, object] = {
             "intro": [f"Read {len(pes.pe_list)} PEs from file '{prepared_input}'"],
             "sections": {},
@@ -384,13 +461,40 @@ class SaipToolBridge:
         return env
 
     def _run_subprocess(self, command: Sequence[str]) -> subprocess.CompletedProcess[str]:
-        return subprocess.run(
-            list(command),
-            check=False,
-            capture_output=True,
-            text=True,
-            env=self._subprocess_env_with_pysim(),
-        )
+        normalized_command = list(command)
+        try:
+            return subprocess.run(
+                normalized_command,
+                check=False,
+                capture_output=True,
+                text=True,
+                env=self._subprocess_env_with_pysim(),
+                timeout=self.command_timeout_seconds,
+            )
+        except subprocess.TimeoutExpired as error:
+            stdout_text = getattr(error, "stdout", None)
+            if stdout_text is None:
+                stdout_text = getattr(error, "output", "")
+            stderr_text = getattr(error, "stderr", "")
+            if isinstance(stdout_text, bytes):
+                stdout_text = stdout_text.decode("utf-8", "replace")
+            if isinstance(stderr_text, bytes):
+                stderr_text = stderr_text.decode("utf-8", "replace")
+            timeout_message = (
+                f"saip-tool timed out after {self.command_timeout_seconds}s while "
+                "decoding or processing the profile."
+            )
+            detail = _describe_exception_chain(error)
+            if len(detail) > 0:
+                timeout_message += f" {detail}"
+            if len(str(stderr_text).strip()) > 0:
+                timeout_message += f"\n{str(stderr_text).strip()}"
+            return subprocess.CompletedProcess(
+                normalized_command,
+                124,
+                stdout=str(stdout_text),
+                stderr=timeout_message,
+            )
 
     def _prepare_input_for_tool(self, resolved_input: Path) -> Path:
         if resolved_input.suffix.lower() not in self._HEX_INPUT_SUFFIXES:

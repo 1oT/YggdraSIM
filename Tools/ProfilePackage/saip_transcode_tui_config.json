@@ -1,9 +1,15 @@
 {
-  "theme": "nord",
+  "theme": "textual-ansi",
   "splits": {
-    "json_outline_width": 34,
+    "json_outline_width": 72,
     "json_col_width": 172,
     "inspect_width": 141,
-    "bottom_height": 14
+    "bottom_height": 38
+  },
+  "panes": {
+    "outline_visible": true,
+    "right_mode": "inspect",
+    "bottom_left_mode": "none",
+    "bottom_right_mode": "none"
   }
 }

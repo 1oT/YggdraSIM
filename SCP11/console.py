@@ -27,6 +27,11 @@ from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from yggdrasim_common.quit_control import quit_all
+from yggdrasim_common.euicc_issuer import (
+    format_ecasd_issuer_display,
+    infer_ecasd_issuer_from_eid,
+)
+from SCP11.shared.gsma_error_codes import describe_sgp22_notification_sent_result
 
 try:
     from SCP03.core.utils import TlvParser
@@ -109,6 +114,8 @@ class CommandSpec:
 @dataclass
 class CardSnapshot:
     eid: str
+    issuer_number: str
+    issuer_name: str
     configured_raw: bytes
     configured_decoded: Dict[str, Any]
     profiles: List[ProfileRow]
@@ -143,8 +150,11 @@ class SCP11Console:
     TAG_CTX_0 = 0xA0
     TAG_AID = 0x4F
     TAG_ICCID = 0x5A
-    DEFAULT_AID_REGISTRY_PATH = os.path.normpath(
-        os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "SCP03", "aid.txt")
+    DEFAULT_AID_REGISTRY_PATH = (
+        getattr(SCP03Config, "AID_FILE", "")
+        or os.path.normpath(
+            os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "Workspace", "SCP03", "aid.txt")
+        )
     )
     HELP_USAGE_WIDTH = 31
 
@@ -465,8 +475,10 @@ class SCP11Console:
         eid_value = snapshot.eid
         if len(eid_value) == 0:
             eid_value = "(unavailable)"
+        issuer_value = format_ecasd_issuer_display(snapshot.issuer_name, snapshot.issuer_number)
         key_width = 19
         lines.append(f"{'EID':<{key_width}}: {eid_value}")
+        lines.append(f"{'Issuer (eCASD)':<{key_width}}: {issuer_value}")
         lines.append(f"{'Card Default SM-DP+':<{key_width}}: {default_smdp}")
         lines.append(f"{'Root SM-DS':<{key_width}}: {root_smds_primary}")
         lines.append(f"{'Additional SM-DS':<{key_width}}: {additional_smds}")
@@ -523,6 +535,12 @@ class SCP11Console:
         print(
             f"EID:                "
             f"{self._style.cyan}{snapshot.eid if len(snapshot.eid) > 0 else '(unavailable)'}{self._style.end}"
+        )
+        print(
+            f"Issuer (eCASD):     "
+            f"{self._style.cyan}"
+            f"{format_ecasd_issuer_display(snapshot.issuer_name, snapshot.issuer_number)}"
+            f"{self._style.end}"
         )
 
         default_smdp = snapshot.configured_decoded.get("default_smdp", "")
@@ -1126,6 +1144,14 @@ class SCP11Console:
 
     def _cmd_eim_download(self, argument: str) -> bool:
         matching_id = argument.strip()
+        if "$" in matching_id:
+            parsed = self._parse_activation_code(matching_id)
+            if parsed is not None:
+                print(
+                    f"{self._style.yellow}[*] Activation code detected. Redirecting to DOWNLOAD-AC flow.{self._style.end}"
+                )
+                self._download_activation_code(matching_id)
+                return True
         print(f"{self._style.cyan}[*] Running eIM poll and relay flow...{self._style.end}")
         try:
             self.orchestrator.run_eim_poll(matching_id=matching_id)
@@ -1138,6 +1164,7 @@ class SCP11Console:
     def _collect_snapshot(self) -> CardSnapshot:
         eid = self._get_eid()
         self.current_eid = eid
+        issuer_identity = infer_ecasd_issuer_from_eid(eid)
         configured_raw = self._get_configured_addresses_raw()
         configured_decoded = self._decode_euicc_configured_data(configured_raw)
         profiles = self._fetch_profiles()
@@ -1160,6 +1187,8 @@ class SCP11Console:
 
         return CardSnapshot(
             eid=eid,
+            issuer_number=str(issuer_identity.get("issuer_number", "")).strip(),
+            issuer_name=str(issuer_identity.get("issuer_name", "")).strip(),
             configured_raw=configured_raw,
             configured_decoded=configured_decoded,
             profiles=profiles,
@@ -1795,6 +1824,15 @@ class SCP11Console:
         print(f"[*] Parsed activation code server: {server_address}")
         print(f"[*] Parsed activation code matchingId: {matching_id}")
         self.current_smdp_address = server_address
+        derived_es9_base_url = self._as_https_url(server_address)
+        if len(derived_es9_base_url) > 0:
+            set_ok = self._set_es9_base_url(derived_es9_base_url, source="activation")
+            if set_ok is False:
+                print(
+                    f"{self._style.red}[!] Could not switch ES9 base URL to activation code target: "
+                    f"{derived_es9_base_url}{self._style.end}"
+                )
+                return
         self._run_full_flow(matching_id)
 
     def _run_retrieve_command(self, title: str, payload: bytes, root_tag: Optional[int]) -> None:
@@ -1880,6 +1918,14 @@ class SCP11Console:
             print(f"{self._style.green}[+] {title}: success.{self._style.end}")
             self._sync_notifications_after_success(response)
             return True
+
+        if result_outer_tag == self.TAG_REMOVE_NOTIFICATION:
+            error_text = describe_sgp22_notification_sent_result(int(result_code))
+            print(
+                f"{self._style.red}[-] {title} failed, code 0x{result_code:02X}: "
+                f"{error_text} [SGP.22 ES10b]{self._style.end}"
+            )
+            return False
 
         error_map: Dict[int, str] = {
             1: "Profile Not Found",
@@ -2090,14 +2136,19 @@ class SCP11Console:
         return _build_tlv(func_tag.to_bytes(2, "big"), inner)
 
     def _build_remove_notification_payload(self, seq_value: int) -> bytes:
-        seq_length = 1
-        if seq_value > 0xFF:
-            seq_length = 2
-        if seq_value > 0xFFFF:
-            seq_length = 4
-        seq_bytes = seq_value.to_bytes(seq_length, "big")
+        seq_bytes = self._encode_positive_asn1_integer(seq_value)
         seq_tlv = _build_tlv(bytes.fromhex("80"), seq_bytes)
         return _build_tlv(self.TAG_REMOVE_NOTIFICATION.to_bytes(2, "big"), seq_tlv)
+
+    @staticmethod
+    def _encode_positive_asn1_integer(value: int) -> bytes:
+        if value < 0:
+            raise ValueError("ASN.1 INTEGER value must be non-negative.")
+        byte_length = max(1, (value.bit_length() + 7) // 8)
+        encoded = value.to_bytes(byte_length, "big")
+        if encoded[0] & 0x80:
+            return b"\x00" + encoded
+        return encoded
 
     def _extract_result_code(self, response: bytes, result_outer_tag: int) -> Optional[int]:
         if len(response) == 0:

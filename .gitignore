@@ -2,6 +2,7 @@
 SCP03/script.txt
 docs
 YggdraSIM-data/
+Workspace/
 state/
 eim_last_response.bin
 eim_last_response_hex.txt
@@ -57,14 +58,21 @@ git_agent.log
 pysim/
 reference_test_profile.transcode.json
 reference_test_profile.transcode.der
+reference_test_profile.transcode.txt
 
 Tools/ProfilePackage/profile/transcoded/1oT_test_profile.transcode.der
 Tools/ProfilePackage/profile/transcoded/reference_test_profile.transcode.json
 Tools/ProfilePackage/profile/transcode/1oT_test_profile.transcode.der
 Tools/ProfilePackage/profile/transcode/1oT_test_profile.transcode.json
+Tools/ProfilePackage/profile/transcode/1oT_test_profile.transcode.txt
+Tools/ProfilePackage/profile/transcoded/reference_test_profile.transcode.txt
+*.transcode.txt
 state/gpg_key.fingerprint
 SCP11/local_access/profile/Test_Profile_dummyvalues.txt
 **/polling_plugin.py
 **/polling_plugin_support.py
 **/test_scp11_live_stk_polling.py
 **/1oT_Test_Profile.txt
+**/Notice_of_Invention.md
+**/GSMA_ZD_vulnerability.md
+Legal/

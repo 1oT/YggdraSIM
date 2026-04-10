@@ -6,6 +6,7 @@ from pathlib import Path
 
 from yggdrasim_common.quit_control import QuitAllRequested
 from Tools.SuciTool.shell import SuciToolShell
+from Tools.SuciTool.tool import SuciCommandResult
 
 
 class SuciToolShellTests(unittest.TestCase):
@@ -43,6 +44,62 @@ class SuciToolShellTests(unittest.TestCase):
     def test_cmd_quit_all_raises_quit_all_requested(self) -> None:
         with self.assertRaises(QuitAllRequested):
             self.shell._cmd_quit_all("")
+
+    def test_print_result_reports_success_and_stderr(self) -> None:
+        result = SuciCommandResult(
+            command=["suci-keytool.py", "--key-file", "demo.key", "dump-pub-key"],
+            returncode=0,
+            stdout="public-key\n",
+            stderr="warning\n",
+        )
+        buffer = io.StringIO()
+
+        with contextlib.redirect_stdout(buffer):
+            self.shell._print_result(result)
+
+        rendered = buffer.getvalue()
+        self.assertIn("public-key", rendered)
+        self.assertIn("warning", rendered)
+        self.assertIn("Command completed successfully", rendered)
+
+    def test_print_result_reports_nonzero_exit_code(self) -> None:
+        result = SuciCommandResult(
+            command=["suci-keytool.py", "--key-file", "demo.key", "dump-pub-key"],
+            returncode=2,
+            stdout="",
+            stderr="failed\n",
+        )
+        buffer = io.StringIO()
+
+        with contextlib.redirect_stdout(buffer):
+            self.shell._print_result(result)
+
+        rendered = buffer.getvalue()
+        self.assertIn("failed", rendered)
+        self.assertIn("exited with code 2", rendered)
+
+    def test_exec_line_reports_unknown_command(self) -> None:
+        buffer = io.StringIO()
+
+        with contextlib.redirect_stdout(buffer):
+            self.shell._exec_line("wat")
+
+        self.assertIn("Unknown command: WAT", buffer.getvalue())
+
+    def test_run_commands_stops_after_exit(self) -> None:
+        recorded: list[str] = []
+        self.shell._print_banner = lambda: None
+        self.shell._commands["STATUS"] = lambda argument: recorded.append("STATUS")
+        self.shell._commands["HELP"] = lambda argument: recorded.append("HELP")
+
+        def _raise_exit(_argument: str) -> None:
+            raise SystemExit(0)
+
+        self.shell._commands["EXIT"] = _raise_exit
+
+        self.shell.run_commands("STATUS; EXIT; HELP")
+
+        self.assertEqual(recorded, ["STATUS"])
 
 
 if __name__ == "__main__":

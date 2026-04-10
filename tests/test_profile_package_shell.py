@@ -4,6 +4,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 import yaml
 
@@ -24,8 +25,8 @@ class ProfilePackageShellTests(unittest.TestCase):
     def test_cmd_status_uses_concise_profile_summary(self) -> None:
         self.shell.bridge.current_input_file = (
             self.shell.bridge.workspace_root
-            / "Tools"
-            / "ProfilePackage"
+            / "Workspace"
+            / "SAIP"
             / "profile"
             / "demo_profile.der"
         )
@@ -34,7 +35,7 @@ class ProfilePackageShellTests(unittest.TestCase):
             self.shell._cmd_status("")
 
         text = captured.getvalue()
-        self.assertIn("Active profile: Tools/ProfilePackage/profile/demo_profile.der", text)
+        self.assertIn("Active profile: Workspace/SAIP/profile/demo_profile.der", text)
         self.assertNotIn("tool=", text)
         self.assertNotIn("profile-dir=", text)
 
@@ -403,6 +404,7 @@ class ProfilePackageShellTests(unittest.TestCase):
             (profile_dir / "beta.txt").write_text("ABCD", encoding="utf-8")
             (profile_dir / "beta.transcode.json").write_text("{}", encoding="utf-8")
             (profile_dir / "beta.transcode.der").write_bytes(b"\xAA")
+            (profile_dir / "beta.transcode.txt").write_text("AABB\n", encoding="utf-8")
 
             matches = self.shell._complete_path_token("")
 
@@ -410,6 +412,7 @@ class ProfilePackageShellTests(unittest.TestCase):
         self.assertIn("beta.txt", matches)
         self.assertNotIn("beta.transcode.json", matches)
         self.assertNotIn("beta.transcode.der", matches)
+        self.assertNotIn("beta.transcode.txt", matches)
 
     def test_cmd_profile_dir_sets_default_directory(self) -> None:
         with tempfile.TemporaryDirectory(dir=self.shell.bridge.workspace_root) as temp_dir:
@@ -425,7 +428,7 @@ class ProfilePackageShellTests(unittest.TestCase):
 
     def test_shell_auto_loads_single_visible_profile(self) -> None:
         workspace_root = self.shell.bridge.workspace_root
-        profile_dir = workspace_root / "Tools" / "ProfilePackage" / "profile"
+        profile_dir = workspace_root / "Workspace" / "SAIP" / "profile"
         profile_dir.mkdir(parents=True, exist_ok=True)
         (profile_dir / ".gitkeep").write_text("", encoding="utf-8")
         profile_file = profile_dir / "only_profile.txt"
@@ -438,11 +441,12 @@ class ProfilePackageShellTests(unittest.TestCase):
 
     def test_banner_lists_profiles_found_in_default_directory(self) -> None:
         workspace_root = self.shell.bridge.workspace_root
-        profile_dir = workspace_root / "Tools" / "ProfilePackage" / "profile"
+        profile_dir = workspace_root / "Workspace" / "SAIP" / "profile"
         profile_dir.mkdir(parents=True, exist_ok=True)
         (profile_dir / "alpha.txt").write_text("AA", encoding="utf-8")
         (profile_dir / "beta.der").write_text("BB", encoding="utf-8")
         (profile_dir / "beta.transcode.json").write_text("{}", encoding="utf-8")
+        (profile_dir / "beta.transcode.txt").write_text("AABB\n", encoding="utf-8")
 
         shell = ProfilePackageShell(workspace_root=workspace_root)
         output = io.StringIO()
@@ -456,6 +460,7 @@ class ProfilePackageShellTests(unittest.TestCase):
         self.assertIn("alpha.txt", banner_text)
         self.assertIn("beta.der", banner_text)
         self.assertNotIn("beta.transcode.json", banner_text)
+        self.assertNotIn("beta.transcode.txt", banner_text)
 
     def test_use_accepts_home_path_missing_leading_slash_for_existing_input(self) -> None:
         actual_profile = (
@@ -471,7 +476,7 @@ class ProfilePackageShellTests(unittest.TestCase):
 
         self.assertEqual(selected, actual_profile)
 
-    def test_cmd_transcode_tui_reports_invalid_profile_asn1(self) -> None:
+    def test_cmd_inspect_reports_invalid_profile_asn1_with_context(self) -> None:
         workspace_root = Path(__file__).resolve().parents[1]
         shell = ProfilePackageShell(workspace_root=workspace_root)
         with tempfile.TemporaryDirectory(dir=workspace_root) as temp_dir:
@@ -480,10 +485,419 @@ class ProfilePackageShellTests(unittest.TestCase):
             shell.bridge.set_input_file(str(invalid_profile))
 
             with contextlib.redirect_stdout(io.StringIO()) as captured:
-                shell._cmd_transcode_tui("")
+                shell._cmd_inspect("")
 
         rendered = captured.getvalue()
         self.assertIn("Profile ASN1 is not valid.", rendered)
+        self.assertIn(f"Source: {invalid_profile}.", rendered)
+        self.assertIn("Size: 4 bytes.", rendered)
+        self.assertIn("First bytes: DE AD BE EF.", rendered)
+        self.assertIn("Decoder error:", rendered)
+        self.assertIn("Hint:", rendered)
+        self.assertIn("SAIP profile element sequence", rendered)
+
+    def test_cmd_transcode_dir_sets_default_directory(self) -> None:
+        with tempfile.TemporaryDirectory(dir=self.shell.bridge.workspace_root) as temp_dir:
+            target_dir = Path(temp_dir) / "transcode"
+
+            self.shell._cmd_transcode_dir(str(target_dir))
+
+            self.assertEqual(self.shell.bridge.default_transcode_dir, target_dir.resolve())
+            self.assertTrue(target_dir.exists())
+
+    def test_cmd_encode_json_writes_der_output(self) -> None:
+        with tempfile.TemporaryDirectory(dir=self.shell.bridge.workspace_root) as temp_dir:
+            input_path = Path(temp_dir) / "profile.json"
+            output_path = Path(temp_dir) / "profile.der"
+            input_path.write_text('{"kind": "demo"}', encoding="utf-8")
+
+            with mock.patch(
+                "Tools.ProfilePackage.saip_json_codec.ensure_workspace_pysim_on_path"
+            ) as mocked_ensure:
+                with mock.patch(
+                    "Tools.ProfilePackage.saip_json_codec.dejsonify_document",
+                    return_value={"document": "demo"},
+                ) as mocked_dejsonify:
+                    with mock.patch(
+                        "Tools.ProfilePackage.saip_json_codec.encode_der_from_document",
+                        return_value=b"\x01\x02",
+                    ) as mocked_encode:
+                        with contextlib.redirect_stdout(io.StringIO()) as captured:
+                            self.shell._cmd_encode_json(f'"{input_path}" "{output_path}"')
+
+            self.assertEqual(output_path.read_bytes(), b"\x01\x02")
+            mocked_ensure.assert_called_once_with(self.shell.bridge.workspace_root)
+            mocked_dejsonify.assert_called_once_with({"kind": "demo"})
+            mocked_encode.assert_called_once_with(
+                {"document": "demo"},
+                self.shell.bridge.workspace_root,
+            )
+            self.assertIn("Wrote 2 bytes DER", captured.getvalue())
+
+    def test_cmd_generate_template_writes_json_with_placeholder_defs(self) -> None:
+        decoded_document = {
+            "intro": ["Read 3 PEs from file '/tmp/demo.der'"],
+            "sections": {
+                "header": {
+                    "iccid": bytes.fromhex("89461111111111111112"),
+                },
+                "mf": {
+                    "ef-iccid": [
+                        ("fillFileContent", bytes.fromhex("98641111111111111121")),
+                    ],
+                },
+                "usim": {
+                    "ef-imsi": [
+                        ("fillFileContent", bytes.fromhex("091132547618325476F8")),
+                    ],
+                },
+            },
+        }
+        self.shell.bridge.current_input_file = self.shell.bridge.workspace_root / "demo.der"
+        self.shell.bridge.build_decoded_dump_document = lambda _mode: decoded_document
+
+        with tempfile.TemporaryDirectory(dir=self.shell.bridge.workspace_root) as temp_dir:
+            output_path = Path(temp_dir) / "profile_template.json"
+            with contextlib.redirect_stdout(io.StringIO()) as captured:
+                self.shell._cmd_generate_template(
+                    f'"{output_path}" ICCID=89461111111111111112 IMSI=1234567812345678'
+                )
+
+            rendered = json.loads(output_path.read_text(encoding="utf-8"))
+
+        self.assertEqual(rendered["sections"]["header"]["iccid"]["hex"], "{ICCID}")
+        self.assertEqual(
+            rendered["sections"]["mf"]["ef-iccid"][0]["@"][1]["hex"],
+            "{ICCID_EF}",
+        )
+        self.assertEqual(
+            rendered["sections"]["usim"]["ef-imsi"][0]["@"][1]["hex"],
+            "{IMSI}",
+        )
+        self.assertEqual(rendered["__ygg_token_defs__"]["ICCID"]["hex"], "89461111111111111112")
+        self.assertEqual(rendered["__ygg_token_defs__"]["ICCID_EF"]["hex"], "98641111111111111121")
+        self.assertEqual(rendered["__ygg_token_defs__"]["IMSI"]["hex"], "091132547618325476F8")
+        self.assertIn("Placeholder injection summary", captured.getvalue())
+
+    def test_cmd_generate_profile_applies_typed_placeholder_overrides(self) -> None:
+        template = {
+            "intro": ["Template"],
+            "sections": {
+                "header": {
+                    "iccid": {"hex": "{ICCID}"},
+                },
+                "mf": {
+                    "ef-iccid": [
+                        {
+                            "@": [
+                                "fillFileContent",
+                                {"hex": "{ICCID_EF}"},
+                            ]
+                        }
+                    ],
+                },
+                "usim": {
+                    "ef-imsi": [
+                        {
+                            "@": [
+                                "fillFileContent",
+                                {"hex": "{IMSI}"},
+                            ]
+                        }
+                    ],
+                },
+            },
+        }
+
+        with tempfile.TemporaryDirectory(dir=self.shell.bridge.workspace_root) as temp_dir:
+            template_path = Path(temp_dir) / "profile_template.json"
+            output_path = Path(temp_dir) / "profile.der"
+            template_path.write_text(json.dumps(template), encoding="utf-8")
+
+            with mock.patch(
+                "Tools.ProfilePackage.saip_json_codec.ensure_workspace_pysim_on_path"
+            ) as mocked_ensure:
+                with mock.patch(
+                    "Tools.ProfilePackage.saip_json_codec.encode_der_from_document",
+                    return_value=b"\xAA\xBB",
+                ) as mocked_encode:
+                    with contextlib.redirect_stdout(io.StringIO()) as captured:
+                        self.shell._cmd_generate_profile(
+                            f'"{template_path}" "{output_path}" '
+                            "ICCID=89461111111111111112 IMSI=1234567812345678"
+                        )
+                    written_bytes = output_path.read_bytes()
+
+        mocked_ensure.assert_called_once_with(self.shell.bridge.workspace_root)
+        document = mocked_encode.call_args.args[0]
+        self.assertEqual(document["sections"]["header"]["iccid"], bytes.fromhex("89461111111111111112"))
+        self.assertEqual(
+            document["sections"]["mf"]["ef-iccid"][0][1],
+            bytes.fromhex("98641111111111111121"),
+        )
+        self.assertEqual(
+            document["sections"]["usim"]["ef-imsi"][0][1],
+            bytes.fromhex("091132547618325476F8"),
+        )
+        self.assertEqual(document["__ygg_token_defs__"]["ICCID"]["hex"], "89461111111111111112")
+        self.assertEqual(document["__ygg_token_defs__"]["ICCID_EF"]["hex"], "98641111111111111121")
+        self.assertEqual(document["__ygg_token_defs__"]["IMSI"]["hex"], "091132547618325476F8")
+        self.assertEqual(written_bytes, b"\xAA\xBB")
+        self.assertIn("Placeholder override summary", captured.getvalue())
+
+    def test_cmd_generate_batch_builds_one_profile_per_csv_record(self) -> None:
+        template = {
+            "intro": ["Template"],
+            "sections": {
+                "header": {
+                    "iccid": {"hex": "{ICCID}"},
+                },
+                "mf": {
+                    "ef-iccid": [
+                        {
+                            "@": [
+                                "fillFileContent",
+                                {"hex": "{ICCID_EF}"},
+                            ]
+                        }
+                    ],
+                },
+                "usim": {
+                    "ef-imsi": [
+                        {
+                            "@": [
+                                "fillFileContent",
+                                {"hex": "{IMSI}"},
+                            ]
+                        }
+                    ],
+                },
+            },
+        }
+
+        with tempfile.TemporaryDirectory(dir=self.shell.bridge.workspace_root) as temp_dir:
+            template_path = Path(temp_dir) / "profile_template.json"
+            data_path = Path(temp_dir) / "batch.csv"
+            output_dir = Path(temp_dir) / "generated"
+            template_path.write_text(json.dumps(template), encoding="utf-8")
+            data_path.write_text(
+                "ICCID,IMSI\n"
+                "89461111111111111112,1234567812345678\n"
+                "89461111111111111113,1234567812345679\n",
+                encoding="utf-8",
+            )
+
+            with mock.patch(
+                "Tools.ProfilePackage.saip_json_codec.ensure_workspace_pysim_on_path"
+            ) as mocked_ensure:
+                with mock.patch(
+                    "Tools.ProfilePackage.saip_json_codec.encode_der_from_document",
+                    side_effect=[b"\xAA\x01", b"\xAA\x02"],
+                ) as mocked_encode:
+                    with contextlib.redirect_stdout(io.StringIO()) as captured:
+                        self.shell._cmd_generate_batch(
+                            f'"{template_path}" "{data_path}" "{output_dir}"'
+                        )
+
+            generated_files = sorted(path.name for path in output_dir.glob("*.der"))
+            generated_payloads = {
+                path.name: path.read_bytes()
+                for path in output_dir.glob("*.der")
+            }
+
+        mocked_ensure.assert_called_once_with(self.shell.bridge.workspace_root)
+        self.assertEqual(mocked_encode.call_count, 2)
+        first_document = mocked_encode.call_args_list[0].args[0]
+        second_document = mocked_encode.call_args_list[1].args[0]
+        self.assertEqual(first_document["sections"]["header"]["iccid"], bytes.fromhex("89461111111111111112"))
+        self.assertEqual(second_document["sections"]["header"]["iccid"], bytes.fromhex("89461111111111111113"))
+        self.assertEqual(
+            generated_files,
+            [
+                "profile_iccid_89461111111111111112.der",
+                "profile_iccid_89461111111111111113.der",
+            ],
+        )
+        self.assertEqual(generated_payloads["profile_iccid_89461111111111111112.der"], b"\xAA\x01")
+        self.assertEqual(generated_payloads["profile_iccid_89461111111111111113.der"], b"\xAA\x02")
+        self.assertIn("Generated 2 DER profiles", captured.getvalue())
+
+    def test_cmd_info_apps_invokes_bridge_with_expected_arguments(self) -> None:
+        result = SaipCommandResult(
+            command=["saip-tool.py", "/tmp/demo.der", "info", "--apps"],
+            returncode=0,
+            stdout="ok\n",
+            stderr="",
+        )
+        recorded_args: list[list[str]] = []
+        printed_results: list[SaipCommandResult] = []
+        self.shell.bridge.run_current = lambda args: recorded_args.append(list(args)) or result
+        self.shell._print_result = lambda rendered: printed_results.append(rendered)
+
+        self.shell._cmd_info("APPS")
+
+        self.assertEqual(recorded_args, [["info", "--apps"]])
+        self.assertEqual(printed_results, [result])
+
+    def test_cmd_tree_invokes_bridge_with_expected_arguments(self) -> None:
+        result = SaipCommandResult(
+            command=["saip-tool.py", "/tmp/demo.der", "tree"],
+            returncode=0,
+            stdout="ok\n",
+            stderr="",
+        )
+        recorded_args: list[list[str]] = []
+        printed_results: list[SaipCommandResult] = []
+        self.shell.bridge.run_current = lambda args: recorded_args.append(list(args)) or result
+        self.shell._print_result = lambda rendered: printed_results.append(rendered)
+
+        self.shell._cmd_tree("")
+
+        self.assertEqual(recorded_args, [["tree"]])
+        self.assertEqual(printed_results, [result])
+
+    def test_cmd_check_invokes_bridge_with_expected_arguments(self) -> None:
+        result = SaipCommandResult(
+            command=["saip-tool.py", "/tmp/demo.der", "check"],
+            returncode=0,
+            stdout="ok\n",
+            stderr="",
+        )
+        recorded_args: list[list[str]] = []
+        printed_results: list[SaipCommandResult] = []
+        self.shell.bridge.run_current = lambda args: recorded_args.append(list(args)) or result
+        self.shell._print_result = lambda rendered: printed_results.append(rendered)
+
+        self.shell._cmd_check("")
+
+        self.assertEqual(recorded_args, [["check"]])
+        self.assertEqual(printed_results, [result])
+
+    def test_cmd_split_resolves_output_prefix_inside_workspace(self) -> None:
+        result = SaipCommandResult(
+            command=["saip-tool.py", "/tmp/demo.der", "split"],
+            returncode=0,
+            stdout="ok\n",
+            stderr="",
+        )
+        recorded_args: list[list[str]] = []
+        self.shell.bridge.run_current = lambda args: recorded_args.append(list(args)) or result
+        self.shell._print_result = lambda rendered: None
+
+        with tempfile.TemporaryDirectory(dir=self.shell.bridge.workspace_root) as temp_dir:
+            output_prefix = Path(temp_dir) / "exported_profile"
+            self.shell._cmd_split(str(output_prefix))
+
+        self.assertEqual(
+            recorded_args,
+            [["split", "--output-prefix", str(output_prefix.resolve())]],
+        )
+
+    def test_cmd_extract_apps_accepts_output_dir_and_format(self) -> None:
+        result = SaipCommandResult(
+            command=["saip-tool.py", "/tmp/demo.der", "extract-apps"],
+            returncode=0,
+            stdout="ok\n",
+            stderr="",
+        )
+        recorded_args: list[list[str]] = []
+        self.shell.bridge.run_current = lambda args: recorded_args.append(list(args)) or result
+        self.shell._print_result = lambda rendered: None
+
+        with tempfile.TemporaryDirectory(dir=self.shell.bridge.workspace_root) as temp_dir:
+            output_dir = Path(temp_dir) / "apps"
+            self.shell._cmd_extract_apps(f"{output_dir} CAP")
+
+        self.assertEqual(
+            recorded_args,
+            [["extract-apps", "--output-dir", str(output_dir.resolve()), "--format", "cap"]],
+        )
+
+    def test_cmd_extract_apps_rejects_unknown_format(self) -> None:
+        with self.assertRaisesRegex(ValueError, "Usage: EXTRACT-APPS \\[output_dir\\] \\[CAP\\|IJC\\]"):
+            self.shell._cmd_extract_apps("tests/output BAD")
+
+    def test_cmd_remove_naa_builds_expected_command(self) -> None:
+        result = SaipCommandResult(
+            command=["saip-tool.py", "/tmp/demo.der", "remove-naa"],
+            returncode=0,
+            stdout="ok\n",
+            stderr="",
+        )
+        recorded_args: list[list[str]] = []
+        self.shell.bridge.run_current = lambda args: recorded_args.append(list(args)) or result
+        self.shell._print_result = lambda rendered: None
+
+        with tempfile.TemporaryDirectory(dir=self.shell.bridge.workspace_root) as temp_dir:
+            output_file = Path(temp_dir) / "without_usim.der"
+            self.shell._cmd_remove_naa(f"USIM {output_file}")
+
+        self.assertEqual(
+            recorded_args,
+            [["remove-naa", "--output-file", str(output_file.resolve()), "--naa-type", "usim"]],
+        )
+
+    def test_cmd_raw_normalizes_arguments_before_dispatch(self) -> None:
+        result = SaipCommandResult(
+            command=["saip-tool.py", "/tmp/demo.der", "split"],
+            returncode=0,
+            stdout="ok\n",
+            stderr="",
+        )
+        normalized_tokens = ["split", "--output-prefix", "/tmp/out"]
+        captured_raw_tokens: list[list[str]] = []
+        captured_run_args: list[list[str]] = []
+        printed_results: list[SaipCommandResult] = []
+        self.shell.bridge.normalize_raw_arguments = (
+            lambda tokens: captured_raw_tokens.append(list(tokens)) or normalized_tokens
+        )
+        self.shell.bridge.run_current = lambda args: captured_run_args.append(list(args)) or result
+        self.shell._print_result = lambda rendered: printed_results.append(rendered)
+
+        self.shell._cmd_raw("split --output-prefix tests/out")
+
+        self.assertEqual(captured_raw_tokens, [["split", "--output-prefix", "tests/out"]])
+        self.assertEqual(captured_run_args, [normalized_tokens])
+        self.assertEqual(printed_results, [result])
+
+    def test_exec_line_reports_unknown_command(self) -> None:
+        buffer = io.StringIO()
+
+        with contextlib.redirect_stdout(buffer):
+            self.shell._exec_line("wat")
+
+        self.assertIn("Unknown command: WAT", buffer.getvalue())
+
+    def test_run_commands_stops_after_exit(self) -> None:
+        recorded: list[str] = []
+        self.shell._print_banner = lambda: None
+        self.shell._commands["STATUS"] = lambda argument: recorded.append("STATUS")
+        self.shell._commands["HELP"] = lambda argument: recorded.append("HELP")
+
+        def _raise_exit(_argument: str) -> None:
+            raise SystemExit(0)
+
+        self.shell._commands["EXIT"] = _raise_exit
+
+        self.shell.run_commands("STATUS; EXIT; HELP")
+
+        self.assertEqual(recorded, ["STATUS"])
+
+    def test_run_commands_returns_error_after_command_exception(self) -> None:
+        self.shell._print_banner = lambda: None
+
+        def _raise_decode_error(_argument: str) -> None:
+            raise RuntimeError("synthetic decode failure")
+
+        self.shell._commands["CHECK"] = _raise_decode_error
+        buffer = io.StringIO()
+
+        with contextlib.redirect_stdout(buffer):
+            with self.assertRaises(SystemExit) as raised:
+                self.shell.run_commands("CHECK")
+
+        self.assertEqual(raised.exception.code, 1)
+        self.assertIn("synthetic decode failure", buffer.getvalue())
 
     def test_cmd_lint_writes_json_report(self) -> None:
         decoded_document = {

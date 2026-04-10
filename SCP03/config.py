@@ -17,10 +17,9 @@
 
 import os 
 import sys 
-import shutil 
 import configparser 
 
-from yggdrasim_common.runtime_paths import bundle_path, ensure_runtime_dir, runtime_path
+from yggdrasim_common.runtime_paths import bundle_path, ensure_seeded_workspace_file, ensure_workspace_dir
 
 try :
     from yggdrasim_common.device_inventory import DeviceInventoryStore 
@@ -30,38 +29,13 @@ except ImportError :
 class Config :
     """Centralized configuration and constants."""
 
-    BASE_DIR =bundle_path ("SCP03")
-    CONFIG_DIR =ensure_runtime_dir ("SCP03")
+    BASE_DIR =bundle_path ("Workspace","SCP03")
+    CONFIG_DIR =ensure_workspace_dir ("SCP03")
 
-    INI_FILE =os .path .join (CONFIG_DIR ,'keys.ini')
-    FIDS_FILE =os .path .join (CONFIG_DIR ,'fids.txt')
-    AID_FILE =os .path .join (CONFIG_DIR ,'aid.txt')
-    BINDS_FILE =os .path .join (CONFIG_DIR ,'binds.json')
-
-
-    for filename in ['fids.txt','aid.txt','keys.ini']:
-        user_path =os .path .join (CONFIG_DIR ,filename )
-        bundled_path =os .path .join (BASE_DIR ,filename )
-        if not os .path .exists (user_path )and os .path .exists (bundled_path ):
-            try :
-                shutil .copy2 (bundled_path ,user_path )
-            except Exception as e :
-                print (f"Warning: Could not copy default {filename} to {CONFIG_DIR}: {e}")
-
-
-    user_binds_path =os .path .join (CONFIG_DIR ,'binds.json')
-    bundled_binds_candidates =[
-    os .path .join (BASE_DIR ,'binds.json')
-    ]
-    if not os .path .exists (user_binds_path ):
-        for bundled_binds_path in bundled_binds_candidates :
-            has_bundled =os .path .exists (bundled_binds_path )
-            if has_bundled :
-                try :
-                    shutil .copy2 (bundled_binds_path ,user_binds_path )
-                except Exception as e :
-                    print (f"Warning: Could not copy default binds.json to {CONFIG_DIR}: {e}")
-                break 
+    INI_FILE =ensure_seeded_workspace_file (("Workspace","SCP03","keys.ini"),"SCP03","keys.ini")
+    FIDS_FILE =ensure_seeded_workspace_file (("Workspace","SCP03","fids.txt"),"SCP03","fids.txt")
+    AID_FILE =ensure_seeded_workspace_file (("Workspace","SCP03","aid.txt"),"SCP03","aid.txt")
+    BINDS_FILE =ensure_seeded_workspace_file (("Workspace","SCP03","binds.json"),"SCP03","binds.json")
 
     DEFAULT_KEYS ={
     'scp03_kenc':'1122334455667788AABBCCDDEEFF0011',

@@ -17,7 +17,7 @@ class LocalAccessPathResolutionTests(unittest.TestCase):
             "SCP11/eim_local/certs/eim/CERT.EIM.pem",
             base_dir=cfg.CERTS_DIR,
         )
-        self.assertIn("/SCP11/eim_local/certs/eim/CERT.EIM.pem", resolved)
+        self.assertIn("/Workspace/LocalEIM/certs/eim/CERT.EIM.pem", resolved)
         self.assertNotIn("/certs/SCP11/eim_local", resolved)
 
     def test_unknown_relative_path_keeps_base_dir_resolution(self) -> None:

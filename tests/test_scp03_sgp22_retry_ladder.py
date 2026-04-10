@@ -17,6 +17,7 @@ PROFILE_LIST_HEX = (
     "BF2D49A047E3455A0A980103000040773677634F10A0000005591010FFFFFFFF8900001100"
     "9F700101910B4C6162202845552030312992114C61622028446F6D61696E2D4120303129950102"
 )
+PROFILE_LIST_SEQUENCE_HEX = PROFILE_LIST_HEX.replace("A047E345", "A0473045", 1)
 
 DUMMY_TEST_EIM_OID = "2.25.311782205282738360923618091971140414400"
 DEFAULT_TEST_EIM_FQDN = "yggdrasim.eim.test.1ot.com"
@@ -89,6 +90,38 @@ class DummyTransport:
         raise AssertionError(f"Unexpected APDU: {apdu_hex}")
 
 
+class StkBasicRetryTransport:
+    def __init__(self):
+        self.calls = []
+        self.reset_calls = 0
+        self.base_attempts = 0
+
+    def reset(self):
+        self.reset_calls += 1
+        return True
+
+    def transmit(self, apdu_hex: str, silent: bool = False):
+        del silent
+        normalized = apdu_hex.upper()
+        self.calls.append(normalized)
+        if normalized == "00A4040010A0000005591010FFFFFFFF8900000100":
+            return b"", 0x90, 0x00
+        if normalized == "80E2910003BF2D00":
+            self.base_attempts += 1
+            if self.base_attempts == 1:
+                return b"", 0x69, 0x85
+            return bytes.fromhex(PROFILE_LIST_HEX), 0x90, 0x00
+        if normalized == "0070000001":
+            return b"", 0x68, 0x81
+        if normalized == "80AA00000DA90B8100820101830107840101":
+            return b"", 0x90, 0x00
+        if normalized == "80100000010C":
+            return b"", 0x90, 0x00
+        if normalized == "81E2910003BF2D00":
+            return b"", 0x68, 0x81
+        raise AssertionError(f"Unexpected APDU: {apdu_hex}")
+
+
 class ExportReportManager(Sgp22Manager):
     def __init__(self, payload_map):
         super().__init__(DummyTransport())
@@ -157,6 +190,32 @@ class Sgp22RetryLadderTests(unittest.TestCase):
                 "0070800100",
             ],
         )
+
+    def test_list_profiles_retries_on_basic_channel_after_stk_bootstrap(self):
+        transport = StkBasicRetryTransport()
+        manager = Sgp22Manager(transport)
+
+        with redirect_stdout(io.StringIO()) as output:
+            manager.list_profiles()
+
+        self.assertEqual(transport.reset_calls, 2)
+        self.assertIn("LAB (DOMAIN-A 01)", manager.profile_cache)
+        self.assertIn("81E2910003BF2D00", transport.calls)
+        self.assertEqual(transport.calls[-1], "80E2910003BF2D00")
+        self.assertIn("Lab (Domain-A 01)", output.getvalue())
+
+    def test_profile_list_parser_handles_nested_sequence_profile_entries(self):
+        payload = bytes.fromhex(PROFILE_LIST_SEQUENCE_HEX)
+
+        entries = self.manager._profile_list_to_dicts(payload)
+
+        self.assertEqual(len(entries), 1)
+        self.assertEqual(entries[0]["name"], "Lab (Domain-A 01)")
+        with redirect_stdout(io.StringIO()) as output:
+            self.manager._parse_profile_list(payload)
+        rendered = output.getvalue()
+        self.assertIn("Lab (Domain-A 01)", rendered)
+        self.assertNotIn("No decodable profiles found", rendered)
 
     def test_euicc_info2_tag_mapping_matches_sgp32(self):
         self.assertEqual(self.manager._resolve_tag_name(0x87, 0xBF22), "GlobalPlatform Version")

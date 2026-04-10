@@ -33,11 +33,11 @@ Confirm the following first:
 - the repository root is the current working directory
 - the intended Python environment is active
 - PC/SC access is available when real card execution is required
-- a usable profile source exists under `SCP11/eim_local/profile`
-- metadata JSON exists under `SCP11/eim_local/profile/metadata` when metadata
+- a usable profile source exists under `Workspace/LocalEIM/profile`
+- metadata JSON exists under `Workspace/LocalEIM/profile/metadata` when metadata
   override is needed
-- eIM certificate material exists under `SCP11/eim_local/certs/eim`
-- if `YGGDRASIM_RUNTIME_ROOT` is set, treat `SCP11/eim_local/...` as relative to
+- eIM certificate material exists under `Workspace/LocalEIM/certs/eim`
+- if `YGGDRASIM_RUNTIME_ROOT` is set, treat `Workspace/LocalEIM/...` as relative to
   the active runtime root rather than only to the git checkout
 
 Recommended first commands inside the shell:
@@ -51,6 +51,15 @@ EIM-CERTS
 HOTFOLDER-LIST
 DISCOVER
 ```
+
+Batch-mode shortcut:
+
+```bash
+python -m SCP11.eim_local --cmd "STATUS; PATHS; HOTFOLDER-LIST --json; EXIT"
+```
+
+Use `../../PROFILE_LIFECYCLE_CLI_CHEATSHEET.md` when the goal is a ready-made
+download, handover, or queue command sequence rather than a deep operator walk.
 
 ## 3. Choose the execution path
 
@@ -115,7 +124,7 @@ Practical split:
 
 ## 4. Identity and certificate model
 
-Identity defaults live in `SCP11/eim_local/eim_identity.json`.
+Identity defaults for the Local eIM shell live in `Workspace/LocalEIM/eim_identity.json`.
 
 Important identity fields:
 
@@ -135,17 +144,25 @@ Practical rule:
 - when an executable package leaves a compatible AddEim/AddInitialEim field
   empty, the shell can fall back to the identity value
 
+Simulator-side split:
+
+- `Workspace/LocalEIM/eim_identity.json` describes the local eIM / SM-DP+ side used by `SCP11/eim_local`
+- `Workspace/SIMCARD/eim_identity.json` describes the simulated card's default BF55 eIM identity
+- use the wrapper `Card Backend / Simulator Settings` screen or `python main/main.py --card-backend sim --sim-eim-identity /path/to/card_side_eim_identity.json` when you want to swap the simulated card to a different local or real eIM-facing identity quickly
+- use `Workspace/SIMCARD/isdr_config.json` with explicit `eim_entries` when the card side needs a full custom eIM layout instead of the single seeded default
+
 Certificate handling:
 
-- eIM-side signing and TLS material is read from `SCP11/eim_local/certs/eim`
+- eIM-side signing and TLS material is read from operator-provided drop-ins under `Workspace/LocalEIM/certs/eim`
 - local SM-DP+ auth / download credentials are resolved through
-  `SCP11/local_access/certs`
+  `Workspace/LocalSMDPP/certs`
 - `EIM-CERTS` previews the auto-selected signing certificate for the current
   card and package
 - PEM and DER inputs are both accepted; PEM is normalized before wire encoding
-- `eim_identity.json` pins the default identity signing cert to
-  `CERT_S_EIMsign_YGGDRASIM_ACCEPTED.der`; command examples that pass
-  `CERT_S_EIMsign_YGGDRASIM_NIST.pem` are intentionally overriding that default
+- the repository does not ship usable Local eIM signing or TLS certificates
+- `eim_identity.json` leaves the Local eIM certificate paths empty by default
+- command examples should pass operator-provided certificate paths explicitly,
+  or the operator can populate the identity file locally
 
 ## 5. Package model
 
@@ -202,31 +219,31 @@ This confirms:
 Package mode is preferred when full `EimConfigurationData` control is needed:
 
 ```text
-ADD-INITIAL-EIM package SCP11/eim_local/eim_packages/templates/template_add_initial_eim.json
+ADD-INITIAL-EIM package Workspace/LocalEIM/eim_packages/templates/template_add_initial_eim.json
 ```
 
 Direct `ISD-R` validation can also be forced explicitly:
 
 ```text
-ISDR-ADD-INITIAL-EIM SCP11/eim_local/eim_packages/templates/template_add_initial_eim.json
+ISDR-ADD-INITIAL-EIM Workspace/LocalEIM/eim_packages/templates/template_add_initial_eim.json
 ```
 
 ### 6.3 Register an additional eIM
 
 ```text
-ADD-EIM package SCP11/eim_local/eim_packages/templates/template_add_eim.json
+ADD-EIM package Workspace/LocalEIM/eim_packages/templates/template_add_eim.json
 ```
 
 Canonical seeded fake eIM peer package:
 
 ```text
-ADD-EIM package SCP11/eim_local/eim_packages/fake_eim_add_eim_package.json
+ADD-EIM package Workspace/LocalEIM/eim_packages/fake_eim_add_eim_package.json
 ```
 
 For explicit direct-to-card validation:
 
 ```text
-ISDR-ADD-EIM SCP11/eim_local/eim_packages/templates/template_add_eim.json
+ISDR-ADD-EIM Workspace/LocalEIM/eim_packages/templates/template_add_eim.json
 ```
 
 ### 6.4 Verify the result
@@ -246,7 +263,7 @@ Use `LOAD-EIM-PACKAGE` when a package should be sent directly toward the card,
 without queue or relay routing:
 
 ```text
-LOAD-EIM-PACKAGE SCP11/eim_local/eim_packages/templates/template_add_eim.json
+LOAD-EIM-PACKAGE Workspace/LocalEIM/eim_packages/templates/template_add_eim.json
 ```
 
 This is the fastest way to validate:
@@ -273,6 +290,11 @@ IPAD-DISCOVER
 
 `PATHS` shows the active Direct Auth path plus the localized bridge endpoints
 used for `IPAd` and `IPAe`.
+
+Before proving a simulated-card loop:
+
+- make sure the simulated card's BF55 view matches the intended eIM by checking `Workspace/SIMCARD/eim_identity.json` or the wrapper `eIM identity` override
+- do not assume that changing `Workspace/LocalEIM/eim_identity.json` alone changes what the simulated card advertises
 
 ### 8.2 Run the polling path
 
@@ -369,8 +391,8 @@ activation path toward the local SM-DP+ role.
 Typical lint and issue cycle:
 
 ```text
-EIM-PACKAGE-LINT SCP11/eim_local/eim_packages/templates/template_profile_download_trigger_request.json
-EIM-PACKAGE-ISSUE SCP11/eim_local/eim_packages/templates/template_profile_download_trigger_request.json
+EIM-PACKAGE-LINT Workspace/LocalEIM/eim_packages/templates/template_profile_download_trigger_request.json
+EIM-PACKAGE-ISSUE Workspace/LocalEIM/eim_packages/templates/template_profile_download_trigger_request.json
 ```
 
 ### 10.2 Direct `BF36` relay
@@ -379,8 +401,8 @@ Use `bound_profile_package` or `direct_profile_download` when the eIM should
 relay the profile payload itself.
 
 ```text
-EIM-PACKAGE-LINT SCP11/eim_local/eim_packages/templates/template_bound_profile_package.json
-EIM-PACKAGE-ISSUE SCP11/eim_local/eim_packages/templates/template_bound_profile_package.json
+EIM-PACKAGE-LINT Workspace/LocalEIM/eim_packages/templates/template_bound_profile_package.json
+EIM-PACKAGE-ISSUE Workspace/LocalEIM/eim_packages/templates/template_bound_profile_package.json
 ```
 
 Source handling rules:
@@ -448,11 +470,11 @@ This is expected and is not treated as a failure.
 
 Response log file:
 
-- `SCP11/eim_local/eim_response_log.jsonl`
+- `Workspace/LocalEIM/eim_response_log.jsonl`
 
 Poll audit database:
 
-- `SCP11/eim_local/eim_poll_audit.sqlite3`
+- `Workspace/LocalEIM/eim_poll_audit.sqlite3`
 
 Shared mutable inventory:
 
@@ -470,7 +492,7 @@ COUNTER 2.25.311782205282738360923618091971140414400 set 1
 
 Compatibility note:
 
-- `SCP11/eim_local/eim_runtime_state.json` remains as a legacy import source,
+- `Workspace/LocalEIM/eim_runtime_state.json` remains as a legacy import source,
   not the primary mutable store
 
 ## 13. Troubleshooting
@@ -561,3 +583,10 @@ For most sessions, this order keeps the shell deterministic:
 7. inspect `RESP-LOG`
 8. drain notifications if needed with `NOTIF-HYGIENE 0`
 9. export campaign reports when running queues over time
+
+## 16. Related documents
+
+- `../../PROFILE_LIFECYCLE_CLI_CHEATSHEET.md`
+- `../../CLI_AND_PIPING_GUIDE.md`
+- `README.md`
+- `../local_access/README.md`

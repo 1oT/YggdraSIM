@@ -16,6 +16,7 @@
 # -----------------------------------------------------------------------------
 
 from typing import Tuple ,Optional ,Dict ,Any ,List 
+from yggdrasim_common .card_backend import create_card_connection ,is_simulated_card_backend
 if __package__ :
     from .config import ConfigManager 
     from .utils import Utils ,Colors 
@@ -24,14 +25,16 @@ else :
     from utils import Utils ,Colors 
 
 try :
-    from smartcard .System import readers 
     from smartcard .CardConnection import CardConnection 
     from smartcard .ATR import ATR 
     PYSCRARD_AVAIL =True 
 except ImportError :
     PYSCRARD_AVAIL =False 
-    readers =None 
     ATR =None
+    class CardConnection :  # type: ignore[no-redef]
+        T0_protocol =0
+        T1_protocol =1
+        RAW_protocol =2
 
 class Transport :
     def __init__ (self ,config :ConfigManager ):
@@ -40,21 +43,12 @@ class Transport :
         self .active_protocol =None
 
     def connect (self ,protocol =None )->bool :
-        if not PYSCRARD_AVAIL :
+        if not PYSCRARD_AVAIL and not is_simulated_card_backend ():
             print (f"{Colors.FAIL}[!] pyscard library missing.{Colors.ENDC}")
             return False 
         try :
-            r_list =readers ()
-            if not r_list :
-                print (f"{Colors.FAIL}[!] No readers found.{Colors.ENDC}")
-                return False 
             idx =self .cfg .get_int ("reader_idx")
-            if idx >=len (r_list ):idx =0 
-            self .conn =r_list [idx ].createConnection ()
-            if protocol is None :
-                self .conn .connect ()
-            else :
-                self .conn .connect (protocol )
+            self .conn =create_card_connection (reader_index =idx ,protocol =protocol )
             try :
                 self .active_protocol =self .conn .getProtocol ()
             except Exception :

@@ -16,6 +16,13 @@
 # -----------------------------------------------------------------------------
 
 try:
+    from ..pysim_path import ensure_repo_pysim_on_path
+except ImportError:
+    from SCP11.pysim_path import ensure_repo_pysim_on_path
+
+ensure_repo_pysim_on_path()
+
+try:
     from pySim.esim import compile_asn1_subdir
 except ImportError:
     compile_asn1_subdir = None

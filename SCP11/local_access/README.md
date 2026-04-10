@@ -25,10 +25,34 @@ From the repository root:
 python -m SCP11.local_access
 ```
 
+Batch automation examples:
+
+```bash
+python -m SCP11.local_access --cmd "DISCOVER; STATUS; CERTS --json; EXIT"
+python -m SCP11.local_access --cmd "ENABLE-PROFILE ISDP1; EXIT"
+```
+
+```bash
+python -m SCP11.local_access --stdin <<'EOF'
+PROFILE Workspace/LocalSMDPP/profile/test_profile.txt
+METADATA Workspace/LocalSMDPP/profile/metadata/default_profile_metadata.json
+LOAD-PROFILE
+EXIT
+EOF
+```
+
+Use `../../PROFILE_LIFECYCLE_CLI_CHEATSHEET.md` for the day-to-day non-interactive
+download, enable, disable, delete, and recording patterns.
+
 ## Operator model
 
 The shell is intentionally one-shot. There is no long-lived `OPEN` / `CLOSE`
 session surface.
+
+Simulator note:
+
+- when the shared card backend is set to `sim`, `DISCOVER`, `GET-EIM-CONFIG`, and other card-facing reads come from the simulator
+- the simulator's default BF55 eIM identity is configured through `Workspace/SIMCARD/eim_identity.json`, not `Workspace/LocalEIM/eim_identity.json`
 
 Each card-touching command:
 
@@ -156,7 +180,7 @@ Accepted identifiers:
 - ICCID digits
 - ICCID EF-format hex
 - ISD-P AID hex
-- alias from `SCP03/aid.txt`
+- alias from `Workspace/SCP03/aid.txt`
 
 Current behavior:
 
@@ -171,7 +195,7 @@ Current behavior:
 APDU transport defaults to local PC/SC. Certificate selection is card-aware:
 
 - bundled valid SGP.26 material is scanned automatically
-- drop-in files under `SCP11/local_access/certs` are scanned together with the
+- drop-in files under `Workspace/LocalSMDPP/certs` are scanned together with the
   bundled inventory
 - matching uses the allowed `CI PKID` values reported by the card
 - local drop-ins win when they match and include usable key material
@@ -188,7 +212,7 @@ Legacy filename pairs still work:
 - `CERT.DPauth.ECDSA.der` and `SK.DPauth.ECDSA.pem`
 - `CERT.DPpb.ECDSA.der` and `SK.DPpb.ECDSA.pem`
 
-See `SCP11/local_access/certs/README.md` for the drop-in format.
+See `Workspace/LocalSMDPP/certs/README.md` for the drop-in format.
 
 ## Persistence model
 
@@ -214,9 +238,9 @@ Optional encryption:
 
 Default roots:
 
-- profiles: `SCP11/local_access/profile`
-- metadata: `SCP11/local_access/profile/metadata`
-- debug output: `SCP11/local_access/debug`
+- profiles: `Workspace/LocalSMDPP/profile`
+- metadata: `Workspace/LocalSMDPP/profile/metadata`
+- debug output: `Workspace/LocalSMDPP/debug`
 
 Resolution rules:
 
@@ -239,7 +263,9 @@ Resolution rules:
 ## Related guides
 
 - `SCP11/README.md`
+- `../../CLI_AND_PIPING_GUIDE.md`
+- `../../PROFILE_LIFECYCLE_CLI_CHEATSHEET.md`
 - `SCP11/live/README.md`
 - `SCP11/test/README.md`
 - `SCP11/eim_local/README.md`
-- `SCP11/local_access/certs/README.md`
+- `Workspace/LocalSMDPP/certs/README.md`

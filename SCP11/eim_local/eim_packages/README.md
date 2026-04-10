@@ -21,6 +21,12 @@ Use `fake_eim_peer_addition_info.json` when the operator needs the complete
 identity, endpoint, counter, and certificate inventory needed to carry that
 fake eIM into another workflow or environment.
 
+Simulator distinction:
+
+- these package fixtures describe the Local eIM side and peer-provisioning data
+- the simulated card's own default BF55 identity still comes from
+  `Workspace/SIMCARD/eim_identity.json` unless a stronger card-side override is applied
+
 ## Core fields
 
 - `package_type`

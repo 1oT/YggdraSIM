@@ -148,5 +148,106 @@ class ShellDispatcherExecLineTests(unittest.TestCase):
         self.assertIn("Unknown command: NOT-A-COMMAND", buffer.getvalue())
 
 
+class ShellDispatcherPromptStateTests(unittest.TestCase):
+    @staticmethod
+    def _make_shell() -> ShellDispatcher:
+        shell = ShellDispatcher.__new__(ShellDispatcher)
+        shell.transport = types.SimpleNamespace(session=None)
+        shell.gp_ctrl = types.SimpleNamespace(
+            target_aid=bytes.fromhex("A000000151000000"),
+            list_registry=lambda _kind: None,
+            sgp22=types.SimpleNamespace(),
+        )
+        shell.fs_ctrl = types.SimpleNamespace(
+            current_path_hint="",
+            current_fid=None,
+            current_fcp={},
+            fid_map={
+                "MF": ["3F00"],
+                "ADF_USIM": ["7FF0"],
+                "USIM": ["7FF0"],
+                "EF_IMSI": ["6F07"],
+                "IMSI": ["6F07"],
+            },
+        )
+        shell.aid_lookup = {
+            bytes.fromhex("A000000151000000"): "MNO-SD",
+        }
+        shell._prompt_context_label = ""
+        shell.prompt_str = ""
+        return shell
+
+    def test_update_prompt_state_shows_apdu_context_suffix(self) -> None:
+        shell = self._make_shell()
+
+        shell._set_prompt_context("MNO-SD")
+        shell._update_prompt_state()
+
+        self.assertIn("APDU -> MNO-SD", shell.prompt_str)
+
+    def test_update_prompt_state_appends_selection_to_secure_prompt(self) -> None:
+        shell = self._make_shell()
+        shell.transport = types.SimpleNamespace(
+            session=types.SimpleNamespace(is_authenticated=True, protocol_name="SCP03")
+        )
+
+        shell._set_prompt_context("EF_IMSI")
+        shell._update_prompt_state()
+
+        self.assertIn("SCP03:MNO-SD -> EF_IMSI", shell.prompt_str)
+
+    def test_handle_registry_sets_prompt_context_to_gp_target(self) -> None:
+        shell = self._make_shell()
+        calls: list[str] = []
+        shell.gp_ctrl = types.SimpleNamespace(
+            target_aid=bytes.fromhex("A000000151000000"),
+            list_registry=lambda kind: calls.append(kind),
+        )
+
+        shell._handle_registry("APPS")
+
+        self.assertEqual(calls, ["APPS"])
+        self.assertEqual(shell._prompt_context_label, "MNO-SD")
+
+    def test_sync_manual_select_updates_prompt_context(self) -> None:
+        shell = self._make_shell()
+
+        shell._sync_manual_command(bytes.fromhex("00A40004023F00"), b"")
+
+        self.assertEqual(shell._prompt_context_label, "MF")
+        self.assertEqual(shell.fs_ctrl.current_path_hint, "MF")
+
+    def test_handle_read_binary_refreshes_prompt_context_from_fs_state(self) -> None:
+        shell = self._make_shell()
+
+        def _read_binary(path=None):
+            self.assertEqual(path, "16")
+            shell.fs_ctrl.current_fid = "6F07"
+            shell.fs_ctrl.current_path_hint = "USIM/EF_IMSI"
+
+        shell.fs_ctrl.read_binary = _read_binary
+
+        shell._set_prompt_context("ISD-R")
+        shell._handle_read_binary("16")
+
+        self.assertEqual(shell._prompt_context_label, "USIM/EF_IMSI")
+
+    def test_handle_scan_tree_resets_prompt_context_to_mf(self) -> None:
+        shell = self._make_shell()
+
+        def _scan_tree():
+            shell.fs_ctrl.current_fid = "3F00"
+            shell.fs_ctrl.current_path_hint = ""
+
+        shell.fs_ctrl.scan_tree = _scan_tree
+
+        shell._set_prompt_context("ISD-R")
+        shell.fs_ctrl.current_path_hint = "ISD-R"
+        shell._handle_scan_tree()
+
+        self.assertEqual(shell._prompt_context_label, "MF")
+        self.assertEqual(shell.fs_ctrl.current_path_hint, "MF")
+
+
 if __name__ == "__main__":
     unittest.main()

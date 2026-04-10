@@ -21,7 +21,8 @@ import urllib.error
 import urllib.request
 from typing import Optional, Protocol, Tuple
 
-from smartcard.System import readers
+from yggdrasim_common.session_recording import emit_apdu_trace_event
+from yggdrasim_common.card_backend import create_card_connection
 
 
 def _encode_der_length(length: int) -> bytes:
@@ -192,15 +193,10 @@ class PcscApduChannel:
     def __init__(self, reader_index: int = 0):
         self._reader_index = reader_index
         self._conn = self._connect(reader_index)
-        self._raw_apdu_logging = True
+        self._raw_apdu_logging = False
 
     def _connect(self, index: int):
-        reader_list = readers()
-        if len(reader_list) == 0:
-            raise RuntimeError("No smart card readers found.")
-        connection = reader_list[index].createConnection()
-        connection.connect()
-        return connection
+        return create_card_connection(reader_index=index)
 
     def reset(self) -> bool:
         try:
@@ -212,15 +208,22 @@ class PcscApduChannel:
 
     def bootstrap_stk(self) -> bool:
         terminal_profile = bytes.fromhex("8010000015FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF00")
-        response, sw1, sw2 = self._conn.transmit(list(terminal_profile))
+        _, sw1, sw2 = self.exchange(terminal_profile, "STK INIT: TERMINAL PROFILE")
         while sw1 == 0x91:
-            fetch_apdu = [0x80, 0x12, 0x00, 0x00, sw2]
-            fetch_data, fetch_sw1, fetch_sw2 = self._conn.transmit(fetch_apdu)
+            fetch_data, fetch_sw1, fetch_sw2 = self.exchange(
+                bytes([0x80, 0x12, 0x00, 0x00, sw2]),
+                "STK INIT: FETCH",
+            )
             if fetch_sw1 != 0x90 or fetch_sw2 != 0x00:
                 raise IOError(f"APDU Failed: {fetch_sw1:02X}{fetch_sw2:02X}")
             terminal_response_body = bytes(fetch_data) + bytes.fromhex("81830100")
-            terminal_response = [0x80, 0x14, 0x00, 0x00, len(terminal_response_body)] + list(terminal_response_body)
-            response, sw1, sw2 = self._conn.transmit(terminal_response)
+            terminal_response = bytes(
+                [0x80, 0x14, 0x00, 0x00, len(terminal_response_body)]
+            ) + terminal_response_body
+            _, sw1, sw2 = self.exchange(
+                terminal_response,
+                "STK INIT: TERMINAL RESPONSE",
+            )
         if sw1 != 0x90 or sw2 != 0x00:
             raise IOError(f"APDU Failed: {sw1:02X}{sw2:02X}")
         return True
@@ -232,7 +235,16 @@ class PcscApduChannel:
         status_hex = f"{sw1:02X}{sw2:02X}"
         if self._raw_apdu_logging:
             print(f"[{log_name}] < SW: {status_hex} Data: {bytes(response).hex().upper()}")
-        return bytes(response), sw1, sw2
+        payload = bytes(response)
+        emit_apdu_trace_event(
+            log_name=log_name,
+            apdu=apdu,
+            response=payload,
+            sw1=sw1,
+            sw2=sw2,
+            transport=self.__class__.__name__,
+        )
+        return payload, sw1, sw2
 
     def send(self, apdu: bytes, log_name: str) -> bytes:
         response, sw1, sw2 = self.exchange(apdu, log_name)
@@ -330,22 +342,27 @@ class RelayApduChannel:
     def __init__(self, relay_client: RelayHttpClientJsonHex, session_id: str = ""):
         self._relay_client = relay_client
         self._session_id = session_id
-        self._raw_apdu_logging = True
+        self._raw_apdu_logging = False
 
     def reset(self) -> bool:
         return False
 
     def bootstrap_stk(self) -> bool:
         terminal_profile = bytes.fromhex("8010000015FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF00")
-        response, sw1, sw2 = self._relay_client.send_apdu(terminal_profile, session_id=self._session_id)
+        _, sw1, sw2 = self.exchange(terminal_profile, "STK INIT: TERMINAL PROFILE")
         while sw1 == 0x91:
-            fetch_apdu = bytes([0x80, 0x12, 0x00, 0x00, sw2])
-            fetch_data, fetch_sw1, fetch_sw2 = self._relay_client.send_apdu(fetch_apdu, session_id=self._session_id)
+            fetch_data, fetch_sw1, fetch_sw2 = self.exchange(
+                bytes([0x80, 0x12, 0x00, 0x00, sw2]),
+                "STK INIT: FETCH",
+            )
             if fetch_sw1 != 0x90 or fetch_sw2 != 0x00:
                 raise IOError(f"APDU Failed: {fetch_sw1:02X}{fetch_sw2:02X}")
             terminal_response_body = fetch_data + bytes.fromhex("81830100")
             terminal_response = bytes([0x80, 0x14, 0x00, 0x00, len(terminal_response_body)]) + terminal_response_body
-            response, sw1, sw2 = self._relay_client.send_apdu(terminal_response, session_id=self._session_id)
+            _, sw1, sw2 = self.exchange(
+                terminal_response,
+                "STK INIT: TERMINAL RESPONSE",
+            )
         if sw1 != 0x90 or sw2 != 0x00:
             raise IOError(f"APDU Failed: {sw1:02X}{sw2:02X}")
         return True
@@ -357,6 +374,14 @@ class RelayApduChannel:
         status_hex = f"{sw1:02X}{sw2:02X}"
         if self._raw_apdu_logging:
             print(f"[{log_name}] < SW: {status_hex} Data: {response.hex().upper()}")
+        emit_apdu_trace_event(
+            log_name=log_name,
+            apdu=apdu,
+            response=response,
+            sw1=sw1,
+            sw2=sw2,
+            transport=self.__class__.__name__,
+        )
         return response, sw1, sw2
 
     def send(self, apdu: bytes, log_name: str) -> bytes:

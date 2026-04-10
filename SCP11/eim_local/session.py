@@ -6,7 +6,7 @@ from typing import Any, Optional
 
 from cryptography import x509 as crypto_x509
 from cryptography.hazmat.primitives import serialization
-from yggdrasim_common.runtime_paths import runtime_root
+from yggdrasim_common.runtime_paths import ensure_seeded_workspace_file, runtime_root
 
 try:
     from SCP11.local_access.session import LocalIsdrSession
@@ -190,15 +190,7 @@ class EimLocalSession(LocalIsdrSession):
         self.eim_state.hotfolder_override_path = ""
 
     def list_profile_aliases(self) -> list[dict[str, str]]:
-        registry_path = os.path.normpath(
-            os.path.join(
-                os.path.dirname(os.path.abspath(__file__)),
-                "..",
-                "..",
-                "SCP03",
-                "aid.txt",
-            )
-        )
+        registry_path = ensure_seeded_workspace_file(("SCP03", "aid.txt"), "SCP03", "aid.txt")
         if os.path.isfile(registry_path) is False:
             return []
         rows: list[dict[str, str]] = []

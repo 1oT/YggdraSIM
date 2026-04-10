@@ -1,7 +1,9 @@
+import os
 import subprocess
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from Tools.ProfilePackage.saip_tool import SaipToolBridge
 
@@ -64,7 +66,7 @@ class SaipToolBridgeTests(unittest.TestCase):
             self.assertEqual(resolved, Path(handle.name).resolve())
 
     def test_set_input_file_prefers_default_profile_dir_for_bare_filename(self) -> None:
-        profile_dir = self.workspace_root / "Tools" / "ProfilePackage" / "profile"
+        profile_dir = self.workspace_root / "Workspace" / "SAIP" / "profile"
         profile_dir.mkdir(parents=True, exist_ok=True)
         profile_file = profile_dir / "default_profile.der"
         profile_file.write_bytes(b"\x01\x02\x03")
@@ -76,14 +78,14 @@ class SaipToolBridgeTests(unittest.TestCase):
                 profile_file.unlink()
 
     def test_default_profile_dir_persists_in_config(self) -> None:
-        config_path = self.workspace_root / "Tools" / "ProfilePackage" / "saip_tool_config.json"
+        config_path = self.workspace_root / "Workspace" / "SAIP" / "saip_tool_config.json"
         first_bridge = SaipToolBridge(
             workspace_root=self.workspace_root,
             runner=self.runner,
             tool_command=["saip-tool.py"],
             config_path=config_path,
         )
-        persisted_dir = first_bridge.set_default_profile_dir("Tools/ProfilePackage/custom_profiles")
+        persisted_dir = first_bridge.set_default_profile_dir("Workspace/SAIP/custom_profiles")
 
         second_bridge = SaipToolBridge(
             workspace_root=self.workspace_root,
@@ -95,10 +97,10 @@ class SaipToolBridgeTests(unittest.TestCase):
         self.assertEqual(second_bridge.default_profile_dir, persisted_dir)
 
     def test_default_transcode_dir_persists_in_config(self) -> None:
-        config_path = self.workspace_root / "Tools" / "ProfilePackage" / "saip_tool_config.json"
+        config_path = self.workspace_root / "Workspace" / "SAIP" / "saip_tool_config.json"
         config_path.parent.mkdir(parents=True, exist_ok=True)
         config_path.write_text(
-            '{"default_transcode_dir": "Tools/ProfilePackage/custom_transcode"}',
+            '{"default_transcode_dir": "Workspace/SAIP/custom_transcode"}',
             encoding="utf-8",
         )
 
@@ -111,11 +113,11 @@ class SaipToolBridgeTests(unittest.TestCase):
 
         self.assertEqual(
             bridge.default_transcode_dir,
-            (self.workspace_root / "Tools" / "ProfilePackage" / "custom_transcode").resolve(),
+            (self.workspace_root / "Workspace" / "SAIP" / "custom_transcode").resolve(),
         )
 
     def test_set_default_transcode_dir_persists_in_config(self) -> None:
-        config_path = self.workspace_root / "Tools" / "ProfilePackage" / "saip_tool_config.json"
+        config_path = self.workspace_root / "Workspace" / "SAIP" / "saip_tool_config.json"
         first_bridge = SaipToolBridge(
             workspace_root=self.workspace_root,
             runner=self.runner,
@@ -123,7 +125,7 @@ class SaipToolBridgeTests(unittest.TestCase):
             config_path=config_path,
         )
         persisted_dir = first_bridge.set_default_transcode_dir(
-            "Tools/ProfilePackage/custom_transcode"
+            "Workspace/SAIP/custom_transcode"
         )
 
         second_bridge = SaipToolBridge(
@@ -136,39 +138,44 @@ class SaipToolBridgeTests(unittest.TestCase):
         self.assertEqual(second_bridge.default_transcode_dir, persisted_dir)
 
     def test_describe_status_mentions_transcode_dir(self) -> None:
-        self.bridge.set_default_transcode_dir("Tools/ProfilePackage/custom_transcode")
+        self.bridge.set_default_transcode_dir("Workspace/SAIP/custom_transcode")
 
         status = self.bridge.describe_status()
 
         self.assertIn("Active profile:", status)
         self.assertIn("Transcode dir:", status)
-        self.assertIn("Tools/ProfilePackage/custom_transcode", status)
+        self.assertIn("Workspace/SAIP/custom_transcode", status)
 
     def test_list_default_profiles_ignores_transcode_sidecars(self) -> None:
-        profile_dir = self.workspace_root / "Tools" / "ProfilePackage" / "profile"
+        profile_dir = self.workspace_root / "Workspace" / "SAIP" / "profile"
         profile_dir.mkdir(parents=True, exist_ok=True)
         (profile_dir / "profile.der").write_bytes(b"\x01\x02")
         (profile_dir / "profile.transcode.json").write_text("{}", encoding="utf-8")
         (profile_dir / "profile.transcode.der").write_bytes(b"\xAA")
+        (profile_dir / "profile.transcode.txt").write_text("AABB\n", encoding="utf-8")
 
         listed = self.bridge.list_default_profiles()
 
         self.assertEqual([item.name for item in listed], ["profile.der"])
 
     def test_resolve_transcode_sidecar_paths_use_dedicated_folder(self) -> None:
-        source = self.workspace_root / "Tools" / "ProfilePackage" / "profile" / "demo.der"
+        source = self.workspace_root / "Workspace" / "SAIP" / "profile" / "demo.der"
         source.parent.mkdir(parents=True, exist_ok=True)
         source.write_bytes(b"\x01")
 
-        json_path, der_path = self.bridge.resolve_transcode_sidecar_paths(source)
+        json_path, der_path, txt_path = self.bridge.resolve_transcode_sidecar_paths(source)
 
         self.assertEqual(
             json_path,
-            (self.workspace_root / "Tools" / "ProfilePackage" / "transcode" / "demo.transcode.json").resolve(),
+            (self.workspace_root / "Workspace" / "SAIP" / "transcode" / "demo.transcode.json").resolve(),
         )
         self.assertEqual(
             der_path,
-            (self.workspace_root / "Tools" / "ProfilePackage" / "transcode" / "demo.transcode.der").resolve(),
+            (self.workspace_root / "Workspace" / "SAIP" / "transcode" / "demo.transcode.der").resolve(),
+        )
+        self.assertEqual(
+            txt_path,
+            (self.workspace_root / "Workspace" / "SAIP" / "transcode" / "demo.transcode.txt").resolve(),
         )
 
     def test_resolve_workspace_path_rejects_outside_workspace(self) -> None:
@@ -185,6 +192,67 @@ class SaipToolBridgeTests(unittest.TestCase):
         self.assertEqual(normalized[0], "split")
         self.assertEqual(normalized[1], "--output-prefix")
         self.assertTrue(normalized[2].startswith(str(self.workspace_root)))
+
+    def test_subprocess_env_with_pysim_prepends_workspace_dir_and_preserves_pythonpath(self) -> None:
+        workspace_pysim = self.workspace_root / "pysim"
+        workspace_pysim.mkdir(parents=True, exist_ok=True)
+
+        with mock.patch.dict(os.environ, {"PYTHONPATH": "existing/pythonpath"}, clear=False):
+            env = self.bridge._subprocess_env_with_pysim()
+
+        pythonpath_entries = env["PYTHONPATH"].split(os.pathsep)
+        self.assertEqual(pythonpath_entries[0], str(workspace_pysim))
+        self.assertEqual(pythonpath_entries[-1], "existing/pythonpath")
+
+    def test_run_subprocess_passes_capture_text_and_env(self) -> None:
+        workspace_pysim = self.workspace_root / "pysim"
+        workspace_pysim.mkdir(parents=True, exist_ok=True)
+        completed = subprocess.CompletedProcess(
+            ["saip-tool.py", "demo.der", "info"],
+            0,
+            stdout="ok\n",
+            stderr="",
+        )
+
+        with mock.patch(
+            "Tools.ProfilePackage.saip_tool.subprocess.run",
+            return_value=completed,
+        ) as mocked_run:
+            result = self.bridge._run_subprocess(["saip-tool.py", "demo.der", "info"])
+
+        self.assertIs(result, completed)
+        mocked_run.assert_called_once()
+        self.assertEqual(
+            mocked_run.call_args.args[0],
+            ["saip-tool.py", "demo.der", "info"],
+        )
+        self.assertFalse(mocked_run.call_args.kwargs["check"])
+        self.assertTrue(mocked_run.call_args.kwargs["capture_output"])
+        self.assertTrue(mocked_run.call_args.kwargs["text"])
+        self.assertEqual(
+            mocked_run.call_args.kwargs["timeout"],
+            self.bridge.command_timeout_seconds,
+        )
+        pythonpath_entries = mocked_run.call_args.kwargs["env"]["PYTHONPATH"].split(os.pathsep)
+        self.assertEqual(pythonpath_entries[0], str(workspace_pysim))
+
+    def test_run_subprocess_returns_timeout_error_instead_of_hanging(self) -> None:
+        timeout = self.bridge.command_timeout_seconds
+        with mock.patch(
+            "Tools.ProfilePackage.saip_tool.subprocess.run",
+            side_effect=subprocess.TimeoutExpired(
+                ["saip-tool.py", "demo.der", "dump"],
+                timeout,
+                output="partial output\n",
+                stderr="decoder stalled",
+            ),
+        ):
+            result = self.bridge._run_subprocess(["saip-tool.py", "demo.der", "dump"])
+
+        self.assertEqual(result.returncode, 124)
+        self.assertEqual(result.stdout, "partial output\n")
+        self.assertIn("timed out", result.stderr)
+        self.assertIn("decoder stalled", result.stderr)
 
 
 if __name__ == "__main__":

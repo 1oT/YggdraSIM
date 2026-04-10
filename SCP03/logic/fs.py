@@ -18,7 +18,7 @@
 import os 
 import time 
 import yaml 
-from typing import Dict ,Any ,List ,Union ,Optional 
+from typing import Dict ,Any ,List ,Union ,Optional ,Tuple 
 
 
 from SCP03 .config import Config 
@@ -223,13 +223,9 @@ class FileSystemController :
         self .tp =transport 
         self .fid_map =self ._load_fid_map ()
 
-        has_registry =False 
-        if aid_registry :
-            has_registry =True 
-
-        if has_registry :
+        if aid_registry is not None :
             self .aid_registry =aid_registry 
-        if has_registry ==False :
+        else :
             self .aid_registry ={}
 
         self .current_fcp ={}
@@ -247,7 +243,10 @@ class FileSystemController :
         mapping ={}
 
         for k ,v in self .DEFAULT_MAP .items ():
-            mapping [k ]=v if isinstance (v ,list )else [v ]
+            if isinstance (v ,list ):
+                mapping [k ]=list (v )
+            else :
+                mapping [k ]=[v ]
 
 
         if os .path .exists (Config .FIDS_FILE ):
@@ -266,13 +265,24 @@ class FileSystemController :
                             candidates =[x .strip ().upper ()for x in rest .split (':')if x .strip ()]
 
                             if name_raw and candidates :
+                                target_names =[name_raw ]
 
-                                if name_raw in mapping :
-                                    for c in candidates :
-                                        if c not in mapping [name_raw ]:
-                                            mapping [name_raw ].append (c )
+                                if name_raw .startswith ("ADF_"):
+                                    base_name =name_raw [4 :]
+                                    if base_name in mapping and base_name not in target_names :
+                                        target_names .append (base_name )
                                 else :
-                                    mapping [name_raw ]=candidates 
+                                    adf_name =f"ADF_{name_raw}"
+                                    if adf_name in mapping and adf_name not in target_names :
+                                        target_names .append (adf_name )
+
+                                for target_name in target_names :
+                                    if target_name in mapping :
+                                        for c in candidates :
+                                            if c not in mapping [target_name ]:
+                                                mapping [target_name ].append (c )
+                                    else :
+                                        mapping [target_name ]=list (candidates )
 
                                 if name_raw .startswith ("EF_"):
                                     short_name =name_raw [3 :]
@@ -318,6 +328,562 @@ class FileSystemController :
             return int (arg ,0 )
         except ValueError :
             return int (arg ,16 )
+
+    @staticmethod
+    def _is_hex_identifier (value :str )->bool :
+        clean =str (value or "").strip ().upper ()
+        if len (clean )==0 :
+            return False 
+        if len (clean )%2 !=0 :
+            return False 
+        for char in clean :
+            if char not in "0123456789ABCDEF":
+                return False 
+        return True
+
+    @staticmethod
+    def _build_select_command (identifier :str )->str :
+        clean_identifier =str (identifier or "").strip ().upper ()
+        if len (clean_identifier )>4 :
+            return f"00A40400{len(clean_identifier)//2:02X}{clean_identifier}"
+        return f"00A4000402{clean_identifier}"
+
+    @staticmethod
+    def _normalize_ef_dir_label (label_text :str )->str :
+        return " ".join (str (label_text or "").strip ().split ())
+
+    def _restore_selection_after_ef_dir_probe (self ,previous_fid :str )->None :
+        restore_fid =str (previous_fid or "").strip ().upper ()
+        if len (restore_fid )==0 :
+            self .tp .transmit ("00A40004023F00",silent =True )
+            return 
+        self .tp .transmit (self ._build_select_command (restore_fid ),silent =True )
+
+    def _should_try_ef_dir_fallback (self ,target :str )->bool :
+        clean_target =str (target or "").strip ().upper ()
+        if len (clean_target )==0 :
+            return False 
+        if self ._is_hex_identifier (clean_target ):
+            return False 
+        if clean_target in self .aid_registry :
+            return True 
+        if clean_target in ("USIM","ADF_USIM","ISIM","ADF_ISIM","SSIM","ADF_SSIM","CSIM","ADF_CSIM","GSM"):
+            return True 
+        if clean_target .startswith ("ADF_"):
+            return True 
+        for candidate in self .fid_map .get (clean_target ,[]):
+            candidate_text =str (candidate or "").strip ().upper ()
+            if len (candidate_text )>4 and self ._is_hex_identifier (candidate_text ):
+                return True 
+        return False
+
+    def _derive_ef_dir_aliases (self ,aid_hex :str ,label_text :str )->List [str ]:
+        aliases =set ()
+        upper_label =self ._normalize_ef_dir_label (label_text ).upper ()
+        clean_aid =str (aid_hex or "").strip ().upper ()
+        label_markers =set ()
+        for marker in ("USIM","ISIM","SSIM","CSIM"):
+            if marker in upper_label :
+                label_markers .add (marker )
+
+        if "USIM"in label_markers or (clean_aid .startswith ("A000000087")and "1002"in clean_aid ):
+            aliases .add ("USIM")
+            aliases .add ("ADF_USIM")
+
+        if "ISIM"in label_markers or (clean_aid .startswith ("A000000087")and "1004"in clean_aid ):
+            aliases .add ("ISIM")
+            aliases .add ("ADF_ISIM")
+
+        if "SSIM"in label_markers :
+            aliases .add ("SSIM")
+            aliases .add ("ADF_SSIM")
+
+        if "CSIM"in label_markers or clean_aid .startswith ("A0000003431002")or "4353494D"in clean_aid :
+            aliases .add ("CSIM")
+            aliases .add ("ADF_CSIM")
+
+        return sorted (aliases )
+
+    def _decode_ef_dir_application_template (self ,app_template )->Optional [Dict [str ,Any ]]:
+        try :
+            inner =app_template 
+            if isinstance (app_template ,(bytes ,bytearray ,memoryview )):
+                inner =TlvParser .parse (bytes (app_template ))
+        except Exception :
+            return None 
+
+        has_get =False 
+        if hasattr (inner ,'get'):
+            has_get =True 
+        if has_get ==False :
+            return None 
+
+        aid_value =inner .get (0x4F ,b"")
+        if isinstance (aid_value ,list ):
+            aid_value =aid_value [0 ]if aid_value else b""
+        aid_hex =aid_value .hex ().upper ()if hasattr (aid_value ,'hex')else ""
+        if self ._is_hex_identifier (aid_hex )==False :
+            return None 
+
+        label_value =inner .get (0x50 ,b"")
+        if isinstance (label_value ,list ):
+            label_value =label_value [0 ]if label_value else b""
+
+        label_text =""
+        if isinstance (label_value ,(bytes ,bytearray ,memoryview )):
+            decoded_label =bytes (label_value ).decode ('ascii','ignore')
+            label_text =self ._normalize_ef_dir_label (decoded_label )
+
+        aliases =self ._derive_ef_dir_aliases (aid_hex ,label_text )
+        if len (aliases )==0 :
+            return None 
+
+        return {
+        'aid':aid_hex ,
+        'label':label_text ,
+        'aliases':aliases ,
+        }
+
+    def _discover_ef_dir_applications (self )->List [Dict [str ,Any ]]:
+        previous_fid =self .current_fid 
+        discovered_apps =[]
+        seen_aids =set ()
+        try :
+            self .tp .transmit ("00A40004023F00",silent =True )
+            _ ,sw1 ,sw2 =self .tp .transmit ("00A40004022F00",silent =True )
+            if sw1 !=0x90 and sw1 !=0x61 :
+                return []
+
+            for record_index in range (1 ,33 ):
+                read_cmd =f"00B2{record_index:02X}0400"
+                data ,sw1 ,sw2 =self .tp .transmit (read_cmd ,silent =True )
+                if sw1 ==0x6C :
+                    read_cmd =f"00B2{record_index:02X}04{sw2:02X}"
+                    data ,sw1 ,sw2 =self .tp .transmit (read_cmd ,silent =True )
+                if sw1 !=0x90 and sw1 !=0x61 :
+                    break 
+
+                clean_data =bytes (data or b"" ).rstrip (b"\xff")
+                if len (clean_data )==0 :
+                    continue 
+
+                try :
+                    parsed =TlvParser .parse (clean_data )
+                except Exception :
+                    continue 
+
+                app_templates =parsed .get (0x61 ,[])
+                if isinstance (app_templates ,bytes ):
+                    app_templates =[app_templates ]
+                elif isinstance (app_templates ,dict ):
+                    app_templates =[app_templates ]
+                if isinstance (app_templates ,list )==False :
+                    app_templates =[]
+
+                for app_template in app_templates :
+                    app_entry =self ._decode_ef_dir_application_template (app_template )
+                    if app_entry is None :
+                        continue 
+                    aid_hex =str (app_entry .get ('aid',"")).strip ().upper ()
+                    if aid_hex in seen_aids :
+                        continue 
+                    seen_aids .add (aid_hex )
+                    discovered_apps .append (app_entry )
+
+            return discovered_apps 
+        except Exception :
+            return []
+        finally :
+            self ._restore_selection_after_ef_dir_probe (previous_fid )
+
+    def _cache_ef_dir_aliases (self ,app_entries :List [Dict [str ,Any ]])->bool :
+        refreshed =False 
+        for app_entry in app_entries :
+            aid_hex =str (app_entry .get ('aid',"")).strip ().upper ()
+            if self ._is_hex_identifier (aid_hex )==False :
+                continue 
+            for alias_name in app_entry .get ('aliases',[]):
+                alias_key =str (alias_name or "").strip ().upper ()
+                if len (alias_key )==0 :
+                    continue 
+                existing =str (self .aid_registry .get (alias_key ,"")).strip ().upper ()
+                if existing !=aid_hex :
+                    self .aid_registry [alias_key ]=aid_hex 
+                    refreshed =True 
+        return refreshed
+
+    @staticmethod
+    def _normalize_registry_path_tokens (path_tokens :List [str ])->List [str ]:
+        normalized_tokens =[]
+        for token in path_tokens :
+            token_text =str (token or "").strip ().upper ()
+            if len (token_text )>0 :
+                normalized_tokens .append (token_text )
+        return normalized_tokens
+
+    @staticmethod
+    def _parse_fid_registry_line (raw_line :str )->Optional [Dict [str ,Any ]]:
+        line_text =str (raw_line or "").rstrip ('\n')
+        expanded =line_text .expandtabs (4 )
+        stripped =expanded .strip ()
+        if len (stripped )==0 :
+            return None
+        if stripped .startswith ('#'):
+            return None
+        if ':'not in expanded :
+            return None
+
+        left_side ,right_side =expanded .split (':',1 )
+        indent =len (left_side )-len (left_side .lstrip ())
+        name =left_side .strip ().upper ()
+        if len (name )==0 :
+            return None
+
+        comment_text =""
+        values_text =right_side
+        if '#'in values_text :
+            values_text ,comment_suffix =values_text .split ('#',1 )
+            clean_comment =comment_suffix .strip ()
+            if len (clean_comment )>0 :
+                comment_text =f"# {clean_comment}"
+
+        candidates =[]
+        for candidate in values_text .split (':'):
+            candidate_text =str (candidate or "").strip ().upper ()
+            if len (candidate_text )>0 :
+                candidates .append (candidate_text )
+
+        return {
+        'indent':indent ,
+        'name':name ,
+        'candidates':candidates ,
+        'comment':comment_text ,
+        }
+
+    @classmethod
+    def _iter_fid_registry_paths (cls ,lines :List [str ]):
+        stack =[]
+        for line_index ,raw_line in enumerate (lines ):
+            parsed =cls ._parse_fid_registry_line (raw_line )
+            if parsed is None :
+                continue
+
+            indent =int (parsed ['indent'])
+            while len (stack )>0 and stack [-1 ][0 ]>=indent :
+                stack .pop ()
+
+            path_tokens =[entry [1 ]for entry in stack ]+[parsed ['name']]
+            yield line_index ,parsed ,path_tokens
+            stack .append ((indent ,parsed ['name']))
+
+    @staticmethod
+    def _format_fid_registry_line (
+        name :str ,
+        candidates :List [str ],
+        indent :int =0 ,
+        comment_text :str ="",
+    )->str :
+        clean_candidates =[]
+        for candidate in candidates :
+            candidate_text =str (candidate or "").strip ().upper ()
+            if len (candidate_text )>0 :
+                clean_candidates .append (candidate_text )
+
+        line_text =f"{' ' * max (0 ,int (indent ))}{str (name or '').strip ().upper ()}:{':'.join (clean_candidates )}"
+        normalized_comment =str (comment_text or "").strip ()
+        if len (normalized_comment )>0 :
+            if normalized_comment .startswith ('#')==False :
+                normalized_comment =f"# {normalized_comment}"
+            line_text =f"{line_text} {normalized_comment}"
+        return line_text +'\n'
+
+    def _find_fid_registry_entry (
+        self ,
+        lines :List [str ],
+        path_tokens :List [str ],
+    )->Tuple [Optional [int ],Optional [Dict [str ,Any ]]]:
+        normalized_tokens =self ._normalize_registry_path_tokens (path_tokens )
+        for line_index ,parsed ,entry_tokens in self ._iter_fid_registry_paths (lines ):
+            if entry_tokens ==normalized_tokens :
+                return line_index ,parsed
+        return None ,None
+
+    def _find_fid_registry_subtree_end (self ,lines :List [str ],path_tokens :List [str ])->int :
+        target_index =None 
+        target_indent =-1 
+        normalized_tokens =self ._normalize_registry_path_tokens (path_tokens )
+        for line_index ,parsed ,entry_tokens in self ._iter_fid_registry_paths (lines ):
+            if entry_tokens ==normalized_tokens :
+                target_index =line_index 
+                target_indent =int (parsed ['indent'])
+                continue
+            if target_index is not None :
+                if int (parsed ['indent'])<=target_indent :
+                    return line_index 
+        return len (lines )
+
+    def _parent_has_fid_candidate (
+        self ,
+        lines :List [str ],
+        parent_tokens :List [str ],
+        fid_value :str ,
+    )->bool :
+        normalized_parent =self ._normalize_registry_path_tokens (parent_tokens )
+        clean_fid =str (fid_value or "").strip ().upper ()
+        parent_depth =len (normalized_parent )
+        for _line_index ,parsed ,entry_tokens in self ._iter_fid_registry_paths (lines ):
+            if len (entry_tokens )!=parent_depth +1 :
+                continue
+            if entry_tokens [:parent_depth ]!=normalized_parent :
+                continue
+            if clean_fid in parsed .get ('candidates',[]):
+                return True
+        return False
+
+    def _save_fid_registry_lines (self ,lines :List [str ])->bool :
+        try :
+            with open (Config .FIDS_FILE ,'w',encoding ='utf-8')as fid_file :
+                fid_file .writelines (lines )
+        except Exception :
+            return False
+        self .fid_map =self ._load_fid_map ()
+        return True
+
+    def _persist_fid_registry_candidate (self ,path_tokens :List [str ],fid_value :str )->bool :
+        normalized_tokens =self ._normalize_registry_path_tokens (path_tokens )
+        clean_fid =str (fid_value or "").strip ().upper ()
+        if len (normalized_tokens )==0 :
+            return False
+        if self ._is_hex_identifier (clean_fid )==False :
+            return False
+
+        try :
+            with open (Config .FIDS_FILE ,'r',encoding ='utf-8')as fid_file :
+                lines =fid_file .readlines ()
+        except Exception :
+            return False
+
+        line_index ,parsed =self ._find_fid_registry_entry (lines ,normalized_tokens )
+        if line_index is not None and parsed is not None :
+            candidates =list (parsed .get ('candidates',[]))
+            if clean_fid in candidates :
+                return False
+            candidates .append (clean_fid )
+            lines [line_index ]=self ._format_fid_registry_line (
+                parsed ['name'],
+                candidates ,
+                indent =int (parsed ['indent']),
+                comment_text =str (parsed .get ('comment',"")),
+            )
+            return self ._save_fid_registry_lines (lines )
+
+        if len (normalized_tokens )==1 :
+            if len (lines )>0 :
+                if len (str (lines [-1 ]).strip ())>0 :
+                    lines .append ('\n')
+            lines .append (self ._format_fid_registry_line (normalized_tokens [0 ],[clean_fid ]))
+            return self ._save_fid_registry_lines (lines )
+
+        parent_tokens =normalized_tokens [:-1 ]
+        parent_index ,parent_entry =self ._find_fid_registry_entry (lines ,parent_tokens )
+        if parent_index is None or parent_entry is None :
+            return False
+        if self ._parent_has_fid_candidate (lines ,parent_tokens ,clean_fid ):
+            return False
+
+        insert_index =self ._find_fid_registry_subtree_end (lines ,parent_tokens )
+        child_indent =int (parent_entry ['indent'])+1 
+        lines .insert (
+            insert_index ,
+            self ._format_fid_registry_line (normalized_tokens [-1 ],[clean_fid ],indent =child_indent ),
+        )
+        return self ._save_fid_registry_lines (lines )
+
+    def _persist_ef_dir_discoveries (self ,app_entries :List [Dict [str ,Any ]])->bool :
+        persisted =False 
+        for app_entry in app_entries :
+            aid_hex =str (app_entry .get ('aid',"")).strip ().upper ()
+            if self ._is_hex_identifier (aid_hex )==False :
+                continue
+            aliases =app_entry .get ('aliases',[])
+            root_name =self ._preferred_scan_root_name (aliases )
+            if len (root_name )==0 :
+                continue
+            saved =self ._persist_fid_registry_candidate ([root_name ],aid_hex )
+            if saved :
+                persisted =True 
+        return persisted
+
+    def _build_dynamic_fid_name (self ,fid_value :str )->str :
+        clean_fid =str (fid_value or "").strip ().upper ()
+        file_type =str (self .current_fcp .get ('type',"")).strip ().upper ()
+        if file_type =='DF':
+            return f"DF_{clean_fid}"
+        if file_type =='EF':
+            return f"EF_{clean_fid}"
+        return f"FILE_{clean_fid}"
+
+    def _persist_dynamic_fid_discovery (self ,parent_path_tokens :List [str ],fid_value :str )->str :
+        dynamic_name =self ._build_dynamic_fid_name (fid_value )
+        self ._persist_fid_registry_candidate (parent_path_tokens +[dynamic_name ],fid_value )
+        return dynamic_name
+
+    @staticmethod
+    def _scan_root_candidates_from_aliases (aliases :List [str ])->List [str ]:
+        candidate_names =[]
+        for alias_name in aliases :
+            alias_text =str (alias_name or "").strip ().upper ()
+            if len (alias_text )==0 :
+                continue 
+            base_name =alias_text 
+            if alias_text .startswith ("ADF_"):
+                base_name =alias_text [4 :]
+            for candidate_name in (base_name ,alias_text ):
+                if candidate_name not in candidate_names :
+                    candidate_names .append (candidate_name )
+        return candidate_names
+
+    def _preferred_scan_root_name (self ,aliases :List [str ])->str :
+        candidate_names =self ._scan_root_candidates_from_aliases (aliases )
+        for candidate_name in candidate_names :
+            if candidate_name .startswith ("ADF_")==False :
+                return candidate_name 
+        if len (candidate_names )>0 :
+            return candidate_names [0 ]
+        return ""
+
+    def _find_scan_root_template (self ,roots ,aliases :List [str ]):
+        candidate_names =self ._scan_root_candidates_from_aliases (aliases )
+        for node in roots :
+            node_name =str (node .get ('name',"")).strip ().upper ()
+            if node_name in candidate_names :
+                return node 
+        return None 
+
+    @staticmethod
+    def _clone_scan_tree_node (node :Dict [str ,Any ])->Dict [str ,Any ]:
+        cloned_fids =[]
+        for fid in node .get ('fids',[]):
+            cloned_fids .append (str (fid or "").strip ().upper ())
+
+        cloned_children =[]
+        for child in node .get ('children',[]):
+            cloned_children .append (FileSystemController ._clone_scan_tree_node (child ))
+
+        return {
+        'name':str (node .get ('name',"")).strip ().upper (),
+        'fids':cloned_fids ,
+        'children':cloned_children ,
+        }
+
+    def _merge_live_apps_into_scan_tree (self ,roots ,app_entries :List [Dict [str ,Any ]])->None :
+        claimed_templates =set ()
+        used_path_names =set ()
+        for node in roots :
+            node_name =str (node .get ('name',"")).strip ().upper ()
+            if len (node_name )>0 :
+                used_path_names .add (node_name )
+
+        for app_entry in app_entries :
+            aid_hex =str (app_entry .get ('aid',"")).strip ().upper ()
+            aliases =[]
+            for alias_name in app_entry .get ('aliases',[]):
+                alias_text =str (alias_name or "").strip ().upper ()
+                if len (alias_text )>0 :
+                    aliases .append (alias_text )
+
+            if self ._is_hex_identifier (aid_hex )==False :
+                continue 
+            if len (aliases )==0 :
+                continue 
+
+            template_node =self ._find_scan_root_template (roots ,aliases )
+            target_node =None 
+            path_name =""
+
+            if template_node is not None and id (template_node )not in claimed_templates :
+                target_node =template_node 
+                claimed_templates .add (id (template_node ))
+                path_name =str (target_node .get ('name',"")).strip ().upper ()
+            else :
+                if template_node is not None :
+                    target_node =self ._clone_scan_tree_node (template_node )
+                else :
+                    target_node ={
+                    'name':self ._preferred_scan_root_name (aliases ),
+                    'fids':[] ,
+                    'children':[] ,
+                    }
+
+                node_name =str (target_node .get ('name',"")).strip ().upper ()
+                if len (node_name )==0 :
+                    continue 
+
+                path_name =node_name 
+                if path_name in used_path_names :
+                    path_name =aid_hex 
+                roots .append (target_node )
+                used_path_names .add (path_name )
+
+            if len (path_name )==0 :
+                path_name =str (target_node .get ('name',"")).strip ().upper ()
+            target_node ['path_name']=path_name 
+
+            merged_fids =[aid_hex ]
+            for candidate in target_node .get ('fids',[]):
+                candidate_text =str (candidate or "").strip ().upper ()
+                if len (candidate_text )==0 :
+                    continue 
+                if candidate_text ==aid_hex :
+                    continue 
+                merged_fids .append (candidate_text )
+            target_node ['fids']=merged_fids 
+
+            node_name =str (target_node .get ('name',"")).strip ().upper ()
+            label_text =self ._normalize_ef_dir_label (app_entry .get ('label',""))
+            display_name =node_name 
+            if len (label_text )>0 and label_text .upper ()!=node_name :
+                display_name =f"{node_name} [{label_text}]"
+            target_node ['display_name']=display_name
+
+    def _refresh_aid_registry_from_ef_dir (self ,silent :bool =False )->bool :
+        app_entries =self ._discover_ef_dir_applications ()
+        refreshed =self ._cache_ef_dir_aliases (app_entries )
+        persisted =self ._persist_ef_dir_discoveries (app_entries )
+        if (refreshed or persisted )and not silent :
+            print (f"{Config.Colors.CYAN}[*] Refreshed application AIDs from EF.DIR.{Config.Colors.ENDC}")
+        if refreshed :
+            return True
+        return persisted 
+
+    def _cache_selected_application_aliases (self ,target :str ,fid_value :str )->None :
+        clean_target =str (target or "").strip ().upper ()
+        clean_fid =str (fid_value or "").strip ().upper ()
+        if len (clean_target )==0 :
+            return 
+        if self ._is_hex_identifier (clean_target ):
+            return 
+        if self ._is_hex_identifier (clean_fid )==False :
+            return 
+        if len (clean_fid )<=4 :
+            return 
+
+        alias_names =[]
+        if clean_target .startswith ("ADF_"):
+            alias_names .append (clean_target )
+            base_name =clean_target [4 :]
+            if len (base_name )>0 :
+                alias_names .append (base_name )
+        else :
+            alias_names .append (clean_target )
+            if clean_target in ("USIM","ISIM","SSIM","CSIM"):
+                alias_names .append (f"ADF_{clean_target}")
+
+        for alias_name in alias_names :
+            alias_key =str (alias_name or "").strip ().upper ()
+            if len (alias_key )==0 :
+                continue 
+            self .aid_registry [alias_key ]=clean_fid 
 
     def select (self ,target_path :str ,silent :bool =False )->bool :
         target_path =target_path .strip ().upper ()
@@ -373,7 +939,6 @@ class FileSystemController :
             aid_hex =self .aid_registry [target_path ]
             if not silent :
                 print (f"{Config.Colors.CYAN}[*] Resolved Alias '{target_path}' -> {aid_hex}{Config.Colors.ENDC}")
-            return self ._select_single (aid_hex ,silent =silent ,resolve =True )
 
 
         return self ._select_single (target_path ,silent =silent ,resolve =True )
@@ -384,8 +949,19 @@ class FileSystemController :
         resolve=True means we will try to resolve ARR security rules for the selected file.
         """
         target =target .upper ()
-        candidates =self .fid_map .get (target )
-        if not candidates :candidates =[target ]
+        candidates =[]
+        alias_candidate =str (self .aid_registry .get (target ,"")).strip ().upper ()
+        if self ._is_hex_identifier (alias_candidate ):
+            candidates .append (alias_candidate )
+
+        mapped_candidates =self .fid_map .get (target )
+        if not mapped_candidates :
+            mapped_candidates =[target ]
+
+        for candidate in mapped_candidates :
+            normalized_candidate =str (candidate or "").strip ().upper ()
+            if normalized_candidate not in candidates :
+                candidates .append (normalized_candidate )
 
         for fid in candidates :
             if not all (c in '0123456789ABCDEFabcdef'for c in fid ):continue 
@@ -398,6 +974,7 @@ class FileSystemController :
             if sw1 ==0x90 or sw1 ==0x61 :
                 self .current_fid =fid 
                 self .current_path_hint =target 
+                self ._cache_selected_application_aliases (target ,fid )
                 if data :
 
                     self ._parse_fcp_internal (data ,target_fid =fid ,resolve =resolve )
@@ -410,6 +987,36 @@ class FileSystemController :
             else :
                 if not silent and len (candidates )>1 :
                      print (f"{Config.Colors.WARNING}[-] Candidate {fid} failed ({sw1:02X}{sw2:02X}), trying next...{Config.Colors.ENDC}")
+
+        should_probe_dir =self ._should_try_ef_dir_fallback (target )
+        if should_probe_dir :
+            if not silent :
+                print (f"{Config.Colors.CYAN}[*] Probing EF.DIR for application AIDs...{Config.Colors.ENDC}")
+            self ._refresh_aid_registry_from_ef_dir (silent =silent )
+            discovered_aid =str (self .aid_registry .get (target ,"")).strip ().upper ()
+            can_retry =False 
+            if self ._is_hex_identifier (discovered_aid ):
+                if discovered_aid not in candidates :
+                    can_retry =True 
+
+            if can_retry :
+                retry_cmd =f"00A4000402{discovered_aid}"
+                if len (discovered_aid )>4 :
+                    retry_cmd =f"00A40400{len(discovered_aid)//2:02X}{discovered_aid}"
+
+                data ,sw1 ,sw2 =self .tp .transmit (retry_cmd ,silent =True )
+
+                if sw1 ==0x90 or sw1 ==0x61 :
+                    self .current_fid =discovered_aid 
+                    self .current_path_hint =target 
+                    self ._cache_selected_application_aliases (target ,discovered_aid )
+                    if data :
+                        self ._parse_fcp_internal (data ,target_fid =discovered_aid ,resolve =resolve )
+                    if not silent :
+                        print (f"{Config.Colors.BLUE}[<--]{Config.Colors.ENDC} {data.hex().upper()} {sw1:02X}{sw2:02X}")
+                        print (f"{Config.Colors.GREEN}[+] Selected {target} ({discovered_aid}){Config.Colors.ENDC}")
+                        self .print_fcp_info ()
+                    return True 
 
         if not silent :
             print (f"{Config.Colors.FAIL}[-] Select Failed: '{target}' (Tried: {candidates}){Config.Colors.ENDC}")
@@ -1057,14 +1664,16 @@ class FileSystemController :
             return 
 
         roots =self ._load_tree_structure ()
+        live_app_entries =self ._discover_ef_dir_applications ()
+        self ._cache_ef_dir_aliases (live_app_entries )
+        self ._persist_ef_dir_discoveries (live_app_entries )
+        self ._merge_live_apps_into_scan_tree (roots ,live_app_entries )
         self .scan_cache ={}
         scan_counter =[0 ]
 
         def live_scan (nodes ,parent_fid ,parent_path ,level =0 ):
             for node in nodes :
-                p_cmd =f"00A4000402{parent_fid}"
-                if len (parent_fid )>4 :
-                    p_cmd =f"00A40400{len(parent_fid)//2:02X}{parent_fid}"
+                p_cmd =self ._build_select_command (parent_fid )
 
                 self .tp .transmit (p_cmd ,silent =True )
                 selected_fid =None 
@@ -1077,9 +1686,7 @@ class FileSystemController :
                     continue 
 
                 for fid in node ['fids']:
-                    cmd =f"00A4000402{fid}"
-                    if len (fid )>4 :
-                        cmd =f"00A40404{len(fid)//2:02X}{fid}"
+                    cmd =self ._build_select_command (fid )
 
                     _ ,sw1 ,sw2 =self .tp .transmit (cmd ,silent =True )
 
@@ -1097,9 +1704,12 @@ class FileSystemController :
                     scan_counter [0 ]+=1 
                     idx =str (scan_counter [0 ])
 
-                    current_path =node ['name']
+                    path_name =str (node .get ('path_name',node ['name'])).strip ().upper ()
+                    if len (path_name )==0 :
+                        path_name =str (node ['name']).strip ().upper ()
+                    current_path =path_name 
                     if parent_path !="":
-                        current_path =f"{parent_path}/{node['name']}"
+                        current_path =f"{parent_path}/{path_name}"
 
                     self .scan_cache [idx ]=current_path 
 
@@ -1108,7 +1718,10 @@ class FileSystemController :
                         connector ="└── "
 
                     indent ="    "*level 
-                    print (f"{indent}{connector}[{Config.Colors.YELLOW}{idx}{Config.Colors.ENDC}] {Config.Colors.GREEN}{node['name']}{Config.Colors.ENDC} ({selected_fid})")
+                    display_name =str (node .get ('display_name',node ['name'])).strip ()
+                    if len (display_name )==0 :
+                        display_name =str (node ['name']).strip ().upper ()
+                    print (f"{indent}{connector}[{Config.Colors.YELLOW}{idx}{Config.Colors.ENDC}] {Config.Colors.GREEN}{display_name}{Config.Colors.ENDC} ({selected_fid})")
 
                     if node ['children']:
                         live_scan (node ['children'],selected_fid ,current_path ,level +1 )
@@ -1163,6 +1776,10 @@ class FileSystemController :
         if not os .path .exists (Config .FIDS_FILE ):print (f"{Config.Colors.FAIL}fids.txt missing{Config.Colors.ENDC}");return 
 
         roots =self ._load_tree_structure ()
+        live_app_entries =self ._discover_ef_dir_applications ()
+        self ._cache_ef_dir_aliases (live_app_entries )
+        self ._persist_ef_dir_discoveries (live_app_entries )
+        self ._merge_live_apps_into_scan_tree (roots ,live_app_entries )
         report_data ={}
 
         def extract_file_content (fid ,context_path ):
@@ -1221,7 +1838,7 @@ class FileSystemController :
                 for fid in node ['fids']:
                     if selected_fid is not None :
                         break 
-                    cmd =f"00A40404{len(fid)//2:02X}{fid}"if len (fid )>4 else f"00A4000402{fid}"
+                    cmd =self ._build_select_command (fid )
                     data ,sw1 ,sw2 =self .tp .transmit (cmd ,silent =True )
                     if sw1 ==0x90 or sw1 ==0x61 or sw1 ==0x9F :
                         selected_fid =fid 
@@ -1263,7 +1880,8 @@ class FileSystemController :
                         self .current_fid =target_fid 
                         self ._parse_fcp_internal (data ,target_fid =target_fid )
 
-                        name =f"UNKNOWN_{target_fid}";path ="/".join (parent_path_list +[name ])
+                        name =self ._persist_dynamic_fid_discovery (parent_path_list ,target_fid )
+                        path ="/".join (parent_path_list +[name ])
                         print (f"  > Found Wildcard: {path}")
                         self .current_path_hint =path 
                         file_entry ={'fid':target_fid ,'name':name ,'meta':self .current_fcp .copy ()}
@@ -1350,6 +1968,10 @@ class FileSystemController :
 
         root_dir .mkdir (parents =True ,exist_ok =True )
         roots =self ._load_tree_structure ()
+        live_app_entries =self ._discover_ef_dir_applications ()
+        self ._cache_ef_dir_aliases (live_app_entries )
+        self ._persist_ef_dir_discoveries (live_app_entries )
+        self ._merge_live_apps_into_scan_tree (roots ,live_app_entries )
 
         def _write_ef_content (fid :str ,file_path_base :Path ):
             struct =self .current_fcp .get ('structure','Unknown')
@@ -1408,7 +2030,7 @@ class FileSystemController :
                     if sw1 !=0x6A :
                         break 
 
-        def _live_deep_scan (nodes ,parent_fid ,current_path :Path ):
+        def _live_deep_scan (nodes ,parent_fid ,current_path :Path ,parent_path_tokens :List [str ]):
             processed_fids =set ()
 
             explicit_nodes =[]
@@ -1456,10 +2078,7 @@ class FileSystemController :
                 for fid in node ['fids']:
                     if selected_fid is not None :
                         break 
-                    if len (fid )>4 :
-                        cmd =f"00A40404{len(fid)//2:02X}{fid}"
-                    if len (fid )<=4 :
-                        cmd =f"00A4000402{fid}"
+                    cmd =self ._build_select_command (fid )
 
                     data ,sw1 ,sw2 =self .tp .transmit (cmd ,silent =True )
 
@@ -1493,7 +2112,7 @@ class FileSystemController :
                         _write_ef_content (selected_fid ,file_base )
 
                     if node ['children']:
-                        _live_deep_scan (node ['children'],selected_fid ,node_dir )
+                        _live_deep_scan (node ['children'],selected_fid ,node_dir ,parent_path_tokens +[node ['name']])
 
             for wc in wildcard_nodes :
                 template =wc ['fids'][0 ]
@@ -1530,7 +2149,7 @@ class FileSystemController :
                         self .current_fid =target_fid 
                         self ._parse_fcp_internal (data ,target_fid =target_fid )
 
-                        name =f"UNKNOWN_{target_fid}"
+                        name =self ._persist_dynamic_fid_discovery (parent_path_tokens ,target_fid )
                         file_base =current_path /name 
                         print (f"  > Found & Dumping Wildcard: {file_base}")
                         self .current_path_hint =str (file_base )
@@ -1540,7 +2159,7 @@ class FileSystemController :
 
         try :
             self .tp .transmit ("00A40004023F00",silent =True )
-            _live_deep_scan (roots ,"3F00",root_dir )
+            _live_deep_scan (roots ,"3F00",root_dir ,[])
             print (f"{Config.Colors.GREEN}[+] Live dump complete. Output saved to {root_dir}{Config.Colors.ENDC}")
         except Exception as e :
             print (f"{Config.Colors.FAIL}[!] Dump Execution Failed: {e}{Config.Colors.ENDC}")

@@ -7,10 +7,13 @@ from pathlib import Path
 from unittest import mock
 
 import yggdrasim_common.runtime_paths as runtime_paths
+from SCP11.config import SGPConfig as RelayConfig
 from SCP11.es9_client import Es9LikeClient
 from SCP11.eim_local.config import EimLocalConfig
+from SCP11.live.config import SGPConfig as LiveRelayConfig
 from SCP11.local_access.config import LocalAccessConfig
 from SCP11.local_access.session import LocalIsdrSession
+from SCP11.test.config import SGPConfig as TestRelayConfig
 
 
 class _DummyApduChannel:
@@ -48,20 +51,79 @@ class FrozenRuntimePathTests(unittest.TestCase):
             patch_frozen, patch_executable, patch_env = self._frozen_patches(runtime_root)
             with patch_frozen, patch_executable, patch_env:
                 cfg = LocalAccessConfig()
-            self.assertEqual(cfg.CERTS_DIR, str(runtime_root / "SCP11" / "local_access" / "certs"))
-            self.assertTrue((runtime_root / "SCP11" / "local_access" / "certs").is_dir())
-            self.assertTrue((runtime_root / "SCP11" / "local_access" / "profile").is_dir())
-            self.assertTrue((runtime_root / "SCP11" / "local_access" / "profile" / "test_profile.txt").exists())
+            self.assertEqual(cfg.CERTS_DIR, str(runtime_root / "Workspace" / "LocalSMDPP" / "certs"))
+            self.assertEqual(
+                cfg.SGP26_VALID_CERT_DIR,
+                str(runtime_root / "Workspace" / "SCP11" / "SGP.26_test_Certs" / "Valid Test Cases"),
+            )
+            self.assertTrue((runtime_root / "Workspace" / "LocalSMDPP" / "certs").is_dir())
+            self.assertTrue((runtime_root / "Workspace" / "LocalSMDPP" / "profile").is_dir())
             self.assertTrue(
                 (
                     runtime_root
+                    / "Workspace"
                     / "SCP11"
-                    / "local_access"
+                    / "SGP.26_test_Certs"
+                    / "Valid Test Cases"
+                    / "Variant O"
+                    / "SM-DP+"
+                    / "SM_DPauth"
+                    / "CERT_S_SM_DPauth_VARO_SIG_NIST.der"
+                ).exists()
+            )
+            self.assertTrue((runtime_root / "Workspace" / "LocalSMDPP" / "profile" / "test_profile.txt").exists())
+            self.assertTrue(
+                (
+                    runtime_root
+                    / "Workspace"
+                    / "LocalSMDPP"
                     / "profile"
                     / "metadata"
                     / "default_profile_metadata.json"
                 ).exists()
             )
+
+    def test_scp03_config_seeds_shared_workspace_files_when_frozen(self) -> None:
+        import SCP03.config as scp03_config
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            runtime_root = Path(temp_dir) / "runtime"
+            patch_frozen, patch_executable, patch_env = self._frozen_patches(runtime_root)
+            try:
+                with patch_frozen, patch_executable, patch_env:
+                    importlib.reload(scp03_config)
+                    self.assertEqual(
+                        Path(scp03_config.Config.CONFIG_DIR),
+                        runtime_root / "Workspace" / "SCP03",
+                    )
+                    self.assertEqual(
+                        Path(scp03_config.Config.AID_FILE),
+                        runtime_root / "Workspace" / "SCP03" / "aid.txt",
+                    )
+                    self.assertTrue((runtime_root / "Workspace" / "SCP03" / "keys.ini").exists())
+                    self.assertTrue((runtime_root / "Workspace" / "SCP03" / "fids.txt").exists())
+                    self.assertTrue((runtime_root / "Workspace" / "SCP03" / "aid.txt").exists())
+                    self.assertTrue((runtime_root / "Workspace" / "SCP03" / "binds.json").exists())
+            finally:
+                importlib.reload(scp03_config)
+
+    def test_scp11_relay_configs_seed_workspace_cert_paths_when_frozen(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            runtime_root = Path(temp_dir) / "runtime"
+            patch_frozen, patch_executable, patch_env = self._frozen_patches(runtime_root)
+            with patch_frozen, patch_executable, patch_env:
+                relay_cfg = RelayConfig()
+                live_cfg = LiveRelayConfig()
+                test_cfg = TestRelayConfig()
+            self.assertEqual(relay_cfg.CERT_PATH_AUTH, str(runtime_root / "Workspace" / "SCP11" / "CERT.DPauth.ECDSA.der"))
+            self.assertEqual(live_cfg.CERT_PATH_AUTH, str(runtime_root / "Workspace" / "SCP11" / "live" / "CERT.DPauth.ECDSA.der"))
+            self.assertEqual(test_cfg.CERT_PATH_AUTH, str(runtime_root / "Workspace" / "SCP11" / "test" / "CERT.DPauth.ECDSA.der"))
+            self.assertTrue((runtime_root / "Workspace" / "SCP11" / "ES9_TEST_CI_CA.pem").exists())
+            self.assertTrue((runtime_root / "Workspace" / "SCP11" / "SK.DPauth.ECDSA.pem").exists())
+            self.assertTrue((runtime_root / "Workspace" / "SCP11" / "live" / "ES9_TEST_CI_CA.pem").exists())
+            self.assertTrue((runtime_root / "Workspace" / "SCP11" / "live" / "SK.DPauth.ECDSA.pem").exists())
+            self.assertTrue((runtime_root / "Workspace" / "SCP11" / "test" / "ES9_TEST_CI_CA.pem").exists())
+            self.assertTrue((runtime_root / "Workspace" / "SCP11" / "test" / "SK.DPauth.ECDSA.pem").exists())
 
     def test_eim_local_config_seeds_writable_runtime_tree_when_frozen(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -69,24 +131,41 @@ class FrozenRuntimePathTests(unittest.TestCase):
             patch_frozen, patch_executable, patch_env = self._frozen_patches(runtime_root)
             with patch_frozen, patch_executable, patch_env:
                 cfg = EimLocalConfig()
-            self.assertEqual(cfg.EIM_PACKAGES_DIR, str(runtime_root / "SCP11" / "eim_local" / "eim_packages"))
-            self.assertTrue((runtime_root / "SCP11" / "eim_local" / "certs" / "eim").is_dir())
-            self.assertTrue((runtime_root / "SCP11" / "eim_local" / "eim_identity.json").exists())
+            self.assertEqual(cfg.EIM_PACKAGES_DIR, str(runtime_root / "Workspace" / "LocalEIM" / "eim_packages"))
+            self.assertTrue((runtime_root / "Workspace" / "LocalEIM" / "certs" / "eim").is_dir())
+            self.assertTrue((runtime_root / "Workspace" / "LocalEIM" / "eim_identity.json").exists())
             self.assertTrue(
                 (
                     runtime_root
-                    / "SCP11"
-                    / "eim_local"
+                    / "Workspace"
+                    / "LocalEIM"
                     / "eim_packages"
                     / "templates"
                     / "template_add_eim.json"
                 ).exists()
             )
+            addeim_readme = runtime_root / "Workspace" / "LocalEIM" / "certs" / "addeim" / "README.md"
+            addeim_template = (
+                runtime_root
+                / "Workspace"
+                / "LocalEIM"
+                / "certs"
+                / "addeim"
+                / "eim_identity.template.json"
+            )
+            self.assertTrue(addeim_readme.exists())
+            self.assertTrue(addeim_template.exists())
+            addeim_template_text = addeim_template.read_text(encoding="utf-8")
+            self.assertIn("/path/to/local_eim_signing_cert.pem", addeim_template_text)
+            self.assertNotIn("Workspace/LocalEIM/certs/addeim/", addeim_template_text)
+            self.assertIn('"eim_hostname_fqdn": "yggdrasim.eim.test.1ot.com"', addeim_template_text)
+            self.assertIn('"tls_connection_certificate_choice": "server_certificate"', addeim_template_text)
+            self.assertIn('"https_over_tcp_retrieval": true', addeim_template_text)
 
     def test_local_access_session_resolves_repo_style_path_from_runtime_root_when_frozen(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             runtime_root = Path(temp_dir) / "runtime"
-            target_file = runtime_root / "SCP11" / "eim_local" / "certs" / "eim" / "CERT.EIM.pem"
+            target_file = runtime_root / "Workspace" / "LocalEIM" / "certs" / "eim" / "CERT.EIM.pem"
             target_file.parent.mkdir(parents=True, exist_ok=True)
             target_file.write_text("dummy\n", encoding="utf-8")
             patch_frozen, patch_executable, patch_env = self._frozen_patches(runtime_root)
@@ -97,6 +176,19 @@ class FrozenRuntimePathTests(unittest.TestCase):
                     "SCP11/eim_local/certs/eim/CERT.EIM.pem",
                     base_dir=cfg.CERTS_DIR,
                 )
+            self.assertEqual(resolved, str(target_file))
+
+    def test_local_access_session_remaps_legacy_scp03_aid_path_to_workspace_when_frozen(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            runtime_root = Path(temp_dir) / "runtime"
+            target_file = runtime_root / "Workspace" / "SCP03" / "aid.txt"
+            target_file.parent.mkdir(parents=True, exist_ok=True)
+            target_file.write_text("ISD-R: A0000005591010FFFFFFFF8900000100\n", encoding="utf-8")
+            patch_frozen, patch_executable, patch_env = self._frozen_patches(runtime_root)
+            with patch_frozen, patch_executable, patch_env:
+                cfg = LocalAccessConfig()
+                session = LocalIsdrSession(cfg=cfg, apdu_channel=_DummyApduChannel())
+                resolved = session._normalize_user_path("SCP03/aid.txt")
             self.assertEqual(resolved, str(target_file))
 
     def test_es9_client_uses_runtime_root_for_lookup_cache_when_frozen(self) -> None:

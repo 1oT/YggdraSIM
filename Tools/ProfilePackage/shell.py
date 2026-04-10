@@ -1,5 +1,6 @@
 import atexit
 import ast
+import copy
 import ipaddress
 import json
 import os
@@ -12,6 +13,15 @@ import yaml
 
 from yggdrasim_common.quit_control import quit_all
 from .lint_engine import SaipProfileLinter
+from .saip_profile_template import (
+    apply_placeholder_overrides_to_loaded_document,
+    batch_output_stem,
+    build_placeholder_template_document,
+    extract_template_placeholder_names,
+    load_batch_placeholder_records,
+    parse_placeholder_assignment_tokens,
+    validate_batch_record_assignments,
+)
 from .saip_tool import SaipCommandResult, SaipToolBridge
 
 try:
@@ -79,8 +89,12 @@ class ProfilePackageShell:
             "ENCODE-JSON": self._cmd_encode_json,
             "EXIT": self._cmd_exit,
             "EXTRACT-APPS": self._cmd_extract_apps,
+            "GENERATE-BATCH": self._cmd_generate_batch,
+            "GENERATE-PROFILE": self._cmd_generate_profile,
+            "GENERATE-TEMPLATE": self._cmd_generate_template,
             "HELP": self._cmd_help,
             "INFO": self._cmd_info,
+            "INSPECT": self._cmd_inspect,
             "LINT": self._cmd_lint,
             "OPEN": self._cmd_use,
             "PWD": self._cmd_pwd,
@@ -94,7 +108,7 @@ class ProfilePackageShell:
             "STATUS": self._cmd_status,
             "TOOL": self._cmd_tool,
             "TRANSCODE-DIR": self._cmd_transcode_dir,
-            "TRANSCODE-TUI": self._cmd_transcode_tui,
+            "TRANSCODE-TUI": self._cmd_inspect,
             "TREE": self._cmd_tree,
             "USE": self._cmd_use,
         }
@@ -120,14 +134,22 @@ class ProfilePackageShell:
 
     def run_commands(self, cmd_line: str) -> None:
         self._print_banner()
+        had_error = False
         for raw_command in str(cmd_line or "").split(";"):
             command_text = raw_command.strip()
             if len(command_text) == 0:
                 continue
             try:
-                self._exec_line(command_text)
-            except SystemExit:
+                succeeded = self._exec_line(command_text)
+                if succeeded is False:
+                    had_error = True
+            except SystemExit as error:
+                exit_code = error.code if isinstance(error.code, int) else 0
+                if exit_code not in (0, None):
+                    raise
                 break
+        if had_error:
+            raise SystemExit(1)
 
     def _print_banner(self) -> None:
         print(f"{ShellStyle.HEADER}=== SAIP Tool ==={ShellStyle.END}")
@@ -1723,7 +1745,7 @@ class ProfilePackageShell:
             raise
         return tokens[:redirect_index], output_path
 
-    def _exec_line(self, raw_line: str) -> None:
+    def _exec_line(self, raw_line: str) -> bool:
         parts = raw_line.split(None, 1)
         command = parts[0].upper()
         argument = ""
@@ -1732,14 +1754,17 @@ class ProfilePackageShell:
 
         if command not in self._commands:
             print(f"{ShellStyle.FAIL}[-] Unknown command: {command}{ShellStyle.END}")
-            return
+            return False
 
         try:
             self._commands[command](argument)
+            return True
         except SystemExit:
             raise
         except Exception as error:
-            print(f"{ShellStyle.FAIL}[-] {error}{ShellStyle.END}")
+            message = str(error).strip() or error.__class__.__name__
+            print(f"{ShellStyle.FAIL}[-] {message}{ShellStyle.END}")
+            return False
 
     def _cmd_help(self, _arg: str) -> None:
         print(f"\n{ShellStyle.BOLD}SAIP Tool commands:{ShellStyle.END}")
@@ -1761,7 +1786,7 @@ class ProfilePackageShell:
         print("                             `.txt` and `.hex` inputs are treated as hex-encoded DER and converted automatically.")
         print("  STATUS                     Show the active profile selection and transcode output directory.")
         print("  PROFILE-DIR [dir]          Show or set the default profile directory used by `USE` and tab completion.")
-        print("  TRANSCODE-DIR [dir]        Show or set the default TRANSCODE-TUI save directory.")
+        print("  TRANSCODE-DIR [dir]        Show or set the default INSPECT save directory.")
         print("  TOOL [command]             Show or override the saip-tool executable command.")
         print("  INFO [APPS]                Run `info` and optionally include `--apps`.")
         print("  TREE                       Run `tree`.")
@@ -1775,15 +1800,31 @@ class ProfilePackageShell:
         print("                             Run `dump` using all_pe, all_pe_by_type, or all_pe_by_naa.")
         print("                             Use `>` to write a workspace-confined structured dump file.")
         print("                             Decoded dumps write YAML by default, or JSON when the path ends in `.json`.")
-        print("  TRANSCODE-TUI              Open a split Textual UI: JSON outline + editor (left) and DER hex (right);")
+        print("  INSPECT                    Open a split Textual UI: JSON outline + editor (left) and DER hex (right);")
         print("                             F3 inserts blank PE blocks from pySim templates (before end PE).")
         print("                             Bottom split: left = live selection/whole-profile decode (F4),")
         print("                             right = live lint; F7 cycles theme (saved). JSON↔DER uses nearest { }/[ ] value.")
         print("                             Full-terminal layout using terminal-native styling; Ctrl+S or F2 save, Ctrl+Q quit.")
+        print("                             Legacy alias: TRANSCODE-TUI.")
         print("  ENCODE-JSON <in.json> <out.der>")
-        print("                             Build DER from tagged SAIP JSON (same schema as TRANSCODE-TUI).")
+        print("                             Build DER from tagged SAIP JSON (same schema as INSPECT).")
         print("                             Optional root __ygg_token_defs__ names {token} (default) or [token]")
         print("                             when __ygg_placeholder_style__ is bracket; use inside hex / __ygg_saip_ph__.")
+        print("  GENERATE-TEMPLATE <out.json> [ICCID=<digits>] [IMSI=<digits>]")
+        print("                             Export the active profile as tagged JSON and optionally inject")
+        print("                             typed placeholders for common fields. ICCID injects {ICCID}")
+        print("                             in header.iccid and {ICCID_EF} in EF.ICCID; IMSI injects")
+        print("                             {IMSI} in EF.IMSI. Custom tokens can still be added manually.")
+        print("  GENERATE-PROFILE <template.json> <out.der> [NAME=value ...]")
+        print("                             Build DER from a tagged JSON template with placeholder overrides.")
+        print("                             ICCID=<digits> derives ICCID + ICCID_EF automatically;")
+        print("                             IMSI=<digits> derives EF.IMSI bytes. Unknown tokens are")
+        print("                             treated as raw hex overrides for manual placeholders.")
+        print("  GENERATE-BATCH <template.json> <data_file> <out_dir>")
+        print("                             Generate one DER profile per record from CSV / JSON / JSONL / YAML.")
+        print("                             Each record must map placeholder names 1:1 to template tokens.")
+        print("                             CSV headers or object keys become placeholder names directly.")
+        print("                             Quote ICCID / IMSI values in JSON/YAML to preserve leading zeros.")
         print("  SPLIT [output_prefix]      Run `split`.")
         print("  EXTRACT-APPS [dir] [CAP|IJC]")
         print("                             Run `extract-apps`.")
@@ -1795,25 +1836,28 @@ class ProfilePackageShell:
         print("  QA                         Leave the SAIP Tool shell and exit YggdraSIM.")
         print("")
         print("  Examples:")
-        print("    PROFILE-DIR Tools/ProfilePackage/profile")
-        print("    TRANSCODE-DIR Tools/ProfilePackage/transcode")
+        print("    PROFILE-DIR Workspace/SAIP/profile")
+        print("    TRANSCODE-DIR Workspace/SAIP/transcode")
         print("    USE reference_test_profile.txt")
         print("    DUMP ALL DECODED")
         print("    DUMP ALL DECODED > reports/decoded_dump.yaml")
         print("    DUMP ALL DECODED > reports/decoded_dump.json")
-        print("    TRANSCODE-TUI")
+        print("    INSPECT")
         print("    ENCODE-JSON reports/saip_tagged.json reports/rebuilt.der")
+        print("    GENERATE-TEMPLATE reports/profile_template.json ICCID=89461111111111111112 IMSI=123456781234567")
+        print("    GENERATE-PROFILE reports/profile_template.json reports/profile.der ICCID=89461111111111111112")
+        print("    GENERATE-BATCH reports/profile_template.json Workspace/SAIP/examples/saip_batch_data_template.yaml reports/generated_profiles")
         print("    LINT")
         print("    LINT STRICT")
         print("    LINT HELP")
         print("    LINT PROFILES")
         print("    LINT PROFILE STRICT-FS")
         print("    LINT PROFILE RELEASE-GATE ENFORCE")
-        print("    LINT METADATA SCP11/local_access/profile/metadata/default_profile_metadata.json")
+        print("    LINT METADATA Workspace/LocalSMDPP/profile/metadata/default_profile_metadata.json")
         print("    LINT GATE YRL-FIL,YRL-SVC")
         print("    LINT GATE YRL-FIL MIN-SCORE 90 FAIL-ON-WARN")
         print("    LINT GATE YRL-FIL,YRL-JCA ENFORCE > reports/profile_lint.json")
-        print("    LINT STRICT METADATA SCP11/local_access/profile/metadata/default_profile_metadata.json > reports/profile_lint.yaml")
+        print("    LINT STRICT METADATA Workspace/LocalSMDPP/profile/metadata/default_profile_metadata.json > reports/profile_lint.yaml")
         print("    EXTRACT-APPS tests/saip_apps IJC")
         print("    RAW extract-pe --pe-file tests/header.der --identification 4")
 
@@ -1877,11 +1921,14 @@ class ProfilePackageShell:
         selected = self.bridge.set_input_file(arg)
         print(f"{ShellStyle.GREEN}[+] Active profile package: {selected}{ShellStyle.END}")
 
-    def _cmd_transcode_tui(self, _arg: str) -> None:
+    def _cmd_inspect(self, _arg: str) -> None:
         try:
             self.bridge.get_input_file()
         except ValueError as exc:
             print(f"{ShellStyle.FAIL}[-] {exc}{ShellStyle.END}")
+        except Exception as exc:
+            detail = str(exc).strip() or exc.__class__.__name__
+            print(f"{ShellStyle.FAIL}[-] INSPECT failed: {detail}{ShellStyle.END}")
             print(
                 f"{ShellStyle.WARNING}[*] Select a profile with USE <file> first.{ShellStyle.END}"
             )
@@ -1895,19 +1942,22 @@ class ProfilePackageShell:
             detail = str(exc).lower()
             if "textual" in detail:
                 print(
-                    f"{ShellStyle.FAIL}[-] Textual is required for TRANSCODE-TUI "
+                    f"{ShellStyle.FAIL}[-] Textual is required for INSPECT "
                     f"(pip install textual): {exc}{ShellStyle.END}"
                 )
             elif "pysim" in detail:
                 print(
-                    f"{ShellStyle.FAIL}[-] TRANSCODE-TUI needs the vendored pySim tree "
+                    f"{ShellStyle.FAIL}[-] INSPECT needs the vendored pySim tree "
                     f"under {self.bridge.workspace_root / 'pysim'} (or install pySim): "
                     f"{exc}{ShellStyle.END}"
                 )
             else:
-                print(f"{ShellStyle.FAIL}[-] TRANSCODE-TUI import failed: {exc}{ShellStyle.END}")
+                print(f"{ShellStyle.FAIL}[-] INSPECT import failed: {exc}{ShellStyle.END}")
         except ValueError as exc:
             print(f"{ShellStyle.FAIL}[-] {exc}{ShellStyle.END}")
+
+    def _cmd_transcode_tui(self, _arg: str) -> None:
+        self._cmd_inspect(_arg)
 
     def _cmd_encode_json(self, arg: str) -> None:
         tokens = shlex.split(arg.strip())
@@ -1933,6 +1983,141 @@ class ProfilePackageShell:
         print(
             f"{ShellStyle.GREEN}[+] Wrote {len(der)} bytes DER to {output_path}{ShellStyle.END}"
         )
+
+    def _cmd_generate_template(self, arg: str) -> None:
+        tokens = shlex.split(arg.strip())
+        if len(tokens) == 0:
+            raise ValueError(
+                "Usage: GENERATE-TEMPLATE <output.json> [ICCID=<digits>] [IMSI=<digits>]"
+            )
+
+        self.bridge.get_input_file()
+        output_path = self.bridge.resolve_workspace_path(tokens[0], must_exist=False)
+        assignments = parse_placeholder_assignment_tokens(tokens[1:])
+        document = self.bridge.build_decoded_dump_document("all_pe")
+        tagged, summaries = build_placeholder_template_document(document, assignments)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text(
+            json.dumps(tagged, indent=2, ensure_ascii=False) + "\n",
+            encoding="utf-8",
+        )
+        print(
+            f"{ShellStyle.GREEN}[+] Template JSON written to: {output_path}{ShellStyle.END}"
+        )
+        if len(summaries) > 0:
+            print(f"{ShellStyle.CYAN}[*] Placeholder injection summary:{ShellStyle.END}")
+            for summary in summaries:
+                print(f"    - {summary}")
+
+    def _cmd_generate_profile(self, arg: str) -> None:
+        tokens = shlex.split(arg.strip())
+        if len(tokens) < 2:
+            raise ValueError(
+                "Usage: GENERATE-PROFILE <template.json> <output.der> [NAME=value ...]"
+            )
+
+        from .saip_json_codec import (
+            dejsonify_document,
+            encode_der_from_document,
+            ensure_workspace_pysim_on_path,
+        )
+
+        template_path = self.bridge.resolve_workspace_path(tokens[0], must_exist=True)
+        output_path = self.bridge.resolve_workspace_path(tokens[1], must_exist=False)
+        assignments = parse_placeholder_assignment_tokens(tokens[2:])
+        ensure_workspace_pysim_on_path(self.bridge.workspace_root)
+        raw_text = template_path.read_text(encoding="utf-8")
+        loaded = json.loads(raw_text)
+        if isinstance(loaded, dict) is False:
+            raise ValueError("Root JSON value must be an object.")
+        summaries = apply_placeholder_overrides_to_loaded_document(loaded, assignments)
+        document = dejsonify_document(loaded)
+        der = encode_der_from_document(document, self.bridge.workspace_root)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_bytes(der)
+        print(
+            f"{ShellStyle.GREEN}[+] Wrote {len(der)} bytes DER to {output_path}{ShellStyle.END}"
+        )
+        if len(summaries) > 0:
+            print(f"{ShellStyle.CYAN}[*] Placeholder override summary:{ShellStyle.END}")
+            for summary in summaries:
+                print(f"    - {summary}")
+
+    def _cmd_generate_batch(self, arg: str) -> None:
+        tokens = shlex.split(arg.strip())
+        if len(tokens) != 3:
+            raise ValueError(
+                "Usage: GENERATE-BATCH <template.json> <data_file> <output_dir>"
+            )
+
+        from .saip_json_codec import (
+            dejsonify_document,
+            encode_der_from_document,
+            ensure_workspace_pysim_on_path,
+        )
+
+        template_path = self.bridge.resolve_workspace_path(tokens[0], must_exist=True)
+        data_path = self.bridge.resolve_workspace_path(tokens[1], must_exist=True)
+        output_dir = self.bridge.resolve_workspace_path(tokens[2], must_exist=False)
+        raw_text = template_path.read_text(encoding="utf-8")
+        loaded_template = json.loads(raw_text)
+        if isinstance(loaded_template, dict) is False:
+            raise ValueError("Root JSON value must be an object.")
+
+        records = load_batch_placeholder_records(data_path)
+        if len(records) == 0:
+            raise ValueError("Batch data file did not contain any records.")
+
+        template_placeholders = extract_template_placeholder_names(loaded_template)
+        if len(template_placeholders) == 0:
+            raise ValueError("Template does not contain any placeholders.")
+        token_defs_raw = loaded_template.get("__ygg_token_defs__", {})
+        template_token_defs: dict = {}
+        if isinstance(token_defs_raw, dict):
+            template_token_defs = dict(token_defs_raw)
+
+        validated_records: list[tuple[str, dict[str, str]]] = []
+        for record in records:
+            try:
+                assignments = validate_batch_record_assignments(
+                    record.values,
+                    template_placeholders=template_placeholders,
+                    template_token_defs=template_token_defs,
+                )
+            except Exception as error:
+                raise ValueError(f"{record.label}: {error}") from error
+            validated_records.append((record.label, assignments))
+
+        ensure_workspace_pysim_on_path(self.bridge.workspace_root)
+        output_dir.mkdir(parents=True, exist_ok=True)
+        used_output_names: set[str] = set()
+        generated_paths: list[Path] = []
+
+        for index, (label, assignments) in enumerate(validated_records, start=1):
+            loaded = copy.deepcopy(loaded_template)
+            try:
+                apply_placeholder_overrides_to_loaded_document(loaded, assignments)
+                document = dejsonify_document(loaded)
+                der = encode_der_from_document(document, self.bridge.workspace_root)
+            except Exception as error:
+                raise ValueError(f"{label}: {error}") from error
+
+            base_stem = batch_output_stem(assignments, index=index)
+            candidate_name = f"{base_stem}.der"
+            suffix_index = 2
+            while candidate_name in used_output_names:
+                candidate_name = f"{base_stem}_{suffix_index}.der"
+                suffix_index += 1
+            used_output_names.add(candidate_name)
+            output_path = output_dir / candidate_name
+            output_path.write_bytes(der)
+            generated_paths.append(output_path)
+
+        print(
+            f"{ShellStyle.GREEN}[+] Generated {len(generated_paths)} DER profiles in {output_dir}{ShellStyle.END}"
+        )
+        for path in generated_paths:
+            print(f"    - {path.name}")
 
     def _cmd_info(self, arg: str) -> None:
         command = ["info"]

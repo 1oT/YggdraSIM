@@ -258,8 +258,11 @@ def verify_certificate_against_ca_bundle(certificate_der: bytes, ca_bundle_path:
 def get_certificate_authority_key_identifier(certificate_der: bytes) -> bytes:
     if pysim_available() is False:
         return b""
-    certificate = crypto_x509.load_der_x509_certificate(certificate_der)
-    return pysim_x509.cert_get_auth_key_id(certificate)
+    try:
+        certificate = crypto_x509.load_der_x509_certificate(certificate_der)
+        return pysim_x509.cert_get_auth_key_id(certificate)
+    except Exception:
+        return b""
 
 
 def _load_pem_certificates(bundle_path: str) -> List[crypto_x509.Certificate]:

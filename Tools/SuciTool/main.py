@@ -2,6 +2,7 @@ import argparse
 import sys
 from pathlib import Path
 
+from yggdrasim_common.process_debug import add_debug_argument, set_global_debug
 from yggdrasim_common.quit_control import QuitAllRequested
 
 try:
@@ -36,6 +37,10 @@ def entry_stdin() -> None:
 
 def run_standalone() -> None:
     parser = argparse.ArgumentParser(description="YggdraSIM SUCI Tool")
+    add_debug_argument(
+        parser,
+        help_text="Accept the global debug flag for wrapper and batch compatibility.",
+    )
     parser.add_argument(
         "--cmd",
         type=str,
@@ -47,6 +52,7 @@ def run_standalone() -> None:
         help="Read newline-separated commands from stdin for non-interactive execution",
     )
     args = parser.parse_args()
+    set_global_debug(bool(getattr(args, "debug", False)))
     if args.cmd:
         entry_cmd(args.cmd)
         return

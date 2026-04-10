@@ -34,6 +34,7 @@ from SCP03 .logic .sgp32_decode import decode_notifications_response
 from SCP03 .logic .sgp32_decode import decode_rat_rules 
 from SCP03 .logic .sgp32_decode import EIM_SUPPORTED_PROTOCOL_FLAGS 
 from SCP03 .logic .sgp32_decode import format_named_bit_string 
+from yggdrasim_common .euicc_issuer import infer_ecasd_issuer_identity
 
 class Sgp22Manager :
     """
@@ -408,6 +409,87 @@ class Sgp22Manager :
             pass 
         return {}
 
+    def _looks_like_profile_node (self ,node :Any )->bool :
+        is_dict =False
+        if isinstance (node ,dict ):
+            is_dict =True
+        if is_dict ==False :
+            return False
+        match_count =0
+        for tag in [
+        self .TAG_AID ,
+        self .TAG_ICCID ,
+        self .TAG_STATE ,
+        self .TAG_NICKNAME ,
+        self .TAG_NAME ,
+        self .TAG_SP_NAME ,
+        self .TAG_CLASS ,
+        ]:
+            if tag in node :
+                match_count +=1
+        if match_count >=2 :
+            return True
+        has_identity =False
+        if self .TAG_AID in node or self .TAG_ICCID in node :
+            has_identity =True
+        has_name =False
+        if self .TAG_NICKNAME in node or self .TAG_NAME in node or self .TAG_SP_NAME in node :
+            has_name =True
+        if has_identity and has_name :
+            return True
+        return False
+
+    def _collect_profile_nodes (self ,node :Any )->List [Dict [int ,Any ]]:
+        out :List [Dict [int ,Any ]]=[]
+        if self ._looks_like_profile_node (node ):
+            out .append (node )
+            return out
+        if isinstance (node ,dict ):
+            for value in node .values ():
+                out .extend (self ._collect_profile_nodes (value ))
+            return out
+        if isinstance (node ,list ):
+            for item in node :
+                out .extend (self ._collect_profile_nodes (item ))
+            return out
+        if isinstance (node ,(bytes ,bytearray ,memoryview )):
+            parsed =self ._safe_parse_tlv (bytes (node ))
+            if parsed :
+                out .extend (self ._collect_profile_nodes (parsed ))
+        return out
+
+    def _scan_profile_blobs_from_raw (self ,data :bytes )->List [bytes ]:
+        blobs :List [bytes ]=[]
+        i =0
+        while i <len (data ):
+            if data [i ]!=0xE3 :
+                i +=1
+                continue
+            if i +1 >=len (data ):
+                break
+            length =data [i +1 ]
+            offset =2
+            if length &0x80 :
+                n =length &0x7F
+                if i +2 +n >len (data ):
+                    break
+                length =int .from_bytes (data [i +2 :i +2 +n ],"big")
+                offset =2 +n
+            end =i +offset +length
+            if end >len (data ):
+                break
+            blobs .append (data [i +offset :end ])
+            i =end
+        return blobs
+
+    def _profile_nodes_from_data (self ,data :bytes )->List [Any ]:
+        parsed =self ._safe_parse_tlv (data )
+        if parsed :
+            profile_nodes =self ._collect_profile_nodes (parsed )
+            if len (profile_nodes )>0 :
+                return profile_nodes
+        return self ._scan_profile_blobs_from_raw (data )
+
     def _compact_from_payload (self ,payload :str ,root_tag :Optional [int ])->Dict [str ,Any ]:
         data =self ._es10_retrieve_data (payload )
         if not data :
@@ -646,6 +728,65 @@ class Sgp22Manager :
         mode_report ["close_channel_status"]=close_status 
         return mode_report 
 
+    @staticmethod
+    def _decode_bcd_digits (value :bytes )->str :
+        digits =""
+        for byte in value :
+            high =(byte >>4 )&0x0F 
+            low =byte &0x0F 
+            for nibble in [high ,low ]:
+                if nibble ==0x0F :
+                    continue 
+                digits +=str (nibble )
+        return digits
+
+    def _decode_ecasd_issuer_number_from_result (self ,result_entry :Dict [str ,Any ])->str :
+        if isinstance (result_entry ,dict )==False :
+            return ""
+        raw_hex =str (result_entry .get ("raw_hex","")).strip ().upper ()
+        if len (raw_hex )==0 :
+            return ""
+        raw_bytes =b""
+        try :
+            raw_bytes =bytes .fromhex (raw_hex )
+        except Exception :
+            return ""
+        try :
+            parsed =TlvParser .parse (raw_bytes )
+        except Exception :
+            return self ._decode_bcd_digits (raw_bytes )
+        value =TlvParser .get_first (parsed ,0x42 )
+        if isinstance (value ,bytes )==False :
+            return self ._decode_bcd_digits (raw_bytes )
+        return self ._decode_bcd_digits (value )
+
+    def get_ecasd_issuer_identity (self )->Dict [str ,str ]:
+        for use_logical_channel in (False ,True ):
+            mode_name ="basic"
+            if use_logical_channel :
+                mode_name ="logical_channel_01"
+            try :
+                report =self ._run_sgp02_domain_probe (mode_name ,use_logical_channel )
+            except Exception :
+                continue 
+            domains =report .get ("domains",{})
+            if isinstance (domains ,dict )==False :
+                continue 
+            ecasd =domains .get ("ecasd",{})
+            if isinstance (ecasd ,dict )==False :
+                continue 
+            tags =ecasd .get ("tags",{})
+            if isinstance (tags ,dict )==False :
+                continue 
+            issuer_entry =tags .get ("issuer_identification_number",{})
+            if isinstance (issuer_entry ,dict )==False :
+                continue 
+            result_entry =issuer_entry .get ("result",{})
+            issuer_number =self ._decode_ecasd_issuer_number_from_result (result_entry )
+            if len (issuer_number )>0 :
+                return infer_ecasd_issuer_identity (issuer_number )
+        return infer_ecasd_issuer_identity ("")
+
     def _get_euicc_report_sgp02_dual_path (self )->Dict [str ,Any ]:
         report :Dict [str ,Any ]={}
         report ["approach"]="Dual-path SGP.02 probe (basic channel and logical channel 01)."
@@ -657,28 +798,21 @@ class Sgp22Manager :
     def _profile_list_to_dicts (self ,data :bytes )->List [Dict ]:
         """Parse BF2D profile list response into list of dicts."""
         out =[]
-        i =0 
-        while i <len (data ):
-            if data [i ]==0xE3 :
-                length =data [i +1 ]
-                offset =2 
-                if length &0x80 :
-                    n =length &0x7F 
-                    length =int .from_bytes (data [i +2 :i +2 +n ],"big")
-                    offset =2 +n 
-                blob =data [i +offset :i +offset +length ]
-                entry =self ._single_profile_to_dict (blob )
-                if entry :
-                    out .append (entry )
-                i +=offset +length 
-            else :
-                i +=1 
+        for profile_source in self ._profile_nodes_from_data (data ):
+            entry =self ._single_profile_to_dict (profile_source )
+            if entry :
+                out .append (entry )
         return out 
 
-    def _single_profile_to_dict (self ,data :bytes )->Optional [Dict ]:
-        """Convert one profile TLV blob to dict."""
+    def _profile_fields_from_source (self ,data :Any )->Optional [Dict [str ,str ]]:
         try :
-            info =TlvParser .parse (data )
+            info =data
+            if isinstance (info ,dict )==False :
+                if isinstance (data ,(bytes ,bytearray ,memoryview ))==False :
+                    return None
+                info =TlvParser .parse (bytes (data ))
+            if isinstance (info ,dict )==False :
+                return None
             aid_bytes =TlvParser .get_first (info ,self .TAG_AID )or TlvParser .get_first (info ,self .TAG_CTX_0 )
             iccid_bytes =TlvParser .get_first (info ,self .TAG_ICCID )
             aid_hex =aid_bytes .hex ().upper ()if isinstance (aid_bytes ,bytes )else ""
@@ -704,11 +838,25 @@ class Sgp22Manager :
             "state":state_str ,
             "class":class_str ,
             "iccid":iccid_display ,
+            "iccid_raw":iccid_raw ,
             "name":name_str ,
             "aid":aid_hex ,
             }
         except Exception :
             return None 
+
+    def _single_profile_to_dict (self ,data :Any )->Optional [Dict ]:
+        """Convert one profile TLV blob or parsed node to dict."""
+        fields =self ._profile_fields_from_source (data )
+        if not fields :
+            return None
+        return {
+        "state":fields .get ("state","") ,
+        "class":fields .get ("class","") ,
+        "iccid":fields .get ("iccid","") ,
+        "name":fields .get ("name","") ,
+        "aid":fields .get ("aid","") ,
+        }
 
     def _run_sequence_collect (self ,sequence :List [Tuple [str ,str ]])->Dict [str ,str ]:
         """Run sequence and return dict of description -> response hex (successful only)."""
@@ -1306,58 +1454,34 @@ class Sgp22Manager :
         print ("    "+"-"*105 )
 
         self .profile_cache ={}
-        i =0 
-        while i <len (data ):
-            if data [i ]==0xE3 :
-                length =data [i +1 ]
-                offset =2 
-                if length &0x80 :
-                    n =length &0x7F 
-                    length =int .from_bytes (data [i +2 :i +2 +n ],'big')
-                    offset =2 +n 
-
-                profile_blob =data [i +offset :i +offset +length ]
-                self ._print_single_profile (profile_blob )
-                i +=offset +length 
+        printed_count =0
+        for profile_source in self ._profile_nodes_from_data (data ):
+            was_printed =self ._print_single_profile (profile_source )
+            if was_printed :
+                printed_count +=1
+        if printed_count ==0 :
+            if data :
+                print (f"    | {Config.Colors.WARNING}(No decodable profiles found in response){Config.Colors.ENDC}")
             else :
-                i +=1 
+                print ("    | (Empty)")
         print ("")
 
-    def _print_single_profile (self ,data :bytes ):
-        info =TlvParser .parse (data )
+    def _print_single_profile (self ,data :Any )->bool :
+        fields =self ._profile_fields_from_source (data )
+        if not fields :
+            return False
 
-        aid_bytes =TlvParser .get_first (info ,self .TAG_AID )or TlvParser .get_first (info ,self .TAG_CTX_0 )
-        iccid_bytes =TlvParser .get_first (info ,self .TAG_ICCID )
-
-        aid_hex =aid_bytes .hex ().upper ()if isinstance (aid_bytes ,bytes )else ""
-        iccid_raw =iccid_bytes .hex ().upper ()if isinstance (iccid_bytes ,bytes )else ""
-        iccid_display =self ._swap_nibbles (iccid_raw )
-
-        state_val =TlvParser .get_first (info ,self .TAG_STATE ,b'\x00')
-        state_int =int .from_bytes (state_val ,'big')if isinstance (state_val ,bytes )else 0 
+        aid_hex =str (fields .get ("aid",""))
+        iccid_raw =str (fields .get ("iccid_raw",""))
+        iccid_display =str (fields .get ("iccid",""))
+        name_str =str (fields .get ("name","Unknown"))
+        state_plain =str (fields .get ("state","DISABLED")).upper ()
         state_str =(
         f"{Config.Colors.GREEN}ENABLED  {Config.Colors.ENDC}"
-        if state_int ==1
+        if state_plain =="ENABLED"
         else f"{Config.Colors.FAIL}DISABLED {Config.Colors.ENDC}"
         )
-
-        class_val =TlvParser .get_first (info ,self .TAG_CLASS ,b'\x02')
-        class_int =int .from_bytes (class_val ,'big')if isinstance (class_val ,bytes )else 2 
-        class_map ={0 :'TEST ',1 :'PROV ',2 :'OPER '}
-        class_str =class_map .get (class_int ,'UNK  ')
-
-        name_bytes =(
-        TlvParser .get_first (info ,self .TAG_NICKNAME )
-        or TlvParser .get_first (info ,self .TAG_NAME )
-        or TlvParser .get_first (info ,self .TAG_SP_NAME )
-        )
-        name_str ="Unknown"
-        if isinstance (name_bytes ,bytes ):
-            try :name_str =name_bytes .decode ('utf-8','ignore').strip ()
-            except :name_str =name_bytes .hex ()
-
-        if name_str =="Unknown"and iccid_display :
-            name_str =f"ICCID-{iccid_display[-4:]}"
+        class_str =f"{str(fields .get ('class','OPER')):<5}"
 
         print (f"    {state_str} | {class_str} | {iccid_display:<20} | {name_str:<25} | {aid_hex}")
 
@@ -1368,6 +1492,7 @@ class Sgp22Manager :
         elif iccid_raw :
             entry =(self .TAG_ICCID ,iccid_raw )
             self .profile_cache [name_str .upper ()]=entry 
+        return True
 
 
 
@@ -1424,8 +1549,15 @@ class Sgp22Manager :
         self .tp .transmit ("80AA00000DA90B8100820101830107840101",silent =True )
         self ._select_isd_r ()
         self .tp .transmit ("80100000010C",silent =True )
-        cmd =f"81E29100{len(bytes.fromhex(payload)):02X}{payload}"
-        return self .tp .transmit (cmd ,silent =True )
+        last_data ,last_sw1 ,last_sw2 =b"" ,0x6F ,0x00
+        for cla in [0x81 ,0x80 ]:
+            if cla ==0x80 :
+                self ._select_isd_r ()
+            cmd =f"{cla:02X}E29100{len(bytes.fromhex(payload)):02X}{payload}"
+            last_data ,last_sw1 ,last_sw2 =self .tp .transmit (cmd ,silent =True )
+            if self ._is_success_sw (last_sw1 ):
+                return last_data ,last_sw1 ,last_sw2
+        return last_data ,last_sw1 ,last_sw2
 
     def _retrieve_eid_response (self )->Tuple [bytes ,int ,int ]:
         data ,sw1 ,sw2 =self ._send_store_data_with_retry_ladder ("BF3E00")

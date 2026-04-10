@@ -43,6 +43,12 @@ python -m SCP11.eim_local
 python -m SCP11.relay
 ```
 
+All operator shells in this family also support `--cmd` and `--stdin` batch
+execution. For semicolon batches, here-docs, and log-capture patterns, use:
+
+- `../CLI_AND_PIPING_GUIDE.md`
+- `../PROFILE_LIFECYCLE_CLI_CHEATSHEET.md`
+
 The top-level launcher in `main/main.py` exposes the same operator surfaces
 through the Guides menu and the main module selector.
 
@@ -53,6 +59,11 @@ through the Guides menu and the main module selector.
 - relay shells require ES9+ / SM-DP+ settings that are valid for the target
   environment
 - direct local flows require usable local SCP11 credential material
+- when the shared card backend is set to `sim`, card-facing SCP11 modules use
+  the simulator and the card-side default BF55 eIM identity comes from
+  `Workspace/SIMCARD/eim_identity.json`
+- `Workspace/LocalEIM/eim_identity.json` remains the Local eIM shell identity
+  and does not automatically rewrite the simulated card-side BF55 row
 - mutable cross-shell state is stored in `state/device_inventory.sqlite3`
 - frozen builds use a spawned writable runtime tree under `YggdraSIM-data`
   for mutable state, drop-in certs, package templates, and CA caches
@@ -61,7 +72,9 @@ through the Guides menu and the main module selector.
 ## Reading order
 
 1. `SCP11/live/README.md` or `SCP11/test/README.md` for relay-side operation
-2. `SCP11/local_access/README.md` for direct local `ISD-R` work
-3. `SCP11/eim_local/README.md` for the eIM-side shell overview
-4. `SCP11/eim_local/GUIDE.md` for deep eIM-local package, polling, and
+2. `../PROFILE_LIFECYCLE_CLI_CHEATSHEET.md` for ready-to-run lifecycle, poll,
+   and logging commands
+3. `SCP11/local_access/README.md` for direct local `ISD-R` work
+4. `SCP11/eim_local/README.md` for the eIM-side shell overview
+5. `SCP11/eim_local/GUIDE.md` for deep eIM-local package, polling, and
    handover workflows

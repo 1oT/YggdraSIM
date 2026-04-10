@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Any
+from yggdrasim_common.euicc_issuer import format_ecasd_issuer_display
 
 try:
     from SCP03.logic.euicc_info2 import build_euicc_info2_detail_lines
@@ -244,8 +245,11 @@ def render_consolidated_discovery_snapshot(
     print(f"\n{header_color}=== Running SGP.22/SGP.32 Scan ==={end_color}")
 
     eid = str(snapshot.get("eid", "")).strip()
+    issuer_name = str(snapshot.get("issuer_name", "")).strip()
+    issuer_number = str(snapshot.get("issuer_number", "")).strip()
     print("\n[+] EID")
     print(f"    | Value               : {eid or '(unavailable)'}")
+    print(f"    | Issuer (eCASD)      : {format_ecasd_issuer_display(issuer_name, issuer_number)}")
 
     profiles = snapshot.get("profiles", [])
     if isinstance(profiles, list) is False:

@@ -3,8 +3,11 @@ import datetime
 import io
 import importlib
 import json
+import os
+import sys
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -13,14 +16,17 @@ from cryptography import x509 as crypto_x509
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.x509.oid import NameOID
+import yaml
 
 from SCP11.asn1_registry import ASN1Registry
 from SCP11.local_access.cert_store import LocalSgp26CertStore
+import SCP11.local_access.session as local_access_session
 from SCP11.local_access import LocalAccessConfig, LocalIsdrSession
 from SCP11.local_access.main import LocalAccessShell
 from SCP11.local_access.payload_diff import analyze_payload_pair, decode_payload_bytes
 from SCP11.pysim_path import ensure_repo_pysim_on_path
 from SCP11.shared.pysim_support import decode_rsp_type
+from yggdrasim_common.session_recording import emit_apdu_trace_event
 
 
 def encode_der_length(value: int) -> bytes:
@@ -53,7 +59,7 @@ def build_profiles_info_response() -> bytes:
         b"".join(
             [
                 wrap_tlv(b"\x5A", encode_iccid_for_tlv("8901000000000000001")),
-                wrap_tlv(b"\x4F", bytes.fromhex("A0000005591010FFFFFFFF8900001000")),
+                wrap_tlv(b"\x4F", bytes.fromhex("A0000005591010FFFFFFFF8900001100")),
                 wrap_tlv(bytes.fromhex("9F70"), b"\x01"),
                 wrap_tlv(b"\x95", b"\x02"),
                 wrap_tlv(b"\x90", b"Primary"),
@@ -65,7 +71,7 @@ def build_profiles_info_response() -> bytes:
         b"".join(
             [
                 wrap_tlv(b"\x5A", encode_iccid_for_tlv("8901000000000000002")),
-                wrap_tlv(b"\x4F", bytes.fromhex("A0000005591010FFFFFFFF8900001100")),
+                wrap_tlv(b"\x4F", bytes.fromhex("A0000005591010FFFFFFFF8900001200")),
                 wrap_tlv(bytes.fromhex("9F70"), b"\x00"),
                 wrap_tlv(b"\x95", b"\x02"),
                 wrap_tlv(b"\x90", b"Secondary"),
@@ -292,6 +298,8 @@ class FakeApduChannel:
             return self.certs_response
         if log_name == "LOCAL: GetEID":
             return wrap_tlv(b"\x5A", bytes.fromhex("89049032118427504800000000000607"))
+        if log_name == "LOCAL: GetIssuerIdentificationNumber":
+            return wrap_tlv(b"\x42", bytes.fromhex("89049032"))
         if log_name == "LOCAL: ListNotifications":
             return self.notification_list_response
         if log_name.startswith("LOCAL: RetrieveNotification ["):
@@ -299,7 +307,7 @@ class FakeApduChannel:
         if log_name.startswith("LOCAL: RemoveNotificationFromList ["):
             return self.notification_remove_response
         if log_name == "LOCAL: CancelSession":
-            return bytes.fromhex("BF4600")
+            return bytes.fromhex("BF4103810102")
         raise AssertionError(f"Unexpected APDU log name: {log_name}")
 
     def send_chunked(
@@ -342,6 +350,40 @@ class CaptureApduChannel:
 
 
 class LocalAccessSessionTests(unittest.TestCase):
+    def test_local_access_dependency_stubs_are_scoped_to_context(self):
+        for module_name in [
+            "smartcard",
+            "smartcard.util",
+            "smartcard.CardConnection",
+            "smartcard.System",
+            "smpp",
+            "smpp.pdu",
+            "smpp.pdu.pdu_types",
+            "smpp.pdu.operations",
+        ]:
+            sys.modules.pop(module_name, None)
+
+        with local_access_session._temporary_session_bound_dependency_stubs():
+            from smartcard.util import toBytes
+            from smpp.pdu import operations, pdu_types
+
+            self.assertEqual(toBytes("01 02 0A"), [0x01, 0x02, 0x0A])
+            self.assertEqual(toBytes(bytes.fromhex("ABCD")), [0xAB, 0xCD])
+            self.assertTrue(hasattr(pdu_types, "DataCoding"))
+            self.assertTrue(hasattr(operations, "SubmitSM"))
+
+        for module_name in [
+            "smartcard",
+            "smartcard.util",
+            "smartcard.CardConnection",
+            "smartcard.System",
+            "smpp",
+            "smpp.pdu",
+            "smpp.pdu.pdu_types",
+            "smpp.pdu.operations",
+        ]:
+            self.assertNotIn(module_name, sys.modules)
+
     def test_vendored_pysim_helper_exposes_imports(self):
         pysim_root = ensure_repo_pysim_on_path()
 
@@ -441,6 +483,30 @@ class LocalAccessSessionTests(unittest.TestCase):
         self.assertTrue(metadata["notification_events"]["enable"])
         self.assertTrue(metadata["notification_events"]["disable"])
         self.assertTrue(metadata["notification_events"]["delete"])
+
+    def test_build_effective_metadata_document_falls_back_to_header_tlv_when_pysim_parse_fails(self):
+        profile_path = Path(__file__).resolve().parent.parent / "SCP11" / "local_access" / "profile" / "test_profile.txt"
+        profile_bytes = bytes.fromhex(profile_path.read_text(encoding="utf-8").strip())
+        local_access_session = importlib.import_module("SCP11.local_access.session")
+        if getattr(local_access_session, "pysim_saip", None) is None:
+            self.skipTest("pySim SAIP support unavailable in this environment")
+
+        with tempfile.TemporaryDirectory() as metadata_dir:
+            session = LocalIsdrSession(
+                cfg=LocalAccessConfig(METADATA_DIR=str(metadata_dir)),
+                apdu_channel=FakeApduChannel(),
+            )
+            with mock.patch.object(
+                local_access_session.pysim_saip.ProfileElementSequence,
+                "from_der",
+                side_effect=RuntimeError("synthetic parse failure"),
+            ):
+                metadata = session._build_effective_metadata_document(profile_bytes)
+
+        self.assertEqual(metadata["profile"]["iccid"], "89460811111111111112")
+        self.assertEqual(metadata["profile"]["name"], "Sample Lab")
+        self.assertEqual(metadata["profile"]["profile_type"], "Sample Lab")
+        self.assertEqual(metadata["operator"]["name"], "Sample Lab")
 
     def test_default_metadata_file_does_not_override_profile_identity_fields(self):
         profile_path = Path(__file__).resolve().parent.parent / "SCP11" / "local_access" / "profile" / "test_profile.txt"
@@ -545,7 +611,7 @@ class LocalAccessSessionTests(unittest.TestCase):
 
         response = session.cancel_session(reason=LocalIsdrSession.CANCEL_SESSION_REASON_TIMEOUT)
 
-        self.assertEqual(response, bytes.fromhex("BF4600"))
+        self.assertEqual(response, bytes.fromhex("BF4103810102"))
         self.assertFalse(session.state.session_open)
         self.assertEqual(channel.send_calls[-1][0], "LOCAL: CancelSession")
         cancel_apdu = channel.send_calls[-1][1]
@@ -583,12 +649,14 @@ class LocalAccessSessionTests(unittest.TestCase):
         snapshot = session.discover_card()
 
         self.assertEqual(snapshot["eid"], "89049032118427504800000000000607")
+        self.assertEqual(snapshot["issuer_number"], "89049032")
+        self.assertEqual(snapshot["issuer_name"], "Giesecke+Devrient")
         self.assertEqual(snapshot["configured_decoded"]["default_smdp"], "smdpplus2.esim.tst.1ot.mobi")
         self.assertEqual(len(snapshot["profiles"]), 2)
         self.assertEqual(snapshot["profiles"][0].state, "ENABLED")
         self.assertEqual(snapshot["profiles"][1].nickname, "Secondary")
         self.assertEqual(
-            [name for name, _ in session.apdu_channel.send_calls[:11]],
+            [name for name, _ in session.apdu_channel.send_calls[:15]],
             [
                 "LOCAL: Select ISD-R",
                 "LOCAL: GetProfilesInfo",
@@ -596,14 +664,36 @@ class LocalAccessSessionTests(unittest.TestCase):
                 "LOCAL: Select ECASD",
                 "LOCAL: GetEID",
                 "LOCAL: Select ISD-R",
+                "LOCAL: Select ECASD",
+                "LOCAL: GetIssuerIdentificationNumber",
+                "LOCAL: Select ISD-R",
                 "LOCAL: GetEuiccInfo1",
                 "LOCAL: GetEuiccInfo2",
                 "LOCAL: GetRAT",
                 "LOCAL: RetrieveNotificationsList",
                 "LOCAL: GetEimConfigurationData",
+                "LOCAL: GetCerts",
             ],
         )
-        self.assertEqual(session.apdu_channel.send_calls[11][0], "LOCAL: GetCerts")
+
+    def test_discover_card_returns_decode_errors_without_raising(self):
+        session = LocalIsdrSession(apdu_channel=FakeApduChannel())
+        session.decode_profile_metadata_rows = mock.Mock(
+            side_effect=RuntimeError("synthetic profile decode failure")
+        )
+        session.decode_euicc_configured_data = mock.Mock(
+            side_effect=RuntimeError("synthetic configured-data decode failure")
+        )
+
+        snapshot = session.discover_card()
+
+        self.assertEqual(snapshot["profiles"], [])
+        self.assertEqual(snapshot["configured_decoded"]["default_smdp"], "")
+        self.assertIn("synthetic profile decode failure", snapshot["profiles_decode_error"])
+        self.assertIn(
+            "synthetic configured-data decode failure",
+            snapshot["configured_decode_error"],
+        )
 
     def test_pre_bsp_debug_files_use_dedicated_debug_dir(self):
         with tempfile.TemporaryDirectory() as profile_dir, tempfile.TemporaryDirectory() as debug_dir:
@@ -632,7 +722,7 @@ class LocalAccessSessionTests(unittest.TestCase):
             collect_profile_metadata=lambda: [
                 SimpleNamespace(
                     iccid="8901000000000000001",
-                    aid="A0000005591010FFFFFFFF8900001000",
+                    aid="A0000005591010FFFFFFFF8900001100",
                     state="ENABLED",
                     profile_class="OPER",
                     nickname="Primary",
@@ -640,7 +730,7 @@ class LocalAccessSessionTests(unittest.TestCase):
                 ),
                 SimpleNamespace(
                     iccid="8901000000000000002",
-                    aid="A0000005591010FFFFFFFF8900001100",
+                    aid="A0000005591010FFFFFFFF8900001200",
                     state="DISABLED",
                     profile_class="OPER",
                     nickname="Secondary",
@@ -654,7 +744,7 @@ class LocalAccessSessionTests(unittest.TestCase):
             if identifier == "8901000000000000002"
             else (
                 b"\x4F",
-                "A0000005591010FFFFFFFF8900001000",
+                "A0000005591010FFFFFFFF8900001100",
             ),
             disable_profile=lambda identifier: calls.append(("disable", identifier)) or bytes.fromhex("BF3203800100"),
             enable_profile=lambda identifier: calls.append(("enable", identifier)) or bytes.fromhex("BF3103800100"),
@@ -666,7 +756,7 @@ class LocalAccessSessionTests(unittest.TestCase):
         self.assertEqual(
             calls,
             [
-                ("disable", "A0000005591010FFFFFFFF8900001000"),
+                ("disable", "A0000005591010FFFFFFFF8900001100"),
                 ("enable", "8901000000000000002"),
             ],
         )
@@ -679,7 +769,7 @@ class LocalAccessSessionTests(unittest.TestCase):
             collect_profile_metadata=lambda: [
                 SimpleNamespace(
                     iccid="8901000000000000002",
-                    aid="A0000005591010FFFFFFFF8900001100",
+                    aid="A0000005591010FFFFFFFF8900001200",
                     state="DISABLED",
                     profile_class="OPER",
                     nickname="Secondary",
@@ -706,7 +796,7 @@ class LocalAccessSessionTests(unittest.TestCase):
             collect_profile_metadata=lambda: [
                 SimpleNamespace(
                     iccid="8901000000000000001",
-                    aid="A0000005591010FFFFFFFF8900001000",
+                    aid="A0000005591010FFFFFFFF8900001100",
                     state="ENABLED",
                     profile_class="OPER",
                     nickname="Primary",
@@ -714,7 +804,7 @@ class LocalAccessSessionTests(unittest.TestCase):
                 ),
                 SimpleNamespace(
                     iccid="8901000000000000002",
-                    aid="A0000005591010FFFFFFFF8900001100",
+                    aid="A0000005591010FFFFFFFF8900001200",
                     state="DISABLED",
                     profile_class="OPER",
                     nickname="Secondary",
@@ -751,10 +841,53 @@ class LocalAccessSessionTests(unittest.TestCase):
         self.assertIn("Aliases: ENABLE, DISABLE, DELETE", rendered)
         self.assertTrue(
             any(
-                "CERTS [--json]" in line and "STATUS" in line
+                "CERTS [--json|--yaml]" in line and "STATUS" in line
                 for line in rendered.splitlines()
             )
         )
+
+    def test_local_shell_discover_reports_decode_warnings(self):
+        shell = LocalAccessShell()
+        shell.session = SimpleNamespace(
+            discover_card=lambda: {
+                "profiles": [],
+                "configured_decoded": {
+                    "default_smdp": "",
+                    "root_smds_primary": "",
+                    "root_smds_additional": [],
+                    "allowed_ci_pkid": [],
+                },
+                "profiles_decode_error": "synthetic profile decode failure",
+                "configured_decode_error": "synthetic configured-data decode failure",
+            }
+        )
+
+        with mock.patch(
+            "SCP11.local_access.main.render_consolidated_discovery_snapshot"
+        ) as mocked_render:
+            with contextlib.redirect_stdout(io.StringIO()) as output:
+                shell._cmd_discover()
+
+        mocked_render.assert_called_once()
+        rendered = output.getvalue()
+        self.assertIn("Profile metadata decode failed: synthetic profile decode failure", rendered)
+        self.assertIn(
+            "eUICC configured-data decode failed: synthetic configured-data decode failure",
+            rendered,
+        )
+
+    def test_local_shell_run_commands_returns_error_after_command_exception(self):
+        shell = LocalAccessShell()
+        shell._build_session = lambda: None  # type: ignore[method-assign]
+        shell._finalize_recording_on_exit = lambda: None  # type: ignore[method-assign]
+        shell._execute_command = mock.Mock(side_effect=RuntimeError("synthetic decode failure"))
+
+        with contextlib.redirect_stdout(io.StringIO()) as output:
+            with self.assertRaises(SystemExit) as raised:
+                shell.run_commands("DISCOVER")
+
+        self.assertEqual(raised.exception.code, 1)
+        self.assertIn("synthetic decode failure", output.getvalue())
 
     def test_local_shell_help_alias_lookup_resolves_to_canonical_command(self):
         shell = LocalAccessShell()
@@ -795,6 +928,84 @@ class LocalAccessSessionTests(unittest.TestCase):
         self.assertEqual(captured_arguments, [["demo_profile.txt"]])
         self.assertEqual(fake_channel.raw_logging_updates, [True, False])
 
+    def test_local_shell_global_debug_enables_transport_logging_on_session_build(self):
+        class _FakeApduChannel:
+            def __init__(self) -> None:
+                self.raw_apdu_logging = False
+                self.raw_logging_updates: list[bool] = []
+
+            def set_raw_apdu_logging(self, enabled: bool) -> None:
+                self.raw_apdu_logging = bool(enabled)
+                self.raw_logging_updates.append(bool(enabled))
+
+            def get_raw_apdu_logging(self) -> bool:
+                return bool(self.raw_apdu_logging)
+
+        fake_channel = _FakeApduChannel()
+        fake_session = SimpleNamespace(
+            apdu_channel=fake_channel,
+            state=SimpleNamespace(session_open=False),
+        )
+
+        with mock.patch.dict(os.environ, {"YGGDRASIM_GLOBAL_DEBUG": "1"}, clear=False):
+            shell = LocalAccessShell()
+        shell._session_cls = lambda cfg: fake_session
+
+        shell._build_session()
+
+        self.assertEqual(fake_channel.raw_logging_updates, [True])
+
+    def test_local_shell_record_exports_replayable_commands_and_apdu_trace(self):
+        shell = LocalAccessShell()
+        shell.session = SimpleNamespace(
+            apdu_channel=SimpleNamespace(),
+            state=SimpleNamespace(session_open=False),
+        )
+
+        def _fake_profile(arguments: list[str]) -> None:
+            self.assertEqual(arguments, ["demo_profile.txt"])
+            emit_apdu_trace_event(
+                log_name="LOCAL: Test APDU",
+                apdu=bytes.fromhex("00A40400"),
+                response=bytes.fromhex("6F00"),
+                sw1=0x90,
+                sw2=0x00,
+                transport="FakeApduChannel",
+            )
+
+        shell._cmd_profile = _fake_profile
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_path = Path(temp_dir) / "local_record.yaml"
+
+            with contextlib.redirect_stdout(io.StringIO()):
+                shell._execute_command(
+                    "RECORD",
+                    ["START", str(output_path)],
+                    raw_command=f"RECORD START {output_path}",
+                )
+                shell._execute_command(
+                    "PROFILE",
+                    ["demo_profile.txt"],
+                    raw_command="PROFILE demo_profile.txt",
+                )
+                shell._execute_command(
+                    "RECORD",
+                    ["STOP"],
+                    raw_command="RECORD STOP",
+                )
+
+            payload = yaml.safe_load(output_path.read_text(encoding="utf-8"))
+
+        self.assertEqual(payload["replay"]["commands"], ["PROFILE demo_profile.txt"])
+        self.assertEqual(payload["commands"][0]["canonical_command"], "PROFILE")
+        self.assertEqual(payload["commands"][0]["apdu_count"], 1)
+        self.assertEqual(payload["apdu_trace"][0]["log_name"], "LOCAL: Test APDU")
+        self.assertEqual(
+            payload["apdu_trace"][0]["command_replay"],
+            "PROFILE demo_profile.txt",
+        )
+
     def test_local_shell_discover_prints_live_style_sections(self):
         shell = LocalAccessShell()
         shell.session = SimpleNamespace(
@@ -803,7 +1014,7 @@ class LocalAccessSessionTests(unittest.TestCase):
                 "profiles": [
                     SimpleNamespace(
                         iccid="8901000000000000001",
-                        aid="A0000005591010FFFFFFFF8900001000",
+                        aid="A0000005591010FFFFFFFF8900001100",
                         state="ENABLED",
                         profile_class="OPER",
                         nickname="Primary",
@@ -874,6 +1085,96 @@ class LocalAccessSessionTests(unittest.TestCase):
         self.assertIn("/tmp/operator-alpha-auth.der", rendered)
         self.assertIn("local.smdpp.operator.example", rendered)
         self.assertIn("local_override_ci_match", rendered)
+
+    def test_local_shell_certs_yaml_output_is_parseable(self):
+        shell = LocalAccessShell()
+        shell.session = SimpleNamespace(
+            list_local_smdp_certificate_inventory=lambda: {
+                "allowed_ci_pkids": ["F54172BDF98A95D65CBEB88A38A1C11D800A85C3"],
+                "selected_auth": {
+                    "certificate_path": "/tmp/operator-alpha-auth.der",
+                    "private_key_path": "/tmp/operator-alpha-auth.key.pem",
+                    "selection_reason": "local_override_ci_match",
+                },
+                "selected_pb": {
+                    "certificate_path": "/tmp/operator-alpha-pb.der",
+                    "private_key_path": "/tmp/operator-alpha-pb.key.pem",
+                    "selection_reason": "local_override_ci_match",
+                },
+                "auth_records": [{}],
+                "pb_records": [{}],
+            }
+        )
+
+        with contextlib.redirect_stdout(io.StringIO()) as output:
+            shell._cmd_certs(["--yaml"])
+
+        payload = yaml.safe_load(output.getvalue())
+        self.assertEqual(
+            payload["selected_auth"]["certificate_path"],
+            "/tmp/operator-alpha-auth.der",
+        )
+        self.assertEqual(payload["selected_pb"]["selection_reason"], "local_override_ci_match")
+
+    def test_local_shell_explain_last_yaml_output_is_parseable(self):
+        shell = LocalAccessShell()
+        shell.session = SimpleNamespace(
+            current_eid="89049032118427504800000000000607",
+            resolve_profile_path=lambda: "/tmp/profile.der",
+            resolve_metadata_path=lambda: "/tmp/metadata.json",
+            state=SimpleNamespace(
+                session_open=False,
+                isdr_selected=True,
+                transaction_id=b"\x01\x02",
+                card_challenge=b"\x03\x04",
+                server_challenge=b"\x05\x06",
+                load_notifications_synced=True,
+                allowed_ci_pkids=["F54172BDF98A95D65CBEB88A38A1C11D800A85C3"],
+                selected_ci_pkid="F54172BDF98A95D65CBEB88A38A1C11D800A85C3",
+                selected_auth_certificate_path="/tmp/operator-alpha-auth.der",
+                selected_auth_private_key_path="/tmp/operator-alpha-auth.key.pem",
+                selected_auth_certificate_reason="local_override_ci_match",
+                selected_pb_certificate_path="/tmp/operator-alpha-pb.der",
+                selected_pb_private_key_path="/tmp/operator-alpha-pb.key.pem",
+                selected_pb_certificate_reason="local_override_ci_match",
+                selected_local_smdp_address="local.smdpp.operator.example",
+                profile_override_path="",
+                metadata_override_path="",
+                select_response=b"\x90\x00",
+                euicc_info1=bytes.fromhex("BF2000"),
+                configured_data=bytes.fromhex("BF3C00"),
+                authenticate_server_request=bytes.fromhex("BF3800"),
+                authenticate_server_response=bytes.fromhex("BF2100"),
+                euicc_signed1=b"\xAA",
+                euicc_signature1=b"\xBB",
+                prepare_download_response=bytes.fromhex("BF2100"),
+                last_load_bpp_response=bytes.fromhex("BF3700"),
+                cancel_session_response=bytes.fromhex("BF4103810102"),
+                bpp_command_descriptions=["StoreData chunk 1"],
+                upp_protected_command_descriptions=["Protected chunk 1"],
+                last_bpp_layout_lines=["A0 total=1 memberLengths=[1]"],
+                last_bpp_crypto_debug_lines=[
+                    "Pre-BSP payload bin=/tmp/pre.bin hex=/tmp/pre.txt sha256=AA",
+                    "A3[0] plain=1 plain_sha256=AA protected=2 protected_tag=86 "
+                    "protected_value=1 block_nr=1->2 mac_chain=AA->BB",
+                ],
+                last_pre_bsp_payload_bin_path="/tmp/pre.bin",
+                last_pre_bsp_payload_hex_path="/tmp/pre.txt",
+            ),
+        )
+
+        with contextlib.redirect_stdout(io.StringIO()) as output:
+            shell._cmd_explain_last(["--yaml"])
+
+        payload = yaml.safe_load(output.getvalue())
+        self.assertTrue(payload["session_initialized"])
+        self.assertEqual(payload["session"]["active_eid"], "89049032118427504800000000000607")
+        self.assertEqual(payload["targets"]["resolved_profile_path"], "/tmp/profile.der")
+        self.assertEqual(payload["responses"]["last_load_bpp_response"]["len"], 3)
+        self.assertEqual(
+            payload["bpp"]["debug_artifacts"]["pre_bsp_payload_hex_path"],
+            "/tmp/pre.txt",
+        )
 
     def test_real_sgp26_bundle_resolves_variant_o_nist_auth_and_pb(self):
         project_root = Path(__file__).resolve().parent.parent
@@ -1442,6 +1743,84 @@ class LocalAccessSessionTests(unittest.TestCase):
         self.assertEqual(calls[3], ("load", generated_bpp))
         self.assertEqual(calls[4][0], "close")
 
+    def test_run_load_profile_chain_resets_prepare_download_state_between_attempts(self):
+        with tempfile.TemporaryDirectory() as profile_dir:
+            profile_path = Path(profile_dir) / "local-profile.hex"
+            profile_path.write_text("A00100", encoding="utf-8")
+            session = LocalIsdrSession(
+                cfg=LocalAccessConfig(
+                    PROFILE_DIR=str(profile_dir),
+                    GENERATE_SESSION_BOUND_BPP=True,
+                    WRAP_SEGMENT_IN_BOOTSTRAP=False,
+                ),
+                apdu_channel=FakeApduChannel(),
+            )
+            open_seen_state = []
+            prepare_calls = []
+            load_calls = []
+            next_txid_octet = 1
+
+            def fake_open(transaction_id_override=None):
+                nonlocal next_txid_octet
+                open_seen_state.append(
+                    (
+                        bytes(session.state.transaction_id),
+                        bytes(session.state.prepare_download_response),
+                        transaction_id_override,
+                    )
+                )
+                session.state.session_open = True
+                session.state.transaction_id = bytes([next_txid_octet]) * 16
+                next_txid_octet += 1
+                return None
+
+            def fake_prepare():
+                prepare_calls.append(bytes(session.state.transaction_id))
+                session.state.prepare_download_response = b"\x01"
+                return b"\x01"
+
+            def fake_build(_payload: bytes) -> bytes:
+                return wrap_tlv(
+                    bytes.fromhex("BF36"),
+                    wrap_tlv(bytes.fromhex("BF23"), wrap_tlv(b"\x80", session.state.transaction_id)),
+                )
+
+            def fake_load(payload: bytes) -> bytes:
+                load_calls.append(payload)
+                return bytes.fromhex("9000")
+
+            def fake_close(reason=LocalIsdrSession.CANCEL_SESSION_REASON_END_USER_REJECTION):
+                _ = reason
+                session.state.session_open = False
+                return b""
+
+            session.open_session = fake_open
+            session.prepare_download = fake_prepare
+            session._build_session_bound_profile_package = fake_build
+            session._load_profile_from_bytes = fake_load
+            session.close_session = fake_close
+
+            first_response = session.run_load_profile_chain()
+            second_response = session.run_load_profile_chain()
+
+        self.assertEqual(first_response, bytes.fromhex("9000"))
+        self.assertEqual(second_response, bytes.fromhex("9000"))
+        self.assertEqual(
+            open_seen_state,
+            [
+                (b"", b"", None),
+                (b"", b"", None),
+            ],
+        )
+        self.assertEqual(
+            prepare_calls,
+            [
+                b"\x01" * 16,
+                b"\x02" * 16,
+            ],
+        )
+        self.assertEqual(len(load_calls), 2)
+
     def test_load_profile_from_bytes_raises_on_terminal_failure_result(self):
         session = LocalIsdrSession(apdu_channel=FakeApduChannel())
         session.state.session_open = True
@@ -1458,9 +1837,12 @@ class LocalAccessSessionTests(unittest.TestCase):
         with self.assertRaises(RuntimeError) as error:
             session._load_profile_from_bytes(valid_bpp)
 
-        self.assertIn("bppCommandId=5", str(error.exception))
-        self.assertIn("errorReason=13", str(error.exception))
-        self.assertIn("iccid=89460811111111111112", str(error.exception))
+        error_text = str(error.exception)
+        self.assertIn("bppCommandId=5", error_text)
+        self.assertIn("errorReason=13", error_text)
+        self.assertIn("iccid=89460811111111111112", error_text)
+        self.assertIn("\n  [ERROR 13]", error_text)
+        self.assertIn("\n  command=A3.ProtectedProfilePackageCommand", error_text)
         log_names = [name for name, _apdu in session.apdu_channel.send_calls]
         self.assertIn("LOCAL: ListNotifications", log_names)
         self.assertIn("LOCAL: RetrieveNotification [543]", log_names)
@@ -1585,10 +1967,10 @@ class LocalAccessSessionTests(unittest.TestCase):
         session = LocalIsdrSession(apdu_channel=FakeApduChannel())
         session.state.bpp_command_descriptions = [
             "BF23.InitialiseSecureChannelRequest",
-            "A0.ConfigureISDPRequest[1]",
-            "A1.StoreMetadataRequest[1]",
-            "A2.ReplaceSessionKeys[1]",
-            "A3.ProtectedProfilePackageCommand[1]",
+            "A0.ConfigureISDPRequest",
+            "A1.StoreMetadataRequest",
+            "A2.ReplaceSessionKeys",
+            "A3.ProtectedProfilePackageCommand",
         ]
 
         summary = session._summarize_profile_installation_result(
@@ -1596,8 +1978,116 @@ class LocalAccessSessionTests(unittest.TestCase):
         )
 
         self.assertIn("bppCommandId=5", summary)
-        self.assertIn("command=A3.ProtectedProfilePackageCommand[1]", summary)
+        self.assertIn("command=A3.ProtectedProfilePackageCommand", summary)
         self.assertIn("errorReason=13", summary)
+
+    def test_install_failure_summary_identifies_likely_a3_chunk_and_block_window(self):
+        session = LocalIsdrSession(apdu_channel=FakeApduChannel())
+        session.state.bpp_command_descriptions = [
+            "BF23.InitialiseSecureChannelRequest",
+            "A0.ConfigureISDPRequest",
+            "A1.StoreMetadataRequest",
+            "A2.ReplaceSessionKeys",
+            "A3.ProtectedProfilePackageCommand",
+        ]
+        session.state.last_bpp_layout_lines = [
+            "BF36 total=13557 value=13552",
+            "A3 total=13104 value=13100 members=13 memberLengths=[1036, 1036, 1036, 1036, 1036, 1036, 1036, 1036, 1036, 1036, 1036, 1036, 668]",
+            "A3[11] len=1036 plaintext[10080:11088] overlaps TLV[14] A1 genericFileManagement, TLV[15] A6 securityDomain",
+            "A3[12] len=1036 plaintext[11088:12096] overlaps TLV[15] A6 securityDomain, TLV[16] A7 rfm, TLV[17] AA end",
+            "A3[13] len=668 plaintext[12096:12744] overlaps TLV[17] AA end",
+        ]
+
+        summary = session._summarize_profile_installation_result(
+            build_profile_installation_failure(b"\x10" * 16)
+        )
+
+        self.assertIn("\n", summary)
+        self.assertIn("likelyProtectedChunk=A3[12]", summary)
+        self.assertIn("blocks=12.0 -> 12.8", summary)
+        self.assertIn("plaintext[11088:12096]", summary)
+        self.assertIn("terminalChunkContinuation=A3[13]", summary)
+        self.assertIn("blocks=13.0 -> 13.5", summary)
+
+    def test_install_failure_summary_keeps_full_overlap_list(self):
+        session = LocalIsdrSession(apdu_channel=FakeApduChannel())
+        session.state.bpp_command_descriptions = [
+            "BF23.InitialiseSecureChannelRequest",
+            "A0.ConfigureISDPRequest",
+            "A1.StoreMetadataRequest",
+            "A2.ReplaceSessionKeys",
+            "A3.ProtectedProfilePackageCommand",
+        ]
+        session.state.last_bpp_layout_lines = [
+            "BF36 total=1600 value=1595",
+            "A3 total=1200 value=1196 members=2 memberLengths=[1036, 188]",
+            "A3[1] len=1036 plaintext[0:1008] overlaps TLV[1] A0 header, TLV[2] B0 mf, TLV[3] A1 usim, TLV[4] A1 isim, TLV[5] A7 rfm",
+            "A3[2] len=188 plaintext[1008:1180] overlaps TLV[5] A7 rfm",
+        ]
+
+        summary = session._summarize_profile_installation_result(
+            build_profile_installation_failure(b"\x10" * 16)
+        )
+
+        self.assertIn("TLV[5] A7 rfm", summary)
+        self.assertIn("overlaps:\n    TLV[1] A0 header", summary)
+        self.assertNotIn("...,", summary)
+        self.assertNotIn(", ...", summary)
+
+    def test_describe_upp_protected_command_sequence_keeps_all_overlap_labels(self):
+        session = LocalIsdrSession(apdu_channel=FakeApduChannel())
+        session._describe_upp_element_ranges = lambda _profile_bytes: [
+            (0, 10, "TLV[1] A0 header"),
+            (0, 10, "TLV[2] B0 mf"),
+            (0, 10, "TLV[3] A1 usim"),
+            (0, 10, "TLV[4] A1 isim"),
+            (0, 10, "TLV[5] A7 rfm"),
+        ]
+
+        descriptions = session._describe_upp_protected_command_sequence(b"\xAA" * 10, chunk_size=10)
+
+        self.assertEqual(len(descriptions), 1)
+        self.assertIn("TLV[5] A7 rfm", descriptions[0])
+        self.assertNotIn(", ...", descriptions[0])
+
+    def test_describe_upp_element_ranges_falls_back_to_individual_pe_decode(self):
+        session = LocalIsdrSession(apdu_channel=FakeApduChannel())
+        local_access_session = importlib.import_module("SCP11.local_access.session")
+
+        class _FakeProfileElementSequence:
+            @staticmethod
+            def from_der(_payload):
+                raise RuntimeError("synthetic full-sequence decode failure")
+
+        class _FakeProfileElement:
+            @staticmethod
+            def from_der(raw_tlv):
+                tag = raw_tlv[0]
+                if tag == 0xA7:
+                    return SimpleNamespace(type="rfm", header_name="rfm-header", templateID="")
+                if tag == 0xA9:
+                    return SimpleNamespace(type="application", header_name="app-Header", templateID="")
+                if tag == 0xAA:
+                    return SimpleNamespace(type="end", header_name="end-header", templateID="")
+                raise ValueError(f"unexpected tag {tag:02X}")
+
+        fake_pysim_saip = SimpleNamespace(
+            ProfileElementSequence=_FakeProfileElementSequence,
+            ProfileElement=_FakeProfileElement,
+        )
+        profile_bytes = (
+            wrap_tlv(b"\xA7", b"\x00")
+            + wrap_tlv(b"\xA9", b"\x00")
+            + wrap_tlv(b"\xAA", b"\x00")
+        )
+
+        with mock.patch.object(local_access_session, "pysim_saip", fake_pysim_saip):
+            ranges = session._describe_upp_element_ranges(profile_bytes)
+
+        labels = [label for _start, _end, label in ranges]
+        self.assertEqual(labels[0], "TLV[1] A7 rfm")
+        self.assertEqual(labels[1], "TLV[2] A9 application")
+        self.assertEqual(labels[2], "TLV[3] AA end")
 
     def test_describe_upp_protected_command_sequence_includes_plaintext_range_and_elements(self):
         profile_path = Path(__file__).resolve().parent.parent / "SCP11" / "local_access" / "profile" / "test_profile.txt"

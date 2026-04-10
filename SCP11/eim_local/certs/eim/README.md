@@ -21,35 +21,23 @@ Drop-in inventory behavior:
     non-standard certificates that the X.509 parser cannot fully decode
 
 The default identity can still pin a `certPath`, but when it does not, the
-inventory selector will rank the available drop-ins and bundled assets.
+inventory selector will rank the available operator-provided drop-ins.
 
-Default first-test identity points to locally generated yggdrasim assets:
+Bundled policy:
 
-- `SCP11/eim_local/certs/eim/CERT_S_EIMsign_YGGDRASIM_ACCEPTED.der`
-- `SCP11/eim_local/certs/eim/CERT_S_EIM_TLS_YGGDRASIM_NIST.der`
-- `SCP11/eim_local/certs/eim/SK_S_EIM_TLS_YGGDRASIM_NIST.pem`
+- This repository does **not** ship usable Local eIM certificate or private key
+  material.
+- Keep GSMA assets out of the repository.
+- Generate or drop local test-only material here when you need to exercise the
+  Local eIM flow in a private environment.
+- This directory feeds the Local eIM shell; the simulated card's default BF55
+  identity is configured separately through `Workspace/SIMCARD/eim_identity.json`
+  or the wrapper `eIM identity` override path.
 
-Generated lab certificate set:
+Retained files:
 
-- `CERT.EIM.pem` (PEM leaf cert used by `ADD-INITIAL-EIM` / `ADD-EIM`)
-- `EIM.Simulator.key.pem` (private key, keep local and protected)
-
-Seeded reference certificate set:
-
-- `SCP11/eim_local/certs/eim/CERT_S_EIMsign_YGGDRASIM_ACCEPTED.der` (eIM signing cert chained to reference test CI)
-- `SCP11/eim_local/certs/eim/SK_S_EIMsign_YGGDRASIM_ACCEPTED.pem` (eIM signing private key)
-- `SCP11/eim_local/certs/eim/CERT_S_EIM_TLS_YGGDRASIM_NIST.der` (eIM TLS cert chained to reference test CI)
-- `SCP11/eim_local/certs/eim/SK_S_EIM_TLS_YGGDRASIM_NIST.pem` (eIM TLS private key)
-- `SCP11/eim_local/certs/eim/CA.EIM.Root.cert.pem` (reference test CI root / CI PKID source)
-
-Generated CA-signed chain variant (for realistic validation tests):
-
-- `CA.EIM.Root.key.pem` (mini test root CA private key)
-- `CA.EIM.Root.cert.pem` / `CA.EIM.Root.cert.der` (mini test root CA cert)
-- `EIM.Chain.Leaf.key.pem` (chain leaf private key)
-- `EIM.Chain.Leaf.csr.pem` (leaf CSR)
-- `CERT.EIM.CHAIN.pem` / `CERT.EIM.CHAIN.der` (CA-signed eIM leaf cert)
-- `CA.EIM.Root.cert.srl` (OpenSSL serial tracker)
+- The OpenSSL configuration templates remain in-tree as local generation aids.
+- README and metadata guidance remain in-tree for operator provisioning.
 
 Certificate profile:
 
@@ -64,10 +52,11 @@ CA-signed chain profile:
 - Leaf CN: `YggdraSIM.eSIM.Simulator.Cert.Chain`
 - Algorithm: `EC P-256` + `ecdsa-with-SHA256`
 - Chain verification command:
-  - `openssl verify -CAfile CA.EIM.Root.cert.pem CERT.EIM.CHAIN.pem`
+  - `openssl verify -CAfile /path/to/local_eim_ci_root_cert.pem /path/to/local_eim_leaf_cert.pem`
 
 Use in package JSON:
 
-- `cert_der_path: "SCP11/eim_local/certs/eim/CERT_S_EIMsign_YGGDRASIM_ACCEPTED.der"` for the seeded first-test setup
-- `cert_der_path: "SCP11/eim_local/certs/eim/CERT.EIM.CHAIN.pem"` for chain leaf tests
-- Keep `CA.EIM.Root.cert.pem` available for local validator/inspection tooling
+- Point `cert_der_path` to an operator-provided DER or PEM certificate outside
+  the bundled defaults.
+- Keep private keys local to the operator environment and out of version
+  control.

@@ -249,6 +249,46 @@ class OtaShellTests(unittest.TestCase):
         self.assertTrue(shell.last_command_ok)
         self.assertTrue(getattr(shell, "_last_caveat", False))
 
+    def test_do_send_uses_global_debug_as_verbose(self) -> None:
+        shell = self._make_shell()
+        shell.global_debug = True
+        build_calls: list[tuple[bool, object]] = []
+        shell.builder = SimpleNamespace(
+            build_plan=lambda verbose=False, override_payload=None: build_calls.append(
+                (bool(verbose), override_payload)
+            )
+            or SimpleNamespace(
+                is_concatenated=False,
+                apdus=[SimpleNamespace(index=0, total=1, apdu_hex="A1B2")],
+                reader_apdus=[],
+            )
+        )
+
+        shell.do_send()
+
+        self.assertEqual(build_calls, [(True, None)])
+        self.assertEqual(shell.transport.send_calls, [(["A1B2"], True)])
+
+    def test_do_ota_uses_global_debug_as_verbose(self) -> None:
+        shell = self._make_shell()
+        shell.global_debug = True
+        build_calls: list[tuple[bool, object]] = []
+        shell.builder = SimpleNamespace(
+            build_plan=lambda verbose=False, override_payload=None: build_calls.append(
+                (bool(verbose), override_payload)
+            )
+            or SimpleNamespace(
+                is_concatenated=False,
+                apdus=[SimpleNamespace(index=0, total=1, apdu_hex="A1B2")],
+                reader_apdus=[],
+            )
+        )
+
+        shell.do_ota("00A4040000")
+
+        self.assertEqual(build_calls, [(True, "00A4040000")])
+        self.assertEqual(shell.transport.send_calls, [(["A1B2"], True)])
+
 
 if __name__ == "__main__":
     unittest.main()

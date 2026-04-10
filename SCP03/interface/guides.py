@@ -299,7 +299,7 @@ class ShellGuides :
 {Config.Colors.HEADER}=== Cryptography & Security Guide ==={Config.Colors.ENDC}
 
 {Config.Colors.CYAN}1. Secure Channel Protocol 03 (SCP03){Config.Colors.ENDC}
-   SCP03 provides confidentiality (C-DECRYPT/R-ENCRYPT) and integrity (C-MAC/R-MAC) over APDU payloads. Keys in `keys.ini`: K-ENC, K-MAC, K-DEK.
+   SCP03 provides confidentiality (C-DECRYPT/R-ENCRYPT) and integrity (C-MAC/R-MAC) over APDU payloads. Keys in `Workspace/SCP03/keys.ini`: K-ENC, K-MAC, K-DEK.
    - {Config.Colors.BOLD}Session key derivation (NIST SP 800-108 KDF):{Config.Colors.ENDC} Context = Host Challenge (8) || Card Challenge (8) from INITIALIZE UPDATE response. S-ENC = KDF(K-ENC, 0x04, context, 128); S-MAC = KDF(K-MAC, 0x06, context, 128); S-RMAC = KDF(K-MAC, 0x07, context, 128). Key data = 11 bytes zero || constant || 0x00 || 0x00 0x40 || 0x01 || context; SessionKey = first 16 bytes of CMAC(StaticKey, key_data).
    - {Config.Colors.BOLD}K-ENC / K-MAC:{Config.Colors.ENDC} Used only for derivation. S-ENC encrypts/decrypts payloads (AES-CBC, IV from SSC). S-MAC/S-RMAC for command/response MAC (8 bytes).
    - {Config.Colors.BOLD}K-DEK:{Config.Colors.ENDC} Not derived. Used to wrap key material in PUT KEY (e.g. AES-ECB or AES-CBC per implementation). Session keys are not used to wrap keys.
@@ -325,14 +325,14 @@ class ShellGuides :
 {Config.Colors.HEADER}=== Configuration Files & Persistence Guide ==={Config.Colors.ENDC}
 
 {Config.Colors.CYAN}1. Config Directory (CONFIG_DIR){Config.Colors.ENDC}
-   - {Config.Colors.BOLD}Source (Python):{Config.Colors.ENDC} Config files are read/written under the module directory (e.g. SCP03/keys.ini, SCP03/aid.txt, SCP03/fids.txt, SCP03/binds.json). SCP80 uses SCP80/ota_config.ini.
-   - {Config.Colors.BOLD}Frozen executable:{Config.Colors.ENDC} Config files are read from a spawned writable runtime tree under `YggdraSIM-data` next to the executable when possible, else under `~/YggdraSIM-data`. Set `YGGDRASIM_RUNTIME_ROOT` to force a specific writable root. Default files are copied there on first run if missing.
+   - {Config.Colors.BOLD}Source (Python):{Config.Colors.ENDC} SCP03 config files are read/written under the shared workspace directory (e.g. `Workspace/SCP03/keys.ini`, `Workspace/SCP03/aid.txt`, `Workspace/SCP03/fids.txt`, `Workspace/SCP03/binds.json`). SCP80 uses SCP80/ota_config.ini.
+   - {Config.Colors.BOLD}Frozen executable:{Config.Colors.ENDC} These workspace files live under the chosen writable runtime root. Set `YGGDRASIM_RUNTIME_ROOT` to force a specific writable root. Default files are copied there on first run if missing.
 
 {Config.Colors.CYAN}2. SCP03 Configuration Files{Config.Colors.ENDC}
-   - {Config.Colors.BOLD}keys.ini:{Config.Colors.ENDC} [KEYS] section: kenc, kmac, dek (32/48/64 hex chars for AES-128/192/256), kvn (hex), aid (default SD AID), adm (ADM key for ETSI VERIFY). CONFIG wizard or WIZARD > Update Keys can rotate and save.
-   - {Config.Colors.BOLD}aid.txt:{Config.Colors.ENDC} One line per alias: `Name: AID` (hex, no spaces). Enables `SELECT Name` in the shell (e.g. ISD-R, USIM).
-   - {Config.Colors.BOLD}fids.txt:{Config.Colors.ENDC} Maps path names to FIDs: `Path: FID` (e.g. USIM: 7FFF, USIM/IMSI: 6F07). Used by file system navigator and TREE/SCAN.
-   - {Config.Colors.BOLD}binds.json:{Config.Colors.ENDC} Custom command macros. Keys = command names; values = shell input(s). Use {{0}}, {{1}} for arguments; `;` for multiple commands. Example: "adm": "manage-pin verify 0a {{0}}".
+   - {Config.Colors.BOLD}Workspace/SCP03/keys.ini:{Config.Colors.ENDC} [KEYS] section: kenc, kmac, dek (32/48/64 hex chars for AES-128/192/256), kvn (hex), aid (default SD AID), adm (ADM key for ETSI VERIFY). CONFIG wizard or WIZARD > Update Keys can rotate and save.
+   - {Config.Colors.BOLD}Workspace/SCP03/aid.txt:{Config.Colors.ENDC} One line per alias: `Name: AID` (hex, no spaces). Enables `SELECT Name` in the shell (e.g. ISD-R, USIM).
+   - {Config.Colors.BOLD}Workspace/SCP03/fids.txt:{Config.Colors.ENDC} Maps path names to FIDs: `Path: FID` (e.g. USIM: 7FFF, USIM/IMSI: 6F07). Used by file system navigator and TREE/SCAN.
+   - {Config.Colors.BOLD}Workspace/SCP03/binds.json:{Config.Colors.ENDC} Custom command macros. Keys = command names; values = shell input(s). Use {{0}}, {{1}} for arguments; `;` for multiple commands. Example: "adm": "manage-pin verify 0a {{0}}".
 
 {Config.Colors.CYAN}3. SCP80 OTA Configuration{Config.Colors.ENDC}
    - {Config.Colors.BOLD}ota_config.ini:{Config.Colors.ENDC} In SCP80 module folder. [ota]: tar (3-byte hex), spi, key_enc, key_mac (KIC/KID keys), transport (SMS/HTTP), etc.
@@ -341,7 +341,7 @@ class ShellGuides :
    SCP11 is now split into relay and local-access paths:
    - {Config.Colors.BOLD}`SCP11/live`:{Config.Colors.ENDC} live-certificate relay shell with `LPAd`, `IPAd`, and `IPAe`.
    - {Config.Colors.BOLD}`SCP11/test`:{Config.Colors.ENDC} test-certificate relay shell with the same relay model, but a smaller default command surface.
-   - {Config.Colors.BOLD}`SCP11/local_access`:{Config.Colors.ENDC} local `AuthenticateServer` and `LOAD-PROFILE` path using certificate material in `SCP11/local_access/certs`.
+   - {Config.Colors.BOLD}`SCP11/local_access`:{Config.Colors.ENDC} local `AuthenticateServer` and `LOAD-PROFILE` path using certificate material in `Workspace/LocalSMDPP/certs`.
 """)
 
     @classmethod 

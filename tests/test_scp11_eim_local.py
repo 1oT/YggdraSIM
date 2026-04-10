@@ -1,16 +1,20 @@
+import base64
 import contextlib
 import io
 import json
+import os
 import tempfile
 import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
+from unittest import mock
 
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.x509.oid import NameOID
+import yaml
 
 from SCP03.logic.euicc_info2 import parse_tlv_nodes
 from SCP03.logic.sgp32_decode import decode_eim_configuration_entry
@@ -24,6 +28,7 @@ from SCP11.eim_local.polling_bridge import LocalizedPollingBridge
 from SCP11.eim_local.session import EimLocalSession
 from SCP11.eim_local.main import EimLocalShell
 from SCP11.eim_packages import TYPE_PROFILE_DOWNLOAD_TRIGGER, parse_eim_package
+from yggdrasim_common.session_recording import emit_apdu_trace_event
 
 
 DEFAULT_TEST_EIM_OID = "2.25.311782205282738360923618091971140414400"
@@ -252,6 +257,26 @@ def write_local_smdp_drop_in(
     return cert_path, key_path
 
 
+def write_test_pem_certificate(cert_dir: Path, stem: str = "local_eim_cert") -> Path:
+    cert_dir.mkdir(parents=True, exist_ok=True)
+    private_key = ec.generate_private_key(ec.SECP256R1())
+    subject = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, stem)])
+    now = datetime.now(timezone.utc)
+    certificate = (
+        x509.CertificateBuilder()
+        .subject_name(subject)
+        .issuer_name(subject)
+        .public_key(private_key.public_key())
+        .serial_number(x509.random_serial_number())
+        .not_valid_before(now - timedelta(days=1))
+        .not_valid_after(now + timedelta(days=365))
+        .sign(private_key=private_key, algorithm=hashes.SHA256())
+    )
+    cert_path = cert_dir / f"{stem}.pem"
+    cert_path.write_bytes(certificate.public_bytes(serialization.Encoding.PEM))
+    return cert_path
+
+
 class FakeEimLocalApduChannel:
     def __init__(self) -> None:
         self.send_calls: list[tuple[str, bytes]] = []
@@ -413,7 +438,7 @@ class EimLocalModelTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             runtime_state_file = str(Path(temp_dir) / "state.json")
             config = EimLocalConfig(EIM_RUNTIME_STATE_FILE=runtime_state_file)
-            session = EimLocalSession(cfg=config, apdu_channel=None)
+            session = EimLocalSession(cfg=config, apdu_channel=SimpleNamespace())
             resolved = session._normalize_user_path(
                 "SCP11/eim_local/certs/eim/CERT.EIM.pem",
                 base_dir=config.EIM_CERTS_DIR,
@@ -431,7 +456,7 @@ class EimLocalModelTests(unittest.TestCase):
                 EIM_HOTFOLDER_DIR=str(hotfolder_dir),
                 EIM_POLL_INCLUDE_FIXED_FIXTURES=False,
             )
-            session = EimLocalSession(cfg=config, apdu_channel=None)
+            session = EimLocalSession(cfg=config, apdu_channel=SimpleNamespace())
             meta = session.hotfolder_poll_response_meta()
             self.assertEqual(meta["package_count"], 0)
             self.assertEqual(meta["eim_result_code"], 1)
@@ -1368,6 +1393,7 @@ class EimLocalModelTests(unittest.TestCase):
     def test_wire_preview_add_initial_eim_accepts_pem_certificate_path(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             runtime_state_file = str(Path(temp_dir) / "state.json")
+            pem_cert_path = write_test_pem_certificate(Path(temp_dir) / "certs", "explicit_eim_cert")
             config = EimLocalConfig(EIM_RUNTIME_STATE_FILE=runtime_state_file)
             session = EimLocalSession(cfg=config, apdu_channel=None)
             document = build_add_eim_package_document("add_initial_eim")
@@ -1375,7 +1401,7 @@ class EimLocalModelTests(unittest.TestCase):
             row["eim_public_key_data"] = {
                 "include": True,
                 "choice": "eim_certificate",
-                "eim_certificate_der_path": "SCP11/eim_local/certs/eim/CERT.EIM.pem",
+                "eim_certificate_der_path": str(pem_cert_path),
             }
             row["trusted_public_key_data_tls"] = {"include": False}
             payload = session.build_wire_payload_preview(document)
@@ -1391,6 +1417,7 @@ class EimLocalModelTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             runtime_state_file = str(Path(temp_dir) / "state.json")
             identity_file = Path(temp_dir) / "identity.json"
+            pem_cert_path = write_test_pem_certificate(Path(temp_dir) / "certs", "identity_eim_cert")
             identity_file.write_text(
                 json.dumps(
                     {
@@ -1398,8 +1425,8 @@ class EimLocalModelTests(unittest.TestCase):
                         "eim_fqdn": DEFAULT_TEST_EIM_FQDN,
                         "eim_id_type": "oid",
                         "eim_endpoint": "https://identity.eim.example/gsma/rsp2/asn1",
-                        "eim_public_key_cert_path": "SCP11/eim_local/certs/eim/CERT.EIM.pem",
-                        "trusted_tls_cert_path": "SCP11/eim_local/certs/eim/CERT.EIM.pem",
+                        "eim_public_key_cert_path": str(pem_cert_path),
+                        "trusted_tls_cert_path": str(pem_cert_path),
                         "euicc_ci_pk_id": "F54172BDF98A95D65CBEB88A38A1C11D800A85C3",
                     }
                 ),
@@ -1830,6 +1857,10 @@ class EimLocalModelTests(unittest.TestCase):
         self.assertIn("yggdrasim.eim.test.1ot.com", rendered)
         self.assertIn("LOAD-EIM-PACKAGE completed", rendered)
         self.assertIn("transport : local_auth", rendered)
+        self.assertEqual(
+            shell._resolve_cached_poll_target_fqdns(),
+            [DEFAULT_TEST_EIM_FQDN],
+        )
 
     def test_discover_renders_shared_scp11_snapshot(self) -> None:
         shell = EimLocalShell()
@@ -1839,7 +1870,7 @@ class EimLocalModelTests(unittest.TestCase):
                 "profiles": [
                     SimpleNamespace(
                         iccid="8901000000000000001",
-                        aid="A0000005591010FFFFFFFF8900001000",
+                        aid="A0000005591010FFFFFFFF8900001100",
                         state="ENABLED",
                         profile_class="OPER",
                         nickname="Primary",
@@ -1881,6 +1912,22 @@ class EimLocalModelTests(unittest.TestCase):
         self.assertIn("[+] GetEimConfigurationData", rendered)
         self.assertIn("[+] GetCerts", rendered)
         self.assertIn(DEFAULT_TEST_EIM_FQDN, rendered)
+        self.assertEqual(
+            shell._resolve_cached_poll_target_fqdns(),
+            [DEFAULT_TEST_EIM_FQDN],
+        )
+
+    def test_delete_eim_invalidates_cached_poll_target_fqdns(self) -> None:
+        shell = EimLocalShell()
+        shell._set_cached_poll_target_fqdns([DEFAULT_TEST_EIM_FQDN])
+        shell.session = SimpleNamespace(
+            delete_eim=lambda eim_id: bytes.fromhex("BF5900"),
+        )
+
+        with contextlib.redirect_stdout(io.StringIO()):
+            shell._cmd_delete_eim(DEFAULT_TEST_EIM_OID)
+
+        self.assertEqual(shell._resolve_cached_poll_target_fqdns(), [])
 
     def test_aggregate_campaign_reports(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -2004,6 +2051,51 @@ class EimLocalModelTests(unittest.TestCase):
             self.assertEqual(served_row["flow_run_id"], "RUN-BRIDGE")
             self.assertEqual(result_row["response_preview_hex"], "BF5000")
 
+    def test_localized_bridge_initiate_authentication_decodes_base64_challenge(self) -> None:
+        class _FakeServerSigned1:
+            def dump(self) -> bytes:
+                return b"signed1"
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base_dir = Path(temp_dir)
+            config = EimLocalConfig(
+                EIM_RUNTIME_STATE_FILE=str(base_dir / "state.json"),
+                EIM_RESPONSE_LOG_FILE=str(base_dir / "responses.jsonl"),
+                EIM_POLL_AUDIT_DB_FILE=str(base_dir / "poll_audit.sqlite3"),
+                EIM_POLL_INCLUDE_FIXED_FIXTURES=False,
+            )
+            session = EimLocalSession(cfg=config, apdu_channel=SimpleNamespace())
+            bridge = LocalizedPollingBridge(session)
+            session._ensure_local_material_loaded = lambda: None
+            session._cert_auth = b"cert"
+            session._key_auth = object()
+            expected_challenge = b"\xAA" * 16
+            signed1 = _FakeServerSigned1()
+
+            with mock.patch(
+                "SCP11.eim_local.polling_bridge.CryptoEngine.generate_server_challenges",
+                return_value=(signed1, b"\x10" * 16, b"\x20" * 16),
+            ) as mocked_generate, mock.patch(
+                "SCP11.eim_local.polling_bridge.CryptoEngine.sign_asn1",
+                return_value=b"sig",
+            ) as mocked_sign:
+                response = bridge._handle_smdp_initiate_authentication(
+                    {
+                        "euiccChallenge": base64.b64encode(expected_challenge).decode("ascii"),
+                        "smdpAddress": "yggdrasim.smdpp.test.1ot.com",
+                    }
+                )
+
+            mocked_generate.assert_called_once_with(
+                expected_challenge,
+                "yggdrasim.smdpp.test.1ot.com",
+            )
+            mocked_sign.assert_called_once_with(signed1, session._key_auth)
+            self.assertEqual(base64.b64decode(response["transactionId"]), b"\x10" * 16)
+            self.assertEqual(base64.b64decode(response["serverSigned1"]), b"signed1")
+            self.assertEqual(base64.b64decode(response["serverSignature1"]), b"sig")
+            self.assertEqual(base64.b64decode(response["serverCertificate"]), b"cert")
+
     def test_parse_localized_ipae_args_supports_defaults_and_debug(self) -> None:
         defaults = EimLocalShell._parse_localized_ipae_args("")
         self.assertEqual(defaults, (1, 30, False))
@@ -2052,6 +2144,59 @@ class EimLocalModelTests(unittest.TestCase):
         self.assertEqual(captured_arguments, [""])
         self.assertEqual(fake_channel.raw_logging_updates, [True, False])
 
+    def test_local_eim_global_debug_enables_transport_logging_on_startup(self) -> None:
+        class _FakeApduChannel:
+            def __init__(self) -> None:
+                self.raw_apdu_logging = False
+                self.raw_logging_updates: list[bool] = []
+
+            def set_raw_apdu_logging(self, enabled: bool) -> None:
+                self.raw_apdu_logging = bool(enabled)
+                self.raw_logging_updates.append(bool(enabled))
+
+            def get_raw_apdu_logging(self) -> bool:
+                return bool(self.raw_apdu_logging)
+
+        fake_channel = _FakeApduChannel()
+        fake_session = SimpleNamespace(apdu_channel=fake_channel)
+
+        with mock.patch.dict(os.environ, {"YGGDRASIM_GLOBAL_DEBUG": "1"}, clear=False):
+            with mock.patch("SCP11.eim_local.main.EimLocalSession", return_value=fake_session):
+                EimLocalShell()
+
+        self.assertEqual(fake_channel.raw_logging_updates, [True])
+
+    def test_local_eim_record_exports_replayable_commands_and_apdu_trace(self) -> None:
+        shell = EimLocalShell()
+        shell.session = SimpleNamespace(
+            apdu_channel=SimpleNamespace(),
+            state=SimpleNamespace(session_open=False),
+        )
+        shell._commands["DISCOVER"] = lambda argument: emit_apdu_trace_event(
+            log_name="EIM-LOCAL: Test APDU",
+            apdu=bytes.fromhex("80E2910003BF2000"),
+            response=bytes.fromhex("BF2000"),
+            sw1=0x90,
+            sw2=0x00,
+            transport="FakeApduChannel",
+        )
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_path = Path(temp_dir) / "eim_record.yaml"
+
+            with contextlib.redirect_stdout(io.StringIO()):
+                shell._execute_command_line(f"RECORD START {output_path}")
+                shell._execute_command_line("DISCOVER")
+                shell._execute_command_line("RECORD STOP")
+
+            payload = yaml.safe_load(output_path.read_text(encoding="utf-8"))
+
+        self.assertEqual(payload["replay"]["commands"], ["DISCOVER"])
+        self.assertEqual(payload["commands"][0]["canonical_command"], "DISCOVER")
+        self.assertEqual(payload["commands"][0]["apdu_count"], 1)
+        self.assertEqual(payload["apdu_trace"][0]["log_name"], "EIM-LOCAL: Test APDU")
+        self.assertEqual(payload["apdu_trace"][0]["status_hex"], "9000")
+
     def test_local_eim_localized_ipad_keeps_debug_flag_for_internal_parser(self) -> None:
         class _FakeApduChannel:
             def set_raw_apdu_logging(self, enabled: bool) -> None:
@@ -2073,6 +2218,22 @@ class EimLocalModelTests(unittest.TestCase):
         self.assertTrue(keep_running)
         self.assertEqual(captured_arguments, ["MATCH-1 --debug"])
 
+    def test_local_eim_localized_ipad_uses_global_debug_when_enabled(self) -> None:
+        fake_session = SimpleNamespace(apdu_channel=SimpleNamespace())
+        fake_runner = SimpleNamespace(run=mock.Mock())
+
+        with mock.patch.dict(os.environ, {"YGGDRASIM_GLOBAL_DEBUG": "1"}, clear=False):
+            with mock.patch("SCP11.eim_local.main.EimLocalSession", return_value=fake_session):
+                shell = EimLocalShell()
+
+        with mock.patch(
+            "SCP11.eim_local.ipad_standalone.LocalizedIPAdRunner",
+            return_value=fake_runner,
+        ):
+            shell._run_localized_ipad("live", matching_id="MATCH-1")
+
+        self.assertTrue(bool(fake_runner.run.call_args.kwargs["debug"]))
+
     def test_shell_registry_shows_canonical_commands_only(self) -> None:
         shell = EimLocalShell()
         self.assertNotIn("INFO", shell._commands)
@@ -2081,6 +2242,99 @@ class EimLocalModelTests(unittest.TestCase):
         self.assertEqual(shell._canonical_command("INFO"), "DISCOVER")
         self.assertEqual(shell._canonical_command("POLL-CAMPAIGN"), "POLL-CAMPAIGN")
         self.assertEqual(shell._canonical_command("Q"), "EXIT")
+
+    def test_handover_status_yaml_output_is_parseable(self) -> None:
+        shell = EimLocalShell()
+        shell.session = SimpleNamespace(
+            handover_context=lambda: {
+                "transaction_id_hex": "01020304AABBCCDD",
+                "matching_id": "MID-1",
+                "profile_path": "/tmp/profile.der",
+                "notification_policy": "strict",
+                "source": "manual",
+            },
+            state=SimpleNamespace(session_open=False),
+        )
+
+        with contextlib.redirect_stdout(io.StringIO()) as output:
+            shell._cmd_handover_status("--yaml")
+
+        payload = yaml.safe_load(output.getvalue())
+        self.assertEqual(payload["transaction_id_hex"], "01020304AABBCCDD")
+        self.assertEqual(payload["matching_id"], "MID-1")
+
+    def test_eim_package_explain_yaml_output_includes_runtime_hints_and_cert_selection(self) -> None:
+        shell = EimLocalShell()
+        shell.session = SimpleNamespace(
+            resolve_eim_package_path=lambda override_path="": "/tmp/package.json",
+            load_eim_package_document=lambda override_path="": {
+                "package_type": "add_initial_eim",
+                "package_version": "2.0.0",
+                "command_tag_hex": "BF57",
+                "runtime": {
+                    "matching_id": "MID-1",
+                    "transaction_id_hex": "0102",
+                    "profile_path": "/tmp/profile.der",
+                    "smdp_address": "rsp.example.com",
+                    "bip_endpoint": "https://eim.local",
+                    "cert_der_path": "/tmp/runtime-cert.der",
+                },
+                "sgp32": {
+                    "add_initial_eim_request": {
+                        "eim_configuration_data_list": [
+                            {
+                                "eim_id": {"include": True, "value": DEFAULT_TEST_EIM_OID},
+                                "eim_public_key_data": {
+                                    "include": True,
+                                    "choice": "eim_certificate",
+                                    "eim_certificate_der_path": "/tmp/eim-cert.der",
+                                },
+                            }
+                        ]
+                    }
+                },
+            },
+            lint_eim_package=lambda package_path="", strict_executable=False: {
+                "ok": True,
+                "package_path": "/tmp/package.json",
+                "package_type": "add_initial_eim",
+                "package_version": "2.0.0",
+                "additional_tlv_count": 1,
+                "optional_tlv_count": 0,
+                "spec_passed": 2,
+                "spec_failed": 0,
+                "spec_checks": [{"status": "PASS", "check": "BF57", "detail": "ok"}],
+                "warnings": [],
+                "errors": [],
+            },
+            preview_eim_signing_certificate=lambda package_path="": {
+                "path": "/tmp/selected-cert.der",
+                "private_key_path": "/tmp/selected-key.pem",
+                "reason": "auto_select_ci_match",
+                "root_ci_pkids": ["F54172BDF98A95D65CBEB88A38A1C11D800A85C3"],
+                "preferred_ci_pkids": ["F54172BDF98A95D65CBEB88A38A1C11D800A85C3"],
+            },
+            identity_summary=lambda: {
+                "eim_id": DEFAULT_TEST_EIM_OID,
+                "eim_fqdn": DEFAULT_TEST_EIM_FQDN,
+                "default_matching_id": "MID-DEFAULT",
+                "eim_endpoint": "https://eim.local",
+                "smdp_address": "rsp.example.com",
+            },
+            state=SimpleNamespace(session_open=False),
+        )
+
+        with contextlib.redirect_stdout(io.StringIO()) as output:
+            shell._cmd_eim_package_explain("--yaml")
+
+        payload = yaml.safe_load(output.getvalue())
+        self.assertEqual(payload["package"]["type"], "add_initial_eim")
+        self.assertEqual(payload["runtime_hints"]["matching_id"], "MID-1")
+        self.assertEqual(
+            payload["signing_certificate"]["path"],
+            "/tmp/selected-cert.der",
+        )
+        self.assertEqual(payload["lint"]["spec_passed"], 2)
 
     def test_help_groups_localized_watchdog_and_queue_campaign_separately(self) -> None:
         shell = EimLocalShell()
@@ -2101,6 +2355,7 @@ class EimLocalModelTests(unittest.TestCase):
         self.assertIn("Queue Campaigns", rendered)
         self.assertIn("IPAE-LIVE [attempts] [timer-window] [-t 20s] [-s 5] [--debug]", rendered)
         self.assertIn("POLL-CAMPAIGN [cycles] [intervalMs] [...]", rendered)
+        self.assertIn("EIM-PACKAGE-EXPLAIN [path] [--yaml]", rendered)
         self.assertLess(rendered.index("Localized Routing & Handover"), rendered.index("IPAE-LIVE [attempts] [timer-window] [-t 20s] [-s 5] [--debug]"))
         self.assertLess(rendered.index("Queue Campaigns"), rendered.index("POLL-CAMPAIGN [cycles] [intervalMs] [...]"))
         self.assertTrue(
@@ -2280,7 +2535,9 @@ class EimLocalModelTests(unittest.TestCase):
 
         def load_orchestrator(profile_name: str) -> FakeOrchestrator:
             calls["profile_name"] = profile_name
-            return FakeOrchestrator()
+            orchestrator = FakeOrchestrator()
+            calls["orchestrator"] = orchestrator
+            return orchestrator
 
         shell._close_shell_session_if_open = lambda: calls.setdefault("closed_shell", True)
         shell.session._read_card_eid_safe = lambda: "89049032000000000000000000000002"
@@ -2288,6 +2545,7 @@ class EimLocalModelTests(unittest.TestCase):
         shell._ensure_poll_bridge = ensure_bridge
         shell._load_network_orchestrator = load_orchestrator
         shell._close_network_runtime = lambda orchestrator: calls.setdefault("closed_runtime", True)
+        shell._set_cached_poll_target_fqdns(["eim2.esim.tst.1ot.mobi"])
 
         with contextlib.redirect_stdout(io.StringIO()) as output:
             shell._run_localized_ipae("test", argument="7 18 -t 20s -s 5 --debug")
@@ -2298,6 +2556,7 @@ class EimLocalModelTests(unittest.TestCase):
         self.assertEqual(calls["reset_runtime"], True)
         self.assertEqual(watchdog_kwargs["poll_attempts_per_fqdn"], 7)
         self.assertEqual(watchdog_kwargs["timer_expiration_window_seconds"], 18)
+        self.assertTrue(bool(watchdog_kwargs["timer_window_explicit"]))
         self.assertEqual(watchdog_kwargs["poll_attempt_delay_seconds"], 20)
         self.assertEqual(watchdog_kwargs["poll_attempt_post_status_loops"], 5)
         self.assertTrue(bool(watchdog_kwargs["debug"]))
@@ -2306,9 +2565,77 @@ class EimLocalModelTests(unittest.TestCase):
         self.assertEqual(calls["eid"], "89049032000000000000000000000002")
         self.assertEqual(len(calls["poll_events"]), 1)
         self.assertEqual(calls["poll_events"][0]["flow"], "ipae_test")
+        self.assertTrue(
+            callable(
+                getattr(
+                    calls["orchestrator"],
+                    "_resolve_cached_poll_target_fqdns",
+                    None,
+                )
+            )
+        )
+        self.assertEqual(
+            calls["orchestrator"]._resolve_cached_poll_target_fqdns(),
+            ["eim2.esim.tst.1ot.mobi"],
+        )
         self.assertIn("Active path: SIM IP", rendered)
         self.assertIn("SIM <-> bridge <-> eIM/SM-DP+", rendered)
         self.assertIn("Localized IPAe watchdog completed", rendered)
+
+    def test_run_localized_ipae_auto_extends_timer_window_for_delayed_attempts(self) -> None:
+        shell = EimLocalShell()
+        calls: dict[str, object] = {}
+
+        class FakeBridge:
+            bind_host = "127.0.0.1"
+            dns_port = 15353
+
+            def set_flow_context(self, flow: str, flow_run_id: str = "", eid: str = "") -> None:
+                calls["flow"] = flow
+                calls["flow_run_id"] = flow_run_id
+                calls["eid"] = eid
+
+            def status_payload(self) -> dict[str, object]:
+                return {
+                    "ack_count": 0,
+                    "active_transactions": 1,
+                    "pending_package_path": "",
+                }
+
+        class FakeOrchestrator:
+            apdu_channel = SimpleNamespace()
+
+            def run_eim_status_watchdog(self, **kwargs) -> None:
+                calls["watchdog_kwargs"] = kwargs
+
+        def ensure_bridge(reset_runtime: bool = True) -> FakeBridge:
+            calls["reset_runtime"] = reset_runtime
+            return FakeBridge()
+
+        def load_orchestrator(profile_name: str) -> FakeOrchestrator:
+            calls["profile_name"] = profile_name
+            return FakeOrchestrator()
+
+        shell._close_shell_session_if_open = lambda: calls.setdefault("closed_shell", True)
+        shell.session._read_card_eid_safe = lambda: "89049032000000000000000000000002"
+        shell.session.record_poll_audit_event = lambda **kwargs: calls.setdefault("poll_events", []).append(kwargs)
+        shell._ensure_poll_bridge = ensure_bridge
+        shell._load_network_orchestrator = load_orchestrator
+        shell._close_network_runtime = lambda orchestrator: calls.setdefault("closed_runtime", True)
+
+        with contextlib.redirect_stdout(io.StringIO()) as output:
+            shell._run_localized_ipae("test", argument="3 -t 15 -s 60")
+
+        rendered = output.getvalue()
+        watchdog_kwargs = calls["watchdog_kwargs"]
+        self.assertEqual(calls["profile_name"], "test")
+        self.assertEqual(watchdog_kwargs["poll_attempts_per_fqdn"], 3)
+        self.assertEqual(watchdog_kwargs["timer_expiration_window_seconds"], 330)
+        self.assertEqual(watchdog_kwargs["poll_attempt_delay_seconds"], 15)
+        self.assertEqual(watchdog_kwargs["poll_attempt_post_status_loops"], 60)
+        self.assertFalse(bool(watchdog_kwargs["debug"]))
+        self.assertIn("timer expiration stimuli window: 330s (auto)", rendered)
+        self.assertIn("auto-extended to 330s", rendered)
 
 
 if __name__ == "__main__":
