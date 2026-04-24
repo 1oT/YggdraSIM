@@ -4,6 +4,9 @@ __all__ = [
     "PayloadBuilder",
     "RelayHttpClientJsonHex",
     "SGP22Transport",
+    "safe_parse",
+    "reset_safe_parse_rollup",
+    "safe_parse_rollup_snapshot",
 ]
 
 
@@ -22,6 +25,18 @@ def __getattr__(name):
         mapping = {
             "RelayHttpClientJsonHex": RelayHttpClientJsonHex,
             "SGP22Transport": SGP22Transport,
+        }
+        return mapping[name]
+    if name in ("safe_parse", "reset_safe_parse_rollup", "safe_parse_rollup_snapshot"):
+        from .safe_parse import (
+            reset_safe_parse_rollup,
+            safe_parse,
+            safe_parse_rollup_snapshot,
+        )
+        mapping = {
+            "safe_parse": safe_parse,
+            "reset_safe_parse_rollup": reset_safe_parse_rollup,
+            "safe_parse_rollup_snapshot": safe_parse_rollup_snapshot,
         }
         return mapping[name]
     raise AttributeError(name)

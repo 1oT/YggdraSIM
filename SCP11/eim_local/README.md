@@ -37,7 +37,7 @@ EXIT
 EOF
 ```
 
-Use `../../PROFILE_LIFECYCLE_CLI_CHEATSHEET.md` for ready-to-paste lifecycle,
+Use `../../guides/PROFILE_LIFECYCLE_CLI_CHEATSHEET.md` for ready-to-paste lifecycle,
 handover, and polling sequences.
 
 ## Three execution paths
@@ -201,7 +201,7 @@ Operational queue roots live under:
 ## Recommended reading order
 
 1. this overview for module selection and execution paths
-2. `../../PROFILE_LIFECYCLE_CLI_CHEATSHEET.md` for non-interactive lifecycle
+2. `../../guides/PROFILE_LIFECYCLE_CLI_CHEATSHEET.md` for non-interactive lifecycle
    and poll recipes
 3. `SCP11/eim_local/GUIDE.md` for operator workflows
 4. `SCP11/local_access/README.md` for the baseline local SCP11 behavior this

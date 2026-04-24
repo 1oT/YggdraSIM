@@ -11,6 +11,7 @@ from Tools.ProfilePackage.saip_json_codec import (
     dejsonify_saip_value,
     document_to_pretty_json,
     encode_der_from_document,
+    humanize_saip_display_path,
     jsonify_document,
     jsonify_saip_value,
     parse_editor_json,
@@ -141,7 +142,22 @@ class SaipJsonCodecTests(unittest.TestCase):
         self.assertIn("label", inner)
         self.assertIn("Master file", inner["label"])
         self.assertIn("EF.ICCID", inner["label"])
-        self.assertIn("Fill file content", inner["label"])
+        self.assertIn("File content", inner["label"])
+
+    def test_humanize_saip_display_path_skips_raw_ef_record_indexes(self) -> None:
+        rendered = humanize_saip_display_path(
+            [
+                "mf",
+                "ef-arr",
+                "[0]",
+                "fileDescriptor",
+                "shortEFID",
+            ]
+        )
+        self.assertEqual(
+            rendered,
+            "Master file (MF) tree / EF.ARR / File descriptor / Short EF Identifier",
+        )
 
     def test_reapply_transcode_restores_bytes_template_and_meta(self) -> None:
         pre_loaded = {

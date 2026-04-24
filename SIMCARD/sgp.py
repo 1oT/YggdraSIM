@@ -33,6 +33,7 @@ from SIMCARD.utils import (
     tlv,
 )
 from yggdrasim_common.card_backend import get_sim_eim_identity_path
+from yggdrasim_common.inventory_crypto import read_secret_file_bytes
 from yggdrasim_common.runtime_paths import ensure_seeded_workspace_file, runtime_root
 
 
@@ -109,9 +110,10 @@ class SgpLogic:
         if normalized == bytes.fromhex("BF2D00"):
             return self._build_profiles_info_response(), 0x90, 0x00
         if normalized == bytes.fromhex("BF2E00"):
-            return self._issue_card_challenge(), 0x90, 0x00
-        if normalized == bytes.fromhex("BF2800"):
-            return self._build_notification_list_response(), 0x90, 0x00
+            challenge = self._issue_card_challenge()
+            return tlv("BF2E", tlv("80", challenge)), 0x90, 0x00
+        if normalized.startswith(bytes.fromhex("BF28")):
+            return self._build_notification_list_response(normalized), 0x90, 0x00
         if normalized == bytes.fromhex("BF2B028200"):
             return self._build_euicc_package_result_list_response(), 0x90, 0x00
         if normalized == bytes.fromhex("BF2B00"):
@@ -162,6 +164,14 @@ class SgpLogic:
             return self._handle_prepare_download(normalized)
         if normalized.startswith(bytes.fromhex("BF36")):
             return self._handle_bpp_bootstrap(normalized)
+        if normalized.startswith(bytes.fromhex("BF25")):
+            return self._handle_standalone_store_metadata(normalized)
+        if normalized.startswith(bytes.fromhex("BF2A")):
+            return self._handle_standalone_update_metadata(normalized)
+        if normalized.startswith(bytes.fromhex("BF29")):
+            return self._handle_set_nickname(normalized)
+        if normalized.startswith(bytes.fromhex("BF3F")):
+            return self._handle_set_default_dp_address(normalized)
         if len(normalized) > 0 and normalized[0] in (0x86, 0x87, 0x88, 0xA0, 0xA1, 0xA2, 0xA3):
             return self._handle_bpp_segment(normalized)
         return b"", 0x6A, 0x80
@@ -234,6 +244,117 @@ class SgpLogic:
         self.state.eim_entries = retained
         self._sync_euicc_store()
         return tlv("BF59", b""), 0x90, 0x00
+
+    def _handle_standalone_store_metadata(self, payload: bytes) -> tuple[bytes, int, int]:
+        try:
+            metadata = self._parse_store_metadata_request(payload)
+        except Exception:
+            return tlv("BF25", tlv("80", b"\x01")), 0x90, 0x00
+        session = self.state.sgp_session
+        session.bpp_store_metadata = dict(metadata)
+        target_iccid = str(metadata.get("iccid", "")).strip()
+        if len(target_iccid) > 0:
+            self._apply_metadata_to_profile(metadata, match_iccid=target_iccid)
+            self._sync_profile_store()
+        return tlv("BF25", tlv("80", b"\x00")), 0x90, 0x00
+
+    def _handle_standalone_update_metadata(self, payload: bytes) -> tuple[bytes, int, int]:
+        try:
+            _root_tag, root_value, _, _ = read_tlv(payload, 0)
+        except Exception:
+            return tlv("BF2A", tlv("80", b"\x01")), 0x90, 0x00
+        rewrapped = tlv("BF25", root_value)
+        try:
+            metadata = self._parse_store_metadata_request(rewrapped)
+        except Exception:
+            metadata = {}
+        target_iccid = str(metadata.get("iccid", "")).strip()
+        if len(target_iccid) > 0:
+            self._apply_metadata_to_profile(metadata, match_iccid=target_iccid)
+            self._sync_profile_store()
+        return tlv("BF2A", tlv("80", b"\x00")), 0x90, 0x00
+
+    def _handle_set_nickname(self, payload: bytes) -> tuple[bytes, int, int]:
+        # SGP.22 §5.7.19 ES10c.SetNickname. BF29 root carries 5A ICCID and
+        # 90 profileNickname. Result BF29 / 80 / (00 ok, 01 iccidNotFound,
+        # 7F malformed).
+        try:
+            _root_tag, root_value, _, _ = read_tlv(payload, 0)
+            iccid_raw = find_first_tlv(root_value, "5A")
+            nickname_raw = find_first_tlv(root_value, "90")
+        except Exception:
+            return tlv("BF29", tlv("80", b"\x7F")), 0x90, 0x00
+
+        if len(iccid_raw) == 0:
+            return tlv("BF29", tlv("80", b"\x7F")), 0x90, 0x00
+        try:
+            _, iccid_value, _, _ = read_tlv(iccid_raw, 0)
+            nickname_value = b""
+            if len(nickname_raw) > 0:
+                _, nickname_value, _, _ = read_tlv(nickname_raw, 0)
+        except Exception:
+            return tlv("BF29", tlv("80", b"\x7F")), 0x90, 0x00
+        target_iccid = decode_bcd_digits(iccid_value)
+
+        matched_profile = None
+        for profile in self.state.profiles:
+            if str(profile.iccid or "").strip() == target_iccid:
+                matched_profile = profile
+                break
+        if matched_profile is None:
+            return tlv("BF29", tlv("80", b"\x01")), 0x90, 0x00
+
+        try:
+            matched_profile.nickname = nickname_value.decode("utf-8", "ignore").strip()
+        except Exception:
+            matched_profile.nickname = ""
+        self._sync_profile_store()
+        return tlv("BF29", tlv("80", b"\x00")), 0x90, 0x00
+
+    def _handle_set_default_dp_address(self, payload: bytes) -> tuple[bytes, int, int]:
+        # SGP.22 §5.7.21 ES10b.SetDefaultDpAddress. BF3F carries a
+        # defaultDpAddress (80 utf8string). Result BF3F / 80 / (00 ok,
+        # 01 invalid SM-DP+ address). An empty UTF8String resets the
+        # default per the spec.
+        try:
+            _root_tag, root_value, _, _ = read_tlv(payload, 0)
+        except Exception:
+            return tlv("BF3F", tlv("80", b"\x01")), 0x90, 0x00
+
+        address_raw = find_first_tlv(root_value, "80")
+        if len(address_raw) == 0:
+            return tlv("BF3F", tlv("80", b"\x01")), 0x90, 0x00
+        _, address_value, _, _ = read_tlv(address_raw, 0)
+        try:
+            normalized_address = address_value.decode("utf-8", "ignore").strip()
+        except Exception:
+            return tlv("BF3F", tlv("80", b"\x01")), 0x90, 0x00
+        if len(normalized_address) > 128:
+            return tlv("BF3F", tlv("80", b"\x01")), 0x90, 0x00
+        self.state.default_dp_address = normalized_address
+        self._sync_euicc_store()
+        return tlv("BF3F", tlv("80", b"\x00")), 0x90, 0x00
+
+    def _apply_metadata_to_profile(self, metadata: dict, *, match_iccid: str) -> None:
+        normalized_target = str(match_iccid or "").strip()
+        if len(normalized_target) == 0:
+            return
+        for profile in self.state.profiles:
+            if str(profile.iccid or "").strip() != normalized_target:
+                continue
+            service_provider = str(metadata.get("service_provider", "")).strip()
+            profile_name = str(metadata.get("profile_name", "")).strip()
+            profile_class = str(metadata.get("profile_class", "")).strip().lower()
+            notification_address = str(metadata.get("notification_address", "")).strip()
+            if len(service_provider) > 0:
+                profile.service_provider = service_provider
+            if len(profile_name) > 0:
+                profile.profile_name = profile_name
+            if len(profile_class) > 0:
+                profile.profile_class = profile_class
+            if len(notification_address) > 0:
+                profile.notification_address = notification_address
+            break
 
     def _handle_euicc_memory_reset(self, payload: bytes) -> tuple[bytes, int, int]:
         options_raw = find_first_tlv(payload, "82")
@@ -471,7 +592,10 @@ class SgpLogic:
                 continue
             seen.add(resolved_key)
             try:
-                certificate_bytes = resolved.read_bytes()
+                certificate_bytes = read_secret_file_bytes(
+                    resolved,
+                    protect_plaintext_on_read=True,
+                )
             except Exception:
                 continue
             normalized = self._normalize_certificate_der(certificate_bytes)
@@ -710,7 +834,12 @@ class SgpLogic:
         return tlv("BF3C", b"".join(body))
 
     def _build_rat_response(self) -> bytes:
-        return tlv("BF43", tlv("80", b"\x01"))
+        # SGP.22 §5.7.16 ES10c.GetRAT returns a RulesAuthorisationTable
+        # (SEQUENCE OF ProfilePolicyAuthorisationRule). An eUICC with no
+        # configured PPR rules MUST still emit a well-formed empty SEQUENCE.
+        # The simulated card currently ships with no PPRs, so the response
+        # is a BF43 container holding one empty SEQUENCE (30 00).
+        return tlv("BF43", bytes.fromhex("3000"))
 
     def _build_certs_response(self) -> bytes:
         self._ensure_metadata_defaults()
@@ -900,14 +1029,19 @@ class SgpLogic:
 
     def _load_builtin_pem_certificate_der(self, path: Path) -> bytes:
         try:
-            certificate = crypto_x509.load_pem_x509_certificate(path.read_bytes())
+            certificate = crypto_x509.load_pem_x509_certificate(
+                read_secret_file_bytes(path, protect_plaintext_on_read=False)
+            )
         except Exception:
             return b""
         return certificate.public_bytes(serialization.Encoding.DER)
 
     def _load_builtin_ec_private_key(self, path: Path) -> ec.EllipticCurvePrivateKey | None:
         try:
-            loaded = serialization.load_pem_private_key(path.read_bytes(), password=None)
+            loaded = serialization.load_pem_private_key(
+                read_secret_file_bytes(path, protect_plaintext_on_read=False),
+                password=None,
+            )
         except Exception:
             return None
         if isinstance(loaded, ec.EllipticCurvePrivateKey) is False:
@@ -1428,19 +1562,44 @@ class SgpLogic:
             return True
         return False
 
-    def _build_notification_list_response(self) -> bytes:
-        if len(self.state.notifications) == 0:
-            return tlv("BF28", b"")
-        entries = b"".join(
-            self._notification_metadata_tlv(
-                seq_number=notification.seq_number,
-                operation=notification.operation,
-                iccid=notification.iccid,
-                notification_address=notification.address,
+    def _build_notification_list_response(self, payload: bytes = b"") -> bytes:
+        filter_mask = self._extract_notification_filter(payload)
+        selected: list[bytes] = []
+        for notification in self.state.notifications:
+            op_bits = int(notification.operation or 0)
+            if filter_mask is not None and (op_bits & filter_mask) == 0:
+                continue
+            selected.append(
+                self._notification_metadata_tlv(
+                    seq_number=notification.seq_number,
+                    operation=op_bits,
+                    iccid=notification.iccid,
+                    notification_address=notification.address,
+                )
             )
-            for notification in self.state.notifications
-        )
-        return tlv("BF28", tlv("A0", entries))
+        if len(selected) == 0:
+            return tlv("BF28", tlv("A0", b""))
+        return tlv("BF28", tlv("A0", b"".join(selected)))
+
+    @staticmethod
+    def _extract_notification_filter(payload: bytes) -> int | None:
+        body = bytes(payload or b"")
+        if len(body) == 0 or body.startswith(bytes.fromhex("BF28")) is False:
+            return None
+        try:
+            _, inner, _, _ = read_tlv(body, 0)
+        except ValueError:
+            return None
+        tlv_81 = find_first_tlv(inner, "81")
+        if len(tlv_81) == 0:
+            return None
+        try:
+            _, filter_value, _, _ = read_tlv(tlv_81, 0)
+        except ValueError:
+            return None
+        if len(filter_value) == 0:
+            return None
+        return int.from_bytes(filter_value, "big", signed=False)
 
     def _build_notification_retrieve_all_response(self) -> bytes:
         if len(self.state.notifications) == 0:
@@ -2010,6 +2169,12 @@ class SgpLogic:
             profile_imsi = str(profile_image.imsi or "").strip()
             profile_impi = str(profile_image.impi or "").strip()
 
+        profile_auth_config = None
+        if profile_image is not None:
+            carried_config = getattr(profile_image, "auth_config", None)
+            if carried_config is not None:
+                profile_auth_config = carried_config
+
         profile = SimProfileEntry(
             aid=aid,
             iccid=effective_iccid,
@@ -2024,6 +2189,7 @@ class SgpLogic:
             upp_bytes=bytes(session.bpp_unprotected_profile),
             profile_image=profile_image,
             profile_source="upp",
+            auth_config=profile_auth_config,
         )
         self.state.profiles.append(profile)
         self._sync_profile_store()

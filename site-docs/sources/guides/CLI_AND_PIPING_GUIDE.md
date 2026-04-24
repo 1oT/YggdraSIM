@@ -1,0 +1,1 @@
+--8<-- "guides/CLI_AND_PIPING_GUIDE.md"

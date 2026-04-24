@@ -12,7 +12,7 @@
 # You should have received a copy of the GNU General Public License
 # along with this program. If not, see <https://www.gnu.org/licenses/>.
 #
-# Copyright (c) 2026 Hampus Hellsberg and contributors
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 # -----------------------------------------------------------------------------
 
 import os 
@@ -50,6 +50,11 @@ class Config :
     'adm':'0000000000000000'
     }
 
+    DEMO_KEY_SLOTS =(
+    'scp03_kenc','scp03_kmac','scp03_dek',
+    'scp02_enc','scp02_mac','scp02_dek',
+    )
+
     MODULE_STATE_NAME ="scp03_config"
 
     class Colors :
@@ -86,6 +91,68 @@ class Config :
         MINT =_hex_to_ansi .__func__ (MINT_HEX )
         ENDC ='\033[0m'
         BOLD ='\033[1m'
+
+
+_DEMO_KEYS_WARNED =False 
+
+
+def detect_demo_key_slots (config_keys )->list :
+    """Return the list of key slot names currently set to the shipped demo placeholder."""
+    placeholder =Config .DEFAULT_KEYS .get ('scp03_kenc','')
+    hits =[]
+    for slot_name in Config .DEMO_KEY_SLOTS :
+        value =str (config_keys .get (slot_name ,Config .DEFAULT_KEYS .get (slot_name ,''))or '').strip ().upper ()
+        if value ==placeholder .upper ():
+            hits .append (slot_name )
+    return hits 
+
+
+def enforce_demo_key_policy (config_keys ,backend_label :str =""):
+    """Warn (always) / fail (opt-in) when the active keyset is still the demo placeholder.
+
+    Behavior:
+    - Simulator backend: no warning (demo keys are the intended default).
+      Returns ``None``.
+    - Any other backend: build a one-shot banner listing the slots using
+      the demo placeholder and return it as a string. The caller owns
+      when and where to surface it; the previous stderr-write-at-call-
+      time path got clobbered by the shell's screen-clear redraw.
+    - If YGGDRASIM_REQUIRE_NON_DEMO_KEYS=1 is set, raise RuntimeError so
+      production-style deployments cannot start with shipped placeholders.
+    - YGGDRASIM_ALLOW_DEMO_KEYS=1 silences the warning for the current process.
+    - The one-shot guard (``_DEMO_KEYS_WARNED``) still fires: subsequent
+      calls in the same process return ``None`` once the caller has
+      drained the first banner, matching the previous observable
+      behaviour for batch / report surfaces that re-enter the dispatcher.
+    """
+    global _DEMO_KEYS_WARNED 
+    label =str (backend_label or '').strip ().lower ()
+    if label =='sim'or label =='simulator':
+        return None 
+    hits =detect_demo_key_slots (config_keys )
+    if len (hits )==0 :
+        return None 
+    require_flag =os .environ .get ('YGGDRASIM_REQUIRE_NON_DEMO_KEYS','').strip ().lower ()
+    if require_flag in ('1','true','yes','on'):
+        raise RuntimeError (
+        "Refusing to open a secure channel with shipped demo keys in slots: "
+        +", ".join (hits )
+        +". Populate SCP03/keys.ini (or the inventory store) with real values "
+        "before starting, or unset YGGDRASIM_REQUIRE_NON_DEMO_KEYS."
+        )
+    allow_flag =os .environ .get ('YGGDRASIM_ALLOW_DEMO_KEYS','').strip ().lower ()
+    if allow_flag in ('1','true','yes','on'):
+        return None 
+    if _DEMO_KEYS_WARNED :
+        return None 
+    _DEMO_KEYS_WARNED =True 
+    return (
+    "[SCP03] WARNING: shipped demo keys active for slots: "
+    +", ".join (hits )
+    +". Never use these against a real card. Set YGGDRASIM_ALLOW_DEMO_KEYS=1 "
+    "to silence this warning, or YGGDRASIM_REQUIRE_NON_DEMO_KEYS=1 to fail "
+    "fast when placeholders are present."
+    )
 
 
 def _legacy_scp03_parser ()->configparser .ConfigParser :

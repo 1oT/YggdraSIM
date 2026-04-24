@@ -1,13 +1,23 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
+import shutil
+import time
 from typing import Any, Callable
+from urllib import error as urllib_error
+from urllib import request as urllib_request
+from urllib.parse import urlparse, urlunparse
 
-from .runtime_paths import ensure_seeded_workspace_file, ensure_workspace_dir, workspace_path
+from .runtime_paths import ensure_seeded_workspace_file, ensure_workspace_dir, runtime_path, workspace_path
+
+
+_LOGGER = logging.getLogger(__name__)
 
 
 CARD_BACKEND_ENV = "YGGDRASIM_CARD_BACKEND"
+CARD_RELAY_URL_ENV = "YGGDRASIM_CARD_RELAY_URL"
 SIM_QUIRKS_ENV = "YGGDRASIM_SIM_QUIRKS"
 SIM_ISDR_CONFIG_ENV = "YGGDRASIM_SIM_ISDR_CONFIG"
 SIM_EIM_IDENTITY_ENV = "YGGDRASIM_SIM_EIM_IDENTITY"
@@ -16,6 +26,14 @@ SIM_PROFILE_STORE_ENV = "YGGDRASIM_SIM_PROFILE_STORE"
 
 CARD_BACKEND_READER = "reader"
 CARD_BACKEND_SIM = "sim"
+# Sentinel value that means "do not load any simulator quirks file". It is
+# accepted by YGGDRASIM_SIM_QUIRKS, by the persisted setting, and by the
+# ``set_sim_quirks_path`` helper. When seen, the getter short-circuits to
+# the empty-string path so no fall-through to the seeded workspace default
+# occurs and the quirks registry stays empty without tripping the
+# YGGDRASIM_ALLOW_QUIRKS gate.
+SIM_QUIRKS_PATH_NONE = "none"
+SIM_QUIRKS_PATH_DISABLED_ALIASES = ("none", "off", "disabled", "disable")
 CARD_BACKEND_SETTINGS_FILENAME = "card_backend.json"
 _SETTINGS_KEY_CARD_BACKEND = "card_backend"
 _SETTINGS_KEY_SIM_QUIRKS_PATH = "sim_quirks_path"
@@ -29,6 +47,9 @@ SETTING_SOURCE_DERIVED_DEFAULT = "derived default"
 SETTING_SOURCE_SAVED_OVERRIDE = "saved override"
 SETTING_SOURCE_SESSION_OVERRIDE = "session override"
 SETTING_SOURCE_SAVED_SELECTION = "saved selection"
+SETTING_SOURCE_DISABLED = "disabled"
+CARD_RELAY_MARKER_FILENAME = "hil_bridge_card_relay.json"
+DEFAULT_CARD_RELAY_TIMEOUT_SECONDS = 30
 
 
 def normalize_card_backend(value: Any, default: str = CARD_BACKEND_READER) -> str:
@@ -64,11 +85,45 @@ def _load_card_backend_settings() -> dict[str, Any]:
     try:
         with open(settings_path, "r", encoding="utf-8") as handle:
             payload = json.load(handle)
-    except Exception:
+    except json.JSONDecodeError as decode_error:
+        _quarantine_corrupt_card_backend(settings_path, decode_error)
+        return {}
+    except OSError as io_error:
+        _LOGGER.warning(
+            "card_backend: unable to read %s (%s); using empty settings.",
+            settings_path,
+            io_error,
+        )
         return {}
     if isinstance(payload, dict):
         return dict(payload)
     return {}
+
+
+def _quarantine_corrupt_card_backend(
+    settings_path: str,
+    decode_error: json.JSONDecodeError,
+) -> None:
+    sidecar_path = f"{settings_path}.corrupt.{int(time.time())}"
+    try:
+        shutil.move(settings_path, sidecar_path)
+    except OSError as move_error:
+        _LOGGER.error(
+            "card_backend: %s is corrupt (%s) and could not be renamed "
+            "aside (%s); empty settings will be used until the file is "
+            "repaired.",
+            settings_path,
+            decode_error,
+            move_error,
+        )
+        return
+    _LOGGER.warning(
+        "card_backend: %s was unparseable (%s); moved to %s. Review or "
+        "restore the file before relying on saved backend choices.",
+        settings_path,
+        decode_error,
+        sidecar_path,
+    )
 
 
 def _save_card_backend_settings(payload: dict[str, Any]) -> None:
@@ -91,6 +146,19 @@ def _persist_setting(key: str, value: str) -> None:
     payload = _load_card_backend_settings()
     payload[str(key)] = str(value or "").strip()
     _save_card_backend_settings(payload)
+
+
+def _try_persist_setting(key: str, value: str) -> None:
+    try:
+        _persist_setting(key, value)
+    except OSError as io_error:
+        _LOGGER.warning(
+            "card_backend: could not persist %s=%r (%s: %s).",
+            key,
+            value,
+            io_error.__class__.__name__,
+            io_error,
+        )
 
 
 def _normalize_optional_path(path_text: str) -> str:
@@ -121,8 +189,11 @@ def set_card_backend(backend: str, *, persist: bool = True) -> str:
     if persist:
         try:
             _persist_card_backend(normalized)
-        except Exception:
-            pass
+        except OSError as io_error:
+            _LOGGER.warning(
+                "card_backend: could not persist backend=%r (%s: %s).",
+                normalized, io_error.__class__.__name__, io_error,
+            )
     return normalized
 
 
@@ -188,18 +259,12 @@ def set_sim_isdr_config_path(path: str, *, persist: bool = True) -> str:
     if len(normalized) == 0:
         os.environ.pop(SIM_ISDR_CONFIG_ENV, None)
         if persist:
-            try:
-                _persist_setting(_SETTINGS_KEY_SIM_ISDR_CONFIG_PATH, "")
-            except Exception:
-                pass
+            _try_persist_setting(_SETTINGS_KEY_SIM_ISDR_CONFIG_PATH, "")
         return ""
     absolute_path = os.path.abspath(os.path.expanduser(normalized))
     os.environ[SIM_ISDR_CONFIG_ENV] = absolute_path
     if persist:
-        try:
-            _persist_setting(_SETTINGS_KEY_SIM_ISDR_CONFIG_PATH, absolute_path)
-        except Exception:
-            pass
+        _try_persist_setting(_SETTINGS_KEY_SIM_ISDR_CONFIG_PATH, absolute_path)
     return absolute_path
 
 
@@ -233,18 +298,12 @@ def set_sim_eim_identity_path(path: str, *, persist: bool = True) -> str:
     if len(normalized) == 0:
         os.environ.pop(SIM_EIM_IDENTITY_ENV, None)
         if persist:
-            try:
-                _persist_setting(_SETTINGS_KEY_SIM_EIM_IDENTITY_PATH, "")
-            except Exception:
-                pass
+            _try_persist_setting(_SETTINGS_KEY_SIM_EIM_IDENTITY_PATH, "")
         return ""
     absolute_path = os.path.abspath(os.path.expanduser(normalized))
     os.environ[SIM_EIM_IDENTITY_ENV] = absolute_path
     if persist:
-        try:
-            _persist_setting(_SETTINGS_KEY_SIM_EIM_IDENTITY_PATH, absolute_path)
-        except Exception:
-            pass
+        _try_persist_setting(_SETTINGS_KEY_SIM_EIM_IDENTITY_PATH, absolute_path)
     return absolute_path
 
 
@@ -279,18 +338,12 @@ def set_sim_euicc_store_root(path: str, *, persist: bool = True) -> str:
     if len(normalized) == 0:
         os.environ.pop(SIM_EUICC_STORE_ENV, None)
         if persist:
-            try:
-                _persist_setting(_SETTINGS_KEY_SIM_EUICC_STORE_ROOT, "")
-            except Exception:
-                pass
+            _try_persist_setting(_SETTINGS_KEY_SIM_EUICC_STORE_ROOT, "")
         return ""
     absolute_path = os.path.abspath(os.path.expanduser(normalized))
     os.environ[SIM_EUICC_STORE_ENV] = absolute_path
     if persist:
-        try:
-            _persist_setting(_SETTINGS_KEY_SIM_EUICC_STORE_ROOT, absolute_path)
-        except Exception:
-            pass
+        _try_persist_setting(_SETTINGS_KEY_SIM_EUICC_STORE_ROOT, absolute_path)
     return absolute_path
 
 
@@ -306,11 +359,48 @@ def get_sim_euicc_store_root_source() -> str:
     return SETTING_SOURCE_WORKSPACE_DEFAULT
 
 
+def _is_sim_quirks_disabled_sentinel(value: Any) -> bool:
+    """Return ``True`` when ``value`` is one of the "disabled" sentinels.
+
+    The sentinel is case-insensitive and matches any of
+    ``SIM_QUIRKS_PATH_DISABLED_ALIASES`` (``none`` / ``off`` /
+    ``disabled`` / ``disable``). Any leading/trailing whitespace is
+    tolerated so operators can paste from guides without surprise.
+    """
+    text = str(value or "").strip().lower()
+    if len(text) == 0:
+        return False
+    return text in SIM_QUIRKS_PATH_DISABLED_ALIASES
+
+
+def is_sim_quirks_disabled() -> bool:
+    """Return ``True`` when the operator has explicitly opted out of
+    loading any simulator quirks file.
+
+    This inspects the same env-var/persisted cascade as
+    :func:`get_sim_quirks_path` but reports the disabled state rather
+    than the resolved path. Callers that need both the path and the
+    disabled state should prefer :func:`get_sim_quirks_path` followed
+    by :func:`is_sim_quirks_disabled` to keep the two in sync.
+    """
+    configured = str(os.environ.get(SIM_QUIRKS_ENV, "") or "").strip()
+    if _is_sim_quirks_disabled_sentinel(configured):
+        return True
+    persisted = _get_persisted_setting(_SETTINGS_KEY_SIM_QUIRKS_PATH)
+    if _is_sim_quirks_disabled_sentinel(persisted):
+        return True
+    return False
+
+
 def get_sim_quirks_path() -> str:
     configured = str(os.environ.get(SIM_QUIRKS_ENV, "") or "").strip()
+    if _is_sim_quirks_disabled_sentinel(configured):
+        return ""
     if len(configured) > 0:
         return os.path.abspath(os.path.expanduser(configured))
     persisted = _get_persisted_setting(_SETTINGS_KEY_SIM_QUIRKS_PATH)
+    if _is_sim_quirks_disabled_sentinel(persisted):
+        return ""
     if len(persisted) > 0:
         return os.path.abspath(os.path.expanduser(persisted))
     default_path = get_default_sim_quirks_path()
@@ -338,18 +428,12 @@ def set_sim_profile_store_path(path: str, *, persist: bool = True) -> str:
     if len(normalized) == 0:
         os.environ.pop(SIM_PROFILE_STORE_ENV, None)
         if persist:
-            try:
-                _persist_setting(_SETTINGS_KEY_SIM_PROFILE_STORE_PATH, "")
-            except Exception:
-                pass
+            _try_persist_setting(_SETTINGS_KEY_SIM_PROFILE_STORE_PATH, "")
         return ""
     absolute_path = os.path.abspath(os.path.expanduser(normalized))
     os.environ[SIM_PROFILE_STORE_ENV] = absolute_path
     if persist:
-        try:
-            _persist_setting(_SETTINGS_KEY_SIM_PROFILE_STORE_PATH, absolute_path)
-        except Exception:
-            pass
+        _try_persist_setting(_SETTINGS_KEY_SIM_PROFILE_STORE_PATH, absolute_path)
     return absolute_path
 
 
@@ -370,24 +454,33 @@ def set_sim_quirks_path(path: str, *, persist: bool = True) -> str:
     if len(normalized) == 0:
         os.environ.pop(SIM_QUIRKS_ENV, None)
         if persist:
-            try:
-                _persist_setting(_SETTINGS_KEY_SIM_QUIRKS_PATH, "")
-            except Exception:
-                pass
+            _try_persist_setting(_SETTINGS_KEY_SIM_QUIRKS_PATH, "")
         return ""
+    if _is_sim_quirks_disabled_sentinel(normalized):
+        # Explicit opt-out: record the canonical sentinel in both env
+        # and persisted store so `get_sim_quirks_path` returns "" and
+        # the getter does not fall through to the reseeded workspace
+        # default.
+        os.environ[SIM_QUIRKS_ENV] = SIM_QUIRKS_PATH_NONE
+        if persist:
+            _try_persist_setting(_SETTINGS_KEY_SIM_QUIRKS_PATH, SIM_QUIRKS_PATH_NONE)
+        return SIM_QUIRKS_PATH_NONE
     absolute_path = os.path.abspath(os.path.expanduser(normalized))
     os.environ[SIM_QUIRKS_ENV] = absolute_path
     if persist:
-        try:
-            _persist_setting(_SETTINGS_KEY_SIM_QUIRKS_PATH, absolute_path)
-        except Exception:
-            pass
+        _try_persist_setting(_SETTINGS_KEY_SIM_QUIRKS_PATH, absolute_path)
     return absolute_path
 
 
 def get_sim_quirks_source() -> str:
-    configured = _normalize_optional_path(os.environ.get(SIM_QUIRKS_ENV, ""))
-    persisted = _normalize_optional_path(_get_persisted_setting(_SETTINGS_KEY_SIM_QUIRKS_PATH))
+    raw_configured = str(os.environ.get(SIM_QUIRKS_ENV, "") or "").strip()
+    raw_persisted = _get_persisted_setting(_SETTINGS_KEY_SIM_QUIRKS_PATH)
+    if _is_sim_quirks_disabled_sentinel(raw_configured):
+        return SETTING_SOURCE_DISABLED
+    if _is_sim_quirks_disabled_sentinel(raw_persisted):
+        return SETTING_SOURCE_DISABLED
+    configured = _normalize_optional_path(raw_configured)
+    persisted = _normalize_optional_path(raw_persisted)
     if len(configured) > 0:
         if len(persisted) > 0 and configured == persisted:
             return SETTING_SOURCE_SAVED_OVERRIDE
@@ -395,6 +488,214 @@ def get_sim_quirks_source() -> str:
     if len(persisted) > 0:
         return SETTING_SOURCE_SAVED_OVERRIDE
     return SETTING_SOURCE_WORKSPACE_DEFAULT
+
+
+def _card_relay_marker_path() -> str:
+    return runtime_path("state", CARD_RELAY_MARKER_FILENAME)
+
+
+def _normalize_card_relay_url(value: Any) -> str:
+    text = str(value or "").strip()
+    if len(text) == 0:
+        return ""
+    if text.startswith(("http://", "https://")) is False:
+        return ""
+    if text.rstrip("/").endswith("/apdu"):
+        return text.rstrip("/")
+    return text.rstrip("/") + "/apdu"
+
+
+def _build_card_relay_status_url(apdu_url: str) -> str:
+    parsed = urlparse(apdu_url)
+    normalized_path = parsed.path.rstrip("/")
+    if normalized_path.endswith("/apdu"):
+        status_path = normalized_path[: -len("/apdu")] + "/status"
+    elif normalized_path == "":
+        status_path = "/status"
+    else:
+        status_path = normalized_path + "/status"
+    return urlunparse((parsed.scheme, parsed.netloc, status_path, "", "", ""))
+
+
+def _build_card_relay_modem_refresh_url(apdu_url: str) -> str:
+    parsed = urlparse(apdu_url)
+    normalized_path = parsed.path.rstrip("/")
+    if normalized_path.endswith("/apdu"):
+        refresh_path = normalized_path[: -len("/apdu")] + "/modem/refresh"
+    elif normalized_path == "":
+        refresh_path = "/modem/refresh"
+    else:
+        refresh_path = normalized_path + "/modem/refresh"
+    return urlunparse((parsed.scheme, parsed.netloc, refresh_path, "", "", ""))
+
+
+def _resolve_card_relay_url() -> tuple[str, str]:
+    configured = _normalize_card_relay_url(os.environ.get(CARD_RELAY_URL_ENV, ""))
+    if len(configured) > 0:
+        return configured, "env"
+
+    marker_path = _card_relay_marker_path()
+    if os.path.isfile(marker_path) is False:
+        return "", ""
+
+    try:
+        with open(marker_path, "r", encoding="utf-8") as handle:
+            payload = json.load(handle)
+    except (OSError, json.JSONDecodeError) as marker_error:
+        _LOGGER.warning(
+            "card_backend: unreadable relay marker %s (%s: %s); falling back to defaults.",
+            marker_path,
+            marker_error.__class__.__name__,
+            marker_error,
+        )
+        return "", ""
+
+    if isinstance(payload, dict) is False:
+        return "", ""
+
+    marker_url = _normalize_card_relay_url(payload.get("url") or payload.get("apduUrl") or "")
+    if len(marker_url) == 0:
+        return "", ""
+    return marker_url, "marker"
+
+
+def _request_card_relay_json(
+    url: str,
+    *,
+    method: str,
+    timeout_seconds: int = DEFAULT_CARD_RELAY_TIMEOUT_SECONDS,
+    request_json: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    encoded_body = None
+    headers = {"Accept": "application/json"}
+    if request_json is not None:
+        encoded_body = json.dumps(request_json).encode("utf-8")
+        headers["Content-Type"] = "application/json"
+    request = urllib_request.Request(url, data=encoded_body, headers=headers, method=method)
+    try:
+        with urllib_request.urlopen(
+            request,
+            timeout=max(1, int(timeout_seconds or DEFAULT_CARD_RELAY_TIMEOUT_SECONDS)),
+        ) as response:
+            raw_payload = response.read().decode("utf-8")
+    except urllib_error.HTTPError as exc:
+        error_body = exc.read().decode("utf-8", errors="replace").strip()
+        detail = error_body or str(exc.reason)
+        raise RuntimeError(f"Card relay HTTP {exc.code}: {detail}") from exc
+    except urllib_error.URLError as exc:
+        raise RuntimeError(f"Card relay connection failed: {exc}") from exc
+
+    try:
+        payload = json.loads(raw_payload) if len(raw_payload) > 0 else {}
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(f"Card relay returned invalid JSON: {raw_payload}") from exc
+    if isinstance(payload, dict) is False:
+        raise RuntimeError("Card relay response is not a JSON object.")
+    error_text = str(payload.get("error", "") or "").strip()
+    if len(error_text) > 0:
+        raise RuntimeError(error_text)
+    return payload
+
+
+class RelayCardConnection:
+    def __init__(self, endpoint: str, timeout_seconds: int = DEFAULT_CARD_RELAY_TIMEOUT_SECONDS):
+        normalized_endpoint = _normalize_card_relay_url(endpoint)
+        if len(normalized_endpoint) == 0:
+            raise RuntimeError("Invalid card relay endpoint.")
+        self._endpoint = normalized_endpoint
+        self._status_url = _build_card_relay_status_url(normalized_endpoint)
+        self._timeout_seconds = max(1, int(timeout_seconds or DEFAULT_CARD_RELAY_TIMEOUT_SECONDS))
+        self._connected = False
+        self._atr: list[int] = []
+
+    def connect(self, protocol: Any = None) -> None:
+        del protocol
+        payload = self._request_json(self._status_url, method="GET")
+        atr_hex = str(payload.get("atr", "") or "").strip()
+        try:
+            self._atr = list(bytes.fromhex(atr_hex)) if len(atr_hex) > 0 else []
+        except ValueError as exc:
+            raise RuntimeError(f"Card relay returned invalid ATR hex: {atr_hex}") from exc
+        self._connected = True
+
+    def disconnect(self) -> None:
+        self._connected = False
+
+    def getATR(self):
+        if self._connected is False:
+            self.connect()
+        return list(self._atr)
+
+    def transmit(self, apdu):
+        if self._connected is False:
+            self.connect()
+        apdu_bytes = bytes(apdu)
+        payload = self._request_json(
+            self._endpoint,
+            method="POST",
+            request_json={"apdu": apdu_bytes.hex().upper()},
+        )
+        data_hex = str(payload.get("data", "") or "").strip()
+        sw1_hex = str(payload.get("sw1", "") or "").strip()
+        sw2_hex = str(payload.get("sw2", "") or "").strip()
+        if len(sw1_hex) == 0 or len(sw2_hex) == 0:
+            raise RuntimeError("Card relay response is missing status words.")
+        try:
+            data = list(bytes.fromhex(data_hex)) if len(data_hex) > 0 else []
+            sw1 = int(sw1_hex, 16)
+            sw2 = int(sw2_hex, 16)
+        except ValueError as exc:
+            raise RuntimeError(f"Card relay response contained invalid hex fields: {payload}") from exc
+        return data, sw1, sw2
+
+    def _request_json(self, url: str, *, method: str, request_json: dict[str, Any] | None = None) -> dict[str, Any]:
+        return _request_card_relay_json(
+            url,
+            method=method,
+            timeout_seconds=self._timeout_seconds,
+            request_json=request_json,
+        )
+
+
+def trigger_card_relay_modem_refresh(
+    *,
+    mode: str = "",
+    source: str = "",
+    required: bool = False,
+    timeout_seconds: int = DEFAULT_CARD_RELAY_TIMEOUT_SECONDS,
+) -> dict[str, Any] | None:
+    relay_url, relay_source = _resolve_card_relay_url()
+    if len(relay_url) == 0:
+        if required:
+            raise RuntimeError("No active card relay was discovered for modem REFRESH.")
+        return None
+
+    refresh_url = _build_card_relay_modem_refresh_url(relay_url)
+    request_payload: dict[str, Any] = {}
+    if len(str(mode or "").strip()) > 0:
+        request_payload["mode"] = str(mode or "").strip()
+    if len(str(source or "").strip()) > 0:
+        request_payload["sessionId"] = str(source or "").strip()
+
+    try:
+        return _request_card_relay_json(
+            refresh_url,
+            method="POST",
+            timeout_seconds=timeout_seconds,
+            request_json=request_payload,
+        )
+    except Exception as refresh_error:
+        # urllib / socket / JSON decode / RuntimeError from _request_card_relay_json
+        # can all manifest here; escalate only when the caller or the env-based
+        # relay source explicitly required it.
+        if required or relay_source == "env":
+            raise
+        _LOGGER.debug(
+            "card_backend: optional modem REFRESH via relay failed (%s: %s); ignoring.",
+            refresh_error.__class__.__name__,
+            refresh_error,
+        )
+        return None
 
 
 def describe_card_backend() -> str:
@@ -426,6 +727,26 @@ def create_card_connection(
         connection.connect(protocol)
         return connection
 
+    relay_url, relay_source = _resolve_card_relay_url()
+    if len(relay_url) > 0:
+        relay_connection = RelayCardConnection(relay_url)
+        try:
+            relay_connection.connect(protocol)
+        except Exception as relay_error:
+            # If the operator explicitly set YGGDRASIM_CARD_RELAY_URL, a failure
+            # to reach it is fatal; if the URL came from the runtime marker we
+            # fall back to local readers so stale markers don't wedge startup.
+            if relay_source == "env":
+                raise
+            _LOGGER.info(
+                "card_backend: relay %s unreachable (%s: %s); falling back to local reader.",
+                relay_url,
+                relay_error.__class__.__name__,
+                relay_error,
+            )
+        else:
+            return relay_connection
+
     if readers_func is None:
         from smartcard.System import readers as default_readers
 
@@ -438,8 +759,39 @@ def create_card_connection(
             f"Reader index {reader_index} is out of range. Detected readers: {len(reader_list)}."
         )
     connection = reader_list[reader_index].createConnection()
-    if protocol is None:
-        connection.connect()
-    else:
-        connection.connect(protocol)
+    # pyscard defaults disposition to ``SCARD_UNPOWER_CARD``, which means
+    # the card gets power-cycled every time this connection closes. That
+    # is a problem whenever multiple handles share the same reader —
+    # e.g. the reader-bar poll grabbing ATRs while an scp03 scan session
+    # is live: when the poll handle disconnects, pcscd honours UNPOWER
+    # and the live session's card state (selected DF, secure channel,
+    # transient-memory slots) is torn down silently. Passing
+    # ``SCARD_LEAVE_CARD`` keeps the card powered up so long as *any*
+    # handle is still open, which is exactly what we want for a shared
+    # desktop UI that can open many concurrent sessions against the
+    # same reader.
+    try:
+        from smartcard.scard import SCARD_LEAVE_CARD as _SCARD_LEAVE_CARD
+    except Exception:  # noqa: BLE001 — pyscard shim may omit scard consts
+        _SCARD_LEAVE_CARD = 0
+    def _connect_with_leave_card() -> None:
+        try:
+            if protocol is None:
+                connection.connect(disposition=_SCARD_LEAVE_CARD)
+            else:
+                connection.connect(protocol, disposition=_SCARD_LEAVE_CARD)
+            return
+        except TypeError:
+            # Older pyscard releases lack the ``disposition`` kwarg on
+            # ``connect``; fall back and patch the attribute directly.
+            pass
+        if protocol is None:
+            connection.connect()
+        else:
+            connection.connect(protocol)
+        try:
+            connection.disposition = _SCARD_LEAVE_CARD
+        except Exception:  # noqa: BLE001
+            pass
+    _connect_with_leave_card()
     return connection

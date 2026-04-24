@@ -12,7 +12,7 @@
 # You should have received a copy of the GNU General Public License
 # along with this program. If not, see <https://www.gnu.org/licenses/>.
 #
-# Copyright (c) 2026 Hampus Hellsberg and contributors
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 # -----------------------------------------------------------------------------
 
 from dataclasses import dataclass
@@ -21,11 +21,11 @@ from typing import List ,Optional
 if __package__ :
     from .utils import Utils ,Colors 
     from .crypto import CryptoEngine 
-    from .config import ConfigManager 
+    from .config import ConfigManager ,enforce_demo_key_policy 
 else :
     from utils import Utils ,Colors 
     from crypto import CryptoEngine 
-    from config import ConfigManager 
+    from config import ConfigManager ,enforce_demo_key_policy 
 
 
 @dataclass
@@ -122,6 +122,7 @@ class OtaPacketBuilder :
         kid_hex =self .cfg .get ("kid")
         tar_hex =self .cfg .get ("tar")
         cntr_hex =self .cfg .get ("cntr")
+        enforce_demo_key_policy (self .cfg .get ("key_enc"),self .cfg .get ("key_mac"))
         k_enc =Utils .to_bytes (self .cfg .get ("key_enc"))
         k_mac =Utils .to_bytes (self .cfg .get ("key_mac"))
 

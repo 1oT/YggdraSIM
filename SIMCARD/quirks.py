@@ -85,14 +85,62 @@ class QuirkRegistry:
             hook(state)
 
 
+_ALLOW_QUIRKS_ENV = "YGGDRASIM_ALLOW_QUIRKS"
+_DISABLE_QUIRKS_ENV = "YGGDRASIM_DISABLE_QUIRKS"
+# Path-level sentinels that mean "no quirks file - do not even attempt to
+# resolve one". Kept in sync with ``SIM_QUIRKS_PATH_DISABLED_ALIASES`` in
+# :mod:`yggdrasim_common.card_backend`. Duplicated here to keep the module
+# importable without the common-package dependency (SIMCARD is loaded very
+# early during simulator bring-up).
+_QUIRKS_PATH_DISABLED_ALIASES = ("none", "off", "disabled", "disable")
+
+
+def _quirks_loading_enabled() -> bool:
+    value = os.environ.get(_ALLOW_QUIRKS_ENV, "").strip().lower()
+    return value in ("1", "true", "yes", "on")
+
+
+def _quirks_disabled_by_env() -> bool:
+    """Return ``True`` when the kill-switch env flag is set truthy.
+
+    The kill switch is orthogonal to ``YGGDRASIM_ALLOW_QUIRKS``: it
+    always wins, regardless of whether the path points at an existing
+    trusted file and regardless of whether the allow gate is flipped
+    on. Use it in CI / sandboxed environments where the simulator must
+    never import arbitrary Python from disk.
+    """
+    value = os.environ.get(_DISABLE_QUIRKS_ENV, "").strip().lower()
+    return value in ("1", "true", "yes", "on")
+
+
+def _path_is_disabled_sentinel(path: str) -> bool:
+    text = str(path or "").strip().lower()
+    if len(text) == 0:
+        return False
+    return text in _QUIRKS_PATH_DISABLED_ALIASES
+
+
 def load_quirk_registry(path: str) -> QuirkRegistry:
     registry = QuirkRegistry()
+    if _quirks_disabled_by_env():
+        return registry
     normalized = str(path or "").strip()
     if len(normalized) == 0:
+        return registry
+    if _path_is_disabled_sentinel(normalized):
         return registry
     absolute_path = os.path.abspath(os.path.expanduser(normalized))
     if os.path.isfile(absolute_path) is False:
         return registry
+    if _quirks_loading_enabled() is False:
+        raise PermissionError(
+            "Simulator quirk loading is disabled by default because it executes "
+            "arbitrary Python from disk. Set "
+            f"{_ALLOW_QUIRKS_ENV}=1 in the environment to enable loading "
+            f"{absolute_path}, or set {_DISABLE_QUIRKS_ENV}=1 / "
+            f"YGGDRASIM_SIM_QUIRKS=none to run the simulator with an "
+            f"empty quirks registry."
+        )
     module = _load_module_from_path(absolute_path)
     metadata_hook = _build_metadata_state_hook(module)
     if metadata_hook is not None:
@@ -122,6 +170,8 @@ def _build_metadata_state_hook(module: ModuleType) -> StateHook | None:
         overrides.update(raw_metadata)
 
     alias_map = {
+        "atr": "atr",
+        "atr_hex": "atr",
         "default_dp_address": "default_dp_address",
         "root_ci_pkid": "root_ci_pkid",
         "euicc_info_overrides": "euicc_info",
@@ -146,6 +196,10 @@ def _build_metadata_state_hook(module: ModuleType) -> StateHook | None:
 
 
 def _apply_metadata_overrides(state: SimCardState, overrides: dict[str, Any]) -> None:
+    atr_override = overrides["atr"] if "atr" in overrides else overrides.get("atr_hex")
+    if atr_override is not None:
+        state.atr = _coerce_bytes(atr_override)
+
     default_dp_address = overrides.get("default_dp_address")
     if default_dp_address is not None:
         state.default_dp_address = str(default_dp_address)

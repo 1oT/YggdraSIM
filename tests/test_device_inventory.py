@@ -153,7 +153,224 @@ class DeviceInventoryTests(unittest.TestCase):
             input=b'{"secret": true}',
             capture_output=True,
             check=False,
+            timeout=120.0,
         )
+
+    def test_inventory_crypto_dict_payload_round_trip_through_fake_gpg(self) -> None:
+        """COMMON-P4-01 (a): ``encrypt_payload`` / ``decrypt_payload`` round-trip.
+
+        The real GPG binary is replaced with a reversible base64 stand-in so
+        the test works in CI without a keyring. What matters for the audit
+        checklist is that the ``dict`` the operator hands in is the same
+        ``dict`` that comes back after a round-trip through the public
+        encrypt/decrypt surface.
+        """
+        import base64 as _b64
+
+        config_path = self.temp_path / "inventory_crypto.json"
+        config_path.write_text(
+            json.dumps(
+                {
+                    "enabled": True,
+                    "provider": "gpg",
+                    "plaintext_fallback_writes": False,
+                    "gpg": {
+                        "binary": "gpg",
+                        "recipients": ["ABCDEF0123456789"],
+                    },
+                },
+                indent=2,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        manager = InventoryCryptoManager(config_path=str(config_path))
+
+        def _fake_gpg_run(command, *, input=b"", capture_output=True, check=False, timeout=None):
+            del capture_output
+            del check
+            del timeout
+            if "--encrypt" in command:
+                armored = (
+                    "-----BEGIN PGP MESSAGE-----\n"
+                    + _b64.b64encode(bytes(input)).decode("ascii")
+                    + "\n-----END PGP MESSAGE-----\n"
+                )
+                return subprocess.CompletedProcess(command, 0, stdout=armored.encode("utf-8"), stderr=b"")
+            trimmed_lines = [
+                line
+                for line in bytes(input).decode("utf-8").splitlines()
+                if len(line.strip()) > 0 and line.startswith("-----") is False
+            ]
+            return subprocess.CompletedProcess(
+                command,
+                0,
+                stdout=_b64.b64decode("".join(trimmed_lines)),
+                stderr=b"",
+            )
+
+        payload = {
+            "ki": "00112233445566778899AABBCCDDEEFF",
+            "opc": "FFEEDDCCBBAA99887766554433221100",
+            "notes": {"kvn": 0x31, "lab": True},
+        }
+
+        with mock.patch(
+            "yggdrasim_common.inventory_crypto.shutil.which",
+            return_value="/usr/bin/gpg",
+        ):
+            with mock.patch(
+                "yggdrasim_common.inventory_crypto.subprocess.run",
+                side_effect=_fake_gpg_run,
+            ):
+                envelope = manager.encrypt_payload(payload)
+                decrypted = manager.decrypt_payload(envelope)
+
+        self.assertTrue(envelope[InventoryCryptoManager.ENVELOPE_MARKER])
+        self.assertEqual(envelope["provider"], "gpg")
+        self.assertIn("-----BEGIN PGP MESSAGE-----", envelope["ciphertext_ascii"])
+        self.assertEqual(decrypted, payload)
+
+    def test_inventory_crypto_blocks_plaintext_secret_writes_when_enabled(self) -> None:
+        """COMMON-P4-01 (b): refuse plaintext fallback when configured.
+
+        With ``enabled=True`` and ``plaintext_fallback_writes=False`` the
+        manager must advertise ``blocks_plaintext_secret_writes() is True``
+        so callers wired through ``write_secret_file_bytes`` never silently
+        land plaintext on disk.
+        """
+        config_path = self.temp_path / "inventory_crypto.json"
+        config_path.write_text(
+            json.dumps(
+                {
+                    "enabled": True,
+                    "provider": "gpg",
+                    "plaintext_fallback_writes": False,
+                    "gpg": {
+                        "binary": "gpg",
+                        "recipients": ["ABCDEF0123456789"],
+                    },
+                },
+                indent=2,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        manager = InventoryCryptoManager(config_path=str(config_path))
+
+        with mock.patch(
+            "yggdrasim_common.inventory_crypto.shutil.which",
+            return_value="/usr/bin/gpg",
+        ):
+            self.assertTrue(manager.write_encryption_enabled())
+            self.assertFalse(manager.plaintext_fallback_writes_allowed())
+            self.assertTrue(manager.provider_ready_for_encrypt())
+            self.assertTrue(manager.blocks_plaintext_secret_writes())
+
+    def test_inventory_crypto_write_secret_file_leaves_no_plaintext_on_disk(self) -> None:
+        """COMMON-P4-01 (c): ``write_secret_file_bytes`` never leaves plaintext behind."""
+        from yggdrasim_common.inventory_crypto import write_secret_file_bytes
+
+        config_path = self.temp_path / "inventory_crypto.json"
+        config_path.write_text(
+            json.dumps(
+                {
+                    "enabled": True,
+                    "provider": "gpg",
+                    "gpg": {
+                        "binary": "gpg",
+                        "recipients": ["ABCDEF0123456789"],
+                    },
+                },
+                indent=2,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        manager = InventoryCryptoManager(config_path=str(config_path))
+        secret_path = self.temp_path / "secret.bin"
+        plaintext = b"\x00\x11\x22\x33KI-MATERIAL\x44\x55"
+        armored = (
+            b"-----BEGIN PGP MESSAGE-----\n"
+            b"ciphertext-placeholder\n"
+            b"-----END PGP MESSAGE-----\n"
+        )
+
+        with mock.patch(
+            "yggdrasim_common.inventory_crypto.shutil.which",
+            return_value="/usr/bin/gpg",
+        ):
+            with mock.patch(
+                "yggdrasim_common.inventory_crypto.subprocess.run",
+                return_value=subprocess.CompletedProcess([], 0, stdout=armored, stderr=b""),
+            ):
+                write_secret_file_bytes(secret_path, plaintext, crypto_manager=manager)
+
+        on_disk = secret_path.read_bytes()
+        self.assertTrue(on_disk.lstrip().startswith(b"-----BEGIN PGP MESSAGE-----"))
+        self.assertNotIn(b"KI-MATERIAL", on_disk)
+
+    def test_inventory_crypto_refuses_to_encrypt_without_recipients(self) -> None:
+        """COMMON-P4-01 (d): ``_gpg_encrypt`` raises when recipient list is empty."""
+        config_path = self.temp_path / "inventory_crypto.json"
+        config_path.write_text(
+            json.dumps(
+                {
+                    "enabled": True,
+                    "provider": "gpg",
+                    "gpg": {
+                        "binary": "gpg",
+                        "recipients": [],
+                    },
+                },
+                indent=2,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        manager = InventoryCryptoManager(config_path=str(config_path))
+
+        with mock.patch(
+            "yggdrasim_common.inventory_crypto.shutil.which",
+            return_value="/usr/bin/gpg",
+        ):
+            self.assertFalse(manager.provider_ready_for_encrypt())
+            with self.assertRaises(ValueError):
+                manager._gpg_encrypt(b"unusable without recipients")
+
+    def test_inventory_crypto_refuses_gpg_key_file_outside_config_directory(self) -> None:
+        """COMMON-P4-01 (e): ``gpg_key_file`` path cannot escape the config dir."""
+        config_path = self.temp_path / "inventory_crypto.json"
+
+        sibling_root = Path(tempfile.mkdtemp(dir=self.state_dir))
+        try:
+            escape_target = sibling_root / "rogue_recipient.txt"
+            escape_target.write_text("DEADBEEFCAFEBABE0011223344556677\n", encoding="utf-8")
+            config_path.write_text(
+                json.dumps(
+                    {
+                        "enabled": True,
+                        "provider": "gpg",
+                        "gpg": {
+                            "binary": "gpg",
+                            "gpg_key_file": str(escape_target),
+                        },
+                    },
+                    indent=2,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            manager = InventoryCryptoManager(config_path=str(config_path))
+            self.assertIsNone(manager._gpg_key_file_path())
+            self.assertEqual(manager._gpg_recipients(), [])
+        finally:
+            try:
+                for child in sibling_root.iterdir():
+                    child.unlink()
+                sibling_root.rmdir()
+            except OSError:
+                pass
 
     def test_inventory_crypto_decrypt_invokes_gpg_subprocess(self) -> None:
         config_path = self.temp_path / "inventory_crypto.json"
@@ -195,6 +412,7 @@ class DeviceInventoryTests(unittest.TestCase):
             input=b"ciphertext",
             capture_output=True,
             check=False,
+            timeout=120.0,
         )
 
     def test_store_round_trip_per_namespace(self) -> None:

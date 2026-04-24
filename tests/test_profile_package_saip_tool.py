@@ -1,5 +1,6 @@
 import os
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -137,6 +138,30 @@ class SaipToolBridgeTests(unittest.TestCase):
 
         self.assertEqual(second_bridge.default_transcode_dir, persisted_dir)
 
+    def test_last_input_open_directory_persists_in_config(self) -> None:
+        config_path = self.workspace_root / "Workspace" / "SAIP" / "saip_tool_config.json"
+        profile_dir = self.workspace_root / "captures" / "recent"
+        profile_dir.mkdir(parents=True, exist_ok=True)
+        profile_path = profile_dir / "picked_profile.der"
+        profile_path.write_bytes(b"\x01\x02\x03")
+
+        first_bridge = SaipToolBridge(
+            workspace_root=self.workspace_root,
+            runner=self.runner,
+            tool_command=["saip-tool.py"],
+            config_path=config_path,
+        )
+        first_bridge.set_input_file(str(profile_path))
+
+        second_bridge = SaipToolBridge(
+            workspace_root=self.workspace_root,
+            runner=self.runner,
+            tool_command=["saip-tool.py"],
+            config_path=config_path,
+        )
+
+        self.assertEqual(second_bridge.last_input_open_directory, profile_dir.resolve())
+
     def test_describe_status_mentions_transcode_dir(self) -> None:
         self.bridge.set_default_transcode_dir("Workspace/SAIP/custom_transcode")
 
@@ -145,6 +170,37 @@ class SaipToolBridgeTests(unittest.TestCase):
         self.assertIn("Active profile:", status)
         self.assertIn("Transcode dir:", status)
         self.assertIn("Workspace/SAIP/custom_transcode", status)
+
+    def test_pick_input_file_uses_last_open_directory_when_available(self) -> None:
+        remembered_directory = self.workspace_root / "captures" / "recent"
+        remembered_directory.mkdir(parents=True, exist_ok=True)
+        selected_path = remembered_directory / "offline_profile.der"
+        selected_path.write_bytes(b"\x01\x02")
+        self.bridge.last_input_open_directory = remembered_directory.resolve()
+        completed = subprocess.CompletedProcess(
+            ["zenity"],
+            0,
+            stdout=f"{selected_path}\n",
+            stderr="",
+        )
+
+        with mock.patch.dict(os.environ, {"DISPLAY": ":0"}, clear=False):
+            with mock.patch(
+                "Tools.ProfilePackage.saip_tool.shutil.which",
+                side_effect=lambda name: "/usr/bin/zenity" if name == "zenity" else None,
+            ):
+                with mock.patch(
+                    "Tools.ProfilePackage.saip_tool.subprocess.run",
+                    return_value=completed,
+                ) as mocked_run:
+                    resolved = self.bridge.pick_input_file()
+
+        self.assertEqual(resolved, selected_path.resolve())
+        self.assertEqual(self.bridge.current_input_file, selected_path.resolve())
+        self.assertIn(
+            f"--filename={remembered_directory.resolve()}/",
+            mocked_run.call_args.args[0],
+        )
 
     def test_list_default_profiles_ignores_transcode_sidecars(self) -> None:
         profile_dir = self.workspace_root / "Workspace" / "SAIP" / "profile"
@@ -253,6 +309,41 @@ class SaipToolBridgeTests(unittest.TestCase):
         self.assertEqual(result.stdout, "partial output\n")
         self.assertIn("timed out", result.stderr)
         self.assertIn("decoder stalled", result.stderr)
+
+    def test_bundle_root_seeds_default_profile_dir(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_bundle:
+            bundle_root = Path(temp_bundle)
+            source_profile_dir = bundle_root / "Tools" / "ProfilePackage" / "profile"
+            source_profile_dir.mkdir(parents=True, exist_ok=True)
+            (source_profile_dir / "seed.der").write_bytes(b"\x01\x02")
+
+            bridge = SaipToolBridge(
+                workspace_root=self.workspace_root,
+                runner=self.runner,
+                tool_command=["saip-tool.py"],
+                bundle_root_path=bundle_root,
+            )
+
+            seeded_path = self.workspace_root / "Workspace" / "SAIP" / "profile" / "seed.der"
+            self.assertTrue(seeded_path.is_file())
+            self.assertEqual(bridge.list_default_profiles()[0].name, "seed.der")
+
+    def test_get_tool_command_falls_back_to_bundle_root_pysim(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_bundle:
+            bundle_root = Path(temp_bundle)
+            bundled_tool = bundle_root / "pysim" / "contrib" / "saip-tool.py"
+            bundled_tool.parent.mkdir(parents=True, exist_ok=True)
+            bundled_tool.write_text("#!/usr/bin/env python3\n", encoding="utf-8")
+
+            with mock.patch("Tools.ProfilePackage.saip_tool.shutil.which", return_value=None):
+                bridge = SaipToolBridge(
+                    workspace_root=self.workspace_root,
+                    runner=self.runner,
+                    bundle_root_path=bundle_root,
+                )
+                command = bridge.get_tool_command()
+
+            self.assertEqual(command, [sys.executable, str(bundled_tool.resolve())])
 
 
 if __name__ == "__main__":

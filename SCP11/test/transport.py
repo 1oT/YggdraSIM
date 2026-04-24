@@ -12,7 +12,7 @@
 # You should have received a copy of the GNU General Public License
 # along with this program. If not, see <https://www.gnu.org/licenses/>.
 #
-# Copyright (c) 2026 Hampus Hellsberg and contributors
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 # -----------------------------------------------------------------------------
 
 import json
@@ -23,6 +23,7 @@ from typing import Optional, Protocol, Tuple
 
 from yggdrasim_common.session_recording import emit_apdu_trace_event
 from yggdrasim_common.card_backend import create_card_connection
+from SCP11.shared.tls_helpers import create_insecure_context
 
 
 def _encode_der_length(length: int) -> bytes:
@@ -146,7 +147,7 @@ class RelayHttpClientJsonHex:
             if self._verify_tls:
                 ssl_context = ssl.create_default_context()
             else:
-                ssl_context = ssl._create_unverified_context()
+                ssl_context = create_insecure_context(caller="SCP11.test.transport")
 
         try:
             with urllib.request.urlopen(request, timeout=self._timeout_seconds, context=ssl_context) as response:

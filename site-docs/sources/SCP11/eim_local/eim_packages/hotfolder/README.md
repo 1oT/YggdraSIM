@@ -1,0 +1,1 @@
+--8<-- "SCP11/eim_local/eim_packages/hotfolder/README.md"

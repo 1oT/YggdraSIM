@@ -16,6 +16,7 @@ from cryptography import x509 as crypto_x509
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.x509.oid import NameOID
+import pytest
 import yaml
 
 from SCP11.asn1_registry import ASN1Registry
@@ -363,33 +364,65 @@ class LocalAccessSessionTests(unittest.TestCase):
         ]:
             sys.modules.pop(module_name, None)
 
+        smartcard_stub_active = local_access_session._smartcard_support_available() is False
+        smpp_stub_active = local_access_session._smpp_support_available() is False
+
         with local_access_session._temporary_session_bound_dependency_stubs():
             from smartcard.util import toBytes
             from smpp.pdu import operations, pdu_types
 
             self.assertEqual(toBytes("01 02 0A"), [0x01, 0x02, 0x0A])
-            self.assertEqual(toBytes(bytes.fromhex("ABCD")), [0xAB, 0xCD])
-            self.assertTrue(hasattr(pdu_types, "DataCoding"))
-            self.assertTrue(hasattr(operations, "SubmitSM"))
+            # The bytes-accepting contract is a stub-only convenience: the
+            # real pyscard toBytes() requires str and raises TypeError on
+            # bytes input. Only assert that shape when our stub is in force.
+            if smartcard_stub_active:
+                self.assertEqual(toBytes(bytes.fromhex("ABCD")), [0xAB, 0xCD])
+            if smpp_stub_active:
+                self.assertTrue(hasattr(pdu_types, "DataCoding"))
+                self.assertTrue(hasattr(operations, "SubmitSM"))
+            else:
+                self.assertTrue(
+                    hasattr(pdu_types, "DataCoding") or hasattr(pdu_types, "PDU")
+                )
+                self.assertTrue(hasattr(operations, "SubmitSM"))
 
-        for module_name in [
+        smartcard_module_group = [
             "smartcard",
             "smartcard.util",
             "smartcard.CardConnection",
             "smartcard.System",
+        ]
+        smpp_module_group = [
             "smpp",
             "smpp.pdu",
             "smpp.pdu.pdu_types",
             "smpp.pdu.operations",
-        ]:
-            self.assertNotIn(module_name, sys.modules)
+        ]
+        # The context manager only records (and therefore only restores)
+        # snapshots for module groups that actually had stubs installed. If
+        # the real package is importable on this host, the context leaves
+        # the real package in sys.modules untouched, which is correct.
+        if smartcard_stub_active:
+            for module_name in smartcard_module_group:
+                self.assertNotIn(module_name, sys.modules)
+        if smpp_stub_active:
+            for module_name in smpp_module_group:
+                self.assertNotIn(module_name, sys.modules)
 
-    def test_vendored_pysim_helper_exposes_imports(self):
+    def test_pysim_helper_exposes_imports(self):
+        """``ensure_repo_pysim_on_path`` is a prepend-helper, not a gate.
+
+        It returns a ``Path`` when a developer checkout is present at
+        ``<repo>/pysim`` (the upstream-branch-development workflow)
+        and ``None`` when the operator is running against a pip
+        install from the ``[saip]`` extra. Both states are valid; the
+        invariant we actually care about is that ``pySim.esim.rsp``
+        imports and exposes ``RspSessionState`` after the helper
+        returned, regardless of which provisioning path resolved it.
+        """
         pysim_root = ensure_repo_pysim_on_path()
-
-        self.assertIsNotNone(pysim_root)
-        assert pysim_root is not None
-        self.assertTrue(pysim_root.is_dir())
+        if pysim_root is not None:
+            self.assertTrue(pysim_root.is_dir())
         module = importlib.import_module("pySim.esim.rsp")
         self.assertTrue(hasattr(module, "RspSessionState"))
 
@@ -458,6 +491,35 @@ class LocalAccessSessionTests(unittest.TestCase):
             summary,
         )
         self.assertFalse(any(line.startswith("A3[1]") for line in summary))
+
+    def test_resolve_profile_target_encodes_decimal_iccid_before_hex_fallback(self):
+        session = LocalIsdrSession(apdu_channel=FakeApduChannel())
+
+        resolved = session._resolve_profile_target("8901000000000000001")
+
+        self.assertEqual(
+            resolved,
+            (session.TAG_ICCID, "981000000000000000F1"),
+        )
+
+    def test_delete_profile_uses_encoded_iccid_payload_for_decimal_identifier(self):
+        session = LocalIsdrSession(apdu_channel=CaptureApduChannel())
+        session.collect_profile_metadata = lambda: []  # type: ignore[method-assign]
+        session._sync_pending_notifications = lambda response=b"": None  # type: ignore[method-assign]
+
+        response = session.delete_profile("89460811111111111112")
+
+        expected_payload = session._build_profile_state_payload(
+            session.TAG_DELETE_PROFILE,
+            session.TAG_ICCID,
+            "98648011111111111121",
+        )
+        expected_apdu = bytes([0x80, 0xE2, 0x91, 0x00, len(expected_payload)]) + expected_payload
+
+        self.assertEqual(response, b"")
+        self.assertEqual(session.apdu_channel.send_calls[0][0], "LOCAL: Select ISD-R")
+        self.assertEqual(session.apdu_channel.send_calls[1][0], "LOCAL: DeleteProfile [Block 0]")
+        self.assertEqual(session.apdu_channel.send_calls[1][1], expected_apdu)
 
     def test_analyze_payload_pair_reports_first_diff(self):
         analysis = analyze_payload_pair(bytes.fromhex("A00100"), bytes.fromhex("A00200"))
@@ -762,6 +824,50 @@ class LocalAccessSessionTests(unittest.TestCase):
         )
         self.assertIn("auto-disabling active profile", output.getvalue())
 
+    def test_local_shell_enable_profile_refuses_auto_disable_when_ppr1_forbids_disable(self):
+        shell = LocalAccessShell()
+        calls = []
+        shell.session = SimpleNamespace(
+            collect_profile_metadata=lambda: [
+                SimpleNamespace(
+                    iccid="8901000000000000001",
+                    aid="A0000005591010FFFFFFFF8900001100",
+                    state="ENABLED",
+                    profile_class="OPER",
+                    nickname="Primary",
+                    profile_name="",
+                    profile_policy_rules_hex="0640",
+                ),
+                SimpleNamespace(
+                    iccid="8901000000000000002",
+                    aid="A0000005591010FFFFFFFF8900001200",
+                    state="DISABLED",
+                    profile_class="OPER",
+                    nickname="Secondary",
+                    profile_name="",
+                    profile_policy_rules_hex="",
+                ),
+            ],
+            resolve_profile_target=lambda identifier: (
+                b"\x5A",
+                "981000000000000000F2",
+            )
+            if identifier == "8901000000000000002"
+            else (
+                b"\x4F",
+                "A0000005591010FFFFFFFF8900001100",
+            ),
+            disable_profile=lambda identifier: calls.append(("disable", identifier)) or bytes.fromhex("BF3203800100"),
+            enable_profile=lambda identifier: calls.append(("enable", identifier)) or bytes.fromhex("BF3103800100"),
+        )
+
+        with contextlib.redirect_stdout(io.StringIO()) as output:
+            shell._cmd_enable_profile(["8901000000000000002"])
+
+        self.assertEqual(calls, [])
+        self.assertIn("guarded mode refused to auto-disable active profile", output.getvalue())
+        self.assertIn("ppr1-disable-not-allowed", output.getvalue())
+
     def test_local_shell_disable_profile_noops_when_already_disabled(self):
         shell = LocalAccessShell()
         calls = []
@@ -836,9 +942,10 @@ class LocalAccessSessionTests(unittest.TestCase):
         self.assertIn("Canonical command names are listed here", rendered)
         self.assertIn("ENABLE-PROFILE <id>", rendered)
         self.assertIn("DELETE-PROFILE <id>", rendered)
+        self.assertIn("REFRESH-MODEM [mode]", rendered)
         self.assertNotIn("  ENABLE <id>", rendered)
         self.assertNotIn("  DELETE <id>", rendered)
-        self.assertIn("Aliases: ENABLE, DISABLE, DELETE", rendered)
+        self.assertIn("Aliases: ENABLE, DISABLE, DELETE, MODEM-REFRESH", rendered)
         self.assertTrue(
             any(
                 "CERTS [--json|--yaml]" in line and "STATUS" in line
@@ -899,6 +1006,17 @@ class LocalAccessSessionTests(unittest.TestCase):
         self.assertIn("[DELETE-PROFILE]", rendered)
         self.assertIn("Usage   : DELETE-PROFILE <id>", rendered)
         self.assertIn("Aliases : DELETE", rendered)
+
+    def test_local_shell_help_alias_lookup_resolves_refresh_modem_command(self):
+        shell = LocalAccessShell()
+
+        with contextlib.redirect_stdout(io.StringIO()) as output:
+            shell._cmd_help(["MODEM-REFRESH"])
+
+        rendered = output.getvalue()
+        self.assertIn("[REFRESH-MODEM]", rendered)
+        self.assertIn("Usage   : REFRESH-MODEM [mode]", rendered)
+        self.assertIn("Aliases : MODEM-REFRESH", rendered)
 
     def test_local_shell_debug_flag_strips_argument_and_toggles_raw_apdu_logging(self):
         class _FakeApduChannel:
@@ -1719,7 +1837,8 @@ class LocalAccessSessionTests(unittest.TestCase):
                 calls.append(("build", payload))
                 return generated_bpp
 
-            def fake_load(payload: bytes) -> bytes:
+            def fake_load(payload: bytes, *, progress_bar=None) -> bytes:
+                _ = progress_bar
                 calls.append(("load", payload))
                 return bytes.fromhex("9000")
 
@@ -1785,7 +1904,8 @@ class LocalAccessSessionTests(unittest.TestCase):
                     wrap_tlv(bytes.fromhex("BF23"), wrap_tlv(b"\x80", session.state.transaction_id)),
                 )
 
-            def fake_load(payload: bytes) -> bytes:
+            def fake_load(payload: bytes, *, progress_bar=None) -> bytes:
+                _ = progress_bar
                 load_calls.append(payload)
                 return bytes.fromhex("9000")
 
@@ -1848,6 +1968,155 @@ class LocalAccessSessionTests(unittest.TestCase):
         self.assertIn("LOCAL: RetrieveNotification [543]", log_names)
         self.assertIn("LOCAL: RemoveNotificationFromList [543]", log_names)
 
+    def test_load_profile_from_bytes_advances_progress_per_segment_and_sync(self):
+        """
+        Regression: the sticky-footer progress bar must keep moving
+        through every LoadBoundProfilePackage segment and land on the
+        trailing "sync notifications" step. Before the fix the outer
+        ``load_profile_from_path`` reserved a single "load bound
+        profile package" slot which jumped to 100 % the moment the
+        install began and sat there for the entire segment loop.
+        """
+
+        class _FakeProgressBar:
+            def __init__(self, total: int) -> None:
+                self.total = int(total)
+                self.completed = 0
+                self.advance_calls: list[tuple[str, int]] = []
+                self.set_total_calls: list[int] = []
+
+            def set_total(self, new_total: int) -> None:
+                self.total = int(new_total)
+                self.set_total_calls.append(int(new_total))
+                if self.completed > self.total:
+                    self.completed = self.total
+
+            def advance(self, label: str = "", count: int = 1) -> None:
+                step_count = int(count)
+                if step_count < 0:
+                    step_count = 0
+                self.completed = self.completed + step_count
+                if self.completed > self.total:
+                    self.completed = self.total
+                self.advance_calls.append((str(label or ""), step_count))
+
+        session = LocalIsdrSession(apdu_channel=FakeApduChannel())
+        session.state.session_open = True
+        session.state.prepare_download_response = b"\x01"
+        valid_bpp = wrap_tlv(
+            bytes.fromhex("BF36"),
+            wrap_tlv(bytes.fromhex("BF23"), wrap_tlv(b"\x80", b"\x10" * 16)),
+        )
+        # Three segments, none of them terminal — the loop must walk
+        # through all of them without short-circuiting so we can assert
+        # on three per-segment advances.
+        segments = [b"\xAA", b"\xBB", b"\xCC"]
+        session._segment_bound_profile_package = lambda _: list(segments)
+        session._send_personalization_store_data = lambda *_args, **_kwargs: b""
+        session._sync_pending_notifications = lambda *_args, **_kwargs: None
+
+        # Pre-install phase already consumed 4 slots (open, prepare,
+        # bind, describe) just like load_profile_from_path does.
+        bar = _FakeProgressBar(total=4)
+        bar.completed = 4
+
+        result = session._load_profile_from_bytes(valid_bpp, progress_bar=bar)
+
+        self.assertEqual(result, b"")
+        # Total must be expanded to cover every segment plus the final
+        # "sync notifications" step. 4 pre-install + 3 segments + 1
+        # sync = 8.
+        self.assertEqual(bar.total, 8)
+        self.assertIn(8, bar.set_total_calls)
+        advance_labels = [label for label, _count in bar.advance_calls]
+        self.assertEqual(
+            advance_labels,
+            [
+                "load segment 1/3",
+                "load segment 2/3",
+                "load segment 3/3",
+                "sync notifications",
+            ],
+        )
+        # Counter must land at 100 % only after the final sync advance,
+        # not before — otherwise the footer would sit at 100 % while
+        # the notify sync is still running.
+        self.assertEqual(bar.completed, 8)
+
+    def test_load_profile_from_bytes_coasts_remaining_segments_on_terminal_result(self):
+        """
+        When the card returns a terminal ProfileInstallationResult
+        mid-stream the remaining segments are skipped; the bar must
+        still reach 100 % by the time "sync notifications" fires.
+        """
+
+        class _FakeProgressBar:
+            def __init__(self, total: int) -> None:
+                self.total = int(total)
+                self.completed = 0
+                self.advance_calls: list[tuple[str, int]] = []
+
+            def set_total(self, new_total: int) -> None:
+                self.total = int(new_total)
+                if self.completed > self.total:
+                    self.completed = self.total
+
+            def advance(self, label: str = "", count: int = 1) -> None:
+                step_count = int(count)
+                if step_count < 0:
+                    step_count = 0
+                self.completed = self.completed + step_count
+                if self.completed > self.total:
+                    self.completed = self.total
+                self.advance_calls.append((str(label or ""), step_count))
+
+        session = LocalIsdrSession(apdu_channel=FakeApduChannel())
+        session.state.session_open = True
+        session.state.prepare_download_response = b"\x01"
+        valid_bpp = wrap_tlv(
+            bytes.fromhex("BF36"),
+            wrap_tlv(bytes.fromhex("BF23"), wrap_tlv(b"\x80", b"\x10" * 16)),
+        )
+        segments = [b"\xAA", b"\xBB", b"\xCC", b"\xDD"]
+        session._segment_bound_profile_package = lambda _: list(segments)
+
+        call_index = {"value": 0}
+
+        def fake_store_data(*_args, **_kwargs):
+            call_index["value"] = call_index["value"] + 1
+            # Second segment triggers a terminal failure so the loop
+            # short-circuits after draining segment #2.
+            if call_index["value"] == 2:
+                return build_profile_installation_failure(b"\x10" * 16)
+            return b""
+
+        session._send_personalization_store_data = fake_store_data
+        session._sync_pending_notifications = lambda *_args, **_kwargs: None
+
+        bar = _FakeProgressBar(total=4)
+        bar.completed = 4
+
+        with self.assertRaises(RuntimeError):
+            session._load_profile_from_bytes(valid_bpp, progress_bar=bar)
+
+        advance_labels = [label for label, _count in bar.advance_calls]
+        # Expect the two real segment advances, a short-circuit coast
+        # advance worth 2 (remaining segments), and the final sync.
+        self.assertIn("load segment 1/4", advance_labels)
+        self.assertIn("load segment 2/4", advance_labels)
+        self.assertIn("install short-circuit", advance_labels)
+        self.assertIn("sync notifications", advance_labels)
+        # The coast advance must carry a count equal to the number of
+        # segments we did not send (4 total - 2 attempted = 2).
+        coast_counts = [
+            count for label, count in bar.advance_calls
+            if label == "install short-circuit"
+        ]
+        self.assertEqual(coast_counts, [2])
+        # Bar lands at 100 % by the time the final sync fires.
+        self.assertEqual(bar.completed, bar.total)
+        self.assertEqual(bar.total, 4 + 4 + 1)
+
     def test_run_load_profile_chain_syncs_notifications_before_close_when_load_aborts(self):
         with tempfile.TemporaryDirectory() as profile_dir:
             profile_path = Path(profile_dir) / "local-profile.hex"
@@ -1880,7 +2149,8 @@ class LocalAccessSessionTests(unittest.TestCase):
                     wrap_tlv(bytes.fromhex("BF23"), wrap_tlv(b"\x80", b"\x55" * 16)),
                 )
 
-            def fake_load(_payload: bytes) -> bytes:
+            def fake_load(_payload: bytes, *, progress_bar=None) -> bytes:
+                _ = progress_bar
                 session.state.last_load_bpp_response = build_profile_installation_failure(b"\x55" * 16)
                 raise RuntimeError("synthetic failure before inner notification sync")
 
@@ -1938,7 +2208,8 @@ class LocalAccessSessionTests(unittest.TestCase):
                     wrap_tlv(bytes.fromhex("BF23"), wrap_tlv(b"\x80", b"\x55" * 16)),
                 )
 
-            def fake_load(_payload: bytes) -> bytes:
+            def fake_load(_payload: bytes, *, progress_bar=None) -> bytes:
+                _ = progress_bar
                 session.state.load_notifications_synced = True
                 calls.append("load")
                 return bytes.fromhex("9000")
@@ -2089,6 +2360,7 @@ class LocalAccessSessionTests(unittest.TestCase):
         self.assertEqual(labels[1], "TLV[2] A9 application")
         self.assertEqual(labels[2], "TLV[3] AA end")
 
+    @pytest.mark.slow
     def test_describe_upp_protected_command_sequence_includes_plaintext_range_and_elements(self):
         profile_path = Path(__file__).resolve().parent.parent / "SCP11" / "local_access" / "profile" / "test_profile.txt"
         profile_bytes = bytes.fromhex(profile_path.read_text(encoding="utf-8").strip())
@@ -2128,7 +2400,14 @@ class LocalAccessSessionTests(unittest.TestCase):
         self.assertIn("A3[1] len=3 plaintext[0:3]", lines[3])
         self.assertIn("A3[2] len=4 plaintext[3:7]", lines[4])
 
-    def test_segment_bound_profile_package_uses_sequence_members_like_pysim_decode(self):
+    def test_segment_bound_profile_package_frames_a1_a3_headers_per_sgp22_annex_m(self):
+        # SGP.22 Annex M expects the A0 ConfigureISDPRequest to be
+        # delivered as a single wrapped segment, while A1/A2/A3
+        # containers ship their headers as their own StoreData chains
+        # followed by each inner 86/88 TLV. Stripping the A1/A3 headers
+        # has been observed to make real eUICCs emit a spurious terminal
+        # ProfileInstallationResult on the first bare 86 and leave the
+        # SM-DP+ session pending.
         session = LocalIsdrSession(apdu_channel=FakeApduChannel())
         bpp_bytes = wrap_tlv(
             bytes.fromhex("BF36"),
@@ -2141,12 +2420,14 @@ class LocalAccessSessionTests(unittest.TestCase):
         segments = session._segment_bound_profile_package(bpp_bytes)
         descriptions = session._describe_bpp_command_sequence(bpp_bytes)
 
-        self.assertEqual(len(segments), 5)
+        self.assertEqual(len(segments), 7)
         self.assertTrue(segments[0].startswith(bytes.fromhex("BF36")))
-        self.assertEqual(segments[1], wrap_tlv(b"\x87", b"\xAA"))
-        self.assertEqual(segments[2], wrap_tlv(b"\x88", b"\xBB"))
-        self.assertEqual(segments[3], wrap_tlv(b"\x86", b"\xCC"))
-        self.assertEqual(segments[4], wrap_tlv(b"\x86", b"\xDD"))
+        self.assertEqual(segments[1], wrap_tlv(b"\xA0", wrap_tlv(b"\x87", b"\xAA")))
+        self.assertEqual(segments[2], bytes.fromhex("A103"))
+        self.assertEqual(segments[3], wrap_tlv(b"\x88", b"\xBB"))
+        self.assertEqual(segments[4], bytes.fromhex("A306"))
+        self.assertEqual(segments[5], wrap_tlv(b"\x86", b"\xCC"))
+        self.assertEqual(segments[6], wrap_tlv(b"\x86", b"\xDD"))
         self.assertEqual(
             descriptions,
             [

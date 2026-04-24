@@ -12,12 +12,11 @@
 # You should have received a copy of the GNU General Public License
 # along with this program. If not, see <https://www.gnu.org/licenses/>.
 #
-# Copyright (c) 2026 Hampus Hellsberg and contributors
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 # -----------------------------------------------------------------------------
 
 import os 
 from typing import Dict ,Tuple ,Callable 
-from SCP03 .interface .wizards import InteractiveWizards 
 from SCP03 .interface .shell_wizards import ShellInteractiveWizards 
 
 class CommandRegistry :
@@ -114,6 +113,7 @@ class CommandRegistry :
 
 
         'EXPORT-EUICC':(shell ._handle_export_euicc ,"[OutputPath.yaml]"),
+        'EXPORT-KEYBAG':(shell ._handle_export_keybag ,"[OutputPath.keys.json] [Label]"),
 
         'SET-GOLD-PROFILE':(
         shell ._handle_set_gold_profile ,
@@ -170,6 +170,7 @@ class CommandRegistry :
         'DUMP-FS',
         'MANAGE-PIN',
         'EXPORT-EUICC',
+        'EXPORT-KEYBAG',
         'ARR',
         'VALIDATE',
         'GOLD-PROFILE',

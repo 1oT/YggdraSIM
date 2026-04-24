@@ -12,14 +12,23 @@
 # You should have received a copy of the GNU General Public License
 # along with this program. If not, see <https://www.gnu.org/licenses/>.
 #
-# Copyright (c) 2026 Hampus Hellsberg and contributors
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 # -----------------------------------------------------------------------------
+
+"""Legacy mirror: live-default SCP11 console shell.
+
+The ``canonical`` SCP11 console lives in ``SCP11/console.py``. This module
+is a ``legacy mirror`` that ships the live certificate / endpoint defaults
+and relay-first ES9+ helpers. Spec or dispatcher fixes should land in the
+canonical tree first and be mirrored here. Tracked by audit item
+``SCP11-P1-02`` for eventual split into ``console_cli``,
+``console_tls_probe``, and ``console_state``.
+"""
 
 import atexit
 import hashlib
 import io
 import os
-import re
 import shutil
 import socket
 import ssl
@@ -29,6 +38,8 @@ from urllib.parse import urlparse
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
+from yggdrasim_common.card_backend import trigger_card_relay_modem_refresh
+from yggdrasim_common.hil_bridge_runtime import hil_bridge_warning_text
 from yggdrasim_common.plugin_runtime import extend_target_with_plugins
 from yggdrasim_common.quit_control import quit_all
 from yggdrasim_common.polling_plugin_support import dispatch_poll_command
@@ -38,6 +49,8 @@ from yggdrasim_common.euicc_issuer import (
 )
 from SCP11.shared.gsma_error_codes import describe_sgp22_notification_sent_result
 from SCP11.shared.gsma_error_codes import describe_sgp22_profile_state_result
+from SCP11.shared.profile_targeting import resolve_profile_target_identifier
+from SCP11.shared.tls_helpers import create_introspection_context
 
 try:
     from SCP03.core.utils import TlvParser
@@ -159,6 +172,40 @@ class ProfileMetadataView:
     additional_fields: List[Tuple[str, str]] = field(default_factory=list)
 
 
+class SessionPolicy:
+    """Command-scoped session reset policy.
+
+    A command dispatched by :class:`SCP11Console` is classified into one of
+    three buckets that govern how much of the card session is torn down
+    before the handler runs. The policy is applied by
+    :meth:`SCP11Console._enter_command_session` immediately prior to the
+    handler invocation.
+
+    ``SHARED``
+        Local-only or read-only commands that must not perturb the live
+        card session (e.g. ``HELP``, ``GET-ES9``). No reset is performed.
+
+    ``SOFT_RESET``
+        Card-touching commands that are safe to share transport and
+        logical channels, but must start with clean ephemeral crypto /
+        STK state. Ephemeral fields on ``orchestrator.state`` are
+        zeroed and STK per-flow histories are cleared. The ES10b
+        logical channel and any pinned discovery snapshot remain live.
+
+    ``HARD_RESET``
+        Full-flow commands that must run on a freshly reconnected
+        session: close the logical channel, clear ephemeral state,
+        re-run ``_phase_connect`` + ``_phase_load_credentials``. Used
+        for SCP11 handshake, SGP.32 eIM download, SGP.22 FLOW, and
+        profile-state changes (enable/disable/delete) that trigger a
+        card-side channel rebinding.
+    """
+
+    SHARED = "shared"
+    SOFT_RESET = "soft"
+    HARD_RESET = "hard"
+
+
 @dataclass
 class CommandSpec:
     name: str
@@ -169,6 +216,7 @@ class CommandSpec:
     section: str
     visible_in_help: bool
     trigger_notification_sync: bool
+    session_policy: str = SessionPolicy.SHARED
 
 
 @dataclass
@@ -218,6 +266,7 @@ class SCP11Console:
     TAG_CTX_0 = 0xA0
     TAG_AID = 0x4F
     TAG_ICCID = 0x5A
+    MODULE_STATE_NAME = "scp11_live_config"
     DEFAULT_AID_REGISTRY_PATH = (
         getattr(SCP03Config, "AID_FILE", "")
         or os.path.normpath(
@@ -237,6 +286,7 @@ class SCP11Console:
         self.current_es9_ca_bundle_path = self.cfg.ES9_CA_BUNDLE_PATH
         self.current_eid = ""
         self._inventory = EidInventoryNamespace("scp11_live")
+        self._apply_module_state_profile()
         self._es9_auto_derived = False
         self._style = self._build_style()
         self._commands: Dict[str, CommandSpec] = {}
@@ -251,6 +301,22 @@ class SCP11Console:
         self._latest_snapshot: Optional[CardSnapshot] = None
         self._cached_poll_target_fqdns: List[str] = []
         self._notification_sync_attempted = False
+        # Tracks whether the most recent DOWNLOAD / EIM-DOWNLOAD flow
+        # managed to reach any configured eIM server. ``None`` means the
+        # flag is not applicable for the command that was just dispatched.
+        # The post-command auto-clear gate in ``_execute_command`` keeps
+        # on-card notifications intact when the value is ``False`` so we
+        # never drop pending events that were never delivered upstream.
+        self._last_eim_download_reached_server: Optional[bool] = None
+        # ``_session_dirty`` drives the command-scoped reset policy: a
+        # handler that touched the card (SOFT_RESET or HARD_RESET policy)
+        # flips it True, and the next HARD_RESET command uses the flag
+        # to decide whether a full reconnect is warranted before the
+        # handler runs. Starts True so the very first command after
+        # ``__init__`` always gets a clean session on the first call.
+        # ``_initialize_session`` clears it once the initial connect has
+        # completed successfully.
+        self._session_dirty: bool = True
         self._aid_registry = self._load_aid_registry()
         self._register_commands()
         extend_target_with_plugins(self)
@@ -328,14 +394,176 @@ class SCP11Console:
     def _execute_command(self, command_upper: str, argument: str) -> bool:
         spec = self._commands[command_upper]
         self._notification_sync_attempted = False
-        keep_running = spec.handler(argument)
+        self._last_eim_download_reached_server = None
+        self._enter_command_session(spec, command_upper)
+        try:
+            keep_running = spec.handler(argument)
+        finally:
+            self._leave_command_session(spec, command_upper)
         if keep_running is False:
             return keep_running
         if spec.trigger_notification_sync and self._notification_sync_attempted is False:
             self._sync_notifications_after_success(b"")
         if spec.trigger_notification_sync and command_upper != "CLEAR-NOTIFICATIONS":
-            self._clear_notifications_internal(quiet=True)
+            if self._should_skip_post_command_auto_clear(command_upper):
+                # Leave pending notifications intact: the eIM sweep never
+                # reached any server so nothing was acknowledged upstream.
+                pass
+            else:
+                self._clear_notifications_internal(quiet=True)
         return keep_running
+
+    def _enter_command_session(self, spec: CommandSpec, command_upper: str) -> None:
+        """Apply the command's session reset policy before handler dispatch.
+
+        SHARED commands are left untouched. SOFT_RESET clears ephemeral
+        orchestrator / STK state without reconnecting. HARD_RESET closes
+        any live logical channel and re-runs ``_phase_connect`` +
+        ``_phase_load_credentials`` so the handler starts on a clean
+        transport. The first command after :meth:`_initialize_session`
+        skips HARD_RESET work unless something already dirtied the
+        session, avoiding a redundant double-init on shell startup.
+        """
+        policy = getattr(spec, "session_policy", SessionPolicy.SHARED)
+        if policy == SessionPolicy.HARD_RESET:
+            if self._session_dirty:
+                self._reset_card_session_hard(reason=command_upper)
+            return
+        if policy == SessionPolicy.SOFT_RESET:
+            self._reset_orchestrator_ephemeral_state()
+            return
+
+    def _leave_command_session(self, spec: CommandSpec, command_upper: str) -> None:
+        """Mark the session dirty after any non-SHARED command.
+
+        We treat the session as potentially dirty whenever a handler
+        either completes or raises under a non-SHARED policy. This lets
+        the next HARD_RESET command do its full reinit and keeps SHARED
+        commands free of the cost. Running under SHARED never flips the
+        dirty bit because these handlers do not touch the card.
+        """
+        policy = getattr(spec, "session_policy", SessionPolicy.SHARED)
+        if policy == SessionPolicy.SHARED:
+            return
+        self._session_dirty = True
+
+    def _reset_orchestrator_ephemeral_state(self) -> None:
+        """Zero per-flow crypto + STK history fields on ``orchestrator.state``.
+
+        Safe to call against partially-constructed stubs used in unit
+        tests: missing attributes are silently ignored. Persistent
+        discovery / terminal-profile fields (``current_euicc_ci_pkid``,
+        ``stk_event_list``, ``stk_poll_interval_seconds``,
+        ``stk_location_information``, ``stk_imei``) are intentionally
+        preserved so the next command reuses the card's advertised
+        terminal identity rather than re-negotiating it.
+        """
+        orchestrator = getattr(self, "orchestrator", None)
+        if orchestrator is None:
+            return
+        state = getattr(orchestrator, "state", None)
+        if state is None:
+            return
+
+        ephemeral_bytes = (
+            "transaction_id",
+            "provider_smdp_certificate",
+            "server_challenge",
+            "euicc_signed1",
+            "euicc_signature1",
+            "euicc_signed2",
+            "bpp_bytes",
+            "load_bpp_response",
+            "load_bpp_aid",
+            "load_bpp_sima_response",
+            "eim_package_response",
+            "card_challenge",
+            "stk_last_proactive_command",
+            "stk_pending_channel_data",
+        )
+        ephemeral_strings = (
+            "provider_transaction_id",
+            "relay_session_id",
+            "authenticate_server_response_b64",
+            "prepare_download_response_b64",
+            "bpp_b64",
+        )
+        ephemeral_list_fields = (
+            "stk_command_history",
+            "stk_status_history",
+            "stk_flow_events",
+            "stk_timer_history",
+            "stk_generic_ack_history",
+            "stk_trigger_history",
+            "stk_dns_history",
+            "stk_tls_history",
+            "stk_alert_history",
+            "stk_open_channel_history",
+            "stk_open_channel_failure_history",
+            "stk_pending_channel_queue",
+        )
+
+        for field_name in ephemeral_bytes:
+            if hasattr(state, field_name):
+                setattr(state, field_name, b"")
+        for field_name in ephemeral_strings:
+            if hasattr(state, field_name):
+                setattr(state, field_name, "")
+        for field_name in ephemeral_list_fields:
+            if hasattr(state, field_name):
+                setattr(state, field_name, [])
+        if hasattr(state, "stk_last_channel_data_sent"):
+            state.stk_last_channel_data_sent = 0
+
+        if hasattr(orchestrator, "_last_eim_poll_reached_server"):
+            orchestrator._last_eim_poll_reached_server = False
+
+    def _reset_card_session_hard(self, reason: str) -> None:
+        """Close logical channel, clear ephemeral state, and reconnect.
+
+        Failure paths are intentionally quiet: missing orchestrator
+        hooks (as in unit-test stubs) are skipped rather than raised so
+        the policy layer remains safe to insert between every command.
+        When the full re-init succeeds the session-dirty flag is
+        cleared so a subsequent SHARED or SOFT command does not trigger
+        another HARD reset in the same breath.
+        """
+        self._reset_orchestrator_ephemeral_state()
+
+        orchestrator = getattr(self, "orchestrator", None)
+        if orchestrator is not None:
+            close_method = getattr(orchestrator, "_close_es10b_logical_channel", None)
+            if callable(close_method):
+                try:
+                    with redirect_stdout(io.StringIO()):
+                        close_method(f"SESSION-RESET:{reason}")
+                except Exception:
+                    pass
+
+        self._latest_snapshot = None
+        self._invalidate_poll_target_cache()
+
+        phase_connect = getattr(orchestrator, "_phase_connect", None) if orchestrator is not None else None
+        phase_load = getattr(orchestrator, "_phase_load_credentials", None) if orchestrator is not None else None
+        if callable(phase_connect) and callable(phase_load):
+            try:
+                with redirect_stdout(io.StringIO()):
+                    phase_connect()
+                    phase_load()
+            except Exception:
+                # The next HARD_RESET attempt will retry. Leave the
+                # dirty flag set so a subsequent SHARED read does not
+                # mask a broken transport.
+                return
+        self._session_dirty = False
+
+    def _should_skip_post_command_auto_clear(self, command_upper: str) -> bool:
+        if command_upper not in ("DOWNLOAD", "EIM-DOWNLOAD"):
+            return False
+        reached = self._last_eim_download_reached_server
+        if reached is False:
+            return True
+        return False
 
     def _activate_locked_help_pane_if_supported(self) -> None:
         if self._locked_help_pane_requested() is False:
@@ -647,11 +875,24 @@ class SCP11Console:
         with redirect_stdout(io.StringIO()):
             self.orchestrator._phase_connect()
             self.orchestrator._phase_load_credentials()
+        self._session_dirty = False
         print(f"{self._style.green}[+] Relay shell ready.{self._style.end}")
 
     def _run_watchdog_pre_reset(self) -> None:
-        with redirect_stdout(io.StringIO()):
-            self._cmd_reset("")
+        orchestrator = getattr(self, "orchestrator", None)
+        if orchestrator is not None and hasattr(orchestrator, "_skip_es10b_bootstrap_for_next_connect"):
+            orchestrator._skip_es10b_bootstrap_for_next_connect = True
+        try:
+            with redirect_stdout(io.StringIO()):
+                self._cmd_reset("")
+        finally:
+            if orchestrator is not None and hasattr(orchestrator, "_skip_es10b_bootstrap_for_next_connect"):
+                orchestrator._skip_es10b_bootstrap_for_next_connect = False
+        # The watchdog runs its own STK initialization on top of the
+        # pre-reset; treat the session as dirty so the next HARD_RESET
+        # command gets a fresh ``_phase_connect`` rather than assuming
+        # the watchdog's inlined STK state matches a clean orchestrator.
+        self._session_dirty = True
 
     def _print_start_snapshot(self, announce_when_pinned: bool = False) -> None:
         snapshot = self._run_with_stdout_suppressed(self._collect_snapshot)
@@ -725,6 +966,9 @@ class SCP11Console:
             if len(eim_id) > 0:
                 print(f"eIM ID:             {self._style.cyan}{eim_id}{self._style.end}")
         self._print_profiles_table(snapshot.profiles, title="Profiles on Card")
+        warning_text = hil_bridge_warning_text()
+        if len(warning_text) > 0:
+            print(f"{self._style.yellow}[!] {warning_text}{self._style.end}")
 
     def _set_cached_poll_target_fqdns(self, targets: List[str]) -> None:
         cached_targets: List[str] = []
@@ -822,6 +1066,12 @@ class SCP11Console:
         return parts[0], parts[1].strip()
 
     def _register_commands(self) -> None:
+        # Policy legend:
+        #   SHARED     -> no card touch or purely local config; no session reset
+        #   SOFT_RESET -> card reads / light writes; clear ephemeral crypto+STK
+        #                 state but keep the transport + logical channel alive
+        #   HARD_RESET -> crypto flows and profile-state changes; close the
+        #                 logical channel and re-run connect + load-credentials
         self._add_command(
             "HELP",
             "HELP [EXPERT]",
@@ -829,6 +1079,7 @@ class SCP11Console:
             self._cmd_help,
             aliases=["H", "?"],
             section=self.HELP_SECTION_UTILITIES,
+            session_policy=SessionPolicy.SHARED,
         )
         self._add_command(
             "HELP-ALL",
@@ -837,6 +1088,7 @@ class SCP11Console:
             self._cmd_help_all,
             section=self.HELP_SECTION_EXPERT,
             visible_in_help=False,
+            session_policy=SessionPolicy.SHARED,
         )
         self._add_command(
             "SCAN",
@@ -845,8 +1097,16 @@ class SCP11Console:
             self._cmd_scan,
             aliases=["INFO"],
             section=self.HELP_SECTION_UTILITIES,
+            session_policy=SessionPolicy.SOFT_RESET,
         )
-        self._add_command("RESET", "RESET", "Reset card and reinitialize session", self._cmd_reset, section=self.HELP_SECTION_UTILITIES)
+        self._add_command(
+            "RESET",
+            "RESET",
+            "Reset card and reinitialize session",
+            self._cmd_reset,
+            section=self.HELP_SECTION_UTILITIES,
+            session_policy=SessionPolicy.HARD_RESET,
+        )
         self._add_command(
             "GET-EID",
             "GET-EID",
@@ -854,9 +1114,24 @@ class SCP11Console:
             self._cmd_get_eid,
             section=self.HELP_SECTION_EXPERT,
             visible_in_help=False,
+            session_policy=SessionPolicy.SOFT_RESET,
         )
-        self._add_command("STATUS", "STATUS", "Decode EuiccConfiguredData fields", self._cmd_status, section=self.HELP_SECTION_UTILITIES)
-        self._add_command("LIST", "LIST", "List profile metadata", self._cmd_list, section=self.HELP_SECTION_UTILITIES)
+        self._add_command(
+            "STATUS",
+            "STATUS",
+            "Decode EuiccConfiguredData fields",
+            self._cmd_status,
+            section=self.HELP_SECTION_UTILITIES,
+            session_policy=SessionPolicy.SOFT_RESET,
+        )
+        self._add_command(
+            "LIST",
+            "LIST",
+            "List profile metadata",
+            self._cmd_list,
+            section=self.HELP_SECTION_UTILITIES,
+            session_policy=SessionPolicy.SOFT_RESET,
+        )
         self._add_command(
             "GET-SMDP",
             "GET-SMDP",
@@ -864,6 +1139,7 @@ class SCP11Console:
             self._cmd_get_smdp,
             section=self.HELP_SECTION_EXPERT,
             visible_in_help=False,
+            session_policy=SessionPolicy.SOFT_RESET,
         )
         self._add_command(
             "GET-ES9",
@@ -872,6 +1148,7 @@ class SCP11Console:
             self._cmd_get_es9,
             section=self.HELP_SECTION_EXPERT,
             visible_in_help=False,
+            session_policy=SessionPolicy.SHARED,
         )
         self._add_command(
             "SET-ES9",
@@ -880,6 +1157,7 @@ class SCP11Console:
             self._cmd_set_es9,
             section=self.HELP_SECTION_EXPERT,
             visible_in_help=False,
+            session_policy=SessionPolicy.SHARED,
         )
         self._add_command(
             "SET-ES9-TLS",
@@ -888,6 +1166,7 @@ class SCP11Console:
             self._cmd_set_es9_tls,
             section=self.HELP_SECTION_EXPERT,
             visible_in_help=False,
+            session_policy=SessionPolicy.SHARED,
         )
         self._add_command(
             "SET-ES9-CA",
@@ -896,6 +1175,7 @@ class SCP11Console:
             self._cmd_set_es9_ca,
             section=self.HELP_SECTION_EXPERT,
             visible_in_help=False,
+            session_policy=SessionPolicy.SHARED,
         )
         self._add_command(
             "ES9-CERT-INFO",
@@ -904,6 +1184,7 @@ class SCP11Console:
             self._cmd_es9_cert_info,
             section=self.HELP_SECTION_EXPERT,
             visible_in_help=False,
+            session_policy=SessionPolicy.SHARED,
         )
         self._add_command(
             "SET-SMDP",
@@ -912,6 +1193,7 @@ class SCP11Console:
             self._cmd_set_smdp,
             section=self.HELP_SECTION_EXPERT,
             visible_in_help=False,
+            session_policy=SessionPolicy.SOFT_RESET,
         )
         self._add_command(
             "VERIFY-SCP11",
@@ -920,8 +1202,22 @@ class SCP11Console:
             self._cmd_verify_scp11,
             section=self.HELP_SECTION_EXPERT,
             visible_in_help=False,
+            # VERIFY-SCP11 owns its own connect / load-credentials calls
+            # because each step feeds the self-diagnostic check table.
+            # Run under SOFT_RESET so any prior ephemeral crypto state is
+            # wiped before the explicit step-by-step checks begin.
+            session_policy=SessionPolicy.SOFT_RESET,
         )
-        self._add_command("FLOW", "FLOW [matchingId]", "Run SCP11 flow", self._cmd_flow, section=self.HELP_SECTION_EXPERT, visible_in_help=False, trigger_notification_sync=True)
+        self._add_command(
+            "FLOW",
+            "FLOW [matchingId]",
+            "Run SCP11 flow",
+            self._cmd_flow,
+            section=self.HELP_SECTION_EXPERT,
+            visible_in_help=False,
+            trigger_notification_sync=True,
+            session_policy=SessionPolicy.HARD_RESET,
+        )
         self._add_command(
             "DOWNLOAD-PROFILE",
             "DOWNLOAD-PROFILE <activation>",
@@ -930,9 +1226,25 @@ class SCP11Console:
             aliases=["DOWNLOAD-AC"],
             section=self.HELP_SECTION_LPAD,
             trigger_notification_sync=True,
+            session_policy=SessionPolicy.HARD_RESET,
         )
-        self._add_command("EXIT", "EXIT", "Leave SCP11 shell", self._cmd_exit, aliases=["QUIT", "Q"], section=self.HELP_SECTION_UTILITIES)
-        self._add_command("QA", "QA", "Leave SCP11 shell and exit YggdraSIM", self._cmd_quit_all, section=self.HELP_SECTION_UTILITIES)
+        self._add_command(
+            "EXIT",
+            "EXIT",
+            "Leave SCP11 shell",
+            self._cmd_exit,
+            aliases=["QUIT", "Q"],
+            section=self.HELP_SECTION_UTILITIES,
+            session_policy=SessionPolicy.SHARED,
+        )
+        self._add_command(
+            "QA",
+            "QA",
+            "Leave SCP11 shell and exit YggdraSIM",
+            self._cmd_quit_all,
+            section=self.HELP_SECTION_UTILITIES,
+            session_policy=SessionPolicy.SHARED,
+        )
 
         self._add_command(
             "GET-EUICC-INFO1",
@@ -941,6 +1253,7 @@ class SCP11Console:
             self._cmd_get_euicc_info1,
             section=self.HELP_SECTION_EXPERT,
             visible_in_help=False,
+            session_policy=SessionPolicy.SOFT_RESET,
         )
         self._add_command(
             "GET-EUICC-INFO2",
@@ -949,6 +1262,7 @@ class SCP11Console:
             self._cmd_get_euicc_info2,
             section=self.HELP_SECTION_EXPERT,
             visible_in_help=False,
+            session_policy=SessionPolicy.SOFT_RESET,
         )
         self._add_command(
             "GET-RAT",
@@ -957,6 +1271,7 @@ class SCP11Console:
             self._cmd_get_rat,
             section=self.HELP_SECTION_EXPERT,
             visible_in_help=False,
+            session_policy=SessionPolicy.SOFT_RESET,
         )
         self._add_command(
             "GET-NOTIFICATIONS",
@@ -965,6 +1280,7 @@ class SCP11Console:
             self._cmd_get_notifications,
             section=self.HELP_SECTION_EXPERT,
             visible_in_help=False,
+            session_policy=SessionPolicy.SOFT_RESET,
         )
         self._add_command(
             "REMOVE-NOTIFICATION",
@@ -973,6 +1289,7 @@ class SCP11Console:
             self._cmd_remove_notification,
             section=self.HELP_SECTION_EXPERT,
             visible_in_help=False,
+            session_policy=SessionPolicy.SOFT_RESET,
         )
         self._add_command(
             "CLEAR-NOTIFICATIONS",
@@ -981,6 +1298,7 @@ class SCP11Console:
             self._cmd_clear_notifications,
             section=self.HELP_SECTION_EXPERT,
             visible_in_help=False,
+            session_policy=SessionPolicy.SOFT_RESET,
         )
         self._add_command(
             "ENABLE-PROFILE",
@@ -989,6 +1307,7 @@ class SCP11Console:
             self._cmd_enable_profile,
             section=self.HELP_SECTION_LPAD,
             trigger_notification_sync=True,
+            session_policy=SessionPolicy.HARD_RESET,
         )
         self._add_command(
             "DISABLE-PROFILE",
@@ -997,6 +1316,7 @@ class SCP11Console:
             self._cmd_disable_profile,
             section=self.HELP_SECTION_LPAD,
             trigger_notification_sync=True,
+            session_policy=SessionPolicy.HARD_RESET,
         )
         self._add_command(
             "DELETE-PROFILE",
@@ -1005,6 +1325,16 @@ class SCP11Console:
             self._cmd_delete_profile,
             section=self.HELP_SECTION_LPAD,
             trigger_notification_sync=True,
+            session_policy=SessionPolicy.HARD_RESET,
+        )
+        self._add_command(
+            "REFRESH-MODEM",
+            "REFRESH-MODEM [mode]",
+            "Queue proactive REFRESH toward modem",
+            self._cmd_refresh_modem,
+            aliases=["MODEM-REFRESH"],
+            section=self.HELP_SECTION_LPAD,
+            session_policy=SessionPolicy.SOFT_RESET,
         )
         self._add_command(
             "AIDS",
@@ -1013,6 +1343,7 @@ class SCP11Console:
             self._cmd_aids,
             section=self.HELP_SECTION_EXPERT,
             visible_in_help=False,
+            session_policy=SessionPolicy.SHARED,
         )
         self._add_command(
             "READ-METADATA",
@@ -1021,6 +1352,7 @@ class SCP11Console:
             self._cmd_read_metadata,
             section=self.HELP_SECTION_EXPERT,
             visible_in_help=False,
+            session_policy=SessionPolicy.SOFT_RESET,
         )
         self._add_command(
             "GET-POL",
@@ -1029,6 +1361,7 @@ class SCP11Console:
             self._cmd_get_pol,
             section=self.HELP_SECTION_EXPERT,
             visible_in_help=False,
+            session_policy=SessionPolicy.SOFT_RESET,
         )
         self._add_command(
             "SET-POL",
@@ -1037,6 +1370,7 @@ class SCP11Console:
             self._cmd_set_pol,
             section=self.HELP_SECTION_EXPERT,
             visible_in_help=False,
+            session_policy=SessionPolicy.SOFT_RESET,
         )
         self._add_command(
             "METADATA",
@@ -1045,6 +1379,7 @@ class SCP11Console:
             self._cmd_get_metadata,
             aliases=["GET-METADATA"],
             section=self.HELP_SECTION_UTILITIES,
+            session_policy=SessionPolicy.SOFT_RESET,
         )
         self._add_command(
             "STORE-METADATA",
@@ -1053,6 +1388,7 @@ class SCP11Console:
             self._cmd_store_metadata,
             section=self.HELP_SECTION_EXPERT,
             visible_in_help=False,
+            session_policy=SessionPolicy.SOFT_RESET,
         )
         self._add_command(
             "GET-CERTS",
@@ -1061,6 +1397,7 @@ class SCP11Console:
             self._cmd_get_certs,
             section=self.HELP_SECTION_EXPERT,
             visible_in_help=False,
+            session_policy=SessionPolicy.SOFT_RESET,
         )
         self._add_command(
             "GET-EIM-CONFIG",
@@ -1069,6 +1406,7 @@ class SCP11Console:
             self._cmd_get_eim_config,
             section=self.HELP_SECTION_EXPERT,
             visible_in_help=False,
+            session_policy=SessionPolicy.SOFT_RESET,
         )
         self._add_command(
             "GET-ALL-DATA",
@@ -1077,6 +1415,7 @@ class SCP11Console:
             self._cmd_get_all_data,
             section=self.HELP_SECTION_EXPERT,
             visible_in_help=False,
+            session_policy=SessionPolicy.SOFT_RESET,
         )
         self._add_command(
             "DISCOVER",
@@ -1085,6 +1424,7 @@ class SCP11Console:
             self._cmd_eim_discover,
             aliases=["EIM-DISCOVER"],
             section=self.HELP_SECTION_IPAD,
+            session_policy=SessionPolicy.SOFT_RESET,
         )
         self._add_command(
             "EIM-AUTHENTICATE",
@@ -1093,6 +1433,7 @@ class SCP11Console:
             self._cmd_eim_authenticate,
             section=self.HELP_SECTION_EXPERT,
             visible_in_help=False,
+            session_policy=SessionPolicy.HARD_RESET,
         )
         self._add_command(
             "DOWNLOAD",
@@ -1102,6 +1443,7 @@ class SCP11Console:
             aliases=["EIM-DOWNLOAD"],
             section=self.HELP_SECTION_IPAD,
             trigger_notification_sync=True,
+            session_policy=SessionPolicy.HARD_RESET,
         )
 
     def _add_command(
@@ -1114,6 +1456,7 @@ class SCP11Console:
         section: str = "core",
         visible_in_help: bool = True,
         trigger_notification_sync: bool = False,
+        session_policy: str = SessionPolicy.SHARED,
     ) -> None:
         spec = CommandSpec(
             name=name,
@@ -1124,6 +1467,7 @@ class SCP11Console:
             section=section,
             visible_in_help=visible_in_help,
             trigger_notification_sync=trigger_notification_sync,
+            session_policy=session_policy,
         )
         self._commands[name] = spec
         self._primary_commands.append(name)
@@ -1158,9 +1502,17 @@ class SCP11Console:
         return True
 
     def _cmd_reset(self, _: str) -> bool:
-        self._latest_snapshot = None
-        self._invalidate_poll_target_cache()
-        self._initialize_session()
+        # The HARD_RESET session policy has already closed the logical
+        # channel, cleared ephemeral state, and re-run the connect /
+        # load-credentials phases before this handler fires. The only
+        # remaining work is to re-announce readiness and refresh the
+        # snapshot pane so the operator sees an up-to-date summary.
+        if self._session_dirty:
+            # Fallback path: policy did not fire (e.g. session still
+            # marked clean). Do the reinit explicitly so RESET always
+            # has reconnect semantics regardless of caller state.
+            self._reset_card_session_hard(reason="RESET")
+        print(f"{self._style.green}[+] Relay shell ready.{self._style.end}")
         self._print_start_snapshot(announce_when_pinned=True)
         return True
 
@@ -1395,6 +1747,10 @@ class SCP11Console:
         )
         return True
 
+    def _cmd_refresh_modem(self, argument: str) -> bool:
+        self._queue_modem_refresh("RefreshModem", mode=argument.strip())
+        return True
+
     def _cmd_aids(self, _: str) -> bool:
         self._print_aid_registry()
         return True
@@ -1617,14 +1973,27 @@ class SCP11Console:
         try:
             self.orchestrator.run_eim_poll(matching_id=matching_id)
         except Exception as error:
+            self._last_eim_download_reached_server = False
             print(f"{self._style.red}[!] EIM-DOWNLOAD failed: {error}{self._style.end}")
             return True
-        print(f"{self._style.green}[+] eIM poll flow completed.{self._style.end}")
+        reached_server = bool(
+            getattr(self.orchestrator, "_last_eim_poll_reached_server", False)
+        )
+        self._last_eim_download_reached_server = reached_server
+        if reached_server:
+            print(f"{self._style.green}[+] eIM poll flow completed.{self._style.end}")
+        else:
+            print(
+                f"{self._style.yellow}[*] eIM poll flow completed without reaching any configured "
+                f"eIM server; on-card notifications left untouched.{self._style.end}"
+            )
         return True
 
     def _cmd_eim_poll(self, argument: str) -> bool:
         try:
             dispatch_poll_command("scp11.live", "POLL", self, argument)
+        except KeyboardInterrupt:
+            print(f"{self._style.yellow}[*] EIM-POLL interrupted by user.{self._style.end}")
         except Exception as error:
             print(f"{self._style.red}[!] EIM-POLL failed: {error}{self._style.end}")
         return True
@@ -2035,7 +2404,7 @@ class SCP11Console:
         return True, ""
 
     def _fetch_server_leaf_certificate(self, hostname: str, port: int) -> Optional[bytes]:
-        context = ssl._create_unverified_context()
+        context = create_introspection_context(caller="SCP11.live.console/fetch_leaf")
         try:
             with socket.create_connection((hostname, port), timeout=8) as tcp_socket:
                 with context.wrap_socket(tcp_socket, server_hostname=hostname) as tls_socket:
@@ -2045,7 +2414,7 @@ class SCP11Console:
             return None
 
     def _decode_leaf_certificate_dict(self, hostname: str, port: int) -> Optional[Dict[str, Any]]:
-        context = ssl._create_unverified_context()
+        context = create_introspection_context(caller="SCP11.live.console/decode_leaf")
         try:
             with socket.create_connection((hostname, port), timeout=8) as tcp_socket:
                 with context.wrap_socket(tcp_socket, server_hostname=hostname) as tls_socket:
@@ -2213,6 +2582,15 @@ class SCP11Console:
             return
         self._inventory.replace(self.current_eid, self._inventory_payload())
 
+    def _apply_module_state_profile(self) -> None:
+        try:
+            payload = self._inventory.store.get_module_state(self.MODULE_STATE_NAME)
+        except Exception:
+            return
+        if isinstance(payload, dict) is False or len(payload) == 0:
+            return
+        self._apply_inventory_profile(payload)
+
     def _persist_config_line(self, key_prefix: str, literal_value: str, human_key: str) -> None:
         if len(self.current_eid) > 0:
             self._persist_inventory_profile()
@@ -2221,41 +2599,18 @@ class SCP11Console:
                 f"for EID {self.current_eid}{self._style.end}"
             )
             return
-        config_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.py")
-        if os.path.exists(config_path) is False:
-            print(f"{self._style.red}[!] Cannot persist {human_key}. Missing file: {config_path}{self._style.end}")
-            return
-
+        _ = key_prefix
+        _ = literal_value
         try:
-            with open(config_path, "r", encoding="utf-8") as config_file:
-                lines = config_file.readlines()
+            self._inventory.store.replace_module_state(
+                self.MODULE_STATE_NAME,
+                self._inventory_payload(),
+            )
         except Exception as error:
-            print(f"{self._style.red}[!] Failed reading config.py: {error}{self._style.end}")
+            print(f"{self._style.red}[!] Failed writing SCP11 runtime state: {error}{self._style.end}")
             return
 
-        found = False
-        updated_lines: List[str] = []
-        for line in lines:
-            stripped = line.lstrip()
-            if stripped.startswith(key_prefix):
-                indent = line[: len(line) - len(stripped)]
-                updated_lines.append(f"{indent}{key_prefix} {literal_value}\n")
-                found = True
-                continue
-            updated_lines.append(line)
-
-        if found is False:
-            print(f"{self._style.red}[!] Could not find {human_key} entry in config.py{self._style.end}")
-            return
-
-        try:
-            with open(config_path, "w", encoding="utf-8") as config_file:
-                config_file.writelines(updated_lines)
-        except Exception as error:
-            print(f"{self._style.red}[!] Failed writing config.py: {error}{self._style.end}")
-            return
-
-        print(f"{self._style.green}[+] Persisted {human_key} in SCP11/config.py{self._style.end}")
+        print(f"{self._style.green}[+] Persisted {human_key} in SCP11 runtime state{self._style.end}")
 
     def _apply_es9_autoderive_from_card(self, card_default_smdp: str) -> None:
         if self._is_placeholder_es9_url(self.current_es9_base_url) is False:
@@ -2534,16 +2889,19 @@ class SCP11Console:
             return False
 
         result_code = self._extract_result_code(response, result_outer_tag)
+        should_trigger_sync = result_outer_tag != self.TAG_REMOVE_NOTIFICATION
         if result_code is None:
             print(f"{self._style.green}[+] {title}: success (no explicit result code).{self._style.end}")
             if len(response) > 0:
                 print(f"[*] Raw response: {response.hex().upper()}")
-            self._sync_notifications_after_success(response)
+            if should_trigger_sync:
+                self._sync_notifications_after_success(response)
             return True
 
         if result_code == 0:
             print(f"{self._style.green}[+] {title}: success.{self._style.end}")
-            self._sync_notifications_after_success(response)
+            if should_trigger_sync:
+                self._sync_notifications_after_success(response)
             return True
 
         if result_outer_tag == self.TAG_REMOVE_NOTIFICATION:
@@ -2579,13 +2937,32 @@ class SCP11Console:
             result_outer_tag=func_tag,
         )
 
+    def _queue_modem_refresh(self, action_label: str, mode: str = "") -> None:
+        try:
+            payload = trigger_card_relay_modem_refresh(
+                mode=mode,
+                source=f"scp11-live:{action_label}",
+            )
+        except Exception as error:
+            print(f"{self._style.yellow}[*] {action_label}: modem REFRESH queue failed ({error}).{self._style.end}")
+            return
+        if payload is None:
+            return
+        status = str(payload.get("status", "queued") or "queued")
+        mode_name = str(payload.get("mode", "") or "")
+        print(
+            f"{self._style.yellow}[*] {action_label}: modem REFRESH {status} "
+            f"({mode_name or 'euicc-profile-state-change'}).{self._style.end}"
+        )
+
     def _run_enable_profile_state_command(
         self,
         resolved: Tuple[int, str],
         target_metadata: Optional[ProfileMetadataView],
     ) -> None:
         if target_metadata is None:
-            self._execute_profile_state_command(resolved, self.TAG_ENABLE_PROFILE, "EnableProfile")
+            if self._execute_profile_state_command(resolved, self.TAG_ENABLE_PROFILE, "EnableProfile"):
+                self._queue_modem_refresh("EnableProfile")
             return
 
         if target_metadata.state.upper() == "ENABLED":
@@ -2595,6 +2972,8 @@ class SCP11Console:
         profiles = self._collect_profile_metadata()
         active_profile = self._find_enabled_profile(profiles, exclude_profile=target_metadata)
         if active_profile is not None:
+            if self._allow_auto_disable_for_enable(active_profile, target_metadata) is False:
+                return
             print(
                 f"{self._style.yellow}[*] EnableProfile: auto-disabling active profile "
                 f"{self._describe_profile_metadata(active_profile)}.{self._style.end}"
@@ -2606,7 +2985,8 @@ class SCP11Console:
             ) is False:
                 return
 
-        self._execute_profile_state_command(resolved, self.TAG_ENABLE_PROFILE, "EnableProfile")
+        if self._execute_profile_state_command(resolved, self.TAG_ENABLE_PROFILE, "EnableProfile"):
+            self._queue_modem_refresh("EnableProfile")
 
     def _run_disable_profile_state_command(
         self,
@@ -2617,7 +2997,8 @@ class SCP11Console:
             if target_metadata.state.upper() != "ENABLED":
                 print(f"{self._style.green}[+] DisableProfile: target is already disabled.{self._style.end}")
                 return
-        self._execute_profile_state_command(resolved, self.TAG_DISABLE_PROFILE, "DisableProfile")
+        if self._execute_profile_state_command(resolved, self.TAG_DISABLE_PROFILE, "DisableProfile"):
+            self._queue_modem_refresh("DisableProfile")
 
     def _run_delete_profile_state_command(
         self,
@@ -2630,7 +3011,8 @@ class SCP11Console:
                 f"(laptop mode override).{self._style.end}"
             )
 
-        self._execute_profile_state_command(resolved, self.TAG_DELETE_PROFILE, "DeleteProfile")
+        if self._execute_profile_state_command(resolved, self.TAG_DELETE_PROFILE, "DeleteProfile"):
+            self._queue_modem_refresh("DeleteProfile")
 
     def _run_enable_profile_sequence_for_metadata(self, target_metadata: ProfileMetadataView) -> bool:
         resolved = self._profile_metadata_to_resolved(target_metadata)
@@ -2644,6 +3026,8 @@ class SCP11Console:
         profiles = self._collect_profile_metadata()
         active_profile = self._find_enabled_profile(profiles, exclude_profile=target_metadata)
         if active_profile is not None:
+            if self._allow_auto_disable_for_enable(active_profile, target_metadata) is False:
+                return False
             print(
                 f"{self._style.yellow}[*] EnableProfile: auto-disabling active profile "
                 f"{self._describe_profile_metadata(active_profile)}.{self._style.end}"
@@ -2655,6 +3039,33 @@ class SCP11Console:
             ) is False:
                 return False
         return self._execute_profile_state_command(resolved, self.TAG_ENABLE_PROFILE, "EnableProfile")
+
+    def _allow_auto_disable_for_enable(
+        self,
+        active_profile: ProfileMetadataView,
+        target_metadata: Optional[ProfileMetadataView],
+    ) -> bool:
+        if self._profile_disable_not_allowed(active_profile) is False:
+            return True
+        target_description = "requested target"
+        if target_metadata is not None:
+            target_description = self._describe_profile_metadata(target_metadata)
+        print(
+            f"{self._style.red}[!] EnableProfile: guarded mode refused to auto-disable active profile "
+            f"{self._describe_profile_metadata(active_profile)} because its PPR advertises "
+            f"ppr1-disable-not-allowed.{self._style.end}"
+        )
+        print(
+            "    Use a rollback-enabled profile switch path, or move the active profile "
+            f"away from {target_description} in the modem before retrying."
+        )
+        return False
+
+    def _profile_disable_not_allowed(self, entry: Optional[ProfileMetadataView]) -> bool:
+        if entry is None:
+            return False
+        decoded = self._decode_ppr_ids(str(getattr(entry, "profile_policy_rules_hex", "") or ""))
+        return "ppr1-disable-not-allowed" in decoded
 
     def _find_enabled_profile(
         self,
@@ -2900,31 +3311,16 @@ class SCP11Console:
         return None
 
     def _resolve_profile_target(self, identifier: str) -> Optional[Tuple[int, str]]:
-        clean = identifier.strip().upper()
-        if len(clean) == 0:
-            return None
-
-        alias_match = self._resolve_aid_from_alias(clean)
-        if alias_match is not None:
-            return self.TAG_AID, alias_match
-
-        if self._is_hex(clean):
-            if clean.startswith("A0") and len(clean) >= 10:
-                return self.TAG_AID, clean
-            if clean.startswith("98") and len(clean) >= 18:
-                return self.TAG_ICCID, clean
-
-        decimal_iccid = self._extract_decimal_iccid(clean)
-        if decimal_iccid is not None:
-            return self.TAG_ICCID, self._encode_iccid_for_command(decimal_iccid)
-
-        profiles = self._fetch_profiles()
-        for row in profiles:
-            if row.iccid.upper() == clean:
-                return self.TAG_ICCID, self._encode_iccid_for_command(row.iccid)
-            if row.aid.upper() == clean:
-                return self.TAG_AID, row.aid
-        return None
+        return resolve_profile_target_identifier(
+            identifier,
+            tag_aid=self.TAG_AID,
+            tag_iccid=self.TAG_ICCID,
+            resolve_aid_from_alias=self._resolve_aid_from_alias,
+            is_hex=self._is_hex,
+            extract_decimal_iccid=self._extract_decimal_iccid,
+            encode_iccid_for_command=self._encode_iccid_for_command,
+            fetch_profiles=self._fetch_profiles,
+        )
 
     def _resolve_aid_from_alias(self, alias: str) -> Optional[str]:
         if alias in self._aid_registry:

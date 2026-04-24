@@ -1,21 +1,47 @@
-# Core smart-card and cryptographic runtime
+# Core smart-card and cryptographic runtime. This file mirrors the
+# non-optional ``[project].dependencies`` list from ``pyproject.toml`` so
+# that environments bootstrapped via ``pip install -r requirements.txt``
+# land the same wheels as a ``pip install .`` invocation.
+#
+# Build / test / HIL / docs extras live under ``[project.optional-dependencies]``
+# in ``pyproject.toml`` and are intentionally NOT duplicated here — pulling
+# this file should not drag PyInstaller onto every user's workstation.
+# Use the matching extras (``.[build]``, ``.[test]``, ``.[hil]``, ``.[docs]``,
+# or ``.[full]``) via ``pip install .[full]`` when those surfaces are needed.
+#
+# See guides/INSTALL_CLEAN.md and guides/INSTALL_FULL.md for onboarding paths.
+
 pyscard
 cryptography
 pycryptodome
+pycryptodomex
+pyserial
+pytlv
 
-# ASN.1, schema, and profile-package handling
+# ASN.1 and profile-package handling
 asn1crypto
 asn1tools
-pySim
+jsonpath-ng
+construct>=2.10.70
+bidict
+pyosmocom>=0.0.12
 pyyaml
+cmd2>=2.6.2,<3.0
+termcolor
+colorlog
+packaging
 
-# Interactive tooling and local packaging
+# Interactive TUI
 textual>=0.47.0
-pyinstaller
 
-# Test tooling
-pytest
+# HIL bridge runtime — Linux only. The PyPI package does not ship Windows
+# or macOS wheels and the HIL flow itself requires udev / SIMtrace2 /
+# osmo-remsim-client-st2, so the marker keeps the core install clean.
+pyudev; sys_platform == "linux"
 
 # External system tools used by selected features are not installed here.
-# Example: `gpg` is optional and only required when encrypted inventory
-# payloads are enabled through `state/inventory_crypto.json`.
+# Examples:
+#   * `gpg` is optional and only required when encrypted inventory
+#     payloads are enabled through `state/inventory_crypto.json`.
+#   * `osmo-remsim-client-st2` and SIMtrace2 firmware are only required
+#     for the HIL bridge (see guides/SIMTRACE2_CARDEM_GUIDE.md).

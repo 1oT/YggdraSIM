@@ -1,5 +1,8 @@
 import argparse
+import contextlib
 import os
+import sys
+import warnings
 
 
 GLOBAL_DEBUG_ENV = "YGGDRASIM_GLOBAL_DEBUG"
@@ -39,3 +42,66 @@ def add_debug_argument(
         action="store_true",
         help=help_text,
     )
+
+
+def debug_print(message: str, *, stream=None) -> None:
+    """
+    Emit ``message`` to ``stream`` (default ``sys.stdout``) only when the
+    global debug flag is on. Used for verbose transport / TLS / request
+    traces that would otherwise clutter the operator surface during
+    nominal runs. When the flag flips back to off the same call site
+    becomes silent without needing a conditional wrapper at the caller.
+    """
+    if is_global_debug_enabled() is False:
+        return
+    target = stream if stream is not None else sys.stdout
+    try:
+        target.write(f"{message}\n")
+        flush = getattr(target, "flush", None)
+        if callable(flush):
+            flush()
+    except Exception:
+        return
+
+
+@contextlib.contextmanager
+def suppress_noisy_crypto_warnings():
+    """
+    Silence ``CryptographyDeprecationWarning`` emissions while loading
+    test / legacy PEM certificates (e.g. CI roots with non-positive
+    serials). When global debug is on the warnings are left intact so
+    the operator still sees them during troubleshooting. Any import
+    failure is treated as a no-op so older/newer cryptography releases
+    do not break the call site.
+    """
+    if is_global_debug_enabled():
+        yield
+        return
+    try:
+        from cryptography.utils import CryptographyDeprecationWarning
+    except Exception:
+        yield
+        return
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", CryptographyDeprecationWarning)
+        yield
+
+
+def install_noisy_warning_filters() -> None:
+    """
+    Install process-wide ``warnings.filterwarnings`` rules that silence
+    known-noisy third-party deprecations (currently only
+    ``CryptographyDeprecationWarning`` triggered by test-CA PEMs with
+    non-positive serials). Entry-point wrappers should call this once
+    after ``set_global_debug`` has been resolved. When debug is on the
+    call is a no-op so the operator still sees the warnings during
+    troubleshooting. Safe to call repeatedly; ``filterwarnings`` is
+    idempotent for identical patterns.
+    """
+    if is_global_debug_enabled():
+        return
+    try:
+        from cryptography.utils import CryptographyDeprecationWarning
+    except Exception:
+        return
+    warnings.filterwarnings("ignore", category=CryptographyDeprecationWarning)

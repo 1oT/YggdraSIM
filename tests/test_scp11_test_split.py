@@ -14,6 +14,7 @@ from cryptography.x509.oid import NameOID
 from SCP11.live.console import SCP11Console as LiveConsole
 from SCP11.test.console import SCP11Console as Scp11TestConsole
 from SCP11.test.es9_client import Es9LikeClient
+from SCP11.test.models import EimPollRequest
 from SCP11.test.orchestrator import SGP22Orchestrator
 
 
@@ -120,7 +121,179 @@ class RecordingEimClient(Es9LikeClient):
         return b'{"euiccPackageList":[],"pollingComplete":true,"eimResultCode":1}'
 
 
+class AcknowledgedPackageProvider:
+    def __init__(self):
+        self.poll_eim_calls = []
+        self.provide_eim_package_result_calls = []
+
+    def get_eim_package(self, request_obj):
+        self.poll_eim_calls.append(request_obj)
+        if len(self.poll_eim_calls) == 1:
+            return types.SimpleNamespace(
+                transaction_id="TX-ACK",
+                euicc_package_list=["BF5103800101"],
+                package_format="",
+                polling_complete=False,
+                retry_after_seconds=0,
+                eim_result_code=None,
+            )
+        return types.SimpleNamespace(
+            transaction_id="TX-ACK",
+            euicc_package_list=[],
+            package_format="",
+            polling_complete=True,
+            retry_after_seconds=0,
+            eim_result_code=1,
+        )
+
+    def provide_eim_package_result(self, request_obj):
+        self.provide_eim_package_result_calls.append(request_obj)
+        return {
+            "packageFormat": "eimAcknowledgements",
+            "pollingComplete": True,
+        }
+
+
+class EmptyResponsePackageProvider:
+    def __init__(self):
+        self.poll_eim_calls = []
+        self.provide_eim_package_result_calls = []
+
+    def get_eim_package(self, request_obj):
+        self.poll_eim_calls.append(request_obj)
+        if len(self.poll_eim_calls) == 1:
+            return types.SimpleNamespace(
+                transaction_id="TX-EMPTY",
+                euicc_package_list=["BF5203800101"],
+                package_format="",
+                polling_complete=False,
+                retry_after_seconds=0,
+                eim_result_code=None,
+            )
+        return types.SimpleNamespace(
+            transaction_id="TX-EMPTY",
+            euicc_package_list=[],
+            package_format="",
+            polling_complete=True,
+            retry_after_seconds=0,
+            eim_result_code=1,
+        )
+
+    def provide_eim_package_result(self, request_obj):
+        self.provide_eim_package_result_calls.append(request_obj)
+        return {
+            "packageFormat": "emptyResponse",
+            "pollingComplete": True,
+        }
+
+
+class DrainRoundSkipProvider:
+    def __init__(self):
+        self.poll_eim_calls = []
+        self.provide_eim_package_result_calls = []
+        self._per_fqdn_call_counts = {}
+
+    def get_eim_package(self, request_obj):
+        self.poll_eim_calls.append(request_obj)
+        fqdn = str(getattr(request_obj, "eim_fqdn", "") or "").strip()
+        call_count = self._per_fqdn_call_counts.get(fqdn, 0) + 1
+        self._per_fqdn_call_counts[fqdn] = call_count
+        if fqdn == "eim1.example.com":
+            return types.SimpleNamespace(
+                transaction_id="TX-DRAIN-1",
+                euicc_package_list=[],
+                package_format="",
+                polling_complete=True,
+                retry_after_seconds=0,
+                eim_result_code=1,
+            )
+        if fqdn == "eim2.example.com" and call_count == 1:
+            return types.SimpleNamespace(
+                transaction_id="TX-DRAIN-2A",
+                euicc_package_list=["BF5103800101"],
+                package_format="",
+                polling_complete=False,
+                retry_after_seconds=0,
+                eim_result_code=None,
+            )
+        return types.SimpleNamespace(
+            transaction_id="TX-DRAIN-2B",
+            euicc_package_list=[],
+            package_format="",
+            polling_complete=True,
+            retry_after_seconds=0,
+            eim_result_code=1,
+        )
+
+    def provide_eim_package_result(self, request_obj):
+        self.provide_eim_package_result_calls.append(request_obj)
+        return {
+            "pollingComplete": True,
+            "retryAfterSeconds": 0,
+        }
+
+
 class TestSplitPinningTests(unittest.TestCase):
+    def _run_test_orchestrator_single_entry(self, provider):
+        orchestrator = SGP22Orchestrator(cfg=DummyCfg(), apdu_channel=None, profile_provider=provider)
+        request = EimPollRequest(
+            eim_fqdn="eim1.esim.tst.1ot.mobi",
+            eim_id="manager-1",
+            eim_id_type="1",
+            counter_value="0",
+            association_token="",
+            supported_protocol="3",
+            euicc_ci_pkid="",
+            indirect_profile_download="0",
+            euicc_configured_data="",
+            eim_configuration_data="",
+            euicc_info1="",
+            euicc_info2="",
+            eid="89044045930000000000001492294428",
+            euicc_challenge="",
+            trusted_tls_public_key_data="",
+            transaction_id="",
+            euicc_package_result="",
+            raw_body=bytes.fromhex("BF4F125A1089044045930000000000001492294428"),
+        )
+        relayed_packages = []
+
+        orchestrator._phase_connect = lambda: None
+        orchestrator._phase_eim_card_challenge = lambda: None
+        orchestrator._resolve_eim_poll_entry_indices = lambda entry_index=None: [0]
+        orchestrator._build_eim_poll_request = lambda matching_id="", entry_index=0: request
+
+        def fake_relay(package_bytes, poll_round, package_index):
+            relayed_packages.append((package_bytes, poll_round, package_index))
+            return bytes.fromhex("BF5280")
+
+        orchestrator._relay_eim_package_to_card = fake_relay
+        orchestrator.run_eim_poll(matching_id="MATCH-1")
+        return relayed_packages, provider
+
+    def _run_test_orchestrator_entry_sequence(self, provider, entry_requests):
+        cfg = DummyCfg()
+        cfg.EIM_MAX_DRAIN_ROUNDS = 3
+        orchestrator = SGP22Orchestrator(cfg=cfg, apdu_channel=None, profile_provider=provider)
+        relayed_packages = []
+
+        orchestrator._phase_connect = lambda: None
+        orchestrator._phase_eim_card_challenge = lambda: None
+        orchestrator._resolve_eim_poll_entry_indices = (
+            lambda entry_index=None: list(range(len(entry_requests)))
+        )
+        orchestrator._build_eim_poll_request = (
+            lambda matching_id="", entry_index=0: entry_requests[entry_index]
+        )
+
+        def fake_relay(package_bytes, poll_round, package_index):
+            relayed_packages.append((package_bytes, poll_round, package_index))
+            return bytes.fromhex("BF5280")
+
+        orchestrator._relay_eim_package_to_card = fake_relay
+        orchestrator.run_eim_poll(matching_id="MATCH-1")
+        return relayed_packages, provider
+
     def _run_console_poll(self, console_type, argument: str):
         client = PollDummyClient()
         console = console_type(client)
@@ -211,6 +384,101 @@ class TestSplitPinningTests(unittest.TestCase):
             )
 
         self.assertEqual(client.use_configured_ca_bundle_flags, [True])
+
+    def test_test_run_eim_poll_repolls_after_acknowledged_package_result(self):
+        relayed_packages, provider = self._run_test_orchestrator_single_entry(
+            AcknowledgedPackageProvider()
+        )
+
+        self.assertEqual(len(provider.poll_eim_calls), 2)
+        self.assertEqual(len(provider.provide_eim_package_result_calls), 1)
+        self.assertEqual(provider.provide_eim_package_result_calls[0].transaction_id, "TX-ACK")
+        self.assertEqual(provider.poll_eim_calls[1].transaction_id, "TX-ACK")
+        self.assertEqual(
+            relayed_packages,
+            [
+                (bytes.fromhex("BF5103800101"), 1, 1),
+            ],
+        )
+
+    def test_test_run_eim_poll_repolls_after_empty_package_result_response(self):
+        relayed_packages, provider = self._run_test_orchestrator_single_entry(
+            EmptyResponsePackageProvider()
+        )
+
+        self.assertEqual(len(provider.poll_eim_calls), 2)
+        self.assertEqual(len(provider.provide_eim_package_result_calls), 1)
+        self.assertEqual(provider.provide_eim_package_result_calls[0].transaction_id, "TX-EMPTY")
+        self.assertEqual(provider.poll_eim_calls[1].transaction_id, "TX-EMPTY")
+        self.assertEqual(
+            relayed_packages,
+            [
+                (bytes.fromhex("BF5203800101"), 1, 1),
+            ],
+        )
+
+    def test_test_run_eim_poll_skips_no_package_entries_in_later_drain_rounds(self):
+        relayed_packages, provider = self._run_test_orchestrator_entry_sequence(
+            DrainRoundSkipProvider(),
+            [
+                EimPollRequest(
+                    eim_fqdn="eim1.example.com",
+                    eim_id="manager-1",
+                    eim_id_type="1",
+                    counter_value="0",
+                    association_token="",
+                    supported_protocol="3",
+                    euicc_ci_pkid="",
+                    indirect_profile_download="0",
+                    euicc_configured_data="",
+                    eim_configuration_data="",
+                    euicc_info1="",
+                    euicc_info2="",
+                    eid="89044045930000000000001492294428",
+                    euicc_challenge="",
+                    trusted_tls_public_key_data="",
+                    transaction_id="",
+                    euicc_package_result="",
+                    raw_body=bytes.fromhex("BF4F125A1089044045930000000000001492294428"),
+                ),
+                EimPollRequest(
+                    eim_fqdn="eim2.example.com",
+                    eim_id="manager-2",
+                    eim_id_type="1",
+                    counter_value="0",
+                    association_token="",
+                    supported_protocol="3",
+                    euicc_ci_pkid="",
+                    indirect_profile_download="0",
+                    euicc_configured_data="",
+                    eim_configuration_data="",
+                    euicc_info1="",
+                    euicc_info2="",
+                    eid="89044045930000000000001492294428",
+                    euicc_challenge="",
+                    trusted_tls_public_key_data="",
+                    transaction_id="",
+                    euicc_package_result="",
+                    raw_body=bytes.fromhex("BF4F125A1089044045930000000000001492294428"),
+                ),
+            ],
+        )
+
+        self.assertEqual(
+            [call.eim_fqdn for call in provider.poll_eim_calls],
+            [
+                "eim1.example.com",
+                "eim2.example.com",
+                "eim2.example.com",
+            ],
+        )
+        self.assertEqual(len(provider.provide_eim_package_result_calls), 1)
+        self.assertEqual(
+            relayed_packages,
+            [
+                (bytes.fromhex("BF5103800101"), 1, 1),
+            ],
+        )
 
 
 if __name__ == "__main__":

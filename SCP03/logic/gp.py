@@ -12,14 +12,14 @@
 # You should have received a copy of the GNU General Public License
 # along with this program. If not, see <https://www.gnu.org/licenses/>.
 #
-# Copyright (c) 2026 Hampus Hellsberg and contributors
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 # -----------------------------------------------------------------------------
 
 import os 
 import math 
 from typing import Optional ,List ,Dict ,Any ,Tuple 
 
-from SCP03 .config import Config 
+from SCP03 .config import Config ,enforce_demo_key_policy 
 from SCP03 .core .utils import HexUtils ,TlvParser 
 from SCP03 .core .decoders import AdvancedDecoders 
 from SCP03 .core .cap import CapFileParser 
@@ -27,7 +27,7 @@ from SCP03 .crypto .session import Scp03Session
 from SCP03 .crypto .scp02_session import Scp02SessionAdapter 
 from SCP03 .logic .sgp22 import Sgp22Manager 
 from yggdrasim_common .card_backend import is_simulated_card_backend
-from cryptography .hazmat .primitives .ciphers import algorithms ,Cipher ,modes 
+from cryptography .hazmat .primitives .ciphers import algorithms 
 from cryptography .hazmat .primitives import cmac 
 
 class GlobalPlatformManager :
@@ -48,6 +48,15 @@ class GlobalPlatformManager :
         self .scp03_kvn =int (config_keys .get ('scp03_kvn',Config .DEFAULT_KEYS ['scp03_kvn']),16 )
         self .scp02_kvn =int (config_keys .get ('scp02_kvn',Config .DEFAULT_KEYS ['scp02_kvn']),16 )
         self .active_scp_protocol ="SCP03"
+
+        backend_label ="sim"if is_simulated_card_backend ()else "reader"
+        # ``enforce_demo_key_policy`` used to stderr-write synchronously,
+        # which got wiped by the shell's screen-clear redraw. It now
+        # returns the banner text (or None) so the caller decides when
+        # to surface it; the dispatcher flushes after the banner is drawn.
+        self .pending_demo_keys_warning =enforce_demo_key_policy (
+        config_keys ,backend_label =backend_label ,
+        )
 
         self .sgp22 =Sgp22Manager (transport )
 
@@ -913,7 +922,7 @@ class GlobalPlatformManager :
             try :
                 parsed =TlvParser .parse (data )
                 self .print_tlv_data (parsed )
-            except Exception as e :
+            except Exception :
                 pass 
         else :
             err_map ={
@@ -951,7 +960,7 @@ class GlobalPlatformManager :
                     safe_chars =set ("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 -_.:/,")
                     if len (s )>1 and all (c in safe_chars for c in s ):
                         ascii_str =f" ('{s}')"
-                except :
+                except Exception :
                     pass 
 
                 print (f"{indent_str}Tag {tag_hex} (L={len(val)}): {val_hex}{ascii_str}")

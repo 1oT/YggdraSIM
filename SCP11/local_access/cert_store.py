@@ -1,4 +1,3 @@
-import json
 import os
 import re
 from dataclasses import dataclass
@@ -8,6 +7,7 @@ from typing import Any, Optional
 from cryptography import x509 as crypto_x509
 from cryptography.hazmat.primitives import serialization
 from cryptography.x509.oid import ExtensionOID
+from yggdrasim_common.inventory_crypto import read_secret_file_bytes, read_secret_json_file
 
 
 @dataclass(frozen=True)
@@ -336,8 +336,7 @@ class LocalSgp26CertStore:
                 return candidate
         return self.default_server_address
 
-    @staticmethod
-    def _load_sidecar_metadata(certificate_path: str) -> dict[str, Any]:
+    def _load_sidecar_metadata(self, certificate_path: str) -> dict[str, Any]:
         candidates = [
             f"{certificate_path}.meta.json",
             os.path.splitext(certificate_path)[0] + ".meta.json",
@@ -346,8 +345,10 @@ class LocalSgp26CertStore:
             if os.path.isfile(candidate) is False:
                 continue
             try:
-                with open(candidate, "r", encoding="utf-8") as handle:
-                    payload = json.load(handle)
+                payload = read_secret_json_file(
+                    candidate,
+                    protect_plaintext_on_read=self._path_is_under_root(candidate, self.override_cert_root),
+                )
             except Exception:
                 continue
             if isinstance(payload, dict):
@@ -394,19 +395,32 @@ class LocalSgp26CertStore:
                 return "BRP"
         return ""
 
-    @staticmethod
-    def _load_certificate(path: str) -> crypto_x509.Certificate:
-        with open(path, "rb") as cert_file:
-            cert_data = cert_file.read()
+    def _load_certificate(self, path: str) -> crypto_x509.Certificate:
+        cert_data = read_secret_file_bytes(
+            path,
+            protect_plaintext_on_read=self._path_is_under_root(path, self.override_cert_root),
+        )
         if path.lower().endswith(".pem"):
             return crypto_x509.load_pem_x509_certificate(cert_data)
         return crypto_x509.load_der_x509_certificate(cert_data)
 
-    @staticmethod
-    def _load_private_key(path: str) -> Any:
-        with open(path, "rb") as key_file:
-            key_data = key_file.read()
+    def _load_private_key(self, path: str) -> Any:
+        key_data = read_secret_file_bytes(
+            path,
+            protect_plaintext_on_read=self._path_is_under_root(path, self.override_cert_root),
+        )
         return serialization.load_pem_private_key(key_data, password=None)
+
+    @staticmethod
+    def _path_is_under_root(path_text: str, root_text: str) -> bool:
+        normalized_path = os.path.abspath(str(path_text or "").strip())
+        normalized_root = os.path.abspath(str(root_text or "").strip())
+        if len(normalized_path) == 0 or len(normalized_root) == 0:
+            return False
+        try:
+            return os.path.commonpath([normalized_path, normalized_root]) == normalized_root
+        except ValueError:
+            return False
 
     @staticmethod
     def _subject_key_identifier(certificate: crypto_x509.Certificate) -> str:

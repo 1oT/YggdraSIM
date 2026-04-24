@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hmac
 import os
 from typing import Any
 
@@ -61,7 +62,12 @@ class Scp03CardLogic:
             selected_aid=self._selected_aid_hex(),
         )
         card_cryptogram = self._gen_crypto(constant=0x00)
-        response = (b"\x00" * 10) + bytes([expected_kvn, 0x03, 0x03]) + card_challenge + card_cryptogram
+        i_parameter = 0x00 
+        key_info = bytes([expected_kvn, 0x03, i_parameter])
+        response = (b"\x00" * 10) + key_info + card_challenge + card_cryptogram 
+        if (i_parameter & 0x10) != 0:
+            self.state.scp03_sequence_counter = (self.state.scp03_sequence_counter + 1) & 0xFFFFFF
+            response += self.state.scp03_sequence_counter.to_bytes(3, "big")
         return response, 0x90, 0x00
 
     def handle_external_authenticate(self, security_level: int, payload: bytes) -> tuple[bytes, int, int]:
@@ -74,13 +80,13 @@ class Scp03CardLogic:
         host_cryptogram = payload[:8]
         host_mac = payload[8:16]
         expected_cryptogram = self._gen_crypto(constant=0x01)
-        if host_cryptogram != expected_cryptogram:
+        if not hmac.compare_digest(host_cryptogram, expected_cryptogram):
             self.reset()
             return b"", 0x69, 0x82
 
         header = bytes([0x84, 0x82, security_level & 0xFF, 0x00, 0x10])
         full_mac = self._cmac(self._session_keys["s_mac"], session.chaining_value + header + host_cryptogram)
-        if host_mac != full_mac[:8]:
+        if not hmac.compare_digest(host_mac, full_mac[:8]):
             self.reset()
             return b"", 0x69, 0x82
 
@@ -113,7 +119,7 @@ class Scp03CardLogic:
             self._session_keys["s_mac"],
             session.chaining_value + header + protected_payload,
         )
-        if mac_value != expected_full_mac[:8]:
+        if not hmac.compare_digest(mac_value, expected_full_mac[:8]):
             return None, (b"", 0x69, 0x88)
         session.chaining_value = expected_full_mac
 

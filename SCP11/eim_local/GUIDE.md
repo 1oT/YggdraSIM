@@ -58,7 +58,7 @@ Batch-mode shortcut:
 python -m SCP11.eim_local --cmd "STATUS; PATHS; HOTFOLDER-LIST --json; EXIT"
 ```
 
-Use `../../PROFILE_LIFECYCLE_CLI_CHEATSHEET.md` when the goal is a ready-made
+Use `../../guides/PROFILE_LIFECYCLE_CLI_CHEATSHEET.md` when the goal is a ready-made
 download, handover, or queue command sequence rather than a deep operator walk.
 
 ## 3. Choose the execution path
@@ -586,7 +586,7 @@ For most sessions, this order keeps the shell deterministic:
 
 ## 16. Related documents
 
-- `../../PROFILE_LIFECYCLE_CLI_CHEATSHEET.md`
-- `../../CLI_AND_PIPING_GUIDE.md`
+- `../../guides/PROFILE_LIFECYCLE_CLI_CHEATSHEET.md`
+- `../../guides/CLI_AND_PIPING_GUIDE.md`
 - `README.md`
 - `../local_access/README.md`

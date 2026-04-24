@@ -104,6 +104,22 @@ class EimPackageParsingTests(unittest.TestCase):
         )
         self.assertEqual(parsed.request_token, bytes.fromhex("00000000000004A1"))
 
+    def test_euicc_configuration_extracts_search_criteria_sequence_numbers(self):
+        raw = wrap_tlv(
+            "BF52",
+            wrap_tlv("5C", bytes.fromhex("A0A2"))
+            + wrap_tlv("A1", wrap_tlv("80", b"\x02"))
+            + wrap_tlv("A2", wrap_tlv("80", b"\x09"))
+            + wrap_tlv("83", bytes.fromhex("00000000000004A2")),
+        )
+
+        parsed = parse_eim_package(raw)
+
+        self.assertEqual(parsed.package_type, TYPE_EUICC_CONFIGURATION)
+        self.assertEqual(parsed.notification_seq_number, 2)
+        self.assertEqual(parsed.euicc_package_result_seq_number, 9)
+        self.assertEqual(parsed.request_token, bytes.fromhex("00000000000004A2"))
+
     def test_profile_download_trigger_extracts_activation_code(self):
         trigger = wrap_tlv(
             "30",

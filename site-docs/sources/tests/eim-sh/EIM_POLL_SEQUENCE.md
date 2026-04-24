@@ -1,0 +1,1 @@
+--8<-- "tests/eim-sh/EIM_POLL_SEQUENCE.md"

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import threading
+
 from SIMCARD.engine import SimulatedSimCardEngine
 from yggdrasim_common.card_backend import (
     get_sim_eim_identity_path,
@@ -16,6 +18,12 @@ _SHARED_ENGINE_ISDR_CONFIG_PATH = ""
 _SHARED_ENGINE_EIM_IDENTITY_PATH = ""
 _SHARED_ENGINE_EUICC_STORE_ROOT = ""
 _SHARED_ENGINE_PROFILE_STORE_PATH = ""
+# Guards the whole ``_SHARED_ENGINE`` / path-key tuple. Two dispatchers
+# instantiating ``SimulatedCardConnection`` from different threads must not
+# race through the path-change check and each construct their own engine;
+# that would deliver duplicate EF reads back to two shells sharing the same
+# on-disk store.
+_SHARED_ENGINE_LOCK = threading.Lock()
 
 
 def get_shared_engine() -> SimulatedSimCardEngine:
@@ -25,27 +33,30 @@ def get_shared_engine() -> SimulatedSimCardEngine:
     eim_identity_path = get_sim_eim_identity_path()
     euicc_store_root = get_sim_euicc_store_root()
     profile_store_path = get_sim_profile_store_path()
-    if (
-        _SHARED_ENGINE is None
-        or quirks_path != _SHARED_ENGINE_QUIRKS_PATH
-        or isdr_config_path != _SHARED_ENGINE_ISDR_CONFIG_PATH
-        or eim_identity_path != _SHARED_ENGINE_EIM_IDENTITY_PATH
-        or euicc_store_root != _SHARED_ENGINE_EUICC_STORE_ROOT
-        or profile_store_path != _SHARED_ENGINE_PROFILE_STORE_PATH
-    ):
-        _SHARED_ENGINE = SimulatedSimCardEngine(
-            quirks_path=quirks_path,
-            isdr_config_path=isdr_config_path,
-            sim_eim_identity_path=eim_identity_path,
-            euicc_store_root=euicc_store_root,
-            profile_store_path=profile_store_path,
+    with _SHARED_ENGINE_LOCK:
+        needs_rebuild = (
+            _SHARED_ENGINE is None
+            or quirks_path != _SHARED_ENGINE_QUIRKS_PATH
+            or isdr_config_path != _SHARED_ENGINE_ISDR_CONFIG_PATH
+            or eim_identity_path != _SHARED_ENGINE_EIM_IDENTITY_PATH
+            or euicc_store_root != _SHARED_ENGINE_EUICC_STORE_ROOT
+            or profile_store_path != _SHARED_ENGINE_PROFILE_STORE_PATH
         )
-        _SHARED_ENGINE_QUIRKS_PATH = quirks_path
-        _SHARED_ENGINE_ISDR_CONFIG_PATH = isdr_config_path
-        _SHARED_ENGINE_EIM_IDENTITY_PATH = eim_identity_path
-        _SHARED_ENGINE_EUICC_STORE_ROOT = euicc_store_root
-        _SHARED_ENGINE_PROFILE_STORE_PATH = profile_store_path
-    return _SHARED_ENGINE
+        if needs_rebuild:
+            _SHARED_ENGINE = SimulatedSimCardEngine(
+                quirks_path=quirks_path,
+                isdr_config_path=isdr_config_path,
+                sim_eim_identity_path=eim_identity_path,
+                euicc_store_root=euicc_store_root,
+                profile_store_path=profile_store_path,
+            )
+            _SHARED_ENGINE_QUIRKS_PATH = quirks_path
+            _SHARED_ENGINE_ISDR_CONFIG_PATH = isdr_config_path
+            _SHARED_ENGINE_EIM_IDENTITY_PATH = eim_identity_path
+            _SHARED_ENGINE_EUICC_STORE_ROOT = euicc_store_root
+            _SHARED_ENGINE_PROFILE_STORE_PATH = profile_store_path
+        engine = _SHARED_ENGINE
+    return engine
 
 
 class SimulatedCardConnection:

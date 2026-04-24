@@ -4,8 +4,11 @@ import sys
 import io
 import contextlib
 from pathlib import Path
+from unittest import mock
 
 CONSOLE_PATH = Path(__file__).resolve().parent.parent / "SCP11" / "console.py"
+LIVE_CONSOLE_PATH = Path(__file__).resolve().parent.parent / "SCP11" / "live" / "console.py"
+TEST_CONSOLE_PATH = Path(__file__).resolve().parent.parent / "SCP11" / "test" / "console.py"
 spec = importlib.util.spec_from_file_location("scp11_console_module", CONSOLE_PATH)
 console_module = importlib.util.module_from_spec(spec)
 assert spec is not None
@@ -13,6 +16,16 @@ assert spec.loader is not None
 sys.modules[spec.name] = console_module
 spec.loader.exec_module(console_module)
 SCP11Console = console_module.SCP11Console
+
+
+def _load_console_module(module_name: str, module_path: Path):
+    spec = importlib.util.spec_from_file_location(module_name, module_path)
+    module = importlib.util.module_from_spec(spec)
+    assert spec is not None
+    assert spec.loader is not None
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
 
 
 def encode_length(length: int) -> bytes:
@@ -82,6 +95,20 @@ class DummyClient:
         self.cfg = DummyCfg()
         self.apdu_channel = DummyApduChannel()
         self.orchestrator = DummyOrchestrator()
+
+
+class DummyModuleStateStore:
+    def __init__(self):
+        self.replaced: list[tuple[str, dict]] = []
+
+    def get_module_state(self, module_name: str) -> dict:
+        _ = module_name
+        return {}
+
+    def replace_module_state(self, module_name: str, payload: dict) -> dict:
+        stored_payload = dict(payload)
+        self.replaced.append((module_name, stored_payload))
+        return stored_payload
 
 
 class SCP11ConsoleStatusDecodeTests(unittest.TestCase):
@@ -168,6 +195,14 @@ class SCP11ConsoleStatusDecodeTests(unittest.TestCase):
         )
         self.assertEqual(payload.hex().upper(), "BF33124F10A0000005591010FFFFFFFF8900001100")
 
+    def test_queue_modem_refresh_stays_silent_when_hil_bridge_is_unavailable(self):
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            with mock.patch.object(console_module, "trigger_card_relay_modem_refresh", return_value=None):
+                self.console._queue_modem_refresh("DeleteProfile")
+
+        self.assertEqual(output.getvalue(), "")
+
     def test_build_remove_notification_payload(self):
         payload = self.console._build_remove_notification_payload(7)
         self.assertEqual(payload.hex().upper(), "BF3003800107")
@@ -199,6 +234,82 @@ class SCP11ConsoleStatusDecodeTests(unittest.TestCase):
     def test_resolve_profile_target_by_alias(self):
         resolved = self.console._resolve_profile_target("isdp1")
         self.assertEqual(resolved, (self.console.TAG_AID, "A0000005591010FFFFFFFF8900001100"))
+
+    def test_resolve_profile_target_by_decimal_iccid_prefers_encoded_metadata_value(self):
+        self.console._fetch_profiles = lambda: [
+            console_module.ProfileMetadataView(
+                iccid="89460811111111111112",
+                aid="A0000005591010FFFFFFFF8900001303",
+                state="DISABLED",
+                profile_class="OPER",
+                nickname="Sample Lab",
+                service_provider="",
+                profile_name="",
+                profile_policy_rules_hex="",
+            )
+        ]
+
+        resolved = self.console._resolve_profile_target("89460811111111111112")
+
+        self.assertEqual(
+            resolved,
+            (self.console.TAG_ICCID, "98648011111111111121"),
+        )
+
+    def test_live_and_test_console_resolve_decimal_and_encoded_iccid_consistently(self):
+        live_module = _load_console_module("scp11_live_console_target_resolution", LIVE_CONSOLE_PATH)
+        test_module = _load_console_module("scp11_test_console_target_resolution", TEST_CONSOLE_PATH)
+
+        for module in (live_module, test_module):
+            console = module.SCP11Console(DummyClient())
+            console._aid_registry = {
+                "ISDP1": "A0000005591010FFFFFFFF8900001100",
+            }
+            console._fetch_profiles = lambda module=module: [
+                module.ProfileMetadataView(
+                    iccid="89460811111111111112",
+                    aid="A0000005591010FFFFFFFF8900001303",
+                    state="DISABLED",
+                    profile_class="OPER",
+                    nickname="Sample Lab",
+                    service_provider="",
+                    profile_name="",
+                    profile_policy_rules_hex="",
+                )
+            ]
+
+            self.assertEqual(
+                console._resolve_profile_target("89460811111111111112"),
+                (console.TAG_ICCID, "98648011111111111121"),
+            )
+            self.assertEqual(
+                console._resolve_profile_target("98648011111111111121"),
+                (console.TAG_ICCID, "98648011111111111121"),
+            )
+            self.assertEqual(
+                console._resolve_profile_target("A0000005591010FFFFFFFF8900001303"),
+                (console.TAG_AID, "A0000005591010FFFFFFFF8900001303"),
+            )
+
+    def test_persist_config_line_uses_runtime_module_state_without_eid(self):
+        store = DummyModuleStateStore()
+        self.console._inventory.store = store
+        self.console.current_eid = ""
+        self.console.current_es9_base_url = "https://persist.example.com"
+
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            self.console._persist_config_line(
+                "ES9_BASE_URL: str =",
+                '"https://persist.example.com"',
+                "ES9_BASE_URL",
+            )
+
+        self.assertEqual(len(store.replaced), 1)
+        module_name, payload = store.replaced[0]
+        self.assertEqual(module_name, self.console.MODULE_STATE_NAME)
+        self.assertEqual(payload["es9_base_url"], "https://persist.example.com")
+        self.assertIn("runtime state", output.getvalue())
 
     def test_enable_profile_auto_disables_current_enabled_profile(self):
         profiles = [
@@ -243,6 +354,48 @@ class SCP11ConsoleStatusDecodeTests(unittest.TestCase):
                 ((self.console.TAG_ICCID, "981000000000000000F2"), self.console.TAG_ENABLE_PROFILE, "EnableProfile"),
             ],
         )
+
+    def test_enable_profile_refuses_auto_disable_when_active_profile_ppr1_forbids_disable(self):
+        profiles = [
+            console_module.ProfileMetadataView(
+                iccid="8901000000000000001",
+                aid="A0000005591010FFFFFFFF8900001100",
+                state="ENABLED",
+                profile_class="OPER",
+                nickname="Primary",
+                service_provider="",
+                profile_name="",
+                profile_policy_rules_hex="0640",
+            ),
+            console_module.ProfileMetadataView(
+                iccid="8901000000000000002",
+                aid="A0000005591010FFFFFFFF8900001200",
+                state="DISABLED",
+                profile_class="OPER",
+                nickname="Secondary",
+                service_provider="",
+                profile_name="",
+                profile_policy_rules_hex="",
+            ),
+        ]
+        executed = []
+        self.console._collect_profile_metadata = lambda: profiles
+        self.console._execute_profile_state_command = lambda resolved, func_tag, action_label: executed.append(
+            (resolved, func_tag, action_label)
+        ) or True
+
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            self.console._run_profile_state_command(
+                identifier="8901000000000000002",
+                func_tag=self.console.TAG_ENABLE_PROFILE,
+                action_label="EnableProfile",
+                command_name="ENABLE-PROFILE",
+            )
+
+        self.assertEqual(executed, [])
+        self.assertIn("guarded mode refused to auto-disable active profile", output.getvalue())
+        self.assertIn("ppr1-disable-not-allowed", output.getvalue())
 
     def test_disable_profile_noops_when_target_already_disabled(self):
         profiles = [
@@ -316,6 +469,62 @@ class SCP11ConsoleStatusDecodeTests(unittest.TestCase):
                 ((self.console.TAG_ICCID, "981000000000000000F1"), self.console.TAG_DELETE_PROFILE, "DeleteProfile"),
             ],
         )
+
+    def test_enable_profile_sequence_queues_single_modem_refresh_after_success(self):
+        profiles = [
+            console_module.ProfileMetadataView(
+                iccid="8901000000000000001",
+                aid="A0000005591010FFFFFFFF8900001100",
+                state="ENABLED",
+                profile_class="OPER",
+                nickname="Primary",
+                service_provider="",
+                profile_name="",
+                profile_policy_rules_hex="",
+            ),
+            console_module.ProfileMetadataView(
+                iccid="8901000000000000002",
+                aid="A0000005591010FFFFFFFF8900001200",
+                state="DISABLED",
+                profile_class="OPER",
+                nickname="Secondary",
+                service_provider="",
+                profile_name="",
+                profile_policy_rules_hex="",
+            ),
+        ]
+        executed = []
+        refreshes = []
+        self.console._collect_profile_metadata = lambda: profiles
+        self.console._execute_profile_state_command = lambda resolved, func_tag, action_label: executed.append(
+            (resolved, func_tag, action_label)
+        ) or True
+        self.console._queue_modem_refresh = lambda action_label, mode="": refreshes.append((action_label, mode))
+
+        self.console._run_profile_state_command(
+            identifier="8901000000000000002",
+            func_tag=self.console.TAG_ENABLE_PROFILE,
+            action_label="EnableProfile",
+            command_name="ENABLE-PROFILE",
+        )
+
+        self.assertEqual(
+            executed,
+            [
+                ((self.console.TAG_AID, "A0000005591010FFFFFFFF8900001100"), self.console.TAG_DISABLE_PROFILE, "DisableProfile"),
+                ((self.console.TAG_ICCID, "981000000000000000F2"), self.console.TAG_ENABLE_PROFILE, "EnableProfile"),
+            ],
+        )
+        self.assertEqual(refreshes, [("EnableProfile", "")])
+
+    def test_refresh_modem_command_delegates_to_queue_helper(self):
+        calls = []
+        self.console._queue_modem_refresh = lambda action_label, mode="": calls.append((action_label, mode))
+
+        keep_running = self.console._cmd_refresh_modem("uicc-reset")
+
+        self.assertTrue(keep_running)
+        self.assertEqual(calls, [("RefreshModem", "uicc-reset")])
 
     def test_execute_result_command_syncs_notifications_on_success(self):
         self.console._execute_result_command(

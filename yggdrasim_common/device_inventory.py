@@ -129,7 +129,7 @@ class DeviceInventoryStore:
     def _deserialize_payload(self, payload_text: str) -> dict[str, Any]:
         try:
             payload = json.loads(str(payload_text))
-        except Exception:
+        except (json.JSONDecodeError, TypeError):
             return {}
         if isinstance(payload, dict) is False:
             return {}
@@ -161,7 +161,7 @@ class DeviceInventoryStore:
                     continue
                 try:
                     raw_payload = json.loads(str(row["payload_json"]))
-                except Exception:
+                except (json.JSONDecodeError, TypeError):
                     continue
                 if self.crypto.is_encrypted_payload(raw_payload):
                     continue
@@ -205,7 +205,7 @@ class DeviceInventoryStore:
                     continue
                 try:
                     raw_payload = json.loads(str(row["payload_json"]))
-                except Exception:
+                except (json.JSONDecodeError, TypeError):
                     continue
                 if self.crypto.is_encrypted_payload(raw_payload):
                     continue

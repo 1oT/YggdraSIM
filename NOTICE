@@ -1,8 +1,10 @@
 YggdraSIM
-Copyright 2026 Hampus Hellsberg and contributors.
+Copyright (c) 2026 1oT OÜ. All rights reserved.
 
 Project attribution:
-- Hampus Hellsberg - Creator, Lead Architect, Lead Maintainer
+- Copyright holder: 1oT OÜ (Tallinn, Estonia)
+- Author and lead maintainer: Hampus Hellsberg (Creator, Lead Architect, Lead Maintainer)
+- Additional contributors: see repository commit history
 
 Standards notice:
 YggdraSIM implements, tests against, or models portions of specifications and
@@ -12,12 +14,27 @@ Specification, and ISO 7816 are technical references only. They do not imply
 endorsement, certification, partnership, or approval by the originating bodies.
 
 Third-party notice:
-This repository includes or depends on third-party software components,
-including but not limited to:
-- `pysim/`, which is kept as a vendored runtime dependency for several flows
-- Python packages listed in `requirements.txt`
-- Optional external system tooling such as `gpg` when encrypted inventory
-  payloads are enabled
+This repository depends on third-party software components that are NOT
+redistributed as part of this source tree. They are pulled at install or
+runtime from their upstream sources:
+- Python packages listed in `requirements.txt` (installed from PyPI)
+- `pySim` (Osmocom) - an optional on-disk checkout when the SAIP ASN.1
+  compile path or the SCP11-local flows are exercised; clone manually from
+  `https://gitlab.com/osmocom/pysim.git` into `pysim/` at the repository
+  root. The directory is gitignored and is NOT redistributed with this
+  project. Runtime falls back to the installed `pySim` PyPI wheel when the
+  checkout is absent.
+- Optional external system tooling such as `gpg` (when encrypted inventory
+  payloads are enabled) and `osmo-remsim-client-st2` / SIMtrace2 firmware
+  (when the HIL bridge is in use). These tools are provided by their
+  respective upstream projects and are not redistributed here.
+
+Vendored schema notice:
+The only third-party material redistributed inside this tree is the RSPRO
+ASN.1 schema at `docs/RSPRO.asn` (mirrored into `Tools/HilBridge/RSPRO.asn`
+for wheel packaging). It is included because it is required at runtime by
+the HIL bridge decoder and is too small to justify a separate installation
+step.
 
 Acknowledgements:
 With a big-hearted thank you to the Osmocom community, the `pySim`

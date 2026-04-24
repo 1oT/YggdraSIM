@@ -3,6 +3,20 @@ from __future__ import annotations
 from typing import Any
 
 
+# The table below maps the leading 8 digits of an EID (the EUM IIN assigned
+# by GSMA) to the publicly published EUM (eUICC manufacturer) name. The
+# mapping is reproduced here solely for operator diagnostics: it lets the
+# tool answer "which EUM issued this eUICC?" when an operator inspects an
+# EID returned by a card in the lab.
+#
+# The names below are taken from the GSMA-published EID / IIN registry.
+# Their presence here is a factual technical reference, not a sponsorship,
+# endorsement, partnership, certification, or commercial relationship of
+# any kind. No vendor listed below has reviewed, approved, or contributed
+# to this project, and no claim of interoperability with any specific
+# vendor's production infrastructure is made by the presence of this
+# table. If a vendor's registered IIN changes upstream, update the
+# mapping; do not treat this file as an authoritative registry.
 KNOWN_EUICC_ISSUER_PREFIXES: dict[str, str] = {
     "89033023": "Thales",
     "89033024": "IDEMIA",

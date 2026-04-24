@@ -40,7 +40,7 @@ Point users to these guides unless the namespace itself is the topic:
 - `SCP11/README.md`
 - `SCP11/live/README.md`
 - `SCP11/test/README.md`
-- `../../PROFILE_LIFECYCLE_CLI_CHEATSHEET.md`
+- `../../guides/PROFILE_LIFECYCLE_CLI_CHEATSHEET.md`
 
 Keep this file short and compatibility-focused. Do not duplicate the primary
 relay operator guides here.

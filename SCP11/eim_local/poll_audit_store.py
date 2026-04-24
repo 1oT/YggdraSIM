@@ -3,7 +3,7 @@ import os
 import sqlite3
 import threading
 from datetime import datetime, timezone
-from typing import Any, Optional
+from typing import Any
 
 
 def _utc_now() -> str:

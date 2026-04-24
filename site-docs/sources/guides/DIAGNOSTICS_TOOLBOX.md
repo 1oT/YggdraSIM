@@ -1,0 +1,1 @@
+--8<-- "guides/DIAGNOSTICS_TOOLBOX.md"

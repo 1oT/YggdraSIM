@@ -108,6 +108,130 @@ class _ScanTreeEfDirTransport:
         return b"", 0x6A, 0x82
 
 
+class _ScanTreeMfWarningTransport:
+    session = None
+
+    def __init__(self) -> None:
+        self.calls: list[str] = []
+
+    def reset(self) -> bool:
+        return True
+
+    def transmit(self, cmd: str, silent: bool = False):
+        del silent
+        command = str(cmd or "").strip().upper()
+        self.calls.append(command)
+
+        if command == "00A40004023F00":
+            return bytes.fromhex("6202820138"), 0x90, 0x00
+        if command == "00A40004022F00":
+            return bytes.fromhex("621A8205422100260483022F008A01058B032F060A800200988801F0"), 0x62, 0x82
+        if command == "00B2010400":
+            return b"", 0x6A, 0x83
+        if command == "00A40004022FE2":
+            return bytes.fromhex("62178202412183022FE28A01058B032F060B8002000A880110"), 0x63, 0x00
+        if command == "00A40004027F10":
+            return bytes.fromhex(
+                "62298202782183027F10A50C80017183040003D2D88701018A01058B032F060EC60990014083010183010A"
+            ), 0x9F, 0x10
+        if command == "00A40004027FF0":
+            return bytes.fromhex(
+                "623E8202782183027FF08410A0000000871002FF34FF0789312E30FFA50C80017183040003D2D88701018A01058B032F060EC60C90016083010183018183010A"
+            ), 0x90, 0x00
+        if command == "00A40004026F07":
+            return bytes.fromhex("62178202412183026F078A01058B036F060280020009880138"), 0x62, 0x82
+        return b"", 0x6A, 0x82
+
+
+class _ScanTreeMfTransientTransport:
+    session = None
+
+    def __init__(self) -> None:
+        self.calls: list[str] = []
+        self.call_counts: dict[str, int] = {}
+
+    def reset(self) -> bool:
+        return True
+
+    def transmit(self, cmd: str, silent: bool = False):
+        del silent
+        command = str(cmd or "").strip().upper()
+        self.calls.append(command)
+        self.call_counts[command] = self.call_counts.get(command, 0) + 1
+        attempt = self.call_counts[command]
+
+        if command == "00A40004023F00":
+            return bytes.fromhex("6202820138"), 0x90, 0x00
+        if command == "00A40004022F00":
+            return bytes.fromhex("621A8205422100260483022F008A01058B032F060A800200988801F0"), 0x90, 0x00
+        if command == "00B2010400":
+            return b"", 0x6A, 0x83
+        if command == "00A40004022FE2":
+            if attempt == 1:
+                return b"", 0x6A, 0x82
+            return bytes.fromhex("62178202412183022FE28A01058B032F060B8002000A880110"), 0x90, 0x00
+        if command == "00A40004027F10":
+            if attempt == 1:
+                return b"", 0x6A, 0x82
+            return bytes.fromhex(
+                "62298202782183027F10A50C80017183040003D2D88701018A01058B032F060EC60990014083010183010A"
+            ), 0x90, 0x00
+        if command == "00A40004027FF0":
+            return bytes.fromhex(
+                "623E8202782183027FF08410A0000000871002FF34FF0789312E30FFA50C80017183040003D2D88701018A01058B032F060EC60C90016083010183018183010A"
+            ), 0x90, 0x00
+        if command == "00A40004026F07":
+            return bytes.fromhex("62178202412183026F078A01058B036F060280020009880138"), 0x90, 0x00
+        return b"", 0x6A, 0x82
+
+
+class _ScanTreeMfSettleTransport:
+    session = None
+
+    def __init__(self) -> None:
+        self.calls: list[str] = []
+        self.mf_settled = False
+
+    def reset(self) -> bool:
+        self.mf_settled = False
+        return True
+
+    def settle_after_parent_select(self) -> None:
+        self.mf_settled = True
+
+    def transmit(self, cmd: str, silent: bool = False):
+        del silent
+        command = str(cmd or "").strip().upper()
+        self.calls.append(command)
+
+        if command == "00A40004023F00":
+            self.mf_settled = False
+            return bytes.fromhex("6202820138"), 0x90, 0x00
+        if command == "00A40004022F00":
+            if self.mf_settled is False:
+                return b"", 0x69, 0x82
+            return bytes.fromhex("621A8205422100260483022F008A01058B032F060A800200988801F0"), 0x90, 0x00
+        if command == "00B2010400":
+            return b"", 0x6A, 0x83
+        if command == "00A40004022FE2":
+            if self.mf_settled is False:
+                return b"", 0x69, 0x82
+            return bytes.fromhex("62178202412183022FE28A01058B032F060B8002000A880110"), 0x90, 0x00
+        if command == "00A40004027F10":
+            if self.mf_settled is False:
+                return b"", 0x69, 0x82
+            return bytes.fromhex(
+                "62298202782183027F10A50C80017183040003D2D88701018A01058B032F060EC60990014083010183010A"
+            ), 0x90, 0x00
+        if command == "00A40004027FF0":
+            return bytes.fromhex(
+                "623E8202782183027FF08410A0000000871002FF34FF0789312E30FFA50C80017183040003D2D88701018A01058B032F060EC60C90016083010183018183010A"
+            ), 0x90, 0x00
+        if command == "00A40004026F07":
+            return bytes.fromhex("62178202412183026F078A01058B036F060280020009880138"), 0x90, 0x00
+        return b"", 0x6A, 0x82
+
+
 class _WildcardReportTransport:
     session = None
 
@@ -262,6 +386,108 @@ class FileSystemControllerAdfFallbackTests(unittest.TestCase):
         self.assertIn("USIM/EF_IMSI", controller.scan_cache.values())
         self.assertEqual(controller.aid_registry.get("USIM"), discovered_aid)
         self.assertFalse(any(command.startswith("00A40404") for command in transport.calls))
+
+    def test_scan_tree_always_renders_mf_root_entry(self) -> None:
+        discovered_aid = "A0000000871002FF86FF112233445566"
+        transport = _ScanTreeEfDirTransport(discovered_aid, "Tele2 USIM")
+        controller = FileSystemController(transport, aid_registry={})
+
+        rendered = io.StringIO()
+        with contextlib.redirect_stdout(rendered):
+            controller.scan_tree()
+
+        output = rendered.getvalue()
+        self.assertIn("MF", output)
+        self.assertIn("(3F00)", output)
+        self.assertEqual(controller.scan_cache.get("1"), "MF")
+
+    def test_scan_tree_keeps_mf_children_when_select_returns_warning_status(self) -> None:
+        transport = _ScanTreeMfWarningTransport()
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            fids_path = Path(temp_dir) / "fids.txt"
+            fids_path.write_text(
+                "MF:3F00\n"
+                " EF_DIR:2F00\n"
+                " EF_ICCID:2FE2\n"
+                "TELECOM:7F10\n"
+                "USIM:7FF0\n"
+                " EF_IMSI:6F07\n",
+                encoding="utf-8",
+            )
+
+            with mock.patch.object(Config, "FIDS_FILE", str(fids_path)):
+                controller = FileSystemController(transport, aid_registry={})
+                rendered = io.StringIO()
+                with contextlib.redirect_stdout(rendered):
+                    controller.scan_tree()
+
+        output = rendered.getvalue()
+        self.assertIn("EF_DIR", output)
+        self.assertIn("EF_ICCID", output)
+        self.assertIn("TELECOM", output)
+        self.assertIn("USIM", output)
+        self.assertIn("EF_IMSI", output)
+
+    def test_scan_tree_retries_transient_mf_child_select_misses(self) -> None:
+        transport = _ScanTreeMfTransientTransport()
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            fids_path = Path(temp_dir) / "fids.txt"
+            fids_path.write_text(
+                "MF:3F00\n"
+                " EF_ICCID:2FE2\n"
+                "TELECOM:7F10\n"
+                "USIM:7FF0\n"
+                " EF_IMSI:6F07\n",
+                encoding="utf-8",
+            )
+
+            with mock.patch.object(Config, "FIDS_FILE", str(fids_path)):
+                controller = FileSystemController(transport, aid_registry={})
+                rendered = io.StringIO()
+                with mock.patch("SCP03.logic.fs.time.sleep", return_value=None):
+                    with contextlib.redirect_stdout(rendered):
+                        controller.scan_tree()
+
+        output = rendered.getvalue()
+        self.assertIn("EF_ICCID", output)
+        self.assertIn("TELECOM", output)
+        self.assertIn("USIM", output)
+        self.assertEqual(transport.call_counts.get("00A40004022FE2"), 2)
+        self.assertEqual(transport.call_counts.get("00A40004027F10"), 2)
+
+    def test_scan_tree_waits_after_selecting_mf_before_child_selects(self) -> None:
+        transport = _ScanTreeMfSettleTransport()
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            fids_path = Path(temp_dir) / "fids.txt"
+            fids_path.write_text(
+                "MF:3F00\n"
+                " EF_DIR:2F00\n"
+                " EF_ICCID:2FE2\n"
+                "TELECOM:7F10\n"
+                "USIM:7FF0\n"
+                " EF_IMSI:6F07\n",
+                encoding="utf-8",
+            )
+
+            with mock.patch.object(Config, "FIDS_FILE", str(fids_path)):
+                controller = FileSystemController(transport, aid_registry={})
+                rendered = io.StringIO()
+
+                def _sleep(_seconds: float) -> None:
+                    transport.settle_after_parent_select()
+
+                with mock.patch("SCP03.logic.fs.time.sleep", side_effect=_sleep):
+                    with contextlib.redirect_stdout(rendered):
+                        controller.scan_tree()
+
+        output = rendered.getvalue()
+        self.assertIn("EF_DIR", output)
+        self.assertIn("EF_ICCID", output)
+        self.assertIn("TELECOM", output)
+        self.assertIn("USIM", output)
 
     def test_scan_tree_injects_missing_ssim_root_from_ef_dir(self) -> None:
         discovered_aid = "A0000001515353494D11223344556677"

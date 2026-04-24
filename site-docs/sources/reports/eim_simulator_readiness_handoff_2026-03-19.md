@@ -1,0 +1,1 @@
+--8<-- "reports/eim_simulator_readiness_handoff_2026-03-19.md"

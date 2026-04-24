@@ -30,6 +30,9 @@ SGP22_DOWNLOAD_ERROR_CODE: Dict[int, str] = {
 }
 
 # SGP.22 / SGP.02 profile installation result reason reported by card.
+# Codes 1..15 and 127 are SGP.22 v2 (the upstream pySim ASN.1 module is v2.0).
+# Codes 16..23 are the v3.x extensions — harmless on v2 cards because they
+# will never appear there; useful when the card firmware moves forward.
 SGP22_PROFILE_INSTALLATION_RESULT_REASON: Dict[int, str] = {
     1: "incorrectInputValues",
     2: "invalidSignature",
@@ -46,6 +49,14 @@ SGP22_PROFILE_INSTALLATION_RESULT_REASON: Dict[int, str] = {
     13: "installFailedDueToIccidMismatch",
     14: "testProfileInstallFailedDueToInvalidNaaKey",
     15: "pprNotAllowed",
+    16: "enterpriseProfilesNotSupported",
+    17: "enterpriseRulesNotAllowed",
+    18: "enterpriseProfileNotAllowed",
+    19: "enterpriseOidMismatch",
+    20: "enterpriseRulesError",
+    21: "enterpriseProfilesOnly",
+    22: "lprNotSupported",
+    23: "unknownTlvInMetadata",
     127: "installFailedDueToUnknownError",
 }
 

@@ -91,6 +91,7 @@ class SuciKeyToolBridgeTests(unittest.TestCase):
             check=False,
             capture_output=True,
             text=True,
+            timeout=120,
         )
 
 

@@ -12,7 +12,9 @@ try:
         decode_notifications_response,
         decode_rat_rules,
     )
-except Exception:
+except ImportError:
+    # SCP03 decoders are an optional peer; the snapshot renderer is still
+    # callable without them and degrades to raw-hex previews per section.
     build_euicc_info2_detail_lines = None
     decode_eim_configuration_entries = None
     decode_euicc_info1_summary = None

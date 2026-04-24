@@ -24,7 +24,7 @@ from SCP11.eim_local.eim_package_codec import (
 )
 from SCP11.eim_local.config import EimLocalConfig
 from SCP11.eim_local.models import EimHandoverContext, ensure_handover_transaction
-from SCP11.eim_local.polling_bridge import LocalizedPollingBridge
+from plugins.polling.wifi_ethernet_bridge import LocalizedPollingBridge
 from SCP11.eim_local.session import EimLocalSession
 from SCP11.eim_local.main import EimLocalShell
 from SCP11.eim_packages import TYPE_PROFILE_DOWNLOAD_TRIGGER, parse_eim_package
@@ -140,6 +140,23 @@ def encode_der_length(value: int) -> bytes:
 
 def wrap_tlv(tag_bytes: bytes, value: bytes) -> bytes:
     return bytes(tag_bytes) + encode_der_length(len(value)) + value
+
+
+def encode_iccid_for_tlv(iccid_digits: str) -> bytes:
+    padded = str(iccid_digits).strip()
+    if len(padded) % 2 != 0:
+        padded += "F"
+    return bytes.fromhex(padded)
+
+
+def write_minimal_profile_payload(profile_path: Path, iccid_digits: str, profile_name: str = "Test") -> None:
+    profile_path.parent.mkdir(parents=True, exist_ok=True)
+    payload = wrap_tlv(
+        b"\xA0",
+        wrap_tlv(b"\x82", profile_name.encode("utf-8"))
+        + wrap_tlv(b"\x83", encode_iccid_for_tlv(iccid_digits)),
+    )
+    profile_path.write_text(payload.hex().upper(), encoding="ascii")
 
 
 def build_eim_configuration_response_for_shell() -> bytes:
@@ -471,7 +488,7 @@ class EimLocalModelTests(unittest.TestCase):
                 EIM_RUNTIME_STATE_FILE=runtime_state_file,
                 EIM_RESPONSE_LOG_FILE=response_log_file,
             )
-            session = EimLocalSession(cfg=config, apdu_channel=None)
+            session = EimLocalSession(cfg=config, apdu_channel=SimpleNamespace())
             closed = session.acknowledge_eim_operations(transaction_id_hex="A1B2", matching_id="MID-1")
             self.assertEqual(closed, 0)
             log_lines = Path(response_log_file).read_text(encoding="utf-8").strip().splitlines()
@@ -511,7 +528,7 @@ class EimLocalModelTests(unittest.TestCase):
             config = EimLocalConfig(
                 EIM_RUNTIME_STATE_FILE=runtime_state_file,
             )
-            session = EimLocalSession(cfg=config, apdu_channel=None)
+            session = EimLocalSession(cfg=config, apdu_channel=SimpleNamespace())
             payload = session.set_error_code_in_package(
                 family="sgp32_profile_download_error_reason",
                 code_value="ecallActive",
@@ -1067,7 +1084,8 @@ class EimLocalModelTests(unittest.TestCase):
 
             session._build_session_bound_profile_package = fake_build_session_bound_profile_package  # type: ignore[assignment]
 
-            def fake_load_profile_from_bytes(bpp_bytes: bytes) -> bytes:
+            def fake_load_profile_from_bytes(bpp_bytes: bytes, *, progress_bar=None) -> bytes:
+                _ = progress_bar
                 calls.append(("load_profile_from_bytes", bytes(bpp_bytes)))
                 return bytes.fromhex("BF3700")
 
@@ -1117,7 +1135,8 @@ class EimLocalModelTests(unittest.TestCase):
 
             session._build_session_bound_profile_package = fail_build_session_bound_profile_package  # type: ignore[assignment]
 
-            def fake_load_profile_from_bytes(bpp_bytes: bytes) -> bytes:
+            def fake_load_profile_from_bytes(bpp_bytes: bytes, *, progress_bar=None) -> bytes:
+                _ = progress_bar
                 calls.append(("load_profile_from_bytes", bytes(bpp_bytes)))
                 return bytes.fromhex("BF3700")
 
@@ -2035,6 +2054,9 @@ class EimLocalModelTests(unittest.TestCase):
                 eid="89049032000000000000000000000001",
             )
 
+            bridge._installed_profile_iccids = set()
+            bridge._installed_profile_iccids_loaded = True
+
             payload = bridge._serve_eim_package()
             self.assertGreater(len(payload), 0)
             bridge._acknowledge_eim_package_result(bytes.fromhex("BF5000"))
@@ -2073,10 +2095,10 @@ class EimLocalModelTests(unittest.TestCase):
             signed1 = _FakeServerSigned1()
 
             with mock.patch(
-                "SCP11.eim_local.polling_bridge.CryptoEngine.generate_server_challenges",
+                "plugins.polling.wifi_ethernet_bridge.CryptoEngine.generate_server_challenges",
                 return_value=(signed1, b"\x10" * 16, b"\x20" * 16),
             ) as mocked_generate, mock.patch(
-                "SCP11.eim_local.polling_bridge.CryptoEngine.sign_asn1",
+                "plugins.polling.wifi_ethernet_bridge.CryptoEngine.sign_asn1",
                 return_value=b"sig",
             ) as mocked_sign:
                 response = bridge._handle_smdp_initiate_authentication(
@@ -2096,6 +2118,268 @@ class EimLocalModelTests(unittest.TestCase):
             self.assertEqual(base64.b64decode(response["serverSignature1"]), b"sig")
             self.assertEqual(base64.b64decode(response["serverCertificate"]), b"cert")
 
+    def test_localized_bridge_get_bound_profile_package_reports_profile_context_on_builder_failure(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base_dir = Path(temp_dir)
+            config = EimLocalConfig(
+                EIM_RUNTIME_STATE_FILE=str(base_dir / "state.json"),
+                EIM_RESPONSE_LOG_FILE=str(base_dir / "responses.jsonl"),
+                EIM_POLL_AUDIT_DB_FILE=str(base_dir / "poll_audit.sqlite3"),
+                EIM_POLL_INCLUDE_FIXED_FIXTURES=False,
+            )
+            session = EimLocalSession(cfg=config, apdu_channel=SimpleNamespace())
+            bridge = LocalizedPollingBridge(session)
+            fake_builder = SimpleNamespace(
+                state=SimpleNamespace(prepare_download_response=b"", transaction_id=b""),
+                _read_profile_source_bytes=lambda profile_path="": bytes.fromhex("A00100"),
+                resolve_profile_path=lambda override_path="": str(base_dir / "profile" / "test_profile.txt"),
+            )
+
+            def _raise_missing_pysim(profile_bytes: bytes) -> bytes:
+                _ = profile_bytes
+                raise RuntimeError("pySim session-bound BPP generation is unavailable in this environment.")
+
+            fake_builder._build_session_bound_profile_package = _raise_missing_pysim
+            bridge._build_offline_profile_builder_session = lambda: fake_builder  # type: ignore[assignment]
+
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "resolved profile source .* as profile_payload \\(3 bytes\\)",
+            ) as raised:
+                bridge._handle_smdp_get_bound_profile_package(
+                    {
+                        "transactionId": base64.b64encode(b"\x10" * 16).decode("ascii"),
+                        "prepareDownloadResponse": base64.b64encode(b"\xBF\x21\x00").decode("ascii"),
+                    }
+                )
+
+            self.assertIn(
+                "pySim session-bound BPP generation is unavailable",
+                str(raised.exception),
+            )
+
+    def test_localized_bridge_skips_duplicate_profile_trigger_after_success(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base_dir = Path(temp_dir)
+            hotfolder_dir = base_dir / "hotfolder"
+            hotfolder_dir.mkdir(parents=True, exist_ok=True)
+            eim_to_esim_dir, esim_to_eim_dir = create_poll_fixture_dirs(base_dir)
+            profile_path = base_dir / "profile" / "duplicate_profile.txt"
+            write_minimal_profile_payload(profile_path, "89460811111111111112")
+            (eim_to_esim_dir / "010_first.json").write_text(
+                json.dumps(
+                    {
+                        "package_type": "profile_download_trigger_request",
+                        "runtime": {
+                            "queue_id": 10,
+                            "transaction_id_hex": "10000000000000000000000000000001",
+                            "matching_id": "FIRST",
+                            "profile_path": str(profile_path),
+                            "smdp_address": "yggdrasim.smdpp.test.1ot.com",
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (hotfolder_dir / "110_second.json").write_text(
+                json.dumps(
+                    {
+                        "package_type": "profile_download_trigger_request",
+                        "runtime": {
+                            "queue_id": 110,
+                            "transaction_id_hex": "11000000000000000000000000000001",
+                            "matching_id": "SECOND",
+                            "profile_path": str(profile_path),
+                            "smdp_address": "yggdrasim.smdpp.test.1ot.com",
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            config = EimLocalConfig(
+                EIM_RUNTIME_STATE_FILE=str(base_dir / "state.json"),
+                EIM_RESPONSE_LOG_FILE=str(base_dir / "responses.jsonl"),
+                EIM_POLL_AUDIT_DB_FILE=str(base_dir / "poll_audit.sqlite3"),
+                EIM_HOTFOLDER_DIR=str(hotfolder_dir),
+                EIM_POLL_EIM_TO_ESIM_DIR=str(eim_to_esim_dir),
+                EIM_POLL_ESIM_TO_EIM_DIR=str(esim_to_eim_dir),
+            )
+            session = EimLocalSession(cfg=config, apdu_channel=SimpleNamespace())
+            bridge = LocalizedPollingBridge(session)
+
+            first_payload = bridge._serve_eim_package()
+            first_parsed = parse_eim_package(first_payload)
+            self.assertEqual(first_parsed.package_type, TYPE_PROFILE_DOWNLOAD_TRIGGER)
+            self.assertEqual(first_parsed.matching_id, "FIRST")
+
+            success_branch = session._build_profile_download_trigger_result_tlv(
+                bytes.fromhex("BF3700"),
+                eim_transaction_id=bytes(first_parsed.eim_transaction_id),
+            )
+            success_result = session._build_provide_eim_package_result_tlv(success_branch)
+            next_payload = bridge._acknowledge_eim_package_result(success_result)
+
+            self.assertEqual(next_payload, bytes.fromhex("BF4F03020101"))
+            self.assertEqual(bridge.status_payload().get("queue_index"), 2)
+            rows = session.read_poll_audit_rows(limit=10)
+            actions = [str(row.get("action", "")) for row in rows]
+            self.assertIn("localized_eim_package_skipped_duplicate_iccid", actions)
+
+    def test_localized_bridge_keeps_duplicate_profile_trigger_after_failed_result(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base_dir = Path(temp_dir)
+            hotfolder_dir = base_dir / "hotfolder"
+            hotfolder_dir.mkdir(parents=True, exist_ok=True)
+            eim_to_esim_dir, esim_to_eim_dir = create_poll_fixture_dirs(base_dir)
+            profile_path = base_dir / "profile" / "duplicate_profile.txt"
+            write_minimal_profile_payload(profile_path, "89460811111111111112")
+            (eim_to_esim_dir / "010_first.json").write_text(
+                json.dumps(
+                    {
+                        "package_type": "profile_download_trigger_request",
+                        "runtime": {
+                            "queue_id": 10,
+                            "transaction_id_hex": "10000000000000000000000000000001",
+                            "matching_id": "FIRST",
+                            "profile_path": str(profile_path),
+                            "smdp_address": "yggdrasim.smdpp.test.1ot.com",
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (hotfolder_dir / "110_second.json").write_text(
+                json.dumps(
+                    {
+                        "package_type": "profile_download_trigger_request",
+                        "runtime": {
+                            "queue_id": 110,
+                            "transaction_id_hex": "11000000000000000000000000000001",
+                            "matching_id": "SECOND",
+                            "profile_path": str(profile_path),
+                            "smdp_address": "yggdrasim.smdpp.test.1ot.com",
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            config = EimLocalConfig(
+                EIM_RUNTIME_STATE_FILE=str(base_dir / "state.json"),
+                EIM_RESPONSE_LOG_FILE=str(base_dir / "responses.jsonl"),
+                EIM_POLL_AUDIT_DB_FILE=str(base_dir / "poll_audit.sqlite3"),
+                EIM_HOTFOLDER_DIR=str(hotfolder_dir),
+                EIM_POLL_EIM_TO_ESIM_DIR=str(eim_to_esim_dir),
+                EIM_POLL_ESIM_TO_EIM_DIR=str(esim_to_eim_dir),
+            )
+            session = EimLocalSession(cfg=config, apdu_channel=SimpleNamespace())
+            bridge = LocalizedPollingBridge(session)
+
+            first_payload = bridge._serve_eim_package()
+            first_parsed = parse_eim_package(first_payload)
+            self.assertEqual(first_parsed.matching_id, "FIRST")
+
+            error_branch = session._build_profile_download_trigger_result_error(
+                eim_transaction_id=bytes(first_parsed.eim_transaction_id),
+                error_reason=127,
+            )
+            error_result = session._build_provide_eim_package_result_tlv(error_branch)
+            next_payload = bridge._acknowledge_eim_package_result(error_result)
+            next_parsed = parse_eim_package(next_payload)
+
+            self.assertEqual(next_parsed.package_type, TYPE_PROFILE_DOWNLOAD_TRIGGER)
+            self.assertEqual(next_parsed.matching_id, "SECOND")
+            rows = session.read_poll_audit_rows(limit=10)
+            actions = [str(row.get("action", "")) for row in rows]
+            self.assertNotIn("localized_eim_package_skipped_duplicate_iccid", actions)
+
+    def test_localized_bridge_skips_profile_trigger_when_iccid_is_already_installed(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base_dir = Path(temp_dir)
+            hotfolder_dir = base_dir / "hotfolder"
+            hotfolder_dir.mkdir(parents=True, exist_ok=True)
+            eim_to_esim_dir, esim_to_eim_dir = create_poll_fixture_dirs(base_dir)
+            profile_path = base_dir / "profile" / "duplicate_profile.txt"
+            write_minimal_profile_payload(profile_path, "89460811111111111112")
+            (eim_to_esim_dir / "010_first.json").write_text(
+                json.dumps(
+                    {
+                        "package_type": "profile_download_trigger_request",
+                        "runtime": {
+                            "queue_id": 10,
+                            "transaction_id_hex": "10000000000000000000000000000001",
+                            "matching_id": "FIRST",
+                            "profile_path": str(profile_path),
+                            "smdp_address": "yggdrasim.smdpp.test.1ot.com",
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            config = EimLocalConfig(
+                EIM_RUNTIME_STATE_FILE=str(base_dir / "state.json"),
+                EIM_RESPONSE_LOG_FILE=str(base_dir / "responses.jsonl"),
+                EIM_POLL_AUDIT_DB_FILE=str(base_dir / "poll_audit.sqlite3"),
+                EIM_HOTFOLDER_DIR=str(hotfolder_dir),
+                EIM_POLL_EIM_TO_ESIM_DIR=str(eim_to_esim_dir),
+                EIM_POLL_ESIM_TO_EIM_DIR=str(esim_to_eim_dir),
+            )
+            session = EimLocalSession(cfg=config, apdu_channel=SimpleNamespace())
+            bridge = LocalizedPollingBridge(session)
+            bridge.set_card_query_session(SimpleNamespace(collect_profile_metadata=lambda: [SimpleNamespace(iccid="89460811111111111112")]))
+
+            payload = bridge._serve_eim_package()
+
+            self.assertEqual(payload, bytes.fromhex("BF4F03020101"))
+            rows = session.read_poll_audit_rows(limit=10)
+            actions = [str(row.get("action", "")) for row in rows]
+            self.assertIn("localized_eim_package_skipped_duplicate_iccid", actions)
+
+    def test_localized_bridge_uses_builder_profile_source_for_duplicate_iccid_skip(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base_dir = Path(temp_dir)
+            hotfolder_dir = base_dir / "hotfolder"
+            hotfolder_dir.mkdir(parents=True, exist_ok=True)
+            eim_to_esim_dir, esim_to_eim_dir = create_poll_fixture_dirs(base_dir)
+            profile_path = base_dir / "profile" / "builder_profile.txt"
+            write_minimal_profile_payload(profile_path, "89460811111111111112")
+            (eim_to_esim_dir / "010_first.json").write_text(
+                json.dumps(
+                    {
+                        "package_type": "profile_download_trigger_request",
+                        "runtime": {
+                            "queue_id": 10,
+                            "transaction_id_hex": "10000000000000000000000000000001",
+                            "matching_id": "FIRST",
+                            "profile_path": "missing/profile/path.txt",
+                            "smdp_address": "yggdrasim.smdpp.test.1ot.com",
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            config = EimLocalConfig(
+                EIM_RUNTIME_STATE_FILE=str(base_dir / "state.json"),
+                EIM_RESPONSE_LOG_FILE=str(base_dir / "responses.jsonl"),
+                EIM_POLL_AUDIT_DB_FILE=str(base_dir / "poll_audit.sqlite3"),
+                EIM_HOTFOLDER_DIR=str(hotfolder_dir),
+                EIM_POLL_EIM_TO_ESIM_DIR=str(eim_to_esim_dir),
+                EIM_POLL_ESIM_TO_EIM_DIR=str(esim_to_eim_dir),
+            )
+            session = EimLocalSession(cfg=config, apdu_channel=SimpleNamespace())
+            bridge = LocalizedPollingBridge(session)
+            bridge.set_card_query_session(SimpleNamespace(collect_profile_metadata=lambda: [SimpleNamespace(iccid="89460811111111111112")]))
+            profile_bytes = session._read_profile_source_bytes(profile_path=str(profile_path))
+            bridge._build_offline_profile_builder_session = lambda: SimpleNamespace(  # type: ignore[assignment]
+                _read_profile_source_bytes=lambda profile_path="": profile_bytes
+            )
+
+            payload = bridge._serve_eim_package()
+
+            self.assertEqual(payload, bytes.fromhex("BF4F03020101"))
+            rows = session.read_poll_audit_rows(limit=10)
+            actions = [str(row.get("action", "")) for row in rows]
+            self.assertIn("localized_eim_package_skipped_duplicate_iccid", actions)
+
     def test_parse_localized_ipae_args_supports_defaults_and_debug(self) -> None:
         defaults = EimLocalShell._parse_localized_ipae_args("")
         self.assertEqual(defaults, (1, 30, False))
@@ -2107,14 +2391,16 @@ class EimLocalModelTests(unittest.TestCase):
         self.assertEqual(parsed_with_extended_flags, (7, 18, True))
 
     def test_parse_localized_ipad_args_supports_matching_id_and_debug(self) -> None:
-        defaults = EimLocalShell._parse_localized_ipad_args("")
+        # Plugin-owned helper — import from the polling plugin package.
+        from plugins.polling.shell_lifecycle import _parse_localized_ipad_args
+        defaults = _parse_localized_ipad_args("")
         self.assertEqual(defaults, ("", False))
-        parsed = EimLocalShell._parse_localized_ipad_args("MATCH-1 --debug")
+        parsed = _parse_localized_ipad_args("MATCH-1 --debug")
         self.assertEqual(parsed, ("MATCH-1", True))
-        reversed_order = EimLocalShell._parse_localized_ipad_args("--debug MATCH-2")
+        reversed_order = _parse_localized_ipad_args("--debug MATCH-2")
         self.assertEqual(reversed_order, ("MATCH-2", True))
         with self.assertRaisesRegex(ValueError, "at most one matchingId"):
-            EimLocalShell._parse_localized_ipad_args("MID-1 MID-2")
+            _parse_localized_ipad_args("MID-1 MID-2")
 
     def test_local_eim_debug_flag_strips_argument_and_toggles_raw_apdu_logging(self) -> None:
         class _FakeApduChannel:
@@ -2227,7 +2513,7 @@ class EimLocalModelTests(unittest.TestCase):
                 shell = EimLocalShell()
 
         with mock.patch(
-            "SCP11.eim_local.ipad_standalone.LocalizedIPAdRunner",
+            "plugins.polling.ipad_standalone.LocalizedIPAdRunner",
             return_value=fake_runner,
         ):
             shell._run_localized_ipad("live", matching_id="MATCH-1")
@@ -2337,7 +2623,9 @@ class EimLocalModelTests(unittest.TestCase):
         self.assertEqual(payload["lint"]["spec_passed"], 2)
 
     def test_help_groups_localized_watchdog_and_queue_campaign_separately(self) -> None:
-        shell = EimLocalShell()
+        fake_session = SimpleNamespace(apdu_channel=SimpleNamespace())
+        with mock.patch("SCP11.eim_local.main.EimLocalSession", return_value=fake_session):
+            shell = EimLocalShell()
         shell._terminal_width = lambda: 140  # type: ignore[method-assign]
         shell._plugin_localized_help_rows = [
             (
@@ -2356,6 +2644,7 @@ class EimLocalModelTests(unittest.TestCase):
         self.assertIn("IPAE-LIVE [attempts] [timer-window] [-t 20s] [-s 5] [--debug]", rendered)
         self.assertIn("POLL-CAMPAIGN [cycles] [intervalMs] [...]", rendered)
         self.assertIn("EIM-PACKAGE-EXPLAIN [path] [--yaml]", rendered)
+        self.assertIn("REFRESH-MODEM [mode]", rendered)
         self.assertLess(rendered.index("Localized Routing & Handover"), rendered.index("IPAE-LIVE [attempts] [timer-window] [-t 20s] [-s 5] [--debug]"))
         self.assertLess(rendered.index("Queue Campaigns"), rendered.index("POLL-CAMPAIGN [cycles] [intervalMs] [...]"))
         self.assertTrue(
@@ -2431,6 +2720,16 @@ class EimLocalModelTests(unittest.TestCase):
             "smdp_base_url": "https://127.0.0.1:19443",
             "smdp_fqdn": "yggdrasim.smdpp.test.1ot.com",
         }
+        shell._plugin_path_sections = [
+            {
+                "title": "3. SIM IP Polling",
+                "lines": [
+                    "   live cmd  : IPAE-LIVE [matchingId] [--debug]",
+                    "   test cmd  : IPAE-TEST [matchingId] [--debug]",
+                    "   route     : SIM <-> bridge <-> eIM/SM-DP+",
+                ],
+            }
+        ]
 
         with contextlib.redirect_stdout(io.StringIO()) as output:
             shell._cmd_paths()
@@ -2444,6 +2743,21 @@ class EimLocalModelTests(unittest.TestCase):
         self.assertIn("SIM IP Polling", rendered)
         self.assertIn("127.0.0.1:15353", rendered)
         self.assertIn("yggdrasim.eim.test.1ot.com", rendered)
+
+    def test_localized_bridge_provider_disables_direct_eim_tls_public_key_pinning(self) -> None:
+        shell = EimLocalShell()
+        calls: list[bool] = []
+
+        class FakeClient:
+            def set_eim_tls_public_key_pinning_enabled(self, enabled: bool) -> None:
+                calls.append(bool(enabled))
+
+        provider = SimpleNamespace(_client=FakeClient())
+
+        returned = shell._configure_localized_bridge_profile_provider(provider)
+
+        self.assertIs(returned, provider)
+        self.assertEqual(calls, [False])
 
     def test_run_localized_ipad_uses_bridge_and_orchestrator(self) -> None:
         shell = EimLocalShell()
@@ -2630,12 +2944,174 @@ class EimLocalModelTests(unittest.TestCase):
         watchdog_kwargs = calls["watchdog_kwargs"]
         self.assertEqual(calls["profile_name"], "test")
         self.assertEqual(watchdog_kwargs["poll_attempts_per_fqdn"], 3)
-        self.assertEqual(watchdog_kwargs["timer_expiration_window_seconds"], 330)
+        # Realistic per-attempt budget floor is 20s (covers DNS + TLS + eIM
+        # POST + drain + CLOSE CHANNEL observed on production cards). Expected
+        # floor: 3 attempts * 1 target * 20s + 60 post-status loops * 5s = 360.
+        self.assertEqual(watchdog_kwargs["timer_expiration_window_seconds"], 360)
         self.assertEqual(watchdog_kwargs["poll_attempt_delay_seconds"], 15)
         self.assertEqual(watchdog_kwargs["poll_attempt_post_status_loops"], 60)
         self.assertFalse(bool(watchdog_kwargs["debug"]))
-        self.assertIn("timer expiration stimuli window: 330s (auto)", rendered)
-        self.assertIn("auto-extended to 330s", rendered)
+        self.assertIn("timer expiration stimuli window: 360s (auto)", rendered)
+        self.assertIn("auto-extended to 360s", rendered)
+
+
+class PollCampaignSummaryFormattingTests(unittest.TestCase):
+    """Lock the compact text-mode rendering of the POLL-CAMPAIGN summary.
+
+    The renderer is a pure function over the campaign ``rows`` list, so
+    the tests construct an :class:`EimLocalShell` and drive
+    ``_print_poll_campaign_rows`` directly without touching the
+    session / card layer.
+    """
+
+    def _render(self, rows):
+        shell = EimLocalShell()
+        buffer = io.StringIO()
+        with contextlib.redirect_stdout(buffer):
+            shell._print_poll_campaign_rows(rows)
+        return buffer.getvalue()
+
+    def test_factors_common_base_path_once_and_prints_relative_suffixes(self):
+        rows = [
+            {
+                "cycle": 1,
+                "issued": True,
+                "issued_type": "profile_download_trigger_request",
+                "issued_result_len": 47,
+                "issued_file": "/ws/LocalEIM/eim_packages/fixtures/eim_to_esim/010_trigger.json",
+            },
+            {
+                "cycle": 2,
+                "issued": True,
+                "issued_type": "provide_eim_package_result",
+                "issued_result_len": 24,
+                "issued_file": "/ws/LocalEIM/eim_packages/fixtures/esim_to_eim/020_result.json",
+            },
+            {
+                "cycle": 3,
+                "issued": True,
+                "issued_type": "eim_acknowledgements",
+                "issued_result_len": 0,
+                "issued_file": "/ws/LocalEIM/eim_packages/hotfolder/030_ack.json",
+            },
+        ]
+
+        rendered = self._render(rows)
+
+        # Base line printed once, workspace prefix does not repeat.
+        self.assertIn("[*] Base: /ws/LocalEIM/eim_packages", rendered)
+        self.assertEqual(rendered.count("/ws/LocalEIM/eim_packages"), 1)
+        # Suffixes shown as relative paths.
+        self.assertIn("fixtures/eim_to_esim/010_trigger.json", rendered)
+        self.assertIn("fixtures/esim_to_eim/020_result.json", rendered)
+        self.assertIn("hotfolder/030_ack.json", rendered)
+
+    def test_applies_short_type_codes_for_known_package_types(self):
+        rows = [
+            {
+                "cycle": 1,
+                "issued": True,
+                "issued_type": "profile_download_trigger_request",
+                "issued_result_len": 47,
+                "issued_file": "/base/a.json",
+            },
+            {
+                "cycle": 2,
+                "issued": True,
+                "issued_type": "provide_eim_package_result",
+                "issued_result_len": 24,
+                "issued_file": "/base/b.json",
+            },
+            {
+                "cycle": 3,
+                "issued": True,
+                "issued_type": "eim_acknowledgements",
+                "issued_result_len": 0,
+                "issued_file": "/base/c.json",
+            },
+        ]
+
+        rendered = self._render(rows)
+
+        self.assertIn("trigger_req", rendered)
+        self.assertIn("eim_result", rendered)
+        self.assertIn("ack", rendered)
+        # Long canonical names must not leak into the tabular cells.
+        self.assertNotIn("profile_download_trigger_request", rendered)
+        self.assertNotIn("provide_eim_package_result", rendered)
+        self.assertNotIn("eim_acknowledgements", rendered)
+
+    def test_unknown_type_is_passed_through_verbatim(self):
+        rows = [
+            {
+                "cycle": 1,
+                "issued": True,
+                "issued_type": "some_future_type",
+                "issued_result_len": 7,
+                "issued_file": "/base/x.json",
+            }
+        ]
+
+        rendered = self._render(rows)
+
+        self.assertIn("some_future_type", rendered)
+
+    def test_no_package_and_error_rows_use_compact_layout(self):
+        rows = [
+            {
+                "cycle": 1,
+                "issued": False,
+                "eim_result_code": 1,
+                "eim_result_name": "noEimPackageAvailable",
+                "issued_file": "",
+            },
+            {
+                "cycle": 2,
+                "issued": True,
+                "issued_type": "profile_download_trigger_request",
+                "issued_result_len": 47,
+                "issued_file": "/base/a.json",
+                "error": "NetworkError: unreachable",
+            },
+        ]
+
+        rendered = self._render(rows)
+
+        self.assertIn("no-package", rendered)
+        self.assertIn("result=1 (noEimPackageAvailable)", rendered)
+        self.assertIn("[error] NetworkError: unreachable", rendered)
+
+    def test_no_cycle_rows_emits_nothing(self):
+        rendered = self._render([])
+        self.assertEqual(rendered, "")
+
+    def test_type_code_helper_maps_known_and_passes_unknown(self):
+        shell = EimLocalShell()
+        self.assertEqual(
+            shell._compact_poll_campaign_type("profile_download_trigger_request"),
+            "trigger_req",
+        )
+        self.assertEqual(
+            shell._compact_poll_campaign_type("provide_eim_package_result"),
+            "eim_result",
+        )
+        self.assertEqual(shell._compact_poll_campaign_type("eim_acknowledgements"), "ack")
+        self.assertEqual(shell._compact_poll_campaign_type(""), "-")
+        self.assertEqual(shell._compact_poll_campaign_type("custom_thing"), "custom_thing")
+
+    def test_common_base_helper_handles_single_row_and_missing_paths(self):
+        shell = EimLocalShell()
+        self.assertEqual(
+            shell._poll_campaign_common_base(
+                [{"issued_file": "/tmp/run/one/a.json"}]
+            ),
+            "/tmp/run/one",
+        )
+        self.assertEqual(shell._poll_campaign_common_base([]), "")
+        self.assertEqual(
+            shell._poll_campaign_common_base([{"issued_file": ""}, {"issued_file": None}]),
+            "",
+        )
 
 
 if __name__ == "__main__":

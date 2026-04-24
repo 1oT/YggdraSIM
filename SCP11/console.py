@@ -12,8 +12,19 @@
 # You should have received a copy of the GNU General Public License
 # along with this program. If not, see <https://www.gnu.org/licenses/>.
 #
-# Copyright (c) 2026 Hampus Hellsberg and contributors
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 # -----------------------------------------------------------------------------
+
+"""Canonical SCP11 console shell.
+
+This is the ``canonical`` SCP11 console/CLI entry point for YggdraSIM v1.
+``SCP11/live/console.py`` and ``SCP11/test/console.py`` are ``legacy
+mirrors`` that add variant-specific defaults (live vs. test certificates and
+endpoints) on top of the same dispatcher shape. Audit item ``SCP11-P1-02``
+tracks splitting this module into ``console_cli``, ``console_tls_probe``,
+and ``console_state`` post v1; until then, prefer changes here first and
+mirror the behaviour into the sibling variants.
+"""
 
 import atexit
 import hashlib
@@ -26,12 +37,16 @@ from urllib.parse import urlparse
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
+from yggdrasim_common.card_backend import trigger_card_relay_modem_refresh
+from yggdrasim_common.hil_bridge_runtime import hil_bridge_warning_text
 from yggdrasim_common.quit_control import quit_all
 from yggdrasim_common.euicc_issuer import (
     format_ecasd_issuer_display,
     infer_ecasd_issuer_from_eid,
 )
 from SCP11.shared.gsma_error_codes import describe_sgp22_notification_sent_result
+from SCP11.shared.profile_targeting import resolve_profile_target_identifier
+from SCP11.shared.tls_helpers import create_introspection_context
 
 try:
     from SCP03.core.utils import TlvParser
@@ -150,6 +165,7 @@ class SCP11Console:
     TAG_CTX_0 = 0xA0
     TAG_AID = 0x4F
     TAG_ICCID = 0x5A
+    MODULE_STATE_NAME = "scp11_relay_config"
     DEFAULT_AID_REGISTRY_PATH = (
         getattr(SCP03Config, "AID_FILE", "")
         or os.path.normpath(
@@ -169,6 +185,7 @@ class SCP11Console:
         self.current_es9_ca_bundle_path = self.cfg.ES9_CA_BUNDLE_PATH
         self.current_eid = ""
         self._inventory = EidInventoryNamespace("scp11")
+        self._apply_module_state_profile()
         self._es9_auto_derived = False
         self._style = self._build_style()
         self._commands: Dict[str, CommandSpec] = {}
@@ -562,6 +579,9 @@ class SCP11Console:
         print(f"Active Flow Target:  {self._style.cyan}{self.current_smdp_address}{self._style.end}")
         print(f"Active ES9 Base URL: {self._style.cyan}{self.current_es9_base_url}{self._style.end}")
         self._print_profiles_table(snapshot.profiles, title="Profiles on Card")
+        warning_text = hil_bridge_warning_text()
+        if len(warning_text) > 0:
+            print(f"{self._style.yellow}[!] {warning_text}{self._style.end}")
 
     def _print_help(self) -> None:
         print(f"\n{self._style.bold}{self._style.header}eSIM Relay Command Groups{self._style.end}")
@@ -604,6 +624,7 @@ class SCP11Console:
             ("ENABLE-PROFILE <id|aid|alias>", "ES10c.EnableProfile"),
             ("DISABLE-PROFILE <id|aid|alias>", "ES10c.DisableProfile"),
             ("DELETE-PROFILE <id|aid|alias>", "ES10c.DeleteProfile"),
+            ("REFRESH-MODEM [mode]", "Queue proactive REFRESH toward modem"),
             ("AIDS", "List AID aliases loaded from Admin registry"),
             ("READ-METADATA [22|32]", "Read profile metadata from GetProfilesInfo"),
             ("GET-POL <id|aid|alias>", "Read profilePolicyRules (PPR) from metadata"),
@@ -704,6 +725,13 @@ class SCP11Console:
             "DELETE-PROFILE <iccid-or-aid>",
             "ES10c.DeleteProfile",
             self._cmd_delete_profile,
+        )
+        self._add_command(
+            "REFRESH-MODEM",
+            "REFRESH-MODEM [mode]",
+            "Queue proactive REFRESH toward modem",
+            self._cmd_refresh_modem,
+            aliases=["MODEM-REFRESH"],
         )
         self._add_command("AIDS", "AIDS", "List AID aliases loaded from Admin registry", self._cmd_aids)
         self._add_command("READ-METADATA", "READ-METADATA [22|32]", "Read metadata", self._cmd_read_metadata)
@@ -995,6 +1023,10 @@ class SCP11Console:
         )
         return True
 
+    def _cmd_refresh_modem(self, argument: str) -> bool:
+        self._queue_modem_refresh("RefreshModem", mode=argument.strip())
+        return True
+
     def _cmd_aids(self, _: str) -> bool:
         self._print_aid_registry()
         return True
@@ -1158,7 +1190,16 @@ class SCP11Console:
         except Exception as error:
             print(f"{self._style.red}[!] EIM-DOWNLOAD failed: {error}{self._style.end}")
             return True
-        print(f"{self._style.green}[+] eIM poll flow completed.{self._style.end}")
+        reached_server = bool(
+            getattr(self.orchestrator, "_last_eim_poll_reached_server", False)
+        )
+        if reached_server:
+            print(f"{self._style.green}[+] eIM poll flow completed.{self._style.end}")
+        else:
+            print(
+                f"{self._style.yellow}[*] eIM poll flow completed without reaching any configured "
+                f"eIM server.{self._style.end}"
+            )
         return True
 
     def _collect_snapshot(self) -> CardSnapshot:
@@ -1422,7 +1463,7 @@ class SCP11Console:
         return True, ""
 
     def _fetch_server_leaf_certificate(self, hostname: str, port: int) -> Optional[bytes]:
-        context = ssl._create_unverified_context()
+        context = create_introspection_context(caller="SCP11.console/fetch_leaf")
         try:
             with socket.create_connection((hostname, port), timeout=8) as tcp_socket:
                 with context.wrap_socket(tcp_socket, server_hostname=hostname) as tls_socket:
@@ -1432,7 +1473,7 @@ class SCP11Console:
             return None
 
     def _decode_leaf_certificate_dict(self, hostname: str, port: int) -> Optional[Dict[str, Any]]:
-        context = ssl._create_unverified_context()
+        context = create_introspection_context(caller="SCP11.console/decode_leaf")
         try:
             with socket.create_connection((hostname, port), timeout=8) as tcp_socket:
                 with context.wrap_socket(tcp_socket, server_hostname=hostname) as tls_socket:
@@ -1600,6 +1641,15 @@ class SCP11Console:
             return
         self._inventory.replace(self.current_eid, self._inventory_payload())
 
+    def _apply_module_state_profile(self) -> None:
+        try:
+            payload = self._inventory.store.get_module_state(self.MODULE_STATE_NAME)
+        except Exception:
+            return
+        if isinstance(payload, dict) is False or len(payload) == 0:
+            return
+        self._apply_inventory_profile(payload)
+
     def _persist_config_line(self, key_prefix: str, literal_value: str, human_key: str) -> None:
         if len(self.current_eid) > 0:
             self._persist_inventory_profile()
@@ -1608,41 +1658,18 @@ class SCP11Console:
                 f"for EID {self.current_eid}{self._style.end}"
             )
             return
-        config_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.py")
-        if os.path.exists(config_path) is False:
-            print(f"{self._style.red}[!] Cannot persist {human_key}. Missing file: {config_path}{self._style.end}")
-            return
-
+        _ = key_prefix
+        _ = literal_value
         try:
-            with open(config_path, "r", encoding="utf-8") as config_file:
-                lines = config_file.readlines()
+            self._inventory.store.replace_module_state(
+                self.MODULE_STATE_NAME,
+                self._inventory_payload(),
+            )
         except Exception as error:
-            print(f"{self._style.red}[!] Failed reading config.py: {error}{self._style.end}")
+            print(f"{self._style.red}[!] Failed writing SCP11 runtime state: {error}{self._style.end}")
             return
 
-        found = False
-        updated_lines: List[str] = []
-        for line in lines:
-            stripped = line.lstrip()
-            if stripped.startswith(key_prefix):
-                indent = line[: len(line) - len(stripped)]
-                updated_lines.append(f"{indent}{key_prefix} {literal_value}\n")
-                found = True
-                continue
-            updated_lines.append(line)
-
-        if found is False:
-            print(f"{self._style.red}[!] Could not find {human_key} entry in config.py{self._style.end}")
-            return
-
-        try:
-            with open(config_path, "w", encoding="utf-8") as config_file:
-                config_file.writelines(updated_lines)
-        except Exception as error:
-            print(f"{self._style.red}[!] Failed writing config.py: {error}{self._style.end}")
-            return
-
-        print(f"{self._style.green}[+] Persisted {human_key} in SCP11/config.py{self._style.end}")
+        print(f"{self._style.green}[+] Persisted {human_key} in SCP11 runtime state{self._style.end}")
 
     def _apply_es9_autoderive_from_card(self, card_default_smdp: str) -> None:
         if self._is_placeholder_es9_url(self.current_es9_base_url) is False:
@@ -1668,7 +1695,7 @@ class SCP11Console:
             f"{self._style.end}"
         )
         print(
-            f"{self._style.yellow}[*] Use SET-ES9 [--persist] <url> or configure ES9_BASE_URL in SCP11/config.py."
+            f"{self._style.yellow}[*] Use SET-ES9 [--persist] <url> or persist a default relay profile in runtime state."
             f"{self._style.end}"
         )
 
@@ -1907,16 +1934,19 @@ class SCP11Console:
             return False
 
         result_code = self._extract_result_code(response, result_outer_tag)
+        should_trigger_sync = result_outer_tag != self.TAG_REMOVE_NOTIFICATION
         if result_code is None:
             print(f"{self._style.green}[+] {title}: success (no explicit result code).{self._style.end}")
             if len(response) > 0:
                 print(f"[*] Raw response: {response.hex().upper()}")
-            self._sync_notifications_after_success(response)
+            if should_trigger_sync:
+                self._sync_notifications_after_success(response)
             return True
 
         if result_code == 0:
             print(f"{self._style.green}[+] {title}: success.{self._style.end}")
-            self._sync_notifications_after_success(response)
+            if should_trigger_sync:
+                self._sync_notifications_after_success(response)
             return True
 
         if result_outer_tag == self.TAG_REMOVE_NOTIFICATION:
@@ -1958,13 +1988,32 @@ class SCP11Console:
             result_outer_tag=func_tag,
         )
 
+    def _queue_modem_refresh(self, action_label: str, mode: str = "") -> None:
+        try:
+            payload = trigger_card_relay_modem_refresh(
+                mode=mode,
+                source=f"scp11-console:{action_label}",
+            )
+        except Exception as error:
+            print(f"{self._style.yellow}[*] {action_label}: modem REFRESH queue failed ({error}).{self._style.end}")
+            return
+        if payload is None:
+            return
+        status = str(payload.get("status", "queued") or "queued")
+        mode_name = str(payload.get("mode", "") or "")
+        print(
+            f"{self._style.yellow}[*] {action_label}: modem REFRESH {status} "
+            f"({mode_name or 'euicc-profile-state-change'}).{self._style.end}"
+        )
+
     def _run_enable_profile_state_command(
         self,
         resolved: Tuple[int, str],
         target_metadata: Optional[ProfileMetadataView],
     ) -> None:
         if target_metadata is None:
-            self._execute_profile_state_command(resolved, self.TAG_ENABLE_PROFILE, "EnableProfile")
+            if self._execute_profile_state_command(resolved, self.TAG_ENABLE_PROFILE, "EnableProfile"):
+                self._queue_modem_refresh("EnableProfile")
             return
 
         if target_metadata.state.upper() == "ENABLED":
@@ -1974,6 +2023,8 @@ class SCP11Console:
         profiles = self._collect_profile_metadata()
         active_profile = self._find_enabled_profile(profiles, exclude_profile=target_metadata)
         if active_profile is not None:
+            if self._allow_auto_disable_for_enable(active_profile, target_metadata) is False:
+                return
             print(
                 f"{self._style.yellow}[*] EnableProfile: auto-disabling active profile "
                 f"{self._describe_profile_metadata(active_profile)}.{self._style.end}"
@@ -1985,7 +2036,8 @@ class SCP11Console:
             ) is False:
                 return
 
-        self._execute_profile_state_command(resolved, self.TAG_ENABLE_PROFILE, "EnableProfile")
+        if self._execute_profile_state_command(resolved, self.TAG_ENABLE_PROFILE, "EnableProfile"):
+            self._queue_modem_refresh("EnableProfile")
 
     def _run_disable_profile_state_command(
         self,
@@ -1996,7 +2048,8 @@ class SCP11Console:
             if target_metadata.state.upper() != "ENABLED":
                 print(f"{self._style.green}[+] DisableProfile: target is already disabled.{self._style.end}")
                 return
-        self._execute_profile_state_command(resolved, self.TAG_DISABLE_PROFILE, "DisableProfile")
+        if self._execute_profile_state_command(resolved, self.TAG_DISABLE_PROFILE, "DisableProfile"):
+            self._queue_modem_refresh("DisableProfile")
 
     def _run_delete_profile_state_command(
         self,
@@ -2004,7 +2057,8 @@ class SCP11Console:
         target_metadata: Optional[ProfileMetadataView],
     ) -> None:
         if target_metadata is None:
-            self._execute_profile_state_command(resolved, self.TAG_DELETE_PROFILE, "DeleteProfile")
+            if self._execute_profile_state_command(resolved, self.TAG_DELETE_PROFILE, "DeleteProfile"):
+                self._queue_modem_refresh("DeleteProfile")
             return
 
         if target_metadata.state.upper() == "ENABLED":
@@ -2023,7 +2077,8 @@ class SCP11Console:
             if self._run_enable_profile_sequence_for_metadata(replacement) is False:
                 return
 
-        self._execute_profile_state_command(resolved, self.TAG_DELETE_PROFILE, "DeleteProfile")
+        if self._execute_profile_state_command(resolved, self.TAG_DELETE_PROFILE, "DeleteProfile"):
+            self._queue_modem_refresh("DeleteProfile")
 
     def _run_enable_profile_sequence_for_metadata(self, target_metadata: ProfileMetadataView) -> bool:
         resolved = self._profile_metadata_to_resolved(target_metadata)
@@ -2037,6 +2092,8 @@ class SCP11Console:
         profiles = self._collect_profile_metadata()
         active_profile = self._find_enabled_profile(profiles, exclude_profile=target_metadata)
         if active_profile is not None:
+            if self._allow_auto_disable_for_enable(active_profile, target_metadata) is False:
+                return False
             print(
                 f"{self._style.yellow}[*] EnableProfile: auto-disabling active profile "
                 f"{self._describe_profile_metadata(active_profile)}.{self._style.end}"
@@ -2048,6 +2105,33 @@ class SCP11Console:
             ) is False:
                 return False
         return self._execute_profile_state_command(resolved, self.TAG_ENABLE_PROFILE, "EnableProfile")
+
+    def _allow_auto_disable_for_enable(
+        self,
+        active_profile: ProfileMetadataView,
+        target_metadata: Optional[ProfileMetadataView],
+    ) -> bool:
+        if self._profile_disable_not_allowed(active_profile) is False:
+            return True
+        target_description = "requested target"
+        if target_metadata is not None:
+            target_description = self._describe_profile_metadata(target_metadata)
+        print(
+            f"{self._style.red}[!] EnableProfile: guarded mode refused to auto-disable active profile "
+            f"{self._describe_profile_metadata(active_profile)} because its PPR advertises "
+            f"ppr1-disable-not-allowed.{self._style.end}"
+        )
+        print(
+            "    Use a rollback-enabled profile switch path, or move the active profile "
+            f"away from {target_description} in the modem before retrying."
+        )
+        return False
+
+    def _profile_disable_not_allowed(self, entry: Optional[ProfileMetadataView]) -> bool:
+        if entry is None:
+            return False
+        decoded = self._decode_ppr_ids(str(getattr(entry, "profile_policy_rules_hex", "") or ""))
+        return "ppr1-disable-not-allowed" in decoded
 
     def _find_enabled_profile(
         self,
@@ -2184,31 +2268,16 @@ class SCP11Console:
         return None
 
     def _resolve_profile_target(self, identifier: str) -> Optional[Tuple[int, str]]:
-        clean = identifier.strip().upper()
-        if len(clean) == 0:
-            return None
-
-        alias_match = self._resolve_aid_from_alias(clean)
-        if alias_match is not None:
-            return self.TAG_AID, alias_match
-
-        if self._is_hex(clean):
-            if clean.startswith("A0") and len(clean) >= 10:
-                return self.TAG_AID, clean
-            if clean.startswith("98") and len(clean) >= 18:
-                return self.TAG_ICCID, clean
-
-        decimal_iccid = self._extract_decimal_iccid(clean)
-        if decimal_iccid is not None:
-            return self.TAG_ICCID, self._encode_iccid_for_command(decimal_iccid)
-
-        profiles = self._fetch_profiles()
-        for row in profiles:
-            if row.iccid.upper() == clean:
-                return self.TAG_ICCID, self._encode_iccid_for_command(row.iccid)
-            if row.aid.upper() == clean:
-                return self.TAG_AID, row.aid
-        return None
+        return resolve_profile_target_identifier(
+            identifier,
+            tag_aid=self.TAG_AID,
+            tag_iccid=self.TAG_ICCID,
+            resolve_aid_from_alias=self._resolve_aid_from_alias,
+            is_hex=self._is_hex,
+            extract_decimal_iccid=self._extract_decimal_iccid,
+            encode_iccid_for_command=self._encode_iccid_for_command,
+            fetch_profiles=self._fetch_profiles,
+        )
 
     def _resolve_aid_from_alias(self, alias: str) -> Optional[str]:
         if alias in self._aid_registry:

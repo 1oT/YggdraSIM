@@ -137,14 +137,17 @@ def _skip_json_ws(text: str, pos: int, end: int) -> int:
     return pos
 
 
-def scan_json_object_members(text: str, start: int, end: int) -> list[tuple[str, int, int]]:
+def scan_json_object_member_entries(
+    text: str,
+    start: int,
+    end: int,
+) -> list[tuple[str, int, int, int, int]]:
     """
-    Best-effort object member scan for partially edited JSON.
+    Best-effort object member scan returning both key and value spans.
 
-    Returns only the members that can be parsed safely from the current buffer and
-    stops quietly once an incomplete key/value fragment is encountered.
+    Each tuple is ``(key_text, key_start, key_end, value_start, value_end)``.
     """
-    out: list[tuple[str, int, int]] = []
+    out: list[tuple[str, int, int, int, int]] = []
     pos = start + 1
     while pos < end:
         pos = _skip_json_ws(text, pos, end)
@@ -153,7 +156,7 @@ def scan_json_object_members(text: str, start: int, end: int) -> list[tuple[str,
         key_start = pos
         try:
             key_end = _scan_json_value_end(text, key_start)
-        except Exception:
+        except (IndexError, ValueError):
             break
         if key_end <= key_start:
             break
@@ -171,15 +174,32 @@ def scan_json_object_members(text: str, start: int, end: int) -> list[tuple[str,
         value_start = pos
         try:
             value_end = _scan_json_value_end(text, value_start)
-        except Exception:
+        except (IndexError, ValueError):
             break
         if value_end <= value_start:
             break
-        out.append((str(key_text), value_start, value_end))
+        out.append((str(key_text), key_start, key_end, value_start, value_end))
         pos = _skip_json_ws(text, value_end, end)
         if pos < end and text[pos] == ",":
             pos += 1
     return out
+
+
+def scan_json_object_members(text: str, start: int, end: int) -> list[tuple[str, int, int]]:
+    """
+    Best-effort object member scan for partially edited JSON.
+
+    Returns only the members that can be parsed safely from the current buffer and
+    stops quietly once an incomplete key/value fragment is encountered.
+    """
+    return [
+        (key_text, value_start, value_end)
+        for key_text, _key_start, _key_end, value_start, value_end in scan_json_object_member_entries(
+            text,
+            start,
+            end,
+        )
+    ]
 
 
 def scan_json_list_items(text: str, start: int, end: int) -> list[tuple[int, int]]:
@@ -193,7 +213,7 @@ def scan_json_list_items(text: str, start: int, end: int) -> list[tuple[int, int
         value_start = pos
         try:
             value_end = _scan_json_value_end(text, value_start)
-        except Exception:
+        except (IndexError, ValueError):
             break
         if value_end <= value_start:
             break
@@ -255,7 +275,7 @@ def enclosing_json_value_span(text: str, lo: int, hi: int) -> tuple[int, int]:
             continue
         try:
             e = _scan_json_value_end(text, t)
-        except Exception:
+        except (IndexError, ValueError):
             s -= 1
             continue
         if lo == hi:

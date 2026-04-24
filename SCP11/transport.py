@@ -12,7 +12,7 @@
 # You should have received a copy of the GNU General Public License
 # along with this program. If not, see <https://www.gnu.org/licenses/>.
 #
-# Copyright (c) 2026 Hampus Hellsberg and contributors
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 # -----------------------------------------------------------------------------
 
 import json
@@ -23,6 +23,7 @@ from typing import Optional, Protocol, Tuple
 
 from yggdrasim_common.session_recording import emit_apdu_trace_event
 from yggdrasim_common.card_backend import create_card_connection
+from SCP11.shared.tls_helpers import create_insecure_context
 
 
 _TRACE_RESET = "\033[0m"
@@ -72,8 +73,17 @@ def _print_apdu_exchange(
             f"{bytes(response).hex().upper()}{_TRACE_RESET}"
         )
         return
+    # Concise mode: the outer send() loop resolves ISO 7816 continuation
+    # status words (61xx / 6Cxx) via GET RESPONSE / Le correction before
+    # returning to the caller. Those intermediate exchanges are
+    # implementation detail - only the initial command label and the
+    # final SW are operator-relevant.
+    if label.endswith("[GET RESPONSE]"):
+        return
     print(f"\n{label_color}[*] {label}{_TRACE_RESET}")
     if status_hex in ("9000", "9100"):
+        return
+    if sw1 in (0x61, 0x6C):
         return
     status_color = _trace_status_color(sw1, sw2)
     print(f"{status_color}    -> SW {status_hex} len={len(response)}{_TRACE_RESET}")
@@ -142,7 +152,7 @@ class RelayHttpClientJsonHex:
             if self._verify_tls:
                 ssl_context = ssl.create_default_context()
             else:
-                ssl_context = ssl._create_unverified_context()
+                ssl_context = create_insecure_context(caller="SCP11.transport")
 
         try:
             with urllib.request.urlopen(request, timeout=self._timeout_seconds, context=ssl_context) as response:

@@ -12,10 +12,11 @@
 # You should have received a copy of the GNU General Public License
 # along with this program. If not, see <https://www.gnu.org/licenses/>.
 #
-# Copyright (c) 2026 Hampus Hellsberg and contributors
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 # -----------------------------------------------------------------------------
 
-from typing import Optional ,Tuple 
+from dataclasses import dataclass
+from typing import Optional 
 from SCP03 .config import Config 
 from SCP03 .core .utils import TlvParser 
 
@@ -32,10 +33,65 @@ AUTH_TEST_VECTOR ={
 "Ki":"465B5CE8B199B49FAA5F0A2EE238A6BC",
 "OP":"CDC202D5123E20F62B6D676AC72CB318",
 "OPc":"CD63CB71954A9F4E48A5994E37A02BAF",
+"SQN":"000000000001",
+"AMF":"8000",
+"AUTN":"AA689C6483718000F48B60145BEACF8E",
 "RES":"A54211D5E3BA50BF",
 "CK":"B40BA9A3C58B2A05BBF0D987B21BF8CB",
-"IK":"F769BC432284C6FE2B7066554707B8D0",
+"IK":"F769BCD751044604127672711C6D3441",
+"Kc":"EAE4BE823AF9A08B",
+"USIM_AUTH_APDU":"00880081221023553CBE9637A89D218AE64DAE47BF3510AA689C6483718000F48B60145BEACF8E00",
+"USIM_AUTH_RESPONSE":"DB08A54211D5E3BA50BF10B40BA9A3C58B2A05BBF0D987B21BF8CB10F769BCD751044604127672711C6D344108EAE4BE823AF9A08B",
 }
+
+
+@dataclass(frozen=True)
+class OfflineAuthVector:
+    rand :str
+    ki :str
+    op :str
+    opc :str
+    res :str
+    ck :str
+    ik :str
+    kc :str
+
+
+@dataclass(frozen=True)
+class OfflineUsimAuthExchange:
+    rand :str
+    autn :str
+    amf :str
+    current_sqn :str
+    recovered_sqn :str
+    next_sqn :str
+    command_payload :str
+    command_apdu :str
+    response_payload :str
+    response_apdu :str
+    status_word :str
+    result :str
+    res :str
+    ck :str
+    ik :str
+    kc :str
+    auts :str =""
+
+
+def _load_milenage_vectors_helper ():
+    try :
+        from SIMCARD .auth import milenage_vectors 
+    except Exception as error :
+        raise RuntimeError ("SIMCARD Milenage helpers unavailable") from error 
+    return milenage_vectors 
+
+
+def _load_usim_auth_helpers ():
+    try :
+        from SIMCARD .auth import build_milenage_autn ,build_milenage_auts ,milenage_vectors 
+    except Exception as error :
+        raise RuntimeError ("SIMCARD auth helpers unavailable") from error 
+    return milenage_vectors ,build_milenage_autn ,build_milenage_auts 
 
 
 class SecurityController :
@@ -131,27 +187,402 @@ class SecurityController :
         opc =bytes (a ^b for a ,b in zip (enc ,plain ))
         return opc .hex ().upper ()
 
+    @staticmethod
+    def _normalize_hex_input (value :str ,expected_chars :int ,label :str )->str :
+        text =str (value or "").replace (" ","").replace (":","").replace ("-","").upper ()
+        if len (text )!=expected_chars :
+            raise ValueError (f"{label} must be {expected_chars} hex chars")
+        return text 
+
+    @staticmethod
+    def _normalize_even_hex (value :str ,label :str )->str :
+        text =str (value or "").replace (" ","").replace (":","").replace ("-","").upper ()
+        if len (text )==0 :
+            raise ValueError (f"{label} must not be empty")
+        if len (text )%2 !=0 :
+            raise ValueError (f"{label} must contain an even number of hex chars")
+        return text 
+
+    @staticmethod
+    def _resolve_offline_auth_material (
+        ki_hex :str ,
+        *,
+        op_hex :str ="",
+        opc_hex :str ="",
+    )->tuple [str ,str ,str ]:
+        normalized_ki =SecurityController ._normalize_hex_input (ki_hex ,32 ,"Ki")
+        normalized_op =str (op_hex or "").replace (" ","").replace (":","").replace ("-","").upper ()
+        normalized_opc =str (opc_hex or "").replace (" ","").replace (":","").replace ("-","").upper ()
+        if len (normalized_opc )==0 :
+            normalized_op =SecurityController ._normalize_hex_input (normalized_op ,32 ,"OP")
+            normalized_opc =SecurityController .derive_opc (normalized_ki ,normalized_op )
+        else :
+            normalized_opc =SecurityController ._normalize_hex_input (normalized_opc ,32 ,"OPc")
+        return normalized_ki ,normalized_op ,normalized_opc 
+
+    @staticmethod
+    def derive_gsm_kc (ck_hex :str ,ik_hex :str )->str :
+        normalized_ck =SecurityController ._normalize_hex_input (ck_hex ,32 ,"CK")
+        normalized_ik =SecurityController ._normalize_hex_input (ik_hex ,32 ,"IK")
+        ck =bytes .fromhex (normalized_ck )
+        ik =bytes .fromhex (normalized_ik )
+        kc =bytes (
+        left ^right ^third ^fourth
+        for left ,right ,third ,fourth in zip (ck [:8 ],ck [8 :],ik [:8 ],ik [8 :])
+        )
+        return kc .hex ().upper ()
+
+    @staticmethod
+    def compute_offline_milenage_vector (
+        rand_hex :str ,
+        ki_hex :str ,
+        *,
+        op_hex :str ="",
+        opc_hex :str ="",
+    )->OfflineAuthVector :
+        normalized_rand =SecurityController ._normalize_hex_input (rand_hex ,32 ,"RAND")
+        normalized_ki ,normalized_op ,normalized_opc =SecurityController ._resolve_offline_auth_material (
+        ki_hex ,
+        op_hex =op_hex ,
+        opc_hex =opc_hex ,
+        )
+        milenage_vectors =_load_milenage_vectors_helper ()
+        vectors =milenage_vectors (
+        bytes .fromhex (normalized_ki ),
+        bytes .fromhex (normalized_opc ),
+        bytes .fromhex (normalized_rand ),
+        b"\x00"*6 ,
+        b"\x00\x00",
+        )
+        ck_value =vectors .ck .hex ().upper ()
+        ik_value =vectors .ik .hex ().upper ()
+        return OfflineAuthVector (
+        rand =normalized_rand ,
+        ki =normalized_ki ,
+        op =normalized_op ,
+        opc =normalized_opc ,
+        res =vectors .res .hex ().upper (),
+        ck =ck_value ,
+        ik =ik_value ,
+        kc =SecurityController .derive_gsm_kc (ck_value ,ik_value ),
+        )
+
+    @staticmethod
+    def build_usim_auth_payload (rand_hex :str ,autn_hex :str )->str :
+        normalized_rand =SecurityController ._normalize_hex_input (rand_hex ,32 ,"RAND")
+        normalized_autn =SecurityController ._normalize_hex_input (autn_hex ,32 ,"AUTN")
+        return f"10{normalized_rand}10{normalized_autn}"
+
+    @staticmethod
+    def build_usim_auth_apdu (rand_hex :str ,autn_hex :str ,cla_hex :str ="00")->str :
+        normalized_cla =SecurityController ._normalize_hex_input (cla_hex ,2 ,"CLA")
+        payload =SecurityController .build_usim_auth_payload (rand_hex ,autn_hex )
+        payload_len =len (payload )//2
+        return f"{normalized_cla}880081{payload_len:02X}{payload}00"
+
+    @staticmethod
+    def build_usim_auth_response_payload (
+        res_hex :str ,
+        ck_hex :str ,
+        ik_hex :str ,
+        kc_hex :str ,
+    )->str :
+        normalized_res =SecurityController ._normalize_even_hex (res_hex ,"RES")
+        normalized_ck =SecurityController ._normalize_even_hex (ck_hex ,"CK")
+        normalized_ik =SecurityController ._normalize_even_hex (ik_hex ,"IK")
+        normalized_kc =SecurityController ._normalize_even_hex (kc_hex ,"Kc")
+        return (
+        "DB"
+        +f"{len (normalized_res )//2:02X}{normalized_res}"
+        +f"{len (normalized_ck )//2:02X}{normalized_ck}"
+        +f"{len (normalized_ik )//2:02X}{normalized_ik}"
+        +f"{len (normalized_kc )//2:02X}{normalized_kc}"
+        )
+
+    @staticmethod
+    def build_usim_auth_response_apdu (
+        res_hex :str ,
+        ck_hex :str ,
+        ik_hex :str ,
+        kc_hex :str ,
+        status_word :str ="9000",
+    )->str :
+        normalized_sw =SecurityController ._normalize_hex_input (status_word ,4 ,"Status word")
+        payload =SecurityController .build_usim_auth_response_payload (res_hex ,ck_hex ,ik_hex ,kc_hex )
+        return payload +normalized_sw 
+
+    @staticmethod
+    def _parse_usim_auth_command_payload (payload :bytes )->tuple [str ,str ]:
+        normalized_payload =bytes (payload or b"")
+        if len (normalized_payload )==32 :
+            rand =normalized_payload [:16 ].hex ().upper ()
+            autn =normalized_payload [16 :32 ].hex ().upper ()
+            return rand ,autn 
+        if len (normalized_payload )!=34 :
+            raise ValueError ("USIM auth payload must be 32 or 34 bytes")
+        if normalized_payload [0 ]!=0x10 :
+            raise ValueError ("USIM auth payload missing RAND length tag")
+        if normalized_payload [17 ]!=0x10 :
+            raise ValueError ("USIM auth payload missing AUTN length tag")
+        rand =normalized_payload [1 :17 ].hex ().upper ()
+        autn =normalized_payload [18 :34 ].hex ().upper ()
+        return rand ,autn 
+
+    @staticmethod
+    def _parse_usim_auth_apdu (command_apdu_hex :str )->tuple [str ,str ,str ,str ]:
+        normalized_apdu =SecurityController ._normalize_even_hex (command_apdu_hex ,"Command APDU")
+        raw_apdu =bytes .fromhex (normalized_apdu )
+        if len (raw_apdu )<5 :
+            raise ValueError ("Command APDU must be at least 5 bytes")
+        ins =raw_apdu [1 ]
+        p2 =raw_apdu [3 ]
+        if ins !=0x88 or p2 !=0x81 :
+            raise ValueError ("Command APDU must be INTERNAL AUTHENTICATE with P2=81")
+        lc =raw_apdu [4 ]
+        payload_start =5 
+        payload_end =payload_start +lc 
+        if len (raw_apdu )not in (payload_end ,payload_end +1 ):
+            raise ValueError ("Command APDU length does not match Lc")
+        payload =raw_apdu [payload_start :payload_end ]
+        rand_hex ,autn_hex =SecurityController ._parse_usim_auth_command_payload (payload )
+        return normalized_apdu ,payload .hex ().upper (),rand_hex ,autn_hex 
+
+    @staticmethod
+    def validate_offline_usim_auth_apdu (
+        command_apdu_hex :str ,
+        ki_hex :str ,
+        *,
+        current_sqn_hex :str ="",
+        op_hex :str ="",
+        opc_hex :str ="",
+    )->OfflineUsimAuthExchange :
+        normalized_ki ,normalized_op ,normalized_opc =SecurityController ._resolve_offline_auth_material (
+        ki_hex ,
+        op_hex =op_hex ,
+        opc_hex =opc_hex ,
+        )
+        normalized_command_apdu ,command_payload ,rand_hex ,autn_hex =SecurityController ._parse_usim_auth_apdu (
+        command_apdu_hex
+        )
+        normalized_current_sqn =str (current_sqn_hex or "").strip ()
+        if len (normalized_current_sqn )>0 :
+            normalized_current_sqn =SecurityController ._normalize_hex_input (
+            normalized_current_sqn ,
+            12 ,
+            "Current SQN",
+            )
+        milenage_vectors ,_build_milenage_autn ,build_milenage_auts =_load_usim_auth_helpers ()
+        del _build_milenage_autn
+        rand =bytes .fromhex (rand_hex )
+        autn =bytes .fromhex (autn_hex )
+        amf =autn [6 :8 ]
+        concealed_sqn =autn [:6 ]
+        initial_vectors =milenage_vectors (
+        bytes .fromhex (normalized_ki ),
+        bytes .fromhex (normalized_opc ),
+        rand ,
+        b"\x00"*6 ,
+        amf ,
+        )
+        recovered_sqn_bytes =bytes (
+        left ^right
+        for left ,right in zip (concealed_sqn ,initial_vectors .ak )
+        )
+        recovered_sqn =recovered_sqn_bytes .hex ().upper ()
+        vectors =milenage_vectors (
+        bytes .fromhex (normalized_ki ),
+        bytes .fromhex (normalized_opc ),
+        rand ,
+        recovered_sqn_bytes ,
+        amf ,
+        )
+        res_hex =vectors .res .hex ().upper ()
+        ck_hex =vectors .ck .hex ().upper ()
+        ik_hex =vectors .ik .hex ().upper ()
+        kc_hex =vectors .kc .hex ().upper ()
+        if vectors .mac_a !=autn [8 :16 ]:
+            return OfflineUsimAuthExchange (
+            rand =rand_hex ,
+            autn =autn_hex ,
+            amf =amf .hex ().upper (),
+            current_sqn =normalized_current_sqn ,
+            recovered_sqn =recovered_sqn ,
+            next_sqn =normalized_current_sqn or recovered_sqn ,
+            command_payload =command_payload ,
+            command_apdu =normalized_command_apdu ,
+            response_payload ="",
+            response_apdu ="9862",
+            status_word ="9862",
+            result ="mac_failure",
+            res =res_hex ,
+            ck =ck_hex ,
+            ik =ik_hex ,
+            kc =kc_hex ,
+            auts ="",
+            )
+        effective_current_sqn =normalized_current_sqn or recovered_sqn 
+        effective_current_sqn_value =int (effective_current_sqn ,16 )
+        recovered_sqn_value =int (recovered_sqn ,16 )
+        if recovered_sqn_value <effective_current_sqn_value :
+            auts =build_milenage_auts (
+            bytes .fromhex (normalized_ki ),
+            bytes .fromhex (normalized_opc ),
+            rand ,
+            bytes .fromhex (effective_current_sqn ),
+            ).hex ().upper ()
+            response_payload ="DC0E"+auts 
+            return OfflineUsimAuthExchange (
+            rand =rand_hex ,
+            autn =autn_hex ,
+            amf =amf .hex ().upper (),
+            current_sqn =effective_current_sqn ,
+            recovered_sqn =recovered_sqn ,
+            next_sqn =effective_current_sqn ,
+            command_payload =command_payload ,
+            command_apdu =normalized_command_apdu ,
+            response_payload =response_payload ,
+            response_apdu =response_payload +"9000",
+            status_word ="9000",
+            result ="sync_failure",
+            res =res_hex ,
+            ck =ck_hex ,
+            ik =ik_hex ,
+            kc =kc_hex ,
+            auts =auts ,
+            )
+        next_sqn =f"{max (effective_current_sqn_value ,recovered_sqn_value )+1:012X}"
+        response_payload =SecurityController .build_usim_auth_response_payload (
+        res_hex ,
+        ck_hex ,
+        ik_hex ,
+        kc_hex ,
+        )
+        return OfflineUsimAuthExchange (
+        rand =rand_hex ,
+        autn =autn_hex ,
+        amf =amf .hex ().upper (),
+        current_sqn =effective_current_sqn ,
+        recovered_sqn =recovered_sqn ,
+        next_sqn =next_sqn ,
+        command_payload =command_payload ,
+        command_apdu =normalized_command_apdu ,
+        response_payload =response_payload ,
+        response_apdu =response_payload +"9000",
+        status_word ="9000",
+        result ="success",
+        res =res_hex ,
+        ck =ck_hex ,
+        ik =ik_hex ,
+        kc =kc_hex ,
+        auts ="",
+        )
+
+    @staticmethod
+    def compute_offline_usim_auth_exchange (
+        rand_hex :str ,
+        ki_hex :str ,
+        sqn_hex :str ,
+        amf_hex :str ,
+        *,
+        op_hex :str ="",
+        opc_hex :str ="",
+        current_sqn_hex :str ="",
+    )->OfflineUsimAuthExchange :
+        normalized_ki ,normalized_op ,normalized_opc =SecurityController ._resolve_offline_auth_material (
+        ki_hex ,
+        op_hex =op_hex ,
+        opc_hex =opc_hex ,
+        )
+        normalized_rand =SecurityController ._normalize_hex_input (rand_hex ,32 ,"RAND")
+        normalized_sqn =SecurityController ._normalize_hex_input (sqn_hex ,12 ,"SQN")
+        normalized_amf =SecurityController ._normalize_hex_input (amf_hex ,4 ,"AMF")
+        _milenage_vectors ,build_milenage_autn ,_build_milenage_auts =_load_usim_auth_helpers ()
+        del _milenage_vectors
+        del _build_milenage_auts
+        autn =build_milenage_autn (
+        bytes .fromhex (normalized_ki ),
+        bytes .fromhex (normalized_opc ),
+        bytes .fromhex (normalized_rand ),
+        bytes .fromhex (normalized_sqn ),
+        bytes .fromhex (normalized_amf ),
+        ).hex ().upper ()
+        command_apdu =SecurityController .build_usim_auth_apdu (normalized_rand ,autn )
+        return SecurityController .validate_offline_usim_auth_apdu (
+        command_apdu ,
+        normalized_ki ,
+        current_sqn_hex =current_sqn_hex or normalized_sqn ,
+        op_hex =normalized_op ,
+        opc_hex =normalized_opc ,
+        )
+
+    @staticmethod
+    def build_auth_test_vector_report ()->OfflineAuthVector :
+        return SecurityController .compute_offline_milenage_vector (
+        AUTH_TEST_VECTOR ["RAND"],
+        AUTH_TEST_VECTOR ["Ki"],
+        op_hex =AUTH_TEST_VECTOR ["OP"],
+        )
+
+    @staticmethod
+    def build_auth_test_usim_exchange ()->OfflineUsimAuthExchange :
+        return SecurityController .compute_offline_usim_auth_exchange (
+        AUTH_TEST_VECTOR ["RAND"],
+        AUTH_TEST_VECTOR ["Ki"],
+        AUTH_TEST_VECTOR ["SQN"],
+        AUTH_TEST_VECTOR ["AMF"],
+        op_hex =AUTH_TEST_VECTOR ["OP"],
+        current_sqn_hex =AUTH_TEST_VECTOR ["SQN"],
+        )
+
     def run_auth_test_vector (self ):
         """
-        Run authentication using 3GPP TS 35.207 test set 1 and print expected vs card output.
+        Run offline authentication validation using 3GPP TS 35.207 style values.
         """
         print (f"{Config.Colors.HEADER}=== Milenage Test Vector (3GPP TS 35.207) ==={Config.Colors.ENDC}")
         print (f"  RAND: {AUTH_TEST_VECTOR['RAND']}")
         print (f"  Ki:   {AUTH_TEST_VECTOR['Ki']}")
         print (f"  OP:   {AUTH_TEST_VECTOR['OP']}")
         try :
-            derived =self .derive_opc (AUTH_TEST_VECTOR ["Ki"],AUTH_TEST_VECTOR ["OP"])
-            print (f"  OPc (derived): {derived}")
+            report =self .build_auth_test_vector_report ()
+            print (f"  OPc (derived): {report.opc}")
             print (f"  OPc (expected): {AUTH_TEST_VECTOR['OPc']}")
-            match ="OK"if derived ==AUTH_TEST_VECTOR ["OPc"]else "MISMATCH"
+            match ="OK"if report .opc ==AUTH_TEST_VECTOR ["OPc"]else "MISMATCH"
             print (f"  OPc check: {Config.Colors.GREEN if match == 'OK' else Config.Colors.FAIL}{match}{Config.Colors.ENDC}")
+            print (f"  RES (derived): {report.res}")
+            print (f"  RES (expected): {AUTH_TEST_VECTOR['RES']}")
+            match ="OK"if report .res ==AUTH_TEST_VECTOR ["RES"]else "MISMATCH"
+            print (f"  RES check: {Config.Colors.GREEN if match == 'OK' else Config.Colors.FAIL}{match}{Config.Colors.ENDC}")
+            print (f"  CK  (derived): {report.ck}")
+            print (f"  CK  (expected): {AUTH_TEST_VECTOR['CK']}")
+            match ="OK"if report .ck ==AUTH_TEST_VECTOR ["CK"]else "MISMATCH"
+            print (f"  CK  check: {Config.Colors.GREEN if match == 'OK' else Config.Colors.FAIL}{match}{Config.Colors.ENDC}")
+            print (f"  IK  (derived): {report.ik}")
+            print (f"  IK  (expected): {AUTH_TEST_VECTOR['IK']}")
+            match ="OK"if report .ik ==AUTH_TEST_VECTOR ["IK"]else "MISMATCH"
+            print (f"  IK  check: {Config.Colors.GREEN if match == 'OK' else Config.Colors.FAIL}{match}{Config.Colors.ENDC}")
+            print (f"  Kc  (derived): {report.kc}")
+            print (f"  Kc  (expected): {AUTH_TEST_VECTOR['Kc']}")
+            match ="OK"if report .kc ==AUTH_TEST_VECTOR ["Kc"]else "MISMATCH"
+            print (f"  Kc  check: {Config.Colors.GREEN if match == 'OK' else Config.Colors.FAIL}{match}{Config.Colors.ENDC}")
+            exchange =self .build_auth_test_usim_exchange ()
+            print (f"  SQN:  {AUTH_TEST_VECTOR['SQN']}")
+            print (f"  AMF:  {AUTH_TEST_VECTOR['AMF']}")
+            print (f"  AUTN (derived): {exchange.autn}")
+            print (f"  AUTN (expected): {AUTH_TEST_VECTOR['AUTN']}")
+            match ="OK"if exchange .autn ==AUTH_TEST_VECTOR ["AUTN"]else "MISMATCH"
+            print (f"  AUTN check: {Config.Colors.GREEN if match == 'OK' else Config.Colors.FAIL}{match}{Config.Colors.ENDC}")
+            print (f"  00 88 APDU (derived): {exchange.command_apdu}")
+            print (f"  00 88 APDU (expected): {AUTH_TEST_VECTOR['USIM_AUTH_APDU']}")
+            match ="OK"if exchange .command_apdu ==AUTH_TEST_VECTOR ["USIM_AUTH_APDU"]else "MISMATCH"
+            print (f"  APDU check: {Config.Colors.GREEN if match == 'OK' else Config.Colors.FAIL}{match}{Config.Colors.ENDC}")
+            print (f"  Response payload (derived): {exchange.response_payload}")
+            print (f"  Response payload (expected): {AUTH_TEST_VECTOR['USIM_AUTH_RESPONSE']}")
+            match ="OK"if exchange .response_payload ==AUTH_TEST_VECTOR ["USIM_AUTH_RESPONSE"]else "MISMATCH"
+            print (f"  Response check: {Config.Colors.GREEN if match == 'OK' else Config.Colors.FAIL}{match}{Config.Colors.ENDC}")
+            print (f"  Response APDU (derived): {exchange.response_apdu}")
+            print (f"{Config.Colors.CYAN}[*] Offline vector check complete. Use RUN-AUTH for live APDU execution.{Config.Colors.ENDC}")
         except Exception as e :
-            print (f"  OPc derivation: {Config.Colors.FAIL}{e}{Config.Colors.ENDC}")
-        print (f"  Expected RES: {AUTH_TEST_VECTOR['RES']}")
-        print (f"  Expected CK:  {AUTH_TEST_VECTOR['CK']}")
-        print (f"  Expected IK:  {AUTH_TEST_VECTOR['IK']}")
-        print (f"{Config.Colors.CYAN}[*] Sending RAND to card (USIM auth)...{Config.Colors.ENDC}")
-        self .run_auth (AUTH_TEST_VECTOR ["RAND"],autn =None ,app_context ="USIM")
+            print (f"  Offline vector check: {Config.Colors.FAIL}{e}{Config.Colors.ENDC}")
 
     def _smart_select_app (self ,target_type :str )->bool :
 
@@ -189,7 +620,7 @@ class SecurityController :
                         print (f"{Config.Colors.CYAN}[*] Found {target_type} App: {label} ({aid}){Config.Colors.ENDC}")
                         found_aid =aid 
                         break 
-            except :continue 
+            except Exception :continue 
 
 
         if found_aid :
@@ -277,7 +708,7 @@ class SecurityController :
                 if idx <len (data ):
                     kc_len =data [idx ];idx +=1 
                     print (f"    Kc  : {Config.Colors.GREEN}{data[idx:idx+kc_len].hex().upper()}{Config.Colors.ENDC}")
-            except :
+            except Exception :
                 print (f"{Config.Colors.WARNING}[!] Output truncated{Config.Colors.ENDC}")
 
         elif len (data )>=12 :

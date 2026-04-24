@@ -12,7 +12,7 @@
 # You should have received a copy of the GNU General Public License
 # along with this program. If not, see <https://www.gnu.org/licenses/>.
 #
-# Copyright (c) 2026 Hampus Hellsberg and contributors
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 # -----------------------------------------------------------------------------
 
 import sys 
@@ -29,6 +29,49 @@ except ImportError :
     if str (repo_root )not in sys .path :
         sys .path .insert (0 ,str (repo_root ))
     from yggdrasim_common.device_inventory import DeviceInventoryStore 
+
+_DEMO_KEYS_WARNED =False 
+
+
+def enforce_demo_key_policy (key_enc :str ,key_mac :str )->None :
+    """Warn / fail when OTA SCP80 key slots still carry the shipped weak placeholder.
+
+    Environment flags:
+    - YGGDRASIM_REQUIRE_NON_DEMO_KEYS=1 raises RuntimeError so a deployment
+      script cannot accidentally ship an OTA packet MAC'd with placeholder keys.
+    - YGGDRASIM_ALLOW_DEMO_KEYS=1 silences the warning for the current process.
+    """
+    global _DEMO_KEYS_WARNED 
+    placeholder_enc =ConfigManager .DEFAULTS .get ("key_enc","")
+    placeholder_mac =ConfigManager .DEFAULTS .get ("key_mac","")
+    hits =[]
+    if str (key_enc or "").strip ().upper ()==placeholder_enc .upper ():
+        hits .append ("key_enc")
+    if str (key_mac or "").strip ().upper ()==placeholder_mac .upper ():
+        hits .append ("key_mac")
+    if len (hits )==0 :
+        return 
+    require_flag =os .environ .get ("YGGDRASIM_REQUIRE_NON_DEMO_KEYS","").strip ().lower ()
+    if require_flag in ("1","true","yes","on"):
+        raise RuntimeError (
+        "Refusing to build an SCP80 OTA packet with shipped demo keys in slots: "
+        +", ".join (hits )
+        +". Populate ota_config.ini with real values or unset "
+        "YGGDRASIM_REQUIRE_NON_DEMO_KEYS."
+        )
+    allow_flag =os .environ .get ("YGGDRASIM_ALLOW_DEMO_KEYS","").strip ().lower ()
+    if allow_flag in ("1","true","yes","on"):
+        return 
+    if _DEMO_KEYS_WARNED :
+        return 
+    _DEMO_KEYS_WARNED =True 
+    sys .stderr .write (
+    "[SCP80] WARNING: shipped demo keys active for slots: "
+    +", ".join (hits )
+    +". Never use these against a real card. Set YGGDRASIM_ALLOW_DEMO_KEYS=1 "
+    "to silence, or YGGDRASIM_REQUIRE_NON_DEMO_KEYS=1 to fail fast.\n"
+    )
+
 
 class ConfigManager :
     MODULE_STATE_NAME ="scp80_config"
@@ -101,7 +144,7 @@ class ConfigManager :
             return 
         try :
             self .file_path .write_text (bundled_default .read_text ())
-        except Exception :
+        except OSError :
             pass 
 
     def load (self ):

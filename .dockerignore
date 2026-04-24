@@ -1,0 +1,68 @@
+# Agent, IDE, and SCM metadata not needed inside the image.
+.cursor/
+.git/
+.github/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+.venv/
+agent-transcripts/
+venv/
+
+# Python bytecode and local caches.
+__pycache__/
+*.pyc
+*.pyo
+*.swp
+
+# Sensitive or operator-only runtime state. The image creates a fresh
+# ``/opt/YggdraSIM-data`` root on first boot; host-side state must not
+# bleed in at build time.
+YggdraSIM-data/
+Workspace/
+state/
+Latjo/
+*.db
+*.sqlite3
+
+# Developer capture / scratch trees that can balloon context size.
+trace/
+.profilepackage-cache/
+.pytest_agent_log*.txt
+.pytest_chunk_log*.txt
+.pytest_last_run*.log
+.pytest_pre_log*.txt
+.unittest_agent_log*.txt
+.unittest_last_run*.log
+.run_*.txt
+.smoke_*
+.tshark_*
+.tmuxshark*
+.live_*pdml*
+.active_env_exact_pdml*
+.direct_*_probe*
+.sudo_pdml_probe*
+.user_pdml_probe*
+.hil_tui_*
+.hil_decode_tui_probe*
+
+# Build artefacts that get regenerated inside the image.
+build/
+dist/
+site/
+yggdrasim.egg-info/
+
+# Optional upstream checkouts that are gitignored at the repo level. They
+# are NOT vendored — ``pysim/`` is cloned from
+# https://gitlab.com/osmocom/pysim.git by operators who need the SAIP
+# ASN.1 compile path or the SCP11-local flows; ``pyscard/`` only ever
+# appears as a stale virtualenv and must never reach the image. Both are
+# excluded from the build context to keep layers small.
+pysim/
+pyscard/
+
+# Documentation output and ephemeral reports.
+reports/
+YggdraSIM.md
+reference_test_profile.transcode.*
+demo.der

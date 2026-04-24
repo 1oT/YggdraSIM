@@ -12,16 +12,14 @@
 # You should have received a copy of the GNU General Public License
 # along with this program. If not, see <https://www.gnu.org/licenses/>.
 #
-# Copyright (c) 2026 Hampus Hellsberg and contributors
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 # -----------------------------------------------------------------------------
 
-from typing import List ,Dict ,Optional 
+import hmac 
+from typing import List ,Dict 
 from cryptography .hazmat .primitives .ciphers import Cipher ,algorithms ,modes 
 from cryptography .hazmat .primitives import cmac 
 
-
-from SCP03 .config import Config 
-from SCP03 .core .utils import HexUtils 
 
 class Scp03Session :
     def __init__ (self ,static_keys :Dict [str ,bytes ]):
@@ -60,8 +58,8 @@ class Scp03Session :
         self .s_mac =self ._kdf (self .k_mac ,b'\x06',context ,128 )
         self .s_rmac =self ._kdf (self .k_mac ,b'\x07',context ,128 )
         expected =self ._gen_crypto (b'\x00')
-        if expected !=card_cryptogram :
-            raise Exception (f"Card Cryptogram Mismatch! Expected {expected.hex().upper()}")
+        if not hmac .compare_digest (expected ,card_cryptogram ):
+            raise RuntimeError (f"Card Cryptogram Mismatch! Expected {expected.hex().upper()}")
         self .proprietary_iv =None 
 
     def calculate_host_cryptogram (self )->bytes :
@@ -158,16 +156,13 @@ class Scp03Session :
                     unpadded =dec [:pad_idx ]
                     if len (unpadded )>0 :
                         return unpadded 
-            except :
+            except Exception :
                 pass 
 
         return payload 
 
     def encrypt_key_data (self ,key_bytes :bytes )->bytes :
-        from cryptography .hazmat .primitives .ciphers import Cipher ,algorithms ,modes 
         import binascii 
-        import configparser 
-        import os 
 
         target_dek =None 
 
@@ -210,7 +205,7 @@ class Scp03Session :
                     is_missing =False 
 
         if is_missing :
-            raise Exception ("DEK attribute is missing from the active SCP03 SQLite state.")
+            raise RuntimeError ("DEK attribute is missing from the active SCP03 SQLite state.")
 
         is_string =False 
         if isinstance (target_dek ,str ):

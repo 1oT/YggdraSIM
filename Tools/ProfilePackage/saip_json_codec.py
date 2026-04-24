@@ -23,7 +23,10 @@ from collections import OrderedDict
 from pathlib import Path
 from typing import Any
 
+from yggdrasim_common.runtime_paths import bundle_root as runtime_bundle_root
+
 _TYPE_SUFFIX_RE = re.compile(r"_(\d+)$")
+_DISPLAY_WORD_RE = re.compile(r"[A-Z]+[0-9]+|[0-9]+[A-Za-z]+|[A-Z]+(?=[A-Z][a-z]|[0-9]|$)|[A-Z]?[a-z]+|[0-9]+")
 
 _TAG_BYTES = "hex"
 _TAG_TUPLE = "@"
@@ -83,7 +86,7 @@ def _raise_codec_error(error: Exception, path: tuple[str, ...]) -> None:
 
 # Human-oriented hints next to ``__ygg_saip_bytes__`` (ignored on dejsonify / encode).
 _JSON_VALUE_LABELS: dict[str, str] = {
-    "fillFileContent": "Fill file content (SAIP)",
+    "fillFileContent": "File content",
     "header": "Profile header PE",
     "application": "Application PE",
     "nonStandard": "Non-standard PE",
@@ -121,6 +124,78 @@ _JSON_VALUE_LABELS: dict[str, str] = {
 }
 
 
+_DISPLAY_NAME_OVERRIDES: dict[str, str] = {
+    "applicationspecificparametersc9": "Application specific parameters C9",
+    "createfcp": "Create FCP",
+    "effilesize": "EF file size",
+    "filedescriptor": "File descriptor",
+    "fileid": "File ID",
+    "filemanagementcmd": "File management CMD",
+    "filepath": "File path",
+    "fillfilecontent": "File content",
+    "fillfileoffset": "Fill file offset",
+    "securityattributesreferenced": "Referenced security attributes",
+    "shortefid": "Short EF Identifier",
+    "uicctoolkitapplicationspecificparametersfield": (
+        "UICC toolkit application specific parameters field"
+    ),
+}
+
+
+_DISPLAY_WORD_OVERRIDES: dict[str, str] = {
+    "3gpp": "3GPP",
+    "5g": "5G",
+    "5gs": "5GS",
+    "5gprose": "5GProSe",
+    "adf": "ADF",
+    "aid": "AID",
+    "aka": "AKA",
+    "apn": "APN",
+    "arr": "ARR",
+    "ber": "BER",
+    "cmd": "CMD",
+    "df": "DF",
+    "der": "DER",
+    "dns": "DNS",
+    "eap": "EAP",
+    "ef": "EF",
+    "eim": "EIM",
+    "est": "EST",
+    "fcp": "FCP",
+    "fid": "FID",
+    "gsm": "GSM",
+    "iccid": "ICCID",
+    "id": "ID",
+    "imsi": "IMSI",
+    "isim": "ISIM",
+    "ist": "IST",
+    "json": "JSON",
+    "lcsi": "LCSI",
+    "msisdn": "MSISDN",
+    "naf": "NAF",
+    "nai": "NAI",
+    "oid": "OID",
+    "ota": "OTA",
+    "pe": "PE",
+    "pin": "PIN",
+    "pkcs15": "PKCS15",
+    "puk": "PUK",
+    "rfm": "RFM",
+    "saip": "SAIP",
+    "scp": "SCP",
+    "sfi": "SFI",
+    "sim": "SIM",
+    "snpn": "SNPN",
+    "sqn": "SQN",
+    "suci": "SUCI",
+    "supi": "SUPI",
+    "tar": "TAR",
+    "uicc": "UICC",
+    "usim": "USIM",
+    "ust": "UST",
+}
+
+
 def _canonical_tag_key(key: str) -> str:
     mapping = {
         _LEGACY_TAG_BYTES: _TAG_BYTES,
@@ -140,18 +215,62 @@ def _value_first(value: dict[str, Any], *keys: str) -> Any:
 
 
 def _label_for_path_segment(segment: str) -> str:
-    k = str(segment).strip()
-    if k in _JSON_VALUE_LABELS:
-        return _JSON_VALUE_LABELS[k]
-    if k.startswith("ef-"):
-        return f"EF field ({k})"
-    if k.startswith("[") and k.endswith("]"):
-        return k
-    return k.replace("-", " ")
+    return humanize_saip_display_name(segment)
 
 
-def _display_label_for_json_path(path: tuple[str, ...]) -> str | None:
+def humanize_saip_display_name(segment: str) -> str:
+    normalized = _canonical_tag_key(str(segment).strip())
+    if len(normalized) == 0:
+        return ""
+    mapped_label = _JSON_VALUE_LABELS.get(normalized)
+    if mapped_label is None:
+        mapped_label = _JSON_VALUE_LABELS.get(normalized.lower())
+    if mapped_label is not None:
+        return mapped_label
+    override_label = _DISPLAY_NAME_OVERRIDES.get(normalized.lower())
+    if override_label is not None:
+        return override_label
+    if normalized.startswith("[") and normalized.endswith("]"):
+        return normalized
+    words: list[str] = []
+    raw_chunks = normalized.replace("-", " ").replace("_", " ").split()
+    for raw_chunk in raw_chunks:
+        chunk_override = _DISPLAY_WORD_OVERRIDES.get(raw_chunk.lower())
+        if chunk_override is not None:
+            words.append(chunk_override)
+            continue
+        chunk_words = _DISPLAY_WORD_RE.findall(raw_chunk)
+        if len(chunk_words) == 0:
+            chunk_words = [raw_chunk]
+        for chunk_word in chunk_words:
+            word_override = _DISPLAY_WORD_OVERRIDES.get(chunk_word.lower())
+            if word_override is not None:
+                words.append(word_override)
+                continue
+            if chunk_word.isdigit():
+                words.append(chunk_word)
+                continue
+            if chunk_word.isupper():
+                words.append(chunk_word)
+                continue
+            words.append(chunk_word.lower())
+    if len(words) == 0:
+        return normalized
+    first_word = words[0]
+    if len(first_word) > 0:
+        if first_word.isupper() is False:
+            if first_word[0].isdigit() is False:
+                words[0] = first_word[:1].upper() + first_word[1:]
+    return " ".join(words)
+
+
+def humanize_saip_display_path(
+    path: tuple[str, ...] | list[str],
+    *,
+    limit: int = 4,
+) -> str | None:
     parts: list[str] = []
+    last_non_index_key: str | None = None
     for raw in path:
         key = _canonical_tag_key(str(raw).strip())
         if key in ("", "sections", "intro", _TAG_BYTES, _TAG_TUPLE, _TAG_PLACEHOLDER):
@@ -160,15 +279,49 @@ def _display_label_for_json_path(path: tuple[str, ...]) -> str | None:
             continue
         if key.startswith("__ygg_"):
             continue
-        if key.startswith("[") and len(parts) > 0:
+        if key.startswith("[") and key.endswith("]") and len(parts) > 0:
+            if isinstance(last_non_index_key, str) and last_non_index_key.startswith("ef-"):
+                continue
             parts[-1] = parts[-1] + f" {key}"
             continue
         parts.append(_label_for_path_segment(key))
+        last_non_index_key = key
     if len(parts) == 0:
         return None
-    if len(parts) > 4:
-        parts = parts[-4:]
+    if limit > 0:
+        if len(parts) > limit:
+            parts = parts[-limit:]
     return " / ".join(parts)
+
+
+def _display_label_for_json_path(path: tuple[str, ...]) -> str | None:
+    return humanize_saip_display_path(path)
+
+
+def _encode_ber_tlv_length(byte_length: int) -> bytes:
+    """Encode ``byte_length`` as BER-TLV length octets (ISO 7816-4 / X.690).
+
+    Values in 0..127 are emitted as a single short-form byte. Larger lengths
+    use the long form ``0x80 | N`` followed by ``N`` big-endian length
+    octets. Callers pass the number of content octets that the companion
+    placeholder will expand to.
+    """
+
+    if byte_length < 0:
+        raise ValueError("Derived-length token cannot encode a negative length.")
+    if byte_length < 0x80:
+        return bytes([byte_length])
+    buffer: list[int] = []
+    remaining = byte_length
+    while remaining > 0:
+        buffer.append(remaining & 0xFF)
+        remaining >>= 8
+    if len(buffer) > 0x7E:
+        raise ValueError(
+            "Derived-length token exceeds BER-TLV long-form capacity (max 126 octets)."
+        )
+    buffer.reverse()
+    return bytes([0x80 | len(buffer)]) + bytes(buffer)
 
 
 class TokenExpansionContext:
@@ -181,9 +334,21 @@ class TokenExpansionContext:
 
     The same token name always expands from the same definition; occurrences are not
     cross-checked for consistency (e.g. multiple ``{ICCID}`` need not match).
+
+    A ``{#NAME}`` / ``[#NAME]`` companion form emits the BER-TLV length octets
+    of the resolved ``NAME`` token, letting templates stay in sync when the
+    resolved byte-length of a placeholder changes. The content byte-length is
+    encoded in short form (``0x00..0x7F``) or long form
+    (``0x81 LL``, ``0x82 LL LL``, ``0x83 LL LL LL`` ...).
     """
 
-    def __init__(self, defs: dict[str, Any], style: str) -> None:
+    def __init__(
+        self,
+        defs: dict[str, Any],
+        style: str,
+        *,
+        tolerate_undefined: bool = False,
+    ) -> None:
         if isinstance(defs, dict) is False:
             raise ValueError(f"{_META_TOKEN_DEFS} must be a JSON object.")
         self.defs = dict(defs)
@@ -195,17 +360,48 @@ class TokenExpansionContext:
                 f'{_META_PLACEHOLDER_STYLE} must be "brace" or "bracket" (got {style!r}).'
             )
         self.style = norm
+        # Pattern captures (length_marker, name). The ``#`` marker is optional
+        # and tags the match as a derived-length companion rather than a
+        # content substitution.
         if norm == "brace":
-            self._pat = re.compile(r"\{([A-Za-z][A-Za-z0-9_]*)\}")
+            self._pat = re.compile(r"\{(#)?([A-Za-z][A-Za-z0-9_]*)\}")
         else:
-            self._pat = re.compile(r"\[([A-Za-z][A-Za-z0-9_]*)\]")
+            self._pat = re.compile(r"\[(#)?([A-Za-z][A-Za-z0-9_]*)\]")
+        self.tolerate_undefined = bool(tolerate_undefined)
+        # Names of undefined tokens encountered while tolerate_undefined=True.
+        # Callers (e.g. the TUI lint harness) can inspect this to report
+        # which placeholders still need definitions.
+        self.undefined_tokens: set[str] = set()
 
     def resolve_named(self, name: str) -> bytes:
         if name not in self.defs:
+            if self.tolerate_undefined:
+                self.undefined_tokens.add(str(name))
+                return b""
             raise ValueError(
                 f"Undefined placeholder token {name!r}; add it under {_META_TOKEN_DEFS}."
             )
         return _placeholder_inner_to_bytes(self.defs[name], self)
+
+    def resolve_length(self, name: str) -> bytes:
+        """Resolve ``{#NAME}`` / ``[#NAME]`` to BER-TLV length octets.
+
+        When the companion ``NAME`` token is undefined and
+        ``tolerate_undefined`` is set, emits a single ``0x00`` octet (short-form
+        length for an empty content token) and records the undefined name so
+        the lint harness can surface it.
+        """
+
+        if name not in self.defs:
+            if self.tolerate_undefined:
+                self.undefined_tokens.add(str(name))
+                return bytes([0x00])
+            raise ValueError(
+                f"Undefined placeholder token {name!r} referenced via "
+                f"derived-length companion; add it under {_META_TOKEN_DEFS}."
+            )
+        resolved = _placeholder_inner_to_bytes(self.defs[name], self)
+        return _encode_ber_tlv_length(len(resolved))
 
     def expand_mixed_hex(self, text: str) -> bytes:
         if self._pat.search(text) is None:
@@ -225,7 +421,12 @@ class TokenExpansionContext:
                 raise ValueError("Hex fragment before placeholder has odd length.")
             if len(compact) > 0:
                 parts.append(bytes.fromhex(compact))
-            parts.append(self.resolve_named(match.group(1)))
+            length_marker = match.group(1)
+            token_name = match.group(2)
+            if length_marker is not None:
+                parts.append(self.resolve_length(token_name))
+            else:
+                parts.append(self.resolve_named(token_name))
             pos = match.end()
 
         tail = text[pos:].replace(" ", "").replace("\n", "").replace("\t", "")
@@ -301,15 +502,82 @@ def _placeholder_inner_to_bytes(inner: Any, ctx: TokenExpansionContext | None = 
     )
 
 
-def ensure_workspace_pysim_on_path(workspace_root: Path) -> Path:
-    """Insert bundled pysim tree on sys.path. Required before pySim.esim.saip imports."""
-    pysim_root = Path(workspace_root).resolve() / "pysim"
-    if pysim_root.is_dir() is False:
-        raise RuntimeError(f"Local pySim source tree not found: {pysim_root}")
-    root_text = str(pysim_root)
-    if root_text not in sys.path:
-        sys.path.insert(0, root_text)
-    return pysim_root
+def ensure_workspace_pysim_on_path(
+    workspace_root: Path,
+    bundle_root_path: Path | None = None,
+) -> Path:
+    """Make ``pySim.esim.saip`` importable and return the resolved root.
+
+    Resolution order, in descending priority:
+
+    1. A developer checkout at ``<workspace>/pysim`` or the PyInstaller
+       bundle root. This lets a maintainer work against an unreleased
+       upstream branch without reinstalling after every change.
+    2. A pip-installed ``pySim`` package (e.g. from the ``[saip]`` extra
+       or ``pip install 'pySim @ git+https://github.com/osmocom/pysim.git'``).
+       When the package is already importable we accept it as-is and
+       return the directory that ``pySim.__file__`` resolves to, so
+       callers that log the "pysim root" still get a meaningful path.
+
+    We only raise ``RuntimeError`` when **both** paths fail; the
+    message points the operator at the recommended install command.
+    This avoids the previous behaviour where a perfectly valid
+    ``pip install yggdrasim[saip]`` still broke the SAIP TUI because
+    the on-disk clone was absent.
+
+    .. warning::
+       Callers MUST NOT re-insert the returned path into ``sys.path``.
+       For the on-disk case this helper has already done so; for the
+       pip-installed case the returned path points *inside*
+       ``site-packages/pySim/`` (the package directory itself).
+       Adding that directory to ``sys.path`` would shadow stdlib
+       ``pprint`` with ``pySim/pprint.py`` and trigger a circular
+       import in ``asn1tools`` (``from pprint import pformat``
+       resolves to the pySim submodule, whose ``from pprint import
+       PrettyPrinter`` then self-references). Consume the return
+       value for logging and diagnostics only.
+    """
+    candidates = [
+        Path(workspace_root).resolve() / "pysim",
+    ]
+    if bundle_root_path is not None:
+        candidates.append(Path(bundle_root_path).resolve() / "pysim")
+    candidates.append(Path(runtime_bundle_root()).resolve() / "pysim")
+
+    seen: set[Path] = set()
+    for candidate in candidates:
+        if candidate in seen:
+            continue
+        seen.add(candidate)
+        if candidate.is_dir():
+            root_text = str(candidate)
+            if root_text not in sys.path:
+                sys.path.insert(0, root_text)
+            return candidate
+
+    try:
+        import pySim  # noqa: F401  (import-probe; resolves to site-packages)
+    except ImportError as import_error:
+        tried = ", ".join(str(path) for path in seen)
+        raise RuntimeError(
+            "pySim is not available. Install the upstream package via "
+            "`pip install 'yggdrasim[saip]'` (recommended) or "
+            "`pip install 'pySim @ git+https://github.com/osmocom/pysim.git'`, "
+            "or clone the upstream tree into one of: "
+            f"{tried}. Underlying import error: "
+            f"{type(import_error).__name__}: {import_error}."
+        ) from import_error
+
+    package_path = getattr(pySim, "__file__", None)
+    if isinstance(package_path, str) and len(package_path) > 0:
+        installed_root = Path(package_path).resolve().parent
+        return installed_root
+
+    tried = ", ".join(str(path) for path in seen)
+    raise RuntimeError(
+        "pySim imported but has no resolvable file location. "
+        f"On-disk candidates checked: {tried}."
+    )
 
 
 def base_pe_type(section_key: str) -> str:
@@ -409,16 +677,33 @@ def _structural_data_keys(value: dict) -> list[str]:
     return out
 
 
+_PLACEHOLDER_SCAN_RE = re.compile(
+    r"\{#?([A-Za-z][A-Za-z0-9_]*)\}|\[#?([A-Za-z][A-Za-z0-9_]*)\]"
+)
+
+
+def _hex_text_has_placeholder(hex_text: str) -> bool:
+    if isinstance(hex_text, str) is False:
+        return False
+    if _PLACEHOLDER_SCAN_RE.search(hex_text) is None:
+        return False
+    return True
+
+
 def dejsonify_saip_value(
     value: Any,
     ctx: TokenExpansionContext | None = None,
     path: tuple[str, ...] = (),
+    *,
+    placeholder_paths: set[str] | None = None,
 ) -> Any:
     """Restore pySim-friendly values from JSON-loaded structures."""
     if isinstance(value, dict):
         structural = _structural_data_keys(value)
         if set(structural) == {_TAG_BYTES}:
             hex_text = str(_value_first(value, _TAG_BYTES, _LEGACY_TAG_BYTES))
+            if placeholder_paths is not None and _hex_text_has_placeholder(hex_text):
+                placeholder_paths.add(_format_codec_path(path))
             try:
                 if ctx is not None:
                     return ctx.expand_mixed_hex(hex_text)
@@ -437,12 +722,21 @@ def dejsonify_saip_value(
             for index, item in enumerate(inner):
                 item_path = path + (f"[{index}]",)
                 try:
-                    out_items.append(dejsonify_saip_value(item, ctx, item_path))
+                    out_items.append(
+                        dejsonify_saip_value(
+                            item,
+                            ctx,
+                            item_path,
+                            placeholder_paths=placeholder_paths,
+                        )
+                    )
                 except Exception as error:
                     _raise_codec_error(error, item_path)
             return tuple(out_items)
 
         if set(structural) == {_TAG_PLACEHOLDER}:
+            if placeholder_paths is not None:
+                placeholder_paths.add(_format_codec_path(path))
             try:
                 return _placeholder_inner_to_bytes(
                     _value_first(value, _TAG_PLACEHOLDER, _LEGACY_TAG_PLACEHOLDER),
@@ -460,7 +754,12 @@ def dejsonify_saip_value(
                 continue
             child_path = path + (key_text,)
             try:
-                ordered[key_text] = dejsonify_saip_value(item, ctx, child_path)
+                ordered[key_text] = dejsonify_saip_value(
+                    item,
+                    ctx,
+                    child_path,
+                    placeholder_paths=placeholder_paths,
+                )
             except Exception as error:
                 _raise_codec_error(error, child_path)
         return ordered
@@ -470,7 +769,14 @@ def dejsonify_saip_value(
         for index, item in enumerate(value):
             item_path = path + (f"[{index}]",)
             try:
-                out.append(dejsonify_saip_value(item, ctx, item_path))
+                out.append(
+                    dejsonify_saip_value(
+                        item,
+                        ctx,
+                        item_path,
+                        placeholder_paths=placeholder_paths,
+                    )
+                )
             except Exception as error:
                 _raise_codec_error(error, item_path)
         return out
@@ -500,8 +806,25 @@ def jsonify_document(document: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
-def dejsonify_document(document: dict[str, Any]) -> dict[str, Any]:
-    """Restore a document from json.loads output."""
+def dejsonify_document(
+    document: dict[str, Any],
+    *,
+    tolerate_undefined_placeholders: bool = False,
+    placeholder_paths: set[str] | None = None,
+) -> dict[str, Any]:
+    """Restore a document from json.loads output.
+
+    When ``tolerate_undefined_placeholders=True`` the context accepts
+    undefined ``{NAME}`` / ``[NAME]`` tokens (resolved to zero bytes)
+    instead of raising. This is intended for non-encoding passes such
+    as the lint harness and template authoring flows.
+
+    When ``placeholder_paths`` is a mutable set, it is populated with
+    the dotted paths (e.g. ``sections.header.iccid``) of every hex field
+    that embedded at least one placeholder token. Callers can use these
+    paths to scope follow-up validation.
+    """
+
     intro = document.get("intro", [])
     if isinstance(intro, list) is False:
         intro = [str(intro)]
@@ -516,7 +839,11 @@ def dejsonify_document(document: dict[str, Any]) -> dict[str, Any]:
 
     style_raw = document.get(_META_PLACEHOLDER_STYLE, "brace")
     try:
-        ctx = TokenExpansionContext(defs_raw, str(style_raw))
+        ctx = TokenExpansionContext(
+            defs_raw,
+            str(style_raw),
+            tolerate_undefined=tolerate_undefined_placeholders,
+        )
     except Exception as error:
         _raise_codec_error(error, (_META_PLACEHOLDER_STYLE,))
 
@@ -532,6 +859,7 @@ def dejsonify_document(document: dict[str, Any]) -> dict[str, Any]:
                 section_value,
                 ctx,
                 section_path,
+                placeholder_paths=placeholder_paths,
             )
         except Exception as error:
             _raise_codec_error(error, section_path)
@@ -551,7 +879,7 @@ def document_to_pretty_json(document: dict[str, Any]) -> str:
 
 
 _PLACEHOLDER_FRAG_RE = re.compile(
-    r"\{[A-Za-z][A-Za-z0-9_]*\}|\[[A-Za-z][A-Za-z0-9_]*\]",
+    r"\{#?[A-Za-z][A-Za-z0-9_]*\}|\[#?[A-Za-z][A-Za-z0-9_]*\]",
 )
 
 
@@ -711,6 +1039,87 @@ def parse_editor_json(text: str) -> dict[str, Any]:
         raise ValueError("Root JSON value must be an object.")
 
     return dejsonify_document(loaded)
+
+
+def parse_editor_json_template_aware(
+    text: str,
+) -> tuple[dict[str, Any], frozenset[str], frozenset[str]]:
+    """Parse an editor buffer while tolerating undefined placeholders.
+
+    Returns a three-tuple ``(document, placeholder_paths, undefined_tokens)``:
+
+    * ``document`` — the restored decoded document with undefined placeholders
+      expanded to zero bytes. The document is still usable for structural
+      validation (lint) but should not be re-encoded to DER.
+    * ``placeholder_paths`` — dotted paths (e.g. ``sections.header.iccid``) of
+      every hex field that embedded at least one ``{NAME}`` / ``[NAME]`` token.
+    * ``undefined_tokens`` — names that had no entry in
+      ``__ygg_token_defs__``.
+    """
+
+    stripped = str(text or "").strip()
+    if len(stripped) == 0:
+        raise ValueError("JSON buffer is empty.")
+
+    loaded = json.loads(stripped)
+    if isinstance(loaded, dict) is False:
+        raise ValueError("Root JSON value must be an object.")
+
+    sections = loaded.get("sections", {})
+    if isinstance(sections, dict) is False:
+        raise SaipCodecValueError("Document 'sections' must be an object.", ("sections",))
+
+    defs_raw = loaded.get(_META_TOKEN_DEFS, {})
+    if isinstance(defs_raw, dict) is False:
+        raise SaipCodecValueError(
+            f"{_META_TOKEN_DEFS} must be an object.",
+            (_META_TOKEN_DEFS,),
+        )
+    style_raw = loaded.get(_META_PLACEHOLDER_STYLE, "brace")
+    try:
+        ctx = TokenExpansionContext(defs_raw, str(style_raw), tolerate_undefined=True)
+    except Exception as error:
+        _raise_codec_error(error, (_META_PLACEHOLDER_STYLE,))
+
+    placeholder_paths: set[str] = set()
+    intro = loaded.get("intro", [])
+    if isinstance(intro, list) is False:
+        intro = [str(intro)]
+
+    restored: dict[str, Any] = {
+        "intro": list(intro),
+        "sections": {},
+    }
+    for key, section_value in sections.items():
+        section_key = str(key)
+        section_path = ("sections", section_key)
+        try:
+            restored["sections"][section_key] = dejsonify_saip_value(
+                section_value,
+                ctx,
+                section_path,
+                placeholder_paths=placeholder_paths,
+            )
+        except Exception as error:
+            _raise_codec_error(error, section_path)
+
+    if _META_TOKEN_DEFS in loaded:
+        restored[_META_TOKEN_DEFS] = dict(defs_raw)
+    if _META_PLACEHOLDER_STYLE in loaded:
+        restored[_META_PLACEHOLDER_STYLE] = loaded[_META_PLACEHOLDER_STYLE]
+
+    normalized_paths: set[str] = set()
+    for raw_path in placeholder_paths:
+        text = str(raw_path or "")
+        if text.startswith("sections."):
+            text = text[len("sections."):]
+        normalized_paths.add(text)
+
+    return (
+        restored,
+        frozenset(normalized_paths),
+        frozenset(ctx.undefined_tokens),
+    )
 
 
 def build_decoded_document_from_sequence(pes: Any, intro_lines: list[str] | None = None) -> dict[str, Any]:

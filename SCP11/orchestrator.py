@@ -12,12 +12,26 @@
 # You should have received a copy of the GNU General Public License
 # along with this program. If not, see <https://www.gnu.org/licenses/>.
 #
-# Copyright (c) 2026 Hampus Hellsberg and contributors
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 # -----------------------------------------------------------------------------
+
+"""Canonical SCP11 orchestrator.
+
+This module is the ``canonical`` SCP11 orchestrator tree for YggdraSIM v1.
+Bug-fixes, spec-correctness work, and API additions should land here first.
+``SCP11/live/orchestrator.py`` and ``SCP11/test/orchestrator.py`` mirror this
+implementation with variant-specific overlays (e.g. ``stk_polling`` mixin for
+live, extra request shaping for the test tree) and are treated as *legacy
+mirrors* for v1. Any change made here should be evaluated against both
+mirrors; the long-term goal tracked by audit item ``SCP11-P1-01`` is to turn
+the mirrors into thin shim packages that import from this module and only
+override the variant delta.
+"""
 
 import base64
 import binascii
 import copy
+import time
 from typing import Any, Optional
 
 from cryptography import x509 as crypto_x509
@@ -26,12 +40,13 @@ from cryptography.hazmat.primitives.asymmetric import ec, utils as asym_utils
 from SCP03.logic.sgp32_decode import decode_eim_configuration_entries as decode_eim_configuration_entries_shared
 from SCP03.logic.sgp32_decode import decode_eim_configuration_entry as decode_eim_configuration_entry_shared
 from SCP11.shared.gsma_error_codes import describe_sgp32_eim_package_error
+from SCP11.shared.safe_parse import safe_parse
+from yggdrasim_common.process_debug import debug_print
 
 try:
     from .asn1_registry import ASN1Registry
     from .crypto_engine import CryptoEngine
     from .eim_packages import (
-        TYPE_BOUND_PROFILE_PACKAGE,
         TYPE_EUICC_CONFIGURATION,
         TYPE_INDIRECT_PROFILE_DOWNLOAD,
         TYPE_PROFILE_DOWNLOAD_TRIGGER,
@@ -55,7 +70,6 @@ try:
         decode_authenticate_server_response,
         decode_initialise_secure_channel_request as decode_initialise_secure_channel_request_pysim,
         decode_list_notification_response,
-        decode_notification_metadata,
         decode_pending_notification,
         decode_prepare_download_response,
         decode_retrieve_notifications_list_response,
@@ -70,7 +84,6 @@ except ImportError:
     from asn1_registry import ASN1Registry
     from crypto_engine import CryptoEngine
     from eim_packages import (
-        TYPE_BOUND_PROFILE_PACKAGE,
         TYPE_EUICC_CONFIGURATION,
         TYPE_INDIRECT_PROFILE_DOWNLOAD,
         TYPE_PROFILE_DOWNLOAD_TRIGGER,
@@ -94,7 +107,6 @@ except ImportError:
         decode_authenticate_server_response,
         decode_initialise_secure_channel_request as decode_initialise_secure_channel_request_pysim,
         decode_list_notification_response,
-        decode_notification_metadata,
         decode_pending_notification,
         decode_prepare_download_response,
         decode_retrieve_notifications_list_response,
@@ -126,6 +138,11 @@ class SGP22Orchestrator:
         self.key_pb = None
         self._local_credentials_loaded = False
         self._use_stk_mode_for_es10b_store_data = False
+        # Set True once any configured eIM entry successfully reaches the
+        # server during ``run_eim_poll``. Consumed by the console layer to
+        # gate the post-download notification auto-clear sweep: if nothing
+        # was delivered server-side, on-card notifications must be kept.
+        self._last_eim_poll_reached_server = False
 
     def run_flow(self, matching_id: str = "", smdp_address: Optional[str] = None) -> None:
         effective_smdp_address = smdp_address
@@ -154,15 +171,45 @@ class SGP22Orchestrator:
         print("\n[*] Sequence completed without profile installation.")
 
     def run_eim_poll(self, matching_id: str = "", entry_index: Optional[int] = None) -> None:
-        print("--- IOT / SGP.32 eIM POLL - RELAY READY ---")
+        debug_print("--- IOT / SGP.32 eIM POLL - RELAY READY ---")
+        self._last_eim_poll_reached_server = False
         self._phase_connect()
         self._phase_eim_card_challenge()
         entry_indices = self._resolve_eim_poll_entry_indices(entry_index)
-        if len(entry_indices) > 1:
-            print(f"[*] eIM poll: processing {len(entry_indices)} configured eIM entries sequentially.")
-        for current_entry_index in entry_indices:
-            request = self._build_eim_poll_request(matching_id=matching_id, entry_index=current_entry_index)
-            self._run_single_eim_poll_round(request)
+        total_entries = len(entry_indices)
+        if total_entries > 1:
+            print(f"[*] eIM poll: {total_entries} configured entry(s) to poll.")
+        for ordinal, current_entry_index in enumerate(entry_indices, start=1):
+            request = None
+            try:
+                request = self._build_eim_poll_request(
+                    matching_id=matching_id, entry_index=current_entry_index
+                )
+                self._run_single_eim_poll_round(request)
+                self._last_eim_poll_reached_server = True
+                self._print_eim_poll_entry_summary(ordinal, total_entries, current_entry_index, request)
+            except Exception as error:
+                # Keep the overall DOWNLOAD flow progressing on per-entry
+                # failures (TLS pin mismatch, DNS, HTTP) so post-flow steps
+                # like notification sync still run. Console gates its
+                # auto-clear sweep on ``_last_eim_poll_reached_server``.
+                fqdn_text = ""
+                if request is not None:
+                    fqdn_text = str(getattr(request, "eim_fqdn", "") or "").strip()
+                if len(fqdn_text) > 0:
+                    label_text = f"index={current_entry_index}, fqdn={fqdn_text}"
+                else:
+                    label_text = f"index={current_entry_index}"
+                error_text = str(error).strip()
+                if total_entries > 1:
+                    print(
+                        "[!] eIM entry failed; continuing with next configured "
+                        f"entry: {label_text}"
+                    )
+                else:
+                    print(f"[!] eIM entry failed: {label_text}")
+                if len(error_text) > 0:
+                    print(f"    reason: {error_text}")
 
     def _run_single_eim_poll_round(self, request: EimPollRequest) -> None:
         poll_round = 1
@@ -182,7 +229,7 @@ class SGP22Orchestrator:
 
             if len(response.euicc_package_list) == 0:
                 if response.eim_result_code == 1:
-                    print("[*] eIM returned noEimPackageAvailable.")
+                    debug_print("[*] eIM returned noEimPackageAvailable.")
                 elif response.eim_result_code == 127:
                     raise RuntimeError(
                         "eIM GetEimPackage failed with undefinedError(127); "
@@ -206,7 +253,7 @@ class SGP22Orchestrator:
                         clear_payload = self._build_provide_eim_package_result_error_tlv(127)
                     clear_request.euicc_package_result = ""
                     clear_request.raw_body = clear_payload
-                    print(
+                    debug_print(
                         "[*] Sending eIM clear ack (no packages)"
                         + (" with ProvideEimPackageResult error" if len(clear_payload) > 0 else "")
                         + " to close transaction."
@@ -218,7 +265,7 @@ class SGP22Orchestrator:
                         poll_round += 1
                         continue
                 if response.polling_complete:
-                    print("[+] eIM polling completed.")
+                    debug_print("[+] eIM polling completed.")
                     return
                 if response.retry_after_seconds > 0:
                     time.sleep(response.retry_after_seconds)
@@ -268,35 +315,71 @@ class SGP22Orchestrator:
                 pending_response = follow_up_response
                 continue
             if completion_response.polling_complete:
-                print("[+] eIM polling completed.")
+                debug_print("[+] eIM polling completed.")
                 return
             if completion_response.retry_after_seconds > 0:
                 time.sleep(completion_response.retry_after_seconds)
         raise RuntimeError("eIM polling exceeded maximum follow-up rounds without completion.")
 
     def _log_eim_poll_round(self, response: EimPollResponse, poll_round: int) -> None:
-        print(
+        self._last_eim_poll_response = response
+        debug_print(
             f"[*] eIM poll round {poll_round}: "
             f"packages={len(response.euicc_package_list)} complete={response.polling_complete}"
         )
         if len(response.transaction_id) > 0:
-            print(f"[*] eIM transactionId: {response.transaction_id}")
+            debug_print(f"[*] eIM transactionId: {response.transaction_id}")
         if response.eim_result_code is not None:
-            print(
+            debug_print(
                 "[*] GetEimPackage result code: "
                 f"{describe_sgp32_eim_package_error(int(response.eim_result_code))} [SGP.32]"
             )
         if response.package_format == "eimAcknowledgements":
             if len(response.ack_sequence_numbers) > 0:
-                print(
+                debug_print(
                     "[*] ProvideEimPackageResult acknowledgement: seqNumber(s)="
                     + ", ".join(str(item) for item in response.ack_sequence_numbers)
                 )
             else:
-                print("[*] ProvideEimPackageResult acknowledgement: empty BF53.")
+                debug_print("[*] ProvideEimPackageResult acknowledgement: empty BF53.")
+
+    def _print_eim_poll_entry_summary(
+        self,
+        ordinal: int,
+        total_entries: int,
+        entry_index: int,
+        request: Optional[EimPollRequest],
+    ) -> None:
+        # Compact one-liner so the operator can scan drain results at a
+        # glance even with the phase/round debug chatter suppressed.
+        last_response = getattr(self, "_last_eim_poll_response", None)
+        fqdn = ""
+        if request is not None:
+            fqdn = str(getattr(request, "eim_fqdn", "") or "").strip()
+        label_text = fqdn if len(fqdn) > 0 else f"index={entry_index}"
+        result_text = ""
+        package_count = 0
+        complete_flag = False
+        if last_response is not None:
+            package_count = len(getattr(last_response, "euicc_package_list", []) or [])
+            complete_flag = bool(getattr(last_response, "polling_complete", False))
+            result_code = getattr(last_response, "eim_result_code", None)
+            if result_code is not None:
+                result_text = describe_sgp32_eim_package_error(int(result_code))
+        parts: list[str] = []
+        if total_entries > 1:
+            parts.append(f"[{ordinal}/{total_entries}]")
+        parts.append(label_text)
+        suffix_parts: list[str] = []
+        if len(result_text) > 0:
+            suffix_parts.append(result_text)
+        suffix_parts.append(f"packages={package_count}")
+        if complete_flag:
+            suffix_parts.append("complete")
+        print(f"[*] eIM poll {' '.join(parts)} -> {', '.join(suffix_parts)}")
 
     def _phase_connect(self) -> None:
-        print("\n[*] Phase: Connect")
+        debug_print("\n[*] Phase: Connect")
         self._use_stk_mode_for_es10b_store_data = False
         if bool(getattr(self.cfg, "RESET_CARD_BEFORE_FLOW", False)):
             reset_method = getattr(self.apdu_channel, "reset", None)
@@ -304,9 +387,9 @@ class SGP22Orchestrator:
                 try:
                     did_reset = bool(reset_method())
                     if did_reset:
-                        print("[*] Card transport reset before flow start.")
+                        debug_print("[*] Card transport reset before flow start.")
                 except Exception as error:
-                    print(f"[*] Card transport reset skipped ({error}).")
+                    debug_print(f"[*] Card transport reset skipped ({error}).")
         try:
             self.apdu_channel.send(bytes.fromhex("80AA000007A9058303170000"), "INIT: TERMINAL CAPABILITY")
         except IOError:
@@ -324,7 +407,27 @@ class SGP22Orchestrator:
 
     @staticmethod
     def _should_retry_notification_sync_after_reselect(error: Exception) -> bool:
-        return "6E00" in str(error).upper()
+        """
+        A post-enable/disable/delete context switch frequently leaves
+        ISD-R unbound from the active logical channel. The card then
+        answers any ES10b StoreData with one of two related status
+        words:
+
+        * ``6E00`` — CLA not supported on this channel.
+        * ``6881`` — logical channel not supported.
+
+        Both are recovered the same way: reselect ISD-R on the active
+        channel and replay the StoreData. Treat them as a single
+        recoverable class so notification sync does not error out just
+        because the profile state change invalidated the channel
+        binding.
+        """
+        error_text = str(error).upper()
+        if "6E00" in error_text:
+            return True
+        if "6881" in error_text:
+            return True
+        return False
 
     @staticmethod
     def _build_es10b_store_data_apdu(
@@ -399,7 +502,10 @@ class SGP22Orchestrator:
         except Exception as error:
             if self._should_retry_notification_sync_after_reselect(error) is False:
                 raise
-            print("[*] Notification sync: listNotifications hit 6E00; reselecting ISD-R and retrying.")
+            print(
+                f"[*] Notification sync: listNotifications hit channel fault ({error}); "
+                "reselecting ISD-R and retrying."
+            )
             self._reselect_isd_r_for_es10b_store_data("DOWNLOAD: RESELECT ISD-R")
             return self._send_es10b_store_data(
                 payload,
@@ -408,14 +514,14 @@ class SGP22Orchestrator:
             )
 
     def _phase_eim_card_challenge(self) -> None:
-        print("\n[*] Phase: eIM card challenge (GetEuiccChallenge)")
+        debug_print("\n[*] Phase: eIM card challenge (GetEuiccChallenge)")
         challenge_response = self.apdu_channel.send(
             bytes.fromhex("80E2910003BF2E00"),
             "EIM: GetEuiccChallenge",
         )
         if len(challenge_response) >= 16:
             self.state.card_challenge = challenge_response[-16:]
-            print(f"[+] Card challenge: {self.state.card_challenge.hex().upper()}")
+            debug_print(f"[+] Card challenge: {self.state.card_challenge.hex().upper()}")
         else:
             self.state.card_challenge = b""
             print("[*] GetEuiccChallenge response too short; eIM poll will omit euiccChallenge.")
@@ -525,7 +631,7 @@ class SGP22Orchestrator:
         return b""
 
     def _build_eim_poll_request(self, matching_id: str, entry_index: int) -> EimPollRequest:
-        print("\n[*] Phase: Read eIM Metadata")
+        debug_print("\n[*] Phase: Read eIM Metadata")
         euicc_configured_data = self._retrieve_es10b_data(bytes.fromhex("BF3C00"), "EIM: GetEuiccConfiguredData")
         eim_configuration_data = self._retrieve_es10b_data(bytes.fromhex("BF5500"), "EIM: GetEimConfigurationData")
         euicc_info1 = self._retrieve_es10b_data(bytes.fromhex("BF2000"), "EIM: GetEuiccInfo1")
@@ -547,7 +653,7 @@ class SGP22Orchestrator:
         eim_id_type = str(entry.get("eim_id_type", "")).strip()
         if len(eim_id_type) > 0:
             fragments.append(f"eimIdType={eim_id_type}")
-        print("[*] Selected eIM entry: " + ", ".join(fragments))
+        debug_print("[*] Selected eIM entry: " + ", ".join(fragments))
 
         variant = getattr(self.cfg, "EIM_REQUEST_VARIANT", 0)
         raw_body = None
@@ -727,9 +833,13 @@ class SGP22Orchestrator:
         return b""
 
     def _extract_certificate_subject_public_key_info(self, value: bytes) -> bytes:
-        try:
-            certificate = crypto_x509.load_der_x509_certificate(value)
-        except Exception:
+        certificate = safe_parse(
+            "scp11.extract_cert_spki",
+            value,
+            crypto_x509.load_der_x509_certificate,
+            default=None,
+        )
+        if certificate is None:
             return b""
         return certificate.public_key().public_bytes(
             encoding=serialization.Encoding.DER,
@@ -737,7 +847,7 @@ class SGP22Orchestrator:
         )
 
     def _get_eim_package(self, request: EimPollRequest):
-        print("\n[*] Phase: GetEimPackage")
+        debug_print("\n[*] Phase: GetEimPackage")
         if self.profile_provider is None:
             raise RuntimeError("No profile provider configured for eIM polling.")
         try:
@@ -751,7 +861,7 @@ class SGP22Orchestrator:
                 tried_bodies=[request.raw_body] if request.raw_body is not None else None,
             )
             if variant_response is not None:
-                print(
+                debug_print(
                     f"[+] eIM poll response: packages={len(variant_response.euicc_package_list)}, "
                     f"complete={variant_response.polling_complete}, "
                     f"retryAfter={variant_response.retry_after_seconds}"
@@ -759,14 +869,14 @@ class SGP22Orchestrator:
                 return variant_response
             raise RuntimeError(f"Provider getEimPackage failed: {error}") from error
         response = self._probe_get_eim_package_variants(request, response)
-        print(
+        debug_print(
             f"[+] eIM poll response: packages={len(response.euicc_package_list)}, "
             f"complete={response.polling_complete}, retryAfter={response.retry_after_seconds}"
         )
         return response
 
     def _provide_eim_package_result(self, request: EimPollRequest) -> dict:
-        print("\n[*] Phase: ProvideEimPackageResult")
+        debug_print("\n[*] Phase: ProvideEimPackageResult")
         if self.profile_provider is None:
             raise RuntimeError("No profile provider configured for eIM polling.")
         try:
@@ -954,7 +1064,7 @@ class SGP22Orchestrator:
                 f"card seqNumber(s): {', '.join(str(item) for item in synthesized.ack_sequence_numbers)}"
             )
         else:
-            print("[*] ProvideEimPackageResult acknowledgement synthesized as empty BF53.")
+            debug_print("[*] ProvideEimPackageResult acknowledgement synthesized as empty BF53.")
         return synthesized
 
     def _build_eim_timeout_retry_request(
@@ -1195,10 +1305,11 @@ class SGP22Orchestrator:
         return f"https://{cleaned.rstrip('/')}"
 
     def _profile_download_provider_base_url(self, smdp_address: str) -> str:
-        bridge = getattr(self, "localized_poll_bridge", None)
-        bridge_base_url = str(getattr(bridge, "smdp_base_url", "") or "").strip()
-        if len(bridge_base_url) > 0:
-            return bridge_base_url.rstrip("/")
+        provider_override = str(
+            getattr(self, "_profile_download_base_url_override", "") or ""
+        ).strip()
+        if len(provider_override) > 0:
+            return provider_override.rstrip("/")
         return self._as_https_smdp(smdp_address)
 
     def _relay_eim_package_to_card(self, package_bytes: bytes, poll_round: int, package_index: int) -> bytes:
@@ -1216,8 +1327,6 @@ class SGP22Orchestrator:
                 "running SGP.22 profile download."
             )
             if self.profile_provider is not None and hasattr(self.profile_provider, "set_base_url"):
-                # Keep localized IPAd pinned to the bridge while the ES9 payload
-                # still carries the activation-code SM-DP+ address.
                 base_url = self._profile_download_provider_base_url(parsed.smdp_address)
                 if len(base_url) > 0:
                     self.profile_provider.set_base_url(base_url)
@@ -1253,8 +1362,6 @@ class SGP22Orchestrator:
                 f"matchingId={parsed.matching_id}; running SGP.22 profile download."
             )
             if self.profile_provider is not None and hasattr(self.profile_provider, "set_base_url"):
-                # Keep localized IPAd pinned to the bridge while the ES9 payload
-                # still carries the activation-code SM-DP+ address.
                 base_url = self._profile_download_provider_base_url(parsed.smdp_address)
                 if len(base_url) > 0:
                     self.profile_provider.set_base_url(base_url)
@@ -1336,6 +1443,12 @@ class SGP22Orchestrator:
         print("[*] Handling ipaEuiccDataRequest locally.")
         requested_tags = tuple(getattr(parsed_package, "requested_tags", ()) or ())
         request_token = bytes(getattr(parsed_package, "request_token", b"") or b"")
+        notification_seq_number = getattr(parsed_package, "notification_seq_number", None)
+        euicc_package_result_seq_number = getattr(parsed_package, "euicc_package_result_seq_number", None)
+        if isinstance(notification_seq_number, int) is False:
+            notification_seq_number = None
+        if isinstance(euicc_package_result_seq_number, int) is False:
+            euicc_package_result_seq_number = None
         requested_tag_set = set(requested_tags)
 
         euicc_info1 = b""
@@ -1358,12 +1471,12 @@ class SGP22Orchestrator:
             certs_data = self._retrieve_es10b_data(bytes.fromhex("BF5600"), f"{log_name}: GetCerts")
         if b"\xA0" in requested_tag_set:
             pending_notification_list = self._retrieve_es10b_data(
-                bytes.fromhex("BF2B00"),
+                self._build_retrieve_notification_request_payload(notification_seq_number),
                 f"{log_name}: RetrieveNotificationsList",
             )
         if b"\xA2" in requested_tag_set:
             euicc_package_result_list = self._retrieve_es10b_data(
-                bytes.fromhex("BF2B028200"),
+                self._build_retrieve_euicc_package_result_request_payload(euicc_package_result_seq_number),
                 f"{log_name}: RetrieveEuiccPackageResults",
             )
 
@@ -1497,10 +1610,15 @@ class SGP22Orchestrator:
         return self._wrap_tlv(b"\x80", ipa_features) + self._wrap_tlv(b"\x81", ipa_supported_protocols)
 
     def _extract_first_eim_entry_bytes(self, response: bytes) -> bytes:
-        try:
-            root_tag, root_value, _, _ = self._read_tlv(response, 0)
-        except Exception:
+        tlv = safe_parse(
+            "scp11.first_eim_entry.root",
+            response,
+            lambda buf: self._read_tlv(buf, 0),
+            default=None,
+        )
+        if tlv is None:
             return b""
+        root_tag, root_value, _, _ = tlv
         if root_tag != bytes.fromhex("BF55"):
             return b""
         entries = self._find_eim_entry_values(root_value)
@@ -1538,10 +1656,15 @@ class SGP22Orchestrator:
         raw_tlv = self._find_first_raw_tlv_recursive(data, target_tag)
         if len(raw_tlv) == 0:
             return b""
-        try:
-            _, value, _, _ = self._read_tlv(raw_tlv, 0)
-        except Exception:
+        tlv = safe_parse(
+            "scp11.find_first_tlv.value",
+            raw_tlv,
+            lambda buf: self._read_tlv(buf, 0),
+            default=None,
+        )
+        if tlv is None:
             return b""
+        _, value, _, _ = tlv
         return value
 
     def _unwrap_single_tlv_value(self, data: bytes, expected_tag: bytes) -> bytes:
@@ -1560,16 +1683,26 @@ class SGP22Orchestrator:
     def _extract_choice_item(self, response: bytes, expected_choice_tag: bytes) -> bytes:
         if len(response) == 0:
             return b""
-        try:
-            root_tag, root_value, _, _ = self._read_tlv(response, 0)
-        except Exception:
+        root_tlv = safe_parse(
+            "scp11.choice_item.root",
+            response,
+            lambda buf: self._read_tlv(buf, 0),
+            default=None,
+        )
+        if root_tlv is None:
             return b""
+        root_tag, root_value, _, _ = root_tlv
         if root_tag != bytes.fromhex("BF2B"):
             return b""
-        try:
-            choice_tag, _, choice_raw, _ = self._read_tlv(root_value, 0)
-        except Exception:
+        inner_tlv = safe_parse(
+            "scp11.choice_item.inner",
+            root_value,
+            lambda buf: self._read_tlv(buf, 0),
+            default=None,
+        )
+        if inner_tlv is None:
             return b""
+        choice_tag, _, choice_raw, _ = inner_tlv
         if choice_tag != expected_choice_tag:
             return b""
         return choice_raw
@@ -2291,10 +2424,15 @@ class SGP22Orchestrator:
     def _extract_inline_pending_notification(self, raw_response: bytes) -> tuple:
         if len(raw_response) == 0:
             return b"", None
-        try:
-            root_tag, _, _, _ = self._read_tlv(raw_response, 0)
-        except Exception:
+        root_tlv = safe_parse(
+            "scp11.inline_pending_notification.root",
+            raw_response,
+            lambda buf: self._read_tlv(buf, 0),
+            default=None,
+        )
+        if root_tlv is None:
             return b"", None
+        root_tag, _, _, _ = root_tlv
         if root_tag != bytes.fromhex("BF37"):
             return b"", None
         bf2f_raw = self._find_first_tlv_in_value(raw_response, bytes.fromhex("BF2F"))
@@ -3042,10 +3180,17 @@ class SGP22Orchestrator:
             print(f"[*] Notification sync: no decodable pending notification for seq={seq_number}.")
         return raw_pending_notification
 
-    def _build_retrieve_notification_request_payload(self, seq_number: int) -> bytes:
+    def _build_retrieve_notification_request_payload(self, seq_number: Optional[int] = None) -> bytes:
+        if isinstance(seq_number, int) is False:
+            return bytes.fromhex("BF2B00")
         seq_bytes = self._encode_notification_sequence(seq_number)
         search_criteria = self._wrap_tlv(b"\x80", seq_bytes)
         return self._wrap_tlv(bytes.fromhex("BF2B"), self._wrap_tlv(b"\xA0", search_criteria))
+
+    def _build_retrieve_euicc_package_result_request_payload(self, seq_number: Optional[int] = None) -> bytes:
+        if isinstance(seq_number, int) is False:
+            return bytes.fromhex("BF2B028200")
+        return self._build_retrieve_notification_request_payload(seq_number)
 
     def _extract_pending_notification_payload(self, raw_response: bytes) -> bytes:
         if len(raw_response) == 0:
@@ -3103,6 +3248,13 @@ class SGP22Orchestrator:
         return False
 
     def _segment_bound_profile_package(self, bpp_bytes: bytes) -> list:
+        # Per SGP.22 v2.x / v3.x Annex M "ES10b.LoadBoundProfilePackage"
+        # A0 ships as a single wrapped segment, while A1/A2/A3 require
+        # the container header as its own StoreData chain followed by
+        # each inner 86/88 TLV. Stripping the container headers lets a
+        # compliant eUICC misread the first bare 86 as a terminal
+        # loadProfileElements completion and leave the SM-DP+ session
+        # pending.
         if len(bpp_bytes) == 0:
             raise ValueError("Bound Profile Package is empty.")
 
@@ -3120,7 +3272,10 @@ class SGP22Orchestrator:
             if child_tag == bytes.fromhex("BF23"):
                 bootstrap_end = next_offset + (len(bpp_bytes) - len(root_value))
                 segments.append(bpp_bytes[:bootstrap_end])
-            elif child_tag in [b"\xA0", b"\xA1", b"\xA2", b"\xA3"]:
+            elif child_tag == b"\xA0":
+                segments.append(child_raw)
+            elif child_tag in (b"\xA1", b"\xA2", b"\xA3"):
+                segments.append(self._encode_tlv_header(child_tag, len(child_value)))
                 if len(child_value) > 0:
                     segments.extend(self._extract_sequence_members(child_value))
             else:

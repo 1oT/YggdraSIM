@@ -261,7 +261,13 @@ class TransportTests(unittest.TestCase):
         transport.conn = SimpleNamespace(getATR=lambda: [0x3B, 0x00])
         transport.active_protocol = scp80_transport.CardConnection.T1_protocol
 
-        with mock.patch.object(
+        # ``PYSCRARD_AVAIL`` and ``ATR`` are bound at import time from the
+        # ``smartcard`` package. Sibling SCP80 test files may install partial
+        # stubs (missing ``smartcard.ATR``) before this module imports, which
+        # leaves ``PYSCRARD_AVAIL=False`` and ``ATR=None`` cached on
+        # ``SCP80.transport``. Force both flags to known values here so the
+        # protocol-summary assertions do not depend on test ordering.
+        with mock.patch.object(scp80_transport, "PYSCRARD_AVAIL", True), mock.patch.object(
             scp80_transport,
             "ATR",
             lambda data: SimpleNamespace(getSupportedProtocols=lambda: {"T=1": True, "raw": data}),

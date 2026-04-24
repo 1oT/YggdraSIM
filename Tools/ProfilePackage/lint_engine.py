@@ -61,6 +61,11 @@ class SaipProfileLinter:
     def __init__(self, strict: bool = False) -> None:
         self.strict = strict
         self.findings: list[LintFinding] = []
+        # Populated when ``lint_decoded_document`` is called with
+        # ``placeholder_paths``; used by ``_add`` to skip lint findings that
+        # originate from template-placeholder-bearing fields.
+        self._placeholder_paths: frozenset[str] = frozenset()
+        self._undefined_tokens: frozenset[str] = frozenset()
 
     def lint_decoded_document(
         self,
@@ -71,13 +76,22 @@ class SaipProfileLinter:
         metadata: Optional[dict[str, Any]] = None,
         metadata_path: Optional[str] = None,
         emit_missing_check_finding: bool = True,
+        placeholder_paths: Optional[frozenset[str]] = None,
+        undefined_tokens: Optional[frozenset[str]] = None,
     ) -> LintReport:
         self.findings = []
+        self._placeholder_paths = frozenset(
+            str(path).strip() for path in (placeholder_paths or frozenset()) if str(path).strip()
+        )
+        self._undefined_tokens = frozenset(
+            str(name).strip() for name in (undefined_tokens or frozenset()) if str(name).strip()
+        )
         sections = self._extract_sections(decoded_document)
         ordered_types = [self._base_type_from_key(key) for key in sections.keys()]
         section_items = list(sections.items())
         file_definitions = self._extract_file_definitions(section_items)
 
+        self._emit_template_mode_banner()
         self._check_parser_health(section_items)
         self._check_base_structure(ordered_types)
         self._check_singleton_types(ordered_types)
@@ -230,6 +244,21 @@ class SaipProfileLinter:
             return cleaned
         return cleaned[: matched.start()]
 
+    def _path_has_placeholder(self, path: str) -> bool:
+        if len(self._placeholder_paths) == 0:
+            return False
+        normalized = str(path or "").strip()
+        if len(normalized) == 0:
+            return False
+        for placeholder_path in self._placeholder_paths:
+            if normalized == placeholder_path:
+                return True
+            if normalized.startswith(placeholder_path + "."):
+                return True
+            if normalized.startswith(placeholder_path + "["):
+                return True
+        return False
+
     def _add(
         self,
         code: str,
@@ -240,6 +269,21 @@ class SaipProfileLinter:
         recommendation: str,
         evidence: Any = None,
     ) -> None:
+        normalized_severity = str(severity or "").strip().upper()
+        if (
+            normalized_severity in {"FAIL", "WARN"}
+            and self._path_has_placeholder(path)
+        ):
+            severity = "INFO"
+            message = (
+                f"Template placeholder present at {path}; skipping {code} "
+                f"({normalized_severity}). Original message: {message}"
+            )
+            recommendation = (
+                "Resolve the placeholder via APPLY-TEMPLATE or populate "
+                "__ygg_token_defs__ to re-enable strict validation."
+            )
+            code = f"{code}/TEMPLATE"
         self.findings.append(
             LintFinding(
                 code=code,
@@ -250,6 +294,55 @@ class SaipProfileLinter:
                 recommendation=recommendation,
                 evidence=evidence,
             )
+        )
+
+    def _emit_template_mode_banner(self) -> None:
+        if len(self._placeholder_paths) == 0 and len(self._undefined_tokens) == 0:
+            return
+        token_summary = "none"
+        if len(self._undefined_tokens) > 0:
+            token_summary = ", ".join(sorted(self._undefined_tokens))
+        path_summary = "none"
+        if len(self._placeholder_paths) > 0:
+            path_summary = ", ".join(sorted(self._placeholder_paths))
+
+        recommendation_lines = [
+            "Resolve placeholders before shipping this profile. Typical flow:",
+            "  1. If an accompanying sidecar exists, merge it back:",
+            "       APPLY-TOKENS <template.json> <template.tokens.json>",
+            "  2. Materialise into a DER build:",
+            "       APPLY-TEMPLATE <template.json> <out.der> "
+            "[ICCID=<digits|AUTO>] [IMSI=<digits|AUTO>] [VERIFY]",
+            "  3. Or batch-generate one DER per data record:",
+            "       GENERATE-BATCH <template.json> <data_file> <out_dir>",
+        ]
+        if len(self._undefined_tokens) > 0:
+            recommendation_lines.insert(
+                1,
+                "     Unresolved token names: " + token_summary + ".",
+            )
+
+        self._add(
+            code="YRL-TPL-OK",
+            severity="INFO",
+            spec="Template authoring",
+            path="sections",
+            message=(
+                "Profile parsed in template mode — placeholder fields are "
+                "excluded from strict hex/ICCID validation."
+            ),
+            recommendation="\n".join(recommendation_lines),
+            evidence={
+                "undefined_tokens": sorted(self._undefined_tokens),
+                "placeholder_paths": sorted(self._placeholder_paths),
+                "token_summary": token_summary,
+                "path_summary": path_summary,
+                "resolving_commands": [
+                    "APPLY-TOKENS <template.json> <template.tokens.json>",
+                    "APPLY-TEMPLATE <template.json> <out.der>",
+                    "GENERATE-BATCH <template.json> <data_file> <out_dir>",
+                ],
+            },
         )
 
     def _check_parser_health(self, section_items: list[tuple[str, Any]]) -> None:

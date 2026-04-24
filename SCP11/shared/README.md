@@ -9,8 +9,8 @@ For operator-facing module selection, start with `SCP11/README.md`.
 
 Automation references:
 
-- `../../CLI_AND_PIPING_GUIDE.md`
-- `../../PROFILE_LIFECYCLE_CLI_CHEATSHEET.md`
+- `../../guides/CLI_AND_PIPING_GUIDE.md`
+- `../../guides/PROFILE_LIFECYCLE_CLI_CHEATSHEET.md`
 
 ## Primary consumers
 

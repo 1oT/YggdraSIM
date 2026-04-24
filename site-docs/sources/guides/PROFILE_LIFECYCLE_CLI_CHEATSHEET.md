@@ -1,0 +1,1 @@
+--8<-- "guides/PROFILE_LIFECYCLE_CLI_CHEATSHEET.md"

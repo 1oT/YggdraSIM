@@ -29,6 +29,26 @@ class FakePcscConnection:
         return list(self._response_data), self._sw1, self._sw2
 
 
+class ScriptedPcscConnection:
+    """PC/SC connection stub that replays a scripted response list.
+
+    Each entry is a ``(response_bytes, sw1, sw2)`` tuple consumed in
+    order, so we can exercise the 61xx / 6Cxx continuation flows that
+    the concise-mode log filter is supposed to hide.
+    """
+
+    def __init__(self, script):
+        self._script = list(script)
+        self.calls = []
+
+    def transmit(self, apdu):
+        self.calls.append(list(apdu))
+        if len(self._script) == 0:
+            raise RuntimeError("No scripted PC/SC responses remaining")
+        response_bytes, sw1, sw2 = self._script.pop(0)
+        return list(response_bytes), int(sw1), int(sw2)
+
+
 class RelayApduChannelTests(unittest.TestCase):
     def test_reset_reports_unsupported(self):
         relay = FakeRelayClient([])
@@ -122,6 +142,74 @@ class PcscApduChannelLoggingTests(unittest.TestCase):
         rendered = output.getvalue()
         self.assertIn("[*] TEST", rendered)
         self.assertIn("SW 6A82 len=0", rendered)
+
+    def test_send_concise_mode_silences_61xx_continuation_and_get_response(self):
+        # Initial 61xx continuation resolved by a follow-up GET RESPONSE
+        # that returns 9000; concise mode should print the command label
+        # once and emit no SW line and no GET RESPONSE label.
+        channel = PcscApduChannel.__new__(PcscApduChannel)
+        channel._conn = ScriptedPcscConnection(
+            [
+                (b"", 0x61, 0x1A),
+                (b"\xDE\xAD", 0x90, 0x00),
+            ]
+        )
+        channel._raw_apdu_logging = False
+
+        output = io.StringIO()
+        with redirect_stdout(output):
+            response = channel.send(bytes.fromhex("00A4040000"), "LOCAL: Select ECASD")
+
+        rendered = output.getvalue()
+        self.assertEqual(response, b"\xDE\xAD")
+        self.assertIn("[*] LOCAL: Select ECASD", rendered)
+        self.assertNotIn("[GET RESPONSE]", rendered)
+        self.assertNotIn("SW 611A", rendered)
+
+    def test_send_concise_mode_silences_6cxx_length_correction(self):
+        # 6Cxx triggers an internal Le retry; the retry SW is the one
+        # the operator cares about so the intermediate 6Cxx must be
+        # hidden in concise mode.
+        channel = PcscApduChannel.__new__(PcscApduChannel)
+        channel._conn = ScriptedPcscConnection(
+            [
+                (b"", 0x6C, 0x12),
+                (b"\xCA\xFE", 0x90, 0x00),
+            ]
+        )
+        channel._raw_apdu_logging = False
+
+        output = io.StringIO()
+        with redirect_stdout(output):
+            response = channel.send(bytes.fromhex("80E2910000"), "LOCAL: GetEID")
+
+        rendered = output.getvalue()
+        self.assertEqual(response, b"\xCA\xFE")
+        self.assertIn("[*] LOCAL: GetEID", rendered)
+        self.assertNotIn("SW 6C12", rendered)
+
+    def test_raw_mode_still_surfaces_continuation_swords(self):
+        # Developers that enable raw logging want the full chaining
+        # visible (including GET RESPONSE follow-ups and 61xx lines).
+        channel = PcscApduChannel.__new__(PcscApduChannel)
+        channel._conn = ScriptedPcscConnection(
+            [
+                (b"", 0x61, 0x02),
+                (b"\xAA\xBB", 0x90, 0x00),
+            ]
+        )
+        channel._raw_apdu_logging = True
+
+        output = io.StringIO()
+        with redirect_stdout(output):
+            response = channel.send(bytes.fromhex("00A4040000"), "LOCAL: Select ECASD")
+
+        rendered = output.getvalue()
+        self.assertEqual(response, b"\xAA\xBB")
+        self.assertIn("[LOCAL: Select ECASD] > 00A4040000", rendered)
+        self.assertIn("SW: 6102", rendered)
+        self.assertIn("[LOCAL: Select ECASD [GET RESPONSE]] >", rendered)
+        self.assertIn("SW: 9000", rendered)
 
 
 if __name__ == "__main__":

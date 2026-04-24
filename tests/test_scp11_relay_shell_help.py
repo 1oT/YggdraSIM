@@ -5,6 +5,7 @@ import unittest
 from contextlib import redirect_stdout
 from pathlib import Path
 from types import SimpleNamespace
+from unittest import mock
 
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -184,6 +185,7 @@ class RelayShellHelpTests(unittest.TestCase):
         self.assertIn("ENABLE-PROFILE <iccid-or-aid>", rendered)
         self.assertIn("DISABLE-PROFILE <iccid-or-aid>", rendered)
         self.assertIn("DELETE-PROFILE <iccid-or-aid>", rendered)
+        self.assertIn("REFRESH-MODEM [mode]", rendered)
         self.assertIn("DISCOVER", rendered)
         self.assertIn("DOWNLOAD", rendered)
         self.assertNotIn("POLL", rendered)
@@ -221,6 +223,7 @@ class RelayShellHelpTests(unittest.TestCase):
         self.assertIn("ENABLE-PROFILE <iccid-or-aid>", rendered)
         self.assertIn("DISABLE-PROFILE <iccid-or-aid>", rendered)
         self.assertIn("DELETE-PROFILE <iccid-or-aid>", rendered)
+        self.assertIn("REFRESH-MODEM [mode]", rendered)
         self.assertIn("DISCOVER", rendered)
         self.assertIn("DOWNLOAD", rendered)
         self.assertNotIn("DOWNLOAD [matchingId]", rendered)
@@ -237,12 +240,16 @@ class RelayShellHelpTests(unittest.TestCase):
         self.assertIn("METADATA", live_console._commands)
         self.assertIn("EIM-DISCOVER", live_console._commands)
         self.assertIn("EIM-DOWNLOAD", live_console._commands)
+        self.assertIn("REFRESH-MODEM", live_console._commands)
+        self.assertIn("MODEM-REFRESH", live_console._commands)
         self.assertNotIn("EIM-POLL", live_console._commands)
         self.assertIn("DOWNLOAD-AC", test_console._commands)
         self.assertIn("GET-METADATA", test_console._commands)
         self.assertIn("METADATA", test_console._commands)
         self.assertIn("EIM-DISCOVER", test_console._commands)
         self.assertIn("EIM-DOWNLOAD", test_console._commands)
+        self.assertIn("REFRESH-MODEM", test_console._commands)
+        self.assertIn("MODEM-REFRESH", test_console._commands)
         self.assertNotIn("EIM-POLL", test_console._commands)
 
     def test_hidden_command_remains_callable(self):
@@ -522,6 +529,74 @@ class RelayShellHelpTests(unittest.TestCase):
             self.assertTrue(keep_running)
             self.assertEqual(invoked, ["discover"])
 
+    def test_remove_notification_success_does_not_retrigger_notification_sync(self):
+        """
+        Regression: ``_execute_result_command`` must not call
+        ``_sync_notifications_after_success`` when the command itself is
+        ``RemoveNotificationFromList``. The outer profile state flow
+        already runs a notification sync after success — letting the
+        remove recursion re-enter it causes the noisy ``listNotifications
+        failed (APDU Failed: 6881)`` log seen after DISABLE-PROFILE.
+        """
+        for module in [self.live_module, self.test_module]:
+            console = self._build_console(module)
+            sync_calls: list[bytes] = []
+            console._sync_notifications_after_success = (
+                lambda response=b"", _log=sync_calls: _log.append(response)
+            )
+
+            remove_payload = console._build_remove_notification_payload(281)
+            success = console._execute_result_command(
+                title="RemoveNotificationFromList seq=281",
+                payload=remove_payload,
+                result_outer_tag=console.TAG_REMOVE_NOTIFICATION,
+            )
+
+            self.assertTrue(success)
+            self.assertEqual(sync_calls, [])
+
+    def test_profile_state_success_still_triggers_notification_sync(self):
+        """
+        Companion regression: profile state commands (DisableProfile etc.)
+        must continue to trigger ``_sync_notifications_after_success`` so
+        the inline notification path keeps working. Only the
+        RemoveNotification recursion is suppressed by the fix above.
+        """
+        for module in [self.live_module, self.test_module]:
+            console = self._build_console(module)
+            sync_calls: list[bytes] = []
+            console._sync_notifications_after_success = (
+                lambda response=b"", _log=sync_calls: _log.append(response)
+            )
+            module_self = module
+
+            class DisableProfileChannel:
+                def __init__(self) -> None:
+                    self.send_calls: list[tuple[str, bytes]] = []
+
+                def send(self, apdu: bytes, log_name: str) -> bytes:
+                    self.send_calls.append((log_name, apdu))
+                    return module_self._build_tlv(
+                        bytes.fromhex("BF32"),
+                        module_self._build_tlv(bytes.fromhex("80"), b"\x00"),
+                    )
+
+            console.apdu_channel = DisableProfileChannel()
+
+            disable_payload = console._build_profile_command_payload(
+                console.TAG_DISABLE_PROFILE,
+                console.TAG_ICCID,
+                "98103000000477637736",
+            )
+            success = console._execute_result_command(
+                title="DisableProfile",
+                payload=disable_payload,
+                result_outer_tag=console.TAG_DISABLE_PROFILE,
+            )
+
+            self.assertTrue(success)
+            self.assertEqual(len(sync_calls), 1)
+
     def test_snapshot_collects_notification_count(self):
         for module in [self.live_module, self.test_module]:
             console = self._build_console(module)
@@ -606,6 +681,29 @@ class RelayShellHelpTests(unittest.TestCase):
             self.assertIn("SCP11 Session Ready", rendered)
             self.assertNotIn("NOISY-TRACE-LINE", rendered)
 
+    def test_start_snapshot_prints_hil_warning_when_bridge_is_running(self):
+        for module in [self.live_module, self.test_module]:
+            console = self._build_console(module)
+            console._collect_snapshot = lambda: module.CardSnapshot(
+                eid="89044045930000000000001492294428",
+                issuer_number="89044045",
+                issuer_name="Kigen",
+                configured_raw=b"",
+                configured_decoded={},
+                profiles=[],
+                notification_count=0,
+                euicc_info2_summary={},
+                eim_summary={},
+            )
+            buffer = io.StringIO()
+
+            with mock.patch.object(module, "hil_bridge_warning_text", return_value="Synthetic HIL warning"):
+                with redirect_stdout(buffer):
+                    console._print_start_snapshot()
+
+            rendered = buffer.getvalue()
+            self.assertIn("Synthetic HIL warning", rendered)
+
     def test_execute_command_keeps_read_only_action_free_of_notification_side_effects(self):
         for module in [self.live_module, self.test_module]:
             console = self._build_console(module)
@@ -618,6 +716,15 @@ class RelayShellHelpTests(unittest.TestCase):
             self.assertEqual(console.apdu_channel.send_calls, [])
 
     def test_execute_command_triggers_notification_sync_and_auto_clear_for_transaction_action(self):
+        """
+        Post-transaction commands (DOWNLOAD, ENABLE, DISABLE, DELETE)
+        must trigger a single notification sync plus the quiet
+        auto-clear sweep. The auto-clear still fires per-seq
+        RemoveNotificationFromList APDUs, but those removals must NOT
+        re-enter the sync path — otherwise the log gets spammed with
+        "listNotifications failed (APDU Failed: 6881)" after a
+        channel-rebinding profile state change.
+        """
         for module in [self.live_module, self.test_module]:
             console = self._build_console(module)
             console.apdu_channel.notification_responses = [
@@ -629,8 +736,7 @@ class RelayShellHelpTests(unittest.TestCase):
             keep_running = console._execute_command("DOWNLOAD", "")
 
             self.assertTrue(keep_running)
-            self.assertEqual(console.orchestrator.sync_calls[0], b"")
-            self.assertEqual(len(console.orchestrator.sync_calls), 3)
+            self.assertEqual(console.orchestrator.sync_calls, [b""])
             send_logs = [entry[0] for entry in console.apdu_channel.send_calls]
             self.assertIn("GET: RetrieveNotificationsList", send_logs)
             self.assertIn("CMD: RemoveNotificationFromList seq=7", send_logs)

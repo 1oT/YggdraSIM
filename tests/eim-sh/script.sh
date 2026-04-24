@@ -9,22 +9,41 @@ cd "$PROJECT_ROOT"
 
 export PYTHONPATH="${PROJECT_ROOT}:${PROJECT_ROOT}/SCP11:${PYTHONPATH:-}"
 
-# Prefer pyscard venv (Linux, all deps); else .zshrc venv; else project .venv
-PYSCARD_VENV="/home/hampushellsberg/Documents/pyscard/bin/activate"
-if [[ -f "$PYSCARD_VENV" ]]; then
+# Pick a Python interpreter in this preference order:
+#   1. YGGDRASIM_PYTHON (explicit override)
+#   2. YGGDRASIM_PYSCARD_VENV / <project>/../pyscard/bin/activate
+#      (legacy convenience for developers who keep a sibling pyscard venv)
+#   3. project-local .venv
+#   4. system python3 on PATH
+PYTHON=""
+if [[ -n "${YGGDRASIM_PYTHON:-}" && -x "${YGGDRASIM_PYTHON}" ]]; then
+  PYTHON="${YGGDRASIM_PYTHON}"
+fi
+
+PYSCARD_VENV="${YGGDRASIM_PYSCARD_VENV:-$PROJECT_ROOT/../pyscard/bin/activate}"
+if [[ -z "$PYTHON" && -f "$PYSCARD_VENV" ]]; then
+  # shellcheck disable=SC1090
   source "$PYSCARD_VENV"
 fi
-[[ -f "$HOME/.zshrc" ]] && source "$HOME/.zshrc" 2>/dev/null || true
-if type venv &>/dev/null; then
-  venv
-fi
-PYTHON=python3
-if ! command -v "$PYTHON" &>/dev/null; then
+
+if [[ -z "$PYTHON" ]]; then
   if [[ -x "$PROJECT_ROOT/.venv/bin/python" ]]; then
     PYTHON="$PROJECT_ROOT/.venv/bin/python"
   elif [[ -x "$PROJECT_ROOT/.venv/bin/python3" ]]; then
     PYTHON="$PROJECT_ROOT/.venv/bin/python3"
   fi
+fi
+
+if [[ -z "$PYTHON" ]]; then
+  if command -v python3 &>/dev/null; then
+    PYTHON="$(command -v python3)"
+  fi
+fi
+
+if [[ -z "$PYTHON" ]]; then
+  echo "EIM_TEST_RESULT=FAIL"
+  echo "error: no python3 interpreter available; set YGGDRASIM_PYTHON or create .venv" >&2
+  exit 1
 fi
 
 TIMEOUT_SEC=90

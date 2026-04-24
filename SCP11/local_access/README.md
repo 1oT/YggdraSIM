@@ -41,7 +41,7 @@ EXIT
 EOF
 ```
 
-Use `../../PROFILE_LIFECYCLE_CLI_CHEATSHEET.md` for the day-to-day non-interactive
+Use `../../guides/PROFILE_LIFECYCLE_CLI_CHEATSHEET.md` for the day-to-day non-interactive
 download, enable, disable, delete, and recording patterns.
 
 ## Operator model
@@ -263,8 +263,8 @@ Resolution rules:
 ## Related guides
 
 - `SCP11/README.md`
-- `../../CLI_AND_PIPING_GUIDE.md`
-- `../../PROFILE_LIFECYCLE_CLI_CHEATSHEET.md`
+- `../../guides/CLI_AND_PIPING_GUIDE.md`
+- `../../guides/PROFILE_LIFECYCLE_CLI_CHEATSHEET.md`
 - `SCP11/live/README.md`
 - `SCP11/test/README.md`
 - `SCP11/eim_local/README.md`

@@ -204,10 +204,14 @@ def parse_apdu(apdu: bytes) -> dict[str, Any]:
         if len(body) < 1 + lc:
             raise ValueError("Short APDU body is truncated.")
         command_data = body[1 : 1 + lc]
-        if len(body) > 1 + lc:
-            trailing = body[1 + lc :]
-            if len(trailing) > 0:
-                le = 256 if trailing[-1] == 0 else trailing[-1]
+        trailing = body[1 + lc :]
+        if len(trailing) == 1:
+            le = 256 if trailing[0] == 0 else trailing[0]
+        elif len(trailing) > 1:
+            raise ValueError(
+                f"Short APDU has {len(trailing)} trailing bytes after Lc; "
+                "expected 0 (case 3S) or 1 (case 4S)."
+            )
         return {
             "cla": cla,
             "ins": ins,
@@ -219,16 +223,28 @@ def parse_apdu(apdu: bytes) -> dict[str, Any]:
 
     if len(body) < 3:
         raise ValueError("Extended APDU body is truncated.")
-    lc = int.from_bytes(body[1:3], "big", signed=False)
-    if lc == 0 and len(body) == 3:
+
+    # ISO 7816-4 §5.1 Case 2E: ``CLA INS P1 P2 00 Le_hi Le_lo``. A
+    # 3-byte body that starts with 0x00 is a command with no data and
+    # an extended Le, not an extended Lc. Le=0000 encodes 65536 per
+    # §5.3.2. The previous implementation treated these bytes as Lc
+    # and either lost the Le (Le=0 → None) or raised "Extended APDU
+    # payload is truncated" (Le>0 → expected <lc> data bytes that do
+    # not exist).
+    if len(body) == 3:
+        le_value = int.from_bytes(body[1:3], "big", signed=False)
+        if le_value == 0:
+            le_value = 65536
         return {
             "cla": cla,
             "ins": ins,
             "p1": p1,
             "p2": p2,
             "data": command_data,
-            "le": None,
+            "le": le_value,
         }
+
+    lc = int.from_bytes(body[1:3], "big", signed=False)
     if len(body) < 3 + lc:
         raise ValueError("Extended APDU payload is truncated.")
     command_data = body[3 : 3 + lc]
@@ -236,6 +252,14 @@ def parse_apdu(apdu: bytes) -> dict[str, Any]:
     if len(trailing) == 1:
         le = 256 if trailing[0] == 0 else trailing[0]
     elif len(trailing) >= 2:
+        # When Lc is extended the trailing Le is 2 bytes (ISO 7816-4
+        # §5.1 Case 4E). Any bytes past trailing[:2] would be a
+        # malformed APDU; drop them rather than silently extend.
+        if len(trailing) > 2:
+            raise ValueError(
+                f"Extended APDU has {len(trailing)} trailing bytes after "
+                "data; expected 0 (case 3E) or 2 (case 4E)."
+            )
         le = int.from_bytes(trailing[:2], "big", signed=False)
         if le == 0:
             le = 65536

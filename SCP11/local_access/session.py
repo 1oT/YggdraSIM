@@ -2,22 +2,27 @@ import hashlib
 import os
 import re
 import sys
+import threading
+import time
 import types
 from contextlib import contextmanager
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 from cryptography import x509 as crypto_x509
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.x509.oid import ExtensionOID
 from yggdrasim_common.euicc_issuer import infer_ecasd_issuer_identity
+from yggdrasim_common.progress import progress_session
 from yggdrasim_common.runtime_paths import ensure_seeded_workspace_file, remap_legacy_workspace_relative, runtime_root
 
 try:
-    from ..pysim_path import ensure_repo_pysim_on_path
+    from ..pysim_path import describe_pysim_resolution, ensure_repo_pysim_on_path
+    from ..shared.profile_targeting import resolve_profile_target_identifier
 except ImportError:
-    from SCP11.pysim_path import ensure_repo_pysim_on_path
+    from SCP11.pysim_path import describe_pysim_resolution, ensure_repo_pysim_on_path
+    from SCP11.shared.profile_targeting import resolve_profile_target_identifier
 
 ensure_repo_pysim_on_path()
 
@@ -167,6 +172,70 @@ def _temporary_session_bound_dependency_stubs():
         _restore_module_snapshot(snapshot)
 
 
+_SAIP_DECODE_TIMEOUT_ENV = "YGGDRASIM_SCP11_SAIP_DECODE_TIMEOUT_SECONDS"
+# pySim's SAIP ASN.1 decoder can loop on production-sized UPPs; keep the
+# default budget short so the operator console never wedges, and fall back
+# to header-TLV identity extraction when the decoder punts. Set
+# ``YGGDRASIM_SCP11_SAIP_DECODE_TIMEOUT_SECONDS`` to a larger value when a
+# specific workflow genuinely needs the full decode to finish.
+_SAIP_DECODE_DEFAULT_TIMEOUT = 8.0
+# pySim's SAIP decoder holds the GIL for the entire walk, so even a
+# time-bounded daemon thread can pin a CPU and starve later decode calls
+# within the same process. Full-decode is therefore opt-in: the default
+# console path sticks to the header-TLV fallback (which gives us iccid
+# and profile name) and only exercises pySim when the operator explicitly
+# asks for it via ``YGGDRASIM_SCP11_ALLOW_FULL_SAIP_DECODE``.
+_SAIP_DECODE_ALLOW_FULL_ENV = "YGGDRASIM_SCP11_ALLOW_FULL_SAIP_DECODE"
+
+
+def _resolve_saip_decode_timeout_seconds() -> float:
+    raw_value = str(os .environ .get (_SAIP_DECODE_TIMEOUT_ENV ,"")or "").strip ()
+    if len (raw_value )==0 :
+        return _SAIP_DECODE_DEFAULT_TIMEOUT
+    try :
+        parsed =float (raw_value )
+    except ValueError :
+        return _SAIP_DECODE_DEFAULT_TIMEOUT
+    if parsed <=0.0 :
+        return _SAIP_DECODE_DEFAULT_TIMEOUT
+    return parsed
+
+
+def _full_saip_decode_enabled() -> bool:
+    raw_value = str(os.environ.get(_SAIP_DECODE_ALLOW_FULL_ENV, "") or "").strip().lower()
+    return raw_value in {"1", "true", "yes", "on"}
+
+
+def _run_with_timeout(callable_, args, *, timeout_seconds: float):
+    """Execute ``callable_(*args)`` under a soft deadline.
+
+    Returns the callable's result, or ``None`` on timeout / exception. The
+    returned ``None`` is treated by the caller as a "decoder punted" signal
+    — the header-TLV path still supplies identity fields, so downstream
+    callers degrade gracefully instead of wedging the whole console.
+    Background threads are daemonised; if the decoder genuinely loops, the
+    worker is left pinned but the main thread continues and the process
+    will eventually be reaped by the launcher.
+    """
+    result_slot : list [Any ]=[None ]
+    exc_slot : list [BaseException | None ]=[None ]
+
+    def _worker ()->None :
+        try :
+            result_slot [0 ]=callable_ (*args )
+        except BaseException as error :
+            exc_slot [0 ]=error
+
+    worker =threading .Thread (target =_worker ,daemon =True )
+    worker .start ()
+    worker .join (timeout =max (0.5 ,float (timeout_seconds )))
+    if worker .is_alive ():
+        return None
+    if exc_slot [0 ] is not None :
+        return None
+    return result_slot [0 ]
+
+
 BspInstance = None
 BoundProfilePackage = None
 gen_replace_session_keys = None
@@ -176,6 +245,15 @@ UnprotectedProfilePackage = None
 pysim_saip = None
 PySimRspSessionState = None
 CertAndPrivkey = None
+PYSIM_SESSION_BOUND_IMPORT_ERROR = ""
+
+
+def _describe_pysim_session_bound_support() -> str:
+    detail = str(PYSIM_SESSION_BOUND_IMPORT_ERROR).strip()
+    summary = describe_pysim_resolution()
+    if len(detail) == 0:
+        return summary
+    return summary + " Session-bound import error: " + detail + "."
 
 
 def _ensure_pysim_session_bound_support() -> None:
@@ -188,6 +266,7 @@ def _ensure_pysim_session_bound_support() -> None:
     global pysim_saip
     global PySimRspSessionState
     global CertAndPrivkey
+    global PYSIM_SESSION_BOUND_IMPORT_ERROR
 
     if all(
         component is not None
@@ -218,7 +297,8 @@ def _ensure_pysim_session_bound_support() -> None:
             from pySim.esim import saip as _pysim_saip
             from pySim.esim.rsp import RspSessionState as _PySimRspSessionState
             from pySim.esim.x509_cert import CertAndPrivkey as _CertAndPrivkey
-        except Exception:
+        except Exception as error:
+            PYSIM_SESSION_BOUND_IMPORT_ERROR = f"{type(error).__name__}: {error}"
             return
 
     BspInstance = _BspInstance
@@ -230,6 +310,7 @@ def _ensure_pysim_session_bound_support() -> None:
     pysim_saip = _pysim_saip
     PySimRspSessionState = _PySimRspSessionState
     CertAndPrivkey = _CertAndPrivkey
+    PYSIM_SESSION_BOUND_IMPORT_ERROR = ""
 
 try:
     from ..shared.crypto_engine import CryptoEngine
@@ -246,7 +327,7 @@ try:
         extract_euicc_signed1,
     )
     from ..shared.transport import PcscApduChannel
-    from .cert_store import LocalSgp26CertStore
+    from .cert_store import LocalSgp26CertStore, SmdpCertificateRecord
     from .config import LocalAccessConfig
     from .metadata_codec import (
         collect_enabled_custom_metadata_tags,
@@ -273,7 +354,7 @@ except ImportError:
         extract_euicc_signed1,
     )
     from SCP11.shared.transport import PcscApduChannel
-    from SCP11.local_access.cert_store import LocalSgp26CertStore
+    from SCP11.local_access.cert_store import LocalSgp26CertStore, SmdpCertificateRecord
     from SCP11.local_access.config import LocalAccessConfig
     from SCP11.local_access.metadata_codec import (
         collect_enabled_custom_metadata_tags,
@@ -323,6 +404,12 @@ class LocalSessionState:
     last_bpp_crypto_debug_lines: list[str] = field(default_factory=list)
     last_pre_bsp_payload_bin_path: str = ""
     last_pre_bsp_payload_hex_path: str = ""
+    last_bsp_s_enc_hex: str = ""
+    last_bsp_s_mac_hex: str = ""
+    last_bsp_mac_chain_hex: str = ""
+    last_bsp_block_nr: int = 0
+    last_bsp_aid_hex: str = ""
+    last_bsp_protocol: str = ""
 
 
 @dataclass
@@ -703,25 +790,16 @@ class LocalIsdrSession:
         return response
 
     def _resolve_profile_target(self, identifier: str) -> Optional[tuple[bytes, str]]:
-        clean = identifier.strip().upper()
-        if len(clean) == 0:
-            return None
-
-        alias_match = self._resolve_aid_from_alias(clean)
-        if alias_match is not None:
-            return self.TAG_AID, alias_match
-
-        if self._is_valid_hex(clean):
-            if clean.startswith("A0") and len(clean) >= 10:
-                return self.TAG_AID, clean
-            if len(clean) >= 18:
-                return self.TAG_ICCID, clean
-
-        decimal_iccid = self._extract_decimal_iccid(clean)
-        if decimal_iccid is not None:
-            return self.TAG_ICCID, self._encode_iccid_for_command(decimal_iccid)
-
-        return None
+        return resolve_profile_target_identifier(
+            identifier,
+            tag_aid=self.TAG_AID,
+            tag_iccid=self.TAG_ICCID,
+            resolve_aid_from_alias=self._resolve_aid_from_alias,
+            is_hex=self._is_valid_hex,
+            extract_decimal_iccid=self._extract_decimal_iccid,
+            encode_iccid_for_command=self._encode_iccid_for_command,
+            fetch_profiles=self.collect_profile_metadata,
+        )
 
     def _resolve_aid_from_alias(self, alias: str) -> Optional[str]:
         registry_path = ensure_seeded_workspace_file(("SCP03", "aid.txt"), "SCP03", "aid.txt")
@@ -1235,29 +1313,41 @@ class LocalIsdrSession:
                     "GENERATE_SESSION_BOUND_BPP, or set WRAP_SEGMENT_IN_BOOTSTRAP=True "
                     "to use the legacy synthetic wrapper."
                 )
-        try:
-            self.open_session(
-                transaction_id_override=None if (defer_bind or build_session_bound_bpp) else transaction_id_override
-            )
-            if len(self.state.prepare_download_response) == 0:
-                self.prepare_download()
-            if build_session_bound_bpp:
-                bpp_bytes = self._build_session_bound_profile_package(bpp_bytes)
-            elif defer_bind:
-                bpp_bytes, _ = self._wrap_segment_in_bootstrap(
-                    bpp_bytes,
-                    transaction_id=self.state.transaction_id,
+        # Four-phase pre-install pipeline (open → prepare → bind/wrap →
+        # describe) plus an install phase whose step count is
+        # discovered from the BPP. ``_load_profile_from_bytes``
+        # expands the total to cover every per-segment store-data plus
+        # one trailing "sync notifications" step so the sticky footer
+        # stays in motion throughout the whole install rather than
+        # sitting at 100 % during LoadBoundProfilePackage.
+        with progress_session("Local load profile", total=4) as bar:
+            bar.advance("open session")
+            try:
+                self.open_session(
+                    transaction_id_override=None if (defer_bind or build_session_bound_bpp) else transaction_id_override
                 )
-            self.state.last_bpp_layout_lines = self._describe_bpp_layout(bpp_bytes)
-            return self._load_profile_from_bytes(bpp_bytes)
-        finally:
-            if self.state.session_open:
-                try:
-                    if self.state.load_notifications_synced is False:
-                        self._sync_pending_notifications(self.state.last_load_bpp_response)
-                except Exception:
-                    pass
-                self.close_session()
+                bar.advance("prepare download")
+                if len(self.state.prepare_download_response) == 0:
+                    self.prepare_download()
+                bar.advance("bind / wrap bpp")
+                if build_session_bound_bpp:
+                    bpp_bytes = self._build_session_bound_profile_package(bpp_bytes)
+                elif defer_bind:
+                    bpp_bytes, _ = self._wrap_segment_in_bootstrap(
+                        bpp_bytes,
+                        transaction_id=self.state.transaction_id,
+                    )
+                bar.advance("describe bpp layout")
+                self.state.last_bpp_layout_lines = self._describe_bpp_layout(bpp_bytes)
+                return self._load_profile_from_bytes(bpp_bytes, progress_bar=bar)
+            finally:
+                if self.state.session_open:
+                    try:
+                        if self.state.load_notifications_synced is False:
+                            self._sync_pending_notifications(self.state.last_load_bpp_response)
+                    except Exception:
+                        pass
+                    self.close_session()
 
     def _extract_transaction_id_from_bpp(self, bpp_bytes: bytes) -> Optional[bytes]:
         """Extract transactionId (tag 0x80) from BF23 so session can use it.
@@ -1329,7 +1419,12 @@ class LocalIsdrSession:
             _ensure_pysim_session_bound_support()
             if BoundProfilePackage is None or UnprotectedProfilePackage is None:
                 raise RuntimeError(
-                    "pySim session-bound BPP generation is unavailable in this environment."
+                    "pySim session-bound BPP generation is unavailable in this environment. "
+                    + _describe_pysim_session_bound_support()
+                    + " Install `pySim` into the active interpreter (pip install pySim), "
+                    + "clone the upstream tree at `<YggdraSIM>/pysim/` "
+                    + "(git clone https://gitlab.com/osmocom/pysim.git pysim), "
+                    + "or supply a pre-built BF36 Bound Profile Package as the profile input."
                 )
             if len(upp_bytes) == 0:
                 raise ValueError("Local profile payload is empty.")
@@ -1456,7 +1551,33 @@ class LocalIsdrSession:
             bytes.fromhex(rsp_session.eid),
         )
         bsp.c_algo.block_nr = self._bpp_initial_block_nr()
+        self._snapshot_session_bsp(bsp)
         return bsp
+
+    def _snapshot_session_bsp(self, bsp: Any) -> None:
+        """Store BSP key material on the session for keybag export.
+
+        Called whenever `_build_session_bsp` constructs a fresh BSP
+        instance; the shell's `EXPORT-KEYBAG` command reads these
+        fields to avoid re-running the full SCP11 handshake solely to
+        dump the derived keys.
+        """
+        c_algo = getattr(bsp, "c_algo", None)
+        m_algo = getattr(bsp, "m_algo", None)
+        if c_algo is None or m_algo is None:
+            return
+        s_enc_bytes = bytes(getattr(c_algo, "s_enc", b"") or b"")
+        s_mac_bytes = bytes(getattr(m_algo, "s_mac", b"") or b"")
+        if len(s_enc_bytes) == 0 or len(s_mac_bytes) == 0:
+            return
+        mac_chain_bytes = bytes(getattr(m_algo, "mac_chain", b"\x00" * 16) or b"\x00" * 16)
+        block_nr = int(getattr(c_algo, "block_nr", 0) or 0)
+        self.state.last_bsp_s_enc_hex = s_enc_bytes.hex().upper()
+        self.state.last_bsp_s_mac_hex = s_mac_bytes.hex().upper()
+        self.state.last_bsp_mac_chain_hex = mac_chain_bytes.hex().upper()
+        self.state.last_bsp_block_nr = block_nr
+        self.state.last_bsp_protocol = "scp11c"
+        self.state.last_bsp_aid_hex = bytes(self.cfg.AID_ISD_R or b"").hex().upper()
 
     @staticmethod
     def _advance_session_bsp_to_a3_prelude(session_bsp: Any, profile_metadata: Any) -> bytes:
@@ -1552,23 +1673,52 @@ class LocalIsdrSession:
         if pysim_saip is None:
             return labels
 
-        try:
-            pes = list(pysim_saip.ProfileElementSequence.from_der(bytes(profile_bytes)))
-        except Exception:
-            pes = []
-        for index, pe in enumerate(pes[: len(labels)]):
-            labels[index] = self._format_profile_element_label(pe)
+        # pySim's SAIP decoder can loop on production-sized UPPs and it holds
+        # the GIL during the walk, so a background thread does not reliably
+        # reclaim CPU. The full decode is therefore gated behind an opt-in
+        # env flag; the default label path keeps the console responsive by
+        # relying on whatever the per-element decode below can recover.
+        timeout_seconds = _resolve_saip_decode_timeout_seconds()
+
+        if _full_saip_decode_enabled():
+            def _decode_profile_element_sequence(raw: bytes) -> list[Any]:
+                return list(pysim_saip.ProfileElementSequence.from_der(raw))
+
+            pes = _run_with_timeout(
+                _decode_profile_element_sequence,
+                (bytes(profile_bytes),),
+                timeout_seconds=timeout_seconds,
+            )
+            if not isinstance(pes, list):
+                pes = []
+            for index, pe in enumerate(pes[: len(labels)]):
+                labels[index] = self._format_profile_element_label(pe)
 
         profile_element_cls = getattr(pysim_saip, "ProfileElement", None)
         if profile_element_cls is None:
             return labels
 
+        # Per-element decoding is the second chance to label TLVs that the
+        # whole-sequence decode could not place. Each individual decode is
+        # timeout-guarded *and* the whole loop shares a single wall-clock
+        # budget so a profile that slowly bleeds the decoder (a handful of
+        # seconds per element) cannot stall the operator console. The
+        # budget is intentionally generous enough for mocked test doubles
+        # to label a dozen or so elements without tripping it.
+        per_element_timeout = max(0.5, timeout_seconds / 4.0)
+        total_budget_seconds = max(1.0, timeout_seconds / 2.0)
+        loop_deadline = time.monotonic() + total_budget_seconds
         for index, (_start, _end, _tag_bytes, raw_tlv) in enumerate(raw_elements):
             if len(labels[index]) > 0:
                 continue
-            try:
-                pe = profile_element_cls.from_der(raw_tlv)
-            except Exception:
+            if time.monotonic() >= loop_deadline:
+                break
+            pe = _run_with_timeout(
+                profile_element_cls.from_der,
+                (raw_tlv,),
+                timeout_seconds=per_element_timeout,
+            )
+            if pe is None:
                 continue
             labels[index] = self._format_profile_element_label(pe)
         return labels
@@ -1902,23 +2052,35 @@ class LocalIsdrSession:
             profile_name = header_profile_name
         if len(header_profile_iccid) > 0:
             profile_iccid = header_profile_iccid
-        if pysim_saip is not None:
-            try:
-                pes = pysim_saip.ProfileElementSequence.from_der(bytes(profile_bytes))
-                header = pes.get_pe_for_type("header")
-                if header is not None and isinstance(header.decoded, dict):
-                    decoded_header = header.decoded
-                    profile_type = decoded_header.get("profileType", "")
-                    if isinstance(profile_type, (bytes, bytearray, memoryview)):
-                        decoded_profile_name = self._decode_text_or_hex(bytes(profile_type)).strip()
-                    else:
-                        decoded_profile_name = str(profile_type or "").strip()
-                    profile_name = decoded_profile_name or profile_name
-                    iccid_value = decoded_header.get("iccid", b"")
-                    if isinstance(iccid_value, (bytes, bytearray, memoryview)) and len(iccid_value) > 0:
-                        profile_iccid = self._decode_bcd_digits(bytes(iccid_value))
-            except Exception:
-                pass
+        if pysim_saip is not None and _full_saip_decode_enabled():
+            # pySim's SAIP ASN.1 decoder has historically looped on certain
+            # non-canonical UPP packings; cap the decode at a short budget so
+            # the operator console never wedges and the header-TLV identity
+            # path still populates the metadata stub. Full-decode is opt-in
+            # because the decoder holds the GIL and can starve later callers
+            # even when a daemon-thread timeout fires.
+            timeout_seconds = _resolve_saip_decode_timeout_seconds()
+            pes = _run_with_timeout(
+                pysim_saip.ProfileElementSequence.from_der,
+                (bytes(profile_bytes),),
+                timeout_seconds=timeout_seconds,
+            )
+            if pes is not None:
+                try:
+                    header = pes.get_pe_for_type("header")
+                    if header is not None and isinstance(header.decoded, dict):
+                        decoded_header = header.decoded
+                        profile_type = decoded_header.get("profileType", "")
+                        if isinstance(profile_type, (bytes, bytearray, memoryview)):
+                            decoded_profile_name = self._decode_text_or_hex(bytes(profile_type)).strip()
+                        else:
+                            decoded_profile_name = str(profile_type or "").strip()
+                        profile_name = decoded_profile_name or profile_name
+                        iccid_value = decoded_header.get("iccid", b"")
+                        if isinstance(iccid_value, (bytes, bytearray, memoryview)) and len(iccid_value) > 0:
+                            profile_iccid = self._decode_bcd_digits(bytes(iccid_value))
+                except Exception:
+                    pass
         return {
             "profile": {
                 "name": profile_name,
@@ -2034,7 +2196,22 @@ class LocalIsdrSession:
         issuer_number = self._decode_bcd_digits(value)
         return infer_ecasd_issuer_identity(issuer_number)
 
-    def _load_profile_from_bytes(self, bpp_bytes: bytes) -> bytes:
+    def _load_profile_from_bytes(
+        self,
+        bpp_bytes: bytes,
+        *,
+        progress_bar: Any = None,
+    ) -> bytes:
+        """
+        Run the ES10b LoadBoundProfilePackage loop and the trailing
+        notification sync.
+
+        When ``progress_bar`` is an active ``ProgressSession``, the
+        caller's total is extended to cover every per-segment
+        store-data round plus one final "sync notifications" slot, so
+        the footer keeps moving throughout the install instead of
+        parking at 100 % while the card chews through the segments.
+        """
         if self.state.session_open is False:
             raise RuntimeError("No active local SCP11 session.")
         if len(self.state.prepare_download_response) == 0:
@@ -2045,15 +2222,26 @@ class LocalIsdrSession:
         self._update_bpp_structure_debug(bpp_bytes)
         self.state.bpp_command_descriptions = self._describe_bpp_command_id_sequence(bpp_bytes)
         segments = self._segment_bound_profile_package(bpp_bytes)
+        segment_count = len(segments)
+        self._progress_expand_for_install(progress_bar, segment_count)
         last_response = b""
         for index, segment in enumerate(segments, start=1):
+            self._progress_advance(
+                progress_bar,
+                f"load segment {index}/{segment_count}",
+            )
             last_response = self._send_personalization_store_data(
                 segment,
-                f"DOWNLOAD: LoadBoundProfilePackage [{index}/{len(segments)}]",
+                f"DOWNLOAD: LoadBoundProfilePackage [{index}/{segment_count}]",
             )
             self.state.last_load_bpp_response = last_response
             if self._is_terminal_profile_installation_result(last_response):
+                self._progress_coast_remaining_segments(
+                    progress_bar,
+                    skipped_count=segment_count - index,
+                )
                 break
+        self._progress_advance(progress_bar, "sync notifications")
         self._sync_pending_notifications(last_response)
         self.state.load_notifications_synced = True
         if self._is_failed_profile_installation_result(last_response):
@@ -2068,6 +2256,56 @@ class LocalIsdrSession:
                 f"{'=' * 64}"
             )
         return last_response
+
+    @staticmethod
+    def _progress_expand_for_install(progress_bar: Any, segment_count: int) -> None:
+        """
+        Grow the sticky-footer total so the install phase can advance
+        once per segment plus one final "sync notifications" step.
+        The total is set to ``already_completed + segment_count + 1``
+        so the per-segment loop and the trailing sync land at exactly
+        100 %.
+        """
+        if progress_bar is None:
+            return
+        try:
+            completed_so_far = int(getattr(progress_bar, "completed", 0) or 0)
+        except Exception:
+            completed_so_far = 0
+        normalized_segment_count = max(0, int(segment_count))
+        new_total = completed_so_far + normalized_segment_count + 1
+        try:
+            progress_bar.set_total(new_total)
+        except Exception:
+            pass
+
+    @staticmethod
+    def _progress_advance(progress_bar: Any, label: str) -> None:
+        if progress_bar is None:
+            return
+        try:
+            progress_bar.advance(label)
+        except Exception:
+            pass
+
+    @staticmethod
+    def _progress_coast_remaining_segments(
+        progress_bar: Any, skipped_count: int,
+    ) -> None:
+        """
+        When a terminal ProfileInstallationResult short-circuits the
+        loop, fast-forward the bar across the segments we will not be
+        sending so the final "sync notifications" advance still lands
+        at 100 %.
+        """
+        if progress_bar is None:
+            return
+        if skipped_count <= 0:
+            return
+        try:
+            progress_bar.advance("install short-circuit", count=int(skipped_count))
+        except Exception:
+            pass
 
     def _sync_pending_notifications(self, initial_response: bytes = b"") -> None:
         seq_numbers: list[int] = []
@@ -2611,7 +2849,7 @@ class LocalIsdrSession:
 
     def _selection_reason(
         self,
-        record: "SmdpCertificateRecord",
+        record: SmdpCertificateRecord,
         allowed_ci_pkids: list[str],
     ) -> str:
         normalized_allowed = [str(value).strip().upper() for value in allowed_ci_pkids if len(str(value).strip()) > 0]
@@ -2623,7 +2861,7 @@ class LocalIsdrSession:
     def _remember_selected_smdp_record(
         self,
         role: str,
-        record: "SmdpCertificateRecord",
+        record: SmdpCertificateRecord,
         allowed_ci_pkids: list[str],
     ) -> None:
         if role == "auth":
@@ -2648,7 +2886,7 @@ class LocalIsdrSession:
 
     def _smdp_record_summary(
         self,
-        record: "SmdpCertificateRecord",
+        record: SmdpCertificateRecord,
         allowed_ci_pkids: list[str],
     ) -> dict[str, Any]:
         return {
@@ -3451,13 +3689,30 @@ class LocalIsdrSession:
             return prefix.rstrip()
         return "\n".join(f"{prefix}{line}" if len(line) > 0 else prefix.rstrip() for line in lines)
 
+    # SGP.22 v3.0 §5.5.4 / §5.5.5: bppCommandId is a 1-based index into the
+    # canonical BoundProfilePackage command sequence. When the observed BPP
+    # layout in self.state.bpp_command_descriptions is shorter than the
+    # failing command (typical when the BPP was segmented upstream or
+    # supplied as a stub in unit tests), fall back to this canonical table
+    # so the failure summary still identifies which step aborted.
+    _SGP22_BPP_COMMAND_ID_TABLE = (
+        "BF23.InitialiseSecureChannelRequest",
+        "A0.ConfigureISDPRequest",
+        "A1.StoreMetadataRequest",
+        "A2.ReplaceSessionKeys",
+        "A3.ProtectedProfilePackageCommand",
+    )
+
     def _describe_bpp_command_id(self, command_id: int) -> str:
         if command_id <= 0:
             return ""
         index = command_id - 1
-        if index >= len(self.state.bpp_command_descriptions):
-            return ""
-        return self.state.bpp_command_descriptions[index]
+        observed = self.state.bpp_command_descriptions
+        if index < len(observed):
+            return observed[index]
+        if index < len(self._SGP22_BPP_COMMAND_ID_TABLE):
+            return self._SGP22_BPP_COMMAND_ID_TABLE[index]
+        return ""
 
     @staticmethod
     def _describe_profile_installation_error_reason(error_reason: int) -> str:
@@ -3579,6 +3834,11 @@ class LocalIsdrSession:
         return ".".join(parts)
 
     def _segment_bound_profile_package(self, bpp_bytes: bytes) -> list[bytes]:
+        # Keep the A0 configureISDPRequest wrapped and emit A1/A2/A3
+        # container headers as their own StoreData chains, matching
+        # SGP.22 Annex M "ES10b.LoadBoundProfilePackage". Without this
+        # framing a compliant eUICC can misinterpret the first bare 86
+        # as a terminal loadProfileElements result.
         if len(bpp_bytes) == 0:
             raise ValueError("Bound Profile Package is empty.")
         root_tag, root_value, _, _ = self._read_tlv(bpp_bytes, 0)
@@ -3594,7 +3854,10 @@ class LocalIsdrSession:
             if child_tag == bytes.fromhex("BF23"):
                 bootstrap_end = next_offset + (len(bpp_bytes) - len(root_value))
                 segments.append(bpp_bytes[:bootstrap_end])
-            elif child_tag in (b"\xA0", b"\xA1", b"\xA2", b"\xA3"):
+            elif child_tag == b"\xA0":
+                segments.append(child_raw)
+            elif child_tag in (b"\xA1", b"\xA2", b"\xA3"):
+                segments.append(self._encode_tlv_header(child_tag, len(child_value)))
                 if len(child_value) > 0:
                     segments.extend(self._extract_sequence_members(child_value))
             else:

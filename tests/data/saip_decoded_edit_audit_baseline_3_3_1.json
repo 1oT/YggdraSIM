@@ -1,0 +1,6706 @@
+{
+  "saip_spec_version": "3.3.1",
+  "saip_spec_asn1_file": "PE_Definitions-3.3.1.asn",
+  "totals": {
+    "structural_only": 87,
+    "roundtrip_scalar": 55,
+    "roundtrip_bytes": 102,
+    "roundtrip_ef": 373,
+    "readonly_ef": 2,
+    "hand_written": 1
+  },
+  "groups": {
+    "PE-AKAParameter": {
+      "summary": {
+        "structural_only": 1,
+        "roundtrip_scalar": 2,
+        "roundtrip_bytes": 13
+      },
+      "fields": [
+        {
+          "path": [
+            "PE-AKAParameter",
+            "aka-header",
+            "mandated"
+          ],
+          "type_name": "NULL",
+          "optional": true,
+          "kind": "field",
+          "classification": "structural_only"
+        },
+        {
+          "path": [
+            "PE-AKAParameter",
+            "aka-header",
+            "identification"
+          ],
+          "type_name": "UInt15",
+          "optional": false,
+          "kind": "field",
+          "classification": "roundtrip_scalar"
+        },
+        {
+          "path": [
+            "PE-AKAParameter",
+            "algoConfiguration",
+            "mappingParameter",
+            "mappingOptions"
+          ],
+          "type_name": "OCTET STRING",
+          "optional": false,
+          "kind": "field",
+          "classification": "roundtrip_bytes"
+        },
+        {
+          "path": [
+            "PE-AKAParameter",
+            "algoConfiguration",
+            "mappingParameter",
+            "mappingSource"
+          ],
+          "type_name": "ApplicationIdentifier",
+          "optional": false,
+          "kind": "field",
+          "classification": "roundtrip_bytes"
+        },
+        {
+          "path": [
+            "PE-AKAParameter",
+            "algoConfiguration",
+            "algoParameter",
+            "algorithmID"
+          ],
+          "type_name": "INTEGER",
+          "optional": false,
+          "kind": "field",
+          "classification": "roundtrip_scalar"
+        },
+        {
+          "path": [
+            "PE-AKAParameter",
+            "algoConfiguration",
+            "algoParameter",
+            "algorithmOptions"
+          ],
+          "type_name": "OCTET STRING",
+          "optional": false,
+          "kind": "field",
+          "classification": "roundtrip_bytes"
+        },
+        {
+          "path": [
+            "PE-AKAParameter",
+            "algoConfiguration",
+            "algoParameter",
+            "key"
+          ],
+          "type_name": "OCTET STRING",
+          "optional": false,
+          "kind": "field",
+          "classification": "roundtrip_bytes"
+        },
+        {
+          "path": [
+            "PE-AKAParameter",
+            "algoConfiguration",
+            "algoParameter",
+            "opc"
+          ],
+          "type_name": "OCTET STRING",
+          "optional": false,
+          "kind": "field",
+          "classification": "roundtrip_bytes"
+        },
+        {
+          "path": [
+            "PE-AKAParameter",
+            "algoConfiguration",
+            "algoParameter",
+            "rotationConstants"
+          ],
+          "type_name": "OCTET STRING",
+          "optional": false,
+          "kind": "field",
+          "classification": "roundtrip_bytes"
+        },
+        {
+          "path": [
+            "PE-AKAParameter",
+            "algoConfiguration",
+            "algoParameter",
+            "xoringConstants"
+          ],
+          "type_name": "OCTET STRING",
+          "optional": false,
+          "kind": "field",
+          "classification": "roundtrip_bytes"
+        },
+        {
+          "path": [
+            "PE-AKAParameter",
+            "algoConfiguration",
+            "algoParameter",
+            "authCounterMax"
+          ],
+          "type_name": "OCTET STRING",
+          "optional": true,
+          "kind": "field",
+          "classification": "roundtrip_bytes"
+        },
+        {
+          "path": [
+            "PE-AKAParameter",
+            "algoConfiguration",
+            "algoParameter",
+            "numberOfKeccak"
+          ],
+          "type_name": "UInt8",
+          "optional": false,
+          "kind": "field",
+          "classification": "roundtrip_bytes"
+        },
+        {
+          "path": [
+            "PE-AKAParameter",
+            "sqnOptions"
+          ],
+          "type_name": "OCTET STRING",
+          "optional": false,
+          "kind": "field",
+          "classification": "roundtrip_bytes"
+        },
+        {
+          "path": [
+            "PE-AKAParameter",
+            "sqnDelta"
+          ],
+          "type_name": "OCTET STRING",
+          "optional": false,
+          "kind": "field",
+          "classification": "roundtrip_bytes"
+        },
+        {
+          "path": [
+            "PE-AKAParameter",
+            "sqnAgeLimit"
+          ],
+          "type_name": "OCTET STRING",
+          "optional": false,
+          "kind": "field",
+          "classification": "roundtrip_bytes"
+        },
+        {
+          "path": [
+            "PE-AKAParameter",
+            "sqnInit"
+          ],
+          "type_name": "OCTET STRING",
+          "optional": false,
+          "kind": "field",
+          "classification": "roundtrip_bytes"
+        }
+      ]
+    },
+    "PE-Application": {
+      "summary": {
+        "structural_only": 1,
+        "roundtrip_scalar": 1,
+        "roundtrip_bytes": 31
+      },
+      "fields": [
+        {
+          "path": [
+            "PE-Application",
+            "app-Header",
+            "mandated"
+          ],
+          "type_name": "NULL",
+          "optional": true,
+          "kind": "field",
+          "classification": "structural_only"
+        },
+        {
+          "path": [
+            "PE-Application",
+            "app-Header",
+            "identification"
+          ],
+          "type_name": "UInt15",
+          "optional": false,
+          "kind": "field",
+          "classification": "roundtrip_scalar"
+        },
+        {
+          "path": [
+            "PE-Application",
+            "loadBlock",
+            "loadPackageAID"
+          ],
+          "type_name": "ApplicationIdentifier",
+          "optional": false,
+          "kind": "field",
+          "classification": "roundtrip_bytes"
+        },
+        {
+          "path": [
+            "PE-Application",
+            "loadBlock",
+            "securityDomainAID"
+          ],
+          "type_name": "ApplicationIdentifier",
+          "optional": true,
+          "kind": "field",
+          "classification": "roundtrip_bytes"
+        },
+        {
+          "path": [
+            "PE-Application",
+            "loadBlock",
+            "nonVolatileCodeLimitC6"
+          ],
+          "type_name": "OCTET STRING",
+          "optional": true,
+          "kind": "field",
+          "classification": "roundtrip_bytes"
+        },
+        {
+          "path": [
+            "PE-Application",
+            "loadBlock",
+            "volatileDataLimitC7"
+          ],
+          "type_name": "OCTET STRING",
+          "optional": true,
+          "kind": "field",
+          "classification": "roundtrip_bytes"
+        },
+        {
+          "path": [
+            "PE-Application",
+            "loadBlock",
+            "nonVolatileDataLimitC8"
+          ],
+          "type_name": "OCTET STRING",
+          "optional": true,
+          "kind": "field",
+          "classification": "roundtrip_bytes"
+        },
+        {
+          "path": [
+            "PE-Application",
+            "loadBlock",
+            "hashValue"
+          ],
+          "type_name": "OCTET STRING",
+          "optional": true,
+          "kind": "field",
+          "classification": "roundtrip_bytes"
+        },
+        {
+          "path": [
+            "PE-Application",
+            "loadBlock",
+            "loadBlockObject"
+          ],
+          "type_name": "OCTET STRING",
+          "optional": false,
+          "kind": "field",
+          "classification": "roundtrip_bytes"
+        },
+        {
+          "path": [
+            "PE-Application",
+            "instanceList",
+            "applicationLoadPackageAID"
+          ],
+          "type_name": "ApplicationIdentifier",
+          "optional": false,
+          "kind": "field",
+          "classification": "roundtrip_bytes"
+        },
+        {
+          "path": [
+            "PE-Application",
+            "instanceList",
+            "classAID"
+          ],
+          "type_name": "ApplicationIdentifier",
+          "optional": false,
+          "kind": "field",
+          "classification": "roundtrip_bytes"
+        },
+        {
+          "path": [
+            "PE-Application",
+            "instanceList",
+            "instanceAID"
+          ],
+          "type_name": "ApplicationIdentifier",
+          "optional": false,
+          "kind": "field",
+          "classification": "roundtrip_bytes"
+        },
+        {
+          "path": [
+            "PE-Application",
+            "instanceList",
+            "extraditeSecurityDomainAID"
+          ],
+          "type_name": "ApplicationIdentifier",
+          "optional": true,
+          "kind": "field",
+          "classification": "roundtrip_bytes"
+        },
+        {
+          "path": [
+            "PE-Application",
+            "instanceList",
+            "applicationPrivileges"
+          ],
+          "type_name": "OCTET STRING",
+          "optional": false,
+          "kind": "field",
+          "classification": "roundtrip_bytes"
+        },
+        {
+          "path": [
+            "PE-Application",
+            "instanceList",
+            "lifeCycleState"
+          ],
+          "type_name": "OCTET STRING",
+          "optional": false,
+          "kind": "field",
+          "classification": "roundtrip_bytes"
+        },
+        {
+          "path": [
+            "PE-Application",
+            "instanceList",
+            "applicationSpecificParametersC9"
+          ],
+          "type_name": "OCTET STRING",
+          "optional": false,
+          "kind": "field",
+          "classification": "roundtrip_bytes"
+        },
+        {
+          "path": [
+            "PE-Application",
+            "instanceList",
+            "systemSpecificParameters",
+            "volatileMemoryQuotaC7"
+          ],
+          "type_name": "OCTET STRING",
+          "optional": true,
+          "kind": "field",
+          "classification": "roundtrip_bytes"
+        },
+        {
+          "path": [
+            "PE-Application",
+            "instanceList",
+            "systemSpecificParameters",
+            "nonVolatileMemoryQuotaC8"
+          ],
+          "type_name": "OCTET STRING",
+          "optional": true,
+          "kind": "field",
+          "classification": "roundtrip_bytes"
+        },
+        {
+          "path": [
+            "PE-Application",
+            "instanceList",
+            "systemSpecificParameters",
+            "globalServiceParameters"
+          ],
+          "type_name": "OCTET STRING",
+          "optional": true,
+          "kind": "field",
+          "classification": "roundtrip_bytes"
+        },
+        {
+          "path": [
+            "PE-Application",
+            "instanceList",
+            "systemSpecificParameters",
+            "implicitSelectionParameter"
+          ],
+          "type_name": "OCTET STRING",
+          "optional": true,
+          "kind": "field",
+          "classification": "roundtrip_bytes"
+        },
+        {
+          "path": [
+            "PE-Application",
+            "instanceList",
+            "systemSpecificParameters",
+            "volatileReservedMemory"
+          ],
+          "type_name": "OCTET STRING",
+          "optional": true,
+          "kind": "field",
+          "classification": "roundtrip_bytes"
+        },
+        {
+          "path": [
+            "PE-Application",
+            "instanceList",
+            "systemSpecificParameters",
+            "nonVolatileReservedMemory"
+          ],
+          "type_name": "OCTET STRING",
+          "optional": true,
+          "kind": "field",
+          "classification": "roundtrip_bytes"
+        },
+        {
+          "path": [
+            "PE-Application",
+            "instanceList",
+            "systemSpecificParameters",
+            "ts102226SIMFileAccessToolkitParameter"
+          ],
+          "type_name": "OCTET STRING",
+          "optional": true,
+          "kind": "field",
+          "classification": "roundtrip_bytes"
+        },
+        {
+          "path": [
+            "PE-Application",
+            "instanceList",
+            "systemSpecificParameters",
+            "ts102226AdditionalContactlessParameters",
+            "protocolParameterData"
+          ],
+          "type_name": "OCTET STRING",
+          "optional": false,
+          "kind": "field",
+          "classification": "roundtrip_bytes"
+        },
+        {
+          "path": [
+            "PE-Application",
+            "instanceList",
+            "systemSpecificParameters",
+            "contactlessProtocolParameters"
+          ],
+          "type_name": "OCTET STRING",
+          "optional": true,
+          "kind": "field",
+          "classification": "roundtrip_bytes"
+        },
+        {
+          "path": [
+            "PE-Application",
+            "instanceList",
+            "systemSpecificParameters",
+            "userInteractionContactlessParameters"
+          ],
+          "type_name": "OCTET STRING",
+          "optional": true,
+          "kind": "field",
+          "classification": "roundtrip_bytes"
+        },
+        {
+          "path": [
+            "PE-Application",
+            "instanceList",
+            "systemSpecificParameters",
+            "cumulativeGrantedVolatileMemory"
+          ],
+          "type_name": "OCTET STRING",
+          "optional": true,
+          "kind": "field",
+          "classification": "roundtrip_bytes"
+        },
+        {
+          "path": [
+            "PE-Application",
+            "instanceList",
+            "systemSpecificParameters",
+            "cumulativeGrantedNonVolatileMemory"
+          ],
+          "type_name": "OCTET STRING",
+          "optional": true,
+          "kind": "field",
+          "classification": "roundtrip_bytes"
+        },
+        {
+          "path": [
+            "PE-Application",
+            "instanceList",
+            "applicationParameters",
+            "uiccToolkitApplicationSpecificParametersField"
+          ],
+          "type_name": "OCTET STRING",
+          "optional": true,
+          "kind": "field",
+          "classification": "roundtrip_bytes"
+        },
+        {
+          "path": [
+            "PE-Application",
+            "instanceList",
+            "applicationParameters",
+            "uiccAccessApplicationSpecificParametersField"
+          ],
+          "type_name": "OCTET STRING",
+          "optional": true,
+          "kind": "field",
+          "classification": "roundtrip_bytes"
+        },
+        {
+          "path": [
+            "PE-Application",
+            "instanceList",
+            "applicationParameters",
+            "uiccAdministrativeAccessApplicationSpecificParametersField"
+          ],
+          "type_name": "OCTET STRING",
+          "optional": true,
+          "kind": "field",
+          "classification": "roundtrip_bytes"
+        },
+        {
+          "path": [
+            "PE-Application",
+            "instanceList",
+            "processData"
+          ],
+          "type_name": "OCTET STRING",
+          "optional": true,
+          "kind": "field",
+          "classification": "roundtrip_bytes"
+        },
+        {
+          "path": [
+            "PE-Application",
+            "instanceList",
+            "controlReferenceTemplate",
+            "applicationProviderIdentifier"
+          ],
+          "type_name": "OCTET STRING",
+          "optional": false,
+          "kind": "field",
+          "classification": "roundtrip_bytes"
+        }
+      ]
+    },
+    "PE-CD": {
+      "summary": {
+        "structural_only": 2,
+        "roundtrip_scalar": 2,
+        "roundtrip_ef": 2
+      },
+      "fields": [
+        {
+          "path": [
+            "PE-CD",
+            "cd-header",
+            "mandated"
+          ],
+          "type_name": "NULL",
+          "optional": true,
+          "kind": "field",
+          "classification": "structural_only"
+        },
+        {
+          "path": [
+            "PE-CD",
+            "cd-header",
+            "identification"
+          ],
+          "type_name": "UInt15",
+          "optional": false,
+          "kind": "field",
+          "classification": "roundtrip_scalar"
+        },
+        {
+          "path": [
+            "PE-CD",
+            "templateID"
+          ],
+          "type_name": "OBJECT IDENTIFIER",
+          "optional": false,
+          "kind": "field",
+          "classification": "roundtrip_scalar"
+        },
+        {
+          "path": [
+            "PE-CD",
+            "df-cd"
+          ],
+          "type_name": "File",
+          "optional": false,
+          "kind": "ef",
+          "classification": "structural_only"
+        },
+        {
+          "path": [
+            "PE-CD",
+            "ef-launchpad"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-CD",
+            "ef-icon"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        }
+      ]
+    },
+    "PE-CDMAParameter": {
+      "summary": {
+        "structural_only": 1,
+        "roundtrip_scalar": 1,
+        "roundtrip_bytes": 5
+      },
+      "fields": [
+        {
+          "path": [
+            "PE-CDMAParameter",
+            "cdma-header",
+            "mandated"
+          ],
+          "type_name": "NULL",
+          "optional": true,
+          "kind": "field",
+          "classification": "structural_only"
+        },
+        {
+          "path": [
+            "PE-CDMAParameter",
+            "cdma-header",
+            "identification"
+          ],
+          "type_name": "UInt15",
+          "optional": false,
+          "kind": "field",
+          "classification": "roundtrip_scalar"
+        },
+        {
+          "path": [
+            "PE-CDMAParameter",
+            "authenticationKey"
+          ],
+          "type_name": "OCTET STRING",
+          "optional": false,
+          "kind": "field",
+          "classification": "roundtrip_bytes"
+        },
+        {
+          "path": [
+            "PE-CDMAParameter",
+            "ssd"
+          ],
+          "type_name": "OCTET STRING",
+          "optional": true,
+          "kind": "field",
+          "classification": "roundtrip_bytes"
+        },
+        {
+          "path": [
+            "PE-CDMAParameter",
+            "hrpdAccessAuthenticationData"
+          ],
+          "type_name": "OCTET STRING",
+          "optional": true,
+          "kind": "field",
+          "classification": "roundtrip_bytes"
+        },
+        {
+          "path": [
+            "PE-CDMAParameter",
+            "simpleIPAuthenticationData"
+          ],
+          "type_name": "OCTET STRING",
+          "optional": true,
+          "kind": "field",
+          "classification": "roundtrip_bytes"
+        },
+        {
+          "path": [
+            "PE-CDMAParameter",
+            "mobileIPAuthenticationData"
+          ],
+          "type_name": "OCTET STRING",
+          "optional": true,
+          "kind": "field",
+          "classification": "roundtrip_bytes"
+        }
+      ]
+    },
+    "PE-CSIM": {
+      "summary": {
+        "structural_only": 2,
+        "roundtrip_scalar": 2,
+        "roundtrip_ef": 34
+      },
+      "fields": [
+        {
+          "path": [
+            "PE-CSIM",
+            "csim-header",
+            "mandated"
+          ],
+          "type_name": "NULL",
+          "optional": true,
+          "kind": "field",
+          "classification": "structural_only"
+        },
+        {
+          "path": [
+            "PE-CSIM",
+            "csim-header",
+            "identification"
+          ],
+          "type_name": "UInt15",
+          "optional": false,
+          "kind": "field",
+          "classification": "roundtrip_scalar"
+        },
+        {
+          "path": [
+            "PE-CSIM",
+            "templateID"
+          ],
+          "type_name": "OBJECT IDENTIFIER",
+          "optional": false,
+          "kind": "field",
+          "classification": "roundtrip_scalar"
+        },
+        {
+          "path": [
+            "PE-CSIM",
+            "adf-csim"
+          ],
+          "type_name": "File",
+          "optional": false,
+          "kind": "ef",
+          "classification": "structural_only"
+        },
+        {
+          "path": [
+            "PE-CSIM",
+            "ef-arr"
+          ],
+          "type_name": "File",
+          "optional": false,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-CSIM",
+            "ef-call-count"
+          ],
+          "type_name": "File",
+          "optional": false,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-CSIM",
+            "ef-imsi-m"
+          ],
+          "type_name": "File",
+          "optional": false,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-CSIM",
+            "ef-imsi-t"
+          ],
+          "type_name": "File",
+          "optional": false,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-CSIM",
+            "ef-tmsi"
+          ],
+          "type_name": "File",
+          "optional": false,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-CSIM",
+            "ef-ah"
+          ],
+          "type_name": "File",
+          "optional": false,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-CSIM",
+            "ef-aop"
+          ],
+          "type_name": "File",
+          "optional": false,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-CSIM",
+            "ef-aloc"
+          ],
+          "type_name": "File",
+          "optional": false,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-CSIM",
+            "ef-cdmahome"
+          ],
+          "type_name": "File",
+          "optional": false,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-CSIM",
+            "ef-znregi"
+          ],
+          "type_name": "File",
+          "optional": false,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-CSIM",
+            "ef-snregi"
+          ],
+          "type_name": "File",
+          "optional": false,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-CSIM",
+            "ef-distregi"
+          ],
+          "type_name": "File",
+          "optional": false,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-CSIM",
+            "ef-accolc"
+          ],
+          "type_name": "File",
+          "optional": false,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-CSIM",
+            "ef-term"
+          ],
+          "type_name": "File",
+          "optional": false,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-CSIM",
+            "ef-acp"
+          ],
+          "type_name": "File",
+          "optional": false,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-CSIM",
+            "ef-prl"
+          ],
+          "type_name": "File",
+          "optional": false,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-CSIM",
+            "ef-ruimid"
+          ],
+          "type_name": "File",
+          "optional": false,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-CSIM",
+            "ef-csim-st"
+          ],
+          "type_name": "File",
+          "optional": false,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-CSIM",
+            "ef-spc"
+          ],
+          "type_name": "File",
+          "optional": false,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-CSIM",
+            "ef-otapaspc"
+          ],
+          "type_name": "File",
+          "optional": false,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-CSIM",
+            "ef-namlock"
+          ],
+          "type_name": "File",
+          "optional": false,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-CSIM",
+            "ef-ota"
+          ],
+          "type_name": "File",
+          "optional": false,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-CSIM",
+            "ef-sp"
+          ],
+          "type_name": "File",
+          "optional": false,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-CSIM",
+            "ef-esn-meid-me"
+          ],
+          "type_name": "File",
+          "optional": false,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-CSIM",
+            "ef-li"
+          ],
+          "type_name": "File",
+          "optional": false,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-CSIM",
+            "ef-usgind"
+          ],
+          "type_name": "File",
+          "optional": false,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-CSIM",
+            "ef-ad"
+          ],
+          "type_name": "File",
+          "optional": false,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-CSIM",
+            "ef-max-prl"
+          ],
+          "type_name": "File",
+          "optional": false,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-CSIM",
+            "ef-spcs"
+          ],
+          "type_name": "File",
+          "optional": false,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-CSIM",
+            "ef-mecrp"
+          ],
+          "type_name": "File",
+          "optional": false,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-CSIM",
+            "ef-home-tag"
+          ],
+          "type_name": "File",
+          "optional": false,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-CSIM",
+            "ef-group-tag"
+          ],
+          "type_name": "File",
+          "optional": false,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-CSIM",
+            "ef-specific-tag"
+          ],
+          "type_name": "File",
+          "optional": false,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-CSIM",
+            "ef-call-prompt"
+          ],
+          "type_name": "File",
+          "optional": false,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        }
+      ]
+    },
+    "PE-DF-5GPROSE": {
+      "summary": {
+        "structural_only": 2,
+        "roundtrip_scalar": 2,
+        "roundtrip_ef": 6
+      },
+      "fields": [
+        {
+          "path": [
+            "PE-DF-5GPROSE",
+            "df-5g-prose-header",
+            "mandated"
+          ],
+          "type_name": "NULL",
+          "optional": true,
+          "kind": "field",
+          "classification": "structural_only"
+        },
+        {
+          "path": [
+            "PE-DF-5GPROSE",
+            "df-5g-prose-header",
+            "identification"
+          ],
+          "type_name": "UInt15",
+          "optional": false,
+          "kind": "field",
+          "classification": "roundtrip_scalar"
+        },
+        {
+          "path": [
+            "PE-DF-5GPROSE",
+            "templateID"
+          ],
+          "type_name": "OBJECT IDENTIFIER",
+          "optional": false,
+          "kind": "field",
+          "classification": "roundtrip_scalar"
+        },
+        {
+          "path": [
+            "PE-DF-5GPROSE",
+            "df-df-5g-prose"
+          ],
+          "type_name": "File",
+          "optional": false,
+          "kind": "ef",
+          "classification": "structural_only"
+        },
+        {
+          "path": [
+            "PE-DF-5GPROSE",
+            "ef-5g-prose-st"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-DF-5GPROSE",
+            "ef-5g-prose-dd"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-DF-5GPROSE",
+            "ef-5g-prose-dc"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-DF-5GPROSE",
+            "ef-5g-prose-u2nru"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-DF-5GPROSE",
+            "ef-5g-prose-ru"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-DF-5GPROSE",
+            "ef-5g-prose-uir"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        }
+      ]
+    },
+    "PE-DF-5GS": {
+      "summary": {
+        "structural_only": 2,
+        "roundtrip_scalar": 2,
+        "roundtrip_ef": 19
+      },
+      "fields": [
+        {
+          "path": [
+            "PE-DF-5GS",
+            "df-5gs-header",
+            "mandated"
+          ],
+          "type_name": "NULL",
+          "optional": true,
+          "kind": "field",
+          "classification": "structural_only"
+        },
+        {
+          "path": [
+            "PE-DF-5GS",
+            "df-5gs-header",
+            "identification"
+          ],
+          "type_name": "UInt15",
+          "optional": false,
+          "kind": "field",
+          "classification": "roundtrip_scalar"
+        },
+        {
+          "path": [
+            "PE-DF-5GS",
+            "templateID"
+          ],
+          "type_name": "OBJECT IDENTIFIER",
+          "optional": false,
+          "kind": "field",
+          "classification": "roundtrip_scalar"
+        },
+        {
+          "path": [
+            "PE-DF-5GS",
+            "df-df-5gs"
+          ],
+          "type_name": "File",
+          "optional": false,
+          "kind": "ef",
+          "classification": "structural_only"
+        },
+        {
+          "path": [
+            "PE-DF-5GS",
+            "ef-5gs3gpploci"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-DF-5GS",
+            "ef-5gsn3gpploci"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-DF-5GS",
+            "ef-5gs3gppnsc"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-DF-5GS",
+            "ef-5gsn3gppnsc"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-DF-5GS",
+            "ef-5gauthkeys"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-DF-5GS",
+            "ef-uac-aic"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-DF-5GS",
+            "ef-suci-calc-info"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-DF-5GS",
+            "ef-opl5g"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-DF-5GS",
+            "ef-supinai"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-DF-5GS",
+            "ef-routing-indicator"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-DF-5GS",
+            "ef-ursp"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-DF-5GS",
+            "ef-tn3gppsnn"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-DF-5GS",
+            "ef-cag"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-DF-5GS",
+            "ef-sor-cmci"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-DF-5GS",
+            "ef-dri"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-DF-5GS",
+            "ef-5gsedrx"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-DF-5GS",
+            "ef-5gnswo-conf"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-DF-5GS",
+            "ef-mchpplmn"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-DF-5GS",
+            "ef-kausf-derivation"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        }
+      ]
+    },
+    "PE-DF-SAIP": {
+      "summary": {
+        "structural_only": 2,
+        "roundtrip_scalar": 2,
+        "roundtrip_ef": 1
+      },
+      "fields": [
+        {
+          "path": [
+            "PE-DF-SAIP",
+            "df-saip-header",
+            "mandated"
+          ],
+          "type_name": "NULL",
+          "optional": true,
+          "kind": "field",
+          "classification": "structural_only"
+        },
+        {
+          "path": [
+            "PE-DF-SAIP",
+            "df-saip-header",
+            "identification"
+          ],
+          "type_name": "UInt15",
+          "optional": false,
+          "kind": "field",
+          "classification": "roundtrip_scalar"
+        },
+        {
+          "path": [
+            "PE-DF-SAIP",
+            "templateID"
+          ],
+          "type_name": "OBJECT IDENTIFIER",
+          "optional": false,
+          "kind": "field",
+          "classification": "roundtrip_scalar"
+        },
+        {
+          "path": [
+            "PE-DF-SAIP",
+            "df-df-saip"
+          ],
+          "type_name": "File",
+          "optional": false,
+          "kind": "ef",
+          "classification": "structural_only"
+        },
+        {
+          "path": [
+            "PE-DF-SAIP",
+            "ef-suci-calc-info-usim"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        }
+      ]
+    },
+    "PE-DF-SNPN": {
+      "summary": {
+        "structural_only": 2,
+        "roundtrip_scalar": 2,
+        "roundtrip_ef": 1
+      },
+      "fields": [
+        {
+          "path": [
+            "PE-DF-SNPN",
+            "df-snpn-header",
+            "mandated"
+          ],
+          "type_name": "NULL",
+          "optional": true,
+          "kind": "field",
+          "classification": "structural_only"
+        },
+        {
+          "path": [
+            "PE-DF-SNPN",
+            "df-snpn-header",
+            "identification"
+          ],
+          "type_name": "UInt15",
+          "optional": false,
+          "kind": "field",
+          "classification": "roundtrip_scalar"
+        },
+        {
+          "path": [
+            "PE-DF-SNPN",
+            "templateID"
+          ],
+          "type_name": "OBJECT IDENTIFIER",
+          "optional": false,
+          "kind": "field",
+          "classification": "roundtrip_scalar"
+        },
+        {
+          "path": [
+            "PE-DF-SNPN",
+            "df-df-snpn"
+          ],
+          "type_name": "File",
+          "optional": false,
+          "kind": "ef",
+          "classification": "structural_only"
+        },
+        {
+          "path": [
+            "PE-DF-SNPN",
+            "ef-pws-snpn"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        }
+      ]
+    },
+    "PE-EAP": {
+      "summary": {
+        "structural_only": 2,
+        "roundtrip_scalar": 2,
+        "roundtrip_ef": 7
+      },
+      "fields": [
+        {
+          "path": [
+            "PE-EAP",
+            "eap-header",
+            "mandated"
+          ],
+          "type_name": "NULL",
+          "optional": true,
+          "kind": "field",
+          "classification": "structural_only"
+        },
+        {
+          "path": [
+            "PE-EAP",
+            "eap-header",
+            "identification"
+          ],
+          "type_name": "UInt15",
+          "optional": false,
+          "kind": "field",
+          "classification": "roundtrip_scalar"
+        },
+        {
+          "path": [
+            "PE-EAP",
+            "templateID"
+          ],
+          "type_name": "OBJECT IDENTIFIER",
+          "optional": false,
+          "kind": "field",
+          "classification": "roundtrip_scalar"
+        },
+        {
+          "path": [
+            "PE-EAP",
+            "df-eap"
+          ],
+          "type_name": "File",
+          "optional": false,
+          "kind": "ef",
+          "classification": "structural_only"
+        },
+        {
+          "path": [
+            "PE-EAP",
+            "ef-eapkeys"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-EAP",
+            "ef-eapstatus"
+          ],
+          "type_name": "File",
+          "optional": false,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-EAP",
+            "ef-puid"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-EAP",
+            "ef-ps"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-EAP",
+            "ef-curid"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-EAP",
+            "ef-reid"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-EAP",
+            "ef-realm"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        }
+      ]
+    },
+    "PE-End": {
+      "summary": {
+        "structural_only": 1,
+        "roundtrip_scalar": 1
+      },
+      "fields": [
+        {
+          "path": [
+            "PE-End",
+            "end-header",
+            "mandated"
+          ],
+          "type_name": "NULL",
+          "optional": true,
+          "kind": "field",
+          "classification": "structural_only"
+        },
+        {
+          "path": [
+            "PE-End",
+            "end-header",
+            "identification"
+          ],
+          "type_name": "UInt15",
+          "optional": false,
+          "kind": "field",
+          "classification": "roundtrip_scalar"
+        }
+      ]
+    },
+    "PE-GSM-ACCESS": {
+      "summary": {
+        "structural_only": 2,
+        "roundtrip_scalar": 2,
+        "roundtrip_ef": 4
+      },
+      "fields": [
+        {
+          "path": [
+            "PE-GSM-ACCESS",
+            "gsm-access-header",
+            "mandated"
+          ],
+          "type_name": "NULL",
+          "optional": true,
+          "kind": "field",
+          "classification": "structural_only"
+        },
+        {
+          "path": [
+            "PE-GSM-ACCESS",
+            "gsm-access-header",
+            "identification"
+          ],
+          "type_name": "UInt15",
+          "optional": false,
+          "kind": "field",
+          "classification": "roundtrip_scalar"
+        },
+        {
+          "path": [
+            "PE-GSM-ACCESS",
+            "templateID"
+          ],
+          "type_name": "OBJECT IDENTIFIER",
+          "optional": false,
+          "kind": "field",
+          "classification": "roundtrip_scalar"
+        },
+        {
+          "path": [
+            "PE-GSM-ACCESS",
+            "df-gsm-access"
+          ],
+          "type_name": "File",
+          "optional": false,
+          "kind": "ef",
+          "classification": "structural_only"
+        },
+        {
+          "path": [
+            "PE-GSM-ACCESS",
+            "ef-kc"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-GSM-ACCESS",
+            "ef-kcgprs"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-GSM-ACCESS",
+            "ef-cpbcch"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-GSM-ACCESS",
+            "ef-invscan"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        }
+      ]
+    },
+    "PE-GenericFileManagement": {
+      "summary": {
+        "structural_only": 2,
+        "roundtrip_scalar": 1
+      },
+      "fields": [
+        {
+          "path": [
+            "PE-GenericFileManagement",
+            "gfm-header",
+            "mandated"
+          ],
+          "type_name": "NULL",
+          "optional": true,
+          "kind": "field",
+          "classification": "structural_only"
+        },
+        {
+          "path": [
+            "PE-GenericFileManagement",
+            "gfm-header",
+            "identification"
+          ],
+          "type_name": "UInt15",
+          "optional": false,
+          "kind": "field",
+          "classification": "roundtrip_scalar"
+        },
+        {
+          "path": [
+            "PE-GenericFileManagement",
+            "fileManagementCMD"
+          ],
+          "type_name": "FileManagement",
+          "optional": false,
+          "kind": "field",
+          "classification": "structural_only"
+        }
+      ]
+    },
+    "PE-ISIM": {
+      "summary": {
+        "structural_only": 2,
+        "roundtrip_scalar": 2,
+        "roundtrip_ef": 6
+      },
+      "fields": [
+        {
+          "path": [
+            "PE-ISIM",
+            "isim-header",
+            "mandated"
+          ],
+          "type_name": "NULL",
+          "optional": true,
+          "kind": "field",
+          "classification": "structural_only"
+        },
+        {
+          "path": [
+            "PE-ISIM",
+            "isim-header",
+            "identification"
+          ],
+          "type_name": "UInt15",
+          "optional": false,
+          "kind": "field",
+          "classification": "roundtrip_scalar"
+        },
+        {
+          "path": [
+            "PE-ISIM",
+            "templateID"
+          ],
+          "type_name": "OBJECT IDENTIFIER",
+          "optional": false,
+          "kind": "field",
+          "classification": "roundtrip_scalar"
+        },
+        {
+          "path": [
+            "PE-ISIM",
+            "adf-isim"
+          ],
+          "type_name": "File",
+          "optional": false,
+          "kind": "ef",
+          "classification": "structural_only"
+        },
+        {
+          "path": [
+            "PE-ISIM",
+            "ef-impi"
+          ],
+          "type_name": "File",
+          "optional": false,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-ISIM",
+            "ef-impu"
+          ],
+          "type_name": "File",
+          "optional": false,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-ISIM",
+            "ef-domain"
+          ],
+          "type_name": "File",
+          "optional": false,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-ISIM",
+            "ef-ist"
+          ],
+          "type_name": "File",
+          "optional": false,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-ISIM",
+            "ef-ad"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-ISIM",
+            "ef-arr"
+          ],
+          "type_name": "File",
+          "optional": false,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        }
+      ]
+    },
+    "PE-IoT": {
+      "summary": {
+        "structural_only": 3,
+        "roundtrip_scalar": 2,
+        "roundtrip_ef": 19,
+        "readonly_ef": 1
+      },
+      "fields": [
+        {
+          "path": [
+            "PE-IoT",
+            "iot-header",
+            "mandated"
+          ],
+          "type_name": "NULL",
+          "optional": true,
+          "kind": "field",
+          "classification": "structural_only"
+        },
+        {
+          "path": [
+            "PE-IoT",
+            "iot-header",
+            "identification"
+          ],
+          "type_name": "UInt15",
+          "optional": false,
+          "kind": "field",
+          "classification": "roundtrip_scalar"
+        },
+        {
+          "path": [
+            "PE-IoT",
+            "templateID"
+          ],
+          "type_name": "OBJECT IDENTIFIER",
+          "optional": false,
+          "kind": "field",
+          "classification": "roundtrip_scalar"
+        },
+        {
+          "path": [
+            "PE-IoT",
+            "mf"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "structural_only"
+        },
+        {
+          "path": [
+            "PE-IoT",
+            "ef-pl"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-IoT",
+            "ef-iccid"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "readonly_ef"
+        },
+        {
+          "path": [
+            "PE-IoT",
+            "ef-dir"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-IoT",
+            "ef-arr"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-IoT",
+            "ef-umpc"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-IoT",
+            "adf-usim"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "structural_only"
+        },
+        {
+          "path": [
+            "PE-IoT",
+            "ef-imsi"
+          ],
+          "type_name": "File",
+          "optional": false,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-IoT",
+            "ef-arr-usim"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-IoT",
+            "ef-keys"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-IoT",
+            "ef-keysPS"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-IoT",
+            "ef-hpplmn"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-IoT",
+            "ef-ust"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-IoT",
+            "ef-start-hfn"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-IoT",
+            "ef-threshold"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-IoT",
+            "ef-psloci"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-IoT",
+            "ef-acc"
+          ],
+          "type_name": "File",
+          "optional": false,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-IoT",
+            "ef-fplmn"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-IoT",
+            "ef-loci"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-IoT",
+            "ef-ad"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-IoT",
+            "ef-ecc"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-IoT",
+            "ef-netpar"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        }
+      ]
+    },
+    "PE-MF": {
+      "summary": {
+        "structural_only": 2,
+        "roundtrip_scalar": 2,
+        "roundtrip_ef": 4,
+        "readonly_ef": 1
+      },
+      "fields": [
+        {
+          "path": [
+            "PE-MF",
+            "mf-header",
+            "mandated"
+          ],
+          "type_name": "NULL",
+          "optional": true,
+          "kind": "field",
+          "classification": "structural_only"
+        },
+        {
+          "path": [
+            "PE-MF",
+            "mf-header",
+            "identification"
+          ],
+          "type_name": "UInt15",
+          "optional": false,
+          "kind": "field",
+          "classification": "roundtrip_scalar"
+        },
+        {
+          "path": [
+            "PE-MF",
+            "templateID"
+          ],
+          "type_name": "OBJECT IDENTIFIER",
+          "optional": false,
+          "kind": "field",
+          "classification": "roundtrip_scalar"
+        },
+        {
+          "path": [
+            "PE-MF",
+            "mf"
+          ],
+          "type_name": "File",
+          "optional": false,
+          "kind": "ef",
+          "classification": "structural_only"
+        },
+        {
+          "path": [
+            "PE-MF",
+            "ef-pl"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-MF",
+            "ef-iccid"
+          ],
+          "type_name": "File",
+          "optional": false,
+          "kind": "ef",
+          "classification": "readonly_ef"
+        },
+        {
+          "path": [
+            "PE-MF",
+            "ef-dir"
+          ],
+          "type_name": "File",
+          "optional": false,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-MF",
+            "ef-arr"
+          ],
+          "type_name": "File",
+          "optional": false,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-MF",
+            "ef-umpc"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        }
+      ]
+    },
+    "PE-NonStandard": {
+      "summary": {
+        "structural_only": 2,
+        "roundtrip_scalar": 1,
+        "roundtrip_bytes": 1
+      },
+      "fields": [
+        {
+          "path": [
+            "PE-NonStandard",
+            "nonStandard-header",
+            "mandated"
+          ],
+          "type_name": "NULL",
+          "optional": true,
+          "kind": "field",
+          "classification": "structural_only"
+        },
+        {
+          "path": [
+            "PE-NonStandard",
+            "nonStandard-header",
+            "identification"
+          ],
+          "type_name": "UInt15",
+          "optional": false,
+          "kind": "field",
+          "classification": "roundtrip_scalar"
+        },
+        {
+          "path": [
+            "PE-NonStandard",
+            "issuerID"
+          ],
+          "type_name": "OBJECT IDENTIFIER",
+          "optional": false,
+          "kind": "field",
+          "classification": "structural_only"
+        },
+        {
+          "path": [
+            "PE-NonStandard",
+            "content"
+          ],
+          "type_name": "OCTET STRING",
+          "optional": false,
+          "kind": "field",
+          "classification": "roundtrip_bytes"
+        }
+      ]
+    },
+    "PE-OPT-CSIM": {
+      "summary": {
+        "structural_only": 1,
+        "roundtrip_scalar": 2,
+        "roundtrip_ef": 67
+      },
+      "fields": [
+        {
+          "path": [
+            "PE-OPT-CSIM",
+            "optcsim-header",
+            "mandated"
+          ],
+          "type_name": "NULL",
+          "optional": true,
+          "kind": "field",
+          "classification": "structural_only"
+        },
+        {
+          "path": [
+            "PE-OPT-CSIM",
+            "optcsim-header",
+            "identification"
+          ],
+          "type_name": "UInt15",
+          "optional": false,
+          "kind": "field",
+          "classification": "roundtrip_scalar"
+        },
+        {
+          "path": [
+            "PE-OPT-CSIM",
+            "templateID"
+          ],
+          "type_name": "OBJECT IDENTIFIER",
+          "optional": false,
+          "kind": "field",
+          "classification": "roundtrip_scalar"
+        },
+        {
+          "path": [
+            "PE-OPT-CSIM",
+            "ef-ssci"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-OPT-CSIM",
+            "ef-fdn"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-OPT-CSIM",
+            "ef-sms"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-OPT-CSIM",
+            "ef-smsp"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-OPT-CSIM",
+            "ef-smss"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-OPT-CSIM",
+            "ef-ssfc"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-OPT-CSIM",
+            "ef-spn"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-OPT-CSIM",
+            "ef-mdn"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-OPT-CSIM",
+            "ef-ecc"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-OPT-CSIM",
+            "ef-me3gpdopc"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-OPT-CSIM",
+            "ef-3gpdopm"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-OPT-CSIM",
+            "ef-sipcap"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-OPT-CSIM",
+            "ef-mipcap"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-OPT-CSIM",
+            "ef-sipupp"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-OPT-CSIM",
+            "ef-mipupp"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-OPT-CSIM",
+            "ef-sipsp"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-OPT-CSIM",
+            "ef-mipsp"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-OPT-CSIM",
+            "ef-sippapss"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-OPT-CSIM",
+            "ef-puzl"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-OPT-CSIM",
+            "ef-maxpuzl"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-OPT-CSIM",
+            "ef-hrpdcap"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-OPT-CSIM",
+            "ef-hrpdupp"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-OPT-CSIM",
+            "ef-csspr"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-OPT-CSIM",
+            "ef-atc"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-OPT-CSIM",
+            "ef-eprl"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-OPT-CSIM",
+            "ef-bcsmscfg"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-OPT-CSIM",
+            "ef-bcsmspref"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-OPT-CSIM",
+            "ef-bcsmstable"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-OPT-CSIM",
+            "ef-bcsmsp"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-OPT-CSIM",
+            "ef-bakpara"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-OPT-CSIM",
+            "ef-upbakpara"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-OPT-CSIM",
+            "ef-mmsn"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-OPT-CSIM",
+            "ef-ext8"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-OPT-CSIM",
+            "ef-mmsicp"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-OPT-CSIM",
+            "ef-mmsup"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-OPT-CSIM",
+            "ef-mmsucp"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-OPT-CSIM",
+            "ef-auth-capability"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-OPT-CSIM",
+            "ef-3gcik"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-OPT-CSIM",
+            "ef-dck"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-OPT-CSIM",
+            "ef-gid1"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-OPT-CSIM",
+            "ef-gid2"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-OPT-CSIM",
+            "ef-cdmacnl"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-OPT-CSIM",
+            "ef-sf-euimid"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-OPT-CSIM",
+            "ef-est"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-OPT-CSIM",
+            "ef-hidden-key"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-OPT-CSIM",
+            "ef-lcsver"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-OPT-CSIM",
+            "ef-lcscp"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-OPT-CSIM",
+            "ef-sdn"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-OPT-CSIM",
+            "ef-ext2"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-OPT-CSIM",
+            "ef-ext3"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-OPT-CSIM",
+            "ef-ici"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-OPT-CSIM",
+            "ef-oci"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-OPT-CSIM",
+            "ef-ext5"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-OPT-CSIM",
+            "ef-ccp2"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-OPT-CSIM",
+            "ef-applabels"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-OPT-CSIM",
+            "ef-model"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-OPT-CSIM",
+            "ef-rc"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-OPT-CSIM",
+            "ef-smscap"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-OPT-CSIM",
+            "ef-mipflags"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-OPT-CSIM",
+            "ef-3gpduppext"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-OPT-CSIM",
+            "ef-ipv6cap"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-OPT-CSIM",
+            "ef-tcpconfig"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-OPT-CSIM",
+            "ef-dgc"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-OPT-CSIM",
+            "ef-wapbrowsercp"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-OPT-CSIM",
+            "ef-wapbrowserbm"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-OPT-CSIM",
+            "ef-mmsconfig"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-OPT-CSIM",
+            "ef-jdl"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        }
+      ]
+    },
+    "PE-OPT-ISIM": {
+      "summary": {
+        "structural_only": 1,
+        "roundtrip_scalar": 2,
+        "roundtrip_ef": 14
+      },
+      "fields": [
+        {
+          "path": [
+            "PE-OPT-ISIM",
+            "optisim-header",
+            "mandated"
+          ],
+          "type_name": "NULL",
+          "optional": true,
+          "kind": "field",
+          "classification": "structural_only"
+        },
+        {
+          "path": [
+            "PE-OPT-ISIM",
+            "optisim-header",
+            "identification"
+          ],
+          "type_name": "UInt15",
+          "optional": false,
+          "kind": "field",
+          "classification": "roundtrip_scalar"
+        },
+        {
+          "path": [
+            "PE-OPT-ISIM",
+            "templateID"
+          ],
+          "type_name": "OBJECT IDENTIFIER",
+          "optional": false,
+          "kind": "field",
+          "classification": "roundtrip_scalar"
+        },
+        {
+          "path": [
+            "PE-OPT-ISIM",
+            "ef-pcscf"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-OPT-ISIM",
+            "ef-sms"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-OPT-ISIM",
+            "ef-smsp"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-OPT-ISIM",
+            "ef-smss"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-OPT-ISIM",
+            "ef-smsr"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-OPT-ISIM",
+            "ef-gbabp"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-OPT-ISIM",
+            "ef-gbanl"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-OPT-ISIM",
+            "ef-nafkca"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-OPT-ISIM",
+            "ef-uicciari"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-OPT-ISIM",
+            "ef-frompreferred"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-OPT-ISIM",
+            "ef-imsconfigdata"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-OPT-ISIM",
+            "ef-xcapconfigdata"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-OPT-ISIM",
+            "ef-webrtcuri"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-OPT-ISIM",
+            "ef-mudmidconfigdata"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        }
+      ]
+    },
+    "PE-OPT-IoT": {
+      "summary": {
+        "structural_only": 3,
+        "roundtrip_scalar": 2,
+        "roundtrip_ef": 24
+      },
+      "fields": [
+        {
+          "path": [
+            "PE-OPT-IoT",
+            "optiot-header",
+            "mandated"
+          ],
+          "type_name": "NULL",
+          "optional": true,
+          "kind": "field",
+          "classification": "structural_only"
+        },
+        {
+          "path": [
+            "PE-OPT-IoT",
+            "optiot-header",
+            "identification"
+          ],
+          "type_name": "UInt15",
+          "optional": false,
+          "kind": "field",
+          "classification": "roundtrip_scalar"
+        },
+        {
+          "path": [
+            "PE-OPT-IoT",
+            "templateID"
+          ],
+          "type_name": "OBJECT IDENTIFIER",
+          "optional": false,
+          "kind": "field",
+          "classification": "roundtrip_scalar"
+        },
+        {
+          "path": [
+            "PE-OPT-IoT",
+            "ef-fdn"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-OPT-IoT",
+            "ef-sms"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-OPT-IoT",
+            "ef-smsp"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-OPT-IoT",
+            "ef-smss"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-OPT-IoT",
+            "ef-spn"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-OPT-IoT",
+            "ef-est"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-OPT-IoT",
+            "ef-oplmnwact"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-OPT-IoT",
+            "ef-hplmnwact"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-OPT-IoT",
+            "ef-ehplmn"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-OPT-IoT",
+            "ef-epsloci"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-OPT-IoT",
+            "ef-epsnsc"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-OPT-IoT",
+            "df-df-5gs"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "structural_only"
+        },
+        {
+          "path": [
+            "PE-OPT-IoT",
+            "ef-5gs3gpploci"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-OPT-IoT",
+            "ef-5gsn3gpploci"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-OPT-IoT",
+            "ef-5gs3gppnsc"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-OPT-IoT",
+            "ef-5gsn3gppnsc"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-OPT-IoT",
+            "ef-5gauthkeys"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-OPT-IoT",
+            "ef-uac-aic"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-OPT-IoT",
+            "ef-suci-calc-info"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-OPT-IoT",
+            "ef-opl5g"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-OPT-IoT",
+            "ef-supi-nai"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-OPT-IoT",
+            "ef-routing-indicator"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-OPT-IoT",
+            "ef-ursp"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-OPT-IoT",
+            "ef-tn3gppsnn"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-OPT-IoT",
+            "df-df-saip"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "structural_only"
+        },
+        {
+          "path": [
+            "PE-OPT-IoT",
+            "ef-suci-calc-info-usim"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        }
+      ]
+    },
+    "PE-OPT-USIM": {
+      "summary": {
+        "structural_only": 1,
+        "roundtrip_scalar": 2,
+        "roundtrip_ef": 86
+      },
+      "fields": [
+        {
+          "path": [
+            "PE-OPT-USIM",
+            "optusim-header",
+            "mandated"
+          ],
+          "type_name": "NULL",
+          "optional": true,
+          "kind": "field",
+          "classification": "structural_only"
+        },
+        {
+          "path": [
+            "PE-OPT-USIM",
+            "optusim-header",
+            "identification"
+          ],
+          "type_name": "UInt15",
+          "optional": false,
+          "kind": "field",
+          "classification": "roundtrip_scalar"
+        },
+        {
+          "path": [
+            "PE-OPT-USIM",
+            "templateID"
+          ],
+          "type_name": "OBJECT IDENTIFIER",
+          "optional": false,
+          "kind": "field",
+          "classification": "roundtrip_scalar"
+        },
+        {
+          "path": [
+            "PE-OPT-USIM",
+            "ef-li"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-OPT-USIM",
+            "ef-acmax"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-OPT-USIM",
+            "ef-acm"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-OPT-USIM",
+            "ef-gid1"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-OPT-USIM",
+            "ef-gid2"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-OPT-USIM",
+            "ef-msisdn"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-OPT-USIM",
+            "ef-puct"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-OPT-USIM",
+            "ef-cbmi"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-OPT-USIM",
+            "ef-cbmid"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-OPT-USIM",
+            "ef-sdn"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-OPT-USIM",
+            "ef-ext2"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-OPT-USIM",
+            "ef-ext3"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-OPT-USIM",
+            "ef-cbmir"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-OPT-USIM",
+            "ef-plmnwact"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-OPT-USIM",
+            "ef-oplmnwact"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-OPT-USIM",
+            "ef-hplmnwact"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-OPT-USIM",
+            "ef-dck"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-OPT-USIM",
+            "ef-cnl"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-OPT-USIM",
+            "ef-smsr"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-OPT-USIM",
+            "ef-bdn"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-OPT-USIM",
+            "ef-ext5"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-OPT-USIM",
+            "ef-ccp2"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-OPT-USIM",
+            "ef-ext4"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-OPT-USIM",
+            "ef-acl"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-OPT-USIM",
+            "ef-cmi"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-OPT-USIM",
+            "ef-ici"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-OPT-USIM",
+            "ef-oci"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-OPT-USIM",
+            "ef-ict"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-OPT-USIM",
+            "ef-oct"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-OPT-USIM",
+            "ef-vgcs"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-OPT-USIM",
+            "ef-vgcss"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-OPT-USIM",
+            "ef-vbs"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-OPT-USIM",
+            "ef-vbss"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-OPT-USIM",
+            "ef-emlpp"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-OPT-USIM",
+            "ef-aaem"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-OPT-USIM",
+            "ef-hiddenkey"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-OPT-USIM",
+            "ef-pnn"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-OPT-USIM",
+            "ef-opl"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-OPT-USIM",
+            "ef-mbdn"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-OPT-USIM",
+            "ef-ext6"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-OPT-USIM",
+            "ef-mbi"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-OPT-USIM",
+            "ef-mwis"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-OPT-USIM",
+            "ef-cfis"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-OPT-USIM",
+            "ef-ext7"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-OPT-USIM",
+            "ef-spdi"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-OPT-USIM",
+            "ef-mmsn"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-OPT-USIM",
+            "ef-ext8"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-OPT-USIM",
+            "ef-mmsicp"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-OPT-USIM",
+            "ef-mmsup"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-OPT-USIM",
+            "ef-mmsucp"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-OPT-USIM",
+            "ef-nia"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-OPT-USIM",
+            "ef-vgcsca"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-OPT-USIM",
+            "ef-vbsca"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-OPT-USIM",
+            "ef-gbabp"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-OPT-USIM",
+            "ef-msk"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-OPT-USIM",
+            "ef-muk"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-OPT-USIM",
+            "ef-ehplmn"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-OPT-USIM",
+            "ef-gbanl"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-OPT-USIM",
+            "ef-ehplmnpi"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-OPT-USIM",
+            "ef-lrplmnsi"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-OPT-USIM",
+            "ef-nafkca"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-OPT-USIM",
+            "ef-spni"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-OPT-USIM",
+            "ef-pnni"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-OPT-USIM",
+            "ef-ncp-ip"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-OPT-USIM",
+            "ef-ufc"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-OPT-USIM",
+            "ef-nasconfig"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-OPT-USIM",
+            "ef-uicciari"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-OPT-USIM",
+            "ef-pws"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-OPT-USIM",
+            "ef-fdnuri"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-OPT-USIM",
+            "ef-bdnuri"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-OPT-USIM",
+            "ef-sdnuri"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-OPT-USIM",
+            "ef-ial"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-OPT-USIM",
+            "ef-ips"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-OPT-USIM",
+            "ef-ipd"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-OPT-USIM",
+            "ef-epdgid"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-OPT-USIM",
+            "ef-epdgselection"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-OPT-USIM",
+            "ef-epdgidem"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-OPT-USIM",
+            "ef-epdgselectionem"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-OPT-USIM",
+            "ef-frompreferred"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-OPT-USIM",
+            "ef-imsconfigdata"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-OPT-USIM",
+            "ef-3gpppsdataoff"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-OPT-USIM",
+            "ef-3gpppsdataoffservicelist"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-OPT-USIM",
+            "ef-xcapconfigdata"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-OPT-USIM",
+            "ef-earfcnlist"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-OPT-USIM",
+            "ef-mudmidconfigdata"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-OPT-USIM",
+            "ef-eaka"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        }
+      ]
+    },
+    "PE-PHONEBOOK": {
+      "summary": {
+        "structural_only": 2,
+        "roundtrip_scalar": 2,
+        "roundtrip_ef": 17
+      },
+      "fields": [
+        {
+          "path": [
+            "PE-PHONEBOOK",
+            "phonebook-header",
+            "mandated"
+          ],
+          "type_name": "NULL",
+          "optional": true,
+          "kind": "field",
+          "classification": "structural_only"
+        },
+        {
+          "path": [
+            "PE-PHONEBOOK",
+            "phonebook-header",
+            "identification"
+          ],
+          "type_name": "UInt15",
+          "optional": false,
+          "kind": "field",
+          "classification": "roundtrip_scalar"
+        },
+        {
+          "path": [
+            "PE-PHONEBOOK",
+            "templateID"
+          ],
+          "type_name": "OBJECT IDENTIFIER",
+          "optional": false,
+          "kind": "field",
+          "classification": "roundtrip_scalar"
+        },
+        {
+          "path": [
+            "PE-PHONEBOOK",
+            "df-phonebook"
+          ],
+          "type_name": "File",
+          "optional": false,
+          "kind": "ef",
+          "classification": "structural_only"
+        },
+        {
+          "path": [
+            "PE-PHONEBOOK",
+            "ef-pbr"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-PHONEBOOK",
+            "ef-ext1"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-PHONEBOOK",
+            "ef-aas"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-PHONEBOOK",
+            "ef-gas"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-PHONEBOOK",
+            "ef-psc"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-PHONEBOOK",
+            "ef-cc"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-PHONEBOOK",
+            "ef-puid"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-PHONEBOOK",
+            "ef-iap"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-PHONEBOOK",
+            "ef-adn"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-PHONEBOOK",
+            "ef-pbc"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-PHONEBOOK",
+            "ef-anr"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-PHONEBOOK",
+            "ef-puri"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-PHONEBOOK",
+            "ef-email"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-PHONEBOOK",
+            "ef-sne"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-PHONEBOOK",
+            "ef-uid"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-PHONEBOOK",
+            "ef-grp"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-PHONEBOOK",
+            "ef-ccp1"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        }
+      ]
+    },
+    "PE-PINCodes": {
+      "summary": {
+        "structural_only": 1,
+        "roundtrip_scalar": 4,
+        "roundtrip_bytes": 3
+      },
+      "fields": [
+        {
+          "path": [
+            "PE-PINCodes",
+            "pin-Header",
+            "mandated"
+          ],
+          "type_name": "NULL",
+          "optional": true,
+          "kind": "field",
+          "classification": "structural_only"
+        },
+        {
+          "path": [
+            "PE-PINCodes",
+            "pin-Header",
+            "identification"
+          ],
+          "type_name": "UInt15",
+          "optional": false,
+          "kind": "field",
+          "classification": "roundtrip_scalar"
+        },
+        {
+          "path": [
+            "PE-PINCodes",
+            "pinCodes",
+            "pinconfig",
+            "keyReference"
+          ],
+          "type_name": "PINKeyReferenceValue",
+          "optional": false,
+          "kind": "field",
+          "classification": "roundtrip_scalar"
+        },
+        {
+          "path": [
+            "PE-PINCodes",
+            "pinCodes",
+            "pinconfig",
+            "pinValue"
+          ],
+          "type_name": "OCTET STRING",
+          "optional": false,
+          "kind": "field",
+          "classification": "roundtrip_bytes"
+        },
+        {
+          "path": [
+            "PE-PINCodes",
+            "pinCodes",
+            "pinconfig",
+            "unblockingPINReference"
+          ],
+          "type_name": "PUKKeyReferenceValue",
+          "optional": true,
+          "kind": "field",
+          "classification": "roundtrip_scalar"
+        },
+        {
+          "path": [
+            "PE-PINCodes",
+            "pinCodes",
+            "pinconfig",
+            "pinAttributes"
+          ],
+          "type_name": "UInt8",
+          "optional": false,
+          "kind": "field",
+          "classification": "roundtrip_bytes"
+        },
+        {
+          "path": [
+            "PE-PINCodes",
+            "pinCodes",
+            "pinconfig",
+            "maxNumOfAttemps-retryNumLeft"
+          ],
+          "type_name": "UInt8",
+          "optional": false,
+          "kind": "field",
+          "classification": "roundtrip_scalar"
+        },
+        {
+          "path": [
+            "PE-PINCodes",
+            "pinCodes",
+            "filePath"
+          ],
+          "type_name": "OCTET STRING",
+          "optional": false,
+          "kind": "field",
+          "classification": "roundtrip_bytes"
+        }
+      ]
+    },
+    "PE-PUKCodes": {
+      "summary": {
+        "structural_only": 1,
+        "roundtrip_scalar": 3,
+        "roundtrip_bytes": 1
+      },
+      "fields": [
+        {
+          "path": [
+            "PE-PUKCodes",
+            "puk-Header",
+            "mandated"
+          ],
+          "type_name": "NULL",
+          "optional": true,
+          "kind": "field",
+          "classification": "structural_only"
+        },
+        {
+          "path": [
+            "PE-PUKCodes",
+            "puk-Header",
+            "identification"
+          ],
+          "type_name": "UInt15",
+          "optional": false,
+          "kind": "field",
+          "classification": "roundtrip_scalar"
+        },
+        {
+          "path": [
+            "PE-PUKCodes",
+            "pukCodes",
+            "keyReference"
+          ],
+          "type_name": "PUKKeyReferenceValue",
+          "optional": false,
+          "kind": "field",
+          "classification": "roundtrip_scalar"
+        },
+        {
+          "path": [
+            "PE-PUKCodes",
+            "pukCodes",
+            "pukValue"
+          ],
+          "type_name": "OCTET STRING",
+          "optional": false,
+          "kind": "field",
+          "classification": "roundtrip_bytes"
+        },
+        {
+          "path": [
+            "PE-PUKCodes",
+            "pukCodes",
+            "maxNumOfAttemps-retryNumLeft"
+          ],
+          "type_name": "UInt8",
+          "optional": false,
+          "kind": "field",
+          "classification": "roundtrip_scalar"
+        }
+      ]
+    },
+    "PE-RFM": {
+      "summary": {
+        "structural_only": 1,
+        "roundtrip_scalar": 1,
+        "roundtrip_bytes": 9
+      },
+      "fields": [
+        {
+          "path": [
+            "PE-RFM",
+            "rfm-header",
+            "mandated"
+          ],
+          "type_name": "NULL",
+          "optional": true,
+          "kind": "field",
+          "classification": "structural_only"
+        },
+        {
+          "path": [
+            "PE-RFM",
+            "rfm-header",
+            "identification"
+          ],
+          "type_name": "UInt15",
+          "optional": false,
+          "kind": "field",
+          "classification": "roundtrip_scalar"
+        },
+        {
+          "path": [
+            "PE-RFM",
+            "instanceAID"
+          ],
+          "type_name": "ApplicationIdentifier",
+          "optional": false,
+          "kind": "field",
+          "classification": "roundtrip_bytes"
+        },
+        {
+          "path": [
+            "PE-RFM",
+            "securityDomainAID"
+          ],
+          "type_name": "ApplicationIdentifier",
+          "optional": true,
+          "kind": "field",
+          "classification": "roundtrip_bytes"
+        },
+        {
+          "path": [
+            "PE-RFM",
+            "tarList"
+          ],
+          "type_name": "OCTET STRING",
+          "optional": true,
+          "kind": "field",
+          "classification": "roundtrip_bytes"
+        },
+        {
+          "path": [
+            "PE-RFM",
+            "minimumSecurityLevel"
+          ],
+          "type_name": "OCTET STRING",
+          "optional": false,
+          "kind": "field",
+          "classification": "roundtrip_bytes"
+        },
+        {
+          "path": [
+            "PE-RFM",
+            "uiccAccessDomain"
+          ],
+          "type_name": "OCTET STRING",
+          "optional": false,
+          "kind": "field",
+          "classification": "roundtrip_bytes"
+        },
+        {
+          "path": [
+            "PE-RFM",
+            "uiccAdminAccessDomain"
+          ],
+          "type_name": "OCTET STRING",
+          "optional": false,
+          "kind": "field",
+          "classification": "roundtrip_bytes"
+        },
+        {
+          "path": [
+            "PE-RFM",
+            "adfRFMAccess",
+            "adfAID"
+          ],
+          "type_name": "ApplicationIdentifier",
+          "optional": false,
+          "kind": "field",
+          "classification": "roundtrip_bytes"
+        },
+        {
+          "path": [
+            "PE-RFM",
+            "adfRFMAccess",
+            "adfAccessDomain"
+          ],
+          "type_name": "OCTET STRING",
+          "optional": false,
+          "kind": "field",
+          "classification": "roundtrip_bytes"
+        },
+        {
+          "path": [
+            "PE-RFM",
+            "adfRFMAccess",
+            "adfAdminAccessDomain"
+          ],
+          "type_name": "OCTET STRING",
+          "optional": false,
+          "kind": "field",
+          "classification": "roundtrip_bytes"
+        }
+      ]
+    },
+    "PE-SecurityDomain": {
+      "summary": {
+        "structural_only": 3,
+        "roundtrip_scalar": 2,
+        "roundtrip_bytes": 34
+      },
+      "fields": [
+        {
+          "path": [
+            "PE-SecurityDomain",
+            "sd-Header",
+            "mandated"
+          ],
+          "type_name": "NULL",
+          "optional": true,
+          "kind": "field",
+          "classification": "structural_only"
+        },
+        {
+          "path": [
+            "PE-SecurityDomain",
+            "sd-Header",
+            "identification"
+          ],
+          "type_name": "UInt15",
+          "optional": false,
+          "kind": "field",
+          "classification": "roundtrip_scalar"
+        },
+        {
+          "path": [
+            "PE-SecurityDomain",
+            "instance",
+            "applicationLoadPackageAID"
+          ],
+          "type_name": "ApplicationIdentifier",
+          "optional": false,
+          "kind": "field",
+          "classification": "roundtrip_bytes"
+        },
+        {
+          "path": [
+            "PE-SecurityDomain",
+            "instance",
+            "classAID"
+          ],
+          "type_name": "ApplicationIdentifier",
+          "optional": false,
+          "kind": "field",
+          "classification": "roundtrip_bytes"
+        },
+        {
+          "path": [
+            "PE-SecurityDomain",
+            "instance",
+            "instanceAID"
+          ],
+          "type_name": "ApplicationIdentifier",
+          "optional": false,
+          "kind": "field",
+          "classification": "roundtrip_bytes"
+        },
+        {
+          "path": [
+            "PE-SecurityDomain",
+            "instance",
+            "extraditeSecurityDomainAID"
+          ],
+          "type_name": "ApplicationIdentifier",
+          "optional": true,
+          "kind": "field",
+          "classification": "roundtrip_bytes"
+        },
+        {
+          "path": [
+            "PE-SecurityDomain",
+            "instance",
+            "applicationPrivileges"
+          ],
+          "type_name": "OCTET STRING",
+          "optional": false,
+          "kind": "field",
+          "classification": "roundtrip_bytes"
+        },
+        {
+          "path": [
+            "PE-SecurityDomain",
+            "instance",
+            "lifeCycleState"
+          ],
+          "type_name": "OCTET STRING",
+          "optional": false,
+          "kind": "field",
+          "classification": "roundtrip_bytes"
+        },
+        {
+          "path": [
+            "PE-SecurityDomain",
+            "instance",
+            "applicationSpecificParametersC9"
+          ],
+          "type_name": "OCTET STRING",
+          "optional": false,
+          "kind": "field",
+          "classification": "roundtrip_bytes"
+        },
+        {
+          "path": [
+            "PE-SecurityDomain",
+            "instance",
+            "systemSpecificParameters",
+            "volatileMemoryQuotaC7"
+          ],
+          "type_name": "OCTET STRING",
+          "optional": true,
+          "kind": "field",
+          "classification": "roundtrip_bytes"
+        },
+        {
+          "path": [
+            "PE-SecurityDomain",
+            "instance",
+            "systemSpecificParameters",
+            "nonVolatileMemoryQuotaC8"
+          ],
+          "type_name": "OCTET STRING",
+          "optional": true,
+          "kind": "field",
+          "classification": "roundtrip_bytes"
+        },
+        {
+          "path": [
+            "PE-SecurityDomain",
+            "instance",
+            "systemSpecificParameters",
+            "globalServiceParameters"
+          ],
+          "type_name": "OCTET STRING",
+          "optional": true,
+          "kind": "field",
+          "classification": "roundtrip_bytes"
+        },
+        {
+          "path": [
+            "PE-SecurityDomain",
+            "instance",
+            "systemSpecificParameters",
+            "implicitSelectionParameter"
+          ],
+          "type_name": "OCTET STRING",
+          "optional": true,
+          "kind": "field",
+          "classification": "roundtrip_bytes"
+        },
+        {
+          "path": [
+            "PE-SecurityDomain",
+            "instance",
+            "systemSpecificParameters",
+            "volatileReservedMemory"
+          ],
+          "type_name": "OCTET STRING",
+          "optional": true,
+          "kind": "field",
+          "classification": "roundtrip_bytes"
+        },
+        {
+          "path": [
+            "PE-SecurityDomain",
+            "instance",
+            "systemSpecificParameters",
+            "nonVolatileReservedMemory"
+          ],
+          "type_name": "OCTET STRING",
+          "optional": true,
+          "kind": "field",
+          "classification": "roundtrip_bytes"
+        },
+        {
+          "path": [
+            "PE-SecurityDomain",
+            "instance",
+            "systemSpecificParameters",
+            "ts102226SIMFileAccessToolkitParameter"
+          ],
+          "type_name": "OCTET STRING",
+          "optional": true,
+          "kind": "field",
+          "classification": "roundtrip_bytes"
+        },
+        {
+          "path": [
+            "PE-SecurityDomain",
+            "instance",
+            "systemSpecificParameters",
+            "ts102226AdditionalContactlessParameters",
+            "protocolParameterData"
+          ],
+          "type_name": "OCTET STRING",
+          "optional": false,
+          "kind": "field",
+          "classification": "roundtrip_bytes"
+        },
+        {
+          "path": [
+            "PE-SecurityDomain",
+            "instance",
+            "systemSpecificParameters",
+            "contactlessProtocolParameters"
+          ],
+          "type_name": "OCTET STRING",
+          "optional": true,
+          "kind": "field",
+          "classification": "roundtrip_bytes"
+        },
+        {
+          "path": [
+            "PE-SecurityDomain",
+            "instance",
+            "systemSpecificParameters",
+            "userInteractionContactlessParameters"
+          ],
+          "type_name": "OCTET STRING",
+          "optional": true,
+          "kind": "field",
+          "classification": "roundtrip_bytes"
+        },
+        {
+          "path": [
+            "PE-SecurityDomain",
+            "instance",
+            "systemSpecificParameters",
+            "cumulativeGrantedVolatileMemory"
+          ],
+          "type_name": "OCTET STRING",
+          "optional": true,
+          "kind": "field",
+          "classification": "roundtrip_bytes"
+        },
+        {
+          "path": [
+            "PE-SecurityDomain",
+            "instance",
+            "systemSpecificParameters",
+            "cumulativeGrantedNonVolatileMemory"
+          ],
+          "type_name": "OCTET STRING",
+          "optional": true,
+          "kind": "field",
+          "classification": "roundtrip_bytes"
+        },
+        {
+          "path": [
+            "PE-SecurityDomain",
+            "instance",
+            "applicationParameters",
+            "uiccToolkitApplicationSpecificParametersField"
+          ],
+          "type_name": "OCTET STRING",
+          "optional": true,
+          "kind": "field",
+          "classification": "roundtrip_bytes"
+        },
+        {
+          "path": [
+            "PE-SecurityDomain",
+            "instance",
+            "applicationParameters",
+            "uiccAccessApplicationSpecificParametersField"
+          ],
+          "type_name": "OCTET STRING",
+          "optional": true,
+          "kind": "field",
+          "classification": "roundtrip_bytes"
+        },
+        {
+          "path": [
+            "PE-SecurityDomain",
+            "instance",
+            "applicationParameters",
+            "uiccAdministrativeAccessApplicationSpecificParametersField"
+          ],
+          "type_name": "OCTET STRING",
+          "optional": true,
+          "kind": "field",
+          "classification": "roundtrip_bytes"
+        },
+        {
+          "path": [
+            "PE-SecurityDomain",
+            "instance",
+            "processData"
+          ],
+          "type_name": "OCTET STRING",
+          "optional": true,
+          "kind": "field",
+          "classification": "roundtrip_bytes"
+        },
+        {
+          "path": [
+            "PE-SecurityDomain",
+            "instance",
+            "controlReferenceTemplate",
+            "applicationProviderIdentifier"
+          ],
+          "type_name": "OCTET STRING",
+          "optional": false,
+          "kind": "field",
+          "classification": "roundtrip_bytes"
+        },
+        {
+          "path": [
+            "PE-SecurityDomain",
+            "keyList",
+            "keyUsageQualifier"
+          ],
+          "type_name": "OCTET STRING",
+          "optional": false,
+          "kind": "field",
+          "classification": "roundtrip_bytes"
+        },
+        {
+          "path": [
+            "PE-SecurityDomain",
+            "keyList",
+            "keyAccess"
+          ],
+          "type_name": "OCTET STRING",
+          "optional": false,
+          "kind": "field",
+          "classification": "roundtrip_bytes"
+        },
+        {
+          "path": [
+            "PE-SecurityDomain",
+            "keyList",
+            "keyIdentifier"
+          ],
+          "type_name": "OCTET STRING",
+          "optional": false,
+          "kind": "field",
+          "classification": "roundtrip_bytes"
+        },
+        {
+          "path": [
+            "PE-SecurityDomain",
+            "keyList",
+            "keyVersionNumber"
+          ],
+          "type_name": "OCTET STRING",
+          "optional": false,
+          "kind": "field",
+          "classification": "roundtrip_bytes"
+        },
+        {
+          "path": [
+            "PE-SecurityDomain",
+            "keyList",
+            "keyCounterValue"
+          ],
+          "type_name": "OCTET STRING",
+          "optional": true,
+          "kind": "field",
+          "classification": "roundtrip_bytes"
+        },
+        {
+          "path": [
+            "PE-SecurityDomain",
+            "keyList",
+            "keyComponents",
+            "keyType"
+          ],
+          "type_name": "OCTET STRING",
+          "optional": false,
+          "kind": "field",
+          "classification": "roundtrip_bytes"
+        },
+        {
+          "path": [
+            "PE-SecurityDomain",
+            "keyList",
+            "keyComponents",
+            "keyData"
+          ],
+          "type_name": "OCTET STRING",
+          "optional": false,
+          "kind": "field",
+          "classification": "roundtrip_bytes"
+        },
+        {
+          "path": [
+            "PE-SecurityDomain",
+            "keyList",
+            "keyComponents",
+            "macLength"
+          ],
+          "type_name": "UInt8",
+          "optional": false,
+          "kind": "field",
+          "classification": "roundtrip_scalar"
+        },
+        {
+          "path": [
+            "PE-SecurityDomain",
+            "sdPersoData"
+          ],
+          "type_name": "OCTET STRING",
+          "optional": true,
+          "kind": "field",
+          "classification": "roundtrip_bytes"
+        },
+        {
+          "path": [
+            "PE-SecurityDomain",
+            "openPersoData",
+            "restrictParameter"
+          ],
+          "type_name": "OCTET STRING",
+          "optional": true,
+          "kind": "field",
+          "classification": "roundtrip_bytes"
+        },
+        {
+          "path": [
+            "PE-SecurityDomain",
+            "openPersoData",
+            "contactlessProtocolParameters"
+          ],
+          "type_name": "OCTET STRING",
+          "optional": true,
+          "kind": "field",
+          "classification": "roundtrip_bytes"
+        },
+        {
+          "path": [
+            "PE-SecurityDomain",
+            "catTpParameters",
+            "catTpMaxSduSize"
+          ],
+          "type_name": "UInt16",
+          "optional": false,
+          "kind": "field",
+          "classification": "structural_only"
+        },
+        {
+          "path": [
+            "PE-SecurityDomain",
+            "catTpParameters",
+            "catTpMaxPduSize"
+          ],
+          "type_name": "UInt16",
+          "optional": false,
+          "kind": "field",
+          "classification": "structural_only"
+        }
+      ]
+    },
+    "PE-TELECOM": {
+      "summary": {
+        "structural_only": 8,
+        "roundtrip_scalar": 2,
+        "roundtrip_ef": 39
+      },
+      "fields": [
+        {
+          "path": [
+            "PE-TELECOM",
+            "telecom-header",
+            "mandated"
+          ],
+          "type_name": "NULL",
+          "optional": true,
+          "kind": "field",
+          "classification": "structural_only"
+        },
+        {
+          "path": [
+            "PE-TELECOM",
+            "telecom-header",
+            "identification"
+          ],
+          "type_name": "UInt15",
+          "optional": false,
+          "kind": "field",
+          "classification": "roundtrip_scalar"
+        },
+        {
+          "path": [
+            "PE-TELECOM",
+            "templateID"
+          ],
+          "type_name": "OBJECT IDENTIFIER",
+          "optional": false,
+          "kind": "field",
+          "classification": "roundtrip_scalar"
+        },
+        {
+          "path": [
+            "PE-TELECOM",
+            "df-telecom"
+          ],
+          "type_name": "File",
+          "optional": false,
+          "kind": "ef",
+          "classification": "structural_only"
+        },
+        {
+          "path": [
+            "PE-TELECOM",
+            "ef-arr"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-TELECOM",
+            "ef-rma"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-TELECOM",
+            "ef-sume"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-TELECOM",
+            "ef-ice-dn"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-TELECOM",
+            "ef-ice-ff"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-TELECOM",
+            "ef-psismsc"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-TELECOM",
+            "df-graphics"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "structural_only"
+        },
+        {
+          "path": [
+            "PE-TELECOM",
+            "ef-img"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-TELECOM",
+            "ef-iidf"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-TELECOM",
+            "ef-ice-graphics"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-TELECOM",
+            "ef-launch-scws"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-TELECOM",
+            "ef-icon"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-TELECOM",
+            "df-phonebook"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "structural_only"
+        },
+        {
+          "path": [
+            "PE-TELECOM",
+            "ef-pbr"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-TELECOM",
+            "ef-ext1"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-TELECOM",
+            "ef-aas"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-TELECOM",
+            "ef-gas"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-TELECOM",
+            "ef-psc"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-TELECOM",
+            "ef-cc"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-TELECOM",
+            "ef-puid"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-TELECOM",
+            "ef-iap"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-TELECOM",
+            "ef-adn"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-TELECOM",
+            "ef-pbc"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-TELECOM",
+            "ef-anr"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-TELECOM",
+            "ef-puri"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-TELECOM",
+            "ef-email"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-TELECOM",
+            "ef-sne"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-TELECOM",
+            "ef-uid"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-TELECOM",
+            "ef-grp"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-TELECOM",
+            "ef-ccp1"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-TELECOM",
+            "df-multimedia"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "structural_only"
+        },
+        {
+          "path": [
+            "PE-TELECOM",
+            "ef-mml"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-TELECOM",
+            "ef-mmdf"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-TELECOM",
+            "df-mmss"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "structural_only"
+        },
+        {
+          "path": [
+            "PE-TELECOM",
+            "ef-mlpl"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-TELECOM",
+            "ef-mspl"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-TELECOM",
+            "ef-mmssmode"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-TELECOM",
+            "df-mcs"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "structural_only"
+        },
+        {
+          "path": [
+            "PE-TELECOM",
+            "ef-mst"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-TELECOM",
+            "ef-mcs-config"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-TELECOM",
+            "df-v2x"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "structural_only"
+        },
+        {
+          "path": [
+            "PE-TELECOM",
+            "ef-vst"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-TELECOM",
+            "ef-v2x-config"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-TELECOM",
+            "ef-v2xp-pc5"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-TELECOM",
+            "ef-v2xp-Uu"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        }
+      ]
+    },
+    "PE-USIM": {
+      "summary": {
+        "structural_only": 2,
+        "roundtrip_scalar": 2,
+        "roundtrip_ef": 23
+      },
+      "fields": [
+        {
+          "path": [
+            "PE-USIM",
+            "usim-header",
+            "mandated"
+          ],
+          "type_name": "NULL",
+          "optional": true,
+          "kind": "field",
+          "classification": "structural_only"
+        },
+        {
+          "path": [
+            "PE-USIM",
+            "usim-header",
+            "identification"
+          ],
+          "type_name": "UInt15",
+          "optional": false,
+          "kind": "field",
+          "classification": "roundtrip_scalar"
+        },
+        {
+          "path": [
+            "PE-USIM",
+            "templateID"
+          ],
+          "type_name": "OBJECT IDENTIFIER",
+          "optional": false,
+          "kind": "field",
+          "classification": "roundtrip_scalar"
+        },
+        {
+          "path": [
+            "PE-USIM",
+            "adf-usim"
+          ],
+          "type_name": "File",
+          "optional": false,
+          "kind": "ef",
+          "classification": "structural_only"
+        },
+        {
+          "path": [
+            "PE-USIM",
+            "ef-imsi"
+          ],
+          "type_name": "File",
+          "optional": false,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-USIM",
+            "ef-arr"
+          ],
+          "type_name": "File",
+          "optional": false,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-USIM",
+            "ef-keys"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-USIM",
+            "ef-keysPS"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-USIM",
+            "ef-hpplmn"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-USIM",
+            "ef-ust"
+          ],
+          "type_name": "File",
+          "optional": false,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-USIM",
+            "ef-fdn"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-USIM",
+            "ef-sms"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-USIM",
+            "ef-smsp"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-USIM",
+            "ef-smss"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-USIM",
+            "ef-spn"
+          ],
+          "type_name": "File",
+          "optional": false,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-USIM",
+            "ef-est"
+          ],
+          "type_name": "File",
+          "optional": false,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-USIM",
+            "ef-start-hfn"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-USIM",
+            "ef-threshold"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-USIM",
+            "ef-psloci"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-USIM",
+            "ef-acc"
+          ],
+          "type_name": "File",
+          "optional": false,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-USIM",
+            "ef-fplmn"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-USIM",
+            "ef-loci"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-USIM",
+            "ef-ad"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-USIM",
+            "ef-ecc"
+          ],
+          "type_name": "File",
+          "optional": false,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-USIM",
+            "ef-netpar"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-USIM",
+            "ef-epsloci"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        },
+        {
+          "path": [
+            "PE-USIM",
+            "ef-epsnsc"
+          ],
+          "type_name": "File",
+          "optional": true,
+          "kind": "ef",
+          "classification": "roundtrip_ef"
+        }
+      ]
+    },
+    "ProfileHeader": {
+      "summary": {
+        "roundtrip_scalar": 2,
+        "structural_only": 32,
+        "hand_written": 1,
+        "roundtrip_bytes": 5
+      },
+      "fields": [
+        {
+          "path": [
+            "ProfileHeader",
+            "major-version"
+          ],
+          "type_name": "UInt8",
+          "optional": false,
+          "kind": "field",
+          "classification": "roundtrip_scalar"
+        },
+        {
+          "path": [
+            "ProfileHeader",
+            "minor-version"
+          ],
+          "type_name": "UInt8",
+          "optional": false,
+          "kind": "field",
+          "classification": "roundtrip_scalar"
+        },
+        {
+          "path": [
+            "ProfileHeader",
+            "profileType"
+          ],
+          "type_name": "UTF8String",
+          "optional": true,
+          "kind": "field",
+          "classification": "structural_only"
+        },
+        {
+          "path": [
+            "ProfileHeader",
+            "iccid"
+          ],
+          "type_name": "OCTET STRING",
+          "optional": false,
+          "kind": "field",
+          "classification": "hand_written"
+        },
+        {
+          "path": [
+            "ProfileHeader",
+            "pol"
+          ],
+          "type_name": "OCTET STRING",
+          "optional": true,
+          "kind": "field",
+          "classification": "roundtrip_bytes"
+        },
+        {
+          "path": [
+            "ProfileHeader",
+            "eUICC-Mandatory-services",
+            "contactless"
+          ],
+          "type_name": "NULL",
+          "optional": true,
+          "kind": "field",
+          "classification": "structural_only"
+        },
+        {
+          "path": [
+            "ProfileHeader",
+            "eUICC-Mandatory-services",
+            "usim"
+          ],
+          "type_name": "NULL",
+          "optional": true,
+          "kind": "field",
+          "classification": "structural_only"
+        },
+        {
+          "path": [
+            "ProfileHeader",
+            "eUICC-Mandatory-services",
+            "isim"
+          ],
+          "type_name": "NULL",
+          "optional": true,
+          "kind": "field",
+          "classification": "structural_only"
+        },
+        {
+          "path": [
+            "ProfileHeader",
+            "eUICC-Mandatory-services",
+            "csim"
+          ],
+          "type_name": "NULL",
+          "optional": true,
+          "kind": "field",
+          "classification": "structural_only"
+        },
+        {
+          "path": [
+            "ProfileHeader",
+            "eUICC-Mandatory-services",
+            "milenage"
+          ],
+          "type_name": "NULL",
+          "optional": true,
+          "kind": "field",
+          "classification": "structural_only"
+        },
+        {
+          "path": [
+            "ProfileHeader",
+            "eUICC-Mandatory-services",
+            "tuak128"
+          ],
+          "type_name": "NULL",
+          "optional": true,
+          "kind": "field",
+          "classification": "structural_only"
+        },
+        {
+          "path": [
+            "ProfileHeader",
+            "eUICC-Mandatory-services",
+            "cave"
+          ],
+          "type_name": "NULL",
+          "optional": true,
+          "kind": "field",
+          "classification": "structural_only"
+        },
+        {
+          "path": [
+            "ProfileHeader",
+            "eUICC-Mandatory-services",
+            "gba-usim"
+          ],
+          "type_name": "NULL",
+          "optional": true,
+          "kind": "field",
+          "classification": "structural_only"
+        },
+        {
+          "path": [
+            "ProfileHeader",
+            "eUICC-Mandatory-services",
+            "gba-isim"
+          ],
+          "type_name": "NULL",
+          "optional": true,
+          "kind": "field",
+          "classification": "structural_only"
+        },
+        {
+          "path": [
+            "ProfileHeader",
+            "eUICC-Mandatory-services",
+            "mbms"
+          ],
+          "type_name": "NULL",
+          "optional": true,
+          "kind": "field",
+          "classification": "structural_only"
+        },
+        {
+          "path": [
+            "ProfileHeader",
+            "eUICC-Mandatory-services",
+            "eap"
+          ],
+          "type_name": "NULL",
+          "optional": true,
+          "kind": "field",
+          "classification": "structural_only"
+        },
+        {
+          "path": [
+            "ProfileHeader",
+            "eUICC-Mandatory-services",
+            "javacard"
+          ],
+          "type_name": "NULL",
+          "optional": true,
+          "kind": "field",
+          "classification": "structural_only"
+        },
+        {
+          "path": [
+            "ProfileHeader",
+            "eUICC-Mandatory-services",
+            "multos"
+          ],
+          "type_name": "NULL",
+          "optional": true,
+          "kind": "field",
+          "classification": "structural_only"
+        },
+        {
+          "path": [
+            "ProfileHeader",
+            "eUICC-Mandatory-services",
+            "multiple-usim"
+          ],
+          "type_name": "NULL",
+          "optional": true,
+          "kind": "field",
+          "classification": "structural_only"
+        },
+        {
+          "path": [
+            "ProfileHeader",
+            "eUICC-Mandatory-services",
+            "multiple-isim"
+          ],
+          "type_name": "NULL",
+          "optional": true,
+          "kind": "field",
+          "classification": "structural_only"
+        },
+        {
+          "path": [
+            "ProfileHeader",
+            "eUICC-Mandatory-services",
+            "multiple-csim"
+          ],
+          "type_name": "NULL",
+          "optional": true,
+          "kind": "field",
+          "classification": "structural_only"
+        },
+        {
+          "path": [
+            "ProfileHeader",
+            "eUICC-Mandatory-services",
+            "tuak256"
+          ],
+          "type_name": "NULL",
+          "optional": true,
+          "kind": "field",
+          "classification": "structural_only"
+        },
+        {
+          "path": [
+            "ProfileHeader",
+            "eUICC-Mandatory-services",
+            "usim-test-algorithm"
+          ],
+          "type_name": "NULL",
+          "optional": true,
+          "kind": "field",
+          "classification": "structural_only"
+        },
+        {
+          "path": [
+            "ProfileHeader",
+            "eUICC-Mandatory-services",
+            "ber-tlv"
+          ],
+          "type_name": "NULL",
+          "optional": true,
+          "kind": "field",
+          "classification": "structural_only"
+        },
+        {
+          "path": [
+            "ProfileHeader",
+            "eUICC-Mandatory-services",
+            "dfLink"
+          ],
+          "type_name": "NULL",
+          "optional": true,
+          "kind": "field",
+          "classification": "structural_only"
+        },
+        {
+          "path": [
+            "ProfileHeader",
+            "eUICC-Mandatory-services",
+            "cat-tp"
+          ],
+          "type_name": "NULL",
+          "optional": true,
+          "kind": "field",
+          "classification": "structural_only"
+        },
+        {
+          "path": [
+            "ProfileHeader",
+            "eUICC-Mandatory-services",
+            "get-identity"
+          ],
+          "type_name": "NULL",
+          "optional": true,
+          "kind": "field",
+          "classification": "structural_only"
+        },
+        {
+          "path": [
+            "ProfileHeader",
+            "eUICC-Mandatory-services",
+            "profile-a-x25519"
+          ],
+          "type_name": "NULL",
+          "optional": true,
+          "kind": "field",
+          "classification": "structural_only"
+        },
+        {
+          "path": [
+            "ProfileHeader",
+            "eUICC-Mandatory-services",
+            "profile-b-p256"
+          ],
+          "type_name": "NULL",
+          "optional": true,
+          "kind": "field",
+          "classification": "structural_only"
+        },
+        {
+          "path": [
+            "ProfileHeader",
+            "eUICC-Mandatory-services",
+            "suciCalculatorApi"
+          ],
+          "type_name": "NULL",
+          "optional": true,
+          "kind": "field",
+          "classification": "structural_only"
+        },
+        {
+          "path": [
+            "ProfileHeader",
+            "eUICC-Mandatory-services",
+            "dns-resolution"
+          ],
+          "type_name": "NULL",
+          "optional": true,
+          "kind": "field",
+          "classification": "structural_only"
+        },
+        {
+          "path": [
+            "ProfileHeader",
+            "eUICC-Mandatory-services",
+            "scp11ac"
+          ],
+          "type_name": "NULL",
+          "optional": true,
+          "kind": "field",
+          "classification": "structural_only"
+        },
+        {
+          "path": [
+            "ProfileHeader",
+            "eUICC-Mandatory-services",
+            "scp11c-authorization-mechanism"
+          ],
+          "type_name": "NULL",
+          "optional": true,
+          "kind": "field",
+          "classification": "structural_only"
+        },
+        {
+          "path": [
+            "ProfileHeader",
+            "eUICC-Mandatory-services",
+            "s16mode"
+          ],
+          "type_name": "NULL",
+          "optional": true,
+          "kind": "field",
+          "classification": "structural_only"
+        },
+        {
+          "path": [
+            "ProfileHeader",
+            "eUICC-Mandatory-services",
+            "eaka"
+          ],
+          "type_name": "NULL",
+          "optional": true,
+          "kind": "field",
+          "classification": "structural_only"
+        },
+        {
+          "path": [
+            "ProfileHeader",
+            "eUICC-Mandatory-GFSTEList"
+          ],
+          "type_name": "OBJECT IDENTIFIER",
+          "optional": false,
+          "kind": "field",
+          "classification": "structural_only"
+        },
+        {
+          "path": [
+            "ProfileHeader",
+            "connectivityParameters"
+          ],
+          "type_name": "OCTET STRING",
+          "optional": true,
+          "kind": "field",
+          "classification": "roundtrip_bytes"
+        },
+        {
+          "path": [
+            "ProfileHeader",
+            "eUICC-Mandatory-AIDs",
+            "aid"
+          ],
+          "type_name": "ApplicationIdentifier",
+          "optional": false,
+          "kind": "field",
+          "classification": "roundtrip_bytes"
+        },
+        {
+          "path": [
+            "ProfileHeader",
+            "eUICC-Mandatory-AIDs",
+            "version"
+          ],
+          "type_name": "OCTET STRING",
+          "optional": false,
+          "kind": "field",
+          "classification": "roundtrip_bytes"
+        },
+        {
+          "path": [
+            "ProfileHeader",
+            "iotOptions",
+            "pix"
+          ],
+          "type_name": "OCTET STRING",
+          "optional": false,
+          "kind": "field",
+          "classification": "roundtrip_bytes"
+        }
+      ]
+    }
+  }
+}

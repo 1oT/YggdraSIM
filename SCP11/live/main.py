@@ -170,8 +170,30 @@ def entry() -> None:
         action="store_true",
         help="Read newline-separated commands from stdin for non-interactive execution",
     )
+    parser.add_argument(
+        "--dump-keybag",
+        dest="dump_keybag",
+        type=str,
+        default=None,
+        help=(
+            "Not supported in live mode: SCP11c BSP keys are derived inside the "
+            "eUICC during BPP processing and never reach the host. Use "
+            "`python -m SCP11.local_access --dump-keybag PATH` to dump BSP "
+            "keys for flows that derive them locally, or EXPORT-KEYBAG in the "
+            "SCP03 shell for SCP03 session-key dumps."
+        ),
+    )
     args = parser.parse_args()
     set_global_debug(bool(getattr(args, "debug", False)))
+
+    if getattr(args, "dump_keybag", None):
+        print(
+            "[-] --dump-keybag is a no-op in SCP11 live mode: session keys are "
+            "derived inside the eUICC and never leave the card. Use "
+            "SCP11.local_access for host-derived BSP keybag dumps, or "
+            "EXPORT-KEYBAG in the SCP03 shell for SCP03 sessions."
+        )
+        sys.exit(2)
 
     client = SGP22Client()
     if args.flow:

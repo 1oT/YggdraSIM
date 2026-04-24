@@ -12,7 +12,7 @@
 # You should have received a copy of the GNU General Public License
 # along with this program. If not, see <https://www.gnu.org/licenses/>.
 #
-# Copyright (c) 2026 Hampus Hellsberg and contributors
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 # -----------------------------------------------------------------------------
 
 import sys 
@@ -35,6 +35,7 @@ except ImportError :
         sys .path .insert (0 ,str (repo_root ))
     from yggdrasim_common.device_inventory import DeviceInventoryStore 
 
+from yggdrasim_common.progress import progress_session
 from yggdrasim_common.quit_control import quit_all
 
 try :
@@ -67,6 +68,11 @@ class ShellDispatcher :
         self .aid_lookup ={bytes .fromhex (v ):k for k ,v in self .aid_registry .items ()}
 
         self .debug_mode =False 
+
+        # Buffer for startup stderr notices that would otherwise be lost
+        # to the ``run()`` screen-clear redraw (currently: the
+        # shipped-demo-keys banner surfaced by ``enforce_demo_key_policy``).
+        self ._pending_startup_stderr =None 
 
         self .transport =None 
         try :
@@ -340,7 +346,7 @@ class ShellDispatcher :
             if has_file :
                 readline .read_history_file (self .hist_file )
             readline .set_history_length (1000 )
-        except :
+        except Exception :
             pass 
 
         atexit .register (self ._save_history )
@@ -363,7 +369,7 @@ class ShellDispatcher :
 
         try :
             readline .parse_and_bind ("set show-all-if-ambiguous on")
-        except :
+        except Exception :
             pass 
 
     def _save_history (self ):
@@ -374,7 +380,7 @@ class ShellDispatcher :
         if has_readline :
             try :
                 readline .write_history_file (self .hist_file )
-            except :
+            except Exception :
                 pass 
 
     def _completer (self ,text ,state ):
@@ -1359,33 +1365,41 @@ class ShellDispatcher :
             temp_name =temp_file .name 
 
         try :
-            print (f"{Config.Colors.CYAN}[*] Resetting card before File System collection...{Config.Colors.ENDC}")
-            self ._handle_reset ()
-            adm_clean =adm_hex .strip ().upper ()
-            has_adm =False 
-            if len (adm_clean )>0 :
-                if adm_clean !="SKIP":
-                    has_adm =True 
-            if has_adm :
-                self .gp_ctrl .verify_adm (adm_hex )
+            # Three deterministic collection phases — FS YAML,
+            # eUICC report, MNO-SD report — each preceded by a card
+            # reset. Sticky footer surfaces which collection is
+            # active for operators watching a long combined sweep.
+            with progress_session ("SCP03 combined report",total =3 )as bar :
+                bar .advance ("file-system collection")
+                print (f"{Config.Colors.CYAN}[*] Resetting card before File System collection...{Config.Colors.ENDC}")
+                self ._handle_reset ()
+                adm_clean =adm_hex .strip ().upper ()
+                has_adm =False 
+                if len (adm_clean )>0 :
+                    if adm_clean !="SKIP":
+                        has_adm =True 
+                if has_adm :
+                    self .gp_ctrl .verify_adm (adm_hex )
 
-            self .fs_ctrl .dump_fs_to_yaml (temp_name )
-            fs_data :Dict [str ,Any ]={}
-            with open (temp_name ,"r",encoding ="utf-8")as fsf :
-                loaded =yaml .safe_load (fsf )
-                if isinstance (loaded ,dict ):
-                    fs_data =loaded 
+                self .fs_ctrl .dump_fs_to_yaml (temp_name )
+                fs_data :Dict [str ,Any ]={}
+                with open (temp_name ,"r",encoding ="utf-8")as fsf :
+                    loaded =yaml .safe_load (fsf )
+                    if isinstance (loaded ,dict ):
+                        fs_data =loaded 
 
-            print (f"{Config.Colors.CYAN}[*] Resetting card before eUICC collection...{Config.Colors.ENDC}")
-            self ._handle_reset ()
-            euicc_report =self ._build_euicc_export_report (standard =standard )
+                bar .advance ("eUICC collection")
+                print (f"{Config.Colors.CYAN}[*] Resetting card before eUICC collection...{Config.Colors.ENDC}")
+                self ._handle_reset ()
+                euicc_report =self ._build_euicc_export_report (standard =standard )
 
-            print (f"{Config.Colors.CYAN}[*] Resetting card before MNO-SD collection...{Config.Colors.ENDC}")
-            self ._handle_reset ()
-            mnosd_report =self ._build_mnosd_export_report (
-                adm_hex =adm_hex ,
-                authenticate_sd =authenticate_sd ,
-            )
+                bar .advance ("MNO-SD collection")
+                print (f"{Config.Colors.CYAN}[*] Resetting card before MNO-SD collection...{Config.Colors.ENDC}")
+                self ._handle_reset ()
+                mnosd_report =self ._build_mnosd_export_report (
+                    adm_hex =adm_hex ,
+                    authenticate_sd =authenticate_sd ,
+                )
 
             return {
                 "generated":euicc_report .get ("generated"),
@@ -1589,6 +1603,86 @@ class ShellDispatcher :
             print (f"{Config.Colors.GREEN}[+] Report written to {out_path}{Config.Colors.ENDC}")
         except Exception as e :
             print (f"{Config.Colors.FAIL}[!] Export failed: {e}{Config.Colors.ENDC}")
+
+    def _handle_export_keybag (self ,arg :str =""):
+        """Dump the active SCP03 session keys into a HIL keybag JSON.
+
+        Usage: EXPORT-KEYBAG [path.keys.json] [label]
+
+        The keybag can then be paired with a pcap and consumed by the
+        HIL decode TUI (see B → [3] Open saved .pcap) to unwrap
+        secure-messaging APDUs captured during the same card session.
+        """
+        tokens =shlex .split (arg .strip ())if arg else []
+
+        out_path ="scp03_session.keys.json"
+        if len (tokens )>0 :
+            candidate =tokens [0 ].strip ()
+            if len (candidate )>0 :
+                out_path =candidate
+
+        label ="scp03-live"
+        if len (tokens )>1 :
+            candidate_label =tokens [1 ].strip ()
+            if len (candidate_label )>0 :
+                label =candidate_label
+
+        has_session =False 
+        if self .transport is not None :
+            if self .transport .session is not None :
+                has_session =True 
+
+        if has_session ==False :
+            print (f"{Config.Colors.FAIL}[!] No active SCP03 session. Run AUTH-SD first.{Config.Colors.ENDC}")
+            return 
+
+        session =self .transport .session 
+        is_authenticated =bool (getattr (session ,"is_authenticated",False ))
+        if is_authenticated ==False :
+            print (f"{Config.Colors.FAIL}[!] Session is not authenticated. Run AUTH-SD before EXPORT-KEYBAG.{Config.Colors.ENDC}")
+            return 
+
+        aid_hex =""
+        target_aid =b""
+        gp_ctrl =getattr (self ,"gp_ctrl",None )
+        if gp_ctrl is not None :
+            target_aid =bytes (getattr (gp_ctrl ,"target_aid",b"")or b"")
+        if len (target_aid )>0 :
+            aid_hex =target_aid .hex ().upper ()
+
+        try :
+            from Tools .HilBridge .scp_keybag_export import (
+            entry_from_scp03_session ,
+            write_keybag_file ,
+            )
+        except ImportError as error :
+            print (f"{Config.Colors.FAIL}[!] Keybag exporter unavailable: {error}{Config.Colors.ENDC}")
+            return 
+
+        try :
+            entry =entry_from_scp03_session (
+            session ,
+            label =label ,
+            match_aid_hex =aid_hex ,
+            )
+        except RuntimeError as error :
+            print (f"{Config.Colors.FAIL}[!] {error}{Config.Colors.ENDC}")
+            return 
+        except Exception as error :
+            print (f"{Config.Colors.FAIL}[!] Keybag snapshot failed: {error}{Config.Colors.ENDC}")
+            return 
+
+        try :
+            written_path =write_keybag_file (out_path ,[entry ],merge_existing =True )
+        except Exception as error :
+            print (f"{Config.Colors.FAIL}[!] Keybag write failed: {error}{Config.Colors.ENDC}")
+            return 
+
+        suffix =""
+        if len (aid_hex )>0 :
+            suffix =f" (aid={aid_hex})"
+        print (f"{Config.Colors.GREEN}[+] Keybag written: {written_path} label={label}{suffix}{Config.Colors.ENDC}")
+        print (f"{Config.Colors.CYAN}    Pair with a sibling .pcap (rename to <pcap>.keys.json) for offline HIL replay.{Config.Colors.ENDC}")
 
     def _handle_read_metadata (self ,arg :str =""):
         """
@@ -1858,6 +1952,10 @@ class ShellDispatcher :
         Execute semicolon-separated commands (e.g. "AUTH-SD; LIST") without interactive loop.
         If yaml_out is set, capture each command output and write to YAML file.
         """
+        # Non-interactive paths do not clear the screen, so flushing the
+        # deferred startup notice here is safe and keeps the banner
+        # visible when operators pipe commands in via ``--cmd``/``--stdin``.
+        self ._flush_pending_startup_stderr ()
         commands =[c .strip ()for c in cmd_line .split (";")if c .strip ()]
         results =[]
         for line in commands :
@@ -1883,7 +1981,7 @@ class ShellDispatcher :
             try :
                 with open (yaml_out ,"w")as f :
                     f .write ("# YggdraSIM CLI Report\n")
-                    f .write (f"# Date: {datetime.datetime.now()}\n\n")
+                    f .write (f"# Date: {datetime.datetime.now(datetime.timezone.utc).isoformat()}\n\n")
                     f .write ("steps:\n")
                     for step in results :
                         f .write (f"  - command: \"{step['command']}\"\n")
@@ -1894,6 +1992,11 @@ class ShellDispatcher :
                 print (f"{Config.Colors.FAIL}[!] Failed to write YAML: {e}{Config.Colors.ENDC}")
 
     def run_script (self ,arg_line :str ):
+        # Scripted runs share the buffer used by the interactive shell;
+        # flush here so the shipped-demo-keys banner is not silently
+        # discarded when the script path is invoked via ``--script``
+        # before the REPL ever gets a chance to redraw.
+        self ._flush_pending_startup_stderr ()
         parts =arg_line .split ()
 
         is_empty =False 
@@ -2000,8 +2103,8 @@ class ShellDispatcher :
             if has_res :
                 try :
                     with open (yaml_out ,'w')as f :
-                        f .write (f"# YggdraSIM Script Report\n")
-                        f .write (f"# Date: {datetime.datetime.now()}\n")
+                        f .write ("# YggdraSIM Script Report\n")
+                        f .write (f"# Date: {datetime.datetime.now(datetime.timezone.utc).isoformat()}\n")
                         f .write (f"# Script: {filename}\n\n")
                         f .write ("steps:\n")
                         for step in results :
@@ -2099,21 +2202,10 @@ class ShellDispatcher :
                 is_unknown =True 
 
             if is_unknown :
+                apdu_bytes =self ._parse_manual_apdu_line (line )
                 is_apdu =False 
-                is_long_enough =False 
-                if len (cmd )>=4 :
-                    is_long_enough =True 
-
-                if is_long_enough :
-                    is_valid_hex =True 
-                    for c in cmd :
-                        is_hex_char =False 
-                        if c in '0123456789ABCDEFabcdef':
-                            is_hex_char =True 
-                        if is_hex_char ==False :
-                            is_valid_hex =False 
-                    if is_valid_hex :
-                        is_apdu =True 
+                if apdu_bytes is not None :
+                    is_apdu =True 
 
                 if is_apdu :
                     has_tp =False 
@@ -2121,7 +2213,6 @@ class ShellDispatcher :
                         has_tp =True 
 
                     if has_tp :
-                        apdu_bytes =HexUtils .to_bytes (line )
                         data ,sw1 ,sw2 =self .transport .transmit (line ,silent =False )
 
                         is_success =False 
@@ -2148,6 +2239,16 @@ class ShellDispatcher :
                     print (f"{Config.Colors.FAIL}Unknown command: {cmd}{Config.Colors.ENDC}")
         finally :
             self ._update_prompt_state ()
+
+    @staticmethod
+    def _parse_manual_apdu_line (line :str )->Optional [bytes ]:
+        candidate =str (line or "").strip ()
+        if len (candidate )<4 :
+            return None
+        try :
+            return HexUtils .to_bytes (candidate )
+        except ValueError :
+            return None
 
     def _sync_manual_command (self ,apdu :bytes ,data :bytes ):
         is_short =False 
@@ -2253,7 +2354,7 @@ class ShellDispatcher :
                 try :
                     parsed =TlvParser .parse (data )
                     self .gp_ctrl .print_tlv_data (parsed )
-                except :
+                except Exception :
                     pass 
 
     def _print_card_info (self ):
@@ -2291,34 +2392,13 @@ class ShellDispatcher :
             print (f"{Config.Colors.FAIL}[-] Card Reset Failed.{Config.Colors.ENDC}")
             return 
 
-        iccid ="Unknown"
-        self .transport .transmit ("00A40004023F00",silent =True )
-        self .transport .transmit ("00A40004022FE2",silent =True )
-        data ,sw1 ,sw2 =self .transport .transmit ("00B000000A",silent =True )
-
-        is_success =False 
-        if sw1 ==0x90 :
-            is_success =True 
-
-        if is_success :
-            def swap_nibbles (s ):
-                res =[]
-                for i in range (0 ,len (s ),2 ):
-                    has_next =False 
-                    if i +1 <len (s ):
-                        has_next =True 
-
-                    if has_next :
-                        res .append (s [i +1 ]+s [i ])
-
-                    is_last =False 
-                    if has_next ==False :
-                        is_last =True 
-
-                    if is_last :
-                        res .append (s [i ])
-                return "".join (res ).replace ('F','')
-            iccid =swap_nibbles (data .hex ().upper ())
+        iccid =self ._read_live_iccid ()
+        if len (iccid )==0 :
+            known_iccid =''.join (ch for ch in str (self .current_iccid or "")if ch .isdigit ())
+            if len (known_iccid )>0 :
+                iccid =known_iccid 
+            else :
+                iccid ="Unknown"
 
         print (f"{Config.Colors.BOLD}ATR   :{Config.Colors.ENDC} {atr_hex}")
         print (f"{Config.Colors.BOLD}ICCID :{Config.Colors.ENDC} {iccid}")
@@ -2454,6 +2534,49 @@ class ShellDispatcher :
             digits .append (pair [0 ])
         return "".join (digits ).replace ("F","")
 
+    @staticmethod
+    def _is_successful_select_sw (sw1 :int )->bool :
+        if sw1 ==0x90 :
+            return True 
+        if sw1 ==0x61 :
+            return True 
+        if sw1 ==0x9F :
+            return True 
+        return False 
+
+    @staticmethod
+    def _is_usable_read_sw (sw1 :int ,data :bytes )->bool :
+        if sw1 ==0x90 :
+            return True 
+        has_data =False 
+        if len (bytes (data or b"" ))>0 :
+            has_data =True 
+        if has_data ==False :
+            return False 
+        if sw1 ==0x62 :
+            return True 
+        if sw1 ==0x63 :
+            return True 
+        return False 
+
+    def _read_live_iccid (self )->str :
+        has_tp =False 
+        if self .transport :
+            has_tp =True 
+        if has_tp ==False :
+            return ""
+        try :
+            self .transport .transmit ("00A40004023F00",silent =True )
+            _sel_data ,sel_sw1 ,sel_sw2 =self .transport .transmit ("00A40004022FE2",silent =True )
+            if self ._is_successful_select_sw (sel_sw1 )==False :
+                return ""
+            data ,sw1 ,sw2 =self .transport .transmit ("00B000000A",silent =True )
+            if self ._is_usable_read_sw (sw1 ,data )==False :
+                return ""
+            return self ._decode_iccid_bcd (data )
+        except Exception :
+            return ""
+
     def _probe_card_identity (self )->Tuple [str ,str ]:
         has_tp =False 
         if self .transport :
@@ -2465,15 +2588,7 @@ class ShellDispatcher :
         if reset_ok ==False :
             return "",""
 
-        iccid =""
-        try :
-            self .transport .transmit ("00A40004023F00",silent =True )
-            self .transport .transmit ("00A40004022FE2",silent =True )
-            data ,sw1 ,sw2 =self .transport .transmit ("00B000000A",silent =True )
-            if sw1 ==0x90 :
-                iccid =self ._decode_iccid_bcd (data )
-        except Exception :
-            iccid =""
+        iccid =self ._read_live_iccid ()
 
         eid =""
         try :
@@ -2730,6 +2845,18 @@ class ShellDispatcher :
         self .gp_ctrl =GlobalPlatformManager (self .transport ,keys )
         self .fs_ctrl =FileSystemController (self .transport ,self .aid_registry )
         self .sec_ctrl =SecurityController (self .transport ,self .fs_ctrl )
+        # ``GlobalPlatformManager`` now returns the demo-keys banner text
+        # via ``pending_demo_keys_warning`` instead of writing straight to
+        # stderr. Hoist it onto the dispatcher so ``run`` / ``run_commands``
+        # / ``run_script`` can surface it after the screen-clear redraw.
+        pending_warning =getattr (self .gp_ctrl ,"pending_demo_keys_warning",None )
+        if pending_warning :
+            existing =getattr (self ,"_pending_startup_stderr",None )
+            if existing :
+                self ._pending_startup_stderr =existing +"\n"+str (pending_warning )
+            else :
+                self ._pending_startup_stderr =str (pending_warning )
+            self .gp_ctrl .pending_demo_keys_warning =None 
 
     def _update_config (self ,key :str ,value :Optional [str ]):
         is_empty =False 
@@ -2976,10 +3103,10 @@ class ShellDispatcher :
         print (r"           / _ \ | | | | |\/| || ||  \| |")
         print (r"          / ___ \| |_| | |  | || || |\  |")
         print (r"         /_/   \_\____/|_|  |_|___|_| \_|")
-        print (f"")
-        print (f"=== YggdraSIM Administration Shell ===")
-        print (f" [ GlobalPlatform | ETSI FS | SGP.22 eUICC | Telecom Auth ]")
-        print (f" Created and maintained by Hampus Hellsberg and contributors")
+        print ("")
+        print ("=== YggdraSIM Administration Shell ===")
+        print (" [ GlobalPlatform | ETSI FS | SGP.22 eUICC | Telecom Auth ]")
+        print (" Authored and maintained by Hampus Hellsberg for 1oT OÜ")
         print (f"{Config.Colors.ENDC}")
 
         print (f"\n{Config.Colors.HEADER}=== Returning to SCP03 Shell ==={Config.Colors.ENDC}")
@@ -3084,6 +3211,27 @@ class ShellDispatcher :
         except Exception as error :
             print (f"[!] Command Execution Error: {error}")
 
+    def _flush_pending_startup_stderr (self )->None :
+        """Drain the one-shot startup notice buffer to stderr.
+
+        Called from ``run`` after the screen-clear redraw and from the
+        non-interactive ``run_commands`` / ``run_script`` surfaces
+        before any command output, so operators on a real-reader
+        backend always see the shipped-demo-keys banner.
+        """
+        notice =getattr (self ,"_pending_startup_stderr",None )
+        if not notice :
+            return 
+        self ._pending_startup_stderr =None 
+        message =str (notice ).rstrip ("\n")
+        if len (message )==0 :
+            return 
+        sys .stderr .write (message +"\n")
+        try :
+            sys .stderr .flush ()
+        except Exception :
+            pass 
+
     def run (self ):
         self ._init_binder ()
 
@@ -3113,10 +3261,10 @@ class ShellDispatcher :
         print (r"           / _ \ | | | | |\/| || ||  \| |")
         print (r"          / ___ \| |_| | |  | || || |\  |")
         print (r"         /_/   \_\____/|_|  |_|___|_| \_|")
-        print (f"")
-        print (f"=== YggdraSIM Administration Shell ===")
-        print (f" [ GlobalPlatform | ETSI FS | SGP.22 eUICC | Telecom Auth ]")
-        print (f" Created and maintained by Hampus Hellsberg and contributors")
+        print ("")
+        print ("=== YggdraSIM Administration Shell ===")
+        print (" [ GlobalPlatform | ETSI FS | SGP.22 eUICC | Telecom Auth ]")
+        print (" Authored and maintained by Hampus Hellsberg for 1oT OÜ")
         print (f"{Config.Colors.MINT}")
 
         has_transport =False 
@@ -3128,6 +3276,11 @@ class ShellDispatcher :
                 self ._print_card_info ()
             except Exception as e :
                 print (f"{Config.Colors.FAIL}[!] Startup Check Failed: {e}{Config.Colors.ENDC}")
+
+        # Surface any deferred startup notices now that the banner and
+        # card info have been drawn; before this change they were emitted
+        # during ``__init__`` and wiped by the clear-screen call above.
+        self ._flush_pending_startup_stderr ()
 
         self ._update_prompt_state ()
 

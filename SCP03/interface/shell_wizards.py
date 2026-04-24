@@ -12,12 +12,11 @@
 # You should have received a copy of the GNU General Public License
 # along with this program. If not, see <https://www.gnu.org/licenses/>.
 #
-# Copyright (c) 2026 Hampus Hellsberg and contributors
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 # -----------------------------------------------------------------------------
 
 import os 
 import sys 
-import configparser 
 import yaml 
 
 current_dir =os .path .dirname (os .path .abspath (__file__ ))
@@ -231,7 +230,7 @@ class ShellInteractiveWizards :
     @staticmethod 
     def _prompt_config_update (shell ,new_kvn :int ,enc :str ,mac :str ,dek :str )->None :
         wiz =InteractiveWizard ("Configuration Synchronization",Config .Colors )
-        wiz .add_step ("upd",f"Update SQLite-backed SCP03 state with new keys? [y/N]:",default =False ,is_bool =True )
+        wiz .add_step ("upd","Update SQLite-backed SCP03 state with new keys? [y/N]:",default =False ,is_bool =True )
         res =wiz .run ()
 
         is_upd =False 
@@ -823,7 +822,7 @@ class ShellInteractiveWizards :
         if is_ten :
             key_name ="aid"
 
-        print (f"\n[*] Updating configuration...")
+        print ("\n[*] Updating configuration...")
         shell ._update_config (key_name ,val )
 
     @staticmethod 
