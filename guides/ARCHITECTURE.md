@@ -2,8 +2,9 @@
 
 This document explains how YggdraSIM is organized, which subsystems depend on
 each other, and how runtime state moves between shells, helpers, storage, and
-optional encryption. For operator usage and launch commands, see `README.md`.
-For discoverable entry points and symbol names, see `yggdrasim_common/registry.py`.
+optional encryption. For operator usage and launch commands, see the top-level
+`../README.md`. For discoverable entry points and symbol names, see
+`../yggdrasim_common/registry.py`.
 
 ## 1. Architectural intent
 
@@ -428,21 +429,21 @@ Non-Python operational dependencies:
 
 Documentation and architecture changes should stay aligned with:
 
-- `README.md`
+- `../README.md`
 - `CLI_AND_PIPING_GUIDE.md`
 - `PROFILE_LIFECYCLE_CLI_CHEATSHEET.md`
-- `NOTICE`
-- `requirements.txt`
-- `yggdrasim_common/registry.py`
-- `SCP11/README.md`
-- `SCP11/live/README.md`
-- `SCP11/test/README.md`
-- `SCP11/local_access/README.md`
-- `SCP11/eim_local/README.md`
-- `SCP11/eim_local/GUIDE.md`
-- `SCP11/relay/README.md`
-- `SCP11/shared/README.md`
-- `plugins/README.md`
+- `../NOTICE`
+- `../requirements.txt`
+- `../yggdrasim_common/registry.py`
+- `../SCP11/README.md`
+- `../SCP11/live/README.md`
+- `../SCP11/test/README.md`
+- `../SCP11/local_access/README.md`
+- `../SCP11/eim_local/README.md`
+- `../SCP11/eim_local/GUIDE.md`
+- `../SCP11/relay/README.md`
+- `../SCP11/shared/README.md`
+- `../plugins/README.md`
 
 When a new cross-module dependency is added, update both:
 
