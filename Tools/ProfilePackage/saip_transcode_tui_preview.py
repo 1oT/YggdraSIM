@@ -20,7 +20,6 @@ from .saip_json_codec import (
     _TAG_BYTES,
     _hex_text_has_placeholder,
     _structural_data_keys,
-    _token_ctx_from_loaded_document,
 )
 
 

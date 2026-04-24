@@ -95,7 +95,6 @@ from yggdrasim_common.card_backend import (
     set_sim_isdr_config_path,
     set_sim_profile_store_path,
     set_sim_quirks_path,
-    SETTING_SOURCE_DISABLED,
 )
 from yggdrasim_common.process_debug import (
     add_debug_argument,
@@ -436,7 +435,6 @@ def configure_card_backend ():
         clear_screen ()
         current_isdr_config =get_sim_isdr_config_path ()
         default_isdr_config =get_default_sim_isdr_config_path ()
-        current_quirks =get_sim_quirks_path ()
         default_quirks =get_default_sim_quirks_path ()
         current_eim_identity =get_sim_eim_identity_path ()
         default_eim_identity =get_default_sim_eim_identity_path ()

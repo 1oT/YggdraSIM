@@ -16,7 +16,6 @@
 # -----------------------------------------------------------------------------
 
 import os 
-import sys 
 import configparser 
 
 from yggdrasim_common.runtime_paths import bundle_path, ensure_seeded_workspace_file, ensure_workspace_dir
