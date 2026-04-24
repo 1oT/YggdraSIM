@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import ipaddress
-from typing import Any, Callable
+from typing import Any
 
 from SIMCARD.state import SimCardState, SimToolkitMenuItem
 from SIMCARD.utils import read_tlv, tlv

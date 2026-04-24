@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import os
 import pathlib
-import re
 import shutil
 import subprocess
 from typing import TYPE_CHECKING
@@ -97,7 +96,6 @@ def run_saip_transcode_tui(bridge: SaipToolBridge) -> None:
     import copy
     from dataclasses import dataclass
     import json
-    import sys
 
     resolved_input = bridge.resolve_input_path(str(bridge.get_input_file()), must_exist=True)
     prepared_input = bridge._prepare_input_for_tool(resolved_input)
@@ -3107,7 +3105,7 @@ def run_saip_transcode_tui(bridge: SaipToolBridge) -> None:
             self._token_manager_pre_defs: dict[str, object] = {}
             self._pending_auto_retoken_updated: dict | None = None
             self._pending_auto_retoken_tokens: list[str] = []
-            self._token_watcher_path: Path | None = None
+            self._token_watcher_path: pathlib.Path | None = None
             self._token_watcher_mtime: float | None = None
             self._token_watcher_last_defs: dict[str, object] = {}
             self._token_watcher_last_style: str = "brace"
@@ -7235,14 +7233,14 @@ def run_saip_transcode_tui(bridge: SaipToolBridge) -> None:
                 tolerate_undefined=True,
             )
             try:
-                _probe_doc = dejsonify_saip_value(
+                dejsonify_saip_value(
                     pre_loaded.get("sections", {}),
                     probe_tolerant,
                     ("sections",),
                     placeholder_paths=template_probe_paths,
                 )
             except Exception:
-                _probe_doc = None
+                pass
             if len(probe_tolerant.undefined_tokens) > 0:
                 unresolved = ", ".join(sorted(probe_tolerant.undefined_tokens))
                 self._set_status(

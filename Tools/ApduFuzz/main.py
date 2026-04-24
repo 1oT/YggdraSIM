@@ -67,7 +67,6 @@ def _build_null_transport(args: argparse.Namespace) -> _NullTransport:
 def _build_pcsc_transport(args: argparse.Namespace):
     try:
         from smartcard.System import readers  # type: ignore[import-not-found]
-        from smartcard.util import toBytes  # type: ignore[import-not-found]
         from smartcard.CardConnection import CardConnection  # type: ignore[import-not-found]
     except ImportError as error:
         raise SystemExit(

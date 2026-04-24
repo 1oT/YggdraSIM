@@ -34,8 +34,6 @@ from Tools.ProfilePackage.saip_asn1_decode import (
     _KEY_USAGE_FLAGS,
     _LIFE_CYCLE_STATE_NAMES,
     _MEMORY_LIMIT_FIELD_LABELS,
-    _PROFILE_POLICY_RULE_NAMES,
-    _PUK_KEY_REFERENCE_NAMES,
 )
 
 
