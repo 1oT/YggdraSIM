@@ -47,7 +47,7 @@ def runtime_root() -> str:
     override = os.environ.get(RUNTIME_ROOT_ENV, "").strip()
     if len(override) > 0:
         normalized_override = os.path.abspath(os.path.expanduser(override))
-        return _ensure_writable_root(normalized_override, strict=True)
+        return _ensure_writable_root(normalized_override)
     if is_frozen() is False:
         return bundle_root()
     portable_candidate = os.path.join(
@@ -61,7 +61,7 @@ def runtime_root() -> str:
         os.path.expanduser("~"),
         PORTABLE_RUNTIME_DIRNAME,
     )
-    return _ensure_writable_root(fallback_root, strict=True)
+    return _ensure_writable_root(fallback_root)
 
 
 def runtime_path(*parts: str) -> str:
@@ -175,23 +175,23 @@ def _copy_tree_if_missing(source_dir: str, target_dir: str) -> None:
 
 def _try_writable_root(path: str) -> str | None:
     try:
-        return _ensure_writable_root(path, strict=False)
+        return _ensure_writable_root(path)
     except OSError:
         return None
 
 
-def _ensure_writable_root(path: str, strict: bool) -> str:
+def _ensure_writable_root(path: str) -> str:
     normalized = os.path.abspath(os.path.expanduser(str(path).strip()))
+    os.makedirs(normalized, exist_ok=True)
+    probe_path = os.path.join(normalized, _WRITE_PROBE_FILENAME)
     try:
-        os.makedirs(normalized, exist_ok=True)
-        probe_path = os.path.join(normalized, _WRITE_PROBE_FILENAME)
         with open(probe_path, "w", encoding="utf-8") as probe_file:
             probe_file.write("ok\n")
-        os.remove(probe_path)
-    except OSError:
-        if strict:
-            raise
-        raise
+    finally:
+        try:
+            os.remove(probe_path)
+        except OSError:
+            pass
     return normalized
 
 

@@ -22,12 +22,27 @@ class SimProfileFsNode:
 
 
 @dataclass
+class SimProfileAuthConfig:
+    algorithm: str = "milenage"
+    ki: bytes = b""
+    opc: bytes = b""
+    op: bytes = b""
+    amf: bytes = bytes.fromhex("8000")
+    sqn: bytes = b"\x00" * 6
+    # TUAK specific. Ignored for MILENAGE. Number of Keccak-f[1600] iterations.
+    number_of_keccak: int = 1
+    # Optional SAIP-sourced counter bound. Empty when unused.
+    auth_counter_max: bytes = b""
+
+
+@dataclass
 class SimProfileImage:
     profile_name: str = ""
     iccid: str = ""
     imsi: str = ""
     impi: str = ""
     nodes: list[SimProfileFsNode] = field(default_factory=list)
+    auth_config: SimProfileAuthConfig | None = None
 
 
 @dataclass
@@ -45,6 +60,7 @@ class SimProfileEntry:
     upp_bytes: bytes = b""
     profile_image: SimProfileImage | None = None
     profile_source: str = "json"
+    auth_config: SimProfileAuthConfig | None = None
 
 
 @dataclass
@@ -205,6 +221,59 @@ class SimScp80SecurityConfig:
 
 
 @dataclass
+class SimToolkitMenuItem:
+    identifier: int
+    text: str
+
+
+@dataclass
+class SimToolkitState:
+    bootstrap_enabled: bool = True
+    provide_imei: bool = True
+    menu_title: str = ""
+    menu_items: list[SimToolkitMenuItem] = field(
+        default_factory=lambda: [
+            SimToolkitMenuItem(identifier=0x80, text="Add Profile"),
+            SimToolkitMenuItem(identifier=0x81, text="List Profiles"),
+            SimToolkitMenuItem(identifier=0x82, text="Get Eim Package"),
+        ]
+    )
+    event_list: list[int] = field(default_factory=lambda: [0x03, 0x09, 0x0A, 0x12])
+    poll_interval_seconds: int = 60
+    language: bytes = b"en"
+    location_information: bytes = bytes.fromhex("000000")
+    imei: bytes = bytes.fromhex("316F542E59676764726153494D")
+    terminal_profile: bytes = b""
+    terminal_capabilities: list[bytes] = field(default_factory=list)
+    envelope_history: list[bytes] = field(default_factory=list)
+    last_terminal_response: bytes = b""
+    bootstrap_initialized: bool = False
+    active_proactive_command: bytes = b""
+    next_command_number: int = 1
+    open_channel_active: bool = False
+    open_channel_protocol: str = ""
+    open_channel_endpoint: str = ""
+    open_channel_network_access_name: str = ""
+    open_channel_transport_protocol_type: int = 0
+    last_channel_data_sent: int = 0
+    last_received_channel_data: bytes = b""
+    received_channel_history: list[bytes] = field(default_factory=list)
+
+
+@dataclass
+class SimChvReference:
+    reference: int
+    value: str = ""
+    unblock_value: str = ""
+    enabled: bool = True
+    verified: bool = False
+    retry_limit: int = 3
+    retries_remaining: int = 3
+    unblock_retry_limit: int = 10
+    unblock_retries_remaining: int = 10
+
+
+@dataclass
 class SimCardState:
     atr: bytes
     eid: str
@@ -241,4 +310,15 @@ class SimCardState:
     store_data_buffer: bytes = b""
     store_data_expected_block: int = 0
     scp03_session: SimScp03Session = field(default_factory=SimScp03Session)
+    # Persistent SCP03 secure-channel sequence counter. GP Card Spec v2.3.1
+    # Amendment D §7.1.1.4.3 requires the 3-byte counter to be appended to the
+    # INITIALIZE UPDATE response when the pseudo-random card challenge option
+    # is in use (i-byte bit 4 = 0).
+    scp03_sequence_counter: int = 0
     sgp_session: SimSgpSession = field(default_factory=SimSgpSession)
+    toolkit: SimToolkitState = field(default_factory=SimToolkitState)
+    chv_references: dict[int, SimChvReference] = field(default_factory=dict)
+    # Logical channels that are currently open. Channel 0 is the basic
+    # channel and is implicitly available. ISO 7816-4 §7.1.2 / GP Card
+    # Spec v2.3.1 §11.1.2 allow channels 1..3 on a baseline card.
+    open_logical_channels: set[int] = field(default_factory=lambda: {0})

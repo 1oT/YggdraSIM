@@ -12,7 +12,7 @@
 # You should have received a copy of the GNU General Public License
 # along with this program. If not, see <https://www.gnu.org/licenses/>.
 #
-# Copyright (c) 2026 Hampus Hellsberg and contributors
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 # -----------------------------------------------------------------------------
 
 import os
@@ -465,10 +465,10 @@ class CapFileParser:
                         elif component_name == "Applet.cap":
                             applet_aids = CapFileParser._extract_applet_aids(data)
         except zipfile.BadZipFile as exc:
-            raise Exception("Invalid CAP file format (Not a valid ZIP)") from exc
+            raise ValueError("Invalid CAP file format (Not a valid ZIP)") from exc
 
         if len(blob) == 0:
-            raise Exception("CAP file did not contain any recognized load components.")
+            raise ValueError("CAP file did not contain any recognized load components.")
 
         component_blob = bytes(blob)
         load_block = CapFileParser._wrap_load_file_block(component_blob)

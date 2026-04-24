@@ -12,7 +12,7 @@
 # You should have received a copy of the GNU General Public License
 # along with this program. If not, see <https://www.gnu.org/licenses/>.
 #
-# Copyright (c) 2026 Hampus Hellsberg and contributors
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 # -----------------------------------------------------------------------------
 
 import os 
@@ -85,7 +85,7 @@ class SmartDecoder :
                         if idx +2 ==len (s ):le =next_byte ;idx +=2 ;last_le =le 
                         else :lc =next_byte ;idx +=2 +(lc *2 )
                 else :break 
-        except :pass 
+        except Exception :pass 
         return current_fid ,last_le 
 
     def try_decode (self ,fid ,le ,por_hex ):
@@ -165,7 +165,7 @@ class OtaShell :
         try :
             if os .path .exists (self .history_file ):readline .read_history_file (self .history_file )
             readline .set_history_length (1000 )
-        except :pass 
+        except Exception :pass 
 
     def run (self ):
         is_nt =False 
@@ -194,9 +194,9 @@ class OtaShell :
         print (r"                  | | | || | / _ \  ")
         print (r"                  | |_| || |/ ___ \ ")
         print (r"                   \___/ |_/_/   \_"+"\\")
-        print (f"")
-        print (f"=== Remote File Management & Over-The-Air Payload Generator ===")
-        print (f" Created and maintained by Hampus Hellsberg and contributors")
+        print ("")
+        print ("=== Remote File Management & Over-The-Air Payload Generator ===")
+        print (" Authored and maintained by Hampus Hellsberg for 1oT OÜ")
         print (f"{Colors.ENDC}")
 
         self ._setup_history ()
@@ -425,7 +425,7 @@ class OtaShell :
         if not args :print ("Usage: script <file>");return 
         if not os .path .exists (args [0 ]):print ("File not found");return 
         print (f"{Colors.CYAN}[*] Executing script: {args[0]}{Colors.ENDC}")
-        with open (args [0 ],'r')as f :
+        with open (args [0 ],'r',encoding ='utf-8')as f :
             for line in f :
                 normalized_line =self ._normalize_script_hex_line (line )
                 if len (normalized_line )==0 :
@@ -637,9 +637,9 @@ class OtaShell :
         print (r"                 | | | || |/ ___ \ ")
         print (r"                 | |_| || / ___  \ ")
         print (r"                  \___/ |_/_/   \_"+"\\")
-        print (f"")
-        print (f"=== Remote File Management & Over-The-Air Payload Generator ===")
-        print (f" Created and maintained by Hampus Hellsberg and contributors")
+        print ("")
+        print ("=== Remote File Management & Over-The-Air Payload Generator ===")
+        print (" Authored and maintained by Hampus Hellsberg for 1oT OÜ")
         print (f"{Colors.ENDC}")
 
         print (f"\n{Colors.HEADER}=== Returning to SCP80 OTA Tool ==={Colors.ENDC}")

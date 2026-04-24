@@ -1,0 +1,74 @@
+name: Security report (non-exploitable / hardening)
+description: Report a hardening gap, audit finding, or non-exploitable security concern. For exploitable vulnerabilities, use GitHub Security Advisories instead.
+title: "[sec] <short, specific summary>"
+labels: ["type:security", "needs-approval"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ### Not for active exploits
+        If you have an **exploitable** vulnerability (key leak, signature
+        forgery, bypass of SCP03/11 authentication, eSIM profile
+        compromise, supply chain injection), do **not** file this issue.
+        Use the private path:
+        https://github.com/hampus/YggdraSIM/security/advisories/new
+
+        This form is for:
+        - Hardening proposals (defence-in-depth)
+        - Audit findings that do not have a proof-of-concept
+        - Questions about threat model and security posture
+        - Follow-ups to items tracked in `V1_RELEASE_AUDIT.md`
+
+  - type: dropdown
+    id: category
+    attributes:
+      label: Category
+      options:
+        - Cryptography (primitive, mode, parameter)
+        - Key management / storage / envelope encryption
+        - Transport (TLS, SCP03, SCP11, SCP80)
+        - APDU / profile parsing robustness
+        - Supply chain / dependency pinning / CI
+        - Logging / secrets in output
+        - Fuzzing / timeout / DoS / resource exhaustion
+        - Other (describe below)
+    validations:
+      required: true
+
+  - type: textarea
+    id: finding
+    attributes:
+      label: Finding
+      description: Describe the hardening gap or audit finding precisely.
+    validations:
+      required: true
+
+  - type: textarea
+    id: impact
+    attributes:
+      label: Impact (if the gap were exploited)
+      description: |
+        Describe the theoretical impact. If you know of a PoC, do NOT
+        paste it here — use Security Advisories.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposed_fix
+    attributes:
+      label: Proposed mitigation
+      description: Concrete suggestion, plus any spec reference (GSMA / GlobalPlatform / ETSI / 3GPP / NIST).
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: pre_submit
+    attributes:
+      label: Pre-submission checklist
+      options:
+        - label: This report does not contain an active exploit or working proof-of-concept.
+          required: true
+        - label: I did not include private customer data, real key material, or live TLS secrets.
+          required: true
+        - label: I understand this issue must be approved by a maintainer before any linked PR will be accepted.
+          required: true

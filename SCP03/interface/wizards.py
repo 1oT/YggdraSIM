@@ -12,11 +12,11 @@
 # You should have received a copy of the GNU General Public License
 # along with this program. If not, see <https://www.gnu.org/licenses/>.
 #
-# Copyright (c) 2026 Hampus Hellsberg and contributors
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 # -----------------------------------------------------------------------------
 
 import os 
-from typing import Tuple ,List ,Dict ,Any 
+from typing import Tuple 
 from SCP03 .config import Config 
 from SCP03 .core .cap import CapFileParser 
 from SCP03 .core .utils import HexUtils 
@@ -97,7 +97,7 @@ class InteractiveWizards :
         print ("  8. Full CAP Install Sequence - build or execute INSTALL/LOAD/INSTALL from CAP/IJC")
         print ("  0. Exit Menu")
 
-        choice =InteractiveWizards ._normalize_numeric_choice (input (f"\nChoice [0-8]: ").strip ())
+        choice =InteractiveWizards ._normalize_numeric_choice (input ("\nChoice [0-8]: ").strip ())
 
         is_zero =False 
         if choice =='0':

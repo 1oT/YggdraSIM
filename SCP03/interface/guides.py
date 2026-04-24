@@ -12,7 +12,7 @@
 # You should have received a copy of the GNU General Public License
 # along with this program. If not, see <https://www.gnu.org/licenses/>.
 #
-# Copyright (c) 2026 Hampus Hellsberg and contributors
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 # -----------------------------------------------------------------------------
 
 import os 
@@ -50,7 +50,7 @@ class ShellGuides :
                 print (f"  {Config.Colors.CYAN}10.{Config.Colors.ENDC} CLI Entry Points & Piping (CLI)")
                 print (f"  {Config.Colors.CYAN}q.{Config.Colors.ENDC} Return to Shell")
 
-                choice =input (f"\nChoice [1-10, q]: ").strip ().lower ()
+                choice =input ("\nChoice [1-10, q]: ").strip ().lower ()
                 if choice =='q':
                     break 
                 elif choice =='exit':

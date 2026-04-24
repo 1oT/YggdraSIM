@@ -1,6 +1,5 @@
 import argparse
 import atexit
-import json
 import os
 import shlex
 import shutil
@@ -14,6 +13,8 @@ from yggdrasim_common.process_debug import (
     is_global_debug_enabled,
     set_global_debug,
 )
+from yggdrasim_common.card_backend import trigger_card_relay_modem_refresh
+from yggdrasim_common.hil_bridge_runtime import hil_bridge_warning_text
 from yggdrasim_common.quit_control import quit_all, QuitAllRequested
 from yggdrasim_common.session_recording import ShellSessionRecorder
 from yggdrasim_common.structured_output import dump_structured_payload
@@ -31,11 +32,11 @@ except Exception:
 
 from .config import EimLocalConfig
 from .eim_package_codec import resolve_package_runtime_hints
-from .polling_bridge import LocalizedPollingBridge
 from .session import EimLocalSession
 from yggdrasim_common.polling_plugin_support import (
     dispatch_poll_command,
     dispatch_poll_method,
+    has_polling_plugin,
     parse_eim_local_ipae_args,
 )
 from SCP11.shared.gsma_error_codes import (
@@ -72,7 +73,7 @@ class EimLocalShell:
         self._cached_poll_target_fqdns: list[str] = []
         if self._global_debug:
             self._set_transport_debug(True)
-        self._poll_bridge: Optional[LocalizedPollingBridge] = None
+        self._poll_bridge: Any = None
         self._recorder = ShellSessionRecorder(
             shell_name="scp11_eim_local",
             module_entry_point="python -m SCP11.eim_local",
@@ -92,6 +93,7 @@ class EimLocalShell:
             "ENABLE-PROFILE": self._cmd_enable_profile,
             "DISABLE-PROFILE": self._cmd_disable_profile,
             "DELETE-PROFILE": self._cmd_delete_profile,
+            "REFRESH-MODEM": self._cmd_refresh_modem,
             "PROFILE": self._cmd_profile,
             "PROFILE-CLEAR": self._cmd_profile_clear,
             "METADATA": self._cmd_metadata,
@@ -148,6 +150,7 @@ class EimLocalShell:
             "ENABLE": "ENABLE-PROFILE",
             "DISABLE": "DISABLE-PROFILE",
             "DELETE": "DELETE-PROFILE",
+            "MODEM-REFRESH": "REFRESH-MODEM",
             "EIM-ACK": "EIM-ACKNOWLEDGE",
             "ISDR-PACKAGE": "LOAD-EIM-PACKAGE",
             "ISDR-LOAD-PACKAGE": "LOAD-EIM-PACKAGE",
@@ -184,6 +187,11 @@ class EimLocalShell:
             "ENABLE-PROFILE": {"usage": "ENABLE-PROFILE <iccid|aid|alias>", "summary": "Enable profile by ICCID, AID, or alias.", "examples": ["ENABLE-PROFILE ISDP1", "ENABLE-PROFILE 8904903200000000000F"]},
             "DISABLE-PROFILE": {"usage": "DISABLE-PROFILE <iccid|aid|alias>", "summary": "Disable profile by ICCID, AID, or alias.", "examples": ["DISABLE-PROFILE ISDP1"]},
             "DELETE-PROFILE": {"usage": "DELETE-PROFILE <iccid|aid|alias>", "summary": "Delete profile by ICCID, AID, or alias.", "examples": ["DELETE-PROFILE ISDP1"]},
+            "REFRESH-MODEM": {
+                "usage": "REFRESH-MODEM [mode]",
+                "summary": "Queue a proactive REFRESH toward the attached modem via the active HIL bridge.",
+                "examples": ["REFRESH-MODEM", "REFRESH-MODEM euicc-profile-state-change", "REFRESH-MODEM uicc-reset"],
+            },
             "PROFILE": {"usage": "PROFILE [profilePath]", "summary": "Show active profile target or set override path.", "examples": ["PROFILE", "PROFILE test_profile.txt"]},
             "PROFILE-CLEAR": {"usage": "PROFILE-CLEAR", "summary": "Clear profile override path.", "examples": ["PROFILE-CLEAR"]},
             "METADATA": {"usage": "METADATA [metadataPath]", "summary": "Show active metadata target or set override path.", "examples": ["METADATA", "METADATA default_profile_metadata.json"]},
@@ -264,7 +272,6 @@ class EimLocalShell:
         except Exception:
             pass
         atexit.register(self._save_history)
-        atexit.register(self._stop_poll_bridge)
         readline.set_completer(self._completer)
         readline.set_completer_delims(" \t\n")
         if readline.__doc__ is not None and "libedit" in readline.__doc__:
@@ -570,6 +577,9 @@ class EimLocalShell:
         line = "=" * 86
         print(f"\n{ShellStyle.HEADER}{line}{ShellStyle.END}")
         print(f"{ShellStyle.BOLD}Local eIM Shell Ready{ShellStyle.END}")
+        warning_text = hil_bridge_warning_text()
+        if len(warning_text) > 0:
+            print(f"{ShellStyle.WARNING}[!] {warning_text}{ShellStyle.END}")
         print(f"{ShellStyle.HEADER}{line}{ShellStyle.END}")
         print(f"{ShellStyle.CYAN}--- Directories ---{ShellStyle.END}")
         print(f"  Profile directory : {self.cfg.PROFILE_DIR}")
@@ -660,6 +670,24 @@ class EimLocalShell:
             return text
         return f"{text[:max_chars]}..."
 
+    def _queue_modem_refresh(self, action_label: str, mode: str = "") -> None:
+        try:
+            payload = trigger_card_relay_modem_refresh(
+                mode=mode,
+                source=f"scp11-eim-local:{action_label}",
+            )
+        except Exception as error:
+            print(f"[*] {action_label}: modem REFRESH queue failed ({error}).")
+            return
+        if payload is None:
+            return
+        status = str(payload.get("status", "queued") or "queued")
+        mode_name = str(payload.get("mode", "") or "")
+        print(
+            f"[*] {action_label}: modem REFRESH {status} "
+            f"({mode_name or 'euicc-profile-state-change'})."
+        )
+
     def _format_target_value(self, value: Any) -> str:
         text = str(value or "").strip()
         if len(text) == 0:
@@ -681,15 +709,15 @@ class EimLocalShell:
         if len(private_key_path) > 0:
             print(f"    cert_key  : {private_key_path}")
 
+    # Bridge / orchestrator lifecycle is installed by the polling plugin
+    # via ``PollingCapability.extend_target`` (see
+    # ``plugins/polling/shell_lifecycle.py``). When the plugin is absent
+    # every IPAD / IPAE / PATHS-bridge-section code path that tries to
+    # reach a bridge must fail loudly, so we keep tiny stubs here that
+    # either raise or return neutral placeholders.
+
     def _stop_poll_bridge(self) -> None:
-        bridge = self._poll_bridge
-        self._poll_bridge = None
-        if bridge is None:
-            return
-        try:
-            bridge.stop()
-        except Exception:
-            return
+        return
 
     def _close_shell_session_if_open(self) -> None:
         state = getattr(self.session, "state", None)
@@ -701,17 +729,16 @@ class EimLocalShell:
         close_session()
 
     def _bridge_status_payload(self) -> dict[str, Any]:
-        if self._poll_bridge is None:
-            self._poll_bridge = LocalizedPollingBridge(self.session)
-        return self._poll_bridge.status_payload()
+        # Fallback stub — the polling plugin overrides this with the
+        # real bridge status through ``extend_target``. Absent plugin ⇒
+        # STATUS / PATHS print ``-`` / ``no``.
+        return {}
 
-    def _ensure_poll_bridge(self, reset_runtime: bool = True) -> LocalizedPollingBridge:
-        if self._poll_bridge is None:
-            self._poll_bridge = LocalizedPollingBridge(self.session)
-        self._poll_bridge.start()
-        if reset_runtime:
-            self._poll_bridge.reset_runtime_state()
-        return self._poll_bridge
+    def _ensure_poll_bridge(self, reset_runtime: bool = True) -> Any:
+        raise RuntimeError(
+            "Localized polling bridge is provided by the polling plugin and "
+            "is not available in this build."
+        )
 
     def _close_network_runtime(self, orchestrator: Any) -> None:
         if orchestrator is None:
@@ -722,76 +749,15 @@ class EimLocalShell:
                 close_open_channel()
             except Exception:
                 pass
-        apdu_channel = getattr(orchestrator, "apdu_channel", None)
-        if apdu_channel is None:
-            return
-        close_method = getattr(apdu_channel, "close", None)
-        if callable(close_method):
-            try:
-                close_method()
-            except Exception:
-                pass
-            return
-        connection = getattr(apdu_channel, "_conn", None)
-        disconnect_method = getattr(connection, "disconnect", None)
-        if callable(disconnect_method):
-            try:
-                disconnect_method()
-            except Exception:
-                pass
+
+    def _configure_localized_bridge_profile_provider(self, profile_provider: Any) -> Any:
+        return profile_provider
 
     def _load_network_orchestrator(self, profile_name: str) -> Any:
-        normalized_profile = str(profile_name or "").strip().lower()
-        if normalized_profile not in ("live", "test"):
-            raise ValueError("Network orchestrator profile must be 'live' or 'test'.")
-        try:
-            from SCP11.eim_local.ipad_standalone import LocalizedRelayApduChannel
-        except ImportError:
-            from .ipad_standalone import LocalizedRelayApduChannel
-        try:
-            if normalized_profile == "live":
-                from SCP11.live.config import SGPConfig
-                from SCP11.live.factory import build_apdu_channel, build_profile_provider
-                from SCP11.live.models import BACKEND_MODE_REMOTE_DP, TRANSPORT_MODE_PCSC
-                from SCP11.live.orchestrator import SGP22Orchestrator
-            else:
-                from SCP11.test.config import SGPConfig
-                from SCP11.test.factory import build_apdu_channel, build_profile_provider
-                from SCP11.test.models import BACKEND_MODE_REMOTE_DP, TRANSPORT_MODE_PCSC
-                from SCP11.test.orchestrator import SGP22Orchestrator
-        except ImportError:
-            if normalized_profile == "live":
-                from ..live.config import SGPConfig
-                from ..live.factory import build_apdu_channel, build_profile_provider
-                from ..live.models import BACKEND_MODE_REMOTE_DP, TRANSPORT_MODE_PCSC
-                from ..live.orchestrator import SGP22Orchestrator
-            else:
-                from ..test.config import SGPConfig
-                from ..test.factory import build_apdu_channel, build_profile_provider
-                from ..test.models import BACKEND_MODE_REMOTE_DP, TRANSPORT_MODE_PCSC
-                from ..test.orchestrator import SGP22Orchestrator
-        bridge = self._ensure_poll_bridge(reset_runtime=False)
-        cfg = SGPConfig()
-        object.__setattr__(cfg, "READER_INDEX", int(getattr(self.cfg, "READER_INDEX", 0) or 0))
-        object.__setattr__(cfg, "TRANSPORT_MODE", TRANSPORT_MODE_PCSC)
-        object.__setattr__(cfg, "BACKEND_MODE", BACKEND_MODE_REMOTE_DP)
-        object.__setattr__(cfg, "ES9_BASE_URL", bridge.smdp_base_url)
-        object.__setattr__(cfg, "EIM_BASE_URL", bridge.eim_base_url)
-        object.__setattr__(cfg, "ES9_VERIFY_TLS", False)
-        object.__setattr__(cfg, "ES9_CA_BUNDLE_PATH", "")
-        smdp_address = self.session._resolve_runtime_smdp_address({})
-        if len(str(smdp_address or "").strip()) == 0:
-            smdp_address = bridge.smdp_fqdn
-        object.__setattr__(cfg, "RSP_SERVER_URL", str(smdp_address))
-        apdu_channel = LocalizedRelayApduChannel(build_apdu_channel(cfg))
-        profile_provider = build_profile_provider(cfg)
-        orchestrator = SGP22Orchestrator(
-            cfg=cfg,
-            apdu_channel=apdu_channel,
-            profile_provider=profile_provider,
+        raise RuntimeError(
+            "Networked orchestrator with localized bridge is provided by the "
+            "polling plugin and is not available in this build."
         )
-        setattr(orchestrator, "localized_poll_bridge", bridge)
-        return orchestrator
 
     def _cmd_paths(self, _: str = "") -> None:
         identity = self.session.identity_summary()
@@ -1035,6 +1001,7 @@ class EimLocalShell:
             self._help_row("ENABLE-PROFILE <id>", "ENABLE-PROFILE"),
             self._help_row("DISABLE-PROFILE <id>", "DISABLE-PROFILE"),
             self._help_row("DELETE-PROFILE <id>", "DELETE-PROFILE"),
+            self._help_row("REFRESH-MODEM [mode]", "REFRESH-MODEM"),
             self._help_row("STORE-METADATA [path]", "STORE-METADATA"),
             self._help_row("UPDATE-METADATA [path]", "UPDATE-METADATA"),
         ]
@@ -1207,6 +1174,7 @@ class EimLocalShell:
         response = self.session.enable_profile(identifier)
         print(f"[+] EnableProfile completed ({len(response)} bytes).")
         print(f"    {self._hex_preview(response)}")
+        self._queue_modem_refresh("EnableProfile")
 
     def _cmd_disable_profile(self, argument: str = "") -> None:
         identifier = argument.strip()
@@ -1215,6 +1183,7 @@ class EimLocalShell:
         response = self.session.disable_profile(identifier)
         print(f"[+] DisableProfile completed ({len(response)} bytes).")
         print(f"    {self._hex_preview(response)}")
+        self._queue_modem_refresh("DisableProfile")
 
     def _cmd_delete_profile(self, argument: str = "") -> None:
         identifier = argument.strip()
@@ -1223,6 +1192,10 @@ class EimLocalShell:
         response = self.session.delete_profile(identifier)
         print(f"[+] DeleteProfile completed ({len(response)} bytes).")
         print(f"    {self._hex_preview(response)}")
+        self._queue_modem_refresh("DeleteProfile")
+
+    def _cmd_refresh_modem(self, argument: str = "") -> None:
+        self._queue_modem_refresh("RefreshModem", mode=argument.strip())
 
     def _cmd_profile(self, argument: str = "") -> None:
         path_text = argument.strip()
@@ -1302,6 +1275,7 @@ class EimLocalShell:
         self._print_post_eim_configuration_snapshot()
 
     def _cmd_ipad_discover(self, argument: str = "") -> None:
+        # Always safe — pure ASN.1 GetEimPackage exchange; no bridge needed.
         sequence = self.session.ipad_discover(package_path=argument.strip())
         for title, response in sequence:
             print(f"\n[IPAd] {title}")
@@ -1327,54 +1301,22 @@ class EimLocalShell:
         print(f"    bytes: {len(response)}")
         print(f"    head : {self._hex_preview(response)}")
 
-    @staticmethod
-    def _parse_localized_ipad_args(argument: str = "") -> tuple[str, bool]:
-        parts = shlex.split(argument or "")
-        matching_id = ""
-        debug = False
-        for part in parts:
-            normalized = str(part).strip().lower()
-            if normalized == "--debug":
-                debug = True
-                continue
-            if matching_id:
-                raise ValueError("IPAD accepts at most one matchingId argument.")
-            matching_id = str(part).strip()
-        return matching_id, debug
-
-    def _run_localized_ipad(
-        self,
-        profile_name: str,
-        matching_id: str = "",
-        *,
-        debug: bool = False,
-    ) -> None:
-        effective_debug = bool(debug or self._global_debug)
-        try:
-            from SCP11.eim_local.ipad_standalone import LocalizedIPAdRunner
-        except ImportError:
-            from .ipad_standalone import LocalizedIPAdRunner
-
-        runner = LocalizedIPAdRunner(
-            session=self.session,
-            bridge_factory=lambda _session: self._ensure_poll_bridge(reset_runtime=False),
-            orchestrator_loader=lambda normalized_profile, _bridge, _session, _cfg: self._load_network_orchestrator(normalized_profile),
-            close_runtime=self._close_network_runtime,
-            emit=print,
-        )
-        runner.run(
-            profile_name=profile_name,
-            matching_id=matching_id,
-            debug=effective_debug,
-        )
+    # IPAD-LIVE / IPAD-TEST are installed by the polling plugin. When
+    # the plugin is absent the command table still has neutral fallback
+    # stubs that surface a clear error, keeping the shell runnable
+    # without exposing bridge internals.
 
     def _cmd_ipad_live(self, argument: str = "") -> None:
-        matching_id, debug = self._parse_localized_ipad_args(argument)
-        self._run_localized_ipad("live", matching_id=matching_id, debug=debug)
+        raise RuntimeError(
+            "IPAD-LIVE requires the polling plugin (plugins/polling/). "
+            "Install it or use IPAE-AUTHENTICATE + IPAE-DOWNLOAD instead."
+        )
 
     def _cmd_ipad_test(self, argument: str = "") -> None:
-        matching_id, debug = self._parse_localized_ipad_args(argument)
-        self._run_localized_ipad("test", matching_id=matching_id, debug=debug)
+        raise RuntimeError(
+            "IPAD-TEST requires the polling plugin (plugins/polling/). "
+            "Install it or use IPAE-AUTHENTICATE + IPAE-DOWNLOAD instead."
+        )
 
     @staticmethod
     def _parse_localized_ipae_args(argument: str = "") -> tuple[int, int, bool]:
@@ -1439,21 +1381,75 @@ class EimLocalShell:
             f"errors={summary.get('error_cycles', 0)} "
             f"stop={summary.get('stop_reason', '-')}"
         )
+        self._print_poll_campaign_rows(rows)
+
+    # Short codes for well-known SGP.32 eIM package types. Anything not
+    # in this map falls through verbatim so we never silently alias an
+    # unexpected category.
+    _POLL_CAMPAIGN_TYPE_CODES = {
+        "profile_download_trigger_request": "trigger_req",
+        "provide_eim_package_result": "eim_result",
+        "eim_acknowledgements": "ack",
+        "eim_configuration_data": "eim_cfg",
+        "remove_eim_configuration_data": "eim_cfg_rm",
+        "rollback_profile": "rollback",
+        "enable_profile": "enable",
+        "disable_profile": "disable",
+        "delete_profile": "delete",
+        "list_profile_info": "list_info",
+        "set_nickname": "nickname",
+    }
+
+    def _compact_poll_campaign_type(self, kind: str) -> str:
+        normalized = str(kind or "").strip()
+        if len(normalized) == 0:
+            return "-"
+        return self._POLL_CAMPAIGN_TYPE_CODES.get(normalized, normalized)
+
+    def _poll_campaign_common_base(self, rows: list[dict[str, Any]]) -> str:
+        paths: list[str] = []
+        for row in rows:
+            if isinstance(row, dict) is False:
+                continue
+            candidate = str(row.get("issued_file", "") or "").strip()
+            if len(candidate) == 0:
+                continue
+            paths.append(candidate)
+        if len(paths) == 0:
+            return ""
+        if len(paths) == 1:
+            return os.path.dirname(paths[0])
+        try:
+            return os.path.commonpath(paths)
+        except ValueError:
+            return ""
+
+    def _print_poll_campaign_rows(self, rows: list[dict[str, Any]]) -> None:
+        if len(rows) == 0:
+            return
+        base_path = self._poll_campaign_common_base(rows)
+        if len(base_path) > 0:
+            print(f"[*] Base: {base_path}")
+        cycle_width = max(2, len(str(len(rows))))
         for row in rows:
             cycle = int(row.get("cycle", 0))
+            cycle_cell = f"{cycle:>{cycle_width}}"
             issued = bool(row.get("issued", False))
+            error_text = str(row.get("error", "")).strip()
             if issued:
-                print(
-                    f"    - cycle={cycle:<3} issued={row.get('issued_type', '-'):<28} "
-                    f"len={int(row.get('issued_result_len', 0)):<5} file={row.get('issued_file', '-')}"
-                )
+                kind_code = self._compact_poll_campaign_type(str(row.get("issued_type", "")))
+                length = int(row.get("issued_result_len", 0))
+                file_path = str(row.get("issued_file", "") or "-")
+                if len(base_path) > 0 and file_path.startswith(base_path + os.sep):
+                    file_path = file_path[len(base_path) + 1:]
+                print(f"    {cycle_cell}  {kind_code:<11}  {length:>4}B  {file_path}")
             else:
                 code = row.get("eim_result_code")
                 name = str(row.get("eim_result_name", "")).strip() or "-"
-                print(f"    - cycle={cycle:<3} no-package result={code} ({name})")
-            error_text = str(row.get("error", "")).strip()
+                code_text = "-" if code is None else str(code)
+                print(f"    {cycle_cell}  {'no-package':<11}  {'':>4}   result={code_text} ({name})")
             if len(error_text) > 0:
-                print(f"      [error] {error_text}")
+                print(f"    {' ' * cycle_width}  [error] {error_text}")
 
     def _cmd_poll_export(self, argument: str = "") -> None:
         parts = argument.split()
@@ -1899,6 +1895,7 @@ class EimLocalShell:
             transport="isdr_store_data",
         )
         print(f"    package   : {package_path}")
+        self._queue_modem_refresh("eUICCMemoryReset")
         self._invalidate_poll_target_cache()
         self._print_post_eim_configuration_snapshot(
             title="ISDR post-reset GetEimConfigurationData",

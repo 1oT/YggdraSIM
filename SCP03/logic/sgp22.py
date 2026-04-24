@@ -12,7 +12,7 @@
 # You should have received a copy of the GNU General Public License
 # along with this program. If not, see <https://www.gnu.org/licenses/>.
 #
-# Copyright (c) 2026 Hampus Hellsberg and contributors
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 # -----------------------------------------------------------------------------
 
 import json 
@@ -28,7 +28,6 @@ from SCP03 .logic .euicc_info2 import build_euicc_info2_detail_lines
 from SCP03 .logic .euicc_info2 import decode_euicc_info2_value 
 from SCP03 .logic .euicc_info2 import resolve_euicc_info2_tag_name 
 from SCP03 .logic .sgp32_decode import decode_eim_configuration_entries 
-from SCP03 .logic .sgp32_decode import decode_euicc_info1_summary 
 from SCP03 .logic .sgp32_decode import decode_get_certs_response 
 from SCP03 .logic .sgp32_decode import decode_notifications_response 
 from SCP03 .logic .sgp32_decode import decode_rat_rules 
@@ -933,7 +932,7 @@ class Sgp22Manager :
 
                         parsed =TlvParser .parse (resp )
                         self ._print_tlv_tree (parsed ,indent =1 ,parent_tag =root_tag )
-                    except :
+                    except Exception :
                          print (f"    | {resp.hex().upper()}")
                 else :
                     print ("    | (Empty)")
@@ -1392,7 +1391,7 @@ class Sgp22Manager :
                         if _should_print_object_separator ():
                             print ("")
                         continue 
-                except :pass 
+                except Exception :pass 
 
 
             if isinstance (val ,dict ):

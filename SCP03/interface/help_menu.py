@@ -12,7 +12,7 @@
 # You should have received a copy of the GNU General Public License
 # along with this program. If not, see <https://www.gnu.org/licenses/>.
 #
-# Copyright (c) 2026 Hampus Hellsberg and contributors
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 # -----------------------------------------------------------------------------
 
 from SCP03 .config import Config 
@@ -54,7 +54,7 @@ class HelpMenu :
         print ("  MANAGE-PROFILE : Spec-aware wizard with separate SGP.22, SGP.32, and SGP.02 command sets.")
         print ("                   Local STORE DATA reads retry via base channel, then logical channel 1, then STK mode.")
         print ("  RUN-AUTH       : Execute GSM, USIM, or ISIM authentication algorithms.")
-        print ("  RUN-AUTH-TEST  : Run 3GPP TS 35.207 test vector (OPc derivation + card auth).")
+        print ("  RUN-AUTH-TEST  : Run offline 3GPP TS 35.207 Milenage vector validation.")
         print ("  DERIVE-OPC     : <Ki_hex> <OP_hex> - Derive OPc per 3GPP TS 35.206.")
 
         print (f"\n{Config.Colors.CYAN}[ SCP11 module map ]{Config.Colors.ENDC}")
@@ -91,6 +91,7 @@ class HelpMenu :
         print ("  GUIDE [Topic]  : Show documentation (Topics: GP, ETSI, GSMA, INSTALL, SECURITY, OTA, CONFIG, SAIP, SUCI, CLI).")
         print ("  DECODE         : <Hex> - Parse and decode a raw BER-TLV string.")
         print ("  RUN / SCRIPT   : <File> [Out.yaml] - Execute a batch script of APDU commands.")
+        print ("  EXPORT-KEYBAG  : [Path.keys.json] [Label] - Dump active SCP03 session keys for HIL offline replay.")
         print ("  DEBUG/VERBOSE  : Toggle raw APDU hex transmission logging.")
         print ("  HELP           : Display this menu.")
         print ("  EXIT / Q       : Disconnect reader and leave SCP03 shell.")

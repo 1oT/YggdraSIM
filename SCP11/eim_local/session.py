@@ -6,6 +6,8 @@ from typing import Any, Optional
 
 from cryptography import x509 as crypto_x509
 from cryptography.hazmat.primitives import serialization
+from yggdrasim_common.inventory_crypto import read_secret_file_bytes
+from yggdrasim_common.progress import progress_session
 from yggdrasim_common.runtime_paths import ensure_seeded_workspace_file, runtime_root
 
 try:
@@ -14,9 +16,9 @@ except ImportError:
     from ..local_access.session import LocalIsdrSession
 
 try:
-    from SCP11.eim_packages import TYPE_BOUND_PROFILE_PACKAGE, TYPE_PROFILE_DOWNLOAD_TRIGGER, parse_eim_package
+    from SCP11.eim_packages import parse_eim_package
 except ImportError:
-    from ..eim_packages import TYPE_BOUND_PROFILE_PACKAGE, TYPE_PROFILE_DOWNLOAD_TRIGGER, parse_eim_package
+    from ..eim_packages import parse_eim_package
 
 from .config import EimLocalConfig
 from .eim_cert_store import EimCertificateRecord, EimCertificateStore
@@ -591,25 +593,38 @@ class EimLocalSession(LocalIsdrSession):
         bpp_bytes = b""
         response = b""
         self.reset_state()
-        try:
-            self.select_isdr()
-            self.open_session(transaction_id_override=bytes(transaction_id))
-            self.prepare_download()
-            if source_bytes.startswith(bytes.fromhex("BF36")):
-                bpp_bytes = bytes(source_bytes)
-            else:
-                bpp_bytes = self._build_session_bound_profile_package(source_bytes)
-            response = self._load_profile_from_bytes(bpp_bytes)
-        finally:
+        # Four-phase pre-install pipeline (select → open → prepare →
+        # build) plus an install phase whose step count is discovered
+        # from the BPP. ``_load_profile_from_bytes`` expands the total
+        # to cover every per-segment store-data round plus one final
+        # "sync notifications" step so the sticky footer keeps moving
+        # through the whole chain rather than sitting at 100 % for the
+        # duration of LoadBoundProfilePackage and the trailing notify
+        # sync.
+        with progress_session("eIM handover load", total=4) as bar:
             try:
-                if self.state.session_open:
-                    self.close_session()
-            except Exception:
-                pass
-        if len(response) > 0:
-            self.state.load_notifications_synced = False
-            self._sync_pending_notifications(response)
-            self.state.load_notifications_synced = True
+                bar.advance("select ISD-R")
+                self.select_isdr()
+                bar.advance("open session")
+                self.open_session(transaction_id_override=bytes(transaction_id))
+                bar.advance("prepare download")
+                self.prepare_download()
+                bar.advance("build bpp")
+                if source_bytes.startswith(bytes.fromhex("BF36")):
+                    bpp_bytes = bytes(source_bytes)
+                else:
+                    bpp_bytes = self._build_session_bound_profile_package(source_bytes)
+                response = self._load_profile_from_bytes(bpp_bytes, progress_bar=bar)
+            finally:
+                try:
+                    if self.state.session_open:
+                        self.close_session()
+                except Exception:
+                    pass
+            if len(response) > 0:
+                self.state.load_notifications_synced = False
+                self._sync_pending_notifications(response)
+                self.state.load_notifications_synced = True
         return response
 
     def _resolve_runtime_transaction_id(self, runtime_hints: dict[str, Any]) -> bytes:
@@ -1502,8 +1517,10 @@ class EimLocalSession(LocalIsdrSession):
 
     def _load_certificate_bytes(self, path_text: str) -> tuple[bytes, str]:
         resolved_path = self._normalize_user_path(path_text, base_dir=self.cfg.EIM_CERTS_DIR)
-        with open(resolved_path, "rb") as handle:
-            raw_bytes = handle.read()
+        raw_bytes = read_secret_file_bytes(
+            resolved_path,
+            protect_plaintext_on_read=True,
+        )
         if len(raw_bytes) == 0:
             raise RuntimeError(f"Certificate file is empty: {resolved_path}")
         stripped = raw_bytes.lstrip()
@@ -3246,51 +3263,61 @@ class EimLocalSession(LocalIsdrSession):
         rows: list[dict[str, Any]] = []
         resolved_dir = self.reset_hotfolder_poll_session(hotfolder_dir=hotfolder_dir)
         stop_reason = "cycles_completed"
-        for index in range(run_cycles):
-            cycle_no = index + 1
-            meta = self.hotfolder_poll_metadata(hotfolder_dir=resolved_dir)
-            package_count = int(meta.get("package_count", 0))
-            row: dict[str, Any] = {
-                "cycle": cycle_no,
-                "package_count": package_count,
-                "polling_complete": bool(meta.get("polling_complete", True)),
-                "eim_result_code": meta.get("eim_result_code"),
-                "eim_result_name": str(meta.get("eim_result_name", "")).strip(),
-                "issued": False,
-                "issued_file": "",
-                "issued_type": "",
-                "issued_result_len": 0,
-                "error": "",
-            }
-            if package_count > 0:
-                try:
-                    issued = self.issue_next_hotfolder_package(hotfolder_dir=resolved_dir)
-                    if issued is not None:
-                        row["issued"] = True
-                        row["issued_file"] = issued[0]
-                        row["issued_type"] = issued[1]
-                        row["issued_result_len"] = issued[2]
-                    else:
-                        raise ValueError("Campaign queue reported pending packages but did not expose next_file.")
-                except Exception as error:
-                    row["error"] = f"{type(error).__name__}: {error}"
-            rows.append(row)
-            self._append_response_log_event(
-                action="poll_cycle",
-                package_path=str(row.get("issued_file", "")),
-                package_type=str(row.get("issued_type", "")),
-                transaction_id_hex="",
-                matching_id="",
-                success=len(str(row.get("error", "")).strip()) == 0,
-                result_len=int(row.get("issued_result_len", 0)),
-                response_preview_hex="",
-                details=dict(row),
-            )
-            if until_empty and package_count <= 0:
-                stop_reason = "queue_empty"
-                break
-            if sleep_ms > 0 and cycle_no < run_cycles:
-                time.sleep(float(sleep_ms) / 1000.0)
+        # Determinate bar — we know the cycle budget up front. When
+        # ``until_empty`` is set the bar may finish early (early break
+        # below); the sticky footer just shows the real completion
+        # state whenever the caller exits the ``with`` block.
+        with progress_session(
+            "eIM hotfolder poll", total=run_cycles
+        ) as bar:
+            for index in range(run_cycles):
+                cycle_no = index + 1
+                meta = self.hotfolder_poll_metadata(hotfolder_dir=resolved_dir)
+                package_count = int(meta.get("package_count", 0))
+                bar.advance(
+                    f"cycle {cycle_no}/{run_cycles} · {package_count} pending"
+                )
+                row: dict[str, Any] = {
+                    "cycle": cycle_no,
+                    "package_count": package_count,
+                    "polling_complete": bool(meta.get("polling_complete", True)),
+                    "eim_result_code": meta.get("eim_result_code"),
+                    "eim_result_name": str(meta.get("eim_result_name", "")).strip(),
+                    "issued": False,
+                    "issued_file": "",
+                    "issued_type": "",
+                    "issued_result_len": 0,
+                    "error": "",
+                }
+                if package_count > 0:
+                    try:
+                        issued = self.issue_next_hotfolder_package(hotfolder_dir=resolved_dir)
+                        if issued is not None:
+                            row["issued"] = True
+                            row["issued_file"] = issued[0]
+                            row["issued_type"] = issued[1]
+                            row["issued_result_len"] = issued[2]
+                        else:
+                            raise ValueError("Campaign queue reported pending packages but did not expose next_file.")
+                    except Exception as error:
+                        row["error"] = f"{type(error).__name__}: {error}"
+                rows.append(row)
+                self._append_response_log_event(
+                    action="poll_cycle",
+                    package_path=str(row.get("issued_file", "")),
+                    package_type=str(row.get("issued_type", "")),
+                    transaction_id_hex="",
+                    matching_id="",
+                    success=len(str(row.get("error", "")).strip()) == 0,
+                    result_len=int(row.get("issued_result_len", 0)),
+                    response_preview_hex="",
+                    details=dict(row),
+                )
+                if until_empty and package_count <= 0:
+                    stop_reason = "queue_empty"
+                    break
+                if sleep_ms > 0 and cycle_no < run_cycles:
+                    time.sleep(float(sleep_ms) / 1000.0)
         summary = {
             "total_cycles": len(rows),
             "issued_cycles": len([row for row in rows if bool(row.get("issued", False))]),

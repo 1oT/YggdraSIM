@@ -21,7 +21,9 @@ from .saip_json_codec import (
 _ASSIGNMENT_RE = re.compile(
     r"^(?P<name>\{[A-Za-z][A-Za-z0-9_]*\}|\[[A-Za-z][A-Za-z0-9_]*\]|[A-Za-z][A-Za-z0-9_]*)=(?P<value>.+)$"
 )
-_PLACEHOLDER_ANY_RE = re.compile(r"\{([A-Za-z][A-Za-z0-9_]*)\}|\[([A-Za-z][A-Za-z0-9_]*)\]")
+_PLACEHOLDER_ANY_RE = re.compile(
+    r"\{#?([A-Za-z][A-Za-z0-9_]*)\}|\[#?([A-Za-z][A-Za-z0-9_]*)\]"
+)
 
 
 @dataclass(frozen=True)

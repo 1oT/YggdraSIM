@@ -12,10 +12,9 @@
 # You should have received a copy of the GNU General Public License
 # along with this program. If not, see <https://www.gnu.org/licenses/>.
 #
-# Copyright (c) 2026 Hampus Hellsberg and contributors
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 # -----------------------------------------------------------------------------
 
-import traceback 
 from typing import Tuple ,List ,Optional ,Any 
 
 
@@ -54,7 +53,8 @@ class CardTransporter :
         self .session =Scp03Session ({'kenc':b'','kmac':b'','dek':b''})
         self .verbose =False 
         self .debug =False 
-        if not self .connect ():raise Exception ("Could not connect to a smart card reader.")
+        if not self .connect ():
+            raise RuntimeError ("Could not connect to a smart card reader.")
 
     def connect (self )->bool :
         try :

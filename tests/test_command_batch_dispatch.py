@@ -35,6 +35,12 @@ def _dummy_client() -> SimpleNamespace:
 
 
 class CommandBatchDispatchTests(unittest.TestCase):
+    @staticmethod
+    def _build_eim_shell() -> EimLocalShell:
+        fake_session = SimpleNamespace(apdu_channel=None)
+        with mock.patch("SCP11.eim_local.main.EimLocalSession", return_value=fake_session):
+            return EimLocalShell()
+
     def _exercise_scp11_console(self, console_cls) -> None:
         console = console_cls(_dummy_client())
         console._initialize_session = lambda: None
@@ -68,10 +74,12 @@ class CommandBatchDispatchTests(unittest.TestCase):
         command_map = {
             "CERTS": "_cmd_certs",
             "DISCOVER": "_cmd_discover",
+            "EXPLAIN-LAST": "_cmd_explain_last",
             "LOAD-PROFILE": "_cmd_load_profile",
             "ENABLE-PROFILE": "_cmd_enable_profile",
             "DISABLE-PROFILE": "_cmd_disable_profile",
             "DELETE-PROFILE": "_cmd_delete_profile",
+            "REFRESH-MODEM": "_cmd_refresh_modem",
             "STORE-METADATA": "_cmd_store_metadata",
             "UPDATE-METADATA": "_cmd_update_metadata",
             "STORE-METADATA-CUSTOM": "_cmd_store_metadata_custom",
@@ -81,6 +89,7 @@ class CommandBatchDispatchTests(unittest.TestCase):
             "METADATA": "_cmd_metadata",
             "METADATA-LINT": "_cmd_metadata_lint",
             "METADATA-CLEAR": "_cmd_metadata_clear",
+            "RECORD": "_cmd_record",
             "STATUS": "_print_status",
             "HELP": "_cmd_help",
         }
@@ -93,7 +102,7 @@ class CommandBatchDispatchTests(unittest.TestCase):
         self.assertEqual(recorded, list(command_map.keys()))
 
     def test_local_eim_run_commands_dispatches_all_registered_commands(self) -> None:
-        shell = EimLocalShell()
+        shell = self._build_eim_shell()
         recorded: list[str] = []
         expected = list(shell._commands.keys())
         for command_name in expected:

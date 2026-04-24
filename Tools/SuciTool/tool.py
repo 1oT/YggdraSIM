@@ -74,7 +74,7 @@ class SuciKeyToolBridge:
     def describe_tool_command(self) -> str:
         try:
             return " ".join(self.get_tool_command())
-        except Exception as error:
+        except (RuntimeError, ValueError) as error:
             return f"unavailable ({error})"
 
     def _display_path(self, path_value: Path) -> str:
@@ -125,11 +125,21 @@ class SuciKeyToolBridge:
 
     @staticmethod
     def _run_subprocess(command: Sequence[str]) -> subprocess.CompletedProcess[str]:
+        raw_timeout = os.environ.get("YGGDRASIM_SUCI_TIMEOUT", "").strip()
+        effective_timeout = 120
+        if len(raw_timeout) > 0:
+            try:
+                parsed = int(raw_timeout)
+                if parsed > 0:
+                    effective_timeout = parsed
+            except (TypeError, ValueError):
+                effective_timeout = 120
         return subprocess.run(
             list(command),
             check=False,
             capture_output=True,
             text=True,
+            timeout=effective_timeout,
         )
 
     def _is_within_workspace(self, resolved_path: Path) -> bool:

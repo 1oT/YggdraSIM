@@ -1,0 +1,21 @@
+# Issue template configuration for YggdraSIM.
+#
+# Blank issues are disabled so every new issue runs through a structured
+# form. That form is what the issue-approval workflow inspects when it
+# decides whether an issue can accept a linked pull request.
+
+blank_issues_enabled: false
+
+contact_links:
+  - name: Security vulnerability (private disclosure)
+    url: https://github.com/hampus/YggdraSIM/security/advisories/new
+    about: >-
+      Report cryptographic, APDU, SCP03/11, eUICC or supply-chain
+      vulnerabilities privately via GitHub Security Advisories. Do NOT
+      open a public issue for exploitable security bugs.
+  - name: Offline specification archive
+    url: https://github.com/hampus/YggdraSIM/tree/main/docs
+    about: >-
+      Before filing an issue, check the offline-mirrored docs under
+      docs/ for the relevant GSMA SGP.02 / SGP.22 / SGP.32, GlobalPlatform
+      and ETSI TS 102 221 behaviour.

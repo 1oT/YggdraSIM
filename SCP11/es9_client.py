@@ -12,10 +12,11 @@
 # You should have received a copy of the GNU General Public License
 # along with this program. If not, see <https://www.gnu.org/licenses/>.
 #
-# Copyright (c) 2026 Hampus Hellsberg and contributors
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 # -----------------------------------------------------------------------------
 
 import base64
+import hmac
 import io
 import http.client
 import json
@@ -31,6 +32,11 @@ from cryptography import x509 as crypto_x509
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.x509.oid import NameOID
 from SCP11.shared.gsma_error_codes import describe_sgp32_eim_package_error
+from SCP11.shared.tls_helpers import create_insecure_context, create_introspection_context
+from yggdrasim_common.process_debug import (
+    debug_print,
+    suppress_noisy_crypto_warnings,
+)
 from yggdrasim_common.runtime_paths import ensure_runtime_dir, ensure_seeded_runtime_file, runtime_path
 
 try:
@@ -406,9 +412,9 @@ class Es9LikeClient:
         endpoint = base_url.rstrip("/") + path
         body_hex = body.hex().upper()
         if len(body) <= 64:
-            print(f"[*] eIM request: POST {endpoint} body_len={len(body)} hex={body_hex}")
+            debug_print(f"[*] eIM request: POST {endpoint} body_len={len(body)} hex={body_hex}")
         else:
-            print(f"[*] eIM request: POST {endpoint} body_len={len(body)} first={body[:min(32, len(body))].hex().upper()}")
+            debug_print(f"[*] eIM request: POST {endpoint} body_len={len(body)} first={body[:min(32, len(body))].hex().upper()}")
         headers = {
             "Content-Type": "application/x-gsma-rsp-asn1",
             "Accept": "application/json, application/x-gsma-rsp-asn1",
@@ -421,7 +427,7 @@ class Es9LikeClient:
             and len(pinned_tls_public_key_data) > 0
         )
         if use_pinned_first:
-            print(
+            debug_print(
                 "[*] eIM transport: pinned TLS public key available from BF55 "
                 "metadata; using direct pinned path."
             )
@@ -443,10 +449,11 @@ class Es9LikeClient:
                         endpoint,
                         label="eIM",
                     )
-            except Exception as pinned_error:
-                raise IOError(
-                    f"Provider getEimPackage failed: {pinned_error}"
-                ) from pinned_error
+            except Exception:
+                # Let the orchestrator's outer wrap supply the canonical
+                # ``Provider getEimPackage failed: ...`` prefix so it is
+                # not repeated twice in the surfaced error message.
+                raise
         else:
             ssl_context = self._build_ssl_context_for_endpoint(
                 endpoint,
@@ -454,7 +461,7 @@ class Es9LikeClient:
                 log_label="eIM",
             )
             if len(pinned_tls_public_key_data) == 0:
-                print(
+                debug_print(
                     "[*] eIM transport: no pinned TLS public key available "
                     "from BF55 metadata."
                 )
@@ -502,19 +509,19 @@ class Es9LikeClient:
         if len(raw) == 0:
             return {}
         is_json = raw.lstrip().startswith(b"{")
-        print(f"[*] eIM response: len={len(raw)} format={'JSON' if is_json else 'binary'} "
+        debug_print(f"[*] eIM response: len={len(raw)} format={'JSON' if is_json else 'binary'} "
               f"first={raw[:min(64, len(raw))].hex().upper()}")
         if is_json:
             decoded = json.loads(raw.decode("utf-8"))
             pkg_key = "euiccPackageList" if "euiccPackageList" in decoded else "packages" if "packages" in decoded else None
             pkg_count = len(decoded.get(pkg_key or "", [])) if pkg_key else 0
-            print(f"[*] eIM JSON keys={list(decoded.keys())} package_key={pkg_key} package_count={pkg_count}")
+            debug_print(f"[*] eIM JSON keys={list(decoded.keys())} package_key={pkg_key} package_count={pkg_count}")
             if pkg_count == 0:
                 self._dump_eim_response_for_debug(raw)
         else:
             try:
                 decoded = json.loads(raw.decode("utf-8"))
-                print(f"[*] eIM parsed as JSON (fallback) keys={list(decoded.keys())}")
+                debug_print(f"[*] eIM parsed as JSON (fallback) keys={list(decoded.keys())}")
             except (ValueError, UnicodeDecodeError):
                 decoded = self._parse_eim_binary_response(raw)
                 pkg_count = len(decoded.get("euiccPackageList", []))
@@ -523,7 +530,7 @@ class Es9LikeClient:
                 if rc is not None:
                     rc_name = self._eim_package_error_name(rc)
                     rc_str = f" eimPackageError={rc_name}"
-                print(f"[*] eIM binary parsed: packages={pkg_count} "
+                debug_print(f"[*] eIM binary parsed: packages={pkg_count} "
                       f"pollingComplete={decoded.get('pollingComplete')}{rc_str}")
                 if pkg_count == 0:
                     self._dump_eim_response_for_debug(raw)
@@ -540,14 +547,14 @@ class Es9LikeClient:
                 debug_dir = ensure_runtime_dir("SCP11", "eim_local")
             hex_path = os.path.join(debug_dir, "eim_last_response_hex.txt")
             bin_path = os.path.join(debug_dir, "eim_last_response.bin")
-            with open(hex_path, "w") as f:
+            with open(hex_path, "w", encoding="utf-8") as f:
                 f.write(f"len={len(raw)}\n")
                 f.write(raw.hex().upper())
             with open(bin_path, "wb") as f:
                 f.write(raw)
-            print(f"[*] eIM response dumped (packages=0): {hex_path} {bin_path}")
+            debug_print(f"[*] eIM response dumped (packages=0): {hex_path} {bin_path}")
         except Exception as err:
-            print(f"[*] eIM debug dump failed: {err}")
+            debug_print(f"[*] eIM debug dump failed: {err}")
 
     def _read_tlv_at(self, data: bytes, offset: int):
         if offset >= len(data) or offset + 2 > len(data):
@@ -754,7 +761,7 @@ class Es9LikeClient:
     ) -> dict:
         endpoint = base_url.rstrip("/") + path
         payload = json.dumps(body).encode("utf-8")
-        print(
+        debug_print(
             f"[*] ES9 request: POST {endpoint} json_len={len(payload)} "
             f"keys={list(body.keys())}"
         )
@@ -871,7 +878,7 @@ class Es9LikeClient:
                 close_connection()
             raise
         connect_elapsed_ms = int((time.monotonic() - connect_started_at) * 1000)
-        print(f"[*] {label} transport: connect/TLS completed in {connect_elapsed_ms} ms.")
+        debug_print(f"[*] {label} transport: connect/TLS completed in {connect_elapsed_ms} ms.")
 
         if pinned_tls_spki is not None and len(pinned_tls_spki) > 0:
             tls_sock = getattr(connection, "sock", None)
@@ -890,14 +897,14 @@ class Es9LikeClient:
                     encoding=serialization.Encoding.DER,
                     format=serialization.PublicFormat.SubjectPublicKeyInfo,
                 )
-                if presented_spki != pinned_tls_spki:
+                if hmac.compare_digest(presented_spki, pinned_tls_spki) is False:
                     close_fn = getattr(connection, "close", None)
                     if callable(close_fn):
                         close_fn()
                     raise IOError(
                         "Pinned TLS public key mismatch on live eIM connection."
                     )
-                print(
+                debug_print(
                     f"[*] {label} transport: pinned TLS SPKI verified "
                     f"on live connection."
                 )
@@ -929,7 +936,7 @@ class Es9LikeClient:
                 close_connection()
             raise
         send_elapsed_ms = int((time.monotonic() - send_started_at) * 1000)
-        print(
+        debug_print(
             f"[*] {label} transport: request sent in {send_elapsed_ms} ms "
             f"(bytes={len(request_body)})."
         )
@@ -952,9 +959,9 @@ class Es9LikeClient:
         header_elapsed_ms = int((time.monotonic() - header_started_at) * 1000)
         status = getattr(response, "status", None)
         if status is None:
-            print(f"[*] {label} transport: response headers received in {header_elapsed_ms} ms.")
+            debug_print(f"[*] {label} transport: response headers received in {header_elapsed_ms} ms.")
         else:
-            print(f"[*] {label} transport: response headers received in {header_elapsed_ms} ms (status={status}).")
+            debug_print(f"[*] {label} transport: response headers received in {header_elapsed_ms} ms (status={status}).")
         if isinstance(status, int) and status >= 400:
             error_body_started_at = time.monotonic()
             try:
@@ -1050,7 +1057,7 @@ class Es9LikeClient:
             )
             raise
         elapsed_ms = int((time.monotonic() - started_at) * 1000)
-        print(f"[*] {label} transport: response body read in {elapsed_ms} ms (bytes={len(raw)}).")
+        debug_print(f"[*] {label} transport: response body read in {elapsed_ms} ms (bytes={len(raw)}).")
         return raw
 
     def _log_http_stage_failure(
@@ -1063,7 +1070,9 @@ class Es9LikeClient:
     ) -> None:
         elapsed_ms = int((time.monotonic() - started_at) * 1000)
         detail = self._describe_http_failure_stage(stage, error)
-        print(f"[!] {label} transport: failure during {detail} after {elapsed_ms} ms for {endpoint}: {error}")
+        debug_print(
+            f"[!] {label} transport: failure during {detail} after {elapsed_ms} ms for {endpoint}: {error}"
+        )
 
     def _describe_http_failure_stage(self, stage: str, error: Exception) -> str:
         reason = getattr(error, "reason", error)
@@ -1288,14 +1297,14 @@ class Es9LikeClient:
         if endpoint.lower().startswith("https://") is False:
             return None
         if self._verify_tls is False:
-            return ssl._create_unverified_context()
+            return create_insecure_context(caller=f"SCP11.es9_client/{log_label}")
         preferred_bundle = self._preferred_ca_bundle_for_endpoint(
             endpoint,
             trust_hint_ci_pkid,
             use_configured_ca_bundle=use_configured_ca_bundle,
         )
         if len(preferred_bundle) > 0:
-            print(f"[*] {log_label} TLS trust bundle selected: {preferred_bundle}")
+            debug_print(f"[*] {log_label} TLS trust bundle selected: {preferred_bundle}")
             return self._create_default_context_with_bundle(preferred_bundle)
         return ssl.create_default_context()
 
@@ -1578,7 +1587,8 @@ class Es9LikeClient:
         try:
             with open(path, "rb") as pem_file:
                 pem_data = pem_file.read()
-            certificate = crypto_x509.load_pem_x509_certificate(pem_data)
+            with suppress_noisy_crypto_warnings():
+                certificate = crypto_x509.load_pem_x509_certificate(pem_data)
         except Exception:
             return None
 
@@ -1798,7 +1808,7 @@ class Es9LikeClient:
         return chain_der[0]
 
     def _fetch_server_certificate_chain_der(self, hostname: str, port: int) -> list[bytes]:
-        context = ssl._create_unverified_context()
+        context = create_introspection_context(caller="SCP11.es9_client/fetch_server_chain")
         with socket.create_connection((hostname, port), timeout=self._timeout_seconds) as connection:
             with context.wrap_socket(connection, server_hostname=hostname) as tls_socket:
                 get_chain = getattr(tls_socket, "get_unverified_chain", None)

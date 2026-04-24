@@ -1,4 +1,3 @@
-import json
 import os
 from dataclasses import dataclass
 from pathlib import Path
@@ -7,6 +6,7 @@ from typing import Any, Optional
 from cryptography import x509 as crypto_x509
 from cryptography.hazmat.primitives import serialization
 from cryptography.x509.oid import ExtensionOID, NameOID
+from yggdrasim_common.inventory_crypto import read_secret_file_bytes, read_secret_json_file
 
 
 @dataclass(frozen=True)
@@ -322,18 +322,21 @@ class EimCertificateStore:
             if os.path.isfile(candidate) is False:
                 continue
             try:
-                with open(candidate, "r", encoding="utf-8") as handle:
-                    payload = json.load(handle)
+                payload = read_secret_json_file(
+                    candidate,
+                    protect_plaintext_on_read=self._path_is_under_root(candidate, self.local_cert_root),
+                )
             except Exception:
                 continue
             if isinstance(payload, dict):
                 return payload
         return {}
 
-    @staticmethod
-    def _load_certificate_bytes(path: str) -> bytes:
-        with open(path, "rb") as cert_file:
-            return cert_file.read()
+    def _load_certificate_bytes(self, path: str) -> bytes:
+        return read_secret_file_bytes(
+            path,
+            protect_plaintext_on_read=self._path_is_under_root(path, self.local_cert_root),
+        )
 
     @staticmethod
     def _load_certificate(cert_bytes: bytes) -> crypto_x509.Certificate:
@@ -348,6 +351,17 @@ class EimCertificateStore:
         if len(value) == 0:
             return ""
         return os.path.abspath(os.path.expanduser(os.path.expandvars(value)))
+
+    @staticmethod
+    def _path_is_under_root(path_text: str, root_text: str) -> bool:
+        normalized_path = os.path.abspath(str(path_text or "").strip())
+        normalized_root = os.path.abspath(str(root_text or "").strip())
+        if len(normalized_path) == 0 or len(normalized_root) == 0:
+            return False
+        try:
+            return os.path.commonpath([normalized_path, normalized_root]) == normalized_root
+        except ValueError:
+            return False
 
     @staticmethod
     def _normalize_ci_pkid(value: Any) -> str:

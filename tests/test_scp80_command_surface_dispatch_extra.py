@@ -16,16 +16,33 @@ def _install_smartcard_stubs() -> None:
     smartcard_module = types.ModuleType("smartcard")
     system_module = types.ModuleType("smartcard.System")
     card_connection_module = types.ModuleType("smartcard.CardConnection")
+    atr_module = types.ModuleType("smartcard.ATR")
+
+    class _CardConnection:
+        T0_protocol = 0
+        T1_protocol = 1
+        RAW_protocol = 2
+
+    class _Atr:
+        def __init__(self, _raw):
+            pass
+
+        @staticmethod
+        def getSupportedProtocols():
+            return {"T=1": True}
 
     system_module.readers = lambda: []
-    card_connection_module.CardConnection = type("CardConnection", (), {})
+    card_connection_module.CardConnection = _CardConnection
+    atr_module.ATR = _Atr
 
     smartcard_module.System = system_module
     smartcard_module.CardConnection = card_connection_module
+    smartcard_module.ATR = atr_module
 
     sys.modules["smartcard"] = smartcard_module
     sys.modules["smartcard.System"] = system_module
     sys.modules["smartcard.CardConnection"] = card_connection_module
+    sys.modules["smartcard.ATR"] = atr_module
 
 
 _install_smartcard_stubs()

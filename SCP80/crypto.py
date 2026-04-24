@@ -12,7 +12,7 @@
 # You should have received a copy of the GNU General Public License
 # along with this program. If not, see <https://www.gnu.org/licenses/>.
 #
-# Copyright (c) 2026 Hampus Hellsberg and contributors
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 # -----------------------------------------------------------------------------
 
 from Crypto .Cipher import AES ,DES3 
@@ -31,7 +31,7 @@ class CryptoEngine :
             if val ==0x05 :return "3DES2"
             if val ==0x09 :return "3DES3"
             return "3DES2"
-        except :return "3DES2"
+        except Exception :return "3DES2"
 
     @staticmethod 
     def describe_keyset (byte_hex :str )->str :
@@ -48,7 +48,7 @@ class CryptoEngine :
             elif algo ==0x09 :algo_name ="3DES (3-key)"
 
             return f"{byte_hex} ({algo_name}, Keyset {keyset})"
-        except :
+        except Exception :
             return byte_hex 
 
     @staticmethod 

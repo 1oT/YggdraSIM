@@ -1,0 +1,1 @@
+--8<-- "guides/SIMTRACE2_CARDEM_GUIDE.md"

@@ -324,6 +324,19 @@ class FakeProvider:
 
 
 class OrchestratorFlowTests(unittest.TestCase):
+    @staticmethod
+    def _tag_of_segment(segment: bytes) -> bytes:
+        if len(segment) == 0:
+            return b""
+        if (segment[0] & 0x1F) != 0x1F:
+            return segment[:1]
+        offset = 1
+        while offset < len(segment) and (segment[offset] & 0x80) != 0:
+            offset += 1
+        if offset < len(segment):
+            offset += 1
+        return segment[:offset]
+
     def test_flow_runs_local_paths(self):
         cfg = FakeCfg()
         cfg.CAPABILITIES = {
@@ -552,8 +565,17 @@ class OrchestratorFlowTests(unittest.TestCase):
                 + wrap_tlv("5F37", b"\x22" * 64),
             ),
         )
+        tmp_orchestrator = SGP22Orchestrator(
+            cfg=FakeCfg(),
+            apdu_channel=FakeApduChannel(),
+            profile_provider=None,
+        )
+        expected_segments = tmp_orchestrator._segment_bound_profile_package(bpp_bytes)
+        expected_block_count = 0
+        for segment in expected_segments:
+            expected_block_count += max(1, (len(segment) + 119) // 120)
         apdu_channel = FakeApduChannel(
-            load_bpp_response_sequence=[b""] * 7 + [inline_notification],
+            load_bpp_response_sequence=[b""] * (expected_block_count - 1) + [inline_notification],
         )
         orchestrator = SGP22Orchestrator(
             cfg=FakeCfg(),
@@ -581,57 +603,39 @@ class OrchestratorFlowTests(unittest.TestCase):
         self.assertEqual(len(remove_calls), 1)
         self.assertEqual(remove_calls[0][1], bytes.fromhex("80E2910007BF3004800201FD"))
         load_calls = [call for call in apdu_channel.send_calls if call[0].startswith("DOWNLOAD: LoadBoundProfilePackage")]
-        self.assertEqual(len(load_calls), 8)
+        self.assertEqual(len(load_calls), expected_block_count)
 
-        expected_segments = orchestrator._segment_bound_profile_package(bpp_bytes)
-        expected_head = expected_segments[0]
-        self.assertEqual(load_calls[0][0], "DOWNLOAD: LoadBoundProfilePackage [1/5] [Block 0]")
-        self.assertEqual(
-            load_calls[0][1],
-            bytes([0x80, 0xE2, 0x11, 0x00, 120]) + expected_head[:120],
-        )
+        # Per SGP.22 Annex M the BPP must split into 7 StoreData chains:
+        # BF36-wrapped bootstrap, A0 (wrapped), A1 header, two A1 members,
+        # A3 header, one A3 member. Assert the segment boundaries rather
+        # than each individual APDU to keep the test chunk-size-agnostic.
+        self.assertEqual(len(expected_segments), 7)
+        self.assertEqual(self._tag_of_segment(expected_segments[0]), b"\xBF\x36")
+        self.assertEqual(self._tag_of_segment(expected_segments[1]), b"\xA0")
+        self.assertEqual(self._tag_of_segment(expected_segments[2]), b"\xA1")
+        self.assertEqual(self._tag_of_segment(expected_segments[3]), b"\x88")
+        self.assertEqual(self._tag_of_segment(expected_segments[4]), b"\x89")
+        self.assertEqual(self._tag_of_segment(expected_segments[5]), b"\xA3")
+        self.assertEqual(self._tag_of_segment(expected_segments[6]), b"\x86")
 
-        self.assertEqual(load_calls[1][0], "DOWNLOAD: LoadBoundProfilePackage [1/5] [Block 1]")
-        self.assertEqual(
-            load_calls[1][1],
-            bytes([0x80, 0xE2, 0x91, 0x01, len(expected_head[120:])]) + expected_head[120:],
-        )
-
-        self.assertEqual(load_calls[2][0], "DOWNLOAD: LoadBoundProfilePackage [2/5] [Block 0]")
-        a0_member = wrap_tlv("87", b"\xAA\xBB")
-        self.assertEqual(
-            load_calls[2][1],
-            bytes([0x80, 0xE2, 0x91, 0x00, len(a0_member)]) + a0_member,
-        )
-
-        a1_first_member = wrap_tlv("88", b"\x01" * 247)
-        self.assertEqual(load_calls[3][0], "DOWNLOAD: LoadBoundProfilePackage [3/5] [Block 0]")
-        self.assertEqual(
-            load_calls[3][1],
-            bytes([0x80, 0xE2, 0x11, 0x00, 120]) + a1_first_member[:120],
-        )
-        self.assertEqual(load_calls[4][0], "DOWNLOAD: LoadBoundProfilePackage [3/5] [Block 1]")
-        self.assertEqual(
-            load_calls[4][1],
-            bytes([0x80, 0xE2, 0x11, 0x01, 120]) + a1_first_member[120:240],
-        )
-        self.assertEqual(load_calls[5][0], "DOWNLOAD: LoadBoundProfilePackage [3/5] [Block 2]")
-        self.assertEqual(
-            load_calls[5][1],
-            bytes([0x80, 0xE2, 0x91, 0x02, len(a1_first_member[240:])]) + a1_first_member[240:],
-        )
-
-        a1_second_member = wrap_tlv("89", b"\x02")
-        self.assertEqual(load_calls[6][0], "DOWNLOAD: LoadBoundProfilePackage [4/5] [Block 0]")
-        self.assertEqual(
-            load_calls[6][1],
-            bytes([0x80, 0xE2, 0x91, 0x00, len(a1_second_member)]) + a1_second_member,
-        )
-        self.assertEqual(load_calls[7][0], "DOWNLOAD: LoadBoundProfilePackage [5/5] [Block 0]")
-        self.assertEqual(
-            load_calls[7][1],
-            bytes([0x80, 0xE2, 0x91, 0x00, len(wrap_tlv("86", b"\xCC\xDD"))]) + wrap_tlv("86", b"\xCC\xDD"),
-        )
+        call_index = 0
+        for segment_index, segment in enumerate(expected_segments, start=1):
+            total_segment_len = len(segment)
+            offset = 0
+            block_number = 0
+            while offset < total_segment_len:
+                end_offset = offset + 120
+                chunk = segment[offset:end_offset]
+                is_last = end_offset >= total_segment_len
+                expected_p1 = 0x91 if is_last else 0x11
+                expected_label = f"DOWNLOAD: LoadBoundProfilePackage [{segment_index}/{len(expected_segments)}] [Block {block_number}]"
+                expected_apdu = bytes([0x80, 0xE2, expected_p1, block_number & 0xFF, len(chunk)]) + chunk
+                self.assertEqual(load_calls[call_index][0], expected_label)
+                self.assertEqual(load_calls[call_index][1], expected_apdu)
+                call_index += 1
+                offset += 120
+                block_number += 1
+        self.assertEqual(call_index, expected_block_count)
 
     def test_install_package_stops_on_terminal_profile_installation_failure(self):
         bf23_value = b"".join(
@@ -1659,6 +1663,20 @@ class OrchestratorFlowTests(unittest.TestCase):
             if call[0] == "EIM: RelayPackage [poll=1 package=1]"
         ]
         self.assertEqual(relay_calls, [])
+        notification_calls = [
+            call
+            for call in orchestrator.apdu_channel.send_calls
+            if "RetrieveNotificationsList" in call[0]
+        ]
+        self.assertEqual(len(notification_calls), 1)
+        self.assertEqual(notification_calls[0][1], bytes.fromhex("80E2910003BF2B00"))
+        package_result_calls = [
+            call
+            for call in orchestrator.apdu_channel.send_calls
+            if "RetrieveEuiccPackageResults" in call[0]
+        ]
+        self.assertEqual(len(package_result_calls), 1)
+        self.assertEqual(package_result_calls[0][1], bytes.fromhex("80E2910005BF2B028200"))
 
     def test_relay_ipa_euicc_data_request_returns_empty_a2_when_card_returns_other_choice(self):
         configured_data = wrap_tlv(
@@ -1696,6 +1714,33 @@ class OrchestratorFlowTests(unittest.TestCase):
         self.assertIn(wrap_tlv("A2", b""), response)
         self.assertIn(bytes.fromhex("A808800202C481020780"), response)
         self.assertIn(bytes.fromhex("870800000000000004A4"), response)
+
+    def test_relay_ipa_euicc_data_request_filters_package_results_by_sequence_number(self):
+        euicc_package_result = wrap_tlv("BF51", bytes.fromhex("010203"))
+        orchestrator = SGP22Orchestrator(
+            cfg=FakeCfg(),
+            apdu_channel=FakeApduChannel(
+                euicc_package_result_list_response=wrap_tlv("BF2B", wrap_tlv("A2", euicc_package_result)),
+            ),
+            profile_provider=FakeProvider(bpp_bytes=b""),
+        )
+        package = wrap_tlv(
+            "BF52",
+            wrap_tlv("5C", bytes.fromhex("A2"))
+            + wrap_tlv("A2", wrap_tlv("80", b"\x02"))
+            + wrap_tlv("83", bytes.fromhex("00000000000004A5")),
+        )
+
+        response = orchestrator._relay_eim_package_to_card(package, poll_round=1, package_index=1)
+
+        self.assertIn(wrap_tlv("A2", euicc_package_result), response)
+        package_result_calls = [
+            call
+            for call in orchestrator.apdu_channel.send_calls
+            if "RetrieveEuiccPackageResults" in call[0]
+        ]
+        self.assertEqual(len(package_result_calls), 1)
+        self.assertEqual(package_result_calls[0][1], bytes.fromhex("80E2910008BF2B05A003800102"))
 
     def test_run_eim_poll_finishes_on_no_package_result(self):
         configured_data = wrap_tlv("BF3C", wrap_tlv("80", b"rsp.example.com"))

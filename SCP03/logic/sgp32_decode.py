@@ -1,4 +1,4 @@
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 from SCP03.logic.euicc_info2 import format_version_bytes
 from SCP03.logic.euicc_info2 import parse_tlv_nodes

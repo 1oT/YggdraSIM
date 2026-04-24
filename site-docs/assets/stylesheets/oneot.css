@@ -1,0 +1,1154 @@
+/* -----------------------------------------------------------------------------
+ * oneot.css
+ * Visual variant of the YggdraSIM docs styled after the 1ot.com brand system.
+ * Loaded exclusively by mkdocs.oneot.yml; the default Nord theme continues to
+ * use extra.css. Both stylesheets are mutually exclusive - do not load them
+ * into the same site build.
+ *
+ * Palette reference (extracted from 1ot.webflow.shared CSS, April 2026):
+ *   primary        #01d799   mint/emerald
+ *   primary hover  #bfffdd
+ *   primary press  #02b480
+ *   secondary      #fec107   warm yellow
+ *   primary-2      #ee5d1f   orange accent
+ *   secondary-2    #f03489   pink accent
+ *   tertiary       #6382ee   soft indigo
+ *   text           #0d1926   near-black navy
+ *   text muted     #576675
+ *   surface        #e1e8f0   cool blue-grey
+ *   surface mint   #e8fff0
+ *   surface tert.  #eff0ff   cool lavender
+ *   page bg light  #f5f8fb
+ *   outline        #c2ccd7
+ *   notification   #001b38
+ * ---------------------------------------------------------------------------*/
+
+:root {
+  --oneot-primary: #01d799;
+  --oneot-primary-hover: #bfffdd;
+  --oneot-primary-press: #02b480;
+  --oneot-secondary: #fec107;
+  --oneot-orange: #ee5d1f;
+  --oneot-pink: #f03489;
+  --oneot-indigo: #6382ee;
+  --oneot-text: #0d1926;
+  --oneot-text-muted: #576675;
+  --oneot-surface: #e1e8f0;
+  --oneot-surface-mint: #e8fff0;
+  --oneot-surface-lav: #eff0ff;
+  --oneot-page-bg: #f5f8fb;
+  --oneot-outline: #c2ccd7;
+  --oneot-navy: #001b38;
+  --oneot-card-radius: 24px;
+  --oneot-xl-radius: 32px;
+  --oneot-sm-radius: 12px;
+  --oneot-shadow-soft: 0 14px 38px rgba(13, 25, 38, 0.08);
+  --oneot-shadow-lift: 0 20px 50px rgba(13, 25, 38, 0.12);
+}
+
+/* -------------------------------------------------------------------------- */
+/* Light scheme                                                               */
+/* -------------------------------------------------------------------------- */
+[data-md-color-scheme="default"] {
+  --md-primary-fg-color: var(--oneot-navy);
+  --md-primary-fg-color--light: #0d1926;
+  --md-primary-fg-color--dark: #00122a;
+  --md-primary-bg-color: #ffffff;
+  --md-primary-bg-color--light: rgba(255, 255, 255, 0.72);
+
+  --md-accent-fg-color: var(--oneot-primary-press);
+  --md-accent-fg-color--transparent: rgba(1, 215, 153, 0.1);
+
+  --md-default-bg-color: #ffffff;
+  --md-default-bg-color--light: var(--oneot-page-bg);
+  --md-default-fg-color: var(--oneot-text);
+  --md-default-fg-color--light: var(--oneot-text-muted);
+  --md-default-fg-color--lighter: #8896a4;
+  --md-default-fg-color--lightest: rgba(13, 25, 38, 0.08);
+
+  --md-typeset-a-color: var(--oneot-primary-press);
+  --md-code-bg-color: var(--oneot-page-bg);
+  --md-code-fg-color: var(--oneot-text);
+
+  --oneot-card-bg: #ffffff;
+  --oneot-card-border: rgba(194, 204, 215, 0.6);
+  --oneot-hero-bg:
+    radial-gradient(circle at 88% 0%, rgba(1, 215, 153, 0.18), transparent 46%),
+    radial-gradient(circle at 8% 100%, rgba(99, 130, 238, 0.16), transparent 48%),
+    linear-gradient(160deg, #ffffff 0%, var(--oneot-page-bg) 62%, var(--oneot-surface-lav) 100%);
+  --oneot-kbd-bg: #ffffff;
+  --oneot-kbd-fg: var(--oneot-text);
+  --oneot-kbd-border: var(--oneot-outline);
+}
+
+/* -------------------------------------------------------------------------- */
+/* Dark scheme                                                                */
+/* -------------------------------------------------------------------------- */
+[data-md-color-scheme="slate"] {
+  --md-primary-fg-color: #02172f;
+  --md-primary-fg-color--light: #0a2748;
+  --md-primary-fg-color--dark: #00122a;
+  --md-primary-bg-color: #e6f7ff;
+
+  --md-accent-fg-color: var(--oneot-primary);
+  --md-accent-fg-color--transparent: rgba(1, 215, 153, 0.18);
+
+  --md-default-bg-color: #03152a;
+  --md-default-bg-color--light: #062440;
+  --md-default-fg-color: #eaf2fb;
+  --md-default-fg-color--light: #a9bdd2;
+  --md-default-fg-color--lighter: #7c8ea4;
+  --md-default-fg-color--lightest: rgba(234, 242, 251, 0.08);
+
+  --md-typeset-a-color: var(--oneot-primary);
+  --md-code-bg-color: #041a33;
+  --md-code-fg-color: #eaf2fb;
+
+  --oneot-card-bg: rgba(9, 38, 68, 0.7);
+  --oneot-card-border: rgba(194, 204, 215, 0.14);
+  --oneot-hero-bg:
+    radial-gradient(circle at 90% 5%, rgba(1, 215, 153, 0.22), transparent 46%),
+    radial-gradient(circle at 5% 100%, rgba(99, 130, 238, 0.20), transparent 48%),
+    linear-gradient(155deg, #02172f 0%, #041f3c 60%, #062440 100%);
+  --oneot-kbd-bg: rgba(6, 36, 64, 0.9);
+  --oneot-kbd-fg: #eaf2fb;
+  --oneot-kbd-border: rgba(194, 204, 215, 0.22);
+}
+
+/* -------------------------------------------------------------------------- */
+/* Typography                                                                 */
+/* -------------------------------------------------------------------------- */
+html,
+body {
+  font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+  letter-spacing: -0.005em;
+}
+
+.md-typeset h1,
+.md-typeset h2,
+.md-typeset h3,
+.md-typeset h4,
+.md-header__title,
+.md-nav__title,
+.md-tabs__link {
+  font-family: "Manrope", "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  letter-spacing: -0.025em;
+}
+
+.md-typeset h1 {
+  font-weight: 800;
+  font-size: clamp(2.2rem, 4vw, 3.25rem);
+  line-height: 1.05;
+  margin-bottom: 1rem;
+}
+
+.md-typeset h2 {
+  font-weight: 700;
+  font-size: 1.9rem;
+  margin-top: 2.6rem;
+  padding-bottom: 0.45rem;
+  border-bottom: 1px solid var(--oneot-card-border);
+}
+
+.md-typeset h3 {
+  font-weight: 700;
+  font-size: 1.35rem;
+  margin-top: 1.9rem;
+  color: var(--oneot-text-muted);
+}
+
+[data-md-color-scheme="slate"] .md-typeset h3 {
+  color: var(--md-default-fg-color--light);
+}
+
+.md-typeset p {
+  line-height: 1.65;
+}
+
+.md-typeset code {
+  font-family: "JetBrains Mono", "Fira Code", "SFMono-Regular", Menlo, Consolas, monospace;
+  font-size: 0.85em;
+  background: var(--md-code-bg-color);
+  border-radius: 0.4rem;
+  padding: 0.08em 0.35em;
+  border: 1px solid var(--oneot-card-border);
+}
+
+[data-md-color-scheme="slate"] .md-typeset code {
+  border-color: rgba(255, 255, 255, 0.06);
+}
+
+/* -------------------------------------------------------------------------- */
+/* Header and top tabs                                                        */
+/* -------------------------------------------------------------------------- */
+.md-header {
+  background: #ffffff;
+  color: var(--oneot-text);
+  border-bottom: 1px solid var(--oneot-outline);
+  box-shadow: 0 1px 0 rgba(13, 25, 38, 0.04);
+}
+
+.md-header[data-md-state="shadow"] {
+  box-shadow: 0 8px 24px rgba(13, 25, 38, 0.08);
+}
+
+[data-md-color-scheme="slate"] .md-header {
+  background: var(--md-primary-fg-color);
+  color: var(--md-default-fg-color);
+  border-bottom: 1px solid rgba(194, 204, 215, 0.14);
+}
+
+.md-header__title {
+  font-weight: 700;
+  color: inherit;
+}
+
+.md-header__button.md-logo img,
+.md-header__button.md-logo svg {
+  height: 1.5rem;
+  width: 1.5rem;
+}
+
+.md-search__form {
+  background: var(--oneot-page-bg);
+  border-radius: 999px;
+  border: 1px solid var(--oneot-outline);
+}
+
+[data-md-color-scheme="slate"] .md-search__form {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(255, 255, 255, 0.12);
+}
+
+.md-search__input {
+  color: inherit;
+}
+
+.md-tabs {
+  background: #ffffff;
+  color: var(--oneot-text);
+  border-bottom: 1px solid var(--oneot-outline);
+}
+
+[data-md-color-scheme="slate"] .md-tabs {
+  background: var(--md-primary-fg-color);
+  color: var(--md-default-fg-color);
+  border-bottom-color: rgba(194, 204, 215, 0.14);
+}
+
+.md-tabs__link {
+  font-weight: 600;
+  opacity: 0.72;
+  transition: opacity 120ms ease, color 120ms ease;
+}
+
+.md-tabs__link:hover,
+.md-tabs__link--active {
+  opacity: 1;
+  color: var(--oneot-primary-press);
+}
+
+[data-md-color-scheme="slate"] .md-tabs__link:hover,
+[data-md-color-scheme="slate"] .md-tabs__link--active {
+  color: var(--oneot-primary);
+}
+
+/* -------------------------------------------------------------------------- */
+/* Side navigation                                                            */
+/* -------------------------------------------------------------------------- */
+.md-nav__title {
+  font-weight: 700;
+  color: var(--oneot-text);
+}
+
+[data-md-color-scheme="slate"] .md-nav__title {
+  color: var(--md-default-fg-color);
+}
+
+.md-nav__link {
+  border-radius: 0.5rem;
+  padding: 0.15rem 0.55rem;
+  transition: background 120ms ease, color 120ms ease;
+}
+
+.md-nav__link:hover,
+.md-nav__link:focus {
+  background: var(--oneot-surface-lav);
+  color: var(--oneot-primary-press);
+}
+
+[data-md-color-scheme="slate"] .md-nav__link:hover,
+[data-md-color-scheme="slate"] .md-nav__link:focus {
+  background: rgba(1, 215, 153, 0.12);
+  color: var(--oneot-primary);
+}
+
+.md-nav__link--active,
+.md-nav__link--active:focus,
+.md-nav__link--active:hover {
+  background: var(--oneot-surface-mint);
+  color: var(--oneot-primary-press);
+  font-weight: 600;
+}
+
+[data-md-color-scheme="slate"] .md-nav__link--active {
+  background: rgba(1, 215, 153, 0.18);
+  color: var(--oneot-primary);
+}
+
+/* -------------------------------------------------------------------------- */
+/* Main content rhythm                                                        */
+/* -------------------------------------------------------------------------- */
+.md-main__inner {
+  margin-top: 1.6rem;
+}
+
+.md-content {
+  background: var(--md-default-bg-color);
+}
+
+.md-typeset a {
+  color: var(--md-typeset-a-color);
+  text-decoration: none;
+  border-bottom: 1px solid transparent;
+  transition: color 120ms ease, border-color 120ms ease;
+}
+
+.md-typeset a:hover {
+  color: var(--oneot-orange);
+  border-bottom-color: currentColor;
+}
+
+[data-md-color-scheme="slate"] .md-typeset a:hover {
+  color: var(--oneot-secondary);
+}
+
+/* -------------------------------------------------------------------------- */
+/* Buttons                                                                    */
+/* -------------------------------------------------------------------------- */
+.md-typeset .md-button {
+  border-radius: 999px;
+  padding: 0.55rem 1.25rem;
+  font-weight: 600;
+  letter-spacing: -0.005em;
+  border: 1px solid var(--oneot-outline);
+  color: var(--oneot-text);
+  background: #ffffff;
+  box-shadow: 0 2px 6px rgba(13, 25, 38, 0.04);
+  transition: transform 120ms ease, box-shadow 160ms ease, background 120ms ease, border-color 120ms ease;
+}
+
+.md-typeset .md-button:hover {
+  transform: translateY(-1px);
+  background: var(--oneot-page-bg);
+  border-color: var(--oneot-primary);
+  color: var(--oneot-primary-press);
+  box-shadow: 0 8px 22px rgba(13, 25, 38, 0.10);
+}
+
+.md-typeset .md-button--primary {
+  background: var(--oneot-primary);
+  border-color: var(--oneot-primary);
+  color: var(--oneot-navy);
+  box-shadow: 0 8px 24px rgba(1, 215, 153, 0.28);
+}
+
+.md-typeset .md-button--primary:hover {
+  background: var(--oneot-primary-hover);
+  border-color: var(--oneot-primary-hover);
+  color: var(--oneot-navy);
+  box-shadow: 0 14px 32px rgba(1, 215, 153, 0.32);
+}
+
+[data-md-color-scheme="slate"] .md-typeset .md-button {
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--md-default-fg-color);
+  border-color: rgba(194, 204, 215, 0.22);
+}
+
+[data-md-color-scheme="slate"] .md-typeset .md-button--primary {
+  background: var(--oneot-primary);
+  color: var(--oneot-navy);
+  border-color: var(--oneot-primary);
+}
+
+/* -------------------------------------------------------------------------- */
+/* Hero band (reuses .hero class from the Nord variant)                       */
+/* -------------------------------------------------------------------------- */
+.hero {
+  display: grid;
+  grid-template-columns: minmax(0, 6.5rem) minmax(0, 1fr);
+  gap: 1.6rem;
+  align-items: center;
+  padding: clamp(1.8rem, 4vw, 3rem);
+  margin: 0 0 2rem;
+  border: 1px solid var(--oneot-card-border);
+  border-radius: var(--oneot-xl-radius);
+  background: var(--oneot-hero-bg);
+  box-shadow: var(--oneot-shadow-soft);
+  position: relative;
+  overflow: hidden;
+}
+
+.hero::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  border-radius: inherit;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.7);
+}
+
+[data-md-color-scheme="slate"] .hero::after {
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+
+.hero__mark {
+  width: min(5.8rem, 100%);
+  height: auto;
+  filter: drop-shadow(0 14px 26px rgba(1, 215, 153, 0.30));
+}
+
+.hero__eyebrow {
+  margin: 0 0 0.5rem;
+  color: var(--oneot-primary-press);
+  font-family: "Manrope", "Inter", sans-serif;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+}
+
+[data-md-color-scheme="slate"] .hero__eyebrow {
+  color: var(--oneot-primary);
+}
+
+.hero__title {
+  margin: 0;
+  font-family: "Manrope", "Inter", sans-serif;
+  font-size: clamp(2.2rem, 4.4vw, 3.25rem);
+  line-height: 1.02;
+  letter-spacing: -0.03em;
+  font-weight: 800;
+}
+
+.hero__lead {
+  margin: 0.9rem 0 0;
+  max-width: 46rem;
+  font-size: 1.08rem;
+  line-height: 1.55;
+  color: var(--md-default-fg-color--light);
+}
+
+.hero__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin: 1.4rem 0 0;
+}
+
+@media screen and (max-width: 44.9375em) {
+  .hero {
+    grid-template-columns: 1fr;
+    text-align: center;
+  }
+  .hero__actions {
+    justify-content: center;
+  }
+}
+
+/* -------------------------------------------------------------------------- */
+/* Card grids                                                                 */
+/* -------------------------------------------------------------------------- */
+.md-typeset .grid.cards > ul > li,
+.md-typeset .grid.cards > ol > li {
+  border: 1px solid var(--oneot-card-border);
+  border-radius: var(--oneot-card-radius);
+  background: var(--oneot-card-bg);
+  box-shadow: var(--oneot-shadow-soft);
+  padding: 1.1rem 1.2rem;
+  transition: transform 140ms ease, box-shadow 160ms ease, border-color 140ms ease;
+}
+
+.md-typeset .grid.cards > ul > li:hover,
+.md-typeset .grid.cards > ol > li:hover {
+  transform: translateY(-3px);
+  border-color: var(--oneot-primary);
+  box-shadow: var(--oneot-shadow-lift);
+}
+
+.md-typeset .grid.cards strong {
+  color: var(--md-default-fg-color);
+  font-family: "Manrope", "Inter", sans-serif;
+  font-weight: 700;
+}
+
+.md-typeset .grid.cards code {
+  font-size: 0.8em;
+}
+
+/* -------------------------------------------------------------------------- */
+/* Tables                                                                     */
+/* -------------------------------------------------------------------------- */
+.md-typeset table:not([class]) {
+  border-radius: var(--oneot-sm-radius);
+  overflow: hidden;
+  border-collapse: separate;
+  border-spacing: 0;
+  box-shadow: inset 0 0 0 1px var(--oneot-card-border);
+}
+
+.md-typeset table:not([class]) th {
+  background: var(--oneot-surface-lav);
+  color: var(--oneot-text);
+  font-family: "Manrope", "Inter", sans-serif;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+[data-md-color-scheme="slate"] .md-typeset table:not([class]) th {
+  background: rgba(99, 130, 238, 0.18);
+  color: var(--md-default-fg-color);
+}
+
+.md-typeset table:not([class]) td {
+  border-top: 1px solid var(--oneot-card-border);
+}
+
+[data-md-color-scheme="slate"] .md-typeset table:not([class]) td {
+  border-top-color: rgba(194, 204, 215, 0.14);
+}
+
+/* -------------------------------------------------------------------------- */
+/* Admonitions / details                                                      */
+/* -------------------------------------------------------------------------- */
+.md-typeset .admonition,
+.md-typeset details {
+  border-radius: var(--oneot-sm-radius);
+  border-width: 1px;
+  box-shadow: var(--oneot-shadow-soft);
+}
+
+.md-typeset .admonition > .admonition-title,
+.md-typeset details > summary {
+  font-family: "Manrope", "Inter", sans-serif;
+  font-weight: 700;
+  letter-spacing: -0.005em;
+}
+
+.md-typeset .admonition.info,
+.md-typeset details.info {
+  border-color: var(--oneot-primary);
+}
+
+.md-typeset .admonition.info > .admonition-title,
+.md-typeset details.info > summary {
+  background-color: var(--oneot-surface-mint);
+  color: var(--oneot-primary-press);
+}
+
+.md-typeset .admonition.tip,
+.md-typeset details.tip,
+.md-typeset .admonition.hint,
+.md-typeset details.hint {
+  border-color: var(--oneot-indigo);
+}
+
+.md-typeset .admonition.tip > .admonition-title,
+.md-typeset details.tip > summary,
+.md-typeset .admonition.hint > .admonition-title,
+.md-typeset details.hint > summary {
+  background-color: var(--oneot-surface-lav);
+  color: var(--oneot-indigo);
+}
+
+.md-typeset .admonition.warning,
+.md-typeset details.warning {
+  border-color: var(--oneot-secondary);
+}
+
+.md-typeset .admonition.warning > .admonition-title,
+.md-typeset details.warning > summary {
+  background-color: #fff6d6;
+  color: #8a6100;
+}
+
+[data-md-color-scheme="slate"] .md-typeset .admonition.warning > .admonition-title,
+[data-md-color-scheme="slate"] .md-typeset details.warning > summary {
+  background-color: rgba(254, 193, 7, 0.14);
+  color: var(--oneot-secondary);
+}
+
+.md-typeset .admonition.danger,
+.md-typeset details.danger,
+.md-typeset .admonition.failure,
+.md-typeset details.failure {
+  border-color: var(--oneot-orange);
+}
+
+.md-typeset .admonition.danger > .admonition-title,
+.md-typeset details.danger > summary,
+.md-typeset .admonition.failure > .admonition-title,
+.md-typeset details.failure > summary {
+  background-color: #ffe7dc;
+  color: #9b3c12;
+}
+
+[data-md-color-scheme="slate"] .md-typeset .admonition.danger > .admonition-title,
+[data-md-color-scheme="slate"] .md-typeset details.danger > summary {
+  background-color: rgba(238, 93, 31, 0.16);
+  color: #ffa37c;
+}
+
+.md-typeset .admonition.example,
+.md-typeset details.example {
+  border-color: var(--oneot-pink);
+}
+
+.md-typeset .admonition.example > .admonition-title,
+.md-typeset details.example > summary {
+  background-color: #ffe7f1;
+  color: #a41a5b;
+}
+
+[data-md-color-scheme="slate"] .md-typeset .admonition.example > .admonition-title,
+[data-md-color-scheme="slate"] .md-typeset details.example > summary {
+  background-color: rgba(240, 52, 137, 0.16);
+  color: #ff7fb3;
+}
+
+/* -------------------------------------------------------------------------- */
+/* Keyboard, abbr, tag pills                                                  */
+/* -------------------------------------------------------------------------- */
+.md-typeset kbd,
+.md-typeset .key {
+  background: var(--oneot-kbd-bg);
+  color: var(--oneot-kbd-fg);
+  border: 1px solid var(--oneot-kbd-border);
+  border-radius: 0.35rem;
+  box-shadow: inset 0 -1px 0 rgba(13, 25, 38, 0.14);
+  padding: 0.05em 0.5em;
+  font-family: "JetBrains Mono", "Fira Code", "SFMono-Regular", monospace;
+  font-size: 0.78em;
+}
+
+.md-typeset abbr[title] {
+  border-bottom: 1px dotted var(--oneot-primary-press);
+  text-decoration: none;
+  cursor: help;
+}
+
+.md-typeset .tag-pill {
+  display: inline-block;
+  padding: 0.2em 0.7em;
+  margin: 0 0.3em 0.3em 0;
+  border-radius: 999px;
+  font-size: 0.72em;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  background: var(--oneot-surface-lav);
+  color: var(--oneot-indigo);
+  border: 1px solid rgba(99, 130, 238, 0.26);
+}
+
+[data-md-color-scheme="slate"] .md-typeset .tag-pill {
+  background: rgba(99, 130, 238, 0.18);
+  color: #b9c6ff;
+  border-color: rgba(99, 130, 238, 0.38);
+}
+
+/* -------------------------------------------------------------------------- */
+/* Custom callout block used in some pages                                    */
+/* -------------------------------------------------------------------------- */
+.ygg-callout {
+  display: grid;
+  grid-template-columns: 2.4rem 1fr;
+  gap: 0.9rem;
+  padding: 1rem 1.2rem;
+  margin: 1.2rem 0;
+  border-radius: var(--oneot-sm-radius);
+  background: var(--oneot-card-bg);
+  border: 1px solid var(--oneot-card-border);
+  box-shadow: var(--oneot-shadow-soft);
+}
+
+.ygg-callout__icon {
+  font-size: 1.5rem;
+  line-height: 1.1;
+  color: var(--oneot-primary-press);
+}
+
+[data-md-color-scheme="slate"] .ygg-callout__icon {
+  color: var(--oneot-primary);
+}
+
+.ygg-callout__body > :first-child {
+  margin-top: 0;
+}
+
+.ygg-callout__body > :last-child {
+  margin-bottom: 0;
+}
+
+/* -------------------------------------------------------------------------- */
+/* Mermaid diagram containers (ported from extra.css, retuned for 1oT)        */
+/* -------------------------------------------------------------------------- */
+.md-typeset .mermaid {
+  text-align: center;
+  margin: 1.4rem 0;
+  padding: 1rem 1.1rem;
+  border: 1px solid var(--oneot-card-border);
+  border-radius: var(--oneot-sm-radius);
+  background: var(--oneot-card-bg);
+  box-shadow: var(--oneot-shadow-soft);
+}
+
+[data-md-color-scheme="slate"] .md-typeset .mermaid svg {
+  filter: brightness(1.08);
+}
+
+.md-typeset .mermaid-xl {
+  margin: 1.4rem 0;
+  overflow-x: auto;
+}
+
+.md-typeset .mermaid-xl .mermaid {
+  padding: 1.2rem 1.4rem;
+}
+
+.md-typeset .mermaid-xl .mermaid svg {
+  max-width: 100% !important;
+  width: 100% !important;
+  height: auto !important;
+}
+
+.md-typeset .mermaid.mermaid-zoomable {
+  position: relative;
+  cursor: zoom-in;
+  transition: transform 160ms ease, box-shadow 160ms ease, border-color 160ms ease;
+}
+
+.md-typeset .mermaid.mermaid-zoomable:hover {
+  transform: translateY(-2px);
+  border-color: var(--oneot-primary);
+  box-shadow: var(--oneot-shadow-lift);
+}
+
+.md-typeset .mermaid.mermaid-zoomable:focus-visible {
+  outline: 2px solid var(--oneot-primary);
+  outline-offset: 3px;
+}
+
+.md-typeset .mermaid-zoom-badge {
+  position: absolute;
+  top: 0.55rem;
+  right: 0.7rem;
+  width: 1.85rem;
+  height: 1.85rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: var(--oneot-surface-mint);
+  color: var(--oneot-primary-press);
+  font-size: 1rem;
+  line-height: 1;
+  pointer-events: none;
+  opacity: 0.8;
+  transition: opacity 160ms ease, background 160ms ease, transform 160ms ease;
+}
+
+.md-typeset .mermaid-zoom-badge::after {
+  content: "\2922";
+}
+
+.md-typeset .mermaid.mermaid-zoomable:hover .mermaid-zoom-badge {
+  opacity: 1;
+  background: var(--oneot-primary);
+  color: var(--oneot-navy);
+  transform: scale(1.08);
+}
+
+body.mermaid-lightbox-open {
+  overflow: hidden;
+}
+
+.mermaid-lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transition: opacity 180ms ease;
+}
+
+.mermaid-lightbox.is-open {
+  opacity: 1;
+}
+
+.mermaid-lightbox.is-closing {
+  opacity: 0;
+}
+
+.mermaid-lightbox__backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 27, 56, 0.78);
+  backdrop-filter: blur(3px);
+  cursor: zoom-out;
+}
+
+.mermaid-lightbox__stage {
+  position: relative;
+  width: min(96vw, 120rem);
+  height: min(92vh, 70rem);
+  background: var(--oneot-card-bg);
+  border-radius: var(--oneot-card-radius);
+  box-shadow: 0 30px 60px rgba(0, 0, 0, 0.45);
+  overflow: hidden;
+  display: flex;
+  align-items: stretch;
+  justify-content: stretch;
+  transform: scale(0.92);
+  transition: transform 180ms ease;
+}
+
+.mermaid-lightbox.is-open .mermaid-lightbox__stage {
+  transform: scale(1);
+}
+
+.mermaid-lightbox__canvas {
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2.2rem;
+  transform-origin: center center;
+  transition: transform 60ms linear;
+  cursor: grab;
+  user-select: none;
+}
+
+.mermaid-lightbox__canvas.is-dragging {
+  cursor: grabbing;
+  transition: none;
+}
+
+.mermaid-lightbox__spinner {
+  font-size: 0.9rem;
+  letter-spacing: 0.04em;
+  color: var(--md-default-fg-color--light);
+  padding: 1.5rem 2rem;
+  border-radius: var(--oneot-sm-radius);
+  border: 1px dashed var(--oneot-card-border);
+  background: rgba(1, 215, 153, 0.08);
+  animation: oneotLightboxPulse 1.6s ease-in-out infinite;
+}
+
+@keyframes oneotLightboxPulse {
+  0%, 100% { opacity: 0.55; }
+  50%      { opacity: 1.0; }
+}
+
+.mermaid-lightbox__canvas svg {
+  width: 100% !important;
+  height: 100% !important;
+  max-width: none !important;
+  max-height: none !important;
+  pointer-events: none;
+}
+
+.mermaid-lightbox__close {
+  position: absolute;
+  top: 0.8rem;
+  right: 0.8rem;
+  width: 2.4rem;
+  height: 2.4rem;
+  border-radius: 50%;
+  border: 1px solid var(--oneot-card-border);
+  background: var(--oneot-card-bg);
+  color: var(--md-default-fg-color);
+  font-size: 1.1rem;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+  transition: transform 120ms ease, background 120ms ease, color 120ms ease;
+}
+
+.mermaid-lightbox__close:hover {
+  transform: scale(1.06);
+  background: var(--oneot-primary);
+  color: var(--oneot-navy);
+  border-color: var(--oneot-primary);
+}
+
+.mermaid-lightbox__hint {
+  position: absolute;
+  bottom: 0.9rem;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 0.72rem;
+  letter-spacing: 0.03em;
+  padding: 0.3rem 0.8rem;
+  border-radius: 999px;
+  background: rgba(0, 27, 56, 0.78);
+  color: #eaf2fb;
+  pointer-events: none;
+  opacity: 0.88;
+}
+
+/* -------------------------------------------------------------------------- */
+/* 1oT branding blocks                                                        */
+/* Gated by the .oneot-only class on the default (Nord) build, so only the    */
+/* 1oT variant renders them.                                                  */
+/* -------------------------------------------------------------------------- */
+.oneot-only {
+  display: revert;
+}
+
+.oneot-partner-strip {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.6rem 1rem;
+  padding: 0.65rem 1.1rem;
+  margin: 0 0 1.3rem;
+  border-radius: 999px;
+  border: 1px solid var(--oneot-card-border);
+  background: linear-gradient(100deg, var(--oneot-surface-mint) 0%, #ffffff 55%, var(--oneot-surface-lav) 100%);
+  box-shadow: var(--oneot-shadow-soft);
+  font-size: 0.84rem;
+  color: var(--oneot-text);
+}
+
+[data-md-color-scheme="slate"] .oneot-partner-strip {
+  background: linear-gradient(100deg, rgba(1, 215, 153, 0.16) 0%, rgba(6, 36, 64, 0.6) 55%, rgba(99, 130, 238, 0.18) 100%);
+  color: var(--md-default-fg-color);
+}
+
+.oneot-partner-strip__badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.15rem 0.65rem;
+  border-radius: 999px;
+  background: var(--oneot-primary);
+  color: var(--oneot-navy);
+  font-family: "Manrope", "Inter", sans-serif;
+  font-weight: 700;
+  font-size: 0.72rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  box-shadow: 0 4px 12px rgba(1, 215, 153, 0.28);
+}
+
+.oneot-partner-strip__divider {
+  width: 1px;
+  height: 1.05rem;
+  background: var(--oneot-card-border);
+}
+
+.oneot-partner-strip__link {
+  font-family: "Manrope", "Inter", sans-serif;
+  font-weight: 600;
+  color: var(--oneot-text);
+  border-bottom: 1px solid transparent;
+  transition: color 120ms ease, border-color 120ms ease;
+}
+
+.oneot-partner-strip__link:hover {
+  color: var(--oneot-primary-press);
+  border-bottom-color: currentColor;
+}
+
+[data-md-color-scheme="slate"] .oneot-partner-strip__link {
+  color: var(--md-default-fg-color);
+}
+
+[data-md-color-scheme="slate"] .oneot-partner-strip__link:hover {
+  color: var(--oneot-primary);
+}
+
+/* Text wordmark.
+ *
+ * A stylized textual rendition of the 1oT brand. The SVG logo
+ * (assets/images/1ot-logo.svg) is still shipped and is used on the
+ * dedicated consultancy page; the main page prefers the text mark for
+ * restraint and typographic coherence with the surrounding Manrope
+ * display copy.
+ *
+ * Typography matches the 1oT brand system:
+ *   - Manrope 800, tight tracking
+ *   - '1' in brand green, 'oT' in the page text color
+ *   - baseline-aligned; no box / no background
+ */
+.oneot-wordmark {
+  display: inline-flex;
+  align-items: baseline;
+  font-family: "Manrope", "Inter", -apple-system, BlinkMacSystemFont, sans-serif;
+  font-weight: 800;
+  font-size: inherit;
+  letter-spacing: -0.045em;
+  line-height: 1;
+  white-space: nowrap;
+  font-feature-settings: "ss01", "cv11";
+}
+
+.oneot-wordmark__one {
+  color: var(--oneot-primary-press);
+}
+
+.oneot-wordmark__ot {
+  color: var(--oneot-text);
+}
+
+[data-md-color-scheme="slate"] .oneot-wordmark__one {
+  color: var(--oneot-primary);
+}
+
+[data-md-color-scheme="slate"] .oneot-wordmark__ot {
+  color: var(--md-default-fg-color);
+}
+
+/* When the wordmark sits inside a link it still inherits the brand
+ * coloring for the '1' so the mint accent stays identifiable even on
+ * hover states that tint the surrounding anchor.
+ */
+a:hover .oneot-wordmark__ot {
+  color: inherit;
+}
+
+/* SVG logo class kept for the consultancy page. The main page no
+ * longer embeds the SVG, but the asset is still shipped and used in
+ * a single restrained spot under /about.
+ *
+ * Material's own `.md-typeset img { max-width: 100%; height: auto }`
+ * rule has higher specificity than a bare `.oneot-logo` selector and
+ * will otherwise force the SVG to fill the text column, so the rule
+ * below is scoped to `.md-typeset .oneot-logo` to win the cascade and
+ * the intrinsic width is also clamped directly.
+ */
+.md-typeset .oneot-logo,
+.oneot-logo {
+  display: inline-block;
+  height: 72px !important;
+  width: auto !important;
+  max-width: 240px;
+  vertical-align: middle;
+  color: var(--oneot-text);
+  transition: opacity 140ms ease;
+}
+
+.md-typeset .oneot-logo:hover,
+.oneot-logo:hover {
+  opacity: 0.72;
+}
+
+[data-md-color-scheme="slate"] .md-typeset .oneot-logo,
+[data-md-color-scheme="slate"] .oneot-logo {
+  color: var(--md-default-fg-color);
+}
+
+.oneot-cta-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 1.4rem;
+  padding: clamp(1.4rem, 3vw, 2rem) clamp(1.4rem, 3vw, 2.2rem);
+  margin: 2.2rem 0 1rem;
+  border: 1px solid var(--oneot-card-border);
+  border-radius: var(--oneot-card-radius);
+  background:
+    radial-gradient(circle at 0% 0%, rgba(1, 215, 153, 0.18), transparent 48%),
+    radial-gradient(circle at 100% 100%, rgba(99, 130, 238, 0.14), transparent 46%),
+    linear-gradient(155deg, #ffffff 0%, var(--oneot-page-bg) 100%);
+  box-shadow: var(--oneot-shadow-soft);
+}
+
+[data-md-color-scheme="slate"] .oneot-cta-card {
+  background:
+    radial-gradient(circle at 0% 0%, rgba(1, 215, 153, 0.22), transparent 48%),
+    radial-gradient(circle at 100% 100%, rgba(99, 130, 238, 0.22), transparent 46%),
+    linear-gradient(155deg, #041f3c 0%, #03152a 100%);
+}
+
+.oneot-cta-card__body p {
+  margin: 0.35rem 0 0;
+  color: var(--md-default-fg-color--light);
+  font-size: 0.98rem;
+  line-height: 1.55;
+}
+
+.oneot-cta-card__body p:first-child {
+  margin-top: 0;
+  color: var(--md-default-fg-color);
+  font-family: "Manrope", "Inter", sans-serif;
+  font-weight: 700;
+  font-size: 1.15rem;
+  letter-spacing: -0.015em;
+}
+
+.oneot-cta-card__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  justify-content: flex-end;
+  align-self: center;
+}
+
+@media screen and (max-width: 49.9375em) {
+  .oneot-cta-card {
+    grid-template-columns: 1fr;
+  }
+  .oneot-cta-card__actions {
+    justify-content: flex-start;
+  }
+}
+
+/* -------------------------------------------------------------------------- */
+/* Footer                                                                     */
+/* -------------------------------------------------------------------------- */
+.md-footer {
+  background: var(--oneot-navy);
+  color: #f9fafc;
+}
+
+.md-footer-meta {
+  background: #00122a;
+  color: #8b8b8b;
+}
+
+.md-footer__link {
+  color: #f9fafc;
+}
+
+.md-footer__link:hover {
+  color: var(--oneot-primary);
+}
+
+/* -------------------------------------------------------------------------- */
+/* Scrollbar polish (WebKit)                                                  */
+/* -------------------------------------------------------------------------- */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(13, 25, 38, 0.18);
+  border-radius: 999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(1, 215, 153, 0.5);
+}
+
+[data-md-color-scheme="slate"] ::-webkit-scrollbar-thumb {
+  background: rgba(234, 242, 251, 0.14);
+}

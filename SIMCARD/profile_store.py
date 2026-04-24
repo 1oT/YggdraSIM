@@ -1,13 +1,17 @@
 from __future__ import annotations
 
-import json
 import os
 import shutil
-from pathlib import Path
 from typing import Any
 
 from SIMCARD.saip_profile import decode_profile_image
-from SIMCARD.state import SimProfileEntry, SimProfileFsNode, SimProfileImage
+from SIMCARD.state import SimProfileAuthConfig, SimProfileEntry, SimProfileFsNode, SimProfileImage
+from yggdrasim_common.inventory_crypto import (
+    read_secret_file_bytes,
+    read_secret_json_file,
+    write_secret_file_bytes,
+    write_secret_json_file,
+)
 
 STORE_VERSION = 1
 MANIFEST_FILENAME = "manifest.json"
@@ -55,8 +59,10 @@ def sync_profiles_to_store(store_path: str, profiles: list[SimProfileEntry]) -> 
         else:
             _delete_if_exists(os.path.join(directory_path, PROFILE_IMAGE_FILENAME))
         if len(bytes(profile.upp_bytes or b"")) > 0:
-            with open(os.path.join(directory_path, PROFILE_UPP_FILENAME), "wb") as output_file:
-                output_file.write(bytes(profile.upp_bytes))
+            write_secret_file_bytes(
+                os.path.join(directory_path, PROFILE_UPP_FILENAME),
+                bytes(profile.upp_bytes),
+            )
         else:
             _delete_if_exists(os.path.join(directory_path, PROFILE_UPP_FILENAME))
 
@@ -70,7 +76,10 @@ def sync_profiles_to_store(store_path: str, profiles: list[SimProfileEntry]) -> 
 
 
 def load_profile_image_json_file(path: str) -> SimProfileImage | None:
-    return _load_profile_image_from_json(os.path.abspath(os.path.expanduser(str(path or "").strip())))
+    return _load_profile_image_from_json(
+        os.path.abspath(os.path.expanduser(str(path or "").strip())),
+        protect_plaintext_on_read=False,
+    )
 
 
 def profile_store_has_entries(store_path: str) -> bool:
@@ -91,7 +100,7 @@ def profile_store_has_entries(store_path: str) -> bool:
 
 def _load_profile_directory(directory_path: str) -> tuple[int, SimProfileEntry] | None:
     manifest_path = os.path.join(directory_path, MANIFEST_FILENAME)
-    manifest = _read_json_file(manifest_path)
+    manifest = _read_json_file(manifest_path, protect_plaintext_on_read=True)
     if isinstance(manifest, dict) is False:
         return None
 
@@ -113,7 +122,7 @@ def _load_profile_directory(directory_path: str) -> tuple[int, SimProfileEntry] 
     upp_bytes = b""
     if os.path.isfile(upp_path):
         try:
-            upp_bytes = Path(upp_path).read_bytes()
+            upp_bytes = read_secret_file_bytes(upp_path, protect_plaintext_on_read=True)
         except OSError:
             upp_bytes = b""
 
@@ -128,6 +137,12 @@ def _load_profile_directory(directory_path: str) -> tuple[int, SimProfileEntry] 
             impi = str(profile_image.impi).strip()
         if len(str(profile_image.profile_name or "").strip()) > 0:
             profile_name = str(profile_image.profile_name).strip()
+
+    manifest_auth_config = _deserialize_profile_auth(manifest.get("auth"))
+    if manifest_auth_config is None and profile_image is not None:
+        image_auth_config = getattr(profile_image, "auth_config", None)
+        if image_auth_config is not None:
+            manifest_auth_config = image_auth_config
 
     entry = SimProfileEntry(
         aid=aid,
@@ -146,6 +161,7 @@ def _load_profile_directory(directory_path: str) -> tuple[int, SimProfileEntry] 
             manifest.get("profile_source"),
             has_upp=len(upp_bytes) > 0,
         ),
+        auth_config=manifest_auth_config,
     )
     order_index = int(manifest.get("order_index", 0) or 0)
     return order_index, entry
@@ -160,25 +176,27 @@ def _load_profile_image(
     default_imsi: str,
     default_impi: str,
 ) -> SimProfileImage | None:
-    normalized_source = _normalize_profile_source(source_preference, has_upp=False)
+    # The JSON image is the canonical cached view written by
+    # ``sync_profiles_to_store`` at install time. Re-decoding the raw UPP on
+    # every startup is both wasteful and dangerous: the pySim SAIP ASN.1
+    # decoder can loop unboundedly on pathological ``ProfileElement``
+    # payloads (observed with the ``B2`` telecom section on some live
+    # profiles). Even with the bounded decode helper in ``saip_profile`` the
+    # worker threads that hit the deadline keep holding references and leak
+    # several GB of RAM across repeated tool launches. Trust the JSON cache
+    # first and only fall back to the UPP if the JSON side-file is missing
+    # or unreadable; the ``source_preference`` hint is kept purely for
+    # forensics/debugging (it used to drive the priority).
+    _ = source_preference  # retained for backwards-compat manifests; no longer drives ordering
     image_path = os.path.join(directory_path, PROFILE_IMAGE_FILENAME)
     upp_path = os.path.join(directory_path, PROFILE_UPP_FILENAME)
 
-    if normalized_source == "upp":
-        image = _load_profile_image_from_upp(
-            upp_path,
-            default_iccid=default_iccid,
-            default_name=default_name,
-            default_imsi=default_imsi,
-            default_impi=default_impi,
-        )
-        if image is not None:
-            return image
-        return _load_profile_image_from_json(image_path)
-
-    image = _load_profile_image_from_json(image_path)
-    if image is not None:
-        return image
+    cached_image = _load_profile_image_from_json(
+        image_path,
+        protect_plaintext_on_read=True,
+    )
+    if cached_image is not None:
+        return cached_image
     return _load_profile_image_from_upp(
         upp_path,
         default_iccid=default_iccid,
@@ -199,7 +217,7 @@ def _load_profile_image_from_upp(
     if os.path.isfile(upp_path) is False:
         return None
     try:
-        upp_bytes = Path(upp_path).read_bytes()
+        upp_bytes = read_secret_file_bytes(upp_path, protect_plaintext_on_read=True)
     except OSError:
         return None
     return decode_profile_image(
@@ -211,8 +229,15 @@ def _load_profile_image_from_upp(
     )
 
 
-def _load_profile_image_from_json(image_path: str) -> SimProfileImage | None:
-    image_data = _read_json_file(image_path)
+def _load_profile_image_from_json(
+    image_path: str,
+    *,
+    protect_plaintext_on_read: bool = False,
+) -> SimProfileImage | None:
+    image_data = _read_json_file(
+        image_path,
+        protect_plaintext_on_read=protect_plaintext_on_read,
+    )
     if isinstance(image_data, dict) is False:
         return None
     nodes: list[SimProfileFsNode] = []
@@ -247,6 +272,7 @@ def _load_profile_image_from_json(image_path: str) -> SimProfileImage | None:
         imsi=str(image_data.get("imsi", "")).strip(),
         impi=str(image_data.get("impi", "")).strip(),
         nodes=nodes,
+        auth_config=_deserialize_profile_auth(image_data.get("auth")),
     )
 
 
@@ -265,6 +291,7 @@ def _serialize_profile_manifest(profile: SimProfileEntry, *, order_index: int) -
         "impi": str(profile.impi).strip(),
         "notification_address": str(profile.notification_address).strip(),
         "profile_source": _normalize_profile_source(profile.profile_source, has_upp=len(bytes(profile.upp_bytes or b"")) > 0),
+        "auth": _serialize_profile_auth(profile.auth_config),
     }
 
 
@@ -274,6 +301,7 @@ def _serialize_profile_image(image: SimProfileImage) -> dict[str, Any]:
         "iccid": str(image.iccid).strip(),
         "imsi": str(image.imsi).strip(),
         "impi": str(image.impi).strip(),
+        "auth": _serialize_profile_auth(image.auth_config),
         "nodes": [
             {
                 "path": list(node.path),
@@ -324,21 +352,15 @@ def _ensure_store_root(store_path: str) -> str:
     return normalized
 
 
-def _read_json_file(path: str) -> Any:
-    if os.path.isfile(path) is False:
-        return None
-    try:
-        with open(path, "r", encoding="utf-8") as input_file:
-            return json.load(input_file)
-    except (OSError, json.JSONDecodeError):
-        return None
+def _read_json_file(path: str, *, protect_plaintext_on_read: bool = False) -> Any:
+    return read_secret_json_file(
+        path,
+        protect_plaintext_on_read=protect_plaintext_on_read,
+    )
 
 
 def _write_json_file(path: str, value: Any) -> None:
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, "w", encoding="utf-8") as output_file:
-        json.dump(value, output_file, indent=2, sort_keys=True)
-        output_file.write("\n")
+    write_secret_json_file(path, value)
 
 
 def _delete_if_exists(path: str) -> None:
@@ -354,7 +376,12 @@ def _coerce_hex_bytes(value: Any) -> bytes:
         return b""
     if text.startswith("0x") or text.startswith("0X"):
         text = text[2:]
-    return bytes.fromhex(text)
+    if len(text) % 2 != 0:
+        return b""
+    try:
+        return bytes.fromhex(text)
+    except ValueError:
+        return b""
 
 
 def _coerce_optional_int(value: Any) -> int | None:
@@ -364,3 +391,48 @@ def _coerce_optional_int(value: Any) -> int | None:
         return int(value)
     except (TypeError, ValueError):
         return None
+
+
+def _serialize_profile_auth(config: SimProfileAuthConfig | None) -> dict[str, Any] | None:
+    if config is None:
+        return None
+    return {
+        "algorithm": str(config.algorithm or "").strip().lower(),
+        "ki_hex": bytes(config.ki or b"").hex().upper(),
+        "opc_hex": bytes(config.opc or b"").hex().upper(),
+        "op_hex": bytes(config.op or b"").hex().upper(),
+        "amf_hex": bytes(config.amf or b"").hex().upper(),
+        "sqn_hex": bytes(config.sqn or b"").hex().upper(),
+        "number_of_keccak": int(getattr(config, "number_of_keccak", 1) or 1),
+        "auth_counter_max_hex": bytes(getattr(config, "auth_counter_max", b"") or b"").hex().upper(),
+    }
+
+
+def _deserialize_profile_auth(value: Any) -> SimProfileAuthConfig | None:
+    if isinstance(value, dict) is False:
+        return None
+    config = SimProfileAuthConfig()
+    algorithm = str(value.get("algorithm", config.algorithm)).strip().lower()
+    if len(algorithm) > 0:
+        config.algorithm = algorithm
+    for field_name, key_name in (
+        ("ki", "ki_hex"),
+        ("opc", "opc_hex"),
+        ("op", "op_hex"),
+        ("amf", "amf_hex"),
+        ("sqn", "sqn_hex"),
+        ("auth_counter_max", "auth_counter_max_hex"),
+    ):
+        if key_name not in value:
+            continue
+        setattr(config, field_name, _coerce_hex_bytes(value.get(key_name)))
+    number_of_keccak_raw = value.get("number_of_keccak")
+    if number_of_keccak_raw is not None:
+        try:
+            keccak_value = int(number_of_keccak_raw)
+        except (TypeError, ValueError):
+            keccak_value = 1
+        # TS 35.231 Annex A bounds numberOfKeccak to [1, 255].
+        keccak_value = max(1, min(0xFF, keccak_value))
+        config.number_of_keccak = keccak_value
+    return config

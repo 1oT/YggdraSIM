@@ -17,6 +17,38 @@ Plugin discovery follows the active runtime root:
 That means the same capability can be developed in-tree during source work and
 then dropped into the writable runtime tree for packaged builds.
 
+## Load posture (default-on)
+
+The plugin manager loads every `.py` file (or package directory) it finds under
+the active runtime root's `plugins/`. Two env flags adjust the posture:
+
+1. `YGGDRASIM_DISALLOW_PLUGINS=1` — hard-lock. Refuses every plugin,
+   including the first-party `polling_plugin.py`. Intended for
+   attestation / CI / air-gapped deployments where no out-of-tree
+   Python may execute at startup.
+2. `YGGDRASIM_ALLOW_PLUGINS=0` (or `false`/`no`/`off`) — explicit
+   opt-out, equivalent to the disallow flag. Kept for backward compat
+   with prior deployments that were already pinned to the old
+   opt-in-only behavior.
+3. `YGGDRASIM_ALLOW_PLUGINS=1` — explicit opt-in. Redundant now that
+   the default is on, still honoured.
+
+On first successful load the manager emits a one-line stderr note listing the
+module file names. Operators can eyeball the line at shell startup to confirm
+which plugins are executing. Example:
+
+```
+[plugins] loaded 1: __init__.py (hard-lock with YGGDRASIM_DISALLOW_PLUGINS=1).
+```
+
+The first-party `polling` plugin ships as a directory package
+(`plugins/polling/`) so the canonical label is the package's
+`__init__.py`. Legacy single-file plugins (`plugins/<name>.py`) still
+appear under their module filename.
+
+When loading is hard-locked the manager records a `__gate__` entry in
+`plugin_load_errors()` pointing at the responsible env flag.
+
 ## Loader contract
 
 The current loader accepts either:
@@ -73,13 +105,22 @@ Current plugin-owned command families:
 - relay `POLL` on `SCP11/live`
 - relay `POLL` on `SCP11/test`
 - localized `IPAE-LIVE` / `IPAE-TEST` on `SCP11/eim_local`
+- localized `IPAD-LIVE` / `IPAD-TEST` on `SCP11/eim_local`
+- BIP-over-WiFi / Ethernet polling bridge (`LocalizedPollingBridge`
+  at `plugins/polling/wifi_ethernet_bridge.py` — the patentable
+  loopback DNS / TLS / HTTP emulation lives here and nowhere else)
+- SIM-side IPAE emulation extension
+  (`plugins/polling/sim_toolkit_ipae.py`) which attaches to
+  `SIMCARD.toolkit.ToolkitLogic` via `extend_target` and owns the
+  DNS query, TLS handshake, and HTTP/1.1 request-parser state
+  machine originally embedded in the core toolkit
 
 Operator-facing references for those command families:
 
 - `../SCP11/live/README.md`
 - `../SCP11/test/README.md`
 - `../SCP11/eim_local/GUIDE.md`
-- `../PROFILE_LIFECYCLE_CLI_CHEATSHEET.md`
+- `../guides/PROFILE_LIFECYCLE_CLI_CHEATSHEET.md`
 
 ## Publication model
 
@@ -117,3 +158,38 @@ def register_plugins(manager):
 - Do not assume tracked bundle paths when the same plugin must work in frozen
   builds.
 - Keep operator-facing help owned by the plugin when the feature is optional.
+
+## Polling plugin layout
+
+`plugins/polling/` holds the first-party polling capability. It is
+deliberately split so the patentable surface can be excised in one
+`rm -rf` without touching the core SIM simulator:
+
+| File | Purpose |
+| --- | --- |
+| `__init__.py` | Aggregates `PollingCapability`, wires `extend_target` for `SCP11Console` / `EimLocalShell` / `ToolkitLogic` |
+| `watchdog.py` | Poll-watchdog runtimes + timer / STK envelope helpers |
+| `wifi_ethernet_bridge.py` | **Patentable.** BIP-over-WiFi/Ethernet loopback DNS/TLS/HTTP bridge |
+| `ipad_standalone.py` | `LocalizedIPAdRunner` and `LocalizedRelayApduChannel` (bridge-backed IPAd flow) |
+| `sim_toolkit_ipae.py` | SIM-side IPAE emulation (DNS / TLS / HTTP state machine) plugged into `ToolkitLogic` |
+| `shell_lifecycle.py` | Shell-scope helpers (`_ensure_poll_bridge`, IPAD-* command handlers, bridge status payload) |
+| `session.py` | Thin `EimLocalSession` proxy for plugin-internal construction |
+| `stk_polling_mixin.py` | Legacy `LiveStkPollingMixin` shim kept empty for registry compatibility |
+
+### Absent-plugin contract
+
+Without the polling plugin installed:
+
+- `ToolkitLogic` has zero IPAE-specific attributes — no
+  `set_localized_poll_bridge`, no `eim_poll_*` state, no DNS / TLS /
+  HTTP client behavior. The simulated UICC speaks only generic
+  STK / BIP framework and plain ES8+ APDUs.
+- `SimToolkitState` has no `eim_poll_*` fields (guarded by
+  `tests/test_polling_plugin_absence_guard.py`).
+- `EimLocalShell` commands `IPAD-LIVE` / `IPAD-TEST` / `IPAE-LIVE` /
+  `IPAE-TEST` / `POLL` raise a plain `RuntimeError` explaining the
+  capability is plugin-provided. `IPAD-DISCOVER` still works (ASN.1
+  ES9+ `GetEimPackage`, no bridge traffic).
+- `SCP11/{live,test}` orchestrators no longer carry
+  `localized_poll_bridge`; ES9+ request building works as specified
+  in SGP.32 §3 without any loopback bridge dependency.

@@ -1,3 +1,4 @@
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -8,6 +9,7 @@ import yggdrasim_common.plugin_runtime as plugin_runtime
 import yggdrasim_common.polling_plugin_support as polling_plugin_support
 import yggdrasim_common.quit_control as quit_control
 import yggdrasim_common.registry as registry
+import yggdrasim_common.console_scripts as console_scripts
 
 
 class PluginRuntimeTests(unittest.TestCase):
@@ -26,7 +28,11 @@ class PluginRuntimeTests(unittest.TestCase):
             )
 
             manager = plugin_runtime.PluginManager()
-            with mock.patch.object(
+            with mock.patch.dict(
+                os.environ,
+                {"YGGDRASIM_ALLOW_PLUGINS": "1"},
+                clear=False,
+            ), mock.patch.object(
                 plugin_runtime,
                 "ensure_runtime_dir",
                 return_value=str(plugin_dir),
@@ -49,7 +55,11 @@ class PluginRuntimeTests(unittest.TestCase):
             )
 
             manager = plugin_runtime.PluginManager()
-            with mock.patch.object(
+            with mock.patch.dict(
+                os.environ,
+                {"YGGDRASIM_ALLOW_PLUGINS": "1"},
+                clear=False,
+            ), mock.patch.object(
                 plugin_runtime,
                 "ensure_runtime_dir",
                 return_value=str(plugin_dir),
@@ -91,6 +101,47 @@ class RegistryTests(unittest.TestCase):
         self.assertTrue(any(name == "SCP80" for name, _ in subsystems))
 
 
+class ConsoleScriptTests(unittest.TestCase):
+    def test_invoke_returns_zero_for_none_result(self) -> None:
+        fake_module = SimpleNamespace(entry=lambda: None)
+        with mock.patch.object(console_scripts.importlib, "import_module", return_value=fake_module):
+            self.assertEqual(console_scripts._invoke("fake.module", "entry"), 0)
+
+    def test_invoke_returns_integer_result(self) -> None:
+        fake_module = SimpleNamespace(entry=lambda: 7)
+        with mock.patch.object(console_scripts.importlib, "import_module", return_value=fake_module):
+            self.assertEqual(console_scripts._invoke("fake.module", "entry"), 7)
+
+    def test_invoke_maps_quit_request_to_zero(self) -> None:
+        def _raise_quit() -> None:
+            raise quit_control.QuitAllRequested()
+
+        fake_module = SimpleNamespace(entry=_raise_quit)
+        with mock.patch.object(console_scripts.importlib, "import_module", return_value=fake_module):
+            self.assertEqual(console_scripts._invoke("fake.module", "entry"), 0)
+
+    def test_console_scripts_dispatch_expected_targets(self) -> None:
+        expected_targets = {
+            "scp03": ("SCP03.main", "run_standalone"),
+            "scp80": ("SCP80.main", "run_standalone"),
+            "scp11": ("SCP11.main", "entry"),
+            "scp11_live": ("SCP11.live.main", "entry"),
+            "scp11_test": ("SCP11.test.main", "entry"),
+            "scp11_relay": ("SCP11.relay.main", "entry"),
+            "scp11_local_access": ("SCP11.local_access.main", "run_standalone"),
+            "scp11_eim_local": ("SCP11.eim_local.main", "run_standalone"),
+            "profile_package": ("Tools.ProfilePackage.main", "run_standalone"),
+            "suci_tool": ("Tools.SuciTool.main", "run_standalone"),
+        }
+
+        for function_name, expected in expected_targets.items():
+            with self.subTest(function=function_name):
+                with mock.patch.object(console_scripts, "_invoke", return_value=0) as mocked:
+                    result = getattr(console_scripts, function_name)()
+                self.assertEqual(result, 0)
+                mocked.assert_called_once_with(*expected)
+
+
 class QuitControlTests(unittest.TestCase):
     def test_quit_all_raises_control_exception(self) -> None:
         with self.assertRaises(quit_control.QuitAllRequested):
@@ -100,7 +151,7 @@ class QuitControlTests(unittest.TestCase):
 class PollingPluginSupportTests(unittest.TestCase):
     def test_require_polling_plugin_raises_when_missing(self) -> None:
         with mock.patch.object(polling_plugin_support, "get_capability", return_value=None):
-            with self.assertRaisesRegex(RuntimeError, "optional plugin"):
+            with self.assertRaisesRegex(RuntimeError, "Polling capability is not installed"):
                 polling_plugin_support.require_polling_plugin()
 
     def test_dispatch_poll_command_normalizes_surface_and_command_name(self) -> None:
@@ -146,23 +197,6 @@ class PollingPluginSupportTests(unittest.TestCase):
                 polling_plugin_support.parse_eim_local_ipae_args("--debug"),
                 (5, 40, True),
             )
-
-    def test_install_poll_method_stubs_dispatches_to_plugin_runtime(self) -> None:
-        class DummySurface:
-            pass
-
-        polling_plugin_support.install_poll_method_stubs(DummySurface)
-        surface = DummySurface()
-
-        with mock.patch.object(
-            polling_plugin_support,
-            "dispatch_poll_method",
-            return_value=("ok",),
-        ) as dispatch:
-            result = surface._decode_stk_timer_value_seconds("AA")
-
-        self.assertEqual(result, ("ok",))
-        dispatch.assert_called_once_with(surface, "_decode_stk_timer_value_seconds", "AA")
 
 
 if __name__ == "__main__":

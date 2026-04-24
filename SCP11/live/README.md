@@ -39,7 +39,7 @@ python -m SCP11.live --cmd "DOWNLOAD-PROFILE LPA:1$SMDP.EXAMPLE$TOKEN; STATUS; E
 python -m SCP11.live --cmd "POLL 3 30 --debug; EXIT"
 ```
 
-See `../../PROFILE_LIFECYCLE_CLI_CHEATSHEET.md` for ready-to-paste lifecycle
+See `../../guides/PROFILE_LIFECYCLE_CLI_CHEATSHEET.md` for ready-to-paste lifecycle
 sequences and log-capture patterns.
 
 ## Startup preflight
@@ -214,8 +214,8 @@ Practical rule:
 ## Related guides
 
 - `SCP11/README.md`
-- `../../CLI_AND_PIPING_GUIDE.md`
-- `../../PROFILE_LIFECYCLE_CLI_CHEATSHEET.md`
+- `../../guides/CLI_AND_PIPING_GUIDE.md`
+- `../../guides/PROFILE_LIFECYCLE_CLI_CHEATSHEET.md`
 - `SCP11/test/README.md`
 - `SCP11/local_access/README.md`
 - `SCP11/eim_local/README.md`

@@ -1,0 +1,92 @@
+import io
+import unittest
+from contextlib import redirect_stdout
+
+from SCP03.logic.security import AUTH_TEST_VECTOR, SecurityController
+
+
+class _UnexpectedTransmitTransport:
+    def transmit(self, *_args, **_kwargs):
+        raise AssertionError("RUN-AUTH-TEST should not hit live transport in offline mode.")
+
+
+class SecurityControllerOfflineAuthTests(unittest.TestCase):
+    def test_derive_opc_matches_reference_vector(self) -> None:
+        derived = SecurityController.derive_opc(
+            AUTH_TEST_VECTOR["Ki"],
+            AUTH_TEST_VECTOR["OP"],
+        )
+
+        self.assertEqual(derived, AUTH_TEST_VECTOR["OPc"])
+
+    def test_compute_offline_milenage_vector_matches_reference_values(self) -> None:
+        report = SecurityController.compute_offline_milenage_vector(
+            AUTH_TEST_VECTOR["RAND"],
+            AUTH_TEST_VECTOR["Ki"],
+            op_hex=AUTH_TEST_VECTOR["OP"],
+        )
+
+        self.assertEqual(report.opc, AUTH_TEST_VECTOR["OPc"])
+        self.assertEqual(report.res, AUTH_TEST_VECTOR["RES"])
+        self.assertEqual(report.ck, AUTH_TEST_VECTOR["CK"])
+        self.assertEqual(report.ik, AUTH_TEST_VECTOR["IK"])
+        self.assertEqual(report.kc, AUTH_TEST_VECTOR["Kc"])
+
+    def test_build_auth_test_usim_exchange_matches_reference_wire_format(self) -> None:
+        exchange = SecurityController.build_auth_test_usim_exchange()
+
+        self.assertEqual(exchange.result, "success")
+        self.assertEqual(exchange.autn, AUTH_TEST_VECTOR["AUTN"])
+        self.assertEqual(exchange.command_apdu, AUTH_TEST_VECTOR["USIM_AUTH_APDU"])
+        self.assertEqual(exchange.response_payload, AUTH_TEST_VECTOR["USIM_AUTH_RESPONSE"])
+        self.assertEqual(exchange.response_apdu, AUTH_TEST_VECTOR["USIM_AUTH_RESPONSE"] + "9000")
+        self.assertEqual(exchange.current_sqn, AUTH_TEST_VECTOR["SQN"])
+        self.assertEqual(exchange.recovered_sqn, AUTH_TEST_VECTOR["SQN"])
+        self.assertEqual(exchange.next_sqn, "000000000002")
+
+    def test_validate_offline_usim_auth_apdu_detects_sync_failure(self) -> None:
+        exchange = SecurityController.validate_offline_usim_auth_apdu(
+            AUTH_TEST_VECTOR["USIM_AUTH_APDU"],
+            AUTH_TEST_VECTOR["Ki"],
+            current_sqn_hex="000000000002",
+            op_hex=AUTH_TEST_VECTOR["OP"],
+        )
+
+        self.assertEqual(exchange.result, "sync_failure")
+        self.assertEqual(exchange.status_word, "9000")
+        self.assertEqual(exchange.auts, "451E8BECA43968AC6493B0A408B0")
+        self.assertEqual(exchange.response_payload, "DC0E451E8BECA43968AC6493B0A408B0")
+        self.assertEqual(exchange.response_apdu, "DC0E451E8BECA43968AC6493B0A408B09000")
+        self.assertEqual(exchange.next_sqn, "000000000002")
+
+    def test_validate_offline_usim_auth_apdu_detects_mac_failure(self) -> None:
+        tampered_apdu = AUTH_TEST_VECTOR["USIM_AUTH_APDU"][:-4] + "FF00"
+        exchange = SecurityController.validate_offline_usim_auth_apdu(
+            tampered_apdu,
+            AUTH_TEST_VECTOR["Ki"],
+            current_sqn_hex=AUTH_TEST_VECTOR["SQN"],
+            op_hex=AUTH_TEST_VECTOR["OP"],
+        )
+
+        self.assertEqual(exchange.result, "mac_failure")
+        self.assertEqual(exchange.status_word, "9862")
+        self.assertEqual(exchange.response_payload, "")
+        self.assertEqual(exchange.response_apdu, "9862")
+
+    def test_run_auth_test_vector_is_offline_only(self) -> None:
+        controller = SecurityController(_UnexpectedTransmitTransport())
+
+        output = io.StringIO()
+        with redirect_stdout(output):
+            controller.run_auth_test_vector()
+
+        rendered = output.getvalue()
+        self.assertIn("Offline vector check complete", rendered)
+        self.assertIn(AUTH_TEST_VECTOR["Kc"], rendered)
+        self.assertIn("OPc check:", rendered)
+        self.assertIn("00 88 APDU (derived):", rendered)
+        self.assertIn("Response check:", rendered)
+
+
+if __name__ == "__main__":
+    unittest.main()

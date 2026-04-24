@@ -2,6 +2,7 @@ import os
 from typing import Any, List, Optional
 
 from cryptography import x509 as crypto_x509
+from yggdrasim_common.process_debug import suppress_noisy_crypto_warnings
 
 try:
     from ..pysim_path import ensure_repo_pysim_on_path
@@ -272,10 +273,11 @@ def _load_pem_certificates(bundle_path: str) -> List[crypto_x509.Certificate]:
     certificates = []
     marker = b"-----END CERTIFICATE-----"
     segments = bundle_data.split(marker)
-    for segment in segments:
-        cleaned = segment.strip()
-        if len(cleaned) == 0:
-            continue
-        pem_bytes = cleaned + b"\n" + marker + b"\n"
-        certificates.append(crypto_x509.load_pem_x509_certificate(pem_bytes))
+    with suppress_noisy_crypto_warnings():
+        for segment in segments:
+            cleaned = segment.strip()
+            if len(cleaned) == 0:
+                continue
+            pem_bytes = cleaned + b"\n" + marker + b"\n"
+            certificates.append(crypto_x509.load_pem_x509_certificate(pem_bytes))
     return certificates

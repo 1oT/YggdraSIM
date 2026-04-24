@@ -1,0 +1,253 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "yggdrasim"
+version = "2026.4.10"
+description = "YggdraSIM secure-element, eUICC, OTA, and SAIP toolkit."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { file = "LICENSE" }
+authors = [
+    { name = "Hampus Hellsberg" },
+]
+maintainers = [
+    { name = "1oT OÜ" },
+    { name = "Hampus Hellsberg" },
+]
+keywords = [
+    "sim",
+    "euicc",
+    "esim",
+    "uicc",
+    "smartcard",
+    "globalplatform",
+    "scp03",
+    "scp11",
+    "scp80",
+    "saip",
+    "sgp22",
+    "sgp32",
+    "iso7816",
+    "etsi",
+    "3gpp",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Telecommunications Industry",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: GNU General Public License v3 or later (GPLv3+)",
+    "Operating System :: POSIX :: Linux",
+    "Operating System :: MacOS",
+    "Operating System :: Microsoft :: Windows",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Communications",
+    "Topic :: Security :: Cryptography",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: System :: Hardware",
+]
+# Core dependencies are kept cross-platform. Linux-only packages and the
+# HIL bridge runtime live under optional extras so Windows, macOS, and
+# Raspberry Pi installs stay lean. See guides/INSTALL_CLEAN.md and
+# guides/INSTALL_FULL.md for the two supported bundling paths.
+dependencies = [
+    "pyscard",
+    "cryptography",
+    "pycryptodome",
+    "pycryptodomex",
+    "pyserial",
+    "pytlv",
+    "asn1crypto",
+    "asn1tools",
+    "jsonpath-ng",
+    "construct>=2.10.70",
+    "bidict",
+    "pyosmocom>=0.0.12",
+    "cmd2>=2.6.2,<3.0",
+    "termcolor",
+    "colorlog",
+    "packaging",
+    "pyyaml",
+    "textual>=0.47.0",
+]
+
+[project.optional-dependencies]
+# Adds the hardware-in-the-loop bridge dependency stack. pyudev only has
+# Linux wheels, so we gate it by platform to keep Windows / macOS installs
+# from failing even when the extra is requested accidentally.
+hil = [
+    "pyudev; sys_platform == 'linux'",
+]
+# Packaging-side tools used when building the bundled executable.
+build = [
+    "pyinstaller",
+]
+# Test-only dependencies.
+test = [
+    "pytest",
+]
+# Legacy alias kept for backwards compatibility with earlier onboarding
+# scripts that call ``pip install -e '.[dev]'``.
+dev = [
+    "pyinstaller",
+    "pytest",
+]
+# Documentation-site tooling. Mirrors ``requirements-docs.txt`` so
+# ``pip install yggdrasim[docs]`` alone is sufficient for running
+# ``mkdocs build``/``mkdocs serve`` from a fresh checkout.
+docs = [
+    "mkdocs>=1.6",
+    "mkdocs-material>=9.6",
+    "pymdown-extensions>=10.13",
+]
+# ``saip`` pulls upstream pySim directly from git. The Osmocom SAIP
+# stack (``pySim.esim.saip``, ``pySim.esim.compile_asn1_subdir``,
+# ``pySim.esim.x509_cert``) is what the SCP11 local / eIM-local
+# flows, the SAIP transcode TUI, and the profile-scaffolding
+# wizards rely on. The upstream project does not publish wheels to
+# PyPI (the ``pySim`` name on PyPI belongs to an unrelated package,
+# ``pysimcard`` is the yanked 2021 snapshot), so this extra installs
+# the canonical tree from the GitHub mirror. Keeping it as an
+# optional extra means a fresh ``pip install yggdrasim`` still
+# works without a network round-trip to GitHub, but operators who
+# want the SAIP surfaces just run ``pip install 'yggdrasim[saip]'``
+# and stop having to clone ``pysim/`` by hand. The developer
+# checkout at ``<repo>/pysim`` is still honoured by
+# ``SCP11/pysim_path.py`` for people working against an unreleased
+# upstream branch.
+saip = [
+    "pySim @ git+https://github.com/osmocom/pysim.git",
+]
+# ``gui`` pulls the FastAPI + uvicorn + pywebview stack for the
+# desktop ``--gui`` flow (R2-004). ``gui-server`` intentionally omits
+# pywebview so a headless lab server (``--web-server``) does not need
+# GTK / Qt / WebKit on the host. Both extras are additive; a host
+# that wants the native desktop window and the remote API installs
+# ``yggdrasim[gui]`` (pywebview implies the server deps). See
+# ``V2_UNIVERSAL_GUI_PLAN.md`` §11.
+gui = [
+    "fastapi>=0.110,<1.0",
+    "uvicorn[standard]>=0.27,<1.0",
+    "pywebview>=5.0,<6.0",
+    "websockets>=12.0,<14.0",
+]
+gui-server = [
+    "fastapi>=0.110,<1.0",
+    "uvicorn[standard]>=0.27,<1.0",
+    "websockets>=12.0,<14.0",
+]
+# ``full`` is the HIL-capable development profile: everything the
+# maintainer needs on a Linux box to run, build, and test the suite.
+# ``full`` now includes the SAIP surface so a single ``pip install
+# 'yggdrasim[full]'`` leaves nothing optional to chase afterwards.
+full = [
+    "pyudev; sys_platform == 'linux'",
+    "pyinstaller",
+    "pytest",
+    "pySim @ git+https://github.com/osmocom/pysim.git",
+]
+
+[project.scripts]
+yggdrasim-scp03 = "yggdrasim_common.console_scripts:scp03"
+yggdrasim-scp80 = "yggdrasim_common.console_scripts:scp80"
+yggdrasim-scp11 = "yggdrasim_common.console_scripts:scp11"
+yggdrasim-scp11-live = "yggdrasim_common.console_scripts:scp11_live"
+yggdrasim-scp11-test = "yggdrasim_common.console_scripts:scp11_test"
+yggdrasim-scp11-relay = "yggdrasim_common.console_scripts:scp11_relay"
+yggdrasim-scp11-local-access = "yggdrasim_common.console_scripts:scp11_local_access"
+yggdrasim-scp11-eim-local = "yggdrasim_common.console_scripts:scp11_eim_local"
+yggdrasim-hil-bridge = "yggdrasim_common.console_scripts:hil_bridge"
+yggdrasim-hil-supervisor = "yggdrasim_common.console_scripts:hil_bridge_supervisor"
+yggdrasim-profile-package = "yggdrasim_common.console_scripts:profile_package"
+yggdrasim-suci-tool = "yggdrasim_common.console_scripts:suci_tool"
+yggdrasim-profile-autoload = "yggdrasim_common.console_scripts:profile_autoload"
+yggdrasim-apdu-fuzzer = "yggdrasim_common.console_scripts:apdu_fuzzer"
+yggdrasim-eum-diag = "yggdrasim_common.console_scripts:eum_diag"
+
+[project.urls]
+Homepage = "https://github.com/hampushellsberg-dev/YggdraSIM"
+Documentation = "https://github.com/hampushellsberg-dev/YggdraSIM/tree/main/guides"
+Repository = "https://github.com/hampushellsberg-dev/YggdraSIM"
+Issues = "https://github.com/hampushellsberg-dev/YggdraSIM/issues"
+Changelog = "https://github.com/hampushellsberg-dev/YggdraSIM/blob/main/V1_RELEASE_AUDIT.md"
+
+[tool.setuptools]
+include-package-data = true
+
+[tool.setuptools.package-data]
+# The HIL bridge ships a vendored copy of the RSPRO schema so that an
+# installed wheel (``pip install yggdrasim``) can load it even when the
+# source tree's ``docs/`` folder is not on disk. The canonical copy
+# lives in ``docs/RSPRO.asn``; ``Tools/HilBridge/RSPRO.asn`` is a mirror
+# that is ``cp``-refreshed from it as part of the release procedure.
+"Tools.HilBridge" = ["RSPRO.asn"]
+# The EUM diagnostics dissector is a Lua script that tshark loads at
+# runtime via ``-X lua_script:...``. Shipping it as package-data means
+# the wheel can resolve its location via ``importlib.resources`` even
+# when the source tree is not on disk.
+"Tools.EumDiag" = ["dissector.lua"]
+
+[tool.black]
+# Canonical formatter target for the "style only" sweep flagged by audit
+# item SCP03-P1-03 (and the sibling SCP80-P1-04 / MAIN-P1-03 requests to
+# run the same pass across SCP80/ and main/). Line length matches the
+# project's historical cap; keep this section in sync with the maintainer
+# ruling before the sweep lands. Target version is fixed to the project's
+# minimum supported Python (3.10) so the output is stable across the
+# release matrix.
+line-length = 100
+target-version = ["py310"]
+include = '\.pyi?$'
+extend-exclude = '''
+/(
+    \.git
+  | \.pytest_cache
+  | build
+  | dist
+  | site-docs
+  | trace
+  | Workspace
+  | YggdraSIM-data
+  | yggdrasim\.egg-info
+)/
+'''
+
+[tool.pytest.ini_options]
+# ``slow`` quarantines long-running integration-style tests that exercise
+# the pySim ASN.1 / SAIP decoder on production-sized UPPs. They are
+# excluded from the default ``pytest`` run so the suite stays responsive
+# on modest workstations, and opt-in via ``pytest --runslow`` when a full
+# release validation is wanted (see tests/conftest.py).
+markers = [
+    "slow: opt-in marker for long-running profile-decode tests",
+]
+# Deterministic defaults for the pytest suite. Tests run in quiet mode
+# with short tracebacks so a broken run cannot flood the terminal, and
+# warnings are silenced because construct and cmd2 still emit
+# DeprecationWarnings on Python 3.12+ that the project cannot influence.
+# See site-docs/internals/testing-guide.md for the full testing policy
+# (narrow targets, 90 s wall-time cap, redirected logs).
+testpaths = ["tests"]
+addopts = "-q --tb=short --disable-warnings --no-header"
+filterwarnings = [
+    "ignore::DeprecationWarning:construct",
+    "ignore::DeprecationWarning:cmd2",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = [
+    "SCP03*",
+    "SCP80*",
+    "SCP11*",
+    "SIMCARD*",
+    "Tools*",
+    "yggdrasim_common*",
+]

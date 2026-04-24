@@ -2,7 +2,7 @@
 # YggdraSIM code registry: locate entry points, classes, and callables without
 # walking the tree. Symbols resolve via importlib (lazy; nothing heavy at import).
 #
-# Usage (repository root on sys.path, e.g. PYTHONPATH=.):
+# Usage (editable-installed, or repository root on sys.path):
 #   from yggdrasim_common.registry import get, search, resolve, REPO_ROOT
 #   fn = get("main.launcher.scp03")
 #   for key, target in search("orchestrator"):
@@ -34,11 +34,12 @@ SUBSYSTEMS: dict[str, str] = {
     "SCP11.shared": "Cross-flavour crypto, transport helpers, ASN.1 registry, GSMA error codes.",
     "Tools.ProfilePackage": "SAIP / UPP shell, saip-tool bridge, lint engine, JSON↔DER transcode.",
     "Tools.SuciTool": "SUCI-related helper shell.",
+    "gui_server": "Optional universal GUI layer (R2-004): FastAPI API + pywebview desktop window + headless lab server.",
     "tests": "pytest modules under tests/ (not registered as symbols; discover by filename).",
-    "pysim": "Vendored pySim tree (upstream osmocom); prefer Tools.ProfilePackage for SAIP glue.",
+    "pysim": "Optional on-disk pySim checkout (upstream osmocom, gitignored). Clone https://gitlab.com/osmocom/pysim.git when the SAIP ASN.1 compile / SCP11-local flows are needed; prefer Tools.ProfilePackage for SAIP glue.",
 }
 
-# Runnable packages (python -m … from REPO_ROOT with PYTHONPATH=.).
+# Runnable packages (python -m … after editable install, or from repo root).
 CLI_MODULES: list[str] = [
     "SCP03",
     "SCP80",
@@ -119,7 +120,6 @@ SYMBOL_REGISTRY: dict[str, str] = {
     "scp11.live.payload_builder": "SCP11.live.payload_builder:PayloadBuilder",
     "scp11.live.asn1_registry": "SCP11.live.asn1_registry:ASN1Registry",
     "scp11.live.eim_packages": "SCP11.live.eim_packages:ParsedEimPackage",
-    "scp11.live.stk_polling": "SCP11.live.stk_polling:LiveStkPollingMixin",
     # --- SCP11 test ---
     "scp11.test.entry": "SCP11.test.main:entry",
     "scp11.test.orchestrator": "SCP11.test.orchestrator:SGP22Orchestrator",
@@ -168,6 +168,21 @@ SYMBOL_REGISTRY: dict[str, str] = {
     "tools.suci.entry": "Tools.SuciTool.main:entry",
     "tools.suci.entry_cmd": "Tools.SuciTool.main:entry_cmd",
     "tools.suci.run_standalone": "Tools.SuciTool.main:run_standalone",
+    # --- Universal GUI (R2-004, optional) ---
+    # These targets only resolve when the `gui` / `gui-server` extra is
+    # installed (fastapi + uvicorn, plus pywebview for desktop mode).
+    # They are listed here for discoverability; importing them without
+    # the extra raises ModuleNotFoundError.
+    "gui.config.build_desktop": "yggdrasim_common.gui_server.config:build_desktop_config",
+    "gui.config.build_server": "yggdrasim_common.gui_server.config:build_web_server_config",
+    "gui.config.dataclass": "yggdrasim_common.gui_server.config:GuiServerConfig",
+    "gui.auth.rate_limiter": "yggdrasim_common.gui_server.auth:FailureRateLimiter",
+    "gui.app.run_desktop": "yggdrasim_common.gui_server.app:run_desktop",
+    "gui.app.run_web_server": "yggdrasim_common.gui_server.app:run_web_server",
+    "gui.app.create_app": "yggdrasim_common.gui_server.app:create_app",
+    "gui.actions.registry": "yggdrasim_common.gui_server.actions.registry:get_registry",
+    "gui.actions.load_builtins": "yggdrasim_common.gui_server.actions.registry:ensure_builtin_actions_loaded",
+    "gui.sessions.manager": "yggdrasim_common.gui_server.sessions:get_manager",
 }
 
 
@@ -238,7 +253,10 @@ def iter_subsystems() -> Iterator[tuple[str, str]]:
 
 def describe_cli_modules() -> str:
     """One block of text listing suggested ``python -m`` invocations."""
-    lines = ["python -m <module>  (from repo root; set PYTHONPATH=.)", ""]
+    lines = [
+        "python -m <module>  (after pip install -e /path/to/YggdraSIM, or from repo root)",
+        "",
+    ]
     for name in CLI_MODULES:
         lines.append(f"  python -m {name}")
     return "\n".join(lines)

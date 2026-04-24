@@ -12,10 +12,9 @@
 # You should have received a copy of the GNU General Public License
 # along with this program. If not, see <https://www.gnu.org/licenses/>.
 #
-# Copyright (c) 2026 Hampus Hellsberg and contributors
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 # -----------------------------------------------------------------------------
 
-import binascii 
 import json 
 from typing import Dict ,Any ,List ,Optional 
 from SCP03 .core .utils import TlvParser 
@@ -591,7 +590,7 @@ class AdvancedDecoders :
                 if len (acts )>0 :
                     entry_str +=f" | AcT: {', '.join(acts)}"
                 if len (acts )==0 :
-                    entry_str +=f" | AcT: None"
+                    entry_str +=" | AcT: None"
 
             entries .append (entry_str )
 

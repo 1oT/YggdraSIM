@@ -49,6 +49,23 @@ class DummyTransport:
         return self.response
 
 
+class DummySequenceTransport:
+    def __init__(self, responses: list[tuple[bytes, int, int]]):
+        self.responses = list(responses)
+        self.calls: list[tuple[str, bool]] = []
+        self.reset_calls = 0
+
+    def transmit(self, line: str, silent: bool = False):
+        self.calls.append((line, silent))
+        if len(self.responses) == 0:
+            raise AssertionError("No queued APDU response")
+        return self.responses.pop(0)
+
+    def reset(self) -> bool:
+        self.reset_calls += 1
+        return True
+
+
 class ShellDispatcherCommandRegistryTests(unittest.TestCase):
     def test_arg_requirements_are_disjoint_and_known(self) -> None:
         command_map = CommandRegistry.build(_CallableProxy())
@@ -129,6 +146,15 @@ class ShellDispatcherExecLineTests(unittest.TestCase):
         self.assertEqual(shell.transport.calls, [("00A4040000", False)])
         self.assertEqual(shell.synced, [(bytes.fromhex("00A4040000"), b"\xAA\xBB")])
 
+    def test_unknown_spaced_hex_apdu_transmits_and_syncs_on_success(self) -> None:
+        shell = self._make_shell()
+        shell.transport = DummyTransport((b"\xAA\xBB", 0x90, 0x00))
+
+        shell._exec_line("00 A4 04 00 00")
+
+        self.assertEqual(shell.transport.calls, [("00 A4 04 00 00", False)])
+        self.assertEqual(shell.synced, [(bytes.fromhex("00A4040000"), b"\xAA\xBB")])
+
     def test_unknown_hex_apdu_does_not_sync_on_failure_status(self) -> None:
         shell = self._make_shell()
         shell.transport = DummyTransport((b"", 0x6A, 0x82))
@@ -146,6 +172,53 @@ class ShellDispatcherExecLineTests(unittest.TestCase):
             shell._exec_line("NOT-A-COMMAND")
 
         self.assertIn("Unknown command: NOT-A-COMMAND", buffer.getvalue())
+
+
+class ShellDispatcherIdentityProbeTests(unittest.TestCase):
+    @staticmethod
+    def _make_shell(transport) -> ShellDispatcher:
+        shell = ShellDispatcher.__new__(ShellDispatcher)
+        shell.transport = transport
+        shell.current_iccid = ""
+        return shell
+
+    def test_read_live_iccid_accepts_warning_status_with_data(self) -> None:
+        shell = self._make_shell(
+            DummySequenceTransport(
+                [
+                    (b"", 0x90, 0x00),
+                    (b"", 0x90, 0x00),
+                    (bytes.fromhex("98010300005089547021"), 0x62, 0x82),
+                ]
+            )
+        )
+
+        iccid = shell._read_live_iccid()
+
+        self.assertEqual(iccid, "89103000000598450712")
+        self.assertEqual(
+            shell.transport.calls,
+            [
+                ("00A40004023F00", True),
+                ("00A40004022FE2", True),
+                ("00B000000A", True),
+            ],
+        )
+
+    def test_read_live_iccid_accepts_9f_select_status(self) -> None:
+        shell = self._make_shell(
+            DummySequenceTransport(
+                [
+                    (b"", 0x90, 0x00),
+                    (b"", 0x9F, 0x10),
+                    (bytes.fromhex("98010300005089547021"), 0x90, 0x00),
+                ]
+            )
+        )
+
+        iccid = shell._read_live_iccid()
+
+        self.assertEqual(iccid, "89103000000598450712")
 
 
 class ShellDispatcherPromptStateTests(unittest.TestCase):

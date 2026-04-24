@@ -15,6 +15,90 @@ from .saip_json_codec import transcode_sidecar_paths
 _DEFAULT_TOOL_TIMEOUT_SECONDS = 60
 _TOOL_TIMEOUT_ENV = "YGGDRASIM_SAIP_TOOL_TIMEOUT_SECONDS"
 
+# ``.profilepackage-cache/`` holds hex-to-DER conversions. One cache file per
+# distinct input path + payload digest; over a long-running maintainer
+# workflow these accumulate and the directory balloons. The soft cap keeps
+# the most recently used ``_MAX_CACHE_FILES`` entries and drops older ones.
+_MAX_CACHE_FILES = 64
+_CACHE_MAX_BYTES_ENV = "YGGDRASIM_SAIP_TOOL_CACHE_MAX_BYTES"
+_DEFAULT_CACHE_MAX_BYTES = 256 * 1024 * 1024
+
+
+def _resolve_cache_max_bytes() -> int:
+    raw = str(os.environ.get(_CACHE_MAX_BYTES_ENV, "") or "").strip()
+    if len(raw) == 0:
+        return _DEFAULT_CACHE_MAX_BYTES
+    try:
+        parsed = int(raw)
+    except ValueError:
+        return _DEFAULT_CACHE_MAX_BYTES
+    if parsed <= 0:
+        return _DEFAULT_CACHE_MAX_BYTES
+    return parsed
+
+
+def _prune_profile_package_cache(cache_dir: Path, *, keep: Path) -> None:
+    """Best-effort LRU-style prune of the hex-to-DER cache.
+
+    Keeps the file we just wrote (``keep``) plus the newest
+    ``_MAX_CACHE_FILES - 1`` cache entries, subject to a total-size budget
+    configured via ``YGGDRASIM_SAIP_TOOL_CACHE_MAX_BYTES``. Errors are
+    swallowed because the cache is purely advisory: the caller has already
+    materialised ``keep`` and needs to hand it to saip-tool regardless.
+    """
+    try:
+        entries: list[tuple[float, int, Path]] = []
+        for candidate in cache_dir.iterdir():
+            if candidate.is_file() is False:
+                continue
+            if candidate.suffix.lower() != ".der":
+                continue
+            try:
+                stat_result = candidate.stat()
+            except OSError:
+                continue
+            entries.append((stat_result.st_mtime, stat_result.st_size, candidate))
+    except OSError:
+        return
+
+    if len(entries) == 0:
+        return
+
+    try:
+        kept_resolved = keep.resolve()
+    except OSError:
+        kept_resolved = keep
+
+    entries.sort(key=lambda item: item[0], reverse=True)
+    max_bytes = _resolve_cache_max_bytes()
+    keepers: list[Path] = []
+    doomed: list[Path] = []
+    running_bytes = 0
+    for _mtime, size, path in entries:
+        try:
+            path_resolved = path.resolve()
+        except OSError:
+            path_resolved = path
+        is_kept = path_resolved == kept_resolved
+        projected = running_bytes + size
+        would_exceed_count = len(keepers) >= _MAX_CACHE_FILES
+        would_exceed_bytes = projected > max_bytes
+        if is_kept:
+            keepers.append(path)
+            running_bytes = projected
+            continue
+        if would_exceed_count or would_exceed_bytes:
+            doomed.append(path)
+            continue
+        keepers.append(path)
+        running_bytes = projected
+
+    for path in doomed:
+        try:
+            path.unlink()
+        except OSError:
+            continue
+
 
 @dataclass
 class SaipCommandResult:
@@ -47,15 +131,144 @@ def _describe_exception_chain(error: BaseException) -> str:
 def _parse_timeout_seconds(raw_value: object) -> int:
     try:
         parsed = int(str(raw_value or "").strip())
-    except Exception:
+    except (TypeError, ValueError):
         return _DEFAULT_TOOL_TIMEOUT_SECONDS
     if parsed <= 0:
         return _DEFAULT_TOOL_TIMEOUT_SECONDS
     return parsed
 
 
+def _desktop_file_picker_supported() -> bool:
+    display_value = str(os.environ.get("DISPLAY", "") or "").strip()
+    if len(display_value) > 0:
+        return True
+    wayland_value = str(os.environ.get("WAYLAND_DISPLAY", "") or "").strip()
+    if len(wayland_value) > 0:
+        return True
+    return False
+
+
+def _run_file_picker_command(command: Sequence[str]) -> str | None:
+    try:
+        completed = subprocess.run(
+            list(command),
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=600,
+        )
+    except (OSError, subprocess.SubprocessError) as error:
+        raise RuntimeError(f"Failed to launch desktop file picker: {error}") from error
+    if completed.returncode != 0:
+        stderr_text = str(completed.stderr or "").strip()
+        if len(stderr_text) == 0:
+            return None
+        raise RuntimeError(stderr_text)
+    selected_path = str(completed.stdout or "").strip()
+    if len(selected_path) == 0:
+        return None
+    return selected_path
+
+
+def _pick_existing_file_path(
+    *,
+    title: str,
+    initial_directory: Path,
+    file_filter_label: str,
+    file_filter_glob: str,
+) -> Path | None:
+    if _desktop_file_picker_supported() is False:
+        raise RuntimeError("No desktop display is available for the file picker.")
+    normalized_initial_directory = Path(initial_directory).expanduser().resolve()
+    if normalized_initial_directory.exists() is False:
+        normalized_initial_directory = normalized_initial_directory.parent
+    if normalized_initial_directory.is_dir() is False:
+        normalized_initial_directory = Path.cwd().resolve()
+
+    picker_command: list[str] | None = None
+    if shutil.which("zenity") is not None:
+        picker_command = [
+            "zenity",
+            "--file-selection",
+            f"--title={title}",
+            f"--filename={str(normalized_initial_directory)}/",
+            f"--file-filter={file_filter_label} | {file_filter_glob}",
+            "--file-filter=All files | *",
+        ]
+    elif shutil.which("qarma") is not None:
+        picker_command = [
+            "qarma",
+            "--file-selection",
+            f"--title={title}",
+            f"--filename={str(normalized_initial_directory)}/",
+            f"--file-filter={file_filter_label} | {file_filter_glob}",
+            "--file-filter=All files | *",
+        ]
+    elif shutil.which("yad") is not None:
+        picker_command = [
+            "yad",
+            "--file-selection",
+            f"--title={title}",
+            f"--filename={str(normalized_initial_directory)}/",
+            f"--file-filter={file_filter_label} | {file_filter_glob}",
+            "--file-filter=All files | *",
+        ]
+    elif shutil.which("kdialog") is not None:
+        picker_command = [
+            "kdialog",
+            "--title",
+            title,
+            "--getopenfilename",
+            str(normalized_initial_directory),
+            f"{file_filter_label} ({file_filter_glob})",
+        ]
+    if picker_command is not None:
+        selected_path = _run_file_picker_command(picker_command)
+        if selected_path is None:
+            return None
+        return Path(selected_path).expanduser().resolve()
+
+    python_executable = str(sys.executable or "").strip()
+    if len(python_executable) > 0:
+        tkinter_script = (
+            "import sys\n"
+            "import tkinter as tk\n"
+            "from tkinter import filedialog\n"
+            "root = tk.Tk()\n"
+            "root.withdraw()\n"
+            "path = filedialog.askopenfilename(\n"
+            "    title=sys.argv[1],\n"
+            "    initialdir=sys.argv[2],\n"
+            "    filetypes=[(sys.argv[3], sys.argv[4]), ('All files', '*')],\n"
+            ")\n"
+            "root.update()\n"
+            "root.destroy()\n"
+            "print(path)\n"
+        )
+        selected_path = _run_file_picker_command(
+            [
+                python_executable,
+                "-c",
+                tkinter_script,
+                title,
+                str(normalized_initial_directory),
+                file_filter_label,
+                file_filter_glob,
+            ]
+        )
+        if selected_path is None:
+            return None
+        return Path(selected_path).expanduser().resolve()
+
+    raise RuntimeError(
+        "No supported desktop file picker is available. Install zenity, qarma, yad, kdialog, or Tk support."
+    )
+
+
 class SaipToolBridge:
     _HEX_INPUT_SUFFIXES = {".hex", ".txt"}
+    _INPUT_FILE_PICKER_LABEL = "SAIP profile files"
+    _INPUT_FILE_PICKER_GLOB = "*.der *.txt *.hex *.upp *.bin"
     _RAW_INPUT_PATH_FLAGS = {
         "--applet-file": True,
         "--output-dir": False,
@@ -70,8 +283,14 @@ class SaipToolBridge:
         runner: Optional[Callable[[Sequence[str]], subprocess.CompletedProcess[str]]] = None,
         tool_command: Optional[Sequence[str]] = None,
         config_path: Optional[Path] = None,
+        bundle_root_path: Optional[Path] = None,
     ) -> None:
         self.workspace_root = Path(workspace_root).resolve()
+        self.bundle_root = (
+            Path(bundle_root_path).resolve()
+            if bundle_root_path is not None
+            else self.workspace_root
+        )
         self.runner = runner if runner is not None else self._run_subprocess
         self.command_timeout_seconds = _parse_timeout_seconds(
             os.environ.get(_TOOL_TIMEOUT_ENV, _DEFAULT_TOOL_TIMEOUT_SECONDS)
@@ -85,13 +304,14 @@ class SaipToolBridge:
         self.default_profile_dir = self.workspace_root / "Workspace" / "SAIP" / "profile"
         self.default_transcode_dir = self.workspace_root / "Workspace" / "SAIP" / "transcode"
         self.current_input_file: Optional[Path] = None
+        self.last_input_open_directory: Optional[Path] = None
         self._load_config()
         self._seed_tree_if_missing(
-            self.workspace_root / "Tools" / "ProfilePackage" / "profile",
+            self.bundle_root / "Tools" / "ProfilePackage" / "profile",
             self.default_profile_dir,
         )
         self._seed_tree_if_missing(
-            self.workspace_root / "Tools" / "ProfilePackage" / "examples",
+            self.bundle_root / "Tools" / "ProfilePackage" / "examples",
             self.workspace_root / "Workspace" / "SAIP" / "examples",
         )
         self.default_profile_dir.mkdir(parents=True, exist_ok=True)
@@ -103,7 +323,25 @@ class SaipToolBridge:
         if resolved_path.is_dir():
             raise IsADirectoryError(f"Expected a file, got directory: {resolved_path}")
         self.current_input_file = resolved_path
+        self.last_input_open_directory = resolved_path.parent.resolve()
+        self._save_config()
         return resolved_path
+
+    def pick_input_file(self) -> Optional[Path]:
+        initial_directory = self.default_profile_dir
+        if self.last_input_open_directory is not None:
+            initial_directory = self.last_input_open_directory
+        elif self.current_input_file is not None:
+            initial_directory = self.current_input_file.parent.resolve()
+        selected_path = _pick_existing_file_path(
+            title="Open SAIP profile package",
+            initial_directory=initial_directory,
+            file_filter_label=self._INPUT_FILE_PICKER_LABEL,
+            file_filter_glob=self._INPUT_FILE_PICKER_GLOB,
+        )
+        if selected_path is None:
+            return None
+        return self.set_input_file(str(selected_path))
 
     def set_default_profile_dir(self, path_text: str) -> Path:
         resolved_path = self.resolve_workspace_path(path_text, must_exist=False)
@@ -200,7 +438,7 @@ class SaipToolBridge:
                 return list(self._tool_command)
 
         seen_script: set[Path] = set()
-        for base in (self.workspace_root, _repo_root_from_saip_module()):
+        for base in (self.workspace_root, self.bundle_root, _repo_root_from_saip_module()):
             bundled_script = (base / "pysim" / "contrib" / "saip-tool.py").resolve()
             if bundled_script in seen_script:
                 continue
@@ -211,8 +449,11 @@ class SaipToolBridge:
 
         raise RuntimeError(
             "saip-tool was not found. Install pySim saip-tool, set YGGDRASIM_SAIP_TOOL, "
-            "or keep the vendored tree at <YggdraSIM>/pysim/contrib/saip-tool.py "
-            f"(checked under workspace {self.workspace_root} and module root {_repo_root_from_saip_module()})."
+            "or clone the upstream pySim tree so "
+            "<YggdraSIM>/pysim/contrib/saip-tool.py is present "
+            "(git clone https://gitlab.com/osmocom/pysim.git pysim). "
+            f"Checked workspace {self.workspace_root}, bundle root {self.bundle_root}, "
+            f"and module root {_repo_root_from_saip_module()}."
         )
 
     def describe_status(self) -> str:
@@ -337,9 +578,12 @@ class SaipToolBridge:
     def build_decoded_dump_document(self, mode: str) -> dict:
         resolved_input = self.resolve_input_path(str(self.get_input_file()), must_exist=True)
         prepared_input = self._prepare_input_for_tool(resolved_input)
-        pysim_root = self.workspace_root / "pysim"
-        if pysim_root.exists() is False:
-            raise RuntimeError(f"Local pySim source tree not found: {pysim_root}")
+        pysim_dirs = self._pysim_source_dirs()
+        if len(pysim_dirs) == 0:
+            raise RuntimeError(
+                "Local pySim source tree not found under workspace, bundle root, or module root."
+            )
+        pysim_root = pysim_dirs[0]
 
         pysim_root_text = str(pysim_root)
         if pysim_root_text not in sys.path:
@@ -429,10 +673,10 @@ class SaipToolBridge:
         return normalized
 
     def _pysim_source_dirs(self) -> list[Path]:
-        """Directories that contain the `pySim` package (vendored trees under .../pysim)."""
+        """Directories that contain the `pySim` package (optional on-disk checkouts under .../pysim)."""
         roots: list[Path] = []
         seen: set[Path] = set()
-        for base in (self.workspace_root, _repo_root_from_saip_module()):
+        for base in (self.workspace_root, self.bundle_root, _repo_root_from_saip_module()):
             candidate = (base / "pysim").resolve()
             if candidate.is_dir() is False:
                 continue
@@ -520,6 +764,7 @@ class SaipToolBridge:
         digest = hashlib.sha256(resolved_input.as_posix().encode("utf-8") + binary_payload).hexdigest()
         cache_path = cache_dir / f"{resolved_input.stem}-{digest[:16]}.der"
         cache_path.write_bytes(binary_payload)
+        _prune_profile_package_cache(cache_dir, keep=cache_path)
         return cache_path
 
     def _is_within_workspace(self, resolved_path: Path) -> bool:
@@ -535,14 +780,17 @@ class SaipToolBridge:
 
         try:
             payload = json.loads(self.config_path.read_text(encoding="utf-8"))
-        except Exception:
+        except OSError:
+            return
+        except (json.JSONDecodeError, UnicodeDecodeError) as decode_error:
+            self._quarantine_corrupt_config(decode_error)
             return
 
         profile_dir_value = str(payload.get("default_profile_dir", "")).strip()
         if len(profile_dir_value) > 0:
             try:
                 self.default_profile_dir = self.resolve_workspace_path(profile_dir_value, must_exist=False)
-            except Exception:
+            except (OSError, ValueError):
                 pass
 
         transcode_dir_value = str(payload.get("default_transcode_dir", "")).strip()
@@ -551,8 +799,52 @@ class SaipToolBridge:
                 self.default_transcode_dir = self.resolve_workspace_path(
                     transcode_dir_value, must_exist=False
                 )
-            except Exception:
+            except (OSError, ValueError):
                 pass
+
+        last_input_open_directory_value = str(payload.get("last_input_open_directory", "")).strip()
+        if len(last_input_open_directory_value) > 0:
+            try:
+                configured_directory = Path(last_input_open_directory_value).expanduser()
+                if configured_directory.is_absolute() is False:
+                    configured_directory = self.workspace_root / configured_directory
+                configured_directory = configured_directory.resolve()
+                self.last_input_open_directory = configured_directory
+            except (OSError, ValueError, RuntimeError):
+                pass
+
+    def _quarantine_corrupt_config(
+        self,
+        decode_error: json.JSONDecodeError | UnicodeDecodeError,
+    ) -> None:
+        """Rename a corrupt saip_tool.json aside so operators keep their edit.
+
+        Historical behaviour silently discarded the file and started with
+        defaults, which hid hand-edit mistakes (unbalanced braces, stray
+        comment, truncated copy/paste). The sidecar preserves the source
+        material and we note the decision on stderr. Consistent with the
+        ``inventory_crypto.json`` / ``card_backend.json`` quarantine paths.
+        """
+        import shutil as _shutil
+        import time as _time
+
+        sidecar_path = self.config_path.with_suffix(
+            self.config_path.suffix + f".corrupt.{int(_time.time())}"
+        )
+        try:
+            _shutil.move(str(self.config_path), str(sidecar_path))
+        except OSError as move_error:
+            sys.stderr.write(
+                f"[saip-tool] {self.config_path} is corrupt ({decode_error}) "
+                f"and could not be renamed aside ({move_error}); defaults "
+                "will be used this session.\n"
+            )
+            return
+        sys.stderr.write(
+            f"[saip-tool] {self.config_path} was unparseable ({decode_error}); "
+            f"moved to {sidecar_path}. Review or restore the file before "
+            "relying on saved preferences.\n"
+        )
 
     def _save_config(self) -> None:
         self.config_path.parent.mkdir(parents=True, exist_ok=True)
@@ -568,8 +860,19 @@ class SaipToolBridge:
         except ValueError:
             stored_transcode_dir = str(self.default_transcode_dir)
 
+        stored_last_input_open_directory = ""
+        if self.last_input_open_directory is not None:
+            try:
+                relative_last_input_open_directory = self.last_input_open_directory.relative_to(
+                    self.workspace_root
+                )
+                stored_last_input_open_directory = relative_last_input_open_directory.as_posix()
+            except ValueError:
+                stored_last_input_open_directory = str(self.last_input_open_directory)
+
         payload = {
             "default_profile_dir": stored_profile_dir,
             "default_transcode_dir": stored_transcode_dir,
+            "last_input_open_directory": stored_last_input_open_directory,
         }
         self.config_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")

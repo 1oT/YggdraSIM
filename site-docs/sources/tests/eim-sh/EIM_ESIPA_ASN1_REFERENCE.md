@@ -1,0 +1,1 @@
+--8<-- "tests/eim-sh/EIM_ESIPA_ASN1_REFERENCE.md"

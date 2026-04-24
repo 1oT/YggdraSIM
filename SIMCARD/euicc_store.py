@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-import json
 import os
 from typing import Any
 
 from SIMCARD.etsi_fs import apply_security_domain_config
 from SIMCARD.state import SimCardState, SimEimEntry
+from yggdrasim_common.inventory_crypto import read_secret_json_file, write_secret_json_file
 
 STORE_VERSION = 1
 EUICC_MANIFEST_FILENAME = "euicc.json"
@@ -50,9 +50,7 @@ def sync_euicc_store(state: SimCardState) -> None:
     store_path = os.path.abspath(os.path.expanduser(raw_path))
     os.makedirs(store_path, exist_ok=True)
     manifest_path = os.path.join(store_path, EUICC_MANIFEST_FILENAME)
-    with open(manifest_path, "w", encoding="utf-8") as output_file:
-        json.dump(_serialize_state(state), output_file, indent=2, sort_keys=True)
-        output_file.write("\n")
+    write_secret_json_file(manifest_path, _serialize_state(state))
 
 
 def load_euicc_store_into_state(store_path: str, state: SimCardState) -> bool:
@@ -65,11 +63,10 @@ def load_euicc_store_into_state(store_path: str, state: SimCardState) -> bool:
     )
     if os.path.isfile(manifest_path) is False:
         return False
-    try:
-        with open(manifest_path, "r", encoding="utf-8") as input_file:
-            payload = json.load(input_file)
-    except (OSError, json.JSONDecodeError):
-        return False
+    payload = read_secret_json_file(
+        manifest_path,
+        protect_plaintext_on_read=True,
+    )
     if isinstance(payload, dict) is False:
         return False
     apply_euicc_state_payload(state, payload)

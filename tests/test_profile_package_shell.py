@@ -49,6 +49,61 @@ class ProfilePackageShellTests(unittest.TestCase):
         self.assertIn("Tool command: saip-tool.py --demo", text)
         self.assertNotIn("Active profile:", text)
 
+    def test_cmd_open_without_argument_uses_tui_picker_and_launches_inspect(self) -> None:
+        selected_path = self.shell.bridge.workspace_root / "Workspace" / "SAIP" / "profile" / "picked.der"
+        selected_path.parent.mkdir(parents=True, exist_ok=True)
+        selected_path.write_bytes(b"\x01\x02")
+
+        with contextlib.redirect_stdout(io.StringIO()) as captured:
+            with mock.patch(
+                "Tools.ProfilePackage.saip_open_picker_tui.pick_saip_profile_path_tui",
+                return_value=selected_path,
+            ) as mocked_pick:
+                with mock.patch.object(self.shell, "_cmd_inspect") as mocked_inspect:
+                    self.shell._cmd_open("")
+
+        text = captured.getvalue()
+        mocked_pick.assert_called_once_with(self.shell.bridge)
+        mocked_inspect.assert_called_once_with("")
+        self.assertIn("Active profile package", text)
+        self.assertIn(str(selected_path), text)
+
+    def test_cmd_open_without_argument_reports_cancelled_picker(self) -> None:
+        with contextlib.redirect_stdout(io.StringIO()) as captured:
+            with mock.patch(
+                "Tools.ProfilePackage.saip_open_picker_tui.pick_saip_profile_path_tui",
+                return_value=None,
+            ):
+                with mock.patch.object(self.shell, "_cmd_inspect") as mocked_inspect:
+                    self.shell._cmd_open("")
+
+        text = captured.getvalue()
+        mocked_inspect.assert_not_called()
+        self.assertIn("File selection cancelled", text)
+
+    def test_cmd_open_with_argument_selects_file_and_launches_inspect(self) -> None:
+        selected_path = self.shell.bridge.workspace_root / "Workspace" / "SAIP" / "profile" / "picked.der"
+        selected_path.parent.mkdir(parents=True, exist_ok=True)
+        selected_path.write_bytes(b"\x01\x02")
+
+        with contextlib.redirect_stdout(io.StringIO()) as captured:
+            with mock.patch.object(self.shell, "_cmd_inspect") as mocked_inspect:
+                self.shell._cmd_open(str(selected_path))
+
+        text = captured.getvalue()
+        mocked_inspect.assert_called_once_with("")
+        self.assertIn("Active profile package", text)
+        self.assertIn(str(selected_path), text)
+
+    def test_exec_line_dispatches_tui_command(self) -> None:
+        recorded: list[str] = []
+        self.shell._commands["TUI"] = lambda argument: recorded.append(argument)
+
+        succeeded = self.shell._exec_line("TUI")
+
+        self.assertTrue(succeeded)
+        self.assertEqual(recorded, [""])
+
     def test_render_result_stdout_formats_decoded_dump(self) -> None:
         stdout = "\n".join(
             [
@@ -190,7 +245,8 @@ class ProfilePackageShellTests(unittest.TestCase):
             file_text = output_path.read_text(encoding="utf-8")
             parsed = yaml.safe_load(file_text)
 
-        self.assertEqual(parsed["sections"]["header"]["iccid"], "8931086226015334408f")
+        self.assertEqual(parsed["sections"]["header"]["iccid"]["raw"], "8931086226015334408f")
+        self.assertEqual(parsed["sections"]["header"]["iccid"]["decoded"]["iccid"], "8931086226015334408")
         self.assertEqual(parsed["intro"], ["Read 1 PEs from file '/tmp/demo.der'"])
         self.assertNotIn("\033[", file_text)
 
@@ -287,6 +343,16 @@ class ProfilePackageShellTests(unittest.TestCase):
                         ],
                     }
                 ],
+                "pinCodes": [
+                    {
+                        "maxNumOfAttemps-retryNumLeft": 51,
+                    }
+                ],
+                "pukCodes": [
+                    {
+                        "maxNumOfAttemps-retryNumLeft": 170,
+                    }
+                ],
                 "sdPersoData": [
                     "00707a8578841c010301400102028182350103390205dc3c030227be3e05210a0a0a0a8517133839343435303136303532343637363333363202400186070003a50300200089368a0d3133392e3136322e31352e36338b13383931303330303030303030363835333633338c102f67736d612f61646d696e6167656e74"
                 ],
@@ -344,6 +410,16 @@ class ProfilePackageShellTests(unittest.TestCase):
         self.assertEqual(key_entry["keyCounterValue"]["decoded"]["decimal"], 0)
         self.assertEqual(key_entry["keyComponents"][0]["keyType"]["decoded"]["type"], "AES")
 
+        pin_retry = normalized["pinCodes"][0]["maxNumOfAttemps-retryNumLeft"]
+        self.assertEqual(pin_retry["raw"], 51)
+        self.assertEqual(pin_retry["decoded"]["maxAttempts"], 3)
+        self.assertEqual(pin_retry["decoded"]["remainingAttempts"], 3)
+
+        puk_retry = normalized["pukCodes"][0]["maxNumOfAttemps-retryNumLeft"]
+        self.assertEqual(puk_retry["raw"], 170)
+        self.assertEqual(puk_retry["decoded"]["maxAttempts"], 10)
+        self.assertEqual(puk_retry["decoded"]["remainingAttempts"], 10)
+
         sd_perso = normalized["sdPersoData"]
         self.assertEqual(sd_perso["raw"][0], "00707a8578841c010301400102028182350103390205dc3c030227be3e05210a0a0a0a8517133839343435303136303532343637363333363202400186070003a50300200089368a0d3133392e3136322e31352e36338b13383931303330303030303030363835333633338c102f67736d612f61646d696e6167656e74")
         transport_parameters = sd_perso["decoded"][0]["items"][0]["decoded"][0]["decoded"][0]["decoded"]
@@ -384,16 +460,176 @@ class ProfilePackageShellTests(unittest.TestCase):
         self.assertTrue(normalized["eUICC-Mandatory-services"]["usim"])
         self.assertTrue(normalized["eUICC-Mandatory-services"]["milenage"])
 
+    def test_normalize_dump_value_decodes_filesystem_and_secret_fields(self) -> None:
+        normalized = self.shell._normalize_dump_value(
+            {
+                "fileDescriptor": "42210026",
+                "efFileSize": "04ba",
+                "shortEFID": "10",
+                "lcsi": "05",
+                "pinValue": "31323334ffffffff",
+                "pukValue": "3132333435363738",
+                "fillFileOffset": 0,
+                "unblockingPINReference": 1,
+                "instanceAID": "a000000151000000",
+            }
+        )
+
+        file_descriptor = normalized["fileDescriptor"]
+        self.assertEqual(file_descriptor["decoded"]["structure"], "linear_fixed")
+        self.assertEqual(file_descriptor["decoded"]["recordLength"], 38)
+        self.assertTrue(file_descriptor["decoded"]["shareable"])
+
+        self.assertEqual(normalized["efFileSize"]["decoded"]["decimal"], 1210)
+        self.assertEqual(normalized["shortEFID"]["decoded"]["sfi"], 2)
+        self.assertTrue(normalized["shortEFID"]["decoded"]["validEncoding"])
+        self.assertEqual(normalized["lcsi"]["decoded"]["state"], "operational_activated")
+        self.assertEqual(normalized["pinValue"]["decoded"]["digits"], "1234")
+        self.assertEqual(normalized["pukValue"]["decoded"]["digits"], "12345678")
+        self.assertEqual(normalized["fillFileOffset"]["decoded"]["decimal"], 0)
+        self.assertEqual(
+            normalized["unblockingPINReference"]["decoded"]["referenceName"],
+            "pukAppl1",
+        )
+        self.assertEqual(normalized["instanceAID"]["decoded"]["rid"], "a000000151")
+
+    def test_normalize_dump_value_decodes_header_iccid_and_key_material(self) -> None:
+        normalized = self.shell._normalize_dump_value(
+            {
+                "iccid": "89460811111111111112",
+                "keyData": "1122334455667788aabbccddeeff0011",
+                "macLength": 8,
+            }
+        )
+
+        self.assertEqual(normalized["iccid"]["decoded"]["iccid"], "89460811111111111112")
+        self.assertEqual(normalized["keyData"]["decoded"]["keySizeBits"], 128)
+        self.assertEqual(normalized["macLength"]["decoded"]["decimal"], 8)
+
+    def test_normalize_dump_value_decodes_profile_policy_and_memory_limits(self) -> None:
+        normalized = self.shell._normalize_dump_value(
+            {
+                "pol": "04",
+                "nonVolatileCodeLimitC6": "0100",
+                "volatileDataLimitC7": "00010000",
+                "nonVolatileDataLimitC8": "0001",
+            }
+        )
+
+        self.assertEqual(
+            normalized["pol"]["decoded"]["activePolicies"],
+            ["ppr2-delete-not-allowed"],
+        )
+        self.assertEqual(normalized["nonVolatileCodeLimitC6"]["decoded"]["decimal"], 256)
+        self.assertEqual(normalized["volatileDataLimitC7"]["decoded"]["decimal"], 65536)
+        self.assertEqual(normalized["nonVolatileDataLimitC8"]["decoded"]["decimal"], 1)
+
+    def test_normalize_dump_value_decodes_aka_parameter_fields(self) -> None:
+        normalized = self.shell._normalize_dump_value(
+            {
+                "algorithmID": 1,
+                "algorithmOptions": "01",
+                "key": "ffffffffffffffffffffffffffffffff",
+                "opc": "11111111111111111111111111111111",
+                "authCounterMax": "ffffff",
+                "rotationConstants": "4000204060",
+                "xoringConstants": (
+                    "00000000000000000000000000000000"
+                    "00000000000000000000000000000001"
+                    "00000000000000000000000000000002"
+                    "00000000000000000000000000000004"
+                    "00000000000000000000000000000008"
+                ),
+                "numberOfKeccak": 1,
+                "sqnOptions": "0e",
+                "sqnDelta": "000010000000",
+                "sqnAgeLimit": "000010000000",
+                "sqnInit": ["000000000000", "000000000001"],
+            }
+        )
+
+        self.assertEqual(normalized["algorithmID"]["decoded"]["algorithm"], "milenage")
+        self.assertEqual(normalized["algorithmOptions"]["decoded"]["setBits"], [0])
+        self.assertEqual(normalized["key"]["decoded"]["keySizeBits"], 128)
+        self.assertEqual(normalized["opc"]["decoded"]["keySizeBits"], 128)
+        self.assertEqual(normalized["authCounterMax"]["decoded"]["decimal"], 16777215)
+        self.assertEqual(normalized["rotationConstants"]["decoded"]["r1"], 64)
+        self.assertEqual(
+            normalized["xoringConstants"]["decoded"]["c5"],
+            "00000000000000000000000000000008",
+        )
+        self.assertEqual(normalized["numberOfKeccak"]["decoded"]["decimal"], 1)
+        self.assertEqual(normalized["sqnOptions"]["decoded"]["setBits"], [3, 2, 1])
+        self.assertEqual(normalized["sqnDelta"]["decoded"]["decimal"], 268435456)
+        self.assertEqual(normalized["sqnAgeLimit"]["decoded"]["decimal"], 268435456)
+        self.assertEqual(normalized["sqnInit"]["decoded"][1]["decimal"], 1)
+
+    def test_normalize_dump_value_decodes_filesystem_reference_and_proprietary_fields(self) -> None:
+        normalized = self.shell._normalize_dump_value(
+            {
+                "fileID": "6f38",
+                "filePath": "7f10",
+                "securityAttributesReferenced": "6f0603",
+                "linkPath": "7f106f38",
+                "specialFileInformation": "c0",
+                "fillPattern": "ff",
+                "fileDetails": "01",
+                "repeatPattern": "4142",
+            }
+        )
+
+        self.assertEqual(normalized["fileID"]["decoded"]["name"], "EF.UST / EF.UST-SERVICE-TABLE")
+        self.assertEqual(normalized["filePath"]["decoded"]["segments"][0]["name"], "DF.TELECOM")
+        self.assertEqual(normalized["securityAttributesReferenced"]["decoded"]["arrFileId"], "6F06")
+        self.assertEqual(normalized["securityAttributesReferenced"]["decoded"]["recordNumber"], 3)
+        self.assertEqual(normalized["linkPath"]["decoded"]["segments"][0]["name"], "DF.TELECOM")
+        self.assertEqual(
+            normalized["linkPath"]["decoded"]["segments"][1]["name"],
+            "EF.UST / EF.UST-SERVICE-TABLE",
+        )
+        self.assertTrue(normalized["specialFileInformation"]["decoded"]["highUpdateActivity"])
+        self.assertTrue(
+            normalized["specialFileInformation"]["decoded"]["readAndUpdateWhenDeactivated"]
+        )
+        self.assertEqual(normalized["fillPattern"]["decoded"]["byteValue"], "0xFF")
+        self.assertEqual(normalized["fileDetails"]["decoded"]["coding"], "DER coding")
+        self.assertEqual(normalized["repeatPattern"]["decoded"]["ascii"], "AB")
+
+    def test_normalize_dump_value_decodes_pin_policy_and_rfm_fields(self) -> None:
+        normalized = self.shell._normalize_dump_value(
+            {
+                "keyReference": 10,
+                "pinAttributes": 6,
+                "pinStatusTemplateDO": "010a",
+                "tarList": ["b00001"],
+                "minimumSecurityLevel": "16",
+                "uiccAccessDomain": "02030104",
+                "adfAccessDomain": "02030104",
+            }
+        )
+
+        self.assertEqual(normalized["keyReference"]["decoded"]["admName"], "adm1")
+        self.assertEqual(normalized["pinAttributes"]["decoded"]["setBits"], [2, 1])
+        self.assertEqual(normalized["pinStatusTemplateDO"]["decoded"]["statusBytes"], "01")
+        self.assertEqual(
+            normalized["pinStatusTemplateDO"]["decoded"]["keyReference"]["admName"],
+            "adm1",
+        )
+        self.assertEqual(normalized["tarList"]["decoded"][0]["tar"], "b00001")
+        self.assertEqual(normalized["minimumSecurityLevel"]["decoded"]["setBits"], [4, 2, 1])
+        self.assertEqual(normalized["uiccAccessDomain"]["decoded"]["bytes"][0], "0x02")
+        self.assertEqual(normalized["adfAccessDomain"]["decoded"]["bytes"][-1], "0x04")
+
     def test_dump_output_redirection_rejects_outside_workspace_with_clear_message(self) -> None:
         with self.assertRaisesRegex(ValueError, "Output redirection is workspace-confined"):
             self.shell._parse_output_redirection(
-                "ALL DECODED > /home/hampushellsberg/Documents/test_dump.txt"
+                "ALL DECODED > /tmp/yggdrasim_test_dump.txt"
             )
 
     def test_lint_output_redirection_rejects_outside_workspace_with_clear_message(self) -> None:
         with self.assertRaisesRegex(ValueError, "Output redirection is workspace-confined"):
             self.shell._parse_lint_output_redirection(
-                "STRICT > /home/hampushellsberg/Documents/test_lint.yaml"
+                "STRICT > /tmp/yggdrasim_test_lint.yaml"
             )
 
     def test_complete_path_token_uses_default_profile_dir_for_bare_names(self) -> None:
@@ -1047,6 +1283,257 @@ class ProfilePackageShellTests(unittest.TestCase):
 
         self.assertEqual(parsed["lint_profile"], "RELEASE-GATE")
         self.assertIn("gate", parsed)
+
+class ProfilePackageShellProvisionAkaTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.workspace_root = Path(__file__).resolve().parents[1]
+        self.shell = ProfilePackageShell(workspace_root=self.workspace_root)
+
+    def _stub_input(self, answers: list[str]):
+        queue = list(answers)
+
+        def _consume(_prompt: str) -> str:
+            if len(queue) == 0:
+                raise AssertionError("provision-aka wizard consumed more prompts than answers provided")
+            return queue.pop(0)
+
+        return _consume
+
+    def test_provision_aka_updates_profile_and_writes_der(self) -> None:
+        from Tools.ProfilePackage.saip_aka_wizard import read_aka_configuration
+        from Tools.ProfilePackage.saip_json_codec import (
+            build_decoded_document_from_sequence,
+            ensure_workspace_pysim_on_path,
+        )
+        from Tools.ProfilePackage.saip_pe_quick_add import insert_blank_pe_for_menu_id
+
+        ensure_workspace_pysim_on_path(self.workspace_root)
+        from pySim.esim.saip import (
+            ProfileElementEnd,
+            ProfileElementHeader,
+            ProfileElementSequence,
+        )
+
+        pes = ProfileElementSequence()
+        pes.append(ProfileElementHeader())
+        pes.append(ProfileElementEnd())
+        base_document = build_decoded_document_from_sequence(pes, intro_lines=["wizard"])
+        document = insert_blank_pe_for_menu_id(
+            base_document,
+            self.workspace_root,
+            menu_id="akaParameter",
+        )
+
+        self.shell.bridge.build_decoded_dump_document = lambda _mode: document
+        self.shell.bridge.current_input_file = self.workspace_root / "demo.der"
+        self.shell._input_fn = self._stub_input(
+            [
+                "tuak",
+                "AA" * 32,
+                "BB" * 32,
+                "5",
+                "FFFFFE",
+                "000000000010",
+            ]
+        )
+
+        with tempfile.TemporaryDirectory(dir=self.workspace_root) as temp_dir:
+            output_path = Path(temp_dir) / "provisioned.der"
+            with contextlib.redirect_stdout(io.StringIO()) as captured:
+                self.shell._cmd_provision_aka(f'"{output_path}"')
+
+            rendered = captured.getvalue()
+            self.assertIn("Provisioned tuak AKA", rendered)
+            data = output_path.read_bytes()
+            self.assertTrue(len(data) > 0)
+
+            reloaded = ProfileElementSequence.from_der(data)
+            doc_after = build_decoded_document_from_sequence(reloaded)
+            snapshot = read_aka_configuration(doc_after, "akaParameter")
+            self.assertEqual(snapshot["algorithm"], "tuak")
+            self.assertEqual(snapshot["key"], "AA" * 32)
+            self.assertEqual(snapshot["opc"], "BB" * 32)
+            self.assertEqual(snapshot["numberOfKeccak"], "5")
+            self.assertEqual(snapshot["authCounterMax"], "FFFFFE")
+            self.assertEqual(snapshot["sqnInit"], "000000000010")
+
+    def test_provision_aka_rejects_missing_output_path(self) -> None:
+        self.shell._input_fn = self._stub_input([])
+        with self.assertRaises(ValueError) as ctx:
+            self.shell._cmd_provision_aka("")
+        self.assertIn("Usage: PROVISION-AKA", str(ctx.exception))
+
+
+def _aka_document_with_blank_pe(workspace_root: Path):
+    from Tools.ProfilePackage.saip_json_codec import (
+        build_decoded_document_from_sequence,
+        ensure_workspace_pysim_on_path,
+    )
+    from Tools.ProfilePackage.saip_pe_quick_add import insert_blank_pe_for_menu_id
+
+    ensure_workspace_pysim_on_path(workspace_root)
+    from pySim.esim.saip import (
+        ProfileElementEnd,
+        ProfileElementHeader,
+        ProfileElementSequence,
+    )
+
+    pes = ProfileElementSequence()
+    pes.append(ProfileElementHeader())
+    pes.append(ProfileElementEnd())
+    base_document = build_decoded_document_from_sequence(pes, intro_lines=["wizard"])
+    return insert_blank_pe_for_menu_id(
+        base_document,
+        workspace_root,
+        menu_id="akaParameter",
+    )
+
+
+class ProfilePackageShellListAkaTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.workspace_root = Path(__file__).resolve().parents[1]
+        self.shell = ProfilePackageShell(workspace_root=self.workspace_root)
+
+    def test_list_aka_reports_no_pe_present(self) -> None:
+        from Tools.ProfilePackage.saip_json_codec import (
+            build_decoded_document_from_sequence,
+            ensure_workspace_pysim_on_path,
+        )
+
+        ensure_workspace_pysim_on_path(self.workspace_root)
+        from pySim.esim.saip import (
+            ProfileElementEnd,
+            ProfileElementHeader,
+            ProfileElementSequence,
+        )
+
+        pes = ProfileElementSequence()
+        pes.append(ProfileElementHeader())
+        pes.append(ProfileElementEnd())
+        document = build_decoded_document_from_sequence(pes, intro_lines=["list"])
+        self.shell.bridge.build_decoded_dump_document = lambda _mode: document
+
+        with contextlib.redirect_stdout(io.StringIO()) as captured:
+            self.shell._cmd_list_aka("")
+
+        self.assertIn("no akaParameter PE", captured.getvalue())
+
+    def test_list_aka_summarises_existing_sections(self) -> None:
+        document = _aka_document_with_blank_pe(self.workspace_root)
+        self.shell.bridge.build_decoded_dump_document = lambda _mode: document
+        self.shell.bridge.current_input_file = self.workspace_root / "demo.der"
+        self.shell._input_fn = lambda _prompt: "invalid"
+
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.shell._cmd_provision_aka(
+                'IN-PLACE ALGORITHM=milenage KI=' + 'AA' * 16 + ' OPC=' + 'BB' * 16
+            )
+
+        # Re-read via the wizard to confirm LIST-AKA renders the expected row
+        with contextlib.redirect_stdout(io.StringIO()) as captured:
+            self.shell._cmd_list_aka("")
+
+        text = captured.getvalue()
+        self.assertIn("akaParameter", text)
+        self.assertIn("milenage", text)
+
+
+class ProfilePackageShellProvisionAkaFlagTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.workspace_root = Path(__file__).resolve().parents[1]
+        self.shell = ProfilePackageShell(workspace_root=self.workspace_root)
+
+    def test_provision_aka_non_interactive_writes_der(self) -> None:
+        from Tools.ProfilePackage.saip_aka_wizard import read_aka_configuration
+        from Tools.ProfilePackage.saip_json_codec import (
+            build_decoded_document_from_sequence,
+        )
+
+        document = _aka_document_with_blank_pe(self.workspace_root)
+        self.shell.bridge.build_decoded_dump_document = lambda _mode: document
+
+        def _no_prompt(_prompt: str) -> str:
+            raise AssertionError("non-interactive PROVISION-AKA must not prompt")
+
+        self.shell._input_fn = _no_prompt
+
+        with tempfile.TemporaryDirectory(dir=self.workspace_root) as temp_dir:
+            output_path = Path(temp_dir) / "non_interactive.der"
+            cmd_line = (
+                f'"{output_path}" ALGORITHM=milenage '
+                f'KI={"AA" * 16} OPC={"BB" * 16}'
+            )
+            with contextlib.redirect_stdout(io.StringIO()) as captured:
+                self.shell._cmd_provision_aka(cmd_line)
+            rendered = captured.getvalue()
+            self.assertIn("Provisioned milenage AKA", rendered)
+
+            from Tools.ProfilePackage.saip_json_codec import (
+                ensure_workspace_pysim_on_path,
+            )
+
+            ensure_workspace_pysim_on_path(self.workspace_root)
+            from pySim.esim.saip import ProfileElementSequence
+
+            reloaded = ProfileElementSequence.from_der(output_path.read_bytes())
+            doc_after = build_decoded_document_from_sequence(reloaded)
+            snapshot = read_aka_configuration(doc_after, "akaParameter")
+            self.assertEqual(snapshot["algorithm"], "milenage")
+            self.assertEqual(snapshot["key"], "AA" * 16)
+            self.assertEqual(snapshot["opc"], "BB" * 16)
+
+    def test_provision_aka_rejects_unknown_override(self) -> None:
+        self.shell.bridge.build_decoded_dump_document = lambda _mode: _aka_document_with_blank_pe(self.workspace_root)
+        with self.assertRaises(ValueError) as ctx:
+            self.shell._cmd_provision_aka("reports/ignored.der FOO=bar")
+        self.assertIn("Unknown AKA override", str(ctx.exception))
+
+    def test_provision_aka_in_place_requires_active_input(self) -> None:
+        self.shell.bridge.current_input_file = None
+        with self.assertRaises(ValueError) as ctx:
+            self.shell._cmd_provision_aka("IN-PLACE ALGORITHM=milenage KI=" + "AA" * 16 + " OPC=" + "BB" * 16)
+        self.assertIn("IN-PLACE", str(ctx.exception))
+
+
+class ProfilePackageShellRandomizeAkaTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.workspace_root = Path(__file__).resolve().parents[1]
+        self.shell = ProfilePackageShell(workspace_root=self.workspace_root)
+
+    def test_randomize_aka_generates_values_and_writes_der(self) -> None:
+        from Tools.ProfilePackage.saip_aka_wizard import read_aka_configuration
+        from Tools.ProfilePackage.saip_json_codec import (
+            build_decoded_document_from_sequence,
+            ensure_workspace_pysim_on_path,
+        )
+
+        document = _aka_document_with_blank_pe(self.workspace_root)
+        self.shell.bridge.build_decoded_dump_document = lambda _mode: document
+
+        with tempfile.TemporaryDirectory(dir=self.workspace_root) as temp_dir:
+            output_path = Path(temp_dir) / "random.der"
+            with contextlib.redirect_stdout(io.StringIO()) as captured:
+                self.shell._cmd_randomize_aka(f'"{output_path}" ALGORITHM=milenage')
+            rendered = captured.getvalue()
+            self.assertIn("Provisioned milenage AKA", rendered)
+            self.assertIn("RANDOMIZE-AKA", rendered)
+
+            ensure_workspace_pysim_on_path(self.workspace_root)
+            from pySim.esim.saip import ProfileElementSequence
+
+            reloaded = ProfileElementSequence.from_der(output_path.read_bytes())
+            doc_after = build_decoded_document_from_sequence(reloaded)
+            snapshot = read_aka_configuration(doc_after, "akaParameter")
+            self.assertEqual(snapshot["algorithm"], "milenage")
+            self.assertEqual(len(snapshot["key"]), 32)
+            self.assertEqual(len(snapshot["opc"]), 32)
+
+    def test_randomize_aka_rejects_unknown_option(self) -> None:
+        self.shell.bridge.build_decoded_dump_document = lambda _mode: _aka_document_with_blank_pe(self.workspace_root)
+        with self.assertRaises(ValueError) as ctx:
+            self.shell._cmd_randomize_aka("reports/ignored.der FOO=bar")
+        self.assertIn("Unknown RANDOMIZE-AKA option", str(ctx.exception))
+
 
 if __name__ == "__main__":
     unittest.main()

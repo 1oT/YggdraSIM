@@ -175,9 +175,21 @@ def compile_saip_asn1():
         return _SAIP_ASN1
     pysim_root = Path(__file__).resolve().parents[1] / "pysim"
     root_text = str(pysim_root)
-    if root_text not in sys.path:
+    if pysim_root.is_dir() and root_text not in sys.path:
         sys.path.insert(0, root_text)
-    from pySim.esim import compile_asn1_subdir
+    try:
+        from pySim.esim import compile_asn1_subdir
+    except ModuleNotFoundError as import_error:
+        # ``pysim/`` is an optional on-disk upstream checkout (gitignored)
+        # that source trees and installed wheels alike may not have.
+        # Tests that need the SAIP ASN.1 schema should be skipped rather
+        # than fail hard, matching the WARN behaviour of
+        # ``yggdrasim --doctor``.
+        raise unittest.SkipTest(
+            f"pySim not available; SAIP fixture build requires the optional pysim/ checkout "
+            f"(clone https://gitlab.com/osmocom/pysim.git into {pysim_root}). "
+            f"Underlying error: {import_error.name}."
+        )
 
     _SAIP_ASN1 = compile_asn1_subdir("saip")
     return _SAIP_ASN1
@@ -297,6 +309,12 @@ def extract_nested_tlv_value(data: bytes, parent_tag: bytes | str, child_tag: by
     return child_value
 
 
+def extract_euicc_challenge(response: bytes | list[int]) -> bytes:
+    """Unwrap the BF2E/80 envelope emitted by ES10b.GetEUICCChallenge."""
+    blob = bytes(response)
+    return extract_nested_tlv_value(blob, "BF2E", "80")
+
+
 def send_store_data_payload(connection, payload: bytes, chunk_size: int = 120) -> tuple[bytes, int, int]:
     response = (b"", 0x6F, 0x00)
     offset = 0
@@ -392,14 +410,21 @@ def load_local_sgp26_auth_and_pb_material() -> tuple[
         / "Variant O"
         / "SM-DP+"
     )
-    auth_cert_der = (cert_root / "SM_DPauth" / "CERT_S_SM_DPauth_VARO_SIG_NIST.der").read_bytes()
+    # Operator workstations may have applied envelope encryption (gpg) to
+    # the SGP.26 reference material. read_secret_file_bytes transparently
+    # decrypts PGP-wrapped payloads for both the CERT_*.der and SK_*.pem
+    # files, so the helper works the same on a stock checkout and on a
+    # secret-encrypted checkout.
+    from yggdrasim_common.inventory_crypto import read_secret_file_bytes
+
+    auth_cert_der = read_secret_file_bytes(cert_root / "SM_DPauth" / "CERT_S_SM_DPauth_VARO_SIG_NIST.der")
     auth_key = serialization.load_pem_private_key(
-        (cert_root / "SM_DPauth" / "SK_S_SM_DPauth_SIG_NIST.pem").read_bytes(),
+        read_secret_file_bytes(cert_root / "SM_DPauth" / "SK_S_SM_DPauth_SIG_NIST.pem"),
         password=None,
     )
-    pb_cert_der = (cert_root / "SM_DPpb" / "CERT_S_SM_DPpb_VARO_SIG_NIST.der").read_bytes()
+    pb_cert_der = read_secret_file_bytes(cert_root / "SM_DPpb" / "CERT_S_SM_DPpb_VARO_SIG_NIST.der")
     pb_key = serialization.load_pem_private_key(
-        (cert_root / "SM_DPpb" / "SK_S_SM_DPpb_SIG_NIST.pem").read_bytes(),
+        read_secret_file_bytes(cert_root / "SM_DPpb" / "SK_S_SM_DPpb_SIG_NIST.pem"),
         password=None,
     )
     if isinstance(auth_key, ec.EllipticCurvePrivateKey) is False:
@@ -681,7 +706,7 @@ class SimulatedConnectionTests(unittest.TestCase):
             cert_der, cert_private_key = build_self_signed_cert_and_key("Invalid Signature DPauth")
             auth_payload = build_authenticate_server_payload(
                 transaction_id=bytes.fromhex("0102030405060708090A0B0C0D0E0F10"),
-                euicc_challenge=bytes(challenge),
+                euicc_challenge=extract_euicc_challenge(challenge),
                 server_address="rsp.example.com",
                 server_challenge=b"\x55" * 16,
                 cert_der=cert_der,
@@ -708,7 +733,7 @@ class SimulatedConnectionTests(unittest.TestCase):
             cert_der, cert_private_key = build_self_signed_cert_and_key("Prepare Signature DPauth")
             auth_payload = build_authenticate_server_payload(
                 transaction_id=transaction_id,
-                euicc_challenge=bytes(challenge),
+                euicc_challenge=extract_euicc_challenge(challenge),
                 server_address="rsp.example.com",
                 server_challenge=b"\x66" * 16,
                 cert_der=cert_der,
@@ -744,7 +769,7 @@ class SimulatedConnectionTests(unittest.TestCase):
             auth_cert_der, auth_private_key = build_self_signed_cert_and_key("Prepare Match DPauth")
             auth_payload = build_authenticate_server_payload(
                 transaction_id=transaction_id,
-                euicc_challenge=bytes(challenge),
+                euicc_challenge=extract_euicc_challenge(challenge),
                 server_address="rsp.example.com",
                 server_challenge=b"\x77" * 16,
                 cert_der=auth_cert_der,
@@ -782,7 +807,7 @@ class SimulatedConnectionTests(unittest.TestCase):
             )
             auth_payload = build_authenticate_server_payload(
                 transaction_id=transaction_id,
-                euicc_challenge=bytes(challenge),
+                euicc_challenge=extract_euicc_challenge(challenge),
                 server_address="rsp.example.com",
                 server_challenge=b"\x55" * 16,
                 cert_der=auth_cert_der,
@@ -824,7 +849,7 @@ class SimulatedConnectionTests(unittest.TestCase):
             )
             auth_payload = build_authenticate_server_payload(
                 transaction_id=transaction_id,
-                euicc_challenge=bytes(challenge),
+                euicc_challenge=extract_euicc_challenge(challenge),
                 server_address="rsp.example.com",
                 server_challenge=b"\x33" * 16,
                 cert_der=auth_cert_der,
@@ -1059,11 +1084,13 @@ class SimulatedConnectionTests(unittest.TestCase):
 
     def test_simulated_connection_applies_metadata_overrides_from_quirks_file(self) -> None:
         root_ci_pkid = "00112233445566778899AABBCCDDEEFF00112233"
+        atr_hex = "3B8F8001804F0CA000000306030001000000006A"
         eum_certificate_der, _ = build_self_signed_cert_and_key("Override EUM")
         euicc_certificate_der, _ = build_self_signed_cert_and_key("Override eUICC")
 
         quirks_source = f"""
 metadata_overrides = {{
+    "atr": "{atr_hex}",
     "default_dp_address": "rsp.override.test",
     "root_ci_pkid": "{root_ci_pkid}",
     "euicc_info": {{
@@ -1114,6 +1141,7 @@ metadata_overrides = {{
                 clear=False,
             ):
                 connection = create_card_connection(reader_index=0)
+                self.assertEqual(bytes(connection.getATR()).hex().upper(), atr_hex)
 
                 data, sw1, sw2 = connection.transmit(list(bytes.fromhex(f"00A4040010{ISDR_AID}")))
                 self.assertEqual((sw1, sw2), (0x90, 0x00))
@@ -1561,13 +1589,14 @@ metadata_overrides = {{
 
             challenge, sw1, sw2 = connection.transmit(list(bytes.fromhex("80E2910003BF2E00")))
             self.assertEqual((sw1, sw2), (0x90, 0x00))
-            self.assertEqual(len(bytes(challenge)), 16)
+            challenge_value = extract_euicc_challenge(challenge)
+            self.assertEqual(len(challenge_value), 16)
 
             transaction_id = bytes.fromhex("11223344556677889900AABBCCDDEEFF")
             server_signed1 = wrap_tlv(
                 b"\x30",
                 wrap_tlv(b"\x80", transaction_id)
-                + wrap_tlv(b"\x81", bytes(challenge))
+                + wrap_tlv(b"\x81", challenge_value)
                 + wrap_tlv(b"\x83", b"rsp.example.com")
                 + wrap_tlv(b"\x84", b"\x22" * 16),
             )
@@ -1575,7 +1604,7 @@ metadata_overrides = {{
             ctx_params = wrap_tlv(b"\xA0", wrap_tlv(b"\x81", wrap_tlv(b"\x04", b"ctx")))
             auth_payload = build_authenticate_server_payload(
                 transaction_id=transaction_id,
-                euicc_challenge=bytes(challenge),
+                euicc_challenge=extract_euicc_challenge(challenge),
                 server_address="rsp.example.com",
                 server_challenge=b"\x22" * 16,
                 cert_der=cert_der,
@@ -1629,7 +1658,7 @@ metadata_overrides = {{
             aid_raw = find_first_tlv(result_response, "4F")
             self.assertGreater(len(aid_raw), 0)
             _, installed_aid, _, _ = read_tlv(aid_raw, 0)
-            self.assertEqual(installed_aid.hex().upper(), "A0000005591010FFFFFFFF8900001303")
+            self.assertEqual(installed_aid.hex().upper(), "A0000005591010FFFFFFFF8900001300")
             result_code, result_detail = parse_profile_install_result(result_response)
             self.assertEqual(result_code, 5)
             self.assertEqual(result_detail, 0)
@@ -1749,7 +1778,9 @@ metadata_overrides = {{
 
             empty_list_response, sw1, sw2 = connection.transmit(list(bytes.fromhex("80E2910003BF2800")))
             self.assertEqual((sw1, sw2), (0x90, 0x00))
-            self.assertEqual(bytes(empty_list_response), bytes.fromhex("BF2800"))
+            # SGP.22 §5.7.9 mandates an explicit empty SEQUENCE OF wrapper
+            # (tag A0, length 0) when no notifications are queued.
+            self.assertEqual(bytes(empty_list_response), bytes.fromhex("BF2802A000"))
 
     def test_simulated_connection_retrieve_notifications_list_returns_all_queued_notifications(self) -> None:
         with mock.patch.dict(os.environ, {CARD_BACKEND_ENV: "sim"}, clear=False):
@@ -1843,7 +1874,7 @@ metadata_overrides = {{
             cert_der, cert_private_key = build_self_signed_cert_and_key("Chunked Bootstrap DPpb")
             auth_payload = build_authenticate_server_payload(
                 transaction_id=transaction_id,
-                euicc_challenge=bytes(challenge),
+                euicc_challenge=extract_euicc_challenge(challenge),
                 server_address="rsp.example.com",
                 server_challenge=b"\x24" * 16,
                 cert_der=cert_der,
@@ -1931,7 +1962,7 @@ metadata_overrides = {{
                 cert_der, cert_private_key = build_self_signed_cert_and_key("Segmented A3 DPpb")
                 auth_payload = build_authenticate_server_payload(
                     transaction_id=transaction_id,
-                    euicc_challenge=bytes(challenge),
+                    euicc_challenge=extract_euicc_challenge(challenge),
                     server_address="rsp.example.com",
                     server_challenge=b"\x34" * 16,
                     cert_der=cert_der,
@@ -2021,7 +2052,7 @@ metadata_overrides = {{
                 cert_der, cert_private_key = build_self_signed_cert_and_key("Persist DPpb")
                 auth_payload = build_authenticate_server_payload(
                     transaction_id=transaction_id,
-                    euicc_challenge=bytes(challenge),
+                    euicc_challenge=extract_euicc_challenge(challenge),
                     server_address="persist.example.com",
                     server_challenge=b"\x44" * 16,
                     cert_der=cert_der,
@@ -2064,7 +2095,7 @@ metadata_overrides = {{
                 self.assertGreater(len(aid_raw), 0)
                 _, installed_aid, _, _ = read_tlv(aid_raw, 0)
                 installed_aid_hex = installed_aid.hex().upper()
-                self.assertEqual(installed_aid_hex, "A0000005591010FFFFFFFF8900001303")
+                self.assertEqual(installed_aid_hex, "A0000005591010FFFFFFFF8900001300")
 
                 enable_request = wrap_tlv("BF31", wrap_tlv("4F", installed_aid))
                 enable_response, sw1, sw2 = send_store_data_payload(connection, enable_request)
@@ -2127,7 +2158,7 @@ metadata_overrides = {{
                 cert_der, cert_private_key = build_self_signed_cert_and_key("Notification Target DPpb")
                 auth_payload = build_authenticate_server_payload(
                     transaction_id=transaction_id,
-                    euicc_challenge=bytes(challenge),
+                    euicc_challenge=extract_euicc_challenge(challenge),
                     server_address=server_address,
                     server_challenge=b"\x41" * 16,
                     cert_der=cert_der,
@@ -2179,16 +2210,23 @@ metadata_overrides = {{
                 _, installed_aid, _, _ = read_tlv(aid_raw, 0)
                 manifest_path = profile_store_dir / f"AID_{installed_aid.hex().upper()}" / "manifest.json"
                 self.assertTrue(manifest_path.is_file())
-                manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+                from yggdrasim_common.inventory_crypto import read_secret_json_file
+                manifest = read_secret_json_file(manifest_path)
+                self.assertIsInstance(manifest, dict)
                 self.assertEqual(manifest["notification_address"], server_address)
 
     def test_euicc_store_persists_card_identity_and_scp03_keys_by_eid(self) -> None:
+        from yggdrasim_common.inventory_crypto import (
+            read_secret_json_file,
+            write_secret_json_file,
+        )
         with tempfile.TemporaryDirectory() as temp_dir:
             engine = SimulatedSimCardEngine(euicc_store_root=temp_dir)
             euicc_manifest_path = Path(engine.state.euicc_store_path) / "euicc.json"
             self.assertTrue(euicc_manifest_path.is_file())
 
-            manifest = json.loads(euicc_manifest_path.read_text(encoding="utf-8"))
+            manifest = read_secret_json_file(euicc_manifest_path)
+            self.assertIsInstance(manifest, dict)
             manifest["root_ci_pkid_hex"] = "00112233445566778899AABBCCDDEEFF00112233"
             manifest["scp03_keys"] = {
                 "kenc_hex": "0102030405060708090A0B0C0D0E0F10",
@@ -2196,7 +2234,7 @@ metadata_overrides = {{
                 "dek_hex": "2122232425262728292A2B2C2D2E2F30",
                 "kvn": 0x31,
             }
-            euicc_manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+            write_secret_json_file(euicc_manifest_path, manifest)
 
             recreated_engine = SimulatedSimCardEngine(euicc_store_root=temp_dir)
             self.assertEqual(recreated_engine.state.root_ci_pkid.hex().upper(), "00112233445566778899AABBCCDDEEFF00112233")
@@ -2243,7 +2281,7 @@ metadata_overrides = {{
             self.assertEqual(result.profile_name, "Imported From ASN1")
             self.assertEqual(result.iccid, "89461111111111111144")
             self.assertEqual(result.profile_source, "upp")
-            self.assertEqual(result.aid, "A0000005591010FFFFFFFF8900001303")
+            self.assertEqual(result.aid, "A0000005591010FFFFFFFF8900001300")
             self.assertTrue(result.enabled)
 
             recreated_engine = SimulatedSimCardEngine(euicc_store_root=temp_dir)
@@ -2371,14 +2409,24 @@ metadata_overrides = {{
             self.assertEqual(imported[0].state, "enabled")
 
     def test_generated_profile_aids_follow_real_world_sequence(self) -> None:
-        profiles = [types.SimpleNamespace(aid="A0000005591010FFFFFFFF8900001100")]
+        profiles: list[types.SimpleNamespace] = []
+        self.assertEqual(next_generated_profile_aid(profiles), "A0000005591010FFFFFFFF8900001100")
+
+        profiles.append(types.SimpleNamespace(aid="A0000005591010FFFFFFFF8900001100"))
         self.assertEqual(next_generated_profile_aid(profiles), "A0000005591010FFFFFFFF8900001200")
 
         profiles.append(types.SimpleNamespace(aid="A0000005591010FFFFFFFF8900001200"))
-        self.assertEqual(next_generated_profile_aid(profiles), "A0000005591010FFFFFFFF8900001303")
+        self.assertEqual(next_generated_profile_aid(profiles), "A0000005591010FFFFFFFF8900001300")
 
-        profiles.append(types.SimpleNamespace(aid="A0000005591010FFFFFFFF8900001303"))
-        self.assertEqual(next_generated_profile_aid(profiles), "A0000005591010FFFFFFFF8900001304")
+        profiles.append(types.SimpleNamespace(aid="A0000005591010FFFFFFFF8900001300"))
+        self.assertEqual(next_generated_profile_aid(profiles), "A0000005591010FFFFFFFF8900001400")
+
+        profiles.append(types.SimpleNamespace(aid="A0000005591010FFFFFFFF8900001400"))
+        self.assertEqual(next_generated_profile_aid(profiles), "A0000005591010FFFFFFFF8900001500")
+
+        gapped = [types.SimpleNamespace(aid="A0000005591010FFFFFFFF8900001100"),
+                  types.SimpleNamespace(aid="A0000005591010FFFFFFFF8900001300")]
+        self.assertEqual(next_generated_profile_aid(gapped), "A0000005591010FFFFFFFF8900001200")
 
     def test_simulated_connection_rejects_tampered_bpp_segment(self) -> None:
         with mock.patch.dict(os.environ, {CARD_BACKEND_ENV: "sim"}, clear=False):
@@ -2401,7 +2449,7 @@ metadata_overrides = {{
             cert_der, cert_private_key = build_self_signed_cert_and_key("Tamper DPpb")
             auth_payload = build_authenticate_server_payload(
                 transaction_id=transaction_id,
-                euicc_challenge=bytes(challenge),
+                euicc_challenge=extract_euicc_challenge(challenge),
                 server_address="rsp.example.com",
                 server_challenge=b"\x33" * 16,
                 cert_der=cert_der,
@@ -2464,7 +2512,7 @@ metadata_overrides = {{
             cert_der, cert_private_key = build_self_signed_cert_and_key("Duplicate ICCID DPauth")
             auth_payload = build_authenticate_server_payload(
                 transaction_id=transaction_id,
-                euicc_challenge=bytes(challenge),
+                euicc_challenge=extract_euicc_challenge(challenge),
                 server_address="rsp.example.com",
                 server_challenge=b"\x31" * 16,
                 cert_der=cert_der,
@@ -2522,7 +2570,7 @@ metadata_overrides = {{
             cert_der, cert_private_key = build_self_signed_cert_and_key("Mismatch ICCID DPauth")
             auth_payload = build_authenticate_server_payload(
                 transaction_id=transaction_id,
-                euicc_challenge=bytes(challenge),
+                euicc_challenge=extract_euicc_challenge(challenge),
                 server_address="rsp.example.com",
                 server_challenge=b"\x32" * 16,
                 cert_der=cert_der,
@@ -2573,6 +2621,892 @@ metadata_overrides = {{
             result_code, result_detail = parse_profile_install_result(result_response)
             self.assertEqual(result_code, 5)
             self.assertEqual(result_detail, 13)
+
+
+class SaipProfileDecodeBoundedTests(unittest.TestCase):
+    """
+    Regression tests for the per-element timeout around
+    ``asn1.decode('ProfileElement', raw_tlv)`` inside
+    ``SIMCARD.saip_profile.decode_profile_image``.
+
+    The simulator's LOAD-PROFILE path used to wedge the APDU response
+    whenever pySim's asn1tools DER codec entered its unbounded
+    ``decode_content`` loop on a pathological ProfileElement. These tests
+    pin the contract that the decoder now punts on the offending element
+    instead of blocking the whole install.
+    """
+
+    def test_bounded_decode_returns_none_when_asn1_never_finishes(self) -> None:
+        import time
+
+        from SIMCARD.saip_profile import _decode_profile_element_bounded
+
+        class HangingAsn1:
+            def decode(self, _type_name, _raw_tlv):
+                while True:
+                    time.sleep(0.05)
+
+        started = time.time()
+        result = _decode_profile_element_bounded(
+            HangingAsn1(),
+            b"\x86\x01\xAA",
+            timeout_seconds=0.75,
+        )
+        elapsed = time.time() - started
+
+        self.assertIsNone(result)
+        self.assertLess(elapsed, 2.0, "timeout must fire well before the test harness bails")
+
+    def test_bounded_decode_returns_none_on_exception(self) -> None:
+        from SIMCARD.saip_profile import _decode_profile_element_bounded
+
+        class RaisingAsn1:
+            def decode(self, _type_name, _raw_tlv):
+                raise ValueError("synthetic decoder error")
+
+        result = _decode_profile_element_bounded(
+            RaisingAsn1(),
+            b"\x86\x01\xAA",
+            timeout_seconds=1.0,
+        )
+
+        self.assertIsNone(result)
+
+    def test_bounded_decode_returns_result_when_decode_succeeds(self) -> None:
+        from SIMCARD.saip_profile import _decode_profile_element_bounded
+
+        class StubAsn1:
+            def decode(self, _type_name, _raw_tlv):
+                return ("telecom", {"iccid": b"\x89\x46"})
+
+        result = _decode_profile_element_bounded(
+            StubAsn1(),
+            b"\xB2\x01\xAA",
+            timeout_seconds=1.0,
+        )
+
+        self.assertIsNotNone(result)
+        pe_type, decoded = result
+        self.assertEqual(pe_type, "telecom")
+        self.assertEqual(decoded, {"iccid": b"\x89\x46"})
+
+    def test_decode_profile_image_skips_hanging_element_and_keeps_going(self) -> None:
+        import time
+
+        from SIMCARD import saip_profile
+
+        if saip_profile._get_saip_asn1() is None:
+            self.skipTest("pySim SAIP asn1 compiler unavailable in this environment")
+
+        header_name_tlv = bytes([0x82, 0x08]) + b"Header10"
+        header_iccid_tlv = bytes([0x83, 0x08]) + bytes.fromhex("6000000000000000")
+        header_value = header_name_tlv + header_iccid_tlv
+        header_tlv = bytes([0xA0, len(header_value)]) + header_value
+
+        hanging_tlv = bytes([0xB2, 0x03, 0xAA, 0x01, 0x02])
+        trailing_tlv = bytes([0xB3, 0x02, 0x81, 0x00])
+
+        upp_bytes = header_tlv + hanging_tlv + trailing_tlv
+
+        hang_controller = {"hanging_seen": False, "trailing_seen": False}
+
+        class HangingOnceAsn1:
+            def __init__(self, real_asn1) -> None:
+                self._real = real_asn1
+
+            def decode(self, type_name, raw_tlv):
+                first_tag = bytes(raw_tlv)[:1]
+                if first_tag == b"\xB2":
+                    hang_controller["hanging_seen"] = True
+                    while True:
+                        time.sleep(0.05)
+                if first_tag == b"\xB3":
+                    hang_controller["trailing_seen"] = True
+                return self._real.decode(type_name, raw_tlv)
+
+        real_asn1 = saip_profile._get_saip_asn1()
+        with mock.patch(
+            "SIMCARD.saip_profile._get_saip_asn1",
+            return_value=HangingOnceAsn1(real_asn1),
+        ), mock.patch.dict(
+            os.environ,
+            {"YGGDRASIM_SIM_SAIP_DECODE_TIMEOUT_SECONDS": "0.75"},
+            clear=False,
+        ):
+            started = time.time()
+            image = saip_profile.decode_profile_image(
+                upp_bytes,
+                default_iccid="",
+                default_name="",
+            )
+            elapsed = time.time() - started
+
+        self.assertTrue(hang_controller["hanging_seen"], "hanging B2 element must be attempted")
+        self.assertTrue(
+            hang_controller["trailing_seen"],
+            "elements after the hang must still be attempted",
+        )
+        self.assertLess(elapsed, 4.0, "decode_profile_image must not hang on a single bad element")
+        self.assertIsNotNone(image)
+
+    def test_native_salvage_recovers_telecom_ef_adn_when_asn1_hangs(self) -> None:
+        """
+        When ``asn1tools`` cannot decode a ``PE-TELECOM`` element (either
+        because it trips the DER ``decode_content`` infinite loop or
+        raises on a malformed inner TLV), the profile image used to lose
+        every file that lived under ``DF.TELECOM``. The native salvage
+        walker now recovers file slots that follow the SAIP
+        ``File ::= SEQUENCE OF CHOICE`` encoding without going through
+        asn1tools. Pin that ``EF.ADN`` is reconstructed with the right
+        FID, structure, and record payload even when the bounded decode
+        returns ``None``.
+        """
+        import time
+
+        from SIMCARD import saip_profile
+
+        # Construct a minimal PE-TELECOM (B2) with an ef-adn [24] File
+        # slot carrying a single ``fillFileContent`` OCTET STRING. The
+        # field layout follows AUTOMATIC TAGS IMPLICIT per SAIP 3.3.1:
+        #   telecom-header [0] -> 0xA0, templateID [1] -> 0x81,
+        #   df-telecom [2] -> 0xA2, ef-adn [24] -> 0xB8,
+        #   fillFileContent [3] -> 0x83.
+        telecom_header = bytes.fromhex("A003810101")  # identification=1
+        template_oid = bytes.fromhex("81020000")  # placeholder, walker ignores value
+        df_telecom = bytes.fromhex("A200")  # empty File
+
+        file_content = bytes([0x83, 0x05]) + b"ABCDE"
+        ef_adn_tlv = bytes([0xB8, len(file_content)]) + file_content
+
+        pe_content = telecom_header + template_oid + df_telecom + ef_adn_tlv
+        pe_tlv = bytes([0xB2, len(pe_content)]) + pe_content
+
+        header_name = b"TestName"
+        header_iccid = bytes.fromhex("6000000000000000")
+        header_value = (
+            bytes([0x82, len(header_name)]) + header_name
+            + bytes([0x83, len(header_iccid)]) + header_iccid
+        )
+        header_tlv = bytes([0xA0, len(header_value)]) + header_value
+
+        upp_bytes = header_tlv + pe_tlv
+
+        class HangingAsn1:
+            def decode(self, _type_name, _raw_tlv):
+                while True:
+                    time.sleep(0.05)
+
+        with mock.patch(
+            "SIMCARD.saip_profile._get_saip_asn1",
+            return_value=HangingAsn1(),
+        ), mock.patch.dict(
+            os.environ,
+            {"YGGDRASIM_SIM_SAIP_DECODE_TIMEOUT_SECONDS": "0.5"},
+            clear=False,
+        ):
+            image = saip_profile.decode_profile_image(
+                upp_bytes,
+                default_iccid="",
+                default_name="",
+            )
+
+        self.assertIsNotNone(image)
+        assert image is not None
+
+        telecom_root = next(
+            (node for node in image.nodes if node.path == ("MF", "DF.TELECOM")),
+            None,
+        )
+        self.assertIsNotNone(
+            telecom_root,
+            "DF.TELECOM root node must be materialised by the telecom salvage path",
+        )
+
+        ef_adn_node = next(
+            (node for node in image.nodes if node.path == ("MF", "DF.TELECOM", "EF.ADN")),
+            None,
+        )
+        self.assertIsNotNone(
+            ef_adn_node,
+            "EF.ADN file content must be recovered by the native PE-TELECOM walker",
+        )
+        assert ef_adn_node is not None
+        self.assertEqual(ef_adn_node.fid.upper(), "6F3A")
+        self.assertEqual(ef_adn_node.structure, "linear-fixed")
+        self.assertEqual(ef_adn_node.records, [b"ABCDE"])
+
+    def test_native_salvage_respects_do_not_create_marker(self) -> None:
+        """
+        A PE-TELECOM slot whose File starts with ``doNotCreate`` must not
+        produce a file-system node even though the section itself is
+        salvageable. This mirrors the behaviour of the asn1tools-driven
+        path via ``_materialize_file_payload``.
+        """
+        import time
+
+        from SIMCARD import saip_profile
+
+        # ef-adn [24] -> File containing only doNotCreate ([0] IMPLICIT NULL).
+        do_not_create = bytes([0x80, 0x00])
+        ef_adn_tlv = bytes([0xB8, len(do_not_create)]) + do_not_create
+
+        telecom_header = bytes.fromhex("A003810101")
+        pe_content = telecom_header + ef_adn_tlv
+        pe_tlv = bytes([0xB2, len(pe_content)]) + pe_content
+
+        header_value = (
+            bytes([0x82, 0x08]) + b"TestName"
+            + bytes([0x83, 0x08]) + bytes.fromhex("6000000000000000")
+        )
+        header_tlv = bytes([0xA0, len(header_value)]) + header_value
+        upp_bytes = header_tlv + pe_tlv
+
+        class HangingAsn1:
+            def decode(self, _type_name, _raw_tlv):
+                while True:
+                    time.sleep(0.05)
+
+        with mock.patch(
+            "SIMCARD.saip_profile._get_saip_asn1",
+            return_value=HangingAsn1(),
+        ), mock.patch.dict(
+            os.environ,
+            {"YGGDRASIM_SIM_SAIP_DECODE_TIMEOUT_SECONDS": "0.5"},
+            clear=False,
+        ):
+            image = saip_profile.decode_profile_image(
+                upp_bytes,
+                default_iccid="",
+                default_name="",
+            )
+
+        self.assertIsNotNone(image)
+        assert image is not None
+
+        # DF.TELECOM itself should still be materialised...
+        self.assertTrue(
+            any(node.path == ("MF", "DF.TELECOM") for node in image.nodes),
+            "DF.TELECOM root must still be created around a doNotCreate slot",
+        )
+        # ...but EF.ADN must be suppressed.
+        self.assertFalse(
+            any(node.path == ("MF", "DF.TELECOM", "EF.ADN") for node in image.nodes),
+            "doNotCreate marker must suppress the EF.ADN node",
+        )
+
+    def test_bounded_decode_actively_terminates_runaway_worker_thread(self) -> None:
+        """
+        Regression: the original daemon-thread implementation merely let the
+        asn1 decode keep running after ``_decode_profile_element_bounded``
+        returned, which allowed the asn1tools inner list to grow unboundedly
+        and leaked several GB of RAM across repeated installs / startups.
+        The ctypes-based async-exception path must actually unwind the
+        worker so it disappears shortly after the soft deadline.
+        """
+        import threading
+        import time
+
+        from SIMCARD.saip_profile import _decode_profile_element_bounded
+
+        worker_name = "saip-profile-element-decode"
+
+        class BytecodeHangingAsn1:
+            def decode(self, _type_name, _raw_tlv):
+                # Pure Python bytecode loop so PyThreadState_SetAsyncExc can
+                # land between opcodes; mirrors the shape of the asn1tools
+                # DER ``decode_content`` loop that caused the original hang.
+                counter = 0
+                while True:
+                    counter = (counter + 1) & 0xFFFF
+
+        before = sum(
+            1 for thread in threading.enumerate() if thread.name == worker_name
+        )
+
+        result = _decode_profile_element_bounded(
+            BytecodeHangingAsn1(),
+            b"\x86\x01\xAA",
+            timeout_seconds=0.5,
+        )
+
+        self.assertIsNone(result)
+
+        # The worker must die within a bounded grace window; allow a couple
+        # of scheduler ticks so the async exception can land even on a busy
+        # test host.
+        deadline = time.time() + 3.0
+        while time.time() < deadline:
+            alive = sum(
+                1 for thread in threading.enumerate() if thread.name == worker_name
+            )
+            if alive <= before:
+                break
+            time.sleep(0.05)
+
+        still_alive = sum(
+            1 for thread in threading.enumerate() if thread.name == worker_name
+        )
+        self.assertLessEqual(
+            still_alive,
+            before,
+            "runaway asn1 decode worker must be killed after the deadline fires",
+        )
+
+
+class SaipProfilePeSectionCoverageTests(unittest.TestCase):
+    """
+    Pin the shape of the SAIP PE section schema table against the section
+    dispatcher and the canonical ASN.1 CHOICE layout so regressions (e.g.
+    a dropped PE section, a stale field-index mapping, or a section spec
+    that drifts out of sync with ``_PE_SECTION_SCHEMAS``) surface
+    immediately. Covers both the structural wiring and the native
+    salvage path for the large File-based sections.
+    """
+
+    # Expected AUTOMATIC TAGS choice-index for every file-based PE
+    # section we salvage natively. Mirrors the CHOICE member order in
+    # pySim's ``PE_Definitions-3.3.1.asn``.
+    _EXPECTED_PE_CHOICE_INDEX: dict[str, int] = {
+        "mf": 16,
+        "cd": 17,
+        "telecom": 18,
+        "usim": 19,
+        "opt-usim": 20,
+        "isim": 21,
+        "opt-isim": 22,
+        "phonebook": 23,
+        "gsm-access": 24,
+        "csim": 25,
+        "opt-csim": 26,
+        "eap": 27,
+        "df-5gs": 28,
+        "df-saip": 29,
+        "df-snpn": 30,
+        "df-5gprose": 31,
+    }
+
+    def test_pe_section_schemas_align_with_section_specs(self) -> None:
+        """Every salvaged ``pe_type`` must have a corresponding section spec."""
+
+        from SIMCARD.saip_profile import _PE_SECTION_SCHEMAS, _SECTION_SPECS
+
+        for outer_tag, schema in _PE_SECTION_SCHEMAS.items():
+            pe_type = str(schema.get("pe_type") or "").strip()
+            self.assertTrue(
+                len(pe_type) > 0,
+                f"PE section schema {outer_tag.hex().upper()} must declare a pe_type",
+            )
+            self.assertIn(
+                pe_type,
+                _SECTION_SPECS,
+                f"Salvaged pe_type {pe_type!r} has no entry in _SECTION_SPECS",
+            )
+            fields = schema.get("fields") or {}
+            self.assertIsInstance(fields, dict)
+            self.assertGreater(
+                len(fields),
+                0,
+                f"PE section {pe_type!r} declares no AUTOMATIC TAGS fields",
+            )
+            # Field indices must start at 0 and be contiguous; a gap
+            # means the walker cannot line up with the asn1tools schema.
+            indices = sorted(fields.keys())
+            self.assertEqual(indices[0], 0)
+            self.assertEqual(
+                indices,
+                list(range(indices[-1] + 1)),
+                f"PE section {pe_type!r} has non-contiguous field indices",
+            )
+
+    def test_pe_section_schemas_use_automatic_tags_encoding(self) -> None:
+        """Outer tag bytes must match the AUTOMATIC TAGS encoding for CHOICE [N]."""
+
+        from SIMCARD.saip_profile import _PE_CHOICE_OUTER_TAGS, _PE_SECTION_SCHEMAS
+
+        pe_type_to_outer_tag = {
+            str(schema["pe_type"]): outer_tag
+            for outer_tag, schema in _PE_SECTION_SCHEMAS.items()
+        }
+
+        for pe_type, choice_index in self._EXPECTED_PE_CHOICE_INDEX.items():
+            self.assertIn(
+                pe_type,
+                pe_type_to_outer_tag,
+                f"Missing PE section schema for {pe_type!r}",
+            )
+            expected_tag = _PE_CHOICE_OUTER_TAGS.get(choice_index)
+            self.assertEqual(
+                pe_type_to_outer_tag[pe_type],
+                expected_tag,
+                f"Outer tag for {pe_type!r} does not match CHOICE [{choice_index}]",
+            )
+
+    @staticmethod
+    def _build_upp_with_bad_pe(outer_tag: bytes, pe_content: bytes) -> bytes:
+        pe_tlv = bytes(outer_tag) + bytes([len(pe_content)]) + pe_content
+        header_value = (
+            bytes([0x82, 0x08]) + b"TestName"
+            + bytes([0x83, 0x08]) + bytes.fromhex("6000000000000000")
+        )
+        header_tlv = bytes([0xA0, len(header_value)]) + header_value
+        return header_tlv + pe_tlv
+
+    @staticmethod
+    def _file_with_single_content(field_tag_byte: int, payload: bytes) -> bytes:
+        """Encode a File slot with a single ``fillFileContent`` alternative."""
+
+        inner = bytes([0x83, len(payload)]) + payload
+        return bytes([field_tag_byte, len(inner)]) + inner
+
+    def test_native_salvage_recovers_usim_ef_spn_when_asn1_hangs(self) -> None:
+        """
+        PE-USIM is the most common asn1tools hang site on live profiles
+        (alongside PE-TELECOM). Pin that the native walker recovers
+        ``EF.SPN`` (field 13 of PE-USIM → AUTOMATIC TAG [13] = 0xAD) with
+        the expected FID and transparent payload even when asn1 cannot
+        decode the envelope.
+        """
+        import time
+
+        from SIMCARD import saip_profile
+
+        ef_spn_payload = bytes.fromhex("010A4C61625F45553031FFFFFFFFFFFFFF")
+        ef_spn_tlv = self._file_with_single_content(0xAD, ef_spn_payload)
+        usim_header = bytes.fromhex("A003810103")
+        pe_content = usim_header + ef_spn_tlv
+        upp_bytes = self._build_upp_with_bad_pe(b"\xB3", pe_content)
+
+        class HangingAsn1:
+            def decode(self, _type_name, _raw_tlv):
+                while True:
+                    time.sleep(0.05)
+
+        with mock.patch(
+            "SIMCARD.saip_profile._get_saip_asn1",
+            return_value=HangingAsn1(),
+        ), mock.patch.dict(
+            os.environ,
+            {"YGGDRASIM_SIM_SAIP_DECODE_TIMEOUT_SECONDS": "0.5"},
+            clear=False,
+        ):
+            image = saip_profile.decode_profile_image(
+                upp_bytes,
+                default_iccid="",
+                default_name="",
+            )
+
+        self.assertIsNotNone(image)
+        assert image is not None
+
+        adf_usim = next(
+            (node for node in image.nodes if node.path == ("MF", "ADF.USIM")),
+            None,
+        )
+        self.assertIsNotNone(
+            adf_usim,
+            "ADF.USIM root node must be materialised by the usim salvage path",
+        )
+
+        ef_spn = next(
+            (node for node in image.nodes if node.path == ("MF", "ADF.USIM", "EF.SPN")),
+            None,
+        )
+        self.assertIsNotNone(
+            ef_spn,
+            "EF.SPN must be recovered by the native PE-USIM walker",
+        )
+        assert ef_spn is not None
+        self.assertEqual(ef_spn.fid.upper(), "6F46")
+        self.assertEqual(ef_spn.structure, "transparent")
+        self.assertEqual(ef_spn.data, ef_spn_payload)
+
+    def test_native_salvage_recovers_isim_ef_impi_when_asn1_hangs(self) -> None:
+        """
+        PE-ISIM salvage must materialise ADF.ISIM and its canonical
+        EF.IMPI (field 3 → AUTOMATIC TAG [3] = 0xA3).
+        """
+        import time
+
+        from SIMCARD import saip_profile
+
+        ef_impi_payload = b"sip:user@example.org"
+        ef_impi_tlv = self._file_with_single_content(0xA3, ef_impi_payload)
+        isim_header = bytes.fromhex("A003810105")
+        pe_content = isim_header + ef_impi_tlv
+        upp_bytes = self._build_upp_with_bad_pe(b"\xB5", pe_content)
+
+        class HangingAsn1:
+            def decode(self, _type_name, _raw_tlv):
+                while True:
+                    time.sleep(0.05)
+
+        with mock.patch(
+            "SIMCARD.saip_profile._get_saip_asn1",
+            return_value=HangingAsn1(),
+        ), mock.patch.dict(
+            os.environ,
+            {"YGGDRASIM_SIM_SAIP_DECODE_TIMEOUT_SECONDS": "0.5"},
+            clear=False,
+        ):
+            image = saip_profile.decode_profile_image(
+                upp_bytes,
+                default_iccid="",
+                default_name="",
+            )
+
+        self.assertIsNotNone(image)
+        assert image is not None
+
+        self.assertTrue(
+            any(node.path == ("MF", "ADF.ISIM") for node in image.nodes),
+            "ADF.ISIM root must be materialised by the isim salvage path",
+        )
+        ef_impi = next(
+            (node for node in image.nodes if node.path == ("MF", "ADF.ISIM", "EF.IMPI")),
+            None,
+        )
+        self.assertIsNotNone(ef_impi)
+        assert ef_impi is not None
+        self.assertEqual(ef_impi.fid.upper(), "6F02")
+        self.assertEqual(ef_impi.structure, "transparent")
+        self.assertEqual(ef_impi.data, ef_impi_payload)
+
+    def test_native_salvage_nests_phonebook_ef_adn_under_df_phonebook(self) -> None:
+        """
+        A standalone PE-PHONEBOOK envelope (outer tag 0xB7) must place
+        ``EF.ADN`` (field 11 → 0xAB) under ``DF.PHONEBOOK`` rather than
+        repeating the PE-TELECOM flat layout. This differentiates the
+        schema spec from the legacy telecom-nested codepath.
+        """
+        import time
+
+        from SIMCARD import saip_profile
+
+        ef_adn_payload = b"PBONLY"
+        ef_adn_tlv = self._file_with_single_content(0xAB, ef_adn_payload)
+        phonebook_header = bytes.fromhex("A003810107")
+        pe_content = phonebook_header + ef_adn_tlv
+        upp_bytes = self._build_upp_with_bad_pe(b"\xB7", pe_content)
+
+        class HangingAsn1:
+            def decode(self, _type_name, _raw_tlv):
+                while True:
+                    time.sleep(0.05)
+
+        with mock.patch(
+            "SIMCARD.saip_profile._get_saip_asn1",
+            return_value=HangingAsn1(),
+        ), mock.patch.dict(
+            os.environ,
+            {"YGGDRASIM_SIM_SAIP_DECODE_TIMEOUT_SECONDS": "0.5"},
+            clear=False,
+        ):
+            image = saip_profile.decode_profile_image(
+                upp_bytes,
+                default_iccid="",
+                default_name="",
+            )
+
+        self.assertIsNotNone(image)
+        assert image is not None
+
+        self.assertTrue(
+            any(
+                node.path == ("MF", "DF.TELECOM", "DF.PHONEBOOK") for node in image.nodes
+            ),
+            "DF.PHONEBOOK root must be materialised under DF.TELECOM by the phonebook salvage path",
+        )
+        ef_adn = next(
+            (
+                node
+                for node in image.nodes
+                if node.path == ("MF", "DF.TELECOM", "DF.PHONEBOOK", "EF.ADN")
+            ),
+            None,
+        )
+        self.assertIsNotNone(
+            ef_adn,
+            "EF.ADN from PE-PHONEBOOK must be nested under DF.PHONEBOOK",
+        )
+        assert ef_adn is not None
+        self.assertEqual(ef_adn.fid.upper(), "6F3A")
+        self.assertEqual(ef_adn.structure, "linear-fixed")
+        self.assertEqual(ef_adn.records, [ef_adn_payload])
+
+    def test_native_salvage_handles_longform_tag_for_df_5gprose(self) -> None:
+        """
+        PE-DF-5GPROSE lives at CHOICE [31] which AUTOMATIC TAGS encodes
+        as the long-form tag ``BF 1F``. The salvage dispatcher must
+        recognise the multi-byte outer tag and still walk the File
+        contents correctly.
+        """
+        import time
+
+        from SIMCARD import saip_profile
+
+        ef_prose_st_payload = bytes.fromhex("0102030405")
+        ef_prose_tlv = self._file_with_single_content(0xA3, ef_prose_st_payload)
+        prose_header = bytes.fromhex("A00381010B")
+        pe_content = prose_header + ef_prose_tlv
+        # CHOICE [31] -> outer tag BF 1F (constructed context-specific).
+        pe_tlv = bytes([0xBF, 0x1F, len(pe_content)]) + pe_content
+        header_value = (
+            bytes([0x82, 0x08]) + b"TestName"
+            + bytes([0x83, 0x08]) + bytes.fromhex("6000000000000000")
+        )
+        header_tlv = bytes([0xA0, len(header_value)]) + header_value
+        upp_bytes = header_tlv + pe_tlv
+
+        class HangingAsn1:
+            def decode(self, _type_name, _raw_tlv):
+                while True:
+                    time.sleep(0.05)
+
+        with mock.patch(
+            "SIMCARD.saip_profile._get_saip_asn1",
+            return_value=HangingAsn1(),
+        ), mock.patch.dict(
+            os.environ,
+            {"YGGDRASIM_SIM_SAIP_DECODE_TIMEOUT_SECONDS": "0.5"},
+            clear=False,
+        ):
+            image = saip_profile.decode_profile_image(
+                upp_bytes,
+                default_iccid="",
+                default_name="",
+            )
+
+        self.assertIsNotNone(image)
+        assert image is not None
+
+        prose_root = next(
+            (
+                node
+                for node in image.nodes
+                if node.path == ("MF", "ADF.USIM", "DF.5G_PROSE")
+            ),
+            None,
+        )
+        self.assertIsNotNone(
+            prose_root,
+            "DF.5G_PROSE root must be materialised from the BF 1F envelope",
+        )
+        ef_prose_st = next(
+            (
+                node
+                for node in image.nodes
+                if node.path
+                == ("MF", "ADF.USIM", "DF.5G_PROSE", "EF.5G-PROSE-ST")
+            ),
+            None,
+        )
+        self.assertIsNotNone(ef_prose_st)
+        assert ef_prose_st is not None
+        self.assertEqual(ef_prose_st.data, ef_prose_st_payload)
+
+    def test_native_salvage_skips_non_file_section_outer_tags(self) -> None:
+        """
+        Non-file ProfileElement alternatives (header, pinCodes,
+        akaParameter, rfu1..rfu5, application, rfm, nonStandard, end,
+        genericFileManagement) do not belong in ``_PE_SECTION_SCHEMAS``
+        and must therefore be skipped by the salvage dispatcher. This
+        ensures a PE-PINCodes or PE-AKAParameter that happens to trip
+        asn1tools does not get routed through the File walker (which
+        would produce garbage because those PEs are not SEQUENCE-OF-
+        File).
+        """
+        from SIMCARD.saip_profile import (
+            _PE_SECTION_SCHEMAS,
+            _salvage_profile_element_natively,
+        )
+
+        non_file_tags = [
+            b"\xA0",  # header
+            b"\xA1",  # genericFileManagement
+            b"\xA2",  # pinCodes
+            b"\xA3",  # pukCodes
+            b"\xA4",  # akaParameter
+            b"\xA5",  # cdmaParameter
+            b"\xA6",  # securityDomain
+            b"\xA7",  # rfm
+            b"\xA8",  # application
+            b"\xA9",  # nonStandard
+            b"\xAA",  # end
+            b"\xAB",  # rfu1
+            b"\xAF",  # rfu5
+        ]
+
+        for tag in non_file_tags:
+            self.assertNotIn(
+                tag,
+                _PE_SECTION_SCHEMAS,
+                f"Non-file ProfileElement tag {tag.hex().upper()} must not be in schemas",
+            )
+            dummy_tlv = bytes(tag) + b"\x00"
+            self.assertIsNone(
+                _salvage_profile_element_natively(dummy_tlv),
+                f"Salvage must return None for non-file outer tag {tag.hex().upper()}",
+            )
+
+
+class ProfileStoreLoadPrefersJsonImageTests(unittest.TestCase):
+    """
+    Regression: ``load_profiles_from_store`` used to re-run
+    ``decode_profile_image`` on the raw UPP for every profile whose
+    manifest declared ``profile_source == 'upp'`` (which is the default
+    for BPP-installed profiles). When the UPP contained a pathological
+    ProfileElement the resulting decode thread leaked several GB of RAM
+    on every tool launch. Pin that the JSON image cache is always
+    preferred and the UPP decode path is only used as a fallback when
+    the JSON side-file is absent.
+    """
+
+    def test_json_image_cache_is_preferred_even_when_manifest_says_upp(self) -> None:
+        from SIMCARD import profile_store
+        from SIMCARD.state import (
+            SimProfileAuthConfig,
+            SimProfileEntry,
+            SimProfileFsNode,
+            SimProfileImage,
+        )
+
+        with tempfile.TemporaryDirectory() as store_root:
+            profile = SimProfileEntry(
+                aid="A0000005591010FFFFFFFF8900001100",
+                iccid="89460811111111111112",
+                state="disabled",
+                profile_class="operational",
+                nickname="Lab (EU 01)",
+                service_provider="",
+                profile_name="Lab EU 01",
+                imsi="001010123456789",
+                impi="",
+                notification_address="",
+                # Non-empty UPP so sync_profiles_to_store writes
+                # profile_source="upp" into the manifest.
+                upp_bytes=b"\xA0\x04\x82\x02AB",
+                profile_image=SimProfileImage(
+                    profile_name="Lab EU 01",
+                    iccid="89460811111111111112",
+                    imsi="001010123456789",
+                    impi="",
+                    nodes=[
+                        SimProfileFsNode(
+                            path=("MF", "EF.IMSI"),
+                            name="EF.IMSI",
+                            kind="ef",
+                            fid="6F07",
+                            structure="transparent",
+                            data=bytes.fromhex("08091010123456789F"),
+                        ),
+                    ],
+                ),
+                auth_config=SimProfileAuthConfig(
+                    algorithm="milenage",
+                    ki=bytes.fromhex("00112233445566778899AABBCCDDEEFF"),
+                    opc=bytes.fromhex("FFEEDDCCBBAA99887766554433221100"),
+                ),
+            )
+            profile_store.sync_profiles_to_store(store_root, [profile])
+
+            profile_dir = next(
+                path for path in Path(store_root).iterdir() if path.is_dir()
+            )
+            manifest_path = profile_dir / "manifest.json"
+            self.assertTrue(manifest_path.is_file())
+            image_path = profile_dir / "profile_image.json"
+            self.assertTrue(image_path.is_file())
+
+            with mock.patch(
+                "SIMCARD.profile_store.decode_profile_image",
+                autospec=True,
+            ) as decode_mock:
+                loaded = profile_store.load_profiles_from_store(store_root)
+
+            self.assertEqual(
+                decode_mock.call_count,
+                0,
+                "load_profiles_from_store must not re-decode the UPP when the JSON image is cached",
+            )
+            self.assertEqual(len(loaded), 1)
+            self.assertEqual(loaded[0].aid, profile.aid)
+            self.assertEqual(loaded[0].iccid, profile.iccid)
+            self.assertEqual(loaded[0].profile_name, profile.profile_name)
+            self.assertIsNotNone(loaded[0].profile_image)
+
+    def test_upp_is_redecoded_only_when_json_image_cache_is_missing(self) -> None:
+        from SIMCARD import profile_store
+        from SIMCARD.state import (
+            SimProfileAuthConfig,
+            SimProfileEntry,
+            SimProfileFsNode,
+            SimProfileImage,
+        )
+
+        with tempfile.TemporaryDirectory() as store_root:
+            profile = SimProfileEntry(
+                aid="A0000005591010FFFFFFFF8900001100",
+                iccid="89460811111111111112",
+                state="disabled",
+                profile_class="operational",
+                nickname="Lab (EU 01)",
+                service_provider="",
+                profile_name="Lab EU 01",
+                imsi="001010123456789",
+                impi="",
+                notification_address="",
+                upp_bytes=b"\xA0\x04\x82\x02AB",
+                profile_image=SimProfileImage(
+                    profile_name="Lab EU 01",
+                    iccid="89460811111111111112",
+                    imsi="001010123456789",
+                    impi="",
+                    nodes=[
+                        SimProfileFsNode(
+                            path=("MF", "EF.IMSI"),
+                            name="EF.IMSI",
+                            kind="ef",
+                            fid="6F07",
+                            structure="transparent",
+                            data=bytes.fromhex("08091010123456789F"),
+                        ),
+                    ],
+                ),
+                auth_config=SimProfileAuthConfig(
+                    algorithm="milenage",
+                    ki=bytes.fromhex("00112233445566778899AABBCCDDEEFF"),
+                    opc=bytes.fromhex("FFEEDDCCBBAA99887766554433221100"),
+                ),
+            )
+            profile_store.sync_profiles_to_store(store_root, [profile])
+
+            profile_dir = next(
+                path for path in Path(store_root).iterdir() if path.is_dir()
+            )
+            image_path = profile_dir / "profile_image.json"
+            image_path.unlink()
+
+            decoded_image = SimProfileImage(
+                profile_name="Lab EU 01",
+                iccid="89460811111111111112",
+                imsi="001010123456789",
+                impi="",
+                nodes=[],
+            )
+            with mock.patch(
+                "SIMCARD.profile_store.decode_profile_image",
+                autospec=True,
+                return_value=decoded_image,
+            ) as decode_mock:
+                loaded = profile_store.load_profiles_from_store(store_root)
+
+            self.assertEqual(
+                decode_mock.call_count,
+                1,
+                "UPP decode must be the fallback when the JSON image is absent",
+            )
+            self.assertEqual(len(loaded), 1)
+            self.assertEqual(loaded[0].iccid, profile.iccid)
 
 
 class SimulatedBackendIntegrationTests(unittest.TestCase):
@@ -2861,6 +3795,7 @@ class MainWrapperCardBackendTests(unittest.TestCase):
                 os.environ,
                 {
                     "YGGDRASIM_RUNTIME_ROOT": str(runtime_root),
+                    "YGGDRASIM_ALLOW_QUIRKS": "1",
                     CARD_BACKEND_ENV: "reader",
                     SIM_EIM_IDENTITY_ENV: str(override_eim_identity),
                     SIM_ISDR_CONFIG_ENV: str(override_isdr),

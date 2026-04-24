@@ -135,4 +135,4 @@ Or pass path directly:
 Related operator docs:
 
 - `../../README.md`
-- `../../../../PROFILE_LIFECYCLE_CLI_CHEATSHEET.md`
+- `../../../../guides/PROFILE_LIFECYCLE_CLI_CHEATSHEET.md`

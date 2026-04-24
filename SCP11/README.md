@@ -17,6 +17,21 @@ Use this file as the entry point for choosing the correct `SCP11` module.
 | `SCP11/relay` | preserve older relay imports and automation contracts | `pcsc` or `relay` | compatibility namespace | `SCP11/relay/README.md` |
 | `SCP11/shared` | shared helpers only | n/a | n/a | `SCP11/shared/README.md` |
 
+### Canonical vs legacy orchestrator / console trees (v1 freeze)
+
+Three parallel orchestrator and console trees ship with v1:
+
+| Tree | Status | Notes |
+| --- | --- | --- |
+| `SCP11/orchestrator.py` and `SCP11/console.py` | **canonical** | Spec-correctness work, bug fixes, and API additions land here first. |
+| `SCP11/live/orchestrator.py` and `SCP11/live/console.py` | **legacy mirror** | Relay-first live-certificate overlay. Includes the `LiveStkPollingMixin` and live ES9+ defaults. |
+| `SCP11/test/orchestrator.py` and `SCP11/test/console.py` | **legacy mirror** | Lab relay flow with test-certificate defaults and extra request shaping. |
+
+Any change that lands in the canonical tree must be evaluated against both
+legacy mirrors, and vice versa. Audit items `SCP11-P1-01` and `SCP11-P1-02`
+track collapsing the mirrors into shim packages post v1 so fixes only have
+to be made once.
+
 ## Choose by task
 
 - Use `SCP11/live` when the workflow is relay-first and should reflect the
@@ -46,8 +61,8 @@ python -m SCP11.relay
 All operator shells in this family also support `--cmd` and `--stdin` batch
 execution. For semicolon batches, here-docs, and log-capture patterns, use:
 
-- `../CLI_AND_PIPING_GUIDE.md`
-- `../PROFILE_LIFECYCLE_CLI_CHEATSHEET.md`
+- `../guides/CLI_AND_PIPING_GUIDE.md`
+- `../guides/PROFILE_LIFECYCLE_CLI_CHEATSHEET.md`
 
 The top-level launcher in `main/main.py` exposes the same operator surfaces
 through the Guides menu and the main module selector.
@@ -72,7 +87,7 @@ through the Guides menu and the main module selector.
 ## Reading order
 
 1. `SCP11/live/README.md` or `SCP11/test/README.md` for relay-side operation
-2. `../PROFILE_LIFECYCLE_CLI_CHEATSHEET.md` for ready-to-run lifecycle, poll,
+2. `../guides/PROFILE_LIFECYCLE_CLI_CHEATSHEET.md` for ready-to-run lifecycle, poll,
    and logging commands
 3. `SCP11/local_access/README.md` for direct local `ISD-R` work
 4. `SCP11/eim_local/README.md` for the eIM-side shell overview

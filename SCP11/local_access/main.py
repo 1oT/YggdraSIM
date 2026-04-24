@@ -6,7 +6,7 @@ import shlex
 import shutil
 import sys
 import textwrap
-from typing import Any, Dict, List, Optional
+from typing import Any, List, Optional
 
 from yggdrasim_common.quit_control import quit_all, QuitAllRequested
 from yggdrasim_common.process_debug import (
@@ -14,6 +14,8 @@ from yggdrasim_common.process_debug import (
     is_global_debug_enabled,
     set_global_debug,
 )
+from yggdrasim_common.card_backend import trigger_card_relay_modem_refresh
+from yggdrasim_common.hil_bridge_runtime import hil_bridge_warning_text
 from yggdrasim_common.session_recording import ShellSessionRecorder
 from yggdrasim_common.structured_output import dump_structured_payload
 from SCP11.shared.discovery_snapshot import render_consolidated_discovery_snapshot
@@ -44,9 +46,11 @@ _COMMANDS = (
     "ENABLE-PROFILE",
     "DISABLE-PROFILE",
     "DELETE-PROFILE",
+    "REFRESH-MODEM",
     "ENABLE",
     "DISABLE",
     "DELETE",
+    "MODEM-REFRESH",
     "STORE-METADATA",
     "STORE-METADATA-CUSTOM",
     "STORE-METADATA-CUSTOM-ALL",
@@ -57,6 +61,7 @@ _COMMANDS = (
     "METADATA-LINT",
     "METADATA-CLEAR",
     "RECORD",
+    "EXPORT-KEYBAG",
     "STATUS",
     "HELP",
     "EXIT",
@@ -69,6 +74,7 @@ _COMMAND_ALIASES = {
     "ENABLE": "ENABLE-PROFILE",
     "DISABLE": "DISABLE-PROFILE",
     "DELETE": "DELETE-PROFILE",
+    "MODEM-REFRESH": "REFRESH-MODEM",
     "PROFILE-RESET": "PROFILE-CLEAR",
     "METADATA-RESET": "METADATA-CLEAR",
     "QUIT": "EXIT",
@@ -107,6 +113,10 @@ _COMMAND_DOCS = {
     "DELETE-PROFILE": {
         "usage": "DELETE-PROFILE <id>",
         "summary": "Delete a profile by ICCID, AID, or alias.",
+    },
+    "REFRESH-MODEM": {
+        "usage": "REFRESH-MODEM [mode]",
+        "summary": "Queue a proactive REFRESH toward the attached modem via the active HIL bridge.",
     },
     "STORE-METADATA": {
         "usage": "STORE-METADATA [path]",
@@ -147,6 +157,10 @@ _COMMAND_DOCS = {
     "RECORD": {
         "usage": "RECORD [STATUS|START [outputPath]|STOP [outputPath]|CANCEL]",
         "summary": "Capture replayable shell commands plus the underlying APDU trace.",
+    },
+    "EXPORT-KEYBAG": {
+        "usage": "EXPORT-KEYBAG [path.keys.json] [label]",
+        "summary": "Dump derived SCP11c BSP keys (S-ENC / S-MAC / mac-chain) for pcap-paired offline replay.",
     },
     "HELP": {
         "usage": "HELP [command]",
@@ -364,6 +378,69 @@ class LocalAccessShell:
             print("[+] Recording cancelled. Discarded in-memory command/APDU capture.")
             return
         raise ValueError("Usage: RECORD [STATUS|START [outputPath]|STOP [outputPath]|CANCEL]")
+
+    def _cmd_export_keybag(self, arguments: list[str]) -> None:
+        """Dump the last-derived SCP11c BSP keys into a HIL keybag JSON.
+
+        The snapshot is populated by
+        `LocalSmdppSession._snapshot_session_bsp` whenever a BSP is
+        constructed (LOAD-PROFILE and custom A3 generation paths). If
+        the fields are empty the operator is asked to run
+        `LOAD-PROFILE` (or any profile command that opens a BSP-bound
+        channel) first.
+        """
+        out_path = "scp11c_session.keys.json"
+        label = "scp11c-local"
+        if len(arguments) > 0:
+            candidate_path = str(arguments[0] or "").strip()
+            if len(candidate_path) > 0:
+                out_path = candidate_path
+        if len(arguments) > 1:
+            candidate_label = str(arguments[1] or "").strip()
+            if len(candidate_label) > 0:
+                label = candidate_label
+
+        if self.session is None:
+            raise RuntimeError("Local SCP11 session is not initialized; cannot export keybag.")
+
+        state = self.session.state
+        s_enc_hex = str(getattr(state, "last_bsp_s_enc_hex", "") or "").strip()
+        s_mac_hex = str(getattr(state, "last_bsp_s_mac_hex", "") or "").strip()
+        if len(s_enc_hex) == 0 or len(s_mac_hex) == 0:
+            raise RuntimeError(
+                "No SCP11c BSP keys captured yet. Run LOAD-PROFILE first so the "
+                "session derives BSP S-ENC / S-MAC, then retry EXPORT-KEYBAG."
+            )
+
+        mac_chain_hex = str(getattr(state, "last_bsp_mac_chain_hex", "") or "00" * 16)
+        block_nr = int(getattr(state, "last_bsp_block_nr", 0) or 0)
+        aid_hex = str(getattr(state, "last_bsp_aid_hex", "") or "").strip().upper()
+
+        try:
+            from Tools.HilBridge.scp_keybag_export import (
+                KeybagExportEntry,
+                write_keybag_file,
+            )
+        except ImportError as error:
+            raise RuntimeError(f"Keybag exporter unavailable: {error}")
+
+        entry = KeybagExportEntry(
+            label=label,
+            protocol="scp11c",
+            s_enc_hex=s_enc_hex,
+            s_mac_hex=s_mac_hex,
+            s_rmac_hex=s_mac_hex,
+            match_aid_hex=aid_hex,
+            initial_ssc=block_nr,
+            initial_chaining_hex=mac_chain_hex,
+        )
+
+        written_path = write_keybag_file(out_path, [entry], merge_existing=True)
+        suffix = ""
+        if len(aid_hex) > 0:
+            suffix = f" aid={aid_hex}"
+        print(f"[+] Keybag written: {written_path} label={label}{suffix}")
+        print("    Pair with a sibling .pcap (rename to <pcap>.keys.json) for offline HIL replay.")
 
     def _finalize_recording_on_exit(self) -> None:
         if self._recorder.is_active() is False:
@@ -822,6 +899,24 @@ class LocalAccessShell:
         if len(response) > 0:
             print(f"    {self._hex_preview(response, max_chars=80)}")
 
+    def _queue_modem_refresh(self, action_label: str, mode: str = "") -> None:
+        try:
+            payload = trigger_card_relay_modem_refresh(
+                mode=mode,
+                source=f"scp11-local:{action_label}",
+            )
+        except Exception as error:
+            print(f"[*] {action_label}: modem REFRESH queue failed ({error}).")
+            return
+        if payload is None:
+            return
+        status = str(payload.get("status", "queued") or "queued")
+        mode_name = str(payload.get("mode", "") or "")
+        print(
+            f"[*] {action_label}: modem REFRESH {status} "
+            f"({mode_name or 'euicc-profile-state-change'})."
+        )
+
     def _safe_collect_profile_metadata(self) -> List[Any]:
         if self.session is None:
             return []
@@ -875,6 +970,49 @@ class LocalAccessShell:
             if str(getattr(entry, "state", "")).strip().upper() == "ENABLED":
                 return entry
         return None
+
+    def _allow_auto_disable_for_enable(self, active_profile: Any, target_profile: Optional[Any]) -> bool:
+        if self._profile_disable_not_allowed(active_profile) is False:
+            return True
+        target_description = "requested target"
+        if target_profile is not None:
+            target_description = self._describe_profile_metadata(target_profile)
+        print(
+            "[!] EnableProfile: guarded mode refused to auto-disable active profile "
+            f"{self._describe_profile_metadata(active_profile)} because its PPR advertises "
+            "ppr1-disable-not-allowed."
+        )
+        print(
+            "    Use a rollback-enabled profile switch path, or move the active profile "
+            f"away from {target_description} in the modem before retrying."
+        )
+        return False
+
+    @staticmethod
+    def _profile_disable_not_allowed(entry: Any) -> bool:
+        ppr_hex = str(getattr(entry, "profile_policy_rules_hex", "") or "").strip()
+        if len(ppr_hex) < 4:
+            return False
+        try:
+            raw = bytes.fromhex(ppr_hex)
+        except ValueError:
+            return False
+        if len(raw) < 2:
+            return False
+        unused_bits = int(raw[0])
+        payload = raw[1:]
+        if len(payload) == 0:
+            return False
+        bit_index = 0
+        for byte_index, byte_value in enumerate(payload):
+            for mask_bit in range(7, -1, -1):
+                if byte_index == len(payload) - 1 and mask_bit < unused_bits:
+                    continue
+                is_set = ((byte_value >> mask_bit) & 0x01) == 0x01
+                if bit_index == 1 and is_set:
+                    return True
+                bit_index += 1
+        return False
 
     @staticmethod
     def _profile_metadata_identifier(entry: Any) -> str:
@@ -946,6 +1084,9 @@ class LocalAccessShell:
                 f"{'Active Metadata':<{key_width}}: "
                 f"{ShellStyle.CYAN}{metadata_value}{ShellStyle.END}"
             )
+        warning_text = hil_bridge_warning_text()
+        if len(warning_text) > 0:
+            print(f"{ShellStyle.WARNING}[!] {warning_text}{ShellStyle.END}")
         print(f"{ShellStyle.HEADER}{line}{ShellStyle.END}")
 
     def _print_load_success_banner(self, response: bytes) -> None:
@@ -1031,6 +1172,8 @@ class LocalAccessShell:
                 return
             active_profile = self._find_enabled_profile(profiles, exclude_profile=target_metadata)
             if active_profile is not None:
+                if self._allow_auto_disable_for_enable(active_profile, target_metadata) is False:
+                    return
                 print(
                     "[*] EnableProfile: auto-disabling active profile "
                     f"{self._describe_profile_metadata(active_profile)}."
@@ -1041,6 +1184,7 @@ class LocalAccessShell:
                 self._print_profile_state_response("DisableProfile", disable_response)
         response = self.session.enable_profile(identifier)
         self._print_profile_state_response("EnableProfile", response)
+        self._queue_modem_refresh("EnableProfile")
 
     def _cmd_disable_profile(self, arguments: list[str]) -> None:
         identifier = " ".join(arguments).strip()
@@ -1054,6 +1198,7 @@ class LocalAccessShell:
                 return
         response = self.session.disable_profile(identifier)
         self._print_profile_state_response("DisableProfile", response)
+        self._queue_modem_refresh("DisableProfile")
 
     def _cmd_delete_profile(self, arguments: list[str]) -> None:
         identifier = " ".join(arguments).strip()
@@ -1066,6 +1211,11 @@ class LocalAccessShell:
                 print("[*] DeleteProfile: deleting enabled target directly (local override).")
         response = self.session.delete_profile(identifier)
         self._print_profile_state_response("DeleteProfile", response)
+        self._queue_modem_refresh("DeleteProfile")
+
+    def _cmd_refresh_modem(self, arguments: list[str]) -> None:
+        mode = " ".join(arguments).strip()
+        self._queue_modem_refresh("RefreshModem", mode=mode)
 
     def _cmd_store_metadata(self, arguments: list[str]) -> None:
         metadata_path = " ".join(arguments).strip()
@@ -1374,8 +1524,8 @@ class LocalAccessShell:
         self._print_help_section(
             "Profile State Management",
             ShellStyle.HEADER,
-            ["ENABLE-PROFILE", "DISABLE-PROFILE", "DELETE-PROFILE"],
-            alias_note="Aliases: ENABLE, DISABLE, DELETE",
+            ["ENABLE-PROFILE", "DISABLE-PROFILE", "DELETE-PROFILE", "REFRESH-MODEM"],
+            alias_note="Aliases: ENABLE, DISABLE, DELETE, MODEM-REFRESH",
         )
         self._print_help_section(
             "Metadata / ASN.1 Runtime",
@@ -1525,6 +1675,8 @@ class LocalAccessShell:
                 self._cmd_disable_profile(filtered_arguments)
             elif canonical_command == "DELETE-PROFILE":
                 self._cmd_delete_profile(filtered_arguments)
+            elif canonical_command == "REFRESH-MODEM":
+                self._cmd_refresh_modem(filtered_arguments)
             elif canonical_command == "STORE-METADATA":
                 self._cmd_store_metadata(filtered_arguments)
             elif canonical_command == "UPDATE-METADATA":
@@ -1545,6 +1697,8 @@ class LocalAccessShell:
                 self._cmd_metadata_clear()
             elif canonical_command == "RECORD":
                 self._cmd_record(filtered_arguments)
+            elif canonical_command == "EXPORT-KEYBAG":
+                self._cmd_export_keybag(filtered_arguments)
             elif canonical_command == "STATUS":
                 self._print_status()
             elif canonical_command == "HELP":
@@ -1612,6 +1766,24 @@ def entry_cmd(cmd_line: str) -> None:
     shell.run_commands(cmd_line)
 
 
+def _append_keybag_dump_command(cmd_line: str, dump_path: str) -> str:
+    """Append an EXPORT-KEYBAG invocation to a shell batch.
+
+    Used by the `--dump-keybag` CLI convenience so operators can pair
+    a non-interactive run (`--cmd "LOAD-PROFILE"`) with an automatic
+    keybag dump without chaining the commands themselves.
+    """
+    normalized_dump = str(dump_path or "").strip()
+    if len(normalized_dump) == 0:
+        return cmd_line
+    quoted_path = shlex.quote(normalized_dump)
+    trailing_command = f"EXPORT-KEYBAG {quoted_path}"
+    base = str(cmd_line or "").strip().rstrip(";").strip()
+    if len(base) == 0:
+        return trailing_command
+    return f"{base}; {trailing_command}"
+
+
 def _read_stdin_command_text() -> str:
     commands: list[str] = []
     for raw_line in sys.stdin.read().splitlines():
@@ -1644,13 +1816,34 @@ def run_standalone() -> None:
         action="store_true",
         help="Read newline-separated commands from stdin for non-interactive execution",
     )
+    parser.add_argument(
+        "--dump-keybag",
+        dest="dump_keybag",
+        type=str,
+        default=None,
+        help=(
+            "After running the requested command batch, append EXPORT-KEYBAG "
+            "<PATH> so the derived SCP11c BSP keys land in a pcap-paired "
+            "keybag JSON for offline HIL replay."
+        ),
+    )
     args = parser.parse_args()
     set_global_debug(bool(getattr(args, "debug", False)))
+    keybag_path = str(getattr(args, "dump_keybag", "") or "").strip()
     if args.cmd:
-        entry_cmd(args.cmd)
+        cmd_line = args.cmd
+        if len(keybag_path) > 0:
+            cmd_line = _append_keybag_dump_command(cmd_line, keybag_path)
+        entry_cmd(cmd_line)
         return
     if args.stdin:
-        entry_stdin()
+        base_cmd = _read_stdin_command_text()
+        if len(keybag_path) > 0:
+            base_cmd = _append_keybag_dump_command(base_cmd, keybag_path)
+        entry_cmd(base_cmd)
+        return
+    if len(keybag_path) > 0:
+        entry_cmd(_append_keybag_dump_command("", keybag_path))
         return
     entry()
 

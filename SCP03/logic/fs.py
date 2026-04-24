@@ -12,7 +12,7 @@
 # You should have received a copy of the GNU General Public License
 # along with this program. If not, see <https://www.gnu.org/licenses/>.
 #
-# Copyright (c) 2026 Hampus Hellsberg and contributors
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 # -----------------------------------------------------------------------------
 
 import os 
@@ -24,6 +24,7 @@ from typing import Dict ,Any ,List ,Union ,Optional ,Tuple
 from SCP03 .config import Config 
 from SCP03 .core .utils import TlvParser 
 from SCP03 .core .decoders import ContentDecoder ,AdvancedDecoders 
+from yggdrasim_common .progress import progress_session 
 
 class FileSystemController :
 
@@ -320,6 +321,33 @@ class FileSystemController :
                     stack .append ((indent ,node ['children']))
         return roots 
 
+    @staticmethod
+    def _split_scan_root_nodes (roots :List [Dict [str ,Any ]])->Tuple [bool ,List [Dict [str ,Any ]]]:
+        render_nodes =[]
+        mf_children =[]
+        saw_mf =False 
+        for node in roots :
+            node_name =str (node .get ('name',"")).strip ().upper ()
+            node_fids =[]
+            for candidate in node .get ('fids',[]):
+                candidate_text =str (candidate or "").strip ().upper ()
+                if len (candidate_text )>0 :
+                    node_fids .append (candidate_text )
+            is_mf =False 
+            if node_name =="MF":
+                is_mf =True 
+            if "3F00"in node_fids :
+                is_mf =True 
+            if is_mf and saw_mf ==False :
+                saw_mf =True 
+                for child in node .get ('children',[]):
+                    mf_children .append (child )
+                continue 
+            render_nodes .append (node )
+        if saw_mf :
+            return True ,mf_children +render_nodes 
+        return False ,list (roots )
+
     def _parse_record_arg (self ,arg :Union [str ,int ])->int :
         """Parses decimal (10), hex-prefix (0x0A), or raw hex (0B) strings into int."""
         if isinstance (arg ,int ):return arg 
@@ -347,6 +375,70 @@ class FileSystemController :
         if len (clean_identifier )>4 :
             return f"00A40400{len(clean_identifier)//2:02X}{clean_identifier}"
         return f"00A4000402{clean_identifier}"
+
+    @staticmethod
+    def _is_successful_select_response (sw1 :int ,data :bytes )->bool :
+        if sw1 ==0x90 :
+            return True 
+        if sw1 ==0x61 :
+            return True 
+        if sw1 ==0x9F :
+            return True 
+        payload =bytes (data or b"" )
+        if len (payload )==0 :
+            return False 
+        if sw1 ==0x62 :
+            return True 
+        if sw1 ==0x63 :
+            return True 
+        return False
+
+    @staticmethod
+    def _is_retryable_traversal_miss (sw1 :int ,sw2 :int ,data :bytes )->bool :
+        payload =bytes (data or b"" )
+        if len (payload )>0 :
+            return False 
+        if sw1 ==0x6A and sw2 ==0x82 :
+            return True 
+        if sw1 ==0x69 and sw2 ==0x85 :
+            return True 
+        if sw1 ==0x6F and sw2 ==0x00 :
+            return True 
+        return False 
+
+    def _select_for_live_traversal (self ,parent_fid :str ,candidate_fid :str )->Tuple [bytes ,int ,int ]:
+        parent_text =str (parent_fid or "").strip ().upper ()
+        candidate_text =str (candidate_fid or "").strip ().upper ()
+        cmd =self ._build_select_command (candidate_text )
+        data ,sw1 ,sw2 =self .tp .transmit (cmd ,silent =True )
+        if parent_text !="3F00":
+            return data ,sw1 ,sw2 
+        if self ._is_successful_select_response (sw1 ,data ):
+            return data ,sw1 ,sw2 
+        if self ._is_retryable_traversal_miss (sw1 ,sw2 ,data )==False :
+            return data ,sw1 ,sw2 
+        parent_cmd =self ._build_select_command (parent_text )
+        self .tp .transmit (parent_cmd ,silent =True )
+        time .sleep (0.01 )
+        retry_data ,retry_sw1 ,retry_sw2 =self .tp .transmit (cmd ,silent =True )
+        return retry_data ,retry_sw1 ,retry_sw2
+
+    def _select_parent_for_live_traversal (self ,parent_fid :str )->Tuple [bytes ,int ,int ]:
+        parent_text =str (parent_fid or "").strip ().upper ()
+        parent_cmd =self ._build_select_command (parent_text )
+        data ,sw1 ,sw2 =self .tp .transmit (parent_cmd ,silent =True )
+        if parent_text !="3F00":
+            return data ,sw1 ,sw2 
+        if self ._is_successful_select_response (sw1 ,data ):
+            time .sleep (0.01 )
+            return data ,sw1 ,sw2 
+        if self ._is_retryable_traversal_miss (sw1 ,sw2 ,data )==False :
+            return data ,sw1 ,sw2 
+        time .sleep (0.01 )
+        retry_data ,retry_sw1 ,retry_sw2 =self .tp .transmit (parent_cmd ,silent =True )
+        if self ._is_successful_select_response (retry_sw1 ,retry_data ):
+            time .sleep (0.01 )
+        return retry_data ,retry_sw1 ,retry_sw2
 
     @staticmethod
     def _normalize_ef_dir_label (label_text :str )->str :
@@ -449,9 +541,9 @@ class FileSystemController :
         discovered_apps =[]
         seen_aids =set ()
         try :
-            self .tp .transmit ("00A40004023F00",silent =True )
-            _ ,sw1 ,sw2 =self .tp .transmit ("00A40004022F00",silent =True )
-            if sw1 !=0x90 and sw1 !=0x61 :
+            self ._select_parent_for_live_traversal ("3F00")
+            data ,sw1 ,sw2 =self ._select_for_live_traversal ("3F00","2F00")
+            if self ._is_successful_select_response (sw1 ,data )==False :
                 return []
 
             for record_index in range (1 ,33 ):
@@ -971,7 +1063,7 @@ class FileSystemController :
 
             data ,sw1 ,sw2 =self .tp .transmit (cmd ,silent =True )
 
-            if sw1 ==0x90 or sw1 ==0x61 :
+            if self ._is_successful_select_response (sw1 ,data ):
                 self .current_fid =fid 
                 self .current_path_hint =target 
                 self ._cache_selected_application_aliases (target ,fid )
@@ -1006,7 +1098,7 @@ class FileSystemController :
 
                 data ,sw1 ,sw2 =self .tp .transmit (retry_cmd ,silent =True )
 
-                if sw1 ==0x90 or sw1 ==0x61 :
+                if self ._is_successful_select_response (sw1 ,data ):
                     self .current_fid =discovered_aid 
                     self .current_path_hint =target 
                     self ._cache_selected_application_aliases (target ,discovered_aid )
@@ -1107,7 +1199,7 @@ class FileSystemController :
                 if 0x73 in fci_body :self .current_fcp ['sd_data']=fci_body [0x73 ].hex ().upper ()
             else :
                 self .current_fcp ={'template':'Unknown','raw':data .hex ().upper ()}
-        except Exception as e :
+        except Exception :
             pass 
 
     def _resolve_arr_rules (self ,arr_fid :str ,record_num :int ,restore_fid :str )->Optional [str ]:
@@ -1654,13 +1746,21 @@ class FileSystemController :
             else :print (f"{Config.Colors.FAIL}[-] Update Failed: {sw1:02X}{sw2:02X}{Config.Colors.ENDC}")
         except Exception as e :print (f"{Config.Colors.FAIL}[!] Update Error: {e}{Config.Colors.ENDC}")
 
-    def scan_tree (self ):
+    def scan_tree (self ,return_tree :bool =False ):
+        # ``return_tree`` is opt-in. The CLI path (False) is byte-identical
+        # to the historical behaviour: print the tree, populate
+        # ``self.scan_cache``, return None. The GUI / Command Center path
+        # (True) additionally materialises a nested structure describing
+        # every resolved node so the frontend can render a clickable tree
+        # without re-parsing coloured stdout.
         self ._reset_before_scan ("scan")
         print (f"{Config.Colors.HEADER}[*] Auditing File System (Live)...{Config.Colors.ENDC}")
 
         file_exists =os .path .exists (Config .FIDS_FILE )
         if file_exists ==False :
             print (f"{Config.Colors.FAIL}fids.txt missing{Config.Colors.ENDC}")
+            if return_tree :
+                return {"tree":[],"scan_cache":{}}
             return 
 
         roots =self ._load_tree_structure ()
@@ -1668,14 +1768,14 @@ class FileSystemController :
         self ._cache_ef_dir_aliases (live_app_entries )
         self ._persist_ef_dir_discoveries (live_app_entries )
         self ._merge_live_apps_into_scan_tree (roots ,live_app_entries )
+        _had_explicit_mf_root ,render_roots =self ._split_scan_root_nodes (roots )
         self .scan_cache ={}
         scan_counter =[0 ]
+        tree_nodes :List [Dict [str ,Any ]]=[]
 
-        def live_scan (nodes ,parent_fid ,parent_path ,level =0 ):
+        def live_scan (nodes ,parent_fid ,parent_path ,level =0 ,collect_into =None ):
             for node in nodes :
-                p_cmd =self ._build_select_command (parent_fid )
-
-                self .tp .transmit (p_cmd ,silent =True )
+                self ._select_parent_for_live_traversal (parent_fid )
                 selected_fid =None 
 
                 has_wildcard =False 
@@ -1686,17 +1786,9 @@ class FileSystemController :
                     continue 
 
                 for fid in node ['fids']:
-                    cmd =self ._build_select_command (fid )
+                    data ,sw1 ,sw2 =self ._select_for_live_traversal (parent_fid ,fid )
 
-                    _ ,sw1 ,sw2 =self .tp .transmit (cmd ,silent =True )
-
-                    valid_sel =False 
-                    if sw1 ==0x90 :
-                        valid_sel =True 
-                    if sw1 ==0x61 :
-                        valid_sel =True 
-
-                    if valid_sel :
+                    if self ._is_successful_select_response (sw1 ,data ):
                         selected_fid =fid 
                         break 
 
@@ -1723,16 +1815,62 @@ class FileSystemController :
                         display_name =str (node ['name']).strip ().upper ()
                     print (f"{indent}{connector}[{Config.Colors.YELLOW}{idx}{Config.Colors.ENDC}] {Config.Colors.GREEN}{display_name}{Config.Colors.ENDC} ({selected_fid})")
 
+                    child_collector =None 
+                    if collect_into is not None :
+                        entry ={
+                        "idx":idx ,
+                        "fid":selected_fid ,
+                        "name":str (node ['name']).strip ().upper (),
+                        "display_name":display_name ,
+                        "path":current_path ,
+                        "level":level ,
+                        "children":[],
+                        }
+                        collect_into .append (entry )
+                        child_collector =entry ["children"]
+
                     if node ['children']:
-                        live_scan (node ['children'],selected_fid ,current_path ,level +1 )
+                        live_scan (node ['children'],selected_fid ,current_path ,level +1 ,collect_into =child_collector )
+
+        root_collector =tree_nodes if return_tree else None 
 
         try :
             self .tp .transmit ("00A40004023F00",silent =True )
-            live_scan (roots ,"3F00","",0 )
+            scan_counter [0 ]+=1 
+            root_index =str (scan_counter [0 ])
+            self .scan_cache [root_index ]="MF"
+            print (f"[{Config.Colors.YELLOW}{root_index}{Config.Colors.ENDC}] {Config.Colors.GREEN}MF{Config.Colors.ENDC} (3F00)")
+            if root_collector is not None :
+                root_entry ={
+                "idx":root_index ,
+                "fid":"3F00",
+                "name":"MF",
+                "display_name":"MF",
+                "path":"MF",
+                "level":0 ,
+                "children":[],
+                }
+                root_collector .append (root_entry )
+                child_sink =root_entry ["children"]
+            else :
+                child_sink =None 
+            # Seed traversal with parent_path="MF" so every descendant path
+            # is fully qualified (e.g. "MF/EF.ICCID", "MF/ADF_USIM/EF_IMSI").
+            # The select() path-walk branch pre-selects MF before walking
+            # segments, which means GUI clicks on an EF directly under MF
+            # always succeed regardless of where the card's current DF
+            # happens to be. Without this, top-level EFs came through as
+            # bare names ("EF.ICCID") and the no-slash select branch
+            # tried 00A4000402<FID> against the last-selected ADF.
+            live_scan (render_roots ,"3F00","MF",1 ,collect_into =child_sink )
         finally :
             self .tp .transmit ("00A40004023F00",silent =True )
             self .current_fid ="3F00"
             print (f"\n{Config.Colors.CYAN}Scan complete. Use 'SELECT <ID>' to navigate.{Config.Colors.ENDC}")
+
+        if return_tree :
+            return {"tree":tree_nodes ,"scan_cache":dict (self .scan_cache )}
+        return None 
 
     def _sanitize_yaml (self ,data ):
         if data is None :
@@ -1817,8 +1955,7 @@ class FileSystemController :
             wildcard_nodes =[n for n in nodes if any ('X'in f for f in n ['fids'])]
 
             for node in explicit_nodes :
-                p_cmd =f"00A40400{len(parent_fid)//2:02X}{parent_fid}"if len (parent_fid )>4 else f"00A4000402{parent_fid}"
-                p_data ,p_sw1 ,p_sw2 =self .tp .transmit (p_cmd ,silent =True )
+                p_data ,p_sw1 ,p_sw2 =self ._select_parent_for_live_traversal (parent_fid )
                 selected_fid =None 
                 data =None 
 
@@ -1829,7 +1966,7 @@ class FileSystemController :
                         is_root_self =True 
                 if is_root_self :
                     parent_ok =False 
-                    if p_sw1 ==0x90 or p_sw1 ==0x61 or p_sw1 ==0x9F :
+                    if self ._is_successful_select_response (p_sw1 ,p_data ):
                         parent_ok =True 
                     if parent_ok :
                         selected_fid =parent_fid 
@@ -1838,9 +1975,8 @@ class FileSystemController :
                 for fid in node ['fids']:
                     if selected_fid is not None :
                         break 
-                    cmd =self ._build_select_command (fid )
-                    data ,sw1 ,sw2 =self .tp .transmit (cmd ,silent =True )
-                    if sw1 ==0x90 or sw1 ==0x61 or sw1 ==0x9F :
+                    data ,sw1 ,sw2 =self ._select_for_live_traversal (parent_fid ,fid )
+                    if self ._is_successful_select_response (sw1 ,data ):
                         selected_fid =fid 
                         break 
 
@@ -1859,6 +1995,12 @@ class FileSystemController :
                         if content :file_entry .update (content )
 
                     report_data [path ]=file_entry 
+                    notify_cb =getattr (self ,"_report_scan_progress_cb",None )
+                    if notify_cb is not None :
+                        try :
+                            notify_cb (path )
+                        except Exception :
+                            pass 
                     if node ['children']:deep_scan (node ['children'],selected_fid ,parent_path_list +[node ['name']])
                 else :
                     path ="/".join (parent_path_list +[node ['name']])
@@ -1870,13 +2012,12 @@ class FileSystemController :
                     target_fid =f"{prefix}{i:02X}"
                     if target_fid in processed_fids :continue 
 
-                    p_cmd =f"00A40400{len(parent_fid)//2:02X}{parent_fid}"if len (parent_fid )>4 else f"00A4000402{parent_fid}"
-                    self .tp .transmit (p_cmd ,silent =True )
+                    self ._select_parent_for_live_traversal (parent_fid )
 
                     cmd =f"00A4000402{target_fid}"
                     data ,sw1 ,sw2 =self .tp .transmit (cmd ,silent =True )
 
-                    if sw1 ==0x90 or sw1 ==0x61 or sw1 ==0x9F :
+                    if self ._is_successful_select_response (sw1 ,data ):
                         self .current_fid =target_fid 
                         self ._parse_fcp_internal (data ,target_fid =target_fid )
 
@@ -1889,10 +2030,33 @@ class FileSystemController :
                             content =extract_file_content (target_fid ,path )
                             if content :file_entry .update (content )
                         report_data [path ]=file_entry 
+                        notify_cb =getattr (self ,"_report_scan_progress_cb",None )
+                        if notify_cb is not None :
+                            try :
+                                notify_cb (path )
+                            except Exception :
+                                pass 
 
         try :
             self .tp .transmit ("00A40004023F00",silent =True )
-            deep_scan (roots ,"3F00",[])
+            # Deep report scan has unknown final length until the
+            # live tree finishes resolving wildcards — sticky footer
+            # runs indeterminate and updates from deep_scan whenever
+            # an EF is persisted into ``report_data``.
+            with progress_session ("FS YAML report")as bar :
+                scan_counter ={"value":0 }
+
+                def _notify_report_entry (scan_path :str )->None :
+                    scan_counter ["value"]=scan_counter ["value"]+1 
+                    bar .set_status (
+                    f"{scan_counter['value']} entr(y/ies) scanned · {scan_path}"
+                    )
+
+                self ._report_scan_progress_cb =_notify_report_entry 
+                try :
+                    deep_scan (roots ,"3F00",[])
+                finally :
+                    self ._report_scan_progress_cb =None 
             clean_data =self ._sanitize_yaml (report_data )
             with open (filename ,'w')as outfile :yaml .dump (clean_data ,outfile ,default_flow_style =False ,sort_keys =False )
             print (f"{Config.Colors.GREEN}[+] Report saved to {filename}{Config.Colors.ENDC}")
@@ -1925,12 +2089,22 @@ class FileSystemController :
             valid_select =True 
         if sw1 ==0x61 :
             valid_select =True 
+        if sw1 ==0x9F :
+            valid_select =True 
 
         if valid_select ==False :
             return "UNKNOWN_ICCID"
 
         data ,sw1 ,sw2 =self .tp .transmit ("00B000000A",silent =True )
-        if sw1 !=0x90 :
+        valid_read =False 
+        if sw1 ==0x90 :
+            valid_read =True 
+        if len (bytes (data or b"" ))>0 :
+            if sw1 ==0x62 :
+                valid_read =True 
+            if sw1 ==0x63 :
+                valid_read =True 
+        if valid_read ==False :
             return "UNKNOWN_ICCID"
 
         hex_str =data .hex ().upper ()
@@ -1978,12 +2152,12 @@ class FileSystemController :
             content_file =file_path_base .with_suffix ('.txt')
 
             with open (content_file ,'w')as f :
-                f .write (f"--- File Metadata ---\n")
+                f .write ("--- File Metadata ---\n")
                 f .write (f"FID: {fid}\n")
                 f .write (f"Type: {self.current_fcp.get('type')} ({struct})\n\n")
-                f .write (f"--- FCP Data ---\n")
+                f .write ("--- FCP Data ---\n")
                 yaml .dump (self ._sanitize_yaml (self .current_fcp ),f ,default_flow_style =False ,sort_keys =False )
-                f .write (f"\n--- File Data ---\n")
+                f .write ("\n--- File Data ---\n")
 
                 if struct =='Transparent':
                     data ,sw1 ,sw2 =self .tp .transmit ("00B0000000",silent =True )
@@ -2052,12 +2226,7 @@ class FileSystemController :
                     wildcard_nodes .append (n )
 
             for node in explicit_nodes :
-                if len (parent_fid )>4 :
-                    p_cmd =f"00A40400{len(parent_fid)//2:02X}{parent_fid}"
-                if len (parent_fid )<=4 :
-                    p_cmd =f"00A4000402{parent_fid}"
-
-                p_data ,p_sw1 ,p_sw2 =self .tp .transmit (p_cmd ,silent =True )
+                p_data ,p_sw1 ,p_sw2 =self ._select_parent_for_live_traversal (parent_fid )
 
                 selected_fid =None 
                 last_data =None 
@@ -2069,7 +2238,7 @@ class FileSystemController :
                         is_root_self =True 
                 if is_root_self :
                     parent_ok =False 
-                    if p_sw1 ==0x90 or p_sw1 ==0x61 or p_sw1 ==0x9F :
+                    if self ._is_successful_select_response (p_sw1 ,p_data ):
                         parent_ok =True 
                     if parent_ok :
                         selected_fid =parent_fid 
@@ -2078,19 +2247,9 @@ class FileSystemController :
                 for fid in node ['fids']:
                     if selected_fid is not None :
                         break 
-                    cmd =self ._build_select_command (fid )
+                    data ,sw1 ,sw2 =self ._select_for_live_traversal (parent_fid ,fid )
 
-                    data ,sw1 ,sw2 =self .tp .transmit (cmd ,silent =True )
-
-                    valid_sel =False 
-                    if sw1 ==0x90 :
-                        valid_sel =True 
-                    if sw1 ==0x61 :
-                        valid_sel =True 
-                    if sw1 ==0x9F :
-                        valid_sel =True 
-
-                    if valid_sel :
+                    if self ._is_successful_select_response (sw1 ,data ):
                         selected_fid =fid 
                         last_data =data 
                         break 
@@ -2110,6 +2269,12 @@ class FileSystemController :
                         print (f"  > Dumping: {file_base}")
                         self .current_path_hint =str (file_base )
                         _write_ef_content (selected_fid ,file_base )
+                        notify_cb =getattr (self ,"_progress_notify_ef",None )
+                        if notify_cb is not None :
+                            try :
+                                notify_cb (file_base ,False )
+                            except Exception :
+                                pass 
 
                     if node ['children']:
                         _live_deep_scan (node ['children'],selected_fid ,node_dir ,parent_path_tokens +[node ['name']])
@@ -2127,25 +2292,12 @@ class FileSystemController :
                     if is_processed :
                         continue 
 
-                    if len (parent_fid )>4 :
-                        p_cmd =f"00A40400{len(parent_fid)//2:02X}{parent_fid}"
-                    if len (parent_fid )<=4 :
-                        p_cmd =f"00A4000402{parent_fid}"
-
-                    self .tp .transmit (p_cmd ,silent =True )
+                    self ._select_parent_for_live_traversal (parent_fid )
 
                     cmd =f"00A4000402{target_fid}"
                     data ,sw1 ,sw2 =self .tp .transmit (cmd ,silent =True )
 
-                    valid_wc_sel =False 
-                    if sw1 ==0x90 :
-                        valid_wc_sel =True 
-                    if sw1 ==0x61 :
-                        valid_wc_sel =True 
-                    if sw1 ==0x9F :
-                        valid_wc_sel =True 
-
-                    if valid_wc_sel :
+                    if self ._is_successful_select_response (sw1 ,data ):
                         self .current_fid =target_fid 
                         self ._parse_fcp_internal (data ,target_fid =target_fid )
 
@@ -2156,10 +2308,35 @@ class FileSystemController :
 
                         if self .current_fcp .get ('type')=='EF':
                             _write_ef_content (target_fid ,file_base )
+                            notify_cb =getattr (self ,"_progress_notify_ef",None )
+                            if notify_cb is not None :
+                                try :
+                                    notify_cb (file_base ,True )
+                                except Exception :
+                                    pass 
 
         try :
             self .tp .transmit ("00A40004023F00",silent =True )
-            _live_deep_scan (roots ,"3F00",root_dir ,[])
+            # The live tree grows as wildcards resolve, so the total
+            # EF count is unknown up front — run the footer in
+            # indeterminate mode and surface the resolved-file count
+            # as the status label. Inactive on non-TTY surfaces so
+            # scripted dumps stay byte-identical to their baseline.
+            with progress_session ("FS dump")as bar :
+                ef_counter ={"value":0 }
+
+                def _notify_ef (file_base :Path ,is_wildcard :bool )->None :
+                    ef_counter ["value"]=ef_counter ["value"]+1 
+                    suffix ="wildcard"if is_wildcard else "explicit"
+                    bar .set_status (
+                    f"{ef_counter['value']} EF(s) dumped · {file_base.name} ({suffix})"
+                    )
+
+                self ._progress_notify_ef =_notify_ef 
+                try :
+                    _live_deep_scan (roots ,"3F00",root_dir ,[])
+                finally :
+                    self ._progress_notify_ef =None 
             print (f"{Config.Colors.GREEN}[+] Live dump complete. Output saved to {root_dir}{Config.Colors.ENDC}")
         except Exception as e :
             print (f"{Config.Colors.FAIL}[!] Dump Execution Failed: {e}{Config.Colors.ENDC}")

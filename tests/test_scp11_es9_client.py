@@ -598,20 +598,28 @@ class Es9LikeClientEimTests(unittest.TestCase):
         )
         self.assertEqual(client.pinned_context_calls, [])
 
-    def test_post_eim_binary_pinned_path_wraps_failure_in_ioerror(self):
+    def test_post_eim_binary_pinned_path_reraises_original_exception(self):
+        # The pinned branch used to wrap any failure in
+        # ``IOError("Provider getEimPackage failed: ...")`` which produced
+        # the prefix twice in operator-facing output because the
+        # orchestrator layer already adds the canonical
+        # ``Provider getEimPackage failed: ...`` wrap. The client now
+        # re-raises the underlying exception unchanged and lets the
+        # orchestrator supply the single prefix.
         client = RecordingEimBinaryClient(base_url="https://rsp.example.com")
         client.open_errors = [
             TimeoutError("The read operation timed out"),
         ]
 
-        with self.assertRaises(IOError) as raised:
+        with self.assertRaises(TimeoutError) as raised:
             client._post_eim_binary(
                 "https://polling.example.net",
                 bytes.fromhex("BF4F125A1089044045930000000000001492294428"),
                 b"\x01\x02",
             )
 
-        self.assertIn("Provider getEimPackage failed", str(raised.exception))
+        self.assertIn("timed out", str(raised.exception).lower())
+        self.assertNotIn("Provider getEimPackage failed", str(raised.exception))
         self.assertEqual(len(client.open_contexts), 1)
         self.assertEqual(
             client.open_pinned_spki_args,
@@ -729,6 +737,65 @@ class Es9LikeClientEimTests(unittest.TestCase):
             saved_lookup = json.loads(lookup_path.read_text(encoding="utf-8"))
             self.assertEqual(saved_lookup, {})
             self.assertEqual(len(client.bundle_verify_calls), 1)
+
+
+class Es9LikeClientTransportLogGatingTests(unittest.TestCase):
+    """
+    Regression coverage for the debug-mode gating applied to the ES9
+    HTTP/TLS transport traces. When the global debug flag is off the
+    operator surface must stay quiet; when it is on the full trace
+    returns without any code change.
+    """
+
+    def setUp(self) -> None:
+        from yggdrasim_common.process_debug import GLOBAL_DEBUG_ENV
+
+        self._env_key = GLOBAL_DEBUG_ENV
+        self._previous_value = os.environ.get(self._env_key, "")
+
+    def tearDown(self) -> None:
+        os.environ[self._env_key] = self._previous_value
+
+    def _run_open_http_response(self) -> str:
+        import io as _io
+        import contextlib
+
+        client = RecordingHttpStageClient(base_url="https://rsp.example.com")
+        request = urllib.request.Request("https://rsp.example.com/gsma/rsp2/es9plus/handleNotification")
+        buffer = _io.StringIO()
+        with contextlib.redirect_stdout(buffer):
+            handle = client._open_http_response(
+                request,
+                None,
+                request.full_url,
+                label="ES9",
+            )
+            try:
+                handle.__exit__(None, None, None)
+            except Exception:
+                pass
+        return buffer.getvalue()
+
+    def test_http_transport_traces_are_hidden_when_debug_off(self) -> None:
+        from yggdrasim_common.process_debug import set_global_debug
+
+        set_global_debug(False)
+        captured = self._run_open_http_response()
+        self.assertNotIn("transport: connect/TLS completed in", captured)
+        self.assertNotIn("transport: request sent in", captured)
+        self.assertNotIn("transport: response headers received in", captured)
+
+    def test_http_transport_traces_surface_when_debug_on(self) -> None:
+        from yggdrasim_common.process_debug import set_global_debug
+
+        set_global_debug(True)
+        try:
+            captured = self._run_open_http_response()
+        finally:
+            set_global_debug(False)
+        self.assertIn("transport: connect/TLS completed in", captured)
+        self.assertIn("transport: request sent in", captured)
+        self.assertIn("transport: response headers received in", captured)
 
 
 if __name__ == "__main__":

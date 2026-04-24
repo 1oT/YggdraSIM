@@ -4,6 +4,7 @@ from pathlib import Path
 
 from yggdrasim_common.process_debug import add_debug_argument, set_global_debug
 from yggdrasim_common.quit_control import QuitAllRequested
+from yggdrasim_common.runtime_paths import bundle_root, runtime_root
 
 try:
     from .shell import ProfilePackageShell
@@ -11,15 +12,25 @@ except ImportError:
     from Tools.ProfilePackage.shell import ProfilePackageShell
 
 
+def _shell_roots() -> tuple[Path, Path]:
+    return Path(runtime_root()).resolve(), Path(bundle_root()).resolve()
+
+
 def entry() -> None:
-    workspace_root = Path(__file__).resolve().parents[2]
-    shell = ProfilePackageShell(workspace_root=workspace_root)
+    workspace_root, bundle_root_path = _shell_roots()
+    shell = ProfilePackageShell(
+        workspace_root=workspace_root,
+        bundle_root_path=bundle_root_path,
+    )
     shell.run()
 
 
 def entry_cmd(cmd_line: str) -> None:
-    workspace_root = Path(__file__).resolve().parents[2]
-    shell = ProfilePackageShell(workspace_root=workspace_root)
+    workspace_root, bundle_root_path = _shell_roots()
+    shell = ProfilePackageShell(
+        workspace_root=workspace_root,
+        bundle_root_path=bundle_root_path,
+    )
     shell.run_commands(cmd_line)
 
 
@@ -73,8 +84,11 @@ def run_standalone() -> None:
         entry_stdin()
         return
     if args.inspect:
-        workspace_root = Path(__file__).resolve().parents[2]
-        shell = ProfilePackageShell(workspace_root=workspace_root)
+        workspace_root, bundle_root_path = _shell_roots()
+        shell = ProfilePackageShell(
+            workspace_root=workspace_root,
+            bundle_root_path=bundle_root_path,
+        )
         profile_text = str(args.profile or "").strip()
         if len(profile_text) > 0:
             shell.bridge.set_input_file(profile_text)

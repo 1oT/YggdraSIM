@@ -4,6 +4,7 @@ from pathlib import Path
 
 from yggdrasim_common.process_debug import add_debug_argument, set_global_debug
 from yggdrasim_common.quit_control import QuitAllRequested
+from yggdrasim_common.runtime_paths import runtime_root
 
 try:
     from .shell import SuciToolShell
@@ -11,14 +12,18 @@ except ImportError:
     from Tools.SuciTool.shell import SuciToolShell
 
 
+def _workspace_root() -> Path:
+    return Path(runtime_root()).resolve()
+
+
 def entry() -> None:
-    workspace_root = Path(__file__).resolve().parents[2]
+    workspace_root = _workspace_root()
     shell = SuciToolShell(workspace_root=workspace_root)
     shell.run()
 
 
 def entry_cmd(cmd_line: str) -> None:
-    workspace_root = Path(__file__).resolve().parents[2]
+    workspace_root = _workspace_root()
     shell = SuciToolShell(workspace_root=workspace_root)
     shell.run_commands(cmd_line)
 

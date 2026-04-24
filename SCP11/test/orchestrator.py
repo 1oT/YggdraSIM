@@ -12,12 +12,23 @@
 # You should have received a copy of the GNU General Public License
 # along with this program. If not, see <https://www.gnu.org/licenses/>.
 #
-# Copyright (c) 2026 Hampus Hellsberg and contributors
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 # -----------------------------------------------------------------------------
+
+"""Legacy mirror: test-default SCP11 orchestrator.
+
+For YggdraSIM v1 the ``canonical`` SCP11 orchestrator lives in
+``SCP11/orchestrator.py``. This module is a ``legacy mirror`` retained for
+the lab relay flow with test certificates and extra request shaping. Any
+spec fix must also land in the canonical tree (and, where it applies, in
+``SCP11/live/orchestrator.py``). Tracked by audit item ``SCP11-P1-01`` for
+collapse into a shim package post v1.
+"""
 
 import base64
 import binascii
 import copy
+import time
 from typing import Any, Optional
 
 from cryptography import x509 as crypto_x509
@@ -26,13 +37,12 @@ from cryptography.hazmat.primitives.asymmetric import ec, utils as asym_utils
 from SCP03.logic.sgp32_decode import decode_eim_configuration_entries as decode_eim_configuration_entries_shared
 from SCP03.logic.sgp32_decode import decode_eim_configuration_entry as decode_eim_configuration_entry_shared
 from SCP11.shared.gsma_error_codes import describe_sgp32_eim_package_error
+from yggdrasim_common.process_debug import debug_print
 
 try:
-    from ..live.stk_polling import LiveStkPollingMixin
     from .asn1_registry import ASN1Registry
     from .crypto_engine import CryptoEngine
     from .eim_packages import (
-        TYPE_BOUND_PROFILE_PACKAGE,
         TYPE_EUICC_CONFIGURATION,
         TYPE_INDIRECT_PROFILE_DOWNLOAD,
         TYPE_PROFILE_DOWNLOAD_TRIGGER,
@@ -56,7 +66,6 @@ try:
         decode_authenticate_server_response,
         decode_initialise_secure_channel_request as decode_initialise_secure_channel_request_pysim,
         decode_list_notification_response,
-        decode_notification_metadata,
         decode_pending_notification,
         decode_prepare_download_response,
         decode_retrieve_notifications_list_response,
@@ -68,11 +77,9 @@ try:
         verify_certificate_against_ca_bundle,
     )
 except ImportError:
-    from live.stk_polling import LiveStkPollingMixin
     from asn1_registry import ASN1Registry
     from crypto_engine import CryptoEngine
     from eim_packages import (
-        TYPE_BOUND_PROFILE_PACKAGE,
         TYPE_EUICC_CONFIGURATION,
         TYPE_INDIRECT_PROFILE_DOWNLOAD,
         TYPE_PROFILE_DOWNLOAD_TRIGGER,
@@ -96,7 +103,6 @@ except ImportError:
         decode_authenticate_server_response,
         decode_initialise_secure_channel_request as decode_initialise_secure_channel_request_pysim,
         decode_list_notification_response,
-        decode_notification_metadata,
         decode_pending_notification,
         decode_prepare_download_response,
         decode_retrieve_notifications_list_response,
@@ -109,7 +115,7 @@ except ImportError:
     )
 
 
-class SGP22Orchestrator(LiveStkPollingMixin):
+class SGP22Orchestrator:
     """Phase-based SCP11/SGP.22 orchestration with pluggable transport/provider."""
 
     CANCEL_SESSION_REASON_END_USER_REJECTION = 0
@@ -131,6 +137,10 @@ class SGP22Orchestrator(LiveStkPollingMixin):
         self._stk_open_channel_request_fields: dict[str, Any] = {}
         self._eim_poll_debug_enabled = False
         self._use_stk_mode_for_es10b_store_data = False
+        # Set True once any configured eIM entry successfully reaches the
+        # server during ``run_eim_poll``. Consumed by the console layer to
+        # gate the post-download notification auto-clear sweep.
+        self._last_eim_poll_reached_server = False
 
     def run_flow(self, matching_id: str = "", smdp_address: Optional[str] = None) -> None:
         effective_smdp_address = smdp_address
@@ -165,133 +175,296 @@ class SGP22Orchestrator(LiveStkPollingMixin):
         return exchange(apdu, log_name)
 
     def run_eim_poll(self, matching_id: str = "", entry_index: Optional[int] = None) -> None:
-        print("--- IOT / SGP.32 eIM POLL - RELAY READY ---")
+        debug_print("--- IOT / SGP.32 eIM POLL - RELAY READY ---")
+        self._last_eim_poll_reached_server = False
         self._phase_connect()
         self._phase_eim_card_challenge()
         entry_indices = self._resolve_eim_poll_entry_indices(entry_index)
-        if len(entry_indices) > 1:
-            print(f"[*] eIM poll: processing {len(entry_indices)} configured eIM entries sequentially.")
-        for current_entry_index in entry_indices:
-            request = self._build_eim_poll_request(matching_id=matching_id, entry_index=current_entry_index)
-            poll_round = 1
-            pending_response = None
-            max_rounds = int(getattr(self.cfg, "EIM_MAX_POLL_ROUNDS", 16) or 16)
-            if max_rounds <= 0:
-                max_rounds = 16
-            while poll_round <= max_rounds:
-                if pending_response is None:
-                    response = self._get_eim_package(request)
-                else:
-                    response = pending_response
-                    pending_response = None
-                self._log_eim_poll_round(response, poll_round)
-                if len(response.transaction_id) > 0:
-                    request.transaction_id = response.transaction_id
-
-                if len(response.euicc_package_list) == 0:
-                    if response.eim_result_code == 1:
-                        print("[*] eIM returned noEimPackageAvailable.")
-                    elif response.eim_result_code == 127:
-                        raise RuntimeError(
-                            "eIM GetEimPackage failed with undefinedError(127); "
-                            "live endpoint accepted the request family but did not return any packages."
-                        )
-                    clear_ack = getattr(self.cfg, "EIM_CLEAR_ACK_ON_NO_PACKAGE", False)
-                    if clear_ack:
-                        clear_request = copy.deepcopy(request)
-                        if len(response.transaction_id) > 0:
-                            clear_request.transaction_id = response.transaction_id
-                        err_hex = getattr(
-                            self.cfg, "EIM_CLEAR_ACK_GENERIC_ERROR_HEX", ""
-                        ).strip().replace(" ", "")
-                        clear_payload = b""
-                        if len(err_hex) > 0:
-                            try:
-                                clear_payload = bytes.fromhex(err_hex)
-                            except ValueError:
-                                clear_payload = b""
-                        else:
-                            clear_payload = self._build_provide_eim_package_result_error_tlv(127)
-                        clear_request.euicc_package_result = ""
-                        clear_request.raw_body = clear_payload
+        total_entries = len(entry_indices)
+        if total_entries > 1:
+            print(
+                f"[*] eIM poll: {total_entries} configured entry(s); "
+                f"up to {self._resolve_eim_poll_drain_round_limit(total_entries)} drain round(s)."
+            )
+        drained_entry_indices: set[int] = set()
+        max_drain_rounds = self._resolve_eim_poll_drain_round_limit(total_entries)
+        drain_round = 1
+        remaining_entry_indices = list(entry_indices)
+        entry_ordinal_map = {
+            idx: ordinal for ordinal, idx in enumerate(entry_indices, start=1)
+        }
+        while drain_round <= max_drain_rounds:
+            remaining_entry_indices = [
+                current_entry_index
+                for current_entry_index in entry_indices
+                if current_entry_index not in drained_entry_indices
+            ]
+            if len(remaining_entry_indices) == 0:
+                break
+            if total_entries > 1:
+                debug_print(
+                    "[*] eIM drain round "
+                    f"{drain_round}: {len(remaining_entry_indices)} active "
+                    "configured eIM entry(s)."
+                )
+                if len(drained_entry_indices) > 0:
+                    debug_print(
+                        "[*] eIM drain round "
+                        f"{drain_round}: skipping {len(drained_entry_indices)} "
+                        "entry(s) that previously returned noEimPackageAvailable(1)."
+                    )
+            round_relayed_package_count = 0
+            for current_entry_index in remaining_entry_indices:
+                request = None
+                try:
+                    request = self._build_eim_poll_request(
+                        matching_id=matching_id,
+                        entry_index=current_entry_index,
+                    )
+                    outcome = self._run_single_eim_poll_round(request)
+                    self._last_eim_poll_reached_server = True
+                    round_relayed_package_count += int(
+                        outcome.get("packages_relayed", 0) or 0
+                    )
+                    if int(outcome.get("final_result_code", 0) or 0) == 1:
+                        drained_entry_indices.add(current_entry_index)
+                    self._print_eim_poll_entry_summary(
+                        ordinal=entry_ordinal_map.get(
+                            current_entry_index, current_entry_index
+                        ),
+                        total_entries=total_entries,
+                        entry_index=current_entry_index,
+                        request=request,
+                    )
+                except Exception as error:
+                    # Keep the DOWNLOAD flow going on per-entry failures
+                    # (TLS pin mismatch, DNS, HTTP); console gates its
+                    # auto-clear sweep on ``_last_eim_poll_reached_server``.
+                    drained_entry_indices.add(current_entry_index)
+                    fqdn_text = ""
+                    if request is not None:
+                        fqdn_text = str(getattr(request, "eim_fqdn", "") or "").strip()
+                    if len(fqdn_text) > 0:
+                        label_text = f"index={current_entry_index}, fqdn={fqdn_text}"
+                    else:
+                        label_text = f"index={current_entry_index}"
+                    error_text = str(error).strip()
+                    if total_entries > 1:
                         print(
-                            "[*] Sending eIM clear ack (no packages)"
-                            + (" with ProvideEimPackageResult error" if len(clear_payload) > 0 else "")
-                            + " to close transaction."
+                            "[!] eIM entry failed; continuing with next configured "
+                            f"entry: {label_text}"
                         )
-                        provide_response = self._provide_eim_package_result(clear_request)
-                        normalized_response = self._coerce_eim_poll_response(provide_response)
-                        if self._has_eim_poll_follow_up(normalized_response):
-                            pending_response = normalized_response
-                            poll_round += 1
-                            continue
-                    if response.polling_complete:
-                        print("[+] eIM polling completed.")
-                        break
-                    if response.retry_after_seconds > 0:
-                        time.sleep(response.retry_after_seconds)
-                    poll_round += 1
-                    continue
+                    else:
+                        print(f"[!] eIM entry failed: {label_text}")
+                    if len(error_text) > 0:
+                        print(f"    reason: {error_text}")
+            remaining_entry_indices = [
+                current_entry_index
+                for current_entry_index in entry_indices
+                if current_entry_index not in drained_entry_indices
+            ]
+            if len(remaining_entry_indices) == 0:
+                break
+            if round_relayed_package_count <= 0:
+                if total_entries > 1:
+                    debug_print(
+                        "[*] eIM drain sweep made no additional package progress; "
+                        "stopping further drain rounds."
+                    )
+                break
+            drain_round += 1
+        if drain_round > max_drain_rounds and len(remaining_entry_indices) > 0:
+            print(
+                "[*] eIM drain round limit reached with "
+                f"{len(remaining_entry_indices)} active entry(s) remaining."
+            )
 
-                follow_up_response = None
-                for package_index, package_text in enumerate(response.euicc_package_list, start=1):
-                    package_bytes = self._decode_string_payload(package_text)
-                    if len(package_bytes) == 0:
-                        raise RuntimeError(
-                            f"eIM package {package_index} in poll round {poll_round} was empty after decode."
-                        )
-                    card_response = self._relay_eim_package_to_card(
-                        package_bytes,
-                        poll_round=poll_round,
-                        package_index=package_index,
+    def _resolve_eim_poll_drain_round_limit(self, entry_count: int) -> int:
+        default_limit = max(1, int(entry_count) + 1)
+        configured_limit = int(
+            getattr(self.cfg, "EIM_MAX_DRAIN_ROUNDS", default_limit) or default_limit
+        )
+        if configured_limit <= 0:
+            return default_limit
+        return configured_limit
+
+    def _print_eim_poll_entry_summary(
+        self,
+        ordinal: int,
+        total_entries: int,
+        entry_index: int,
+        request: Optional[EimPollRequest],
+    ) -> None:
+        # Compact one-liner so the operator can scan drain results at a
+        # glance even with the phase/round debug chatter suppressed.
+        last_response = getattr(self, "_last_eim_poll_response", None)
+        fqdn = ""
+        if request is not None:
+            fqdn = str(getattr(request, "eim_fqdn", "") or "").strip()
+        label_text = fqdn if len(fqdn) > 0 else f"index={entry_index}"
+        result_text = ""
+        package_count = 0
+        complete_flag = False
+        if last_response is not None:
+            package_count = len(getattr(last_response, "euicc_package_list", []) or [])
+            complete_flag = bool(getattr(last_response, "polling_complete", False))
+            result_code = getattr(last_response, "eim_result_code", None)
+            if result_code is not None:
+                result_text = describe_sgp32_eim_package_error(int(result_code))
+        parts: list[str] = []
+        if total_entries > 1:
+            parts.append(f"[{ordinal}/{total_entries}]")
+        parts.append(label_text)
+        suffix_parts: list[str] = []
+        if len(result_text) > 0:
+            suffix_parts.append(result_text)
+        suffix_parts.append(f"packages={package_count}")
+        if complete_flag:
+            suffix_parts.append("complete")
+        print(f"[*] eIM poll {' '.join(parts)} -> {', '.join(suffix_parts)}")
+
+    def _run_single_eim_poll_round(self, request: EimPollRequest) -> dict[str, Any]:
+        poll_round = 1
+        pending_response = None
+        relayed_package_count = 0
+        max_rounds = int(getattr(self.cfg, "EIM_MAX_POLL_ROUNDS", 16) or 16)
+        if max_rounds <= 0:
+            max_rounds = 16
+        while poll_round <= max_rounds:
+            if pending_response is None:
+                response = self._get_eim_package(request)
+            else:
+                response = pending_response
+                pending_response = None
+            self._log_eim_poll_round(response, poll_round)
+            if len(response.transaction_id) > 0:
+                request.transaction_id = response.transaction_id
+
+            if len(response.euicc_package_list) == 0:
+                if response.eim_result_code == 1:
+                    debug_print("[*] eIM returned noEimPackageAvailable.")
+                elif response.eim_result_code == 127:
+                    raise RuntimeError(
+                        "eIM GetEimPackage failed with undefinedError(127); "
+                        "live endpoint accepted the request family but did not return any packages."
                     )
-                    if len(card_response) == 0:
-                        raise RuntimeError("eIM polling requires a card package result, but the last relay response was empty.")
-                    provide_result = self._build_provide_eim_package_result_tlv(
-                        card_response,
-                        eid=request.eid,
-                    )
-                    provide_request = copy.deepcopy(request)
-                    provide_request.euicc_package_result = ""
-                    provide_request.raw_body = provide_result
+                clear_ack = getattr(self.cfg, "EIM_CLEAR_ACK_ON_NO_PACKAGE", False)
+                if clear_ack:
+                    clear_request = copy.deepcopy(request)
                     if len(response.transaction_id) > 0:
-                        provide_request.transaction_id = response.transaction_id
-                    print(
-                        f"[*] Sending eIM package result to server for package {package_index} "
-                        f"in poll round {poll_round}."
+                        clear_request.transaction_id = response.transaction_id
+                    err_hex = getattr(
+                        self.cfg, "EIM_CLEAR_ACK_GENERIC_ERROR_HEX", ""
+                    ).strip().replace(" ", "")
+                    clear_payload = b""
+                    if len(err_hex) > 0:
+                        try:
+                            clear_payload = bytes.fromhex(err_hex)
+                        except ValueError:
+                            clear_payload = b""
+                    else:
+                        clear_payload = self._build_provide_eim_package_result_error_tlv(127)
+                    clear_request.euicc_package_result = ""
+                    clear_request.raw_body = clear_payload
+                    debug_print(
+                        "[*] Sending eIM clear ack (no packages)"
+                        + (" with ProvideEimPackageResult error" if len(clear_payload) > 0 else "")
+                        + " to close transaction."
                     )
-                    provide_response = self._provide_eim_package_result(provide_request)
+                    provide_response = self._provide_eim_package_result(clear_request)
                     normalized_response = self._coerce_eim_poll_response(provide_response)
                     if self._has_eim_poll_follow_up(normalized_response):
-                        follow_up_response = normalized_response
-
-                poll_round += 1
-                if follow_up_response is not None:
-                    pending_response = follow_up_response
-                    continue
+                        pending_response = normalized_response
+                        poll_round += 1
+                        continue
                 if response.polling_complete:
-                    print("[+] eIM polling completed.")
-                    break
+                    debug_print("[+] eIM polling completed.")
+                    return {
+                        "packages_relayed": relayed_package_count,
+                        "final_result_code": response.eim_result_code,
+                    }
                 if response.retry_after_seconds > 0:
                     time.sleep(response.retry_after_seconds)
-            else:
-                raise RuntimeError("eIM polling exceeded maximum follow-up rounds without completion.")
+                poll_round += 1
+                continue
+
+            follow_up_response = None
+            completion_response = response
+            continue_after_acknowledgement = False
+            for package_index, package_text in enumerate(response.euicc_package_list, start=1):
+                package_bytes = self._decode_string_payload(package_text)
+                if len(package_bytes) == 0:
+                    raise RuntimeError(
+                        f"eIM package {package_index} in poll round {poll_round} was empty after decode."
+                    )
+                card_response = self._relay_eim_package_to_card(
+                    package_bytes,
+                    poll_round=poll_round,
+                    package_index=package_index,
+                )
+                relayed_package_count += 1
+                if len(card_response) == 0:
+                    raise RuntimeError("eIM polling requires a card package result, but the last relay response was empty.")
+                provide_result = self._build_provide_eim_package_result_tlv(
+                    card_response,
+                    eid=request.eid,
+                )
+                provide_request = copy.deepcopy(request)
+                provide_request.euicc_package_result = ""
+                provide_request.raw_body = provide_result
+                if len(response.transaction_id) > 0:
+                    provide_request.transaction_id = response.transaction_id
+                print(
+                    f"[*] Sending eIM package result to server for package {package_index} "
+                    f"in poll round {poll_round}."
+                )
+                provide_response = self._provide_eim_package_result(provide_request)
+                normalized_response = self._coerce_eim_poll_response(provide_response)
+                completion_response = normalized_response
+                if self._has_eim_poll_follow_up(normalized_response):
+                    follow_up_response = normalized_response
+                    continue
+                if self._should_continue_polling_after_provide_eim_acknowledgement(
+                    normalized_response
+                ):
+                    continue_after_acknowledgement = True
+
+            poll_round += 1
+            if follow_up_response is not None:
+                pending_response = follow_up_response
+                continue
+            if continue_after_acknowledgement:
+                debug_print(
+                    "[*] ProvideEimPackageResult completed without a terminal "
+                    "GetEimPackage result; polling eIM again for any remaining queued packages."
+                )
+                continue
+            if completion_response.polling_complete:
+                debug_print("[+] eIM polling completed.")
+                return {
+                    "packages_relayed": relayed_package_count,
+                    "final_result_code": completion_response.eim_result_code,
+                }
+            if completion_response.retry_after_seconds > 0:
+                time.sleep(completion_response.retry_after_seconds)
+        raise RuntimeError("eIM polling exceeded maximum follow-up rounds without completion.")
 
     def _log_eim_poll_round(self, response: EimPollResponse, poll_round: int) -> None:
-        print(
+        self._last_eim_poll_response = response
+        debug_print(
             f"[*] eIM poll round {poll_round}: "
             f"packages={len(response.euicc_package_list)} complete={response.polling_complete}"
         )
         if len(response.transaction_id) > 0:
-            print(f"[*] eIM transactionId: {response.transaction_id}")
+            debug_print(f"[*] eIM transactionId: {response.transaction_id}")
         if response.eim_result_code is not None:
-            print(
+            debug_print(
                 "[*] GetEimPackage result code: "
                 f"{describe_sgp32_eim_package_error(int(response.eim_result_code))} [SGP.32]"
             )
 
     def _phase_connect(self) -> None:
-        print("\n[*] Phase: Connect")
+        debug_print("\n[*] Phase: Connect")
         self._use_stk_mode_for_es10b_store_data = False
         if bool(getattr(self.cfg, "RESET_CARD_BEFORE_FLOW", False)):
             reset_method = getattr(self.apdu_channel, "reset", None)
@@ -299,9 +472,9 @@ class SGP22Orchestrator(LiveStkPollingMixin):
                 try:
                     did_reset = bool(reset_method())
                     if did_reset:
-                        print("[*] Card transport reset before flow start.")
+                        debug_print("[*] Card transport reset before flow start.")
                 except Exception as error:
-                    print(f"[*] Card transport reset skipped ({error}).")
+                    debug_print(f"[*] Card transport reset skipped ({error}).")
         try:
             self.apdu_channel.send(bytes.fromhex("80AA000007A9058303170000"), "INIT: TERMINAL CAPABILITY")
         except IOError:
@@ -319,7 +492,27 @@ class SGP22Orchestrator(LiveStkPollingMixin):
 
     @staticmethod
     def _should_retry_notification_sync_after_reselect(error: Exception) -> bool:
-        return "6E00" in str(error).upper()
+        """
+        A post-enable/disable/delete context switch frequently leaves
+        ISD-R unbound from the active logical channel. The card then
+        answers any ES10b StoreData with one of two related status
+        words:
+
+        * ``6E00`` — CLA not supported on this channel.
+        * ``6881`` — logical channel not supported.
+
+        Both are recovered the same way: reselect ISD-R on the active
+        channel and replay the StoreData. Treat them as a single
+        recoverable class so notification sync does not error out just
+        because the profile state change invalidated the channel
+        binding.
+        """
+        error_text = str(error).upper()
+        if "6E00" in error_text:
+            return True
+        if "6881" in error_text:
+            return True
+        return False
 
     @staticmethod
     def _build_es10b_store_data_apdu(
@@ -394,7 +587,10 @@ class SGP22Orchestrator(LiveStkPollingMixin):
         except Exception as error:
             if self._should_retry_notification_sync_after_reselect(error) is False:
                 raise
-            print("[*] Notification sync: listNotifications hit 6E00; reselecting ISD-R and retrying.")
+            print(
+                f"[*] Notification sync: listNotifications hit channel fault ({error}); "
+                "reselecting ISD-R and retrying."
+            )
             self._reselect_isd_r_for_es10b_store_data("DOWNLOAD: RESELECT ISD-R")
             return self._send_es10b_store_data(
                 payload,
@@ -403,14 +599,14 @@ class SGP22Orchestrator(LiveStkPollingMixin):
             )
 
     def _phase_eim_card_challenge(self) -> None:
-        print("\n[*] Phase: eIM card challenge (GetEuiccChallenge)")
+        debug_print("\n[*] Phase: eIM card challenge (GetEuiccChallenge)")
         challenge_response = self.apdu_channel.send(
             bytes.fromhex("80E2910003BF2E00"),
             "EIM: GetEuiccChallenge",
         )
         if len(challenge_response) >= 16:
             self.state.card_challenge = challenge_response[-16:]
-            print(f"[+] Card challenge: {self.state.card_challenge.hex().upper()}")
+            debug_print(f"[+] Card challenge: {self.state.card_challenge.hex().upper()}")
         else:
             self.state.card_challenge = b""
             print("[*] GetEuiccChallenge response too short; eIM poll will omit euiccChallenge.")
@@ -520,7 +716,7 @@ class SGP22Orchestrator(LiveStkPollingMixin):
         return b""
 
     def _build_eim_poll_request(self, matching_id: str, entry_index: int) -> EimPollRequest:
-        print("\n[*] Phase: Read eIM Metadata")
+        debug_print("\n[*] Phase: Read eIM Metadata")
         euicc_configured_data = self._retrieve_es10b_data(bytes.fromhex("BF3C00"), "EIM: GetEuiccConfiguredData")
         eim_configuration_data = self._retrieve_es10b_data(bytes.fromhex("BF5500"), "EIM: GetEimConfigurationData")
         euicc_info1 = self._retrieve_es10b_data(bytes.fromhex("BF2000"), "EIM: GetEuiccInfo1")
@@ -542,7 +738,7 @@ class SGP22Orchestrator(LiveStkPollingMixin):
         eim_id_type = str(entry.get("eim_id_type", "")).strip()
         if len(eim_id_type) > 0:
             fragments.append(f"eimIdType={eim_id_type}")
-        print("[*] Selected eIM entry: " + ", ".join(fragments))
+        debug_print("[*] Selected eIM entry: " + ", ".join(fragments))
 
         variant = getattr(self.cfg, "EIM_REQUEST_VARIANT", 0)
         raw_body = None
@@ -745,7 +941,7 @@ class SGP22Orchestrator(LiveStkPollingMixin):
         )
 
     def _get_eim_package(self, request: EimPollRequest):
-        print("\n[*] Phase: GetEimPackage")
+        debug_print("\n[*] Phase: GetEimPackage")
         if self.profile_provider is None:
             raise RuntimeError("No profile provider configured for eIM polling.")
         try:
@@ -759,7 +955,7 @@ class SGP22Orchestrator(LiveStkPollingMixin):
                 tried_bodies=[request.raw_body] if request.raw_body is not None else None,
             )
             if variant_response is not None:
-                print(
+                debug_print(
                     f"[+] eIM poll response: packages={len(variant_response.euicc_package_list)}, "
                     f"complete={variant_response.polling_complete}, "
                     f"retryAfter={variant_response.retry_after_seconds}"
@@ -767,14 +963,14 @@ class SGP22Orchestrator(LiveStkPollingMixin):
                 return variant_response
             raise RuntimeError(f"Provider getEimPackage failed: {error}") from error
         response = self._probe_get_eim_package_variants(request, response)
-        print(
+        debug_print(
             f"[+] eIM poll response: packages={len(response.euicc_package_list)}, "
             f"complete={response.polling_complete}, retryAfter={response.retry_after_seconds}"
         )
         return response
 
     def _provide_eim_package_result(self, request: EimPollRequest) -> dict:
-        print("\n[*] Phase: ProvideEimPackageResult")
+        debug_print("\n[*] Phase: ProvideEimPackageResult")
         if self.profile_provider is None:
             raise RuntimeError("No profile provider configured for eIM polling.")
         try:
@@ -882,6 +1078,17 @@ class SGP22Orchestrator(LiveStkPollingMixin):
         if response.polling_complete is False:
             return True
         if response.eim_result_code is not None:
+            return True
+        return False
+
+    def _should_continue_polling_after_provide_eim_acknowledgement(
+        self,
+        response: EimPollResponse,
+    ) -> bool:
+        if self._has_eim_poll_follow_up(response):
+            return False
+        package_format = str(getattr(response, "package_format", "") or "").strip()
+        if package_format in {"eimAcknowledgements", "emptyResponse"}:
             return True
         return False
 
@@ -1118,10 +1325,11 @@ class SGP22Orchestrator(LiveStkPollingMixin):
         return f"https://{cleaned.rstrip('/')}"
 
     def _profile_download_provider_base_url(self, smdp_address: str) -> str:
-        bridge = getattr(self, "localized_poll_bridge", None)
-        bridge_base_url = str(getattr(bridge, "smdp_base_url", "") or "").strip()
-        if len(bridge_base_url) > 0:
-            return bridge_base_url.rstrip("/")
+        provider_override = str(
+            getattr(self, "_profile_download_base_url_override", "") or ""
+        ).strip()
+        if len(provider_override) > 0:
+            return provider_override.rstrip("/")
         return self._as_https_smdp(smdp_address)
 
     def _relay_eim_package_to_card(self, package_bytes: bytes, poll_round: int, package_index: int) -> bytes:
@@ -1139,8 +1347,6 @@ class SGP22Orchestrator(LiveStkPollingMixin):
                 "running SGP.22 profile download."
             )
             if self.profile_provider is not None and hasattr(self.profile_provider, "set_base_url"):
-                # Keep localized IPAd pinned to the bridge while the ES9 payload
-                # still carries the activation-code SM-DP+ address.
                 base_url = self._profile_download_provider_base_url(parsed.smdp_address)
                 if len(base_url) > 0:
                     self.profile_provider.set_base_url(base_url)
@@ -1176,8 +1382,6 @@ class SGP22Orchestrator(LiveStkPollingMixin):
                 f"matchingId={parsed.matching_id}; running SGP.22 profile download."
             )
             if self.profile_provider is not None and hasattr(self.profile_provider, "set_base_url"):
-                # Keep localized IPAd pinned to the bridge while the ES9 payload
-                # still carries the activation-code SM-DP+ address.
                 base_url = self._profile_download_provider_base_url(parsed.smdp_address)
                 if len(base_url) > 0:
                     self.profile_provider.set_base_url(base_url)
@@ -1259,6 +1463,12 @@ class SGP22Orchestrator(LiveStkPollingMixin):
         print("[*] Handling ipaEuiccDataRequest locally.")
         requested_tags = tuple(getattr(parsed_package, "requested_tags", ()) or ())
         request_token = bytes(getattr(parsed_package, "request_token", b"") or b"")
+        notification_seq_number = getattr(parsed_package, "notification_seq_number", None)
+        euicc_package_result_seq_number = getattr(parsed_package, "euicc_package_result_seq_number", None)
+        if isinstance(notification_seq_number, int) is False:
+            notification_seq_number = None
+        if isinstance(euicc_package_result_seq_number, int) is False:
+            euicc_package_result_seq_number = None
         requested_tag_set = set(requested_tags)
 
         euicc_info1 = b""
@@ -1281,12 +1491,12 @@ class SGP22Orchestrator(LiveStkPollingMixin):
             certs_data = self._retrieve_es10b_data(bytes.fromhex("BF5600"), f"{log_name}: GetCerts")
         if b"\xA0" in requested_tag_set:
             pending_notification_list = self._retrieve_es10b_data(
-                bytes.fromhex("BF2B00"),
+                self._build_retrieve_notification_request_payload(notification_seq_number),
                 f"{log_name}: RetrieveNotificationsList",
             )
         if b"\xA2" in requested_tag_set:
             euicc_package_result_list = self._retrieve_es10b_data(
-                bytes.fromhex("BF2B028200"),
+                self._build_retrieve_euicc_package_result_request_payload(euicc_package_result_seq_number),
                 f"{log_name}: RetrieveEuiccPackageResults",
             )
 
@@ -2903,10 +3113,17 @@ class SGP22Orchestrator(LiveStkPollingMixin):
             print(f"[*] Notification sync: no decodable pending notification for seq={seq_number}.")
         return raw_pending_notification
 
-    def _build_retrieve_notification_request_payload(self, seq_number: int) -> bytes:
+    def _build_retrieve_notification_request_payload(self, seq_number: Optional[int] = None) -> bytes:
+        if isinstance(seq_number, int) is False:
+            return bytes.fromhex("BF2B00")
         seq_bytes = self._encode_notification_sequence(seq_number)
         search_criteria = self._wrap_tlv(b"\x80", seq_bytes)
         return self._wrap_tlv(bytes.fromhex("BF2B"), self._wrap_tlv(b"\xA0", search_criteria))
+
+    def _build_retrieve_euicc_package_result_request_payload(self, seq_number: Optional[int] = None) -> bytes:
+        if isinstance(seq_number, int) is False:
+            return bytes.fromhex("BF2B028200")
+        return self._build_retrieve_notification_request_payload(seq_number)
 
     def _extract_pending_notification_payload(self, raw_response: bytes) -> bytes:
         if len(raw_response) == 0:
@@ -2964,6 +3181,29 @@ class SGP22Orchestrator(LiveStkPollingMixin):
         return False
 
     def _segment_bound_profile_package(self, bpp_bytes: bytes) -> list:
+        # Per SGP.22 v2.x / v3.x Annex M "ES10b.LoadBoundProfilePackage"
+        # the StoreData command chain must present the Bound Profile
+        # Package as:
+        #
+        #   1. BF36{BF23 ...}                -- bootstrap (sent as one
+        #                                      StoreData chain)
+        #   2. A0{...}                       -- configureISDPRequest as
+        #                                      a single wrapped segment
+        #   3. A1 header + each 88           -- storeMetadataRequest:
+        #                                      container header as its
+        #                                      own segment, then each
+        #                                      88 TLV
+        #   4. (optional) A2 header + each 86 for replaceSessionKeys
+        #   5. A3 header + each 86           -- loadProfileElements
+        #
+        # Stripping the A1/A2/A3 container headers causes a compliant
+        # eUICC to interpret the first bare 86/88 as a malformed
+        # payload; in the field we have observed one real card answer
+        # the first bare 86 with a terminal ProfileInstallationResult
+        # that superficially looks like success but leaves the SM-DP+
+        # session pending (profile stuck in limbo). Keep the A0 wrapped
+        # segment and emit A1/A2/A3 headers verbatim so each section is
+        # framed before its members arrive.
         if len(bpp_bytes) == 0:
             raise ValueError("Bound Profile Package is empty.")
 
@@ -2981,7 +3221,10 @@ class SGP22Orchestrator(LiveStkPollingMixin):
             if child_tag == bytes.fromhex("BF23"):
                 bootstrap_end = next_offset + (len(bpp_bytes) - len(root_value))
                 segments.append(bpp_bytes[:bootstrap_end])
-            elif child_tag in [b"\xA0", b"\xA1", b"\xA2", b"\xA3"]:
+            elif child_tag == b"\xA0":
+                segments.append(child_raw)
+            elif child_tag in (b"\xA1", b"\xA2", b"\xA3"):
+                segments.append(self._encode_tlv_header(child_tag, len(child_value)))
                 if len(child_value) > 0:
                     segments.extend(self._extract_sequence_members(child_value))
             else:
