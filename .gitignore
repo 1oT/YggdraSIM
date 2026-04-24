@@ -12,6 +12,11 @@ tmp_*.bin
 tmp_*.pem
 tmp_*.txt
 
+# Ephemeral scratch dirs left by pytest tmp_path fixtures or ad-hoc probes.
+# Match both tmp_XXXX/ (underscore) and tmpXXXX/ (no separator) styles.
+tmp_*/
+tmp[a-z0-9]*/
+
 # SCP11 mutable runtime caches and reports
 SCP11/es9_ca_lookup.json
 SCP11/live/es9_ca_lookup.json
