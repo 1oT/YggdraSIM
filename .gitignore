@@ -130,6 +130,10 @@ Tools/ProfilePackage/profile/transcode/1oT_test_profile.transcode.json
 Tools/ProfilePackage/profile/transcode/1oT_test_profile.transcode.txt
 Tools/ProfilePackage/profile/transcoded/reference_test_profile.transcode.txt
 *.transcode.txt
+# Per-operator scratch dump created by saip_json_codec.resolve_transcode_paths
+# when an externally-sourced SAIP profile is loaded. Filenames look operational
+# (real-looking ICCID prefixes), so the directory is excluded by default.
+Tools/ProfilePackage/transcode/_external/
 state/gpg_key.fingerprint
 SCP11/local_access/profile/Test_Profile_dummyvalues.txt
 # Polling plugin package (IPAE / BIP-WiFi bridge) — proprietary, do not ship
