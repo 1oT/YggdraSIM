@@ -327,6 +327,7 @@ class ShellGuides :
 {Config.Colors.CYAN}1. Config Directory (CONFIG_DIR){Config.Colors.ENDC}
    - {Config.Colors.BOLD}Source (Python):{Config.Colors.ENDC} SCP03 config files are read/written under the shared workspace directory (e.g. `Workspace/SCP03/keys.ini`, `Workspace/SCP03/aid.txt`, `Workspace/SCP03/fids.txt`, `Workspace/SCP03/binds.json`). SCP80 uses SCP80/ota_config.ini.
    - {Config.Colors.BOLD}Frozen executable:{Config.Colors.ENDC} These workspace files live under the chosen writable runtime root. Set `YGGDRASIM_RUNTIME_ROOT` to force a specific writable root. Default files are copied there on first run if missing.
+   - {Config.Colors.BOLD}Shipped seeds:{Config.Colors.ENDC} The first-run defaults are bundled at `SCP03/seeds/{{keys.ini, fids.txt, aid.txt, binds.json}}` and copied (never overwritten) into the workspace. Delete a runtime file to force a re-seed.
 
 {Config.Colors.CYAN}2. SCP03 Configuration Files{Config.Colors.ENDC}
    - {Config.Colors.BOLD}Workspace/SCP03/keys.ini:{Config.Colors.ENDC} [KEYS] section: kenc, kmac, dek (32/48/64 hex chars for AES-128/192/256), kvn (hex), aid (default SD AID), adm (ADM key for ETSI VERIFY). CONFIG wizard or WIZARD > Update Keys can rotate and save.

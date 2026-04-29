@@ -32,10 +32,10 @@ class Config :
     BASE_DIR =bundle_path ("Workspace","SCP03")
     CONFIG_DIR =ensure_workspace_dir ("SCP03")
 
-    INI_FILE =ensure_seeded_workspace_file (("Workspace","SCP03","keys.ini"),"SCP03","keys.ini")
-    FIDS_FILE =ensure_seeded_workspace_file (("Workspace","SCP03","fids.txt"),"SCP03","fids.txt")
-    AID_FILE =ensure_seeded_workspace_file (("Workspace","SCP03","aid.txt"),"SCP03","aid.txt")
-    BINDS_FILE =ensure_seeded_workspace_file (("Workspace","SCP03","binds.json"),"SCP03","binds.json")
+    INI_FILE =ensure_seeded_workspace_file (("SCP03","seeds","keys.ini"),"SCP03","keys.ini")
+    FIDS_FILE =ensure_seeded_workspace_file (("SCP03","seeds","fids.txt"),"SCP03","fids.txt")
+    AID_FILE =ensure_seeded_workspace_file (("SCP03","seeds","aid.txt"),"SCP03","aid.txt")
+    BINDS_FILE =ensure_seeded_workspace_file (("SCP03","seeds","binds.json"),"SCP03","binds.json")
 
     DEFAULT_KEYS ={
     'scp03_kenc':'1122334455667788AABBCCDDEEFF0011',
