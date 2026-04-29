@@ -19,6 +19,34 @@ The engineering work looks done. What is left is release hygiene.
 > `~/Documents/Tools/YggdraSIM_v1.0.0` on the `release/1.0.x` branch.
 > Outstanding items below are kept for historical context — anything
 > still relevant moves into `V2_ROADMAP.md`, not back into this audit.
+>
+> **Residual sweep (2026-04-29, post-v1.0.0 audit pass).** Items that
+> were still genuinely open after the freeze have been rectified in
+> both the dev tree and the `release/1.0.x` mirror:
+>
+> - **B2** — `.venv/` (10 tracked files: `bin/Activate.ps1`,
+>   `bin/activate{,.csh,.fish}`, `bin/pip{,3}`, `bin/python{,3}`,
+>   `lib64`, `pyvenv.cfg`) untracked via `git rm --cached -r .venv`.
+>   `.gitignore:61` already excludes the directory.
+> - **H1** — `SECURITY.md` (vulnerability disclosure incl. GSMA CVD
+>   routing) and `CODE_OF_CONDUCT.md` (Contributor Covenant 2.1
+>   adapted) added at repo root. `CHANGELOG.md`, `CONTRIBUTING.md`,
+>   `.github/PULL_REQUEST_TEMPLATE.md`, and `.github/ISSUE_TEMPLATE/`
+>   were already in place.
+> - **H7** — `SCP11/TEST_MATERIAL_NOTICE.md` added with the explicit
+>   "SGP.26 publicly-known test material" disclaimer; a one-paragraph
+>   pointer landed at the top of `SCP11/README.md`.
+> - **H8** — operational-looking transcode dumps
+>   (`Tools/ProfilePackage/transcode/_external/89103000000466310758-*.transcode.json`
+>   and the `V2_…` sibling) removed from the index in both repos;
+>   `Tools/ProfilePackage/transcode/_external/` added to `.gitignore`
+>   so future scratch dumps from `saip_json_codec.resolve_transcode_paths`
+>   stay local.
+>
+> Tier 0 / Tier 1 items called out as `[fixed]`, `[partial]`, or
+> `[frozen for v1]` further down in this audit retain those statuses
+> from earlier passes; the residual sweep only touched items that
+> were still genuinely actionable.
 
 ---
 
