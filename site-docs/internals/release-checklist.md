@@ -96,18 +96,74 @@ Do not mass-run. Redirect noisy runs to a log file and inspect with `rg`.
 
 ## Tagging and publishing
 
-- [ ] tag the release in git:
+The publish flow is wired end-to-end in `.github/workflows/build.yml`. Pushing
+an annotated `v*` tag triggers `docs-strict` + `pytest-suite`, the seven-way
+build matrix (Linux x86_64 / arm64 clean+full, macOS x86_64+arm64 clean,
+Windows x86_64 clean, Debian package) and the `publish-release` job. The
+`publish-release` job:
+
+- downloads every matrix artefact;
+- renames each binary to the canonical name the install scripts consume
+  (`yggdrasim-{os}-{arch}-{flavor}[.exe]`, see
+  `scripts/install/_common.sh::yg_asset_name` and
+  `scripts/install/install-windows.ps1::Install-YgFromRelease`);
+- generates a `SHA256SUMS` manifest;
+- guards the matrix against silent drift with an explicit "required asset"
+  list before calling `gh release create`;
+- calls `gh release create <tag> --notes-from-tag --verify-tag …`, which
+  reuses the annotated tag message as the public release notes.
+
+### Annotated-tag-message contract
+
+The release page's body comes from the **annotated** tag message via
+`gh release create --notes-from-tag`. Tagging steps:
+
+- [ ] tag the release in git **with an annotation that reads as a
+      release note** (covers headline behavioural changes, defaults,
+      migration considerations):
 
     ```bash
-    git tag -a vYYYY.M.P -m "Release vYYYY.M.P"
-    git push origin vYYYY.M.P
+    git tag -a vX.Y.Z -m "$(cat <<'EOF'
+    YggdraSIM vX.Y.Z
+
+    First / next … release. Notable changes:
+
+    - …
+    - …
+    EOF
+    )"
+    git push origin vX.Y.Z
     ```
 
-- [ ] produce a release note in the project's release surface. Reference
-      the CAPABILITIES changes and any migration considerations.
-- [ ] publish the Docker image (if that's part of your process)
-- [ ] publish the bundled executables for each supported OS (if that's part
-      of your process)
+- [ ] watch the workflow at `https://github.com/<repo>/actions`. The
+      `publish-release` job only runs on `refs/tags/v*`; failures in
+      `docs-strict`, `pytest-suite`, or any build leg short-circuit the
+      release publish.
+- [ ] confirm the GitHub Release page lists the eight asset names plus
+      `SHA256SUMS`:
+
+    ```
+    yggdrasim-linux-x86_64-clean
+    yggdrasim-linux-x86_64-full
+    yggdrasim-linux-arm64-clean
+    yggdrasim-linux-arm64-full
+    yggdrasim-macos-x86_64-clean
+    yggdrasim-macos-arm64-clean
+    yggdrasim-windows-x86_64-clean.exe
+    yggdrasim-clean_X.Y.Z_amd64.deb
+    SHA256SUMS
+    ```
+
+- [ ] sanity-check that the install-script `release` mode resolves with
+      the just-published tag, e.g.:
+
+    ```bash
+    YGGDRASIM_REPO=hampushellsberg-dev/YggdraSIM \
+      scripts/install/install-linux.sh --version vX.Y.Z
+    ```
+
+- [ ] publish the Docker image (`.github/workflows/docker.yml`) if that
+      is part of the release.
 
 ## Post-release
 
