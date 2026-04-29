@@ -27,10 +27,10 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.11"
 
@@ -54,10 +54,10 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.11"
 
@@ -101,10 +101,10 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.11"
 
@@ -155,7 +155,7 @@ jobs:
           "${BIN}" --doctor || true
 
       - name: Upload Linux bundle artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: ${{ steps.meta.outputs.artifact_name }}
           path: dist/yggdrasim-${{ matrix.flavor }}
@@ -167,7 +167,7 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Resolve package metadata
         id: meta
@@ -178,7 +178,7 @@ jobs:
           echo "artifact_name=yggdrasim-linux-arm64-clean-${VERSION}" >> "$GITHUB_OUTPUT"
 
       - name: Set up QEMU for arm64
-        uses: docker/setup-qemu-action@v3
+        uses: docker/setup-qemu-action@v4
         with:
           platforms: arm64
 
@@ -206,7 +206,7 @@ jobs:
             '
 
       - name: Upload arm64 bundle artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: ${{ steps.meta.outputs.artifact_name }}
           path: dist/yggdrasim-clean
@@ -218,7 +218,7 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Resolve package metadata
         id: meta
@@ -229,7 +229,7 @@ jobs:
           echo "artifact_name=yggdrasim-linux-arm64-full-${VERSION}" >> "$GITHUB_OUTPUT"
 
       - name: Set up QEMU for arm64
-        uses: docker/setup-qemu-action@v3
+        uses: docker/setup-qemu-action@v4
         with:
           platforms: arm64
 
@@ -257,7 +257,7 @@ jobs:
             '
 
       - name: Upload arm64 full bundle artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: ${{ steps.meta.outputs.artifact_name }}
           path: dist/yggdrasim-full
@@ -269,10 +269,10 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.11"
 
@@ -306,7 +306,7 @@ jobs:
           .\dist\yggdrasim-clean.exe --version
 
       - name: Upload Windows bundle artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: ${{ steps.meta.outputs.artifact_name }}
           path: dist/yggdrasim-clean.exe
@@ -326,10 +326,10 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.11"
 
@@ -366,7 +366,7 @@ jobs:
           dist/yggdrasim-clean --version
 
       - name: Upload macOS bundle artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: ${{ steps.meta.outputs.artifact_name }}
           path: dist/yggdrasim-clean
@@ -380,7 +380,7 @@ jobs:
 
     steps:
       - name: Download clean Linux bundle
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v6
         with:
           name: ${{ needs.build-linux-x86_64.outputs.clean_artifact_name }}
           path: dist
@@ -411,7 +411,7 @@ jobs:
           echo "artifact_path=dist/${DEB_NAME}" >> "$GITHUB_OUTPUT"
 
       - name: Upload Debian package artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: ${{ steps.deb.outputs.artifact_name }}
           path: ${{ steps.deb.outputs.artifact_path }}
@@ -435,7 +435,7 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Resolve release metadata
         id: meta
@@ -453,49 +453,49 @@ jobs:
           mkdir -p dl
 
       - name: Download Linux x86_64 clean
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v6
         with:
           name: yggdrasim-linux-x86_64-clean-${{ steps.meta.outputs.version }}
           path: dl/linux-x86_64-clean
 
       - name: Download Linux x86_64 full
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v6
         with:
           name: yggdrasim-linux-x86_64-full-${{ steps.meta.outputs.version }}
           path: dl/linux-x86_64-full
 
       - name: Download Linux arm64 clean
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v6
         with:
           name: yggdrasim-linux-arm64-clean-${{ steps.meta.outputs.version }}
           path: dl/linux-arm64-clean
 
       - name: Download Linux arm64 full
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v6
         with:
           name: yggdrasim-linux-arm64-full-${{ steps.meta.outputs.version }}
           path: dl/linux-arm64-full
 
       - name: Download Windows x86_64 clean
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v6
         with:
           name: yggdrasim-windows-x86_64-clean-${{ steps.meta.outputs.version }}
           path: dl/windows-x86_64-clean
 
       - name: Download macOS x86_64 clean
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v6
         with:
           name: yggdrasim-macos-x86_64-clean-${{ steps.meta.outputs.version }}
           path: dl/macos-x86_64-clean
 
       - name: Download macOS arm64 clean
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v6
         with:
           name: yggdrasim-macos-arm64-clean-${{ steps.meta.outputs.version }}
           path: dl/macos-arm64-clean
 
       - name: Download Linux Debian package (clean)
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v6
         with:
           name: yggdrasim-linux-deb-clean-${{ steps.meta.outputs.version }}
           path: dl/linux-deb-clean
