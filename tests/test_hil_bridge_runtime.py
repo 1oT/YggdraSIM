@@ -102,6 +102,54 @@ class HilBridgeRuntimeTests(unittest.TestCase):
             self.assertTrue(written_path.endswith(".config/systemd/user/yggdrasim-hil-supervisor.service"))
             self.assertEqual(Path(written_path).read_text(encoding="utf-8"), "[Unit]\nDescription=Demo\n")
 
+    def test_write_user_service_if_changed_reports_first_write_and_idempotent_rewrite(self) -> None:
+        state_dir = Path(__file__).resolve().parents[1] / "state"
+        with tempfile.TemporaryDirectory(dir=state_dir) as temp_dir:
+            unit_text = "[Unit]\nDescription=Initial\n"
+            first_path, first_changed = hil_bridge_runtime.write_user_service_if_changed(
+                unit_text,
+                home_dir=temp_dir,
+            )
+
+            self.assertTrue(first_changed)
+            self.assertTrue(Path(first_path).is_file())
+
+            second_path, second_changed = hil_bridge_runtime.write_user_service_if_changed(
+                unit_text,
+                home_dir=temp_dir,
+            )
+
+            self.assertEqual(first_path, second_path)
+            self.assertFalse(second_changed)
+
+            third_path, third_changed = hil_bridge_runtime.write_user_service_if_changed(
+                "[Unit]\nDescription=Updated\nEnvironment=YGGDRASIM_CARD_BACKEND=sim\n",
+                home_dir=temp_dir,
+            )
+
+            self.assertEqual(first_path, third_path)
+            self.assertTrue(third_changed)
+            self.assertIn(
+                "Environment=YGGDRASIM_CARD_BACKEND=sim",
+                Path(third_path).read_text(encoding="utf-8"),
+            )
+
+    def test_clear_card_relay_state_removes_marker_when_present(self) -> None:
+        state_dir = Path(__file__).resolve().parents[1] / "state"
+        with tempfile.TemporaryDirectory(dir=state_dir) as temp_dir:
+            with mock.patch.dict("os.environ", {"YGGDRASIM_RUNTIME_ROOT": temp_dir}, clear=False):
+                marker_path = Path(hil_bridge_runtime.card_relay_state_path())
+                marker_path.parent.mkdir(parents=True, exist_ok=True)
+                marker_path.write_text("{\"statusUrl\": \"http://127.0.0.1:1/old\"}\n", encoding="utf-8")
+
+                hil_bridge_runtime.clear_card_relay_state()
+
+                self.assertFalse(marker_path.exists())
+
+                # Subsequent calls must be no-ops.
+                hil_bridge_runtime.clear_card_relay_state()
+                self.assertFalse(marker_path.exists())
+
     def test_query_user_service_state_parses_systemctl_show_output(self) -> None:
         completed = subprocess.CompletedProcess(
             ["systemctl", "--user", "show"],

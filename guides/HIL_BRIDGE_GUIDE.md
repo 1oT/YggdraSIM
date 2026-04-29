@@ -256,6 +256,7 @@ Source runs write runtime state under the repository root by default. The key fi
 Supervisor state should show:
 
 - `status: running`
+- `cardBackendGate: reader` (or `sim`; see below)
 - `usbPresent: true`
 - a non-zero `bridgePid`
 
@@ -273,6 +274,28 @@ The bridge log should also print the relay URL:
 ```text
 Card relay available at http://127.0.0.1:45007/apdu
 ```
+
+### 4.1 Sim-backend launches without SIMtrace2 hardware
+
+When `YGGDRASIM_CARD_BACKEND=sim` is set (via the `[C] Card backend`
+menu, the env-flags wizard, or an explicit `Environment=` override),
+the supervisor:
+
+- skips the SIMtrace2 USB-presence gate and launches the bridge child
+  immediately. The supervisor JSON reports `cardBackendGate: sim`,
+  `usbSource: sim-backend`, and `usbPresent: true` with a synthetic
+  `usbMatches` entry that documents the bypass.
+- refuses to spawn `osmo-remsim-client-st2`. Sim mode has no
+  USB-attached modem path, so REMSIM is irrelevant; the JSON reports
+  `remsimClientEnabled: false` and `remsimClientCommand: []` for the
+  duration of sim-mode operation.
+
+Toggling between `reader` and `sim` between sessions is now
+non-destructive: the wizard rewrites the user unit only when the
+generated content actually changes, runs `daemon-reload` only on a
+change, clears the previous run's relay marker, and triggers a real
+`systemctl --user restart` so the new `Environment=YGGDRASIM_CARD_BACKEND=...`
+block takes effect. No tool reboot is required.
 
 ## 5. Automatic remsim client management
 

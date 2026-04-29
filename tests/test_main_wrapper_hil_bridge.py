@@ -144,7 +144,7 @@ class MainWrapperHilBridgeRouteTests(unittest.TestCase):
         mocked_hil_bridge.assert_called_once_with()
 
     def test_start_hil_bridge_session_starts_service_and_attaches_live_view(self) -> None:
-        with mock.patch.object(main_wrapper, "_ensure_hil_bridge_user_service", return_value="/tmp/ygg.service"):
+        with mock.patch.object(main_wrapper, "_ensure_hil_bridge_user_service", return_value=("/tmp/ygg.service", True)):
             with mock.patch.object(main_wrapper.hil_bridge_runtime, "read_supervisor_state", return_value={}):
                 with mock.patch.object(
                     main_wrapper.hil_bridge_runtime,
@@ -170,7 +170,7 @@ class MainWrapperHilBridgeRouteTests(unittest.TestCase):
         self.assertIn("Attaching to the live APDU stream view", captured.getvalue())
 
     def test_start_hil_bridge_session_reuses_active_session_and_attaches_live_view(self) -> None:
-        with mock.patch.object(main_wrapper, "_ensure_hil_bridge_user_service", return_value="/tmp/ygg.service"):
+        with mock.patch.object(main_wrapper, "_ensure_hil_bridge_user_service", return_value=("/tmp/ygg.service", False)):
             with mock.patch.object(
                 main_wrapper.hil_bridge_runtime,
                 "read_supervisor_state",
@@ -199,7 +199,7 @@ class MainWrapperHilBridgeRouteTests(unittest.TestCase):
         self.assertIn("already active", captured.getvalue())
 
     def test_start_hil_bridge_session_restarts_active_session_when_capture_mode_changes(self) -> None:
-        with mock.patch.object(main_wrapper, "_ensure_hil_bridge_user_service", return_value="/tmp/ygg.service"):
+        with mock.patch.object(main_wrapper, "_ensure_hil_bridge_user_service", return_value=("/tmp/ygg.service", False)):
             with mock.patch.object(
                 main_wrapper.hil_bridge_runtime,
                 "read_supervisor_state",
@@ -229,8 +229,52 @@ class MainWrapperHilBridgeRouteTests(unittest.TestCase):
         )
         self.assertIn("restarted to apply the requested capture mode", captured.getvalue())
 
+    def test_start_hil_bridge_session_restarts_active_session_when_unit_changed(self) -> None:
+        # Toggling YGGDRASIM_CARD_BACKEND between active sessions
+        # rewrites the unit file. Even when the requested capture
+        # mode matches the current bridge command, the wizard must
+        # honour the unit-file change and restart so systemd picks
+        # up the new Environment= block.
+        existing_bridge_command = [
+            "python3",
+            "-m",
+            "Tools.HilBridge.main",
+        ]
+        with mock.patch.object(
+            main_wrapper,
+            "_ensure_hil_bridge_user_service",
+            return_value=("/tmp/ygg.service", True),
+        ):
+            with mock.patch.object(
+                main_wrapper.hil_bridge_runtime,
+                "read_supervisor_state",
+                return_value={"bridgeCommand": existing_bridge_command},
+            ):
+                with mock.patch.object(
+                    main_wrapper.hil_bridge_runtime,
+                    "query_user_service_state",
+                    return_value={"activeState": "active"},
+                ):
+                    with mock.patch.object(main_wrapper.hil_bridge_runtime, "start_user_service") as mocked_start:
+                        with mock.patch.object(main_wrapper.hil_bridge_runtime, "restart_user_service") as mocked_restart:
+                            with mock.patch.object(
+                                main_wrapper.hil_bridge_runtime,
+                                "wait_for_bridge_ready",
+                                return_value={"apduUrl": "http://127.0.0.1:44215/apdu"},
+                            ):
+                                with mock.patch.object(
+                                    main_wrapper.hil_bridge_runtime,
+                                    "clear_card_relay_state",
+                                ) as mocked_clear:
+                                    with mock.patch.object(main_wrapper, "_view_hil_bridge_live_stream"):
+                                        main_wrapper._start_hil_bridge_session("raw")
+
+        mocked_start.assert_not_called()
+        mocked_restart.assert_called_once_with(main_wrapper.hil_bridge_runtime.DEFAULT_SERVICE_NAME)
+        mocked_clear.assert_called_once()
+
     def test_start_hil_bridge_session_launches_wireshark_when_requested(self) -> None:
-        with mock.patch.object(main_wrapper, "_ensure_hil_bridge_user_service", return_value="/tmp/ygg.service"):
+        with mock.patch.object(main_wrapper, "_ensure_hil_bridge_user_service", return_value=("/tmp/ygg.service", True)):
             with mock.patch.object(main_wrapper.hil_bridge_runtime, "read_supervisor_state", return_value={}):
                 with mock.patch.object(
                     main_wrapper.hil_bridge_runtime,
@@ -256,7 +300,7 @@ class MainWrapperHilBridgeRouteTests(unittest.TestCase):
         )
 
     def test_start_hil_bridge_session_attaches_termshark_when_requested(self) -> None:
-        with mock.patch.object(main_wrapper, "_ensure_hil_bridge_user_service", return_value="/tmp/ygg.service") as mocked_ensure:
+        with mock.patch.object(main_wrapper, "_ensure_hil_bridge_user_service", return_value=("/tmp/ygg.service", True)) as mocked_ensure:
             with mock.patch.object(main_wrapper.hil_bridge_runtime, "read_supervisor_state", return_value={}):
                 with mock.patch.object(
                     main_wrapper.hil_bridge_runtime,
