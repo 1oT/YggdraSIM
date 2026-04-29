@@ -47,10 +47,14 @@ in `site-docs/`.
 python main/main.py
 python main/main.py --debug
 python main/main.py --card-backend sim --sim-eim-identity /path/to/card_side_eim_identity.json
+python main/main.py --gui
+python main/main.py --web-server --host 127.0.0.1 --port 8765
 ```
 
 Use `--debug` or `--verbose` on the wrapper when debug output should become the
-global default for launched modules.
+global default for launched modules. Use `--gui` for the desktop Universal GUI
+Command Center (requires the `[gui]` extra) or `--web-server` for the FastAPI
+loopback variant (requires the `[gui-server]` extra).
 
 ## Direct module entry points
 
@@ -69,6 +73,8 @@ python -m SCP11.eim_local
 python -m Tools.HilBridge.main
 python -m Tools.HilBridge.supervisor
 python -m Tools.ProfilePackage
+python -m Tools.ApduFuzz
+python -m Tools.EumDiag
 python -m Tools.SuciTool
 ```
 
@@ -86,6 +92,9 @@ yggdrasim-scp11-eim-local
 yggdrasim-hil-bridge
 yggdrasim-hil-supervisor
 yggdrasim-profile-package
+yggdrasim-profile-autoload
+yggdrasim-apdu-fuzzer
+yggdrasim-eum-diag
 yggdrasim-suci-tool
 ```
 

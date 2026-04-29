@@ -12,10 +12,12 @@ All `python -m ...` examples in this guide assume one of these is true:
 - or you already ran `python -m pip install -e /path/to/YggdraSIM` in the same Python environment
 
 After editable install, you can also use the installed commands directly, for
-example `yggdrasim-scp11-live`, `yggdrasim-scp11-local-access`,
-`yggdrasim-scp11-eim-local`, `yggdrasim-profile-package`,
-`yggdrasim-profile-autoload`, `yggdrasim-apdu-fuzzer`,
-`yggdrasim-eum-diag`, and `yggdrasim-suci-tool`.
+example `yggdrasim-scp03`, `yggdrasim-scp80`, `yggdrasim-scp11`,
+`yggdrasim-scp11-live`, `yggdrasim-scp11-test`, `yggdrasim-scp11-relay`,
+`yggdrasim-scp11-local-access`, `yggdrasim-scp11-eim-local`,
+`yggdrasim-hil-bridge`, `yggdrasim-hil-supervisor`,
+`yggdrasim-profile-package`, `yggdrasim-profile-autoload`,
+`yggdrasim-apdu-fuzzer`, `yggdrasim-eum-diag`, and `yggdrasim-suci-tool`.
 
 ## Scope
 
@@ -35,6 +37,8 @@ The following modules support direct command automation:
 | `python -m Tools.ApduFuzz` | No | No | No | Opt-in APDU mutation fuzzer. Refuses to run without `--i-mean-it` and at least one `--allow-iccid` / `--allow-imsi`. Ships as `yggdrasim-apdu-fuzzer`. |
 | `python -m Tools.EumDiag` | No | No | No | EUM diagnostics: `inject-keys` / `store-keys` / `decode-bpp` subcommands. Ships as `yggdrasim-eum-diag`. |
 | `python -m Tools.SuciTool` | Yes | Yes | Yes | SUCI key tool shell. |
+| `python -m Tools.HilBridge.main` | No | No | No | HIL bridge daemon (Linux only). Long-running RSPRO server. Ships as `yggdrasim-hil-bridge`. |
+| `python -m Tools.HilBridge.supervisor` | No | No | No | HIL bridge supervisor / health-check / restarter (Linux only). Ships as `yggdrasim-hil-supervisor`. |
 
 ## Wrapper simulator flags
 
@@ -44,12 +48,13 @@ wrapper.
 
 Useful wrapper flags:
 
-- `--card-backend sim`
+- `--card-backend {reader,sim}`
 - `--sim-isdr-config /path/to/isdr_config.json`
 - `--sim-quirks /path/to/sim_quirks.py`
 - `--sim-eim-identity /path/to/card_side_eim_identity.json`
 - `--sim-euicc-store /path/to/euicc_root`
 - `--sim-profile-store /path/to/profile_store`
+- `--sim-import-profile /path/to/profile.der` (paired with `--sim-import-enable` to auto-enable on first boot)
 
 Example:
 
@@ -73,6 +78,36 @@ TUI in offline review mode — no bridge, no supervisor, no `tshark -i`:
 Sidecar keybags named `<pcap>.keys.json` / `<stem>.keys.json` are
 auto-discovered when `--keybag` is omitted. A full write-up lives in
 `HIL_BRIDGE_GUIDE.md` §11 "Offline pcap replay and session-key unwrap".
+
+## Wrapper GUI Command Center flags
+
+`main/main.py` can also short-circuit into the optional Universal GUI
+Command Center instead of the menu. Both modes require the GUI extra
+to be installed (`pip install -e '.[gui]'` for desktop;
+`'.[gui-server]'` for the headless web server).
+
+- `--gui` — desktop window via `pywebview`
+- `--web-server` — headless FastAPI/uvicorn HTTP server with the SPA
+- `--host <addr>` / `--port <num>` — override the loopback bind for `--web-server`
+- `--token-file <path>` — bearer token expected on every request (`--web-server` only)
+- `--tls-cert <path>` / `--tls-key <path>` — bring your own TLS material
+- `--tls-self-signed` — generate or reuse a self-signed pair under `state/gui_tls/`
+
+Examples:
+
+```bash
+python main/main.py --gui --card-backend sim
+```
+
+```bash
+python main/main.py --web-server \
+    --host 127.0.0.1 --port 18443 \
+    --token-file ~/.config/yggdrasim/gui-token \
+    --tls-self-signed
+```
+
+These flags are documented in detail in
+`V2_UNIVERSAL_GUI_PLAN.md` and the `--help` output of `main/main.py`.
 
 ## Wrapper diagnostics
 

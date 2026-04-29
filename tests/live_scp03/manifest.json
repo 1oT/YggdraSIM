@@ -1,0 +1,478 @@
+{
+  "schema": "scp03-live-1",
+  "description": "Per-command stdin scripts for the SCP03 admin shell. Default backend is the simulated card; the runner can also drive a real PC/SC reader when SCP03_LIVE_BACKEND=reader.",
+  "reader_policy": {
+    "comment": "Reader-mode gating. 'auth' tests authenticate against the card's Security Domain — every key mismatch increments the SD lockout counter and 3 misses can brick the SD. 'write' tests modify card state. Tests not listed here run by default (read-only / offline / local-only).",
+    "auth": [
+      "AUTH-SD",
+      "SCP03-SD",
+      "SCP02-SD",
+      "KEYS",
+      "LOGOUT",
+      "LIST",
+      "LIST-IOT",
+      "GET-IOT",
+      "APPS",
+      "PKGS",
+      "SD",
+      "STORE-DATA",
+      "LOCK",
+      "UNLOCK",
+      "DEL",
+      "SCAN",
+      "DUMP-FS",
+      "VALIDATE",
+      "ARR",
+      "CERT-INFO",
+      "EXPORT-EUICC",
+      "EXPORT-KEYBAG",
+      "PROFILE-DIFF",
+      "REPORT",
+      "MANAGE-PROFILE",
+      "GET-DATA",
+      "PUT-KEY",
+      "SET-STATUS",
+      "MANAGE-CHANNEL",
+      "WIZARD",
+      "FS-ADMIN",
+      "MANAGE-PIN",
+      "RUN-AUTH",
+      "STK",
+      "OTA"
+    ],
+    "write": [
+      "UPDATE"
+    ]
+  },
+  "snapshot_files": [
+    "Workspace/SCP03/aid.txt",
+    "Workspace/SCP03/keys.ini",
+    "Workspace/SCP03/binds.json",
+    "Workspace/SCP03/fids.txt",
+    "state/yggdrasim.sqlite3",
+    "state/yggdrasim.sqlite3-wal",
+    "state/yggdrasim.sqlite3-shm"
+  ],
+  "tests": [
+    {
+      "name": "AUTH-SD",
+      "script": "AUTH-SD.in.txt",
+      "category": "session",
+      "expected_sw": ["9000"],
+      "expected_substrings": [
+        "SCP03 Authenticated",
+        "Level 0x33",
+        "KVN 0x30"
+      ],
+      "notes": "Legacy alias for SCP03-SD."
+    },
+    {
+      "name": "SCP03-SD",
+      "script": "SCP03-SD.in.txt",
+      "category": "session",
+      "expected_sw": ["9000"],
+      "expected_substrings": ["SCP03 Authenticated", "KVN 0x30"]
+    },
+    {
+      "name": "SCP02-SD",
+      "script": "SCP02-SD.in.txt",
+      "category": "session",
+      "expected_sw_any": ["9000", "6A82", "6985", "6A88", "6D00"],
+      "expected_substrings": ["SCP02 simulated session activated"],
+      "tolerate_failure": true,
+      "notes": "Simulator implements a plaintext SCP02 fake session for tooling parity."
+    },
+    {
+      "name": "RESET",
+      "script": "RESET.in.txt",
+      "category": "session",
+      "expected_substrings": ["Resetting card", "Reset Successful"],
+      "tolerate_failure": false
+    },
+    {
+      "name": "INFO",
+      "script": "INFO.in.txt",
+      "category": "session",
+      "expected_substrings": ["CARD INFO", "ATR", "ICCID"]
+    },
+    {
+      "name": "ATR",
+      "script": "ATR.in.txt",
+      "category": "session",
+      "expected_substrings": ["ATR"]
+    },
+    {
+      "name": "KEYS",
+      "script": "KEYS.in.txt",
+      "category": "session",
+      "expected_sw": ["9000"],
+      "expected_substrings": ["Card Key Registry", "AES"]
+    },
+    {
+      "name": "LOGOUT",
+      "script": "LOGOUT.in.txt",
+      "category": "session",
+      "expected_substrings": ["Secure session closed"]
+    },
+    {
+      "name": "CLS",
+      "script": "CLS.in.txt",
+      "category": "session"
+    },
+    {
+      "name": "LIST",
+      "script": "LIST.in.txt",
+      "category": "esim",
+      "expected_substrings": ["GetProfilesInfo", "ICCID", "ENABLED"]
+    },
+    {
+      "name": "LIST-IOT",
+      "script": "LIST-IOT.in.txt",
+      "category": "esim",
+      "expected_substrings": ["GetProfilesInfo", "ICCID"]
+    },
+    {
+      "name": "GET-IOT",
+      "script": "GET-IOT.in.txt",
+      "category": "esim",
+      "expected_substrings": ["Running SGP.22/SGP.32 Scan", "EID", "EuiccConfiguredData"]
+    },
+    {
+      "name": "APPS",
+      "script": "APPS.in.txt",
+      "category": "registry",
+      "expected_sw_any": ["9000", "6A88", "6A82"],
+      "expected_substrings": ["GlobalPlatform Registry (APPS)", "SELECTABLE"]
+    },
+    {
+      "name": "PKGS",
+      "script": "PKGS.in.txt",
+      "category": "registry",
+      "expected_sw_any": ["9000", "6A88", "6A82"]
+    },
+    {
+      "name": "SD",
+      "script": "SD.in.txt",
+      "category": "registry",
+      "expected_sw_any": ["9000", "6A88", "6A82"]
+    },
+    {
+      "name": "STORE-DATA",
+      "script": "STORE-DATA.in.txt",
+      "category": "gp",
+      "expected_sw_any": ["9000", "6A80", "6A88", "6985"],
+      "expected_substrings": ["STORE DATA", "STORE DATA Success"]
+    },
+    {
+      "name": "LOCK",
+      "script": "LOCK.in.txt",
+      "category": "gp",
+      "expected_sw_any": ["6A88", "6A80", "6982", "6A82"],
+      "tolerate_failure": true
+    },
+    {
+      "name": "UNLOCK",
+      "script": "UNLOCK.in.txt",
+      "category": "gp",
+      "expected_sw_any": ["6A88", "6A80", "6982", "6A82"],
+      "tolerate_failure": true
+    },
+    {
+      "name": "DEL",
+      "script": "DEL.in.txt",
+      "category": "gp",
+      "expected_sw_any": ["6A88", "6A80", "6985", "6A82"],
+      "tolerate_failure": true
+    },
+    {
+      "name": "SCAN",
+      "script": "SCAN.in.txt",
+      "category": "fs",
+      "expected_substrings": ["3F00", "Scan complete"]
+    },
+    {
+      "name": "SELECT",
+      "script": "SELECT.in.txt",
+      "category": "fs",
+      "expected_sw": ["9000"],
+      "expected_substrings": ["3F00"]
+    },
+    {
+      "name": "READ",
+      "script": "READ.in.txt",
+      "category": "fs",
+      "expected_sw": ["9000"],
+      "expected_substrings": ["EF (Transparent)", "iccid:"]
+    },
+    {
+      "name": "RECORD",
+      "script": "RECORD.in.txt",
+      "category": "fs",
+      "expected_sw_any": ["9000", "6981", "6A82"],
+      "expected_substrings": ["Reading All Records"]
+    },
+    {
+      "name": "UPDATE",
+      "script": "UPDATE.in.txt",
+      "category": "fs",
+      "expected_sw_any": ["9000", "6982", "6985"],
+      "expected_substrings": ["Binary Update Successful"],
+      "tolerate_failure": true
+    },
+    {
+      "name": "DUMP-FS",
+      "script": "DUMP-FS.in.txt",
+      "category": "fs",
+      "expected_substrings": ["Live dump complete", "FS_DUMP"]
+    },
+    {
+      "name": "VALIDATE",
+      "script": "VALIDATE.in.txt",
+      "category": "fs",
+      "expected_substrings": ["PROFILE VALIDATION", "Scope: MF"]
+    },
+    {
+      "name": "ARR",
+      "script": "ARR.in.txt",
+      "category": "fs",
+      "expected_substrings": ["ARR"]
+    },
+    {
+      "name": "CERT-INFO",
+      "script": "CERT-INFO.in.txt",
+      "category": "esim",
+      "expected_substrings": ["Certificate", "IIN"]
+    },
+    {
+      "name": "RUN-AUTH-TEST",
+      "script": "RUN-AUTH-TEST.in.txt",
+      "category": "auth",
+      "expected_substrings": ["AUTN check: OK", "APDU check: OK", "Offline vector check complete"]
+    },
+    {
+      "name": "DERIVE-OPC",
+      "script": "DERIVE-OPC.in.txt",
+      "category": "auth",
+      "expected_substrings": ["OPc:"]
+    },
+    {
+      "name": "DECODE",
+      "script": "DECODE.in.txt",
+      "category": "tools",
+      "expected_substrings": ["Tag 6F", "Tag 82", "Tag 83"]
+    },
+    {
+      "name": "SHOW",
+      "script": "SHOW.in.txt",
+      "category": "config",
+      "expected_substrings": ["[KEYS]", "scp03_kenc", "[GOLD_PROFILE]"]
+    },
+    {
+      "name": "AIDS",
+      "script": "AIDS.in.txt",
+      "category": "config",
+      "expected_substrings": ["ISDR", "MNOSD"]
+    },
+    {
+      "name": "SET-AID-ALIAS",
+      "script": "SET-AID-ALIAS.in.txt",
+      "category": "config",
+      "expected_substrings": ["LIVE_TEST_ALIAS"]
+    },
+    {
+      "name": "SET-DEFAULT",
+      "script": "SET-DEFAULT.in.txt",
+      "category": "config",
+      "expected_substrings": ["Resetting configuration to defaults", "Reset complete"]
+    },
+    {
+      "name": "EXPORT-EUICC",
+      "script": "EXPORT-EUICC.in.txt",
+      "category": "esim",
+      "expected_substrings": ["Report written to", "euicc.yaml"]
+    },
+    {
+      "name": "EXPORT-KEYBAG",
+      "script": "EXPORT-KEYBAG.in.txt",
+      "category": "session",
+      "expected_substrings": ["Keybag written", "session.keys.json", "scp03-live-runner"]
+    },
+    {
+      "name": "SET-GOLD-PROFILE",
+      "script": "SET-GOLD-PROFILE.in.txt",
+      "category": "profile",
+      "expected_substrings": ["Gold combined profile YAML path saved", "Gold profile reference"]
+    },
+    {
+      "name": "GOLD-PROFILE",
+      "script": "GOLD-PROFILE.in.txt",
+      "category": "profile",
+      "expected_substrings": ["Gold profile reference"]
+    },
+    {
+      "name": "CLEAR-GOLD-PROFILE",
+      "script": "CLEAR-GOLD-PROFILE.in.txt",
+      "category": "profile",
+      "expected_substrings": ["Cleared gold profile path"]
+    },
+    {
+      "name": "PROFILE-DIFF",
+      "script": "PROFILE-DIFF.in.txt",
+      "category": "profile",
+      "expected_substrings": ["Gold YAML not found"],
+      "tolerate_failure": true
+    },
+    {
+      "name": "GUIDE",
+      "script": "GUIDE.in.txt",
+      "category": "system",
+      "expected_substrings": ["GlobalPlatform"]
+    },
+    {
+      "name": "HELP",
+      "script": "HELP.in.txt",
+      "category": "system",
+      "expected_substrings": ["YggdraSIM Command Reference", "Session & Card Info"]
+    },
+    {
+      "name": "REPORT",
+      "script": "REPORT.in.txt",
+      "category": "wizard",
+      "expected_substrings": ["File System Reporting Wizard", "EOF when reading a line"],
+      "tolerate_failure": true,
+      "notes": "Wizard receives EOF on stdin."
+    },
+    {
+      "name": "MANAGE-PROFILE",
+      "script": "MANAGE-PROFILE.in.txt",
+      "category": "wizard",
+      "expected_substrings": ["eSIM Profile Management", "EOF when reading a line"],
+      "tolerate_failure": true
+    },
+    {
+      "name": "GET-DATA",
+      "script": "GET-DATA.in.txt",
+      "category": "wizard",
+      "expected_substrings": ["GP GET DATA Command", "EOF when reading a line"],
+      "tolerate_failure": true
+    },
+    {
+      "name": "PUT-KEY",
+      "script": "PUT-KEY.in.txt",
+      "category": "wizard",
+      "expected_substrings": ["GP PUT KEY Command", "EOF when reading a line"],
+      "tolerate_failure": true
+    },
+    {
+      "name": "SET-STATUS",
+      "script": "SET-STATUS.in.txt",
+      "category": "wizard",
+      "expected_substrings": ["GP SET STATUS Command", "EOF when reading a line"],
+      "tolerate_failure": true
+    },
+    {
+      "name": "MANAGE-CHANNEL",
+      "script": "MANAGE-CHANNEL.in.txt",
+      "category": "wizard",
+      "expected_substrings": ["GP MANAGE CHANNEL Command", "EOF when reading a line"],
+      "tolerate_failure": true
+    },
+    {
+      "name": "WIZARD",
+      "script": "WIZARD.in.txt",
+      "category": "wizard",
+      "expected_substrings": ["Select Execution Variant", "INSTALL [for load]"],
+      "tolerate_failure": true
+    },
+    {
+      "name": "FS-ADMIN",
+      "script": "FS-ADMIN.in.txt",
+      "category": "wizard",
+      "expected_substrings": ["ETSI File System Administration", "EOF when reading a line"],
+      "tolerate_failure": true
+    },
+    {
+      "name": "MANAGE-PIN",
+      "script": "MANAGE-PIN.in.txt",
+      "category": "wizard",
+      "expected_substrings": ["GP PIN Management Command", "EOF when reading a line"],
+      "tolerate_failure": true
+    },
+    {
+      "name": "RUN-AUTH",
+      "script": "RUN-AUTH.in.txt",
+      "category": "wizard",
+      "expected_substrings": ["Telecom Authentication Command", "EOF when reading a line"],
+      "tolerate_failure": true
+    },
+    {
+      "name": "CONFIG",
+      "script": "CONFIG.in.txt",
+      "category": "wizard",
+      "expected_substrings": ["Environment Configuration", "EOF when reading a line"],
+      "tolerate_failure": true
+    },
+    {
+      "name": "BINDS",
+      "script": "BINDS.in.txt",
+      "category": "wizard",
+      "expected_substrings": ["Binder engine"],
+      "tolerate_failure": true
+    },
+    {
+      "name": "STK",
+      "script": "STK.in.txt",
+      "category": "subshell",
+      "expected_substrings": ["[STK:READY]", "STK initialization completed"],
+      "tolerate_failure": true
+    },
+    {
+      "name": "OTA",
+      "script": "OTA.in.txt",
+      "category": "subshell",
+      "expected_substrings": ["Switching to SCP80 OTA Tool", "Returning to SCP03 Shell"],
+      "tolerate_failure": true
+    },
+    {
+      "name": "RUN",
+      "script": "RUN.in.txt",
+      "category": "script",
+      "expected_substrings": ["[SCRIPT:", "Command Reference"],
+      "tolerate_failure": false
+    },
+    {
+      "name": "SCRIPT",
+      "script": "SCRIPT.in.txt",
+      "category": "script",
+      "expected_substrings": ["[SCRIPT:", "Command Reference"],
+      "tolerate_failure": false
+    },
+    {
+      "name": "DEBUG",
+      "script": "DEBUG.in.txt",
+      "category": "system",
+      "expected_substrings": ["VERBOSE / DEBUG Mode is now ON", "VERBOSE / DEBUG Mode is now OFF"]
+    },
+    {
+      "name": "VERBOSE",
+      "script": "VERBOSE.in.txt",
+      "category": "system",
+      "expected_substrings": ["VERBOSE / DEBUG Mode is now ON", "VERBOSE / DEBUG Mode is now OFF"]
+    },
+    {
+      "name": "EXIT",
+      "script": "EXIT.in.txt",
+      "category": "lifecycle"
+    },
+    {
+      "name": "Q",
+      "script": "Q.in.txt",
+      "category": "lifecycle"
+    },
+    {
+      "name": "QA",
+      "script": "QA.in.txt",
+      "category": "lifecycle"
+    }
+  ]
+}

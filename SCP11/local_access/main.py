@@ -1,12 +1,14 @@
 import argparse
 import atexit
+import io
 import os
 import re
 import shlex
 import shutil
 import sys
 import textwrap
-from typing import Any, List, Optional
+from contextlib import redirect_stdout
+from typing import Any, Callable, List, Optional, Tuple
 
 from yggdrasim_common.quit_control import quit_all, QuitAllRequested
 from yggdrasim_common.process_debug import (
@@ -18,31 +20,109 @@ from yggdrasim_common.card_backend import trigger_card_relay_modem_refresh
 from yggdrasim_common.hil_bridge_runtime import hil_bridge_warning_text
 from yggdrasim_common.session_recording import ShellSessionRecorder
 from yggdrasim_common.structured_output import dump_structured_payload
-from SCP11.shared.discovery_snapshot import render_consolidated_discovery_snapshot
+from yggdrasim_common.nord_palette import NORD
+from SCP11.shared.discovery_snapshot import (
+    render_card_overview_snapshot,
+    render_consolidated_discovery_snapshot,
+)
+from SCP11.shared.profile_actions import (
+    ProfileActionAdapter,
+    is_enabled,
+    run_delete_profile as shared_run_delete_profile,
+    run_disable_profile as shared_run_disable_profile,
+    run_enable_profile as shared_run_enable_profile,
+)
+
+try:
+    from SCP03.logic.sgp22 import Sgp22Manager
+except Exception:
+    Sgp22Manager = None
 
 try:
     import readline
 except ImportError:
     readline = None
 
+
+class _LocalAccessTransportAdapter:
+    """Wraps a local-access apdu_channel as an Sgp22Manager-compatible transport.
+
+    Mirrors the live/test :class:`_SCP03RelayTransportAdapter` so that the legacy
+    Sgp22 manager — used by eSIM Live and eSIM Test for the DISCOVER bundle —
+    can drive the same APDU stream against a local-access session and produce
+    output coherent with those modules.
+    """
+
+    def __init__(self, apdu_channel: Any):
+        self._apdu_channel = apdu_channel
+        self.debug = False
+
+    def reset(self) -> None:
+        reset_method = getattr(self._apdu_channel, "reset", None)
+        if callable(reset_method):
+            reset_method()
+
+    def transmit(self, apdu_hex: str, silent: bool = False) -> Tuple[bytes, int, int]:
+        apdu = bytes.fromhex(apdu_hex)
+        response, sw1, sw2 = self._exchange(apdu, "SCP03", silent)
+        if sw1 == 0x6C:
+            corrected = apdu[:-1] + bytes([sw2])
+            return self.transmit(corrected.hex().upper(), silent=silent)
+        if sw1 in (0x61, 0x9F):
+            accumulated = response
+            get_response_cla = 0x00
+            if len(apdu) > 0:
+                get_response_cla = apdu[0] & 0x03
+            while sw1 in (0x61, 0x9F):
+                get_response = bytes([get_response_cla, 0xC0, 0x00, 0x00, sw2])
+                chunk, sw1, sw2 = self._exchange(get_response, "SCP03 [GET RESPONSE]", silent)
+                accumulated += chunk
+            return accumulated, sw1, sw2
+        return response, sw1, sw2
+
+    def _exchange(self, apdu: bytes, log_name: str, silent: bool) -> Tuple[bytes, int, int]:
+        exchange_method = getattr(self._apdu_channel, "exchange", None)
+        if callable(exchange_method):
+            if silent:
+                with redirect_stdout(io.StringIO()):
+                    return exchange_method(apdu, log_name)
+            return exchange_method(apdu, log_name)
+        send_method = getattr(self._apdu_channel, "send")
+        if silent:
+            with redirect_stdout(io.StringIO()):
+                response = send_method(apdu, log_name)
+        else:
+            response = send_method(apdu, log_name)
+        return response, 0x90, 0x00
+
 class ShellStyle:
-    HEADER = "\033[38;2;95;220;203m"
-    BLUE = "\033[38;2;138;167;255m"
-    CYAN = "\033[38;2;147;247;255m"
-    GREEN = "\033[38;2;141;255;141m"
-    WARNING = "\033[38;2;255;240;143m"
-    WHITE = "\033[38;2;247;252;255m"
-    BOLD = "\033[1m"
-    END = "\033[0m"
+    """Local-access shell colour roles, sourced from the Nord palette.
+
+    Field order intentionally mirrors the legacy ``Colors`` classes
+    so existing call-sites such as ``ShellStyle.HEADER`` continue to
+    work without modification.
+    """
+
+    HEADER = NORD.HEADER
+    BLUE = NORD.BLUE
+    CYAN = NORD.CYAN
+    GREEN = NORD.GREEN
+    WARNING = NORD.WARNING
+    WHITE = NORD.WHITE
+    BOLD = NORD.BOLD
+    END = NORD.RESET
 
 
 _COMMANDS = (
     "CERTS",
     "SMDP-CERTS",
-    "DISCOVER",
-    "EXPLAIN-LAST",
+    "SCAN",
     "INFO",
+    "DISCOVER",
+    "EIM-DISCOVER",
+    "EXPLAIN-LAST",
     "LOAD-PROFILE",
+    "LIST",
     "ENABLE-PROFILE",
     "DISABLE-PROFILE",
     "DELETE-PROFILE",
@@ -68,17 +148,27 @@ _COMMANDS = (
     "QA",
 )
 
+# Canonical aliases used across all four SCP11 shells (eSIM Live / eSIM
+# Test / Local SMDP+ / Local eIM). Keep this list aligned with the
+# tables in SCP11/live/console.py and SCP11/eim_local/main.py so an
+# operator can use the same shorthand on every surface.
 _COMMAND_ALIASES = {
     "SMDP-CERTS": "CERTS",
-    "INFO": "DISCOVER",
+    # ``SCAN`` is the canonical primary in eSIM Live/Test; ``INFO``
+    # remains the friendlier alias and now points at the same quick
+    # overview as the live shells (mirrors ``_print_start_snapshot``).
+    "INFO": "SCAN",
+    "EIM-DISCOVER": "DISCOVER",
     "ENABLE": "ENABLE-PROFILE",
     "DISABLE": "DISABLE-PROFILE",
     "DELETE": "DELETE-PROFILE",
     "MODEM-REFRESH": "REFRESH-MODEM",
     "PROFILE-RESET": "PROFILE-CLEAR",
     "METADATA-RESET": "METADATA-CLEAR",
+    "GET-METADATA": "METADATA",
     "QUIT": "EXIT",
     "Q": "EXIT",
+    "?": "HELP",
 }
 
 _COMMAND_DOCS = {
@@ -86,9 +176,13 @@ _COMMAND_DOCS = {
         "usage": "CERTS [--json|--yaml]",
         "summary": "Show local SM-DP+ certificate inventory and current selection.",
     },
+    "SCAN": {
+        "usage": "SCAN",
+        "summary": "Quick card overview (EID / issuer / SM-DP+ / SM-DS / profiles). Mirrors eSIM Live's INFO/SCAN.",
+    },
     "DISCOVER": {
         "usage": "DISCOVER",
-        "summary": "Run the shared SCP11 SGP.22/SGP.32 discovery snapshot.",
+        "summary": "Full SGP.32 consolidated discovery dump (mirrors eSIM Live's DISCOVER).",
     },
     "EXPLAIN-LAST": {
         "usage": "EXPLAIN-LAST [--json|--yaml]",
@@ -97,6 +191,10 @@ _COMMAND_DOCS = {
     "STATUS": {
         "usage": "STATUS",
         "summary": "Show the current Local SMDPP session state and active targets.",
+    },
+    "LIST": {
+        "usage": "LIST",
+        "summary": "List profile metadata rows currently present on the card (state / class / ICCID / nickname / AID).",
     },
     "LOAD-PROFILE": {
         "usage": "LOAD-PROFILE [path]",
@@ -1160,58 +1258,89 @@ class LocalAccessShell:
         self._print_last_bpp_layout()
         self._print_load_success_banner(response)
 
+    def _build_profile_action_adapter(self) -> ProfileActionAdapter:
+        """Return a ``ProfileActionAdapter`` wired to this shell's session.
+
+        The adapter routes the shared helpers in
+        ``SCP11.shared.profile_actions`` through the local SMDP+
+        session's ``enable_profile`` / ``disable_profile`` /
+        ``delete_profile`` callbacks plus the existing PPR1 guard and
+        the modem-refresh queue. Every shell that wants harmonised
+        ENABLE / DISABLE / DELETE semantics builds the same adapter
+        shape so the helpers don't have to grow per-shell branches.
+        """
+        return ProfileActionAdapter(
+            enable_profile=lambda target: self._invoke_profile_state_command(
+                "EnableProfile",
+                lambda: self.session.enable_profile(target),
+            ),
+            disable_profile=lambda target: self._invoke_profile_state_command(
+                "DisableProfile",
+                lambda: self.session.disable_profile(target),
+            ),
+            delete_profile=lambda target: self._invoke_profile_state_command(
+                "DeleteProfile",
+                lambda: self.session.delete_profile(target),
+            ),
+            policy_allow_auto_disable=self._allow_auto_disable_for_enable,
+            modem_refresh=self._queue_modem_refresh,
+            describe_profile=self._describe_profile_metadata,
+            profile_identifier=self._profile_metadata_identifier,
+        )
+
+    def _invoke_profile_state_command(
+        self,
+        action_label: str,
+        callback: Callable[[], bytes],
+    ) -> bytes:
+        """Run a profile-state callback and surface the response.
+
+        Returns the raw response bytes (truthy when the card accepted
+        the command), or ``b""`` on failure. The shared profile-action
+        helpers treat empty bytes as failure and abort the rest of the
+        sequence, which is exactly what we want when (e.g.) the
+        auto-disable step fails before a planned delete.
+        """
+        try:
+            response = callback()
+        except Exception as error:
+            print(f"[!] {action_label} failed: {error}")
+            return b""
+        self._print_profile_state_response(action_label, response)
+        return response if isinstance(response, (bytes, bytearray)) else b""
+
     def _cmd_enable_profile(self, arguments: list[str]) -> None:
         identifier = " ".join(arguments).strip()
         if len(identifier) == 0:
             raise ValueError("Usage: ENABLE-PROFILE <iccid-or-aid-or-alias>")
         profiles = self._safe_collect_profile_metadata()
-        target_metadata = self._find_profile_metadata(profiles, identifier)
-        if target_metadata is not None:
-            if str(getattr(target_metadata, "state", "")).strip().upper() == "ENABLED":
-                print("[+] EnableProfile: target is already enabled.")
-                return
-            active_profile = self._find_enabled_profile(profiles, exclude_profile=target_metadata)
-            if active_profile is not None:
-                if self._allow_auto_disable_for_enable(active_profile, target_metadata) is False:
-                    return
-                print(
-                    "[*] EnableProfile: auto-disabling active profile "
-                    f"{self._describe_profile_metadata(active_profile)}."
-                )
-                disable_response = self.session.disable_profile(
-                    self._profile_metadata_identifier(active_profile)
-                )
-                self._print_profile_state_response("DisableProfile", disable_response)
-        response = self.session.enable_profile(identifier)
-        self._print_profile_state_response("EnableProfile", response)
-        self._queue_modem_refresh("EnableProfile")
+        shared_run_enable_profile(
+            self._build_profile_action_adapter(),
+            list(profiles),
+            identifier,
+        )
 
     def _cmd_disable_profile(self, arguments: list[str]) -> None:
         identifier = " ".join(arguments).strip()
         if len(identifier) == 0:
             raise ValueError("Usage: DISABLE-PROFILE <iccid-or-aid-or-alias>")
         profiles = self._safe_collect_profile_metadata()
-        target_metadata = self._find_profile_metadata(profiles, identifier)
-        if target_metadata is not None:
-            if str(getattr(target_metadata, "state", "")).strip().upper() != "ENABLED":
-                print("[+] DisableProfile: target is already disabled.")
-                return
-        response = self.session.disable_profile(identifier)
-        self._print_profile_state_response("DisableProfile", response)
-        self._queue_modem_refresh("DisableProfile")
+        shared_run_disable_profile(
+            self._build_profile_action_adapter(),
+            list(profiles),
+            identifier,
+        )
 
     def _cmd_delete_profile(self, arguments: list[str]) -> None:
         identifier = " ".join(arguments).strip()
         if len(identifier) == 0:
             raise ValueError("Usage: DELETE-PROFILE <iccid-or-aid-or-alias>")
         profiles = self._safe_collect_profile_metadata()
-        target_metadata = self._find_profile_metadata(profiles, identifier)
-        if target_metadata is not None:
-            if str(getattr(target_metadata, "state", "")).strip().upper() == "ENABLED":
-                print("[*] DeleteProfile: deleting enabled target directly (local override).")
-        response = self.session.delete_profile(identifier)
-        self._print_profile_state_response("DeleteProfile", response)
-        self._queue_modem_refresh("DeleteProfile")
+        shared_run_delete_profile(
+            self._build_profile_action_adapter(),
+            list(profiles),
+            identifier,
+        )
 
     def _cmd_refresh_modem(self, arguments: list[str]) -> None:
         mode = " ".join(arguments).strip()
@@ -1253,7 +1382,106 @@ class LocalAccessShell:
         if len(response) > 0:
             print(f"    {self._hex_preview(response, max_chars=80)}")
 
+    def _cmd_scan(self) -> None:
+        """Render the eSIM Live-style quick card overview.
+
+        Mirrors ``_print_start_snapshot`` from ``SCP11/live/console.py`` so
+        operators get the same header card across all four SCP11 shells.
+        Only the lightweight ES10 reads happen here (EID, profiles,
+        EuiccConfiguredData, EimConfigurationData) — the full SGP.32
+        consolidated dump still lives behind ``DISCOVER``.
+        """
+        snapshot = self.session.collect_quick_overview()
+        render_card_overview_snapshot(
+            snapshot,
+            header_title="Local SMDP+ Session Ready",
+            header_color=ShellStyle.HEADER,
+            accent_color=ShellStyle.CYAN,
+            end_color=ShellStyle.END,
+            profile_table_title="Profiles on Card",
+        )
+        warning_text = hil_bridge_warning_text()
+        if len(warning_text) > 0:
+            print(f"{ShellStyle.WARNING}[!] {warning_text}{ShellStyle.END}")
+
+    def _cmd_list(self) -> None:
+        """Print just the profile metadata table.
+
+        Equivalent to ``LIST`` in eSIM Live/Test (which calls
+        ``_print_profiles``). Operators who only want the profile inventory
+        — without the EID / configured-data header — get a focused output.
+        """
+        profiles = self._safe_collect_profile_metadata()
+        if len(profiles) == 0:
+            print("[*] No profile metadata decoded on the card.")
+            return
+        print(f"\n[+] Profiles on Card ({len(profiles)})")
+        print("    | State     Class  ICCID                 Nickname                  AID")
+        print("    | " + "-" * 94)
+        for entry in profiles:
+            nickname = str(getattr(entry, "nickname", "")).strip()
+            if len(nickname) == 0:
+                nickname = str(getattr(entry, "profile_name", "")).strip()
+            aid = str(getattr(entry, "aid", "")).strip().upper()
+            if len(aid) > 40:
+                aid = aid[:40] + "..."
+            if len(nickname) > 24:
+                nickname = nickname[:21] + "..."
+            print(
+                "    | "
+                f"{str(getattr(entry, 'state', '')).strip():<9} "
+                f"{str(getattr(entry, 'profile_class', '')).strip():<6} "
+                f"{str(getattr(entry, 'iccid', '')).strip():<20} "
+                f"{nickname:<24} "
+                f"{aid}"
+            )
+
     def _cmd_discover(self) -> None:
+        if Sgp22Manager is not None:
+            self._cmd_discover_via_sgp22_manager()
+            return
+        self._cmd_discover_via_local_snapshot()
+
+    def _cmd_discover_via_sgp22_manager(self) -> None:
+        """Run the eSIM Live / eSIM Test DISCOVER bundle against the local card.
+
+        Uses the same `Sgp22Manager.get_sgp32_all_data()` pipeline that the
+        eSIM Live (3a) and eSIM Test (3b) consoles use, so the rendered output
+        is coherent across the three SCP11 surfaces. APDU-level traces from
+        the local-access channel are quieted for the duration so that only
+        the manager's structured sections are visible.
+        """
+        apdu_channel = getattr(self.session, "apdu_channel", None)
+        if apdu_channel is None:
+            self._cmd_discover_via_local_snapshot()
+            return
+
+        previous_quiet: Optional[bool] = None
+        getter = getattr(apdu_channel, "get_quiet_apdu_logging", None)
+        setter = getattr(apdu_channel, "set_quiet_apdu_logging", None)
+        if callable(getter) and callable(setter):
+            previous_quiet = bool(getter())
+            setter(True)
+        try:
+            try:
+                self.session.select_isdr()
+            except Exception:
+                pass
+            try:
+                self.session.get_eid()
+            except Exception:
+                pass
+            manager = Sgp22Manager(_LocalAccessTransportAdapter(apdu_channel))
+            try:
+                manager.get_sgp32_all_data()
+            except Exception as error:
+                print(f"[-] DISCOVER bundle failed: {error}")
+                self._cmd_discover_via_local_snapshot()
+        finally:
+            if previous_quiet is not None and callable(setter):
+                setter(previous_quiet)
+
+    def _cmd_discover_via_local_snapshot(self) -> None:
         snapshot = self.session.discover_card()
         render_consolidated_discovery_snapshot(
             snapshot,
@@ -1663,10 +1891,14 @@ class LocalAccessShell:
         try:
             if canonical_command == "CERTS":
                 self._cmd_certs(filtered_arguments)
+            elif canonical_command == "SCAN":
+                self._cmd_scan()
             elif canonical_command == "DISCOVER":
                 self._cmd_discover()
             elif canonical_command == "EXPLAIN-LAST":
                 self._cmd_explain_last(filtered_arguments)
+            elif canonical_command == "LIST":
+                self._cmd_list()
             elif canonical_command == "LOAD-PROFILE":
                 self._cmd_load_profile(filtered_arguments)
             elif canonical_command == "ENABLE-PROFILE":
@@ -1837,10 +2069,11 @@ def run_standalone() -> None:
         entry_cmd(cmd_line)
         return
     if args.stdin:
-        base_cmd = _read_stdin_command_text()
         if len(keybag_path) > 0:
-            base_cmd = _append_keybag_dump_command(base_cmd, keybag_path)
-        entry_cmd(base_cmd)
+            base_cmd = _append_keybag_dump_command(_read_stdin_command_text(), keybag_path)
+            entry_cmd(base_cmd)
+            return
+        entry_stdin()
         return
     if len(keybag_path) > 0:
         entry_cmd(_append_keybag_dump_command("", keybag_path))

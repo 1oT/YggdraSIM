@@ -1,0 +1,4 @@
+# SET-STATUS is an interactive wizard. Sends EOF immediately after invocation.
+SCP03-SD
+SET-STATUS
+EXIT

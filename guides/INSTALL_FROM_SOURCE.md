@@ -85,18 +85,30 @@ Python 3.10 or newer is required.
 # Minimal — matches the clean flavor. Runs on any OS.
 python -m pip install -e .
 
-# Clean + build + test tooling (PyInstaller, pytest).
+# Clean + build + test tooling (PyInstaller, pytest, httpx).
 python -m pip install -e '.[build,test]'
 
 # HIL-capable on Linux (adds pyudev).
 python -m pip install -e '.[hil]'
 
-# HIL-capable Linux developer profile (pyudev + pyinstaller + pytest).
+# HIL-capable Linux developer profile (pyudev + pyinstaller + pytest + pySim).
 python -m pip install -e '.[full]'
+
+# Optional: Universal GUI Command Center.
+python -m pip install -e '.[gui]'        # desktop window via pywebview
+python -m pip install -e '.[gui-server]' # headless web server only
+
+# Optional: YggdraCore BYO-Open5GS bridge (lazy pymongo).
+python -m pip install -e '.[open5gs]'
+
+# Optional: docs site tooling for `mkdocs build` / `mkdocs serve`.
+python -m pip install -e '.[docs]'
 ```
 
 `pyudev` is listed with `sys_platform == 'linux'` so the extras stay
-installable on Windows / macOS — the package simply gets skipped.
+installable on Windows / macOS — the package simply gets skipped. The
+extras can be combined: `pip install -e '.[full,gui,open5gs]'` is a
+common Linux-developer profile.
 
 ## 4. Verify the install
 

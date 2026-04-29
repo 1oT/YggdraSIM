@@ -96,6 +96,13 @@ options are consumed by `argparse` before the menu is drawn.
 | `--sim-import-enable` | flag | off | Enable the imported simulated profile immediately. |
 | `--open-pcap <path>` | path | — | Open a saved `.pcap` / `.pcapng` directly in the HIL decoded-APDU TUI in offline review mode. No SIMtrace2, no supervisor, no FIFO, no systemd service touch. Short-circuits the main menu. |
 | `--keybag <path>` | path | — | Optional keybag JSON with SCP03 / SCP11c session keys. Used with `--open-pcap` to decrypt secure-messaging APDUs inline. If omitted, `<pcap>.keys.json` / `<stem>.keys.json` sidecars are auto-discovered. |
+| `--gui` | flag | off | Launch the desktop Universal GUI Command Center (requires the `[gui]` extra; `pywebview`-backed). Short-circuits the menu. |
+| `--web-server` | flag | off | Launch the Universal GUI as a FastAPI loopback service (requires the `[gui-server]` extra). Short-circuits the menu. |
+| `--host <addr>` | str | `127.0.0.1` | Bind address for `--web-server`. |
+| `--port <n>` | int | `8765` | Bind port for `--web-server`. |
+| `--token-file <path>` | path | — | Persisted bearer-token file for the web server. |
+| `--tls-cert <path>` / `--tls-key <path>` | path | — | Optional TLS material for the web server. |
+| `--tls-self-signed` | flag | off | Generate an in-memory self-signed certificate for the web server. |
 | `--debug` / `--verbose` | flag | off | Promote global debug to every sub-module (`YGGDRASIM_GLOBAL_DEBUG=1`). |
 
 ### 1.2 Top-level numeric / letter menu
@@ -216,6 +223,9 @@ Defined in `pyproject.toml`/`yggdrasim_common/console_scripts.py`:
 | `yggdrasim-hil-bridge` | `Tools.HilBridge.main.entry` |
 | `yggdrasim-hil-supervisor` | `Tools.HilBridge.supervisor.entry` |
 | `yggdrasim-profile-package` | `Tools.ProfilePackage.main.run_standalone` |
+| `yggdrasim-profile-autoload` | `Tools.ProfilePackage.simcard_watch.run_cli` |
+| `yggdrasim-apdu-fuzzer` | `Tools.ApduFuzz.main.run_cli` |
+| `yggdrasim-eum-diag` | `Tools.EumDiag.main.run_cli` |
 | `yggdrasim-suci-tool` | `Tools.SuciTool.main.run_standalone` |
 
 ---
@@ -1298,7 +1308,7 @@ Inherits every bridge runtime flag **except** `--list-readers`. Signals:
 | `--termination-timeout` | float | `5.0` | no | SIGTERM grace before SIGKILL. |
 | `--lsusb-path` | str | `lsusb` | no | lsusb binary for fallback presence probe. |
 | `--no-pyudev` | flag | off | no | Disable pyudev hotplug; use lsusb polling only. |
-| `--state-file` | str | `runtime/state/hil_bridge_supervisor.json` | no | Supervisor status JSON path. |
+| `--state-file` | str | `<runtime_root>/state/hil_bridge_supervisor.json` | no | Supervisor status JSON path. Empty default falls through to `yggdrasim_common.hil_bridge_runtime.supervisor_state_path()`. |
 | `--bridge-python` | str | `sys.executable` | no | Python interpreter for the bridge child. |
 | `--no-remsim-client` | flag | off | no | Disable the managed `osmo-remsim-client-st2`. |
 | `--remsim-binary` | str | `osmo-remsim-client-st2` | no | Binary path / name. |

@@ -105,6 +105,44 @@ The TUI supports:
 - persistent pane-layout selection saved in workspace config
 - OS clipboard copy and paste
 - uncapped inspector and decode retention
+- structured Profile Element editors, an MF/DF/EF file-system view, and an
+  applications view (see [Structured PE editors](#structured-pe-editors)
+  below)
+
+### Structured PE editors
+
+Each pane slot can be flipped between four modes; the active mode is shown
+in the slot caption.
+
+| Mode | What you see |
+| --- | --- |
+| `asn1` | the JSON-tagged decode stream, identical to the transcode JSON |
+| `pe_editor` | a structured form for the PE selected in the JSON outline |
+| `filesystem` | an MF / DF / EF tree reconstructed from the file-bearing PEs |
+| `applications` | an ISD + applications tree from PE-SecurityDomain and PE-Application |
+
+Editor coverage today:
+
+- PE-PINCodes / PE-PUKCodes — per-row key-reference, retry counters, hex
+  PIN / PUK value, attributes, unblocking-PIN reference, with add / remove
+- PE-AKAParameter / PE-AKAParameter2 — algorithm picker (Milenage,
+  TUAK, XOR, etc.), key, OPc, rotation / xoring constants, SQN options,
+  delta, age limit, and a dynamic SQN-init list
+- PE-USIM / PE-OPT-USIM / PE-ISIM / PE-OPT-ISIM / PE-CSIM / PE-OPT-CSIM /
+  PE-Telecom — header, template-ID dropdown of known OIDs, and EF presence
+  toggles so operators can drop EFs from the PE
+- PE-SecurityDomain — instance parameters (load-package / class /
+  instance AID, privileges, life-cycle state), dynamic key list (key data,
+  key type, MAC length, key access, key identifier, usage qualifier,
+  version number), and a personalisation-blob list
+- everything else — `GenericPeEditor` falls back to the shared
+  `PeHeaderForm` so `mandated` and `identification` always round-trip
+
+All edits are committed back through `saip_decoded_edit`, so the JSON and
+DER previews refresh on every change.
+
+The file-system and applications views are read-only navigation aids:
+selecting a file or application jumps the JSON outline to the matching PE.
 
 ## Runtime dependencies
 

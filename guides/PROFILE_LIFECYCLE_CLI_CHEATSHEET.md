@@ -26,7 +26,12 @@ yggdrasim-scp11-test
 yggdrasim-scp11-relay
 yggdrasim-scp11-local-access
 yggdrasim-scp11-eim-local
+yggdrasim-hil-bridge
+yggdrasim-hil-supervisor
 yggdrasim-profile-package
+yggdrasim-profile-autoload
+yggdrasim-apdu-fuzzer
+yggdrasim-eum-diag
 yggdrasim-suci-tool
 ```
 
@@ -38,8 +43,21 @@ Use `yggdrasim-scp11-local-access` for direct local card work.
 Use `yggdrasim-scp11-eim-local` for local eIM, queue, handover, and localized
 polling work.
 
+Use `yggdrasim-hil-bridge` and `yggdrasim-hil-supervisor` for HIL bridge work
+on Linux (full-flavor / `[hil]` extra only).
+
 Use `yggdrasim-profile-package` when the profile package itself needs to be
 checked before card work.
+
+Use `yggdrasim-profile-autoload` for the SIMCARD → SAIP TUI watcher
+(auto-opens the SAIP TUI when SIMCARD writes a new ICCID to the profile
+store).
+
+Use `yggdrasim-apdu-fuzzer` for opt-in APDU mutation fuzzing (requires
+`--i-mean-it` and an `--allow-iccid` / `--allow-imsi` allow-list).
+
+Use `yggdrasim-eum-diag` for EUM / SM-DP+ session-key injection and
+Wireshark / tshark Lua dissector work against BF36 BPPs.
 
 Use `yggdrasim-scp03` for GlobalPlatform admin, file-system, card inspection,
 and STK work.

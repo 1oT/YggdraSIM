@@ -80,6 +80,9 @@ def import_profile_artifact(
         upp_bytes=upp_bytes,
         profile_image=profile_image,
         profile_source="json" if source_kind == "json" else "upp",
+        # SAIP profileHeader.connectivityParameters seeds SGP.32 §5.9.24
+        # GetConnectivityParameters; the bytes flow straight through.
+        connectivity_params_http=bytes(profile_image.connectivity_params_http or b""),
     )
 
     if enable:

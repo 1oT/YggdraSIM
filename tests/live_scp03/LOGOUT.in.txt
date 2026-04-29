@@ -1,0 +1,4 @@
+# Open a session, then close it cleanly via LOGOUT.
+SCP03-SD
+LOGOUT
+EXIT

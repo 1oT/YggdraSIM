@@ -26,8 +26,8 @@ def _hex_to_ansi (hex_color :str )->str :
     blue =int (hex_value [4 :6 ],16 )
     return f"\033[38;2;{red};{green};{blue}m"
 
-PASS_COLOR =_hex_to_ansi ('#8DFF8D')
-ERROR_COLOR =_hex_to_ansi ('#FF9A9A')
+PASS_COLOR =_hex_to_ansi ('#A3BE8C')
+ERROR_COLOR =_hex_to_ansi ('#BF616A')
 END_COLOR ='\033[0m'
 
 class KeyDiagnostics :

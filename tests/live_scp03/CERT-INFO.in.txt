@@ -1,0 +1,5 @@
+# Display SCP11 / SAIP-related certificate information held by the active
+# profile (e.g. eUICC certs). Pure read-only.
+SCP03-SD
+CERT-INFO
+EXIT

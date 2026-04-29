@@ -1,0 +1,4 @@
+# GET-DATA is an interactive wizard. Sends EOF immediately after invocation.
+SCP03-SD
+GET-DATA
+EXIT

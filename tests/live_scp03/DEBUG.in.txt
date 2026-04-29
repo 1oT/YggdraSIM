@@ -1,0 +1,4 @@
+# Toggle raw APDU hex transmission logging on, then off again.
+DEBUG
+DEBUG
+EXIT

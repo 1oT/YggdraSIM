@@ -5,6 +5,79 @@ import time
 from typing import Any, Optional
 
 
+def _encode_imei_bcd(imei_digits: str) -> bytes:
+    """Encode a 15-digit IMEI per ETSI TS 102 223 §8.20.
+
+    The byte layout follows 3GPP TS 24.008 §10.5.1.4 (Mobile Identity):
+
+    - Byte 1 high nibble: first IMEI digit; low nibble = ``0xA``
+      (type-of-identity ``010`` for IMEI, parity bit ``1`` for the
+      odd 15-digit count).
+    - Bytes 2-8: BCD nibble-swapped digit pairs (digits 2-15).
+
+    The output is always 8 bytes.
+    """
+    digits = "".join(ch for ch in str(imei_digits or "") if ch.isdigit())
+    if len(digits) != 15:
+        raise ValueError("IMEI must be exactly 15 decimal digits.")
+    out = bytearray(8)
+    out[0] = ((int(digits[0]) & 0x0F) << 4) | 0x0A
+    for index in range(1, 8):
+        low_digit = int(digits[2 * index - 1]) & 0x0F
+        high_digit = int(digits[2 * index]) & 0x0F
+        out[index] = (high_digit << 4) | low_digit
+    return bytes(out)
+
+
+def _encode_location_information_gsm(
+    mcc: str,
+    mnc: str,
+    lac: int,
+    cell_id: int,
+) -> bytes:
+    """Encode a 2G/3G Location Information value per ETSI TS 102 223 §8.19.
+
+    Layout (7 bytes):
+
+    - 3 bytes: MCC + MNC packed BCD per 3GPP TS 24.008 §10.5.1.3.
+    - 2 bytes: LAC big-endian (or RAC + LAC for GPRS contexts).
+    - 2 bytes: Cell ID big-endian.
+
+    For 2-digit MNCs the high nibble of byte 2 is set to ``0xF``.
+    """
+    mcc_digits = str(mcc or "").strip()
+    mnc_digits = str(mnc or "").strip()
+    if len(mcc_digits) != 3 or any(not ch.isdigit() for ch in mcc_digits):
+        raise ValueError("MCC must be exactly three decimal digits.")
+    if len(mnc_digits) not in (2, 3) or any(not ch.isdigit() for ch in mnc_digits):
+        raise ValueError("MNC must be two or three decimal digits.")
+
+    mcc1 = int(mcc_digits[0])
+    mcc2 = int(mcc_digits[1])
+    mcc3 = int(mcc_digits[2])
+    if len(mnc_digits) == 2:
+        mnc3 = 0xF
+        mnc2 = int(mnc_digits[1])
+        mnc1 = int(mnc_digits[0])
+    else:
+        mnc3 = int(mnc_digits[2])
+        mnc2 = int(mnc_digits[1])
+        mnc1 = int(mnc_digits[0])
+
+    plmn = bytes(
+        [
+            (mcc2 << 4) | mcc1,
+            (mnc3 << 4) | mcc3,
+            (mnc2 << 4) | mnc1,
+        ]
+    )
+    if not 0 <= int(lac) <= 0xFFFF:
+        raise ValueError("LAC must fit in two bytes.")
+    if not 0 <= int(cell_id) <= 0xFFFF:
+        raise ValueError("Cell ID must fit in two bytes.")
+    return plmn + int(lac).to_bytes(2, "big") + int(cell_id).to_bytes(2, "big")
+
+
 @dataclass
 class StkState:
     initialized: bool = False
@@ -15,8 +88,16 @@ class StkState:
     trigger_history: list[str] = field(default_factory=list)
     poll_interval_seconds: int = 0
     polling_off: bool = False
-    location_information: bytes = bytes.fromhex("62F21000010001")
-    imei: bytes = bytes.fromhex("316F542E59676764726153494D")
+    # ETSI TS 102 223 §8.19 GSM Location Information value: MCC=262,
+    # MNC=01 (Germany / Telekom), LAC=0x0001, Cell ID=0x0001. Layout:
+    # 3 bytes packed-BCD PLMN + 2 byte LAC + 2 byte Cell ID = 7 bytes.
+    location_information: bytes = field(
+        default_factory=lambda: _encode_location_information_gsm("262", "01", 0x0001, 0x0001)
+    )
+    # ETSI TS 102 223 §8.20 IMEI: 8-byte BCD encoding of a 15-digit
+    # IMEI. The default is "086543245654321" (Type Allocation Code
+    # 086543245 reserved by 3GPP TS 23.003 for test purposes).
+    imei: bytes = field(default_factory=lambda: _encode_imei_bcd("086543245654321"))
     last_proactive_command: bytes = b""
     open_channel_active: bool = False
     open_channel_protocol: str = ""
@@ -34,6 +115,9 @@ class StkController:
     DEVICE_IDENTITIES_UICC_TO_TERMINAL = bytes.fromhex("82028182")
     SMS_PP_PREFIX = bytes.fromhex("0202828106028001")
 
+    # Event List values per ETSI TS 102 223 §8.25 (table "Event list").
+    # Keep the dict literal sparse so future additions are deliberate;
+    # missing event codes still fall through to "0xNN" via _stk_event_name.
     EVENT_NAME_MAP = {
         "MT-CALL": 0x00,
         "CALL-CONNECTED": 0x01,
@@ -41,13 +125,34 @@ class StkController:
         "LOCATION-STATUS": 0x03,
         "USER-ACTIVITY": 0x04,
         "IDLE-SCREEN": 0x05,
+        "CARD-READER-STATUS": 0x06,
         "LANGUAGE-SELECTION": 0x07,
         "BROWSER-TERMINATION": 0x08,
         "DATA-AVAILABLE": 0x09,
         "CHANNEL-STATUS": 0x0A,
         "ACCESS-TECHNOLOGY-CHANGE": 0x0B,
+        "DISPLAY-PARAMETERS-CHANGED": 0x0C,
+        "LOCAL-CONNECTION": 0x0D,
+        "NETWORK-SEARCH-MODE-CHANGE": 0x0E,
+        "BROWSING-STATUS": 0x0F,
+        "FRAMES-INFORMATION-CHANGE": 0x10,
+        "I-WLAN-ACCESS-STATUS-CHANGE": 0x11,
+        "NETWORK-REJECTION": 0x12,
+        "HCI-CONNECTIVITY": 0x13,
+        "ACCESS-TECHNOLOGY-CHANGE-MULTI": 0x14,
+        "CSG-CELL-SELECTION": 0x15,
+        "CONTACTLESS-STATE-REQUEST": 0x16,
+        "IMS-REGISTRATION": 0x17,
+        "IMS-INCOMING-DATA": 0x18,
+        "PROFILE-CONTAINER": 0x19,
+        "USAT-APPLICATION": 0x1A,
+        "DATA-CONNECTION-STATUS-CHANGE": 0x1B,
     }
 
+    # Proactive command codes per ETSI TS 102 223 §6.6 (Type of Command).
+    # Includes the SET UP MENU (0x25) which the simulator emits during
+    # bootstrap, and the broader 0x10..0x16 / 0x20..0x28 / 0x45..0x73
+    # ranges so traces are no longer rendered as "UNKNOWN 0x..".
     PROACTIVE_NAME_MAP = {
         0x01: "REFRESH",
         0x02: "MORE TIME",
@@ -55,15 +160,42 @@ class StkController:
         0x04: "POLLING OFF",
         0x05: "SET UP EVENT LIST",
         0x10: "SET UP CALL",
+        0x11: "SEND SS",
+        0x12: "SEND USSD",
         0x13: "SEND SHORT MESSAGE",
+        0x14: "SEND DTMF",
+        0x15: "LAUNCH BROWSER",
+        0x16: "GEOGRAPHICAL LOCATION REQUEST",
+        0x20: "PLAY TONE",
         0x21: "DISPLAY TEXT",
+        0x22: "GET INKEY",
+        0x23: "GET INPUT",
+        0x24: "SELECT ITEM",
+        0x25: "SET UP MENU",
         0x26: "PROVIDE LOCAL INFORMATION",
         0x27: "TIMER MANAGEMENT",
+        0x28: "SET UP IDLE MODE TEXT",
+        0x30: "PERFORM CARD APDU",
+        0x31: "POWER ON CARD",
+        0x32: "POWER OFF CARD",
+        0x33: "GET READER STATUS",
+        0x34: "RUN AT COMMAND",
+        0x35: "LANGUAGE NOTIFICATION",
         0x40: "OPEN CHANNEL",
         0x41: "CLOSE CHANNEL",
         0x42: "RECEIVE DATA",
         0x43: "SEND DATA",
         0x44: "GET CHANNEL STATUS",
+        0x45: "SERVICE SEARCH",
+        0x46: "GET SERVICE INFORMATION",
+        0x47: "DECLARE SERVICE",
+        0x60: "SET FRAMES",
+        0x61: "GET FRAMES STATUS",
+        0x70: "RETRIEVE MULTIMEDIA MESSAGE",
+        0x71: "SUBMIT MULTIMEDIA MESSAGE",
+        0x72: "DISPLAY MULTIMEDIA MESSAGE",
+        0x73: "ACTIVATE",
+        0x81: "ESTABLISH NETWORK ACCESS",
     }
 
     def __init__(self, transport, debug: bool = False) -> None:
@@ -647,6 +779,25 @@ class StkController:
         bounded = max(0, min(99, int(value)))
         return ((bounded % 10) << 4) | (bounded // 10)
 
+    @staticmethod
+    def _duration_tlv_to_seconds(unit: int, value: int) -> int:
+        """Resolve ETSI TS 102 223 §8.8 Duration TLV to whole seconds.
+
+        Tenths-of-seconds round up so a (0x02, 0x05) duration ("0.5s")
+        still surfaces as 1s in trace output rather than collapsing to
+        zero. Unknown units fall back to ``value`` so the caller still
+        gets a non-zero number to render.
+        """
+        unit_byte = int(unit) & 0xFF
+        value_byte = int(value) & 0xFF
+        if unit_byte == 0x00:
+            return value_byte * 60
+        if unit_byte == 0x01:
+            return value_byte
+        if unit_byte == 0x02:
+            return (value_byte + 9) // 10
+        return value_byte
+
     def _parse_proactive_command(
         self,
         fetch_data: bytes,
@@ -674,8 +825,19 @@ class StkController:
                 fields["device_identities_tlv"] = raw_tlv
             elif tag_bytes == b"\x99":
                 fields["event_list"] = [int(value) for value in value_bytes]
-            elif tag_bytes == b"\x84" and len(value_bytes) > 0:
-                fields["poll_interval_seconds"] = int.from_bytes(value_bytes, "big", signed=False)
+            elif tag_bytes == b"\x84" and len(value_bytes) >= 2:
+                # ETSI TS 102 223 §8.8 Duration TLV.
+                # Byte 0: time unit (0x00=minutes, 0x01=seconds,
+                #                    0x02=tenths-of-seconds).
+                # Byte 1: value (1..255). Earlier revisions of this
+                # parser treated the two bytes as a big-endian seconds
+                # count, which under-reported a 1-minute POLL INTERVAL
+                # as "1s" in the trace.
+                fields["duration_unit"] = value_bytes[0]
+                fields["duration_value"] = value_bytes[1]
+                fields["poll_interval_seconds"] = self._duration_tlv_to_seconds(
+                    value_bytes[0], value_bytes[1]
+                )
             elif tag_bytes == b"\x35":
                 fields["bearer_description_tlv"] = raw_tlv
             elif tag_bytes == b"\x36":

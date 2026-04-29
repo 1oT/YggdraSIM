@@ -1,34 +1,54 @@
-Place local SM-DP+ certificate material for the eIM local profile-loading path
-in this directory.
+# eIM-Local RSP Certificate Drop Zone
 
-Selection behavior:
+Drop operator-owned `DPauth` / `DPpb` certificates and matching private
+keys here for the eIM local profile-loading path (`SCP11/eim_local`).
 
-- The local SCP11 layer scans both this folder and the bundled valid SGP.26
-  inventory.
-- Local drop-ins are preferred when they match the card and include usable key
-  material.
-- The eIM reuses the selected local DPauth `server_address` when it builds a
-  local profile-download trigger and the package does not pin another
-  `smdp_address`.
+## Quick start
 
-Drop-in format:
+1. Drop the certificate and matching private key in this folder using
+   any readable filename.
+2. Add a sidecar metadata file beside the certificate, named either
+   `<certificate>.meta.json` or `<certificate-stem>.meta.json`.
+3. The eim-local shell does not expose a dedicated DPauth / DPpb
+   inventory verb (the selector is exercised silently when the flow
+   runs). Verify functionally by running the flow:
 
-- Any certificate filename is accepted.
-- Add a sidecar metadata file beside the certificate:
-  - `<certificate>.meta.json`, or
-  - `<certificate-stem>.meta.json`
-- Recommended sidecar fields:
-  - `role`: `auth` or `pb`
-  - `private_key_path`: PEM key path
-  - `root_ci_pkid`: CI PKID binding
-  - `server_address`: optional local SM-DP+ address to mirror into the eIM
-    activation code
+   ```bash
+   yggdrasim-scp11-eim-local --cmd "STATUS; LOAD-PROFILE; EXIT"
+   ```
 
-Legacy compatibility:
+   For the eIM **signing** inventory under `eim/`, use `EIM-CERTS`
+   instead — see [`eim/README.md`](eim/README.md).
 
-- `CERT.DPauth.ECDSA.der` / `SK.DPauth.ECDSA.pem`
-- `CERT.DPpb.ECDSA.der` / `SK.DPpb.ECDSA.pem`
+The drop-in pattern, sidecar fields, fallback rules, and selector
+behaviour are **identical** to the local-access cert zone — the
+eim-local shell reuses the same record schema. The only behavioural
+difference is that the selected DPauth `server_address` is mirrored
+into the eIM activation code when the package does not pin a
+different `smdp_address`.
 
-The DPauth pair is still required for local `AuthenticateServer`.
-The DPpb pair remains optional, but is used when the local flow needs to sign
-download-side payloads such as `PrepareDownload`.
+The legacy SGP.26 filenames `CERT.DPauth.ECDSA.der` /
+`SK.DPauth.ECDSA.pem` and `CERT.DPpb.ECDSA.der` /
+`SK.DPpb.ECDSA.pem` continue to work without a sidecar.
+
+## Sub-directories
+
+- [`eim/`](eim/) — operator-issued **eIM signing certificates** for
+  `ADD-INITIAL-EIM` / `ADD-EIM`. Different selector
+  (`EimCertificateStore`). See the README in that directory and the
+  canonical guide.
+- [`addeim/`](addeim/) — bundled fake-eIM identity sheet and template
+  for `AddEim` package authoring.
+
+## Canonical reference
+
+- [`guides/CONFIGURATION_AND_CERTIFICATES.md`](../../../guides/CONFIGURATION_AND_CERTIFICATES.md)
+  — § *SCP11 RSP certificates (eim-local)* and § *Local eIM signing
+  certificates*.
+
+Selector code:
+
+- [`SCP11/local_access/cert_store.py`](../../local_access/cert_store.py)
+  (DPauth / DPpb)
+- [`SCP11/eim_local/eim_cert_store.py`](../eim_cert_store.py)
+  (eIM signing certs under `eim/`)

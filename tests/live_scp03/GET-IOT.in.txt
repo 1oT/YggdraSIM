@@ -1,0 +1,5 @@
+# IoT profile scan via STORE DATA (eIM polling). Validates that the SCP03
+# shell can chain SD auth into a STORE DATA flow without crashing.
+SCP03-SD
+GET-IOT
+EXIT

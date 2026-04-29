@@ -85,12 +85,35 @@ An ISIM ADF is smaller than a USIM ADF. Key EFs include:
 5G introduced the **SUCI** to avoid sending SUPI in the clear. The USIM
 computes the SUCI locally using an ECIES scheme. YggdraSIM includes
 `Tools/SuciTool` to help generate and export the SUCI key material that a
-profile expects.
+profile expects, and the in-process simulator (`SIMCARD/`) implements the
+full 3GPP TS 33.501 §C.3 SUCI calculation (Profile A and Profile B) plus
+the 3GPP TS 31.102 §7.1.2.4 `GET IDENTITY` command that surfaces the SUCI
+to the modem.
+
+## 5G authentication and AKMA
+
+The 5G stack adds a few authentication surfaces on top of the classic
+USIM `AUTHENTICATE`:
+
+- **5G AKA** (3GPP TS 33.501) — `AUTHENTICATE` on the 5G UE-context
+  produces `RES*` (a Kausf-bound transformation of `RES`) instead of
+  `RES` directly.
+- **EAP-AKA'** (3GPP TS 33.402) — non-3GPP access authentication binding
+  the same long-term key into an EAP exchange.
+- **AKMA** (3GPP TS 33.535) — application-layer keys derived from
+  `Kausf`, surfaced as `K_AKMA` and the `A-KID` identifier.
+
+The simulated UICC implements all three; the in-process YggdraCore stubs
+(`Tools/YggdraCore/`) close the loop on the network side with AUSF and
+AAnF surfaces so the round-trips can be exercised without an external 5G
+core.
 
 ## Where to look in YggdraSIM
 
 - [SCP03 Admin Shell](../subsystems/scp03.md) for live USIM/ISIM file
   access and `AUTHENTICATE` diagnostics
 - [SUCI Tool](../subsystems/suci-tool.md) for SUCI key handling
+- [SIMCARD Simulator](../subsystems/simcard-simulator.md) for the
+  in-process 5G AKA / EAP-AKA' / AKMA / SUCI / `GET IDENTITY` surface
 - [SAIP Profiles](saip-profiles.md) for how the SAIP template encodes
   the NAA that finally lands on a card

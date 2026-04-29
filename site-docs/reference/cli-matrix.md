@@ -26,6 +26,9 @@ lookup.
 | `yggdrasim-hil-bridge` | `python -m Tools.HilBridge.main` | [HIL Bridge](../subsystems/hil-bridge.md) |
 | `yggdrasim-hil-supervisor` | `python -m Tools.HilBridge.supervisor` | [HIL Bridge](../subsystems/hil-bridge.md) |
 | `yggdrasim-profile-package` | `python -m Tools.ProfilePackage` | [Profile Package](../subsystems/profile-package.md) |
+| `yggdrasim-profile-autoload` | `python -m Tools.ProfilePackage.simcard_watch` | [Profile Package](../subsystems/profile-package.md) |
+| `yggdrasim-apdu-fuzzer` | `python -m Tools.ApduFuzz` | [APDU Fuzzer](../subsystems/apdu-fuzzer.md) |
+| `yggdrasim-eum-diag` | `python -m Tools.EumDiag` | [EUM Diagnostics](../subsystems/eum-diagnostics.md) |
 | `yggdrasim-suci-tool` | `python -m Tools.SuciTool` | [SUCI Tool](../subsystems/suci-tool.md) |
 
 ## Non-interactive patterns
@@ -46,10 +49,22 @@ specifics.
 | --- | --- |
 | `--debug` | elevate module log levels to debug globally |
 | `--verbose` | alias for `--debug` in most contexts |
-| `--card-backend sim` | route card work to the simulator backend |
+| `--card-backend reader\|sim` | route card work to the PC/SC reader (default) or the in-process simulator |
 | `--sim-eim-identity <path>` | pin the simulated card's BF55 eIM identity |
+| `--sim-isdr-config <path>` | seed the simulated ISD-R / eUICC personality |
+| `--sim-quirks <path>` | quirks override for the simulated SIM |
+| `--sim-euicc-store <dir>` | persistent EID-scoped eUICC state root |
+| `--sim-profile-store <dir>` | persisted simulated-profile artifacts directory |
+| `--sim-import-profile <path>` | import a DER / BIN / hex / SAIP-JSON / `profile_image.json` before launch |
+| `--sim-import-enable` | enable the imported simulated profile immediately |
 | `--open-pcap <path>` | open a saved `.pcap` / `.pcapng` in the HIL decoded-APDU TUI (offline review; no bridge, no supervisor, no FIFO) |
 | `--keybag <path>` | optional keybag JSON paired with `--open-pcap`; unwraps SCP03 / SCP11c secure-messaging APDUs inline |
+| `--gui` | launch the desktop Universal GUI Command Center (requires the `[gui]` extra) |
+| `--web-server` | launch the FastAPI Universal GUI variant (requires the `[gui-server]` extra) |
+| `--host <addr>` / `--port <n>` | bind address / port for `--web-server` |
+| `--token-file <path>` | persisted bearer-token file for the web server |
+| `--tls-cert <path>` / `--tls-key <path>` | optional TLS material for the web server |
+| `--tls-self-signed` | generate an in-memory self-signed certificate for the web server |
 
 ## HIL pcap replay + keybag export quick reference
 
@@ -81,6 +96,11 @@ python -m Tools.ProfilePackage --cmd "USE profile.der; LINT --strict; EXIT"
 | Variable | Effect |
 | --- | --- |
 | `YGGDRASIM_RUNTIME_ROOT` | force a specific runtime root directory |
+| `YGGDRASIM_CARD_BACKEND` | preselect `reader` / `sim` when no `--card-backend` is passed |
+| `YGGDRASIM_FLAVOR` | force `clean` / `full` / `source` when probing from a shared tree |
+| `YGGDRASIM_5GCORE_MODE` | switch YggdraCore between in-process stub and BYO-Open5GS bridge |
+| `YGGDRASIM_EUM_SESSION_KEYS` | session-key staging for the EUM diagnostics dissector |
+| `YGGDRASIM_SUNRISE6G_MODE` | toggle the Sunrise6G bridge between stub and SDK adapter |
 | `GNUPGHOME` | pick the gpg home directory when inventory crypto is enabled |
 
 ## Related pages

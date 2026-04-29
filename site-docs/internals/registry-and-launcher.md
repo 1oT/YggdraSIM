@@ -25,8 +25,18 @@ Key wrapper flags:
 | Flag | Effect |
 | --- | --- |
 | `--debug`, `--verbose` | elevate log levels to debug globally |
-| `--card-backend sim` | route card work to the simulator backend |
+| `--card-backend reader\|sim` | route card work to the PC/SC reader (default) or the in-process simulator |
 | `--sim-eim-identity <path>` | pin the simulated card's BF55 eIM identity |
+| `--sim-isdr-config <path>` | seed the simulated ISD-R / eUICC personality |
+| `--sim-quirks <path>` | quirks override for the simulated SIM |
+| `--sim-euicc-store <dir>` | persistent EID-scoped eUICC state root |
+| `--sim-profile-store <dir>` | persisted simulated-profile artifacts directory |
+| `--sim-import-profile <path>` | import a DER / BIN / hex / SAIP-JSON / `profile_image.json` before launch |
+| `--sim-import-enable` | enable the imported simulated profile immediately |
+| `--open-pcap <path>` / `--keybag <path>` | offline HIL pcap review (short-circuits the menu) |
+| `--gui` / `--web-server` | launch the desktop or web Universal GUI Command Center (short-circuits the menu) |
+| `--host` / `--port` / `--token-file` / `--tls-cert` / `--tls-key` / `--tls-self-signed` | bind / TLS settings for `--web-server` |
+| `--doctor`, `--version` | preflight / version helpers (no menu) |
 
 In-process dispatch means that module-level singletons, caches, and
 `runtime_paths` resolution are shared across a single launcher session.

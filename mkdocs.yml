@@ -159,6 +159,7 @@ nav:
       - Run a HIL Capture: how-to/run-hil-capture.md
       - Replay a HIL pcap offline: how-to/replay-hil-pcap-offline.md
       - Enable Inventory Encryption: how-to/enable-inventory-encryption.md
+      - Load Certificates and Configuration: how-to/load-certificates-and-config.md
       - Write a Plugin: how-to/write-a-plugin.md
       - Build a Bundled Executable: how-to/build-a-bundled-exe.md
       - Run in Docker: how-to/run-in-docker.md

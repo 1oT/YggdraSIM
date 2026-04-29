@@ -2,7 +2,7 @@
   "theme": "textual-ansi",
   "splits": {
     "json_outline_width": 70,
-    "json_col_width": 126,
+    "json_col_width": 174,
     "inspect_width": 141,
     "bottom_height": 38
   },

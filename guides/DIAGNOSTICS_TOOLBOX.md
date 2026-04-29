@@ -63,10 +63,15 @@ the SAIP TUI against the newly written profile manifest.
 The trigger surface is an in-engine hook:
 
 ```python
-from SIMCARD.engine import get_engine
-engine = get_engine()
+from SIMCARD.connection import get_shared_engine
+
+engine = get_shared_engine()
 engine.register_profile_download_hook(lambda event: print(event["iccid"]))
 ```
+
+`get_shared_engine()` returns the same `SimulatedSimCardEngine`
+instance that every `--card-backend sim` consumer talks to, so the
+hook fires regardless of which shell triggered the profile download.
 
 Hooks are error-isolated: one raising callback does not poison the
 others.
@@ -215,3 +220,29 @@ on POSIX. Format:
 
 The Lua dissector looks up its path via the environment variable
 `YGGDRASIM_EUM_SESSION_KEYS`. The tshark runner sets it for you.
+
+---
+
+## 5. Related diagnostics outside this guide
+
+These complementary diagnostic surfaces are documented in their own
+guides because they sit on top of larger subsystems:
+
+- **HIL offline pcap replay + SCP keybag unwrap.** `main/main.py
+  --open-pcap <pcap> [--keybag <json>]` opens the HIL decoded-APDU
+  TUI without spinning up the bridge. SCP03 / SCP11c session-keys
+  are unwrapped on the fly when a keybag JSON is supplied (sidecars
+  named `<pcap>.keys.json` are auto-discovered). Full write-up:
+  `HIL_BRIDGE_GUIDE.md` §11.
+- **YggdraCore 5G AKA / AKMA stub AUSF.** `Tools/YggdraCore/` ships an
+  in-process `AusfStub` + `AAnFStub` that can drive a complete
+  `Nausf_UEAuthentication_Authenticate` round trip against the
+  simulated USIM without standing up Open5GS. The opt-in FastAPI
+  loopback is gated by `YGGDRASIM_5GCORE_MODE=stub`. See
+  `guides/CAPABILITIES.md` §11 and `V2_ROADMAP.md` `R2-005`.
+- **`main/main.py --doctor`.** Read-only preflight covering Python
+  version, `cryptography`, `pycryptodomex`, `asn1tools`, optional
+  on-disk `pysim/` clone, SQLite, optional `textual` (TUI), PC/SC
+  reader visibility, and `gpg`. Safe to run at pipeline entry; never
+  opens a card transport. See `CLI_AND_PIPING_GUIDE.md` §"Wrapper
+  diagnostics".

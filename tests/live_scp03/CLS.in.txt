@@ -1,0 +1,4 @@
+# CLS in stdin mode is effectively a no-op (it tries to clear the screen via
+# clear/cls); the test confirms it does not error out and yields a clean exit.
+CLS
+EXIT

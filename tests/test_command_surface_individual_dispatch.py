@@ -169,9 +169,15 @@ class LocalAccessCommandSurfaceDispatchTests(unittest.TestCase):
     _COMMAND_CASES = {
         "CERTS": ("_cmd_certs", ["sample-arg"], [["sample-arg"]]),
         "SMDP-CERTS": ("_cmd_certs", ["sample-arg"], [["sample-arg"]]),
+        # SCP11 command harmonisation: SCAN is the primary, INFO is its
+        # alias and renders the quick card overview instead of the full
+        # SGP.32 consolidated dump that DISCOVER (and EIM-DISCOVER) emit.
+        "SCAN": ("_cmd_scan", ["sample-arg"], [None]),
+        "INFO": ("_cmd_scan", ["sample-arg"], [None]),
         "DISCOVER": ("_cmd_discover", ["sample-arg"], [None]),
-        "INFO": ("_cmd_discover", ["sample-arg"], [None]),
+        "EIM-DISCOVER": ("_cmd_discover", ["sample-arg"], [None]),
         "EXPLAIN-LAST": ("_cmd_explain_last", ["sample-arg"], [["sample-arg"]]),
+        "LIST": ("_cmd_list", ["sample-arg"], [None]),
         "LOAD-PROFILE": ("_cmd_load_profile", ["sample-arg"], [["sample-arg"]]),
         "ENABLE-PROFILE": ("_cmd_enable_profile", ["sample-arg"], [["sample-arg"]]),
         "ENABLE": ("_cmd_enable_profile", ["sample-arg"], [["sample-arg"]]),
@@ -199,6 +205,7 @@ class LocalAccessCommandSurfaceDispatchTests(unittest.TestCase):
         "METADATA-LINT": ("_cmd_metadata_lint", ["sample-arg"], [["sample-arg"]]),
         "METADATA-CLEAR": ("_cmd_metadata_clear", [], [None]),
         "RECORD": ("_cmd_record", ["sample-arg"], [["sample-arg"]]),
+        "EXPORT-KEYBAG": ("_cmd_export_keybag", ["sample-arg"], [["sample-arg"]]),
         "STATUS": ("_print_status", [], [None]),
         "HELP": ("_cmd_help", ["sample-arg"], [["sample-arg"]]),
     }

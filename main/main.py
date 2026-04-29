@@ -102,8 +102,14 @@ from yggdrasim_common.process_debug import (
     set_global_debug,
 )
 from yggdrasim_common.quit_control import QuitAllRequested
+from yggdrasim_common.remote_card_args import (
+    add_remote_card_arguments as _add_remote_card_arguments,
+    apply_remote_card_arguments as _apply_remote_card_arguments,
+    describe_remote_card_state as _describe_remote_card_state,
+)
 from yggdrasim_common import flavor as yggdrasim_flavor
 from yggdrasim_common import env_flags as yggdrasim_env_flags
+from yggdrasim_common.nord_palette import NordHex as _NordHex
 try :
     from yggdrasim_common import hil_bridge_runtime
 except ImportError :
@@ -161,7 +167,13 @@ def _emit_plugin_load_banner (stream =None )->None :
         pass 
 
 class Colors :
-    """ANSI terminal colors derived from hex palette values."""
+    """ANSI terminal colours sourced from the canonical Nord palette.
+
+    Hex constants and the ``_hex_to_ansi`` helper stay on the class so
+    third-party launchers that introspect ``main.Colors`` keep working;
+    the values themselves now flow from
+    :mod:`yggdrasim_common.nord_palette`.
+    """
 
     @staticmethod
     def _hex_to_ansi (hex_color ):
@@ -171,14 +183,14 @@ class Colors :
         blue =int (hex_value [4 :6 ],16 )
         return f'\033[38;2;{red};{green};{blue}m'
 
-    HEADER_HEX ='#5FDCCB'
-    BLUE_HEX ='#8AA7FF'
-    CYAN_HEX ='#93F7FF'
-    GREEN_HEX ='#8DFF8D'
-    WARNING_HEX ='#FFF08F'
-    FAIL_HEX ='#FF9A9A'
-    BROWN_HEX ='#C99749'
-    WHITE_HEX ='#F7FCFF'
+    HEADER_HEX =_NordHex .FROST_TEAL
+    BLUE_HEX =_NordHex .FROST_BLUE
+    CYAN_HEX =_NordHex .FROST_CYAN
+    GREEN_HEX =_NordHex .AURORA_GREEN
+    WARNING_HEX =_NordHex .AURORA_YELLOW
+    FAIL_HEX =_NordHex .AURORA_RED
+    BROWN_HEX =_NordHex .AURORA_ORANGE
+    WHITE_HEX =_NordHex .SNOW_2
 
     HEADER =_hex_to_ansi .__func__ (HEADER_HEX )
     BLUE =_hex_to_ansi .__func__ (BLUE_HEX )
@@ -2449,6 +2461,7 @@ def _build_cli_parser ():
     help_text ="Enable global debug across modules launched from the wrapper. Without it, per-module debug stays opt-in.",
     )
     _add_gui_arguments (parser )
+    _add_remote_card_arguments (parser )
     return parser 
 
 
@@ -2551,10 +2564,27 @@ def _route_gui_modes (args ):
     return int (run_web_server (args )or 0 )
 
 
+def _apply_remote_card_arguments_with_log (args )->None :
+    """Apply --remote-card-url / --remote-card-token-file and surface state.
+
+    A bridge banner only prints when something is actually configured —
+    we don't want every YggdraSIM invocation to grow a noisy "remote
+    card bridge: not configured" line.
+    """
+    state =_apply_remote_card_arguments (args )
+    if len (state .get ("url")or "")>0 :
+        print (f"{Colors.CYAN}[i] {_describe_remote_card_state(state)}{Colors.ENDC}")
+
+
 def run_cli (argv =None ):
     parser =_build_cli_parser ()
     args =parser .parse_args (argv )
     _emit_plugin_load_banner ()
+    # Mirror --remote-card-url / --remote-card-token-file into the env
+    # before any card backend is touched, so the existing
+    # YGGDRASIM_CARD_RELAY_* resolution chain in card_backend picks the
+    # values up transparently downstream.
+    _apply_remote_card_arguments_with_log (args )
     if bool (getattr (args ,"doctor",False )):
         from yggdrasim_common.doctor import run_doctor
         return run_doctor (Path (PROJECT_ROOT )if PROJECT_ROOT else None )

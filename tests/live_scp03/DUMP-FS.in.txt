@@ -1,0 +1,6 @@
+# Dump the live FS to disk. We pipe an explicit destination under
+# reports/scp03_live_run/ so the run is reproducible and does not pollute
+# the repo root. The test validates 9000 SWs throughout the traversal.
+SCP03-SD
+DUMP-FS reports/scp03_live_run/dump-fs
+EXIT

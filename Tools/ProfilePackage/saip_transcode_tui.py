@@ -258,6 +258,7 @@ def run_saip_transcode_tui(bridge: SaipToolBridge) -> None:
         format_der_hex,
         humanize_saip_display_name,
         jsonify_document,
+        jsonify_saip_value,
         parse_editor_json,
         reapply_transcode_editor_placeholders,
     )
@@ -274,6 +275,15 @@ def run_saip_transcode_tui(bridge: SaipToolBridge) -> None:
         build_decoded_value_readonly_view,
         build_decoded_value_roundtrip_model,
         encode_decoded_value_editor_payload,
+    )
+    from .saip_pe_editors import (
+        ApplicationsView,
+        BasePeEditor,
+        FileSystemView,
+        GenericPeEditor,
+        PE_EDITOR_REGISTRY,
+        base_pe_type_for_section_key,
+        lookup_pe_editor,
     )
     from .saip_token_sidecar import (
         TokenSidecarError,
@@ -499,6 +509,7 @@ def run_saip_transcode_tui(bridge: SaipToolBridge) -> None:
                     ("F7", "Cycle the color theme."),
                     ("F8 / F9", "Cycle the bottom-left or bottom-right pane."),
                     ("F10", "Open the pane layout menu."),
+                    ("Pane modes", "der · inspect · lint · decoded · pe_editor · filesystem · applications · none"),
                 ],
             ),
             (
@@ -2329,7 +2340,16 @@ def run_saip_transcode_tui(bridge: SaipToolBridge) -> None:
             "F4 inspect left · F5/F6/F8/F9 panes · "
             "F7 theme · F10 pane menu · Ctrl+Q quit"
         )
-        _PANE_MODE_SEQUENCE = ("der", "inspect", "lint", "none", "decoded")
+        _PANE_MODE_SEQUENCE = (
+            "der",
+            "inspect",
+            "lint",
+            "none",
+            "decoded",
+            "pe_editor",
+            "filesystem",
+            "applications",
+        )
         _SLOT_DEFAULTS = {
             "right": "der",
             "bottom_left": "inspect",
@@ -2351,6 +2371,9 @@ def run_saip_transcode_tui(bridge: SaipToolBridge) -> None:
                 "inspect": "right_inspect_log",
                 "lint": "right_lint_log",
                 "decoded": "right_decoded_editor",
+                "pe_editor": "right_pe_editor_host",
+                "filesystem": "right_filesystem_host",
+                "applications": "right_applications_host",
                 "none": "right_none",
             },
             "bottom_left": {
@@ -2358,6 +2381,9 @@ def run_saip_transcode_tui(bridge: SaipToolBridge) -> None:
                 "inspect": "inspect_log",
                 "lint": "inspect_lint_log",
                 "decoded": "inspect_decoded_editor",
+                "pe_editor": "inspect_pe_editor_host",
+                "filesystem": "inspect_filesystem_host",
+                "applications": "inspect_applications_host",
                 "none": "inspect_none",
             },
             "bottom_right": {
@@ -2365,8 +2391,26 @@ def run_saip_transcode_tui(bridge: SaipToolBridge) -> None:
                 "inspect": "lint_inspect_log",
                 "lint": "lint_log",
                 "decoded": "lint_decoded_editor",
+                "pe_editor": "lint_pe_editor_host",
+                "filesystem": "lint_filesystem_host",
+                "applications": "lint_applications_host",
                 "none": "lint_none",
             },
+        }
+        _PE_EDITOR_HOST_PER_SLOT = {
+            "right": "right_pe_editor_host",
+            "bottom_left": "inspect_pe_editor_host",
+            "bottom_right": "lint_pe_editor_host",
+        }
+        _FILESYSTEM_HOST_PER_SLOT = {
+            "right": "right_filesystem_host",
+            "bottom_left": "inspect_filesystem_host",
+            "bottom_right": "lint_filesystem_host",
+        }
+        _APPLICATIONS_HOST_PER_SLOT = {
+            "right": "right_applications_host",
+            "bottom_left": "inspect_applications_host",
+            "bottom_right": "lint_applications_host",
         }
         _DECODED_SLOT_WIDGETS = {
             "right": {
@@ -2523,25 +2567,25 @@ def run_saip_transcode_tui(bridge: SaipToolBridge) -> None:
             background: transparent;
         }
         #json_editor.flash-ok {
-            border: tall #44cc44;
+            border: tall #A3BE8C;
         }
         #der_view.flash-ok {
-            border: tall #44cc44;
+            border: tall #A3BE8C;
         }
         .der-pane.flash-ok {
-            border: tall #44cc44;
+            border: tall #A3BE8C;
         }
         #json_editor.invalid-buffer {
-            border: tall #FF6B6B;
-            color: #FFB4B4;
+            border: tall #BF616A;
+            color: #D08770;
         }
         #der_view.invalid-buffer {
-            border: tall #FF6B6B;
-            color: #FFB4B4;
+            border: tall #BF616A;
+            color: #D08770;
         }
         .der-pane.invalid-buffer {
-            border: tall #FF6B6B;
-            color: #FFB4B4;
+            border: tall #BF616A;
+            color: #D08770;
         }
         #json_editor.peer-sync {
             border: tall $accent;
@@ -2582,6 +2626,27 @@ def run_saip_transcode_tui(bridge: SaipToolBridge) -> None:
             background: $boost;
             color: $text;
             border-top: solid $primary;
+        }
+        .pe-editor-host {
+            width: 100%;
+            height: 1fr;
+            min-height: 0;
+            border: solid $accent;
+            background: $surface;
+        }
+        .filesystem-host {
+            width: 100%;
+            height: 1fr;
+            min-height: 0;
+            border: solid $accent;
+            background: $surface;
+        }
+        .applications-host {
+            width: 100%;
+            height: 1fr;
+            min-height: 0;
+            border: solid $accent;
+            background: $surface;
         }
         .decoded-json-pane {
             width: 100%;
@@ -2739,8 +2804,8 @@ def run_saip_transcode_tui(bridge: SaipToolBridge) -> None:
             padding: 0 1;
         }
         #status_line.error-state {
-            border-top: solid #FF6B6B;
-            color: #FFB4B4;
+            border-top: solid #BF616A;
+            color: #D08770;
         }
         PeBlockPicker {
             align: center middle;
@@ -3225,6 +3290,18 @@ def run_saip_transcode_tui(bridge: SaipToolBridge) -> None:
                                             read_only=True,
                                         )
                                     yield Static("", id="right_decoded_raw_hex", classes="decoded-raw-hex")
+                                yield Vertical(
+                                    id="right_pe_editor_host",
+                                    classes="pe-editor-host",
+                                )
+                                yield Vertical(
+                                    id="right_filesystem_host",
+                                    classes="filesystem-host",
+                                )
+                                yield Vertical(
+                                    id="right_applications_host",
+                                    classes="applications-host",
+                                )
                                 yield Static(
                                     "Pane hidden. Press F5 to cycle the right pane.",
                                     id="right_none",
@@ -3293,6 +3370,18 @@ def run_saip_transcode_tui(bridge: SaipToolBridge) -> None:
                                             read_only=True,
                                         )
                                     yield Static("", id="inspect_decoded_raw_hex", classes="decoded-raw-hex")
+                                yield Vertical(
+                                    id="inspect_pe_editor_host",
+                                    classes="pe-editor-host",
+                                )
+                                yield Vertical(
+                                    id="inspect_filesystem_host",
+                                    classes="filesystem-host",
+                                )
+                                yield Vertical(
+                                    id="inspect_applications_host",
+                                    classes="applications-host",
+                                )
                                 yield Static(
                                     "Pane hidden. Press F8 to cycle the bottom-left pane.",
                                     id="inspect_none",
@@ -3360,6 +3449,18 @@ def run_saip_transcode_tui(bridge: SaipToolBridge) -> None:
                                             read_only=True,
                                         )
                                     yield Static("", id="lint_decoded_raw_hex", classes="decoded-raw-hex")
+                                yield Vertical(
+                                    id="lint_pe_editor_host",
+                                    classes="pe-editor-host",
+                                )
+                                yield Vertical(
+                                    id="lint_filesystem_host",
+                                    classes="filesystem-host",
+                                )
+                                yield Vertical(
+                                    id="lint_applications_host",
+                                    classes="applications-host",
+                                )
                                 yield Static(
                                     "Pane hidden. Press F9 to cycle the bottom-right pane.",
                                     id="lint_none",
@@ -3724,6 +3825,207 @@ def run_saip_transcode_tui(bridge: SaipToolBridge) -> None:
             self._decoded_pane_payload = copy.deepcopy(payload)
             self._set_decoded_text_views_state(payload_text, read_only=True)
 
+        # ------------------------------------------------------------------
+        # PE editor / filesystem / applications panes
+        # ------------------------------------------------------------------
+
+        def _selected_pe_section_key(self) -> str | None:
+            """Return the PE section key under the JSON cursor, or ``None``."""
+            try:
+                editor = self.query_one("#json_editor", TextArea)
+            except Exception:
+                return None
+            text = str(editor.text or "")
+            stripped = text.lstrip()
+            if len(stripped) == 0:
+                return None
+            try:
+                root_start = len(text) - len(stripped)
+                root_end = _scan_json_value_end(text, root_start)
+                sel = editor.selection
+                cursor_offset = location_to_offset(text, sel.start)
+                path, _span = self._json_path_for_offset(
+                    text,
+                    root_start,
+                    root_end,
+                    cursor_offset,
+                )
+            except Exception:
+                return None
+            if (
+                len(path) >= 2
+                and path[0] == "sections"
+                and isinstance(path[1], str)
+            ):
+                return path[1]
+            return None
+
+        def _pe_value_for_section(self, pe_section_key: str) -> dict[str, object]:
+            """Return a SAIP JSON-tagged copy of the PE value at ``pe_section_key``.
+
+            ``_current_editor_document()`` returns the *internal* Python
+            representation (native bytes / tuples) used by the codec when
+            re-encoding. The PE editors expect the JSON-tagged shape so they
+            can round-trip through the same ``jsonify_document`` /
+            ``dejsonify_document`` pipeline as the JSON pane. ``jsonify_saip_value``
+            turns native bytes into ``__ygg_saip_bytes__`` dicts and tagged
+            tuples into ``__ygg_saip_tuple__`` lists, exactly the shape every
+            ``BasePeEditor`` subclass binds against.
+            """
+            try:
+                document = self._current_editor_document()
+            except Exception:
+                return {}
+            sections = document.get("sections")
+            if isinstance(sections, dict) is False:
+                return {}
+            value = sections.get(pe_section_key)
+            if isinstance(value, dict) is False:
+                return {}
+            tagged = jsonify_saip_value(
+                copy.deepcopy(value),
+                parent_key=pe_section_key,
+                path=("sections", pe_section_key),
+            )
+            if isinstance(tagged, dict):
+                return tagged
+            return copy.deepcopy(value)
+
+        def _resolve_pe_editor_class_for_section(
+            self,
+            pe_section_key: str,
+        ) -> type[BasePeEditor]:
+            registered = lookup_pe_editor(pe_section_key)
+            if registered is not None:
+                return registered
+            return GenericPeEditor
+
+        def _refresh_pe_editor_panes(self) -> None:
+            if self._has_visible_mode("pe_editor") is False:
+                return
+            pe_key = self._selected_pe_section_key()
+            for slot_name, host_id in self._PE_EDITOR_HOST_PER_SLOT.items():
+                if str(self._pane_modes.get(slot_name) or "").lower() != "pe_editor":
+                    continue
+                self._refresh_pe_editor_for_slot(slot_name, host_id, pe_key)
+            self._refresh_slot_captions()
+
+        def _refresh_pe_editor_for_slot(
+            self,
+            slot_name: str,
+            host_id: str,
+            pe_section_key: str | None,
+        ) -> None:
+            try:
+                host = self.query_one(f"#{host_id}", Vertical)
+            except Exception:
+                return
+            if pe_section_key is None or len(pe_section_key) == 0:
+                for child in list(host.children):
+                    child.remove()
+                host.mount(
+                    Static(
+                        "Move the JSON cursor onto a profile element to "
+                        "open its structured editor here.",
+                        classes="pane-placeholder",
+                    ),
+                )
+                return
+            target_class = self._resolve_pe_editor_class_for_section(pe_section_key)
+            existing_editor: BasePeEditor | None = None
+            for child in host.children:
+                if isinstance(child, BasePeEditor):
+                    existing_editor = child
+                    break
+            if isinstance(existing_editor, target_class):
+                pe_value = self._pe_value_for_section(pe_section_key)
+                existing_editor.bind_pe(pe_section_key, pe_value)
+                return
+            for child in list(host.children):
+                child.remove()
+            pe_value = self._pe_value_for_section(pe_section_key)
+            try:
+                editor = target_class(
+                    pe_section_key=pe_section_key,
+                    pe_value=pe_value,
+                    read_only=False,
+                )
+            except Exception as exc:
+                host.mount(
+                    Static(
+                        f"PE editor failed to mount: {exc}",
+                        classes="pane-placeholder",
+                    ),
+                )
+                return
+            host.mount(editor)
+
+        def _refresh_filesystem_panes(self) -> None:
+            if self._has_visible_mode("filesystem") is False:
+                return
+            try:
+                document = self._current_editor_document()
+            except Exception:
+                document = {}
+            for slot_name, host_id in self._FILESYSTEM_HOST_PER_SLOT.items():
+                if str(self._pane_modes.get(slot_name) or "").lower() != "filesystem":
+                    continue
+                self._refresh_filesystem_for_slot(host_id, document)
+
+        def _refresh_filesystem_for_slot(
+            self,
+            host_id: str,
+            document: dict[str, object],
+        ) -> None:
+            try:
+                host = self.query_one(f"#{host_id}", Vertical)
+            except Exception:
+                return
+            existing: FileSystemView | None = None
+            for child in host.children:
+                if isinstance(child, FileSystemView):
+                    existing = child
+                    break
+            if existing is not None:
+                existing.update_document(document)
+                return
+            for child in list(host.children):
+                child.remove()
+            host.mount(FileSystemView(document=document))
+
+        def _refresh_applications_panes(self) -> None:
+            if self._has_visible_mode("applications") is False:
+                return
+            try:
+                document = self._current_editor_document()
+            except Exception:
+                document = {}
+            for slot_name, host_id in self._APPLICATIONS_HOST_PER_SLOT.items():
+                if str(self._pane_modes.get(slot_name) or "").lower() != "applications":
+                    continue
+                self._refresh_applications_for_slot(host_id, document)
+
+        def _refresh_applications_for_slot(
+            self,
+            host_id: str,
+            document: dict[str, object],
+        ) -> None:
+            try:
+                host = self.query_one(f"#{host_id}", Vertical)
+            except Exception:
+                return
+            existing: ApplicationsView | None = None
+            for child in host.children:
+                if isinstance(child, ApplicationsView):
+                    existing = child
+                    break
+            if existing is not None:
+                existing.update_document(document)
+                return
+            for child in list(host.children):
+                child.remove()
+            host.mount(ApplicationsView(document=document))
+
         def _has_visible_mode(self, mode_name: str) -> bool:
             normalized_mode = str(mode_name or "").strip().lower()
             return any(
@@ -3800,6 +4102,9 @@ def run_saip_transcode_tui(bridge: SaipToolBridge) -> None:
                 "inspect": "Inspect",
                 "lint": "Lint",
                 "decoded": "Decoded view",
+                "pe_editor": "PE editor",
+                "filesystem": "File system",
+                "applications": "Applications",
                 "none": "Hidden",
             }.get(str(mode_name or "").lower(), str(mode_name or "").lower() or "Unknown")
 
@@ -3827,7 +4132,29 @@ def run_saip_transcode_tui(bridge: SaipToolBridge) -> None:
                     f"{title}: {view_label} · read-only · "
                     "follows selected field"
                 )
+            if mode == "pe_editor":
+                pe_label = self._pe_editor_label_for_slot(slot_name)
+                if len(pe_label) > 0:
+                    return f"{title}: PE editor · {pe_label} · edits round-trip to JSON"
+                return f"{title}: PE editor · select a profile element"
+            if mode == "filesystem":
+                return f"{title}: File system tree · MF / DF / EF overview"
+            if mode == "applications":
+                return f"{title}: Applications · ISD + applet overview"
             return f"{title}: hidden"
+
+        def _pe_editor_label_for_slot(self, slot_name: str) -> str:
+            host_id = self._PE_EDITOR_HOST_PER_SLOT.get(slot_name)
+            if host_id is None:
+                return ""
+            try:
+                host = self.query_one(f"#{host_id}", Vertical)
+            except Exception:
+                return ""
+            for child in host.children:
+                if isinstance(child, BasePeEditor):
+                    return f"{child.PE_TYPE_LABEL} · {child.pe_section_key or '(unbound)'}"
+            return ""
 
         @staticmethod
         def _render_inspect_log_line(line: str) -> Text:
@@ -4113,6 +4440,12 @@ def run_saip_transcode_tui(bridge: SaipToolBridge) -> None:
             self._persist_pane_layout()
             self._apply_pane_layout()
             self._refresh_bottom_panel()
+            if normalized_mode == "pe_editor":
+                self._refresh_pe_editor_panes()
+            elif normalized_mode == "filesystem":
+                self._refresh_filesystem_panes()
+            elif normalized_mode == "applications":
+                self._refresh_applications_panes()
             return normalized_mode
 
         def _reset_pane_layout_defaults(self) -> None:
@@ -4525,7 +4858,16 @@ def run_saip_transcode_tui(bridge: SaipToolBridge) -> None:
             self.set_timer(delay, maybe_refresh)
 
         def _schedule_decoded_refresh(self, *, delay: float = 0.08) -> None:
-            if self._has_visible_mode("decoded") is False:
+            decoded_visible = self._has_visible_mode("decoded")
+            pe_visible = self._has_visible_mode("pe_editor")
+            fs_visible = self._has_visible_mode("filesystem")
+            apps_visible = self._has_visible_mode("applications")
+            if (
+                decoded_visible is False
+                and pe_visible is False
+                and fs_visible is False
+                and apps_visible is False
+            ):
                 return
             self._decoded_debounce_gen += 1
             generation = self._decoded_debounce_gen
@@ -4534,7 +4876,14 @@ def run_saip_transcode_tui(bridge: SaipToolBridge) -> None:
                 if generation != self._decoded_debounce_gen:
                     return
                 try:
-                    self._refresh_decoded_panel()
+                    if decoded_visible:
+                        self._refresh_decoded_panel()
+                    if pe_visible:
+                        self._refresh_pe_editor_panes()
+                    if fs_visible:
+                        self._refresh_filesystem_panes()
+                    if apps_visible:
+                        self._refresh_applications_panes()
                 except Exception:
                     return
 
@@ -5825,24 +6174,106 @@ def run_saip_transcode_tui(bridge: SaipToolBridge) -> None:
                 event.prevent_default()
 
         def on_tree_node_selected(self, event: Tree.NodeSelected) -> None:
-            tree = self.query_one("#json_outline", Tree)
-            if event.control is not tree:
+            tree_widget = event.control
+            try:
+                json_outline = self.query_one("#json_outline", Tree)
+            except Exception:
+                json_outline = None
+            if tree_widget is json_outline:
+                if self._outline_search_selecting:
+                    return
+                self._follow_tree_cursor_in_editor(event.node)
+                pe_key = self._preferred_selected_pe_key()
+                if pe_key is None:
+                    self._set_status("Tree selection active.")
+                else:
+                    self._set_status(
+                        f"Tree PE {pe_key} selected — Ctrl+T tree actions · Ctrl+A add file · F3 picker · "
+                        "F11 after · F12 before · Ctrl+↑/↓ move · Ctrl+D remove · Ctrl+Y copy · "
+                        "Ctrl+P paste after · Ctrl+B paste before · "
+                        "F1 help · Ctrl+L lint"
+                    )
+                if self._has_visible_mode("inspect"):
+                    self._refresh_inspect_panel()
+                if self._has_visible_mode("pe_editor"):
+                    self._refresh_pe_editor_panes()
+
+        def on_base_pe_editor_changed(self, event) -> None:
+            """Round-trip a structured PE editor change back to the JSON pane."""
+            pe_section_key = str(getattr(event, "pe_section_key", "") or "").strip()
+            if len(pe_section_key) == 0:
                 return
-            if self._outline_search_selecting:
+            new_value = getattr(event, "new_value", None)
+            if isinstance(new_value, dict) is False:
                 return
-            self._follow_tree_cursor_in_editor(event.node)
-            pe_key = self._preferred_selected_pe_key()
-            if pe_key is None:
-                self._set_status("Tree selection active.")
+            try:
+                document = self._current_editor_document()
+            except Exception as exc:
+                self._set_status(
+                    f"PE editor change rejected (JSON parse failed): {exc}",
+                    remember=False,
+                )
                 return
-            self._set_status(
-                f"Tree PE {pe_key} selected — Ctrl+T tree actions · Ctrl+A add file · F3 picker · "
-                "F11 after · F12 before · Ctrl+↑/↓ move · Ctrl+D remove · Ctrl+Y copy · "
-                "Ctrl+P paste after · Ctrl+B paste before · "
-                "F1 help · Ctrl+L lint"
+            sections = document.get("sections")
+            if isinstance(sections, dict) is False:
+                self._set_status(
+                    "PE editor change rejected: document has no `sections` mapping.",
+                    remember=False,
+                )
+                return
+            if pe_section_key not in sections:
+                self._set_status(
+                    f"PE editor change rejected: section {pe_section_key!r} no longer exists.",
+                    remember=False,
+                )
+                return
+            sections[pe_section_key] = copy.deepcopy(new_value)
+            summary = str(getattr(event, "summary", "") or "").strip()
+            status_ok = (
+                f"{pe_section_key} updated via PE editor"
+                if len(summary) == 0
+                else f"{pe_section_key}: {summary}"
             )
-            if self._has_visible_mode("inspect"):
-                self._refresh_inspect_panel()
+            self._apply_document_edit(
+                document,
+                status_ok=status_ok,
+                failure_prefix=f"PE editor change for {pe_section_key} failed",
+            )
+
+        def on_file_system_view_file_selected(self, event) -> None:
+            pe_section_key = str(getattr(event, "pe_section_key", "") or "").strip()
+            if len(pe_section_key) == 0:
+                return
+            self._jump_json_editor_to_section(pe_section_key)
+            ef_key = str(getattr(event, "ef_key", "") or "").strip()
+            if len(ef_key) > 0:
+                self._set_status(
+                    f"File-system: {pe_section_key} / {ef_key} (JSON cursor follows selection).",
+                )
+
+        def on_applications_view_application_selected(self, event) -> None:
+            pe_section_key = str(getattr(event, "pe_section_key", "") or "").strip()
+            if len(pe_section_key) == 0:
+                return
+            self._jump_json_editor_to_section(pe_section_key)
+            self._set_status(
+                f"Applications: {pe_section_key} (JSON cursor follows selection).",
+            )
+
+        def _jump_json_editor_to_section(self, pe_section_key: str) -> None:
+            try:
+                editor = self.query_one("#json_editor", TextArea)
+            except Exception:
+                return
+            text = str(editor.text or "")
+            stripped = text.lstrip()
+            if len(stripped) == 0:
+                return
+            search_token = f"\"{pe_section_key}\""
+            offset = text.find(search_token)
+            if offset < 0:
+                return
+            self._jump_editor_to_span(offset, offset + len(search_token))
 
         def on_tree_node_highlighted(self, event: Tree.NodeHighlighted) -> None:
             tree = self.query_one("#json_outline", Tree)

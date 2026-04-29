@@ -27,6 +27,38 @@ Operator install notes for each flavor live in dedicated guides:
 - [`INSTALL_RASPBERRYPI.md`](INSTALL_RASPBERRYPI.md)
 - [`SIMTRACE2_CARDEM_GUIDE.md`](SIMTRACE2_CARDEM_GUIDE.md)
 
+## Optional extras orthogonal to the flavor split
+
+The `clean` / `full` split only controls whether the HIL bridge stack
+is bundled. Several feature surfaces sit on **opt-in extras** that are
+declared in `pyproject.toml` and are not pulled in by either default
+flavor:
+
+| Extra          | Pulls in                                      | Used by                                        |
+|----------------|-----------------------------------------------|------------------------------------------------|
+| `[saip]`       | `pySim` from the upstream osmocom mirror      | SAIP transcode TUI, SCP11-local / eIM-local    |
+| `[hil]`        | `pyudev` (Linux only)                         | HIL bridge supervisor / event-driven hotplug   |
+| `[gui]`        | `fastapi`, `uvicorn[standard]`, `pywebview`, `websockets` | Desktop Universal GUI Command Center (`--gui`) |
+| `[gui-server]` | `fastapi`, `uvicorn[standard]`, `websockets`  | Headless web Command Center (`--web-server`)   |
+| `[open5gs]`    | `pymongo>=4.5,<5.0`                           | YggdraCore BYO-Open5GS subscriber bridge       |
+| `[build]`      | `pyinstaller`                                 | Producing `dist/yggdrasim-*` bundles           |
+| `[test]`       | `pytest`, `httpx`                             | Running the `tests/` suite                     |
+| `[docs]`       | `mkdocs`, `mkdocs-material`, `pymdown-extensions` | Building / serving `site-docs/`             |
+| `[full]`       | `pyudev`, `pyinstaller`, `pytest`, `pySim`    | Full Linux maintainer profile                  |
+
+Notes:
+
+- `[full]` does **not** include `[gui]` / `[gui-server]`. An operator
+  who wants the desktop window or the remote-lab web app on a `full`
+  install must add them explicitly:
+  `pip install -e '.[full,gui]'`.
+- The PyInstaller spec does not currently bundle the GUI extras into
+  the single-file launcher. Use the editable install or a Docker
+  image when you need `--gui` / `--web-server`.
+- `[gui]` is a strict superset of `[gui-server]`; you only need
+  `[gui-server]` on headless servers where `pywebview` would just fail
+  to import a desktop toolkit.
+
 ## Current structure status
 
 The current layout is suitable for Docker and PyInstaller-style bundling with the

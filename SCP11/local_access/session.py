@@ -601,6 +601,70 @@ class LocalIsdrSession:
             snapshot["configured_decode_error"] = configured_decode_error
         return snapshot
 
+    def collect_quick_overview(self) -> dict[str, Any]:
+        """Lightweight ``INFO``/``SCAN`` snapshot — header data only.
+
+        Mirrors :meth:`discover_card` but skips the heavy ES10 reads
+        (``GetRAT``, ``RetrieveNotificationsList``, ``GetCerts``) so the
+        operator can refresh the header card after a profile change
+        without paying the round-trip cost of the full SGP.32
+        consolidated retrieval. Returns the same dict shape used by
+        :func:`SCP11.shared.discovery_snapshot.render_card_overview_snapshot`
+        so the renderer can be shared across all four shells.
+        """
+        self.reset_state()
+        self.select_isdr()
+        profiles_raw = self.get_profiles_info()
+        configured_raw = self.get_euicc_configured_data()
+        eid_value = self.get_eid()
+        try:
+            issuer_identity = self._read_card_ecasd_issuer_identity()
+        except Exception:
+            issuer_identity = infer_ecasd_issuer_identity("")
+
+        profiles: list[ProfileMetadataView] = []
+        profiles_decode_error = ""
+        try:
+            profiles = self.decode_profile_metadata_rows(profiles_raw)
+        except Exception as error:
+            profiles_decode_error = self._describe_exception_chain(error)
+
+        configured_decoded: dict[str, Any] = {
+            "default_smdp": "",
+            "root_smds_primary": "",
+            "root_smds_additional": [],
+            "allowed_ci_pkid": [],
+        }
+        configured_decode_error = ""
+        try:
+            configured_decoded = self.decode_euicc_configured_data(configured_raw)
+        except Exception as error:
+            configured_decode_error = self._describe_exception_chain(error)
+
+        # ``GetEimConfigurationData`` is cheap and central to the eIM
+        # entries on the header card, so we keep it. ``GetCerts`` and
+        # ``GetRAT`` stay out of the quick path.
+        try:
+            eim_configuration = self.get_eim_configuration_data()
+        except Exception:
+            eim_configuration = b""
+
+        snapshot: dict[str, Any] = {
+            "eid": eid_value,
+            "issuer_number": str(issuer_identity.get("issuer_number", "")).strip(),
+            "issuer_name": str(issuer_identity.get("issuer_name", "")).strip(),
+            "profiles_raw": profiles_raw,
+            "profiles": profiles,
+            "configured_raw": configured_raw,
+            "configured_decoded": configured_decoded,
+            "eim_configuration": eim_configuration,
+        }
+        if len(profiles_decode_error) > 0:
+            snapshot["profiles_decode_error"] = profiles_decode_error
+        if len(configured_decode_error) > 0:
+            snapshot["configured_decode_error"] = configured_decode_error
+        return snapshot
+
     def collect_profile_metadata(self) -> list[ProfileMetadataView]:
         self.reset_state()
         self.select_isdr()

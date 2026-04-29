@@ -36,6 +36,7 @@ test CI material after every v2 delivery.
 | R2-002 | Signer seam follow-ups (cloud KMS providers) | Medium | accepted |
 | R2-003 | Signer seam follow-ups (eUICC-side issuer chain) | Low | accepted |
 | R2-004 | Universal GUI (desktop `--gui` + remote `--web-server`) | Medium | in-progress (Phase A + B + B-1/B-2/B-3 + Command Center 1st/2nd/3rd slice + G-1..G-4 SCP03 Workbench + SA-1..SA-4 SAIP Workbench + C-1..C-7 SCP03 module-parity + SIMCARD helpers + SCP11 Local workbench (read-only) + per-tab xterm + Playwright smoke skeleton landed) |
+| R2-005 | Simulated USIM 5G AKA / AKMA / SUCI / `GET IDENTITY` + in-process YggdraCore (AUSF / AAnF) stubs + BYO-Open5GS bridge | High | in-progress (SIMCARD modules and Tools/YggdraCore landed; documentation, CLI surface, and full HTTP loopback hardening pending) |
 
 ---
 
@@ -807,6 +808,102 @@ security posture, REST surface sketch, risks, and change log.
 
 ---
 
+## R2-005. Simulated USIM 5G AKA / AKMA / SUCI + YggdraCore stubs
+
+### Summary
+
+The v1 simulated USIM covers UMTS / EPS AKA, ETSI TS 102 223 toolkit,
+GP / SCP03 / SCP80, ISD-R + ISD-Ps, and the SAIP profile lifecycle.
+R2-005 extends the 3GPP coverage upward to 5G AS-side authentication
+and adds an in-process 5G-core stub so an operator can drive a
+5G AKA + AKMA round trip end-to-end without standing up Open5GS or
+free5GC.
+
+The new SIMCARD modules:
+
+- `SIMCARD/aka_5g.py` — TS 33.501 Annex A KDFs: `derive_res_star`,
+  `derive_k_ausf`, `derive_k_seaf`, `derive_eap_aka_prime_keys`.
+- `SIMCARD/akma.py` — TS 33.535 Annex A KDFs: `derive_k_akma`,
+  `derive_a_tid`, `derive_k_af`, plus the RFC 7542 NAI envelope
+  (`format_a_kid`).
+- `SIMCARD/suci.py` — TS 33.501 §C.3 / TS 24.501 §9.11.3.4 SUCI
+  layer: Profile A (X25519) and Profile B (secp256r1) +
+  `EF.SUCI_Calc_Info` codecs and the Mobile-Identity IE writer.
+- `SIMCARD/identity.py` — TS 31.102 §7.1.2.4 `GET IDENTITY`
+  (CLA=80 INS=78 P2=0x01 SUCI calculation) handler.
+
+The new tooling layer:
+
+- `Tools/YggdraCore/subscription_store.py` — in-memory subscriber DB
+  with K / OPc / AMF / SQN / MCC / MNC / RID / `akma_enabled`.
+- `Tools/YggdraCore/ausf_stub.py` — `start_ue_authentication`
+  (`Nausf_UEAuthentication_Authenticate` POST) and `confirm_5g_aka`
+  (PUT `5g-aka-confirmation`) per TS 33.501 §6.1.3.
+- `Tools/YggdraCore/aanf_stub.py` — TS 33.535 §6 AAnF state with
+  `register` (`Naanf_AKMA_KeyRegistration`) and
+  `application_key_get` (`Naanf_AKMA_ApplicationKey_Get`).
+- `Tools/YggdraCore/http_app.py` — opt-in FastAPI loopback launcher
+  gated by `YGGDRASIM_5GCORE_MODE=stub`. Refuses non-loopback binds
+  unless `YGGDRASIM_5GCORE_ALLOW_NONLOOPBACK=1` is set.
+- `Tools/YggdraCore/open5gs_bridge.py` — BYO-Open5GS provisioning
+  bridge that pushes subscribers into a host-installed Open5GS +
+  MongoDB deployment. Marks every YggdraSIM-provisioned doc with
+  a `_yggdrasim_provisioned` field so a later purge can scope cleanly.
+
+### Goals
+
+- Byte-exact 5G AKA KDFs against TS 33.501 Annex A test vectors.
+- Byte-exact AKMA KDFs against the TS 33.535 Annex A worked example.
+- Profile A and Profile B SUCI Scheme-Output bytes verified against
+  test vectors that the OAI / free5GC test rigs publish.
+- The simulator's `GET IDENTITY` handler must walk
+  `EF.SUCI_Calc_Info`'s priority list, fall back to the null scheme
+  cleanly, and pin determinism via an injectable ephemeral key for
+  testing.
+- The YggdraCore stub AUSF must answer a complete 5G AKA round trip
+  in-process and (when AKMA is enabled on the subscription) push the
+  resulting `(SUPI, A-KID, KAKMA)` tuple into the AAnF stub.
+- The HTTP launcher must remain off-by-default and refuse to bind
+  outside loopback unless the operator explicitly opts in.
+- The Open5GS bridge must be a no-op on hosts without `pymongo`
+  installed and without an `open5gs-*` binary on `$PATH`.
+
+### Non-goals
+
+- A full SEAF / AMF emulation. The stub collapses the SEAF role into
+  the AUSF for test-rig purposes.
+- SUCI decryption on the AUSF side — the stub takes SUPI directly.
+- Persistent subscription storage. Phase 2 (BYO Open5GS) provides
+  the persistence path; the in-memory store is intentionally
+  process-local.
+
+### Acceptance criteria
+
+- `tests/test_simcard_5g_aka.py`, `tests/test_simcard_aka_milenage_kat.py`,
+  `tests/test_simcard_akma_kdf.py`, `tests/test_simcard_suci.py` all
+  pass on TS 33.501 / TS 33.535 / TS 33.402 worked examples.
+- `tests/test_yggdracore_subscription_store.py`,
+  `tests/test_yggdracore_ausf_stub.py`,
+  `tests/test_yggdracore_aanf_stub.py`,
+  `tests/test_yggdracore_http_app.py`, and
+  `tests/test_yggdracore_open5gs_bridge.py` pin the stub-AUSF and
+  bridge surfaces. The HTTP test must use FastAPI's `TestClient`
+  so the loopback launcher policy is honoured.
+- Documentation: this entry, plus `docs/akma_overview.md`. The
+  README and the simulator subsystem page list the new modules.
+
+### Open questions
+
+- Whether to ship a CLI shell (`yggdrasim-yggdracore`) for the
+  stub AUSF / AAnF or keep the surface library-only and let the
+  GUI Command Center drive it.
+- How aggressively to gate the Open5GS bridge on a sealed-lab
+  marker. Currently the gate is "operator must already have
+  Open5GS running"; we may add an explicit
+  `YGGDRASIM_OPEN5GS_BRIDGE=1` opt-in.
+
+---
+
 ## Change log
 
 | Date | Change |
@@ -821,6 +918,7 @@ security posture, REST surface sketch, risks, and change log.
 | 2026-04-23 | `R2-004` SAIP Workbench (SA-1..SA-4) landed. SA-1 (read-only): `saip.open_package` / `list_pes` / `show_pe` / `list_files` / `show_file` / `validate` / `close_package`. SA-2: package drawer + numbered PE list + main-area tabs + bottom validation dock. SA-3 (editor + save): `saip.update_file_field` + `saip.save_package` (writes through `Tools/ProfilePackage/saip_transcode_sync.py`); per-PE dirty-state tracking via `saip.get_dirty`; `saip.revert_changes` restores per-PE baseline. SA-4: `saip.compare` (PE/FS/field-level diff over two package sessions) + `saip.list_variables` / `saip.set_variable` (placeholder editor backed by `saip_profile_template.py`). SAIP package sessions live alongside SCP03 sessions in the same `SessionManager`. |
 | 2026-04-23 | `R2-004` SCP03 module-parity slices (C-1..C-4, 45 actions total) landed — daily card workflows no longer need the raw terminal. C-1 (8 read-only telemetry): `scp03.atr` / `card_info` / `reset` / `decode` / `read_binary` / `read_record` / `arr` / `dump_fs`. C-2 (10 auth + GP registry + profile telemetry): `auth_scp03` / `auth_scp02` / `logout` / `keys`; `registry_apps` / `registry_pkgs` / `registry_sd` / `get_data` / `list_aids`; `list_profiles` / `profile_scan`. `GlobalPlatformManager` is lazily built per session and cached on `session.handle["gp"]`; key material is read from the inventory `scp03_config` module-state on first build. C-3 (11 mutation + validation + exports): `set_status` / `lock` / `unlock` / `delete` / `store_data`; `update_binary` / `update_record`; `validate` / `cert_info`; `export_euicc` / `export_keybag`. All mutations check `_require_auth_session` and surface a destructive banner; `delete` requires a typed-back confirm. C-4 (16 actions): eUICC telemetry — `get_eid` / `get_euicc_certs` / `get_euicc_configured_data` / `get_sgp32_all_data`; profile lifecycle — `enable_profile` / `disable_profile` / `delete_profile` (typed-back confirm); snapshots / gold profile — `set_gold_profile` / `show_gold_profile` / `clear_gold_profile` / `profile_diff` (eUICC-scope first pass; persistence reuses the inventory `scp03_config` module-state shared with the shell GOLD-PROFILE wizard); offline crypto — `derive_opc` / `run_auth_test_vector` (3GPP TS 35.207 Milenage vector with derived OPc / RES / CK / IK / Kc / AUTN / USIM-AUTH-APDU / USIM-AUTH-RESPONSE); Tier-3 admin — `show_config` (KEYS + GOLD_PROFILE + AID registry, with `mask_secrets` toggle), `set_aid_alias` (add / update / delete in `aid.txt`), `set_defaults` (RESET-confirmed key wipe; invalidates cached `gp` on live SCP03 sessions). Native pickers: fields with `kind="path"` / `"directory"` / `"save_path"` open the matching pywebview dialog (`window.pywebview.api.pick_file` / `pick_folder` / `save_file`) on Browse… click or input double-click; backend treats all three as plain strings via `coerce_input`. Catalogue grows from 24 → 117 actions across SCP03 (51) / eSIM Live (38) / SAIP (14) / Tools (6) / Local eIM (4) / HIL (3) / SCP11 (1). |
 | 2026-04-23 | `R2-004` SCP03 module-parity slices C-5..C-7 landed (25 new actions + 2 sub-shell shortcuts). **C-5 — Mutation depth (16 actions)**: `scp03.put_key`; `install_cap` / `install_app` / `install_make_selectable` / `install_extradition` / `install_personalization` / `install_registry_update`; `fs_create_file` / `fs_delete_file` / `fs_resize` / `fs_lifecycle` / `fs_search_record` / `fs_suspend_uicc`; `manage_pin` / `manage_channel`; `run_auth_live`. Three new ribbon groups ("Install", "FS-Admin", "Live AAA") with typed-back confirmations on every destructive path. `scp03BuildInlineForm` extended to support `"select"` / `"bool"` / `"textarea"` / `"number"` kinds; 20 HTTP guard smoke cases pass. **C-6 — Sub-shell handoffs (2 shortcuts)**: `scp03.stk_shell` (SCP03 → auto-typed `STK-SHELL`) and `scp03.ota_shell` (`python -m SCP80`) under a new "Sub-shells" ribbon group reuse the B-2 PTY bridge instead of embedding per-tab xterms. **C-7 — QoL + adjacent (7 actions)**: SCP03 side — `scp03.run_script` (in-process `entry_cmd`), `scp03.fs_report` (YAML via `FileSystemController.generate_report`), `scp03.guide_list` + `scp03.guide_show` (captured `ShellGuides` topics). New `SIMCARD` subsystem — `simcard.quirks_status`, `simcard.profile_store_list`, `simcard.euicc_store_list`, `simcard.tuak_derive_topc` (pure 3GPP TS 35.231 derivation). 15 in-process smoke cases pass. Catalogue grows from 117 → 141 actions across SCP03 (71) / eSIM Live (38) / SAIP (14) / Tools (6) / SIMCARD (4) / Local eIM (4) / HIL (3) / SCP11 (1). |
+| 2026-04-25 | `R2-005` accepted and partially landed. New SIMCARD modules: `aka_5g.py` (TS 33.501 Annex A.2 / A.3 / A.4 / A.6), `akma.py` (TS 33.535 Annex A.2 / A.3 / A.4), `suci.py` (TS 33.501 §C.3 Profile A & B + EF.SUCI_Calc_Info codec + TS 24.501 §9.11.3.4 Mobile-Identity IE), `identity.py` (TS 31.102 §7.1.2.4 `GET IDENTITY` handler). New tooling layer `Tools/YggdraCore`: `subscription_store.py`, `ausf_stub.py`, `aanf_stub.py`, `http_app.py` (opt-in FastAPI loopback gated by `YGGDRASIM_5GCORE_MODE=stub`), `open5gs_bridge.py` (BYO Open5GS subscriber repository with `pymongo`-lazy import). New tests: `tests/test_simcard_5g_aka.py`, `tests/test_simcard_aka_milenage_kat.py`, `tests/test_simcard_akma_kdf.py`, `tests/test_simcard_suci.py`, `tests/test_yggdracore_*.py`. Documentation: `docs/akma_overview.md`. Pending: GUI Command Center / `yggdrasim-yggdracore` CLI surface (TBD), Open5GS bridge sealed-lab gate. |
 | 2026-04-23 | `R2-004` pre-C-5 carry-overs cleared. **SCP11 Local workbench (7 read-only actions)** — new `SCP11 Local` subsystem wraps `SCP11.local_access.session.LocalIsdrSession` for daily offline drive-by reads: `scp11_local.get_eid` (ISD-R SELECT + ECASD 5A), `list_profiles` (BF2D00 with per-E3 decode via `decode_profile_metadata_rows`), `get_euicc_info2` (BF2200 rendered through the shared `SCP03.logic.euicc_info2.build_euicc_info2_detail_lines` key/value lines), `get_configured_data` (BF3C00 → default SM-DP+ / primary + additional SM-DS / allowed CI PKIDs), `list_notifications` (BF2B00 raw-hex), `get_certs_inventory` (pure filesystem scan of the local SGP.26 DPauth / DPpb bundle), `discover` (one-shot snapshot). Mirrors the `scp11_live` per-call PC/SC channel pattern (open → probe → disconnect); write / mutation surfaces (enable / disable / delete / metadata) stay deferred for a confirmation-gate pass. **Per-tab xterm** — the B-2 terminal view is now multi-tab. Each "Open tab" click creates a fresh `.terminal-pane` with its own `Terminal`, `FitAddon`, `WebSocket`, `module`, `pid`, and `status`; a pill-style tab strip over the host handles switch / close, and window resize re-fits only the visible pane. `terminalState.pendingInit` is promoted to a top-level `terminalPendingBootstrap` so C-6 sub-shell handoffs (`scp03.stk_shell` / `scp03.ota_shell`) deterministically seed the NEXT-spawned tab regardless of which tab the user has focused. Stale global-state callers fall through the legacy-alias shim. **Playwright smoke** — `tests/test_gui_playwright_smoke.py` ships a self-skipping end-to-end smoke that spins `uvicorn` on a loopback port (reusing the real `create_app` factory), drives the SPA with a headless Chromium, and verifies the Command Center nav renders the new `SCP11 Local` subsystem with its seven action cards. Cleanly skips with an actionable reason string whenever `playwright` or the Chromium binary is missing, so CI stays green until the headless lane is wired. Catalogue grows 141 → 148 actions across SCP03 (71) / eSIM Live (38) / SAIP (14) / SCP11 Local (7) / Tools (6) / SIMCARD (4) / Local eIM (4) / HIL (3) / SCP11 (1). |
 
 ## See also

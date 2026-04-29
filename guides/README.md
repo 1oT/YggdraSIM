@@ -11,6 +11,14 @@ needs at runtime (`RSPRO.asn`) is shipped as package data under
 `Tools/HilBridge/RSPRO.asn`. Operators who want offline reference
 reading can populate `docs/` themselves from the issuing body.
 
+## Install Guides
+
+- `INSTALL_CLEAN.md` - clean-flavor executable install (Win / macOS / Linux / Pi)
+- `INSTALL_FULL.md` - HIL-capable executable install (Linux only)
+- `INSTALL_FROM_SOURCE.md` - editable source install with the extras matrix
+- `INSTALL_RASPBERRYPI.md` - Raspberry Pi specific install notes
+- `SIMTRACE2_CARDEM_GUIDE.md` - flashing / updating SIMtrace2 and `osmo-remsim-client-st2`
+
 ## Core Guides
 
 - `ARCHITECTURE.md` - system structure, dependency map, runtime state, and flow charts
@@ -21,6 +29,8 @@ reading can populate `docs/` themselves from the issuing body.
 - `HIL_BRIDGE_GUIDE.md` - SIMtrace2 / PCSC HIL bridge setup and operation
 - `DIAGNOSTICS_TOOLBOX.md` - SAIP diff, SIMCARD-to-TUI auto-open, APDU fuzzer, EUM/tshark dissector
 - `TEMPLATE_AND_TOKENS.md` - SAIP template authoring, token sidecars, placeholder lifecycle
+- `GUI_HOST_SHELL_GUIDE.md` - GUI `Advanced > Host shell` opt-in PTY surface, AT-decode overlay, threat model
+- `CONFIGURATION_AND_CERTIFICATES.md` - canonical operator guide for every certificate, keyset, identity, and configuration drop-in surface
 
 ## Supporting Examples
 

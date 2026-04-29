@@ -1,0 +1,4 @@
+# Shortcut for GET STATUS (Applications registry, P1=0x40).
+SCP03-SD
+APPS
+EXIT

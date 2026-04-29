@@ -2514,11 +2514,11 @@ class SCP11Console:
 
         if use_color:
             return ConsoleStyle(
-                header=_hex_to_ansi("#5FDCCB"),
-                cyan=_hex_to_ansi("#93F7FF"),
-                green=_hex_to_ansi("#8DFF8D"),
-                yellow=_hex_to_ansi("#FFF08F"),
-                red=_hex_to_ansi("#FF9A9A"),
+                header=_hex_to_ansi("#8FBCBB"),
+                cyan=_hex_to_ansi("#88C0D0"),
+                green=_hex_to_ansi("#A3BE8C"),
+                yellow=_hex_to_ansi("#EBCB8B"),
+                red=_hex_to_ansi("#BF616A"),
                 bold="\033[1m",
                 end="\033[0m",
             )

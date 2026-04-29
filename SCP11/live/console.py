@@ -3005,11 +3005,31 @@ class SCP11Console:
         resolved: Tuple[int, str],
         target_metadata: Optional[ProfileMetadataView],
     ) -> None:
-        if target_metadata.state.upper() == "ENABLED":
+        # Harmonised contract (matches Local SMDP+ / Local eIM): if the
+        # delete target is currently ENABLED we auto-disable it first
+        # under the same PPR1 guard used by ENABLE-PROFILE. SGP.22
+        # §5.7.18 forbids deleting an enabled profile, and silently
+        # forcing the delete leaves the modem state ambiguous from the
+        # operator's perspective. The auto-disable path is opt-out
+        # only at the policy callback (``ppr1-disable-not-allowed``).
+        if target_metadata is not None and target_metadata.state.upper() == "ENABLED":
+            if self._allow_auto_disable_for_enable(target_metadata, target_metadata) is False:
+                return
             print(
-                f"{self._style.yellow}[*] DeleteProfile: deleting enabled target directly "
-                f"(laptop mode override).{self._style.end}"
+                f"{self._style.yellow}[*] DeleteProfile: auto-disabling enabled target "
+                f"{self._describe_profile_metadata(target_metadata)} before delete.{self._style.end}"
             )
+            if self._execute_profile_state_command(
+                resolved,
+                self.TAG_DISABLE_PROFILE,
+                "DisableProfile",
+            ) is False:
+                print(
+                    f"{self._style.red}[!] DeleteProfile: auto-disable failed; aborting delete "
+                    "to avoid leaving the card in an inconsistent state."
+                    f"{self._style.end}"
+                )
+                return
 
         if self._execute_profile_state_command(resolved, self.TAG_DELETE_PROFILE, "DeleteProfile"):
             self._queue_modem_refresh("DeleteProfile")
@@ -3571,11 +3591,11 @@ class SCP11Console:
 
         if use_color:
             return ConsoleStyle(
-                header=_hex_to_ansi("#5FDCCB"),
-                cyan=_hex_to_ansi("#93F7FF"),
-                green=_hex_to_ansi("#8DFF8D"),
-                yellow=_hex_to_ansi("#FFF08F"),
-                red=_hex_to_ansi("#FF9A9A"),
+                header=_hex_to_ansi("#8FBCBB"),
+                cyan=_hex_to_ansi("#88C0D0"),
+                green=_hex_to_ansi("#A3BE8C"),
+                yellow=_hex_to_ansi("#EBCB8B"),
+                red=_hex_to_ansi("#BF616A"),
                 bold="\033[1m",
                 end="\033[0m",
             )

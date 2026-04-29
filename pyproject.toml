@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "yggdrasim"
-version = "2026.4.10"
+version = "1.0.0"
 description = "YggdraSIM secure-element, eUICC, OTA, and SAIP toolkit."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -76,6 +76,7 @@ dependencies = [
     "packaging",
     "pyyaml",
     "textual>=0.47.0",
+    "dnspython>=2.4",
 ]
 
 [project.optional-dependencies]
@@ -89,15 +90,20 @@ hil = [
 build = [
     "pyinstaller",
 ]
-# Test-only dependencies.
+# Test-only dependencies. ``httpx`` is required by FastAPI's
+# ``TestClient`` (used by the YggdraCore stub-AUSF tests); pulling it
+# in here keeps the GUI / GUI-server runtime extras free of an extra
+# transitive dep that production deployments do not need.
 test = [
     "pytest",
+    "httpx",
 ]
 # Legacy alias kept for backwards compatibility with earlier onboarding
 # scripts that call ``pip install -e '.[dev]'``.
 dev = [
     "pyinstaller",
     "pytest",
+    "httpx",
 ]
 # Documentation-site tooling. Mirrors ``requirements-docs.txt`` so
 # ``pip install yggdrasim[docs]`` alone is sufficient for running
@@ -106,6 +112,29 @@ docs = [
     "mkdocs>=1.6",
     "mkdocs-material>=9.6",
     "pymdown-extensions>=10.13",
+]
+# ``open5gs`` adds the BYO Open5GS bridge dependency stack. The bridge
+# itself loads ``pymongo`` lazily so the import is deferred until an
+# operator actually exercises ``yggdracore.open5gs_*``; pulling it in
+# under an opt-in extra keeps the default install lean for hosts that
+# never run a 5G core. Pin range follows the upstream ``pymongo`` 4.x
+# major; older 3.x is missing the type-stub coverage and is not
+# tested.
+open5gs = [
+    "pymongo>=4.5,<5.0",
+]
+# ``sunrise6g`` pulls in the SUNRISE-6G OpenSDK and lets the
+# ``Tools/Sunrise6G/bridge.py`` SDK adapter delegate CAMARA QoD /
+# Location calls to a real testbed. The bridge defaults to its
+# in-process stub mode so a fresh ``pip install yggdrasim`` works
+# without the SDK; operators who actually have a SUNRISE-6G
+# testbed reachable run ``pip install 'yggdrasim[sunrise6g]'`` and
+# flip ``YGGDRASIM_SUNRISE6G_MODE=sdk``. Pin range follows the
+# 1.0.x line that exposes the network-adapter surface this bridge
+# targets (``create_qod_session`` / ``get_qod_session`` /
+# ``delete_qod_session`` / ``create_monitoring_event_subscription``).
+sunrise6g = [
+    "sunrise6g-opensdk>=1.0.5,<2.0",
 ]
 # ``saip`` pulls upstream pySim directly from git. The Osmocom SAIP
 # stack (``pySim.esim.saip``, ``pySim.esim.compile_asn1_subdir``,

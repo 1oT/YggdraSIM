@@ -1,10 +1,17 @@
 from __future__ import annotations
 
 import hmac
+import secrets
 from dataclasses import dataclass
 
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 
+from SIMCARD.aka_5g import (
+    derive_eap_aka_prime_keys,
+    derive_k_ausf,
+    derive_k_seaf,
+    derive_res_star,
+)
 from SIMCARD.state import SimCardState, SimProfileAuthConfig
 from SIMCARD.tuak import (
     TuakVectors,
@@ -29,6 +36,27 @@ class MilenageVectors:
     ak_star: bytes
     mac_a: bytes
     mac_s: bytes
+
+
+@dataclass(frozen=True)
+class FiveGAuthVector:
+    """ME-side 5G HE AV bundle produced from a USIM AUTHENTICATE.
+
+    The USIM only returns the UMTS triple ``(res, ck, ik)``; the
+    serving-network anchor keys are derived in the ME (or, for
+    test-bench use, in :class:`AuthLogic`) per TS 33.501 Annex A.
+    """
+
+    res: bytes
+    ck: bytes
+    ik: bytes
+    res_star: bytes
+    k_ausf: bytes
+    k_seaf: bytes
+    ck_prime: bytes
+    ik_prime: bytes
+    sn_name: str
+    sqn_xor_ak: bytes
 
 
 def derive_opc(ki: bytes, op: bytes) -> bytes:
@@ -124,11 +152,39 @@ def build_milenage_auts(ki: bytes, opc: bytes, rand: bytes, sqn: bytes) -> bytes
 
 
 class AuthLogic:
-    def __init__(self, state: SimCardState) -> None:
+    def __init__(self, state: SimCardState, file_system: object | None = None) -> None:
         self.state = state
+        # Optional file-system handle so 5G AKA can persist KAUSF /
+        # KSEAF into EF.5GAUTHKEYS (TS 31.102 §4.4.11.5). Kept as an
+        # untyped attribute to avoid an import cycle with
+        # ``SIMCARD.etsi_fs``; everything we call on it
+        # (``write_ef_transparent_by_path``) is duck-typed.
+        self.fs = file_system
 
     def reset(self) -> None:
         return
+
+    def get_challenge(self, p1: int, p2: int, le: int | None) -> tuple[bytes, int, int]:
+        """ETSI TS 102 221 §11.1.7 GET CHALLENGE.
+
+        Returns ``Le`` random bytes; ``Le=0`` requests 256 bytes per
+        ISO 7816-4 mapping. P1/P2 are reserved as ``00 00`` -- anything
+        else is rejected with 6A 86 to mirror commercial UICC behaviour.
+        The challenge is also persisted in
+        ``state.last_challenge_bytes`` so STORE-DATA / OTA paths that
+        feed it back as freshness can be exercised by tests.
+        """
+        if (int(p1) & 0xFF) != 0 or (int(p2) & 0xFF) != 0:
+            return b"", 0x6A, 0x86
+        if le is None:
+            return b"", 0x67, 0x00
+        normalized_le = int(le) & 0xFF
+        challenge_length = 256 if normalized_le == 0 else normalized_le
+        if challenge_length <= 0 or challenge_length > 256:
+            return b"", 0x67, 0x00
+        challenge = secrets.token_bytes(challenge_length)
+        self.state.last_challenge_bytes = challenge
+        return challenge, 0x90, 0x00
 
     def internal_authenticate(self, p2: int, payload: bytes) -> tuple[bytes, int, int]:
         normalized_p2 = int(p2) & 0xFF
@@ -136,7 +192,150 @@ class AuthLogic:
             return self._run_gsm_algorithm(payload)
         if normalized_p2 == 0x81:
             return self._run_usim_authentication(payload)
+        if normalized_p2 == 0x82:
+            # 3GPP TS 31.103 §7.1 IMS AKA. The ISIM application
+            # implements AKA against the same Milenage parameters
+            # as the USIM, but the AUTHENTICATE command is issued
+            # under the ISIM context. The simulator routes this
+            # through the regular UMTS AKA path because the
+            # cryptographic chain is identical; only the calling
+            # AID context differs at the dispatcher level.
+            #
+            # On a paired card the IMS AKA result is accepted by
+            # the IMS (S-CSCF) authentication challenge in
+            # SIP REGISTER, and the derived CK/IK are forwarded
+            # to the IMS Authentication Server (AS).
+            return self._run_usim_authentication(payload)
+        if normalized_p2 == 0x84:
+            # 3GPP TS 31.102 §7.1.2.1.2 GBA Bootstrap (P2=0x84). The
+            # algorithm chain is identical to UMTS AKA; the only
+            # difference is that on success the card caches Ks =
+            # CK||IK and the freshness RAND for a later P2=0x85
+            # NAF derivation.
+            return self._run_gba_bootstrap(payload)
+        if normalized_p2 == 0x85:
+            # 3GPP TS 31.102 §7.1.2.1.3 GBA Security Context Mode
+            # (P2=0x85). Inputs: NAF_Id and IMPI. Output: Ks_NAF
+            # derived per TS 33.220 §B.0.
+            return self._run_gba_naf_derivation(payload)
         return b"", 0x6A, 0x86
+
+    def derive_5g_vector(
+        self,
+        sn_name: str,
+        rand: bytes,
+        autn: bytes,
+    ) -> FiveGAuthVector | None:
+        """Run the full 5G HE-AV computation against the active profile.
+
+        Implements TS 33.501 §6.1.3.2.0 from the USIM-plus-ME side:
+        the simulator first runs the UMTS-shaped AUTHENTICATE
+        (P2=0x81) internally, then derives the serving-network-bound
+        anchor keys via :mod:`SIMCARD.aka_5g`. Returns ``None`` if
+        the USIM rejects the input (sync failure, MAC mismatch,
+        algorithm not supported); the caller is expected to handle
+        the AUTS/RESYNC path through ``internal_authenticate``.
+        """
+        normalized_rand = bytes(rand or b"")
+        normalized_autn = bytes(autn or b"")
+        if len(normalized_rand) != 16 or len(normalized_autn) != 16:
+            return None
+        config = self._active_auth_config()
+        if config is None:
+            return None
+        algorithm = str(config.algorithm or "").strip().lower()
+        if algorithm not in ("milenage", "aka-milenage"):
+            # 5G AKA tests target Milenage profiles; TUAK/EAP-AKA' on
+            # TUAK is a separate work item.
+            return None
+        try:
+            key, operator_variant = self._resolve_milenage_keys(config)
+        except ValueError:
+            return None
+        amf = bytes(normalized_autn[6:8])
+        initial = milenage_vectors(key, operator_variant, normalized_rand, b"\x00" * 6, amf)
+        concealed_sqn = normalized_autn[:6]
+        recovered_sqn = _xor_bytes(concealed_sqn, initial.ak)
+        vectors = milenage_vectors(key, operator_variant, normalized_rand, recovered_sqn, amf)
+        if hmac.compare_digest(vectors.mac_a, normalized_autn[8:16]) is False:
+            return None
+        sqn_xor_ak = bytes(concealed_sqn)
+        res_star = derive_res_star(
+            vectors.ck,
+            vectors.ik,
+            sn_name,
+            normalized_rand,
+            vectors.res,
+        )
+        k_ausf = derive_k_ausf(vectors.ck, vectors.ik, sn_name, sqn_xor_ak)
+        k_seaf = derive_k_seaf(k_ausf, sn_name)
+        ck_prime, ik_prime = derive_eap_aka_prime_keys(
+            vectors.ck,
+            vectors.ik,
+            sn_name,
+            sqn_xor_ak,
+        )
+        bundle = FiveGAuthVector(
+            res=vectors.res,
+            ck=vectors.ck,
+            ik=vectors.ik,
+            res_star=res_star,
+            k_ausf=k_ausf,
+            k_seaf=k_seaf,
+            ck_prime=ck_prime,
+            ik_prime=ik_prime,
+            sn_name=str(sn_name),
+            sqn_xor_ak=sqn_xor_ak,
+        )
+        self._persist_5g_authkeys(bundle)
+        return bundle
+
+    def _persist_5g_authkeys(self, bundle: "FiveGAuthVector") -> None:
+        """Update EF.5GAUTHKEYS and EF.KAUSF-DERIVATION after a successful
+        5G AKA so a subsequent ``READ BINARY`` against DF.5GS reflects
+        the freshly-derived anchor keys.
+
+        EF.5GAUTHKEYS layout (TS 31.102 §4.4.11.5):
+            '80' Lk KAUSF || '81' Lk KSEAF
+        EF.KAUSF-DERIVATION (4F16) is a 4-byte big-endian counter that
+        the spec leaves operator-defined; we treat it as a monotonic
+        derivation counter so a network audit can detect replay.
+        """
+        fs = self.fs
+        if fs is None or hasattr(fs, "write_ef_transparent_by_path") is False:
+            return
+
+        def _ber_simple(tag: int, value: bytes) -> bytes:
+            if len(value) <= 0x7F:
+                return bytes((tag, len(value))) + bytes(value)
+            length_bytes = len(value).to_bytes((len(value).bit_length() + 7) // 8, "big")
+            return bytes((tag, 0x80 | len(length_bytes))) + length_bytes + bytes(value)
+
+        body = _ber_simple(0x80, bundle.k_ausf) + _ber_simple(0x81, bundle.k_seaf)
+        fs.write_ef_transparent_by_path(
+            ("MF", "ADF.USIM", "DF.5GS", "EF.5GAUTHKEYS"),
+            body,
+        )
+        # Monotonic counter; clamp at 2**32 - 1 so the field stays
+        # 4 bytes even after a long-running test session.
+        existing_counter = self._read_ef_kausf_derivation_counter()
+        next_counter = min(existing_counter + 1, 0xFFFFFFFF)
+        fs.write_ef_transparent_by_path(
+            ("MF", "ADF.USIM", "DF.5GS", "EF.KAUSF-DERIVATION"),
+            next_counter.to_bytes(4, "big"),
+        )
+
+    def _read_ef_kausf_derivation_counter(self) -> int:
+        fs = self.fs
+        if fs is None or hasattr(fs, "find_node_by_path") is False:
+            return 0
+        node = fs.find_node_by_path(("MF", "ADF.USIM", "DF.5GS", "EF.KAUSF-DERIVATION"))
+        if node is None:
+            return 0
+        raw = bytes(getattr(node, "data", b"") or b"")
+        if len(raw) == 0:
+            return 0
+        return int.from_bytes(raw[:4].ljust(4, b"\x00"), "big")
 
     def _run_gsm_algorithm(self, payload: bytes) -> tuple[bytes, int, int]:
         config = self._active_auth_config()
@@ -396,6 +595,106 @@ class AuthLogic:
             return None
         return normalized[1:17], normalized[18:34]
 
+    def _run_gba_bootstrap(self, payload: bytes) -> tuple[bytes, int, int]:
+        """3GPP TS 31.102 §7.1.2.1.2 / TS 33.220 §4.5 GBA Bootstrap.
+
+        Reuses the regular UMTS AKA path so SQN tracking, AUTS sync
+        recovery and MAC validation behave identically to a P2=0x81
+        run. On success the card caches Ks = CK||IK plus the
+        freshness RAND so a follow-on P2=0x85 NAF derivation can
+        compute Ks_(ext)NAF without needing the network to replay
+        the bootstrap input.
+        """
+        if self._selected_application_name() not in ("ADF.USIM", "ADF.ISIM"):
+            return b"", 0x69, 0x85
+        config = self._active_auth_config()
+        if config is None:
+            return b"", 0x69, 0x85
+        algorithm = str(config.algorithm or "").strip().lower()
+        if algorithm not in ("milenage", "aka-milenage"):
+            # TS 33.220 only mandates Milenage for GBA. TUAK is
+            # allowed but not yet wired to the GBA cache; keep the
+            # rejection explicit so a future test enables it.
+            return b"", 0x69, 0x85
+        parsed = self._parse_usim_auth_payload(payload)
+        if parsed is None:
+            return b"", 0x67, 0x00
+        rand, autn = parsed
+        amf, mac_a = autn[6:8], autn[8:16]
+        try:
+            key, operator_variant = self._resolve_milenage_keys(config)
+        except ValueError:
+            return b"", 0x69, 0x85
+        initial_vectors = milenage_vectors(key, operator_variant, rand, b"\x00" * 6, amf)
+        concealed_sqn = autn[:6]
+        recovered_sqn = _xor_bytes(concealed_sqn, initial_vectors.ak)
+        vectors = milenage_vectors(key, operator_variant, rand, recovered_sqn, amf)
+        if hmac.compare_digest(vectors.mac_a, mac_a) is False:
+            return b"", 0x98, 0x62
+        stored_sqn_bytes = bytes(config.sqn or b"\x00" * 6).rjust(6, b"\x00")[-6:]
+        current_sqn = int.from_bytes(stored_sqn_bytes, "big")
+        network_sqn_value = int.from_bytes(recovered_sqn, "big")
+        if network_sqn_value < current_sqn:
+            auts = build_milenage_auts(key, operator_variant, rand, stored_sqn_bytes)
+            return b"\xDC\x0E" + auts, 0x90, 0x00
+        config.sqn = self._bump_and_clamp_sqn(current_sqn, network_sqn_value)
+        self._persist_active_profile()
+        # Cache the bootstrap context. The simulator picks a B-TID
+        # of the form ``<rand-hex>@bsf.simulator`` so a downstream
+        # NAF lookup can reproduce the value without the BSF having
+        # actually replied -- real deployments take the B-TID from
+        # the BSF over Ub. ``gba_key_lifetime`` is the spec-default
+        # 86400 s window per TS 33.220 §4.4.6.
+        self.state.gba_ks = vectors.ck + vectors.ik
+        self.state.gba_b_tid = f"{rand.hex()}@bsf.simulator"
+        self.state.gba_key_lifetime = 86400
+        self.state.last_challenge_bytes = rand
+        response = (
+            b"\xDB\x08"
+            + vectors.res
+            + b"\x10"
+            + vectors.ck
+            + b"\x10"
+            + vectors.ik
+        )
+        return response, 0x90, 0x00
+
+    def _run_gba_naf_derivation(self, payload: bytes) -> tuple[bytes, int, int]:
+        """3GPP TS 31.102 §7.1.2.1.3 / TS 33.220 §B.0 NAF derivation.
+
+        Input layout: ``L_NAF || NAF_Id || L_IMPI || IMPI``. The
+        function rejects the request with ``69 85`` when no Ks is
+        cached (no prior bootstrap) and ``67 00`` when the input
+        TLV layout is malformed. Successful runs derive Ks_(ext)NAF
+        per TS 33.220 §B.0 using HMAC-SHA-256 with the static
+        ``"gba-me"`` salt and return ``DB 20 || Ks_NAF`` so a
+        modem-side ME library can splice it into the standard AKA
+        response framing.
+        """
+        if self._selected_application_name() not in ("ADF.USIM", "ADF.ISIM"):
+            return b"", 0x69, 0x85
+        if len(self.state.gba_ks) != 32:
+            return b"", 0x69, 0x85
+        normalized = bytes(payload or b"")
+        if len(normalized) < 2:
+            return b"", 0x67, 0x00
+        naf_length = int(normalized[0])
+        if naf_length == 0 or naf_length + 2 > len(normalized):
+            return b"", 0x67, 0x00
+        naf_id = normalized[1 : 1 + naf_length]
+        impi_offset = 1 + naf_length
+        impi_length = int(normalized[impi_offset])
+        if impi_length == 0 or impi_offset + 1 + impi_length > len(normalized):
+            return b"", 0x67, 0x00
+        impi = normalized[impi_offset + 1 : impi_offset + 1 + impi_length]
+        rand = bytes(self.state.last_challenge_bytes or b"")
+        if len(rand) != 16:
+            return b"", 0x69, 0x85
+        ks_naf = _gba_kdf(self.state.gba_ks, rand, impi, naf_id)
+        record_key = (naf_id + b"|" + impi).hex()
+        self.state.gba_naf_records[record_key] = ks_naf
+        return b"\xDB\x20" + ks_naf, 0x90, 0x00
+
 
 def _aes_ecb_encrypt(key: bytes, block: bytes) -> bytes:
     cipher = Cipher(algorithms.AES(bytes(key)), modes.ECB())
@@ -421,6 +720,30 @@ def _xor_bytes(left: bytes, right: bytes) -> bytes:
     if len(left_bytes) != len(right_bytes):
         raise ValueError("XOR inputs must have the same length.")
     return bytes(left_part ^ right_part for left_part, right_part in zip(left_bytes, right_bytes))
+
+
+def _gba_kdf(ks: bytes, rand: bytes, impi: bytes, naf_id: bytes) -> bytes:
+    """3GPP TS 33.220 §B.0 GBA key derivation (Ks_(ext)NAF).
+
+    Builds the standard FC=0x01 input string for the generic 3GPP
+    KDF and runs HMAC-SHA-256 keyed with Ks. The FC value 0x01 is
+    the "GBA Bootstrapping" specifier; the static prefix
+    ``"gba-me"`` (six ASCII bytes) appears as P0 per Annex B.0 and
+    fixes the derivation to the ME variant of the NAF key.
+    """
+    import hashlib
+
+    p0 = b"gba-me"
+    p1 = bytes(rand or b"")
+    p2 = bytes(impi or b"")
+    p3 = bytes(naf_id or b"")
+    payload = b""
+    payload += b"\x01"
+    payload += p0 + len(p0).to_bytes(2, "big")
+    payload += p1 + len(p1).to_bytes(2, "big")
+    payload += p2 + len(p2).to_bytes(2, "big")
+    payload += p3 + len(p3).to_bytes(2, "big")
+    return hmac.new(bytes(ks or b""), payload, hashlib.sha256).digest()
 
 
 def _tuak_kc(vectors: TuakVectors) -> bytes:

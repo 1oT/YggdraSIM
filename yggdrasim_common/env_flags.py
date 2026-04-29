@@ -294,6 +294,37 @@ FLAG_REGISTRY: Final[tuple[EnvFlag, ...]] = (
         default_hint="derived per-EID under the eUICC store root",
         applies=APPLIES_RUNTIME,
     ),
+    EnvFlag(
+        name="YGGDRASIM_SIM_IPA_POLL_APN",
+        category=CATEGORY_CARD_BACKEND,
+        summary="Override the SGP.32 IPA-poll APN",
+        description=(
+            "Cellular APN the simulated IPA emits in OPEN CHANNEL\n"
+            "(ETSI TS 102 223 §8.70 Network Access Name, tag 47)\n"
+            "when polling the eIM. Set per-process to pin a lab APN.\n"
+            "An active SAIP profile that ships an APN (BPP override)\n"
+            "wins over this env flag; ``internet.apn`` is the\n"
+            "workspace fallback when neither is set."
+        ),
+        kind=KIND_STRING,
+        default_hint="internet.apn",
+        applies=APPLIES_RUNTIME,
+    ),
+    EnvFlag(
+        name="YGGDRASIM_SIM_IPA_POLL_DNS_SERVER",
+        category=CATEGORY_CARD_BACKEND,
+        summary="Override the SGP.32 IPA-poll DNS resolver",
+        description=(
+            "IPv4 address of the public DNS resolver the simulated\n"
+            "IPA targets when resolving the eIM FQDN over BIP UDP.\n"
+            "The default mirrors what every reference card emits:\n"
+            "Google's 8.8.8.8 on port 53. Override only when running\n"
+            "in a closed lab where a captive resolver replaces 8.8.8.8."
+        ),
+        kind=KIND_STRING,
+        default_hint="8.8.8.8",
+        applies=APPLIES_RUNTIME,
+    ),
 
     # --- Simulator behaviour -------------------------------------------
     EnvFlag(
@@ -851,6 +882,34 @@ FLAG_REGISTRY: Final[tuple[EnvFlag, ...]] = (
         kind=KIND_BOOL_TOGGLE,
         default_hint="unset → dev tools closed",
         applies=APPLIES_STARTUP,
+    ),
+    EnvFlag(
+        name="YGGDRASIM_GUI_HOST_SHELL",
+        category=CATEGORY_GUI,
+        summary="Expose the GUI Host-Shell tab (free-form OS shell PTY)",
+        description=(
+            "Opt-in switch for the Advanced > Host shell sidebar entry.\n"
+            "When truthy (1/true/yes/on) the GUI registers a WebSocket\n"
+            "endpoint that bridges xterm.js to a free-form interactive\n"
+            "shell (resolved $SHELL, fallback /bin/bash) running as the\n"
+            "process that launched yggdrasim. This is functionally\n"
+            "equivalent to giving every bearer-token holder a remote SSH\n"
+            "session — operators must opt in explicitly. The accompanying\n"
+            "'AT decode' overlay (off by default per session) tee's the\n"
+            "PTY byte stream through Tools.HilBridge.at_simlink so\n"
+            "AT+CSIM / AT+CRSM lines surface a decoded ISO 7816 / TS\n"
+            "27.007 view alongside the raw modem dialogue."
+        ),
+        kind=KIND_BOOL_TOGGLE,
+        default_hint="unset → Host shell tab is hidden, route refuses connections",
+        applies=APPLIES_STARTUP,
+        sensitive=True,
+        notes=(
+            "Free-form RCE-class surface. Restrict the bearer token's "
+            "blast radius and prefer an SSH tunnel over a public "
+            "--web-server bind. Full operator guide: "
+            "guides/GUI_HOST_SHELL_GUIDE.md."
+        ),
     ),
 )
 

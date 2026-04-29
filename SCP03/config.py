@@ -19,6 +19,7 @@ import os
 import configparser 
 
 from yggdrasim_common.runtime_paths import bundle_path, ensure_seeded_workspace_file, ensure_workspace_dir
+from yggdrasim_common.nord_palette import NordHex as _NordHex
 
 try :
     from yggdrasim_common.device_inventory import DeviceInventoryStore 
@@ -57,7 +58,12 @@ class Config :
     MODULE_STATE_NAME ="scp03_config"
 
     class Colors :
-        """ANSI terminal colors derived from hex palette values."""
+        """ANSI terminal colours sourced from the canonical Nord palette.
+
+        The SCP03 banner intentionally swaps the launcher's frost-teal
+        header for aurora-purple to keep the protocol header visually
+        distinct from the SCP11 / SAIP shells.
+        """
 
         @staticmethod
         def _hex_to_ansi (hex_color ):
@@ -67,16 +73,16 @@ class Config :
             blue =int (hex_value [4 :6 ],16 )
             return f'\033[38;2;{red};{green};{blue}m'
 
-        HEADER_HEX ='#FF8FFF'
-        BLUE_HEX ='#8AA7FF'
-        CYAN_HEX ='#93F7FF'
-        GREEN_HEX ='#8DFF8D'
-        YELLOW_HEX ='#FFF08F'
+        HEADER_HEX =_NordHex .AURORA_PURPLE
+        BLUE_HEX =_NordHex .FROST_BLUE
+        CYAN_HEX =_NordHex .FROST_CYAN
+        GREEN_HEX =_NordHex .AURORA_GREEN
+        YELLOW_HEX =_NordHex .AURORA_YELLOW
         WARNING_HEX =YELLOW_HEX
-        FAIL_HEX ='#FF9A9A'
+        FAIL_HEX =_NordHex .AURORA_RED
         RED_HEX =FAIL_HEX
-        WHITE_HEX ='#F7FCFF'
-        MINT_HEX ='#5FDCCB'
+        WHITE_HEX =_NordHex .SNOW_2
+        MINT_HEX =_NordHex .FROST_TEAL
 
         HEADER =_hex_to_ansi .__func__ (HEADER_HEX )
         BLUE =_hex_to_ansi .__func__ (BLUE_HEX )

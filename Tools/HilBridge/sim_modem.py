@@ -31,11 +31,22 @@ class SimulatedModemCardChannel:
         self._connection = connection
         self._pending_responses: dict[int, PendingResponse] = {}
         self._current_node_by_channel: dict[int, str] = {0: "3F00"}
+        # ETSI TS 102 221 §8.4.2.3 / TS 102 222 §6.6: the "currently
+        # selected application" is sticky per logical channel and only
+        # changes on an explicit SELECT-by-AID. A modem that briefly
+        # walks back through MF (e.g. to read EF.ARR at 2F06) must not
+        # lose the USIM scope, otherwise every subsequent
+        # ``00A40804047FFF<EF>`` collapses to 6A82 even though the EF
+        # is wired up. ``_active_application_root_by_channel`` carries
+        # the sticky pointer so the 7FFF alias keeps resolving across
+        # MF side-trips.
+        self._active_application_root_by_channel: dict[int, str] = {}
         self._open_channels: set[int] = set()
 
     def disconnect(self) -> None:
         self._pending_responses.clear()
         self._current_node_by_channel = {0: "3F00"}
+        self._active_application_root_by_channel = {}
         self._open_channels.clear()
         self._connection.disconnect()
 
@@ -113,6 +124,13 @@ class SimulatedModemCardChannel:
                     continue
                 self._open_channels.add(channel_number)
                 self._current_node_by_channel[channel_number] = "3F00"
+                # TS 102 221 §11.1.17: a freshly opened logical channel
+                # inherits the basic channel's currently-selected
+                # application so the modem can split traffic without
+                # re-running SELECT-by-AID on the new channel.
+                inherited_root = self._active_application_root_by_channel.get(logical_channel, "")
+                if len(inherited_root) > 0:
+                    self._active_application_root_by_channel[channel_number] = inherited_root
                 self._pending_responses.pop(channel_number, None)
                 return bytes((channel_number,)), 0x90, 0x00
             return b"", 0x6A, 0x81
@@ -123,6 +141,7 @@ class SimulatedModemCardChannel:
                 close_channel = int(p2) & 0x03
             self._open_channels.discard(close_channel)
             self._current_node_by_channel.pop(close_channel, None)
+            self._active_application_root_by_channel.pop(close_channel, None)
             self._pending_responses.pop(close_channel, None)
             return b"", 0x90, 0x00
 
@@ -147,8 +166,19 @@ class SimulatedModemCardChannel:
             response_data, sw1, sw2 = self._select_current_application_root(logical_channel)
         else:
             selector = self._resolve_select_selector(requested_selector)
-            response_data, sw1, sw2 = self._engine().fs.select(selector)
-            self._current_node_by_channel[logical_channel] = str(state.current_node_id or previous_node_id)
+            response_data, sw1, sw2 = self._engine().fs.select(selector, p1=int(p1) & 0xFF)
+            if sw1 == 0x90:
+                landed_id = str(state.current_node_id or previous_node_id)
+                self._current_node_by_channel[logical_channel] = landed_id
+                # TS 102 221 §8.4.2.3: SELECT-by-AID (P1=0x04) and
+                # any other select that lands on an ADF rewires the
+                # "currently selected application" anchor used by the
+                # 7FFF alias. Path-rooted (P1=0x08) and FID selects
+                # also have the side-effect of pinning the application
+                # if the cursor walks into an ADF subtree.
+                self._update_active_application_root_from_landing(logical_channel, landed_id)
+            else:
+                self._current_node_by_channel[logical_channel] = previous_node_id
 
         response_bytes = self._rewrite_response_aliases(bytes(response_data))
         if sw1 == 0x90 and len(response_bytes) > 0:
@@ -173,6 +203,7 @@ class SimulatedModemCardChannel:
                 state.current_node_id = current_id
                 node = state.nodes[current_id]
                 self._current_node_by_channel[logical_channel] = current_id
+                self._update_active_application_root_from_landing(logical_channel, current_id)
                 return self._engine().fs.build_fcp(node), 0x90, 0x00
 
         for segment in segments:
@@ -183,6 +214,7 @@ class SimulatedModemCardChannel:
 
         state.current_node_id = current_id
         self._current_node_by_channel[logical_channel] = current_id
+        self._update_active_application_root_from_landing(logical_channel, current_id)
         return self._engine().fs.build_fcp(state.nodes[current_id]), 0x90, 0x00
 
     def _select_current_application_root(self, logical_channel: int) -> tuple[bytes, int, int]:
@@ -192,7 +224,38 @@ class SimulatedModemCardChannel:
         state = self._engine_state()
         state.current_node_id = root_id
         self._current_node_by_channel[logical_channel] = root_id
+        self._update_active_application_root_from_landing(logical_channel, root_id)
         return self._engine().fs.build_fcp(state.nodes[root_id]), 0x90, 0x00
+
+    def _update_active_application_root_from_landing(self, logical_channel: int, landed_node_id: str) -> None:
+        """Re-anchor the sticky ``7FFF`` pointer if the SELECT cursor
+        lands inside an ADF subtree.
+
+        The pointer is *not* cleared when the cursor walks back to MF
+        (or into a non-ADF DF such as DF.TELECOM) -- TS 102 221
+        §8.4.2.3 only switches the "currently selected application"
+        on an explicit SELECT-by-AID (or path/FID select that
+        actually targets a different ADF root).
+        """
+        target = str(landed_node_id or "").strip()
+        if len(target) == 0:
+            return
+        adf_root_id = self._enclosing_adf_id(target)
+        if len(adf_root_id) == 0:
+            return
+        self._active_application_root_by_channel[logical_channel] = adf_root_id
+
+    def _enclosing_adf_id(self, node_id: str) -> str:
+        state = self._engine_state()
+        cursor = str(node_id or "").strip()
+        while len(cursor) > 0:
+            node = state.nodes.get(cursor)
+            if node is None:
+                return ""
+            if str(getattr(node, "kind", "")).strip().lower() == "adf":
+                return cursor
+            cursor = str(getattr(node, "parent_id", "") or "").strip()
+        return ""
 
     def _delegate_exchange(self, logical_channel: int, apdu: bytes) -> tuple[bytes, int, int]:
         state = self._engine_state()
@@ -281,13 +344,28 @@ class SimulatedModemCardChannel:
         return None
 
     def _current_application_root_id(self, logical_channel: int) -> str:
+        # Sticky-first lookup: TS 102 221 §8.4.2.3 ties the 7FFF
+        # alias to the *currently selected application*, not to the
+        # current EF cursor. The application stays selected until an
+        # explicit SELECT-by-AID switches it, even when the cursor
+        # transiently walks to MF/2F06 or to a non-ADF DF.
         state = self._engine_state()
+        sticky = str(self._active_application_root_by_channel.get(logical_channel, "") or "").strip()
+        if len(sticky) > 0:
+            sticky_node = state.nodes.get(sticky)
+            if sticky_node is not None and str(getattr(sticky_node, "kind", "")).strip().lower() == "adf":
+                return sticky
+            self._active_application_root_by_channel.pop(logical_channel, None)
+
         node_id = str(self._current_node_by_channel.get(logical_channel, "3F00") or "3F00")
         while len(node_id) > 0:
             node = state.nodes.get(node_id)
             if node is None:
                 return ""
             if str(getattr(node, "kind", "")).strip().lower() == "adf":
+                # Cache the discovered ADF so subsequent 7FFF resolves
+                # also when the cursor moves out of the ADF subtree.
+                self._active_application_root_by_channel[logical_channel] = node_id
                 return node_id
             node_id = str(getattr(node, "parent_id", "") or "").strip()
         return ""

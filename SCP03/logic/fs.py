@@ -322,6 +322,39 @@ class FileSystemController :
         return roots 
 
     @staticmethod
+    def _classify_tree_node_kind (name :str ,*,has_children :bool =False )->str :
+        """Classify a scan-tree node by ETSI naming convention.
+
+        ``fids.txt`` follows a stable convention where the type is
+        encoded as the prefix of the entry's name:
+
+        * ``MF``                       — master file
+        * ``ADF_<aid>`` / ``ADF.<aid>``  — application DF (ETSI TS 102 221 §8.2)
+        * ``DF_<name>`` / ``DF.<name>``  — directory file
+        * ``EF_<name>`` / ``EF.<name>``  — elementary file (ETSI TS 102 221 §8.3)
+
+        Returns one of ``"mf"`` / ``"adf"`` / ``"df"`` / ``"ef"`` /
+        ``"unknown"``. The fallback rule for entries that don't carry a
+        prefix is the only ambiguity-resolver: if the entry has children
+        we treat it as a DF (only DF/ADF/MF can hold children), otherwise
+        as an EF.
+        """
+        upper =str (name or "").strip ().upper ()
+        if len (upper )==0 :
+            return "unknown"
+        if upper =="MF":
+            return "mf"
+        if upper .startswith ("ADF_")or upper .startswith ("ADF."):
+            return "adf"
+        if upper .startswith ("DF_")or upper .startswith ("DF."):
+            return "df"
+        if upper .startswith ("EF_")or upper .startswith ("EF."):
+            return "ef"
+        if has_children :
+            return "df"
+        return "ef"
+
+    @staticmethod
     def _split_scan_root_nodes (roots :List [Dict [str ,Any ]])->Tuple [bool ,List [Dict [str ,Any ]]]:
         render_nodes =[]
         mf_children =[]
@@ -1799,9 +1832,26 @@ class FileSystemController :
                     path_name =str (node .get ('path_name',node ['name'])).strip ().upper ()
                     if len (path_name )==0 :
                         path_name =str (node ['name']).strip ().upper ()
-                    current_path =path_name 
-                    if parent_path !="":
+
+                    # ADF roots are reached via SELECT BY AID, so the
+                    # path-walk branch in select() resolves them through the
+                    # aid_registry — they must NOT carry an "MF/" prefix.
+                    # Detect them by selected_fid being a long AID (>4 hex
+                    # chars) and the node sitting at the top level (level==1
+                    # because the root MF is level 0 and is added separately
+                    # below). For non-ADF top-level entries (DFs and EFs
+                    # under MF) we keep the "MF/" prefix so select()'s
+                    # path-walk branch fires and pre-selects MF first.
+                    is_adf_root =False 
+                    if level ==1 and len (str (selected_fid ))>4 :
+                        is_adf_root =True 
+
+                    if is_adf_root :
+                        current_path =path_name 
+                    elif parent_path !="":
                         current_path =f"{parent_path}/{path_name}"
+                    else :
+                        current_path =path_name 
 
                     self .scan_cache [idx ]=current_path 
 
@@ -1817,13 +1867,18 @@ class FileSystemController :
 
                     child_collector =None 
                     if collect_into is not None :
+                        node_name_upper =str (node ['name']).strip ().upper ()
                         entry ={
                         "idx":idx ,
                         "fid":selected_fid ,
-                        "name":str (node ['name']).strip ().upper (),
+                        "name":node_name_upper ,
                         "display_name":display_name ,
                         "path":current_path ,
                         "level":level ,
+                        "kind":self ._classify_tree_node_kind (
+                            node_name_upper ,
+                            has_children =bool (node .get ('children')),
+                        ),
                         "children":[],
                         }
                         collect_into .append (entry )
@@ -1848,20 +1903,21 @@ class FileSystemController :
                 "display_name":"MF",
                 "path":"MF",
                 "level":0 ,
+                "kind":"mf",
                 "children":[],
                 }
                 root_collector .append (root_entry )
                 child_sink =root_entry ["children"]
             else :
                 child_sink =None 
-            # Seed traversal with parent_path="MF" so every descendant path
-            # is fully qualified (e.g. "MF/EF.ICCID", "MF/ADF_USIM/EF_IMSI").
-            # The select() path-walk branch pre-selects MF before walking
-            # segments, which means GUI clicks on an EF directly under MF
-            # always succeed regardless of where the card's current DF
-            # happens to be. Without this, top-level EFs came through as
-            # bare names ("EF.ICCID") and the no-slash select branch
-            # tried 00A4000402<FID> against the last-selected ADF.
+            # Seed traversal with parent_path="MF" so non-ADF top-level
+            # entries (DFs/EFs directly under MF) come through as
+            # "MF/<name>". Their slash forces select() into the path-walk
+            # branch, which pre-selects MF first — guaranteeing GUI clicks
+            # on EFs under MF resolve regardless of which ADF is currently
+            # selected. ADF roots are exempted inside live_scan above so
+            # they keep their bare alias path (e.g. "USIM", "SSIM") which
+            # the AID registry resolves via SELECT BY AID.
             live_scan (render_roots ,"3F00","MF",1 ,collect_into =child_sink )
         finally :
             self .tp .transmit ("00A40004023F00",silent =True )
