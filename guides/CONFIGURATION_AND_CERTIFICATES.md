@@ -473,6 +473,13 @@ the simulator's MNO-SD).
 **File.** `Workspace/SCP03/keys.ini`.
 **Companion files.** `aid.txt`, `fids.txt`, `binds.json` (per-shell
 state).
+**Shipped seeds.** First-run defaults live under `SCP03/seeds/`
+(`keys.ini`, `aid.txt`, `fids.txt`, `binds.json`). They are copied into
+`Workspace/SCP03/` exactly once, on first launch, and never overwrite an
+existing runtime file. The shipped `keys.ini` carries the publicly-known
+GlobalPlatform demo placeholder (`1122334455667788AABBCCDDEEFF0011` and
+ADM `3132333435363738`) — replace it before talking to any production
+card.
 
 ```ini
 [KEYS]

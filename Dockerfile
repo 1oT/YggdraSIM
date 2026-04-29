@@ -39,13 +39,16 @@ WORKDIR /opt/YggdraSIM
 
 # Toolchain + pcsc headers needed by pyscard's C extension. ``libudev1`` is
 # pulled in for pyudev only; the runtime stage keeps a copy so ``full``
-# images can dlopen it at import time.
+# images can dlopen it at import time. ``git`` is required because the
+# pySim dependency is fetched as ``pip install 'pySim @ git+...'`` and pip
+# shells out to the system git binary to clone the upstream tree.
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
         build-essential \
         ca-certificates \
         g++ \
         gcc \
+        git \
         libpcsclite-dev \
         libudev1 \
         libudev-dev \
