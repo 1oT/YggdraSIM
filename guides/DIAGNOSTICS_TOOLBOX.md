@@ -239,7 +239,7 @@ guides because they sit on top of larger subsystems:
   `Nausf_UEAuthentication_Authenticate` round trip against the
   simulated USIM without standing up Open5GS. The opt-in FastAPI
   loopback is gated by `YGGDRASIM_5GCORE_MODE=stub`. See
-  `guides/CAPABILITIES.md` §11 and `V2_ROADMAP.md` `R2-005`.
+  `guides/CAPABILITIES.md` §11 and `V2_ROADMAP.md` `R2-005`. (R2-005, post-v1.0.0 staging — see V2_ROADMAP.md.)
 - **`main/main.py --doctor`.** Read-only preflight covering Python
   version, `cryptography`, `pycryptodomex`, `asn1tools`, optional
   on-disk `pysim/` clone, SQLite, optional `textual` (TUI), PC/SC

@@ -1811,6 +1811,7 @@ The complementary core-side surface lives under `Tools/YggdraCore/`,
 which exposes an in-process AUSF / AAnF pair plus a FastAPI loopback
 launcher (`YGGDRASIM_5GCORE_MODE=stub`). See the operator-surfaces
 table on the [home page](../index.md) for the entry points.
+*(R2-005, post-v1.0.0 staging — see V2_ROADMAP.md.)*
 
 ## Identity files
 

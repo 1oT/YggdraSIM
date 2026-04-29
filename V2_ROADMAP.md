@@ -36,7 +36,7 @@ test CI material after every v2 delivery.
 | R2-002 | Signer seam follow-ups (cloud KMS providers) | Medium | accepted |
 | R2-003 | Signer seam follow-ups (eUICC-side issuer chain) | Low | accepted |
 | R2-004 | Universal GUI (desktop `--gui` + remote `--web-server`) | Medium | in-progress (Phase A + B + B-1/B-2/B-3 + Command Center 1st/2nd/3rd slice + G-1..G-4 SCP03 Workbench + SA-1..SA-4 SAIP Workbench + C-1..C-7 SCP03 module-parity + SIMCARD helpers + SCP11 Local workbench (read-only) + per-tab xterm + Playwright smoke skeleton landed) |
-| R2-005 | Simulated USIM 5G AKA / AKMA / SUCI / `GET IDENTITY` + in-process YggdraCore (AUSF / AAnF) stubs + BYO-Open5GS bridge | High | in-progress (SIMCARD modules and Tools/YggdraCore landed; documentation, CLI surface, and full HTTP loopback hardening pending) |
+| R2-005 | Simulated USIM 5G AKA / AKMA / SUCI / `GET IDENTITY` + in-process YggdraCore (AUSF / AAnF) stubs + BYO-Open5GS bridge | High | in-progress (SIMCARD-side `aka_5g` / `akma` / `suci` / `identity` shipped in v1.0.0; `Tools/YggdraCore`, `Tools/Sunrise6G`, `Tools/CardBridge` HTTP tier staging committed post-v1.0.0; documentation, CLI surface, and full HTTP-loopback hardening pending) |
 
 ---
 

@@ -305,6 +305,8 @@ search.
 
 ## Recipe 8: Seed a YggdraCore subscription
 
+> **Status: R2-005, post-v1.0.0 staging.** Tracked in [V2_ROADMAP.md](../../V2_ROADMAP.md). The v1.0.0 frozen tree (tag `v1.0.0`) does not include this surface.
+
 The in-process AUSF / AAnF stub holds subscribers in memory only.
 There is no on-disk format.
 
@@ -450,7 +452,7 @@ non-test environment:
 6. **SUCI keys.** Author per home-network. Never reuse across
    operators.
 7. **YggdraCore subscribers.** Provision through `upsert(...)` or the
-   BYO Open5GS bridge. Stub state is intentionally non-persistent.
+   BYO Open5GS bridge. Stub state is intentionally non-persistent. (R2-005, post-v1.0.0 staging — see V2_ROADMAP.md.)
 8. **EUM session keys.** Author with `yggdrasim-eum-diag store-keys`,
    chmod 0600, point `YGGDRASIM_EUM_SESSION_KEYS` at the file.
 9. **HIL keybags.** Drop next to the pcap; auto-discovery picks them

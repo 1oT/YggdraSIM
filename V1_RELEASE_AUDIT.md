@@ -11,6 +11,15 @@ grouped by severity, plus a concrete pre-tag action list.
 
 The engineering work looks done. What is left is release hygiene.
 
+> **Status: closed (2026-04-29).** v1.0.0 was tagged at commit
+> `ec74dd5 release: v1.0.0 freeze`; `pyproject.toml` is now SemVer
+> `1.0.0`; the post-v1 R2-005 Tools-tier staging continues on `main`
+> from commit `8433ec7 wip(v2): R2-005 staging — YggdraCore + Sunrise6G
+> + CardBridge HTTP tier`. The carved release tree is mirrored at
+> `~/Documents/Tools/YggdraSIM_v1.0.0` on the `release/1.0.x` branch.
+> Outstanding items below are kept for historical context — anything
+> still relevant moves into `V2_ROADMAP.md`, not back into this audit.
+
 ---
 
 ## Blockers (must fix before tagging v1)
