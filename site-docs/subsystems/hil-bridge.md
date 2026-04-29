@@ -239,6 +239,24 @@ schema is stable across `v1`.
   leave the card in live mode. Use `SCP11.local_access` or SCP03 for
   real exports.
 
+## AT+CSIM / AT+CRSM transcoder
+
+`Tools/HilBridge/at_simlink.py` (3GPP TS 27.007 §8.17 / §8.18) is a
+transport-agnostic transcoder that turns `AT+CSIM=...` and
+`AT+CRSM=...` request lines into raw ISO 7816 APDUs and stringifies
+the responses back into `+CSIM:` / `+CRSM:` reply lines. Use it when
+an AT-controlled modem must exercise the simulator or a SIMtrace2-bridged
+card without a direct PC/SC handle:
+
+| Request shape | Decoded APDU |
+| --- | --- |
+| `AT+CSIM=<length>,"<hex>"` | raw `CLA INS P1 P2 P3 …` |
+| `AT+CRSM=<command>,<fileid>,<P1>,<P2>,<P3>[,"<data>"][,"<path>"]` | `CLA=0x00`, `INS` from the §8.18 command table |
+
+Common modem REFRESH and AT-only flows can therefore be replayed
+through the same simulator backend the SCP shells use, with no host
+PC/SC involvement on the modem side.
+
 ## Optional `systemd --user` service
 
 `guides/systemd/yggdrasim-hil-supervisor.service.example` ships as a starting

@@ -9,15 +9,22 @@ subsystems.
 | Site page | Main source material |
 | --- | --- |
 | `index.md` | `README.md`, `guides/README.md` |
-| `getting-started.md` | `README.md` |
+| `getting-started.md` | `README.md`, `guides/INSTALL_*.md` |
 | `architecture.md` | `guides/ARCHITECTURE.md` |
 | `operator-surfaces.md` | `guides/CAPABILITIES.md`, `guides/CLI_AND_PIPING_GUIDE.md` |
+| `subsystems/scp03.md` | `SCP03/README.md` |
+| `subsystems/scp80.md` | `SCP80/README.md` |
 | `subsystems/scp11-live.md` | `SCP11/README.md`, `SCP11/live/README.md` |
 | `subsystems/scp11-test.md` | `SCP11/README.md`, `SCP11/test/README.md` |
 | `subsystems/scp11-local-access.md` | `SCP11/local_access/README.md` |
 | `subsystems/scp11-eim-local.md` | `SCP11/eim_local/README.md`, `SCP11/eim_local/GUIDE.md` |
 | `subsystems/profile-package.md` | `Tools/ProfilePackage/` sources |
-| `subsystems/hil-bridge.md` | `guides/HIL_BRIDGE_GUIDE.md` |
+| `subsystems/hil-bridge.md` | `guides/HIL_BRIDGE_GUIDE.md`, `guides/SIMTRACE2_CARDEM_GUIDE.md` |
+| `subsystems/apdu-fuzzer.md` | `Tools/ApduFuzz/` sources |
+| `subsystems/eum-diagnostics.md` | `Tools/EumDiag/` sources |
+| `subsystems/simcard-simulator.md` | `SIMCARD/` sources, `guides/CAPABILITIES.md` |
+| `subsystems/suci-tool.md` | `Tools/SuciTool/` sources |
+| `how-to/diagnostics-toolbox.md` | `guides/DIAGNOSTICS_TOOLBOX.md` |
 | `reference/state-schema.md` | `plugins/README.md`, `guides/ARCHITECTURE.md` |
 | `build-and-packaging.md` | `guides/BUILD_AND_PACKAGING.md` |
 
@@ -33,6 +40,15 @@ subsystems.
 | `guides/PROFILE_LIFECYCLE_CLI_CHEATSHEET.md` | ready-to-run lifecycle, polling, and logging recipes |
 | `guides/BUILD_AND_PACKAGING.md` | Docker, PyInstaller, `.deb`, and packaging guidance |
 | `guides/HIL_BRIDGE_GUIDE.md` | SIMtrace2 and PCSC HIL bridge setup and operation |
+| `guides/SIMTRACE2_CARDEM_GUIDE.md` | SIMtrace2 cardem hardware bring-up notes |
+| `guides/DIAGNOSTICS_TOOLBOX.md` | SAIP diff, simulator-to-TUI, fuzzer, and EUM diag |
+| `guides/INSTALL_CLEAN.md` | clean (no-HIL) install path |
+| `guides/INSTALL_FULL.md` | full HIL-capable install path |
+| `guides/INSTALL_FROM_SOURCE.md` | source-checkout install with optional extras |
+| `guides/INSTALL_RASPBERRYPI.md` | Raspberry Pi install notes |
+| `guides/TEMPLATE_AND_TOKENS.md` | template and token contract used by the launcher and shells |
+| `V1_FEATURE_PLAN.md`, `V1_RELEASE_AUDIT.md`, `V2_ROADMAP.md` | release planning and roadmap notes |
+| `SIMCARD_V1_REVIEW.md` | historical simulator backend gap review |
 | `SCP11/README.md` | SCP11 family selection guide |
 | `SCP11/live/README.md` | live relay operator guide |
 | `SCP11/test/README.md` | test relay operator guide |

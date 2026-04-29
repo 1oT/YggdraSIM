@@ -13,6 +13,16 @@ are defined in `site-docs/_includes/abbreviations.md`.
 
 ## A
 
+**AAnF** - AKMA Anchor Function. The 5G core function that anchors AKMA
+keys per UE.
+
+**A-KID** - AKMA Key Identifier. Identifier carried alongside `K_AKMA`.
+
+**AKA** - Authentication and Key Agreement.
+
+**AKMA** - Authentication and Key Management for Applications (3GPP TS
+33.535).
+
 **AID** - Application Identifier. A globally unique identifier for an
 on-card application, package, or Security Domain.
 
@@ -25,7 +35,12 @@ access rules on a UICC.
 **ATR** - Answer To Reset. The initial response a card sends after an
 electrical or logical reset.
 
+**AUSF** - Authentication Server Function. The 5G core function that
+performs authentication with the UE.
+
 ## B
+
+**BIP** - Bearer Independent Protocol (ETSI TS 102 223).
 
 **BPP** - Bound Profile Package. The bound form of a profile delivered by
 SM-DP+ to a device for installation into an ISD-P.
@@ -57,6 +72,8 @@ transfers.
 
 ## E
 
+**EAP-AKA'** - EAP method for AKA over non-3GPP access (3GPP TS 33.402).
+
 **EF** - Elementary File. An ETSI/3GPP filesystem data file.
 
 **EID** - eUICC Identifier. The identity of an eUICC.
@@ -81,10 +98,16 @@ transfers.
 
 ## G
 
+**GET IDENTITY** - 3GPP TS 31.102 §7.1.2.4 USIM command that returns the
+SUCI built on-card.
+
 **GP** - GlobalPlatform.
 
 **GSMA** - GSM Association. The telecom industry body that authors SGP.
 specifications.
+
+**GSMTAP** - Encapsulation used to mirror SIM/modem traffic for capture
+in Wireshark.
 
 ## H
 
@@ -109,6 +132,12 @@ that runs inside the eUICC itself rather than on the host device.
 **ISD-R** - Issuer Security Domain - Root. The top SD on an eUICC.
 
 **ISIM** - IP Multimedia Services Identity Module.
+
+## K
+
+**K_AKMA** - AKMA Anchor Key derived from `Kausf`.
+
+**Kausf** - 5G AKA anchor key derived during 5G authentication.
 
 ## L
 
@@ -145,6 +174,9 @@ that runs inside the eUICC itself rather than on the host device.
 ## R
 
 **RAM** - Remote Application Management.
+
+**RES** / **RES*** - AKA response (`RES`) and the 5G AKA derived response
+(`RES*`, derived per 3GPP TS 33.501 Annex A.4).
 
 **RAT** - Rules Authorisation Table.
 

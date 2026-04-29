@@ -188,6 +188,43 @@ class HilBridgeLiveDecodeTuiTests(unittest.TestCase):
             "Channels",
         )
 
+    def test_summary_group_name_weaves_iso7816_manage_channel_into_stk(self) -> None:
+        """ISO/IEC 7816-4 MANAGE CHANNEL must not be mistaken for STK BIP OPEN CHANNEL.
+
+        The wireshark dissector reports plain logical-channel
+        management APDUs (CLA xx INS 70) as
+        "ISO/IEC 7816-4 MANAGE CHANNEL Operation=Open Channel ...".
+        The "OPEN CHANNEL" substring would otherwise match the STK
+        BIP marker and slot these frames into "Channels", where they
+        would fall into the unbound-channel tail because they carry
+        no channel_session_id (they *are* the channel-open primitive,
+        not a BIP session lifecycle event). In practice the modem
+        brackets STK proactive activity with MANAGE CHANNEL pairs, so
+        the TUI weaves them into the STK group.
+        """
+        from Tools.HilBridge.live_decode_tui import _summary_group_name
+
+        self.assertEqual(
+            _summary_group_name(
+                self._summary_row(
+                    1,
+                    info="ISO/IEC 7816-4 MANAGE CHANNEL Operation=Open Channel (assign channel)",
+                ),
+                None,
+            ),
+            "STK",
+        )
+        self.assertEqual(
+            _summary_group_name(
+                self._summary_row(
+                    2,
+                    info="ISO/IEC 7816-4 MANAGE CHANNEL Operation=Close Channel",
+                ),
+                None,
+            ),
+            "STK",
+        )
+
     def test_summary_partition_channel_rows_groups_channel_lifecycle_under_open_channel_session(self) -> None:
         from Tools.HilBridge.live_decode_state import StatefulFrameAnnotation
         from Tools.HilBridge.live_decode_tui import (

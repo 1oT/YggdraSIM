@@ -2525,7 +2525,14 @@ class EimLocalModelTests(unittest.TestCase):
         self.assertNotIn("INFO", shell._commands)
         self.assertNotIn("POLL", shell._commands)
         self.assertNotIn("Q", shell._commands)
-        self.assertEqual(shell._canonical_command("INFO"), "DISCOVER")
+        # After SCP11 command harmonisation INFO is an alias of SCAN
+        # (the quick card-overview snapshot used by eSIM Live / Test /
+        # Local SMDP+ / Local eIM). DISCOVER stays as the full
+        # SGP.32 consolidated dump and its own primary command.
+        self.assertEqual(shell._canonical_command("INFO"), "SCAN")
+        self.assertEqual(shell._canonical_command("DISCOVER"), "DISCOVER")
+        self.assertEqual(shell._canonical_command("EIM-DISCOVER"), "DISCOVER")
+        self.assertIn("SCAN", shell._commands)
         self.assertEqual(shell._canonical_command("POLL-CAMPAIGN"), "POLL-CAMPAIGN")
         self.assertEqual(shell._canonical_command("Q"), "EXIT")
 

@@ -1,0 +1,5 @@
+# Factory reset configuration to default test keys. The runner snapshots
+# Workspace/SCP03/keys.ini before the run and restores it afterwards so this
+# remains non-destructive between local runs.
+SET-DEFAULT
+EXIT

@@ -17,9 +17,19 @@ from SIMCARD.euicc_store import sync_euicc_store
 from SIMCARD.etsi_fs import next_generated_profile_aid, rebuild_runtime_filesystem
 from SIMCARD.profile_store import sync_profiles_to_store
 from SIMCARD.saip_profile import decode_profile_image
+from SIMCARD.sgp32_packages import (
+    EuiccPackageDecodeError,
+    decode_euicc_package_request,
+    encode_der_integer,
+    encode_euicc_package_error_signed,
+    encode_euicc_package_error_unsigned,
+    encode_euicc_package_result_signed,
+    verify_eim_signature,
+)
 from SIMCARD.state import (
     SimCardState,
     SimEimEntry,
+    SimEuiccPackageResultEntry,
     SimNotificationEntry,
     SimProfileEntry,
     SimSgpSession,
@@ -122,8 +132,8 @@ class SgpLogic:
             return self._build_configured_data_response(), 0x90, 0x00
         if normalized == bytes.fromhex("BF4300"):
             return self._build_rat_response(), 0x90, 0x00
-        if normalized == bytes.fromhex("BF5500"):
-            return self._build_eim_configuration_response(), 0x90, 0x00
+        if normalized.startswith(bytes.fromhex("BF55")):
+            return self._build_eim_configuration_response(normalized), 0x90, 0x00
         if normalized == bytes.fromhex("BF5600"):
             return self._build_certs_response(), 0x90, 0x00
         if normalized in (bytes.fromhex("BF3E00"), bytes.fromhex("BF3E035C015A")):
@@ -137,13 +147,48 @@ class SgpLogic:
         if normalized.startswith(bytes.fromhex("BF57")):
             return self._handle_add_eim(normalized, "BF57")
         if normalized.startswith(bytes.fromhex("BF58")):
+            # SGP.32 v1.2 §5.9.16 ProfileRollbackRequest is also tagged
+            # BF58, with body ``01 01 NN`` (a primitive BOOLEAN). The
+            # legacy UpdateEim path uses a constructed ``A0 30 ...``
+            # body. Sniff the inner first TLV to route correctly.
+            if self._is_profile_rollback_request(normalized):
+                return self._handle_profile_rollback(normalized)
             return self._handle_add_eim(normalized, "BF58")
         if normalized.startswith(bytes.fromhex("BF59")):
+            # SGP.32 v1.2 §5.9.17 ConfigureImmediateProfileEnabling shares
+            # the BF59 tag with the legacy "delete eIM" surface used by
+            # the simulator's eim_local fixtures. Both carry context [0]
+            # tags but differ structurally: ConfigureImmediateProfileEnabling
+            # uses NULL/[1] OID/[2] UTF8String, the legacy path always
+            # uses a non-empty UTF-8 eIM identifier in [0]. Sniff the
+            # body to pick the correct lane.
+            if self._is_configure_immediate_enable_request(normalized):
+                return self._handle_configure_immediate_profile_enabling(normalized)
             return self._handle_delete_eim(normalized)
+        if normalized.startswith(bytes.fromhex("BF5A")):
+            return self._handle_immediate_enable(normalized)
+        if normalized.startswith(bytes.fromhex("BF5B")):
+            return self._handle_enable_emergency_profile(normalized)
+        if normalized.startswith(bytes.fromhex("BF5C")):
+            return self._handle_disable_emergency_profile(normalized)
+        if normalized.startswith(bytes.fromhex("BF5D")):
+            return self._handle_execute_fallback_mechanism(normalized)
+        if normalized.startswith(bytes.fromhex("BF5E")):
+            return self._handle_return_from_fallback(normalized)
+        if normalized.startswith(bytes.fromhex("BF5F")):
+            return self._handle_get_connectivity_parameters(normalized)
+        if normalized.startswith(bytes.fromhex("BF65")):
+            return self._handle_set_default_dp_address_es10b(normalized)
+        if normalized.startswith(bytes.fromhex("BF34")):
+            return self._handle_es10c_memory_reset(normalized)
         if normalized.startswith(bytes.fromhex("BF64")):
             return self._handle_euicc_memory_reset(normalized)
         if normalized.startswith(bytes.fromhex("BF30")):
             return self._remove_notification_from_list(normalized), 0x90, 0x00
+        if normalized.startswith(bytes.fromhex("BF35")):
+            return self._handle_load_crl(normalized)
+        if normalized.startswith(bytes.fromhex("BF51")):
+            return self._handle_load_euicc_package(normalized)
         if normalized.startswith(bytes.fromhex("BF41")):
             reason_code = 0
             reason_raw = find_first_tlv(normalized, "81")
@@ -244,6 +289,459 @@ class SgpLogic:
         self.state.eim_entries = retained
         self._sync_euicc_store()
         return tlv("BF59", b""), 0x90, 0x00
+
+    @staticmethod
+    def _is_configure_immediate_enable_request(payload: bytes) -> bool:
+        # SGP.32 v1.2 §5.9.17 ConfigureImmediateProfileEnablingRequest body:
+        #   [0] NULL OPTIONAL, [1] OBJECT IDENTIFIER OPTIONAL,
+        #   [2] UTF8String OPTIONAL.
+        # The legacy delete-eIM path always carries a non-empty UTF-8
+        # eIM identifier under [0]. Positive ID rule: any of an empty
+        # [0] (NULL), or a [1]/[2] field present, or empty body, is the
+        # spec request.
+        try:
+            _outer_tag, outer_value, _raw, _next = read_tlv(bytes(payload or b""), 0)
+        except ValueError:
+            return False
+        if len(outer_value) == 0:
+            return True
+        offset = 0
+        while offset < len(outer_value):
+            try:
+                tag_bytes, value, _raw_inner, next_offset = read_tlv(outer_value, offset)
+            except ValueError:
+                return False
+            if tag_bytes == b"\x80" and len(value) == 0:
+                return True
+            if tag_bytes in (b"\x81", b"\x82"):
+                return True
+            offset = next_offset
+        return False
+
+    def _handle_configure_immediate_profile_enabling(
+        self, payload: bytes
+    ) -> tuple[bytes, int, int]:
+        # SGP.32 v1.2 §5.9.17 ConfigureImmediateProfileEnablingResponse ::=
+        # [89] SEQUENCE { configImmediateEnableResult [0] INTEGER {
+        #   ok(0), insufficientMemory(1), associatedEimAlreadyExists(2),
+        #   undefinedError(127) } } -- Tag 'BF59'
+        if len(self.state.eim_entries) > 0:
+            return (
+                tlv("BF59", tlv(b"\x80", encode_der_integer(2))),
+                0x90,
+                0x00,
+            )
+        try:
+            _outer_tag, outer_value, _raw, _next = read_tlv(bytes(payload or b""), 0)
+        except ValueError:
+            return (
+                tlv("BF59", tlv(b"\x80", encode_der_integer(127))),
+                0x90,
+                0x00,
+            )
+        flag_present = False
+        new_oid: str | None = None
+        new_address: str | None = None
+        offset = 0
+        while offset < len(outer_value):
+            try:
+                tag_bytes, value, _raw_inner, next_offset = read_tlv(outer_value, offset)
+            except ValueError:
+                return (
+                    tlv("BF59", tlv(b"\x80", encode_der_integer(127))),
+                    0x90,
+                    0x00,
+                )
+            if tag_bytes == b"\x80":
+                flag_present = True
+            elif tag_bytes == b"\x81":
+                new_oid = self._format_oid(value)
+            elif tag_bytes == b"\x82":
+                try:
+                    new_address = bytes(value).decode("utf-8", "strict").strip()
+                except UnicodeDecodeError:
+                    return (
+                        tlv("BF59", tlv(b"\x80", encode_der_integer(127))),
+                        0x90,
+                        0x00,
+                    )
+            offset = next_offset
+        self.state.immediate_enable_flag = bool(flag_present)
+        if new_oid is not None:
+            self.state.immediate_enable_smdp_oid = new_oid
+        if new_address is not None:
+            self.state.immediate_enable_smdp_address = new_address
+        self._sync_euicc_store()
+        return (
+            tlv("BF59", tlv(b"\x80", encode_der_integer(0))),
+            0x90,
+            0x00,
+        )
+
+    def _handle_immediate_enable(self, payload: bytes) -> tuple[bytes, int, int]:
+        # SGP.32 v1.2 §5.9.15 ImmediateEnableRequest ::= [90] SEQUENCE {
+        #   refreshFlag BOOLEAN } -- Tag 'BF5A'
+        # Response: [90] SEQUENCE { immediateEnableResult [0] INTEGER {
+        #   ok(0), immediateEnableNotAvailable(1), noSessionContext(4),
+        #   catBusy(5), undefinedError(127) } }
+        # The simulator does not strictly enforce "previous ES10 was
+        # LoadBoundProfilePackage"; instead it requires
+        # ``immediate_enable_flag`` to be set (which the spec mandates
+        # as a precondition of granting immediate enabling) and a
+        # disabled candidate Profile to enable.
+        if self.state.immediate_enable_flag is False:
+            return (
+                tlv("BF5A", tlv(b"\x80", encode_der_integer(1))),
+                0x90,
+                0x00,
+            )
+        candidate = next(
+            (entry for entry in reversed(self.state.profiles) if entry.state == "disabled"),
+            None,
+        )
+        if candidate is None:
+            return (
+                tlv("BF5A", tlv(b"\x80", encode_der_integer(4))),
+                0x90,
+                0x00,
+            )
+        previous_enabled = next(
+            (entry for entry in self.state.profiles if entry.state == "enabled"),
+            None,
+        )
+        if previous_enabled is not None:
+            previous_enabled.state = "disabled"
+            previous_enabled.rollback_armed = False
+            self._enqueue_notification(
+                operation=self.NOTIF_DISABLE,
+                profile=previous_enabled,
+            )
+        candidate.state = "enabled"
+        candidate.rollback_armed = False
+        self.state.active_profile_aid = str(candidate.aid or "")
+        self.state.previous_enabled_aid = ""
+        rebuild_runtime_filesystem(self.state)
+        self._sync_profile_store()
+        self._enqueue_notification(
+            operation=self.NOTIF_ENABLE,
+            profile=candidate,
+        )
+        return (
+            tlv("BF5A", tlv(b"\x80", encode_der_integer(0))),
+            0x90,
+            0x00,
+        )
+
+    @staticmethod
+    def _is_profile_rollback_request(payload: bytes) -> bool:
+        # BF58 ProfileRollbackRequest body: SEQUENCE { refreshFlag BOOLEAN }.
+        # Single primitive BOOLEAN (tag 01). The legacy UpdateEim wrapper
+        # always carries a constructed body so the discriminator is the
+        # very first inner TLV tag.
+        try:
+            _outer_tag, outer_value, _raw, _next = read_tlv(bytes(payload or b""), 0)
+        except ValueError:
+            return False
+        if len(outer_value) == 0:
+            return False
+        try:
+            inner_tag, _value, _raw_inner, _next_inner = read_tlv(outer_value, 0)
+        except ValueError:
+            return False
+        return inner_tag == b"\x01"
+
+    def _handle_profile_rollback(self, payload: bytes) -> tuple[bytes, int, int]:
+        # SGP.32 §5.9.16 ProfileRollbackResponse ::= [88] SEQUENCE { -- BF58
+        #     cmdResult INTEGER {ok(0), rollbackNotAllowed(1), catBusy(5),
+        #                        commandError(7), undefinedError(127)},
+        #     eUICCPackageResult [81] EuiccPackageResult OPTIONAL  -- BF51
+        # }
+        # AUTOMATIC TAGS keeps the cmdResult INTEGER as primitive 0x80
+        # because all SEQUENCE fields are unambiguously tagged.
+        candidate = next(
+            (entry for entry in self.state.profiles if entry.rollback_armed is True),
+            None,
+        )
+        previous_aid = str(self.state.previous_enabled_aid or "").strip()
+        previous_profile = self._lookup_profile_by_aid(previous_aid)
+        if candidate is None or previous_profile is None:
+            return (
+                tlv("BF58", tlv(b"\x80", encode_der_integer(1))),  # rollbackNotAllowed
+                0x90,
+                0x00,
+            )
+        candidate.state = "disabled"
+        candidate.rollback_armed = False
+        previous_profile.state = "enabled"
+        self.state.active_profile_aid = str(previous_profile.aid or "")
+        self.state.previous_enabled_aid = ""
+        rebuild_runtime_filesystem(self.state)
+        self._sync_profile_store()
+        self._enqueue_notification(operation=self.NOTIF_DISABLE, profile=candidate)
+        self._enqueue_notification(operation=self.NOTIF_ENABLE, profile=previous_profile)
+        return (
+            tlv("BF58", tlv(b"\x80", encode_der_integer(0))),
+            0x90,
+            0x00,
+        )
+
+    def _handle_execute_fallback_mechanism(self, payload: bytes) -> tuple[bytes, int, int]:
+        # SGP.32 §5.9.20 ExecuteFallbackMechanismResponse ::= [93] SEQUENCE { -- BF5D
+        #     executeFallbackMechanismResult [0] INTEGER { ok(0),
+        #         profileNotInDisabledState(2), catBusy(5),
+        #         fallbackNotAvailable(6), commandError(7),
+        #         ecallActive(104), undefinedError(127) }
+        # }
+        if bool(self.state.euicc_info.iot_specific_info.fallback_supported) is False:
+            return (
+                tlv("BF5D", tlv(b"\x80", encode_der_integer(7))),
+                0x90,
+                0x00,
+            )
+        fallback_profile = next(
+            (entry for entry in self.state.profiles if entry.fallback_attribute is True),
+            None,
+        )
+        currently_enabled = next(
+            (entry for entry in self.state.profiles if entry.state == "enabled"),
+            None,
+        )
+        if currently_enabled is None:
+            return (
+                tlv("BF5D", tlv(b"\x80", encode_der_integer(7))),
+                0x90,
+                0x00,
+            )
+        if fallback_profile is None:
+            return (
+                tlv("BF5D", tlv(b"\x80", encode_der_integer(6))),  # fallbackNotAvailable
+                0x90,
+                0x00,
+            )
+        if fallback_profile.state != "disabled":
+            return (
+                tlv("BF5D", tlv(b"\x80", encode_der_integer(2))),  # profileNotInDisabledState
+                0x90,
+                0x00,
+            )
+        currently_enabled.state = "disabled"
+        fallback_profile.state = "enabled"
+        self.state.active_profile_aid = str(fallback_profile.aid or "")
+        # Per §5.9.20: any granted rollback authorisation is reset.
+        for entry in self.state.profiles:
+            entry.rollback_armed = False
+        self.state.previous_enabled_aid = str(currently_enabled.aid or "")
+        rebuild_runtime_filesystem(self.state)
+        self._sync_profile_store()
+        self._enqueue_notification(operation=self.NOTIF_DISABLE, profile=currently_enabled)
+        self._enqueue_notification(operation=self.NOTIF_ENABLE, profile=fallback_profile)
+        return (
+            tlv("BF5D", tlv(b"\x80", encode_der_integer(0))),
+            0x90,
+            0x00,
+        )
+
+    def _handle_return_from_fallback(self, payload: bytes) -> tuple[bytes, int, int]:
+        # SGP.32 §5.9.21 ReturnFromFallbackResponse ::= [94] SEQUENCE { -- BF5E
+        #     returnFromFallbackResult [0] INTEGER { ok(0),
+        #         fallbackNotAvailable(6), commandError(7),
+        #         ecallActive(104), undefinedError(127) }
+        # }
+        currently_enabled = next(
+            (entry for entry in self.state.profiles if entry.state == "enabled"),
+            None,
+        )
+        if currently_enabled is None or currently_enabled.fallback_attribute is False:
+            return (
+                tlv("BF5E", tlv(b"\x80", encode_der_integer(6))),  # fallbackNotAvailable
+                0x90,
+                0x00,
+            )
+        previous_aid = str(self.state.previous_enabled_aid or "").strip()
+        previous_profile = self._lookup_profile_by_aid(previous_aid)
+        if previous_profile is None:
+            return (
+                tlv("BF5E", tlv(b"\x80", encode_der_integer(7))),  # commandError
+                0x90,
+                0x00,
+            )
+        currently_enabled.state = "disabled"
+        previous_profile.state = "enabled"
+        self.state.active_profile_aid = str(previous_profile.aid or "")
+        self.state.previous_enabled_aid = ""
+        rebuild_runtime_filesystem(self.state)
+        self._sync_profile_store()
+        self._enqueue_notification(operation=self.NOTIF_DISABLE, profile=currently_enabled)
+        self._enqueue_notification(operation=self.NOTIF_ENABLE, profile=previous_profile)
+        return (
+            tlv("BF5E", tlv(b"\x80", encode_der_integer(0))),
+            0x90,
+            0x00,
+        )
+
+    def _lookup_profile_by_aid(self, aid: str):
+        target = str(aid or "").strip().upper()
+        if len(target) == 0:
+            return None
+        for entry in self.state.profiles:
+            if str(entry.aid or "").upper() == target:
+                return entry
+        return None
+
+    @staticmethod
+    def _decode_refresh_flag(payload: bytes) -> bool | None:
+        # SGP.32 v1.2 §5.9.22 / §5.9.23 Request body is the single
+        # primitive ASN.1 BOOLEAN ``refreshFlag`` (tag ``01``). Returns
+        # None for malformed payloads so the caller can map to
+        # ``undefinedError(127)``.
+        try:
+            _outer_tag, outer_value, _raw, _next = read_tlv(bytes(payload or b""), 0)
+        except ValueError:
+            return None
+        if len(outer_value) == 0:
+            return False
+        try:
+            inner_tag, inner_value, _raw_inner, _next_inner = read_tlv(outer_value, 0)
+        except ValueError:
+            return None
+        if inner_tag != b"\x01" or len(inner_value) != 1:
+            return None
+        return inner_value[0] != 0x00
+
+    def _handle_enable_emergency_profile(self, payload: bytes) -> tuple[bytes, int, int]:
+        # SGP.32 v1.2 §5.9.22 EnableEmergencyProfile -- Tag 'BF5B'.
+        # Response: [91] SEQUENCE { enableEmergencyProfileResult [0] INTEGER {
+        #   ok(0), profileNotInDisabledState(2), catBusy(5),
+        #   ecallNotAvailable(8), undefinedError(127) } }
+        if bool(self.state.euicc_info.iot_specific_info.ecall_supported) is False:
+            return tlv("BF5B", tlv(b"\x80", encode_der_integer(8))), 0x90, 0x00
+        emergency_profile = next(
+            (entry for entry in self.state.profiles if entry.ecall_indication is True),
+            None,
+        )
+        if emergency_profile is None:
+            return tlv("BF5B", tlv(b"\x80", encode_der_integer(8))), 0x90, 0x00
+        if self._decode_refresh_flag(payload) is None:
+            return tlv("BF5B", tlv(b"\x80", encode_der_integer(127))), 0x90, 0x00
+        if emergency_profile.state != "disabled":
+            return tlv("BF5B", tlv(b"\x80", encode_der_integer(2))), 0x90, 0x00
+        currently_enabled = next(
+            (entry for entry in self.state.profiles if entry.state == "enabled"),
+            None,
+        )
+        if currently_enabled is not None:
+            currently_enabled.state = "disabled"
+            currently_enabled.rollback_armed = False
+        emergency_profile.state = "enabled"
+        emergency_profile.rollback_armed = False
+        self.state.emergency_profile_active = True
+        self.state.emergency_pre_aid = (
+            str(currently_enabled.aid or "").upper() if currently_enabled is not None else ""
+        )
+        self.state.active_profile_aid = str(emergency_profile.aid or "")
+        self.state.previous_enabled_aid = ""
+        rebuild_runtime_filesystem(self.state)
+        self._sync_profile_store()
+        self._sync_euicc_store()
+        # Per §5.9.22: Upon enabling the Emergency Profile, the eUICC
+        # SHALL NOT generate any Notifications. We therefore skip
+        # ``_enqueue_notification`` here.
+        return tlv("BF5B", tlv(b"\x80", encode_der_integer(0))), 0x90, 0x00
+
+    def _handle_disable_emergency_profile(self, payload: bytes) -> tuple[bytes, int, int]:
+        # SGP.32 v1.2 §5.9.23 DisableEmergencyProfile -- Tag 'BF5C'.
+        # Response: [92] SEQUENCE { disableEmergencyProfileResult [0] INTEGER {
+        #   ok(0), profileNotInEnabledState(2), catBusy(5),
+        #   undefinedError(127) } }
+        # Note: the spec uses ``ecallNotAvailable(8)`` only for
+        # EnableEmergencyProfile; for the disable side, §5.9.23 lists
+        # ok / profileNotInEnabledState / catBusy / undefinedError.
+        if bool(self.state.euicc_info.iot_specific_info.ecall_supported) is False:
+            return tlv("BF5C", tlv(b"\x80", encode_der_integer(2))), 0x90, 0x00
+        emergency_profile = next(
+            (entry for entry in self.state.profiles if entry.ecall_indication is True),
+            None,
+        )
+        if emergency_profile is None or emergency_profile.state != "enabled":
+            return tlv("BF5C", tlv(b"\x80", encode_der_integer(2))), 0x90, 0x00
+        if self._decode_refresh_flag(payload) is None:
+            return tlv("BF5C", tlv(b"\x80", encode_der_integer(127))), 0x90, 0x00
+        emergency_profile.state = "disabled"
+        emergency_profile.rollback_armed = False
+        previous_aid = str(self.state.emergency_pre_aid or "").strip().upper()
+        previous_profile = self._lookup_profile_by_aid(previous_aid)
+        if previous_profile is not None:
+            previous_profile.state = "enabled"
+            self.state.active_profile_aid = str(previous_profile.aid or "")
+        else:
+            self.state.active_profile_aid = ""
+        self.state.emergency_profile_active = False
+        self.state.emergency_pre_aid = ""
+        self.state.previous_enabled_aid = ""
+        rebuild_runtime_filesystem(self.state)
+        self._sync_profile_store()
+        self._sync_euicc_store()
+        # Per §5.9.23: the eUICC MAY generate notifications according
+        # to the disabled / enabled Profile metadata. Existing fixtures
+        # exercise the default ``notificationConfigurationInfo`` path.
+        self._enqueue_notification(operation=self.NOTIF_DISABLE, profile=emergency_profile)
+        if previous_profile is not None:
+            self._enqueue_notification(operation=self.NOTIF_ENABLE, profile=previous_profile)
+        return tlv("BF5C", tlv(b"\x80", encode_der_integer(0))), 0x90, 0x00
+
+    def _handle_get_connectivity_parameters(self, payload: bytes) -> tuple[bytes, int, int]:
+        # SGP.32 v1.2 §5.9.24 GetConnectivityParameters -- Tag 'BF5F'.
+        # Request: [95] SEQUENCE { } (empty body, ``BF5F00``).
+        # Response: [95] CHOICE {
+        #     connectivityParameters ConnectivityParameters,
+        #     connectivityParametersError ConnectivityParametersError
+        # } where ConnectivityParameters ::= SEQUENCE {
+        #     httpParams [1] OCTET STRING OPTIONAL  -- also used for CoAP
+        # } and ConnectivityParametersError ::= INTEGER {
+        #     parametersNotAvailable(1), undefinedError(127) }.
+        # AUTOMATIC TAGS: SEQUENCE keeps OPTIONAL field with explicit
+        # context tag ``81``. The CHOICE branches inherit the same
+        # implicit tagging pattern; we use ``80`` for the error INTEGER.
+        _ = payload  # request carries no useful operands
+        active = self._lookup_profile_by_aid(self.state.active_profile_aid)
+        params_http = bytes(active.connectivity_params_http or b"") if active is not None else b""
+        if len(params_http) == 0:
+            return (
+                tlv("BF5F", tlv(b"\x80", encode_der_integer(1))),
+                0x90,
+                0x00,
+            )
+        return (
+            tlv("BF5F", tlv(b"\x81", params_http)),
+            0x90,
+            0x00,
+        )
+
+    def _handle_set_default_dp_address_es10b(self, payload: bytes) -> tuple[bytes, int, int]:
+        # SGP.32 v1.2 §5.9.25 SetDefaultDpAddress (ES10b) -- Tag 'BF65'.
+        # Mirrors SGP.22 v3 §5.7.4 ES10a.SetDefaultDpAddress (BF3F) with
+        # the same UTF8String operand under primitive context tag 80;
+        # the eUICC MUST honour either tag and update the same persisted
+        # default SM-DP+ address. Response shape [101] SEQUENCE {
+        #     setDefaultDpAddressResult [0] INTEGER {
+        #         ok(0), undefinedError(127) } }.
+        try:
+            _root_tag, root_value, _, _ = read_tlv(payload, 0)
+        except Exception:
+            return tlv("BF65", tlv(b"\x80", encode_der_integer(127))), 0x90, 0x00
+        address_raw = find_first_tlv(root_value, "80")
+        normalized_address = ""
+        if len(address_raw) > 0:
+            try:
+                _, address_value, _, _ = read_tlv(address_raw, 0)
+                normalized_address = address_value.decode("utf-8", "ignore").strip()
+            except Exception:
+                return tlv("BF65", tlv(b"\x80", encode_der_integer(127))), 0x90, 0x00
+        if len(normalized_address) > 128:
+            return tlv("BF65", tlv(b"\x80", encode_der_integer(127))), 0x90, 0x00
+        self.state.default_dp_address = normalized_address
+        self._sync_euicc_store()
+        return tlv("BF65", tlv(b"\x80", encode_der_integer(0))), 0x90, 0x00
 
     def _handle_standalone_store_metadata(self, payload: bytes) -> tuple[bytes, int, int]:
         try:
@@ -357,19 +855,135 @@ class SgpLogic:
             break
 
     def _handle_euicc_memory_reset(self, payload: bytes) -> tuple[bytes, int, int]:
+        # SGP.32 v1.2 §5.9.5 EuiccMemoryResetRequest ::= [100] SEQUENCE
+        #   resetOptions [2] BIT STRING { deleteOperationalProfiles(0),
+        #     deleteFieldLoadedTestProfiles(1), resetDefaultSmdpAddress(2),
+        #     deletePreLoadedTestProfiles(3), deleteProvisioningProfiles(4),
+        #     resetEimConfigData(5), resetImmediateEnableConfig(6) }
+        # The simulator response keeps the legacy "BF64 00" empty form
+        # for backwards compatibility with the existing eim-local
+        # regression suite; the side-effects on state are the spec-
+        # mandated work that this function actually performs.
+        bits = self._decode_reset_options(payload)
+        self._apply_memory_reset_bits(bits)
+        return tlv("BF64", b""), 0x90, 0x00
+
+    def _handle_load_crl(self, payload: bytes) -> tuple[bytes, int, int]:
+        """SGP.22 v3 §5.7.13 ES10b.LoadCRL handler.
+
+        Request: ``BF35`` SEQUENCE { ``A0`` Crl OCTET STRING ... }.
+        Response: ``BF35`` SEQUENCE { ``80`` LoadCRLResponseOk |
+        ``81`` LoadCRLResponseError }.
+
+        The simulator records the CRL DER bytes in ``state.loaded_crls``
+        for introspection but does not enforce revocation today. The
+        eUICC therefore always replies ``ok(0)`` provided the request
+        carries a non-empty inner CRL TLV; an empty body returns
+        ``invalidSignature(2)`` to keep the bouncer behaviour honest.
+        """
+
+        crl_blob = bytes(payload[2:] if len(payload) > 2 else b"")
+        # Strip the outer length byte chain to reach the inner value.
+        inner_value = b""
+        try:
+            _outer_tag, outer_value, _outer_raw, _outer_next = read_tlv(payload, 0)
+            inner_value = bytes(outer_value)
+        except (ValueError, IndexError):
+            pass
+        if len(inner_value) == 0:
+            error_response = tlv("BF35", tlv(b"\x81", encode_der_integer(2)))
+            return error_response, 0x90, 0x00
+        self.state.loaded_crls.append(inner_value)
+        ok_response = tlv("BF35", tlv(b"\x80", encode_der_integer(0)))
+        return ok_response, 0x90, 0x00
+
+    def _handle_es10c_memory_reset(self, payload: bytes) -> tuple[bytes, int, int]:
+        # SGP.22 v3 §5.7.19 ES10c.eUICCMemoryReset ::= [52] SEQUENCE { -- BF34
+        #   resetOptions [2] BIT STRING { deleteOperationalProfiles(0),
+        #     deleteFieldLoadedTestProfiles(1), resetDefaultSmdpAddress(2),
+        #     deletePreLoadedTestProfiles(3), deleteProvisioningProfiles(4) }
+        # }
+        # Response: [52] SEQUENCE { resetResult [0] INTEGER { ok(0),
+        #   nothingToDelete(1), catBusy(5), undefinedError(127) } }
+        # AUTOMATIC TAGS encodes the single field as primitive [0]
+        # context tag, hence ``80 01 RR``.
+        bits = self._decode_reset_options(payload)
+        if len(bits) == 0:
+            return tlv("BF34", tlv(b"\x80", encode_der_integer(127))), 0x90, 0x00
+        deleted_any = self._apply_memory_reset_bits(bits)
+        result = 0 if deleted_any is True else 1
+        return tlv("BF34", tlv(b"\x80", encode_der_integer(result))), 0x90, 0x00
+
+    def _decode_reset_options(self, payload: bytes) -> set[int]:
         options_raw = find_first_tlv(payload, "82")
         if len(options_raw) == 0:
-            return tlv("BF64", tlv("80", b"\x01")), 0x90, 0x00
-        _, options_value, _, _ = read_tlv(options_raw, 0)
-        enabled_option_bits = set(self._decode_named_bit_string(options_value))
+            return set()
+        try:
+            _tag, options_value, _raw, _next = read_tlv(options_raw, 0)
+        except ValueError:
+            return set()
+        return set(self._decode_named_bit_string(options_value))
+
+    def _apply_memory_reset_bits(self, bits: set[int]) -> bool:
+        deleted_any = False
         state_changed = False
-        if 5 in enabled_option_bits:
+        if 0 in bits or 1 in bits or 3 in bits or 4 in bits:
+            classes_to_drop: set[str] = set()
+            if 0 in bits:
+                classes_to_drop.add("operational")
+            if 1 in bits or 3 in bits:
+                classes_to_drop.add("test")
+            if 4 in bits:
+                classes_to_drop.add("provisioning")
+            retained: list[SimProfileEntry] = []
+            removed: list[SimProfileEntry] = []
+            for profile in self.state.profiles:
+                profile_class = str(profile.profile_class or "").strip().lower()
+                if profile_class in classes_to_drop:
+                    removed.append(profile)
+                    continue
+                retained.append(profile)
+            if len(removed) > 0:
+                deleted_any = True
+                state_changed = True
+                self.state.profiles = retained
+                surviving_aids = {entry.aid for entry in retained}
+                if self.state.active_profile_aid not in surviving_aids:
+                    self.state.active_profile_aid = ""
+                if self.state.previous_enabled_aid not in surviving_aids:
+                    self.state.previous_enabled_aid = ""
+                for profile in removed:
+                    self._enqueue_notification(
+                        operation=self.NOTIF_DELETE,
+                        profile=profile,
+                    )
+                rebuild_runtime_filesystem(self.state)
+                self._sync_profile_store()
+        if 2 in bits:
+            self.state.default_dp_address = ""
+            state_changed = True
+        if 5 in bits:
+            had_entries = len(self.state.eim_entries) > 0
             self.state.eim_entries = self._default_eim_entries()
             self._ensure_metadata_defaults()
             state_changed = True
-        if state_changed:
+            if had_entries is True:
+                deleted_any = True
+        if 6 in bits:
+            had_immediate = (
+                self.state.immediate_enable_flag is True
+                or len(self.state.immediate_enable_smdp_oid) > 0
+                or len(self.state.immediate_enable_smdp_address) > 0
+            )
+            self.state.immediate_enable_flag = False
+            self.state.immediate_enable_smdp_oid = ""
+            self.state.immediate_enable_smdp_address = ""
+            if had_immediate is True:
+                deleted_any = True
+                state_changed = True
+        if state_changed is True:
             self._sync_euicc_store()
-        return tlv("BF64", b""), 0x90, 0x00
+        return deleted_any
 
     def _parse_add_eim_entries(self, payload: bytes) -> list[SimEimEntry]:
         try:
@@ -851,10 +1465,32 @@ class SgpLogic:
             body += tlv("A1", tlv("A6", euicc_certificate_der))
         return tlv("BF56", body)
 
-    def _build_eim_configuration_response(self) -> bytes:
+    def _build_eim_configuration_response(self, request: bytes = b"") -> bytes:
+        # SGP.32 v1.2 §5.9.18 GetEimConfigurationDataRequest body carries
+        # an optional ``searchCriteria CHOICE { eimId [0] UTF8String }``.
+        # When provided, only the matching entry is returned.
         self._ensure_metadata_defaults()
+        target_eim_id = ""
+        if len(request) > 0:
+            try:
+                _outer_tag, outer_value, _raw, _next = read_tlv(bytes(request), 0)
+            except ValueError:
+                outer_value = b""
+            if len(outer_value) > 0:
+                try:
+                    inner_tag, inner_value, _raw_inner, _next_inner = read_tlv(outer_value, 0)
+                except ValueError:
+                    inner_tag = b""
+                    inner_value = b""
+                if inner_tag == b"\x80" and len(inner_value) > 0:
+                    target_eim_id = self._normalize_eim_identifier(
+                        self._decode_text_field(inner_value)
+                    )
         entries = b""
         for entry in self.state.eim_entries:
+            if len(target_eim_id) > 0:
+                if self._normalize_eim_identifier(entry.eim_id) != target_eim_id:
+                    continue
             body = tlv("80", str(entry.eim_id).encode("utf-8"))
             if len(str(entry.eim_fqdn or "").strip()) > 0:
                 body += tlv("81", str(entry.eim_fqdn).encode("utf-8"))
@@ -1616,19 +2252,677 @@ class SgpLogic:
         for notification in self.state.notifications:
             if notification.seq_number == seq_number:
                 return tlv("BF2B", tlv("A0", notification.payload))
+        # SGP.32 §5.9.11: searchCriteria.seqNumber may also resolve a
+        # stored eUICC Package Result. Fall through to the result list
+        # so the IPA receives the matching ``A2`` body if it exists.
+        for entry in self.state.euicc_package_results:
+            if entry.seq_number == seq_number:
+                return tlv("BF2B", tlv("A2", bytes(entry.payload)))
         return tlv("BF2B", b"")
 
+    def _build_euicc_package_result_list_response(self) -> bytes:
+        if len(self.state.euicc_package_results) == 0:
+            return tlv("BF2B", b"")
+        # SGP.32 §2.11.2 EuiccPackageResultList = SEQUENCE OF
+        # EuiccPackageResult. Each stored payload already includes the
+        # signed body wrapped in the ``A0`` (euiccPackageResultSigned)
+        # alternative, so a simple concatenation under ``A2`` is the
+        # correct list shape.
+        body = b"".join(bytes(entry.payload) for entry in self.state.euicc_package_results)
+        return tlv("BF2B", tlv("A2", body))
+
+    # ------------------------------------------------------------------
+    # SGP.32 §5.9.1 ES10b.LoadEuiccPackage / §2.11.1.1 EuiccPackageRequest
+    # ------------------------------------------------------------------
+
+    def _handle_load_euicc_package(self, payload: bytes) -> tuple[bytes, int, int]:
+        """Verify and execute an ``EuiccPackageRequest`` (BF51).
+
+        Verification ladder per SGP.32 v1.2 §5.9.1:
+
+        1. Look up the targeted eIM by ``eimId``. Unknown eIM →
+           ``euiccPackageErrorUnsigned``.
+        2. Verify the ``5F37`` ECDSA r||s over
+           ``euiccPackageSigned || associationToken``. Bad signature →
+           ``euiccPackageErrorUnsigned``.
+        3. Verify ``eidValue`` matches the eUICC's own EID. Mismatch →
+           ``euiccPackageErrorSigned`` with ``invalidEid(3)``.
+        4. Verify ``counterValue`` is strictly greater than the stored
+           per-eIM counter and not above ``0x7FFFFF``. Replay or overflow
+           → ``euiccPackageErrorSigned`` with ``replayError(4)`` or
+           ``counterValueOutOfRange(6)``.
+        5. Execute the inner ``psmoList`` / ``ecoList`` sequentially,
+           emitting one ``EuiccResultData`` per element. Errors abort the
+           remainder with ``processingTerminated``.
+        6. Sign the result, persist into ``state.euicc_package_results``,
+           and advance the per-eIM counter and the global notification /
+           result sequence number.
+        """
+
+        try:
+            envelope = decode_euicc_package_request(payload)
+        except EuiccPackageDecodeError:
+            # Malformed packages cannot identify the eIM. The IPA gets a
+            # plain unsigned error result with no eimId so it can drop
+            # the package without retrying.
+            return (
+                encode_euicc_package_error_unsigned(eim_id=""),
+                0x90,
+                0x00,
+            )
+
+        eim_entry = self._find_eim_entry(envelope.eim_id)
+        if eim_entry is None or len(eim_entry.eim_public_key_data or b"") == 0:
+            return (
+                encode_euicc_package_error_unsigned(
+                    eim_id=envelope.eim_id,
+                    eim_transaction_id=envelope.eim_transaction_id,
+                ),
+                0x90,
+                0x00,
+            )
+
+        association_token = max(0, int(eim_entry.association_token or 0))
+        token_for_signature = association_token if association_token > 0 else 0
+        signature_ok = verify_eim_signature(
+            public_key_payload=bytes(eim_entry.eim_public_key_data),
+            signed_blob=envelope.signed_blob,
+            signature_rs=envelope.eim_signature,
+            association_token=token_for_signature,
+        )
+        if signature_ok is False:
+            include_token = association_token if association_token > 0 else None
+            return (
+                encode_euicc_package_error_unsigned(
+                    eim_id=envelope.eim_id,
+                    eim_transaction_id=envelope.eim_transaction_id,
+                    association_token=include_token,
+                ),
+                0x90,
+                0x00,
+            )
+
+        own_eid_bytes = self._eid_bytes()
+        if len(envelope.eid_value) != 16 or envelope.eid_value != own_eid_bytes:
+            return (
+                self._sign_package_error(
+                    envelope=envelope,
+                    error_code=3,
+                    association_token=token_for_signature,
+                ),
+                0x90,
+                0x00,
+            )
+
+        if envelope.counter_value > 0x7FFFFF:
+            return (
+                self._sign_package_error(
+                    envelope=envelope,
+                    error_code=6,
+                    association_token=token_for_signature,
+                ),
+                0x90,
+                0x00,
+            )
+        if envelope.counter_value <= int(eim_entry.counter_value or 0):
+            return (
+                self._sign_package_error(
+                    envelope=envelope,
+                    error_code=4,
+                    association_token=token_for_signature,
+                ),
+                0x90,
+                0x00,
+            )
+
+        result_items = self._execute_euicc_package(envelope)
+        seq_number = self._allocate_package_result_seq_number()
+        outer_tlv, payload_tlv = encode_euicc_package_result_signed(
+            eim_id=envelope.eim_id,
+            counter_value=envelope.counter_value,
+            seq_number=seq_number,
+            euicc_results=result_items,
+            eim_transaction_id=envelope.eim_transaction_id,
+            private_key=self._euicc_private_key,
+            association_token=token_for_signature,
+        )
+
+        eim_entry.counter_value = int(envelope.counter_value)
+        self.state.euicc_package_results.append(
+            SimEuiccPackageResultEntry(
+                seq_number=seq_number,
+                eim_id=envelope.eim_id,
+                counter_value=int(envelope.counter_value),
+                eim_transaction_id=bytes(envelope.eim_transaction_id),
+                payload=bytes(payload_tlv),
+            )
+        )
+        self._sync_euicc_store()
+        return outer_tlv, 0x90, 0x00
+
+    def _sign_package_error(
+        self,
+        *,
+        envelope,
+        error_code: int,
+        association_token: int,
+    ) -> bytes:
+        return encode_euicc_package_error_signed(
+            eim_id=envelope.eim_id,
+            counter_value=envelope.counter_value,
+            error_code=error_code,
+            eim_transaction_id=envelope.eim_transaction_id,
+            private_key=self._euicc_private_key,
+            association_token=association_token,
+        )
+
+    def _allocate_package_result_seq_number(self) -> int:
+        seq_number = int(self.state.next_notification_seq or 1)
+        if seq_number < 1:
+            seq_number = 1
+        self.state.next_notification_seq = seq_number + 1
+        return seq_number
+
+    def _eid_bytes(self) -> bytes:
+        eid_text = str(self.state.eid or "").strip().upper()
+        try:
+            raw = bytes.fromhex(eid_text)
+        except ValueError:
+            raw = b""
+        return raw
+
+    def _find_eim_entry(self, eim_id: str) -> SimEimEntry | None:
+        normalized = self._normalize_eim_identifier(eim_id)
+        if len(normalized) == 0:
+            return None
+        for entry in self.state.eim_entries:
+            if self._normalize_eim_identifier(entry.eim_id) == normalized:
+                return entry
+        return None
+
+    def _execute_euicc_package(self, envelope) -> list[bytes]:
+        """Run ``Psmo`` / ``Eco`` items sequentially per §5.9.1.
+
+        On the first per-element failure the eUICC stops processing and
+        appends a final ``processingTerminated`` ``EuiccResultData`` so
+        the eIM can correlate. Each element-level helper returns the
+        already-encoded ``EuiccResultData`` TLV (e.g. ``83 01 00`` for
+        an ``ok`` enable).
+
+        The package-level constraints from §2.11.1.1 are enforced before
+        execution begins:
+
+        - ``At most one enable command SHALL occur in an eUICC Package.``
+        - ``At most one disable command SHALL occur in an eUICC Package.``
+        - ``A listProfileInfo command SHALL NOT occur after an enable,
+          disable or delete command.`` Violation -> the matching
+          ``listProfileInfoResult`` element is emitted with
+          ``profileChangeOngoing(11)`` and the package is aborted with
+          ``processingTerminated``.
+        """
+
+        results: list[bytes] = []
+        items: list[tuple[str, bytes]] = []
+        if envelope.has_psmo_list:
+            for raw in envelope.psmo_items:
+                items.append(("psmo", raw))
+        else:
+            for raw in envelope.eco_items:
+                items.append(("eco", raw))
+
+        if envelope.has_psmo_list:
+            constraint_result = self._psmo_package_constraint_violation(items)
+            if constraint_result is not None:
+                violation_tlv, abort = constraint_result
+                if violation_tlv is not None:
+                    results.append(violation_tlv)
+                if abort is True:
+                    results.append(self._processing_terminated(2))
+                    return results
+
+        enable_or_disable_or_delete_seen = False
+        for kind, raw in items:
+            if kind == "psmo":
+                tag_bytes = self._peek_psmo_tag(raw)
+                if (
+                    tag_bytes == bytes.fromhex("BF2D")
+                    and enable_or_disable_or_delete_seen is True
+                ):
+                    # listProfileInfoResult [45] BF2D with
+                    # ProfileInfoListError ::= INTEGER {profileChangeOngoing(11)}.
+                    # The listProfileInfoError alternative is encoded as a
+                    # primitive INTEGER (no inner context tag).
+                    results.append(
+                        tlv(
+                            bytes.fromhex("BF2D"),
+                            tlv(b"\x02", encode_der_integer(11)),
+                        )
+                    )
+                    results.append(self._processing_terminated(2))
+                    return results
+                if tag_bytes in (b"\xA3", b"\xA4", b"\xA5"):
+                    enable_or_disable_or_delete_seen = True
+            try:
+                if kind == "psmo":
+                    result_tlv = self._execute_psmo(raw)
+                else:
+                    result_tlv = self._execute_eco(raw)
+            except Exception:
+                # SGP.32 §5.9.1: when execution of a PSMO/eCO fails the
+                # eUICC SHALL terminate processing of the remainder and
+                # emit a final ``processingTerminated`` element. The
+                # 2 ``unknownOrDamagedCommand`` value matches the spec
+                # description for malformed inner data.
+                results.append(self._processing_terminated(2))
+                return results
+            results.append(result_tlv)
+        return results
+
     @staticmethod
-    def _build_euicc_package_result_list_response() -> bytes:
-        return tlv("BF2B", b"")
+    def _peek_psmo_tag(raw: bytes) -> bytes:
+        try:
+            tag_bytes, _value, _raw_tlv, _next = read_tlv(bytes(raw or b""), 0)
+        except ValueError:
+            return b""
+        return tag_bytes
+
+    def _psmo_package_constraint_violation(
+        self,
+        items: list[tuple[str, bytes]],
+    ) -> tuple[bytes | None, bool] | None:
+        """Return ``(violation_tlv, abort)`` if the PSMO list breaks the
+        ``at most one enable`` / ``at most one disable`` rule. ``abort``
+        signals that processing must terminate without running the rest
+        of the package.
+        """
+
+        enable_count = 0
+        disable_count = 0
+        for kind, raw in items:
+            if kind != "psmo":
+                continue
+            tag_bytes = self._peek_psmo_tag(raw)
+            if tag_bytes == b"\xA3":
+                enable_count += 1
+            elif tag_bytes == b"\xA4":
+                disable_count += 1
+        if enable_count > 1:
+            # commandError(7) is the closest defined value for an
+            # over-count enable in EnableProfileResult.
+            return (tlv(b"\x83", encode_der_integer(127)), True)
+        if disable_count > 1:
+            return (tlv(b"\x84", encode_der_integer(127)), True)
+        return None
+
+    @staticmethod
+    def _processing_terminated(code: int) -> bytes:
+        # processingTerminated INTEGER (CHOICE alternative without an
+        # explicit context tag). Per §2.11.2.1 the documented values are
+        # 1 resultSizeOverflow, 2 unknownOrDamagedCommand, 3 interruption,
+        # 127 undefinedError. Encoded as a primitive INTEGER (tag 02).
+        return tlv(b"\x02", encode_der_integer(int(code) & 0xFF))
+
+    # -- PSMO ----------------------------------------------------------
+
+    def _execute_psmo(self, raw: bytes) -> bytes:
+        try:
+            tag_bytes, body, _raw_tlv, _next = read_tlv(raw, 0)
+        except ValueError:
+            return self._processing_terminated(2)
+
+        if tag_bytes == b"\xA3":
+            return self._psmo_enable(body)
+        if tag_bytes == b"\xA4":
+            return self._psmo_disable(body)
+        if tag_bytes == b"\xA5":
+            return self._psmo_delete(body)
+        if tag_bytes == bytes.fromhex("BF2D"):
+            return tlv(
+                bytes.fromhex("BF2D"),
+                tlv("A0", b""),
+            ) if len(self.state.profiles) == 0 else self._psmo_list_profile_info()
+        if tag_bytes == b"\xA6":
+            return tlv(b"\xA6", b"")
+        if tag_bytes == b"\xA7":
+            return self._psmo_configure_immediate_enable(body)
+        if tag_bytes == b"\xA8":
+            return self._psmo_set_fallback_attribute(body)
+        if tag_bytes == b"\xA9":
+            return self._psmo_unset_fallback_attribute()
+        if tag_bytes == bytes.fromhex("BF65"):
+            return self._psmo_set_default_dp_address(body)
+        return self._processing_terminated(2)
+
+    def _psmo_enable(self, body: bytes) -> bytes:
+        profile = self._resolve_profile_reference(body)
+        if profile is None:
+            return tlv(b"\x83", encode_der_integer(1))  # iccidOrAidNotFound
+        # SGP.32 §2.11.1.1: enable SEQUENCE { iccid, rollbackFlag NULL OPTIONAL }.
+        # The rollbackFlag is a primitive NULL with the auto-tag [1] -> 0x81.
+        rollback_requested = self._enable_rollback_requested(body)
+        if str(profile.state).strip().lower() != "disabled":
+            # SGP.32 EnableProfileResult code 2 covers "profileNotInDisabledState".
+            # The simulator treats already-enabled profiles as a no-op success
+            # because real cards seen in the field also report ok(0) for the
+            # idempotent case; tighten with caution if a strict-mode test
+            # demands the spec-literal rejection.
+            if str(profile.state).strip().lower() != "enabled":
+                return tlv(b"\x83", encode_der_integer(2))
+            return tlv(b"\x83", encode_der_integer(0))
+        previous_enabled_aid = ""
+        for current in self.state.profiles:
+            if current is profile:
+                current.state = "enabled"
+            elif current.state == "enabled":
+                if len(previous_enabled_aid) == 0:
+                    previous_enabled_aid = str(current.aid or "")
+                current.state = "disabled"
+            current.rollback_armed = False
+        if rollback_requested is True:
+            profile.rollback_armed = True
+            self.state.previous_enabled_aid = previous_enabled_aid
+        else:
+            self.state.previous_enabled_aid = ""
+        self.state.active_profile_aid = profile.aid
+        rebuild_runtime_filesystem(self.state)
+        self._sync_profile_store()
+        self._enqueue_notification(operation=self.NOTIF_ENABLE, profile=profile)
+        return tlv(b"\x83", encode_der_integer(0))
+
+    @staticmethod
+    def _enable_rollback_requested(body: bytes) -> bool:
+        offset = 0
+        while offset < len(body):
+            try:
+                tag_bytes, _value, _raw, next_offset = read_tlv(bytes(body), offset)
+            except ValueError:
+                return False
+            if tag_bytes == b"\x81":
+                return True
+            offset = next_offset
+        return False
+
+    def _psmo_disable(self, body: bytes) -> bytes:
+        profile = self._resolve_profile_reference(body)
+        if profile is None:
+            return tlv(b"\x84", encode_der_integer(1))
+        if str(profile.state).strip().lower() != "enabled":
+            return tlv(b"\x84", encode_der_integer(2))
+        profile.state = "disabled"
+        if self.state.active_profile_aid.upper() == profile.aid.upper():
+            self.state.active_profile_aid = ""
+        rebuild_runtime_filesystem(self.state)
+        self._sync_profile_store()
+        self._enqueue_notification(operation=self.NOTIF_DISABLE, profile=profile)
+        return tlv(b"\x84", encode_der_integer(0))
+
+    def _psmo_delete(self, body: bytes) -> bytes:
+        profile = self._resolve_profile_reference(body)
+        if profile is None:
+            return tlv(b"\x85", encode_der_integer(1))
+        if str(profile.state).strip().lower() not in ("disabled", "deleted"):
+            return tlv(b"\x85", encode_der_integer(2))
+        self._enqueue_notification(operation=self.NOTIF_DELETE, profile=profile)
+        if self.state.active_profile_aid.upper() == profile.aid.upper():
+            self.state.active_profile_aid = ""
+        self.state.profiles = [
+            current for current in self.state.profiles if current.aid.upper() != profile.aid.upper()
+        ]
+        rebuild_runtime_filesystem(self.state)
+        self._sync_profile_store()
+        return tlv(b"\x85", encode_der_integer(0))
+
+    def _psmo_list_profile_info(self) -> bytes:
+        # Reuse the existing ES10b.GetProfilesInfo response body. The
+        # outer tag (BF2D) already matches the listProfileInfoResult
+        # alternative in EuiccResultData.
+        return self._build_profiles_info_response()
+
+    def _psmo_configure_immediate_enable(self, body: bytes) -> bytes:
+        # SGP.32 §2.11.1.1 configureImmediateEnable [7] SEQUENCE {
+        #     immediateEnableFlag [0] NULL OPTIONAL,
+        #     defaultSmdpOid [1] OBJECT IDENTIFIER OPTIONAL,
+        #     defaultSmdpAddress [2] UTF8String OPTIONAL
+        # }
+        # ConfigureImmediateEnableResult is INTEGER tagged [7] -> primitive 0x87.
+        new_flag: bool | None = None
+        new_oid: str | None = None
+        new_address: str | None = None
+        offset = 0
+        while offset < len(body):
+            try:
+                tag_bytes, value, _raw, next_offset = read_tlv(bytes(body), offset)
+            except ValueError:
+                return tlv(b"\x87", encode_der_integer(7))  # commandError
+            if tag_bytes == b"\x80":
+                new_flag = True
+            elif tag_bytes == b"\x81":
+                new_oid = self._format_oid(value)
+            elif tag_bytes == b"\x82":
+                try:
+                    new_address = bytes(value).decode("utf-8", "strict").strip()
+                except UnicodeDecodeError:
+                    return tlv(b"\x87", encode_der_integer(7))
+            offset = next_offset
+        if new_flag is True:
+            self.state.immediate_enable_flag = True
+        else:
+            self.state.immediate_enable_flag = False
+        if new_oid is not None:
+            self.state.immediate_enable_smdp_oid = new_oid
+        if new_address is not None:
+            self.state.immediate_enable_smdp_address = new_address
+        self._sync_euicc_store()
+        return tlv(b"\x87", encode_der_integer(0))
+
+    @staticmethod
+    def _format_oid(payload: bytes) -> str:
+        raw = bytes(payload or b"")
+        if len(raw) == 0:
+            return ""
+        first = raw[0]
+        components: list[int] = [first // 40, first % 40]
+        index = 1
+        while index < len(raw):
+            value = 0
+            while index < len(raw):
+                byte = raw[index]
+                value = (value << 7) | (byte & 0x7F)
+                index += 1
+                if byte & 0x80 == 0:
+                    break
+            components.append(value)
+        return ".".join(str(component) for component in components)
+
+    def _psmo_set_fallback_attribute(self, body: bytes) -> bytes:
+        # SetFallbackAttributeResult ::= INTEGER {
+        #     ok(0), iccidOrAidNotFound(1), fallbackNotAllowed(2),
+        #     fallbackProfileEnabled(3), undefinedError(127) }
+        if bool(self.state.euicc_info.iot_specific_info.fallback_supported) is False:
+            return tlv(b"\x8D", encode_der_integer(2))  # fallbackNotAllowed
+        profile = self._resolve_profile_reference(body)
+        if profile is None:
+            return tlv(b"\x8D", encode_der_integer(1))
+        if any(
+            entry.fallback_attribute is True and entry.state == "enabled"
+            for entry in self.state.profiles
+        ):
+            return tlv(b"\x8D", encode_der_integer(3))  # fallbackProfileEnabled
+        for entry in self.state.profiles:
+            entry.fallback_attribute = False
+        profile.fallback_attribute = True
+        self._sync_profile_store()
+        return tlv(b"\x8D", encode_der_integer(0))
+
+    def _psmo_unset_fallback_attribute(self) -> bytes:
+        # UnsetFallbackAttributeResult ::= INTEGER {
+        #     ok(0), noFallbackAttribute(2), fallbackProfileEnabled(3),
+        #     commandError(7), undefinedError(127) }
+        marked = [entry for entry in self.state.profiles if entry.fallback_attribute is True]
+        if len(marked) == 0:
+            return tlv(b"\x8E", encode_der_integer(2))  # noFallbackAttribute
+        if any(entry.state == "enabled" for entry in marked):
+            return tlv(b"\x8E", encode_der_integer(3))  # fallbackProfileEnabled
+        for entry in marked:
+            entry.fallback_attribute = False
+        self._sync_profile_store()
+        return tlv(b"\x8E", encode_der_integer(0))
+
+    def _psmo_set_default_dp_address(self, body: bytes) -> bytes:
+        address_raw = find_first_tlv(body, "80")
+        if len(address_raw) == 0:
+            return tlv(bytes.fromhex("BF65"), tlv("80", encode_der_integer(1)))
+        try:
+            _tag, address_value, _raw, _next = read_tlv(address_raw, 0)
+        except ValueError:
+            return tlv(bytes.fromhex("BF65"), tlv("80", encode_der_integer(1)))
+        try:
+            address_text = bytes(address_value).decode("utf-8", "strict").strip()
+        except UnicodeDecodeError:
+            return tlv(bytes.fromhex("BF65"), tlv("80", encode_der_integer(1)))
+        if len(address_text) > 128:
+            return tlv(bytes.fromhex("BF65"), tlv("80", encode_der_integer(1)))
+        self.state.default_dp_address = address_text
+        self._sync_euicc_store()
+        return tlv(bytes.fromhex("BF65"), tlv("80", encode_der_integer(0)))
+
+    # -- eCO -----------------------------------------------------------
+
+    def _execute_eco(self, raw: bytes) -> bytes:
+        try:
+            tag_bytes, body, _raw_tlv, _next = read_tlv(raw, 0)
+        except ValueError:
+            return self._processing_terminated(2)
+
+        if tag_bytes == b"\xA8":
+            return self._eco_add_eim(body)
+        if tag_bytes == b"\xA9":
+            return self._eco_delete_eim(body)
+        if tag_bytes == b"\xAA":
+            return self._eco_update_eim(body)
+        if tag_bytes == b"\xAB":
+            return self._eco_list_eim()
+        return self._processing_terminated(2)
+
+    def _eco_add_eim(self, body: bytes) -> bytes:
+        wrapped = tlv("BF57", tlv("A0", tlv("30", body)))
+        entries = self._parse_add_eim_entries(wrapped)
+        if len(entries) == 0:
+            return tlv(b"\xA8", tlv(b"\x02", encode_der_integer(7)))
+        new_entry = entries[0]
+        association_request = self._extract_association_token_request(body)
+        if association_request is not None and association_request < 0:
+            allocated = self._allocate_association_token()
+            new_entry.association_token = allocated
+        existing = self._find_eim_entry(new_entry.eim_id)
+        if existing is not None:
+            return tlv(b"\xA8", tlv(b"\x02", encode_der_integer(2)))  # associatedEimAlreadyExists
+        self._upsert_eim_entries([new_entry])
+        self._ensure_metadata_defaults()
+        self._sync_euicc_store()
+        if new_entry.association_token > 0:
+            return tlv(
+                b"\xA8",
+                tlv(b"\x84", encode_der_integer(int(new_entry.association_token))),
+            )
+        return tlv(b"\xA8", tlv(b"\x02", encode_der_integer(0)))
+
+    def _eco_delete_eim(self, body: bytes) -> bytes:
+        # SGP.32 §2.11.2.1 EuiccResultData ::= CHOICE {
+        #     ..., deleteEimResult [9] DeleteEimResult, ... }
+        # DeleteEimResult ::= INTEGER {...}. AUTOMATIC TAGS keeps the
+        # natural primitive form for INTEGER, so the alternative is
+        # encoded as the *primitive* context-specific tag 0x89, NOT the
+        # constructed 0xA9 used by the eCO command-side tag of the
+        # same number.
+        eim_id_raw = find_first_tlv(body, "80")
+        if len(eim_id_raw) == 0:
+            return tlv(b"\x89", encode_der_integer(7))
+        try:
+            _tag, eim_id_value, _raw, _next = read_tlv(eim_id_raw, 0)
+        except ValueError:
+            return tlv(b"\x89", encode_der_integer(7))
+        target = self._decode_text_field(eim_id_value)
+        if len(target) == 0:
+            return tlv(b"\x89", encode_der_integer(7))
+        normalized_target = self._normalize_eim_identifier(target)
+        retained = [
+            entry
+            for entry in self.state.eim_entries
+            if self._normalize_eim_identifier(entry.eim_id) != normalized_target
+        ]
+        if len(retained) == len(self.state.eim_entries):
+            return tlv(b"\x89", encode_der_integer(1))  # eimNotFound
+        self.state.eim_entries = retained
+        self._sync_euicc_store()
+        if len(self.state.eim_entries) == 0:
+            return tlv(b"\x89", encode_der_integer(2))  # lastEimDeleted
+        return tlv(b"\x89", encode_der_integer(0))
+
+    def _eco_update_eim(self, body: bytes) -> bytes:
+        # SGP.32 §2.11.2.1 EuiccResultData updateEimResult [10] UpdateEimResult.
+        # UpdateEimResult ::= INTEGER, so AUTOMATIC TAGS yields the
+        # primitive context tag 0x8A. The constructed 0xAA seen on the
+        # eCO command side is unrelated.
+        wrapped = tlv("BF58", tlv("A0", tlv("30", body)))
+        entries = self._parse_add_eim_entries(wrapped)
+        if len(entries) == 0:
+            return tlv(b"\x8A", encode_der_integer(7))
+        update = entries[0]
+        existing = self._find_eim_entry(update.eim_id)
+        if existing is None:
+            return tlv(b"\x8A", encode_der_integer(1))  # eimNotFound
+        if int(update.counter_value or 0) < int(existing.counter_value or 0) and len(update.eim_public_key_data or b"") == 0:
+            return tlv(b"\x8A", encode_der_integer(6))  # counterValueOutOfRange
+        self._upsert_eim_entries([update])
+        self._sync_euicc_store()
+        return tlv(b"\x8A", encode_der_integer(0))
+
+    def _eco_list_eim(self) -> bytes:
+        eim_id_list = b""
+        for entry in self.state.eim_entries:
+            row = tlv(b"\x80", str(entry.eim_id or "").encode("utf-8"))
+            if int(entry.eim_id_type or 0) > 0:
+                row += tlv(b"\x82", encode_der_integer(int(entry.eim_id_type)))
+            eim_id_list += tlv(b"\x30", row)
+        return tlv(b"\xAB", tlv(b"\x30", eim_id_list))
+
+    def _extract_association_token_request(self, body: bytes) -> int | None:
+        token_raw = find_first_tlv(body, "84")
+        if len(token_raw) == 0:
+            return None
+        try:
+            _tag, value, _raw, _next = read_tlv(token_raw, 0)
+        except ValueError:
+            return None
+        if len(value) == 0:
+            return 0
+        return int.from_bytes(value, "big", signed=True)
+
+    def _allocate_association_token(self) -> int:
+        next_token = int(self.state.association_token_counter or 0) + 1
+        self.state.association_token_counter = next_token
+        return next_token
+
+
 
     def _remove_notification_from_list(self, payload: bytes) -> bytes:
         seq_number = self._extract_notification_seq(payload)
         if seq_number is None:
             return tlv("BF30", b"")
+        before_notifications = len(self.state.notifications)
         self.state.notifications = [
             notification for notification in self.state.notifications if notification.seq_number != seq_number
         ]
+        before_results = len(self.state.euicc_package_results)
+        self.state.euicc_package_results = [
+            entry for entry in self.state.euicc_package_results if entry.seq_number != seq_number
+        ]
+        if (
+            len(self.state.notifications) != before_notifications
+            or len(self.state.euicc_package_results) != before_results
+        ):
+            self._sync_euicc_store()
         return tlv("BF30", b"")
 
     def _extract_notification_seq(self, payload: bytes) -> int | None:

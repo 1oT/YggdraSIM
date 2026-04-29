@@ -1,0 +1,6 @@
+# Set lifecycle state of an applet AID back to SELECTABLE (0x07). Same caveat
+# as LOCK: the simulator returns an explicit error SW rather than silently
+# accepting the change.
+SCP03-SD
+UNLOCK A0000005591010FFFFFFFF8900000100
+EXIT

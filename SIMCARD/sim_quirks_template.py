@@ -28,7 +28,7 @@ Available hooks (declare any subset; all optional):
 Supported metadata override entry points (top-level module attributes):
 
     metadata_overrides = {
-        "atr": "3B9F96801FC7A073BE21136743200718000001A5",
+        "atr": "3B9F96801FC78031A073BE21136743200718000001A5",
         "default_dp_address": "rsp.custom.test",
         "root_ci_pkid": "00112233445566778899AABBCCDDEEFF00112233",
         "euicc_info": {

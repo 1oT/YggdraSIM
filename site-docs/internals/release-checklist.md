@@ -48,6 +48,9 @@ release.
     yggdrasim-scp11-local-access --cmd "HELP; EXIT"
     yggdrasim-scp11-eim-local --cmd "HELP; EXIT"
     yggdrasim-profile-package --cmd "STATUS; EXIT"
+    yggdrasim-profile-autoload --help
+    yggdrasim-apdu-fuzzer --help
+    yggdrasim-eum-diag --help
     yggdrasim-suci-tool --cmd "STATUS; EXIT"
     ```
 

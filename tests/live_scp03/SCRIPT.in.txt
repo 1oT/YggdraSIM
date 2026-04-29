@@ -1,0 +1,3 @@
+# Same as RUN, but invoked through the SCRIPT alias.
+SCRIPT reports/scp03_live_run/run.script
+EXIT

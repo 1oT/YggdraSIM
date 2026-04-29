@@ -1,5 +1,14 @@
 # SIMCARD module pre-v1 review
 
+> **Status note (post-v1, 2026)**: this document is the snapshot taken
+> immediately before the v1 tag. The bug list below (B-01..B-12) was
+> the gating set for v1.0 closure; subsequent fixes and the post-v1
+> 5G-AKA / AKMA / SUCI / `GET IDENTITY` extensions live in
+> `SIMCARD/aka_5g.py`, `SIMCARD/akma.py`, `SIMCARD/suci.py`, and
+> `SIMCARD/identity.py` and are tracked separately. New bugs found
+> after v1 should be filed in `V2_ROADMAP.md` (or, if scoped narrowly,
+> `NEW_FEATURE_IDEAS.md`) rather than appended here.
+
 Scope: `SIMCARD/` (simulated ICC/eUICC engine). Cross-checked against:
 
 - ETSI TS 102 221 v17.2.0 — UICC-Terminal interface
@@ -243,12 +252,19 @@ malformed frame on the card and sees `9000` when it should see `67 00`.
 ### B-12 [N] Simulator ATR is synthetic
 
 `SIMCARD/state.py:7`: ATR
-`3B9F96801FC7A073BE21136743200718000001A5`. 15 historical bytes, valid
-shape but the content does not reflect an actual eUICC ATR (no SGP.22
-`Card Capabilities` historical byte, no EUM-specific OS marker string).
-Cosmetic; does not block v1, but hoisting the ATR to a
-quirks override default that mirrors the golden card would make
-HIL-bridge tests deterministic.
+`3B9F96801FC78031A073BE21136743200718000001A5`. 15 historical bytes
+(led by the ISO 7816-4 `80 31` category indicator + COMPACT-TLV),
+TCK=0xA5 verified against `XOR(T0..lastHist)`. The shape is now
+ISO 7816-3 §8.2 conformant; the content still does not reflect an
+actual eUICC ATR (no SGP.22 `Card Capabilities` historical byte, no
+EUM-specific OS marker string). Cosmetic from a v1 review angle,
+but hoisting the ATR to a quirks override default that mirrors the
+golden card would make HIL-bridge tests deterministic.
+
+NB: an earlier draft of the constant was 20 bytes — it lost the
+`80 31` prefix and shipped with no TCK at all. Real modems behind
+the HIL bridge (SIMtrace2 + osmo-remsim-client-st2) timed out the
+ATR sequence and refused to issue any APDU on cold boot.
 
 ## 4. Non-divergences (explicitly OK)
 

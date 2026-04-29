@@ -18,6 +18,8 @@ _LOGGER = logging.getLogger(__name__)
 
 CARD_BACKEND_ENV = "YGGDRASIM_CARD_BACKEND"
 CARD_RELAY_URL_ENV = "YGGDRASIM_CARD_RELAY_URL"
+CARD_RELAY_TOKEN_ENV = "YGGDRASIM_CARD_RELAY_TOKEN"
+CARD_RELAY_TOKEN_FILE_ENV = "YGGDRASIM_CARD_RELAY_TOKEN_FILE"
 SIM_QUIRKS_ENV = "YGGDRASIM_SIM_QUIRKS"
 SIM_ISDR_CONFIG_ENV = "YGGDRASIM_SIM_ISDR_CONFIG"
 SIM_EIM_IDENTITY_ENV = "YGGDRASIM_SIM_EIM_IDENTITY"
@@ -378,14 +380,23 @@ def is_sim_quirks_disabled() -> bool:
     loading any simulator quirks file.
 
     This inspects the same env-var/persisted cascade as
-    :func:`get_sim_quirks_path` but reports the disabled state rather
-    than the resolved path. Callers that need both the path and the
-    disabled state should prefer :func:`get_sim_quirks_path` followed
-    by :func:`is_sim_quirks_disabled` to keep the two in sync.
+    :func:`get_sim_quirks_path`. The env var always wins over the
+    persisted setting, mirroring the resolver: if the env carries a
+    concrete path the operator has actively re-enabled quirks for the
+    current process, even when an older persisted ``"none"`` sentinel
+    is still on disk. Callers that need both the path and the disabled
+    state should prefer :func:`get_sim_quirks_path` followed by
+    :func:`is_sim_quirks_disabled` to keep the two in sync.
     """
     configured = str(os.environ.get(SIM_QUIRKS_ENV, "") or "").strip()
     if _is_sim_quirks_disabled_sentinel(configured):
         return True
+    if len(configured) > 0:
+        # A concrete env path overrides any persisted opt-out: the
+        # operator has explicitly pointed the current process at a
+        # quirks file, so the resolver will return that path and the
+        # disabled probe must agree.
+        return False
     persisted = _get_persisted_setting(_SETTINGS_KEY_SIM_QUIRKS_PATH)
     if _is_sim_quirks_disabled_sentinel(persisted):
         return True
@@ -529,15 +540,11 @@ def _build_card_relay_modem_refresh_url(apdu_url: str) -> str:
     return urlunparse((parsed.scheme, parsed.netloc, refresh_path, "", "", ""))
 
 
-def _resolve_card_relay_url() -> tuple[str, str]:
-    configured = _normalize_card_relay_url(os.environ.get(CARD_RELAY_URL_ENV, ""))
-    if len(configured) > 0:
-        return configured, "env"
-
+def _read_card_relay_marker_payload() -> dict[str, Any]:
+    """Return the parsed marker payload, or an empty dict on any failure."""
     marker_path = _card_relay_marker_path()
     if os.path.isfile(marker_path) is False:
-        return "", ""
-
+        return {}
     try:
         with open(marker_path, "r", encoding="utf-8") as handle:
             payload = json.load(handle)
@@ -548,9 +555,19 @@ def _resolve_card_relay_url() -> tuple[str, str]:
             marker_error.__class__.__name__,
             marker_error,
         )
-        return "", ""
-
+        return {}
     if isinstance(payload, dict) is False:
+        return {}
+    return payload
+
+
+def _resolve_card_relay_url() -> tuple[str, str]:
+    configured = _normalize_card_relay_url(os.environ.get(CARD_RELAY_URL_ENV, ""))
+    if len(configured) > 0:
+        return configured, "env"
+
+    payload = _read_card_relay_marker_payload()
+    if len(payload) == 0:
         return "", ""
 
     marker_url = _normalize_card_relay_url(payload.get("url") or payload.get("apduUrl") or "")
@@ -559,18 +576,73 @@ def _resolve_card_relay_url() -> tuple[str, str]:
     return marker_url, "marker"
 
 
+def _resolve_card_relay_token(*, allow_marker: bool) -> str:
+    """Resolve the bearer token for the card relay client.
+
+    Resolution order matches :func:`_resolve_card_relay_url` so the
+    URL and the token are sourced consistently:
+
+    1. ``YGGDRASIM_CARD_RELAY_TOKEN`` — raw token value.
+    2. ``YGGDRASIM_CARD_RELAY_TOKEN_FILE`` — path to a 0600 token file.
+    3. The runtime marker (only when *allow_marker* is True), which
+       may carry either ``token`` (raw) or ``tokenFile`` (path).
+
+    Returning an empty string is fine: the relay accepts unauthenticated
+    requests when bound to loopback, which is the historical HilBridge
+    deployment that we must not regress.
+    """
+    direct = str(os.environ.get(CARD_RELAY_TOKEN_ENV, "") or "").strip()
+    if len(direct) > 0:
+        return direct
+
+    file_path = str(os.environ.get(CARD_RELAY_TOKEN_FILE_ENV, "") or "").strip()
+    if len(file_path) > 0:
+        try:
+            with open(os.path.expanduser(file_path), "r", encoding="utf-8") as handle:
+                return handle.read().strip()
+        except OSError as token_error:
+            _LOGGER.warning(
+                "card_backend: cannot read token file %s (%s: %s); proceeding without bearer.",
+                file_path,
+                token_error.__class__.__name__,
+                token_error,
+            )
+            return ""
+
+    if allow_marker is False:
+        return ""
+
+    payload = _read_card_relay_marker_payload()
+    if len(payload) == 0:
+        return ""
+    raw_marker_token = str(payload.get("token", "") or "").strip()
+    if len(raw_marker_token) > 0:
+        return raw_marker_token
+    marker_token_file = str(payload.get("tokenFile", "") or "").strip()
+    if len(marker_token_file) > 0:
+        try:
+            with open(os.path.expanduser(marker_token_file), "r", encoding="utf-8") as handle:
+                return handle.read().strip()
+        except OSError:
+            return ""
+    return ""
+
+
 def _request_card_relay_json(
     url: str,
     *,
     method: str,
     timeout_seconds: int = DEFAULT_CARD_RELAY_TIMEOUT_SECONDS,
     request_json: dict[str, Any] | None = None,
+    auth_token: str = "",
 ) -> dict[str, Any]:
     encoded_body = None
     headers = {"Accept": "application/json"}
     if request_json is not None:
         encoded_body = json.dumps(request_json).encode("utf-8")
         headers["Content-Type"] = "application/json"
+    if len(auth_token) > 0:
+        headers["Authorization"] = f"Bearer {auth_token}"
     request = urllib_request.Request(url, data=encoded_body, headers=headers, method=method)
     try:
         with urllib_request.urlopen(
@@ -598,15 +670,27 @@ def _request_card_relay_json(
 
 
 class RelayCardConnection:
-    def __init__(self, endpoint: str, timeout_seconds: int = DEFAULT_CARD_RELAY_TIMEOUT_SECONDS):
+    def __init__(
+        self,
+        endpoint: str,
+        timeout_seconds: int = DEFAULT_CARD_RELAY_TIMEOUT_SECONDS,
+        *,
+        auth_token: str = "",
+    ):
         normalized_endpoint = _normalize_card_relay_url(endpoint)
         if len(normalized_endpoint) == 0:
             raise RuntimeError("Invalid card relay endpoint.")
         self._endpoint = normalized_endpoint
         self._status_url = _build_card_relay_status_url(normalized_endpoint)
         self._timeout_seconds = max(1, int(timeout_seconds or DEFAULT_CARD_RELAY_TIMEOUT_SECONDS))
+        self._auth_token = str(auth_token or "").strip()
         self._connected = False
         self._atr: list[int] = []
+
+    @property
+    def auth_token(self) -> str:
+        """Return the bearer token configured on this connection (or empty)."""
+        return self._auth_token
 
     def connect(self, protocol: Any = None) -> None:
         del protocol
@@ -654,6 +738,7 @@ class RelayCardConnection:
             method=method,
             timeout_seconds=self._timeout_seconds,
             request_json=request_json,
+            auth_token=self._auth_token,
         )
 
 
@@ -677,12 +762,15 @@ def trigger_card_relay_modem_refresh(
     if len(str(source or "").strip()) > 0:
         request_payload["sessionId"] = str(source or "").strip()
 
+    auth_token = _resolve_card_relay_token(allow_marker=relay_source == "marker")
+
     try:
         return _request_card_relay_json(
             refresh_url,
             method="POST",
             timeout_seconds=timeout_seconds,
             request_json=request_payload,
+            auth_token=auth_token,
         )
     except Exception as refresh_error:
         # urllib / socket / JSON decode / RuntimeError from _request_card_relay_json
@@ -720,16 +808,22 @@ def create_card_connection(
     protocol: Any = None,
     readers_func: Callable[[], Any] | None = None,
 ):
+    # Defer the import so the recorder module isn't dragged in until a
+    # connection is actually being created — keeps cold-start cheap for
+    # CLI tools that never touch a card.
+    from .apdu_recorder import wrap_connection
+
     if is_simulated_card_backend():
         from SIMCARD.connection import SimulatedCardConnection
 
         connection = SimulatedCardConnection()
         connection.connect(protocol)
-        return connection
+        return wrap_connection(connection, source="simulator")
 
     relay_url, relay_source = _resolve_card_relay_url()
     if len(relay_url) > 0:
-        relay_connection = RelayCardConnection(relay_url)
+        relay_token = _resolve_card_relay_token(allow_marker=relay_source == "marker")
+        relay_connection = RelayCardConnection(relay_url, auth_token=relay_token)
         try:
             relay_connection.connect(protocol)
         except Exception as relay_error:
@@ -745,7 +839,10 @@ def create_card_connection(
                 relay_error,
             )
         else:
-            return relay_connection
+            return wrap_connection(
+                relay_connection,
+                source=f"relay#{reader_index}",
+            )
 
     if readers_func is None:
         from smartcard.System import readers as default_readers
@@ -794,4 +891,11 @@ def create_card_connection(
         except Exception:  # noqa: BLE001
             pass
     _connect_with_leave_card()
-    return connection
+    # Pre-resolve a stable name for the recorder source so the GUI's
+    # APDU dock can group rows per-reader at a glance. Falls back to
+    # the raw index when the reader exposes no name.
+    try:
+        reader_name = str(reader_list[reader_index]) or f"pcsc#{reader_index}"
+    except Exception:  # noqa: BLE001 — exotic reader objects
+        reader_name = f"pcsc#{reader_index}"
+    return wrap_connection(connection, source=reader_name)

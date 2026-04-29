@@ -1,0 +1,5 @@
+# Select USIM ADF and read the EF_DIR record set.
+SELECT 3F00
+SELECT 2F00
+RECORD ALL
+EXIT

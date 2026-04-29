@@ -1,0 +1,6 @@
+# Authenticate to the Security Domain using SCP02. The simulated card only
+# implements SCP03, so this is expected to fail with an SW like 6A82 / 6985
+# from the simulator. The test validates that the failure surfaces cleanly
+# rather than crashing the shell.
+SCP02-SD
+EXIT

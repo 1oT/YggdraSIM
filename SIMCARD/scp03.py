@@ -26,6 +26,13 @@ class Scp03CardLogic:
         self._session_keys: dict[str, bytes] = {}
 
     def reset(self) -> None:
+        # Re-read the static keys on every reset so a profile switch
+        # (SGP.22 enableProfile / disableProfile, BPP install) that
+        # rewrites ``state.scp03_keys`` via ``rebuild_runtime_filesystem``
+        # actually takes effect on the next INITIALIZE UPDATE. Without
+        # this refresh ``_static_keys`` would still hold the keyset
+        # captured at engine boot.
+        self._static_keys = self._load_static_keys()
         self.state.scp03_session = SimScp03Session(key_version=self._static_keys["kvn"])
         self._session_keys = {}
 
@@ -44,6 +51,13 @@ class Scp03CardLogic:
     def handle_initialize_update(self, kvn: int, host_challenge: bytes) -> tuple[bytes, int, int]:
         if len(host_challenge) != 8:
             return b"", 0x67, 0x00
+        # GP Card Spec v2.3.1 §7.1: INITIALIZE UPDATE is the place to
+        # latch the active keyset for the upcoming session. Refresh
+        # from ``state.scp03_keys`` here so a runtime profile change
+        # (e.g. enabling a BPP whose securityDomain PE supplied new
+        # baseline keys) is honoured without re-instantiating the
+        # engine.
+        self._static_keys = self._load_static_keys()
         expected_kvn = int(self._static_keys["kvn"])
         if kvn not in (0x00, expected_kvn):
             return b"", 0x6A, 0x88

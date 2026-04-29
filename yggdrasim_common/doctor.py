@@ -24,6 +24,8 @@ import sys
 from pathlib import Path
 from typing import Callable
 
+from yggdrasim_common.nord_palette import NORD
+
 
 __all__ = [
     "DoctorCheck",
@@ -72,17 +74,20 @@ class DoctorReport:
 
 
 def _color_for_status(status: str) -> str:
+    # Map the four doctor-report verdicts onto the Nord aurora swatches.
+    # Anything else (e.g. a future "skip" verdict) simply renders
+    # without colour rather than picking a random escape sequence.
     colors = {
-        "ok": "\033[38;2;141;255;141m",
-        "warn": "\033[38;2;255;240;143m",
-        "fail": "\033[38;2;255;154;154m",
-        "info": "\033[38;2;147;247;255m",
+        "ok": NORD.GREEN,
+        "warn": NORD.WARNING,
+        "fail": NORD.FAIL,
+        "info": NORD.CYAN,
     }
     return colors.get(status, "")
 
 
 def _format_check(check: DoctorCheck) -> str:
-    reset = "\033[0m"
+    reset = NORD.RESET
     colour = _color_for_status(check.status)
     marker = {"ok": "[+]", "warn": "[*]", "fail": "[-]", "info": "[*]"}.get(
         check.status, "[*]"
@@ -307,6 +312,190 @@ def _probe_hil_optional_helpers(report: DoctorReport) -> None:
             report.add(label, "info", f"{binary_name} not on PATH")
             continue
         report.add(label, "ok", resolved)
+
+
+def _probe_card_relay(report: DoctorReport) -> None:
+    """Probe the configured remote card bridge (CB-3 reachability check).
+
+    Decision tree:
+
+    * If neither ``YGGDRASIM_CARD_RELAY_URL`` nor a runtime marker is
+      set: emit a single ``info`` line so operators learn the feature
+      exists without polluting the report.
+    * If a URL is configured but the relay is unreachable: ``warn``.
+    * If the relay answers but rejects the bearer token: ``warn``.
+    * If the relay answers and authorises: ``ok`` plus a one-line
+      summary of the auth posture so operators can spot e.g. a
+      non-loopback bind without an audit log enabled.
+
+    All probes use ``urllib.request`` with a tight timeout — we never
+    want the doctor to block on a wedged remote bridge.
+    """
+    try:
+        from yggdrasim_common.card_backend import (
+            _resolve_card_relay_url,
+            _resolve_card_relay_token,
+        )
+    except Exception as error:  # noqa: BLE001
+        report.add(
+            "Remote card bridge",
+            "info",
+            f"card_backend module unavailable: {error.__class__.__name__}",
+        )
+        return
+
+    try:
+        relay_url, relay_url_source = _resolve_card_relay_url()
+    except Exception as error:  # noqa: BLE001
+        report.add(
+            "Remote card bridge",
+            "info",
+            f"resolve URL failed: {error.__class__.__name__}: {error}",
+        )
+        return
+
+    if len(relay_url) == 0:
+        report.add(
+            "Remote card bridge",
+            "info",
+            "Not configured — set YGGDRASIM_CARD_RELAY_URL or pass --remote-card-url to talk to a Card Bridge over SSH.",
+        )
+        return
+    _ = relay_url_source  # reserved for future per-source diagnostics
+
+    # /apdu suffix is optional; the bridge's status endpoint lives at
+    # the URL root. Strip the suffix if present so we can reach /ping
+    # and /status.
+    base_url = relay_url
+    if relay_url.endswith("/apdu"):
+        base_url = relay_url[: -len("/apdu")]
+    base_url = base_url.rstrip("/")
+
+    try:
+        token = _resolve_card_relay_token(allow_marker=True)
+    except Exception as error:  # noqa: BLE001
+        report.add(
+            "Remote card bridge",
+            "warn",
+            f"token resolution failed: {error.__class__.__name__}: {error}",
+        )
+        return
+
+    import json as _json
+    import urllib.error
+    import urllib.request
+
+    def _open(path: str) -> tuple[int, dict[str, object] | None]:
+        full = f"{base_url}{path}"
+        request = urllib.request.Request(full, method="GET")
+        if len(token) > 0:
+            request.add_header("Authorization", f"Bearer {token}")
+        with urllib.request.urlopen(request, timeout=2.0) as response:
+            payload_raw = response.read().decode("utf-8", errors="replace")
+            try:
+                payload = _json.loads(payload_raw)
+            except Exception:
+                payload = None
+            return int(response.status), payload if isinstance(payload, dict) else None
+
+    try:
+        ping_status, _ping_payload = _open("/ping")
+    except urllib.error.HTTPError as error:
+        report.add(
+            "Remote card bridge",
+            "warn",
+            f"{base_url}/ping returned HTTP {error.code} ({error.reason}).",
+        )
+        return
+    except (urllib.error.URLError, ConnectionError, TimeoutError, OSError) as error:
+        report.add(
+            "Remote card bridge",
+            "warn",
+            f"{base_url} unreachable: {error.__class__.__name__}: {error}",
+        )
+        return
+
+    if ping_status != 200:
+        report.add(
+            "Remote card bridge",
+            "warn",
+            f"{base_url}/ping returned HTTP {ping_status}.",
+        )
+        return
+
+    # Status carries the auth posture (authRequired / tokenFingerprint).
+    # If we don't have a token but the relay requires one, surface
+    # exactly that so the operator knows what to fix.
+    try:
+        status_status, status_payload = _open("/status")
+    except urllib.error.HTTPError as error:
+        if error.code == 401:
+            report.add(
+                "Remote card bridge",
+                "warn",
+                f"{base_url} reachable but token rejected (HTTP 401). Check YGGDRASIM_CARD_RELAY_TOKEN_FILE.",
+            )
+            return
+        report.add(
+            "Remote card bridge",
+            "warn",
+            f"{base_url}/status returned HTTP {error.code} ({error.reason}).",
+        )
+        return
+    except (urllib.error.URLError, ConnectionError, TimeoutError, OSError) as error:
+        report.add(
+            "Remote card bridge",
+            "warn",
+            f"{base_url}/status unreachable: {error.__class__.__name__}: {error}",
+        )
+        return
+
+    if status_status != 200:
+        report.add(
+            "Remote card bridge",
+            "warn",
+            f"{base_url}/status returned HTTP {status_status}.",
+        )
+        return
+
+    auth_required = False
+    fingerprint = ""
+    bind_host = ""
+    audit_enabled: object = None
+    if isinstance(status_payload, dict):
+        auth_required = bool(status_payload.get("authRequired"))
+        fingerprint = str(status_payload.get("tokenFingerprint") or "")
+        bind_host = str(status_payload.get("host") or status_payload.get("bindHost") or "")
+        audit_enabled = status_payload.get("auditEnabled")
+
+    parts: list[str] = []
+    parts.append(f"{base_url} reachable")
+    if auth_required:
+        if len(token) == 0:
+            report.add(
+                "Remote card bridge",
+                "warn",
+                f"{base_url} requires a bearer token; none configured. Set YGGDRASIM_CARD_RELAY_TOKEN_FILE.",
+            )
+            return
+        if len(fingerprint) > 0:
+            parts.append(f"auth ok (token fp: {fingerprint})")
+        else:
+            parts.append("auth ok")
+    else:
+        if len(bind_host) > 0 and bind_host not in {"127.0.0.1", "::1", "localhost"}:
+            report.add(
+                "Remote card bridge",
+                "warn",
+                f"{base_url} reachable but auth disabled on non-loopback host '{bind_host}' — refuse to use it.",
+            )
+            return
+        parts.append("loopback bridge (no token required)")
+    if audit_enabled is True:
+        parts.append("audit on")
+    elif audit_enabled is False:
+        parts.append("audit off")
+    report.add("Remote card bridge", "ok", "; ".join(parts))
 
 
 def _detect_webview_backends() -> tuple[list[str], list[str]]:
@@ -544,6 +733,7 @@ def run_doctor(
     _probe_flavor(report)
     _probe_hil_bridge(report)
     _probe_hil_optional_helpers(report)
+    _probe_card_relay(report)
     _probe_gui_stack(report)
 
     try:

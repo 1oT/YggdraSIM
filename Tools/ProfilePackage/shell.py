@@ -13,6 +13,7 @@ import yaml
 
 from yggdrasim_common.progress import progress_session
 from yggdrasim_common.quit_control import quit_all
+from yggdrasim_common.nord_palette import NORD
 from .saip_asn1_decode import _FID_TO_NAME, fid_name as _fid_name_lookup
 from .lint_engine import SaipProfileLinter
 from .saip_profile_scaffold import (
@@ -91,14 +92,16 @@ _AKA_ALGORITHM_ID_NAMES = {
 }
 
 class ShellStyle:
-    HEADER = "\033[38;2;95;220;203m"
-    BLUE = "\033[38;2;138;167;255m"
-    CYAN = "\033[38;2;147;247;255m"
-    GREEN = "\033[38;2;141;255;141m"
-    WARNING = "\033[38;2;255;240;143m"
-    FAIL = "\033[38;2;255;154;154m"
-    BOLD = "\033[1m"
-    END = "\033[0m"
+    """SAIP profile-package shell colour roles, anchored to Nord."""
+
+    HEADER = NORD.HEADER
+    BLUE = NORD.BLUE
+    CYAN = NORD.CYAN
+    GREEN = NORD.GREEN
+    WARNING = NORD.WARNING
+    FAIL = NORD.FAIL
+    BOLD = NORD.BOLD
+    END = NORD.RESET
 
 
 class ProfilePackageShell:

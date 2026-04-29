@@ -31,6 +31,9 @@ After an editable install you can also use the installed console scripts:
 - `yggdrasim-scp11-local-access`
 - `yggdrasim-scp11-eim-local`
 - `yggdrasim-profile-package`
+- `yggdrasim-profile-autoload`
+- `yggdrasim-apdu-fuzzer`
+- `yggdrasim-eum-diag`
 - `yggdrasim-suci-tool`
 - `yggdrasim-hil-bridge`
 - `yggdrasim-hil-supervisor`

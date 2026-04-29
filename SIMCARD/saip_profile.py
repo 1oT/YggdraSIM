@@ -10,7 +10,33 @@ from pathlib import Path
 from typing import Any
 
 from SIMCARD.etsi_fs import ISIM_AID, USIM_AID
-from SIMCARD.state import SimProfileAuthConfig, SimProfileFsNode, SimProfileImage
+from SIMCARD.saip_pysim_specs import (
+    FcpAttributes,
+    GfmEntry,
+    apply_pysim_augmentations,
+    apply_pysim_service_table_overlay_to_inspector,
+    decode_fcp_attributes,
+    pysim_alias_specs_for,
+    pysim_gfm_walk,
+    pysim_normalize_aka_decoded,
+    pysim_pe_wrapper,
+    pysim_sd_keys,
+)
+
+# Phase E: when pySim is installed, use its TS-aligned service-name maps
+# in place of the inspector's hand-curated copies. The call is a no-op
+# in stripped deployments without pySim.
+apply_pysim_service_table_overlay_to_inspector()
+from SIMCARD.state import (
+    SimProfileAuthConfig,
+    SimProfileFsNode,
+    SimProfileImage,
+    SimProfilePinEntry,
+    SimProfilePukEntry,
+    SimProfileRfmInstance,
+    SimProfileSecurityDomain,
+    SimProfileSecurityDomainKey,
+)
 from SIMCARD.utils import decode_imsi_ef, encode_iccid_ef, encode_imsi_ef, read_tlv
 
 _SAIP_ASN1 = None
@@ -868,6 +894,7 @@ _SECTION_SPECS: dict[str, dict[str, Any]] = {
         "root_fid": "",
         "root_aid": "",
         "root_label": "",
+        "descriptor_key": "mf",
     },
     "cd": {
         "base_path": ("MF", "DF.CD"),
@@ -876,6 +903,7 @@ _SECTION_SPECS: dict[str, dict[str, Any]] = {
         "root_fid": "7F11",
         "root_aid": "",
         "root_label": "",
+        "descriptor_key": "df-cd",
     },
     "telecom": {
         "base_path": ("MF", "DF.TELECOM"),
@@ -884,6 +912,7 @@ _SECTION_SPECS: dict[str, dict[str, Any]] = {
         "root_fid": "7F10",
         "root_aid": "",
         "root_label": "",
+        "descriptor_key": "df-telecom",
     },
     "phonebook": {
         "base_path": ("MF", "DF.TELECOM", "DF.PHONEBOOK"),
@@ -892,6 +921,7 @@ _SECTION_SPECS: dict[str, dict[str, Any]] = {
         "root_fid": "5F3A",
         "root_aid": "",
         "root_label": "",
+        "descriptor_key": "df-phonebook",
     },
     "gsm-access": {
         "base_path": ("MF", "ADF.USIM", "DF.GSM-ACCESS"),
@@ -900,6 +930,7 @@ _SECTION_SPECS: dict[str, dict[str, Any]] = {
         "root_fid": "5F3B",
         "root_aid": "",
         "root_label": "",
+        "descriptor_key": "df-gsm-access",
     },
     "usim": {
         "base_path": ("MF", "ADF.USIM"),
@@ -908,6 +939,7 @@ _SECTION_SPECS: dict[str, dict[str, Any]] = {
         "root_fid": "7FF0",
         "root_aid": USIM_AID,
         "root_label": "USIM",
+        "descriptor_key": "adf-usim",
     },
     "opt-usim": {
         "base_path": ("MF", "ADF.USIM"),
@@ -916,6 +948,7 @@ _SECTION_SPECS: dict[str, dict[str, Any]] = {
         "root_fid": "7FF0",
         "root_aid": USIM_AID,
         "root_label": "USIM",
+        "descriptor_key": "adf-usim",
     },
     "isim": {
         "base_path": ("MF", "ADF.ISIM"),
@@ -924,6 +957,7 @@ _SECTION_SPECS: dict[str, dict[str, Any]] = {
         "root_fid": "7FF2",
         "root_aid": ISIM_AID,
         "root_label": "ISIM",
+        "descriptor_key": "adf-isim",
     },
     "opt-isim": {
         "base_path": ("MF", "ADF.ISIM"),
@@ -932,6 +966,7 @@ _SECTION_SPECS: dict[str, dict[str, Any]] = {
         "root_fid": "7FF2",
         "root_aid": ISIM_AID,
         "root_label": "ISIM",
+        "descriptor_key": "adf-isim",
     },
     "csim": {
         "base_path": ("MF", "ADF.CSIM"),
@@ -940,6 +975,7 @@ _SECTION_SPECS: dict[str, dict[str, Any]] = {
         "root_fid": "7FF3",
         "root_aid": "",
         "root_label": "CSIM",
+        "descriptor_key": "adf-csim",
     },
     "opt-csim": {
         "base_path": ("MF", "ADF.CSIM"),
@@ -948,6 +984,7 @@ _SECTION_SPECS: dict[str, dict[str, Any]] = {
         "root_fid": "7FF3",
         "root_aid": "",
         "root_label": "CSIM",
+        "descriptor_key": "adf-csim",
     },
     "eap": {
         "base_path": ("MF", "DF.EAP"),
@@ -956,6 +993,7 @@ _SECTION_SPECS: dict[str, dict[str, Any]] = {
         "root_fid": "7F20",
         "root_aid": "",
         "root_label": "",
+        "descriptor_key": "df-eap",
     },
     "df-5gs": {
         "base_path": ("MF", "ADF.USIM", "DF.5GS"),
@@ -964,6 +1002,7 @@ _SECTION_SPECS: dict[str, dict[str, Any]] = {
         "root_fid": "5FC0",
         "root_aid": "",
         "root_label": "",
+        "descriptor_key": "df-5gs",
     },
     "df-saip": {
         "base_path": ("MF", "ADF.USIM", "DF.SAIP"),
@@ -972,6 +1011,7 @@ _SECTION_SPECS: dict[str, dict[str, Any]] = {
         "root_fid": "5FD0",
         "root_aid": "",
         "root_label": "",
+        "descriptor_key": "df-saip",
     },
     "df-snpn": {
         "base_path": ("MF", "ADF.USIM", "DF.SNPN"),
@@ -980,6 +1020,7 @@ _SECTION_SPECS: dict[str, dict[str, Any]] = {
         "root_fid": "5FE0",
         "root_aid": "",
         "root_label": "",
+        "descriptor_key": "df-snpn",
     },
     "df-5gprose": {
         "base_path": ("MF", "ADF.USIM", "DF.5G_PROSE"),
@@ -988,6 +1029,7 @@ _SECTION_SPECS: dict[str, dict[str, Any]] = {
         "root_fid": "5FF0",
         "root_aid": "",
         "root_label": "",
+        "descriptor_key": "df-5gprose",
     },
 }
 
@@ -1547,6 +1589,25 @@ _FILE_SPECS: dict[str, dict[str, Any]] = {
 }
 
 
+# Phase A: overlay pySim's TCA Profile-Interoperability §9 templates on
+# top of the literal table. Augmentation is in-place, FID-anchored
+# (parent context preserved) and only fills gaps. The follow-up alias
+# pass surfaces pySim spellings (e.g. V2 ``ef-supi-nai``) onto the same
+# spec dict so BPPs emitted by pySim-shell or other TCA-compliant
+# tooling decode without losing the EF entry.
+apply_pysim_augmentations(_FILE_SPECS)
+
+
+def _install_pysim_aliases(specs: dict[str, dict[str, Any]]) -> None:
+    for alias_pe_name, alias_spec in pysim_alias_specs_for(specs).items():
+        if alias_pe_name in specs:
+            continue
+        specs[alias_pe_name] = alias_spec
+
+
+_install_pysim_aliases(_FILE_SPECS)
+
+
 def decode_profile_image(
     upp_bytes: bytes,
     *,
@@ -1667,26 +1728,95 @@ def _consume_profile_element(image: SimProfileImage, pe_type: str, decoded: dict
         header_iccid = decoded.get("iccid")
         if isinstance(header_iccid, (bytes, bytearray, memoryview)) and len(header_iccid) > 0:
             image.iccid = bytes(header_iccid).hex().upper().rstrip("F")
+        # TCA Profile Interoperability §3.4.2 connectivityParameters.
+        # The SAIP header carries an optional TLV stream describing the
+        # MNO bearer (BIP / RAM-HTTP). The bytes are kept verbatim so
+        # SGP.32 ES10b.GetConnectivityParameters can return them
+        # unmodified; conversion to the [1] httpParams OCTET STRING is
+        # done by the SGP layer.
+        connectivity_value = decoded.get("connectivityParameters")
+        if isinstance(connectivity_value, (bytes, bytearray, memoryview)):
+            image.connectivity_params_http = bytes(connectivity_value)
         return
 
     if pe_type == "akaParameter":
         _consume_aka_parameter(image, decoded)
         return
 
+    if pe_type == "pinCodes":
+        _consume_pin_codes(image, decoded)
+        return
+
+    if pe_type == "pukCodes":
+        _consume_puk_codes(image, decoded)
+        return
+
+    if pe_type == "securityDomain":
+        _consume_security_domain(image, decoded)
+        return
+
+    if pe_type == "rfm":
+        _consume_rfm(image, decoded)
+        return
+
+    if pe_type == "genericFileManagement":
+        _consume_generic_file_management(image, decoded)
+        return
+
     spec = _SECTION_SPECS.get(pe_type)
     if spec is None:
         return
 
+    root_descriptor: dict[str, Any] = {}
+    descriptor_key = str(spec.get("descriptor_key", "") or "")
+    descriptor_present = False
+    if len(descriptor_key) > 0 and descriptor_key in decoded:
+        root_descriptor = _extract_file_descriptor_dict(decoded.get(descriptor_key))
+        descriptor_present = True
+
     root_path = spec.get("root_path")
+    # Optional companion PEs (``opt-usim``/``opt-isim``/``opt-csim``) reuse
+    # the same logical container as their mandatory counterpart but never
+    # carry a fresh ``adf-*`` descriptor. Emitting a second root node from
+    # spec defaults at this point would clobber the AID/FID/lcsi we just
+    # learned from the BPP, so skip the root for these companion sections.
+    if isinstance(root_path, tuple) and descriptor_present is False and pe_type.startswith("opt-"):
+        root_path = None
+
     if isinstance(root_path, tuple):
+        spec_aid = str(spec.get("root_aid", "") or "")
+        spec_fid = str(spec.get("root_fid", "") or "")
+        bpp_aid_bytes = root_descriptor.get("dfName")
+        bpp_fid_bytes = root_descriptor.get("fileID")
+        # SAIP TCA Profile Interoperability §3 mandates ``dfName`` for
+        # ADF descriptors. Honouring it here lets the runtime FCP/EF.DIR
+        # builders emit the AID actually present in the BPP rather than
+        # falling back to YggdraSIM's hard-coded test constants.
+        resolved_aid = (
+            bytes(bpp_aid_bytes).hex().upper()
+            if isinstance(bpp_aid_bytes, (bytes, bytearray, memoryview)) and len(bpp_aid_bytes) > 0
+            else spec_aid
+        )
+        resolved_fid = (
+            bytes(bpp_fid_bytes).hex().upper()
+            if isinstance(bpp_fid_bytes, (bytes, bytearray, memoryview)) and len(bpp_fid_bytes) == 2
+            else spec_fid
+        )
+        lcsi_byte = root_descriptor.get("lcsi")
+        lifecycle_state = (
+            int(bytes(lcsi_byte)[0])
+            if isinstance(lcsi_byte, (bytes, bytearray, memoryview)) and len(lcsi_byte) >= 1
+            else 0x05
+        )
         image.nodes.append(
             SimProfileFsNode(
                 path=root_path,
                 name=root_path[-1],
                 kind=str(spec.get("root_kind", "df") or "df"),
-                fid=str(spec.get("root_fid", "") or ""),
-                aid=str(spec.get("root_aid", "") or ""),
+                fid=resolved_fid,
+                aid=resolved_aid,
                 label=str(spec.get("root_label", "") or ""),
+                lifecycle_state=lifecycle_state,
             )
         )
 
@@ -1694,15 +1824,47 @@ def _consume_profile_element(image: SimProfileImage, pe_type: str, decoded: dict
     for key, value in decoded.items():
         if key.endswith("-header") or key == "templateID":
             continue
+        if str(key) == descriptor_key:
+            continue
         file_spec = _FILE_SPECS.get(str(key))
         if file_spec is None:
             continue
-        payload = _materialize_file_payload(value)
-        if payload is None:
+        materialised = _materialize_ef_value(value)
+        if materialised is None:
             continue
+        payload, ef_descriptor = materialised
         structure = str(file_spec.get("structure", "transparent") or "transparent")
-        records = [payload] if structure == "linear-fixed" and len(payload) > 0 else []
-        data = b"" if structure == "linear-fixed" else payload
+        # Phase B: route descriptor parsing through pySim's
+        # File.from_fileDescriptor so record_len / efFileSize / lcsi /
+        # ARR / fillPattern stay aligned with TS 102 222 + SAIP §5.1.
+        attrs = decode_fcp_attributes(ef_descriptor)
+        record_length = attrs.record_length
+        ef_size = attrs.transparent_size if structure == "transparent" else 0
+        if ef_size > 0 and len(payload) < ef_size:
+            payload = payload + b"\xFF" * (ef_size - len(payload))
+        records: list[bytes] = []
+        data = b""
+        if structure in ("linear-fixed", "cyclic"):
+            if record_length > 0 and len(payload) >= record_length:
+                # SAIP §5.1 packs records back-to-back inside ``ef-*``;
+                # use the descriptor-supplied length to slice them out
+                # so READ RECORD returns the exact bytes from the BPP.
+                count = len(payload) // record_length
+                records = [
+                    payload[i * record_length : (i + 1) * record_length]
+                    for i in range(count)
+                ]
+            elif len(payload) > 0:
+                records = [payload]
+        else:
+            data = payload
+        ef_lifecycle = int(attrs.lcsi) if attrs.lcsi is not None else 0x05
+        # BPP-supplied SFI overrides are intentionally NOT honoured
+        # here: pySim's ``from_fileDescriptor`` stores the raw
+        # ``shortEFID`` byte without unpacking the TS 102 221 §13.2
+        # SFI bits (bits 7..3), so the value cannot be used as-is.
+        # The Phase A registry already aligns template SFIs with
+        # pySim's authoritative TCA Profile-Interoperability §9 maps.
         image.nodes.append(
             SimProfileFsNode(
                 path=base_path + (str(file_spec["name"]),),
@@ -1713,12 +1875,1012 @@ def _consume_profile_element(image: SimProfileImage, pe_type: str, decoded: dict
                 data=data,
                 records=records,
                 sfi=file_spec.get("sfi"),
+                lifecycle_state=ef_lifecycle,
+                link_path=attrs.link_path,
             )
         )
 
 
+def _extract_file_descriptor_dict(value: Any) -> dict[str, Any]:
+    if value is None:
+        return {}
+    if isinstance(value, dict):
+        # ``mf-header`` style descriptor objects already arrive as dicts.
+        inner = value.get("fileDescriptor") if "fileDescriptor" in value else value
+        return inner if isinstance(inner, dict) else value
+    if isinstance(value, list) is False:
+        return {}
+    for item in value:
+        if isinstance(item, tuple) is False or len(item) != 2:
+            continue
+        tag_name = str(item[0] or "").strip()
+        if tag_name == "fileDescriptor" and isinstance(item[1], dict):
+            return item[1]
+    return {}
+
+
+def _record_length_from_descriptor(descriptor: dict[str, Any]) -> int:
+    raw = descriptor.get("fileDescriptor")
+    if isinstance(raw, (bytes, bytearray, memoryview)) is False:
+        return 0
+    body = bytes(raw)
+    # ETSI TS 102 221 §11.1.1.4.3: linear-fixed/cyclic descriptor is
+    # 5 bytes wide -- byte 0 file descriptor byte, byte 1 data coding,
+    # bytes 2-3 record length, byte 4 record count. Anything shorter
+    # is a transparent EF descriptor without a record length.
+    if len(body) < 4:
+        return 0
+    return int.from_bytes(body[2:4], "big", signed=False)
+
+
+def _ef_size_from_descriptor(descriptor: dict[str, Any]) -> int:
+    raw = descriptor.get("efFileSize")
+    if isinstance(raw, (bytes, bytearray, memoryview)) is False:
+        return 0
+    body = bytes(raw)
+    if len(body) == 0:
+        return 0
+    return int.from_bytes(body, "big", signed=False)
+
+
+def _decode_fcp_link_path(descriptor: Any) -> tuple[str, ...]:
+    """Decode ``Fcp.linkPath`` (``[PRIVATE 7]`` OCTET STRING, SIZE
+    0..8) from a SAIP file descriptor dict.
+
+    SAIP / TCA Profile Interoperability v2.3.1 §8.3.5: the OCTET
+    STRING is a concatenation of 2-byte FIDs walking from the MF
+    (or the temporary ADF FID when the path is rooted in an ADF)
+    down to the file the link points at. An empty OCTET STRING
+    denotes "turn this template link file into an independent
+    file" (§8.3.5 explicit note). We return the path as a tuple of
+    upper-case hex FIDs so consumers can index into a path -> node
+    dict without rebuilding hex strings on every lookup.
+
+    Returns an empty tuple when the descriptor is missing or
+    malformed; the calling consumer treats that as "no link".
+    """
+    if isinstance(descriptor, dict) is False:
+        return tuple()
+    raw = descriptor.get("linkPath")
+    if raw is None:
+        return tuple()
+    if isinstance(raw, (bytes, bytearray, memoryview)) is False:
+        return tuple()
+    payload = bytes(raw)
+    if len(payload) == 0:
+        # Per §8.3.5, "an empty linkPath indicates that the link
+        # file shall be turned into an independent file." There is
+        # no link target so the runtime treats the slot as a
+        # regular EF.
+        return tuple()
+    if len(payload) % 2 != 0:
+        # Malformed encoding -- linkPath must be a whole number of
+        # FIDs. Drop the link rather than synthesising a partial
+        # path that would mis-resolve at runtime.
+        return tuple()
+    fids: list[str] = []
+    for offset in range(0, len(payload), 2):
+        fids.append(payload[offset : offset + 2].hex().upper())
+    return tuple(fids)
+
+
+def _consume_pin_codes(image: SimProfileImage, decoded: dict[str, Any]) -> None:
+    """SAIP §5.6.1 -- materialise a ``pinCodes`` PE into ``image.pin_codes``.
+
+    Both ``pinconfig`` and ``pinmappings`` choices are tolerated; only the
+    former carries actual key material so anything else is dropped silently.
+    The retry counter is stored as the high-nibble (max attempts) and
+    low-nibble (remaining) of the SAIP ``maxNumOfAttemps-retryNumLeft``
+    byte so VERIFY PIN can update both fields independently.
+
+    The decoded dict is routed through pySim's
+    ``ProfileElementPin`` wrapper (Phase C) so any future pySim-side
+    schema validation surfaces here uniformly. The wrapper is purely
+    interpretive -- the local parser remains the authoritative path.
+    """
+    wrapper = pysim_pe_wrapper("pinCodes", decoded)
+    source = getattr(wrapper, "decoded", decoded) if wrapper is not None else decoded
+    if isinstance(source, dict) is False:
+        source = decoded
+    pin_codes_value = source.get("pinCodes")
+    if isinstance(pin_codes_value, tuple) is False or len(pin_codes_value) != 2:
+        return
+    choice_name = str(pin_codes_value[0] or "").strip()
+    choice_value = pin_codes_value[1]
+    if choice_name != "pinconfig":
+        # ``pinmappings`` simply re-binds an existing PIN to another DF
+        # and does not provision new key material. Honouring it requires
+        # the receiving DF to be in ``image.nodes`` already; defer until
+        # the consumer is wired up by a future increment.
+        return
+    if isinstance(choice_value, list) is False:
+        return
+    for entry in choice_value:
+        if isinstance(entry, dict) is False:
+            continue
+        try:
+            key_reference = int(entry.get("keyReference", 0) or 0) & 0xFF
+        except (TypeError, ValueError):
+            continue
+        pin_value = entry.get("pinValue")
+        pin_bytes = bytes(pin_value) if isinstance(pin_value, (bytes, bytearray, memoryview)) else b""
+        if len(pin_bytes) == 0:
+            continue
+        unblock_reference = 0
+        try:
+            unblock_reference = int(entry.get("unblockingPINReference", 0) or 0) & 0xFF
+        except (TypeError, ValueError):
+            unblock_reference = 0
+        attributes = 0
+        try:
+            attributes = int(entry.get("pinAttributes", 0) or 0) & 0xFF
+        except (TypeError, ValueError):
+            attributes = 0
+        retry_byte = 0
+        try:
+            retry_byte = int(entry.get("maxNumOfAttemps-retryNumLeft", 0) or 0) & 0xFF
+        except (TypeError, ValueError):
+            retry_byte = 0
+        max_attempts = (retry_byte >> 4) & 0x0F
+        retries_remaining = retry_byte & 0x0F
+        if max_attempts == 0:
+            max_attempts = 3
+        if retries_remaining == 0:
+            retries_remaining = max_attempts
+        image.pin_codes.append(
+            SimProfilePinEntry(
+                key_reference=key_reference,
+                value=pin_bytes,
+                unblock_reference=unblock_reference,
+                attributes=attributes,
+                max_attempts=max_attempts,
+                retries_remaining=retries_remaining,
+            )
+        )
+
+
+def _consume_puk_codes(image: SimProfileImage, decoded: dict[str, Any]) -> None:
+    """SAIP §5.6.2 -- materialise a ``pukCodes`` PE.
+
+    The PUK retry counter is encoded as the SAIP ``maxNumOfAttemps-
+    retryNumLeft`` byte; per TS 102 221 §9.5.4 the unblock counter
+    range is [0, 10] so the high/low nibbles each map to a single
+    decimal digit -- 0xAA decodes to "10/10 attempts remaining".
+
+    The decoded dict is routed through pySim's ``ProfileElementPuk``
+    wrapper (Phase C) for forward-compat with upstream validation.
+    """
+    wrapper = pysim_pe_wrapper("pukCodes", decoded)
+    source = getattr(wrapper, "decoded", decoded) if wrapper is not None else decoded
+    if isinstance(source, dict) is False:
+        source = decoded
+    puk_list = source.get("pukCodes")
+    if isinstance(puk_list, list) is False:
+        return
+    for entry in puk_list:
+        if isinstance(entry, dict) is False:
+            continue
+        try:
+            key_reference = int(entry.get("keyReference", 0) or 0) & 0xFF
+        except (TypeError, ValueError):
+            continue
+        puk_value = entry.get("pukValue")
+        puk_bytes = bytes(puk_value) if isinstance(puk_value, (bytes, bytearray, memoryview)) else b""
+        if len(puk_bytes) == 0:
+            continue
+        retry_byte = 0
+        try:
+            retry_byte = int(entry.get("maxNumOfAttemps-retryNumLeft", 0) or 0) & 0xFF
+        except (TypeError, ValueError):
+            retry_byte = 0
+        max_attempts = (retry_byte >> 4) & 0x0F
+        retries_remaining = retry_byte & 0x0F
+        if max_attempts == 0:
+            max_attempts = 10
+        if retries_remaining == 0:
+            retries_remaining = max_attempts
+        # TS 102 221 §9.5.4 caps the PUK counter at 10 attempts; SAIP
+        # therefore stores 0xAA = "10/10". Normalise so the runtime
+        # ``naa.unblock_chv`` path doesn't see an out-of-range value.
+        max_attempts = min(max_attempts, 10)
+        retries_remaining = min(retries_remaining, max_attempts)
+        image.puk_codes.append(
+            SimProfilePukEntry(
+                key_reference=key_reference,
+                value=puk_bytes,
+                max_attempts=max_attempts,
+                retries_remaining=retries_remaining,
+            )
+        )
+
+
+def _consume_security_domain(image: SimProfileImage, decoded: dict[str, Any]) -> None:
+    """SAIP §5.5 -- materialise a ``securityDomain`` PE.
+
+    ``instance`` carries the GP §11.4 application registry tuple
+    (instance/class/load-package AID, privileges, lifecycle, install
+    parameters). ``keyList`` carries SCP02/SCP03 keys (KeyType +
+    KeyData + KeyVersionNumber) plus a derived MAC length per GP
+    Card Spec v2.3.1 Amendment D §7.5.
+
+    Key parsing routes through pySim's ``ProfileElementSD`` wrapper
+    (Phase C) -- ``SecurityDomainKey.from_saip_dict`` handles the
+    ``KeyType`` enum and the ``KeyUsageQualifier`` BitStruct so we
+    surface a properly packed usage byte even when the BPP encodes
+    the OPTIONAL ``keyUsageQualifier`` as a multi-byte BitStruct.
+    The local dict-walker remains as the fallback for unmapped or
+    pySim-unsupported shapes.
+    """
+    wrapper = pysim_pe_wrapper("securityDomain", decoded)
+    source = getattr(wrapper, "decoded", decoded) if wrapper is not None else decoded
+    if isinstance(source, dict) is False:
+        source = decoded
+    instance_dict = source.get("instance")
+    if isinstance(instance_dict, dict) is False:
+        return
+    instance_aid_value = instance_dict.get("instanceAID")
+    instance_aid_bytes = (
+        bytes(instance_aid_value) if isinstance(instance_aid_value, (bytes, bytearray, memoryview)) else b""
+    )
+    if len(instance_aid_bytes) == 0:
+        return
+    class_aid_value = instance_dict.get("classAID")
+    load_package_aid_value = instance_dict.get("applicationLoadPackageAID")
+    privileges_value = instance_dict.get("applicationPrivileges")
+    lifecycle_value = instance_dict.get("lifeCycleState")
+    install_params_value = instance_dict.get("applicationSpecificParametersC9")
+    application_parameters = instance_dict.get("applicationParameters")
+    uicc_toolkit_bytes = b""
+    if isinstance(application_parameters, dict):
+        toolkit_value = application_parameters.get("uiccToolkitApplicationSpecificParametersField")
+        if isinstance(toolkit_value, (bytes, bytearray, memoryview)):
+            uicc_toolkit_bytes = bytes(toolkit_value)
+
+    sd_keys: list[SimProfileSecurityDomainKey] = []
+    key_list = source.get("keyList")
+    pysim_keys = pysim_sd_keys(decoded)
+    if pysim_keys and isinstance(key_list, list) and len(pysim_keys) == len(key_list):
+        # Prefer pySim's typed parse: it collapses the KeyUsageQualifier
+        # BitStruct back to a single GP byte and resolves the KeyType
+        # enum to the canonical string ahead of the byte-level lookup.
+        for raw_entry, pk in zip(key_list, pysim_keys):
+            access = 0
+            counter_bytes = b""
+            if isinstance(raw_entry, dict):
+                access = _coerce_byte(raw_entry.get("keyAccess"))
+                counter_value = raw_entry.get("keyCounterValue")
+                if isinstance(counter_value, (bytes, bytearray, memoryview)):
+                    counter_bytes = bytes(counter_value)
+            primary_type = 0x00
+            primary_data = b""
+            primary_mac_length = 8
+            if pk.components:
+                comp_type, comp_data, mac_len = pk.components[0]
+                primary_type = _key_type_string_to_byte(comp_type)
+                primary_data = comp_data
+                primary_mac_length = mac_len
+            sd_keys.append(
+                SimProfileSecurityDomainKey(
+                    usage_qualifier=pk.key_usage_qualifier,
+                    key_identifier=pk.key_identifier,
+                    key_version=pk.key_version_number,
+                    key_type=primary_type,
+                    key_data=primary_data,
+                    mac_length=primary_mac_length,
+                    counter=counter_bytes,
+                    access=access,
+                )
+            )
+    elif isinstance(key_list, list):
+        for key_entry in key_list:
+            if isinstance(key_entry, dict) is False:
+                continue
+            usage_qualifier = _coerce_byte(key_entry.get("keyUsageQualifier"))
+            key_identifier = _coerce_byte(key_entry.get("keyIdentifier"))
+            key_version = _coerce_byte(key_entry.get("keyVersionNumber"))
+            access = _coerce_byte(key_entry.get("keyAccess"))
+            counter_value = key_entry.get("keyCounterValue")
+            counter_bytes = bytes(counter_value) if isinstance(counter_value, (bytes, bytearray, memoryview)) else b""
+
+            components = key_entry.get("keyComponents")
+            primary_type = 0x00
+            primary_data = b""
+            primary_mac_length = 8
+            if isinstance(components, list) and len(components) > 0:
+                first = components[0]
+                if isinstance(first, dict):
+                    primary_type = _coerce_byte(first.get("keyType"))
+                    component_data = first.get("keyData")
+                    if isinstance(component_data, (bytes, bytearray, memoryview)):
+                        primary_data = bytes(component_data)
+                    try:
+                        primary_mac_length = int(first.get("macLength", 8) or 8)
+                    except (TypeError, ValueError):
+                        primary_mac_length = 8
+            sd_keys.append(
+                SimProfileSecurityDomainKey(
+                    usage_qualifier=usage_qualifier,
+                    key_identifier=key_identifier,
+                    key_version=key_version,
+                    key_type=primary_type,
+                    key_data=primary_data,
+                    mac_length=primary_mac_length,
+                    counter=counter_bytes,
+                    access=access,
+                )
+            )
+
+    perso_data: list[bytes] = []
+    perso_value = source.get("sdPersoData")
+    if isinstance(perso_value, list):
+        for chunk in perso_value:
+            if isinstance(chunk, (bytes, bytearray, memoryview)) and len(chunk) > 0:
+                perso_data.append(bytes(chunk))
+
+    image.security_domains.append(
+        SimProfileSecurityDomain(
+            instance_aid=instance_aid_bytes.hex().upper(),
+            class_aid=(
+                bytes(class_aid_value).hex().upper()
+                if isinstance(class_aid_value, (bytes, bytearray, memoryview))
+                else ""
+            ),
+            load_package_aid=(
+                bytes(load_package_aid_value).hex().upper()
+                if isinstance(load_package_aid_value, (bytes, bytearray, memoryview))
+                else ""
+            ),
+            privileges=(
+                bytes(privileges_value)
+                if isinstance(privileges_value, (bytes, bytearray, memoryview))
+                else b""
+            ),
+            lifecycle_state=(
+                int(bytes(lifecycle_value)[0])
+                if isinstance(lifecycle_value, (bytes, bytearray, memoryview)) and len(lifecycle_value) >= 1
+                else 0x07
+            ),
+            install_parameters=(
+                bytes(install_params_value)
+                if isinstance(install_params_value, (bytes, bytearray, memoryview))
+                else b""
+            ),
+            uicc_toolkit_parameters=uicc_toolkit_bytes,
+            keys=sd_keys,
+            perso_data=perso_data,
+        )
+    )
+
+
+def _consume_rfm(image: SimProfileImage, decoded: dict[str, Any]) -> None:
+    """SAIP §5.7 -- materialise an ``rfm`` PE.
+
+    Each PE binds one OTA RFM applet (instance AID + TAR list +
+    minimum security level + optional ADF restriction). ETSI TS 102
+    226 §8.4 prohibits more than one ADF binding per RFM instance, so
+    the optional ``adfRFMAccess`` is materialised verbatim.
+
+    Routes through pySim's ``ProfileElementRFM`` wrapper (Phase C);
+    the wrapper currently does no extra post-decoding but lets future
+    upstream invariants surface here without re-touching the parser.
+    """
+    wrapper = pysim_pe_wrapper("rfm", decoded)
+    source = getattr(wrapper, "decoded", decoded) if wrapper is not None else decoded
+    if isinstance(source, dict) is False:
+        source = decoded
+    instance_aid_value = source.get("instanceAID")
+    if isinstance(instance_aid_value, (bytes, bytearray, memoryview)) is False:
+        return
+    instance_aid_bytes = bytes(instance_aid_value)
+    if len(instance_aid_bytes) == 0:
+        return
+    tar_list_raw = source.get("tarList")
+    tar_list: list[bytes] = []
+    if isinstance(tar_list_raw, list):
+        for tar in tar_list_raw:
+            if isinstance(tar, (bytes, bytearray, memoryview)) and len(tar) == 3:
+                tar_list.append(bytes(tar))
+    minimum_security_level = _coerce_byte(source.get("minimumSecurityLevel"))
+    uicc_access_domain = _coerce_octet_string(source.get("uiccAccessDomain"))
+    uicc_admin_access_domain = _coerce_octet_string(source.get("uiccAdminAccessDomain"))
+
+    adf_aid_hex = ""
+    adf_access_domain = b""
+    adf_admin_access_domain = b""
+    adf_section = source.get("adfRFMAccess")
+    if isinstance(adf_section, dict):
+        adf_aid_value = adf_section.get("adfAID")
+        if isinstance(adf_aid_value, (bytes, bytearray, memoryview)) and len(adf_aid_value) > 0:
+            adf_aid_hex = bytes(adf_aid_value).hex().upper()
+        adf_access_domain = _coerce_octet_string(adf_section.get("adfAccessDomain"))
+        adf_admin_access_domain = _coerce_octet_string(adf_section.get("adfAdminAccessDomain"))
+
+    image.rfm_instances.append(
+        SimProfileRfmInstance(
+            instance_aid=instance_aid_bytes.hex().upper(),
+            tar_list=tar_list,
+            minimum_security_level=minimum_security_level,
+            uicc_access_domain=uicc_access_domain,
+            uicc_admin_access_domain=uicc_admin_access_domain,
+            adf_aid=adf_aid_hex,
+            adf_access_domain=adf_access_domain,
+            adf_admin_access_domain=adf_admin_access_domain,
+        )
+    )
+
+
+_PYSIM_GFM_FILE_TYPE_TO_STRUCTURE: dict[str, str] = {
+    "TR": "transparent",
+    "LF": "linear-fixed",
+    "CY": "cyclic",
+    "BT": "ber-tlv",
+}
+
+
+def _consume_generic_file_management(image: SimProfileImage, decoded: dict[str, Any]) -> None:
+    """SAIP §5.4 -- materialise a ``genericFileManagement`` PE.
+
+    Phase D: routes the PE through pySim's typed ``File`` / GFM
+    walker (see ``pysim_gfm_walk``). pySim handles the FCP decode,
+    fill-pattern expansion (TS 102 222 §6.3.2.2.2) and content
+    accumulation; this consumer maps the resulting ``GfmEntry`` items
+    onto ``SimProfileFsNode`` instances with the simulator's
+    canonical path/label conventions intact.
+
+    The legacy hand-rolled walker remains as a fallback for inputs
+    pySim cannot decode (missing constructs, malformed sequences,
+    or pySim-not-installed deploys).
+    """
+    cmd_list = decoded.get("fileManagementCMD")
+    if isinstance(cmd_list, list) is False:
+        return
+
+    pysim_entries = pysim_gfm_walk(decoded)
+    if pysim_entries:
+        _materialize_gfm_via_pysim(image, pysim_entries)
+        return
+
+    _consume_generic_file_management_local(image, decoded)
+
+
+def _materialize_gfm_via_pysim(
+    image: SimProfileImage,
+    entries: tuple[GfmEntry, ...],
+) -> None:
+    """Translate pySim-decoded ``GfmEntry`` items into ``SimProfileFsNode``s.
+
+    The translation preserves the simulator's friendly name layer
+    (``("MF", "ADF.USIM", "EF.IMSI")``) while delegating descriptor
+    parsing and body accumulation to pySim. New DFs/ADFs created by
+    the GFM stream are added to ``fid_to_path`` on the fly so any
+    downstream EFs anchored under them resolve correctly.
+    """
+    fid_to_path = _build_fid_to_path_map(image)
+    for entry in entries:
+        parent_fids = entry.path_fids[:-1] if len(entry.path_fids) > 1 else (0x3F00,)
+        df_anchor = _resolve_df_anchor_from_fids(parent_fids, fid_to_path)
+        fid_hex = "%04X" % entry.fid
+        if entry.file_type in ("MF", "DF", "ADF"):
+            aid_hex = entry.df_name.hex().upper()
+            df_label = _resolve_df_label_for_fid(fid_hex, aid_hex)
+            if fid_hex == "3F00":
+                new_path: tuple[str, ...] = ("MF",)
+            elif fid_hex.startswith("7F"):
+                new_path = ("MF", df_label)
+            elif fid_hex.startswith("5F"):
+                anchor = df_anchor if len(df_anchor) >= 2 else ("MF",)
+                new_path = anchor + (df_label,)
+            else:
+                new_path = df_anchor + (df_label,)
+            kind = "adf" if len(aid_hex) > 0 or entry.file_type == "ADF" else "df"
+            image.nodes.append(
+                SimProfileFsNode(
+                    path=new_path,
+                    name=df_label,
+                    kind=kind,
+                    fid=fid_hex,
+                    aid=aid_hex,
+                    label=df_label,
+                    lifecycle_state=int(entry.lcsi) if entry.lcsi is not None else 0x05,
+                )
+            )
+            fid_to_path[fid_hex] = new_path
+            continue
+        structure = _PYSIM_GFM_FILE_TYPE_TO_STRUCTURE.get(entry.file_type, "transparent")
+        ef_name = _resolve_ef_label(fid_hex)
+        ef_path = df_anchor + (ef_name,)
+        ef_size = int(entry.file_size or 0)
+        record_length = int(entry.rec_len or 0)
+        payload = entry.body
+        # TS 102 222 §6.3.2.2.2 / TCA §3.5.4: erased flash is 0xFF.
+        # pySim's ``file_content_from_tuples`` only fills explicit
+        # ranges, so any tail still uncovered after the GFM stream is
+        # padded here.
+        if ef_size > 0 and len(payload) < ef_size:
+            payload = payload + b"\xFF" * (ef_size - len(payload))
+        elif ef_size > 0 and len(payload) > ef_size:
+            payload = payload[:ef_size]
+        records: list[bytes] = []
+        data = b""
+        if structure in ("linear-fixed", "cyclic") and record_length > 0:
+            if len(payload) >= record_length:
+                count = len(payload) // record_length
+                records = [
+                    payload[i * record_length : (i + 1) * record_length]
+                    for i in range(count)
+                ]
+            elif len(payload) > 0:
+                records = [payload]
+        else:
+            data = payload
+        # SAIP encodes the SFI byte right-justified per TS 102 221
+        # §13.2 (5-bit SFI in the low nibble + 3 reserved zero bits);
+        # pySim stores the raw byte verbatim so we mask it to keep
+        # the same convention as the local walker.
+        sfi_value: int | None = None
+        if isinstance(entry.sfi_raw, int):
+            sfi_value = int(entry.sfi_raw) & 0x1F
+        node = SimProfileFsNode(
+            path=ef_path,
+            name=ef_name,
+            kind="ef",
+            fid=fid_hex,
+            structure=structure,
+            data=data,
+            records=records,
+            sfi=sfi_value,
+            lifecycle_state=int(entry.lcsi) if entry.lcsi is not None else 0x05,
+            link_path=entry.link_path,
+        )
+        image.nodes.append(node)
+        fid_to_path[fid_hex] = ef_path
+
+
+def _resolve_df_anchor_from_fids(
+    parent_fids: tuple[int, ...],
+    fid_to_path: dict[str, tuple[str, ...]],
+) -> tuple[str, ...]:
+    """Resolve a chain of FIDs into a tuple of canonical path labels.
+
+    Walks the chain head-first (MF down to the immediate parent), so a
+    GFM ``filePath`` like ``3F00 7F20 5F3A`` resolves to
+    ``("MF", "DF.GSM", "DF.PHONEBOOK")`` when those entries already
+    exist in ``fid_to_path``. Unknown FIDs resolve to a synthetic
+    ``DF.{FID}`` so the result remains stable across passes.
+    """
+    if not parent_fids:
+        return ("MF",)
+    path: tuple[str, ...] = ("MF",)
+    for fid in parent_fids:
+        fid_hex = "%04X" % int(fid)
+        if fid_hex == "3F00":
+            path = ("MF",)
+            continue
+        existing = fid_to_path.get(fid_hex)
+        if existing is not None:
+            path = existing
+            continue
+        path = path + (_resolve_df_label_for_fid(fid_hex, ""),)
+    return path
+
+
+def _consume_generic_file_management_local(
+    image: SimProfileImage, decoded: dict[str, Any]
+) -> None:
+    """Hand-rolled fallback for ``genericFileManagement``.
+
+    Used when pySim's ``ProfileElementGFM``/``File`` cannot parse the
+    incoming PE -- e.g. unconventional fileDescriptor encodings or
+    pySim-not-installed deploys. Mirrors the pre-Phase-D behaviour
+    exactly so the simulator continues to boot from any historical
+    profile fixture.
+    """
+    cmd_list = decoded.get("fileManagementCMD")
+    if isinstance(cmd_list, list) is False:
+        return
+
+    fid_to_path = _build_fid_to_path_map(image)
+    df_anchor: tuple[str, ...] = ("MF",)
+    current_node: SimProfileFsNode | None = None
+    current_node_size: int = 0
+    current_record_length: int = 0
+    cursor: int = 0
+    buffer = bytearray()
+
+    def _flush_current() -> None:
+        nonlocal current_node, current_node_size, current_record_length, cursor, buffer
+        if current_node is None:
+            return
+        payload = bytes(buffer)
+        if current_node_size > 0 and len(payload) < current_node_size:
+            payload = payload + b"\xFF" * (current_node_size - len(payload))
+        elif current_node_size > 0 and len(payload) > current_node_size:
+            payload = payload[:current_node_size]
+        if current_node.kind == "ef":
+            structure = str(current_node.structure or "transparent")
+            if structure in ("linear-fixed", "cyclic") and current_record_length > 0:
+                if len(payload) >= current_record_length:
+                    count = len(payload) // current_record_length
+                    current_node.records = [
+                        payload[i * current_record_length : (i + 1) * current_record_length]
+                        for i in range(count)
+                    ]
+                else:
+                    current_node.records = [payload] if len(payload) > 0 else []
+                current_node.data = b""
+            else:
+                current_node.data = payload
+
+    for sequence in cmd_list:
+        if isinstance(sequence, list) is False:
+            continue
+        for command in sequence:
+            if isinstance(command, tuple) is False or len(command) != 2:
+                continue
+            tag = str(command[0] or "").strip()
+            value = command[1]
+            if tag == "filePath":
+                _flush_current()
+                current_node = None
+                current_node_size = 0
+                cursor = 0
+                buffer = bytearray()
+                if isinstance(value, (bytes, bytearray, memoryview)) and len(value) >= 2:
+                    fid_bytes = bytes(value)
+                    df_anchor = _resolve_df_anchor(fid_bytes, fid_to_path)
+                continue
+            if tag == "createFCP":
+                _flush_current()
+                if isinstance(value, dict) is False:
+                    current_node = None
+                    continue
+                fid_bytes = value.get("fileID")
+                if isinstance(fid_bytes, (bytes, bytearray, memoryview)) is False:
+                    current_node = None
+                    continue
+                fid_hex = bytes(fid_bytes).hex().upper()
+                df_name_value = value.get("dfName")
+                lcsi_value = value.get("lcsi")
+                lifecycle_state = (
+                    int(bytes(lcsi_value)[0])
+                    if isinstance(lcsi_value, (bytes, bytearray, memoryview)) and len(lcsi_value) >= 1
+                    else 0x05
+                )
+                file_descriptor_byte = _file_descriptor_first_byte(value)
+                # ETSI TS 102 221 §11.1.1.4.3 / TS 102 222 §6.5.6: bits
+                # b6..b5 of the file descriptor byte form the file
+                # category. ``11`` = DF/ADF, ``00`` = working EF,
+                # ``01`` = internal EF. SAIP omits ``dfName`` for plain
+                # DFs (e.g. DF.GSM 7F20) so we cannot rely on its
+                # presence alone -- fall back to the descriptor bits.
+                is_df = isinstance(df_name_value, (bytes, bytearray, memoryview)) and len(df_name_value) > 0
+                if is_df is False and (file_descriptor_byte & 0x60) == 0x60:
+                    is_df = True
+                if is_df:
+                    aid_bytes = bytes(df_name_value) if isinstance(df_name_value, (bytes, bytearray, memoryview)) else b""
+                    aid_hex = aid_bytes.hex().upper()
+                    df_label = _resolve_df_label_for_fid(fid_hex, aid_hex)
+                    # ETSI TS 102 221 §13.1 reserves the FID class:
+                    #   3F00      MF
+                    #   7Fxx      1st-level DF (child of MF)
+                    #   5Fxx      2nd-level DF (child of currently
+                    #             selected 7Fxx DF)
+                    # Honour that ordering so a SAIP issuer that
+                    # forgets to insert a ``filePath`` between two
+                    # top-level DF declarations still produces a
+                    # sane tree.
+                    if fid_hex.startswith("7F"):
+                        new_parent: tuple[str, ...] = ("MF",)
+                    elif fid_hex.startswith("5F"):
+                        new_parent = df_anchor if len(df_anchor) >= 2 else ("MF",)
+                    else:
+                        new_parent = df_anchor
+                    new_path = new_parent + (df_label,)
+                    image.nodes.append(
+                        SimProfileFsNode(
+                            path=new_path,
+                            name=df_label,
+                            kind="adf" if len(aid_hex) > 0 else "df",
+                            fid=fid_hex,
+                            aid=aid_hex,
+                            label=df_label,
+                            lifecycle_state=lifecycle_state,
+                        )
+                    )
+                    fid_to_path[fid_hex] = new_path
+                    df_anchor = new_path
+                    current_node = None
+                    current_node_size = 0
+                    current_record_length = 0
+                    cursor = 0
+                    buffer = bytearray()
+                    continue
+                # EF
+                ef_size = _ef_size_from_gfm_descriptor(value)
+                file_descriptor_byte = _file_descriptor_first_byte(value)
+                structure = _structure_for_descriptor_byte(file_descriptor_byte)
+                record_length = _gfm_record_length(value, file_descriptor_byte)
+                ef_name = _resolve_ef_label(fid_hex)
+                ef_path = df_anchor + (ef_name,)
+                sfi_value: int | None = None
+                short_efid = value.get("shortEFID")
+                if isinstance(short_efid, dict) is False:
+                    sfi_value = None
+                else:
+                    sfi_raw = short_efid.get("shortEFID")
+                    if isinstance(sfi_raw, (bytes, bytearray, memoryview)) and len(sfi_raw) >= 1:
+                        sfi_value = int(bytes(sfi_raw)[0]) & 0x1F
+                node = SimProfileFsNode(
+                    path=ef_path,
+                    name=ef_name,
+                    kind="ef",
+                    fid=fid_hex,
+                    structure=structure,
+                    sfi=sfi_value,
+                    lifecycle_state=lifecycle_state,
+                    link_path=_decode_fcp_link_path(value),
+                )
+                image.nodes.append(node)
+                fid_to_path[fid_hex] = ef_path
+                current_node = node
+                current_node_size = ef_size
+                current_record_length = record_length
+                cursor = 0
+                buffer = bytearray()
+                continue
+            if tag == "fillFileOffset":
+                if current_node is None:
+                    continue
+                try:
+                    offset = int(value or 0)
+                except (TypeError, ValueError):
+                    offset = 0
+                cursor += max(0, offset)
+                if len(buffer) < cursor:
+                    buffer.extend(b"\xFF" * (cursor - len(buffer)))
+                continue
+            if tag == "fillFileContent":
+                if current_node is None:
+                    continue
+                if isinstance(value, (bytes, bytearray, memoryview)) is False:
+                    continue
+                payload = bytes(value)
+                if len(buffer) < cursor:
+                    buffer.extend(b"\xFF" * (cursor - len(buffer)))
+                end_offset = cursor + len(payload)
+                if len(buffer) < end_offset:
+                    buffer.extend(b"\x00" * (end_offset - len(buffer)))
+                buffer[cursor:end_offset] = payload
+                cursor = end_offset
+                continue
+
+    _flush_current()
+
+
+def _coerce_byte(value: Any) -> int:
+    if isinstance(value, (bytes, bytearray, memoryview)) and len(value) >= 1:
+        return int(bytes(value)[0]) & 0xFF
+    if isinstance(value, int):
+        return value & 0xFF
+    return 0
+
+
+# GP Card Spec v2.3.1 §11.1.8 Table 11-16 ``Key Type`` byte encodings.
+# Mirrors ``pySim.esim.saip.KeyType`` so the SD-key migration can map
+# pySim's resolved enum string back to the on-card byte without
+# importing the construct adapter at the use site.
+_GP_KEY_TYPE_STRING_TO_BYTE: dict[str, int] = {
+    "des-implicit": 0x80,
+    "reserved-1": 0x81,
+    "tls": 0x81,
+    "des-cbc": 0x82,
+    "des-ecb": 0x83,
+    "tdes-cbc": 0x84,
+    "tdes-cbc-2": 0x84,
+    "aes": 0x88,
+    "hmac-sha1": 0x90,
+    "hmac-sha-160": 0x91,
+    "rsa-public-e": 0xA0,
+    "rsa-public-n": 0xA1,
+    "rsa-private-n": 0xA2,
+    "rsa-private-d": 0xA3,
+    "rsa-crt-p": 0xA4,
+    "rsa-crt-q": 0xA5,
+    "rsa-crt-pq": 0xA6,
+    "rsa-crt-dp1": 0xA7,
+    "rsa-crt-dq1": 0xA8,
+    "ecc-public-key": 0xB0,
+    "ecc-private-key": 0xB1,
+    "ecc-field-parameter-a": 0xB2,
+    "ecc-field-parameter-b": 0xB3,
+    "ecc-field-parameter-g": 0xB4,
+    "ecc-field-parameter-n": 0xB5,
+    "ecc-field-parameter-k": 0xB6,
+    "ecc-key-parameter-reference": 0xF0,
+    "extended-format": 0xFF,
+}
+
+
+def _key_type_string_to_byte(key_type: str) -> int:
+    """Resolve a pySim ``KeyType`` enum string to its GP byte.
+
+    Returns ``0`` for unknown / empty values so the downstream
+    ``SimProfileSecurityDomainKey`` defaults remain stable.
+    """
+    if not key_type:
+        return 0
+    key = str(key_type).strip().lower()
+    return _GP_KEY_TYPE_STRING_TO_BYTE.get(key, 0)
+
+
+def _build_fid_to_path_map(image: SimProfileImage) -> dict[str, tuple[str, ...]]:
+    """Indexes every materialised node by FID so GFM ``filePath``
+    directives can resolve the target parent without walking the tree.
+
+    SAIP §5.4 ``filePath`` carries a 2-byte FID; the simulator uses
+    fully-qualified path tuples, so we precompute the mapping at the
+    start of each GFM walk. New DFs created by the GFM commands are
+    added to this map on the fly.
+    """
+    mapping: dict[str, tuple[str, ...]] = {}
+    for node in image.nodes:
+        fid = str(node.fid or "").strip().upper()
+        if len(fid) == 0:
+            continue
+        if fid not in mapping:
+            mapping[fid] = node.path
+    # Well-known anchors that may not be materialised yet but the GFM
+    # stream nevertheless points at (e.g. DF.GSM 7F20 referenced from
+    # PE-RFM and PE-GFM in operator BPPs).
+    if "3F00" not in mapping:
+        mapping["3F00"] = ("MF",)
+    if "7F10" not in mapping:
+        mapping["7F10"] = ("MF", "DF.TELECOM")
+    if "7F20" not in mapping:
+        mapping["7F20"] = ("MF", "DF.GSM")
+    return mapping
+
+
+def _resolve_df_anchor(fid_bytes: bytes, fid_to_path: dict[str, tuple[str, ...]]) -> tuple[str, ...]:
+    fid_hex = fid_bytes.hex().upper()
+    if fid_hex == "3F00":
+        return ("MF",)
+    existing = fid_to_path.get(fid_hex)
+    if existing is not None:
+        return existing
+    # Best-effort fallback: synthesise a stable label and anchor under
+    # MF. The GFM `createFCP` that follows will materialise the DF and
+    # update the index so subsequent EFs resolve correctly.
+    return ("MF", _resolve_df_label_for_fid(fid_hex, ""))
+
+
+def _resolve_df_label_for_fid(fid_hex: str, aid_hex: str) -> str:
+    """Map a DF/ADF FID (and optional AID) to a canonical path label.
+
+    AID-based mapping wins so PKCS#15 / USIM / ISIM / CSIM ADFs land in
+    the well-known place even when the issuer reuses non-canonical FIDs.
+    Falls back to ETSI TS 31.102 §4.1 / TS 31.103 §4.1 / TS 31.101 §6.4
+    fixed FIDs (``7F10`` = DF.TELECOM, ``7F20`` = DF.GSM, ``7F21`` =
+    DF.DCS-1800, etc.) before resorting to a deterministic
+    ``DF.{FID}`` form so any unknown DF still gets a stable, unique
+    component within the image.
+    """
+    if aid_hex.startswith("A000000063504B43532D3135"):
+        return "DF.PKCS-15"
+    if aid_hex.startswith("A0000000871002"):
+        return "ADF.USIM"
+    if aid_hex.startswith("A0000000871004"):
+        return "ADF.ISIM"
+    if aid_hex.startswith("A0000003431002"):
+        return "ADF.CSIM"
+    upper = fid_hex.upper()
+    well_known = {
+        "7F10": "DF.TELECOM",
+        "7F20": "DF.GSM",
+        "7F21": "DF.DCS-1800",
+        "7F22": "DF.IS-41",
+        "7F23": "DF.FP-CTS",
+        "7F25": "DF.CDMA",
+        "7F11": "DF.CD",
+        "7F50": "DF.PKCS-15",
+        "5F3A": "DF.PHONEBOOK",
+        "5F3B": "DF.GSM-ACCESS",
+        "5F40": "DF.SOLSA",
+        "5F50": "DF.MEXE",
+        "5F60": "DF.CCP1",
+        "5F70": "DF.SIM-USIM-ACCESS",
+        "5FC0": "DF.5GS",
+        "5FD0": "DF.SAIP",
+        "5FE0": "DF.SNPN",
+        "5FF0": "DF.5G_PROSE",
+    }
+    if upper in well_known:
+        return well_known[upper]
+    return "DF." + upper
+
+
+def _resolve_ef_label(fid_hex: str) -> str:
+    """Return ``EF.{symbol}`` for FIDs the simulator already recognises,
+    else ``EF.{FID}``. The symbol is sourced from ``_FILE_SPECS`` so the
+    consumer stays aligned with the rest of the SAIP toolchain.
+    """
+    upper = fid_hex.upper()
+    for spec in _FILE_SPECS.values():
+        candidate = str(spec.get("fid", "") or "").upper()
+        if candidate == upper:
+            return str(spec.get("name", "EF." + upper) or ("EF." + upper))
+    return "EF." + upper
+
+
+def _file_descriptor_first_byte(fcp: dict[str, Any]) -> int:
+    raw = fcp.get("fileDescriptor")
+    if isinstance(raw, (bytes, bytearray, memoryview)) and len(raw) >= 1:
+        return int(bytes(raw)[0]) & 0xFF
+    return 0x41
+
+
+def _structure_for_descriptor_byte(file_descriptor_byte: int) -> str:
+    """Decode the ETSI TS 102 221 §11.1.1.4.3 file descriptor byte.
+
+    Bits b3..b1 (low three bits) carry the EF structure:
+      000 = no information (treat as transparent)
+      001 = transparent EF
+      010 = linear-fixed EF
+      110 = cyclic EF
+    Higher bits encode shareability and file category and are
+    inspected separately by the DF/EF discriminator.
+    """
+    structure_bits = file_descriptor_byte & 0x07
+    if structure_bits == 0x02:
+        return "linear-fixed"
+    if structure_bits == 0x06:
+        return "cyclic"
+    return "transparent"
+
+
+def _gfm_record_length(fcp: dict[str, Any], file_descriptor_byte: int) -> int:
+    """Pull the record length out of an FCP descriptor.
+
+    SAIP carries the ETSI 5-byte file descriptor TLV verbatim (tag 82,
+    length 4 or 5); for record-structured EFs the record length lives
+    in bytes 3..4 (big endian). For pure transparent EFs the field is
+    irrelevant and reported as 0.
+    """
+    structure_bits = file_descriptor_byte & 0x07
+    if structure_bits not in (0x02, 0x06):
+        return 0
+    raw = fcp.get("fileDescriptor")
+    if isinstance(raw, (bytes, bytearray, memoryview)) is False:
+        return 0
+    body = bytes(raw)
+    if len(body) >= 4:
+        return int.from_bytes(body[2:4], "big", signed=False)
+    return 0
+
+
+def _ef_size_from_gfm_descriptor(fcp: dict[str, Any]) -> int:
+    raw = fcp.get("efFileSize")
+    if isinstance(raw, (bytes, bytearray, memoryview)) is False:
+        return 0
+    body = bytes(raw)
+    if len(body) == 0:
+        return 0
+    return int.from_bytes(body, "big", signed=False)
+
+
 def _consume_aka_parameter(image: SimProfileImage, decoded: dict[str, Any]) -> None:
-    algo_configuration = decoded.get("algoConfiguration")
+    """SAIP §5.8 -- materialise an ``akaParameter`` PE.
+
+    Routes the decoded dict through pySim's ``ProfileElementAKA``
+    wrapper (Phase C). The wrapper's ``_post_decode`` runs
+    ``_fixup_sqnInit_dec``, which substitutes the asn1tools default
+    placeholder ``'0x000000000000'`` with a 32-element list of 6-byte
+    zeros (TS 33.102 §6.3.7 / 3GPP TS 35.205 Annex E SQN init layout).
+    """
+    source = pysim_normalize_aka_decoded(decoded)
+    if isinstance(source, dict) is False:
+        source = decoded
+    algo_configuration = source.get("algoConfiguration")
     if isinstance(algo_configuration, tuple) is False or len(algo_configuration) != 2:
         return
     choice_name = str(algo_configuration[0] or "").strip()
@@ -1760,7 +2922,7 @@ def _consume_aka_parameter(image: SimProfileImage, decoded: dict[str, Any]) -> N
     keccak_value = max(1, min(0xFF, keccak_value))
     config.number_of_keccak = keccak_value
 
-    sqn_init = decoded.get("sqnInit")
+    sqn_init = source.get("sqnInit")
     if isinstance(sqn_init, list) and len(sqn_init) > 0:
         candidate = _coerce_octet_string(sqn_init[0])
         if len(candidate) == 6:
@@ -1816,28 +2978,61 @@ def _saip_algorithm_name(algorithm_id: Any) -> str:
 
 
 def _materialize_file_payload(value: Any) -> bytes | None:
+    materialised = _materialize_ef_value(value)
+    if materialised is None:
+        return None
+    payload, _ = materialised
+    return payload
+
+
+def _materialize_ef_value(value: Any) -> tuple[bytes, dict[str, Any]] | None:
+    """Extract the EF payload and its associated ``fileDescriptor`` dict.
+
+    SAIP §5.1 stores EF contents as a ``CHOICE`` SEQUENCE that interleaves
+    a ``fileDescriptor`` element with one or more ``fillFileContent`` /
+    ``fillFileOffset`` directives. The directives describe a contiguous
+    image of the file written from offset 0; ``fillFileOffset`` jumps the
+    write cursor forward by N bytes, leaving the gap padded with 0xFF
+    (TCA Profile Interoperability §3.5.4 -- erased flash state).
+    """
     if isinstance(value, (bytes, bytearray, memoryview)):
-        return bytes(value)
+        return bytes(value), {}
     if isinstance(value, list) is False:
-        return b""
-    stream = io.BytesIO()
+        return b"", {}
+
+    descriptor: dict[str, Any] = {}
+    chunks: list[tuple[int, bytes]] = []
+    cursor = 0
     for item in value:
         if isinstance(item, tuple) is False or len(item) != 2:
             continue
         tag_name = str(item[0] or "").strip()
         if tag_name == "doNotCreate":
             return None
+        if tag_name == "fileDescriptor" and isinstance(item[1], dict):
+            descriptor = item[1]
+            continue
         if tag_name == "fillFileOffset":
             try:
-                stream.seek(int(item[1] or 0), io.SEEK_CUR)
+                cursor += int(item[1] or 0)
             except Exception:
-                continue
+                pass
             continue
         if tag_name == "fillFileContent":
             payload = item[1]
             if isinstance(payload, (bytes, bytearray, memoryview)):
-                stream.write(bytes(payload))
-    return stream.getvalue()
+                data = bytes(payload)
+                if len(data) > 0:
+                    chunks.append((cursor, data))
+                    cursor += len(data)
+
+    total_length = max((offset + len(blob) for offset, blob in chunks), default=0)
+    if total_length == 0:
+        return b"", descriptor
+    buffer = bytearray(b"\xFF" * total_length)
+    for offset, blob in chunks:
+        buffer[offset : offset + len(blob)] = blob
+    return bytes(buffer), descriptor
 
 
 def _finalize_image(image: SimProfileImage) -> SimProfileImage | None:

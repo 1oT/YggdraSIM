@@ -16,7 +16,7 @@
 # -----------------------------------------------------------------------------
 
 import json 
-from typing import Dict ,Any ,List ,Optional 
+from typing import Dict ,Any ,Iterable ,List ,Optional 
 from SCP03 .core .utils import TlvParser 
 
 try :
@@ -638,17 +638,21 @@ class AdvancedDecoders :
             return {"Error":"LOCI Decode Error"}
 
     @staticmethod 
-    def decode_ust (data_hex :str )->list :
+    def decode_ust (data_hex :str )->dict :
+        # 3GPP TS 31.102 §4.2.8 — USIM Service Table. Each bit is a
+        # service flag; the file body is the bitmap. Operators asked to
+        # see *not-set* services too so the GUI can render a checklist
+        # style view (active vs. available-but-disabled) rather than
+        # only reporting the active subset.
         if not data_hex :
-            return ["Empty"]
+            return {"error":"Empty","active":[],"inactive":[]}
 
         try :
             data =bytes .fromhex (data_hex )
         except Exception :
-            return ["UST Decode Error"]
+            return {"error":"UST Decode Error","active":[],"inactive":[]}
 
         try :
-            services =[]
             ust_map ={
             1 :"Local Phone Book",2 :"FDN",3 :"Extension 2",4 :"SDN",5 :"Extension 3",
             6 :"SMS",7 :"BDN",8 :"OCI",9 :"ICI",10 :"SMS-PP Download",
@@ -676,19 +680,112 @@ class AdvancedDecoders :
             103 :"5G SE-DRX",104 :"5G NSWO Conf",105 :"MCHPPLMN",106 :"KAUSF Derivation",
             113 :"5G Parameters"
             }
-
-            for byte_idx ,byte_val in enumerate (data ):
-                for bit_idx in range (8 ):
-                    service_num =(byte_idx *8 )+bit_idx +1 
-                    if byte_val &(1 <<bit_idx ):
-                        name =ust_map .get (service_num ,f"Service {service_num}")
-                        services .append (f"{service_num}: {name}")
-
-            if len (services )>0 :
-                return services 
-            return ["No Services Active"]
+            return AdvancedDecoders ._build_service_table (
+                data ,
+                name_map =ust_map ,
+                table_name ="UST",
+                full_name ="USIM Service Table",
+                spec ="3GPP TS 31.102 \u00a74.2.8",
+                )
         except Exception :
-            return ["UST Decode Error"]
+            return {"error":"UST Decode Error","active":[],"inactive":[]}
+
+    # ---- Service-table encoder (mock-update / staging) ----------------
+    #
+    # Operators asked for a way to *preview* what a UST / IST / generic
+    # service-table EF body would look like after toggling individual
+    # service flags, without having to push the new bytes to the card.
+    # Pure local math: given a list of active service numbers and the
+    # original byte length, build the matching bitmap so the GUI can
+    # surface the resulting hex string for copy / inspection / feeding
+    # into UPDATE BINARY.
+    @staticmethod 
+    def encode_service_table (
+    active_bits :Iterable [int ],
+    *,
+    total_bytes :Optional [int ]=None ,
+    current_hex :Optional [str ]=None ,
+    )->str :
+        # Resolve the EF body length. ``total_bytes`` wins; otherwise
+        # we infer it from the current hex (so callers staging an edit
+        # on an existing EF can omit it). When neither is present we
+        # auto-size to fit the highest set bit, which is the right
+        # default for a fresh from-scratch encode.
+        if total_bytes is None and current_hex is not None :
+            cleaned =str (current_hex or "").replace (" ","").replace (":","")
+            total_bytes =max (1 ,len (cleaned )//2 )
+        bits =sorted ({int (n )for n in active_bits if int (n )>=1 })
+        if total_bytes is None :
+            highest =bits [-1 ]if len (bits )>0 else 1 
+            total_bytes =max (1 ,(highest +7 )//8 )
+        buf =bytearray (int (total_bytes ))
+        for service_num in bits :
+            byte_idx =(service_num -1 )//8 
+            bit_idx =(service_num -1 )%8 
+            if byte_idx >=len (buf ):
+                # Caller wants to set a service beyond the current
+                # body — extend the buffer rather than silently dropping
+                # the bit. Cards reject oversized payloads at UPDATE
+                # time, but for staging we want the operator to *see*
+                # the resulting size before submitting.
+                buf .extend (b"\x00"*(byte_idx +1 -len (buf )))
+            buf [byte_idx ]|=(1 <<bit_idx )
+        return buf .hex ().upper ()
+
+    @staticmethod 
+    def _build_service_table (
+    data :bytes ,
+    *,
+    name_map :Optional [Dict [int ,str ]]=None ,
+    table_name :str ="Service Table",
+    full_name :Optional [str ]=None ,
+    spec :Optional [str ]=None ,
+    )->Dict [str ,Any ]:
+        # Shared shape for UST / IST / EST / SST-style bitmap files.
+        # Returns ``active`` and ``inactive`` lists in the same
+        # ``"<n>: <name>"`` shape so the GUI can render both columns
+        # with a single renderer. ``service_table`` is a sentinel the
+        # frontend keys off to switch to the checklist layout.
+        active =[]
+        inactive =[]
+        total_bits =len (data )*8 
+        named_only =name_map is not None 
+        for byte_idx ,byte_val in enumerate (data ):
+            for bit_idx in range (8 ):
+                service_num =(byte_idx *8 )+bit_idx +1 
+                if name_map is not None :
+                    name =name_map .get (service_num )
+                    if name is None :
+                        # Fall through to a generic placeholder so the
+                        # operator still sees that bit X exists (helps
+                        # diagnose oversized service tables on lab cards).
+                        label =f"{service_num}: Service {service_num}"
+                    else :
+                        label =f"{service_num}: {name}"
+                else :
+                    label =f"{service_num}"
+                is_set =bool (byte_val &(1 <<bit_idx ))
+                if is_set :
+                    active .append (label )
+                else :
+                    inactive .append (label )
+
+        result :Dict [str ,Any ]={
+        "service_table":True ,
+        "table":table_name ,
+        "active_count":len (active ),
+        "inactive_count":len (inactive ),
+        "total_count":total_bits ,
+        "summary":f"{len(active)} of {total_bits} active",
+        "active":active ,
+        "inactive":inactive ,
+        "raw":data .hex ().upper (),
+        }
+        if full_name is not None :
+            result ["full_name"]=full_name 
+        if spec is not None :
+            result ["spec"]=spec 
+        return result 
 
 class ContentDecoder :
     _registry ={}
@@ -933,17 +1030,21 @@ class ContentDecoder :
 
     @staticmethod 
     def decode_service_table_bits (hex_str :str )->dict :
+        # Generic anonymous service-table decoder used by EF_PSISMSC,
+        # MCS / V2X / A2X service-table EFs, etc. Without a name map
+        # the rows are pure service numbers, but the active/inactive
+        # split still gives operators a checklist view in the GUI.
         try :
             data =bytes .fromhex (hex_str )
-            active =[]
-            for byte_idx ,byte_val in enumerate (data ):
-                for bit_idx in range (8 ):
-                    service_num =(byte_idx *8 )+bit_idx +1 
-                    if byte_val &(1 <<bit_idx ):
-                        active .append (service_num )
-            return {"Services Active":active ,"Raw":hex_str }
         except Exception :
-            return {"Service Table (Raw)":hex_str }
+            return {"service_table":True ,"error":"Service Table (Raw)",
+            "raw":hex_str ,"active":[],"inactive":[]}
+        return AdvancedDecoders ._build_service_table (
+            data ,
+            name_map =None ,
+            table_name ="Service Table",
+            full_name ="Generic service table (no name map)",
+            )
 
     @staticmethod 
     def decode_cbmi_list (hex_str :str )->dict :
@@ -1469,40 +1570,45 @@ class ContentDecoder :
 
     @staticmethod 
     def decode_isim_ist (hex_str :str )->dict :
+        # 3GPP TS 31.103 §4.2.7 — ISIM Service Table. Mirrors the UST
+        # split so operators see active *and* not-set services in the
+        # decoded view.
         try :
             data =bytes .fromhex (hex_str )
-            service_map ={
-            1 :"P-CSCF address",
-            2 :"GBA",
-            3 :"HTTP Digest",
-            4 :"GBA-based Local Key Establishment",
-            5 :"P-CSCF discovery for IMS Local Break Out",
-            6 :"SMS",
-            7 :"SMSR",
-            8 :"SM-over-IP via SMS-PP",
-            9 :"Communication Control for IMS",
-            10 :"UICC access to IMS",
-            11 :"URI support by UICC",
-            12 :"Media Type support",
-            13 :"IMS call disconnection cause",
-            14 :"URI support for MO SMS CONTROL",
-            15 :"Mission Critical Services",
-            16 :"URI support for SMS-PP DOWNLOAD",
-            17 :"From Preferred",
-            18 :"IMS configuration data",
-            19 :"XCAP configuration data",
-            20 :"WebRTC URI",
-            21 :"MuD/MiD configuration data",
-            }
-            services =[]
-            for byte_idx ,byte_val in enumerate (data ):
-                for bit_idx in range (8 ):
-                    service_num =(byte_idx *8 )+bit_idx +1 
-                    if byte_val &(1 <<bit_idx ):
-                        services .append (f"{service_num}: {service_map.get(service_num, f'Service {service_num}')}")
-            return {"ISIM Services":services }
         except Exception :
-            return {"IST (Raw)":hex_str }
+            return {"service_table":True ,"table":"IST","error":"IST (Raw)",
+            "raw":hex_str ,"active":[],"inactive":[]}
+
+        service_map ={
+        1 :"P-CSCF address",
+        2 :"GBA",
+        3 :"HTTP Digest",
+        4 :"GBA-based Local Key Establishment",
+        5 :"P-CSCF discovery for IMS Local Break Out",
+        6 :"SMS",
+        7 :"SMSR",
+        8 :"SM-over-IP via SMS-PP",
+        9 :"Communication Control for IMS",
+        10 :"UICC access to IMS",
+        11 :"URI support by UICC",
+        12 :"Media Type support",
+        13 :"IMS call disconnection cause",
+        14 :"URI support for MO SMS CONTROL",
+        15 :"Mission Critical Services",
+        16 :"URI support for SMS-PP DOWNLOAD",
+        17 :"From Preferred",
+        18 :"IMS configuration data",
+        19 :"XCAP configuration data",
+        20 :"WebRTC URI",
+        21 :"MuD/MiD configuration data",
+        }
+        return AdvancedDecoders ._build_service_table (
+            data ,
+            name_map =service_map ,
+            table_name ="IST",
+            full_name ="ISIM Service Table",
+            spec ="3GPP TS 31.103 \u00a74.2.7",
+            )
 
     @staticmethod 
     def decode_isim_pcscf (hex_str :str )->dict :

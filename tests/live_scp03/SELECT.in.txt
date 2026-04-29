@@ -1,0 +1,3 @@
+# Select MF (3F00). Pure ETSI TS 102 221 SELECT, no SD auth required.
+SELECT 3F00
+EXIT

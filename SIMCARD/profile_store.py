@@ -5,7 +5,17 @@ import shutil
 from typing import Any
 
 from SIMCARD.saip_profile import decode_profile_image
-from SIMCARD.state import SimProfileAuthConfig, SimProfileEntry, SimProfileFsNode, SimProfileImage
+from SIMCARD.state import (
+    SimProfileAuthConfig,
+    SimProfileEntry,
+    SimProfileFsNode,
+    SimProfileImage,
+    SimProfilePinEntry,
+    SimProfilePukEntry,
+    SimProfileRfmInstance,
+    SimProfileSecurityDomain,
+    SimProfileSecurityDomainKey,
+)
 from yggdrasim_common.inventory_crypto import (
     read_secret_file_bytes,
     read_secret_json_file,
@@ -162,6 +172,10 @@ def _load_profile_directory(directory_path: str) -> tuple[int, SimProfileEntry] 
             has_upp=len(upp_bytes) > 0,
         ),
         auth_config=manifest_auth_config,
+        fallback_attribute=bool(manifest.get("fallback_attribute", False)),
+        rollback_armed=bool(manifest.get("rollback_armed", False)),
+        ecall_indication=bool(manifest.get("ecall_indication", False)),
+        connectivity_params_http=_coerce_hex_bytes(manifest.get("connectivity_params_http_hex", "")),
     )
     order_index = int(manifest.get("order_index", 0) or 0)
     return order_index, entry
@@ -264,6 +278,9 @@ def _load_profile_image_from_json(
                 data=_coerce_hex_bytes(node_data.get("data_hex", "")),
                 records=[_coerce_hex_bytes(item) for item in node_data.get("records_hex", []) if item is not None],
                 sfi=_coerce_optional_int(node_data.get("sfi")),
+                write_acl=str(node_data.get("write_acl", "always") or "always").strip().lower() or "always",
+                lifecycle_state=_coerce_lifecycle_state(node_data.get("lifecycle_state")),
+                link_path=_coerce_link_path(node_data.get("link_path")),
             )
         )
     return SimProfileImage(
@@ -273,6 +290,11 @@ def _load_profile_image_from_json(
         impi=str(image_data.get("impi", "")).strip(),
         nodes=nodes,
         auth_config=_deserialize_profile_auth(image_data.get("auth")),
+        connectivity_params_http=_coerce_hex_bytes(image_data.get("connectivity_params_http_hex", "")),
+        pin_codes=_deserialize_pin_codes(image_data.get("pin_codes")),
+        puk_codes=_deserialize_puk_codes(image_data.get("puk_codes")),
+        security_domains=_deserialize_security_domains(image_data.get("security_domains")),
+        rfm_instances=_deserialize_rfm_instances(image_data.get("rfm_instances")),
     )
 
 
@@ -292,6 +314,10 @@ def _serialize_profile_manifest(profile: SimProfileEntry, *, order_index: int) -
         "notification_address": str(profile.notification_address).strip(),
         "profile_source": _normalize_profile_source(profile.profile_source, has_upp=len(bytes(profile.upp_bytes or b"")) > 0),
         "auth": _serialize_profile_auth(profile.auth_config),
+        "fallback_attribute": bool(profile.fallback_attribute),
+        "rollback_armed": bool(profile.rollback_armed),
+        "ecall_indication": bool(profile.ecall_indication),
+        "connectivity_params_http_hex": bytes(profile.connectivity_params_http or b"").hex().upper(),
     }
 
 
@@ -302,6 +328,11 @@ def _serialize_profile_image(image: SimProfileImage) -> dict[str, Any]:
         "imsi": str(image.imsi).strip(),
         "impi": str(image.impi).strip(),
         "auth": _serialize_profile_auth(image.auth_config),
+        "connectivity_params_http_hex": bytes(image.connectivity_params_http or b"").hex().upper(),
+        "pin_codes": _serialize_pin_codes(image.pin_codes),
+        "puk_codes": _serialize_puk_codes(image.puk_codes),
+        "security_domains": _serialize_security_domains(image.security_domains),
+        "rfm_instances": _serialize_rfm_instances(image.rfm_instances),
         "nodes": [
             {
                 "path": list(node.path),
@@ -314,6 +345,9 @@ def _serialize_profile_image(image: SimProfileImage) -> dict[str, Any]:
                 "data_hex": bytes(node.data or b"").hex().upper(),
                 "records_hex": [bytes(record or b"").hex().upper() for record in node.records],
                 "sfi": node.sfi,
+                "write_acl": str(getattr(node, "write_acl", "always") or "always").strip().lower() or "always",
+                "lifecycle_state": int(getattr(node, "lifecycle_state", 0x05) or 0x05) & 0xFF,
+                "link_path": list(getattr(node, "link_path", ()) or ()),
             }
             for node in image.nodes
         ],
@@ -393,6 +427,51 @@ def _coerce_optional_int(value: Any) -> int | None:
         return None
 
 
+def _coerce_link_path(value: Any) -> tuple[str, ...]:
+    """Decode the persisted ``link_path`` field back to a tuple of
+    upper-case hex FIDs.
+
+    Manifests written before this field existed (everything pre-link-
+    path) emit ``None`` / missing here; map that to the empty tuple
+    so the deserialised node behaves like an independent EF (no link
+    target). Lists of arbitrary scalars are coerced to canonical
+    upper-case 2-byte hex; anything that cannot be normalised is
+    dropped silently rather than aborting the whole image load.
+    """
+    if value is None:
+        return tuple()
+    if isinstance(value, (list, tuple)) is False:
+        return tuple()
+    fids: list[str] = []
+    for item in value:
+        token = str(item or "").strip().upper()
+        if len(token) == 4 and all(c in "0123456789ABCDEF" for c in token):
+            fids.append(token)
+    return tuple(fids)
+
+
+def _coerce_lifecycle_state(value: Any) -> int:
+    """Best-effort decode of the persisted ``lifecycle_state`` byte.
+
+    Manifests written before gap-5 didn't carry the field; default to
+    0x05 (operational-activated) so a reload reproduces the old
+    behaviour. Recognised values are 0x04 (deactivated), 0x05
+    (activated), and 0x0C (terminated -- set by TERMINATE EF /
+    TERMINATE DF). Anything else clamps back to 0x05 because the
+    simulator never deliberately produces the other §11.1.1.4.9
+    values.
+    """
+    if value is None:
+        return 0x05
+    try:
+        coerced = int(value)
+    except (TypeError, ValueError):
+        return 0x05
+    if coerced & 0xFF in (0x04, 0x05, 0x0C):
+        return coerced & 0xFF
+    return 0x05
+
+
 def _serialize_profile_auth(config: SimProfileAuthConfig | None) -> dict[str, Any] | None:
     if config is None:
         return None
@@ -436,3 +515,191 @@ def _deserialize_profile_auth(value: Any) -> SimProfileAuthConfig | None:
         keccak_value = max(1, min(0xFF, keccak_value))
         config.number_of_keccak = keccak_value
     return config
+
+
+def _serialize_pin_codes(entries: list[SimProfilePinEntry]) -> list[dict[str, Any]]:
+    serialised: list[dict[str, Any]] = []
+    for entry in entries or []:
+        serialised.append(
+            {
+                "key_reference": int(entry.key_reference) & 0xFF,
+                "value_hex": bytes(entry.value or b"").hex().upper(),
+                "unblock_reference": int(entry.unblock_reference) & 0xFF,
+                "attributes": int(entry.attributes) & 0xFF,
+                "max_attempts": int(entry.max_attempts) & 0x0F,
+                "retries_remaining": int(entry.retries_remaining) & 0x0F,
+            }
+        )
+    return serialised
+
+
+def _deserialize_pin_codes(value: Any) -> list[SimProfilePinEntry]:
+    decoded: list[SimProfilePinEntry] = []
+    if isinstance(value, list) is False:
+        return decoded
+    for item in value:
+        if isinstance(item, dict) is False:
+            continue
+        decoded.append(
+            SimProfilePinEntry(
+                key_reference=int(item.get("key_reference", 0) or 0) & 0xFF,
+                value=_coerce_hex_bytes(item.get("value_hex", "")),
+                unblock_reference=int(item.get("unblock_reference", 0) or 0) & 0xFF,
+                attributes=int(item.get("attributes", 0) or 0) & 0xFF,
+                max_attempts=int(item.get("max_attempts", 3) or 3) & 0x0F,
+                retries_remaining=int(item.get("retries_remaining", 3) or 3) & 0x0F,
+            )
+        )
+    return decoded
+
+
+def _serialize_puk_codes(entries: list[SimProfilePukEntry]) -> list[dict[str, Any]]:
+    serialised: list[dict[str, Any]] = []
+    for entry in entries or []:
+        serialised.append(
+            {
+                "key_reference": int(entry.key_reference) & 0xFF,
+                "value_hex": bytes(entry.value or b"").hex().upper(),
+                "max_attempts": int(entry.max_attempts) & 0xFF,
+                "retries_remaining": int(entry.retries_remaining) & 0xFF,
+            }
+        )
+    return serialised
+
+
+def _deserialize_puk_codes(value: Any) -> list[SimProfilePukEntry]:
+    decoded: list[SimProfilePukEntry] = []
+    if isinstance(value, list) is False:
+        return decoded
+    for item in value:
+        if isinstance(item, dict) is False:
+            continue
+        decoded.append(
+            SimProfilePukEntry(
+                key_reference=int(item.get("key_reference", 0) or 0) & 0xFF,
+                value=_coerce_hex_bytes(item.get("value_hex", "")),
+                max_attempts=int(item.get("max_attempts", 10) or 10) & 0xFF,
+                retries_remaining=int(item.get("retries_remaining", 10) or 10) & 0xFF,
+            )
+        )
+    return decoded
+
+
+def _serialize_security_domains(entries: list[SimProfileSecurityDomain]) -> list[dict[str, Any]]:
+    serialised: list[dict[str, Any]] = []
+    for entry in entries or []:
+        serialised.append(
+            {
+                "instance_aid": str(entry.instance_aid or "").strip().upper(),
+                "class_aid": str(entry.class_aid or "").strip().upper(),
+                "load_package_aid": str(entry.load_package_aid or "").strip().upper(),
+                "privileges_hex": bytes(entry.privileges or b"").hex().upper(),
+                "lifecycle_state": int(entry.lifecycle_state) & 0xFF,
+                "install_parameters_hex": bytes(entry.install_parameters or b"").hex().upper(),
+                "uicc_toolkit_parameters_hex": bytes(entry.uicc_toolkit_parameters or b"").hex().upper(),
+                "keys": [
+                    {
+                        "usage_qualifier": int(k.usage_qualifier) & 0xFF,
+                        "key_identifier": int(k.key_identifier) & 0xFF,
+                        "key_version": int(k.key_version) & 0xFF,
+                        "key_type": int(k.key_type) & 0xFF,
+                        "key_data_hex": bytes(k.key_data or b"").hex().upper(),
+                        "mac_length": int(k.mac_length) & 0xFF,
+                        "counter_hex": bytes(k.counter or b"").hex().upper(),
+                        "access": int(k.access) & 0xFF,
+                    }
+                    for k in entry.keys
+                ],
+                "perso_data_hex": [bytes(payload or b"").hex().upper() for payload in entry.perso_data],
+            }
+        )
+    return serialised
+
+
+def _deserialize_security_domains(value: Any) -> list[SimProfileSecurityDomain]:
+    decoded: list[SimProfileSecurityDomain] = []
+    if isinstance(value, list) is False:
+        return decoded
+    for item in value:
+        if isinstance(item, dict) is False:
+            continue
+        keys: list[SimProfileSecurityDomainKey] = []
+        for key_item in item.get("keys", []) or []:
+            if isinstance(key_item, dict) is False:
+                continue
+            keys.append(
+                SimProfileSecurityDomainKey(
+                    usage_qualifier=int(key_item.get("usage_qualifier", 0) or 0) & 0xFF,
+                    key_identifier=int(key_item.get("key_identifier", 0) or 0) & 0xFF,
+                    key_version=int(key_item.get("key_version", 0) or 0) & 0xFF,
+                    key_type=int(key_item.get("key_type", 0) or 0) & 0xFF,
+                    key_data=_coerce_hex_bytes(key_item.get("key_data_hex", "")),
+                    mac_length=int(key_item.get("mac_length", 8) or 8) & 0xFF,
+                    counter=_coerce_hex_bytes(key_item.get("counter_hex", "")),
+                    access=int(key_item.get("access", 0) or 0) & 0xFF,
+                )
+            )
+        perso_data: list[bytes] = []
+        for perso_item in item.get("perso_data_hex", []) or []:
+            if perso_item is None:
+                continue
+            perso_data.append(_coerce_hex_bytes(perso_item))
+        decoded.append(
+            SimProfileSecurityDomain(
+                instance_aid=str(item.get("instance_aid", "") or "").strip().upper(),
+                class_aid=str(item.get("class_aid", "") or "").strip().upper(),
+                load_package_aid=str(item.get("load_package_aid", "") or "").strip().upper(),
+                privileges=_coerce_hex_bytes(item.get("privileges_hex", "")),
+                lifecycle_state=int(item.get("lifecycle_state", 0x07) or 0x07) & 0xFF,
+                install_parameters=_coerce_hex_bytes(item.get("install_parameters_hex", "")),
+                uicc_toolkit_parameters=_coerce_hex_bytes(item.get("uicc_toolkit_parameters_hex", "")),
+                keys=keys,
+                perso_data=perso_data,
+            )
+        )
+    return decoded
+
+
+def _serialize_rfm_instances(entries: list[SimProfileRfmInstance]) -> list[dict[str, Any]]:
+    serialised: list[dict[str, Any]] = []
+    for entry in entries or []:
+        serialised.append(
+            {
+                "instance_aid": str(entry.instance_aid or "").strip().upper(),
+                "tar_list_hex": [bytes(tar or b"").hex().upper() for tar in entry.tar_list],
+                "minimum_security_level": int(entry.minimum_security_level) & 0xFF,
+                "uicc_access_domain_hex": bytes(entry.uicc_access_domain or b"").hex().upper(),
+                "uicc_admin_access_domain_hex": bytes(entry.uicc_admin_access_domain or b"").hex().upper(),
+                "adf_aid": str(entry.adf_aid or "").strip().upper(),
+                "adf_access_domain_hex": bytes(entry.adf_access_domain or b"").hex().upper(),
+                "adf_admin_access_domain_hex": bytes(entry.adf_admin_access_domain or b"").hex().upper(),
+            }
+        )
+    return serialised
+
+
+def _deserialize_rfm_instances(value: Any) -> list[SimProfileRfmInstance]:
+    decoded: list[SimProfileRfmInstance] = []
+    if isinstance(value, list) is False:
+        return decoded
+    for item in value:
+        if isinstance(item, dict) is False:
+            continue
+        tar_list: list[bytes] = []
+        for tar in item.get("tar_list_hex", []) or []:
+            if tar is None:
+                continue
+            tar_list.append(_coerce_hex_bytes(tar))
+        decoded.append(
+            SimProfileRfmInstance(
+                instance_aid=str(item.get("instance_aid", "") or "").strip().upper(),
+                tar_list=tar_list,
+                minimum_security_level=int(item.get("minimum_security_level", 0) or 0) & 0xFF,
+                uicc_access_domain=_coerce_hex_bytes(item.get("uicc_access_domain_hex", "")),
+                uicc_admin_access_domain=_coerce_hex_bytes(item.get("uicc_admin_access_domain_hex", "")),
+                adf_aid=str(item.get("adf_aid", "") or "").strip().upper(),
+                adf_access_domain=_coerce_hex_bytes(item.get("adf_access_domain_hex", "")),
+                adf_admin_access_domain=_coerce_hex_bytes(item.get("adf_admin_access_domain_hex", "")),
+            )
+        )
+    return decoded

@@ -72,11 +72,13 @@ class SegmenterAnnexMComplianceTests(unittest.TestCase):
         # A0 must ship as an entire wrapped TLV, not the inner 87.
         self.assertEqual(segments[1], wrap_tlv("A0", wrap_tlv("87", b"\xAA\xBB")))
 
-        # A1 / A3 headers must be emitted as their own segments with
-        # bodies of length zero so the eUICC establishes the section
-        # before the 86 / 88 members arrive.
+        # A1 / A3 headers must be emitted as their own segments
+        # advertising the original DER body length so the eUICC
+        # establishes the section before the 86 / 88 members arrive.
+        # A1 body = 88-TLV (250) + 89-TLV (3) = 253 octets => A1 81 FD.
+        # A3 body = 86-TLV (4) + 86-TLV (4) = 8 octets       => A3 08.
         self.assertEqual(segments[2], bytes.fromhex("A181FD"))
-        self.assertEqual(segments[5], bytes.fromhex("A30A"))
+        self.assertEqual(segments[5], bytes.fromhex("A308"))
 
     def _make_main_orchestrator(self):
         return MainOrchestrator(cfg=FakeCfg(), apdu_channel=FakeApduChannel(), profile_provider=None)

@@ -1,44 +1,48 @@
-Place local SM-DP+ certificate material for `ISD-R` access in this directory.
+# Local-Access RSP Certificate Drop Zone
 
-Inventory behavior:
+Drop operator-owned `DPauth` / `DPpb` certificates and matching private
+keys here for the `SCP11/local_access` shell (`LOAD-PROFILE` against
+`ISD-R`).
 
-- If this folder contains no usable certificate material, the application uses the bundled valid SGP.26 certificate inventory.
-- If this folder contains usable certificate material, the selector scans both the local drop-ins and the bundled inventory, then picks the best matching pair for the card.
-- Legacy filenames still work, but they are no longer required.
+## Quick start
 
-Supported drop-in pattern:
+1. Drop the certificate and matching private key in this folder using
+   any readable filename.
+2. Add a sidecar metadata file beside the certificate, named either
+   `<certificate>.meta.json` or `<certificate-stem>.meta.json`.
+3. Verify with the shell's `CERTS` verb (alias `SMDP-CERTS`):
 
-- Place the certificate and matching private key in this folder using any readable filename.
-- Add a sidecar metadata file next to the certificate:
-  - `<certificate>.meta.json`, or
-  - `<certificate-stem>.meta.json`
+   ```bash
+   yggdrasim-scp11-local-access --cmd "STATUS; CERTS; EXIT"
+   ```
 
-Recommended sidecar fields:
+   Add `--json` or `--yaml` to `CERTS` for machine-readable output.
 
-- `role`: `auth` or `pb`
-- `private_key_path`: relative or absolute path to the PEM private key
-- `root_ci_pkid`: CI PKID to use for card matching
-- `server_address`: optional local SM-DP+ address to expose to the eIM local profile-download path
+The legacy SGP.26 filenames `CERT.DPauth.ECDSA.der` /
+`SK.DPauth.ECDSA.pem` and `CERT.DPpb.ECDSA.der` /
+`SK.DPpb.ECDSA.pem` continue to work without a sidecar. The DPauth
+pair is required for `AuthenticateServer`. The DPpb pair is optional;
+present it when the local flow needs to sign download-side payloads
+such as `PrepareDownload`.
 
-Example sidecar:
+## Sidecar fields (most common)
 
-```json
-{
-  "role": "auth",
-  "private_key_path": "operator-alpha-auth.key.pem",
-  "root_ci_pkid": "F54172BDF98A95D65CBEB88A38A1C11D800A85C3",
-  "server_address": "local.smdpp.operator.example"
-}
-```
+| Field              | Purpose                                                                |
+| ------------------ | ---------------------------------------------------------------------- |
+| `role`             | `auth` or `pb`. Inferred from filename when omitted.                   |
+| `private_key_path` | Absolute, or relative to this directory.                               |
+| `root_ci_pkid`     | Hex SKI used for card matching. Falls back to the cert's AKI.          |
+| `server_address`   | Optional local SM-DP+ address surfaced to the eIM activation code.     |
 
-Compatibility note:
+## Canonical reference
 
-- The legacy pairs `CERT.DPauth.ECDSA.der` / `SK.DPauth.ECDSA.pem`
-  and `CERT.DPpb.ECDSA.der` / `SK.DPpb.ECDSA.pem` remain valid.
-- The DPauth pair is still required for local `AuthenticateServer`.
-- The DPpb pair remains optional, but is used when the local flow needs to sign download-side payloads such as `PrepareDownload`.
+The full sidecar schema, selection order (operator drop-in vs SGP.26
+bundle, curve preference, AKI/SKI tie-breaks), and BYO-keys checklist
+all live in the canonical operator guide:
 
-Related operator docs:
+- [`guides/CONFIGURATION_AND_CERTIFICATES.md`](../../../guides/CONFIGURATION_AND_CERTIFICATES.md)
+  — § *SCP11 RSP certificates (local-access)*
 
-- `../README.md`
-- `../../../guides/PROFILE_LIFECYCLE_CLI_CHEATSHEET.md`
+Selector code: [`SCP11/local_access/cert_store.py`](../cert_store.py).
+
+Operator workflow: [`guides/PROFILE_LIFECYCLE_CLI_CHEATSHEET.md`](../../../guides/PROFILE_LIFECYCLE_CLI_CHEATSHEET.md).

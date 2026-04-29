@@ -1,6 +1,6 @@
 {
-  "eid": "89044045930000000000001492294428",
-  "atr_hex": "3B9F96801FC7A073BE21136743200718000001A5",
+  "eid": "89045967676472615349763031303005",
+  "atr_hex": "3B9F96801FC78031A073BE21136743200718000001A5",
   "default_dp_address": "rsp.example.com",
   "root_ci_pkid_hex": "F54172BDF98A95D65CBEB88A38A1C11D800A85C3",
   "isdr": {
@@ -41,5 +41,23 @@
     "ci_list_hex": [
       "F54172BDF98A95D65CBEB88A38A1C11D800A85C3"
     ]
+  },
+  "toolkit": {
+    "poll_strategy": "timer",
+    "timer_management_seconds": 30,
+    "timer_management_id": 1,
+    "timer_management_auto_rearm": true,
+    "poll_interval_seconds": 60,
+    "provide_imei": true,
+    "ipa_poll": {
+      "enabled": true,
+      "eim_fqdn": "",
+      "eim_port": 443,
+      "transport_type": 2,
+      "buffer_size": 1024,
+      "receive_size": 250,
+      "alpha_id": "eIM Poll",
+      "request_payload_hex": ""
+    }
   }
 }

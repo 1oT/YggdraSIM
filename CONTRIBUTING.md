@@ -23,8 +23,10 @@ below.
 ## Workflow
 
 1. Open an issue before starting non-trivial work. Describe the scope,
-   affected subsystem (`SCP03`, `SCP80`, `SCP11/*`, `Tools/HilBridge`,
-   `Tools/ProfilePackage`, `SIMCARD`, `main/`), and the specification the
+   affected subsystem (`SCP03`, `SCP80`, `SCP11/*`, `SIMCARD`, `main/`,
+   `Tools/HilBridge`, `Tools/ProfilePackage`, `Tools/SuciTool`,
+   `Tools/ApduFuzz`, `Tools/EumDiag`, `Tools/YggdraCore`,
+   `yggdrasim_common/gui_server`, `plugins/`), and the specification the
    change references.
 2. Fork the repository and branch from `main`. Use one topic branch per
    logical change.

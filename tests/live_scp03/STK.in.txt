@@ -1,0 +1,5 @@
+# Switch into the SCP03 STK sub-shell. The shell receives EOF immediately
+# and the test asserts that the parent SCP03 shell recovers cleanly.
+SCP03-SD
+STK
+EXIT

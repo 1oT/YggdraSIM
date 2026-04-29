@@ -815,11 +815,15 @@ class LocalAccessSessionTests(unittest.TestCase):
         with contextlib.redirect_stdout(io.StringIO()) as output:
             shell._cmd_enable_profile(["8901000000000000002"])
 
+        # The shared profile-action helpers normalise both the
+        # auto-disable and the enable call to the canonical metadata
+        # identifier (AID first, ICCID fallback). Operators still type
+        # the ICCID — resolution happens inside the helpers.
         self.assertEqual(
             calls,
             [
                 ("disable", "A0000005591010FFFFFFFF8900001100"),
-                ("enable", "8901000000000000002"),
+                ("enable", "A0000005591010FFFFFFFF8900001200"),
             ],
         )
         self.assertIn("auto-disabling active profile", output.getvalue())
@@ -895,7 +899,12 @@ class LocalAccessSessionTests(unittest.TestCase):
         self.assertEqual(calls, [])
         self.assertIn("already disabled", output.getvalue())
 
-    def test_local_shell_delete_profile_keeps_direct_delete_for_enabled_target(self):
+    def test_local_shell_delete_profile_auto_disables_enabled_target_first(self):
+        """Harmonised contract: deleting an ENABLED profile auto-disables it
+        first (mirrors eSIM Live / Test / Local eIM after SCP11 command
+        harmonisation). The previous "delete-while-enabled (laptop
+        override)" behaviour is gone — SGP.22 §5.7.18 forbids it and
+        relying on the card to forgive the sequence was non-portable."""
         shell = LocalAccessShell()
         calls = []
         shell.session = SimpleNamespace(
@@ -921,14 +930,27 @@ class LocalAccessSessionTests(unittest.TestCase):
                 b"\x5A",
                 "981000000000000000F1",
             ),
+            disable_profile=lambda identifier: calls.append(("disable", identifier)) or bytes.fromhex("BF3203800100"),
             delete_profile=lambda identifier: calls.append(("delete", identifier)) or bytes.fromhex("BF3303800100"),
         )
 
         with contextlib.redirect_stdout(io.StringIO()) as output:
             shell._cmd_delete_profile(["8901000000000000001"])
 
-        self.assertEqual(calls, [("delete", "8901000000000000001")])
-        self.assertIn("deleting enabled target directly", output.getvalue())
+        # The shared helpers resolve to the canonical metadata
+        # identifier (AID first, ICCID fallback) so the underlying
+        # ``disable_profile`` / ``delete_profile`` callbacks see the
+        # same target the eSIM Live shell would. Operators still type
+        # the ICCID — the resolution happens inside the helpers.
+        self.assertEqual(
+            calls,
+            [
+                ("disable", "A0000005591010FFFFFFFF8900001100"),
+                ("delete", "A0000005591010FFFFFFFF8900001100"),
+            ],
+        )
+        rendered = output.getvalue()
+        self.assertIn("auto-disabling enabled target", rendered)
 
     def test_local_shell_help_shows_canonical_commands_and_alias_notes(self):
         shell = LocalAccessShell()

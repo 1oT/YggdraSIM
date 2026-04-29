@@ -1,0 +1,5 @@
+# Select EF_ICCID (under MF) and READ BINARY the full body.
+SELECT 3F00
+SELECT 2FE2
+READ
+EXIT

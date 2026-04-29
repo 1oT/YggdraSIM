@@ -47,18 +47,27 @@ flowchart LR
     Launcher --> ProfileTool["Tools.ProfilePackage"]
     Launcher --> HilBridge["Tools.HilBridge"]
     Launcher --> Suci["Tools.SuciTool"]
+    Launcher --> ApduFuzz["Tools.ApduFuzz"]
+    Launcher --> EumDiag["Tools.EumDiag"]
+    Launcher --> YggdraCore["Tools.YggdraCore<br/>(library + HTTP stub)"]
+    Launcher --> Simulator["SIMCARD<br/>simulator backend"]
+    Launcher --> GuiServer["yggdrasim_common.gui_server<br/>(Universal GUI)"]
 
-    SCP03 --> Card[("PC/SC reader<br/>UICC / eUICC")]
+    SCP03 --> Card[("PC/SC reader or<br/>SIMCARD simulator<br/>UICC / eUICC")]
     SCP80 --> Card
     Live --> Card
     Test --> Card
     Local --> Card
     EimLocal --> Card
     HilBridge --> Card
+    ApduFuzz --> Card
+    EumDiag --> Card
+    Simulator --> Card
 
     Live --> Network[("ES9+ / SM-DP+ endpoints")]
     Test --> Network
     EimLocal --> LocalServices[("Localized eIM / SM-DP+ endpoints")]
+    YggdraCore --> Network
 
     ProfileTool --> Files[("Profile / JSON / DER files")]
     Suci --> Files
@@ -66,6 +75,7 @@ flowchart LR
 
     HilBridge -. GSMTAP mirror .-> Wireshark[("Wireshark<br/>UDP 4729")]
     HilBridge -. relay side-channel .-> Live
+    HilBridge -. AT+CSIM/CRSM .-> Modem[("DUT modem")]
 ```
 
 ## Repository structure
@@ -155,8 +165,12 @@ flowchart TB
 | `SCP11.local_access` | Primary | Primary | No | Primary | Primary | Primary | Direct local `ISD-R` flow |
 | `SCP11.eim_local` | Primary | Primary | Primary | Primary | Primary | Primary | eIM-local package, polling, handover, IPAd standalone |
 | `Tools.ProfilePackage` | Primary | No | No | Primary | No | No | SAIP tooling and transcode UI |
-| `Tools.HilBridge` | Primary | Primary | No | No | No | No | HIL supervisor and relay |
+| `Tools.HilBridge` | Primary | Primary | No | No | No | No | HIL supervisor, relay, GSMTAP mirror, AT+CSIM/CRSM transcoder |
 | `Tools.SuciTool` | Primary | No | No | No | No | No | File/stdin shell around `suci-keytool` |
+| `Tools.ApduFuzz` | Primary | Primary | No | No | No | No | Allow-listed eUICC APDU mutation fuzzer (opt-in, hard-gated) |
+| `Tools.EumDiag` | Primary | Optional | No | No | No | No | EUM / SM-DP+ session-key staging and Wireshark Lua dissector |
+| `Tools.YggdraCore` | No (library / HTTP stub) | No | Optional | No | No | No | In-process AUSF / AAnF stubs and BYO-Open5GS bridge |
+| `SIMCARD` | Selected via `--card-backend sim` | No | No | No | Optional | No | Simulated UICC / eUICC backend (ETSI / GP / SCP03 / SCP80 / Toolkit / 5G AKA / AKMA / SUCI) |
 
 ## Complete dependency graph
 
@@ -502,7 +516,7 @@ split so subsystem shells can target either backend.
 
 ```mermaid
 flowchart LR
-    Launcher["main/main.py"] -->|--card-backend pcsc| PCSC[("PC/SC reader")]
+    Launcher["main/main.py"] -->|--card-backend reader| PCSC[("PC/SC reader")]
     Launcher -->|--card-backend sim| Sim["SIMCARD simulator"]
 
     Sim --> EuiccStore["euicc_store.py"]
@@ -528,8 +542,18 @@ flowchart LR
 - `Tools/ProfilePackage` is the SAIP package inspection and transcode
   surface
 - `Tools/HilBridge` is the dedicated physical-card-to-modem bridge path
+  (also exposes the AT+CSIM/CRSM transcoder for AT-controlled modems)
 - `Tools/SuciTool` is the SUCI key helper
-- `SIMCARD` is the simulator backend activated by `--card-backend sim`
+- `Tools/ApduFuzz` is the opt-in, allow-listed APDU mutation fuzzer
+- `Tools/EumDiag` is the EUM / SM-DP+ diagnostics surface (session-key
+  injection plus Wireshark / tshark Lua dissector)
+- `Tools/YggdraCore` is the in-process 5G core stub (AUSF / AAnF) plus
+  optional BYO-Open5GS provisioning bridge
+- `SIMCARD` is the simulator backend activated by `--card-backend sim`,
+  including ETSI / GP / SCP03 / SCP80 / Toolkit and the 5G AKA / EAP-AKA' /
+  AKMA / SUCI / `GET IDENTITY` stack
+- `yggdrasim_common/gui_server/` is the optional Universal GUI Command
+  Center, started with `--gui` (desktop) or `--web-server` (FastAPI)
 
 ## Deep reference
 

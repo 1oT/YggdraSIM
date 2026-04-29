@@ -77,6 +77,16 @@ subsystem page that contains the full surface.
 
     [Open recipe](enable-inventory-encryption.md)
 
+-   :material-certificate-outline: __Load Certificates and Configuration__
+
+    ---
+
+    Bring operator-owned certificates, keysets, identity files, and
+    encryption envelopes into YggdraSIM without touching bundled
+    starter material.
+
+    [Open recipe](load-certificates-and-config.md)
+
 -   :material-puzzle-outline: __Write a Plugin__
 
     ---
@@ -100,5 +110,14 @@ subsystem page that contains the full surface.
     Use the bundled Dockerfile, keep state on the host.
 
     [Open recipe](run-in-docker.md)
+
+-   :material-stethoscope: __Diagnostics Toolbox__
+
+    ---
+
+    Visual SAIP diff, simulator-to-TUI auto-open, opt-in APDU mutation
+    fuzzer, and EUM / SM-DP+ session-key diagnostics.
+
+    [Open recipe](diagnostics-toolbox.md)
 
 </div>

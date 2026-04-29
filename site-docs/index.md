@@ -127,10 +127,14 @@ exercised without switching projects.
 | `SCP11/test/` | Test relay shell with lab-default trust | [SCP11 Test Relay](subsystems/scp11-test.md) |
 | `SCP11/local_access/` | Direct local `ISD-R` shell | [SCP11 Local Access](subsystems/scp11-local-access.md) |
 | `SCP11/eim_local/` | SGP.32 eIM-local package and polling shell | [SCP11 eIM Local](subsystems/scp11-eim-local.md) |
+| `SIMCARD/` | Simulated UICC / eUICC backend (ETSI / GP / SCP03 / SCP80 / Toolkit / 5G AKA / AKMA / SUCI / `GET IDENTITY`) | [SIMCARD Simulator](subsystems/simcard-simulator.md) |
 | `Tools/ProfilePackage/` | SAIP shell, lint engine, transcode TUI | [Profile Package](subsystems/profile-package.md) |
-| `Tools/HilBridge/` | SIMtrace2-backed HIL bridge and supervisor | [HIL Bridge](subsystems/hil-bridge.md) |
+| `Tools/HilBridge/` | SIMtrace2-backed HIL bridge, supervisor, GSMTAP, AT+CSIM/CRSM transcoder | [HIL Bridge](subsystems/hil-bridge.md) |
+| `Tools/ApduFuzz/` | Opt-in eUICC APDU mutation fuzzer (allow-listed, hard-gated) | [APDU Fuzzer](subsystems/apdu-fuzzer.md) |
+| `Tools/EumDiag/` | EUM / SM-DP+ session-key injection + Wireshark Lua dissector | [EUM Diagnostics](subsystems/eum-diagnostics.md) |
 | `Tools/SuciTool/` | SUCI key management shell | [SUCI Tool](subsystems/suci-tool.md) |
-| `SIMCARD/` | Simulator backend for card-side flows | [SIMCARD Simulator](subsystems/simcard-simulator.md) |
+| `Tools/YggdraCore/` | In-process 5G core stubs (AUSF / AAnF) + BYO-Open5GS bridge | [Subsystems index](subsystems/index.md) |
+| `yggdrasim_common/gui_server/` | Optional Universal GUI Command Center (`--gui` / `--web-server`) | [Subsystems index](subsystems/index.md) |
 
 ## What this site covers
 

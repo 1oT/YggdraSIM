@@ -1,0 +1,4 @@
+# Shortcut for GET STATUS (Security Domains registry, P1=0x80).
+SCP03-SD
+SD
+EXIT

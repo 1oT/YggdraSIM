@@ -284,7 +284,6 @@ _SUMMARY_EUICC_MARKERS = (
     "GET DATA",
     "INITIALIZE UPDATE",
     "EXTERNAL AUTHENTICATE",
-    "MANAGE CHANNEL",
     "PROFILE",
     "SM-DP+",
     "EIM",
@@ -329,41 +328,50 @@ class TuiThemePalette:
 
 
 def _theme_palette(theme_name: str) -> TuiThemePalette:
+    """Return the Nord-aligned palette for ``theme_name``.
+
+    Both branches now sit on the canonical Nord wheel
+    (https://www.nordtheme.com/docs/colors-and-palettes); the light
+    branch reaches for the deeper Frost / Polar Night swatches that
+    stay legible on a pale background, while the dark branch keeps
+    the brighter Frost + Aurora accents that pop against the slate
+    Polar Night canvas.
+    """
     normalized_theme_name = _normalize_theme_name(theme_name)
     if normalized_theme_name in _LIGHT_THEME_NAMES:
         return TuiThemePalette(
-            frame="#B06A00",
-            primary="#1F2937",
-            secondary="#6B7280",
-            endpoint="#176087",
-            protocol="#1F6F46",
-            waiting="#6B7280",
-            error="#B42318",
-            bip="#176087",
-            stk="#8C5A00",
-            fs="#1F6F46",
-            timer="#B42318",
-            euicc="#6D3FC0",
-            security="#7A1FA2",
-            other="#465467",
-            context="#1F6F46",
+            frame="#5E81AC",      # frost-deep -- primary brand stroke
+            primary="#2E3440",    # polar-night-0 -- body text
+            secondary="#4C566A",  # polar-night-3 -- dim text
+            endpoint="#5E81AC",   # frost-deep
+            protocol="#A3BE8C",   # aurora-green
+            waiting="#4C566A",
+            error="#BF616A",      # aurora-red
+            bip="#5E81AC",
+            stk="#D08770",        # aurora-orange
+            fs="#A3BE8C",
+            timer="#BF616A",
+            euicc="#B48EAD",      # aurora-purple
+            security="#B48EAD",
+            other="#4C566A",
+            context="#A3BE8C",
         )
     return TuiThemePalette(
-        frame="#D08770",
-        primary="#ECEFF4",
-        secondary="#9AA5B1",
-        endpoint="#5FA8D3",
-        protocol="#7FB77E",
+        frame="#D08770",          # aurora-orange -- warm window chrome
+        primary="#ECEFF4",        # snow-2 -- body text
+        secondary="#9AA5B1",      # snow-tinted dim
+        endpoint="#88C0D0",       # frost-cyan
+        protocol="#A3BE8C",
         waiting="#9AA5B1",
-        error="#E25555",
-        bip="#5FA8D3",
-        stk="#D7A65F",
-        fs="#7FB77E",
-        timer="#E25555",
+        error="#BF616A",
+        bip="#88C0D0",
+        stk="#EBCB8B",            # aurora-yellow
+        fs="#A3BE8C",
+        timer="#BF616A",
         euicc="#B48EAD",
-        security="#C792EA",
-        other="#81A1C1",
-        context="#7FB77E",
+        security="#B48EAD",
+        other="#81A1C1",          # frost-blue
+        context="#A3BE8C",
     )
 
 
@@ -471,6 +479,18 @@ def _summary_group_name(
     if stk_context is not None:
         return "STK"
     summary_text = _summary_grouping_text(row, annotation)
+    # ISO/IEC 7816-4 MANAGE CHANNEL (INS=0x70) advertises itself in
+    # the tshark info column as "MANAGE CHANNEL Operation=Open
+    # Channel ...", whose "OPEN CHANNEL" substring would otherwise
+    # match the STK BIP marker below and bucket the frame into
+    # "Channels". MANAGE CHANNEL carries no `channel_session_id`
+    # (it *is* the channel-open primitive, not a BIP lifecycle
+    # event), so the frame would fall into the unbound-channel tail
+    # and render as an uncategorised top-level row. In practice the
+    # modem brackets STK proactive activity with these APDUs, so we
+    # weave them into the STK group ahead of any BIP / marker scan.
+    if "MANAGE CHANNEL" in summary_text:
+        return "STK"
     if _summary_matches_marker(summary_text, _SUMMARY_BIP_MARKERS):
         return "Channels"
     if _summary_matches_marker(summary_text, _SUMMARY_STK_MARKERS):

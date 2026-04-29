@@ -680,7 +680,7 @@ class SimulatedConnectionTests(unittest.TestCase):
             self.assertEqual((sw1, sw2), (0x90, 0x00))
             self.assertEqual(
                 bytes(data).hex().upper(),
-                "5A1089044045930000000000001492294428",
+                "5A1089045967676472615349763031303005",
             )
 
             data, sw1, sw2 = connection.transmit(
@@ -1634,7 +1634,7 @@ metadata_overrides = {{
             bpp_segments = build_signed_bpp_segments(
                 transaction_id=transaction_id,
                 euicc_otpk_raw=euicc_otpk_raw,
-                eid_hex="89044045930000000000001492294428",
+                eid_hex="89045967676472615349763031303005",
                 cert_private_key=cert_private_key,
                 iccid="89461111111111111177",
                 provider_name="Test Provider",
@@ -1898,7 +1898,7 @@ metadata_overrides = {{
             bpp_segments = build_signed_bpp_segments(
                 transaction_id=transaction_id,
                 euicc_otpk_raw=euicc_otpk_raw,
-                eid_hex="89044045930000000000001492294428",
+                eid_hex="89045967676472615349763031303005",
                 cert_private_key=cert_private_key,
                 iccid="89461111111111111191",
                 provider_name="Chunked Provider",
@@ -1987,7 +1987,7 @@ metadata_overrides = {{
                 bpp_segments = build_signed_bpp_segments(
                     transaction_id=transaction_id,
                     euicc_otpk_raw=euicc_otpk_raw,
-                    eid_hex="89044045930000000000001492294428",
+                    eid_hex="89045967676472615349763031303005",
                     cert_private_key=cert_private_key,
                     iccid="89461111111111111222",
                     provider_name="Segmented Provider",
@@ -2076,7 +2076,7 @@ metadata_overrides = {{
                 bpp_segments = build_signed_bpp_segments(
                     transaction_id=transaction_id,
                     euicc_otpk_raw=euicc_otpk_raw,
-                    eid_hex="89044045930000000000001492294428",
+                    eid_hex="89045967676472615349763031303005",
                     cert_private_key=cert_private_key,
                     iccid="89461111111111111166",
                     provider_name="Persistent Provider",
@@ -2182,7 +2182,7 @@ metadata_overrides = {{
                 bpp_segments = build_signed_bpp_segments(
                     transaction_id=transaction_id,
                     euicc_otpk_raw=euicc_otpk_raw,
-                    eid_hex="89044045930000000000001492294428",
+                    eid_hex="89045967676472615349763031303005",
                     cert_private_key=cert_private_key,
                     iccid="89461111111111111167",
                     provider_name="Notification Provider",
@@ -2473,7 +2473,7 @@ metadata_overrides = {{
             bpp_segments = build_signed_bpp_segments(
                 transaction_id=transaction_id,
                 euicc_otpk_raw=euicc_otpk_raw,
-                eid_hex="89044045930000000000001492294428",
+                eid_hex="89045967676472615349763031303005",
                 cert_private_key=cert_private_key,
                 iccid="89461111111111111188",
                 provider_name="Tampered Provider",
@@ -2536,7 +2536,7 @@ metadata_overrides = {{
             bpp_segments = build_signed_bpp_segments(
                 transaction_id=transaction_id,
                 euicc_otpk_raw=euicc_otpk_raw,
-                eid_hex="89044045930000000000001492294428",
+                eid_hex="89045967676472615349763031303005",
                 cert_private_key=cert_private_key,
                 iccid="89461111111111111112",
                 provider_name="Duplicate Provider",
@@ -2594,7 +2594,7 @@ metadata_overrides = {{
             bpp_segments = build_signed_bpp_segments(
                 transaction_id=transaction_id,
                 euicc_otpk_raw=euicc_otpk_raw,
-                eid_hex="89044045930000000000001492294428",
+                eid_hex="89045967676472615349763031303005",
                 cert_private_key=cert_private_key,
                 iccid="89461111111111111178",
                 provider_name="Mismatch Provider",

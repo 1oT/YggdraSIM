@@ -1,0 +1,5 @@
+# MANAGE-CHANNEL is an interactive wizard. Sends EOF immediately after
+# invocation.
+SCP03-SD
+MANAGE-CHANNEL
+EXIT

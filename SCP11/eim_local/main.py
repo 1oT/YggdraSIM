@@ -18,7 +18,17 @@ from yggdrasim_common.hil_bridge_runtime import hil_bridge_warning_text
 from yggdrasim_common.quit_control import quit_all, QuitAllRequested
 from yggdrasim_common.session_recording import ShellSessionRecorder
 from yggdrasim_common.structured_output import dump_structured_payload
-from SCP11.shared.discovery_snapshot import render_consolidated_discovery_snapshot
+from yggdrasim_common.nord_palette import NORD
+from SCP11.shared.discovery_snapshot import (
+    render_card_overview_snapshot,
+    render_consolidated_discovery_snapshot,
+)
+from SCP11.shared.profile_actions import (
+    ProfileActionAdapter,
+    run_delete_profile as shared_run_delete_profile,
+    run_disable_profile as shared_run_disable_profile,
+    run_enable_profile as shared_run_enable_profile,
+)
 
 try:
     import readline
@@ -50,15 +60,17 @@ from SCP11.shared.gsma_error_codes import (
 
 
 class ShellStyle:
-    HEADER = "\033[38;2;95;220;203m"
-    BLUE = "\033[38;2;138;167;255m"
-    CYAN = "\033[38;2;147;247;255m"
-    GREEN = "\033[38;2;141;255;141m"
-    RED = "\033[38;2;255;154;154m"
-    WARNING = "\033[38;2;255;240;143m"
-    WHITE = "\033[38;2;247;252;255m"
-    BOLD = "\033[1m"
-    END = "\033[0m"
+    """eIM-local shell colour roles, sourced from the Nord palette."""
+
+    HEADER = NORD.HEADER
+    BLUE = NORD.BLUE
+    CYAN = NORD.CYAN
+    GREEN = NORD.GREEN
+    RED = NORD.RED
+    WARNING = NORD.WARNING
+    WHITE = NORD.WHITE
+    BOLD = NORD.BOLD
+    END = NORD.RESET
 
 
 class EimLocalStartupError(RuntimeError):
@@ -88,6 +100,7 @@ class EimLocalShell:
             "RECORD": self._cmd_record,
             "STATUS": self._cmd_status,
             "LIST": self._cmd_list_profiles,
+            "SCAN": self._cmd_scan,
             "DISCOVER": self._cmd_discover,
             "LOAD-PROFILE": self._cmd_load_profile,
             "ENABLE-PROFILE": self._cmd_enable_profile,
@@ -145,12 +158,17 @@ class EimLocalShell:
             "QA": self._cmd_quit_all,
             "EXIT": self._cmd_exit,
         }
+        # Aliases harmonised with eSIM Live / Test / Local SMDP+. Keep
+        # in sync with SCP11/local_access/main.py::_COMMAND_ALIASES so
+        # the same shorthand works across all four shells.
         self._command_aliases: dict[str, str] = {
-            "INFO": "DISCOVER",
+            "INFO": "SCAN",
+            "EIM-DISCOVER": "DISCOVER",
             "ENABLE": "ENABLE-PROFILE",
             "DISABLE": "DISABLE-PROFILE",
             "DELETE": "DELETE-PROFILE",
             "MODEM-REFRESH": "REFRESH-MODEM",
+            "GET-METADATA": "METADATA",
             "EIM-ACK": "EIM-ACKNOWLEDGE",
             "ISDR-PACKAGE": "LOAD-EIM-PACKAGE",
             "ISDR-LOAD-PACKAGE": "LOAD-EIM-PACKAGE",
@@ -182,7 +200,16 @@ class EimLocalShell:
             },
             "STATUS": {"usage": "STATUS", "summary": "Show current runtime/session state.", "examples": ["STATUS"]},
             "LIST": {"usage": "LIST", "summary": "List known profile aliases (AID registry) for profile state commands.", "examples": ["LIST"]},
-            "DISCOVER": {"usage": "DISCOVER", "summary": "Run the shared SCP11 SGP.22/SGP.32 discovery snapshot.", "examples": ["DISCOVER"]},
+            "SCAN": {
+                "usage": "SCAN",
+                "summary": "Quick card overview (EID / issuer / SM-DP+ / SM-DS / eIM / profiles). INFO is an alias.",
+                "examples": ["SCAN", "INFO"],
+            },
+            "DISCOVER": {
+                "usage": "DISCOVER",
+                "summary": "Full SGP.32 consolidated discovery dump (EID + EuiccConfiguredData + ES10 reads + GetCerts).",
+                "examples": ["DISCOVER", "EIM-DISCOVER"],
+            },
             "LOAD-PROFILE": {"usage": "LOAD-PROFILE [profilePath]", "summary": "Run PrepareDownload + profile load chain.", "examples": ["LOAD-PROFILE", "LOAD-PROFILE Workspace/LocalEIM/profile/test_profile.txt"]},
             "ENABLE-PROFILE": {"usage": "ENABLE-PROFILE <iccid|aid|alias>", "summary": "Enable profile by ICCID, AID, or alias.", "examples": ["ENABLE-PROFILE ISDP1", "ENABLE-PROFILE 8904903200000000000F"]},
             "DISABLE-PROFILE": {"usage": "DISABLE-PROFILE <iccid|aid|alias>", "summary": "Disable profile by ICCID, AID, or alias.", "examples": ["DISABLE-PROFILE ISDP1"]},
@@ -1150,6 +1177,30 @@ class EimLocalShell:
             end_color=ShellStyle.END,
         )
 
+    def _cmd_scan(self, _: str = "") -> None:
+        """Quick card overview — header data only.
+
+        Mirrors the ``SCAN`` (and ``INFO`` alias) behaviour of eSIM Live /
+        Test / Local SMDP+: EID, eCASD issuer, default SM-DP+, root SM-DS,
+        eIM entries, and the profile inventory. Skips the heavy ES10
+        reads (``GetRAT`` / ``RetrieveNotificationsList`` / ``GetCerts``)
+        that ``DISCOVER`` performs so refreshing the header card after a
+        profile switch stays cheap.
+        """
+        snapshot = self.session.collect_quick_overview()
+        self._cache_poll_target_fqdns_from_discovery_snapshot(snapshot)
+        render_card_overview_snapshot(
+            snapshot,
+            header_title="Local eIM Session Ready",
+            header_color=ShellStyle.HEADER,
+            accent_color=ShellStyle.CYAN,
+            end_color=ShellStyle.END,
+            profile_table_title="Profiles on Card",
+        )
+        warning_text = hil_bridge_warning_text()
+        if len(warning_text) > 0:
+            print(f"{ShellStyle.WARNING}[!] {warning_text}{ShellStyle.END}")
+
     def _cmd_load_profile(self, argument: str = "") -> None:
         response = self.session.run_load_profile_chain(profile_path=argument.strip())
         print(f"[+] LOAD-PROFILE completed ({len(response)} bytes).")
@@ -1167,32 +1218,115 @@ class EimLocalShell:
             aid = str(row.get("aid", "")).strip() or "-"
             print(f"    - {alias:<16} -> {aid}")
 
+    def _safe_collect_profile_metadata(self) -> list[Any]:
+        """Read profile metadata for ENABLE / DISABLE / DELETE auto-routing.
+
+        Returns an empty list if the card read or the decoder fails — the
+        shared helpers fall back to the raw identifier in that case so
+        the operator still gets a clean error from the card if their
+        identifier is bogus.
+        """
+        try:
+            raw = self.session.get_profiles_info()
+            return list(self.session.decode_profile_metadata_rows(raw))
+        except Exception:
+            return []
+
+    @staticmethod
+    def _profile_metadata_identifier(entry: Any) -> str:
+        iccid = str(getattr(entry, "iccid", "") or "").strip()
+        if len(iccid) > 0:
+            return iccid
+        aid = str(getattr(entry, "aid", "") or "").strip()
+        if len(aid) > 0:
+            return aid
+        return str(getattr(entry, "nickname", "") or "").strip()
+
+    @staticmethod
+    def _describe_profile_metadata(entry: Any) -> str:
+        nickname = str(getattr(entry, "nickname", "") or "").strip()
+        iccid = str(getattr(entry, "iccid", "") or "").strip()
+        if len(nickname) > 0 and len(iccid) > 0:
+            return f"{nickname} (ICCID {iccid})"
+        if len(iccid) > 0:
+            return f"ICCID {iccid}"
+        if len(nickname) > 0:
+            return nickname
+        aid = str(getattr(entry, "aid", "") or "").strip()
+        if len(aid) > 0:
+            return f"AID {aid}"
+        return "(unknown profile)"
+
+    def _build_profile_action_adapter(self) -> ProfileActionAdapter:
+        """Wire the local-eIM session into the shared profile-action helpers.
+
+        Same shape as ``LocalAccessShell._build_profile_action_adapter``;
+        the eIM-local shell historically had no auto-disable logic and
+        no PPR1 guard, so adopting the shared adapter brings it to
+        parity with eSIM Live / Test / Local SMDP+ in one move.
+        """
+        return ProfileActionAdapter(
+            enable_profile=lambda target: self._invoke_profile_state_command(
+                "EnableProfile",
+                lambda: self.session.enable_profile(target),
+            ),
+            disable_profile=lambda target: self._invoke_profile_state_command(
+                "DisableProfile",
+                lambda: self.session.disable_profile(target),
+            ),
+            delete_profile=lambda target: self._invoke_profile_state_command(
+                "DeleteProfile",
+                lambda: self.session.delete_profile(target),
+            ),
+            policy_allow_auto_disable=None,
+            modem_refresh=self._queue_modem_refresh,
+            describe_profile=self._describe_profile_metadata,
+            profile_identifier=self._profile_metadata_identifier,
+        )
+
+    def _invoke_profile_state_command(
+        self,
+        action_label: str,
+        callback: Callable[[], bytes],
+    ) -> bytes:
+        try:
+            response = callback()
+        except Exception as error:
+            print(f"[!] {action_label} failed: {error}")
+            return b""
+        print(f"[+] {action_label} completed ({len(response)} bytes).")
+        print(f"    {self._hex_preview(response)}")
+        return response if isinstance(response, (bytes, bytearray)) else b""
+
     def _cmd_enable_profile(self, argument: str = "") -> None:
         identifier = argument.strip()
         if len(identifier) == 0:
             raise ValueError("Usage: ENABLE-PROFILE <iccid|aid|alias>")
-        response = self.session.enable_profile(identifier)
-        print(f"[+] EnableProfile completed ({len(response)} bytes).")
-        print(f"    {self._hex_preview(response)}")
-        self._queue_modem_refresh("EnableProfile")
+        shared_run_enable_profile(
+            self._build_profile_action_adapter(),
+            self._safe_collect_profile_metadata(),
+            identifier,
+        )
 
     def _cmd_disable_profile(self, argument: str = "") -> None:
         identifier = argument.strip()
         if len(identifier) == 0:
             raise ValueError("Usage: DISABLE-PROFILE <iccid|aid|alias>")
-        response = self.session.disable_profile(identifier)
-        print(f"[+] DisableProfile completed ({len(response)} bytes).")
-        print(f"    {self._hex_preview(response)}")
-        self._queue_modem_refresh("DisableProfile")
+        shared_run_disable_profile(
+            self._build_profile_action_adapter(),
+            self._safe_collect_profile_metadata(),
+            identifier,
+        )
 
     def _cmd_delete_profile(self, argument: str = "") -> None:
         identifier = argument.strip()
         if len(identifier) == 0:
             raise ValueError("Usage: DELETE-PROFILE <iccid|aid|alias>")
-        response = self.session.delete_profile(identifier)
-        print(f"[+] DeleteProfile completed ({len(response)} bytes).")
-        print(f"    {self._hex_preview(response)}")
-        self._queue_modem_refresh("DeleteProfile")
+        shared_run_delete_profile(
+            self._build_profile_action_adapter(),
+            self._safe_collect_profile_metadata(),
+            identifier,
+        )
 
     def _cmd_refresh_modem(self, argument: str = "") -> None:
         self._queue_modem_refresh("RefreshModem", mode=argument.strip())

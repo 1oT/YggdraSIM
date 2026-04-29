@@ -108,6 +108,17 @@ The `[full]` extra covers:
 - `pyudev; sys_platform == 'linux'`
 - `pyinstaller`
 - `pytest`
+- `pySim @ git+https://github.com/osmocom/pysim.git` (so the SAIP
+  ASN.1 compile path, the SAIP transcode TUI, and the SCP11-local /
+  eIM-local flows are all unlocked without a separate `[saip]`
+  install)
+
+Note: `[full]` does **not** pull in the optional GUI Command Center
+extras. If you also want `--gui` / `--web-server`, install them
+explicitly with `pip install -e '.[full,gui]'` (desktop + server) or
+`pip install -e '.[full,gui-server]'` (headless server only). See
+`BUILD_AND_PACKAGING.md` §"Optional extras orthogonal to the flavor
+split".
 
 `YGGDRASIM_FLAVOR=full` tells the spec to keep `Tools/HilBridge` and
 `yggdrasim_common.hil_bridge_runtime` in the bundle and to record the

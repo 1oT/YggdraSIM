@@ -189,10 +189,13 @@ class SGP22Orchestrator:
                 self._last_eim_poll_reached_server = True
                 self._print_eim_poll_entry_summary(ordinal, total_entries, current_entry_index, request)
             except Exception as error:
-                # Keep the overall DOWNLOAD flow progressing on per-entry
-                # failures (TLS pin mismatch, DNS, HTTP) so post-flow steps
-                # like notification sync still run. Console gates its
-                # auto-clear sweep on ``_last_eim_poll_reached_server``.
+                # Multi-entry resilience: keep the overall DOWNLOAD flow
+                # progressing on per-entry failures (TLS pin mismatch, DNS,
+                # HTTP) so post-flow steps like notification sync still run.
+                # Console gates its auto-clear sweep on
+                # ``_last_eim_poll_reached_server``. For a single configured
+                # entry we re-raise so that the failure surfaces to the
+                # caller; otherwise the operator gets a silent no-op.
                 fqdn_text = ""
                 if request is not None:
                     fqdn_text = str(getattr(request, "eim_fqdn", "") or "").strip()
@@ -210,6 +213,8 @@ class SGP22Orchestrator:
                     print(f"[!] eIM entry failed: {label_text}")
                 if len(error_text) > 0:
                     print(f"    reason: {error_text}")
+                if total_entries <= 1:
+                    raise
 
     def _run_single_eim_poll_round(self, request: EimPollRequest) -> None:
         poll_round = 1

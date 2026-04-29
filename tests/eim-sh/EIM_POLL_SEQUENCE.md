@@ -31,7 +31,7 @@ We do **not** send euiccChallenge, eimId, or other JSON fields in this flow; the
 
 - Single TLV: **GetEimPackage** (tag `BF 4F`) containing **EID** (tag `5A`).
 - Build:
-  - EID from card is a BCD digit string (e.g. `89044045930000000000001492294428`).
+  - EID from card is a BCD digit string (e.g. `89045967676472615349763031303005`).
   - Encoded to bytes: two digits per byte, high nibble first → 16 bytes for a 32-digit EID.
   - Inner TLV: `5A` + length (1 byte) + EID bytes → e.g. `5A 10 <16 bytes>`.
   - Outer TLV: `BF 4F` + length (1 byte) + inner TLV.

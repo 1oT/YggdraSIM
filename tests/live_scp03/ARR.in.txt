@@ -1,0 +1,6 @@
+# Resolve the access rule reference (ARR) chain for the currently selected
+# file (MF by default) and decode the SE/AM tags.
+SCP03-SD
+SELECT 3F00
+ARR
+EXIT

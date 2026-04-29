@@ -1,0 +1,4 @@
+# GetProfilesInfo (ES10c). Requires SD auth on most cards.
+SCP03-SD
+LIST
+EXIT

@@ -1,0 +1,4 @@
+# Offline 3GPP TS 35.207 Milenage vector validation. Does not touch the card
+# transport, so it works regardless of authentication state.
+RUN-AUTH-TEST
+EXIT

@@ -1,0 +1,4 @@
+# Hand off to the SCP80 OTA shell. EOF on stdin should bring control back
+# to the SCP03 shell which then sees EXIT.
+OTA
+EXIT

@@ -210,6 +210,66 @@ class HilBridgeSimulatedModemTests(unittest.TestCase):
         self.assertEqual(response_sw1, 0x91)
         self.assertGreater(response_sw2, 0)
 
+    def test_current_application_alias_survives_mf_side_trip(self) -> None:
+        # Activate USIM via legacy AID select.
+        _, select_sw1, select_sw2 = self.channel.transmit(
+            bytes([0x00, 0xA4, 0x04, 0x04, len(LEGACY_USIM_AID)]) + LEGACY_USIM_AID
+        )
+        self.assertEqual(select_sw1, 0x61)
+        _, drain_sw1, drain_sw2 = self._drain_get_response(0x00, select_sw2)
+        self.assertEqual((drain_sw1, drain_sw2), (0x90, 0x00))
+
+        # First 7FFF/6F07 walk lands on EF.IMSI under USIM.
+        _, first_sw1, first_sw2 = self.channel.transmit(bytes.fromhex("00A40804047FFF6F07"))
+        self.assertEqual(first_sw1, 0x61)
+        first_fcp, first_drain_sw1, first_drain_sw2 = self._drain_get_response(0x00, first_sw2)
+        self.assertEqual((first_drain_sw1, first_drain_sw2), (0x90, 0x00))
+        self.assertIn(bytes.fromhex("83026F07"), first_fcp)
+
+        # Modem-style MF side-trip: SELECT 2F00 (EF.DIR) under MF via path
+        # walks the cursor out of the USIM subtree.
+        _, side_trip_sw1, _ = self.channel.transmit(bytes.fromhex("00A40804022F00"))
+        self.assertEqual(side_trip_sw1, 0x61)
+
+        # 7FFF/<EF> must still resolve to the previously activated USIM
+        # because TS 102 221 §8.4.2.3 keeps the "currently selected
+        # application" sticky until an explicit SELECT-by-AID switches
+        # it.
+        _, post_sw1, post_sw2 = self.channel.transmit(bytes.fromhex("00A40804047FFF6F07"))
+        self.assertEqual(post_sw1, 0x61)
+        post_fcp, post_drain_sw1, post_drain_sw2 = self._drain_get_response(0x00, post_sw2)
+        self.assertEqual((post_drain_sw1, post_drain_sw2), (0x90, 0x00))
+        self.assertIn(bytes.fromhex("83026F07"), post_fcp)
+
+    def test_select_by_aid_switches_sticky_application(self) -> None:
+        # Anchor on USIM.
+        _, usim_sw1, usim_sw2 = self.channel.transmit(
+            bytes([0x00, 0xA4, 0x04, 0x04, len(LEGACY_USIM_AID)]) + LEGACY_USIM_AID
+        )
+        self.assertEqual(usim_sw1, 0x61)
+        _, drain_sw1, _ = self._drain_get_response(0x00, usim_sw2)
+        self.assertEqual(drain_sw1, 0x90)
+
+        # 7FFF resolves to USIM root before the switch.
+        _, pre_sw1, pre_sw2 = self.channel.transmit(bytes.fromhex("00A40804047FFF6F07"))
+        self.assertEqual(pre_sw1, 0x61)
+        pre_fcp, _, _ = self._drain_get_response(0x00, pre_sw2)
+        self.assertIn(bytes.fromhex("83026F07"), pre_fcp)
+
+        # Switch to ISIM via AID.
+        _, isim_sw1, isim_sw2 = self.channel.transmit(
+            bytes([0x00, 0xA4, 0x04, 0x04, len(LEGACY_ISIM_AID)]) + LEGACY_ISIM_AID
+        )
+        self.assertEqual(isim_sw1, 0x61)
+        _, isim_drain_sw1, _ = self._drain_get_response(0x00, isim_sw2)
+        self.assertEqual(isim_drain_sw1, 0x90)
+
+        # 7FFF must now resolve to ISIM. EF.IMPI lives at 6F02 under ISIM.
+        _, post_sw1, post_sw2 = self.channel.transmit(bytes.fromhex("00A40804047FFF6F02"))
+        self.assertEqual(post_sw1, 0x61)
+        post_fcp, _, _ = self._drain_get_response(0x00, post_sw2)
+        self.assertIn(bytes.fromhex("83026F02"), post_fcp)
+
     def test_internal_authenticate_is_exposed_via_get_response(self) -> None:
         _, select_sw1, select_sw2 = self.channel.transmit(
             bytes([0x00, 0xA4, 0x04, 0x04, len(LEGACY_USIM_AID)]) + LEGACY_USIM_AID

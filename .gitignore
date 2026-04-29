@@ -146,6 +146,13 @@ Legal/
 Latjo/
 trace/
 
+# Live capture reports (SCP03 live runs, eIM dumps, ...). These can
+# contain derived session keys, chaining values, and IMSI/IMSI-mapped
+# traces. Keep them out of git so they cannot be pushed by accident.
+# `reports/.gitkeep` survives so the layout is documented.
+reports/*
+!reports/.gitkeep
+
 # Packaging metadata written by `pip install -e .`
 yggdrasim.egg-info/
 

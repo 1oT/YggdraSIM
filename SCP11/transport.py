@@ -23,16 +23,19 @@ from typing import Optional, Protocol, Tuple
 
 from yggdrasim_common.session_recording import emit_apdu_trace_event
 from yggdrasim_common.card_backend import create_card_connection
+from yggdrasim_common.nord_palette import NORD
 from SCP11.shared.tls_helpers import create_insecure_context
 
 
-_TRACE_RESET = "\033[0m"
-_TRACE_LOCAL = "\033[38;2;147;247;255m"
-_TRACE_EIM = "\033[38;2;95;220;203m"
-_TRACE_SMDP = "\033[38;2;138;167;255m"
-_TRACE_OK = "\033[38;2;141;255;141m"
-_TRACE_FAIL = "\033[38;2;255;154;154m"
-_TRACE_INFO = "\033[38;2;247;252;255m"
+# Trace colour roles, anchored to the canonical Nord palette so the
+# SCP11 transcript matches the launcher banner and the doctor output.
+_TRACE_RESET = NORD.RESET
+_TRACE_LOCAL = NORD.CYAN     # frost-1 -- on-card / local card chatter
+_TRACE_EIM = NORD.HEADER     # frost-0 -- eIM dialogue
+_TRACE_SMDP = NORD.BLUE      # frost-2 -- SM-DP+ dialogue
+_TRACE_OK = NORD.GREEN       # aurora-green -- 9000 / success swatches
+_TRACE_FAIL = NORD.RED       # aurora-red   -- non-success status words
+_TRACE_INFO = NORD.WHITE     # snow-2  -- neutral informational text
 
 
 def _trace_label_color(log_name: str) -> str:
@@ -126,6 +129,12 @@ class ApduChannel(Protocol):
     def get_raw_apdu_logging(self) -> bool:
         pass
 
+    def set_quiet_apdu_logging(self, enabled: bool) -> None:
+        pass
+
+    def get_quiet_apdu_logging(self) -> bool:
+        pass
+
 
 class RelayHttpClientJsonHex:
     """HTTP JSON relay client for APDU round-trips."""
@@ -191,6 +200,7 @@ class PcscApduChannel:
         self._reader_index = reader_index
         self._conn = self._connect(reader_index)
         self._raw_apdu_logging = False
+        self._quiet_apdu_logging = False
 
     def _connect(self, index: int):
         return create_card_connection(reader_index=index)
@@ -206,14 +216,15 @@ class PcscApduChannel:
     def exchange(self, apdu: bytes, log_name: str) -> Tuple[bytes, int, int]:
         response, sw1, sw2 = self._conn.transmit(list(apdu))
         payload = bytes(response)
-        _print_apdu_exchange(
-            log_name,
-            apdu,
-            payload,
-            sw1,
-            sw2,
-            raw=bool(self._raw_apdu_logging),
-        )
+        if self._quiet_apdu_logging is False:
+            _print_apdu_exchange(
+                log_name,
+                apdu,
+                payload,
+                sw1,
+                sw2,
+                raw=bool(self._raw_apdu_logging),
+            )
         emit_apdu_trace_event(
             log_name=log_name,
             apdu=apdu,
@@ -282,6 +293,12 @@ class PcscApduChannel:
     def get_raw_apdu_logging(self) -> bool:
         return bool(self._raw_apdu_logging)
 
+    def set_quiet_apdu_logging(self, enabled: bool) -> None:
+        self._quiet_apdu_logging = bool(enabled)
+
+    def get_quiet_apdu_logging(self) -> bool:
+        return bool(self._quiet_apdu_logging)
+
 
 class RelayApduChannel:
     """Relay-backed APDU channel using HTTP JSON transport."""
@@ -290,20 +307,22 @@ class RelayApduChannel:
         self._relay_client = relay_client
         self._session_id = session_id
         self._raw_apdu_logging = False
+        self._quiet_apdu_logging = False
 
     def reset(self) -> bool:
         return False
 
     def exchange(self, apdu: bytes, log_name: str) -> Tuple[bytes, int, int]:
         response, sw1, sw2 = self._relay_client.send_apdu(apdu, session_id=self._session_id)
-        _print_apdu_exchange(
-            log_name,
-            apdu,
-            response,
-            sw1,
-            sw2,
-            raw=bool(self._raw_apdu_logging),
-        )
+        if self._quiet_apdu_logging is False:
+            _print_apdu_exchange(
+                log_name,
+                apdu,
+                response,
+                sw1,
+                sw2,
+                raw=bool(self._raw_apdu_logging),
+            )
         emit_apdu_trace_event(
             log_name=log_name,
             apdu=apdu,
@@ -372,6 +391,12 @@ class RelayApduChannel:
     def get_raw_apdu_logging(self) -> bool:
         return bool(self._raw_apdu_logging)
 
+    def set_quiet_apdu_logging(self, enabled: bool) -> None:
+        self._quiet_apdu_logging = bool(enabled)
+
+    def get_quiet_apdu_logging(self) -> bool:
+        return bool(self._quiet_apdu_logging)
+
 
 class SGP22Transport:
     """
@@ -436,3 +461,14 @@ class SGP22Transport:
         if callable(getter):
             return bool(getter())
         return True
+
+    def set_quiet_apdu_logging(self, enabled: bool) -> None:
+        setter = getattr(self._channel, "set_quiet_apdu_logging", None)
+        if callable(setter):
+            setter(bool(enabled))
+
+    def get_quiet_apdu_logging(self) -> bool:
+        getter = getattr(self._channel, "get_quiet_apdu_logging", None)
+        if callable(getter):
+            return bool(getter())
+        return False

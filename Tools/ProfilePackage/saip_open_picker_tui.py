@@ -145,7 +145,7 @@ def pick_saip_profile_path_tui(bridge: SaipToolBridge) -> Path | None:
         CSS = """
         Screen {
             layout: vertical;
-            background: #1E222A;
+            background: #2E3440;
             color: #E5E9F0;
         }
         #saip_open_picker_shell {

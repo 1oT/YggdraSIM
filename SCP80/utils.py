@@ -17,8 +17,10 @@
 
 import binascii
 
+from yggdrasim_common.nord_palette import NordHex as _NordHex
+
 class Colors :
-    """ANSI terminal colors derived from hex palette values."""
+    """ANSI terminal colours sourced from the canonical Nord palette."""
 
     @staticmethod 
     def _hex_to_ansi (hex_color ):
@@ -28,12 +30,12 @@ class Colors :
         blue =int (hex_value [4 :6 ],16 )
         return f'\033[38;2;{red};{green};{blue}m'
 
-    HEADER_HEX ='#5FDCCB'
-    BLUE_HEX ='#8AA7FF'
-    CYAN_HEX ='#93F7FF'
-    GREEN_HEX ='#8DFF8D'
-    WARNING_HEX ='#FFF08F'
-    FAIL_HEX ='#FF9A9A'
+    HEADER_HEX =_NordHex .FROST_TEAL
+    BLUE_HEX =_NordHex .FROST_BLUE
+    CYAN_HEX =_NordHex .FROST_CYAN
+    GREEN_HEX =_NordHex .AURORA_GREEN
+    WARNING_HEX =_NordHex .AURORA_YELLOW
+    FAIL_HEX =_NordHex .AURORA_RED
 
     HEADER =_hex_to_ansi .__func__ (HEADER_HEX )
     BLUE =_hex_to_ansi .__func__ (BLUE_HEX )

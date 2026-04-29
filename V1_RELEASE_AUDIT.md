@@ -5617,3 +5617,215 @@ Operator impact.
    `ALLOW=0`) in their launcher to keep the old posture.
 3. Operators see the loaded plugin file names at shell startup via
    the announce banner and can spot unexpected plugins in seconds.
+
+---
+
+## SGP.32 IPA loopback — Mode A + Mode B
+
+Goal. Let the simulated SIMCARD act as a real SGP.32 IPA so the
+local eIM can validate the same way it validates a production
+eUICC. The previous build only signalled the BIP burst on TIMER
+EXPIRATION; the eIM-side response was logged but never re-injected
+into ISD-R, which meant `AddEim` / `ProfileDownloadTrigger` etc.
+were dropped on the floor.
+
+Scope.
+
+1. `SimToolkitState` gains four new fields (`ipa_poll_session_active`,
+   `ipa_poll_last_request_payload`, `ipa_poll_last_response_payload`,
+   `ipa_poll_dispatched_packages`) so the IPA cycle is observable
+   end to end.
+2. `ToolkitLogic._queue_ipa_poll_sequence()` flips
+   `ipa_poll_session_active = True` when the BIP burst is queued
+   and stashes the request payload so a test can introspect it.
+3. `ToolkitLogic._apply_close_channel_response()` clears the
+   session flag on success *and* failure (the bearer is gone
+   either way).
+4. `ToolkitLogic._apply_receive_data_response()` parses the
+   eIM-side payload, strips a leading HTTP envelope if present,
+   walks the residue as a chain of SGP.32 outer TLVs, and calls
+   the dispatcher for each recognised `BFxx` package. Outer tags
+   land in `ipa_poll_dispatched_packages`.
+5. `ToolkitLogic.set_eim_package_dispatcher(callable)` is the new
+   wiring point. `SimulatedSimCardEngine.__init__` calls it with
+   `self.sgp.handle_store_data` so the IPA fans the eIM payload
+   straight into the same ISD-R handler the modem would hit
+   through STORE DATA. Unit tests can pass any
+   `Callable[[bytes], tuple[bytes, int, int]]` for isolation.
+
+Tests.
+
+- `tests/test_simcard_local_eim_loopback.py` (Mode A, 11 cases) —
+  drives `EimLocalSession.discover_card()` and
+  `EimLocalSession.add_initial_eim()` against
+  `SimulatedCardConnection`. Pins every `BFxx` ISD-R surface
+  (BF20/22/2D/2E/3C/43/2B/55/56) plus the BF57 AddInitialEim
+  STORE DATA round-trip.
+- `tests/test_simcard_ipa_poll_dispatch.py` (Mode B, 7 cases) —
+  fake-modem FETCH/TR loop. Exercises stacked EuiccPackages,
+  HTTP envelope stripping, dispatcher errors, missing dispatcher
+  fallback, and unknown-payload rejection.
+- `tests/test_simcard_ipa_poll_engine_loopback.py` (Mode B, 1
+  case) — fake modem driving the *real* `SimulatedSimCardEngine`.
+  Asserts an `AddEim` (BF58) ESipa response delivered through
+  RECEIVE DATA actually creates a new `SimEimEntry` after the
+  cycle closes.
+
+Operator impact.
+
+1. The simulator can now be plugged into the local eIM in place
+   of a production eUICC. The bearer (TLS, HTTP, DNS) stays the
+   modem's responsibility; the simulator handles the application
+   layer.
+2. Tests can introspect the IPA cycle via
+   `state.toolkit.ipa_poll_*` without instrumenting the
+   dispatcher. `ipa_poll_dispatched_packages` is the canonical
+   "did the eIM side land?" signal.
+3. New documentation lives under
+   `site-docs/subsystems/simcard-simulator.md` ("ESipa response
+   dispatch on RECEIVE DATA" and "IPA-poll loopback validation
+   (Mode A + Mode B)"). The configuration schema in
+   `guides/CONFIGURATION_AND_CERTIFICATES.md` is unchanged
+   because the new state fields are runtime-only.
+
+## SGP.32 ESipa shape — `BF4F` request and `BF50` follow-up
+
+Scope. Round out the simulator's IPA so the eIM does not just
+see a generic HTTP poll. Two missing ESipa shapes were
+implemented:
+
+- `BF4F` GetEimPackageRequest (SGP.32 v1.2 §6.5.2.1) is the
+  default body of the first SEND DATA in every IPA-poll cycle.
+  Carries the EID under tag `5A`; optional `80`/`81`/`82` fields
+  for notifyStateChange/stateChangeCause/rPlmn are exposed on
+  the builder. The body is wrapped in HTTP/1.1 framing with
+  `Content-Type: application/x-gsma-rsp-asn1` and
+  `X-Admin-Protocol: gsma/rsp/v2.2.0` so the modem's HTTPS
+  client routes it to `/gsma/rsp2/asn1`. `state.toolkit.ipa_poll_request_payload`
+  remains the override for tests that need a different opener.
+
+- `BF50` ProvideEimPackageResult (SGP.32 v1.2 §6.5.2.1) is the
+  follow-up SEND DATA injected directly before the still-pending
+  CLOSE CHANNEL whenever the dispatcher landed at least one
+  non-empty per-package result. The body is `5A` EID plus one or
+  more `BF51`/`BF52`/`BF54` results; bare ISD-R responses are
+  wrapped in `BF51` per the default-CHOICE rule. A second
+  RECEIVE DATA is also injected so the eIM's empty/ack reply is
+  drained on the same channel.
+
+Latches.
+
+- `state.toolkit.ipa_poll_followup_emitted` — set when the BF50
+  pair is queued, reset on CLOSE CHANNEL TR (success or failure).
+  Prevents the dispatcher from cascading itself if the eIM's ack
+  payload happens to contain BF50 bytes.
+- `state.toolkit.ipa_poll_pending_result_payload` and
+  `state.toolkit.ipa_poll_last_result_payload` — cache the body
+  shipped to the eIM. The latter survives the cycle teardown so
+  a test can introspect "what did the IPA tell the eIM about
+  cycle N?".
+- `state.toolkit.ipa_poll_dispatched_responses` — list of raw
+  R-APDU bytes the SGP layer returned for each forwarded
+  package, parallel to `ipa_poll_dispatched_packages`.
+
+Allow-list expansion. The eIM-side dispatcher now accepts every
+`BFxx` tag `SgpLogic.handle_store_data` knows about
+(BF21/25/29/2A/2B/2D/2E/30..34/36/38/3C/3F/41/45/50..5F/64/65),
+not just the discovery + AddEim subset. New tags are added to
+the allow-list whenever the SGP layer grows a new STORE DATA
+opcode.
+
+Tests added.
+
+- `IpaPollEsipaShapeTests::test_default_send_data_carries_get_eim_package_request_bf4f`
+- `IpaPollEsipaShapeTests::test_followup_send_data_carries_provide_eim_package_result_bf50`
+- `IpaPollEsipaShapeTests::test_followup_is_not_emitted_when_dispatcher_returns_empty`
+- `IpaPollEsipaShapeTests::test_followup_emitted_only_once_per_cycle`
+- `IpaPollEsipaShapeTests::test_dispatcher_forwards_full_sgp32_tag_range`
+- `IpaPollEngineLoopbackTests::test_d7_envelope_drives_full_ipa_poll_cycle` —
+  extended to assert both BF4F (initial) and BF50 (follow-up)
+  travel out via SEND DATA against the real engine.
+
+Operator impact.
+
+1. The simulator now speaks the canonical ESipa request/response
+   shape end-to-end. A real eIM that rejects empty-body polls or
+   that requires per-package results now sees the data it
+   expects from the simulator.
+2. `ipa_poll_last_result_payload` is the new "did the IPA report
+   home?" signal, complementary to `ipa_poll_dispatched_packages`
+   which already answered "did the eIM side land?".
+3. The configuration schema is still runtime-only; no operator
+   action is required to pick up the new behaviour.
+
+## SGP coverage round-out — LoadCRL, error CHOICE, notifications
+
+Scope. Three smaller but real gaps closed against the SGP.22 /
+SGP.32 surface:
+
+- **BF35 LoadCRL (SGP.22 §5.7.13).** New
+  `SgpLogic._handle_load_crl()` accepts the request, persists
+  the inner CRL DER bytes in `state.loaded_crls`, and replies
+  `BF35 80 01 00` (`ok(0)`). Empty bodies fall to
+  `81 01 02` (`invalidSignature(2)`). The dispatcher allow-list
+  was extended so an eIM-side LoadCRL pushed over BIP routes
+  through the IPA into ISD-R without further wiring.
+
+- **EimPackageResultErrorCode `[0]` in BF50 (SGP.32 §6.5.2.1).**
+  `_dispatch_eim_response_packages()` now tracks per-package
+  SW pairs and maps them to error codes via
+  `_sw_to_eim_package_error_code()`. When every package in a
+  cycle failed, the IPA emits the error branch of the
+  EimPackageResult CHOICE -- `80 05 30 03 02 01 XX` -- instead
+  of fabricating a fake success. `state.toolkit.ipa_poll_failed_packages`
+  is the parallel audit trail.
+
+- **Cross-cycle PendingNotification piggyback.** The BF50
+  follow-up now stitches a `BF2B/A0` retrieve-all chunk drained
+  from `state.notifications` so post-Enable/Disable/Delete
+  notifications reach the eIM in the same round-trip rather
+  than waiting for a future cycle. Notifications are NOT cleared
+  on the eUICC -- the eIM must still issue
+  `RemoveNotificationFromList` to pop them, mirroring a real
+  card's behaviour.
+
+State surface added.
+
+- `state.loaded_crls: list[bytes]` -- ordered persistence of
+  every CRL the eUICC accepted.
+- `state.toolkit.ipa_poll_failed_packages: list[tuple[bytes, int]]`
+  -- parallel to `ipa_poll_dispatched_packages`, recording
+  `(outer_tag, error_code)` for each failed dispatch.
+
+Tests added.
+
+- `tests/test_simcard_load_crl.py` -- 3 unit cases covering
+  the ok / invalidSignature / multi-CRL accumulation paths
+  on the SGP layer directly.
+- `IpaPollEsipaShapeTests::test_dispatch_failure_emits_bf50_error_choice`
+  -- pins `80 05 30 03 02 01 01` (invalidPackageFormat) when
+  the dispatcher returns `6A80`.
+- `IpaPollEsipaShapeTests::test_dispatcher_exception_maps_to_undefined_error_code_127`
+  -- pins `80 05 30 03 02 01 7F` when the dispatcher raises.
+- `IpaPollEsipaShapeTests::test_pending_notifications_piggyback_on_bf50`
+  -- pins `BF2B/A0` retrieve-all chunk inside the BF50 body
+  when the eUICC has staged notifications.
+
+Test helpers were also tightened: `_proactive_kind` /
+`_command_number` now handle the BER long-form length
+(`D0 81 LL` *and* `D0 82 LL LL`) so future SEND DATA bodies
+exceeding 0xFF bytes (which the notification piggyback can
+trigger) don't trip the assertion.
+
+Operator impact.
+
+1. The eIM's CRL pushes are now a real persistence path on the
+   simulator, not a no-op.
+2. Real eIMs that branch on the error CHOICE (alarm, retry,
+   abandon-cycle) now see the right signal from the simulator
+   when ISD-R rejects a package, instead of a misleading
+   "success" envelope.
+3. Profile-state-change notifications reach the eIM in the same
+   poll cycle as the action that produced them, eliminating one
+   round-trip of latency for the common
+   "EnableProfile + reportNotification" flow.
