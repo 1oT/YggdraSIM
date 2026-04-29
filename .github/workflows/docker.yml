@@ -30,27 +30,17 @@ jobs:
 
       - name: Smoke test Docker image
         shell: bash
-        run: docker run --rm yggdrasim-ci:local yggdrasim-scp11 --cmd "HELP; EXIT"
-
-      - name: Doctor + version smoke test
-        shell: bash
-        # ``--version`` exercises console-script registration and
-        # ``--doctor`` validates the preflight surface against the installed
-        # runtime root. ``|| true`` is acceptable on --doctor because the
-        # container does not ship pcscd / SIMtrace2 and some probes are
-        # expected to emit WARN in a stripped image.
+        # ``--version`` exercises console-script registration, venv
+        # activation in the entrypoint, and argparse wiring without
+        # requiring a PC/SC daemon, a SIMtrace2 board, or a relay
+        # endpoint -- none of which exist inside a single-shot CI
+        # container. A real session would call ``_run_startup_preflight``
+        # which short-circuits cleanly when pcscd is unreachable but
+        # still aborts with a non-zero exit, so it is not a meaningful
+        # smoke target without hardware. The non-root assertion confirms
+        # the Dockerfile's ``USER yggdrasim`` layer is intact.
         run: |
           docker run --rm yggdrasim-ci:local yggdrasim-scp11 --version
-          docker run --rm yggdrasim-ci:local yggdrasim-scp11 --doctor || true
-
-      - name: Non-root user smoke test
-        shell: bash
-        # The Dockerfile switches to ``uid=1000`` for the default command;
-        # this asserts that the shipped entrypoint still works without
-        # ``--user root`` overrides. A regression in the USER/chown layer
-        # would surface here as an ``ImportError`` or a permission denied
-        # on ``/opt/YggdraSIM-data``.
-        run: |
           docker run --rm yggdrasim-ci:local sh -c 'id -u && test "$(id -u)" = "1000"'
 
       - name: Log in to GHCR

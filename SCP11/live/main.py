@@ -1,6 +1,7 @@
 import argparse
 import sys
 
+from yggdrasim_common.__about__ import get_version
 from yggdrasim_common.plugin_runtime import ensure_plugins_loaded
 from yggdrasim_common.process_debug import (
     add_debug_argument,
@@ -75,13 +76,24 @@ class SGP22Client:
             except Exception as error:
                 errors.append(f"Unable to load PC/SC reader support: {error}")
             else:
-                reader_list = readers()
-                if len(reader_list) == 0:
-                    errors.append("No smart card readers found for PC/SC transport.")
-                elif self.cfg.READER_INDEX >= len(reader_list):
+                try:
+                    reader_list = readers()
+                except Exception as error:
                     errors.append(
-                        f"READER_INDEX {self.cfg.READER_INDEX} is out of range. Detected readers: {len(reader_list)}."
+                        "PC/SC reader enumeration failed "
+                        f"({error.__class__.__name__}: {error}). "
+                        "Is pcscd running and reachable on this host? "
+                        "Headless / containerised hosts can set "
+                        "YGGDRASIM_CARD_BACKEND=sim to bypass PC/SC, "
+                        "or supply a remote card relay endpoint."
                     )
+                else:
+                    if len(reader_list) == 0:
+                        errors.append("No smart card readers found for PC/SC transport.")
+                    elif self.cfg.READER_INDEX >= len(reader_list):
+                        errors.append(
+                            f"READER_INDEX {self.cfg.READER_INDEX} is out of range. Detected readers: {len(reader_list)}."
+                        )
 
         if errors:
             combined = list(errors)
@@ -151,6 +163,11 @@ class SGP22Client:
 def entry() -> None:
     ensure_plugins_loaded()
     parser = argparse.ArgumentParser(description="SCP11 live relay orchestration shell")
+    parser.add_argument(
+        "--version",
+        action="version",
+        version=f"yggdrasim-scp11 {get_version()}",
+    )
     add_debug_argument(
         parser,
         help_text="Enable verbose debug output for this SCP11 live session.",
