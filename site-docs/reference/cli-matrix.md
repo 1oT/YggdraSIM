@@ -98,9 +98,9 @@ python -m Tools.ProfilePackage --cmd "USE profile.der; LINT --strict; EXIT"
 | `YGGDRASIM_RUNTIME_ROOT` | force a specific runtime root directory |
 | `YGGDRASIM_CARD_BACKEND` | preselect `reader` / `sim` when no `--card-backend` is passed |
 | `YGGDRASIM_FLAVOR` | force `clean` / `full` / `source` when probing from a shared tree |
-| `YGGDRASIM_5GCORE_MODE` | switch YggdraCore between in-process stub and BYO-Open5GS bridge |
+| `YGGDRASIM_5GCORE_MODE` *(R2-005, post-v1.0.0 staging)* | switch YggdraCore between in-process stub and BYO-Open5GS bridge |
 | `YGGDRASIM_EUM_SESSION_KEYS` | session-key staging for the EUM diagnostics dissector |
-| `YGGDRASIM_SUNRISE6G_MODE` | toggle the Sunrise6G bridge between stub and SDK adapter |
+| `YGGDRASIM_SUNRISE6G_MODE` *(R2-005, post-v1.0.0 staging)* | toggle the Sunrise6G bridge between stub and SDK adapter |
 | `GNUPGHOME` | pick the gpg home directory when inventory crypto is enabled |
 
 ## Related pages

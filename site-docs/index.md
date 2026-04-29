@@ -133,7 +133,7 @@ exercised without switching projects.
 | `Tools/ApduFuzz/` | Opt-in eUICC APDU mutation fuzzer (allow-listed, hard-gated) | [APDU Fuzzer](subsystems/apdu-fuzzer.md) |
 | `Tools/EumDiag/` | EUM / SM-DP+ session-key injection + Wireshark Lua dissector | [EUM Diagnostics](subsystems/eum-diagnostics.md) |
 | `Tools/SuciTool/` | SUCI key management shell | [SUCI Tool](subsystems/suci-tool.md) |
-| `Tools/YggdraCore/` | In-process 5G core stubs (AUSF / AAnF) + BYO-Open5GS bridge | [Subsystems index](subsystems/index.md) |
+| `Tools/YggdraCore/` *(R2-005, post-v1.0.0 staging)* | In-process 5G core stubs (AUSF / AAnF) + BYO-Open5GS bridge | [Subsystems index](subsystems/index.md) |
 | `yggdrasim_common/gui_server/` | Optional Universal GUI Command Center (`--gui` / `--web-server`) | [Subsystems index](subsystems/index.md) |
 
 ## What this site covers

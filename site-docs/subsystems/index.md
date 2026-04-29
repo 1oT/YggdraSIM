@@ -120,6 +120,8 @@ Subsystem pages are the operator-facing deep dives. Each page covers:
 
     ---
 
+    > **Status: R2-005, post-v1.0.0 staging.** Tracked in [V2_ROADMAP.md](../../V2_ROADMAP.md). The v1.0.0 frozen tree (tag `v1.0.0`) does not include this surface.
+
     In-process AUSF and AAnF stubs for 5G AKA, EAP-AKA', and AKMA round-trips, plus a BYO-Open5GS provisioning bridge.
 
     Library + FastAPI loopback (`YGGDRASIM_5GCORE_MODE=stub`).
@@ -141,4 +143,4 @@ Subsystem pages are the operator-facing deep dives. Each page covers:
 | SUCI Tool | [3GPP NAA](../concepts/3gpp-naa.md) |
 | APDU Mutation Fuzzer | [Secure Element Primer](../concepts/secure-element-primer.md) |
 | EUM Diagnostics | [RSP Architecture](../concepts/rsp-architecture.md), [SAIP Profiles](../concepts/saip-profiles.md) |
-| YggdraCore (5G core stubs) | [3GPP NAA](../concepts/3gpp-naa.md) |
+| YggdraCore (5G core stubs) *(R2-005, post-v1.0.0 staging)* | [3GPP NAA](../concepts/3gpp-naa.md) |

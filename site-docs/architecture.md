@@ -49,7 +49,7 @@ flowchart LR
     Launcher --> Suci["Tools.SuciTool"]
     Launcher --> ApduFuzz["Tools.ApduFuzz"]
     Launcher --> EumDiag["Tools.EumDiag"]
-    Launcher --> YggdraCore["Tools.YggdraCore<br/>(library + HTTP stub)"]
+    Launcher --> YggdraCore["Tools.YggdraCore<br/>(library + HTTP stub)<br/>(R2-005, post-v1.0.0 staging)"]
     Launcher --> Simulator["SIMCARD<br/>simulator backend"]
     Launcher --> GuiServer["yggdrasim_common.gui_server<br/>(Universal GUI)"]
 
@@ -169,7 +169,7 @@ flowchart TB
 | `Tools.SuciTool` | Primary | No | No | No | No | No | File/stdin shell around `suci-keytool` |
 | `Tools.ApduFuzz` | Primary | Primary | No | No | No | No | Allow-listed eUICC APDU mutation fuzzer (opt-in, hard-gated) |
 | `Tools.EumDiag` | Primary | Optional | No | No | No | No | EUM / SM-DP+ session-key staging and Wireshark Lua dissector |
-| `Tools.YggdraCore` | No (library / HTTP stub) | No | Optional | No | No | No | In-process AUSF / AAnF stubs and BYO-Open5GS bridge |
+| `Tools.YggdraCore` *(R2-005, post-v1.0.0 staging)* | No (library / HTTP stub) | No | Optional | No | No | No | In-process AUSF / AAnF stubs and BYO-Open5GS bridge |
 | `SIMCARD` | Selected via `--card-backend sim` | No | No | No | Optional | No | Simulated UICC / eUICC backend (ETSI / GP / SCP03 / SCP80 / Toolkit / 5G AKA / AKMA / SUCI) |
 
 ## Complete dependency graph
@@ -548,7 +548,7 @@ flowchart LR
 - `Tools/EumDiag` is the EUM / SM-DP+ diagnostics surface (session-key
   injection plus Wireshark / tshark Lua dissector)
 - `Tools/YggdraCore` is the in-process 5G core stub (AUSF / AAnF) plus
-  optional BYO-Open5GS provisioning bridge
+  optional BYO-Open5GS provisioning bridge. (R2-005, post-v1.0.0 staging — see V2_ROADMAP.md.)
 - `SIMCARD` is the simulator backend activated by `--card-backend sim`,
   including ETSI / GP / SCP03 / SCP80 / Toolkit and the 5G AKA / EAP-AKA' /
   AKMA / SUCI / `GET IDENTITY` stack

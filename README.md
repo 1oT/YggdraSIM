@@ -2,6 +2,13 @@
 
 YggdraSIM is a Python toolkit for secure-element research, eUICC analysis, SIM/eSIM management, OTA payload work, SCP11 relay/local flows, and SAIP profile-package tooling. The repository keeps the operator surfaces, protocol helpers, and test suite in one workspace so card work, relay work, and package work can be exercised without switching projects. The SAIP decoding path and the SCP11 local / eIM flows pull in upstream `pySim`; install them in one shot with `pip install -e '.[saip]'` (the `[saip]` extra pins pySim directly from its GitHub mirror).
 
+> **Releases.** v1.0.0 was tagged on 2026-04-29. Check out the frozen
+> v1 footprint with `git checkout v1.0.0`. The `main` branch carries
+> in-flight v2 work — surfaces tagged `(R2-005, post-v1.0.0 staging)`
+> below are part of that v2 line and are not covered by the v1.0.0
+> compatibility promise. See [`CHANGELOG.md`](CHANGELOG.md) and
+> [`V2_ROADMAP.md`](V2_ROADMAP.md) for the active backlog.
+
 ## Distribution at a glance
 
 YggdraSIM is offered in three shapes:
@@ -59,7 +66,9 @@ powershell -ExecutionPolicy Bypass -File scripts\install\install-windows.ps1
 | `Tools/SuciTool/` | SUCI helper tooling | helper shell |
 | `Tools/ApduFuzz/` | Safety-gated eUICC APDU mutation fuzzer (`--i-mean-it` + ICCID/IMSI allow-list) | `yggdrasim-apdu-fuzzer` |
 | `Tools/EumDiag/` | EUM / SM-DP+ "God-Mode": session-key injection + Wireshark/tshark Lua dissector for BF36 BPPs | `yggdrasim-eum-diag` |
-| `Tools/YggdraCore/` | In-process 5G core stubs (AUSF / AAnF) for AKA / AKMA flows + BYO-Open5GS provisioning bridge | FastAPI loopback (opt-in via `YGGDRASIM_5GCORE_MODE=stub`) |
+| `Tools/YggdraCore/` *(R2-005, post-v1.0.0 staging)* | In-process 5G core stubs (AUSF / AAnF) for AKA / AKMA flows + BYO-Open5GS provisioning bridge | FastAPI loopback (opt-in via `YGGDRASIM_5GCORE_MODE=stub`) |
+| `Tools/Sunrise6G/` *(R2-005, post-v1.0.0 staging)* | Sunrise-6G QoD / Location stubs feeding the YggdraCore loopback | library only |
+| `Tools/CardBridge/` *(R2-005, post-v1.0.0 staging)* | Loopback HTTP card-relay daemon paired with `yggdrasim_common.card_bridge_auth` | `python -m Tools.CardBridge` |
 | `yggdrasim_common/gui_server/` | Optional Universal GUI Command Center (R2-004): FastAPI API + pywebview desktop window or headless lab server | `--gui` / `--web-server` |
 | `plugins/` | Runtime-loaded optional plugins (polling, custom commands) discovered at launch | drop-in `register_plugins()` modules |
 | `pysim/` | **Optional** developer checkout of upstream pySim (gitignored). Only needed when working against an unreleased upstream branch; the released SAIP surface ships via the `[saip]` extra (`pip install 'yggdrasim[saip]'`). | optional external tree |
@@ -74,8 +83,8 @@ powershell -ExecutionPolicy Bypass -File scripts\install\install-windows.ps1
 - eIM-centric local package work, localized polling, hotfolder campaigns, and response tracking through `SCP11/eim_local`.
 - Hardware-in-the-loop SIMtrace2 bridge with GSMTAP mirroring, brokered APDU side-channel access, modem REFRESH control, and AT+CSIM / AT+CRSM transcoding for modem cold-boot rigs through `Tools/HilBridge`.
 - In-process simulated UICC / eUICC backend (`--card-backend sim`) with full ETSI TS 102 221 file system, ISD-R + ISD-P personalities, persistent EID-scoped store, GP / SCP03 / SCP80 secure messaging, and an ETSI TS 102 223 toolkit + BIP runtime.
-- 3GPP TS 33.501 5G AKA, EAP-AKA' (TS 33.402), AKMA (TS 33.535), and SUPI / SUCI Profile A & B (TS 33.501 §C.3) on the simulated card, including TS 31.102 §7.1.2.4 `GET IDENTITY` (P2 = 0x01 SUCI calculation).
-- In-process 5G-core stubs for end-to-end AKA + AKMA loops (`Tools/YggdraCore`: AUSF, AAnF, subscription store, optional FastAPI loopback) plus a BYO-Open5GS provisioning bridge for hosts that already run a real 5GC.
+- 3GPP TS 33.501 5G AKA, EAP-AKA' (TS 33.402), AKMA (TS 33.535), and SUPI / SUCI Profile A & B (TS 33.501 §C.3) on the simulated card, including TS 31.102 §7.1.2.4 `GET IDENTITY` (P2 = 0x01 SUCI calculation). *(SIMCARD layer shipped in v1.0.0.)*
+- In-process 5G-core stubs for end-to-end AKA + AKMA loops (`Tools/YggdraCore`: AUSF, AAnF, subscription store, optional FastAPI loopback) plus a BYO-Open5GS provisioning bridge for hosts that already run a real 5GC. *(R2-005, post-v1.0.0 staging on `main`; documentation, CLI surface, and HTTP-loopback hardening pending — see `V2_ROADMAP.md` and `CHANGELOG.md`.)*
 - SAIP / UPP profile inspection, linting, JSON↔DER transcode, and shell automation through `Tools/ProfilePackage`.
 - Visual side-by-side SAIP profile diffing (shell + Textual TUI) via
   `DIFF` / `DIFF-TUI` inside the profile-package shell.
@@ -535,7 +544,9 @@ its pane layout in the workspace, supports OS clipboard copy/paste, and writes
 - `Tools/SuciTool/` - SUCI helper shell
 - `Tools/ApduFuzz/` - eUICC APDU fuzzer
 - `Tools/EumDiag/` - EUM / SM-DP+ diagnostics + tshark Lua dissector
-- `Tools/YggdraCore/` - in-process AUSF / AAnF stubs, subscription store, BYO-Open5GS bridge
+- `Tools/YggdraCore/` - **(R2-005, post-v1.0.0 staging)** in-process AUSF / AAnF stubs, subscription store, BYO-Open5GS bridge
+- `Tools/Sunrise6G/` - **(R2-005, post-v1.0.0 staging)** Sunrise-6G QoD / Location stubs feeding the YggdraCore loopback
+- `Tools/CardBridge/` - **(R2-005, post-v1.0.0 staging)** loopback HTTP card-relay daemon paired with `yggdrasim_common.card_bridge_auth`
 - `plugins/` - runtime-loaded optional plugins (polling, custom commands)
 - `tests/` - first-party test suite
 - `state/` - shared SQLite inventory and crypto bootstrap config
