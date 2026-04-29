@@ -1131,19 +1131,23 @@ def _build_hil_bridge_service_options (
 def _ensure_hil_bridge_user_service (
     gsmtap_enabled :bool =True ,
     gsmtap_capture_path :str ="",
-)->str :
+)->tuple [str ,bool ]:
     options =_build_hil_bridge_service_options (
     gsmtap_enabled =gsmtap_enabled ,
     gsmtap_capture_path =gsmtap_capture_path ,
     )
     unit_text =hil_bridge_runtime .render_user_service_unit (options )
-    written_path =hil_bridge_runtime .install_user_service (unit_text ,options .service_name )
-    hil_bridge_runtime .daemon_reload_user_services ()
+    written_path ,unit_changed =hil_bridge_runtime .write_user_service_if_changed (
+    unit_text ,
+    service_name =options .service_name ,
+    )
+    if unit_changed :
+        hil_bridge_runtime .daemon_reload_user_services ()
     try :
         hil_bridge_runtime .disable_user_service (options .service_name )
     except (OSError ,RuntimeError ):
         pass
-    return written_path
+    return written_path ,unit_changed 
 
 
 def _hil_bridge_log_line_is_apdu_related (line_text :str )->bool :
@@ -1205,14 +1209,16 @@ def _activate_hil_bridge_service (
     normalized_service_name =str (service_name or hil_bridge_runtime .DEFAULT_SERVICE_NAME )
     try :
         if active_before ==False :
+            hil_bridge_runtime .clear_card_relay_state ()
             hil_bridge_runtime .start_user_service (normalized_service_name )
         elif needs_restart :
+            hil_bridge_runtime .clear_card_relay_state ()
             hil_bridge_runtime .restart_user_service (normalized_service_name )
         return hil_bridge_runtime .wait_for_bridge_ready ()
     except Exception :
         if active_before ==False :
             _stop_hil_bridge_service_quietly (normalized_service_name )
-        raise
+        raise 
 
 
 def _stop_hil_bridge_from_attached_view (service_name :str ,reason_text :str )->None :
@@ -1429,18 +1435,8 @@ def _start_hil_bridge_session (view_mode :str ="")->None :
     active_before =str (service_state .get ("activeState","")or "").strip ()=="active"
     active_gsmtap_enabled =_hil_bridge_command_uses_gsmtap (supervisor_state .get ("bridgeCommand",[]))
     active_capture_path =_hil_bridge_command_capture_path (supervisor_state .get ("bridgeCommand",[]))
-    needs_restart =(
-    active_before
-    and (
-    (
-    active_gsmtap_enabled is not None
-    and bool (active_gsmtap_enabled )!=bool (gsmtap_enabled )
-    )
-    or str (active_capture_path or "").strip ()!=str (requested_capture_path or "").strip ()
-    )
-    )
     try :
-        written_path =_ensure_hil_bridge_user_service (
+        written_path ,unit_changed =_ensure_hil_bridge_user_service (
         gsmtap_enabled =gsmtap_enabled ,
         gsmtap_capture_path =requested_capture_path ,
         )
@@ -1448,6 +1444,17 @@ def _start_hil_bridge_session (view_mode :str ="")->None :
         print (f"\n{Colors.FAIL}[!] Could not start HIL session: {e}{Colors.ENDC}")
         pause ()
         return
+    needs_restart =(
+    active_before
+    and (
+    unit_changed 
+    or (
+    active_gsmtap_enabled is not None 
+    and bool (active_gsmtap_enabled )!=bool (gsmtap_enabled )
+    )
+    or str (active_capture_path or "").strip ()!=str (requested_capture_path or "").strip ()
+    )
+    )
     if effective_view_mode ==_HIL_BRIDGE_VIEW_MODE_TERMSHARK and (active_before ==False or needs_restart ):
         warmup_seconds =_hil_bridge_termshark_warmup_seconds ()
 
@@ -1484,7 +1491,7 @@ def _start_hil_bridge_session (view_mode :str ="")->None :
         pause ()
         return
     if active_before and needs_restart :
-        print (f"\n{Colors.GREEN}[+] HIL session was restarted to apply the requested capture mode.{Colors.ENDC}")
+        print (f"\n{Colors.GREEN}[+] HIL session was restarted to apply the requested capture mode and env overrides.{Colors.ENDC}")
     elif active_before :
         print (f"\n{Colors.GREEN}[+] HIL session is already active.{Colors.ENDC}")
     else :

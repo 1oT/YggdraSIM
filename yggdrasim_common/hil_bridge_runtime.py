@@ -221,10 +221,62 @@ def install_user_service(
     *,
     home_dir: str = "",
 ) -> str:
+    written_path, _ = write_user_service_if_changed(
+        unit_text,
+        service_name=service_name,
+        home_dir=home_dir,
+    )
+    return written_path
+
+
+def write_user_service_if_changed(
+    unit_text: str,
+    *,
+    service_name: str = DEFAULT_SERVICE_NAME,
+    home_dir: str = "",
+) -> tuple[str, bool]:
+    """Write ``unit_text`` to the user systemd unit path; report whether it changed.
+
+    The on-disk content is compared byte-for-byte against ``unit_text``.
+    When they already match, the file is left untouched (preserving
+    mtime so ``systemctl --user daemon-reload`` keeps the existing
+    fragment) and the second tuple element is ``False``. When they
+    differ — or when the file does not yet exist — the new content is
+    written and the second tuple element is ``True``. The flag lets
+    the wizard decide between "no-op" and "restart so the new
+    Environment= block takes effect".
+    """
     target_path = Path(user_service_path(service_name=service_name, home_dir=home_dir))
     target_path.parent.mkdir(parents=True, exist_ok=True)
-    target_path.write_text(str(unit_text or ""), encoding="utf-8")
-    return str(target_path)
+    desired_text = str(unit_text or "")
+    existing_text = ""
+    if target_path.is_file():
+        try:
+            existing_text = target_path.read_text(encoding="utf-8")
+        except OSError:
+            existing_text = ""
+    if existing_text == desired_text:
+        return str(target_path), False
+    target_path.write_text(desired_text, encoding="utf-8")
+    return str(target_path), True
+
+
+def clear_card_relay_state() -> None:
+    """Remove the relay marker so :func:`wait_for_bridge_ready` cannot
+    latch onto a stale URL from a previous bridge generation.
+
+    Wizards that drive a stop+start (or daemon-reload + restart) over
+    the supervisor should clear the marker first; the new bridge child
+    publishes a fresh marker once it is fully up. Missing files are
+    tolerated quietly.
+    """
+    relay_path = card_relay_state_path()
+    try:
+        os.remove(relay_path)
+    except FileNotFoundError:
+        return
+    except OSError:
+        return
 
 
 def _systemctl_error_text(completed: subprocess.CompletedProcess[str]) -> str:

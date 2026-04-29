@@ -14,7 +14,7 @@ from datetime import datetime, timezone
 from threading import Event
 from typing import Any, Protocol
 
-from yggdrasim_common.card_backend import CARD_RELAY_MARKER_FILENAME
+from yggdrasim_common.card_backend import CARD_RELAY_MARKER_FILENAME, is_simulated_card_backend
 from yggdrasim_common.process_debug import add_debug_argument, set_global_debug
 from yggdrasim_common.quit_control import QuitAllRequested
 from yggdrasim_common.runtime_paths import ensure_runtime_dir, runtime_path
@@ -34,6 +34,8 @@ DEFAULT_REMSIM_USB_INTERFACE_ID = "0"
 DEFAULT_REMSIM_USB_ALTSETTING_ID = "0"
 SUPERVISOR_STATE_FILENAME = "hil_bridge_supervisor.json"
 REMSIM_USB_SELECTOR_FLAGS: tuple[str, ...] = ("-V", "-P", "-C", "-I", "-S", "-A", "-H")
+SIM_BACKEND_USB_SOURCE = "sim-backend"
+SIM_BACKEND_PRESENCE_LABEL = "simulated card backend (no USB hardware required)"
 _USB_BUS_DEVICE_PATTERN = re.compile(r"\bBus\s+(\d+)\s+Device\s+(\d+):", re.IGNORECASE)
 _USB_ID_VIDPID_PATTERN = re.compile(r"\bID\s+([0-9a-f]{4}):([0-9a-f]{4})\b", re.IGNORECASE)
 _USB_PLAIN_VIDPID_PATTERN = re.compile(r"\b([0-9a-f]{4}):([0-9a-f]{4})\b", re.IGNORECASE)
@@ -485,7 +487,13 @@ class HilBridgeSupervisor:
                 self.reconcile()
                 if self._stop_event.is_set():
                     break
-                self.usb_monitor.wait_for_change(self.config.poll_interval_seconds)
+                if self._sim_backend_active():
+                    # No USB hardware to monitor in sim mode; the
+                    # poll-interval sleep is the only thing keeping the
+                    # loop responsive to stop_event.
+                    time.sleep(max(0.1, float(self.config.poll_interval_seconds)))
+                else:
+                    self.usb_monitor.wait_for_change(self.config.poll_interval_seconds)
         finally:
             self._stop_remsim_child("supervisor shutdown")
             self._stop_bridge_child("supervisor shutdown")
@@ -496,8 +504,29 @@ class HilBridgeSupervisor:
             )
         return 0
 
+    def _sim_backend_active(self) -> bool:
+        # Sim mode is determined at reconcile time (not init time) so an
+        # operator who toggles ``YGGDRASIM_CARD_BACKEND`` between
+        # supervisor cycles via ``systemctl --user restart`` always
+        # gets the matching gate behaviour. The check is cheap and
+        # intentionally tolerates env / persisted settings out of sync.
+        try:
+            return bool(is_simulated_card_backend())
+        except Exception:  # noqa: BLE001 - card_backend resolver should never break the supervisor loop
+            return False
+
+    def _sim_backend_snapshot(self) -> UsbPresenceSnapshot:
+        return UsbPresenceSnapshot(
+            source=SIM_BACKEND_USB_SOURCE,
+            present=True,
+            matches=(SIM_BACKEND_PRESENCE_LABEL,),
+        )
+
     def reconcile(self) -> None:
         now = float(self.monotonic())
+        if self._sim_backend_active():
+            self._reconcile_sim_backend(now)
+            return
         snapshot = self.usb_monitor.snapshot()
         self._reconcile_child_exit(now)
         if self._bridge_is_running() is False and self._remsim_is_running():
@@ -575,6 +604,40 @@ class HilBridgeSupervisor:
             snapshot=snapshot,
             reason="SIMtrace2 hardware not detected.",
         )
+
+    def _reconcile_sim_backend(self, now: float) -> None:
+        snapshot = self._sim_backend_snapshot()
+        self._reconcile_child_exit(now)
+        if self._remsim_is_running():
+            # REMSIM client is meaningless without the SIMtrace2 USB
+            # path. If a previous reconcile spawned it (e.g. before the
+            # operator toggled the backend), tear it down quietly.
+            self._stop_remsim_child("simulated card backend; REMSIM client not required")
+
+        if self._bridge_is_running():
+            self._write_state(
+                status="running",
+                snapshot=snapshot,
+                reason="Simulated card backend; bridge child is active. USB and REMSIM gates bypassed.",
+            )
+            return
+
+        if now < self._next_start_not_before:
+            remaining = max(0.0, self._next_start_not_before - now)
+            self._write_state(
+                status="restart-pending",
+                snapshot=snapshot,
+                reason=f"Waiting {remaining:.1f}s before bridge restart (simulated card backend).",
+            )
+            return
+
+        self._start_bridge_child(snapshot)
+        if self._bridge_is_running():
+            self._write_state(
+                status="running",
+                snapshot=snapshot,
+                reason="Simulated card backend; bridge child started without USB or REMSIM gates.",
+            )
 
     def _start_bridge_child(self, snapshot: UsbPresenceSnapshot) -> None:
         self._cleanup_stale_bridge_marker()
@@ -904,10 +967,13 @@ class HilBridgeSupervisor:
         state_dir = os.path.dirname(state_path)
         if len(state_dir) > 0:
             os.makedirs(state_dir, exist_ok=True)
+        sim_backend = self._sim_backend_active()
+        remsim_command_active = self.config.remsim_client.enabled and sim_backend is False
         payload = {
             "status": str(status),
             "reason": str(reason),
             "updatedAt": _utc_timestamp(),
+            "cardBackendGate": "sim" if sim_backend else "reader",
             "usbPresent": bool(snapshot.present),
             "usbSource": str(snapshot.source),
             "usbMatches": list(snapshot.matches),
@@ -916,10 +982,10 @@ class HilBridgeSupervisor:
             "bridgePid": int(getattr(self._child, "pid", 0) or 0),
             "bridgeCommand": self._build_bridge_command(),
             "bridgePort": int(self.config.bridge.listen_port),
-            "remsimClientEnabled": bool(self.config.remsim_client.enabled),
+            "remsimClientEnabled": bool(self.config.remsim_client.enabled) and sim_backend is False,
             "remsimClientRunning": self._remsim_is_running(),
             "remsimClientPid": int(getattr(self._remsim_child, "pid", 0) or 0),
-            "remsimClientCommand": self._build_remsim_command(snapshot=snapshot) if self.config.remsim_client.enabled else [],
+            "remsimClientCommand": self._build_remsim_command(snapshot=snapshot) if remsim_command_active else [],
             "remsimClientHost": self._remsim_host(),
             "remsimClientPort": self._remsim_port(),
             "readerIndex": int(self.config.bridge.reader_index),
