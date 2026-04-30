@@ -275,22 +275,40 @@ The bridge log should also print the relay URL:
 Card relay available at http://127.0.0.1:45007/apdu
 ```
 
-### 4.1 Sim-backend launches without SIMtrace2 hardware
+### 4.1 Sim-backend interaction with SIMtrace2 / REMSIM
 
-When `YGGDRASIM_CARD_BACKEND=sim` is set (via the `[C] Card backend`
-menu, the env-flags wizard, or an explicit `Environment=` override),
-the supervisor:
+`YGGDRASIM_CARD_BACKEND` only changes which card the bridge talks to.
+It does **not** disable the modem-in-the-loop path. The supervisor
+keeps two independent gates:
 
-- skips the SIMtrace2 USB-presence gate and launches the bridge child
-  immediately. The supervisor JSON reports `cardBackendGate: sim`,
-  `usbSource: sim-backend`, and `usbPresent: true` with a synthetic
-  `usbMatches` entry that documents the bypass.
-- refuses to spawn `osmo-remsim-client-st2`. Sim mode has no
-  USB-attached modem path, so REMSIM is irrelevant; the JSON reports
-  `remsimClientEnabled: false` and `remsimClientCommand: []` for the
-  duration of sim-mode operation.
+| Card backend | SIMtrace2 USB | Bridge child | REMSIM client |
+|--------------|---------------|--------------|---------------|
+| reader       | present       | running      | running       |
+| reader       | absent        | down (`waiting-usb`) | down  |
+| sim          | present       | running      | running (modem-in-loop sim) |
+| sim          | absent        | running (relay-only sim) | down |
 
-Toggling between `reader` and `sim` between sessions is now
+Practical consequences:
+
+- Sim mode with the SIMtrace2 cable still attached behaves exactly
+  like reader mode from the modem's point of view — REMSIM stays
+  alive so the modem keeps getting answers from the bridge — except
+  the bridge serves APDUs from the simulator instead of the PC/SC
+  reader.
+- Sim mode without SIMtrace2 attached still serves the YggdraSIM-side
+  HTTP relay (`apduUrl`, `statusUrl`, `modemRefreshUrl`); REMSIM is
+  intentionally absent because there is nothing for it to connect
+  to.
+- Yanking the SIMtrace2 cable while sim mode is active drops REMSIM
+  but leaves the bridge running. Plugging it back in spawns REMSIM
+  again on the next reconcile pass.
+
+The supervisor JSON reports the new `cardBackendGate` field
+(`reader` or `sim`) so operators can see at a glance which gating
+matrix is in effect, alongside the regular `usbPresent`,
+`bridgeRunning`, and `remsimClientRunning` flags.
+
+Toggling between `reader` and `sim` between sessions is
 non-destructive: the wizard rewrites the user unit only when the
 generated content actually changes, runs `daemon-reload` only on a
 change, clears the previous run's relay marker, and triggers a real
