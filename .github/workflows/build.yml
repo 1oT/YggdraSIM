@@ -184,6 +184,12 @@ jobs:
 
       - name: Build arm64 bundle inside Debian container
         shell: bash
+        # ``python3-dev`` is required for the ``pyscard`` C extension build
+        # (it pulls in ``Python.h``); ``git`` is required by pip when an
+        # extra resolves to a ``git+https://`` source. The clean flavor does
+        # not currently consume ``saip`` (which uses git+), but the clean
+        # ``[build,test]`` extras keep us future-proof against transitive
+        # changes.
         run: |
           mkdir -p dist
           docker run --rm --platform linux/arm64 \
@@ -193,8 +199,8 @@ jobs:
               set -eux
               apt-get update
               DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-                python3 python3-pip python3-venv \
-                libpcsclite-dev pcscd swig pkg-config gpg \
+                python3 python3-pip python3-venv python3-dev \
+                libpcsclite-dev pcscd swig pkg-config gpg git \
                 build-essential
               python3 -m venv /opt/venv
               . /opt/venv/bin/activate
@@ -235,6 +241,9 @@ jobs:
 
       - name: Build arm64 full bundle inside Debian container
         shell: bash
+        # The ``full`` extra resolves ``pySim`` from a ``git+https://``
+        # source, so ``git`` must be present in the container. ``python3-dev``
+        # supplies ``Python.h`` for the ``pyscard`` C extension build.
         run: |
           mkdir -p dist
           docker run --rm --platform linux/arm64 \
@@ -244,8 +253,8 @@ jobs:
               set -eux
               apt-get update
               DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-                python3 python3-pip python3-venv \
-                libpcsclite-dev pcscd swig pkg-config gpg \
+                python3 python3-pip python3-venv python3-dev \
+                libpcsclite-dev pcscd swig pkg-config gpg git \
                 libudev-dev build-essential
               python3 -m venv /opt/venv
               . /opt/venv/bin/activate

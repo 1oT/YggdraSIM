@@ -10,6 +10,8 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
+import pytest
+
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec
@@ -24,7 +26,15 @@ from SCP11.eim_local.eim_package_codec import (
 )
 from SCP11.eim_local.config import EimLocalConfig
 from SCP11.eim_local.models import EimHandoverContext, ensure_handover_transaction
-from plugins.polling.wifi_ethernet_bridge import LocalizedPollingBridge
+# ``plugins.polling`` is bundled with the full source tree but stripped
+# release flavours (the v1.0.0 freeze, packaged ``clean`` distributions)
+# omit it. ``importorskip`` skips this entire file when the namespace is
+# absent so pytest collection no longer fails on those trees.
+_polling_bridge_module = pytest.importorskip(
+    "plugins.polling.wifi_ethernet_bridge",
+    reason="plugins.polling.wifi_ethernet_bridge unavailable in this build flavour",
+)
+LocalizedPollingBridge = _polling_bridge_module.LocalizedPollingBridge
 from SCP11.eim_local.session import EimLocalSession
 from SCP11.eim_local.main import EimLocalShell
 from SCP11.eim_packages import TYPE_PROFILE_DOWNLOAD_TRIGGER, parse_eim_package

@@ -13,17 +13,30 @@ Notes:
 ## Repository Root
 
 - [`AUTHORS`](sources/AUTHORS/index.md)
+- [`CHANGELOG.md`](sources/CHANGELOG.md)
+- [`CODE_OF_CONDUCT.md`](sources/CODE_OF_CONDUCT.md)
+- [`CONTRIBUTING.md`](sources/CONTRIBUTING.md)
 - [`LICENSE`](sources/LICENSE/index.md)
+- [`NEW_FEATURE_IDEAS.md`](sources/NEW_FEATURE_IDEAS.md)
 - [`NOTICE`](sources/NOTICE/index.md)
 - [`README.md`](sources/README.md)
+- [`SECURITY.md`](sources/SECURITY.md)
+- [`SIMCARD_V1_REVIEW.md`](sources/SIMCARD_V1_REVIEW.md)
+- [`V1_FEATURE_PLAN.md`](sources/V1_FEATURE_PLAN.md)
+- [`V1_RELEASE_AUDIT.md`](sources/V1_RELEASE_AUDIT.md)
+- [`V2_ROADMAP.md`](sources/V2_ROADMAP.md)
+- [`V2_UNIVERSAL_GUI_PLAN.md`](sources/V2_UNIVERSAL_GUI_PLAN.md)
 
 ## Authored Guides
 
 - [`guides/ARCHITECTURE.md`](sources/guides/ARCHITECTURE.md)
 - [`guides/BUILD_AND_PACKAGING.md`](sources/guides/BUILD_AND_PACKAGING.md)
 - [`guides/CAPABILITIES.md`](sources/guides/CAPABILITIES.md)
+- [`guides/CARD_BRIDGE_GUIDE.md`](sources/guides/CARD_BRIDGE_GUIDE.md)
 - [`guides/CLI_AND_PIPING_GUIDE.md`](sources/guides/CLI_AND_PIPING_GUIDE.md)
+- [`guides/CONFIGURATION_AND_CERTIFICATES.md`](sources/guides/CONFIGURATION_AND_CERTIFICATES.md)
 - [`guides/DIAGNOSTICS_TOOLBOX.md`](sources/guides/DIAGNOSTICS_TOOLBOX.md)
+- [`guides/GUI_HOST_SHELL_GUIDE.md`](sources/guides/GUI_HOST_SHELL_GUIDE.md)
 - [`guides/HIL_BRIDGE_GUIDE.md`](sources/guides/HIL_BRIDGE_GUIDE.md)
 - [`guides/INSTALL_CLEAN.md`](sources/guides/INSTALL_CLEAN.md)
 - [`guides/INSTALL_FROM_SOURCE.md`](sources/guides/INSTALL_FROM_SOURCE.md)
@@ -56,6 +69,7 @@ Notes:
 - [`SCP11/relay/README.md`](sources/SCP11/relay/README.md)
 - [`SCP11/shared/README.md`](sources/SCP11/shared/README.md)
 - [`SCP11/test/README.md`](sources/SCP11/test/README.md)
+- [`SCP11/TEST_MATERIAL_NOTICE.md`](sources/SCP11/TEST_MATERIAL_NOTICE.md)
 
 ## Plugins
 
@@ -63,6 +77,7 @@ Notes:
 
 ## Scripts
 
+- [`scripts/demos/README.md`](sources/scripts/demos/README.md)
 - [`scripts/install/README.md`](sources/scripts/install/README.md)
 
 ## Test And Harness Docs
@@ -70,7 +85,11 @@ Notes:
 - [`tests/eim-sh/EIM_ESIPA_ASN1_REFERENCE.md`](sources/tests/eim-sh/EIM_ESIPA_ASN1_REFERENCE.md)
 - [`tests/eim-sh/EIM_POLL_SEQUENCE.md`](sources/tests/eim-sh/EIM_POLL_SEQUENCE.md)
 - [`tests/eim-sh/README_venv.md`](sources/tests/eim-sh/README_venv.md)
+- [`tests/live_scp03/README.md`](sources/tests/live_scp03/README.md)
 
 ## Reports
 
 - [`reports/eim_simulator_readiness_handoff_2026-03-19.md`](sources/reports/eim_simulator_readiness_handoff_2026-03-19.md)
+- [`reports/scp03_live_run_20260427T063631Z.md`](sources/reports/scp03_live_run_20260427T063631Z.md)
+- [`reports/scp03_live_run_reader_20260427T064431Z.md`](sources/reports/scp03_live_run_reader_20260427T064431Z.md)
+- [`reports/scp03_live_run_reader_20260427T064516Z.md`](sources/reports/scp03_live_run_reader_20260427T064516Z.md)

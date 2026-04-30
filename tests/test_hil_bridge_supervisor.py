@@ -416,15 +416,20 @@ class HilBridgeSupervisorTests(unittest.TestCase):
         self.assertEqual(bridge_command[:3], [config.bridge_python, "-m", "Tools.HilBridge.main"])
         self.assertEqual(state_payload["status"], "running")
         self.assertEqual(state_payload["cardBackendGate"], "sim")
-        self.assertTrue(bool(state_payload["usbPresent"]))
-        self.assertEqual(state_payload["usbSource"], "sim-backend")
+        self.assertFalse(bool(state_payload["usbPresent"]))
+        self.assertEqual(state_payload["usbSource"], "lsusb")
         self.assertTrue(bool(state_payload["bridgeRunning"]))
         self.assertEqual(state_payload["bridgePid"], 9100)
         self.assertFalse(bool(state_payload["remsimClientRunning"]))
-        self.assertFalse(bool(state_payload["remsimClientEnabled"]))
-        self.assertEqual(state_payload["remsimClientCommand"], [])
+        self.assertTrue(bool(state_payload["remsimClientEnabled"]))
+        self.assertIn("Simulated card backend", state_payload["reason"])
 
-    def test_supervisor_tears_down_remsim_when_backend_toggles_to_sim(self) -> None:
+    def test_supervisor_keeps_remsim_running_when_backend_toggles_to_sim_with_usb_present(self) -> None:
+        # Modem-in-the-loop sim mode: SIMtrace2 cable is plugged in
+        # and the operator picks the simulated card. The bridge swaps
+        # to the simulator behind the scenes, but the REMSIM client
+        # MUST stay alive so the modem keeps getting answers from the
+        # bridge.
         monitor = _MutableUsbMonitor(
             UsbPresenceSnapshot(
                 source="lsusb",
@@ -433,7 +438,6 @@ class HilBridgeSupervisorTests(unittest.TestCase):
             )
         )
         spawned: list[_FakeChildProcess] = []
-        signal_calls: list[tuple[int, int]] = []
 
         def popen_factory(command: list[str], **kwargs):
             del command
@@ -463,7 +467,7 @@ class HilBridgeSupervisorTests(unittest.TestCase):
                     HilBridgeSupervisor,
                     "_signal_child_process_group",
                     autospec=True,
-                    side_effect=lambda self, pid, signal_number: signal_calls.append((pid, signal_number)) or True,
+                    return_value=True,
                 ):
                     supervisor.reconcile()
                     self.assertEqual(len(spawned), 2)
@@ -479,10 +483,71 @@ class HilBridgeSupervisorTests(unittest.TestCase):
                         supervisor.reconcile()
                         state_payload = json.loads(state_path.read_text(encoding="utf-8"))
 
-        self.assertIn((remsim_process.pid, signal.SIGTERM), signal_calls)
+        self.assertEqual(len(spawned), 2)
         self.assertEqual(state_payload["cardBackendGate"], "sim")
-        self.assertFalse(bool(state_payload["remsimClientRunning"]))
         self.assertTrue(bool(state_payload["bridgeRunning"]))
+        self.assertTrue(bool(state_payload["remsimClientRunning"]))
+        self.assertTrue(bool(state_payload["remsimClientEnabled"]))
+        self.assertTrue(bool(state_payload["usbPresent"]))
+
+    def test_supervisor_drops_remsim_in_sim_mode_when_usb_disappears_but_keeps_bridge(self) -> None:
+        # Cable yank in sim mode: bridge keeps serving the simulator
+        # to the YggdraSIM-side relay (no modem on the bus right now)
+        # but REMSIM is shut down because there is no SIMtrace2 to
+        # attach to.
+        monitor = _MutableUsbMonitor(
+            UsbPresenceSnapshot(
+                source="lsusb",
+                present=True,
+                matches=("Bus 001 Device 010: ID 1d50:60e3 sysmocom SIMtrace 2",),
+            )
+        )
+        spawned: list[_FakeChildProcess] = []
+        signal_calls: list[tuple[int, int]] = []
+
+        def popen_factory(command: list[str], **kwargs):
+            del command
+            del kwargs
+            process = _FakeChildProcess(pid=9500 + len(spawned))
+            spawned.append(process)
+            return process
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            state_path = Path(temp_dir) / "state" / "hil_bridge_supervisor.json"
+            config = HilBridgeSupervisorConfig(
+                bridge=BridgeConfig(reader_index=0, listen_port=9997),
+                state_path=str(state_path),
+            )
+            supervisor = HilBridgeSupervisor(
+                config=config,
+                usb_monitor=monitor,
+                popen_factory=popen_factory,
+                monotonic=lambda: 50.0,
+            )
+            with mock.patch.dict(
+                os.environ,
+                {"YGGDRASIM_RUNTIME_ROOT": temp_dir, "YGGDRASIM_CARD_BACKEND": "sim"},
+                clear=False,
+            ):
+                with mock.patch.object(
+                    HilBridgeSupervisor,
+                    "_signal_child_process_group",
+                    autospec=True,
+                    side_effect=lambda self, pid, signal_number: signal_calls.append((pid, signal_number)) or True,
+                ):
+                    supervisor.reconcile()
+                    self.assertEqual(len(spawned), 2)
+                    bridge_process, remsim_process = spawned
+
+                    monitor.snapshot_value = UsbPresenceSnapshot(source="lsusb", present=False)
+                    supervisor.reconcile()
+                    state_payload = json.loads(state_path.read_text(encoding="utf-8"))
+
+        self.assertIn((remsim_process.pid, signal.SIGTERM), signal_calls)
+        self.assertNotIn((bridge_process.pid, signal.SIGTERM), signal_calls)
+        self.assertTrue(bool(state_payload["bridgeRunning"]))
+        self.assertFalse(bool(state_payload["remsimClientRunning"]))
+        self.assertEqual(state_payload["cardBackendGate"], "sim")
 
     def test_supervisor_forces_group_kill_when_bridge_child_does_not_exit(self) -> None:
         monitor = _MutableUsbMonitor(UsbPresenceSnapshot(source="lsusb", present=False))

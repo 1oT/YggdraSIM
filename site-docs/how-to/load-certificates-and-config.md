@@ -18,7 +18,7 @@ without touching any in-tree starter material.
 
 This page is the **task-driven mirror** of the canonical operator
 guide
-[`guides/CONFIGURATION_AND_CERTIFICATES.md`](../../guides/CONFIGURATION_AND_CERTIFICATES.md)
+[`guides/CONFIGURATION_AND_CERTIFICATES.md`](../sources/guides/CONFIGURATION_AND_CERTIFICATES.md)
 at the repository root. The schemas, sidecar shapes, fallback rules,
 and selection orders are normative there; this page picks the most
 common flows and walks through them as numbered recipes.
@@ -305,7 +305,7 @@ search.
 
 ## Recipe 8: Seed a YggdraCore subscription
 
-> **Status: R2-005, post-v1.0.0 staging.** Tracked in [V2_ROADMAP.md](../../V2_ROADMAP.md). The v1.0.0 frozen tree (tag `v1.0.0`) does not include this surface.
+> **Status: R2-005, post-v1.0.0 staging.** Tracked in [V2_ROADMAP.md](../sources/V2_ROADMAP.md). The v1.0.0 frozen tree (tag `v1.0.0`) does not include this surface.
 
 The in-process AUSF / AAnF stub holds subscribers in memory only.
 There is no on-disk format.
@@ -480,7 +480,7 @@ For each recipe above, the canonical "did it stick?" probes are:
 
 ## Related documentation
 
-- [Configuration and Certificates (canonical operator guide)](../../guides/CONFIGURATION_AND_CERTIFICATES.md)
+- [Configuration and Certificates (canonical operator guide)](../sources/guides/CONFIGURATION_AND_CERTIFICATES.md)
 - [Enable Inventory Encryption](enable-inventory-encryption.md)
 - [Download a Profile (Local Access)](download-a-profile-local.md)
 - [Diagnostics Toolbox](diagnostics-toolbox.md)

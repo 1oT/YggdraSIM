@@ -279,6 +279,27 @@ def clear_card_relay_state() -> None:
         return
 
 
+def clear_supervisor_state() -> None:
+    """Remove the supervisor state file so :func:`wait_for_bridge_ready`
+    cannot latch onto a stale ``reason`` from a previous run.
+
+    The supervisor publishes its current ``status`` and ``reason``
+    fields here as the reconcile loop progresses. When a previous
+    invocation crashed mid-warm-up the file is left on disk with a
+    transient ``restart-pending`` reason like
+    ``Waiting 1.0s before bridge restart…``. Without this clear, the
+    next start of the wizard would surface that stale reason as if it
+    were a fresh failure. Missing files are tolerated quietly.
+    """
+    state_path = supervisor_state_path()
+    try:
+        os.remove(state_path)
+    except FileNotFoundError:
+        return
+    except OSError:
+        return
+
+
 def _systemctl_error_text(completed: subprocess.CompletedProcess[str]) -> str:
     stderr_text = str(completed.stderr or "").strip()
     if len(stderr_text) > 0:
@@ -461,7 +482,11 @@ def wait_for_bridge_ready(
     poll_interval_seconds: float = DEFAULT_BRIDGE_READY_POLL_SECONDS,
 ) -> dict[str, Any]:
     deadline = time.monotonic() + max(0.5, float(timeout_seconds or DEFAULT_BRIDGE_READY_TIMEOUT_SECONDS))
-    last_error_text = ""
+    last_relay_error_text = ""
+    last_status_text = ""
+    last_reason_text = ""
+    crash_observed = False
+    relay_url_observed = False
     # Readiness is an indeterminate poll loop — supervisor boot time
     # depends on USB detection, systemd warm-up, and the remsim
     # client init. The sticky footer gives operators a visible
@@ -473,19 +498,82 @@ def wait_for_bridge_ready(
             relay_state = read_card_relay_state()
             status_url = str(relay_state.get("statusUrl", "") or "").strip()
             if len(status_url) > 0:
+                relay_url_observed = True
                 bar.set_status("probing relay status endpoint")
                 try:
                     payload = _request_json(status_url, method="GET")
                 except Exception as exc:
-                    last_error_text = str(exc)
+                    last_relay_error_text = str(exc)
                 else:
                     return payload
             supervisor_state = read_supervisor_state()
+            status_text = str(supervisor_state.get("status", "") or "").strip()
             reason_text = str(supervisor_state.get("reason", "") or "").strip()
+            if len(status_text) > 0:
+                last_status_text = status_text
             if len(reason_text) > 0:
-                last_error_text = reason_text
+                last_reason_text = reason_text
                 bar.set_status(f"supervisor: {reason_text[:48]}")
+            if status_text in ("restart-pending", "start-failed"):
+                crash_observed = True
             time.sleep(max(0.05, float(poll_interval_seconds or DEFAULT_BRIDGE_READY_POLL_SECONDS)))
-    if len(last_error_text) == 0:
-        last_error_text = "Timed out waiting for HIL bridge relay readiness."
-    raise RuntimeError(last_error_text)
+    raise RuntimeError(_compose_bridge_ready_failure(
+        status_text=last_status_text,
+        reason_text=last_reason_text,
+        relay_error_text=last_relay_error_text,
+        relay_url_observed=relay_url_observed,
+        crash_observed=crash_observed,
+    ))
+
+
+def _compose_bridge_ready_failure(
+    *,
+    status_text: str,
+    reason_text: str,
+    relay_error_text: str,
+    relay_url_observed: bool,
+    crash_observed: bool,
+) -> str:
+    """Compose an actionable error message for ``wait_for_bridge_ready``.
+
+    The supervisor publishes a ``status`` field (``running``,
+    ``restart-pending``, ``start-failed``, ``usb-detect-error`` …) and
+    a free-form ``reason``. Surfacing the raw ``reason`` on timeout —
+    as the previous implementation did — was misleading because a
+    transient ``restart-pending`` reason like
+    ``Waiting 1.0s before bridge restart (simulated card backend).``
+    looks like a non-fatal hint but is actually the symptom of a
+    bridge child that keeps crashing within the warm-up window. This
+    helper distinguishes those cases and points operators at the
+    user-journal trace for the actual bridge-child failure.
+    """
+    journal_hint = (
+        f"Run `journalctl --user -u {DEFAULT_SERVICE_NAME} "
+        '--since "5 min ago" --no-pager | tail -n 80` for the bridge child traceback.'
+    )
+    if status_text == "start-failed":
+        if len(reason_text) > 0:
+            return f"HIL bridge could not start: {reason_text}. {journal_hint}"
+        return f"HIL bridge could not start. {journal_hint}"
+    if status_text == "usb-detect-error":
+        if len(reason_text) > 0:
+            return f"HIL bridge USB detection failed: {reason_text}. {journal_hint}"
+        return f"HIL bridge USB detection failed. {journal_hint}"
+    if crash_observed:
+        return (
+            "HIL bridge child crashed during warm-up and the supervisor "
+            f"entered a restart-backoff loop. {journal_hint}"
+        )
+    if relay_url_observed and len(relay_error_text) > 0:
+        return (
+            "HIL bridge relay endpoint did not become reachable within "
+            f"the warm-up window: {relay_error_text}. {journal_hint}"
+        )
+    if len(relay_error_text) > 0:
+        return f"HIL bridge warm-up timeout: {relay_error_text}. {journal_hint}"
+    if len(reason_text) > 0:
+        return (
+            f"Timed out waiting for HIL bridge relay readiness. "
+            f"Last supervisor state: {reason_text}. {journal_hint}"
+        )
+    return f"Timed out waiting for HIL bridge relay readiness. {journal_hint}"

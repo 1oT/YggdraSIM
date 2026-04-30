@@ -1079,6 +1079,36 @@ def _prompt_hil_bridge_view_mode ()->str :
         pause ()
 
 
+def _resolve_supervisor_quirks_env ()->tuple [str ,str ]:
+    """Resolve the ``(YGGDRASIM_SIM_QUIRKS, YGGDRASIM_ALLOW_QUIRKS)`` pair
+    that should be propagated to the HIL bridge supervisor unit.
+
+    The bridge child enforces the same ``YGGDRASIM_ALLOW_QUIRKS`` gate
+    as every other simulator entry point (``SIMCARD/quirks.py``).
+    Without an explicit opt-in, ``load_quirk_registry`` raises
+    ``PermissionError`` whenever a quirks file is resolvable on disk —
+    which crashes the supervisor child immediately and traps the
+    wizard in a restart-backoff loop. We therefore mirror the
+    launcher's quirks env state into the unit:
+
+    * If the launcher has ``YGGDRASIM_ALLOW_QUIRKS=<value>`` exported,
+      forward both that value and the resolved quirks path so the
+      supervisor honours the operator's existing decision.
+    * If the launcher does not have the gate set, deliberately fall
+      back to ``YGGDRASIM_SIM_QUIRKS=none`` so the bridge child boots
+      with an empty quirks registry instead of crash-looping. This
+      keeps the supervisor safe-by-default — operators who want
+      quirks in the supervisor must opt in just like everywhere else.
+    """
+    allow_value =str (os .environ .get ("YGGDRASIM_ALLOW_QUIRKS","")or "").strip ()
+    quirks_path =get_sim_quirks_path ()
+    if len (allow_value )>0 :
+        return (quirks_path ,allow_value )
+    if len (quirks_path )==0 :
+        return ("","")
+    return ("none","")
+
+
 def _build_hil_bridge_service_options (
     gsmtap_enabled :bool =True ,
     gsmtap_capture_path :str ="",
@@ -1102,13 +1132,16 @@ def _build_hil_bridge_service_options (
         bridge_port =9997 
     remsim_args =hil_bridge_runtime .extract_remsim_extra_args_from_supervisor_state (supervisor_state )
     documentation_path =os .path .join (PROJECT_ROOT ,"guides","HIL_BRIDGE_GUIDE.md")
+    quirks_env_value ,allow_quirks_env_value =_resolve_supervisor_quirks_env ()
     environment_overrides =[
     (CARD_BACKEND_ENV ,get_card_backend ()),
     (SIM_ISDR_CONFIG_ENV ,get_sim_isdr_config_path ()),
-    (SIM_QUIRKS_ENV ,get_sim_quirks_path ()),
+    (SIM_QUIRKS_ENV ,quirks_env_value ),
     (SIM_EIM_IDENTITY_ENV ,get_sim_eim_identity_path ()),
     (SIM_EUICC_STORE_ENV ,get_sim_euicc_store_root ()),
     ]
+    if len (allow_quirks_env_value )>0 :
+        environment_overrides .append (("YGGDRASIM_ALLOW_QUIRKS",allow_quirks_env_value ))
     current_profile_store_override =get_sim_profile_store_path ()
     if len (current_profile_store_override )>0 :
         environment_overrides .append ((SIM_PROFILE_STORE_ENV ,current_profile_store_override ))
@@ -1209,9 +1242,11 @@ def _activate_hil_bridge_service (
     normalized_service_name =str (service_name or hil_bridge_runtime .DEFAULT_SERVICE_NAME )
     try :
         if active_before ==False :
+            hil_bridge_runtime .clear_supervisor_state ()
             hil_bridge_runtime .clear_card_relay_state ()
             hil_bridge_runtime .start_user_service (normalized_service_name )
         elif needs_restart :
+            hil_bridge_runtime .clear_supervisor_state ()
             hil_bridge_runtime .clear_card_relay_state ()
             hil_bridge_runtime .restart_user_service (normalized_service_name )
         return hil_bridge_runtime .wait_for_bridge_ready ()
