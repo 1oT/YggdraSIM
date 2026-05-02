@@ -1,0 +1,110 @@
+name: Feature request
+description: Propose new behaviour, a new tool, a new wizard step, a new APDU surface, or a new GSMA / GlobalPlatform / 3GPP feature for YggdraSIM.
+title: "[feat] <short, specific summary>"
+labels: ["type:feature", "needs-approval"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ### Before you submit
+        - Features **must** be approved by a maintainer before a pull
+          request referencing them will be accepted. Unapproved PRs are
+          closed automatically -- see `.github/SECURITY_CONTROLS.md`.
+        - Changes that alter cryptographic primitives, SCP03/11 state
+          machines, eUICC profile formats or supply-chain surface area
+          require a written specification reference.
+
+  - type: dropdown
+    id: scope
+    attributes:
+      label: Scope
+      multiple: true
+      options:
+        - SCP03 shell / wizards
+        - SCP11 console
+        - SCP11 eim_local
+        - SCP11 local_access
+        - SCP11 live
+        - SIMCARD engine / NAA / profile store
+        - SAIP profile tooling
+        - HIL bridge
+        - Device inventory / envelope encryption
+        - Docs (mkdocs / guides / offline mirror)
+        - Installers / packaging / CI
+        - Other (describe below)
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem statement
+      description: What is the gap, risk, or workflow cost today? Who is affected?
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behaviour
+      description: |
+        Describe the desired behaviour precisely. Include CLI flags,
+        wizard prompts, APDU sequences, default values, and any new
+        environment variables or files you expect.
+    validations:
+      required: true
+
+  - type: textarea
+    id: spec_refs
+    attributes:
+      label: Specification references (required for crypto / state-machine / profile work)
+      description: |
+        GSMA SGP.02 / SGP.22 / SGP.32 section, GlobalPlatform Card
+        Specification v2.3 section, ETSI TS 102 221, 3GPP TS 31.102 /
+        TS 33.102, ISO 7816-4, etc.
+      placeholder: |
+        - GSMA SGP.22 v3.0, §5.6.3
+        - GlobalPlatform Card Specification v2.3, §E.5.2.3
+    validations:
+      required: false
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Workarounds, other designs, third-party tools. Why are they insufficient?
+    validations:
+      required: false
+
+  - type: textarea
+    id: compat
+    attributes:
+      label: Backwards compatibility and migration
+      description: |
+        Will existing workspaces, inventory stores, SCP sessions, profile
+        packages, or CI workflows need changes? Describe migration.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: risk
+    attributes:
+      label: Security/compliance sensitivity
+      options:
+        - High -- touches cryptography, secret storage, or TLS / pinning
+        - Medium -- touches APDU dispatch, SCP session state, or profile state
+        - Low -- docs / packaging / UI only
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: pre_submit
+    attributes:
+      label: Pre-submission checklist
+      options:
+        - label: I searched existing issues and this is not a duplicate.
+          required: true
+        - label: I have provided a concrete specification reference OR this change is doc/packaging/UI only.
+          required: true
+        - label: I understand this feature must be approved by a maintainer before any linked PR will be accepted.
+          required: true

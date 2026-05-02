@@ -1,0 +1,5 @@
+# Legacy alias for SCP03-SD. Authenticates to the AID configured in
+# Workspace/SCP03/keys.ini (default A000000151000000) using the SCP03 keyset
+# and prints "[+] SCP03 Authenticated (Level 0x33, KVN 0x30)".
+AUTH-SD
+EXIT

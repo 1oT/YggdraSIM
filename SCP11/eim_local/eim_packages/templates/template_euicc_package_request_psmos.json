@@ -1,0 +1,31 @@
+{
+  "package_type": "euicc_package_request_psmos",
+  "package_version": "2.0.0",
+  "spec_target": "SGP.32 eIM Package Request / EuiccPackageRequest Containing PSMOs",
+  "sgp32": {
+    "euicc_package_request": {
+      "include": true,
+      "choice": "euicc_package_request_containing_psmos",
+      "euicc_package_request_containing_psmos": {
+        "include": true,
+        "psmos": [
+          {
+            "include": true,
+            "description": "Example PSMO payload container",
+            "value_hex": ""
+          }
+        ],
+        "policy_reference": {
+          "include": false,
+          "value_hex": ""
+        }
+      }
+    }
+  },
+  "runtime": {
+    "matching_id": "EIM-PSMO-REQ",
+    "transaction_id_hex": ""
+  },
+  "additional_tlvs": [],
+  "optional_tags": {}
+}

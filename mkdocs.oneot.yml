@@ -1,0 +1,212 @@
+# --------------------------------------------------------------------------
+# mkdocs.oneot.yml
+# Second visual variant of the YggdraSIM docs. Shares the same source tree
+# (site-docs/) and navigation as mkdocs.yml, but swaps the Nord palette for
+# the 1oT brand system (mint/emerald primary, Manrope display, Inter body,
+# navy footer, white header) and writes to a separate output directory so
+# both variants can be previewed side-by-side.
+#
+# Serve locally:
+#     python -m mkdocs serve -f mkdocs.oneot.yml -a 127.0.0.1:8010
+# Build static output to site-oneot/:
+#     python -m mkdocs build -f mkdocs.oneot.yml
+# --------------------------------------------------------------------------
+
+site_name: YggdraSIM -- A 1oT OSS initiative
+site_description: Secure-element, eUICC, OTA, SCP11, HIL bridge, and SAIP toolkit documentation.
+site_author: Hampus Hellsberg
+site_url: https://1ot.github.io/YggdraSIM/oneot/
+repo_url: https://github.com/1oT/YggdraSIM
+repo_name: 1oT/YggdraSIM
+edit_uri: edit/main/site-docs/
+docs_dir: site-docs
+site_dir: site-oneot
+strict: true
+copyright: Copyright &copy; 2026 1oT OÜ. Authored by Hampus Hellsberg. Documentation released under the project license.
+
+extra_css:
+  - https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Manrope:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap
+  - assets/stylesheets/oneot.css
+
+extra_javascript:
+  - assets/javascripts/mermaid-zoom.js
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/1oT/YggdraSIM
+      name: YggdraSIM source repository
+  generator: false
+
+theme:
+  name: material
+  font: false
+  logo: assets/images/yggdrasil-mark.svg
+  favicon: assets/images/yggdrasil-mark.svg
+  icon:
+    repo: fontawesome/brands/github
+    edit: material/pencil
+    view: material/eye
+  features:
+    - navigation.tabs
+    - navigation.tabs.sticky
+    - navigation.sections
+    - navigation.top
+    - navigation.footer
+    - navigation.instant
+    - navigation.instant.progress
+    - navigation.indexes
+    - navigation.tracking
+    - toc.follow
+    - toc.integrate
+    - search.highlight
+    - search.suggest
+    - search.share
+    - content.code.copy
+    - content.code.annotate
+    - content.tabs.link
+    - content.action.edit
+    - content.action.view
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: custom
+      accent: custom
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: custom
+      accent: custom
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+
+plugins:
+  - search
+  - tags
+
+markdown_extensions:
+  - abbr
+  - admonition
+  - attr_list
+  - def_list
+  - footnotes
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+      permalink_title: Anchor link
+      toc_depth: 4
+  - pymdownx.caret
+  - pymdownx.tilde
+  - pymdownx.mark
+  - pymdownx.keys
+  - pymdownx.smartsymbols
+  - pymdownx.betterem
+  - pymdownx.tasklist:
+      custom_checkbox: true
+  - pymdownx.details
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+      use_pygments: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets:
+      base_path: .
+      check_paths: true
+      auto_append:
+        - site-docs/_includes/abbreviations.md
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
+  - pymdownx.magiclink:
+      repo_url_shorthand: true
+      user: 1oT
+      repo: YggdraSIM
+
+nav:
+  - Home: index.md
+  - Overview:
+      - Getting Started: getting-started.md
+      - Architecture: architecture.md
+      - Operator Surfaces: operator-surfaces.md
+      - Documentation Map: documentation-map.md
+  - Concepts:
+      - Overview: concepts/index.md
+      - Secure Element Primer: concepts/secure-element-primer.md
+      - GlobalPlatform: concepts/globalplatform.md
+      - ETSI UICC: concepts/etsi-uicc.md
+      - 3GPP NAA: concepts/3gpp-naa.md
+      - RSP Architecture: concepts/rsp-architecture.md
+      - SAIP Profiles: concepts/saip-profiles.md
+      - SCP80 OTA: concepts/ota-scp80.md
+      - HIL Model: concepts/hil-model.md
+  - Subsystems:
+      - Overview: subsystems/index.md
+      - SCP03 Admin Shell: subsystems/scp03.md
+      - SCP80 OTA Shell: subsystems/scp80.md
+      - SCP11 Live Relay: subsystems/scp11-live.md
+      - SCP11 Test Relay: subsystems/scp11-test.md
+      - SCP11 Local Access: subsystems/scp11-local-access.md
+      - SCP11 eIM Local: subsystems/scp11-eim-local.md
+      - Profile Package: subsystems/profile-package.md
+      - HIL Bridge: subsystems/hil-bridge.md
+      - SUCI Tool: subsystems/suci-tool.md
+      - SIMCARD Simulator: subsystems/simcard-simulator.md
+      - APDU Mutation Fuzzer: subsystems/apdu-fuzzer.md
+      - EUM Diagnostics: subsystems/eum-diagnostics.md
+  - How-To:
+      - Overview: how-to/index.md
+      - Download a Profile (Live Relay): how-to/download-a-profile-live.md
+      - Download a Profile (Local Access): how-to/download-a-profile-local.md
+      - Enable, Disable, Delete a Profile: how-to/enable-disable-delete-profile.md
+      - Inspect and Transcode SAIP: how-to/inspect-and-transcode-saip.md
+      - Run a HIL Capture: how-to/run-hil-capture.md
+      - Replay a HIL pcap offline: how-to/replay-hil-pcap-offline.md
+      - Enable Inventory Encryption: how-to/enable-inventory-encryption.md
+      - Write a Plugin: how-to/write-a-plugin.md
+      - Build a Bundled Executable: how-to/build-a-bundled-exe.md
+      - Run in Docker: how-to/run-in-docker.md
+      - Diagnostics Toolbox: how-to/diagnostics-toolbox.md
+  - Shell Guides:
+      - Overview: shell-guides/index.md
+      - Guide Topics: shell-guides/scp03-guide-topics.md
+      - Command Reference: shell-guides/scp03-command-reference.md
+  - Reference:
+      - Overview: reference/index.md
+      - Command Suite: reference/command-suite.md
+      - CLI And Piping Cheatsheet: reference/cli-and-piping-cheatsheet.md
+      - CLI Matrix: reference/cli-matrix.md
+      - State Schema: reference/state-schema.md
+      - Runtime Root: reference/runtime-root.md
+      - Standards Map: reference/standards-map.md
+      - Glossary: reference/glossary.md
+      - Troubleshooting: reference/troubleshooting.md
+      - FAQ: reference/faq.md
+      - Tags: reference/tags.md
+  - Internals:
+      - Overview: internals/index.md
+      - Registry and Launcher: internals/registry-and-launcher.md
+      - Plugin Contract: internals/plugin-contract.md
+      - Testing Guide: internals/testing-guide.md
+      - Coding Standards: internals/coding-standards.md
+      - Release Checklist: internals/release-checklist.md
+  - Source Library: source-library.md
+  - Build and Packaging: build-and-packaging.md
+  - About:
+      - Overview: about/index.md
+      - Authors and Attribution: about/authors.md
+      - License (GPL-3.0-or-later): about/license.md
+      - NOTICE: about/notice.md
+      - Contributing: about/contributing.md
+      - Consultancy and Contact: about/consultancy.md

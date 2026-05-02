@@ -1,0 +1,6 @@
+# Send a minimal raw STORE DATA payload after SD auth. The payload is a
+# harmless empty BF22 (ProfileInfoListRequest) tag with zero length, which
+# the simulator either acknowledges with 9000 or rejects with a defined SW.
+SCP03-SD
+STORE-DATA BF2200
+EXIT

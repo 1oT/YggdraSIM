@@ -1,0 +1,92 @@
+{
+  "package_type": "eim_package_request",
+  "package_version": "2.1.1",
+  "spec_target": "SGP.32 eIM Package Request (2.11.1) with all request CHOICE branches",
+  "sgp32": {
+    "eim_package_request": {
+      "include": true,
+      "choice": "euicc_package_request",
+      "euicc_package_request": {
+        "include": true,
+        "choice": "eim_configuration_data",
+        "eim_configuration_data": {
+          "include": true,
+          "rows": [
+            {
+              "include": true,
+              "eim_id": {
+                "include": true,
+                "value": "2.25.311782205282738360923618091971140414400"
+              },
+              "counter_value": {
+                "include": true,
+                "value_hex": "0000000000000001"
+              },
+              "supported_protocol": {
+                "include": true,
+                "value_hex": "0780"
+              }
+            }
+          ]
+        },
+        "euicc_package_request_containing_ecos": {
+          "include": false,
+          "ecos": [
+            {
+              "include": true,
+              "value_hex": ""
+            }
+          ]
+        },
+        "euicc_package_request_containing_psmos": {
+          "include": false,
+          "psmos": [
+            {
+              "include": true,
+              "value_hex": ""
+            }
+          ]
+        }
+      },
+      "ipa_euicc_data_request": {
+        "include": false,
+        "transaction_id": {
+          "include": true,
+          "value_hex": "0102030405060708090A0B0C0D0E0F10"
+        },
+        "request_payload": {
+          "include": true,
+          "value_hex": ""
+        }
+      },
+      "profile_download_trigger_request": {
+        "include": false,
+        "transaction_id": {
+          "include": true,
+          "value_hex": "0102030405060708090A0B0C0D0E0F10"
+        },
+        "matching_id": {
+          "include": true,
+          "value": "EIM-PROFILE-DOWNLOAD"
+        }
+      },
+      "eim_acknowledgements": {
+        "include": false,
+        "ack_rows": [
+          {
+            "include": true,
+            "transaction_id_hex": "0102030405060708090A0B0C0D0E0F10",
+            "status": "acknowledged",
+            "status_info_hex": ""
+          }
+        ]
+      }
+    }
+  },
+  "runtime": {
+    "matching_id": "EIM-PKG-REQ",
+    "transaction_id_hex": ""
+  },
+  "additional_tlvs": [],
+  "optional_tags": {}
+}

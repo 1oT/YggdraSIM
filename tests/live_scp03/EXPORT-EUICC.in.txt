@@ -1,0 +1,4 @@
+# Export the active eUICC YAML profile into the run report folder.
+SCP03-SD
+EXPORT-EUICC reports/scp03_live_run/euicc.yaml
+EXIT

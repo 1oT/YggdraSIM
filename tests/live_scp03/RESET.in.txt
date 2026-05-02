@@ -1,0 +1,3 @@
+# Reset the card connection (cold/warm reset) and re-read ATR.
+RESET
+EXIT

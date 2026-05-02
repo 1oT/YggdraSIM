@@ -1,0 +1,37 @@
+{
+  "package_type": "get_eim_package",
+  "package_version": "2.0.0",
+  "spec_target": "SGP.32 ESipa.GetEimPackageRequest (BF4F)",
+  "sgp32": {
+    "get_eim_package_request": {
+      "include": true,
+      "command_tag_hex": "BF4F",
+      "eid_value": {
+        "include": true,
+        "tag_hex": "5A",
+        "value_hex": "89049032000000000000000000000000"
+      },
+      "notify_state_change": {
+        "include": false
+      },
+      "state_change_cause": {
+        "include": false,
+        "value": "fallback"
+      },
+      "rplmn": {
+        "include": false,
+        "value_hex": ""
+      },
+      "eim_transaction_id": {
+        "include": false,
+        "value_hex": ""
+      }
+    }
+  },
+  "runtime": {
+    "matching_id": "EIM-IPAD-DISCOVER",
+    "transaction_id_hex": ""
+  },
+  "additional_tlvs": [],
+  "optional_tags": {}
+}

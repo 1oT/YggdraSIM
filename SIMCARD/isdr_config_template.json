@@ -1,0 +1,63 @@
+{
+  "eid": "89045967676472615349763031303005",
+  "atr_hex": "3B9F96801FC78031A073BE21136743200718000001A5",
+  "default_dp_address": "rsp.example.com",
+  "root_ci_pkid_hex": "F54172BDF98A95D65CBEB88A38A1C11D800A85C3",
+  "isdr": {
+    "aid": "A0000005591010FFFFFFFF8900000100",
+    "label": "ISDR"
+  },
+  "ecasd": {
+    "aid": "A0000005591010FFFFFFFF8900000200",
+    "label": "ECASD"
+  },
+  "mno_sd": {
+    "aid": "A000000151000000",
+    "label": "MNO-SD"
+  },
+  "scp03_keys": {
+    "kenc_hex": "1122334455667788AABBCCDDEEFF0011",
+    "kmac_hex": "1122334455667788AABBCCDDEEFF0011",
+    "dek_hex": "1122334455667788AABBCCDDEEFF0011",
+    "kvn": 48
+  },
+  "scp80_security": {
+    "spi": "1621",
+    "kic": "15",
+    "kid": "15",
+    "tar": "B00000",
+    "key_enc_hex": "1111111111111111",
+    "key_mac_hex": "1111111111111111"
+  },
+  "configured_data": {
+    "root_smds_address": "lpa.ds.gsma.com",
+    "additional_root_smds_addresses": [
+      "smds2.yggdrasim.test",
+      "smds3.yggdrasim.test"
+    ],
+    "allowed_ci_pkids_hex": [
+      "F54172BDF98A95D65CBEB88A38A1C11D800A85C3"
+    ],
+    "ci_list_hex": [
+      "F54172BDF98A95D65CBEB88A38A1C11D800A85C3"
+    ]
+  },
+  "toolkit": {
+    "poll_strategy": "timer",
+    "timer_management_seconds": 30,
+    "timer_management_id": 1,
+    "timer_management_auto_rearm": true,
+    "poll_interval_seconds": 60,
+    "provide_imei": true,
+    "ipa_poll": {
+      "enabled": true,
+      "eim_fqdn": "",
+      "eim_port": 443,
+      "transport_type": 2,
+      "buffer_size": 1024,
+      "receive_size": 250,
+      "alpha_id": "eIM Poll",
+      "request_payload_hex": ""
+    }
+  }
+}

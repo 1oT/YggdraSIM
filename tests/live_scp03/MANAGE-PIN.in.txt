@@ -1,0 +1,5 @@
+# MANAGE-PIN wizard (Verify / Change / Enable / Disable / Unblock).
+# Sends EOF immediately after invocation.
+SCP03-SD
+MANAGE-PIN
+EXIT

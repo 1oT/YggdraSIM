@@ -1,0 +1,147 @@
+name: Bug report
+description: Report incorrect behaviour in YggdraSIM (shell, wizard, APDU, SCP session, TUI, installer, etc.)
+title: "[bug] <short, specific summary>"
+labels: ["type:bug", "needs-approval"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ### Before you submit
+        1. Search existing issues (including **closed** ones) for the same
+           symptom first. Duplicates will be closed.
+        2. If this looks like a security vulnerability (key leak, APDU
+           injection, eUICC profile compromise, supply chain), close this
+           form and use **Security Advisory** instead.
+        3. This issue **must** be approved by a maintainer before a pull
+           request referencing it will be accepted. See
+           `.github/SECURITY_CONTROLS.md`.
+
+  - type: input
+    id: version
+    attributes:
+      label: YggdraSIM version
+      description: Output of `yggdrasim --version` or the git commit SHA.
+      placeholder: "v1.0.0 / 1a2b3c4d"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: flavor
+    attributes:
+      label: Bundle flavor
+      options:
+        - clean (no HIL bridge)
+        - full (HIL bridge + SIMtrace2)
+        - pip install (editable)
+        - docker (ghcr.io image)
+        - other / unknown
+    validations:
+      required: true
+
+  - type: input
+    id: os
+    attributes:
+      label: Host OS and version
+      placeholder: "Ubuntu 24.04 / Windows 11 23H2 / macOS 14.4 / Raspberry Pi OS 64-bit"
+    validations:
+      required: true
+
+  - type: input
+    id: python
+    attributes:
+      label: Python version
+      placeholder: "3.11.7"
+    validations:
+      required: false
+
+  - type: dropdown
+    id: component
+    attributes:
+      label: Affected component
+      multiple: true
+      options:
+        - SCP03 shell / wizards
+        - SCP11 console
+        - SCP11 eim_local
+        - SCP11 local_access
+        - SCP11 live
+        - SIMCARD engine / NAA / profile store
+        - SAIP profile package tooling
+        - HIL bridge
+        - Polling plugin
+        - Device inventory / envelope encryption
+        - Installer / Dockerfile / CI
+        - Docs (mkdocs)
+        - Other (describe below)
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      description: |
+        Be exact. Paste the shell commands, the order of wizard
+        selections, the APDU sequence, and any profile package hashes
+        needed to repro.
+      placeholder: |
+        1. Launch `yggdrasim-scp03`
+        2. Wizard -> ...
+        3. Send APDU 00 A4 04 00 ...
+        4. Observe ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behaviour
+      description: >-
+        Cite GSMA SGP.02/22/32, GlobalPlatform 2.3, ETSI TS 102 221,
+        ISO 7816 or 3GPP TS where relevant.
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behaviour
+      description: What happened, with exact error text / APDU response / SW bytes.
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs, tracebacks, APDU traces
+      description: |
+        Paste the minimum log excerpt that proves the bug. Redact keys
+        (Ki, OPc, PSK, K_ENC/K_MAC, TLS certs, eSIM profiles) before
+        submitting.
+      render: text
+    validations:
+      required: false
+
+  - type: dropdown
+    id: severity
+    attributes:
+      label: Severity (self-assessed; maintainers will re-triage)
+      options:
+        - Critical -- data loss, wrong key material, silent crypto failure
+        - High -- major feature broken, no workaround
+        - Medium -- feature broken, workaround exists
+        - Low -- cosmetic, docs, minor UX
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: pre_submit
+    attributes:
+      label: Pre-submission checklist
+      options:
+        - label: I searched existing issues and this is not a duplicate.
+          required: true
+        - label: I redacted all key material, personal data and TLS secrets from the logs above.
+          required: true
+        - label: I understand this issue must be approved by a maintainer before any linked PR will be accepted.
+          required: true
