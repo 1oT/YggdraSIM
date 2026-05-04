@@ -1,0 +1,5 @@
+# Run a batch script. The runner generates reports/scp03_live_run/run.script
+# with HELP/EXIT lines before invoking this test, so we can verify the
+# scripted dispatch path end-to-end.
+RUN reports/scp03_live_run/run.script
+EXIT

@@ -1,0 +1,2 @@
+# Q alias of EXIT.
+Q

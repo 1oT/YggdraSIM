@@ -1,0 +1,6 @@
+# Map a temporary alias to an AID, list to confirm, then exit. The alias
+# write goes to Workspace/SCP03/aid.txt; the runner snapshots/restores that
+# file around the run so the workspace stays clean.
+SET-AID-ALIAS LIVE_TEST_ALIAS A0000005591010FFFFFFFF8900000100
+AIDS
+EXIT

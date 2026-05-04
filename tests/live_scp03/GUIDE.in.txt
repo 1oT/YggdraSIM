@@ -1,0 +1,3 @@
+# Render the GP topic guide (no APDU traffic).
+GUIDE GP
+EXIT

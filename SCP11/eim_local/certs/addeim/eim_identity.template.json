@@ -1,0 +1,30 @@
+{
+  "display_name": "Local eIM Identity (certificate material not bundled)",
+  "eim_id": "2.25.311782205282738360923618091971140414400",
+  "eim_id_type": "oid",
+  "eim_fqdn": "eim.yggdrasim.example.test",
+  "default_matching_id": "EIM-FIRST-TEST",
+  "organization": "RSPTEST",
+  "certificate_subject_cn": "eim.yggdrasim.example.test",
+  "eim_endpoint": "https://eim.yggdrasim.example.test/gsma/rsp2/asn1",
+  "smdpp_endpoint": "https://smdpp.yggdrasim.example.test/gsma/rsp2/es9plus",
+  "smdp_address": "smdpp.yggdrasim.example.test",
+  "eim_public_key_cert_path": "/path/to/local_eim_signing_cert.pem",
+  "trusted_tls_cert_path": "/path/to/local_eim_tls_cert.pem",
+  "tls_private_key_path": "/path/to/local_eim_tls_key.pem",
+  "euicc_ci_pk_id": "F54172BDF98A95D65CBEB88A38A1C11D800A85C3",
+  "peer_registration": {
+    "display_name": "Local eIM Identity (certificate material not bundled)",
+    "eim_hostname_fqdn": "eim.yggdrasim.example.test",
+    "tls_connection_certificate_choice": "server_certificate",
+    "supported_protocols": {
+      "https_over_tcp_retrieval": true,
+      "https_over_tcp_injection": false,
+      "coap_dtls_over_udp_retrieval": false,
+      "coap_dtls_over_udp_injection": false
+    },
+    "indirect_profile_downloading_supported": true,
+    "eim_signing_certificate_pem_path": "/path/to/local_eim_signing_cert.pem",
+    "tls_server_certificate_pem_path": "/path/to/local_eim_tls_cert.pem"
+  }
+}

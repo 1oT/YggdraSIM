@@ -1,0 +1,6 @@
+# Diff live FS+eUICC+MNO-SD against an explicit gold YAML. The gold file is
+# synthetic so the runner expects a clean "no gold" warning rather than a
+# successful diff. This validates the no-gold error branch end-to-end.
+SCP03-SD
+PROFILE-DIFF reports/scp03_live_run/synthetic-gold.yaml SGP.32 AUTH=N
+EXIT

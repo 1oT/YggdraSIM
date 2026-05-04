@@ -1,0 +1,22 @@
+{
+  "package_type": "euicc_memory_reset",
+  "package_version": "2.0.0",
+  "spec_target": "SGP.22 ES10c eUICCMemoryReset with selective eIM reset support",
+  "sgp22": {
+    "euicc_memory_reset_request": {
+      "include": true,
+      "options": {
+        "delete_operational_profiles": false,
+        "delete_field_loaded_test_profiles": false,
+        "reset_default_smdp_address": false,
+        "delete_preloaded_test_profiles": false,
+        "delete_provisioning_profiles": false,
+        "reset_eim_config_data": true,
+        "reset_immediate_enable_config": false
+      }
+    }
+  },
+  "runtime": {},
+  "additional_tlvs": [],
+  "optional_tags": {}
+}

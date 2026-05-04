@@ -1,0 +1,28 @@
+{
+  "package_type": "ipa_euicc_data_response",
+  "package_version": "2.1.2.2",
+  "spec_target": "SGP.32 eIM Package Result / IpaEuiccDataResponse",
+  "sgp32": {
+    "ipa_euicc_data_response": {
+      "include": true,
+      "transaction_id": {
+        "include": true,
+        "value_hex": "0102030405060708090A0B0C0D0E0F10"
+      },
+      "response_payload": {
+        "include": true,
+        "value_hex": ""
+      },
+      "response_metadata": {
+        "include": false,
+        "value_hex": ""
+      }
+    }
+  },
+  "runtime": {
+    "matching_id": "EIM-IPAE-UICC-DATA-RES",
+    "transaction_id_hex": "0102030405060708090A0B0C0D0E0F10"
+  },
+  "additional_tlvs": [],
+  "optional_tags": {}
+}

@@ -1,0 +1,4 @@
+# Export the active SCP03 session keybag for HIL offline replay.
+SCP03-SD
+EXPORT-KEYBAG reports/scp03_live_run/session.keys.json scp03-live-runner
+EXIT

@@ -1,0 +1,301 @@
+name: PR approval gate
+
+# Enforces that every pull request is linked to an issue which has been
+# approved by a privileged maintainer (write / maintain / admin
+# permission on this repository).
+#
+# On every PR event this workflow:
+#   1. Gates the `bypass-approval-check` and `approved` labels so only
+#      privileged accounts can apply them to a PR.
+#   2. Parses the PR title and body for GitHub issue-closing keywords
+#      (Closes, Fixes, Resolves, Refs, Related to).
+#   3. Fetches each referenced issue and verifies that it carries the
+#      `approved` label.
+#   4. If none do, closes the pull request immediately and posts a
+#      comment explaining the policy.
+#
+# The companion `.github/workflows/issue-approval.yml` workflow applies
+# the same privilege check to the `approved` label on issues.
+#
+# Uses `pull_request_target` so the GITHUB_TOKEN has write permission on
+# pull requests opened from forks. IMPORTANT: this workflow must NEVER
+# check out or execute the PR head -- it only reads PR metadata.
+#
+# See `.github/SECURITY_CONTROLS.md` for the full policy.
+
+on:
+  pull_request_target:
+    types:
+      - opened
+      - reopened
+      - edited
+      - synchronize
+      - ready_for_review
+      - labeled
+      - unlabeled
+
+permissions:
+  pull-requests: write
+  issues: read
+
+concurrency:
+  group: pr-approval-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  guard-pr-labels:
+    name: Guard approved / bypass labels on PRs
+    if: github.event.action == 'labeled' || github.event.action == 'unlabeled'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Enforce privileged labelling on PR
+        uses: actions/github-script@v8
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const GATED_LABELS = new Set([
+              "approved",
+              "bypass-approval-check",
+            ]);
+            const PRIVILEGED = new Set(["admin", "maintain", "write"]);
+
+            const action = context.payload.action;
+            const label = context.payload.label && context.payload.label.name;
+            if (!label || !GATED_LABELS.has(label)) {
+              core.info(`Label "${label}" is not gated. Nothing to do.`);
+              return;
+            }
+
+            const { owner, repo } = context.repo;
+            const pr = context.payload.pull_request;
+            const issue_number = pr.number;
+            const sender = context.payload.sender && context.payload.sender.login;
+
+            if (!sender) {
+              core.setFailed("No sender on payload; refusing to continue.");
+              return;
+            }
+
+            async function permissionFor(login) {
+              try {
+                const res = await github.rest.repos.getCollaboratorPermissionLevel({
+                  owner,
+                  repo,
+                  username: login,
+                });
+                return res.data.permission;
+              } catch (err) {
+                core.warning(`Could not resolve permission for ${login}: ${err.message}`);
+                return "none";
+              }
+            }
+
+            const perm = await permissionFor(sender);
+            const privileged = PRIVILEGED.has(perm);
+            core.info(`Sender=${sender} permission=${perm} privileged=${privileged}`);
+
+            if (action === "labeled" && !privileged) {
+              core.warning(
+                `Non-privileged user ${sender} (permission=${perm}) attempted to apply "${label}". Reverting.`
+              );
+              try {
+                await github.rest.issues.removeLabel({
+                  owner,
+                  repo,
+                  issue_number,
+                  name: label,
+                });
+              } catch (err) {
+                if (err.status !== 404) {
+                  core.warning(`Could not remove "${label}": ${err.message}`);
+                }
+              }
+              const body = [
+                `@${sender}, the \`${label}\` label is reserved for repository`,
+                `maintainers (write / maintain / admin permission). Your`,
+                `permission level is \`${perm}\`, so the label has been removed.`,
+                ``,
+                `See \`.github/SECURITY_CONTROLS.md\` for the full policy.`,
+              ].join("\n");
+              await github.rest.issues.createComment({
+                owner,
+                repo,
+                issue_number,
+                body,
+              });
+              return;
+            }
+
+            if (action === "unlabeled" && !privileged) {
+              core.warning(
+                `Non-privileged user ${sender} removed "${label}". Restoring.`
+              );
+              try {
+                await github.rest.issues.addLabels({
+                  owner,
+                  repo,
+                  issue_number,
+                  labels: [label],
+                });
+              } catch (err) {
+                core.warning(`Could not restore "${label}": ${err.message}`);
+              }
+            }
+
+  require-approved-issue:
+    name: Require linked approved issue
+    needs: guard-pr-labels
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Resolve and enforce approval
+        uses: actions/github-script@v8
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const { owner, repo } = context.repo;
+            const pr = context.payload.pull_request;
+            const pr_number = pr.number;
+
+            if (pr.state !== "open") {
+              core.info(`PR #${pr_number} is not open (${pr.state}); nothing to enforce.`);
+              return;
+            }
+
+            const labels = (pr.labels || []).map((l) => l.name);
+            if (labels.includes("bypass-approval-check")) {
+              core.info(
+                `PR #${pr_number} carries bypass-approval-check; skipping linked-issue enforcement.`
+              );
+              return;
+            }
+
+            const PATTERN = new RegExp(
+              String.raw`(?:\bclose[sd]?\b|\bfix(?:e[sd])?\b|\bresolve[sd]?\b|\brefs?\b|\brelated to\b)` +
+                String.raw`\s*[:\-]?\s*#(\d+)`,
+              "gi"
+            );
+
+            const title = pr.title || "";
+            const body = pr.body || "";
+            const haystack = `${title}\n\n${body}`;
+
+            const referenced = new Set();
+            for (const match of haystack.matchAll(PATTERN)) {
+              const n = parseInt(match[1], 10);
+              if (Number.isFinite(n) && n > 0 && n !== pr_number) {
+                referenced.add(n);
+              }
+            }
+
+            core.info(
+              `PR #${pr_number} references same-repo issues: ${
+                referenced.size === 0 ? "(none)" : Array.from(referenced).join(", ")
+              }`
+            );
+
+            const approvedIssues = [];
+            const unapprovedIssues = [];
+            const missingIssues = [];
+
+            for (const n of referenced) {
+              try {
+                const res = await github.rest.issues.get({
+                  owner,
+                  repo,
+                  issue_number: n,
+                });
+                if (res.data.pull_request) {
+                  unapprovedIssues.push({
+                    number: n,
+                    reason: "reference points at a pull request, not an issue",
+                  });
+                  continue;
+                }
+                const issueLabels = (res.data.labels || []).map((l) =>
+                  typeof l === "string" ? l : l.name
+                );
+                if (issueLabels.includes("approved")) {
+                  approvedIssues.push(n);
+                } else {
+                  unapprovedIssues.push({
+                    number: n,
+                    reason: `issue is missing the 'approved' label (state=${res.data.state})`,
+                  });
+                }
+              } catch (err) {
+                if (err.status === 404) {
+                  missingIssues.push(n);
+                } else {
+                  core.warning(`Could not fetch issue #${n}: ${err.message}`);
+                  unapprovedIssues.push({
+                    number: n,
+                    reason: `could not fetch issue (${err.message})`,
+                  });
+                }
+              }
+            }
+
+            if (approvedIssues.length > 0) {
+              core.info(
+                `PR #${pr_number} is linked to approved issues: ${approvedIssues.join(", ")}. Passing.`
+              );
+              return;
+            }
+
+            const reasons = [];
+            if (referenced.size === 0) {
+              reasons.push(
+                "no issue reference found in the PR title or body (use `Closes #NNN`, `Fixes #NNN`, `Resolves #NNN`, `Refs #NNN`, or `Related to #NNN`)"
+              );
+            }
+            for (const entry of unapprovedIssues) {
+              reasons.push(`#${entry.number}: ${entry.reason}`);
+            }
+            for (const n of missingIssues) {
+              reasons.push(`#${n}: issue does not exist in this repository`);
+            }
+
+            const reasonBlock = reasons.map((r) => `- ${r}`).join("\n");
+
+            const commentBody = [
+              `### Pull request closed by policy`,
+              ``,
+              `This repository requires every pull request to reference an`,
+              `issue that has already been approved by a maintainer`,
+              `(account with write / maintain / admin permission) via the`,
+              `\`approved\` label.`,
+              ``,
+              `Reasons this PR did not satisfy the policy:`,
+              ``,
+              reasonBlock,
+              ``,
+              `What to do next:`,
+              ``,
+              `1. Open an issue using one of the forms under`,
+              `   \`.github/ISSUE_TEMPLATE/\` and fill it in completely.`,
+              `2. Wait for a maintainer to triage and apply the \`approved\` label.`,
+              `3. Open a fresh pull request whose title or body contains`,
+              `   \`Closes #<approved issue number>\`, or reopen this PR`,
+              `   after updating its description.`,
+              ``,
+              `See \`.github/SECURITY_CONTROLS.md\` for the full policy.`,
+            ].join("\n");
+
+            await github.rest.issues.createComment({
+              owner,
+              repo,
+              issue_number: pr_number,
+              body: commentBody,
+            });
+
+            await github.rest.pulls.update({
+              owner,
+              repo,
+              pull_number: pr_number,
+              state: "closed",
+            });
+
+            core.setFailed(
+              `PR #${pr_number} closed: not linked to any issue carrying the 'approved' label.`
+            );

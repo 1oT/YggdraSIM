@@ -1,0 +1,4 @@
+# VERBOSE alias of DEBUG. Toggle on/off.
+VERBOSE
+VERBOSE
+EXIT
