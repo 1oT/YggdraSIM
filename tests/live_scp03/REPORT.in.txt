@@ -1,0 +1,6 @@
+# REPORT is an interactive wizard. In stdin mode the wizard sees EOF and
+# aborts with a clean abort message -- the test exists to validate that the
+# shell does not hang when a pipe ends mid-wizard.
+SCP03-SD
+REPORT
+EXIT

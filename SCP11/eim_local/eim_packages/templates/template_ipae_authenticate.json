@@ -1,0 +1,33 @@
+{
+  "package_type": "ipae_authenticate",
+  "package_version": "2.0.0",
+  "spec_target": "SGP.32 ESipa.InitiateAuthenticationRequestEsipa (BF39)",
+  "sgp32": {
+    "initiate_authentication_request_esipa": {
+      "include": true,
+      "command_tag_hex": "BF39",
+      "euicc_challenge": {
+        "include": false,
+        "value_hex": ""
+      },
+      "smdp_address": {
+        "include": true,
+        "value": "smdpp.yggdrasim.example.test"
+      },
+      "euicc_info1": {
+        "include": false,
+        "value_hex": ""
+      },
+      "eim_transaction_id": {
+        "include": false,
+        "value_hex": ""
+      }
+    }
+  },
+  "runtime": {
+    "matching_id": "EIM-IPAE-AUTH",
+    "transaction_id_hex": ""
+  },
+  "additional_tlvs": [],
+  "optional_tags": {}
+}

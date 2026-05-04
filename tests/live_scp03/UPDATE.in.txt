@@ -1,0 +1,9 @@
+# Attempt UPDATE BINARY against EF_ICCID. The simulator enforces access
+# rules; the test validates that the shell sends the APDU and surfaces
+# either 9000 (if the test profile permits writes) or a defined error SW
+# such as 6982 / 6985, never an unhandled exception.
+SCP03-SD
+SELECT 3F00
+SELECT 2FE2
+UPDATE BINARY 89880811111111111112
+EXIT

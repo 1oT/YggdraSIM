@@ -1,0 +1,3 @@
+# Clear the persisted gold path (idempotent).
+CLEAR-GOLD-PROFILE
+EXIT

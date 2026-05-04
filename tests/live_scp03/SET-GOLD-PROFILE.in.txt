@@ -1,0 +1,6 @@
+# Persist a gold combined-YAML path. The path is synthetic / non-existent,
+# so the test verifies the SQLite write side without forcing a real diff.
+SET-GOLD-PROFILE reports/scp03_live_run/gold.yaml SGP.32 AUTH=Y
+GOLD-PROFILE
+CLEAR-GOLD-PROFILE
+EXIT

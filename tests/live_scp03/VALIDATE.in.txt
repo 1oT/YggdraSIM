@@ -1,0 +1,5 @@
+# Validate active profile FS structure against the SAIP interoperability
+# spec, MF tree only (cheapest scope).
+SCP03-SD
+VALIDATE MF
+EXIT

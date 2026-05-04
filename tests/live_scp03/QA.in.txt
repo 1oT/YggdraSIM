@@ -1,0 +1,3 @@
+# QA raises QuitAllRequested. The SCP03 __main__ catches it and exits 0,
+# so the runner accepts a clean exit here.
+QA

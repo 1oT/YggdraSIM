@@ -1,0 +1,32 @@
+# Copy this file to:
+#   ~/.config/systemd/user/yggdrasim-hil-supervisor.service
+#
+# Then adjust:
+# - WorkingDirectory
+# - ExecStart
+# - --reader-index / --reader-name
+# - --usb-vidpid
+# - optional --remsim-arg selectors if osmo-remsim-client-st2 needs explicit SIMtrace2 selection
+#
+# This example assumes:
+# - repository checkout at ~/Documents/Tools/YggdraSIM
+# - Python venv at ~/Documents/pyscard
+# - SIMtrace2 USB ID 1d50:60e3
+
+[Unit]
+Description=YggdraSIM HIL bridge supervisor
+Documentation=file:%h/Documents/Tools/YggdraSIM/guides/HIL_BRIDGE_GUIDE.md
+After=default.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/Documents/Tools/YggdraSIM
+Environment=PYTHONUNBUFFERED=1
+ExecStart=%h/Documents/pyscard/bin/python3 -m Tools.HilBridge.supervisor --reader-index 0 --host 127.0.0.1 --port 9997 --advertise-host 127.0.0.1 --usb-vidpid 1d50:60e3
+Restart=on-failure
+RestartSec=2
+KillMode=mixed
+TimeoutStopSec=10
+
+[Install]
+WantedBy=default.target

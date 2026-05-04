@@ -1,0 +1,46 @@
+{
+  "package_type": "euicc_package_request_eim_configuration_data",
+  "package_version": "2.0.0",
+  "spec_target": "SGP.32 eIM Package Request / EuiccPackageRequest / eIM Configuration Data",
+  "sgp32": {
+    "euicc_package_request": {
+      "include": true,
+      "choice": "eim_configuration_data",
+      "eim_configuration_data": {
+        "include": true,
+        "rows": [
+          {
+            "include": true,
+            "eim_id": {
+              "include": true,
+              "value": "2.25.311782205282738360923618091971140414400"
+            },
+            "counter_value": {
+              "include": true,
+              "value_hex": "0000000000000001"
+            },
+            "association_token": {
+              "include": false,
+              "value_hex": ""
+            },
+            "supported_protocol": {
+              "include": true,
+              "value_hex": "0780"
+            },
+            "eim_public_key_data": {
+              "include": false,
+              "choice": "eim_certificate",
+              "eim_certificate_der_path": ""
+            }
+          }
+        ]
+      }
+    }
+  },
+  "runtime": {
+    "matching_id": "EIM-CONFIG-DATA-REQ",
+    "transaction_id_hex": ""
+  },
+  "additional_tlvs": [],
+  "optional_tags": {}
+}

@@ -1,0 +1,5 @@
+# WIZARD is the unified install wizard. Sends EOF immediately after
+# invocation.
+SCP03-SD
+WIZARD
+EXIT

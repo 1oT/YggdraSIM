@@ -1,0 +1,5 @@
+# RUN-AUTH is the GSM/USIM/ISIM auth wizard. Sends EOF immediately after
+# invocation.
+SCP03-SD
+RUN-AUTH
+EXIT

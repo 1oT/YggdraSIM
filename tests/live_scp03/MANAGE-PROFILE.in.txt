@@ -1,0 +1,5 @@
+# MANAGE-PROFILE is an interactive wizard. The pipe sends EOF immediately
+# after invocation; the test validates clean wizard abort handling.
+SCP03-SD
+MANAGE-PROFILE
+EXIT

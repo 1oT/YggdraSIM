@@ -1,0 +1,244 @@
+name: Issue approval gate
+
+# Enforces that only accounts with privileged access (write / maintain /
+# admin permission on the repository) can attach the "approved" or
+# "bypass-approval-check" labels that unblock pull requests.
+#
+# Labels managed by this workflow
+# -------------------------------
+#   approved
+#     Marks an issue as triaged and ready to accept pull requests. The
+#     `pr-require-approved-issue` workflow requires PRs to reference an
+#     issue that carries this label.
+#
+#   bypass-approval-check
+#     Applied to an issue or PR by a maintainer to skip the linked-issue
+#     requirement for a specific pull request (e.g. urgent CI/docs fix).
+#
+#   needs-approval
+#     Auto-applied to every new issue. Cleared when `approved` sticks.
+#
+# Companion workflow
+# ------------------
+#   .github/workflows/pr-require-approved-issue.yml
+#     Consumes the `approved` / `bypass-approval-check` labels to decide
+#     whether to close a pull request.
+#
+# Companion docs
+# --------------
+#   .github/SECURITY_CONTROLS.md
+#     Operator-facing description of the full gate.
+
+on:
+  issues:
+    types: [opened, reopened, labeled, unlabeled]
+
+permissions:
+  issues: write
+
+concurrency:
+  group: issue-approval-${{ github.event.issue.number }}
+  cancel-in-progress: false
+
+jobs:
+  bootstrap-needs-approval:
+    name: Bootstrap needs-approval on new issues
+    if: >-
+      github.event.action == 'opened' ||
+      github.event.action == 'reopened'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Add needs-approval label
+        uses: actions/github-script@v8
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const { owner, repo } = context.repo;
+            const issue_number = context.payload.issue.number;
+            await github.rest.issues.addLabels({
+              owner,
+              repo,
+              issue_number,
+              labels: ["needs-approval"],
+            });
+
+  guard-approval-labels:
+    name: Guard approved / bypass labels
+    if: github.event.action == 'labeled' || github.event.action == 'unlabeled'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Enforce privileged approval
+        uses: actions/github-script@v8
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const GATED_LABELS = new Set([
+              "approved",
+              "bypass-approval-check",
+            ]);
+            const PRIVILEGED = new Set(["admin", "maintain", "write"]);
+
+            const action = context.payload.action;
+            const label = context.payload.label && context.payload.label.name;
+            if (!label || !GATED_LABELS.has(label)) {
+              core.info(`Label "${label}" is not gated. Nothing to do.`);
+              return;
+            }
+
+            const { owner, repo } = context.repo;
+            const issue = context.payload.issue;
+            const issue_number = issue.number;
+            const sender = context.payload.sender && context.payload.sender.login;
+
+            if (!sender) {
+              core.setFailed("No sender on payload; refusing to continue.");
+              return;
+            }
+
+            async function permissionFor(login) {
+              try {
+                const res = await github.rest.repos.getCollaboratorPermissionLevel({
+                  owner,
+                  repo,
+                  username: login,
+                });
+                return res.data.permission;
+              } catch (err) {
+                core.warning(`Could not resolve permission for ${login}: ${err.message}`);
+                return "none";
+              }
+            }
+
+            const perm = await permissionFor(sender);
+            const privileged = PRIVILEGED.has(perm);
+            core.info(`Sender=${sender} permission=${perm} privileged=${privileged}`);
+
+            if (action === "labeled") {
+              if (privileged) {
+                if (label === "approved") {
+                  try {
+                    await github.rest.issues.removeLabel({
+                      owner,
+                      repo,
+                      issue_number,
+                      name: "needs-approval",
+                    });
+                  } catch (err) {
+                    if (err.status !== 404) {
+                      core.warning(`Could not remove needs-approval: ${err.message}`);
+                    }
+                  }
+                }
+                core.info(`Label "${label}" applied by privileged user ${sender}. Allowed.`);
+                return;
+              }
+
+              core.warning(
+                `Non-privileged user ${sender} (permission=${perm}) attempted to apply "${label}". Reverting.`
+              );
+
+              try {
+                await github.rest.issues.removeLabel({
+                  owner,
+                  repo,
+                  issue_number,
+                  name: label,
+                });
+              } catch (err) {
+                if (err.status !== 404) {
+                  core.warning(`Could not remove "${label}": ${err.message}`);
+                }
+              }
+
+              if (label === "approved") {
+                try {
+                  await github.rest.issues.addLabels({
+                    owner,
+                    repo,
+                    issue_number,
+                    labels: ["needs-approval"],
+                  });
+                } catch (err) {
+                  core.warning(`Could not re-add needs-approval: ${err.message}`);
+                }
+              }
+
+              const body = [
+                `@${sender}, the \`${label}\` label is reserved for repository`,
+                `maintainers (write / maintain / admin permission). Your`,
+                `permission level is \`${perm}\`, so the label has been removed.`,
+                ``,
+                `A maintainer will apply \`approved\` after triage. Pull`,
+                `requests referencing this issue will not merge until then.`,
+                `See \`.github/SECURITY_CONTROLS.md\` for the full policy.`,
+              ].join("\n");
+
+              await github.rest.issues.createComment({
+                owner,
+                repo,
+                issue_number,
+                body,
+              });
+              return;
+            }
+
+            if (action === "unlabeled") {
+              if (label === "approved") {
+                if (!privileged) {
+                  core.warning(
+                    `Non-privileged user ${sender} removed "approved". Restoring.`
+                  );
+                  try {
+                    await github.rest.issues.addLabels({
+                      owner,
+                      repo,
+                      issue_number,
+                      labels: ["approved"],
+                    });
+                  } catch (err) {
+                    core.warning(`Could not restore approved: ${err.message}`);
+                  }
+                  try {
+                    await github.rest.issues.removeLabel({
+                      owner,
+                      repo,
+                      issue_number,
+                      name: "needs-approval",
+                    });
+                  } catch (err) {
+                    if (err.status !== 404) {
+                      core.warning(`Could not clear needs-approval: ${err.message}`);
+                    }
+                  }
+                  return;
+                }
+                try {
+                  await github.rest.issues.addLabels({
+                    owner,
+                    repo,
+                    issue_number,
+                    labels: ["needs-approval"],
+                  });
+                } catch (err) {
+                  core.warning(`Could not re-add needs-approval: ${err.message}`);
+                }
+                return;
+              }
+
+              if (label === "bypass-approval-check" && !privileged) {
+                core.warning(
+                  `Non-privileged user ${sender} removed "bypass-approval-check". Restoring.`
+                );
+                try {
+                  await github.rest.issues.addLabels({
+                    owner,
+                    repo,
+                    issue_number,
+                    labels: ["bypass-approval-check"],
+                  });
+                } catch (err) {
+                  core.warning(`Could not restore bypass-approval-check: ${err.message}`);
+                }
+                return;
+              }
+            }

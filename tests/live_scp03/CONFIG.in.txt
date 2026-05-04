@@ -1,0 +1,4 @@
+# CONFIG is the keyset/AID rotation wizard. Sends EOF immediately after
+# invocation.
+CONFIG
+EXIT

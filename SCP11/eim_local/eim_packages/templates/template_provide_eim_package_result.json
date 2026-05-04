@@ -1,0 +1,57 @@
+{
+  "package_type": "provide_eim_package_result",
+  "package_version": "2.0.0",
+  "spec_target": "SGP.32 ESipa.ProvideEimPackageResult (BF50) with ProfileDownloadTriggerResult (BF54)",
+  "sgp32": {
+    "provide_eim_package_result": {
+      "include": true,
+      "command_tag_hex": "BF50",
+      "eid_value": {
+        "include": true,
+        "tag_hex": "5A",
+        "value_hex": "89049032000000000000000000000000"
+      },
+      "eim_transaction_id": {
+        "include": false,
+        "value_hex": ""
+      },
+      "result_choice": "profile_download_trigger_result",
+      "profile_download_trigger_result": {
+        "include": true,
+        "transaction_id_hex": "0102030405060708090A0B0C0D0E0F10",
+        "profile_download_error": {
+          "include": false,
+          "value": "undefinedError(127)"
+        },
+        "notifications": {
+          "include": false,
+          "pending_notification_list_hex": ""
+        }
+      },
+      "euicc_package_result": {
+        "include": false,
+        "value_hex": ""
+      },
+      "ipa_euicc_data_response": {
+        "include": false,
+        "value_hex": ""
+      },
+      "eim_package_result_response_error": {
+        "include": false,
+        "error_code": "undefinedError(127)"
+      }
+    }
+  },
+  "runtime": {
+    "matching_id": "EIM-FIRST-TEST-HANDOVER",
+    "transaction_id_hex": "",
+    "profile_path": "SCP11/eim_local/profile/test_profile.txt",
+    "smdp_address": "smdpp.yggdrasim.example.test",
+    "bip_endpoints": {
+      "eim": "https://eim.yggdrasim.example.test/gsma/rsp2/asn1",
+      "smdpp": "https://smdpp.yggdrasim.example.test/gsma/rsp2/es9plus"
+    }
+  },
+  "additional_tlvs": [],
+  "optional_tags": {}
+}

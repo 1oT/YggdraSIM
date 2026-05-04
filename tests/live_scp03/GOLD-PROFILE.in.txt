@@ -1,0 +1,3 @@
+# Show persisted gold path / standard / SD-auth flag (read-only).
+GOLD-PROFILE
+EXIT

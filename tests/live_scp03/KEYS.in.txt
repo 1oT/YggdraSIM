@@ -1,0 +1,4 @@
+# Retrieve key information for current AID after SD auth.
+SCP03-SD
+KEYS
+EXIT

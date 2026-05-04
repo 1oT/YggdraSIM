@@ -1,0 +1,570 @@
+name: Build Bundles
+
+# The matrix publishes:
+#   * clean bundles for Linux (x86_64), Windows (x86_64), macOS (x86_64+arm64)
+#   * clean bundle for Linux arm64 via QEMU, aimed at Raspberry Pi OS 64-bit
+#   * full bundle for Linux (x86_64) -- includes the HIL bridge
+#   * full bundle for Linux arm64 via QEMU, aimed at Raspberry Pi + SIMtrace2
+#   * a Debian package wrapping the clean Linux x86_64 bundle
+#
+# See guides/INSTALL_CLEAN.md, guides/INSTALL_FULL.md, and
+# guides/INSTALL_RASPBERRYPI.md for how each artefact is expected to be
+# consumed downstream.
+
+on:
+  push:
+    branches: [main, master]
+    tags:
+      - "v*"
+  pull_request:
+    branches: [main, master]
+  workflow_dispatch:
+
+jobs:
+  docs-strict:
+    name: Docs (mkdocs --strict)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: Install docs dependencies
+        shell: bash
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements-docs.txt
+
+      - name: Mirror repo docs into site-docs/sources/
+        shell: bash
+        run: python site-docs/_tools/mirror_source_docs.py
+
+      - name: Build docs (strict)
+        shell: bash
+        run: mkdocs build --strict
+
+  # The ``pytest`` regression suite is intentionally not part of CI:
+  # most of it depends on hardware (PC/SC readers, SIMtrace2),
+  # private cert fixtures (SGP.26 ``Variant O`` material is gitignored),
+  # or optional sub-trees (``plugins/polling``, ``yggdrasim_common/gui_server``)
+  # that the public release tree does not ship. The signal that
+  # remained after stripping those out was "non-hardware unit tests
+  # pass on a clean install", which is already covered by the bundle
+  # smoke tests below (``--version`` + ``--doctor`` against each
+  # flavour's PyInstaller binary). Maintainers run ``pytest`` locally
+  # with the full fixture / plugin tree present; CI focuses on what
+  # it can validate end-to-end without mocking a smart card reader.
+
+  build-linux-x86_64:
+    name: Linux x86_64 (${{ matrix.flavor }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        flavor: [clean, full]
+    outputs:
+      version: ${{ steps.meta.outputs.version }}
+      clean_artifact_name: ${{ steps.meta.outputs.clean_artifact_name }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: Resolve package metadata
+        id: meta
+        shell: bash
+        run: |
+          VERSION=$(python -c "import tomllib; from pathlib import Path; data = tomllib.loads(Path('pyproject.toml').read_text(encoding='utf-8')); print(data['project']['version'])")
+          FLAVOR="${{ matrix.flavor }}"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "artifact_name=yggdrasim-linux-x86_64-${FLAVOR}-${VERSION}" >> "$GITHUB_OUTPUT"
+          if [ "${FLAVOR}" = "clean" ]; then
+            echo "clean_artifact_name=yggdrasim-linux-x86_64-clean-${VERSION}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Install Linux build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libpcsclite-dev pcscd swig pkg-config gpg
+
+      - name: Install Python dependencies (clean)
+        if: matrix.flavor == 'clean'
+        shell: bash
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e '.[build,test]'
+
+      - name: Install Python dependencies (full)
+        if: matrix.flavor == 'full'
+        shell: bash
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e '.[full]'
+
+      - name: Build Linux bundle
+        env:
+          YGGDRASIM_FLAVOR: ${{ matrix.flavor }}
+        run: python -m PyInstaller --noconfirm --clean yggdrasim_main.spec
+
+      - name: Smoke test Linux bundle
+        shell: bash
+        env:
+          YGGDRASIM_FLAVOR: ${{ matrix.flavor }}
+        run: |
+          BIN="dist/yggdrasim-${{ matrix.flavor }}"
+          chmod +x "${BIN}"
+          "${BIN}" --version
+          "${BIN}" --doctor || true
+
+      - name: Upload Linux bundle artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: ${{ steps.meta.outputs.artifact_name }}
+          path: dist/yggdrasim-${{ matrix.flavor }}
+          if-no-files-found: error
+
+  build-linux-arm64-clean:
+    name: Linux arm64 clean (Raspberry Pi)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Resolve package metadata
+        id: meta
+        shell: bash
+        run: |
+          VERSION=$(python3 -c "import tomllib; from pathlib import Path; data = tomllib.loads(Path('pyproject.toml').read_text(encoding='utf-8')); print(data['project']['version'])")
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "artifact_name=yggdrasim-linux-arm64-clean-${VERSION}" >> "$GITHUB_OUTPUT"
+
+      - name: Set up QEMU for arm64
+        uses: docker/setup-qemu-action@v4
+        with:
+          platforms: arm64
+
+      - name: Build arm64 bundle inside Debian container
+        shell: bash
+        # ``python3-dev`` ships ``Python.h``, which the ``pyscard`` C
+        # extension needs at build time. Without it the wheel build
+        # falls over with ``fatal error: Python.h: No such file or
+        # directory``. ``git`` is here in case the build extras grow
+        # a ``pip install foo @ git+...`` dependency in the future and
+        # to keep parity with the ``full`` step below.
+        run: |
+          mkdir -p dist
+          docker run --rm --platform linux/arm64 \
+            -v "$PWD":/src -w /src \
+            -e YGGDRASIM_FLAVOR=clean \
+            debian:bookworm-slim bash -lc '
+              set -eux
+              apt-get update
+              DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+                python3 python3-dev python3-pip python3-venv \
+                libpcsclite-dev pcscd swig pkg-config gpg git \
+                build-essential
+              python3 -m venv /opt/venv
+              . /opt/venv/bin/activate
+              python -m pip install --upgrade pip
+              python -m pip install -e ".[build,test]"
+              python -m PyInstaller --noconfirm --clean yggdrasim_main.spec
+              chmod +x dist/yggdrasim-clean
+              dist/yggdrasim-clean --version
+            '
+
+      - name: Upload arm64 bundle artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: ${{ steps.meta.outputs.artifact_name }}
+          path: dist/yggdrasim-clean
+          if-no-files-found: error
+
+  build-linux-arm64-full:
+    name: Linux arm64 full (Raspberry Pi + HIL)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Resolve package metadata
+        id: meta
+        shell: bash
+        run: |
+          VERSION=$(python3 -c "import tomllib; from pathlib import Path; data = tomllib.loads(Path('pyproject.toml').read_text(encoding='utf-8')); print(data['project']['version'])")
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "artifact_name=yggdrasim-linux-arm64-full-${VERSION}" >> "$GITHUB_OUTPUT"
+
+      - name: Set up QEMU for arm64
+        uses: docker/setup-qemu-action@v4
+        with:
+          platforms: arm64
+
+      - name: Build arm64 full bundle inside Debian container
+        shell: bash
+        # ``python3-dev`` is needed for the ``pyscard`` / ``pyudev`` C
+        # extensions (they ``#include <Python.h>``). ``git`` is required
+        # because ``[full]`` pulls upstream pySim via
+        # ``pySim @ git+https://github.com/osmocom/pysim.git`` and pip
+        # shells out to the system ``git`` binary to clone the tree.
+        run: |
+          mkdir -p dist
+          docker run --rm --platform linux/arm64 \
+            -v "$PWD":/src -w /src \
+            -e YGGDRASIM_FLAVOR=full \
+            debian:bookworm-slim bash -lc '
+              set -eux
+              apt-get update
+              DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+                python3 python3-dev python3-pip python3-venv \
+                libpcsclite-dev pcscd swig pkg-config gpg git \
+                libudev-dev build-essential
+              python3 -m venv /opt/venv
+              . /opt/venv/bin/activate
+              python -m pip install --upgrade pip
+              python -m pip install -e ".[full]"
+              python -m PyInstaller --noconfirm --clean yggdrasim_main.spec
+              chmod +x dist/yggdrasim-full
+              dist/yggdrasim-full --version
+            '
+
+      - name: Upload arm64 full bundle artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: ${{ steps.meta.outputs.artifact_name }}
+          path: dist/yggdrasim-full
+          if-no-files-found: error
+
+  build-windows-clean:
+    name: Windows x86_64 clean
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: Resolve package metadata
+        id: meta
+        shell: pwsh
+        run: |
+          $version = python -c "import tomllib; from pathlib import Path; data = tomllib.loads(Path('pyproject.toml').read_text(encoding='utf-8')); print(data['project']['version'])"
+          "version=$version" >> $env:GITHUB_OUTPUT
+          "artifact_name=yggdrasim-windows-x86_64-clean-$version" >> $env:GITHUB_OUTPUT
+
+      - name: Install Windows build dependencies
+        shell: pwsh
+        run: choco install swig -y
+
+      - name: Install Python dependencies
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e '.[build,test]'
+
+      - name: Build Windows bundle
+        shell: pwsh
+        env:
+          YGGDRASIM_FLAVOR: clean
+        run: python -m PyInstaller --noconfirm --clean yggdrasim_main.spec
+
+      - name: Smoke test Windows bundle
+        shell: pwsh
+        run: |
+          .\dist\yggdrasim-clean.exe --version
+
+      - name: Upload Windows bundle artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: ${{ steps.meta.outputs.artifact_name }}
+          path: dist/yggdrasim-clean.exe
+          if-no-files-found: error
+
+  build-macos-clean:
+    name: macOS ${{ matrix.arch }} clean
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # ``macos-13`` was retired by GitHub on 2025-12-08 and the
+          # ``macos-14`` image enters its deprecation window on
+          # 2026-07-06 (retired 2026-11-02). The only remaining
+          # Intel-architecture runner is ``macos-15-intel`` --
+          # planned to be the *last* x86_64 image, supported through
+          # Fall 2027 (see GitHub Changelog 2025-09-19). Pin both
+          # rows to the macOS 15 family so the matrix keeps
+          # producing release artefacts past July 2026.
+          - arch: x86_64
+            runner: macos-15-intel
+          - arch: arm64
+            runner: macos-15
+    runs-on: ${{ matrix.runner }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: Resolve package metadata
+        id: meta
+        shell: bash
+        run: |
+          VERSION=$(python -c "import tomllib; from pathlib import Path; data = tomllib.loads(Path('pyproject.toml').read_text(encoding='utf-8')); print(data['project']['version'])")
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "artifact_name=yggdrasim-macos-${{ matrix.arch }}-clean-${VERSION}" >> "$GITHUB_OUTPUT"
+
+      - name: Install macOS build dependencies
+        shell: bash
+        run: |
+          brew update
+          brew install swig || true
+
+      - name: Install Python dependencies
+        shell: bash
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e '.[build,test]'
+
+      - name: Build macOS bundle
+        shell: bash
+        env:
+          YGGDRASIM_FLAVOR: clean
+        run: python -m PyInstaller --noconfirm --clean yggdrasim_main.spec
+
+      - name: Smoke test macOS bundle
+        shell: bash
+        run: |
+          chmod +x dist/yggdrasim-clean
+          dist/yggdrasim-clean --version
+
+      - name: Upload macOS bundle artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: ${{ steps.meta.outputs.artifact_name }}
+          path: dist/yggdrasim-clean
+          if-no-files-found: error
+
+  build-linux-deb-clean:
+    name: Debian package (clean)
+    runs-on: ubuntu-latest
+    needs:
+      - build-linux-x86_64
+
+    steps:
+      - name: Download clean Linux bundle
+        uses: actions/download-artifact@v7
+        with:
+          name: ${{ needs.build-linux-x86_64.outputs.clean_artifact_name }}
+          path: dist
+
+      - name: Build Debian package
+        id: deb
+        shell: bash
+        run: |
+          VERSION="${{ needs.build-linux-x86_64.outputs.version }}"
+          ARCH="$(dpkg --print-architecture)"
+          PKGROOT="$RUNNER_TEMP/yggdrasim-deb"
+          DEB_NAME="yggdrasim-clean_${VERSION}_${ARCH}.deb"
+          mkdir -p "$PKGROOT/DEBIAN" "$PKGROOT/usr/lib/yggdrasim" "$PKGROOT/usr/bin"
+          install -m 0755 dist/yggdrasim-clean "$PKGROOT/usr/lib/yggdrasim/yggdrasim"
+          ln -s ../lib/yggdrasim/yggdrasim "$PKGROOT/usr/bin/yggdrasim"
+          cat > "$PKGROOT/DEBIAN/control" <<EOF
+          Package: yggdrasim-clean
+          Version: ${VERSION}
+          Section: utils
+          Priority: optional
+          Architecture: ${ARCH}
+          Maintainer: GitHub Actions
+          Depends: libpcsclite1, pcscd, gpg
+          Description: YggdraSIM secure-element and eUICC toolkit (clean flavor, no HIL bridge)
+          EOF
+          dpkg-deb --build "$PKGROOT" "dist/${DEB_NAME}"
+          echo "artifact_name=yggdrasim-linux-deb-clean-${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "artifact_path=dist/${DEB_NAME}" >> "$GITHUB_OUTPUT"
+
+      - name: Upload Debian package artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: ${{ steps.deb.outputs.artifact_name }}
+          path: ${{ steps.deb.outputs.artifact_path }}
+          if-no-files-found: error
+
+  publish-release:
+    name: Publish GitHub Release
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    needs:
+      - docs-strict
+      - build-linux-x86_64
+      - build-linux-arm64-clean
+      - build-linux-arm64-full
+      - build-windows-clean
+      - build-macos-clean
+      - build-linux-deb-clean
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Resolve release metadata
+        id: meta
+        shell: bash
+        run: |
+          VERSION=$(python3 -c "import tomllib; from pathlib import Path; data = tomllib.loads(Path('pyproject.toml').read_text(encoding='utf-8')); print(data['project']['version'])")
+          TAG="${GITHUB_REF#refs/tags/}"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+
+      - name: Stage release directory
+        shell: bash
+        run: |
+          mkdir -p release-assets
+          mkdir -p dl
+
+      - name: Download Linux x86_64 clean
+        uses: actions/download-artifact@v7
+        with:
+          name: yggdrasim-linux-x86_64-clean-${{ steps.meta.outputs.version }}
+          path: dl/linux-x86_64-clean
+
+      - name: Download Linux x86_64 full
+        uses: actions/download-artifact@v7
+        with:
+          name: yggdrasim-linux-x86_64-full-${{ steps.meta.outputs.version }}
+          path: dl/linux-x86_64-full
+
+      - name: Download Linux arm64 clean
+        uses: actions/download-artifact@v7
+        with:
+          name: yggdrasim-linux-arm64-clean-${{ steps.meta.outputs.version }}
+          path: dl/linux-arm64-clean
+
+      - name: Download Linux arm64 full
+        uses: actions/download-artifact@v7
+        with:
+          name: yggdrasim-linux-arm64-full-${{ steps.meta.outputs.version }}
+          path: dl/linux-arm64-full
+
+      - name: Download Windows x86_64 clean
+        uses: actions/download-artifact@v7
+        with:
+          name: yggdrasim-windows-x86_64-clean-${{ steps.meta.outputs.version }}
+          path: dl/windows-x86_64-clean
+
+      - name: Download macOS x86_64 clean
+        uses: actions/download-artifact@v7
+        with:
+          name: yggdrasim-macos-x86_64-clean-${{ steps.meta.outputs.version }}
+          path: dl/macos-x86_64-clean
+
+      - name: Download macOS arm64 clean
+        uses: actions/download-artifact@v7
+        with:
+          name: yggdrasim-macos-arm64-clean-${{ steps.meta.outputs.version }}
+          path: dl/macos-arm64-clean
+
+      - name: Download Linux Debian package (clean)
+        uses: actions/download-artifact@v7
+        with:
+          name: yggdrasim-linux-deb-clean-${{ steps.meta.outputs.version }}
+          path: dl/linux-deb-clean
+
+      # The install scripts (scripts/install/_common.sh::yg_asset_name and
+      # install-windows.ps1::Install-YgFromRelease) consume the assets at
+      # ``yggdrasim-{os}-{arch}-{flavor}[.exe]``. The build matrix uploads
+      # them as ``yggdrasim-{flavor}[.exe]`` inside per-platform artefact
+      # bundles, so this step renames + sets +x on the way to the Release.
+      - name: Rename artefacts to install-script asset names
+        shell: bash
+        run: |
+          set -eu
+          install -m 0755 dl/linux-x86_64-clean/yggdrasim-clean   release-assets/yggdrasim-linux-x86_64-clean
+          install -m 0755 dl/linux-x86_64-full/yggdrasim-full     release-assets/yggdrasim-linux-x86_64-full
+          install -m 0755 dl/linux-arm64-clean/yggdrasim-clean    release-assets/yggdrasim-linux-arm64-clean
+          install -m 0755 dl/linux-arm64-full/yggdrasim-full      release-assets/yggdrasim-linux-arm64-full
+          install -m 0755 dl/macos-x86_64-clean/yggdrasim-clean   release-assets/yggdrasim-macos-x86_64-clean
+          install -m 0755 dl/macos-arm64-clean/yggdrasim-clean    release-assets/yggdrasim-macos-arm64-clean
+          install -m 0755 dl/windows-x86_64-clean/yggdrasim-clean.exe release-assets/yggdrasim-windows-x86_64-clean.exe
+          cp dl/linux-deb-clean/yggdrasim-clean_${{ steps.meta.outputs.version }}_amd64.deb release-assets/
+
+      - name: Generate SHA256 manifest
+        shell: bash
+        working-directory: release-assets
+        run: |
+          set -eu
+          : > SHA256SUMS
+          for f in $(ls | grep -v '^SHA256SUMS$' | sort); do
+            sha256sum "${f}" >> SHA256SUMS
+          done
+          echo '--- SHA256SUMS ---'
+          cat SHA256SUMS
+
+      # Guard the Release publish step against a silent matrix drift: if a new
+      # platform is added to the build matrix without the matching install-
+      # script asset name, this gate fires before ``gh release create``.
+      - name: Verify release-asset names match the install-script pattern
+        shell: bash
+        run: |
+          set -eu
+          required="
+            yggdrasim-linux-x86_64-clean
+            yggdrasim-linux-x86_64-full
+            yggdrasim-linux-arm64-clean
+            yggdrasim-linux-arm64-full
+            yggdrasim-macos-x86_64-clean
+            yggdrasim-macos-arm64-clean
+            yggdrasim-windows-x86_64-clean.exe
+            SHA256SUMS
+          "
+          missing=
+          for asset in ${required}; do
+            if [ ! -f "release-assets/${asset}" ]; then
+              missing="${missing} ${asset}"
+            fi
+          done
+          if [ -n "${missing}" ]; then
+            echo "missing release assets:${missing}" >&2
+            exit 1
+          fi
+          echo 'all required release assets present'
+          ls -la release-assets/
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        shell: bash
+        run: |
+          set -eu
+          TAG="${{ steps.meta.outputs.tag }}"
+          PRERELEASE_FLAG=""
+          case "${TAG}" in
+            *-rc*|*-alpha*|*-beta*|*-pre*) PRERELEASE_FLAG="--prerelease" ;;
+          esac
+          gh release create "${TAG}" \
+            --title "YggdraSIM ${TAG}" \
+            --notes-from-tag \
+            --verify-tag \
+            ${PRERELEASE_FLAG} \
+            release-assets/*
