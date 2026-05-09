@@ -1,3 +1,5 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+"""SAIP profile applicator: walks a decoded pySim profile document and writes each PE to the simulated FS."""
 from __future__ import annotations
 
 import ctypes
@@ -182,7 +184,7 @@ def _decode_profile_element_bounded(
 #
 # References:
 #   * pySim ``esim/asn1/saip/PE_Definitions-3.3.1.asn`` (AUTOMATIC TAGS,
-#     IMPLICIT by default, EXTENSIBILITY IMPLIED) -- the canonical schema.
+#     IMPLICIT by default, EXTENSIBILITY IMPLIED) — the canonical schema.
 #   * 3GPP TS 31.102 / TS 31.103 / TS 51.011 / ETSI TS 102 221 for file
 #     identifiers and per-EF record structures.
 #   * ``Tools/ProfilePackage/saip_asn1_decode._EF_KEY_TO_FID`` for the
@@ -843,7 +845,7 @@ def _salvage_file_profile_element(
 
         payload = _collect_file_content_bytes(bytes(field_value))
         if payload is None:
-            # ``doNotCreate`` marker - skip without synthesising a node.
+            # ``doNotCreate`` marker – skip without synthesising a node.
             produced_any_slot = True
             offset = next_offset
             continue
@@ -1616,6 +1618,7 @@ def decode_profile_image(
     default_imsi: str = "",
     default_impi: str = "",
 ) -> SimProfileImage | None:
+    """Decode a SAIP profile image byte blob into a structured Python dict."""
     raw = bytes(upp_bytes or b"")
     if len(raw) == 0:
         return None
@@ -2260,9 +2263,9 @@ def _consume_rfm(image: SimProfileImage, decoded: dict[str, Any]) -> None:
     226 §8.4 prohibits more than one ADF binding per RFM instance, so
     the optional ``adfRFMAccess`` is materialised verbatim.
 
-    Routes through pySim's ``ProfileElementRFM`` wrapper; the wrapper
-    performs no extra post-decoding but provides a hook so future
-    upstream invariants can surface here without re-touching the parser.
+    Routes through pySim's ``ProfileElementRFM`` wrapper (Phase C);
+    the wrapper currently does no extra post-decoding but lets future
+    upstream invariants surface here without re-touching the parser.
     """
     wrapper = pysim_pe_wrapper("rfm", decoded)
     source = getattr(wrapper, "decoded", decoded) if wrapper is not None else decoded

@@ -1,0 +1,19 @@
+# openssl x509 extfile params
+extensions = extend
+
+prompt = no
+
+[extend] # openssl extensions
+authorityKeyIdentifier=keyid,issuer
+
+keyUsage =critical, digitalSignature
+
+subjectKeyIdentifier=hash
+
+subjectAltName = RID:2.999.15   
+
+certificatePolicies=critical,2.23.146.1.2.1.7  
+
+# crlDistributionPoints
+crlDistributionPoints=URI:http://ci.test.example.com/CRL-1.crl, URI:http://ci.test.example.com/CRL-2.crl
+

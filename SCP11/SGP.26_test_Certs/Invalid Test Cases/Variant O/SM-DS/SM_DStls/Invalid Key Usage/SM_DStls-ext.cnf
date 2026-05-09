@@ -1,0 +1,15 @@
+######################################################################################################################################################################
+# Extensions for a DSTLS
+keyUsage = critical, keyAgreement
+extendedKeyUsage = critical, serverAuth, clientAuth
+#id-rspRole-ds-tls OBJECT IDENTIFIER ::= {id-rspRole 6}
+certificatePolicies = 2.23.146.1.2.1.6
+subjectKeyIdentifier = hash
+authorityKeyIdentifier = keyid:always,issuer
+
+# RID shall be aligend with SGP.23 value S_SM_DS_OID	2.999.15
+# DNS name shall be aligned with SGP.23 value ##TEST_ROOT_DS_ADDRESS
+subjectAltName =  DNS:testrootsmds.example.com, RID:2.999.15
+
+crlDistributionPoints=URI:http://ci.test.example.com/CRL-1.crl, URI:http://ci.test.example.com/CRL-2.crl
+

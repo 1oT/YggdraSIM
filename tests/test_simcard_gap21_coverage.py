@@ -1,10 +1,14 @@
-"""Coverage for the USIM Service Table coherence with voice / SMS EFs:
+"""Twenty-first-pass gap-coverage suite for the USIM Service Table
+plus EF.SMSR / EF.SDN default seeds.
 
-A modem that respects EF.UST (3GPP TS 31.102 §4.2.8) needs the
-service bits for EF.LND, EF.ICI, EF.OCI, EF.SMS to be set or it
-will not read those EFs. The corresponding service bits are
-flipped to ON and two remaining linear-fixed EFs in the same
-family are added:
+Round-21 closes a quiet but real gap: rounds 19 and 20 seeded
+several voice / SMS EFs and decoded the operator-control
+envelopes (D4 / D5), but the USIM Service Table never advertised
+those services. A modem that respects EF.UST (3GPP TS 31.102
+§4.2.8) would then *not* read EF.LND, EF.ICI, EF.OCI, EF.SMS
+even though the simulator was happy to serve them. Round-21
+flips the corresponding service bits to ON and adds two
+remaining linear-fixed EFs in the same family:
 
 * EF.SMSR (``6F47``) -- SMS Status Reports, linear-fixed, 30
   bytes per record. Service 11 in EF.UST.
@@ -13,7 +17,8 @@ family are added:
   in EF.UST.
 
 Existing 5G UST assertions (services 122 / 124 / 125 / 129 /
-130) continue to pass because the update only *adds* bits.
+130) continue to pass because the round-21 update only *adds*
+bits.
 """
 
 from __future__ import annotations
@@ -90,8 +95,8 @@ class UsimServiceTableTests(_EngineHarness):
         self._select_usim()
         self._select_ef("6F38")
         ust = self._read_binary(0x11)
-        # Voice / SMS service bits whose backing EFs the simulator
-        # seeds and whose envelopes it decodes.
+        # Round 19 / 20 / 21 services that correspond to EFs the
+        # simulator now seeds and envelopes it now decodes.
         for service in (4, 8, 9, 10, 11, 12, 21, 30, 31, 55):
             self._assert_service_enabled(ust, service)
 
@@ -99,8 +104,10 @@ class UsimServiceTableTests(_EngineHarness):
         self._select_usim()
         self._select_ef("6F38")
         ust = self._read_binary(0x11)
-        # Attach baseline. Services 45 / 46 are PNN / OPL per
-        # TS 31.102 §4.2.8; service 50 is reserved and not set.
+        # Pre-existing attach baseline must stay intact. Round 27
+        # corrected services 50 / 51 to the spec-accurate 45 / 46
+        # (PNN / OPL) backing -- service 50 is reserved per
+        # TS 31.102 §4.2.8 and shall be ignored.
         for service in (19, 27, 33, 38, 45, 46, 51, 122, 124, 125, 126, 129, 130):
             self._assert_service_enabled(ust, service)
 

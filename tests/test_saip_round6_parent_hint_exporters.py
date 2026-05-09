@@ -1,5 +1,6 @@
-"""parent_hint threading through the offline JSON inspectors and the
-decoded-editor audit.
+"""
+Round-6 Sweeps 2 & 3 — parent_hint threading through the offline JSON
+inspectors and the decoded-editor audit.
 
 The TRANSCODE inspector (``saip_transcode_inspect.build_transcode_inspector_text``)
 and the decoded-editor audit (``saip_decoded_edit_audit.audit_decoded_editors``)

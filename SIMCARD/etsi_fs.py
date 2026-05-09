@@ -1,3 +1,5 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+"""ETSI TS 102 221 elementary-file emulation: transparent, linear-fixed, and cyclic record access on in-memory byte arrays."""
 from __future__ import annotations
 
 import copy
@@ -101,23 +103,23 @@ def _encode_ef_ust_default() -> bytes:
     # modem complete attach against the simulator and also advertises
     # the voice / SMS services whose EFs are seeded under ADF.USIM:
     #
-    #   4 SDN (Service Dialling Numbers),
-    #   8 OCI/OCT (Outgoing Call Information / Timer),
-    #   9 ICI/ICT (Incoming Call Information / Timer),
-    #  10 SMS message storage,
-    #  11 SMS Status Reports,
+    #   4 SDN (Service Dialling Numbers - round 21),
+    #   8 OCI/OCT (Outgoing Call Information / Timer - round 20),
+    #   9 ICI/ICT (Incoming Call Information / Timer - round 20),
+    #  10 SMS message storage (round 20),
+    #  11 SMS Status Reports (round 21),
     #  12 SMS Parameters (already seeded as EF.SMSP),
     #  19 SPN, 21 MSISDN, 27 GSM access,
-    #  30 Call Control by USIM (D4 envelope decoder),
-    #  31 MO-SMS Control by USIM (D5 envelope decoder),
+    #  30 Call Control by USIM (D4 envelope decoder - round 19),
+    #  31 MO-SMS Control by USIM (D5 envelope decoder - round 19),
     #  33 RFU/must-be-1, 38 GSM security context,
-    #  45 PLMN Network Name (PNN),
-    #  46 Operator PLMN List (OPL),
-    #  49 Call Forwarding Indication Status (CFIS),
-    #  51 Service Provider Display Information (SPDI),
-    #  55 Last Number Dialled,
-    #  71 Equivalent HPLMN (EHPLMN list),
-    #  91 Support for SM-over-IP (PSISMSC),
+    #  45 PLMN Network Name (PNN - corrected round 27),
+    #  46 Operator PLMN List (OPL - corrected round 27),
+    #  49 Call Forwarding Indication Status (CFIS - round 22),
+    #  51 Service Provider Display Information (SPDI - round 27),
+    #  55 Last Number Dialled (round 19),
+    #  71 Equivalent HPLMN (EHPLMN list - round 22),
+    #  91 Support for SM-over-IP (PSISMSC - round 26),
     #  122 Subscription identifier de-concealing function (5G SUCI by ME),
     #  124 Subscription identifier de-concealing function support (5G),
     #  125 SUCI calculation by the USIM (TS 31.102 §5.1.1.5),
@@ -653,7 +655,7 @@ def _attach_ready_usim_nodes(
             records=[b"\xFF" * 8],
         ),
         # 3GPP TS 31.102 §4.2.66 EF.SPDI - Service Provider
-        # Display Information. Transparent EF gated
+        # Display Information (round 27). Transparent EF gated
         # by EF.UST service 51. Default seed: empty SPDI list
         # (`A3 02 80 00`) so a modem reading the EF before the
         # operator pushes an SPDI provisioning record gets a
@@ -761,7 +763,7 @@ def _attach_ready_usim_nodes(
             records=[_encode_ef_mwis_record()],
         ),
         # 3GPP TS 31.102 §4.2.32 EF.LND - Last Number Dialled
-        #. Cyclic, one 22-byte record (8-byte alpha +
+        # (round 19). Cyclic, one 22-byte record (8-byte alpha +
         # 14-byte dial body), all-FF -- no last number dialled
         # yet. UPDATE RECORD mode 0x03 (previous) cycles new
         # entries through; the simulator's cyclic semantics keep
@@ -776,7 +778,7 @@ def _attach_ready_usim_nodes(
             records=[_encode_ef_lnd_record(alpha_length=8)],
         ),
         # 3GPP TS 31.102 §4.2.20 EF.ICI - Incoming Call Information
-        #. Cyclic record store for the call-history
+        # (round 20). Cyclic record store for the call-history
         # log. Default seed: one 30-byte all-FF record, modem
         # appends new entries via UPDATE RECORD mode 0x03.
         SimProfileFsNode(
@@ -788,7 +790,7 @@ def _attach_ready_usim_nodes(
             records=[_encode_ef_ici_record(alpha_length=8)],
         ),
         # 3GPP TS 31.102 §4.2.21 EF.OCI - Outgoing Call Information
-        #. Same shape as EF.ICI minus the unread byte;
+        # (round 20). Same shape as EF.ICI minus the unread byte;
         # the simulator carries the conservative full layout
         # because the FCP descriptor advertises the exact length.
         SimProfileFsNode(
@@ -800,7 +802,7 @@ def _attach_ready_usim_nodes(
             records=[_encode_ef_oci_record(alpha_length=8)],
         ),
         # 3GPP TS 31.102 §4.2.22 EF.ICT - Incoming Call Timer
-        #. Cyclic, 3-byte BE counter of cumulative
+        # (round 20). Cyclic, 3-byte BE counter of cumulative
         # incoming-call seconds. Default zero.
         SimProfileFsNode(
             path=("MF", "ADF.USIM", "EF.ICT"),
@@ -811,7 +813,7 @@ def _attach_ready_usim_nodes(
             records=[_encode_ef_ict_record()],
         ),
         # 3GPP TS 31.102 §4.2.23 EF.OCT - Outgoing Call Timer
-        #. Cyclic, 3-byte BE counter of cumulative
+        # (round 20). Cyclic, 3-byte BE counter of cumulative
         # outgoing-call seconds. Default zero.
         SimProfileFsNode(
             path=("MF", "ADF.USIM", "EF.OCT"),
@@ -822,7 +824,7 @@ def _attach_ready_usim_nodes(
             records=[_encode_ef_oct_record()],
         ),
         # 3GPP TS 31.102 §4.2.25 EF.SMS - SMS message storage
-        #. Linear-fixed, 176 bytes per record. The
+        # (round 20). Linear-fixed, 176 bytes per record. The
         # default profile carries one free slot (status byte
         # 0x00, body 0xFF) so a modem can immediately STORE an
         # SMS without resizing the EF.
@@ -835,7 +837,7 @@ def _attach_ready_usim_nodes(
             records=[_encode_ef_sms_record()],
         ),
         # 3GPP TS 31.102 §4.2.28 EF.SMSR - SMS Status Reports
-        #. Linear-fixed, 30 bytes per record. Service 11
+        # (round 21). Linear-fixed, 30 bytes per record. Service 11
         # in EF.UST. Each record links back to the matching EF.SMS
         # row plus a 29-byte Status Report TPDU.
         SimProfileFsNode(
@@ -847,7 +849,7 @@ def _attach_ready_usim_nodes(
             records=[_encode_ef_smsr_record()],
         ),
         # 3GPP TS 31.102 §4.2.46 EF.SDN - Service Dialling Numbers
-        #. Linear-fixed, 22 bytes per record (alpha 8 +
+        # (round 21). Linear-fixed, 22 bytes per record (alpha 8 +
         # 14-byte dial body). Service 4 in EF.UST. Operators
         # provision shortcut codes (customer service, voicemail
         # access) into these records OTA.
@@ -860,7 +862,7 @@ def _attach_ready_usim_nodes(
             records=[_encode_ef_sdn_record(alpha_length=8)],
         ),
         # 3GPP TS 31.102 §4.2.84 EF.EHPLMNPI - Equivalent HPLMN
-        # Presentation Indication. Service 71 in
+        # Presentation Indication (round 22). Service 71 in
         # EF.UST. One transparent byte; bit 1 controls whether
         # the modem displays every EHPLMN or only the HPLMN.
         # Default 0x00 = HPLMN only.
@@ -873,7 +875,7 @@ def _attach_ready_usim_nodes(
             data=_encode_ef_ehplmnpi_default(),
         ),
         # 3GPP TS 31.102 §4.2.64 EF.CFIS - Call Forwarding
-        # Indication Status. Service 49 in EF.UST.
+        # Indication Status (round 22). Service 49 in EF.UST.
         # Linear-fixed, 16 bytes per record. Default seed:
         # MSP ID 0x01, CFU off, BCD dial body all-FF.
         SimProfileFsNode(
@@ -886,7 +888,7 @@ def _attach_ready_usim_nodes(
         ),
         # 3GPP TS 31.102 §4.2.81 EF.PSISMSC - Public Service
         # Identity of the SM-SC for SM-over-IP messaging
-        #. Service 91 in EF.UST. Linear-fixed; one
+        # (round 26). Service 91 in EF.UST. Linear-fixed; one
         # 64-byte default record carrying a TS 23.003-shaped
         # SIP URI rooted in the simulator's test PLMN, so a
         # paired modem can resolve the SM-SC end-point without
@@ -916,7 +918,7 @@ def _attach_ready_usim_nodes(
             data=threshold,
         ),
         # 3GPP TS 31.102 §4.2.6 EF.HPPLMN - Higher Priority PLMN
-        # search period. One byte: search timer in
+        # search period (round 18). One byte: search timer in
         # 6-minute units (range 0x01..0xF1). The 0x05 default
         # corresponds to 30 minutes between HPLMN scans, the
         # interval most operator profiles ship.
@@ -929,7 +931,7 @@ def _attach_ready_usim_nodes(
             data=bytes((0x05,)),
         ),
         # 3GPP TS 31.102 §4.2.34 EF.NETPAR - Network parameters
-        # cache. The 16-byte transparent body holds
+        # cache (round 18). The 16-byte transparent body holds
         # ciphering / integrity / RAT bookkeeping that the modem
         # writes on detach so a subsequent attach can resume
         # without renegotiating. Default is all-FF -- no cached
@@ -943,7 +945,7 @@ def _attach_ready_usim_nodes(
             data=b"\xFF" * 16,
         ),
         # 3GPP TS 31.102 §4.2.86 EF.LRPLMNSI - Last RPLMN Selection
-        # Indication. One byte: 0x00 = "first attempt
+        # Indication (round 18). One byte: 0x00 = "first attempt
         # after power on" (default), 0x01 = "subsequent attempt"
         # (set after the modem's first PLMN selection succeeds).
         # Modems read it during power-up to decide between fast
@@ -1541,7 +1543,7 @@ def _default_profile_image(
             ],
         ),
         # 3GPP TS 31.103 §4.2.10 EF.GBABP - GBA Bootstrapping
-        # Parameters. Required because EF.IST
+        # Parameters (round 23). Required because EF.IST
         # advertises GBA (service 2). Seeded with three empty
         # TLVs so the EF has a deterministic 6-byte default
         # before the first bootstrap runs.
@@ -1554,7 +1556,7 @@ def _default_profile_image(
             data=_encode_ef_gbabp_default(),
         ),
         # 3GPP TS 31.103 §4.2.11 EF.GBANL - GBA NAF List
-        #. Linear-fixed list of NAF_ID / B-TID
+        # (round 23). Linear-fixed list of NAF_ID / B-TID
         # pairs. Default seed: one 28-byte all-FF placeholder
         # so the modem can UPDATE RECORD post-bootstrap
         # without the simulator pre-allocating per-NAF rows.
@@ -1567,7 +1569,7 @@ def _default_profile_image(
             records=[_encode_ef_gbanl_record(record_length=28)],
         ),
         # 3GPP TS 31.103 §4.2.13 EF.SMS - Short Message
-        # storage in ISIM. Linear-fixed; 1-byte
+        # storage in ISIM (round 24). Linear-fixed; 1-byte
         # status + 175-byte TPDU per record. Required because
         # EF.IST advertises service 6 (Short Message storage).
         # Default seed: one empty slot (0x00 status + FF
@@ -1582,7 +1584,7 @@ def _default_profile_image(
             records=[_encode_ef_sms_record()],
         ),
         # 3GPP TS 31.103 §4.2.14 EF.SMSS - SMS Status in
-        # ISIM. Transparent, two bytes:
+        # ISIM (round 24). Transparent, two bytes:
         #   Byte 0  Last-Used TP-MR (0x00 on issuance).
         #   Byte 1  SMS memory-capacity exceeded notification
         #           flag (0xFF = no notification owed).
@@ -1596,7 +1598,7 @@ def _default_profile_image(
             data=_encode_ef_smss_default(),
         ),
         # 3GPP TS 31.103 §4.2.15 EF.SMSR - SMS Status Reports
-        # in ISIM. Linear-fixed; 1-byte link to
+        # in ISIM (round 24). Linear-fixed; 1-byte link to
         # EF.SMS record + 29-byte status report TPDU.
         # Required by EF.IST service 7.
         SimProfileFsNode(
@@ -1650,6 +1652,7 @@ def _build_name_path_index(nodes: dict[str, SimFileNode]) -> dict[tuple[str, ...
     index: dict[tuple[str, ...], str] = {}
 
     def walk(node_id: str, path: tuple[str, ...]) -> None:
+        """Depth-first walk of the ETSI file-system TLV tree."""
         node = nodes[node_id]
         index[path] = node_id
         for child_id in node.children:
@@ -1681,6 +1684,7 @@ def _resolve_active_profile(state: SimCardState) -> SimProfileEntry | None:
 
 
 def apply_security_domain_config(state: SimCardState) -> None:
+    """Update ISDR, ECASD, and MNO-SD node AIDs and labels in ``state.base_nodes`` from current state fields."""
     _apply_security_domain_node(state.base_nodes, "ISDR", state.isdr_aid, state.isdr_label)
     _apply_security_domain_node(state.base_nodes, "ECASD", state.ecasd_aid, state.ecasd_label)
     _apply_security_domain_node(state.base_nodes, "MNO_SD", state.mno_sd_aid, state.mno_sd_label)
@@ -1706,6 +1710,11 @@ def _apply_security_domain_node(
 
 
 def rebuild_runtime_filesystem(state: SimCardState) -> None:
+    """Rebuild the live node tree from the base snapshot after a profile enable/disable or BPP install.
+
+    Deep-copies ``state.base_nodes``, re-applies the SAIP profile overlay, personalises
+    EF bodies with current ICCID/IMSI/AKA material, then restores the previously selected node.
+    """
     previous_node_id = str(state.current_node_id or "3F00")
     base_nodes = state.base_nodes if len(state.base_nodes) > 0 else state.nodes
     state.nodes = copy.deepcopy(base_nodes)
@@ -1842,13 +1851,14 @@ def rebuild_runtime_filesystem(state: SimCardState) -> None:
     # DF.GSM (FID 7F20). Real-world dual-mode SIMs always present
     # this DF so a 2G-style modem cold-attach (CLA=0xA0 SELECT 7F20)
     # succeeds even when the operator's BPP did not explicitly carve
-    # one out via genericFileManagement. If the active profile's
-    # image stream did not land a 7F20 node under MF, synthesise an
-    # empty stub. EFs under DF.GSM (EF.IMSI, EF.LOCI, EF.Kc, ...)
-    # only matter once the modem actually descends into the DF,
-    # which current basebands rarely do once they discover ADF.USIM
-    # via EF.DIR. The stub satisfies the probe and unblocks the
-    # cold attach.
+    # one out via genericFileManagement. The simulator now mirrors
+    # that contract: if the active profile's image stream did not
+    # land a 7F20 node under MF, synthesise an empty stub. EFs under
+    # DF.GSM (EF.IMSI, EF.LOCI, EF.Kc, ...) only matter once the
+    # modem actually descends into the DF, which the trace shows
+    # current basebands rarely do once they discover ADF.USIM via
+    # EF.DIR. The stub satisfies the probe and unblocks the cold
+    # attach.
     if ("MF", "DF.GSM") not in path_index and "3F00" in nodes:
         df_gsm_node_id = "DF_GSM_LEGACY"
         if df_gsm_node_id not in nodes:
@@ -2117,7 +2127,7 @@ def _apply_explicit_file_links_from_profile(
     The pass is idempotent and respects three invariants:
 
     1. Issuer-supplied content always wins. If the source EF already
-       carries ``data`` or any non-empty record the link is treated as
+       carries ``data`` or any non-empty record we treat the link as
        a creation-time hint that has been overridden and leave the
        source untouched. Same rule the on-card link resolver in real
        cards follows after CREATE FILE has materialised content.
@@ -2317,9 +2327,9 @@ def _apply_saip_template_defaults_to_runtime(
             node.sfi = int(template_sfi) & 0x1F
 
         template_file_type = str(getattr(template, "file_type", "") or "").strip()
-        # Map pySim shorthand ('TR', 'LF', 'CY', 'BT') onto runtime
-        # labels. ``BT`` (BER-TLV) is not exercised by any cold-attach
-        # EF but is mapped for completeness.
+        # Map pySim shorthand ('TR', 'LF', 'CY', 'BT') onto our
+        # runtime labels. ``BT`` (BER-TLV) is not currently exercised
+        # by any cold-attach EF but is mapped for completeness.
         structure_for_template = {
             "TR": "transparent",
             "LF": "linear-fixed",
@@ -2613,9 +2623,10 @@ def _apply_profile_apn_to_ipa_poll(
     The APN lives in EF.ACL (FID 6F57, transparent) per
     3GPP TS 31.102 §4.2.48: byte 0 is the APN count followed by N
     BER-TLVs with tag ``0xDD``, length, then ASCII APN bytes. The
-    first APN wins. When the EF is missing or empty the helper
-    preserves whatever the env / workspace fallback already placed
-    in ``ipa_poll_apn``.
+    first APN wins because that is what real IPA implementations use
+    for the eIM-poll bearer. When the EF is missing or empty the
+    helper preserves whatever the env / workspace fallback already
+    placed in ``ipa_poll_apn``.
     """
 
     apn = _extract_apn_from_ef_acl(nodes, path_index)
@@ -2688,7 +2699,12 @@ def _extract_apn_from_ef_acl(
 
 
 def build_default_state() -> SimCardState:
-    iccid = "89881111111111111112"
+    """Construct a fully-initialised ``SimCardState`` from the built-in default UICC profile.
+
+    Creates the base ETSI file system tree, personalises it with synthetic test
+    identifiers, and returns the singleton-ready state object.
+    """
+    iccid = "89461111111111111112"
     # MCC/MNC 001/01 - 3GPP test PLMN. Keeps the default profile identity
     # compatible with osmo-hlr / open5gs / free5gc lab HSS configurations.
     imsi = "001010000000001"
@@ -2735,7 +2751,7 @@ def build_default_state() -> SimCardState:
         ),
         SimProfileEntry(
             aid=ISDP2_AID,
-            iccid="89881111111111111129",
+            iccid="89461111111111111129",
             state="disabled",
             profile_class="test",
             nickname="Lab (EU 02)",
@@ -2745,7 +2761,7 @@ def build_default_state() -> SimCardState:
             impi="user-secondary@yggdrasim.test",
             notification_address="rsp.example.com",
             profile_image=_default_profile_image(
-                "89881111111111111129",
+                "89461111111111111129",
                 secondary_imsi,
                 "user-secondary@yggdrasim.test",
                 service_provider=secondary_service_provider,
@@ -2772,7 +2788,7 @@ def build_default_state() -> SimCardState:
         eim_entries=[
             SimEimEntry(
                 eim_id="2.25.311782205282738360923618091971140414400",
-                eim_fqdn="eim.yggdrasim.example.test",
+                eim_fqdn="yggdrasim.eim.test.1ot.com",
                 eim_id_type=1,
                 counter_value=1,
                 association_token=16,
@@ -3110,7 +3126,7 @@ class EtsiFileSystem:
         - ``0x04`` Absolute. On linear-fixed P1 is the record id; on
           cyclic P1 = 0 means the current (most-recent) record.
 
-        Cyclic EFs keep the most-recent record at index
+        Cyclic EFs (round 19) keep the most-recent record at index
         0 of ``records``; ``record_number = 1`` returns that
         record. Absolute reads with P1 in range 1..record_count map
         directly into the slot history (1 = most recent, 2 = next
@@ -3258,7 +3274,7 @@ class EtsiFileSystem:
 
         - ``0x04`` Absolute -- linear-fixed only. P1 is the record
           number to overwrite.
-        - ``0x03`` Previous -- cyclic only. The card
+        - ``0x03`` Previous -- cyclic only (round 19). The card
           overwrites what was the OLDEST record, then rotates the
           ring so the new record becomes the most-recent (index 0).
           P1 is ignored per spec.
@@ -3564,6 +3580,7 @@ class EtsiFileSystem:
         to_remove: list[str] = []
 
         def collect(node_id: str) -> None:
+            """Collect file descriptors while traversing the directory tree."""
             node = self.state.nodes.get(node_id)
             if node is None:
                 return
@@ -3743,7 +3760,7 @@ class EtsiFileSystem:
         - ``0x04`` simple search forward, starting at record P1.
         - ``0x05`` simple search backward, starting at record P1.
         - ``0x06`` enhanced search (per §11.1.7.4) -- not modelled;
-          the form is accepted but treated as a forward simple search.
+          we accept the form but treat it as forward simple search.
 
         The body is the byte sequence to look for. Successful search
         returns the matching record numbers (1 byte each) under SW
@@ -3976,10 +3993,11 @@ class EtsiFileSystem:
             )
         else:
             descriptor = b"\x41\x21"
-        # Tag order: 82 83 [84] [A5] 8A 8B [80] [88] [C6]. Strict
-        # baseband parsers walk the FCP linearly and tolerate missing
-        # tags but reject unexpected ordering, so the order is kept
-        # identical to the canonical UICC FCP format.
+        # Tag order mirrors commercial UICCs (sysmoUSIM-SJS1 reference
+        # trace): 82 83 [84] [A5] 8A 8B [80] [88] [C6]. Strict baseband
+        # parsers (e.g. Qualcomm RIL) walk the FCP linearly and
+        # tolerate missing tags but reject unexpected ordering, so we
+        # keep this identical to the on-the-wire format observed.
         body = tlv("82", descriptor)
         if len(node.fid) == 4:
             body += tlv("83", bytes.fromhex(node.fid))
@@ -4039,7 +4057,10 @@ class EtsiFileSystem:
                                    the ATR's TA1=0x96 declares Fi=512
                                    Di=32 (~5 MHz).
             83 04 00 03 79 70      Application Power Consumption:
-                                   class B 3 V, 0x7970 mA*100us.
+                                   class B 3 V, 0x7970 mA*100us. The
+                                   numeric values mirror the reference
+                                   trace from a sysmoUSIM-SJS1 so test
+                                   benches can pattern-match.
             87 01 01               Template version 1.
 
         Modems use 80 inside A5 to discriminate UICC from legacy SIM;
@@ -4092,7 +4113,7 @@ class EtsiFileSystem:
         EFs whose parent is the MF reference the global EF_ARR at
         2F06; EFs (and DFs/ADFs) that hang off a DF or ADF reference
         the local 6F06. MF itself, top-level DFs, and top-level ADFs
-        all reference 2F06 (the global table) per the standard UICC
+        all reference 2F06 (the global table) per the sysmocom UICC
         convention.
         """
         if node.kind in ("mf", "df", "adf"):
@@ -4124,7 +4145,7 @@ class EtsiFileSystem:
 
         * At the ADF/DF level we declare the PIN1 / Universal-PIN /
           ADM1 triplet. The bitmap is computed from
-          ``state.chv_references[...].enabled`` so DISABLE PIN /
+          ``state.chv_references[…].enabled`` so DISABLE PIN /
           ENABLE PIN APDUs flip the advertisement on the next FCP
           retrieval.
         """

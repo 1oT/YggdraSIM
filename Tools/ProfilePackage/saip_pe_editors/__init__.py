@@ -13,9 +13,9 @@ Public surface
 
 * ``PE_EDITOR_REGISTRY`` maps a normalized PE base type (``base_pe_type``
   output, e.g. ``"pinCodes"``, ``"akaParameter"``, ``"securityDomain"``,
-  ``"usim"``, ``"isim"``...) to the editor class that knows how to render
+  ``"usim"``, ``"isim"``…) to the editor class that knows how to render
   it. The TUI looks up by the *base* of the PE key so duplicate PEs
-  (``pinCodes_2``, ``genericFileManagement_3`` ...) all hit the same editor.
+  (``pinCodes_2``, ``genericFileManagement_3`` …) all hit the same editor.
 * ``BasePeEditor`` is the abstract parent. It owns the shared ``Changed``
   message, the read-only flag, and the ``set_pe_value`` / ``current_value``
   contract.
@@ -24,7 +24,7 @@ Public surface
   filesystem summaries (the right-most column of the reference UI).
 
 The editors deliberately do not depend on anything in ``saip_transcode_tui``
--- the host wires them up by importing ``PE_EDITOR_REGISTRY`` and listening
+— the host wires them up by importing ``PE_EDITOR_REGISTRY`` and listening
 for ``BasePeEditor.Changed``.
 """
 
@@ -66,7 +66,7 @@ def _register_default_editors() -> None:
     for naa_key in ("usim", "opt-usim", "isim", "opt-isim", "csim", "opt-csim"):
         register_pe_editor(PE_EDITOR_REGISTRY, naa_key, NaaPeEditor)
     # ``GenericPeEditor`` is used as the fallback for every PE that does
-    # not have a custom editor -- it surfaces the SAIP header and lists
+    # not have a custom editor — it surfaces the SAIP header and lists
     # the PE members so the operator at least sees a structured shape
     # instead of the raw JSON dump.
 

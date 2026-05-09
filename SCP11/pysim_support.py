@@ -1,3 +1,5 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+"""SCP11 pySim support: thin wrappers over pySim SAIP codec and OTA keyset for profile decoding and BPP signing."""
 import os
 from typing import Any, List, Optional
 
@@ -29,6 +31,7 @@ if compile_asn1_subdir is not None:
 
 
 def pysim_available() -> bool:
+    """Return True when the pySim RSP ASN.1 codec is importable in the current environment."""
     if _PY_SIM_RSP_ASN1 is None:
         return False
     if pysim_rsp is None:
@@ -59,6 +62,7 @@ def decode_rsp_type(type_name: str, payload: bytes) -> Any:
 
 
 def unwrap_tlv_octet_string(value: bytes, tag_bytes: bytes) -> bytes:
+    """Strip a BER-TLV OCTET STRING wrapper and return the raw payload bytes."""
     raw_value = bytes(value)
     wanted_tag = bytes(tag_bytes)
     if raw_value.startswith(wanted_tag) is False:
@@ -107,6 +111,7 @@ def encode_server_signed1(
     server_address: str,
     server_challenge: bytes,
 ) -> bytes:
+    """Encode a ServerSigned1 structure for ES9+.AuthenticateClient (SGP.22 §5.7.14)."""
     payload = {
         "transactionId": bytes(transaction_id),
         "euiccChallenge": bytes(euicc_challenge),
@@ -125,6 +130,7 @@ def encode_smdp_signed2(
     cc_required_flag: bool,
     bpp_euicc_otpk: bytes = b"",
 ) -> bytes:
+    """Encode an SmdpSigned2 structure for ES9+.GetBoundProfilePackage (SGP.22 §5.7.15)."""
     payload = {
         "transactionId": bytes(transaction_id),
         "ccRequiredFlag": bool(cc_required_flag),
@@ -145,6 +151,7 @@ def encode_authenticate_server_request(
     server_certificate_der: bytes,
     ctx_params: dict,
 ) -> bytes:
+    """Encode a complete ES9+.AuthenticateClient request payload."""
     decoded_server_signed1 = decode_rsp_type("ServerSigned1", server_signed1_der)
     decoded_server_certificate = decode_certificate(server_certificate_der)
     if decoded_server_signed1 is None:
@@ -169,6 +176,7 @@ def encode_prepare_download_request(
     smdp_certificate_der: bytes,
     hash_cc: bytes = b"",
 ) -> bytes:
+    """Encode an ES9+.PrepareDownload request payload (SGP.22 §5.7.16)."""
     decoded_smdp_signed2 = decode_rsp_type("SmdpSigned2", smdp_signed2_der)
     decoded_smdp_certificate = decode_certificate(smdp_certificate_der)
     if decoded_smdp_signed2 is None:
@@ -229,6 +237,7 @@ def decode_list_notification_response(raw_tlv: bytes) -> Any:
 
 
 def verify_certificate_against_ca_bundle(certificate_der: bytes, ca_bundle_path: str) -> str:
+    """Verify an X.509 DER certificate against a PEM CA bundle using the cryptography library."""
     if pysim_available() is False:
         return ""
     if len(ca_bundle_path.strip()) == 0:
@@ -256,6 +265,7 @@ def verify_certificate_against_ca_bundle(certificate_der: bytes, ca_bundle_path:
 
 
 def get_certificate_authority_key_identifier(certificate_der: bytes) -> bytes:
+    """Extract the Authority Key Identifier extension bytes from a DER-encoded X.509 certificate."""
     if pysim_available() is False:
         return b""
     try:

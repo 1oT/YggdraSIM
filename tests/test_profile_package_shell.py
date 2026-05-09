@@ -950,12 +950,12 @@ class ProfilePackageShellTests(unittest.TestCase):
         self.assertEqual(
             generated_files,
             [
-                "profile_iccid_89461111111111111112.der",
-                "profile_iccid_89461111111111111113.der",
+                "profile_iccid_89881111111111111112.der",
+                "profile_iccid_89881111111111111113.der",
             ],
         )
-        self.assertEqual(generated_payloads["profile_iccid_89461111111111111112.der"], b"\xAA\x01")
-        self.assertEqual(generated_payloads["profile_iccid_89461111111111111113.der"], b"\xAA\x02")
+        self.assertEqual(generated_payloads["profile_iccid_89881111111111111112.der"], b"\xAA\x01")
+        self.assertEqual(generated_payloads["profile_iccid_89881111111111111113.der"], b"\xAA\x02")
         self.assertIn("Generated 2 DER profiles", captured.getvalue())
 
     def test_cmd_info_apps_invokes_bridge_with_expected_arguments(self) -> None:

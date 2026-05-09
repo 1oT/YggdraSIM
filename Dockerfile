@@ -24,7 +24,7 @@
 ARG YGGDRASIM_FLAVOR=clean
 
 # -----------------------------------------------------------------------------
-# Stage 1 -- build: compile wheels and populate a self-contained virtualenv
+# Stage 1 — build: compile wheels and populate a self-contained virtualenv
 # -----------------------------------------------------------------------------
 FROM python:3.11-slim AS build
 
@@ -90,7 +90,7 @@ RUN if [ "${YGGDRASIM_FLAVOR}" = "full" ]; then \
     fi
 
 # -----------------------------------------------------------------------------
-# Stage 2 -- runtime: slim image carrying only shared libs + venv + source
+# Stage 2 — runtime: slim image carrying only shared libs + venv + source
 # -----------------------------------------------------------------------------
 FROM python:3.11-slim AS runtime
 

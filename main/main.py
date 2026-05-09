@@ -1086,7 +1086,7 @@ def _resolve_supervisor_quirks_env ()->tuple [str ,str ]:
     The bridge child enforces the same ``YGGDRASIM_ALLOW_QUIRKS`` gate
     as every other simulator entry point (``SIMCARD/quirks.py``).
     Without an explicit opt-in, ``load_quirk_registry`` raises
-    ``PermissionError`` whenever a quirks file is resolvable on disk --
+    ``PermissionError`` whenever a quirks file is resolvable on disk —
     which crashes the supervisor child immediately and traps the
     wizard in a restart-backoff loop. We therefore mirror the
     launcher's quirks env state into the unit:
@@ -1097,7 +1097,7 @@ def _resolve_supervisor_quirks_env ()->tuple [str ,str ]:
     * If the launcher does not have the gate set, deliberately fall
       back to ``YGGDRASIM_SIM_QUIRKS=none`` so the bridge child boots
       with an empty quirks registry instead of crash-looping. This
-      keeps the supervisor safe-by-default -- operators who want
+      keeps the supervisor safe-by-default — operators who want
       quirks in the supervisor must opt in just like everywhere else.
     """
     allow_value =str (os .environ .get ("YGGDRASIM_ALLOW_QUIRKS","")or "").strip ()
@@ -1613,7 +1613,7 @@ def _open_hil_bridge_pcap_offline (pcap_path :str ,*,keybag_path :str ="")->int 
     if len (resolved_keybag )>0 :
         print (f"    Keybag file : {resolved_keybag}")
     else :
-        print ("    Keybag file : (none -- ciphered APDUs will stay wrapped)")
+        print ("    Keybag file : (none — ciphered APDUs will stay wrapped)")
     print ("    Mode        : offline review (no bridge, no live FIFO)")
     try :
         run_live_decode_tui (
@@ -1759,15 +1759,26 @@ def _prompt_open_hil_bridge_pcap_offline ()->None :
 def manage_env_flags ()->None :
     """Launch the YGGDRASIM_* environment flag editor.
 
-    The editor lives under :mod:`yggdrasim_common.env_flags_ui` so
-    PyInstaller's ``collect_submodules("yggdrasim_common")`` bundles it
-    into the frozen artefact. The theme + blocking helpers are passed
-    in explicitly so the editor module does not have to reach back
-    into ``__main__``.
+    ``main/`` is not a Python package at runtime (``main.py`` runs as
+    ``__main__`` and there is no ``main/__init__.py``), so we load the
+    sibling ``env_flags_ui`` module by file path rather than via
+    ``import main.env_flags_ui``. The theme + blocking helpers used by
+    the editor are passed in explicitly so the editor module does not
+    have to reach back into ``__main__``.
     """
     try :
-        from yggdrasim_common import env_flags_ui as env_flags_ui_module 
-        importlib .reload (env_flags_ui_module )
+        import importlib .util 
+        module_path =os .path .join (CURRENT_DIR ,"env_flags_ui.py")
+        module_spec =importlib .util .spec_from_file_location (
+        "yggdrasim_env_flags_ui",module_path ,
+        )
+        if module_spec is None or module_spec .loader is None :
+            raise RuntimeError (f"Could not locate env_flags_ui at {module_path}")
+        env_flags_ui_module =importlib .util .module_from_spec (module_spec )
+        # Expose the module under sys.modules so any relative imports it
+        # grows later can still resolve the symbolic name we used above.
+        sys .modules [module_spec .name ]=env_flags_ui_module 
+        module_spec .loader .exec_module (env_flags_ui_module )
         env_flags_ui_module .run (Colors ,clear_screen ,pause )
     except Exception as e :
         print (f"{Colors.FAIL}[!] Environment Flags editor error: {e}{Colors.ENDC}")
@@ -2149,12 +2160,12 @@ def show_about ():
     The suite facilitates lower-layer communication to analyze secure 
     element behavior and protocol compliance.
 
-    {Colors.WARNING}Feature coverage differs by module. SCP03, SCP80, SCP11 relay, SCP11 Local SMDPP, the Local eIM shell, SAIP tooling, and SUCI key tooling each have their own command surfaces, data roots, and operational limits.{Colors.ENDC}
+    {Colors.WARNING}Feature coverage differs by module. SCP03, SCP80, SCP11 relay, SCP11 Local SMDPP, the Local eIM shell, SAIP tooling, and SUCI key tooling now have separate command surfaces, data roots, and operational limits.{Colors.ENDC}
 
     {Colors.BOLD}Core Sub-Systems:{Colors.ENDC}
     
     * {Colors.CYAN}SCP03 Admin Shell (Local Management):{Colors.ENDC}
-      A high-privilege administrative interface that uses GlobalPlatform 
+      A high-privilege administrative interface utilizing GlobalPlatform 
       Secure Channel Protocol 03. It enables direct ETSI TS 102 221/222 
       file system operations, security attribute (ARR) decoding, AID alias
       management, registry inspection, and spec-aware wizard flows for
@@ -2282,7 +2293,7 @@ def main_menu ():
         if yggdrasim_flavor .is_hil_bridge_included ()and yggdrasim_flavor .is_hil_bridge_supported_platform ():
             menu_lines .append (f"{Colors.CYAN} [B] HIL Bridge Session{Colors.ENDC}")
         elif yggdrasim_flavor .is_hil_bridge_included ():
-            menu_lines .append (f"{Colors.BROWN} [B] HIL Bridge Session (Linux only -- hidden on {sys.platform}){Colors.ENDC}")
+            menu_lines .append (f"{Colors.BROWN} [B] HIL Bridge Session (Linux only — hidden on {sys.platform}){Colors.ENDC}")
         else :
             menu_lines .append (f"{Colors.BROWN} [B] HIL Bridge Session (not bundled in clean build){Colors.ENDC}")
         menu_lines .extend ([
@@ -2491,114 +2502,14 @@ def _build_cli_parser ():
     parser ,
     help_text ="Enable global debug across modules launched from the wrapper. Without it, per-module debug stays opt-in.",
     )
-    _add_gui_arguments (parser )
     _add_remote_card_arguments (parser )
     return parser 
-
-
-def _add_gui_arguments (parser ):
-    """Attach the universal GUI argparse surface (experimental).
-
-    Both `--gui` and `--web-server` are off by default. Neither flag
-    imports FastAPI / uvicorn / pywebview until the corresponding
-    dispatch path runs, so the baseline `pip install yggdrasim`
-    install remains lean.
-    """
-    group =parser .add_argument_group ("GUI (experimental)")
-    group .add_argument (
-    "--gui",
-    action ="store_true",
-    help ="Launch the desktop GUI (FastAPI on loopback + pywebview native window).",
-    )
-    group .add_argument (
-    "--web-server",
-    dest ="web_server",
-    action ="store_true",
-    help ="Launch the remote-lab GUI API (FastAPI, no pywebview; requires an explicit bearer token).",
-    )
-    group .add_argument (
-    "--host",
-    type =str ,
-    default =None ,
-    help ="Override the GUI API bind host (default: 127.0.0.1 for --gui, 0.0.0.0 for --web-server).",
-    )
-    group .add_argument (
-    "--port",
-    type =int ,
-    default =None ,
-    help ="Override the GUI API bind port (default: 27853 desktop / 27854 server).",
-    )
-    group .add_argument (
-    "--token-file",
-    dest ="token_file",
-    type =str ,
-    default =None ,
-    help ="Path to a file containing the bearer token (required for --web-server).",
-    )
-    group .add_argument (
-    "--tls-cert",
-    dest ="tls_cert",
-    type =str ,
-    default =None ,
-    help ="TLS certificate path (PEM) for --web-server.",
-    )
-    group .add_argument (
-    "--tls-key",
-    dest ="tls_key",
-    type =str ,
-    default =None ,
-    help ="TLS private key path (PEM) for --web-server.",
-    )
-    group .add_argument (
-    "--tls-self-signed",
-    dest ="tls_self_signed",
-    action ="store_true",
-    help ="Generate / reuse a self-signed TLS pair under state/gui_tls/ for --web-server.",
-    )
-    group .add_argument (
-    "--allow-origin",
-    dest ="allow_origin",
-    action ="append",
-    default =[],
-    help ="Additional CORS origin for --web-server (repeatable; wildcards refused).",
-    )
-    return parser 
-
-
-def _route_gui_modes (args ):
-    """Dispatch --gui / --web-server to the GUI server layer.
-
-    Returns ``None`` when neither flag is set so the caller continues
-    with the legacy CLI path. When a GUI flag is set but its optional
-    dependency stack is missing, this returns a non-zero exit code
-    with a pointer at the correct `pip install yggdrasim[...]` extra.
-    """
-    gui_enabled =bool (getattr (args ,"gui",False ))
-    web_server_enabled =bool (getattr (args ,"web_server",False ))
-    if gui_enabled and web_server_enabled :
-        print (f"{Colors.FAIL}[-] --gui and --web-server are mutually exclusive.{Colors.ENDC}")
-        return 2 
-    if not (gui_enabled or web_server_enabled ):
-        return None 
-    try :
-        from yggdrasim_common .gui_server .app import run_desktop ,run_web_server 
-    except ImportError as import_error :
-        extra ="gui"if gui_enabled else "gui-server"
-        print (
-        f"{Colors.FAIL}[-] {('--gui'if gui_enabled else '--web-server')} needs the optional dependency stack. "
-        f"Install it with: pip install 'yggdrasim[{extra}]' "
-        f"(underlying import error: {type(import_error).__name__}: {import_error}){Colors.ENDC}"
-        )
-        return 3 
-    if gui_enabled :
-        return int (run_desktop (args )or 0 )
-    return int (run_web_server (args )or 0 )
 
 
 def _apply_remote_card_arguments_with_log (args )->None :
     """Apply --remote-card-url / --remote-card-token-file and surface state.
 
-    A bridge banner only prints when something is actually configured --
+    A bridge banner only prints when something is actually configured —
     we don't want every YggdraSIM invocation to grow a noisy "remote
     card bridge: not configured" line.
     """
@@ -2607,50 +2518,7 @@ def _apply_remote_card_arguments_with_log (args )->None :
         print (f"{Colors.CYAN}[i] {_describe_remote_card_state(state)}{Colors.ENDC}")
 
 
-_FROZEN_DASH_M_DISPATCH ={
-    "Tools.HilBridge.supervisor":("Tools.HilBridge.supervisor","run_standalone"),
-    "Tools.HilBridge.main":("Tools.HilBridge.main","run_standalone"),
-}
-
-
-def _maybe_dispatch_frozen_dash_m (argv =None ):
-    """Route ``<frozen-bundle> -m <module> ...`` to the module's entry.
-
-    In a PyInstaller frozen bundle ``sys.executable`` is the bundle path,
-    not a real Python. Code that re-invokes ``[sys.executable, "-m",
-    module, ...]`` -- the systemd unit ``ExecStart`` for the HIL bridge
-    supervisor, and the supervisor's bridge-child ``Popen`` -- would
-    otherwise hit the launcher argparse, which rejects ``-m`` as an
-    unknown positional and exits 2. This guard recognises the classic
-    prefix and hands control to the target module's ``run_standalone``
-    so the contract ``python -m Tools.HilBridge.supervisor ...`` keeps
-    working when the "python" is really the frozen bundle.
-
-    Unknown modules fall through so the normal argparse error surface
-    is preserved.
-    """
-    source_argv =list (sys .argv )if argv is None else list (argv )
-    if len (source_argv )<3 :
-        return None
-    if source_argv [1 ]!="-m":
-        return None
-    module_name =str (source_argv [2 ]or "").strip ()
-    dispatch =_FROZEN_DASH_M_DISPATCH .get (module_name )
-    if dispatch is None :
-        return None
-    module_path ,entry_attr =dispatch
-    module =importlib .import_module (module_path )
-    entry_callable =getattr (module ,entry_attr ,None )
-    if entry_callable is None :
-        return None
-    sys .argv =[f"{module_name}.__main__",*source_argv [3 :]]
-    return int (entry_callable ()or 0 )
-
-
 def run_cli (argv =None ):
-    dash_m_exit =_maybe_dispatch_frozen_dash_m (argv )
-    if dash_m_exit is not None :
-        return dash_m_exit 
     parser =_build_cli_parser ()
     args =parser .parse_args (argv )
     _emit_plugin_load_banner ()
@@ -2662,9 +2530,6 @@ def run_cli (argv =None ):
     if bool (getattr (args ,"doctor",False )):
         from yggdrasim_common.doctor import run_doctor
         return run_doctor (Path (PROJECT_ROOT )if PROJECT_ROOT else None )
-    gui_exit =_route_gui_modes (args )
-    if gui_exit is not None :
-        return int (gui_exit )
     global_debug_enabled =bool (getattr (args ,"debug",False ))
     # Only the wrapper flag promotes debug to a process-global default.
     set_global_debug (global_debug_enabled )

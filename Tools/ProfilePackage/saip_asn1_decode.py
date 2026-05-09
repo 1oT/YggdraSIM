@@ -1,3 +1,4 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """
 Pure-Python ASN.1 / TLV decode helpers for tagged SAIP JSON.
 
@@ -43,7 +44,7 @@ _EF_KEY_TO_FID: dict[str, str] = {
     "df-saip": "5FD0",
     "df-snpn": "5FE0",
     "df-5gprose": "5FF0",
-    # additional DF identifier tokens.
+    # 5x20 Pass A — additional DF identifier tokens.
     "df-telecom": "7F10",
     "df-phonebook": "5F3A",
     "df-graphics": "5F50",
@@ -64,7 +65,7 @@ _EF_KEY_TO_FID: dict[str, str] = {
     "df-5gprose-relay": "5FA7",
     "df-a2x": "5FA8",
     "df-hpsim": "5FA9",
-    # additional ADF identifier tokens.
+    # 5x20 Pass B — additional ADF identifier tokens.
     "adf-hpsim": "7FF4",
     "adf-mcptt": "7FF5",
     "adf-mcvideo": "7FF6",
@@ -180,7 +181,7 @@ _EF_KEY_TO_FID: dict[str, str] = {
     # (pySim / TS 31.102 §4.4.2 / §4.4.3).
     "ef-ocst": "6F02",  # also collides with ISIM EF.IMPI; parent routing.
     "ef-rplmnact": "6F65",
-    # 5G EFs (DF.5GS = 5FC0).
+    # 5x10 Pass A — 5G EFs (DF.5GS = 5FC0).
     "ef-5gs3gpploci": "4F01",
     "ef-5gsn3gpploci": "4F02",
     "ef-5gs3gppnsc": "4F03",
@@ -191,7 +192,7 @@ _EF_KEY_TO_FID: dict[str, str] = {
     "ef-opl5g": "4F08",
     "ef-routing-indicator": "4F0A",
     "ef-ursp": "4F0B",
-    # 5G extras.
+    # 5x10 Pass C — 5G extras.
     "ef-tn3gppsnn": "4F0C",
     # Rel-17 additions (TS 31.102 §4.4.11.14-22). Previously
     # ``ef-5gsedrx`` / ``ef-5gnswo-conf`` were mis-mapped to 4F0D/4F0E
@@ -221,7 +222,7 @@ _EF_KEY_TO_FID: dict[str, str] = {
     "ef-csgt": "4F82",
     "ef-hnbn": "4F83",
     "ef-ocsgl": "4F84",
-    # DF.PHONEBOOK = 5F3A (under DF.TELECOM 7F10).
+    # 5x10 Pass B / D — DF.PHONEBOOK = 5F3A (under DF.TELECOM 7F10).
     "ef-pbr": "4F30",
     "ef-iap": "4F25",
     "ef-anr": "4F11",
@@ -238,7 +239,7 @@ _EF_KEY_TO_FID: dict[str, str] = {
     "ef-psc": "4F22",
     "ef-cc": "4F23",
     "ef-puid": "4F24",
-    # additional 3GPP / legacy.
+    # 5x10 Pass C — additional 3GPP / legacy.
     "ef-phase": "6FAE",
     "ef-plmnsel": "6F30",
     "ef-bcch": "6F74",
@@ -252,7 +253,7 @@ _EF_KEY_TO_FID: dict[str, str] = {
     "ef-bdnuri": "6FEE",
     "ef-sdnuri": "6FEF",
     "ef-lnduri": "6FEA",
-    # ISIM + multimedia extras.
+    # 5x10 Pass D — ISIM + multimedia extras.
     "ef-muddomain": "6FDF",
     "ef-pcscf-urn": "6F09",
     "ef-psismsc": "6FE5",
@@ -268,7 +269,7 @@ _EF_KEY_TO_FID: dict[str, str] = {
     # flat FID map. If a profile vendor assigns a concrete FID it should
     # go in its own vendor namespace.
     # TS 31.102 §4.2.96-§4.2.106 Rel-13/14/15 ADF.USIM singletons that
-    # were missing from the FID map -- needed so both token-based and
+    # were missing from the FID map — needed so both token-based and
     # FID-based lookups route to their semantic decoders.
     "ef-pws": "6FEC",
     "ef-ips": "6FF1",
@@ -277,7 +278,7 @@ _EF_KEY_TO_FID: dict[str, str] = {
     "ef-epdgselection": "6FF4",
     "ef-frompreferred": "6FF7",
     "ef-eaka": "6F01",
-    # Mailbox / CF / VGCS / VBS / eMLPP / DCK / CNL family.
+    # 5x20 Pass A — Mailbox / CF / VGCS / VBS / eMLPP / DCK / CNL family.
     "ef-mbdn": "6FC7",
     "ef-ext6": "6FC8",
     "ef-mbi": "6FC9",
@@ -298,7 +299,7 @@ _EF_KEY_TO_FID: dict[str, str] = {
     "ef-mexe-st": "6F3A",
     "ef-prose-pfsr": "4F30",
     "ef-vsuri": "6FE9",
-    # CSIM (ADF.CSIM) EFs. Tokens namespaced as ``ef-csim-*``
+    # 5x20 Pass B — CSIM (ADF.CSIM) EFs. Tokens namespaced as ``ef-csim-*``
     # because CDMA FIDs overlap USIM/ISIM FIDs when looked at in isolation.
     "ef-csim-spc": "6F20",
     "ef-csim-smscap": "6F21",
@@ -320,7 +321,7 @@ _EF_KEY_TO_FID: dict[str, str] = {
     "ef-csim-ssci": "6F4E",
     "ef-csim-mlpl": "6F4F",
     "ef-csim-meruiid": "6F5D",
-    # Specialized (ISIM + MCPTT + V2X + ProSe + MCS).
+    # 5x20 Pass C — Specialized (ISIM + MCPTT + V2X + ProSe + MCS).
     "ef-prose-pfidg": "4F04",
     "ef-prose-pfddn": "4F05",
     "ef-v2x-cfg": "4F01",
@@ -341,7 +342,7 @@ _EF_KEY_TO_FID: dict[str, str] = {
     "ef-mcs-keyset": "6FAB",
     "ef-mcs-stat": "6FAC",
     "ef-mcs-sec-profile": "6FAF",
-    # Operator / vendor extensions + auxiliary EFs.
+    # 5x20 Pass D — Operator / vendor extensions + auxiliary EFs.
     "ef-opcust1": "4F90",
     "ef-opcust2": "4F91",
     "ef-opcust3": "4F92",
@@ -384,7 +385,7 @@ _EXTRA_FID_NAMES = {
 # Parent-context disambiguation for FID label lookup.
 #
 # Several FIDs legitimately coexist under different DF/ADF parents. The most
-# visible case is 6F40 -- ``EF.MSISDN`` under ADF.USIM/DF.TELECOM and
+# visible case is 6F40 — ``EF.MSISDN`` under ADF.USIM/DF.TELECOM and
 # ``EF.CSIM-MDN`` under ADF.CSIM. A flat FID -> name map combines both labels,
 # which surfaces in the TRANSCODE tree pane as a garbled "MSISDN / CSIM-MDN"
 # badge regardless of the actual parent. The maps below let callers scope the
@@ -900,7 +901,7 @@ _UNIVERSAL_TAG_NAMES: dict[int, str] = {
 # annotate the same bit indices with the same service names. The earlier
 # hand-curated map drifted from the spec (e.g. service 15 was labelled
 # "Ignored" while TS 31.102 defines it as "Cell Broadcast Message
-# Identifier") -- keeping the pySim map verbatim avoids that drift.
+# Identifier") — keeping the pySim map verbatim avoids that drift.
 _UST_SERVICE_NAMES: dict[int, str] = {
     1: "Local Phone Book",
     2: "Fixed Dialling Numbers (FDN)",
@@ -1202,11 +1203,11 @@ _MEMORY_LIMIT_FIELD_LABELS = {
 }
 
 
-# OCTET STRING fields whose decoded view is a generic hex summary
-# plus optional ASCII/BCD hints (``_summarize_binary_blob``). These
-# match the encoder side in ``saip_asn1_encode.py`` via the
+# Wave A — OCTET STRING fields whose decoded view is a generic hex
+# summary plus optional ASCII/BCD hints (``_summarize_binary_blob``).
+# These match the encoder side in ``saip_asn1_encode.py`` via the
 # ``_PASSTHROUGH_BYTES_FIELD_NAMES`` registration. Keep the two lists
-# in sync -- adding a field to one without the other breaks round-trip.
+# in sync — adding a field to one without the other breaks round-trip.
 _PASSTHROUGH_BYTES_FIELD_NAMES = frozenset(
     {
         "volatileMemoryQuotaC7",
@@ -1710,8 +1711,8 @@ def _tlv_value_decoder_network_name(
     """Per-tag decoder for TS 24.008 Network Name IE payloads.
 
     Spec-correct PNN records always begin with the Network Name IE
-    header byte (bit 8 set). Some roundtrip encoders -- including the
-    in-repo ``encode_ef_pnn_record`` shortcut -- emit plain text without
+    header byte (bit 8 set). Some roundtrip encoders — including the
+    in-repo ``encode_ef_pnn_record`` shortcut — emit plain text without
     that prefix. Prefer the spec-anchored decode and fall back to a
     strict printable-ASCII reading so both on-card and synthesised
     payloads hydrate correctly.
@@ -2044,7 +2045,7 @@ def _decode_acc(hex_clean: str) -> dict[str, object] | None:
 
 
 def _decode_spn(hex_clean: str) -> dict[str, object] | None:
-    """Decode EF.SPN (TS 31.102 §4.2.12 -- Service Provider Name).
+    """Decode EF.SPN (TS 31.102 §4.2.12 — Service Provider Name).
 
     Byte layout:
       [0]    display condition byte (bit0 HPLMN-required, bit1 hide-in-OPLMN)
@@ -2134,7 +2135,7 @@ def _decode_msisdn(hex_clean: str) -> dict[str, object] | None:
 
 
 def _decode_pnn_record(hex_clean: str) -> dict[str, object] | None:
-    """Decode EF.PNN (TS 31.102 §4.2.58 -- PLMN Network Name).
+    """Decode EF.PNN (TS 31.102 §4.2.58 — PLMN Network Name).
 
     Tag 0x43 ("Full name for network") and tag 0x45 ("Short name for
     network") both carry a Network Name IE per TS 24.008 §10.5.3.5a
@@ -2528,7 +2529,7 @@ def _decode_pcscf_address(hex_clean: str) -> dict[str, object] | None:
 
 
 def _decode_gbanl(hex_clean: str) -> dict[str, object] | None:
-    """Decode EF.GBANL (TS 31.102 §4.2.80 -- GBA NAF List).
+    """Decode EF.GBANL (TS 31.102 §4.2.80 — GBA NAF List).
 
     Tag 0x80 carries the opaque NAF ID (binary per 3GPP TS 33.220); tag
     0x81 carries the B-TID, which TS 33.220 defines as a URI-encoded
@@ -2922,10 +2923,10 @@ def _decode_opaque_ef(
 
 
 # ---------------------------------------------------------------------------
-# Opaque-passthrough EF catalog.
+# Opaque-passthrough EF catalog (Wave B).
 #
 # Every key in this table is covered by ``_decode_opaque_ef`` on read and
-# ``encode_ef_opaque`` on write. The format_name is cosmetic -- it shows up
+# ``encode_ef_opaque`` on write. The format_name is cosmetic — it shows up
 # as ``format`` in the decoded view and in error traces from the round-trip
 # encoder. The label is keyed by the verbatim EF member name from the SAIP
 # ASN.1 schema (``PE_Definitions-<spec>.asn``).
@@ -3013,7 +3014,7 @@ _OPAQUE_PASSTHROUGH_EF_CATALOG: dict[str, str] = {
     # ADF.USIM extras (TS 31.102 §4.4.2 / §4.4.3).
     "ef-ocst": "Operator Controlled Signal Threshold",
     "ef-rplmnact": "RPLMN Last used Access Technology",
-    # DF.HNB (TS 31.102 §4.4.6 -- Home NodeB).
+    # DF.HNB (TS 31.102 §4.4.6 — Home NodeB).
     "ef-acsgl": "Allowed CSG Lists",
     "ef-csgt": "CSG Types",
     "ef-hnbn": "Home NodeB Name",
@@ -3208,7 +3209,7 @@ def _decode_one_byte_indicator(
 
 
 def _decode_nasconfig(hex_clean: str) -> dict[str, object] | None:
-    """Decode EF.NASCONFIG (TS 31.102 §4.2.96) -- BER-TLV stream."""
+    """Decode EF.NASCONFIG (TS 31.102 §4.2.96) — BER-TLV stream."""
 
     try:
         raw = bytes.fromhex(hex_clean)
@@ -3241,7 +3242,7 @@ def _decode_nasconfig(hex_clean: str) -> dict[str, object] | None:
 
 
 def _decode_suci_calc_info(hex_clean: str) -> dict[str, object] | None:
-    """Decode EF.SUCI_Calc_Info (TS 31.102 Annex N) -- BER-TLV."""
+    """Decode EF.SUCI_Calc_Info (TS 31.102 Annex N) — BER-TLV."""
 
     try:
         raw = bytes.fromhex(hex_clean)
@@ -3407,7 +3408,7 @@ def _decode_pcscf_urn(hex_clean: str) -> dict[str, object] | None:
 #
 # EF.GBAUAPI carries linear-fixed records with a single BER-TLV ``80`` entry
 # whose value is an inner struct ``<len><AID> <len><NAF_ID>``. The length
-# prefixes are 1-byte unsigned integers (pySim shortcut -- AIDs / NAF IDs are
+# prefixes are 1-byte unsigned integers (pySim shortcut — AIDs / NAF IDs are
 # always <128 bytes). EF.IMSDCI is a single byte enumerating whether the
 # terminal may establish IMS data channels.
 
@@ -3487,7 +3488,7 @@ def _decode_ef_imsdci(hex_clean: str) -> dict[str, object] | None:
 
 
 # ---------------------------------------------------------------------------
-# semantic decoders for DF.5GS / DF.5G_ProSe / DF.SNPN /
+# Wave C Pass A — semantic decoders for DF.5GS / DF.5G_ProSe / DF.SNPN /
 # ADF.USIM ePDG EFs.
 #
 # Coverage (20 EFs, TS 31.102 §4.2 / §4.4.11 / §4.4.12 / §4.4.13):
@@ -3515,8 +3516,8 @@ def _decode_ef_imsdci(hex_clean: str) -> dict[str, object] | None:
 # Every decoder returns a dict containing a ``hex`` field with the
 # verbatim payload bytes so that ``encode_ef_opaque`` (the default
 # round-trip encoder) can still reproduce the content byte-exact. The
-# semantic fields are additive -- edits happen through the raw ``hex``
-# key; richer in-place editing is left as a future enhancement.
+# semantic fields are additive — edits happen through the raw ``hex``
+# key for now; richer in-place editing is a follow-up wave.
 
 
 _5G_PROSE_ST_SERVICES: dict[int, str] = {
@@ -3644,7 +3645,7 @@ _5G_PROSE_UIR_TAGS: dict[str, str] = {
 }
 
 
-# Rel-18 ProSe UE-to-UE Relay (User) -- TS 31.102 §4.4.13.8, tag set
+# Rel-18 ProSe UE-to-UE Relay (User) — TS 31.102 §4.4.13.8, tag set
 # mirrors U2NRU but adds the U2U-specific RSC list / L2 ID mapping.
 _5G_PROSE_U2URU_TAGS: dict[str, str] = {
     "A0": "ProSe UE-to-UE relay UE configuration",
@@ -3663,7 +3664,7 @@ _5G_PROSE_U2URU_TAGS: dict[str, str] = {
 }
 
 
-# Rel-18 ProSe End-UE -- TS 31.102 §4.4.13.9, derived from pySim U2URu
+# Rel-18 ProSe End-UE — TS 31.102 §4.4.13.9, derived from pySim U2URu
 # / remote-UE tag aliases. Shares most anchors with RU.
 _5G_PROSE_EU_TAGS: dict[str, str] = {
     "A0": "ProSe end-UE configuration",
@@ -3722,7 +3723,7 @@ def _decode_5g_prose_tlv_ef(
 
 
 # ---------------------------------------------------------------------------
-# earlier work -- generic BER-TLV promotion for MCS / V2X / ProSe-provisioned
+# Round-2 Pass 2 — generic BER-TLV promotion for MCS / V2X / ProSe-provisioned
 # and ISIM ancillary EFs. These EFs are specified as BER-TLV containers by
 # their respective 3GPP clauses without an exhaustive tag enumeration, so
 # we surface the TLV boundaries + any known-tag names and leave the payload
@@ -3750,7 +3751,7 @@ def _decode_generic_tlv_ef(
         value_decoders=value_decoders,
     )
     # If the stream parser did not surface a single successfully decoded TLV
-    # nothing useful can be shown beyond the raw blob; surrender so the
+    # we have nothing useful to show beyond the raw blob; surrender so the
     # caller can fall through to the spec-opaque annotated wrapper. Without
     # this guard a malformed payload would report "length=N, items=[parseError]"
     # and shadow the more informative opaque summary.
@@ -3880,7 +3881,7 @@ _EF_PKCS15_ACRF_TAGS: dict[str, str] = {
 
 
 def _decode_ef_netpar(hex_clean: str) -> dict[str, object] | None:
-    """Decode EF.NETPAR (TS 51.011 §10.3.14) -- Network Parameters.
+    """Decode EF.NETPAR (TS 51.011 §10.3.14) — Network Parameters.
 
     Legacy 4-byte record structure: HPLMN search period (1 byte BCD
     encoded as multiples of 6 minutes per TS 22.011 §3.2) plus 3
@@ -3912,7 +3913,7 @@ def _decode_ef_netpar(hex_clean: str) -> dict[str, object] | None:
 
 
 def _decode_ef_cpbcch(hex_clean: str) -> dict[str, object] | None:
-    """Decode EF.CPBCCH (TS 51.011 §10.3.30) -- Compressed PBCCH information.
+    """Decode EF.CPBCCH (TS 51.011 §10.3.30) — Compressed PBCCH information.
 
     16-byte bitmap of compressed PBCCH ARFCNs; structure mirrors
     EF.BCCH. Bit-ordering per TS 51.011: byte 1 bit 8 = CB index 1.
@@ -3943,8 +3944,8 @@ def _decode_pws_snpn(hex_clean: str) -> dict[str, object] | None:
     """Decode EF.PWS_SNPN (TS 31.102 §4.4.12.2).
 
     Single-byte bitmap:
-      bit 0 -- ignore all PWS in subscribed SNPNs
-      bit 1 -- ignore all PWS in non-subscribed SNPNs
+      bit 0 — ignore all PWS in subscribed SNPNs
+      bit 1 — ignore all PWS in non-subscribed SNPNs
     """
 
     try:
@@ -3973,7 +3974,7 @@ def _decode_pws_snpn(hex_clean: str) -> dict[str, object] | None:
 
 
 def _decode_ef_dri(hex_clean: str) -> dict[str, object] | None:
-    """Decode EF.DRI (TS 31.102 §4.4.11.17 -- Disaster Roaming Information).
+    """Decode EF.DRI (TS 31.102 §4.4.11.17 — Disaster Roaming Information).
 
     7-byte structure:
       [0]   disaster roaming enabled (0x00/0x01)
@@ -4022,7 +4023,7 @@ def _decode_ef_dri(hex_clean: str) -> dict[str, object] | None:
 
 
 def _decode_ef_mchpplmn(hex_clean: str) -> dict[str, object] | None:
-    """Decode EF.MCHPPLMN (TS 31.102 §4.4.11.20 -- Manual Configurable HPPLMN).
+    """Decode EF.MCHPPLMN (TS 31.102 §4.4.11.20 — Manual Configurable HPPLMN).
 
     Content is a concatenation of 3-byte encoded PLMN identifiers. Unused
     slots are filled with 0xFFFFFF.
@@ -4105,11 +4106,11 @@ def _decode_5gs_loci(
 
     Fixed 20-byte layout:
 
-        [0..12]  5G-GUTI (13 bytes; TS 24.501 §9.11.3.4 -- PLMN 3 || AMF
+        [0..12]  5G-GUTI (13 bytes; TS 24.501 §9.11.3.4 — PLMN 3 || AMF
                  Region ID 1 || AMF Set ID/Pointer 2 || 5G-TMSI 4 ||
                  RFU padding 3)
-        [13..15] Last visited registered TAI -- PLMN (BCD, swapped)
-        [16..18] Last visited registered TAI -- TAC
+        [13..15] Last visited registered TAI — PLMN (BCD, swapped)
+        [16..18] Last visited registered TAI — TAC
         [19]     5GS update status (TS 24.501 §9.11.3.2)
     """
 
@@ -4164,8 +4165,8 @@ def _decode_5gsedrx(hex_clean: str) -> dict[str, object] | None:
 
     Layout per TS 24.501 §9.11.3.26 (Extended DRX parameters):
 
-        [0]  low nibble  -- eDRX value (paging cycle)
-             high nibble -- RFU
+        [0]  low nibble  — eDRX value (paging cycle)
+             high nibble — RFU
         [1]  Paging Time Window (optional, absent on 1-byte files)
     """
 
@@ -4199,8 +4200,8 @@ def _decode_5gnswo_conf(hex_clean: str) -> dict[str, object] | None:
     """Decode EF.5GNSWO_CONF (TS 31.102 §4.4.11.22).
 
     Single byte:
-        bit 0 -- 5G NSWO usage status (0 = disabled, 1 = enabled)
-        bits 1..7 -- RFU
+        bit 0 — 5G NSWO usage status (0 = disabled, 1 = enabled)
+        bits 1..7 — RFU
     """
 
     try:
@@ -4303,7 +4304,7 @@ _NID_ASSIGNMENT_MODE_LABELS: dict[int, str] = {
 
 
 def _decode_ef_nid(hex_clean: str) -> dict[str, object] | None:
-    """Decode EF.NID (TS 31.102 §4.4.11.13.2 -- SNPN Network Identifier).
+    """Decode EF.NID (TS 31.102 §4.4.11.13.2 — SNPN Network Identifier).
 
     6-byte record:
         [0]     assignment mode (TS 23.003 §28.16.3)
@@ -4334,7 +4335,7 @@ def _decode_ef_nid(hex_clean: str) -> dict[str, object] | None:
 
 
 def _decode_ef_ocst(hex_clean: str) -> dict[str, object] | None:
-    """Decode EF.OCST (TS 31.102 §4.4.3 -- Operator Controlled Signal Threshold).
+    """Decode EF.OCST (TS 31.102 §4.4.3 — Operator Controlled Signal Threshold).
 
     Layout: 1 byte 'sense' flag (bit 0) followed by BER-TLV data. The
     enclosed TLV stream carries per-access-technology threshold entries.
@@ -4365,7 +4366,7 @@ def _decode_ef_ocst(hex_clean: str) -> dict[str, object] | None:
 
 
 def _decode_ef_rplmnact(hex_clean: str) -> dict[str, object] | None:
-    """Decode EF.RPLMNAcT (TS 31.102 §4.2.42 -- RPLMN Access Technology).
+    """Decode EF.RPLMNAcT (TS 31.102 §4.2.42 — RPLMN Access Technology).
 
     Linear-fixed record of 2-byte access-technology stacks per registered
     PLMN, each byte pair re-using the EF.PLMNwAcT AcT bitmap.
@@ -4402,7 +4403,7 @@ _EF_HNBN_TAGS: dict[str, str] = {
 
 
 def _decode_ef_hnbn(hex_clean: str) -> dict[str, object] | None:
-    """Decode EF.HNBN (TS 31.102 §4.4.6.4 -- Home NodeB Name).
+    """Decode EF.HNBN (TS 31.102 §4.4.6.4 — Home NodeB Name).
 
     BER-TLV wrapper. Tag 0x80 carries a UCS-2 string per TS 23.003.
     """
@@ -4436,7 +4437,7 @@ _EF_CSGT_TAGS: dict[str, str] = {
 
 
 def _decode_ef_csgt(hex_clean: str) -> dict[str, object] | None:
-    """Decode EF.CSGT (TS 31.102 §4.4.6.3 -- CSG Types).
+    """Decode EF.CSGT (TS 31.102 §4.4.6.3 — CSG Types).
 
     BER-TLV collection. Tag 0x89 carries UCS-2, tag 0x80 a UTF-8 URI,
     tag 0x81 a single-octet EF.IMG record reference.
@@ -4485,7 +4486,7 @@ def _tlv_value_decoder_plmn(value_bytes: bytes) -> dict[str, object]:
 
 
 def _decode_ef_acsgl(hex_clean: str) -> dict[str, object] | None:
-    """Decode EF.ACSGL (TS 31.102 §4.4.6.2 -- Allowed CSG Lists)."""
+    """Decode EF.ACSGL (TS 31.102 §4.4.6.2 — Allowed CSG Lists)."""
 
     try:
         raw = bytes.fromhex(hex_clean)
@@ -4497,9 +4498,9 @@ def _decode_ef_acsgl(hex_clean: str) -> dict[str, object] | None:
         raw,
         tag_names=_EF_ACSGL_TAGS,
         value_decoders={
-            # TS 31.102 §4.4.6.2 -- 80 is a 3-byte PLMN; 82 is a 1-byte
+            # TS 31.102 §4.4.6.2 — 80 is a 3-byte PLMN; 82 is a 1-byte
             # CSG display indicator. 81 is a nested CSG-information TLV
-            # whose inner layout is operator-defined -- keep it raw.
+            # whose inner layout is operator-defined — keep it raw.
             "80": _tlv_value_decoder_plmn,
             "82": _tlv_value_decoder_small_int,
         },
@@ -4514,7 +4515,7 @@ def _decode_ef_acsgl(hex_clean: str) -> dict[str, object] | None:
 
 
 def _decode_ef_ocsgl(hex_clean: str) -> dict[str, object] | None:
-    """Decode EF.OCSGL (TS 31.102 §4.4.6.5 -- Operator CSG Lists).
+    """Decode EF.OCSGL (TS 31.102 §4.4.6.5 — Operator CSG Lists).
 
     Re-uses the ACSGL tag table; the only difference is the display-
     indicator tag (0x82) appears inside the operator list.
@@ -4544,11 +4545,11 @@ def _decode_ef_ocsgl(hex_clean: str) -> dict[str, object] | None:
 
 
 def _decode_ef_ipd_opaque(hex_clean: str) -> dict[str, object] | None:
-    """Decode EF.IPD (TS 31.102 §4.2.99 -- IP Data).
+    """Decode EF.IPD (TS 31.102 §4.2.99 — IP Data).
 
     TS 31.102 §4.2.99 leaves the inner layout to the profile/operator
     (Greedy bytes with no mandated text encoding). We surface raw hex
-    and a byte summary only -- ASCII rendering here would be context-
+    and a byte summary only — ASCII rendering here would be context-
     blind fluff and is intentionally omitted.
     """
 
@@ -4693,7 +4694,7 @@ def _decode_ef_epdgselection(
 
 
 # ---------------------------------------------------------------------------
-# ADF.USIM optional / shared ISIM-USIM EF decoders.
+# Wave C Pass B — ADF.USIM optional / shared ISIM-USIM EF decoders.
 #
 # Coverage (20 EFs, TS 31.102 §4.2 / §4.4.2):
 #   ef-bdn                routed to _decode_adn_like_record (§4.4.2.3)
@@ -4722,8 +4723,8 @@ def _decode_ef_pws(hex_clean: str) -> dict[str, object] | None:
     """Decode EF.PWS (TS 31.102 §4.2.96).
 
     1-byte flags:
-      bit 0 -- ignore PWS in HPLMN and equivalent
-      bit 1 -- ignore PWS in VPLMN
+      bit 0 — ignore PWS in HPLMN and equivalent
+      bit 1 — ignore PWS in VPLMN
     """
 
     try:
@@ -4786,7 +4787,7 @@ def _decode_ef_ufc(hex_clean: str) -> dict[str, object] | None:
 
 
 def _decode_ef_umpc(hex_clean: str) -> dict[str, object] | None:
-    """Decode EF.UMPC (TS 102 221 §13.1 -- UICC Max Power Consumption).
+    """Decode EF.UMPC (TS 102 221 §13.1 — UICC Max Power Consumption).
 
     2-byte record:
       [0] maximum current (units of 1 mA when byte < 0xFF; 0xFF = undefined)
@@ -4889,7 +4890,7 @@ def _decode_ef_3gpp_ps_data_off_service_list(
     Single-record payload: 1-byte service-activation bitmap. Each bit
     flags exemption of one standardised 3GPP PS service (voice,
     video, SMS, ...) from the PS-Data-Off policy. Bit assignment is
-    operator-specific per TS 31.102 -- we surface the raw byte and
+    operator-specific per TS 31.102 — we surface the raw byte and
     per-bit states for editing.
     """
 
@@ -4932,8 +4933,8 @@ def _decode_ef_cipher_algo_record(
     """Decode a 2-byte VGCSCA / VBSCA record (TS 31.102 §4.2.77 / §4.2.79).
 
     Layout:
-      [0] alg_v_ki_1 -- ciphering algorithm indicator for V_KI #1
-      [1] alg_v_ki_2 -- ciphering algorithm indicator for V_KI #2
+      [0] alg_v_ki_1 — ciphering algorithm indicator for V_KI #1
+      [1] alg_v_ki_2 — ciphering algorithm indicator for V_KI #2
     """
 
     try:
@@ -5068,7 +5069,7 @@ def _tlv_value_decoder_imei_sv(value_bytes: bytes) -> dict[str, object]:
 
 
 def _decode_ef_ial_record(hex_clean: str) -> dict[str, object] | None:
-    """Decode EF.IAL (TS 31.102 §4.2.102 -- IMEI(SV) Association List)."""
+    """Decode EF.IAL (TS 31.102 §4.2.102 — IMEI(SV) Association List)."""
 
     try:
         raw = bytes.fromhex(hex_clean)
@@ -5104,7 +5105,7 @@ _EF_NCP_IP_TAGS: dict[str, str] = {
 
 
 def _decode_ef_ncp_ip_record(hex_clean: str) -> dict[str, object] | None:
-    """Decode EF.NCP-IP (TS 31.102 §4.2.90 -- Network Connectivity Parameters).
+    """Decode EF.NCP-IP (TS 31.102 §4.2.90 — Network Connectivity Parameters).
 
     BER-TLV collection with APN, login, password, address/prefix, and
     bearer description tags (TS 31.111 style).
@@ -5180,7 +5181,7 @@ def _decode_ef_icon_indicator(
 
 
 # ---------------------------------------------------------------------------
-# ADF.ISIM + DF.MULTIMEDIA + MCS + MMS EF decoders.
+# Wave C Pass C — ADF.ISIM + DF.MULTIMEDIA + MCS + MMS EF decoders.
 #
 # Coverage (20 EFs, TS 31.103 / TS 31.102 §4.6 / TS 51.011 §10.3.5x):
 #   ef-gbabp             TS 31.103 §4.2.9  (GBA Bootstrapping Params)
@@ -5511,7 +5512,7 @@ _EF_MST_SERVICE_NAMES: dict[int, str] = {
 
 
 def _decode_ef_mst(hex_clean: str) -> dict[str, object] | None:
-    """Decode EF.MST (TS 31.102 §4.6.4.1 -- MCS Service Table)."""
+    """Decode EF.MST (TS 31.102 §4.6.4.1 — MCS Service Table)."""
 
     try:
         raw = bytes.fromhex(hex_clean)
@@ -5537,7 +5538,7 @@ _EF_MLPL_TAGS: dict[str, str] = {
 
 
 def _decode_ef_mlpl(hex_clean: str) -> dict[str, object] | None:
-    """Decode EF.MLPL (TS 31.102 §4.6.3.3 -- MMS List Preferred)."""
+    """Decode EF.MLPL (TS 31.102 §4.6.3.3 — MMS List Preferred)."""
 
     try:
         raw = bytes.fromhex(hex_clean)
@@ -5568,7 +5569,7 @@ _EF_MSPL_TAGS: dict[str, str] = {
 
 
 def _decode_ef_mspl(hex_clean: str) -> dict[str, object] | None:
-    """Decode EF.MSPL (TS 31.102 §4.6.3.4 -- MMS Sender Preferred)."""
+    """Decode EF.MSPL (TS 31.102 §4.6.3.4 — MMS Sender Preferred)."""
 
     try:
         raw = bytes.fromhex(hex_clean)
@@ -5697,7 +5698,7 @@ _EF_MMSUP_TAGS: dict[str, str] = {
 
 
 def _decode_ef_mmsup(hex_clean: str) -> dict[str, object] | None:
-    """Decode EF.MMSUP (TS 51.011 §10.3.54 -- MMS User Preferences)."""
+    """Decode EF.MMSUP (TS 51.011 §10.3.54 — MMS User Preferences)."""
 
     try:
         raw = bytes.fromhex(hex_clean)
@@ -5722,7 +5723,7 @@ def _decode_ef_mmsup(hex_clean: str) -> dict[str, object] | None:
 
 
 def _decode_ef_mmsconfig(hex_clean: str) -> dict[str, object] | None:
-    """Decode EF.MMSConfig (CSIM MMS Config -- 3GPP2 C.S0023)."""
+    """Decode EF.MMSConfig (CSIM MMS Config — 3GPP2 C.S0023)."""
 
     return _decode_spec_opaque_ef(
         hex_clean,
@@ -5733,7 +5734,7 @@ def _decode_ef_mmsconfig(hex_clean: str) -> dict[str, object] | None:
 
 
 def _decode_ef_hrpdcap(hex_clean: str) -> dict[str, object] | None:
-    """Decode EF.HRPDcap (3GPP2 C.S0023 -- HRPD Capability)."""
+    """Decode EF.HRPDcap (3GPP2 C.S0023 — HRPD Capability)."""
 
     return _decode_spec_opaque_ef(
         hex_clean,
@@ -5744,7 +5745,7 @@ def _decode_ef_hrpdcap(hex_clean: str) -> dict[str, object] | None:
 
 
 def _decode_ef_hrpdupp(hex_clean: str) -> dict[str, object] | None:
-    """Decode EF.HRPDupp (3GPP2 C.S0023 -- HRPD User Profile Parameters)."""
+    """Decode EF.HRPDupp (3GPP2 C.S0023 — HRPD User Profile Parameters)."""
 
     return _decode_spec_opaque_ef(
         hex_clean,
@@ -5755,7 +5756,7 @@ def _decode_ef_hrpdupp(hex_clean: str) -> dict[str, object] | None:
 
 
 def _decode_ef_spc(hex_clean: str) -> dict[str, object] | None:
-    """Decode EF.SPC (3GPP2 C.S0023 -- Service Programming Code)."""
+    """Decode EF.SPC (3GPP2 C.S0023 — Service Programming Code)."""
 
     return _decode_spec_opaque_ef(
         hex_clean,
@@ -5766,7 +5767,7 @@ def _decode_ef_spc(hex_clean: str) -> dict[str, object] | None:
 
 
 # ---------------------------------------------------------------------------
-# ADF.CSIM / OPT-CSIM core EF decoders.
+# Wave C Pass D — ADF.CSIM / OPT-CSIM core EF decoders.
 #
 # Coverage (20 EFs, 3GPP2 C.S0023 / C.S0065):
 #   ef-csim-st          C.S0065 §5.2.28  (CSIM Service Table)
@@ -5791,7 +5792,7 @@ def _decode_ef_spc(hex_clean: str) -> dict[str, object] | None:
 #   ef-tmsi             C.S0023 §3.4.17  (TMSI)
 
 
-# CSIM Service Table names per 3GPP2 C.S0065 v2.0 §5.2.28 (partial -- the
+# CSIM Service Table names per 3GPP2 C.S0065 v2.0 §5.2.28 (partial — the
 # catalog is operator-extensible; numeric fallbacks cover entries not
 # explicitly named).
 _CSIM_SERVICE_NAMES: dict[int, str] = {
@@ -5919,7 +5920,7 @@ def _decode_ef_csim_1byte_cap(
 
 
 def _decode_ef_mipcap(hex_clean: str) -> dict[str, object] | None:
-    """Decode EF.MIPCAP (3GPP2 C.S0023 §3.4.36 -- MIP Capabilities)."""
+    """Decode EF.MIPCAP (3GPP2 C.S0023 §3.4.36 — MIP Capabilities)."""
 
     return _decode_ef_csim_1byte_cap(
         hex_clean,
@@ -5934,7 +5935,7 @@ def _decode_ef_mipcap(hex_clean: str) -> dict[str, object] | None:
 
 
 def _decode_ef_ipv6cap(hex_clean: str) -> dict[str, object] | None:
-    """Decode EF.IPV6CAP (3GPP2 C.S0023 §3.4.45 -- IPv6 Capability)."""
+    """Decode EF.IPV6CAP (3GPP2 C.S0023 §3.4.45 — IPv6 Capability)."""
 
     return _decode_ef_csim_1byte_cap(
         hex_clean,
@@ -5948,7 +5949,7 @@ def _decode_ef_ipv6cap(hex_clean: str) -> dict[str, object] | None:
 
 
 def _decode_ef_smscap(hex_clean: str) -> dict[str, object] | None:
-    """Decode EF.SMSCAP (3GPP2 C.S0023 §3.4.38 -- SMS Capability)."""
+    """Decode EF.SMSCAP (3GPP2 C.S0023 §3.4.38 — SMS Capability)."""
 
     return _decode_ef_csim_1byte_cap(
         hex_clean,
@@ -5963,7 +5964,7 @@ def _decode_ef_smscap(hex_clean: str) -> dict[str, object] | None:
 
 
 def _decode_ef_sipcap(hex_clean: str) -> dict[str, object] | None:
-    """Decode EF.SIPCAP (3GPP2 C.S0023 §3.4.46 -- SIP Capability)."""
+    """Decode EF.SIPCAP (3GPP2 C.S0023 §3.4.46 — SIP Capability)."""
 
     return _decode_ef_csim_1byte_cap(
         hex_clean,
@@ -6011,7 +6012,7 @@ def _decode_ef_imsi_t(hex_clean: str) -> dict[str, object] | None:
 
 
 def _decode_ef_ruimid(hex_clean: str) -> dict[str, object] | None:
-    """Decode EF.RUIMID (3GPP2 C.S0023 §3.4.41 -- R-UIM ID)."""
+    """Decode EF.RUIMID (3GPP2 C.S0023 §3.4.41 — R-UIM ID)."""
 
     return _decode_spec_opaque_ef(
         hex_clean,
@@ -6044,7 +6045,7 @@ def _decode_ef_esn_meid_me(hex_clean: str) -> dict[str, object] | None:
 
 
 def _decode_ef_mdn(hex_clean: str) -> dict[str, object] | None:
-    """Decode EF.MDN (3GPP2 C.S0023 §3.4.7 -- Mobile Directory Number).
+    """Decode EF.MDN (3GPP2 C.S0023 §3.4.7 — Mobile Directory Number).
 
     Per C.S0023, each record is: 1-byte mdn-length + BCD-encoded digits
     padded with 0xF. BCD bytes are low-nibble-first (digit N then
@@ -6086,7 +6087,7 @@ def _decode_ef_mdn(hex_clean: str) -> dict[str, object] | None:
 
 
 def _decode_ef_prl(hex_clean: str) -> dict[str, object] | None:
-    """Decode EF.PRL (3GPP2 C.S0023 §3.4.24 -- Preferred Roaming List)."""
+    """Decode EF.PRL (3GPP2 C.S0023 §3.4.24 — Preferred Roaming List)."""
 
     return _decode_spec_opaque_ef(
         hex_clean,
@@ -6097,7 +6098,7 @@ def _decode_ef_prl(hex_clean: str) -> dict[str, object] | None:
 
 
 def _decode_ef_eprl(hex_clean: str) -> dict[str, object] | None:
-    """Decode EF.EPRL (3GPP2 C.S0023 §3.4.25 -- Extended PRL)."""
+    """Decode EF.EPRL (3GPP2 C.S0023 §3.4.25 — Extended PRL)."""
 
     return _decode_spec_opaque_ef(
         hex_clean,
@@ -6108,7 +6109,7 @@ def _decode_ef_eprl(hex_clean: str) -> dict[str, object] | None:
 
 
 def _decode_ef_cdmahome(hex_clean: str) -> dict[str, object] | None:
-    """Decode EF.CDMAHOME (3GPP2 C.S0023 §3.4.27 -- CDMA Home SID/NID)."""
+    """Decode EF.CDMAHOME (3GPP2 C.S0023 §3.4.27 — CDMA Home SID/NID)."""
 
     return _decode_spec_opaque_ef(
         hex_clean,
@@ -6152,7 +6153,7 @@ def _decode_ef_specific_tag(hex_clean: str) -> dict[str, object] | None:
 
 
 def _decode_ef_csim_tmsi(hex_clean: str) -> dict[str, object] | None:
-    """Decode EF.TMSI (3GPP2 C.S0023 §3.4.17 -- CSIM TMSI)."""
+    """Decode EF.TMSI (3GPP2 C.S0023 §3.4.17 — CSIM TMSI)."""
 
     return _decode_spec_opaque_ef(
         hex_clean,
@@ -6163,7 +6164,7 @@ def _decode_ef_csim_tmsi(hex_clean: str) -> dict[str, object] | None:
 
 
 # ---------------------------------------------------------------------------
-# DF.TELECOM / DF.PHONEBOOK / ICE / DF.V2X / EAP EF decoders.
+# Wave C Pass E — DF.TELECOM / DF.PHONEBOOK / ICE / DF.V2X / EAP EF decoders.
 #
 # Coverage (20 EFs, TS 31.102 §4.4.2/§4.4.3/§4.6.1/§4.6.5 + TS 102 310):
 #   ef-aas              TS 31.102 §4.4.2.13 (Additional Alpha String)
@@ -6221,7 +6222,7 @@ def _decode_ef_aas(hex_clean: str) -> dict[str, object] | None:
 
 
 def _decode_ef_pbc(hex_clean: str) -> dict[str, object] | None:
-    """Decode EF.PBC (TS 31.102 §4.4.2.5 -- Phonebook Control).
+    """Decode EF.PBC (TS 31.102 §4.4.2.5 — Phonebook Control).
 
     Per TS 31.102, each record contains a single-byte control flag
     followed by record-metadata (hidden/private markers). We expose
@@ -6258,7 +6259,7 @@ def _decode_ef_pbc(hex_clean: str) -> dict[str, object] | None:
 
 
 def _decode_ef_puri(hex_clean: str) -> dict[str, object] | None:
-    """Decode EF.PURI (TS 31.102 §4.4.2.17 -- Phonebook URI)."""
+    """Decode EF.PURI (TS 31.102 §4.4.2.17 — Phonebook URI)."""
 
     return _decode_uri_record(
         hex_clean,
@@ -6268,7 +6269,7 @@ def _decode_ef_puri(hex_clean: str) -> dict[str, object] | None:
 
 
 def _decode_ef_uid(hex_clean: str) -> dict[str, object] | None:
-    """Decode EF.UID (TS 31.102 §4.4.2.14 -- Phonebook Unique Identifier).
+    """Decode EF.UID (TS 31.102 §4.4.2.14 — Phonebook Unique Identifier).
 
     Content is a 2-byte big-endian integer UID per record.
     """
@@ -6291,7 +6292,7 @@ def _decode_ef_uid(hex_clean: str) -> dict[str, object] | None:
 
 
 def _decode_ef_ice_dn(hex_clean: str) -> dict[str, object] | None:
-    """Decode EF.ICE-DN (TS 31.102 §4.4.3.3 -- ICE Dialling Numbers).
+    """Decode EF.ICE-DN (TS 31.102 §4.4.3.3 — ICE Dialling Numbers).
 
     Layout matches EF.ADN: alpha identifier + BCD dialling information.
     We wrap the ADN-like record with ``hex`` + ``length`` so downstream
@@ -6315,7 +6316,7 @@ def _decode_ef_ice_dn(hex_clean: str) -> dict[str, object] | None:
 
 
 def _decode_ef_ice_ff(hex_clean: str) -> dict[str, object] | None:
-    """Decode EF.ICE-FF (TS 31.102 §4.4.3.4 -- ICE Free Format).
+    """Decode EF.ICE-FF (TS 31.102 §4.4.3.4 — ICE Free Format).
 
     The free-format byte stream is opaque per spec; we surface it as
     annotated opaque.
@@ -6352,7 +6353,7 @@ def _decode_ef_icon(hex_clean: str) -> dict[str, object] | None:
 
 
 def _decode_ef_img(hex_clean: str) -> dict[str, object] | None:
-    """Decode EF.IMG (TS 31.102 §4.6.1.2 -- Image Instance Record).
+    """Decode EF.IMG (TS 31.102 §4.6.1.2 — Image Instance Record).
 
     Layout per record: number of actual images (1B) + per-image
     structure (width 1B, height 1B, image coding 1B, offset 2B,
@@ -6395,7 +6396,7 @@ def _decode_ef_img(hex_clean: str) -> dict[str, object] | None:
 
 
 def _decode_ef_iidf(hex_clean: str) -> dict[str, object] | None:
-    """Decode EF.IIDF (TS 31.102 §4.6.1.3 -- Image Instance Data File)."""
+    """Decode EF.IIDF (TS 31.102 §4.6.1.3 — Image Instance Data File)."""
 
     return _decode_spec_opaque_ef(
         hex_clean,
@@ -6598,7 +6599,7 @@ _EF_VST_CODING_NAMES: dict[int, str] = {
 
 
 def _decode_ef_vst(hex_clean: str) -> dict[str, object] | None:
-    """Decode EF.VST (TS 31.102 Rel-18 §4.6.5.2 -- V2X Service Table).
+    """Decode EF.VST (TS 31.102 Rel-18 §4.6.5.2 — V2X Service Table).
 
     Byte 0 is the ``Coding of V2X data`` indicator (reused by EFs in
     DF.V2X); bytes 1.. are the service-table bitmap proper.
@@ -6649,7 +6650,7 @@ _EF_EAP_CURID_TAGS: dict[str, str] = {
 
 
 def _decode_ef_eap_curid(hex_clean: str) -> dict[str, object] | None:
-    """Decode EF.CURID (TS 102 310 §5.2.2 -- EAP Current ID)."""
+    """Decode EF.CURID (TS 102 310 §5.2.2 — EAP Current ID)."""
 
     try:
         raw = bytes.fromhex(hex_clean)
@@ -6676,7 +6677,7 @@ _EF_EAP_PS_TAGS: dict[str, str] = {
 
 
 def _decode_ef_eap_ps(hex_clean: str) -> dict[str, object] | None:
-    """Decode EF.PS (TS 102 310 §5.2.2 -- EAP Pseudonym)."""
+    """Decode EF.PS (TS 102 310 §5.2.2 — EAP Pseudonym)."""
 
     try:
         raw = bytes.fromhex(hex_clean)
@@ -6703,7 +6704,7 @@ _EF_EAP_REALM_TAGS: dict[str, str] = {
 
 
 def _decode_ef_eap_realm(hex_clean: str) -> dict[str, object] | None:
-    """Decode EF.REALM (TS 102 310 §5.2.2 -- EAP Realm)."""
+    """Decode EF.REALM (TS 102 310 §5.2.2 — EAP Realm)."""
 
     try:
         raw = bytes.fromhex(hex_clean)
@@ -6725,7 +6726,7 @@ def _decode_ef_eap_realm(hex_clean: str) -> dict[str, object] | None:
 
 
 # ---------------------------------------------------------------------------
-# EAP / USIM / TELECOM / common residual EF decoders.
+# Wave D Pass A — EAP / USIM / TELECOM / common residual EF decoders.
 #
 # Coverage (20 EFs):
 #   ef-imsi             TS 31.102 §4.2.2   (USIM IMSI, wraps _decode_imsi
@@ -6789,7 +6790,7 @@ _EF_ARR_USIM_TAGS: dict[str, str] = {
 
 
 def _decode_ef_arr_usim(hex_clean: str) -> dict[str, object] | None:
-    """Decode EF.ARR (TS 102 221 §9.4 -- Access Rule Reference)."""
+    """Decode EF.ARR (TS 102 221 §9.4 — Access Rule Reference)."""
 
     try:
         raw = bytes.fromhex(hex_clean)
@@ -6876,7 +6877,7 @@ _EAP_STATUS_CODES: dict[int, str] = {
 
 
 def _decode_ef_eapstatus(hex_clean: str) -> dict[str, object] | None:
-    """Decode EF.EAPSTATUS (TS 102 310 §5.2.2 -- single status octet)."""
+    """Decode EF.EAPSTATUS (TS 102 310 §5.2.2 — single status octet)."""
 
     try:
         raw = bytes.fromhex(hex_clean)
@@ -6902,7 +6903,7 @@ _EF_REID_TAGS: dict[str, str] = {
 
 
 def _decode_ef_reid(hex_clean: str) -> dict[str, object] | None:
-    """Decode EF.REID (TS 102 310 §5.2.2 -- EAP Re-authentication ID).
+    """Decode EF.REID (TS 102 310 §5.2.2 — EAP Re-authentication ID).
 
     Tag 0x80 is a UTF-8 Re-authentication ID per RFC 5216; declare the
     text decoder so the editor renders the identity directly.
@@ -6928,7 +6929,7 @@ def _decode_ef_reid(hex_clean: str) -> dict[str, object] | None:
 
 
 def _decode_ef_model(hex_clean: str) -> dict[str, object] | None:
-    """Decode EF.MODEL (3GPP2 C.S0023 §3.4.61 -- ASCII device model)."""
+    """Decode EF.MODEL (3GPP2 C.S0023 §3.4.61 — ASCII device model)."""
 
     try:
         raw = bytes.fromhex(hex_clean)
@@ -7010,7 +7011,7 @@ def _decode_ef_auth_capability(hex_clean: str) -> dict[str, object] | None:
 
 
 def _decode_ef_acp(hex_clean: str) -> dict[str, object] | None:
-    """Decode EF.ACP (3GPP2 C.S0023 §3.4.11 -- Access Channel Params)."""
+    """Decode EF.ACP (3GPP2 C.S0023 §3.4.11 — Access Channel Params)."""
 
     return _decode_spec_opaque_ef(
         hex_clean,
@@ -7021,7 +7022,7 @@ def _decode_ef_acp(hex_clean: str) -> dict[str, object] | None:
 
 
 def _decode_ef_atc(hex_clean: str) -> dict[str, object] | None:
-    """Decode EF.ATC (3GPP2 C.S0023 §3.4.14 -- Access Terminal Class)."""
+    """Decode EF.ATC (3GPP2 C.S0023 §3.4.14 — Access Terminal Class)."""
 
     return _decode_spec_opaque_ef(
         hex_clean,
@@ -7032,7 +7033,7 @@ def _decode_ef_atc(hex_clean: str) -> dict[str, object] | None:
 
 
 def _decode_ef_namlock(hex_clean: str) -> dict[str, object] | None:
-    """Decode EF.NAMLOCK (3GPP2 C.S0065 -- NAM Lock state)."""
+    """Decode EF.NAMLOCK (3GPP2 C.S0065 — NAM Lock state)."""
 
     return _decode_spec_opaque_ef(
         hex_clean,
@@ -7043,7 +7044,7 @@ def _decode_ef_namlock(hex_clean: str) -> dict[str, object] | None:
 
 
 def _decode_ef_usgind(hex_clean: str) -> dict[str, object] | None:
-    """Decode EF.USGIND (3GPP2 C.S0023 §3.4.67 -- Usage Indicator)."""
+    """Decode EF.USGIND (3GPP2 C.S0023 §3.4.67 — Usage Indicator)."""
 
     return _decode_spec_opaque_ef(
         hex_clean,
@@ -7054,7 +7055,7 @@ def _decode_ef_usgind(hex_clean: str) -> dict[str, object] | None:
 
 
 def _decode_ef_dgc(hex_clean: str) -> dict[str, object] | None:
-    """Decode EF.DGC (3GPP2 C.S0023 §3.4.57 -- Data Generic Config)."""
+    """Decode EF.DGC (3GPP2 C.S0023 §3.4.57 — Data Generic Config)."""
 
     return _decode_spec_opaque_ef(
         hex_clean,
@@ -7065,7 +7066,7 @@ def _decode_ef_dgc(hex_clean: str) -> dict[str, object] | None:
 
 
 def _decode_ef_term(hex_clean: str) -> dict[str, object] | None:
-    """Decode EF.TERM (3GPP2 C.S0023 §3.4.68 -- Terminal Capability)."""
+    """Decode EF.TERM (3GPP2 C.S0023 §3.4.68 — Terminal Capability)."""
 
     return _decode_spec_opaque_ef(
         hex_clean,
@@ -7098,7 +7099,7 @@ def _decode_ef_csspr(hex_clean: str) -> dict[str, object] | None:
 
 
 def _decode_ef_rma(hex_clean: str) -> dict[str, object] | None:
-    """Decode EF.RMA (TS 31.102 -- operator/vendor-specific RMA data)."""
+    """Decode EF.RMA (TS 31.102 — operator/vendor-specific RMA data)."""
 
     return _decode_spec_opaque_ef(
         hex_clean,
@@ -7109,9 +7110,9 @@ def _decode_ef_rma(hex_clean: str) -> dict[str, object] | None:
 
 
 # ---------------------------------------------------------------------------
-# CSIM MIP / SIP / BCSMS / 3GPD / WAP / OTA decoders.
+# Wave D Pass B — CSIM MIP / SIP / BCSMS / 3GPD / WAP / OTA decoders.
 #
-# Coverage (20 EFs) -- all CSIM-side structures whose layout is defined by
+# Coverage (20 EFs) — all CSIM-side structures whose layout is defined by
 # 3GPP2 specs but whose inner layout is operator/device-specific. They are
 # surfaced via :func:`_decode_spec_opaque_ef` which provides a formal
 # "format + specReference + hex" triple so the TUI shows a semantic label
@@ -7273,7 +7274,7 @@ def _decode_ef_sipupp(hex_clean: str) -> dict[str, object] | None:
 
 
 def _decode_ef_ota(hex_clean: str) -> dict[str, object] | None:
-    """Decode EF.OTA (3GPP2 C.S0023 §3.4.78 -- OTA Parameters)."""
+    """Decode EF.OTA (3GPP2 C.S0023 §3.4.78 — OTA Parameters)."""
 
     return _decode_spec_opaque_ef(
         hex_clean,
@@ -7295,7 +7296,7 @@ def _decode_ef_otapaspc(hex_clean: str) -> dict[str, object] | None:
 
 
 def _decode_ef_sp(hex_clean: str) -> dict[str, object] | None:
-    """Decode EF.SP (3GPP2 C.S0023 §3.4.21 -- Service Preferences)."""
+    """Decode EF.SP (3GPP2 C.S0023 §3.4.21 — Service Preferences)."""
 
     return _decode_spec_opaque_ef(
         hex_clean,
@@ -7339,7 +7340,7 @@ def _decode_ef_wapbrowsercp(hex_clean: str) -> dict[str, object] | None:
 
 
 # ---------------------------------------------------------------------------
-# CSIM / 3GPP2 legacy analog + registration + PUZL/PRL/LCS.
+# Wave D Pass C — CSIM / 3GPP2 legacy analog + registration + PUZL/PRL/LCS.
 #
 # Final 19 opaque entries. Each one is promoted via
 # :func:`_decode_spec_opaque_ef` because:
@@ -7353,7 +7354,7 @@ def _decode_ef_wapbrowsercp(hex_clean: str) -> dict[str, object] | None:
 # roundtrip via the ``hex`` / ``length`` fields.
 
 def _decode_ef_ah(hex_clean: str) -> dict[str, object] | None:
-    """Decode EF.AH (3GPP2 C.S0023 §3.4.4 -- Analog Home)."""
+    """Decode EF.AH (3GPP2 C.S0023 §3.4.4 — Analog Home)."""
 
     return _decode_spec_opaque_ef(
         hex_clean,
@@ -7364,7 +7365,7 @@ def _decode_ef_ah(hex_clean: str) -> dict[str, object] | None:
 
 
 def _decode_ef_aloc(hex_clean: str) -> dict[str, object] | None:
-    """Decode EF.ALOC (3GPP2 C.S0023 §3.4.5 -- Analog Location)."""
+    """Decode EF.ALOC (3GPP2 C.S0023 §3.4.5 — Analog Location)."""
 
     return _decode_spec_opaque_ef(
         hex_clean,
@@ -7386,7 +7387,7 @@ def _decode_ef_aop(hex_clean: str) -> dict[str, object] | None:
 
 
 def _decode_ef_bakpara(hex_clean: str) -> dict[str, object] | None:
-    """Decode EF.BAKPARA (3GPP2 C.S0023 §3.4.53 -- BAK Parameters)."""
+    """Decode EF.BAKPARA (3GPP2 C.S0023 §3.4.53 — BAK Parameters)."""
 
     return _decode_spec_opaque_ef(
         hex_clean,
@@ -7419,7 +7420,7 @@ def _decode_ef_distregi(hex_clean: str) -> dict[str, object] | None:
 
 
 def _decode_ef_jdl(hex_clean: str) -> dict[str, object] | None:
-    """Decode EF.JDL (3GPP2 C.S0023 §3.4.64 -- Java Download List)."""
+    """Decode EF.JDL (3GPP2 C.S0023 §3.4.64 — Java Download List)."""
 
     return _decode_spec_opaque_ef(
         hex_clean,
@@ -7430,7 +7431,7 @@ def _decode_ef_jdl(hex_clean: str) -> dict[str, object] | None:
 
 
 def _decode_ef_lcscp(hex_clean: str) -> dict[str, object] | None:
-    """Decode EF.LCSCP (3GPP2 C.S0023 §3.4.65 -- LCS Client Profile)."""
+    """Decode EF.LCSCP (3GPP2 C.S0023 §3.4.65 — LCS Client Profile)."""
 
     return _decode_spec_opaque_ef(
         hex_clean,
@@ -7441,7 +7442,7 @@ def _decode_ef_lcscp(hex_clean: str) -> dict[str, object] | None:
 
 
 def _decode_ef_lcsver(hex_clean: str) -> dict[str, object] | None:
-    """Decode EF.LCSVER (3GPP2 C.S0023 §3.4.66 -- LCS Version)."""
+    """Decode EF.LCSVER (3GPP2 C.S0023 §3.4.66 — LCS Version)."""
 
     return _decode_spec_opaque_ef(
         hex_clean,
@@ -7452,7 +7453,7 @@ def _decode_ef_lcsver(hex_clean: str) -> dict[str, object] | None:
 
 
 def _decode_ef_max_prl(hex_clean: str) -> dict[str, object] | None:
-    """Decode EF.MaxPRL (3GPP2 C.S0023 §3.4.22 -- Maximum PRL)."""
+    """Decode EF.MaxPRL (3GPP2 C.S0023 §3.4.22 — Maximum PRL)."""
 
     return _decode_spec_opaque_ef(
         hex_clean,
@@ -7463,7 +7464,7 @@ def _decode_ef_max_prl(hex_clean: str) -> dict[str, object] | None:
 
 
 def _decode_ef_maxpuzl(hex_clean: str) -> dict[str, object] | None:
-    """Decode EF.MaxPUZL (3GPP2 C.S0023 §3.4.42 -- Maximum PUZL)."""
+    """Decode EF.MaxPUZL (3GPP2 C.S0023 §3.4.42 — Maximum PUZL)."""
 
     return _decode_spec_opaque_ef(
         hex_clean,
@@ -7485,7 +7486,7 @@ def _decode_ef_puzl(hex_clean: str) -> dict[str, object] | None:
 
 
 def _decode_ef_rc(hex_clean: str) -> dict[str, object] | None:
-    """Decode EF.RC (3GPP2 C.S0023 §3.4.44 -- Root Certificate)."""
+    """Decode EF.RC (3GPP2 C.S0023 §3.4.44 — Root Certificate)."""
 
     return _decode_spec_opaque_ef(
         hex_clean,
@@ -7507,7 +7508,7 @@ def _decode_ef_snregi(hex_clean: str) -> dict[str, object] | None:
 
 
 def _decode_ef_spcs(hex_clean: str) -> dict[str, object] | None:
-    """Decode EF.SPCS (3GPP2 C.S0023 §3.4.25 -- SPC Status)."""
+    """Decode EF.SPCS (3GPP2 C.S0023 §3.4.25 — SPC Status)."""
 
     return _decode_spec_opaque_ef(
         hex_clean,
@@ -7551,7 +7552,7 @@ def _decode_ef_upbakpara(hex_clean: str) -> dict[str, object] | None:
 
 
 def _decode_ef_znregi(hex_clean: str) -> dict[str, object] | None:
-    """Decode EF.ZNREGI (3GPP2 C.S0023 §3.4.18 -- Zone-based Registration)."""
+    """Decode EF.ZNREGI (3GPP2 C.S0023 §3.4.18 — Zone-based Registration)."""
 
     return _decode_spec_opaque_ef(
         hex_clean,
@@ -7688,7 +7689,7 @@ def _decode_uri_record(
     EHURI / TN3GPPSNN / similar).
 
     Per TS 31.102 §4.2.71 and cross-referenced EFs, the payload is a single
-    BER-TLV ``80 LL <utf-8 bytes>`` record. earlier work adds RFC 3986
+    BER-TLV ``80 LL <utf-8 bytes>`` record. Round-4 Pass 2 adds RFC 3986
     decomposition (scheme / authority / path / query / fragment) and
     percent-decoding so the edit-decoded TUI can validate URI payloads
     instead of displaying them as opaque text.
@@ -7752,7 +7753,7 @@ def _decode_mwis_record(hex_clean: str) -> dict[str, object] | None:
 
 def _decode_mbi_record(hex_clean: str) -> dict[str, object] | None:
     """Decode EF.MBI (TS 31.102 §4.2.61). Each record is a profile of
-    mailbox identifiers -- typically 4 bytes (voicemail / fax / email / other).
+    mailbox identifiers — typically 4 bytes (voicemail / fax / email / other).
     Expose the raw bytes plus each slot.
     """
 
@@ -7778,7 +7779,7 @@ def _decode_mbi_record(hex_clean: str) -> dict[str, object] | None:
 def _decode_cfis_record(hex_clean: str) -> dict[str, object] | None:
     """Decode EF.CFIS (TS 31.102 §4.2.64). Record shape is 16 bytes:
     MSP_number(1) + CF_indication(1) + alpha-id segment + dialling number.
-    The TS defines the layout in detail; the first two bytes are kept as
+    The TS defines the layout in detail; we keep the first two bytes as
     semantic fields and expose the rest as ``tailHex`` for round-trip.
     """
 
@@ -8046,7 +8047,7 @@ def _decode_ef_puid(hex_clean: str) -> dict[str, object] | None:
 
 
 # ---------------------------------------------------------------------------
-# earlier work -- phonebook administrative + auxiliary EFs.
+# Round-2 Pass 1 — phonebook administrative + auxiliary EFs.
 #
 # These records all originate from DF.PHONEBOOK (TS 31.102 §4.4.2). Their
 # shapes are dictated by EF.PBR and are profile-dependent in their exact
@@ -8056,7 +8057,7 @@ def _decode_ef_puid(hex_clean: str) -> dict[str, object] | None:
 
 
 def _decode_ef_iap_record(hex_clean: str) -> dict[str, object] | None:
-    """Decode EF.IAP (TS 31.102 §4.4.2.2) -- Index Administration Phonebook.
+    """Decode EF.IAP (TS 31.102 §4.4.2.2) — Index Administration Phonebook.
 
     Each record is a sequence of record-pointer bytes, one byte per Type1
     file referenced from EF.PBR. ``0xFF`` indicates "no entry", any other
@@ -8153,7 +8154,7 @@ def _decode_ef_email_record(
 
 
 def _decode_ef_gas_record(hex_clean: str) -> dict[str, object] | None:
-    """Decode EF.GAS (TS 31.102 §4.4.2.15) -- Grouping Alpha String."""
+    """Decode EF.GAS (TS 31.102 §4.4.2.15) — Grouping Alpha String."""
 
     try:
         raw = bytes.fromhex(hex_clean)
@@ -8172,7 +8173,7 @@ def _decode_ef_gas_record(hex_clean: str) -> dict[str, object] | None:
 
 
 def _decode_ef_grp_record(hex_clean: str) -> dict[str, object] | None:
-    """Decode EF.GRP (TS 31.102 §4.4.2.3) -- Phonebook Groups.
+    """Decode EF.GRP (TS 31.102 §4.4.2.3) — Phonebook Groups.
 
     Each record maps one ADN entry to up to ``N`` GAS group IDs (``N``
     fixed by EF.PBR). Each byte holds a 1-based GAS record reference or
@@ -8204,7 +8205,7 @@ def _decode_ef_grp_record(hex_clean: str) -> dict[str, object] | None:
 
 
 def _decode_ef_anl_record(hex_clean: str) -> dict[str, object] | None:
-    """Decode EF.ANL (TS 31.102 §4.2.85) -- Aggregated Name List.
+    """Decode EF.ANL (TS 31.102 §4.2.85) — Aggregated Name List.
 
     Linear-fixed alpha-string records; PBR owns the width. Used as a
     shared name pool for other phonebook references.
@@ -8227,7 +8228,7 @@ def _decode_ef_anl_record(hex_clean: str) -> dict[str, object] | None:
 
 
 # ---------------------------------------------------------------------------
-# earlier work -- legacy GSM / broadcast EFs.
+# Round-2 Pass 1 — legacy GSM / broadcast EFs.
 # ---------------------------------------------------------------------------
 
 
@@ -8262,7 +8263,7 @@ def _decode_ef_bcch(hex_clean: str) -> dict[str, object] | None:
 
 
 # ---------------------------------------------------------------------------
-# earlier work -- ISIM / GBA / CSG helpers.
+# Round-2 Pass 1 — ISIM / GBA / CSG helpers.
 # ---------------------------------------------------------------------------
 
 
@@ -8284,7 +8285,7 @@ def _decode_nafkca_entry_value(payload: bytes) -> dict[str, object]:
 
 
 def _decode_ef_nafkca_list(hex_clean: str) -> dict[str, object] | None:
-    """Decode EF.NAFKCA-List (TS 31.102 §4.2.91) -- NAF Key Centre List."""
+    """Decode EF.NAFKCA-List (TS 31.102 §4.2.91) — NAF Key Centre List."""
 
     try:
         raw = bytes.fromhex(hex_clean)
@@ -8321,7 +8322,7 @@ def _decode_forbidden_csg_value(payload: bytes) -> dict[str, object]:
 
 
 def _decode_ef_fcsl(hex_clean: str) -> dict[str, object] | None:
-    """Decode EF.FCSL / EF.FCSGL (TS 31.102 §4.2.73) -- Forbidden CSG List."""
+    """Decode EF.FCSL / EF.FCSGL (TS 31.102 §4.2.73) — Forbidden CSG List."""
 
     try:
         raw = bytes.fromhex(hex_clean)
@@ -8344,7 +8345,7 @@ def _decode_ef_fcsl(hex_clean: str) -> dict[str, object] | None:
 
 
 def _decode_ef_phist(hex_clean: str) -> dict[str, object] | None:
-    """Decode EF.PHist (TS 31.102 §4.2.94) -- Provider Host List.
+    """Decode EF.PHist (TS 31.102 §4.2.94) — Provider Host List.
 
     BER-TLV stream; tag ``80`` carries UTF-8 host FQDN entries.
     """
@@ -8370,12 +8371,12 @@ def _decode_ef_phist(hex_clean: str) -> dict[str, object] | None:
 
 
 # ---------------------------------------------------------------------------
-# earlier work -- mailbox, SMSC, MExE service table.
+# Round-2 Pass 1 — mailbox, SMSC, MExE service table.
 # ---------------------------------------------------------------------------
 
 
 def _decode_ef_mbparam(hex_clean: str) -> dict[str, object] | None:
-    """Decode EF.MBParam (TS 31.102 §4.2.70) -- Mailbox Parameters.
+    """Decode EF.MBParam (TS 31.102 §4.2.70) — Mailbox Parameters.
 
     Variable-length transparent file composed of a 1-byte type byte
     followed by a mailbox identifier string (UTF-8 or ASCII). Trailing
@@ -8416,7 +8417,7 @@ def _decode_ef_mbparam(hex_clean: str) -> dict[str, object] | None:
 
 
 def _decode_ef_psismsc(hex_clean: str) -> dict[str, object] | None:
-    """Decode EF.PSISMSC (TS 31.103 §4.2.18) -- Public Service Identity SMSC.
+    """Decode EF.PSISMSC (TS 31.103 §4.2.18) — Public Service Identity SMSC.
 
     BER-TLV stream carrying SIP URI entries (tag ``80``, UTF-8) for the
     SMSC associated with the IMPI/IMPU.
@@ -8453,7 +8454,7 @@ _MEXE_ST_SERVICE_NAMES: dict[int, str] = {
 
 
 def _decode_ef_mexe_st(hex_clean: str) -> dict[str, object] | None:
-    """Decode EF.MExE-ST (TS 31.102 §4.4.10.1) -- MExE Service Table.
+    """Decode EF.MExE-ST (TS 31.102 §4.4.10.1) — MExE Service Table.
 
     Packed bit-map (service N at byte ``(N-1)//8`` bit ``(N-1)%8``).
     """
@@ -8485,12 +8486,12 @@ def _decode_ef_mexe_st(hex_clean: str) -> dict[str, object] | None:
 
 
 # ---------------------------------------------------------------------------
-# earlier work -- operator / vendor control primitives.
+# Round-2 Pass 1 — operator / vendor control primitives.
 # ---------------------------------------------------------------------------
 
 
 def _decode_ef_scp80_counter(hex_clean: str) -> dict[str, object] | None:
-    """Decode EF.SCP80 Counter -- 3-byte big-endian counter (ETSI TS 102 225)."""
+    """Decode EF.SCP80 Counter — 3-byte big-endian counter (ETSI TS 102 225)."""
 
     try:
         raw = bytes.fromhex(hex_clean)
@@ -8516,7 +8517,7 @@ _SIM_LOCK_STATES: dict[int, str] = {
 
 
 def _decode_ef_simlock_state(hex_clean: str) -> dict[str, object] | None:
-    """Decode EF.SIM Lock State -- 1-byte enum."""
+    """Decode EF.SIM Lock State — 1-byte enum."""
 
     try:
         raw = bytes.fromhex(hex_clean)
@@ -8545,7 +8546,7 @@ _OTA_STATES: dict[int, str] = {
 
 
 def _decode_ef_ota_state(hex_clean: str) -> dict[str, object] | None:
-    """Decode EF.OTA State -- 1-byte enum (operator convention)."""
+    """Decode EF.OTA State — 1-byte enum (operator convention)."""
 
     try:
         raw = bytes.fromhex(hex_clean)
@@ -8573,7 +8574,7 @@ _OTA_KEY_TAGS: dict[str, str] = {
 
 
 def _decode_ef_ota_keys(hex_clean: str) -> dict[str, object] | None:
-    """Decode EF.OTA Keys -- BER-TLV keyset (ETSI TS 102 225/226)."""
+    """Decode EF.OTA Keys — BER-TLV keyset (ETSI TS 102 225/226)."""
 
     try:
         raw = bytes.fromhex(hex_clean)
@@ -8602,7 +8603,7 @@ _SCP11_KEY_TAGS: dict[str, str] = {
 
 
 def _decode_ef_scp11_key(hex_clean: str) -> dict[str, object] | None:
-    """Decode EF.SCP11 Key -- BER-TLV key reference (GlobalPlatform Amd.F)."""
+    """Decode EF.SCP11 Key — BER-TLV key reference (GlobalPlatform Amd.F)."""
 
     try:
         raw = bytes.fromhex(hex_clean)
@@ -8861,7 +8862,7 @@ def _decode_vgcss_vbss_status(hex_clean: str, *, format_name: str) -> dict[str, 
 
 
 def _decode_phonebook_pbr(hex_clean: str) -> dict[str, object] | None:
-    """Decode EF.PBR (TS 31.102 §4.4.2.1) -- BER-TLV of tagged TLV entries
+    """Decode EF.PBR (TS 31.102 §4.4.2.1) — BER-TLV of tagged TLV entries
     listing phonebook EFs (type 1: type1Tag, type 2: type2Tag, etc.).
 
     The constructed A8/A9/AA wrappers carry nested primitive tags C0..CB,
@@ -9243,11 +9244,19 @@ def _decode_ef_arr(hex_clean: str) -> dict[str, object] | None:
     while cursor < len(raw):
         parsed = _parse_ber_tlv_item(raw, cursor)
         if parsed is None:
+            # Trailing 0xFF padding is benign: SAIP linear-fixed records
+            # are FF-padded to ``recordLength`` when fewer access rules
+            # are encoded than the slot accommodates. Stop cleanly so
+            # the caller still receives the summary / ruleCount instead
+            # of a parseErrorOffset warning.
+            remaining = raw[cursor:]
+            if all(byte_value == 0xFF for byte_value in remaining):
+                break
             return {
                 "format": "EF.ARR access rules",
                 "rules": rules,
                 "parseErrorOffset": cursor,
-                "remaining": raw[cursor:].hex().upper(),
+                "remaining": remaining.hex().upper(),
             }
         item, cursor = parsed
         tag = str(item["tag"])
@@ -9441,6 +9450,12 @@ def describe_arr_record_from_file_value(
     *,
     record_number: int,
 ) -> str | None:
+    """Return a human-readable summary string for one ARR record stored inside a file value dict.
+
+    Reconstructs EF.ARR records from ``fileDescriptor`` + ``fillFileContent`` chunks, then
+    looks up the decoded ``summary`` field for the requested 1-based record number.
+    Returns ``None`` when the record cannot be located or has no ``summary``.
+    """
     if isinstance(record_number, int) is False or record_number <= 0:
         return None
     descriptor_payload = None
@@ -9480,6 +9495,11 @@ def describe_arr_record_from_section(
     *,
     record_number: int,
 ) -> str | None:
+    """Return the ARR record summary for a named file-system section dict.
+
+    Delegates to ``describe_arr_record_from_file_value`` using the ``ef-arr``
+    sub-key of *section_value*.
+    """
     if isinstance(section_value, dict) is False:
         return None
     return describe_arr_record_from_file_value(
@@ -9494,6 +9514,13 @@ def describe_arr_record_from_gfm_section(
     context_path: list[int] | tuple[int, ...],
     record_number: int,
 ) -> str | None:
+    """Return the ARR record summary by walking a Generic File Management section.
+
+    Resolves the correct EF.ARR FID from *context_path* (0x2F06 at MF level,
+    0x6F06 at DF/ADF level per ETSI TS 102 221 §9.5), then scans
+    ``fileManagementCMD`` groups for matching ``fileID`` / ``fillFileContent``
+    chunks to reconstruct the record.
+    """
     if isinstance(section_value, dict) is False:
         return None
     normalized_context = tuple(int(part) for part in context_path)
@@ -9599,7 +9626,7 @@ def _decode_known_ef_payload(
     # Token-namespaced groups first (FIDs within these groups commonly
     # collide with unrelated EFs under ADF.USIM/DF.5GS/etc, so the token
     # wins when present).
-    # semantic CSIM tokens carved out before the generic
+    # Wave C Pass D — semantic CSIM tokens carved out before the generic
     # ``ef-csim-*`` opaque fallback below.
     if token == "ef-csim-st":
         return _decode_ef_csim_st(hex_clean)
@@ -9629,7 +9656,7 @@ def _decode_known_ef_payload(
     # ef-simlock-state/ef-ota-state/ef-ota-keys/ef-provconfig/ef-selfservice/
     # ef-appconfig/ef-acmp/ef-tui tokens were previously short-circuited to
     # _decode_opaque_ef here, which shadowed the semantic decoders added in
-    # earlier work / Pass 2 further down in this dispatcher. The semantic
+    # Round-2 Pass 1 / Pass 2 further down in this dispatcher. The semantic
     # branches at ``ef-mexe-st`` / ``ef-prose-pfidg`` / ``ef-scp11key`` etc
     # now win; fall through so they can fire.
 
@@ -9876,7 +9903,7 @@ def _decode_known_ef_payload(
             format_name="Invert Scan",
             value_map={0x00: "not inverted", 0x01: "inverted"},
         )
-    # 5G EFs in DF.5GS.
+    # 5x10 Pass A — 5G EFs in DF.5GS.
     # Token-based routing first (FIDs 4F01/4F07 also used in ADF.USIM).
     if token == "ef-5gs3gpploci":
         return _decode_5gs_loci(
@@ -9944,7 +9971,7 @@ def _decode_known_ef_payload(
             spec_reference="TS 31.102 §4.4.11.10 / TS 24.526",
             summary_prefix="URSP",
         )
-    # 5G extras.
+    # 5x10 Pass C — 5G extras.
     if token == "ef-tn3gppsnn" or fid_upper == "4F0C":
         return _decode_uri_record(
             hex_clean,
@@ -9960,7 +9987,7 @@ def _decode_known_ef_payload(
         return _decode_5gsedrx(hex_clean)
     if token == "ef-5gnswo-conf":
         return _decode_5gnswo_conf(hex_clean)
-    # DF.5GS / DF.5G_ProSe / DF.SNPN / ADF.USIM ePDG.
+    # Wave C Pass A — DF.5GS / DF.5G_ProSe / DF.SNPN / ADF.USIM ePDG.
     # Token-first routing (FIDs in these DFs collide with ADF.USIM).
     if token == "ef-5g-prose-st":
         return _decode_5g_prose_service_table(hex_clean)
@@ -9995,7 +10022,7 @@ def _decode_known_ef_payload(
             tag_names=_5G_PROSE_UIR_TAGS,
         )
     # Rel-18 ProSe additions (TS 31.102 §4.4.13.8 / §4.4.13.9). Token-
-    # only routing -- the bare FID collides with DF.5GS anchors.
+    # only routing — the bare FID collides with DF.5GS anchors.
     if token == "ef-5g-prose-u2uru":
         return _decode_5g_prose_tlv_ef(
             hex_clean,
@@ -10034,7 +10061,7 @@ def _decode_known_ef_payload(
         return _decode_ef_ocst(hex_clean)
     if token == "ef-rplmnact" or fid_upper == "6F65":
         return _decode_ef_rplmnact(hex_clean)
-    # DF.HNB (TS 31.102 §4.4.6 -- Home NodeB files).
+    # DF.HNB (TS 31.102 §4.4.6 — Home NodeB files).
     if token == "ef-acsgl" or fid_upper == "4F81":
         return _decode_ef_acsgl(hex_clean)
     if token == "ef-csgt" or fid_upper == "4F82":
@@ -10117,10 +10144,10 @@ def _decode_known_ef_payload(
             hex_clean,
             format_name="Emergency ePDG Selection Information",
         )
-    # ADF.USIM optional / ISIM-USIM shared EFs.
+    # Wave C Pass B — ADF.USIM optional / ISIM-USIM shared EFs.
     if token == "ef-bdn":
         return _decode_adn_like_record(hex_clean)
-    # ``ef-bdnuri`` is dispatched with spec_reference further down (earlier work
+    # ``ef-bdnuri`` is dispatched with spec_reference further down (Round-3
     # Pass 1 FID-map correction aligned it with 6FEE). Do not short-circuit
     # here or we would emit URI records without the §-reference.
     if token == "ef-ext4":
@@ -10171,7 +10198,7 @@ def _decode_known_ef_payload(
             hex_clean,
             format_name="PLMN Network Name Icon",
         )
-    # ADF.ISIM / DF.MULTIMEDIA / DF.MCS / MMS family.
+    # Wave C Pass C — ADF.ISIM / DF.MULTIMEDIA / DF.MCS / MMS family.
     if token == "ef-gbabp":
         return _decode_ef_gbabp(hex_clean)
     if token == "ef-uicciari":
@@ -10212,7 +10239,7 @@ def _decode_known_ef_payload(
         return _decode_ef_hrpdupp(hex_clean)
     if token == "ef-spc":
         return _decode_ef_spc(hex_clean)
-    # ADF.CSIM / OPT-CSIM core.
+    # Wave C Pass D — ADF.CSIM / OPT-CSIM core.
     if token == "ef-csim-st":
         return _decode_ef_csim_st(hex_clean)
     if token == "ef-accolc":
@@ -10253,7 +10280,7 @@ def _decode_known_ef_payload(
         return _decode_ef_specific_tag(hex_clean)
     if token == "ef-tmsi":
         return _decode_ef_csim_tmsi(hex_clean)
-    # DF.TELECOM / DF.PHONEBOOK / ICE / DF.V2X / EAP.
+    # Wave C Pass E — DF.TELECOM / DF.PHONEBOOK / ICE / DF.V2X / EAP.
     if token == "ef-aas":
         return _decode_ef_aas(hex_clean)
     if token == "ef-pbc":
@@ -10294,7 +10321,7 @@ def _decode_known_ef_payload(
         return _decode_ef_eap_ps(hex_clean)
     if token == "ef-realm":
         return _decode_ef_eap_realm(hex_clean)
-    # EAP / USIM / TELECOM / common residual EFs.
+    # Wave D Pass A — EAP / USIM / TELECOM / common residual EFs.
     if token == "ef-arr-usim":
         return _decode_ef_arr_usim(hex_clean)
     if token == "ef-threshold":
@@ -10333,7 +10360,7 @@ def _decode_known_ef_payload(
         return _decode_ef_csspr(hex_clean)
     if token == "ef-rma":
         return _decode_ef_rma(hex_clean)
-    # CSIM MIP/SIP/BCSMS/3GPD/WAP/OTA annotated opaque EFs.
+    # Wave D Pass B — CSIM MIP/SIP/BCSMS/3GPD/WAP/OTA annotated opaque EFs.
     if token == "ef-3gpdopm":
         return _decode_ef_3gpdopm(hex_clean)
     if token == "ef-3gpduppext":
@@ -10374,7 +10401,7 @@ def _decode_known_ef_payload(
         return _decode_ef_wapbrowserbm(hex_clean)
     if token == "ef-wapbrowsercp":
         return _decode_ef_wapbrowsercp(hex_clean)
-    # CDMA legacy / analog / registration / PUZL / PRL / LCS.
+    # Wave D Pass C — CDMA legacy / analog / registration / PUZL / PRL / LCS.
     if token == "ef-ah":
         return _decode_ef_ah(hex_clean)
     if token == "ef-aloc":
@@ -10413,7 +10440,7 @@ def _decode_known_ef_payload(
         return _decode_ef_upbakpara(hex_clean)
     if token == "ef-znregi":
         return _decode_ef_znregi(hex_clean)
-    # Phonebook EFs (DF.PHONEBOOK / DF.TELECOM).
+    # 5x10 Pass B / D — Phonebook EFs (DF.PHONEBOOK / DF.TELECOM).
     if token == "ef-pbr" or fid_upper == "4F30":
         return _decode_phonebook_pbr(hex_clean)
     if token == "ef-iap" or fid_upper == "4F25":
@@ -10526,7 +10553,7 @@ def _decode_known_ef_payload(
             spec_reference="TS 31.102 §4.4.2.14",
             summary_prefix="PUID",
         )
-    # Additional 3GPP / legacy.
+    # 5x10 Pass C — Additional 3GPP / legacy.
     if token == "ef-phase" or fid_upper == "6FAE":
         return _decode_one_byte_indicator(
             hex_clean,
@@ -10604,7 +10631,7 @@ def _decode_known_ef_payload(
             format_name="EF.LND URI",
             spec_reference="TS 31.102 §4.2.70",
         )
-    # ISIM + multimedia extras.
+    # 5x10 Pass D — ISIM + multimedia extras.
     if token == "ef-pcscf-urn":
         return _decode_pcscf_urn(hex_clean)
     if token == "ef-muddomain" or fid_upper == "6FDF":
@@ -10690,7 +10717,7 @@ def _decode_known_ef_payload(
         )
     # ``ef-fcst`` / ``ef-phist`` are already dispatched near the top of this
     # function (token-only) to avoid colliding with EF.BDNURI / EF.SDNURI.
-    # Mailbox / CF / VGCS / VBS / eMLPP / DCK / CNL family.
+    # 5x20 Pass A — Mailbox / CF / VGCS / VBS / eMLPP / DCK / CNL family.
     if token == "ef-mbdn" or fid_upper == "6FC7":
         return _decode_adn_like_record(hex_clean)
     if token == "ef-ext6" or fid_upper == "6FC8":
@@ -10811,9 +10838,9 @@ def _decode_known_ef_payload(
             format_name="Voicemail Server URI",
             spec_reference="TS 31.102 §4.2.68",
         )
-    # CSIM EFs are now dispatched via the annotated
-    # ``ef-csim-*`` branch earlier in this function.
-    # Specialized (ISIM/MCPTT/V2X/ProSe/MCS).
+    # 5x20 Pass B — CSIM EFs are now dispatched via the annotated
+    # ``ef-csim-*`` branch earlier in this function (Round-4 Pass 1).
+    # 5x20 Pass C — Specialized (ISIM/MCPTT/V2X/ProSe/MCS).
     if token == "ef-prose-pfidg":
         decoded = _decode_generic_tlv_ef(
             hex_clean,
@@ -10936,7 +10963,7 @@ def _decode_known_ef_payload(
                 spec_reference="TS 31.102 §4.4.13 / TS 24.483",
                 summary_prefix=_mcs_prefix,
             )
-    # Operator / vendor / SCP80/SCP11 extensions.
+    # 5x20 Pass D — Operator / vendor / SCP80/SCP11 extensions.
     if token.startswith("ef-opcust"):
         return _decode_opaque_ef(
             hex_clean, format_name=f"Operator Custom {token[len('ef-opcust'):]}"
@@ -11009,11 +11036,11 @@ def _decode_known_ef_payload(
         return _decode_opaque_ef(hex_clean, format_name="ACMP")
     if token == "ef-tui":
         return _decode_opaque_ef(hex_clean, format_name="TUI Config")
-    # Opaque-passthrough catalog for every remaining PE-referenced EF
-    # that has no bespoke decoder. Lookup is case-insensitive; the
-    # catalog owns the human-readable format label. Upgrading any
-    # single key to a bespoke decoder is done by adding a dedicated
-    # ``if token == ...`` clause above this block.
+    # Wave B: opaque-passthrough catalog for every remaining PE-referenced
+    # EF that has no bespoke decoder. Lookup is case-insensitive; the
+    # catalog owns the human-readable format label. Upgrading any single
+    # key to a bespoke decoder is done by adding a dedicated ``if token ==
+    # ...`` clause above this block.
     opaque_label = _lookup_opaque_passthrough_ef(token)
     if opaque_label is not None:
         return _decode_opaque_ef(hex_clean, format_name=opaque_label)
@@ -11266,7 +11293,7 @@ def _parse_ber_stream(
             decoded_value = None
             if tag_class == "universal":
                 # Universal-class primitives carry a spec-mandated
-                # interpretation (INTEGER / OCTET STRING / OID / ...). For
+                # interpretation (INTEGER / OCTET STRING / OID / …). For
                 # context / application / private classes there is no
                 # universal rule, so we surface only ``raw`` and let the
                 # containing decoder declare an interpretation when the
@@ -11876,9 +11903,9 @@ def _decode_fill_file_offset(value: Any) -> dict[str, object] | None:
 def _decode_pin_secret_value(value_bytes: bytes) -> dict[str, object] | None:
     """Decode a PIN/PUK value per ETSI TS 102 221 §9.2.
 
-    PIN/PUK secrets are strictly 4-8 ASCII digits (0x30..0x39) followed
+    PIN/PUK secrets are strictly 4–8 ASCII digits (0x30..0x39) followed
     by 0xFF filler octets to pad the record to 8 bytes. BCD is not a
-    legal on-card representation, so no BCD inference is performed --
+    legal on-card representation, so no BCD inference is performed —
     that would be context-blind fluff that misreads random-looking
     key material as a digit string.
     """
@@ -11900,7 +11927,7 @@ def _decode_pin_secret_value(value_bytes: bytes) -> dict[str, object] | None:
         decoded["digits"] = ascii_text
         decoded["summary"] = ascii_text
         return decoded
-    # Non-digit content violates §9.2 -- surface the raw hex rather than
+    # Non-digit content violates §9.2 — surface the raw hex rather than
     # fabricate a text rendering of unrelated bytes.
     decoded["summary"] = value_bytes.hex().upper()
     return decoded
@@ -12403,11 +12430,11 @@ def _decode_fill_pattern(value_bytes: bytes, *, repeat_pattern: bool) -> dict[st
     if len(value_bytes) == 1:
         decoded["byteValue"] = f"0x{value_bytes[0]:02X}"
     # SAIP ``fillPattern`` / ``repeatPattern`` are intentionally opaque byte
-    # sequences -- typically 0xFF padding, 0x00 zero-fill, or a vendor marker.
+    # sequences — typically 0xFF padding, 0x00 zero-fill, or a vendor marker.
     # Historic builds attempted an ASCII decode here which would yield
     # false-positive strings (e.g. "hello" because the test profile happened
     # to use ASCII). Only surface a printable form when the pattern is long
-    # enough to be meaningful and every byte is printable -- that way a
+    # enough to be meaningful and every byte is printable — that way a
     # profile that really contains ASCII test data still lights up, but
     # random-looking padding never does.
     if len(value_bytes) >= 3:
@@ -12715,7 +12742,7 @@ _RESTRICT_PARAMETER_BITS: dict[int, str] = {
 
 
 def _decode_restrict_parameter(value_bytes: bytes) -> dict[str, object] | None:
-    """SAIP §8.6.6 / GlobalPlatform Card Spec Amd F §A.4 -- single-byte
+    """SAIP §8.6.6 / GlobalPlatform Card Spec Amd F §A.4 — single-byte
     bitmap governing the Security Domain ``openPersoData`` behaviour.
 
     Only the two standards-assigned bits are labelled; all remaining bits
@@ -12759,7 +12786,7 @@ def _decode_gp_memory_quota_field(
     field_name: str,
     value_bytes: bytes,
 ) -> dict[str, object] | None:
-    """GlobalPlatform Amd A §5.1.2 / Amd C -- ``ApplicationSystemParameters``
+    """GlobalPlatform Amd A §5.1.2 / Amd C — ``ApplicationSystemParameters``
     memory quota fields.
 
     Each entry is a 2..4 byte network-byte-order unsigned integer giving
@@ -12825,7 +12852,7 @@ def _decode_access_domain_record(value_bytes: bytes) -> dict[str, object]:
 def _decode_ts102226_sim_file_access_toolkit_parameter(
     value_bytes: bytes,
 ) -> dict[str, object] | None:
-    """TS 102 226 §8.2.1.3.2.3 / TS 51.011 clause A.1.2.3 -- combined SIM
+    """TS 102 226 §8.2.1.3.2.3 / TS 51.011 clause A.1.2.3 — combined SIM
     Toolkit Application + SIM File Access parameters.
 
     Structure::
@@ -12890,7 +12917,7 @@ def _decode_uicc_access_application_specific_parameters(
     *,
     administrative: bool,
 ) -> dict[str, object] | None:
-    """TS 102 226 §8.2.1.3.2.2 -- UICC access application-specific
+    """TS 102 226 §8.2.1.3.2.2 — UICC access application-specific
     parameters (regular and administrative variants).
 
     Structure (same for both variants)::
@@ -12943,7 +12970,7 @@ def _decode_uicc_access_application_specific_parameters(
 
 
 def _decode_application_provider_identifier(value_bytes: bytes) -> dict[str, object] | None:
-    """SAIP §2.8.2 -- ``applicationProviderIdentifier`` is an ASN.1
+    """SAIP §2.8.2 — ``applicationProviderIdentifier`` is an ASN.1
     OBJECT IDENTIFIER octet string. Surface the OID dotted form so the
     edit-decoded TUI can display the provider arc (e.g. GSMA eUICC arc).
     """
@@ -12978,7 +13005,7 @@ _GLOBAL_SERVICE_BITS: dict[int, str] = {
 
 
 def _decode_global_service_parameters(value_bytes: bytes) -> dict[str, object] | None:
-    """SAIP §2.6.3 -- single-byte bitmap of global services supported by the
+    """SAIP §2.6.3 — single-byte bitmap of global services supported by the
     profile. Map each set bit to the service name per Table 2-6."""
 
     if len(value_bytes) != 1:
@@ -12997,7 +13024,7 @@ def _decode_global_service_parameters(value_bytes: bytes) -> dict[str, object] |
 
 
 def _decode_implicit_selection_parameter(value_bytes: bytes) -> dict[str, object] | None:
-    """GlobalPlatform Card Spec Amd A §A.3 -- single-byte implicit selection
+    """GlobalPlatform Card Spec Amd A §A.3 — single-byte implicit selection
     parameter. bit8 distinguishes default application vs. explicit AID
     selection, bits 1-5 carry the channel mask."""
 
@@ -13020,7 +13047,7 @@ def _decode_implicit_selection_parameter(value_bytes: bytes) -> dict[str, object
 
 
 def _decode_contactless_protocol_parameters(value_bytes: bytes) -> dict[str, object] | None:
-    """GlobalPlatform Card Spec Amd C §5 -- BER-TLV wrapping NFC contactless
+    """GlobalPlatform Card Spec Amd C §5 — BER-TLV wrapping NFC contactless
     protocol data (AID, protocol type, routing)."""
 
     if len(value_bytes) == 0:
@@ -13053,7 +13080,7 @@ def _decode_contactless_protocol_parameters(value_bytes: bytes) -> dict[str, obj
 def _decode_user_interaction_contactless_parameters(
     value_bytes: bytes,
 ) -> dict[str, object] | None:
-    """GlobalPlatform Card Spec Amd C §6 -- User interaction parameters.
+    """GlobalPlatform Card Spec Amd C §6 — User interaction parameters.
 
     Structure is a BER-TLV stream carrying the contactless user-interaction
     fields: display required flag, CREL application AID, display-content
@@ -13322,9 +13349,9 @@ def _summarize_binary_blob(
 
     Inference is now strictly opt-in:
 
-    * ``infer_text=True``  -- caller has spec evidence the field is
+    * ``infer_text=True``  — caller has spec evidence the field is
       text (UTF-8 / ASCII identifier, e.g. ``applicationLabel``).
-    * ``infer_bcd=True``   -- caller has spec evidence the field is
+    * ``infer_bcd=True``   — caller has spec evidence the field is
       BCD-encoded digits (e.g. ``dialledNumber``).
     """
 
@@ -13361,7 +13388,7 @@ def _filesystem_hint(pe_base: str) -> str | None:
         "mcs": "MF/USIM/MCS",
         "v2x": "MF/USIM/V2X",
         "a2x": "MF/USIM/A2X",
-        # additional PE filesystem hints.
+        # 5x20 Pass C — additional PE filesystem hints.
         "usim": "MF/USIM",
         "opt-usim": "MF/USIM",
         "csim": "MF/CSIM",
@@ -13479,6 +13506,65 @@ def _updated_sequence_fid(current_fid: str | None, child: Any) -> str | None:
     return file_id_hex.upper()
 
 
+def _decode_inline_placeholder_blob(raw_text: str) -> list[str]:
+    """Produce an INSPECT ``Field semantics`` block for hex with inline placeholders.
+
+    ``raw_text`` is the tagged hex-leaf content the walker refused to
+    canonicalise because it embeds vendor-style typed placeholders such
+    as ``{iccid:ICCID:10:nibble_swap}``. The block lists each literal
+    with its declared metadata and the surrounding hex runs so the
+    operator still gets a field-level decode for template scaffolding.
+    Returns an empty list when the text carries no inline placeholders,
+    which lets the walker stay silent for genuinely unparseable payloads.
+    """
+    from Tools.ProfilePackage.saip_hex_template import (
+        extract_inline_placeholders_from_hex_text,
+    )
+
+    text = str(raw_text or "")
+    entries = extract_inline_placeholders_from_hex_text(text)
+    if len(entries) == 0:
+        return []
+
+    total_bytes = 0
+    cursor = 0
+    for entry in entries:
+        prefix_hex = "".join(text[cursor : entry["start"]].split())
+        if len(prefix_hex) % 2 == 0:
+            total_bytes += len(prefix_hex) // 2
+        total_bytes += int(entry["byte_length"])
+        cursor = entry["end"]
+    tail_hex = "".join(text[cursor:].split())
+    if len(tail_hex) % 2 == 0:
+        total_bytes += len(tail_hex) // 2
+
+    block: dict[str, Any] = {
+        "format": "Inline template placeholder",
+        "hex_with_literals": text,
+        "placeholders": [
+            {
+                "literal": entry["literal"],
+                "variable": entry["variable"],
+                "type": entry["type"],
+                "byte_length": entry["byte_length"],
+                **(
+                    {"modifier": entry["modifier"]}
+                    if entry["modifier"] is not None
+                    else {}
+                ),
+            }
+            for entry in entries
+        ],
+        "byte_length": total_bytes,
+        "summary": (
+            f"{len(entries)} inline placeholder"
+            + ("s" if len(entries) != 1 else "")
+            + f" · {total_bytes} declared bytes"
+        ),
+    }
+    return _compact_block("Field semantics", block)
+
+
 def _decode_one_blob(
     hex_clean: str,
     *,
@@ -13558,6 +13644,21 @@ def _walk(
         if keys_structural == {_TAG_BYTES}:
             hx = _hex_from_tagged_bytes(value)
             if hx is None:
+                raw_text = str(
+                    _value_first(value, _TAG_BYTES, _LEGACY_TAG_BYTES) or ""
+                )
+                placeholder_lines = _decode_inline_placeholder_blob(raw_text)
+                if len(placeholder_lines) > 0:
+                    out.append(
+                        (
+                            _format_hit_title(
+                                pe_section_key,
+                                path_tail,
+                                fallback="(bytes)",
+                            ),
+                            placeholder_lines,
+                        )
+                    )
                 return
             lines = _decode_one_blob(
                 hx,

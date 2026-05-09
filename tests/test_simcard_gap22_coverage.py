@@ -1,7 +1,8 @@
-"""Coverage for the call-forwarding and EHPLMN-presentation USIM EFs:
+"""Twenty-second-pass gap-coverage suite for the call-forwarding
+and EHPLMN-presentation EFs.
 
-These EFs are always pre-allocated on real cards; without them
-the simulator returns ``6A 82`` (file not found) on a modem read.
+Round-22 closes two USIM EFs that real cards always pre-allocate
+but the simulator was returning ``6A 82`` (file not found) for:
 
 * EF.EHPLMNPI (``6FDB``) -- 3GPP TS 31.102 §4.2.84 Equivalent
   HPLMN Presentation Indication. Single transparent byte; bit 1

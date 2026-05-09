@@ -1,3 +1,4 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """
 Polling watcher that auto-opens fresh SIMCARD profiles in the SAIP tooling.
 
@@ -16,7 +17,7 @@ Architecture:
    ``saip-diff-tui`` or the transcode TUI at the fresh profile.
 
 Polling (rather than inotify / fsevents) keeps the module dependency
-light -- no extra wheels, portable to macOS / Windows / Linux. The
+light — no extra wheels, portable to macOS / Windows / Linux. The
 default poll interval (2 s) is aligned with the shell REPL ergonomics:
 slow enough not to burn CPU, fast enough that a new ES10b download is
 visible within a breath.
@@ -156,6 +157,7 @@ class ProfileStoreWatcher:
         return self._store_root
 
     def poll_once(self) -> list[ProfileArrival]:
+        """Poll for card presence once and return the current card state dict."""
         try:
             arrivals = _scan_store_once(self._store_root)
         except OSError as scan_error:
@@ -197,6 +199,7 @@ class ProfileStoreWatcher:
         self._stop_event.set()
 
     def run_forever(self) -> None:
+        """Run the card-presence polling loop forever until interrupted."""
         while self._stop_event.is_set() is False:
             try:
                 self.poll_once()
@@ -249,7 +252,7 @@ def _build_default_tui_command(arrival: ProfileArrival) -> list[str]:
     python_binary = sys.executable or "python3"
     # Previous iterations of this hook invoked the diff TUI with the
     # same profile on both sides, which always produced "no
-    # differences" -- useless for an operator. Instead drop the new
+    # differences" — useless for an operator. Instead drop the new
     # profile into the profile-package shell with a three-command
     # inspect batch so the operator sees profile_name/iccid/imsi plus
     # the TREE of PE sections immediately.
@@ -283,14 +286,14 @@ def _expand_launcher_template(
 
     The accepted tokens are:
 
-    * ``{iccid}``         -- the newly seen ICCID.
-    * ``{profile}``       -- the preferred profile file path.
-    * ``{profile_path}``  -- alias of ``{profile}``; kept for callers that
+    * ``{iccid}``         — the newly seen ICCID.
+    * ``{profile}``       — the preferred profile file path.
+    * ``{profile_path}``  — alias of ``{profile}``; kept for callers that
       still use the original placeholder name.
-    * ``{profile_dir}``   -- the per-profile directory.
-    * ``{manifest}``      -- the manifest JSON path (empty string if the
+    * ``{profile_dir}``   — the per-profile directory.
+    * ``{manifest}``      — the manifest JSON path (empty string if the
       arrival did not ship a manifest).
-    * ``{python}``        -- ``sys.executable``.
+    * ``{python}``        — ``sys.executable``.
 
     Unknown tokens are substituted with empty strings rather than
     raising: a typo in the operator's ``--launcher`` string must not
@@ -421,6 +424,7 @@ def watch_and_launch_tui(
 
 
 def run_cli(argv: Sequence[str] | None = None) -> int:
+    """Parse CLI arguments and launch the SIM-card watch loop."""
     import argparse
 
     parser = argparse.ArgumentParser(

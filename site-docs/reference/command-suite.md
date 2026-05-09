@@ -69,7 +69,7 @@ flowchart TD
 
 ---
 
-## 1. `main/main.py` -- Top-level Menu Launcher
+## 1. `main/main.py` — Top-level Menu Launcher
 
 Invoke with `python main/main.py` or any wrapper console script
 (`yggdrasim-scp03`, `yggdrasim-scp11`, etc., which delegate to the
@@ -84,24 +84,24 @@ options are consumed by `argparse` before the menu is drawn.
 | `--version` | flag | off | Print `YggdraSIM <version>` sourced from `yggdrasim_common.__about__.get_version()` (which reads `pyproject.toml` / installed distribution metadata) and exit `0`. |
 | `--doctor` | flag | off | Run a read-only preflight (`yggdrasim_common.doctor.run_doctor`) covering Python ≥3.10, `cryptography`, `pycryptodomex`, `asn1tools`, the optional on-disk `pysim/` tree, SQLite, optional `textual`, PC/SC readers, and the `gpg` binary. Exit `0` when every probe is `ok`/`info`, `1` when any is `warn`/`fail`. |
 | `--scp03` | flag | off | Target the SCP03 shell non-interactively (pair with `--cmd`). |
-| `--cmd "<semicolon list>"` | string | -- | Batch commands for the `--scp03` pipeline. |
-| `--out <path>` | path | -- | YAML output for `--cmd` (forwarded to `run_scp03_cmd`). |
+| `--cmd "<semicolon list>"` | string | — | Batch commands for the `--scp03` pipeline. |
+| `--out <path>` | path | — | YAML output for `--cmd` (forwarded to `run_scp03_cmd`). |
 | `--card-backend` | `reader` \| `sim` | persisted | Physical PC/SC reader vs simulated eUICC; re-persists when reused. |
-| `--sim-isdr-config` | JSON path | -- | Seed simulated ISD-R/eUICC personality. |
-| `--sim-quirks` | Python path | -- | Quirks override for the simulated SIM. |
-| `--sim-eim-identity` | JSON path | -- | Simulated BF55 eIM identity. |
-| `--sim-euicc-store` | directory | -- | Persistent EID-scoped eUICC state root. |
-| `--sim-profile-store` | directory | -- | Persisted simulated-profile artifacts directory. |
-| `--sim-import-profile` | path | -- | Import DER / BIN / hex-text / tagged SAIP JSON / `profile_image.json` before launch. |
+| `--sim-isdr-config` | JSON path | — | Seed simulated ISD-R/eUICC personality. |
+| `--sim-quirks` | Python path | — | Quirks override for the simulated SIM. |
+| `--sim-eim-identity` | JSON path | — | Simulated BF55 eIM identity. |
+| `--sim-euicc-store` | directory | — | Persistent EID-scoped eUICC state root. |
+| `--sim-profile-store` | directory | — | Persisted simulated-profile artifacts directory. |
+| `--sim-import-profile` | path | — | Import DER / BIN / hex-text / tagged SAIP JSON / `profile_image.json` before launch. |
 | `--sim-import-enable` | flag | off | Enable the imported simulated profile immediately. |
-| `--open-pcap <path>` | path | -- | Open a saved `.pcap` / `.pcapng` directly in the HIL decoded-APDU TUI in offline review mode. No SIMtrace2, no supervisor, no FIFO, no systemd service touch. Short-circuits the main menu. |
-| `--keybag <path>` | path | -- | Optional keybag JSON with SCP03 / SCP11c session keys. Used with `--open-pcap` to decrypt secure-messaging APDUs inline. If omitted, `<pcap>.keys.json` / `<stem>.keys.json` sidecars are auto-discovered. |
+| `--open-pcap <path>` | path | — | Open a saved `.pcap` / `.pcapng` directly in the HIL decoded-APDU TUI in offline review mode. No SIMtrace2, no supervisor, no FIFO, no systemd service touch. Short-circuits the main menu. |
+| `--keybag <path>` | path | — | Optional keybag JSON with SCP03 / SCP11c session keys. Used with `--open-pcap` to decrypt secure-messaging APDUs inline. If omitted, `<pcap>.keys.json` / `<stem>.keys.json` sidecars are auto-discovered. |
 | `--gui` | flag | off | Launch the desktop Universal GUI Command Center (requires the `[gui]` extra; `pywebview`-backed). Short-circuits the menu. |
 | `--web-server` | flag | off | Launch the Universal GUI as a FastAPI loopback service (requires the `[gui-server]` extra). Short-circuits the menu. |
 | `--host <addr>` | str | `127.0.0.1` | Bind address for `--web-server`. |
 | `--port <n>` | int | `8765` | Bind port for `--web-server`. |
-| `--token-file <path>` | path | -- | Persisted bearer-token file for the web server. |
-| `--tls-cert <path>` / `--tls-key <path>` | path | -- | Optional TLS material for the web server. |
+| `--token-file <path>` | path | — | Persisted bearer-token file for the web server. |
+| `--tls-cert <path>` / `--tls-key <path>` | path | — | Optional TLS material for the web server. |
 | `--tls-self-signed` | flag | off | Generate an in-memory self-signed certificate for the web server. |
 | `--debug` / `--verbose` | flag | off | Promote global debug to every sub-module (`YGGDRASIM_GLOBAL_DEBUG=1`). |
 
@@ -109,17 +109,17 @@ options are consumed by `argparse` before the menu is drawn.
 
 | Pick | Label | Opens |
 | --- | --- | --- |
-| `1` | Admin Shell -- Local Management | SCP03 Admin Shell |
-| `2` | OTA Simulator -- Remote Management | SCP80 OTA Shell |
+| `1` | Admin Shell — Local Management | SCP03 Admin Shell |
+| `2` | OTA Simulator — Remote Management | SCP80 OTA Shell |
 | `3A` | eSIM Management Relay (Live Certificates) | SCP11 Live console |
 | `3B` | eSIM Management Relay (Test Certificates) | SCP11 Test console |
 | `3C` | Local SMDPP | SCP11 Local Access shell |
 | `3D` | Local eIM | SCP11 Local eIM shell |
 | `7` | SAIP Tool | Profile Package / SAIP shell |
 | `8` | SUCI Key Tool | SUCI Tool shell |
-| `9A` | Admin Shell -- Script Execution | SCP03 batch-script mode (prompts for path) |
-| `9B` | Admin Shell -- Report & DUMP-FS | SCP03 report-wizard pipeline |
-| `9C` | OTA Simulator -- Script Execution | SCP80 batch-script mode |
+| `9A` | Admin Shell — Script Execution | SCP03 batch-script mode (prompts for path) |
+| `9B` | Admin Shell — Report & DUMP-FS | SCP03 report-wizard pipeline |
+| `9C` | OTA Simulator — Script Execution | SCP80 batch-script mode |
 | `C` | Card Backend / Simulator Settings | Nested backend/sim picker (§1.5) |
 | `B` | HIL Bridge Session | Nested HIL session controller (§1.4) |
 | `G` | Guides & Documentation | Nested in-terminal guide menu (§1.6) |
@@ -149,19 +149,19 @@ URL, ATR) each iteration.
 
 | Pick | Action |
 | --- | --- |
-| `1` | Start HIL session -- prompts for a view mode: `[1]` Raw APDU only, `[2]` Raw APDU + Wireshark, `[3]` Decoded APDU in terminal (Textual TUI), `[Q]` Back. Starts `yggdrasim-hil-supervisor.service` (user unit). |
-| `2` | Stop HIL session -- stops the user unit. |
-| `3` | Open saved `.pcap` (offline review, no bridge) -- prompts for a capture path (native picker with manual fallback) and an optional keybag JSON path. Auto-discovers `<pcap>.keys.json` / `<stem>.keys.json` sidecars when the keybag prompt is left blank. Runs `Tools.HilBridge.live_decode_tui.run_live_decode_tui` with `live_capture=False`; no supervisor, no FIFO, no `tshark -i`, no systemd touch. Same code path as `main/main.py --open-pcap <path> [--keybag <path>]`. |
+| `1` | Start HIL session — prompts for a view mode: `[1]` Raw APDU only, `[2]` Raw APDU + Wireshark, `[3]` Decoded APDU in terminal (Textual TUI), `[Q]` Back. Starts `yggdrasim-hil-supervisor.service` (user unit). |
+| `2` | Stop HIL session — stops the user unit. |
+| `3` | Open saved `.pcap` (offline review, no bridge) — prompts for a capture path (native picker with manual fallback) and an optional keybag JSON path. Auto-discovers `<pcap>.keys.json` / `<stem>.keys.json` sidecars when the keybag prompt is left blank. Runs `Tools.HilBridge.live_decode_tui.run_live_decode_tui` with `live_capture=False`; no supervisor, no FIFO, no `tshark -i`, no systemd touch. Same code path as `main/main.py --open-pcap <path> [--keybag <path>]`. |
 | `R` | Refresh status header. |
 | `Q` / *(empty)* | Return to main menu. |
 
 Sub-tooling spawned from `[B]`:
 
-- **Wireshark live capture** -- `wireshark -k -i <iface> -f "udp port 4729"`. `iface` defaults to `lo`/`lo0`; override via `YGGDRASIM_HIL_CAPTURE_INTERFACE`. Binary override via `YGGDRASIM_HIL_WIRESHARK_BIN`.
-- **Decoded-APDU Textual TUI** -- `Tools.HilBridge.live_decode_tui.run_live_decode_tui` driving either the live pcap with `tshark -i` (live mode) or a saved pcap with `tshark -r` (offline review mode). Override via `YGGDRASIM_HIL_TERMSHARK_BIN`, warmup via `YGGDRASIM_HIL_TERMSHARK_WARMUP_SECONDS`. In offline mode, a keybag JSON can be layered in via the `[3]` prompt or `--keybag`.
-- **Raw APDU stream view** -- tails `journalctl --user -u yggdrasim-hil-supervisor.service -f -n 0 -o cat`, filtered to APDU-flavored lines.
-- **Pcap writers** -- `Tools/HilBridge/termshark_capture_pcap.py` (preferred) or `tshark`/`dumpcap`. Mirror fan-out via `termshark_capture_mirror.py` when `--gsmtap-capture-mirror-fifo-path` is set.
-- **Offline replay engine** -- `Tools.HilBridge.scp_replay.ScpReplayEngine` unwraps secure-messaging APDUs (CLA bit `0x04`) for SCP03 / SCP11c when a keybag JSON is loaded via `load_keybag()` / `try_autodiscover_sidecar_keybag()`. Keybags are produced by `EXPORT-KEYBAG` in SCP03 / SCP11 Local Access or by `python -m SCP11.local_access --dump-keybag`.
+- **Wireshark live capture** — `wireshark -k -i <iface> -f "udp port 4729"`. `iface` defaults to `lo`/`lo0`; override via `YGGDRASIM_HIL_CAPTURE_INTERFACE`. Binary override via `YGGDRASIM_HIL_WIRESHARK_BIN`.
+- **Decoded-APDU Textual TUI** — `Tools.HilBridge.live_decode_tui.run_live_decode_tui` driving either the live pcap with `tshark -i` (live mode) or a saved pcap with `tshark -r` (offline review mode). Override via `YGGDRASIM_HIL_TERMSHARK_BIN`, warmup via `YGGDRASIM_HIL_TERMSHARK_WARMUP_SECONDS`. In offline mode, a keybag JSON can be layered in via the `[3]` prompt or `--keybag`.
+- **Raw APDU stream view** — tails `journalctl --user -u yggdrasim-hil-supervisor.service -f -n 0 -o cat`, filtered to APDU-flavored lines.
+- **Pcap writers** — `Tools/HilBridge/termshark_capture_pcap.py` (preferred) or `tshark`/`dumpcap`. Mirror fan-out via `termshark_capture_mirror.py` when `--gsmtap-capture-mirror-fifo-path` is set.
+- **Offline replay engine** — `Tools.HilBridge.scp_replay.ScpReplayEngine` unwraps secure-messaging APDUs (CLA bit `0x04`) for SCP03 / SCP11c when a keybag JSON is loaded via `load_keybag()` / `try_autodiscover_sidecar_keybag()`. Keybags are produced by `EXPORT-KEYBAG` in SCP03 / SCP11 Local Access or by `python -m SCP11.local_access --dump-keybag`.
 
 ### 1.5 `[C]` Card Backend sub-menu
 
@@ -192,17 +192,17 @@ picks delegate to `SCP03.interface.guides.ShellGuides`.
 | --- | --- |
 | `1` | Admin Shell guide topics (`ShellGuides.print_guide("WIZARD")`) |
 | `2` | OTA Simulator guide (`ShellGuides._print_ota_guide`) |
-| `3` | eSIM Relay Live -- `SCP11/live/README.md` |
-| `4` | eSIM Relay Test -- `SCP11/test/README.md` |
-| `5` | Local SMDPP -- `SCP11/local_access/README.md` |
-| `5C` | Local SMDPP certificate override -- `SCP11/local_access/certs/README.md` |
-| `6` | Local eIM overview -- `SCP11/eim_local/README.md` |
-| `6D` | Local eIM detailed guide -- `SCP11/eim_local/GUIDE.md` |
-| `6T` | Local eIM package templates -- `SCP11/eim_local/eim_packages/templates/README.md` |
+| `3` | eSIM Relay Live — `SCP11/live/README.md` |
+| `4` | eSIM Relay Test — `SCP11/test/README.md` |
+| `5` | Local SMDPP — `SCP11/local_access/README.md` |
+| `5C` | Local SMDPP certificate override — `SCP11/local_access/certs/README.md` |
+| `6` | Local eIM overview — `SCP11/eim_local/README.md` |
+| `6D` | Local eIM detailed guide — `SCP11/eim_local/GUIDE.md` |
+| `6T` | Local eIM package templates — `SCP11/eim_local/eim_packages/templates/README.md` |
 | `7` | SAIP Tool guide (`ShellGuides._print_saip_guide`) |
 | `8` | SUCI Tool guide (`ShellGuides._print_suci_guide`) |
 | `R` | Root `README.md` |
-| `H` | Architecture -- `guides/ARCHITECTURE.md` |
+| `H` | Architecture — `guides/ARCHITECTURE.md` |
 | `N` | `NOTICE` |
 | `Q` | Back to main menu |
 
@@ -230,7 +230,7 @@ Defined in `pyproject.toml`/`yggdrasim_common/console_scripts.py`:
 
 ---
 
-## 2. SCP03 -- GlobalPlatform Admin Shell
+## 2. SCP03 — GlobalPlatform Admin Shell
 
 `python -m SCP03` / `yggdrasim-scp03`. Command dispatcher:
 `SCP03.interface.commands.CommandRegistry`. Entry points:
@@ -246,95 +246,95 @@ Defined in `pyproject.toml`/`yggdrasim_common/console_scripts.py`:
 | `--out <path>` | path | YAML transcript paired with `--cmd` / `--stdin`. |
 | `--debug` / `--verbose` | flag | Promote APDU hex logging (`dispatcher.debug_mode` + transport debug). |
 
-No `--scp03-keys`, `--aid`, `--reader` or similar flags -- *(not in source)*.
+No `--scp03-keys`, `--aid`, `--reader` or similar flags — *(not in source)*.
 
 ### 2.2 Session & card info
 
 | Command | Args | Aliases | Purpose |
 | --- | --- | --- | --- |
-| `SCP03-SD` | -- | `AUTH-SD` | Authenticate ISD with SCP03. |
-| `AUTH-SD` | -- | `SCP03-SD` | Legacy alias. |
-| `SCP02-SD` | -- | -- | Authenticate ISD with SCP02. |
-| `RESET` | -- | -- | Reset card; re-read ATR; auto-restore session if one was active. |
-| `INFO` | -- | -- | ATR, ICCID, EID, SGP version summary. |
-| `ATR` | -- | -- | Parsed ATR breakdown after reset. |
-| `KEYS` | `[AID]` | -- | Retrieve key information for current / given AID. |
-| `LOGOUT` | -- | -- | Close the secure session. |
-| `CLS` | -- | -- | Clear terminal screen. |
-| `OTA` | -- | -- | Switch to the SCP80 OTA shell (in-process; reader released and reacquired). |
-| `STK` | `[Commands]` | -- | Enter the SCP03 STK subsystem (or run semicolon batch). See §2.10. |
+| `SCP03-SD` | — | `AUTH-SD` | Authenticate ISD with SCP03. |
+| `AUTH-SD` | — | `SCP03-SD` | Legacy alias. |
+| `SCP02-SD` | — | — | Authenticate ISD with SCP02. |
+| `RESET` | — | — | Reset card; re-read ATR; auto-restore session if one was active. |
+| `INFO` | — | — | ATR, ICCID, EID, SGP version summary. |
+| `ATR` | — | — | Parsed ATR breakdown after reset. |
+| `KEYS` | `[AID]` | — | Retrieve key information for current / given AID. |
+| `LOGOUT` | — | — | Close the secure session. |
+| `CLS` | — | — | Clear terminal screen. |
+| `OTA` | — | — | Switch to the SCP80 OTA shell (in-process; reader released and reacquired). |
+| `STK` | `[Commands]` | — | Enter the SCP03 STK subsystem (or run semicolon batch). See §2.10. |
 
 ### 2.3 GlobalPlatform execution wizards
 
-Each wizard is tag-granular -- every sub-prompt is its own step.
+Each wizard is tag-granular — every sub-prompt is its own step.
 
 #### `WIZARD` → **GlobalPlatform Execution Wizards** (`Choice [0-8]`)
 
 1. **INSTALL [for load]** (P1=02)
-    1. `lf_aid` -- Executable Load File AID [Hex, optional]
-    2. `sd_aid` -- Target Security Domain AID [Hex, optional]
-    3. `lf_hash` -- Load File Data Block Hash [Hex, optional]
-    4. `params` -- Launch Load Parameters TLV Builder? [y/N] → nested **Install Parameters TLV Builder**
-    5. `raw_params` -- Raw hex-only Load Parameters [Hex, optional]
-    6. `token` -- Load Token [Hex, optional]
+    1. `lf_aid` — Executable Load File AID [Hex, optional]
+    2. `sd_aid` — Target Security Domain AID [Hex, optional]
+    3. `lf_hash` — Load File Data Block Hash [Hex, optional]
+    4. `params` — Launch Load Parameters TLV Builder? [y/N] → nested **Install Parameters TLV Builder**
+    5. `raw_params` — Raw hex-only Load Parameters [Hex, optional]
+    6. `token` — Load Token [Hex, optional]
 2. **INSTALL [for install]** (P1=04)
-    1. `elf_aid` -- Executable Load File / Package AID [Hex, mandatory]
-    2. `em_aid` -- Executable Module AID [Hex, mandatory]
-    3. `app_aid` -- Target Application / Applet AID [Hex, mandatory]
-    4. `priv` -- Launch Privileges Builder? [y/N] → nested **Privileges Builder**
-    5. `raw_priv` -- Raw Privileges bitmask [Hex, default 00]
-    6. `params` -- Launch Install Parameters TLV Builder? [y/N] → nested builder
-    7. `raw_params` -- Raw Install Parameters [Hex, default C900]
-    8. `token` -- Install Token [Hex, optional]
-3. **INSTALL [for make selectable]** (P1=08) -- sub-steps: `app_aid`, `priv`, `raw_priv`, `params`, `raw_params`, `token`.
+    1. `elf_aid` — Executable Load File / Package AID [Hex, mandatory]
+    2. `em_aid` — Executable Module AID [Hex, mandatory]
+    3. `app_aid` — Target Application / Applet AID [Hex, mandatory]
+    4. `priv` — Launch Privileges Builder? [y/N] → nested **Privileges Builder**
+    5. `raw_priv` — Raw Privileges bitmask [Hex, default 00]
+    6. `params` — Launch Install Parameters TLV Builder? [y/N] → nested builder
+    7. `raw_params` — Raw Install Parameters [Hex, default C900]
+    8. `token` — Install Token [Hex, optional]
+3. **INSTALL [for make selectable]** (P1=08) — sub-steps: `app_aid`, `priv`, `raw_priv`, `params`, `raw_params`, `token`.
 4. **INSTALL [for extradition]** (P1=10)
-    1. `sd_aid` -- Destination Security Domain AID [Hex]
-    2. `app_aid` -- Application / ELF AID [Hex]
-    3. `token` -- Extradition Token [Hex, optional]
-5. **INSTALL [for registry update]** (P1=40) -- sub-steps: `app_aid`, `priv`, `raw_priv`, `params`, `raw_params`, `token`.
+    1. `sd_aid` — Destination Security Domain AID [Hex]
+    2. `app_aid` — Application / ELF AID [Hex]
+    3. `token` — Extradition Token [Hex, optional]
+5. **INSTALL [for registry update]** (P1=40) — sub-steps: `app_aid`, `priv`, `raw_priv`, `params`, `raw_params`, `token`.
 6. **INSTALL [for personalization] / STORE DATA helper** (`run_dgi_personalization`)
-    1. `target_mode` -- Mode [1=INSTALL for personalization, 2=Direct STORE DATA only]
-    2. `target_aid` -- Target AID [Hex] *(only when mode=1)*
-    3. `input_mode` -- [1=Structured TLV builder, 2=Raw payload hex only]
-    4. `store_p1` -- STORE DATA P1 [Hex, default 90]
-    5. `store_p2` -- STORE DATA P2 [Hex, default 00]
-    6. `raw_payload` -- STORE DATA payload [Hex] *(only when input_mode=2)*
-    7. `42` -- Issuer/SD ID (Tag 42) [Hex, SKIP]
-    8. `45` -- Card/SD Image Number (Tag 45) [Hex, SKIP]
-    9. `4F` -- Issuer SD AID (Tag 4F) [Hex, SKIP]
-    10. `66` -- Card/SD Recognition Data (Tag 66) [Hex, SKIP]
-    11. `67` -- Launch Card Capability Info Builder (Tag 67)? [y/N] → nested **Tag 67 builder**
-    12. `5F50` -- SD Manager URL (Tag 5F50) [Hex, SKIP]
-    13. `86` -- Security Level (Tag 86) [Hex, SKIP]
-    14. `8A` -- Admin IP/Host (Tag 8A) [Hex, SKIP]
-    15. `8C` -- Admin URL (Tag 8C) [Hex, SKIP]
-    16. `custom` -- Add Custom TLV String [Hex, SKIP]
-    17. `tx` -- Transmit Confirmation [y/N]
-7. **INSTALL [for install and make selectable]** (P1=0C) -- same surface as step 2.
+    1. `target_mode` — Mode [1=INSTALL for personalization, 2=Direct STORE DATA only]
+    2. `target_aid` — Target AID [Hex] *(only when mode=1)*
+    3. `input_mode` — [1=Structured TLV builder, 2=Raw payload hex only]
+    4. `store_p1` — STORE DATA P1 [Hex, default 90]
+    5. `store_p2` — STORE DATA P2 [Hex, default 00]
+    6. `raw_payload` — STORE DATA payload [Hex] *(only when input_mode=2)*
+    7. `42` — Issuer/SD ID (Tag 42) [Hex, SKIP]
+    8. `45` — Card/SD Image Number (Tag 45) [Hex, SKIP]
+    9. `4F` — Issuer SD AID (Tag 4F) [Hex, SKIP]
+    10. `66` — Card/SD Recognition Data (Tag 66) [Hex, SKIP]
+    11. `67` — Launch Card Capability Info Builder (Tag 67)? [y/N] → nested **Tag 67 builder**
+    12. `5F50` — SD Manager URL (Tag 5F50) [Hex, SKIP]
+    13. `86` — Security Level (Tag 86) [Hex, SKIP]
+    14. `8A` — Admin IP/Host (Tag 8A) [Hex, SKIP]
+    15. `8C` — Admin URL (Tag 8C) [Hex, SKIP]
+    16. `custom` — Add Custom TLV String [Hex, SKIP]
+    17. `tx` — Transmit Confirmation [y/N]
+7. **INSTALL [for install and make selectable]** (P1=0C) — same surface as step 2.
 8. **Full CAP Install Sequence**
     1. Prompt: path to CAP/IJC file
-    2. `app_aid` -- Target Applet AID [Hex, defaults from CAP]
-    3. `mod_aid` -- Target Module AID [Hex, default=MIRROR → same as applet]
-    4. `priv` -- Privileges bitmask [Hex, default 00]
-    5. `run_b` -- Launch Install Parameters TLV Builder? [y/N]
-    6. `raw_p` -- Raw Install Parameters [Hex, default C900]
-    7. `ota` -- Format LOAD blocks for OTA / SMS-PP size limits? [y/N]
-    8. `algo` -- Encryption profile [1=3DES-sized chunks, 2=AES-sized chunks]
-    9. `execute` -- Execute the full CAP install on the connected SIM? [y/N]
+    2. `app_aid` — Target Applet AID [Hex, defaults from CAP]
+    3. `mod_aid` — Target Module AID [Hex, default=MIRROR → same as applet]
+    4. `priv` — Privileges bitmask [Hex, default 00]
+    5. `run_b` — Launch Install Parameters TLV Builder? [y/N]
+    6. `raw_p` — Raw Install Parameters [Hex, default C900]
+    7. `ota` — Format LOAD blocks for OTA / SMS-PP size limits? [y/N]
+    8. `algo` — Encryption profile [1=3DES-sized chunks, 2=AES-sized chunks]
+    9. `execute` — Execute the full CAP install on the connected SIM? [y/N]
 0. Exit Menu
 
 ##### Nested shared builders
 
 - **Install Parameters TLV Builder** (`_build_install_parameters_tlv`):
-    1. `c9` -- Application-Specific (Tag C9) [Hex, default C900]
-    2. `ef` -- Build GP System Parameters (Tag EF)? [y/N] → **Tag EF builder** (`c6`, `c7`, `c8`, `c9`, `ca`, `cb`)
-    3. `ca` -- SIM File Access (Tag CA) [Raw Hex, SKIP] *(CA + EA cannot coexist per ETSI TS 102 226)*
-    4. `ea` -- Build UICC System Parameters (Tag EA)? [y/N] *(skipped if `ca` set)* → **Tag EA builder**:
-        - `inc_80` -- Toolkit Parameters (Tag 80)? [y/N] → `prio`, `timers` (max 08), `text`, `menu`, `menu_list`, `msl`, `tar`, `chan`, `srv`
-        - `inc_c3` -- Toolkit Parameters DAP (Tag C3)? [y/N] → `dap`
-        - `inc_81` -- Access Parameters (Tag 81)? [y/N] → **Access Domain** sub-wizard `choice` (1=Full 00, 2=UICC 02, 3=No Access FF, 4=Raw), `add`, `raw`
-        - `inc_82` -- Admin Access Parameters (Tag 82)? [y/N] *(same sub-wizard)*
-        - `inc_83` -- Update Access Parameters (Tag 83)? [y/N] *(same sub-wizard)*
+    1. `c9` — Application-Specific (Tag C9) [Hex, default C900]
+    2. `ef` — Build GP System Parameters (Tag EF)? [y/N] → **Tag EF builder** (`c6`, `c7`, `c8`, `c9`, `ca`, `cb`)
+    3. `ca` — SIM File Access (Tag CA) [Raw Hex, SKIP] *(CA + EA cannot coexist per ETSI TS 102 226)*
+    4. `ea` — Build UICC System Parameters (Tag EA)? [y/N] *(skipped if `ca` set)* → **Tag EA builder**:
+        - `inc_80` — Toolkit Parameters (Tag 80)? [y/N] → `prio`, `timers` (max 08), `text`, `menu`, `menu_list`, `msl`, `tar`, `chan`, `srv`
+        - `inc_c3` — Toolkit Parameters DAP (Tag C3)? [y/N] → `dap`
+        - `inc_81` — Access Parameters (Tag 81)? [y/N] → **Access Domain** sub-wizard `choice` (1=Full 00, 2=UICC 02, 3=No Access FF, 4=Raw), `add`, `raw`
+        - `inc_82` — Admin Access Parameters (Tag 82)? [y/N] *(same sub-wizard)*
+        - `inc_83` — Update Access Parameters (Tag 83)? [y/N] *(same sub-wizard)*
 - **Privileges Builder** (`_build_privileges`): bits `b7` Security Domain, `b6` DAP Verification, `b5` Delegated Management, `b4` Card Lock, `b3` Card Terminate, `b2` Default Selected, `b1` CVM Management, `b0` Mandated DAP Verification.
 - **Tag 67 builder** (`_build_tag_67`): `scp`, `scp_id`, `scp_opt`, `scp_mask`, `other`.
 - **Transmit confirmation**: every `_finalize_and_transmit` path ends with `tx [y/N]`; on yes, `_ensure_auth_sd(gp_ctrl)` runs first.
@@ -344,7 +344,7 @@ Each wizard is tag-granular -- every sub-prompt is its own step.
 | Command | Purpose | Steps |
 | --- | --- | --- |
 | `PUT-KEY` | GP PUT KEY (GPCS 11.8). | `action` [1=Add, 2=Rotate KVN 01, 3=Replace] → `okvn`/`okid` (replace only) → `nkid` → `nkvn` → `enc` → `mac` → `dek` → `algo` [AES/3DES, default AES] → `exec` [y/N]. On success prompts **Configuration Synchronization** `upd` to persist into SQLite. |
-| `SET-STATUS` | GP SET STATUS (GPCS 11.10) -- irreversible. | `target` [1=ISD, 2=App, 3=ELF] → `state` [Hex] → `aid` [Hex, SKIP for ISD] → `exec` [y/N]. |
+| `SET-STATUS` | GP SET STATUS (GPCS 11.10) — irreversible. | `target` [1=ISD, 2=App, 3=ELF] → `state` [Hex] → `aid` [Hex, SKIP for ISD] → `exec` [y/N]. |
 | `MANAGE-CHANNEL` | GP MANAGE CHANNEL (GPCS 11.6). | `choice` [1=Open, 2=Close] → `chan` [Hex]. |
 | `GET-DATA` | GP GET DATA (GPCS 11.3). | `choice` [1=Apps, 2=Pkgs, 3=SDs, 4=CPLC, 5=Custom] → `p1` / `p2` (Custom only). |
 
@@ -352,9 +352,9 @@ Each wizard is tag-granular -- every sub-prompt is its own step.
 
 | Command | Args | Purpose |
 | --- | --- | --- |
-| `APPS` | -- | `GET-DATA APPS`. |
-| `PKGS` | -- | `GET-DATA PACKAGES`. |
-| `SD` | -- | `GET-DATA SD`. |
+| `APPS` | — | `GET-DATA APPS`. |
+| `PKGS` | — | `GET-DATA PACKAGES`. |
+| `SD` | — | `GET-DATA SD`. |
 | `LOCK` | `<AID>` | `SET-STATUS → 0x80` for the given AID. |
 | `UNLOCK` | `<AID>` | `SET-STATUS → 0x07`. |
 | `DEL` | `<AID>` | Delete object (`gp_ctrl.delete_object(aid, True)`). |
@@ -364,21 +364,21 @@ Each wizard is tag-granular -- every sub-prompt is its own step.
 
 | Command | Args | Aliases | Purpose |
 | --- | --- | --- | --- |
-| `LIST` | -- | `LIST-IOT` | List eSIM profiles (GetProfilesInfo, SGP.22 / SGP.32). |
-| `LIST-IOT` | -- | `LIST` | Alias. |
-| `GET-IOT` | -- | *(not in HELP)* | Run the SGP.22 profile-scan probe. |
-| `MANAGE-PROFILE` | -- | -- | Spec-aware wizard with dedicated SGP.22, SGP.32, and SGP.02 branches. |
-| `RUN-AUTH` | -- | -- | GSM / USIM / ISIM authentication wizard: `ctx` [1=GSM, 2=USIM, 3=ISIM] → `rand` [32 hex chars] → `autn` [32 hex chars, non-GSM only]. |
-| `RUN-AUTH-TEST` | -- | -- | Offline 3GPP TS 35.207 Milenage vector validation. |
-| `DERIVE-OPC` | `<Ki_hex> <OP_hex>` | -- | Derive OPc per 3GPP TS 35.206 (32 hex chars each). |
+| `LIST` | — | `LIST-IOT` | List eSIM profiles (GetProfilesInfo, SGP.22 / SGP.32). |
+| `LIST-IOT` | — | `LIST` | Alias. |
+| `GET-IOT` | — | *(not in HELP)* | Run the SGP.22 profile-scan probe. |
+| `MANAGE-PROFILE` | — | — | Spec-aware wizard with dedicated SGP.22, SGP.32, and SGP.02 branches. |
+| `RUN-AUTH` | — | — | GSM / USIM / ISIM authentication wizard: `ctx` [1=GSM, 2=USIM, 3=ISIM] → `rand` [32 hex chars] → `autn` [32 hex chars, non-GSM only]. |
+| `RUN-AUTH-TEST` | — | — | Offline 3GPP TS 35.207 Milenage vector validation. |
+| `DERIVE-OPC` | `<Ki_hex> <OP_hex>` | — | Derive OPc per 3GPP TS 35.206 (32 hex chars each). |
 
 #### `MANAGE-PROFILE` wizard
 
-1. `spec` -- Target spec [1=SGP.22, 2=SGP.32, 3=SGP.02]
-2. `action22` -- SGP.22 Action [1=List, 2=Scan, 3=Enable, 4=Disable, 5=Delete, 6=GetConfiguredData, 7=GetCerts, 8=GetEID, 9=ReadMetadata] *(spec=1)*
-3. `action32` -- SGP.32 Action [1=List, 2=Scan, 3=Enable, 4=Disable, 5=Delete, 6=GetAllData, 7=ReadMetadata] *(spec=2)*
-4. `action02` -- SGP.02 Action [1=Scan] *(spec=3)*
-5. `target` -- Target Profile AID / ICCID / alias *(only for actions 3/4/5)*
+1. `spec` — Target spec [1=SGP.22, 2=SGP.32, 3=SGP.02]
+2. `action22` — SGP.22 Action [1=List, 2=Scan, 3=Enable, 4=Disable, 5=Delete, 6=GetConfiguredData, 7=GetCerts, 8=GetEID, 9=ReadMetadata] *(spec=1)*
+3. `action32` — SGP.32 Action [1=List, 2=Scan, 3=Enable, 4=Disable, 5=Delete, 6=GetAllData, 7=ReadMetadata] *(spec=2)*
+4. `action02` — SGP.02 Action [1=Scan] *(spec=3)*
+5. `target` — Target Profile AID / ICCID / alias *(only for actions 3/4/5)*
 
 ### 2.5 Security / PIN management
 
@@ -386,11 +386,11 @@ Each wizard is tag-granular -- every sub-prompt is its own step.
 
 Interactive wizard (`run_manage_pin_wizard`):
 
-1. `action` -- [1=Verify, 2=Change, 3=Disable, 4=Enable, 5=Unblock]
-2. `pin_id` -- PIN ID [Hex, default 01]
-3. `curr` -- Enter PIN [ASCII] *(action ≠ 5)*
-4. `new` -- New PIN [ASCII] *(action ∈ {2, 5})*
-5. `puk` -- PUK [ASCII] *(action = 5)*
+1. `action` — [1=Verify, 2=Change, 3=Disable, 4=Enable, 5=Unblock]
+2. `pin_id` — PIN ID [Hex, default 01]
+3. `curr` — Enter PIN [ASCII] *(action ≠ 5)*
+4. `new` — New PIN [ASCII] *(action ∈ {2, 5})*
+5. `puk` — PUK [ASCII] *(action = 5)*
 
 Non-interactive macro forms:
 
@@ -404,62 +404,62 @@ Non-interactive macro forms:
 
 | Command | Args | Purpose |
 | --- | --- | --- |
-| `CONFIG` | -- | Wizard -- `key` [1=SCP03 ENC, 2=SCP03 MAC, 3=SCP03 DEK, 4=SCP03 KVN, 5=SCP02 ENC, 6=SCP02 MAC, 7=SCP02 DEK, 8=SCP02 KVN, 9=ADM, 10=AID] → `val` [Hex]. |
-| `SHOW` | -- | Display the SQLite-backed SCP03 configuration (`[KEYS]`, `[GOLD_PROFILE]`, ICCID, eID). |
-| `AIDS` | -- | List registered AID aliases from `Workspace/SCP03/aid.txt` (tagged `[ARAM]` / `[ARAC]` where relevant). |
+| `CONFIG` | — | Wizard — `key` [1=SCP03 ENC, 2=SCP03 MAC, 3=SCP03 DEK, 4=SCP03 KVN, 5=SCP02 ENC, 6=SCP02 MAC, 7=SCP02 DEK, 8=SCP02 KVN, 9=ADM, 10=AID] → `val` [Hex]. |
+| `SHOW` | — | Display the SQLite-backed SCP03 configuration (`[KEYS]`, `[GOLD_PROFILE]`, ICCID, eID). |
+| `AIDS` | — | List registered AID aliases from `Workspace/SCP03/aid.txt` (tagged `[ARAM]` / `[ARAC]` where relevant). |
 | `SET-AID-ALIAS` | `<Name> <AID>` | Map a friendly name to an AID (persisted). |
-| `SET-DEFAULT` | -- | Factory-reset configuration to default test keys. |
-| `BINDS` | -- | Manage custom macros. Opens **Manage Custom Binds** wizard -- `action` [ADD/DEL/LIST], `trigger`, `sequence` (supports `{0}`, `{1}`... placeholders). Default seeded: `adm → manage-pin verify 0a {0}`. |
+| `SET-DEFAULT` | — | Factory-reset configuration to default test keys. |
+| `BINDS` | — | Manage custom macros. Opens **Manage Custom Binds** wizard — `action` [ADD/DEL/LIST], `trigger`, `sequence` (supports `{0}`, `{1}`… placeholders). Default seeded: `adm → manage-pin verify 0a {0}`. |
 
 ### 2.7 File system
 
 | Command | Args | Aliases | Purpose |
 | --- | --- | --- | --- |
-| `SCAN` | -- | -- | Traverse and discover the UICC file tree; sets current path hint to MF. |
-| `REPORT` | `[Args]` | -- | Opens the **File System Reporting Wizard** (see below). |
-| `FS-ADMIN` | -- | -- | Opens the **ETSI File System Administration** wizard (see below). |
-| `SELECT` | `<Path/FID>` | -- | Select DF / EF; auto-reads ARA-M/ARA-C rules when selection is a registered ARAM/ARAC alias. |
-| `READ` | `[Path]` | -- | Read binary data from the selected EF (or `Path`). |
-| `RECORD` | `<N\|ALL\|Start-End> [Path]` | -- | Read record(s) from a linear fixed / cyclic EF. |
-| `UPDATE` | `BINARY <Hex>` *or* `RECORD <N> <Hex>` | -- | Write data to an EF (falls back to `update_binary` if neither token given). |
+| `SCAN` | — | — | Traverse and discover the UICC file tree; sets current path hint to MF. |
+| `REPORT` | `[Args]` | — | Opens the **File System Reporting Wizard** (see below). |
+| `FS-ADMIN` | — | — | Opens the **ETSI File System Administration** wizard (see below). |
+| `SELECT` | `<Path/FID>` | — | Select DF / EF; auto-reads ARA-M/ARA-C rules when selection is a registered ARAM/ARAC alias. |
+| `READ` | `[Path]` | — | Read binary data from the selected EF (or `Path`). |
+| `RECORD` | `<N\|ALL\|Start-End> [Path]` | — | Read record(s) from a linear fixed / cyclic EF. |
+| `UPDATE` | `BINARY <Hex>` *or* `RECORD <N> <Hex>` | — | Write data to an EF (falls back to `update_binary` if neither token given). |
 | `DUMP-FS` | `[OutputDir]` | *(not in HELP)* | Dump the entire filesystem to disk (default `~/Documents/FS_DUMP`). |
-| `VALIDATE` | `[ALL\|MF\|USIM\|ISIM] [ProfileDump.yaml\|.json]` | -- | Validate the active profile against the profile interoperability spec. |
+| `VALIDATE` | `[ALL\|MF\|USIM\|ISIM] [ProfileDump.yaml\|.json]` | — | Validate the active profile against the profile interoperability spec. |
 | `EXPORT-EUICC` | `[OutputPath.yaml]` | *(not in HELP)* | One-shot eUICC report export (default `euicc_report.yaml`, SGP.32). |
 | `ARR` | `[Path]` | *(not in HELP)* | Decode ARA-M / ARA-C access rules. |
-| `CERT-INFO` | -- | *(not in HELP)* | Select ECASD; decode EID / CIN / IIN / Key Info / Certificate (Tag 5A / 45 / 42 / E0 / 7F21). |
+| `CERT-INFO` | — | *(not in HELP)* | Select ECASD; decode EID / CIN / IIN / Key Info / Certificate (Tag 5A / 45 / 42 / E0 / 7F21). |
 
 #### `REPORT` → **File System Reporting Wizard**
 
-1. `choice` -- [1=Export FS to Disk (DUMP-FS), 2=Full YAML Report, 3=eUICC YAML, 4=Combined FS+eUICC YAML]
-2. `dest` -- Destination Directory [SKIP = default FS_DUMP] *(choice=1)*
-3. `yaml` -- YAML Filename [SKIP = default] *(choice ∈ {2, 3, 4})*
-4. `std` -- Target Standard [1=SGP.22, 2=SGP.32, 3=SGP.02] *(choice ∈ {3, 4})*
-5. *(choice=4 only)* -- free-form prompts: `Enter ADM: (Skip if no)` → `Authenticate SD? (Y/N)`.
+1. `choice` — [1=Export FS to Disk (DUMP-FS), 2=Full YAML Report, 3=eUICC YAML, 4=Combined FS+eUICC YAML]
+2. `dest` — Destination Directory [SKIP = default FS_DUMP] *(choice=1)*
+3. `yaml` — YAML Filename [SKIP = default] *(choice ∈ {2, 3, 4})*
+4. `std` — Target Standard [1=SGP.22, 2=SGP.32, 3=SGP.02] *(choice ∈ {3, 4})*
+5. *(choice=4 only)* — free-form prompts: `Enter ADM: (Skip if no)` → `Authenticate SD? (Y/N)`.
 
 #### `FS-ADMIN` → **ETSI File System Administration**
 
-1. `action` -- [1=ACTIVATE, 2=DEACT, 3=SUSPEND, 4=SEARCH, 5=CREATE, 6=DELETE, 7=TERM DF, 8=TERM EF, 9=RESIZE]
-2. `target` -- Target FID / Path [SKIP for current / Suspend / Create]
-3. `search` -- Search string [Hex, SEARCH only]
-4. `create` -- Creation mode [1=Raw FCP, 2=Builder, SKIP for non-CREATE]
-5. `raw_fcp` -- Raw FCP Template [Hex, CREATE mode 1]
-6. `parent` -- Parent path [Hex, SKIP for current]
-7. `resize83` -- FID for Resize (Tag 83) [Hex]
-8. `resize80` -- New File Size (Tag 80) [Hex]
-9. `resize81` -- New Total Size (Tag 81) [Hex]
+1. `action` — [1=ACTIVATE, 2=DEACT, 3=SUSPEND, 4=SEARCH, 5=CREATE, 6=DELETE, 7=TERM DF, 8=TERM EF, 9=RESIZE]
+2. `target` — Target FID / Path [SKIP for current / Suspend / Create]
+3. `search` — Search string [Hex, SEARCH only]
+4. `create` — Creation mode [1=Raw FCP, 2=Builder, SKIP for non-CREATE]
+5. `raw_fcp` — Raw FCP Template [Hex, CREATE mode 1]
+6. `parent` — Parent path [Hex, SKIP for current]
+7. `resize83` — FID for Resize (Tag 83) [Hex]
+8. `resize80` — New File Size (Tag 80) [Hex]
+9. `resize81` — New Total Size (Tag 81) [Hex]
 
 When `create=2` → **ETSI TS 102 222 FCP Builder** (`_build_fcp_template`):
 
-1. `type` -- File type [1=DF/ADF, 2=Transparent EF, 3=Linear Fixed EF]
-2. `path` -- Full path for new file [Hex]
-3. `sec` -- Security attribute TLV (Tag 8C / 8B / AB) [Hex]
-4. `size` -- File size / DF memory [Hex]
-5. `aid` -- ADF AID (Tag 84) [Hex, DF/EF skip]
-6. `c6` -- PIN Status Template DO (Tag C6) [Hex, EF skip]
-7. `sfi` -- Short File Identifier [Hex, DF/none skip]
-8. `reclen` -- Record length [Hex, DF/Transparent skip]
-9. `numrec` -- Number of records [Hex, DF/Transparent skip]
-10. `prop` -- Proprietary Info (Tag A5) [Hex, SKIP to omit]
+1. `type` — File type [1=DF/ADF, 2=Transparent EF, 3=Linear Fixed EF]
+2. `path` — Full path for new file [Hex]
+3. `sec` — Security attribute TLV (Tag 8C / 8B / AB) [Hex]
+4. `size` — File size / DF memory [Hex]
+5. `aid` — ADF AID (Tag 84) [Hex, DF/EF skip]
+6. `c6` — PIN Status Template DO (Tag C6) [Hex, EF skip]
+7. `sfi` — Short File Identifier [Hex, DF/none skip]
+8. `reclen` — Record length [Hex, DF/Transparent skip]
+9. `numrec` — Number of records [Hex, DF/Transparent skip]
+10. `prop` — Proprietary Info (Tag A5) [Hex, SKIP to omit]
 
 When the built file is an EF, an **EF Initialization** wizard asks `upd [y/N]`. On yes, **EF Data Update** appears:
 
@@ -471,25 +471,25 @@ When the built file is an EF, an **EF Initialization** wizard asks `upd [y/N]`. 
 | Command | Args | Purpose |
 | --- | --- | --- |
 | `SET-GOLD-PROFILE` | `<path> [SGP.32\|SGP.22\|SGP.02] [AUTH=Y\|AUTH=N]` | Persist gold combined-YAML path. |
-| `GOLD-PROFILE` | -- | Show persisted gold path, GSMA standard, SD-auth flag. |
-| `CLEAR-GOLD-PROFILE` | -- | Clear the persisted path (keeps flags). |
+| `GOLD-PROFILE` | — | Show persisted gold path, GSMA standard, SD-auth flag. |
+| `CLEAR-GOLD-PROFILE` | — | Clear the persisted path (keeps flags). |
 | `PROFILE-DIFF` | `[gold.yaml] [STANDARD] [AUTH=Y\|AUTH=N]` | Capture live FS+eUICC+MNO-SD and diff vs gold (timestamps stripped). |
 
 ### 2.9 System & developer
 
 | Command | Args | Aliases | Purpose |
 | --- | --- | --- | --- |
-| `GUIDE` | `[Topic]` | -- | In-shell documentation. Topics: `GP`, `ETSI`, `GSMA`, `INSTALL`, `SECURITY`, `OTA`, `CONFIG`, `SAIP`, `SUCI`, `CLI`, plus implicit `WIZARD`. |
-| `DECODE` | `<Hex>` | -- | Parse and decode a raw BER-TLV string (falls back to simple LV decoder when not valid BER-TLV). |
+| `GUIDE` | `[Topic]` | — | In-shell documentation. Topics: `GP`, `ETSI`, `GSMA`, `INSTALL`, `SECURITY`, `OTA`, `CONFIG`, `SAIP`, `SUCI`, `CLI`, plus implicit `WIZARD`. |
+| `DECODE` | `<Hex>` | — | Parse and decode a raw BER-TLV string (falls back to simple LV decoder when not valid BER-TLV). |
 | `RUN` | `<File> [Out.yaml]` | `SCRIPT` | Execute a batch script; optional YAML transcript output. |
 | `SCRIPT` | `<File>` | `RUN` | Alias (no output-path form). |
-| `DEBUG` | -- | `VERBOSE`, *(hidden from tab-completion)* | Toggle raw APDU hex logging. |
-| `VERBOSE` | -- | `DEBUG`, *(hidden from tab-completion)* | Alias. |
-| `EXPORT-KEYBAG` | `[OutputPath.keys.json] [Label]` | -- | Dump the active SCP03 session keys (S-ENC, S-MAC, S-RMAC, SSC, chaining value) and `gp_ctrl.target_aid` into a keybag JSON (`yggdrasim-hil-keybag/v1`). Refuses cleanly if the session is missing or unauthenticated. Writes via `Tools.HilBridge.scp_keybag_export.write_keybag_file`. Consumed by the HIL decoded-APDU TUI in offline review mode. |
-| `HELP` | -- | -- | Print the full menu. No `HELP EXPERT` / `HELP-ALL` exists in this shell. |
-| `EXIT` | -- | `Q` | Disconnect reader and leave SCP03. |
-| `Q` | -- | `EXIT` | Alias. |
-| `QA` | -- | -- | Disconnect reader and exit YggdraSIM (`quit_all`). |
+| `DEBUG` | — | `VERBOSE`, *(hidden from tab-completion)* | Toggle raw APDU hex logging. |
+| `VERBOSE` | — | `DEBUG`, *(hidden from tab-completion)* | Alias. |
+| `EXPORT-KEYBAG` | `[OutputPath.keys.json] [Label]` | — | Dump the active SCP03 session keys (S-ENC, S-MAC, S-RMAC, SSC, chaining value) and `gp_ctrl.target_aid` into a keybag JSON (`yggdrasim-hil-keybag/v1`). Refuses cleanly if the session is missing or unauthenticated. Writes via `Tools.HilBridge.scp_keybag_export.write_keybag_file`. Consumed by the HIL decoded-APDU TUI in offline review mode. |
+| `HELP` | — | — | Print the full menu. No `HELP EXPERT` / `HELP-ALL` exists in this shell. |
+| `EXIT` | — | `Q` | Disconnect reader and leave SCP03. |
+| `Q` | — | `EXIT` | Alias. |
+| `QA` | — | — | Disconnect reader and exit YggdraSIM (`quit_all`). |
 
 ### 2.10 STK sub-shell (`STK` → `SCP03.interface.stk_shell.StkShell`)
 
@@ -498,21 +498,21 @@ as `STK <commands>`. Commands are handled by their upper-case keyword.
 
 | Command | Args | Aliases | Purpose |
 | --- | --- | --- | --- |
-| `HELP` | -- | -- | STK help banner. |
-| `INIT` | -- | `RESET` | Reset session state; run STK terminal-profile bootstrap. |
-| `APDU` | `<hex>` | -- | Send a raw APDU; auto-handle the proactive chain. |
+| `HELP` | — | — | STK help banner. |
+| `INIT` | — | `RESET` | Reset session state; run STK terminal-profile bootstrap. |
+| `APDU` | `<hex>` | — | Send a raw APDU; auto-handle the proactive chain. |
 | `SMS` | `<tpdu_hex>` | `SMS-PP` | Send an ENVELOPE (SMS-PP DOWNLOAD). |
-| `QUEUE` | `<hex>` | -- | Queue virtual-channel data for later RECEIVE DATA. |
-| `DATA` | `[hex]` | -- | Optionally queue bytes, then emit EVENT DOWNLOAD DATA AVAILABLE. |
-| `EVENT` | `<name\|hex> [extra_tlvs_hex]` | -- | Generic EVENT DOWNLOAD envelope. Names: `MT-CALL`, `CALL-CONNECTED`, `CALL-DISCONNECTED`, `LOCATION-STATUS`, `USER-ACTIVITY`, `IDLE-SCREEN`, `LANGUAGE-SELECTION`, `BROWSER-TERMINATION`, `DATA-AVAILABLE`, `CHANNEL-STATUS`, `ACCESS-TECHNOLOGY-CHANGE`. |
-| `CALL CONNECTED` | `[extra_tlvs_hex]` | -- | Shorthand for `EVENT CALL-CONNECTED`. |
-| `CALL DISCONNECTED` | `[extra_tlvs_hex]` | -- | Shorthand for `EVENT CALL-DISCONNECTED`. |
-| `LOCATION` | `[status_hex] [location_hex]` | -- | LOCATION STATUS envelope. |
-| `STATE` | -- | -- | Current STK / virtual-channel state. |
-| `HISTORY` | -- | -- | Recent proactive commands, triggers, flow events. |
-| `DEBUG` / `VERBOSE` | -- | -- | Toggle raw STK APDU logging. |
-| `EXIT` / `BACK` / `Q` | -- | -- | Return to SCP03 shell. |
-| `QA` | -- | -- | Exit YggdraSIM entirely. |
+| `QUEUE` | `<hex>` | — | Queue virtual-channel data for later RECEIVE DATA. |
+| `DATA` | `[hex]` | — | Optionally queue bytes, then emit EVENT DOWNLOAD DATA AVAILABLE. |
+| `EVENT` | `<name\|hex> [extra_tlvs_hex]` | — | Generic EVENT DOWNLOAD envelope. Names: `MT-CALL`, `CALL-CONNECTED`, `CALL-DISCONNECTED`, `LOCATION-STATUS`, `USER-ACTIVITY`, `IDLE-SCREEN`, `LANGUAGE-SELECTION`, `BROWSER-TERMINATION`, `DATA-AVAILABLE`, `CHANNEL-STATUS`, `ACCESS-TECHNOLOGY-CHANGE`. |
+| `CALL CONNECTED` | `[extra_tlvs_hex]` | — | Shorthand for `EVENT CALL-CONNECTED`. |
+| `CALL DISCONNECTED` | `[extra_tlvs_hex]` | — | Shorthand for `EVENT CALL-DISCONNECTED`. |
+| `LOCATION` | `[status_hex] [location_hex]` | — | LOCATION STATUS envelope. |
+| `STATE` | — | — | Current STK / virtual-channel state. |
+| `HISTORY` | — | — | Recent proactive commands, triggers, flow events. |
+| `DEBUG` / `VERBOSE` | — | — | Toggle raw STK APDU logging. |
+| `EXIT` / `BACK` / `Q` | — | — | Return to SCP03 shell. |
+| `QA` | — | — | Exit YggdraSIM entirely. |
 
 ### 2.11 Argument-requirement classification
 
@@ -526,7 +526,7 @@ Any line that starts with a pure-hex token routes to `_exec_line → transport.t
 
 ---
 
-## 3. SCP80 -- OTA Shell
+## 3. SCP80 — OTA Shell
 
 `python -m SCP80` / `yggdrasim-scp80`. Dispatcher: `SCP80.cli.OtaShell`.
 Command names registered as `do_<lowercase>`; runtime matching is
@@ -548,19 +548,19 @@ case-insensitive.
 | `ota` | `<hex>` | Explicit OTA wrap + send with `ContentDecoder`-driven POR handling. |
 | `iccid` | `[decimal-iccid]` | No args: reader transport re-reads MF/EF_ICCID (`3F00`/`2FE2`/READ BINARY) and rebinds inventory; else prints current ICCID. With arg: strip to digits, bind inventory profile. |
 | `script` | `<file>` | Execute hex APDU lines from a file. Supports inline `#` comments; leading-hex regex extracts the APDU; non-hex lines are skipped. Aborts on any POR failure (counter not advanced). |
-| `history` | -- | Print readline history. |
+| `history` | — | Print readline history. |
 | `set` | `<key> <value>` | Update a parameter (see §3.3). |
 | `send` | `[-v] [<hex>]` | Build plan and deliver via `transport.send_ota_sequence`. `-v` forces the 03.48 block breakdown + APDU tracing. |
 | `build` | `[-v] [<hex>]` | Build plan and print APDUs (single or concatenated). Does NOT transmit. |
-| `show` | -- | Print all parameters **except** the hidden keys `header`, `cla`, `sender`. Keys `kic` / `kid` rendered via `CryptoEngine.describe_keyset()`. |
+| `show` | — | Print all parameters **except** the hidden keys `header`, `cla`, `sender`. Keys `kic` / `kid` rendered via `CryptoEngine.describe_keyset()`. |
 | `sendraw` | `<hex>` | Send a raw APDU (no OTA wrapping, no ICCID/counter side-effects). |
-| `reset` | -- | Reset STK transport (disconnect → connect → re-prime TERMINAL PROFILE); re-pulls inventory on `reader` transport. |
-| `help` | -- | Help banner. Lists only `concat_sms` and `tp_ud_max` under "Config keys"; other keys are undocumented in-app. |
-| `quit` / `exit` / `q` | -- | Save config, disconnect, leave SCP80 shell. *(`exit` and `q` are not listed in `help`.)* |
-| `qa` | -- | Save, disconnect, exit YggdraSIM (`quit_all`). |
-| `admin` | -- | *(not in `help`)* Hot-swap to the SCP03 Admin Shell (reloads `SCP03.main`). Returns here on exit. |
+| `reset` | — | Reset STK transport (disconnect → connect → re-prime TERMINAL PROFILE); re-pulls inventory on `reader` transport. |
+| `help` | — | Help banner. Lists only `concat_sms` and `tp_ud_max` under "Config keys"; other keys are undocumented in-app. |
+| `quit` / `exit` / `q` | — | Save config, disconnect, leave SCP80 shell. *(`exit` and `q` are not listed in `help`.)* |
+| `qa` | — | Save, disconnect, exit YggdraSIM (`quit_all`). |
+| `admin` | — | *(not in `help`)* Hot-swap to the SCP03 Admin Shell (reloads `SCP03.main`). Returns here on exit. |
 
-### 3.3 `set <key> <value>` -- full key matrix
+### 3.3 `set <key> <value>` — full key matrix
 
 Strict validation in `ConfigManager.set`. Keys not in the table below are silently ignored.
 
@@ -580,7 +580,7 @@ Strict validation in `ConfigManager.set`. Keys not in the table below are silent
 | `reader_idx` | `0` | decimal int | PC/SC reader index. |
 | `sender` | `82` | 2 hex chars | Persisted but not consumed by the builder. Hidden from `show`. |
 | `concat_sms` | `ON` | `ON/OFF/TRUE/FALSE/YES/NO/1/0` | Concatenation policy; overflow raises when disabled. |
-| `tp_ud_max` | `140` | decimal int, 8-140 | Per-segment TP-UD ceiling (`concat_budget = tp_ud_max - 6`). |
+| `tp_ud_max` | `140` | decimal int, 8–140 | Per-segment TP-UD ceiling (`concat_budget = tp_ud_max - 6`). |
 
 Per-ICCID persistence covers `cntr, header, spi, kic, kid, tar, key_enc, key_mac, cla, sender, concat_sms, tp_ud_max`. `payload`, `transport`, `reader_idx` are module-level only.
 
@@ -630,21 +630,21 @@ Exact section titles emitted by the consoles:
 | --- | --- | --- | --- |
 | `HELP` | `H`, `?` | `HELP [EXPERT]` | Show command list; `HELP EXPERT` / `HELP ALL` includes expert section. |
 | `SCAN` | `INFO` | `SCAN` | Refresh card snapshot (EID, issuer, SM-DP+/SM-DS, profiles, eIM, Info2). |
-| `RESET` | -- | `RESET` | Reset card and reinitialize SCP11 session. |
-| `STATUS` | -- | `STATUS` | Decode `EuiccConfiguredData` (default SM-DP+, SM-DS roots, eIM entries). |
-| `LIST` | -- | `LIST` | Print profile metadata table from `GetProfilesInfo`. |
+| `RESET` | — | `RESET` | Reset card and reinitialize SCP11 session. |
+| `STATUS` | — | `STATUS` | Decode `EuiccConfiguredData` (default SM-DP+, SM-DS roots, eIM entries). |
+| `LIST` | — | `LIST` | Print profile metadata table from `GetProfilesInfo`. |
 | `METADATA` | `GET-METADATA` | `METADATA <id\|aid\|alias>` | Read per-profile metadata (nickname, service provider, PPR, etc.). |
 | `EXIT` | `QUIT`, `Q` | `EXIT` | Leave SCP11 shell. |
-| `QA` | -- | `QA` | Leave SCP11 shell **and** exit YggdraSIM. |
+| `QA` | — | `QA` | Leave SCP11 shell **and** exit YggdraSIM. |
 
 ### 4.5 LPAd
 
 | Command | Aliases | Usage | Purpose |
 | --- | --- | --- | --- |
-| `DOWNLOAD-PROFILE` | `DOWNLOAD-AC` | `DOWNLOAD-PROFILE <activation>` | LPAd profile download via activation code (`LPA:1$smdp$mid$...`). Triggers notification sync. |
-| `ENABLE-PROFILE` | -- | `ENABLE-PROFILE <iccid-or-aid>` | ES10c.EnableProfile. Triggers notification sync. |
-| `DISABLE-PROFILE` | -- | `DISABLE-PROFILE <iccid-or-aid>` | ES10c.DisableProfile. Triggers notification sync. |
-| `DELETE-PROFILE` | -- | `DELETE-PROFILE <iccid-or-aid>` | ES10c.DeleteProfile. Triggers notification sync. |
+| `DOWNLOAD-PROFILE` | `DOWNLOAD-AC` | `DOWNLOAD-PROFILE <activation>` | LPAd profile download via activation code (`LPA:1$smdp$mid$…`). Triggers notification sync. |
+| `ENABLE-PROFILE` | — | `ENABLE-PROFILE <iccid-or-aid>` | ES10c.EnableProfile. Triggers notification sync. |
+| `DISABLE-PROFILE` | — | `DISABLE-PROFILE <iccid-or-aid>` | ES10c.DisableProfile. Triggers notification sync. |
+| `DELETE-PROFILE` | — | `DELETE-PROFILE <iccid-or-aid>` | ES10c.DeleteProfile. Triggers notification sync. |
 | `REFRESH-MODEM` | `MODEM-REFRESH` | `REFRESH-MODEM [mode]` | Queue proactive REFRESH via HIL bridge. |
 
 ### 4.6 IPAd
@@ -675,31 +675,31 @@ Argument grammar (shared via `yggdrasim_common.polling_plugin_support`):
 
 | Command | Usage | Purpose |
 | --- | --- | --- |
-| `HELP-ALL` | -- | Print every command, visible or hidden. |
-| `GET-EID` | -- | Read and decode the EID value. |
-| `GET-SMDP` | -- | Show default SM-DP+ / SM-DS roots on card. |
+| `HELP-ALL` | — | Print every command, visible or hidden. |
+| `GET-EID` | — | Read and decode the EID value. |
+| `GET-SMDP` | — | Show default SM-DP+ / SM-DS roots on card. |
 | `SET-SMDP` | `SET-SMDP <address>` | Set default SM-DP+ address on card. |
-| `GET-ES9` | -- | Show active ES9 base URL in tool. |
+| `GET-ES9` | — | Show active ES9 base URL in tool. |
 | `SET-ES9` | `SET-ES9 [--persist] <url>` | Set active ES9 base URL; `--persist` saves to module state. |
 | `SET-ES9-TLS` | `SET-ES9-TLS [--persist] <on\|off>` | Set ES9 TLS verification mode. |
 | `SET-ES9-CA` | `SET-ES9-CA [--persist] <pemPath\|NONE>` | Set ES9 CA bundle path. |
-| `ES9-CERT-INFO` | -- | Inspect ES9 server TLS certificate / trust status. |
+| `ES9-CERT-INFO` | — | Inspect ES9 server TLS certificate / trust status. |
 | `VERIFY-SCP11` | `VERIFY-SCP11 [matchingId]` | Run SCP11 auth verification only. |
 | `FLOW` | `FLOW [matchingId]` | Run SCP11 flow end-to-end with active SM-DP+. Triggers notification sync. |
-| `GET-EUICC-INFO1` | -- | ES10a.GetEuiccInfo1 (`BF20 00`). |
-| `GET-EUICC-INFO2` | -- | ES10a.GetEuiccInfo2 (`BF22 00`). |
-| `GET-RAT` | -- | ES10b.GetRAT (`BF43 00`). |
-| `GET-CERTS` | -- | ES10b.GetCerts (`BF56 00`). |
-| `GET-NOTIFICATIONS` | -- | ES10b.RetrieveNotificationsList (`BF2B 00`). |
-| `REMOVE-NOTIFICATION` | `REMOVE-NOTIFICATION <seq>` | ES10b.RemoveNotificationFromList (decimal or `0x...`). |
-| `CLEAR-NOTIFICATIONS` | -- | Drain / clear all queued ES10b notifications. |
-| `AIDS` | -- | List AID aliases loaded from Admin registry (`aid.txt`). |
+| `GET-EUICC-INFO1` | — | ES10a.GetEuiccInfo1 (`BF20 00`). |
+| `GET-EUICC-INFO2` | — | ES10a.GetEuiccInfo2 (`BF22 00`). |
+| `GET-RAT` | — | ES10b.GetRAT (`BF43 00`). |
+| `GET-CERTS` | — | ES10b.GetCerts (`BF56 00`). |
+| `GET-NOTIFICATIONS` | — | ES10b.RetrieveNotificationsList (`BF2B 00`). |
+| `REMOVE-NOTIFICATION` | `REMOVE-NOTIFICATION <seq>` | ES10b.RemoveNotificationFromList (decimal or `0x…`). |
+| `CLEAR-NOTIFICATIONS` | — | Drain / clear all queued ES10b notifications. |
+| `AIDS` | — | List AID aliases loaded from Admin registry (`aid.txt`). |
 | `READ-METADATA` | `READ-METADATA [22\|32]` | Profile metadata summary (ICCID / AID / state / class / PPR). |
 | `GET-POL` | `GET-POL <id\|aid\|alias>` | Read profile policy rules (PPR) from metadata. |
 | `SET-POL` | `SET-POL <id\|aid\|alias> <hex>` | Guarded POL update (placeholder). |
 | `STORE-METADATA` | `STORE-METADATA <id\|aid\|alias> <hex>` | Guarded metadata update (placeholder). |
-| `GET-EIM-CONFIG` | -- | ES10b.GetEimConfigurationData (`BF55 00`, SGP.32). |
-| `GET-ALL-DATA` | -- | Consolidated dump (GET-EID, LIST, STATUS, INFO1, INFO2, RAT, NOTIFICATIONS, EIM-CONFIG, CERTS). |
+| `GET-EIM-CONFIG` | — | ES10b.GetEimConfigurationData (`BF55 00`, SGP.32). |
+| `GET-ALL-DATA` | — | Consolidated dump (GET-EID, LIST, STATUS, INFO1, INFO2, RAT, NOTIFICATIONS, EIM-CONFIG, CERTS). |
 | `EIM-AUTHENTICATE` | `EIM-AUTHENTICATE [matchingId]` | SGP.32 / SGP.22 authentication phase only. |
 
 ### 4.9 Flag reference (Live / Test)
@@ -714,7 +714,7 @@ Argument grammar (shared via `yggdrasim_common.polling_plugin_support`):
 
 ### 4.10 Divergences
 
-Live ↔ Test: no semantic command differences. Housekeeping only --
+Live ↔ Test: no semantic command differences. Housekeeping only —
 prompt string, module state name, inventory namespace, polling-surface
 key. No command exists in one shell and not the other. Test carries a
 dead-code `_add_scaffold` helper that is never called.
@@ -732,7 +732,7 @@ sections).
 
 Same shape as Live/Test launchers (`--debug`, `--flow`, `--cmd`, `--stdin`).
 The relay launcher does **not** call `ensure_plugins_loaded()`, so the
-polling plugin never extends this shell -- `POLL` / `EIM-POLL` are
+polling plugin never extends this shell — `POLL` / `EIM-POLL` are
 unavailable.
 
 ### 5.2 Prompt / namespace
@@ -757,44 +757,44 @@ Only two:
 | --- | --- | --- | --- |
 | `HELP` | `H`, `?` | `HELP` | Show command list (no EXPERT mode here). |
 | `SCAN` | `INFO` | `SCAN` | Refresh card snapshot. |
-| `GET-EID` | -- | `GET-EID` | Read / decode EID. |
-| `STATUS` | -- | `STATUS` | Decode `EuiccConfiguredData`. |
-| `LIST` | -- | `LIST` | List profiles with metadata. |
-| `GET-SMDP` | -- | `GET-SMDP` | Show default SM-DP+ / SM-DS roots. |
-| `SET-SMDP` | -- | `SET-SMDP <address>` | Set default SM-DP+ address. |
-| `GET-ES9` | -- | `GET-ES9` | Show active ES9 base URL. |
-| `SET-ES9` | -- | `SET-ES9 [--persist] <url>` | Set active ES9 base URL. |
-| `SET-ES9-TLS` | -- | `SET-ES9-TLS [--persist] <on\|off>` | Set ES9 TLS verification mode. |
-| `SET-ES9-CA` | -- | `SET-ES9-CA [--persist] <pemPath\|NONE>` | Set ES9 CA bundle path. |
-| `ES9-CERT-INFO` | -- | `ES9-CERT-INFO` | Inspect ES9 server TLS certificate. |
-| `VERIFY-SCP11` | -- | `VERIFY-SCP11 [matchingId]` | Run SCP11 auth verification only. |
-| `FLOW` | -- | `FLOW [matchingId]` | Run SCP11 flow. |
-| `DOWNLOAD-AC` | -- | `DOWNLOAD-AC <activation>` | Parse activation code and run FLOW. |
+| `GET-EID` | — | `GET-EID` | Read / decode EID. |
+| `STATUS` | — | `STATUS` | Decode `EuiccConfiguredData`. |
+| `LIST` | — | `LIST` | List profiles with metadata. |
+| `GET-SMDP` | — | `GET-SMDP` | Show default SM-DP+ / SM-DS roots. |
+| `SET-SMDP` | — | `SET-SMDP <address>` | Set default SM-DP+ address. |
+| `GET-ES9` | — | `GET-ES9` | Show active ES9 base URL. |
+| `SET-ES9` | — | `SET-ES9 [--persist] <url>` | Set active ES9 base URL. |
+| `SET-ES9-TLS` | — | `SET-ES9-TLS [--persist] <on\|off>` | Set ES9 TLS verification mode. |
+| `SET-ES9-CA` | — | `SET-ES9-CA [--persist] <pemPath\|NONE>` | Set ES9 CA bundle path. |
+| `ES9-CERT-INFO` | — | `ES9-CERT-INFO` | Inspect ES9 server TLS certificate. |
+| `VERIFY-SCP11` | — | `VERIFY-SCP11 [matchingId]` | Run SCP11 auth verification only. |
+| `FLOW` | — | `FLOW [matchingId]` | Run SCP11 flow. |
+| `DOWNLOAD-AC` | — | `DOWNLOAD-AC <activation>` | Parse activation code and run FLOW. |
 | `EXIT` | `QUIT`, `Q` | `EXIT` | Leave shell. |
-| `QA` | -- | `QA` | Leave shell and exit YggdraSIM. |
+| `QA` | — | `QA` | Leave shell and exit YggdraSIM. |
 
 ### 5.5 SGP.22 / SGP.32 Operations
 
 | Command | Usage | Purpose |
 | --- | --- | --- |
-| `GET-EUICC-INFO1` | -- | ES10a.GetEuiccInfo1. |
-| `GET-EUICC-INFO2` | -- | ES10a.GetEuiccInfo2. |
-| `GET-RAT` | -- | ES10b.GetRAT. |
-| `GET-NOTIFICATIONS` | -- | ES10b.RetrieveNotificationsList. |
+| `GET-EUICC-INFO1` | — | ES10a.GetEuiccInfo1. |
+| `GET-EUICC-INFO2` | — | ES10a.GetEuiccInfo2. |
+| `GET-RAT` | — | ES10b.GetRAT. |
+| `GET-NOTIFICATIONS` | — | ES10b.RetrieveNotificationsList. |
 | `REMOVE-NOTIFICATION` | `REMOVE-NOTIFICATION <seq>` | ES10b.RemoveNotificationFromList. |
 | `ENABLE-PROFILE` | `ENABLE-PROFILE <iccid-or-aid>` | ES10c.EnableProfile. |
 | `DISABLE-PROFILE` | `DISABLE-PROFILE <iccid-or-aid>` | ES10c.DisableProfile. |
 | `DELETE-PROFILE` | `DELETE-PROFILE <iccid-or-aid>` | ES10c.DeleteProfile. |
 | `REFRESH-MODEM` | `REFRESH-MODEM [mode]` | Queue proactive REFRESH via HIL bridge (alias `MODEM-REFRESH`). |
-| `AIDS` | -- | List AID aliases from Admin registry. |
+| `AIDS` | — | List AID aliases from Admin registry. |
 | `READ-METADATA` | `READ-METADATA [22\|32]` | Read profile metadata summary. |
 | `GET-POL` | `GET-POL <id\|aid\|alias>` | Read PPR from metadata. |
 | `SET-POL` | `SET-POL <id\|aid\|alias> <hex>` | Guarded POL update (placeholder). |
 | `GET-METADATA` | `GET-METADATA <id\|aid\|alias>` | Read per-profile metadata. |
 | `STORE-METADATA` | `STORE-METADATA <id\|aid\|alias> <hex>` | Guarded metadata update (placeholder). |
-| `GET-CERTS` | -- | ES10b.GetCerts. |
-| `GET-EIM-CONFIG` | -- | ES10b.GetEimConfigurationData (SGP.32). |
-| `EIM-DISCOVER` | -- | SGP.32 eIM capability discovery. |
+| `GET-CERTS` | — | ES10b.GetCerts. |
+| `GET-EIM-CONFIG` | — | ES10b.GetEimConfigurationData (SGP.32). |
+| `EIM-DISCOVER` | — | SGP.32 eIM capability discovery. |
 | `EIM-AUTHENTICATE` | `EIM-AUTHENTICATE [matchingId]` | SGP.32 / SGP.22 authentication phase. |
 | `EIM-DOWNLOAD` | `EIM-DOWNLOAD [matchingId]` | SGP.32 eIM poll and relay flow. |
 
@@ -832,9 +832,9 @@ logging via `_extract_debug_flag`.
 | --- | --- | --- | --- | --- |
 | `CERTS` | `SMDP-CERTS` | `CERTS [--json\|--yaml]` | `--json`, `--yaml`, `--debug` | Show local SM-DP+ certificate inventory and current selection. |
 | `DISCOVER` | `INFO` | `DISCOVER` | `--debug` | Shared SCP11 SGP.22 / SGP.32 discovery snapshot. |
-| `EXPLAIN-LAST` | -- | `EXPLAIN-LAST [--json\|--yaml]` | `--json`, `--yaml`, `--debug` | Explain last local SCP11 command state, selections, responses. |
-| `STATUS` | -- | `STATUS` | `--debug` | Current Local SMDPP session state and active targets. |
-| `LOAD-PROFILE` | -- | `LOAD-PROFILE [path]` | `--debug` | One-shot open, prepare, load, close for the active profile. Triggers notification sync. |
+| `EXPLAIN-LAST` | — | `EXPLAIN-LAST [--json\|--yaml]` | `--json`, `--yaml`, `--debug` | Explain last local SCP11 command state, selections, responses. |
+| `STATUS` | — | `STATUS` | `--debug` | Current Local SMDPP session state and active targets. |
+| `LOAD-PROFILE` | — | `LOAD-PROFILE [path]` | `--debug` | One-shot open, prepare, load, close for the active profile. Triggers notification sync. |
 
 ### 6.3 Profile state management
 
@@ -849,30 +849,30 @@ logging via `_extract_debug_flag`.
 
 | Command | Aliases | Usage | Flags | Purpose |
 | --- | --- | --- | --- | --- |
-| `STORE-METADATA` | -- | `STORE-METADATA [path]` | `--debug` | Encode BF25 from metadata JSON and send. |
-| `UPDATE-METADATA` | -- | `UPDATE-METADATA [path]` | `--debug` | Encode BF2A from metadata JSON and send. |
-| `STORE-METADATA-CUSTOM` | -- | `STORE-METADATA-CUSTOM <tag> [path]` | `--debug` | Send one enabled custom metadata tag row. |
-| `STORE-METADATA-CUSTOM-ALL` | -- | `STORE-METADATA-CUSTOM-ALL [path]` | `--debug` | Send all enabled custom metadata tag rows. |
-| `METADATA` | -- | `METADATA [path]` | `--debug` | Show / set the active metadata JSON file. |
-| `METADATA-LINT` | -- | `METADATA-LINT [path] [--json\|--yaml]` | `--json`, `--yaml`, `--debug` | Validate metadata JSON, ASN.1 encodes, enabled custom rows. |
+| `STORE-METADATA` | — | `STORE-METADATA [path]` | `--debug` | Encode BF25 from metadata JSON and send. |
+| `UPDATE-METADATA` | — | `UPDATE-METADATA [path]` | `--debug` | Encode BF2A from metadata JSON and send. |
+| `STORE-METADATA-CUSTOM` | — | `STORE-METADATA-CUSTOM <tag> [path]` | `--debug` | Send one enabled custom metadata tag row. |
+| `STORE-METADATA-CUSTOM-ALL` | — | `STORE-METADATA-CUSTOM-ALL [path]` | `--debug` | Send all enabled custom metadata tag rows. |
+| `METADATA` | — | `METADATA [path]` | `--debug` | Show / set the active metadata JSON file. |
+| `METADATA-LINT` | — | `METADATA-LINT [path] [--json\|--yaml]` | `--json`, `--yaml`, `--debug` | Validate metadata JSON, ASN.1 encodes, enabled custom rows. |
 | `METADATA-CLEAR` | `METADATA-RESET` | `METADATA-CLEAR` | `--debug` | Clear the metadata override. |
 
 ### 6.5 File selection
 
 | Command | Aliases | Usage | Flags | Purpose |
 | --- | --- | --- | --- | --- |
-| `PROFILE` | -- | `PROFILE [path]` | `--debug` | Show / set the active profile override. |
+| `PROFILE` | — | `PROFILE [path]` | `--debug` | Show / set the active profile override. |
 | `PROFILE-CLEAR` | `PROFILE-RESET` | `PROFILE-CLEAR` | `--debug` | Clear the profile override. |
 
 ### 6.6 Shell
 
 | Command | Aliases | Usage | Purpose |
 | --- | --- | --- | --- |
-| `RECORD` | -- | `RECORD [STATUS\|START [out]\|STOP [out]\|CANCEL]` | Capture replayable shell commands + APDU trace. YAML default; JSON when `out` ends in `.json`. Auto-saves on shell exit. |
-| `EXPORT-KEYBAG` | -- | `EXPORT-KEYBAG [Path.keys.json] [Label]` | Dump the last captured pySim BSP snapshot (S-ENC, S-MAC, MAC chain, block number, AID; protocol `SCP11c`) into a keybag JSON (`yggdrasim-hil-keybag/v1`). Snapshot is populated by `_snapshot_session_bsp` every time `_build_session_bsp` runs, so any BSP-building verb (`LOAD-PROFILE`, `ENABLE-PROFILE`, `DISABLE-PROFILE`, `DELETE-PROFILE`, `STORE-METADATA`, `UPDATE-METADATA`, ...) primes the export. Refuses cleanly when the session is uninitialized or no BSP has been built yet. |
-| `HELP` | -- | `HELP [command]` | Grouped help or per-command help. `?` → `HELP` is not registered here. |
+| `RECORD` | — | `RECORD [STATUS\|START [out]\|STOP [out]\|CANCEL]` | Capture replayable shell commands + APDU trace. YAML default; JSON when `out` ends in `.json`. Auto-saves on shell exit. |
+| `EXPORT-KEYBAG` | — | `EXPORT-KEYBAG [Path.keys.json] [Label]` | Dump the last captured pySim BSP snapshot (S-ENC, S-MAC, MAC chain, block number, AID; protocol `SCP11c`) into a keybag JSON (`yggdrasim-hil-keybag/v1`). Snapshot is populated by `_snapshot_session_bsp` every time `_build_session_bsp` runs, so any BSP-building verb (`LOAD-PROFILE`, `ENABLE-PROFILE`, `DISABLE-PROFILE`, `DELETE-PROFILE`, `STORE-METADATA`, `UPDATE-METADATA`, ...) primes the export. Refuses cleanly when the session is uninitialized or no BSP has been built yet. |
+| `HELP` | — | `HELP [command]` | Grouped help or per-command help. `?` → `HELP` is not registered here. |
 | `EXIT` | `QUIT`, `Q` | `EXIT` | Leave the Local SMDPP shell. |
-| `QA` | -- | `QA` | Leave shell and call `quit_all()`. |
+| `QA` | — | `QA` | Leave shell and call `quit_all()`. |
 
 ### 6.7 Notification-sync callouts
 
@@ -902,14 +902,14 @@ Commands are registered in `__init__` via `self._commands`,
 | Command | Aliases | Usage | Purpose |
 | --- | --- | --- | --- |
 | `DISCOVER` | `INFO` | `DISCOVER` | Shared discovery snapshot; populates internal poll-target FQDN cache. |
-| `LIST` | -- | `LIST` | List known profile aliases (AID registry). |
-| `LOAD-PROFILE` | -- | `LOAD-PROFILE [profilePath]` | PrepareDownload + profile load chain. Triggers notification sync. |
+| `LIST` | — | `LIST` | List known profile aliases (AID registry). |
+| `LOAD-PROFILE` | — | `LOAD-PROFILE [profilePath]` | PrepareDownload + profile load chain. Triggers notification sync. |
 | `ENABLE-PROFILE` | `ENABLE` | `ENABLE-PROFILE <iccid\|aid\|alias>` | Enable profile. Queues modem REFRESH. |
 | `DISABLE-PROFILE` | `DISABLE` | `DISABLE-PROFILE <iccid\|aid\|alias>` | Disable profile. Queues REFRESH. |
 | `DELETE-PROFILE` | `DELETE` | `DELETE-PROFILE <iccid\|aid\|alias>` | Delete profile. Queues REFRESH. |
 | `REFRESH-MODEM` | `MODEM-REFRESH` | `REFRESH-MODEM [mode]` | Queue proactive REFRESH via HIL bridge (`euicc-profile-state-change`, `uicc-reset`, ...). |
-| `STORE-METADATA` | -- | `STORE-METADATA [metadataPath]` | Encode / send StoreMetadata (BF25). |
-| `UPDATE-METADATA` | -- | `UPDATE-METADATA [metadataPath]` | Encode / send UpdateMetadata (BF2A). |
+| `STORE-METADATA` | — | `STORE-METADATA [metadataPath]` | Encode / send StoreMetadata (BF25). |
+| `UPDATE-METADATA` | — | `UPDATE-METADATA [metadataPath]` | Encode / send UpdateMetadata (BF2A). |
 
 ### 7.3 Targets & Overrides
 
@@ -925,37 +925,37 @@ Commands are registered in `__init__` via `self._commands`,
 
 | Command | Aliases | Usage | Purpose |
 | --- | --- | --- | --- |
-| `PATHS` | -- | `PATHS` | Show Direct Auth / IPAd polling / IPAe polling / localized bridge endpoints. |
-| `IPAD-DISCOVER` | -- | `IPAD-DISCOVER [packagePath]` | IPAd discovery + optional package selection. |
-| `IPAD-LIVE` | -- | `IPAD-LIVE [matchingId] [--debug]` | Localized IPAd polling via the Live orchestrator (internal `--debug`). |
-| `IPAD-TEST` | -- | `IPAD-TEST [matchingId] [--debug]` | Localized IPAd polling via the Test orchestrator (internal `--debug`). |
-| `IPAE-AUTHENTICATE` | -- | `IPAE-AUTHENTICATE [matchingId]` | Seed handover context with `transactionId`. |
-| `IPAE-DOWNLOAD` | -- | `IPAE-DOWNLOAD [profilePath] [matchingId]` | Handover-linked download / load profile chain. Triggers notification sync. |
-| *(plugin)* `IPAE-LIVE` | -- | `IPAE-LIVE [attempts] [timer-window] [-t 20s] [-s 5] [--debug]` | Localized IPAe STK/BIP watchdog via SCP11.live (internal `--debug`). |
-| *(plugin)* `IPAE-TEST` | -- | `IPAE-TEST [attempts] [timer-window] [-t 20s] [-s 5] [--debug]` | Localized IPAe STK/BIP watchdog via SCP11.test (internal `--debug`). |
-| `HANDOVER-SET` | -- | `HANDOVER-SET <txidHex> [matchingId]` | Manually seed handover context. |
-| `HANDOVER-STATUS` | -- | `HANDOVER-STATUS [--json\|--yaml]` | Print current handover context. |
+| `PATHS` | — | `PATHS` | Show Direct Auth / IPAd polling / IPAe polling / localized bridge endpoints. |
+| `IPAD-DISCOVER` | — | `IPAD-DISCOVER [packagePath]` | IPAd discovery + optional package selection. |
+| `IPAD-LIVE` | — | `IPAD-LIVE [matchingId] [--debug]` | Localized IPAd polling via the Live orchestrator (internal `--debug`). |
+| `IPAD-TEST` | — | `IPAD-TEST [matchingId] [--debug]` | Localized IPAd polling via the Test orchestrator (internal `--debug`). |
+| `IPAE-AUTHENTICATE` | — | `IPAE-AUTHENTICATE [matchingId]` | Seed handover context with `transactionId`. |
+| `IPAE-DOWNLOAD` | — | `IPAE-DOWNLOAD [profilePath] [matchingId]` | Handover-linked download / load profile chain. Triggers notification sync. |
+| *(plugin)* `IPAE-LIVE` | — | `IPAE-LIVE [attempts] [timer-window] [-t 20s] [-s 5] [--debug]` | Localized IPAe STK/BIP watchdog via SCP11.live (internal `--debug`). |
+| *(plugin)* `IPAE-TEST` | — | `IPAE-TEST [attempts] [timer-window] [-t 20s] [-s 5] [--debug]` | Localized IPAe STK/BIP watchdog via SCP11.test (internal `--debug`). |
+| `HANDOVER-SET` | — | `HANDOVER-SET <txidHex> [matchingId]` | Manually seed handover context. |
+| `HANDOVER-STATUS` | — | `HANDOVER-STATUS [--json\|--yaml]` | Print current handover context. |
 
 ### 7.5 eIM Packages & ISD-R
 
 | Command | Aliases | Usage | Purpose |
 | --- | --- | --- | --- |
-| `EIM-PACKAGE` | -- | `EIM-PACKAGE [packagePath]` | Show / set package override. |
-| `EIM-PACKAGE-CLEAR` | -- | `EIM-PACKAGE-CLEAR` | Clear package override. |
-| `EIM-PACKAGE-LINT` | -- | `EIM-PACKAGE-LINT [path] [--strict-exec] [--json\|--yaml]` | Detailed package lint + spec checks. |
-| `EIM-PACKAGE-EXPLAIN` | -- | `EIM-PACKAGE-EXPLAIN [path] [--strict-exec] [--json\|--yaml]` | Runtime hints + signing-cert selection preview. |
-| `EIM-PACKAGE-ISSUE` | -- | `EIM-PACKAGE-ISSUE [path]` | Issue one package by `package_type`. |
-| `EIM-PACKAGE-ISSUE-ALL` | -- | `EIM-PACKAGE-ISSUE-ALL [directory]` | Issue every JSON package in the directory. |
-| `EIM-CERTS` | -- | `EIM-CERTS [--json\|--yaml] [pkg] [cert]` | Signing-cert inventory + auto-selected preview. |
-| `ADD-INITIAL-EIM` | -- | `ADD-INITIAL-EIM [package\|isdr] [certPath] [pkgPath]` | Card-aware AddInitialEim. |
-| `ADD-EIM` | -- | `ADD-EIM [package\|isdr] [certPath] [pkgPath]` | Card-aware AddEim. |
-| `GET-EIM-CONFIG` | -- | `GET-EIM-CONFIG` | Standalone BF55 GetEimConfigurationData. |
-| `DELETE-EIM` | -- | `DELETE-EIM <eimId>` | BF59 DeleteEim request (eimId is OID-form). |
+| `EIM-PACKAGE` | — | `EIM-PACKAGE [packagePath]` | Show / set package override. |
+| `EIM-PACKAGE-CLEAR` | — | `EIM-PACKAGE-CLEAR` | Clear package override. |
+| `EIM-PACKAGE-LINT` | — | `EIM-PACKAGE-LINT [path] [--strict-exec] [--json\|--yaml]` | Detailed package lint + spec checks. |
+| `EIM-PACKAGE-EXPLAIN` | — | `EIM-PACKAGE-EXPLAIN [path] [--strict-exec] [--json\|--yaml]` | Runtime hints + signing-cert selection preview. |
+| `EIM-PACKAGE-ISSUE` | — | `EIM-PACKAGE-ISSUE [path]` | Issue one package by `package_type`. |
+| `EIM-PACKAGE-ISSUE-ALL` | — | `EIM-PACKAGE-ISSUE-ALL [directory]` | Issue every JSON package in the directory. |
+| `EIM-CERTS` | — | `EIM-CERTS [--json\|--yaml] [pkg] [cert]` | Signing-cert inventory + auto-selected preview. |
+| `ADD-INITIAL-EIM` | — | `ADD-INITIAL-EIM [package\|isdr] [certPath] [pkgPath]` | Card-aware AddInitialEim. |
+| `ADD-EIM` | — | `ADD-EIM [package\|isdr] [certPath] [pkgPath]` | Card-aware AddEim. |
+| `GET-EIM-CONFIG` | — | `GET-EIM-CONFIG` | Standalone BF55 GetEimConfigurationData. |
+| `DELETE-EIM` | — | `DELETE-EIM <eimId>` | BF59 DeleteEim request (eimId is OID-form). |
 | `EUICC-MEMORY-RESET` | `ISDR-EUICC-MEMORY-RESET` | `EUICC-MEMORY-RESET [packagePath]` | Template-driven ES10c eUICCMemoryReset on ISD-R; queues REFRESH. |
-| `ISDR-GET-EIM-CONFIG` | -- | `ISDR-GET-EIM-CONFIG` | Decode / report live BF55 eIM rows from the card. |
-| `ISDR-DELETE-EIM` | -- | `ISDR-DELETE-EIM <eimId>` | Delete target eIM and print decoded post-state. |
-| `ISDR-ADD-INITIAL-EIM` | -- | `ISDR-ADD-INITIAL-EIM [certPath] [pkgPath]` | Validate AddInitialEim directly on-card. |
-| `ISDR-ADD-EIM` | -- | `ISDR-ADD-EIM [certPath] [pkgPath]` | Validate AddEim directly on-card. |
+| `ISDR-GET-EIM-CONFIG` | — | `ISDR-GET-EIM-CONFIG` | Decode / report live BF55 eIM rows from the card. |
+| `ISDR-DELETE-EIM` | — | `ISDR-DELETE-EIM <eimId>` | Delete target eIM and print decoded post-state. |
+| `ISDR-ADD-INITIAL-EIM` | — | `ISDR-ADD-INITIAL-EIM [certPath] [pkgPath]` | Validate AddInitialEim directly on-card. |
+| `ISDR-ADD-EIM` | — | `ISDR-ADD-EIM [certPath] [pkgPath]` | Validate AddEim directly on-card. |
 | `LOAD-EIM-PACKAGE` | `ISDR-PACKAGE`, `ISDR-LOAD-PACKAGE` | `LOAD-EIM-PACKAGE [pkgPath] [certPath]` | Execute a card-facing package toward ISD-R. |
 | `EIM-ACKNOWLEDGE` | `EIM-ACK` | `EIM-ACKNOWLEDGE [txidHex] [matchingId]` | Close pending eIM ops + sync notifications. |
 
@@ -976,24 +976,24 @@ Commands are registered in `__init__` via `self._commands`,
 
 | Command | Aliases | Usage | Purpose |
 | --- | --- | --- | --- |
-| `STATUS` | -- | `STATUS` | Runtime / session state (session, BIP, eIM identity, bridge, counters, handover). |
-| `NOTIF-HYGIENE` | -- | `NOTIF-HYGIENE [maxPending]` | Drain / check pending notifications threshold. |
-| `COUNTERS` | -- | `COUNTERS` | List persisted counters by eIM ID. |
-| `COUNTER` | -- | `COUNTER <eimId> [set <n>]` *or* `COUNTER set <n>` | Inspect / override next counter value. |
-| `ERROR-CODES` | -- | `ERROR-CODES [SGP.02\|SGP.22\|SGP.32\|ALL]` | List GSMA error-code tables. |
-| `ERROR-CODE-SET` | -- | `ERROR-CODE-SET <family> <code\|name> [pkg]` | Apply resolved error code into a package JSON. Families: `sgp32_eim_package_result_error`, `sgp32_profile_download_error_reason`, `sgp22_profile_state_result`. |
+| `STATUS` | — | `STATUS` | Runtime / session state (session, BIP, eIM identity, bridge, counters, handover). |
+| `NOTIF-HYGIENE` | — | `NOTIF-HYGIENE [maxPending]` | Drain / check pending notifications threshold. |
+| `COUNTERS` | — | `COUNTERS` | List persisted counters by eIM ID. |
+| `COUNTER` | — | `COUNTER <eimId> [set <n>]` *or* `COUNTER set <n>` | Inspect / override next counter value. |
+| `ERROR-CODES` | — | `ERROR-CODES [SGP.02\|SGP.22\|SGP.32\|ALL]` | List GSMA error-code tables. |
+| `ERROR-CODE-SET` | — | `ERROR-CODE-SET <family> <code\|name> [pkg]` | Apply resolved error code into a package JSON. Families: `sgp32_eim_package_result_error`, `sgp32_profile_download_error_reason`, `sgp22_profile_state_result`. |
 | `RESP-LOG` | `RESPONSE-LOG` | `RESP-LOG [n] [--json\|--yaml]` | Show last *n* response-log entries. |
-| `RESP-LOG-FILTER` | -- | `RESP-LOG-FILTER <query> [n] [--json\|--yaml]` | Filter by txid / matchingId / path / action. |
-| `RESP-LOG-CLEAR` | -- | `RESP-LOG-CLEAR` | Clear response-log JSONL. |
+| `RESP-LOG-FILTER` | — | `RESP-LOG-FILTER <query> [n] [--json\|--yaml]` | Filter by txid / matchingId / path / action. |
+| `RESP-LOG-CLEAR` | — | `RESP-LOG-CLEAR` | Clear response-log JSONL. |
 
 ### 7.8 Shell
 
 | Command | Aliases | Usage | Purpose |
 | --- | --- | --- | --- |
-| `RECORD` | -- | `RECORD [STATUS\|START [out]\|STOP [out]\|CANCEL]` | Replayable shell + APDU trace (YAML default, JSON for `.json` outputs). |
+| `RECORD` | — | `RECORD [STATUS\|START [out]\|STOP [out]\|CANCEL]` | Replayable shell + APDU trace (YAML default, JSON for `.json` outputs). |
 | `HELP` | `?` | `HELP [command]` | Grouped help or per-command help. |
 | `EXIT` | `QUIT`, `Q` | `EXIT` | Exit shell (closes session). |
-| `QA` | -- | `QA` | Exit shell + `quit_all()`. |
+| `QA` | — | `QA` | Exit shell + `quit_all()`. |
 
 ### 7.9 Notification-sync callouts
 
@@ -1001,7 +1001,7 @@ Commands that automatically run `_sync_pending_notifications`
 (followed by `load_notifications_synced = True`):
 
 - `LOAD-PROFILE`, `IPAE-DOWNLOAD`.
-- `EIM-PACKAGE-ISSUE`, `EIM-PACKAGE-ISSUE-ALL`, `HOTFOLDER-FETCH`, `POLL-CAMPAIGN`, `POLL-EXPORT` -- but only when the queued package is one of `eim_package_result`, `euicc_package_result`, `ipa_euicc_data_response`, `profile_download_trigger_result`, `eim_acknowledgements`.
+- `EIM-PACKAGE-ISSUE`, `EIM-PACKAGE-ISSUE-ALL`, `HOTFOLDER-FETCH`, `POLL-CAMPAIGN`, `POLL-EXPORT` — but only when the queued package is one of `eim_package_result`, `euicc_package_result`, `ipa_euicc_data_response`, `profile_download_trigger_result`, `eim_acknowledgements`.
 - `EIM-ACKNOWLEDGE` (alias `EIM-ACK`).
 - `LOAD-EIM-PACKAGE` on load-chain package types.
 
@@ -1020,7 +1020,7 @@ parse it together with `[matchingId]` or `[attempts] [timer-window]
 
 ---
 
-## 8. Tools.ProfilePackage -- SAIP Tool Shell
+## 8. Tools.ProfilePackage — SAIP Tool Shell
 
 `python -m Tools.ProfilePackage` / `yggdrasim-profile-package`.
 `ProfilePackageShell` in `Tools/ProfilePackage/shell.py`. Seeds
@@ -1041,33 +1041,33 @@ Preferences persisted in `Workspace/SAIP/saip_tool_config.json`.
 
 | Command | Aliases | Args | Modifiers | Purpose |
 | --- | --- | --- | --- | --- |
-| `HELP` | -- | -- | -- | Command reference + examples. |
-| `STATUS` | -- | -- | -- | Active profile + transcode dir. |
-| `PWD` | -- | -- | -- | Workspace root + selected input path. |
-| `TOOL` | -- | `[command]` | -- | Show / override `saip-tool` executable (shlex-split). |
-| `PROFILE-DIR` | -- | `[dir]` | -- | Show / set default profile directory; auto-selects the sole profile on reload. |
-| `TRANSCODE-DIR` | -- | `[dir]` | -- | Show / set default INSPECT save directory. |
-| `USE` | -- | `<file>` | -- | Select active DER input. `.txt` / `.hex` auto-decoded and cached as `.profilepackage-cache/<stem>-<digest>.der`. |
-| `OPEN` | -- | `[file]` | -- | With arg: `USE` then `INSPECT`. Without: launches the `SaipOpenPickerApp` Textual TUI (see §8.4). |
-| `INSPECT` | `TUI`, `TRANSCODE-TUI` | -- | -- | Launch the split-pane Textual TUI (see §8.5). |
-| `INFO` | -- | `[APPS]` | `APPS` / `--APPS` → `--apps` | `saip-tool <input> info [--apps]`. |
-| `TREE` | -- | -- | -- | `saip-tool <input> tree`. |
-| `CHECK` | -- | -- | -- | `saip-tool <input> check`. |
-| `DUMP` | -- | `[ALL\|TYPE\|NAA] [DECODED]` | `DECODED` / `--DECODED` → `--dump-decoded`. `> <file>` redirection -- `.json` → JSON, else YAML (ANSI-stripped). Path must be workspace-confined. | `saip-tool dump ...`. |
-| `LINT` | -- | `[STRICT] [METADATA <path>] [PROFILE <name>] [GATE <p1,p2,...>] [FAIL-CODES <c1,c2,...>] [MIN-SCORE <n>] [FAIL-ON-WARN] [ENFORCE]` *plus* `HELP`/`--HELP`/`-H` and `PROFILES`/`LIST-PROFILES` (self-documenting) | `> out` → YAML default / JSON on `.json`. | Integrated `SaipProfileLinter` over the decoded dump + `saip-tool check`. Presets: `STRICT-FS`, `RELEASE-GATE`, `RELAXED-CI`. `ENFORCE` raises `SystemExit(2)` on gate fail. |
-| `ENCODE-JSON` | -- | `<in.json> <out.der>` | -- | Rebuild DER from tagged SAIP JSON (supports `__ygg_token_defs__`, `__ygg_placeholder_style__` = `brace` / `bracket`). |
-| `GENERATE-TEMPLATE` | -- | `<out.json> [ICCID=<digits>] [IMSI=<digits>]` | Only `ICCID` and `IMSI` are accepted. | Export active profile as tagged JSON with placeholder injection. |
-| `GENERATE-PROFILE` | -- | `<template.json> <out.der> [NAME=value ...]` | `ICCID=<digits>` derives `{ICCID}` + `{ICCID_EF}`; `IMSI=<digits>` derives `{IMSI}`; other names → raw-hex overrides. | Build DER from a tagged JSON template with overrides. |
-| `GENERATE-BATCH` | -- | `<template.json> <data_file> <out_dir>` | `.csv` (header row), `.json` (list), `.jsonl`/`.ndjson` (one/line), `.yaml`/`.yml` (list of mappings). `ICCID` implicitly supplies `ICCID_EF`; unknown placeholders fail. | Batch-generate DER per record. Output stem: `profile_iccid_<digits>` / `profile_imsi_<digits>` / `profile_<idx:03d>`. |
-| `LIST-AKA` | -- | -- | -- | Read-only summary of every `akaParameter` PE: section key, algorithm, Ki/OPc byte length, Keccak count, `authCounterMax`, `sqnInit` presence. Decodes via `saip_aka_wizard.list_aka_sections` -- no shell redirection, no mutation. |
-| `PROVISION-AKA` | -- | `<out.der \| IN-PLACE> [ALGORITHM=..] [KI=..] [OPC=..] [NUMBER-OF-KECCAK=..] [AUTH-COUNTER-MAX=..] [SQN-INIT=..]` | `ALGORITHM` ∈ {`milenage`, `tuak`, `xor-3g`}. `KI` / `OPC` lengths validated per algorithm (MILENAGE 16 B, TUAK 16/32 + 32 B, XOR-3G 16 B, OPC unused). `NUMBER-OF-KECCAK` ∈ `[1,255]` (TUAK only). `AUTH-COUNTER-MAX` = 3 B optional. `SQN-INIT` = 6 B optional. `IN-PLACE` rewrites the selected input file. Without overrides walks the interactive tag-granular wizard. | Tag-granular AKA provisioning using `saip_aka_wizard.apply_aka_configuration`. Fails closed on missing required fields when non-interactive. |
-| `RANDOMIZE-AKA` | -- | `<out.der \| IN-PLACE> [ALGORITHM=..] [INCLUDE-AUTH-COUNTER-MAX] [INCLUDE-SQN-INIT]` | `ALGORITHM` ∈ {`milenage`, `tuak`, `xor-3g`}; falls back to the PE's current algorithm when omitted. `INCLUDE-AUTH-COUNTER-MAX` adds a 3-byte random `authCounterMax`. `INCLUDE-SQN-INIT` adds a 6-byte random `sqnInit` seed. | Development helper. Uses `secrets.token_bytes` to generate Ki (and OPc/TOPc plus `numberOfKeccak` for TUAK). Leaves replay-protection fields untouched unless explicitly included. Prints an explicit dev-only banner after writing. |
-| `SPLIT` | -- | `[prefix]` | -- | `saip-tool split [--output-prefix <prefix>]`. |
-| `EXTRACT-APPS` | -- | `[dir] [CAP\|IJC]` | Two tokens max. | `saip-tool extract-apps [--output-dir <dir>] [--format cap\|ijc]`. |
-| `REMOVE-NAA` | -- | `<USIM\|ISIM\|CSIM> <out>` | -- | `saip-tool remove-naa --naa-type <naa> --output-file <out>`. |
-| `RAW` | -- | `<subcmd args...>` | Path flags auto-resolved: `--applet-file` (must exist), `--output-dir`, `--output-file`, `--output-prefix`, `--pe-file` (workspace-confined). | Pass-through to `saip-tool <input> ...`. |
-| `EXIT` | `QUIT`, `Q` | -- | -- | `SystemExit(0)`. |
-| `QA` | -- | -- | -- | `quit_all()`. |
+| `HELP` | — | — | — | Command reference + examples. |
+| `STATUS` | — | — | — | Active profile + transcode dir. |
+| `PWD` | — | — | — | Workspace root + selected input path. |
+| `TOOL` | — | `[command]` | — | Show / override `saip-tool` executable (shlex-split). |
+| `PROFILE-DIR` | — | `[dir]` | — | Show / set default profile directory; auto-selects the sole profile on reload. |
+| `TRANSCODE-DIR` | — | `[dir]` | — | Show / set default INSPECT save directory. |
+| `USE` | — | `<file>` | — | Select active DER input. `.txt` / `.hex` auto-decoded and cached as `.profilepackage-cache/<stem>-<digest>.der`. |
+| `OPEN` | — | `[file]` | — | With arg: `USE` then `INSPECT`. Without: launches the `SaipOpenPickerApp` Textual TUI (see §8.4). |
+| `INSPECT` | `TUI`, `TRANSCODE-TUI` | — | — | Launch the split-pane Textual TUI (see §8.5). |
+| `INFO` | — | `[APPS]` | `APPS` / `--APPS` → `--apps` | `saip-tool <input> info [--apps]`. |
+| `TREE` | — | — | — | `saip-tool <input> tree`. |
+| `CHECK` | — | — | — | `saip-tool <input> check`. |
+| `DUMP` | — | `[ALL\|TYPE\|NAA] [DECODED]` | `DECODED` / `--DECODED` → `--dump-decoded`. `> <file>` redirection — `.json` → JSON, else YAML (ANSI-stripped). Path must be workspace-confined. | `saip-tool dump …`. |
+| `LINT` | — | `[STRICT] [METADATA <path>] [PROFILE <name>] [GATE <p1,p2,…>] [FAIL-CODES <c1,c2,…>] [MIN-SCORE <n>] [FAIL-ON-WARN] [ENFORCE]` *plus* `HELP`/`--HELP`/`-H` and `PROFILES`/`LIST-PROFILES` (self-documenting) | `> out` → YAML default / JSON on `.json`. | Integrated `SaipProfileLinter` over the decoded dump + `saip-tool check`. Presets: `STRICT-FS`, `RELEASE-GATE`, `RELAXED-CI`. `ENFORCE` raises `SystemExit(2)` on gate fail. |
+| `ENCODE-JSON` | — | `<in.json> <out.der>` | — | Rebuild DER from tagged SAIP JSON (supports `__ygg_token_defs__`, `__ygg_placeholder_style__` = `brace` / `bracket`). |
+| `GENERATE-TEMPLATE` | — | `<out.json> [ICCID=<digits>] [IMSI=<digits>]` | Only `ICCID` and `IMSI` are accepted. | Export active profile as tagged JSON with placeholder injection. |
+| `GENERATE-PROFILE` | — | `<template.json> <out.der> [NAME=value ...]` | `ICCID=<digits>` derives `{ICCID}` + `{ICCID_EF}`; `IMSI=<digits>` derives `{IMSI}`; other names → raw-hex overrides. | Build DER from a tagged JSON template with overrides. |
+| `GENERATE-BATCH` | — | `<template.json> <data_file> <out_dir>` | `.csv` (header row), `.json` (list), `.jsonl`/`.ndjson` (one/line), `.yaml`/`.yml` (list of mappings). `ICCID` implicitly supplies `ICCID_EF`; unknown placeholders fail. | Batch-generate DER per record. Output stem: `profile_iccid_<digits>` / `profile_imsi_<digits>` / `profile_<idx:03d>`. |
+| `LIST-AKA` | — | — | — | Read-only summary of every `akaParameter` PE: section key, algorithm, Ki/OPc byte length, Keccak count, `authCounterMax`, `sqnInit` presence. Decodes via `saip_aka_wizard.list_aka_sections` — no shell redirection, no mutation. |
+| `PROVISION-AKA` | — | `<out.der \| IN-PLACE> [ALGORITHM=..] [KI=..] [OPC=..] [NUMBER-OF-KECCAK=..] [AUTH-COUNTER-MAX=..] [SQN-INIT=..]` | `ALGORITHM` ∈ {`milenage`, `tuak`, `xor-3g`}. `KI` / `OPC` lengths validated per algorithm (MILENAGE 16 B, TUAK 16/32 + 32 B, XOR-3G 16 B, OPC unused). `NUMBER-OF-KECCAK` ∈ `[1,255]` (TUAK only). `AUTH-COUNTER-MAX` = 3 B optional. `SQN-INIT` = 6 B optional. `IN-PLACE` rewrites the selected input file. Without overrides walks the interactive tag-granular wizard. | Tag-granular AKA provisioning using `saip_aka_wizard.apply_aka_configuration`. Fails closed on missing required fields when non-interactive. |
+| `RANDOMIZE-AKA` | — | `<out.der \| IN-PLACE> [ALGORITHM=..] [INCLUDE-AUTH-COUNTER-MAX] [INCLUDE-SQN-INIT]` | `ALGORITHM` ∈ {`milenage`, `tuak`, `xor-3g`}; falls back to the PE's current algorithm when omitted. `INCLUDE-AUTH-COUNTER-MAX` adds a 3-byte random `authCounterMax`. `INCLUDE-SQN-INIT` adds a 6-byte random `sqnInit` seed. | Development helper. Uses `secrets.token_bytes` to generate Ki (and OPc/TOPc plus `numberOfKeccak` for TUAK). Leaves replay-protection fields untouched unless explicitly included. Prints an explicit dev-only banner after writing. |
+| `SPLIT` | — | `[prefix]` | — | `saip-tool split [--output-prefix <prefix>]`. |
+| `EXTRACT-APPS` | — | `[dir] [CAP\|IJC]` | Two tokens max. | `saip-tool extract-apps [--output-dir <dir>] [--format cap\|ijc]`. |
+| `REMOVE-NAA` | — | `<USIM\|ISIM\|CSIM> <out>` | — | `saip-tool remove-naa --naa-type <naa> --output-file <out>`. |
+| `RAW` | — | `<subcmd args...>` | Path flags auto-resolved: `--applet-file` (must exist), `--output-dir`, `--output-file`, `--output-prefix`, `--pe-file` (workspace-confined). | Pass-through to `saip-tool <input> …`. |
+| `EXIT` | `QUIT`, `Q` | — | — | `SystemExit(0)`. |
+| `QA` | — | — | — | `quit_all()`. |
 
 `saip-tool` resolution order: `TOOL` override → `YGGDRASIM_SAIP_TOOL`
 env → `saip-tool.py` / `saip-tool` on `PATH` →
@@ -1075,15 +1075,15 @@ env → `saip-tool.py` / `saip-tool` on `PATH` →
 Subprocess timeout: 60 s (override via
 `YGGDRASIM_SAIP_TOOL_TIMEOUT_SECONDS`).
 
-### 8.3 `RAW` -- underlying `saip-tool` subcommands
+### 8.3 `RAW` — underlying `saip-tool` subcommands
 
 | Subcommand | Flags / positionals |
 | --- | --- |
 | `split` | `[--output-prefix OUTPUT_PREFIX]` (default `.`) |
 | `dump` | `{all_pe,all_pe_by_type,all_pe_by_naa}`, `[--dump-decoded]` |
-| `check` | -- |
+| `check` | — |
 | `extract-pe` | `--pe-file`, `[--identification]` |
-| `remove-pe` | `--output-file`, `[--identification ...]` *(repeatable)*, `[--type ...]` *(repeatable)* |
+| `remove-pe` | `--output-file`, `[--identification …]` *(repeatable)*, `[--type …]` *(repeatable)* |
 | `remove-naa` | `--output-file`, `--naa-type {csim,usim,isim}` |
 | `info` | `[--apps]` |
 | `extract-apps` | `[--output-dir]` (default `.`), `[--format {ijc,cap}]` (default `cap`) |
@@ -1091,10 +1091,10 @@ Subprocess timeout: 60 s (override via
 | `remove-app` | `--output-file`, `--aid` |
 | `add-app-inst` | `--output-file`, `--aid`, `--class-aid`, `--inst-aid`, `[--app-privileges]` (default `000000`), `[--volatile-memory-quota]`, `[--non-volatile-memory-quota]`, `[--app-spec-pars]` (default `00`), `[--uicc-toolkit-app-spec-pars]`, `[--uicc-access-app-spec-pars]`, `[--uicc-adm-access-app-spec-pars]`, `[--process-data]` *(repeatable)* |
 | `remove-app-inst` | `--output-file`, `--aid`, `--inst-aid` |
-| `edit-mand-srv-list` | `--output-file`; repeatable `[--add-flag ...]` / `[--remove-flag ...]`: `contactless, usim, isim, csim, milenage, tuak128, cave, gba-usim, gba-isim, mbms, eap, javacard, multos, multiple-usim, multiple-isim, multiple-csim, tuak256, usim-test-algorithm, ber-tlv, dfLink, cat-tp, get-identity, profile-a-x25519, profile-b-p256, suciCalculatorApi, dns-resolution, scp11ac, scp11c-authorization-mechanism, s16mode, eaka` |
-| `tree` | -- |
+| `edit-mand-srv-list` | `--output-file`; repeatable `[--add-flag …]` / `[--remove-flag …]`: `contactless, usim, isim, csim, milenage, tuak128, cave, gba-usim, gba-isim, mbms, eap, javacard, multos, multiple-usim, multiple-isim, multiple-csim, tuak256, usim-test-algorithm, ber-tlv, dfLink, cat-tp, get-identity, profile-a-x25519, profile-b-p256, suciCalculatorApi, dns-resolution, scp11ac, scp11c-authorization-mechanism, s16mode, eaka` |
+| `tree` | — |
 
-### 8.4 `OPEN` picker TUI -- `saip_open_picker_tui.SaipOpenPickerApp`
+### 8.4 `OPEN` picker TUI — `saip_open_picker_tui.SaipOpenPickerApp`
 
 Filtering:
 
@@ -1112,7 +1112,7 @@ Keybindings:
 | `r` | Refresh listing. |
 | `q` / `Escape` | Cancel (returns `None`). |
 
-### 8.5 `INSPECT` TUI -- `saip_transcode_tui.run_saip_transcode_tui`
+### 8.5 `INSPECT` TUI — `saip_transcode_tui.run_saip_transcode_tui`
 
 Pane-mode cycle (`_PANE_MODE_SEQUENCE`): `der`, `inspect`, `lint`,
 `none`, `decoded`. Slot defaults: `right=der`,
@@ -1160,10 +1160,10 @@ PE block picker options: `header`, `end`, `mf`, `telecom`, `cd`,
 `df-5gprose`, `pinCodes`, `pukCodes`, `securityDomain`,
 `securityDomain_ssd`, `application`, `nonStandard`, `usim`,
 `opt-usim`, `isim`, `opt-isim`, `akaParameter`,
-`genericFileManagement`. `header` / `end` / `mf` are at-most-once --
+`genericFileManagement`. `header` / `end` / `mf` are at-most-once —
 blocked when already present.
 
-### 8.6 Decoded edit modal -- `saip_decoded_edit.py`
+### 8.6 Decoded edit modal — `saip_decoded_edit.py`
 
 Global modal keybindings:
 
@@ -1175,8 +1175,8 @@ Global modal keybindings:
 Three modal variants selected by `editor_kind`:
 
 - `ServiceTableEditorPicker` (`editor_kind=="service_table"`).
-- `StructuredDecodedFieldEditorPicker` -- kinds `short_efid`, `byte_count`, `arr_reference`, `lcsi_state`, `fill_file_offset`, `file_id`.
-- `DecodedValueEditorPicker` -- generic JSON textarea.
+- `StructuredDecodedFieldEditorPicker` — kinds `short_efid`, `byte_count`, `arr_reference`, `lcsi_state`, `fill_file_offset`, `file_id`.
+- `DecodedValueEditorPicker` — generic JSON textarea.
 
 Supported decoded fields and validation (`build_decoded_value_editor_model`):
 
@@ -1199,14 +1199,14 @@ Regex: `{NAME}` (default) or `[NAME]` when root JSON sets
 `__ygg_placeholder_style__: "bracket"`. Names must match
 `[A-Za-z][A-Za-z0-9_]*`.
 
-- `GENERATE-TEMPLATE` -- only `ICCID` and `IMSI` accepted as typed
+- `GENERATE-TEMPLATE` — only `ICCID` and `IMSI` accepted as typed
   injections. ICCID injects `{ICCID}` into `header.iccid` and
   `{ICCID_EF}` into every `mf.ef-iccid` `fillFileContent`. IMSI
   injects `{IMSI}` into every EF.IMSI `fillFileContent`.
-- `GENERATE-PROFILE` -- typed assignments derive hex encodings;
+- `GENERATE-PROFILE` — typed assignments derive hex encodings;
   unknown names become raw-hex overrides via
   `normalize_raw_hex_token_value`.
-- `GENERATE-BATCH` -- extension picks loader: `.csv` (header row),
+- `GENERATE-BATCH` — extension picks loader: `.csv` (header row),
   `.json` (list of objects), `.jsonl`/`.ndjson` (one per line),
   `.yaml`/`.yml` (list of mappings). `ICCID` implicitly supplies
   `ICCID_EF`; unknown placeholders fail the batch. Quote ICCID /
@@ -1214,7 +1214,7 @@ Regex: `{NAME}` (default) or `[NAME]` when root JSON sets
 
 ---
 
-## 9. Tools.SuciTool -- SUCI Key Shell
+## 9. Tools.SuciTool — SUCI Key Shell
 
 `python -m Tools.SuciTool` / `yggdrasim-suci-tool`. `SuciToolShell` in
 `Tools/SuciTool/shell.py`.
@@ -1231,15 +1231,15 @@ Regex: `{NAME}` (default) or `[NAME]` when root JSON sets
 
 | Command | Aliases | Args | Purpose |
 | --- | --- | --- | --- |
-| `HELP` | -- | -- | Banner + workflow. |
-| `STATUS` | -- | -- | Active key file selection. |
-| `PWD` | -- | -- | Workspace root + selected key file. |
-| `TOOL` | -- | `[command]` | Show / override `suci-keytool` executable (shlex-split). |
-| `USE` | -- | `<key_file>` | Select active SUCI key file (need not exist yet). Absolute paths must still resolve inside the workspace. |
-| `GENERATE` | -- | `<SECP256R1\|CURVE25519>` | `suci-keytool --key-file <key> generate-key --curve <curve>` (case-insensitive). |
-| `DUMP` | -- | `[COMPRESSED]` | `suci-keytool --key-file <key> dump-pub-key [--compressed]`. |
-| `EXIT` | `QUIT`, `Q` | -- | `SystemExit(0)`. |
-| `QA` | -- | -- | `quit_all()`. |
+| `HELP` | — | — | Banner + workflow. |
+| `STATUS` | — | — | Active key file selection. |
+| `PWD` | — | — | Workspace root + selected key file. |
+| `TOOL` | — | `[command]` | Show / override `suci-keytool` executable (shlex-split). |
+| `USE` | — | `<key_file>` | Select active SUCI key file (need not exist yet). Absolute paths must still resolve inside the workspace. |
+| `GENERATE` | — | `<SECP256R1\|CURVE25519>` | `suci-keytool --key-file <key> generate-key --curve <curve>` (case-insensitive). |
+| `DUMP` | — | `[COMPRESSED]` | `suci-keytool --key-file <key> dump-pub-key [--compressed]`. |
+| `EXIT` | `QUIT`, `Q` | — | `SystemExit(0)`. |
+| `QA` | — | — | `quit_all()`. |
 
 `suci-keytool` resolution order: `TOOL` override →
 `YGGDRASIM_SUCI_TOOL` env → `suci-keytool.py` / `suci-keytool` on
@@ -1254,7 +1254,7 @@ shell: `generate-key --curve {secp256r1, curve25519}` and
 
 ## 10. HIL Bridge daemons
 
-Both binaries are non-interactive daemons -- there is no shell and no
+Both binaries are non-interactive daemons — there is no shell and no
 command dispatcher. They run stand-alone or via the
 `[B]` HIL Bridge Session menu (§1.4).
 
@@ -1370,10 +1370,10 @@ operators to inject `-H`, custom selectors, or bare switches.
 
 ### 10.5 Runtime files
 
-- `runtime/state/hil_bridge_supervisor.json` -- rewritten every
+- `runtime/state/hil_bridge_supervisor.json` — rewritten every
   `_write_state()` with `status`, `reason`, `updatedAt`, USB/bridge/
   REMSIM running flags, PIDs and commands.
-- `runtime/state/hil_bridge_card_relay.json` -- written by the bridge;
+- `runtime/state/hil_bridge_card_relay.json` — written by the bridge;
   stale markers cleaned by the supervisor.
 
 ### 10.6 Offline pcap replay tooling
@@ -1386,7 +1386,7 @@ child.
 
 | Entry point | Launch |
 | --- | --- |
-| Wrapper flags | `python main/main.py --open-pcap <file> [--keybag <file>]` -- short-circuits the menu and drops straight into offline review. |
+| Wrapper flags | `python main/main.py --open-pcap <file> [--keybag <file>]` — short-circuits the menu and drops straight into offline review. |
 | `[B]` sub-menu | Pick `[3]` (see §1.4). Prompts for the pcap path (native picker with manual-input fallback) and an optional keybag path. |
 | Programmatic | `from main.main import _open_hil_bridge_pcap_offline; _open_hil_bridge_pcap_offline(pcap_path, keybag_path="")` |
 
@@ -1394,7 +1394,7 @@ Keybag resolution order when no explicit `--keybag` is provided:
 
 1. `<pcap>.keys.json` (path + `.keys.json`)
 2. `<stem>.keys.json` (splitext + `.keys.json`)
-3. none -- ciphered APDUs stay wrapped in the TUI
+3. none — ciphered APDUs stay wrapped in the TUI
 
 Unwrapping is performed by
 `Tools.HilBridge.scp_replay.ScpReplayEngine`, which matches keybag
@@ -1409,10 +1409,10 @@ Keybag files are produced by:
 - `python -m SCP11.local_access --dump-keybag <path>` (§6.1)
 
 `python -m SCP11.live --dump-keybag` is the intentional no-op stub
-documented in §4.1 -- live-mode BSP keys are derived inside the eUICC
+documented in §4.1 — live-mode BSP keys are derived inside the eUICC
 and never reach the host.
 - `state/hil_termshark/live_capture.pcap` and
-  `state/hil_termshark/{config,cache}/...` -- created by the launcher's
+  `state/hil_termshark/{config,cache}/…` — created by the launcher's
   `[B]` menu.
 
 ---
@@ -1437,33 +1437,42 @@ startup.
 `extend_target(target)` once per target (idempotent via a per-instance
 attribute).
 
-### 11.2 Capability contract for host shells
+### 11.2 Current plugin — `plugins/polling_plugin.py`
 
-The core surfaces a `polling` capability slot consumed by the SCP11 host
-shells when a plugin registers it. Without that capability registered
-the listed commands are simply absent from `HELP`.
+Registers capability `polling` → `PollingCapability()`.
+Dispatch rules:
 
-For Live / Test the capability calls `target._add_command(name, usage, description, handler, aliases=None, section=..., visible_in_help=True, trigger_notification_sync=False)`; the host console must expose:
+| Host shell | Commands injected | Default aliases | Help section |
+| --- | --- | --- | --- |
+| `SCP11.live.console.SCP11Console` | `POLL [attempts] [timer-window] [-t 20s] [-s 5] [--debug]` | `EIM-POLL` | IPAe |
+| `SCP11.test.console.SCP11Console` | `POLL [attempts] [timer-window] [-t 20s] [-s 5] [--debug]` | `EIM-POLL` | IPAe |
+| `SCP11.eim_local.main.EimLocalShell` | `IPAE-LIVE` / `IPAE-TEST [attempts] [timer-window] [-t 20s] [-s 5] [--debug]` | — | "3. SIM IP Polling" + Localized Routing & Handover |
 
-- `target._commands` -- dict keyed by canonical name.
+Argument grammar (all three): `yggdrasim_common.polling_plugin_support.parse_eim_local_ipae_options`.
+
+### 11.3 Capability contract for host shells
+
+For Live / Test the plugin uses `target._add_command(name, usage, description, handler, aliases=None, section=..., visible_in_help=True, trigger_notification_sync=False)`; the host console must expose:
+
+- `target._commands` — dict keyed by canonical name.
 - `target._add_command(...)` registration helper.
-- `target.HELP_SECTION_IPAE` -- section constant.
-- `target._cmd_eim_poll(self, argument)` -- pre-defined handler.
+- `target.HELP_SECTION_IPAE` — section constant.
+- `target._cmd_eim_poll(self, argument)` — pre-defined handler.
 
-For eIM Local the capability writes directly into the shell instance:
+For eIM Local the plugin writes directly into the shell instance:
 
 - `target._commands` (dict).
-- `target._command_docs` (dict) -- receives `{"usage", "summary", "examples"}` entries.
-- `target._plugin_path_sections` -- list for `PATHS` rendering.
-- `target._plugin_localized_help_rows` -- list for localized help rows.
-- `target._cmd_ipae_live` / `target._cmd_ipae_test` -- pre-defined handlers.
+- `target._command_docs` (dict) — receives `{"usage", "summary", "examples"}` entries.
+- `target._plugin_path_sections` — list for `PATHS` rendering.
+- `target._plugin_localized_help_rows` — list for localized help rows.
+- `target._cmd_ipae_live` / `target._cmd_ipae_test` — pre-defined handlers.
 
 Runtime dispatch helpers in `yggdrasim_common/polling_plugin_support.py`:
 
-- `dispatch_poll_command(surface, command_name, target, argument)` -- routes to the capability.
-- `dispatch_poll_method(target, method_name, *args, **kwargs)` -- routes to polling-owned methods.
-- `install_poll_method_stubs(target_cls)` -- installs the forwarding stubs.
-- `require_polling_plugin()` -- raises with a helpful message when the plugin is absent.
+- `dispatch_poll_command(surface, command_name, target, argument)` — routes to the capability.
+- `dispatch_poll_method(target, method_name, *args, **kwargs)` — routes to polling-owned methods.
+- `install_poll_method_stubs(target_cls)` — installs the 92-name `POLLING_METHOD_NAMES` forwarding stubs.
+- `require_polling_plugin()` — raises with a helpful message when the plugin is absent.
 
 See [Plugin Contract](../internals/plugin-contract.md) for the formal
 spec.

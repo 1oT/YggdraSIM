@@ -1,3 +1,4 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """
 Decoded-edit coverage audit for the SAIP decoded-field editor surfaces.
 
@@ -69,7 +70,7 @@ CLASS_MISSING = "missing"
 # ``_decode_known_ef_payload`` so the audit coverage check honours the
 # same parent-aware FID dispatcher as the interactive TUI. When the PE
 # type is not enumerated here, parent hint defaults to ``None`` which
-# is equivalent to the pre-earlier work behaviour.
+# is equivalent to the pre-Round-6 behaviour.
 _PE_TYPE_TO_PARENT_HINT: dict[str, str] = {
     "PE-MF": "mf",
     "PE-USIM": "adf-usim",
@@ -100,7 +101,7 @@ def _parent_hint_for_path(path: tuple[str, ...]) -> str | None:
 
 # Hand-written editors in ``saip_decoded_edit.py``. Keep in sync with
 # ``build_decoded_value_editor_model`` and
-# ``encode_decoded_value_editor_payload`` -- both must know about a field
+# ``encode_decoded_value_editor_payload`` — both must know about a field
 # for it to count as hand-written.
 _HAND_WRITTEN_FIELDS: frozenset[str] = frozenset(
     {
@@ -146,7 +147,7 @@ _EXPANDABLE_TYPES: frozenset[str] = frozenset(
         "MappingParameter",
         "AlgoParameter",
         "FileManagement",
-        # Expand these so their children become individually
+        # Wave A: expand these so their children become individually
         # classifiable leaves rather than an opaque "missing" wrapper.
         "TS102226AdditionalContactlessParameters",
         "ServicesList",
@@ -157,7 +158,7 @@ _EXPANDABLE_TYPES: frozenset[str] = frozenset(
 # EF member names that anchor a DF / ADF / MF slot rather than carrying
 # decodable EF content. The SAIP spec models them with the ``File``
 # wrapper, but the only content is the FCP descriptor of the parent DF
-# -- there is no body to round-trip. We classify them as
+# — there is no body to round-trip. We classify them as
 # ``structural_only`` so they don't show up in the ``missing`` bucket.
 # ``mf`` is the single-MF anchor used by PE-MF / PE-IoT.
 _EF_ANCHOR_NAMES: frozenset[str] = frozenset(
@@ -248,6 +249,7 @@ class AuditReport:
     groups: list[GroupReport] = field(default_factory=list)
 
     def totals(self) -> dict[str, int]:
+        """Return aggregate counts of all audit entry categories."""
         aggregate: dict[str, int] = {}
         for group in self.groups:
             for classification, count in group.summary().items():
@@ -256,6 +258,7 @@ class AuditReport:
         return aggregate
 
     def missing_entries(self) -> list[FieldRecord]:
+        """Return the list of audit entries that are missing required decoded fields."""
         missing: list[FieldRecord] = []
         for group in self.groups:
             for record in group.fields:
@@ -344,9 +347,9 @@ def _is_ef_key_covered(
     # Read-only path: ``_decode_known_ef_payload`` recognises many more
     # EF tokens than the roundtrip dispatcher. We call it with an empty
     # hex string because the decoder tolerates that and the caller does
-    # not care about the returned payload -- only whether a non-None
+    # not care about the returned payload — only whether a non-None
     # result is reachable (i.e. a routing entry exists for the token).
-    # The parent hint (``adf-usim`` / ``df-telecom`` / ...) is threaded
+    # The parent hint (``adf-usim`` / ``df-telecom`` / …) is threaded
     # through so parent-aware FID dispatchers see the same enclosing
     # context that the interactive edit surface would provide.
     try:
@@ -392,7 +395,7 @@ def _is_field_roundtrip(field_name: str) -> str | None:
 
 def _is_field_readonly(field_name: str) -> str | None:
     name = str(field_name or "").strip()
-    # Scalar first -- the scalar decoder accepts None/empty cleanly and
+    # Scalar first — the scalar decoder accepts None/empty cleanly and
     # returning a shape dict indicates the editor can render a view.
     try:
         scalar_result = _decode_scalar_special_field(name, 0)
@@ -808,7 +811,7 @@ def _walk_sequence_of_element(
             optional=optional,
         )
 
-    # Primitive element -- leaf classified by the wrapper member name.
+    # Primitive element — leaf classified by the wrapper member name.
     leaf_name = str(path[-1]) if len(path) > 0 else ""
     classification = _classify_leaf_field(
         field_name=leaf_name,
@@ -923,6 +926,7 @@ def format_audit_report(
     *,
     show_only_missing: bool = False,
 ) -> str:
+    """Format the decoded-field edit audit results as a structured text report."""
     lines: list[str] = []
     header = (
         f"SAIP decoded-editor audit "

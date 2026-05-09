@@ -1,17 +1,20 @@
-"""Coverage for spec-anchored text typing in the SAIP ASN.1 decoder.
+"""
+Round-3 deep-sweep regression coverage for the SAIP ASN.1 decoder.
 
-These tests lock in spec-anchored text typing for named EFs that
-must use strict UTF-8 / ASCII decoders rather than lenient ones.
-A TS 24.008 §10.5.3.5a Network Name IE decoder is wired into EF.PNN
-as part of this surface.
+After the first two "fluff" sweeps closed the opportunistic ASCII /
+BCD / small-integer inference paths in the generic TLV helpers, this
+sweep focuses on spec-anchored text typing for named EFs that were
+still routing through lenient ``decode("utf-8", "ignore")`` or
+``decode("ascii", "ignore")`` helpers. It also introduces a TS 24.008
+§10.5.3.5a Network Name IE decoder and wires it into EF.PNN.
 
 Targets covered:
 
 * EF.SPN (6F46, TS 31.102 §4.2.12)
-    - ``serviceProviderName`` is decoded via the Annex A alpha
+    - ``serviceProviderName`` is now decoded via the Annex A alpha
       string helper (GSM 7-bit default alphabet or UCS-2 with the
-      0x80/0x81/0x82 leaders), so bytes with the high bit set are
-      preserved instead of being silently dropped.
+      0x80/0x81/0x82 leaders). The legacy ``decode("utf-8", "ignore")``
+      path used to silently drop any byte with the high bit set.
 
 * EF.PNN (6FC5, TS 31.102 §4.2.58)
     - Tags 0x43 / 0x45 now dispatch the TS 24.008 Network Name IE
@@ -49,7 +52,7 @@ from Tools.ProfilePackage.saip_asn1_decode import (
 
 
 # ---------------------------------------------------------------------------
-# EF.SPN -- TS 31.102 §4.2.12
+# EF.SPN — TS 31.102 §4.2.12
 # ---------------------------------------------------------------------------
 
 
@@ -78,7 +81,7 @@ class TestSpnAlphaStringTyping:
 
 
 # ---------------------------------------------------------------------------
-# EF.PNN -- TS 31.102 §4.2.58 / TS 24.008 §10.5.3.5a
+# EF.PNN — TS 31.102 §4.2.58 / TS 24.008 §10.5.3.5a
 # ---------------------------------------------------------------------------
 
 
@@ -138,7 +141,7 @@ class TestPnnRecordDispatchesNetworkNameIe:
 
 
 # ---------------------------------------------------------------------------
-# EF.GBANL -- TS 31.102 §4.2.80
+# EF.GBANL — TS 31.102 §4.2.80
 # ---------------------------------------------------------------------------
 
 
@@ -168,7 +171,7 @@ class TestGbanlBtidTyping:
 
 
 # ---------------------------------------------------------------------------
-# ISIM P-CSCF address -- TS 31.103 §4.2.8
+# ISIM P-CSCF address — TS 31.103 §4.2.8
 # ---------------------------------------------------------------------------
 
 

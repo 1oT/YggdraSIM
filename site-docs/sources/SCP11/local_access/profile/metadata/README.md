@@ -20,14 +20,14 @@ Use `default_profile_metadata.json` as the single metadata file for:
 
 - **Tag**: `[37]` / `BF25`
 - **iccid** (Iccid): required
-- **serviceProviderName** `[17]` UTF8String **SIZE(0..32)** -- Tag `91`
-- **profileName** `[18]` UTF8String **SIZE(0..64)** -- Short Description per SGP.21; Tag `92`
-- **iconType** `[19]` IconType OPTIONAL -- Tag `93` (JPG or PNG)
-- **icon** `[20]` OCTET STRING **SIZE(0..1024)** OPTIONAL -- only if iconType present; Tag `94`
-- **profileClass** `[21]` ProfileClass DEFAULT operational -- Tag `95`
+- **serviceProviderName** `[17]` UTF8String **SIZE(0..32)** — Tag `91`
+- **profileName** `[18]` UTF8String **SIZE(0..64)** — Short Description per SGP.21; Tag `92`
+- **iconType** `[19]` IconType OPTIONAL — Tag `93` (JPG or PNG)
+- **icon** `[20]` OCTET STRING **SIZE(0..1024)** OPTIONAL — only if iconType present; Tag `94`
+- **profileClass** `[21]` ProfileClass DEFAULT operational — Tag `95`
 - **notificationConfigurationInfo** `[22]` SEQUENCE OF NotificationConfigurationInformation OPTIONAL
-- **profileOwner** `[23]` OperatorId OPTIONAL -- Tag `B7`
-- **profilePolicyRules** `[25]` PprIds OPTIONAL -- Tag `99`
+- **profileOwner** `[23]` OperatorId OPTIONAL — Tag `B7`
+- **profilePolicyRules** `[25]` PprIds OPTIONAL — Tag `99`
 - Further optional fields (e.g. `[34]` serviceSpecificDataStoredInEuicc, `[35]` serviceSpecificDataNotStoredInEuicc, RPM/LPR/Enterprise, etc.) are defined in the spec but may not be present in the local encoder.
 
 **NotificationEvent** (BIT STRING) used in `notificationConfigurationInfo`:

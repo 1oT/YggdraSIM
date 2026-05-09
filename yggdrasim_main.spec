@@ -5,11 +5,11 @@
 # The spec produces one of two bundles controlled by the ``YGGDRASIM_FLAVOR``
 # environment variable at build time:
 #
-#   * ``clean`` (default) -- Windows / macOS / Linux / Raspberry Pi target.
+#   * ``clean`` (default) — Windows / macOS / Linux / Raspberry Pi target.
 #     The ``Tools/HilBridge`` tree and the ``yggdrasim_common.hil_bridge_runtime``
 #     module are excluded so the bundle has no residual Linux-only ``pyudev`` or
 #     ``osmo-remsim`` coupling.
-#   * ``full`` -- Linux-only superset that ships the HIL bridge so the bundled
+#   * ``full`` — Linux-only superset that ships the HIL bridge so the bundled
 #     launcher can drive a SIMtrace2 through ``osmo-remsim-client-st2``.
 #
 # The spec also writes ``yggdrasim_common/_build_flavor.py`` before analysis
@@ -25,7 +25,7 @@ from PyInstaller.utils.hooks import collect_submodules
 
 
 # ``SPECPATH`` is the directory containing this spec file, which is the
-# repository root. Do not add a ``.parent`` here -- that would walk one
+# repository root. Do not add a ``.parent`` here — that would walk one
 # level above the checkout and break the stamp write-through plus every
 # ``Tree(...)`` lookup below.
 ROOT = Path(SPECPATH).resolve()
@@ -115,23 +115,6 @@ for relative in data_tree_candidates:
     source = ROOT / relative
     if source.exists():
         datas.append((str(source), relative))
-
-
-# Top-level text files the launcher opens by path at runtime. ``main.py``
-# resolves ``PROJECT_ROOT = sys._MEIPASS`` in frozen builds and then reads
-# LICENSE / README.md / NOTICE from it, so they must land at the bundle
-# root rather than inside a sub-directory.
-for toplevel_filename in ("LICENSE", "NOTICE", "README.md"):
-    toplevel_source = ROOT / toplevel_filename
-    if toplevel_source.is_file():
-        datas.append((str(toplevel_source), "."))
-
-# The Guides menu in the launcher opens guides/ARCHITECTURE.md directly
-# via ``_show_text_document``. Shipping the whole ``guides/`` tree keeps
-# the surface consistent for any additional guide entries added later.
-guides_source = ROOT / "guides"
-if guides_source.is_dir():
-    datas.append((str(guides_source), "guides"))
 
 
 # Third-party dependencies that are imported lazily (inside functions

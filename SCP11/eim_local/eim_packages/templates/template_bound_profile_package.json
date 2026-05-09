@@ -6,10 +6,10 @@
     "transaction_id_hex": "0102030405060708090A0B0C0D0E0F10",
     "matching_id": "EIM-DIRECT-DOWNLOAD",
     "profile_path": "SCP11/eim_local/profile/test_profile.txt",
-    "smdp_address": "smdpp.yggdrasim.example.test",
+    "smdp_address": "smdpp.example.test",
     "bip_endpoints": {
-      "eim": "https://eim.yggdrasim.example.test/gsma/rsp2/asn1",
-      "smdpp": "https://smdpp.yggdrasim.example.test/gsma/rsp2/es9plus"
+      "eim": "https://eim.example.test/gsma/rsp2/asn1",
+      "smdpp": "https://smdpp.example.test/gsma/rsp2/es9plus"
     }
   },
   "additional_tlvs": [],

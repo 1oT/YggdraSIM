@@ -1,4 +1,6 @@
-"""Coverage for TS 102 222 DELETE FILE, Cell Broadcast Download, Menu Selection and TS 102 223 TR-side latches:
+"""Eleventh-pass gap-coverage suite for SIMCARD surfaces beyond ES10.
+
+Round-11 closes the following:
 
 * ETSI TS 102 222 §6.5 ``DELETE FILE`` (`INS 0xE4`). Admin-scope,
   SCP03-gated; cascades through DF subtrees and rejects MF.

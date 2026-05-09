@@ -1,3 +1,4 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """
 TRANSCODE-TUI left inspector: decode the JSON selection or whole profile.
 """
@@ -219,6 +220,7 @@ def build_template_defaults_report(
     pe_key: str,
     focus_key_hint: str | None,
 ) -> str | None:
+    """Build and return a report dict summarising the template token defaults for the loaded profile."""
     return _implicit_template_defaults_report(
         loaded_document,
         pe_key=pe_key,
@@ -251,7 +253,7 @@ def build_transcode_inspector_text(
         try:
             loaded = json.loads(stripped)
         except json.JSONDecodeError as exc:
-            return f"JSON parse error -- cannot run profile decode:\n{exc}"
+            return f"JSON parse error — cannot run profile decode:\n{exc}"
         if isinstance(loaded, dict) is False:
             return "Root must be a JSON object for profile-wide decode."
         return build_profile_asn1_report(loaded)
@@ -272,7 +274,7 @@ def build_transcode_inspector_text(
     try:
         loaded_document = json.loads(stripped)
     except json.JSONDecodeError as exc:
-        return f"JSON parse error -- cannot inspect selection:\n{exc}"
+        return f"JSON parse error — cannot inspect selection:\n{exc}"
 
     sub: Any
     if subtree_override is not None:
@@ -288,7 +290,7 @@ def build_transcode_inspector_text(
                 f"Span [{s}:{e}) is not valid JSON ({exc}).\n"
                 f"PE context (heuristic): {pe_key}\n"
                 + frag[:800]
-                + ("\n..." if len(frag) > 800 else "")
+                + ("\n…" if len(frag) > 800 else "")
             )
 
     header = f"PE: {humanize_saip_display_name(pe_key)}\n"

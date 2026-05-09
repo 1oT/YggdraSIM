@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+"""HIL-Bridge pcap capture: opens a pcapng write handle and records each bridged APDU exchange as a pseudo-link-layer frame."""
 from __future__ import annotations
 
 import os
@@ -21,6 +23,7 @@ def build_capture_command(
     *,
     capture_backend: str | None = None,
 ) -> list[str]:
+    """Build the tshark command-line args list for writing a PCAP capture file."""
     backend = str(capture_backend or _resolve_capture_backend()).strip()
     if len(backend) == 0:
         raise ValueError("Missing capture backend for Termshark pcap wrapper.")
@@ -31,6 +34,7 @@ def build_capture_command(
 
 
 def exec_capture_command(command: list[str]) -> None:
+    """Execute the capture command and block until the capture is complete."""
     if len(command) == 0:
         raise ValueError("Missing capture command for Termshark pcap wrapper.")
     executable = str(command[0] or "").strip()
@@ -42,6 +46,7 @@ def exec_capture_command(command: list[str]) -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
+    """CLI entry point for the PCAP capture utility."""
     arguments = list(sys.argv[1:] if argv is None else argv)
     try:
         command = build_capture_command(arguments)

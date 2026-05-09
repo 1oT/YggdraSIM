@@ -1,7 +1,7 @@
 """Tests for ``yggdrasim_common.doctor._probe_card_relay`` (CB-3).
 
-A minimal stub bridge -- built on the stdlib's ``http.server`` -- answers
-``/ping`` and ``/status`` so the doctor probe's full
+A minimal stub bridge — built on the stdlib's ``http.server`` — answers
+``/ping`` and ``/status`` so we can exercise the doctor probe's full
 decision tree without depending on the HilBridge / Card Bridge stack
 or on a real reader.
 
@@ -48,7 +48,7 @@ def _make_handler(
         def log_message(self, *_args, **_kwargs):
             return  # silence stdout in tests
 
-        def do_GET(self) -> None:  # noqa: N802 -- http.server convention
+        def do_GET(self) -> None:  # noqa: N802 — http.server convention
             if ping_raises_connection_close and self.path == "/ping":
                 # Simulate a peer reset: close without sending headers.
                 try:
@@ -285,7 +285,7 @@ class DoctorCardRelayProbeTests(unittest.TestCase):
         report = self._run_probe()
         row = self._row(report)
         # Either "warn" with a transport-error message, or "info" if
-        # the resolver rejects the URL outright. Both are acceptable --
+        # the resolver rejects the URL outright. Both are acceptable —
         # the doctor must not raise.
         self.assertIn(row.status, {"warn", "info"})
 

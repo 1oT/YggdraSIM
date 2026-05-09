@@ -44,7 +44,7 @@ through the wrapper menu.
 - an ETSI TS 102 221-shaped filesystem covering MF, DFs, ADFs, and EFs
 - the full PIN lifecycle: VERIFY (`0x20`), CHANGE (`0x24`), DISABLE
   (`0x26`), ENABLE (`0x28`) and UNBLOCK (`0x2C`) with proper retry
-  bookkeeping per TS 102 221 §11.1.9-11.1.12
+  bookkeeping per TS 102 221 §11.1.9–11.1.12
 - ISO 7816-4 / TS 102 221 §11.1.7 `GET CHALLENGE` (`0x84`) returning
   `Le` random bytes (or 256 when `Le=0`) and persisting them in
   `state.last_challenge_bytes` for OTA / SCP03 freshness
@@ -190,7 +190,7 @@ through the wrapper menu.
     - 3GPP TS 33.535 AKMA key derivation (`K_AKMA`, `A-KID`)
     - 3GPP TS 33.501 §C.3 SUCI calculation (Profile A and Profile B)
     - 3GPP TS 31.102 §7.1.2.4 `GET IDENTITY` (USIM-side SUCI build)
-- a BF55 eIM identity surface advertised over GET STATUS
+- a BF55 eIM identity surface that mirrors what a real eUICC advertises
 - an SGP.32 ES10b.LoadEuiccPackage path that verifies the eIM signature,
   enforces counter / EID checks, executes the inner PSMO/eCO batch, and
   emits a signed `EuiccPackageResult` into the notification list
@@ -301,7 +301,7 @@ These are dispatched outside the BF51 package envelope:
 | `BF65` | `SetDefaultDpAddress` (SGP.32 §5.9.25) | IoT-side counterpart of SGP.22 v3 `BF3F`. Updates `state.default_dp_address` from `[0] UTF8String`; an empty body resets the address. Returns `BF65 80 01 NN` with `ok(0)` or `undefinedError(127)` (oversized / malformed). |
 
 Each of the BF58/BF5B/BF5C/BF5D/BF5E/BF59/BF5A/BF65 responses follows
-the `[N] SEQUENCE { result [0] INTEGER }` shape from §5.9.15 - §5.9.25,
+the `[N] SEQUENCE { result [0] INTEGER }` shape from §5.9.15 – §5.9.25,
 encoded as `BFxx LL 80 01 NN`. `BF5F` is the only CHOICE in this group:
 the success branch wraps `httpParams` under context `81`, the error
 branch reuses `80 01 NN` for the `connectivityParametersError` enum.
@@ -323,17 +323,17 @@ branch reuses `80 01 NN` for the `connectivityParametersError` enum.
 `SIMCARD/state.py::SimCardState` carries the SGP.32 fields persisted
 through the eUICC manifest (`SIMCARD/euicc_store.py`):
 
-- `euicc_package_results: list[SimEuiccPackageResultEntry]` -- signed
+- `euicc_package_results: list[SimEuiccPackageResultEntry]` — signed
   result blobs awaiting IPA acknowledgement.
-- `association_token_counter: int` -- monotonic counter used by
+- `association_token_counter: int` — monotonic counter used by
   `addEim` to allocate fresh association tokens.
 - `immediate_enable_flag`, `immediate_enable_smdp_oid`,
-  `immediate_enable_smdp_address` -- populated by
+  `immediate_enable_smdp_address` — populated by
   `configureImmediateEnable` and read back by
   `GetEimConfigurationData`.
-- `previous_enabled_aid` -- captured during a `enable.rollbackFlag`
+- `previous_enabled_aid` — captured during a `enable.rollbackFlag`
   swap or a `BF5D` fallback swap so `BF58` / `BF5E` can revert.
-- `emergency_profile_active`, `emergency_pre_aid` -- sticky
+- `emergency_profile_active`, `emergency_pre_aid` — sticky
   bookkeeping for `BF5B` / `BF5C`. Spec-mandated: the Emergency
   Profile remains enabled across resets, so this state lives in the
   eUICC manifest rather than the volatile session.
@@ -341,13 +341,13 @@ through the eUICC manifest (`SIMCARD/euicc_store.py`):
 `SimProfileEntry` adds the following flags persisted by
 `SIMCARD/profile_store.py`:
 
-- `fallback_attribute: bool` -- set by PSMO `setFallbackAttribute`.
-- `rollback_armed: bool` -- set by `enable.rollbackFlag` and cleared on
+- `fallback_attribute: bool` — set by PSMO `setFallbackAttribute`.
+- `rollback_armed: bool` — set by `enable.rollbackFlag` and cleared on
   successful `ProfileRollback` / `ExecuteFallbackMechanism`.
-- `ecall_indication: bool` -- marks the Profile that BF5B / BF5C
+- `ecall_indication: bool` — marks the Profile that BF5B / BF5C
   operate on. Sourced from SAIP profile metadata at install time, or
   set explicitly by tooling/tests.
-- `connectivity_params_http: bytes` -- TCA Profile Interoperability
+- `connectivity_params_http: bytes` — TCA Profile Interoperability
   HTTP/CoAP parameters returned by `BF5F`.
 
 Each `SimEimEntry` keeps its own `counter_value` and
@@ -491,20 +491,375 @@ through the `toolkit` block in
 
 | Field | Meaning |
 | --- | --- |
-| `poll_strategy` | `"timer"` (default) / `"poll_interval"` / `"both"` / `"off"`. `"timer"` uses TS 102 223 §6.6.21 TIMER MANAGEMENT START. `"poll_interval"` falls back to the §6.6.5 POLL INTERVAL heartbeat. `"both"` emits both; `"off"` emits no proactive bring-up. |
+| `poll_strategy` | `"timer"` (default) / `"poll_interval"` / `"both"` / `"off"`. `"timer"` uses TS 102 223 §6.6.21 TIMER MANAGEMENT START — the trigger SGP.32 IPA-poll relies on. `"poll_interval"` falls back to the §6.6.5 POLL INTERVAL heartbeat. `"both"` emits both; `"off"` emits no proactive bring-up. |
 | `timer_management_seconds` | Initial timer setpoint, encoded as BCD HH/MM/SS in TLV `A5`. |
 | `timer_management_id` | Timer identifier carried in TLV `A4`. Clamped to the ETSI 1..8 range. |
-| `timer_management_auto_rearm` | When `true` (default) every received `D7` TIMER EXPIRATION envelope re-queues a fresh TIMER MANAGEMENT START so the polling cadence keeps running without applet-side housekeeping. |
+| `timer_management_auto_rearm` | When `true` (default) every received `D7` TIMER EXPIRATION envelope re-queues a fresh TIMER MANAGEMENT START so the IPA-poll cadence keeps running without applet-side housekeeping. |
 | `poll_interval_seconds` | Setpoint used when the strategy includes the legacy POLL INTERVAL heartbeat. |
-| `provide_imei` | When `true` (default) the bootstrap also queues a PROVIDE LOCAL INFORMATION (IMEI) proactive command after the polling trigger. |
+| `provide_imei` | When `true` (default) the bootstrap also queues a PROVIDE LOCAL INFORMATION (IMEI) proactive command after the polling trigger, mirroring real eUICC bring-up. |
+| `ipa_poll` | Nested object that controls the SGP.32 §3.5 IPA-poll BIP trigger emitted on every D7 TIMER EXPIRATION envelope (see below). |
 
 Defaults (`SimToolkitState`) match the JSON template, so a fresh
-workspace boots straight into the timer-driven proactive cadence
-without any manual configuration.
+workspace boots straight into timer-driven IPA-poll without any
+manual configuration.
+
+### IPA-poll BIP trigger on TIMER EXPIRATION
+
+`_apply_timer_expiration` drives the SGP.32 §3.5 polling
+cadence. Each `D7` envelope queues a two-leg BIP cycle followed
+by a TIMER MANAGEMENT START re-arm. The first leg is a DNS
+resolution against a public resolver (default `8.8.8.8`); the
+second is the ESipa exchange against the resolved eIM IP.
+
+#### Cold-cache cycle (no resolved IP yet)
+
+1. **OPEN CHANNEL** UDP_REMOTE → `toolkit.ipa_poll_dns_server:53`
+   with qualifier `0x03` (immediate + automatic reconnection).
+   The cellular APN travels under TLV `47` (Network Access Name,
+   §8.70 label-list encoding), the resolver IPv4 under TLV `3E`
+   (Other Address, §8.59 type byte `0x21`), and the alpha id
+   (TLV `05`) is present-but-empty so the modem can still label
+   the bearer in its UI without forcing user-visible text.
+2. **SEND DATA** with the AAAA query for the eIM FQDN (RFC 1035
+   wire format, transaction id seeded from
+   `toolkit.ipa_poll_dns_query_id`).
+3. **SEND DATA** with the A query for the same FQDN.
+4. **RECEIVE DATA** drains the resolver's first answer.
+5. **RECEIVE DATA** drains the resolver's second answer. The
+   first usable A-record lands in
+   `toolkit.ipa_poll_resolved_ip`.
+6. **CLOSE CHANNEL** tears the resolver bearer down. If the DNS
+   leg produced an IPv4 address, the toolkit chains directly
+   into the eIM leg below; otherwise the cycle returns to idle
+   and `toolkit.ipa_poll_last_resolution_error` records why.
+7. **TIMER MANAGEMENT START** re-arms the cadence.
+
+#### Warm-cache cycle (resolved IP already cached)
+
+1. **OPEN CHANNEL** TCP_CLIENT_REMOTE → `<resolved_ip>:443`
+   with qualifier `0x01`. APN under TLV `47`, IPv4 destination
+   under TLV `3E` (type byte `0x21`).
+2. **SEND DATA** carrying the configured ESipa request payload
+   (default: HTTP/1.1 `POST /gsma/rsp2/asn1` wrapping a
+   `BF4F GetEimPackageRequest`).
+3. **RECEIVE DATA** to drain the eIM's response (parsed as
+   SGP.32 outer TLVs).
+4. **CLOSE CHANNEL** ends the bearer.
+5. **TIMER MANAGEMENT START** re-arms the cadence.
+
+The DNS and eIM legs share the same APN. APN priority is:
+1. SAIP profile EF.ACL (`6F57`) — set automatically by the
+   filesystem rebuild whenever a profile is enabled.
+2. `YGGDRASIM_SIM_IPA_POLL_APN` env override.
+3. `internet.apn` workspace fallback.
+
+`toolkit.ipa_poll_apn_source` records which input won
+(`"bpp"` / `"env"` / `"default"`).
+
+#### OPEN CHANNEL failure recovery
+
+When the modem fails the OPEN CHANNEL TR (e.g. result `0x20`
+"BIP error", info `0x04` "no service"), the toolkit drains the
+SEND DATA / RECEIVE DATA / TIMER MANAGEMENT / CLOSE CHANNEL
+commands the IPA had already queued behind it so the modem does
+not have to FETCH guaranteed-failure commands (`0x3A03` "channel
+id not valid") before the next timer expires.
+`ipa_poll_session_active`, `ipa_poll_followup_emitted` and the
+phase machine all reset on the same code path.
+
+When the modem fails a SEND DATA or RECEIVE DATA TR mid-cycle
+(general result `0x3A` "Bearer Independent Protocol error" is
+the common case for misbehaving UDP/TCP stacks), the toolkit
+drains the still-pending SEND/RECEIVE/TIMER follow-ups but
+preserves the trailing CLOSE CHANNEL so the bearer is torn down
+cleanly, increments `toolkit.ipa_poll_consecutive_failures` and
+records a `phase|origin|result|info` summary into
+`toolkit.ipa_poll_last_cycle_error` for status renderers. The
+counter resets to zero on the next cycle that successfully
+dispatches at least one EuiccPackage into ISD-R.
+
+#### TIMER MANAGEMENT yield between SEND and RECEIVE DATA
+
+ETSI TS 102 223 §6.6.21 + reference IPA traces show that real
+eUICC IPAs arm a watchdog timer (timer `02`, ~65 s) right after
+the SEND DATA burst and deactivate it once the matching
+RECEIVE DATA flight has been drained. The proactive yield gives
+the modem its FETCH/STATUS polling window so bytes from the
+network actually land in the bearer buffer before the eUICC
+issues RECEIVE DATA. Skipping the yield makes the modem return
+general result `0x3A` ("Bearer Independent Protocol error") on
+every RECEIVE DATA because no data has arrived yet.
+
+The simulator now mirrors this behaviour:
+
+* The DNS leg queues
+  `OPEN/SEND/SEND/TIMER(start)/RECV/RECV/TIMER(stop)/CLOSE`.
+* The plain-HTTP eIM leg queues
+  `OPEN/SEND/TIMER(start)/RECV/TIMER(stop)/CLOSE`.
+* The TLS reactive loop arms the watchdog right before each
+  RECEIVE DATA dispatch and disarms it before the next SEND
+  DATA flight (or CLOSE CHANNEL).
+
+`toolkit.ipa_poll_wait_timer_id` (default `2`) and
+`toolkit.ipa_poll_wait_timer_seconds` (default `65`) override
+the timer parameters; `toolkit.ipa_poll_wait_timer_armed`
+tracks the runtime arm state for the TLS path.
+
+All TIMER MANAGEMENT proactives use the comprehension-clear
+TLV form (`24` Timer Identifier, `25` Timer Value) and
+RECEIVE DATA uses the comprehension-clear form (`37` Channel
+Data Length); reference cards emit those tags without the CR
+bit set and some modems silently drop the proactive when the
+CR-set form (`A4` / `A5` / `B7`) is used.
+
+#### BIP follow-up device-identities patching
+
+ETSI TS 102 223 §6.6.27/28/29 require the destination device on
+SEND DATA / RECEIVE DATA / CLOSE CHANNEL commands to identify
+the channel opened by the matching OPEN CHANNEL -- encoded as
+`0x20 + channel_id` in the device-identities TLV (channel 1 →
+`0x21`, ..., channel 7 → `0x27`). Sending the generic terminal
+identifier (`0x82`) instead causes the modem to reject every
+follow-up with general-result `0x3A` / additional-info `0x03`
+("Channel identifier not valid").
+
+Because the IPA-poll cycle queues the full
+OPEN/SEND/RECEIVE/CLOSE batch up-front, the destination byte on
+the follow-ups is initially encoded as `0x82`. Once the
+OPEN CHANNEL TR returns the assigned channel id in the
+channel-status TLV (`38 02 [byte1] [byte2]`, channel id =
+`byte1 & 0x07`), the toolkit captures it on
+`toolkit.open_channel_id` and walks the still-pending queue to
+patch the destination byte of every BIP follow-up in place. The
+patch stops at the first non-BIP entry so unrelated traffic from
+extensions is left untouched. The field resets to `0` on
+CLOSE CHANNEL (success or failure) and on OPEN CHANNEL failure
+so the next cycle starts clean.
+
+The trigger is gated by `ipa_poll.enabled`. When no FQDN can be
+resolved (no override, no `state.eim_entries[*].eim_fqdn`, no
+workspace eIM identity) the BIP sequence is skipped and only the
+timer re-arm is queued so the cadence keeps running while a test
+fixture is being staged.
+
+#### In-card TLS-1.2 handshake (Stage 2)
+
+When `toolkit.ipa_poll_tls_enabled` is `True` (the production
+default) the eIM leg above runs the TLS-1.2
+**ECDHE-ECDSA-AES128-GCM-SHA256** handshake entirely inside the
+card. The modem stays a transparent byte pipe -- no MITM, no
+re-wrapping -- which mirrors what every reference IPA on real
+hardware emits.
+
+The handshake state machine is reactive: only the OPEN CHANNEL
+is enqueued up-front. After the bearer comes up, the toolkit's
+TR handlers drive a SEND/RECEIVE DATA loop:
+
+1. **OPEN CHANNEL TR success** → instantiate the `CardTlsClient`
+   (memory-BIO `ssl.SSLObject` pinned to TLS-1.2 + cipher suite
+   0xC02B), call `do_handshake()`, drain the resulting
+   ClientHello bytes, slice them into ≤240-byte SEND DATA
+   chunks. Phase advances to `eim_tls_handshake`.
+2. **SEND DATA TR success (during handshake)** → if more
+   outbound bytes are buffered (multi-chunk flight), keep
+   shipping them; otherwise queue a RECEIVE DATA so the modem
+   can hand back the eIM's response.
+3. **RECEIVE DATA TR success (during handshake)** → if the TR
+   reported `channel_data_length > 0` (more bytes still
+   buffered in the modem) keep draining; otherwise feed the
+   accumulated bytes to the TLS engine, advance the handshake,
+   and either ship more outbound flights or wait for more
+   inbound.
+4. Once the handshake completes, the configured ESipa request
+   payload is encrypted and shipped as the next SEND DATA.
+   Phase = `eim_request`.
+5. **RECEIVE DATA TR success (during eim_recv)** → buffer until
+   the modem signals "drained", feed the TLS engine, decrypt
+   the application data, dispatch each SGP.32 outer TLV through
+   `set_eim_package_dispatcher` (same contract as the
+   plain-HTTP path), then queue CLOSE CHANNEL.
+
+Trust-anchor priority for the chain validator:
+
+1. Every `state.eim_entries[*].trusted_tls_public_key_data`
+   (DER, seeded by `_load_sim_eim_certificate_der` from
+   `eim_identity.json::trusted_tls_cert_path`).
+2. When no trust anchor is provisioned the engine falls back to
+   `ssl.CERT_NONE` so the simulator still emits valid TLS bytes
+   for diagnostics. Operators tighten the chain by populating
+   the eIM identity JSON.
+
+Aborts:
+
+* TLS handshake failure (`SSLError` from `do_handshake()`)
+  records the reason in `toolkit.ipa_poll_tls_last_error`,
+  drains any queued follow-ups and queues a single CLOSE CHANNEL
+  so the bearer is shut cleanly.
+* Idle-receive cap (`toolkit.ipa_poll_tls_max_idle_receives`,
+  default 16) prevents an unresponsive eIM from looping the
+  RECEIVE DATA polls forever; on overflow the cycle aborts with
+  the same CLOSE CHANNEL teardown.
+
+The Stage-1 plain-HTTP fallback is preserved for tests and lab
+debugging: setting `toolkit.ipa_poll_tls_enabled = False`
+restores the linear OPEN/SEND/RECEIVE/CLOSE queue from before
+the TLS engine was wired in.
+
+### ESipa request body — `BF4F` GetEimPackageRequest
+
+The first SEND DATA in every IPA-poll cycle carries an
+SGP.32 v1.2 §6.5.2.1 `GetEimPackageRequest` (BF4F) wrapped in
+HTTP/1.1 framing:
+
+- `5A` 16-byte EID (mandatory).
+- `80` notifyStateChange flag, `81` stateChangeCause, `82` rPlmn
+  BCD — all optional, omitted by default.
+
+`Content-Type` is `application/x-gsma-rsp-asn1` and
+`X-Admin-Protocol` is `gsma/rsp/v2.2.0` so the modem's HTTP
+client routes it to `/gsma/rsp2/asn1`. The body can still be
+overridden by setting `state.toolkit.ipa_poll_request_payload`;
+that escape hatch is the way an integration test injects a
+`BF39` InitiateAuthenticationRequestEsipa or any other ESipa
+opener.
+
+### ESipa response dispatch on RECEIVE DATA
+
+When an IPA-poll cycle is in flight, the bytes the modem returns
+through the **RECEIVE DATA** terminal response are the eIM's
+ESipa payload (SGP.32 §6.5). The toolkit:
+
+1. Tracks the cycle via `state.toolkit.ipa_poll_session_active`,
+   set when `_queue_ipa_poll_sequence()` enqueues the BIP burst
+   and cleared on the **CLOSE CHANNEL** TR (success *or* failure;
+   the bearer is gone either way).
+2. Strips any leading HTTP envelope (`HTTP/1.1 ...\r\n\r\n`) the
+   bearer left in the buffer.
+3. Walks the residue as a chain of SGP.32 outer TLVs and forwards
+   each recognised `BFxx` package into ISD-R via the dispatcher
+   wired by `SimulatedSimCardEngine`
+   (`self.toolkit.set_eim_package_dispatcher(self.sgp.handle_store_data)`),
+   which is exactly the path a real terminal would take when the
+   IPA fans the eIM payload out as STORE DATA on ISD-R.
+4. Records the outer tag of every successfully dispatched package
+   in `state.toolkit.ipa_poll_dispatched_packages` and the raw
+   R-APDU bytes the SGP layer returned in
+   `state.toolkit.ipa_poll_dispatched_responses`.
+
+The dispatcher allow-list covers the full SGP.32/SGP.22 tag range
+the SGP layer can handle (BF21/25/29/2A/2B/2D/2E/30/31/32/33/34/
+36/38/3C/3F/41/45/50..5F/64/65). New tags are added to the
+allow-list whenever `SgpLogic.handle_store_data` learns a new
+opcode. The dispatcher is decoupled from `SgpLogic` so unit
+tests can build a `ToolkitLogic` in isolation; the engine wiring
+is the only place that introduces the dependency. Failures from
+the dispatcher (raised exceptions, `6Axx` SW pairs) are isolated
+to their package and do not abort the rest of the chain.
+
+### LoadCRL — `BF35` (SGP.22 §5.7.13)
+
+The eUICC accepts CRL DER blobs pushed by the RSP server. Each
+non-empty `BF35` STORE DATA payload is appended to
+`state.loaded_crls`; the response is `BF35` with an inner
+`80 01 00` (`ok(0)`). Empty bodies return `81 01 02`
+(`invalidSignature(2)`). Revocation is not enforced today, but
+the persistence path lets a future enforcer walk the list
+without touching transport. The dispatcher allow-list includes
+`BF35` so an eIM-side push relayed over BIP forwards directly to
+the SGP layer.
+
+### ESipa result follow-up — `BF50` ProvideEimPackageResult
+
+After the dispatcher consumed at least one package and produced
+non-empty response bytes, the IPA injects a fresh **SEND DATA**
+(plus a follow-up RECEIVE DATA to drain the eIM's
+acknowledgement) directly in front of the still-pending CLOSE
+CHANNEL. The injected SEND DATA carries an SGP.32 v1.2 §6.5.2.1
+`ProvideEimPackageResult` (BF50) body wrapping:
+
+- `5A` EID,
+- one or more `BF51` / `BF52` / `BF54` per-package results;
+  bare ISD-R responses that are not already prefixed with one
+  of those tags are wrapped in `BF51` (`LoadEuiccPackage` result)
+  per the default-CHOICE rule.
+
+The follow-up is gated by `state.toolkit.ipa_poll_followup_emitted`
+so the IPA cannot cascade itself if the eIM's acknowledgement
+happens to contain BF50 bytes -- real eIMs reply with an empty
+body or a tiny ack TLV and the latch resets only on the next
+cycle (CLOSE CHANNEL TR).
+
+`state.toolkit.ipa_poll_pending_result_payload` and
+`state.toolkit.ipa_poll_last_result_payload` cache the body for
+operator introspection; the latter survives the cycle teardown
+so a test can confirm "the IPA shipped the eIM the expected
+result for cycle N".
+
+#### Error CHOICE — `BF50` with `[0]` EimPackageResultErrorCode
+
+When *every* dispatched package failed (the SGP layer returned a
+non-9000 SW pair, or the dispatcher itself raised), the IPA
+emits the error branch of the SGP.32 v1.2 §6.5.2.1 EimPackageResult
+CHOICE instead of `BF51`/`BF52`/`BF54`:
+
+```
+BF50 LL { 5A 10 <EID>  80 05 30 03 02 01 XX }
+```
+
+where `XX` is the EimPackageResultErrorCode the IPA inferred.
+The `_sw_to_eim_package_error_code()` static maps the card's
+SW pair to `1` (invalidPackageFormat — `6A80`/`6A82`/`6985`),
+`2` (unknownPackage — `6A88`), or `127` (undefinedError —
+everything else). `state.toolkit.ipa_poll_failed_packages` is a
+parallel `[(outer_tag, error_code), ...]` audit trail to the
+existing `ipa_poll_dispatched_packages` success list.
+
+#### PendingNotification piggyback
+
+After the per-package result chain (or in place of it on a
+failure-only cycle, provided notifications exist), the IPA
+appends a `BF2B`/`A0 ...` retrieve-all chunk drained from
+`state.notifications`. The notifications themselves are NOT
+cleared from the eUICC; the eIM is expected to acknowledge them
+via a follow-up `RemoveNotificationFromList` (BF30) before they
+go away. This mirrors a real card: notifications stay pinned
+until explicitly cleared, so the eIM and eUICC share the same
+view if the IPA-poll BIP cycle drops mid-flight.
+
+### IPA-poll loopback validation (Mode A + Mode B)
+
+Two integration suites pin the IPA contract end-to-end:
+
+- **Mode A (ISD-R discovery + AddInitialEim)** --
+  `tests/test_simcard_local_eim_loopback.py`. Drives
+  `EimLocalSession.discover_card()` and
+  `EimLocalSession.add_initial_eim()` against the
+  `SimulatedCardConnection` PC/SC shim. The `EimLocalSession` is
+  the same code path the local eIM uses against a production
+  eUICC; passing here guarantees the simulator answers every
+  `BFxx` ISD-R surface the eIM relies on (BF20/22/2D/2E/3C/43/2B/55/56)
+  and the BF57 AddInitialEim STORE DATA round-trip lands a new
+  entry in `state.eim_entries`.
+
+- **Mode B (RECEIVE DATA dispatch / fake-modem)** --
+  `tests/test_simcard_ipa_poll_dispatch.py` and
+  `tests/test_simcard_ipa_poll_engine_loopback.py`. A small
+  in-test FETCH/TR loop impersonates the modem, returns a canned
+  ESipa payload through RECEIVE DATA, and asserts that the
+  payload is fan-out into ISD-R. The engine-level test runs
+  against the real `SimulatedSimCardEngine` and verifies that an
+  `AddEim` (BF58) ESipa response actually creates a new
+  `SimEimEntry` in the simulator after the BIP cycle closes.
+
+Together these two layers mean: if the production eIM produced an
+ESipa payload the local eIM can produce, the simulator will
+process it the same way a real eUICC does -- the bearer (TLS,
+HTTP framing, DNS) is the modem's responsibility and the
+simulator does not need to mock that.
 
 ### MORE TIME / POLLING OFF / DECLARE SERVICE
 
-Three small queueables round out the core proactive surface:
+Three small queueables round out the round-7 proactive surface:
 
 - `queue_more_time` (TS 102 223 §6.4.2, command type `0x02`) --
   reserved-qualifier proactive command an STK applet uses to ask
@@ -521,7 +876,7 @@ Three small queueables round out the core proactive surface:
 
 ### Service discovery (`0x45` / `0x46` / `0x47`)
 
-completes the TS 102 223 §6.4.32..§6.4.34 service-discovery
+Round-8 completes the TS 102 223 §6.4.32..§6.4.34 service-discovery
 triplet:
 
 - `queue_service_search` (proactive `0x45`) ships the requested
@@ -539,7 +894,7 @@ triplet:
   INFORMATION; the parser stashes both interpretations and the
   apply layer picks the right one based on the originating
   command type.
-- `queue_declare_service` keeps populating
+- `queue_declare_service` (round-7) keeps populating
   `state.toolkit.declared_services` so the search/info handlers
   can be replayed against the previously declared records.
 
@@ -563,9 +918,9 @@ TS 102 223 §6.4.11..§6.4.14 multi-card proactives:
   response into `state.toolkit.last_reader_status` for offline
   inspection.
 
-### Cell Broadcast / Menu Selection envelope decode
+### Cell Broadcast / Menu Selection envelope decode (round 11)
 
-promotes the previously "record-only" `D2` and `D3`
+Round-11 promotes the previously "record-only" `D2` and `D3`
 envelopes to fully decoded latches:
 
 - **3GPP TS 23.041 §9.4.1 Cell Broadcast Download (`D2`).** The
@@ -587,9 +942,9 @@ envelopes to fully decoded latches:
   `menu_selections`. A standalone Help Request TLV (`15` / `95`,
   zero-length) flips `last_menu_help_request`.
 
-### EF.SPDI + UST service-number correction
+### EF.SPDI + UST service-number correction (round 27)
 
-introduced a real spec-correctness bug in
+Round-22 introduced a real spec-correctness bug in
 `_encode_ef_ust_default`: the inline comment said
 "50 PNN, 51 OPL" and the code therefore set bits **50** and
 **51**. Per 3GPP TS 31.102 §4.2.8 those two services are:
@@ -603,10 +958,10 @@ advertising SPDI without a backing EF (every read of
 `6FCD` would have hit `6A 82`), and (c) failing to advertise
 PNN / OPL even though both EFs are seeded.
 
-makes EF.UST honest with respect to the on-card
+Round-27 makes EF.UST honest with respect to the on-card
 file system:
 
-| Service | TS 31.102 meaning | earlier work action |
+| Service | TS 31.102 meaning | Round-27 action |
 | ------- | ----------------- | --------------- |
 | 45 | PLMN Network Name (PNN) | **Set** -- backing EF.PNN seeded since baseline |
 | 46 | Operator PLMN List (OPL) | **Set** -- backing EF.OPL seeded since baseline |
@@ -616,16 +971,17 @@ file system:
 `EF.SPDI` (`6FCD`, transparent) is seeded with the empty-list
 scaffold `A3 02 80 00` per §4.2.66, so the modem reads a
 well-formed TLV before the operator pushes a populated SPDI
-record. An earlier baseline test had inherited the wrong
-service-number list and was repaired alongside this seed
-(`tests/test_simcard_gap21_coverage.py`).
+record. The pre-existing round-21 baseline test had inherited
+the wrong service-number list and was repaired in the same
+patch (`tests/test_simcard_gap21_coverage.py`).
 
 ### Legacy GSM (CLA=A0) cold-attach compatibility
 
-Some basebands still issue 3GPP TS 11.11 / TS 51.011 ``CLA=A0``
-commands during the SIM cold-attach sequence even when the card
-answers as a UICC. Two compatibility hooks keep that boot path
-unblocked:
+Some basebands -- particularly older Quectel BG95 / BG96 / EC25
+families and Cinterion / Telit derivatives -- still issue 3GPP
+TS 11.11 / TS 51.011 ``CLA=A0`` commands during the SIM cold-attach
+sequence even when the card answers as a UICC. Two compatibility
+hooks keep that boot path unblocked:
 
 1. ``SimulatedSimCardEngine._is_supported_cla`` accepts the
    ``0xA0..0xAF`` family and routes those APDUs through the same
@@ -650,7 +1006,7 @@ wrapper.
 ### SAIP §8.3.5 explicit `Fcp.linkPath` aliases
 
 The TCA Profile Interoperability v2.3.1 specification carries a
-dedicated encoding for cross-DF aliases inside the Bound Profile
+first-class encoding for cross-DF aliases inside the Bound Profile
 Package. Every `Fcp` SEQUENCE may include a
 `linkPath [PRIVATE 7] OCTET STRING (SIZE (0..8))` field whose body
 is the concatenation of 2-byte File Identifiers walking from the MF
@@ -714,7 +1070,7 @@ the OCTET-STRING decoder, the runtime resolver, the
 "USIM-only EF (no link, no peer) preserved verbatim" contract, and
 an end-to-end replay against the operator BPP fixture that asserts
 every USIM-side EF.IMSI / EF.AD / EF.SPN / EF.SMS / EF.SMSP /
-EF.MSISDN bound to a DF.GSM or DF.TELECOM target exposes the
+EF.MSISDN bound to a DF.GSM or DF.TELECOM target now exposes the
 canonical bytes through the ADF SELECT path -- including the
 production SFI READ BINARY (`00B0870009`) that originally returned
 `9000` with an empty body.
@@ -755,12 +1111,13 @@ happen to coexist under both DFs (vendor-private EFs, repurposed
 slots) are left untouched because they are not in the shared-EF
 table.
 
-This unblocks the HIL trace where `READ BINARY` against
-EF.IMSI under ADF.USIM (issued by the modem via SFI=0x07
-selection mode) returns `9000` with no body once the operator
-BPP overrides the lab default. Regression coverage lives in
-`tests/test_simcard_shared_ef_mirror.py`, including a slot that
-replays the SFI READ BINARY against the BPP fixture.
+This is the fix that unblocks the production HIL trace where
+`READ BINARY` against EF.IMSI under ADF.USIM (issued by the modem
+via SFI=0x07 selection mode) used to return `9000` with no body
+once the operator BPP overrode the lab default. Regression
+coverage lives in `tests/test_simcard_shared_ef_mirror.py`,
+including a slot that replays the SFI READ BINARY against the
+real `89103000000466311335` BPP fixture.
 
 ### TCA Profile Interoperability §3.5 / §9 template default fill-in
 
@@ -901,13 +1258,13 @@ with the same service strings. Local-only entries (e.g. the
 inspector's MexE / VST / MST / CSIM tables for which pySim has
 no upstream equivalent) survive untouched.
 
-### EF.PSISMSC + UST service 91
+### EF.PSISMSC + UST service 91 (round 26)
 
 3GPP TS 31.102 §4.2.81 places `EF.PSISMSC` (`6FE5`) under
 `ADF.USIM` to publish the SIP URI of the SM-SC used by
 **SM-over-IP** messaging (TS 23.204). The EF is gated by
-**EF.UST service 91 ("Support for SM-over-IP")**; the
-service bit is now set and a backing record is seeded so a
+**EF.UST service 91 ("Support for SM-over-IP")**; round-26
+flips the service bit on and seeds a backing record so a
 modem keying IMS-SMS discovery off that bit no longer trips
 `6A 82`.
 
@@ -920,9 +1277,9 @@ so a paired modem reading the EF before any OTA provisioning
 gets a well-formed end-point. Operators overwrite the record
 via UPDATE RECORD once provisioning lands.
 
-### DF.GSM-ACCESS + EF.Kc / EF.KcGPRS
+### DF.GSM-ACCESS + EF.Kc / EF.KcGPRS (round 25)
 
-closes a third UST/EF coherence gap, this time on the
+Round-25 closes a third UST/EF coherence gap, this time on the
 **USIM** side. `EF.UST` advertises **service 27 (GSM access)**,
 which per 3GPP TS 31.102 §4.4.3 obliges the card to expose
 `DF.GSM-ACCESS` (`5F3B`) under `ADF.USIM` with at least the two
@@ -940,13 +1297,13 @@ CKSN value `0x07` is the "no key set" sentinel from TS 24.008
 the sentinel and triggers a fresh authentication instead of
 encrypting traffic with stale state.
 
-### ISIM SMS-storage EFs
+### ISIM SMS-storage EFs (round 24)
 
 `EF.IST` byte 0 = `0xFF` also flips on **service 6 (SMS
 storage in ISIM)**, **service 7 (SMS status reports in ISIM)**,
-and **service 8 (SM-over-IP)** per 3GPP TS 31.103 §4.2.7.
-Like the GBA pair, services 6 and 7 require dedicated EFs
-under `ADF.ISIM`; the simulator closes that coherence gap.
+and **service 8 (SM-over-IP)** per 3GPP TS 31.103 §4.2.7. As
+with round-23's GBA pair, services 6 and 7 require dedicated
+EFs under `ADF.ISIM`; round-24 closes that coherence gap.
 
 | FID  | Name    | Structure        | Default                          | Spec |
 | ---- | ------- | ---------------- | -------------------------------- | --- |
@@ -958,13 +1315,14 @@ Encoders are shared with the USIM-side seeds (rounds 20 / 21),
 so a modem reading SMS storage from either app sees the same
 default record shape.
 
-### ISIM GBA-supporting EFs
+### ISIM GBA-supporting EFs (round 23)
 
 `EF.IST` (3GPP TS 31.103 §4.2.7) is seeded with byte 0 = `0xFF`,
 which advertises **service 2 (GBA)** as available + activated.
 A spec-conformant card with that bit set must also expose the
-two GBA storage EFs; without them, `6A 82` on either would stall
-every bootstrap a paired ME attempted.
+two GBA storage EFs; previously the simulator was returning
+`6A 82` on both, which would stall every bootstrap a paired ME
+attempted.
 
 | FID | Name | Structure | Default | Spec |
 | --- | --- | --- | --- | --- |
@@ -977,9 +1335,9 @@ allows a normal UPDATE BINARY once the bootstrap completes.
 EF.GBANL is structured as a record EF so the modem can append
 per-NAF rows via UPDATE RECORD without resizing.
 
-### EF.EHPLMNPI + EF.CFIS seeds
+### EF.EHPLMNPI + EF.CFIS seeds (round 22)
 
-closes two more spec-mandated EFs that the simulator
+Round-22 closes two more spec-mandated EFs that the simulator
 was returning ``6A 82`` for:
 
 | FID | Name | Structure | Default | Spec |
@@ -991,36 +1349,38 @@ was returning ``6A 82`` for:
 
 | Service | Description | Provider in this simulator |
 | --- | --- | --- |
-| 49 | Call Forwarding Indication Status (CFIS) | EF.CFIS |
-| 71 | Equivalent HPLMN Presentation Indication | EF.EHPLMNPI |
+| 49 | Call Forwarding Indication Status (CFIS) | EF.CFIS seeded round 22 |
+| 71 | Equivalent HPLMN Presentation Indication | EF.EHPLMNPI seeded round 22 |
 
 EF.CFIS records carry the spec-shaped layout (`MSP ID | CFU
 status | length | TON-NPI | 10-byte BCD body | CCP | Ext7`) so
 modems UPDATE RECORD over the placeholder slot to switch CFU
 on without resizing the EF.
 
-### EF.UST service-bit alignment + EF.SMSR / EF.SDN seeds
+### EF.UST service-bit alignment + EF.SMSR / EF.SDN seeds (round 21)
 
-The simulator serves EF.LND, EF.ICI, EF.OCI, EF.ICT, EF.OCT,
-EF.SMS, EF.SMSP, EF.MSISDN and decodes D4 / D5 envelopes; the
-USIM Service Table (TS 31.102 §4.2.8) advertises the matching
-service numbers so a modem honouring EF.UST does not skip those
-reads.
+Round-21 finishes wiring up the EFs and envelopes that the
+previous two rounds added. Before round-21 the simulator was
+serving EF.LND, EF.ICI, EF.OCI, EF.ICT, EF.OCT, EF.SMS,
+EF.SMSP, EF.MSISDN and decoding D4 / D5 envelopes -- but the
+USIM Service Table (TS 31.102 §4.2.8) didn't advertise the
+matching service numbers, so a modem honouring EF.UST would
+skip those reads entirely.
 
 `_encode_ef_ust_default` now also enables:
 
 | Service | Description | Provider in this simulator |
 | --- | --- | --- |
-| 4 | Service Dialling Numbers (SDN) | EF.SDN |
-| 8 | Outgoing Call Information / Timer | EF.OCI + EF.OCT |
-| 9 | Incoming Call Information / Timer | EF.ICI + EF.ICT |
-| 10 | SMS storage | EF.SMS |
-| 11 | SMS Status Reports | EF.SMSR |
+| 4 | Service Dialling Numbers (SDN) | EF.SDN seeded round 21 |
+| 8 | Outgoing Call Information / Timer | EF.OCI + EF.OCT (round 20) |
+| 9 | Incoming Call Information / Timer | EF.ICI + EF.ICT (round 20) |
+| 10 | SMS storage | EF.SMS (round 20) |
+| 11 | SMS Status Reports | EF.SMSR seeded round 21 |
 | 12 | SMS Parameters | EF.SMSP (pre-existing) |
 | 21 | MSISDN | EF.MSISDN (pre-existing) |
-| 30 | Call Control by USIM | D4 envelope decoder |
-| 31 | MO-SMS Control by USIM | D5 envelope decoder |
-| 55 | Last Number Dialled | EF.LND |
+| 30 | Call Control by USIM | D4 envelope decoder (round 19) |
+| 31 | MO-SMS Control by USIM | D5 envelope decoder (round 19) |
+| 55 | Last Number Dialled | EF.LND (round 19) |
 
 The pre-existing 5G attach baseline (services 19, 27, 33, 38,
 50, 51, 122, 124, 125, 126, 129, 130) is kept verbatim.
@@ -1033,9 +1393,9 @@ the new service bits:
 | `6F47` | EF.SMSR | linear-fixed, 30 bytes | one record: link `0x00` (unused) + 29 × `0xFF` (TPDU pad) | TS 31.102 §4.2.28 |
 | `6F49` | EF.SDN | linear-fixed, 22 bytes | one all-FF record | TS 31.102 §4.2.46 |
 
-### Call-history and SMS-storage EFs
+### Call-history and SMS-storage EFs (round 20)
 
-closes the family of EFs that real USIMs always ship
+Round-20 closes the family of EFs that real USIMs always ship
 pre-allocated and that the modem reads during voice / SMS init:
 
 | FID | Name | Structure | Default | Spec |
@@ -1046,15 +1406,15 @@ pre-allocated and that the modem reads during voice / SMS init:
 | `6F82` | EF.ICT | cyclic, 3 bytes (BE seconds counter) | one zeroed record | TS 31.102 §4.2.22 |
 | `6F83` | EF.OCT | cyclic, 3 bytes | one zeroed record | TS 31.102 §4.2.23 |
 
-already taught READ RECORD / UPDATE RECORD how to
+Round-19 already taught READ RECORD / UPDATE RECORD how to
 service cyclic EFs, so the new seeds plug straight into the
 existing code path: UPDATE RECORD mode `03` rotates the cyclic
 ring on EF.ICI / EF.OCI / EF.ICT / EF.OCT, and the canonical
 linear-fixed UPDATE RECORD path handles EF.SMS slots.
 
-### Operator-side envelope decoders
+### Operator-side envelope decoders (round 19)
 
-closes three operator-control envelopes that previously
+Round-19 closes three operator-control envelopes that previously
 returned a canned "Allowed, no modification" reply without
 actually decoding the body. The simulator now extracts the
 spec-anchored TLVs into `SimToolkitState` so an STK applet (or a
@@ -1072,12 +1432,12 @@ the canned `80 01 00` Result TLV ("Allowed, no modification")
 because vendor-specific override logic belongs in an STK applet
 rather than the simulator core.
 
-### Cyclic record I/O + EF.LND
+### Cyclic record I/O + EF.LND (round 19)
 
 `read_record` and `update_record` previously rejected every
 cyclic EF with `69 81` ("command incompatible with file
 structure"), forcing tests to fall back on transparent reads.
-brings the implementation in line with TS 102 221
+Round-19 brings the implementation in line with TS 102 221
 §11.1.5 / §11.1.6:
 
 - READ RECORD on a cyclic EF accepts modes `02` next, `03`
@@ -1094,9 +1454,9 @@ brings the implementation in line with TS 102 221
 dial body). Modems can immediately READ RECORD against it
 instead of getting `6A 82` on the first call-history scan.
 
-### Maintenance-class proactive TR latches
+### Maintenance-class proactive TR latches (round 18)
 
-closes four maintenance-flavoured proactive TRs whose
+Round-18 closes four maintenance-flavoured proactive TRs whose
 result codes were either dropped on the floor (SET UP EVENT LIST)
 or had no dedicated latch alongside the existing rich-payload
 handler (POLLING OFF / TIMER MANAGEMENT / PROVIDE LOCAL
@@ -1109,7 +1469,7 @@ INFORMATION):
 | `TIMER MANAGEMENT` (`0x27`) | TS 102 223 §6.4.27 / §6.6.27 | `state.toolkit.last_timer_management_result` | The existing `_apply_timer_management_response` continues to mutate `timer_table` from the echoed timer-id / timer-value TLVs. |
 | `PROVIDE LOCAL INFORMATION` (`0x26`) | TS 102 223 §6.4.15 / §6.6.15 | `state.toolkit.last_provide_local_information_result` plus `last_provide_local_information_qualifier` (echoed request type) | The rich-payload handler keeps populating `imei`, `imeisv`, `language`, `date_time_timezone`, `location_information`, `battery_state`, `access_technology`. |
 
-### Additional USIM EFs
+### Additional USIM EFs (round 18)
 
 Three more attach-relevant EFs are now seeded under `ADF.USIM` so
 the modem stops getting `6A 82` on the early PLMN-selection /
@@ -1121,9 +1481,9 @@ network-parameter reads:
 | `6FC4` | EF.NETPAR | TS 31.102 §4.2.34. 16-byte transparent body for cached network parameters. Default all-FF (no cached state). |
 | `6FDC` | EF.LRPLMNSI | TS 31.102 §4.2.86. One byte. Default `0x00` = first attempt after power on (modem will run a full PLMN scan). |
 
-### Event-download apply-side latches
+### Event-download apply-side latches (round 17)
 
-wires four spec-anchored event downloads that previously
+Round-17 wires four spec-anchored event downloads that previously
 only got as far as parsing -- their decoded TLVs never reached the
 apply layer. The parser now extracts Frames Information (`49` /
 `C9`) and Card Reader Status (`A0` / `20`) directly off the `D6`
@@ -1142,9 +1502,9 @@ The `0x09` overlay accepts envelopes that carry both
 overloads the same opcode for both purposes does not lose either
 side of the dispatch.
 
-### User-input proactive TR latches
+### User-input proactive TR latches (round 16)
 
-closes the user-facing STK proactive TR-side gaps. The
+Round-16 closes the user-facing STK proactive TR-side gaps. The
 parser now extracts the Text String TLV (`0D` / `8D`) and the
 Item Identifier TLV (`10` / `90`) from terminal responses, and
 six previously-queueable proactives gained dedicated latches:
@@ -1162,9 +1522,9 @@ The Text String decoder honours the standard DCS bytes:
 `0x00` / `0x04` 8-bit ASCII, `0x08` UCS-2/BE, falling back to a
 best-effort UTF-8 decode for vendor-specific values.
 
-### Voice / SMS USIM EFs
+### Voice / SMS USIM EFs (round 15)
 
-finishes the attach-ready USIM EF set with the
+Round-15 finishes the attach-ready USIM EF set with the
 voicemail trio plus the subscriber MSISDN slot:
 
 | FID | Name | Structure | Encoding |
@@ -1178,7 +1538,7 @@ The combined effect: a paired modem reaching for "what's my
 phone number / where's my voicemail / are there waiting
 messages?" gets deterministic stub values instead of `6A 82`.
 
-### REFRESH / SET UP CALL TR latches
+### REFRESH / SET UP CALL TR latches (round 15)
 
 Two more long-standing TR-side gaps closed:
 
@@ -1194,10 +1554,10 @@ SET UP CALL stores the cause blob so a follow-up applet can
 distinguish "user busy" from "network busy" without re-queueing
 the proactive.
 
-### Additional USIM EFs
+### Additional USIM EFs (round 14)
 
-The blank simulator ships these as standard for an attach-ready
-ADF.USIM image:
+Round-14 closes a pair of long-standing gaps in the attach-ready
+ADF.USIM image. A blank simulator now ships these as standard:
 
 | FID | Name | Structure | Encoding |
 | --- | --- | --- | --- |
@@ -1206,17 +1566,17 @@ ADF.USIM image:
 | `6F42` | EF.SMSP | linear-fixed | TS 31.102 §4.2.27 SMS Parameters. One 40-byte slot: 12-byte alpha + parameter-indicators (`FF`) + 12-byte destination + 12-byte SC + PID + DCS + Validity, all initialised to `FF` so the modem is free to UPDATE RECORD. |
 | `6F43` | EF.SMSS | transparent | TS 31.102 §4.2.9 SMS Status. Two bytes: TP-MR=`00` and memory-capacity flag=`FF` (no capacity-exceeded notification owed). |
 
-Modems that would otherwise fall back to "no GID" or "no SMSP"
-paths read deterministic stub values; tests that exercise SMS-MO
+Modems that previously fell back to "no GID" or "no SMSP" paths
+now read deterministic stub values; tests that exercise SMS-MO
 flows can UPDATE RECORD into EF.SMSP without first having to
 seed the EF themselves.
 
-### LAUNCH BROWSER TR latch
+### LAUNCH BROWSER TR latch (round 14)
 
 ETSI TS 102 223 §6.6.21 ``LAUNCH BROWSER`` only echoes a result
 code on the TR side -- the follow-on browser-termination cause
 arrives separately as event `0x07` (already wired to
-`last_browser_termination_cause`). earlier work adds an independent
+`last_browser_termination_cause`). Round-14 adds an independent
 result latch:
 
 | Proactive | Result attribute | Notes |
@@ -1229,11 +1589,11 @@ launch result) from "browser ran and the user closed it later"
 (launch result `0x00`, termination cause set when the BROWSER
 TERMINATION envelope arrives).
 
-### Terminal Capability TLV decode
+### Terminal Capability TLV decode (round 13)
 
 ETSI TS 102 221 §11.1.19 ``TERMINAL CAPABILITY`` (CLA=0x80,
 INS=0xAA) carries a sequence of optional COMPREHENSION-TLV
-items describing terminal-side support. earlier work decodes the
+items describing terminal-side support. Round-13 decodes the
 well-known sub-tags into dedicated ``state.toolkit`` fields so
 an applet / test can answer "does the terminal advertise
 extended logical channels?" without walking the raw blob list:
@@ -1250,9 +1610,9 @@ The raw payload is still appended to ``terminal_capabilities``
 so existing introspection paths keep working. Truncated TLVs
 abort the loop without crashing the dispatcher.
 
-### Additional ISIM EFs
+### Additional ISIM EFs (round 13)
 
-augments the ADF.ISIM tree (FID `7FF2`) with two more
+Round-13 augments the ADF.ISIM tree (FID `7FF2`) with two more
 spec-mandated EFs:
 
 | FID | Name | Structure | Encoding |
@@ -1264,11 +1624,11 @@ The new EFs are registered for both fresh boots and downloaded
 profiles, so a paired modem can run IMS bootstrap without
 external provisioning.
 
-### MORE TIME / POLL INTERVAL TR latches
+### MORE TIME / POLL INTERVAL TR latches (round 13)
 
 ETSI TS 102 223 §6.4.2 ``MORE TIME`` and §6.4.3 ``POLL INTERVAL``
 were already queueable but lacked dedicated TR-side handlers.
-wires both:
+Round-13 wires both:
 
 | Proactive | Result attribute | Payload attribute |
 | --- | --- | --- |
@@ -1281,11 +1641,11 @@ tenths-of-second. Failed TRs reset the duration cache so a
 subsequent test can distinguish "terminal accepted some
 cadence" from "terminal rejected the request".
 
-### IMS AKA via `AUTHENTICATE` P2=0x82
+### IMS AKA via `AUTHENTICATE` P2=0x82 (round 12)
 
 3GPP TS 31.103 §7.1 specifies that the ISIM application performs
 its own AKA challenge/response under the same Milenage parameters
-as the USIM. earlier work wires `internal_authenticate(p2=0x82, ...)`
+as the USIM. Round-12 wires `internal_authenticate(p2=0x82, ...)`
 in `SIMCARD/auth.py` so it delegates to `_run_usim_authentication`
 verbatim:
 
@@ -1296,9 +1656,9 @@ verbatim:
   challenge handling without a custom carve-out.
 - Unknown P2 values still return `6A 86`.
 
-### ISIM EFs
+### ISIM EFs (round 12)
 
-augments the ADF.ISIM tree (FID `7FF2`, AID
+Round-12 augments the ADF.ISIM tree (FID `7FF2`, AID
 `A0000000871004FF86FF112233445566`) with the three EFs that the
 IMS layer of a paired modem expects to read at registration time:
 
@@ -1313,7 +1673,7 @@ These EFs are part of the default profile image, so a fresh
 simulator boot already exposes them without requiring custom
 provisioning JSON.
 
-### Call-lifecycle event downloads
+### Call-lifecycle event downloads (round 12)
 
 `_handle_event_download` now decodes the three TS 102 223 §7.4.0
 .. §7.4.2 call events:
@@ -1327,7 +1687,7 @@ provisioning JSON.
 A polling STK applet can therefore correlate the full call cycle
 without scraping `event_history`.
 
-### Misc event downloads
+### Misc event downloads (round 12)
 
 | Event code | Behaviour |
 | --- | --- |
@@ -1335,9 +1695,9 @@ without scraping `event_history`.
 | `0x0D` Access Technology Change | `state.toolkit.last_access_technology` caches the new RAT byte (TS 102 223 §8.61: `0x00` GSM, `0x03` UTRAN, `0x08` E-UTRAN, `0x0A` NG-RAN). `access_technology_changes` increments only when the value actually changed. The COMPREHENSION-TLV tag `3F` / `BF` is read by a dedicated single-byte / single-length scanner because the BER walker would otherwise mis-parse it as a multi-byte tag (TS 101 220 §7.1.1.1). |
 | `0x0E` Display Parameters Change | `state.toolkit.last_display_parameters` caches the raw TLV `46` / `C6` payload; `display_parameters_changes` increments on every event so polling can derive a delta. |
 
-### Proactive terminal-response latches
+### Proactive terminal-response latches (round 11)
 
-The following proactives expose a dedicated TR-side latch.
+The following proactives now expose a dedicated TR-side latch.
 Each latch records the result code (TLV `83` byte 0); commands
 that carry payload TLVs additionally cache the spec field they
 return:
@@ -1353,7 +1713,7 @@ return:
 
 ### Display frames (`0x60` / `0x61`)
 
-adds the TS 102 223 §6.4.36 / §6.4.37 frame management
+Round-10 adds the TS 102 223 §6.4.36 / §6.4.37 frame management
 proactives:
 
 - `queue_set_frames(frame_identifier, frame_layout, default_frame_identifier)`
@@ -1376,7 +1736,7 @@ proactives:
 
 ### Event Download additions
 
-extends `_handle_event_download` with three event codes
+Round-8 extends `_handle_event_download` with three event codes
 from TS 102 223 §7.4.10 / §7.4.12:
 
 | Event code | Latched into |
@@ -1384,19 +1744,19 @@ from TS 102 223 §7.4.10 / §7.4.12:
 | `0x0A` SS event   | `state.toolkit.last_ss_event_data` (TLV `89` payload) |
 | `0x0B` USSD event | `state.toolkit.last_ussd_event_data` + `last_ussd_event_dcs` (TLV `8A` byte 0 = DCS, bytes 1.. = text) |
 | `0x0C` Local Connection | `state.toolkit.local_connection_active` -- True when TLV `40` byte 0 high nibble = `0x80` (established), False on `0x00` (terminated) |
-| `0x13` HCI Connectivity | `state.toolkit.hci_connectivity_active` -- shares TLV `40` decoding with Local Connection: high nibble `0x80` marks the HCI gate as connected, `0x00` as disconnected |
-| `0x16` Contactless State Request | `state.toolkit.contactless_active` -- TLV `40` high nibble `0x80` activates the contactless front-end, `0x00` deactivates it |
-| `0x18` IMS Registration | `state.toolkit.ims_registered` from TLV `B9` byte 0 (`0x01` registered, `0x00` deregistered) and `state.toolkit.last_ims_event_data` from the optional registered URI (TLV `BA`) |
-| `0x19` IMS Incoming Data | `state.toolkit.last_ims_event_data` -- IMS / SIP payload from TLV `BA` |
+| `0x13` HCI Connectivity (round-9) | `state.toolkit.hci_connectivity_active` -- shares TLV `40` decoding with Local Connection: high nibble `0x80` marks the HCI gate as connected, `0x00` as disconnected |
+| `0x16` Contactless State Request (round-10) | `state.toolkit.contactless_active` -- TLV `40` high nibble `0x80` activates the contactless front-end, `0x00` deactivates it |
+| `0x18` IMS Registration (round-10) | `state.toolkit.ims_registered` from TLV `B9` byte 0 (`0x01` registered, `0x00` deregistered) and `state.toolkit.last_ims_event_data` from the optional registered URI (TLV `BA`) |
+| `0x19` IMS Incoming Data (round-10) | `state.toolkit.last_ims_event_data` -- IMS / SIP payload from TLV `BA` |
 
 `last_event_code` is still the most recently observed event so
 existing telemetry that polls a single field keeps working.
 
-### RUN AT COMMAND terminal-response latch
+### RUN AT COMMAND terminal-response latch (round-9)
 
 `ToolkitLogic.queue_run_at_command` already sends the proactive
 command (TS 102 223 §6.4.16, type `0x34`) with the AT string under
-TLV `A8`. earlier work wires the matching TR-side decode: the AT
+TLV `A8`. Round-9 wires the matching TR-side decode: the AT
 Response (TLV `A9` / context-specific `29`) is parsed into
 `response_fields["at_response"]` and dispatched to
 `_apply_run_at_command_response`. On success the bytes are cached
@@ -1446,6 +1806,10 @@ modules:
 | `SIMCARD/akma.py` | TS 33.535 `K_AKMA` / `A-KID` derivation |
 | `SIMCARD/suci.py` | TS 33.501 §C.3 SUCI Profile A and Profile B encoders |
 | `SIMCARD/identity.py` | TS 31.102 §7.1.2.4 `GET IDENTITY` SUCI build path |
+
+The complementary network-side AUSF / AAnF surfaces are out of scope
+for this release; this release ships the SIM-side primitives only.
+Operators who need a network-side counterpart wire it up themselves.
 
 ## Identity files
 

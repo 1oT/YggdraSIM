@@ -84,7 +84,7 @@ class _SimulatorEimLoopbackBase(unittest.TestCase):
                 {
                     "eim_id": "2.25.311782205282738360923618091971140414400",
                     "eim_id_type": "oid",
-                    "eim_fqdn": "eim.yggdrasim.example.test",
+                    "eim_fqdn": "eim.example.test",
                     "counter_value": 0,
                     "association_token": -1,
                     "supported_protocol_bits": [0],
@@ -143,8 +143,8 @@ class _SimulatorEimLoopbackBase(unittest.TestCase):
 
 
 class IsdrDiscoveryAgainstSimulatorTests(_SimulatorEimLoopbackBase):
-    """Confirm discover_card() crosses every BFxx surface the eIM relies
-    on and gets a parseable answer."""
+    """Confirm discover_card() crosses every BFxx surface the eIM
+    relies on and gets a parseable answer."""
 
     def test_select_isdr_returns_9000_against_simulator(self) -> None:
         session = self._build_session()
@@ -320,7 +320,7 @@ class AddInitialEimAgainstSimulatorTests(_SimulatorEimLoopbackBase):
         # AddInitialEim STORE DATA round-trip.
         session.select_isdr()
 
-        # Read the baseline eIM list from the simulator so the test can
+        # Read the baseline eIM list from the simulator so we can
         # diff correctly even if the simulator pre-seeded a default
         # entry.
         baseline_bf55 = session.get_eim_configuration_data()

@@ -1,3 +1,4 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 # -----------------------------------------------------------------------------
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -12,7 +13,7 @@
 # You should have received a copy of the GNU General Public License
 # along with this program. If not, see <https://www.gnu.org/licenses/>.
 #
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+# Copyright (c) 2026 1oT OU. Authored by Hampus Hellsberg.
 # -----------------------------------------------------------------------------
 
 """Process-wide APDU exchange recorder.
@@ -24,7 +25,7 @@ display the full live trace without each call site having to opt in.
 Subscribers may be either:
 
 * **synchronous callables** invoked on the recorder thread (typically
-  the FastAPI worker thread that dispatched the action) -- keep them
+  the FastAPI worker thread that dispatched the action) — keep them
   fast, they run inside the same lock that the wire-level transmit
   call holds; or
 * **asyncio.Queue** instances attached via :meth:`attach_queue`, used
@@ -75,6 +76,7 @@ class ApduExchange:
     direction: str = "out"
 
     def to_json(self) -> dict[str, Any]:
+        """Serialise the recorded APDU session to a JSON-compatible dict."""
         return {
             "ts": self.ts,
             "source": self.source,
@@ -104,7 +106,7 @@ class _ApduRecorder:
         """Append *exchange* to the buffer and fan it out to subscribers.
 
         Sync callbacks that raise are swallowed and counted under
-        :pyattr:`dropped`; a misbehaving listener is not allowed to kill
+        :pyattr:`dropped`; we do not let a misbehaving listener kill
         the card-touching call. Async queue puts use the queue's
         owning loop via :func:`call_soon_threadsafe` so cross-thread
         emits stay loop-safe.
@@ -117,7 +119,7 @@ class _ApduRecorder:
         for fn in sync_subs:
             try:
                 fn(exchange)
-            except Exception:  # noqa: BLE001 -- never trust subscribers
+            except Exception:  # noqa: BLE001 — never trust subscribers
                 self._dropped += 1
 
         for queue, loop in async_queues:
@@ -132,7 +134,7 @@ class _ApduRecorder:
         try:
             queue.put_nowait(exchange)
         except asyncio.QueueFull:
-            # Slow consumer -- drop oldest by pulling and re-pushing.
+            # Slow consumer — drop oldest by pulling and re-pushing.
             try:
                 _ = queue.get_nowait()
                 queue.put_nowait(exchange)
@@ -143,6 +145,7 @@ class _ApduRecorder:
     def subscribe(
         self, fn: Callable[[ApduExchange], None]
     ) -> Callable[[], None]:
+        """Register a callback to receive new APDU events in real time."""
         with self._lock:
             self._sync_subs.append(fn)
 
@@ -210,8 +213,8 @@ def wrap_connection(connection: Any, *, source: str = "card") -> Any:
     """Monkey-patch ``connection.transmit`` to record every APDU.
 
     The wrapper is idempotent (calling it twice on the same connection
-    is a no-op). It preserves the original ``transmit`` semantics --
-    return value, raised exceptions, kwargs -- and adds a single side
+    is a no-op). It preserves the original ``transmit`` semantics —
+    return value, raised exceptions, kwargs — and adds a single side
     effect: every successful response and every raised exception
     appends one :class:`ApduExchange` to the global recorder.
 
@@ -234,7 +237,7 @@ def wrap_connection(connection: Any, *, source: str = "card") -> Any:
     def _traced(apdu, *args, **kwargs):
         try:
             apdu_bytes = bytes(apdu)
-        except Exception:  # noqa: BLE001 -- exotic apdu shapes
+        except Exception:  # noqa: BLE001 — exotic apdu shapes
             apdu_bytes = b""
 
         start = time.perf_counter()
@@ -256,7 +259,7 @@ def wrap_connection(connection: Any, *, source: str = "card") -> Any:
         elapsed_ms = (time.perf_counter() - start) * 1000.0
         try:
             data_bytes = bytes(data) if data else b""
-        except Exception:  # noqa: BLE001 -- pyscard returns list[int]
+        except Exception:  # noqa: BLE001 — pyscard returns list[int]
             data_bytes = bytes(list(data)) if data else b""
         exchange = ApduExchange(
             ts=datetime.now(timezone.utc).timestamp(),

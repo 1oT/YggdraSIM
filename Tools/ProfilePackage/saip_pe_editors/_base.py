@@ -192,7 +192,7 @@ def rebuild_pe_with_header(
 ) -> dict[str, Any]:
     """Return a copy of ``pe_value`` with its header replaced.
 
-    Preserves the original member ordering -- the header is updated in
+    Preserves the original member ordering — the header is updated in
     place if present, otherwise inserted at the start. Other members
     are deep-copied so the caller can mutate the result without
     affecting the source document.

@@ -6,9 +6,9 @@ default_md = sha256
 x509_extensions = v3_eim
 
 [ req_dn ]
-C = XX
-ST = TestState
-L = TestLocality
+C = SE
+ST = Stockholm
+L = Stockholm
 O = YggdraSIM
 OU = eSIM Simulator
 CN = YggdraSIM.eSIM.Simulator.Cert

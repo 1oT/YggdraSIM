@@ -15,6 +15,7 @@
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 # -----------------------------------------------------------------------------
 
+"""SCP03 response decoders: converts raw EF hex strings to structured Python dicts."""
 import json 
 from typing import Dict ,Any ,Iterable ,List ,Optional 
 from SCP03 .core .utils import TlvParser 
@@ -31,6 +32,10 @@ except ImportError :
 class AdvancedDecoders :
     @staticmethod 
     def decode_ef_arr (data_hex :str )->list :
+        """Decode EF.ARR access rule records from raw hex (ETSI TS 102 221 §9.5.1).
+
+        Walks AM/SC TLV pairs and returns a list of human-readable rule strings.
+        """
         if not data_hex :
             return ["Empty/Invalid Rule"]
         if data_hex .startswith ('FF'):
@@ -533,6 +538,10 @@ class AdvancedDecoders :
 
     @staticmethod 
     def decode_plmn_list (data_hex :str )->list :
+        """Decode a PLMN list EF to a list of PLMN dicts (3GPP TS 31.102 §4.2.5).
+
+        Each entry carries mcc, mnc, and optional Access Technology bitmask.
+        """
         if not data_hex :
             return ["Empty List"]
 
@@ -600,6 +609,10 @@ class AdvancedDecoders :
 
     @staticmethod 
     def decode_loci (data_hex :str )->dict :
+        """Decode EF.LOCI: Location Information (3GPP TS 31.102 §4.2.16).
+
+        Returns TMSI, LAI components, update-status, and raw hex fallback.
+        """
         try :
             data =bytes .fromhex (data_hex )
         except Exception :
@@ -639,7 +652,12 @@ class AdvancedDecoders :
 
     @staticmethod 
     def decode_ust (data_hex :str )->dict :
-        # 3GPP TS 31.102 §4.2.8 -- USIM Service Table. Each bit is a
+        """Decode EF.UST: USIM Service Table bitfield (3GPP TS 31.102 §4.2.8).
+
+        Splits bits into active and not-set service lists; includes all 256 possible
+        service numbers so the GUI can render a complete checklist.
+        """
+        # 3GPP TS 31.102 §4.2.8 — USIM Service Table. Each bit is a
         # service flag; the file body is the bitmap. Operators asked to
         # see *not-set* services too so the GUI can render a checklist
         # style view (active vs. available-but-disabled) rather than
@@ -706,6 +724,11 @@ class AdvancedDecoders :
     total_bytes :Optional [int ]=None ,
     current_hex :Optional [str ]=None ,
     )->str :
+        """Re-encode a service-table bitfield from an iterable of active bit positions.
+
+        Uses *current_hex* to preserve the existing byte width when possible;
+        falls back to *total_bytes* or the minimum width that covers all set bits.
+        """
         # Resolve the EF body length. ``total_bytes`` wins; otherwise
         # we infer it from the current hex (so callers staging an edit
         # on an existing EF can omit it). When neither is present we
@@ -724,7 +747,7 @@ class AdvancedDecoders :
             bit_idx =(service_num -1 )%8 
             if byte_idx >=len (buf ):
                 # Caller wants to set a service beyond the current
-                # body -- extend the buffer rather than silently dropping
+                # body — extend the buffer rather than silently dropping
                 # the bit. Cards reject oversized payloads at UPDATE
                 # time, but for staging we want the operator to *see*
                 # the resulting size before submitting.
@@ -792,6 +815,11 @@ class ContentDecoder :
 
     @classmethod 
     def init_registry (cls ):
+        """Populate the FID-to-decoder dispatch table on first access.
+
+        Maps every supported elementary-file FID (string, upper-case) to the
+        corresponding static decoder method on this class.
+        """
         cls ._registry ={
         '2FE2':cls .decode_iccid ,
         '2F00':cls .decode_dir ,
@@ -1014,6 +1042,10 @@ class ContentDecoder :
 
     @staticmethod 
     def decode_language_indicators (hex_str :str )->dict :
+        """Decode EF.LI / EF.PL: Language Indication (ETSI TS 102 221 §13.1).
+
+        Returns a list of ISO 639-1 two-character language codes.
+        """
         try :
             data =bytes .fromhex (hex_str )
             langs =[]
@@ -1030,6 +1062,10 @@ class ContentDecoder :
 
     @staticmethod 
     def decode_service_table_bits (hex_str :str )->dict :
+        """Decode a generic service-table EF to active / not-set service number lists.
+
+        Used for EFs without a named-service map (e.g. EF.PSISMSC, V2X service tables).
+        """
         # Generic anonymous service-table decoder used by EF_PSISMSC,
         # MCS / V2X / A2X service-table EFs, etc. Without a name map
         # the rows are pure service numbers, but the active/inactive
@@ -1048,6 +1084,10 @@ class ContentDecoder :
 
     @staticmethod 
     def decode_cbmi_list (hex_str :str )->dict :
+        """Decode EF.CBMI: Cell Broadcast Message Identifier list (3GPP TS 31.102 §4.2.14).
+
+        Returns a list of 16-bit message identifier integers.
+        """
         try :
             data =bytes .fromhex (hex_str )
             ids =[]
@@ -1064,6 +1104,10 @@ class ContentDecoder :
 
     @staticmethod 
     def decode_cbmid_range_list (hex_str :str )->dict :
+        """Decode EF.CBMIR: Cell Broadcast Message Identifier Range list (3GPP TS 31.102 §4.2.22).
+
+        Returns a list of from/to range pairs.
+        """
         try :
             data =bytes .fromhex (hex_str )
             ranges =[]
@@ -1108,6 +1152,10 @@ class ContentDecoder :
 
     @staticmethod 
     def decode_spn (hex_str :str )->dict :
+        """Decode EF.SPN: Service Provider Name (3GPP TS 31.102 §4.2.12).
+
+        Returns display-condition byte and the UTF-8-decoded provider name.
+        """
         try :
             valid =False 
             if hex_str :
@@ -1121,6 +1169,10 @@ class ContentDecoder :
 
     @classmethod 
     def decode_raw (cls ,fid :str ,hex_data :str ,context_path :Optional [str ]=None )->Any :
+        """Look up the decoder for *fid* and return its raw Python output.
+
+        Returns ``None`` when no decoder is registered for the given FID.
+        """
         if not fid :
             return None 
         fid_upper =fid .upper ()
@@ -1138,6 +1190,11 @@ class ContentDecoder :
 
     @classmethod 
     def decode (cls ,fid :str ,hex_data :str ,context_path :Optional [str ]=None )->Optional [str ]:
+        """Decode *hex_data* for *fid* and return a JSON-serialisable string.
+
+        Formats the raw decoder output as a pretty-printed JSON string;
+        returns ``None`` when no decoder is registered.
+        """
         raw =cls .decode_raw (fid ,hex_data ,context_path =context_path )
         if raw is None :
             return None 
@@ -1161,6 +1218,10 @@ class ContentDecoder :
 
     @classmethod 
     def decode_obj (cls ,fid :str ,hex_data :str ,context_path :Optional [str ]=None )->Optional [Dict [str ,Any ]]:
+        """Decode *hex_data* for *fid* and return the raw Python dict or list.
+
+        Returns ``None`` when no decoder is registered for *fid*.
+        """
         raw =cls .decode_raw (fid ,hex_data ,context_path =context_path )
         if raw is None :
             return None 
@@ -1181,6 +1242,10 @@ class ContentDecoder :
 
     @staticmethod 
     def decode_acc (hex_str :str )->dict :
+        """Decode EF.ACC: Access Control Class bitmask (3GPP TS 31.102 §4.2.15).
+
+        Returns the 16-bit raw value and a list of class labels for each set bit.
+        """
         try :
             val =int (hex_str ,16 )
             classes =[]
@@ -1193,6 +1258,10 @@ class ContentDecoder :
 
     @staticmethod 
     def decode_dir (hex_str :str )->dict :
+        """Decode EF.DIR: Application Directory records (ISO 7816-4 §8.3).
+
+        Returns a list of AID hex strings; empty entries (all-FF) are skipped.
+        """
         try :
             is_empty =True 
             for c in hex_str :
@@ -1223,6 +1292,10 @@ class ContentDecoder :
 
     @staticmethod 
     def decode_msisdn (hex_str :str )->dict :
+        """Decode EF.MSISDN: Mobile Station ISDN Number record (3GPP TS 31.102 §4.2.26).
+
+        Returns alphanumeric-tag, TON/NPI, dialling digits, and capability/extension.
+        """
         try :
             is_empty =True 
             for c in hex_str :
@@ -1263,6 +1336,10 @@ class ContentDecoder :
 
     @staticmethod 
     def decode_iccid (hex_str :str )->dict :
+        """Decode EF.ICCID: Integrated Circuit Card ID (ETSI TS 102 221 §13.2).
+
+        Nibble-swaps each byte pair to recover the E.118 BCD-encoded serial number.
+        """
         try :
             res =[]
             for i in range (0 ,len (hex_str ),2 ):
@@ -1273,6 +1350,10 @@ class ContentDecoder :
 
     @staticmethod 
     def decode_imsi (hex_str :str )->dict :
+        """Decode EF.IMSI: International Mobile Subscriber Identity (3GPP TS 31.102 §4.2.2).
+
+        Strips the length byte and ODD/EVEN parity nibble; returns the 15-digit IMSI string.
+        """
         try :
             imsi_hex =hex_str [2 :]
             res =[imsi_hex [1 ]]
@@ -1284,6 +1365,10 @@ class ContentDecoder :
 
     @staticmethod 
     def decode_ad (hex_str :str )->dict :
+        """Decode EF.AD: Administrative Data (3GPP TS 31.102 §4.2.18).
+
+        Returns the administrative mode code, MNC length, and raw AD bytes.
+        """
         try :
             mode =int (hex_str [0 :2 ],16 )
             m_map ={0 :"Normal",1 :"Type Approval",2 :"Normal/Internal",4 :"Normal/Internal",128 :"Proprietary"}
@@ -1294,6 +1379,10 @@ class ContentDecoder :
 
     @staticmethod 
     def decode_sms_params (hex_str :str )->dict :
+        """Decode EF.SMSP: SMS Parameters record (3GPP TS 23.040 §9.2.12).
+
+        Returns indicator flags, SMSC address, destination address, protocol ID, and DCS.
+        """
         try :
             data =bytes .fromhex (hex_str )
             if len (data )<12 :
@@ -1321,6 +1410,10 @@ class ContentDecoder :
 
     @staticmethod 
     def decode_puct (hex_str :str )->dict :
+        """Decode EF.PUCT: Price per Unit and Currency Table (3GPP TS 31.102 §4.2.30).
+
+        Returns currency string, price-per-unit mantissa/exponent, and raw bytes.
+        """
         try :
             data =bytes .fromhex (hex_str )
             if len (data )<5 :
@@ -1341,6 +1434,10 @@ class ContentDecoder :
 
     @staticmethod 
     def decode_ecc (hex_str :str )->dict :
+        """Decode EF.ECC: Emergency Call Codes (3GPP TS 31.102 §4.2.27).
+
+        Returns a list of dicts with emergency code digits and category bitmask.
+        """
         try :
             data =bytes .fromhex (hex_str )
             codes =[]
@@ -1359,6 +1456,10 @@ class ContentDecoder :
 
     @staticmethod 
     def decode_adn_like_record (hex_str :str )->dict :
+        """Decode an ADN-like linear-fixed record (EF.ADN, EF.FDN, EF.SDN).
+
+        Returns alpha-identifier, TON/NPI, dialling digits, CCP, and extension pointer.
+        """
         try :
             data =bytes .fromhex (hex_str )
             if len (data )<14 :
@@ -1390,6 +1491,10 @@ class ContentDecoder :
 
     @staticmethod 
     def decode_smss (hex_str :str )->dict :
+        """Decode EF.SMSS: SMS Status (3GPP TS 31.102 §4.2.39).
+
+        Returns SMS full flag and memory capacity exceeded indicator.
+        """
         try :
             data =bytes .fromhex (hex_str )
             if len (data )<2 :
@@ -1404,6 +1509,11 @@ class ContentDecoder :
 
     @staticmethod 
     def decode_sms_record (hex_str :str )->dict :
+        """Decode a single EF.SMS record (3GPP TS 31.102 §4.2.25).
+
+        Returns record status, message type indicator, originating/destination address,
+        and raw payload hex.
+        """
         try :
             data =bytes .fromhex (hex_str )
             if len (data )==0 :
@@ -1434,6 +1544,10 @@ class ContentDecoder :
 
     @staticmethod 
     def decode_smsr (hex_str :str )->dict :
+        """Decode EF.SMSR: SMS Report record (3GPP TS 31.102 §4.2.40).
+
+        Returns record status, SMS reference, and discharge-time string.
+        """
         try :
             data =bytes .fromhex (hex_str )
             if len (data )<1 :
@@ -1447,6 +1561,10 @@ class ContentDecoder :
 
     @staticmethod 
     def decode_pnn (hex_str :str )->dict :
+        """Decode EF.PNN: PLMN Network Name record (3GPP TS 31.102 §4.2.58).
+
+        Returns full-name and short-name strings decoded from TLV 0x43/0x45.
+        """
         try :
             data =bytes .fromhex (hex_str )
             if len (data )==0 :
@@ -1470,6 +1588,10 @@ class ContentDecoder :
 
     @staticmethod 
     def decode_opl (hex_str :str )->dict :
+        """Decode EF.OPL: Operator PLMN List record (3GPP TS 31.102 §4.2.59).
+
+        Returns PLMN, LAC range, and PNN record number for each 8-byte record.
+        """
         try :
             data =bytes .fromhex (hex_str )
             if len (data )<8 :
@@ -1489,6 +1611,10 @@ class ContentDecoder :
 
     @staticmethod 
     def decode_spdi (hex_str :str )->dict :
+        """Decode EF.SPDI: Service Provider Display Information (3GPP TS 31.102 §4.2.66).
+
+        Returns a list of PLMN strings from the 0xA3/0x80 TLV structure.
+        """
         try :
             data =bytes .fromhex (hex_str )
             parsed =TlvParser .parse (data )
@@ -1511,6 +1637,10 @@ class ContentDecoder :
 
     @staticmethod 
     def decode_epsnsc (hex_str :str )->dict :
+        """Decode EF.EPSNSC: EPS NAS Security Context (3GPP TS 31.102 §4.4.11.2).
+
+        Returns KSI/ASME, UL/DL NAS counts, and raw context bytes.
+        """
         try :
             data =bytes .fromhex (hex_str )
             out ={"Raw":hex_str }
@@ -1526,6 +1656,10 @@ class ContentDecoder :
 
     @staticmethod 
     def decode_gbanl (hex_str :str )->dict :
+        """Decode EF.GBANL: GBA NAF List (3GPP TS 31.102 §4.4.4).
+
+        Returns NAF FQDN/IMPI pair from the 0x80/0x81 TLV structure.
+        """
         try :
             data =bytes .fromhex (hex_str )
             parsed =TlvParser .parse (data )
@@ -1542,6 +1676,10 @@ class ContentDecoder :
 
     @staticmethod 
     def decode_nafkca (hex_str :str )->dict :
+        """Decode EF.NAFKCA: NAF Key Centre Address (3GPP TS 31.102 §4.4.5).
+
+        Returns the NAF key centre address string from TLV tag 0x80.
+        """
         try :
             data =bytes .fromhex (hex_str )
             parsed =TlvParser .parse (data )
@@ -1557,6 +1695,10 @@ class ContentDecoder :
 
     @staticmethod 
     def decode_isim_tlv80_text (hex_str :str )->dict :
+        """Decode an ISIM TLV tag-0x80 UTF-8 text field (3GPP TS 31.103 generic).
+
+        Returns the decoded string; used by EF.IMPI, EF.DOMAIN, and EF.REALM.
+        """
         try :
             data =bytes .fromhex (hex_str )
             parsed =TlvParser .parse (data )
@@ -1570,7 +1712,11 @@ class ContentDecoder :
 
     @staticmethod 
     def decode_isim_ist (hex_str :str )->dict :
-        # 3GPP TS 31.103 §4.2.7 -- ISIM Service Table. Mirrors the UST
+        """Decode EF.IST: ISIM Service Table (3GPP TS 31.103 §4.2.7).
+
+        Returns active and not-set service-number lists; mirrors UST layout.
+        """
+        # 3GPP TS 31.103 §4.2.7 — ISIM Service Table. Mirrors the UST
         # split so operators see active *and* not-set services in the
         # decoded view.
         try :
@@ -1612,6 +1758,10 @@ class ContentDecoder :
 
     @staticmethod 
     def decode_isim_pcscf (hex_str :str )->dict :
+        """Decode EF.PCSCF: P-CSCF Address List (3GPP TS 31.103 §4.2.8).
+
+        Returns a list of P-CSCF addresses extracted from TLV tag-0x80 records.
+        """
         try :
             data =bytes .fromhex (hex_str )
             parsed =TlvParser .parse (data )
@@ -1631,6 +1781,10 @@ class ContentDecoder :
 
     @staticmethod 
     def decode_tlv_as_map (hex_str :str )->dict :
+        """Decode a generic BER-TLV hex blob into a nested tag-value map.
+
+        Used for EFs that carry TLV structures without a dedicated decoder.
+        """
         try :
             data =bytes .fromhex (hex_str )
             parsed =TlvParser .parse (data )
@@ -1709,6 +1863,11 @@ class ContentDecoder :
 
     @staticmethod 
     def decode_pkcs15_odf (hex_str :str )->list :
+        """Decode PKCS #15 EF.ODF: Object Directory File (ISO 7816-15 §6.7.4).
+
+        Returns a list of PKCS-15 object-class dicts, each carrying the DER-encoded
+        ObjectDirectoryFile path pointing to the respective EF.
+        """
         try :
             raw =bytes .fromhex (hex_str )
         except Exception :
@@ -1751,6 +1910,10 @@ class ContentDecoder :
 
     @staticmethod 
     def decode_pkcs15_dodf (hex_str :str )->list :
+        """Decode PKCS #15 EF.DODF: Data Objects Directory File (ISO 7816-15 §7.5).
+
+        Returns a list of data-object path records parsed from the SEQUENCE OF DODF structure.
+        """
         try :
             raw =bytes .fromhex (hex_str )
         except Exception :
@@ -1808,6 +1971,10 @@ class ContentDecoder :
 
     @staticmethod 
     def decode_pkcs15_acm (hex_str :str )->list :
+        """Decode PKCS #15 EF.ACM: Authentication Certificate Mapping (ISO 7816-15 §7.4.2).
+
+        Returns a list of cert-path / key-ref mapping entries.
+        """
         try :
             raw =bytes .fromhex (hex_str )
         except Exception :
@@ -1835,6 +2002,11 @@ class ContentDecoder :
 
     @staticmethod 
     def decode_pkcs15_acrf_json (hex_str :str )->list :
+        """Decode PKCS #15 EF.ACRF: Access Control Rule File (GlobalPlatform SEAC §5.2).
+
+        Parses REF-DO and AR-DO TLV structures and returns a flat list of JSON-serialisable
+        access-rule dicts.
+        """
         try :
             raw =bytes .fromhex (hex_str )
         except Exception :
@@ -1900,6 +2072,10 @@ class ContentDecoder :
 
     @staticmethod 
     def decode_pkcs15_accf_json (hex_str :str )->list :
+        """Decode PKCS #15 EF.ACCF: Access Control Conditions File (GlobalPlatform SEAC §5.3).
+
+        Returns a list of device-application condition objects from the ACCF TLV structure.
+        """
         try :
             raw =bytes .fromhex (hex_str )
         except Exception :
@@ -1930,6 +2106,10 @@ class ContentDecoder :
 
     @staticmethod 
     def decode_5gs_loci (hex_str :str )->dict :
+        """Decode EF.5GLOCI: 5GS Location Information (3GPP TS 31.102 §4.4.11.9).
+
+        Returns GUTI components (MCC/MNC/AMF-ID/5G-TMSI), TAI, and update status.
+        """
         try :
             data =bytes .fromhex (hex_str )
             out ={"Raw":hex_str }
@@ -1943,6 +2123,10 @@ class ContentDecoder :
 
     @staticmethod 
     def decode_5gs_nsc (hex_str :str )->dict :
+        """Decode EF.5GS_NSC: 5GS NAS Security Context (3GPP TS 31.102 §4.4.11.3).
+
+        Returns ngKSI, UL/DL NAS counts, and raw context bytes.
+        """
         try :
             data =bytes .fromhex (hex_str )
             out ={"Raw":hex_str }
@@ -1956,6 +2140,11 @@ class ContentDecoder :
 
     @staticmethod 
     def decode_5gs_auth_keys (hex_str :str )->dict :
+        """Decode EF.5GAUTHKEYS: 5G Authentication Keys (3GPP TS 31.102 §4.4.11.5).
+
+        Returns the key blob length and raw hex; keys are security-sensitive and
+        not further decomposed.
+        """
         try :
             data =bytes .fromhex (hex_str )
             return {
@@ -1967,6 +2156,10 @@ class ContentDecoder :
 
     @staticmethod 
     def decode_5gs_uac_aic (hex_str :str )->dict :
+        """Decode EF.UAC_AIC: Unified Access Control Access Identities Configuration (3GPP TS 31.102 §4.4.11.6).
+
+        Returns per-access-identity category bitmask and AI list.
+        """
         try :
             data =bytes .fromhex (hex_str )
             if len (data )==0 :
@@ -1982,6 +2175,10 @@ class ContentDecoder :
 
     @staticmethod 
     def decode_routing_indicator (hex_str :str )->dict :
+        """Decode EF.RI: Routing Indicator (3GPP TS 31.102 §4.4.11.8).
+
+        Returns BCD-decoded routing indicator digits and raw hex.
+        """
         try :
             data =bytes .fromhex (hex_str )
             digits =ContentDecoder ._decode_bcd_digits (data )
@@ -1991,6 +2188,10 @@ class ContentDecoder :
 
     @staticmethod 
     def decode_5gs_sor_cmci (hex_str :str )->dict :
+        """Decode EF.SOR-CMCI: Steering of Roaming – Connected-Mode Control Information (3GPP TS 31.102 §4.4.11.11).
+
+        Returns the SOR-MAC-IAUSF, counter, and PLMN list entries.
+        """
         try :
             data =bytes .fromhex (hex_str )
             if len (data )==0 :
@@ -2004,6 +2205,10 @@ class ContentDecoder :
 
     @staticmethod 
     def decode_dri (hex_str :str )->dict :
+        """Decode EF.DRI: Data Routing Information (3GPP TS 31.102 §4.2.109).
+
+        Returns the TLV-encoded data-routing indicator flags and raw hex.
+        """
         try :
             data =bytes .fromhex (hex_str )
             if len (data )==0 :

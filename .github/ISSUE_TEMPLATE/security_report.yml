@@ -11,13 +11,13 @@ body:
         forgery, bypass of SCP03/11 authentication, eSIM profile
         compromise, supply chain injection), do **not** file this issue.
         Use the private path:
-        https://github.com/1oT/YggdraSIM/security/advisories/new
+        https://github.com/hampus/YggdraSIM/security/advisories/new
 
         This form is for:
         - Hardening proposals (defence-in-depth)
         - Audit findings that do not have a proof-of-concept
         - Questions about threat model and security posture
-        - Follow-ups to items already tracked in maintainer audit notes
+        - Follow-ups to items tracked in `V1_RELEASE_AUDIT.md`
 
   - type: dropdown
     id: category
@@ -49,7 +49,7 @@ body:
       label: Impact (if the gap were exploited)
       description: |
         Describe the theoretical impact. If you know of a PoC, do NOT
-        paste it here -- use Security Advisories.
+        paste it here — use Security Advisories.
     validations:
       required: true
 

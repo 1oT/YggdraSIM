@@ -1,3 +1,5 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+"""SCP11 operator console: interactive REPL exposing ES2+/ES9+ commands and profile lifecycle operations."""
 # -----------------------------------------------------------------------------
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -19,11 +21,11 @@
 
 This is the ``canonical`` SCP11 console/CLI entry point for YggdraSIM v1.
 ``SCP11/live/console.py`` and ``SCP11/test/console.py`` are ``legacy
-mirrors`` that add variant-specific defaults (live vs. test certificates
-and endpoints) on top of the same dispatcher shape. A future cleanup
-will split this module into ``console_cli``, ``console_tls_probe``, and
-``console_state``; until then, prefer changes here first and mirror the
-behaviour into the sibling variants.
+mirrors`` that add variant-specific defaults (live vs. test certificates and
+endpoints) on top of the same dispatcher shape. Audit item ``SCP11-P1-02``
+tracks splitting this module into ``console_cli``, ``console_tls_probe``,
+and ``console_state`` post v1; until then, prefer changes here first and
+mirror the behaviour into the sibling variants.
 """
 
 import atexit
@@ -38,13 +40,7 @@ from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from yggdrasim_common.card_backend import trigger_card_relay_modem_refresh
-try:
-    from yggdrasim_common.hil_bridge_runtime import hil_bridge_warning_text
-except ImportError:
-    # Clean bundles intentionally exclude ``yggdrasim_common.hil_bridge_runtime``
-    # (see yggdrasim_main.spec). The banner helper is a no-op in that case.
-    def hil_bridge_warning_text() -> str:
-        return ""
+from yggdrasim_common.hil_bridge_runtime import hil_bridge_warning_text
 from yggdrasim_common.quit_control import quit_all
 from yggdrasim_common.euicc_issuer import (
     format_ecasd_issuer_display,
@@ -209,6 +205,7 @@ class SCP11Console:
         self._setup_readline()
 
     def run(self) -> None:
+        """Start the interactive operator REPL for this SCP11 session variant."""
         try:
             self._initialize_session()
             self._activate_locked_help_pane_if_supported()
@@ -239,6 +236,7 @@ class SCP11Console:
             self._deactivate_locked_help_pane()
 
     def run_commands(self, cmd_line: str) -> None:
+        """Execute a semicolon-delimited list of operator commands non-interactively."""
         try:
             self._initialize_session()
         except Exception as error:
@@ -958,10 +956,10 @@ class SCP11Console:
 
     def _cmd_scaffold(self, command_name: str) -> bool:
         print(
-            f"{self._style.yellow}[*] {command_name} is a placeholder reserved for the "
-            f"SGP.22/SGP.32 command surface and is not wired in this build.{self._style.end}"
+            f"{self._style.yellow}[*] {command_name} is scaffolded and reserved for upcoming "
+            f"SGP.22/SGP.32 expansion.{self._style.end}"
         )
-        print(f"{self._style.yellow}[*] Use SCAN / STATUS / LIST / FLOW for the active flows.{self._style.end}")
+        print(f"{self._style.yellow}[*] Keep using SCAN / STATUS / LIST / FLOW for now.{self._style.end}")
         return True
 
     def _cmd_get_euicc_info1(self, _: str) -> bool:

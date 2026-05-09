@@ -30,7 +30,7 @@ The architecture favors:
 
 ```mermaid
 flowchart LR
-    Operator["Operator"] --> Launcher["main/main.py<br/>launcher (--card-backend, --gui, --web-server)"]
+    Operator["Operator"] --> Launcher["main/main.py<br/>launcher (--card-backend)"]
 
     Launcher --> SCP03["SCP03<br/>admin shell"]
     Launcher --> SCP80["SCP80<br/>OTA shell"]
@@ -43,7 +43,6 @@ flowchart LR
     Launcher --> Hil["Tools.HilBridge"]
     Launcher --> Fuzz["Tools.ApduFuzz"]
     Launcher --> Eum["Tools.EumDiag"]
-    Launcher --> Gui["yggdrasim_common.gui_server"]
 
     SCP03 --> Backend["card backend<br/>--card-backend reader|sim"]
     SCP80 --> Backend
@@ -62,16 +61,11 @@ flowchart LR
     Test --> Network
     EimLocal --> LocalServices["Localized eIM / SM-DP+ endpoints"]
 
+
     ProfileTool --> Files["Profile / JSON / DER files"]
     Suci --> Files
     EimLocal --> Files
 
-    Gui --> SCP03
-    Gui --> Live
-    Gui --> Local
-    Gui --> ProfileTool
-    Gui --> Sim
-    Gui --> Hil
 ```
 
 ## 3. Repository structure
@@ -89,7 +83,6 @@ flowchart TB
         SCP11["SCP11/"]
         SIMCARD["SIMCARD/"]
         Tools["Tools/<br/>(HilBridge, ApduFuzz, EumDiag, ProfilePackage, SuciTool)"]
-        GuiServer["yggdrasim_common/gui_server/"]
     end
 
     subgraph SharedRuntime["Shared runtime"]
@@ -110,12 +103,10 @@ flowchart TB
     Main --> SCP11
     Main --> SIMCARD
     Main --> Tools
-    Main --> GuiServer
     Registry --> SCP03
     Registry --> SCP80
     Registry --> SCP11
     Registry --> Tools
-    Registry --> GuiServer
 
     SCP03 --> CardBackend
     SCP80 --> CardBackend
@@ -131,7 +122,6 @@ flowchart TB
     PluginRuntime --> RuntimePaths
     Crypto --> StateDir
     CardBackend --> ApduRecorder
-    GuiServer --> ApduRecorder
     SCP03 --> PySim
     SCP11 --> PySim
     Tools --> PySim
@@ -140,7 +130,6 @@ flowchart TB
     Tests --> SCP11
     Tests --> SIMCARD
     Tests --> Tools
-    Tests --> GuiServer
 ```
 
 ## 4. Interdependency matrix
@@ -162,7 +151,6 @@ The table below shows the operational dependency shape of each major subsystem.
 | `Tools.SuciTool` | Primary | No | No | No | No | No | File and stdin helper shell built around the external `suci-keytool` tool |
 | `Tools.ApduFuzz` | Primary | Primary | No | No | No | No | Opt-in eUICC APDU mutation fuzzer with hard `--i-mean-it` + allow-list gates |
 | `Tools.EumDiag` | Primary | No | No | No | No | No | EUM / SM-DP+ session-key injection + Wireshark/tshark Lua dissector for BF36 BPPs |
-| `yggdrasim_common.gui_server` | Optional | No | Primary | No | Primary | Primary | Universal GUI Command Center (`--gui` desktop / `--web-server` remote-lab); requires the `gui` or `gui-server` extra |
 
 ## 5. Complete dependency graph
 
@@ -238,11 +226,11 @@ Direct module entry points:
 - `python -m Tools.SuciTool`
 
 `SIMCARD` is a library package with no `__main__`; it is reached
-through the launcher (`--card-backend sim`), through the GUI Command
-Center, or imported directly from operator scripts.
+through the launcher (`--card-backend sim`) or imported directly from
+operator scripts.
 
 The menu launcher in `main/main.py` remains the umbrella entry point for
-interactive use. The launcher's flag matrix includes:
+interactive use. The launcher's flag matrix now includes:
 
 - `--card-backend {reader,sim}` plus the simulator personality flags
   (`--sim-isdr-config`, `--sim-quirks`, `--sim-eim-identity`,
@@ -250,9 +238,6 @@ interactive use. The launcher's flag matrix includes:
   `--sim-import-enable`)
 - `--open-pcap <path>` and `--keybag <path>` for offline HIL pcap
   review
-- `--gui` and `--web-server` (with `--host`, `--port`, `--token-file`,
-  `--tls-cert`, `--tls-key`, `--tls-self-signed`) for the optional
-  Universal GUI Command Center
 - `--doctor` and `--version` diagnostic shortcuts
 
 ## 7. Runtime state and secret flow
@@ -420,7 +405,7 @@ Plugin notes:
 - the current shipped contract reserves the `polling` capability name
 - `SCP11.live` and `SCP11.test` use that capability to expose relay `POLL`
 - `SCP11.eim_local` uses the same capability for localized `IPAE-*` polling
-- a standalone IPAd entry point is intentionally separate from the
+- `SCP11.eim_local/ipad_standalone.py` is intentionally separate from the
   plugin runtime so it can be exported into external Python environments
 - seeded fake-eIM peer-provisioning artifacts live under
   `Workspace/LocalEIM/eim_packages/` and remain file-based rather than plugin-owned
@@ -503,46 +488,7 @@ the PC/SC reader and exposes:
 - a `supervisor.py` health-checker / restarter, suitable for
   `systemd --user` deployment (see `guides/systemd/`)
 
-## 13. Universal GUI architecture
-
-`yggdrasim_common/gui_server/` (experimental) is the optional Universal GUI
-Command Center. It is installed via the `gui` or `gui-server` extra
-and never imported until the operator passes `--gui` or
-`--web-server`.
-
-```mermaid
-flowchart LR
-    Cli["main.main --gui | --web-server"] --> AppFactory["gui_server/app.py<br/>create_app / run_desktop / run_web_server"]
-    AppFactory --> Routes["gui_server/routes/*"]
-    Routes --> Actions["gui_server/actions/*<br/>typed action registry"]
-    Actions --> SCP03["SCP03.logic.*"]
-    Actions --> Live["SCP11.live.*"]
-    Actions --> Local["SCP11.local_access.*"]
-    Actions --> Profile["Tools.ProfilePackage.*"]
-    Actions --> Sim["SIMCARD.*"]
-    Actions --> Hil["Tools.HilBridge.*"]
-    AppFactory --> Sessions["gui_server/sessions.py<br/>SessionManager"]
-    AppFactory --> Recorder["yggdrasim_common.apdu_recorder<br/>get_recorder()"]
-    Sessions --> Recorder
-    AppFactory --> Auth["gui_server/auth.py<br/>FailureRateLimiter"]
-```
-
-Properties:
-
-- the action registry is typed: every action declares its inputs,
-  output renderer, and confirmation policy so the SPA auto-builds the
-  form
-- the bottom-dock APDU tab subscribes to the process-wide recorder
-  via WebSocket, so any module that goes through
-  `card_backend.create_card_connection` shows up live
-- `--web-server` requires a bearer token (`--token-file`) and supports
-  BYO TLS (`--tls-cert` / `--tls-key`) or generated self-signed
-  (`--tls-self-signed`, persisted under `state/gui_tls/`)
-- xterm.js per-tab PTY bridges back the C-6 sub-shell handoffs so an
-  operator can drop into `STK-SHELL` or `python -m SCP80` without
-  leaving the browser
-
-## 14. Profile package tooling architecture
+## 13. Profile package tooling architecture
 
 `Tools/ProfilePackage` is a file-oriented tooling surface rather than a card
 session shell.
@@ -574,34 +520,34 @@ Responsibilities:
 - structured Profile Element editors (`saip_pe_editors/`) wired into the
   decoded slot of the transcode TUI
 
-### 14.1 Structured PE editor surface
+### 15.1 Structured PE editor surface
 
 The transcode TUI no longer surfaces decoded payloads only as JSON. Each pane
 slot can be flipped between four modes:
 
-- `asn1` -- the existing JSON-tagged decode stream backed by `saip_decoded_edit`
-- `pe_editor` -- a structured form for the currently selected Profile Element
-- `filesystem` -- an MF/DF/EF tree reconstructed from PE-DF, PE-MF, PE-USIM,
+- `asn1` — the existing JSON-tagged decode stream backed by `saip_decoded_edit`
+- `pe_editor` — a structured form for the currently selected Profile Element
+- `filesystem` — an MF/DF/EF tree reconstructed from PE-DF, PE-MF, PE-USIM,
   PE-ISIM, PE-CSIM, PE-Telecom, PE-PhoneBook and PE-GenericFileManagement
-- `applications` -- an ISD + applications tree derived from PE-SecurityDomain
+- `applications` — an ISD + applications tree derived from PE-SecurityDomain
   and PE-Application
 
 Editor classes live in `Tools/ProfilePackage/saip_pe_editors/` and are
 selected through `PE_EDITOR_REGISTRY` / `lookup_pe_editor`:
 
-- `_base.BasePeEditor` -- abstract Textual `Vertical` host that owns the
+- `_base.BasePeEditor` — abstract Textual `Vertical` host that owns the
   `PeHeaderForm` (mandated/identification round-trip), guards initial paint
   with a deferred `_suppress_emit` window, and emits
   `BasePeEditor.Changed` once an operator commits a change
-- `_header.PeHeaderForm` -- reusable header form bound to every PE root
-- `_pin.PinCodesEditor` / `PukCodesEditor` -- per-row PIN / PUK forms
-- `_aka.AkaParameterEditor` -- algorithm picker, key material, SQN options
-- `_naa.NaaPeEditor` / `TelecomPeEditor` -- header + template ID dropdown
+- `_header.PeHeaderForm` — reusable header form bound to every PE root
+- `_pin.PinCodesEditor` / `PukCodesEditor` — per-row PIN / PUK forms
+- `_aka.AkaParameterEditor` — algorithm picker, key material, SQN options
+- `_naa.NaaPeEditor` / `TelecomPeEditor` — header + template ID dropdown
   + EF presence toggles for USIM / OPT-USIM / ISIM / OPT-ISIM / CSIM /
   OPT-CSIM / Telecom
-- `_security_domain.SecurityDomainEditor` -- instance parameters, key list
+- `_security_domain.SecurityDomainEditor` — instance parameters, key list
   rows, and personalisation blob list
-- `_filesystem.FileSystemView` / `_applications.ApplicationsView` -- read-only
+- `_filesystem.FileSystemView` / `_applications.ApplicationsView` — read-only
   navigation views that emit `FileSelected` / `ApplicationSelected` so the
   JSON outline can jump to the matching PE
 
@@ -618,13 +564,13 @@ Adding a new structured editor:
 1. Subclass `BasePeEditor` and implement `compose`, `_refresh_widgets`, and
    the collect-and-emit path.
 2. Register the class in `PE_EDITOR_REGISTRY` (or call
-   `register_pe_editor`) keyed by the PE section type -- duplicates such as
+   `register_pe_editor`) keyed by the PE section type — duplicates such as
    `pinCodes_2` are resolved through `base_pe_type_for_section_key`.
 3. Add a unit test under `tests/test_saip_pe_editors.py`. Use
-   `_drive_with_callback` so assertions run while the editor is mounted --
+   `_drive_with_callback` so assertions run while the editor is mounted —
    queries against widget DOM state must execute inside the active pilot.
 
-## 15. Dependencies
+## 14. Dependencies
 
 High-signal Python dependencies:
 
@@ -648,7 +594,7 @@ Non-Python operational dependencies:
 - network access for relay and eIM endpoint workflows
 - `gpg` only when encrypted inventory storage is enabled
 
-## 16. Tests and maintenance
+## 15. Tests and maintenance
 
 Documentation and architecture changes should stay aligned with:
 
@@ -675,7 +621,6 @@ Documentation and architecture changes should stay aligned with:
 - `../SCP11/shared/README.md`
 - `../SIMCARD/`
 - `../Tools/HilBridge/`
-- `../yggdrasim_common/gui_server/`
 - `../plugins/README.md`
 
 When a new cross-module dependency is added, update both:

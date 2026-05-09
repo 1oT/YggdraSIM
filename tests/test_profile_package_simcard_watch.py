@@ -206,7 +206,7 @@ class WatchAndLaunchTuiTests(unittest.TestCase):
                 _write_profile_dir(root, iccid="8900000000000000000777")
 
             with patch.object(simcard_watch, "_spawn_launcher", side_effect=_fake_spawn):
-                # Manually build the watcher to interleave the
+                # Manually build the watcher so we can interleave the
                 # filesystem arrival between poll_once calls.
                 watcher = simcard_watch.ProfileStoreWatcher(
                     root,
@@ -283,7 +283,7 @@ class LauncherTemplateTests(unittest.TestCase):
         iccid_position = argv.index("--iccid")
         self.assertEqual(argv[iccid_position + 1], "8900004000000000000004")
         # The profile path (with whitespace) must survive as a single argv
-        # entry -- that is exactly what shlex.split guarantees for quoted
+        # entry — that is exactly what shlex.split guarantees for quoted
         # substrings after format_map expansion.
         self.assertTrue(
             any(" " in chunk for chunk in argv),
@@ -295,7 +295,7 @@ class LauncherTemplateTests(unittest.TestCase):
             arrival = self._arrival(Path(td), "8900005000000000000005")
             # Quote the placeholder so shlex preserves the empty
             # positional after substitution; if the operator did not
-            # quote the current behaviour is preserved (shlex drops the
+            # quote we keep the current behaviour (shlex drops the
             # empty token) and just log the typo.
             template = "/bin/echo {iccid} '{unknown_token}'"
             with self.assertLogs(simcard_watch._LOGGER, level="WARNING") as logs:

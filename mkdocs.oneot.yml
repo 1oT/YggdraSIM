@@ -12,16 +12,19 @@
 #     python -m mkdocs build -f mkdocs.oneot.yml
 # --------------------------------------------------------------------------
 
-site_name: YggdraSIM -- A 1oT OSS initiative
+site_name: YggdraSIM — A 1oT OSS initiative
 site_description: Secure-element, eUICC, OTA, SCP11, HIL bridge, and SAIP toolkit documentation.
 site_author: Hampus Hellsberg
-site_url: https://1ot.github.io/YggdraSIM/oneot/
+site_url: https://1oT.github.io/YggdraSIM/oneot/
 repo_url: https://github.com/1oT/YggdraSIM
 repo_name: 1oT/YggdraSIM
 edit_uri: edit/main/site-docs/
 docs_dir: site-docs
 site_dir: site-oneot
 strict: true
+validation:
+  nav:
+    omitted_files: ignore
 copyright: Copyright &copy; 2026 1oT OÜ. Authored by Hampus Hellsberg. Documentation released under the project license.
 
 extra_css:

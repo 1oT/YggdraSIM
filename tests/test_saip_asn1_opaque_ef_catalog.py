@@ -1,8 +1,9 @@
-"""Opaque-passthrough round-trip guards for unmapped EF keys.
+"""
+Wave B — opaque-passthrough round-trip guards for unmapped EF keys.
 
 Every EF key in ``_OPAQUE_PASSTHROUGH_EF_CATALOG`` is covered by the
 decode-side ``_decode_opaque_ef`` / encode-side ``encode_ef_opaque``
-pair. The catalog replaces previously ``missing`` entries in the
+pair. The catalog replaces 180 previously ``missing`` entries in the
 decoded-editor audit with byte-exact round-trip coverage; any single
 entry can later be upgraded to a bespoke decoder without disturbing the
 rest of the catalog.
@@ -78,12 +79,12 @@ class OpaquePassthroughCatalogTests(unittest.TestCase):
     def test_label_matches_ef_csim_prefix_clause_when_shadowed(self):
         # Two decoder paths can serve a catalog key:
         #   (a) the explicit ``ef-csim-<suffix>`` prefix branch already in
-        #       ``_decode_known_ef_payload`` (pre-existing).
-        #   (b) the opaque catalog lookup at the tail of the same
+        #       ``_decode_known_ef_payload`` (predates the Wave B catalog).
+        #   (b) the Wave B opaque catalog lookup at the tail of the same
         #       function.
         # When a key is reachable via both, (a) wins because it appears
         # first. The observable contract is unchanged (opaque dict shape
-        # with a human-readable ``format``), so either label is accepted.
+        # with a human-readable ``format``), so we accept either label.
         catalog_label = _lookup_opaque_passthrough_ef("ef-csim-st")
         self.assertIsNotNone(catalog_label)
         decoded = _decode_known_ef_payload(
@@ -104,12 +105,12 @@ class OpaquePassthroughCatalogTests(unittest.TestCase):
 # ``_decode_imsi`` enforces a 9-byte BCD layout). The catalog still
 # registers them in the dispatcher (round-trip coverage) but the
 # decoded-view assertion is handled via the bespoke decoder's own
-# unit tests; they are skipped here so the fallback contract is not
+# unit tests; we skip them here so the fallback contract is not
 # accidentally re-tested with synthetic data.
 _SKIP_DECODE_SHAPE_KEYS: frozenset[str] = frozenset(
     {
         "ef-imsi",
-        # keys promoted to length-strict semantic decoders.
+        # Wave C Pass A — keys promoted to length-strict semantic decoders.
         # They reject the synthetic 9-byte sample because the spec fixes
         # their layout at a different length (PWS SNPN: 1 byte; DRI: 7
         # bytes; IPS: 4 bytes). Each has dedicated unit coverage in
@@ -117,7 +118,7 @@ _SKIP_DECODE_SHAPE_KEYS: frozenset[str] = frozenset(
         "ef-pws-snpn",
         "ef-dri",
         "ef-ips",
-        # keys promoted to fixed-length / BER-TLV
+        # Wave C Pass B — keys promoted to fixed-length / BER-TLV
         # semantic decoders. Each rejects the synthetic 9-byte sample
         # because their spec layout is either shorter (1-2 bytes for
         # flag / icon EFs) or requires well-formed BER-TLV content.
@@ -145,17 +146,17 @@ _SKIP_DECODE_SHAPE_KEYS: frozenset[str] = frozenset(
         "ef-ial",
         "ef-ncp-ip",
         "ef-3gpppsdataoffservicelist",
-        # MMS storage mode has a strict 1-byte layout;
+        # Wave C Pass C — MMS storage mode has a strict 1-byte layout;
         # the 9-byte synthetic sample is rejected. Dedicated unit
         # coverage lives in tests/test_saip_wave_c_pass_c_decoders.py.
         "ef-mmssmode",
-        # GBABP uses three consecutive length-prefixed
+        # Wave C Pass C — GBABP uses three consecutive length-prefixed
         # fields (rand / b_tid / key_lifetime). The first length byte
         # of the synthetic sample (0xDE = 222) exceeds the remaining
         # bytes, so the length-strict decoder rejects it. Dedicated
         # coverage lives in tests/test_saip_wave_c_pass_c_decoders.py.
         "ef-gbabp",
-        # 1-byte CSIM capability/bitmap decoders
+        # Wave C Pass D — 1-byte CSIM capability/bitmap decoders
         # strictly require exactly one byte; the 9-byte synthetic
         # sample is rejected. Dedicated coverage lives in
         # tests/test_saip_wave_c_pass_d_decoders.py.
@@ -164,18 +165,18 @@ _SKIP_DECODE_SHAPE_KEYS: frozenset[str] = frozenset(
         "ef-ipv6cap",
         "ef-smscap",
         "ef-sipcap",
-        # ICE-DN uses the 14-byte ADN-like footer;
+        # Wave C Pass E — ICE-DN uses the 14-byte ADN-like footer;
         # the 9-byte synthetic sample is shorter. Dedicated coverage
         # lives in tests/test_saip_wave_c_pass_e_decoders.py.
         "ef-ice-dn",
-        # length-strict decoders rejecting the 9-byte
+        # Wave D Pass A — length-strict decoders rejecting the 9-byte
         # synthetic sample. Dedicated coverage lives in
         # tests/test_saip_wave_d_pass_a_decoders.py.
         "ef-threshold",  # spec-fixed 1 byte
         "ef-eapstatus",  # spec-fixed 1 byte
         "ef-call-count",  # spec-fixed 2 bytes
         "ef-call-prompt",  # spec-fixed 1 byte
-        # Deep-sweep additions -- pySim-aligned EFs with strict shape
+        # Deep-sweep additions — pySim-aligned EFs with strict shape
         # requirements. Dedicated coverage lives in
         # tests/test_saip_deep_sweep_additions.py.
         "ef-nid",  # spec-fixed 6-byte record
@@ -227,10 +228,10 @@ class OpaquePassthroughRoundTripTests(unittest.TestCase):
     def test_catalog_label_is_used_when_no_earlier_clause_shadows_key(self):
         # Pick a handful of keys across the major groups that still
         # fall through to the opaque-catalog fallback. Anchors that
-        # have been promoted to semantic decoders carry
-        # spec-accurate format labels rather than the raw catalog
-        # label and are exercised in their dedicated test files
-        # instead.
+        # have been promoted to semantic decoders in Waves C Pass A..E
+        # now carry spec-accurate format labels rather than the raw
+        # catalog label and are exercised in their dedicated test
+        # files instead.
         anchors = (
             ("ef-launchpad", "Operator Launchpad"),
             ("ef-icon", "Icon"),

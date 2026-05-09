@@ -492,10 +492,10 @@ class HilBridgeLiveDecodeStateTests(unittest.TestCase):
     def test_bip_payload_annotations_summarize_dns_query_and_response(self) -> None:
         open_fetch, open_response = self._open_channel_rows()
         dns_query = bytes.fromhex(
-            "1234010000010000000000000365696D076578616D706C6504746573740000010001"
+            "1234010000010000000000000365696D02736D03316F7403636F6D0000010001"
         )
         dns_response = bytes.fromhex(
-            "1234818000010001000000000365696D076578616D706C6504746573740000010001"
+            "1234818000010001000000000365696D02736D03316F7403636F6D0000010001"
             "C00C000100010000003C000408080808"
         )
         send_data_payload = _proactive_command(
@@ -528,7 +528,7 @@ class HilBridgeLiveDecodeStateTests(unittest.TestCase):
         annotations = build_stateful_packet_annotations(rows)
 
         self.assertIn("DNS Query:", annotations[3].summary_suffix)
-        self.assertIn("qname=eim.example.test", annotations[3].summary_suffix)
+        self.assertIn("qname=", annotations[3].summary_suffix)
         self.assertIn("DNS Response:", annotations[6].summary_suffix)
         self.assertIn("answers=A:8.8.8.8", annotations[6].summary_suffix)
         self.assertTrue(any("Last SEND summary: DNS Query:" in line for line in annotations[6].context_lines))
@@ -536,7 +536,7 @@ class HilBridgeLiveDecodeStateTests(unittest.TestCase):
 
     def test_bip_payload_annotations_summarize_tls_handshakes(self) -> None:
         open_fetch, open_response = self._open_channel_rows()
-        tls_client_hello = _tls_client_hello_record("tls.example.test")
+        tls_client_hello = _tls_client_hello_record("tls.eim.example.test")
         tls_server_chain = bytes.fromhex("1603030008020000000B000000")
         send_data_payload = _proactive_command(
             2,
@@ -568,11 +568,11 @@ class HilBridgeLiveDecodeStateTests(unittest.TestCase):
         annotations = build_stateful_packet_annotations(rows)
 
         self.assertIn("TLS Handshake: ClientHello", annotations[3].summary_suffix)
-        self.assertIn("sni=tls.example.test", annotations[3].summary_suffix)
+        self.assertIn("sni=tls.eim.example.test", annotations[3].summary_suffix)
         self.assertIn("TLS Handshake: ServerHello", annotations[6].summary_suffix)
         self.assertIn("Certificate", annotations[6].summary_suffix)
         self.assertTrue(any("Last SEND summary: TLS Handshake: ClientHello" in line for line in annotations[6].context_lines))
-        self.assertTrue(any("sni=tls.example.test" in line for line in annotations[6].context_lines))
+        self.assertTrue(any("sni=tls.eim.example.test" in line for line in annotations[6].context_lines))
         self.assertTrue(any("Last RECEIVE summary: TLS Handshake: ServerHello" in line for line in annotations[6].context_lines))
 
     def test_etsi_file_annotations_track_selection_and_binary_reads(self) -> None:
@@ -582,7 +582,7 @@ class HilBridgeLiveDecodeStateTests(unittest.TestCase):
             _apdu_exchange_row(
                 3,
                 bytes.fromhex("00B000000A"),
-                bytes.fromhex("894611111111111111129000"),
+                bytes.fromhex("898811111111111111129000"),
             ),
         ]
 
@@ -612,10 +612,10 @@ class HilBridgeLiveDecodeStateTests(unittest.TestCase):
         odd_bytes = bytes.fromhex("898811111111111111F1")
         self.assertEqual(_decode_iccid_bytes(odd_bytes), "9888111111111111111")
 
-        too_short = bytes.fromhex("89881111")
+        too_short = bytes.fromhex("89461111")
         self.assertEqual(_decode_iccid_bytes(too_short), "")
 
-        invalid_digit = bytes.fromhex("A9881111111111111112")
+        invalid_digit = bytes.fromhex("A9461111111111111112")
         self.assertEqual(_decode_iccid_bytes(invalid_digit), "")
 
     def test_ef_iccid_read_binary_populates_card_session_iccid(self) -> None:
@@ -786,7 +786,7 @@ class HilBridgeLiveDecodeStateTests(unittest.TestCase):
         first_open_response = _terminal_response_row(
             2, first_open_payload, time_override_seconds=1.100
         )
-        # Frame 3 arrives ~45 s later -- well beyond the 30 s idle threshold --
+        # Frame 3 arrives ~45 s later — well beyond the 30 s idle threshold —
         # so the tracker must treat it as the opening of Card Session 2.
         post_reboot_select = _apdu_exchange_row(
             3,

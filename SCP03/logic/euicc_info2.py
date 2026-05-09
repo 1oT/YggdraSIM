@@ -1,3 +1,5 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+"""EUICCInfo2 TLV decoder: parses tag BF22 into a structured dict (SGP.22 §2.6.2)."""
 from typing import Dict, List, Optional, Tuple
 
 
@@ -111,6 +113,7 @@ EUICC_INFO2_MANDATORY_TAGS: tuple[int, ...] = (
 
 
 def parse_tlv_nodes(data: bytes) -> List[Tuple[int, bytes, bool]]:
+    """Parse a BER-TLV byte blob into a list of (tag, value, constructed) tuples."""
     nodes: List[Tuple[int, bytes, bool]] = []
     index = 0
     while index < len(data):
@@ -131,6 +134,7 @@ def parse_tlv_nodes(data: bytes) -> List[Tuple[int, bytes, bool]]:
 
 
 def parse_tlv_simple(data: bytes) -> Dict[int, object]:
+    """Parse a BER-TLV blob into a flat tag→value dict, keeping only the last value per tag."""
     parsed: Dict[int, object] = {}
     for tag, value, _constructed in parse_tlv_nodes(data):
         if tag in parsed:
@@ -152,6 +156,7 @@ def unwrap_euicc_info2_payload(data: bytes) -> bytes:
 
 
 def resolve_euicc_info2_tag_name(tag: int, parent_tag: Optional[int]) -> Optional[str]:
+    """Return the human-readable name for a tag within the EUICCInfo2 (BF22) response structure (SGP.22 §C.5)."""
     if parent_tag == 0xBF22:
         return EUICC_INFO2_TAG_NAMES.get(tag)
     nested = EUICC_INFO2_NESTED_TAG_NAMES.get(parent_tag)
@@ -161,6 +166,7 @@ def resolve_euicc_info2_tag_name(tag: int, parent_tag: Optional[int]) -> Optiona
 
 
 def decode_euicc_info2_value(tag: int, value: bytes, parent_tag: Optional[int]) -> Optional[str]:
+    """Decode a single EUICCInfo2 TLV value to a printable string (SGP.22 §C.5)."""
     if parent_tag == 0xBF22:
         if tag in (0x81, 0x82, 0x83, 0x86, 0x87, 0x04):
             return format_version_bytes(value)
@@ -199,6 +205,7 @@ def decode_euicc_info2_value(tag: int, value: bytes, parent_tag: Optional[int]) 
 
 
 def build_euicc_info2_detail_lines(response: bytes) -> List[Tuple[int, str, str]]:
+    """Return a list of (depth, name, value) tuples for the full EUICCInfo2 detail view."""
     root_value = unwrap_euicc_info2_payload(response)
     root_map = parse_tlv_simple(root_value)
     lines: List[Tuple[int, str, str]] = []
@@ -241,6 +248,7 @@ def build_euicc_info2_detail_lines(response: bytes) -> List[Tuple[int, str, str]
 
 
 def build_euicc_info2_validation_lines(response: bytes) -> List[Tuple[int, str, str]]:
+    """Return a list of (severity, label, message) tuples for EUICCInfo2 capability warnings."""
     root_value = unwrap_euicc_info2_payload(response)
     root_map = parse_tlv_simple(root_value)
     warnings: List[str] = []
@@ -301,6 +309,7 @@ def format_version_bytes(value: bytes) -> str:
 
 
 def decode_euicc_category(value: bytes) -> str:
+    """Map a single-byte euiccCategory value to its name string (SGP.22 §C.5 tag 0x87)."""
     if len(value) != 1:
         return value.hex().upper()
     categories = {
@@ -315,6 +324,7 @@ def decode_euicc_category(value: bytes) -> str:
 
 
 def decode_ipa_mode(value: bytes) -> str:
+    """Map a single-byte IPA mode byte to its name string (SGP.32 §C.1)."""
     if len(value) != 1:
         return value.hex().upper()
     ipa_modes = {
@@ -335,6 +345,7 @@ def format_named_bit_string(value: bytes, bit_names: Dict[int, str]) -> str:
 
 
 def decode_named_bit_string(value: bytes, bit_names: Dict[int, str]) -> List[str]:
+    """Decode a named-BIT-STRING value to the list of set bit names."""
     if len(value) == 0:
         return []
     unused_bits = value[0]
@@ -355,6 +366,7 @@ def decode_named_bit_string(value: bytes, bit_names: Dict[int, str]) -> List[str
 
 
 def decode_ext_card_resource_value(tag: int, value: bytes) -> Optional[str]:
+    """Decode an ExtCardResource sub-TLV value to a human-readable string (SGP.22 §C.5 tag 0x86)."""
     if tag == 0x81:
         return str(int.from_bytes(value, "big", signed=False))
     if tag in (0x82, 0x83):

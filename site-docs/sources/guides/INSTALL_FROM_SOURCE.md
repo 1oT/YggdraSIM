@@ -1,4 +1,4 @@
-# Installation -- From Source Checkout
+# Installation — From Source Checkout
 
 This path is the right choice when you want to run the full test suite,
 modify the code, or cherry-pick HIL features without committing to a
@@ -53,7 +53,7 @@ git clone https://github.com/osmocom/pysim.git pysim
 `pysim/` is gitignored so the checkout never ships in the
 distribution.
 
-### Optional -- let the installer script handle it
+### Optional — let the installer script handle it
 
 Steps 2 and 3 can be replaced by the corresponding script under
 `scripts/install/`:
@@ -82,29 +82,25 @@ Python 3.10 or newer is required.
 ## 3. Pick the extras that match your needs
 
 ```bash
-# Minimal -- matches the clean flavor. Runs on any OS.
+# Minimal — matches the clean flavor. Runs on any OS.
 python -m pip install -e .
 
-# Clean + build + test tooling (PyInstaller, pytest, httpx).
+# Clean + build + test tooling (PyInstaller, pytest).
 python -m pip install -e '.[build,test]'
 
 # HIL-capable on Linux (adds pyudev).
 python -m pip install -e '.[hil]'
 
-# HIL-capable Linux developer profile (pyudev + pyinstaller + pytest + pySim).
+# HIL-capable Linux developer profile (pyudev + pyinstaller + pytest).
 python -m pip install -e '.[full]'
-
-# Optional: Universal GUI Command Center.
-python -m pip install -e '.[gui]'        # desktop window via pywebview
-python -m pip install -e '.[gui-server]' # headless web server only
 
 # Optional: docs site tooling for `mkdocs build` / `mkdocs serve`.
 python -m pip install -e '.[docs]'
 ```
 
 `pyudev` is listed with `sys_platform == 'linux'` so the extras stay
-installable on Windows / macOS -- the package simply gets skipped. The
-extras can be combined: `pip install -e '.[full,gui]'` is a common
+installable on Windows / macOS — the package simply gets skipped. The
+extras can be combined: `pip install -e '.[full,docs]'` is a common
 Linux-developer profile.
 
 ## 4. Verify the install
@@ -134,12 +130,12 @@ python -m SCP11.local_access                    # local SMDPP shell
 python -m SCP11.eim_local                       # local eIM shell
 python -m Tools.ProfilePackage                  # SAIP tool shell
 python -m Tools.SuciTool                        # SUCI tool shell
-python -m Tools.HilBridge.main                  # HIL bridge -- Linux only
-python -m Tools.HilBridge.supervisor            # HIL supervisor -- Linux only
+python -m Tools.HilBridge.main                  # HIL bridge — Linux only
+python -m Tools.HilBridge.supervisor            # HIL supervisor — Linux only
 ```
 
 After `pip install -e .` the same surfaces are available as console
-scripts (`yggdrasim-scp03`, `yggdrasim-scp11-live`, ...). The HIL scripts
+scripts (`yggdrasim-scp03`, `yggdrasim-scp11-live`, …). The HIL scripts
 exit with a helpful message on non-Linux or clean-only environments.
 
 ## 6. Running the test suite
@@ -161,7 +157,7 @@ runs are reserved for explicit release validation.
 # Clean (any OS)
 YGGDRASIM_FLAVOR=clean python -m PyInstaller --noconfirm --clean yggdrasim_main.spec
 
-# Full (Linux only -- requires pip install -e '.[full]')
+# Full (Linux only — requires pip install -e '.[full]')
 YGGDRASIM_FLAVOR=full python -m PyInstaller --noconfirm --clean yggdrasim_main.spec
 ```
 
@@ -175,12 +171,12 @@ The resulting onefile is written to
 - On Linux without `pyudev` the supervisor switches to `lsusb` polling,
   which is slower but still correct.
 - SIMtrace2 firmware flashing / updating is documented separately in
-  [`SIMTRACE2_CARDEM_GUIDE.md`](https://github.com/1oT/YggdraSIM/blob/main/guides/SIMTRACE2_CARDEM_GUIDE.md).
+  [`SIMTRACE2_CARDEM_GUIDE.md`](SIMTRACE2_CARDEM_GUIDE.md).
 
 ## Related guides
 
-- [`INSTALL_CLEAN.md`](https://github.com/1oT/YggdraSIM/blob/main/guides/INSTALL_CLEAN.md) -- published lean executables.
-- [`INSTALL_FULL.md`](https://github.com/1oT/YggdraSIM/blob/main/guides/INSTALL_FULL.md) -- published HIL-capable executable.
-- [`INSTALL_RASPBERRYPI.md`](https://github.com/1oT/YggdraSIM/blob/main/guides/INSTALL_RASPBERRYPI.md) -- arm64 / Pi-specific notes.
-- [`BUILD_AND_PACKAGING.md`](https://github.com/1oT/YggdraSIM/blob/main/guides/BUILD_AND_PACKAGING.md) -- PyInstaller, `.deb`, and Docker notes.
-- [`HIL_BRIDGE_GUIDE.md`](https://github.com/1oT/YggdraSIM/blob/main/guides/HIL_BRIDGE_GUIDE.md) -- operator flow once the HIL bundle is running.
+- [`INSTALL_CLEAN.md`](INSTALL_CLEAN.md) — published lean executables.
+- [`INSTALL_FULL.md`](INSTALL_FULL.md) — published HIL-capable executable.
+- [`INSTALL_RASPBERRYPI.md`](INSTALL_RASPBERRYPI.md) — arm64 / Pi-specific notes.
+- [`BUILD_AND_PACKAGING.md`](BUILD_AND_PACKAGING.md) — PyInstaller, `.deb`, and Docker notes.
+- [`HIL_BRIDGE_GUIDE.md`](HIL_BRIDGE_GUIDE.md) — operator flow once the HIL bundle is running.

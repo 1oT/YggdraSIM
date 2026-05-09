@@ -460,7 +460,7 @@ class ServiceTableBitMapTests:
 
 
 class TelecomFixedCountersDecoderTests:
-    """TS 31.102 §4.4.2.12.2-4 -- PSC / CC / PUID."""
+    """TS 31.102 §4.4.2.12.2-4 — PSC / CC / PUID."""
 
     def test_psc_counter(self) -> None:
         decoded = _decode_ef_psc("0000002A")
@@ -482,7 +482,7 @@ class TelecomFixedCountersDecoderTests:
 
 
 class FiveGSecurityContextDecoderTests:
-    """TS 31.102 §4.4.11.4-6 -- 5GS 3GPP NSC / 5GAUTHKEYS."""
+    """TS 31.102 §4.4.11.4-6 — 5GS 3GPP NSC / 5GAUTHKEYS."""
 
     @staticmethod
     def _sample_nsc_record() -> str:
@@ -521,7 +521,7 @@ class FiveGSecurityContextDecoderTests:
 
 
 class EarfcnListDecoderTests:
-    """TS 31.102 §4.2.112 -- EF.EARFCNList pySim regression vector."""
+    """TS 31.102 §4.2.112 — EF.EARFCNList pySim regression vector."""
 
     _VECTOR = (
         "a01a8004000100008112000001100001000002100002000003100003"
@@ -542,7 +542,7 @@ class EarfcnListDecoderTests:
 
 
 class CmiDecoderTests:
-    """TS 51.011 §10.5.16 -- EF.CMI record with GSM alpha tail."""
+    """TS 51.011 §10.5.16 — EF.CMI record with GSM alpha tail."""
 
     def test_alpha_and_id(self) -> None:
         decoded = _decode_ef_cmi("48454C4C4FFFFFFF05")
@@ -630,7 +630,7 @@ class DispatchRoutingTests:
 
 
 class PhonebookAuxiliaryEfTests:
-    """DF.PHONEBOOK administrative / auxiliary EFs."""
+    """Round-2 Pass 1 — DF.PHONEBOOK administrative / auxiliary EFs."""
 
     @staticmethod
     def test_iap_pointer_map() -> None:
@@ -677,7 +677,7 @@ class PhonebookAuxiliaryEfTests:
 
 
 class BcchDecoderTests:
-    """EF.BCCH (TS 51.011 §10.3.25)."""
+    """Round-2 Pass 1 — EF.BCCH (TS 51.011 §10.3.25)."""
 
     @staticmethod
     def test_ba_list_bits() -> None:
@@ -692,7 +692,7 @@ class BcchDecoderTests:
 
 
 class IsimCsgAndHostListDecoderTests:
-    """NAFKCA / FCSL / PHist / PSISMSC BER-TLV decoders."""
+    """Round-2 Pass 1 — NAFKCA / FCSL / PHist / PSISMSC BER-TLV decoders."""
 
     @staticmethod
     def test_nafkca_fqdn() -> None:
@@ -723,7 +723,7 @@ class IsimCsgAndHostListDecoderTests:
 
 
 class MailboxAndMenuDecoderTests:
-    """mailbox / setup-menu / MExE service table."""
+    """Round-2 Pass 1 — mailbox / setup-menu / MExE service table."""
 
     @staticmethod
     def test_mbparam_voice_identifier() -> None:
@@ -748,7 +748,7 @@ class MailboxAndMenuDecoderTests:
 
 
 class OperatorControlEfDecoderTests:
-    """SCP80 counter / SCP11 key / SIM lock / OTA state."""
+    """Round-2 Pass 1 — SCP80 counter / SCP11 key / SIM lock / OTA state."""
 
     @staticmethod
     def test_scp80_counter() -> None:
@@ -783,7 +783,7 @@ class OperatorControlEfDecoderTests:
 
 
 class LegacyNetworkParamsDecoderTests:
-    """EF.NETPAR / EF.CPBCCH legacy GSM files."""
+    """Round-2 Pass 2 — EF.NETPAR / EF.CPBCCH legacy GSM files."""
 
     @staticmethod
     def test_netpar_hplmn_search_period() -> None:
@@ -809,7 +809,7 @@ class LegacyNetworkParamsDecoderTests:
 
 
 class McsV2xProseTlvPromotionTests:
-    """MCS / V2X / ProSe provisioned BER-TLV promotions."""
+    """Round-2 Pass 2 — MCS / V2X / ProSe provisioned BER-TLV promotions."""
 
     @staticmethod
     def test_v2x_cfg_tag_named() -> None:
@@ -857,7 +857,7 @@ class McsV2xProseTlvPromotionTests:
 
 
 class ArrBooleanConditionDecoderTests:
-    """EF.ARR boolean SC-DO templates (ISO 7816-4 §5.3.3)."""
+    """Round-2 Pass 4 — EF.ARR boolean SC-DO templates (ISO 7816-4 §5.3.3)."""
 
     @staticmethod
     def test_simple_always_rule() -> None:
@@ -876,7 +876,7 @@ class ArrBooleanConditionDecoderTests:
 
     @staticmethod
     def test_or_template_parses() -> None:
-        # UPDATE (0x02) under OR(A4 PIN1) -- single child to keep parse clean.
+        # UPDATE (0x02) under OR(A4 PIN1) — single child to keep parse clean.
         inner = "A40683010195010880"
         outer = "A0" + f"{len(bytes.fromhex(inner)):02X}" + inner
         payload = "800102" + outer
@@ -897,7 +897,7 @@ class ArrBooleanConditionDecoderTests:
 
 
 class V2xpRel16PromotionTests:
-    """EF.V2XP-Uu / EF.V2XP-PC5 BER-TLV promotions (TS 31.102 §4.6.5.4/5)."""
+    """Round-2 Pass 3 — EF.V2XP-Uu / EF.V2XP-PC5 BER-TLV promotions (TS 31.102 §4.6.5.4/5)."""
 
     @staticmethod
     def test_v2xp_uu_xml_value() -> None:
@@ -913,7 +913,7 @@ class V2xpRel16PromotionTests:
 
 
 class ThresholdDecoderTests:
-    """EF.THRESHOLD corrected to 3 bytes (TS 31.102 §4.2.52)."""
+    """Round-2 Pass 1 — EF.THRESHOLD corrected to 3 bytes (TS 31.102 §4.2.52)."""
 
     @staticmethod
     def test_three_byte_max_start() -> None:

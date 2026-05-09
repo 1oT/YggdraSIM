@@ -1,11 +1,11 @@
 """Tests for the 5×20 decoded-edit sweep.
 
 Covers 100 additional EF tokens across:
-- Mailbox / CF / VGCS / VBS / eMLPP / DCK / CNL family.
-- CSIM (CDMA SIM) EFs -- opaque namespace ``ef-csim-*``.
-- Specialized (ISIM / MCPTT / V2X / ProSe / MCS) EFs.
-- Operator / vendor customs + SCP/OTA auxiliary EFs.
-- Registration + structured-recomposition integration.
+- Pass A (20): Mailbox / CF / VGCS / VBS / eMLPP / DCK / CNL family.
+- Pass B (20): CSIM (CDMA SIM) EFs — opaque namespace ``ef-csim-*``.
+- Pass C (20): Specialized (ISIM / MCPTT / V2X / ProSe / MCS) EFs.
+- Pass D (20): Operator / vendor customs + SCP/OTA auxiliary EFs.
+- Pass E: registration + structured-recomposition integration.
 """
 
 from __future__ import annotations
@@ -41,7 +41,7 @@ def _roundtrip(
 
 
 # ---------------------------------------------------------------------------
-# Mailbox / CF / VGCS / VBS / eMLPP / DCK / CNL.
+# Pass A — Mailbox / CF / VGCS / VBS / eMLPP / DCK / CNL.
 
 
 class MwisTests(unittest.TestCase):
@@ -254,7 +254,7 @@ class VsuriTests(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# CSIM.
+# Pass B — CSIM.
 
 
 class CsimOpaqueTests(unittest.TestCase):
@@ -299,7 +299,7 @@ class CsimOpaqueTests(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# Specialized (ProSe / V2X / MCS / MCPTT).
+# Pass C — Specialized (ProSe / V2X / MCS / MCPTT).
 
 
 class SpecializedOpaqueTests(unittest.TestCase):
@@ -344,7 +344,7 @@ class SpecializedOpaqueTests(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# Operator / vendor / auxiliary.
+# Pass D — Operator / vendor / auxiliary.
 
 
 class OperatorCustomTests(unittest.TestCase):
@@ -389,7 +389,7 @@ class OperatorCustomTests(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# Integration -- registration + hex-hint sweep.
+# Integration — registration + hex-hint sweep.
 
 
 class SweepIntegrationTests(unittest.TestCase):

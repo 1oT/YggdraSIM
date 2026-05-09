@@ -1,4 +1,6 @@
-"""Coverage for ADF.USIM service EFs (MSISDN/MBI/MBDN/MWIS) and TS 102 223 REFRESH / SET UP CALL latches:
+"""Fifteenth-pass gap-coverage suite for SIMCARD surfaces beyond ES10.
+
+Round-15 closes the following:
 
 * 3GPP TS 31.102 §4.2.40 ``EF.MSISDN`` (FID 6F40) seeded under
   ADF.USIM as a linear-fixed EF with one 22-byte slot

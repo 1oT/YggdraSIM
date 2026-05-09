@@ -1,20 +1,35 @@
-"""TLS-1.2 client wrapper used by the simulator's IPA-poll path.
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+"""In-card TLS-1.2 client used by the SGP.32 IPA-poll eIM leg.
 
-Wraps Python's ``ssl.MemoryBIO`` to drive a TLS-1.2 handshake in
-chunks under reactive control. The public surface is:
+This module wraps Python's ``ssl.MemoryBIO`` so the simulator can drive
+a TLS-1.2 ECDHE-ECDSA-AES128-GCM-SHA256 handshake one BIP SEND/RECEIVE
+DATA at a time. The real eUICC carries the entire TLS state machine in
+the card and emits TLS records as proactive SEND DATA payloads; the
+modem becomes a transparent byte pipe to the eIM. The simulator now
+mirrors that contract: the bytes a real card would put on the bearer
+match what we put on the bearer.
 
-* ``feed_inbound`` / ``drain_outbound`` move bytes between the
-  inbound/outbound BIOs.
-* ``drive_handshake`` advances the handshake; returns ``True`` once
-  it completes.
+The class is intentionally keyed off two memory BIOs so the toolkit's
+proactive-command FSM can pump bytes in and out reactively:
+
+* ``feed_inbound`` writes the channel data the modem returned on
+  RECEIVE DATA into the inbound BIO.
+* ``drain_outbound`` reads whatever the TLS engine produced (handshake
+  flights, ChangeCipherSpec, encrypted application data) so the
+  toolkit can ship it as the next SEND DATA payload.
+* ``drive_handshake`` advances the handshake whenever new inbound
+  bytes are available; it returns ``True`` once the handshake has
+  fully completed.
 * ``encrypt_application_data`` / ``decrypt_application_data`` operate
   after the handshake completes.
 
+Cipher suite is pinned to ``ECDHE-ECDSA-AES128-GCM-SHA256``
+(IANA 0xC02B) and the minimum/maximum TLS version is fixed at 1.2 so
+the handshake matches what real reference IPA implementations emit.
 The trust anchor comes from the eIM identity's
-``trusted_tls_cert_path``. When that file is missing or unreadable
-the client falls back to ``ssl.CERT_NONE`` so lab setups without a
-provisioned CA bundle still produce valid TLS wire bytes for
-diagnostics.
+``trusted_tls_cert_path``; when that file is missing or unreadable the
+client falls back to ``ssl.CERT_NONE`` so the simulator continues to
+work in lab setups that have not provisioned a CA bundle yet.
 """
 
 from __future__ import annotations
@@ -81,7 +96,8 @@ def create_card_tls_client(config: CardTlsClientConfig) -> CardTlsClientState:
       ClientHello advertises legacy_version=0x0303 with no TLS-1.3
       fallback.
     * ``set_ciphers(PINNED_CIPHER_SUITE)`` so OpenSSL emits a single
-      cipher suite in the ClientHello.
+      cipher suite (0xC02B) in the ClientHello, matching the reference
+      card byte for byte.
     * ``check_hostname=True`` + ``CERT_REQUIRED`` when CA material is
       supplied, otherwise ``CERT_NONE`` so unconfigured workspaces
       still produce a syntactically valid handshake (operators can then

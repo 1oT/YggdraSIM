@@ -1,8 +1,10 @@
 <!--
-  1oT wordmark, sourced from the public 1oT.com brand assets. The
-  black fills have been replaced with currentColor so the light /
+  1oT wordmark. Sourced from the 1oT.com brand kit
+  (https://cdn.prod.website-files.com/675ad9858b108e77c7e0cc2c/675c151401db0e4b9ccbe945_logo_new%201.svg).
+  The black fills have been replaced with currentColor so the light /
   dark mode switch in mkdocs.oneot.yml can recolor the glyph without
-  shipping a second asset. Brand green (#00D799) is preserved as-is.
+  shipping a second asset. Brand green (#00D799) is preserved as-is
+  per the 1oT brand guide.
 -->
 <svg xmlns="http://www.w3.org/2000/svg" width="71" height="24" viewBox="0 0 71 24" fill="none" role="img" aria-label="1oT">
   <title>1oT</title>

@@ -244,7 +244,7 @@ class SaipEncodeFlagBitmaskTests(unittest.TestCase):
             decoded = _decode_profile_policy_rules(raw)
             assert decoded is not None
             encoded = encode_decoded_roundtrip_bytes("pol", decoded)
-            # pol has a canonical encoding -- re-decoding must be stable.
+            # pol has a canonical encoding — re-decoding must be stable.
             self.assertEqual(_decode_profile_policy_rules(encoded), _decode_profile_policy_rules(encoded))
             # Byte-identity only when input was canonical (minimal width).
             if len(raw) == 1:

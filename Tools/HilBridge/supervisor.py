@@ -1,3 +1,5 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+"""HIL-Bridge supervisor: manages child process lifecycle (modem, bridge, tshark) with restart policy and watchdog timers."""
 from __future__ import annotations
 
 import argparse
@@ -15,11 +17,7 @@ from threading import Event
 from typing import Any, Protocol
 
 from yggdrasim_common.card_backend import CARD_RELAY_MARKER_FILENAME, is_simulated_card_backend
-from yggdrasim_common.process_debug import (
-    add_debug_argument,
-    set_global_debug,
-    subprocess_env_without_bundle_libs,
-)
+from yggdrasim_common.process_debug import add_debug_argument, set_global_debug
 from yggdrasim_common.quit_control import QuitAllRequested
 from yggdrasim_common.runtime_paths import ensure_runtime_dir, runtime_path
 
@@ -70,6 +68,7 @@ def _normalize_usb_match_terms(values: list[str] | tuple[str, ...] | None) -> tu
 
 
 def normalize_usb_vidpid(value: str) -> str:
+    """Normalise a USB VID:PID string to lowercase colon-separated hex (e.g. '04e6:5116')."""
     text = str(value or "").strip().lower()
     if len(text) == 0:
         return ""
@@ -251,6 +250,7 @@ class LsusbPresenceMonitor:
     timeout_seconds: float = DEFAULT_LSUSB_TIMEOUT_SECONDS
 
     def snapshot(self) -> UsbPresenceSnapshot:
+        """Return a snapshot dict of the current connection state for all managed channels."""
         command = [str(self.lsusb_path or "lsusb")]
         try:
             completed = subprocess.run(
@@ -259,7 +259,6 @@ class LsusbPresenceMonitor:
                 text=True,
                 timeout=max(1.0, float(self.timeout_seconds or DEFAULT_LSUSB_TIMEOUT_SECONDS)),
                 check=False,
-                env=subprocess_env_without_bundle_libs(),
             )
         except FileNotFoundError as exc:
             return UsbPresenceSnapshot(
@@ -314,6 +313,7 @@ class PyudevPresenceMonitor:
         match_terms: tuple[str, ...],
         vidpids: tuple[str, ...],
     ) -> "PyudevPresenceMonitor":
+        """Create a new managed channel entry for the given slot configuration."""
         import pyudev
 
         context = pyudev.Context()
@@ -328,6 +328,7 @@ class PyudevPresenceMonitor:
         )
 
     def snapshot(self) -> UsbPresenceSnapshot:
+        """Return a snapshot dict of the current state of this managed channel."""
         matches: list[str] = []
         try:
             devices = list(self._context.list_devices(subsystem="usb"))
@@ -420,6 +421,7 @@ def create_usb_presence_monitor(
     prefer_pyudev: bool,
     lsusb_path: str,
 ) -> UsbPresenceMonitor:
+    """Create a USB device presence monitor thread that detects reader hot-plug events."""
     if prefer_pyudev:
         try:
             monitor = PyudevPresenceMonitor.create(match_terms=match_terms, vidpids=vidpids)
@@ -480,6 +482,7 @@ class HilBridgeSupervisor:
         self._stop_event.set()
 
     def run(self) -> int:
+        """Run the supervisor event loop until the stop signal is received."""
         LOGGER.info(
             "HIL bridge supervisor started with USB selectors terms=%s vidpids=%s",
             list(self.config.usb_match_terms),
@@ -518,6 +521,7 @@ class HilBridgeSupervisor:
             return False
 
     def reconcile(self) -> None:
+        """Reconcile the desired-state channel config against the running connections."""
         now = float(self.monotonic())
         sim_mode = self._sim_backend_active()
         snapshot = self.usb_monitor.snapshot()
@@ -563,7 +567,7 @@ class HilBridgeSupervisor:
                 if remsim_allowed is False:
                     if self._remsim_is_running():
                         # Cable was pulled while sim mode remained
-                        # selected -- bridge stays up, REMSIM goes.
+                        # selected — bridge stays up, REMSIM goes.
                         self._stop_remsim_child("SIMtrace2 hardware disappeared.")
                     reason_text = self._sim_no_usb_reason() if sim_mode and snapshot.present is False else self._reader_no_remsim_reason(snapshot)
                     self._write_state(
@@ -655,10 +659,7 @@ class HilBridgeSupervisor:
         if self.config.remsim_client.enabled is False:
             return
         command = self._build_remsim_command(snapshot=snapshot)
-        # ``osmo-remsim-client-st2`` is a host binary; the PyInstaller-
-        # injected LD_LIBRARY_PATH would otherwise override system
-        # ``libcrypto``/``libssl`` with the bundle's older copies.
-        env = subprocess_env_without_bundle_libs()
+        env = os.environ.copy()
         env["PYTHONUNBUFFERED"] = "1"
         if self.config.debug_enabled:
             env["YGGDRASIM_GLOBAL_DEBUG"] = "1"
@@ -1128,6 +1129,7 @@ def _configure_logging(debug_enabled: bool) -> None:
 
 
 def build_supervisor_config_from_args(args: argparse.Namespace) -> HilBridgeSupervisorConfig:
+    """Build the HIL-Bridge supervisor config dict from parsed argparse namespace."""
     state_path = str(args.state_file or "").strip()
     if len(state_path) == 0:
         ensure_runtime_dir("state")
@@ -1163,6 +1165,7 @@ def build_supervisor_config_from_args(args: argparse.Namespace) -> HilBridgeSupe
 
 
 def run_standalone() -> int:
+    """Start the HIL-Bridge supervisor as a standalone foreground process."""
     parser = _build_parser()
     args = parser.parse_args()
     debug_enabled = bool(getattr(args, "debug", False))

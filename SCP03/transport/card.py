@@ -15,6 +15,7 @@
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 # -----------------------------------------------------------------------------
 
+"""Physical card transport: PCSC and serial backend abstraction for C-APDU / R-APDU exchange."""
 from typing import Tuple ,List ,Optional ,Any 
 
 
@@ -57,6 +58,7 @@ class CardTransporter :
             raise RuntimeError ("Could not connect to a smart card reader.")
 
     def connect (self )->bool :
+        """Connect to the physical card using the configured PCSC or serial backend."""
         try :
             self .connection =create_card_connection (reader_index =0 )
             if is_simulated_card_backend ():
@@ -98,6 +100,7 @@ class CardTransporter :
         self ._reset_session_state ()
 
     def reset (self )->bool :
+        """Issue a card reset and return the ATR bytes."""
         if self .connection is None :return self .connect ()
         try :
             self .connection .disconnect ()
@@ -108,6 +111,7 @@ class CardTransporter :
             return False 
 
     def get_atr_bytes (self )->bytes :
+        """Return the ATR bytes from the most recent reset."""
         if self .connection is None :
             return b""
         try :
@@ -283,6 +287,7 @@ class CardTransporter :
         return lines 
 
     def describe_atr (self )->List [str ]:
+        """Return a human-readable description of the ATR byte string."""
         atr_bytes =self .get_atr_bytes ()
         lines :List [str ]=[]
         if len (atr_bytes )==0 :
@@ -366,6 +371,7 @@ class CardTransporter :
         return lines 
 
     def transmit (self ,apdu_hex :str ,silent :bool =False )->Tuple [bytes ,int ,int ]:
+        """Transmit a C-APDU and return the full R-APDU including status word."""
         if self .connection is None :
             if not self .connect ():return b'',0x6F ,0x00 
         try :

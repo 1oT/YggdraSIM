@@ -1,3 +1,5 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+"""GlobalPlatform card-side logic: SSD secure session emulation, INSTALL/LOAD/DELETE command dispatch (GP Card Spec v2.3)."""
 from __future__ import annotations
 
 from SIMCARD.etsi_fs import USIM_AID, ISIM_AID
@@ -70,6 +72,10 @@ class GpLogic:
     # ------------------------------------------------------------------
 
     def handle_get_data(self, p1: int, p2: int) -> tuple[bytes, int, int]:
+        """GP Card Spec v2.3 §11.3 GET DATA — returns card/SD status data objects.
+
+        Supported tags: 005A (EID), 9F7F (CPLC), 9F70 (card life-cycle state).
+        """
         tag_hex = f"{p1:02X}{p2:02X}"
         if tag_hex == "005A":
             return tlv("5A", bytes.fromhex(self.state.eid)), 0x90, 0x00
@@ -110,6 +116,11 @@ class GpLogic:
         return b"", 0x6A, 0x88
 
     def handle_get_status(self, p1: int, p2: int, data: bytes) -> tuple[bytes, int, int]:
+        """GP Card Spec v2.3 §11.4 GET STATUS — reports installed applications and SDs.
+
+        P1 scope: 0x80 = ISD, 0x40 = Applications/SDs, 0x20 = load-files,
+        0x10 = load-file + modules. Searches *data* AID filter if present.
+        """
         del p2
         scope = int(p1) & 0xFF
         search_aid = self._extract_search_aid(bytes(data or b""))
@@ -172,6 +183,10 @@ class GpLogic:
     # ------------------------------------------------------------------
 
     def handle_install(self, p1: int, p2: int, data: bytes) -> tuple[bytes, int, int]:
+        """GP Card Spec v2.3 §11.5 INSTALL — records install parameters in the GP context.
+
+        P1 0x02 = INSTALL for load; 0x04 = INSTALL for install; 0x08 = INSTALL for make-selectable.
+        """
         sub_function = int(p1) & 0xFF
         more_blocks = (int(p2) & 0x80) == 0
         del more_blocks  # multi-block INSTALL is rare and not modelled
@@ -193,6 +208,7 @@ class GpLogic:
         return b"", 0x6A, 0x86
 
     def handle_load(self, p1: int, p2: int, data: bytes) -> tuple[bytes, int, int]:
+        """GP Card Spec v2.3 §11.6 LOAD — accumulates CAP/IJC block chunks and commits on last block."""
         last_block = (int(p1) & 0x80) != 0
         block_number = int(p2) & 0xFF
         ctx: SimGpInstallContext = self.state.gp_install
@@ -224,6 +240,10 @@ class GpLogic:
         return b"", 0x90, 0x00
 
     def handle_delete(self, p1: int, p2: int, data: bytes) -> tuple[bytes, int, int]:
+        """GP Card Spec v2.3 §11.2 DELETE — removes an application or load-file by AID.
+
+        P2 0x80 requests delete-related (cascade-delete all instances).
+        """
         del p1
         delete_related = (int(p2) & 0x80) != 0
         payload = bytes(data or b"")
@@ -260,6 +280,7 @@ class GpLogic:
         return b"", 0x90, 0x00
 
     def handle_put_key(self, p1: int, p2: int, data: bytes) -> tuple[bytes, int, int]:
+        """GP Card Spec v2.3 §11.8 PUT KEY — stubs key-import (returns 9000 to satisfy INSTALL/PUT KEY sequences)."""
         del data
         kvn = int(p1) & 0xFF
         key_id = int(p2) & 0xFF
@@ -272,6 +293,7 @@ class GpLogic:
         return bytes([kvn]), 0x90, 0x00
 
     def handle_set_status(self, p1: int, p2: int, data: bytes) -> tuple[bytes, int, int]:
+        """GP Card Spec v2.3 §11.9 SET STATUS — transitions ISD or application life-cycle state."""
         scope = int(p1) & 0xFF
         new_state = int(p2) & 0xFF
         payload = bytes(data or b"")
@@ -373,8 +395,8 @@ class GpLogic:
 
     def _install_for_personalization(self, data: bytes) -> tuple[bytes, int, int]:
         # §11.5.2.8: hands the next STORE DATA chain to the named app.
-        # The SgpLogic STORE DATA dispatcher does not key off the
-        # personalization target, so the request is accepted as-is.
+        # The SgpLogic STORE DATA dispatcher does not currently key off
+        # the personalization target, so we accept and move on.
         del data
         return b"", 0x90, 0x00
 

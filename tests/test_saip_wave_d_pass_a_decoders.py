@@ -1,4 +1,5 @@
-"""EAP / USIM / TELECOM / common residual EF decoder coverage.
+"""
+Wave D Pass A — EAP / USIM / TELECOM / common residual EF decoders.
 
 For every EF promoted from the generic opaque pass-through catalog we
 verify three invariants:
@@ -90,7 +91,7 @@ def _roundtrip(token: str, hex_input: str) -> dict[str, object]:
 class TestImsi:
     def test_imsi_decoded_with_hex(self) -> None:
         # Packed IMSI: length byte 08, then BCD "910132547698010"
-        # (nibble-swapped form "1910325476981 0" style) - this test uses a
+        # (nibble-swapped form "1910325476981 0" style) – we use a
         # well-formed TS 31.102 layout (0x08 + 8 bytes).
         hex_input = "0891103254769810F0"
         decoded = _roundtrip("ef-imsi", hex_input)
@@ -101,7 +102,7 @@ class TestImsi:
 
 class TestArrUsim:
     def test_arr_tlv(self) -> None:
-        # A4 06 [ 80 01 03 97 01 AA ] -- AM=0x03 + never
+        # A4 06 [ 80 01 03 97 01 AA ] — AM=0x03 + never
         hex_input = "A4068001039701AA"
         decoded = _roundtrip("ef-arr-usim", hex_input)
         assert decoded["format"] == "Access Rule Reference (USIM)"
@@ -113,7 +114,7 @@ class TestThreshold:
     def test_threshold_three_byte_per_ts_31_102(self) -> None:
         # TS 31.102 §4.2.52: EF.THRESHOLD is 3 bytes carrying the MSB of
         # the maximum allowed STARTCS/STARTPS (hex-integer, unused nibbles
-        # coded as F). earlier work replaced the earlier 1-byte shim
+        # coded as F). Round-2 Pass 1 replaced the earlier 1-byte shim
         # with the spec-accurate 3-byte decoder.
         decoded = _roundtrip("ef-threshold", "000005")
         assert decoded["format"] == "Maximum START value"

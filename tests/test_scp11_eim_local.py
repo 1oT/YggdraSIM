@@ -10,6 +10,8 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
+import pytest
+
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec
@@ -24,7 +26,15 @@ from SCP11.eim_local.eim_package_codec import (
 )
 from SCP11.eim_local.config import EimLocalConfig
 from SCP11.eim_local.models import EimHandoverContext, ensure_handover_transaction
-
+# ``plugins.polling`` is bundled with the full source tree but stripped
+# release flavours (the v1.0.0 freeze, packaged ``clean`` distributions)
+# omit it. ``importorskip`` skips this entire file when the namespace is
+# absent so pytest collection no longer fails on those trees.
+_polling_bridge_module = pytest.importorskip(
+    "plugins.polling.wifi_ethernet_bridge",
+    reason="plugins.polling.wifi_ethernet_bridge unavailable in this build flavour",
+)
+LocalizedPollingBridge = _polling_bridge_module.LocalizedPollingBridge
 from SCP11.eim_local.session import EimLocalSession
 from SCP11.eim_local.main import EimLocalShell
 from SCP11.eim_packages import TYPE_PROFILE_DOWNLOAD_TRIGGER, parse_eim_package
@@ -32,7 +42,7 @@ from yggdrasim_common.session_recording import emit_apdu_trace_event
 
 
 DEFAULT_TEST_EIM_OID = "2.25.311782205282738360923618091971140414400"
-DEFAULT_TEST_EIM_FQDN = "eim.yggdrasim.example.test"
+DEFAULT_TEST_EIM_FQDN = "eim.example.test"
 
 
 def create_poll_fixture_dirs(base_dir: Path) -> tuple[Path, Path]:
@@ -1873,7 +1883,7 @@ class EimLocalModelTests(unittest.TestCase):
         rendered = output.getvalue()
         self.assertIn("ISDR GetEimConfigurationData", rendered)
         self.assertIn("eIM rows : 1", rendered)
-        self.assertIn("eim.yggdrasim.example.test", rendered)
+        self.assertIn("eim.example.test", rendered)
         self.assertIn("LOAD-EIM-PACKAGE completed", rendered)
         self.assertIn("transport : local_auth", rendered)
         self.assertEqual(
@@ -1898,10 +1908,10 @@ class EimLocalModelTests(unittest.TestCase):
                 ],
                 "configured_raw": wrap_tlv(
                     bytes.fromhex("BF3C"),
-                    wrap_tlv(b"\x80", b"smdpplus.example.test"),
+                    wrap_tlv(b"\x80", b"smdpplus2.esim.tst.1ot.mobi"),
                 ),
                 "configured_decoded": {
-                    "default_smdp": "smdpplus.example.test",
+                    "default_smdp": "smdpplus2.esim.tst.1ot.mobi",
                     "root_smds_primary": "",
                     "root_smds_additional": [],
                     "allowed_ci_pkid": [],
@@ -2022,6 +2032,386 @@ class EimLocalModelTests(unittest.TestCase):
             self.assertTrue(bool(row["success"]))
             self.assertEqual(row["event"]["matching_id"], "MID-1")
 
+    def test_localized_bridge_writes_served_and_result_audit_rows(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base_dir = Path(temp_dir)
+            hotfolder_dir = base_dir / "hotfolder"
+            hotfolder_dir.mkdir(parents=True, exist_ok=True)
+            (hotfolder_dir / "010_trigger.json").write_text(
+                json.dumps(
+                    {
+                        "package_type": "profile_download_trigger_request",
+                        "runtime": {
+                            "transaction_id_hex": "0102030405060708090A0B0C0D0E0F10",
+                            "matching_id": "MID-BRIDGE",
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            config = EimLocalConfig(
+                EIM_RUNTIME_STATE_FILE=str(base_dir / "state.json"),
+                EIM_RESPONSE_LOG_FILE=str(base_dir / "responses.jsonl"),
+                EIM_POLL_AUDIT_DB_FILE=str(base_dir / "poll_audit.sqlite3"),
+                EIM_HOTFOLDER_DIR=str(hotfolder_dir),
+                EIM_POLL_INCLUDE_FIXED_FIXTURES=False,
+            )
+            session = EimLocalSession(cfg=config, apdu_channel=None)
+            bridge = LocalizedPollingBridge(session)
+            bridge.set_flow_context(
+                "ipad_live",
+                flow_run_id="RUN-BRIDGE",
+                eid="89049032000000000000000000000001",
+            )
+
+            bridge._installed_profile_iccids = set()
+            bridge._installed_profile_iccids_loaded = True
+
+            payload = bridge._serve_eim_package()
+            self.assertGreater(len(payload), 0)
+            bridge._acknowledge_eim_package_result(bytes.fromhex("BF5000"))
+
+            rows = session.read_poll_audit_rows(limit=10, flow="ipad_live")
+            actions = [str(row.get("action", "")) for row in rows]
+            self.assertIn("localized_eim_package_served", actions)
+            self.assertIn("localized_eim_package_result", actions)
+            served_row = next(row for row in rows if str(row.get("action", "")) == "localized_eim_package_served")
+            result_row = next(row for row in rows if str(row.get("action", "")) == "localized_eim_package_result")
+            self.assertEqual(served_row["package_name"], "010_trigger.json")
+            self.assertEqual(served_row["transaction_id_hex"], "0102030405060708090A0B0C0D0E0F10")
+            self.assertEqual(served_row["matching_id"], "MID-BRIDGE")
+            self.assertEqual(served_row["flow_run_id"], "RUN-BRIDGE")
+            self.assertEqual(result_row["response_preview_hex"], "BF5000")
+
+    def test_localized_bridge_initiate_authentication_decodes_base64_challenge(self) -> None:
+        class _FakeServerSigned1:
+            def dump(self) -> bytes:
+                return b"signed1"
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base_dir = Path(temp_dir)
+            config = EimLocalConfig(
+                EIM_RUNTIME_STATE_FILE=str(base_dir / "state.json"),
+                EIM_RESPONSE_LOG_FILE=str(base_dir / "responses.jsonl"),
+                EIM_POLL_AUDIT_DB_FILE=str(base_dir / "poll_audit.sqlite3"),
+                EIM_POLL_INCLUDE_FIXED_FIXTURES=False,
+            )
+            session = EimLocalSession(cfg=config, apdu_channel=SimpleNamespace())
+            bridge = LocalizedPollingBridge(session)
+            session._ensure_local_material_loaded = lambda: None
+            session._cert_auth = b"cert"
+            session._key_auth = object()
+            expected_challenge = b"\xAA" * 16
+            signed1 = _FakeServerSigned1()
+
+            with mock.patch(
+                "plugins.polling.wifi_ethernet_bridge.CryptoEngine.generate_server_challenges",
+                return_value=(signed1, b"\x10" * 16, b"\x20" * 16),
+            ) as mocked_generate, mock.patch(
+                "plugins.polling.wifi_ethernet_bridge.CryptoEngine.sign_asn1",
+                return_value=b"sig",
+            ) as mocked_sign:
+                response = bridge._handle_smdp_initiate_authentication(
+                    {
+                        "euiccChallenge": base64.b64encode(expected_challenge).decode("ascii"),
+                        "smdpAddress": "smdpp.example.test",
+                    }
+                )
+
+            mocked_generate.assert_called_once_with(
+                expected_challenge,
+                "smdpp.example.test",
+            )
+            mocked_sign.assert_called_once_with(signed1, session._key_auth)
+            self.assertEqual(base64.b64decode(response["transactionId"]), b"\x10" * 16)
+            self.assertEqual(base64.b64decode(response["serverSigned1"]), b"signed1")
+            self.assertEqual(base64.b64decode(response["serverSignature1"]), b"sig")
+            self.assertEqual(base64.b64decode(response["serverCertificate"]), b"cert")
+
+    def test_localized_bridge_get_bound_profile_package_reports_profile_context_on_builder_failure(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base_dir = Path(temp_dir)
+            config = EimLocalConfig(
+                EIM_RUNTIME_STATE_FILE=str(base_dir / "state.json"),
+                EIM_RESPONSE_LOG_FILE=str(base_dir / "responses.jsonl"),
+                EIM_POLL_AUDIT_DB_FILE=str(base_dir / "poll_audit.sqlite3"),
+                EIM_POLL_INCLUDE_FIXED_FIXTURES=False,
+            )
+            session = EimLocalSession(cfg=config, apdu_channel=SimpleNamespace())
+            bridge = LocalizedPollingBridge(session)
+            fake_builder = SimpleNamespace(
+                state=SimpleNamespace(prepare_download_response=b"", transaction_id=b""),
+                _read_profile_source_bytes=lambda profile_path="": bytes.fromhex("A00100"),
+                resolve_profile_path=lambda override_path="": str(base_dir / "profile" / "test_profile.txt"),
+            )
+
+            def _raise_missing_pysim(profile_bytes: bytes) -> bytes:
+                _ = profile_bytes
+                raise RuntimeError("pySim session-bound BPP generation is unavailable in this environment.")
+
+            fake_builder._build_session_bound_profile_package = _raise_missing_pysim
+            bridge._build_offline_profile_builder_session = lambda: fake_builder  # type: ignore[assignment]
+
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "resolved profile source .* as profile_payload \\(3 bytes\\)",
+            ) as raised:
+                bridge._handle_smdp_get_bound_profile_package(
+                    {
+                        "transactionId": base64.b64encode(b"\x10" * 16).decode("ascii"),
+                        "prepareDownloadResponse": base64.b64encode(b"\xBF\x21\x00").decode("ascii"),
+                    }
+                )
+
+            self.assertIn(
+                "pySim session-bound BPP generation is unavailable",
+                str(raised.exception),
+            )
+
+    def test_localized_bridge_skips_duplicate_profile_trigger_after_success(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base_dir = Path(temp_dir)
+            hotfolder_dir = base_dir / "hotfolder"
+            hotfolder_dir.mkdir(parents=True, exist_ok=True)
+            eim_to_esim_dir, esim_to_eim_dir = create_poll_fixture_dirs(base_dir)
+            profile_path = base_dir / "profile" / "duplicate_profile.txt"
+            write_minimal_profile_payload(profile_path, "89880811111111111112")
+            (eim_to_esim_dir / "010_first.json").write_text(
+                json.dumps(
+                    {
+                        "package_type": "profile_download_trigger_request",
+                        "runtime": {
+                            "queue_id": 10,
+                            "transaction_id_hex": "10000000000000000000000000000001",
+                            "matching_id": "FIRST",
+                            "profile_path": str(profile_path),
+                            "smdp_address": "smdpp.example.test",
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (hotfolder_dir / "110_second.json").write_text(
+                json.dumps(
+                    {
+                        "package_type": "profile_download_trigger_request",
+                        "runtime": {
+                            "queue_id": 110,
+                            "transaction_id_hex": "11000000000000000000000000000001",
+                            "matching_id": "SECOND",
+                            "profile_path": str(profile_path),
+                            "smdp_address": "smdpp.example.test",
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            config = EimLocalConfig(
+                EIM_RUNTIME_STATE_FILE=str(base_dir / "state.json"),
+                EIM_RESPONSE_LOG_FILE=str(base_dir / "responses.jsonl"),
+                EIM_POLL_AUDIT_DB_FILE=str(base_dir / "poll_audit.sqlite3"),
+                EIM_HOTFOLDER_DIR=str(hotfolder_dir),
+                EIM_POLL_EIM_TO_ESIM_DIR=str(eim_to_esim_dir),
+                EIM_POLL_ESIM_TO_EIM_DIR=str(esim_to_eim_dir),
+            )
+            session = EimLocalSession(cfg=config, apdu_channel=SimpleNamespace())
+            bridge = LocalizedPollingBridge(session)
+
+            first_payload = bridge._serve_eim_package()
+            first_parsed = parse_eim_package(first_payload)
+            self.assertEqual(first_parsed.package_type, TYPE_PROFILE_DOWNLOAD_TRIGGER)
+            self.assertEqual(first_parsed.matching_id, "FIRST")
+
+            success_branch = session._build_profile_download_trigger_result_tlv(
+                bytes.fromhex("BF3700"),
+                eim_transaction_id=bytes(first_parsed.eim_transaction_id),
+            )
+            success_result = session._build_provide_eim_package_result_tlv(success_branch)
+            next_payload = bridge._acknowledge_eim_package_result(success_result)
+
+            self.assertEqual(next_payload, bytes.fromhex("BF4F03020101"))
+            self.assertEqual(bridge.status_payload().get("queue_index"), 2)
+            rows = session.read_poll_audit_rows(limit=10)
+            actions = [str(row.get("action", "")) for row in rows]
+            self.assertIn("localized_eim_package_skipped_duplicate_iccid", actions)
+
+    def test_localized_bridge_keeps_duplicate_profile_trigger_after_failed_result(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base_dir = Path(temp_dir)
+            hotfolder_dir = base_dir / "hotfolder"
+            hotfolder_dir.mkdir(parents=True, exist_ok=True)
+            eim_to_esim_dir, esim_to_eim_dir = create_poll_fixture_dirs(base_dir)
+            profile_path = base_dir / "profile" / "duplicate_profile.txt"
+            write_minimal_profile_payload(profile_path, "89880811111111111112")
+            (eim_to_esim_dir / "010_first.json").write_text(
+                json.dumps(
+                    {
+                        "package_type": "profile_download_trigger_request",
+                        "runtime": {
+                            "queue_id": 10,
+                            "transaction_id_hex": "10000000000000000000000000000001",
+                            "matching_id": "FIRST",
+                            "profile_path": str(profile_path),
+                            "smdp_address": "smdpp.example.test",
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (hotfolder_dir / "110_second.json").write_text(
+                json.dumps(
+                    {
+                        "package_type": "profile_download_trigger_request",
+                        "runtime": {
+                            "queue_id": 110,
+                            "transaction_id_hex": "11000000000000000000000000000001",
+                            "matching_id": "SECOND",
+                            "profile_path": str(profile_path),
+                            "smdp_address": "smdpp.example.test",
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            config = EimLocalConfig(
+                EIM_RUNTIME_STATE_FILE=str(base_dir / "state.json"),
+                EIM_RESPONSE_LOG_FILE=str(base_dir / "responses.jsonl"),
+                EIM_POLL_AUDIT_DB_FILE=str(base_dir / "poll_audit.sqlite3"),
+                EIM_HOTFOLDER_DIR=str(hotfolder_dir),
+                EIM_POLL_EIM_TO_ESIM_DIR=str(eim_to_esim_dir),
+                EIM_POLL_ESIM_TO_EIM_DIR=str(esim_to_eim_dir),
+            )
+            session = EimLocalSession(cfg=config, apdu_channel=SimpleNamespace())
+            bridge = LocalizedPollingBridge(session)
+
+            first_payload = bridge._serve_eim_package()
+            first_parsed = parse_eim_package(first_payload)
+            self.assertEqual(first_parsed.matching_id, "FIRST")
+
+            error_branch = session._build_profile_download_trigger_result_error(
+                eim_transaction_id=bytes(first_parsed.eim_transaction_id),
+                error_reason=127,
+            )
+            error_result = session._build_provide_eim_package_result_tlv(error_branch)
+            next_payload = bridge._acknowledge_eim_package_result(error_result)
+            next_parsed = parse_eim_package(next_payload)
+
+            self.assertEqual(next_parsed.package_type, TYPE_PROFILE_DOWNLOAD_TRIGGER)
+            self.assertEqual(next_parsed.matching_id, "SECOND")
+            rows = session.read_poll_audit_rows(limit=10)
+            actions = [str(row.get("action", "")) for row in rows]
+            self.assertNotIn("localized_eim_package_skipped_duplicate_iccid", actions)
+
+    def test_localized_bridge_skips_profile_trigger_when_iccid_is_already_installed(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base_dir = Path(temp_dir)
+            hotfolder_dir = base_dir / "hotfolder"
+            hotfolder_dir.mkdir(parents=True, exist_ok=True)
+            eim_to_esim_dir, esim_to_eim_dir = create_poll_fixture_dirs(base_dir)
+            profile_path = base_dir / "profile" / "duplicate_profile.txt"
+            write_minimal_profile_payload(profile_path, "89880811111111111112")
+            (eim_to_esim_dir / "010_first.json").write_text(
+                json.dumps(
+                    {
+                        "package_type": "profile_download_trigger_request",
+                        "runtime": {
+                            "queue_id": 10,
+                            "transaction_id_hex": "10000000000000000000000000000001",
+                            "matching_id": "FIRST",
+                            "profile_path": str(profile_path),
+                            "smdp_address": "smdpp.example.test",
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            config = EimLocalConfig(
+                EIM_RUNTIME_STATE_FILE=str(base_dir / "state.json"),
+                EIM_RESPONSE_LOG_FILE=str(base_dir / "responses.jsonl"),
+                EIM_POLL_AUDIT_DB_FILE=str(base_dir / "poll_audit.sqlite3"),
+                EIM_HOTFOLDER_DIR=str(hotfolder_dir),
+                EIM_POLL_EIM_TO_ESIM_DIR=str(eim_to_esim_dir),
+                EIM_POLL_ESIM_TO_EIM_DIR=str(esim_to_eim_dir),
+            )
+            session = EimLocalSession(cfg=config, apdu_channel=SimpleNamespace())
+            bridge = LocalizedPollingBridge(session)
+            bridge.set_card_query_session(SimpleNamespace(collect_profile_metadata=lambda: [SimpleNamespace(iccid="89880811111111111112")]))
+
+            payload = bridge._serve_eim_package()
+
+            self.assertEqual(payload, bytes.fromhex("BF4F03020101"))
+            rows = session.read_poll_audit_rows(limit=10)
+            actions = [str(row.get("action", "")) for row in rows]
+            self.assertIn("localized_eim_package_skipped_duplicate_iccid", actions)
+
+    def test_localized_bridge_uses_builder_profile_source_for_duplicate_iccid_skip(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base_dir = Path(temp_dir)
+            hotfolder_dir = base_dir / "hotfolder"
+            hotfolder_dir.mkdir(parents=True, exist_ok=True)
+            eim_to_esim_dir, esim_to_eim_dir = create_poll_fixture_dirs(base_dir)
+            profile_path = base_dir / "profile" / "builder_profile.txt"
+            write_minimal_profile_payload(profile_path, "89880811111111111112")
+            (eim_to_esim_dir / "010_first.json").write_text(
+                json.dumps(
+                    {
+                        "package_type": "profile_download_trigger_request",
+                        "runtime": {
+                            "queue_id": 10,
+                            "transaction_id_hex": "10000000000000000000000000000001",
+                            "matching_id": "FIRST",
+                            "profile_path": "missing/profile/path.txt",
+                            "smdp_address": "smdpp.example.test",
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            config = EimLocalConfig(
+                EIM_RUNTIME_STATE_FILE=str(base_dir / "state.json"),
+                EIM_RESPONSE_LOG_FILE=str(base_dir / "responses.jsonl"),
+                EIM_POLL_AUDIT_DB_FILE=str(base_dir / "poll_audit.sqlite3"),
+                EIM_HOTFOLDER_DIR=str(hotfolder_dir),
+                EIM_POLL_EIM_TO_ESIM_DIR=str(eim_to_esim_dir),
+                EIM_POLL_ESIM_TO_EIM_DIR=str(esim_to_eim_dir),
+            )
+            session = EimLocalSession(cfg=config, apdu_channel=SimpleNamespace())
+            bridge = LocalizedPollingBridge(session)
+            bridge.set_card_query_session(SimpleNamespace(collect_profile_metadata=lambda: [SimpleNamespace(iccid="89880811111111111112")]))
+            profile_bytes = session._read_profile_source_bytes(profile_path=str(profile_path))
+            bridge._build_offline_profile_builder_session = lambda: SimpleNamespace(  # type: ignore[assignment]
+                _read_profile_source_bytes=lambda profile_path="": profile_bytes
+            )
+
+            payload = bridge._serve_eim_package()
+
+            self.assertEqual(payload, bytes.fromhex("BF4F03020101"))
+            rows = session.read_poll_audit_rows(limit=10)
+            actions = [str(row.get("action", "")) for row in rows]
+            self.assertIn("localized_eim_package_skipped_duplicate_iccid", actions)
+
+    def test_parse_localized_ipae_args_supports_defaults_and_debug(self) -> None:
+        defaults = EimLocalShell._parse_localized_ipae_args("")
+        self.assertEqual(defaults, (1, 30, False))
+        parsed = EimLocalShell._parse_localized_ipae_args("5 12 --debug")
+        self.assertEqual(parsed, (5, 12, True))
+        parsed_with_extended_flags = EimLocalShell._parse_localized_ipae_args(
+            "7 18 -t 20s -s 5 --debug"
+        )
+        self.assertEqual(parsed_with_extended_flags, (7, 18, True))
+
+    def test_parse_localized_ipad_args_supports_matching_id_and_debug(self) -> None:
+        # Plugin-owned helper — import from the polling plugin package.
+        from plugins.polling.shell_lifecycle import _parse_localized_ipad_args
+        defaults = _parse_localized_ipad_args("")
+        self.assertEqual(defaults, ("", False))
+        parsed = _parse_localized_ipad_args("MATCH-1 --debug")
+        self.assertEqual(parsed, ("MATCH-1", True))
+        reversed_order = _parse_localized_ipad_args("--debug MATCH-2")
+        self.assertEqual(reversed_order, ("MATCH-2", True))
+        with self.assertRaisesRegex(ValueError, "at most one matchingId"):
+            _parse_localized_ipad_args("MID-1 MID-2")
+
     def test_local_eim_debug_flag_strips_argument_and_toggles_raw_apdu_logging(self) -> None:
         class _FakeApduChannel:
             def __init__(self) -> None:
@@ -2123,6 +2513,22 @@ class EimLocalModelTests(unittest.TestCase):
 
         self.assertTrue(keep_running)
         self.assertEqual(captured_arguments, ["MATCH-1 --debug"])
+
+    def test_local_eim_localized_ipad_uses_global_debug_when_enabled(self) -> None:
+        fake_session = SimpleNamespace(apdu_channel=SimpleNamespace())
+        fake_runner = SimpleNamespace(run=mock.Mock())
+
+        with mock.patch.dict(os.environ, {"YGGDRASIM_GLOBAL_DEBUG": "1"}, clear=False):
+            with mock.patch("SCP11.eim_local.main.EimLocalSession", return_value=fake_session):
+                shell = EimLocalShell()
+
+        with mock.patch(
+            "plugins.polling.ipad_standalone.LocalizedIPAdRunner",
+            return_value=fake_runner,
+        ):
+            shell._run_localized_ipad("live", matching_id="MATCH-1")
+
+        self.assertTrue(bool(fake_runner.run.call_args.kwargs["debug"]))
 
     def test_shell_registry_shows_canonical_commands_only(self) -> None:
         shell = EimLocalShell()
@@ -2319,8 +2725,8 @@ class EimLocalModelTests(unittest.TestCase):
         shell = EimLocalShell()
         shell.session = SimpleNamespace(
             identity_summary=lambda: {
-                "eim_fqdn": "eim.yggdrasim.example.test",
-                "smdp_address": "smdpp.yggdrasim.example.test",
+                "eim_fqdn": "eim.example.test",
+                "smdp_address": "smdpp.example.test",
             }
         )
         shell._bridge_status_payload = lambda: {
@@ -2329,7 +2735,7 @@ class EimLocalModelTests(unittest.TestCase):
             "dns_port": 15353,
             "eim_base_url": "https://127.0.0.1:18443",
             "smdp_base_url": "https://127.0.0.1:19443",
-            "smdp_fqdn": "smdpp.yggdrasim.example.test",
+            "smdp_fqdn": "smdpp.example.test",
         }
         shell._plugin_path_sections = [
             {
@@ -2353,7 +2759,217 @@ class EimLocalModelTests(unittest.TestCase):
         self.assertIn("SIM <-> bridge <-> eIM/SM-DP+", rendered)
         self.assertIn("SIM IP Polling", rendered)
         self.assertIn("127.0.0.1:15353", rendered)
-        self.assertIn("eim.yggdrasim.example.test", rendered)
+        self.assertIn("eim.example.test", rendered)
+
+    def test_localized_bridge_provider_disables_direct_eim_tls_public_key_pinning(self) -> None:
+        shell = EimLocalShell()
+        calls: list[bool] = []
+
+        class FakeClient:
+            def set_eim_tls_public_key_pinning_enabled(self, enabled: bool) -> None:
+                calls.append(bool(enabled))
+
+        provider = SimpleNamespace(_client=FakeClient())
+
+        returned = shell._configure_localized_bridge_profile_provider(provider)
+
+        self.assertIs(returned, provider)
+        self.assertEqual(calls, [False])
+
+    def test_run_localized_ipad_uses_bridge_and_orchestrator(self) -> None:
+        shell = EimLocalShell()
+        calls: dict[str, object] = {}
+
+        class FakeBridge:
+            eim_base_url = "https://127.0.0.1:18443"
+            smdp_base_url = "https://127.0.0.1:19443"
+
+            def set_flow_context(self, flow: str, flow_run_id: str = "", eid: str = "") -> None:
+                calls["flow"] = flow
+                calls["flow_run_id"] = flow_run_id
+                calls["eid"] = eid
+
+            def status_payload(self) -> dict[str, object]:
+                return {
+                    "queue_index": 1,
+                    "pending_package_path": "fixtures/010_trigger.json",
+                    "ack_count": 2,
+                }
+
+        class FakeOrchestrator:
+            apdu_channel = SimpleNamespace()
+
+            def run_eim_poll(self, matching_id: str = "") -> None:
+                calls["matching_id"] = matching_id
+
+        def ensure_bridge(reset_runtime: bool = True) -> FakeBridge:
+            calls["reset_runtime"] = reset_runtime
+            return FakeBridge()
+
+        def load_orchestrator(profile_name: str) -> FakeOrchestrator:
+            calls["profile_name"] = profile_name
+            return FakeOrchestrator()
+
+        shell._close_shell_session_if_open = lambda: calls.setdefault("closed_shell", True)
+        shell.session._read_card_eid_safe = lambda: "89049032000000000000000000000001"
+        shell.session.record_poll_audit_event = lambda **kwargs: calls.setdefault("poll_events", []).append(kwargs)
+        shell._ensure_poll_bridge = ensure_bridge
+        shell._load_network_orchestrator = load_orchestrator
+        shell._close_network_runtime = lambda orchestrator: calls.setdefault("closed_runtime", True)
+
+        with contextlib.redirect_stdout(io.StringIO()) as output:
+            shell._run_localized_ipad("live", matching_id="MATCH-1")
+
+        rendered = output.getvalue()
+        self.assertEqual(calls["profile_name"], "live")
+        self.assertEqual(calls["matching_id"], "MATCH-1")
+        self.assertEqual(calls["reset_runtime"], False)
+        self.assertTrue(bool(calls["closed_runtime"]))
+        self.assertEqual(calls["flow"], "ipad_live")
+        self.assertEqual(calls["eid"], "89049032000000000000000000000001")
+        self.assertEqual(len(calls["poll_events"]), 1)
+        self.assertEqual(calls["poll_events"][0]["flow"], "ipad_live")
+        self.assertIn("Active path: IPAd", rendered)
+        self.assertIn("SIM <-> IPAd <-> eIM/SM-DP+", rendered)
+        self.assertIn("Localized IPAd run completed", rendered)
+        self.assertIn("ack_count", rendered)
+
+    def test_run_localized_ipae_maps_attempts_to_watchdog(self) -> None:
+        shell = EimLocalShell()
+        calls: dict[str, object] = {}
+
+        class FakeBridge:
+            bind_host = "127.0.0.1"
+            dns_port = 15353
+
+            def set_flow_context(self, flow: str, flow_run_id: str = "", eid: str = "") -> None:
+                calls["flow"] = flow
+                calls["flow_run_id"] = flow_run_id
+                calls["eid"] = eid
+
+            def status_payload(self) -> dict[str, object]:
+                return {
+                    "ack_count": 0,
+                    "active_transactions": 1,
+                    "pending_package_path": "",
+                }
+
+        class FakeOrchestrator:
+            apdu_channel = SimpleNamespace()
+
+            def run_eim_status_watchdog(self, **kwargs) -> None:
+                calls["watchdog_kwargs"] = kwargs
+
+        def ensure_bridge(reset_runtime: bool = True) -> FakeBridge:
+            calls["reset_runtime"] = reset_runtime
+            return FakeBridge()
+
+        def load_orchestrator(profile_name: str) -> FakeOrchestrator:
+            calls["profile_name"] = profile_name
+            orchestrator = FakeOrchestrator()
+            calls["orchestrator"] = orchestrator
+            return orchestrator
+
+        shell._close_shell_session_if_open = lambda: calls.setdefault("closed_shell", True)
+        shell.session._read_card_eid_safe = lambda: "89049032000000000000000000000002"
+        shell.session.record_poll_audit_event = lambda **kwargs: calls.setdefault("poll_events", []).append(kwargs)
+        shell._ensure_poll_bridge = ensure_bridge
+        shell._load_network_orchestrator = load_orchestrator
+        shell._close_network_runtime = lambda orchestrator: calls.setdefault("closed_runtime", True)
+        shell._set_cached_poll_target_fqdns(["eim2.esim.tst.1ot.mobi"])
+
+        with contextlib.redirect_stdout(io.StringIO()) as output:
+            shell._run_localized_ipae("test", argument="7 18 -t 20s -s 5 --debug")
+
+        rendered = output.getvalue()
+        watchdog_kwargs = calls["watchdog_kwargs"]
+        self.assertEqual(calls["profile_name"], "test")
+        self.assertEqual(calls["reset_runtime"], True)
+        self.assertEqual(watchdog_kwargs["poll_attempts_per_fqdn"], 7)
+        self.assertEqual(watchdog_kwargs["timer_expiration_window_seconds"], 18)
+        self.assertTrue(bool(watchdog_kwargs["timer_window_explicit"]))
+        self.assertEqual(watchdog_kwargs["poll_attempt_delay_seconds"], 20)
+        self.assertEqual(watchdog_kwargs["poll_attempt_post_status_loops"], 5)
+        self.assertTrue(bool(watchdog_kwargs["debug"]))
+        self.assertEqual(watchdog_kwargs["duration_seconds"], 60)
+        self.assertEqual(calls["flow"], "ipae_test")
+        self.assertEqual(calls["eid"], "89049032000000000000000000000002")
+        self.assertEqual(len(calls["poll_events"]), 1)
+        self.assertEqual(calls["poll_events"][0]["flow"], "ipae_test")
+        self.assertTrue(
+            callable(
+                getattr(
+                    calls["orchestrator"],
+                    "_resolve_cached_poll_target_fqdns",
+                    None,
+                )
+            )
+        )
+        self.assertEqual(
+            calls["orchestrator"]._resolve_cached_poll_target_fqdns(),
+            ["eim2.esim.tst.1ot.mobi"],
+        )
+        self.assertIn("Active path: SIM IP", rendered)
+        self.assertIn("SIM <-> bridge <-> eIM/SM-DP+", rendered)
+        self.assertIn("Localized IPAe watchdog completed", rendered)
+
+    def test_run_localized_ipae_auto_extends_timer_window_for_delayed_attempts(self) -> None:
+        shell = EimLocalShell()
+        calls: dict[str, object] = {}
+
+        class FakeBridge:
+            bind_host = "127.0.0.1"
+            dns_port = 15353
+
+            def set_flow_context(self, flow: str, flow_run_id: str = "", eid: str = "") -> None:
+                calls["flow"] = flow
+                calls["flow_run_id"] = flow_run_id
+                calls["eid"] = eid
+
+            def status_payload(self) -> dict[str, object]:
+                return {
+                    "ack_count": 0,
+                    "active_transactions": 1,
+                    "pending_package_path": "",
+                }
+
+        class FakeOrchestrator:
+            apdu_channel = SimpleNamespace()
+
+            def run_eim_status_watchdog(self, **kwargs) -> None:
+                calls["watchdog_kwargs"] = kwargs
+
+        def ensure_bridge(reset_runtime: bool = True) -> FakeBridge:
+            calls["reset_runtime"] = reset_runtime
+            return FakeBridge()
+
+        def load_orchestrator(profile_name: str) -> FakeOrchestrator:
+            calls["profile_name"] = profile_name
+            return FakeOrchestrator()
+
+        shell._close_shell_session_if_open = lambda: calls.setdefault("closed_shell", True)
+        shell.session._read_card_eid_safe = lambda: "89049032000000000000000000000002"
+        shell.session.record_poll_audit_event = lambda **kwargs: calls.setdefault("poll_events", []).append(kwargs)
+        shell._ensure_poll_bridge = ensure_bridge
+        shell._load_network_orchestrator = load_orchestrator
+        shell._close_network_runtime = lambda orchestrator: calls.setdefault("closed_runtime", True)
+
+        with contextlib.redirect_stdout(io.StringIO()) as output:
+            shell._run_localized_ipae("test", argument="3 -t 15 -s 60")
+
+        rendered = output.getvalue()
+        watchdog_kwargs = calls["watchdog_kwargs"]
+        self.assertEqual(calls["profile_name"], "test")
+        self.assertEqual(watchdog_kwargs["poll_attempts_per_fqdn"], 3)
+        # Realistic per-attempt budget floor is 20s (covers DNS + TLS + eIM
+        # POST + drain + CLOSE CHANNEL observed on production cards). Expected
+        # floor: 3 attempts * 1 target * 20s + 60 post-status loops * 5s = 360.
+        self.assertEqual(watchdog_kwargs["timer_expiration_window_seconds"], 360)
+        self.assertEqual(watchdog_kwargs["poll_attempt_delay_seconds"], 15)
+        self.assertEqual(watchdog_kwargs["poll_attempt_post_status_loops"], 60)
+        self.assertFalse(bool(watchdog_kwargs["debug"]))
+        self.assertIn("timer expiration stimuli window: 360s (auto)", rendered)
+        self.assertIn("auto-extended to 360s", rendered)
 
 
 class PollCampaignSummaryFormattingTests(unittest.TestCase):

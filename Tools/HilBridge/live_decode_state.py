@@ -1,3 +1,5 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+"""HIL-Bridge live-decode state: accumulates captured APDU frames and maintains the decoded protocol tree for the TUI."""
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
@@ -176,6 +178,7 @@ class _PendingProactiveState:
 
 
 def annotate_packet_summary(row: PacketSummary, annotation: StatefulFrameAnnotation | None) -> PacketSummary:
+    """Annotate a single packet summary line with decoded APDU or ATR information."""
     if annotation is None:
         return row
     suffix = str(annotation.summary_suffix or "").strip()
@@ -194,6 +197,7 @@ def build_stateful_packet_annotations(
     *,
     replay_engine: ScpReplayEngine | None = None,
 ) -> dict[int, StatefulFrameAnnotation]:
+    """Process a batch of packet summaries and return stateful decoded annotations."""
     tracker = LiveDecodeStateTracker(replay_engine=replay_engine)
     annotations: dict[int, StatefulFrameAnnotation] = {}
     ordered_rows = sorted(rows, key=lambda row: int(row.number))
@@ -251,7 +255,7 @@ class LiveDecodeStateTracker:
         self._recent_file_operations: list[str] = []
         # Card-session tracking. The counter starts at 1; every detected
         # reset increments it. `_pending_card_session_bump_reason` is set
-        # when the *next* frame is required to open a new session (the REFRESH
+        # when we need the *next* frame to open a new session (the REFRESH
         # TERMINAL RESPONSE itself still belongs to the closing session).
         self._card_session_index: int = 1
         self._pending_card_session_bump_reason: str = ""
@@ -270,6 +274,7 @@ class LiveDecodeStateTracker:
         self,
         annotations: dict[int, StatefulFrameAnnotation],
     ) -> dict[int, StatefulFrameAnnotation]:
+        """Complete any pending multi-packet decode state and return the final annotation list."""
         occurrence_by_channel: dict[int, int] = {}
         ordered_sessions = sorted(
             self._sessions.values(),
@@ -385,6 +390,7 @@ class LiveDecodeStateTracker:
         # when a frame lacks an explicit channel-session tag. The tuple is
         # (start_frame, end_frame, session_id); end_frame is clamped to
         # the sentinel 2_000_000_000 when the session is still open.
+        """Return a list of (start_frame, end_frame) pairs for each APDU session in the capture."""
         ranges: list[tuple[int, int, int]] = []
         for session in self._sessions.values():
             start_frame = session.open_request_frame
@@ -420,6 +426,7 @@ class LiveDecodeStateTracker:
         session.channel_number = int(channel_number)
 
     def consume_row(self, row: PacketSummary) -> StatefulFrameAnnotation:
+        """Consume one summary row dict and advance the decode-state machine."""
         frame_number = int(row.number)
         frame_time_seconds = _parse_capture_time_seconds(row.time_text)
         self._row_time_seconds = frame_time_seconds
@@ -935,7 +942,7 @@ class LiveDecodeStateTracker:
             )
         except Exception as engine_exc:
             frame_lines.append(
-                f"SCP replay: engine error ({engine_exc}) -- ciphered APDU left wrapped."
+                f"SCP replay: engine error ({engine_exc}) — ciphered APDU left wrapped."
             )
             return
         if result is None:
@@ -1755,9 +1762,9 @@ def _parse_event_download(payload: bytes) -> dict[str, object] | None:
         # ETSI TS 101.220 COMPREHENSION-TLV tags may arrive with the CR
         # (comprehension required) bit either set or cleared, and some
         # implementations additionally mark a tag as constructed. Accept
-        # each of the permitted encodings for the fields here so live
-        # captures resolve to a concrete event code / channel status,
-        # not a silent default of 0x00.
+        # each of the permitted encodings for the fields we care about so
+        # that live captures from real cards always resolve to a concrete
+        # event code / channel status, not a silent default of 0x00.
         if tag_bytes in _EVENT_LIST_TAGS and len(value_bytes) > 0:
             fields["event_code"] = int(value_bytes[0])
             continue

@@ -56,9 +56,9 @@ class QuirksValueDisplayTests(_EnvIsolationMixin, unittest.TestCase):
         self.assertNotIn("workspace default unavailable", text)
 
     def test_concrete_path_is_passed_through(self) -> None:
-        # Route the getter through a patched env to avoid depending on
+        # Route the getter through a patched env so we do not depend on
         # the operator's real workspace. An absolute path survives the
-        # normalisation, so the result can be asserted directly.
+        # normalisation, so we can assert directly on the result.
         os.environ[SIM_QUIRKS_ENV] = "/tmp/example-quirks.py"
 
         text = main_wrapper._quirks_value_display()

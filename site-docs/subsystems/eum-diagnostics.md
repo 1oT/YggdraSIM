@@ -8,12 +8,12 @@ tags:
   - wireshark
 ---
 
-# EUM Diagnostics
+# EUM Diagnostics "God-Mode"
 
 `Tools/EumDiag/` is the *server-side* diagnostic toolbox for
 ES8+ / Bound Profile Package (BPP) work. Its purpose is to take
-ShS-ENC / ShS-MAC / DEK session material -- which an EUM or
-SM-DP+ operator already has in its session database -- and turn
+ShS-ENC / ShS-MAC / DEK session material — which an EUM or
+SM-DP+ operator already has in its session database — and turn
 an otherwise opaque `BF36` capture into an analysable one through
 a Wireshark/tshark Lua dissector.
 

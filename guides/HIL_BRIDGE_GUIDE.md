@@ -291,8 +291,8 @@ keeps two independent gates:
 Practical consequences:
 
 - Sim mode with the SIMtrace2 cable still attached behaves exactly
-  like reader mode from the modem's point of view -- REMSIM stays
-  alive so the modem keeps getting answers from the bridge -- except
+  like reader mode from the modem's point of view — REMSIM stays
+  alive so the modem keeps getting answers from the bridge — except
   the bridge serves APDUs from the simulator instead of the PC/SC
   reader.
 - Sim mode without SIMtrace2 attached still serves the YggdraSIM-side
@@ -529,7 +529,7 @@ are auto-discovered in this order:
 2. `<stem>.keys.json` (capture path with extension stripped + `.keys.json`)
 
 Both locations are checked before the TUI launches. A missing or
-unreadable keybag is non-fatal -- ciphered APDUs simply stay wrapped
+unreadable keybag is non-fatal — ciphered APDUs simply stay wrapped
 in the TUI.
 
 ### 11.3 Producing a keybag

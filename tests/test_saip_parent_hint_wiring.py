@@ -1,18 +1,19 @@
-"""parent_hint wiring tests for the SAIP decoded-edit TUI.
+"""
+Round-5 Sweep 2 — parent_hint wiring regression tests.
 
 These tests lock in the plumbing that carries the enclosing PE section
-key (``usim``, ``telecom``, ``isim``, ``csim`` ...) through the decoded-
+key (``usim``, ``telecom``, ``isim``, ``csim`` …) through the decoded-
 edit TUI into the SAIP decoders, so that FIDs that collide across
 applications resolve against their real parent instead of the first
 match in the catalogue.
 
 Colliding FIDs exercised here:
 
-* ``6F3A`` -- ``ef-adn`` lives under ADF.USIM.DF.PhoneBook, DF.Telecom
+* ``6F3A`` — ``ef-adn`` lives under ADF.USIM.DF.PhoneBook, DF.Telecom
   and DF.GSM; the on-card interpretation differs because the records
   share no container.
 
-* ``6F06`` -- EF.ARR exists under MF, DF.Telecom and every ADF; the
+* ``6F06`` — EF.ARR exists under MF, DF.Telecom and every ADF; the
   referenced-SA decoder needs the parent hint to emit the right
   ``arrFileName`` label.
 """

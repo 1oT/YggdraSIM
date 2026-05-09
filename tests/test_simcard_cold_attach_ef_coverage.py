@@ -1,7 +1,7 @@
 """Cold-attach SELECT coverage for the default ADF.USIM / DF.TELECOM tree.
 
-A reference HIL trace showed the modem walking a fixed list of FIDs
-via path-rooted SELECTs (``00A40804047FFF<FID>`` and
+The HIL trace captured on 2026-04-27 showed the modem walking a fixed
+list of FIDs via path-rooted SELECTs (``00A40804047FFF<FID>`` and
 ``00A40804047F10...``) immediately after USIM activation. Several of
 those FIDs returned ``6A82`` even though TS 31.102 §4.2 / CPHS Phase 2
 §B.4 require them to be present on a real card -- e.g. EF.FDN (6F3B),

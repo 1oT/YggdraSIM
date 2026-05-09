@@ -13,9 +13,13 @@ Notes:
 ## Repository Root
 
 - [`AUTHORS`](sources/AUTHORS/index.md)
+- [`CHANGELOG.md`](sources/CHANGELOG.md)
+- [`CODE_OF_CONDUCT.md`](sources/CODE_OF_CONDUCT.md)
+- [`CONTRIBUTING.md`](sources/CONTRIBUTING.md)
 - [`LICENSE`](sources/LICENSE/index.md)
 - [`NOTICE`](sources/NOTICE/index.md)
 - [`README.md`](sources/README.md)
+- [`SECURITY.md`](sources/SECURITY.md)
 
 ## Authored Guides
 
@@ -25,7 +29,6 @@ Notes:
 - [`guides/CLI_AND_PIPING_GUIDE.md`](sources/guides/CLI_AND_PIPING_GUIDE.md)
 - [`guides/CONFIGURATION_AND_CERTIFICATES.md`](sources/guides/CONFIGURATION_AND_CERTIFICATES.md)
 - [`guides/DIAGNOSTICS_TOOLBOX.md`](sources/guides/DIAGNOSTICS_TOOLBOX.md)
-- [`guides/GUI_HOST_SHELL_GUIDE.md`](sources/guides/GUI_HOST_SHELL_GUIDE.md)
 - [`guides/HIL_BRIDGE_GUIDE.md`](sources/guides/HIL_BRIDGE_GUIDE.md)
 - [`guides/INSTALL_CLEAN.md`](sources/guides/INSTALL_CLEAN.md)
 - [`guides/INSTALL_FROM_SOURCE.md`](sources/guides/INSTALL_FROM_SOURCE.md)
@@ -66,6 +69,7 @@ Notes:
 
 ## Scripts
 
+- [`scripts/demos/README.md`](sources/scripts/demos/README.md)
 - [`scripts/install/README.md`](sources/scripts/install/README.md)
 
 ## Test And Harness Docs

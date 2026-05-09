@@ -9,7 +9,7 @@ body:
         ### Before you submit
         - Features **must** be approved by a maintainer before a pull
           request referencing them will be accepted. Unapproved PRs are
-          closed automatically -- see `.github/SECURITY_CONTROLS.md`.
+          closed automatically — see `.github/SECURITY_CONTROLS.md`.
         - Changes that alter cryptographic primitives, SCP03/11 state
           machines, eUICC profile formats or supply-chain surface area
           require a written specification reference.
@@ -28,6 +28,7 @@ body:
         - SIMCARD engine / NAA / profile store
         - SAIP profile tooling
         - HIL bridge
+        - Polling plugin
         - Device inventory / envelope encryption
         - Docs (mkdocs / guides / offline mirror)
         - Installers / packaging / CI
@@ -91,9 +92,9 @@ body:
     attributes:
       label: Security/compliance sensitivity
       options:
-        - High -- touches cryptography, secret storage, or TLS / pinning
-        - Medium -- touches APDU dispatch, SCP session state, or profile state
-        - Low -- docs / packaging / UI only
+        - High — touches cryptography, secret storage, or TLS / pinning
+        - Medium — touches APDU dispatch, SCP session state, or profile state
+        - Low — docs / packaging / UI only
     validations:
       required: true
 

@@ -1,3 +1,4 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """Central gate for insecure / introspection TLS contexts used by SCP11.
 
 Two distinct trust-posture needs exist in the SCP11 tree:
@@ -12,7 +13,7 @@ Two distinct trust-posture needs exist in the SCP11 tree:
    client needs to fetch the server's certificate chain so it can
    auto-learn a trust anchor for a freshly-seen FQDN and persist it
    under ``SCP11/<tree>/dynamic_ca/``. No request body is ever sent
-   over this context -- only the TLS handshake runs, and the socket is
+   over this context — only the TLS handshake runs, and the socket is
    closed immediately after the peer cert is read. Auto-learn is the
    intended day-one behaviour for new eUICCs / new eIM endpoints, so
    this path is allowed by default and can only be *tightened* for
@@ -20,16 +21,16 @@ Two distinct trust-posture needs exist in the SCP11 tree:
 
 The two gates are:
 
-- ``YGGDRASIM_SCP11_ALLOW_INSECURE_TLS`` -- opts in to full unpinned
+- ``YGGDRASIM_SCP11_ALLOW_INSECURE_TLS`` — opts in to full unpinned
   request traffic. Default: refused. Controls
   :func:`create_insecure_context` and :func:`configure_unpinned_context`.
 
-- ``YGGDRASIM_SCP11_REQUIRE_PINNED_TLS`` -- hard-lock that also refuses
+- ``YGGDRASIM_SCP11_REQUIRE_PINNED_TLS`` — hard-lock that also refuses
   unpinned request traffic even if the ``ALLOW_INSECURE_TLS`` flag is
   set. Intended for CI / fleet deployments where nobody should ever
   downgrade a request.
 
-- ``YGGDRASIM_SCP11_REQUIRE_PINNED_TLS_INTROSPECTION`` -- separate
+- ``YGGDRASIM_SCP11_REQUIRE_PINNED_TLS_INTROSPECTION`` — separate
   hard-lock that also disables the read-only TOFU bootstrap. Default:
   unset, i.e. introspection is allowed. Only set this in air-gapped
   or attestation-only environments where *no* new trust anchor may be

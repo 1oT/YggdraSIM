@@ -1,3 +1,4 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """
 Unified profile-document loader for the SAIP diff engine.
 
@@ -8,7 +9,7 @@ dicts. In practice the operator will point it at either:
   which needs no external dependencies,
 * a ``*.der`` / ``*.pp`` / ``*.upp`` raw SAIP profile package, which
   can only be decoded via ``pySim.esim.saip.ProfileElementSequence``,
-* a ``*.txt`` / ``*.hex`` ASCII hex-dump of a DER package -- the same
+* a ``*.txt`` / ``*.hex`` ASCII hex-dump of a DER package — the same
   shape ``OPEN`` / ``USE`` accept via
   :meth:`Tools.ProfilePackage.saip_tool.SaipToolBridge._prepare_input_for_tool`.
   Whitespace and case are normalised before the bytes are handed to
@@ -94,7 +95,7 @@ def _looks_like_simulator_manifest(payload: dict[str, Any]) -> bool:
 def _looks_like_ascii_hex(text: str) -> bool:
     """Heuristic: does *text* look like a hex-dump of a DER profile?
 
-    The check is intentionally cheap -- we only inspect the first
+    The check is intentionally cheap — we only inspect the first
     ``_HEX_SNIFF_HEAD_LIMIT`` characters, accept whitespace as a free
     separator (so multi-line ``xxd`` / ``hexdump -C``-style input is
     fine once column markers are stripped) and demand at least one
@@ -115,19 +116,44 @@ def _looks_like_ascii_hex(text: str) -> bool:
     return seen_hex_digit
 
 
-def _decode_hex_text_payload(text: str, *, source: Path) -> bytes:
+def _decode_hex_text_payload(
+    text: str,
+    *,
+    source: Path,
+) -> tuple[bytes, list]:
     """Convert a hex-dump string to its underlying DER bytes.
 
     Validation mirrors
     :meth:`Tools.ProfilePackage.saip_tool.SaipToolBridge._prepare_input_for_tool`
     so the diagnostic the diff command emits matches what the operator
-    will see if they later try to OPEN the same file.
+    will see if they later try to OPEN the same file. Inline typed
+    placeholders (``{name:TYPE:length[:modifier]}``) are substituted
+    with deterministic sentinel bytes before hex decoding; the returned
+    records are handed back so the caller can splice the literals back
+    into the decoded document for a semantic diff.
     """
-    normalized_hex = "".join(text.split()).upper()
+    from .saip_hex_template import (
+        detect_inline_placeholders,
+        iter_inline_placeholders,
+        substitute_inline_placeholders,
+    )
+
+    working_text = text
+    records: list = []
+    if detect_inline_placeholders(text):
+        working_text, records = substitute_inline_placeholders(text)
+    normalized_hex = "".join(working_text.split()).upper()
     if len(normalized_hex) == 0:
         raise SaipDiffLoadError(f"{source}: hex-text profile is empty")
     for character in normalized_hex:
         if character not in "0123456789ABCDEF":
+            leftover = [match.group(0) for match in iter_inline_placeholders(text)]
+            if len(leftover) > 0:
+                preview = ", ".join(sorted(set(leftover))[:4])
+                raise SaipDiffLoadError(
+                    f"{source}: inline typed placeholders did not substitute cleanly "
+                    f"({preview}); report as a bug"
+                )
             raise SaipDiffLoadError(
                 f"{source}: hex-text profile contains non-hex characters"
             )
@@ -136,7 +162,7 @@ def _decode_hex_text_payload(text: str, *, source: Path) -> bytes:
             f"{source}: hex-text profile has odd-length payload "
             f"({len(normalized_hex)} characters after whitespace strip)"
         )
-    return bytes.fromhex(normalized_hex)
+    return bytes.fromhex(normalized_hex), records
 
 
 def _normalise_simulator_manifest(payload: dict[str, Any], *, source: Path) -> dict[str, Any]:
@@ -200,13 +226,15 @@ def _decode_der_bytes(
     workspace_root: Path,
     *,
     shape: str = "saip-der",
+    placeholder_records: list | None = None,
 ) -> LoadedDocument:
     """Decode *der_bytes* via pySim and return a normalised document.
 
     The path is only used for error wording / ``LoadedDocument.source_path``.
-    Splitting this out from :func:`_load_der_profile` lets the hex-text
-    branch reuse the same pipeline without re-reading the file or
-    duplicating the pySim import dance.
+    When ``placeholder_records`` is supplied (hex-text branch), the
+    decoded document has inline typed-placeholder literals spliced
+    back into the tagged hex leaves so the diff engine compares
+    semantic template shape rather than blake2s sentinel bytes.
     """
     try:
         ensure_workspace_pysim_on_path(workspace_root)
@@ -231,6 +259,12 @@ def _decode_der_bytes(
         raise SaipDiffLoadError(
             f"{path}: DER decode failed: {exc.__class__.__name__}: {exc}"
         ) from exc
+
+    if placeholder_records is not None and len(placeholder_records) > 0:
+        from .saip_hex_template import splice_literals_into_tagged_document
+
+        splice_literals_into_tagged_document(document, placeholder_records)
+
     return LoadedDocument(source_path=path, shape=shape, document=document)
 
 
@@ -248,8 +282,14 @@ def _load_hex_text_profile(
     workspace_root: Path,
 ) -> LoadedDocument:
     """Translate a hex-text profile into a DER-decoded document."""
-    decoded_bytes = _decode_hex_text_payload(raw_text, source=path)
-    return _decode_der_bytes(path, decoded_bytes, workspace_root, shape="saip-hex")
+    decoded_bytes, placeholder_records = _decode_hex_text_payload(raw_text, source=path)
+    return _decode_der_bytes(
+        path,
+        decoded_bytes,
+        workspace_root,
+        shape="saip-hex",
+        placeholder_records=placeholder_records,
+    )
 
 
 def load_profile_document(path: Path, *, workspace_root: Path) -> LoadedDocument:
@@ -288,7 +328,7 @@ def load_profile_document(path: Path, *, workspace_root: Path) -> LoadedDocument
             )
 
         # Hex-text fallback. ``.txt`` / ``.hex`` profiles are ASCII
-        # hex dumps of a DER package -- the same shape OPEN / USE
+        # hex dumps of a DER package — the same shape OPEN / USE
         # accept. We honour the explicit suffix unconditionally and
         # fall back to a content sniff for extension-less inputs so a
         # mis-named file still lands in the right branch. Any failure

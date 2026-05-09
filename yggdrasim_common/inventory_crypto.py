@@ -1,3 +1,5 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+"""Inventory crypto manager: age-based encryption/decryption for secret files stored in the device inventory."""
 from __future__ import annotations
 
 import json
@@ -119,6 +121,7 @@ class InventoryCryptoManager:
         return bool(payload.get(self.ENVELOPE_MARKER, False))
 
     def encrypt_payload(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Encrypt *plaintext* bytes using the active KDF and cipher and return the ciphertext."""
         if self.write_encryption_enabled() is False:
             return dict(payload)
         provider = self._normalized_provider()
@@ -133,6 +136,7 @@ class InventoryCryptoManager:
         }
 
     def decrypt_payload(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Decrypt *ciphertext* bytes using the active KDF and cipher and return the plaintext."""
         if self.is_encrypted_payload(payload) is False:
             return dict(payload)
         provider = str(payload.get("provider", "")).strip().lower()
@@ -170,6 +174,7 @@ class InventoryCryptoManager:
         return provider
 
     def provider_ready_for_encrypt(self) -> bool:
+        """Return True if the active encryption provider has all required key material."""
         provider = self._normalized_provider()
         if provider != "gpg":
             return False
@@ -347,6 +352,7 @@ def read_secret_file_bytes(
     crypto_manager: InventoryCryptoManager | None = None,
     protect_plaintext_on_read: bool = False,
 ) -> bytes:
+    """Read and return the raw bytes of a secret file, applying any configured decryption."""
     file_path = Path(path)
     raw_bytes = file_path.read_bytes()
     manager = _coerce_crypto_manager(crypto_manager)
@@ -363,6 +369,7 @@ def write_secret_file_bytes(
     *,
     crypto_manager: InventoryCryptoManager | None = None,
 ) -> None:
+    """Write *data* to *path* setting restrictive permissions (0o600) afterwards."""
     file_path = Path(path)
     file_path.parent.mkdir(parents=True, exist_ok=True)
     manager = _coerce_crypto_manager(crypto_manager)
@@ -405,6 +412,7 @@ def read_secret_json_file(
     crypto_manager: InventoryCryptoManager | None = None,
     protect_plaintext_on_read: bool = False,
 ) -> Any:
+    """Read and JSON-decode the contents of a secret (0o600-protected) JSON file."""
     file_path = Path(path)
     if file_path.is_file() is False:
         return None
@@ -440,5 +448,6 @@ def write_secret_json_file(
     *,
     crypto_manager: InventoryCryptoManager | None = None,
 ) -> None:
+    """JSON-encode *obj* and write it to *path* with restrictive permissions."""
     encoded = json.dumps(payload, indent=2, sort_keys=True, ensure_ascii=True).encode("utf-8") + b"\n"
     write_secret_file_bytes(path, encoded, crypto_manager=crypto_manager)

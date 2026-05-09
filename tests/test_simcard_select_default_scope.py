@@ -57,7 +57,7 @@ class SelectDefaultScopeTests(unittest.TestCase):
         return self._select(0x04, bytes.fromhex(aid))
 
     def test_imsi_is_unreachable_from_mf_context(self) -> None:
-        """`SELECT 6F07` from MF must fail -- EF.IMSI lives under ADF.USIM."""
+        """`SELECT 6F07` from MF must fail — EF.IMSI lives under ADF.USIM."""
         _, sw1, sw2 = self._select_fid("3F00")
         self.assertEqual((sw1, sw2), (0x90, 0x00))
         _, sw1, sw2 = self._select_fid("6F07")

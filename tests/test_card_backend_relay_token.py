@@ -2,7 +2,7 @@
 
 Verifies that:
 
-* :class:`RelayCardConnection` attaches an ``Authorization: Bearer ...``
+* :class:`RelayCardConnection` attaches an ``Authorization: Bearer …``
   header to outbound HTTP exchanges when a token is configured.
 * :func:`_resolve_card_relay_token` honours ``YGGDRASIM_CARD_RELAY_TOKEN``
   and ``YGGDRASIM_CARD_RELAY_TOKEN_FILE`` in the documented order.

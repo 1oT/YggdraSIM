@@ -6,10 +6,10 @@ unless a maintainer has explicitly approved the underlying request.
 
 ## Roles
 
-- **Contributor** -- anyone without `write`, `maintain` or `admin`
+- **Contributor** — anyone without `write`, `maintain` or `admin`
   permission on this repository. This is the default for community
   contributors and for new collaborators during onboarding.
-- **Maintainer / privileged account** -- an account with `write`,
+- **Maintainer / privileged account** — an account with `write`,
   `maintain` or `admin` permission on this repository. Privilege is
   resolved at event time via the
   `GET /repos/{owner}/{repo}/collaborators/{username}/permission`
@@ -43,7 +43,7 @@ pull-request event. It:
 
 1. Parses the PR title and body for same-repo issue references using
    the GitHub keywords: `Closes`, `Fixes`, `Resolves`, `Refs`,
-   `Related to` -- all case-insensitive, with optional `:` or `-`
+   `Related to` — all case-insensitive, with optional `:` or `-`
    separator.
 2. Fetches each referenced issue (rejects references to PRs and
    non-existent issues).
@@ -57,7 +57,7 @@ pull-request event. It:
 `bypass-approval-check` is a PR- or issue-level label that skips the
 linked-issue requirement. It is gated the same way as `approved`:
 non-privileged accounts cannot apply or remove it. Bypass is intended
-for urgent CI-only / docs-only maintainer fixes -- never for code
+for urgent CI-only / docs-only maintainer fixes — never for code
 changes that touch cryptography, SCP state machines, APDU surfaces,
 TLS, or supply chain.
 
@@ -95,7 +95,7 @@ When triaging a new issue:
 
 - A contributor opens a PR that appears to address a trivial issue but
   actually introduces a cryptographic regression, a supply-chain
-  vector, or a key-leak path -- before any maintainer has seen the
+  vector, or a key-leak path — before any maintainer has seen the
   underlying issue.
 - A contributor self-labels an issue `approved` to race a PR past the
   gate.
@@ -104,10 +104,10 @@ When triaging a new issue:
   force a new approval cycle or to silence tooling.
 
 All four are blocked by the workflows above. The gate does **not**
-replace required reviewers, branch protection, or CODEOWNERS -- it
+replace required reviewers, branch protection, or CODEOWNERS — it
 adds a triage requirement on top of them.
 
-## Future extensions
+## Future extensions (post-v1)
 
 - Require a second maintainer approval for issues labelled with a
   `risk:high` category via a dedicated workflow.

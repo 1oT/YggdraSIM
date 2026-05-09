@@ -1,3 +1,5 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+"""Process debug helpers: thread-dump signal handler and memory-usage reporter for long-running daemon processes."""
 import argparse
 import contextlib
 import os
@@ -35,6 +37,7 @@ def add_debug_argument(
     *,
     help_text: str = "Enable verbose debug output.",
 ) -> None:
+    """Add a `--debug` argument group to *parser* with process diagnostic flags."""
     parser.add_argument(
         "--debug",
         "--verbose",
@@ -85,49 +88,6 @@ def suppress_noisy_crypto_warnings():
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", CryptographyDeprecationWarning)
         yield
-
-
-def subprocess_env_without_bundle_libs(
-    base_env: "dict[str, str] | os._Environ[str] | None" = None,
-) -> dict[str, str]:
-    """Return an env dict safe for launching *system* binaries from a frozen bundle.
-
-    PyInstaller's bootloader injects the bundle extraction directory
-    (``sys._MEIPASS``) into ``LD_LIBRARY_PATH`` / ``DYLD_LIBRARY_PATH``
-    before handing control to the frozen script. When the script then
-    invokes a system binary (``systemctl``, ``zenity``, ``tshark``,
-    ``lsusb``, ...) via :mod:`subprocess`, the child inherits that path
-    and ``ld.so`` loads bundle-shipped copies of shared libraries
-    (``libcrypto.so.3``, ``libssl.so.3``, ``libffi.so.8``, ...) instead
-    of the system's own. That breaks symbol versioning whenever the
-    system binary was linked against a newer ``.so`` than the bundle
-    carries -- for example a PyInstaller bundle built against
-    ``libcrypto.so.3`` without the ``OPENSSL_3.4.0`` symbol version
-    that host ``systemd`` 257 / ``libsystemd-shared-257.so`` requires.
-
-    PyInstaller saves the original (pre-override) values in
-    ``LD_LIBRARY_PATH_ORIG`` / ``DYLD_LIBRARY_PATH_ORIG``. This helper
-    copies ``base_env`` (or :data:`os.environ`), restores those values
-    when present, and unsets the overridden keys otherwise. The
-    returned dict is safe to pass as ``env=`` to :func:`subprocess.run`
-    / :class:`subprocess.Popen` when the child is a system binary.
-
-    Do NOT use this for ``sys.executable`` subprocess calls -- a
-    re-launch of the frozen bundle itself relies on the bundle libs
-    being on ``LD_LIBRARY_PATH``.
-    """
-    env_source = base_env if base_env is not None else os.environ
-    env: dict[str, str] = {str(key): str(value) for key, value in env_source.items()}
-    for override_name, orig_name in (
-        ("LD_LIBRARY_PATH", "LD_LIBRARY_PATH_ORIG"),
-        ("DYLD_LIBRARY_PATH", "DYLD_LIBRARY_PATH_ORIG"),
-    ):
-        original_value = env.pop(orig_name, None)
-        if original_value is not None and len(original_value.strip()) > 0:
-            env[override_name] = original_value
-        else:
-            env.pop(override_name, None)
-    return env
 
 
 def install_noisy_warning_filters() -> None:

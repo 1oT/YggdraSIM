@@ -1,4 +1,6 @@
-"""Coverage for IMS AKA (P2=0x82), ADF.ISIM EFs and TS 102 223 call-lifecycle event downloads:
+"""Twelfth-pass gap-coverage suite for SIMCARD surfaces beyond ES10.
+
+Round-12 closes the following:
 
 * 3GPP TS 31.103 §7.1 IMS AKA (``AUTHENTICATE`` P2=0x82). The ISIM
   context routes through the same Milenage chain as UMTS AKA

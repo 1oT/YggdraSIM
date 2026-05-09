@@ -1,4 +1,4 @@
-# Installation -- Clean Flavor
+# Installation — Clean Flavor
 
 The **clean** flavor is the default distribution of YggdraSIM. It targets
 operators who do not need the SIMtrace2-based hardware-in-the-loop (HIL)
@@ -35,7 +35,7 @@ yggdrasim-<os>-<arch>-clean-<version>[.exe]
 | macOS Intel          | `yggdrasim-macos-x86_64-clean-<version>`             |
 | macOS Apple Silicon  | `yggdrasim-macos-arm64-clean-<version>`              |
 | Linux x86_64         | `yggdrasim-linux-x86_64-clean-<version>`             |
-| Linux arm64 / RPi OS | `yggdrasim-linux-arm64-clean-<version>` -- see the Raspberry Pi guide |
+| Linux arm64 / RPi OS | `yggdrasim-linux-arm64-clean-<version>` — see the Raspberry Pi guide |
 
 Download the artefact that matches your OS and CPU, then make the file
 executable (Linux / macOS):

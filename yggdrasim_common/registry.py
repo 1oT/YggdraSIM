@@ -1,3 +1,5 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+"""Plugin registry: maps capability tokens to provider callables and enforces single-registration invariants."""
 # -----------------------------------------------------------------------------
 # YggdraSIM code registry: locate entry points, classes, and callables without
 # walking the tree. Symbols resolve via importlib (lazy; nothing heavy at import).
@@ -34,12 +36,11 @@ SUBSYSTEMS: dict[str, str] = {
     "SCP11.shared": "Cross-flavour crypto, transport helpers, ASN.1 registry, GSMA error codes.",
     "Tools.ProfilePackage": "SAIP / UPP shell, saip-tool bridge, lint engine, JSON↔DER transcode.",
     "Tools.SuciTool": "SUCI-related helper shell.",
-    "gui_server": "Optional universal GUI layer (experimental): FastAPI API + pywebview desktop window + headless lab server.",
     "tests": "pytest modules under tests/ (not registered as symbols; discover by filename).",
     "pysim": "Optional on-disk pySim checkout (upstream osmocom, gitignored). Clone https://gitlab.com/osmocom/pysim.git when the SAIP ASN.1 compile / SCP11-local flows are needed; prefer Tools.ProfilePackage for SAIP glue.",
 }
 
-# Runnable packages (python -m ... after editable install, or from repo root).
+# Runnable packages (python -m … after editable install, or from repo root).
 CLI_MODULES: list[str] = [
     "SCP03",
     "SCP80",
@@ -168,21 +169,6 @@ SYMBOL_REGISTRY: dict[str, str] = {
     "tools.suci.entry": "Tools.SuciTool.main:entry",
     "tools.suci.entry_cmd": "Tools.SuciTool.main:entry_cmd",
     "tools.suci.run_standalone": "Tools.SuciTool.main:run_standalone",
-    # --- Universal GUI (experimental, optional) ---
-    # These targets only resolve when the `gui` / `gui-server` extra is
-    # installed (fastapi + uvicorn, plus pywebview for desktop mode).
-    # They are listed here for discoverability; importing them without
-    # the extra raises ModuleNotFoundError.
-    "gui.config.build_desktop": "yggdrasim_common.gui_server.config:build_desktop_config",
-    "gui.config.build_server": "yggdrasim_common.gui_server.config:build_web_server_config",
-    "gui.config.dataclass": "yggdrasim_common.gui_server.config:GuiServerConfig",
-    "gui.auth.rate_limiter": "yggdrasim_common.gui_server.auth:FailureRateLimiter",
-    "gui.app.run_desktop": "yggdrasim_common.gui_server.app:run_desktop",
-    "gui.app.run_web_server": "yggdrasim_common.gui_server.app:run_web_server",
-    "gui.app.create_app": "yggdrasim_common.gui_server.app:create_app",
-    "gui.actions.registry": "yggdrasim_common.gui_server.actions.registry:get_registry",
-    "gui.actions.load_builtins": "yggdrasim_common.gui_server.actions.registry:ensure_builtin_actions_loaded",
-    "gui.sessions.manager": "yggdrasim_common.gui_server.sessions:get_manager",
 }
 
 

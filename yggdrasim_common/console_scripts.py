@@ -1,3 +1,5 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+"""Console-script entry points: thin wrappers that delegate each named tool to its module's main function."""
 from __future__ import annotations
 
 import importlib

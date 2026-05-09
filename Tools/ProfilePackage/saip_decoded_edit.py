@@ -1,3 +1,12 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+"""SAIP decoded-field editor: model builders and payload encoders.
+
+``build_decoded_value_editor_model`` maps a raw JSON field value to a
+typed editor model (enum, bitmask, roundtrip, raw-hex, …) that the GUI
+renders as a structured form.  ``encode_decoded_value_editor_payload``
+is its inverse — it converts a submitted editor payload back to a
+tagged-bytes JSON value ready for splice into the document tree.
+"""
 from __future__ import annotations
 
 import copy
@@ -52,10 +61,10 @@ _SERVICE_TABLE_FILE_DEFS: dict[str, tuple[str, dict[int, str]]] = {
 # Enum registry for the decoded form editor
 #
 # Certain decoded payload keys only accept a fixed set of string values
-# (life-cycle state, file descriptor flags, algorithm identifiers, ...).
+# (life-cycle state, file descriptor flags, algorithm identifiers, …).
 # Typing them by hand is error-prone, so the bulk form editor exposes
 # a pick-list (Ctrl+L) whenever the cursor lands on one. The registry
-# below is the single source of truth for the valid choices -- the
+# below is the single source of truth for the valid choices — the
 # TUI picker, the encoder, and the documentation all read from the
 # same table.
 #
@@ -73,17 +82,17 @@ _COMMON_ENUM_CHOICES: dict[str, dict[str, Any]] = {
         "choices": sorted(_LCSI_STATE_TO_HEX.keys()),
         "description": "Life Cycle Status Integer (ETSI TS 102 221 §11.1.1.4.9)",
         "labels": {
-            "no_information": "0x00 -- No information",
-            "creation": "0x01 -- Creation",
-            "initialization": "0x03 -- Initialization",
-            "operational_activated": "0x05 -- Operational (activated)",
-            "operational_deactivated": "0x04 -- Operational (deactivated)",
-            "termination": "0xC0 -- Termination",
+            "no_information": "0x00 — No information",
+            "creation": "0x01 — Creation",
+            "initialization": "0x03 — Initialization",
+            "operational_activated": "0x05 — Operational (activated)",
+            "operational_deactivated": "0x04 — Operational (deactivated)",
+            "termination": "0xC0 — Termination",
         },
     },
     "fileType": {
         "choices": ["working_ef", "internal_ef", "df"],
-        "description": "File descriptor -- file type (ETSI TS 102 221 §11.1.1.4.3)",
+        "description": "File descriptor — file type (ETSI TS 102 221 §11.1.1.4.3)",
         "labels": {
             "working_ef": "Working EF",
             "internal_ef": "Internal EF",
@@ -98,7 +107,7 @@ _COMMON_ENUM_CHOICES: dict[str, dict[str, Any]] = {
             "cyclic",
             "ber_tlv",
         ],
-        "description": "File descriptor -- EF structure",
+        "description": "File descriptor — EF structure",
         "labels": {
             "no_info_given": "No information given",
             "transparent": "Transparent",
@@ -125,11 +134,11 @@ _COMMON_ENUM_CHOICES: dict[str, dict[str, Any]] = {
     },
     "validEncoding": {
         "choices": ["true", "false"],
-        "description": "Short EF identifier -- reserved low bits are zero",
+        "description": "Short EF identifier — reserved low bits are zero",
     },
     "supported": {
         "choices": ["true", "false"],
-        "description": "Short EF identifier -- present on the card",
+        "description": "Short EF identifier — present on the card",
     },
 }
 
@@ -163,7 +172,7 @@ def normalize_enum_choice_for_key(payload_key: str, value: Any) -> str | bool | 
     Boolean-valued enums accept the strings ``"true"`` / ``"false"``
     (case-insensitive) and fall back to the native ``bool`` for the
     JSON encoder. Returns ``None`` when the value doesn't match the
-    enum -- callers may surface the valid set instead.
+    enum — callers may surface the valid set instead.
     """
     descriptor = _COMMON_ENUM_CHOICES.get(payload_key)
     if descriptor is None:
@@ -329,6 +338,13 @@ def build_decoded_value_editor_model(
     last_ef_key: str | None = None,
     pe_section_key: str | None = None,
 ) -> dict[str, Any] | None:
+    """Build a typed editor model for a single decoded profile field.
+
+    Returns a dict with ``title``, ``editor_kind``, and ``payload`` keys
+    that the GUI renders as a form, or ``None`` when no typed editor is
+    available for the field.  ``last_ef_key`` (e.g. ``"ef-acc"``) narrows
+    the editor for fields whose meaning depends on the containing EF.
+    """
     normalized_field = str(field_name or "").strip()
     if normalized_field == "shortEFID":
         raw_hex = _hex_from_tagged_bytes(raw_value)
@@ -534,6 +550,45 @@ def build_decoded_value_readonly_view(
     normalized_ef = normalized_ef_raw.lower() if len(normalized_ef_raw) > 0 else None
     normalized_pe = str(pe_section_key or "").strip() or None
 
+    if normalized_field == "sdPersoData":
+        # GlobalPlatform Amendment A DGI personalisation blocks. The
+        # SAIP shell's INFO renderer goes through the same decoder so
+        # the Decoded pane in either TUI shows the SCP80 connectivity
+        # tags (84/85/86/89) and the GP Amendment A DGI names
+        # (0070, 8010, ...) without diverging from CLI output.
+        from .saip_dgi_decode import decode_dgi_records as _decode_dgi_records
+
+        candidate_value = raw_value
+        if isinstance(raw_value, dict):
+            tagged_hex = _hex_from_tagged_bytes(raw_value)
+            if tagged_hex is not None:
+                candidate_value = [tagged_hex]
+        elif isinstance(raw_value, list):
+            collected: list[str] = []
+            for item in raw_value:
+                if isinstance(item, dict):
+                    item_hex = _hex_from_tagged_bytes(item)
+                    if item_hex is not None:
+                        collected.append(item_hex)
+                        continue
+                if isinstance(item, str):
+                    collected.append(item)
+            candidate_value = collected
+        try:
+            decoded_dgi = _decode_dgi_records(candidate_value)
+        except Exception:
+            decoded_dgi = None
+        if isinstance(decoded_dgi, list) and len(decoded_dgi) > 0:
+            return {
+                "title": _readonly_view_title(normalized_field, normalized_ef_raw),
+                "note": _READONLY_VIEW_NOTE,
+                "editor_kind": _READONLY_VIEW_EDITOR_KIND,
+                "payload": {
+                    "format": "DGI",
+                    "blocks": decoded_dgi,
+                },
+            }
+
     if normalized_field == "fillFileContent" and normalized_ef is not None:
         raw_hex = _hex_from_tagged_bytes(raw_value)
         if raw_hex is not None and len(raw_hex) > 0:
@@ -595,9 +650,8 @@ def build_decoded_value_readonly_view(
 
 _ROUNDTRIP_EDITOR_KIND = "roundtrip_decoded"
 _ROUNDTRIP_EDITOR_NOTE = (
-    "Round-trip decoded editor. Edit the decoded fields directly as JSON "
-    "(e.g. 'decimal', 'state', 'activeUsageIds'). The editor re-encodes the "
-    "value back to its original SAIP representation on apply."
+    "The default decoded tab shows a short layout summary. Full ASN.1-shaped "
+    "structure is under SHOW JSON; edits there re-encode back to tagged bytes on save."
 )
 
 # Record-structured EFs whose decoders are intentionally lossy (alpha-id
@@ -658,7 +712,7 @@ _HEX_HINTED_EF_KEYS: frozenset[str] = frozenset(
         "ef-cbmi",
         "ef-cbmid",
         "ef-cbmir",
-        # .
+        # 5x5 Pass A additions.
         "ef-ext1",
         "ef-ext2",
         "ef-ext3",
@@ -681,7 +735,7 @@ _HEX_HINTED_EF_KEYS: frozenset[str] = frozenset(
         "ef-cpbcch",
         "ef-invscan",
         "ef-s7",
-        # 5G EFs (DF.5GS).
+        # 5x10 additions — 5G EFs (DF.5GS).
         "ef-5gs3gpploci",
         "ef-5gsn3gpploci",
         "ef-5gs3gppnsc",
@@ -695,7 +749,7 @@ _HEX_HINTED_EF_KEYS: frozenset[str] = frozenset(
         "ef-tn3gppsnn",
         "ef-5gsedrx",
         "ef-5gnswo-conf",
-        # Phonebook family.
+        # 5x10 additions — Phonebook family.
         "ef-pbr",
         "ef-iap",
         "ef-sne",
@@ -708,7 +762,7 @@ _HEX_HINTED_EF_KEYS: frozenset[str] = frozenset(
         "ef-psc",
         "ef-cc",
         "ef-puid",
-        # Legacy 3GPP.
+        # 5x10 additions — legacy 3GPP.
         "ef-phase",
         "ef-plmnsel",
         "ef-bcch",
@@ -716,7 +770,7 @@ _HEX_HINTED_EF_KEYS: frozenset[str] = frozenset(
         "ef-fdnuri",
         "ef-sdnuri",
         "ef-lnduri",
-        # ISIM + multimedia extras.
+        # 5x10 additions — ISIM + multimedia extras.
         "ef-pcscf-urn",
         "ef-muddomain",
         "ef-psismsc",
@@ -727,7 +781,7 @@ _HEX_HINTED_EF_KEYS: frozenset[str] = frozenset(
         "ef-earfcnlist",
         "ef-fcst",
         "ef-phist",
-        # (Mailbox / CF / VGCS / VBS / eMLPP / DCK).
+        # 5x20 Pass A additions (Mailbox / CF / VGCS / VBS / eMLPP / DCK).
         "ef-ext6",
         "ef-ext7",
         "ef-mbi",
@@ -747,7 +801,7 @@ _HEX_HINTED_EF_KEYS: frozenset[str] = frozenset(
         "ef-mexe-st",
         "ef-prose-pfsr",
         "ef-vsuri",
-        # CSIM family.
+        # 5x20 Pass B — CSIM family.
         "ef-csim-spc",
         "ef-csim-smscap",
         "ef-csim-min",
@@ -768,7 +822,7 @@ _HEX_HINTED_EF_KEYS: frozenset[str] = frozenset(
         "ef-csim-ssci",
         "ef-csim-mlpl",
         "ef-csim-meruiid",
-        # Specialized (ISIM/MCPTT/V2X/ProSe/MCS).
+        # 5x20 Pass C — Specialized (ISIM/MCPTT/V2X/ProSe/MCS).
         "ef-prose-pfidg",
         "ef-prose-pfddn",
         "ef-v2x-cfg",
@@ -789,7 +843,7 @@ _HEX_HINTED_EF_KEYS: frozenset[str] = frozenset(
         "ef-mcs-keyset",
         "ef-mcs-stat",
         "ef-mcs-sec-profile",
-        # Operator / vendor / auxiliary.
+        # 5x20 Pass D — Operator / vendor / auxiliary.
         "ef-opcust1",
         "ef-opcust2",
         "ef-opcust3",
@@ -815,7 +869,7 @@ _HEX_HINTED_EF_KEYS: frozenset[str] = frozenset(
 _LOSSY_SPLICE_EDITOR_NOTE = (
     "Lossy-splice decoded editor. Undecoded bytes (alpha-id padding, CCI, "
     "inner security TLVs) are preserved from the original record via the "
-    "'_ygg_original_hex' hint -- do not edit or remove that field. Edit only "
+    "'_ygg_original_hex' hint — do not edit or remove that field. Edit only "
     "the semantic fields you want to change; the splicer rewrites only the "
     "bytes whose decoded value differs from the original."
 )
@@ -825,10 +879,12 @@ def _roundtrip_editor_title(field_name: str, last_ef_key: str | None) -> str:
     base = str(field_name or "").strip() or "field"
     ef_token = str(last_ef_key or "").strip()
     if base == "fillFileContent" and len(ef_token) > 0:
-        return f"Decoded editor: {ef_token} file content"
+        return f"File data — {ef_token}"
+    if base == "fillFileContent":
+        return "File data"
     if len(ef_token) > 0:
-        return f"Decoded editor: {ef_token} / {base}"
-    return f"Decoded editor: {base}"
+        return f"Decoded — {ef_token} / {base}"
+    return f"Decoded — {base}"
 
 
 def _roundtrip_editor_payload(decoded: Any) -> dict[str, Any]:
@@ -853,7 +909,7 @@ def build_decoded_value_roundtrip_model(
     ``build_decoded_value_editor_model`` decline the field.
 
     ``pe_section_key`` carries the enclosing PE section (``usim``,
-    ``telecom``, ``isim``, ``csim`` ...) through to
+    ``telecom``, ``isim``, ``csim`` …) through to
     ``_decode_known_ef_payload`` / ``_decode_special_field`` as the
     ``parent_hint`` so colliding FIDs resolve correctly.
 
@@ -1111,6 +1167,13 @@ def encode_decoded_value_editor_payload(
     target_length: int | None = None,
     editor_kind: str | None = None,
 ) -> Any:
+    """Encode a submitted editor payload back to a tagged-bytes JSON value.
+
+    Inverse of ``build_decoded_value_editor_model``.  ``editor_kind``
+    selects the encoding path; when ``None`` it is inferred from
+    ``field_name``.  Raises ``ValueError`` for invalid or out-of-range
+    input values.
+    """
     normalized_field = str(field_name or "").strip()
     payload = dict(editor_payload)
     if normalized_field == "shortEFID":
@@ -1210,17 +1273,17 @@ def _summarize_for_picker(
     if hex_value is not None:
         compact = str(hex_value or "").upper()
         byte_len = len(compact) // 2
-        preview = compact[:24] + ("..." if len(compact) > 24 else "")
+        preview = compact[:24] + ("…" if len(compact) > 24 else "")
         return f"{kind_label} · {byte_len}B · {preview}"
     if isinstance(payload, dict):
         flat_parts: list[str] = []
         for key, value in list(payload.items())[:3]:
             value_text = str(value)
             if len(value_text) > 24:
-                value_text = value_text[:24] + "..."
+                value_text = value_text[:24] + "…"
             flat_parts.append(f"{key}={value_text}")
         if len(payload) > 3:
-            flat_parts.append("...")
+            flat_parts.append("…")
         return f"{kind_label} · {' '.join(flat_parts)}" if flat_parts else kind_label
     if isinstance(payload, (list, tuple)):
         return f"{kind_label} · [{len(payload)} entries]"
@@ -1228,7 +1291,7 @@ def _summarize_for_picker(
         return kind_label
     value_text = str(payload)
     if len(value_text) > 48:
-        value_text = value_text[:48] + "..."
+        value_text = value_text[:48] + "…"
     return f"{kind_label} · {value_text}"
 
 
@@ -1298,7 +1361,7 @@ def _resolve_pe_editor_model_for_enumeration(
        surface it without accepting edits.
     4. Raw-hex fallback (``build_decoded_value_raw_hex_model``) for
        any remaining tagged-bytes field so the whole PE stays
-       editable -- even legacy or niche fields the project hasn't
+       editable — even legacy or niche fields the project hasn't
        decoded yet.
 
     Returns ``None`` only when the field carries no tagged bytes and
@@ -1386,13 +1449,13 @@ def enumerate_pe_decodable_fields(
     round-trip encoders, read-only decoders, and raw-hex fallbacks
     are all surfaced. The bulk PE form can therefore present every
     non-trivial field of the PE in one place (application / domain
-    PEs benefit the most -- file-system PEs still route through the
+    PEs benefit the most — file-system PEs still route through the
     EF-scoped form).
 
     Recognised shapes:
 
-    * ``{"<field>": {"hex": "..."}}`` -- plain hex-valued field on a dict.
-    * ``{"@": ["<field>", <value>]}`` -- tagged tuple (SAIP profile-element
+    * ``{"<field>": {"hex": "..."}}`` — plain hex-valued field on a dict.
+    * ``{"@": ["<field>", <value>]}`` — tagged tuple (SAIP profile-element
       items commonly used for ``fillFileContent`` and similar).
 
     Duplicate field names across different EFs are retained (each is a
@@ -1409,6 +1472,7 @@ def enumerate_pe_decodable_fields(
         raw_value: Any,
         last_ef_key: str | None,
     ) -> None:
+        """Register a decoded-field editor class for the given PE type and tag path."""
         key = tuple(rel_path)
         if key in seen_paths:
             return
@@ -1445,6 +1509,7 @@ def enumerate_pe_decodable_fields(
         })
 
     def walk(node: Any, rel_path: list[Any], last_ef_key: str | None) -> None:
+        """Walk the decoded JSON tree and collect all editable field paths."""
         if isinstance(node, dict):
             for tuple_tag_key in _TUPLE_TAG_KEYS:
                 if tuple_tag_key in node and isinstance(node[tuple_tag_key], list):
@@ -1568,7 +1633,7 @@ def _insert_payload_at_path(
     extend a list; string segments create/use a dict. Pre-existing
     container mismatches raise ``ValueError`` because that would
     indicate two entries pointing at the same slot with different
-    structures -- a decoder bug worth surfacing.
+    structures — a decoder bug worth surfacing.
     """
     if len(path) == 0:
         raise ValueError("Cannot insert payload at an empty path.")
@@ -1613,7 +1678,7 @@ def build_pe_form_document(
     """
     Build a nested JSON document that mirrors the PE structure, with
     each entry's decoded payload placed at its insertion path. Matches
-    the visual layout of the decoded pane -- the operator sees the same
+    the visual layout of the decoded pane — the operator sees the same
     semantic tree they would navigate field-by-field, just laid out in
     full so they can edit everything in one pass.
     """
@@ -1680,7 +1745,7 @@ def enumerate_pe_form_unknown_paths(
     entry (neither as a terminal leaf nor as a prefix of one). Used by
     the apply step to flag unknown keys before any encoding happens.
     Descent stops at every terminal path so the payload dicts
-    themselves are not scrutinised -- their schema is the encoder's
+    themselves are not scrutinised — their schema is the encoder's
     concern.
     """
     expected: set[tuple[Any, ...]] = {
@@ -1693,6 +1758,7 @@ def enumerate_pe_form_unknown_paths(
     unknown: list[list[Any]] = []
 
     def walk(node: Any, path: list[Any]) -> None:
+        """Walk the decoded JSON tree recursively, yielding (path, value) tuples."""
         if tuple(path) in expected:
             return
         if isinstance(node, dict):

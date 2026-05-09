@@ -75,7 +75,7 @@ def get_version() -> str:
     Resolution order:
 
     1. Installed distribution metadata (``pip install -e .`` / wheel).
-    2. Build stamp written by ``yggdrasim_main.spec`` -- used by frozen
+    2. Build stamp written by ``yggdrasim_main.spec`` — used by frozen
        PyInstaller bundles that do not ship ``pyproject.toml``.
     3. ``pyproject.toml`` of the source checkout.
     4. Literal ``"0.0.0+unknown"`` so downstream code never has to

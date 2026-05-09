@@ -1,3 +1,5 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+"""eIM poll audit store: persists IPA-poll request/response records keyed by transaction ID for post-mortem inspection."""
 import json
 import os
 import sqlite3
@@ -87,6 +89,7 @@ class EimPollAuditStore:
                 connection.close()
 
     def append_event(self, event: dict[str, Any]) -> None:
+        """Persist one IPA-poll round event record to the JSONL audit store."""
         payload = dict(event)
         logged_at_utc = str(payload.get("logged_at_utc", "") or "").strip()
         if len(logged_at_utc) == 0:
@@ -174,6 +177,7 @@ class EimPollAuditStore:
         flow: str = "",
         package_type: str = "",
     ) -> list[dict[str, Any]]:
+        """Return a list of stored poll-event dicts, optionally filtered by EID."""
         normalized_limit = int(limit)
         if normalized_limit <= 0:
             normalized_limit = 1
@@ -220,6 +224,7 @@ class EimPollAuditStore:
         return results
 
     def clear(self) -> int:
+        """Delete all stored poll-event records for the given EID (or all EIDs)."""
         with self._lock:
             connection = self._connect()
             try:

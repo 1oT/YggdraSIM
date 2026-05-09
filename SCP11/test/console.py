@@ -17,12 +17,12 @@
 
 """Legacy mirror: test-default SCP11 console shell.
 
-The ``canonical`` SCP11 console lives in ``SCP11/console.py``. This
-module is a ``legacy mirror`` that ships the test-certificate defaults
-and lab-only ES9+ / eIM request variants. Spec or dispatcher fixes
-should land in the canonical tree first and be mirrored here. A future
-cleanup splits this module into ``console_cli``, ``console_tls_probe``,
-and ``console_state``.
+The ``canonical`` SCP11 console lives in ``SCP11/console.py``. This module
+is a ``legacy mirror`` that ships the test-certificate defaults and
+lab-only ES9+ / eIM request variants. Spec or dispatcher fixes should land
+in the canonical tree first and be mirrored here. Tracked by audit item
+``SCP11-P1-02`` for eventual split into ``console_cli``,
+``console_tls_probe``, and ``console_state``.
 """
 
 import atexit
@@ -39,13 +39,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from yggdrasim_common.card_backend import trigger_card_relay_modem_refresh
-try:
-    from yggdrasim_common.hil_bridge_runtime import hil_bridge_warning_text
-except ImportError:
-    # Clean bundles intentionally exclude ``yggdrasim_common.hil_bridge_runtime``
-    # (see yggdrasim_main.spec). The banner helper is a no-op in that case.
-    def hil_bridge_warning_text() -> str:
-        return ""
+from yggdrasim_common.hil_bridge_runtime import hil_bridge_warning_text
 from yggdrasim_common.plugin_runtime import extend_target_with_plugins
 from yggdrasim_common.quit_control import quit_all
 from yggdrasim_common.polling_plugin_support import dispatch_poll_command
@@ -122,6 +116,7 @@ class _SCP03RelayTransportAdapter:
             reset_method()
 
     def transmit(self, apdu_hex: str, silent: bool = False) -> Tuple[bytes, int, int]:
+        """Transmit a C-APDU over the test SCP11 transport and return the R-APDU."""
         apdu = bytes.fromhex(apdu_hex)
         response, sw1, sw2 = self._exchange(apdu, "SCP03", silent)
         if sw1 == 0x6C:
@@ -327,6 +322,7 @@ class SCP11Console:
         self._setup_readline()
 
     def run(self) -> None:
+        """Start the interactive operator REPL for this SCP11 session variant."""
         try:
             self._initialize_session()
             self._activate_locked_help_pane_if_supported()
@@ -357,6 +353,7 @@ class SCP11Console:
             self._deactivate_locked_help_pane()
 
     def run_commands(self, cmd_line: str) -> None:
+        """Execute a semicolon-delimited list of operator commands non-interactively."""
         try:
             self._initialize_session()
         except Exception as error:
@@ -562,10 +559,28 @@ class SCP11Console:
         self._session_dirty = False
 
     def _should_skip_post_command_auto_clear(self, command_upper: str) -> bool:
+        # SGP.22 §5.6.4: the LPA must forward operational notifications
+        # to the recipient SM-DP+ before deleting them from the eUICC
+        # queue. When _sync_pending_notifications could not complete the
+        # listNotifications round-trip (channel binding lost after a
+        # profile state change, transport jam, etc.), skipping the
+        # auto-clear preserves the queue for a later sweep instead of
+        # silently dropping unforwarded notifications.
+        if self._notification_sync_failed_on_last_command():
+            return True
         if command_upper not in ("DOWNLOAD", "EIM-DOWNLOAD"):
             return False
         reached = self._last_eim_download_reached_server
         if reached is False:
+            return True
+        return False
+
+    def _notification_sync_failed_on_last_command(self) -> bool:
+        orchestrator = getattr(self, "orchestrator", None)
+        if orchestrator is None:
+            return False
+        outcome = getattr(orchestrator, "_last_notification_sync_succeeded", None)
+        if outcome is False:
             return True
         return False
 
@@ -1693,10 +1708,10 @@ class SCP11Console:
 
     def _cmd_scaffold(self, command_name: str) -> bool:
         print(
-            f"{self._style.yellow}[*] {command_name} is a placeholder reserved for the "
-            f"SGP.22/SGP.32 command surface and is not wired in this build.{self._style.end}"
+            f"{self._style.yellow}[*] {command_name} is scaffolded and reserved for upcoming "
+            f"SGP.22/SGP.32 expansion.{self._style.end}"
         )
-        print(f"{self._style.yellow}[*] Use SCAN / STATUS / LIST / FLOW for the active flows.{self._style.end}")
+        print(f"{self._style.yellow}[*] Keep using SCAN / STATUS / LIST / FLOW for now.{self._style.end}")
         return True
 
     def _cmd_get_euicc_info1(self, _: str) -> bool:
@@ -3030,7 +3045,7 @@ class SCP11Console:
         target_metadata: Optional[ProfileMetadataView],
     ) -> None:
         # See SCP11/live/console.py for the harmonised auto-disable
-        # contract -- kept identical here so eSIM Test produces the
+        # contract — kept identical here so eSIM Test produces the
         # same operator-visible sequence as eSIM Live, Local SMDP+, and
         # Local eIM. Reference: SGP.22 §5.7.18.
         if target_metadata is not None and target_metadata.state.upper() == "ENABLED":

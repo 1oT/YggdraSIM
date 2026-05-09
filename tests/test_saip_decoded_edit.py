@@ -550,7 +550,7 @@ class EnumeratePeDecodableFieldsTests(unittest.TestCase):
             self.assertIn("target_length", entry)
             self.assertIn("read_only", entry)
             # All of these tagged-bytes fields resolve through the
-            # round-trip registry -- none should fall back to raw hex
+            # round-trip registry — none should fall back to raw hex
             # (that would indicate a decoder regression).
             self.assertEqual(entry["editor_kind"], "roundtrip_decoded")
             self.assertFalse(entry["read_only"])
@@ -558,7 +558,7 @@ class EnumeratePeDecodableFieldsTests(unittest.TestCase):
     def test_falls_back_to_raw_hex_for_unknown_tagged_bytes(self) -> None:
         """
         Fields that have no hand-written editor, no round-trip encoder,
-        and no semantic decoder must still be editable -- the raw-hex
+        and no semantic decoder must still be editable — the raw-hex
         fallback keeps the whole PE usable even for legacy / vendor
         blobs the project has not decoded yet.
         """
@@ -796,7 +796,7 @@ class EnumeratePeDecodableFieldsTests(unittest.TestCase):
     def test_enum_registry_matches_lcsi_hex_map(self) -> None:
         """
         The life-cycle state enum must stay in lock-step with the
-        encoder's ``_LCSI_STATE_TO_HEX`` map -- otherwise the picker
+        encoder's ``_LCSI_STATE_TO_HEX`` map — otherwise the picker
         could offer a value the encoder will later reject.
         """
         from Tools.ProfilePackage.saip_decoded_edit import _LCSI_STATE_TO_HEX

@@ -1,4 +1,4 @@
-"""Unit tests for the SAIP pair-encoders (file structure, PKCS#15,
+"""Unit tests for the round 1-4 pair-encoders (file structure, PKCS#15,
 PIN/key material, install parameters).
 
 All encoders are verified against ``decode -> encode -> decode`` identity
@@ -62,7 +62,7 @@ from Tools.ProfilePackage.saip_asn1_encode import (
 
 
 # ---------------------------------------------------------------------------
-# file-structure fields.
+# Round 1 — file-structure fields.
 
 
 class FilePathEncoderTests(unittest.TestCase):
@@ -199,7 +199,7 @@ class FileDetailsEncoderTests(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# PKCS#15 EFs.
+# Round 2 — PKCS#15 EFs.
 
 
 class Pkcs15EncoderTests(unittest.TestCase):
@@ -247,7 +247,7 @@ class Pkcs15EncoderTests(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# PIN/PUK/key-material fields.
+# Round 3 — PIN/PUK/key-material fields.
 
 
 class PinSecretEncoderTests(unittest.TestCase):
@@ -317,7 +317,7 @@ class PinStatusTemplateDoEncoderTests(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# install and connectivity parameters.
+# Round 4 — install and connectivity parameters.
 
 
 class ConnectivityParametersEncoderTests(unittest.TestCase):
@@ -386,7 +386,7 @@ class UiccToolkitParametersEncoderTests(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# common 3GPP EFs previously without decoders.
+# Round 5 — common 3GPP EFs previously without decoders.
 
 
 class GroupIdentifierEncoderTests(unittest.TestCase):

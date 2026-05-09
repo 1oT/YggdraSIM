@@ -1,3 +1,5 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+"""SCP11 key checker: validates that the configured EIM certificate chain and private key are consistent before session open."""
 # -----------------------------------------------------------------------------
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -33,6 +35,7 @@ END_COLOR ='\033[0m'
 class KeyDiagnostics :
     @staticmethod 
     def verify_pair (cert_name :str ,key_name :str ):
+        """Verify that an ECC private-key file and its corresponding certificate are a matching pair."""
         print (f"--- DIAGNOSTIC: {cert_name} vs {key_name} ---")
         try :
             cert ,priv_key =CryptoEngine .load_credentials (cert_name ,key_name )

@@ -196,7 +196,7 @@ def _drive_with_callback(
 ) -> Any:
     """Run the App and capture the result of ``callback(widget)`` while mounted.
 
-    The widgets only return useful answers while the Textual app is alive --
+    The widgets only return useful answers while the Textual app is alive —
     once ``run_test`` exits, the widget tree is torn down and ``query_one``
     starts raising ``NoMatches``. Tests that assert against form state must
     therefore run their queries from inside the active pilot session.

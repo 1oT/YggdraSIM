@@ -15,6 +15,7 @@
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 # -----------------------------------------------------------------------------
 
+"""CAP (Converted Applet) file parser: reads JavaCard CAP archives and extracts load-file data blocks."""
 import os
 import zipfile
 from dataclasses import dataclass
@@ -93,6 +94,7 @@ class CapFileParser:
 
     @staticmethod
     def parse_with_metadata(cap_path: str) -> CapParseResult:
+        """Parse a CAP or IJC load file and return a ``CapParseResult`` with the component map and metadata."""
         if not os.path.exists(cap_path):
             raise FileNotFoundError(f"File not found: {cap_path}")
 
@@ -327,6 +329,7 @@ class CapFileParser:
 
     @staticmethod
     def plan_load_chunks(parsed: CapParseResult, max_chunk_size: int) -> List[CapLoadChunk]:
+        """Segment a parsed CAP load block into ``CapLoadChunk`` objects sized for the target card's *max_chunk_size*."""
         if max_chunk_size <= 0:
             raise ValueError("Chunk size must be greater than zero.")
 

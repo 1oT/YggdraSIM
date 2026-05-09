@@ -1,3 +1,5 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+"""HIL-Bridge simulated modem channel: bridges AT+CSIM commands from a serial modem to the card relay."""
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -54,6 +56,7 @@ class SimulatedModemCardChannel:
         return bytes(self._connection.getATR())
 
     def queue_refresh(self, mode: str | int = "euicc-profile-state-change", *, source: str = "") -> dict[str, Any]:
+        """Queue a REFRESH proactive command through the AT-simlink modem channel."""
         toolkit = getattr(self._engine(), "toolkit", None)
         if toolkit is None:
             raise RuntimeError("Simulated engine toolkit is not available.")
@@ -63,6 +66,7 @@ class SimulatedModemCardChannel:
         return dict(queue_method(mode, source=source))
 
     def proactive_status_payload(self) -> dict[str, Any]:
+        """Return the current proactive command queue state dict for the modem channel."""
         toolkit = getattr(self._engine(), "toolkit", None)
         if toolkit is None:
             return {}
@@ -72,6 +76,7 @@ class SimulatedModemCardChannel:
         return dict(status_method())
 
     def transmit(self, apdu: bytes) -> tuple[bytes, int, int]:
+        """Transmit a raw APDU via the AT+CSIM modem command and return (response_bytes, SW1, SW2)."""
         command = bytes(apdu or b"")
         parsed = parse_apdu(command)
         cla = int(parsed["cla"])

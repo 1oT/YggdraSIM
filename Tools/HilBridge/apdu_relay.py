@@ -1,3 +1,5 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+"""HIL-Bridge APDU relay: forwards C-APDUs from a network client to the connected physical SIM and returns R-APDUs."""
 from __future__ import annotations
 
 import json
@@ -39,14 +41,14 @@ class ApduRelayConfig:
     no auth, no audit) so existing single-machine deployments keep
     working without changes. Operators who expose the relay to anything
     other than ``127.0.0.1`` / ``::1`` must supply a non-empty
-    :attr:`auth_token`; the service refuses to start otherwise -- see
+    :attr:`auth_token`; the service refuses to start otherwise — see
     :meth:`HilBridgeApduRelayService.start`.
     """
 
     host: str = "127.0.0.1"
     port: int = 0
     enabled: bool = True
-    # Bearer token presented by clients in ``Authorization: Bearer ...``.
+    # Bearer token presented by clients in ``Authorization: Bearer …``.
     # Empty token + loopback bind = unauthenticated (back-compat).
     # Empty token + non-loopback bind = service refuses to start.
     auth_token: str = ""
@@ -57,7 +59,7 @@ class ApduRelayConfig:
     auth_lockout_failures: int = 3
     auth_lockout_window_seconds: float = 30.0
     auth_lockout_duration_seconds: float = 60.0
-    # Structured audit emission. Header-only by default -- never logs
+    # Structured audit emission. Header-only by default — never logs
     # APDU data bytes or response payloads. The full-hex form must be
     # opted into explicitly because PIN material rides through here.
     audit_enabled: bool = False
@@ -90,6 +92,7 @@ class _PeerThrottle:
         self._lockouts: dict[str, float] = {}
 
     def is_locked(self, peer: str, now: float) -> bool:
+        """Return True when the relay channel is locked (a PCSC session holds exclusive access)."""
         with self._lock:
             until = self._lockouts.get(peer)
             if until is None:
@@ -138,6 +141,7 @@ class _ApduRelayHandler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
 
     def do_GET(self) -> None:
+        """Handle HTTP GET requests on the relay endpoint (APDU fetch)."""
         normalized_path = self.path.rstrip("/") or "/"
         if normalized_path == APDU_RELAY_PING_PATH:
             # Liveness probe stays unauthenticated. It carries no card
@@ -155,6 +159,7 @@ class _ApduRelayHandler(BaseHTTPRequestHandler):
         self._send_text_response(HTTPStatus.NOT_FOUND, b"not found\n")
 
     def do_POST(self) -> None:
+        """Handle HTTP POST requests on the relay endpoint (APDU transmit)."""
         normalized_path = self.path.rstrip("/") or "/"
         if normalized_path == APDU_RELAY_PATH:
             if self._enforce_authorization() is False:
@@ -202,7 +207,7 @@ class _ApduRelayHandler(BaseHTTPRequestHandler):
 
         Wraps the throttle check + bearer comparison so the per-route
         plumbing in :meth:`do_GET` / :meth:`do_POST` stays a one-liner.
-        On rejection the response has already been emitted, so the
+        On rejection we have already emitted the response, so the
         caller must simply return.
         """
         service: HilBridgeApduRelayService = self.server.service
@@ -366,6 +371,7 @@ class HilBridgeApduRelayService:
 
     @property
     def base_url(self) -> str:
+        """Return the base URL string for this relay server instance."""
         host = self._config.host
         port = self._config.port
         if self._server is not None:
@@ -402,6 +408,7 @@ class HilBridgeApduRelayService:
         return self._audit_logger
 
     def start(self) -> None:
+        """Start the APDU relay: open both sockets and begin the forwarding loop."""
         if self.enabled is False:
             return
         if self._server is not None:
@@ -434,6 +441,7 @@ class HilBridgeApduRelayService:
         self._thread.start()
 
     def stop(self) -> None:
+        """Stop the APDU relay and close all open sockets."""
         server = self._server
         thread = self._thread
         self._server = None
@@ -455,6 +463,7 @@ class HilBridgeApduRelayService:
                 pass
 
     def status_payload(self) -> dict[str, Any]:
+        """Return a status payload dict describing the current relay state."""
         payload = dict(self._status_callback())
         payload.setdefault("status", "ok")
         payload.setdefault("url", self.apdu_url)
@@ -464,7 +473,7 @@ class HilBridgeApduRelayService:
             payload.setdefault("modemRefreshUrl", self.modem_refresh_url)
         # Surface auth posture so SSH-tunnelled consumers can confirm
         # they're hitting a daemon that requires a token. We never
-        # publish the token itself -- the fingerprint is enough for an
+        # publish the token itself — the fingerprint is enough for an
         # operator to correlate with the on-disk file.
         payload["authRequired"] = len(self._config.auth_token) > 0
         if len(self._config.auth_token) > 0:
@@ -496,7 +505,7 @@ class HilBridgeApduRelayService:
         Header-only by default. The header bytes (CLA/INS/P1/P2) plus
         ``Lc``/``Le`` and the status word leak no secret material. PIN
         bodies and AUTHENTICATE responses ride in the data fields and
-        are deliberately omitted unless ``audit_full_apdu`` is set --
+        are deliberately omitted unless ``audit_full_apdu`` is set —
         which the operator must opt into and which logs a startup
         warning at the call site so they know what's on disk.
         """

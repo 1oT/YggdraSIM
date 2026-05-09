@@ -3,7 +3,7 @@
 
 Iterates `tests/live_scp03/manifest.json`, pipes each `*.in.txt` script through
 `python -m SCP03 --stdin` against the simulated card backend, captures
-stdout / stderr / exit code, parses transmit traces for trailing `SW=...` tokens
+stdout / stderr / exit code, parses transmit traces for trailing `SW=…` tokens
 and writes a single review-ready dump to
 `reports/scp03_live_run_<timestamp>.md`.
 
@@ -225,7 +225,7 @@ def _filter_for_reader(
                 decorated["skip_reason"] = (
                     "Requires SCP03 SD authentication; gated by "
                     "SCP03_LIVE_ALLOW_AUTH=1 (every key mismatch increments "
-                    "the SD lockout counter -- 3 misses can brick the SD)."
+                    "the SD lockout counter — 3 misses can brick the SD)."
                 )
                 skipped.append(decorated)
             continue
@@ -427,9 +427,9 @@ def _render_report(
         summary_lines.append("| Command | Policy | Reason |")
         summary_lines.append("| --- | --- | --- |")
         for entry in skipped:
-            reason = entry.get("skip_reason", "--")
+            reason = entry.get("skip_reason", "—")
             summary_lines.append(
-                f"| `{entry['name']}` | {entry.get('reader_policy', '--')} | {reason} |"
+                f"| `{entry['name']}` | {entry.get('reader_policy', '—')} | {reason} |"
             )
         summary_lines.append("")
     summary_lines.append("## Verdict matrix")
@@ -442,7 +442,7 @@ def _render_report(
         summary_lines.append("| --- | --- | --- | --- | --- | --- |")
     for r in results:
         verdict = _verdict_label(r)
-        sws = ", ".join(r["sw_observed"]) if r["sw_observed"] else "--"
+        sws = ", ".join(r["sw_observed"]) if r["sw_observed"] else "—"
         notes_parts: list[str] = []
         a = r["assertions"]
         if not a["sw_pass"]:
@@ -458,7 +458,7 @@ def _render_report(
         notes_text = "; ".join(notes_parts) if notes_parts else "ok"
         if backend == BACKEND_READER:
             summary_lines.append(
-                f"| `{r['name']}` | {r.get('reader_policy', '--')} | {verdict} | {r['exit_code']} | {r['elapsed_s']} | {sws} | {notes_text} |"
+                f"| `{r['name']}` | {r.get('reader_policy', '—')} | {verdict} | {r['exit_code']} | {r['elapsed_s']} | {sws} | {notes_text} |"
             )
         else:
             summary_lines.append(
@@ -471,21 +471,21 @@ def _render_report(
     for r in results:
         a = r["assertions"]
         block: list[str] = []
-        block.append(f"### `{r['name']}` -- {_verdict_label(r)}")
+        block.append(f"### `{r['name']}` — {_verdict_label(r)}")
         block.append("")
-        block.append(f"- Category:        {r['category'] or '--'}")
+        block.append(f"- Category:        {r['category'] or '—'}")
         block.append(f"- Script:          `tests/live_scp03/{r['script']}`")
         block.append(f"- Started at:      {r['started_at']}")
         block.append(f"- Elapsed:         {r['elapsed_s']} s")
         block.append(f"- Exit code:       {r['exit_code']}")
         block.append(f"- Timed out:       {r['timed_out']}")
-        block.append(f"- SWs observed:    {', '.join(r['sw_observed']) if r['sw_observed'] else '--'}")
+        block.append(f"- SWs observed:    {', '.join(r['sw_observed']) if r['sw_observed'] else '—'}")
         if r.get("sw_counts"):
             counts_render = ", ".join(f"{sw}×{count}" for sw, count in r["sw_counts"].items())
             block.append(f"- SW frequency:    {counts_render}")
-        block.append(f"- Expected SW:     {a['expected_sw'] or '--'}")
-        block.append(f"- Expected SW any: {a['expected_sw_any'] or '--'}")
-        block.append(f"- Expected text:   {a['expected_substrings'] or '--'}")
+        block.append(f"- Expected SW:     {a['expected_sw'] or '—'}")
+        block.append(f"- Expected SW any: {a['expected_sw_any'] or '—'}")
+        block.append(f"- Expected text:   {a['expected_substrings'] or '—'}")
         block.append(f"- SW assertion:    {'pass' if a['sw_pass'] else 'fail (' + '; '.join(a['sw_reasons']) + ')'}")
         block.append(f"- Text assertion:  {'pass' if a['substr_pass'] else 'fail (missing: ' + ', '.join(a['substr_missing']) + ')'}")
         block.append(f"- Exit assertion:  {'pass' if a['exit_pass'] else 'fail'}")

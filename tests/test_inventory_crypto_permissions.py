@@ -1,11 +1,12 @@
-"""Regression tests for POSIX permission handling in
+"""Regression tests for the POSIX permission hardening added to
+
 ``yggdrasim_common.inventory_crypto.write_secret_file_bytes``.
 
-A naive implementation would let the atomic tmp-sibling inherit the
-process umask (typically ``022``); the plaintext fallback path would
-then leave inventory secrets world-readable for the microsecond between
-``write_bytes`` and ``os.replace``. The implementation chmods the tmp
-file to ``0600`` before the replace so the final file lands with the
+Previously the atomic tmp-sibling inherited the process umask which on
+most developer workstations is ``022`` — the plaintext fallback path
+therefore left inventory secrets world-readable for the microsecond
+between ``write_bytes`` and ``os.replace``. The new behaviour chmods the
+tmp file to ``0600`` before the replace so the final file lands with the
 expected permissions on every shell/umask combination.
 """
 

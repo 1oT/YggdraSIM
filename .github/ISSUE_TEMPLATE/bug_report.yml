@@ -127,10 +127,10 @@ body:
     attributes:
       label: Severity (self-assessed; maintainers will re-triage)
       options:
-        - Critical -- data loss, wrong key material, silent crypto failure
-        - High -- major feature broken, no workaround
-        - Medium -- feature broken, workaround exists
-        - Low -- cosmetic, docs, minor UX
+        - Critical — data loss, wrong key material, silent crypto failure
+        - High — major feature broken, no workaround
+        - Medium — feature broken, workaround exists
+        - Low — cosmetic, docs, minor UX
     validations:
       required: true
 

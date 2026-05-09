@@ -1,3 +1,5 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+"""HIL-Bridge tshark stream: drives a tshark subprocess and pipes decoded SIM-frame events to the live-decode state."""
 from __future__ import annotations
 
 import errno
@@ -10,7 +12,6 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
 
-from yggdrasim_common.process_debug import subprocess_env_without_bundle_libs
 from Tools.HilBridge.live_decode_view import (
     DEFAULT_DECODE_RULE,
     PacketSummary,
@@ -41,6 +42,7 @@ def build_live_stream_command(
     decode_rule: str = DEFAULT_DECODE_RULE,
     extra_command: tuple[str, ...] = (),
 ) -> list[str]:
+    """Build the tshark command-line args list for live interface capture."""
     normalized_fifo = str(fifo_path or "").strip()
     command: list[str] = [
         str(tshark_binary or "tshark"),
@@ -84,6 +86,7 @@ def build_live_stream_command(
 
 
 def ensure_fifo(fifo_path: str, *, mode: int = 0o600) -> None:
+    """Create the named FIFO pipe if it does not already exist."""
     normalized_path = str(fifo_path or "").strip()
     if len(normalized_path) == 0:
         raise ValueError("FIFO path must not be empty.")
@@ -146,6 +149,7 @@ class LiveTsharkStream:
         return self._options
 
     def start(self) -> bool:
+        """Launch the live tshark capture process and begin streaming to the FIFO."""
         fifo_path = str(self._options.fifo_path or "").strip()
         if len(fifo_path) == 0:
             self._set_error("FIFO path was not provided to LiveTsharkStream.")
@@ -169,12 +173,7 @@ class LiveTsharkStream:
             decode_rule=self._options.decode_rule,
             extra_command=self._options.extra_command,
         )
-        # ``tshark`` is a system binary linked against host libpcap /
-        # glib / libssl. Strip the PyInstaller-injected LD_LIBRARY_PATH
-        # so the child does not pick up bundle-shipped shared libraries
-        # that drift out of symbol-version compatibility with host
-        # ``libsystemd-shared-*.so`` / ``libgcrypt.so.*``.
-        environment = subprocess_env_without_bundle_libs()
+        environment = dict(os.environ)
         try:
             environment["XDG_CONFIG_HOME"] = _local_tshark_config_home(fifo_path)
         except (OSError, ValueError):
@@ -207,6 +206,7 @@ class LiveTsharkStream:
         return True
 
     def is_alive(self) -> bool:
+        """Return True when the live tshark capture process is still running."""
         process = self._runtime.process
         if process is None:
             return False
@@ -218,6 +218,7 @@ class LiveTsharkStream:
             return False
 
     def drain(self, *, limit: int = DEFAULT_STREAM_DRAIN_LIMIT) -> list[PacketSummary]:
+        """Drain any buffered packet data from the tshark output pipe."""
         normalized_limit = max(1, int(limit or DEFAULT_STREAM_DRAIN_LIMIT))
         rows: list[PacketSummary] = []
         for _ in range(normalized_limit):
@@ -228,6 +229,7 @@ class LiveTsharkStream:
         return rows
 
     def error_text(self) -> str:
+        """Return the last error text emitted by the tshark process, if any."""
         with self._lock:
             message = str(self._runtime.last_error or "").strip()
             stderr_blob = bytes(self._runtime.stderr_tail or b"")
@@ -241,6 +243,7 @@ class LiveTsharkStream:
         return f"{message} | tshark: {stderr_text}"
 
     def stop(self, *, timeout: float = DEFAULT_STREAM_STOP_TIMEOUT_SECONDS) -> None:
+        """Terminate the tshark process and clean up the output pipe."""
         if self._runtime.stopped:
             return
         self._runtime.stopped = True

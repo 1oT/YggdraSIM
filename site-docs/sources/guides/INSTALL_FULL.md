@@ -1,4 +1,4 @@
-# Installation -- Full Flavor (HIL-Capable)
+# Installation — Full Flavor (HIL-Capable)
 
 The **full** flavor is the Linux-only superset of YggdraSIM. It packages
 everything the clean flavor offers plus:
@@ -12,7 +12,7 @@ everything the clean flavor offers plus:
 Because the HIL bridge drives a sysmocom SIMtrace2 through
 `osmo-remsim-client-st2` and relies on udev, the full flavor is only
 supported on Linux hosts. On Windows / macOS use
-[`INSTALL_CLEAN.md`](https://github.com/1oT/YggdraSIM/blob/main/guides/INSTALL_CLEAN.md) instead.
+[`INSTALL_CLEAN.md`](INSTALL_CLEAN.md) instead.
 
 ## When to use the full flavor
 
@@ -34,10 +34,10 @@ yggdrasim-linux-arm64-full-<version>
 
 Two full bundles are published:
 
-- `linux-x86_64-full` -- desktop / server / lab hosts.
-- `linux-arm64-full`  -- Raspberry Pi OS 64-bit and other arm64 Linux
+- `linux-x86_64-full` — desktop / server / lab hosts.
+- `linux-arm64-full`  — Raspberry Pi OS 64-bit and other arm64 Linux
   hosts. The arm64 bundle is built through QEMU/Buildx inside CI; see
-  [`INSTALL_RASPBERRYPI.md`](https://github.com/1oT/YggdraSIM/blob/main/guides/INSTALL_RASPBERRYPI.md) for Pi-specific
+  [`INSTALL_RASPBERRYPI.md`](INSTALL_RASPBERRYPI.md) for Pi-specific
   setup.
 
 Download and make it executable:
@@ -67,7 +67,7 @@ The `--doctor` probe adds two HIL-specific rows:
 [+] lsusb (USB identity): /usr/bin/lsusb
 ```
 
-Rows marked `INFO` instead of `OK` are optional -- the supervisor falls
+Rows marked `INFO` instead of `OK` are optional — the supervisor falls
 back to `lsusb` polling when `pyudev` is missing, and the decoded view
 degrades gracefully when `termshark` is absent.
 
@@ -92,7 +92,7 @@ sudo usermod -a -G wireshark "$USER"
 
 Install or build `osmo-remsim-client-st2`. The cleanest path is a distro
 or an Osmocom-provided package; otherwise build from source. See
-[`SIMTRACE2_CARDEM_GUIDE.md`](https://github.com/1oT/YggdraSIM/blob/main/guides/SIMTRACE2_CARDEM_GUIDE.md) for a
+[`SIMTRACE2_CARDEM_GUIDE.md`](SIMTRACE2_CARDEM_GUIDE.md) for a
 step-by-step walk-through.
 
 ## Building the full bundle yourself
@@ -127,7 +127,7 @@ flavor in `yggdrasim_common/_build_flavor.py`.
 ## First HIL session
 
 Detailed operator flow lives in
-[`HIL_BRIDGE_GUIDE.md`](https://github.com/1oT/YggdraSIM/blob/main/guides/HIL_BRIDGE_GUIDE.md). Summary:
+[`HIL_BRIDGE_GUIDE.md`](HIL_BRIDGE_GUIDE.md). Summary:
 
 ```bash
 ./yggdrasim-full
@@ -146,8 +146,8 @@ with your login session.
 
 ## When to switch to another flavor
 
-- You don't need the HIL bridge → [`INSTALL_CLEAN.md`](https://github.com/1oT/YggdraSIM/blob/main/guides/INSTALL_CLEAN.md)
+- You don't need the HIL bridge → [`INSTALL_CLEAN.md`](INSTALL_CLEAN.md)
 - You want the repo for development with the test suite →
-  [`INSTALL_FROM_SOURCE.md`](https://github.com/1oT/YggdraSIM/blob/main/guides/INSTALL_FROM_SOURCE.md)
+  [`INSTALL_FROM_SOURCE.md`](INSTALL_FROM_SOURCE.md)
 - Flashing / updating SIMtrace2 firmware →
-  [`SIMTRACE2_CARDEM_GUIDE.md`](https://github.com/1oT/YggdraSIM/blob/main/guides/SIMTRACE2_CARDEM_GUIDE.md)
+  [`SIMTRACE2_CARDEM_GUIDE.md`](SIMTRACE2_CARDEM_GUIDE.md)

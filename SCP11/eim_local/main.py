@@ -1,3 +1,5 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+"""eIM-local shell: operator REPL for the local eIM simulator exposing IPA-poll, package delivery, and audit commands."""
 import argparse
 import atexit
 import os
@@ -14,13 +16,7 @@ from yggdrasim_common.process_debug import (
     set_global_debug,
 )
 from yggdrasim_common.card_backend import trigger_card_relay_modem_refresh
-try:
-    from yggdrasim_common.hil_bridge_runtime import hil_bridge_warning_text
-except ImportError:
-    # Clean bundles intentionally exclude ``yggdrasim_common.hil_bridge_runtime``
-    # (see yggdrasim_main.spec). The banner helper is a no-op in that case.
-    def hil_bridge_warning_text() -> str:
-        return ""
+from yggdrasim_common.hil_bridge_runtime import hil_bridge_warning_text
 from yggdrasim_common.quit_control import quit_all, QuitAllRequested
 from yggdrasim_common.session_recording import ShellSessionRecorder
 from yggdrasim_common.structured_output import dump_structured_payload
@@ -742,11 +738,12 @@ class EimLocalShell:
         if len(private_key_path) > 0:
             print(f"    cert_key  : {private_key_path}")
 
-    # Bridge / orchestrator lifecycle is installed by an optional
-    # plugin via ``PollingCapability.extend_target``. When the plugin
-    # is absent every IPAD / IPAE / PATHS-bridge code path that tries
-    # to reach a bridge must fail loudly, so tiny stubs are kept here
-    # that either raise or return neutral placeholders.
+    # Bridge / orchestrator lifecycle is installed by the polling plugin
+    # via ``PollingCapability.extend_target`` (see
+    # ``plugins/polling/shell_lifecycle.py``). When the plugin is absent
+    # every IPAD / IPAE / PATHS-bridge-section code path that tries to
+    # reach a bridge must fail loudly, so we keep tiny stubs here that
+    # either raise or return neutral placeholders.
 
     def _stop_poll_bridge(self) -> None:
         return
@@ -761,14 +758,14 @@ class EimLocalShell:
         close_session()
 
     def _bridge_status_payload(self) -> dict[str, Any]:
-        # Fallback stub -- the polling plugin overrides this with the
+        # Fallback stub — the polling plugin overrides this with the
         # real bridge status through ``extend_target``. Absent plugin ⇒
         # STATUS / PATHS print ``-`` / ``no``.
         return {}
 
     def _ensure_poll_bridge(self, reset_runtime: bool = True) -> Any:
         raise RuntimeError(
-            "Polling bridge is provided by the polling plugin and "
+            "Localized polling bridge is provided by the polling plugin and "
             "is not available in this build."
         )
 
@@ -1183,7 +1180,7 @@ class EimLocalShell:
         )
 
     def _cmd_scan(self, _: str = "") -> None:
-        """Quick card overview -- header data only.
+        """Quick card overview — header data only.
 
         Mirrors the ``SCAN`` (and ``INFO`` alias) behaviour of eSIM Live /
         Test / Local SMDP+: EID, eCASD issuer, default SM-DP+, root SM-DS,
@@ -1226,7 +1223,7 @@ class EimLocalShell:
     def _safe_collect_profile_metadata(self) -> list[Any]:
         """Read profile metadata for ENABLE / DISABLE / DELETE auto-routing.
 
-        Returns an empty list if the card read or the decoder fails -- the
+        Returns an empty list if the card read or the decoder fails — the
         shared helpers fall back to the raw identifier in that case so
         the operator still gets a clean error from the card if their
         identifier is bogus.
@@ -1414,7 +1411,7 @@ class EimLocalShell:
         self._print_post_eim_configuration_snapshot()
 
     def _cmd_ipad_discover(self, argument: str = "") -> None:
-        # Always safe -- pure ASN.1 GetEimPackage exchange; no bridge needed.
+        # Always safe — pure ASN.1 GetEimPackage exchange; no bridge needed.
         sequence = self.session.ipad_discover(package_path=argument.strip())
         for title, response in sequence:
             print(f"\n[IPAd] {title}")
@@ -2519,6 +2516,7 @@ class EimLocalShell:
         return True
 
     def run(self) -> None:
+        """Start the interactive eIM-local operator REPL."""
         self._setup_readline()
         self._print_banner()
         self._cmd_help()
@@ -2543,6 +2541,7 @@ class EimLocalShell:
             self._finalize_recording_on_exit()
 
     def run_commands(self, cmd_line: str) -> None:
+        """Execute a semicolon-delimited command string non-interactively."""
         try:
             for raw_command in self._split_batch_commands(cmd_line):
                 keep_running = self._execute_command_line(raw_command, source="batch")
@@ -2581,6 +2580,7 @@ def entry_stdin() -> None:
 
 
 def run_standalone() -> None:
+    """Start the eIM-local shell as a standalone process entry point."""
     ensure_plugins_loaded()
     parser = argparse.ArgumentParser(description="SCP11 local eIM shell")
     add_debug_argument(

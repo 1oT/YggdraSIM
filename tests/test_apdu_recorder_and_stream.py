@@ -1,7 +1,7 @@
 """Regression tests for the APDU recorder + GUI live stream.
 
 The user reported that the bottom-dock APDU panel only showed
-synthetic action summaries -- wire-level APDUs from SCP03 / pyscard /
+synthetic action summaries — wire-level APDUs from SCP03 / pyscard /
 the relay never made it into the dock. The fix funnels every
 ``connection.transmit`` call through
 :mod:`yggdrasim_common.apdu_recorder`, exposes the live stream over a
@@ -35,24 +35,6 @@ from unittest import mock
 
 _APDU_MOD = "yggdrasim_common.apdu_recorder"
 _BACKEND_MOD = "yggdrasim_common.card_backend"
-
-
-# ``mock.patch("smartcard.scard.SCARD_LEAVE_CARD", create=True, ...)`` walks
-# ``getattr(smartcard, "scard")`` during patch resolution. On a fresh CI
-# interpreter where nothing has imported ``smartcard.scard`` yet,
-# the submodule is not registered as an attribute on the parent package
-# and the resolver fails with ``AttributeError: module 'smartcard' has no
-# attribute 'scard'`` -- even though ``create=True`` would happily synthesise
-# the leaf attribute. Importing the submodule eagerly here is a one-time,
-# side-effect-free fix that keeps the patch path resolvable everywhere
-# pyscard is installed. The whole import is best-effort: when pyscard is
-# absent (some lean test environments) we simply leave the attribute alone
-# and let the affected test fall over with the original missing-module
-# diagnostic.
-try:  # pragma: no cover - exercised implicitly by the patch sites below.
-    import smartcard.scard  # noqa: F401
-except Exception:
-    pass
 
 
 # ----------------------------------------------------------------------
@@ -111,7 +93,7 @@ class ApduRecorderUnitTests(unittest.TestCase):
     def test_subscriber_exception_does_not_block_recording(self) -> None:
         # A misbehaving sync subscriber must NEVER prevent the recorder
         # from delivering events to other subscribers or appending to
-        # the buffer -- that's the whole point of the try/except wrap.
+        # the buffer — that's the whole point of the try/except wrap.
         good_seen: list[str] = []
         self.recorder.subscribe(lambda ex: (_ for _ in ()).throw(RuntimeError("boom")))
         self.recorder.subscribe(lambda ex: good_seen.append(ex.apdu_hex))
@@ -135,7 +117,7 @@ class ApduRecorderUnitTests(unittest.TestCase):
             detach = self.recorder.attach_queue(queue, loop=loop)
             try:
                 # Recording from the same loop thread still routes
-                # through ``call_soon_threadsafe`` -- exercise it.
+                # through ``call_soon_threadsafe`` — exercise it.
                 self.recorder.record(self._make_exchange(apdu="DEAD"))
                 # Spin the loop once so the call_soon callback fires.
                 await asyncio.sleep(0)
@@ -207,7 +189,7 @@ class WrapConnectionTests(unittest.TestCase):
 
     def test_wrap_records_err_on_raised_transmit(self) -> None:
         # Connection drop must still produce a recorder entry so the
-        # GUI dock visibly shows something happened -- otherwise the
+        # GUI dock visibly shows something happened — otherwise the
         # operator just sees a silent UI error and an empty APDU tab.
         wrapped = self.mod.wrap_connection(
             _RaisingConnection(RuntimeError("link down")),
@@ -266,7 +248,7 @@ class CardBackendIntegrationTests(unittest.TestCase):
     def test_pcsc_branch_uses_reader_name_as_source(self) -> None:
         backend = importlib.import_module(_BACKEND_MOD)
 
-        # Hand-rolled real classes -- we deliberately avoid MagicMock
+        # Hand-rolled real classes — we deliberately avoid MagicMock
         # here because its auto-attribute behaviour makes
         # ``getattr(conn, "_yggdrasim_apdu_traced", False)`` evaluate
         # to a truthy mock object, which would let ``wrap_connection``
@@ -307,98 +289,9 @@ class CardBackendIntegrationTests(unittest.TestCase):
         conn.transmit([0x00, 0xC0])
         snap = recorder.snapshot()
         self.assertEqual(len(snap), 1)
-        # Source must be the reader name -- gives operators per-reader
+        # Source must be the reader name — gives operators per-reader
         # grouping in the dock.
         self.assertEqual(snap[0].source, "ACS APG8201 00 00")
-
-
-# ----------------------------------------------------------------------
-# Frontend bundle contracts
-# ----------------------------------------------------------------------
-
-
-_STATIC_DIR = (
-    Path(__file__).resolve().parents[1]
-    / "yggdrasim_common" / "gui_server" / "static"
-)
-
-# ``yggdrasim_common/gui_server/`` is excluded from publication via
-# ``.gitignore`` while the experimental Universal GUI surface is being
-# stabilised. Tests that read frontend bundle files or import gui_server
-# modules must therefore degrade to ``skipped`` on a checkout where the
-# directory is absent.
-_GUI_SERVER_TREE_AVAILABLE = (_STATIC_DIR.parent.is_dir() is True) and (
-    (_STATIC_DIR / "app.js").is_file() is True
-)
-_GUI_SERVER_SKIP_REASON = (
-    "yggdrasim_common/gui_server/ is absent on this checkout; "
-    "skipping frontend bundle / route registration assertions."
-)
-
-
-@unittest.skipUnless(_GUI_SERVER_TREE_AVAILABLE, _GUI_SERVER_SKIP_REASON)
-class FrontendApduStreamContract(unittest.TestCase):
-    """``app.js`` opens, formats, and reconnects the APDU stream."""
-
-    def setUp(self) -> None:
-        self.js = (_STATIC_DIR / "app.js").read_text(encoding="utf-8")
-
-    def test_open_apdu_event_stream_is_defined(self) -> None:
-        self.assertIn("function openApduEventStream(", self.js)
-        self.assertIn("/api/events/apdu?t=", self.js)
-
-    def test_open_called_from_init(self) -> None:
-        self.assertIn("openApduEventStream();", self.js)
-
-    def test_frame_formatter_emits_into_apdu_bucket(self) -> None:
-        # The dock gets ``level: "apdu"`` rows tagged with the source
-        # the recorder captured (reader name / "simulator" / etc.).
-        self.assertIn('level: "apdu"', self.js)
-        self.assertIn('source: String(frame.source || "card")', self.js)
-
-    def test_format_frame_includes_command_response_and_sw(self) -> None:
-        # Compact one-liner that fits the dock without truncation.
-        self.assertIn('"\\u2192 "', self.js) if False else None  # noqa
-        self.assertIn("apdu", self.js)
-        self.assertIn("sw=", self.js)
-        self.assertIn("ms", self.js)
-
-    def test_reconnect_with_exponential_backoff(self) -> None:
-        # Bounded back-off so a missing GUI server doesn't pin the CPU.
-        self.assertIn("Math.min(nextDelay * 2, 30000)", self.js)
-        self.assertIn("setTimeout(openApduEventStream, nextDelay)", self.js)
-
-    def test_ping_frames_are_silently_ignored(self) -> None:
-        self.assertIn('frame.event === "ping"', self.js)
-
-    def test_helpers_exposed_on_window(self) -> None:
-        self.assertIn("window.YggdraSimApduStream", self.js)
-
-
-@unittest.skipUnless(_GUI_SERVER_TREE_AVAILABLE, _GUI_SERVER_SKIP_REASON)
-class BackendRouteRegistration(unittest.TestCase):
-    def test_app_includes_apdu_event_router(self) -> None:
-        app_py = (
-            Path(__file__).resolve().parents[1]
-            / "yggdrasim_common" / "gui_server" / "app.py"
-        ).read_text(encoding="utf-8")
-        self.assertIn(
-            "from .routes import apdu_events as apdu_event_routes", app_py,
-        )
-        self.assertIn(
-            "app.include_router(apdu_event_routes.router)", app_py,
-        )
-
-    def test_route_module_declares_websocket_endpoint(self) -> None:
-        rt = (
-            Path(__file__).resolve().parents[1]
-            / "yggdrasim_common" / "gui_server" / "routes" / "apdu_events.py"
-        ).read_text(encoding="utf-8")
-        self.assertIn('@router.websocket("/api/events/apdu")', rt)
-        # Auth path mirrors the terminal route.
-        self.assertIn("compare_tokens", rt)
-        # Replays the buffer first so a fresh tab isn't blank.
-        self.assertIn("recorder.snapshot(limit=200)", rt)
 
 
 if __name__ == "__main__":

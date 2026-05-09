@@ -437,7 +437,7 @@ class Es9LikeClientEimTests(unittest.TestCase):
     def test_poll_eim_accepts_1ot_style_response_fields(self):
         client = RecordingEs9Client(
             base_url="https://rsp.example.com",
-            eim_base_url="https://eim.example.test",
+            eim_base_url="https://eim1.esim.tst.1ot.mobi",
         )
         client.next_response = {
             "eimTransactionId": "eim-tx-1",

@@ -1,10 +1,11 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """
 Environment preflight checks for the YggdraSIM suite.
 
 ``run_doctor`` prints a terminal-friendly report covering Python version,
 common optional runtime dependencies, workspace paths, pySim
 availability (either a developer checkout at ``<workspace>/pysim`` or
-a pip-installed ``pySim`` package -- the latter is what the ``[saip]``
+a pip-installed ``pySim`` package — the latter is what the ``[saip]``
 extra drops in), SQLite availability, PC/SC reader visibility, and
 presence of the ``gpg`` binary used by the optional inventory
 encryption provider. It is intentionally read-only: no SQLite rows are
@@ -51,6 +52,7 @@ class DoctorReport:
         self.checks.append(DoctorCheck(name, status, detail))
 
     def worst_status(self) -> str:
+        """Return the most severe status string from a list of diagnostic check results."""
         rank_table = {"ok": 0, "info": 0, "warn": 1, "fail": 2}
         worst_rank = 0
         saw_info = False
@@ -92,7 +94,7 @@ def _format_check(check: DoctorCheck) -> str:
     marker = {"ok": "[+]", "warn": "[*]", "fail": "[-]", "info": "[*]"}.get(
         check.status, "[*]"
     )
-    detail = f" -- {check.detail}" if len(check.detail) > 0 else ""
+    detail = f" — {check.detail}" if len(check.detail) > 0 else ""
     return f"{colour}{marker} {check.name}: {check.status.upper()}{detail}{reset}"
 
 
@@ -135,7 +137,7 @@ def _probe_optional_pysim(report: DoctorReport, workspace_root: Path) -> None:
     1. A developer checkout at ``<workspace>/pysim`` (advanced
        upstream-branch workflow).
     2. A pip-installed ``pySim`` package (e.g. from the ``[saip]``
-       extra -- ``pip install 'yggdrasim[saip]'`` -- or a hand
+       extra — ``pip install 'yggdrasim[saip]'`` — or a hand
        ``pip install 'pySim @ git+https://github.com/osmocom/pysim.git'``).
 
     Either path is valid. The probe reports ``ok`` when any one of
@@ -174,7 +176,7 @@ def _probe_optional_pysim(report: DoctorReport, workspace_root: Path) -> None:
 
 # Backwards-compatibility alias: older code and tests may still import
 # ``_probe_vendored_pysim``. The underscore prefix marks it as internal
-# but since it was never private to this module in practice the
+# but since it was never private to this module in practice we keep the
 # alias around to avoid breaking downstream callers.
 _probe_vendored_pysim = _probe_optional_pysim
 
@@ -259,7 +261,7 @@ def _probe_hil_bridge(report: DoctorReport) -> None:
     if len(reason) > 0:
         report.add("HIL bridge readiness", "info", reason)
         return
-    # Module presence check -- the clean build strips these, but a ``full``
+    # Module presence check — the clean build strips these, but a ``full``
     # or ``source`` install should have them available.
     try:
         importlib.import_module("Tools.HilBridge.main")
@@ -282,7 +284,7 @@ def _probe_hil_bridge(report: DoctorReport) -> None:
         report.add(
             "HIL bridge readiness",
             "warn",
-            "osmo-remsim-client-st2 not on PATH -- see "
+            "osmo-remsim-client-st2 not on PATH — see "
             "guides/SIMTRACE2_CARDEM_GUIDE.md",
         )
         return
@@ -328,7 +330,7 @@ def _probe_card_relay(report: DoctorReport) -> None:
       summary of the auth posture so operators can spot e.g. a
       non-loopback bind without an audit log enabled.
 
-    All probes use ``urllib.request`` with a tight timeout -- we never
+    All probes use ``urllib.request`` with a tight timeout — we never
     want the doctor to block on a wedged remote bridge.
     """
     try:
@@ -358,13 +360,13 @@ def _probe_card_relay(report: DoctorReport) -> None:
         report.add(
             "Remote card bridge",
             "info",
-            "Not configured -- set YGGDRASIM_CARD_RELAY_URL or pass --remote-card-url to talk to a Card Bridge over SSH.",
+            "Not configured — set YGGDRASIM_CARD_RELAY_URL or pass --remote-card-url to talk to a Card Bridge over SSH.",
         )
         return
     _ = relay_url_source  # reserved for future per-source diagnostics
 
     # /apdu suffix is optional; the bridge's status endpoint lives at
-    # the URL root. Strip the suffix if present so /ping can be reached
+    # the URL root. Strip the suffix if present so we can reach /ping
     # and /status.
     base_url = relay_url
     if relay_url.endswith("/apdu"):
@@ -487,7 +489,7 @@ def _probe_card_relay(report: DoctorReport) -> None:
             report.add(
                 "Remote card bridge",
                 "warn",
-                f"{base_url} reachable but auth disabled on non-loopback host '{bind_host}' -- refuse to use it.",
+                f"{base_url} reachable but auth disabled on non-loopback host '{bind_host}' — refuse to use it.",
             )
             return
         parts.append("loopback bridge (no token required)")
@@ -496,177 +498,6 @@ def _probe_card_relay(report: DoctorReport) -> None:
     elif audit_enabled is False:
         parts.append("audit off")
     report.add("Remote card bridge", "ok", "; ".join(parts))
-
-
-def _detect_webview_backends() -> tuple[list[str], list[str]]:
-    """Return ``(available_backends, install_hints)`` for pywebview.
-
-    pywebview is a thin wrapper over a platform-native web widget. The
-    widget itself has its own dependency tree and must be installed
-    separately:
-
-    * Linux -- **GTK** (``gi`` + WebKit2 GObject introspection) or
-      **Qt** (``qtpy`` + QtWebEngine).
-    * macOS -- **cocoa** (PyObjC / WKWebView).
-    * Windows -- **EdgeChromium** (pythonnet + WebView2).
-
-    The probe attempts the minimal import path for each candidate
-    backend without instantiating a window, so ``--doctor`` can fail
-    fast before ``webview.start()`` raises at runtime.
-    """
-    import sys as _sys
-
-    available: list[str] = []
-    hints: list[str] = []
-
-    if _sys.platform.startswith("linux"):
-        try:
-            import gi  # type: ignore  # noqa: F401
-            from gi.repository import WebKit2  # type: ignore  # noqa: F401
-
-            available.append("gtk")
-        except Exception:
-            hints.append(
-                "GTK backend: `sudo apt install python3-gi gir1.2-webkit2-4.1` "
-                "(plus `pip install PyGObject` if the venv is not "
-                "`--system-site-packages`)."
-            )
-        try:
-            import qtpy  # type: ignore  # noqa: F401
-            from qtpy import QtWebEngineWidgets  # type: ignore  # noqa: F401
-
-            available.append("qt")
-        except Exception:
-            hints.append(
-                "Qt backend (pip-only): "
-                "`pip install 'qtpy>=2.4' 'PyQt6>=6.7' 'PyQt6-WebEngine>=6.7'`."
-            )
-    elif _sys.platform == "darwin":
-        try:
-            import webview.platforms.cocoa  # type: ignore  # noqa: F401
-
-            available.append("cocoa")
-        except Exception:
-            hints.append(
-                "Cocoa backend: `pip install pyobjc-framework-WebKit`."
-            )
-    elif _sys.platform == "win32":
-        try:
-            import webview.platforms.edgechromium  # type: ignore  # noqa: F401
-
-            available.append("edgechromium")
-        except Exception:
-            hints.append(
-                "EdgeChromium backend: install the WebView2 runtime and "
-                "`pip install pythonnet`."
-            )
-
-    return available, hints
-
-
-def _probe_gui_stack(report: DoctorReport) -> None:
-    """Report the state of the optional universal-GUI dependency stack.
-
-    Three-state contract:
-
-    * ``ok``   -- full desktop stack importable AND at least one
-      pywebview backend is importable (gtk / qt / cocoa / edgechromium).
-    * ``info`` -- headless lab-server stack importable (fastapi +
-      uvicorn) but pywebview is not installed; only ``--web-server``
-      is usable from this host.
-    * ``warn`` -- pywebview is installed but no platform backend
-      resolves, or the configured desktop port is in use.
-    * ``fail`` -- ``YGGDRASIM_GUI_TLS_CERT`` is set but unreadable.
-    """
-    # ``gui_server`` is an optional sub-tree (it lives behind the
-    # ``[gui]`` / ``[gui-server]`` extras and is not vendored into the
-    # ``clean`` flavor). When it is absent we still want ``--doctor``
-    # to succeed: report the missing stack as ``info`` and bail out
-    # before the rest of the probe touches GUI defaults that no longer
-    # exist on this host.
-    try:
-        from yggdrasim_common.gui_server import config as gui_config
-    except ModuleNotFoundError as gui_import_error:
-        report.add(
-            "GUI server stack",
-            "info",
-            f"yggdrasim_common.gui_server is not installed in this build "
-            f"(clean flavor or trimmed checkout). "
-            f"({type(gui_import_error).__name__}: {gui_import_error})",
-        )
-        return
-
-    try:
-        import fastapi  # type: ignore  # noqa: F401
-        import uvicorn  # type: ignore  # noqa: F401
-    except Exception as import_error:
-        report.add(
-            "GUI server deps (fastapi + uvicorn)",
-            "info",
-            f"not installed -- run `pip install 'yggdrasim[gui-server]'` "
-            f"(remote) or `pip install 'yggdrasim[gui]'` (desktop). "
-            f"({type(import_error).__name__}: {import_error})",
-        )
-        return
-
-    try:
-        import webview  # type: ignore  # noqa: F401
-    except Exception:
-        report.add(
-            "GUI desktop stack (pywebview)",
-            "info",
-            "pywebview not installed -- desktop --gui disabled; --web-server "
-            "still usable. Install with `pip install 'yggdrasim[gui]'`.",
-        )
-    else:
-        backends, hints = _detect_webview_backends()
-        if backends:
-            report.add(
-                "GUI desktop stack (pywebview)",
-                "ok",
-                f"pywebview importable; usable backends: {', '.join(backends)}",
-            )
-        else:
-            detail = (
-                "pywebview is installed but no platform backend could be "
-                "loaded -- `--gui` will fail with `WebViewException`. "
-                "Pick one of the options below and re-run `--doctor` "
-                "to confirm."
-            )
-            if hints:
-                detail = detail + " " + " | ".join(hints)
-            report.add("GUI desktop stack (pywebview)", "warn", detail)
-
-    # Port probe (desktop default). Warn only -- operators may intend
-    # to use ephemeral fallback or to remap via YGGDRASIM_GUI_PORT.
-    desktop_port = gui_config.DEFAULT_DESKTOP_PORT
-    desktop_host = gui_config.DEFAULT_DESKTOP_HOST
-    try:
-        import socket
-
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            sock.bind((desktop_host, desktop_port))
-        report.add(
-            "GUI desktop default port",
-            "ok",
-            f"{desktop_host}:{desktop_port} is free",
-        )
-    except OSError:
-        report.add(
-            "GUI desktop default port",
-            "warn",
-            f"{desktop_host}:{desktop_port} already in use -- desktop mode "
-            f"will fall back to an ephemeral port.",
-        )
-
-    cert_path = os.environ.get(gui_config.ENV_GUI_TLS_CERT, "")
-    if cert_path and not Path(cert_path).is_file():
-        report.add(
-            "GUI TLS certificate",
-            "fail",
-            f"{gui_config.ENV_GUI_TLS_CERT}={cert_path!r} does not resolve to a readable file.",
-        )
 
 
 def _probe_workspace(report: DoctorReport, workspace_root: Path) -> None:
@@ -750,14 +581,13 @@ def run_doctor(
     _probe_hil_bridge(report)
     _probe_hil_optional_helpers(report)
     _probe_card_relay(report)
-    _probe_gui_stack(report)
 
     try:
         from yggdrasim_common.__about__ import __version__
     except Exception:
         __version__ = "unknown"
 
-    emit(f"YggdraSIM doctor -- suite version {__version__}")
+    emit(f"YggdraSIM doctor — suite version {__version__}")
     emit(f"Workspace: {target_workspace}")
     emit("")
     for check in report.checks:

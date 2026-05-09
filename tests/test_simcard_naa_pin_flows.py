@@ -11,7 +11,7 @@ from SIMCARD.etsi_fs import USIM_AID
 class SimCardPinFlowTests(unittest.TestCase):
     """Regression coverage for SIMCARD/naa.py PIN / PUK flows.
 
-    The checks target behaviour that was tightened during release hardening:
+    The checks target behaviour that was tightened during the v1 audit:
 
     * VERIFY CHV with a non-empty payload whose length != 8 must return
       67 00 without consuming a retry (ETSI TS 102 221 §11.1.9).

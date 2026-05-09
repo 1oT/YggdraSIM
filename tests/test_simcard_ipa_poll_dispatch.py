@@ -1,8 +1,16 @@
-"""SGP.32 §6.5 IPA dispatch coverage for RECEIVE DATA terminal responses.
+"""SGP.32 §6.5 IPA dispatch on RECEIVE DATA terminal response.
 
-Asserts that, during an IPA-poll cycle, the bytes returned in the
-RECEIVE DATA TR are parsed into zero or more EuiccPackages and
-forwarded into ISD-R via the registered dispatcher.
+Pins the in-card IPA contract: when an IPA-poll BIP cycle is in
+flight (TIMER EXPIRATION -> OPEN CHANNEL -> SEND DATA -> RECEIVE
+DATA -> CLOSE CHANNEL), the bytes the modem hands back via
+RECEIVE DATA TR are the eIM's ESipa response. The simulator
+parses zero or more EuiccPackages out of the payload (skipping
+any HTTP envelope the modem leaves behind) and forwards each
+one into ISD-R via the same dispatcher the modem itself would
+hit through a CLA/INS=80/E2 STORE DATA chain.
+
+If these tests pass, the simulator behaves as a real in-card IPA
+when paired with the local eIM over BIP.
 """
 
 from __future__ import annotations
@@ -40,19 +48,20 @@ def _make_toolkit_with_ipa_session() -> ToolkitLogic:
     toolkit_logic.state.toolkit.timer_management_id = 1
     toolkit_logic.state.toolkit.timer_management_auto_rearm = False
     toolkit_logic.state.toolkit.ipa_poll_enabled = True
-    toolkit_logic.state.toolkit.ipa_poll_eim_fqdn = "eim.yggdrasim.example.test"
+    toolkit_logic.state.toolkit.ipa_poll_eim_fqdn = "eim.example.test"
     toolkit_logic.state.toolkit.ipa_poll_eim_port = 443
     toolkit_logic.state.toolkit.ipa_poll_alpha_id = "eIM Poll"
     toolkit_logic.state.toolkit.ipa_poll_request_payload = b""
-    # Pre-warm the resolved-IP cache so the dispatch suite skips the
-    # DNS phase. The DNS phase has its own coverage in
+    # Pre-warm the resolved-IP cache so existing dispatch tests skip
+    # the DNS-over-BIP leg and start the cycle on the eIM TCP bearer.
+    # The DNS-phase wiring is exercised separately in
     # ``IpaPollDnsPhaseTests``.
     toolkit_logic.state.toolkit.ipa_poll_resolved_ip = "203.0.113.7"
     toolkit_logic.state.toolkit.ipa_poll_resolved_ip_family = 4
-    # The TLS path has its own coverage in ``IpaPollTlsLoopbackTests``;
-    # this suite verifies the SGP.32 envelope wiring using a plain
-    # bearer, so the RECEIVE DATA payload is interpreted directly as
-    # eIM packages.
+    # Stage-2 TLS path is exercised separately in
+    # ``IpaPollTlsLoopbackTests``; the dispatch suite verifies the
+    # SGP.32 envelope wiring against a plain-HTTP bearer where the
+    # RECEIVE DATA payload is interpreted directly as eIM packages.
     toolkit_logic.state.toolkit.ipa_poll_tls_enabled = False
     toolkit_logic.state.pending_fetch_queue.clear()
     return toolkit_logic
@@ -596,7 +605,8 @@ def _decode_open_channel_tlvs(payload: bytes) -> dict[str, bytes]:
     """Walk the body of an OPEN CHANNEL D0 command into a tag-indexed dict.
 
     Returns a mapping from one-byte hex tags ("47", "3E", ...) to the
-    raw value bytes. Keeps only the first occurrence per tag.
+    raw value bytes. Keeps only the first occurrence per tag, which
+    matches the layout reference IPA implementations emit.
     """
 
     body = payload[_proactive_body_offset(payload):]
@@ -621,7 +631,7 @@ def _decode_open_channel_tlvs(payload: bytes) -> dict[str, bytes]:
 
 
 class IpaPollDnsPhaseTests(unittest.TestCase):
-    """SGP.32 IPA-poll DNS phase coverage."""
+    """SGP.32 DNS-over-BIP leg ahead of the eIM TCP bearer."""
 
     def test_dns_open_channel_uses_resolver_apn_and_ip(self) -> None:
         toolkit_logic = _make_toolkit_with_ipa_session()
@@ -686,10 +696,11 @@ class IpaPollDnsPhaseTests(unittest.TestCase):
         toolkit_logic = _make_toolkit_with_ipa_session()
         toolkit_logic.state.toolkit.ipa_poll_resolved_ip = ""
         toolkit_logic._queue_ipa_poll_sequence()
-        # DNS phase queues OPEN + 2x SEND + TIMER(start) + 2x RECV
-        # + TIMER(stop) + CLOSE = 8 commands. The TIMER MANAGEMENT
-        # pair gives the bearer a polling window between SEND DATA
-        # and RECEIVE DATA per TS 102 223 §6.4.27.
+        # DNS leg queues OPEN + 2x SEND + TIMER(start) + 2x RECV + TIMER(stop)
+        # + CLOSE = 8 commands. The TIMER MANAGEMENT pair gives the modem a
+        # polling window between the final SEND DATA and the first RECEIVE
+        # DATA so bytes from the network can land in the bearer buffer
+        # before the eUICC asks for them; reference IPA cards do the same.
         self.assertEqual(len(toolkit_logic.state.pending_fetch_queue), 8)
 
         first = bytes(toolkit_logic.state.pending_fetch_queue[0])
@@ -727,7 +738,7 @@ class IpaPollDnsPhaseTests(unittest.TestCase):
 
 
 class IpaPollBipDeviceIdentitiesTests(unittest.TestCase):
-    """ETSI TS 102 223 §8.7 -- SEND/RECEIVE/CLOSE follow-ups must
+    """ETSI TS 102 223 §8.7 — SEND/RECEIVE/CLOSE follow-ups must
     address the channel id assigned by the OPEN CHANNEL TR (encoded
     as 0x20 + channel_id), not the generic terminal identifier
     (0x82). Modems otherwise return general result 0x3A / additional

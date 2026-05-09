@@ -1,14 +1,23 @@
-"""Loopback coverage for the SGP.32 IPA-poll TLS client wrapper.
+"""Stage-2 loopback for the SGP.32 IPA-poll in-card TLS-1.2 client.
 
-Drives an in-process memory-BIO TLS server so a TLS-1.2 handshake
-completes without any real socket, then asserts:
+The simulator's IPA now drives a TLS-1.2 ECDHE-ECDSA-AES128-GCM-SHA256
+handshake entirely inside the card -- the modem stays a transparent
+byte pipe between the card's SEND/RECEIVE DATA proactive commands and
+the eIM. These tests stand up an in-process TLS server (also memory-BIO
+based) so the handshake completes without any real socket, then assert:
 
-* The first SEND DATA emitted begins with a TLS-1.2 ClientHello
-  (ContentType=Handshake, message=0x01).
+* The first SEND DATA the card emits begins with a TLS-1.2
+  ContentType=Handshake, version=0x0301, message=0x01 (ClientHello).
 * The handshake reaches steady state (both sides report a usable
-  cipher) once the toolkit drains the queue.
-* ApplicationData decryption forwards each SGP.32 EuiccPackage TLV
-  to the dispatcher, matching the plain-HTTP path's contract.
+  cipher) after the toolkit's reactive SEND/RECEIVE DATA loop drains
+  the modem's queue.
+* The simulator decrypts the eIM's ApplicationData payload and
+  forwards each SGP.32 EuiccPackage TLV to the dispatcher (the same
+  contract as the plain-HTTP path).
+
+If these tests pass, the simulator's TLS-on-card path is wire-
+compatible with what reference IPA implementations emit on real
+hardware.
 """
 
 from __future__ import annotations

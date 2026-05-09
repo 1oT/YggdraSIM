@@ -1,3 +1,5 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+"""SGP.32 eIM response decoders: EUICCInfo1, GetRAT, GetCerts, and eIM configuration TLV parsers."""
 from typing import Any, Dict, List, Optional
 
 from SCP03.logic.euicc_info2 import format_version_bytes
@@ -43,6 +45,7 @@ NOTIFICATIONS_ERROR_NAMES: dict[int, str] = {
 
 
 def decode_euicc_info1_summary(response: bytes) -> Dict[str, Any]:
+    """Decode an EUICCInfo1 TLV response into a summary dict (SGP.32 §6.3.3)."""
     summary: Dict[str, Any] = {}
     root_value = unwrap_root_tag(response, 0xBF20)
     if root_value is None:
@@ -61,6 +64,7 @@ def decode_euicc_info1_summary(response: bytes) -> Dict[str, Any]:
 
 
 def decode_notifications_response(response: bytes) -> Dict[str, Any]:
+    """Decode a ListNotifications response body into a list of notification dicts (SGP.32 §5.6.2)."""
     result: Dict[str, Any] = {
         "notifications": [],
         "package_results": [],
@@ -94,6 +98,7 @@ def decode_notifications_response(response: bytes) -> Dict[str, Any]:
 
 
 def decode_notification_entry(value: bytes) -> Dict[str, str]:
+    """Decode a single NotificationEntry TLV into a structured dict."""
     entry_map = parse_tlv_simple(value)
     entry: Dict[str, str] = {}
     seq_value = first_bytes(entry_map.get(0x80))
@@ -112,6 +117,7 @@ def decode_notification_entry(value: bytes) -> Dict[str, str]:
 
 
 def decode_rat_rules(response: bytes) -> List[Dict[str, Any]]:
+    """Decode a GetRulesAuthorizationTable response into a list of RAT-rule dicts (SGP.22 §5.7.16)."""
     root_value = unwrap_root_tag(response, 0xBF43)
     if root_value is None:
         return []
@@ -120,6 +126,7 @@ def decode_rat_rules(response: bytes) -> List[Dict[str, Any]]:
     seen_fingerprints: set[str] = set()
 
     def walk(node_bytes: bytes) -> None:
+        """Depth-first walk of RAT rule permission TLVs; appends decoded dicts to the outer list."""
         nodes = parse_tlv_nodes(node_bytes)
         if len(nodes) == 0:
             return
@@ -148,6 +155,7 @@ def decode_rat_rules(response: bytes) -> List[Dict[str, Any]]:
 
 
 def decode_rat_rule(value: bytes) -> Dict[str, Any]:
+    """Decode a single RAT rule TLV block into a human-readable dict."""
     rule_map = parse_tlv_simple(value)
     rule: Dict[str, Any] = {}
     ppr_ids_value = first_bytes(rule_map.get(0x80))
@@ -184,6 +192,7 @@ def decode_rat_rule(value: bytes) -> Dict[str, Any]:
 
 
 def decode_eim_configuration_entries(response: bytes) -> List[Dict[str, Any]]:
+    """Decode a GetEimConfigurationData response into a list of eIM config entry dicts (SGP.32 §6.3.8)."""
     root_value = unwrap_root_tag(response, 0xBF55)
     if root_value is None:
         return []
@@ -192,6 +201,7 @@ def decode_eim_configuration_entries(response: bytes) -> List[Dict[str, Any]]:
     seen_fingerprints: set[str] = set()
 
     def walk(node_bytes: bytes) -> None:
+        """Depth-first walk of eIM config sub-TLVs; appends decoded fields to the outer dict."""
         nodes = parse_tlv_nodes(node_bytes)
         if len(nodes) == 0:
             return
@@ -212,6 +222,7 @@ def decode_eim_configuration_entries(response: bytes) -> List[Dict[str, Any]]:
 
 
 def decode_eim_configuration_entry(value: bytes) -> Dict[str, Any]:
+    """Decode a single eIM configuration entry TLV into a structured dict."""
     entry_map = parse_tlv_simple(value)
     entry: Dict[str, Any] = {}
 
@@ -267,6 +278,7 @@ def decode_eim_configuration_entry(value: bytes) -> Dict[str, Any]:
 
 
 def decode_get_certs_response(response: bytes) -> Dict[str, Any]:
+    """Decode a GetCertsResponse TLV into a dict keyed by certificate role (SGP.32 §6.3.6)."""
     root_value = unwrap_root_tag(response, 0xBF56)
     if root_value is None:
         return {}
@@ -289,6 +301,7 @@ def decode_get_certs_response(response: bytes) -> Dict[str, Any]:
 
 
 def unwrap_root_tag(data: bytes, root_tag: int) -> Optional[bytes]:
+    """Strip an expected outer root tag from *data* and return the payload, raising on mismatch."""
     nodes = parse_tlv_nodes(data)
     if len(nodes) == 1 and nodes[0][0] == root_tag:
         return nodes[0][1]
@@ -304,6 +317,7 @@ def decode_integer(value: bytes) -> int:
 
 
 def decode_text_or_hex(value: bytes) -> str:
+    """Return the UTF-8 text of a BER-TLV value, falling back to hex if decoding fails."""
     if len(value) == 0:
         return ""
     try:
@@ -316,6 +330,7 @@ def decode_text_or_hex(value: bytes) -> str:
 
 
 def decode_bcd_digits(value: bytes) -> str:
+    """Decode BCD-encoded bytes to a digit string (3GPP TS 24.008 §10.5.1.3)."""
     digits: List[str] = []
     for byte_value in value:
         low = byte_value & 0x0F
@@ -331,6 +346,7 @@ def decode_bcd_digits(value: bytes) -> str:
 
 
 def format_named_bit_string(value: bytes, bit_names: Dict[int, str]) -> str:
+    """Format a named-bit-string value as a comma-separated list of set bit names."""
     if len(value) == 0:
         return "none"
     labels = decode_named_bit_string(value, bit_names)
@@ -341,6 +357,7 @@ def format_named_bit_string(value: bytes, bit_names: Dict[int, str]) -> str:
 
 
 def decode_named_bit_string(value: bytes, bit_names: Dict[int, str]) -> List[str]:
+    """Decode a named-bit-string BER value and return a list of set bit names."""
     if len(value) == 0:
         return []
     unused_bits = value[0]
@@ -366,6 +383,7 @@ def first_bytes(value: Any) -> Optional[bytes]:
 
 
 def count_child_tag(value: Any, child_tag: int) -> int:
+    """Count occurrences of *tag* as direct children of *container_bytes*."""
     blob = first_bytes(value)
     if blob is None:
         return 0
@@ -377,6 +395,7 @@ def count_child_tag(value: Any, child_tag: int) -> int:
 
 
 def collect_nested_tag_values(data: bytes, wanted_tag: int) -> List[bytes]:
+    """Recursively collect all values of *tag* found anywhere within *container_bytes*."""
     values: List[bytes] = []
 
     def walk(node_bytes: bytes) -> None:

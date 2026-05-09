@@ -1,3 +1,5 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+"""SCP11 device-inventory support: EID-keyed namespace adapter writing profile metadata to the device inventory store."""
 from __future__ import annotations
 
 import sys
@@ -39,6 +41,7 @@ class EidInventoryNamespace:
         return self.store.replace_namespace("eid", normalized_eid, self.namespace, dict(payload))
 
     def merge(self, eid: Any, updates: dict[str, Any], drop_empty: bool = False) -> dict[str, Any]:
+        """Merge a discovery-snapshot dict into the device inventory record for the given EID."""
         normalized_eid = self.normalize_eid(eid)
         if len(normalized_eid) == 0:
             return {}

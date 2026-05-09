@@ -1,3 +1,4 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 # -----------------------------------------------------------------------------
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -12,7 +13,7 @@
 # You should have received a copy of the GNU General Public License
 # along with this program. If not, see <https://www.gnu.org/licenses/>.
 #
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+# Copyright (c) 2026 1oT OE. Authored by Hampus Hellsberg.
 # -----------------------------------------------------------------------------
 
 """Helpers that turn live SCP03 / SCP11c session state into keybag JSON.
@@ -58,7 +59,7 @@ def entry_from_scp03_session(
     """Extract S-ENC / S-MAC / S-RMAC from an `Scp03Session`.
 
     The `Scp03Session` fields (`s_enc`, `s_mac`, `s_rmac`) are populated
-    during `derive_keys`; if any are missing an error is raised so the caller knows
+    during `derive_keys`; if any are missing we raise so the caller knows
     the session was never fully authenticated.
     """
     if getattr(session, "is_authenticated", False) is False:
@@ -135,6 +136,7 @@ def entry_from_scp11_bsp(
 
 
 def build_keybag_document(entries: list[KeybagExportEntry]) -> dict[str, Any]:
+    """Build and return the keybag export document dict from the current session key material."""
     sessions: list[dict[str, Any]] = []
     for entry in entries:
         session_dict: dict[str, Any] = {

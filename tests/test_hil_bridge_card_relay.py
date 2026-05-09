@@ -396,43 +396,16 @@ class HilBridgeCardRelayTests(unittest.TestCase):
                 headers={"Content-Type": "application/json"},
                 method="POST",
             )
-            # Two outcomes legitimately mean "server rejected the
-            # oversized body before it ever entered the JSON parser",
-            # and which one materialises is platform / TCP-buffer
-            # dependent on a localhost loopback:
-            #
-            # 1. The server reads the ``Content-Length`` header,
-            #    immediately responds with ``400 Bad Request``, and
-            #    closes the connection. The client's ``urlopen`` raises
-            #    ``HTTPError`` with ``.code == 400`` (the documented
-            #    contract this test pins).
-            # 2. The server closes the socket while the client is still
-            #    streaming the 1 MiB+1 body. The client's ``send()``
-            #    half-write trips ``BrokenPipeError`` / ``ConnectionResetError``
-            #    (wrapped in ``URLError``) before it ever sees the
-            #    ``400`` response. This is a pure timing race against
-            #    the TCP send buffer; on a fast loopback runner it is
-            #    in fact the *more likely* outcome.
-            #
-            # Either path satisfies the contract -- the
-            # ``exchange_callback`` ``AssertionError`` above guards the
-            # real invariant (the relay never decoded JSON / dispatched
-            # an APDU). Accept both, but still fail loudly if the
-            # server actually accepted the request and returned 200.
-            status_code: int | None = None
             try:
                 urllib_request.urlopen(request, timeout=5)
             except urllib_request.HTTPError as http_error:
                 status_code = http_error.code
-            except (urllib_request.URLError, BrokenPipeError, ConnectionResetError):
-                status_code = None
             else:
                 self.fail("Oversized request body was accepted.")
         finally:
             relay.stop()
 
-        if status_code is not None:
-            self.assertEqual(status_code, 400)
+        self.assertEqual(status_code, 400)
 
     def test_create_card_connection_falls_back_to_direct_reader_when_marker_is_stale(self) -> None:
         fake_connection = _FakeReaderConnection()

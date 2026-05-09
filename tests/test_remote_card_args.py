@@ -10,7 +10,7 @@ Covers:
   configured / unconfigured / loopback / env-only cases.
 
 The tests use a private ``environment`` dict so the real ``os.environ``
-is never mutated -- keeps the suite safe to run alongside other tests
+is never mutated — keeps the suite safe to run alongside other tests
 that depend on a clean env.
 """
 

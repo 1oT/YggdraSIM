@@ -1,3 +1,5 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+"""Structured output helpers: serialises arbitrary payloads to JSON or YAML for piped CLI consumers."""
 from __future__ import annotations
 
 import json

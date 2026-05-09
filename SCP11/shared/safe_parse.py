@@ -17,13 +17,12 @@
 
 """Structured fallback wrappers for SCP11 TLV / X.509 / ASN.1 parsing.
 
-The three SCP11 trees historically accumulated a large number of broad
-``except Exception`` sites; most were TLV-parse or certificate-decode
-fallbacks that silently continue on malformed input. ``safe_parse``
-centralises the pattern so every swallowed failure is tagged with a
-``label`` and a bounded preview of the offending buffer, and so the
-default value is explicit at the call site instead of hidden inside a
-broad ``except`` block.
+Audit item ``SCP11-P3-01`` flagged ~760 ``except Exception`` sites across
+the three SCP11 trees; most are TLV-parse or certificate-decode fallbacks
+that silently continue on malformed input. ``safe_parse`` centralises the
+pattern so every swallowed failure is tagged with a ``label`` and a bounded
+preview of the offending buffer, and so the default value is explicit at
+the call site instead of hidden inside a broad ``except`` block.
 
 Typical use:
 
@@ -78,7 +77,7 @@ def _format_preview(buffer: bytes | bytearray | memoryview | None, preview_bytes
     head = raw[:preview_bytes]
     tail_note = ""
     if len(raw) > preview_bytes:
-        tail_note = f"... (+{len(raw) - preview_bytes} more)"
+        tail_note = f"… (+{len(raw) - preview_bytes} more)"
     return f"{head.hex().upper()}{tail_note} (len={len(raw)})"
 
 
@@ -105,7 +104,7 @@ def safe_parse(
     normalized_buffer = b"" if buffer is None else bytes(buffer)
     try:
         return parser(normalized_buffer)
-    except Exception as exc:  # noqa: BLE001 -- documented fallback site
+    except Exception as exc:  # noqa: BLE001 — documented fallback site
         preview = _format_preview(normalized_buffer, preview_bytes)
         active_logger.debug(
             "safe_parse(%s) suppressed %s: %s [buffer=%s]",

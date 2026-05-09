@@ -15,6 +15,7 @@
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 # -----------------------------------------------------------------------------
 
+"""GP card management wizards: PUT KEY, DGI personalisation, and applet install flows."""
 import os 
 from typing import Tuple 
 from SCP03 .config import Config 
@@ -71,6 +72,7 @@ class InteractiveWizards :
 
     @staticmethod 
     def run_wizard_menu (tp_ctrl =None ,target_aid :str ="A000000151000000",gp_ctrl =None ):
+        """Display an interactive wizard menu and return the user's selection."""
         is_nt =False 
         if os .name =='nt':
             is_nt =True 
@@ -541,6 +543,7 @@ class InteractiveWizards :
         wiz .add_step ("ca","Tag CA (SIM File Access) [Raw Hex]:",default ="SKIP",warning ="ETSI TS 102 226: Tag 'CA' and 'EA' cannot coexist.")
 
         def ea_cond (res ):
+            """Return an EXTERNAL AUTHENTICATE condition predicate for the wizard flow."""
             ca_val =res .get ("ca")
             is_ca_skip =False 
             if ca_val =="SKIP":
@@ -1077,6 +1080,7 @@ class InteractiveWizards :
 
     @staticmethod 
     def build_install_apdu (tp_ctrl ,filename :str ,gp_ctrl =None ):
+        """Build a GP INSTALL [for install] APDU from the supplied parameters."""
         is_valid_file =False 
         if filename :
             if os .path .exists (filename ):
@@ -1300,6 +1304,7 @@ class InteractiveWizards :
 
     @staticmethod 
     def run_dgi_personalization (tp_ctrl ,gp_ctrl ,target_aid :str )->None :
+        """Run the interactive DGI personalisation wizard for a loaded CAP package."""
         mode_wiz =InteractiveWizard ("Personalization / STORE DATA",Config .Colors ,"Choose whether to open INSTALL [for personalization] against a target AID first, or to send STORE DATA directly.")
         mode_wiz .add_step ("target_mode","Mode [1=Target AID via INSTALL for personalization, 2=Direct STORE DATA only]:",default ="1")
 

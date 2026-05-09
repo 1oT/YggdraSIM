@@ -1,0 +1,18 @@
+
+
+# Extensions for the Test CI SUB_CA
+
+authorityKeyIdentifier=keyid, issuer
+
+subjectKeyIdentifier = hash
+
+keyUsage =critical, keyCertSign, cRLSign
+
+certificatePolicies=critical,2.23.146.1.2.1.0.0
+
+basicConstraints = critical, CA:true
+
+subjectAltName = RID:2.999.1
+
+crlDistributionPoints=URI:http://ci.test.example.com/CRL-1.crl, URI:http://ci.test.example.com/CRL-2.crl
+

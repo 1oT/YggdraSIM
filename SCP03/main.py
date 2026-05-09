@@ -1,3 +1,5 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+"""SCP03 package entry point."""
 # -----------------------------------------------------------------------------
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -51,6 +53,7 @@ def _build_dispatcher ():
     return dispatcher
 
 def run_script (file_path ):
+    """Execute a scripted SCP03 session from the supplied script file path."""
     try :
         app =_build_dispatcher ()
         app .run_script (file_path )
@@ -60,6 +63,7 @@ def run_script (file_path ):
         print (f"\n[SCP03] Fatal Error: {e}")
 
 def run_report_wizard ():
+    """Run the FS report wizard against the active card and write output."""
     from SCP03 .interface .shell_wizards import ShellInteractiveWizards 
     try :
         app =_build_dispatcher ()
@@ -101,6 +105,7 @@ def entry_cmd (cmd_line :str ,yaml_out :str =None ):
         raise 
 
 def entry_stdin (yaml_out :str =None ):
+    """Start an interactive SCP03 shell session reading commands from stdin."""
     command_lines =[]
     for raw_line in sys .stdin .read ().splitlines ():
         command_text =str (raw_line or "").strip ()
@@ -113,6 +118,7 @@ def entry_stdin (yaml_out :str =None ):
 
 
 def run_standalone ():
+    """Parse CLI arguments, establish the transport, and dispatch to the chosen run mode."""
     import argparse 
     parser =argparse .ArgumentParser (description ="YggdraSIM SCP03 Admin Shell")
     parser .add_argument ("--cmd",type =str ,help ="Semicolon-separated commands (non-interactive)")

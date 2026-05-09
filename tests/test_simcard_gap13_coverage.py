@@ -1,4 +1,6 @@
-"""Coverage for TERMINAL CAPABILITY decode, ADF.ISIM EFs (IST/PCSCF) and TS 102 223 MORE TIME / POLL INTERVAL latches:
+"""Thirteenth-pass gap-coverage suite for SIMCARD surfaces beyond ES10.
+
+Round-13 closes the following:
 
 * ETSI TS 102 221 §11.1.19 ``TERMINAL CAPABILITY`` (INS 0xAA)
   TLV-level decode. Each well-known sub-tag is latched into a

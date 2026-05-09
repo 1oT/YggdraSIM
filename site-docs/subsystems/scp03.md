@@ -182,14 +182,14 @@ decoder.
 
 ```text
 [APDU] > AUTH-SD
-[A0...00] > EXPORT-KEYBAG Workspace/hil/captures/session-example.keys.json case-1234
+[A0...00] > EXPORT-KEYBAG Workspace/hil/captures/session-2026-04-20.keys.json case-1234
 ```
 
 Arguments (both optional):
 
-- `OutputPath.keys.json` -- destination file. Defaults to a
+- `OutputPath.keys.json` — destination file. Defaults to a
   timestamped path under the SCP03 workspace when omitted.
-- `Label` -- free-form identifier written to the entry for operator
+- `Label` — free-form identifier written to the entry for operator
   cross-referencing (ticket id, serial, pcap name, etc.).
 
 The handler refuses cleanly if:
@@ -205,7 +205,7 @@ Written fields (per entry):
 - `ssc_hex` / `chaining_value_hex`: SCP03 state at time of export
 - `label`: the operator-provided label
 
-See [HIL Bridge -- Keybag JSON schema](hil-bridge.md#keybag-json-schema)
+See [HIL Bridge — Keybag JSON schema](hil-bridge.md#keybag-json-schema)
 for the complete file structure and
 [Replay a HIL pcap offline](../how-to/replay-hil-pcap-offline.md) for
 how the keybag feeds into the decoded-APDU TUI.
@@ -240,5 +240,5 @@ for reading outside the terminal.
 - [3GPP NAA](../concepts/3gpp-naa.md)
 - [CLI Matrix](../reference/cli-matrix.md)
 - [Troubleshooting](../reference/troubleshooting.md)
-- [HIL Bridge -- offline pcap replay](hil-bridge.md#offline-pcap-replay)
+- [HIL Bridge — offline pcap replay](hil-bridge.md#offline-pcap-replay)
 - [Replay a HIL pcap offline](../how-to/replay-hil-pcap-offline.md)

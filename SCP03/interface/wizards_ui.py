@@ -15,6 +15,7 @@
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 # -----------------------------------------------------------------------------
 
+"""Wizard step runner: collects multi-step user input and returns a consolidated result dict."""
 import re
 
 class InteractiveWizard :
@@ -27,6 +28,7 @@ class InteractiveWizard :
         self .colors =colors_ref 
 
     def add_step (self ,step_id ,prompt ,default =None ,is_bool =False ,indent =0 ,warning =None ,is_mandatory =False ,condition =None ,builder_func =None ):
+        """Append a new wizard step with *title* and *prompt* to the step list."""
         step ={
         "id":step_id ,
         "prompt":prompt ,
@@ -113,6 +115,7 @@ class InteractiveWizard :
             print (f"{indent_str}{self.colors.WARNING}> {prompt_text} {val_str}{self.colors.ENDC}")
 
     def run (self ):
+        """Execute the wizard step sequence, collecting user input, and return the result dict."""
         print (f"\n{self.colors.HEADER}--- {self.title} ---{self.colors.ENDC}")
 
         has_desc =False 

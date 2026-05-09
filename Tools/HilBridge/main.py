@@ -1,3 +1,5 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+"""HIL-Bridge package entry point."""
 from __future__ import annotations
 
 import argparse
@@ -19,6 +21,7 @@ def add_bridge_runtime_arguments(
     *,
     include_list_readers: bool = True,
 ) -> None:
+    """Add HIL-Bridge runtime argparse arguments to *parser*."""
     parser.add_argument("--host", type=str, default="127.0.0.1", help="Listen address for the TCP bridge")
     parser.add_argument("--port", type=int, default=9997, help="Listen port for both control and bankd sockets")
     parser.add_argument(
@@ -91,6 +94,7 @@ def add_bridge_runtime_arguments(
 
 
 def build_bridge_config_from_args(args: argparse.Namespace) -> BridgeConfig:
+    """Build the bridge runtime config dict from parsed argparse namespace."""
     return BridgeConfig(
         listen_host=str(args.host),
         listen_port=int(args.port),
@@ -148,6 +152,7 @@ def build_stop_signal_handler(
     *,
     logger: logging.Logger | None = None,
 ):
+    """Return a signal handler function that gracefully stops the bridge server."""
     active_logger = logger or logging.getLogger(__name__)
 
     def _request_stop(signum: int, _frame: Any) -> None:
@@ -164,6 +169,7 @@ def _install_stop_signal_handlers(stop_event: threading.Event) -> None:
 
 
 def run_bridge_server(server: HilBridgeServer) -> int:
+    """Start the HIL-Bridge server and block until it is stopped."""
     stop_event = threading.Event()
     _install_stop_signal_handlers(stop_event)
     try:
@@ -176,6 +182,7 @@ def run_bridge_server(server: HilBridgeServer) -> int:
 
 
 def run_standalone() -> int:
+    """Parse CLI arguments and run the HIL-Bridge in standalone mode."""
     parser = _build_parser()
     args = parser.parse_args()
     debug_enabled = bool(getattr(args, "debug", False))

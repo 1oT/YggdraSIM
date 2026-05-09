@@ -1,5 +1,5 @@
 """
-semantic decoder coverage for ADF.ISIM / DF.MULTIMEDIA /
+Wave C Pass C — semantic decoder coverage for ADF.ISIM / DF.MULTIMEDIA /
 DF.MCS / MMS family EFs.
 
 For every EF promoted from the generic opaque pass-through catalog we

@@ -4,7 +4,7 @@
    ``_MAX_CACHE_FILES`` newest entries and a total-byte budget. Without it
    the cache grew unbounded across a long-running session.
 2. ``SaipTool._load_config`` now quarantines a corrupt ``saip_tool.json``
-   to a timestamped sidecar instead of silently discarding it -- we want
+   to a timestamped sidecar instead of silently discarding it — we want
    the hand-edit preserved so the operator can recover from a typo.
 
 Neither test needs ``pySim`` or a live card; both operate purely on disk.
@@ -63,7 +63,7 @@ class SaipToolCachePruneTests(unittest.TestCase):
             entries: list[Path] = []
             for index in range(10):
                 cache_path = cache_dir / f"entry-{index}.der"
-                # 1024 bytes each; budget set below to ~3 KiB so the cache
+                # 1024 bytes each; budget set below to ~3 KiB so we expect
                 # at most three files to survive.
                 cache_path.write_bytes(b"\x42" * 1024)
                 os.utime(cache_path, (base_mtime + index, base_mtime + index))

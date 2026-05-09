@@ -1,4 +1,4 @@
-# Installation -- Clean Flavor
+# Installation — Clean Flavor
 
 The **clean** flavor is the default distribution of YggdraSIM. It targets
 operators who do not need the SIMtrace2-based hardware-in-the-loop (HIL)
@@ -18,8 +18,8 @@ Linux, and Raspberry Pi OS 64-bit.
 - the Linux-only `pyudev` dependency
 - any reliance on `osmo-remsim-client-st2` or SIMtrace2 firmware
 
-If any of those are required, use [`INSTALL_FULL.md`](https://github.com/1oT/YggdraSIM/blob/main/guides/INSTALL_FULL.md) or
-[`INSTALL_FROM_SOURCE.md`](https://github.com/1oT/YggdraSIM/blob/main/guides/INSTALL_FROM_SOURCE.md) instead.
+If any of those are required, use [`INSTALL_FULL.md`](INSTALL_FULL.md) or
+[`INSTALL_FROM_SOURCE.md`](INSTALL_FROM_SOURCE.md) instead.
 
 ## Picking the correct pre-built artefact
 
@@ -35,7 +35,7 @@ yggdrasim-<os>-<arch>-clean-<version>[.exe]
 | macOS Intel          | `yggdrasim-macos-x86_64-clean-<version>`             |
 | macOS Apple Silicon  | `yggdrasim-macos-arm64-clean-<version>`              |
 | Linux x86_64         | `yggdrasim-linux-x86_64-clean-<version>`             |
-| Linux arm64 / RPi OS | `yggdrasim-linux-arm64-clean-<version>` -- see the Raspberry Pi guide |
+| Linux arm64 / RPi OS | `yggdrasim-linux-arm64-clean-<version>` — see the Raspberry Pi guide |
 
 Download the artefact that matches your OS and CPU, then make the file
 executable (Linux / macOS):
@@ -80,8 +80,8 @@ bridge is intentionally unavailable:
 ```
 
 If the user opens the `[B] HIL Bridge Session` entry in the main menu the
-launcher prints a pointer to [`INSTALL_FULL.md`](https://github.com/1oT/YggdraSIM/blob/main/guides/INSTALL_FULL.md) and
-[`SIMTRACE2_CARDEM_GUIDE.md`](https://github.com/1oT/YggdraSIM/blob/main/guides/SIMTRACE2_CARDEM_GUIDE.md) instead of
+launcher prints a pointer to [`INSTALL_FULL.md`](INSTALL_FULL.md) and
+[`SIMTRACE2_CARDEM_GUIDE.md`](SIMTRACE2_CARDEM_GUIDE.md) instead of
 crashing.
 
 ## Host dependencies (runtime)
@@ -114,7 +114,7 @@ distribution for reader access.
 
 ### Raspberry Pi OS 64-bit
 
-Use the arm64 bundle and follow [`INSTALL_RASPBERRYPI.md`](https://github.com/1oT/YggdraSIM/blob/main/guides/INSTALL_RASPBERRYPI.md)
+Use the arm64 bundle and follow [`INSTALL_RASPBERRYPI.md`](INSTALL_RASPBERRYPI.md)
 for the additional steps specific to Raspberry Pi hardware.
 
 ## Building the clean bundle yourself
@@ -134,8 +134,8 @@ git-ignored.
 
 ## When to switch to another flavor
 
-- SIMtrace2 + modem HIL capture → [`INSTALL_FULL.md`](https://github.com/1oT/YggdraSIM/blob/main/guides/INSTALL_FULL.md)
+- SIMtrace2 + modem HIL capture → [`INSTALL_FULL.md`](INSTALL_FULL.md)
 - Full development checkout with test suite →
-  [`INSTALL_FROM_SOURCE.md`](https://github.com/1oT/YggdraSIM/blob/main/guides/INSTALL_FROM_SOURCE.md)
+  [`INSTALL_FROM_SOURCE.md`](INSTALL_FROM_SOURCE.md)
 - Running on the Pi directly →
-  [`INSTALL_RASPBERRYPI.md`](https://github.com/1oT/YggdraSIM/blob/main/guides/INSTALL_RASPBERRYPI.md)
+  [`INSTALL_RASPBERRYPI.md`](INSTALL_RASPBERRYPI.md)

@@ -15,6 +15,7 @@
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 # -----------------------------------------------------------------------------
 
+"""SGP.22 eUICC procedures: ES10b/ES9+ command sequences for profile download and management."""
 import json 
 import re
 import shutil 
@@ -760,6 +761,7 @@ class Sgp22Manager :
         return self ._decode_bcd_digits (value )
 
     def get_ecasd_issuer_identity (self )->Dict [str ,str ]:
+        """Read the ECASD issuer public key (ES10b.GetEUICCChallenge + GET DATA) and return a dict of key attributes."""
         for use_logical_channel in (False ,True ):
             mode_name ="basic"
             if use_logical_channel :
@@ -1590,6 +1592,7 @@ class Sgp22Manager :
         return data .hex ().upper ()
 
     def list_profiles (self ):
+        """Send ES10c.GetProfilesInfo and print the installed profile table."""
         self ._select_isd_r ()
         payload ="BF2D00"
         print (f"{Config.Colors.CYAN}[*] Retrieving Profile List (ES10c/ES10b.GetProfilesInfo)...{Config.Colors.ENDC}")
@@ -1937,6 +1940,7 @@ class Sgp22Manager :
         found :List [Dict [int ,Any ]]=[]
 
         def walk (current :Any ):
+            """Depth-first walk of a BER-TLV tree during SGP.22 profile analysis."""
             if isinstance (current ,dict ):
                 keys =set (current .keys ())
                 has_entry_shape =False 
@@ -3028,7 +3032,7 @@ class Sgp22Manager :
         print (f"{Config.Colors.FAIL}[-] Failed: {sw1:02X}{sw2:02X}{Config.Colors.ENDC}")
 
     def get_rat (self )->None :
-        """ES10b.GetRAT (SGP.22/32) - Rules Authorisation Table. Retrieval only."""
+        """ES10b.GetRAT (SGP.22/32) – Rules Authorisation Table. Retrieval only."""
         self ._select_isd_r ()
         payload ="BF4300"
         print (f"{Config.Colors.CYAN}[*] GetRAT (Rules Authorisation Table)...{Config.Colors.ENDC}")
@@ -3052,7 +3056,7 @@ class Sgp22Manager :
             print (f"    {data.hex().upper()}")
 
     def get_notifications_list (self )->None :
-        """ES10b.RetrieveNotificationsList (SGP.22/32) - Pending notifications. Retrieval only."""
+        """ES10b.RetrieveNotificationsList (SGP.22/32) – Pending notifications. Retrieval only."""
         self ._select_isd_r ()
         payload ="BF2B00"
         print (f"{Config.Colors.CYAN}[*] RetrieveNotificationsList...{Config.Colors.ENDC}")
@@ -3076,7 +3080,7 @@ class Sgp22Manager :
             print (f"    {data.hex().upper()}")
 
     def get_eim_configuration_data (self )->None :
-        """ES10b.GetEimConfigurationData (SGP.32 IoT) - eIM configuration data. Retrieval only."""
+        """ES10b.GetEimConfigurationData (SGP.32 IoT) – eIM configuration data. Retrieval only."""
         self ._es10_retrieve (
         "BF5500",
         "GetEimConfigurationData (eIM config, SGP.32)",

@@ -1,3 +1,5 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+"""Simulated card connection facade: routes ISO 7816 C-APDUs to the shared SimulatedSimCardEngine and emits R-APDUs."""
 from __future__ import annotations
 
 import threading
@@ -27,6 +29,7 @@ _SHARED_ENGINE_LOCK = threading.Lock()
 
 
 def get_shared_engine() -> SimulatedSimCardEngine:
+    """Return the process-wide singleton ``SimEngine`` instance, constructing it on first call."""
     global _SHARED_ENGINE, _SHARED_ENGINE_QUIRKS_PATH, _SHARED_ENGINE_ISDR_CONFIG_PATH, _SHARED_ENGINE_EIM_IDENTITY_PATH, _SHARED_ENGINE_EUICC_STORE_ROOT, _SHARED_ENGINE_PROFILE_STORE_PATH
     quirks_path = get_sim_quirks_path()
     isdr_config_path = get_sim_isdr_config_path()

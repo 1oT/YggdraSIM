@@ -6,10 +6,10 @@ This setup seeds one concrete first-test identity and package set for the local 
 
 - eIM ID: `2.25.311782205282738360923618091971140414400`
 - eIM ID type: `OID`
-- eIM FQDN: `eim.yggdrasim.example.test`
-- eIM endpoint: `https://eim.yggdrasim.example.test/gsma/rsp2/asn1`
-- SM-DP+ endpoint: `https://smdpp.yggdrasim.example.test/gsma/rsp2/es9plus`
-- SM-DP+ address: `smdpp.yggdrasim.example.test`
+- eIM FQDN: `eim.example.test`
+- eIM endpoint: `https://eim.example.test/gsma/rsp2/asn1`
+- SM-DP+ endpoint: `https://smdpp.example.test/gsma/rsp2/es9plus`
+- SM-DP+ address: `smdpp.example.test`
 - CI PKID: `F54172BDF98A95D65CBEB88A38A1C11D800A85C3`
 
 The first-test signing and TLS-trust material is no longer bundled in the
@@ -28,7 +28,7 @@ Default identity note:
 - `eim_identity.json` does not pin bundled Local eIM certificate material
 - command examples should pass operator-provided paths explicitly, or the
   operator can populate the identity file locally
-- the simulated card uses its own default BF55 identity file under
+- the simulated card now uses its own default BF55 identity file under
   `Workspace/SIMCARD/eim_identity.json`
 
 ## Canonical Peer Provisioning Artifacts
@@ -96,4 +96,4 @@ RESP-LOG 20
 
 ## Operational Note
 
-The shipped OID is a UUID-derived dummy under `2.25`, not a copied private-enterprise branch. `eim.yggdrasim.example.test` and `smdpp.yggdrasim.example.test` can still be carried through the package runtime fields, while the module continues to use its local intercept path for execution.
+The shipped OID is a UUID-derived dummy under `2.25`, not a copied private-enterprise branch. `eim.example.test` and `smdpp.example.test` can still be carried through the package runtime fields, while the module continues to use its local intercept path for execution.

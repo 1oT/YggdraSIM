@@ -7,7 +7,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable
 
-from SIMCARD.state import SimCardState, append_bounded
+from SIMCARD.state import SimCardState
 from SIMCARD.utils import read_tlv, split_apdu_sequence, tlv
 
 _LOGGER = logging.getLogger(__name__)
@@ -32,8 +32,8 @@ class Scp80Logic:
         self._concat_asm_parts: dict[int, bytes] = {}
 
     def handle_envelope(self, payload: bytes) -> ApduResult:
-        self.state.ota_packet_count += 1
-        append_bounded(self.state.ota_history, payload.hex().upper())
+        """Handle an OTA ENVELOPE command (ETSI TS 102 225 §7.2) and return (data, SW1, SW2)."""
+        self.state.ota_history.append(payload.hex().upper())
         envelope = bytes(payload or b"")
         fetch_body: bytes
         try:

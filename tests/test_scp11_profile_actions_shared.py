@@ -144,7 +144,7 @@ class TestRowHelpers:
         # Only one ENABLED profile is allowed at a time, but the helper
         # still defends against a transient "two enabled" inventory by
         # excluding the target. The other ENABLED row should be the one
-        # the helper returns.
+        # we return.
         rows = [target, other]
         result = profile_actions.find_enabled_profile(rows, exclude=target)
         assert result is other

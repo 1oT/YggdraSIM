@@ -1,4 +1,6 @@
-"""Coverage for ADF.USIM service EFs (GID1/GID2/SMSP/SMSS) and TS 102 223 LAUNCH BROWSER latch:
+"""Fourteenth-pass gap-coverage suite for SIMCARD surfaces beyond ES10.
+
+Round-14 closes the following:
 
 * 3GPP TS 31.102 §4.2.10 / §4.2.11 ``EF.GID1`` (FID 6F3E) and
   ``EF.GID2`` (FID 6F3F) seeded under ADF.USIM. Both default to a

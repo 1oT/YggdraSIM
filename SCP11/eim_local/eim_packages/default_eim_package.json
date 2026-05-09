@@ -47,10 +47,10 @@
     "transaction_id_hex": "10000000000000000000000000000001",
     "profile_path": "SCP11/eim_local/profile/test_profile.txt",
     "cert_der_path": "/path/to/local_eim_signing_cert.pem",
-    "smdp_address": "smdpp.yggdrasim.example.test",
+    "smdp_address": "smdpp.example.test",
     "bip_endpoints": {
-      "eim": "https://eim.yggdrasim.example.test/gsma/rsp2/asn1",
-      "smdpp": "https://smdpp.yggdrasim.example.test/gsma/rsp2/es9plus"
+      "eim": "https://eim.example.test/gsma/rsp2/asn1",
+      "smdpp": "https://smdpp.example.test/gsma/rsp2/es9plus"
     }
   },
   "include_cert_tag": true,

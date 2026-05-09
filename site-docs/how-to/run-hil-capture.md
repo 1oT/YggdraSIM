@@ -71,10 +71,10 @@ Wireshark for post-mortem review.
 
     ```text
     # from the SCP03 admin shell, after AUTH-SD
-    [A0...00] > EXPORT-KEYBAG Workspace/hil/captures/session-example.keys.json case-1234
+    [A0...00] > EXPORT-KEYBAG Workspace/hil/captures/session-2026-04-20.keys.json case-1234
 
     # or from SCP11 Local Access, after a BSP-building verb
-    [Local SMDPP] > EXPORT-KEYBAG Workspace/hil/captures/session-example.keys.json case-1234
+    [Local SMDPP] > EXPORT-KEYBAG Workspace/hil/captures/session-2026-04-20.keys.json case-1234
     ```
 
 7. Shut the supervisor down cleanly. It terminates both the bridge and

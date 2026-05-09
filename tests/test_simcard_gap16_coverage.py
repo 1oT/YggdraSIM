@@ -1,4 +1,6 @@
-"""Coverage for TS 102 223 user-facing TR-side latches (DISPLAY TEXT / GET INKEY / GET INPUT / SELECT ITEM / SET UP MENU / SET UP IDLE MODE TEXT):
+"""Sixteenth-pass gap-coverage suite for SIMCARD surfaces beyond ES10.
+
+Round-16 closes the user-facing TR-side latches:
 
 * ETSI TS 102 223 §6.4.1 ``DISPLAY TEXT`` -- result code only.
 * ETSI TS 102 223 §6.4.2 ``GET INKEY`` -- result + decoded char

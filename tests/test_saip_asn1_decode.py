@@ -23,7 +23,7 @@ def _pysim_saip_templates_available() -> bool:
     pass-through) rely on ``pySim.esim.saip.templates``. That module loads
     only when either an on-disk ``pysim/`` clone is present at the repo
     root or the PyPI ``pySim`` wheel is installed. When neither is
-    reachable the test is skipped rather than failed so a lean "clean" checkout still
+    reachable we skip rather than fail so a lean "clean" checkout still
     passes this file's decoder-only coverage.
     """
     try:

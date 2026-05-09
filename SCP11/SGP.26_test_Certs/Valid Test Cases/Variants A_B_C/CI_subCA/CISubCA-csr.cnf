@@ -1,0 +1,12 @@
+# openssl CI SUB_CA certificate request configuration file
+
+[req] 
+prompt = no
+
+distinguished_name = dn-name
+[dn-name] 
+
+CN = Test CI SubCA
+OU = TESTCERT
+O = RSPTEST
+C = ES

@@ -18,10 +18,10 @@ keys here for the eIM local profile-loading path (`SCP11/eim_local`).
    ```
 
    For the eIM **signing** inventory under `eim/`, use `EIM-CERTS`
-   instead -- see [`eim/README.md`](https://github.com/1oT/YggdraSIM/blob/main/SCP11/eim_local/certs/eim/README.md).
+   instead — see [`eim/README.md`](eim/README.md).
 
 The drop-in pattern, sidecar fields, fallback rules, and selector
-behaviour are **identical** to the local-access cert zone -- the
+behaviour are **identical** to the local-access cert zone — the
 eim-local shell reuses the same record schema. The only behavioural
 difference is that the selected DPauth `server_address` is mirrored
 into the eIM activation code when the package does not pin a
@@ -33,17 +33,17 @@ The legacy SGP.26 filenames `CERT.DPauth.ECDSA.der` /
 
 ## Sub-directories
 
-- [`eim/`](https://github.com/1oT/YggdraSIM/blob/main/SCP11/eim_local/certs/eim) -- operator-issued **eIM signing certificates** for
+- [`eim/`](https://github.com/1oT/YggdraSIM/blob/main/SCP11/eim_local/certs/eim) — operator-issued **eIM signing certificates** for
   `ADD-INITIAL-EIM` / `ADD-EIM`. Different selector
   (`EimCertificateStore`). See the README in that directory and the
   canonical guide.
-- [`addeim/`](https://github.com/1oT/YggdraSIM/blob/main/SCP11/eim_local/certs/addeim) -- bundled fake-eIM identity sheet and template
+- [`addeim/`](https://github.com/1oT/YggdraSIM/blob/main/SCP11/eim_local/certs/addeim) — bundled fake-eIM identity sheet and template
   for `AddEim` package authoring.
 
 ## Canonical reference
 
-- [`guides/CONFIGURATION_AND_CERTIFICATES.md`](https://github.com/1oT/YggdraSIM/blob/main/guides/CONFIGURATION_AND_CERTIFICATES.md)
-  -- § *SCP11 RSP certificates (eim-local)* and § *Local eIM signing
+- [`guides/CONFIGURATION_AND_CERTIFICATES.md`](../../../guides/CONFIGURATION_AND_CERTIFICATES.md)
+  — § *SCP11 RSP certificates (eim-local)* and § *Local eIM signing
   certificates*.
 
 Selector code:

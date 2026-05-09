@@ -4,7 +4,7 @@
 # land the same wheels as a ``pip install .`` invocation.
 #
 # Build / test / HIL / docs extras live under ``[project.optional-dependencies]``
-# in ``pyproject.toml`` and are intentionally NOT duplicated here -- pulling
+# in ``pyproject.toml`` and are intentionally NOT duplicated here — pulling
 # this file should not drag PyInstaller onto every user's workstation.
 # Use the matching extras (``.[build]``, ``.[test]``, ``.[hil]``, ``.[docs]``,
 # or ``.[full]``) via ``pip install .[full]`` when those surfaces are needed.
@@ -31,10 +31,18 @@ termcolor
 colorlog
 packaging
 
+# Upstream Osmocom pySim. SCP03 KDF (GPC v2.3 Amd D §4.1.5) and the
+# SCP80 / 03.48 cipher / CC primitives delegate to it for spec-citation
+# lineage. The wire-format helpers stay YggdraSIM-specific —
+# tests/test_scp03_pysim_parity.py and tests/test_scp80_pysim_parity.py
+# pin the deliberate divergences. Upstream does not publish wheels;
+# the install pulls the canonical tree from GitHub.
+pySim @ git+https://github.com/osmocom/pysim.git
+
 # Interactive TUI
 textual>=0.47.0
 
-# HIL bridge runtime -- Linux only. The PyPI package does not ship Windows
+# HIL bridge runtime — Linux only. The PyPI package does not ship Windows
 # or macOS wheels and the HIL flow itself requires udev / SIMtrace2 /
 # osmo-remsim-client-st2, so the marker keeps the core install clean.
 pyudev; sys_platform == "linux"

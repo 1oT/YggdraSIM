@@ -1,5 +1,6 @@
-"""Semantic decoder coverage for DF.TELECOM / DF.PHONEBOOK / ICE /
-DF.V2X / EAP / MCS / multimedia EFs.
+"""
+Wave C Pass E — semantic decoder coverage for DF.TELECOM / DF.PHONEBOOK /
+ICE / DF.V2X / EAP / MCS / multimedia EFs.
 
 For every EF promoted from the generic opaque pass-through catalog we
 verify three invariants:
@@ -193,7 +194,7 @@ class TestMcsAndV2xConfig:
         decoded = _roundtrip("ef-v2xp-Uu", "AABBCC")
         assert decoded["format"] == "V2X Uu Parameters"
         # Semantic decoder exposes ``reference``; opaque fallback (prior to
-        # earlier work) exposed ``specReference``. Accept either for
+        # Round-3 Pass 1) exposed ``specReference``. Accept either for
         # forward/backward-compat with older tree-pane consumers.
         ref = decoded.get("reference") or decoded.get("specReference")
         assert ref == "TS 31.102 §4.6.5.4"

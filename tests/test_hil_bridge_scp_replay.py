@@ -18,7 +18,7 @@ from Tools.HilBridge.scp_replay import (
 )
 
 
-# Fixed pair of AES-128 keys. Not meant to match any real profile -- the
+# Fixed pair of AES-128 keys. Not meant to match any real profile — the
 # goal is to round-trip a known wrap/unwrap through the replay engine.
 _S_ENC = bytes.fromhex("0F0E0D0C0B0A09080706050403020100")
 _S_MAC = bytes.fromhex("00112233445566778899AABBCCDDEEFF")

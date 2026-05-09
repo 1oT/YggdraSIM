@@ -40,9 +40,9 @@ The full sidecar schema, selection order (operator drop-in vs SGP.26
 bundle, curve preference, AKI/SKI tie-breaks), and BYO-keys checklist
 all live in the canonical operator guide:
 
-- [`guides/CONFIGURATION_AND_CERTIFICATES.md`](https://github.com/1oT/YggdraSIM/blob/main/guides/CONFIGURATION_AND_CERTIFICATES.md)
-  -- § *SCP11 RSP certificates (local-access)*
+- [`guides/CONFIGURATION_AND_CERTIFICATES.md`](../../../guides/CONFIGURATION_AND_CERTIFICATES.md)
+  — § *SCP11 RSP certificates (local-access)*
 
 Selector code: [`SCP11/local_access/cert_store.py`](https://github.com/1oT/YggdraSIM/blob/main/SCP11/local_access/cert_store.py).
 
-Operator workflow: [`guides/PROFILE_LIFECYCLE_CLI_CHEATSHEET.md`](https://github.com/1oT/YggdraSIM/blob/main/guides/PROFILE_LIFECYCLE_CLI_CHEATSHEET.md).
+Operator workflow: [`guides/PROFILE_LIFECYCLE_CLI_CHEATSHEET.md`](../../../guides/PROFILE_LIFECYCLE_CLI_CHEATSHEET.md).

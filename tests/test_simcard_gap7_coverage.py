@@ -1,4 +1,6 @@
-"""Coverage for SIMCARD STATUS / GET RESPONSE / TIMER MANAGEMENT and TS 102 223 helpers:
+"""Seventh-pass gap-coverage suite for SIMCARD surfaces beyond ES10.
+
+Round-7 closes the following:
 
 * ETSI TS 102 221 §11.1.5 STATUS (CLA bit 8 cleared) with P1 in
   ``{0x00, 0x01, 0x02}`` and P2 in ``{0x00, 0x01, 0x0C}``. P1=0x02
@@ -396,7 +398,7 @@ class TimerExpirationEnvelopeTests(unittest.TestCase):
 
 
 class MoreTimePollingOffDeclareServiceTests(unittest.TestCase):
-    """small proactive helpers."""
+    """Round-7 small proactive helpers."""
 
     def setUp(self) -> None:
         self.state = SimCardState(

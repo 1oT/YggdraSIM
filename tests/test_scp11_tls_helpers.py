@@ -2,12 +2,12 @@
 
 Two gates are covered:
 
-1. ``create_insecure_context`` / ``configure_unpinned_context`` -- used
+1. ``create_insecure_context`` / ``configure_unpinned_context`` — used
    by request-carrying transports. Default: refused. Opt-in via
    ``YGGDRASIM_SCP11_ALLOW_INSECURE_TLS``. Hard-lock via
    ``YGGDRASIM_SCP11_REQUIRE_PINNED_TLS``.
 
-2. ``create_introspection_context`` -- used by read-only TOFU chain
+2. ``create_introspection_context`` — used by read-only TOFU chain
    reads. Default: allowed so operators can pop a new card / new eIM
    FQDN in and have the auto-learn path bootstrap trust. Hard-lock
    via ``YGGDRASIM_SCP11_REQUIRE_PINNED_TLS_INTROSPECTION``.

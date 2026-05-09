@@ -344,7 +344,7 @@
 }
 
 /* Glyph painted via pseudo-element so the badge element itself has no
- * textContent -- otherwise Mermaid's text-based parser would see the
+ * textContent — otherwise Mermaid's text-based parser would see the
  * glyph if it ever re-reads the container after decoration.
  */
 .md-typeset .mermaid-zoom-badge::after {

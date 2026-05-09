@@ -25,8 +25,8 @@ The Windows script is self-contained PowerShell.
 
 ## Flavors
 
-- `clean` -- no HIL bridge; cross-platform.
-- `full` -- HIL bridge included; Linux only (including Raspberry Pi
+- `clean` — no HIL bridge; cross-platform.
+- `full` — HIL bridge included; Linux only (including Raspberry Pi
   arm64). Any non-Linux installer will refuse `--flavor full` with a
   clear error.
 
@@ -46,20 +46,24 @@ The Windows script is self-contained PowerShell.
 
 ## Environment overrides
 
-- `YGGDRASIM_REPO` (default: `1oT/YggdraSIM`) -- fork /
+- `YGGDRASIM_REPO` (default: `1oT/YggdraSIM`) — fork /
   mirror to pull releases from. The installer expands it into
   `https://github.com/<owner>/<repo>/releases/...` release URLs.
-- `YGGDRASIM_PYTHON` -- Python interpreter for source installs (default:
+- `YGGDRASIM_PYTHON` — Python interpreter for source installs (default:
   `python3`).
 
 ## Examples
+
+`--version` is the **GitHub release tag**, not only the dotted version in the
+bundled executable name (artefacts are named with the value from `pyproject.toml`).
+Release assets are resolved from GitHub Releases for the selected tag.
 
 ```bash
 # Latest clean bundle on desktop Linux
 scripts/install/install-linux.sh
 
 # Specific release tag, clean
-scripts/install/install-linux.sh --version v0.9.0
+scripts/install/install-linux.sh --version v1.0.0
 
 # HIL-capable bundle on Linux lab host
 scripts/install/install-linux.sh --flavor full

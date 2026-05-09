@@ -123,19 +123,19 @@ in the slot caption.
 
 Editor coverage today:
 
-- PE-PINCodes / PE-PUKCodes -- per-row key-reference, retry counters, hex
+- PE-PINCodes / PE-PUKCodes — per-row key-reference, retry counters, hex
   PIN / PUK value, attributes, unblocking-PIN reference, with add / remove
-- PE-AKAParameter / PE-AKAParameter2 -- algorithm picker (Milenage,
+- PE-AKAParameter / PE-AKAParameter2 — algorithm picker (Milenage,
   TUAK, XOR, etc.), key, OPc, rotation / xoring constants, SQN options,
   delta, age limit, and a dynamic SQN-init list
 - PE-USIM / PE-OPT-USIM / PE-ISIM / PE-OPT-ISIM / PE-CSIM / PE-OPT-CSIM /
-  PE-Telecom -- header, template-ID dropdown of known OIDs, and EF presence
+  PE-Telecom — header, template-ID dropdown of known OIDs, and EF presence
   toggles so operators can drop EFs from the PE
-- PE-SecurityDomain -- instance parameters (load-package / class /
+- PE-SecurityDomain — instance parameters (load-package / class /
   instance AID, privileges, life-cycle state), dynamic key list (key data,
   key type, MAC length, key access, key identifier, usage qualifier,
   version number), and a personalisation-blob list
-- everything else -- `GenericPeEditor` falls back to the shared
+- everything else — `GenericPeEditor` falls back to the shared
   `PeHeaderForm` so `mandated` and `identification` always round-trip
 
 All edits are committed back through `saip_decoded_edit`, so the JSON and

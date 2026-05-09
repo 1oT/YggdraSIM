@@ -1,3 +1,5 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+"""SCP80 configuration manager: loads KIC/KID keys, algorithm selection, and TAR values from INI config."""
 # -----------------------------------------------------------------------------
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -31,10 +33,15 @@ except ImportError :
     from yggdrasim_common.device_inventory import DeviceInventoryStore 
 
 _DEMO_KEYS_WARNED =False 
+_LEGACY_KEY_RENAME_NOTICE_SHOWN =False 
 
 
-def enforce_demo_key_policy (key_enc :str ,key_mac :str )->None :
+def enforce_demo_key_policy (kic :str ,kid :str )->None :
     """Warn / fail when OTA SCP80 key slots still carry the shipped weak placeholder.
+
+    Slot names follow ETSI TS 102 225 §5.1.1: ``kic`` is the ciphering key,
+    ``kid`` is the integrity (MAC) key. The 1-byte indicator bytes that
+    select algorithm + key index live in ``kic_indicator`` / ``kid_indicator``.
 
     Environment flags:
     - YGGDRASIM_REQUIRE_NON_DEMO_KEYS=1 raises RuntimeError so a deployment
@@ -42,13 +49,13 @@ def enforce_demo_key_policy (key_enc :str ,key_mac :str )->None :
     - YGGDRASIM_ALLOW_DEMO_KEYS=1 silences the warning for the current process.
     """
     global _DEMO_KEYS_WARNED 
-    placeholder_enc =ConfigManager .DEFAULTS .get ("key_enc","")
-    placeholder_mac =ConfigManager .DEFAULTS .get ("key_mac","")
+    placeholder_kic =ConfigManager .DEFAULTS .get ("kic","")
+    placeholder_kid =ConfigManager .DEFAULTS .get ("kid","")
     hits =[]
-    if str (key_enc or "").strip ().upper ()==placeholder_enc .upper ():
-        hits .append ("key_enc")
-    if str (key_mac or "").strip ().upper ()==placeholder_mac .upper ():
-        hits .append ("key_mac")
+    if str (kic or "").strip ().upper ()==placeholder_kic .upper ():
+        hits .append ("kic")
+    if str (kid or "").strip ().upper ()==placeholder_kid .upper ():
+        hits .append ("kid")
     if len (hits )==0 :
         return 
     require_flag =os .environ .get ("YGGDRASIM_REQUIRE_NON_DEMO_KEYS","").strip ().lower ()
@@ -73,18 +80,34 @@ def enforce_demo_key_policy (key_enc :str ,key_mac :str )->None :
     )
 
 
+def _emit_legacy_rename_notice (renamed :list )->None :
+    global _LEGACY_KEY_RENAME_NOTICE_SHOWN 
+    if _LEGACY_KEY_RENAME_NOTICE_SHOWN :
+        return 
+    if len (renamed )==0 :
+        return 
+    _LEGACY_KEY_RENAME_NOTICE_SHOWN =True 
+    sys .stderr .write (
+    "[SCP80] note: legacy config keys auto-migrated: "
+    +", ".join (renamed )
+    +". The on-disk record will be rewritten on next save.\n"
+    )
+
+
 class ConfigManager :
     MODULE_STATE_NAME ="scp80_config"
     INVENTORY_NAMESPACE ="scp80"
+    PRINT_ICCID_SENTINEL ="NULL"
+    TRANSPORT_MODES =("print","reader")
     INVENTORY_KEYS =(
     "cntr",
     "header",
     "spi",
+    "kic_indicator",
+    "kid_indicator",
+    "tar",
     "kic",
     "kid",
-    "tar",
-    "key_enc",
-    "key_mac",
     "cla",
     "sender",
     "concat_sms",
@@ -95,11 +118,11 @@ class ConfigManager :
     "header":"447FF600000000000000",
     "payload":"",
     "spi":"1621",
-    "kic":"15",
-    "kid":"15",
+    "kic_indicator":"15",
+    "kid_indicator":"15",
     "tar":"B00000",
-    "key_enc":"1111111111111111",
-    "key_mac":"1111111111111111",
+    "kic":"1111111111111111",
+    "kid":"1111111111111111",
     "cla":"80",
     "transport":"print",
     "reader_idx":"0",
@@ -110,21 +133,17 @@ class ConfigManager :
     HEX_LENGTHS ={
     "cntr":10,
     "spi":4,
-    "kic":2,
-    "kid":2,
+    "kic_indicator":2,
+    "kid_indicator":2,
     "tar":6,
     "cla":2,
     "sender":2,
     }
-    # User-facing aliases for the canonical keys above. ``show`` renders
-    # the raw key (``cntr``), but operators reasonably type the full
-    # word; without this map ``config.set("counter", ...)`` silently
-    # no-ops because ``counter`` is not in ``self.data``.
-    KEY_ALIASES ={
-    "counter":"cntr",
-    "reader_index":"reader_idx",
-    "reader":"reader_idx",
+    LEGACY_KEY_RENAMES ={
+    "key_enc":"kic",
+    "key_mac":"kid",
     }
+    LEGACY_INDICATOR_HEX_LEN =2 
 
     def __init__ (self ):
         self .file_path =self ._resolve_config_path ()
@@ -157,6 +176,7 @@ class ConfigManager :
             pass 
 
     def load (self ):
+        """Load the OTA configuration from the ini file and return the config object."""
         module_state =self .inventory .get_module_state (self .MODULE_STATE_NAME )
         if isinstance (module_state ,dict )and len (module_state )>0 :
             self ._apply_module_state_payload (module_state )
@@ -166,7 +186,10 @@ class ConfigManager :
             parser =ConfigParser ()
             parser .read (self .file_path )
             if "ota"in parser :
-                for k ,v in parser ["ota"].items ():
+                ini_payload ={k :v for k ,v in parser ["ota"].items ()}
+                migrated_payload ,rename_log =self ._migrate_legacy_keys (ini_payload )
+                _emit_legacy_rename_notice (rename_log )
+                for k ,v in migrated_payload .items ():
                     if k in self .data :
                         self .data [k ]=self ._normalize_value (k ,v ,strict =False )
         self ._persist_module_state ()
@@ -179,13 +202,16 @@ class ConfigManager :
         return self .data .get (key ,self .DEFAULTS .get (key ,""))
 
     def set (self ,key :str ,value :str ):
-        resolved_key =self .KEY_ALIASES .get (key ,key )
-        if resolved_key not in self .data :
-            raise ValueError (f"unknown config key: {key}")
-        self .data [resolved_key ]=self ._normalize_value (resolved_key ,value ,strict =True )
+        if key in self .data :
+            self .data [key ]=self ._normalize_value (key ,value ,strict =True )
 
     def bind_iccid_profile (self ,iccid :str )->dict :
-        normalized_iccid =''.join (ch for ch in str (iccid or "")if ch .isdigit ())
+        """Associate an ICCID with a keyset profile in the runtime config."""
+        raw_text =str (iccid or "").strip ()
+        if raw_text .upper ()==self .PRINT_ICCID_SENTINEL :
+            normalized_iccid =self .PRINT_ICCID_SENTINEL 
+        else :
+            normalized_iccid =''.join (ch for ch in raw_text if ch .isdigit ())
         if len (normalized_iccid )==0 :
             self .active_iccid =""
             return {}
@@ -198,11 +224,13 @@ class ConfigManager :
         return {}
 
     def _apply_inventory_payload (self ,payload :dict )->None :
+        migrated_payload ,rename_log =self ._migrate_legacy_keys (payload )
+        _emit_legacy_rename_notice (rename_log )
         for key in self .INVENTORY_KEYS :
-            if key not in payload :
+            if key not in migrated_payload :
                 continue 
             try :
-                self .data [key ]=self ._normalize_value (key ,payload [key ],strict =False )
+                self .data [key ]=self ._normalize_value (key ,migrated_payload [key ],strict =False )
             except Exception :
                 continue 
 
@@ -214,6 +242,7 @@ class ConfigManager :
         return payload 
 
     def persist_inventory_profile (self )->None :
+        """Write the current keyset profile assignment to the on-disk inventory."""
         if len (self .active_iccid )==0 :
             return 
         self .inventory .replace_namespace (
@@ -223,11 +252,46 @@ class ConfigManager :
         self .inventory_payload (),
         )
 
+    @classmethod 
+    def _migrate_legacy_keys (cls ,payload :dict )->tuple :
+        """Translate pre-rename SCP80 config keys onto the current schema.
+
+        - ``key_enc`` / ``key_mac`` (legacy 16-byte session-key slots) move
+          to ``kic`` / ``kid``.
+        - 2-hex-char values previously stored under ``kic`` / ``kid``
+          (the ETSI TS 102 225 §5.1.1 indicator bytes) move to
+          ``kic_indicator`` / ``kid_indicator``.
+        Returns ``(migrated_payload, rename_log)`` where ``rename_log`` is a
+        list of ``"old -> new"`` strings consumed by the one-shot stderr
+        notice.
+        """
+        migrated =dict (payload )
+        rename_log =[]
+        for short ,long_name in (("kic","kic_indicator"),("kid","kid_indicator")):
+            if short not in migrated :
+                continue 
+            value =str (migrated [short ]or "").strip ()
+            is_legacy_indicator =len (value )==cls .LEGACY_INDICATOR_HEX_LEN 
+            already_set =long_name in migrated 
+            if is_legacy_indicator and already_set ==False :
+                migrated [long_name ]=migrated .pop (short )
+                rename_log .append (f"{short} -> {long_name}")
+        for legacy_key ,new_key in cls .LEGACY_KEY_RENAMES .items ():
+            if legacy_key not in migrated :
+                continue 
+            if new_key not in migrated :
+                migrated [new_key ]=migrated [legacy_key ]
+                rename_log .append (f"{legacy_key} -> {new_key}")
+            del migrated [legacy_key ]
+        return migrated ,rename_log 
+
     def _module_state_payload (self )->dict :
         return dict (self .data )
 
     def _apply_module_state_payload (self ,payload :dict )->None :
-        for key ,value in payload .items ():
+        migrated_payload ,rename_log =self ._migrate_legacy_keys (payload )
+        _emit_legacy_rename_notice (rename_log )
+        for key ,value in migrated_payload .items ():
             if key not in self .data :
                 continue 
             try :
@@ -240,7 +304,12 @@ class ConfigManager :
 
     def _normalize_value (self ,key :str ,value ,strict :bool =False )->str :
         if key =="transport":
-            return str (value )
+            normalized =str (value or "").strip ().lower ()
+            if normalized in self .TRANSPORT_MODES :
+                return normalized 
+            if strict :
+                raise ValueError ("transport must be 'print' or 'reader'.")
+            return self .DEFAULTS [key ]
         if key =="concat_sms":
             normalized =str (value ).strip ().upper ()
             if normalized in ["ON","OFF","TRUE","FALSE","YES","NO","1","0"]:
@@ -295,6 +364,7 @@ class ConfigManager :
         except ValueError :return 0 
 
     def increment_counter (self ):
+        """Increment and return the OTA message counter for the active keyset."""
         try :
             val =int (self .data ["cntr"],16 )
             val =(val +1 )&0xFFFFFFFFFF 

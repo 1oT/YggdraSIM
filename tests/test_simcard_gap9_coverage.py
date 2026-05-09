@@ -1,4 +1,6 @@
-"""Coverage for SIMCARD RETRIEVE/SET DATA, GBA AUTHENTICATE and TS 102 223 RUN AT COMMAND:
+"""Ninth-pass gap-coverage suite for SIMCARD surfaces beyond ES10.
+
+Round-9 closes the following:
 
 * ETSI TS 102 221 §11.1.14 RETRIEVE DATA (`INS 0xCB`) and
   §11.1.15 SET DATA (`INS 0xDB`) with a card-side data-object

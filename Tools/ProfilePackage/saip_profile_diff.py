@@ -1,20 +1,21 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """
 Semantic, context-aware diff layer over two SAIP profile documents.
 
 This module sits on top of :mod:`saip_diff_engine` (which performs the
 raw structural walk) and :mod:`saip_diff_loader` (which normalises any
 on-disk shape into a diffable dict). The job here is to turn the
-jq-style ``DiffEntry`` stream -- paths like
-``sections.usim.efImsi.body.imsi`` -- into a categorised, severity-tagged
+jq-style ``DiffEntry`` stream — paths like
+``sections.usim.efImsi.body.imsi`` — into a categorised, severity-tagged
 report that reads like an engineer's review note rather than a
 patch hunk:
 
-    [critical] identity   USIM.IMSI changed: 001010000000001 -> 001010000000999
+    [critical] identity   USIM.IMSI changed: 234560000000001 -> 234560000000999
     [warning]  pe_seq     PE removed: csim (CDMA NAA)
     [info]     files      EF.ARR (sections.mf.efArr) value changed (28 bytes -> 32 bytes)
-    [note]     intro      header line "Issued: 0001-01-01" added
+    [note]     intro      header line "Issued: 2025-01-12" added
 
-The classifier is purely heuristic -- every entry from the structural
+The classifier is purely heuristic — every entry from the structural
 diff is matched against a list of patterns that look at the entry path,
 the surrounding section name, and (where useful) the before/after
 values. Unmatched entries fall into a ``other`` bucket so the operator
@@ -162,14 +163,17 @@ class ProfileDiffReport:
 
     @property
     def total(self) -> int:
+        """Total number of diff entries across all categories."""
         return len(self.entries)
 
     @property
     def is_empty(self) -> bool:
+        """``True`` when no differences were found between the two profiles."""
         return self.total == 0
 
     @property
     def has_critical(self) -> bool:
+        """``True`` when at least one entry carries ``SEVERITY_CRITICAL``."""
         return self.counts_by_severity.get(SEVERITY_CRITICAL, 0) > 0
 
     def filter(
@@ -311,7 +315,7 @@ def _section_key_from_path(segments: Sequence[str]) -> str:
     isn't ``sections.*``.
 
     ``sections`` itself (no second segment) means the change is at the
-    sequence level -- handled separately by the PE-sequence classifier.
+    sequence level — handled separately by the PE-sequence classifier.
     """
     if len(segments) < 2:
         return ""
@@ -412,7 +416,7 @@ def _classify_leaf_key(leaf: str) -> Optional[tuple[str, str]]:
 
 
 # ---------------------------------------------------------------------------
-# Section-aware classifier -- looks at the PE type + path tail.
+# Section-aware classifier — looks at the PE type + path tail.
 # ---------------------------------------------------------------------------
 
 
@@ -455,7 +459,7 @@ def _classify_section_path(
                         "df-eap", "df-5gs", "df-saip", "df-tetra", "mf", "cd"}:
         if op in (DIFF_OP_ADDED, DIFF_OP_REMOVED):
             # Top-level file added or removed within a file-management PE
-            # is louder than a content tweak -- bump to warning.
+            # is louder than a content tweak — bump to warning.
             if len(segments) <= 4:
                 return (CATEGORY_FILES, SEVERITY_WARNING)
         return (CATEGORY_FILES, SEVERITY_INFO)
@@ -475,7 +479,7 @@ def _classify_section_path(
     if base_section == "end":
         return (CATEGORY_STRUCTURE, SEVERITY_NOTE)
 
-    # Unknown PE section -- still surface, just with a low signal.
+    # Unknown PE section — still surface, just with a low signal.
     return (CATEGORY_OTHER, SEVERITY_INFO)
 
 
@@ -504,13 +508,13 @@ def _classify_top_level_path(
     if head == "sections" and len(segments) == 1:
         return (CATEGORY_PE_SEQUENCE, SEVERITY_WARNING, "Profile element sequence")
     if head == "sections" and len(segments) == 2:
-        # sections.<name> -- the entire PE was added or removed.
+        # sections.<name> — the entire PE was added or removed.
         return (CATEGORY_PE_SEQUENCE, SEVERITY_WARNING, "Profile element")
     return None
 
 
 # ---------------------------------------------------------------------------
-# Value rendering -- keeps long hex / large dicts readable in summaries.
+# Value rendering — keeps long hex / large dicts readable in summaries.
 # ---------------------------------------------------------------------------
 
 
@@ -568,7 +572,7 @@ def _format_summary(
 ) -> str:
     """Build a one-line human-readable description.
 
-    The summary is intentionally compact -- long hex values are
+    The summary is intentionally compact — long hex values are
     abbreviated, lists / dicts collapse to ``"[N items]"`` /
     ``"{N keys}"``. The exact wording is shaped by the op so the GUI
     doesn't need to special-case its display.
@@ -673,7 +677,7 @@ def classify_diff_entry(entry: DiffEntry) -> ProfileDiffEntry:
             context={},
         )
 
-    # 3. Otherwise -- it's an unknown root-level key, log it but with
+    # 3. Otherwise — it's an unknown root-level key, log it but with
     # low severity so we don't drown the operator in noise.
     summary = _format_summary(
         category=CATEGORY_OTHER,
@@ -766,7 +770,7 @@ def _sort_key(entry: ProfileDiffEntry) -> tuple[Any, ...]:
     """Sort by severity (critical first), then category, then path.
 
     A stable sort means two diffs of the same documents always render
-    in the same order -- handy for golden-file comparisons in CI.
+    in the same order — handy for golden-file comparisons in CI.
     """
     return (
         _SEVERITY_RANK.get(entry.severity, 99),

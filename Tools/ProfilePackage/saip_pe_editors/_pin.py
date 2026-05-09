@@ -1,3 +1,4 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """
 PE-PINCodes and PE-PUKCodes structured editors.
 
@@ -43,8 +44,10 @@ from typing import Any
 
 from textual.app import ComposeResult
 from textual.containers import Horizontal, Vertical
-from textual.widgets import Button, Input, Static
+from textual.css.query import NoMatches
+from textual.widgets import Button, Static
 
+from ..saip_apply_row import SaipApplyRow, normalize_hex_bytes_text
 from ._base import (
     BasePeEditor,
     base_pe_type_for_section_key,
@@ -109,8 +112,8 @@ def _normalize_hex(value: Any) -> str:
 # ---------------------------------------------------------------------------
 
 
-class _PinRowForm(Horizontal):
-    """Single PIN entry row (used inside the PinCodesEditor)."""
+class _PinRowForm(Vertical):
+    """Single PIN entry: stacked apply-rows plus remove."""
 
     DEFAULT_CSS = """
     _PinRowForm {
@@ -121,18 +124,19 @@ class _PinRowForm(Horizontal):
         background: $boost;
         border: solid $primary;
     }
-    _PinRowForm .pin_row_label {
-        width: 8;
+    _PinRowForm .pin_row_heading {
+        width: 100%;
+        height: auto;
+        margin-bottom: 1;
+    }
+    _PinRowForm .pin_row_heading_label {
+        width: 1fr;
         content-align: left middle;
         color: $text-muted;
-    }
-    _PinRowForm .pin_row_input {
-        width: 1fr;
-        margin-right: 1;
+        text-style: bold;
     }
     _PinRowForm .pin_row_remove {
-        width: 6;
-        margin-left: 1;
+        width: 8;
     }
     """
 
@@ -149,6 +153,8 @@ class _PinRowForm(Horizontal):
         self._pending_payload: dict[str, Any] = (
             dict(initial_payload) if isinstance(initial_payload, dict) else {}
         )
+        self._last_payload: dict[str, Any] = dict(self._pending_payload)
+        self._populating: bool = False
 
     def on_mount(self) -> None:
         if len(self._pending_payload) > 0:
@@ -156,84 +162,111 @@ class _PinRowForm(Horizontal):
             self._pending_payload = {}
 
     def compose(self) -> ComposeResult:
-        yield Static(f"#{self._row_index + 1}", classes="pin_row_label")
-        yield Input(
-            value="",
-            placeholder="key ref",
-            classes="pin_row_input",
-            id=f"pin_row_keyref_{self._row_index}",
-            disabled=self._read_only,
+        with Horizontal(classes="pin_row_heading"):
+            yield Static(f"PIN #{self._row_index + 1}", classes="pin_row_heading_label")
+            yield Button(
+                "Remove",
+                classes="pin_row_remove",
+                id=f"pin_row_remove_{self._row_index}",
+                disabled=self._read_only,
+            )
+        yield SaipApplyRow(
+            f"pin_{self._row_index}_keyref",
+            "Key reference:",
+            mode="decimal",
+            placeholder="1",
+            hint="Decimal · Apply commits this PIN row.",
+            id=f"pin_slot_{self._row_index}_keyref",
         )
-        yield Input(
-            value="",
-            placeholder="max",
-            classes="pin_row_input",
-            id=f"pin_row_max_{self._row_index}",
-            disabled=self._read_only,
+        yield SaipApplyRow(
+            f"pin_{self._row_index}_max",
+            "Max attempts:",
+            mode="decimal",
+            placeholder="0–15",
+            hint="Packed retry nibble (high) · Apply commits.",
+            id=f"pin_slot_{self._row_index}_max",
         )
-        yield Input(
-            value="",
-            placeholder="remaining",
-            classes="pin_row_input",
-            id=f"pin_row_remaining_{self._row_index}",
-            disabled=self._read_only,
+        yield SaipApplyRow(
+            f"pin_{self._row_index}_remaining",
+            "Remaining:",
+            mode="decimal",
+            placeholder="0–15",
+            hint="Packed retry nibble (low) · Apply commits.",
+            id=f"pin_slot_{self._row_index}_remaining",
         )
-        yield Input(
-            value="",
-            placeholder="attrs",
-            classes="pin_row_input",
-            id=f"pin_row_attrs_{self._row_index}",
-            disabled=self._read_only,
+        yield SaipApplyRow(
+            f"pin_{self._row_index}_attrs",
+            "PIN attributes:",
+            mode="decimal",
+            placeholder="octet decimal",
+            hint="Optional pinAttributes · empty drops on encode · Apply commits.",
+            id=f"pin_slot_{self._row_index}_attrs",
         )
-        yield Input(
-            value="",
-            placeholder="value (hex)",
-            classes="pin_row_input",
-            id=f"pin_row_value_{self._row_index}",
-            disabled=self._read_only,
+        yield SaipApplyRow(
+            f"pin_{self._row_index}_value",
+            "PIN value:",
+            mode="hex",
+            placeholder="hex",
+            hint="Hex bytes (odd nibbles padded on encode) · Apply commits.",
+            id=f"pin_slot_{self._row_index}_value",
         )
-        yield Input(
-            value="",
-            placeholder="unblock",
-            classes="pin_row_input",
-            id=f"pin_row_unblock_{self._row_index}",
-            disabled=self._read_only,
+        yield SaipApplyRow(
+            f"pin_{self._row_index}_unblock",
+            "Unblock ref:",
+            mode="decimal",
+            placeholder="optional",
+            hint="Optional unblockingPINReference · Apply commits.",
+            id=f"pin_slot_{self._row_index}_unblock",
         )
-        yield Button(
-            "−",
-            classes="pin_row_remove",
-            id=f"pin_row_remove_{self._row_index}",
-            disabled=self._read_only,
-        )
+
+    def _slot(self, suffix: str) -> SaipApplyRow:
+        return self.query_one(f"#pin_slot_{self._row_index}_{suffix}", SaipApplyRow)
 
     def populate(self, payload: dict[str, Any]) -> None:
-        max_a, remaining = _retry_counter_to_pair(payload.get("maxNumOfAttemps-retryNumLeft"))
-        attrs = payload.get("pinAttributes")
-        attrs_text = "" if attrs is None else str(int(attrs))
-        unblock = payload.get("unblockingPINReference")
-        unblock_text = "" if unblock is None else str(int(unblock))
-        self.query_one(f"#pin_row_keyref_{self._row_index}", Input).value = str(
-            _safe_int(payload.get("keyReference"))
-        )
-        self.query_one(f"#pin_row_max_{self._row_index}", Input).value = str(max_a)
-        self.query_one(f"#pin_row_remaining_{self._row_index}", Input).value = str(remaining)
-        self.query_one(f"#pin_row_attrs_{self._row_index}", Input).value = attrs_text
-        self.query_one(f"#pin_row_value_{self._row_index}", Input).value = (
-            hex_from_tagged_bytes(payload.get("pinValue")) or ""
-        )
-        self.query_one(f"#pin_row_unblock_{self._row_index}", Input).value = unblock_text
+        self._populating = True
+        try:
+            max_a, remaining = _retry_counter_to_pair(payload.get("maxNumOfAttemps-retryNumLeft"))
+            attrs = payload.get("pinAttributes")
+            attrs_text = "" if attrs is None else str(int(attrs))
+            unblock = payload.get("unblockingPINReference")
+            unblock_text = "" if unblock is None else str(int(unblock))
+            try:
+                self._slot("keyref").set_draft(str(_safe_int(payload.get("keyReference"))))
+                self._slot("max").set_draft(str(max_a))
+                self._slot("remaining").set_draft(str(remaining))
+                self._slot("attrs").set_draft(attrs_text)
+                self._slot("value").set_draft(hex_from_tagged_bytes(payload.get("pinValue")) or "")
+                self._slot("unblock").set_draft(unblock_text)
+                for suffix in (
+                    "keyref",
+                    "max",
+                    "remaining",
+                    "attrs",
+                    "value",
+                    "unblock",
+                ):
+                    self._slot(suffix).set_read_only(self._read_only)
+            except NoMatches:
+                return
+            self._last_payload = dict(payload)
+        finally:
+            self._populating = False
 
     def collect(self) -> dict[str, Any]:
-        key_ref = _safe_int(self.query_one(f"#pin_row_keyref_{self._row_index}", Input).value)
-        max_a = _safe_int(self.query_one(f"#pin_row_max_{self._row_index}", Input).value)
-        remaining = _safe_int(
-            self.query_one(f"#pin_row_remaining_{self._row_index}", Input).value
-        )
-        attrs_text = str(self.query_one(f"#pin_row_attrs_{self._row_index}", Input).value or "").strip()
-        value_hex = _normalize_hex(self.query_one(f"#pin_row_value_{self._row_index}", Input).value)
-        unblock_text = str(
-            self.query_one(f"#pin_row_unblock_{self._row_index}", Input).value or ""
-        ).strip()
+        if self._populating:
+            return dict(self._last_payload or self._pending_payload)
+        try:
+            keyref_text = self._slot("keyref").draft_text().strip()
+        except NoMatches:
+            return dict(self._last_payload or self._pending_payload)
+        if len(keyref_text) == 0 and len(self._last_payload) > 0:
+            return dict(self._last_payload)
+        key_ref = _safe_int(keyref_text)
+        max_a = _safe_int(self._slot("max").draft_text())
+        remaining = _safe_int(self._slot("remaining").draft_text())
+        attrs_text = self._slot("attrs").draft_text().strip()
+        value_hex = _normalize_hex(normalize_hex_bytes_text(self._slot("value").draft_text()))
+        unblock_text = self._slot("unblock").draft_text().strip()
         record: dict[str, Any] = {
             "keyReference": key_ref,
             "maxNumOfAttemps-retryNumLeft": _pair_to_retry_counter(max_a, remaining),
@@ -243,6 +276,7 @@ class _PinRowForm(Horizontal):
             record["pinAttributes"] = _safe_int(attrs_text)
         if len(unblock_text) > 0:
             record["unblockingPINReference"] = _safe_int(unblock_text)
+        self._last_payload = dict(record)
         return record
 
 
@@ -263,12 +297,6 @@ class PinCodesEditor(BasePeEditor):
         color: $accent;
         padding: 0 1;
         margin-top: 1;
-    }
-    PinCodesEditor .pin_section_columns {
-        width: 100%;
-        height: 1;
-        padding: 0 1;
-        color: $text-muted;
     }
     PinCodesEditor .pin_rows_host {
         width: 100%;
@@ -298,6 +326,11 @@ class PinCodesEditor(BasePeEditor):
     def __init__(self, **kwargs: Any) -> None:
         super().__init__(**kwargs)
         self._row_count = 0
+        # Set while ``rebuild_form`` is re-populating rows. Cleared by
+        # ``_exit_rebuilding`` via ``call_after_refresh``. Kept as a
+        # belt-and-braces fallback in addition to the per-form
+        # ``_populating`` check inside ``on_input_changed``.
+        self._rebuilding: bool = False
 
     def compose(self) -> ComposeResult:
         yield PeHeaderForm(
@@ -305,17 +338,13 @@ class PinCodesEditor(BasePeEditor):
             id="pin_pe_header",
         )
         yield Static("PIN entries", classes="pin_section_title")
-        yield Static(
-            "  #   keyRef   maxAttempts   remaining   attrs   pinValue (hex)   unblockRef",
-            classes="pin_section_columns",
-        )
         yield Vertical(id="pin_rows_host", classes="pin_rows_host")
         with Horizontal(classes="pin_actions_row"):
             yield Button("+ Add PIN", id="pin_add_row")
             yield Button("⟳ Re-emit", id="pin_reemit")
         yield Static(
-            "Tip: 'attrs' is the SAIP pinAttributes octet (e.g. 6 = 0x06). "
-            "Empty 'unblockRef' drops the field. Hex values are auto-uppercased and padded.",
+            "Each field has Apply. Hex inputs strip whitespace, dashes, 0x. "
+            "Attrs is pinAttributes as decimal (e.g. 6). Empty unblock ref drops the member.",
             classes="pin_section_note",
         )
 
@@ -329,6 +358,7 @@ class PinCodesEditor(BasePeEditor):
         )
         records = _extract_pin_records(self._pe_value)
         host = self.query_one("#pin_rows_host", Vertical)
+        self._rebuilding = True
         for child in list(host.children):
             child.remove()
         self._row_count = len(records)
@@ -343,10 +373,16 @@ class PinCodesEditor(BasePeEditor):
         if self._row_count == 0:
             host.mount(
                 Static(
-                    "(empty pinconfig -- use '+ Add PIN' to create the first entry)",
+                    "(empty pinconfig — use '+ Add PIN' to create the first entry)",
                     classes="pin_section_note",
                 ),
             )
+        # Drop the guard after every pending mount + populate has run
+        # so subsequent user edits resume firing emit_change.
+        self.call_after_refresh(self._exit_rebuilding)
+
+    def _exit_rebuilding(self) -> None:
+        self._rebuilding = False
 
     def _row_at(self, index: int) -> _PinRowForm | None:
         host = self.query_one("#pin_rows_host", Vertical)
@@ -373,13 +409,21 @@ class PinCodesEditor(BasePeEditor):
         self._pe_value = new_pe
         self.emit_change(summary="PIN PE header updated")
 
-    def on_input_changed(self, event: Input.Changed) -> None:
+    def on_saip_apply_row_committed(self, event: SaipApplyRow.Committed) -> None:
         if self._read_only:
             return
-        widget_id = str(event.input.id or "")
-        if widget_id.startswith("pin_row_") is False:
+        if str(event.row_id or "").startswith("pin_") is False:
             return
-        self._collect_and_emit("PIN row edited")
+        if self._rebuilding:
+            return
+        walker: Any = event.row
+        while walker is not None:
+            if isinstance(walker, _PinRowForm):
+                if walker._populating:
+                    return
+                break
+            walker = getattr(walker, "parent", None)
+        self._collect_and_emit("PIN field applied")
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if self._read_only:
@@ -477,7 +521,7 @@ def _rebuild_pin_pe(
 # ---------------------------------------------------------------------------
 
 
-class _PukRowForm(Horizontal):
+class _PukRowForm(Vertical):
 
     DEFAULT_CSS = """
     _PukRowForm {
@@ -488,18 +532,19 @@ class _PukRowForm(Horizontal):
         background: $boost;
         border: solid $primary;
     }
-    _PukRowForm .puk_row_label {
-        width: 8;
+    _PukRowForm .puk_row_heading {
+        width: 100%;
+        height: auto;
+        margin-bottom: 1;
+    }
+    _PukRowForm .puk_row_heading_label {
+        width: 1fr;
         content-align: left middle;
         color: $text-muted;
-    }
-    _PukRowForm .puk_row_input {
-        width: 1fr;
-        margin-right: 1;
+        text-style: bold;
     }
     _PukRowForm .puk_row_remove {
-        width: 6;
-        margin-left: 1;
+        width: 8;
     }
     """
 
@@ -516,6 +561,8 @@ class _PukRowForm(Horizontal):
         self._pending_payload: dict[str, Any] = (
             dict(initial_payload) if isinstance(initial_payload, dict) else {}
         )
+        self._last_payload: dict[str, Any] = dict(self._pending_payload)
+        self._populating: bool = False
 
     def on_mount(self) -> None:
         if len(self._pending_payload) > 0:
@@ -523,65 +570,89 @@ class _PukRowForm(Horizontal):
             self._pending_payload = {}
 
     def compose(self) -> ComposeResult:
-        yield Static(f"#{self._row_index + 1}", classes="puk_row_label")
-        yield Input(
-            value="",
-            placeholder="key ref",
-            classes="puk_row_input",
-            id=f"puk_row_keyref_{self._row_index}",
-            disabled=self._read_only,
+        with Horizontal(classes="puk_row_heading"):
+            yield Static(f"PUK #{self._row_index + 1}", classes="puk_row_heading_label")
+            yield Button(
+                "Remove",
+                classes="puk_row_remove",
+                id=f"puk_row_remove_{self._row_index}",
+                disabled=self._read_only,
+            )
+        yield SaipApplyRow(
+            f"puk_{self._row_index}_keyref",
+            "Key reference:",
+            mode="decimal",
+            placeholder="1",
+            hint="Decimal · Apply commits this PUK row.",
+            id=f"puk_slot_{self._row_index}_keyref",
         )
-        yield Input(
-            value="",
-            placeholder="max",
-            classes="puk_row_input",
-            id=f"puk_row_max_{self._row_index}",
-            disabled=self._read_only,
+        yield SaipApplyRow(
+            f"puk_{self._row_index}_max",
+            "Max attempts:",
+            mode="decimal",
+            placeholder="0–15",
+            hint="Packed retry nibble (high) · Apply commits.",
+            id=f"puk_slot_{self._row_index}_max",
         )
-        yield Input(
-            value="",
-            placeholder="remaining",
-            classes="puk_row_input",
-            id=f"puk_row_remaining_{self._row_index}",
-            disabled=self._read_only,
+        yield SaipApplyRow(
+            f"puk_{self._row_index}_remaining",
+            "Remaining:",
+            mode="decimal",
+            placeholder="0–15",
+            hint="Packed retry nibble (low) · Apply commits.",
+            id=f"puk_slot_{self._row_index}_remaining",
         )
-        yield Input(
-            value="",
-            placeholder="puk value (hex)",
-            classes="puk_row_input",
-            id=f"puk_row_value_{self._row_index}",
-            disabled=self._read_only,
+        yield SaipApplyRow(
+            f"puk_{self._row_index}_value",
+            "PUK value:",
+            mode="hex",
+            placeholder="hex",
+            hint="Hex OCTET STRING body · Apply commits.",
+            id=f"puk_slot_{self._row_index}_value",
         )
-        yield Button(
-            "−",
-            classes="puk_row_remove",
-            id=f"puk_row_remove_{self._row_index}",
-            disabled=self._read_only,
-        )
+
+    def _slot(self, suffix: str) -> SaipApplyRow:
+        return self.query_one(f"#puk_slot_{self._row_index}_{suffix}", SaipApplyRow)
 
     def populate(self, payload: dict[str, Any]) -> None:
-        max_a, remaining = _retry_counter_to_pair(payload.get("maxNumOfAttemps-retryNumLeft"))
-        self.query_one(f"#puk_row_keyref_{self._row_index}", Input).value = str(
-            _safe_int(payload.get("keyReference"))
-        )
-        self.query_one(f"#puk_row_max_{self._row_index}", Input).value = str(max_a)
-        self.query_one(f"#puk_row_remaining_{self._row_index}", Input).value = str(remaining)
-        self.query_one(f"#puk_row_value_{self._row_index}", Input).value = (
-            hex_from_tagged_bytes(payload.get("pukValue")) or ""
-        )
+        self._populating = True
+        try:
+            max_a, remaining = _retry_counter_to_pair(
+                payload.get("maxNumOfAttemps-retryNumLeft")
+            )
+            try:
+                self._slot("keyref").set_draft(str(_safe_int(payload.get("keyReference"))))
+                self._slot("max").set_draft(str(max_a))
+                self._slot("remaining").set_draft(str(remaining))
+                self._slot("value").set_draft(hex_from_tagged_bytes(payload.get("pukValue")) or "")
+                for suffix in ("keyref", "max", "remaining", "value"):
+                    self._slot(suffix).set_read_only(self._read_only)
+            except NoMatches:
+                return
+            self._last_payload = dict(payload)
+        finally:
+            self._populating = False
 
     def collect(self) -> dict[str, Any]:
-        key_ref = _safe_int(self.query_one(f"#puk_row_keyref_{self._row_index}", Input).value)
-        max_a = _safe_int(self.query_one(f"#puk_row_max_{self._row_index}", Input).value)
-        remaining = _safe_int(
-            self.query_one(f"#puk_row_remaining_{self._row_index}", Input).value
-        )
-        value_hex = _normalize_hex(self.query_one(f"#puk_row_value_{self._row_index}", Input).value)
-        return {
+        if self._populating:
+            return dict(self._last_payload or self._pending_payload)
+        try:
+            keyref_text = self._slot("keyref").draft_text().strip()
+        except NoMatches:
+            return dict(self._last_payload or self._pending_payload)
+        if len(keyref_text) == 0 and len(self._last_payload) > 0:
+            return dict(self._last_payload)
+        key_ref = _safe_int(keyref_text)
+        max_a = _safe_int(self._slot("max").draft_text())
+        remaining = _safe_int(self._slot("remaining").draft_text())
+        value_hex = _normalize_hex(normalize_hex_bytes_text(self._slot("value").draft_text()))
+        record = {
             "keyReference": key_ref,
             "maxNumOfAttemps-retryNumLeft": _pair_to_retry_counter(max_a, remaining),
             "pukValue": tagged_bytes(value_hex),
         }
+        self._last_payload = dict(record)
+        return record
 
 
 class PukCodesEditor(BasePeEditor):
@@ -601,12 +672,6 @@ class PukCodesEditor(BasePeEditor):
         color: $accent;
         padding: 0 1;
         margin-top: 1;
-    }
-    PukCodesEditor .puk_section_columns {
-        width: 100%;
-        height: 1;
-        padding: 0 1;
-        color: $text-muted;
     }
     PukCodesEditor .puk_rows_host {
         width: 100%;
@@ -636,6 +701,7 @@ class PukCodesEditor(BasePeEditor):
     def __init__(self, **kwargs: Any) -> None:
         super().__init__(**kwargs)
         self._row_count = 0
+        self._rebuilding: bool = False
 
     def compose(self) -> ComposeResult:
         yield PeHeaderForm(
@@ -643,16 +709,12 @@ class PukCodesEditor(BasePeEditor):
             id="puk_pe_header",
         )
         yield Static("PUK entries", classes="puk_section_title")
-        yield Static(
-            "  #   keyRef   maxAttempts   remaining   pukValue (hex)",
-            classes="puk_section_columns",
-        )
         yield Vertical(id="puk_rows_host", classes="puk_rows_host")
         with Horizontal(classes="puk_actions_row"):
             yield Button("+ Add PUK", id="puk_add_row")
             yield Button("⟳ Re-emit", id="puk_reemit")
         yield Static(
-            "PUK values are stored as fixed-length OCTET STRINGs. Provide hex digits (auto-uppercased).",
+            "Each field has Apply. PUK body is hex (whitespace and 0x stripped on commit).",
             classes="puk_section_note",
         )
 
@@ -666,6 +728,7 @@ class PukCodesEditor(BasePeEditor):
         )
         records = _extract_puk_records(self._pe_value)
         host = self.query_one("#puk_rows_host", Vertical)
+        self._rebuilding = True
         for child in list(host.children):
             child.remove()
         self._row_count = len(records)
@@ -680,10 +743,14 @@ class PukCodesEditor(BasePeEditor):
         if self._row_count == 0:
             host.mount(
                 Static(
-                    "(empty pukCodes list -- use '+ Add PUK' to create the first entry)",
+                    "(empty pukCodes list — use '+ Add PUK' to create the first entry)",
                     classes="puk_section_note",
                 ),
             )
+        self.call_after_refresh(self._exit_rebuilding)
+
+    def _exit_rebuilding(self) -> None:
+        self._rebuilding = False
 
     def _row_at(self, index: int) -> _PukRowForm | None:
         host = self.query_one("#puk_rows_host", Vertical)
@@ -706,13 +773,21 @@ class PukCodesEditor(BasePeEditor):
         self._pe_value = new_pe
         self.emit_change(summary="PUK PE header updated")
 
-    def on_input_changed(self, event: Input.Changed) -> None:
+    def on_saip_apply_row_committed(self, event: SaipApplyRow.Committed) -> None:
         if self._read_only:
             return
-        widget_id = str(event.input.id or "")
-        if widget_id.startswith("puk_row_") is False:
+        if str(event.row_id or "").startswith("puk_") is False:
             return
-        self._collect_and_emit("PUK row edited")
+        if self._rebuilding:
+            return
+        walker: Any = event.row
+        while walker is not None:
+            if isinstance(walker, _PukRowForm):
+                if walker._populating:
+                    return
+                break
+            walker = getattr(walker, "parent", None)
+        self._collect_and_emit("PUK field applied")
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if self._read_only:

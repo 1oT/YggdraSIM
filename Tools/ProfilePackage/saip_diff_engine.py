@@ -1,3 +1,4 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """
 Pure-function diff over two SAIP profile documents.
 
@@ -15,7 +16,7 @@ Design goals:
 * Stable ordering: entries are emitted in a depth-first, key-sorted
   walk so two diff runs on the same inputs produce byte-identical
   reports (critical for CI comparisons).
-* The walker never materialises a full list of paths in memory -- it
+* The walker never materialises a full list of paths in memory — it
   yields ``DiffEntry`` on demand so TB-sized profile packages (very
   unlikely, but the codebase already uses streaming discipline) do not
   blow up the heap.
@@ -46,7 +47,7 @@ class DiffEntry:
     ``path`` is the dotted jq-style path into the jsonified tree, with
     list indices rendered as ``[n]`` segments (e.g.
     ``sections.genericFileManagement[3].file.fileDescriptor``). The
-    caller should treat ``path`` as a display token -- it is NOT a valid
+    caller should treat ``path`` as a display token — it is NOT a valid
     Python or JSONPath expression, just a stable identifier.
     """
 
@@ -68,10 +69,12 @@ class DiffSummary:
 
     @property
     def total(self) -> int:
+        """Sum of all change-type counters."""
         return self.added + self.removed + self.changed + self.moved
 
     @property
     def is_empty(self) -> bool:
+        """``True`` when no differences were found."""
         return self.total == 0
 
 
@@ -198,7 +201,7 @@ def diff_documents(
 ) -> DiffSummary:
     """Compare two jsonified SAIP documents.
 
-    The caller is responsible for feeding in the **same** shape -- e.g.
+    The caller is responsible for feeding in the **same** shape — e.g.
     both sides jsonified, or both sides raw ``{"intro": [...], "sections": {...}}``
     dicts. Mixing shapes is a caller error and the result will flag
     every node as changed.
@@ -239,7 +242,7 @@ def detect_section_reorder(
     The core ``diff_documents`` walker treats mappings as unordered, so a
     profile whose SAIP sections were merely reshuffled would produce no
     entries. Many EUM failures are actually *ordering* bugs (BF36 vs
-    BF37 swapped, NAA before MF, etc.), so a single synthetic event is emitted
+    BF37 swapped, NAA before MF, etc.), so we emit a single synthetic
     entry that the renderer can surface prominently.
     """
     sections_a = document_a.get("sections", {})

@@ -1,17 +1,18 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """Shared profile-management helpers for the four SCP11 shells.
 
 The eSIM Live, eSIM Test, Local SMDP+, and Local eIM shells all expose the
 same ``ENABLE-PROFILE`` / ``DISABLE-PROFILE`` / ``DELETE-PROFILE`` family of
-commands. Without a shared helper, the safety semantics -- auto-disabling the
+commands. Without a shared helper, the safety semantics — auto-disabling the
 currently-active profile before enabling a new one, auto-disabling an
-enabled profile before deleting it, short-circuiting no-op transitions --
+enabled profile before deleting it, short-circuiting no-op transitions —
 drift between the shells. This module factors the contract so every shell
 calls into the same routine and operators see the same behaviour regardless
 of which surface they dropped into.
 
 The helpers are session-agnostic: the caller passes a description of the
 profile inventory (a list of objects exposing ``state``, ``iccid``,
-``aid``, etc. -- the existing ``ProfileMetadataView`` shape) plus a
+``aid``, etc. — the existing ``ProfileMetadataView`` shape) plus a
 ``ProfileActionAdapter`` describing how to reach the underlying ES10 /
 ISD-R commands. Output goes through the adapter's ``info`` / ``warn`` /
 ``error`` callbacks so each shell controls its own colour scheme.
@@ -117,7 +118,7 @@ def find_profile(
 
     The match is case-insensitive on the textual fields and tolerates
     common BCD-string drift (extra whitespace, trailing F filler).
-    Returns ``None`` when the identifier doesn't resolve -- callers
+    Returns ``None`` when the identifier doesn't resolve — callers
     should treat that as "fall through to the underlying ES10 command,
     which will surface a card-level error if the identifier is bogus".
     """
@@ -150,7 +151,7 @@ def _profile_aid_iccid(profile: Any) -> tuple[str, str]:
 
 
 # ---------------------------------------------------------------------------
-# Action helpers -- the meat of the harmonised contract
+# Action helpers — the meat of the harmonised contract
 # ---------------------------------------------------------------------------
 
 
@@ -165,7 +166,7 @@ def run_enable_profile(
 
     1. Resolve ``identifier`` against ``profiles``. When it resolves to a
        profile that is already ENABLED, short-circuit with an info
-       message -- the operator's intent is already met.
+       message — the operator's intent is already met.
     2. Look up the currently ENABLED profile (excluding the target).
        When one exists, ask the policy callback whether the auto-disable
        is allowed (PPR1 guard). If denied, abort.
@@ -219,7 +220,7 @@ def run_disable_profile(
 ) -> bool:
     """Disable ``identifier``, short-circuiting when it isn't ENABLED.
 
-    Mirrors the SGP.22 §5.7.17 idempotency contract -- disabling a
+    Mirrors the SGP.22 §5.7.17 idempotency contract — disabling a
     DISABLED profile is a no-op that returns success. The shell-facing
     output is collapsed to a single info line so the operator doesn't
     have to read a card error to find out their target was already off.
@@ -250,15 +251,14 @@ def run_delete_profile(
 
     SGP.22 §5.7.18 forbids deleting an ENABLED profile (the LPA-side
     contract is "disable, then delete"). Some cards / lab profiles
-    accept a delete-while-enabled as a single transaction, but the
-    simulator treats
+    accept a delete-while-enabled as a single transaction, but we treat
     the safe path as canonical: when the target is currently ENABLED we
     issue a ``DisableProfile`` first (subject to the same PPR1 guard as
     enable), then the delete.
 
     The "force delete an enabled profile without disabling" path stays
     available to callers that drive the underlying ``delete_profile``
-    callback directly -- this helper is the harmonised default.
+    callback directly — this helper is the harmonised default.
     """
     target = find_profile(profiles, identifier)
     if target is not None and is_enabled(target):

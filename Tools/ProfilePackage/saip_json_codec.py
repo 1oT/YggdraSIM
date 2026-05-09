@@ -1,3 +1,4 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """
 JSON serialization helpers for SAIP decoded profile documents (pySim / asn1tools).
 
@@ -219,6 +220,12 @@ def _label_for_path_segment(segment: str) -> str:
 
 
 def humanize_saip_display_name(segment: str) -> str:
+    """Return a human-readable label for a single JSON path segment.
+
+    Applies word-split, case normalisation, and a curated override table
+    so ``ef-acc`` becomes ``EF.ACC`` and ``usim`` becomes ``USIM``.
+    Returns the raw segment unchanged if no mapping applies.
+    """
     normalized = _canonical_tag_key(str(segment).strip())
     if len(normalized) == 0:
         return ""
@@ -269,6 +276,13 @@ def humanize_saip_display_path(
     *,
     limit: int = 4,
 ) -> str | None:
+    """Convert a JSON path tuple to a readable ``"A / B / C"`` breadcrumb.
+
+    Structural noise keys (``sections``, ``intro``, ``@``, ``hex``,
+    ``__ygg_*``) are stripped.  Array index tokens ``[N]`` after EF keys
+    are dropped; after other keys they are merged with the preceding label.
+    Returns ``None`` when the filtered path is empty.
+    """
     parts: list[str] = []
     last_non_index_key: str | None = None
     for raw in path:
@@ -374,6 +388,12 @@ class TokenExpansionContext:
         self.undefined_tokens: set[str] = set()
 
     def resolve_named(self, name: str) -> bytes:
+        """Resolve a ``{NAME}`` / ``[NAME]`` token to its byte value.
+
+        Raises ``ValueError`` for undefined tokens unless
+        ``tolerate_undefined`` is set, in which case an empty byte string
+        is returned and the name is recorded in ``undefined_tokens``.
+        """
         if name not in self.defs:
             if self.tolerate_undefined:
                 self.undefined_tokens.add(str(name))
@@ -404,6 +424,11 @@ class TokenExpansionContext:
         return _encode_ber_tlv_length(len(resolved))
 
     def expand_mixed_hex(self, text: str) -> bytes:
+        """Expand a hex string that may contain embedded ``{NAME}`` tokens.
+
+        Literal hex fragments between tokens must each have an even nibble
+        count.  Returns the concatenated byte string.
+        """
         if self._pat.search(text) is None:
             compact = str(text).replace(" ", "").replace("\n", "").replace("\t", "")
             if len(compact) == 0:
@@ -515,7 +540,7 @@ def ensure_workspace_pysim_on_path(
        upstream branch without reinstalling after every change.
     2. A pip-installed ``pySim`` package (e.g. from the ``[saip]`` extra
        or ``pip install 'pySim @ git+https://github.com/osmocom/pysim.git'``).
-       When the package is already importable it is accepted as-is and
+       When the package is already importable we accept it as-is and
        return the directory that ``pySim.__file__`` resolves to, so
        callers that log the "pysim root" still get a meaningful path.
 
@@ -1048,12 +1073,12 @@ def parse_editor_json_template_aware(
 
     Returns a three-tuple ``(document, placeholder_paths, undefined_tokens)``:
 
-    * ``document`` -- the restored decoded document with undefined placeholders
+    * ``document`` — the restored decoded document with undefined placeholders
       expanded to zero bytes. The document is still usable for structural
       validation (lint) but should not be re-encoded to DER.
-    * ``placeholder_paths`` -- dotted paths (e.g. ``sections.header.iccid``) of
+    * ``placeholder_paths`` — dotted paths (e.g. ``sections.header.iccid``) of
       every hex field that embedded at least one ``{NAME}`` / ``[NAME]`` token.
-    * ``undefined_tokens`` -- names that had no entry in
+    * ``undefined_tokens`` — names that had no entry in
       ``__ygg_token_defs__``.
     """
 
@@ -1127,6 +1152,7 @@ def build_decoded_document_from_sequence(pes: Any, intro_lines: list[str] | None
     counts: dict[str, int] = {}
 
     def unique_key(base_key: str) -> str:
+        """Return a de-duplicated key string for the JSON serialisation of a tagged tuple."""
         key_text = str(base_key or "section").strip() or "section"
         current_count = counts.get(key_text, 0) + 1
         counts[key_text] = current_count

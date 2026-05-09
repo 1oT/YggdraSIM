@@ -7,7 +7,7 @@ the user accidentally invokes the console entry points
 (``yggdrasim-hil-bridge`` / ``yggdrasim-hil-supervisor``).
 
 The bottom block adds a lightweight "every console script resolves"
-assertion -- it mirrors the release-checklist item about "console
+assertion — it mirrors the release-checklist item about "console
 scripts launch via ``--cmd``" without actually spawning 15 subprocesses
 (the per-script ``--help`` smoke is covered by the packaging-side
 ``test_install_scripts`` suite).

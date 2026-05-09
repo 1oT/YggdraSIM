@@ -177,27 +177,27 @@ class TokenEnforcementTests(unittest.TestCase):
 class PeerThrottleTests(unittest.TestCase):
     def test_lockout_after_threshold_is_reached(self) -> None:
         throttle = _PeerThrottle(failures=3, window_seconds=30.0, lockout_seconds=60.0)
-        self.assertFalse(throttle.is_locked("192.0.2.4", now=100.0))
-        self.assertFalse(throttle.record_failure("192.0.2.4", now=100.0))
-        self.assertFalse(throttle.record_failure("192.0.2.4", now=100.5))
-        self.assertTrue(throttle.record_failure("192.0.2.4", now=101.0))
-        self.assertTrue(throttle.is_locked("192.0.2.4", now=140.0))
-        self.assertFalse(throttle.is_locked("192.0.2.4", now=200.0))
+        self.assertFalse(throttle.is_locked("1.2.3.4", now=100.0))
+        self.assertFalse(throttle.record_failure("1.2.3.4", now=100.0))
+        self.assertFalse(throttle.record_failure("1.2.3.4", now=100.5))
+        self.assertTrue(throttle.record_failure("1.2.3.4", now=101.0))
+        self.assertTrue(throttle.is_locked("1.2.3.4", now=140.0))
+        self.assertFalse(throttle.is_locked("1.2.3.4", now=200.0))
 
     def test_success_resets_failure_log(self) -> None:
         throttle = _PeerThrottle(failures=3, window_seconds=30.0, lockout_seconds=60.0)
-        throttle.record_failure("192.0.2.4", now=100.0)
-        throttle.record_failure("192.0.2.4", now=100.1)
-        throttle.record_success("192.0.2.4")
-        self.assertFalse(throttle.record_failure("192.0.2.4", now=101.0))
+        throttle.record_failure("1.2.3.4", now=100.0)
+        throttle.record_failure("1.2.3.4", now=100.1)
+        throttle.record_success("1.2.3.4")
+        self.assertFalse(throttle.record_failure("1.2.3.4", now=101.0))
 
     def test_failures_outside_window_are_dropped(self) -> None:
         throttle = _PeerThrottle(failures=3, window_seconds=10.0, lockout_seconds=60.0)
-        throttle.record_failure("192.0.2.4", now=100.0)
-        throttle.record_failure("192.0.2.4", now=101.0)
-        # Third failure 30s later -- outside the 10s window, so the
+        throttle.record_failure("1.2.3.4", now=100.0)
+        throttle.record_failure("1.2.3.4", now=101.0)
+        # Third failure 30s later — outside the 10s window, so the
         # earlier ones must be evicted and this should not lock out.
-        self.assertFalse(throttle.record_failure("192.0.2.4", now=130.0))
+        self.assertFalse(throttle.record_failure("1.2.3.4", now=130.0))
 
 
 class AuditLogTests(unittest.TestCase):

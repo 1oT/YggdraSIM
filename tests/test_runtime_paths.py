@@ -16,42 +16,6 @@ from SCP11.local_access.session import LocalIsdrSession
 from SCP11.test.config import SGPConfig as TestRelayConfig
 
 
-# These tests round-trip ``frozen``-build fixture seeding from the source
-# tree into a synthesised runtime root. The cert and key bundles they
-# look for live behind the workspace ``.gitignore`` (``*.pem`` / ``*.der``
-# are excluded so private signing material never lands in the public
-# release tree). On a fresh CI checkout the fixtures are absent, so the
-# seeding has nothing to copy and the assertions fail through no fault
-# of the code under test. Skip the affected tests cleanly when the
-# canonical fixture files are missing -- they're the same ones the
-# install scripts ship via the release artefact, and they only exist
-# in the maintainer's working tree.
-_REPO_ROOT = Path(__file__).resolve().parents[1]
-_SGP26_VARO_DPAUTH_CERT = (
-    _REPO_ROOT
-    / "SCP11"
-    / "SGP.26_test_Certs"
-    / "Valid Test Cases"
-    / "Variant O"
-    / "SM-DP+"
-    / "SM_DPauth"
-    / "CERT_S_SM_DPauth_VARO_SIG_NIST.der"
-)
-_SCP11_ES9_TEST_CI_CA = _REPO_ROOT / "SCP11" / "ES9_TEST_CI_CA.pem"
-
-_SGP26_FIXTURE_PRESENT = _SGP26_VARO_DPAUTH_CERT.is_file()
-_SCP11_PEM_FIXTURE_PRESENT = _SCP11_ES9_TEST_CI_CA.is_file()
-
-_SGP26_SKIP_REASON = (
-    f"SGP.26 cert fixture not present at {_SGP26_VARO_DPAUTH_CERT} "
-    "(*.der is gitignored; populated only in the maintainer tree)."
-)
-_SCP11_PEM_SKIP_REASON = (
-    f"SCP11 PEM fixture not present at {_SCP11_ES9_TEST_CI_CA} "
-    "(*.pem is gitignored; populated only in the maintainer tree)."
-)
-
-
 class _DummyApduChannel:
     def send(self, _apdu: bytes, _log_name: str) -> bytes:
         return b""
@@ -81,7 +45,6 @@ class FrozenRuntimePathTests(unittest.TestCase):
             self.assertEqual(resolved, str(runtime_root))
             self.assertTrue(runtime_root.is_dir())
 
-    @unittest.skipUnless(_SGP26_FIXTURE_PRESENT, _SGP26_SKIP_REASON)
     def test_local_access_config_seeds_writable_runtime_tree_when_frozen(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             runtime_root = Path(temp_dir) / "runtime"
@@ -144,7 +107,6 @@ class FrozenRuntimePathTests(unittest.TestCase):
             finally:
                 importlib.reload(scp03_config)
 
-    @unittest.skipUnless(_SCP11_PEM_FIXTURE_PRESENT, _SCP11_PEM_SKIP_REASON)
     def test_scp11_relay_configs_seed_workspace_cert_paths_when_frozen(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             runtime_root = Path(temp_dir) / "runtime"
@@ -196,7 +158,7 @@ class FrozenRuntimePathTests(unittest.TestCase):
             addeim_template_text = addeim_template.read_text(encoding="utf-8")
             self.assertIn("/path/to/local_eim_signing_cert.pem", addeim_template_text)
             self.assertNotIn("Workspace/LocalEIM/certs/addeim/", addeim_template_text)
-            self.assertIn('"eim_hostname_fqdn": "eim.yggdrasim.example.test"', addeim_template_text)
+            self.assertIn('"eim_hostname_fqdn": "eim.example.test"', addeim_template_text)
             self.assertIn('"tls_connection_certificate_choice": "server_certificate"', addeim_template_text)
             self.assertIn('"https_over_tcp_retrieval": true', addeim_template_text)
 

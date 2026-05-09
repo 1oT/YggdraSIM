@@ -1,3 +1,5 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+"""SCP02 session key derivation bridging pySim's GpCardKeyset to the YggdraSIM transport."""
 try:
     from pySim.global_platform import GpCardKeyset
     from pySim.global_platform.scp import SCP02

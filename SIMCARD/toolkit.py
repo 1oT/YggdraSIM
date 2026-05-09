@@ -1,10 +1,12 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+"""SIM Application Toolkit logic: proactive command encoding, BIP bearer setup, timer management (ETSI TS 102 223)."""
 from __future__ import annotations
 
 import ipaddress
 from typing import Any
 
 from SIMCARD import ipa_poll_dns
-from SIMCARD.state import SimCardState, SimToolkitMenuItem, append_bounded
+from SIMCARD.state import SimCardState, SimToolkitMenuItem
 from SIMCARD.utils import read_tlv, tlv
 from Tools.HilBridge.protocol import (
     REFRESH_MODE_EUICC_PROFILE_STATE_CHANGE,
@@ -121,8 +123,10 @@ class ToolkitLogic:
 
     Covers proactive-command enqueue/fetch, envelope dispatch, OPEN/
     CLOSE/SEND/RECEIVE CHANNEL bookkeeping, REFRESH and PROVIDE LOCAL
-    INFORMATION assembly, and event-download routing. Higher-layer
-    protocol emulation belongs in plugins. Extensions attach through
+    INFORMATION assembly, and event-download routing. It deliberately
+    does *not* know anything about IPAE polling, DNS, TLS, or HTTP:
+    that emulation is plugin territory (see ``plugins/polling/
+    sim_toolkit_ipae.py``). Extensions attach through
     ``register_extension`` or via ``extend_target_with_plugins`` at
     construction time and receive ``on_*`` hook callbacks.
     """
@@ -169,11 +173,14 @@ class ToolkitLogic:
     def __init__(self, state: SimCardState) -> None:
         self.state = state
         self._extensions: list[Any] = []
-        # Callable[[bytes], tuple[bytes, int, int]] -- invoked per
-        # EuiccPackage parsed out of an IPA-poll RECEIVE DATA payload.
-        # Wired by ``SimulatedSimCardEngine`` to
-        # ``self.sgp.handle_store_data``. Defaults to ``None`` so
-        # toolkit-only unit tests stay decoupled from the SGP layer.
+        # Callable[[bytes], tuple[bytes, int, int]] — invoked for each
+        # EuiccPackage parsed out of an eIM RECEIVE DATA payload during
+        # an active IPA-poll session. Wired by ``SimulatedSimCardEngine``
+        # to ``self.sgp.handle_store_data`` so the IPA can act as a
+        # proper SGP.32 in-card agent: the eIM speaks ESipa/EuiccPackages
+        # over BIP, the IPA forwards each package as STORE DATA on
+        # ISD-R. Defaults to ``None`` so unit tests that build a
+        # toolkit in isolation are not coupled to the SGP layer.
         self._eim_package_dispatcher: Any = None
         extend_target_with_plugins(self)
 
@@ -199,6 +206,7 @@ class ToolkitLogic:
                 continue
 
     def reset(self) -> None:
+        """Clear TERMINAL PROFILE, active proactive command, and bootstrap state on card reset."""
         toolkit = self.state.toolkit
         toolkit.terminal_profile = b""
         toolkit.terminal_capabilities.clear()
@@ -218,6 +226,11 @@ class ToolkitLogic:
         self._dispatch_hook("reset")
 
     def should_handle_status(self) -> bool:
+        """Return True when the STATUS command should trigger a FETCH response.
+
+        True when a proactive command is queued or when the IPA-poll loop has
+        a pending fetch entry waiting for the terminal to issue FETCH.
+        """
         if len(self.state.toolkit.active_proactive_command) > 0:
             return True
         if len(self.state.pending_fetch_queue) > 0:
@@ -238,7 +251,7 @@ class ToolkitLogic:
 
         The body is a (possibly empty) sequence of single-byte
         COMPREHENSION-TLV objects describing optional terminal
-        features. earlier work decodes the well-known tags into
+        features. Round-13 decodes the well-known tags into
         ``state.toolkit`` so a paired applet / test can answer
         "does the terminal advertise extended logical channels?"
         without walking the raw blob list.
@@ -287,6 +300,11 @@ class ToolkitLogic:
         return self._pending_status()
 
     def handle_terminal_profile(self, payload: bytes) -> tuple[bytes, int, int]:
+        """ETSI TS 102 221 §11.1.14 TERMINAL PROFILE — stores the terminal capability bitmap.
+
+        Kicks off the bootstrap proactive-command sequence when bootstrap is
+        enabled and not yet initialised.
+        """
         toolkit = self.state.toolkit
         toolkit.terminal_profile = bytes(payload or b"")
         if toolkit.bootstrap_enabled and toolkit.bootstrap_initialized is False:
@@ -306,6 +324,11 @@ class ToolkitLogic:
         return active, 0x90, 0x00
 
     def handle_terminal_response(self, payload: bytes) -> tuple[bytes, int, int]:
+        """ETSI TS 102 221 §11.1.15 TERMINAL RESPONSE — processes the terminal's reply to a proactive command.
+
+        Clears the active command slot and advances the bootstrap or IPA-poll
+        state machine to the next step.
+        """
         toolkit = self.state.toolkit
         normalized = bytes(payload or b"")
         toolkit.last_terminal_response = normalized
@@ -335,7 +358,7 @@ class ToolkitLogic:
         plaintext OTA flows keep working.
         """
         normalized = bytes(payload or b"")
-        append_bounded(self.state.toolkit.envelope_history, normalized)
+        self.state.toolkit.envelope_history.append(normalized)
         envelope_tag = normalized[:1] if len(normalized) > 0 else b""
 
         if envelope_tag == b"\xD6":
@@ -388,11 +411,11 @@ class ToolkitLogic:
 
         if envelope_tag == b"\xD4":
             # 3GPP TS 31.111 §7.3.1 Call Control by USIM. The body
-            # carries dialled digits / sub-address / location info,
-            # which is decoded into ``state.toolkit``. The reply is
-            # the canned "Allowed, no modification" Result TLV
-            # because the simulator does not host operator-specific
-            # call-control logic.
+            # carries dialled digits / sub-address / location info
+            # which round-19 now decodes into ``state.toolkit``;
+            # the reply remains the canned "Allowed, no
+            # modification" Result TLV because the simulator does
+            # not host operator-specific call-control logic.
             self._apply_call_control_envelope(normalized)
             response = bytes.fromhex("8001 00".replace(" ", ""))
             if len(self.state.pending_fetch_queue) > 0:
@@ -402,7 +425,7 @@ class ToolkitLogic:
         if envelope_tag == b"\xD5":
             # 3GPP TS 31.111 §7.3.2 MO Short Message Control. Body
             # carries RP-DA + RP-OA Address TLVs and the
-            # calling-area Location Information; now
+            # calling-area Location Information; round 19 now
             # decodes them into ``state.toolkit``. Reply still
             # echoes "Allowed, no modification".
             self._apply_mo_sms_control_envelope(normalized)
@@ -414,8 +437,8 @@ class ToolkitLogic:
         if envelope_tag == b"\xD8":
             # 3GPP TS 31.111 §7.3.3 USSD Download. Body carries
             # the network-side USSD String (TLV 8A = DCS + text);
-            # both halves are decoded into ``state.toolkit``. The
-            # reply is "Allowed, no modification".
+            # round 19 decodes both halves into ``state.toolkit``.
+            # The reply remains "Allowed, no modification".
             self._apply_ussd_download_envelope(normalized)
             response = bytes.fromhex("80 01 00".replace(" ", ""))
             if len(self.state.pending_fetch_queue) > 0:
@@ -435,6 +458,12 @@ class ToolkitLogic:
         *,
         source: str = "",
     ) -> dict[str, str | int | list[str]]:
+        """Queue a REFRESH proactive command (ETSI TS 102 223 §6.4.7).
+
+        Coalesces identical *qualifier* values — a second call for the same
+        mode returns the existing command rather than queuing a duplicate.
+        Returns a status dict indicating whether the command was queued or coalesced.
+        """
         mode_name, qualifier = normalize_refresh_mode(mode)
         existing = self._find_refresh_command(qualifier)
         if len(existing) > 0:
@@ -815,8 +844,9 @@ class ToolkitLogic:
         helper keeps the surface forgiving for tests.
 
         TLV tags are emitted comprehension-clear (24 / 25) so picky
-        modems that drop the CR-set form (A4 / A5) can still parse
-        the proactive command.
+        modems that drop the CR-set form (A4 / A5) can still parse the
+        proactive command -- this matches what reference IPA cards
+        emit during the SGP.32 IPA-poll cycle.
         """
         normalized_id = int(timer_id) & 0xFF
         if normalized_id < 0x01 or normalized_id > 0x08:
@@ -1339,6 +1369,7 @@ class ToolkitLogic:
         )
 
     def status_payload(self) -> dict[str, str | int | list[str] | bool]:
+        """Return a JSON-serialisable snapshot of the current toolkit state for the GUI status endpoint."""
         active = bytes(self.state.toolkit.active_proactive_command or b"")
         queued = [bytes(entry) for entry in self.state.pending_fetch_queue]
         payload: dict[str, str | int | list[str] | bool] = {
@@ -1474,7 +1505,7 @@ class ToolkitLogic:
             self._apply_channel_status_response(response_fields)
             return
         if command_type == PROVIDE_LOCAL_INFORMATION_COMMAND:
-            # latch the result-code + qualifier echo
+            # Round 18: latch the result-code + qualifier echo
             # ahead of the rich payload handler so a polling tool
             # can confirm "I asked for X and the terminal answered
             # with X" without diffing every individual cache.
@@ -1491,7 +1522,7 @@ class ToolkitLogic:
             )
             return
         if command_type == TIMER_MANAGEMENT_COMMAND:
-            # latch the result-code so a polling applet
+            # Round 18: latch the result-code so a polling applet
             # can tell "terminal accepted start" (0x00) from
             # "terminal busy" (0x20) without inspecting
             # timer_table; the timer-id / value handler still runs.
@@ -1505,7 +1536,7 @@ class ToolkitLogic:
             )
             return
         if command_type == POLLING_OFF_COMMAND:
-            # record the result-code on every TR (success
+            # Round 18: record the result-code on every TR (success
             # or failure) so a polling applet can tell whether the
             # terminal actually disabled polling. The
             # ``polling_off_active`` flag is preserved as the
@@ -1692,7 +1723,7 @@ class ToolkitLogic:
             # ETSI TS 102 223 §6.6.5 SET UP MENU. TR carries only
             # a result code; the menu items themselves are echoed
             # back via the MENU SELECTION envelope (D3) which is
-            # wired through dedicated state latches.
+            # already wired through round-11 latches.
             self._apply_simple_proactive_result(
                 "last_set_up_menu_result",
                 response_fields,
@@ -1754,7 +1785,7 @@ class ToolkitLogic:
         - 0x08 IMEISV (TLV 0x62)
         - 0x0D battery state (TLV 0x5C)
 
-        On a non-zero result code the latch is skipped so partial /
+        On a non-zero result code we skip the latch so partial /
         terminal-busy responses don't clobber a previously known good
         value -- the caller's hook still fires.
         """
@@ -2439,22 +2470,24 @@ class ToolkitLogic:
 
         Called from ``_apply_open_channel_response`` when the OPEN
         CHANNEL TR signals failure (and from the abort/error paths).
-        The full OPEN/SEND/.../TIMER/RECV/.../TIMER/CLOSE batch is
-        enqueued up-front, so an orderly unwind is just dropping the
-        still-pending entries.
+        The simulator enqueues the full
+        OPEN/SEND/.../TIMER/RECV/.../TIMER/CLOSE batch up-front for the
+        linear DNS and plain-HTTP eIM legs, so the orderly unwind
+        happens by removing the still-pending entries.
 
         ``keep_close`` is set by the SEND/RECEIVE TR-failure path: a
         BIP error on a data command does not invalidate the bearer
         itself, so we want to drop any pending SEND/RECV/TIMER but
-        leave the trailing CLOSE CHANNEL so the modem gets a clean
-        tear-down. The walk stops at the first non-IPA entry to avoid
-        eating unrelated commands queued by an extension.
+        leave the trailing CLOSE CHANNEL alone so the modem still
+        gets a clean tear-down. The walk stops at the first non-IPA
+        entry to avoid eating unrelated commands queued by an
+        extension.
         """
 
         queue = self.state.pending_fetch_queue
         if len(queue) == 0:
             return
-        # Worst-case follow-up count is 7 entries:
+        # Worst-case follow-up count for the DNS leg is now 7 entries:
         # SEND + SEND + TIMER(start) + RECV + RECV + TIMER(stop) + CLOSE
         # after OPEN CHANNEL has already been popped.
         max_drain = 8
@@ -2475,7 +2508,7 @@ class ToolkitLogic:
             drained += 1
         # Drained TIMER MANAGEMENT entries no longer arm the watchdog,
         # so reset the bookkeeping flag when we drain the entire cycle.
-        # When ``keep_close`` is True the flag is left alone so the
+        # When ``keep_close`` is True we leave the flag alone so the
         # caller can queue a fresh deactivate just before CLOSE CHANNEL.
         toolkit = self.state.toolkit
         if keep_close is False:
@@ -2705,7 +2738,7 @@ class ToolkitLogic:
         remaining_length = int(response_fields.get("channel_length", 0) or 0)
         toolkit.last_received_channel_data = channel_data
         if len(channel_data) > 0:
-            append_bounded(toolkit.received_channel_history, channel_data)
+            toolkit.received_channel_history.append(channel_data)
         current_phase = str(toolkit.ipa_poll_phase or "")
         if current_phase in {"dns_query", "dns_recv"} and len(channel_data) > 0:
             self._absorb_dns_response_chunk(channel_data)
@@ -2741,10 +2774,11 @@ class ToolkitLogic:
             self._dispatch_hook("on_receive_data_response", response_fields, succeeded)
             return
         # SGP.32 §6.5 IPA dispatch. When the simulator's IPA owns
-        # this channel (an IPA-poll cycle is in flight), the bytes
-        # returned by RECEIVE DATA are the ESipa response. Parse
-        # them out to EuiccPackages and forward each into ISD-R via
-        # STORE DATA.
+        # this BIP channel (an IPA-poll cycle is in flight), the
+        # bytes the modem just handed back are the eIM's ESipa
+        # response. Parse them out to EuiccPackages and forward each
+        # into ISD-R via STORE DATA. This mirrors what a production
+        # in-card SGP.32 IPA does after a poll round-trip.
         if bool(toolkit.ipa_poll_session_active) and len(channel_data) > 0:
             toolkit.ipa_poll_last_response_payload = (
                 bytes(toolkit.ipa_poll_last_response_payload or b"") + channel_data
@@ -2760,19 +2794,19 @@ class ToolkitLogic:
         is fed to the TLS engine, the plaintext fragments are appended
         to ``ipa_poll_tls_decrypted_payload``, and any newly recovered
         SGP.32 packages are dispatched to ISD-R as if the bearer had
-        delivered them in plaintext (the non-TLS path).
+        delivered them in plaintext (Stage-1 path).
 
         After dispatch we either:
 
         * keep listening (queue another RECEIVE DATA) when no
           plaintext is yet available -- the encrypted record may have
           been split across multiple modem chunks, or
-        * close the bearer when a non-empty decrypted payload is available.
+        * close the bearer when we have a non-empty decrypted payload.
 
         ``ipa_poll_followup_emitted`` from the dispatcher takes
         precedence: when a BF50 ProvideEimPackageResult was injected
         the cycle keeps the channel open until the eIM acks the
-        result.
+        result, mirroring what real IPAs do.
         """
 
         from SIMCARD import ipa_tls
@@ -2888,7 +2922,7 @@ class ToolkitLogic:
         contract is to deliver each package to ISD-R as a STORE DATA
         body, which is exactly what ``SgpLogic.handle_store_data``
         accepts. Anything that is not a recognised SGP.32 outer tag
-        is ignored -- this keeps the dispatcher tolerant of HTTP
+        is ignored -- this keeps the dispatcher robust to HTTP
         envelopes, status lines, or empty-keepalive responses that
         the bearer may smuggle through.
         """
@@ -2949,10 +2983,10 @@ class ToolkitLogic:
         # SGP.32 §6.5.2.1 ProvideEimPackageResult follow-up. Build a
         # BF50 body wrapping each per-package result and inject a
         # fresh SEND DATA in front of the still-pending CLOSE CHANNEL
-        # so the eIM sees execution results within the same cycle.
-        # A final RECEIVE DATA is also enqueued to drain any
-        # acknowledgement / next-package the eIM ships back so the
-        # conversation stays symmetric.
+        # so the eIM sees execution results within the same BIP
+        # cycle. Real cards also send a final RECEIVE DATA to drain
+        # any acknowledgement / next-package the eIM ships back; we
+        # mirror that to keep the conversation symmetric.
         # ``ipa_poll_followup_emitted`` is the latch that prevents a
         # cascading injection if the eIM's ack itself contains BF50
         # bytes -- real eIMs reply to BF50 with an empty body or a
@@ -3259,14 +3293,14 @@ class ToolkitLogic:
         if len(channel_status) >= 1:
             toolkit.open_channel_active = (channel_status[0] & 0x80) != 0
         # TS 102 223 §7.4 event bookkeeping. The event_code is the
-        # primary key for follow-up actions; it is cached alongside event-
+        # primary key for follow-up actions; we cache it plus event-
         # specific data so STK applets can react via polling and tests
         # can introspect the latched values.
         event_code = event_fields.get("event_code", None)
         if event_code is not None:
             code_int = int(event_code) & 0xFF
             toolkit.last_event_code = code_int
-            append_bounded(toolkit.event_history, code_int)
+            toolkit.event_history.append(code_int)
             if code_int == 0x07:
                 # §7.4.7 Idle Screen Available -- the modem signals
                 # the home screen is idle, so SET UP IDLE MODE TEXT
@@ -3674,7 +3708,7 @@ class ToolkitLogic:
 
         1. ``state.toolkit.ipa_poll_eim_fqdn`` (operator override)
         2. The first ``state.eim_entries[*].eim_fqdn`` that is set
-        3. The empty string -- in which case the sequence is skipped
+        3. The empty string -- in which case we skip the sequence
            rather than emit a malformed OPEN CHANNEL.
         """
         toolkit = self.state.toolkit
@@ -3702,11 +3736,20 @@ class ToolkitLogic:
         self._queue_ipa_poll_dns_phase(fqdn)
 
     def _queue_ipa_poll_dns_phase(self, fqdn: str) -> None:
-        """Queue the SGP.32 IPA-poll DNS phase for the eIM FQDN.
+        """Queue the SGP.32 DNS-over-BIP leg for the eIM FQDN.
 
-        Builds the OPEN CHANNEL / SEND DATA × 2 / RECEIVE DATA × 2
-        / CLOSE CHANNEL sequence with watchdog timers framing the
-        SEND/RECEIVE flight per TS 102 223 §6.4.27.
+        Mirrors what reference IPA implementations emit when their
+        resolved-IP cache is empty:
+
+        1. OPEN CHANNEL UDP_REMOTE to ``ipa_poll_dns_server:53`` with
+           the configured APN. Qualifier ``0x03`` (immediate +
+           automatic reconnection) so the modem keeps the resolver
+           socket warm across the question/answer round trip.
+        2. SEND DATA × 2 carrying AAAA then A questions (RFC 1035
+           dual-stack pattern). Both questions reuse the same channel
+           id once OPEN CHANNEL TR succeeds.
+        3. RECEIVE DATA × 2 (one per outstanding answer).
+        4. CLOSE CHANNEL once the resolver has answered.
         """
 
         toolkit = self.state.toolkit
@@ -3769,10 +3812,14 @@ class ToolkitLogic:
             self._allocate_command_number(),
             receive_size,
         )
-        # Watchdog timer between SEND and RECEIVE DATA per TS 102 223
-        # §6.4.27. The proactive yield gives the bearer time to
-        # receive a response before RECEIVE DATA is issued; skipping
-        # it can trigger general result 0x3A / additional info 0x00.
+        # Reference IPA cards arm timer 02 with a ~65 s watchdog after
+        # the SEND DATA burst and deactivate it before CLOSE CHANNEL.
+        # The proactive yield gives the modem a polling window to
+        # actually receive the DNS answer from the network before the
+        # eUICC issues RECEIVE DATA -- skipping it is what made our
+        # modem reject RECEIVE DATA with general result 0x3A
+        # ("Bearer Independent Protocol error") and additional info
+        # 0x00 ("no specific cause").
         wait_timer_id = int(toolkit.ipa_poll_wait_timer_id or 2) & 0xFF
         wait_seconds = max(1, int(toolkit.ipa_poll_wait_timer_seconds or 65))
         timer_start = self._build_timer_management_start(
@@ -3796,19 +3843,22 @@ class ToolkitLogic:
         self._enqueue_command(close_dns)
 
     def _queue_ipa_poll_eim_phase(self, fqdn: str, resolved_ip: str) -> None:
-        """Queue the SGP.32 IPA-poll eIM phase using the resolved IP.
+        """Queue the SGP.32 ESipa-over-BIP leg using the resolved eIM IP.
 
         Two paths share this entry point:
 
-        * **TLS path** (default; ``ipa_poll_tls_enabled`` is ``True``).
-          Only the OPEN CHANNEL is enqueued up-front; the toolkit's
-          TR handlers then drive a reactive SEND/RECEIVE DATA loop
-          that runs the TLS-1.2 handshake, ships the encrypted
-          request, decrypts the response and queues CLOSE CHANNEL.
+        * **TLS-in-card path** (default; ``ipa_poll_tls_enabled`` is
+          ``True``). Only the OPEN CHANNEL is enqueued up-front. After
+          the bearer comes up the toolkit's TR handlers drive a
+          reactive SEND/RECEIVE DATA loop that runs the TLS-1.2
+          handshake, ships the encrypted ESipa request, decrypts the
+          response and finally queues CLOSE CHANNEL. This mirrors what
+          a real eUICC does -- the modem stays a transparent byte pipe.
         * **Plain-HTTP fallback** (``ipa_poll_tls_enabled`` is
-          ``False``). The four-command queue (OPEN / SEND / RECEIVE
-          / CLOSE) is built up-front. The IPA-dispatch tests opt into
-          this so they can exercise the envelope wiring without TLS.
+          ``False``). The legacy four-command queue (OPEN / SEND /
+          RECEIVE / CLOSE) is built up-front. The IPA-dispatch tests
+          opt into this so they can exercise the SGP.32 envelope wiring
+          without a TLS server.
         """
 
         toolkit = self.state.toolkit
@@ -3872,10 +3922,11 @@ class ToolkitLogic:
         self._enqueue_command(close_eim)
 
     # ------------------------------------------------------------------
-    # IPA-poll TLS path. Helpers below pump the TLS handshake and
-    # encrypted application exchange via the proactive command queue
-    # whenever ``ipa_poll_tls_enabled`` is set; otherwise the linear
-    # plain-HTTP path is used.
+    # In-card TLS-1.2 driving (Stage 2). The helpers below own the
+    # reactive SEND/RECEIVE DATA loop that runs the TLS handshake and
+    # the encrypted ESipa exchange entirely inside the card. They
+    # depend on ``ipa_poll_tls_enabled`` being set; the legacy plain-
+    # HTTP fallback path keeps the linear queue from Stage 1.
     # ------------------------------------------------------------------
 
     _IPA_POLL_TLS_SEND_CHUNK: int = 240
@@ -4020,7 +4071,7 @@ class ToolkitLogic:
             )[-16:]
 
         # No bytes to send. Either the handshake needs more inbound or
-            # the simulator is waiting for the eIM's encrypted response. Either way,
+        # we are waiting for the eIM's encrypted response. Either way,
         # ask the modem for more bytes.
         toolkit.ipa_poll_tls_idle_receives = int(toolkit.ipa_poll_tls_idle_receives or 0) + 1
         if int(toolkit.ipa_poll_tls_idle_receives) > int(
@@ -4028,9 +4079,9 @@ class ToolkitLogic:
         ):
             self._abort_ipa_poll_cycle("tls idle receive cap exceeded")
             return
-        # Arm the watchdog timer before yielding for the bearer's
-        # round-trip; this proactive yield lets bytes land in the
-        # bearer buffer before the next RECEIVE DATA.
+        # Arm the watchdog timer right before yielding for the modem's
+        # network round-trip; reference cards rely on this proactive
+        # yield to actually receive bytes before the next RECEIVE DATA.
         self._arm_ipa_poll_wait_timer()
         receive_size = max(1, min(0xFF, int(toolkit.ipa_poll_receive_size or 0xFA)))
         self._enqueue_command(
@@ -4043,11 +4094,15 @@ class ToolkitLogic:
     def _arm_ipa_poll_wait_timer(self) -> None:
         """Queue a TIMER MANAGEMENT (start) before the next RECEIVE DATA.
 
-        The proactive yield gives the bearer a polling window before
-        RECEIVE DATA is issued; without it some terminals return
-        general result 0x3A on every RECEIVE DATA. The flag stops the
-        same timer being armed twice during an interleaved SEND/RECV
-        burst.
+        Reference IPA cards arm timer 02 with a ~65 s watchdog every
+        time they yield for a network response inside an IPA-poll
+        cycle. The proactive yield gives the modem its FETCH/STATUS
+        polling window so bytes from the network actually land in the
+        bearer buffer before the eUICC issues RECEIVE DATA. Skipping
+        the yield -- the bug we are fixing here -- makes the modem
+        return general result 0x3A (Bearer Independent Protocol
+        error) on every RECEIVE DATA. The flag stops us from arming
+        the same timer twice during an interleaved SEND/RECV burst.
         """
         toolkit = self.state.toolkit
         if bool(toolkit.ipa_poll_wait_timer_armed):
@@ -4064,12 +4119,13 @@ class ToolkitLogic:
         toolkit.ipa_poll_wait_timer_armed = True
 
     def _disarm_ipa_poll_wait_timer(self) -> None:
-        """Queue a TIMER MANAGEMENT (deactivate) once RECEIVE DATA ends.
+        """Queue a TIMER MANAGEMENT (deactivate) once a RECEIVE DATA flight ends.
 
         The terminal echoes the remaining timer value back in the
-        Timer Value (25) TLV. The deactivate must run before CLOSE
-        CHANNEL so the timer-table bookkeeping stays clean across
-        cycles.
+        Timer Value (25) TLV, which lets the IPA log how long the
+        actual wait was. The deactivate must run before CLOSE CHANNEL
+        (or before the next SEND DATA flight in the TLS reactive path)
+        so the timer-table bookkeeping stays clean across cycles.
         """
         toolkit = self.state.toolkit
         if bool(toolkit.ipa_poll_wait_timer_armed) is False:
@@ -4456,7 +4512,7 @@ class ToolkitLogic:
         *,
         device_pair: bytes | None = None,
     ) -> bytes:
-        # ETSI TS 102 223 §8.7 -- Device Identities (TLV 0x82) carries
+        # ETSI TS 102 223 §8.7 — Device Identities (TLV 0x82) carries
         # [source, destination]. Default is UICC->Terminal (0x81 0x82);
         # BIP follow-ups override this to UICC->channel-id where the
         # destination device is encoded as 0x20 + channel_id (channel 1
@@ -4534,9 +4590,9 @@ class ToolkitLogic:
         normalized_id = max(1, min(8, int(timer_id)))
         normalized_seconds = max(0, int(seconds))
         # ETSI TS 102 223 §8.38 / §8.39 -- Timer Identifier (24) and
-        # Timer Value (25). The comprehension-clear form (no CR bit
-        # set) is used because some modems silently drop the
-        # proactive command when the CR bit is on.
+        # Timer Value (25). Reference cards emit the comprehension-clear
+        # form (no CR bit set); some modems are picky and silently drop
+        # the proactive when the CR bit is on, so we mirror that.
         body = tlv("24", bytes((normalized_id,))) + tlv(
             "25",
             _encode_timer_value_bcd(normalized_seconds),
@@ -4556,9 +4612,13 @@ class ToolkitLogic:
     ) -> bytes:
         """ETSI TS 102 223 §6.6.21 TIMER MANAGEMENT (qualifier 0x01).
 
-        Stops a previously armed timer. The body carries only the
-        Timer Identifier (24) -- the value TLV is reserved for the
-        start sub-function.
+        Stops a previously armed timer. Reference IPA cards arm a
+        long-running watchdog timer right before yielding for a
+        RECEIVE DATA flight and then deactivate it once the response
+        has been drained, so the modem reports the elapsed wait back
+        in the Timer Value (25) TLV. The body carries only the Timer
+        Identifier (24) -- the value TLV is reserved for the start
+        sub-function.
         """
         normalized_id = max(1, min(8, int(timer_id)))
         body = tlv("24", bytes((normalized_id,)))
@@ -4596,23 +4656,30 @@ class ToolkitLogic:
     ) -> bytes:
         """ETSI TS 102 223 §6.4.27 OPEN CHANNEL builder.
 
-        TLV order:
+        TLV order matches what reference IPA implementations emit:
 
-        * ``05`` Alpha identifier (always present; empty body when
-          the caller does not want a user-visible string).
+        * ``05`` Alpha identifier (always present so the modem can label
+          the BIP session in its UI; empty body when the IPA does not
+          want a user-visible string).
         * ``35`` Bearer description -- one byte for the bearer type
-          (0x03 = default packet bearer).
+          (0x03 = default packet bearer) is the SGP.32 IPA-poll norm.
         * ``39`` Buffer size (16-bit, big endian).
-        * ``47`` Network Access Name -- the APN, label-list encoded
-          per §8.70. Omitted when no APN is supplied.
+        * ``47`` Network Access Name -- the cellular APN, label-list
+          encoded per §8.70. Omitted when no APN is supplied so the
+          modem falls back to its currently active PDP context.
         * ``3C`` UICC/terminal interface transport level -- protocol
-          type byte (0x01 UDP_REMOTE, 0x02 TCP_CLIENT_REMOTE, ...)
-          plus the destination port.
-        * ``3E`` Other address (data destination) -- literal IPv4
-          (type 0x21) or IPv6 (type 0x57).
+          type byte (0x01 UDP_REMOTE, 0x02 TCP_CLIENT_REMOTE, ...) plus
+          the destination port.
+        * ``3E`` Other address (data destination) -- literal IPv4 (type
+          0x21) or IPv6 (type 0x57). The IPA must resolve the eIM FQDN
+          before it gets here; the public-resolver leg of the
+          DNS-over-BIP cycle owns that translation.
 
-        ``qualifier`` carries the OPEN CHANNEL P2 byte (bit 0 =
-        immediate link establishment, bit 1 = automatic reconnection).
+        ``qualifier`` carries the OPEN CHANNEL P2 byte (bit 0 = immediate
+        link establishment, bit 1 = automatic reconnection). Reference
+        cards set 0x03 for the DNS leg (immediate + reconnect because
+        the DNS UDP socket is volatile) and 0x01 for the eIM leg
+        (immediate, single-shot).
         """
 
         extra_tlvs = b""
@@ -4658,10 +4725,10 @@ class ToolkitLogic:
 
     def _build_receive_data_command(self, command_number: int, requested_length: int) -> bytes:
         bounded_length = max(1, min(0xFF, int(requested_length)))
-        # ETSI TS 102 223 §8.41 -- Channel Data Length tag (37). The
-        # comprehension-clear form is used because some terminals
-        # return general result 0x3A when the CR-set form (B7) is
-        # used.
+        # ETSI TS 102 223 §8.41 -- Channel Data Length tag (37). Plain
+        # comprehension-clear form mirrors what reference IPA cards emit
+        # on RECEIVE DATA; some modems return general result 0x3A when
+        # the CR-set form (B7) is used.
         extra_tlvs = tlv("37", bytes((bounded_length,)))
         return self._proactive_command(
             command_number,
@@ -4966,7 +5033,7 @@ class ToolkitLogic:
             if tag_bytes in (b"\xE0",):
                 # Reader Identifier TLV used by GET READER STATUS
                 # responses (TS 102 223 §8.69). Multiple records are
-                # concatenated by the terminal; the raw blob is kept
+                # concatenated by the terminal; we keep the raw blob
                 # for the apply layer to scan.
                 existing_blob = bytes(fields.get("reader_status_records", b"") or b"")
                 fields["reader_status_records"] = existing_blob + raw_tlv
@@ -5156,7 +5223,7 @@ class ToolkitLogic:
                 # TS 102 223 §8.81 Frames Information carried by the
                 # §7.4.16 Frames Information Change Event. The TLV
                 # body lays out the new frame partitioning chosen by
-                # the user; the raw bytes are preserved because vendors
+                # the user; we keep the raw bytes because vendors
                 # encode the layout differently and the apply layer
                 # only needs the blob plus a transition counter.
                 fields["frames_information"] = value_bytes

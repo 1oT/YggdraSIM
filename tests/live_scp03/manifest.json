@@ -2,7 +2,7 @@
   "schema": "scp03-live-1",
   "description": "Per-command stdin scripts for the SCP03 admin shell. Default backend is the simulated card; the runner can also drive a real PC/SC reader when SCP03_LIVE_BACKEND=reader.",
   "reader_policy": {
-    "comment": "Reader-mode gating. 'auth' tests authenticate against the card's Security Domain -- every key mismatch increments the SD lockout counter and 3 misses can brick the SD. 'write' tests modify card state. Tests not listed here run by default (read-only / offline / local-only).",
+    "comment": "Reader-mode gating. 'auth' tests authenticate against the card's Security Domain — every key mismatch increments the SD lockout counter and 3 misses can brick the SD. 'write' tests modify card state. Tests not listed here run by default (read-only / offline / local-only).",
     "auth": [
       "AUTH-SD",
       "SCP03-SD",

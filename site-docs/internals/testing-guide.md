@@ -80,7 +80,7 @@ Every pytest invocation is expected to complete within 90 seconds of wall
 time. The cap keeps local and CI runs predictable and prevents a single
 slow test from holding the queue. If a test genuinely needs more than 90 s:
 
-1. Narrow the target first -- a single test class or node id usually fits.
+1. Narrow the target first — a single test class or node id usually fits.
 2. If it still does not fit, tag the offender with `@pytest.mark.slow`
    and note the flag in the test docstring.
 3. Only ask to raise the cap explicitly, for a single named run. Do not

@@ -1,8 +1,8 @@
 # Diagnostics Toolbox
 
-Four v1-era capabilities ship alongside the core YggdraSIM
-subsystems. Each is additive -- nothing existing changes behaviour
-unless the new command is explicitly invoked.
+Four v1-era capabilities ship as first-class tooling next to the
+core YggdraSIM subsystems. Each is additive — nothing existing
+changes behaviour unless the new command is explicitly invoked.
 
 | Capability | Entry point | Safety posture |
 | --- | --- | --- |
@@ -35,19 +35,79 @@ entry instead of a flood of add/remove pairs.
 yggdrasim-profile-package
 > DIFF /path/to/profile_a.der /path/to/profile_b.json
 > DIFF /path/to/a.json /path/to/b.json NO-VALUES
+> DIFF /path/to/a.der /path/to/b.der BY-CMD-INDEX
 > DIFF-TUI /path/to/a.der /path/to/b.der
 ```
 
 Pass `NO-VALUES` to suppress value rendering (structure-only view).
 `DIFF-TUI` opens a Textual application; `n` / `N` step between
-differences, `v` toggles values, `q` quits.
+differences, `v` toggles values, `d` toggles a side-by-side decoded
+view of the leaf under the tree cursor (same read-only decoder
+cascade as the transcode TUI's Decoded pane), `o` toggles a
+diffs-only filter that prunes the tree to the diff-bearing
+breadcrumb plus every changed subtree (everything else is hidden,
+which makes spotting real changes much easier on a 400+ entry
+diff), `h` toggles the hex-diff overlay (see below), `q` quits.
 
-### 1.3 Library use
+The decoded pane has two display modes, switched with `h`:
+
+* **JSON view** (default) — the leaf under the tree cursor is
+  rendered using the read-only decoder cascade as a pretty-printed
+  JSON object. No diff colouring is applied inside the pane; the
+  side-by-side tree above carries the diff signal via its op
+  markers and op colours.
+* **Hex-diff overlay** — when the leaf carries a flat hex blob,
+  the pane switches to an xxd-style 16-byte-per-line panel with a
+  byte-level diff against the other side. Diverging bytes are
+  painted on a directional background: red on the A side
+  ("byte present in A, different / missing in B"), green on the B
+  side ("byte present in B, different / missing in A"). A summary
+  line at the top of the panel reports `(n of m bytes differ)`.
+  Leaves with no flat hex fall back to JSON view automatically, so
+  toggling the overlay on is always safe.
+
+The decoded pane scrolls vertically (mouse wheel or `PageUp` /
+`PageDown` on focus) and resizes with `]` (grow) / `[` (shrink)
+between 4 and 60 rows. `F7` cycles the Textual theme through the
+same palette as the transcode TUI. The chosen theme, the decoded-
+pane visibility, the decoded-pane height, the values toggle, the
+diffs-only filter, and the hex-diff overlay all persist between
+sessions in `Tools/ProfilePackage/saip_transcode_tui_config.json`
+(theme is shared with the transcode TUI; layout settings live
+under a `diff_tui` sub-key).
+
+### 1.3 Canonical vs raw `genericFileManagement` comparison
+
+By default both `DIFF` and `DIFF-TUI` re-key
+`sections.genericFileManagement` from a list of PE blocks into a
+dict keyed by the resolved file-system path of each EF / DF / MF
+(e.g. `3F00/7F20/6F07` for EF.IMSI under DF.GSM). `filePath`
+SELECT chains are absorbed into the keys, so two profiles that
+contain the same EFs at different list-index positions produce
+byte-identical canonical maps and the diff engine no longer flags
+mechanical SELECT shifts as `added` / `removed` entries. The
+remaining diff is dominated by real changes (FCP fields, EF
+content, security attributes).
+
+The canonical pass also strips the per-PE
+`<peName>-header.identification` field (SGP.22 §2.5.3), which is a
+sequential PE index that shifts whenever the two profiles differ
+in PE count or order. Suppressing it removes a `changed` entry on
+every PE that would otherwise hide the real semantic differences.
+
+Pass `BY-CMD-INDEX` to opt back to the raw command-index
+comparison (the pre-canonical noisy view, including the PE-header
+`identification` field) — useful when verifying that two encoders
+emit byte-for-byte identical SAIP, or when chasing a regression in
+the file-management command stream itself.
+
+### 1.4 Library use
 
 `Tools/ProfilePackage/saip_diff_engine.py` exposes `diff_saip_documents`,
 `diff_documents`, and `format_diff_text`. The loader layer
 (`saip_diff_loader.py`) normalises the three supported shapes into
-a single dict for the engine.
+a single dict for the engine, and `saip_diff_canonical.py` provides
+the optional path-keyed re-keying step.
 
 ---
 
@@ -86,15 +146,15 @@ yggdrasim-profile-autoload --store-root ... \
 ```
 
 Available template variables in `--launcher` (single-brace Python
-`str.format` style -- unknown names are substituted with the empty
+`str.format` style — unknown names are substituted with the empty
 string rather than raising):
 
-- `{iccid}` -- the newly seen ICCID
-- `{profile}` -- the preferred profile file path
-- `{profile_path}` -- alias of `{profile}`; kept for older scripts
-- `{profile_dir}` -- the per-profile directory
-- `{manifest}` -- the manifest JSON path (empty string if absent)
-- `{python}` -- `sys.executable`
+- `{iccid}` — the newly seen ICCID
+- `{profile}` — the preferred profile file path
+- `{profile_path}` — alias of `{profile}`; kept for older scripts
+- `{profile_dir}` — the per-profile directory
+- `{manifest}` — the manifest JSON path (empty string if absent)
+- `{python}` — `sys.executable`
 
 If no `--launcher` is supplied the watcher falls back to
 `python -m Tools.ProfilePackage --cmd "USE <profile>; INFO; TREE; EXIT"`,
@@ -147,7 +207,7 @@ timestamped subdirectory. The dump root itself is created `0o700`.
 yggdrasim-apdu-fuzzer \
     --corpus /path/to/session.json \
     --transport pcsc \
-    --allow-iccid 8988211234567890123 \
+    --allow-iccid 89000012345678901234 \
     --seed 0xCAFEBABE \
     --max-apdus 500 \
     --i-mean-it
@@ -159,13 +219,13 @@ card).
 
 ---
 
-## 4. EUM Diagnostics
+## 4. EUM Diagnostics "God-Mode"
 
 ### 4.1 What it does
 
 Operates the *server* side of an ES8+ / BPP provisioning flow. The
 operator supplies ShS-ENC, ShS-MAC, and (optionally) DEK for a
-given ICCID -- material that a production EUM or SM-DP+ retains
+given ICCID — material that a production EUM or SM-DP+ retains
 in its session database. The tooling writes an on-disk JSON
 repository and hands it to a Wireshark/tshark Lua dissector that
 annotates BF36 Bound Profile Package TLVs with the matched keys,
@@ -181,11 +241,11 @@ ICCID.
 ```
 # Write keys + launch tshark against a capture:
 yggdrasim-eum-diag inject-keys \
-    --iccid 8988211234567890123 \
+    --iccid 89000012345678901234 \
     --shs-enc <32 hex chars> \
     --shs-mac <32 hex chars> \
     --dek     <32 hex chars> \
-    --pcap    /captures/provisioning-capture.pcapng
+    --pcap    /captures/provisioning-2026-04-19.pcapng
 
 # Write keys only (useful when a separate tshark/wireshark session
 # already has the dissector loaded):

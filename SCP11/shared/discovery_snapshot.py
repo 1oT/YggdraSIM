@@ -1,3 +1,5 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+"""SCP11 discovery snapshot: serialises ES10b.GetEUICCInfo / GetProfilesInfo responses for offline inspection."""
 from __future__ import annotations
 
 from typing import Any
@@ -243,6 +245,7 @@ def render_consolidated_discovery_snapshot(
     header_color: str = "",
     end_color: str = "",
 ) -> None:
+    """Render a multi-section text snapshot of ES10b discovery results for display in the operator console."""
     print(f"\n{header_color}=== SGP.32 Consolidated Data Retrieval ==={end_color}")
     print(f"\n{header_color}=== Running SGP.22/SGP.32 Scan ==={end_color}")
 
@@ -276,12 +279,12 @@ def render_consolidated_discovery_snapshot(
 #
 # This is the lightweight counterpart to ``render_consolidated_discovery_snapshot``.
 # It produces the header-card style output that eSIM Live's ``_print_start_snapshot``
-# emits -- EID, issuer, default SM-DP+ / SM-DS, queued-notification count,
-# eIM entries, and the profile table -- but without the full ES10 dump
+# emits — EID, issuer, default SM-DP+ / SM-DS, queued-notification count,
+# eIM entries, and the profile table — but without the full ES10 dump
 # (``GetRAT`` / ``RetrieveNotificationsList`` / ``GetCerts`` are skipped).
 # Accepts the same snapshot shape used by ``render_consolidated_discovery_snapshot``
 # so the local-access and eim-local sessions can call this with a
-# truncated dict (no ``rat`` / ``notifications`` / ``certs`` fields needed --
+# truncated dict (no ``rat`` / ``notifications`` / ``certs`` fields needed —
 # the renderer treats those as cheap derived values).
 def render_card_overview_snapshot(
     snapshot: dict[str, Any],
@@ -293,6 +296,7 @@ def render_card_overview_snapshot(
     notification_count: int | None = None,
     profile_table_title: str = "Profiles on Card",
 ) -> None:
+    """Render a comprehensive card-overview text block including EUICCInfo2, profile list, and installed apps."""
     eid = str(snapshot.get("eid", "")).strip()
     issuer_name = str(snapshot.get("issuer_name", "")).strip()
     issuer_number = str(snapshot.get("issuer_number", "")).strip()

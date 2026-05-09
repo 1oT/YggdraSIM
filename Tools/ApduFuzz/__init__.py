@@ -10,13 +10,13 @@ opt-in tokens and ICCID/IMSI whitelist semantics.
 
 Public surface:
 
-* :mod:`Tools.ApduFuzz.mutators` -- stateless mutation strategies.
-* :mod:`Tools.ApduFuzz.corpus`   -- loader for known-good APDU
+* :mod:`Tools.ApduFuzz.mutators` — stateless mutation strategies.
+* :mod:`Tools.ApduFuzz.corpus`   — loader for known-good APDU
   sequences (simulator session recordings).
-* :mod:`Tools.ApduFuzz.safety`   -- gate validation, crash-dump
+* :mod:`Tools.ApduFuzz.safety`   — gate validation, crash-dump
   directories, per-IMSI allow-lists.
-* :mod:`Tools.ApduFuzz.runner`   -- PC/SC or HIL-bridge driven replay.
-* :mod:`Tools.ApduFuzz.main`     -- CLI entry point.
+* :mod:`Tools.ApduFuzz.runner`   — PC/SC or HIL-bridge driven replay.
+* :mod:`Tools.ApduFuzz.main`     — CLI entry point.
 """
 
 from __future__ import annotations

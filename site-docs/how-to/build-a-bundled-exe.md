@@ -63,7 +63,7 @@ Run through the suggested checks before publishing:
 - [ ] the bundle opens and creates the writable runtime tree where expected
 - [ ] `SCP11`, `SCP11.live`, and `SCP11.local_access` can read seeded
       runtime material
-- [ ] `yggdrasim-profile-package` can still locate `pySim` -- either the
+- [ ] `yggdrasim-profile-package` can still locate `pySim` — either the
   installed PyPI wheel or the optional on-disk `pysim/` clone when the
   SAIP ASN.1 compile path is required
 - [ ] state writes land in the runtime root, not inside the installed bundle
