@@ -1,3 +1,5 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+"""Session recording: captures raw C-APDU / R-APDU pairs to a JSONL file for post-mortem replay and analysis."""
 from __future__ import annotations
 
 import os
@@ -25,6 +27,7 @@ def _utc_now_iso() -> str:
 def set_apdu_trace_listener(
     listener: Optional[ApduTraceListener],
 ) -> Optional[ApduTraceListener]:
+    """Register a callable to receive raw APDU trace events during the session."""
     global _APDU_TRACE_LISTENER
     with _APDU_TRACE_LISTENER_LOCK:
         previous = _APDU_TRACE_LISTENER
@@ -41,6 +44,7 @@ def emit_apdu_trace_event(
     sw2: int,
     transport: str = "",
 ) -> None:
+    """Emit an APDU trace event to all registered listeners."""
     with _APDU_TRACE_LISTENER_LOCK:
         listener = _APDU_TRACE_LISTENER
     if callable(listener) is False:
@@ -142,6 +146,7 @@ class ShellSessionRecorder:
             return bool(self._active)
 
     def start(self, output_path: str = "") -> str:
+        """Start the session recording: open the output sink and record the session header."""
         with self._state_lock:
             if self._active:
                 raise ValueError(
@@ -160,6 +165,7 @@ class ShellSessionRecorder:
         return pending
 
     def cancel(self) -> None:
+        """Cancel an in-progress recording without finalising it."""
         if self._active is False:
             return
         set_apdu_trace_listener(self._previous_listener)
@@ -176,6 +182,7 @@ class ShellSessionRecorder:
         debug_enabled: bool,
         source: str,
     ) -> Optional[dict[str, Any]]:
+        """Begin recording a single APDU command exchange."""
         with self._state_lock:
             if self._active is False:
                 return None
@@ -204,6 +211,7 @@ class ShellSessionRecorder:
         success: bool,
         error: str = "",
     ) -> None:
+        """Finalise the recording of a single APDU command exchange."""
         if command_record is None:
             return
         with self._state_lock:
@@ -218,6 +226,7 @@ class ShellSessionRecorder:
                 self._active_command = None
 
     def record_apdu_event(self, event: dict[str, Any]) -> None:
+        """Append a fully decoded APDU event dict to the active recording."""
         emit_cap_warning = False
         cap_threshold = 0
         with self._state_lock:
@@ -261,7 +270,7 @@ class ShellSessionRecorder:
     def _successful_replay_commands(self) -> list[str]:
         # Callers hold ``_state_lock`` already (``status_payload`` /
         # ``_build_payload``) so we walk the list directly without taking it
-        # again -- re-entering a ``threading.Lock`` would deadlock.
+        # again — re-entering a ``threading.Lock`` would deadlock.
         commands: list[str] = []
         for command_record in self._commands:
             if command_record.get("success") is not True:
@@ -290,6 +299,7 @@ class ShellSessionRecorder:
         }
 
     def status_payload(self) -> dict[str, Any]:
+        """Return a status summary dict describing the current recording state."""
         with self._state_lock:
             if self._active:
                 summary = self._summary_payload(record_file=self._pending_output_path)
@@ -357,6 +367,7 @@ class ShellSessionRecorder:
         # module-level listener lock (acquired inside
         # ``set_apdu_trace_listener``) is disjoint from ``_state_lock``, so
         # taking them in this order avoids a deadlock.
+        """Stop and finalise the recording: flush, close the sink, and emit the summary."""
         with self._state_lock:
             if self._active is False:
                 raise ValueError("Recording is not active.")

@@ -1,3 +1,5 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+"""Runtime path resolution: derives per-user config, cache, and state directories for the YggdraSIM installation."""
 from __future__ import annotations
 
 import os
@@ -44,6 +46,7 @@ def bundle_root() -> str:
 
 
 def runtime_root() -> str:
+    """Return the active runtime root directory, applying any workspace override."""
     override = os.environ.get(RUNTIME_ROOT_ENV, "").strip()
     if len(override) > 0:
         normalized_override = os.path.abspath(os.path.expanduser(override))
@@ -77,6 +80,7 @@ def workspace_path(*parts: str) -> str:
 
 
 def remap_legacy_workspace_relative(path_text: str) -> str:
+    """Remap a legacy workspace-relative path to the canonical runtime path."""
     normalized = str(path_text or "").strip().replace("\\", "/")
     for legacy_prefix, new_prefix in _LEGACY_WORKSPACE_ALIASES:
         if normalized == legacy_prefix:

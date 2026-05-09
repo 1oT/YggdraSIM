@@ -21,11 +21,11 @@ advertise the correct SKU in its banner, in `--version`, and in
 
 Operator install notes for each flavor live in dedicated guides:
 
-- [`INSTALL_CLEAN.md`](https://github.com/1oT/YggdraSIM/blob/main/guides/INSTALL_CLEAN.md)
-- [`INSTALL_FULL.md`](https://github.com/1oT/YggdraSIM/blob/main/guides/INSTALL_FULL.md)
-- [`INSTALL_FROM_SOURCE.md`](https://github.com/1oT/YggdraSIM/blob/main/guides/INSTALL_FROM_SOURCE.md)
-- [`INSTALL_RASPBERRYPI.md`](https://github.com/1oT/YggdraSIM/blob/main/guides/INSTALL_RASPBERRYPI.md)
-- [`SIMTRACE2_CARDEM_GUIDE.md`](https://github.com/1oT/YggdraSIM/blob/main/guides/SIMTRACE2_CARDEM_GUIDE.md)
+- [`INSTALL_CLEAN.md`](INSTALL_CLEAN.md)
+- [`INSTALL_FULL.md`](INSTALL_FULL.md)
+- [`INSTALL_FROM_SOURCE.md`](INSTALL_FROM_SOURCE.md)
+- [`INSTALL_RASPBERRYPI.md`](INSTALL_RASPBERRYPI.md)
+- [`SIMTRACE2_CARDEM_GUIDE.md`](SIMTRACE2_CARDEM_GUIDE.md)
 
 ## Optional extras orthogonal to the flavor split
 
@@ -34,29 +34,14 @@ is bundled. Several feature surfaces sit on **opt-in extras** that are
 declared in `pyproject.toml` and are not pulled in by either default
 flavor:
 
-| Extra          | Pulls in                                      | Used by                                        |
-|----------------|-----------------------------------------------|------------------------------------------------|
-| `[saip]`       | `pySim` from the upstream osmocom mirror      | SAIP transcode TUI, SCP11-local / eIM-local    |
-| `[hil]`        | `pyudev` (Linux only)                         | HIL bridge supervisor / event-driven hotplug   |
-| `[gui]`        | `fastapi`, `uvicorn[standard]`, `pywebview`, `websockets` | Desktop Universal GUI Command Center (`--gui`) |
-| `[gui-server]` | `fastapi`, `uvicorn[standard]`, `websockets`  | Headless web Command Center (`--web-server`)   |
-| `[build]`      | `pyinstaller`                                 | Producing `dist/yggdrasim-*` bundles           |
-| `[test]`       | `pytest`, `httpx`                             | Running the `tests/` suite                     |
-| `[docs]`       | `mkdocs`, `mkdocs-material`, `pymdown-extensions` | Building / serving `site-docs/`             |
-| `[full]`       | `pyudev`, `pyinstaller`, `pytest`, `pySim`    | Full Linux maintainer profile                  |
-
-Notes:
-
-- `[full]` does **not** include `[gui]` / `[gui-server]`. An operator
-  who wants the desktop window or the remote-lab web app on a `full`
-  install must add them explicitly:
-  `pip install -e '.[full,gui]'`.
-- The PyInstaller spec does not currently bundle the GUI extras into
-  the single-file launcher. Use the editable install or a Docker
-  image when you need `--gui` / `--web-server`.
-- `[gui]` is a strict superset of `[gui-server]`; you only need
-  `[gui-server]` on headless servers where `pywebview` would just fail
-  to import a desktop toolkit.
+| Extra      | Pulls in                                      | Used by                                        |
+|------------|-----------------------------------------------|------------------------------------------------|
+| `[saip]`   | (empty back-compat alias; `pySim` already in base deps) | Onboarding scripts that reference the old name |
+| `[hil]`    | `pyudev` (Linux only)                         | HIL bridge supervisor / event-driven hotplug   |
+| `[build]`  | `pyinstaller`                                 | Producing `dist/yggdrasim-*` bundles           |
+| `[test]`   | `pytest`                                      | Running the `tests/` suite                     |
+| `[docs]`   | `mkdocs`, `mkdocs-material`, `pymdown-extensions` | Building / serving `site-docs/`            |
+| `[full]`   | `pyudev`, `pyinstaller`, `pytest`             | Full Linux maintainer profile                  |
 
 ## Current structure status
 
@@ -122,8 +107,8 @@ docker run --rm -it \
 HIL operation from the `full` image requires USB passthrough for the
 SIMtrace2 and reader (for example `--device /dev/bus/usb` on Linux).
 That integration is host-specific; see
-[`SIMTRACE2_CARDEM_GUIDE.md`](https://github.com/1oT/YggdraSIM/blob/main/guides/SIMTRACE2_CARDEM_GUIDE.md) and
-[`HIL_BRIDGE_GUIDE.md`](https://github.com/1oT/YggdraSIM/blob/main/guides/HIL_BRIDGE_GUIDE.md) before trying it.
+[`SIMTRACE2_CARDEM_GUIDE.md`](SIMTRACE2_CARDEM_GUIDE.md) and
+[`HIL_BRIDGE_GUIDE.md`](HIL_BRIDGE_GUIDE.md) before trying it.
 
 Container notes:
 
@@ -215,8 +200,8 @@ dpkg-deb --build pkg "yggdrasim_[ENTER VERSION HERE]_amd64.deb"
 
 A `full`-flavor `.deb` is possible but should additionally depend on
 `osmo-remsim-client-st2` and `dfu-util`; see
-[`INSTALL_FULL.md`](https://github.com/1oT/YggdraSIM/blob/main/guides/INSTALL_FULL.md) and
-[`SIMTRACE2_CARDEM_GUIDE.md`](https://github.com/1oT/YggdraSIM/blob/main/guides/SIMTRACE2_CARDEM_GUIDE.md).
+[`INSTALL_FULL.md`](INSTALL_FULL.md) and
+[`SIMTRACE2_CARDEM_GUIDE.md`](SIMTRACE2_CARDEM_GUIDE.md).
 
 ## Windows executable notes
 

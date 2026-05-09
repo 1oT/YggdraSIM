@@ -15,6 +15,7 @@
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 # -----------------------------------------------------------------------------
 
+"""Security logic: PIN management, AKA authentication, and OTA key-update procedures (3GPP TS 31.102)."""
 from dataclasses import dataclass
 from typing import Optional 
 from SCP03 .config import Config 
@@ -108,6 +109,7 @@ class SecurityController :
         return (pin_bytes +padding ).hex ().upper ()
 
     def verify_pin (self ,pin_ref :str ,pin_value :str ):
+        """Send VERIFY PIN (ISO 7816-4 §7.5.6) for *pin_ref* and *pin_value*."""
         try :
             ref_byte =int (str (pin_ref ),16 )if len (str (pin_ref ))>1 else int (str (pin_ref ))
             hex_data =self ._pad_pin (pin_value )
@@ -124,6 +126,7 @@ class SecurityController :
 
 
     def change_pin (self ,pin_ref :str ,old_pin :str ,new_pin :str ):
+        """Send CHANGE REFERENCE DATA (ISO 7816-4 §7.5.7) for *pin_ref*."""
         try :
             ref_byte =int (str (pin_ref ),16 )if len (str (pin_ref ))>1 else int (str (pin_ref ))
             payload =self ._pad_pin (old_pin )+self ._pad_pin (new_pin )
@@ -136,6 +139,7 @@ class SecurityController :
         except Exception as e :print (f"{Config.Colors.FAIL}[!] Error: {e}{Config.Colors.ENDC}")
 
     def disable_pin (self ,pin_ref :str ,pin_value :str ):
+        """Send DISABLE VERIFICATION REQUIREMENT (ISO 7816-4 §7.5.9) for *pin_ref*."""
         try :
             ref_byte =int (str (pin_ref ),16 )if len (str (pin_ref ))>1 else int (str (pin_ref ))
             hex_data =self ._pad_pin (pin_value )
@@ -146,6 +150,7 @@ class SecurityController :
         except Exception as e :print (f"{Config.Colors.FAIL}[!] Error: {e}{Config.Colors.ENDC}")
 
     def enable_pin (self ,pin_ref :str ,pin_value :str ):
+        """Send ENABLE VERIFICATION REQUIREMENT (ISO 7816-4 §7.5.9) for *pin_ref*."""
         try :
             ref_byte =int (str (pin_ref ),16 )if len (str (pin_ref ))>1 else int (str (pin_ref ))
             hex_data =self ._pad_pin (pin_value )
@@ -156,6 +161,7 @@ class SecurityController :
         except Exception as e :print (f"{Config.Colors.FAIL}[!] Error: {e}{Config.Colors.ENDC}")
 
     def unblock_pin (self ,pin_ref :str ,puk :str ,new_pin :str ):
+        """Send RESET RETRY COUNTER / UNBLOCK PIN (ISO 7816-4 §7.5.10) using the PUK."""
         try :
             ref_byte =int (str (pin_ref ),16 )if len (str (pin_ref ))>1 else int (str (pin_ref ))
             payload =self ._pad_pin (puk )+self ._pad_pin (new_pin )
@@ -222,6 +228,7 @@ class SecurityController :
 
     @staticmethod
     def derive_gsm_kc (ck_hex :str ,ik_hex :str )->str :
+        """Derive the GSM Kc from Milenage CK and IK (3GPP TS 33.102 Annex B.4)."""
         normalized_ck =SecurityController ._normalize_hex_input (ck_hex ,32 ,"CK")
         normalized_ik =SecurityController ._normalize_hex_input (ik_hex ,32 ,"IK")
         ck =bytes .fromhex (normalized_ck )
@@ -240,6 +247,7 @@ class SecurityController :
         op_hex :str ="",
         opc_hex :str ="",
     )->OfflineAuthVector :
+        """Compute a full Milenage authentication vector offline from RAND, Ki, and OP/OPc."""
         normalized_rand =SecurityController ._normalize_hex_input (rand_hex ,32 ,"RAND")
         normalized_ki ,normalized_op ,normalized_opc =SecurityController ._resolve_offline_auth_material (
         ki_hex ,
@@ -287,6 +295,7 @@ class SecurityController :
         ik_hex :str ,
         kc_hex :str ,
     )->str :
+        """Build the USIM AUTHENTICATE 3G response TLV payload (ETSI TS 102 221 §11.1.2)."""
         normalized_res =SecurityController ._normalize_even_hex (res_hex ,"RES")
         normalized_ck =SecurityController ._normalize_even_hex (ck_hex ,"CK")
         normalized_ik =SecurityController ._normalize_even_hex (ik_hex ,"IK")
@@ -307,6 +316,7 @@ class SecurityController :
         kc_hex :str ,
         status_word :str ="9000",
     )->str :
+        """Construct the full AUTHENTICATE command APDU with the USIM response payload."""
         normalized_sw =SecurityController ._normalize_hex_input (status_word ,4 ,"Status word")
         payload =SecurityController .build_usim_auth_response_payload (res_hex ,ck_hex ,ik_hex ,kc_hex )
         return payload +normalized_sw 
@@ -356,6 +366,7 @@ class SecurityController :
         op_hex :str ="",
         opc_hex :str ="",
     )->OfflineUsimAuthExchange :
+        """Verify a captured AUTHENTICATE command APDU against offline Milenage vectors."""
         normalized_ki ,normalized_op ,normalized_opc =SecurityController ._resolve_offline_auth_material (
         ki_hex ,
         op_hex =op_hex ,
@@ -488,6 +499,7 @@ class SecurityController :
         opc_hex :str ="",
         current_sqn_hex :str ="",
     )->OfflineUsimAuthExchange :
+        """Run a complete offline USIM AKA exchange from RAND/Ki/SQN/AMF and return the full exchange record."""
         normalized_ki ,normalized_op ,normalized_opc =SecurityController ._resolve_offline_auth_material (
         ki_hex ,
         op_hex =op_hex ,
@@ -525,6 +537,7 @@ class SecurityController :
 
     @staticmethod
     def build_auth_test_usim_exchange ()->OfflineUsimAuthExchange :
+        """Run a fixed test-vector USIM AKA exchange for self-test purposes."""
         return SecurityController .compute_offline_usim_auth_exchange (
         AUTH_TEST_VECTOR ["RAND"],
         AUTH_TEST_VECTOR ["Ki"],
@@ -634,6 +647,7 @@ class SecurityController :
         return False 
 
     def run_auth (self ,rand :str ,autn :Optional [str ]=None ,app_context :str ="USIM"):
+        """Send the AUTHENTICATE command with the given RAND/AUTN and print the decoded response."""
         try :
             rand_hex =rand .replace (" ","").upper ()
             if len (rand_hex )!=32 :print (f"{Config.Colors.FAIL}[!] RAND must be 32 hex chars.{Config.Colors.ENDC}");return 

@@ -18,7 +18,6 @@ from SCP11.test.models import EimPollRequest
 from SCP11.test.orchestrator import SGP22Orchestrator
 
 
-
 def encode_der_length(value: int) -> bytes:
     if value < 0x80:
         return bytes([value])
@@ -83,7 +82,7 @@ class RecordingEimClient(Es9LikeClient):
     def __init__(self, ca_bundle_path: str):
         super().__init__(
             base_url="https://rsp.example.com",
-            eim_base_url="https://eim.example.test",
+            eim_base_url="https://eim1.esim.tst.1ot.mobi",
             ca_bundle_path=ca_bundle_path,
         )
         self.use_configured_ca_bundle_flags = []
@@ -238,7 +237,7 @@ class TestSplitPinningTests(unittest.TestCase):
     def _run_test_orchestrator_single_entry(self, provider):
         orchestrator = SGP22Orchestrator(cfg=DummyCfg(), apdu_channel=None, profile_provider=provider)
         request = EimPollRequest(
-            eim_fqdn="eim.example.test",
+            eim_fqdn="eim1.esim.tst.1ot.mobi",
             eim_id="manager-1",
             eim_id_type="1",
             counter_value="0",
@@ -309,6 +308,36 @@ class TestSplitPinningTests(unittest.TestCase):
 
         self.assertIs(orchestrator._eim_poll_debug_enabled, False)
 
+    def test_test_console_poll_command_metadata_matches_live_console(self):
+        live_console, _ = self._run_console_poll(LiveConsole, "")
+        test_console, _ = self._run_console_poll(Scp11TestConsole, "")
+
+        self.assertEqual(
+            test_console._commands["POLL"].usage,
+            live_console._commands["POLL"].usage,
+        )
+        self.assertEqual(
+            test_console._commands["POLL"].visible_in_help,
+            live_console._commands["POLL"].visible_in_help,
+        )
+
+    def test_test_console_poll_parser_matches_live_console(self):
+        for argument in ["", "3", "3 15 --debug", "2 -t 20s -s 5"]:
+            live_console, live_client = self._run_console_poll(LiveConsole, argument)
+            test_console, test_client = self._run_console_poll(Scp11TestConsole, argument)
+
+            self.assertIsNotNone(live_console)
+            self.assertIsNotNone(test_console)
+            self.assertEqual(test_client.last_poll_kwargs, live_client.last_poll_kwargs)
+
+    def test_console_poll_uses_global_debug_when_enabled(self):
+        with mock.patch.dict(os.environ, {"YGGDRASIM_GLOBAL_DEBUG": "1"}, clear=False):
+            _, live_client = self._run_console_poll(LiveConsole, "")
+            _, test_client = self._run_console_poll(Scp11TestConsole, "")
+
+        self.assertTrue(bool(live_client.last_poll_kwargs["debug"]))
+        self.assertTrue(bool(test_client.last_poll_kwargs["debug"]))
+
     def test_test_console_rejects_same_invalid_poll_tokens_as_live_console(self):
         live_client = PollDummyClient()
         live_console = LiveConsole(live_client)
@@ -349,7 +378,7 @@ class TestSplitPinningTests(unittest.TestCase):
             client = RecordingEimClient(str(bundle_path))
 
             client._post_eim_binary(
-                "https://eim.example.test",
+                "https://eim1.esim.tst.1ot.mobi",
                 bytes.fromhex("BF4F125A1089049032118427504800000000006079"),
                 b"",
             )

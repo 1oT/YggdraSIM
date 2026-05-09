@@ -1,27 +1,30 @@
 """Legacy 2G modem cold-attach regression.
 
-Some basebands still issue ``CLA=A0`` commands per 3GPP TS 11.11 /
-TS 51.011 even when the card is a UICC, because their SIM driver
-layer was originally written for plain GSM SIMs and the boot path
-was never re-targeted at ETSI TS 102 221's ``CLA=00`` family.
+Real basebands -- particularly Quectel BG95/BG96/EC25 derivatives and
+older Cinterion/Telit modules -- still issue ``CLA=A0`` commands per
+3GPP TS 11.11 / TS 51.011 even when the card is a UICC, because their
+SIM driver layer was originally written for plain GSM SIMs and the
+boot path was never re-targeted at ETSI TS 102 221's ``CLA=00`` family.
 
-This test exercises the byte sequence observed on a BPP-provisioned
-UICC during cold-attach. Two regressions are guarded:
+The script below mirrors the byte sequence captured live on the HIL
+bridge against a Telna BPP-provisioned UICC. Two failures observed
+there motivate this test:
 
-1. ``A0 B0 00 00 0A`` (READ BINARY of EF.ICCID under legacy CLA) must
-   not fall through ``SimulatedSimCardEngine._is_supported_cla`` and
-   come back as ``6E 00`` ("CLA not supported"), which would abort
-   cold-attach before the modem could read the ICCID.
+1. ``A0 B0 00 00 0A`` (READ BINARY of EF.ICCID under legacy CLA) used
+   to fall through ``SimulatedSimCardEngine._is_supported_cla`` and
+   come back as ``6E 00`` ("CLA not supported"), aborting cold-attach
+   before the modem could even read the ICCID.
 
-2. ``A0 A4 00 00 02 7F20`` (SELECT DF.GSM) must not return ``6A 82``
-   when the active profile's ``genericFileManagement`` directives do
-   not carve out a 7F20 DF. Dual-mode UICCs need DF.GSM as a baseline
-   so 2G probes succeed even when the BPP omits it;
-   ``rebuild_runtime_filesystem`` synthesises the stub.
+2. ``A0 A4 00 00 02 7F20`` (SELECT DF.GSM) used to return ``6A 82``
+   when the active profile's ``genericFileManagement`` directives did
+   not carve out a 7F20 DF (e.g. profiles imported before today's
+   GFM consumer landed). Real-world dual-mode UICCs always present
+   DF.GSM as a baseline so 2G probes succeed even when the BPP omits
+   it; ``rebuild_runtime_filesystem`` now synthesises the stub.
 
-Both behaviours are exercised through ``SimulatedModemCardChannel`` so
-the test sees exactly the bytes the modem would, including ``61 XX``
-/ GET RESPONSE chaining.
+Both fixes are exercised through ``SimulatedModemCardChannel`` so the
+test sees exactly the bytes the modem would, including ``61 XX`` /
+GET RESPONSE chaining.
 """
 
 from __future__ import annotations
@@ -131,8 +134,8 @@ class LegacyGsmModemAttachTests(unittest.TestCase):
 
     def test_04_select_eficcid_under_legacy_cla(self) -> None:
         # SELECT EF.ICCID (2FE2) and READ BINARY 10 bytes via CLA=A0.
-        # READ BINARY (INS=B0) must not be rejected with 6E00 by the
-        # engine's CLA gate; the dispatcher accepts the legacy
+        # READ BINARY (INS=B0) used to be rejected with 6E00 by the
+        # engine's CLA gate; the dispatcher now accepts the legacy
         # 0xA0..0xAF family per TS 11.11 §9.4 / TS 102 221 §10.1.1.
         data, sw1, sw2 = self._exchange("A0A40000022FE2")
         self.assertEqual(sw1, 0x61)

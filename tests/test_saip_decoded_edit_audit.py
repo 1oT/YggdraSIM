@@ -30,7 +30,7 @@ Baseline regeneration (when a drift is *intentional*)::
     open(path, 'w').write(json.dumps(report_to_baseline_dict(r), indent=2));\
     print('wrote', path)"
 
-No compound statements. No silent skips -- when pySim is unavailable the
+No compound statements. No silent skips — when pySim is unavailable the
 conftest gate (``_PYSIM_DEPENDENT_TEST_BASENAMES``) marks the test
 ``skipped`` with an actionable install hint.
 """
@@ -106,7 +106,7 @@ def test_profile_element_coverage_matches_baseline():
         f"{baseline_path.name}.\n\n"
         f"First divergence:\n{mismatch_reason}\n\n"
         "If the drift is intentional (newly-added decoder, pySim bump), "
-        "regenerate the baseline -- see the regeneration snippet in "
+        "regenerate the baseline — see the regeneration snippet in "
         "tests/test_saip_decoded_edit_audit.py module docstring."
     )
 

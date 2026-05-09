@@ -1,3 +1,5 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+"""SCP11 local-access payload diff: computes byte-span differences between two BPP payload files for diagnostics."""
 import argparse
 import hashlib
 from pathlib import Path
@@ -7,6 +9,7 @@ from .session import LocalIsdrSession
 
 
 def decode_payload_bytes(data: bytes) -> bytes:
+    """Decode a raw BPP payload byte string into a list of STORE-DATA segment dicts."""
     try:
         text = data.decode("ascii").strip()
     except UnicodeDecodeError:
@@ -28,6 +31,7 @@ def read_payload_file(path: str) -> bytes:
 
 
 def compute_diff_spans(left: bytes, right: bytes) -> list[tuple[int, int]]:
+    """Compare two BPP payload byte sequences and return a list of differing byte-range spans."""
     spans: list[tuple[int, int]] = []
     start = None
     limit = min(len(left), len(right))
@@ -68,6 +72,7 @@ def slice_hex(data: bytes, start: int, size: int = 32) -> str:
 
 
 def analyze_payload_pair(left: bytes, right: bytes) -> dict[str, Any]:
+    """Return a structured diff analysis dict for two BPP payload files."""
     left_ranges = build_tlv_ranges(left)
     right_ranges = build_tlv_ranges(right)
     diff_spans = compute_diff_spans(left, right)
@@ -86,6 +91,7 @@ def analyze_payload_pair(left: bytes, right: bytes) -> dict[str, Any]:
 
 
 def format_analysis(analysis: dict[str, Any], left: bytes, right: bytes, left_name: str, right_name: str) -> str:
+    """Format a payload-diff analysis dict as a human-readable multi-line string."""
     lines = [
         f"{left_name}: len={analysis['left_len']} sha256={analysis['left_sha256']}",
         f"{right_name}: len={analysis['right_len']} sha256={analysis['right_sha256']}",
@@ -122,6 +128,7 @@ def format_analysis(analysis: dict[str, Any], left: bytes, right: bytes, left_na
 
 
 def main() -> int:
+    """CLI entry point for the payload-diff diagnostic tool."""
     parser = argparse.ArgumentParser(description="Compare two clear profile payloads.")
     parser.add_argument("left_path", help="First payload file path")
     parser.add_argument("right_path", help="Second payload file path")

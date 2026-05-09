@@ -1,47 +1,34 @@
 from __future__ import annotations
 
+import os
+import re
 from collections import defaultdict
 from pathlib import Path
-import re
 import shutil
 
 
 INCLUDED_TOP_LEVEL_DIRS = {
     "guides",
     "plugins",
-    "reports",
     "scripts",
     "SCP11",
     "tests",
 }
 
+# Top-level Markdown files that should be mirrored alongside the README so
+# cross-links from authored ``site-docs/`` pages and from mirrored
+# ``sources/`` content resolve under MkDocs strict mode. Do not include
+# ``LICENSE``, ``NOTICE``, ``AUTHORS`` here -- those are licence text files
+# rendered through ``ROOT_TEXT_PAGES``.
+ROOT_MARKDOWN_FILES = (
+    "README.md",
+    "CHANGELOG.md",
+    "CONTRIBUTING.md",
+    "CODE_OF_CONDUCT.md",
+    "SECURITY.md",
+)
+
 ROOT_TEXT_PAGES = ("AUTHORS", "LICENSE", "NOTICE")
-
-# Mirrored markdown is inlined verbatim into ``site-docs/sources/``. The
-# original files live in the tracked repository tree and reference sibling
-# source files (``../foo.py``, ``../guides/bar.md``) which never exist
-# under ``site-docs/``. Rewriting those relative targets to absolute
-# GitHub blob URLs keeps the links clickable in the rendered site **and**
-# silences ``mkdocs --strict`` warnings about missing in-doc targets,
-# without us having to maintain a fragile per-file allow-list.
-GITHUB_BLOB_BASE_URL = (
-    "https://github.com/1oT/YggdraSIM/blob/main"
-)
-
-EXTERNAL_LINK_SCHEMES = (
-    "http://",
-    "https://",
-    "mailto:",
-    "tel:",
-    "ftp://",
-    "ftps://",
-    "data:",
-)
-
-# Inline ``[text](target)`` and image ``![alt](target)`` syntax. The
-# ``target`` capture stops at the first whitespace so an optional title
-# (``"Tooltip"``) is preserved verbatim by the rewriter.
-_MARKDOWN_LINK_PATTERN = re.compile(r"(!?)\[([^\]]*)\]\(([^)\s]+)((?:\s+\"[^\"]*\")?)\)")
 
 GROUP_TITLES = {
     "__root__": "Repository Root",
@@ -50,7 +37,6 @@ GROUP_TITLES = {
     "scripts": "Scripts",
     "SCP11": "SCP11 Module Docs",
     "tests": "Test And Harness Docs",
-    "reports": "Reports",
 }
 
 GROUP_ORDER = [
@@ -60,9 +46,19 @@ GROUP_ORDER = [
     "Plugins",
     "Scripts",
     "Test And Harness Docs",
-    "Reports",
     "Other Docs",
 ]
+
+# Used by the link rewriter to convert references that fall outside the
+# mirrored docs surface (source code, vendored assets, ``Workspace/`` etc.)
+# into stable absolute URLs that browse the canonical repository tree.
+GITHUB_BLOB_BASE = "https://github.com/1oT/YggdraSIM/blob/main"
+
+# Inline link with optional title: ``[label](url "title")``. The negative
+# lookbehind keeps image references (``![alt](src)``) out of scope.
+INLINE_LINK_PATTERN = re.compile(
+    r'(?P<prefix>!?)\[(?P<label>[^\]]*)\]\(\s*(?P<url>[^)\s]+)(?P<title>\s+"[^"]*")?\s*\)'
+)
 
 
 def repo_root() -> Path:
@@ -82,8 +78,10 @@ def iter_markdown_sources() -> list[Path]:
     matches: list[Path] = []
     for path in root.rglob("*.md"):
         relative_path = path.relative_to(root)
+        if any(part.startswith(".") for part in relative_path.parts):
+            continue
         if len(relative_path.parts) == 1:
-            if relative_path.name != "README.md":
+            if relative_path.name not in ROOT_MARKDOWN_FILES:
                 continue
         elif relative_path.parts[0] not in INCLUDED_TOP_LEVEL_DIRS:
             continue
@@ -91,83 +89,120 @@ def iter_markdown_sources() -> list[Path]:
     return sorted(matches, key=lambda item: item.as_posix().lower())
 
 
-def _is_external_or_anchor(target: str) -> bool:
-    if len(target) == 0:
+def _is_external_url(url: str) -> bool:
+    lowered = url.strip().lower()
+    if lowered.startswith(("http://", "https://", "mailto:", "tel:", "ftp://", "ftps://")):
         return True
-    if target.startswith("#"):
+    if lowered.startswith("#"):
         return True
-    lowered = target.lower()
-    for scheme in EXTERNAL_LINK_SCHEMES:
-        if lowered.startswith(scheme):
-            return True
     return False
 
 
-def _rewrite_relative_link(source_relative_path: Path, target: str) -> str:
-    """Resolve a markdown link target against the source's repo location.
-
-    Returns an absolute https GitHub blob URL when the link points at a
-    real repository file, otherwise leaves the target untouched. The
-    fragment portion (``#anchor``) is preserved verbatim so deep-links
-    keep working in the rendered HTML.
-    """
-
-    fragment_separator_index = target.find("#")
-    if fragment_separator_index >= 0:
-        path_part = target[:fragment_separator_index]
-        fragment_part = target[fragment_separator_index:]
-    else:
-        path_part = target
-        fragment_part = ""
-
-    if len(path_part) == 0:
-        return target
-
-    if path_part.startswith("/"):
-        repo_relative = path_part.lstrip("/")
-    else:
-        candidate = (source_relative_path.parent / path_part)
-        try:
-            resolved = candidate.resolve(strict=False)
-            resolved_relative = resolved.relative_to(repo_root().resolve())
-        except (ValueError, OSError):
-            return target
-        repo_relative = resolved_relative.as_posix()
-
-    return f"{GITHUB_BLOB_BASE_URL}/{repo_relative}{fragment_part}"
+def _split_anchor(url: str) -> tuple[str, str]:
+    if "#" in url:
+        path_part, _, fragment = url.partition("#")
+        return path_part, "#" + fragment
+    return url, ""
 
 
-def rewrite_markdown_links_for_mirroring(
-    *, source_relative_path: Path, source_text: str
+def _mirrored_doc_paths(markdown_sources: list[Path]) -> set[str]:
+    """Repository-relative POSIX paths for every doc that ends up under ``sources/``."""
+
+    paths = {path.as_posix() for path in markdown_sources}
+    for file_name in ROOT_TEXT_PAGES:
+        # Mirrored as ``sources/<NAME>/index.md`` -- treat the bare file name
+        # as a valid target so legacy ``](LICENSE)`` style links keep working.
+        paths.add(file_name)
+    return paths
+
+
+def _rewrite_url(
+    url: str,
+    source_relative_path: Path,
+    mirrored_paths: set[str],
 ) -> str:
-    def _replace(match: re.Match[str]) -> str:
-        prefix = match.group(1)
-        link_text = match.group(2)
-        link_target = match.group(3)
-        title_suffix = match.group(4) or ""
-        if _is_external_or_anchor(link_target):
+    """Return a URL that resolves under the MkDocs mirrored layout."""
+
+    if _is_external_url(url):
+        return url
+
+    path_part, anchor = _split_anchor(url)
+    if path_part == "":
+        return url
+
+    source_dir = (repo_root() / source_relative_path).parent
+    try:
+        resolved = (source_dir / path_part).resolve()
+        target_rel = resolved.relative_to(repo_root().resolve())
+    except (ValueError, OSError):
+        return url
+
+    target_str = target_rel.as_posix()
+
+    if target_str in mirrored_paths:
+        return url
+
+    if target_str in ROOT_TEXT_PAGES:
+        # Mirrored as ``sources/<NAME>/index.md``. Compute the relative path
+        # from the mirror wrapper out to that index.
+        mirror_wrapper = mirrored_sources_root() / source_relative_path
+        target_doc = mirrored_sources_root() / target_str / "index.md"
+        rel = os.path.relpath(target_doc.as_posix(), mirror_wrapper.parent.as_posix())
+        return rel + anchor
+
+    if target_str.startswith("site-docs/"):
+        # Authored docs page under ``site-docs/<rest>``. The mirror wrapper
+        # lives at ``site-docs/sources/<source_relative_path>``; compute a
+        # path that walks back out of ``sources/`` to the authored page.
+        mirror_wrapper = mirrored_sources_root() / source_relative_path
+        target_doc = repo_root() / target_str
+        rel = os.path.relpath(target_doc.as_posix(), mirror_wrapper.parent.as_posix())
+        return rel + anchor
+
+    # Otherwise the link points at non-mirrored content (source code,
+    # ``Workspace/`` material, vendored binaries...). Rewrite to an
+    # absolute GitHub URL so MkDocs treats it as an external link instead
+    # of an unresolved doc reference.
+    return f"{GITHUB_BLOB_BASE}/{target_str}{anchor}"
+
+
+def _rewrite_links_in_text(
+    text: str,
+    source_relative_path: Path,
+    mirrored_paths: set[str],
+) -> str:
+    def repl(match: re.Match[str]) -> str:
+        prefix = match.group("prefix")
+        label = match.group("label")
+        url = match.group("url")
+        title = match.group("title") or ""
+        if prefix == "!":
+            # Image reference -- keep verbatim. Mirrored docs do not
+            # currently embed images, but if they ever do we want the
+            # original asset path preserved.
             return match.group(0)
-        rewritten_target = _rewrite_relative_link(source_relative_path, link_target)
-        return f"{prefix}[{link_text}]({rewritten_target}{title_suffix})"
+        new_url = _rewrite_url(url, source_relative_path, mirrored_paths)
+        return f"{prefix}[{label}]({new_url}{title})"
 
-    return _MARKDOWN_LINK_PATTERN.sub(_replace, source_text)
+    return INLINE_LINK_PATTERN.sub(repl, text)
 
 
-def write_markdown_wrapper(source_relative_path: Path) -> None:
+def write_markdown_wrapper(
+    source_relative_path: Path,
+    mirrored_paths: set[str],
+) -> None:
     target_path = mirrored_sources_root() / source_relative_path
     target_path.parent.mkdir(parents=True, exist_ok=True)
+
     source_text = (repo_root() / source_relative_path).read_text(encoding="utf-8")
+
     if source_relative_path == Path("README.md"):
         source_text = source_text.replace("](LICENSE)", "](LICENSE/index.md)")
         source_text = source_text.replace("](NOTICE)", "](NOTICE/index.md)")
         source_text = source_text.replace("](AUTHORS)", "](AUTHORS/index.md)")
-        target_path.write_text(source_text.rstrip() + "\n", encoding="utf-8")
-        return
-    rewritten_text = rewrite_markdown_links_for_mirroring(
-        source_relative_path=source_relative_path,
-        source_text=source_text,
-    )
-    target_path.write_text(rewritten_text.rstrip() + "\n", encoding="utf-8")
+
+    rewritten = _rewrite_links_in_text(source_text, source_relative_path, mirrored_paths)
+    target_path.write_text(rewritten.rstrip() + "\n", encoding="utf-8")
 
 
 def write_root_text_wrapper(file_name: str) -> None:
@@ -232,8 +267,9 @@ def build_source_library(markdown_sources: list[Path]) -> None:
 def main() -> None:
     shutil.rmtree(mirrored_sources_root(), ignore_errors=True)
     markdown_sources = iter_markdown_sources()
+    mirrored_paths = _mirrored_doc_paths(markdown_sources)
     for relative_path in markdown_sources:
-        write_markdown_wrapper(relative_path)
+        write_markdown_wrapper(relative_path, mirrored_paths)
     for file_name in ROOT_TEXT_PAGES:
         write_root_text_wrapper(file_name)
     build_source_library(markdown_sources)

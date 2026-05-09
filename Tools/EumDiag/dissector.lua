@@ -1,4 +1,4 @@
--- YggdraSIM EUM Diagnostics -- Wireshark/tshark Lua dissector.
+-- YggdraSIM EUM Diagnostics — Wireshark/tshark Lua dissector.
 --
 -- Purpose: annotate Bound Profile Package (BF36) frames with the
 -- session keys pulled from an EUM server database so Tier-3 engineers

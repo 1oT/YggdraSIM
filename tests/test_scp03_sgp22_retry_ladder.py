@@ -20,7 +20,7 @@ PROFILE_LIST_HEX = (
 PROFILE_LIST_SEQUENCE_HEX = PROFILE_LIST_HEX.replace("A047E345", "A0473045", 1)
 
 DUMMY_TEST_EIM_OID = "2.25.311782205282738360923618091971140414400"
-DEFAULT_TEST_EIM_FQDN = "eim.yggdrasim.example.test"
+DEFAULT_TEST_EIM_FQDN = "eim.example.test"
 
 
 def _encode_length(value: int) -> bytes:
@@ -550,7 +550,7 @@ class Sgp22RetryLadderTests(unittest.TestCase):
         buffer = io.StringIO()
         with redirect_stdout(buffer):
             self.manager._print_pipe_line("EuiccConfiguredData", "Present", 0)
-            self.manager._print_pipe_line("SM-DP+ Address", "smdpplus.example.test", 1)
+            self.manager._print_pipe_line("SM-DP+ Address", "smdpplus2.esim.tst.1ot.mobi", 1)
 
         rendered_lines = buffer.getvalue().splitlines()
         self.assertEqual(len(rendered_lines), 2)

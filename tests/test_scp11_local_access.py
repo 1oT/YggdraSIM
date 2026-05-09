@@ -30,34 +30,6 @@ from SCP11.shared.pysim_support import decode_rsp_type
 from yggdrasim_common.session_recording import emit_apdu_trace_event
 
 
-# A handful of tests resolve credentials against the SGP.26 ``Variant O``
-# bundle that lives under ``SCP11/SGP.26_test_Certs/Valid Test Cases/``.
-# The .der / .pem material there is gitignored on purpose (the
-# maintainer tree populates it; the public release tree does not), so
-# on a fresh CI checkout the bundle resolver legitimately raises
-# ``FileNotFoundError: No matching SGP.26 local credential set was
-# found.`` These tests are about wiring, not about the cert content,
-# so skip them cleanly when the canonical NIST cert is missing rather
-# than letting them surface as test failures that operators can't fix
-# without committing private material.
-_REPO_ROOT = Path(__file__).resolve().parent.parent
-_SGP26_VARO_NIST_AUTH = (
-    _REPO_ROOT
-    / "SCP11"
-    / "SGP.26_test_Certs"
-    / "Valid Test Cases"
-    / "Variant O"
-    / "SM-DP+"
-    / "SM_DPauth"
-    / "CERT_S_SM_DPauth_VARO_SIG_NIST.der"
-)
-_SGP26_FIXTURE_PRESENT = _SGP26_VARO_NIST_AUTH.is_file()
-_SGP26_SKIP_REASON = (
-    f"SGP.26 cert fixture not present at {_SGP26_VARO_NIST_AUTH} "
-    "(*.der is gitignored; populated only in the maintainer tree)."
-)
-
-
 def encode_der_length(value: int) -> bytes:
     if value < 0x80:
         return bytes([value])
@@ -265,7 +237,7 @@ def build_profile_installation_failure(transaction_id: bytes) -> bytes:
     notification_metadata = (
         wrap_tlv(b"\x80", bytes.fromhex("021F"))
         + wrap_tlv(b"\x81", bytes.fromhex("07"))
-        + wrap_tlv(b"\x0C", b"smdpplus.example.test")
+        + wrap_tlv(b"\x0C", b"smdpplus2.esim.tst.1ot.mobi")
         + wrap_tlv(b"\x5A", bytes.fromhex("89880811111111111112"))
     )
     failure_result = wrap_tlv(
@@ -308,7 +280,7 @@ class FakeApduChannel:
         if log_name == "LOCAL: GetEuiccConfiguredData":
             return wrap_tlv(
                 bytes.fromhex("BF3C"),
-                wrap_tlv(b"\x80", b"smdpplus.example.test")
+                wrap_tlv(b"\x80", b"smdpplus2.esim.tst.1ot.mobi")
                 + wrap_tlv(b"\x83", bytes.fromhex("F54172BDF98A95D65CBEB88A38A1C11D800A85C3")),
             )
         if log_name == "LOCAL: GetEuiccChallenge":
@@ -741,7 +713,7 @@ class LocalAccessSessionTests(unittest.TestCase):
         self.assertEqual(snapshot["eid"], "89049032118427504800000000000607")
         self.assertEqual(snapshot["issuer_number"], "89049032")
         self.assertEqual(snapshot["issuer_name"], "Giesecke+Devrient")
-        self.assertEqual(snapshot["configured_decoded"]["default_smdp"], "smdpplus.example.test")
+        self.assertEqual(snapshot["configured_decoded"]["default_smdp"], "smdpplus2.esim.tst.1ot.mobi")
         self.assertEqual(len(snapshot["profiles"]), 2)
         self.assertEqual(snapshot["profiles"][0].state, "ENABLED")
         self.assertEqual(snapshot["profiles"][1].nickname, "Secondary")
@@ -846,7 +818,7 @@ class LocalAccessSessionTests(unittest.TestCase):
         # The shared profile-action helpers normalise both the
         # auto-disable and the enable call to the canonical metadata
         # identifier (AID first, ICCID fallback). Operators still type
-        # the ICCID -- resolution happens inside the helpers.
+        # the ICCID — resolution happens inside the helpers.
         self.assertEqual(
             calls,
             [
@@ -931,7 +903,7 @@ class LocalAccessSessionTests(unittest.TestCase):
         """Harmonised contract: deleting an ENABLED profile auto-disables it
         first (mirrors eSIM Live / Test / Local eIM after SCP11 command
         harmonisation). The previous "delete-while-enabled (laptop
-        override)" behaviour is gone -- SGP.22 §5.7.18 forbids it and
+        override)" behaviour is gone — SGP.22 §5.7.18 forbids it and
         relying on the card to forgive the sequence was non-portable."""
         shell = LocalAccessShell()
         calls = []
@@ -969,7 +941,7 @@ class LocalAccessSessionTests(unittest.TestCase):
         # identifier (AID first, ICCID fallback) so the underlying
         # ``disable_profile`` / ``delete_profile`` callbacks see the
         # same target the eSIM Live shell would. Operators still type
-        # the ICCID -- the resolution happens inside the helpers.
+        # the ICCID — the resolution happens inside the helpers.
         self.assertEqual(
             calls,
             [
@@ -1191,10 +1163,10 @@ class LocalAccessSessionTests(unittest.TestCase):
                 ],
                 "configured_raw": wrap_tlv(
                     bytes.fromhex("BF3C"),
-                    wrap_tlv(b"\x80", b"smdpplus.example.test"),
+                    wrap_tlv(b"\x80", b"smdpplus2.esim.tst.1ot.mobi"),
                 ),
                 "configured_decoded": {
-                    "default_smdp": "smdpplus.example.test",
+                    "default_smdp": "smdpplus2.esim.tst.1ot.mobi",
                     "root_smds_primary": "",
                     "root_smds_additional": [],
                     "allowed_ci_pkid": [],
@@ -1344,7 +1316,6 @@ class LocalAccessSessionTests(unittest.TestCase):
             "/tmp/pre.txt",
         )
 
-    @unittest.skipUnless(_SGP26_FIXTURE_PRESENT, _SGP26_SKIP_REASON)
     def test_real_sgp26_bundle_resolves_variant_o_nist_auth_and_pb(self):
         project_root = Path(__file__).resolve().parent.parent
         valid_root = project_root / "SCP11" / "SGP.26_test_Certs" / "Valid Test Cases"
@@ -1362,7 +1333,6 @@ class LocalAccessSessionTests(unittest.TestCase):
         self.assertIn("Variant O/SM-DP+/SM_DPauth/CERT_S_SM_DPauth_VARO_SIG_NIST.der", auth_record.certificate_path)
         self.assertIn("Variant O/SM-DP+/SM_DPpb/CERT_S_SM_DPpb_VARO_SIG_NIST.der", pb_record.certificate_path)
 
-    @unittest.skipUnless(_SGP26_FIXTURE_PRESENT, _SGP26_SKIP_REASON)
     def test_open_session_uses_preloaded_bundle_when_certs_folder_has_no_override(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             certs_dir = Path(temp_dir)
@@ -1381,7 +1351,6 @@ class LocalAccessSessionTests(unittest.TestCase):
 
         self.assertIn("Variant O/SM-DP+/SM_DPauth/CERT_S_SM_DPauth_VARO_SIG_NIST.der", session.state.selected_auth_certificate_path)
 
-    @unittest.skipUnless(_SGP26_FIXTURE_PRESENT, _SGP26_SKIP_REASON)
     def test_partial_manual_override_pair_falls_back_to_bundle(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             certs_dir = Path(temp_dir)
@@ -1651,7 +1620,7 @@ class LocalAccessSessionTests(unittest.TestCase):
             session.state.transaction_id = b"\x10" * 16
             session.state.configured_data = wrap_tlv(
                 bytes.fromhex("BF3C"),
-                wrap_tlv(b"\x80", b"smdpplus.example.test"),
+                wrap_tlv(b"\x80", b"smdpplus2.esim.tst.1ot.mobi"),
             )
 
             euicc_otpk_key = ec.generate_private_key(ec.SECP256R1())
@@ -1727,7 +1696,7 @@ class LocalAccessSessionTests(unittest.TestCase):
             session.state.transaction_id = b"\x10" * 16
             session.state.configured_data = wrap_tlv(
                 bytes.fromhex("BF3C"),
-                wrap_tlv(b"\x80", b"smdpplus.example.test"),
+                wrap_tlv(b"\x80", b"smdpplus2.esim.tst.1ot.mobi"),
             )
 
             euicc_otpk_key = ec.generate_private_key(ec.SECP256R1())
@@ -1818,7 +1787,7 @@ class LocalAccessSessionTests(unittest.TestCase):
             session.state.transaction_id = b"\x10" * 16
             session.state.configured_data = wrap_tlv(
                 bytes.fromhex("BF3C"),
-                wrap_tlv(b"\x80", b"smdpplus.example.test"),
+                wrap_tlv(b"\x80", b"smdpplus2.esim.tst.1ot.mobi"),
             )
 
             euicc_otpk_key = ec.generate_private_key(ec.SECP256R1())
@@ -2060,8 +2029,8 @@ class LocalAccessSessionTests(unittest.TestCase):
             bytes.fromhex("BF36"),
             wrap_tlv(bytes.fromhex("BF23"), wrap_tlv(b"\x80", b"\x10" * 16)),
         )
-        # Three segments, none of them terminal -- the loop must walk
-        # through all of them without short-circuiting so the test can assert
+        # Three segments, none of them terminal — the loop must walk
+        # through all of them without short-circuiting so we can assert
         # on three per-segment advances.
         segments = [b"\xAA", b"\xBB", b"\xCC"]
         session._segment_bound_profile_package = lambda _: list(segments)
@@ -2092,7 +2061,7 @@ class LocalAccessSessionTests(unittest.TestCase):
             ],
         )
         # Counter must land at 100 % only after the final sync advance,
-        # not before -- otherwise the footer would sit at 100 % while
+        # not before — otherwise the footer would sit at 100 % while
         # the notify sync is still running.
         self.assertEqual(bar.completed, 8)
 
@@ -2160,7 +2129,7 @@ class LocalAccessSessionTests(unittest.TestCase):
         self.assertIn("install short-circuit", advance_labels)
         self.assertIn("sync notifications", advance_labels)
         # The coast advance must carry a count equal to the number of
-        # segments that were not sent (4 total - 2 attempted = 2).
+        # segments we did not send (4 total - 2 attempted = 2).
         coast_counts = [
             count for label, count in bar.advance_calls
             if label == "install short-circuit"

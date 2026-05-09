@@ -53,7 +53,7 @@ non-trivial, the row links to the page that explains it in full.
 | TLS error at `InitiateAuthentication` | pinned CA or clock skew | check `SET-ES9-TLS`, `SET-ES9-CA`, host clock |
 | `self-signed certificate in certificate chain` on a freshly-seen eIM/SM-DP+ FQDN | no local trust anchor yet for this host | the client runs a TOFU chain read, verifies it against a local bundle, and persists the result. If you previously set `YGGDRASIM_SCP11_REQUIRE_PINNED_TLS_INTROSPECTION=1`, unset it so auto-learn can bootstrap; subsequent runs will be fully pinned against the persisted bundle. |
 | BPP install fails mid-stream | insufficient memory or bad BPP segment | retry, free space, or relint the source package |
-| `POLL` verb absent or emits capability error | `polling` plugin not loaded | plugins load by default; confirm the startup stderr banner lists a polling-capability plugin and that `YGGDRASIM_DISALLOW_PLUGINS` / `YGGDRASIM_ALLOW_PLUGINS=0` are not set |
+| `POLL` verb absent or emits capability error | `polling` plugin not loaded | plugins load by default; confirm the startup stderr banner lists `polling_plugin.py` and that `YGGDRASIM_DISALLOW_PLUGINS` / `YGGDRASIM_ALLOW_PLUGINS=0` are not set |
 
 ### TLS trust-posture knobs
 
@@ -69,14 +69,14 @@ Auto-learn is intentionally the default. Popping in a new eUICC or registering a
 
 ### Plugin loader knobs
 
-Plugins under the active runtime root's `plugins/` directory load by default. Plugin-backed command families such as `POLL` / `IPAE-LIVE` / `IPAE-TEST` are only present when their backing plugin is installed.
+Plugins under the active runtime root's `plugins/` directory load by default. The first-party `polling_plugin.py` backs the `POLL` / `IPAE-LIVE` / `IPAE-TEST` command families.
 
 | Env flag | Role | Default | When to set |
 | --- | --- | --- | --- |
-| `YGGDRASIM_DISALLOW_PLUGINS` | Hard-lock: refuse every plugin. | unset → plugins load | Attestation / CI / sandboxed deployments where no out-of-tree code may execute. |
+| `YGGDRASIM_DISALLOW_PLUGINS` | Hard-lock: refuse every plugin, including the first-party polling plugin. | unset → plugins load | Attestation / CI / air-gapped deployments where no out-of-tree code may execute. |
 | `YGGDRASIM_ALLOW_PLUGINS` | Tri-state opt-in / opt-out knob. `0`/`false`/`no`/`off` → opt-out (same as `DISALLOW=1`). `1`/`true`/`yes`/`on` → opt-in (redundant after the default flip, still honoured). | unset → plugins load | Backward-compat for deployments that want to keep the old opt-in-only posture. |
 
-On first successful load the manager prints a one-line stderr banner naming each loaded module, e.g. `[plugins] loaded 1: <plugin>.py (hard-lock with YGGDRASIM_DISALLOW_PLUGINS=1).`. If you don't see that line and `POLL` / `IPAE-*` are missing, the loader was hard-locked by one of the env flags above.
+On first successful load the manager prints a one-line stderr banner naming each loaded `.py` file, e.g. `[plugins] loaded 1: polling_plugin.py (hard-lock with YGGDRASIM_DISALLOW_PLUGINS=1).`. If you don't see that line and `POLL` / `IPAE-*` are missing, the loader was hard-locked by one of the env flags above.
 
 ## SCP11 local access
 
@@ -91,8 +91,8 @@ On first successful load the manager prints a one-line stderr banner naming each
 | Symptom | Likely cause | Fix |
 | --- | --- | --- |
 | `ADD-INITIAL-EIM` rejected | BF55 row already populated or overwrite not allowed | check `Workspace/SIMCARD/isdr_config.json` simulator-side, or use `ADD-EIM` |
-| `IPAE-LIVE` / `IPAE-TEST` absent from `HELP` | `polling` plugin not loaded | plugins load by default; check the stderr banner at shell startup. If you set `YGGDRASIM_DISALLOW_PLUGINS=1` (or `YGGDRASIM_ALLOW_PLUGINS=0`), unset it. Confirm a polling-capability plugin sits under the active runtime root. |
-| `POLL` absent from SCP11 relay shells | `polling` plugin not loaded | same as above. The same plugin can back `POLL` / `IPAE-LIVE` / `IPAE-TEST`. |
+| `IPAE-LIVE` / `IPAE-TEST` absent from `HELP` | `polling` plugin not loaded | plugins load by default; check the stderr banner at shell startup. If you set `YGGDRASIM_DISALLOW_PLUGINS=1` (or `YGGDRASIM_ALLOW_PLUGINS=0`), unset it. Confirm `plugins/polling_plugin.py` sits under the active runtime root. |
+| `POLL` absent from SCP11 relay shells | `polling` plugin not loaded | same as above. Plugin backs `POLL` / `IPAE-LIVE` / `IPAE-TEST` in one module. |
 | Hotfolder empty after drop | wrong directory | confirm the runtime root `SCP11/eim_local/eim_packages/hotfolder/` |
 
 ## HIL bridge

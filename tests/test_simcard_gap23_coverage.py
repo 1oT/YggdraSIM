@@ -1,4 +1,4 @@
-"""Coverage for ISIM-side GBA EFs (EF.GBABP / EF.GBANL):
+"""Twenty-third-pass gap-coverage suite for ISIM-side GBA EFs.
 
 3GPP TS 31.103 §4.2.7 lists the ISIM Service Table; the
 simulator advertises every service bit (`EF.IST = 0xFF`),
@@ -7,7 +7,7 @@ Per §4.2.10 / §4.2.11 a card that flips service 2 on must
 provide both EF.GBABP and EF.GBANL or every GBA bootstrap
 attempt by the ME will hit ``6A 82``.
 
-This module seeds the missing pair under ``ADF.ISIM``:
+Round-23 seeds the missing pair under ``ADF.ISIM``:
 
 * EF.GBABP (`6FD5`) -- transparent, six bytes
   (``80 00 81 00 82 00``). The three empty TLVs let a modem

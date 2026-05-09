@@ -1,11 +1,13 @@
-"""Structured round-trip encoder coverage for PE-body decoders.
+"""
+Round-6 Sweep 4 — structured round-trip encoder coverage for the
+Round-4 / Round-5 PE-body decoders.
 
 Each test asserts two invariants for one field:
 
-1. **Hex passthrough** -- when ``hex`` is present on the decoded form
+1. **Hex passthrough** — when ``hex`` is present on the decoded form
    the encoder returns identical bytes (lossless verbatim path that
    keeps legacy JSON documents stable).
-2. **Structured re-encode** -- when ``hex`` is stripped the encoder
+2. **Structured re-encode** — when ``hex`` is stripped the encoder
    must rebuild the on-card bytes from the decoder's spec-named
    fields (OID dotted string, bit flags, TLV items, etc.).
 

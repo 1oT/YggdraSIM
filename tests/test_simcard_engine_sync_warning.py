@@ -1,11 +1,12 @@
 """Regression test for the SIMCARD engine surfacing store-sync failures.
 
-``SimulatedSimCardEngine._sync_all_stores`` swallows persistence
-exceptions raised by ``sync_profiles_to_store`` / ``sync_euicc_store``
-at the control-flow level (so a disk-full or permission-denied
-condition cannot take down the dispatch loop) but emits a one-shot
-stderr banner plus a ``logging.WARNING`` so operators see the problem
-at least once per process.
+``SimulatedSimCardEngine._sync_all_stores`` used to silently swallow any
+exception raised by ``sync_profiles_to_store`` / ``sync_euicc_store``,
+which masked disk-full and permission-denied conditions on persistent
+stores. The engine now still swallows at the control-flow level (so a
+persistence error cannot take down the dispatch loop) but emits a
+one-shot stderr banner plus a ``logging.WARNING`` so operators see the
+problem at least once per process.
 """
 
 from __future__ import annotations

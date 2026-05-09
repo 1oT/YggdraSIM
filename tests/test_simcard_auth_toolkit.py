@@ -242,7 +242,7 @@ class SimCardAuthAndToolkitTests(unittest.TestCase):
         self.assertEqual(response_sw1, 0x91)
         self.assertGreater(response_sw2, 0)
 
-    def test_location_status_triggers_ipa_poll_sequence(self) -> None:
+    def test_location_status_triggers_bip_dns_bootstrap_and_tcp_follow_up(self) -> None:
         self._drain_bootstrap()
 
         envelope_data, envelope_sw1, envelope_sw2 = self.engine.transmit(

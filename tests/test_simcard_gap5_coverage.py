@@ -1,4 +1,15 @@
-"""Coverage for SIMCARD lifecycle and proactive surfaces:
+"""Fifth-pass gap-coverage suite for SIMCARD surfaces beyond ES10.
+
+The previous four passes closed:
+
+* SGP.32 v1.2 / SGP.22 v3.1 ES10b/c command backlog.
+* PIN lifecycle (CHANGE / DISABLE / ENABLE PIN) and GET CHALLENGE.
+* GP GET DATA fingerprinting tags (CPLC, CRD, IIN, CIN).
+* TS 31.111 / TS 102 223 envelope dispatch by tag.
+* SAIP profile-header connectivity parameters.
+
+This pass closes a different class of gaps -- behaviours that a real
+UICC always exposes but the simulator was missing:
 
 * ETSI TS 102 221 §11.1.13 / §11.1.14 file lifecycle commands
   (DEACTIVATE FILE / ACTIVATE FILE -- INS 0x04 / 0x44). The 8A

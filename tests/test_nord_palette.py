@@ -4,7 +4,7 @@
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 #
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+# Copyright (c) 2026 1oT OU. Authored by Hampus Hellsberg.
 # -----------------------------------------------------------------------------
 """Coverage for the canonical Nord palette module.
 

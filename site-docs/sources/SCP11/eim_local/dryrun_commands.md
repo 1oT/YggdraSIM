@@ -18,7 +18,7 @@ Q
 HELP
 HANDOVER-SET 11223344556677889900AABBCCDDEEFF EIM-FIRST-TEST
 HANDOVER-STATUS
-# Runtime handles route handover to SM-DP+ during IPAE-DOWNLOAD.
+# Runtime will auto-handover BIP route to SM-DP+ during IPAE-DOWNLOAD.
 IPAE-DOWNLOAD Workspace/LocalEIM/profile/test_profile.txt EIM-FIRST-TEST
 NOTIF-HYGIENE 0
 Q

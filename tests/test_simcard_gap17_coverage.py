@@ -1,4 +1,7 @@
-"""Coverage for SIMCARD event-download surfaces wired into the apply layer:
+"""Seventeenth-pass gap-coverage suite for SIMCARD event-download surfaces.
+
+Round-17 wires up the following spec-anchored event downloads that
+were parsed but never reached the apply layer:
 
 * ETSI TS 102 223 §7.4.4 ``Location Status`` event (code ``0x03``).
   TLV ``0x9B`` carries a 1-byte status (0=normal, 1=limited, 2=no

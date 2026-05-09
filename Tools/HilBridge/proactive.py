@@ -1,3 +1,5 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+"""HIL-Bridge proactive-command relay: intercepts FETCH R-APDUs and re-delivers the proactive TLV to registered handlers."""
 from __future__ import annotations
 
 from collections import deque
@@ -60,6 +62,7 @@ class ProactiveRefreshBroker:
         *,
         source: str = "",
     ) -> dict[str, Any]:
+        """Queue a REFRESH proactive command for the next FETCH response."""
         mode_name, qualifier = normalize_refresh_mode(mode)
         if self._active is not None and self._active.qualifier == qualifier:
             return self._build_queue_result("coalesced", self._active)
@@ -83,6 +86,7 @@ class ProactiveRefreshBroker:
         return self._build_queue_result("queued", queued)
 
     def handle_apdu(self, apdu: bytes | bytearray | list[int] | tuple[int, ...]) -> ProactiveApduDecision | None:
+        """Route an APDU to the correct proactive-command handler and return (data, SW1, SW2)."""
         apdu_bytes = ensure_bytes(apdu)
         if len(apdu_bytes) < 2:
             return None
@@ -125,6 +129,7 @@ class ProactiveRefreshBroker:
         return None
 
     def status_payload(self) -> dict[str, Any]:
+        """Return a JSON-serialisable dict of the current proactive command queue state."""
         active = self._active
         queued = list(self._queue)
         return {

@@ -33,7 +33,7 @@ class ScriptedPcscConnection:
     """PC/SC connection stub that replays a scripted response list.
 
     Each entry is a ``(response_bytes, sw1, sw2)`` tuple consumed in
-    order, so the test can exercise the 61xx / 6Cxx continuation flows that
+    order, so we can exercise the 61xx / 6Cxx continuation flows that
     the concise-mode log filter is supposed to hide.
     """
 

@@ -1,10 +1,11 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """
 Subprocess wrapper around tshark + the EUM-BPP Lua dissector.
 
 The runner keeps the command construction + environment shaping out
 of the CLI layer so it can be unit-tested without actually invoking
 tshark. Each public function returns a plain argv list or a
-``subprocess.CompletedProcess`` -- no global state.
+``subprocess.CompletedProcess`` — no global state.
 """
 
 from __future__ import annotations
@@ -15,8 +16,6 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Mapping, Sequence
-
-from yggdrasim_common.process_debug import subprocess_env_without_bundle_libs
 
 from .session_keys import SESSION_KEYS_ENV_VAR
 
@@ -67,13 +66,7 @@ def build_tshark_invocation(
         if dissector_path is not None
         else locate_dissector()
     )
-    # ``tshark`` is a host binary; strip the PyInstaller-injected
-    # ``LD_LIBRARY_PATH`` so the child does not load bundle-shipped
-    # copies of ``libssl`` / ``libgcrypt`` over the host's own.
-    if existing_env is not None:
-        env = subprocess_env_without_bundle_libs(existing_env)
-    else:
-        env = subprocess_env_without_bundle_libs()
+    env = dict(existing_env if existing_env is not None else os.environ)
     env[SESSION_KEYS_ENV_VAR] = str(Path(keys_path).resolve())
     command = [
         str(tshark_binary or DEFAULT_TSHARK_BINARY),
@@ -91,6 +84,7 @@ class TsharkMissingError(RuntimeError):
 
 
 def ensure_tshark_on_path(binary: str = DEFAULT_TSHARK_BINARY) -> str:
+    """Verify that tshark is available on PATH and raise ``RuntimeError`` if not found."""
     resolved = shutil.which(binary)
     if resolved is None:
         raise TsharkMissingError(
@@ -109,7 +103,7 @@ def run_tshark(
 ) -> subprocess.CompletedProcess[bytes]:
     """Execute the invocation and return the ``CompletedProcess``.
 
-    The call deliberately does NOT raise on non-zero exit -- tshark
+    The call deliberately does NOT raise on non-zero exit — tshark
     uses non-zero for benign cases (e.g. no matching packets) so the
     caller is responsible for interpreting the return code.
     """

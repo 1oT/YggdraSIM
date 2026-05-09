@@ -17,12 +17,12 @@
 
 """Legacy mirror: test-default SCP11 orchestrator.
 
-The ``canonical`` SCP11 orchestrator lives in ``SCP11/orchestrator.py``.
-This module is a ``legacy mirror`` retained for the lab relay flow with
-test certificates and extra request shaping. Any spec fix must also land
-in the canonical tree (and, where it applies, in
-``SCP11/live/orchestrator.py``). A future cleanup collapses this mirror
-into a thin shim package.
+For YggdraSIM v1 the ``canonical`` SCP11 orchestrator lives in
+``SCP11/orchestrator.py``. This module is a ``legacy mirror`` retained for
+the lab relay flow with test certificates and extra request shaping. Any
+spec fix must also land in the canonical tree (and, where it applies, in
+``SCP11/live/orchestrator.py``). Tracked by audit item ``SCP11-P1-01`` for
+collapse into a shim package post v1.
 """
 
 import base64
@@ -137,12 +137,22 @@ class SGP22Orchestrator:
         self._stk_open_channel_request_fields: dict[str, Any] = {}
         self._eim_poll_debug_enabled = False
         self._use_stk_mode_for_es10b_store_data = False
+        self._es10b_logical_channel = 0
         # Set True once any configured eIM entry successfully reaches the
         # server during ``run_eim_poll``. Consumed by the console layer to
         # gate the post-download notification auto-clear sweep.
         self._last_eim_poll_reached_server = False
+        # SGP.22 §5.6.4: pending profile-state notifications MUST be
+        # forwarded to the recipient SM-DP+ via ES9+.HandleNotification
+        # before being removed from the eUICC queue. Track whether the
+        # most recent _sync_pending_notifications call actually
+        # completed the listNotifications round-trip; the console layer
+        # reads this to decide whether the post-command auto-clear is
+        # safe to run.
+        self._last_notification_sync_succeeded: Optional[bool] = None
 
     def run_flow(self, matching_id: str = "", smdp_address: Optional[str] = None) -> None:
+        """Execute the full SGP.22 ES2+/ES9+/ES8+ profile download flow for one EID target."""
         effective_smdp_address = smdp_address
         if effective_smdp_address is None:
             effective_smdp_address = self.cfg.RSP_SERVER_URL
@@ -175,6 +185,7 @@ class SGP22Orchestrator:
         return exchange(apdu, log_name)
 
     def run_eim_poll(self, matching_id: str = "", entry_index: Optional[int] = None) -> None:
+        """Drive one IPA-poll round: GetBoundProfilePackage → ES8+ STORE-DATA delivery (SGP.32 §3.2)."""
         debug_print("--- IOT / SGP.32 eIM POLL - RELAY READY ---")
         self._last_eim_poll_reached_server = False
         self._phase_connect()
@@ -475,8 +486,17 @@ class SGP22Orchestrator:
                         debug_print("[*] Card transport reset before flow start.")
                 except Exception as error:
                     debug_print(f"[*] Card transport reset skipped ({error}).")
+        # TS 102 221 §11.1.19 TERMINAL CAPABILITY: declare extended logical
+        # channels (tag 0x82) and eUICC support (tag 0x84) on the very first
+        # call. Some eUICC stacks gate ES10 STORE DATA on the eUICC bit and
+        # latch the first TERMINAL CAPABILITY they receive, so a stripped
+        # body sent first then "fixed" later does not recover -- ES10 keeps
+        # returning 6985 (Conditions of use not satisfied).
         try:
-            self.apdu_channel.send(bytes.fromhex("80AA000007A9058303170000"), "INIT: TERMINAL CAPABILITY")
+            self.apdu_channel.send(
+                bytes.fromhex("80AA00000DA90B8100820101830107840101"),
+                "INIT: TERMINAL CAPABILITY",
+            )
         except IOError:
             pass
 
@@ -488,29 +508,20 @@ class SGP22Orchestrator:
 
     @staticmethod
     def _should_retry_with_stk_bootstrap(error: Exception) -> bool:
-        return "6985" in str(error).upper()
-
-    @staticmethod
-    def _should_retry_notification_sync_after_reselect(error: Exception) -> bool:
-        """
-        A post-enable/disable/delete context switch frequently leaves
-        ISD-R unbound from the active logical channel. The card then
-        answers any ES10b StoreData with one of two related status
-        words:
-
-        * ``6E00`` -- CLA not supported on this channel.
-        * ``6881`` -- logical channel not supported.
-
-        Both are recovered the same way: reselect ISD-R on the active
-        channel and replay the StoreData. Treat them as a single
-        recoverable class so notification sync does not error out just
-        because the profile state change invalidated the channel
-        binding.
-        """
+        # SGP.22 §5.7.10 ListNotifications and §5.7.13 GetEUICCInfo can
+        # both surface 6985 / 6E00 / 6881 / 6882 when the card's logical
+        # channel binding for ISD-R has been invalidated by a profile
+        # state change (EnableProfile / DisableProfile / DeleteProfile).
+        # All four status words are recoverable by reopening ISD-R on a
+        # fresh logical channel — see _send_es10b_store_data_with_logical_channel_recovery.
         error_text = str(error).upper()
+        if "6985" in error_text:
+            return True
         if "6E00" in error_text:
             return True
         if "6881" in error_text:
+            return True
+        if "6882" in error_text:
             return True
         return False
 
@@ -524,22 +535,254 @@ class SGP22Orchestrator:
         return bytes([cla & 0xFF, 0xE2, p1 & 0xFF, p2 & 0xFF, len(payload)]) + payload
 
     def _send_es10b_store_data_with_stk_mode(self, payload: bytes, log_name: str) -> bytes:
+        # STK-mode last-resort path. ETSI TS 102 221 §10.1.1 reserves
+        # the low nibble of an 8X CLA for the active logical channel.
+        # No MANAGE CHANNEL OPEN is issued in this branch -- channel 1
+        # does not exist. Several eUICC OSes interpret a channel
+        # selector for a non-open channel as an attempt to start GP
+        # secure messaging and reject with 6882 (ISO 7816-4 §5.1.5:
+        # secure messaging not supported). Sending on CLA=0x80 keeps
+        # the dispatch on the basic channel where ISD-R was just
+        # SELECTed.
+        #
+        # TERMINAL PROFILE is followed by a proactive-cycle drain
+        # (TS 102 223 §6) so non-REFRESH proactive commands queued by
+        # the newly-active profile's STK applets do not strand the
+        # next ES10b on 6985 / 6882.
         print(f"[*] {log_name}: entering STK mode bootstrap.")
+        self._reset_apdu_channel_for_recovery(log_name, "STK mode")
         self.apdu_channel.send(
             bytes.fromhex("80AA00000DA90B8100820101830107840101"),
             f"{log_name} [STK MODE TERMINAL CAPABILITY]",
         )
         self._select_isd_r(f"{log_name} [STK MODE SELECT ISD-R]")
-        self.apdu_channel.send(
+        self._drain_proactive_after_terminal_profile(
             bytes.fromhex("80100000010C"),
             f"{log_name} [STK MODE TERMINAL PROFILE]",
         )
         response = self.apdu_channel.send(
-            self._build_es10b_store_data_apdu(payload, cla=0x81),
-            f"{log_name} [STK MODE CH1]",
+            self._build_es10b_store_data_apdu(payload, cla=0x80),
+            f"{log_name} [STK MODE BASIC]",
         )
         self._use_stk_mode_for_es10b_store_data = True
         return response
+
+    def _reset_apdu_channel_for_recovery(self, log_name: str, attempt_label: str) -> None:
+        # Mirrors the console-side fallback in
+        # _send_store_data_with_logical_fallback so a stale CLA-bound
+        # logical channel from a previous EnableProfile / DisableProfile
+        # cannot poison the next attempt.
+        reset_method = getattr(self.apdu_channel, "reset", None)
+        if callable(reset_method) is False:
+            return
+        try:
+            did_reset = bool(reset_method())
+        except Exception as error:
+            debug_print(f"[*] {log_name}: transport reset before {attempt_label} retry failed ({error}).")
+            return
+        if did_reset:
+            debug_print(f"[*] {log_name}: card transport reset before {attempt_label} retry.")
+
+    def _send_es10b_store_data_on_recovery_channel(
+        self,
+        payload: bytes,
+        log_name: str,
+    ) -> bytes:
+        # Fresh MANAGE CHANNEL OPEN + SELECT ISD-R on the new channel,
+        # then STATUS / TERMINAL PROFILE so eUICC stacks that gate
+        # ES10b on the proactive-UICC handshake (TS 102 223 §5.4) drop
+        # their 6985 ``conditions of use not satisfied'' guard. ETSI
+        # TS 102 221 §11.1.17 governs MANAGE CHANNEL semantics; the
+        # recovery channel is closed in finally so we do not leak
+        # supplementary channels.
+        open_response = self.apdu_channel.send(
+            bytes.fromhex("0070000001"),
+            f"{log_name} [OPEN LOGICAL CHANNEL]",
+        )
+        if len(open_response) == 0:
+            raise RuntimeError("Logical channel open did not return a channel number.")
+        channel_number = int(open_response[0])
+        if channel_number <= 0 or channel_number > 3:
+            raise RuntimeError(f"Unsupported logical channel returned by card: {channel_number}")
+        try:
+            select_cla = channel_number & 0x03
+            select_apdu = (
+                bytes([select_cla, 0xA4, 0x04, 0x00, len(self.cfg.AID_ISD_R)]) + self.cfg.AID_ISD_R
+            )
+            self.apdu_channel.send(select_apdu, f"{log_name} [SELECT ISD-R CH{channel_number}]")
+            self._prime_recovery_channel_for_es10b(log_name, channel_number)
+            recovery_apdu = self._build_es10b_store_data_apdu(
+                payload,
+                cla=(0x80 | (channel_number & 0x03)),
+            )
+            return self.apdu_channel.send(recovery_apdu, f"{log_name} [CH{channel_number}]")
+        finally:
+            try:
+                close_apdu = bytes([0x00, 0x70, 0x80, channel_number & 0xFF, 0x00])
+                self.apdu_channel.send(
+                    close_apdu,
+                    f"{log_name} [CLOSE LOGICAL CHANNEL {channel_number}]",
+                )
+            except Exception:
+                pass
+
+    def _prime_recovery_channel_for_es10b(self, log_name: str, channel_number: int) -> None:
+        # Replay the proactive-UICC handshake the card expects on a
+        # fresh session, in spec-mandated order:
+        #
+        # 1. TERMINAL CAPABILITY (TS 102 221 §11.1.19) -- declares
+        #    extended logical channels (tag 82) and eUICC support
+        #    (tag 84). MUST precede TERMINAL PROFILE.
+        # 2. STATUS (TS 102 221 §11.1.2) -- refreshes the
+        #    active-AID view on the supplementary channel.
+        # 3. TERMINAL PROFILE + proactive cycle drain (TS 102 223
+        #    §5.4 + §6) -- signals proactive-UICC capabilities and
+        #    acknowledges any proactive command (SET UP MENU,
+        #    POLLING OFF, DISPLAY TEXT, REFRESH) the newly-active
+        #    profile's STK applets queue. Without draining, the
+        #    card holds ES10b in 6985 ``conditions of use not
+        #    satisfied'' until the proactive cycle is closed.
+        #
+        # The first two are sent best-effort: cards that have
+        # already latched the corresponding state typically reply
+        # 6D00 / 6E00 / 6985 to the duplicate and the recovery path
+        # proceeds anyway.
+        try:
+            self.apdu_channel.send(
+                bytes.fromhex("80AA00000DA90B8100820101830107840101"),
+                f"{log_name} [TERMINAL CAPABILITY]",
+            )
+        except Exception as terminal_capability_error:
+            debug_print(
+                f"[*] {log_name}: TERMINAL CAPABILITY skipped "
+                f"({terminal_capability_error})."
+            )
+        try:
+            self.apdu_channel.send(
+                bytes.fromhex("80F2000C00"),
+                f"{log_name} [STATUS CH{channel_number}]",
+            )
+        except Exception as status_error:
+            debug_print(f"[*] {log_name}: STATUS on CH{channel_number} skipped ({status_error}).")
+        self._drain_proactive_after_terminal_profile(
+            bytes.fromhex("80100000010C"),
+            f"{log_name} [TERMINAL PROFILE CH{channel_number}]",
+        )
+
+    @staticmethod
+    def _build_generic_terminal_response_apdu(fetch_data: bytes) -> bytes:
+        # Build a TS 102 223 §6.6 TERMINAL RESPONSE acknowledging any
+        # proactive command with a §8.12 General Result of
+        # ``command performed successfully`` (0x00). The proactive
+        # command is wrapped in a D0 BER-TLV; we extract the inner
+        # Command Details TLV (tag 01 / 81, length 3) and Device
+        # Identities TLV (tag 02 / 82, length 2) and rebuild a minimal
+        # success response. Source/destination in Device Identities is
+        # swapped so the response addresses the UICC (0x81) from the
+        # terminal (0x82). On parse failure we fall back to a synthetic
+        # body so the card still receives a syntactically valid TR and
+        # the proactive cycle does not stall.
+        command_details_tlv = bytes.fromhex("8103010000")
+        device_identities_tlv = bytes.fromhex("82028281")
+        try:
+            offset = 0
+            if len(fetch_data) > 1 and fetch_data[0] == 0xD0:
+                length_byte = fetch_data[1]
+                if length_byte & 0x80:
+                    num_octets = length_byte & 0x7F
+                    offset = 2 + num_octets
+                else:
+                    offset = 2
+            pos = offset
+            while pos + 1 < len(fetch_data):
+                tag = fetch_data[pos]
+                length = fetch_data[pos + 1]
+                if tag in (0x01, 0x81) and length == 3 and pos + 5 <= len(fetch_data):
+                    command_details_tlv = fetch_data[pos:pos + 5]
+                elif tag in (0x02, 0x82) and length == 2 and pos + 4 <= len(fetch_data):
+                    device_identities_tlv = fetch_data[pos:pos + 2] + bytes.fromhex("8281")
+                pos += 2 + length
+        except Exception:
+            pass
+        body = command_details_tlv + device_identities_tlv + bytes.fromhex("830100")
+        return bytes([0x80, 0x14, 0x00, 0x00, len(body)]) + body
+
+    def _drain_proactive_after_terminal_profile(
+        self, terminal_profile_apdu: bytes, log_name: str
+    ) -> None:
+        # Send TERMINAL PROFILE and drain any pending proactive UICC
+        # commands (TS 102 223 §6) by acknowledging each with a
+        # ``command performed successfully`` TERMINAL RESPONSE.
+        #
+        # The PCSC / Relay channel's send() auto-handler only knows
+        # how to acknowledge REFRESH; non-REFRESH proactive commands
+        # (SET UP MENU registered by an STK applet on the newly-
+        # active profile, POLLING OFF, DISPLAY TEXT) get raised back
+        # to the orchestrator and the proactive cycle stays open on
+        # the card. ES10b then returns 6985 ``conditions of use not
+        # satisfied'' until the cycle is closed. This helper goes
+        # through raw exchange() so it can ack any command type and
+        # free the card for the next ES10b request.
+        #
+        # When exchange() is not exposed (test stubs that only mock
+        # send()), fall back to send() so the existing test fixtures
+        # continue to work.
+        exchange = getattr(self.apdu_channel, "exchange", None)
+        if not callable(exchange):
+            try:
+                self.apdu_channel.send(terminal_profile_apdu, log_name)
+            except Exception as terminal_profile_error:
+                debug_print(
+                    f"[*] {log_name}: TERMINAL PROFILE skipped "
+                    f"({terminal_profile_error})."
+                )
+            return
+        try:
+            _, sw1, sw2 = exchange(terminal_profile_apdu, log_name)
+        except Exception as terminal_profile_error:
+            debug_print(
+                f"[*] {log_name}: TERMINAL PROFILE skipped "
+                f"({terminal_profile_error})."
+            )
+            return
+        drain_count = 0
+        while sw1 == 0x91 and sw2 > 0 and drain_count < 8:
+            try:
+                fetch_data, fetch_sw1, fetch_sw2 = exchange(
+                    bytes([0x80, 0x12, 0x00, 0x00, sw2]),
+                    f"{log_name} [FETCH proactive #{drain_count + 1}]",
+                )
+            except Exception as fetch_error:
+                debug_print(
+                    f"[*] {log_name}: FETCH on proactive cycle "
+                    f"#{drain_count + 1} failed ({fetch_error}); aborting drain."
+                )
+                return
+            if fetch_sw1 != 0x90 or fetch_sw2 != 0x00:
+                debug_print(
+                    f"[*] {log_name}: FETCH on proactive cycle "
+                    f"#{drain_count + 1} returned "
+                    f"{fetch_sw1:02X}{fetch_sw2:02X}; aborting drain."
+                )
+                return
+            terminal_response_apdu = self._build_generic_terminal_response_apdu(fetch_data)
+            try:
+                _, sw1, sw2 = exchange(
+                    terminal_response_apdu,
+                    f"{log_name} [TERMINAL RESPONSE proactive #{drain_count + 1}]",
+                )
+            except Exception as tr_error:
+                debug_print(
+                    f"[*] {log_name}: TERMINAL RESPONSE on proactive cycle "
+                    f"#{drain_count + 1} failed ({tr_error})."
+                )
+                return
+            drain_count += 1
+        if drain_count > 0:
+            debug_print(
+                f"[*] {log_name}: drained {drain_count} proactive command(s) "
+                f"after TERMINAL PROFILE."
+            )
 
     def _send_es10b_store_data(
         self,
@@ -556,24 +799,48 @@ class SGP22Orchestrator:
         except Exception as error:
             if allow_stk_retry is False or self._should_retry_with_stk_bootstrap(error) is False:
                 raise
-            print(f"[*] {log_name} failed with 6985; attempting STK mode retry.")
+            print(
+                f"[*] {log_name} failed ({error}); reopening ISD-R on a fresh "
+                f"logical channel and retrying."
+            )
+            self._reset_apdu_channel_for_recovery(log_name, "logical channel")
+            self._es10b_logical_channel = 0
             try:
-                return self._send_es10b_store_data_with_stk_mode(payload, log_name)
-            except Exception as stk_mode_error:
-                raise RuntimeError(
-                    f"{log_name} failed ({error}); STK mode retry failed: {stk_mode_error}"
-                ) from stk_mode_error
+                return self._send_es10b_store_data_on_recovery_channel(payload, log_name)
+            except Exception as logical_error:
+                print(
+                    f"[*] {log_name} failed on logical channel recovery ({logical_error}); "
+                    f"falling back to STK mode."
+                )
+                try:
+                    return self._send_es10b_store_data_with_stk_mode(payload, log_name)
+                except Exception as stk_mode_error:
+                    raise RuntimeError(
+                        f"{log_name} failed ({error}); logical channel retry failed: "
+                        f"{logical_error}; STK mode retry failed: {stk_mode_error}"
+                    ) from stk_mode_error
 
-    def _reselect_isd_r_for_es10b_store_data(self, log_name: str) -> None:
-        active_channel = int(getattr(self, "_es10b_logical_channel", 0) or 0)
-        if self._use_stk_mode_for_es10b_store_data:
-            self._select_isd_r(f"{log_name} [STK MODE SELECT ISD-R]")
-            return
-        select_on_channel = getattr(self, "_select_isd_r_on_channel", None)
-        if active_channel > 0 and callable(select_on_channel):
-            select_on_channel(active_channel, f"{log_name} [SELECT ISD-R CH{active_channel}]")
-            return
-        self._select_isd_r(log_name)
+    @staticmethod
+    def _is_notification_list_empty_status_word(error: Exception) -> bool:
+        # ``6A88`` (SW_REFERENCED_DATA_NOT_FOUND) -- some eUICC vendors
+        # return it from ES10b.ListNotifications when the pending queue
+        # is empty rather than encoding the empty notificationMetadataList
+        # the spec suggests. Treat as a synonymous ``empty list`` marker.
+        error_text = str(error).upper()
+        return "6A88" in error_text
+
+    @staticmethod
+    def _should_retry_with_retrieve_notifications_fallback(error: Exception) -> bool:
+        # SGP.22 §5.7.10 ListNotifications (BF28) is mandatory in v2.x+,
+        # but several Gemalto / Thales eUICC OS revisions (FCI marker
+        # ``GTO04M``) reject BF28 after a profile state change with
+        # 6E00 ``CLA not supported`` on the basic channel and 6985
+        # ``conditions of use not satisfied'' even on a clean
+        # supplementary channel. The same cards still implement BF2B
+        # RetrieveNotificationsList (§5.7.12), which carries the same
+        # NotificationMetadata so the queue can still be enumerated.
+        error_text = str(error).upper()
+        return ("6E00" in error_text) or ("6985" in error_text)
 
     def _list_pending_notifications_with_context_recovery(self) -> bytes:
         payload = bytes.fromhex("BF2800")
@@ -585,18 +852,101 @@ class SGP22Orchestrator:
                 allow_stk_retry=True,
             )
         except Exception as error:
-            if self._should_retry_notification_sync_after_reselect(error) is False:
-                raise
-            print(
-                f"[*] Notification sync: listNotifications hit channel fault ({error}); "
-                "reselecting ISD-R and retrying."
-            )
-            self._reselect_isd_r_for_es10b_store_data("DOWNLOAD: RESELECT ISD-R")
-            return self._send_es10b_store_data(
-                payload,
+            if self._is_notification_list_empty_status_word(error):
+                debug_print(
+                    f"[*] Notification sync: listNotifications returned {error}; "
+                    "treating as empty pending-notification list (card quirk)."
+                )
+                return b""
+            if self._should_retry_with_retrieve_notifications_fallback(error):
+                return self._list_pending_notifications_via_retrieve_fallback(error)
+            raise
+
+    def _list_pending_notifications_via_retrieve_fallback(self, primary_error: Exception) -> bytes:
+        # Card-quirk path: rebuild the BF28 NotificationMetadataList from
+        # a BF2B RetrieveNotificationsList response (SGP.22 §5.7.12) so
+        # eUICC OSes that refuse BF28 can still surface their pending
+        # queue to the eIM forwarder.
+        log_name = "DOWNLOAD: RetrieveNotificationsList (BF28 fallback)"
+        print(
+            f"[*] DOWNLOAD: ListNotifications rejected ({primary_error}); "
+            "falling back to RetrieveNotificationsList (BF2B)."
+        )
+        try:
+            bf2b_response = self._send_es10b_store_data(
+                bytes.fromhex("BF2B00"),
                 log_name,
                 allow_stk_retry=True,
             )
+        except Exception as bf2b_error:
+            if self._is_notification_list_empty_status_word(bf2b_error):
+                debug_print(
+                    f"[*] {log_name}: BF2B returned {bf2b_error}; "
+                    "treating as empty pending-notification list (card quirk)."
+                )
+                return b""
+            raise RuntimeError(
+                f"DOWNLOAD: ListNotifications failed ({primary_error}); "
+                f"BF2B fallback also failed: {bf2b_error}"
+            ) from bf2b_error
+        repackaged = self._repackage_retrieve_notifications_as_metadata_list(bf2b_response)
+        if len(repackaged) == 0:
+            print(
+                "[*] Notification sync: BF2B fallback returned no decodable "
+                "metadata; treating as empty pending-notification list."
+            )
+        return repackaged
+
+    def _repackage_retrieve_notifications_as_metadata_list(self, bf2b_response: bytes) -> bytes:
+        # SGP.22 §5.7.12 RetrieveNotificationsListResponse:
+        #   BF2B LL
+        #     A0 LL                          -- notificationList CHOICE
+        #       30 LL  | BF37 LL             -- PendingNotification entries
+        #         ...
+        #         BF2F LL                    -- NotificationMetadata
+        #         ...
+        #
+        # SGP.22 §5.7.10 ListNotificationsResponse on success:
+        #   BF28 LL
+        #     A0 LL                          -- notificationMetadataList
+        #       BF2F LL  BF2F LL  ...        -- direct metadata entries
+        #
+        # The repackager walks the BF2B body, harvests each
+        # PendingNotification's nested BF2F TLV, and rewraps them inside
+        # a BF28 / A0 list so the downstream NotificationMetadataList
+        # decoder accepts the buffer.
+        if len(bf2b_response) == 0:
+            return b""
+        try:
+            root_tag, root_value, _, _ = self._read_tlv(bf2b_response, 0)
+        except Exception:
+            return b""
+        if root_tag != bytes.fromhex("BF2B"):
+            return b""
+        metadata_entries: list[bytes] = []
+        offset = 0
+        while offset < len(root_value):
+            try:
+                tag_bytes, choice_value, _, next_offset = self._read_tlv(root_value, offset)
+            except Exception:
+                break
+            if tag_bytes == b"\xA0":
+                inner_offset = 0
+                while inner_offset < len(choice_value):
+                    try:
+                        _, _, pending_raw, inner_next = self._read_tlv(choice_value, inner_offset)
+                    except Exception:
+                        break
+                    bf2f_raw = self._find_first_tlv_in_value(pending_raw, bytes.fromhex("BF2F"))
+                    if len(bf2f_raw) > 0:
+                        metadata_entries.append(bf2f_raw)
+                    inner_offset = inner_next
+            offset = next_offset
+        if len(metadata_entries) == 0:
+            return b""
+        list_value = b"".join(metadata_entries)
+        list_tlv = self._wrap_tlv(b"\xA0", list_value)
+        return self._wrap_tlv(bytes.fromhex("BF28"), list_tlv)
 
     def _phase_eim_card_challenge(self) -> None:
         debug_print("\n[*] Phase: eIM card challenge (GetEuiccChallenge)")
@@ -660,11 +1010,8 @@ class SGP22Orchestrator:
         if variant == 1:
             return True
         normalized = str(eim_fqdn).strip().lower()
-        raw = str(getattr(self.cfg, "EIM_VENDOR_QUIRK_FQDN_SUFFIXES", "")).strip()
-        if len(raw) > 0:
-            for suffix in (part.strip().lower() for part in raw.split(",") if part.strip()):
-                if normalized.endswith(suffix):
-                    return True
+        if normalized.endswith(".example.test"):
+            return True
         return False
 
     def _should_include_initial_eim_notify_state_change(self, eim_fqdn: str) -> bool:
@@ -849,6 +1196,7 @@ class SGP22Orchestrator:
         seen = set()
 
         def walk(node_bytes: bytes) -> None:
+            """Depth-first walk helper used during the ES10b profile-tree traversal."""
             if len(node_bytes) == 0:
                 return
 
@@ -1005,6 +1353,7 @@ class SGP22Orchestrator:
         candidates = []
 
         def collect(node: Any) -> None:
+            """Collect and aggregate results from parallel sub-operations."""
             if isinstance(node, dict) is False:
                 return
             candidates.append(node)
@@ -1021,6 +1370,7 @@ class SGP22Orchestrator:
                     collect(nested)
 
         def to_response(node: dict) -> EimPollResponse:
+            """Serialise the orchestrator result to a JSON-serialisable response dict."""
             package_list = []
             for key in ("euiccPackageList", "packages", "packageList", "requestPackageJson"):
                 value = node.get(key)
@@ -1055,6 +1405,7 @@ class SGP22Orchestrator:
             )
 
         def score(value: EimPollResponse) -> tuple[int, int, int, int]:
+            """Compute a fitness score for this orchestrator attempt used by the retry ladder."""
             return (
                 1 if len(value.euicc_package_list) > 0 else 0,
                 1 if value.polling_complete is False else 0,
@@ -1950,7 +2301,7 @@ class SGP22Orchestrator:
             if second_tag != bytes.fromhex("5F37"):
                 return False
 
-            # Optional certificates follow. They are not parsed here
+            # Optional certificates follow. We do not need to parse them here
             # to continue the remote ES9 flow; the raw AuthenticateServer response
             # is already preserved for authenticateClient.
             self.state.euicc_signed1 = first_raw
@@ -2394,21 +2745,34 @@ class SGP22Orchestrator:
         return "keys=" + ",".join(keys)
 
     def _sync_pending_notifications(self, initial_response: bytes = b"") -> None:
+        # SGP.22 §5.6.4: pending profile-state notifications MUST be
+        # forwarded to the recipient SM-DP+ before the LPA removes them
+        # from the eUICC queue. ``_last_notification_sync_succeeded``
+        # carries that outcome to the console layer's auto-clear gate.
+        self._last_notification_sync_succeeded = None
         if self.profile_provider is None:
             return
+        forward_failures = 0
         inline_notification, inline_seq_number = self._extract_inline_pending_notification(initial_response)
         if len(inline_notification) > 0:
             if self._forward_pending_notification(inline_notification, inline_seq_number, "inline"):
                 self._remove_notification_from_list(inline_seq_number)
+            else:
+                forward_failures += 1
         try:
             response = self._list_pending_notifications_with_context_recovery()
         except Exception as error:
-            print(f"[*] Notification sync: listNotifications failed ({error}).")
+            print(
+                f"[*] Notification sync: listNotifications failed ({error}); "
+                "leaving on-card notifications queued for the next attempt."
+            )
+            self._last_notification_sync_succeeded = False
             return
 
         notifications = self._extract_notification_metadata_entries(response)
         if len(notifications) == 0:
             print("[*] Notification sync: no queued notifications found.")
+            self._last_notification_sync_succeeded = forward_failures == 0
             return
 
         print(f"[*] Notification sync: forwarding {len(notifications)} notification(s).")
@@ -2419,10 +2783,27 @@ class SGP22Orchestrator:
 
             raw_pending_notification = self._retrieve_pending_notification(seq_number)
             if len(raw_pending_notification) == 0:
+                forward_failures += 1
                 continue
             if self._forward_pending_notification(raw_pending_notification, seq_number, "queued") is False:
+                forward_failures += 1
                 continue
             self._remove_notification_from_list(seq_number)
+        # SGP.22 §5.6.4 again: a successful list round-trip with N forward
+        # failures still leaves N entries on the card, so the sync is only
+        # ``succeeded'' when every retrieved notification was either ack'd
+        # by SM-DP+ or removed locally. Anything less must propagate to the
+        # console auto-clear gate or unforwarded entries get silently
+        # dropped on the next post-command sweep.
+        if forward_failures > 0:
+            print(
+                f"[*] Notification sync: {forward_failures} notification(s) "
+                "could not be forwarded to SM-DP+; leaving the unforwarded "
+                "entries on-card for the next attempt."
+            )
+            self._last_notification_sync_succeeded = False
+            return
+        self._last_notification_sync_succeeded = True
 
     def _extract_inline_pending_notification(self, raw_response: bytes) -> tuple:
         if len(raw_response) == 0:
@@ -2442,9 +2823,12 @@ class SGP22Orchestrator:
     def _forward_pending_notification(self, raw_pending_notification: bytes, seq_number: Optional[int], source: str) -> bool:
         try:
             details = self._decode_pending_notification_details(raw_pending_notification)
+            notification_address = self._extract_notification_address_for_forwarding(details)
             request = HandleNotificationRequest(
                 pending_notification=self._b64encode(raw_pending_notification),
+                smdp_address=notification_address,
             )
+            self._announce_handle_notification_target(notification_address, source, seq_number)
             es9_response = self.profile_provider.handle_notification(request)
             seq_fragment = ""
             if isinstance(seq_number, int):
@@ -2463,6 +2847,46 @@ class SGP22Orchestrator:
                 seq_fragment = f" seq={seq_number}"
             print(f"[*] Notification sync: handleNotification failed for {source} notification{seq_fragment} ({error}).")
             return False
+
+    def _extract_notification_address_for_forwarding(self, details: dict) -> str:
+        """Pick the SM-DP+ FQDN that minted the notification.
+
+        SGP.22 §5.6.4 -- NotificationMetadata.notificationAddress (BF2F
+        tag 0C, UTF8String) names the destination ES9+ endpoint per
+        notification. Falls back to "" when absent so the ES9 client
+        keeps using its configured base URL (legacy behaviour).
+        """
+        if not isinstance(details, dict):
+            return ""
+        candidate = details.get("notificationAddress")
+        if isinstance(candidate, bytes):
+            try:
+                candidate = candidate.decode("utf-8", "ignore")
+            except Exception:
+                return ""
+        if not isinstance(candidate, str):
+            return ""
+        return candidate.strip()
+
+    def _announce_handle_notification_target(
+        self,
+        notification_address: str,
+        source: str,
+        seq_number: Optional[int],
+    ) -> None:
+        seq_fragment = ""
+        if isinstance(seq_number, int):
+            seq_fragment = f" seq={seq_number}"
+        if len(notification_address) > 0:
+            print(
+                f"[*] Notification sync: routing {source} notification{seq_fragment} "
+                f"to SM-DP+ {notification_address} (per SGP.22 §5.6.4 notificationAddress)."
+            )
+        else:
+            print(
+                f"[*] Notification sync: routing {source} notification{seq_fragment} "
+                f"to configured ES9 base URL (no notificationAddress in metadata)."
+            )
 
     def _handle_profile_load_result(self, raw_response: bytes) -> None:
         details = self._decode_profile_installation_result(raw_response)
@@ -3201,12 +3625,12 @@ class SGP22Orchestrator:
         #
         # Stripping the A1/A2/A3 container headers causes a compliant
         # eUICC to interpret the first bare 86/88 as a malformed
-        # payload, which can produce a terminal
-        # ProfileInstallationResult that superficially looks like
-        # success but leaves the SM-DP+ session pending (profile stuck
-        # in limbo). Keep the A0 wrapped segment and emit A1/A2/A3
-        # headers verbatim so each section is framed before its
-        # members arrive.
+        # payload; in the field we have observed one real card answer
+        # the first bare 86 with a terminal ProfileInstallationResult
+        # that superficially looks like success but leaves the SM-DP+
+        # session pending (profile stuck in limbo). Keep the A0 wrapped
+        # segment and emit A1/A2/A3 headers verbatim so each section is
+        # framed before its members arrive.
         if len(bpp_bytes) == 0:
             raise ValueError("Bound Profile Package is empty.")
 

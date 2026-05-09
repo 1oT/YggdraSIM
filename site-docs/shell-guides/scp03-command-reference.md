@@ -100,6 +100,6 @@ SCP11 README pages.
 
 - Use [Guide Topics](scp03-guide-topics.md) for the deeper background material behind these commands.
 - Use [Source Library](../source-library.md) for the mirrored README and guide files that the wrapper menu also exposes.
-- Use [HIL Bridge -- offline pcap replay](../subsystems/hil-bridge.md#offline-pcap-replay) and
+- Use [HIL Bridge — offline pcap replay](../subsystems/hil-bridge.md#offline-pcap-replay) and
   [Replay a HIL pcap offline](../how-to/replay-hil-pcap-offline.md) for the
   `EXPORT-KEYBAG` consumer side.

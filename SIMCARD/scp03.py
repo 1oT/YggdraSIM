@@ -1,3 +1,5 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+"""SCP03 card-side crypto: INITIALIZE-UPDATE / EXTERNAL AUTHENTICATE response and per-APDU MAC+ENC envelope (GlobalPlatform Card Specification v2.3)."""
 from __future__ import annotations
 
 import hmac
@@ -26,6 +28,7 @@ class Scp03CardLogic:
         self._session_keys: dict[str, bytes] = {}
 
     def reset(self) -> None:
+        """Clear active SCP03 session state and reload static keys from ``state.scp03_keys``."""
         # Re-read the static keys on every reset so a profile switch
         # (SGP.22 enableProfile / disableProfile, BPP install) that
         # rewrites ``state.scp03_keys`` via ``rebuild_runtime_filesystem``
@@ -37,6 +40,7 @@ class Scp03CardLogic:
         self._session_keys = {}
 
     def is_wrapped_command(self, apdu: bytes) -> bool:
+        """Return True when *apdu* carries a GP SCP03 security-level header (CLA bit 0x04 set)."""
         command = bytes(apdu or b"")
         if len(command) < 4:
             return False
@@ -49,6 +53,11 @@ class Scp03CardLogic:
         return bool(command[0] & 0x04)
 
     def handle_initialize_update(self, kvn: int, host_challenge: bytes) -> tuple[bytes, int, int]:
+        """GP Card Spec v2.3.1 §7.1 INITIALIZE UPDATE — derives session keys and returns card challenge.
+
+        Selects key-version-number *kvn* from the static key set, generates an 8-byte
+        card challenge, and writes the derived session keys into ``state.scp03_session``.
+        """
         if len(host_challenge) != 8:
             return b"", 0x67, 0x00
         # GP Card Spec v2.3.1 §7.1: INITIALIZE UPDATE is the place to
@@ -85,6 +94,11 @@ class Scp03CardLogic:
         return response, 0x90, 0x00
 
     def handle_external_authenticate(self, security_level: int, payload: bytes) -> tuple[bytes, int, int]:
+        """GP Card Spec v2.3.1 §7.1 EXTERNAL AUTHENTICATE — verifies host cryptogram and opens session.
+
+        Checks the host C-MAC against the session S-MAC key; on success marks
+        ``session.authenticated = True`` and records the negotiated security level.
+        """
         session = self.state.scp03_session
         if len(self._session_keys) == 0 or len(session.host_challenge) == 0:
             return b"", 0x69, 0x85
@@ -111,6 +125,11 @@ class Scp03CardLogic:
         return b"", 0x90, 0x00
 
     def unwrap_command(self, apdu: bytes) -> tuple[bytes | None, tuple[bytes, int, int] | None]:
+        """Verify and strip the SCP03 C-MAC/C-ENC envelope from *apdu*.
+
+        Returns ``(plain_apdu, None)`` on success, or ``(None, error_sw_tuple)`` when
+        the MAC verification fails or the session is not yet authenticated.
+        """
         session = self.state.scp03_session
         if session.authenticated is False:
             return bytes(apdu or b""), None
@@ -164,6 +183,7 @@ class Scp03CardLogic:
         return bytes(rebuilt), None
 
     def wrap_response(self, data: bytes, sw1: int, sw2: int) -> bytes:
+        """Apply SCP03 R-MAC/R-ENC protection to a command response when an authenticated session is active."""
         session = self.state.scp03_session
         response = bytes(data or b"")
         if session.authenticated is False:
@@ -181,7 +201,7 @@ class Scp03CardLogic:
         iv = self._generate_iv(bytes(iv_input))
         padded = self._add_iso_padding(response)
         encrypted = self._cbc_encrypt(self._session_keys["s_enc"], iv, padded)
-        # Host-side simulator transport ignores response MAC bytes,
+        # Host-side simulator transport currently ignores response MAC bytes,
         # but keeping the trailer preserves the expected SCP03 wire shape.
         response_mac = self._cmac(
             self._session_keys["s_rmac"],

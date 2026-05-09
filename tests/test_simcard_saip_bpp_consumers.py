@@ -15,8 +15,9 @@ that lights up ``state.chv_references`` / ``state.gp_apps`` /
 ``state.scp03_keys`` / ``state.rfm_instances`` from the active
 profile's image.
 
-The tests use the reference BPP fixture so the same byte streams
-exercised by HIL traces are covered. The fixture is checked out at
+The tests deliberately use a real operator BPP (the user's
+``89103000000466311335_test`` profile) so we exercise the same byte
+streams that show up in HIL traces. The fixture is checked out at
 ``Workspace/LocalSMDPP/profile/89103000000466311335_test.txt``; if
 it goes missing the suite skips rather than asserting against
 fabricated data.
@@ -159,7 +160,7 @@ class SaipSecurityDomainConsumerTests(unittest.TestCase):
         )
         state.active_profile_aid = forced_aid
 
-        # Capture the placeholder defaults so the BPP can be asserted
+        # Capture the placeholder defaults so we can assert the BPP
         # really overrode them rather than coincidentally matching.
         default_key_enc = bytes(state.scp80_security.key_enc)
         default_key_mac = bytes(state.scp80_security.key_mac)
@@ -514,9 +515,10 @@ class BppPinLifecycleTests(unittest.TestCase):
     def test_verify_against_disabled_pin_returns_6984_without_retry_loss(self) -> None:
         # TS 102 221 §11.1.9 / §10.2.1.5: a real comparison attempt
         # (Lc=8) against a disabled PIN must return 69 84
-        # ("referenced data invalidated") and NOT consume a retry.
-        # Returning 6A 88 ("referenced data not found") would make
-        # strict modems treat the slot as missing rather than disabled.
+        # ("referenced data invalidated"), and NOT consume a retry.
+        # Previously the simulator returned 6A 88 ("referenced data
+        # not found"), which made strict modems treat the slot as
+        # missing rather than disabled.
         before = self.state.chv_references[0x01].retries_remaining
         data, sw1, sw2 = self.naa.verify(0x01, self._padded("0000"))
         self.assertEqual(data, b"")
@@ -573,7 +575,7 @@ class BppPinLifecycleTests(unittest.TestCase):
         self.assertEqual((sw1, sw2), (0x90, 0x00))
         self.assertFalse(self.state.chv_references[0x81].enabled)
 
-        # The FCP PS_DO under ADF.USIM must advertise the local
+        # The FCP PS_DO under ADF.USIM must now advertise the local
         # PIN as disabled. We pick the ADF root because that is where
         # ETSI TS 102 221 §11.1.1.4.9 expects the fully populated
         # PIN1/Universal-PIN/ADM1 cascade.

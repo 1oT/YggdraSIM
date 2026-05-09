@@ -1,11 +1,11 @@
 /* -----------------------------------------------------------------------------
  * oneot.css
- * Visual variant of the YggdraSIM docs styled to match the 1oT brand palette.
+ * Visual variant of the YggdraSIM docs styled after the 1ot.com brand system.
  * Loaded exclusively by mkdocs.oneot.yml; the default Nord theme continues to
  * use extra.css. Both stylesheets are mutually exclusive - do not load them
  * into the same site build.
  *
- * Palette reference:
+ * Palette reference (extracted from 1ot.webflow.shared CSS, April 2026):
  *   primary        #01d799   mint/emerald
  *   primary hover  #bfffdd
  *   primary press  #02b480

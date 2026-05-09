@@ -1,5 +1,6 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """
-Fuzzer runner -- drives mutation + replay against a transport.
+Fuzzer runner — drives mutation + replay against a transport.
 
 The runner is transport-agnostic. It depends on a small callable
 contract rather than on :mod:`smartcard` or the HIL bridge directly,
@@ -112,6 +113,7 @@ class FuzzerRunner:
         self._seed = int(seed)
 
     def execute(self) -> RunStats:
+        """Transmit one fuzz APDU, record the response, and return a result dict."""
         stats = RunStats()
         iccid, imsi = self._transport.probe_card_identity()
         try:

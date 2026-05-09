@@ -1,3 +1,4 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """Pure helpers backing the TUI token-manager modal.
 
 Kept out of :mod:`Tools.ProfilePackage.saip_transcode_tui` so they can be
@@ -25,16 +26,16 @@ def format_token_value_preview(entry: Any) -> str:
     if isinstance(entry, str):
         compact = entry.strip()
         if len(compact) > _MAX_VALUE_PREVIEW:
-            return compact[: _MAX_VALUE_PREVIEW - 1] + "..."
+            return compact[: _MAX_VALUE_PREVIEW - 1] + "…"
         return compact
     if isinstance(entry, dict):
         rendered = json.dumps(entry, ensure_ascii=False)
         if len(rendered) > _MAX_VALUE_PREVIEW:
-            return rendered[: _MAX_VALUE_PREVIEW - 1] + "..."
+            return rendered[: _MAX_VALUE_PREVIEW - 1] + "…"
         return rendered
     fallback = str(entry)
     if len(fallback) > _MAX_VALUE_PREVIEW:
-        return fallback[: _MAX_VALUE_PREVIEW - 1] + "..."
+        return fallback[: _MAX_VALUE_PREVIEW - 1] + "…"
     return fallback
 
 
@@ -87,6 +88,7 @@ def format_token_row(row: dict[str, Any], *, name_width: int = 12) -> str:
 
 
 def placeholder_style_from_document(document: dict[str, Any]) -> str:
+    """Return the appropriate Textual CSS class for a placeholder token based on document state."""
     raw = document.get("__ygg_placeholder_style__", "brace")
     normalized = str(raw or "brace").strip().lower()
     if normalized == "curly":

@@ -1,4 +1,4 @@
-"""Coverage for DF.GSM-ACCESS / EF.Kc / EF.KcGPRS:
+"""Twenty-fifth-pass gap-coverage suite for DF.GSM-ACCESS.
 
 3GPP TS 31.102 §4.4.3 places ``DF.GSM-ACCESS`` under
 ``ADF.USIM`` at FID ``5F3B``. The DF caches the GSM /
@@ -7,7 +7,8 @@ GPRS ciphering keys a modem reuses on inter-RAT fallback
 access")**, so a spec-conformant card MUST also expose at
 least EF.Kc and EF.KcGPRS or every Kc fetch trips ``6A 82``.
 
-Layout:
+Round-25 closes that coherence gap with the same pattern
+rounds 23/24 used for the ISIM IST coherence:
 
 * `5F3B` DF.GSM-ACCESS
 * `4F20` EF.Kc       transparent, 9 bytes (8-byte Kc + 1-byte CKSN).

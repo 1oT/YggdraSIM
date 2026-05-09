@@ -1,3 +1,5 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+"""SCP80 package entry point."""
 # -----------------------------------------------------------------------------
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -23,6 +25,7 @@ from yggdrasim_common.process_debug import add_debug_argument, set_global_debug
 from yggdrasim_common.quit_control import QuitAllRequested
 
 def run_standalone ():
+    """Parse CLI arguments and start the SCP80 interactive OTA shell."""
     current_dir =os .path .dirname (os .path .abspath (__file__ ))
     if current_dir not in sys .path :
         sys .path .insert (0 ,current_dir )

@@ -11,9 +11,9 @@ tags:
 
 ## Goal
 
-Bring operator-owned material -- certificates, private keys,
+Bring operator-owned material — certificates, private keys,
 secure-channel keysets, simulator personality files, identity records,
-encryption envelopes, and protected diagnostic inputs -- into YggdraSIM
+encryption envelopes, and protected diagnostic inputs — into YggdraSIM
 without touching any in-tree starter material.
 
 This page is the **task-driven mirror** of the canonical operator
@@ -33,7 +33,7 @@ common flows and walks through them as numbered recipes.
 
 ## Decision tree
 
-| You have ...                                                                    | Jump to                                                                  |
+| You have …                                                                    | Jump to                                                                  |
 | ----------------------------------------------------------------------------- | ------------------------------------------------------------------------ |
 | operator DPauth / DPpb cert + key for `LOAD-PROFILE` against `ISD-R`          | [Recipe 1](#recipe-1-bring-your-own-rsp-certs-local-access)              |
 | operator DPauth / DPpb cert + key for the eIM local profile-loading path      | [Recipe 2](#recipe-2-bring-your-own-rsp-certs-eim-local)                 |
@@ -45,7 +45,6 @@ common flows and walks through them as numbered recipes.
 | ShS-ENC / ShS-MAC / DEK from an EUM database for a failing PCAP               | [Recipe 8](#recipe-8-attach-eum-session-keys-to-a-pcap)                  |
 | a need to encrypt every persisted secret at rest                              | [Recipe 9](#recipe-9-turn-on-inventory-encryption)                       |
 | a need to relocate or freeze the writable runtime root                        | [Recipe 10](#recipe-10-relocate-the-runtime-root)                        |
-
 
 ## Prerequisites
 
@@ -101,7 +100,7 @@ Replace the bundled SGP.26 test fixtures used by `LOAD-PROFILE` against
     yggdrasim-scp11-local-access --cmd "LOAD-PROFILE; EXIT"
     ```
 
-**Reference.** Selector code: `SCP11/local_access/cert_store.py` -- the
+**Reference.** Selector code: `SCP11/local_access/cert_store.py` — the
 full sidecar schema (every field) lives in the canonical operator
 guide.
 
@@ -270,10 +269,15 @@ Two stages: file-based defaults, then the per-card SQLite inventory
    pattern with lowercase verbs:
 
     ```bash
-    yggdrasim-scp80 --cmd "iccid <ICCID>; set kic <hex>; set kid <hex>; set spi <hex>; show; quit"
+    yggdrasim-scp80 --cmd "iccid <ICCID>; set kic <16-byte-hex>; set kid <16-byte-hex>; set kic_indicator <hex>; set kid_indicator <hex>; show; quit"
     ```
 
-    `set` updates the active SCP80 config; `show` prints the
+    Slot names follow ETSI TS 102 225 §5.1.1: `kic` / `kid` are the
+    16-byte ciphering and integrity keys; `kic_indicator` /
+    `kid_indicator` are the 1-byte indicator bytes that select algorithm
+    plus key index in the Command Packet header. Legacy `key_enc` /
+    `key_mac` and 2-byte `kic` / `kid` values are auto-migrated on
+    load. `set` updates the active SCP80 config; `show` prints the
     resolved values. The per-ICCID record is persisted to
     `iccid/<ICCID>/scp80` and is preferred over the legacy
     `Workspace/SCP80/ota_config.ini` on the next bind.
@@ -300,7 +304,7 @@ search.
     SUCI key files are 32 bytes of long-term home-network material.
     Keep them at 0600, never share across operators, and rotate per the
     home-network's policy. They never belong inside the inventory
-    encryption envelope -- they are operator key material, not stored
+    encryption envelope — they are operator key material, not stored
     application state.
 
 ## Recipe 8: Attach EUM session keys to a pcap
@@ -312,7 +316,7 @@ download.
 
     ```bash
     yggdrasim-eum-diag store-keys \
-        --iccid 8988211111111111110 \
+        --iccid 8988201234567890123 \
         --shs-enc AABBCCDDEEFF00112233445566778899 \
         --shs-mac 00112233445566778899AABBCCDDEEFF \
         --dek    0F0E0D0C0B0A09080706050403020100 \
@@ -369,14 +373,14 @@ short form:
     ```
 
 3. Trigger any inventory write (running the SCP03 shell against a
-   card and exiting cleanly is enough -- it will write the per-card
+   card and exiting cleanly is enough — it will write the per-card
    `scp03` namespace), then confirm the on-disk bytes start with
    `-----BEGIN PGP MESSAGE-----`.
 4. Verify with `yggdrasim --doctor` (the `gpg` probe must report
    `ok`); the resulting on-disk bytes are the actual proof the
    envelope took.
 
-`plaintext_fallback_writes` is the strict-mode escape hatch -- leave it
+`plaintext_fallback_writes` is the strict-mode escape hatch — leave it
 `false` so the writer refuses to drop plaintext on disk while the GPG
 provider is ready.
 

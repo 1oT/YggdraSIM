@@ -59,7 +59,7 @@ class ShellSessionRecorderTests(unittest.TestCase):
 class ShellSessionRecorderHardeningTests(unittest.TestCase):
     def setUp(self) -> None:
         # Drop any global listener the previous test case might have left
-        # hanging so the assertions only see events emitted from this test.
+        # hanging so our assertions only see events we emit from this test.
         set_apdu_trace_listener(None)
 
     def tearDown(self) -> None:

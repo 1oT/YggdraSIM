@@ -1,4 +1,18 @@
-"""Coverage for SIMCARD lifecycle terminators and proactive helpers:
+"""Sixth-pass gap-coverage suite for SIMCARD surfaces beyond ES10.
+
+The previous five passes closed:
+
+* SGP.32 v1.2 / SGP.22 v3.1 ES10b/c command backlog.
+* PIN lifecycle (CHANGE / DISABLE / ENABLE PIN) and GET CHALLENGE.
+* GP GET DATA fingerprinting tags and the FF21 Extended Card Resources
+  template.
+* TS 31.111 / TS 102 223 envelope dispatch by tag.
+* SAIP profile-header connectivity parameters.
+* File lifecycle ACTIVATE / DEACTIVATE FILE, SEARCH RECORD, SUSPEND
+  UICC, LAUNCH BROWSER.
+
+This pass closes a different class of gaps -- behaviours that a real
+UICC always exposes but the simulator was missing:
 
 * ETSI TS 102 221 §11.1.16 / §11.1.17 / §11.1.18 lifecycle terminator
   commands TERMINATE EF / TERMINATE DF / TERMINATE CARD USAGE
@@ -166,7 +180,7 @@ class TerminateCardUsageTests(_EngineHarness):
         self.engine.transmit(bytes.fromhex("00FE000000"))
         # GP STATUS uses CLA=80 P1!=0; a plain TS 102 221 STATUS uses
         # CLA=00 P1=00 P2=00 (poll). The simulator routes both via INS
-        # F2; any successful SW is accepted because the goal is just
+        # F2; we accept any successful SW because the goal is just
         # "card is reachable for presence detection".
         _data, sw1, sw2 = self.engine.transmit(bytes.fromhex("80F2000000"))
         # Either a successful STATUS or a 9000 GP GET STATUS response

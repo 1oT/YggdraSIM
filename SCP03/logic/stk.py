@@ -1,3 +1,5 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+"""SIM Toolkit logic: proactive command encoding/decoding and TERMINAL RESPONSE handling (ETSI TS 102 223)."""
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -88,12 +90,11 @@ class StkState:
     trigger_history: list[str] = field(default_factory=list)
     poll_interval_seconds: int = 0
     polling_off: bool = False
-    # ETSI TS 102 223 §8.19 GSM Location Information value:
-    # MCC=001, MNC=01 (3GPP TS 23.003 §2.2 reserved test PLMN),
-    # LAC=0x0001, Cell ID=0x0001. Layout: 3 bytes packed-BCD PLMN
-    # + 2 byte LAC + 2 byte Cell ID = 7 bytes.
+    # ETSI TS 102 223 §8.19 GSM Location Information value: MCC=262,
+    # MNC=01 (Germany / Telekom), LAC=0x0001, Cell ID=0x0001. Layout:
+    # 3 bytes packed-BCD PLMN + 2 byte LAC + 2 byte Cell ID = 7 bytes.
     location_information: bytes = field(
-        default_factory=lambda: _encode_location_information_gsm("001", "01", 0x0001, 0x0001)
+        default_factory=lambda: _encode_location_information_gsm("262", "01", 0x0001, 0x0001)
     )
     # ETSI TS 102 223 §8.20 IMEI: 8-byte BCD encoding of a 15-digit
     # IMEI. The default is "086543245654321" (Type Allocation Code
@@ -456,6 +457,7 @@ class StkController:
         self._clear_pending_channel_data()
 
     def initialize(self) -> None:
+        """Reset the STK session state and synchronise the event-list from the terminal profile."""
         self.state = StkState()
         reset_session_state = getattr(self.tp, "reset_session_state", None)
         if callable(reset_session_state):
@@ -473,6 +475,7 @@ class StkController:
         self._record_flow_event("STK initialization completed.")
 
     def send_apdu(self, apdu_hex: str) -> tuple[bytes, int, int]:
+        """Send one STK-formatted APDU hex string through the transport and return (data, SW1, SW2)."""
         cleaned = self._clean_hex(apdu_hex)
         if len(cleaned) == 0:
             raise ValueError("APDU hex is empty.")
@@ -518,6 +521,7 @@ class StkController:
             raise ValueError("Extra TLV hex is invalid.") from error
 
     def resolve_event_code(self, event_token: str) -> int:
+        """Resolve an event-name token (e.g. 'MT-CALL') to its ETSI TS 102 223 §8.25 event-code byte."""
         cleaned = str(event_token or "").strip().upper().replace("_", "-")
         if len(cleaned) == 0:
             raise ValueError("Event name is required.")
@@ -533,6 +537,7 @@ class StkController:
         raise ValueError(f"Unknown STK event '{event_token}'.")
 
     def send_event(self, event_token: str, extra_tlvs_hex: str = "") -> tuple[bytes, int, int]:
+        """Queue and dispatch a DOWNLOAD-ENVELOPE event (ETSI TS 102 221 §11.1.11)."""
         event_code = self.resolve_event_code(event_token)
         extra_tlvs = self._parse_extra_tlvs(extra_tlvs_hex)
         self.state.trigger_history.append(f"EVENT {self._stk_event_name(event_code)}")
@@ -547,6 +552,7 @@ class StkController:
         status_value: int = 0x00,
         location_hex: str = "",
     ) -> tuple[bytes, int, int]:
+        """Send a LOCATION-STATUS envelope (ETSI TS 102 223 §8.17) with optional LAI / cell-identity."""
         location_value = self.state.location_information
         cleaned_location = self._clean_hex(location_hex)
         if len(cleaned_location) > 0:
@@ -570,6 +576,7 @@ class StkController:
         return self.send_event("CALL-DISCONNECTED", extra_tlvs_hex=extra_tlvs_hex)
 
     def queue_channel_data(self, payload_hex: str) -> int:
+        """Buffer *payload_hex* for the next DATA-AVAILABLE event and return total queued length."""
         cleaned = self._clean_hex(payload_hex)
         if len(cleaned) == 0:
             raise ValueError("Channel payload hex is empty.")
@@ -584,6 +591,7 @@ class StkController:
         return self._queued_pending_length()
 
     def send_data_available_event(self) -> tuple[bytes, int, int]:
+        """Dispatch a DATA-AVAILABLE envelope (ETSI TS 102 223 §7.5.16) for the queued channel payload."""
         available_length = self._queued_pending_length()
         if available_length <= 0:
             raise RuntimeError("No queued channel data is available.")
@@ -597,6 +605,7 @@ class StkController:
         return self._exchange_with_proactive_chain(apdu, "STK EVENT DOWNLOAD [Data available]")
 
     def send_sms_pp(self, tpdu_hex: str) -> tuple[bytes, int, int]:
+        """Deliver a raw SMS-PP TPDU as an SMS-PP-DOWNLOAD envelope (ETSI TS 102 223 §7.5.2)."""
         cleaned = self._clean_hex(tpdu_hex)
         if len(cleaned) == 0:
             raise ValueError("SMS TPDU hex is empty.")
@@ -868,6 +877,7 @@ class StkController:
         return f"0x{event_code:02X}"
 
     def format_state_lines(self) -> list[str]:
+        """Return a list of human-readable lines summarising the current STK session state."""
         event_names = [self._stk_event_name(value) for value in self.state.event_list]
         open_channel = "NO"
         if self.state.open_channel_active:
@@ -887,6 +897,7 @@ class StkController:
         ]
 
     def format_history_lines(self, limit: int = 12) -> list[str]:
+        """Return a list of recent command and trigger history lines for the STK debug view."""
         out: list[str] = []
         command_history = self.state.command_history[-max(1, int(limit)) :]
         trigger_history = self.state.trigger_history[-max(1, int(limit)) :]

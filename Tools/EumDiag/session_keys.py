@@ -1,3 +1,4 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """
 Session-key bundle contract for the EUM diagnostics dissector.
 
@@ -5,11 +6,11 @@ An EUM / SM-DP+ operator investigating a failed download typically has
 access to the session keys that the server database associates with
 the failing ICCID:
 
-* ``ShS-ENC`` -- the AES-128 shared secret used to encrypt the Bound
+* ``ShS-ENC`` — the AES-128 shared secret used to encrypt the Bound
   Profile Package (SGP.22 §2.5.6).
-* ``ShS-MAC`` -- the AES-128 shared secret used for the S-ENC/MAC
+* ``ShS-MAC`` — the AES-128 shared secret used for the S-ENC/MAC
   integrity layer over the BPP segments.
-* ``DEK``      -- the optional Data Encryption Key that protects PPR
+* ``DEK``      — the optional Data Encryption Key that protects PPR
   elements inside the BPP (present for some profile types).
 
 This module defines a strongly-typed container, validates the inputs
@@ -17,7 +18,7 @@ This module defines a strongly-typed container, validates the inputs
 the bundle to a side-car JSON file that the Lua dissector reads via
 the ``YGGDRASIM_EUM_SESSION_KEYS`` environment variable.
 
-The container deliberately does NOT perform any decryption -- that is
+The container deliberately does NOT perform any decryption — that is
 the Lua dissector's job (or pySim, for the offline decode CLI). We
 keep the Python side pure so it is safe to import on hosts that lack
 tshark / libgcrypt / libnettle.
@@ -107,6 +108,7 @@ class SessionKeyBundle:
         dek: str | None = None,
         comment: str = "",
     ) -> "SessionKeyBundle":
+        """Construct a session-key record from hex-encoded key material strings."""
         iccid_clean = str(iccid or "").strip().upper()
         if len(iccid_clean) == 0:
             raise SessionKeyError("iccid is empty")
@@ -122,6 +124,7 @@ class SessionKeyBundle:
         )
 
     def to_json_dict(self) -> dict[str, Any]:
+        """Serialise this session-key record to a JSON-compatible dict."""
         payload: dict[str, Any] = {
             "iccid": self.iccid,
             "shs_enc_hex": self.shs_enc_hex,
@@ -152,7 +155,7 @@ class SessionKeyRepository:
 
     The Lua dissector performs a per-BPP ICCID lookup to select the
     right keys. Serialising the repository is therefore an
-    ICCID-indexed JSON object rather than a bare list -- constant-time
+    ICCID-indexed JSON object rather than a bare list — constant-time
     lookup at dissection time matters on large PCAPs.
     """
 
@@ -160,6 +163,7 @@ class SessionKeyRepository:
 
     @staticmethod
     def from_bundles(bundles: list[SessionKeyBundle]) -> "SessionKeyRepository":
+        """Construct a keyset from a pair of encryption and MAC key bundles."""
         seen: dict[str, SessionKeyBundle] = {}
         for bundle in bundles:
             if bundle.iccid in seen:
@@ -177,6 +181,7 @@ class SessionKeyRepository:
         return None
 
     def to_json_dict(self) -> dict[str, Any]:
+        """Serialise this session-key record to a JSON-compatible dict."""
         return {
             "format": BUNDLE_FILE_FORMAT,
             "entries": {
@@ -186,6 +191,7 @@ class SessionKeyRepository:
 
     @staticmethod
     def from_json_dict(payload: dict[str, Any]) -> "SessionKeyRepository":
+        """Deserialise a session-key record from a JSON-compatible dict."""
         if isinstance(payload, dict) is False:
             raise SessionKeyError("session-key repository JSON must be an object")
         fmt = str(payload.get("format") or "")

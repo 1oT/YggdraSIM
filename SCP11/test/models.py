@@ -1,3 +1,5 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+"""SCP11-test data models: ES2+/ES9+ request/response dataclasses for the simulated-card variant."""
 # -----------------------------------------------------------------------------
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -83,6 +85,16 @@ class CancelSessionRequest:
 @dataclass
 class HandleNotificationRequest:
     pending_notification: str
+    # SGP.22 §5.6.4: each PendingNotification carries the FQDN of the
+    # SM-DP+ that minted it (NotificationMetadata.notificationAddress,
+    # tag 0C UTF8String). The LPA MUST forward the notification to that
+    # address rather than to a global ES9 endpoint -- profiles from
+    # different SM-DP+ instances coexist on the same eUICC and trust
+    # roots / CI keys differ between live and test environments.
+    # Empty string means "fall back to the configured base URL", which
+    # preserves the legacy behaviour for tests and for cards whose
+    # metadata does not carry a notificationAddress.
+    smdp_address: str = ""
 
 
 @dataclass
@@ -156,7 +168,7 @@ class SCP11SessionState:
     stk_command_history: List[str] = field(default_factory=list)
     stk_poll_interval_seconds: int = 0
     stk_polling_off: bool = False
-    stk_location_information: bytes = bytes.fromhex("00F11000010001")
+    stk_location_information: bytes = bytes.fromhex("62F21000010001")
     stk_imei: bytes = bytes.fromhex("316F542E59676764726153494D")
     stk_last_proactive_command: bytes = b""
     stk_status_history: List[str] = field(default_factory=list)

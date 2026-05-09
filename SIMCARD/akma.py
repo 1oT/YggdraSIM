@@ -1,3 +1,4 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """3GPP TS 33.535 AKMA key-derivation helpers (Annex A.2 / A.3 / A.4).
 
 AKMA (Authentication and Key Management for Applications) reuses the

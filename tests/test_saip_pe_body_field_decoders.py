@@ -1,7 +1,8 @@
-"""Tests for ProfileElement body field decoders.
+"""
+Round-4 Pass 3 regression tests for ProfileElement body field decoders.
 
-Covers the four SAIP ASN.1 octet-string fields surfaced via
-``_summarize_binary_blob``:
+Covers the four SAIP ASN.1 octet-string fields that were previously dumped
+as opaque hex via ``_summarize_binary_blob``:
 
 - ``applicationProviderIdentifier``  -> OBJECT IDENTIFIER (SAIP §2.8.2)
 - ``globalServiceParameters``        -> 1-byte service bitmap (SAIP §2.6.3)

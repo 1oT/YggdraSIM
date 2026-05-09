@@ -1,5 +1,6 @@
-"""Structured decoder + round-trip encoder tests for the
-``_PASSTHROUGH_BYTES_FIELD_NAMES`` entries that were previously
+"""
+Remaining-gap closure tests — structured decoders + round-trip encoders
+for the ``_PASSTHROUGH_BYTES_FIELD_NAMES`` entries that were previously
 hex-only on the editor surface:
 
 * ``restrictParameter``                (SAIP §8.6.6 / GP Amd F §A.4)

@@ -6,7 +6,7 @@ the SAIP header form on top and a member overview underneath so the
 operator at least sees the structured shape (as opposed to the raw JSON
 dump that the legacy decoded pane produced). Edits to the header
 round-trip through the host TUI; the member list itself is read-only
-in this widget -- operators still drop into the JSON column to edit
+in this widget — operators still drop into the JSON column to edit
 fields the generic editor does not know about.
 """
 
@@ -156,7 +156,7 @@ def _describe_member(key: str, value: Any) -> str:
     if value is None:
         return f"{key}: NULL"
     if isinstance(value, str):
-        snippet = value if len(value) <= 40 else value[:37] + "..."
+        snippet = value if len(value) <= 40 else value[:37] + "…"
         return f"{key}: {snippet!r}"
     return f"{key}: {value}"
 

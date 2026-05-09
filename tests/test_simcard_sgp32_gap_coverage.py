@@ -4,7 +4,7 @@ The suites below complement ``test_simcard_sgp32_load_euicc_package`` by
 exercising the surfaces that surfaced during the v1.2 audit:
 
 - Wire-format result tags for ``deleteEim`` (``[9]``) and ``updateEim``
-  (``[10]``) -- primitive ``89`` / ``8A`` per AUTOMATIC TAGS, not the
+  (``[10]``) — primitive ``89`` / ``8A`` per AUTOMATIC TAGS, not the
   constructed forms used on the eCO command side.
 - Package-level constraints from §2.11.1.1: at most one ``enable`` per
   package, at most one ``disable`` per package, ``listProfileInfo`` must

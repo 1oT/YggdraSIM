@@ -1,7 +1,8 @@
 """Tests for the plugin-loading gate in ``yggdrasim_common.plugin_runtime``.
 
-The gate is intentionally default-on so plugins under the active runtime
-root's ``plugins/`` directory load without an env dance. This module
+The gate is intentionally default-on so first-party plugins shipped in
+the tracked tree (``plugins/polling_plugin.py`` — the ``POLL`` and
+``IPAE-*`` watchdog backers) load without an env dance. This module
 pins the exact tri-state semantics and the one-shot announce banner.
 """
 

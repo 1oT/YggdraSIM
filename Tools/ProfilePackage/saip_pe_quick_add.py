@@ -1,3 +1,4 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """
 Insert blank ProfileElement instances using pySim default constructors (same templates
 as bundled ``saip-tool`` / ``pySim.esim.saip``). Intended for TRANSCODE-TUI rapid edits.
@@ -28,7 +29,7 @@ def iter_option_list_specs(
     First row is cancel; remaining rows follow ``list_pe_quick_add_rows``.
     """
     out: List[Tuple[str, str, str | None, bool]] = [
-        ("_cancel", "-- Cancel --", None, False),
+        ("_cancel", "— Cancel —", None, False),
     ]
     for menu_id, title, hint in list_pe_quick_add_rows():
         disabled = menu_id in blocked
@@ -250,6 +251,7 @@ def copy_pe_snapshot(
     *,
     section_key: str,
 ) -> dict[str, Any]:
+    """Snapshot the current PE to the clipboard-like quick-add buffer."""
     sections = document.get("sections", {})
     if isinstance(sections, dict) is False:
         raise ValueError("Document 'sections' must be an object.")
@@ -292,6 +294,7 @@ def paste_pe_snapshot(
     anchor_key: str | None = None,
     insert_after: bool = True,
 ) -> dict[str, Any]:
+    """Paste the quick-add buffer PE snapshot into the document at the cursor position."""
     ensure_workspace_pysim_on_path(workspace_root)
     pe_type = str(snapshot.get("type", "")).strip()
     if len(pe_type) == 0:
@@ -318,6 +321,7 @@ def move_pe_in_document(
     section_key: str,
     direction: str,
 ) -> dict[str, Any]:
+    """Move a PE from one position to another within the document PE list."""
     ensure_workspace_pysim_on_path(workspace_root)
     if direction not in {"up", "down"}:
         raise ValueError(f"Unsupported move direction: {direction!r}")
@@ -347,6 +351,7 @@ def remove_pe_from_document(
     *,
     section_key: str,
 ) -> dict[str, Any]:
+    """Remove the PE identified by *pe_key* from the document and return the modified dict."""
     ensure_workspace_pysim_on_path(workspace_root)
     index = _section_index(document, section_key)
     pe_type = base_pe_type(section_key)
@@ -1886,6 +1891,7 @@ def list_addable_file_rows(
     context_key: Any = None,
     group_index: int | None = None,
 ) -> tuple[Any, str, List[Tuple[str, str, str | None]]]:
+    """Return a list of row-spec dicts describing which file PEs can be added to the document."""
     pes, pe = _section_pe_from_document(
         document,
         workspace_root,
@@ -2010,6 +2016,7 @@ def file_add_override_defaults(
     context_key: Any = None,
     group_index: int | None = None,
 ) -> dict[str, str] | None:
+    """Return a defaults dict for file-add overrides for a specific PE name."""
     normalized_file_key = str(file_pe_name or "").strip()
     if len(normalized_file_key) == 0:
         return None
@@ -2123,6 +2130,7 @@ def gfm_root_bootstrap_defaults(
     context_key: Any = None,
     group_index: int | None = None,
 ) -> dict[str, str] | None:
+    """Return bootstrap default values for a new GFM root PE."""
     normalized_file_key = str(file_pe_name or "").strip()
     if len(normalized_file_key) == 0:
         return None
@@ -2176,6 +2184,7 @@ def insert_blank_file_for_pename(
     bootstrap_overrides: dict[str, Any] | None = None,
     file_overrides: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    """Insert a blank file PE skeleton for *pe_name* into the document at the chosen position."""
     normalized_file_key = str(file_pe_name or "").strip()
     if len(normalized_file_key) == 0:
         raise ValueError("File PE-name must not be empty.")

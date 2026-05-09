@@ -47,14 +47,10 @@ in `site-docs/`.
 python main/main.py
 python main/main.py --debug
 python main/main.py --card-backend sim --sim-eim-identity /path/to/card_side_eim_identity.json
-python main/main.py --gui
-python main/main.py --web-server --host 127.0.0.1 --port 8765
 ```
 
 Use `--debug` or `--verbose` on the wrapper when debug output should become the
-global default for launched modules. Use `--gui` for the desktop Universal GUI
-Command Center (requires the `[gui]` extra) or `--web-server` for the FastAPI
-loopback variant (requires the `[gui-server]` extra).
+global default for launched modules.
 
 ## Direct module entry points
 

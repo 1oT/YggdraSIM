@@ -145,7 +145,7 @@ class SuciCalc5gAliasTests(unittest.TestCase):
 
 
 class Opaque5gEfTests(unittest.TestCase):
-    """5G-specific EFs -- originally opaque passthrough, some are now
+    """5G-specific EFs — originally opaque passthrough, some are now
     length-strict semantic decoders (5GSxLOCI / 5GSEDRX / 5GNSWO)."""
 
     # 5GS LOCI layout: 13B 5G-GUTI + 3B TAI-PLMN + 3B TAC + 1B status.
@@ -352,7 +352,7 @@ class DispatcherRegistrationTests(unittest.TestCase):
     """All 40+ new EF tokens are registered in the content dispatcher."""
 
     EXPECTED_KEYS = (
-        # 5G.
+        # Pass A — 5G.
         "ef-5gs3gpploci",
         "ef-5gsn3gpploci",
         "ef-5gs3gppnsc",
@@ -363,7 +363,7 @@ class DispatcherRegistrationTests(unittest.TestCase):
         "ef-opl5g",
         "ef-routing-indicator",
         "ef-ursp",
-        # Phonebook.
+        # Pass B — Phonebook.
         "ef-pbr",
         "ef-iap",
         "ef-anr",
@@ -380,7 +380,7 @@ class DispatcherRegistrationTests(unittest.TestCase):
         "ef-psc",
         "ef-cc",
         "ef-puid",
-        # 5G extras + legacy 3GPP.
+        # Pass C — 5G extras + legacy 3GPP.
         "ef-tn3gppsnn",
         "ef-5gsedrx",
         "ef-5gnswo-conf",
@@ -392,7 +392,7 @@ class DispatcherRegistrationTests(unittest.TestCase):
         "ef-bdnuri",
         "ef-sdnuri",
         "ef-lnduri",
-        # ISIM / multimedia.
+        # Pass D — ISIM / multimedia.
         "ef-pcscf-urn",
         "ef-muddomain",
         "ef-psismsc",

@@ -1,33 +1,30 @@
-"""Tests for the broad DF / ADF / ProfileElement / field surface.
+"""Tests for the 5×20 DF / ADF / ProfileElement / field sweep.
 
-Covers four groups of decoded-edit additions:
+Covers 100 new decoded-edit additions across:
 
-- DF identifier tokens (df-telecom, df-phonebook, df-graphics, df-mms,
-  df-solsa, df-mexe, df-wlan, df-hnb, df-oma-bcast, df-ecat, df-mcs,
+- Pass A (20): new DF identifier tokens (df-telecom, df-phonebook, df-graphics,
+  df-mms, df-solsa, df-mexe, df-wlan, df-hnb, df-oma-bcast, df-ecat, df-mcs,
   df-mcptt, df-mcvideo, df-mcdata, df-v2x, df-prose, df-iot,
   df-5gprose-relay, df-a2x, df-hpsim).
-- ADF identifier tokens (adf-hpsim, adf-mcptt, adf-mcvideo, adf-mcdata,
-  adf-v2x, adf-prose-ue, adf-prose-relay, adf-5gprose-relay,
+- Pass B (20): new ADF identifier tokens (adf-hpsim, adf-mcptt, adf-mcvideo,
+  adf-mcdata, adf-v2x, adf-prose-ue, adf-prose-relay, adf-5gprose-relay,
   adf-5gprose-disc, adf-iot, adf-dualimsi, adf-cl, adf-a2x, adf-eap,
-  adf-test, adf-snpn, adf-orph, adf-mcvdata, adf-v2xrelay,
-  adf-a2xrelay).
-- PE filesystem hints for new PE base types (usim, opt-usim, csim,
-  opt-csim, opt-eap, cdmaParameter, gsm-access, wlan, df-wlan,
+  adf-test, adf-snpn, adf-orph, adf-mcvdata, adf-v2xrelay, adf-a2xrelay).
+- Pass C (20): PE filesystem hints for new PE base types (usim, opt-usim,
+  csim, opt-csim, opt-eap, cdmaParameter, gsm-access, wlan, df-wlan,
   df-prose, df-iot, df-hnb, df-mcs, df-mcptt, df-mcvideo, df-mcdata,
   df-v2x, df-a2x, df-telecom, df-phonebook, df-graphics, df-mms,
-  df-solsa, df-mexe, df-oma-bcast, df-ecat, df-5gprose-relay,
-  df-hpsim, adf-hpsim, adf-mcptt, adf-mcvideo, adf-mcdata, adf-v2x,
-  adf-prose-ue, adf-prose-relay, adf-5gprose-relay,
-  adf-5gprose-disc, adf-iot, adf-dualimsi, adf-cl, adf-a2x,
-  adf-eap, adf-test, adf-snpn, adf-orph, application, rfm,
-  securityDomain, akaParameter, cdma).
-- PE-level subtag field encoders (iccid, hashValue, lcsi, efFileSize,
-  adfRFMAccess, mappingOptions, mappingSource, processData,
+  df-solsa, df-mexe, df-oma-bcast, df-ecat, df-5gprose-relay, df-hpsim,
+  adf-hpsim, adf-mcptt, adf-mcvideo, adf-mcdata, adf-v2x, adf-prose-ue,
+  adf-prose-relay, adf-5gprose-relay, adf-5gprose-disc, adf-iot,
+  adf-dualimsi, adf-cl, adf-a2x, adf-eap, adf-test, adf-snpn, adf-orph,
+  application, rfm, securityDomain, akaParameter, cdma).
+- Pass D (20): PE-level subtag field encoders (iccid, hashValue, lcsi,
+  efFileSize, adfRFMAccess, mappingOptions, mappingSource, processData,
   sdPersoData, proprietaryEFInfo, tlvBytes, profileVersion,
   customFieldOctets, serialNumber, notificationAddress, major-version,
   minor-version, identification, shortEFID, templateID).
-
-Plus a coverage audit + dispatcher registration sanity check.
+- Pass E: coverage audit + dispatcher registration sanity.
 """
 
 from __future__ import annotations
@@ -47,7 +44,7 @@ from Tools.ProfilePackage.saip_asn1_encode import (
 
 
 # ---------------------------------------------------------------------------
-# DF identifier tokens.
+# Pass A — DF identifier tokens.
 
 
 class DfTokenRegistrationTests(unittest.TestCase):
@@ -87,7 +84,7 @@ class DfTokenRegistrationTests(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# ADF identifier tokens.
+# Pass B — ADF identifier tokens.
 
 
 class AdfTokenRegistrationTests(unittest.TestCase):
@@ -132,7 +129,7 @@ class AdfTokenRegistrationTests(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# PE filesystem hint mappings.
+# Pass C — PE filesystem hint mappings.
 
 
 class ProfileElementHintTests(unittest.TestCase):
@@ -204,7 +201,7 @@ class ProfileElementHintTests(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# PE-level OCTET STRING subtag encoders.
+# Pass D — PE-level OCTET STRING subtag encoders.
 
 
 class IccidFieldTests(unittest.TestCase):
@@ -348,7 +345,7 @@ class NotificationAddressFieldTests(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# PE-level INTEGER subtag encoders.
+# Pass D — PE-level INTEGER subtag encoders.
 
 
 class MajorVersionFieldTests(unittest.TestCase):
@@ -399,7 +396,7 @@ class TemplateIdFieldTests(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# Coverage / dispatcher integration audit.
+# Pass E — Coverage / dispatcher integration audit.
 
 
 class DispatcherAuditTests(unittest.TestCase):

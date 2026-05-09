@@ -15,7 +15,7 @@ scripted local operation. Use this alongside the full
 
 ## Assumptions
 
-Every `python -m ...` example assumes one of the following:
+Every `python -m …` example assumes one of the following:
 
 - you are running the command from the repository root, or
 - you already ran `python -m pip install -e /path/to/YggdraSIM` in the same
@@ -338,7 +338,7 @@ EOF
 ### HIL Bridge daemons
 
 Both `yggdrasim-hil-bridge` and `yggdrasim-hil-supervisor` are
-`argparse`-only daemons -- no `--cmd` / `--stdin`. Drive them through
+`argparse`-only daemons — no `--cmd` / `--stdin`. Drive them through
 systemd or the launcher's `[B]` HIL Bridge Session menu instead:
 
 ```bash
@@ -383,12 +383,12 @@ the same shells that built the secure channel:
 
 ```bash
 python -m SCP03 --cmd \
-    "SCP03-SD; EXPORT-KEYBAG captures/session-example.keys.json case-1234; EXIT"
+    "SCP03-SD; EXPORT-KEYBAG captures/session-2026-04-20.keys.json case-1234; EXIT"
 ```
 
 ```bash
 python -m SCP11.local_access --cmd "LOAD-PROFILE" \
-    --dump-keybag captures/session-example.keys.json
+    --dump-keybag captures/session-2026-04-20.keys.json
 ```
 
 ```bash
@@ -400,8 +400,8 @@ EXIT
 EOF
 ```
 
-`python -m SCP11.live --dump-keybag ...` is an intentional **no-op
-stub** -- live-mode SCP11c BSP keys are derived inside the eUICC and
+`python -m SCP11.live --dump-keybag …` is an intentional **no-op
+stub** — live-mode SCP11c BSP keys are derived inside the eUICC and
 never reach the host. Use `SCP11.local_access` or SCP03 for real
 exports.
 

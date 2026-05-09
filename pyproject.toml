@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "yggdrasim"
-version = "1.0.0"
+version = "1.0.1"
 description = "YggdraSIM secure-element, eUICC, OTA, and SAIP toolkit."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -77,6 +77,17 @@ dependencies = [
     "pyyaml",
     "textual>=0.47.0",
     "dnspython>=2.4",
+    # pySim is the upstream Osmocom SCP / OTA / SAIP toolkit. SCP03
+    # session-key derivation (GPC v2.3 Amd D §4.1.5) and SCP80 / 03.48
+    # cipher and CC primitives delegate to it so spec-citation lineage
+    # for the cryptographic primitives lives upstream. The wire-format
+    # helpers (``Scp03Session.wrap_apdu`` / ``CryptoEngine.build_*``)
+    # remain YggdraSIM-specific — see tests/test_scp03_pysim_parity.py
+    # and tests/test_scp80_pysim_parity.py for the pinned divergences.
+    # Upstream does not publish wheels to PyPI, so we install the git
+    # tree directly. The ``saip`` extra is preserved as a no-op alias
+    # for back-compat with onboarding scripts that still reference it.
+    "pySim @ git+https://github.com/osmocom/pysim.git",
 ]
 
 [project.optional-dependencies]
@@ -90,20 +101,16 @@ hil = [
 build = [
     "pyinstaller",
 ]
-# Test-only dependencies. ``httpx`` is required by FastAPI's
-# ``TestClient``; pulling it in here keeps the GUI / GUI-server
-# runtime extras free of an extra transitive dep that production
-# deployments do not need.
+# Test-only dependencies. ``pytest`` is the runner for the in-tree
+# unit / integration suite under ``tests/``.
 test = [
     "pytest",
-    "httpx",
 ]
 # Legacy alias kept for backwards compatibility with earlier onboarding
 # scripts that call ``pip install -e '.[dev]'``.
 dev = [
     "pyinstaller",
     "pytest",
-    "httpx",
 ]
 # Documentation-site tooling. Mirrors ``requirements-docs.txt`` so
 # ``pip install yggdrasim[docs]`` alone is sufficient for running
@@ -113,67 +120,20 @@ docs = [
     "mkdocs-material>=9.6",
     "pymdown-extensions>=10.13",
 ]
-# ``saip`` pulls upstream pySim directly from git. The Osmocom SAIP
-# stack (``pySim.esim.saip``, ``pySim.esim.compile_asn1_subdir``,
-# ``pySim.esim.x509_cert``) is what the SCP11 local / eIM-local
-# flows, the SAIP transcode TUI, and the profile-scaffolding
-# wizards rely on. The upstream project does not publish wheels to
-# PyPI (the ``pySim`` name on PyPI belongs to an unrelated package,
-# ``pysimcard`` is the yanked 2021 snapshot), so this extra installs
-# the canonical tree from the GitHub mirror. Keeping it as an
-# optional extra means a fresh ``pip install yggdrasim`` still
-# works without a network round-trip to GitHub, but operators who
-# want the SAIP surfaces just run ``pip install 'yggdrasim[saip]'``
-# and stop having to clone ``pysim/`` by hand. The developer
-# checkout at ``<repo>/pysim`` is still honoured by
-# ``SCP11/pysim_path.py`` for people working against an unreleased
-# upstream branch.
-saip = [
-    "pySim @ git+https://github.com/osmocom/pysim.git",
-    # ``pySim`` declares ``requests`` only under its own ``[smdpp]``
-    # extra (see ``setup.py``: ``extras_require={"smdpp": ["requests", ...]}``),
-    # but the SAIP / session-bound BPP code paths the local-access
-    # session reaches still ``import requests`` transitively (e.g.
-    # ``pySim.esim.es8p`` / ``pySim.esim.bsp``). When ``requests`` is
-    # not on the interpreter, ``_build_session_bound_profile_package``
-    # raises ``ModuleNotFoundError`` deep inside upstream code. Pin
-    # the dep at our extras layer so a fresh ``pip install
-    # 'yggdrasim[saip]'`` produces a working SAIP runtime instead of
-    # a half-installed one that only fails at first encode.
-    "requests>=2.28,<3.0",
-]
-# ``gui`` pulls the FastAPI + uvicorn + pywebview stack for the
-# desktop ``--gui`` flow. ``gui-server`` intentionally omits
-# pywebview so a headless lab server (``--web-server``) does not need
-# GTK / Qt / WebKit on the host. Both extras are additive; a host
-# that wants the native desktop window and the remote API installs
-# ``yggdrasim[gui]`` (pywebview implies the server deps).
-gui = [
-    "fastapi>=0.110,<1.0",
-    "uvicorn[standard]>=0.27,<1.0",
-    "pywebview>=5.0,<6.0",
-    "websockets>=12.0,<14.0",
-]
-gui-server = [
-    "fastapi>=0.110,<1.0",
-    "uvicorn[standard]>=0.27,<1.0",
-    "websockets>=12.0,<14.0",
-]
+# ``saip`` is preserved as an empty back-compat alias. pySim moved
+# into the base dependency block once SCP03 / SCP80 began routing
+# their KDF and cipher primitives through it, so onboarding scripts
+# that still reference ``pip install 'yggdrasim[saip]'`` keep
+# working without pulling anything new.
+saip = []
 # ``full`` is the HIL-capable development profile: everything the
 # maintainer needs on a Linux box to run, build, and test the suite.
-# ``full`` includes the SAIP surface so a single ``pip install
+# ``full`` now includes the SAIP surface so a single ``pip install
 # 'yggdrasim[full]'`` leaves nothing optional to chase afterwards.
 full = [
     "pyudev; sys_platform == 'linux'",
     "pyinstaller",
     "pytest",
-    "pySim @ git+https://github.com/osmocom/pysim.git",
-    # See the comment under ``[saip]``: pySim's session-bound BPP
-    # surface imports ``requests`` even though upstream only declares
-    # it under its own ``[smdpp]`` extra. Re-pin here so ``[full]``
-    # stays self-contained and ``--pytest`` against the regression
-    # suite passes on a fresh runner.
-    "requests>=2.28,<3.0",
 ]
 
 [project.scripts]
@@ -198,7 +158,7 @@ Homepage = "https://github.com/1oT/YggdraSIM"
 Documentation = "https://github.com/1oT/YggdraSIM/tree/main/guides"
 Repository = "https://github.com/1oT/YggdraSIM"
 Issues = "https://github.com/1oT/YggdraSIM/issues"
-Changelog = "https://github.com/1oT/YggdraSIM/releases"
+Changelog = "https://github.com/1oT/YggdraSIM/blob/main/V1_RELEASE_AUDIT.md"
 
 [tool.setuptools]
 include-package-data = true
@@ -217,10 +177,13 @@ include-package-data = true
 "Tools.EumDiag" = ["dissector.lua"]
 
 [tool.black]
-# Canonical formatter target for the project's "style only" sweep across
-# SCP03 / SCP80 / main. Line length matches the project's historical cap.
-# Target version is fixed to the project's minimum supported Python
-# (3.10) so the output is stable across the release matrix.
+# Canonical formatter target for the "style only" sweep flagged by audit
+# item SCP03-P1-03 (and the sibling SCP80-P1-04 / MAIN-P1-03 requests to
+# run the same pass across SCP80/ and main/). Line length matches the
+# project's historical cap; keep this section in sync with the maintainer
+# ruling before the sweep lands. Target version is fixed to the project's
+# minimum supported Python (3.10) so the output is stable across the
+# release matrix.
 line-length = 100
 target-version = ["py310"]
 include = '\.pyi?$'

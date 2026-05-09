@@ -6,8 +6,8 @@ operator portal for `ADD-EIM` / peer eIM linking.
 For the canonical operator-side material (sidecar schemas, selector
 ordering, BYO-keys checklist, custodial guidance) see:
 
-- [`guides/CONFIGURATION_AND_CERTIFICATES.md`](https://github.com/1oT/YggdraSIM/blob/main/guides/CONFIGURATION_AND_CERTIFICATES.md)
-  -- § *Local eIM signing certificates*
+- [`guides/CONFIGURATION_AND_CERTIFICATES.md`](../../../../guides/CONFIGURATION_AND_CERTIFICATES.md)
+  — § *Local eIM signing certificates*
 - The hardcoded identity sheet for the bundled fake eIM:
   [`Workspace/LocalEIM/certs/addeim/SIMULATED_EIM_IDENTITY.md`](https://github.com/1oT/YggdraSIM/blob/main/Workspace/LocalEIM/certs/addeim/SIMULATED_EIM_IDENTITY.md)
 

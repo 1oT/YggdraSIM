@@ -1,3 +1,4 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """Canonical Nord palette for YggdraSIM CLI / TUI / docs surfaces.
 
 Single source of truth for the muted Nord look-and-feel. Every CLI

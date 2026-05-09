@@ -1,7 +1,9 @@
-"""CSIM legacy / analog / registration / PUZL / PRL / LCS annotated
-opaque EFs.
+"""
+Wave D Pass C — CSIM legacy / analog / registration / PUZL / PRL / LCS
+annotated opaque EFs.
 
-With these 19 EFs upgraded, every entry in
+This is the final pass of the opaque-catalog promotion campaign. With
+these 19 EFs upgraded, every entry in
 :data:`_OPAQUE_PASSTHROUGH_EF_CATALOG` has a dedicated ``if token ==
 ...`` route in ``_decode_known_ef_payload`` and the generic opaque
 catalog label is only ever reached for truly unreferenced EFs.
@@ -148,7 +150,8 @@ def test_opaque_catalog_has_no_remaining_gap() -> None:
     """Final invariant: every catalog key has a semantic dispatch route.
 
     We detect this by monkey-patching ``_lookup_opaque_passthrough_ef``
-    to record every time the catalog fallback is consulted. After , no catalog key should fall through to the generic opaque
+    to record every time the catalog fallback is consulted. After Wave
+    D Pass C, no catalog key should fall through to the generic opaque
     decoder for an 8-byte probe.
     """
 

@@ -50,7 +50,6 @@ flowchart LR
     Launcher --> ApduFuzz["Tools.ApduFuzz"]
     Launcher --> EumDiag["Tools.EumDiag"]
     Launcher --> Simulator["SIMCARD<br/>simulator backend"]
-    Launcher --> GuiServer["yggdrasim_common.gui_server<br/>(Universal GUI)"]
 
     SCP03 --> Card[("PC/SC reader or<br/>SIMCARD simulator<br/>UICC / eUICC")]
     SCP80 --> Card
@@ -547,8 +546,6 @@ flowchart LR
 - `SIMCARD` is the simulator backend activated by `--card-backend sim`,
   including ETSI / GP / SCP03 / SCP80 / Toolkit and the 5G AKA / EAP-AKA' /
   AKMA / SUCI / `GET IDENTITY` stack
-- `yggdrasim_common/gui_server/` is the optional Universal GUI Command
-  Center, started with `--gui` (desktop) or `--web-server` (FastAPI)
 
 ## Deep reference
 

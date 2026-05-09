@@ -1,4 +1,4 @@
-# SIMtrace2 -- cardem firmware and osmo-remsim toolchain
+# SIMtrace2 — cardem firmware and osmo-remsim toolchain
 
 The YggdraSIM HIL bridge sits on top of Osmocom's
 [`osmo-remsim-client-st2`](https://osmocom.org/projects/osmo-remsim/)
@@ -18,7 +18,7 @@ This guide covers three scenarios:
 
 The YggdraSIM launcher reads all bridge configuration from the main
 menu entry `[B] HIL Bridge Session`. This document only covers the
-hardware and host-side prerequisites -- see
+hardware and host-side prerequisites — see
 [`HIL_BRIDGE_GUIDE.md`](HIL_BRIDGE_GUIDE.md) for the operator flow once
 everything is in place.
 
@@ -41,7 +41,7 @@ Bus 001 Device 012: ID 1d50:60e3 OpenMoko, Inc. SIMtrace 2 (Osmocom)
 ```
 
 `1d50:60e3` is the normal USB identity. `1d50:4004` shows up when the
-board is in DFU (bootloader) mode -- that is the window where you can
+board is in DFU (bootloader) mode — that is the window where you can
 flash a new firmware.
 
 If the board is not listed at all:
@@ -117,7 +117,7 @@ sudo dfu-util -a 0 -D firmware/bin/cardem-simtrace.bin
 
 ## 6. Install `osmo-remsim-client-st2`
 
-### Option A -- sysmocom apt repository
+### Option A — sysmocom apt repository
 
 ```bash
 sudo apt-get install --no-install-recommends software-properties-common gnupg
@@ -135,11 +135,11 @@ sudo apt-get install --no-install-recommends \
 ```
 
 Substitute `Debian_12` with the matching identifier for your
-distribution (`Debian_11`, `Raspbian_12`, `Ubuntu_22.04`, ...). Refer to
+distribution (`Debian_11`, `Raspbian_12`, `Ubuntu_22.04`, …). Refer to
 <https://osmocom.org/projects/cellular-infrastructure/wiki/Binary_Packages>
 for the current list.
 
-### Option B -- source build
+### Option B — source build
 
 Clone and build `libosmocore` first, then `osmo-remsim`:
 
@@ -223,9 +223,9 @@ those; the HIL probes will call out regressions immediately.
 
 ## Related guides
 
-- [`HIL_BRIDGE_GUIDE.md`](HIL_BRIDGE_GUIDE.md) -- operator flow.
-- [`INSTALL_FULL.md`](INSTALL_FULL.md) -- HIL-capable executable install.
-- [`INSTALL_RASPBERRYPI.md`](INSTALL_RASPBERRYPI.md) -- Pi-specific HIL notes.
+- [`HIL_BRIDGE_GUIDE.md`](HIL_BRIDGE_GUIDE.md) — operator flow.
+- [`INSTALL_FULL.md`](INSTALL_FULL.md) — HIL-capable executable install.
+- [`INSTALL_RASPBERRYPI.md`](INSTALL_RASPBERRYPI.md) — Pi-specific HIL notes.
 - Osmocom upstream documentation:
   - <https://osmocom.org/projects/sim-card/wiki/SIMtrace2>
   - <https://osmocom.org/projects/osmo-remsim/wiki>

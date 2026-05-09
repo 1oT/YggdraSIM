@@ -41,7 +41,7 @@ bundle, curve preference, AKI/SKI tie-breaks), and BYO-keys checklist
 all live in the canonical operator guide:
 
 - [`guides/CONFIGURATION_AND_CERTIFICATES.md`](../../../guides/CONFIGURATION_AND_CERTIFICATES.md)
-  -- § *SCP11 RSP certificates (local-access)*
+  — § *SCP11 RSP certificates (local-access)*
 
 Selector code: [`SCP11/local_access/cert_store.py`](../cert_store.py).
 

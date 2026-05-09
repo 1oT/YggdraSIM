@@ -669,7 +669,7 @@ class SaipTranscodeTuiInteractionTests(unittest.TestCase):
 
                 first_group_labels = [str(child.label) for child in first_group.children]
                 self.assertIn(
-                    f"[0] ({humanize_saip_display_name('filePath')}) -- DF.TELECOM",
+                    f"[0] ({humanize_saip_display_name('filePath')}) — DF.TELECOM",
                     first_group_labels,
                 )
                 # The remaining children are EF entries rendered as

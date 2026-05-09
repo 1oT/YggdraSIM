@@ -1,4 +1,4 @@
-"""Coverage for ISIM SMS storage EFs:
+"""Twenty-fourth-pass gap-coverage suite for ISIM SMS storage.
 
 3GPP TS 31.103 §4.2.7 lays out the ISIM Service Table, and the
 simulator advertises every bit (`EF.IST = 0xFF`):
@@ -7,9 +7,10 @@ simulator advertises every bit (`EF.IST = 0xFF`):
     bit 7 = service 7: SMS status reports in ISIM
     bit 8 = service 8: SM-over-IP support indication
 
-Without the corresponding EFs, a modem that keys SMS storage off
-the ISIM service table walks straight into ``6A 82`` on every
-SMS-MO/MT save.
+Round-23 closed the GBA pair (services 2 / 4); round-24 closes
+the SMS-side coherence gap. Without these EFs, a modem that
+keys SMS storage off the ISIM service table walks straight into
+``6A 82`` on every SMS-MO/MT save.
 
 | FID  | Name    | Structure        | Default                           |
 | ---- | ------- | ---------------- | --------------------------------- |

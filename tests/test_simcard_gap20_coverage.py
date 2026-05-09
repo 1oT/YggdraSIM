@@ -1,9 +1,10 @@
-"""Coverage for SIMCARD call-history / SMS-storage default EFs:
+"""Twentieth-pass gap-coverage suite for SIMCARD default EFs.
 
-These EFs are always pre-allocated on real USIMs; without them a
-modem boot-sequence read against any of these FIDs returns
-``6A 82`` ("file not found"), which short-circuits voice / SMS
-init flows that depend on UPDATE RECORD round-trips.
+Round-20 closes the call-history / SMS-storage EFs that real
+USIMs always ship pre-allocated. Without these defaults a modem
+boot-sequence read against any of these FIDs returns ``6A 82``
+("file not found"), which short-circuits voice / SMS init flows
+that depend on UPDATE RECORD round-trips:
 
 * EF.ICI (``6F80``) -- 3GPP TS 31.102 §4.2.20 Incoming Call
   Information. Cyclic, 30 bytes per record (8-byte alpha plus

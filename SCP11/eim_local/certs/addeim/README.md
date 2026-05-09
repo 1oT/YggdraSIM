@@ -7,7 +7,7 @@ For the canonical operator-side material (sidecar schemas, selector
 ordering, BYO-keys checklist, custodial guidance) see:
 
 - [`guides/CONFIGURATION_AND_CERTIFICATES.md`](../../../../guides/CONFIGURATION_AND_CERTIFICATES.md)
-  -- § *Local eIM signing certificates*
+  — § *Local eIM signing certificates*
 - The hardcoded identity sheet for the bundled fake eIM:
   [`Workspace/LocalEIM/certs/addeim/SIMULATED_EIM_IDENTITY.md`](../../../../Workspace/LocalEIM/certs/addeim/SIMULATED_EIM_IDENTITY.md)
 

@@ -1,4 +1,6 @@
-"""Coverage for TS 102 223 maintenance proactive TR latches (SET UP EVENT LIST / POLLING OFF / TIMER MANAGEMENT / PROVIDE LOCAL INFORMATION):
+"""Eighteenth-pass gap-coverage suite for SIMCARD surfaces beyond ES10.
+
+Round-18 closes the following:
 
 * ETSI TS 102 223 §6.4.16 ``SET UP EVENT LIST`` -- TR latch was
   missing entirely from ``_apply_terminal_response``. The new

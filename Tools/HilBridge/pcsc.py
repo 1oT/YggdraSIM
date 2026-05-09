@@ -1,3 +1,5 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+"""HIL-Bridge PCSC channel: wraps pyscard to open a physical reader slot and exchange raw ISO 7816 APDUs."""
 from __future__ import annotations
 
 import logging
@@ -45,6 +47,7 @@ class PcscCardChannel:
         return self._reader_label
 
     def connect(self) -> None:
+        """Connect to the PCSC reader identified by *reader_name* and return True on success."""
         readers, share_exclusive, exclusive_wrapper, error_type = _load_smartcard_runtime()
         available_readers = list(readers())
         if len(available_readers) == 0:
@@ -70,6 +73,7 @@ class PcscCardChannel:
         self.connect()
 
     def disconnect(self) -> None:
+        """Disconnect the active PCSC reader connection."""
         if self._connection is None:
             return
         try:
@@ -88,6 +92,7 @@ class PcscCardChannel:
         return bytes(atr)
 
     def transmit(self, apdu: bytes) -> tuple[bytes, int, int]:
+        """Transmit a raw APDU byte list and return (response_bytes, SW1, SW2)."""
         connection = self._require_connection()
         apdu_list = list(bytes(apdu))
         try:

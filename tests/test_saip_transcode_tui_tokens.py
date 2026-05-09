@@ -30,7 +30,7 @@ class FormatTokenValuePreviewTests(unittest.TestCase):
         long_value = "AB" * 200
         preview = format_token_value_preview(long_value)
         self.assertLess(len(preview), 50)
-        self.assertTrue(preview.endswith("..."))
+        self.assertTrue(preview.endswith("…"))
 
     def test_dict_is_json_encoded(self) -> None:
         preview = format_token_value_preview({"zero_len": 10})
@@ -41,7 +41,7 @@ class FormatTokenValuePreviewTests(unittest.TestCase):
             {"pattern_hex": "FF", "byte_len": 2048, "extra": "x" * 120}
         )
         self.assertLess(len(preview), 50)
-        self.assertTrue(preview.endswith("..."))
+        self.assertTrue(preview.endswith("…"))
 
     def test_none_is_stringified(self) -> None:
         self.assertEqual(format_token_value_preview(None), "None")

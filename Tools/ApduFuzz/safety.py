@@ -1,7 +1,8 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """
 Safety gate for the APDU mutation fuzzer.
 
-Fuzzing a physical eUICC can permanently brick the card -- some vendor
+Fuzzing a physical eUICC can permanently brick the card — some vendor
 OS images refuse to re-enter the post-INSTALL secure channel if a
 reader disconnect happens mid-session, others panic on BER-TLV length
 mismatches and lock the ISD-R. This module exists to make sure nobody
@@ -17,7 +18,7 @@ Safety layers enforced here:
    mutated APDU is transmitted.
 3. Crash-dump directory. Every run writes the mutated APDU, the
    response bytes (if any), and the full corpus seed to
-   ``reports/fuzzer/<timestamp>/``. This is mandatory -- without
+   ``reports/fuzzer/<timestamp>/``. This is mandatory — without
    per-run forensic records we cannot reproduce or audit failures.
 
 This module is pure and has no transport dependencies.
@@ -113,6 +114,7 @@ def _chmod_best_effort(path: Path, mode: int) -> None:
 
 
 def create_run_dir(config: SafetyConfig, *, tag: str = "run") -> Path:
+    """Create and return a timestamped run directory for this fuzzer session."""
     root = resolve_crash_dump_root(config)
     root.mkdir(parents=True, exist_ok=True)
     _chmod_best_effort(root, 0o700)
@@ -208,6 +210,7 @@ def dump_run_manifest(
     seed: int,
     mutator_names: Iterable[str],
 ) -> Path:
+    """Write the fuzzer run manifest JSON to the run directory."""
     target = run_dir / "manifest.json"
     record = {
         "workspace_root": str(config.workspace_root),

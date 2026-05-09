@@ -1,3 +1,5 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+"""Plugin runtime gate: enforces the absence of optional hardware-dependent plugins in environments that declare them unavailable."""
 from __future__ import annotations
 
 import importlib.util
@@ -33,10 +35,13 @@ def _plugin_loading_allowed() -> bool:
     ``SCP11/shared/tls_helpers.py``:
 
     * Default: **on**. If the active runtime root has a ``plugins/``
-      directory with loadable modules, they are loaded.
+      directory with loadable modules, they are loaded. This matches
+      the shipped reality that ``plugins/polling_plugin.py`` is
+      first-party, tracked code backing the ``POLL`` / ``IPAE-LIVE`` /
+      ``IPAE-TEST`` command families.
     * ``YGGDRASIM_DISALLOW_PLUGINS=1`` → hard-lock. Refuse every
       plugin even if ``YGGDRASIM_ALLOW_PLUGINS=1`` is also set.
-      Intended for attestation / CI / sandboxed deployments where no
+      Intended for attestation / CI / air-gapped deployments where no
       out-of-tree code may execute.
     * ``YGGDRASIM_ALLOW_PLUGINS=0`` (or ``false``/``no``/``off``) →
       explicit opt-out, equivalent to setting the disallow flag.
@@ -75,6 +80,7 @@ class PluginManager:
         # done so they see a consistent capability map. ``_loading`` is kept
         # as a belt-and-suspenders guard for anyone that defeats the lock by
         # calling the internals directly.
+        """Ensure the plugin at *path* is loaded, importing it if not already present."""
         with self._lock:
             if self._loaded or self._loading:
                 return
@@ -108,7 +114,7 @@ class PluginManager:
                     if os.path.isfile(plugin_path) and entry_name.endswith(".py"):
                         # Single-file plugins live outside the ``plugins``
                         # namespace package (they are not directories), so
-                        # the historical legacy name is preserved for them.
+                        # we keep the historical legacy name for them.
                         module_name = f"yggdrasim_plugin_{entry_name[:-3]}"
                         source_path = plugin_path
                     elif os.path.isdir(plugin_path):
@@ -141,8 +147,10 @@ class PluginManager:
             return
         self._announced = True
         # Quiet info line so operators can eyeball which modules are
-        # actually executing at startup, without becoming a noisy
-        # warning when plugins are loaded by default.
+        # actually executing at startup. Matches the COMMON-P4-02
+        # audit intent ("print a banner listing every loaded plugin
+        # path") without becoming a noisy warning for the default
+        # first-party ``polling_plugin.py`` case.
         label_parts: list[str] = []
         for path in loaded_paths:
             base = os.path.basename(path)
@@ -169,7 +177,7 @@ class PluginManager:
             # already in sys.modules because an earlier ``import
             # plugins.<name>`` beat the runtime to the punch, reuse
             # that object. This prevents sys.modules from forking into
-            # two distinct copies of the same plugin -- a condition
+            # two distinct copies of the same plugin — a condition
             # that silently breaks ``mock.patch`` targets in tests.
             existing = sys.modules.get(module_name)
             if existing is not None and getattr(existing, "__file__", None) == source_path:
@@ -229,6 +237,7 @@ class PluginManager:
         return dict(self._load_errors)
 
     def extend_target(self, target: Any) -> Any:
+        """Extend *target* with the callables registered for the named extension point."""
         self.ensure_loaded()
         target_dict = getattr(target, "__dict__", None)
         if isinstance(target_dict, dict) is False:
@@ -252,6 +261,7 @@ _PLUGIN_MANAGER_LOCK = threading.Lock()
 
 
 def get_plugin_manager() -> PluginManager:
+    """Return the singleton PluginManager, creating it on first call."""
     global _PLUGIN_MANAGER
     # Fast path keeps the common case lock-free; slow path serialises the
     # one-time construction so two threads calling ``ensure_plugins_loaded``

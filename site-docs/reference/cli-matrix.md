@@ -75,7 +75,7 @@ specifics.
 | SCP03 keybag export | SCP03 shell, after `AUTH-SD`: `EXPORT-KEYBAG [path.keys.json] [label]` |
 | SCP11 Local Access keybag export (shell) | `EXPORT-KEYBAG [path.keys.json] [label]` after any BSP-building verb |
 | SCP11 Local Access keybag export (CLI) | `python -m SCP11.local_access --dump-keybag path.keys.json` |
-| SCP11 Live keybag export | `python -m SCP11.live --dump-keybag ...` is a **no-op stub** -- live-mode BSP keys never reach the host |
+| SCP11 Live keybag export | `python -m SCP11.live --dump-keybag …` is a **no-op stub** — live-mode BSP keys never reach the host |
 
 ## One-shot examples
 
@@ -105,7 +105,7 @@ python -m Tools.ProfilePackage --cmd "USE profile.der; LINT --strict; EXIT"
 
 - [Operator Surfaces](../operator-surfaces.md)
 - [Getting Started](../getting-started.md)
-- [HIL Bridge -- offline pcap replay](../subsystems/hil-bridge.md#offline-pcap-replay)
+- [HIL Bridge — offline pcap replay](../subsystems/hil-bridge.md#offline-pcap-replay)
 - [Replay a HIL pcap offline](../how-to/replay-hil-pcap-offline.md)
 - `guides/CLI_AND_PIPING_GUIDE.md`
 

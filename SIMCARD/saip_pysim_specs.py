@@ -1,3 +1,4 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """pySim profile-template registry adapter.
 
 Bridges pySim's ``ProfileTemplateRegistry`` (TCA SAIP §9 / Annex A
@@ -312,6 +313,7 @@ class FcpAttributes:
 
     @property
     def transparent_size(self) -> int:
+        """Return the declared transparent file size from the FCP template in bytes."""
         if self.file_type in ("LF", "CY"):
             if self.nb_rec and self.rec_len:
                 return int(self.nb_rec) * int(self.rec_len)
@@ -651,7 +653,7 @@ def _gfm_collect_link_path(file_elements: Any) -> tuple[str, ...]:
     """Pull the PRIVATE 7 ``linkPath`` extension from a GFM tuple list.
 
     pySim's ``File.from_fileDescriptor`` does not yet recognise the
-    SAIP §8.3.5 ``linkPath`` extension; mirrors the canonical resolver logic
+    SAIP §8.3.5 ``linkPath`` extension; we mirror Phase B's logic
     against the same descriptor blob so GFM-routed EFs still surface
     their explicit link target.
     """
@@ -1009,7 +1011,7 @@ def apply_pysim_service_table_overlay_to_inspector() -> dict[str, int]:
     ``Tools/ProfilePackage/saip_asn1_decode`` ships hand-curated copies
     of the USIM / Enabled-Service / ISIM service-name tables so the
     inspector stays self-contained when pySim is absent. When pySim
-    *is* present its upstream-tracked values are preferred; this helper
+    *is* present we prefer its upstream-tracked values; this helper
     walks the inspector module and replaces the relevant dicts in
     place.
 

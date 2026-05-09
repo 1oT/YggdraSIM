@@ -1,15 +1,17 @@
-"""SGP.32 §6.5 IPA-poll end-to-end against the simulator engine.
+"""SGP.32 §6.5 IPA-poll end-to-end against the real simulator engine.
 
 Runs the full TIMER EXPIRATION -> OPEN CHANNEL -> SEND DATA ->
-RECEIVE DATA -> CLOSE CHANNEL pipeline with ``SimulatedSimCardEngine``
-and asserts that an eIM-shaped ``AddEim`` (BF58) ESipa payload
-delivered through RECEIVE DATA lands as a new ``SimEimEntry`` in the
-simulator's ISD-R state.
+RECEIVE DATA -> CLOSE CHANNEL pipeline with the real
+``SimulatedSimCardEngine`` and asserts that an eIM-shaped
+``AddEim`` (BF58) ESipa payload delivered through RECEIVE DATA
+lands as a new ``SimEimEntry`` in the simulator's ISD-R state.
 
-The modem is impersonated by a tiny in-test FETCH/TR loop. The ESipa
-payload is the raw outer SGP.32 TLV that exercises the dispatcher
-path used when the simulator is plugged into a local eIM ESipa
-server.
+Production cards do this through a TLS-terminated bearer; here
+the modem is impersonated by a tiny in-test FETCH/TR loop. The
+ESipa payload is the raw outer SGP.32 TLV the eIM would emit
+once the modem stripped HTTP/TLS framing, which exercises the
+exact dispatcher path the real eIM hits when the simulator is
+plugged into the local eIM ESipa server.
 """
 
 from __future__ import annotations
@@ -220,15 +222,15 @@ class IpaPollEngineLoopbackTests(unittest.TestCase):
         toolkit.ipa_poll_eim_port = 443
         toolkit.ipa_poll_alpha_id = "eIM Poll"
         toolkit.ipa_poll_request_payload = b""
-        # Seed the resolved-IP cache so the DNS phase is skipped;
-        # this loopback test exercises the dispatch contract, and
-        # the resolver state machine has its own coverage in
+        # Skip the DNS-over-BIP leg by seeding the resolved-IP cache;
+        # this loopback test exercises the eIM-side dispatch contract,
+        # not the resolver state machine which has its own coverage in
         # ``IpaPollDnsPhaseTests``.
         toolkit.ipa_poll_resolved_ip = "203.0.113.7"
         toolkit.ipa_poll_resolved_ip_family = 4
-        # Disable TLS for the dispatcher loopback test; the contract
-        # under test is the SGP.32 envelope wiring, and TLS has its
-        # own targeted suite.
+        # Disable in-card TLS for the dispatcher loopback test -- the
+        # contract under test is the SGP.32 envelope wiring, not the
+        # TLS engine (which has its own targeted suite).
         toolkit.ipa_poll_tls_enabled = False
         toolkit.timer_management_seconds = 30
         toolkit.timer_management_id = 1

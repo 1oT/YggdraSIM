@@ -1036,7 +1036,7 @@ class SimulatedConnectionTests(unittest.TestCase):
             self.assertGreaterEqual(len(entries), 1)
             first_entry = entries[0]
             self.assertEqual(first_entry["eim_id"], "2.25.311782205282738360923618091971140414400")
-            self.assertEqual(first_entry["eim_fqdn"], "eim.yggdrasim.example.test")
+            self.assertEqual(first_entry["eim_fqdn"], "eim.example.test")
             self.assertIn("eimRetrieveHttps", first_entry["supported_protocol"])
             self.assertIn("eimInjectHttps", first_entry["supported_protocol"])
             self.assertEqual(
@@ -1079,7 +1079,7 @@ class SimulatedConnectionTests(unittest.TestCase):
         )
         self.assertEqual(
             str(payload.get("eim_fqdn", "")).strip(),
-            "eim.yggdrasim.example.test",
+            "eim.example.test",
         )
 
     def test_simulated_connection_applies_metadata_overrides_from_quirks_file(self) -> None:
@@ -1562,12 +1562,12 @@ metadata_overrides = {{
                 entries = decode_eim_configuration_entries(bytes(eim_response))
                 self.assertEqual(len(entries), 1)
                 self.assertEqual(entries[0]["eim_id"], default_eim_id)
-                self.assertEqual(entries[0]["eim_fqdn"], "eim.yggdrasim.example.test")
+                self.assertEqual(entries[0]["eim_fqdn"], "eim.example.test")
 
             recreated_engine = SimulatedSimCardEngine(euicc_store_root=temp_dir)
             self.assertEqual(len(recreated_engine.state.eim_entries), 1)
             self.assertEqual(recreated_engine.state.eim_entries[0].eim_id, default_eim_id)
-            self.assertEqual(recreated_engine.state.eim_entries[0].eim_fqdn, "eim.yggdrasim.example.test")
+            self.assertEqual(recreated_engine.state.eim_entries[0].eim_fqdn, "eim.example.test")
 
     def test_simulated_connection_tracks_stateful_es10_session_and_install_flow(self) -> None:
         with mock.patch.dict(os.environ, {CARD_BACKEND_ENV: "sim"}, clear=False):
@@ -2154,7 +2154,7 @@ metadata_overrides = {{
                 self.assertEqual((sw1, sw2), (0x90, 0x00))
 
                 transaction_id = bytes.fromhex("2233445566778899AABBCCDDEEFF0011")
-                server_address = "dpp.example.test"
+                server_address = "dpp1.esim.tst.1ot.mobi"
                 cert_der, cert_private_key = build_self_signed_cert_and_key("Notification Target DPpb")
                 auth_payload = build_authenticate_server_payload(
                     transaction_id=transaction_id,

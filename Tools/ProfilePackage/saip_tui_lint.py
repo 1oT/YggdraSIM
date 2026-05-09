@@ -1,3 +1,4 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """
 Run SaipProfileLinter against TRANSCODE-TUI JSON buffer (lazy import of linter only from TUI).
 """
@@ -8,6 +9,10 @@ from dataclasses import dataclass, field
 from typing import Optional
 
 from .lint_engine import LintReport, SaipProfileLinter
+from .saip_hex_template import (
+    detect_inline_placeholders,
+    substitute_inline_placeholders_in_editor_json,
+)
 from .saip_json_codec import (
     parse_editor_json,
     parse_editor_json_template_aware,
@@ -21,6 +26,8 @@ class TuiLintOutcome:
     template_mode: bool = False
     undefined_tokens: frozenset[str] = field(default_factory=frozenset)
     placeholder_paths: frozenset[str] = field(default_factory=frozenset)
+    inline_placeholder_count: int = 0
+    inline_placeholder_paths: frozenset[str] = field(default_factory=frozenset)
 
 
 def lint_profile_json_buffer(
@@ -46,6 +53,19 @@ def lint_profile_json_buffer(
     undefined_tokens: frozenset[str] = frozenset()
     template_mode = False
 
+    # Pre-substitute inline typed placeholders (``{name:TYPE:length[:mod]}``)
+    # so dejsonify sees valid hex. The paths of rewritten hex leaves are
+    # fed into the linter as ``placeholder_paths`` to downgrade FAIL/WARN
+    # findings rooted beneath them — a placeholder-bearing leaf is
+    # authoring scaffolding, not a broken profile, and should read as
+    # INFO rather than red.
+    inline_paths: frozenset[str] = frozenset()
+    inline_count = 0
+    if detect_inline_placeholders(json_text):
+        json_text, inline_paths, inline_count = (
+            substitute_inline_placeholders_in_editor_json(json_text)
+        )
+
     try:
         document = parse_editor_json(json_text)
     except Exception as strict_exc:
@@ -61,6 +81,8 @@ def lint_profile_json_buffer(
                     f"{strict_message} (template-aware retry also failed: "
                     f"{template_exc})"
                 ),
+                inline_placeholder_count=inline_count,
+                inline_placeholder_paths=inline_paths,
             )
         template_mode = True
 
@@ -76,6 +98,8 @@ def lint_profile_json_buffer(
             placeholder_paths = frozenset()
             undefined_tokens = frozenset()
 
+    merged_placeholder_paths = frozenset(placeholder_paths | inline_paths)
+
     linter = SaipProfileLinter(strict=strict)
     report = linter.lint_decoded_document(
         decoded_document=document,
@@ -85,7 +109,7 @@ def lint_profile_json_buffer(
         metadata=None,
         metadata_path=None,
         emit_missing_check_finding=False,
-        placeholder_paths=placeholder_paths,
+        placeholder_paths=merged_placeholder_paths,
         undefined_tokens=undefined_tokens,
     )
     return TuiLintOutcome(
@@ -93,7 +117,9 @@ def lint_profile_json_buffer(
         parse_error=None,
         template_mode=template_mode,
         undefined_tokens=undefined_tokens,
-        placeholder_paths=placeholder_paths,
+        placeholder_paths=merged_placeholder_paths,
+        inline_placeholder_count=inline_count,
+        inline_placeholder_paths=inline_paths,
     )
 
 

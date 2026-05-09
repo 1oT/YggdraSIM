@@ -18,21 +18,21 @@ team directly for tailored work.
 
 ## What 1oT can help with
 
-- **eUICC / eSIM integration** -- SGP.22 and SGP.32 bring-up, device-side
+- **eUICC / eSIM integration** — SGP.22 and SGP.32 bring-up, device-side
   LPAd and IPAd, eUICC-side IPAe, eIM remote management, and ES9+ interop
-- **SAIP profile work** -- profile audits, linting, transcoding,
+- **SAIP profile work** — profile audits, linting, transcoding,
   operator-specific binders, `3GPP-USIM` and `GSM-ACCESS` templates
-- **SCP11 relay debugging** -- live ES9+ flows, PK/SK negotiation,
+- **SCP11 relay debugging** — live ES9+ flows, PK/SK negotiation,
   MetaData signing, and eSIM bound-profile download troubleshooting
-- **HIL rigs** -- SIMtrace2 cardem, passive sniffing, APDU capture,
+- **HIL rigs** — SIMtrace2 cardem, passive sniffing, APDU capture,
   pcap replay, and protocol-conformance harnesses around
   `ETSI TS 102 221` and GlobalPlatform
-- **SCP80 OTA** -- campaign design, PoR handling, crypto review, and
+- **SCP80 OTA** — campaign design, PoR handling, crypto review, and
   production-grade key management
-- **Private forks** -- a named feature branch where commercial work
+- **Private forks** — a named feature branch where commercial work
   is performed, with back-porting to YggdraSIM main where it does not
   conflict with customer confidentiality
-- **Training** -- focused sessions on the secure-element stack for
+- **Training** — focused sessions on the secure-element stack for
   your engineering team (APDU, GlobalPlatform, SGP.22/32, SAIP)
 
 ## Engagement shapes
@@ -60,12 +60,12 @@ team directly for tailored work.
 
 ## Contact
 
-- **Commercial conversations** -- reach out via the contact form on
+- **Commercial conversations** — reach out via the contact form on
   [1ot.com](https://www.1ot.com/) or through the inbound channel your
   1oT account manager has provided.
-- **Public bugs and feature requests** -- open a GitHub issue at
+- **Public bugs and feature requests** — open a GitHub issue at
   [`1oT/YggdraSIM`](https://github.com/1oT/YggdraSIM/issues).
-- **Security disclosures** -- follow the process in
+- **Security disclosures** — follow the process in
   [`.github/SECURITY.md`](https://github.com/1oT/YggdraSIM/blob/main/.github/SECURITY.md)
   rather than opening a public issue.
 

@@ -2,6 +2,10 @@
 
 YggdraSIM is a Python toolkit for secure-element research, eUICC analysis, SIM/eSIM management, OTA payload work, SCP11 relay/local flows, and SAIP profile-package tooling. The repository keeps the operator surfaces, protocol helpers, and test suite in one workspace so card work, relay work, and package work can be exercised without switching projects. The SAIP decoding path and the SCP11 local / eIM flows pull in upstream `pySim`; install them in one shot with `pip install -e '.[saip]'` (the `[saip]` extra pins pySim directly from its GitHub mirror).
 
+> **Releases.** v1.0.0 was tagged on 2026-04-29; v1.0.1 is the
+> follow-up bug-fix release. See [`CHANGELOG.md`](CHANGELOG.md) for
+> the per-release history.
+
 ## Distribution at a glance
 
 YggdraSIM is offered in three shapes:
@@ -58,8 +62,7 @@ powershell -ExecutionPolicy Bypass -File scripts\install\install-windows.ps1
 | `Tools/ProfilePackage/` | SAIP shell, transcode UI, lint engine, JSON↔DER bridge | profile-package shell + TUI |
 | `Tools/SuciTool/` | SUCI helper tooling | helper shell |
 | `Tools/ApduFuzz/` | Safety-gated eUICC APDU mutation fuzzer (`--i-mean-it` + ICCID/IMSI allow-list) | `yggdrasim-apdu-fuzzer` |
-| `Tools/EumDiag/` | EUM / SM-DP+ Diagnostics: session-key injection + Wireshark/tshark Lua dissector for BF36 BPPs | `yggdrasim-eum-diag` |
-| `yggdrasim_common/gui_server/` | Optional Universal GUI Command Center (experimental): FastAPI API + pywebview desktop window or headless lab server | `--gui` / `--web-server` |
+| `Tools/EumDiag/` | EUM / SM-DP+ "God-Mode": session-key injection + Wireshark/tshark Lua dissector for BF36 BPPs | `yggdrasim-eum-diag` |
 | `plugins/` | Runtime-loaded optional plugins (polling, custom commands) discovered at launch | drop-in `register_plugins()` modules |
 | `pysim/` | **Optional** developer checkout of upstream pySim (gitignored). Only needed when working against an unreleased upstream branch; the released SAIP surface ships via the `[saip]` extra (`pip install 'yggdrasim[saip]'`). | optional external tree |
 
@@ -73,7 +76,7 @@ powershell -ExecutionPolicy Bypass -File scripts\install\install-windows.ps1
 - eIM-centric local package work, localized polling, hotfolder campaigns, and response tracking through `SCP11/eim_local`.
 - Hardware-in-the-loop SIMtrace2 bridge with GSMTAP mirroring, brokered APDU side-channel access, modem REFRESH control, and AT+CSIM / AT+CRSM transcoding for modem cold-boot rigs through `Tools/HilBridge`.
 - In-process simulated UICC / eUICC backend (`--card-backend sim`) with full ETSI TS 102 221 file system, ISD-R + ISD-P personalities, persistent EID-scoped store, GP / SCP03 / SCP80 secure messaging, and an ETSI TS 102 223 toolkit + BIP runtime.
-- 3GPP TS 33.501 5G AKA, EAP-AKA' (TS 33.402), AKMA (TS 33.535), and SUPI / SUCI Profile A & B (TS 33.501 §C.3) on the simulated card, including TS 31.102 §7.1.2.4 `GET IDENTITY` (P2 = 0x01 SUCI calculation). The corresponding in-process 5G-core stubs (AUSF / AAnF / Open5GS bridge) are not part of this release.
+- 3GPP TS 33.501 5G AKA, EAP-AKA' (TS 33.402), AKMA (TS 33.535), and SUPI / SUCI Profile A & B (TS 33.501 §C.3) on the simulated card, including TS 31.102 §7.1.2.4 `GET IDENTITY` (P2 = 0x01 SUCI calculation).
 - SAIP / UPP profile inspection, linting, JSON↔DER transcode, and shell automation through `Tools/ProfilePackage`.
 - Visual side-by-side SAIP profile diffing (shell + Textual TUI) via
   `DIFF` / `DIFF-TUI` inside the profile-package shell.
@@ -82,11 +85,9 @@ powershell -ExecutionPolicy Bypass -File scripts\install\install-windows.ps1
 - Opt-in, safety-gated eUICC APDU mutation fuzzer via
   `yggdrasim-apdu-fuzzer` (`--i-mean-it` + ICCID/IMSI allow-list
   required).
-- EUM / SM-DP+ diagnostics: session-key injection and
+- EUM / SM-DP+ diagnostics "God-Mode": session-key injection and
   Wireshark/tshark Lua dissector for BF36 Bound Profile Packages via
   `yggdrasim-eum-diag`.
-- Optional Universal GUI Command Center (`--gui` desktop / `--web-server`
-  remote-lab) with a live APDU dock fed by a process-wide recorder.
 - Centralized mutable state in SQLite, with optional `gpg`-based encryption for sensitive payloads.
 
 ## Quick start
@@ -149,10 +150,10 @@ yggdrasim-suci-tool
 
 Container, PyInstaller, `.deb`, and `.exe` notes now live in:
 
-- `guides/BUILD_AND_PACKAGING.md` -- flavor-aware build commands
-- `guides/INSTALL_CLEAN.md` -- operator install for the clean bundle
-- `guides/INSTALL_FULL.md` -- operator install for the HIL-capable bundle
-- `guides/INSTALL_FROM_SOURCE.md` -- editable install and test-suite usage
+- `guides/BUILD_AND_PACKAGING.md` — flavor-aware build commands
+- `guides/INSTALL_CLEAN.md` — operator install for the clean bundle
+- `guides/INSTALL_FULL.md` — operator install for the HIL-capable bundle
+- `guides/INSTALL_FROM_SOURCE.md` — editable install and test-suite usage
 
 Quick container smoke path:
 
@@ -182,19 +183,6 @@ Diagnostic helpers:
 python main/main.py --version
 python main/main.py --doctor
 ```
-
-Optional Universal GUI Command Center (experimental, requires the `gui`
-or `gui-server` extra):
-
-```bash
-pip install -e '.[gui]'
-python main/main.py --gui                          # FastAPI on loopback + native pywebview window
-python main/main.py --web-server --token-file ./tok # remote-lab API, bearer-token mandatory
-```
-
-The GUI is intentionally off by default; neither `--gui` nor
-`--web-server` import FastAPI / uvicorn / pywebview until that path is
-actually selected, so the baseline install stays lean.
 
 `--version` is sourced from `pyproject.toml` through
 `yggdrasim_common/__about__.py`, so any wrapper, plugin, or installed command
@@ -268,7 +256,7 @@ examples, see:
 
 ## Persistent state and security model
 
-YggdraSIM uses `state/device_inventory.sqlite3` as the primary mutable state store for:
+YggdraSIM now uses `state/device_inventory.sqlite3` as the primary mutable state store for:
 
 - per-card `ICCID` inventory payloads
 - per-card `EID` inventory payloads
@@ -392,7 +380,7 @@ Session-key keybag JSONs are produced by:
 - `EXPORT-KEYBAG` in `SCP11.local_access` (after any BSP-building verb)
 - `python -m SCP11.local_access --dump-keybag <path>` non-interactively
 
-`python -m SCP11.live --dump-keybag` is a documented no-op stub -- live
+`python -m SCP11.live --dump-keybag` is a documented no-op stub — live
 SCP11c BSP keys are derived inside the eUICC and never reach the host.
 
 The HIL bridge is **only shipped in the full executable and in source
@@ -403,9 +391,9 @@ entry is still invoked manually, and omits the `yggdrasim-hil-bridge` /
 
 See:
 
-- `guides/HIL_BRIDGE_GUIDE.md` -- operator flow
-- `guides/INSTALL_FULL.md` -- HIL-capable executable install
-- `guides/SIMTRACE2_CARDEM_GUIDE.md` -- flashing / updating SIMtrace2 and `osmo-remsim-client-st2`
+- `guides/HIL_BRIDGE_GUIDE.md` — operator flow
+- `guides/INSTALL_FULL.md` — HIL-capable executable install
+- `guides/SIMTRACE2_CARDEM_GUIDE.md` — flashing / updating SIMtrace2 and `osmo-remsim-client-st2`
 - `guides/systemd/yggdrasim-hil-supervisor.service.example`
 
 ### Local SMDPP
@@ -459,23 +447,23 @@ Use `Tools/ProfilePackage` for:
 - linting and package inspection
 - `saip-tool` bridge work
 
-The transcode UI uses a configurable transcode output directory, persists
+The transcode UI now uses a configurable transcode output directory, persists
 its pane layout in the workspace, supports OS clipboard copy/paste, and writes
 `*.transcode.json`, `*.transcode.der`, and `*.transcode.txt` sidecars.
 
 `akaParameter` tooling (3GPP TS 35.206 / TS 35.231):
 
-- `LIST-AKA` -- read-only summary of every `akaParameter` PE in the active
+- `LIST-AKA` — read-only summary of every `akaParameter` PE in the active
   profile, including algorithm, Ki/OPc byte length, Keccak count,
   `authCounterMax`, and whether a 32-slot `sqnInit` seed is present.
 - `PROVISION-AKA <out.der | IN-PLACE> [ALGORITHM=..] [KI=..] [OPC=..]
-  [NUMBER-OF-KECCAK=..] [AUTH-COUNTER-MAX=..] [SQN-INIT=..]` -- tag-granular
+  [NUMBER-OF-KECCAK=..] [AUTH-COUNTER-MAX=..] [SQN-INIT=..]` — tag-granular
   provisioning. With only an output path it walks the interactive wizard.
   Passing any `NAME=VALUE` override switches to non-interactive mode so the
   command is safe to paste into scripts or tests. `IN-PLACE` rewrites the
   currently-selected DER.
 - `RANDOMIZE-AKA <out.der | IN-PLACE> [ALGORITHM=..] [INCLUDE-AUTH-COUNTER-MAX]
-  [INCLUDE-SQN-INIT]` -- development helper that generates Ki / OPc / TOPc
+  [INCLUDE-SQN-INIT]` — development helper that generates Ki / OPc / TOPc
   (and the TUAK-specific `numberOfKeccak`) via `secrets.token_bytes` and
   applies them to the first `akaParameter` PE. `authCounterMax` and `sqnInit`
   are skipped by default so replay-protection envelopes stay predictable.
@@ -484,7 +472,10 @@ its pane layout in the workspace, supports OS clipboard copy/paste, and writes
 
 - `site-docs/` - canonical mkdocs source tree. `mkdocs serve -f mkdocs.yml`
   renders it locally; `site/` and `site-oneot/` are generated mirrors and
-  should not be edited by hand.
+  should not be edited by hand. For one concatenated Markdown file of the
+  entire nav (offline reading or PDF export), run
+  `python3 site-docs/_tools/build_combined.py` → root `YggdraSIM.md`
+  (gitignored); see `site-docs/_tools/README.md`.
 - `guides/README.md` - index of authored operator and developer guides
 - `guides/CAPABILITIES.md` - suite-level capability reference grouped by subsystem and workflow
 - `guides/ARCHITECTURE.md` - system structure, interdependency matrix, state model, and flow charts
@@ -500,6 +491,7 @@ its pane layout in the workspace, supports OS clipboard copy/paste, and writes
 - `guides/HIL_BRIDGE_GUIDE.md` - physical-card HIL bridge setup, supervision, and Wireshark usage
 - `guides/TEMPLATE_AND_TOKENS.md` - SAIP profile-template token reference
 - `guides/systemd/yggdrasim-hil-supervisor.service.example` - example `systemd --user` unit for the HIL supervisor
+- `CHANGELOG.md` - per-release history
 - `docs/` - vendor / standards reference workspace (GPC v2.3.1, SGP.02 / 22 / 32, ETSI TS 102 221 / 222 / 223 / 225 / 226, TS 31.102, RSPRO.asn, AKMA overview). The only schema the tool needs at runtime (`RSPRO.asn`) is redistributed inside `Tools/HilBridge/RSPRO.asn` as package data, so a fresh `pip install yggdrasim` works without a `docs/` tree on disk. The folder is gitignored so the verbatim standards copies stay out of the published wheel; operators doing offline reference reading can populate `docs/` themselves.
 - `NOTICE` - standards and third-party notice
 - `AUTHORS` - project attribution
@@ -518,7 +510,7 @@ its pane layout in the workspace, supports OS clipboard copy/paste, and writes
 ## Repository layout
 
 - `main/` - top-level launcher
-- `yggdrasim_common/` - shared runtime: card-backend selection, registry, doctor, plugin runtime, GUI server, env-flag editor, APDU recorder
+- `yggdrasim_common/` - shared runtime: card-backend selection, registry, doctor, plugin runtime, env-flag editor, APDU recorder
 - `yggdrasim_common/registry.py` - discoverable map of subsystems, entry points, and stable symbols
 - `SCP03/` - admin shell, transport, controllers, decoders, reports
 - `SCP80/` - OTA CLI, builder, transport, decode helpers
@@ -555,5 +547,5 @@ YggdraSIM builds on.
 
 ## License and notice
 
-- License: [GNU GPL v3.0](LICENSE/index.md)
-- Notice: [NOTICE](NOTICE/index.md)
+- License: [GNU GPL v3.0](https://github.com/1oT/YggdraSIM/blob/main/LICENSE/index.md)
+- Notice: [NOTICE](https://github.com/1oT/YggdraSIM/blob/main/NOTICE/index.md)

@@ -48,7 +48,7 @@ from Tools.ProfilePackage.saip_profile_diff import (
 
 
 # ---------------------------------------------------------------------------
-# Fixtures -- minimal jsonified SAIP documents
+# Fixtures — minimal jsonified SAIP documents
 # ---------------------------------------------------------------------------
 
 
@@ -66,7 +66,7 @@ def _baseline_document() -> dict:
             },
             "usim": {
                 "aid": "A0000000871002FFFFFFFF8902F1FFFFFFFF",
-                "efImsi": {"body": {"imsi": "001011111111111"}},
+                "efImsi": {"body": {"imsi": "234561111111111"}},
                 "efKeys": {"body": {"ki": "00112233445566778899AABBCCDDEEFF"}},
             },
             "akaParameter": {
@@ -101,7 +101,7 @@ class TestIdentityClassification:
     def test_imsi_change_under_usim_is_critical_identity(self) -> None:
         left = _baseline_document()
         right = _baseline_document()
-        right["sections"]["usim"]["efImsi"]["body"]["imsi"] = "001019999999999"
+        right["sections"]["usim"]["efImsi"]["body"]["imsi"] = "234569999999999"
         report = compute_profile_diff(left, right)
         identity_hits = [
             entry for entry in report.entries
@@ -239,7 +239,7 @@ class TestTopLevelClassification:
     def test_intro_addition_is_note(self) -> None:
         left = _baseline_document()
         right = _baseline_document()
-        right["intro"].append("Issued: 0001-01-01")
+        right["intro"].append("Issued: 2026-04-28")
         report = compute_profile_diff(left, right)
         intro_hits = report.filter(categories=[CATEGORY_INTRO])
         assert len(intro_hits) == 1
@@ -373,7 +373,7 @@ class TestArgumentValidation:
 
 
 # ---------------------------------------------------------------------------
-# Sanity -- every category and severity constant is also in the public tuple.
+# Sanity — every category and severity constant is also in the public tuple.
 # ---------------------------------------------------------------------------
 
 

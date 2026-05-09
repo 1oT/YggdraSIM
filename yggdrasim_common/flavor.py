@@ -1,22 +1,23 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """
 Distribution-flavor detection for the YggdraSIM suite.
 
 The suite is published in three shapes:
 
-* ``clean``  -- bundled executable without the HIL bridge. Targets Windows,
+* ``clean``  — bundled executable without the HIL bridge. Targets Windows,
   macOS, desktop Linux, and Raspberry Pi. No ``pyudev``, no ``osmo-remsim``,
   no SIMtrace2 dependency.
-* ``full``   -- bundled executable with the HIL bridge included. Linux-only
+* ``full``   — bundled executable with the HIL bridge included. Linux-only
   operationally, because the HIL bridge drives a SIMtrace2 through
   ``osmo-remsim-client-st2`` and ``pyudev``.
-* ``source`` -- users clone the repo and run ``pip install -e .``. Everything
+* ``source`` — users clone the repo and run ``pip install -e .``. Everything
   is present but HIL features remain opt-in; runtime warnings still apply
   when the supporting host tooling is missing.
 
 The active flavor is resolved in this order:
 
 1. Explicit ``YGGDRASIM_FLAVOR`` environment variable (``clean`` / ``full``
-   / ``source``) -- highest priority so operators can pin behaviour during
+   / ``source``) — highest priority so operators can pin behaviour during
    tests.
 2. Optional build stamp written by ``yggdrasim_main.spec`` at PyInstaller
    build time (``yggdrasim_common/_build_flavor.py`` exposing a single

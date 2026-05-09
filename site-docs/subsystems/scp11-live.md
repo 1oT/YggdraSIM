@@ -167,4 +167,4 @@ error explaining that the capability is optional.
 - [SCP11 Test Relay](scp11-test.md)
 - [SCP11 Local Access](scp11-local-access.md)
 - [Download a Profile (Live Relay)](../how-to/download-a-profile-live.md)
-- [HIL Bridge -- offline pcap replay](hil-bridge.md#offline-pcap-replay)
+- [HIL Bridge — offline pcap replay](hil-bridge.md#offline-pcap-replay)

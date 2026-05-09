@@ -4,7 +4,7 @@ Pins the bootstrap proactive-command sequence the simulator emits
 right after TERMINAL PROFILE so the modem is steered toward
 TIMER EXPIRATION (D7) envelopes instead of the silent POLL INTERVAL
 heartbeats. Without this loop the SGP.32 IPA-poll trigger never
-fires.
+fires, which previously kept the eIM poll silent on real hardware.
 
 The tests cover:
 
@@ -120,9 +120,10 @@ class TimerManagementBootstrapTests(unittest.TestCase):
         )
 
         # Timer Identifier TLV (24) + Timer Value TLV (25) must trail
-        # the Command Details / Device Identities pair, in the
-        # comprehension-clear form so picky modems do not reject the
-        # proactive command.
+        # the Command Details / Device Identities pair. Reference IPA
+        # cards emit the comprehension-clear form so picky modems do
+        # not reject the proactive command; the simulator now mirrors
+        # that.
         self.assertIn(b"\x24\x01\x03", timer_command)
         self.assertIn(b"\x25\x03" + _timer_value_bcd(65), timer_command)
         self.assertEqual(toolkit_logic.state.toolkit.timer_table.get(3), 65)
@@ -234,15 +235,15 @@ class TimerExpirationIpaPollTests(unittest.TestCase):
         toolkit_logic.state.toolkit.timer_management_id = 1
         toolkit_logic.state.toolkit.timer_management_auto_rearm = True
         toolkit_logic.state.toolkit.ipa_poll_enabled = True
-        toolkit_logic.state.toolkit.ipa_poll_eim_fqdn = "eim.yggdrasim.example.test"
+        toolkit_logic.state.toolkit.ipa_poll_eim_fqdn = "eim.example.test"
         toolkit_logic.state.toolkit.ipa_poll_eim_port = 443
         toolkit_logic.state.toolkit.ipa_poll_apn = "internet.apn"
         toolkit_logic.state.toolkit.ipa_poll_dns_server = "8.8.8.8"
         toolkit_logic.state.toolkit.ipa_poll_alpha_id = ""
         toolkit_logic.state.toolkit.ipa_poll_request_payload = b""
-        # Bringup tests assert the linear command queue, so disable
-        # TLS to keep the OPEN/SEND/RECV/CLOSE pattern up-front. TLS
-        # pumping has its own suite.
+        # The bringup tests pin the linear command queue from Stage 1;
+        # disable in-card TLS so the eIM leg keeps emitting OPEN/SEND/
+        # RECV/CLOSE up-front. Stage-2 TLS pumping has its own suite.
         toolkit_logic.state.toolkit.ipa_poll_tls_enabled = False
         if warm_resolved_ip:
             toolkit_logic.state.toolkit.ipa_poll_resolved_ip = "203.0.113.7"
@@ -255,11 +256,11 @@ class TimerExpirationIpaPollTests(unittest.TestCase):
 
     def test_d7_warm_cache_emits_eim_phase_then_rearm(self) -> None:
         # When a previous cycle already cached the eIM IP, the timer
-        # expiry skips the DNS phase and ships the eIM
+        # expiry skips the DNS leg and ships the eIM
         # OPEN/SEND/TIMER(start)/RECV/TIMER(stop)/CLOSE straight away,
         # followed by the auto-rearm. The watchdog timer pair gives
-        # the bearer a polling window between SEND DATA and RECEIVE
-        # DATA so the response actually lands in the bearer
+        # the modem a polling window between SEND DATA and RECEIVE
+        # DATA so the network response actually lands in the bearer
         # buffer before the eUICC issues RECEIVE DATA -- reference
         # IPA cards do the same and skipping it makes the modem
         # answer with general result 0x3A on every RECEIVE DATA.
@@ -281,11 +282,15 @@ class TimerExpirationIpaPollTests(unittest.TestCase):
             ],
         )
 
-    def test_d7_cold_cache_emits_dns_phase_then_rearm(self) -> None:
-        # Cold start: no resolved IP cached, so the DNS phase runs
-        # first. The phase uses two SEND DATA + two RECEIVE DATA
-        # commands (AAAA + A questions) interleaved with a
-        # TIMER MANAGEMENT pair per TS 102 223 §6.4.27.
+    def test_d7_cold_cache_emits_dns_leg_then_rearm(self) -> None:
+        # Cold start: no resolved IP cached, so the IPA must first
+        # open a UDP/53 bearer to the public resolver and exchange
+        # DNS questions/answers before the eIM TCP/443 cycle even
+        # gets queued. The DNS leg uses two SEND DATA + two RECEIVE
+        # DATA commands (AAAA + A questions) interleaved with a
+        # TIMER MANAGEMENT pair so the modem has time to receive the
+        # DNS response from the network between the SEND burst and
+        # the RECEIVE burst.
         toolkit_logic = self._make_logic(warm_resolved_ip=False)
 
         toolkit_logic._apply_timer_expiration(_timer_expiration_envelope(1))
@@ -354,7 +359,7 @@ class TimerExpirationIpaPollTests(unittest.TestCase):
         )
 
         self.assertIn(b"POST /gsma/rsp2/asn1 HTTP/1.1", send_data)
-        self.assertIn(b"Host: eim.yggdrasim.example.test", send_data)
+        self.assertIn(b"Host: eim.example.test", send_data)
         self.assertIn(b"\x36", send_data)
 
     def test_custom_request_payload_overrides_default(self) -> None:
@@ -395,7 +400,7 @@ class TimerExpirationIpaPollTests(unittest.TestCase):
         # Cold cache + no configured FQDN: the IPA resolves the FQDN
         # of the first eIM entry. The labels of that FQDN must show
         # up inside the DNS-question SEND DATA payloads, not inside
-        # the OPEN CHANNEL TLVs (which carry the resolver IP).
+        # the OPEN CHANNEL TLVs (which now carry the resolver IP).
         toolkit_logic = self._make_logic(warm_resolved_ip=False)
         toolkit_logic.state.toolkit.ipa_poll_eim_fqdn = ""
         toolkit_logic.state.eim_entries = [

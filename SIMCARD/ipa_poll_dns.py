@@ -1,10 +1,18 @@
-"""Wire-format DNS message helpers for the SGP.32 IPA-poll path.
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+"""DNS query / answer helpers for the SGP.32 IPA-poll DNS-over-BIP path.
 
-Encodes A / AAAA queries and parses answer sections. dnspython is a
-soft dependency; when missing the module falls back to a minimal
-hand-rolled encoder/decoder. The decoder validates the answer's
-transaction id against the question id so a stale UDP packet cannot
-poison the resolved-IP cache.
+The eUICC simulator has no host networking, so it asks a public resolver
+(default ``8.8.8.8``) for the eIM A-record over BIP UDP just like real
+cards do. This module deals strictly with wire-format DNS messages --
+encoding the question section the IPA puts inside SEND DATA, and parsing
+the answer section the resolver returns through RECEIVE DATA.
+
+dnspython is a soft dependency: when it is present we delegate the
+heavy lifting (label compression, RR parsing, OPT/EDNS) to it; when it
+is missing we fall back to a hand-rolled minimal encoder/decoder that
+is sufficient for plain A/AAAA queries against a stock resolver. The
+decoder validates the answer's transaction id against the question id
+so a stale UDP packet cannot poison the resolved-IP cache.
 """
 
 from __future__ import annotations
@@ -37,9 +45,11 @@ class DnsAnswer:
 
     ``rcode`` is the response code from the DNS header (0 = NOERROR,
     3 = NXDOMAIN, etc.). ``a_records`` / ``aaaa_records`` are the
-    successfully decoded address strings. ``error`` is a non-empty
-    string when the wire bytes could not be parsed, in which case the
-    address lists are guaranteed to be empty.
+    successfully decoded address strings; the IPA picks the first
+    A-record it sees (IPv6 is informational for now since BIP TCP_REMOTE
+    in the simulator targets IPv4). ``error`` is a non-empty string when
+    the wire bytes could not be parsed, in which case the address lists
+    are guaranteed to be empty.
     """
 
     transaction_id: int = 0
@@ -58,7 +68,7 @@ class DnsAnswer:
 def encode_dns_query(qname: str, qtype: int, *, transaction_id: int) -> bytes:
     """Encode a single-question DNS query for ``qname`` / ``qtype``.
 
-    The packet layout follows RFC 1035: 12-byte
+    The packet layout matches what every reference IPA emits: 12-byte
     header (id / flags=0x0100 RD / QDCOUNT=1 / others=0), one question,
     no OPT record. ``transaction_id`` must fit in 16 bits; values that
     overflow are silently masked rather than raising.

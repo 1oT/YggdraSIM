@@ -1,3 +1,4 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """
 Pair-encoder module: inverse of ``saip_asn1_decode``.
 
@@ -6,7 +7,7 @@ losslessly, this module exports ``encode_<field>(decoded)`` which returns
 the byte (or scalar) form the SAIP JSON should carry.
 
 Lossy decoders (ADN records, SMSP, EF.ARR TLVs) are handled by the
-companion "splice" helpers in ``saip_decoded_edit`` -- they take the
+companion "splice" helpers in ``saip_decoded_edit`` — they take the
 decoded form plus the original raw bytes and substitute only the changed
 sub-fields. Encoders here assume the decoded payload came from the
 matching ``_decode_*`` function in the same repository.
@@ -17,7 +18,7 @@ Conventions:
   OCTET STRING.
 - Encoders return ``int`` for fields whose JSON form is an ASN.1 INTEGER
   (i.e. fields handled by ``_decode_scalar_special_field``'s int path).
-- Roundtrip is covered by ``tests/test_saip_asn1_encode.py`` -- every
+- Roundtrip is covered by ``tests/test_saip_asn1_encode.py`` — every
   encoder must satisfy ``decode(encode(decode(x))) == decode(x)``.
 """
 
@@ -129,6 +130,7 @@ def _encode_enum_name(
 
 
 def encode_life_cycle_state(payload: dict[str, Any]) -> bytes:
+    """Encode a lifecycle-state integer as the ASN.1 OCTET STRING for lcsState (GSMA SGP.22 §A.1)."""
     return _encode_enum_name(
         payload,
         name_key="state",
@@ -138,6 +140,7 @@ def encode_life_cycle_state(payload: dict[str, Any]) -> bytes:
 
 
 def encode_key_access(payload: dict[str, Any]) -> bytes:
+    """Encode a key-access byte as the ASN.1 OCTET STRING for keyAccess."""
     return _encode_enum_name(
         payload,
         name_key="access",
@@ -147,6 +150,7 @@ def encode_key_access(payload: dict[str, Any]) -> bytes:
 
 
 def encode_key_type(payload: dict[str, Any]) -> bytes:
+    """Encode a key-type identifier byte as the ASN.1 OCTET STRING for keyType."""
     return _encode_enum_name(
         payload,
         name_key="type",
@@ -174,6 +178,7 @@ def encode_key_version_number(payload: dict[str, Any]) -> bytes:
 
 
 def encode_key_counter_value(payload: dict[str, Any]) -> bytes:
+    """Encode a key counter value into the keyCounterValue SEQUENCE."""
     if "decimal" in payload:
         decimal_value = _require_int(payload, "decimal")
         if "hex" in payload:
@@ -239,7 +244,7 @@ def encode_pin_puk_adm_key_reference(payload: dict[str, Any]) -> int:
 
 
 def encode_algorithm_id(payload: dict[str, Any]) -> int:
-    """AKA algorithm ID -- SAIP stores it as INTEGER."""
+    """AKA algorithm ID — SAIP stores it as INTEGER."""
 
     if "decimal" in payload:
         return _require_int(payload, "decimal")
@@ -302,7 +307,7 @@ def encode_aka_option_octet(payload: dict[str, Any]) -> bytes:
 
 
 def encode_profile_policy_rules(payload: dict[str, Any]) -> bytes:
-    """Profile policy rules -- byte-flag field, usually 1 byte."""
+    """Profile policy rules — byte-flag field, usually 1 byte."""
 
     if "hex" in payload:
         return _hex_to_bytes(_require_hex(payload, "hex"))
@@ -370,6 +375,7 @@ def _encode_active_flags(
 
 
 def encode_application_privileges(payload: dict[str, Any]) -> bytes:
+    """Encode a set of application-privilege flags into the ApplicationPrivileges BIT STRING."""
     if "hex" in payload:
         return _hex_to_bytes(_require_hex(payload, "hex"))
     return _encode_active_flags(
@@ -418,6 +424,7 @@ def encode_aka_secret_material(payload: dict[str, Any]) -> bytes:
 
 
 def encode_rotation_constants(payload: dict[str, Any]) -> bytes:
+    """Encode a list of rotation-constant hex strings into the rotationConstants SEQUENCE."""
     if all(f"r{index}" in payload for index in range(1, 6)):
         values: list[int] = []
         for index in range(1, 6):
@@ -437,6 +444,7 @@ def encode_rotation_constants(payload: dict[str, Any]) -> bytes:
 
 
 def encode_xoring_constants(payload: dict[str, Any]) -> bytes:
+    """Encode a list of XOR-constant hex strings into the xoringConstants SEQUENCE."""
     if "blockCount" in payload:
         block_count = _require_int(payload, "blockCount")
         if block_count < 1:
@@ -527,6 +535,7 @@ def encode_ef_acc(
     *,
     target_length: int | None = None,
 ) -> bytes:
+    """Encode EF.ACC content: Access Control Class bitmask (3GPP TS 31.102 §4.2.15)."""
     classes = payload.get("accessControlClasses")
     if isinstance(classes, list) is False:
         if "raw" in payload and isinstance(payload["raw"], str):
@@ -555,6 +564,7 @@ def encode_ef_ehplmnpi(
     *,
     target_length: int | None = None,
 ) -> bytes:
+    """Encode EF.EHPLMNPI content: EHPLMN presentation indication byte (3GPP TS 31.102 §4.2.85)."""
     name = str(payload.get("presentationIndication", "") or "").strip()
     if name in _EHPLMNPI_NAME_TO_CODE:
         return _pad_ff(
@@ -574,6 +584,7 @@ def encode_ef_start_hfn(
     *,
     target_length: int | None = None,
 ) -> bytes:
+    """Encode EF.START-HFN content: RRC/MM/CN HFN start values (3GPP TS 31.102 §4.2.51)."""
     if "startCs" in payload or "startPs" in payload:
         start_cs = _require_int(payload, "startCs")
         start_ps = _require_int(payload, "startPs")
@@ -595,6 +606,7 @@ def encode_ef_smss(
     *,
     target_length: int | None = None,
 ) -> bytes:
+    """Encode EF.SMSS content: SMS status byte and SMSP pointer (3GPP TS 31.102 §4.2.57)."""
     if "lastUsedTpMr" in payload or "memoryCapacityExceeded" in payload:
         last_used = _require_int(payload, "lastUsedTpMr")
         if not 0 <= last_used <= 0xFF:
@@ -621,6 +633,7 @@ def encode_ef_ad(
     # original (including MNC length + spare bytes) so prefer raw to keep
     # those bytes intact. Rewrite byte 0 only when the requested mode name
     # differs from what the existing byte already decodes to.
+    """Encode EF.AD content: administrative data including MNC length (3GPP TS 31.102 §4.2.18)."""
     if "raw" in payload and isinstance(payload["raw"], str):
         data = _hex_to_bytes(_require_hex(payload, "raw"))
         mode_name = str(payload.get("administrativeMode", "") or "").strip()
@@ -649,6 +662,7 @@ def encode_ef_hpplmn_search_interval(
     *,
     target_length: int | None = None,
 ) -> bytes:
+    """Encode EF.HPPLMN content: higher-priority PLMN search interval byte (3GPP TS 31.102 §4.2.12)."""
     if "intervalMinutes" in payload:
         minutes = _require_int(payload, "intervalMinutes")
         if not 0 <= minutes <= 0xFF:
@@ -665,6 +679,7 @@ def encode_ef_three_byte_counter(
     *,
     target_length: int | None = None,
 ) -> bytes:
+    """Encode a generic three-byte counter EF (e.g. EF.THRESHOLD) from an integer value."""
     if "raw" in payload and isinstance(payload["raw"], str):
         data = _hex_to_bytes(_require_hex(payload, "raw"))
         return _pad_ff(data, target_length=target_length)
@@ -690,6 +705,7 @@ def encode_ef_language_records(
     *,
     target_length: int | None = None,
 ) -> bytes:
+    """Encode EF language preference records into packed ISO 639-1 two-letter strings."""
     languages = payload.get("languages")
     if isinstance(languages, list) is False:
         raise RoundtripEncoderError("language records: 'languages' must be a list")
@@ -830,6 +846,7 @@ def encode_ef_plmn_list(
     with_act: bool,
     target_length: int | None = None,
 ) -> bytes:
+    """Encode a PLMN-list EF (e.g. EF.PLMNWACT) from a list of PLMN+ACT dicts."""
     entries = payload.get("entries")
     if isinstance(entries, list) is False:
         raise RoundtripEncoderError("PLMN list: 'entries' must be a list")
@@ -878,12 +895,12 @@ def encode_ef_plmn_list_no_act(
 # - SMSP:         same alpha-id roundtrip pitfall.
 # - EF.ARR:       sub-TLVs inside ``A4`` groups and any vendor tags outside
 #                 the small whitelist (80/90/97/84/A4) are exposed as opaque
-#                 ``items`` lists rather than dedicated semantic fields.
+#                 ``items`` lists rather than first-class semantic fields.
 #
 # The strategy is to carry the original bytes through the editor model under
 # the ``_ygg_original_hex`` key (populated by
 # ``build_decoded_value_roundtrip_model`` for these EFs). The splicer then
-# patches only the bytes whose decoded representation actually changed -- any
+# patches only the bytes whose decoded representation actually changed — any
 # user payload without ``_ygg_original_hex`` falls back to a best-effort
 # scratch rebuild.
 
@@ -947,7 +964,7 @@ def _decoded_alpha_equals_original(original_alpha_bytes: bytes, alpha_text: str)
     bytes matches the text currently in the decoded payload.
 
     Used to avoid rewriting alpha bytes when the user didn't actually edit
-    them -- UTF-8 decoding drops trailing ``0x00``/``0xFF`` padding which we
+    them — UTF-8 decoding drops trailing ``0x00``/``0xFF`` padding which we
     must preserve byte-for-byte otherwise.
     """
 
@@ -1286,7 +1303,7 @@ def encode_ef_arr_rules(
 
 
 # ---------------------------------------------------------------------------
-# Tier 1 -- straightforward roundtripable EFs (SPN, MSISDN, ECC, PUCT, LOCI,
+# Tier 1 — straightforward roundtripable EFs (SPN, MSISDN, ECC, PUCT, LOCI,
 # OPL, PNN and the three service tables).
 
 
@@ -1380,7 +1397,7 @@ def encode_ef_ecc(
                 f"EF.ECC: code {code_text!r} exceeds 6 BCD digits"
             )
         # Preserve the original BCD block when the user didn't actually
-        # edit this entry -- safer than re-packing padding nibbles.
+        # edit this entry — safer than re-packing padding nibbles.
         if index < len(original_blocks):
             reference_digits = _decode_bcd_digits_local(original_blocks[index])
             if reference_digits == code_text:
@@ -1389,7 +1406,7 @@ def encode_ef_ecc(
         accumulator.extend(_encode_bcd_swapped_digits(code_text, byte_length=3))
 
     # Pad any untouched trailing blocks with the original bytes when we
-    # have them -- preserves the vendor's category byte layout for the
+    # have them — preserves the vendor's category byte layout for the
     # common R99+ MSISDN-style footer.
     consumed_blocks = len(codes)
     while consumed_blocks < len(original_blocks):
@@ -1708,8 +1725,8 @@ def encode_ef_service_table(
     """Encode an EF.UST / EF.EST / EF.IST service-table payload.
 
     Accepts either:
-      - ``raw`` / ``hex`` -- used verbatim (useful for non-editable reloads).
-      - ``activeServices`` -- list of ``"<number>: <name>"`` strings as
+      - ``raw`` / ``hex`` — used verbatim (useful for non-editable reloads).
+      - ``activeServices`` — list of ``"<number>: <name>"`` strings as
         produced by the decoder.
 
     The existing hand-written ``service_table`` editor in
@@ -1742,7 +1759,7 @@ def encode_ef_service_table(
 
 
 # ---------------------------------------------------------------------------
-# Tier 2 -- TLV-structured EFs (PCSCF, SPDI, EPSNSC, SMS, SMSR, DIR).
+# Tier 2 — TLV-structured EFs (PCSCF, SPDI, EPSNSC, SMS, SMSR, DIR).
 
 
 _PCSCF_ADDRESS_TYPE_CODES: dict[str, int] = {
@@ -2024,7 +2041,7 @@ def _encode_dir_item(item: dict[str, Any]) -> bytes:
 
 
 # ---------------------------------------------------------------------------
-# file-structure field encoders (filePath, linkPath,
+# Round 1: file-structure field encoders (filePath, linkPath,
 # fileDescriptor, specialFileInformation, fillPattern, repeatPattern,
 # fileDetails). These invert the matching ``_decode_*`` helpers in
 # ``saip_asn1_decode`` for primitive OCTET STRING values.
@@ -2263,7 +2280,7 @@ def encode_file_details(payload: dict[str, Any]) -> bytes:
 
 
 # ---------------------------------------------------------------------------
-# PIN/PUK/key-material bytes fields.
+# Round 3: PIN/PUK/key-material bytes fields.
 
 
 def encode_pin_secret_value(payload: dict[str, Any]) -> bytes:
@@ -2385,7 +2402,7 @@ def encode_pin_status_template_do(payload: dict[str, Any]) -> bytes:
 
 
 # ---------------------------------------------------------------------------
-# install parameters + connectivity parameters (BER-TLV / length-
+# Round 4: install parameters + connectivity parameters (BER-TLV / length-
 # prefixed structures whose decoders are lossless at the byte level).
 
 
@@ -2472,7 +2489,7 @@ def encode_uicc_toolkit_parameters(payload: dict[str, Any]) -> bytes:
     """Inverse of ``_decode_uicc_toolkit_parameters``.
 
     The decoder exposes a parsed view of the flat ETSI TS 102 226 record
-    but also keeps the original bytes under ``rawHex``; that path is preferred
+    but also keeps the original bytes under ``rawHex``; we prefer that
     verbatim path. Callers wanting to edit individual fields should set
     ``rawHex`` to an empty string and populate the structured fields; in
     that case we re-pack the record end-to-end.
@@ -2616,7 +2633,7 @@ def _require_byte_field(payload: dict[str, Any], key: str) -> int:
 
 
 # ---------------------------------------------------------------------------
-# PKCS#15 EFs (ODF/DODF/ACM/ACCF). The decoders render a lossy
+# Round 2: PKCS#15 EFs (ODF/DODF/ACM/ACCF). The decoders render a lossy
 # summary (object-type buckets, path/reference lists, hash buckets), so
 # every encoder here accepts a mandatory ``hex`` passthrough and treats
 # the decoded summary fields as read-only. Dedicated editors can round-
@@ -2659,7 +2676,7 @@ def encode_ef_pkcs15_odf(
     *,
     target_length: int | None = None,
 ) -> bytes:
-    """Encode a PKCS#15 ODF (EF 5031) -- raw DER passthrough."""
+    """Encode a PKCS#15 ODF (EF 5031) — raw DER passthrough."""
 
     return _encode_pkcs15_passthrough(
         payload,
@@ -2673,7 +2690,7 @@ def encode_ef_pkcs15_dodf(
     *,
     target_length: int | None = None,
 ) -> bytes:
-    """Encode a PKCS#15 DODF (EF 5207) -- raw DER passthrough."""
+    """Encode a PKCS#15 DODF (EF 5207) — raw DER passthrough."""
 
     return _encode_pkcs15_passthrough(
         payload,
@@ -2687,7 +2704,7 @@ def encode_ef_pkcs15_acm(
     *,
     target_length: int | None = None,
 ) -> bytes:
-    """Encode a PKCS#15 ACM (EF 4200) -- raw DER passthrough."""
+    """Encode a PKCS#15 ACM (EF 4200) — raw DER passthrough."""
 
     return _encode_pkcs15_passthrough(
         payload,
@@ -2701,7 +2718,7 @@ def encode_ef_pkcs15_accf(
     *,
     target_length: int | None = None,
 ) -> bytes:
-    """Encode a PKCS#15 ACCF (EF 4310) -- raw DER passthrough."""
+    """Encode a PKCS#15 ACCF (EF 4310) — raw DER passthrough."""
 
     return _encode_pkcs15_passthrough(
         payload,
@@ -2711,7 +2728,7 @@ def encode_ef_pkcs15_accf(
 
 
 # ---------------------------------------------------------------------------
-# common 3GPP EFs that previously had no decoder (GID1, GID2,
+# Round 5: common 3GPP EFs that previously had no decoder (GID1, GID2,
 # CBMI, CBMID, CBMIR). Each pairs with the matching ``_decode_*`` in
 # ``saip_asn1_decode`` added at the same time.
 
@@ -2723,9 +2740,9 @@ def encode_ef_group_identifier(
 ) -> bytes:
     """Encode EF.GID1 / EF.GID2. The payload may carry:
 
-    - ``hex``          -- verbatim bytes (preferred).
-    - ``ascii``        -- ASCII content; padded to ``target_length`` with 0xFF.
-    - ``_ygg_original_hex`` -- fall back when no other field is present.
+    - ``hex``          — verbatim bytes (preferred).
+    - ``ascii``        — ASCII content; padded to ``target_length`` with 0xFF.
+    - ``_ygg_original_hex`` — fall back when no other field is present.
     """
 
     if "hex" in payload and isinstance(payload["hex"], str):
@@ -2880,7 +2897,7 @@ def encode_ef_cbmir(
 
 
 # ---------------------------------------------------------------------------
-# call/phonebook + keys + network/config + 5G + obscure EFs.
+# 5x5 Pass A: call/phonebook + keys + network/config + 5G + obscure EFs.
 # Every encoder pairs with the matching ``_decode_*`` helper added in the
 # same commit to ``saip_asn1_decode``. Opaque EFs (CMI, S7, SUME, NETPAR,
 # CPBCCH, PKCS#15 ACRF) use a hex passthrough; structured records rebuild
@@ -3237,7 +3254,7 @@ def encode_ef_nasconfig(
     *,
     target_length: int | None = None,
 ) -> bytes:
-    """Encode EF.NASCONFIG -- BER-TLV stream."""
+    """Encode EF.NASCONFIG — BER-TLV stream."""
 
     if "hex" in payload and isinstance(payload["hex"], str):
         hex_text = str(payload["hex"]).strip()
@@ -3263,7 +3280,7 @@ def encode_ef_suci_calc_info(
     *,
     target_length: int | None = None,
 ) -> bytes:
-    """Encode EF.SUCI_Calc_Info (TS 31.102 Annex N) -- BER-TLV stream."""
+    """Encode EF.SUCI_Calc_Info (TS 31.102 Annex N) — BER-TLV stream."""
 
     if "hex" in payload and isinstance(payload["hex"], str):
         hex_text = str(payload["hex"]).strip()
@@ -3289,7 +3306,7 @@ def encode_ef_supinai(
     *,
     target_length: int | None = None,
 ) -> bytes:
-    """Encode EF.SUPI_NAI -- ``80 LL <UTF-8 NAI>`` TLV."""
+    """Encode EF.SUPI_NAI — ``80 LL <UTF-8 NAI>`` TLV."""
 
     if "hex" in payload and isinstance(payload["hex"], str):
         hex_text = str(payload["hex"]).strip()
@@ -3398,7 +3415,7 @@ def encode_ef_dir_record(
     payload; constructed templates may recurse via a child ``items`` list.
 
     When ``_ygg_original_hex`` is provided and the decoded items match the
-    re-decoded reference, the original bytes are returned verbatim.
+    re-decoded reference we prefer returning the original bytes verbatim.
     """
 
     items = payload.get("items")
@@ -3683,7 +3700,7 @@ def encode_ef_mbi_record(
     *,
     target_length: int | None = None,
 ) -> bytes:
-    """Encode EF.MBI record -- one byte per slot (voicemail/fax/email/other/...)."""
+    """Encode EF.MBI record — one byte per slot (voicemail/fax/email/other/...)."""
 
     if "hex" in payload and isinstance(payload["hex"], str):
         hex_text = str(payload["hex"]).strip()
@@ -3907,7 +3924,7 @@ def encode_ef_pbr(
     *,
     target_length: int | None = None,
 ) -> bytes:
-    """Encode EF.PBR -- BER-TLV stream identical in shape to EF.NASCONFIG."""
+    """Encode EF.PBR — BER-TLV stream identical in shape to EF.NASCONFIG."""
 
     if "hex" in payload and isinstance(payload["hex"], str):
         hex_text = str(payload["hex"]).strip()
@@ -3984,7 +4001,7 @@ _EF_CONTENT_DISPATCHER: dict[str, Any] = {
     "ef-cbmi": encode_ef_cbmi,
     "ef-cbmid": encode_ef_cbmi,
     "ef-cbmir": encode_ef_cbmir,
-    # call/phonebook family.
+    # 5x5 Pass A — call/phonebook family.
     "ef-lnd": encode_ef_lnd_record,
     "ef-ici": encode_ef_ici_oci_record,
     "ef-oci": encode_ef_ici_oci_record,
@@ -3994,26 +4011,26 @@ _EF_CONTENT_DISPATCHER: dict[str, Any] = {
     "ef-ccp1": encode_ef_ccp_record,
     "ef-ccp2": encode_ef_ccp_record,
     "ef-cmi": encode_ef_opaque,
-    # key material.
+    # 5x5 Pass A — key material.
     "ef-keys": encode_ef_usim_keys_record,
     "ef-keysPS": encode_ef_usim_keys_record,
     "ef-kc": encode_ef_gsm_kc_record,
     "ef-kcgprs": encode_ef_gsm_kc_record,
     "ef-hiddenkey": encode_ef_hidden_key,
-    # network config.
+    # 5x5 Pass A — network config.
     "ef-netpar": encode_ef_opaque,
     "ef-nia": encode_ef_one_byte_indicator,
     "ef-lrplmnsi": encode_ef_one_byte_indicator,
     "ef-nasconfig": encode_ef_nasconfig,
     "ef-sume": encode_ef_opaque,
-    # 5G + obscure.
+    # 5x5 Pass A — 5G + obscure.
     "ef-suci-calc-info-usim": encode_ef_suci_calc_info,
     "ef-supinai": encode_ef_supinai,
     "ef-pkcs15-acrf": encode_ef_opaque,
     "ef-cpbcch": encode_ef_opaque,
     "ef-invscan": encode_ef_one_byte_indicator,
     "ef-s7": encode_ef_opaque,
-    # 5G EFs (DF.5GS).
+    # 5x10 Pass A — 5G EFs (DF.5GS).
     "ef-5gs3gpploci": encode_ef_opaque,
     "ef-5gsn3gpploci": encode_ef_opaque,
     "ef-5gs3gppnsc": encode_ef_opaque,
@@ -4024,11 +4041,11 @@ _EF_CONTENT_DISPATCHER: dict[str, Any] = {
     "ef-opl5g": encode_ef_opl5g_record,
     "ef-routing-indicator": encode_ef_routing_indicator,
     "ef-ursp": encode_ef_opaque,
-    # 5G extras.
+    # 5x10 Pass C — 5G extras.
     "ef-tn3gppsnn": encode_ef_uri_tlv,
     "ef-5gsedrx": encode_ef_opaque,
     "ef-5gnswo-conf": encode_ef_opaque,
-    # Phonebook family.
+    # 5x10 Pass B / D — Phonebook family.
     "ef-pbr": encode_ef_pbr,
     "ef-iap": encode_ef_opaque,
     "ef-anr": encode_ef_adn_record,
@@ -4045,7 +4062,7 @@ _EF_CONTENT_DISPATCHER: dict[str, Any] = {
     "ef-psc": encode_ef_opaque,
     "ef-cc": encode_ef_opaque,
     "ef-puid": encode_ef_opaque,
-    # additional 3GPP / legacy.
+    # 5x10 Pass C — additional 3GPP / legacy.
     "ef-phase": encode_ef_one_byte_indicator,
     "ef-plmnsel": encode_ef_plmn_list_no_act,
     "ef-bcch": encode_ef_opaque,
@@ -4053,7 +4070,7 @@ _EF_CONTENT_DISPATCHER: dict[str, Any] = {
     "ef-fdnuri": encode_ef_uri_tlv,
     "ef-sdnuri": encode_ef_uri_tlv,
     "ef-lnduri": encode_ef_uri_tlv,
-    # ISIM + multimedia extras.
+    # 5x10 Pass D — ISIM + multimedia extras.
     "ef-pcscf-urn": encode_ef_pcscf_address,
     "ef-muddomain": encode_ef_uri_tlv,
     "ef-psismsc": encode_ef_opaque,
@@ -4064,7 +4081,7 @@ _EF_CONTENT_DISPATCHER: dict[str, Any] = {
     "ef-earfcnlist": encode_ef_opaque,
     "ef-fcst": encode_ef_opaque,
     "ef-phist": encode_ef_opaque,
-    # Mailbox / CF / VGCS / VBS / eMLPP / DCK / CNL.
+    # 5x20 Pass A — Mailbox / CF / VGCS / VBS / eMLPP / DCK / CNL.
     "ef-mbdn": encode_ef_adn_record,
     "ef-ext6": encode_ef_extension_record,
     "ef-mbi": encode_ef_mbi_record,
@@ -4085,7 +4102,7 @@ _EF_CONTENT_DISPATCHER: dict[str, Any] = {
     "ef-mexe-st": encode_ef_opaque,
     "ef-prose-pfsr": encode_ef_opaque,
     "ef-vsuri": encode_ef_uri_tlv,
-    # CSIM family.
+    # 5x20 Pass B — CSIM family.
     "ef-csim-spc": encode_ef_opaque,
     "ef-csim-smscap": encode_ef_opaque,
     "ef-csim-min": encode_ef_opaque,
@@ -4106,7 +4123,7 @@ _EF_CONTENT_DISPATCHER: dict[str, Any] = {
     "ef-csim-ssci": encode_ef_opaque,
     "ef-csim-mlpl": encode_ef_opaque,
     "ef-csim-meruiid": encode_ef_opaque,
-    # Specialized (ISIM/MCPTT/V2X/ProSe/MCS).
+    # 5x20 Pass C — Specialized (ISIM/MCPTT/V2X/ProSe/MCS).
     "ef-prose-pfidg": encode_ef_opaque,
     "ef-prose-pfddn": encode_ef_opaque,
     "ef-v2x-cfg": encode_ef_opaque,
@@ -4127,7 +4144,7 @@ _EF_CONTENT_DISPATCHER: dict[str, Any] = {
     "ef-mcs-keyset": encode_ef_opaque,
     "ef-mcs-stat": encode_ef_opaque,
     "ef-mcs-sec-profile": encode_ef_opaque,
-    # Operator / vendor / auxiliary extensions.
+    # 5x20 Pass D — Operator / vendor / auxiliary extensions.
     "ef-opcust1": encode_ef_opaque,
     "ef-opcust2": encode_ef_opaque,
     "ef-opcust3": encode_ef_opaque,
@@ -4152,7 +4169,7 @@ _EF_CONTENT_DISPATCHER: dict[str, Any] = {
 
 
 # ---------------------------------------------------------------------------
-# Opaque-passthrough catalog registration.
+# Wave B: opaque-passthrough catalog registration.
 #
 # The decode-side source of truth is
 # ``Tools.ProfilePackage.saip_asn1_decode._OPAQUE_PASSTHROUGH_EF_CATALOG``.
@@ -4169,7 +4186,7 @@ from Tools.ProfilePackage.saip_asn1_decode import (
 def _register_opaque_passthrough_ef_dispatchers() -> None:
     """Extend ``_EF_CONTENT_DISPATCHER`` with every catalog entry.
 
-    Bespoke encoders already present in the dispatcher win -- the catalog
+    Bespoke encoders already present in the dispatcher win — the catalog
     is additive only, never overrides.
     """
 
@@ -4213,7 +4230,7 @@ def roundtrip_capable_ef_keys() -> tuple[str, ...]:
 
 
 # ---------------------------------------------------------------------------
-# PE-level subtag/field encoders.
+# 5x20 Pass D — PE-level subtag/field encoders.
 #
 # These round-trip the ``{"hex": "..."}`` tagged-bytes form used throughout
 # the SAIP JSON for OCTET STRING fields that carry profile metadata or
@@ -4230,7 +4247,7 @@ def _encode_tagged_hex_passthrough(
     """Round-trip a ``{"hex": "..."}`` OCTET STRING field.
 
     Enforces optional length bounds in bytes when provided. The ``label``
-    key on the payload is ignored -- it is UI metadata only.
+    key on the payload is ignored — it is UI metadata only.
     """
 
     if "hex" not in payload:
@@ -4342,13 +4359,13 @@ def encode_notification_address_field(payload: dict[str, Any]) -> bytes:
 
 
 # ---------------------------------------------------------------------------
-# Generic tagged-bytes pass-through fields.
+# Wave A — generic tagged-bytes pass-through fields.
 #
 # These fields are already carried as raw OCTET STRINGs in the SAIP JSON
 # (GlobalPlatform 9F70 / TS 102 226 / GSMA SAIP Annex D tagged bytes).
 # The decoded view and round-trip encoder both operate on the hex blob
-# without parsing the internal TLV -- this is the "pass-through" contract
-# (deeper TLV decoding is out of scope here).
+# without parsing the internal TLV — this is the "pass-through" contract
+# the user approved for Wave A (deeper TLV decoding is out of scope).
 #
 # Each entry here pairs with a ``_summarize_binary_blob`` dispatch entry
 # in ``_decode_special_field`` (see ``saip_asn1_decode.py``). Length
@@ -4359,7 +4376,7 @@ def encode_notification_address_field(payload: dict[str, Any]) -> bytes:
 _PASSTHROUGH_BYTES_FIELD_NAMES: tuple[str, ...] = (
     # GP / TS 102 226 system-specific install parameters. The fields
     # listed here stay as hex pass-through because their structure is
-    # implementation-specific. Fields with earlier work structured encoders
+    # implementation-specific. Fields with Round-6 structured encoders
     # (``globalServiceParameters``, ``implicitSelectionParameter``,
     # ``contactlessProtocolParameters``,
     # ``userInteractionContactlessParameters``,
@@ -4371,7 +4388,7 @@ _PASSTHROUGH_BYTES_FIELD_NAMES: tuple[str, ...] = (
     "loadBlockObject",
     # PE-NonStandard opaque vendor content.
     "content",
-    # PE-CDMAParameter -- GSMA SAIP Annex D authentication material.
+    # PE-CDMAParameter — GSMA SAIP Annex D authentication material.
     # These are security credentials; we only pass-through the hex on
     # the editor surface. Any cryptographic use goes through the CDMA
     # personalisation path elsewhere in the toolkit.
@@ -4418,8 +4435,8 @@ def _make_passthrough_bytes_encoder(field_label: str):
 
 
 # ---------------------------------------------------------------------------
-# earlier work -- structured round-trip encoders for the fields whose
-# earlier work / earlier work decoders surface a rich decoded view (OID dotted
+# Round-6 Sweep 4 — structured round-trip encoders for the fields whose
+# Round-4 / Round-5 decoders surface a rich decoded view (OID dotted
 # string, single-byte bit flags, BER-TLV streams). Each encoder accepts
 # the pre-existing ``{"hex": ...}`` verbatim form so documents authored
 # before this sweep round-trip unchanged. When ``hex`` is absent or
@@ -4490,12 +4507,12 @@ def _encode_oid_dotted_to_bytes(oid_text: str) -> bytes:
 
 
 def encode_application_provider_identifier_field(payload: dict[str, Any]) -> bytes:
-    """SAIP §2.8.2 -- re-encode the Application Provider OID.
+    """SAIP §2.8.2 — re-encode the Application Provider OID.
 
     Preferred inputs (first non-empty wins):
-    1. ``hex`` -- verbatim passthrough (keeps bytes identical even for
-       non-canonical encodings observed in production traces).
-    2. ``oid`` -- dotted-decimal text; re-encoded per X.690 §8.19.
+    1. ``hex`` — verbatim passthrough (keeps bytes identical even for
+       non-canonical encodings found in the wild).
+    2. ``oid`` — dotted-decimal text; re-encoded per X.690 §8.19.
     """
 
     hex_text = _hex_string_or_none(payload, "hex")
@@ -4522,14 +4539,14 @@ _GLOBAL_SERVICE_BITMAP: dict[str, int] = {
 
 
 def encode_global_service_parameters_field(payload: dict[str, Any]) -> bytes:
-    """SAIP §2.6.3 Table 2-6 -- single-byte bitmap of global services.
+    """SAIP §2.6.3 Table 2-6 — single-byte bitmap of global services.
 
     Accepts ``hex`` (any length; verbatim passthrough so non-canonical
-    payloads authored before the earlier work structured decoder still
+    payloads authored before the Round-6 structured decoder still
     round-trip), ``bitmap`` (``"0xNN"`` or ``"NN"``), or
     ``activeServices`` (list of service names matching the decoder's
     ``_GLOBAL_SERVICE_BITS`` table). Length-1 constraints only apply to
-    the structured paths -- the hex path stays lossless.
+    the structured paths — the hex path stays lossless.
     """
 
     hex_text = _hex_string_or_none(payload, "hex")
@@ -4573,14 +4590,14 @@ def encode_global_service_parameters_field(payload: dict[str, Any]) -> bytes:
 
 
 def encode_implicit_selection_parameter_field(payload: dict[str, Any]) -> bytes:
-    """GlobalPlatform Card Spec Amd A §A.3 -- single-byte selection flags.
+    """GlobalPlatform Card Spec Amd A §A.3 — single-byte selection flags.
 
     Bit 8 (``defaultSelected``) distinguishes default-application
     selection from explicit AID selection; bits 1-5 carry the channel
     mask. Accepts ``hex`` (any length; verbatim passthrough) or
     structured ``defaultSelected`` (bool) + ``channelMask``
     (``"0xNN"`` / int). Length constraints only apply to the
-    structured path -- the hex path stays lossless so legacy profiles
+    structured path — the hex path stays lossless so legacy profiles
     round-trip unchanged.
     """
 
@@ -4630,7 +4647,7 @@ def encode_implicit_selection_parameter_field(payload: dict[str, Any]) -> bytes:
 
 
 def encode_contactless_protocol_parameters_field(payload: dict[str, Any]) -> bytes:
-    """GlobalPlatform Card Spec Amd C §5 -- BER-TLV contactless protocol
+    """GlobalPlatform Card Spec Amd C §5 — BER-TLV contactless protocol
     parameters.
 
     Preferred input is ``hex`` (verbatim). When ``hex`` is absent the
@@ -4655,7 +4672,7 @@ def encode_contactless_protocol_parameters_field(payload: dict[str, Any]) -> byt
 def encode_user_interaction_contactless_parameters_field(
     payload: dict[str, Any],
 ) -> bytes:
-    """GlobalPlatform Card Spec Amd C §6 -- BER-TLV user-interaction
+    """GlobalPlatform Card Spec Amd C §6 — BER-TLV user-interaction
     contactless parameters. Accepts ``hex`` (verbatim) or ``items``."""
 
     hex_text = _hex_string_or_none(payload, "hex")
@@ -4673,7 +4690,7 @@ def encode_user_interaction_contactless_parameters_field(
 
 
 # ---------------------------------------------------------------------------
-# Remaining-gap structured encoders (follow-up to earlier work).
+# Remaining-gap structured encoders (follow-up to Round-6 Sweep 4).
 #
 # Each encoder matches a semantic decoder added to ``saip_asn1_decode.py``
 # for the previously hex-only pass-through fields. The encoders preserve
@@ -4689,13 +4706,13 @@ _RESTRICT_PARAMETER_NAME_TO_BIT: dict[str, int] = {
 
 
 def encode_restrict_parameter_field(payload: dict[str, Any]) -> bytes:
-    """SAIP §8.6.6 / GlobalPlatform Amd F §A.4 -- single-byte bitmap.
+    """SAIP §8.6.6 / GlobalPlatform Amd F §A.4 — single-byte bitmap.
 
     Accepted inputs (first non-empty wins):
-    1. ``hex`` -- verbatim passthrough (any length) so legacy profiles
+    1. ``hex`` — verbatim passthrough (any length) so legacy profiles
        round-trip unchanged.
-    2. ``bitmap`` -- ``"0xNN"`` or ``"NN"``; must fit in one byte.
-    3. ``activeRestrictions`` -- list of labels from
+    2. ``bitmap`` — ``"0xNN"`` or ``"NN"``; must fit in one byte.
+    3. ``activeRestrictions`` — list of labels from
        :data:`_RESTRICT_PARAMETER_NAME_TO_BIT`.
     """
 
@@ -4798,7 +4815,7 @@ _GP_MEMORY_QUOTA_FIELD_NAMES: tuple[str, ...] = (
 def encode_ts102226_sim_file_access_toolkit_parameter_field(
     payload: dict[str, Any],
 ) -> bytes:
-    """TS 102 226 §8.2.1.3.2.3 -- SIM File Access + Toolkit Application
+    """TS 102 226 §8.2.1.3.2.3 — SIM File Access + Toolkit Application
     combined parameters.
 
     Structure: ``len(N1) || SIM Toolkit params || len(N2) || SIM File
@@ -4885,7 +4902,7 @@ def _encode_uicc_access_records(
 def encode_uicc_access_application_specific_parameters_field(
     payload: dict[str, Any],
 ) -> bytes:
-    """TS 102 226 §8.2.1.3.2.2 -- UICC access application-specific
+    """TS 102 226 §8.2.1.3.2.2 — UICC access application-specific
     parameters (regular variant)."""
 
     return _encode_uicc_access_records(
@@ -4897,7 +4914,7 @@ def encode_uicc_access_application_specific_parameters_field(
 def encode_uicc_administrative_access_application_specific_parameters_field(
     payload: dict[str, Any],
 ) -> bytes:
-    """TS 102 226 §8.2.1.3.2.2 -- UICC access application-specific
+    """TS 102 226 §8.2.1.3.2.2 — UICC access application-specific
     parameters (administrative variant)."""
 
     return _encode_uicc_access_records(
@@ -4907,10 +4924,11 @@ def encode_uicc_administrative_access_application_specific_parameters_field(
 
 
 # ---------------------------------------------------------------------------
-# scalar field encoders (PE-level INTEGERs).
+# 5x20 Pass D — scalar field encoders (PE-level INTEGERs).
 
 
 def encode_major_version_field(payload: dict[str, Any]) -> int:
+    """Encode the major-version integer field into its tag/length/value byte sequence."""
     decimal_value = _require_int(payload, "decimal")
     if not 0 <= decimal_value <= 0xFF:
         raise RoundtripEncoderError(
@@ -4920,6 +4938,7 @@ def encode_major_version_field(payload: dict[str, Any]) -> int:
 
 
 def encode_minor_version_field(payload: dict[str, Any]) -> int:
+    """Encode the minor-version integer field into its tag/length/value byte sequence."""
     decimal_value = _require_int(payload, "decimal")
     if not 0 <= decimal_value <= 0xFF:
         raise RoundtripEncoderError(
@@ -4936,6 +4955,7 @@ def encode_identification_field(payload: dict[str, Any]) -> int:
 
 
 def encode_short_efid_field(payload: dict[str, Any]) -> int:
+    """Encode the short EF-ID field into its tag/length/value byte sequence."""
     decimal_value = _require_int(payload, "decimal")
     if not 0 <= decimal_value <= 0x1F:
         raise RoundtripEncoderError(
@@ -4974,7 +4994,7 @@ _BYTES_DISPATCHER: dict[str, Any] = {
     "uiccAdminAccessDomain": encode_access_domain,
     "adfAccessDomain": encode_access_domain,
     "adfAdminAccessDomain": encode_access_domain,
-    # file-structure fields.
+    # Round 1 — file-structure fields.
     "filePath": encode_file_path,
     "linkPath": encode_link_path,
     "fileDescriptor": encode_file_descriptor,
@@ -4982,16 +5002,16 @@ _BYTES_DISPATCHER: dict[str, Any] = {
     "fillPattern": encode_fill_pattern,
     "repeatPattern": encode_repeat_pattern,
     "fileDetails": encode_file_details,
-    # PIN/PUK/key-material.
+    # Round 3 — PIN/PUK/key-material.
     "pinValue": encode_pin_secret_value,
     "pukValue": encode_pin_secret_value,
     "keyData": encode_key_data,
     "pinStatusTemplateDO": encode_pin_status_template_do,
-    # install/connectivity parameters.
+    # Round 4 — install/connectivity parameters.
     "connectivityParameters": encode_connectivity_parameters,
     "applicationSpecificParametersC9": encode_sd_install_parameters,
     "uiccToolkitApplicationSpecificParametersField": encode_uicc_toolkit_parameters,
-    # PE-level OCTET STRING subtag encoders.
+    # 5x20 Pass D — PE-level OCTET STRING subtag encoders.
     "iccid": encode_iccid_field,
     "hashValue": encode_hash_value_field,
     "lcsi": encode_lcsi_field,
@@ -5007,14 +5027,14 @@ _BYTES_DISPATCHER: dict[str, Any] = {
     "customFieldOctets": encode_custom_field_octets,
     "serialNumber": encode_serial_number_field,
     "notificationAddress": encode_notification_address_field,
-    # earlier work -- structured round-trip encoders paired with the
-    # earlier work/earlier work semantic decoders.
+    # Round-6 Sweep 4 — structured round-trip encoders paired with the
+    # Round-4/Round-5 semantic decoders.
     "applicationProviderIdentifier": encode_application_provider_identifier_field,
     "globalServiceParameters": encode_global_service_parameters_field,
     "implicitSelectionParameter": encode_implicit_selection_parameter_field,
     "contactlessProtocolParameters": encode_contactless_protocol_parameters_field,
     "userInteractionContactlessParameters": encode_user_interaction_contactless_parameters_field,
-    # Remaining-gap structured encoders -- previously hex-only pass-through.
+    # Remaining-gap structured encoders — previously hex-only pass-through.
     "restrictParameter": encode_restrict_parameter_field,
     "ts102226SIMFileAccessToolkitParameter": encode_ts102226_sim_file_access_toolkit_parameter_field,
     "uiccAccessApplicationSpecificParametersField": encode_uicc_access_application_specific_parameters_field,
@@ -5036,7 +5056,7 @@ for _aid_field in _AID_FIELD_NAMES:
 for _memory_field in _MEMORY_LIMIT_FIELD_LABELS:
     _BYTES_DISPATCHER[_memory_field] = encode_memory_limit_field
 
-# Register generic tagged-bytes pass-through encoders.
+# Wave A — register generic tagged-bytes pass-through encoders.
 for _passthrough_field in _PASSTHROUGH_BYTES_FIELD_NAMES:
     _BYTES_DISPATCHER[_passthrough_field] = _make_passthrough_bytes_encoder(
         _passthrough_field
@@ -5052,7 +5072,7 @@ _SCALAR_DISPATCHER: dict[str, Any] = {
     "keyReference": encode_pin_puk_adm_key_reference,
     "maxNumOfAttemps-retryNumLeft": encode_pin_puk_retry_counter,
     "maxNumOfAttempts-retryNumLeft": encode_pin_puk_retry_counter,
-    # PE-level INTEGER subtag encoders.
+    # 5x20 Pass D — PE-level INTEGER subtag encoders.
     "major-version": encode_major_version_field,
     "minor-version": encode_minor_version_field,
     "identification": encode_identification_field,
@@ -5125,8 +5145,8 @@ def roundtrip_capable_fields() -> dict[str, str]:
     """Return a mapping of field name -> natural output kind.
 
     ``kind`` is one of:
-    - ``"bytes"`` -- field is stored as tagged-bytes OCTET STRING.
-    - ``"scalar"`` -- field is stored as an ASN.1 INTEGER.
+    - ``"bytes"`` — field is stored as tagged-bytes OCTET STRING.
+    - ``"scalar"`` — field is stored as an ASN.1 INTEGER.
     """
 
     kinds: dict[str, str] = {}

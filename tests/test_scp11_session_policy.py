@@ -105,7 +105,7 @@ class RecordingOrchestrator:
             current_euicc_ci_pkid="pkid-preserved",
             stk_event_list=[3, 9, 10],
             stk_poll_interval_seconds=286,
-            stk_location_information=b"\x00\xF1\x10\x00\x01\x00\x01",
+            stk_location_information=b"\x62\xF2\x10\x00\x01\x00\x01",
             stk_imei=b"abc123",
         )
         self._last_eim_poll_reached_server = True
@@ -221,7 +221,7 @@ class SessionPolicyBehaviorMixin(_SessionPolicyHarness):
         self.assertEqual(orchestrator.state.stk_poll_interval_seconds, 286)
         self.assertEqual(
             orchestrator.state.stk_location_information,
-            b"\x00\xF1\x10\x00\x01\x00\x01",
+            b"\x62\xF2\x10\x00\x01\x00\x01",
         )
         self.assertEqual(orchestrator.state.stk_imei, b"abc123")
 

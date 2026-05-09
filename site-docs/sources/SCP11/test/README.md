@@ -69,7 +69,7 @@ Simulator card note:
 
 Difference from `SCP11/live`:
 
-- the primary relay command surface tracks `SCP11/live`, including the
+- the primary relay command surface now tracks `SCP11/live`, including the
   `POLL` watchdog command shape
 - the operational difference is primarily certificate/trust defaults and the
   availability of extra lab-oriented request/result shaping

@@ -1,9 +1,11 @@
 """Plugin-absence guard tests.
 
 These tests lock in the invariant that the core tree must remain
-functional when the polling plugin is not installed. Removing the
-``plugins/polling/`` tree must leave the simulated UICC behaving as a
-vanilla ISO 7816 card (STK framework only).
+functional when the polling plugin is not installed. The patentable
+Wi‑Fi / Ethernet polling bridge lives exclusively in
+``plugins/polling/``; removing that tree must leave the simulated UICC
+behaving as a vanilla ISO 7816 card (STK framework only, no DNS / TLS /
+HTTP emulation).
 
 The suite is intentionally narrow:
 
@@ -79,67 +81,29 @@ class CoreWithoutPollingPluginTests(unittest.TestCase):
 
     def test_shell_ipad_commands_raise_runtime_error_without_plugin(self) -> None:
         os.environ["YGGDRASIM_EIM_LOCAL_ROOT"] = tempfile.mkdtemp(prefix="eim_absence_")
-        # ``EimLocalShell`` constructs an ``EimLocalSession`` which in turn
-        # builds a ``PcscApduChannel`` against the configured backend. CI
-        # runners have no smart card readers attached, so we explicitly
-        # pin the backend to the in-process simulator (``sim``). That keeps
-        # the test focused on its real subject -- the polling plugin gate
-        # -- without dragging in a hardware probe that would raise
-        # ``RuntimeError("No smart card readers found.")`` long before
-        # the shell command lookup runs.
+        with mock.patch.dict(os.environ, {"YGGDRASIM_DISALLOW_PLUGINS": "1"}):
+            from yggdrasim_common import plugin_runtime
 
-        # We reimport ``SCP11.eim_local.main`` inside the plugin-disallow
-        # gate so the shell observes the absence at module-load time.
-        # That swap leaks across tests if we don't restore: any later
-        # test in the file that did ``from SCP11.eim_local.main import
-        # EimLocalShell`` (i.e. resolved the *original* module's globals
-        # at collection time) will subsequently fail to mock things like
-        # ``EimLocalSession`` via ``mock.patch("SCP11.eim_local.main....")``,
-        # because the patch lands on the *new* module while the bound
-        # ``EimLocalShell`` keeps looking up names in the old one.
-        # Snapshot the affected sys.modules entries up front and put
-        # them back at the end.
-        original_modules: dict[str, object] = {
-            module_name: sys.modules[module_name]
-            for module_name in list(sys.modules.keys())
-            if module_name.startswith("SCP11.eim_local.main")
-        }
-        try:
-            with mock.patch.dict(
-                os.environ,
-                {
-                    "YGGDRASIM_DISALLOW_PLUGINS": "1",
-                    "YGGDRASIM_CARD_BACKEND": "sim",
-                },
-            ):
-                from yggdrasim_common import plugin_runtime
+            plugin_runtime.reset_plugin_manager_for_tests()
 
-                plugin_runtime.reset_plugin_manager_for_tests()
-
-                # Import inside the gate so the shell sees the absence.
-                for module_name in list(sys.modules.keys()):
-                    if module_name.startswith("SCP11.eim_local.main"):
-                        del sys.modules[module_name]
-
-                from SCP11.eim_local import main as eim_main
-
-                eim_main.EimLocalShell._setup_readline = lambda self: None  # type: ignore[assignment]
-                shell = eim_main.EimLocalShell()
-
-            self.assertFalse(getattr(shell, "_polling_plugin_shell_attached", False))
-            self.assertEqual(shell._bridge_status_payload(), {})
-            self.assertIsNone(shell._stop_poll_bridge())
-
-            with self.assertRaisesRegex(RuntimeError, "polling plugin"):
-                shell._commands["IPAD-LIVE"]("")
-            with self.assertRaisesRegex(RuntimeError, "polling plugin"):
-                shell._commands["IPAD-TEST"]("")
-        finally:
+            # Import inside the gate so the shell sees the absence.
             for module_name in list(sys.modules.keys()):
                 if module_name.startswith("SCP11.eim_local.main"):
                     del sys.modules[module_name]
-            for module_name, module_object in original_modules.items():
-                sys.modules[module_name] = module_object  # type: ignore[assignment]
+
+            from SCP11.eim_local import main as eim_main
+
+            eim_main.EimLocalShell._setup_readline = lambda self: None  # type: ignore[assignment]
+            shell = eim_main.EimLocalShell()
+
+        self.assertFalse(getattr(shell, "_polling_plugin_shell_attached", False))
+        self.assertEqual(shell._bridge_status_payload(), {})
+        self.assertIsNone(shell._stop_poll_bridge())
+
+        with self.assertRaisesRegex(RuntimeError, "polling plugin"):
+            shell._commands["IPAD-LIVE"]("")
+        with self.assertRaisesRegex(RuntimeError, "polling plugin"):
+            shell._commands["IPAD-TEST"]("")
 
 
 if __name__ == "__main__":

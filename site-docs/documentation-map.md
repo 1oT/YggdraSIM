@@ -47,6 +47,7 @@ subsystems.
 | `guides/INSTALL_FROM_SOURCE.md` | source-checkout install with optional extras |
 | `guides/INSTALL_RASPBERRYPI.md` | Raspberry Pi install notes |
 | `guides/TEMPLATE_AND_TOKENS.md` | template and token contract used by the launcher and shells |
+| `CHANGELOG.md` | release history |
 | `SCP11/README.md` | SCP11 family selection guide |
 | `SCP11/live/README.md` | live relay operator guide |
 | `SCP11/test/README.md` | test relay operator guide |

@@ -5,17 +5,17 @@ surface against the simulated card backend (`YGGDRASIM_CARD_BACKEND=sim`).
 
 Layout:
 
-* `*.in.txt`        -- one stdin script per command (newline-separated). Lines
+* `*.in.txt`        — one stdin script per command (newline-separated). Lines
                       starting with `#` are treated as comments and ignored by
                       the SCP03 batch loader.
-* `manifest.json`   -- declarative test catalogue: which command each script
+* `manifest.json`   — declarative test catalogue: which command each script
                       exercises, prerequisites, and the expected APDU SW
                       tail (`9000` for happy paths, error SWs where the test
                       validates a refusal path).
-* `run_all.py`      -- runner. Iterates the manifest, pipes each `.in.txt`
+* `run_all.py`      — runner. Iterates the manifest, pipes each `.in.txt`
                       through `python -m SCP03 --stdin`, captures
                       stdout / stderr / exit code, parses transmit traces for
-                      the trailing `SW=...` tokens, and writes a single
+                      the trailing `SW=…` tokens, and writes a single
                       review-ready dump to
                       `reports/scp03_live_run_<timestamp>.md`.
 

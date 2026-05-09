@@ -6,12 +6,12 @@ default_md = sha256
 req_extensions = v3_req
 
 [ req_dn ]
-C = XX
-ST = TestState
-L = TestLocality
+C = EE
+ST = Harjumaa
+L = Tallinn
 O = YggdraSIM
 OU = Subscription Management
-CN = eim.yggdrasim.example.test
+CN = eim.example.test
 emailAddress = certificate.automation@yggdrasim.local
 
 [ v3_req ]
@@ -30,5 +30,5 @@ authorityKeyIdentifier = keyid,issuer
 subjectAltName = @alt_names
 
 [ alt_names ]
-DNS.1 = eim.yggdrasim.example.test
+DNS.1 = eim.example.test
 URI.1 = urn:oid:2.25.311782205282738360923618091971140414400

@@ -1,3 +1,5 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+"""GSMA error-code descriptions: maps SGP.22 profile-state and notification result codes to human-readable strings."""
 from typing import Any, Dict
 
 # SGP.22 / RSP (ES10b) operation result codes currently surfaced by card flows.
@@ -31,7 +33,7 @@ SGP22_DOWNLOAD_ERROR_CODE: Dict[int, str] = {
 
 # SGP.22 / SGP.02 profile installation result reason reported by card.
 # Codes 1..15 and 127 are SGP.22 v2 (the upstream pySim ASN.1 module is v2.0).
-# Codes 16..23 are the v3.x extensions -- harmless on v2 cards because they
+# Codes 16..23 are the v3.x extensions — harmless on v2 cards because they
 # will never appear there; useful when the card firmware moves forward.
 SGP22_PROFILE_INSTALLATION_RESULT_REASON: Dict[int, str] = {
     1: "incorrectInputValues",

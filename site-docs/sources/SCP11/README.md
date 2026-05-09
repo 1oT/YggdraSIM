@@ -35,8 +35,9 @@ Three parallel orchestrator and console trees ship with v1:
 | `SCP11/test/orchestrator.py` and `SCP11/test/console.py` | **legacy mirror** | Lab relay flow with test-certificate defaults and extra request shaping. |
 
 Any change that lands in the canonical tree must be evaluated against both
-legacy mirrors, and vice versa. Collapsing the mirrors into shim packages
-is a future cleanup so fixes only have to be made once.
+legacy mirrors, and vice versa. Audit items `SCP11-P1-01` and `SCP11-P1-02`
+track collapsing the mirrors into shim packages post v1 so fixes only have
+to be made once.
 
 ## Choose by task
 

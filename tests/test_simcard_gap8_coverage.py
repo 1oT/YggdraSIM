@@ -1,4 +1,6 @@
-"""Coverage for SIMCARD UPDATE BINARY/RECORD by SFI and TS 102 223 multi-card surfaces:
+"""Eighth-pass gap-coverage suite for SIMCARD surfaces beyond ES10.
+
+Round-8 closes the following:
 
 * ETSI TS 102 221 §11.1.4 UPDATE BINARY by SFI (P1 bit 8 set selects
   the EF under the current DF; P2 carries the byte offset 0..255).
@@ -331,7 +333,7 @@ class GetReaderStatusTests(_ToolkitHarness):
 
 
 class EventDownloadGap8Tests(_ToolkitHarness):
-    """Event Download additions: SS, USSD, Local Connection."""
+    """Round-8 Event Download additions: SS, USSD, Local Connection."""
 
     def _envelope(self, *body: bytes) -> bytes:
         joined = b"".join(body)

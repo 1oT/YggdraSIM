@@ -1,17 +1,12 @@
 name: Docker Image
 
 on:
-  push:
-    branches: [main, master]
-    tags:
-      - "v*"
   pull_request:
     branches: [main, master]
   workflow_dispatch:
 
 permissions:
   contents: read
-  packages: write
 
 jobs:
   docker:
@@ -30,39 +25,16 @@ jobs:
 
       - name: Smoke test Docker image
         shell: bash
+        # ``--version`` exercises console-script registration, venv
+        # activation in the entrypoint, and argparse wiring without
+        # requiring a PC/SC daemon, a SIMtrace2 board, or a relay
+        # endpoint -- none of which exist inside a single-shot CI
+        # container. A real session would call ``_run_startup_preflight``
+        # which short-circuits cleanly when pcscd is unreachable but
+        # still aborts with a non-zero exit, so it is not a meaningful
+        # smoke target without hardware. The non-root assertion confirms
+        # the Dockerfile's ``USER yggdrasim`` layer is intact.
         run: |
           docker run --rm yggdrasim-ci:local yggdrasim-scp11 --version
           docker run --rm yggdrasim-ci:local sh -c 'id -u && test "$(id -u)" = "1000"'
 
-      - name: Log in to GHCR
-        if: github.event_name == 'push'
-        uses: docker/login-action@v4
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Extract Docker metadata
-        if: github.event_name == 'push'
-        id: meta
-        uses: docker/metadata-action@v6
-        with:
-          images: ghcr.io/${{ github.repository_owner }}/yggdrasim
-          tags: |
-            type=ref,event=branch
-            type=ref,event=tag
-            type=sha,prefix=sha-
-            type=raw,value=latest,enable={{is_default_branch}}
-
-      - name: Build and push Docker image
-        if: github.event_name == 'push'
-        uses: docker/build-push-action@v7
-        with:
-          context: .
-          file: ./Dockerfile
-          platforms: linux/amd64
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max

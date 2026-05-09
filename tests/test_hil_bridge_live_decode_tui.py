@@ -242,7 +242,7 @@ class HilBridgeLiveDecodeTuiTests(unittest.TestCase):
         annotations = {
             1: StatefulFrameAnnotation(
                 frame_number=1,
-                summary_suffix="STK OPEN CHANNEL | CH1 OPEN tcp-client-remote://192.0.2.4:443",
+                summary_suffix="STK OPEN CHANNEL | CH1 OPEN tcp-client-remote://1.2.3.4:443",
                 channel_session_id=1,
                 channel_number=1,
                 channel_poll_index=1,
@@ -314,7 +314,7 @@ class HilBridgeLiveDecodeTuiTests(unittest.TestCase):
             ),
             3: StatefulFrameAnnotation(
                 frame_number=3,
-                summary_suffix="STK OPEN CHANNEL | CH2 OPEN tcp-client-remote://192.0.2.4:443",
+                summary_suffix="STK OPEN CHANNEL | CH2 OPEN tcp-client-remote://1.2.3.4:443",
                 channel_session_id=2,
                 channel_number=1,
                 channel_poll_index=2,
@@ -362,7 +362,7 @@ class HilBridgeLiveDecodeTuiTests(unittest.TestCase):
         annotations = {
             1: StatefulFrameAnnotation(
                 frame_number=1,
-                summary_suffix="STK OPEN CHANNEL | CH1 OPEN tcp-client-remote://192.0.2.4:443",
+                summary_suffix="STK OPEN CHANNEL | CH1 OPEN tcp-client-remote://1.2.3.4:443",
                 channel_session_id=1,
                 channel_number=1,
             ),
@@ -420,7 +420,7 @@ class HilBridgeLiveDecodeTuiTests(unittest.TestCase):
             ),
             3: StatefulFrameAnnotation(
                 frame_number=3,
-                summary_suffix="STK OPEN CHANNEL | CH2 OPEN tcp-client-remote://192.0.2.4:443",
+                summary_suffix="STK OPEN CHANNEL | CH2 OPEN tcp-client-remote://1.2.3.4:443",
                 channel_session_id=2,
                 channel_number=2,
                 channel_poll_index=1,
@@ -465,7 +465,7 @@ class HilBridgeLiveDecodeTuiTests(unittest.TestCase):
         annotations = {
             1: StatefulFrameAnnotation(
                 frame_number=1,
-                summary_suffix="STK OPEN CHANNEL | CH1 OPEN tcp-client-remote://192.0.2.4:443",
+                summary_suffix="STK OPEN CHANNEL | CH1 OPEN tcp-client-remote://1.2.3.4:443",
                 channel_session_id=1,
                 channel_number=1,
                 channel_poll_index=1,
@@ -474,7 +474,7 @@ class HilBridgeLiveDecodeTuiTests(unittest.TestCase):
                 frame_number=2,
                 summary_suffix=(
                     "CH1 SEND 87B | TLS Handshake: ClientHello "
-                    "sni=tls.example.test (67 byte(s))"
+                    "sni=tls.eim.example.test (67 byte(s))"
                 ),
                 channel_session_id=1,
                 channel_number=1,
@@ -503,7 +503,7 @@ class HilBridgeLiveDecodeTuiTests(unittest.TestCase):
 
         self.assertEqual(
             [_summary_channel_session_context_title(context_label) for context_label, _context_rows in context_buckets],
-            ["TLS - tls.example.test", "eIM - eim.example.test"],
+            ["TLS - tls.eim.example.test", "eIM - eim.example.test"],
         )
         self.assertEqual(
             [[int(row.number) for row in context_rows] for _context_label, context_rows in context_buckets],
@@ -526,7 +526,7 @@ class HilBridgeLiveDecodeTuiTests(unittest.TestCase):
         annotations = {
             1: StatefulFrameAnnotation(
                 frame_number=1,
-                summary_suffix="STK OPEN CHANNEL | CH1 OPEN tcp-client-remote://192.0.2.4:443",
+                summary_suffix="STK OPEN CHANNEL | CH1 OPEN tcp-client-remote://1.2.3.4:443",
                 channel_session_id=1,
                 channel_number=1,
                 channel_poll_index=1,
@@ -535,7 +535,7 @@ class HilBridgeLiveDecodeTuiTests(unittest.TestCase):
                 frame_number=2,
                 summary_suffix=(
                     "CH1 SEND 87B | TLS Handshake: ClientHello "
-                    "sni=tls.example.test (67 byte(s))"
+                    "sni=tls.eim.example.test (67 byte(s))"
                 ),
                 channel_session_id=1,
                 channel_number=1,
@@ -555,7 +555,7 @@ class HilBridgeLiveDecodeTuiTests(unittest.TestCase):
         self.assertEqual(len(context_buckets), 1)
         self.assertEqual(
             _summary_channel_session_context_title(context_buckets[0][0]),
-            "TLS - tls.example.test",
+            "TLS - tls.eim.example.test",
         )
         self.assertEqual([int(row.number) for row in context_buckets[0][1]], [2, 3])
         self.assertEqual([int(row.number) for row in unbound_rows], [1])
@@ -576,7 +576,7 @@ class HilBridgeLiveDecodeTuiTests(unittest.TestCase):
         annotations = {
             1: StatefulFrameAnnotation(
                 frame_number=1,
-                summary_suffix="STK OPEN CHANNEL | CH1 OPEN tcp-client-remote://192.0.2.4:443",
+                summary_suffix="STK OPEN CHANNEL | CH1 OPEN tcp-client-remote://1.2.3.4:443",
                 channel_session_id=1,
                 channel_number=1,
                 channel_poll_index=1,
@@ -595,7 +595,7 @@ class HilBridgeLiveDecodeTuiTests(unittest.TestCase):
                 frame_number=3,
                 summary_suffix=(
                     "CH1 SEND 87B | TLS Handshake: ClientHello "
-                    "sni=tls.example.test (67 byte(s))"
+                    "sni=tls.eim.example.test (67 byte(s))"
                 ),
                 channel_session_id=1,
                 channel_number=1,
@@ -614,7 +614,7 @@ class HilBridgeLiveDecodeTuiTests(unittest.TestCase):
 
         self.assertEqual(
             [_summary_channel_session_context_title(context_label) for context_label, _context_rows in context_buckets],
-            ["TLS - tls.example.test", "eIM - eim.example.test"],
+            ["TLS - tls.eim.example.test", "eIM - eim.example.test"],
         )
         self.assertEqual(
             [[int(row.number) for row in context_rows] for _context_label, context_rows in context_buckets],
@@ -689,14 +689,14 @@ class HilBridgeLiveDecodeTuiTests(unittest.TestCase):
         from Tools.HilBridge.live_decode_tui import _summary_display_label_text
 
         self.assertEqual(
-            _summary_display_label_text("STK OPEN CHANNEL | CH12 OPEN tcp-client-remote://192.0.2.4:443"),
-            "STK OPEN CHANNEL | OPEN tcp-client-remote://192.0.2.4:443",
+            _summary_display_label_text("STK OPEN CHANNEL | CH12 OPEN tcp-client-remote://1.2.3.4:443"),
+            "STK OPEN CHANNEL | OPEN tcp-client-remote://1.2.3.4:443",
         )
         self.assertEqual(
             _summary_display_label_text(
-                "CH12 SEND 87B | TLS Handshake: ClientHello sni=tls.example.test (67 byte(s))"
+                "CH12 SEND 87B | TLS Handshake: ClientHello sni=tls.eim.example.test (67 byte(s))"
             ),
-            "SEND 87B | TLS Handshake: ClientHello sni=tls.example.test (67 byte(s))",
+            "SEND 87B | TLS Handshake: ClientHello sni=tls.eim.example.test (67 byte(s))",
         )
         self.assertEqual(
             _summary_display_label_text("CH12 CLOSED"),
@@ -1843,7 +1843,7 @@ class HilBridgeLiveDecodeTuiTests(unittest.TestCase):
                 ),
                 5: StatefulFrameAnnotation(
                     frame_number=5,
-                    summary_suffix="STK OPEN CHANNEL | CH2 OPEN tcp-client-remote://192.0.2.4:443",
+                    summary_suffix="STK OPEN CHANNEL | CH2 OPEN tcp-client-remote://1.2.3.4:443",
                     channel_session_id=2,
                     channel_number=1,
                     channel_poll_index=2,
@@ -1851,7 +1851,7 @@ class HilBridgeLiveDecodeTuiTests(unittest.TestCase):
                 ),
                 6: StatefulFrameAnnotation(
                     frame_number=6,
-                    summary_suffix="CH2 SEND 87B | TLS Handshake: ClientHello sni=tls.example.test (67 byte(s))",
+                    summary_suffix="CH2 SEND 87B | TLS Handshake: ClientHello sni=tls.eim.example.test (67 byte(s))",
                     channel_session_id=2,
                     channel_number=1,
                     channel_poll_index=2,
@@ -1961,7 +1961,7 @@ class HilBridgeLiveDecodeTuiTests(unittest.TestCase):
                         )
                         self.assertTrue(
                             any(
-                                "SEND 87B | TLS Handshake: ClientHello sni=tls.example.test" in label
+                                "SEND 87B | TLS Handshake: ClientHello sni=tls.eim.example.test" in label
                                 for label in fqdn_frame_labels
                             )
                         )
@@ -1989,7 +1989,7 @@ class HilBridgeLiveDecodeTuiTests(unittest.TestCase):
             annotations = {
                 1: StatefulFrameAnnotation(
                     frame_number=1,
-                    summary_suffix="STK OPEN CHANNEL | CH1 OPEN tcp-client-remote://192.0.2.4:443",
+                    summary_suffix="STK OPEN CHANNEL | CH1 OPEN tcp-client-remote://1.2.3.4:443",
                     channel_session_id=1,
                     channel_number=1,
                     channel_poll_index=1,
@@ -2039,7 +2039,7 @@ class HilBridgeLiveDecodeTuiTests(unittest.TestCase):
                             for node in summary_tree.root.children
                             if "Poll 1" in getattr(node.label, "plain", str(node.label))
                         )
-                        # The test endpoint is tcp://192.0.2.4:443, which is
+                        # The test endpoint is tcp://1.2.3.4:443, which is
                         # classified as an eIM leg (port 443 / TCP) rather
                         # than a DNS lookup. The orphan eIM still gets a
                         # standalone poll; we simply look up the session by
@@ -2055,7 +2055,7 @@ class HilBridgeLiveDecodeTuiTests(unittest.TestCase):
                         ]
 
                         self.assertEqual(len(session_labels), 4)
-                        self.assertIn("STK OPEN CHANNEL | OPEN tcp-client-remote://192.0.2.4:443", session_labels[0])
+                        self.assertIn("STK OPEN CHANNEL | OPEN tcp-client-remote://1.2.3.4:443", session_labels[0])
                         self.assertIn("DATA AVAILABLE 12B", session_labels[1])
                         self.assertIn("STK CLOSE CHANNEL | CLOSE", session_labels[2])
                         self.assertIn("CLOSED", session_labels[3])
@@ -3027,7 +3027,7 @@ class HilBridgeLiveDecodeTuiTests(unittest.TestCase):
         )
         # Port 443 over UDP (QUIC/DTLS-style) still classifies as eIM.
         self.assertEqual(
-            _classify_session_role("192.0.2.4:443", "udp-client-remote"),
+            _classify_session_role("1.2.3.4:443", "udp-client-remote"),
             _SESSION_ROLE_EIM,
         )
         # Missing port falls back to the transport hint.
@@ -3118,7 +3118,7 @@ class HilBridgeLiveDecodeTuiTests(unittest.TestCase):
                 frame_number=2,
                 summary_suffix=(
                     "STK OPEN CHANNEL | CH2 OPEN "
-                    "tcp-client-remote://192.0.2.4:443 APN:Terminal.apn"
+                    "tcp-client-remote://1.2.3.4:443 APN:Terminal.apn"
                 ),
             ),
             3: StatefulFrameAnnotation(
@@ -3146,7 +3146,7 @@ class HilBridgeLiveDecodeTuiTests(unittest.TestCase):
         self.assertEqual(len(polls[0][1]), 2)
         self.assertEqual(len(polls[1][1]), 2)
         self.assertTrue(polls[0][1][0][1].startswith("DNS - 8.8.8.8:53"))
-        self.assertTrue(polls[0][1][1][1].startswith("eIM - 192.0.2.4:443"))
+        self.assertTrue(polls[0][1][1][1].startswith("eIM - 1.2.3.4:443"))
         self.assertTrue(polls[1][1][0][1].startswith("DNS - 8.8.8.8:53"))
         self.assertTrue(polls[1][1][1][1].startswith("eIM - 5.6.7.8:443"))
 
@@ -3890,7 +3890,7 @@ class HilBridgeLiveDecodeTuiTests(unittest.TestCase):
                     frame_number=4,
                     summary_suffix=(
                         "STK OPEN CHANNEL | CH2 OPEN "
-                        "tcp-client-remote://192.0.2.4:443 APN:Terminal.apn"
+                        "tcp-client-remote://1.2.3.4:443 APN:Terminal.apn"
                     ),
                     channel_session_id=2,
                     channel_number=2,
@@ -3961,7 +3961,7 @@ class HilBridgeLiveDecodeTuiTests(unittest.TestCase):
                             msg=f"DNS session label wrong: {child_labels[0]!r}",
                         )
                         self.assertTrue(
-                            child_labels[1].startswith("eIM - 192.0.2.4:443 - Terminal.apn"),
+                            child_labels[1].startswith("eIM - 1.2.3.4:443 - Terminal.apn"),
                             msg=f"eIM session label wrong: {child_labels[1]!r}",
                         )
 

@@ -182,7 +182,7 @@ class SaipProfileTemplateTests(unittest.TestCase):
             index=7,
         )
 
-        self.assertEqual(stem, "profile_iccid_89461111111111111112")
+        self.assertEqual(stem, "profile_iccid_89881111111111111112")
 
 
 if __name__ == "__main__":

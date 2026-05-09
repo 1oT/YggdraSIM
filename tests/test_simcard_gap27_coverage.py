@@ -1,13 +1,16 @@
-"""Coverage for EF.UST / EF.SPDI coherence:
+"""Twenty-seventh-pass gap-coverage suite.
 
-``_encode_ef_ust_default`` advertises USIM service **51**
-(Service Provider Display Information) and must seed the
-matching backing EF. Per TS 31.102 §4.2.8 services **45** /
-**46** are PNN / OPL; service **50** is "Reserved (and shall
-be ignored)".
+Round-27 closes a real spec-correctness bug introduced in
+round 22: ``_encode_ef_ust_default`` was advertising USIM
+service **50** (which TS 31.102 §4.2.8 lists as "Reserved
+(and shall be ignored)") and service **51** (Service Provider
+Display Information) without seeding the matching backing EF.
+The accompanying inline comment also mis-labelled services
+50 / 51 as "PNN / OPL" -- per TS 31.102 §4.2.8 those are
+services **45** / **46**.
 
-The simulator's EF.UST is kept honest with respect to its
-actual file system:
+The fix makes the simulator's EF.UST honest with respect to
+its actual file system:
 
 * Drop service 50 (reserved) from ``enabled_services``.
 * Add services 45 (PNN) and 46 (OPL); both EFs are already
@@ -17,8 +20,8 @@ actual file system:
 
 Default EF.SPDI content is ``A3 02 80 00`` -- an empty SPDI
 list per §4.2.66 -- so a modem reading the EF before any
-operator OTA gets a well-formed TLV scaffold instead of
-``6A 82``.
+operator OTA gets a well-formed TLV scaffold instead of the
+previous ``6A 82``.
 """
 
 from __future__ import annotations
@@ -80,13 +83,14 @@ class _UsimEngineHarness(unittest.TestCase):
 
 
 class UstServiceNumberCorrectionTests(_UsimEngineHarness):
-    """Verify the UST correction matches TS 31.102 §4.2.8."""
+    """Verify the round-27 UST correction matches TS 31.102 §4.2.8."""
 
     def test_pnn_and_opl_now_advertised(self) -> None:
         self._select_usim()
         self._select_ok("6F38")
         ust = self._read_binary(0x11)
-        # Services 45 (PNN) and 46 (OPL) per TS 31.102 §4.2.8.
+        # Round 27: services 45 (PNN) and 46 (OPL) replace the
+        # round-22 mis-labelled bits 50 / 51.
         self.assertTrue(
             self._ust_service_enabled(ust, 45),
             msg="UST service 45 (PNN) not advertised",
@@ -101,7 +105,7 @@ class UstServiceNumberCorrectionTests(_UsimEngineHarness):
         self._select_ok("6F38")
         ust = self._read_binary(0x11)
         # TS 31.102 §4.2.8 lists service 50 as "Reserved (and
-        # shall be ignored)"; the simulator must not advertise it.
+        # shall be ignored)". Round 27 stops setting it.
         self.assertFalse(
             self._ust_service_enabled(ust, 50),
             msg="UST service 50 (reserved) still advertised",
@@ -117,7 +121,7 @@ class UstServiceNumberCorrectionTests(_UsimEngineHarness):
         )
 
     def test_psismsc_service_91_still_advertised(self) -> None:
-        # Sanity check that the SM-over-IP advertisement is intact.
+        # Sanity check that round-26 work is untouched.
         self._select_usim()
         self._select_ok("6F38")
         ust = self._read_binary(0x11)

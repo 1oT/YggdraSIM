@@ -27,7 +27,7 @@ Tests in this module pin:
 5. Cycles, self-references and unresolved targets are silent no-ops,
    so a malformed BPP never aborts profile activation.
 6. End-to-end against the operator BPP fixture: every FID the modem
-   reads via SFI on cold attach return the issuer payload that
+   reads via SFI on cold attach now returns the issuer payload that
    would otherwise live only under DF.GSM / DF.TELECOM.
 
 Reference:
@@ -149,7 +149,7 @@ class FcpLinkPathDecoderTests(unittest.TestCase):
 
     def test_odd_length_payload_is_dropped(self) -> None:
         # ``linkPath`` must be a whole number of 2-byte FIDs. A 3-byte
-        # blob is malformed; the link is dropped rather than synthesised
+        # blob is malformed; we drop the link rather than synthesise
         # a partial path that would mis-resolve at runtime.
         self.assertEqual(_decode_fcp_link_path({"linkPath": b"\x7F\x20\x6F"}), tuple())
 
@@ -462,10 +462,10 @@ class OperatorBppLinkPathTests(unittest.TestCase):
         upp = _decode_hex_text_upp(_BPP_PATH)
         image = decode_profile_image(upp)
         linked = [n for n in image.nodes if n.kind == "ef" and len(n.link_path) > 0]
-        # The reference BPP carries 33 known linkPath entries across
-        # USIM, ISIM, GSM-ACCESS and DF.GSM. Use a generous lower
-        # bound so the test stays stable if the profile adds / removes
-        # a couple of optional EFs.
+        # The user's BPP carries 33 known linkPath entries across
+        # USIM, ISIM, GSM-ACCESS and DF.GSM. Drop a generous lower
+        # bound so the test does not break if the operator adds /
+        # removes a couple of optional EFs in a future revision.
         self.assertGreaterEqual(len(linked), 30)
 
     def test_usim_imsi_mirrors_df_gsm_imsi_via_link_path(self) -> None:

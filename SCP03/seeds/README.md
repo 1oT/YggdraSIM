@@ -20,10 +20,10 @@ Delete the runtime file to force a re-seed on next launch.
 
 ## File contracts
 
-### `fids.txt` -- ETSI / 3GPP file-identifier registry
+### `fids.txt` — ETSI / 3GPP file-identifier registry
 
 Plain-text tree of file identifiers consumed by `SCP03.logic.fs.SCP03FileSystem`.
-Indentation marks parent-child nesting; lines of the form `NAME:FID[:AID...]`
+Indentation marks parent–child nesting; lines of the form `NAME:FID[:AID...]`
 declare nodes. `EF_UNKNOWN:6Fxx` is a wildcard catcher for unrecognised entries
 during deep scans. References:
 
@@ -33,7 +33,7 @@ during deep scans. References:
 - 3GPP TS 31.104 §4.2 (HPSIM file structure)
 - 3GPP2 C.S0023-D §3.4 (CSIM file structure)
 
-### `aid.txt` -- Application identifier registry
+### `aid.txt` — Application identifier registry
 
 Plain-text `LABEL:AID-HEX` registry consumed by `SCP03.config.Config` and the
 SCP03 wizards. Labels are short tokens (`ISDR`, `ECASD`, `ARAM`, `ARAC`,
@@ -44,7 +44,7 @@ hard-coding their AIDs. References:
 - GSMA SGP.22 §2.2 (RSP architecture, ISD-R / ECASD / ISD-P)
 - GlobalPlatform Card Specification v2.3 §11.1 (AID format)
 
-### `keys.ini` -- SCP03 key material
+### `keys.ini` — SCP03 key material
 
 INI file consumed by `SCP03.config.Config` for SCP02/SCP03 base-key derivation
 and for ETSI ADM verification. The shipped values are the **publicly-known
@@ -53,7 +53,7 @@ ASCII string `12345678` (`3132333435363738`) for ADM. They are not, and have
 never been, live operator material. Replace them through the SCP03 CONFIG
 wizard before talking to any production card.
 
-### `binds.json` -- custom command macros
+### `binds.json` — custom command macros
 
 JSON object whose keys are user-defined shell command labels and whose values
 are the macro bodies they expand to. The seed is intentionally an empty

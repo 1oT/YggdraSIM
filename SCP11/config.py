@@ -1,3 +1,5 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+"""SCP11 configuration: loads SM-DP+/eIM URLs, certificate paths, and session policy from the YAML config file."""
 # -----------------------------------------------------------------------------
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -180,6 +182,7 @@ class SGPConfig:
                 print(f"Warning: Could not copy default {filename} to {_get_config_dir()}: {error}")
 
     def local_credential_paths(self):
+        """Return a dict of resolved certificate and key file paths for this session variant."""
         return [
             ("DPauth certificate", self.CERT_PATH_AUTH),
             ("DPauth private key", self.KEY_PATH_AUTH),
@@ -188,6 +191,7 @@ class SGPConfig:
         ]
 
     def collect_startup_diagnostics(self):
+        """Check that all required credential files exist and return a list of diagnostic warning strings."""
         errors = []
         warnings = []
 

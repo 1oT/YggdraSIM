@@ -1,3 +1,5 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+"""SGP.22 / SGP.32 BPP consumer: ES8+ APDU-sequence delivery, IccidMismatch / DuplicateIccid guard, and profile-install lifecycle."""
 from __future__ import annotations
 
 import datetime
@@ -50,8 +52,8 @@ from yggdrasim_common.runtime_paths import ensure_seeded_workspace_file, runtime
 DEFAULT_SIM_EIM_IDENTITY: dict[str, str] = {
     "eim_id": "2.25.311782205282738360923618091971140414400",
     "eim_id_type": "oid",
-    "eim_fqdn": "eim.yggdrasim.example.test",
-    "eim_endpoint": "https://eim.yggdrasim.example.test/gsma/rsp2/asn1",
+    "eim_fqdn": "yggdrasim.eim.test.1ot.com",
+    "eim_endpoint": "https://yggdrasim.eim.test.1ot.com/gsma/rsp2/asn1",
     "euicc_ci_pk_id": "F54172BDF98A95D65CBEB88A38A1C11D800A85C3",
     "eim_public_key_cert_path": "",
     "trusted_tls_cert_path": "",
@@ -112,6 +114,7 @@ class SgpLogic:
         self.state.sgp_session = SimSgpSession()
 
     def handle_store_data(self, payload: bytes) -> tuple[bytes, int, int]:
+        """Handle STORE DATA (SGP.22 §3.1.1 / GP Card Spec v2.3 §11.11): accumulate, decode, and dispatch IPA-poll payloads."""
         normalized = bytes(payload or b"")
         if normalized == bytes.fromhex("BF2000"):
             return self._build_euicc_info1_response(), 0x90, 0x00
@@ -701,7 +704,7 @@ class SgpLogic:
         #     parametersNotAvailable(1), undefinedError(127) }.
         # AUTOMATIC TAGS: SEQUENCE keeps OPTIONAL field with explicit
         # context tag ``81``. The CHOICE branches inherit the same
-        # implicit tagging pattern; ``80`` is used for the error INTEGER.
+        # implicit tagging pattern; we use ``80`` for the error INTEGER.
         _ = payload  # request carries no useful operands
         active = self._lookup_profile_by_aid(self.state.active_profile_aid)
         params_http = bytes(active.connectivity_params_http or b"") if active is not None else b""
@@ -1367,7 +1370,7 @@ class SgpLogic:
     def _issue_card_challenge(self) -> bytes:
         challenge = hashlib.sha256(
             bytes.fromhex(self.state.eid)
-            + int(self.state.apdu_count).to_bytes(4, "big", signed=False)
+            + len(self.state.apdu_history).to_bytes(4, "big", signed=False)
         ).digest()[:16]
         self.state.sgp_session.card_challenge = challenge
         return challenge
@@ -1451,7 +1454,7 @@ class SgpLogic:
         # SGP.22 §5.7.16 ES10c.GetRAT returns a RulesAuthorisationTable
         # (SEQUENCE OF ProfilePolicyAuthorisationRule). An eUICC with no
         # configured PPR rules MUST still emit a well-formed empty SEQUENCE.
-        # The simulated card ships with no PPRs, so the response
+        # The simulated card currently ships with no PPRs, so the response
         # is a BF43 container holding one empty SEQUENCE (30 00).
         return tlv("BF43", bytes.fromhex("3000"))
 
@@ -2603,7 +2606,8 @@ class SgpLogic:
         if str(profile.state).strip().lower() != "disabled":
             # SGP.32 EnableProfileResult code 2 covers "profileNotInDisabledState".
             # The simulator treats already-enabled profiles as a no-op success
-            # (idempotent ok(0)); tighten with caution if a strict-mode test
+            # because real cards seen in the field also report ok(0) for the
+            # idempotent case; tighten with caution if a strict-mode test
             # demands the spec-literal rejection.
             if str(profile.state).strip().lower() != "enabled":
                 return tlv(b"\x83", encode_der_integer(2))
@@ -3545,10 +3549,7 @@ class SgpLogic:
         used = {profile.iccid for profile in self.state.profiles}
         suffix = len(self.state.profiles) + 11
         while True:
-            # IIN 8988 is the ITU-T E.118 "Universal" range used by 3GPP
-            # / GSMA test fixtures so the simulator never claims a real
-            # operator IIN.
-            candidate = f"898820000000000000{suffix:02d}"
+            candidate = f"894611111111111111{suffix:02d}"
             if candidate not in used:
                 return candidate
             suffix += 1

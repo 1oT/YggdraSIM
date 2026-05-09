@@ -1,4 +1,6 @@
-"""Semantic decoder coverage for ADF.USIM optional / ISIM-USIM shared EFs.
+"""
+Wave C Pass B — semantic decoder coverage for ADF.USIM optional /
+ISIM-USIM shared EFs.
 
 For every EF promoted from the generic opaque pass-through catalog we
 verify three invariants:
@@ -104,8 +106,8 @@ class TestBdnAdnLike:
     def test_bdnuri_routes_to_uri_helper(self) -> None:
         hex_input = "736D733A2B343612343111113233FFFFFFFFFFFF"
         decoded = _roundtrip("ef-bdnuri", hex_input)
-        # earlier work aligned the label with "EF.BDN URI" (6FEE canonical
-        # form); earlier work additionally attaches the §4.2.72 reference.
+        # Round-3 Pass 1 aligned the label with "EF.BDN URI" (6FEE canonical
+        # form); Round-4 Pass 2 additionally attaches the §4.2.72 reference.
         assert decoded["format"] == "EF.BDN URI"
         assert decoded.get("reference") == "TS 31.102 §4.2.72"
 

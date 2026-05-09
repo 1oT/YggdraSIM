@@ -157,7 +157,7 @@ class DeviceInventoryTests(unittest.TestCase):
         )
 
     def test_inventory_crypto_dict_payload_round_trip_through_fake_gpg(self) -> None:
-        """``encrypt_payload`` / ``decrypt_payload`` round-trip.
+        """COMMON-P4-01 (a): ``encrypt_payload`` / ``decrypt_payload`` round-trip.
 
         The real GPG binary is replaced with a reversible base64 stand-in so
         the test works in CI without a keyring. What matters for the audit
@@ -232,7 +232,7 @@ class DeviceInventoryTests(unittest.TestCase):
         self.assertEqual(decrypted, payload)
 
     def test_inventory_crypto_blocks_plaintext_secret_writes_when_enabled(self) -> None:
-        """refuse plaintext fallback when configured.
+        """COMMON-P4-01 (b): refuse plaintext fallback when configured.
 
         With ``enabled=True`` and ``plaintext_fallback_writes=False`` the
         manager must advertise ``blocks_plaintext_secret_writes() is True``
@@ -268,7 +268,7 @@ class DeviceInventoryTests(unittest.TestCase):
             self.assertTrue(manager.blocks_plaintext_secret_writes())
 
     def test_inventory_crypto_write_secret_file_leaves_no_plaintext_on_disk(self) -> None:
-        """``write_secret_file_bytes`` never leaves plaintext behind."""
+        """COMMON-P4-01 (c): ``write_secret_file_bytes`` never leaves plaintext behind."""
         from yggdrasim_common.inventory_crypto import write_secret_file_bytes
 
         config_path = self.temp_path / "inventory_crypto.json"
@@ -311,7 +311,7 @@ class DeviceInventoryTests(unittest.TestCase):
         self.assertNotIn(b"KI-MATERIAL", on_disk)
 
     def test_inventory_crypto_refuses_to_encrypt_without_recipients(self) -> None:
-        """``_gpg_encrypt`` raises when recipient list is empty."""
+        """COMMON-P4-01 (d): ``_gpg_encrypt`` raises when recipient list is empty."""
         config_path = self.temp_path / "inventory_crypto.json"
         config_path.write_text(
             json.dumps(
@@ -339,7 +339,7 @@ class DeviceInventoryTests(unittest.TestCase):
                 manager._gpg_encrypt(b"unusable without recipients")
 
     def test_inventory_crypto_refuses_gpg_key_file_outside_config_directory(self) -> None:
-        """``gpg_key_file`` path cannot escape the config dir."""
+        """COMMON-P4-01 (e): ``gpg_key_file`` path cannot escape the config dir."""
         config_path = self.temp_path / "inventory_crypto.json"
 
         sibling_root = Path(tempfile.mkdtemp(dir=self.state_dir))

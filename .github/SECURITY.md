@@ -16,7 +16,7 @@ YggdraSIM. This includes, but is not limited to:
 
 Use GitHub Security Advisories for private disclosure:
 
-> <https://github.com/1oT/YggdraSIM/security/advisories/new>
+> <https://github.com/hampus/YggdraSIM/security/advisories/new>
 
 Expect an acknowledgement within 72 hours. Coordinated disclosure
 timelines are negotiated case by case.
@@ -43,7 +43,7 @@ In scope:
 Out of scope:
 
 - Forks outside this repository.
-- Third-party dependencies -- report to their upstream projects first.
+- Third-party dependencies — report to their upstream projects first.
 - Attacks requiring physical possession of the host running
   YggdraSIM with an unlocked operating-system session.
 

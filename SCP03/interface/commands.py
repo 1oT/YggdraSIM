@@ -15,6 +15,7 @@
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 # -----------------------------------------------------------------------------
 
+"""SCP03 shell command dispatcher: maps command strings to their handler callables."""
 import os 
 from typing import Dict ,Tuple ,Callable 
 from SCP03 .interface .shell_wizards import ShellInteractiveWizards 

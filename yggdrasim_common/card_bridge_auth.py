@@ -1,10 +1,11 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """Shared bearer-token utilities for the YggdraSIM card relay.
 
 Used by:
 
-* ``Tools/HilBridge/apdu_relay.HilBridgeApduRelayService`` -- the in-tree
+* ``Tools/HilBridge/apdu_relay.HilBridgeApduRelayService`` — the in-tree
   relay handler that sits inside the HIL bridge.
-* ``yggdrasim_common.card_backend.RelayCardConnection`` -- the
+* ``yggdrasim_common.card_backend.RelayCardConnection`` — the
   pyscard-shaped consumer client.
 
 Design contract:
@@ -14,7 +15,7 @@ Design contract:
 * Tokens live in mode-0600 files under
   ``${XDG_CONFIG_HOME:-~/.config}/yggdrasim/card_bridge/<port>.token``.
   Operators retrieve them through the same SSH session that establishes
-  the ``LocalForward`` -- the file format is one line, no trailing
+  the ``LocalForward`` — the file format is one line, no trailing
   whitespace.
 * Token files are written with the create-truncate-write-chmod dance so
   the mode bits stand even if the inherited umask was looser.
@@ -26,7 +27,7 @@ Design contract:
   file without exposing the credential itself.
 * Loopback bind without a token is permitted for back-compat with the
   existing HilBridge marker workflow. Any non-loopback bind must carry
-  a token; the daemon refuses to start otherwise -- see
+  a token; the daemon refuses to start otherwise — see
   ``HilBridgeApduRelayService.start``.
 """
 
@@ -183,11 +184,11 @@ def resolve_token_from_environment() -> str:
 
     Resolution order:
 
-    1. ``YGGDRASIM_CARD_RELAY_TOKEN`` -- raw token value. Convenient for
-       inline ``ssh user@host -t 'YGGDRASIM_CARD_RELAY_TOKEN=...'``
+    1. ``YGGDRASIM_CARD_RELAY_TOKEN`` — raw token value. Convenient for
+       inline ``ssh user@host -t 'YGGDRASIM_CARD_RELAY_TOKEN=…'``
        invocations but visible to ``ps`` for the lifetime of the
        process; prefer the file form whenever possible.
-    2. ``YGGDRASIM_CARD_RELAY_TOKEN_FILE`` -- path to a 0600-mode file
+    2. ``YGGDRASIM_CARD_RELAY_TOKEN_FILE`` — path to a 0600-mode file
        holding the token on a single line.
 
     Returns an empty string when neither is set.

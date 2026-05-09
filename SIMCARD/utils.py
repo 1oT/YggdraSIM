@@ -1,3 +1,5 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+"""SIM utility primitives: BER-TLV builder/parser, BCD nibble-swap, EF.ICCID and EF.IMSI encoders."""
 from __future__ import annotations
 
 from typing import Any
@@ -19,6 +21,11 @@ def tlv(tag: bytes | str, value: bytes) -> bytes:
 
 
 def read_tlv(data: bytes, offset: int = 0) -> tuple[bytes, bytes, bytes, int]:
+    """Parse one BER-TLV record at *offset* and return (tag, length_bytes, value, next_offset).
+
+    Supports 1-byte and 2-byte tags, and definite short and long-form lengths.
+    Raises ``ValueError`` on truncated or malformed input.
+    """
     if offset >= len(data):
         raise ValueError("TLV offset out of range.")
 
@@ -58,6 +65,10 @@ def read_tlv(data: bytes, offset: int = 0) -> tuple[bytes, bytes, bytes, int]:
 
 
 def read_tlv_header(data: bytes, offset: int = 0) -> tuple[bytes, int, int, int]:
+    """Parse a BER-TLV header at *offset* and return (tag_bytes, length_value, header_size, next_offset).
+
+    Reads only the tag and length fields without copying the value bytes.
+    """
     if offset >= len(data):
         raise ValueError("TLV offset out of range.")
 
@@ -92,6 +103,10 @@ def read_tlv_header(data: bytes, offset: int = 0) -> tuple[bytes, int, int, int]
 
 
 def find_first_tlv(data: bytes, target_tag: bytes | str) -> bytes:
+    """Return the value bytes of the first TLV in *data* whose tag matches *target_tag*.
+
+    Returns an empty bytes object when the tag is not found.
+    """
     target = bytes.fromhex(target_tag) if isinstance(target_tag, str) else bytes(target_tag)
     offset = 0
     while offset < len(data):
@@ -107,6 +122,11 @@ def find_first_tlv(data: bytes, target_tag: bytes | str) -> bytes:
 
 
 def swap_bcd_nibbles(hex_text: str) -> str:
+    """Swap the nibbles of every byte-pair in a hex string (ETSI BCD byte-reversal).
+
+    For example ``"219301"`` becomes ``"123190"``.
+    Raises ``ValueError`` on odd-length input.
+    """
     cleaned = str(hex_text or "").strip().upper()
     if len(cleaned) % 2 != 0:
         raise ValueError("BCD text must contain an even number of nibbles.")
@@ -120,6 +140,10 @@ def swap_bcd_nibbles(hex_text: str) -> str:
 
 
 def encode_iccid_ef(iccid_digits: str) -> bytes:
+    """Encode an ICCID digit string into the 10-byte EF.ICCID body (ETSI TS 102 221 §13.2).
+
+    Pads to 20 nibbles with 0xF, then nibble-swaps each byte pair.
+    """
     cleaned = str(iccid_digits or "").strip().replace(" ", "").replace("-", "").upper()
     if len(cleaned) == 0:
         raise ValueError("ICCID must not be empty.")
@@ -129,6 +153,11 @@ def encode_iccid_ef(iccid_digits: str) -> bytes:
 
 
 def encode_imsi_ef(imsi_digits: str) -> bytes:
+    """Encode an IMSI digit string into the 9-byte EF.IMSI body (3GPP TS 31.102 §4.2.2).
+
+    Length nibble + parity nibble (0x9 = even, 0x1 = odd) + BCD-packed digits padded
+    with 0xF fillers.
+    """
     digits = str(imsi_digits or "").strip().replace(" ", "").replace("-", "")
     if len(digits) == 0 or digits.isdigit() is False:
         raise ValueError("IMSI must contain decimal digits.")
@@ -143,6 +172,7 @@ def encode_imsi_ef(imsi_digits: str) -> bytes:
 
 
 def decode_bcd_digits(value: bytes) -> str:
+    """Decode BCD-packed bytes to a digit string, stripping trailing 0xF fillers."""
     digits = ""
     for byte in bytes(value or b""):
         low = byte & 0x0F
@@ -155,6 +185,10 @@ def decode_bcd_digits(value: bytes) -> str:
 
 
 def decode_imsi_ef(value: bytes) -> str:
+    """Decode a 9-byte EF.IMSI body to a plain digit string (3GPP TS 31.102 §4.2.2).
+
+    Strips the length byte and parity nibble before BCD-decoding.
+    """
     raw = bytes(value or b"")
     if len(raw) < 2:
         return ""
@@ -167,6 +201,12 @@ def decode_imsi_ef(value: bytes) -> str:
 
 
 def parse_apdu(apdu: bytes) -> dict[str, Any]:
+    """Parse a raw APDU byte string into its ISO 7816-4 header and body fields.
+
+    Returns a dict with ``cla``, ``ins``, ``p1``, ``p2``, ``lc``, ``data``, and ``le``.
+    Handles short (1-byte) and extended (3-byte) Lc/Le forms.
+    Raises ``ValueError`` when the APDU is shorter than 4 bytes.
+    """
     data = bytes(apdu or b"")
     if len(data) < 4:
         raise ValueError("APDU must be at least 4 bytes.")

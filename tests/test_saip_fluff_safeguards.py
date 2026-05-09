@@ -1,6 +1,8 @@
-"""Context-safeguard tests for the SAIP ASN.1 decoder.
+"""
+Round-5 Sweep 1 — context-safeguard regression tests.
 
-These tests lock in the following properties of the decoder:
+These tests lock in the following properties of the SAIP ASN.1
+decoder:
 
 * ``_decode_fill_pattern`` / ``_decode_repeat_pattern`` do not
   fabricate ASCII output for short (< 3 byte) patterns and never
@@ -13,7 +15,7 @@ These tests lock in the following properties of the decoder:
 
 * ``_decode_universal_primitive`` (generic ASN.1 OCTET STRING, tag 4)
   requires at least three fully printable bytes before emitting an
-  ``ascii`` hint -- short OCTET STRINGs that happen to be printable by
+  ``ascii`` hint — short OCTET STRINGs that happen to be printable by
   coincidence (key material, counters, tags) are not surfaced as text.
 """
 
@@ -86,7 +88,7 @@ class TestPinSecretValueStrictDigits:
 
 class TestUniversalOctetStringAsciiGuard:
     def test_two_byte_printable_octet_string_has_no_ascii(self) -> None:
-        # Tag 4, length 2, "AB" -- too short to be treated as text
+        # Tag 4, length 2, "AB" — too short to be treated as text
         decoded = _decode_universal_primitive(4, b"AB")
         assert isinstance(decoded, dict)
         assert decoded["hex"] == "4142"

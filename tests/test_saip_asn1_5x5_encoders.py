@@ -46,7 +46,7 @@ from Tools.ProfilePackage.saip_asn1_encode import (
 
 
 # ---------------------------------------------------------------------------
-# Call and phonebook records.
+# Pass A — call and phonebook records.
 
 
 class LndRecordEncoderTests(unittest.TestCase):
@@ -151,7 +151,7 @@ class CcpRecordEncoderTests(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# Key material.
+# Pass A — key material.
 
 
 class UsimKeysRecordEncoderTests(unittest.TestCase):
@@ -214,7 +214,7 @@ class HiddenKeyEncoderTests(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# Network config.
+# Pass A — network config.
 
 
 class OpaqueEncoderTests(unittest.TestCase):
@@ -280,7 +280,7 @@ class NasConfigEncoderTests(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# 5G.
+# Pass A — 5G.
 
 
 class SuciCalcInfoEncoderTests(unittest.TestCase):

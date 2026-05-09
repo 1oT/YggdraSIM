@@ -1,9 +1,10 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """Argparse helper for the ``--remote-card-url`` / ``--remote-card-token-file`` flags.
 
 Card-consuming CLIs (``main/main.py``, the SCP03 / SCP11 / SAIP shells,
 the doctor, and any operator-facing wrapper that ends up calling
 ``yggdrasim_common.card_backend.create_card_connection``) historically
-discover a remote card relay through environment variables --
+discover a remote card relay through environment variables —
 ``YGGDRASIM_CARD_RELAY_URL`` for the endpoint and either
 ``YGGDRASIM_CARD_RELAY_TOKEN`` or ``YGGDRASIM_CARD_RELAY_TOKEN_FILE``
 for authorisation.
@@ -16,8 +17,8 @@ resolution chain (env > marker > nothing) works unchanged downstream.
 
 Two pieces:
 
-* :func:`add_remote_card_arguments` -- registers the flags on a parser.
-* :func:`apply_remote_card_arguments` -- propagates the parsed values
+* :func:`add_remote_card_arguments` — registers the flags on a parser.
+* :func:`apply_remote_card_arguments` — propagates the parsed values
   into the running process's environment.
 
 Both are no-ops when the operator hasn't supplied the flags, so wiring
@@ -38,7 +39,7 @@ from yggdrasim_common.card_backend import (
     CARD_RELAY_URL_ENV,
 )
 
-# Argparse dest names -- kept stable so callers can read the values
+# Argparse dest names — kept stable so callers can read the values
 # back from the parsed namespace if they need to log them or surface
 # them in a doctor-style preflight banner.
 DEST_REMOTE_CARD_URL = "remote_card_url"

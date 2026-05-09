@@ -311,7 +311,7 @@ class FileSystemControllerAdfFallbackTests(unittest.TestCase):
         transport = _EfDirFallbackTransport(
             legacy_aid,
             discovered_aid,
-            label_text="Carrier USIM",
+            label_text="Tele2 USIM",
         )
         controller = FileSystemController(transport, aid_registry=aid_registry)
 
@@ -371,7 +371,7 @@ class FileSystemControllerAdfFallbackTests(unittest.TestCase):
 
     def test_scan_tree_uses_live_ef_dir_aid_for_usim_and_keeps_alias_paths(self) -> None:
         discovered_aid = "A0000000871002FF86FF112233445566"
-        transport = _ScanTreeEfDirTransport(discovered_aid, "Carrier USIM")
+        transport = _ScanTreeEfDirTransport(discovered_aid, "Tele2 USIM")
         controller = FileSystemController(transport, aid_registry={})
 
         rendered = io.StringIO()
@@ -379,7 +379,7 @@ class FileSystemControllerAdfFallbackTests(unittest.TestCase):
             controller.scan_tree()
 
         output = rendered.getvalue()
-        self.assertIn("USIM [Carrier USIM]", output)
+        self.assertIn("USIM [Tele2 USIM]", output)
         self.assertIn(f"({discovered_aid})", output)
         self.assertIn("EF_IMSI", output)
         self.assertIn("USIM", controller.scan_cache.values())
@@ -389,7 +389,7 @@ class FileSystemControllerAdfFallbackTests(unittest.TestCase):
 
     def test_scan_tree_always_renders_mf_root_entry(self) -> None:
         discovered_aid = "A0000000871002FF86FF112233445566"
-        transport = _ScanTreeEfDirTransport(discovered_aid, "Carrier USIM")
+        transport = _ScanTreeEfDirTransport(discovered_aid, "Tele2 USIM")
         controller = FileSystemController(transport, aid_registry={})
 
         rendered = io.StringIO()
@@ -506,7 +506,7 @@ class FileSystemControllerAdfFallbackTests(unittest.TestCase):
 
     def test_scan_tree_persists_live_ef_dir_aid_candidate_to_fids_registry(self) -> None:
         discovered_aid = "A0000000871002FF86FF112233445566"
-        transport = _ScanTreeEfDirTransport(discovered_aid, "Carrier USIM")
+        transport = _ScanTreeEfDirTransport(discovered_aid, "Tele2 USIM")
 
         with tempfile.TemporaryDirectory() as temp_dir:
             fids_path = Path(temp_dir) / "fids.txt"

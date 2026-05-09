@@ -1,4 +1,6 @@
-"""Coverage for TS 102 222 CREATE/RESIZE FILE, TS 102 223 SET/GET FRAMES and event downloads:
+"""Tenth-pass gap-coverage suite for SIMCARD surfaces beyond ES10.
+
+Round-10 closes the following:
 
 * ETSI TS 102 222 §6.3 CREATE FILE (`INS 0xE0`) and §6.4 RESIZE
   FILE (`INS 0xD4`). Both are admin commands gated behind an
@@ -277,7 +279,7 @@ class GetFramesStatusTests(_ToolkitHarness):
 
 
 class EventDownloadGap10Tests(_ToolkitHarness):
-    """event-download decoders (Contactless / IMS)."""
+    """Round-10 event-download decoders (Contactless / IMS)."""
 
     def _envelope(self, *body: bytes) -> bytes:
         joined = b"".join(body)

@@ -31,7 +31,7 @@
  *      window.mermaid.render (which Material has already loaded
  *      globally) and injects that into the lightbox's light DOM.
  *
- * Debugging hooks (no flags required -- all info-level logs are on):
+ * Debugging hooks (no flags required — all info-level logs are on):
  *
  *   window.MermaidZoom.rescan();          // re-decorate containers
  *   window.MermaidZoom.test();            // open the first diagram
@@ -42,7 +42,7 @@
 (function () {
   "use strict";
 
-  var BUILD = "v3-shadow-aware";
+  var BUILD = "2026-04-16-v3-shadow-aware";
 
   try {
     console.log("[mermaid-zoom] script loaded, build=" + BUILD);
@@ -351,7 +351,7 @@
     var source = resolveSource(sourceContainer);
     if (source === null) {
       warn(
-        "no source text for this diagram -- cannot render lightbox.",
+        "no source text for this diagram — cannot render lightbox.",
         "container=",
         sourceContainer
       );

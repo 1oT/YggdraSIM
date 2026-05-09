@@ -1,29 +1,28 @@
-"""Coverage for the SAIP alpha-string + bare-TLV migration.
+"""
+Round-2 "fluff" audit of the SAIP decoder.
 
-The tests below lock in strict behaviour for the following
-generic pass-through decoders, which must not fabricate
-``ascii`` / ``summary`` fields when the underlying spec leaves
-the inner layout opaque:
+After the initial primitive typing overhaul (see
+``test_saip_primitive_typing_context.py``) a second sweep removed the
+remaining opportunistic ASCII inference from:
 
-* ``_decode_spec_opaque_ef`` and ``_decode_opaque_ef`` -- generic
-  pass-through decoders that must not fabricate ``ascii`` /
-  ``summary`` fields when the underlying spec leaves the inner
-  layout opaque.
-* ``_decode_group_identifier`` (EF.GID1 / EF.GID2) -- operator-defined
-  binary identifiers; not rendered as ASCII when raw bytes happen
-  to be printable.
-* ``_decode_ef_ipd_opaque`` -- TS 31.102 §4.2.99 IP Data, explicitly
+* ``_decode_spec_opaque_ef`` and ``_decode_opaque_ef`` — generic
+  pass-through decoders that used to fabricate ``ascii`` / ``summary``
+  fields even when the underlying spec leaves the inner layout opaque.
+* ``_decode_group_identifier`` (EF.GID1 / EF.GID2) — operator-defined
+  binary identifiers that had been rendered as ASCII whenever the raw
+  bytes happened to be printable.
+* ``_decode_ef_ipd_opaque`` — TS 31.102 §4.2.99 IP Data, explicitly
   opaque per-profile.
 
 Concurrently, four BER-TLV EF decoders were migrated to declare a
 per-tag ``value_decoders`` map so spec-typed fields surface the right
 primitive shape (and the rest stays raw):
 
-* EF.AAS (TS 31.102 §4.4.2.13) -- tag 0x80 = Annex A alpha string.
-* EF.REID (TS 102 310 §5.2.2)  -- tag 0x80 = UTF-8 identity.
-* EF.PBR  (TS 31.102 §4.4.2.1) -- tags 0xC0..0xCB = 2-byte FID refs.
-* EF.ARR security condition     -- tags 0x83 / 0x95 = small integers.
-* 5G ProSe TLV EFs              -- tags 85/92/94/95 = integer timers.
+* EF.AAS (TS 31.102 §4.4.2.13) — tag 0x80 = Annex A alpha string.
+* EF.REID (TS 102 310 §5.2.2)  — tag 0x80 = UTF-8 identity.
+* EF.PBR  (TS 31.102 §4.4.2.1) — tags 0xC0..0xCB = 2-byte FID refs.
+* EF.ARR security condition     — tags 0x83 / 0x95 = small integers.
+* 5G ProSe TLV EFs              — tags 85/92/94/95 = integer timers.
 
 The TS 31.102 Annex A alpha string helper added by the same sweep is
 also exercised here to pin the selector behaviour for the GSM 7-bit

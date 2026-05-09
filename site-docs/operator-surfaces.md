@@ -17,7 +17,6 @@
 | `Tools/ApduFuzz/` | the task is opt-in, allow-listed eUICC APDU mutation fuzzing | mutation-based APDU fuzzer with hard-gated allow list | `python -m Tools.ApduFuzz` |
 | `Tools/EumDiag/` | the task is EUM / SM-DP+ traffic diagnostics or session-key injection | session-key staging plus Wireshark / tshark Lua dissector | `python -m Tools.EumDiag` |
 | `SIMCARD/` | the task needs an in-process simulated UICC / eUICC instead of a physical reader | ETSI / GP / SCP03 / SCP80 / Toolkit / 5G AKA / AKMA / SUCI / `GET IDENTITY` | `--card-backend sim` on any launcher |
-| `yggdrasim_common/gui_server/` | a desktop or web-served GUI Command Center is wanted | typed action registry, APDU recorder, FastAPI / pywebview surfaces | `python main/main.py --gui` or `--web-server` |
 
 ## Common automation patterns
 
@@ -51,7 +50,6 @@ python -m SCP80 --cmd "show; history; exit"
 - Use `Tools/ApduFuzz` only on lab-only eUICCs after explicitly enabling the allow-list gate.
 - Use `Tools/EumDiag` when an EUM / SM-DP+ capture must be replayed or decoded with operator-side keys.
 - Use `--card-backend sim` to swap in the in-process simulator without touching shell command surfaces.
-- Use `--gui` or `--web-server` to bring up the Universal GUI Command Center on top of any backend.
 
 ## Related source guides
 

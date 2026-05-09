@@ -1,3 +1,5 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+"""SCP11-test entry point: initialises test-session runtime and starts the operator REPL for the simulated card."""
 import argparse
 import sys
 
@@ -122,6 +124,7 @@ class SGP22Client:
         return
 
     def run_flow(self):
+        """Execute a single profile-download flow against the simulated card."""
         try:
             self._run_startup_preflight()
             self._build_runtime()
@@ -149,6 +152,7 @@ class SGP22Client:
 
 
 def entry() -> None:
+    """Initialise simulated-card test runtime and start the operator REPL."""
     ensure_plugins_loaded()
     parser = argparse.ArgumentParser(description="SCP11 test relay orchestration shell")
     add_debug_argument(

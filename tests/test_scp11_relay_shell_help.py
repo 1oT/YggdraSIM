@@ -534,7 +534,7 @@ class RelayShellHelpTests(unittest.TestCase):
         Regression: ``_execute_result_command`` must not call
         ``_sync_notifications_after_success`` when the command itself is
         ``RemoveNotificationFromList``. The outer profile state flow
-        already runs a notification sync after success -- letting the
+        already runs a notification sync after success — letting the
         remove recursion re-enter it causes the noisy ``listNotifications
         failed (APDU Failed: 6881)`` log seen after DISABLE-PROFILE.
         """
@@ -637,7 +637,7 @@ class RelayShellHelpTests(unittest.TestCase):
                     "firmware_version": "931100",
                 },
                 {
-                    "eim_fqdn": "eim.yggdrasim.example.test",
+                    "eim_fqdn": "eim.example.test",
                     "eim_id": "2.25.311782205282738360923618091971140414400",
                 },
             )
@@ -647,11 +647,11 @@ class RelayShellHelpTests(unittest.TestCase):
             lines = console._build_snapshot_pane_lines(120)
 
             self.assertEqual(snapshot.euicc_info2_summary["profile_version"], "v2.3.1 (020301)")
-            self.assertEqual(snapshot.eim_summary["eim_fqdn"], "eim.yggdrasim.example.test")
+            self.assertEqual(snapshot.eim_summary["eim_fqdn"], "eim.example.test")
             self.assertEqual(snapshot.issuer_name, "Kigen")
             self.assertTrue(any("Issuer" in line and "Kigen" in line for line in lines))
             self.assertTrue(any("Profile Version" in line and "v2.3.1 (020301)" in line for line in lines))
-            self.assertTrue(any("eIM FQDN" in line and "eim.yggdrasim.example.test" in line for line in lines))
+            self.assertTrue(any("eIM FQDN" in line and "eim.example.test" in line for line in lines))
             self.assertFalse(any("Active Flow Target" in line for line in lines))
             self.assertFalse(any("Active ES9 URL" in line for line in lines))
 
@@ -721,7 +721,7 @@ class RelayShellHelpTests(unittest.TestCase):
         must trigger a single notification sync plus the quiet
         auto-clear sweep. The auto-clear still fires per-seq
         RemoveNotificationFromList APDUs, but those removals must NOT
-        re-enter the sync path -- otherwise the log gets spammed with
+        re-enter the sync path — otherwise the log gets spammed with
         "listNotifications failed (APDU Failed: 6881)" after a
         channel-rebinding profile state change.
         """
@@ -746,23 +746,23 @@ class RelayShellHelpTests(unittest.TestCase):
         for module in [self.live_module, self.test_module]:
             console = self._build_console(module)
 
-            console._download_activation_code("1$dpp.example.test$MATCH-55$1.2.3")
+            console._download_activation_code("1$dpp1.esim.tst.1ot.mobi$MATCH-55$1.2.3")
 
-            self.assertEqual(console.current_smdp_address, "dpp.example.test")
-            self.assertEqual(console.current_es9_base_url, "https://dpp.example.test")
-            self.assertEqual(console.orchestrator.run_flow_calls, [("MATCH-55", "dpp.example.test")])
-            self.assertEqual(console.orchestrator.profile_provider.base_url, "https://dpp.example.test")
+            self.assertEqual(console.current_smdp_address, "dpp1.esim.tst.1ot.mobi")
+            self.assertEqual(console.current_es9_base_url, "https://dpp1.esim.tst.1ot.mobi")
+            self.assertEqual(console.orchestrator.run_flow_calls, [("MATCH-55", "dpp1.esim.tst.1ot.mobi")])
+            self.assertEqual(console.orchestrator.profile_provider.base_url, "https://dpp1.esim.tst.1ot.mobi")
 
     def test_download_redirects_activation_code_into_profile_flow(self):
         for module in [self.live_module, self.test_module]:
             console = self._build_console(module)
 
-            keep_running = console._cmd_eim_download("1$dpp.example.test$MATCH-55$1.2.3")
+            keep_running = console._cmd_eim_download("1$dpp1.esim.tst.1ot.mobi$MATCH-55$1.2.3")
 
             self.assertTrue(keep_running)
             self.assertEqual(console.orchestrator.eim_poll_calls, [])
-            self.assertEqual(console.orchestrator.run_flow_calls, [("MATCH-55", "dpp.example.test")])
-            self.assertEqual(console.current_es9_base_url, "https://dpp.example.test")
+            self.assertEqual(console.orchestrator.run_flow_calls, [("MATCH-55", "dpp1.esim.tst.1ot.mobi")])
+            self.assertEqual(console.current_es9_base_url, "https://dpp1.esim.tst.1ot.mobi")
 
     def test_execute_command_does_not_double_sync_when_handler_already_synced(self):
         for module in [self.live_module, self.test_module]:

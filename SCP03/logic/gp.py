@@ -15,6 +15,7 @@
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 # -----------------------------------------------------------------------------
 
+"""GlobalPlatform card administration: INSTALL, LOAD, DELETE, PUT KEY, and status commands (GP Card Spec v2.3.1)."""
 import os 
 import math 
 from typing import Optional ,List ,Dict ,Any ,Tuple 
@@ -69,6 +70,7 @@ class GlobalPlatformManager :
         return f"{self.scp03_kvn:02X}"
 
     def get_config_key_fields_for_protocol (self ,protocol_name :str =None )->Tuple [str ,str ,str ,str ]:
+        """Return (ENC-key-hex, MAC-key-hex, DEK-key-hex, KVN-hex) from the keyset config for *protocol_name*."""
         protocol =self .active_scp_protocol 
         if protocol_name is not None :
             protocol =str (protocol_name ).strip ().upper ()
@@ -77,6 +79,7 @@ class GlobalPlatformManager :
         return ("scp03_kenc","scp03_kmac","scp03_dek","scp03_kvn")
 
     def verify_adm (self ,key_hex :Optional [str ]=None ):
+        """Send VERIFY ADM (GP Card Spec v2.3 §11.10) with the configured or supplied key hex."""
         target_key =key_hex 
         if not target_key :
             target_key =self .raw_keys .get ('adm')
@@ -118,6 +121,7 @@ class GlobalPlatformManager :
         return self .authenticate_scp03 ()
 
     def authenticate_scp03 (self )->bool :
+        """Run INITIALIZE-UPDATE + EXTERNAL-AUTHENTICATE to open an SCP03 admin session; return True on success."""
         if self .tp .session :
             self .tp .reset_session_state ()
 
@@ -181,6 +185,7 @@ class GlobalPlatformManager :
         return False 
 
     def authenticate_scp02 (self )->bool :
+        """Run INITIALIZE-UPDATE + EXTERNAL-AUTHENTICATE to open an SCP02 admin session; return True on success."""
         if self .tp .session :
             self .tp .reset_session_state ()
 
@@ -280,6 +285,7 @@ class GlobalPlatformManager :
         print (f"\n{Config.Colors.GREEN}[+] STORE DATA Success ({total_chunks} blocks).{Config.Colors.ENDC}")
 
     def put_key (self ,old_kvn :int ,key_id :int ,new_kvn :int ,new_keys :list ,key_type :int =0x88 )->bool :
+        """Send PUT KEY (GP Card Spec v2.3 §11.8) to install or replace a keyset entry."""
         from cryptography .hazmat .primitives .ciphers import Cipher ,algorithms ,modes 
         from SCP03 .core .utils import HexUtils 
 
@@ -504,6 +510,7 @@ class GlobalPlatformManager :
             print (f"{Config.Colors.FAIL}[-] Install Failed: {sw1:02X}{sw2:02X}{Config.Colors.ENDC}")
 
     def get_keys_info (self ,target_aid_hex :Optional [str ]=None ,silent =False ):
+        """Print the installed key information from GET KEY INFORMATION DATA for the active or target SD."""
         if target_aid_hex :
             if not silent :
                 print (f"{Config.Colors.CYAN}[*] Selecting AID: {target_aid_hex}...{Config.Colors.ENDC}")
@@ -556,6 +563,7 @@ class GlobalPlatformManager :
         return entries 
 
     def get_keys_info_data (self ,target_aid_hex :Optional [str ]=None )->Dict [str ,Any ]:
+        """Return a dict of installed key information from GET KEY INFORMATION DATA."""
         if target_aid_hex :
             self .tp .transmit (f"00A40400{len(target_aid_hex)//2:02X}{target_aid_hex}",silent =True )
         else :
@@ -580,6 +588,7 @@ class GlobalPlatformManager :
         return out 
 
     def list_registry (self ,kind ='APPS'):
+        """Print the GET STATUS application/package/SD registry for *kind* (APPS, PACKAGES, or SD)."""
         p1_map ={'APPS':0x40 ,'PACKAGES':0x20 ,'SD':0x80 }
 
         p1 =p1_map .get (kind ,0x40 )
@@ -809,6 +818,7 @@ class GlobalPlatformManager :
         return entries 
 
     def get_registry_data (self ,kind :str ='APPS')->Dict [str ,Any ]:
+        """Return a dict of GET STATUS registry entries for *kind* (APPS, PACKAGES, or SD)."""
         p1_map ={'APPS':0x40 ,'PACKAGES':0x20 ,'SD':0x80 }
         p1 =p1_map .get (kind ,0x40 )
         p2 =0x00 
@@ -888,6 +898,7 @@ class GlobalPlatformManager :
         print ("-"*50 +"\n")
 
     def get_cplc (self ):
+        """Send GET DATA 9F7F to retrieve and print the Card Production Life-Cycle (CPLC) data."""
         cmd ="80CA9F7F00"
         data ,sw1 ,sw2 =self .tp .transmit (cmd ,silent =False )
         if sw1 ==0x90 :
@@ -909,6 +920,7 @@ class GlobalPlatformManager :
         return self .tp .transmit (cmd ,silent =True )
 
     def get_data (self ,p1 :int ,p2 :int ):
+        """Send GET DATA for the given P1/P2 tag pair and print the decoded response."""
         print (f"{Config.Colors.CYAN}[*] GET DATA Tag: {p1:02X}{p2:02X}...{Config.Colors.ENDC}")
 
         if p1 ==0x2F and p2 ==0x00 :
@@ -936,6 +948,7 @@ class GlobalPlatformManager :
             print (f"{Config.Colors.FAIL}[-] Failed: {sw1:02X}{sw2:02X} -> {err_msg}{Config.Colors.ENDC}")
 
     def print_tlv_data (self ,tlv_dict :Dict [int ,Any ],indent :int =0 ):
+        """Recursively print a tag→value dict as an indented TLV tree."""
         indent_str ="  "*indent 
         for tag ,val in tlv_dict .items ():
             tag_hex =f"{tag:02X}"if tag <=0xFF else f"{tag:04X}"
@@ -966,6 +979,7 @@ class GlobalPlatformManager :
                 print (f"{indent_str}Tag {tag_hex} (L={len(val)}): {val_hex}{ascii_str}")
 
     def set_status (self ,target_aid ,state_byte :int ):
+        """Send SET STATUS (GP Card Spec v2.3 §11.9) to transition the target application life-cycle state."""
         target =HexUtils .to_bytes (target_aid )
         state_name =f"{state_byte:02X}"
         if state_byte ==0x80 :
@@ -982,6 +996,7 @@ class GlobalPlatformManager :
             print (f"{Config.Colors.FAIL}[-] Failed: {sw1:02X}{sw2:02X}{Config.Colors.ENDC}")
 
     def delete_object (self ,target_aid ,recursive =True ):
+        """Send DELETE (GP Card Spec v2.3 §11.2) to remove an application or load-file by AID."""
         target =HexUtils .to_bytes (target_aid )
         p2 =0x00 
         if recursive :

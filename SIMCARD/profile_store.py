@@ -1,3 +1,5 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+"""Profile store: tracks enabled/disabled profiles and maps EID profile slots to on-disk state files."""
 from __future__ import annotations
 
 import os
@@ -30,6 +32,7 @@ PROFILE_UPP_FILENAME = "profile.upp.der"
 
 
 def load_profiles_from_store(store_path: str) -> list[SimProfileEntry]:
+    """Load all profile JSON files from the store directory into ``state.profiles``."""
     root_path = _ensure_store_root(store_path)
     if len(root_path) == 0:
         return []
@@ -48,6 +51,7 @@ def load_profiles_from_store(store_path: str) -> list[SimProfileEntry]:
 
 
 def sync_profiles_to_store(store_path: str, profiles: list[SimProfileEntry]) -> None:
+    """Persist the current ``state.profiles`` list back to the store directory as JSON files."""
     root_path = _ensure_store_root(store_path)
     if len(root_path) == 0:
         return
@@ -93,6 +97,7 @@ def load_profile_image_json_file(path: str) -> SimProfileImage | None:
 
 
 def profile_store_has_entries(store_path: str) -> bool:
+    """Return True when the profile store directory contains at least one profile entry."""
     root_path = _ensure_store_root(store_path)
     if len(root_path) == 0:
         return False
@@ -453,12 +458,13 @@ def _coerce_link_path(value: Any) -> tuple[str, ...]:
 def _coerce_lifecycle_state(value: Any) -> int:
     """Best-effort decode of the persisted ``lifecycle_state`` byte.
 
-    Older manifests didn't carry the field; default to 0x05
-    (operational-activated) so a reload reproduces the old behaviour.
-    Recognised values are 0x04 (deactivated), 0x05 (activated), and
-    0x0C (terminated -- set by TERMINATE EF / TERMINATE DF). Anything
-    else clamps back to 0x05 because the simulator never deliberately
-    produces the other §11.1.1.4.9 values.
+    Manifests written before gap-5 didn't carry the field; default to
+    0x05 (operational-activated) so a reload reproduces the old
+    behaviour. Recognised values are 0x04 (deactivated), 0x05
+    (activated), and 0x0C (terminated -- set by TERMINATE EF /
+    TERMINATE DF). Anything else clamps back to 0x05 because the
+    simulator never deliberately produces the other §11.1.1.4.9
+    values.
     """
     if value is None:
         return 0x05

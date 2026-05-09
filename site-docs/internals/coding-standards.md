@@ -65,8 +65,7 @@ path navigable and the wizard maintainable as the spec evolves.
   covers operator-visible runtime failures, `ValueError` covers malformed
   user or card data, `TypeError` covers contract violations, and dedicated
   `OSError` subclasses cover transport issues. Avoid `raise Exception(...)`
-  entirely -- the production tree has been swept clean of every remaining
-  occurrence, so new occurrences show up clearly in code review.
+  entirely so broad failures remain visible in review.
 - `except Exception:` catches are acceptable only in display / TLV-fallback
   paths where any failure collapses to "render the raw hex instead". New
   production code should catch the specific exception it cares about.

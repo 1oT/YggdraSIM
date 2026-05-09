@@ -1,28 +1,29 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """
 Deterministic APDU mutation strategies.
 
 Each mutator is a pure function ``(bytes, random.Random) -> bytes``
 that produces a single mutated command APDU from a known-good
 original. Determinism (via the supplied ``Random`` instance) is a
-contract -- crashes must be reproducible from a seed, otherwise
+contract — crashes must be reproducible from a seed, otherwise
 vulnerability research is impossible.
 
 Supported strategies (ETSI TS 102 221 §10.1 APDU framing):
 
-* :func:`mutate_bit_flip`       -- flip one or more random bits in the
+* :func:`mutate_bit_flip`       — flip one or more random bits in the
   payload portion of the APDU (never touches the CLA/INS header so
   the card still tries to parse the command).
-* :func:`mutate_length_mangle`  -- corrupt the Lc / Le fields so the
+* :func:`mutate_length_mangle`  — corrupt the Lc / Le fields so the
   command declares a length that does not match the actual payload.
-* :func:`mutate_tag_shuffle`    -- BER-TLV aware; reshuffles the
+* :func:`mutate_tag_shuffle`    — BER-TLV aware; reshuffles the
   tag byte of one TLV inside a SELECT/INS-APDU payload.
-* :func:`mutate_padding_bloat`  -- appends N bytes of junk past the
+* :func:`mutate_padding_bloat`  — appends N bytes of junk past the
   declared Lc to test if the card strictly enforces length checks.
-* :func:`mutate_zero_lc`        -- sets Lc to 0x00 while keeping the
+* :func:`mutate_zero_lc`        — sets Lc to 0x00 while keeping the
   original payload (classic length-confusion surface).
 
 All mutators respect the short APDU envelope (5-byte header). Extended
-APDU mutation support is deferred -- the simulator session recordings
+APDU mutation support is deferred — the simulator session recordings
 we target use short APDUs exclusively.
 """
 
@@ -72,6 +73,7 @@ def _reassemble(header: bytes, data: bytes, le: bytes) -> bytes:
 
 
 def mutate_bit_flip(apdu: bytes, rng: random.Random) -> MutationResult:
+    """Return a mutated APDU with one randomly chosen bit flipped."""
     if len(apdu) <= APDU_HEADER_BYTES:
         if len(apdu) == 0:
             return MutationResult(mutated_apdu=b"", description="bit_flip@empty")
@@ -88,6 +90,7 @@ def mutate_bit_flip(apdu: bytes, rng: random.Random) -> MutationResult:
 
 
 def mutate_length_mangle(apdu: bytes, rng: random.Random) -> MutationResult:
+    """Return a mutated APDU with the Lc/Le field set to an out-of-range value."""
     if len(apdu) < APDU_HEADER_BYTES:
         return MutationResult(mutated_apdu=bytes(apdu), description="length_mangle@short")
     mutated = bytearray(apdu)
@@ -102,6 +105,7 @@ def mutate_length_mangle(apdu: bytes, rng: random.Random) -> MutationResult:
 
 
 def mutate_zero_lc(apdu: bytes, _rng: random.Random) -> MutationResult:
+    """Return a mutated APDU with the Lc field set to zero."""
     if len(apdu) < APDU_HEADER_BYTES:
         return MutationResult(mutated_apdu=bytes(apdu), description="zero_lc@short")
     mutated = bytearray(apdu)
@@ -114,6 +118,7 @@ def mutate_zero_lc(apdu: bytes, _rng: random.Random) -> MutationResult:
 
 
 def mutate_tag_shuffle(apdu: bytes, rng: random.Random) -> MutationResult:
+    """Return a mutated APDU with the TLV tag bytes randomly reordered."""
     header, data, le = _apdu_split(apdu)
     if len(data) == 0:
         return MutationResult(mutated_apdu=bytes(apdu), description="tag_shuffle@no_data")
@@ -136,6 +141,7 @@ def mutate_tag_shuffle(apdu: bytes, rng: random.Random) -> MutationResult:
 
 
 def mutate_padding_bloat(apdu: bytes, rng: random.Random) -> MutationResult:
+    """Return a mutated APDU with excess padding appended to the data field."""
     pad_count = rng.randint(1, 16)
     mutated = bytearray(apdu)
     mutated.extend(rng.randrange(0, 256) for _ in range(pad_count))

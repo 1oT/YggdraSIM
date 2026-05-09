@@ -1,3 +1,5 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+"""SCP11-live payload builder: assembles BPP STORE-DATA fragments for delivery over a live PCSC channel."""
 # -----------------------------------------------------------------------------
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -59,6 +61,7 @@ class PayloadBuilder:
 
     @staticmethod
     def build_auth_server(signed1, signature, cert, ctx_params, root_ci_id: bytes = None) -> bytes:
+        """Build the ES9+.AuthenticateServer request TLV payload (SGP.22 §5.7.13)."""
         safe_ctx_params = PayloadBuilder._normalize_ctx_params(ctx_params)
         signed1_der = PayloadBuilder._asn1crypto_or_bytes_to_der(signed1)
         certificate_der = PayloadBuilder._asn1crypto_or_bytes_to_der(cert)
@@ -190,6 +193,7 @@ class PayloadBuilder:
 
     @staticmethod
     def build_prepare_download(transaction_id, euicc_sig1, cert, key) -> bytes:
+        """Build the ES9+.PrepareDownload request TLV payload for a locally signed profile (SGP.22 §5.7.16)."""
         smdp_signed2_der = encode_smdp_signed2(
             transaction_id=bytes(transaction_id),
             cc_required_flag=False,
@@ -226,6 +230,7 @@ class PayloadBuilder:
 
     @staticmethod
     def build_prepare_download_remote(smdp_signed2_der: bytes, smdp_signature2: bytes, cert) -> bytes:
+        """Build the ES9+.PrepareDownload request TLV payload for a remotely signed profile (SGP.22 §5.7.16)."""
         raw_signature = PayloadBuilder._unwrap_application_octet_string(
             bytes(smdp_signature2),
             bytes.fromhex("5F37"),

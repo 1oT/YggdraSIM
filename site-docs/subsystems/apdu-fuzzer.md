@@ -60,7 +60,7 @@ Additional knobs:
 
 ## Corpus
 
-Corpora are JSON files -- typically simulator session recordings.
+Corpora are JSON files — typically simulator session recordings.
 Three shapes are accepted:
 
 - the full recorder dump (`{"session_id": "...", "events": [...]}`)
@@ -71,9 +71,9 @@ Three shapes are accepted:
 
 ## Transports
 
-- `null` -- synthetic transport that always returns `90 00`. CI and
+- `null` — synthetic transport that always returns `90 00`. CI and
   dry-runs only.
-- `pcsc` -- live PC/SC reader. Requires `pyscard`.
+- `pcsc` — live PC/SC reader. Requires `pyscard`.
 
 ## Crash records
 

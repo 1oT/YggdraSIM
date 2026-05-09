@@ -1,3 +1,5 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+"""HIL-Bridge APDU router: dispatches incoming C-APDUs to the registered handler (relay, recorder, or simulated card)."""
 from __future__ import annotations
 
 import json
@@ -86,6 +88,7 @@ class BackendCardChannel:
         return self._reader_label
 
     def connect(self) -> None:
+        """Open the WebSocket connection to the HIL-Bridge relay server."""
         backend_name = self.backend_name
         if backend_name == "sim":
             connection = _create_simulated_card_connection()
@@ -101,6 +104,7 @@ class BackendCardChannel:
         self._reader_label = str(channel.reader_label or "").strip() or "PC/SC reader"
 
     def reconnect(self) -> None:
+        """Close and re-open the WebSocket connection."""
         channel = self._require_channel()
         if self.backend_name == "reader" and hasattr(channel, "reconnect"):
             channel.reconnect()
@@ -110,6 +114,7 @@ class BackendCardChannel:
         self.connect()
 
     def disconnect(self) -> None:
+        """Close the WebSocket connection."""
         channel = self._channel
         self._channel = None
         if channel is None:
@@ -225,6 +230,7 @@ class BridgeSession:
         self.atr_sent = False
 
     def server_identity(self) -> dict[str, Any]:
+        """Return the server identity string (URL + session token) for logging purposes."""
         return build_component_identity(
             COMPONENT_REMSIM_SERVER,
             name=self.config.bridge_name,
@@ -233,6 +239,7 @@ class BridgeSession:
         )
 
     def bankd_identity(self) -> dict[str, Any]:
+        """Return the RSPRO ComponentIdentity dict for the bank-daemon role."""
         return build_component_identity(
             COMPONENT_REMSIM_BANKD,
             name=f"{self.config.bridge_name}-bankd",
@@ -292,6 +299,7 @@ class HilBridgeServer:
             LOGGER.info("Card relay available at %s", self._apdu_relay.apdu_url)
 
     def serve_forever(self, *, stop_event: threading.Event | None = None) -> None:
+        """Accept connections and route RSPRO messages until the stop event fires."""
         while True:
             if stop_event is not None:
                 if stop_event.is_set():
@@ -307,6 +315,7 @@ class HilBridgeServer:
                 self._service_connection(context, mask)
 
     def close(self) -> None:
+        """Signal the router to stop and close all managed connections."""
         self._remove_card_relay_marker()
         self._apdu_relay.stop()
         self._reset_session("server shutdown", refresh_card=False)

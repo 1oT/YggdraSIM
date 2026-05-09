@@ -60,7 +60,7 @@ class CompareTests(unittest.TestCase):
         self.assertFalse(auth.compare("", "alpha"))
 
     def test_empty_expected_returns_false(self) -> None:
-        # Defence-in-depth -- even if the daemon hasn't been seeded with
+        # Defence-in-depth — even if the daemon hasn't been seeded with
         # a token, an empty Authorization header must never authorise.
         self.assertFalse(auth.compare("alpha", ""))
 

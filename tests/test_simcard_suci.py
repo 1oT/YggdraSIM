@@ -128,7 +128,7 @@ class SuciMobileIdentityNullSchemeTests(unittest.TestCase):
 
     def test_null_scheme_layout_matches_ts_24_501(self) -> None:
         identity = build_suci_from_imsi(
-            imsi="001017830012345",
+            imsi="262017830012345",
             mnc_length=2,
             routing_indicator="678",
             protection_scheme=ProtectionScheme.NULL,
@@ -137,11 +137,11 @@ class SuciMobileIdentityNullSchemeTests(unittest.TestCase):
         self.assertEqual(len(identity), 13)
         # Octet 1: SUPI format=0 (IMSI, upper nibble), type-of-identity=001 (SUCI)
         self.assertEqual(identity[0], 0x01)
-        # MCC+MNC for 001/01 (3GPP test PLMN):
-        #   o2 = (m[1]<<4)|m[0] = 0x00
-        #   o3 = (mnc[2]<<4)|m[2] = 0xF1
+        # MCC+MNC for 262/01:
+        #   o2 = (m[1]<<4)|m[0] = 0x62
+        #   o3 = (mnc[2]<<4)|m[2] = 0xF2
         #   o4 = (mnc[1]<<4)|mnc[0] = 0x10
-        self.assertEqual(identity[1:4].hex().upper(), "00F110")
+        self.assertEqual(identity[1:4].hex().upper(), "62F210")
         # RI '678' -> [6,7,8,F] -> 0x76 0xF8
         self.assertEqual(identity[4:6].hex().upper(), "76F8")
         self.assertEqual(identity[6], int(ProtectionScheme.NULL))
@@ -176,7 +176,7 @@ class SuciMobileIdentityNullSchemeTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             encode_suci_mobile_identity(
                 supi_format=0,
-                mcc="001",
+                mcc="262",
                 mnc="01",
                 routing_indicator="12345",
                 protection_scheme=ProtectionScheme.NULL,
@@ -188,7 +188,7 @@ class SuciMobileIdentityNullSchemeTests(unittest.TestCase):
         with self.assertRaises(NotImplementedError):
             encode_suci_mobile_identity(
                 supi_format=1,
-                mcc="001",
+                mcc="262",
                 mnc="01",
                 routing_indicator="0",
                 protection_scheme=ProtectionScheme.NULL,
@@ -206,7 +206,7 @@ class ProfileARoundTripTests(unittest.TestCase):
         self.hn_private = x25519.X25519PrivateKey.from_private_bytes(b"\x42" * 32)
         self.hn_pub = self.hn_private.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw)
         self.hn_priv_bytes = self.hn_private.private_bytes_raw()
-        self.imsi = "001017830012345"
+        self.imsi = "262017830012345"
         self.mnc_length = 2
         self.expected_msin_bcd = encode_msin_bcd("7830012345")
 

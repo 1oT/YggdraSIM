@@ -6,13 +6,13 @@
     "display_name": "SGP.26 Seeded eIM Test",
     "eim_id": "2.25.311782205282738360923618091971140414400",
     "eim_id_type": "oid",
-    "eim_fqdn": "eim.yggdrasim.example.test",
+    "eim_fqdn": "eim.example.test",
     "default_matching_id": "EIM-FIRST-TEST",
     "organization": "RSPTEST",
-    "certificate_subject_cn": "eim.yggdrasim.example.test",
-    "eim_endpoint": "https://eim.yggdrasim.example.test/gsma/rsp2/asn1",
-    "smdpp_endpoint": "https://smdpp.yggdrasim.example.test/gsma/rsp2/es9plus",
-    "smdp_address": "smdpp.yggdrasim.example.test",
+    "certificate_subject_cn": "eim.example.test",
+    "eim_endpoint": "https://eim.example.test/gsma/rsp2/asn1",
+    "smdpp_endpoint": "https://smdpp.example.test/gsma/rsp2/es9plus",
+    "smdp_address": "smdpp.example.test",
     "euicc_ci_pk_id": "F54172BDF98A95D65CBEB88A38A1C11D800A85C3"
   },
   "provisioning_artifacts": {
@@ -83,10 +83,10 @@
   },
   "runtime_hints": {
     "matching_id": "EIM-FIRST-TEST",
-    "smdp_address": "smdpp.yggdrasim.example.test",
+    "smdp_address": "smdpp.example.test",
     "bip_endpoints": {
-      "eim": "https://eim.yggdrasim.example.test/gsma/rsp2/asn1",
-      "smdpp": "https://smdpp.yggdrasim.example.test/gsma/rsp2/es9plus"
+      "eim": "https://eim.example.test/gsma/rsp2/asn1",
+      "smdpp": "https://smdpp.example.test/gsma/rsp2/es9plus"
     }
   },
   "operator_examples": {

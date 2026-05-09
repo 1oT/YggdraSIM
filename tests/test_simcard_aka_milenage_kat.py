@@ -157,7 +157,7 @@ class EngineAuthenticateMatchesSpec(unittest.TestCase):
     def _build_autn(self) -> bytes:
         # AUTN = (SQN xor AK) || AMF || MAC-A.
         # Per TS 33.102 Annex C, AK comes from f5(K, OPc, RAND) and is
-        # invariant under SQN, so it can be derived from the primitive
+        # invariant under SQN, so we can derive it from the primitive
         # output directly.
         primitive = milenage_vectors(_TS1_K, _TS1_OPC, _TS1_RAND, _TS1_SQN, _TS1_AMF)
         concealed_sqn = bytes(a ^ b for a, b in zip(_TS1_SQN, primitive.ak))

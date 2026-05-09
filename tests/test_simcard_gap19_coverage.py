@@ -1,8 +1,12 @@
-"""Coverage for SIMCARD operator-side envelope decoders and EF.LND seed:
+"""Nineteenth-pass gap-coverage suite for SIMCARD envelope decoders.
+
+Round-19 closes three operator-side envelopes that previously
+returned a canned "Allowed, no modification" reply without
+decoding any of the body fields:
 
 * 3GPP TS 31.111 §7.3.1.1 ``Call Control by USIM`` (root tag
-  ``D4``). The simulator extracts the dialled-number Address TLV
-  (``06`` / ``86``), the optional Capability Configuration
+  ``D4``). The simulator now extracts the dialled-number Address
+  TLV (``06`` / ``86``), the optional Capability Configuration
   Parameters (``07`` / ``87``), the Sub-Address (``08`` / ``88``)
   and the Location Information (``13`` / ``93``).
 * 3GPP TS 31.111 §7.3.2.1 ``MO Short Message Control`` (``D5``).
@@ -13,9 +17,10 @@
   String TLV (``8A`` / ``0A``) is split into DCS + raw bytes +
   best-effort decoded text.
 
-``EF.LND`` (``6F44``) is also seeded as a cyclic EF with one
-all-FF record so READ RECORD against the empty slot returns
-deterministic data instead of ``6A 83``.
+Round-19 also seeds ``EF.LND`` (``6F44``) -- a cyclic EF that
+real cards always carry. The simulator now ships one all-FF
+record so READ RECORD against the empty slot returns deterministic
+data instead of ``6A 83``.
 """
 
 from __future__ import annotations

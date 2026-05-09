@@ -160,7 +160,7 @@ keybag, the TUI tries, in order:
 2. `<capture>.pcap.keys.json` next to the capture
 3. `<capture>.keys.json` (capture stem + `.keys.json`)
 
-A missing or unreadable keybag is non-fatal -- ciphered APDUs simply
+A missing or unreadable keybag is non-fatal — ciphered APDUs simply
 stay wrapped in the TUI. See [Keybag JSON schema](#keybag-json-schema)
 below for the file shape and how to produce one with
 [`EXPORT-KEYBAG`](#session-key-export) in SCP03 / SCP11 Local Access,
@@ -235,7 +235,7 @@ schema is stable across `v1`.
 - Offline review mode trusts the capture's ATR / SELECT context. If the
   keybag entry's `aid_hex` does not match the AID in the capture the
   corresponding APDUs simply stay wrapped.
-- `SCP11.live --dump-keybag` is intentionally a stub -- the keys never
+- `SCP11.live --dump-keybag` is intentionally a stub — the keys never
   leave the card in live mode. Use `SCP11.local_access` or SCP03 for
   real exports.
 
@@ -250,7 +250,7 @@ card without a direct PC/SC handle:
 
 | Request shape | Decoded APDU |
 | --- | --- |
-| `AT+CSIM=<length>,"<hex>"` | raw `CLA INS P1 P2 P3 ...` |
+| `AT+CSIM=<length>,"<hex>"` | raw `CLA INS P1 P2 P3 …` |
 | `AT+CRSM=<command>,<fileid>,<P1>,<P2>,<P3>[,"<data>"][,"<path>"]` | `CLA=0x00`, `INS` from the §8.18 command table |
 
 Common modem REFRESH and AT-only flows can therefore be replayed
@@ -268,6 +268,6 @@ control.
 - [HIL Model](../concepts/hil-model.md)
 - [Run a HIL Capture](../how-to/run-hil-capture.md)
 - [Replay a HIL pcap offline](../how-to/replay-hil-pcap-offline.md)
-- [SCP03 Admin Shell -- EXPORT-KEYBAG](scp03.md#session-key-export)
-- [SCP11 Local Access -- EXPORT-KEYBAG / `--dump-keybag`](scp11-local-access.md#session-key-export)
+- [SCP03 Admin Shell — EXPORT-KEYBAG](scp03.md#session-key-export)
+- [SCP11 Local Access — EXPORT-KEYBAG / `--dump-keybag`](scp11-local-access.md#session-key-export)
 - `guides/HIL_BRIDGE_GUIDE.md` for the deep authored guide

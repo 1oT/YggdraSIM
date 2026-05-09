@@ -1,3 +1,5 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+"""SCP80 cryptographic engine: DES/AES OTA session key derivation and MAC/ENC computation (ETSI TS 102 225 §5)."""
 # -----------------------------------------------------------------------------
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -17,14 +19,41 @@
 
 from Crypto .Cipher import AES ,DES3 
 from Crypto .Hash import CMAC 
+
+# TS 102 225 §5.1 / §5.2 cipher and CC primitives are routed through
+# pySim.ota so the spec citations (DES/3DES2/3DES3/AES algorithms,
+# CMAC truncation rules) live in one upstream place. The §5.1 envelope
+# layout in this module — leading CHI=00 byte, 1-octet CPL — is
+# YggdraSIM-specific and intentionally diverges from pySim's
+# ``OtaDialectSms.encode_cmd`` (2-octet CPL, no CHI). See
+# tests/test_scp80_pysim_parity.py for the pinned divergence.
+from pySim .ota import (
+    OtaAlgoAuthAES as _PysimAuthAES ,
+    OtaAlgoAuthDES3 as _PysimAuthDES3 ,
+    OtaAlgoCryptAES as _PysimCryptAES ,
+    OtaAlgoCryptDES3 as _PysimCryptDES3 ,
+    OtaKeyset as _PysimOtaKeyset ,
+)
 if __package__ :
     from .utils import Utils 
 else :
     from utils import Utils 
 
+
+def _build_pysim_otak (algo_crypt :str ,algo_auth :str ,key :bytes )->"_PysimOtaKeyset":
+    # pySim's OtaAlgo* classes resolve their ``enum_name`` against the
+    # paired ``OtaKeyset``. We construct one keyset per call: the cost
+    # is a couple of attribute writes, well below CMAC.new() / AES.new().
+    return _PysimOtaKeyset (
+        algo_crypt =algo_crypt ,kic_idx =1 ,kic =key ,
+        algo_auth =algo_auth ,kid_idx =1 ,kid =key ,
+    )
+
+
 class CryptoEngine :
     @staticmethod 
     def get_algo_type (byte_hex :str )->str :
+        """Map a keyset algo nibble to a cipher name string (TS 102 225 §5.2)."""
         try :
             val =int (byte_hex ,16 )&0x0F 
             if val ==0x02 :return "AES"
@@ -35,6 +64,7 @@ class CryptoEngine :
 
     @staticmethod 
     def describe_keyset (byte_hex :str )->str :
+        """Return a human-readable keyset description for a single algo byte (TS 102 225 §5.2)."""
         try :
             val =int (byte_hex ,16 )
             algo =val &0x0F 
@@ -61,39 +91,41 @@ class CryptoEngine :
 
     @staticmethod 
     def compute_cc (algo :str ,key :bytes ,data :bytes )->bytes :
+        """Compute a Cryptographic Checksum over *data* using *algo* and *key* (TS 102 225 §5.1.1)."""
+        # TS 102 225 §5.1.1 — CC truncation to 8 octets is enforced by
+        # pySim's ``OtaAlgoAuth*._sign``. We match the upstream rule.
         if algo =="AES":
-            c =CMAC .new (key ,ciphermod =AES )
-            c .update (data )
-            return c .digest ()[:8 ]
-        else :
-            key_eff =Utils .pad_key_3des (key )
-            pad_len =(-len (data ))%8 
-            if pad_len :data +=b'\x00'*pad_len 
-            cipher =DES3 .new (key_eff ,DES3 .MODE_CBC ,iv =b'\x00'*8 )
-            return cipher .encrypt (data )[-8 :]
+            otak =_build_pysim_otak ("aes_cbc","aes_cmac",key )
+            return _PysimAuthAES (otak )._sign (data )
+        key_eff =Utils .pad_key_3des (key )
+        pad_len =(-len (data ))%8 
+        if pad_len :data +=b'\x00'*pad_len 
+        otak =_build_pysim_otak ("triple_des_cbc2","triple_des_cbc2",key_eff )
+        return _PysimAuthDES3 (otak )._sign (data )
 
     @staticmethod 
     def encrypt_ct (algo :str ,key :bytes ,data :bytes )->bytes :
+        """Encrypt *data* with *algo* and *key* for the OTA Ciphered Text field (TS 102 225 §5.1.2)."""
         if algo =="AES":
             pad_len =(-len (data ))%16 
             if pad_len :data +=b'\x00'*pad_len 
-            cipher =AES .new (key ,AES .MODE_CBC ,iv =b'\x00'*16 )
-            return cipher .encrypt (data )
-        else :
-            key_eff =Utils .pad_key_3des (key )
-            pad_len =(-len (data ))%8 
-            if pad_len :data +=b'\x00'*pad_len 
-            cipher =DES3 .new (key_eff ,DES3 .MODE_CBC ,iv =b'\x00'*8 )
-            return cipher .encrypt (data )
+            otak =_build_pysim_otak ("aes_cbc","aes_cmac",key )
+            return _PysimCryptAES (otak )._encrypt (data )
+        key_eff =Utils .pad_key_3des (key )
+        pad_len =(-len (data ))%8 
+        if pad_len :data +=b'\x00'*pad_len 
+        otak =_build_pysim_otak ("triple_des_cbc2","triple_des_cbc2",key_eff )
+        return _PysimCryptDES3 (otak )._encrypt (data )
 
     @staticmethod
     def decrypt_ct(algo: str, key: bytes, data: bytes) -> bytes:
+        """Decrypt the OTA Ciphered Text field using *algo* and *key* (TS 102 225 §5.1.2)."""
         if algo == "AES":
-            cipher = AES.new(key, AES.MODE_CBC, iv=b"\x00" * 16)
-            return cipher.decrypt(data)
+            otak = _build_pysim_otak("aes_cbc", "aes_cmac", key)
+            return _PysimCryptAES(otak)._decrypt(data)
         key_eff = Utils.pad_key_3des(key)
-        cipher = DES3.new(key_eff, DES3.MODE_CBC, iv=b"\x00" * 8)
-        return cipher.decrypt(data)
+        otak = _build_pysim_otak("triple_des_cbc2", "triple_des_cbc2", key_eff)
+        return _PysimCryptDES3(otak)._decrypt(data)
 
     @staticmethod
     def decrypt_0348_command_block(

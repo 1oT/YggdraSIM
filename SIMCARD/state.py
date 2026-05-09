@@ -1,3 +1,5 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+"""Simulated SIM persistent state: profile FS nodes, auth config, PIN/PUK entries, and SD key records serialised to JSON."""
 from __future__ import annotations
 
 import os
@@ -6,52 +8,6 @@ from typing import Any
 
 
 DEFAULT_SIM_ATR = bytes.fromhex("3B9F96801FC78031A073BE21136743200718000001A5")
-
-
-# Default cap for the simulator's bounded "history" lists (envelope
-# history, IPA-poll phase trace, BIP RECEIVE channel ring, etc.). The
-# simulator engine is a process-wide singleton so any list that grows
-# per-APDU or per-poll-phase will leak memory across long-running
-# shells unless a cap is enforced. 256 entries is more than enough for
-# any consumer that only reads the tail (``[-1]`` / sliced suffix) or
-# ``len()`` while keeping the working set well below 1 MB even when
-# every entry is a full-sized hex APDU. Override via the
-# ``YGGDRASIM_SIM_HISTORY_CAP`` env var when a longer trail is needed
-# for forensics; values <= 0 fall back to the default.
-_DEFAULT_HISTORY_CAP: int = 256
-
-
-def _resolve_history_cap() -> int:
-    raw = str(os.environ.get("YGGDRASIM_SIM_HISTORY_CAP", "") or "").strip()
-    if len(raw) == 0:
-        return _DEFAULT_HISTORY_CAP
-    try:
-        parsed = int(raw)
-    except ValueError:
-        return _DEFAULT_HISTORY_CAP
-    if parsed <= 0:
-        return _DEFAULT_HISTORY_CAP
-    return parsed
-
-
-MAX_HISTORY_ENTRIES: int = _resolve_history_cap()
-
-
-def append_bounded(target: list, value: Any, maxlen: int = 0) -> None:
-    """Append ``value`` to ``target`` and trim the front to ``maxlen`` entries.
-
-    ``target`` stays a real ``list`` (so ``[-1]`` indexing, ``==``
-    comparison against literal lists, and iteration in tests keep
-    working). The trim is FIFO so the most recent entries survive,
-    which is what every consumer of these histories actually wants.
-    A ``maxlen`` of 0 (or negative) falls back to
-    :data:`MAX_HISTORY_ENTRIES`.
-    """
-    cap = int(maxlen) if int(maxlen) > 0 else MAX_HISTORY_ENTRIES
-    target.append(value)
-    overflow = len(target) - cap
-    if overflow > 0:
-        del target[:overflow]
 
 
 # SGP.32 §3.5 IPA-poll bearer defaults. The simulator ships an APN of
@@ -108,10 +64,10 @@ def _default_stk_imei_bcd() -> bytes:
 def _default_stk_location_information() -> bytes:
     """ETSI TS 102 223 §8.19 / 3GPP TS 24.008 §10.5.1.3 GSM Location.
 
-    7 bytes: 3-byte packed-BCD PLMN (MCC=001 / MNC=01 / 3GPP test PLMN)
+    7 bytes: 3-byte packed-BCD PLMN (MCC=262 / MNC=01 / Telekom DE)
     + 2-byte LAC (0x0001) + 2-byte Cell ID (0x0001).
     """
-    return bytes.fromhex("00F11000010001")
+    return bytes.fromhex("62F210000100 01".replace(" ", ""))
 
 
 @dataclass
@@ -555,7 +511,7 @@ class SimToolkitState:
     terminal_profile: bytes = b""
     terminal_capabilities: list[bytes] = field(default_factory=list)
     # ETSI TS 102 221 §11.1.19 Terminal Capability decoded fields
-    #. Each TERMINAL CAPABILITY APDU carries a sequence
+    # (round 13). Each TERMINAL CAPABILITY APDU carries a sequence
     # of optional TLVs; the latest decoded values are latched here
     # so an applet / test can introspect terminal support without
     # walking the raw blob list.
@@ -574,14 +530,14 @@ class SimToolkitState:
     open_channel_endpoint: str = ""
     open_channel_network_access_name: str = ""
     open_channel_transport_protocol_type: int = 0
-    # ETSI TS 102 223 §8.7 / §8.56 -- channel identifier reported by
+    # ETSI TS 102 223 §8.7 / §8.56 — channel identifier reported by
     # the terminal in the OPEN CHANNEL TR channel-status TLV
     # (``38 02 [byte1] [byte2]``, channel id = byte1 & 0x07). Stored
     # so the SEND DATA / RECEIVE DATA / CLOSE CHANNEL builders can
     # encode the destination device identity as ``0x20 + ch_id``
-    # rather than the generic terminal id (0x82); some terminals
-    # return general-result 0x3A / additional-info 0x03
-    # ("Channel identifier not valid") if the dest byte is wrong.
+    # rather than the generic terminal id (0x82); reference cards
+    # that fail us with general-result 0x3A / additional-info 0x03
+    # ("Channel identifier not valid") rely on this exact dest byte.
     open_channel_id: int = 0
     last_channel_data_sent: int = 0
     last_received_channel_data: bytes = b""
@@ -664,12 +620,17 @@ class SimToolkitState:
     ipa_poll_alpha_id: str = ""
     ipa_poll_request_payload: bytes = b""
     # SGP.32 §3.5 / ETSI TS 102 223 §8.59 / §8.70 BIP destination wiring.
-    # OPEN CHANNEL TLVs:
+    # Real eUICC IPAs build OPEN CHANNEL with:
     #   tag 47 = APN (Network Access Name, label-list encoded)
     #   tag 3C = transport type + port
     #   tag 3E = literal IPv4/IPv6 destination
-    # ``ipa_poll_apn`` is seeded from (in order):
-    #   1. the active SAIP profile's APN (BPP override) -- see
+    # The eIM is published via FQDN, so the IPA first opens a UDP/53
+    # bearer to a public resolver (defaults to Google ``8.8.8.8``)
+    # and asks for the eIM A-record. Once the resolved IPv4 lands in
+    # ``ipa_poll_resolved_ip`` the next timer expiry opens a TCP/443
+    # bearer to that address with the same APN. ``ipa_poll_apn`` is
+    # seeded from (in order):
+    #   1. the active SAIP profile's APN (BPP override) — see
     #      ``state.toolkit.ipa_poll_apn_source == "bpp"``
     #   2. ``YGGDRASIM_SIM_IPA_POLL_APN`` env override
     #   3. ``"internet.apn"`` workspace fallback
@@ -705,12 +666,12 @@ class SimToolkitState:
     ipa_poll_dns_channel_id: int = 0
     ipa_poll_eim_channel_id: int = 0
     # DNS payload buffers. ``ipa_poll_dns_pending_questions`` is the
-    # ordered list of (qname, qtype) tuples still to be shipped under
-    # the current bearer. ``ipa_poll_dns_response_buffer`` accumulates
-    # RECEIVE DATA bytes until a complete DNS message is parsed (some
-    # modems split a single response across two RECEIVE DATA TRs).
-    # ``ipa_poll_dns_a_pending`` / ``ipa_poll_dns_aaaa_pending`` track
-    # the dual-stack questions still in flight.
+    # ordered list of (qname, qtype) tuples the IPA still needs to ship
+    # under the current UDP bearer. ``ipa_poll_dns_response_buffer``
+    # accumulates RECEIVE DATA bytes until a complete DNS message is
+    # parsed (some modems split a single response across two RECEIVE
+    # DATA TRs). ``ipa_poll_dns_a_pending`` / ``ipa_poll_dns_aaaa_pending``
+    # mirror the dual-stack-first behaviour of real cards.
     ipa_poll_dns_pending_questions: list[tuple[str, int]] = field(default_factory=list)
     ipa_poll_dns_response_buffer: bytes = b""
     ipa_poll_dns_a_pending: bool = False
@@ -719,7 +680,7 @@ class SimToolkitState:
     # finishes (whether successfully delivering an EuiccPackage or
     # bailing on a bearer error). Used by tests / status renderers.
     ipa_poll_cycle_count: int = 0
-    # SGP.32 §3.5 -- consecutive cycle-failure tally. Bumps when a
+    # SGP.32 §3.5 — consecutive cycle-failure tally. Bumps when a
     # SEND DATA or RECEIVE DATA inside the IPA-poll cycle returns a
     # non-success TR (general result 0x3A "BIP error", 0x20 "no
     # service", etc.); resets when a cycle completes with at least
@@ -730,11 +691,16 @@ class SimToolkitState:
     # additional-info byte) for diagnostics.
     ipa_poll_consecutive_failures: int = 0
     ipa_poll_last_cycle_error: str = ""
-    # ETSI TS 102 223 §6.4.27 / §8.38 -- watchdog timer used between
-    # SEND DATA and RECEIVE DATA inside an IPA-poll cycle. Default
-    # values per TS 102 223. Skipping the wait can trigger general
-    # result 0x3A and additional info 0x00 on RECEIVE DATA against
-    # some terminals.
+    # ETSI TS 102 223 §6.4.27 / §8.38 -- watchdog timer used between the
+    # SEND DATA burst and the RECEIVE DATA flight inside an IPA-poll
+    # cycle. Reference IPA cards arm timer 02 with ~65 s before yielding
+    # for the network response and deactivate it once the response has
+    # been drained, so the modem reports the elapsed wait back in the
+    # Timer Value (25) TLV. The wait is what lets the modem actually
+    # receive bytes from the network before the eUICC issues
+    # RECEIVE DATA -- skipping it triggers general result 0x3A
+    # ("Bearer Independent Protocol error") and additional info 0x00
+    # ("no specific cause") on every RECEIVE DATA.
     ipa_poll_wait_timer_id: int = 2
     ipa_poll_wait_timer_seconds: int = 65
     # Tracks whether the watchdog timer is currently armed inside the
@@ -742,14 +708,17 @@ class SimToolkitState:
     # the same timer twice across an interleaved SEND/RECV burst and
     # to guarantee a deactivate is queued before CLOSE CHANNEL.
     ipa_poll_wait_timer_armed: bool = False
-    # SGP.32 §3.5 / TS 102 223 §6.4.27 IPA-poll TLS toggle.
-    # ``ipa_poll_tls_enabled`` selects between the TLS-1.2 path
-    # (default) and the plain-HTTP fallback used by dispatch tests
-    # that exercise the SGP.32 envelope wiring without a TLS engine.
-    # ``ipa_poll_tls_state`` holds the ``CardTlsClientState``
-    # (memory BIOs + SSLObject) for the cycle in flight;
-    # ``ipa_poll_tls_inbound_buffer`` accumulates RECEIVE DATA bytes
-    # until a full TLS record is parsed (some modems split a
+    # SGP.32 §3.5 / TS 102 223 §6.4.27: real eUICC IPAs run TLS-1.2
+    # ECDHE-ECDSA-AES128-GCM-SHA256 entirely inside the card; the
+    # modem becomes a transparent byte pipe between the card and the
+    # eIM. ``ipa_poll_tls_enabled`` toggles that path -- ``True`` is
+    # the production default (matches reference hardware), ``False``
+    # restores the Stage-1 plain-HTTP fallback used by the IPA dispatch
+    # tests that exercise the SGP.32 envelope wiring without spinning a
+    # full TLS engine. ``ipa_poll_tls_state`` holds the
+    # ``CardTlsClientState`` (memory BIOs + SSLObject) for the cycle in
+    # flight; ``ipa_poll_tls_inbound_buffer`` accumulates RECEIVE DATA
+    # bytes until a full TLS record is parsed (some modems split a
     # single record across two RECEIVE DATA TRs).
     # ``ipa_poll_tls_idle_receives`` is a small safety counter: once a
     # bounded number of RECEIVE DATAs come back with zero bytes the
@@ -882,9 +851,9 @@ class SimToolkitState:
     last_menu_item_id: int = 0
     last_menu_help_request: bool = False
     menu_selections: list[int] = field(default_factory=list)
-    # ETSI TS 102 223 §6.4 proactive-response latches.
+    # ETSI TS 102 223 §6.4 proactive-response latches (round 11).
     # Each "send" / "play" / "notify" proactive that previously
-    # had no dedicated TR handler persists its outcome here.
+    # had no dedicated TR handler now persists its outcome here.
     last_send_ss_result: int = 0
     last_send_ss_additional: bytes = b""
     last_send_ss_response: bytes = b""
@@ -903,7 +872,7 @@ class SimToolkitState:
     # distinguish "browser refused to start" from "browser ran and
     # the user closed it later".
     last_launch_browser_result: int = 0
-    # ETSI TS 102 223 §6.4.5 REFRESH TR-side latch. The
+    # ETSI TS 102 223 §6.4.5 REFRESH TR-side latch (round 15). The
     # terminal response carries only a result code per §6.6.5; the
     # simulator caches the refresh-mode that the TR confirmed plus a
     # monotonic attempt counter so an STK applet can distinguish
@@ -912,7 +881,7 @@ class SimToolkitState:
     last_refresh_result: int = 0
     last_refresh_mode: int = 0
     refresh_attempts: int = 0
-    # ETSI TS 102 223 §6.4.13 SET UP CALL TR-side latch.
+    # ETSI TS 102 223 §6.4.13 SET UP CALL TR-side latch (round 15).
     # The TR per §6.6.13 carries the result code and may include
     # Additional Information (TLV ``1A`` / ``9A``) describing the
     # network-side cause when the call could not be established.
@@ -922,11 +891,11 @@ class SimToolkitState:
     last_set_up_call_result: int = 0
     last_set_up_call_additional: bytes = b""
     last_set_up_call_address: str = ""
-    # ETSI TS 102 223 §6.4.1 DISPLAY TEXT. The TR per
+    # ETSI TS 102 223 §6.4.1 DISPLAY TEXT (round 16). The TR per
     # §6.6.1 only echoes a result code; the simulator caches it
     # so a polling tool can confirm the text actually rendered.
     last_display_text_result: int = 0
-    # ETSI TS 102 223 §6.4.2 GET INKEY. The TR per
+    # ETSI TS 102 223 §6.4.2 GET INKEY (round 16). The TR per
     # §6.6.2 carries the user-typed character in TLV ``0D`` /
     # ``8D`` (DCS + 1 unit). The simulator latches the result
     # plus the decoded character (best-effort; UCS-2 is decoded
@@ -934,28 +903,28 @@ class SimToolkitState:
     last_get_inkey_result: int = 0
     last_get_inkey_text: str = ""
     last_get_inkey_dcs: int = 0
-    # ETSI TS 102 223 §6.4.3 GET INPUT. The TR per
+    # ETSI TS 102 223 §6.4.3 GET INPUT (round 16). The TR per
     # §6.6.3 carries the user-typed string in TLV ``0D`` / ``8D``
     # plus a result. The simulator caches both so a paired test
     # can validate the text the modem returned.
     last_get_input_result: int = 0
     last_get_input_text: str = ""
     last_get_input_dcs: int = 0
-    # ETSI TS 102 223 §6.4.4 SELECT ITEM. The TR per
+    # ETSI TS 102 223 §6.4.4 SELECT ITEM (round 16). The TR per
     # §6.6.4 carries the chosen item identifier in TLV ``10`` /
     # ``90``. The simulator latches the result + chosen id.
     last_select_item_result: int = 0
     last_select_item_id: int = 0
-    # ETSI TS 102 223 §6.4.5 SET UP MENU. TR carries
+    # ETSI TS 102 223 §6.4.5 SET UP MENU (round 16). TR carries
     # only a result code; the simulator latches it independently
     # of the menu selections envelope so a tool can know whether
     # the menu was actually committed by the terminal.
     last_set_up_menu_result: int = 0
-    # ETSI TS 102 223 §6.4.20 SET UP IDLE MODE TEXT.
+    # ETSI TS 102 223 §6.4.20 SET UP IDLE MODE TEXT (round 16).
     # TR carries only a result code.
     last_set_up_idle_mode_text_result: int = 0
     # ETSI TS 102 223 §6.4.2 / §6.4.3 simple proactive TR latches
-    #. MORE TIME and POLL INTERVAL only carry a result
+    # (round 13). MORE TIME and POLL INTERVAL only carry a result
     # code on the TR side; POLL INTERVAL additionally echoes the
     # negotiated polling duration the terminal accepted.
     last_more_time_result: int = 0
@@ -990,7 +959,7 @@ class SimToolkitState:
     last_display_parameters: bytes = b""
     display_parameters_changes: int = 0
     # ETSI TS 102 223 §7.4.4 Location Status Event Download
-    #. The 1-byte status TLV (0x9B / 0x1B) takes one
+    # (round 17). The 1-byte status TLV (0x9B / 0x1B) takes one
     # of three values:
     #   0x00 normal service
     #   0x01 limited service
@@ -1004,7 +973,7 @@ class SimToolkitState:
     last_location_status: int = 0
     location_status_changes: int = 0
     # ETSI TS 102 223 §7.4.x Data Available Event Download
-    #. The terminal raises this with TLV 0x37 (Channel
+    # (round 17). The terminal raises this with TLV 0x37 (Channel
     # Data Length) -- and optionally TLV 0x38 (Channel Status) --
     # when a BIP socket has accumulated received data ready for
     # the applet to drain via RECEIVE DATA. The simulator latches
@@ -1016,7 +985,7 @@ class SimToolkitState:
     last_data_available_channel_status: bytes = b""
     data_available_events: int = 0
     # ETSI TS 102 223 §7.4.16 Frames Information Change Event
-    #. When the user reshapes the terminal display
+    # (round 17). When the user reshapes the terminal display
     # the modem forwards the new layout under TLV 0x49 (Frames
     # Information). The simulator already exposes
     # ``last_frames_information`` from SET FRAMES TR responses;
@@ -1024,7 +993,7 @@ class SimToolkitState:
     # how many times the user reshaped the display since boot.
     frames_information_changes: int = 0
     # ETSI TS 102 223 §7.4.7 Card Reader Status Event Download
-    #. Multi-card terminals broadcast a 1-byte status
+    # (round 17). Multi-card terminals broadcast a 1-byte status
     # under TLV 0xA0 (Card Reader Status) describing the reader
     # whose state changed (bit 7 = card present, bit 6 = card
     # powered, bits 0..3 = reader id). The simulator latches the
@@ -1040,7 +1009,7 @@ class SimToolkitState:
     # latch lets a polling tool confirm that the terminal accepted
     # the new list (vs. responding with terminal busy / unable).
     last_set_up_event_list_result: int = 0
-    # ETSI TS 102 223 §6.4.4 POLLING OFF TR latch. The
+    # ETSI TS 102 223 §6.4.4 POLLING OFF TR latch (round 18). The
     # TR per §6.6.4 echoes only a result byte; the simulator
     # already toggles ``polling_off_active`` on success. The
     # result-code latch records non-success outcomes too so a
@@ -1056,7 +1025,7 @@ class SimToolkitState:
     # (0x20) without inspecting timer_table.
     last_timer_management_result: int = 0
     # ETSI TS 102 223 §6.4.15 PROVIDE LOCAL INFORMATION TR latch
-    #. The qualifier byte selects which datum the
+    # (round 18). The qualifier byte selects which datum the
     # terminal must return (0x00 location info, 0x01 IMEI, 0x03
     # date/time, ..) and the simulator already harvests each
     # decoded field via _apply_provide_local_information_response.
@@ -1066,7 +1035,7 @@ class SimToolkitState:
     last_provide_local_information_result: int = 0
     last_provide_local_information_qualifier: int = 0
     # 3GPP TS 31.111 §7.3.1.1 Call Control by USIM envelope decode
-    #. The terminal forwards every MO call attempt to
+    # (round 19). The terminal forwards every MO call attempt to
     # the SIM via the D4 envelope so the operator can intercept /
     # blacklist / re-route. The simulator now extracts the dialled
     # number (TLV 06/86), TON/NPI byte, optional sub-address
@@ -1082,7 +1051,7 @@ class SimToolkitState:
     last_cc_location_information: bytes = b""
     cc_envelopes_received: int = 0
     # 3GPP TS 31.111 §7.3.2.1 MO Short Message Control envelope
-    # decode. The terminal forwards every MO SMS to
+    # decode (round 19). The terminal forwards every MO SMS to
     # the SIM via the D5 envelope so the operator can intercept
     # the destination address or override the SC. The simulator
     # extracts the destination (RP-DA, first Address TLV) and
@@ -1190,14 +1159,8 @@ class SimCardState:
     scp03_keys: SimScp03StaticKeys = field(default_factory=SimScp03StaticKeys)
     scp80_security: SimScp80SecurityConfig = field(default_factory=SimScp80SecurityConfig)
     current_node_id: str = "3F00"
-    # ``apdu_count`` replaces the legacy unbounded ``apdu_history`` list
-    # for envelope-free APDU tracing (see ``engine.transmit``). OTA
-    # envelopes still record a bounded hex snapshot list so SCP80 replay
-    # diagnostics match the main simulator tree without retaining every
-    # payload for the process lifetime.
-    ota_packet_count: int = 0
     ota_history: list[str] = field(default_factory=list)
-    apdu_count: int = 0
+    apdu_history: list[str] = field(default_factory=list)
     pending_fetch_queue: list[bytes] = field(default_factory=list)
     current_protocol: int | None = None
     profiles: list[SimProfileEntry] = field(default_factory=list)

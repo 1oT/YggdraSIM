@@ -9,14 +9,6 @@ The runtime hardening layers below have distinct default postures:
 - ``YGGDRASIM_ALLOW_QUIRKS``: simulator quirks files (executed as Python)
   must still be explicitly enabled at launch; otherwise the simulator
   refuses to load them (see ``SIMCARD/quirks.py``).
-- ``YGGDRASIM_CARD_BACKEND``: pinned to ``sim`` for the entire test
-  session so unit tests that build an ``EimLocalShell`` / ``...Session``
-  (and therefore a ``PcscApduChannel``) don't reach for a real PC/SC
-  reader. CI runners have no card hardware and ``pcscd`` either is
-  missing or refuses ``SCardEstablishContext`` with ``Access denied
-  (0x8010006A)``. Tests that *want* the reader path can still override
-  via ``mock.patch.dict(os.environ, {"YGGDRASIM_CARD_BACKEND": "reader"}, ...)``
-  inside their own scope.
 
 Unit tests exercise the real plugin / quirk contracts, so the full test
 suite runs with both gates open. The ``YGGDRASIM_ALLOW_PLUGINS=1``
@@ -35,7 +27,7 @@ from pathlib import Path
 import pytest
 
 # The repo ``plugins/`` directory is a runtime-loaded namespace package
-# (no __init__.py by design -- see ``yggdrasim_common/plugin_runtime.py``),
+# (no __init__.py by design — see ``yggdrasim_common/plugin_runtime.py``),
 # so tests that import it directly require the repo root on sys.path.
 # editable installs don't cover ``plugins/`` because it's excluded from
 # ``[tool.setuptools.packages.find]``.
@@ -51,7 +43,6 @@ def _default_env(name: str, value: str) -> None:
 
 _default_env("YGGDRASIM_ALLOW_PLUGINS", "1")
 _default_env("YGGDRASIM_ALLOW_QUIRKS", "1")
-_default_env("YGGDRASIM_CARD_BACKEND", "sim")
 
 
 def pytest_addoption(parser):

@@ -18,20 +18,16 @@ Each of those is published in two flavors:
 
 ### Optional extras (orthogonal to the flavor split)
 
-These extras are independently selectable on a source install. The
-PyInstaller flavors do not bundle the GUI extras, so a frozen build cannot
-launch the Universal GUI Command Center.
+These extras are independently selectable on a source install.
 
 | Extra | Adds | Use when |
 | --- | --- | --- |
-| `[saip]` | upstream pySim | SAIP ASN.1 compile / transcode is required |
-| `[hil]` | `pyudev`, `pyserial`, etc. | enabling the HIL bridge on a source install |
-| `[gui]` | `pywebview` | desktop Universal GUI (`--gui`) |
-| `[gui-server]` | `fastapi`, `uvicorn` | web-served Universal GUI (`--web-server`) |
+| `[saip]` | (empty back-compat alias; pySim is already in base deps) | onboarding scripts that reference the old name |
+| `[hil]` | `pyudev` (Linux only) | enabling the HIL bridge supervisor on a source install |
 | `[build]` | `pyinstaller` | building flavored launcher artifacts |
-| `[test]` | `pytest`, helpers | running the test suite |
+| `[test]` | `pytest` | running the test suite |
 | `[docs]` | `mkdocs-material`, plugins | building / serving this site locally |
-| `[full]` | `[hil]` + `[saip]` | one-shot install of the HIL-capable source flavor (does **not** include `[gui]` / `[gui-server]`) |
+| `[full]` | `[hil]` + `[build]` + `[test]` | one-shot install of the HIL-capable source flavor |
 
 The active flavor is selected at build time through the
 `YGGDRASIM_FLAVOR` environment variable. The PyInstaller spec writes a

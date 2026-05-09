@@ -1,3 +1,5 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+"""Network Access Application logic: PIN verification, AUTHENTICATE routing, and NAA file-system scope management (ETSI TS 102 221)."""
 from __future__ import annotations
 
 import hmac
@@ -35,10 +37,11 @@ class NaaLogic:
           attempting a comparison.
         * A real comparison attempt (Lc=8) against a disabled PIN
           returns 69 84 ("referenced data invalidated") without
-          consuming a retry. The previous 6A 88 reply ("referenced
-          data not found") implied the PIN slot itself was missing,
-          which broke modems that probe disabled PINs before
-          consulting PS_DO.
+          consuming a retry. That matches sysmoUSIM-SJS1, sysmoEUICC,
+          and pySim's reference behaviour. The previous 6A 88 reply
+          ("referenced data not found") implied the PIN slot itself
+          was missing, which broke modems that probe disabled PINs
+          before consulting PS_DO.
         """
         reference_state = self._reference_state(p2)
         if reference_state is None:
@@ -55,7 +58,7 @@ class NaaLogic:
         # Constant-time compare: CHV value handling is security-sensitive
         # even on a simulator (tests run against it) and must not leak
         # byte-by-byte timing. The rest of the codebase standardised on
-        # ``hmac.compare_digest``; NAA matches that contract.
+        # ``hmac.compare_digest``; NAA now matches.
         if hmac.compare_digest(normalized_payload, self._pad_chv_value(reference_state.value)):
             reference_state.verified = True
             reference_state.retries_remaining = reference_state.retry_limit
@@ -69,6 +72,7 @@ class NaaLogic:
         return self._query_retry_counter(reference_state.retries_remaining)
 
     def unblock_chv(self, p2: int, payload: bytes) -> tuple[bytes, int, int]:
+        """Handle UNBLOCK CHV (ETSI TS 102 221 §11.1.12) using the supplied PUK and new PIN."""
         reference_state = self._reference_state(p2)
         if reference_state is None:
             return b"", 0x6A, 0x88
@@ -134,7 +138,7 @@ class NaaLogic:
         """ETSI TS 102 221 §11.1.11 DISABLE PIN.
 
         P1 bit 7 (0x80) selects "PIN reference data ignored / use
-        universal PIN" replacement, which is accepted but not yet modelled
+        universal PIN" replacement, which we accept but do not yet model
         (no Universal PIN slot in state). P1 bits 0..2 must be zero.
         """
         return self._toggle_enabled_chv(p2, payload, target_enabled=False, p1=p1)

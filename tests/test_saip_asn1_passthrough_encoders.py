@@ -1,4 +1,5 @@
-"""Pass-through round-trip guards for the SAIP decoded editor.
+"""
+Wave A — pass-through round-trip guards for the SAIP decoded editor.
 
 Each field below is a tagged-bytes OCTET STRING whose decoded view is a
 hex summary and whose encoder re-emits the original bytes verbatim
@@ -8,7 +9,7 @@ distinct surfaces:
 - GlobalPlatform Amendment A memory quotas / reserved memory (C7/C8).
 - GP / TS 102 226 system-specific install parameters.
 - UICC application-specific parameters (TS 102 226 §8.2.1.3.2).
-- GSMA SAIP Annex D -- PE-CDMAParameter authentication credentials.
+- GSMA SAIP Annex D — PE-CDMAParameter authentication credentials.
 - PE-NonStandard / PE-SecurityDomain.openPersoData opaque blobs.
 - ProfileHeader.eUICC-Mandatory-AIDs child fields (aid, version).
 - TS102226AdditionalContactlessParameters.protocolParameterData.

@@ -1,5 +1,5 @@
 """
-semantic decoder coverage for DF.5GS / DF.5G_ProSe /
+Wave C Pass A — semantic decoder coverage for DF.5GS / DF.5G_ProSe /
 DF.SNPN / ADF.USIM ePDG EFs.
 
 The decoders live in ``Tools.ProfilePackage.saip_asn1_decode`` and are
@@ -306,7 +306,7 @@ class TestEpdgSelection:
 
 @pytest.mark.parametrize("token", _WAVE_C_PASS_A_TOKENS)
 def test_every_wave_c_pass_a_ef_has_semantic_route(token: str) -> None:
-    """Each token must dispatch to a semantic decoder for a
+    """Each Wave C Pass A token must dispatch to a semantic decoder for a
     plausible payload (does not fall through to the generic opaque
     catalog fallback).
     """

@@ -26,7 +26,7 @@ Closes #NNN
 <!--
   Required for any change that touches cryptography, SCP03/11 state
   machines, APDU surfaces, eUICC profile formats or TLS/pinning.
-  Otherwise, write "N/A -- docs/packaging/UI only".
+  Otherwise, write "N/A — docs/packaging/UI only".
 -->
 
 - GSMA SGP.xx vX.Y, §...

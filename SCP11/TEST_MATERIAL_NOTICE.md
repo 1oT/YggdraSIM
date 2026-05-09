@@ -1,4 +1,4 @@
-# SCP11 -- Test Material Notice (GSMA SGP.26)
+# SCP11 — Test Material Notice (GSMA SGP.26)
 
 > **`*.pem`, `*.der`, `*.crt`, and `*.key` files in `SCP11/` and
 > `SCP11/SGP.26_test_Certs/` are the publicly-known GSMA SGP.26 test
@@ -13,17 +13,17 @@
 
 The following files are GSMA SGP.26 public test material:
 
-- `SCP11/SK.DPauth.ECDSA.pem` -- SM-DP+ authentication private key
+- `SCP11/SK.DPauth.ECDSA.pem` — SM-DP+ authentication private key
   (test variant; published as part of SGP.26 test material).
-- `SCP11/SK.DPpb.ECDSA.pem` -- SM-DP+ profile-binding private key
+- `SCP11/SK.DPpb.ECDSA.pem` — SM-DP+ profile-binding private key
   (test variant; published as part of SGP.26 test material).
-- `SCP11/CERT.DPauth.ECDSA.der` -- SM-DP+ authentication certificate
+- `SCP11/CERT.DPauth.ECDSA.der` — SM-DP+ authentication certificate
   signed by the SGP.26 test CI.
-- `SCP11/CERT.DPpb.ECDSA.der` -- SM-DP+ profile-binding certificate
+- `SCP11/CERT.DPpb.ECDSA.der` — SM-DP+ profile-binding certificate
   signed by the SGP.26 test CI.
-- `SCP11/ES9_TEST_CI_CA.pem` -- SGP.26 test CI root used for the
+- `SCP11/ES9_TEST_CI_CA.pem` — SGP.26 test CI root used for the
   ES9+/ES10 certificate chain inside the local test mode.
-- Everything below `SCP11/SGP.26_test_Certs/` -- the OpenSSL `*.cnf`
+- Everything below `SCP11/SGP.26_test_Certs/` — the OpenSSL `*.cnf`
   inputs (CSR / extension config) that build the corresponding
   `.pem` / `.der` material on demand. The generated key and
   certificate files themselves are gitignored and rebuilt locally
@@ -34,7 +34,7 @@ The `SCP11/local_access/certs/`, `SCP11/eim_local/certs/`, and
 `SCP11/test/certs/` subtrees follow the same posture: they hold either
 GSMA-published test material or material derived from it via the SGP.26
 config files. Their READMEs already mark the directories as test-only,
-but the same rule applies -- **do not deploy on production keys.**
+but the same rule applies — **do not deploy on production keys.**
 
 ## Why it ships in the repository
 
@@ -63,8 +63,8 @@ but the same rule applies -- **do not deploy on production keys.**
 
 - GSMA SGP.26 reference test material: <https://www.gsma.com/esim/sgp-26/>
 - SGP.22 RSP architecture: GSMA SGP.22.
-- ETSI TS 102 221 / 222 / 223 / 226 -- APDU and toolkit framing.
-- GlobalPlatform Card Specification v2.3 -- secure-channel framing.
+- ETSI TS 102 221 / 222 / 223 / 226 — APDU and toolkit framing.
+- GlobalPlatform Card Specification v2.3 — secure-channel framing.
 
 If a security-conscious reviewer files an issue about these files, link
 this notice in the response.

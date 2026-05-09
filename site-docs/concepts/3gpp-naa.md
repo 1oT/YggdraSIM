@@ -95,21 +95,17 @@ to the modem.
 The 5G stack adds a few authentication surfaces on top of the classic
 USIM `AUTHENTICATE`:
 
-- **5G AKA** (3GPP TS 33.501) -- `AUTHENTICATE` on the 5G UE-context
+- **5G AKA** (3GPP TS 33.501) — `AUTHENTICATE` on the 5G UE-context
   produces `RES*` (a Kausf-bound transformation of `RES`) instead of
   `RES` directly.
-- **EAP-AKA'** (3GPP TS 33.402) -- non-3GPP access authentication binding
+- **EAP-AKA'** (3GPP TS 33.402) — non-3GPP access authentication binding
   the same long-term key into an EAP exchange.
-- **AKMA** (3GPP TS 33.535) -- application-layer keys derived from
+- **AKMA** (3GPP TS 33.535) — application-layer keys derived from
   `Kausf`, surfaced as `K_AKMA` and the `A-KID` identifier.
 
-The simulated UICC implements all three on the SIMCARD side: 5G AKA
-(`SIMCARD/aka_5g.py`) derives `RES*`, `K_AUSF`, and `K_SEAF` per TS
-33.501 Annex A; AKMA (`SIMCARD/akma.py`) surfaces `K_AKMA` and the
-`A-KID` identifier per TS 33.535; SUCI (`SIMCARD/suci.py`) covers
-Profile A and Profile B per TS 33.501 §C.3; and `GET IDENTITY`
-(`SIMCARD/identity.py`) handles the TS 31.102 §7.1.2.4 surface that
-reports the requested 5G subscriber identity to the ME.
+The simulated UICC implements all three. The matching network-side
+AUSF / AAnF surfaces are the operator's responsibility — this release
+ships the SIM-side primitives only.
 
 ## Where to look in YggdraSIM
 

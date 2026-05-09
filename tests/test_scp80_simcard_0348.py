@@ -27,11 +27,11 @@ class Scp80348RoundTripTests(unittest.TestCase):
 
         os.environ["YGGDRASIM_ALLOW_DEMO_KEYS"] = "1"
         cfg = ConfigManager()
-        cfg.set("key_enc", "1122334455667788AABBCCDDEEFF0011")
-        cfg.set("key_mac", "1122334455667788AABBCCDDEEFF0011")
+        cfg.set("kic", "1122334455667788AABBCCDDEEFF0011")
+        cfg.set("kid", "1122334455667788AABBCCDDEEFF0011")
         cfg.set("spi", "1621")
-        cfg.set("kic", "22")
-        cfg.set("kid", "22")
+        cfg.set("kic_indicator", "22")
+        cfg.set("kid_indicator", "22")
         cfg.set("tar", "B00001")
         cfg.set("cntr", "0000000312")
         inner = bytes.fromhex("00A40004023F00")
@@ -65,11 +65,11 @@ class Scp80EnvelopeDispatchTests(unittest.TestCase):
 
         os.environ["YGGDRASIM_ALLOW_DEMO_KEYS"] = "1"
         cfg = ConfigManager()
-        cfg.set("key_enc", "1122334455667788AABBCCDDEEFF0011")
-        cfg.set("key_mac", "1122334455667788AABBCCDDEEFF0011")
+        cfg.set("kic", "1122334455667788AABBCCDDEEFF0011")
+        cfg.set("kid", "1122334455667788AABBCCDDEEFF0011")
         cfg.set("spi", "1621")
-        cfg.set("kic", "22")
-        cfg.set("kid", "22")
+        cfg.set("kic_indicator", "22")
+        cfg.set("kid_indicator", "22")
         cfg.set("tar", "B00001")
         cfg.set("cntr", "0000000315")
         inner = "00A40004023F00"

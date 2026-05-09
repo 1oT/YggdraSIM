@@ -1,5 +1,6 @@
+# Sensitive keys, certs, secrets, and mutable operator data
 SCP03/script.txt
-docs/
+docs
 site/
 site-oneot/
 YggdraSIM-data/
@@ -8,11 +9,15 @@ state/
 eim_last_response.bin
 eim_last_response_hex.txt
 tmp_*.bin
+tmp_*.pem
 tmp_*.txt
 
+# Ephemeral scratch dirs left by pytest tmp_path fixtures or ad-hoc probes.
+# Match both tmp_XXXX/ (underscore) and tmpXXXX/ (no separator) styles.
 tmp_*/
 tmp[a-z0-9]*/
 
+# SCP11 mutable runtime caches and reports
 SCP11/es9_ca_lookup.json
 SCP11/live/es9_ca_lookup.json
 SCP11/test/es9_ca_lookup.json
@@ -26,6 +31,7 @@ SCP11/eim_local/eim_response_log.jsonl
 SCP11/eim_local/eim_poll_audit.sqlite3
 SCP11/eim_local/eim_runtime_state.json
 
+# Sensitive material: do not ship or push
 *.pem
 *.der
 *.crt
@@ -44,56 +50,122 @@ SCP11/eim_local/eim_runtime_state.json
 *.secret
 *.secrets
 
-SCP11/SGP.26_test_Certs/
-**/SGP.26_test_Certs/
-
+# Python internals (Global)
 **/__pycache__/
 *.pyc
 *.pyo
+Documents.code-workspace
+YggdraSIM.code-workspace
 
+# Virtual environments
 .venv/
 venv/
 
+# Local tool caches
 .pytest_cache/
 .ruff_cache/
 .mypy_cache/
 .profilepackage-cache/
 
+# Generated single-file concatenation of the MkDocs site
 YggdraSIM.md
 
+# Automation logs
+git_agent.log
+
+# Local pytest, probe, and smoke log dotfiles left at repo root
+.pytest_agent_log*.txt
+.pytest_chunk_log*.txt
+.pytest_last_run*.log
+.pytest_pre_log*.txt
+.unittest_agent_log*.txt
+.unittest_last_run*.log
+.run_*.txt
+.smoke_*
+.tmuxshark*
+.tshark_*
+.user_pdml_probe*
+.sudo_pdml_probe*
+.direct_*_probe*
+.live_pdml_*
+.live_env_pdml_*
+.active_env_exact_pdml*
+.hil_tui_*
+.hil_decode_tui_probe*
+.strace_exec.txt
+.cursor-tmux.log
+.tuak_kat_sanity.py
+
+# Agent probe Python scratch scripts
+.smoke_*.py
+.cursorrules
+.cursorignore
+.cursor/
+
+# Build-flavor stamp written by yggdrasim_main.spec at PyInstaller time
 yggdrasim_common/_build_flavor.py
 
+# PyInstaller build / dist artefacts
 build/
 dist/
 
+# Optional working-directory clone of pySim (Osmocom). See
+# guides/INSTALL_FROM_SOURCE.md — operators clone it explicitly when
+# SAIP or SCP11-local flows are needed.
 pysim/
+
+# Legacy misplaced pyscard virtualenv location (cleaned out in pass-set 5).
+# Keep ignored so a rogue re-creation never ends up staged.
+pyscard/
 
 reference_test_profile.transcode.json
 reference_test_profile.transcode.der
 reference_test_profile.transcode.txt
 demo.der
+
 Tools/ProfilePackage/profile/transcoded/1oT_test_profile.transcode.der
 Tools/ProfilePackage/profile/transcoded/reference_test_profile.transcode.json
-Tools/ProfilePackage/transcode/*.transcode.der
-Tools/ProfilePackage/transcode/*.transcode.json
-Tools/ProfilePackage/transcode/*.transcode.txt
 Tools/ProfilePackage/profile/transcode/1oT_test_profile.transcode.der
 Tools/ProfilePackage/profile/transcode/1oT_test_profile.transcode.json
 Tools/ProfilePackage/profile/transcode/1oT_test_profile.transcode.txt
 Tools/ProfilePackage/profile/transcoded/reference_test_profile.transcode.txt
 *.transcode.txt
+# Per-operator scratch dump created by saip_json_codec.resolve_transcode_paths
+# when an externally-sourced SAIP profile is loaded. Filenames look operational
+# (real-looking ICCID prefixes), so the directory is excluded by default.
 Tools/ProfilePackage/transcode/_external/
 state/gpg_key.fingerprint
 SCP11/local_access/profile/Test_Profile_dummyvalues.txt
+# Polling plugin package (IPAE / BIP-WiFi bridge) — proprietary, do not ship
+plugins/polling/
+plugins/polling_plugin.py
+plugins/polling_plugin_support.py
+tests/plugins/polling/
 **/1oT_Test_Profile.txt
+**/Notice_of_Invention.md
+**/GSMA_ZD_vulnerability.md
+Legal/
 
+# Developer scratch and capture trees - do not ship
+Latjo/
 trace/
 
+# Live capture reports (SCP03 live runs, eIM dumps, ...). These can
+# contain derived session keys, chaining values, and IMSI/IMSI-mapped
+# traces. Keep them out of git so they cannot be pushed by accident.
+# `reports/.gitkeep` survives so the layout is documented.
 reports/*
 !reports/.gitkeep
 
+# Packaging metadata written by `pip install -e .`
 yggdrasim.egg-info/
 
+# --- V2 universal GUI (R2-004) -------------------------------------------
+# V2 work-in-progress: keep the entire GUI implementation surface off v1
+# pushes so main stays exactly the v1 footprint until the GUI feature
+# lands officially. Remove these rules when R2-004 graduates to `landed`
+# in V2_ROADMAP.md. Design docs (V2_UNIVERSAL_GUI_PLAN.md) are not
+# ignored — only the code tree.
 gui_frontend/
 yggdrasim_common/gui_server/
 tests/test_gui_*.py

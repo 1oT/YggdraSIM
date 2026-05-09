@@ -1,3 +1,5 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+"""HIL-Bridge live-decode view: scrollable Rich panel rendering the current decoded APDU tree."""
 from __future__ import annotations
 
 import csv
@@ -10,8 +12,6 @@ import time
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-
-from yggdrasim_common.process_debug import subprocess_env_without_bundle_libs
 
 DEFAULT_DECODE_RULE = "udp.port==4729,gsmtap"
 SUMMARY_REFRESH_SECONDS = 0.35
@@ -56,6 +56,7 @@ class _PaneSpec:
 
 
 def resolve_tshark_binary(preferred_path: str = "") -> str:
+    """Locate the tshark binary on PATH and return its absolute path."""
     preferred = str(preferred_path or "").strip()
     if len(preferred) > 0:
         if os.path.isfile(preferred):
@@ -75,6 +76,7 @@ def build_summary_command(
     tshark_binary: str = "tshark",
     decode_rule: str = DEFAULT_DECODE_RULE,
 ) -> list[str]:
+    """Build the tshark command-line args list for the packet-summary view."""
     return [
         str(tshark_binary or "tshark"),
         "-r",
@@ -117,6 +119,7 @@ def build_packet_detail_command(
     tshark_binary: str = "tshark",
     decode_rule: str = DEFAULT_DECODE_RULE,
 ) -> list[str]:
+    """Build the tshark command-line args list for the packet-detail view."""
     frame_number_int = int(frame_number)
     frame_filter = f"(frame.number >= {frame_number_int}) and (frame.number < {frame_number_int + 1})"
     return [
@@ -138,6 +141,7 @@ def build_packet_hex_command(
     tshark_binary: str = "tshark",
     decode_rule: str = DEFAULT_DECODE_RULE,
 ) -> list[str]:
+    """Build the tshark command-line args list for the packet hex-dump view."""
     frame_number_int = int(frame_number)
     frame_filter = f"(frame.number >= {frame_number_int}) and (frame.number < {frame_number_int + 1})"
     return [
@@ -153,6 +157,7 @@ def build_packet_hex_command(
 
 
 def parse_summary_output(output_text: str) -> list[PacketSummary]:
+    """Parse a list of raw summary output lines into structured packet-summary dicts."""
     rows: list[PacketSummary] = []
     reader = csv.reader(
         io.StringIO(str(output_text or "")),
@@ -253,9 +258,7 @@ def _run_tshark_text_command(
 ) -> tuple[str, str]:
     normalized_capture_path = str(capture_path or "").strip()
     prepared_command = list(command)
-    # ``tshark`` is a host binary; the PyInstaller-injected
-    # LD_LIBRARY_PATH would otherwise poison libpcap / libssl loads.
-    environment = subprocess_env_without_bundle_libs()
+    environment = dict(os.environ)
     stdin_handle = None
     stdin_stream = subprocess.DEVNULL
     if len(normalized_capture_path) > 0:
@@ -304,6 +307,7 @@ def read_packet_summaries(
     tshark_binary: str = "tshark",
     decode_rule: str = DEFAULT_DECODE_RULE,
 ) -> tuple[list[PacketSummary], str]:
+    """Read packet summaries from the active capture source and return a list of dicts."""
     normalized_path = str(capture_path or "").strip()
     if len(normalized_path) == 0:
         return ([], "Missing capture path.")
@@ -330,6 +334,7 @@ def read_packet_detail(
     tshark_binary: str = "tshark",
     decode_rule: str = DEFAULT_DECODE_RULE,
 ) -> tuple[str, str]:
+    """Read the full decoded detail for the packet at *index* and return a dict."""
     return _run_tshark_text_command(
         build_packet_detail_command(
             capture_path,
@@ -348,6 +353,7 @@ def read_packet_hex(
     tshark_binary: str = "tshark",
     decode_rule: str = DEFAULT_DECODE_RULE,
 ) -> tuple[str, str]:
+    """Read the raw hex dump for the packet at *index* and return a string."""
     return _run_tshark_text_command(
         build_packet_hex_command(
             capture_path,
@@ -809,6 +815,7 @@ def run_live_decode_view(
     tshark_binary: str = "",
     decode_rule: str = DEFAULT_DECODE_RULE,
 ) -> None:
+    """Start the live-decode view, connecting to the bridge and entering the display loop."""
     resolved_tshark = resolve_tshark_binary(tshark_binary)
     if len(resolved_tshark) == 0:
         raise RuntimeError("tshark is not available for the terminal decode viewer.")

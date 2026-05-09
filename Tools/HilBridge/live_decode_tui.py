@@ -1,3 +1,5 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+"""HIL-Bridge live-decode TUI: Textual app displaying a real-time decoded APDU transcript with protocol annotations."""
 from __future__ import annotations
 
 from contextlib import contextmanager, nullcontext
@@ -13,7 +15,6 @@ import time
 from dataclasses import dataclass, replace
 from pathlib import Path
 
-from yggdrasim_common.process_debug import subprocess_env_without_bundle_libs
 from Tools.HilBridge.live_decode_state import (
     ActiveTimerSnapshot,
     StatefulFrameAnnotation,
@@ -58,7 +59,7 @@ _POLL_CYCLE_IDLE_GAP_SECONDS = 5.0
 _POLL_CYCLE_MAX_HIGHLIGHT_TOKENS = 4
 # Bounded queue for rows buffered while ingest is paused. 5k at typical
 # APDU sizes is ~2 MB, which is well within reason for a stuck-pause
-# scenario. Once the cap is hit the oldest row is dropped and the
+# scenario. Once the cap is hit we drop the oldest row and bump the
 # dropped counter so the operator can see that the paused window is
 # outrunning what the UI can absorb.
 _PAUSED_QUEUE_HARD_CAP_DEFAULT = 5000
@@ -120,6 +121,7 @@ def count_visible_panes(visibility: PaneVisibility) -> int:
 
 
 def toggled_pane_visibility(visibility: PaneVisibility, pane_name: str) -> PaneVisibility:
+    """Return a new visibility dict with the named pane toggled."""
     normalized_name = str(pane_name or "").strip().lower()
     if normalized_name not in _PANE_NAMES:
         raise ValueError(f"unknown pane: {normalized_name}")
@@ -140,6 +142,7 @@ def visible_pane_order(visibility: PaneVisibility) -> tuple[str, ...]:
 
 
 def default_tui_layout_preferences() -> TuiLayoutPreferences:
+    """Return the default TUI layout preference dict."""
     return TuiLayoutPreferences(
         visibility=PaneVisibility(summary=True, detail=False, bytes=True),
         summary_height=_DEFAULT_SUMMARY_HEIGHT,
@@ -2157,6 +2160,7 @@ def _normalize_directory_preference(directory_path: str | Path) -> str:
 
 
 def load_tui_layout_preferences(capture_path: str) -> TuiLayoutPreferences:
+    """Load TUI layout preferences from the user config file, falling back to defaults."""
     defaults = default_tui_layout_preferences()
     target_path = _tui_layout_preferences_path(capture_path)
     if target_path.is_file() is False:
@@ -2217,6 +2221,7 @@ def load_tui_layout_preferences(capture_path: str) -> TuiLayoutPreferences:
 
 
 def save_tui_layout_preferences(capture_path: str, preferences: TuiLayoutPreferences) -> None:
+    """Write the current TUI layout preferences to the user config file."""
     target_path = _tui_layout_preferences_path(capture_path)
     target_path.parent.mkdir(parents=True, exist_ok=True)
     visibility = preferences.visibility
@@ -2390,18 +2395,6 @@ def _normalize_selected_capture_path(path_text: str) -> Path | None:
 
 
 def _run_capture_picker_command(command: list[str]) -> str | None:
-    # Desktop pickers (zenity/qarma/yad/kdialog) are system binaries
-    # linked against host GTK/Qt. Strip the PyInstaller-injected
-    # LD_LIBRARY_PATH so the child does not load bundle-shipped
-    # libraries against a host theme engine. The tkinter fallback
-    # re-launches ``sys.executable`` and is NOT sanitised here -- it
-    # relies on the bundle's libs being on the loader path.
-    command_head = str(command[0] or "").strip() if len(command) > 0 else ""
-    sys_executable = str(sys.executable or "").strip()
-    if len(sys_executable) > 0 and command_head == sys_executable:
-        child_env: dict[str, str] | None = None
-    else:
-        child_env = subprocess_env_without_bundle_libs()
     try:
         completed = subprocess.run(
             command,
@@ -2409,26 +2402,22 @@ def _run_capture_picker_command(command: list[str]) -> str | None:
             capture_output=True,
             text=True,
             timeout=600,
-            env=child_env,
         )
     except Exception as exc:
         raise RuntimeError(f"Failed to launch desktop file picker: {exc}") from exc
-    selected_path = str(completed.stdout or "").strip()
     if completed.returncode != 0:
-        # Zenity / qarma / yad / kdialog all exit non-zero on cancel
-        # (typically 1). GTK theme validation noise is written to
-        # stderr even on a nominal launch, so non-zero + empty stdout
-        # is treated as "no selection" rather than an error. Only
-        # surface a RuntimeError when stdout is also empty AND stderr
-        # looks like a real launch failure (not a Gtk-WARNING spam).
-        if len(selected_path) == 0:
+        stderr_text = str(completed.stderr or "").strip()
+        if len(stderr_text) == 0:
             return None
+        raise RuntimeError(stderr_text)
+    selected_path = str(completed.stdout or "").strip()
     if len(selected_path) == 0:
         return None
     return selected_path
 
 
 def pick_capture_file_path(capture_path: str = "", last_open_directory: str = "") -> Path | None:
+    """Show a file picker modal to select an existing capture file path."""
     if _capture_file_picker_supported() is False:
         raise RuntimeError("No desktop display is available for the native file picker.")
     initial_directory = _capture_picker_initial_directory(
@@ -2738,6 +2727,7 @@ def save_live_capture_trace(
     # affects the auto-generated name. Passing None falls back to
     # _PAUSED_TRACE_FILENAME_MARKER whenever packet_count > 0 so paused
     # snapshots get a discoverable filename without extra plumbing.
+    """Save the current in-memory capture trace to a pcap file on disk."""
     normalized_capture_path = str(capture_path or "").strip()
     if len(normalized_capture_path) == 0:
         raise ValueError("Live capture path is not configured.")
@@ -3218,7 +3208,7 @@ def _populate_summary_tree(
     # with reset qualifier, long idle gap) lifts every pre-reboot
     # Poll / STK / FS group into its own top-level "Card Session N"
     # wrapper and keeps the post-reboot traffic under a sibling
-    # wrapper. When only one session is present the wrapper is skipped
+    # wrapper. When only one session is present we skip the wrapper
     # so the tree stays identical to the pre-reset layout.
     (
         card_session_rows,
@@ -3278,6 +3268,7 @@ def run_live_decode_tui(
     # `keybag_path` optionally points at a sibling JSON file carrying
     # SCP03/SCP11c session-key material used by the annotator to render
     # plaintext alongside ciphered APDUs (see scp_replay module).
+    """Entry point for the HIL-Bridge live-decode TUI; constructs the Textual app and runs the event loop."""
     previous_term = os.environ.get("TERM")
     previous_colorterm = os.environ.get("COLORTERM")
     os.environ["TERM"] = _preferred_textual_term_value()
@@ -3520,6 +3511,7 @@ def run_live_decode_tui(
             self._visibility = visibility
 
         def compose(self) -> ComposeResult:
+            """Compose the channel-selection modal layout."""
             options = []
             for pane_name in _PANE_NAMES:
                 label = _pane_display_name(pane_name)
@@ -3570,6 +3562,7 @@ def run_live_decode_tui(
             )
 
         def compose(self) -> ComposeResult:
+            """Compose the capture-file path prompt modal layout."""
             source_text = _display_path_text(Path(self._capture_path)) if len(self._capture_path.strip()) > 0 else "(unknown)"
             with Vertical(id="trace_save_shell"):
                 yield Static("Save trace snapshot")
@@ -3608,6 +3601,7 @@ def run_live_decode_tui(
             self.dismiss(result)
 
         def on_button_pressed(self, event: Button.Pressed) -> None:
+            """Handle button presses in the capture-file path modal."""
             button_id = str(event.button.id or "").strip()
             if button_id == "trace_save_cancel":
                 self.dismiss(None)
@@ -3636,6 +3630,7 @@ def run_live_decode_tui(
             self._capture_path = str(capture_path or "")
 
         def compose(self) -> ComposeResult:
+            """Compose the bank-slot configuration modal layout."""
             current_capture_text = "(unknown)"
             if len(self._capture_path.strip()) > 0:
                 current_capture_text = _display_path_text(Path(self._capture_path))
@@ -3676,6 +3671,7 @@ def run_live_decode_tui(
             self.dismiss(result)
 
         def on_button_pressed(self, event: Button.Pressed) -> None:
+            """Handle button presses in the bank-slot configuration modal."""
             button_id = str(event.button.id or "").strip()
             if button_id == "capture_open_cancel":
                 self.dismiss(None)
@@ -3700,6 +3696,7 @@ def run_live_decode_tui(
         ]
 
         def compose(self) -> ComposeResult:
+            """Compose the context-menu overlay layout."""
             with Vertical(id="keybind_help_shell"):
                 yield Static("HIL Decode TUI Keybinds")
                 yield Static(
@@ -3715,6 +3712,7 @@ def run_live_decode_tui(
 
     class DragHandle(Static):
         def on_mouse_down(self, event: events.MouseDown) -> None:
+            """Handle right-click on the decode tree to open the context menu."""
             handle_id = self.id or ""
             app = self.app
             if hasattr(app, "_begin_split_drag") is False:
@@ -3728,6 +3726,7 @@ def run_live_decode_tui(
             event.stop()
 
         def on_mouse_move(self, event: events.MouseMove) -> None:
+            """Track mouse movement for tooltip positioning."""
             app = self.app
             if hasattr(app, "_continue_split_drag") is False:
                 return
@@ -4173,6 +4172,7 @@ def run_live_decode_tui(
             self._force_clip_next_save: bool = False
 
         def compose(self) -> ComposeResult:
+            """Compose the main live-decode TUI chrome with capture pane and detail tree."""
             yield Static(
                 (
                     "HIL Decode TUI · Browse frames in the summary pane · F1 keybinds · "
@@ -4217,6 +4217,7 @@ def run_live_decode_tui(
                 yield Static("", id="status_line")
 
         def on_mount(self) -> None:
+            """Initialise TUI state, connect to the HIL-Bridge, and start the packet ingestion worker."""
             self._apply_theme_preference()
             summary_tree = self.query_one("#summary_tree", Tree)
             summary_tree.show_root = False
@@ -4249,6 +4250,7 @@ def run_live_decode_tui(
             self.push_screen(KeybindHelpScreen())
 
         def action_toggle_detail_subtree(self) -> None:
+            """Toggle expansion of the highlighted decode-tree subtree."""
             focused_widget = self.focused
             focused_widget_id = str(getattr(focused_widget, "id", "") or "").strip()
             if focused_widget_id != "detail_view":
@@ -4259,6 +4261,7 @@ def run_live_decode_tui(
             _toggle_tree_subtree(current_node)
 
         def action_cycle_focus(self) -> None:
+            """Cycle keyboard focus between the capture list and the detail tree."""
             ordered_panes = visible_pane_order(self._visibility)
             if len(ordered_panes) == 0:
                 return
@@ -4281,6 +4284,7 @@ def run_live_decode_tui(
             widget_by_pane[next_pane].focus()
 
         def on_key(self, event: events.Key) -> None:
+            """Handle TUI key events not bound to named actions."""
             normalized_key = str(getattr(event, "key", "") or "").strip().lower()
             if normalized_key not in {"left", "right"}:
                 return
@@ -4304,6 +4308,7 @@ def run_live_decode_tui(
                     pass
 
         def action_cycle_theme(self) -> None:
+            """Rotate the TUI colour theme to the next entry in the theme cycle."""
             self._theme_name = _next_theme_name(self._theme_name)
             applied_theme = self._apply_theme_preference()
             self._refresh_summary_tree_visual(scroll=False)
@@ -4314,6 +4319,7 @@ def run_live_decode_tui(
             self._refresh_status_line(message=f"Theme switched to {applied_theme}.", error=False)
 
         def action_cycle_summary_view(self) -> None:
+            """Cycle the capture-pane summary view between available display modes."""
             normalized_current_mode = _normalize_summary_view_mode(self._summary_view_mode)
             if normalized_current_mode in _SUMMARY_VIEW_CYCLE:
                 current_index = _SUMMARY_VIEW_CYCLE.index(normalized_current_mode)
@@ -4355,6 +4361,7 @@ def run_live_decode_tui(
             # On resume the queued rows are applied in a single batch
             # and a fresh pcap refresh is triggered to reconcile any
             # frames that slipped in before the live stream primed.
+            """Toggle pause on the live packet-ingestion stream."""
             self._set_ingest_paused(not self._ingest_paused, discard_on_resume=False)
 
         def action_toggle_ingest_pause_discard(self) -> None:
@@ -4363,6 +4370,7 @@ def run_live_decode_tui(
             # workflow where the operator paused specifically to freeze
             # context and is fine letting the stream catch up on its
             # own.
+            """Pause and discard the buffered packets in the ingestion stream."""
             self._set_ingest_paused(not self._ingest_paused, discard_on_resume=True)
 
         def _set_ingest_paused(
@@ -4425,6 +4433,7 @@ def run_live_decode_tui(
             self._refresh_chrome_title()
 
         def action_jump_tail(self) -> None:
+            """Jump the capture-pane selection to the most recent (tail) packet."""
             if len(self._rows) == 0:
                 self._follow_tail = True
                 self._refresh_status_line()
@@ -4510,6 +4519,7 @@ def run_live_decode_tui(
             # to the currently displayed row count even while ingest is
             # still active (useful when demo recording or bug-bundling
             # a specific window of a noisy live capture).
+            """Save a clipped snapshot of the current capture view to disk."""
             if len(self._base_rows) == 0:
                 self._refresh_status_line(
                     message="No packets in context to clip. Load a capture before exporting.",
@@ -4535,6 +4545,7 @@ def run_live_decode_tui(
             )
 
         def action_clear_capture_view(self) -> None:
+            """Clear all packets from the capture view and reset the display state."""
             if len(str(self._capture_path or "").strip()) == 0 and len(self._rows) == 0:
                 self._refresh_status_line(
                     message="Capture view is already cleared.",
@@ -4576,6 +4587,7 @@ def run_live_decode_tui(
             )
 
         def action_open_capture_file(self) -> None:
+            """Open a saved capture file and load its packets into the capture view."""
             try:
                 selected_path = pick_capture_file_path(
                     self._capture_path,
@@ -4603,6 +4615,7 @@ def run_live_decode_tui(
             )
 
         def action_restore_live_capture(self) -> None:
+            """Restore the last saved live-capture snapshot from disk."""
             if self._live_capture_mode is False:
                 self._refresh_status_line(
                     message=(
@@ -5367,12 +5380,13 @@ def run_live_decode_tui(
             if len(breakdown_parts) == 0:
                 return ""
             if len(ranked) > max_buckets:
-                breakdown_parts.append("...")
+                breakdown_parts.append("…")
             return " ".join(breakdown_parts)
 
         def pause_telemetry_snapshot(self) -> dict[str, int | float]:
             # Exposed as a plain dict so tests and higher-level tooling
             # can sample counters without reaching into private state.
+            """Take a frozen telemetry snapshot of the current ingestion state for diagnostics."""
             return {
                 "pause_event_count": int(self._pause_event_count),
                 "pause_total_duration_seconds": float(self._pause_total_duration_seconds),
@@ -5896,7 +5910,7 @@ def run_live_decode_tui(
                 # _live_stream_delivered_count is intentionally left
                 # alone so the status line separates "queued while
                 # paused" from "delivered to view". The caption badge
-                # is updated by the periodic status tick so it does not
+                # is updated by the periodic status tick so we do not
                 # thrash the DOM for every FIFO batch while paused.
                 for row in newly_added:
                     self._enqueue_paused_row(row)
@@ -6171,6 +6185,7 @@ def run_live_decode_tui(
             self.call_after_refresh(_reapply_cursor_sync_after_refresh)
 
         def on_tree_node_highlighted(self, event: Tree.NodeHighlighted) -> None:
+            """Update the detail tree and decoded-field panel when a capture-pane node is highlighted."""
             if event.control.id != "summary_tree":
                 return
             if self._summary_tree_sync_inflight:
@@ -6201,6 +6216,7 @@ def run_live_decode_tui(
             self._refresh_status_line()
 
         def on_tree_node_expanded(self, event: Tree.NodeExpanded) -> None:
+            """Record tree node expansion in the persistent UI state."""
             if event.control.id != "summary_tree":
                 return
             _apply_summary_tree_expand_state_change(
@@ -6211,6 +6227,7 @@ def run_live_decode_tui(
             )
 
         def on_tree_node_collapsed(self, event: Tree.NodeCollapsed) -> None:
+            """Record tree node collapse in the persistent UI state."""
             if event.control.id != "summary_tree":
                 return
             _apply_summary_tree_expand_state_change(

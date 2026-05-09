@@ -9,10 +9,10 @@ The template surface lives inside the `Tools/ProfilePackage/` subsystem.
 This document is the authoritative entry point for operators. The
 related reference pages are:
 
-- `HELP TOKENS` -- shell command reference for token management
-- `HELP TEMPLATE` -- shell command reference for template creation /
+- `HELP TOKENS` — shell command reference for token management
+- `HELP TEMPLATE` — shell command reference for template creation /
   application
-- `HELP EDIT` -- decoded-editing and roundtrip encoding
+- `HELP EDIT` — decoded-editing and roundtrip encoding
 
 ## Mental model
 
@@ -35,7 +35,7 @@ Token definitions live in a sibling metadata key:
 
 ```json
 "__ygg_token_defs__": {
-  "ICCID": "89882000000000000012",
+  "ICCID": "8988201234567890123",
   "IMSI": { "pattern_hex": "FF", "byte_len": 8 }
 }
 ```
@@ -78,7 +78,7 @@ Either start from a preset via `NEW-TEMPLATE` / `NEW-PROFILE-WIZARD`,
 or open an existing profile and manually annotate the fields you want
 to parameterise.
 
-The wizard includes a dedicated token-declaration step when the
+The wizard now includes a dedicated token-declaration step when the
 output format is JSON. You can declare any number of tokens, choose
 brace or bracket style, and commit the declarations alongside the
 generated template.
@@ -206,6 +206,53 @@ Either use the canonical companion form (`{#NAME}{NAME}`) so the
 length is recomputed automatically, or run `RETOKENISE-LENGTHS` /
 `TOKENS RETOKENISE-LENGTHS` to migrate existing literal-length sites
 to the companion form.
+
+## Inline typed hex placeholders (vendor templates)
+
+Some vendor templates ship a profile as ASCII hex with typed
+placeholders baked directly into the hex body:
+
+```
+62128202412183026F078B036F06068001098800810908{imsi:IMSI:8:encode_imsi}80027F20
+```
+
+The grammar is `{<var>:<TYPE>:<byte_length>[:<modifier>]}`. The byte
+length is the only field YggdraSIM interprets; `TYPE` and `modifier`
+are carried along as opaque strings. When `OPEN` / `USE` selects a
+`.txt` / `.hex` file carrying this shape:
+
+1. Each placeholder is replaced with a deterministic, per-index
+   sentinel of the declared byte length so the hex stream decodes as
+   valid DER.
+2. A sidecar JSON (`<cache>.placeholders.json`) is written next to
+   the cached DER, capturing every placeholder's literal, variable
+   name, type, byte length, modifier, and the sentinel that stands
+   in for it inside the materialised DER.
+3. After pySim decodes the sequence, the sidecar is consulted and
+   every sentinel run found inside a tagged hex leaf is rewritten
+   back to the original placeholder literal. The operator sees the
+   placeholder text exactly where it sat in the source file.
+
+Nothing in this path *resolves* the placeholder to real bytes — that
+surface stays with the JSON template / `__ygg_token_defs__`
+machinery. Saving the template round-trips the literals:
+
+1. The editor JSON buffer carries the vendor literal text inside every
+   `"hex"` leaf (e.g. `"hex": "0908{imsi:IMSI:8:encode_imsi}"`).
+2. On save, the literal is substituted back to its sentinel bytes,
+   the buffer is DER-encoded, re-decoded, and re-jsonified, then the
+   literal is re-inserted into the tagged hex leaves of the fresh
+   tree.
+3. The `*.transcode.json` sidecar ships with the literals intact; the
+   `*.transcode.der` carries the sentinel bytes; a placeholder
+   sidecar (`<transcode-der>.placeholders.json`) is written beside
+   the DER so re-opening the transcode output picks the literals back
+   up.
+
+To produce a provisioning-ready DER (one with real ICCID / IMSI /
+keys rather than sentinel fillers), lift the template into the
+native JSON form (`GENERATE-TEMPLATE` or the TUI's export-to-JSON
+action) and drive `APPLY-TEMPLATE` / `GENERATE-BATCH` against it.
 
 ## Standards and references
 

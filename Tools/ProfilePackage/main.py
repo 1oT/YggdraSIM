@@ -1,3 +1,5 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+"""ProfilePackage tool entry point."""
 import argparse
 import sys
 from pathlib import Path
@@ -17,6 +19,7 @@ def _shell_roots() -> tuple[Path, Path]:
 
 
 def entry() -> None:
+    """Package entry point: parse argv and dispatch to the appropriate SAIP tool sub-command."""
     workspace_root, bundle_root_path = _shell_roots()
     shell = ProfilePackageShell(
         workspace_root=workspace_root,
@@ -26,6 +29,7 @@ def entry() -> None:
 
 
 def entry_cmd(cmd_line: str) -> None:
+    """Entry point for direct CLI invocation of a specific SAIP tool command."""
     workspace_root, bundle_root_path = _shell_roots()
     shell = ProfilePackageShell(
         workspace_root=workspace_root,
@@ -35,6 +39,7 @@ def entry_cmd(cmd_line: str) -> None:
 
 
 def entry_stdin() -> None:
+    """Entry point that reads a SAIP profile from stdin and runs the tool non-interactively."""
     command_lines: list[str] = []
     for raw_line in sys.stdin.read().splitlines():
         command_text = str(raw_line or "").strip()
@@ -47,6 +52,7 @@ def entry_stdin() -> None:
 
 
 def run_standalone() -> None:
+    """Standalone entry point: init paths and run the selected SAIP tool."""
     parser = argparse.ArgumentParser(description="YggdraSIM SAIP Tool")
     add_debug_argument(
         parser,

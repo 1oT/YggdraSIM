@@ -1,3 +1,4 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """Token sidecar I/O.
 
 A *token sidecar* is a small JSON file that carries the
@@ -92,6 +93,7 @@ def candidate_sidecar_paths(profile_path: Path) -> list[Path]:
 
 
 def normalize_style(value: Any) -> str:
+    """Normalise a token-style specifier string to the canonical form expected by the sidecar."""
     raw = str(value or "brace").strip().lower()
     if raw == "curly":
         raw = "brace"
@@ -135,6 +137,7 @@ def _validate_token_def_entry(name: str, entry: Any) -> None:
 
 
 def validate_sidecar_document(sidecar: Any) -> dict[str, Any]:
+    """Validate a token sidecar document dict against the sidecar schema and return error strings."""
     if isinstance(sidecar, dict) is False:
         raise TokenSidecarError("Sidecar root must be a JSON object.")
     style_raw = sidecar.get(_META_PLACEHOLDER_STYLE, "brace")
@@ -204,6 +207,7 @@ def build_sidecar_from_template(
 
 
 def load_sidecar(path: Path) -> dict[str, Any]:
+    """Load and return a token sidecar document from *path*, applying schema validation."""
     if path.is_file() is False:
         raise TokenSidecarError(f"Sidecar not found: {path}")
     try:
@@ -224,6 +228,7 @@ def write_sidecar(
     token_defs: dict[str, Any],
     source_label: str | None = None,
 ) -> None:
+    """Write the token sidecar file alongside the profile binary."""
     normalized_style = normalize_style(style)
     for name, entry in token_defs.items():
         _validate_token_def_entry(str(name), entry)
@@ -385,8 +390,8 @@ def read_token_defs_from_file(
     ``None`` if the file is missing, not JSON, or does not contain the
     ``__ygg_token_defs__`` key. Sidecar files and full template files
     are both acceptable inputs; only the two metadata keys are read.
-    Never raises on malformed input -- missing/invalid data yields
-    ``None`` so callers can treat "no usable defs found" as an explicit
+    Never raises on malformed input — missing/invalid data yields
+    ``None`` so callers can treat "no usable defs found" as a first-class
     case.
     """
 
@@ -426,7 +431,7 @@ def parse_token_value_argument(raw: str) -> Any:
 
     - A JSON object starting with ``{`` (e.g. ``{"zero_len": 10}``).
     - A hex string (whitespace tolerated) for the convenience of CLI users.
-      Example: ``89882000000000000012``.
+      Example: ``89461111111111111112``.
 
     Empty / pure whitespace input is rejected to avoid silent misconfiguration.
     """
@@ -518,6 +523,7 @@ def _tagged_bytes_hex_fields(root: Any) -> list[tuple[list[Any], dict[str, Any],
     out: list[tuple[list[Any], dict[str, Any], str]] = []
 
     def visit(node: Any, path: list[Any]) -> None:
+        """Visit a decoded JSON node and collect token placeholder locations."""
         if isinstance(node, dict):
             hex_value = node.get("hex")
             if (
@@ -712,7 +718,7 @@ def retokenise_template_lengths(
     ``__ygg_token_defs__`` entry for ``NAME``. Short-form (``LL``) and
     long-form (``81 LL``, ``82 LL LL`` ...) prefixes are both recognised.
 
-    Passing ``only_tokens`` restricts the rewrite to the named tokens --
+    Passing ``only_tokens`` restricts the rewrite to the named tokens —
     useful for the TUI's "auto-migrate length companion for the token I
     just edited" prompt. ``None`` (default) means every defined token.
 
@@ -811,7 +817,7 @@ def find_unmigrated_length_candidates(
     represents a spot where the hex nibbles immediately before ``{token_name}``
     already encode the BER-TLV length of ``token_name``. Candidates are
     exactly the sites that :func:`retokenise_template_lengths(only_tokens=
-    {token_name})` would rewrite -- the function does not mutate ``document``.
+    {token_name})` would rewrite — the function does not mutate ``document``.
     """
 
     defs, style = _resolve_token_defs_container(document)

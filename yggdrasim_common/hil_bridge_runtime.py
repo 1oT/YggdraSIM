@@ -1,3 +1,5 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+"""HIL-Bridge runtime helpers: process lifecycle, signal handling, and supervisor IPC for the hardware-in-loop bridge."""
 from __future__ import annotations
 
 import json
@@ -11,7 +13,6 @@ from pathlib import Path
 from typing import Any
 from urllib import error, request
 
-from .process_debug import subprocess_env_without_bundle_libs
 from .progress import progress_session
 from .runtime_paths import runtime_path
 
@@ -52,6 +53,7 @@ def card_relay_state_path() -> str:
 
 
 def load_json_file(path: str) -> dict[str, Any]:
+    """Load and return a parsed JSON object from *path*, raising an informative error on failure."""
     target_path = str(path or "").strip()
     if len(target_path) == 0:
         return {}
@@ -80,6 +82,7 @@ def guess_bridge_python_executable(
     *,
     fallback: str = "",
 ) -> str:
+    """Detect the Python executable the HIL-Bridge supervisor should use."""
     payload = dict(supervisor_state or {})
     bridge_command = payload.get("bridgeCommand", [])
     if isinstance(bridge_command, list):
@@ -97,6 +100,7 @@ def guess_bridge_python_executable(
 def extract_remsim_extra_args_from_supervisor_state(
     supervisor_state: dict[str, Any] | None,
 ) -> tuple[str, ...]:
+    """Extract remsim-specific extra arguments from the supervisor state config."""
     payload = dict(supervisor_state or {})
     remsim_command = payload.get("remsimClientCommand", [])
     if isinstance(remsim_command, list) is False:
@@ -142,6 +146,7 @@ def _systemd_quote(value: str) -> str:
 
 
 def render_user_service_unit(options: HilBridgeUserServiceOptions) -> str:
+    """Render a systemd user-service unit file template for the HIL-Bridge supervisor."""
     documentation_path = str(options.documentation_path or "").strip()
     documentation_line = ""
     if len(documentation_path) > 0:
@@ -222,6 +227,7 @@ def install_user_service(
     *,
     home_dir: str = "",
 ) -> str:
+    """Install or update the HIL-Bridge systemd user service unit."""
     written_path, _ = write_user_service_if_changed(
         unit_text,
         service_name=service_name,
@@ -242,7 +248,7 @@ def write_user_service_if_changed(
     When they already match, the file is left untouched (preserving
     mtime so ``systemctl --user daemon-reload`` keeps the existing
     fragment) and the second tuple element is ``False``. When they
-    differ -- or when the file does not yet exist -- the new content is
+    differ — or when the file does not yet exist — the new content is
     written and the second tuple element is ``True``. The flag lets
     the wizard decide between "no-op" and "restart so the new
     Environment= block takes effect".
@@ -288,7 +294,7 @@ def clear_supervisor_state() -> None:
     fields here as the reconcile loop progresses. When a previous
     invocation crashed mid-warm-up the file is left on disk with a
     transient ``restart-pending`` reason like
-    ``Waiting 1.0s before bridge restart...``. Without this clear, the
+    ``Waiting 1.0s before bridge restart…``. Without this clear, the
     next start of the wizard would surface that stale reason as if it
     were a fresh failure. Missing files are tolerated quietly.
     """
@@ -316,12 +322,8 @@ def run_systemctl_user(
     *,
     timeout_seconds: float = DEFAULT_SYSTEMCTL_TIMEOUT_SECONDS,
 ) -> subprocess.CompletedProcess[str]:
+    """Run a `systemctl --user` sub-command and return the output string."""
     command = ["systemctl", "--user", *[str(arg or "").strip() for arg in args]]
-    # ``systemctl`` is a system binary linked against the host
-    # ``libsystemd-shared-*.so``; passing the PyInstaller-injected
-    # ``LD_LIBRARY_PATH`` makes ``ld.so`` load the bundle's older
-    # ``libcrypto.so.3`` and fail the ``OPENSSL_3.4.0`` symbol lookup
-    # that host ``systemd`` 257 requires.
     try:
         return subprocess.run(
             command,
@@ -329,7 +331,6 @@ def run_systemctl_user(
             text=True,
             timeout=max(1.0, float(timeout_seconds or DEFAULT_SYSTEMCTL_TIMEOUT_SECONDS)),
             check=False,
-            env=subprocess_env_without_bundle_libs(),
         )
     except FileNotFoundError as exc:
         raise RuntimeError(f"systemctl is not available: {exc}") from exc
@@ -342,6 +343,7 @@ def run_systemctl_user_checked(
     *,
     timeout_seconds: float = DEFAULT_SYSTEMCTL_TIMEOUT_SECONDS,
 ) -> subprocess.CompletedProcess[str]:
+    """Run a `systemctl --user` sub-command and raise on non-zero exit."""
     completed = run_systemctl_user(args, timeout_seconds=timeout_seconds)
     if completed.returncode != 0:
         joined_args = " ".join(str(arg or "").strip() for arg in args)
@@ -350,6 +352,7 @@ def run_systemctl_user_checked(
 
 
 def query_user_service_state(service_name: str = DEFAULT_SERVICE_NAME) -> dict[str, Any]:
+    """Query and return the current state of the HIL-Bridge user service."""
     payload: dict[str, Any] = {
         "serviceName": str(service_name or DEFAULT_SERVICE_NAME).strip(),
         "systemctlAvailable": True,
@@ -475,6 +478,7 @@ def is_hil_bridge_running() -> bool:
 
 
 def hil_bridge_warning_text() -> str:
+    """Return a formatted multi-line warning string for an unhealthy bridge state."""
     if is_hil_bridge_running() is False:
         return ""
     return (
@@ -488,13 +492,14 @@ def wait_for_bridge_ready(
     timeout_seconds: float = DEFAULT_BRIDGE_READY_TIMEOUT_SECONDS,
     poll_interval_seconds: float = DEFAULT_BRIDGE_READY_POLL_SECONDS,
 ) -> dict[str, Any]:
+    """Block until the HIL-Bridge service reports ready or the timeout expires."""
     deadline = time.monotonic() + max(0.5, float(timeout_seconds or DEFAULT_BRIDGE_READY_TIMEOUT_SECONDS))
     last_relay_error_text = ""
     last_status_text = ""
     last_reason_text = ""
     crash_observed = False
     relay_url_observed = False
-    # Readiness is an indeterminate poll loop -- supervisor boot time
+    # Readiness is an indeterminate poll loop — supervisor boot time
     # depends on USB detection, systemd warm-up, and the remsim
     # client init. The sticky footer gives operators a visible
     # heartbeat so a stalled bridge startup is obvious. Inactive on
@@ -544,9 +549,9 @@ def _compose_bridge_ready_failure(
     """Compose an actionable error message for ``wait_for_bridge_ready``.
 
     The supervisor publishes a ``status`` field (``running``,
-    ``restart-pending``, ``start-failed``, ``usb-detect-error`` ...) and
-    a free-form ``reason``. Surfacing the raw ``reason`` on timeout --
-    as the previous implementation did -- was misleading because a
+    ``restart-pending``, ``start-failed``, ``usb-detect-error`` …) and
+    a free-form ``reason``. Surfacing the raw ``reason`` on timeout —
+    as the previous implementation did — was misleading because a
     transient ``restart-pending`` reason like
     ``Waiting 1.0s before bridge restart (simulated card backend).``
     looks like a non-fatal hint but is actually the symptom of a

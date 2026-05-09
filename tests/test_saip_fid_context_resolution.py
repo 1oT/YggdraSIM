@@ -302,13 +302,13 @@ class UriEfFidCorrectionTests(unittest.TestCase):
         self.assertEqual(fid_name("6FEF"), "EF.SDNURI")
 
     def test_pws_not_shadowed_by_sdn_uri(self) -> None:
-        # 6FEC must resolve to EF.PWS even though both EF.SDN URI and
-        # EF.PWS reference the same FID; the resolver picks PWS.
+        # 6FEC used to carry a "EF.SDN URI / EF.PWS" combined label because
+        # both tokens claimed the same FID. It now cleanly resolves to PWS.
         self.assertEqual(fid_name("6FEC"), "EF.PWS")
 
 
 class UriPayloadClassificationTests(unittest.TestCase):
-    """guards around ``_decode_uri_record`` RFC 3986 split."""
+    """Round-4 Pass 2 guards around ``_decode_uri_record`` RFC 3986 split."""
 
     def _build(self, uri: str) -> str:
         payload = uri.encode("utf-8")
@@ -351,10 +351,10 @@ class UriPayloadClassificationTests(unittest.TestCase):
         decoded = _decode_known_ef_payload(
             ef_key="ef-fdnuri",
             fid="6FED",
-            hex_clean=self._build("https://example.com/p%20a%3Fth"),
+            hex_clean=self._build("https://ex.com/p%20a%3Fth"),
         )
         self.assertIsNotNone(decoded)
-        self.assertEqual(decoded.get("percentDecoded"), "https://example.com/p a?th")
+        self.assertEqual(decoded.get("percentDecoded"), "https://ex.com/p a?th")
 
     def test_malformed_uri_flagged(self) -> None:
         decoded = _decode_known_ef_payload(

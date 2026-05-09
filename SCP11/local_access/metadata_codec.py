@@ -1,3 +1,4 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """
 StoreMetadataRequest codec for local profile metadata.
 
@@ -83,6 +84,7 @@ def load_metadata_json_document(path: str) -> dict[str, Any]:
 
 
 def collect_enabled_custom_metadata_tags(document: dict[str, Any]) -> list[dict[str, Any]]:
+    """Return the list of custom metadata tag names that are marked enabled in the metadata JSON."""
     custom_root = document.get("custom")
     if custom_root is None:
         return []
@@ -92,6 +94,7 @@ def collect_enabled_custom_metadata_tags(document: dict[str, Any]) -> list[dict[
     matches: list[dict[str, Any]] = []
 
     def walk(node: dict[str, Any], path_parts: list[str]) -> None:
+        """Walk the metadata document tree and yield (path, value) tuples."""
         for key, value in node.items():
             if isinstance(value, dict):
                 if _is_tag_entry(key, value):
@@ -155,6 +158,7 @@ def encode_update_metadata_request(document: dict[str, Any]) -> bytes:
 
 
 def build_store_metadata_request_payload(document: dict[str, Any]) -> dict[str, Any]:
+    """Build a StoreMetadata ES2+ request payload from a metadata JSON document."""
     profile = _require_mapping(document, "profile")
     operator = _require_mapping(document, "operator")
     policy_rules = _optional_mapping(document.get("policy_rules"))
@@ -221,6 +225,7 @@ def build_store_metadata_request_payload(document: dict[str, Any]) -> dict[str, 
 
 
 def build_update_metadata_request_payload(document: dict[str, Any]) -> dict[str, Any]:
+    """Build an UpdateMetadata ES2+ request payload from a partial metadata JSON document."""
     profile = _optional_mapping(document.get("profile"))
     operator = _optional_mapping(document.get("operator"))
     policy_rules = _optional_mapping(document.get("policy_rules"))

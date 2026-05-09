@@ -22,8 +22,6 @@ YggdraSIM currently provides:
   transcoding (`at_simlink`), and offline pcap review
 - non-interactive command, script, and report/export entry points where the
   subsystem already exposes them
-- an optional Universal GUI Command Center (`--gui` desktop / `--web-server`
-  remote-lab) with a typed action registry and a process-wide APDU recorder
 - shared mutable state through SQLite, keyed by card identity or eIM identity
 - optional encryption for stored runtime payloads
 - a writable runtime-tree model for frozen executables
@@ -40,7 +38,7 @@ command or every internal helper.
 
 | Surface | Primary role | Representative capabilities | Deep guide |
 | --- | --- | --- | --- |
-| `main/main.py` | Unified launcher | module dispatch, docs, about, license, automation entry points, `--gui` / `--web-server` | `README.md` |
+| `main/main.py` | Unified launcher | module dispatch, docs, about, license, automation entry points | `README.md` |
 | `SCP03/` | Admin shell | GP auth, ETSI filesystem, eUICC retrieval, report/export, diff/wizards | `README.md` |
 | `SCP80/` | OTA shell | OTA wrap/build/send/decode, script execution, ICCID-bound runtime | `README.md` |
 | `SCP11/live/` | Live relay shell | LPAd, IPAd, IPAe, relay preflight, ES9+/eIM endpoint control | `SCP11/live/README.md` |
@@ -49,13 +47,12 @@ command or every internal helper.
 | `SCP11/local_access/` | Direct local shell | local SCP11 auth, metadata upload, direct profile load, ES10c state control | `SCP11/local_access/README.md` |
 | `SCP11/eim_local/` | eIM-side shell | direct eIM lifecycle commands, localized polling, hotfolders, handover | `SCP11/eim_local/README.md` |
 | `SCP11/shared/` | Shared helper layer | crypto, payload, ASN.1, GSMA error, pySim support helpers | `SCP11/shared/README.md` |
-| `SIMCARD/` | In-process simulated UICC / eUICC | ETSI TS 102 221 FS, GP / SCP03 / SCP80, ISD-R + ISD-Ps, ETSI TS 102 223 toolkit, Milenage / TUAK AKA, 5G AKA / AKMA / SUCI / `GET IDENTITY` | inline source |
+| `SIMCARD/` | In-process simulated UICC / eUICC | ETSI TS 102 221 FS, GP / SCP03 / SCP80, ISD-R + ISD-Ps, ETSI TS 102 223 toolkit, Milenage / TUAK AKA, 5G AKA / AKMA / SUCI / `GET IDENTITY` | `SIMCARD/` module sources |
 | `Tools/HilBridge/` | SIMtrace2 HIL bridge | RSPRO relay on `127.0.0.1:9997`, GSMTAP mirror on UDP 4729, modem REFRESH, offline pcap review, AT+CSIM / AT+CRSM transcoder (`at_simlink`) | `HIL_BRIDGE_GUIDE.md` |
 | `Tools/ProfilePackage/` | SAIP shell | inspect, lint, transcode, encode, split, extract, DIFF/DIFF-TUI, WATCH-SIMCARD | `README.md` |
 | `Tools/ApduFuzz/` | Opt-in APDU mutation fuzzer | deterministic mutators, PC/SC/null transports, safety gate, crash dumps | `Tools/ApduFuzz/` sources |
 | `Tools/EumDiag/` | EUM / SM-DP+ diagnostics | session-key injection, BF36 Lua dissector, tshark runner, BPP decode | `Tools/EumDiag/` sources |
 | `Tools/SuciTool/` | SUCI shell | key selection, key generation, public-key export | `README.md` |
-| `yggdrasim_common/gui_server/` | Optional Universal GUI (deferred) | typed action registry, FastAPI API + pywebview desktop or headless lab server, live APDU dock | not shipped in v1.0.0 |
 
 ## 3. Launcher And Entry-Point Capabilities
 
@@ -85,10 +82,6 @@ The top-level launcher in `main/main.py` can:
   `--sim-quirks`, `--sim-eim-identity`, `--sim-euicc-store`,
   `--sim-profile-store`, `--sim-import-profile`, and
   `--sim-import-enable`
-- launch the optional Universal GUI Command Center via `--gui` (FastAPI
-  loopback + native pywebview window) or `--web-server` (FastAPI only,
-  bearer-token mandatory; `--token-file`, `--tls-cert`, `--tls-key`, and
-  `--tls-self-signed` complete the surface)
 
 The repository also supports direct module entry:
 
@@ -351,7 +344,7 @@ current capability set includes:
 - canonical fake-eIM peer-provisioning artifacts for `AddEim`
 - eIM package linting and issue workflows
 - localized `IPAd` execution through live/test relay orchestrators
-- adapter-first standalone `IPAd` runner export
+- adapter-first standalone `IPAd` runner export through `ipad_standalone.py`
 - simulator-side default BF55 eIM identity override through
   `Workspace/SIMCARD/eim_identity.json`, with full card-side layouts still
   overridable through `Workspace/SIMCARD/isdr_config.json` and `eim_entries`
@@ -476,7 +469,7 @@ relay. Current capabilities include:
 - GSMTAP mirroring on UDP 4729 for live Wireshark capture
 - modem REFRESH proactive command issuance (`Tools/HilBridge/proactive.py`)
 - AT+CSIM / AT+CRSM transcoding (`Tools/HilBridge/at_simlink.py`) per
-  3GPP TS 27.007 §8.17 / §8.18 -- turns AT request lines into raw
+  3GPP TS 27.007 §8.17 / §8.18 — turns AT request lines into raw
   ISO 7816 APDUs and back, transport-agnostic so any modem-side serial
   / TCP loopback can drive the simulated card
 - HIL supervisor (`yggdrasim-hil-supervisor`) with health-checked
@@ -487,28 +480,7 @@ relay. Current capabilities include:
 - decoded-APDU TUI for both live capture and offline pcap review
   (`--open-pcap <path> [--keybag <path>]` from the launcher)
 
-## 11. Universal GUI Command Center Capabilities
-
-`yggdrasim_common/gui_server/` (experimental) is the optional FastAPI +
-pywebview Command Center. Current capability set includes:
-
-- two launch modes: `--gui` (loopback FastAPI + native pywebview
-  window) and `--web-server` (bare FastAPI, bearer-token mandatory)
-- typed action registry with auto-generated SPA forms,
-  scan-tree / FCP / hex / TLV / findings / key-value / log-stream
-  renderers, and per-tab xterm.js PTY tabs for sub-shell handoffs
-- live process-wide APDU recorder (`yggdrasim_common/apdu_recorder.py`)
-  feeding the bottom-dock APDU tab via WebSocket without each call
-  site having to opt in
-- 148+ actions across SCP03 (71), eSIM Live (38), SAIP (14), SCP11
-  Local (7), Tools (6), SIMCARD (4), Local eIM (4), HIL (3), SCP11 (1)
-- TLS surface for `--web-server`: BYO PEM via `--tls-cert` /
-  `--tls-key`, or generate-and-reuse self-signed under
-  `state/gui_tls/` via `--tls-self-signed`
-- Playwright headless-Chromium smoke skeleton (auto-skips when
-  Playwright is not installed)
-
-## 12. SAIP And SUCI Tooling Capabilities
+## 11. SAIP And SUCI Tooling Capabilities
 
 ### `Tools/ProfilePackage`
 
@@ -521,7 +493,7 @@ The SAIP/profile-package tool currently supports:
 - default transcode-directory management
 - override of the external `saip-tool` command path
 - `info`, `tree`, and `check` execution through the shell
-- profile linting with:
+- comprehensive profile linting with:
   - strict mode
   - metadata attachment
   - preset gate profiles
@@ -588,7 +560,7 @@ Representative shell verbs include:
 - `DUMP`
 - `PWD`
 
-## 13. Shared Runtime, Security, And Persistence Capabilities
+## 12. Shared Runtime, Security, And Persistence Capabilities
 
 Cross-cutting runtime capabilities currently include:
 
@@ -623,7 +595,7 @@ Certificate and trust-management capabilities currently include:
 - full simulator card-side eIM row override through
   `Workspace/SIMCARD/isdr_config.json` with `eim_entries`
 
-## 14. Diagnostics, Reporting, And Validation Capabilities
+## 13. Diagnostics, Reporting, And Validation Capabilities
 
 The repository currently includes:
 
@@ -644,7 +616,7 @@ The repository currently includes:
   replay engine (`Tools.HilBridge.scp_replay.ScpReplayEngine`) for
   plaintext overlay of secure-messaging APDUs
 
-## 15. Distribution And Packaging Capabilities
+## 14. Distribution And Packaging Capabilities
 
 The suite is published in two executable flavors and a source option:
 
@@ -685,7 +657,7 @@ Build tooling:
   supported OSes, a full Linux artifact, and an arm64 clean Debian
   artifact through QEMU/Buildx
 
-## 16. Related Documents
+## 15. Related Documents
 
 Use the following documents together with this capability reference:
 

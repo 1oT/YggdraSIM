@@ -70,44 +70,14 @@ Practical note:
 ## Wrapper HIL offline flags
 
 Two extra wrapper flags short-circuit straight into the HIL decoded-APDU
-TUI in offline review mode -- no bridge, no supervisor, no `tshark -i`:
+TUI in offline review mode — no bridge, no supervisor, no `tshark -i`:
 
-- `--open-pcap <path>` -- open a saved `.pcap` / `.pcapng` in the TUI
-- `--keybag <path>` -- optional keybag JSON for SCP03 / SCP11c unwrap
+- `--open-pcap <path>` — open a saved `.pcap` / `.pcapng` in the TUI
+- `--keybag <path>` — optional keybag JSON for SCP03 / SCP11c unwrap
 
 Sidecar keybags named `<pcap>.keys.json` / `<stem>.keys.json` are
 auto-discovered when `--keybag` is omitted. A full write-up lives in
 `HIL_BRIDGE_GUIDE.md` §11 "Offline pcap replay and session-key unwrap".
-
-## Wrapper GUI Command Center flags
-
-`main/main.py` can also short-circuit into the optional Universal GUI
-Command Center instead of the menu. Both modes require the GUI extra
-to be installed (`pip install -e '.[gui]'` for desktop;
-`'.[gui-server]'` for the headless web server).
-
-- `--gui` -- desktop window via `pywebview`
-- `--web-server` -- headless FastAPI/uvicorn HTTP server with the SPA
-- `--host <addr>` / `--port <num>` -- override the loopback bind for `--web-server`
-- `--token-file <path>` -- bearer token expected on every request (`--web-server` only)
-- `--tls-cert <path>` / `--tls-key <path>` -- bring your own TLS material
-- `--tls-self-signed` -- generate or reuse a self-signed pair under `state/gui_tls/`
-
-Examples:
-
-```bash
-python main/main.py --gui --card-backend sim
-```
-
-```bash
-python main/main.py --web-server \
-    --host 127.0.0.1 --port 18443 \
-    --token-file ~/.config/yggdrasim/gui-token \
-    --tls-self-signed
-```
-
-These flags are documented in detail in the `--help` output of
-`main/main.py`.
 
 ## Wrapper diagnostics
 
@@ -241,7 +211,7 @@ GET-IOT
 EOF
 ```
 
-Session-key export (for HIL offline pcap unwrap -- see below):
+Session-key export (for HIL offline pcap unwrap — see below):
 
 ```bash
 python -m SCP03 --cmd \
@@ -258,7 +228,7 @@ python -m SCP80 --cmd "show; build; quit"
 
 ```bash
 python -m SCP80 --stdin <<'EOF'
-iccid 8988211234567890123
+iccid 8988201234567890123
 build
 quit
 EOF
@@ -310,7 +280,7 @@ EXIT
 EOF
 ```
 
-Session-key export (for HIL offline pcap unwrap -- see below):
+Session-key export (for HIL offline pcap unwrap — see below):
 
 ```bash
 python -m SCP11.local_access --cmd "LOAD-PROFILE" \
@@ -460,7 +430,7 @@ pick `[3] Open saved .pcap (offline review, no bridge)`.
 
 If `--keybag` is omitted, sidecar JSONs named `<pcap>.keys.json` or
 `<stem>.keys.json` next to the capture are auto-discovered. A missing
-keybag is non-fatal -- ciphered APDUs stay wrapped.
+keybag is non-fatal — ciphered APDUs stay wrapped.
 
 Keybag JSONs (`yggdrasim-hil-keybag/v1`) are produced by the same
 shells that build the secure channel:
@@ -469,7 +439,7 @@ shells that build the secure channel:
 | --- | --- |
 | `python -m SCP03` | `--cmd "SCP03-SD; EXPORT-KEYBAG path.keys.json label; EXIT"` |
 | `python -m SCP11.local_access` | `--dump-keybag path.keys.json` (standalone or combined with `--cmd` / `--stdin`) |
-| `python -m SCP11.live` | **no-op stub** -- live SCP11c BSP keys are derived inside the eUICC and never reach the host. The flag prints a clear message and exits with code `2`. |
+| `python -m SCP11.live` | **no-op stub** — live SCP11c BSP keys are derived inside the eUICC and never reach the host. The flag prints a clear message and exits with code `2`. |
 
 See the HIL Bridge guide (`HIL_BRIDGE_GUIDE.md` §11 "Offline pcap
 replay and session-key unwrap") for the keybag schema, replay engine

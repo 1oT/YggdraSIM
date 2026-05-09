@@ -1,4 +1,4 @@
-"""SGP.22 §5.7.13 ES10b.LoadCRL -- eUICC-side acceptance.
+"""SGP.22 §5.7.13 ES10b.LoadCRL — eUICC-side acceptance.
 
 The simulator persists every CRL DER blob the RSP server pushes
 into ``state.loaded_crls`` so reports / GUIs can introspect what

@@ -1,6 +1,17 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+"""SAIP tool bridge: GUI-facing adapter over the pySim saip_tool subprocess.
+
+``SaipToolBridge`` owns the workspace state (current input file, default
+directories, tool-command configuration) and exposes the operator actions
+the GUI surfaces: opening a profile file, running the tool with arbitrary
+arguments, and building the decoded-dump document used by the transcode
+editor.  It handles hex→DER conversion, per-call caching, placeholder
+sidecar injection, and pySim path discovery.
+"""
 import hashlib
 import json
 import os
+import re
 import shlex
 import shutil
 import subprocess
@@ -10,6 +21,14 @@ from pathlib import Path
 from typing import Callable, Optional, Sequence
 
 from yggdrasim_common.runtime_paths import remap_legacy_workspace_relative
+from .saip_hex_template import (
+    InlinePlaceholderRecord,
+    detect_inline_placeholders,
+    iter_inline_placeholders,
+    sidecar_path_for_cache,
+    substitute_inline_placeholders,
+    write_sidecar,
+)
 from .saip_json_codec import transcode_sidecar_paths
 
 _DEFAULT_TOOL_TIMEOUT_SECONDS = 60
@@ -98,10 +117,18 @@ def _prune_profile_package_cache(cache_dir: Path, *, keep: Path) -> None:
             path.unlink()
         except OSError:
             continue
+        sidecar_companion = path.with_suffix(".placeholders.json")
+        if sidecar_companion.exists():
+            try:
+                sidecar_companion.unlink()
+            except OSError:
+                continue
 
 
 @dataclass
 class SaipCommandResult:
+    """Result of a single saip_tool subprocess invocation."""
+
     command: list[str]
     returncode: int
     stdout: str
@@ -266,6 +293,19 @@ def _pick_existing_file_path(
 
 
 class SaipToolBridge:
+    """Stateful adapter between the GUI and the saip_tool / pySim pipeline.
+
+    The bridge persists a ``current_input_file``, a ``default_profile_dir``,
+    a ``default_transcode_dir``, and the active tool command across GUI
+    sessions via a JSON config file at ``config_path``.  All path resolution
+    is workspace-rooted: bare filenames resolve relative to
+    ``default_profile_dir``; absolute paths outside the workspace boundary
+    raise ``ValueError`` (workspace sandbox invariant).
+
+    Hex-format input (``*.hex``, ``*.txt``) is converted to DER on first use
+    and cached in ``.profilepackage-cache/`` keyed by content digest.
+    """
+
     _HEX_INPUT_SUFFIXES = {".hex", ".txt"}
     _INPUT_FILE_PICKER_LABEL = "SAIP profile files"
     _INPUT_FILE_PICKER_GLOB = "*.der *.txt *.hex *.upp *.bin"
@@ -319,6 +359,14 @@ class SaipToolBridge:
         self.config_path.parent.mkdir(parents=True, exist_ok=True)
 
     def set_input_file(self, path_text: str) -> Path:
+        """Resolve, validate, and persist a new current input file.
+
+        The path is resolved via ``resolve_input_path`` (workspace-relative
+        bare names anchor to ``default_profile_dir``).  Saves the config
+        and updates ``last_input_open_directory``.  Raises
+        ``FileNotFoundError`` when the resolved path does not exist, or
+        ``IsADirectoryError`` when it resolves to a directory.
+        """
         resolved_path = self.resolve_input_path(path_text, must_exist=True)
         if resolved_path.is_dir():
             raise IsADirectoryError(f"Expected a file, got directory: {resolved_path}")
@@ -328,6 +376,12 @@ class SaipToolBridge:
         return resolved_path
 
     def pick_input_file(self) -> Optional[Path]:
+        """Open a native file-picker dialog and set the result as the current input.
+
+        Returns the resolved ``Path`` on success, or ``None`` when the user
+        cancels without selecting a file.  Falls through to
+        ``set_input_file`` so the same validation rules apply.
+        """
         initial_directory = self.default_profile_dir
         if self.last_input_open_directory is not None:
             initial_directory = self.last_input_open_directory
@@ -344,6 +398,7 @@ class SaipToolBridge:
         return self.set_input_file(str(selected_path))
 
     def set_default_profile_dir(self, path_text: str) -> Path:
+        """Set and persist the default profile directory used for bare-name resolution."""
         resolved_path = self.resolve_workspace_path(path_text, must_exist=False)
         resolved_path.mkdir(parents=True, exist_ok=True)
         self.default_profile_dir = resolved_path
@@ -351,6 +406,7 @@ class SaipToolBridge:
         return resolved_path
 
     def set_default_transcode_dir(self, path_text: str) -> Path:
+        """Set and persist the default transcode output directory."""
         resolved_path = self.resolve_workspace_path(path_text, must_exist=False)
         resolved_path.mkdir(parents=True, exist_ok=True)
         self.default_transcode_dir = resolved_path
@@ -358,6 +414,7 @@ class SaipToolBridge:
         return resolved_path
 
     def list_default_profiles(self) -> list[Path]:
+        """List non-hidden, non-sidecar files in the default profile directory."""
         if self.default_profile_dir.exists() is False or self.default_profile_dir.is_dir() is False:
             return []
 
@@ -396,6 +453,11 @@ class SaipToolBridge:
 
     @staticmethod
     def is_transcode_sidecar(path_value: Path) -> bool:
+        """Return ``True`` when ``path_value`` is a generated transcode artefact.
+
+        Matches ``.transcode.json``, ``.transcode.der``, and ``.transcode.txt``
+        suffixes so these files are excluded from the profile list.
+        """
         name = Path(path_value).name.lower()
         return (
             name.endswith(".transcode.json")
@@ -404,6 +466,11 @@ class SaipToolBridge:
         )
 
     def resolve_transcode_sidecar_paths(self, source_profile_path: Path) -> tuple[Path, Path, Path]:
+        """Return the ``(json, der, txt)`` sidecar paths for a source profile.
+
+        Delegates to ``saip_json_codec.transcode_sidecar_paths`` with the
+        bridge's configured transcode and profile directories.
+        """
         return transcode_sidecar_paths(
             source_profile_path,
             transcode_root=self.default_transcode_dir,
@@ -411,11 +478,13 @@ class SaipToolBridge:
         )
 
     def get_input_file(self) -> Path:
+        """Return the current input file path; raises ``ValueError`` when none is set."""
         if self.current_input_file is None:
             raise ValueError("No profile package selected. Use USE <path> first.")
         return self.current_input_file
 
     def set_tool_command(self, command_text: str) -> list[str]:
+        """Parse and persist an explicit tool command string (shell-split tokens)."""
         tokens = shlex.split(command_text.strip())
         if len(tokens) == 0:
             raise ValueError("Tool command cannot be empty.")
@@ -423,6 +492,7 @@ class SaipToolBridge:
         return list(self._tool_command)
 
     def get_tool_command(self) -> list[str]:
+        """Resolve the effective tool command, consulting ``YGGDRASIM_SAIP_TOOL`` env and bundled script."""
         if self._tool_command is not None:
             return list(self._tool_command)
 
@@ -457,6 +527,7 @@ class SaipToolBridge:
         )
 
     def describe_status(self) -> str:
+        """Return a one-line status string for display in the GUI status bar."""
         current_file = "(not selected)"
         if self.current_input_file is not None:
             current_file = self._display_path(self.current_input_file)
@@ -464,6 +535,7 @@ class SaipToolBridge:
         return f"Active profile: {current_file} | Transcode dir: {transcode_dir}"
 
     def describe_tool_command(self) -> str:
+        """Return a display string for the resolved tool command, or a graceful error."""
         try:
             return " ".join(self.get_tool_command())
         except Exception as error:
@@ -477,9 +549,11 @@ class SaipToolBridge:
             return str(path_obj)
 
     def display_path(self, path_value: Path) -> str:
+        """Return ``path_value`` relative to the workspace root when possible."""
         return self._display_path(path_value)
 
     def resolve_path(self, path_text: str, must_exist: bool = False) -> Path:
+        """Alias for ``resolve_workspace_path``; kept for backwards compatibility."""
         return self.resolve_workspace_path(path_text, must_exist=must_exist)
 
     def _normalize_missing_leading_slash_input_path(
@@ -506,6 +580,14 @@ class SaipToolBridge:
         return normalized
 
     def resolve_input_path(self, path_text: str, must_exist: bool = False) -> Path:
+        """Resolve a path string to an absolute ``Path``, anchored to the workspace.
+
+        Resolution order: absolute / home-relative → workspace-relative with
+        bare-name fallback to ``default_profile_dir`` → workspace root.
+        Raises ``FileNotFoundError`` when ``must_exist=True`` and the path
+        does not exist.  Does NOT enforce the workspace sandbox boundary —
+        use ``resolve_workspace_path`` for that.
+        """
         raw_value = str(path_text or "").strip()
         if len(raw_value) == 0:
             raise ValueError("Path cannot be empty.")
@@ -534,6 +616,12 @@ class SaipToolBridge:
         return resolved_path
 
     def resolve_workspace_path(self, path_text: str, must_exist: bool = False) -> Path:
+        """Resolve a path string and enforce the workspace-root sandbox boundary.
+
+        Raises ``ValueError`` when the resolved absolute path falls outside
+        ``workspace_root``.  Relative paths are anchored to ``workspace_root``
+        (not ``default_profile_dir``).
+        """
         raw_value = str(path_text or "").strip()
         if len(raw_value) == 0:
             raise ValueError("Path cannot be empty.")
@@ -554,9 +642,17 @@ class SaipToolBridge:
         return resolved_path
 
     def run_current(self, args: Sequence[str]) -> SaipCommandResult:
+        """Run the tool against the currently selected input file."""
         return self.run(self.get_input_file(), args)
 
     def run(self, input_file: Path, args: Sequence[str]) -> SaipCommandResult:
+        """Invoke the tool subprocess with ``input_file`` prepended to ``args``.
+
+        Hex-format inputs are transparently converted to DER via
+        ``_prepare_input_for_tool`` before the subprocess is launched.
+        Returns a ``SaipCommandResult``; callers inspect ``returncode``
+        and ``stdout`` / ``stderr`` directly.
+        """
         resolved_input = self.resolve_input_path(str(input_file), must_exist=True)
         if resolved_input.is_dir():
             raise IsADirectoryError(f"Expected a file, got directory: {resolved_input}")
@@ -576,6 +672,16 @@ class SaipToolBridge:
         )
 
     def build_decoded_dump_document(self, mode: str) -> dict:
+        """Decode the current profile package in-process via pySim and return a document dict.
+
+        ``mode`` selects the output shape:
+        - ``"all_pe"`` — one section per PE in sequence order.
+        - ``"all_pe_by_type"`` — one section per PE type (list of decoded dicts).
+        - ``"all_pe_by_naa"`` — grouped by NAA (Network Access Application).
+
+        Raises ``RuntimeError`` when the pySim source tree is not found, or
+        ``ValueError`` on parse failure or unsupported mode.
+        """
         resolved_input = self.resolve_input_path(str(self.get_input_file()), must_exist=True)
         prepared_input = self._prepare_input_for_tool(resolved_input)
         pysim_dirs = self._pysim_source_dirs()
@@ -606,6 +712,7 @@ class SaipToolBridge:
         counts: dict[str, int] = {}
 
         def unique_key(base_key: str) -> str:
+            """Return a de-duplicated key string for use in the SAIP tool's internal PE map."""
             key_text = str(base_key or "section").strip() or "section"
             current_count = counts.get(key_text, 0) + 1
             counts[key_text] = current_count
@@ -636,6 +743,13 @@ class SaipToolBridge:
         return document
 
     def normalize_raw_arguments(self, tokens: Sequence[str]) -> list[str]:
+        """Resolve workspace-relative paths embedded in ``--flag=<path>`` tokens.
+
+        Flags listed in ``_RAW_INPUT_PATH_FLAGS`` have their value portion
+        resolved via ``resolve_input_path`` (when ``must_exist=True``) or
+        ``resolve_workspace_path`` (when ``must_exist=False``).  All other
+        tokens are forwarded unchanged.
+        """
         normalized: list[str] = []
         index = 0
         while index < len(tokens):
@@ -745,15 +859,21 @@ class SaipToolBridge:
             return resolved_input
 
         text_payload = resolved_input.read_text(encoding="utf-8")
-        normalized_hex = "".join(text_payload.split()).upper()
+        placeholder_records: list[InlinePlaceholderRecord] = []
+        if detect_inline_placeholders(text_payload):
+            substituted_text, placeholder_records = substitute_inline_placeholders(
+                text_payload
+            )
+            normalized_hex = "".join(substituted_text.split()).upper()
+        else:
+            normalized_hex = "".join(text_payload.split()).upper()
+
         if len(normalized_hex) == 0:
             raise ValueError(f"Hex input file is empty: {resolved_input}")
 
         for character in normalized_hex:
             if character not in "0123456789ABCDEF":
-                raise ValueError(
-                    f"Hex input file contains non-hex characters: {resolved_input}"
-                )
+                self._raise_hex_input_error(resolved_input, text_payload)
 
         if len(normalized_hex) % 2 != 0:
             raise ValueError(f"Hex input file has odd-length payload: {resolved_input}")
@@ -764,8 +884,59 @@ class SaipToolBridge:
         digest = hashlib.sha256(resolved_input.as_posix().encode("utf-8") + binary_payload).hexdigest()
         cache_path = cache_dir / f"{resolved_input.stem}-{digest[:16]}.der"
         cache_path.write_bytes(binary_payload)
+        sidecar_path = sidecar_path_for_cache(cache_path)
+        if len(placeholder_records) > 0:
+            write_sidecar(sidecar_path, placeholder_records)
+        else:
+            try:
+                sidecar_path.unlink()
+            except FileNotFoundError:
+                pass
+            except OSError:
+                pass
         _prune_profile_package_cache(cache_dir, keep=cache_path)
         return cache_path
+
+    @staticmethod
+    def _raise_hex_input_error(resolved_input: Path, raw_text: str) -> None:
+        """Emit a context-aware error when a hex input won't parse.
+
+        Distinguishes three cases so the operator gets actionable
+        guidance instead of a bare "non-hex characters" line:
+
+        * Inline typed placeholders still present after substitution
+          (means :func:`substitute_inline_placeholders` missed a shape
+          variant; surface the offending literals so the user can
+          report them).
+        * YggdraSIM-native ``{NAME}`` / ``[NAME]`` placeholders present
+          (means the file is a JSON-style template mis-saved as hex
+          text — point at ``APPLY-TEMPLATE``).
+        * Anything else: the historical terse diagnostic.
+        """
+        typed_matches = [match.group(0) for match in iter_inline_placeholders(raw_text)]
+        if len(typed_matches) > 0:
+            preview = ", ".join(sorted(set(typed_matches))[:4])
+            raise ValueError(
+                f"Hex input file contains inline typed placeholders that did not "
+                f"substitute cleanly ({preview}): {resolved_input}. "
+                f"Remove the placeholders or report the template shape as a bug."
+            )
+
+        simple_placeholder = re.search(
+            r"\{#?[A-Za-z][A-Za-z0-9_]*\}|\[#?[A-Za-z][A-Za-z0-9_]*\]",
+            raw_text,
+        )
+        if simple_placeholder is not None:
+            raise ValueError(
+                f"Hex input file carries YggdraSIM-style placeholders "
+                f"({simple_placeholder.group(0)}): {resolved_input}. "
+                f"Use APPLY-TEMPLATE <template.json> <out.der> to materialise the "
+                f"profile before opening it as raw hex."
+            )
+
+        raise ValueError(
+            f"Hex input file contains non-hex characters: {resolved_input}"
+        )
 
     def _is_within_workspace(self, resolved_path: Path) -> bool:
         try:

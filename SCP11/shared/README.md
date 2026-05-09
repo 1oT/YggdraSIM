@@ -29,17 +29,17 @@ Automation references:
 - transport abstractions
 - shared GSMA-oriented error-code helpers
 - shared discovery snapshot rendering
-  - `discovery_snapshot.render_consolidated_discovery_snapshot` -- full
+  - `discovery_snapshot.render_consolidated_discovery_snapshot` — full
     SGP.32 consolidated dump (the `DISCOVER` command output)
-  - `discovery_snapshot.render_card_overview_snapshot` -- quick header
+  - `discovery_snapshot.render_card_overview_snapshot` — quick header
     card (the `SCAN` / `INFO` command output, harmonised across all
     four SCP11 shells)
 - shared profile lifecycle helpers
-  - `profile_actions.run_enable_profile` -- auto-disable the active
+  - `profile_actions.run_enable_profile` — auto-disable the active
     profile (with PPR1 guard) before enabling the target
-  - `profile_actions.run_disable_profile` -- short-circuit when the
+  - `profile_actions.run_disable_profile` — short-circuit when the
     target is already disabled
-  - `profile_actions.run_delete_profile` -- auto-disable an enabled
+  - `profile_actions.run_delete_profile` — auto-disable an enabled
     target before deleting it (SGP.22 §5.7.18)
 
 ## Command harmonisation contract
@@ -48,7 +48,7 @@ Automation references:
 `ENABLE-PROFILE` / `DISABLE-PROFILE` / `DELETE-PROFILE` semantics
 exposed by the live, test, local-access, and eim-local shells. Each
 shell wires a `ProfileActionAdapter` to its session-level callbacks and
-calls into the helpers -- there is no per-shell branch for the
+calls into the helpers — there is no per-shell branch for the
 auto-disable contract or the PPR1 guard. The `INFO` alias on every
 shell now resolves to `SCAN`, which renders the same header card as
 eSIM Live's start-up snapshot via `render_card_overview_snapshot`.

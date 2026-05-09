@@ -1,3 +1,5 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+"""SCP11-relay entry point: initialises relay runtime components and starts the operator REPL."""
 import argparse
 import sys
 
@@ -122,6 +124,7 @@ class SGP22Client:
             print(f"[*] {warning}")
 
     def run_flow(self):
+        """Execute a single profile-download flow over the relay transport."""
         try:
             self._run_startup_preflight()
             self._build_runtime()
@@ -149,6 +152,7 @@ class SGP22Client:
 
 
 def entry() -> None:
+    """Initialise relay runtime components and start the operator REPL."""
     parser = argparse.ArgumentParser(description="SCP11 relay orchestration shell")
     add_debug_argument(
         parser,

@@ -4,7 +4,7 @@ The loader is the entry point used by both the SAIP shell ``DIFF``
 command and the diff TUI. It needs to accept exactly the same inputs
 the inspector accepts via ``OPEN`` / ``USE``: transcode JSON, simulator
 manifest JSON, raw DER, and hex-dump ``*.txt`` / ``*.hex`` profiles.
-The hex branch is the one that motivated this test module -- the
+The hex branch is the one that motivated this test module — the
 shell previously reported ``"not recognised as transcode JSON ... and
 DER decode failed"`` for hex-text inputs because the loader fed ASCII
 hex directly into ``ProfileElementSequence.from_der``.
@@ -66,17 +66,29 @@ class HexDecodeTests(unittest.TestCase):
     _SOURCE = Path("/tmp/example.txt")
 
     def test_decodes_uppercase_hex(self) -> None:
-        result = _decode_hex_text_payload("DEADBEEF", source=self._SOURCE)
-        self.assertEqual(result, b"\xde\xad\xbe\xef")
+        result_bytes, records = _decode_hex_text_payload("DEADBEEF", source=self._SOURCE)
+        self.assertEqual(result_bytes, b"\xde\xad\xbe\xef")
+        self.assertEqual(records, [])
 
     def test_decodes_lowercase_hex(self) -> None:
-        result = _decode_hex_text_payload("deadbeef", source=self._SOURCE)
-        self.assertEqual(result, b"\xde\xad\xbe\xef")
+        result_bytes, records = _decode_hex_text_payload("deadbeef", source=self._SOURCE)
+        self.assertEqual(result_bytes, b"\xde\xad\xbe\xef")
+        self.assertEqual(records, [])
 
     def test_normalises_whitespace_and_newlines(self) -> None:
         text = "DE AD\nBE\tEF\r\n CA FE BA BE"
-        result = _decode_hex_text_payload(text, source=self._SOURCE)
-        self.assertEqual(result, b"\xde\xad\xbe\xef\xca\xfe\xba\xbe")
+        result_bytes, records = _decode_hex_text_payload(text, source=self._SOURCE)
+        self.assertEqual(result_bytes, b"\xde\xad\xbe\xef\xca\xfe\xba\xbe")
+        self.assertEqual(records, [])
+
+    def test_records_typed_placeholders(self) -> None:
+        text = "DEADBEEF{probe:TEST:4:tail}CAFEBABE"
+        result_bytes, records = _decode_hex_text_payload(text, source=self._SOURCE)
+        self.assertEqual(len(result_bytes), 12)
+        self.assertEqual(len(records), 1)
+        self.assertEqual(records[0].variable_name, "probe")
+        self.assertEqual(records[0].byte_length, 4)
+        self.assertEqual(records[0].modifier, "tail")
 
     def test_empty_payload_raises(self) -> None:
         with self.assertRaises(SaipDiffLoadError) as ctx:
@@ -113,7 +125,14 @@ class _LoaderFixture(unittest.TestCase):
         """
         observed: list[bytes] = []
 
-        def fake_decode(path, der_bytes, workspace_root, *, shape="saip-der"):
+        def fake_decode(
+            path,
+            der_bytes,
+            workspace_root,
+            *,
+            shape="saip-der",
+            placeholder_records=None,
+        ):
             observed.append(bytes(der_bytes))
             return LoadedDocument(
                 source_path=path,
@@ -241,7 +260,14 @@ class LoadProfileDocumentRoutingTests(_LoaderFixture):
         path = self.workspace_root / "junk"
         path.write_text("hello", encoding="utf-8")
 
-        def fail_decode(decoded_path, der_bytes, workspace_root, *, shape="saip-der"):
+        def fail_decode(
+            decoded_path,
+            der_bytes,
+            workspace_root,
+            *,
+            shape="saip-der",
+            placeholder_records=None,
+        ):
             raise SaipDiffLoadError(
                 f"{decoded_path}: DER decode failed: stub bypass for unit test"
             )

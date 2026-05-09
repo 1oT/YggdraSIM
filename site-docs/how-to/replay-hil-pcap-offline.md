@@ -25,7 +25,7 @@ streaming a live FIFO.
 ## Prerequisites
 
 - a saved `.pcap` or `.pcapng` captured by the HIL bridge, Wireshark,
-  `tshark`, or `dumpcap` -- on-wire frames must be either plain APDUs or
+  `tshark`, or `dumpcap` — on-wire frames must be either plain APDUs or
   GSMTAP over UDP `4729`
 - `tshark` on `PATH`
 - Python environment with YggdraSIM installed (source checkout or
@@ -75,13 +75,13 @@ For how to produce the keybag, see
         python main/main.py
         [B]   HIL Bridge Session
          [3]  Open saved .pcap (offline review, no bridge)
-              pcap path  : Workspace/hil/captures/session-example.pcapng
+             pcap path  : Workspace/hil/captures/session-example.pcapng
               keybag path: (blank → auto-discover)
         ```
 
 3. Navigate the capture.
 
-    The TUI behaves the same as in live capture mode -- summary list on
+    The TUI behaves the same as in live capture mode — summary list on
     the left, detail pane, hex pane, and stateful context rows.
     Secure-messaging APDUs that match a keybag entry gain an extra
     "plaintext" context line. Entries that do not match (wrong AID, no
@@ -175,7 +175,7 @@ capture; unmatched entries are skipped silently.
 | `tshark is not available` | Install `tshark` (`wireshark-cli`) and retry. |
 | `pcap file not found` | Path typo, or permissions on the capture. |
 | Ciphered APDUs stay wrapped | No keybag, wrong AID in the keybag entry, or the capture actually contains only plaintext APDUs. |
-| `SCP11.live --dump-keybag` prints "no-op" | Expected -- live mode BSP keys are not host-side. Use Local Access or SCP03. |
+| `SCP11.live --dump-keybag` prints "no-op" | Expected — live mode BSP keys are not host-side. Use Local Access or SCP03. |
 
 ## Related pages
 

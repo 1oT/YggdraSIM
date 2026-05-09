@@ -15,6 +15,7 @@
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 # -----------------------------------------------------------------------------
 
+"""Reference-guide printer: renders built-in SCP03 quick-reference text to stdout."""
 import os 
 from SCP03 .config import Config 
 
@@ -29,6 +30,7 @@ class ShellGuides :
 
     @classmethod 
     def print_guide (cls ,topic :str =""):
+        """Print the named reference guide to stdout."""
         original_topic =topic .upper ().strip ()
 
         while True :
@@ -194,11 +196,11 @@ class ShellGuides :
    - {Config.Colors.BOLD}ADF-USIM:{Config.Colors.ENDC} Typically 7FFF or 7FF0. Contains EF-IMSI (6F07), EF-Keys (6F08), EF-LOCI (6F7E), etc. (3GPP TS 31.102).
    - {Config.Colors.BOLD}FCP (Tag 62):{Config.Colors.ENDC} Returned in response. Tag 82 = File Descriptor (78=DF, 41=Transparent EF, 42=Linear Fixed, 43=Cyclic). Tag 83 = File ID (2 bytes). Tag 80 = File size (transparent). Tag 8A = Life Cycle (01/03/04/05). Tag 8B/8C/AB = Access conditions (read/update/admin).
 
-{Config.Colors.CYAN}2. Transparent EF -- READ BINARY / UPDATE BINARY{Config.Colors.ENDC}
+{Config.Colors.CYAN}2. Transparent EF — READ BINARY / UPDATE BINARY{Config.Colors.ENDC}
    - {Config.Colors.BOLD}READ BINARY:{Config.Colors.ENDC} `00 B0 <P1> <P2> <Le>`. P1|P2 = 2-byte offset (P1 high byte, P2 low byte). Le = number of bytes to read (00 = max).
    - {Config.Colors.BOLD}UPDATE BINARY:{Config.Colors.ENDC} `00 D6 <P1> <P2> <Lc> <Data>`. Same offset encoding. Short EF: single command; long EF: multiple commands with increasing offset.
 
-{Config.Colors.CYAN}3. Linear Fixed / Cyclic EF -- Records{Config.Colors.ENDC}
+{Config.Colors.CYAN}3. Linear Fixed / Cyclic EF — Records{Config.Colors.ENDC}
    - {Config.Colors.BOLD}READ RECORD:{Config.Colors.ENDC} `00 B2 <RecNbr> <Mode> <Le>`. Mode: 02=next, 03=previous, 04=absolute (RecNbr = record number).
    - {Config.Colors.BOLD}UPDATE RECORD:{Config.Colors.ENDC} `00 DC <RecNbr> <Mode> <Lc> <Data>`.
    - {Config.Colors.BOLD}SEARCH RECORD:{Config.Colors.ENDC} `00 A2 <RecNbr> <Mode> <Lc> <Search_Pattern>`. Mode 04 = from record 1. Used for FDN, SMS, etc.
@@ -229,7 +231,7 @@ class ShellGuides :
    - {Config.Colors.BOLD}ISD-P (Issuer Security Domain Profile):{Config.Colors.ENDC} One Profile per ISD-P; contains MNO subscription (network apps, files, keys).
    - {Config.Colors.BOLD}ECASD (eUICC Controlling Authority SD):{Config.Colors.ENDC} Root of trust: CI key, EUM certificates, EID (eUICC ID). EID is a 32-digit (20-byte BCD) identifier.
 
-{Config.Colors.CYAN}2. ES10c -- Local Profile Management (STORE DATA to ISD-R){Config.Colors.ENDC}
+{Config.Colors.CYAN}2. ES10c — Local Profile Management (STORE DATA to ISD-R){Config.Colors.ENDC}
    All ES10c requests are STORE DATA (80 E2) with P1=91 (reference), data = BER-TLV. Response in response data or 91 xx (proactive).
    - {Config.Colors.BOLD}GetProfilesInfo (BF 2D):{Config.Colors.ENDC} `80 E2 91 00 03 BF 2D 00`. Returns list of Profiles: ICCID, state (Enabled/Disabled), Profile nickname, MNO name.
    - {Config.Colors.BOLD}EnableProfile (BF 31):{Config.Colors.ENDC} `80 E2 91 00 <Lc> BF 31 <Len> [A0 | A1 <ICCID>]`. Enables the Profile. Only one Enabled at a time unless MEP.
@@ -249,7 +251,7 @@ class ShellGuides :
 
 {Config.Colors.CYAN}5. SGP Retrieval Matrix (Wizard Mapping){Config.Colors.ENDC}
    - {Config.Colors.BOLD}Action 1 - List:{Config.Colors.ENDC} ES10c.GetProfilesInfo / ES10b.GetProfilesInfo. Spec: SGP.22 5.7.15, SGP.32 5.9.14. Request tag `BF2D` (`80 E2 91 00 03 BF 2D 00`).
-   - {Config.Colors.BOLD}Action 2 - Scan:{Config.Colors.ENDC} Composite retrieval sequence (EuiccInfo1/2, EuiccConfiguredData, key/domain data, EID). The scan uses the same retry ladder as individual reads rather than assuming one fixed ISD-R access path.
+   - {Config.Colors.BOLD}Action 2 - Scan:{Config.Colors.ENDC} Composite retrieval sequence (EuiccInfo1/2, EuiccConfiguredData, key/domain data, EID). The scan now uses the same retry ladder as individual reads instead of assuming one fixed ISD-R access path.
    - {Config.Colors.BOLD}Action 3/4/5 - Enable/Disable/Delete:{Config.Colors.ENDC} Local profile state operations via ES10c profile management tags `BF31/BF32/BF33`.
    - {Config.Colors.BOLD}Action 6 - GetRAT:{Config.Colors.ENDC} ES10b.GetRAT. Spec: SGP.22 5.7.22 / SGP.32 5.9.13. Request tag `BF43`.
    - {Config.Colors.BOLD}Action 7 - GetNotifications:{Config.Colors.ENDC} ES10b.RetrieveNotificationsList. Spec: SGP.22 5.7.10 / SGP.32 5.9.11. Request tag `BF2B`.
@@ -271,14 +273,14 @@ class ShellGuides :
    INSTALL [for load] creates a Load File container; LOAD (80 E8) sends the CAP/IJC bytes; INSTALL [for install] or [for install and make selectable] instantiates the applet with AID and privileges.
 
 {Config.Colors.CYAN}2. Wizard Options (WIZARD menu){Config.Colors.ENDC}
-   - {Config.Colors.BOLD}1 -- INSTALL [for load] (GPCS 11.5.2.3.1):{Config.Colors.ENDC} P1=02. Registers a new Executable Load File (ELF) in the registry. Data: Load File AID (LV).
-   - {Config.Colors.BOLD}2 -- INSTALL [for install] (11.5.2.3.2):{Config.Colors.ENDC} P1=04. Instantiates an applet from a loaded module. Requires Load File AID, Module AID, Applet AID, privileges, optional install params.
-   - {Config.Colors.BOLD}3 -- INSTALL [for make selectable] (11.5.2.3.3):{Config.Colors.ENDC} Makes an installed applet selectable (assigns application AID, optional params).
-   - {Config.Colors.BOLD}4 -- INSTALL [for extradition] (11.5.2.3.4):{Config.Colors.ENDC} Transfers control of an SSD to another CA (extradition token).
-   - {Config.Colors.BOLD}5 -- INSTALL [for registry update] (11.5.2.3.5):{Config.Colors.ENDC} Updates registry metadata (e.g. AID, privileges) without re-loading.
-   - {Config.Colors.BOLD}6 -- INSTALL [for personalization] (11.5.2.3.6):{Config.Colors.ENDC} DGI-based personalization; sends STORE DATA / personalization TLVs to the selected SD (requires transport).
-   - {Config.Colors.BOLD}7 -- INSTALL [for install and make selectable] (11.5.2.3.7):{Config.Colors.ENDC} P1=0C. Single step: install applet and make it selectable.
-   - {Config.Colors.BOLD}8 -- Full CAP Install Sequence:{Config.Colors.ENDC} Parses a CAP/IJC file, extracts Package/Applet AIDs, builds INSTALL [for load], LOAD (chunked), INSTALL [for install]. Supports OTA chunk sizes (e.g. SMS-PP block limits).
+   - {Config.Colors.BOLD}1 — INSTALL [for load] (GPCS 11.5.2.3.1):{Config.Colors.ENDC} P1=02. Registers a new Executable Load File (ELF) in the registry. Data: Load File AID (LV).
+   - {Config.Colors.BOLD}2 — INSTALL [for install] (11.5.2.3.2):{Config.Colors.ENDC} P1=04. Instantiates an applet from a loaded module. Requires Load File AID, Module AID, Applet AID, privileges, optional install params.
+   - {Config.Colors.BOLD}3 — INSTALL [for make selectable] (11.5.2.3.3):{Config.Colors.ENDC} Makes an installed applet selectable (assigns application AID, optional params).
+   - {Config.Colors.BOLD}4 — INSTALL [for extradition] (11.5.2.3.4):{Config.Colors.ENDC} Transfers control of an SSD to another CA (extradition token).
+   - {Config.Colors.BOLD}5 — INSTALL [for registry update] (11.5.2.3.5):{Config.Colors.ENDC} Updates registry metadata (e.g. AID, privileges) without re-loading.
+   - {Config.Colors.BOLD}6 — INSTALL [for personalization] (11.5.2.3.6):{Config.Colors.ENDC} DGI-based personalization; sends STORE DATA / personalization TLVs to the selected SD (requires transport).
+   - {Config.Colors.BOLD}7 — INSTALL [for install and make selectable] (11.5.2.3.7):{Config.Colors.ENDC} P1=0C. Single step: install applet and make it selectable.
+   - {Config.Colors.BOLD}8 — Full CAP Install Sequence:{Config.Colors.ENDC} Parses a CAP/IJC file, extracts Package/Applet AIDs, builds INSTALL [for load], LOAD (chunked), INSTALL [for install]. Supports OTA chunk sizes (e.g. SMS-PP block limits).
 
 {Config.Colors.CYAN}3. APDU Structure (80 E6){Config.Colors.ENDC}
    `80 E6 <P1> 00 <Lc> <LoadFileAID_LV> <ModuleAID_LV> <AppletAID_LV> <Priv_LV> <Params_LV> <Token_LV>`. Mandatory empty fields encoded as length 00 (no value).

@@ -26,10 +26,8 @@ release.
       package-data in `pyproject.toml`)
 - [ ] operator-facing docs that reference `docs/` describe it as an
       optional local developer tree (not as shipped content)
-- [ ] the maintainer's local release-audit ledger (kept outside the
-      public tree) shows no open action items that a release should
-      ship with; anything explicitly deferred is recorded in the
-      maintainer's "Deferred" notes
+- [ ] no local-only audit/report files are required to validate this release;
+      all release gates are represented by tracked tests, docs, and CI checks
 - [ ] `pyflakes SCP03/ SCP11/ SCP80/ SIMCARD/ Tools/ main/ plugins/
       yggdrasim_common/` is clean modulo the two documented `# noqa:
       F401` probes and the `SCP11/shared` / `SCP11/relay` star-import
@@ -97,27 +95,13 @@ Do not mass-run. Redirect noisy runs to a log file and inspect with `rg`.
 
 ## Tagging and publishing
 
-The publish flow is wired end-to-end in `.github/workflows/build.yml`. Pushing
-an annotated `v*` tag triggers `docs-strict` + `pytest-suite`, the seven-way
-build matrix (Linux x86_64 / arm64 clean+full, macOS x86_64+arm64 clean,
-Windows x86_64 clean, Debian package) and the `publish-release` job. The
-`publish-release` job:
+The CI workflows are currently validation-only for the v1.0.1 cycle. They run
+build/test checks but do not publish release assets and do not push Docker
+images.
 
-- downloads every matrix artefact;
-- renames each binary to the canonical name the install scripts consume
-  (`yggdrasim-{os}-{arch}-{flavor}[.exe]`, see
-  `scripts/install/_common.sh::yg_asset_name` and
-  `scripts/install/install-windows.ps1::Install-YgFromRelease`);
-- generates a `SHA256SUMS` manifest;
-- guards the matrix against silent drift with an explicit "required asset"
-  list before calling `gh release create`;
-- calls `gh release create <tag> --notes-from-tag --verify-tag ...`, which
-  reuses the annotated tag message as the public release notes.
+Release publication is therefore a manual maintainer step.
 
-### Annotated-tag-message contract
-
-The release page's body comes from the **annotated** tag message via
-`gh release create --notes-from-tag`. Tagging steps:
+### Tagging contract
 
 - [ ] tag the release in git **with an annotation that reads as a
       release note** (covers headline behavioural changes, defaults,
@@ -127,19 +111,17 @@ The release page's body comes from the **annotated** tag message via
     git tag -a vX.Y.Z -m "$(cat <<'EOF'
     YggdraSIM vX.Y.Z
 
-    First / next ... release. Notable changes:
+    First / next … release. Notable changes:
 
-    - ...
-    - ...
+    - …
+    - …
     EOF
     )"
     git push origin vX.Y.Z
     ```
 
-- [ ] watch the workflow at `https://github.com/<repo>/actions`. The
-      `publish-release` job only runs on `refs/tags/v*`; failures in
-      `docs-strict`, `pytest-suite`, or any build leg short-circuit the
-      release publish.
+- [ ] watch the workflow at `https://github.com/<repo>/actions` and
+      confirm the validation jobs complete for the release tag/branch.
 - [ ] confirm the GitHub Release page lists the eight asset names plus
       `SHA256SUMS`:
 
@@ -162,9 +144,6 @@ The release page's body comes from the **annotated** tag message via
     YGGDRASIM_REPO=1oT/YggdraSIM \
       scripts/install/install-linux.sh --version vX.Y.Z
     ```
-
-- [ ] publish the Docker image (`.github/workflows/docker.yml`) if that
-      is part of the release.
 
 ## Post-release
 

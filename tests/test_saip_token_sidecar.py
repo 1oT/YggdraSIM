@@ -105,7 +105,7 @@ class DerivedLengthTokenTests(unittest.TestCase):
         out = ctx.expand_mixed_hex("5F[#ICCID][ICCID]")
         self.assertEqual(
             out,
-            bytes.fromhex("5F0A89461111111111111112"),
+            bytes.fromhex("5F0A89881111111111111112"),
         )
 
     def test_undefined_companion_tolerated(self) -> None:

@@ -19,7 +19,7 @@ name: PR approval gate
 #
 # Uses `pull_request_target` so the GITHUB_TOKEN has write permission on
 # pull requests opened from forks. IMPORTANT: this workflow must NEVER
-# check out or execute the PR head -- it only reads PR metadata.
+# check out or execute the PR head — it only reads PR metadata.
 #
 # See `.github/SECURITY_CONTROLS.md` for the full policy.
 

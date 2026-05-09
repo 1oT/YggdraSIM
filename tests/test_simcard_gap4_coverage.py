@@ -1,4 +1,8 @@
-"""Coverage for SIMCARD surfaces beyond ES10:
+"""Fourth-pass gap-coverage suite for SIMCARD surfaces beyond ES10.
+
+Earlier passes exhausted the SGP.32 v1.2 / SGP.22 v3.1 ES10b/c command
+backlog. This pass closes a different class of gaps -- behaviours that
+a real UICC always exposes but the simulator was missing:
 
 * ETSI TS 102 221 PIN lifecycle commands (CHANGE / DISABLE / ENABLE PIN
   -- INS 0x24 / 0x26 / 0x28). Only VERIFY (0x20) and UNBLOCK (0x2C)
