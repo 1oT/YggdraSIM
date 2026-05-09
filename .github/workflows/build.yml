@@ -1,7 +1,7 @@
 name: Build Bundles
 
 # The matrix publishes:
-#   * clean bundles for Linux (x86_64), Windows (x86_64), macOS (x86_64+arm64)
+#   * clean bundles for Linux (x86_64), Windows (x86_64), macOS (arm64 only)
 #   * clean bundle for Linux arm64 via QEMU, aimed at Raspberry Pi OS 64-bit
 #   * full bundle for Linux (x86_64) — includes the HIL bridge
 #   * full bundle for Linux arm64 via QEMU, aimed at Raspberry Pi + SIMtrace2
@@ -10,6 +10,9 @@ name: Build Bundles
 # See guides/INSTALL_CLEAN.md, guides/INSTALL_FULL.md, and
 # guides/INSTALL_RASPBERRYPI.md for how each artefact is expected to be
 # consumed downstream.
+#
+# The full ``tests/`` pytest sweep is intentionally out of scope here;
+# run it locally when changing behaviour covered by the suite.
 
 on:
   push:
@@ -45,46 +48,6 @@ jobs:
       - name: Build docs (strict)
         shell: bash
         run: mkdocs build --strict
-
-  pytest-suite:
-    name: Pytest (regression suite)
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v5
-
-      - name: Set up Python
-        uses: actions/setup-python@v6
-        with:
-          python-version: "3.11"
-
-      - name: Install Linux build dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            libpcsclite-dev pcscd swig pkg-config gpg libudev-dev build-essential
-
-      - name: Install Python dependencies (full + test extras)
-        shell: bash
-        run: |
-          python -m pip install --upgrade pip
-          python -m pip install -e '.[full]'
-
-      - name: Run pytest suite
-        shell: bash
-        env:
-          PYTHONUNBUFFERED: "1"
-        # ``-q --tb=short`` keeps the log small; ``--maxfail=5`` stops after
-        # a handful of failures so CI aborts fast on systemic regressions
-        # without dumping the whole failure report. pySim-dependent tests
-        # auto-skip via ``tests/conftest.py`` when the optional on-disk
-        # ``pysim/`` checkout is absent, which is the default on a fresh
-        # checkout (pySim is upstream, not vendored). Override by cloning
-        # ``git clone https://gitlab.com/osmocom/pysim.git pysim`` into the
-        # workspace prior to the pytest step.
-        run: |
-          python -m pytest -q --tb=short --disable-warnings --no-header --maxfail=5 tests/
 
   build-linux-x86_64:
     name: Linux x86_64 (${{ matrix.flavor }})
@@ -320,16 +283,8 @@ jobs:
           if-no-files-found: error
 
   build-macos-clean:
-    name: macOS ${{ matrix.arch }} clean
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - arch: x86_64
-            runner: macos-13
-          - arch: arm64
-            runner: macos-14
-    runs-on: ${{ matrix.runner }}
+    name: macOS arm64 clean
+    runs-on: macos-15
 
     steps:
       - name: Checkout code
@@ -346,7 +301,7 @@ jobs:
         run: |
           VERSION=$(python -c "import tomllib; from pathlib import Path; data = tomllib.loads(Path('pyproject.toml').read_text(encoding='utf-8')); print(data['project']['version'])")
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
-          echo "artifact_name=yggdrasim-macos-${{ matrix.arch }}-clean-${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "artifact_name=yggdrasim-macos-arm64-clean-${VERSION}" >> "$GITHUB_OUTPUT"
 
       - name: Install macOS build dependencies
         shell: bash

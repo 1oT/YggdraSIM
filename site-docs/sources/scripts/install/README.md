@@ -8,7 +8,7 @@ editable source installs, mapped to the flavors published by
 | Script | Host | Supported flavors | Modes |
 |---|---|---|---|
 | `install-linux.sh`        | Linux x86_64 / arm64 | clean, full | release, source |
-| `install-macos.sh`        | macOS x86_64 / arm64 | clean       | release, source |
+| `install-macos.sh`        | macOS arm64 (`release`); Intel Macs use `source` mode or a local bundle build | clean       | release, source |
 | `install-windows.ps1`     | Windows x86_64       | clean       | release, source |
 | `install-raspberrypi.sh`  | Raspberry Pi arm64 (Linux) | clean, full | release, source |
 

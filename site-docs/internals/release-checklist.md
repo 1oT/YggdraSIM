@@ -122,7 +122,7 @@ Release publication is therefore a manual maintainer step.
 
 - [ ] watch the workflow at `https://github.com/<repo>/actions` and
       confirm the validation jobs complete for the release tag/branch.
-- [ ] confirm the GitHub Release page lists the eight asset names plus
+- [ ] confirm the GitHub Release page lists the seven binary asset names plus
       `SHA256SUMS`:
 
     ```
@@ -130,7 +130,6 @@ Release publication is therefore a manual maintainer step.
     yggdrasim-linux-x86_64-full
     yggdrasim-linux-arm64-clean
     yggdrasim-linux-arm64-full
-    yggdrasim-macos-x86_64-clean
     yggdrasim-macos-arm64-clean
     yggdrasim-windows-x86_64-clean.exe
     yggdrasim-clean_X.Y.Z_amd64.deb

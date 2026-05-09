@@ -12,7 +12,7 @@ Each of those is published in two flavors:
 
 | Flavor | HIL bridge included | Platforms | Typical operator |
 | --- | --- | --- | --- |
-| `clean` | no | Windows x86_64 / macOS x86_64 + arm64 / Linux x86_64 / Raspberry Pi arm64 | desktop / CI / field |
+| `clean` | no | Windows x86_64 / macOS arm64 / Linux x86_64 / Raspberry Pi arm64 | desktop / CI / field |
 | `full`  | yes | Linux x86_64 only | HIL lab |
 | source  | optional via `[hil]` | any supported Python host | developer |
 
