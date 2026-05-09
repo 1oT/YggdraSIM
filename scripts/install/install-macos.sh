@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# YggdraSIM installer for macOS (x86_64 or arm64).
+# YggdraSIM installer for macOS. Pre-built ``release`` assets are arm64
+# only; Intel hosts use ``source`` mode or build a bundle locally.
 #
 # Only the clean flavor is published for macOS. The HIL bridge depends
 # on Linux-specific tooling (udev + osmo-remsim-client-st2) and cannot
@@ -29,6 +30,10 @@ if [ "${YG_HOST_OS}" != "macos" ]; then
 fi
 if [ "${YG_HOST_ARCH}" = "unknown" ]; then
     yg_die "unsupported CPU architecture: $(uname -m)"
+fi
+
+if [ "${YG_MODE}" = "release" ] && [ "${YG_HOST_ARCH}" = "x86_64" ]; then
+    yg_die "release mode has no GitHub-hosted Intel (x86_64) macOS binary; use --mode source or build from INSTALL_FROM_SOURCE.md"
 fi
 
 yg_validate_flavor_for_host "${YG_FLAVOR}" "${YG_HOST_OS}"
