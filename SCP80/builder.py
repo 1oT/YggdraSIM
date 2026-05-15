@@ -1,3 +1,5 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+"""SCP80 OTA packet builder: assembles RAM/RFM envelope APDUs from key material and script payload (ETSI TS 102 225)."""
 # -----------------------------------------------------------------------------
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -82,6 +84,7 @@ class OtaPacketBuilder :
 
     @classmethod
     def estimate_segment_count (cls ,payload_len :int ,cipher_mode :str ,max_tp_ud :int =None )->int :
+        """Return the number of SMS segments required for *payload_len* bytes with *cipher_mode* (TS 102 225 §7)."""
         tp_ud_max =cls .DEFAULT_TP_UD_MAX if max_tp_ud is None else max_tp_ud 
         block_size =cls ._block_size_for_cipher (cipher_mode )
         pcntr =CryptoEngine .compute_pcntr (payload_len ,block_size ,8 )
@@ -118,20 +121,20 @@ class OtaPacketBuilder :
 
     def _build_0348_block (self ,payload :bytes )->tuple :
         spi_hex =self .cfg .get ("spi")
-        kic_hex =self .cfg .get ("kic")
-        kid_hex =self .cfg .get ("kid")
+        kic_ind_hex =self .cfg .get ("kic_indicator")
+        kid_ind_hex =self .cfg .get ("kid_indicator")
         tar_hex =self .cfg .get ("tar")
         cntr_hex =self .cfg .get ("cntr")
-        enforce_demo_key_policy (self .cfg .get ("key_enc"),self .cfg .get ("key_mac"))
-        k_enc =Utils .to_bytes (self .cfg .get ("key_enc"))
-        k_mac =Utils .to_bytes (self .cfg .get ("key_mac"))
+        enforce_demo_key_policy (self .cfg .get ("kic"),self .cfg .get ("kid"))
+        kic_key =Utils .to_bytes (self .cfg .get ("kic"))
+        kid_key =Utils .to_bytes (self .cfg .get ("kid"))
 
-        cipher_mode =CryptoEngine .get_algo_type (kic_hex )
-        mac_mode =CryptoEngine .get_algo_type (kid_hex )
+        cipher_mode =CryptoEngine .get_algo_type (kic_ind_hex )
+        mac_mode =CryptoEngine .get_algo_type (kid_ind_hex )
         block_size =self ._block_size_for_cipher (cipher_mode )
 
-        param_data =(Utils .to_bytes (spi_hex )[:2 ]+Utils .to_bytes (kic_hex )[:1 ]+
-        Utils .to_bytes (kid_hex )[:1 ]+Utils .to_bytes (tar_hex )[:3 ])
+        param_data =(Utils .to_bytes (spi_hex )[:2 ]+Utils .to_bytes (kic_ind_hex )[:1 ]+
+        Utils .to_bytes (kid_ind_hex )[:1 ]+Utils .to_bytes (tar_hex )[:3 ])
         cntr_bytes =Utils .to_bytes (cntr_hex )[:5 ]
 
         pcntr =CryptoEngine .compute_pcntr (len (payload ),block_size ,8 )
@@ -146,9 +149,9 @@ class OtaPacketBuilder :
         header_blob =chi_byte +cpl_byte +chl_byte 
 
         mac_input =header_blob +param_data +cntr_bytes +pcntr_byte +payload_padded 
-        cc =CryptoEngine .compute_cc (mac_mode ,k_mac ,mac_input )
+        cc =CryptoEngine .compute_cc (mac_mode ,kid_key ,mac_input )
         enc_input =cntr_bytes +pcntr_byte +cc +payload_padded 
-        ct =CryptoEngine .encrypt_ct (cipher_mode ,k_enc ,enc_input )
+        ct =CryptoEngine .encrypt_ct (cipher_mode ,kic_key ,enc_input )
         block_0348 =header_blob +param_data +ct 
 
         return (
@@ -201,6 +204,11 @@ class OtaPacketBuilder :
         return apdu .hex ().upper ()
 
     def build_plan (self ,verbose :bool =False ,override_payload :str =None )->OtaBuildPlan :
+        """Build the full OTA send plan: SPI bytes, CC, CT, and SMS-PP APDU list (TS 102 225 §7).
+
+        Returns an ``OtaBuildPlan`` dataclass with the APDU hex list, keyset summary,
+        and debug fields. Raises ``ValueError`` when the payload is empty.
+        """
         payload_hex =override_payload if override_payload else self .cfg .get ("payload")
         if not payload_hex :
             raise ValueError ("Payload is empty")

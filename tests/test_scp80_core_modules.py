@@ -85,8 +85,8 @@ class DummyInventory:
 class DummyBuilderConfig:
     def __init__(self, values: dict[str, str] | None = None):
         self.values = dict(scp80_config.ConfigManager.DEFAULTS)
-        self.values["key_enc"] = "0123456789ABCDEFFEDCBA9876543210"
-        self.values["key_mac"] = "00112233445566778899AABBCCDDEEFF"
+        self.values["kic"] = "0123456789ABCDEFFEDCBA9876543210"
+        self.values["kid"] = "00112233445566778899AABBCCDDEEFF"
         if values is not None:
             self.values.update(values)
         self.increment_counter_calls = 0
@@ -159,6 +159,85 @@ class ConfigManagerTests(unittest.TestCase):
 
         self.assertEqual(manager.data["cntr"], "0000000000")
         self.assertEqual(save_calls, ["save"])
+
+
+class LegacyKeyMigrationTests(unittest.TestCase):
+    """Lock the soft-compat behaviour for pre-rename SCP80 config keys.
+
+    Pre-rename schema (unversioned ini files in the wild) carried:
+      - ``key_enc`` / ``key_mac``: 16-byte session keys.
+      - ``kic`` / ``kid``: 2-hex-char ETSI TS 102 225 §5.1.1 indicator bytes.
+    Current schema renames the session keys to ``kic`` / ``kid`` and the
+    indicators to ``kic_indicator`` / ``kid_indicator``. The loader must
+    auto-migrate so existing on-disk records keep working without manual
+    rewrites.
+    """
+
+    def _migrate(self, payload: dict) -> tuple:
+        return scp80_config.ConfigManager._migrate_legacy_keys(payload)
+
+    def test_key_enc_and_key_mac_route_to_kic_and_kid(self) -> None:
+        legacy = {"key_enc": "AA" * 16, "key_mac": "BB" * 16}
+        migrated, log = self._migrate(legacy)
+        self.assertEqual(migrated.get("kic"), "AA" * 16)
+        self.assertEqual(migrated.get("kid"), "BB" * 16)
+        self.assertNotIn("key_enc", migrated)
+        self.assertNotIn("key_mac", migrated)
+        self.assertIn("key_enc -> kic", log)
+        self.assertIn("key_mac -> kid", log)
+
+    def test_two_char_kic_kid_route_to_indicator_slots(self) -> None:
+        legacy = {"kic": "15", "kid": "15"}
+        migrated, log = self._migrate(legacy)
+        self.assertEqual(migrated.get("kic_indicator"), "15")
+        self.assertEqual(migrated.get("kid_indicator"), "15")
+        self.assertNotIn("kic", migrated)
+        self.assertNotIn("kid", migrated)
+        self.assertIn("kic -> kic_indicator", log)
+        self.assertIn("kid -> kid_indicator", log)
+
+    def test_full_legacy_payload_migrates_both_layers(self) -> None:
+        legacy = {
+            "kic": "12",
+            "kid": "12",
+            "key_enc": "11" * 16,
+            "key_mac": "22" * 16,
+        }
+        migrated, log = self._migrate(legacy)
+        self.assertEqual(migrated.get("kic_indicator"), "12")
+        self.assertEqual(migrated.get("kid_indicator"), "12")
+        self.assertEqual(migrated.get("kic"), "11" * 16)
+        self.assertEqual(migrated.get("kid"), "22" * 16)
+        self.assertEqual(len(log), 4)
+
+    def test_modern_payload_passes_through_unchanged(self) -> None:
+        modern = {
+            "kic_indicator": "15",
+            "kid_indicator": "15",
+            "kic": "33" * 16,
+            "kid": "44" * 16,
+        }
+        migrated, log = self._migrate(modern)
+        self.assertEqual(migrated, modern)
+        self.assertEqual(log, [])
+
+    def test_legacy_indicator_does_not_overwrite_explicit_indicator(self) -> None:
+        payload = {
+            "kic": "15",
+            "kic_indicator": "32",
+        }
+        migrated, _log = self._migrate(payload)
+        self.assertEqual(migrated.get("kic_indicator"), "32")
+        self.assertEqual(migrated.get("kic"), "15")
+
+    def test_legacy_session_key_does_not_overwrite_explicit_kic(self) -> None:
+        payload = {
+            "key_enc": "AA" * 16,
+            "kic": "BB" * 16,
+        }
+        migrated, _log = self._migrate(payload)
+        self.assertEqual(migrated.get("kic"), "BB" * 16)
+        self.assertNotIn("key_enc", migrated)
 
 
 class CryptoEngineTests(unittest.TestCase):

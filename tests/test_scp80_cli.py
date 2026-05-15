@@ -209,11 +209,22 @@ class OtaShellTests(unittest.TestCase):
         buffer = io.StringIO()
 
         with redirect_stdout(buffer):
+            shell.do_set("cla", "80")
+
+        self.assertEqual(shell.config.set_calls, [("cla", "80")])
+        self.assertEqual(shell.config.save_calls, 1)
+        self.assertIn("cla updated", buffer.getvalue())
+
+    def test_do_set_aliases_counter_to_cntr(self) -> None:
+        shell = self._make_shell()
+        buffer = io.StringIO()
+
+        with redirect_stdout(buffer):
             shell.do_set("counter", "9")
 
-        self.assertEqual(shell.config.set_calls, [("counter", "9")])
+        self.assertEqual(shell.config.set_calls, [("cntr", "9")])
         self.assertEqual(shell.config.save_calls, 1)
-        self.assertIn("counter updated", buffer.getvalue())
+        self.assertIn("cntr updated", buffer.getvalue())
 
     def test_do_set_reports_value_errors(self) -> None:
         shell = self._make_shell()

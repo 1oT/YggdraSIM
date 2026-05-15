@@ -1,3 +1,5 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+"""SCP80 transport: wraps the pySim OTA keyset and dispatches APDU envelopes over the active card connection."""
 # -----------------------------------------------------------------------------
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -43,6 +45,7 @@ class Transport :
         self .active_protocol =None
 
     def connect (self ,protocol =None )->bool :
+        """Connect to the reader or simulated card backend; return True on success."""
         if not PYSCRARD_AVAIL and not is_simulated_card_backend ():
             print (f"{Colors.FAIL}[!] pyscard library missing.{Colors.ENDC}")
             return False 
@@ -84,6 +87,7 @@ class Transport :
         return "".join (digits ).replace ("F","")
 
     def read_iccid (self )->str :
+        """Read and return the ICCID from EF.ICCID via the active connection."""
         if self .conn is None :
             if self .connect ()==False :
                 return ""
@@ -111,6 +115,7 @@ class Transport :
         return str (protocol )
 
     def get_protocol_summary (self )->Dict [str ,Any ]:
+        """Return a JSON-serialisable dict summarising the current card connection and ATR."""
         info ={
         "available":False ,
         "atr_hex":None ,
@@ -160,6 +165,7 @@ class Transport :
         return self .connect (CardConnection .T1_protocol )
 
     def transmit (self ,apdu_hex :str ,silent :bool =False ,log_tx :bool =True ,log_rx :bool =True )->Tuple [bytes ,int ]:
+        """Send one APDU hex string and return (response_bytes, status_word) as an int."""
         if not self .conn :return b'',0x6F00 
         raw =Utils .to_bytes (apdu_hex )
         if not silent and log_tx :
@@ -208,6 +214,7 @@ class Transport :
         return result 
 
     def send_ota_sequence (self ,apdu_hex_list :List [str ] ,verbose :bool =False )->Dict [str ,Any ]:
+        """Send a list of SCP80 OTA APDUs in sequence and return a result dict with SW and POR."""
         result ={
         "sw":None ,
         "por":None ,
