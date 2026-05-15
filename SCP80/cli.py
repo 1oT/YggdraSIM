@@ -1,3 +1,5 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+"""SCP80 CLI: operator-facing shell for OTA session setup, script dispatch, and response decoding."""
 # -----------------------------------------------------------------------------
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -65,6 +67,7 @@ class SmartDecoder :
                     self .fid_lookup [fids ]=name 
 
     def sniff_context (self ,full_apdu :str ):
+        """Walk a raw APDU hex string to infer the selected FID and Le from SELECT/READ patterns."""
         idx =0 ;current_fid =None ;last_le =0 
         s =full_apdu .upper ().replace (" ","")
         try :
@@ -89,6 +92,7 @@ class SmartDecoder :
         return current_fid ,last_le 
 
     def try_decode (self ,fid ,le ,por_hex ):
+        """Attempt to decode a POR response hex string and print a human-readable summary."""
         if not SCP03_AVAIL or not por_hex :return 
         payload =""
 
@@ -152,6 +156,44 @@ class OtaShell :
             return False 
         return self ._bind_inventory_profile (iccid ,announce =announce )
 
+    def _bind_print_profile (self ,announce :bool =True )->bool :
+        sentinel =ConfigManager .PRINT_ICCID_SENTINEL 
+        payload =self .config .bind_iccid_profile (sentinel )
+        self .current_iccid =sentinel 
+        if announce :
+            if isinstance (payload ,dict )and len (payload )>0 :
+                print (
+                f"{Colors.GREEN}[+] PRINT mode: loaded isolated SCP80 profile "
+                f"for ICCID <{sentinel}>.{Colors.ENDC}"
+                )
+            else :
+                print (
+                f"{Colors.CYAN}[*] PRINT mode: seeded isolated SCP80 profile "
+                f"for ICCID <{sentinel}> using current defaults.{Colors.ENDC}"
+                )
+        return True 
+
+    def _apply_transport_state (self ,announce :bool =True )->None :
+        transport_mode =self .config .get ("transport")
+        if transport_mode =="reader":
+            try :
+                self .transport .connect ()
+            except Exception as e :
+                if announce :
+                    print (f"{Colors.FAIL}[!] Reader connect failed: {e}{Colors.ENDC}")
+            self ._refresh_inventory_from_reader (announce =announce )
+            return 
+        try :
+            self .transport .disconnect ()
+        except Exception :
+            pass 
+        self ._bind_print_profile (announce =announce )
+
+    def _prompt_tag (self )->str :
+        if self .config .get ("transport")=="reader":
+            return "READER"
+        return "PRINT"
+
     @staticmethod
     def _normalize_script_hex_line (line :str )->str :
         line_body =line .split ('#',1 )[0 ]
@@ -168,6 +210,7 @@ class OtaShell :
         except Exception :pass 
 
     def run (self ):
+        """Start the interactive SCP80 CLI REPL, handling OS-specific readline setup."""
         is_nt =False 
         if os .name =='nt':
             is_nt =True 
@@ -201,19 +244,11 @@ class OtaShell :
 
         self ._setup_history ()
 
-        is_reader =False 
-        if self .config .get ("transport")=="reader":
-            is_reader =True 
-
-        if is_reader :
-            self .transport .connect ()
-            self ._refresh_inventory_from_reader (announce =True )
+        self ._apply_transport_state (announce =True )
 
         while True :
             try :
-                mode ="PRINT"
-                if is_reader :
-                    mode ="OTA"
+                mode =self ._prompt_tag ()
 
                 line =input (f"\n{Colors.CYAN}[{mode}]{Colors.ENDC} > ").strip ()
 
@@ -261,6 +296,7 @@ class OtaShell :
                 print (f"{Colors.FAIL}Error: {e}{Colors.ENDC}")
 
     def run_commands (self ,cmd_line :str )->None :
+        """Execute a semicolon-delimited list of CLI commands non-interactively."""
         for raw_command in str (cmd_line or "").split (';'):
             command_text =str (raw_command or "").strip ()
             if len (command_text )==0 :
@@ -301,29 +337,47 @@ class OtaShell :
             print (f"{i:4}: {readline.get_history_item(i)}")
 
     def do_show (self ,*args ):
+        """Print the current ICCID, keyset, and transport configuration."""
         print (f"{Colors.CYAN}--- Configuration ---{Colors.ENDC}")
         if len (self .current_iccid )>0 :
-            print (f"{'iccid':<12}: {self.current_iccid}")
+            print (f"{'iccid':<14}: {self.current_iccid}")
         hidden =["header","cla","sender"]
+        indicator_keys =["kic_indicator","kid_indicator"]
         for k ,v in self .config .data .items ():
             if k in hidden :continue 
-            val =CryptoEngine .describe_keyset (v )if k in ["kic","kid"]else v 
-            print (f"{k:<12}: {val}")
+            val =CryptoEngine .describe_keyset (v )if k in indicator_keys else v 
+            print (f"{k:<14}: {val}")
         self ._print_reader_protocol_caveat ()
         print (f"{Colors.CYAN}---------------------{Colors.ENDC}")
 
+    SET_KEY_ALIASES ={
+    "counter":"cntr",
+    "key_enc":"kic",
+    "key_mac":"kid",
+    }
+
     def do_set (self ,*args ):
+        """Set a runtime configuration key-value pair (persisted in the OTA config)."""
         if len (args )<2 :
             print ("Usage: set <k> <v>")
             return 
+        raw_key =args [0 ].lower ()
+        key =self .SET_KEY_ALIASES .get (raw_key ,raw_key )
+        previous_transport =self .config .get ("transport")
         try :
-            self .config .set (args [0 ].lower (),args [1 ])
+            self .config .set (key ,args [1 ])
             self .config .save ()
-            print (f"{Colors.GREEN}[+] {args[0].lower()} updated.{Colors.ENDC}")
+            print (f"{Colors.GREEN}[+] {key} updated.{Colors.ENDC}")
         except ValueError as e :
             print (f"{Colors.FAIL}[!] {e}{Colors.ENDC}")
+            return 
+        if key =="transport":
+            new_transport =self .config .get ("transport")
+            if new_transport !=previous_transport :
+                self ._apply_transport_state (announce =True )
 
     def do_iccid (self ,*args ):
+        """Select the active ICCID for OTA operations; refreshes from the reader when no argument is given."""
         if len (args )==0 :
             if self .config .get ("transport")=="reader":
                 self ._refresh_inventory_from_reader (announce =True )
@@ -385,6 +439,7 @@ class OtaShell :
         return [apdu .apdu_hex for apdu in plan .apdus ]
 
     def do_build (self ,*args ):
+        """Build the SCP80 OTA envelope for the active payload and print the APDU hex without sending."""
         verbose =bool (getattr (self ,"global_debug",False ))or "-v"in args 
         override_payload =self ._override_payload_from_args (args )
         try :
@@ -397,6 +452,7 @@ class OtaShell :
             print (f"Error: {e}")
 
     def do_send (self ,*args ):
+        """Build and send the SCP80 OTA envelope, then print the POR response."""
         verbose =bool (getattr (self ,"global_debug",False ))or "-v"in args 
         try :
             override_payload =self ._override_payload_from_args (args )
@@ -422,6 +478,7 @@ class OtaShell :
             self ._refresh_inventory_from_reader (announce =True )
 
     def do_script (self ,*args ):
+        """Execute a file of CLI commands line-by-line via ``run_commands``."""
         if not args :print ("Usage: script <file>");return 
         if not os .path .exists (args [0 ]):print ("File not found");return 
         print (f"{Colors.CYAN}[*] Executing script: {args[0]}{Colors.ENDC}")
@@ -437,6 +494,7 @@ class OtaShell :
                     break 
 
     def do_ota (self ,*args ):
+        """Wrap a raw APDU hex string in an SCP80 OTA envelope and transmit it."""
         raw_apdu =''.join ("".join (args ).split ())
         fid ,le =self .decoder .sniff_context (raw_apdu )
 
@@ -553,6 +611,7 @@ class OtaShell :
             print (f"{Colors.FAIL}[!] {error}{Colors.ENDC}")
 
     def do_help (self ,*args ):
+        """Print the command reference for the interactive SCP80 CLI."""
         print ("Commands:")
         print ("  <hex string>    - Direct OTA wrap and send")
         print ("  ota <hex>       - Explicit OTA wrap and send")
