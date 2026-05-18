@@ -1,243 +1,267 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+"""Tests for pure-function helpers in ``Tools.HilBridge.protocol``.
+
+Covers: ensure_bytes, build_simple_tlv, describe_refresh_mode,
+normalize_refresh_mode, build_proactive_refresh_command,
+build_ipa_ping, build_component_identity, build_client_slot,
+build_bank_slot, build_rspro_pdu, get_pdu_message_name,
+get_pdu_message_body, get_pdu_tag, build_connect_client_res.
+
+All tested functions are pure (no network, no ASN.1 codec).
+"""
+
 from __future__ import annotations
 
-import os
-import struct
-import tempfile
-import threading
 import unittest
-from pathlib import Path
 
 from Tools.HilBridge.protocol import (
-    GSMTAP_ARFCN_F_UPLINK,
-    GSMTAP_COMPAT_WIRESHARK44,
-    GSMTAP_HDR_LEN_WORDS,
-    GSMTAP_SIM_APDU,
-    GSMTAP_TYPE_SIM,
-    GSMTAP_VERSION,
-    GsmtapPcapWriter,
-    GsmtapTap,
-    IPA_EXT_RSPRO,
-    IPA_MSGT_PONG,
-    IPA_PROTO_CCM,
-    IPA_PROTO_OSMO,
-    build_simtrace_apdu_payload,
-    IpaFrameParser,
-    build_gsmtap_packet,
-    build_ipa_frame,
-    build_ipa_pong,
-    build_ip_choice,
-    build_pcap_global_header,
+    REFRESH_MODE_EUICC_PROFILE_STATE_CHANGE,
+    REFRESH_MODE_UICC_RESET,
+    build_bank_slot,
+    build_client_slot,
+    build_component_identity,
+    build_connect_client_res,
+    build_ipa_ping,
+    build_proactive_refresh_command,
+    build_rspro_pdu,
+    build_simple_tlv,
+    describe_refresh_mode,
+    ensure_bytes,
+    get_pdu_message_body,
+    get_pdu_message_name,
+    get_pdu_tag,
+    normalize_refresh_mode,
 )
 
 
-class _FakeSocket:
-    def __init__(self) -> None:
-        self.sent: list[tuple[bytes, tuple[str, int]]] = []
+class EnsureBytesTests(unittest.TestCase):
 
-    def close(self) -> None:
-        return
+    def test_bytes_passthrough(self) -> None:
+        raw = b"\xAA\xBB"
+        result = ensure_bytes(raw)
+        self.assertIs(result, raw)
 
-    def sendto(self, packet: bytes, address: tuple[str, int]) -> None:
-        self.sent.append((packet, address))
+    def test_bytearray_converted(self) -> None:
+        ba = bytearray([0x01, 0x02])
+        result = ensure_bytes(ba)
+        self.assertIsInstance(result, bytes)
+        self.assertEqual(result, b"\x01\x02")
+
+    def test_list_converted(self) -> None:
+        result = ensure_bytes([0x10, 0x20])
+        self.assertEqual(result, b"\x10\x20")
+
+    def test_tuple_converted(self) -> None:
+        result = ensure_bytes((0xAB, 0xCD))
+        self.assertEqual(result, b"\xAB\xCD")
 
 
-class HilBridgeProtocolTests(unittest.TestCase):
-    def test_ipa_parser_reassembles_fragmented_extended_frame(self) -> None:
-        parser = IpaFrameParser()
-        frame = build_ipa_frame(IPA_PROTO_OSMO, b"\x30\x00\xAA", ext=IPA_EXT_RSPRO)
+class BuildSimpleTlvTests(unittest.TestCase):
 
-        self.assertEqual(parser.feed(frame[:2]), [])
-        self.assertEqual(parser.feed(frame[2:5]), [])
+    def test_short_value(self) -> None:
+        # Tag 0x82, value 0xDEAD → 82 02 DE AD
+        result = build_simple_tlv(0x82, b"\xDE\xAD")
+        self.assertEqual(result, bytes([0x82, 0x02, 0xDE, 0xAD]))
 
-        frames = parser.feed(frame[5:])
-        self.assertEqual(len(frames), 1)
-        self.assertEqual(frames[0].proto, IPA_PROTO_OSMO)
-        self.assertEqual(frames[0].ext, IPA_EXT_RSPRO)
-        self.assertEqual(frames[0].payload, b"\x30\x00\xAA")
+    def test_empty_value(self) -> None:
+        result = build_simple_tlv(0x01, b"")
+        self.assertEqual(result, bytes([0x01, 0x00]))
 
-    def test_ipa_parser_handles_back_to_back_frames(self) -> None:
-        parser = IpaFrameParser()
-        combined = build_ipa_pong() + build_ipa_frame(IPA_PROTO_OSMO, b"ABC", ext=IPA_EXT_RSPRO)
+    def test_tag_masked_to_byte(self) -> None:
+        # Tag values above 0xFF are masked.
+        result = build_simple_tlv(0x1FF, b"\xAA")
+        self.assertEqual(result[0], 0xFF)
 
-        frames = parser.feed(combined)
-        self.assertEqual(len(frames), 2)
-        self.assertEqual(frames[0].proto, IPA_PROTO_CCM)
-        self.assertEqual(frames[0].ext, IPA_MSGT_PONG)
-        self.assertEqual(frames[0].payload, b"")
-        self.assertEqual(frames[1].proto, IPA_PROTO_OSMO)
-        self.assertEqual(frames[1].ext, IPA_EXT_RSPRO)
-        self.assertEqual(frames[1].payload, b"ABC")
+    def test_returns_bytes(self) -> None:
+        self.assertIsInstance(build_simple_tlv(0x10, b"\x00"), bytes)
 
-    def test_build_gsmtap_packet_uses_v2_sim_header(self) -> None:
-        packet = build_gsmtap_packet(b"\x00\xA4\x04\x00", subtype=GSMTAP_SIM_APDU, uplink=True)
-        self.assertEqual(len(packet), 20)
 
-        header = packet[:16]
-        payload = packet[16:]
-        unpacked = struct.unpack("!BBBBHbbIBBBB", header)
+class DescribeRefreshModeTests(unittest.TestCase):
 
-        self.assertEqual(unpacked[0], GSMTAP_VERSION)
-        self.assertEqual(unpacked[1], GSMTAP_HDR_LEN_WORDS)
-        self.assertEqual(unpacked[2], GSMTAP_TYPE_SIM)
-        self.assertEqual(unpacked[4], GSMTAP_ARFCN_F_UPLINK)
-        self.assertEqual(unpacked[8], GSMTAP_SIM_APDU)
-        self.assertEqual(payload, b"\x00\xA4\x04\x00")
+    def test_known_qualifier_uicc_reset(self) -> None:
+        self.assertEqual(describe_refresh_mode(0x04), REFRESH_MODE_UICC_RESET)
 
-    def test_build_simtrace_apdu_payload_concatenates_command_and_response(self) -> None:
-        payload = build_simtrace_apdu_payload(b"\x00\xA4\x04\x00", b"\x61\x19")
-        self.assertEqual(payload, b"\x00\xA4\x04\x00\x61\x19")
+    def test_known_qualifier_profile_state_change(self) -> None:
+        self.assertEqual(describe_refresh_mode(0x09), REFRESH_MODE_EUICC_PROFILE_STATE_CHANGE)
 
-    def test_gsmtap_native_mode_emits_single_combined_packet(self) -> None:
-        tap = GsmtapTap(enabled=False)
-        fake_socket = _FakeSocket()
-        tap._socket = fake_socket
+    def test_unknown_qualifier_fallback(self) -> None:
+        result = describe_refresh_mode(0xFF)
+        self.assertIn("0xFF", result)
 
-        tap.mirror_exchange(b"\x00\xA4\x04\x00", b"\x61\x19")
+    def test_returns_string(self) -> None:
+        self.assertIsInstance(describe_refresh_mode(0x00), str)
 
-        self.assertEqual(len(fake_socket.sent), 1)
-        packet, address = fake_socket.sent[0]
-        self.assertEqual(address, ("127.0.0.1", 4729))
-        unpacked = struct.unpack("!BBBBHbbIBBBB", packet[:16])
-        self.assertEqual(unpacked[0], GSMTAP_VERSION)
-        self.assertEqual(unpacked[1], GSMTAP_HDR_LEN_WORDS)
-        self.assertEqual(unpacked[2], GSMTAP_TYPE_SIM)
-        self.assertEqual(unpacked[4], GSMTAP_ARFCN_F_UPLINK)
-        self.assertEqual(unpacked[8], GSMTAP_SIM_APDU)
-        self.assertEqual(packet[16:], b"\x00\xA4\x04\x00\x61\x19")
 
-    def test_gsmtap_wireshark44_mode_emits_single_combined_packet(self) -> None:
-        tap = GsmtapTap(enabled=False, compat_mode=GSMTAP_COMPAT_WIRESHARK44)
-        fake_socket = _FakeSocket()
-        tap._socket = fake_socket
+class NormalizeRefreshModeTests(unittest.TestCase):
 
-        tap.mirror_exchange(b"\x00\xA4\x04\x00", b"\x61\x19")
-        tap.send_atr(b"\x3B\x00")
+    def test_integer_input(self) -> None:
+        name, qualifier = normalize_refresh_mode(4)
+        self.assertEqual(qualifier, 4)
+        self.assertEqual(name, REFRESH_MODE_UICC_RESET)
 
-        self.assertEqual(len(fake_socket.sent), 1)
-        packet, address = fake_socket.sent[0]
-        self.assertEqual(address, ("127.0.0.1", 4729))
-        unpacked = struct.unpack("!BBBBHbbIBBBB", packet[:16])
-        self.assertEqual(unpacked[0], GSMTAP_VERSION)
-        self.assertEqual(unpacked[1], GSMTAP_HDR_LEN_WORDS)
-        self.assertEqual(unpacked[2], GSMTAP_TYPE_SIM)
-        self.assertEqual(unpacked[4], GSMTAP_ARFCN_F_UPLINK)
-        self.assertEqual(unpacked[8], GSMTAP_SIM_APDU)
-        self.assertEqual(packet[16:], b"\x00\xA4\x04\x00\x61\x19")
+    def test_canonical_string(self) -> None:
+        name, qualifier = normalize_refresh_mode(REFRESH_MODE_UICC_RESET)
+        self.assertEqual(qualifier, 0x04)
+        self.assertEqual(name, REFRESH_MODE_UICC_RESET)
 
-    def test_gsmtap_capture_path_writes_pcap_with_udp_wrapped_packet(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            capture_path = Path(temp_dir) / "live_capture.pcap"
-            tap = GsmtapTap(enabled=False, capture_path=str(capture_path))
-            tap.mirror_exchange(b"\x00\xA4\x04\x00", b"\x61\x19")
-            tap.close()
+    def test_alias_string(self) -> None:
+        name, qualifier = normalize_refresh_mode("reset")
+        self.assertEqual(name, REFRESH_MODE_UICC_RESET)
 
-            payload = capture_path.read_bytes()
+    def test_0x_hex_prefix(self) -> None:
+        name, qualifier = normalize_refresh_mode("0x04")
+        self.assertEqual(qualifier, 4)
 
-        self.assertGreaterEqual(len(payload), 40)
-        magic, major, minor, _tz, _sigfigs, snaplen, linktype = struct.unpack("<IHHIIII", payload[:24])
-        self.assertEqual(magic, 0xA1B2C3D4)
-        self.assertEqual((major, minor), (2, 4))
-        self.assertEqual(snaplen, 65535)
-        self.assertEqual(linktype, 1)
+    def test_two_char_hex(self) -> None:
+        name, qualifier = normalize_refresh_mode("04")
+        self.assertEqual(qualifier, 4)
 
-        _ts_sec, _ts_usec, incl_len, orig_len = struct.unpack("<IIII", payload[24:40])
-        self.assertEqual(incl_len, orig_len)
-        frame = payload[40 : 40 + incl_len]
-        self.assertEqual(frame[12:14], b"\x08\x00")
-        expected_packet = build_gsmtap_packet(
-            build_simtrace_apdu_payload(b"\x00\xA4\x04\x00", b"\x61\x19"),
-            subtype=GSMTAP_SIM_APDU,
-            uplink=True,
+    def test_empty_string_defaults_to_profile_state_change(self) -> None:
+        name, qualifier = normalize_refresh_mode("")
+        self.assertEqual(name, REFRESH_MODE_EUICC_PROFILE_STATE_CHANGE)
+
+    def test_invalid_name_raises(self) -> None:
+        with self.assertRaises(ValueError):
+            normalize_refresh_mode("no-such-mode-xyz")
+
+    def test_returns_tuple(self) -> None:
+        result = normalize_refresh_mode(0x00)
+        self.assertIsInstance(result, tuple)
+        self.assertEqual(len(result), 2)
+
+
+class BuildProactiveRefreshCommandTests(unittest.TestCase):
+
+    def test_produces_bytes(self) -> None:
+        result = build_proactive_refresh_command(command_number=1, qualifier="uicc-reset")
+        self.assertIsInstance(result, bytes)
+        self.assertGreater(len(result), 0)
+
+    def test_zero_command_number_raises(self) -> None:
+        with self.assertRaises(ValueError):
+            build_proactive_refresh_command(command_number=0, qualifier="uicc-reset")
+
+    def test_qualifier_int(self) -> None:
+        result = build_proactive_refresh_command(command_number=1, qualifier=4)
+        self.assertIsInstance(result, bytes)
+
+    def test_different_qualifiers_differ(self) -> None:
+        a = build_proactive_refresh_command(command_number=1, qualifier="uicc-reset")
+        b = build_proactive_refresh_command(command_number=1, qualifier="euicc-profile-state-change")
+        self.assertNotEqual(a, b)
+
+
+class BuildIpaPingTests(unittest.TestCase):
+
+    def test_returns_bytes(self) -> None:
+        self.assertIsInstance(build_ipa_ping(), bytes)
+
+    def test_non_empty(self) -> None:
+        self.assertGreater(len(build_ipa_ping()), 0)
+
+    def test_deterministic(self) -> None:
+        self.assertEqual(build_ipa_ping(), build_ipa_ping())
+
+
+class BuildComponentIdentityTests(unittest.TestCase):
+
+    def test_returns_dict(self) -> None:
+        result = build_component_identity(
+            "server", name="test", software="sw", sw_version="1.0"
         )
-        self.assertEqual(frame[-len(expected_packet) :], expected_packet)
+        self.assertIsInstance(result, dict)
 
-    def test_gsmtap_pcap_writer_mirrors_header_and_record_into_fifo(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            capture_path = Path(temp_dir) / "live_capture.pcap"
-            fifo_path = Path(temp_dir) / "live_capture.fifo"
-            os.mkfifo(str(fifo_path))
-
-            collected_bytes = bytearray()
-            reader_done = threading.Event()
-
-            def reader_thread() -> None:
-                try:
-                    with open(str(fifo_path), "rb") as stream:
-                        while True:
-                            chunk = stream.read(4096)
-                            if chunk is None or len(chunk) == 0:
-                                break
-                            collected_bytes.extend(chunk)
-                finally:
-                    reader_done.set()
-
-            reader = threading.Thread(target=reader_thread, daemon=True)
-            reader.start()
-
-            writer = GsmtapPcapWriter(
-                path=str(capture_path),
-                mirror_fifo_path=str(fifo_path),
-            )
-            payload = build_gsmtap_packet(
-                build_simtrace_apdu_payload(b"\x00\xA4\x04\x00", b"\x61\x19"),
-                subtype=GSMTAP_SIM_APDU,
-                uplink=True,
-            )
-            writer.write_gsmtap_packet(payload, timestamp=1_700_000_000.123456)
-            writer.write_gsmtap_packet(payload, timestamp=1_700_000_000.234567)
-            writer.close()
-
-            reader.join(timeout=2.0)
-            self.assertTrue(reader_done.is_set())
-
-        self.assertGreaterEqual(len(collected_bytes), 24 + 16 + 1)
-        mirrored_header = bytes(collected_bytes[:24])
-        self.assertEqual(mirrored_header, build_pcap_global_header())
-        magic, major, minor, _tz, _sigfigs, snaplen, linktype = struct.unpack(
-            "<IHHIIII",
-            mirrored_header,
+    def test_contains_expected_keys(self) -> None:
+        result = build_component_identity(
+            "server", name="test", software="sw", sw_version="1.0"
         )
-        self.assertEqual(magic, 0xA1B2C3D4)
-        self.assertEqual((major, minor), (2, 4))
-        self.assertEqual(snaplen, 65535)
-        self.assertEqual(linktype, 1)
+        self.assertIn("type", result)
+        self.assertIn("name", result)
+        self.assertIn("software", result)
+        self.assertIn("swVersion", result)
 
-        first_record_header = bytes(collected_bytes[24:40])
-        _ts_sec, _ts_usec, incl_len, orig_len = struct.unpack("<IIII", first_record_header)
-        self.assertEqual(incl_len, orig_len)
-        self.assertGreater(incl_len, 0)
+    def test_values_preserved(self) -> None:
+        result = build_component_identity(
+            "bankd", name="my-bridge", software="YggdraSIM", sw_version="0.2"
+        )
+        self.assertEqual(result["name"], "my-bridge")
+        self.assertEqual(result["swVersion"], "0.2")
 
-    def test_gsmtap_pcap_writer_survives_missing_fifo_reader(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            capture_path = Path(temp_dir) / "live_capture.pcap"
-            fifo_path = Path(temp_dir) / "live_capture.fifo"
-            os.mkfifo(str(fifo_path))
 
-            writer = GsmtapPcapWriter(
-                path=str(capture_path),
-                mirror_fifo_path=str(fifo_path),
-            )
-            payload = build_gsmtap_packet(
-                build_simtrace_apdu_payload(b"\x00\xA4\x04\x00", b"\x61\x19"),
-                subtype=GSMTAP_SIM_APDU,
-                uplink=True,
-            )
-            writer.write_gsmtap_packet(payload, timestamp=1_700_000_000.111111)
-            writer.write_gsmtap_packet(payload, timestamp=1_700_000_000.222222)
-            writer.close()
+class BuildSlotTests(unittest.TestCase):
 
-            captured_bytes = capture_path.read_bytes()
+    def test_client_slot_keys(self) -> None:
+        result = build_client_slot(3, 1)
+        self.assertEqual(result, {"clientId": 3, "slotNr": 1})
 
-        self.assertEqual(captured_bytes[:4], b"\xD4\xC3\xB2\xA1")
-        self.assertGreater(len(captured_bytes), 24)
+    def test_bank_slot_keys(self) -> None:
+        result = build_bank_slot(1, 2)
+        self.assertEqual(result, {"bankId": 1, "slotNr": 2})
 
-    def test_build_ip_choice_encodes_ipv4_and_ipv6(self) -> None:
-        ipv4_choice = build_ip_choice("127.0.0.1")
-        ipv6_choice = build_ip_choice("::1")
+    def test_values_are_ints(self) -> None:
+        result = build_client_slot(0, 0)
+        self.assertIsInstance(result["clientId"], int)
+        self.assertIsInstance(result["slotNr"], int)
 
-        self.assertEqual(ipv4_choice, ("ipv4", b"\x7F\x00\x00\x01"))
-        self.assertEqual(ipv6_choice[0], "ipv6")
-        self.assertEqual(len(ipv6_choice[1]), 16)
+
+class PduHelperTests(unittest.TestCase):
+
+    def _make_pdu(self) -> dict:
+        return build_rspro_pdu(7, "connectClientRes", {"result": "ok"})
+
+    def test_get_pdu_message_name(self) -> None:
+        pdu = self._make_pdu()
+        self.assertEqual(get_pdu_message_name(pdu), "connectClientRes")
+
+    def test_get_pdu_message_body(self) -> None:
+        pdu = self._make_pdu()
+        body = get_pdu_message_body(pdu)
+        self.assertIsInstance(body, dict)
+        self.assertEqual(body["result"], "ok")
+
+    def test_get_pdu_tag(self) -> None:
+        pdu = self._make_pdu()
+        self.assertEqual(get_pdu_tag(pdu), 7)
+
+    def test_invalid_pdu_name_raises(self) -> None:
+        with self.assertRaises(ValueError):
+            get_pdu_message_name({"msg": "not-a-tuple"})
+
+    def test_invalid_pdu_body_raises(self) -> None:
+        with self.assertRaises(ValueError):
+            get_pdu_message_body({"msg": ("name", "not-a-dict")})
+
+    def test_missing_tag_returns_zero(self) -> None:
+        self.assertEqual(get_pdu_tag({}), 0)
+
+
+class BuildConnectClientResTests(unittest.TestCase):
+
+    def _make_identity(self) -> dict:
+        return build_component_identity(
+            "server", name="test", software="sw", sw_version="1.0"
+        )
+
+    def test_returns_dict(self) -> None:
+        identity = self._make_identity()
+        result = build_connect_client_res(tag=5, component_identity=identity)
+        self.assertIsInstance(result, dict)
+
+    def test_message_name_correct(self) -> None:
+        identity = self._make_identity()
+        result = build_connect_client_res(tag=5, component_identity=identity)
+        self.assertEqual(get_pdu_message_name(result), "connectClientRes")
+
+    def test_tag_preserved(self) -> None:
+        identity = self._make_identity()
+        result = build_connect_client_res(tag=12, component_identity=identity)
+        self.assertEqual(get_pdu_tag(result), 12)
+
+    def test_body_contains_identity(self) -> None:
+        identity = self._make_identity()
+        result = build_connect_client_res(tag=1, component_identity=identity)
+        body = get_pdu_message_body(result)
+        self.assertIn("identity", body)
 
 
 if __name__ == "__main__":

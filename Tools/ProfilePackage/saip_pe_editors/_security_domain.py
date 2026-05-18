@@ -1,3 +1,4 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """
 PE-SecurityDomain structured editor.
 
@@ -24,10 +25,9 @@ The SAIP PE shape is roughly::
         "sdPersoData": [{"__ygg_saip_bytes__": "..."}, ...],
     }
 
-The form mirrors the reference UI's "Application Specific Parameters"
-hierarchical layout — each node is a section header, each leaf is a
-focused input. Values are persisted as the same SAIP hex/AID dicts so
-the existing roundtrip encoders apply unchanged.
+Hex fields use label + draft input + Apply per row (whitespace, dashes,
+``0x`` stripped on commit). Any Apply flushes the whole PE form into the
+document splice path via ``emit_change``.
 """
 
 from __future__ import annotations
@@ -37,8 +37,9 @@ from typing import Any
 
 from textual.app import ComposeResult
 from textual.containers import Horizontal, Vertical
-from textual.widgets import Button, Input, Static
+from textual.widgets import Button, Static
 
+from ..saip_apply_row import SaipApplyRow, normalize_hex_bytes_text
 from ._base import (
     BasePeEditor,
     hex_from_tagged_bytes,
@@ -76,7 +77,7 @@ def _component_hex(component: dict[str, Any]) -> tuple[str, str, str]:
     )
 
 
-class _KeyRow(Horizontal):
+class _KeyRow(Vertical):
 
     DEFAULT_CSS = """
     _KeyRow {
@@ -87,18 +88,18 @@ class _KeyRow(Horizontal):
         background: $boost;
         border: solid $primary;
     }
-    _KeyRow .sd_key_label {
-        width: 6;
+    _KeyRow .sd_key_heading {
+        width: 100%;
+        height: auto;
+        margin-bottom: 1;
+    }
+    _KeyRow .sd_key_heading_label {
+        width: 1fr;
         content-align: left middle;
         color: $text-muted;
     }
-    _KeyRow .sd_key_input {
-        width: 1fr;
-        margin-right: 1;
-    }
     _KeyRow .sd_key_remove {
-        width: 6;
-        margin-left: 1;
+        width: 8;
     }
     """
 
@@ -122,75 +123,92 @@ class _KeyRow(Horizontal):
             self._pending_payload = {}
 
     def compose(self) -> ComposeResult:
-        yield Static(f"#{self._index + 1}", classes="sd_key_label")
-        for field_id, label, placeholder in _KEY_HEX_FIELDS:
-            yield Input(
-                value="",
-                placeholder=f"{label} ({placeholder})",
-                classes="sd_key_input",
-                id=f"sd_key_{field_id}_{self._index}",
+        with Horizontal(classes="sd_key_heading"):
+            yield Static(f"Key #{self._index + 1}", classes="sd_key_heading_label")
+            yield Button(
+                "−",
+                classes="sd_key_remove",
+                id=f"sd_key_remove_{self._index}",
                 disabled=self._read_only,
             )
-        yield Input(
-            value="",
-            placeholder="component keyData",
-            classes="sd_key_input",
-            id=f"sd_key_data_{self._index}",
-            disabled=self._read_only,
+        for field_id, label, placeholder in _KEY_HEX_FIELDS:
+            yield SaipApplyRow(
+                f"sd_key_{self._index}_{field_id}",
+                f"{label}:",
+                mode="hex",
+                placeholder=placeholder,
+                hint="Hex bytes · Apply commits this PE.",
+                id=f"sd_key_row_{self._index}_{field_id}",
+                classes="sd_key_apply_slot",
+            )
+        yield SaipApplyRow(
+            f"sd_key_{self._index}_keyData",
+            "Component keyData:",
+            mode="hex",
+            placeholder="key octets",
+            hint="Hex bytes · Apply commits this PE.",
+            id=f"sd_key_row_{self._index}_keyData",
+            classes="sd_key_apply_slot",
         )
-        yield Input(
-            value="",
-            placeholder="keyType",
-            classes="sd_key_input",
-            id=f"sd_key_type_{self._index}",
-            disabled=self._read_only,
+        yield SaipApplyRow(
+            f"sd_key_{self._index}_keyType",
+            "Component keyType:",
+            mode="hex",
+            placeholder="1–2 bytes",
+            hint="Hex bytes · Apply commits this PE.",
+            id=f"sd_key_row_{self._index}_keyType",
+            classes="sd_key_apply_slot",
         )
-        yield Input(
-            value="",
-            placeholder="macLength",
-            classes="sd_key_input",
-            id=f"sd_key_maclen_{self._index}",
-            disabled=self._read_only,
-        )
-        yield Button(
-            "−",
-            classes="sd_key_remove",
-            id=f"sd_key_remove_{self._index}",
-            disabled=self._read_only,
+        yield SaipApplyRow(
+            f"sd_key_{self._index}_macLength",
+            "macLength:",
+            mode="decimal",
+            placeholder="decimal",
+            hint="Decimal macLength · Apply commits this PE.",
+            id=f"sd_key_row_{self._index}_macLength",
+            classes="sd_key_apply_slot",
         )
 
     def populate(self, payload: dict[str, Any]) -> None:
         for field_id, _label, _placeholder in _KEY_HEX_FIELDS:
-            input_widget = self.query_one(
-                f"#sd_key_{field_id}_{self._index}",
-                Input,
-            )
-            input_widget.value = hex_from_tagged_bytes(payload.get(field_id)) or ""
+            row = self.query_one(f"#sd_key_row_{self._index}_{field_id}", SaipApplyRow)
+            row.set_draft(hex_from_tagged_bytes(payload.get(field_id)) or "")
+            row.set_read_only(self._read_only)
+        data_row = self.query_one(f"#sd_key_row_{self._index}_keyData", SaipApplyRow)
+        type_row = self.query_one(f"#sd_key_row_{self._index}_keyType", SaipApplyRow)
+        mac_row = self.query_one(f"#sd_key_row_{self._index}_macLength", SaipApplyRow)
         components = payload.get("keyComponents")
         if isinstance(components, list) is False or len(components) == 0:
-            self.query_one(f"#sd_key_data_{self._index}", Input).value = ""
-            self.query_one(f"#sd_key_type_{self._index}", Input).value = ""
-            self.query_one(f"#sd_key_maclen_{self._index}", Input).value = ""
-            return
-        primary = components[0] if isinstance(components[0], dict) else {}
-        data_hex, type_hex, mac_text = _component_hex(primary)
-        self.query_one(f"#sd_key_data_{self._index}", Input).value = data_hex
-        self.query_one(f"#sd_key_type_{self._index}", Input).value = type_hex
-        self.query_one(f"#sd_key_maclen_{self._index}", Input).value = mac_text
+            data_row.set_draft("")
+            type_row.set_draft("")
+            mac_row.set_draft("")
+        else:
+            primary = components[0] if isinstance(components[0], dict) else {}
+            data_hex, type_hex, mac_text = _component_hex(primary)
+            data_row.set_draft(data_hex)
+            type_row.set_draft(type_hex)
+            mac_row.set_draft(mac_text)
+        data_row.set_read_only(self._read_only)
+        type_row.set_read_only(self._read_only)
+        mac_row.set_read_only(self._read_only)
 
     def collect(self) -> dict[str, Any]:
         record: dict[str, Any] = {}
         for field_id, _label, _placeholder in _KEY_HEX_FIELDS:
-            value = (
-                self.query_one(f"#sd_key_{field_id}_{self._index}", Input).value
-                or ""
-            ).strip().upper()
+            row = self.query_one(f"#sd_key_row_{self._index}_{field_id}", SaipApplyRow)
+            value = normalize_hex_bytes_text(row.draft_text())
             if len(value) > 0:
                 record[field_id] = tagged_bytes(value)
         component: dict[str, Any] = {}
-        data_hex = (self.query_one(f"#sd_key_data_{self._index}", Input).value or "").strip().upper()
-        type_hex = (self.query_one(f"#sd_key_type_{self._index}", Input).value or "").strip().upper()
-        mac_text = (self.query_one(f"#sd_key_maclen_{self._index}", Input).value or "").strip()
+        data_hex = normalize_hex_bytes_text(
+            self.query_one(f"#sd_key_row_{self._index}_keyData", SaipApplyRow).draft_text()
+        )
+        type_hex = normalize_hex_bytes_text(
+            self.query_one(f"#sd_key_row_{self._index}_keyType", SaipApplyRow).draft_text()
+        )
+        mac_text = (
+            self.query_one(f"#sd_key_row_{self._index}_macLength", SaipApplyRow).draft_text()
+        ).strip()
         if len(data_hex) > 0:
             component["keyData"] = tagged_bytes(data_hex)
         if len(type_hex) > 0:
@@ -203,6 +221,57 @@ class _KeyRow(Horizontal):
         if len(component) > 0:
             record["keyComponents"] = [component]
         return record
+
+
+class _PersoBlobRow(Vertical):
+    """One perso blob: hex apply row + remove."""
+
+    DEFAULT_CSS = """
+    _PersoBlobRow {
+        width: 100%;
+        height: auto;
+        margin-top: 1;
+    }
+    _PersoBlobRow .sd_perso_remove_row {
+        width: 100%;
+        height: auto;
+        margin-top: 1;
+    }
+    """
+
+    def __init__(
+        self,
+        index: int,
+        *,
+        read_only: bool = False,
+        initial_hex: str = "",
+    ) -> None:
+        super().__init__()
+        self._index = int(index)
+        self._read_only = bool(read_only)
+        self._initial_hex = str(initial_hex or "")
+
+    def compose(self) -> ComposeResult:
+        yield Static(f"Perso [{self._index}]", classes="sd_section_note")
+        yield SaipApplyRow(
+            f"sd_perso_{self._index}",
+            "Blob hex:",
+            mode="hex",
+            placeholder="BER-TLV hex",
+            hint="Opaque blob · Apply commits this PE.",
+            id=f"sd_perso_apply_{self._index}",
+        )
+        with Horizontal(classes="sd_perso_remove_row"):
+            yield Button(
+                "Remove blob",
+                id=f"sd_perso_remove_{self._index}",
+                disabled=self._read_only,
+            )
+
+    def on_mount(self) -> None:
+        row = self.query_one(f"#sd_perso_apply_{self._index}", SaipApplyRow)
+        row.set_draft(self._initial_hex)
+        row.set_read_only(self._read_only)
 
 
 class SecurityDomainEditor(BasePeEditor):
@@ -230,19 +299,6 @@ class SecurityDomainEditor(BasePeEditor):
         color: $text-muted;
         margin-top: 1;
     }
-    SecurityDomainEditor .sd_field_row {
-        width: 100%;
-        height: auto;
-        padding: 0 1;
-        margin-top: 1;
-    }
-    SecurityDomainEditor .sd_field_label {
-        width: 28;
-        content-align: left middle;
-    }
-    SecurityDomainEditor .sd_field_input {
-        width: 1fr;
-    }
     SecurityDomainEditor .sd_keys_host {
         width: 100%;
         height: auto;
@@ -262,23 +318,6 @@ class SecurityDomainEditor(BasePeEditor):
         height: auto;
         padding: 0 1;
     }
-    SecurityDomainEditor .sd_perso_row {
-        width: 100%;
-        height: auto;
-        margin-top: 1;
-    }
-    SecurityDomainEditor .sd_perso_label {
-        width: 12;
-        content-align: left middle;
-        color: $text-muted;
-    }
-    SecurityDomainEditor .sd_perso_input {
-        width: 1fr;
-    }
-    SecurityDomainEditor .sd_perso_remove {
-        width: 6;
-        margin-left: 1;
-    }
     """
 
     PE_TYPE_LABEL = "PE-SecurityDomain"
@@ -294,23 +333,27 @@ class SecurityDomainEditor(BasePeEditor):
             id="sd_pe_header",
         )
         yield Static("Instance", classes="sd_section_title")
+        yield Static(
+            "Hex fields: whitespace, dashes, 0x stripped on Apply. Any Apply writes the full PE.",
+            classes="sd_section_note",
+        )
         for field_id, label, placeholder in _INSTANCE_HEX_FIELDS:
-            with Horizontal(classes="sd_field_row"):
-                yield Static(f"{label}:", classes="sd_field_label")
-                yield Input(
-                    value="",
-                    placeholder=placeholder,
-                    classes="sd_field_input",
-                    id=f"sd_instance_{field_id}",
-                )
-        with Horizontal(classes="sd_field_row"):
-            yield Static("UICC Toolkit params:", classes="sd_field_label")
-            yield Input(
-                value="",
-                placeholder="ETSI TS 102 226 hex",
-                classes="sd_field_input",
-                id="sd_instance_uiccToolkitApplicationSpecificParametersField",
+            yield SaipApplyRow(
+                f"sd_inst_{field_id}",
+                f"{label}:",
+                mode="hex",
+                placeholder=placeholder,
+                hint="Hex · Apply commits this PE.",
+                id=f"sd_ir_{field_id}",
             )
+        yield SaipApplyRow(
+            "sd_inst_uiccToolkit",
+            "UICC Toolkit params:",
+            mode="hex",
+            placeholder="ETSI TS 102 226 hex",
+            hint="Hex · Apply commits this PE.",
+            id="sd_ir_uiccToolkit",
+        )
 
         yield Static("Key list", classes="sd_section_title")
         yield Vertical(id="sd_keys_host", classes="sd_keys_host")
@@ -323,14 +366,9 @@ class SecurityDomainEditor(BasePeEditor):
         with Horizontal(classes="sd_actions_row"):
             yield Button("+ Add perso blob", id="sd_perso_add")
         yield Static(
-            "SD perso blobs are stored as opaque BER-TLV streams. Edit hex carefully — "
-            "the Inspect pane (F4) decodes them on selection.",
+            "Inspect pane (F4) decodes BER-TLV when the cursor selects these blobs.",
             classes="sd_section_note",
         )
-
-    # ------------------------------------------------------------------
-    # State
-    # ------------------------------------------------------------------
 
     def rebuild_form(self) -> None:
         header_form = self.query_one("#sd_pe_header", PeHeaderForm)
@@ -341,15 +379,12 @@ class SecurityDomainEditor(BasePeEditor):
         )
         instance = self._instance_payload(self._pe_value)
         for field_id, _label, _placeholder in _INSTANCE_HEX_FIELDS:
-            widget = self.query_one(f"#sd_instance_{field_id}", Input)
-            widget.value = hex_from_tagged_bytes(instance.get(field_id)) or ""
-            widget.disabled = self._read_only
-        toolkit_widget = self.query_one(
-            "#sd_instance_uiccToolkitApplicationSpecificParametersField",
-            Input,
-        )
-        toolkit_widget.value = self._toolkit_hex(instance)
-        toolkit_widget.disabled = self._read_only
+            row = self.query_one(f"#sd_ir_{field_id}", SaipApplyRow)
+            row.set_draft(hex_from_tagged_bytes(instance.get(field_id)) or "")
+            row.set_read_only(self._read_only)
+        toolkit_row = self.query_one("#sd_ir_uiccToolkit", SaipApplyRow)
+        toolkit_row.set_draft(self._toolkit_hex(instance))
+        toolkit_row.set_read_only(self._read_only)
 
         self._render_keys()
         self._render_perso()
@@ -385,13 +420,6 @@ class SecurityDomainEditor(BasePeEditor):
                 ),
             )
 
-    def _key_row_at(self, index: int) -> _KeyRow | None:
-        host = self.query_one("#sd_keys_host", Vertical)
-        rows = [child for child in host.children if isinstance(child, _KeyRow)]
-        if index < 0 or index >= len(rows):
-            return None
-        return rows[index]
-
     def _render_perso(self) -> None:
         host = self.query_one("#sd_perso_host", Vertical)
         for child in list(host.children):
@@ -407,30 +435,13 @@ class SecurityDomainEditor(BasePeEditor):
             )
             return
         for index, blob in enumerate(blobs):
-            row = Horizontal(classes="sd_perso_row", id=f"sd_perso_row_{index}")
-            host.mount(row)
-            row.mount(Static(f"perso[{index}]", classes="sd_perso_label"))
-            row.mount(
-                Input(
-                    value=blob,
-                    placeholder="hex BER-TLV",
-                    classes="sd_perso_input",
-                    id=f"sd_perso_input_{index}",
-                    disabled=self._read_only,
+            host.mount(
+                _PersoBlobRow(
+                    index,
+                    read_only=self._read_only,
+                    initial_hex=blob,
                 ),
             )
-            row.mount(
-                Button(
-                    "−",
-                    classes="sd_perso_remove",
-                    id=f"sd_perso_remove_{index}",
-                    disabled=self._read_only,
-                ),
-            )
-
-    # ------------------------------------------------------------------
-    # PE value extraction
-    # ------------------------------------------------------------------
 
     def _instance_payload(self, pe_value: Any) -> dict[str, Any]:
         if isinstance(pe_value, dict) is False:
@@ -456,10 +467,6 @@ class SecurityDomainEditor(BasePeEditor):
             return []
         return [hex_from_tagged_bytes(item) or "" for item in raw]
 
-    # ------------------------------------------------------------------
-    # Events
-    # ------------------------------------------------------------------
-
     def on_pe_header_form_changed(self, event: PeHeaderForm.Changed) -> None:
         if self._read_only:
             return
@@ -473,16 +480,12 @@ class SecurityDomainEditor(BasePeEditor):
         )
         self.emit_change(summary="SD PE header updated")
 
-    def on_input_changed(self, event: Input.Changed) -> None:
+    def on_saip_apply_row_committed(self, event: SaipApplyRow.Committed) -> None:
         if self._read_only:
             return
-        widget_id = str(event.input.id or "")
-        if (
-            widget_id.startswith("sd_instance_")
-            or widget_id.startswith("sd_key_")
-            or widget_id.startswith("sd_perso_input_")
-        ):
-            self._collect_and_emit("SD PE field edited")
+        rid = event.row_id
+        if rid.startswith("sd_inst_") or rid.startswith("sd_key_") or rid.startswith("sd_perso_"):
+            self._collect_and_emit("SD PE field applied")
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if self._read_only:
@@ -564,10 +567,6 @@ class SecurityDomainEditor(BasePeEditor):
         self.rebuild_form()
         self.emit_change(summary="SD perso blob removed")
 
-    # ------------------------------------------------------------------
-    # Form -> PE value
-    # ------------------------------------------------------------------
-
     def _collect_keys(self) -> list[dict[str, Any]]:
         host = self.query_one("#sd_keys_host", Vertical)
         records: list[dict[str, Any]] = []
@@ -580,30 +579,25 @@ class SecurityDomainEditor(BasePeEditor):
         host = self.query_one("#sd_perso_host", Vertical)
         blobs: list[str] = []
         for child in host.children:
-            if isinstance(child, Horizontal):
-                for inner in child.children:
-                    if isinstance(inner, Input) and str(inner.id or "").startswith("sd_perso_input_"):
-                        blobs.append((inner.value or "").strip().upper())
+            if isinstance(child, _PersoBlobRow) is False:
+                continue
+            for wid in child.query(SaipApplyRow):
+                blobs.append(normalize_hex_bytes_text(wid.draft_text()))
+                break
         return blobs
 
     def _collect_instance(self) -> dict[str, Any]:
         existing = self._instance_payload(self._pe_value)
         instance: dict[str, Any] = copy.deepcopy(existing) if isinstance(existing, dict) else {}
         for field_id, _label, _placeholder in _INSTANCE_HEX_FIELDS:
-            value = (
-                self.query_one(f"#sd_instance_{field_id}", Input).value or ""
-            ).strip().upper()
+            row = self.query_one(f"#sd_ir_{field_id}", SaipApplyRow)
+            value = normalize_hex_bytes_text(row.draft_text())
             if len(value) == 0:
                 instance.pop(field_id, None)
                 continue
             instance[field_id] = tagged_bytes(value)
-        toolkit_value = (
-            self.query_one(
-                "#sd_instance_uiccToolkitApplicationSpecificParametersField",
-                Input,
-            ).value
-            or ""
-        ).strip().upper()
+        toolkit_row = self.query_one("#sd_ir_uiccToolkit", SaipApplyRow)
+        toolkit_value = normalize_hex_bytes_text(toolkit_row.draft_text())
         app_params = instance.get("applicationParameters")
         if isinstance(app_params, dict) is False:
             app_params = {}

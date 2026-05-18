@@ -1,3 +1,4 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """Optional simulator quirks file (no-op default).
 
 This file is loaded only when the wrapper selects the simulated card backend

@@ -1,3 +1,5 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+"""HIL-Bridge package entry point."""
 from __future__ import annotations
 
 import argparse
@@ -19,6 +21,7 @@ def add_bridge_runtime_arguments(
     *,
     include_list_readers: bool = True,
 ) -> None:
+    """Add HIL-Bridge runtime argparse arguments to *parser*."""
     parser.add_argument("--host", type=str, default="127.0.0.1", help="Listen address for the TCP bridge")
     parser.add_argument("--port", type=int, default=9997, help="Listen port for both control and bankd sockets")
     parser.add_argument(
@@ -48,6 +51,28 @@ def add_bridge_runtime_arguments(
         type=str,
         default="",
         help="Case-insensitive substring match for the PC/SC reader name",
+    )
+    parser.add_argument(
+        "--remote-card-url",
+        type=str,
+        default="",
+        help=(
+            "Stream APDUs from a remote 'yggdrasim-card-bridge' instance "
+            "(e.g. http://127.0.0.1:8642/apdu after opening an SSH "
+            "RemoteForward from the operator's laptop). When set, the "
+            "local --reader-index / --reader-name flags are ignored. "
+            "Mirrors the YGGDRASIM_HIL_REMOTE_CARD_URL environment variable."
+        ),
+    )
+    parser.add_argument(
+        "--remote-card-token-file",
+        type=str,
+        default="",
+        help=(
+            "Path to a 0600-mode bearer-token file matching the token "
+            "the remote 'yggdrasim-card-bridge' wrote on startup. "
+            "Mirrors YGGDRASIM_HIL_REMOTE_CARD_TOKEN_FILE."
+        ),
     )
     if include_list_readers:
         parser.add_argument("--list-readers", action="store_true", help="List available PC/SC readers and exit")
@@ -91,6 +116,7 @@ def add_bridge_runtime_arguments(
 
 
 def build_bridge_config_from_args(args: argparse.Namespace) -> BridgeConfig:
+    """Build the bridge runtime config dict from parsed argparse namespace."""
     return BridgeConfig(
         listen_host=str(args.host),
         listen_port=int(args.port),
@@ -100,6 +126,10 @@ def build_bridge_config_from_args(args: argparse.Namespace) -> BridgeConfig:
         apdu_relay_enabled=not bool(args.no_apdu_relay),
         reader_index=int(args.reader_index),
         reader_name=str(args.reader_name or ""),
+        remote_card_url=str(getattr(args, "remote_card_url", "") or "").strip(),
+        remote_card_token_file=str(
+            getattr(args, "remote_card_token_file", "") or ""
+        ).strip(),
         client_id=int(args.client_id),
         client_slot=int(args.client_slot),
         bank_id=int(args.bank_id),
@@ -148,6 +178,7 @@ def build_stop_signal_handler(
     *,
     logger: logging.Logger | None = None,
 ):
+    """Return a signal handler function that gracefully stops the bridge server."""
     active_logger = logger or logging.getLogger(__name__)
 
     def _request_stop(signum: int, _frame: Any) -> None:
@@ -164,6 +195,7 @@ def _install_stop_signal_handlers(stop_event: threading.Event) -> None:
 
 
 def run_bridge_server(server: HilBridgeServer) -> int:
+    """Start the HIL-Bridge server and block until it is stopped."""
     stop_event = threading.Event()
     _install_stop_signal_handlers(stop_event)
     try:
@@ -176,6 +208,7 @@ def run_bridge_server(server: HilBridgeServer) -> int:
 
 
 def run_standalone() -> int:
+    """Parse CLI arguments and run the HIL-Bridge in standalone mode."""
     parser = _build_parser()
     args = parser.parse_args()
     debug_enabled = bool(getattr(args, "debug", False))

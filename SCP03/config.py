@@ -1,3 +1,5 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+"""SCP03 key configuration: loads static key sets (ENC, MAC, DEK) from environment or config file."""
 # -----------------------------------------------------------------------------
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -193,6 +195,7 @@ def _legacy_scp03_parser ()->configparser .ConfigParser :
 
 
 def load_scp03_runtime_parser ()->configparser .ConfigParser :
+    """Build and return an argparse parser pre-loaded with SCP03 runtime flags."""
     parser =_legacy_scp03_parser ()
     if DeviceInventoryStore is None :
         return parser 

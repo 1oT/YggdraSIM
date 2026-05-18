@@ -1,3 +1,5 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+"""SCP11-live session factory: constructs the PCSC channel, provider, and crypto-engine for a live-reader session."""
 # -----------------------------------------------------------------------------
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -38,6 +40,7 @@ except ImportError:
 
 
 def build_apdu_channel(cfg):
+    """Construct and return the APDU channel object appropriate for this session variant (PCSC, relay, or simulated)."""
     if cfg.TRANSPORT_MODE == TRANSPORT_MODE_PCSC:
         try:
             return PcscApduChannel(reader_index=cfg.READER_INDEX)
@@ -62,6 +65,7 @@ def build_apdu_channel(cfg):
 
 
 def build_profile_provider(cfg):
+    """Construct and return the profile provider (remote ES9+, local SGP.26, or simulated) for this session variant."""
     if cfg.BACKEND_MODE == BACKEND_MODE_REMOTE_DP:
         if len(str(cfg.ES9_BASE_URL).strip()) == 0:
             raise ValueError("Remote DP mode requires ES9_BASE_URL to be configured.")

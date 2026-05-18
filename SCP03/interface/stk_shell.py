@@ -1,3 +1,5 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+"""SIM Toolkit (STK) sub-shell: issue proactive commands and handle envelope APDUs interactively."""
 from __future__ import annotations
 
 import shlex
@@ -271,6 +273,7 @@ class StkShell:
             return False
 
     def run_commands(self, cmd_line: str) -> None:
+        """Execute a sequence of STK shell commands from a list of strings."""
         commands = [chunk.strip() for chunk in str(cmd_line or "").split(";") if len(chunk.strip()) > 0]
         first_command = ""
         if len(commands) > 0:
@@ -292,6 +295,7 @@ class StkShell:
             raise SystemExit(1)
 
     def run(self) -> None:
+        """Start the interactive STK shell REPL and block until the user exits."""
         self._print_banner()
         try:
             self._run_init()

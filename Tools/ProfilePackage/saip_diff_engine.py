@@ -1,3 +1,4 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """
 Pure-function diff over two SAIP profile documents.
 
@@ -68,10 +69,12 @@ class DiffSummary:
 
     @property
     def total(self) -> int:
+        """Sum of all change-type counters."""
         return self.added + self.removed + self.changed + self.moved
 
     @property
     def is_empty(self) -> bool:
+        """``True`` when no differences were found."""
         return self.total == 0
 
 

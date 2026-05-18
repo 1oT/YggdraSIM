@@ -1,3 +1,4 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """SUPI / SUCI handling per TS 33.501 §6.12 + Annex C and TS 24.501 §9.11.3.4.
 
 Coverage in this module:

@@ -1,3 +1,5 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+"""SCP11 operator console: interactive REPL exposing ES2+/ES9+ commands and profile lifecycle operations."""
 # -----------------------------------------------------------------------------
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -203,6 +205,7 @@ class SCP11Console:
         self._setup_readline()
 
     def run(self) -> None:
+        """Start the interactive operator REPL for this SCP11 session variant."""
         try:
             self._initialize_session()
             self._activate_locked_help_pane_if_supported()
@@ -233,6 +236,7 @@ class SCP11Console:
             self._deactivate_locked_help_pane()
 
     def run_commands(self, cmd_line: str) -> None:
+        """Execute a semicolon-delimited list of operator commands non-interactively."""
         try:
             self._initialize_session()
         except Exception as error:

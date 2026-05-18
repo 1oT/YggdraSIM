@@ -273,13 +273,23 @@ def _emit_startup_banner(
         banner_lines.append(f"  audit log  : enabled via logger '{config.audit_logger_name}'{marker}")
     if is_loopback_host(config.host) is True:
         banner_lines.append(
-            "  remote use : route via 'ssh -fN -L "
-            f"{config.port}:127.0.0.1:{config.port} <pc-host>'"
+            "  ssh tunnel : rig$ ssh -fN -R "
+            f"{config.port}:127.0.0.1:{config.port} <operator-host>"
         )
     else:
         banner_lines.append(
             f"  remote use : non-loopback bind {config.host}:{config.port} — TLS termination is your responsibility"
         )
+    # Self-documenting copy-paste template for the rig side. Pairs the
+    # SSH tunnel above with the matching ``yggdrasim-hil-bridge`` flags
+    # so the operator can drop the line straight into the rig shell.
+    token_file_hint = (
+        str(config.token_file) if config.token_file is not None else "<token-file>"
+    )
+    banner_lines.append(
+        "  rig flags  : --remote-card-url http://127.0.0.1:"
+        f"{config.port}/apdu --remote-card-token-file {token_file_hint}"
+    )
     banner_lines.append("=" * 72)
     for line in banner_lines:
         print(line, file=output)

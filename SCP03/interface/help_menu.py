@@ -15,11 +15,13 @@
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 # -----------------------------------------------------------------------------
 
+"""SCP03 shell help menu: prints the command reference grouped by category."""
 from SCP03 .config import Config 
 
 class HelpMenu :
     @staticmethod 
     def print_help ()->None :
+        """Print the main SCP03 shell help menu to stdout."""
         print (f"\n{Config.Colors.HEADER}=== YggdraSIM Command Reference ==={Config.Colors.ENDC}")
         print (f"{Config.Colors.WARNING}Note: Admin secure channel support now includes SCP03 and SCP02 for Security Domain authentication. SCP11 provisioning and relay flows live in the dedicated SCP11 modules.{Config.Colors.ENDC}")
         print (f"\n{Config.Colors.CYAN}[ Session & Card Info ]{Config.Colors.ENDC}")

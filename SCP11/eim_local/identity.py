@@ -1,3 +1,5 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+"""eIM identity loader: reads the EIM identity JSON (EID, certs, key) and validates internal consistency."""
 import json
 import os
 from typing import Any
@@ -22,6 +24,7 @@ DEFAULT_EIM_IDENTITY: dict[str, str] = {
 
 
 def load_eim_identity(file_path: str) -> dict[str, str]:
+    """Load and return the EIM identity dict (EID, certificates, and signing key) from the configured identity JSON."""
     identity = dict(DEFAULT_EIM_IDENTITY)
     candidate = str(file_path or "").strip()
     if len(candidate) == 0:

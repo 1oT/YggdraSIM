@@ -115,6 +115,12 @@ class MinimalApduChannel:
 
 
 class HandshakeStkBootstrapApduChannel:
+    """Stub apdu_channel that fails ES10b GetEuiccInfo1 with 6985 once and
+    refuses the MANAGE CHANNEL recovery path so the orchestrator must
+    fall through to the STK mode bootstrap. Mirrors the failure mode
+    seen on terminals that reject supplementary channels entirely.
+    """
+
     def __init__(self):
         self.send_calls = []
         self._fail_info1_once = True
@@ -124,6 +130,8 @@ class HandshakeStkBootstrapApduChannel:
 
     def send(self, apdu: bytes, log_name: str) -> bytes:
         self.send_calls.append((log_name, apdu))
+        if "[OPEN LOGICAL CHANNEL]" in log_name:
+            raise IOError("APDU Failed: 6881")
         if log_name == "HANDSHAKE: GetEuiccInfo1" and self._fail_info1_once:
             self._fail_info1_once = False
             raise IOError("APDU Failed: 6985")
@@ -133,9 +141,9 @@ class HandshakeStkBootstrapApduChannel:
             return b""
         if "[STK MODE TERMINAL PROFILE]" in log_name:
             return b""
-        if "[STK MODE CH1]" in log_name and "GetEuiccInfo1" in log_name:
+        if "[STK MODE BASIC]" in log_name and "GetEuiccInfo1" in log_name:
             return bytes.fromhex("BF2000")
-        if "[STK MODE CH1]" in log_name and "GetEuiccChallenge" in log_name:
+        if "[STK MODE BASIC]" in log_name and "GetEuiccChallenge" in log_name:
             return bytes.fromhex("AA55AA55AA55AA55AA55AA55AA55AA55")
         if "GetEuiccInfo1" in log_name:
             return bytes.fromhex("BF2000")
@@ -680,7 +688,7 @@ class LiveSplitTests(unittest.TestCase):
                     b"".join(
                         [
                             wrap_tlv("80", b"manager-1"),
-                            wrap_tlv("81", b"eim1.sm.1ot.com"),
+                            wrap_tlv("81", b"eim1.example.test"),
                             wrap_tlv("82", b"\x01"),
                         ]
                     ),
@@ -733,14 +741,14 @@ class LiveSplitTests(unittest.TestCase):
         package = wrap_tlv(
             "BF54",
             wrap_tlv("82", b"\x01\x02\x03\x04")
-            + wrap_tlv("30", wrap_tlv("80", b"LPA:1$yggdrasim.smdpp.test.1ot.com$MATCH-54")),
+            + wrap_tlv("30", wrap_tlv("80", b"LPA:1$yggdrasim.smdpp.example.test$MATCH-54")),
         )
 
         response = orchestrator._relay_eim_package_to_card(package, poll_round=1, package_index=1)
 
         provider.set_base_url.assert_called_once_with("https://127.0.0.1:19443")
         self.assertEqual(captured["matching_id"], "MATCH-54")
-        self.assertEqual(captured["smdp_address"], "yggdrasim.smdpp.test.1ot.com")
+        self.assertEqual(captured["smdp_address"], "yggdrasim.smdpp.example.test")
         self.assertEqual(response, bytes.fromhex("BF5409820401020304BF3700"))
 
     def test_live_phase_connect_matches_test_certificate_bootstrap(self):
@@ -769,7 +777,7 @@ class LiveSplitTests(unittest.TestCase):
         )
         self.assertEqual(
             apdu_channel.send_calls[0][1],
-            bytes.fromhex("80AA000007A9058303170000"),
+            bytes.fromhex("80AA00000DA90B8100820101830107840101"),
         )
         self.assertEqual(
             apdu_channel.send_calls[1][1],
@@ -795,20 +803,23 @@ class LiveSplitTests(unittest.TestCase):
             [
                 "INIT: TERMINAL CAPABILITY",
                 "INIT: SELECT ISD-R",
-                "INIT: EXTENDED TERMINAL CAPABILITY",
                 "INIT: OPEN LOGICAL CHANNEL",
                 "INIT: SELECT ISD-R CH1",
                 "INIT: STATUS",
                 "INIT: TERMINAL PROFILE",
             ],
         )
-        self.assertEqual(apdu_channel.send_calls[3][1], bytes.fromhex("0070000001"))
         self.assertEqual(
-            apdu_channel.send_calls[4][1],
+            apdu_channel.send_calls[0][1],
+            bytes.fromhex("80AA00000DA90B8100820101830107840101"),
+        )
+        self.assertEqual(apdu_channel.send_calls[2][1], bytes.fromhex("0070000001"))
+        self.assertEqual(
+            apdu_channel.send_calls[3][1],
             bytes.fromhex("01A4040010A0000005591010FFFFFFFF8900000100"),
         )
-        self.assertEqual(apdu_channel.send_calls[5][1], bytes.fromhex("80F2000C00"))
-        self.assertEqual(apdu_channel.send_calls[6][1], bytes.fromhex("80100000010C"))
+        self.assertEqual(apdu_channel.send_calls[4][1], bytes.fromhex("80F2000C00"))
+        self.assertEqual(apdu_channel.send_calls[5][1], bytes.fromhex("80100000010C"))
 
     def test_live_phase_connect_does_not_reset_card_by_default(self):
         apdu_channel = ResetTrackingApduChannel()
@@ -866,14 +877,15 @@ class LiveSplitTests(unittest.TestCase):
                 "INIT: TERMINAL CAPABILITY",
                 "INIT: SELECT ISD-R",
                 "HANDSHAKE: GetEuiccInfo1",
+                "HANDSHAKE: GetEuiccInfo1 [OPEN LOGICAL CHANNEL]",
                 "HANDSHAKE: GetEuiccInfo1 [STK MODE TERMINAL CAPABILITY]",
                 "HANDSHAKE: GetEuiccInfo1 [STK MODE SELECT ISD-R]",
                 "HANDSHAKE: GetEuiccInfo1 [STK MODE TERMINAL PROFILE]",
-                "HANDSHAKE: GetEuiccInfo1 [STK MODE CH1]",
+                "HANDSHAKE: GetEuiccInfo1 [STK MODE BASIC]",
                 "HANDSHAKE: GetEuiccChallenge [STK MODE TERMINAL CAPABILITY]",
                 "HANDSHAKE: GetEuiccChallenge [STK MODE SELECT ISD-R]",
                 "HANDSHAKE: GetEuiccChallenge [STK MODE TERMINAL PROFILE]",
-                "HANDSHAKE: GetEuiccChallenge [STK MODE CH1]",
+                "HANDSHAKE: GetEuiccChallenge [STK MODE BASIC]",
             ],
         )
 
@@ -884,7 +896,7 @@ class LiveSplitTests(unittest.TestCase):
             profile_provider=TimeoutProvider(),
         )
         request = EimPollRequest(
-            eim_fqdn="eim1.sm.1ot.com",
+            eim_fqdn="eim1.example.test",
             eim_id="manager-1",
             eim_id_type="1",
             counter_value="0",
@@ -907,7 +919,7 @@ class LiveSplitTests(unittest.TestCase):
     def test_live_es9_client_requires_binary_eim_body(self):
         client = Es9LikeClient(base_url="https://rsp.example.com")
         request = EimPollRequest(
-            eim_fqdn="eim1.sm.1ot.com",
+            eim_fqdn="eim1.example.test",
             eim_id="manager-1",
             eim_id_type="1",
             counter_value="0",
@@ -943,7 +955,7 @@ class LiveSplitTests(unittest.TestCase):
         client = DynamicRetryEimClient(base_url="https://rsp.example.com")
 
         response = client._post_eim_binary(
-            "https://eim1.sm.1ot.com",
+            "https://eim1.example.test",
             bytes.fromhex("BF4F125A1089044045930000000000001492294428"),
             b"",
         )
@@ -954,7 +966,7 @@ class LiveSplitTests(unittest.TestCase):
             client.dynamic_retry_calls,
             [
                 (
-                    "https://eim1.sm.1ot.com/gsma/rsp2/asn1",
+                    "https://eim1.example.test/gsma/rsp2/asn1",
                     "",
                     "certificate verify failed",
                 )
@@ -970,7 +982,7 @@ class LiveSplitTests(unittest.TestCase):
         client = LeafFallbackEimClient(base_url="https://rsp.example.com")
 
         resolved_bundle = client._resolve_dynamic_ca_bundle_for_endpoint(
-            "https://eim1.sm.1ot.com/gsma/rsp2/asn1",
+            "https://eim1.example.test/gsma/rsp2/asn1",
             trust_hint_ci_pkid="",
             initial_error=IOError("certificate verify failed"),
         )
@@ -1209,7 +1221,7 @@ class LiveSplitTests(unittest.TestCase):
 
         orchestrator._relay_eim_package_to_card = fake_relay
         request = EimPollRequest(
-            eim_fqdn="eim1.sm.1ot.com",
+            eim_fqdn="eim1.example.test",
             eim_id="manager-1",
             eim_id_type="1",
             counter_value="0",
@@ -1252,7 +1264,7 @@ class LiveSplitTests(unittest.TestCase):
 
         orchestrator._relay_eim_package_to_card = fake_relay
         request = EimPollRequest(
-            eim_fqdn="eim1.sm.1ot.com",
+            eim_fqdn="eim1.example.test",
             eim_id="manager-1",
             eim_id_type="1",
             counter_value="0",
@@ -1294,7 +1306,7 @@ class LiveSplitTests(unittest.TestCase):
 
         orchestrator._relay_eim_package_to_card = fake_relay
         request = EimPollRequest(
-            eim_fqdn="eim1.esim.tst.1ot.mobi",
+            eim_fqdn="eim1.esim.example.test",
             eim_id="manager-1",
             eim_id_type="1",
             counter_value="0",
@@ -1584,67 +1596,153 @@ class LiveSplitTests(unittest.TestCase):
         self.assertEqual(bar.total, 10)
         self.assertEqual(bar.completed, 10)
 
-    def test_should_retry_notification_sync_covers_6e00_and_6881(self):
+    def test_should_retry_with_stk_bootstrap_covers_channel_fault_class(self):
         """
-        Regression: broaden the notification-sync channel-fault heuristic
-        so ``6881`` (logical channel not supported) is treated the same
-        as ``6E00`` (CLA not supported). Both fire when the eUICC drops
-        the ISD-R binding after a profile state change and both are
-        recovered by reselecting ISD-R on the active channel.
+        SGP.22 §5.7.10 + ETSI TS 102 221 §11.1.17: 6985 / 6E00 / 6881 /
+        6882 are the recoverable status-word class for an ISD-R binding
+        that has been invalidated by a profile state change. All four
+        flow through the same logical-channel-recovery → STK-mode-fallback
+        chain in ``_send_es10b_store_data``.
         """
-        should_retry = SGP22Orchestrator._should_retry_notification_sync_after_reselect
+        should_retry = SGP22Orchestrator._should_retry_with_stk_bootstrap
+        self.assertTrue(should_retry(IOError("APDU Failed: 6985")))
         self.assertTrue(should_retry(IOError("APDU Failed: 6E00")))
         self.assertTrue(should_retry(IOError("APDU Failed: 6881")))
-        self.assertTrue(should_retry(IOError("apdu failed: 6881")))
+        self.assertTrue(should_retry(IOError("APDU Failed: 6882")))
+        self.assertTrue(should_retry(IOError("apdu failed: 6e00")))
         self.assertFalse(should_retry(IOError("APDU Failed: 6A82")))
-        self.assertFalse(should_retry(IOError("APDU Failed: 6985")))
         self.assertFalse(should_retry(IOError("something else entirely")))
 
-    def test_list_pending_notifications_recovers_from_6881_by_reselecting_isd_r(self):
+    def test_list_pending_notifications_recovers_via_fresh_logical_channel(self):
         """
-        When listNotifications raises 6881 the orchestrator must call
-        its ISD-R reselect helper once and replay the ES10b StoreData
-        instead of bailing out. This stops the ``Notification sync:
-        listNotifications failed (APDU Failed: 6881)`` spam that
-        appears after DISABLE-PROFILE when the card re-binds the
-        logical channel.
+        Regression for the ``EnableProfile`` → ``ListNotifications``
+        cascade observed on a freshly inserted card:
+
+        * BF28 on the base channel returns 6E00 (CLA not supported on
+          this channel — the supplementary CH was dropped during the
+          profile state change).
+        * The orchestrator MUST then reset the transport, open a fresh
+          logical channel via MANAGE CHANNEL, SELECT ISD-R on the new
+          channel, and replay the StoreData with the matching CLA.
+
+        This mirrors the console-side ``_send_store_data_with_logical_fallback``
+        that already protects BF2B (RetrieveNotificationsList).
         """
+        send_log: list[tuple[str, str]] = []
+        attempts = {"count": 0}
+
+        def fake_send(apdu: bytes, log_name: str = "") -> bytes:
+            send_log.append((apdu.hex().upper(), log_name))
+            if apdu[:2].hex().upper() == "0070":
+                if apdu[2] == 0x00:
+                    return b"\x01\x90\x00"
+                return b""
+            if apdu[1] == 0xA4:
+                return b""
+            if apdu[1] == 0xE2:
+                attempts["count"] += 1
+                if attempts["count"] == 1:
+                    raise IOError("APDU Failed: 6E00")
+                return b"\xBF\x28\x00\x90\x00"
+            return b""
+
+        reset_calls = {"count": 0}
+
+        def fake_reset() -> bool:
+            reset_calls["count"] += 1
+            return True
+
+        apdu_channel = SimpleNamespace(send=fake_send, reset=fake_reset)
         orchestrator = SGP22Orchestrator(
             cfg=SimpleNamespace(
                 AID_ISD_R=bytes.fromhex("A0000005591010FFFFFFFF8900000100"),
             ),
-            apdu_channel=SimpleNamespace(send=lambda *_a, **_kw: b""),
+            apdu_channel=apdu_channel,
             profile_provider=None,
         )
 
-        call_log: list[str] = []
-        attempts = {"count": 0}
-
-        def fake_send_es10b_store_data(payload, log_name, **_kw):
-            call_log.append(f"store:{log_name}")
-            attempts["count"] += 1
-            if attempts["count"] == 1:
-                raise IOError("APDU Failed: 6881")
-            return b"\xBF\x2B\x00"
-
-        def fake_reselect(log_name: str) -> None:
-            call_log.append(f"reselect:{log_name}")
-
-        orchestrator._send_es10b_store_data = fake_send_es10b_store_data
-        orchestrator._reselect_isd_r_for_es10b_store_data = fake_reselect
-
         result = orchestrator._list_pending_notifications_with_context_recovery()
 
-        self.assertEqual(result, b"\xBF\x2B\x00")
+        self.assertEqual(result, b"\xBF\x28\x00\x90\x00")
         self.assertEqual(attempts["count"], 2)
-        self.assertEqual(
-            call_log,
-            [
-                "store:DOWNLOAD: ListNotifications",
-                "reselect:DOWNLOAD: RESELECT ISD-R",
-                "store:DOWNLOAD: ListNotifications",
-            ],
+        self.assertEqual(reset_calls["count"], 1)
+        self.assertEqual(orchestrator._es10b_logical_channel, 0)
+
+        kinds = [entry[1] for entry in send_log]
+        self.assertIn("DOWNLOAD: ListNotifications", kinds)
+        self.assertTrue(any("OPEN LOGICAL CHANNEL" in name for name in kinds))
+        self.assertTrue(any("SELECT ISD-R CH1" in name for name in kinds))
+        self.assertTrue(any(name.endswith("[TERMINAL CAPABILITY]") for name in kinds))
+        self.assertTrue(any("STATUS CH1" in name for name in kinds))
+        self.assertTrue(any("TERMINAL PROFILE CH1" in name for name in kinds))
+        self.assertTrue(any(name.endswith("[CH1]") for name in kinds))
+        self.assertTrue(any("CLOSE LOGICAL CHANNEL 1" in name for name in kinds))
+
+        # TERMINAL CAPABILITY must precede TERMINAL PROFILE on the
+        # recovery channel (TS 102 221 §11.1.19).
+        terminal_capability_index = next(
+            index
+            for index, name in enumerate(kinds)
+            if name.endswith("[TERMINAL CAPABILITY]")
         )
+        terminal_profile_index = next(
+            index
+            for index, name in enumerate(kinds)
+            if "TERMINAL PROFILE CH1" in name
+        )
+        self.assertLess(terminal_capability_index, terminal_profile_index)
+
+    def test_sync_pending_notifications_marks_failure_when_listnotifications_unrecoverable(self):
+        """
+        SGP.22 §5.6.4: pending profile-state notifications MUST be
+        forwarded to the recipient SM-DP+ before the LPA removes them
+        from the eUICC queue. When listNotifications cannot complete,
+        the orchestrator records the outcome on
+        ``_last_notification_sync_succeeded`` so the console layer can
+        suppress the post-command auto-clear and preserve the queue
+        for a later sweep.
+        """
+        provider = SimpleNamespace(handle_notification=lambda *_a, **_kw: {})
+
+        def always_fail(*_args, **_kwargs):
+            raise IOError("APDU Failed: 6985")
+
+        apdu_channel = SimpleNamespace(send=always_fail, reset=lambda: True)
+
+        orchestrator = SGP22Orchestrator(
+            cfg=SimpleNamespace(
+                AID_ISD_R=bytes.fromhex("A0000005591010FFFFFFFF8900000100"),
+            ),
+            apdu_channel=apdu_channel,
+            profile_provider=provider,
+        )
+
+        orchestrator._sync_pending_notifications(b"")
+
+        self.assertIs(orchestrator._last_notification_sync_succeeded, False)
+
+    def test_sync_pending_notifications_marks_success_on_empty_queue(self):
+        """Empty queue still counts as a successful sync round-trip."""
+        provider = SimpleNamespace(handle_notification=lambda *_a, **_kw: {})
+
+        def respond(apdu: bytes, log_name: str = "") -> bytes:
+            if apdu[1] == 0xE2:
+                return b"\xBF\x28\x02\x30\x00"
+            return b""
+
+        apdu_channel = SimpleNamespace(send=respond, reset=lambda: True)
+
+        orchestrator = SGP22Orchestrator(
+            cfg=SimpleNamespace(
+                AID_ISD_R=bytes.fromhex("A0000005591010FFFFFFFF8900000100"),
+            ),
+            apdu_channel=apdu_channel,
+            profile_provider=provider,
+        )
+
+        orchestrator._sync_pending_notifications(b"")
+
+        self.assertIs(orchestrator._last_notification_sync_succeeded, True)
 
 
 if __name__ == "__main__":

@@ -1,3 +1,4 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """Single-source-of-truth registry for YGGDRASIM_* runtime flags.
 
 The suite honours a family of ``YGGDRASIM_*`` environment variables that
@@ -55,7 +56,7 @@ CATEGORY_DEBUG: Final[str] = "Debug"
 CATEGORY_HIL_BRIDGE: Final[str] = "HIL bridge"
 CATEGORY_TOOLS: Final[str] = "External tool locators"
 CATEGORY_SESSION: Final[str] = "Session recording"
-CATEGORY_GUI: Final[str] = "Universal GUI (R2-004)"
+CATEGORY_GUI: Final[str] = "Universal GUI"
 
 
 CATEGORY_ORDER: Final[tuple[str, ...]] = (
@@ -709,7 +710,7 @@ FLAG_REGISTRY: Final[tuple[EnvFlag, ...]] = (
         applies=APPLIES_RUNTIME,
     ),
 
-    # --- Universal GUI (R2-004) ----------------------------------------
+    # --- Universal GUI -------------------------------------------------
     EnvFlag(
         name="YGGDRASIM_GUI_HOST",
         category=CATEGORY_GUI,
@@ -748,7 +749,7 @@ FLAG_REGISTRY: Final[tuple[EnvFlag, ...]] = (
             "Override the bind host for `yggdrasim --web-server`.\n"
             "Default is 0.0.0.0 so a remote operator can reach the lab;\n"
             "the safer posture is 127.0.0.1 plus SSH tunnelling. See\n"
-            "V2_UNIVERSAL_GUI_PLAN.md §9 for the runbook."
+            "guides/GUI_HOST_SHELL_GUIDE.md for the runbook."
         ),
         kind=KIND_STRING,
         default_hint="0.0.0.0 (SSH-tunnel-friendly: prefer 127.0.0.1)",

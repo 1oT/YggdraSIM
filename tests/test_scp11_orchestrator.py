@@ -232,11 +232,21 @@ class FakeApduChannel:
 
 
 class StkBootstrapRetryApduChannel(FakeApduChannel):
+    """Fails the first GetEuiccInfo1 with 6985 and refuses MANAGE CHANNEL
+    OPEN so the orchestrator must fall through the new logical-channel
+    recovery layer and reach the STK mode bootstrap. This still
+    exercises the original 6985 → STK contract once the chained
+    fallback exhausts the safer recovery options.
+    """
+
     def __init__(self):
         super().__init__()
         self._fail_info1_once = True
 
     def send(self, apdu: bytes, log_name: str) -> bytes:
+        if "[OPEN LOGICAL CHANNEL]" in log_name:
+            self.send_calls.append((log_name, apdu))
+            raise IOError("APDU Failed: 6881")
         if log_name == "HANDSHAKE: GetEuiccInfo1" and self._fail_info1_once:
             self.send_calls.append((log_name, apdu))
             self._fail_info1_once = False
@@ -250,10 +260,10 @@ class StkBootstrapRetryApduChannel(FakeApduChannel):
         if "[STK MODE TERMINAL PROFILE]" in log_name:
             self.send_calls.append((log_name, apdu))
             return b""
-        if "[STK MODE CH1]" in log_name and "GetEuiccInfo1" in log_name:
+        if "[STK MODE BASIC]" in log_name and "GetEuiccInfo1" in log_name:
             self.send_calls.append((log_name, apdu))
             return bytes.fromhex("BF2000")
-        if "[STK MODE CH1]" in log_name and "GetEuiccChallenge" in log_name:
+        if "[STK MODE BASIC]" in log_name and "GetEuiccChallenge" in log_name:
             self.send_calls.append((log_name, apdu))
             return bytes.fromhex("AA55AA55AA55AA55AA55AA55AA55AA55")
         return super().send(apdu, log_name)
@@ -274,6 +284,7 @@ class FakeCfg:
     EIM_REQUEST_VARIANT: int = 0
     EIM_GET_PACKAGE_NOTIFY_STATE_CHANGE: bool = False
     EIM_GET_PACKAGE_RPLMN: str = ""
+    EIM_VENDOR_QUIRK_FQDN_SUFFIXES: tuple = ("example.test",)
 
 
 class FakeProvider:
@@ -392,14 +403,15 @@ class OrchestratorFlowTests(unittest.TestCase):
                 "INIT: TERMINAL CAPABILITY",
                 "INIT: SELECT ISD-R",
                 "HANDSHAKE: GetEuiccInfo1",
+                "HANDSHAKE: GetEuiccInfo1 [OPEN LOGICAL CHANNEL]",
                 "HANDSHAKE: GetEuiccInfo1 [STK MODE TERMINAL CAPABILITY]",
                 "HANDSHAKE: GetEuiccInfo1 [STK MODE SELECT ISD-R]",
                 "HANDSHAKE: GetEuiccInfo1 [STK MODE TERMINAL PROFILE]",
-                "HANDSHAKE: GetEuiccInfo1 [STK MODE CH1]",
+                "HANDSHAKE: GetEuiccInfo1 [STK MODE BASIC]",
                 "HANDSHAKE: GetEuiccChallenge [STK MODE TERMINAL CAPABILITY]",
                 "HANDSHAKE: GetEuiccChallenge [STK MODE SELECT ISD-R]",
                 "HANDSHAKE: GetEuiccChallenge [STK MODE TERMINAL PROFILE]",
-                "HANDSHAKE: GetEuiccChallenge [STK MODE CH1]",
+                "HANDSHAKE: GetEuiccChallenge [STK MODE BASIC]",
             ],
         )
 
@@ -926,7 +938,7 @@ class OrchestratorFlowTests(unittest.TestCase):
                         [
                             wrap_tlv("80", b"\x6A"),
                             wrap_tlv("81", bytes.fromhex("0780")),
-                            wrap_tlv("0C", b"dpp1.sm.1ot.com"),
+                            wrap_tlv("0C", b"dpp1.example.test"),
                             wrap_tlv("5A", bytes.fromhex("98010300003017672747")),
                         ]
                     ),
@@ -946,7 +958,7 @@ class OrchestratorFlowTests(unittest.TestCase):
                                 [
                                     wrap_tlv("80", b"\x6A"),
                                     wrap_tlv("81", bytes.fromhex("0780")),
-                                    wrap_tlv("0C", b"dpp1.sm.1ot.com"),
+                                    wrap_tlv("0C", b"dpp1.example.test"),
                                     wrap_tlv("5A", bytes.fromhex("98010300003017672747")),
                                 ]
                             ),
@@ -988,23 +1000,57 @@ class OrchestratorFlowTests(unittest.TestCase):
         expected_notification = base64.b64encode(pending_notification).decode("utf-8")
         self.assertEqual(provider.handle_notification_calls[0].pending_notification, expected_notification)
 
-    def test_notification_sync_reselects_isd_r_and_retries_after_6e00(self):
+    def test_notification_sync_recovers_from_6e00_via_fresh_logical_channel(self):
+        # Regression for the EnableProfile → ListNotifications cascade:
+        # ETSI TS 102 221 §11.1.17 + SGP.22 §5.7.10. The base-channel
+        # BF28 hits 6E00 because the supplementary CH was dropped during
+        # the profile state change. The orchestrator must reset the
+        # transport, reopen ISD-R on a fresh logical channel via
+        # MANAGE CHANNEL OPEN, replay the StoreData with the matching
+        # CLA, then close the channel.
         cfg = FakeCfg()
         provider = FakeProvider(b"")
-        apdu_channel = FakeApduChannel(notification_list_response=bytes.fromhex("BF2800"))
+        apdu_channel = FakeApduChannel(notification_list_response=bytes.fromhex("BF2802A000"))
         original_send = apdu_channel.send
         list_attempts = {"count": 0}
+        reset_calls = {"count": 0}
 
-        def send_with_retry(apdu: bytes, log_name: str) -> bytes:
+        def send_with_recovery(apdu: bytes, log_name: str) -> bytes:
             if log_name == "DOWNLOAD: ListNotifications":
                 apdu_channel.send_calls.append((log_name, apdu))
                 list_attempts["count"] += 1
                 if list_attempts["count"] == 1:
                     raise IOError("APDU Failed: 6E00")
+            if "[OPEN LOGICAL CHANNEL]" in log_name:
+                apdu_channel.send_calls.append((log_name, apdu))
+                return b"\x01\x90\x00"
+            if "[SELECT ISD-R CH1]" in log_name:
+                apdu_channel.send_calls.append((log_name, apdu))
+                return b""
+            if log_name.endswith("[TERMINAL CAPABILITY]"):
+                apdu_channel.send_calls.append((log_name, apdu))
+                return b""
+            if "[STATUS CH1]" in log_name:
+                apdu_channel.send_calls.append((log_name, apdu))
+                return b""
+            if "[TERMINAL PROFILE CH1]" in log_name:
+                apdu_channel.send_calls.append((log_name, apdu))
+                return b""
+            if log_name.endswith("[CH1]") and "ListNotifications" in log_name:
+                apdu_channel.send_calls.append((log_name, apdu))
                 return apdu_channel.notification_list_response
+            if "[CLOSE LOGICAL CHANNEL 1]" in log_name:
+                apdu_channel.send_calls.append((log_name, apdu))
+                return b""
             return original_send(apdu, log_name)
 
-        apdu_channel.send = send_with_retry
+        def fake_reset() -> bool:
+            reset_calls["count"] += 1
+            return True
+
+        apdu_channel.send = send_with_recovery
+        apdu_channel.reset = fake_reset
+
         orchestrator = SGP22Orchestrator(
             cfg=cfg,
             apdu_channel=apdu_channel,
@@ -1013,20 +1059,52 @@ class OrchestratorFlowTests(unittest.TestCase):
 
         orchestrator._sync_pending_notifications()
 
-        self.assertEqual(list_attempts["count"], 2)
+        self.assertEqual(list_attempts["count"], 1)
+        self.assertEqual(reset_calls["count"], 1)
+        self.assertEqual(orchestrator._es10b_logical_channel, 0)
         self.assertEqual(provider.handle_notification_calls, [])
         self.assertEqual(
             [name for name, _ in apdu_channel.send_calls],
             [
                 "DOWNLOAD: ListNotifications",
-                "DOWNLOAD: RESELECT ISD-R",
-                "DOWNLOAD: ListNotifications",
+                "DOWNLOAD: ListNotifications [OPEN LOGICAL CHANNEL]",
+                "DOWNLOAD: ListNotifications [SELECT ISD-R CH1]",
+                "DOWNLOAD: ListNotifications [TERMINAL CAPABILITY]",
+                "DOWNLOAD: ListNotifications [STATUS CH1]",
+                "DOWNLOAD: ListNotifications [TERMINAL PROFILE CH1]",
+                "DOWNLOAD: ListNotifications [CH1]",
+                "DOWNLOAD: ListNotifications [CLOSE LOGICAL CHANNEL 1]",
             ],
         )
-        self.assertEqual(
-            apdu_channel.send_calls[1][1],
-            bytes([0x00, 0xA4, 0x04, 0x00, len(cfg.AID_ISD_R)]) + cfg.AID_ISD_R,
+        self.assertIs(orchestrator._last_notification_sync_succeeded, True)
+
+    def test_notification_sync_marks_failure_when_recovery_exhausted(self):
+        # When base channel, MANAGE CHANNEL recovery, and STK mode all
+        # fail, _last_notification_sync_succeeded must be False so the
+        # console layer suppresses the post-command auto-clear and
+        # leaves on-card notifications queued for the next attempt
+        # (SGP.22 §5.6.4).
+        cfg = FakeCfg()
+        provider = FakeProvider(b"")
+        apdu_channel = FakeApduChannel()
+
+        def always_fail(apdu: bytes, log_name: str) -> bytes:
+            apdu_channel.send_calls.append((log_name, apdu))
+            raise IOError("APDU Failed: 6985")
+
+        apdu_channel.send = always_fail
+        apdu_channel.reset = lambda: True
+
+        orchestrator = SGP22Orchestrator(
+            cfg=cfg,
+            apdu_channel=apdu_channel,
+            profile_provider=provider,
         )
+
+        orchestrator._sync_pending_notifications()
+
+        self.assertIs(orchestrator._last_notification_sync_succeeded, False)
+        self.assertEqual(provider.handle_notification_calls, [])
 
     def test_decode_eim_configuration_entries_extracts_bf55_fields(self):
         tls_key_material = bytes.fromhex(
@@ -1181,7 +1259,7 @@ class OrchestratorFlowTests(unittest.TestCase):
             ),
         )
 
-    def test_build_eim_poll_request_includes_challenge_for_live_1ot_endpoint(self):
+    def test_build_eim_poll_request_includes_challenge_for_vendor_quirk_endpoint(self):
         configured_data = wrap_tlv("BF3C", wrap_tlv("80", b"rsp.example.com"))
         eim_configuration = wrap_tlv(
             "BF55",
@@ -1192,7 +1270,7 @@ class OrchestratorFlowTests(unittest.TestCase):
                     b"".join(
                         [
                             wrap_tlv("80", b"manager-1"),
-                            wrap_tlv("81", b"eim1.sm.1ot.com"),
+                            wrap_tlv("81", b"eim1.example.test"),
                             wrap_tlv("82", b"\x01"),
                         ]
                     ),
@@ -1233,7 +1311,8 @@ class OrchestratorFlowTests(unittest.TestCase):
             "89044045930000000000001492294428",
             euicc_challenge_bytes=bytes.fromhex("5B2C6EF395AFB69CBFB3212E6427A16E"),
             notify_state_change=True,
-            rplmn_bytes=bytes.fromhex("262901"),
+            # 3GPP TS 23.003 §2.2 test PLMN: MCC=001, MNC=01 → BCD 00 F1 10.
+            rplmn_bytes=bytes.fromhex("00F110"),
         )
 
         self.assertEqual(
@@ -1241,7 +1320,7 @@ class OrchestratorFlowTests(unittest.TestCase):
             bytes.fromhex(
                 "BF4F195A1089044045930000000000001492294428"
                 "8000"
-                "8203262901"
+                "820300F110"
             ),
         )
 
@@ -1395,7 +1474,7 @@ class OrchestratorFlowTests(unittest.TestCase):
             profile_provider=FakeProvider(bpp_bytes=b""),
         )
         request = EimPollRequest(
-            eim_fqdn="eim1.sm.1ot.com",
+            eim_fqdn="eim1.example.test",
             eim_id="manager-1",
             eim_id_type="1",
             counter_value="0",
@@ -1437,7 +1516,7 @@ class OrchestratorFlowTests(unittest.TestCase):
             profile_provider=provider,
         )
         request = EimPollRequest(
-            eim_fqdn="eim1.sm.1ot.com",
+            eim_fqdn="eim1.example.test",
             eim_id="manager-1",
             eim_id_type="1",
             counter_value="0",
@@ -1473,7 +1552,7 @@ class OrchestratorFlowTests(unittest.TestCase):
             profile_provider=provider,
         )
         request = EimPollRequest(
-            eim_fqdn="eim1.sm.1ot.com",
+            eim_fqdn="eim1.example.test",
             eim_id="manager-1",
             eim_id_type="1",
             counter_value="0",
@@ -1513,7 +1592,7 @@ class OrchestratorFlowTests(unittest.TestCase):
         orchestrator._phase_eim_card_challenge = lambda: None
         orchestrator._resolve_eim_poll_entry_indices = lambda entry_index=None: [0]
         orchestrator._build_eim_poll_request = lambda matching_id="", entry_index=0: EimPollRequest(
-            eim_fqdn="eim1.sm.1ot.com",
+            eim_fqdn="eim1.example.test",
             eim_id="manager-1",
             eim_id_type="1",
             counter_value="0",

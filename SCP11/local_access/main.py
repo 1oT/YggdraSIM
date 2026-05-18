@@ -1,3 +1,5 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+"""SCP11 local-access shell: operator REPL for SGP.26 profile delivery without a live SM-DP+ server."""
 import argparse
 import atexit
 import io
@@ -63,6 +65,7 @@ class _LocalAccessTransportAdapter:
             reset_method()
 
     def transmit(self, apdu_hex: str, silent: bool = False) -> Tuple[bytes, int, int]:
+        """Forward a raw APDU to the simulated or physical card and return (data, SW1, SW2)."""
         apdu = bytes.fromhex(apdu_hex)
         response, sw1, sw2 = self._exchange(apdu, "SCP03", silent)
         if sw1 == 0x6C:
@@ -1781,6 +1784,7 @@ class LocalAccessShell:
         )
 
     def run(self) -> None:
+        """Start the interactive local-access operator REPL."""
         self._build_session()
         self._setup_readline()
         self._print_info_shield()
@@ -1819,6 +1823,7 @@ class LocalAccessShell:
             self._finalize_recording_on_exit()
 
     def run_commands(self, cmd_line: str) -> None:
+        """Execute a semicolon-delimited command string non-interactively."""
         self._build_session()
         had_error = False
         try:
@@ -2033,6 +2038,7 @@ def entry_stdin() -> None:
 
 
 def run_standalone() -> None:
+    """Start the local-access shell as a standalone process entry point."""
     parser = argparse.ArgumentParser(description="SCP11 local SM-DP+ shell")
     add_debug_argument(
         parser,

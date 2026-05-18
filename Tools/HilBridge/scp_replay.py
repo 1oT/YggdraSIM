@@ -1,3 +1,4 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 # -----------------------------------------------------------------------------
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -314,6 +315,7 @@ class ScpReplayEngine:
         return [runtime.session.label for runtime in self._runtimes]
 
     def runtime_snapshots(self) -> list[dict[str, Any]]:
+        """Return a list of runtime snapshot dicts for all recorded SCP sessions."""
         snapshots: list[dict[str, Any]] = []
         for runtime in self._runtimes:
             snapshots.append(

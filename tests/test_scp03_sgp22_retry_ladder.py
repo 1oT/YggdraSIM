@@ -550,7 +550,7 @@ class Sgp22RetryLadderTests(unittest.TestCase):
         buffer = io.StringIO()
         with redirect_stdout(buffer):
             self.manager._print_pipe_line("EuiccConfiguredData", "Present", 0)
-            self.manager._print_pipe_line("SM-DP+ Address", "smdpplus2.esim.tst.1ot.mobi", 1)
+            self.manager._print_pipe_line("SM-DP+ Address", "smdpplus2.smdpp.example.test", 1)
 
         rendered_lines = buffer.getvalue().splitlines()
         self.assertEqual(len(rendered_lines), 2)

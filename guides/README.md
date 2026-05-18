@@ -31,6 +31,7 @@ reading can populate `docs/` themselves from the issuing body.
 - `TEMPLATE_AND_TOKENS.md` - SAIP template authoring, token sidecars, placeholder lifecycle
 - `GUI_HOST_SHELL_GUIDE.md` - GUI `Advanced > Host shell` opt-in PTY surface, AT-decode overlay, threat model
 - `CONFIGURATION_AND_CERTIFICATES.md` - canonical operator guide for every certificate, keyset, identity, and configuration drop-in surface
+- `NAMING_CONVENTIONS.md` - source of truth for every operator-visible label, with the spec citation or YggdraSIM-coined provenance for each
 
 ## Supporting Examples
 

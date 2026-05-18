@@ -1,3 +1,4 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 # -----------------------------------------------------------------------------
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -75,6 +76,7 @@ class ApduExchange:
     direction: str = "out"
 
     def to_json(self) -> dict[str, Any]:
+        """Serialise the recorded APDU session to a JSON-compatible dict."""
         return {
             "ts": self.ts,
             "source": self.source,
@@ -143,6 +145,7 @@ class _ApduRecorder:
     def subscribe(
         self, fn: Callable[[ApduExchange], None]
     ) -> Callable[[], None]:
+        """Register a callback to receive new APDU events in real time."""
         with self._lock:
             self._sync_subs.append(fn)
 

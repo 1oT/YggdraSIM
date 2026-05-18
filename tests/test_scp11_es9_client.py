@@ -434,10 +434,10 @@ class Es9LikeClientEimTests(unittest.TestCase):
         self.assertEqual(client.post_calls[0]["protocol_header"], "gsma/rsp/v9.9.9")
         self.assertEqual(client.post_calls[0]["pinned_tls_public_key_data"], b"\x01\x02")
 
-    def test_poll_eim_accepts_1ot_style_response_fields(self):
+    def test_poll_eim_accepts_vendor_style_response_fields(self):
         client = RecordingEs9Client(
             base_url="https://rsp.example.com",
-            eim_base_url="https://eim1.esim.tst.1ot.mobi",
+            eim_base_url="https://eim1.esim.example.test",
         )
         client.next_response = {
             "eimTransactionId": "eim-tx-1",

@@ -1,3 +1,5 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+"""eIM response logger: writes structured ES2+ response payloads to a JSONL audit trail."""
 import json
 import os
 import threading
@@ -13,6 +15,7 @@ class EimResponseLogger:
         self._lock = threading.Lock()
 
     def append_event(self, event: dict[str, Any]) -> None:
+        """Append one ES2+ response event record to the JSONL response log file."""
         if len(self.log_file_path) == 0:
             return
         directory = os.path.dirname(self.log_file_path)

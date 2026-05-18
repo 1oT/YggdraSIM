@@ -1,3 +1,4 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """
 Pure-Python ASN.1 / TLV decode helpers for tagged SAIP JSON.
 
@@ -106,6 +107,10 @@ _EF_KEY_TO_FID: dict[str, str] = {
     "ef-oplmnwact": "6F61",
     "ef-hplmnwact": "6F62",
     "ef-fplmn": "6F7B",
+    # DF.WLAN (5F40) — TS 31.102 §4.2.82 / §4.2.83 / §4.2.91.
+    "ef-uplmnwlan": "4F41",
+    "ef-oplmnwlan": "4F42",
+    "ef-wlrplmn": "4F47",
     "ef-gid1": "6F3E",
     "ef-gid2": "6F3F",
     "ef-smsp": "6F42",
@@ -170,6 +175,7 @@ _EF_KEY_TO_FID: dict[str, str] = {
     "ef-ici": "6F80",
     "ef-oci": "6F81",
     "ef-keysPS": "6F09",
+    "ef-keysps": "6F09",
     "ef-pcscf": "6F09",
     # ISIM extras (TS 31.103 §4.2.22 / §4.2.23).
     "ef-gbauapi": "6F0A",
@@ -403,6 +409,7 @@ _EF_KEY_TO_PARENT_TOKEN: dict[str, str] = {
     "ef-imsi": "adf-usim",
     "ef-keys": "adf-usim",
     "ef-keysPS": "adf-usim",
+    "ef-keysps": "adf-usim",
     "ef-ad": "adf-usim",
     "ef-msisdn": "adf-usim",
     "ef-puct": "adf-usim",
@@ -5530,6 +5537,152 @@ def _decode_ef_mst(hex_clean: str) -> dict[str, object] | None:
     }
 
 
+# TS 24.334 §6.1 — ProSe Service Table service numbers. Each bit selects
+# one Direct Communication / Direct Discovery service from the ProSe
+# capability table. Bit 1 of byte 1 is service number 1.
+_EF_PST_SERVICE_NAMES: dict[int, str] = {
+    1: "ProSe direct discovery (open)",
+    2: "ProSe direct discovery (restricted)",
+    3: "ProSe direct communication (one-to-many)",
+    4: "ProSe direct communication (one-to-one)",
+    5: "EPC-level ProSe discovery",
+    6: "ProSe UE-to-network relay (Layer-3)",
+    7: "ProSe UE-to-UE relay (Layer-3)",
+    8: "ProSe UE-to-network relay (Layer-2)",
+    9: "ProSe UE-to-UE relay (Layer-2)",
+    10: "ProSe per-PLMN authorisation",
+}
+
+
+def _decode_ef_pst(hex_clean: str) -> dict[str, object] | None:
+    """Decode EF.PST (TS 31.102 §4.4.6.3 — ProSe Service Table)."""
+
+    try:
+        raw = bytes.fromhex(hex_clean)
+    except ValueError:
+        return None
+    if len(raw) == 0:
+        return None
+    table = _decode_service_table(hex_clean, _EF_PST_SERVICE_NAMES)
+    if table is None:
+        return None
+    return {
+        "format": "ProSe Service Table",
+        "hex": raw.hex().upper(),
+        "length": len(raw),
+        **table,
+    }
+
+
+# OMA-TS-BCAST_Service_Guide §5.1 + TS 31.102 §4.2.86 — BCAST service
+# capability bits. The full table covers 32+ services; the canonical
+# names below are sufficient for operator review. Unknown bits fall
+# through to ``Service N`` so future revisions still parse cleanly.
+_EF_BST_SERVICE_NAMES: dict[int, str] = {
+    1: "BCAST Service Provider activation",
+    2: "BCAST notification reception",
+    3: "BCAST file delivery",
+    4: "BCAST streaming",
+    5: "BCAST Service Guide",
+    6: "BCAST Service Protection (DRM Profile)",
+    7: "BCAST Service Protection (Smartcard Profile)",
+    8: "BCAST Roaming",
+}
+
+
+def _decode_ef_bst(hex_clean: str) -> dict[str, object] | None:
+    """Decode EF.BST (TS 31.102 §4.2.86 — BCAST Service Table)."""
+
+    try:
+        raw = bytes.fromhex(hex_clean)
+    except ValueError:
+        return None
+    if len(raw) == 0:
+        return None
+    table = _decode_service_table(hex_clean, _EF_BST_SERVICE_NAMES)
+    if table is None:
+        return None
+    return {
+        "format": "BCAST Service Table",
+        "hex": raw.hex().upper(),
+        "length": len(raw),
+        **table,
+    }
+
+
+def _decode_wlan_plmn_list(
+    hex_clean: str,
+    *,
+    format_name: str,
+    spec_reference: str,
+) -> dict[str, object] | None:
+    """Decode the I-WLAN PLMN selector lists (5-byte records).
+
+    TS 31.102 §4.2.82 / §4.2.83 specify the record as ``MCC/MNC (3 B)``
+    followed by two reserved bytes filled with 'FF'. The shape mirrors
+    `_decode_plmn_list(with_act=True)` but the trailing bytes are
+    reserved-for-future-use rather than Access Technology, so we
+    surface them as ``reserved`` instead of decoding them as AcT.
+    """
+
+    if len(hex_clean) == 0:
+        return None
+    try:
+        raw = bytes.fromhex(hex_clean)
+    except ValueError:
+        return None
+    if len(raw) < 5 or len(raw) % 5 != 0:
+        return None
+    entries: list[dict[str, object]] = []
+    for offset in range(0, len(raw), 5):
+        plmn_bytes = raw[offset : offset + 3]
+        reserved = raw[offset + 3 : offset + 5]
+        if plmn_bytes == b"\xFF\xFF\xFF":
+            continue
+        entries.append(
+            {
+                "plmn": _decode_plmn_hex(plmn_bytes.hex().upper())
+                or plmn_bytes.hex().upper(),
+                "reserved": reserved.hex().upper(),
+            }
+        )
+    return {
+        "format": format_name,
+        "reference": spec_reference,
+        "entries": entries,
+        "entryCount": len(entries),
+    }
+
+
+def _decode_ef_wlrplmn(hex_clean: str) -> dict[str, object] | None:
+    """Decode EF.WLRPLMN (TS 31.102 §4.2.91 — I-WLAN Last Registered PLMN).
+
+    A single 3-byte PLMN identifying the last successfully registered
+    operator over the I-WLAN access. All-FF means "no PLMN registered".
+    """
+
+    if len(hex_clean) == 0:
+        return None
+    try:
+        raw = bytes.fromhex(hex_clean)
+    except ValueError:
+        return None
+    if len(raw) < 3:
+        return None
+    head = raw[:3]
+    plmn_label: str | None
+    if head == b"\xFF\xFF\xFF":
+        plmn_label = None
+    else:
+        plmn_label = _decode_plmn_hex(head.hex().upper()) or head.hex().upper()
+    return {
+        "format": "I-WLAN Last Registered PLMN",
+        "reference": "TS 31.102 §4.2.91",
+        "plmn": plmn_label,
+        "hex": raw.hex().upper(),
+    }
+
+
 _EF_MLPL_TAGS: dict[str, str] = {
     "80": "MMS issuer connectivity profile alphanumeric name",
     "81": "Reference to EF.MMSICP",
@@ -9243,11 +9396,19 @@ def _decode_ef_arr(hex_clean: str) -> dict[str, object] | None:
     while cursor < len(raw):
         parsed = _parse_ber_tlv_item(raw, cursor)
         if parsed is None:
+            # Trailing 0xFF padding is benign: SAIP linear-fixed records
+            # are FF-padded to ``recordLength`` when fewer access rules
+            # are encoded than the slot accommodates. Stop cleanly so
+            # the caller still receives the summary / ruleCount instead
+            # of a parseErrorOffset warning.
+            remaining = raw[cursor:]
+            if all(byte_value == 0xFF for byte_value in remaining):
+                break
             return {
                 "format": "EF.ARR access rules",
                 "rules": rules,
                 "parseErrorOffset": cursor,
-                "remaining": raw[cursor:].hex().upper(),
+                "remaining": remaining.hex().upper(),
             }
         item, cursor = parsed
         tag = str(item["tag"])
@@ -9441,6 +9602,12 @@ def describe_arr_record_from_file_value(
     *,
     record_number: int,
 ) -> str | None:
+    """Return a human-readable summary string for one ARR record stored inside a file value dict.
+
+    Reconstructs EF.ARR records from ``fileDescriptor`` + ``fillFileContent`` chunks, then
+    looks up the decoded ``summary`` field for the requested 1-based record number.
+    Returns ``None`` when the record cannot be located or has no ``summary``.
+    """
     if isinstance(record_number, int) is False or record_number <= 0:
         return None
     descriptor_payload = None
@@ -9480,6 +9647,11 @@ def describe_arr_record_from_section(
     *,
     record_number: int,
 ) -> str | None:
+    """Return the ARR record summary for a named file-system section dict.
+
+    Delegates to ``describe_arr_record_from_file_value`` using the ``ef-arr``
+    sub-key of *section_value*.
+    """
     if isinstance(section_value, dict) is False:
         return None
     return describe_arr_record_from_file_value(
@@ -9494,6 +9666,13 @@ def describe_arr_record_from_gfm_section(
     context_path: list[int] | tuple[int, ...],
     record_number: int,
 ) -> str | None:
+    """Return the ARR record summary by walking a Generic File Management section.
+
+    Resolves the correct EF.ARR FID from *context_path* (0x2F06 at MF level,
+    0x6F06 at DF/ADF level per ETSI TS 102 221 §9.5), then scans
+    ``fileManagementCMD`` groups for matching ``fileID`` / ``fillFileContent``
+    chunks to reconstruct the record.
+    """
     if isinstance(section_value, dict) is False:
         return None
     normalized_context = tuple(int(part) for part in context_path)
@@ -9739,6 +9918,28 @@ def _decode_known_ef_payload(
         return _decode_plmn_list(hex_clean, with_act=True)
     if token == "ef-fplmn" or fid_upper == "6F7B":
         return _decode_plmn_list(hex_clean, with_act=False)
+    # DF.WLAN (5F40) — I-WLAN configuration files. TS 31.102 §4.2.82
+    # (UPLMNWLAN @ 4F41), §4.2.83 (OPLMNWLAN @ 4F42), §4.2.91
+    # (WLRPLMN @ 4F47). Token wins over FID; the FIDs are kept for
+    # legacy callers that strip the token.
+    if token == "ef-oplmnwlan" or fid_upper == "4F42":
+        return _decode_wlan_plmn_list(
+            hex_clean,
+            format_name="Operator-controlled I-WLAN PLMN selector",
+            spec_reference="TS 31.102 §4.2.83",
+        )
+    if token == "ef-uplmnwlan" or fid_upper == "4F41":
+        return _decode_wlan_plmn_list(
+            hex_clean,
+            format_name="User-controlled I-WLAN PLMN selector",
+            spec_reference="TS 31.102 §4.2.82",
+        )
+    if token == "ef-wlrplmn" or fid_upper == "4F47":
+        return _decode_ef_wlrplmn(hex_clean)
+    if token == "ef-bst":
+        return _decode_ef_bst(hex_clean)
+    if token == "ef-pst":
+        return _decode_ef_pst(hex_clean)
     if token in {"ef-loci", "ef-psloci", "ef-epsloci"}:
         return _decode_loci(hex_clean)
     if fid_upper in {"6F7E", "6F73", "6FE3"}:
@@ -9792,7 +9993,7 @@ def _decode_known_ef_payload(
         )
     if token == "ef-keys" or fid_upper == "6F08":
         return _decode_usim_keys_record(hex_clean, format_name="USIM CS ciphering/integrity keys")
-    if token == "ef-keysPS" or fid_upper == "6F09":
+    if token == "ef-keysps" or fid_upper == "6F09":
         return _decode_usim_keys_record(hex_clean, format_name="USIM PS ciphering/integrity keys")
     if token == "ef-kc" or fid_upper == "4F20":
         return _decode_gsm_kc_record(hex_clean, format_name="Kc ciphering key")
@@ -11020,6 +11221,77 @@ def _decode_known_ef_payload(
     return None
 
 
+# Tokens that ``_decode_known_ef_payload`` routes to a semantic
+# decoder. Built once via static introspection of the dispatcher
+# source so the manifest stays in sync as new branches are added.
+# Read by Tools/ProfilePackage/saip_ef_wizard_gui_audit (the PE/EF
+# decoded-edit gap helpers) to identify EFs that fall through to the
+# opaque / raw-byte path.
+_TOKEN_EQUALS_RE = re.compile(r'token\s*==\s*"([a-z0-9-]+)"')
+_TOKEN_IN_SET_RE = re.compile(r'token\s+in\s+\{([^}]+)\}')
+_TOKEN_STARTSWITH_RE = re.compile(r'token\.startswith\("([a-z0-9-]+)"\)')
+
+
+def _scan_dispatcher_tokens() -> tuple[frozenset[str], frozenset[str]]:
+    import inspect
+
+    try:
+        source = inspect.getsource(_decode_known_ef_payload)
+    except (OSError, TypeError):
+        return frozenset(), frozenset()
+    exact: set[str] = set()
+    for match in _TOKEN_EQUALS_RE.finditer(source):
+        token = match.group(1)
+        if token.startswith("ef-"):
+            exact.add(token)
+    for match in _TOKEN_IN_SET_RE.finditer(source):
+        for inner in re.finditer(r'"([a-z0-9-]+)"', match.group(1)):
+            token = inner.group(1)
+            if token.startswith("ef-"):
+                exact.add(token)
+    prefixes: set[str] = set()
+    for match in _TOKEN_STARTSWITH_RE.finditer(source):
+        token = match.group(1)
+        if token.startswith("ef-"):
+            prefixes.add(token)
+    exact.update(_PLMN_WITH_ACT_KEYS)
+    return frozenset(exact), frozenset(prefixes)
+
+
+_DISPATCHER_EXACT_KEYS, _DISPATCHER_PREFIX_KEYS = _scan_dispatcher_tokens()
+
+
+def known_dispatcher_ef_keys() -> frozenset[str]:
+    """Return the set of ef-key tokens routed by ``_decode_known_ef_payload``.
+
+    Static introspection of the dispatcher source. Membership means the
+    dispatcher emits a populated ``decoded`` dict (semantic or opaque-
+    annotated). Used by the GUI-coverage audit; do not rely on this
+    as the public decode entry point — call ``decode_known_ef_payload``
+    or the per-EF helper instead.
+    """
+
+    return _DISPATCHER_EXACT_KEYS
+
+
+def dispatcher_routes_ef_key(token: str) -> bool:
+    """``True`` if the dispatcher has a branch for the given ef-key.
+
+    Honours both exact-match tokens and the ``ef-csim-*`` /
+    ``ef-opcust*`` / ``ef-vendor*`` prefix-match short-circuits.
+    """
+
+    canonical = str(token or "").strip().lower()
+    if canonical == "":
+        return False
+    if canonical in _DISPATCHER_EXACT_KEYS:
+        return True
+    for prefix in _DISPATCHER_PREFIX_KEYS:
+        if canonical.startswith(prefix):
+            return True
+    return False
+
+
 def _decode_oid(value_bytes: bytes) -> str | None:
     if len(value_bytes) == 0:
         return None
@@ -11530,6 +11802,13 @@ def _decode_field_ber_tlv_stream(
     out: list[dict[str, object]] = []
     cursor = 0
     while cursor < len(value_bytes):
+        # Tolerate trailing 0xFF padding emitted by personalisation
+        # (ETSI TS 102 221 §10.1.5 EF-fill convention). A real BER-TLV
+        # tag is never 0xFF (long-form continuation that never
+        # terminates), so once we hit an all-FF tail the record is
+        # complete and the remainder is template fill.
+        if value_bytes[cursor] == 0xFF and all(b == 0xFF for b in value_bytes[cursor:]):
+            break
         parsed = _parse_ber_tlv_item(value_bytes, cursor)
         if parsed is None:
             out.append({"parseErrorOffset": cursor, "remaining": value_bytes[cursor:].hex().upper()})
@@ -13479,6 +13758,65 @@ def _updated_sequence_fid(current_fid: str | None, child: Any) -> str | None:
     return file_id_hex.upper()
 
 
+def _decode_inline_placeholder_blob(raw_text: str) -> list[str]:
+    """Produce an INSPECT ``Field semantics`` block for hex with inline placeholders.
+
+    ``raw_text`` is the tagged hex-leaf content the walker refused to
+    canonicalise because it embeds vendor-style typed placeholders such
+    as ``{iccid:ICCID:10:nibble_swap}``. The block lists each literal
+    with its declared metadata and the surrounding hex runs so the
+    operator still gets a field-level decode for template scaffolding.
+    Returns an empty list when the text carries no inline placeholders,
+    which lets the walker stay silent for genuinely unparseable payloads.
+    """
+    from Tools.ProfilePackage.saip_hex_template import (
+        extract_inline_placeholders_from_hex_text,
+    )
+
+    text = str(raw_text or "")
+    entries = extract_inline_placeholders_from_hex_text(text)
+    if len(entries) == 0:
+        return []
+
+    total_bytes = 0
+    cursor = 0
+    for entry in entries:
+        prefix_hex = "".join(text[cursor : entry["start"]].split())
+        if len(prefix_hex) % 2 == 0:
+            total_bytes += len(prefix_hex) // 2
+        total_bytes += int(entry["byte_length"])
+        cursor = entry["end"]
+    tail_hex = "".join(text[cursor:].split())
+    if len(tail_hex) % 2 == 0:
+        total_bytes += len(tail_hex) // 2
+
+    block: dict[str, Any] = {
+        "format": "Inline template placeholder",
+        "hex_with_literals": text,
+        "placeholders": [
+            {
+                "literal": entry["literal"],
+                "variable": entry["variable"],
+                "type": entry["type"],
+                "byte_length": entry["byte_length"],
+                **(
+                    {"modifier": entry["modifier"]}
+                    if entry["modifier"] is not None
+                    else {}
+                ),
+            }
+            for entry in entries
+        ],
+        "byte_length": total_bytes,
+        "summary": (
+            f"{len(entries)} inline placeholder"
+            + ("s" if len(entries) != 1 else "")
+            + f" · {total_bytes} declared bytes"
+        ),
+    }
+    return _compact_block("Field semantics", block)
+
+
 def _decode_one_blob(
     hex_clean: str,
     *,
@@ -13558,6 +13896,21 @@ def _walk(
         if keys_structural == {_TAG_BYTES}:
             hx = _hex_from_tagged_bytes(value)
             if hx is None:
+                raw_text = str(
+                    _value_first(value, _TAG_BYTES, _LEGACY_TAG_BYTES) or ""
+                )
+                placeholder_lines = _decode_inline_placeholder_blob(raw_text)
+                if len(placeholder_lines) > 0:
+                    out.append(
+                        (
+                            _format_hit_title(
+                                pe_section_key,
+                                path_tail,
+                                fallback="(bytes)",
+                            ),
+                            placeholder_lines,
+                        )
+                    )
                 return
             lines = _decode_one_blob(
                 hx,

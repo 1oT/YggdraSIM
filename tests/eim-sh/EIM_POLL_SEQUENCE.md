@@ -7,7 +7,7 @@ This describes exactly what we send to the eIM server and how we interpret the r
 ## 1. Prerequisites (before poll)
 
 - **Card:** ISD-R selected; we have read EID (BCD string) and eIM config from the card.
-- **eIM base URL:** From card’s GetEimConfigurationData (e.g. `eim1.sm.1ot.com`) or config `EIM_BASE_URL`. Normalized to `https://<fqdn>`.
+- **eIM base URL:** From card’s GetEimConfigurationData (e.g. `eim1.example.test`) or config `EIM_BASE_URL`. Normalized to `https://<fqdn>`.
 - **Path:** Config `EIM_HTTP_PATH` = `/gsma/rsp2/asn1` (default).
 - **Protocol:** Config `EIM_HTTP_PROTOCOL` = `gsma/rsp/v2.1.0` (default).
 
@@ -21,7 +21,7 @@ We do **not** send euiccChallenge, eimId, or other JSON fields in this flow; the
 
 - **Method:** POST  
 - **URL:** `https://<eim_fqdn>/gsma/rsp2/asn1`  
-  Example: `https://eim1.sm.1ot.com/gsma/rsp2/asn1`  
+  Example: `https://eim1.example.test/gsma/rsp2/asn1`  
 - **Headers:**
   - `Content-Type: application/x-gsma-rsp-asn1`
   - `Accept: application/json, application/x-gsma-rsp-asn1`

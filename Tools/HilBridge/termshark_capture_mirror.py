@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+"""HIL-Bridge termshark capture mirror: copies the live pcapng stream to a file path that termshark can tail."""
 from __future__ import annotations
 
 import os
@@ -37,6 +39,7 @@ def _open_input_stream(input_path: str):
 
 
 def mirror_input_to_output(input_path: str, output_path: str) -> int:
+    """Read raw bytes from *input_path* and mirror them to *output_path* in real time."""
     normalized_output = str(output_path or "").strip()
     if len(normalized_output) == 0:
         raise ValueError("Missing output path for mirrored capture stream.")
@@ -61,6 +64,7 @@ def mirror_input_to_output(input_path: str, output_path: str) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
+    """CLI entry point for the capture-mirror utility."""
     arguments = list(sys.argv[1:] if argv is None else argv)
     try:
         input_path, output_path = _parse_capture_args(arguments)

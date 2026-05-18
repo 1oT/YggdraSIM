@@ -1,3 +1,4 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """Shared bearer-token utilities for the YggdraSIM card relay.
 
 Used by:

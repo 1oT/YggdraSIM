@@ -1,3 +1,5 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+"""Device inventory store: persists reader/modem identity records keyed by namespace and module name."""
 from __future__ import annotations
 
 import json
@@ -36,6 +38,13 @@ def _normalize_identity_value(identity_kind: str, identity_value: Any) -> str:
 
     if normalized_kind == "eim_id":
         return raw_text
+
+    # Allow the literal "NULL" sentinel under the iccid kind so callers
+    # can park a profile that is intentionally not tied to any real card
+    # (used by SCP80 print mode to keep the print profile isolated from
+    # any per-ICCID inventory record).
+    if normalized_kind == "iccid" and raw_text.upper() == "NULL":
+        return "NULL"
 
     digits = "".join(ch for ch in raw_text if ch.isdigit())
     if len(digits) > 0:
@@ -236,6 +245,7 @@ class DeviceInventoryStore:
         identity_value: Any,
         namespace: str,
     ) -> dict[str, Any]:
+        """Return the inventory namespace dict for the given EID, creating it if absent."""
         normalized_kind = _normalize_identity_kind(identity_kind)
         normalized_value = _normalize_identity_value(normalized_kind, identity_value)
         normalized_namespace = _normalize_namespace(namespace)
@@ -264,6 +274,7 @@ class DeviceInventoryStore:
         namespace: str,
         payload: dict[str, Any],
     ) -> dict[str, Any]:
+        """Replace the full inventory namespace for an EID with a new dict."""
         if isinstance(payload, dict) is False:
             raise ValueError("payload must be a dictionary.")
         normalized_kind = _normalize_identity_kind(identity_kind)
@@ -309,6 +320,7 @@ class DeviceInventoryStore:
         updates: dict[str, Any],
         drop_empty: bool = False,
     ) -> dict[str, Any]:
+        """Shallow-merge *data* into the inventory namespace for the given EID."""
         if isinstance(updates, dict) is False:
             raise ValueError("updates must be a dictionary.")
         payload = self.get_namespace(identity_kind, identity_value, namespace)
@@ -325,6 +337,7 @@ class DeviceInventoryStore:
         return self.replace_namespace(identity_kind, identity_value, namespace, merged)
 
     def list_identities(self, identity_kind: Optional[str] = None) -> list[dict[str, str]]:
+        """Return a list of all EIDs tracked in the device inventory store."""
         query = """
             SELECT identity_kind, identity_value, MAX(updated_at_utc) AS updated_at_utc
             FROM inventory_namespaces
@@ -352,6 +365,7 @@ class DeviceInventoryStore:
         return results
 
     def get_module_state(self, module_name: str) -> dict[str, Any]:
+        """Return the current state dict for the named hardware module."""
         normalized_module_name = _normalize_module_name(module_name)
         connection = self._connect()
         try:
@@ -370,6 +384,7 @@ class DeviceInventoryStore:
         return self._deserialize_payload(str(row["payload_json"]))
 
     def replace_module_state(self, module_name: str, payload: dict[str, Any]) -> dict[str, Any]:
+        """Replace the state dict for the named hardware module."""
         if isinstance(payload, dict) is False:
             raise ValueError("payload must be a dictionary.")
         normalized_module_name = _normalize_module_name(module_name)

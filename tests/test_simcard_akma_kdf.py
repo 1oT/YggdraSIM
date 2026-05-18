@@ -183,8 +183,8 @@ class AKidNaiFormattingTests(unittest.TestCase):
         self.assertEqual(realm, "akma.5gc.mnc001.mcc001.3gppnetwork.org")
 
     def test_realm_pads_two_digit_mnc_to_three(self) -> None:
-        realm = format_home_network_identifier(mcc="234", mnc="15")
-        self.assertEqual(realm, "akma.5gc.mnc015.mcc234.3gppnetwork.org")
+        realm = format_home_network_identifier(mcc="999", mnc="15")
+        self.assertEqual(realm, "akma.5gc.mnc015.mcc999.3gppnetwork.org")
 
     def test_realm_rejects_short_mcc(self) -> None:
         with self.assertRaises(ValueError):

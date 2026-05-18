@@ -17,7 +17,7 @@ body:
         - Hardening proposals (defence-in-depth)
         - Audit findings that do not have a proof-of-concept
         - Questions about threat model and security posture
-        - Follow-ups to items tracked in `V1_RELEASE_AUDIT.md`
+        - Follow-ups to previously disclosed hardening items
 
   - type: dropdown
     id: category

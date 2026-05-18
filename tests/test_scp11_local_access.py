@@ -90,7 +90,7 @@ def build_eim_configuration_response() -> bytes:
             b"".join(
                 [
                     wrap_tlv(b"\x80", b"manager-1"),
-                    wrap_tlv(b"\x81", b"eim1.sm.1ot.com"),
+                    wrap_tlv(b"\x81", b"eim1.example.test"),
                     wrap_tlv(b"\x82", b"\x01"),
                 ]
             ),
@@ -237,7 +237,7 @@ def build_profile_installation_failure(transaction_id: bytes) -> bytes:
     notification_metadata = (
         wrap_tlv(b"\x80", bytes.fromhex("021F"))
         + wrap_tlv(b"\x81", bytes.fromhex("07"))
-        + wrap_tlv(b"\x0C", b"smdpplus2.esim.tst.1ot.mobi")
+        + wrap_tlv(b"\x0C", b"smdpplus2.smdpp.example.test")
         + wrap_tlv(b"\x5A", bytes.fromhex("89460811111111111112"))
     )
     failure_result = wrap_tlv(
@@ -280,7 +280,7 @@ class FakeApduChannel:
         if log_name == "LOCAL: GetEuiccConfiguredData":
             return wrap_tlv(
                 bytes.fromhex("BF3C"),
-                wrap_tlv(b"\x80", b"smdpplus2.esim.tst.1ot.mobi")
+                wrap_tlv(b"\x80", b"smdpplus2.smdpp.example.test")
                 + wrap_tlv(b"\x83", bytes.fromhex("F54172BDF98A95D65CBEB88A38A1C11D800A85C3")),
             )
         if log_name == "LOCAL: GetEuiccChallenge":
@@ -713,7 +713,7 @@ class LocalAccessSessionTests(unittest.TestCase):
         self.assertEqual(snapshot["eid"], "89049032118427504800000000000607")
         self.assertEqual(snapshot["issuer_number"], "89049032")
         self.assertEqual(snapshot["issuer_name"], "Giesecke+Devrient")
-        self.assertEqual(snapshot["configured_decoded"]["default_smdp"], "smdpplus2.esim.tst.1ot.mobi")
+        self.assertEqual(snapshot["configured_decoded"]["default_smdp"], "smdpplus2.smdpp.example.test")
         self.assertEqual(len(snapshot["profiles"]), 2)
         self.assertEqual(snapshot["profiles"][0].state, "ENABLED")
         self.assertEqual(snapshot["profiles"][1].nickname, "Secondary")
@@ -1163,10 +1163,10 @@ class LocalAccessSessionTests(unittest.TestCase):
                 ],
                 "configured_raw": wrap_tlv(
                     bytes.fromhex("BF3C"),
-                    wrap_tlv(b"\x80", b"smdpplus2.esim.tst.1ot.mobi"),
+                    wrap_tlv(b"\x80", b"smdpplus2.smdpp.example.test"),
                 ),
                 "configured_decoded": {
-                    "default_smdp": "smdpplus2.esim.tst.1ot.mobi",
+                    "default_smdp": "smdpplus2.smdpp.example.test",
                     "root_smds_primary": "",
                     "root_smds_additional": [],
                     "allowed_ci_pkid": [],
@@ -1620,7 +1620,7 @@ class LocalAccessSessionTests(unittest.TestCase):
             session.state.transaction_id = b"\x10" * 16
             session.state.configured_data = wrap_tlv(
                 bytes.fromhex("BF3C"),
-                wrap_tlv(b"\x80", b"smdpplus2.esim.tst.1ot.mobi"),
+                wrap_tlv(b"\x80", b"smdpplus2.smdpp.example.test"),
             )
 
             euicc_otpk_key = ec.generate_private_key(ec.SECP256R1())
@@ -1696,7 +1696,7 @@ class LocalAccessSessionTests(unittest.TestCase):
             session.state.transaction_id = b"\x10" * 16
             session.state.configured_data = wrap_tlv(
                 bytes.fromhex("BF3C"),
-                wrap_tlv(b"\x80", b"smdpplus2.esim.tst.1ot.mobi"),
+                wrap_tlv(b"\x80", b"smdpplus2.smdpp.example.test"),
             )
 
             euicc_otpk_key = ec.generate_private_key(ec.SECP256R1())
@@ -1787,7 +1787,7 @@ class LocalAccessSessionTests(unittest.TestCase):
             session.state.transaction_id = b"\x10" * 16
             session.state.configured_data = wrap_tlv(
                 bytes.fromhex("BF3C"),
-                wrap_tlv(b"\x80", b"smdpplus2.esim.tst.1ot.mobi"),
+                wrap_tlv(b"\x80", b"smdpplus2.smdpp.example.test"),
             )
 
             euicc_otpk_key = ec.generate_private_key(ec.SECP256R1())

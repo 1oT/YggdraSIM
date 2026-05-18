@@ -34,7 +34,7 @@ from Tools.Sunrise6G.qod import QodStubClient, reset_default_qod_stub_client
 
 
 def _device():
-    return DeviceIdentity(phone_number="+15558675309")
+    return DeviceIdentity(phone_number="+15550100199")
 
 
 class StubBridgeTests(unittest.TestCase):
@@ -60,7 +60,7 @@ class StubBridgeTests(unittest.TestCase):
             "qosProfile": "QOS_E",
             "duration": 600,
             "applicationServer": {"ipv4Address": "203.0.113.10"},
-            "device": {"phoneNumber": "+15558675309"},
+            "device": {"phoneNumber": "+15550100199"},
         }
         created = self.bridge.create_qod_session(info)
         sid = created["sessionId"]
@@ -159,7 +159,7 @@ class SdkBridgeTests(unittest.TestCase):
             "qosProfile": "QOS_E",
             "duration": 600,
             "applicationServer": {"ipv4Address": "203.0.113.10"},
-            "device": {"phoneNumber": "+15558675309"},
+            "device": {"phoneNumber": "+15550100199"},
         }
         result = bridge.create_qod_session(info)
         self.assertEqual(result["sessionId"], "sdk-session-1")
@@ -183,7 +183,7 @@ class SdkBridgeTests(unittest.TestCase):
 
         location = bridge.retrieve_location(_device())
         self.assertEqual(location["area"]["radius"], 100)
-        self.assertEqual(captured["retrieve"]["device"], {"phoneNumber": "+15558675309"})
+        self.assertEqual(captured["retrieve"]["device"], {"phoneNumber": "+15550100199"})
         self.assertEqual(captured["retrieve"]["maxAge"], 60)
 
     def test_unsupported_network_adapter_rejected(self):

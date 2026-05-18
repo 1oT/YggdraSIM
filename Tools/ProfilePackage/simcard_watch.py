@@ -1,3 +1,4 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """
 Polling watcher that auto-opens fresh SIMCARD profiles in the SAIP tooling.
 
@@ -156,6 +157,7 @@ class ProfileStoreWatcher:
         return self._store_root
 
     def poll_once(self) -> list[ProfileArrival]:
+        """Poll for card presence once and return the current card state dict."""
         try:
             arrivals = _scan_store_once(self._store_root)
         except OSError as scan_error:
@@ -197,6 +199,7 @@ class ProfileStoreWatcher:
         self._stop_event.set()
 
     def run_forever(self) -> None:
+        """Run the card-presence polling loop forever until interrupted."""
         while self._stop_event.is_set() is False:
             try:
                 self.poll_once()
@@ -421,6 +424,7 @@ def watch_and_launch_tui(
 
 
 def run_cli(argv: Sequence[str] | None = None) -> int:
+    """Parse CLI arguments and launch the SIM-card watch loop."""
     import argparse
 
     parser = argparse.ArgumentParser(

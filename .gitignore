@@ -1,6 +1,8 @@
 # Sensitive keys, certs, secrets, and mutable operator data
 SCP03/script.txt
 docs
+docs/Manual/
+YggdraSIM/docs/Manual/
 site/
 site-oneot/
 YggdraSIM-data/
@@ -16,6 +18,12 @@ tmp_*.txt
 # Match both tmp_XXXX/ (underscore) and tmpXXXX/ (no separator) styles.
 tmp_*/
 tmp[a-z0-9]*/
+
+# Agent-side pytest scratch and audit logs (local-only).
+.ptlog.txt
+.pytest_baseline_log.txt
+.pytest_agent_log.txt
+.saip_key_audit_log.txt
 
 # SCP11 mutable runtime caches and reports
 SCP11/es9_ca_lookup.json
@@ -123,11 +131,11 @@ reference_test_profile.transcode.der
 reference_test_profile.transcode.txt
 demo.der
 
-Tools/ProfilePackage/profile/transcoded/1oT_test_profile.transcode.der
+Tools/ProfilePackage/profile/transcoded/example_test_profile.transcode.der
 Tools/ProfilePackage/profile/transcoded/reference_test_profile.transcode.json
-Tools/ProfilePackage/profile/transcode/1oT_test_profile.transcode.der
-Tools/ProfilePackage/profile/transcode/1oT_test_profile.transcode.json
-Tools/ProfilePackage/profile/transcode/1oT_test_profile.transcode.txt
+Tools/ProfilePackage/profile/transcode/example_test_profile.transcode.der
+Tools/ProfilePackage/profile/transcode/example_test_profile.transcode.json
+Tools/ProfilePackage/profile/transcode/example_test_profile.transcode.txt
 Tools/ProfilePackage/profile/transcoded/reference_test_profile.transcode.txt
 *.transcode.txt
 # Per-operator scratch dump created by saip_json_codec.resolve_transcode_paths
@@ -160,12 +168,41 @@ reports/*
 # Packaging metadata written by `pip install -e .`
 yggdrasim.egg-info/
 
-# --- V2 universal GUI (R2-004) -------------------------------------------
-# V2 work-in-progress: keep the entire GUI implementation surface off v1
-# pushes so main stays exactly the v1 footprint until the GUI feature
-# lands officially. Remove these rules when R2-004 graduates to `landed`
-# in V2_ROADMAP.md. Design docs (V2_UNIVERSAL_GUI_PLAN.md) are not
-# ignored — only the code tree.
+# --- Universal GUI work-in-progress --------------------------------------
+# The GUI implementation surface stays out of the public release tree so
+# the published footprint stays stable. Drop these rules when the GUI
+# graduates to a public release.
 gui_frontend/
 yggdrasim_common/gui_server/
 tests/test_gui_*.py
+
+# --- Internal planning / audit / handoff docs ----------------------------
+# Per .cursor/rules/no-internal-roadmap-leaks.mdc: roadmap, release-audit,
+# feature-plan, review and dated handoff / live-run reports are local-only
+# and never tracked. Keep authoring drafts on disk if you like; do not
+# commit them.
+V1_*.md
+V2_*.md
+*_REVIEW.md
+*_AUDIT.md
+*_HANDOFF.md
+*_handoff_*.md
+*_RELEASE_NOTES.md
+*_PATCHES.md
+NEW_FEATURE_IDEAS.md
+UPSTREAM_DEPENDENCY_NOTES.md
+
+# --- Upstream-PR working tree -------------------------------------------
+# Drop-in patch files we have authored against third-party dependencies
+# (asn1tools, pySim, ...) and intend to submit upstream. The tree is
+# strictly local: nothing here ships with the YggdraSIM wheel. Each file
+# is self-contained Python plus an adjacent .md PR-description so it can
+# be lifted into the corresponding upstream repo without modification.
+upstream_patches/
+site-docs/sources/V1_*.md
+site-docs/sources/V2_*.md
+site-docs/sources/*_REVIEW.md
+site-docs/sources/*_AUDIT.md
+site-docs/sources/*_HANDOFF.md
+site-docs/sources/NEW_FEATURE_IDEAS.md
+site-docs/sources/reports/

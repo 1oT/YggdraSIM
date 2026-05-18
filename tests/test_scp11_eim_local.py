@@ -1908,10 +1908,10 @@ class EimLocalModelTests(unittest.TestCase):
                 ],
                 "configured_raw": wrap_tlv(
                     bytes.fromhex("BF3C"),
-                    wrap_tlv(b"\x80", b"smdpplus2.esim.tst.1ot.mobi"),
+                    wrap_tlv(b"\x80", b"smdpplus2.smdpp.example.test"),
                 ),
                 "configured_decoded": {
-                    "default_smdp": "smdpplus2.esim.tst.1ot.mobi",
+                    "default_smdp": "smdpplus2.smdpp.example.test",
                     "root_smds_primary": "",
                     "root_smds_additional": [],
                     "allowed_ci_pkid": [],
@@ -2876,7 +2876,7 @@ class EimLocalModelTests(unittest.TestCase):
         shell._ensure_poll_bridge = ensure_bridge
         shell._load_network_orchestrator = load_orchestrator
         shell._close_network_runtime = lambda orchestrator: calls.setdefault("closed_runtime", True)
-        shell._set_cached_poll_target_fqdns(["eim2.esim.tst.1ot.mobi"])
+        shell._set_cached_poll_target_fqdns(["eim2.esim.example.test"])
 
         with contextlib.redirect_stdout(io.StringIO()) as output:
             shell._run_localized_ipae("test", argument="7 18 -t 20s -s 5 --debug")
@@ -2907,7 +2907,7 @@ class EimLocalModelTests(unittest.TestCase):
         )
         self.assertEqual(
             calls["orchestrator"]._resolve_cached_poll_target_fqdns(),
-            ["eim2.esim.tst.1ot.mobi"],
+            ["eim2.esim.example.test"],
         )
         self.assertIn("Active path: SIM IP", rendered)
         self.assertIn("SIM <-> bridge <-> eIM/SM-DP+", rendered)

@@ -1,3 +1,4 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """
 Pair-encoder module: inverse of ``saip_asn1_decode``.
 
@@ -129,6 +130,7 @@ def _encode_enum_name(
 
 
 def encode_life_cycle_state(payload: dict[str, Any]) -> bytes:
+    """Encode a lifecycle-state integer as the ASN.1 OCTET STRING for lcsState (GSMA SGP.22 §A.1)."""
     return _encode_enum_name(
         payload,
         name_key="state",
@@ -138,6 +140,7 @@ def encode_life_cycle_state(payload: dict[str, Any]) -> bytes:
 
 
 def encode_key_access(payload: dict[str, Any]) -> bytes:
+    """Encode a key-access byte as the ASN.1 OCTET STRING for keyAccess."""
     return _encode_enum_name(
         payload,
         name_key="access",
@@ -147,6 +150,7 @@ def encode_key_access(payload: dict[str, Any]) -> bytes:
 
 
 def encode_key_type(payload: dict[str, Any]) -> bytes:
+    """Encode a key-type identifier byte as the ASN.1 OCTET STRING for keyType."""
     return _encode_enum_name(
         payload,
         name_key="type",
@@ -174,6 +178,7 @@ def encode_key_version_number(payload: dict[str, Any]) -> bytes:
 
 
 def encode_key_counter_value(payload: dict[str, Any]) -> bytes:
+    """Encode a key counter value into the keyCounterValue SEQUENCE."""
     if "decimal" in payload:
         decimal_value = _require_int(payload, "decimal")
         if "hex" in payload:
@@ -370,6 +375,7 @@ def _encode_active_flags(
 
 
 def encode_application_privileges(payload: dict[str, Any]) -> bytes:
+    """Encode a set of application-privilege flags into the ApplicationPrivileges BIT STRING."""
     if "hex" in payload:
         return _hex_to_bytes(_require_hex(payload, "hex"))
     return _encode_active_flags(
@@ -418,6 +424,7 @@ def encode_aka_secret_material(payload: dict[str, Any]) -> bytes:
 
 
 def encode_rotation_constants(payload: dict[str, Any]) -> bytes:
+    """Encode a list of rotation-constant hex strings into the rotationConstants SEQUENCE."""
     if all(f"r{index}" in payload for index in range(1, 6)):
         values: list[int] = []
         for index in range(1, 6):
@@ -437,6 +444,7 @@ def encode_rotation_constants(payload: dict[str, Any]) -> bytes:
 
 
 def encode_xoring_constants(payload: dict[str, Any]) -> bytes:
+    """Encode a list of XOR-constant hex strings into the xoringConstants SEQUENCE."""
     if "blockCount" in payload:
         block_count = _require_int(payload, "blockCount")
         if block_count < 1:
@@ -527,6 +535,7 @@ def encode_ef_acc(
     *,
     target_length: int | None = None,
 ) -> bytes:
+    """Encode EF.ACC content: Access Control Class bitmask (3GPP TS 31.102 §4.2.15)."""
     classes = payload.get("accessControlClasses")
     if isinstance(classes, list) is False:
         if "raw" in payload and isinstance(payload["raw"], str):
@@ -555,6 +564,7 @@ def encode_ef_ehplmnpi(
     *,
     target_length: int | None = None,
 ) -> bytes:
+    """Encode EF.EHPLMNPI content: EHPLMN presentation indication byte (3GPP TS 31.102 §4.2.85)."""
     name = str(payload.get("presentationIndication", "") or "").strip()
     if name in _EHPLMNPI_NAME_TO_CODE:
         return _pad_ff(
@@ -574,6 +584,7 @@ def encode_ef_start_hfn(
     *,
     target_length: int | None = None,
 ) -> bytes:
+    """Encode EF.START-HFN content: RRC/MM/CN HFN start values (3GPP TS 31.102 §4.2.51)."""
     if "startCs" in payload or "startPs" in payload:
         start_cs = _require_int(payload, "startCs")
         start_ps = _require_int(payload, "startPs")
@@ -595,6 +606,7 @@ def encode_ef_smss(
     *,
     target_length: int | None = None,
 ) -> bytes:
+    """Encode EF.SMSS content: SMS status byte and SMSP pointer (3GPP TS 31.102 §4.2.57)."""
     if "lastUsedTpMr" in payload or "memoryCapacityExceeded" in payload:
         last_used = _require_int(payload, "lastUsedTpMr")
         if not 0 <= last_used <= 0xFF:
@@ -621,6 +633,7 @@ def encode_ef_ad(
     # original (including MNC length + spare bytes) so prefer raw to keep
     # those bytes intact. Rewrite byte 0 only when the requested mode name
     # differs from what the existing byte already decodes to.
+    """Encode EF.AD content: administrative data including MNC length (3GPP TS 31.102 §4.2.18)."""
     if "raw" in payload and isinstance(payload["raw"], str):
         data = _hex_to_bytes(_require_hex(payload, "raw"))
         mode_name = str(payload.get("administrativeMode", "") or "").strip()
@@ -649,6 +662,7 @@ def encode_ef_hpplmn_search_interval(
     *,
     target_length: int | None = None,
 ) -> bytes:
+    """Encode EF.HPPLMN content: higher-priority PLMN search interval byte (3GPP TS 31.102 §4.2.12)."""
     if "intervalMinutes" in payload:
         minutes = _require_int(payload, "intervalMinutes")
         if not 0 <= minutes <= 0xFF:
@@ -665,6 +679,7 @@ def encode_ef_three_byte_counter(
     *,
     target_length: int | None = None,
 ) -> bytes:
+    """Encode a generic three-byte counter EF (e.g. EF.THRESHOLD) from an integer value."""
     if "raw" in payload and isinstance(payload["raw"], str):
         data = _hex_to_bytes(_require_hex(payload, "raw"))
         return _pad_ff(data, target_length=target_length)
@@ -690,6 +705,7 @@ def encode_ef_language_records(
     *,
     target_length: int | None = None,
 ) -> bytes:
+    """Encode EF language preference records into packed ISO 639-1 two-letter strings."""
     languages = payload.get("languages")
     if isinstance(languages, list) is False:
         raise RoundtripEncoderError("language records: 'languages' must be a list")
@@ -830,6 +846,7 @@ def encode_ef_plmn_list(
     with_act: bool,
     target_length: int | None = None,
 ) -> bytes:
+    """Encode a PLMN-list EF (e.g. EF.PLMNWACT) from a list of PLMN+ACT dicts."""
     entries = payload.get("entries")
     if isinstance(entries, list) is False:
         raise RoundtripEncoderError("PLMN list: 'entries' must be a list")
@@ -878,7 +895,7 @@ def encode_ef_plmn_list_no_act(
 # - SMSP:         same alpha-id roundtrip pitfall.
 # - EF.ARR:       sub-TLVs inside ``A4`` groups and any vendor tags outside
 #                 the small whitelist (80/90/97/84/A4) are exposed as opaque
-#                 ``items`` lists rather than first-class semantic fields.
+#                 ``items`` lists rather than explicit semantic fields.
 #
 # The strategy is to carry the original bytes through the editor model under
 # the ``_ygg_original_hex`` key (populated by
@@ -4911,6 +4928,7 @@ def encode_uicc_administrative_access_application_specific_parameters_field(
 
 
 def encode_major_version_field(payload: dict[str, Any]) -> int:
+    """Encode the major-version integer field into its tag/length/value byte sequence."""
     decimal_value = _require_int(payload, "decimal")
     if not 0 <= decimal_value <= 0xFF:
         raise RoundtripEncoderError(
@@ -4920,6 +4938,7 @@ def encode_major_version_field(payload: dict[str, Any]) -> int:
 
 
 def encode_minor_version_field(payload: dict[str, Any]) -> int:
+    """Encode the minor-version integer field into its tag/length/value byte sequence."""
     decimal_value = _require_int(payload, "decimal")
     if not 0 <= decimal_value <= 0xFF:
         raise RoundtripEncoderError(
@@ -4936,6 +4955,7 @@ def encode_identification_field(payload: dict[str, Any]) -> int:
 
 
 def encode_short_efid_field(payload: dict[str, Any]) -> int:
+    """Encode the short EF-ID field into its tag/length/value byte sequence."""
     decimal_value = _require_int(payload, "decimal")
     if not 0 <= decimal_value <= 0x1F:
         raise RoundtripEncoderError(

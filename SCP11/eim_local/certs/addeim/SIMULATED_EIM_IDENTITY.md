@@ -1,11 +1,11 @@
 # YggdraSIM Simulated eIM – AddEim Identity Sheet
 
 This document is the concrete, vendor-neutral identity record for the
-YggdraSIM simulated eIM. It contains **every field** that a real-world eIM
-portal (1oT, or any other GSMA SGP.32-compliant eIM operator) needs in
-order to accept YggdraSIM's simulated eIM as a peer / indirect profile
-download source, and to bind the resulting eIM Configuration Data to a
-real eUICC via ES25 `AddEim`.
+YggdraSIM simulated eIM. It contains **every field** that a real-world
+GSMA SGP.32-compliant eIM portal needs in order to accept YggdraSIM's
+simulated eIM as a peer / indirect profile download source, and to
+bind the resulting eIM Configuration Data to a real eUICC via ES25
+`AddEim`.
 
 The structure mirrors the GSMA SGP.32 `EimConfigurationData` ASN.1 shape
 (section 2.10.1, "eIM Configuration Data"). All values are hardcoded so
@@ -20,8 +20,8 @@ the sheet can be pasted straight into a vendor registration form.
 
 ## 2. Field matrix
 
-| ASN.1 field               | 1oT       | Strict eIM policy | Notes                                                  |
-|---------------------------|-----------|-------------------|--------------------------------------------------------|
+| ASN.1 field               | Common policy | Strict eIM policy | Notes                                                  |
+|---------------------------|---------------|-------------------|--------------------------------------------------------|
 | `eimId`                   | Mandatory | Mandatory         | UTF8String, up to 128 chars, unique per eIM instance.  |
 | `eimIdType`               | Mandatory | Mandatory         | `Oid`, `Fqdn`, or `ProprietaryId`.                     |
 | `eimFqdn`                 | Mandatory | Mandatory         | Must match TLS leaf CN/SAN and AddEim endpoint.        |
@@ -34,7 +34,7 @@ the sheet can be pasted straight into a vendor registration form.
 > Policy note. Some eIM registration portals enforce that every field
 > listed above be non-empty **except** `euiccCiPkId` — i.e. they treat
 > `euiccCiPkId` as the single optional field and everything else as
-> mandatory. The 1oT portal follows the same superset but will accept
+> mandatory. Other portals follow the same superset but will accept
 > a profile even if further optional fields are omitted. The record
 > below satisfies both policies.
 
@@ -159,7 +159,7 @@ Identity breakdown:
 1. `eimId` uses the private enterprise OID arc
    `1.3.6.1.4.1.53775.99.*`. The `.99.1.0` leaf marks this as a
    YggdraSIM-issued test identity, deliberately distinct from any
-   real 1oT production OID.
+   real operator production OID.
 2. `eimFqdn` is the SGP.26 Variant O default (`eim.example.com`), which
    matches the TLS leaf SAN and the signing leaf CN shipped with the
    test vectors.
@@ -206,8 +206,8 @@ Profile 3 or Profile 4 depending on which naming you picked.
 4. The `eimId` values above are test identifiers. Do not reuse them
    against a production eIM or against a customer's live RSP chain.
 5. YggdraSIM operates all of the above against self-signed / SGP.26
-   test trust. For production interop, see `V2_ROADMAP.md` entry
-   `R2-001` (HSM-backed signer seam for the local SMDPp).
+   test trust. Production interop (HSM-backed signer seam for the
+   local SMDPp) is not part of this release.
 
 ## 7. Verification cheatsheet
 
@@ -252,7 +252,8 @@ the scalar fields.
 
 ## 8. Change log
 
-1. 2026-04-19 – Initial hardcoded sheet. Covers Profile 3 (YggdraSIM
+1. Initial hardcoded sheet. Covers Profile 3 (YggdraSIM
    branded), Profile 4 (SGP.26 Variant O neutral), Profile 5 (BRP
-   swap). Matches 1oT registration form expectations and the common
-   "all-mandatory-except-`euiccCiPkId`" eIM intake policy.
+   swap). Matches the common operator registration form
+   expectations and the "all-mandatory-except-`euiccCiPkId`" eIM
+   intake policy.

@@ -1,3 +1,5 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+"""HIL-Bridge APDU router: dispatches incoming C-APDUs to the registered handler (relay, recorder, or simulated card)."""
 from __future__ import annotations
 
 import json
@@ -16,6 +18,11 @@ from yggdrasim_common.runtime_paths import ensure_runtime_dir, runtime_path
 from .apdu_relay import ApduRelayConfig, HilBridgeApduRelayService
 from .pcsc import PcscBridgeError, PcscCardChannel
 from .proactive import ProactiveRefreshBroker
+from .remote_card import (
+    RemoteRelayCardChannel,
+    resolve_remote_card_token,
+    resolve_remote_card_url,
+)
 from .sim_modem import SimulatedModemCardChannel
 from .protocol import (
     COMPONENT_REMSIM_BANKD,
@@ -69,6 +76,14 @@ def _create_simulated_card_connection() -> Any:
 class BackendCardChannel:
     reader_index: int = 0
     reader_name: str = ""
+    # Remote-relay overrides — when ``remote_card_url`` (or the matching
+    # env var, see :func:`resolve_remote_card_url`) resolves to a non-empty
+    # value the channel switches from local PC/SC to a network-backed
+    # :class:`RemoteRelayCardChannel`. The local-PC/SC + simulator paths
+    # stay byte-for-byte identical when no remote URL is configured.
+    remote_card_url: str = ""
+    remote_card_auth_token: str = ""
+    remote_card_token_file: str = ""
     _backend_name: str = field(default="", init=False, repr=False)
     _channel: Any = field(default=None, init=False, repr=False)
     _reader_label: str = field(default="", init=False, repr=False)
@@ -85,13 +100,42 @@ class BackendCardChannel:
     def reader_label(self) -> str:
         return self._reader_label
 
+    def _resolved_remote_url(self) -> str:
+        return resolve_remote_card_url(self.remote_card_url)
+
     def connect(self) -> None:
+        """Open the active card channel.
+
+        Selection order:
+          1. Simulated card backend (``YGGDRASIM_CARD_BACKEND=sim``)
+             → :class:`SimulatedModemCardChannel`. Unchanged.
+          2. Remote relay configured (CLI flag or
+             ``YGGDRASIM_HIL_REMOTE_CARD_URL``) → stream APDUs to a
+             remote :class:`RemoteRelayCardChannel`. Local PC/SC is
+             not opened in this mode — the card lives elsewhere.
+          3. Local PC/SC reader → :class:`PcscCardChannel`. The
+             default; mirrors the existing physically-connected
+             topology byte-for-byte.
+        """
         backend_name = self.backend_name
         if backend_name == "sim":
             connection = _create_simulated_card_connection()
             self._channel = SimulatedModemCardChannel(connection)
             self._backend_name = "sim"
             self._reader_label = describe_card_backend()
+            return
+
+        remote_url = self._resolved_remote_url()
+        if len(remote_url) > 0:
+            token = resolve_remote_card_token(
+                explicit_token=self.remote_card_auth_token,
+                explicit_token_file=self.remote_card_token_file,
+            )
+            channel = RemoteRelayCardChannel(url=remote_url, auth_token=token)
+            channel.connect()
+            self._channel = channel
+            self._backend_name = "remote"
+            self._reader_label = str(channel.reader_label or "").strip() or remote_url
             return
 
         channel = PcscCardChannel(reader_index=self.reader_index, reader_name=self.reader_name)
@@ -101,6 +145,7 @@ class BackendCardChannel:
         self._reader_label = str(channel.reader_label or "").strip() or "PC/SC reader"
 
     def reconnect(self) -> None:
+        """Close and re-open the WebSocket connection."""
         channel = self._require_channel()
         if self.backend_name == "reader" and hasattr(channel, "reconnect"):
             channel.reconnect()
@@ -110,6 +155,7 @@ class BackendCardChannel:
         self.connect()
 
     def disconnect(self) -> None:
+        """Close the WebSocket connection."""
         channel = self._channel
         self._channel = None
         if channel is None:
@@ -160,6 +206,12 @@ class BridgeConfig:
     apdu_relay_enabled: bool = True
     reader_index: int = 0
     reader_name: str = ""
+    # Streaming card-source: when set, the bridge consumes a remote
+    # relay (operator's laptop running ``yggdrasim-card-bridge``)
+    # over the SSH tunnel instead of opening the local PC/SC reader.
+    # ``reader_index`` / ``reader_name`` are ignored in this mode.
+    remote_card_url: str = ""
+    remote_card_token_file: str = ""
     client_id: int = 0
     client_slot: int = 0
     bank_id: int = 1
@@ -225,6 +277,7 @@ class BridgeSession:
         self.atr_sent = False
 
     def server_identity(self) -> dict[str, Any]:
+        """Return the server identity string (URL + session token) for logging purposes."""
         return build_component_identity(
             COMPONENT_REMSIM_SERVER,
             name=self.config.bridge_name,
@@ -233,6 +286,7 @@ class BridgeSession:
         )
 
     def bankd_identity(self) -> dict[str, Any]:
+        """Return the RSPRO ComponentIdentity dict for the bank-daemon role."""
         return build_component_identity(
             COMPONENT_REMSIM_BANKD,
             name=f"{self.config.bridge_name}-bankd",
@@ -255,7 +309,12 @@ class HilBridgeServer:
         self._listen_socket.setblocking(False)
         self._selector.register(self._listen_socket, selectors.EVENT_READ, None)
 
-        self._card = BackendCardChannel(reader_index=config.reader_index, reader_name=config.reader_name)
+        self._card = BackendCardChannel(
+            reader_index=config.reader_index,
+            reader_name=config.reader_name,
+            remote_card_url=config.remote_card_url,
+            remote_card_token_file=config.remote_card_token_file,
+        )
         self._card.connect()
 
         self._gsmtap = GsmtapTap(
@@ -288,10 +347,16 @@ class HilBridgeServer:
             config.advertise_host,
             config.listen_port,
         )
+        LOGGER.info(
+            "Card source: %s (%s)",
+            self._card.backend_name,
+            self._card.reader_label or "unknown",
+        )
         if config.apdu_relay_enabled:
             LOGGER.info("Card relay available at %s", self._apdu_relay.apdu_url)
 
     def serve_forever(self, *, stop_event: threading.Event | None = None) -> None:
+        """Accept connections and route RSPRO messages until the stop event fires."""
         while True:
             if stop_event is not None:
                 if stop_event.is_set():
@@ -307,6 +372,7 @@ class HilBridgeServer:
                 self._service_connection(context, mask)
 
     def close(self) -> None:
+        """Signal the router to stop and close all managed connections."""
         self._remove_card_relay_marker()
         self._apdu_relay.stop()
         self._reset_session("server shutdown", refresh_card=False)

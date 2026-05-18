@@ -270,10 +270,15 @@ Two stages: file-based defaults, then the per-card SQLite inventory
    pattern with lowercase verbs:
 
     ```bash
-    yggdrasim-scp80 --cmd "iccid <ICCID>; set kic <hex>; set kid <hex>; set spi <hex>; show; quit"
+    yggdrasim-scp80 --cmd "iccid <ICCID>; set kic <16-byte-hex>; set kid <16-byte-hex>; set kic_indicator <hex>; set kid_indicator <hex>; show; quit"
     ```
 
-    `set` updates the active SCP80 config; `show` prints the
+    Slot names follow ETSI TS 102 225 §5.1.1: `kic` / `kid` are the
+    16-byte ciphering and integrity keys; `kic_indicator` /
+    `kid_indicator` are the 1-byte indicator bytes that select algorithm
+    plus key index in the Command Packet header. Legacy `key_enc` /
+    `key_mac` and 2-byte `kic` / `kid` values are auto-migrated on
+    load. `set` updates the active SCP80 config; `show` prints the
     resolved values. The per-ICCID record is persisted to
     `iccid/<ICCID>/scp80` and is preferred over the legacy
     `Workspace/SCP80/ota_config.ini` on the next bind.
@@ -305,7 +310,7 @@ search.
 
 ## Recipe 8: Seed a YggdraCore subscription
 
-> **Status: R2-005, post-v1.0.0 staging.** Tracked in [V2_ROADMAP.md](../sources/V2_ROADMAP.md). The v1.0.0 frozen tree (tag `v1.0.0`) does not include this surface.
+> **Status: post-v1 staging.** Not part of the v1.0.0 frozen release tag.
 
 The in-process AUSF / AAnF stub holds subscribers in memory only.
 There is no on-disk format.
@@ -362,7 +367,7 @@ download.
     export YGGDRASIM_EUM_SESSION_KEYS=~/secrets/eum-keys.json
     yggdrasim-eum-diag inject-keys \
         --bundle-file ~/secrets/eum-keys.json \
-        --pcap ~/captures/failing-2026-04-12.pcapng
+        --pcap ~/captures/failing-example.pcapng
     ```
 
     `inject-keys` accepts either the per-bundle CLI flags
@@ -452,7 +457,7 @@ non-test environment:
 6. **SUCI keys.** Author per home-network. Never reuse across
    operators.
 7. **YggdraCore subscribers.** Provision through `upsert(...)` or the
-   BYO Open5GS bridge. Stub state is intentionally non-persistent. (R2-005, post-v1.0.0 staging — see V2_ROADMAP.md.)
+   BYO Open5GS bridge. Stub state is intentionally non-persistent. (post-v1 staging — not part of this release.)
 8. **EUM session keys.** Author with `yggdrasim-eum-diag store-keys`,
    chmod 0600, point `YGGDRASIM_EUM_SESSION_KEYS` at the file.
 9. **HIL keybags.** Drop next to the pcap; auto-discovery picks them

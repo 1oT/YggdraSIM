@@ -1,3 +1,4 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """
 Semantic, context-aware diff layer over two SAIP profile documents.
 
@@ -162,14 +163,17 @@ class ProfileDiffReport:
 
     @property
     def total(self) -> int:
+        """Total number of diff entries across all categories."""
         return len(self.entries)
 
     @property
     def is_empty(self) -> bool:
+        """``True`` when no differences were found between the two profiles."""
         return self.total == 0
 
     @property
     def has_critical(self) -> bool:
+        """``True`` when at least one entry carries ``SEVERITY_CRITICAL``."""
         return self.counts_by_severity.get(SEVERITY_CRITICAL, 0) > 0
 
     def filter(
@@ -246,6 +250,7 @@ _SECTION_LABELS: Mapping[str, str] = {
     "5gAuthParameter": "5G AKA Parameters",
     "applicationManagement": "Application Management",
     "securityDomain": "Security Domain (ISD-P/SSD)",
+    "securityDomain_ssd": "Supplementary Security Domain (SSD)",
     "rfm": "Remote File Management (RFM)",
     "ram": "Remote Application Management (RAM)",
     "genericFileManagement": "Generic File Management (GFM)",
@@ -253,7 +258,19 @@ _SECTION_LABELS: Mapping[str, str] = {
     "df-eap": "DF.EAP",
     "df-5gs": "DF.5GS",
     "df-saip": "DF.SAIP",
+    "df-snpn": "DF.SNPN",
+    "df-5gprose": "DF.5G ProSe",
     "df-tetra": "DF.TETRA",
+    "df-wlan": "DF.WLAN",
+    "wlan": "WLAN configuration",
+    "iot": "IoT configuration",
+    "opt-iot": "IoT (optional)",
+    "pinCodes": "PIN Codes",
+    "pukCodes": "PUK Codes",
+    "application": "JavaCard application",
+    "nonStandard": "Non-standard PE",
+    "isdr": "ISD-R (root security domain)",
+    "isdp": "ISD-P (MNO security domain)",
     "end": "End of Profile marker",
     "profileHeader": "Profile Header",
 }

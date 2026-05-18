@@ -6,7 +6,7 @@ tags:
 
 # Subsystems
 
-Subsystem pages are the operator-facing deep dives. Each page covers:
+Subsystem pages are the operator-facing guides. Each page covers:
 
 - what the shell is for, phrased as when to use it and when not to
 - command surface, grouped
@@ -120,7 +120,7 @@ Subsystem pages are the operator-facing deep dives. Each page covers:
 
     ---
 
-    > **Status: R2-005, post-v1.0.0 staging.** Tracked in [V2_ROADMAP.md](../sources/V2_ROADMAP.md). The v1.0.0 frozen tree (tag `v1.0.0`) does not include this surface.
+    > **Status: post-v1 staging.** Not part of the v1.0.0 frozen release tag.
 
     In-process AUSF and AAnF stubs for 5G AKA, EAP-AKA', and AKMA round-trips, plus a BYO-Open5GS provisioning bridge.
 
@@ -143,4 +143,4 @@ Subsystem pages are the operator-facing deep dives. Each page covers:
 | SUCI Tool | [3GPP NAA](../concepts/3gpp-naa.md) |
 | APDU Mutation Fuzzer | [Secure Element Primer](../concepts/secure-element-primer.md) |
 | EUM Diagnostics | [RSP Architecture](../concepts/rsp-architecture.md), [SAIP Profiles](../concepts/saip-profiles.md) |
-| YggdraCore (5G core stubs) *(R2-005, post-v1.0.0 staging)* | [3GPP NAA](../concepts/3gpp-naa.md) |
+| YggdraCore (5G core stubs) *(post-v1 staging)* | [3GPP NAA](../concepts/3gpp-naa.md) |

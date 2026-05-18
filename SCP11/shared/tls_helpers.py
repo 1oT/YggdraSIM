@@ -1,3 +1,4 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """Central gate for insecure / introspection TLS contexts used by SCP11.
 
 Two distinct trust-posture needs exist in the SCP11 tree:

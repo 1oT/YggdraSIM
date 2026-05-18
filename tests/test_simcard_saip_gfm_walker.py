@@ -1,4 +1,4 @@
-"""Phase D regression coverage for ``ProfileElementGFM`` integration.
+"""Regression coverage for ``ProfileElementGFM`` integration.
 
 The simulator now routes ``genericFileManagement`` PEs through
 pySim's typed walker (``pysim_gfm_walk``). These tests pin:

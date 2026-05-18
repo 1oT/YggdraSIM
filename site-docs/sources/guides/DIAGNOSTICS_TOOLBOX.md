@@ -1,6 +1,6 @@
 # Diagnostics Toolbox
 
-Four v1-era capabilities ship as first-class tooling next to the
+Four v1-era capabilities ship as standalone tooling next to the
 core YggdraSIM subsystems. Each is additive — nothing existing
 changes behaviour unless the new command is explicitly invoked.
 
@@ -35,19 +35,79 @@ entry instead of a flood of add/remove pairs.
 yggdrasim-profile-package
 > DIFF /path/to/profile_a.der /path/to/profile_b.json
 > DIFF /path/to/a.json /path/to/b.json NO-VALUES
+> DIFF /path/to/a.der /path/to/b.der BY-CMD-INDEX
 > DIFF-TUI /path/to/a.der /path/to/b.der
 ```
 
 Pass `NO-VALUES` to suppress value rendering (structure-only view).
 `DIFF-TUI` opens a Textual application; `n` / `N` step between
-differences, `v` toggles values, `q` quits.
+differences, `v` toggles values, `d` toggles a side-by-side decoded
+view of the leaf under the tree cursor (same read-only decoder
+cascade as the transcode TUI's Decoded pane), `o` toggles a
+diffs-only filter that prunes the tree to the diff-bearing
+breadcrumb plus every changed subtree (everything else is hidden,
+which makes spotting real changes much easier on a 400+ entry
+diff), `h` toggles the hex-diff overlay (see below), `q` quits.
 
-### 1.3 Library use
+The decoded pane has two display modes, switched with `h`:
+
+* **JSON view** (default) — the leaf under the tree cursor is
+  rendered using the read-only decoder cascade as a pretty-printed
+  JSON object. No diff colouring is applied inside the pane; the
+  side-by-side tree above carries the diff signal via its op
+  markers and op colours.
+* **Hex-diff overlay** — when the leaf carries a flat hex blob,
+  the pane switches to an xxd-style 16-byte-per-line panel with a
+  byte-level diff against the other side. Diverging bytes are
+  painted on a directional background: red on the A side
+  ("byte present in A, different / missing in B"), green on the B
+  side ("byte present in B, different / missing in A"). A summary
+  line at the top of the panel reports `(n of m bytes differ)`.
+  Leaves with no flat hex fall back to JSON view automatically, so
+  toggling the overlay on is always safe.
+
+The decoded pane scrolls vertically (mouse wheel or `PageUp` /
+`PageDown` on focus) and resizes with `]` (grow) / `[` (shrink)
+between 4 and 60 rows. `F7` cycles the Textual theme through the
+same palette as the transcode TUI. The chosen theme, the decoded-
+pane visibility, the decoded-pane height, the values toggle, the
+diffs-only filter, and the hex-diff overlay all persist between
+sessions in `Tools/ProfilePackage/saip_transcode_tui_config.json`
+(theme is shared with the transcode TUI; layout settings live
+under a `diff_tui` sub-key).
+
+### 1.3 Canonical vs raw `genericFileManagement` comparison
+
+By default both `DIFF` and `DIFF-TUI` re-key
+`sections.genericFileManagement` from a list of PE blocks into a
+dict keyed by the resolved file-system path of each EF / DF / MF
+(e.g. `3F00/7F20/6F07` for EF.IMSI under DF.GSM). `filePath`
+SELECT chains are absorbed into the keys, so two profiles that
+contain the same EFs at different list-index positions produce
+byte-identical canonical maps and the diff engine no longer flags
+mechanical SELECT shifts as `added` / `removed` entries. The
+remaining diff is dominated by real changes (FCP fields, EF
+content, security attributes).
+
+The canonical pass also strips the per-PE
+`<peName>-header.identification` field (SGP.22 §2.5.3), which is a
+sequential PE index that shifts whenever the two profiles differ
+in PE count or order. Suppressing it removes a `changed` entry on
+every PE that would otherwise hide the real semantic differences.
+
+Pass `BY-CMD-INDEX` to opt back to the raw command-index
+comparison (the pre-canonical noisy view, including the PE-header
+`identification` field) — useful when verifying that two encoders
+emit byte-for-byte identical SAIP, or when chasing a regression in
+the file-management command stream itself.
+
+### 1.4 Library use
 
 `Tools/ProfilePackage/saip_diff_engine.py` exposes `diff_saip_documents`,
 `diff_documents`, and `format_diff_text`. The loader layer
 (`saip_diff_loader.py`) normalises the three supported shapes into
-a single dict for the engine.
+a single dict for the engine, and `saip_diff_canonical.py` provides
+the optional path-keyed re-keying step.
 
 ---
 
@@ -239,7 +299,7 @@ guides because they sit on top of larger subsystems:
   `Nausf_UEAuthentication_Authenticate` round trip against the
   simulated USIM without standing up Open5GS. The opt-in FastAPI
   loopback is gated by `YGGDRASIM_5GCORE_MODE=stub`. See
-  `guides/CAPABILITIES.md` §11 and `V2_ROADMAP.md` `R2-005`. (R2-005, post-v1.0.0 staging — see V2_ROADMAP.md.)
+  `guides/CAPABILITIES.md` §11. (post-v1 staging — not part of this release.)
 - **`main/main.py --doctor`.** Read-only preflight covering Python
   version, `cryptography`, `pycryptodomex`, `asn1tools`, optional
   on-disk `pysim/` clone, SQLite, optional `textual` (TUI), PC/SC

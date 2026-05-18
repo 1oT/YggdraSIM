@@ -1,3 +1,4 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """
 Scaffold a brand-new SAIP ProfileElement sequence from a curated preset.
 
@@ -142,14 +143,21 @@ _register_preset(
 
 
 def list_profile_presets() -> list[ProfilePreset]:
+    """Return all registered ``ProfilePreset`` objects in definition order."""
     return [preset for preset in _PROFILE_PRESETS.values()]
 
 
 def default_preset_id() -> str:
+    """Return the identifier of the default preset (currently ``"USIM"``)."""
     return _DEFAULT_PRESET_ID
 
 
 def normalize_preset_id(raw_preset_id: str | None) -> str:
+    """Normalise a preset identifier string; falls back to the default when empty.
+
+    Raises ``ValueError`` when ``raw_preset_id`` is non-empty but not a
+    known preset key.
+    """
     candidate = str(raw_preset_id or "").strip().upper()
     if len(candidate) == 0:
         return _DEFAULT_PRESET_ID
@@ -162,6 +170,7 @@ def normalize_preset_id(raw_preset_id: str | None) -> str:
 
 
 def get_preset(preset_id: str) -> ProfilePreset:
+    """Resolve a preset identifier to its ``ProfilePreset`` data object."""
     normalized = normalize_preset_id(preset_id)
     return _PROFILE_PRESETS[normalized]
 
@@ -174,6 +183,7 @@ def _menu_id_descriptions() -> dict[str, str]:
 
 
 def describe_menu_id(menu_id: str) -> str:
+    """Return the hint string for a PE quick-add ``menu_id``, or empty string."""
     table = _menu_id_descriptions()
     return table.get(str(menu_id), "")
 
@@ -202,6 +212,11 @@ def list_preset_placeholders(preset_id: str) -> list[str]:
 
 
 def describe_preset(preset_id: str) -> dict[str, Any]:
+    """Return a serialisable dict describing a preset for display in the GUI wizard.
+
+    Includes ``preset_id``, ``description``, ``source``, ``pe_count``,
+    ``menu_ids``, per-PE ``pes`` entries, and resolved ``placeholders``.
+    """
     preset = get_preset(preset_id)
     menu_table = _menu_id_descriptions()
     pe_entries: list[dict[str, str]] = []
@@ -224,6 +239,11 @@ def describe_preset(preset_id: str) -> dict[str, Any]:
 
 
 def diff_presets(preset_a_id: str, preset_b_id: str) -> PresetDiff:
+    """Compare two presets and return a ``PresetDiff`` describing PE-level differences.
+
+    Reports which ``menu_ids`` are exclusive to each preset, which are
+    shared, and whether their relative order differs.
+    """
     preset_a = get_preset(preset_a_id)
     preset_b = get_preset(preset_b_id)
     set_a = set(preset_a.menu_ids)
@@ -371,6 +391,7 @@ def register_user_presets(presets: list[ProfilePreset]) -> list[str]:
 
 
 def default_user_presets_path() -> Path:
+    """Return the default path for the user-local presets JSON file (``~/`` based)."""
     return Path.home() / _USER_PRESETS_FILENAME
 
 

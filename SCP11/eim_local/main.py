@@ -1,3 +1,5 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+"""eIM-local shell: operator REPL for the local eIM simulator exposing IPA-poll, package delivery, and audit commands."""
 import argparse
 import atexit
 import os
@@ -2514,6 +2516,7 @@ class EimLocalShell:
         return True
 
     def run(self) -> None:
+        """Start the interactive eIM-local operator REPL."""
         self._setup_readline()
         self._print_banner()
         self._cmd_help()
@@ -2538,6 +2541,7 @@ class EimLocalShell:
             self._finalize_recording_on_exit()
 
     def run_commands(self, cmd_line: str) -> None:
+        """Execute a semicolon-delimited command string non-interactively."""
         try:
             for raw_command in self._split_batch_commands(cmd_line):
                 keep_running = self._execute_command_line(raw_command, source="batch")
@@ -2576,6 +2580,7 @@ def entry_stdin() -> None:
 
 
 def run_standalone() -> None:
+    """Start the eIM-local shell as a standalone process entry point."""
     ensure_plugins_loaded()
     parser = argparse.ArgumentParser(description="SCP11 local eIM shell")
     add_debug_argument(

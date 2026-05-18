@@ -1,3 +1,5 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+"""SIM Application Toolkit logic: proactive command encoding, BIP bearer setup, timer management (ETSI TS 102 223)."""
 from __future__ import annotations
 
 import ipaddress
@@ -204,6 +206,7 @@ class ToolkitLogic:
                 continue
 
     def reset(self) -> None:
+        """Clear TERMINAL PROFILE, active proactive command, and bootstrap state on card reset."""
         toolkit = self.state.toolkit
         toolkit.terminal_profile = b""
         toolkit.terminal_capabilities.clear()
@@ -223,6 +226,11 @@ class ToolkitLogic:
         self._dispatch_hook("reset")
 
     def should_handle_status(self) -> bool:
+        """Return True when the STATUS command should trigger a FETCH response.
+
+        True when a proactive command is queued or when the IPA-poll loop has
+        a pending fetch entry waiting for the terminal to issue FETCH.
+        """
         if len(self.state.toolkit.active_proactive_command) > 0:
             return True
         if len(self.state.pending_fetch_queue) > 0:
@@ -292,6 +300,11 @@ class ToolkitLogic:
         return self._pending_status()
 
     def handle_terminal_profile(self, payload: bytes) -> tuple[bytes, int, int]:
+        """ETSI TS 102 221 §11.1.14 TERMINAL PROFILE — stores the terminal capability bitmap.
+
+        Kicks off the bootstrap proactive-command sequence when bootstrap is
+        enabled and not yet initialised.
+        """
         toolkit = self.state.toolkit
         toolkit.terminal_profile = bytes(payload or b"")
         if toolkit.bootstrap_enabled and toolkit.bootstrap_initialized is False:
@@ -311,6 +324,11 @@ class ToolkitLogic:
         return active, 0x90, 0x00
 
     def handle_terminal_response(self, payload: bytes) -> tuple[bytes, int, int]:
+        """ETSI TS 102 221 §11.1.15 TERMINAL RESPONSE — processes the terminal's reply to a proactive command.
+
+        Clears the active command slot and advances the bootstrap or IPA-poll
+        state machine to the next step.
+        """
         toolkit = self.state.toolkit
         normalized = bytes(payload or b"")
         toolkit.last_terminal_response = normalized
@@ -440,6 +458,12 @@ class ToolkitLogic:
         *,
         source: str = "",
     ) -> dict[str, str | int | list[str]]:
+        """Queue a REFRESH proactive command (ETSI TS 102 223 §6.4.7).
+
+        Coalesces identical *qualifier* values — a second call for the same
+        mode returns the existing command rather than queuing a duplicate.
+        Returns a status dict indicating whether the command was queued or coalesced.
+        """
         mode_name, qualifier = normalize_refresh_mode(mode)
         existing = self._find_refresh_command(qualifier)
         if len(existing) > 0:
@@ -1345,6 +1369,7 @@ class ToolkitLogic:
         )
 
     def status_payload(self) -> dict[str, str | int | list[str] | bool]:
+        """Return a JSON-serialisable snapshot of the current toolkit state for the GUI status endpoint."""
         active = bytes(self.state.toolkit.active_proactive_command or b"")
         queued = [bytes(entry) for entry in self.state.pending_fetch_queue]
         payload: dict[str, str | int | list[str] | bool] = {
@@ -2897,7 +2922,7 @@ class ToolkitLogic:
         contract is to deliver each package to ISD-R as a STORE DATA
         body, which is exactly what ``SgpLogic.handle_store_data``
         accepts. Anything that is not a recognised SGP.32 outer tag
-        is ignored -- this keeps the dispatcher robust to HTTP
+        is ignored -- this keeps the dispatcher tolerant of HTTP
         envelopes, status lines, or empty-keepalive responses that
         the bearer may smuggle through.
         """

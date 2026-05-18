@@ -1,3 +1,5 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+"""SCP11-live transport: BPP STORE-DATA framing and APDU dispatch for the live physical PCSC channel."""
 # -----------------------------------------------------------------------------
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -101,15 +103,19 @@ def _build_terminal_response_for_proactive_command(fetch_data: bytes) -> tuple[b
 
 class ApduChannel(Protocol):
     def send(self, apdu: bytes, log_name: str) -> bytes:
+        """Send an APDU and follow GET RESPONSE chaining (SW 61xx) to retrieve the full response."""
         pass
 
     def exchange(self, apdu: bytes, log_name: str) -> Tuple[bytes, int, int]:
+        """Send one APDU and return (response_bytes, SW1, SW2), logging the exchange under *log_name*."""
         pass
 
     def reset(self) -> bool:
+        """Disconnect and re-connect the underlying card channel, clearing any active session state."""
         pass
 
     def bootstrap_stk(self) -> bool:
+        """Send the STK OPEN-CHANNEL bootstrap command sequence to establish the BIP data channel."""
         pass
 
     def send_chunked(
@@ -122,6 +128,7 @@ class ApduChannel(Protocol):
         log_name: str,
         chunk_size: int = 250,
     ) -> bytes:
+        """Fragment *data* into STORE-DATA chunks and dispatch each via ``exchange`` (SGP.22 §3.1.3)."""
         pass
 
     def set_raw_apdu_logging(self, enabled: bool) -> None:
@@ -140,6 +147,7 @@ class RelayHttpClientJsonHex:
         self._verify_tls = verify_tls
 
     def send_apdu(self, apdu: bytes, session_id: str = "") -> Tuple[bytes, int, int]:
+        """Forward a raw APDU to the remote relay endpoint and return (response_bytes, SW1, SW2)."""
         request_json = {
             "sessionId": session_id,
             "apdu": apdu.hex().upper(),
@@ -200,6 +208,7 @@ class PcscApduChannel:
         return create_card_connection(reader_index=index)
 
     def reset(self) -> bool:
+        """Disconnect and re-connect the underlying card channel, clearing any active session state."""
         try:
             self._conn.disconnect()
         except Exception:
@@ -208,6 +217,7 @@ class PcscApduChannel:
         return True
 
     def bootstrap_stk(self) -> bool:
+        """Send the STK OPEN-CHANNEL bootstrap command sequence to establish the BIP data channel."""
         terminal_profile = bytes.fromhex("8010000015FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF00")
         _, sw1, sw2 = self.exchange(terminal_profile, "STK INIT: TERMINAL PROFILE")
         while sw1 == 0x91:
@@ -230,6 +240,7 @@ class PcscApduChannel:
         return True
 
     def exchange(self, apdu: bytes, log_name: str) -> Tuple[bytes, int, int]:
+        """Send one APDU and return (response_bytes, SW1, SW2), logging the exchange under *log_name*."""
         if self._raw_apdu_logging:
             print(f"\n[{log_name}] > {apdu.hex().upper()}")
         response, sw1, sw2 = self._conn.transmit(list(apdu))
@@ -248,6 +259,7 @@ class PcscApduChannel:
         return payload, sw1, sw2
 
     def send(self, apdu: bytes, log_name: str) -> bytes:
+        """Send an APDU and follow GET RESPONSE chaining (SW 61xx) to retrieve the full response."""
         response, sw1, sw2 = self.exchange(apdu, log_name)
 
         while sw1 == 0x61:
@@ -307,6 +319,7 @@ class PcscApduChannel:
         log_name: str,
         chunk_size: int = 250,
     ) -> bytes:
+        """Fragment *data* into STORE-DATA chunks and dispatch each via ``exchange`` (SGP.22 §3.1.3)."""
         total = len(payload)
         offset = 0
         block = p2_start
@@ -346,9 +359,11 @@ class RelayApduChannel:
         self._raw_apdu_logging = False
 
     def reset(self) -> bool:
+        """Disconnect and re-connect the underlying card channel, clearing any active session state."""
         return False
 
     def bootstrap_stk(self) -> bool:
+        """Send the STK OPEN-CHANNEL bootstrap command sequence to establish the BIP data channel."""
         terminal_profile = bytes.fromhex("8010000015FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF00")
         _, sw1, sw2 = self.exchange(terminal_profile, "STK INIT: TERMINAL PROFILE")
         while sw1 == 0x91:
@@ -369,6 +384,7 @@ class RelayApduChannel:
         return True
 
     def exchange(self, apdu: bytes, log_name: str) -> Tuple[bytes, int, int]:
+        """Send one APDU and return (response_bytes, SW1, SW2), logging the exchange under *log_name*."""
         if self._raw_apdu_logging:
             print(f"\n[{log_name}] > {apdu.hex().upper()}")
         response, sw1, sw2 = self._relay_client.send_apdu(apdu, session_id=self._session_id)
@@ -386,6 +402,7 @@ class RelayApduChannel:
         return response, sw1, sw2
 
     def send(self, apdu: bytes, log_name: str) -> bytes:
+        """Send an APDU and follow GET RESPONSE chaining (SW 61xx) to retrieve the full response."""
         response, sw1, sw2 = self.exchange(apdu, log_name)
 
         while sw1 == 0x61:
@@ -440,6 +457,7 @@ class RelayApduChannel:
         log_name: str,
         chunk_size: int = 250,
     ) -> bytes:
+        """Fragment *data* into STORE-DATA chunks and dispatch each via ``exchange`` (SGP.22 §3.1.3)."""
         total = len(payload)
         offset = 0
         block = p2_start
@@ -488,18 +506,22 @@ class SGP22Transport:
             self._channel = RelayApduChannel(relay_client=relay_client, session_id=relay_session_id)
 
     def send(self, apdu: bytes, log_name: str) -> bytes:
+        """Send an APDU and follow GET RESPONSE chaining (SW 61xx) to retrieve the full response."""
         return self._channel.send(apdu, log_name)
 
     def exchange(self, apdu: bytes, log_name: str) -> Tuple[bytes, int, int]:
+        """Send one APDU and return (response_bytes, SW1, SW2), logging the exchange under *log_name*."""
         return self._channel.exchange(apdu, log_name)
 
     def reset(self) -> bool:
+        """Disconnect and re-connect the underlying card channel, clearing any active session state."""
         reset_method = getattr(self._channel, "reset", None)
         if callable(reset_method):
             return bool(reset_method())
         return False
 
     def bootstrap_stk(self) -> bool:
+        """Send the STK OPEN-CHANNEL bootstrap command sequence to establish the BIP data channel."""
         bootstrap_method = getattr(self._channel, "bootstrap_stk", None)
         if callable(bootstrap_method):
             return bool(bootstrap_method())
@@ -515,6 +537,7 @@ class SGP22Transport:
         log_name: str,
         chunk_size: int = 250,
     ) -> bytes:
+        """Fragment *data* into STORE-DATA chunks and dispatch each via ``exchange`` (SGP.22 §3.1.3)."""
         return self._channel.send_chunked(
             cla=cla,
             ins=ins,

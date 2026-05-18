@@ -1,3 +1,5 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+"""ProfilePackage interactive shell: REPL loop wiring the bridge commands to the Textual TUI and CLI surfaces."""
 import atexit
 import ast
 import copy
@@ -15,6 +17,15 @@ from yggdrasim_common.progress import progress_session
 from yggdrasim_common.quit_control import quit_all
 from yggdrasim_common.nord_palette import NORD
 from .saip_asn1_decode import _FID_TO_NAME, fid_name as _fid_name_lookup
+from .saip_dgi_decode import (
+    decode_compact_binary_value as _dgi_decode_compact_binary_value,
+    decode_dgi_records as _dgi_decode_records,
+    decode_length_prefixed_identifier_block as _dgi_decode_length_prefixed_identifier_block,
+    decode_network_access_name as _dgi_decode_network_access_name,
+    decode_other_address as _dgi_decode_other_address,
+    describe_bearer_description as _dgi_describe_bearer_description,
+    describe_transport_level as _dgi_describe_transport_level,
+)
 from .lint_engine import SaipProfileLinter
 from .saip_profile_scaffold import (
     build_scaffold_profile_document,
@@ -48,9 +59,11 @@ from .saip_token_sidecar import (
     candidate_sidecar_paths,
     count_token_references,
     default_sidecar_path_for,
+    dump_sidecar_to_csv,
     first_available_sidecar,
     list_token_definitions,
     load_sidecar,
+    load_sidecar_from_csv,
     merge_sidecar_into_template,
     parse_token_value_argument,
     remove_token_definition,
@@ -171,6 +184,8 @@ class ProfilePackageShell:
             "APPLY-TEMPLATE": self._cmd_apply_template,
             "APPLY-TOKENS": self._cmd_apply_tokens,
             "EXPORT-TOKENS": self._cmd_export_tokens,
+            "EXPORT-TOKENS-CSV": self._cmd_export_tokens_csv,
+            "IMPORT-TOKENS-CSV": self._cmd_import_tokens_csv,
             "LIST-TOKENS": self._cmd_list_tokens,
             "ADD-TOKEN": self._cmd_add_token,
             "SET-TOKEN": self._cmd_set_token,
@@ -214,6 +229,7 @@ class ProfilePackageShell:
         self._load_user_presets_from_home()
 
     def run(self) -> None:
+        """Start the interactive SAIP shell REPL and block until the user exits."""
         self._print_banner()
         while True:
             try:
@@ -231,6 +247,7 @@ class ProfilePackageShell:
             self._exec_line(raw_line)
 
     def run_commands(self, cmd_line: str) -> None:
+        """Execute a list of SAIP shell commands in sequence."""
         self._print_banner()
         had_error = False
         for raw_command in str(cmd_line or "").split(";"):
@@ -398,6 +415,8 @@ class ProfilePackageShell:
         "RETOKENISE-LENGTHS": (_SLOT_PATH, _SLOT_PATH),
         "RETOKENIZE-LENGTHS": (_SLOT_PATH, _SLOT_PATH),
         "EXPORT-TOKENS": (_SLOT_PATH, _SLOT_PATH),
+        "EXPORT-TOKENS-CSV": (_SLOT_PATH, _SLOT_PATH),
+        "IMPORT-TOKENS-CSV": (_SLOT_PATH, _SLOT_PATH),
         "APPLY-TOKENS": (_SLOT_PATH, _SLOT_PATH, _SLOT_PATH),
         "ENCODE-JSON": (_SLOT_PATH, _SLOT_PATH),
         "GENERATE-TEMPLATE": (_SLOT_PATH,),
@@ -461,6 +480,8 @@ class ProfilePackageShell:
             "_cmd_rename_token": "RENAME-TOKEN",
             "_cmd_retokenise_lengths": "RETOKENISE-LENGTHS",
             "_cmd_export_tokens": "EXPORT-TOKENS",
+            "_cmd_export_tokens_csv": "EXPORT-TOKENS-CSV",
+            "_cmd_import_tokens_csv": "IMPORT-TOKENS-CSV",
             "_cmd_apply_tokens": "APPLY-TOKENS",
         }
         flat = flat_aliases.get(handler_name)
@@ -1129,209 +1150,10 @@ class ProfilePackageShell:
         return decoded
 
     def _decode_sd_perso_data(self, value):
-        hex_values = self._value_to_hex_strings(value)
-        if len(hex_values) == 0:
-            return None
-
-        decoded_entries: list[object] = []
-        entry_index = 1
-        top_level_tag_names = {
-            "84": "Transport Parameters",
-            "85": "Security / Address Container",
-            "86": "Security Parameters",
-            "89": "Remote Endpoint",
-            "8A": "Host / Address",
-            "8B": "Remote Identifier",
-            "8C": "Remote Path",
-        }
-        nested_tag_names = {
-            "85": {
-                "84": "Transport Parameters",
-                "85": "Remote Identifier Block",
-                "86": "Security Parameters",
-                "89": "Remote Endpoint",
-            },
-            "84": {
-                "01": "Parameter 01",
-                "02": "Parameter 02",
-                "35": "Bearer Description",
-                "39": "Buffer Size",
-                "3C": "Transport Level",
-                "3E": "Other Address",
-            },
-            "86": {
-                "00": "Parameter 00",
-                "20": "Parameter 20",
-            },
-            "89": {
-                "8A": "Host / Address",
-                "8B": "Remote Identifier",
-                "8C": "Remote Path",
-            },
-        }
-        nested_decoder_maps = {
-            "85": {
-                "85": self._decode_length_prefixed_identifier_block,
-            },
-            "84": {
-                "01": self._decode_compact_binary_value,
-                "02": self._decode_compact_binary_value,
-            },
-            "86": {
-                "00": self._decode_compact_binary_value,
-                "20": self._decode_compact_binary_value,
-            },
-        }
-        for hex_value in hex_values:
-            entry_bytes = self._value_to_bytes(hex_value)
-            if entry_bytes is None:
-                continue
-            dgi_items = self._decode_dgi_stream(
-                entry_bytes,
-                tag_names=top_level_tag_names,
-                nested_tag_names=nested_tag_names,
-                nested_decoder_maps=nested_decoder_maps,
-            )
-            if len(dgi_items) == 0:
-                continue
-            decoded_entries.append(
-                {
-                    "record": entry_index,
-                    "format": "DGI",
-                    "items": dgi_items,
-                }
-            )
-            entry_index += 1
-
-        if len(decoded_entries) == 0:
-            return None
-        return decoded_entries
-
-    def _decode_dgi_stream(
-        self,
-        data: bytes,
-        tag_names: dict[str, str] | None = None,
-        nested_tag_names: dict[str, dict[str, str]] | None = None,
-        nested_decoder_maps: dict[str, dict[str, Callable[[bytes], object | None]]] | None = None,
-    ) -> list[dict[str, object]]:
-        items: list[dict[str, object]] = []
-        offset = 0
-        while offset + 3 <= len(data):
-            tag_bytes = data[offset : offset + 2]
-            offset += 2
-            if offset >= len(data):
-                break
-
-            length_octet = data[offset]
-            offset += 1
-            if length_octet == 0xFF:
-                if offset + 2 > len(data):
-                    break
-                length_value = int.from_bytes(data[offset : offset + 2], "big", signed=False)
-                offset += 2
-            else:
-                length_value = length_octet
-
-            value_end = offset + length_value
-            if value_end > len(data):
-                break
-
-            value_bytes = data[offset:value_end]
-            offset = value_end
-            items.append(
-                {
-                    "dgi": tag_bytes.hex(),
-                    "length": length_value,
-                    "raw": value_bytes.hex(),
-                    "decoded": self._decode_simple_tlv_payload(
-                        value_bytes,
-                        tag_names=tag_names,
-                        nested_tag_names=nested_tag_names,
-                        nested_decoder_maps=nested_decoder_maps,
-                    ),
-                }
-            )
-
-        return items
-
-    def _decode_simple_tlv_payload(
-        self,
-        data: bytes,
-        tag_names: dict[str, str] | None = None,
-        nested_tag_names: dict[str, dict[str, str]] | None = None,
-        custom_decoder_map: dict[str, Callable[[bytes], object | None]] | None = None,
-        nested_decoder_maps: dict[str, dict[str, Callable[[bytes], object | None]]] | None = None,
-    ):
-        items = self._parse_simple_tlv_stream(data)
-        if items is None or len(items) == 0:
-            ascii_value = self._decode_printable_ascii(data)
-            if ascii_value is not None:
-                return {"ascii": ascii_value}
-            return data.hex()
-
-        decoded_items: list[dict[str, object]] = []
-        for tag_value, value_bytes in items:
-            tag_hex = f"{tag_value:02X}"
-            item: dict[str, object] = {
-                "tag": tag_hex,
-                "length": len(value_bytes),
-                "raw": value_bytes.hex(),
-            }
-            if tag_names is not None and tag_hex in tag_names:
-                item["name"] = tag_names[tag_hex]
-
-            if tag_value in (0x35, 0x39, 0x3C, 0x3E, 0x47):
-                description = self._decode_stk_value(tag_value, value_bytes)
-                if description is not None:
-                    item["decoded"] = description
-            else:
-                if custom_decoder_map is not None:
-                    custom_decoder = custom_decoder_map.get(tag_hex)
-                    if custom_decoder is not None:
-                        custom_decoded = custom_decoder(value_bytes)
-                        if custom_decoded is not None:
-                            item["decoded"] = custom_decoded
-                            decoded_items.append(item)
-                            continue
-                child_tag_names = None
-                if nested_tag_names is not None:
-                    child_tag_names = nested_tag_names.get(tag_hex)
-                child_decoder_map = None
-                if nested_decoder_maps is not None:
-                    child_decoder_map = nested_decoder_maps.get(tag_hex)
-                nested = self._decode_simple_tlv_payload(
-                    value_bytes,
-                    tag_names=child_tag_names,
-                    nested_tag_names=nested_tag_names,
-                    custom_decoder_map=child_decoder_map,
-                    nested_decoder_maps=nested_decoder_maps,
-                )
-                if nested != value_bytes.hex():
-                    item["decoded"] = nested
-                else:
-                    ascii_value = self._decode_printable_ascii(value_bytes)
-                    if ascii_value is not None:
-                        item["ascii"] = ascii_value
-
-            decoded_items.append(item)
-
-        return decoded_items
-
-    def _parse_simple_tlv_stream(self, data: bytes) -> list[tuple[int, bytes]] | None:
-        items: list[tuple[int, bytes]] = []
-        offset = 0
-        while offset < len(data):
-            if offset + 2 > len(data):
-                return None
-            tag_value = data[offset]
-            length_value = data[offset + 1]
-            offset += 2
-            value_end = offset + length_value
-            if value_end > len(data):
-                return None
-            items.append((tag_value, data[offset:value_end]))
-            offset = value_end
-        return items
+        # Delegated to ``saip_dgi_decode``: GlobalPlatform Amendment A
+        # DGI envelope walker + SCP80 connectivity sub-TLV decoder.
+        # Same record shape as before so the INFO renderer is unchanged.
+        return _dgi_decode_records(value)
 
     def _decode_ber_tlv_stream(
         self,
@@ -1465,39 +1287,10 @@ class ProfilePackageShell:
         }
 
     def _decode_compact_binary_value(self, value_bytes: bytes) -> dict[str, object] | None:
-        if len(value_bytes) == 0:
-            return {
-                "hex": "",
-                "empty": True,
-            }
-        if len(value_bytes) > 4:
-            return None
-        return {
-            "hex": value_bytes.hex(),
-            "decimal": int.from_bytes(value_bytes, "big", signed=False),
-            "bytes": [f"0x{byte_value:02X}" for byte_value in value_bytes],
-        }
+        return _dgi_decode_compact_binary_value(value_bytes)
 
     def _decode_length_prefixed_identifier_block(self, value_bytes: bytes) -> dict[str, object] | None:
-        if len(value_bytes) < 1:
-            return None
-        identifier_length = value_bytes[0]
-        if identifier_length == 0 or 1 + identifier_length > len(value_bytes):
-            return None
-        identifier_bytes = value_bytes[1 : 1 + identifier_length]
-        identifier_ascii = self._decode_printable_ascii(identifier_bytes)
-        if identifier_ascii is None:
-            return None
-        decoded: dict[str, object] = {
-            "format": "Length-prefixed identifier block",
-            "identifierLength": identifier_length,
-            "identifierAscii": identifier_ascii,
-        }
-        trailer_bytes = value_bytes[1 + identifier_length :]
-        if len(trailer_bytes) > 0:
-            decoded["trailerHex"] = trailer_bytes.hex()
-            decoded["trailerBytes"] = [f"0x{byte_value:02X}" for byte_value in trailer_bytes]
-        return decoded
+        return _dgi_decode_length_prefixed_identifier_block(value_bytes)
 
     def _decode_application_privileges(self, value):
         value_bytes = self._value_to_bytes(value)
@@ -2473,86 +2266,16 @@ class ProfilePackageShell:
         return decoded
 
     def _decode_network_access_name(self, value_bytes: bytes) -> str:
-        if len(value_bytes) == 0:
-            return "(empty)"
-        labels: list[str] = []
-        offset = 0
-        while offset < len(value_bytes):
-            label_length = value_bytes[offset]
-            offset += 1
-            if label_length == 0:
-                break
-            label_end = offset + label_length
-            if label_end > len(value_bytes):
-                return value_bytes.hex()
-            label_bytes = value_bytes[offset:label_end]
-            try:
-                labels.append(label_bytes.decode("ascii"))
-            except UnicodeDecodeError:
-                return value_bytes.hex()
-            offset = label_end
-        if len(labels) == 0:
-            return value_bytes.hex()
-        return ".".join(labels)
+        return _dgi_decode_network_access_name(value_bytes)
 
     def _describe_bearer_description(self, value_bytes: bytes) -> dict[str, object] | str:
-        if len(value_bytes) == 0:
-            return "(empty)"
-        bearer_type = value_bytes[0]
-        bearer_names = {
-            0x01: "CSD",
-            0x02: "GPRS",
-            0x03: "Default bearer",
-            0x04: "Local link",
-        }
-        decoded = {
-            "type": f"0x{bearer_type:02X}",
-            "typeName": bearer_names.get(bearer_type, "Unknown"),
-        }
-        if len(value_bytes) > 1:
-            decoded["parameters"] = value_bytes[1:].hex()
-        return decoded
+        return _dgi_describe_bearer_description(value_bytes)
 
     def _describe_transport_level(self, value_bytes: bytes) -> dict[str, object] | str:
-        if len(value_bytes) != 3:
-            return value_bytes.hex()
-        protocol_type = value_bytes[0]
-        port_number = int.from_bytes(value_bytes[1:], "big", signed=False)
-        protocol_names = {
-            0x01: "UDP, remote connection",
-            0x02: "TCP, remote connection",
-            0x03: "TCP, local connection",
-            0x04: "UDP, local connection",
-        }
-        return {
-            "protocol": f"0x{protocol_type:02X}",
-            "protocolName": protocol_names.get(protocol_type, "Unknown"),
-            "port": port_number,
-        }
+        return _dgi_describe_transport_level(value_bytes)
 
     def _decode_other_address(self, value_bytes: bytes) -> dict[str, object] | str:
-        if len(value_bytes) < 2:
-            return value_bytes.hex()
-        address_type = value_bytes[0]
-        address_value = value_bytes[1:]
-        type_names = {
-            0x21: "IPv4",
-            0x57: "IPv6",
-        }
-        decoded: dict[str, object] = {
-            "type": f"0x{address_type:02X}",
-            "typeName": type_names.get(address_type, "Unknown"),
-        }
-        try:
-            if address_type == 0x21 and len(address_value) == 4:
-                decoded["address"] = str(ipaddress.IPv4Address(address_value))
-            elif address_type == 0x57 and len(address_value) == 16:
-                decoded["address"] = str(ipaddress.IPv6Address(address_value))
-            else:
-                decoded["rawAddress"] = address_value.hex()
-        except ipaddress.AddressValueError:
-            decoded["rawAddress"] = address_value.hex()
-        return decoded
+        return _dgi_decode_other_address(value_bytes)
 
     def _decode_oid(self, value_bytes: bytes) -> str | None:
         if len(value_bytes) == 0:
@@ -2940,15 +2663,24 @@ class ProfilePackageShell:
         print("                             writing any file. Useful before calling NEW-PROFILE / NEW-TEMPLATE.")
         print("  DIFF-PRESET <a> <b>        Show menu_id additions, removals, and ordering delta between two")
         print("                             presets (handy when deriving a house-style variant).")
-        print("  DIFF <profile_a> <profile_b> [NO-VALUES]")
+        print("  DIFF <profile_a> <profile_b> [NO-VALUES] [BY-CMD-INDEX]")
         print("                             Side-by-side diff of two SAIP profiles. Each file may be a")
         print("                             transcode JSON, a simulator profile_image.json manifest, or a raw")
         print("                             SAIP DER. DER decode requires pySim; JSON works stand-alone. Prints")
         print("                             a grep-able report with +/-/~/> tags and colored coloring.")
-        print("  DIFF-TUI <profile_a> <profile_b>")
+        print("                             genericFileManagement is re-keyed by resolved file path so")
+        print("                             pure list-index shifts do not surface as differences. Add")
+        print("                             BY-CMD-INDEX to opt back to the raw command-index comparison.")
+        print("  DIFF-TUI <profile_a> <profile_b> [BY-CMD-INDEX]")
         print("                             Same as DIFF but renders the result in a Textual side-by-side tree")
-        print("                             with n/N to cycle diffs and v to toggle value display. Requires the")
-        print("                             `textual` extra (install with `pip install textual`).")
+        print("                             with n/N to cycle diffs, v to toggle value display, o to toggle a")
+        print("                             diffs-only filter (prunes the tree to the diff-bearing breadcrumb),")
+        print("                             d to toggle a scrollable side-by-side decoded view, h to toggle the")
+        print("                             byte-level hex-diff overlay on the decoded pane (xxd-style panel,")
+        print("                             diverging bytes painted red on A and green on B), [/] to grow or")
+        print("                             shrink the decoded pane, and F7 to cycle the theme. Theme + layout")
+        print("                             persist between runs.")
+        print("                             Requires the `textual` extra (install with `pip install textual`).")
         print("  WATCH-SIMCARD [STORE <dir>] [POLL <s>] [MAX <n>] [LAUNCHER <template>]")
         print("                             Tail the simulator profile-store directory and auto-launch a TUI")
         print("                             for every new ICCID that lands (e.g. after a SGP.26 ES9+ download).")
@@ -3298,7 +3030,8 @@ class ProfilePackageShell:
     def _cmd_open(self, arg: str) -> None:
         if len(arg.strip()) > 0:
             self._cmd_use(arg)
-            self._cmd_inspect("")
+            if self._preflight_prepared_input(Path(self.bridge.current_input_file)):
+                self._cmd_inspect("")
             return
         try:
             from .saip_open_picker_tui import pick_saip_profile_path_tui
@@ -3320,7 +3053,33 @@ class ProfilePackageShell:
         selected_path = self.bridge.set_input_file(str(selected))
         print(f"{ShellStyle.GREEN}[+] Active profile package: {selected_path}{ShellStyle.END}")
         self._maybe_prompt_for_token_sidecar(Path(selected_path))
-        self._cmd_inspect("")
+        if self._preflight_prepared_input(Path(selected_path)):
+            self._cmd_inspect("")
+
+    def _preflight_prepared_input(self, profile_path: Path) -> bool:
+        """Return True if the file is ready for auto-launching the TUI.
+
+        Runs the same hex-input preparation the TUI would do, so any
+        decoding error surfaces here (single diagnostic) rather than
+        inside the TUI startup path, and the TUI is not launched at all
+        when the input cannot be prepared. Non-hex inputs (``.der`` /
+        ``.upp`` / ``.bin`` / ``.json``) return True immediately.
+        """
+        try:
+            self.bridge._prepare_input_for_tool(profile_path)
+        except ValueError as error:
+            detail = str(error).strip() or error.__class__.__name__
+            print(f"{ShellStyle.FAIL}[-] {detail}{ShellStyle.END}")
+            print(
+                f"{ShellStyle.WARNING}[*] Skipping INSPECT — resolve the input then "
+                f"re-run OPEN or INSPECT manually.{ShellStyle.END}"
+            )
+            return False
+        except OSError as error:
+            detail = str(error).strip() or error.__class__.__name__
+            print(f"{ShellStyle.FAIL}[-] Could not prepare input: {detail}{ShellStyle.END}")
+            return False
+        return True
 
     def _maybe_prompt_for_token_sidecar(self, profile_path: Path) -> None:
         """Detect unresolved placeholders on JSON templates and offer sidecar merge.
@@ -3678,17 +3437,25 @@ class ProfilePackageShell:
     def _cmd_diff(self, arg: str) -> None:
         tokens = shlex.split(str(arg or "").strip())
         show_values = True
+        canonical_mode = True
         files: list[str] = []
         for token in tokens:
-            if token.upper() in ("--NO-VALUES", "NO-VALUES"):
+            upper = token.upper()
+            if upper in ("--NO-VALUES", "NO-VALUES"):
                 show_values = False
+                continue
+            if upper in ("--BY-CMD-INDEX", "BY-CMD-INDEX"):
+                canonical_mode = False
                 continue
             files.append(token)
         if len(files) != 2:
             raise ValueError(
-                "Usage: DIFF <profile_a> <profile_b> [NO-VALUES]\n"
-                "       Accepts transcode JSON, SIMCARD profile manifests, or SAIP DER."
+                "Usage: DIFF <profile_a> <profile_b> [NO-VALUES] [BY-CMD-INDEX]\n"
+                "       Accepts transcode JSON, SIMCARD profile manifests, or SAIP DER.\n"
+                "       BY-CMD-INDEX: compare genericFileManagement by raw list index\n"
+                "       (the pre-canonical noisy view). Default is path-keyed canonical."
             )
+        from .saip_diff_canonical import canonicalize_document_for_diff
         from .saip_diff_engine import diff_saip_documents, format_diff_text
         from .saip_diff_loader import (
             SaipDiffLoadError,
@@ -3706,11 +3473,18 @@ class ProfilePackageShell:
         except SaipDiffLoadError as error:
             print(f"{ShellStyle.FAIL}[-] DIFF load failed: {error}{ShellStyle.END}")
             return
-        summary = diff_saip_documents(loaded_a.document, loaded_b.document)
+        document_a = loaded_a.document
+        document_b = loaded_b.document
+        if canonical_mode is True:
+            document_a = canonicalize_document_for_diff(document_a)
+            document_b = canonicalize_document_for_diff(document_b)
+        summary = diff_saip_documents(document_a, document_b)
+        mode_label = "canonical" if canonical_mode is True else "by-cmd-index"
         print(
             f"{ShellStyle.HEADER}=== SAIP diff ==={ShellStyle.END}\n"
             f"  A: {loaded_a.source_path}  [{loaded_a.shape}]\n"
-            f"  B: {loaded_b.source_path}  [{loaded_b.shape}]"
+            f"  B: {loaded_b.source_path}  [{loaded_b.shape}]\n"
+            f"  mode: {mode_label}"
         )
         if summary.is_empty is True:
             print(f"{ShellStyle.GREEN}[+] No differences detected.{ShellStyle.END}")
@@ -3804,16 +3578,31 @@ class ProfilePackageShell:
 
     def _cmd_diff_tui(self, arg: str) -> None:
         tokens = shlex.split(str(arg or "").strip())
-        if len(tokens) != 2:
+        canonical_mode = True
+        files: list[str] = []
+        for token in tokens:
+            if token.upper() in ("--BY-CMD-INDEX", "BY-CMD-INDEX"):
+                canonical_mode = False
+                continue
+            files.append(token)
+        if len(files) != 2:
             raise ValueError(
-                "Usage: DIFF-TUI <profile_a> <profile_b>\n"
-                "       Opens a Textual side-by-side diff view. Requires the `textual` extra."
+                "Usage: DIFF-TUI <profile_a> <profile_b> [BY-CMD-INDEX]\n"
+                "       Opens a Textual side-by-side diff view. Requires the `textual` extra.\n"
+                "       BY-CMD-INDEX: compare genericFileManagement by raw list index\n"
+                "       (the pre-canonical noisy view). Default is path-keyed canonical."
             )
         from .saip_diff_tui import run_cli
 
-        return_code = run_cli(
-            [tokens[0], tokens[1], "--workspace-root", str(self.bridge.workspace_root)]
-        )
+        cli_args: list[str] = [
+            files[0],
+            files[1],
+            "--workspace-root",
+            str(self.bridge.workspace_root),
+        ]
+        if canonical_mode is False:
+            cli_args.append("--by-cmd-index")
+        return_code = run_cli(cli_args)
         if return_code != 0:
             print(
                 f"{ShellStyle.FAIL}[-] DIFF-TUI exited with status "
@@ -4149,6 +3938,136 @@ class ProfilePackageShell:
                 f"{ShellStyle.CYAN}[*] All template placeholders now have defs.{ShellStyle.END}"
             )
 
+    def _cmd_export_tokens_csv(self, arg: str) -> None:
+        """Export token defs from a template or sidecar as a personalisation CSV.
+
+        Usage: ``EXPORT-TOKENS-CSV <template_or_sidecar.json> [<out.csv>]``
+
+        The CSV layout follows the TCA SAIP personalisation-data
+        convention used by most third-party issuance tooling: one
+        ``<variable_name>,<hex>`` line per token, with optional ``#``
+        comment lines separating multi-package blocks.
+        """
+        tokens = shlex.split(str(arg or "").strip())
+        if len(tokens) < 1 or len(tokens) > 2:
+            raise ValueError(
+                "Usage: EXPORT-TOKENS-CSV <template_or_sidecar.json> [<out.csv>]"
+            )
+        source_path = self.bridge.resolve_workspace_path(tokens[0], must_exist=True)
+        if len(tokens) == 2:
+            csv_path = self.bridge.resolve_workspace_path(tokens[1], must_exist=False)
+        else:
+            csv_path = source_path.with_suffix(".csv")
+
+        raw_text = source_path.read_text(encoding="utf-8")
+        try:
+            loaded = json.loads(raw_text)
+        except json.JSONDecodeError as error:
+            raise ValueError(
+                f"File {source_path.name} is not valid JSON: {error}"
+            ) from error
+        if isinstance(loaded, dict) is False:
+            raise ValueError("Source root JSON value must be an object.")
+
+        try:
+            if "__ygg_token_defs__" in loaded and "sections" not in loaded:
+                sidecar_payload = loaded
+            else:
+                sidecar_payload = build_sidecar_from_template(
+                    loaded,
+                    source_label=source_path.name,
+                )
+            dump_sidecar_to_csv(
+                csv_path,
+                sidecar_payload,
+                block_labels=[source_path.stem],
+            )
+        except TokenSidecarError as error:
+            raise ValueError(str(error)) from error
+
+        defs = sidecar_payload.get("__ygg_token_defs__", {})
+        emitted = sum(
+            1
+            for entry in defs.values()
+            if (isinstance(entry, str) and entry != "")
+            or (isinstance(entry, dict) and isinstance(entry.get("hex"), str))
+        )
+        print(
+            f"{ShellStyle.GREEN}[+] Wrote {emitted}/{len(defs)} token defs to "
+            f"{csv_path}{ShellStyle.END}"
+        )
+        if emitted < len(defs):
+            print(
+                f"{ShellStyle.CYAN}[*] {len(defs) - emitted} pattern-only defs "
+                "skipped (CSV format has no pattern column)."
+                f"{ShellStyle.END}"
+            )
+
+    def _cmd_import_tokens_csv(self, arg: str) -> None:
+        """Convert a personalisation-data CSV into YggdraSIM sidecars.
+
+        Usage: ``IMPORT-TOKENS-CSV <input.csv> [<out.tokens.json>]``
+
+        Single-block CSVs produce one sidecar at ``<out>`` (defaulting to
+        ``<csv-stem>.tokens.json``). Multi-block CSVs (multiple profile
+        packages in one file) produce ``<stem>_1.tokens.json``,
+        ``<stem>_2.tokens.json``, ... — one per block — so each set can be
+        applied independently via ``APPLY-TOKENS``.
+        """
+        tokens = shlex.split(str(arg or "").strip())
+        if len(tokens) < 1 or len(tokens) > 2:
+            raise ValueError(
+                "Usage: IMPORT-TOKENS-CSV <input.csv> [<out.tokens.json>]"
+            )
+        csv_path = self.bridge.resolve_workspace_path(tokens[0], must_exist=True)
+        if len(tokens) == 2:
+            base_out = self.bridge.resolve_workspace_path(tokens[1], must_exist=False)
+        else:
+            base_out = csv_path.with_suffix(".tokens.json")
+
+        try:
+            sidecars = load_sidecar_from_csv(csv_path, source_label=csv_path.name)
+        except TokenSidecarError as error:
+            raise ValueError(str(error)) from error
+
+        if len(sidecars) == 0:
+            raise ValueError(
+                f"CSV file {csv_path.name} contained no variable definitions."
+            )
+
+        if len(sidecars) == 1:
+            sidecar = sidecars[0]
+            defs = sidecar.get("__ygg_token_defs__", {})
+            style = str(sidecar.get("__ygg_placeholder_style__", "brace"))
+            write_sidecar(
+                base_out,
+                style=style,
+                token_defs=defs,
+                source_label=csv_path.name,
+            )
+            print(
+                f"{ShellStyle.GREEN}[+] Wrote {len(defs)} token defs to "
+                f"{base_out}{ShellStyle.END}"
+            )
+            return
+
+        for index, sidecar in enumerate(sidecars, start=1):
+            target = base_out.with_name(
+                f"{base_out.stem}_{index}{base_out.suffix}"
+            )
+            defs = sidecar.get("__ygg_token_defs__", {})
+            style = str(sidecar.get("__ygg_placeholder_style__", "brace"))
+            write_sidecar(
+                target,
+                style=style,
+                token_defs=defs,
+                source_label=csv_path.name,
+            )
+            print(
+                f"{ShellStyle.GREEN}[+] Block {index}: {len(defs)} defs -> "
+                f"{target}{ShellStyle.END}"
+            )
+
     _TOKEN_SUBCOMMANDS: dict[str, str] = {
         "LIST": "_cmd_list_tokens",
         "ADD": "_cmd_add_token",
@@ -4162,8 +4081,10 @@ class ProfilePackageShell:
         "RETOKENIZE": "_cmd_retokenise_lengths",
         "EXPORT": "_cmd_export_tokens",
         "EXPORT-SIDECAR": "_cmd_export_tokens",
+        "EXPORT-CSV": "_cmd_export_tokens_csv",
         "APPLY": "_cmd_apply_tokens",
         "APPLY-SIDECAR": "_cmd_apply_tokens",
+        "IMPORT-CSV": "_cmd_import_tokens_csv",
         "HELP": "_cmd_help_tokens",
     }
 

@@ -1,0 +1,25 @@
+# Mirrors .cursorignore. Edit both files in lockstep when the
+# include / exclude surface changes.
+
+# Forensic Isolation: Stop AI from leaving the USB
+../**
+~/**
+/etc/**
+/var/**
+
+# Metadata Isolation
+.git/
+.vscode/
+**/__pycache__/**
+
+# Project Inclusion - Updated for YggdraSIM structure
+!/SCP03/**
+!/SCP11/**
+!/SCP80/**
+!/SGP.26_v3.0.2-20240828_Files_draft3_2025/**
+!/main/**
+!/docs/**
+!/requirements.txt
+!/main.py
+!/.cursorrules
+!/CLAUDE.md

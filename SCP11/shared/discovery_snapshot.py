@@ -1,3 +1,5 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+"""SCP11 discovery snapshot: serialises ES10b.GetEUICCInfo / GetProfilesInfo responses for offline inspection."""
 from __future__ import annotations
 
 from typing import Any
@@ -243,6 +245,7 @@ def render_consolidated_discovery_snapshot(
     header_color: str = "",
     end_color: str = "",
 ) -> None:
+    """Render a multi-section text snapshot of ES10b discovery results for display in the operator console."""
     print(f"\n{header_color}=== SGP.32 Consolidated Data Retrieval ==={end_color}")
     print(f"\n{header_color}=== Running SGP.22/SGP.32 Scan ==={end_color}")
 
@@ -293,6 +296,7 @@ def render_card_overview_snapshot(
     notification_count: int | None = None,
     profile_table_title: str = "Profiles on Card",
 ) -> None:
+    """Render a comprehensive card-overview text block including EUICCInfo2, profile list, and installed apps."""
     eid = str(snapshot.get("eid", "")).strip()
     issuer_name = str(snapshot.get("issuer_name", "")).strip()
     issuer_number = str(snapshot.get("issuer_number", "")).strip()

@@ -1,3 +1,5 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+"""Simulated UICC/eUICC engine: process-wide singleton owning the in-memory file-system, authentication state, and IPA-poll dispatch loop."""
 from __future__ import annotations
 
 import collections
@@ -123,7 +125,7 @@ class SimulatedSimCardEngine:
         self.scp03 = Scp03CardLogic(self.state)
         self.gp = GpLogic(self.state)
         self.sgp = SgpLogic(self.state, sim_eim_identity_path=selected_sim_eim_identity_path)
-        self.scp80 = Scp80Logic(self.state)
+        self.scp80 = Scp80Logic(self.state, self.transmit)
         self.toolkit = ToolkitLogic(self.state)
         # SGP.32 §6.5 IPA-side ESipa fan-out. The toolkit emits a BIP
         # poll cycle on TIMER EXPIRATION; when the modem returns the
@@ -198,6 +200,11 @@ class SimulatedSimCardEngine:
         self,
         callback,
     ) -> None:
+        """Register a callable invoked whenever a new profile is downloaded.
+
+        The callback receives a single dict with keys ``iccid``,
+        ``profile_store_path``, and ``profile`` (the new ``SimProfile`` object).
+        """
         if callable(callback) is False:
             raise TypeError("profile-download hook must be callable")
         if getattr(self, "_profile_download_hooks", None) is None:
@@ -208,6 +215,7 @@ class SimulatedSimCardEngine:
         self,
         callback,
     ) -> None:
+        """Remove a previously registered profile-download hook. No-op if not found."""
         hooks = getattr(self, "_profile_download_hooks", None)
         if hooks is None:
             return
@@ -264,6 +272,7 @@ class SimulatedSimCardEngine:
         self._last_profile_iccids = current
 
     def reset(self) -> None:
+        """Soft-reset the card: clears all sub-module state, queues, and SCP03 session."""
         self.fs.reset()
         self.naa.reset()
         self.auth.reset()
@@ -280,6 +289,11 @@ class SimulatedSimCardEngine:
         return bytes(self.state.atr)
 
     def transmit(self, apdu: bytes) -> ApduResult:
+        """Submit one raw APDU and return ``(response_bytes, SW1, SW2)``.
+
+        Applies before/after hooks, transparent SCP03 unwrap/wrap, and
+        routes to the appropriate command handler in ``_dispatch``.
+        """
         command = bytes(apdu or b"")
         self.state.apdu_history.append(command.hex().upper())
 

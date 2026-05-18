@@ -1,3 +1,4 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """Resolved-preview rendering for the transcode TUI.
 
 The preview expands every ``{NAME}``/``{#NAME}`` placeholder inside tagged

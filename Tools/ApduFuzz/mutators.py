@@ -1,3 +1,4 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """
 Deterministic APDU mutation strategies.
 
@@ -72,6 +73,7 @@ def _reassemble(header: bytes, data: bytes, le: bytes) -> bytes:
 
 
 def mutate_bit_flip(apdu: bytes, rng: random.Random) -> MutationResult:
+    """Return a mutated APDU with one randomly chosen bit flipped."""
     if len(apdu) <= APDU_HEADER_BYTES:
         if len(apdu) == 0:
             return MutationResult(mutated_apdu=b"", description="bit_flip@empty")
@@ -88,6 +90,7 @@ def mutate_bit_flip(apdu: bytes, rng: random.Random) -> MutationResult:
 
 
 def mutate_length_mangle(apdu: bytes, rng: random.Random) -> MutationResult:
+    """Return a mutated APDU with the Lc/Le field set to an out-of-range value."""
     if len(apdu) < APDU_HEADER_BYTES:
         return MutationResult(mutated_apdu=bytes(apdu), description="length_mangle@short")
     mutated = bytearray(apdu)
@@ -102,6 +105,7 @@ def mutate_length_mangle(apdu: bytes, rng: random.Random) -> MutationResult:
 
 
 def mutate_zero_lc(apdu: bytes, _rng: random.Random) -> MutationResult:
+    """Return a mutated APDU with the Lc field set to zero."""
     if len(apdu) < APDU_HEADER_BYTES:
         return MutationResult(mutated_apdu=bytes(apdu), description="zero_lc@short")
     mutated = bytearray(apdu)
@@ -114,6 +118,7 @@ def mutate_zero_lc(apdu: bytes, _rng: random.Random) -> MutationResult:
 
 
 def mutate_tag_shuffle(apdu: bytes, rng: random.Random) -> MutationResult:
+    """Return a mutated APDU with the TLV tag bytes randomly reordered."""
     header, data, le = _apdu_split(apdu)
     if len(data) == 0:
         return MutationResult(mutated_apdu=bytes(apdu), description="tag_shuffle@no_data")
@@ -136,6 +141,7 @@ def mutate_tag_shuffle(apdu: bytes, rng: random.Random) -> MutationResult:
 
 
 def mutate_padding_bloat(apdu: bytes, rng: random.Random) -> MutationResult:
+    """Return a mutated APDU with excess padding appended to the data field."""
     pad_count = rng.randint(1, 16)
     mutated = bytearray(apdu)
     mutated.extend(rng.randrange(0, 256) for _ in range(pad_count))

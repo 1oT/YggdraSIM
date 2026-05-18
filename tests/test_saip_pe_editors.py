@@ -42,6 +42,7 @@ from Tools.ProfilePackage.saip_pe_editors._base import (
     tagged_tuple,
     unwrap_tagged_tuple,
 )
+from Tools.ProfilePackage.saip_apply_row import SaipApplyRow
 
 
 def _build_pin_pe() -> dict[str, Any]:
@@ -354,7 +355,7 @@ class NaaEditorTests(unittest.TestCase):
         editor = NaaPeEditor(pe_section_key="usim", pe_value=_build_usim_pe())
         value = _drive_with_callback(
             editor,
-            lambda w: w.query_one("#naa_template_input", Input).value,
+            lambda w: w.query_one("#naa_template_apply_row", SaipApplyRow).draft_text(),
         )
         self.assertEqual(value, "2.23.143.1.2.4")
 
@@ -407,20 +408,19 @@ class FileSystemViewTests(unittest.TestCase):
         )
         self.assertGreater(child_count, 0)
 
-    def test_render_file_detail_hides_record_hex_dumps(self) -> None:
+    def test_render_fcp_metadata_excludes_record_hex_dumps(self) -> None:
         from Tools.ProfilePackage.saip_pe_editors._filesystem import FileSystemView as _FsView
 
         view = _FsView(document=_build_full_document())
         sections = _build_full_document()["sections"]
         usim_pe = sections["usim"]
         member = usim_pe["ef-imsi"]
-        rendered = view._render_file_detail("usim", "ef-imsi", member)
-        # Per-record hex dumps must not be rendered alongside the file info.
-        self.assertNotIn("Record #1:", rendered)
-        self.assertNotIn("082943002001020304", rendered)
-        # File Control Parameters section must still be rendered.
-        self.assertIn("File Control Parameters", rendered)
-        self.assertIn("File type", rendered)
+        # FCP metadata pane: must carry File Control Parameters but no hex dump.
+        fcp_rendered = view._render_fcp_metadata_text("usim", "ef-imsi", member)
+        self.assertNotIn("Record #1:", fcp_rendered)
+        self.assertNotIn("082943002001020304", fcp_rendered)
+        self.assertIn("File Control Parameters", fcp_rendered)
+        self.assertIn("File type", fcp_rendered)
 
 
 class ApplicationsViewTests(unittest.TestCase):
@@ -443,7 +443,10 @@ class GenericPeEditorTests(unittest.TestCase):
         )
         value = _drive_with_callback(
             editor,
-            lambda w: w.query_one("#pe_header_identification", Input).value,
+            lambda w: w.query_one(
+                "#pe_header_identification_row",
+                SaipApplyRow,
+            ).draft_text(),
         )
         self.assertEqual(value, "0")
 

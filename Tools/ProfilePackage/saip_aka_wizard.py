@@ -1,3 +1,4 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """
 Tag-granular provisioning wizard for SAIP ``akaParameter`` profile elements.
 
@@ -71,6 +72,7 @@ def aka_algorithm_choices() -> list[tuple[str, str, str]]:
 
 
 def normalize_algorithm(value: Any) -> str:
+    """Normalise an algorithm name string to the canonical lower-case form used by SAIP."""
     normalized = str(value or "").strip().lower()
     if normalized in AKA_ALGORITHM_IDS:
         if normalized == "usim-test-algorithm":
@@ -140,6 +142,7 @@ def validate_key_for_algorithm(algorithm: str, key_hex: Any) -> bytes:
 
 
 def validate_opc_for_algorithm(algorithm: str, opc_hex: Any) -> bytes:
+    """Raise ``ValueError`` when an OPc value is not compatible with the selected AKA algorithm."""
     algo = normalize_algorithm(algorithm)
     if algo == "xor-3g":
         return b""
@@ -149,6 +152,7 @@ def validate_opc_for_algorithm(algorithm: str, opc_hex: Any) -> bytes:
 
 
 def validate_number_of_keccak(value: Any) -> int:
+    """Validate that the number-of-keccak value is within the TUAK-specified range."""
     if value is None:
         return 1
     if isinstance(value, bool):

@@ -1,3 +1,4 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """
 Decoded-edit coverage audit for the SAIP decoded-field editor surfaces.
 
@@ -248,6 +249,7 @@ class AuditReport:
     groups: list[GroupReport] = field(default_factory=list)
 
     def totals(self) -> dict[str, int]:
+        """Return aggregate counts of all audit entry categories."""
         aggregate: dict[str, int] = {}
         for group in self.groups:
             for classification, count in group.summary().items():
@@ -256,6 +258,7 @@ class AuditReport:
         return aggregate
 
     def missing_entries(self) -> list[FieldRecord]:
+        """Return the list of audit entries that are missing required decoded fields."""
         missing: list[FieldRecord] = []
         for group in self.groups:
             for record in group.fields:
@@ -923,6 +926,7 @@ def format_audit_report(
     *,
     show_only_missing: bool = False,
 ) -> str:
+    """Format the decoded-field edit audit results as a structured text report."""
     lines: list[str] = []
     header = (
         f"SAIP decoded-editor audit "

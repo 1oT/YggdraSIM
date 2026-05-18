@@ -1,3 +1,5 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+"""SCP11 profile targeting: resolves ICCID / EID / index target identifiers against the active profile list."""
 from typing import Any, Callable, Iterable, Optional, TypeVar
 
 
@@ -15,6 +17,7 @@ def resolve_profile_target_identifier(
     encode_iccid_for_command: Callable[[str], str],
     fetch_profiles: Callable[[], Iterable[Any]],
 ) -> Optional[tuple[TagT, str]]:
+    """Resolve a user-supplied ICCID, ISDP-AID, or profile index into a canonical ICCID string."""
     clean = str(identifier or "").strip().upper()
     if len(clean) == 0:
         return None

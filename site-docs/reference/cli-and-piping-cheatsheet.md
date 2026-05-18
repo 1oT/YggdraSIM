@@ -364,9 +364,9 @@ a saved capture in the decoded-APDU TUI without bringing the bridge
 stack up:
 
 ```bash
-python main/main.py --open-pcap captures/session-2026-04-20.pcapng
+python main/main.py --open-pcap captures/session-example.pcapng
 python main/main.py \
-    --open-pcap captures/session-2026-04-20.pcapng \
+    --open-pcap captures/session-example.pcapng \
     --keybag    captures/session-2026-04-20.keys.json
 ```
 

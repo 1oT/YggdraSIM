@@ -478,10 +478,9 @@ If Host shell is enabled in `--web-server` mode, walk this list:
 | AT decoder | `yggdrasim_common/gui_server/at_decoder.py` |
 | FastAPI route | `yggdrasim_common/gui_server/routes/host_shell.py` |
 | Frontend (canonical) | `yggdrasim_common/gui_server/static/index.html`, `app.js`, `app.css` |
-| Frontend (Phase A source) | `gui_frontend/src/index.html`, `app.js`, `app.css` |
+| Frontend source tree | `gui_frontend/src/index.html`, `app.js`, `app.css` |
 | AT request parser (re-used) | `Tools/HilBridge/at_simlink.py` |
 | Status-word translator (re-used) | `SCP03/core/utils.py` |
-| GUI plan integration note | `V2_UNIVERSAL_GUI_PLAN.md` §7.3 |
 | Existing PTY route (sibling) | `yggdrasim_common/gui_server/routes/terminal.py` |
 | HIL bridge guide | `guides/HIL_BRIDGE_GUIDE.md` |
 | CLI piping recipes | `guides/CLI_AND_PIPING_GUIDE.md` |

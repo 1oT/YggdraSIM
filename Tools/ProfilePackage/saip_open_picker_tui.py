@@ -1,3 +1,5 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+"""SAIP file-open picker: Textual TUI widget for selecting a profile file from the default profile directory."""
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -25,6 +27,7 @@ class SaipOpenPickerEntry:
 
 
 def picker_start_directory(bridge: SaipToolBridge) -> Path:
+    """Return the directory path that the file picker TUI should open in."""
     candidate_directories: list[Path] = []
     if getattr(bridge, "last_input_open_directory", None) is not None:
         candidate_directories.append(Path(bridge.last_input_open_directory))
@@ -44,6 +47,7 @@ def picker_start_directory(bridge: SaipToolBridge) -> Path:
 
 
 def picker_entries_for_directory(directory_path: Path) -> list[SaipOpenPickerEntry]:
+    """Return a sorted list of file-picker entry dicts for the given directory."""
     normalized_directory = Path(directory_path).expanduser().resolve()
     entries: list[SaipOpenPickerEntry] = []
     parent_directory = normalized_directory.parent
@@ -122,6 +126,7 @@ def _append_options(option_list, options: list[object]) -> None:
 
 
 def pick_saip_profile_path_tui(bridge: SaipToolBridge) -> Path | None:
+    """Run the interactive TUI file picker and return the chosen SAIP profile path."""
     try:
         from textual.app import App, ComposeResult
         from textual.binding import Binding
@@ -188,6 +193,7 @@ def pick_saip_profile_path_tui(bridge: SaipToolBridge) -> Path | None:
             self._entries: list[SaipOpenPickerEntry] = []
 
         def compose(self) -> ComposeResult:
+            """Compose the file/profile picker modal layout."""
             with Vertical(id="saip_open_picker_shell"):
                 yield Static("SAIP profile picker", id="saip_open_picker_title")
                 yield Static("", id="saip_open_picker_directory")
@@ -239,6 +245,7 @@ def pick_saip_profile_path_tui(bridge: SaipToolBridge) -> Path | None:
             self.exit(entry.path)
 
         def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
+            """Handle an OptionList selection and dismiss with the chosen profile path."""
             option_id = str(event.option_id or "").strip()
             if option_id == "_empty":
                 return
@@ -252,6 +259,7 @@ def pick_saip_profile_path_tui(bridge: SaipToolBridge) -> Path | None:
             self._activate_entry(entry_index)
 
         def action_go_parent(self) -> None:
+            """Navigate up to the parent directory in the picker."""
             parent_directory = self._current_directory.parent.resolve()
             if parent_directory == self._current_directory:
                 self._set_status("Already at the filesystem root.")

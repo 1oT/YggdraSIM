@@ -82,7 +82,7 @@ class RecordingEimClient(Es9LikeClient):
     def __init__(self, ca_bundle_path: str):
         super().__init__(
             base_url="https://rsp.example.com",
-            eim_base_url="https://eim1.esim.tst.1ot.mobi",
+            eim_base_url="https://eim1.esim.example.test",
             ca_bundle_path=ca_bundle_path,
         )
         self.use_configured_ca_bundle_flags = []
@@ -237,7 +237,7 @@ class TestSplitPinningTests(unittest.TestCase):
     def _run_test_orchestrator_single_entry(self, provider):
         orchestrator = SGP22Orchestrator(cfg=DummyCfg(), apdu_channel=None, profile_provider=provider)
         request = EimPollRequest(
-            eim_fqdn="eim1.esim.tst.1ot.mobi",
+            eim_fqdn="eim1.esim.example.test",
             eim_id="manager-1",
             eim_id_type="1",
             counter_value="0",
@@ -378,7 +378,7 @@ class TestSplitPinningTests(unittest.TestCase):
             client = RecordingEimClient(str(bundle_path))
 
             client._post_eim_binary(
-                "https://eim1.esim.tst.1ot.mobi",
+                "https://eim1.esim.example.test",
                 bytes.fromhex("BF4F125A1089049032118427504800000000006079"),
                 b"",
             )

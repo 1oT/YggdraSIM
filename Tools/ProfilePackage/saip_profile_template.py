@@ -1,3 +1,11 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+"""SAIP profile template engine: placeholder resolution and batch application.
+
+Supports two placeholder styles — brace (``{NAME}``) and bracket
+(``[NAME]``) — with typed encoders for ICCID (header + EF wire form)
+and IMSI (3GPP TS 31.102 §4.2.2).  Batch records can be loaded from
+CSV, JSON, JSONL, or YAML sources.
+"""
 from __future__ import annotations
 
 import copy
@@ -33,6 +41,11 @@ class BatchPlaceholderRecord:
 
 
 def normalize_placeholder_style(style: str) -> str:
+    """Normalise a placeholder style name to ``"brace"`` or ``"bracket"``.
+
+    Accepts ``"brace"``, ``"curly"`` (alias), or ``"bracket"``.  Raises
+    ``ValueError`` for any other input.
+    """
     normalized = str(style or "brace").strip().lower()
     if normalized == "curly":
         normalized = "brace"
@@ -44,6 +57,10 @@ def normalize_placeholder_style(style: str) -> str:
 
 
 def render_placeholder(name: str, style: str = "brace") -> str:
+    """Return the canonical placeholder token string for ``name``.
+
+    ``style="brace"`` → ``{NAME}``, ``style="bracket"`` → ``[NAME]``.
+    """
     normalized_style = normalize_placeholder_style(style)
     normalized_name = normalize_placeholder_name(name)
     if normalized_style == "bracket":
@@ -52,6 +69,12 @@ def render_placeholder(name: str, style: str = "brace") -> str:
 
 
 def normalize_placeholder_name(raw_name: str) -> str:
+    """Strip surrounding braces / brackets and validate the identifier.
+
+    Accepts bare names (``ICCID``), brace-wrapped (``{ICCID}``), or
+    bracket-wrapped (``[ICCID]``).  The name must match
+    ``[A-Za-z][A-Za-z0-9_]*``; raises ``ValueError`` otherwise.
+    """
     cleaned = str(raw_name or "").strip()
     if len(cleaned) >= 2:
         if cleaned.startswith("{") and cleaned.endswith("}"):
@@ -66,6 +89,11 @@ def normalize_placeholder_name(raw_name: str) -> str:
 
 
 def parse_placeholder_assignment_tokens(tokens: Sequence[str]) -> dict[str, str]:
+    """Parse a sequence of ``NAME=value`` CLI tokens into a name→value dict.
+
+    Names may be bare, brace-wrapped, or bracket-wrapped.  Raises
+    ``ValueError`` on malformed tokens or empty values.
+    """
     assignments: dict[str, str] = {}
     for token in tokens:
         raw_token = str(token or "").strip()
@@ -110,6 +138,14 @@ def _swap_bcd_nibbles(hex_text: str) -> str:
 
 
 def encode_iccid_header_hex(value: str) -> str:
+    """Encode a decimal ICCID string to the 20-nibble header form.
+
+    Accepts 19 or 20 decimal digit strings.  A 19-digit input has an
+    ``F`` filler appended; a 19-digit input that already ends in ``F``
+    is accepted verbatim.  Returns a 20-nibble uppercase hex string in
+    natural digit order (not BCD-swapped) — suitable for the ``header``
+    section.  Use ``encode_iccid_ef_hex`` for the EF.ICCID wire form.
+    """
     cleaned = _compact_user_value(value)
     padded = cleaned
     if cleaned.endswith("F"):
@@ -130,10 +166,20 @@ def encode_iccid_header_hex(value: str) -> str:
 
 
 def encode_iccid_ef_hex(value: str) -> str:
+    """BCD-swap the ICCID header form to produce the EF.ICCID wire bytes.
+
+    ITU-T E.118 §3.3 stores each digit pair nibble-swapped on the wire.
+    """
     return _swap_bcd_nibbles(encode_iccid_header_hex(value))
 
 
 def encode_imsi_ef_hex(value: str) -> str:
+    """Encode a decimal IMSI string to the EF.IMSI wire bytes (hex string).
+
+    3GPP TS 31.102 §4.2.2 layout: length byte (0x08) + parity nibble
+    (0x9 for odd digit count, 0x1 for even) + BCD digits nibble-swapped
+    + optional trailing 0xF filler.  Returns a 18-nibble hex string.
+    """
     digits = _compact_user_value(value)
     if digits.isdigit() is False:
         raise ValueError("IMSI must contain decimal digits only.")
@@ -153,6 +199,12 @@ def encode_imsi_ef_hex(value: str) -> str:
 
 
 def normalize_raw_hex_token_value(value: str, *, token_name: str) -> str:
+    """Strip whitespace/separators and validate a raw hex token value.
+
+    Used for placeholder tokens that have no typed encoder (i.e. not
+    ICCID or IMSI).  Raises ``ValueError`` if the input is empty,
+    contains non-hex characters, or has an odd nibble count.
+    """
     cleaned = _compact_user_value(value)
     if len(cleaned) == 0:
         raise ValueError(f"Placeholder {token_name} requires a non-empty hex value.")
@@ -168,6 +220,13 @@ def normalize_raw_hex_token_value(value: str, *, token_name: str) -> str:
 
 
 def build_override_token_definitions(assignments: dict[str, str]) -> dict[str, dict[str, str]]:
+    """Convert a name→raw-value assignment map to a token-definition dict.
+
+    ICCID and IMSI assignments are encoded via their typed encoders;
+    all other tokens are validated as raw hex and stored verbatim.
+    The returned dict maps token names to ``{"hex": "<uppercase hex>"}``
+    dicts compatible with the profile JSON schema.
+    """
     token_defs: dict[str, dict[str, str]] = {}
     for raw_name, raw_value in assignments.items():
         name = normalize_placeholder_name(raw_name)
@@ -232,6 +291,13 @@ def build_placeholder_template_document(
     *,
     placeholder_style: str = "brace",
 ) -> tuple[dict[str, Any], list[str]]:
+    """Replace ICCID / IMSI values in ``document`` with placeholder tokens.
+
+    ``assignments`` maps placeholder names (currently ``ICCID`` and
+    ``IMSI``) to example values used only to locate the injection sites.
+    Returns ``(tagged_document, summary_lines)`` where ``tagged_document``
+    carries placeholder strings in place of the real values.
+    """
     tagged = jsonify_document(document)
     normalized_style = normalize_placeholder_style(placeholder_style)
     summaries: list[str] = []
@@ -309,6 +375,11 @@ def apply_placeholder_overrides_to_loaded_document(
     loaded: dict[str, Any],
     assignments: dict[str, str],
 ) -> list[str]:
+    """Merge ``assignments`` into an already-loaded template document's token-def table.
+
+    Mutates ``loaded`` in place by updating its ``_META_TOKEN_DEFS`` dict.
+    Returns a list of one-line summary strings describing what was overridden.
+    """
     if isinstance(loaded, dict) is False:
         raise ValueError("Template root JSON value must be an object.")
     if len(assignments) == 0:
@@ -340,9 +411,16 @@ def apply_placeholder_overrides_to_loaded_document(
 
 
 def extract_template_placeholder_names(node: Any) -> set[str]:
+    """Walk ``node`` recursively and collect all placeholder token names.
+
+    Finds both brace-style ``{NAME}`` and bracket-style ``[NAME]`` tokens
+    embedded in string values anywhere in the document tree.  Returns a
+    set of bare names (without surrounding delimiters).
+    """
     names: set[str] = set()
 
     def visit(value: Any) -> None:
+        """Visit a template AST node and apply token substitutions recursively."""
         if isinstance(value, dict):
             for nested_value in value.values():
                 visit(nested_value)
@@ -367,6 +445,13 @@ def extract_template_placeholder_names(node: Any) -> set[str]:
 
 
 def load_batch_placeholder_records(data_path: Path) -> list[BatchPlaceholderRecord]:
+    """Load a batch personalisation file and return a list of records.
+
+    Supported formats: ``.csv``, ``.json``, ``.jsonl``, ``.ndjson``,
+    ``.yaml``, ``.yml``.  Each record exposes a ``label`` (row identifier)
+    and a ``values`` dict mapping placeholder names to raw string values.
+    Raises ``ValueError`` for unsupported extensions.
+    """
     suffix = str(data_path.suffix or "").strip().lower()
     if suffix == ".csv":
         return _load_batch_placeholder_records_csv(data_path)
@@ -449,6 +534,14 @@ def validate_batch_record_assignments(
     template_placeholders: set[str],
     template_token_defs: dict[str, Any],
 ) -> dict[str, str]:
+    """Validate a single batch record's assignments against the template.
+
+    ``template_placeholders`` is the set of token names found in the
+    template document; ``template_token_defs`` are the pre-defined
+    fall-back values.  Raises ``ValueError`` when the record contains
+    unknown names or leaves required placeholders unresolved.  Returns
+    the normalised name→value dict for the record.
+    """
     normalized: dict[str, str] = {}
     for raw_name, raw_value in assignments.items():
         name = normalize_placeholder_name(raw_name)
@@ -484,6 +577,11 @@ def validate_batch_record_assignments(
 
 
 def batch_output_stem(assignments: dict[str, str], *, index: int) -> str:
+    """Derive a filesystem-safe output filename stem for a batch record.
+
+    Prefers ``profile_iccid_<value>`` or ``profile_imsi_<value>`` when the
+    ICCID or IMSI assignment is present; falls back to ``profile_<NNN>``.
+    """
     for preferred_name in ("ICCID", "IMSI"):
         raw_value = assignments.get(preferred_name)
         if raw_value is None:

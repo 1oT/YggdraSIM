@@ -40,7 +40,7 @@ flavor:
 | `[hil]`        | `pyudev` (Linux only)                         | HIL bridge supervisor / event-driven hotplug   |
 | `[gui]`        | `fastapi`, `uvicorn[standard]`, `pywebview`, `websockets` | Desktop Universal GUI Command Center (`--gui`) |
 | `[gui-server]` | `fastapi`, `uvicorn[standard]`, `websockets`  | Headless web Command Center (`--web-server`)   |
-| `[open5gs]` *(R2-005, post-v1.0.0 staging)* | `pymongo>=4.5,<5.0`                           | YggdraCore BYO-Open5GS subscriber bridge       |
+| `[open5gs]` *(post-v1 staging)* | `pymongo>=4.5,<5.0`                           | YggdraCore BYO-Open5GS subscriber bridge       |
 | `[build]`      | `pyinstaller`                                 | Producing `dist/yggdrasim-*` bundles           |
 | `[test]`       | `pytest`, `httpx`                             | Running the `tests/` suite                     |
 | `[docs]`       | `mkdocs`, `mkdocs-material`, `pymdown-extensions` | Building / serving `site-docs/`             |

@@ -15,6 +15,7 @@
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 # -----------------------------------------------------------------------------
 
+"""SCP03 interactive shell: cmd.Cmd subclass providing APDU and GP administration commands."""
 import sys 
 import os 
 import configparser 
@@ -112,6 +113,7 @@ class ShellDispatcher :
         self .binder =CommandBinder (filepath =binds_file )
 
     def do_manage_binds (self ,arg_line :str =""):
+        """Manage custom key-bindings via an interactive wizard."""
         from SCP03 .interface .custom_binds import manage_binds_wizard 
 
         has_binder =False 
@@ -1996,6 +1998,7 @@ class ShellDispatcher :
         # flush here so the shipped-demo-keys banner is not silently
         # discarded when the script path is invoked via ``--script``
         # before the REPL ever gets a chance to redraw.
+        """Load and execute an SCP03 shell script from a file path."""
         self ._flush_pending_startup_stderr ()
         parts =arg_line .split ()
 
@@ -2902,6 +2905,7 @@ class ShellDispatcher :
             print (f"{Config.Colors.FAIL}[-] IO Error: {e}{Config.Colors.ENDC}")
 
     def show_config (self ):
+        """Print the current active SCP03 configuration summary to stdout."""
         print (f"{Config.Colors.HEADER}--- Configuration (SQLite-backed SCP03 state) ---{Config.Colors.ENDC}")
         if len (self .current_iccid )>0 :
             print (f"Active ICCID: {self.current_iccid}")
@@ -2913,6 +2917,7 @@ class ShellDispatcher :
                 print (f"  {key} = {value}")
 
     def list_aids (self ):
+        """List all registered AID entries from the aid.txt registry."""
         print (f"{Config.Colors.HEADER}--- AID Registry (aid.txt) ---{Config.Colors.ENDC}")
 
         has_items =False 
@@ -2972,6 +2977,7 @@ class ShellDispatcher :
             print (f"{Config.Colors.FAIL}[-] Failed to save aid.txt: {e}{Config.Colors.ENDC}")
 
     def set_prompt (self ,name :str ):
+        """Update the shell prompt to reflect the currently active security domain."""
         is_isd =False 
         if name =="ISD-SECURE":
             is_isd =True 
@@ -2987,6 +2993,7 @@ class ShellDispatcher :
             self .prompt_str =f"\n[{Config.Colors.GREEN}{name}{Config.Colors.ENDC}] > "
 
     def logout (self ):
+        """Tear down the current SCP03 session and reset the transport state."""
         has_tp =False 
         if self .transport :
             has_tp =True 
@@ -3169,6 +3176,7 @@ class ShellDispatcher :
             self ._update_prompt_state ()
 
     def do_dump_fs (self ,arg :str ="")->None :
+        """Dump the UICC file-system tree starting from the current DF to stdout."""
         import os 
         from pathlib import Path 
 
@@ -3233,6 +3241,7 @@ class ShellDispatcher :
             pass 
 
     def run (self ):
+        """Start the interactive SCP03 shell REPL and block until the user exits."""
         self ._init_binder ()
 
         is_nt =False 

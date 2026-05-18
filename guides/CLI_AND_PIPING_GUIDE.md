@@ -106,8 +106,8 @@ python main/main.py --web-server \
     --tls-self-signed
 ```
 
-These flags are documented in detail in
-`V2_UNIVERSAL_GUI_PLAN.md` and the `--help` output of `main/main.py`.
+These flags are documented in detail in the `--help` output of
+`main/main.py`.
 
 ## Wrapper diagnostics
 
@@ -449,9 +449,9 @@ TUI's offline review mode. They short-circuit the menu and drop straight
 into the TUI without starting the bridge, supervisor, or `tshark -i`:
 
 ```bash
-python main/main.py --open-pcap captures/session-2026-04-20.pcapng
+python main/main.py --open-pcap captures/session-example.pcapng
 python main/main.py \
-    --open-pcap captures/session-2026-04-20.pcapng \
+    --open-pcap captures/session-example.pcapng \
     --keybag    captures/session-2026-04-20.keys.json
 ```
 

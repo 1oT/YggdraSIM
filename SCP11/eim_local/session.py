@@ -1,3 +1,5 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+"""eIM-local session: drives a single ES2+ IPA-poll exchange from GetBoundProfilePackage through ES8+ delivery."""
 import json
 import os
 import time
@@ -107,6 +109,7 @@ class EimLocalSession(LocalIsdrSession):
         self.eim_state.current_bip_endpoint = self._effective_eim_endpoint()
 
     def reset_state(self) -> None:
+        """Clear transient session data between IPA-poll rounds."""
         super().reset_state()
         self.eim_state.handover = EimHandoverContext()
         self._activate_runtime_bip_role("eim", reason="reset")
@@ -192,6 +195,7 @@ class EimLocalSession(LocalIsdrSession):
         self.eim_state.hotfolder_override_path = ""
 
     def list_profile_aliases(self) -> list[dict[str, str]]:
+        """List profile aliases registered in the eIM hot-folder manifest."""
         registry_path = ensure_seeded_workspace_file(("SCP03", "aid.txt"), "SCP03", "aid.txt")
         if os.path.isfile(registry_path) is False:
             return []
@@ -220,6 +224,7 @@ class EimLocalSession(LocalIsdrSession):
         return rows
 
     def resolve_hotfolder_path(self, override_path: str = "") -> str:
+        """Resolve and return the absolute path to the eIM package hot-folder."""
         target = override_path
         if len(target) == 0:
             target = self.eim_state.hotfolder_override_path
@@ -298,6 +303,7 @@ class EimLocalSession(LocalIsdrSession):
         return self._wrap_tlv(bytes.fromhex("BF64"), self._wrap_tlv(b"\x82", encoded_options))
 
     def get_eim_configuration_data(self) -> bytes:
+        """Return the eIM configuration data TLV for the current session."""
         self.reset_state()
         self.select_isdr()
         response = self._send_retrieve_store_data(bytes.fromhex("BF5500"), "EIM-LOCAL: GetEimConfigurationData")
@@ -316,6 +322,7 @@ class EimLocalSession(LocalIsdrSession):
         return response
 
     def delete_eim(self, eim_id: str) -> bytes:
+        """Send ES2+.DeleteEIM to remove the eIM from the eUICC registry (SGP.32 §5.5.7)."""
         target = str(eim_id).strip()
         if len(target) == 0:
             raise ValueError("DeleteEim requires eim_id.")
@@ -339,6 +346,7 @@ class EimLocalSession(LocalIsdrSession):
         return response
 
     def euicc_memory_reset(self, package_path: str = "") -> bytes:
+        """Send ES10c.EUICCMemoryReset to wipe all profiles and keys (SGP.22 §3.6)."""
         resolved_path = self.resolve_eim_package_path(override_path=package_path)
         package_document = self.load_eim_package_document(override_path=resolved_path)
         command_payload = self._build_euicc_memory_reset_payload(package_document)
@@ -369,6 +377,7 @@ class EimLocalSession(LocalIsdrSession):
         return response
 
     def resolve_eim_package_path(self, override_path: str = "") -> str:
+        """Resolve the absolute path of an eIM package relative to the workspace or config root."""
         target = override_path
         if len(target) == 0:
             target = self.eim_state.eim_package_override_path
@@ -384,6 +393,7 @@ class EimLocalSession(LocalIsdrSession):
         return load_eim_package_document(package_path)
 
     def lint_eim_package(self, package_path: str = "", strict_executable: bool = False) -> dict[str, Any]:
+        """Run static lint checks on an eIM package and return a list of finding strings."""
         resolved_path = self.resolve_eim_package_path(override_path=package_path)
         document = load_eim_package_document(resolved_path)
         report = lint_eim_package_document(document)
@@ -406,6 +416,7 @@ class EimLocalSession(LocalIsdrSession):
         return report
 
     def list_eim_package_files(self, package_dir: str = "") -> list[str]:
+        """Return a list of file-info dicts for all files present in an eIM package."""
         target_dir = package_dir.strip()
         if len(target_dir) == 0:
             target_dir = self.cfg.EIM_PACKAGES_DIR
@@ -503,6 +514,7 @@ class EimLocalSession(LocalIsdrSession):
         self.eim_state.hotfolder_poll_session_issued_paths.add(normalized_path)
 
     def list_fixed_poll_fixture_package_files(self) -> list[str]:
+        """Return file-info dicts for all files in the fixed poll-fixture package."""
         if bool(getattr(self.cfg, "EIM_POLL_INCLUDE_FIXED_FIXTURES", True)) is False:
             return []
         package_files: list[str] = []
@@ -524,6 +536,7 @@ class EimLocalSession(LocalIsdrSession):
         hotfolder_dir: str = "",
         exclude_package_paths: Optional[set[str]] = None,
     ) -> list[dict[str, Any]]:
+        """Return a preview list of files discovered in the hot-folder staging area."""
         resolved_dir, effective_excludes = self._effective_hotfolder_poll_excludes(
             hotfolder_dir=hotfolder_dir,
             exclude_package_paths=exclude_package_paths,
@@ -545,6 +558,7 @@ class EimLocalSession(LocalIsdrSession):
         return rows
 
     def ipad_discover(self, package_path: str = "") -> list[tuple[str, bytes]]:
+        """Discover available IPA (eIM) servers by querying the DNS discovery snapshot."""
         self._activate_runtime_bip_role("eim", reason="ipad_discover")
         sequence = self.discover_card()
         self._sync_pending_notifications()
@@ -553,6 +567,7 @@ class EimLocalSession(LocalIsdrSession):
         return sequence
 
     def ipae_authenticate(self, matching_id: str = "") -> EimHandoverContext:
+        """Authenticate to the eIM via IPA-E; return the session credential bundle."""
         self._activate_runtime_bip_role("eim", reason="ipae_authenticate")
         self.reset_state()
         self.select_isdr()
@@ -569,6 +584,7 @@ class EimLocalSession(LocalIsdrSession):
         return self.eim_state.handover
 
     def ipae_download(self, profile_path: str = "", matching_id: str = "") -> bytes:
+        """Download the IPA-E payload from the eIM; return the raw response bytes."""
         handover = self.eim_state.handover
         transaction_id = ensure_handover_transaction(handover)
         if len(matching_id.strip()) > 0:
@@ -587,6 +603,7 @@ class EimLocalSession(LocalIsdrSession):
         return response
 
     def run_load_profile_chain_with_transaction(self, transaction_id: bytes, profile_path: str = "") -> bytes:
+        """Execute the full load-profile chain wrapped in a recoverable transaction."""
         if len(transaction_id) == 0:
             raise ValueError("transaction_id must not be empty for eIM handover load.")
         source_bytes = self._read_profile_source_bytes(profile_path=profile_path)
@@ -920,6 +937,7 @@ class EimLocalSession(LocalIsdrSession):
         )
 
     def enforce_notification_hygiene(self, max_pending: Optional[int] = None) -> int:
+        """Discard pending notifications that exceed the retention threshold (SGP.22 §3.7.2)."""
         self._sync_pending_notifications()
         response = self._send_retrieve_store_data(bytes.fromhex("BF2B00"), "EIM-LOCAL: RetrieveNotificationsList")
         pending_rows = self._extract_notification_metadata_entries(response)
@@ -940,6 +958,7 @@ class EimLocalSession(LocalIsdrSession):
         package_path: str = "",
         source_mode: str = "package",
     ) -> bytes:
+        """Bootstrap the eIM-local store with the initial eIM entry from the config."""
         return self._run_add_eim_command(
             tag_hex=self.cfg.EIM_ADD_INITIAL_TAG_HEX,
             action_label="AddInitialEim",
@@ -954,6 +973,7 @@ class EimLocalSession(LocalIsdrSession):
         package_path: str = "",
         source_mode: str = "package",
     ) -> bytes:
+        """Register a new eIM entry in the local store and persist it."""
         return self._run_add_eim_command(
             tag_hex=self.cfg.EIM_ADD_TAG_HEX,
             action_label="AddEim",
@@ -1809,6 +1829,7 @@ class EimLocalSession(LocalIsdrSession):
         return bytes([unused_bits & 0xFF]) + bytes(payload)
 
     def set_handover_transaction(self, transaction_id_hex: str, matching_id: str = "") -> EimHandoverContext:
+        """Record a handover transaction reference against the current session state."""
         raw_hex = transaction_id_hex.strip().replace(" ", "")
         if len(raw_hex) == 0:
             raise ValueError("transaction_id_hex must be non-empty.")
@@ -1840,6 +1861,7 @@ class EimLocalSession(LocalIsdrSession):
         return payload
 
     def selected_eim_certificate_summary(self) -> dict[str, Any]:
+        """Return a short human-readable summary of the currently selected eIM signing certificate."""
         return {
             "path": self.eim_state.selected_eim_certificate_path.strip(),
             "reason": self.eim_state.selected_eim_certificate_reason.strip(),
@@ -1852,6 +1874,7 @@ class EimLocalSession(LocalIsdrSession):
         package_path: str = "",
         cert_path: str = "",
     ) -> dict[str, Any]:
+        """Return the full decoded preview of the selected eIM signing certificate."""
         preferred_ci_pkids = self._preferred_ci_pkids_from_package_path(package_path)
         allow_auto_select = len(str(cert_path or "").strip()) == 0
         resolved_path, reason, root_ci_pkids, private_key_path = self._resolve_signing_certificate_candidate(
@@ -1874,6 +1897,7 @@ class EimLocalSession(LocalIsdrSession):
         package_path: str = "",
         cert_path: str = "",
     ) -> dict[str, Any]:
+        """Return the sorted inventory of known eIM certificates with their metadata."""
         rows: list[dict[str, Any]] = []
         for record in self._eim_cert_store.signing_records():
             rows.append(
@@ -1905,6 +1929,7 @@ class EimLocalSession(LocalIsdrSession):
         return self.cfg.EIM_POLL_AUDIT_DB_FILE
 
     def read_response_log(self, limit: int = 25) -> list[dict[str, Any]]:
+        """Return the stored response-log entries as a list of decoded dicts."""
         path = self.response_log_path()
         if os.path.isfile(path) is False:
             return []
@@ -1930,6 +1955,7 @@ class EimLocalSession(LocalIsdrSession):
         return rows
 
     def clear_response_log(self) -> int:
+        """Clear all stored entries from the eIM response log."""
         path = self.response_log_path()
         if os.path.isfile(path) is False:
             return 0
@@ -1950,6 +1976,7 @@ class EimLocalSession(LocalIsdrSession):
         flow: str = "",
         package_type: str = "",
     ) -> list[dict[str, Any]]:
+        """Return all stored poll-audit rows as a list of dicts."""
         return self.poll_audit_store.list_events(
             limit=limit,
             eid=eid,
@@ -1961,6 +1988,7 @@ class EimLocalSession(LocalIsdrSession):
         return self.poll_audit_store.clear()
 
     def filter_response_log(self, query: str, limit: int = 50) -> list[dict[str, Any]]:
+        """Return response-log entries filtered by *criteria* dict fields."""
         needle = str(query).strip().upper()
         if len(needle) == 0:
             return self.read_response_log(limit=limit)
@@ -1983,6 +2011,7 @@ class EimLocalSession(LocalIsdrSession):
         code_value: Any,
         package_path: str = "",
     ) -> dict[str, Any]:
+        """Inject an error-code override into the eIM package and persist the change."""
         resolved_path = self.resolve_eim_package_path(override_path=package_path)
         document = load_eim_package_document(resolved_path)
         normalized_family = str(family).strip().lower().replace("-", "_").replace(".", "_")
@@ -2268,6 +2297,7 @@ class EimLocalSession(LocalIsdrSession):
         flow_run_id: str = "",
         eid: str = "",
     ) -> None:
+        """Append a poll-audit event row to the persistent store."""
         self._append_response_log_event(
             action=action,
             package_path=package_path,
@@ -2355,6 +2385,7 @@ class EimLocalSession(LocalIsdrSession):
         return target_id, next_value
 
     def set_counter_value(self, eim_id: str, next_value: int) -> tuple[str, int]:
+        """Write a new value for the named counter field in the package state."""
         target_id = str(eim_id).strip()
         if len(target_id) == 0:
             target_id = self._effective_eim_id()
@@ -2372,6 +2403,7 @@ class EimLocalSession(LocalIsdrSession):
         matching_id: str = "",
         strict_io: bool = False,
     ) -> int:
+        """Acknowledge a list of completed eIM operations and update the audit state."""
         txid = transaction_id_hex.strip().upper()
         mid = matching_id.strip()
         try:
@@ -2399,6 +2431,7 @@ class EimLocalSession(LocalIsdrSession):
         return closed
 
     def execution_coverage_matrix(self) -> dict[str, dict[str, str]]:
+        """Return a matrix showing which profile-loading steps have been exercised."""
         return {
             "add_initial_eim": {"mode": "executable", "execution_path": "add_initial_eim"},
             "addinitialeim": {"mode": "executable", "execution_path": "add_initial_eim"},
@@ -2429,6 +2462,7 @@ class EimLocalSession(LocalIsdrSession):
         }
 
     def execution_plan_for_package(self, package_path: str = "") -> dict[str, Any]:
+        """Build the ordered execution plan for the operations in an eIM package."""
         resolved_path = self.resolve_eim_package_path(override_path=package_path)
         package_document = self.load_eim_package_document(override_path=resolved_path)
         package_type = str(package_document.get("package_type", "")).strip().lower()
@@ -2513,6 +2547,7 @@ class EimLocalSession(LocalIsdrSession):
         return self._wrap_tlv(bytes.fromhex("BF54"), inner)
 
     def build_wire_payload_preview(self, package_document: dict[str, Any]) -> bytes:
+        """Build a structured preview of the wire payload that would be sent for this package."""
         package_type = str(package_document.get("package_type", "")).strip().lower()
         runtime_hints = resolve_package_runtime_hints(package_document)
         txid_hex, txid = self._wire_preview_transaction_id(runtime_hints)
@@ -2705,6 +2740,7 @@ class EimLocalSession(LocalIsdrSession):
         return False
 
     def load_eim_package_to_isdr(self, package_path: str = "", cert_path: str = "") -> dict[str, Any]:
+        """Load a compiled eIM package to the ISD-R via the ES10b interface (SGP.22 §5.7.20)."""
         resolved_path = self.resolve_eim_package_path(override_path=package_path)
         package_document = self.load_eim_package_document(override_path=resolved_path)
         package_type = str(package_document.get("package_type", "")).strip().lower()
@@ -2776,6 +2812,7 @@ class EimLocalSession(LocalIsdrSession):
         }
 
     def issue_eim_package_file(self, package_path: str = "") -> tuple[str, str, int]:
+        """Issue a single eIM package file to the card and record the result."""
         resolved_path = self.resolve_eim_package_path(override_path=package_path)
         package_document = self.load_eim_package_document(override_path=resolved_path)
         runtime_hints = resolve_package_runtime_hints(package_document)
@@ -3147,6 +3184,7 @@ class EimLocalSession(LocalIsdrSession):
             raise
 
     def issue_all_eim_package_files(self, package_dir: str = "") -> list[tuple[str, str, int]]:
+        """Issue all files in the current eIM package in sequence."""
         results: list[tuple[str, str, int]] = []
         for package_file in self.list_eim_package_files(package_dir=package_dir):
             try:
@@ -3156,6 +3194,7 @@ class EimLocalSession(LocalIsdrSession):
         return results
 
     def issue_hotfolder_packages(self, hotfolder_dir: str = "") -> list[tuple[str, str, int]]:
+        """Issue all packages found in the hot-folder staging area."""
         resolved_dir = self.reset_hotfolder_poll_session(hotfolder_dir=hotfolder_dir)
         poll_meta = self.hotfolder_poll_response_meta(hotfolder_dir=resolved_dir)
         if poll_meta.get("eim_result_code") == self.cfg.EIM_NO_PACKAGE_RESULT_CODE:
@@ -3187,6 +3226,7 @@ class EimLocalSession(LocalIsdrSession):
         return results
 
     def summarize_issue_results(self, results: list[tuple[str, str, int]]) -> dict[str, Any]:
+        """Summarise a list of per-file issue results into a compact report dict."""
         total = len(results)
         success = 0
         failure = 0
@@ -3208,6 +3248,7 @@ class EimLocalSession(LocalIsdrSession):
         }
 
     def issue_next_hotfolder_package(self, hotfolder_dir: str = "") -> Optional[tuple[str, str, int]]:
+        """Issue the next unprocessed hot-folder package and advance the cursor."""
         resolved_dir, effective_excludes = self._effective_hotfolder_poll_excludes(hotfolder_dir=hotfolder_dir)
         package_files = self.list_hotfolder_package_files(hotfolder_dir=resolved_dir)
         package_files = self._exclude_campaign_seen_package_files(
@@ -3227,6 +3268,7 @@ class EimLocalSession(LocalIsdrSession):
         interval_ms: int = 1000,
         hotfolder_dir: str = "",
     ) -> list[dict[str, Any]]:
+        """Poll the hot-folder for new packages and issue them to the card."""
         report = self.poll_hotfolder_campaign(
             cycles=cycles,
             interval_ms=interval_ms,
@@ -3247,6 +3289,7 @@ class EimLocalSession(LocalIsdrSession):
         until_empty: bool = False,
         max_cycles: Optional[int] = None,
     ) -> dict[str, Any]:
+        """Run a hot-folder poll campaign loop until all packages are processed or the limit is reached."""
         requested_cycles = int(cycles)
         if requested_cycles <= 0:
             requested_cycles = 1
@@ -3341,6 +3384,7 @@ class EimLocalSession(LocalIsdrSession):
         campaign_report: dict[str, Any],
         output_path: str = "",
     ) -> str:
+        """Export the campaign report for the completed hot-folder run to disk."""
         target = str(output_path).strip()
         if len(target) == 0:
             file_name = (
@@ -3374,6 +3418,7 @@ class EimLocalSession(LocalIsdrSession):
         return target
 
     def aggregate_campaign_reports(self, reports_dir: str = "") -> dict[str, Any]:
+        """Aggregate per-card campaign reports into a combined multi-card summary."""
         target_dir = str(reports_dir).strip()
         if len(target_dir) == 0:
             base_dir = self._workspace_root if len(self._workspace_root) > 0 else os.getcwd()
@@ -3432,6 +3477,7 @@ class EimLocalSession(LocalIsdrSession):
         }
 
     def export_aggregate_campaign_report(self, aggregate_report: dict[str, Any], output_path: str = "") -> str:
+        """Export the aggregated multi-card campaign report to disk."""
         target = str(output_path).strip()
         if len(target) == 0:
             file_name = (
@@ -3458,6 +3504,7 @@ class EimLocalSession(LocalIsdrSession):
         hotfolder_dir: str = "",
         exclude_package_paths: Optional[set[str]] = None,
     ) -> dict[str, Any]:
+        """Return the response metadata dict for the hot-folder poll operation."""
         resolved_dir, effective_excludes = self._effective_hotfolder_poll_excludes(
             hotfolder_dir=hotfolder_dir,
             exclude_package_paths=exclude_package_paths,
@@ -3491,6 +3538,7 @@ class EimLocalSession(LocalIsdrSession):
         hotfolder_dir: str = "",
         exclude_package_paths: Optional[set[str]] = None,
     ) -> dict[str, Any]:
+        """Return the full metadata dict for a completed hot-folder poll session."""
         resolved_dir, effective_excludes = self._effective_hotfolder_poll_excludes(
             hotfolder_dir=hotfolder_dir,
             exclude_package_paths=exclude_package_paths,

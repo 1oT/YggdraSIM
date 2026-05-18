@@ -1,8 +1,8 @@
 {
   "theme": "textual-ansi",
   "splits": {
-    "json_outline_width": 70,
-    "json_col_width": 174,
+    "json_outline_width": 71,
+    "json_col_width": 180,
     "inspect_width": 141,
     "bottom_height": 38
   },
@@ -11,5 +11,11 @@
     "right_mode": "inspect",
     "bottom_left_mode": "none",
     "bottom_right_mode": "none"
+  },
+  "diff_tui": {
+    "decoded_visible": true,
+    "decoded_height": 14,
+    "show_values": false,
+    "diffs_only": true
   }
 }

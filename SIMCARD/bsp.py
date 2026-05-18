@@ -1,3 +1,5 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+"""BSP (Bearer-Service Profile) crypto layer: key derivation and AES-CBC+MAC for SCP11 BPP channel protection."""
 from __future__ import annotations
 
 from cryptography.hazmat.primitives import cmac, hashes
@@ -22,6 +24,10 @@ def bsp_key_derivation(
     eid: bytes,
     length: int = 16,
 ) -> tuple[bytes, bytes, bytes]:
+    """Derive BSP session keys (S-ENC, S-MAC, initial MCV) via X9.63 KDF (SGP.22 §3.1.4).
+
+    Returns the three key materials needed to initialise a ``BspInstance``.
+    """
     shared_info = (
         bytes([key_type & 0xFF, key_length & 0xFF])
         + encode_length(len(host_id))
@@ -92,6 +98,10 @@ class _BspMac:
         return raw_without_mac + full_mac[: self.mac_length]
 
     def verify(self, protected_tlv: bytes) -> bytes:
+        """Verify the trailing AES-CMAC truncation on *protected_tlv* and return the payload without MAC.
+
+        Raises ``BspCryptoError`` when the MAC does not match.
+        """
         raw = bytes(protected_tlv)
         if len(raw) < self.mac_length + 2:
             raise ValueError("Protected BSP TLV is too short.")
@@ -127,6 +137,7 @@ class BspInstance:
         host_id: bytes,
         eid: bytes,
     ) -> "BspInstance":
+        """Construct a ``BspInstance`` from a raw ECDH shared secret via ``bsp_key_derivation``."""
         s_enc, s_mac, initial_mcv = bsp_key_derivation(
             shared_secret=bytes(shared_secret),
             key_type=int(key_type),
@@ -141,6 +152,7 @@ class BspInstance:
         return self.m_algo.auth(int(tag), encrypted)
 
     def encrypt_and_mac(self, tag: int, plaintext: bytes) -> list[bytes]:
+        """Segment *plaintext* into BSP-sized chunks, AES-CBC-encrypt each, and append AES-CMAC."""
         chunks: list[bytes] = []
         remainder = bytes(plaintext)
         while len(remainder) > 0:
@@ -155,6 +167,7 @@ class BspInstance:
         return protected
 
     def mac_only(self, tag: int, plaintext: bytes) -> list[bytes]:
+        """Segment *plaintext* into BSP-sized chunks and append AES-CMAC without encryption."""
         chunks: list[bytes] = []
         remainder = bytes(plaintext)
         while len(remainder) > 0:

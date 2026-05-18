@@ -15,6 +15,7 @@
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 # -----------------------------------------------------------------------------
 
+"""SGP.22 eUICC procedures: ES10b/ES9+ command sequences for profile download and management."""
 import json 
 import re
 import shutil 
@@ -760,6 +761,7 @@ class Sgp22Manager :
         return self ._decode_bcd_digits (value )
 
     def get_ecasd_issuer_identity (self )->Dict [str ,str ]:
+        """Read the ECASD issuer public key (ES10b.GetEUICCChallenge + GET DATA) and return a dict of key attributes."""
         for use_logical_channel in (False ,True ):
             mode_name ="basic"
             if use_logical_channel :
@@ -1590,6 +1592,7 @@ class Sgp22Manager :
         return data .hex ().upper ()
 
     def list_profiles (self ):
+        """Send ES10c.GetProfilesInfo and print the installed profile table."""
         self ._select_isd_r ()
         payload ="BF2D00"
         print (f"{Config.Colors.CYAN}[*] Retrieving Profile List (ES10c/ES10b.GetProfilesInfo)...{Config.Colors.ENDC}")
@@ -1937,6 +1940,7 @@ class Sgp22Manager :
         found :List [Dict [int ,Any ]]=[]
 
         def walk (current :Any ):
+            """Depth-first walk of a BER-TLV tree during SGP.22 profile analysis."""
             if isinstance (current ,dict ):
                 keys =set (current .keys ())
                 has_entry_shape =False 

@@ -7,7 +7,8 @@ outline. Relative Markdown links are rewritten to in-document anchors so
 the combined file is self-contained. Front matter is stripped. Mermaid
 fences, admonitions, tabs, and tables pass through unchanged.
 
-The result is written to ``site-docs/combined.md`` by default.
+The result is written to ``YggdraSIM.md`` at the repository root by default
+(see ``--out``; the file is gitignored).
 
 Usage:
 

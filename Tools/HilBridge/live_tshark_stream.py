@@ -1,3 +1,5 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+"""HIL-Bridge tshark stream: drives a tshark subprocess and pipes decoded SIM-frame events to the live-decode state."""
 from __future__ import annotations
 
 import errno
@@ -40,6 +42,7 @@ def build_live_stream_command(
     decode_rule: str = DEFAULT_DECODE_RULE,
     extra_command: tuple[str, ...] = (),
 ) -> list[str]:
+    """Build the tshark command-line args list for live interface capture."""
     normalized_fifo = str(fifo_path or "").strip()
     command: list[str] = [
         str(tshark_binary or "tshark"),
@@ -83,6 +86,7 @@ def build_live_stream_command(
 
 
 def ensure_fifo(fifo_path: str, *, mode: int = 0o600) -> None:
+    """Create the named FIFO pipe if it does not already exist."""
     normalized_path = str(fifo_path or "").strip()
     if len(normalized_path) == 0:
         raise ValueError("FIFO path must not be empty.")
@@ -145,6 +149,7 @@ class LiveTsharkStream:
         return self._options
 
     def start(self) -> bool:
+        """Launch the live tshark capture process and begin streaming to the FIFO."""
         fifo_path = str(self._options.fifo_path or "").strip()
         if len(fifo_path) == 0:
             self._set_error("FIFO path was not provided to LiveTsharkStream.")
@@ -201,6 +206,7 @@ class LiveTsharkStream:
         return True
 
     def is_alive(self) -> bool:
+        """Return True when the live tshark capture process is still running."""
         process = self._runtime.process
         if process is None:
             return False
@@ -212,6 +218,7 @@ class LiveTsharkStream:
             return False
 
     def drain(self, *, limit: int = DEFAULT_STREAM_DRAIN_LIMIT) -> list[PacketSummary]:
+        """Drain any buffered packet data from the tshark output pipe."""
         normalized_limit = max(1, int(limit or DEFAULT_STREAM_DRAIN_LIMIT))
         rows: list[PacketSummary] = []
         for _ in range(normalized_limit):
@@ -222,6 +229,7 @@ class LiveTsharkStream:
         return rows
 
     def error_text(self) -> str:
+        """Return the last error text emitted by the tshark process, if any."""
         with self._lock:
             message = str(self._runtime.last_error or "").strip()
             stderr_blob = bytes(self._runtime.stderr_tail or b"")
@@ -235,6 +243,7 @@ class LiveTsharkStream:
         return f"{message} | tshark: {stderr_text}"
 
     def stop(self, *, timeout: float = DEFAULT_STREAM_STOP_TIMEOUT_SECONDS) -> None:
+        """Terminate the tshark process and clean up the output pipe."""
         if self._runtime.stopped:
             return
         self._runtime.stopped = True

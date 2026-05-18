@@ -1,3 +1,4 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """
 CLI entry point for ``yggdrasim-eum-diag``.
 
@@ -272,6 +273,7 @@ def _cmd_decode_bpp(args: argparse.Namespace, workspace_root: Path) -> int:
 
 
 def run_cli(argv: Sequence[str] | None = None) -> int:
+    """Parse CLI arguments and run the EUM diagnostic tool."""
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s %(message)s",

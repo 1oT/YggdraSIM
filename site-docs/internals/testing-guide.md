@@ -32,7 +32,7 @@ to a subsystem or a cross-cutting concern. Representative file patterns:
 | `tests/test_polling_plugin_*.py` | plugin runtime behavior |
 | `tests/test_apdu_fuzzer*.py` | APDU mutation fuzzer (allow-list, mutators, transports) |
 | `tests/test_eum_diag*.py` | EUM / SM-DP+ session-key diagnostics + Lua dissector |
-| `tests/test_yggdracore_*.py` *(R2-005, post-v1.0.0 staging)* | YggdraCore AUSF / AAnF stubs, FastAPI loopback, Open5GS bridge |
+| `tests/test_yggdracore_*.py` *(post-v1 staging)* | YggdraCore AUSF / AAnF stubs, FastAPI loopback, Open5GS bridge |
 | `tests/test_yggdrasim_common_*.py` | shared helpers |
 
 ## Scoping conventions

@@ -1,3 +1,5 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+"""SCP11-live configuration: loads SM-DP+ URL and certificate paths for the live physical-reader session."""
 # -----------------------------------------------------------------------------
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -95,6 +97,11 @@ class SGPConfig:
     EIM_HTTP_PROTOCOL: str = "gsma/rsp/v2.1.0"
     EIM_EUICC_CHALLENGE_ASN1: bool = True
     REMOTE_DP_ALLOW_LOCAL_FALLBACK: bool = False
+    # FQDN suffix allow-list that gates vendor-specific eIM quirks. The
+    # shipped tree carries the mechanism only; operators populate the
+    # targets via EIM_VENDOR_QUIRK_FQDN_SUFFIXES so production endpoint
+    # names stay out of the public source. Comma- or space-separated.
+    EIM_VENDOR_QUIRK_FQDN_SUFFIXES: tuple = ()
     # Prefer ES10b STORE DATA on a dedicated logical channel, matching the
     # channel layout used by commercial LPAs on physical cards.
     ES10B_USE_LOGICAL_CHANNEL: bool = True
@@ -121,6 +128,14 @@ class SGPConfig:
                 parsed_timeout = 0
             if parsed_timeout > 0:
                 object.__setattr__(self, "EIM_TIMEOUT_SECONDS", parsed_timeout)
+        ev_quirk = os.environ.get("EIM_VENDOR_QUIRK_FQDN_SUFFIXES", "").strip()
+        if ev_quirk != "":
+            normalized_suffixes = tuple(
+                suffix.lower().lstrip(".")
+                for suffix in ev_quirk.replace(",", " ").split()
+                if len(suffix.strip()) > 0
+            )
+            object.__setattr__(self, "EIM_VENDOR_QUIRK_FQDN_SUFFIXES", normalized_suffixes)
         if self.CAPABILITIES is None:
             object.__setattr__(
                 self,
@@ -147,6 +162,7 @@ class SGPConfig:
                 print(f"Warning: Could not copy default {filename} to {_get_config_dir()}: {error}")
 
     def local_credential_paths(self):
+        """Return a dict of resolved certificate and key file paths for this session variant."""
         return [
             ("DPauth certificate", self.CERT_PATH_AUTH),
             ("DPauth private key", self.KEY_PATH_AUTH),
@@ -155,6 +171,7 @@ class SGPConfig:
         ]
 
     def collect_startup_diagnostics(self):
+        """Check that all required credential files exist and return a list of diagnostic warning strings."""
         errors = []
         warnings = []
 

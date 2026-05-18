@@ -1,3 +1,4 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """
 Session-key bundle contract for the EUM diagnostics dissector.
 
@@ -107,6 +108,7 @@ class SessionKeyBundle:
         dek: str | None = None,
         comment: str = "",
     ) -> "SessionKeyBundle":
+        """Construct a session-key record from hex-encoded key material strings."""
         iccid_clean = str(iccid or "").strip().upper()
         if len(iccid_clean) == 0:
             raise SessionKeyError("iccid is empty")
@@ -122,6 +124,7 @@ class SessionKeyBundle:
         )
 
     def to_json_dict(self) -> dict[str, Any]:
+        """Serialise this session-key record to a JSON-compatible dict."""
         payload: dict[str, Any] = {
             "iccid": self.iccid,
             "shs_enc_hex": self.shs_enc_hex,
@@ -160,6 +163,7 @@ class SessionKeyRepository:
 
     @staticmethod
     def from_bundles(bundles: list[SessionKeyBundle]) -> "SessionKeyRepository":
+        """Construct a keyset from a pair of encryption and MAC key bundles."""
         seen: dict[str, SessionKeyBundle] = {}
         for bundle in bundles:
             if bundle.iccid in seen:
@@ -177,6 +181,7 @@ class SessionKeyRepository:
         return None
 
     def to_json_dict(self) -> dict[str, Any]:
+        """Serialise this session-key record to a JSON-compatible dict."""
         return {
             "format": BUNDLE_FILE_FORMAT,
             "entries": {
@@ -186,6 +191,7 @@ class SessionKeyRepository:
 
     @staticmethod
     def from_json_dict(payload: dict[str, Any]) -> "SessionKeyRepository":
+        """Deserialise a session-key record from a JSON-compatible dict."""
         if isinstance(payload, dict) is False:
             raise SessionKeyError("session-key repository JSON must be an object")
         fmt = str(payload.get("format") or "")

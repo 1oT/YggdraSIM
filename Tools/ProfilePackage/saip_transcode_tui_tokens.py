@@ -1,3 +1,4 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """Pure helpers backing the TUI token-manager modal.
 
 Kept out of :mod:`Tools.ProfilePackage.saip_transcode_tui` so they can be
@@ -87,6 +88,7 @@ def format_token_row(row: dict[str, Any], *, name_width: int = 12) -> str:
 
 
 def placeholder_style_from_document(document: dict[str, Any]) -> str:
+    """Return the appropriate Textual CSS class for a placeholder token based on document state."""
     raw = document.get("__ygg_placeholder_style__", "brace")
     normalized = str(raw or "brace").strip().lower()
     if normalized == "curly":

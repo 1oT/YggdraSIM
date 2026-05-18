@@ -1,3 +1,5 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+"""eIM-local configuration: resolves cert, profile, and state directory paths for the local eIM simulator."""
 import os
 from dataclasses import dataclass, field
 

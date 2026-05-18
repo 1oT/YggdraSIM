@@ -54,12 +54,16 @@ The Windows script is self-contained PowerShell.
 
 ## Examples
 
+`--version` is the **GitHub release tag**, not only the dotted version in the
+bundled executable name (artefacts are named with the value from `pyproject.toml`).
+Published CI binaries attach to tags matching `refs/tags/v*`.
+
 ```bash
 # Latest clean bundle on desktop Linux
 scripts/install/install-linux.sh
 
 # Specific release tag, clean
-scripts/install/install-linux.sh --version v0.9.0
+scripts/install/install-linux.sh --version v1.0.0
 
 # HIL-capable bundle on Linux lab host
 scripts/install/install-linux.sh --flavor full

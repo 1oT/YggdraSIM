@@ -8,15 +8,14 @@ SCP03 / SCP11 / SCP80 / SIMCARD module entry points, and the
 `yggdrasim_common` helpers consumed by external integrators.
 
 Internal helpers (modules under leading-underscore names, undocumented
-SAIP wrappers, and any path explicitly marked
-`work-in-progress` in `V2_ROADMAP.md`) may change without notice
-between minor releases.
+SAIP wrappers, and any path explicitly marked post-v1 staging in this
+file) may change without notice between minor releases.
 
 ## [Unreleased]
 
 ### Added
 
-- R2-005 Tools tier staging (work-in-progress per `V2_ROADMAP.md`):
+- Post-v1 Tools tier staging (not part of this release):
   in-process `Tools/YggdraCore/` stubs (subscription store, AUSF
   stub, AAnF stub, FastAPI loopback, BYO Open5GS bridge);
   `Tools/Sunrise6G/` QoD / Location / models stubs; local-loopback

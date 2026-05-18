@@ -2154,7 +2154,7 @@ metadata_overrides = {{
                 self.assertEqual((sw1, sw2), (0x90, 0x00))
 
                 transaction_id = bytes.fromhex("2233445566778899AABBCCDDEEFF0011")
-                server_address = "dpp1.esim.tst.1ot.mobi"
+                server_address = "dpp1.esim.example.test"
                 cert_der, cert_private_key = build_self_signed_cert_and_key("Notification Target DPpb")
                 auth_payload = build_authenticate_server_payload(
                     transaction_id=transaction_id,

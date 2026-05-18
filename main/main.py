@@ -2508,14 +2508,14 @@ def _build_cli_parser ():
 
 
 def _add_gui_arguments (parser ):
-    """Attach the V2 universal GUI argparse surface (R2-004).
+    """Attach the universal GUI argparse surface.
 
     Both `--gui` and `--web-server` are off by default. Neither flag
     imports FastAPI / uvicorn / pywebview until the corresponding
     dispatch path runs, so the baseline `pip install yggdrasim`
-    install remains lean per V2_UNIVERSAL_GUI_PLAN.md §16.5.
+    install remains lean.
     """
-    group =parser .add_argument_group ("GUI (experimental, R2-004 Phase A)")
+    group =parser .add_argument_group ("GUI (experimental)")
     group .add_argument (
     "--gui",
     action ="store_true",

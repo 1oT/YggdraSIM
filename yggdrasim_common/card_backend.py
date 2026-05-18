@@ -1,3 +1,5 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+"""Card backend selector: persists and resolves the active transport (physical reader vs simulated card) and associated config paths."""
 from __future__ import annotations
 
 import json
@@ -55,6 +57,7 @@ DEFAULT_CARD_RELAY_TIMEOUT_SECONDS = 30
 
 
 def normalize_card_backend(value: Any, default: str = CARD_BACKEND_READER) -> str:
+    """Canonicalise a backend specifier string to one of the known backend types."""
     text = str(value or "").strip().lower()
     if len(text) == 0:
         return str(default or CARD_BACKEND_READER).strip().lower() or CARD_BACKEND_READER
@@ -186,6 +189,7 @@ def get_card_backend(default: str = CARD_BACKEND_READER) -> str:
 
 
 def set_card_backend(backend: str, *, persist: bool = True) -> str:
+    """Write the active card-backend choice to the runtime config."""
     normalized = normalize_card_backend(backend)
     os.environ[CARD_BACKEND_ENV] = normalized
     if persist:
@@ -200,6 +204,7 @@ def set_card_backend(backend: str, *, persist: bool = True) -> str:
 
 
 def get_card_backend_source() -> str:
+    """Return the config source (env-var, config file, or default) that set the current backend."""
     configured = str(os.environ.get(CARD_BACKEND_ENV, "") or "").strip()
     persisted = _get_persisted_setting(_SETTINGS_KEY_CARD_BACKEND)
     normalized_persisted = _normalize_card_backend_value(persisted)
@@ -244,6 +249,7 @@ def get_default_sim_eim_identity_path() -> str:
 
 
 def get_sim_isdr_config_path() -> str:
+    """Return the filesystem path of the ISD-R configuration file for the current backend."""
     configured = str(os.environ.get(SIM_ISDR_CONFIG_ENV, "") or "").strip()
     if len(configured) > 0:
         return os.path.abspath(os.path.expanduser(configured))
@@ -257,6 +263,7 @@ def get_sim_isdr_config_path() -> str:
 
 
 def set_sim_isdr_config_path(path: str, *, persist: bool = True) -> str:
+    """Set the SIM ISD-R config path override in the backend configuration."""
     normalized = str(path or "").strip()
     if len(normalized) == 0:
         os.environ.pop(SIM_ISDR_CONFIG_ENV, None)
@@ -271,6 +278,7 @@ def set_sim_isdr_config_path(path: str, *, persist: bool = True) -> str:
 
 
 def get_sim_isdr_config_source() -> str:
+    """Return the effective source label for the SIM ISD-R config path (env-var, config, or default)."""
     configured = _normalize_optional_path(os.environ.get(SIM_ISDR_CONFIG_ENV, ""))
     persisted = _normalize_optional_path(_get_persisted_setting(_SETTINGS_KEY_SIM_ISDR_CONFIG_PATH))
     if len(configured) > 0:
@@ -283,6 +291,7 @@ def get_sim_isdr_config_source() -> str:
 
 
 def get_sim_eim_identity_path() -> str:
+    """Return the path to the SIM eIM identity file for the current backend."""
     configured = str(os.environ.get(SIM_EIM_IDENTITY_ENV, "") or "").strip()
     if len(configured) > 0:
         return os.path.abspath(os.path.expanduser(configured))
@@ -296,6 +305,7 @@ def get_sim_eim_identity_path() -> str:
 
 
 def set_sim_eim_identity_path(path: str, *, persist: bool = True) -> str:
+    """Set the SIM eIM identity path override in the backend configuration."""
     normalized = str(path or "").strip()
     if len(normalized) == 0:
         os.environ.pop(SIM_EIM_IDENTITY_ENV, None)
@@ -310,6 +320,7 @@ def set_sim_eim_identity_path(path: str, *, persist: bool = True) -> str:
 
 
 def get_sim_eim_identity_source() -> str:
+    """Return the effective source label for the SIM eIM identity path."""
     configured = _normalize_optional_path(os.environ.get(SIM_EIM_IDENTITY_ENV, ""))
     persisted = _normalize_optional_path(_get_persisted_setting(_SETTINGS_KEY_SIM_EIM_IDENTITY_PATH))
     if len(configured) > 0:
@@ -326,6 +337,7 @@ def get_default_sim_euicc_store_root() -> str:
 
 
 def get_sim_euicc_store_root() -> str:
+    """Return the root directory path for the SIM eUICC store."""
     configured = str(os.environ.get(SIM_EUICC_STORE_ENV, "") or "").strip()
     if len(configured) > 0:
         return os.path.abspath(os.path.expanduser(configured))
@@ -336,6 +348,7 @@ def get_sim_euicc_store_root() -> str:
 
 
 def set_sim_euicc_store_root(path: str, *, persist: bool = True) -> str:
+    """Set the SIM eUICC store root path override in the backend configuration."""
     normalized = str(path or "").strip()
     if len(normalized) == 0:
         os.environ.pop(SIM_EUICC_STORE_ENV, None)
@@ -350,6 +363,7 @@ def set_sim_euicc_store_root(path: str, *, persist: bool = True) -> str:
 
 
 def get_sim_euicc_store_root_source() -> str:
+    """Return the effective source label for the SIM eUICC store root path."""
     configured = _normalize_optional_path(os.environ.get(SIM_EUICC_STORE_ENV, ""))
     persisted = _normalize_optional_path(_get_persisted_setting(_SETTINGS_KEY_SIM_EUICC_STORE_ROOT))
     if len(configured) > 0:
@@ -404,6 +418,7 @@ def is_sim_quirks_disabled() -> bool:
 
 
 def get_sim_quirks_path() -> str:
+    """Return the path to the SIM quirks override file."""
     configured = str(os.environ.get(SIM_QUIRKS_ENV, "") or "").strip()
     if _is_sim_quirks_disabled_sentinel(configured):
         return ""
@@ -425,6 +440,7 @@ def get_default_sim_profile_store_path() -> str:
 
 
 def get_sim_profile_store_path() -> str:
+    """Return the path to the profile binary store directory."""
     configured = str(os.environ.get(SIM_PROFILE_STORE_ENV, "") or "").strip()
     if len(configured) > 0:
         return os.path.abspath(os.path.expanduser(configured))
@@ -435,6 +451,7 @@ def get_sim_profile_store_path() -> str:
 
 
 def set_sim_profile_store_path(path: str, *, persist: bool = True) -> str:
+    """Set the profile store path override in the backend configuration."""
     normalized = str(path or "").strip()
     if len(normalized) == 0:
         os.environ.pop(SIM_PROFILE_STORE_ENV, None)
@@ -449,6 +466,7 @@ def set_sim_profile_store_path(path: str, *, persist: bool = True) -> str:
 
 
 def get_sim_profile_store_path_source() -> str:
+    """Return the effective source label for the profile store path."""
     configured = _normalize_optional_path(os.environ.get(SIM_PROFILE_STORE_ENV, ""))
     persisted = _normalize_optional_path(_get_persisted_setting(_SETTINGS_KEY_SIM_PROFILE_STORE_PATH))
     if len(configured) > 0:
@@ -461,6 +479,7 @@ def get_sim_profile_store_path_source() -> str:
 
 
 def set_sim_quirks_path(path: str, *, persist: bool = True) -> str:
+    """Set the quirks override file path in the backend configuration."""
     normalized = str(path or "").strip()
     if len(normalized) == 0:
         os.environ.pop(SIM_QUIRKS_ENV, None)
@@ -484,6 +503,7 @@ def set_sim_quirks_path(path: str, *, persist: bool = True) -> str:
 
 
 def get_sim_quirks_source() -> str:
+    """Return the effective source label for the SIM quirks path."""
     raw_configured = str(os.environ.get(SIM_QUIRKS_ENV, "") or "").strip()
     raw_persisted = _get_persisted_setting(_SETTINGS_KEY_SIM_QUIRKS_PATH)
     if _is_sim_quirks_disabled_sentinel(raw_configured):
@@ -693,6 +713,7 @@ class RelayCardConnection:
         return self._auth_token
 
     def connect(self, protocol: Any = None) -> None:
+        """Connect to the physical card via the configured PCSC or serial backend."""
         del protocol
         payload = self._request_json(self._status_url, method="GET")
         atr_hex = str(payload.get("atr", "") or "").strip()
@@ -711,6 +732,7 @@ class RelayCardConnection:
         return list(self._atr)
 
     def transmit(self, apdu):
+        """Transmit a C-APDU and return the R-APDU bytes."""
         if self._connected is False:
             self.connect()
         apdu_bytes = bytes(apdu)
@@ -749,6 +771,7 @@ def trigger_card_relay_modem_refresh(
     required: bool = False,
     timeout_seconds: int = DEFAULT_CARD_RELAY_TIMEOUT_SECONDS,
 ) -> dict[str, Any] | None:
+    """Trigger a REFRESH (modem-reset) via the card relay backend."""
     relay_url, relay_source = _resolve_card_relay_url()
     if len(relay_url) == 0:
         if required:
@@ -787,6 +810,7 @@ def trigger_card_relay_modem_refresh(
 
 
 def describe_card_backend() -> str:
+    """Return a multi-line human-readable description of the current backend configuration."""
     backend = get_card_backend()
     if backend != CARD_BACKEND_SIM:
         return CARD_BACKEND_READER
@@ -811,6 +835,7 @@ def create_card_connection(
     # Defer the import so the recorder module isn't dragged in until a
     # connection is actually being created — keeps cold-start cheap for
     # CLI tools that never touch a card.
+    """Create and return a live card connection using the configured backend."""
     from .apdu_recorder import wrap_connection
 
     if is_simulated_card_backend():

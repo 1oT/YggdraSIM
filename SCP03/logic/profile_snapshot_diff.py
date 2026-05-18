@@ -3,6 +3,7 @@
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 # -----------------------------------------------------------------------------
 
+"""Profile snapshot diff: computes structural deltas between two decoded eSIM profile documents."""
 from __future__ import annotations
 
 import copy

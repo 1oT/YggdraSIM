@@ -23,7 +23,8 @@ The stub is intentionally minimal:
   contexts expire after a fixed lifetime to keep the dictionary
   bounded across long-running test sessions.
 
-For the SUCI / SEAF / NRF pieces, see Phase 2 (BYO Open5GS).
+SUCI / SEAF / NRF pieces are not implemented in this release; the
+production answer is the BYO Open5GS bridge.
 """
 
 from __future__ import annotations

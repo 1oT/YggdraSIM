@@ -108,8 +108,8 @@ class FormatSnNameTests(unittest.TestCase):
 
     def test_two_digit_mnc_is_left_padded_with_zero(self) -> None:
         self.assertEqual(
-            format_sn_name(mnc="01", mcc="262"),
-            "5G:mnc001.mcc262.3gppnetwork.org",
+            format_sn_name(mnc="01", mcc="001"),
+            "5G:mnc001.mcc001.3gppnetwork.org",
         )
 
     def test_three_digit_mnc_is_kept_verbatim(self) -> None:
@@ -120,11 +120,11 @@ class FormatSnNameTests(unittest.TestCase):
 
     def test_short_mcc_is_rejected(self) -> None:
         with self.assertRaises(ValueError):
-            format_sn_name(mnc="01", mcc="26")
+            format_sn_name(mnc="01", mcc="00")
 
     def test_excess_mnc_is_rejected(self) -> None:
         with self.assertRaises(ValueError):
-            format_sn_name(mnc="0001", mcc="262")
+            format_sn_name(mnc="0001", mcc="001")
 
 
 class AnnexADerivationTests(unittest.TestCase):

@@ -98,7 +98,7 @@ python -m pip install -e '.[full]'
 python -m pip install -e '.[gui]'        # desktop window via pywebview
 python -m pip install -e '.[gui-server]' # headless web server only
 
-# Optional: YggdraCore BYO-Open5GS bridge (lazy pymongo). (R2-005, post-v1.0.0 staging — see ../V2_ROADMAP.md.)
+# Optional: YggdraCore BYO-Open5GS bridge (lazy pymongo). (post-v1 staging — not part of this release.)
 python -m pip install -e '.[open5gs]'
 
 # Optional: docs site tooling for `mkdocs build` / `mkdocs serve`.

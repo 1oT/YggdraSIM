@@ -1,3 +1,4 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """
 JSON serialization helpers for SAIP decoded profile documents (pySim / asn1tools).
 
@@ -219,6 +220,12 @@ def _label_for_path_segment(segment: str) -> str:
 
 
 def humanize_saip_display_name(segment: str) -> str:
+    """Return a human-readable label for a single JSON path segment.
+
+    Applies word-split, case normalisation, and a curated override table
+    so ``ef-acc`` becomes ``EF.ACC`` and ``usim`` becomes ``USIM``.
+    Returns the raw segment unchanged if no mapping applies.
+    """
     normalized = _canonical_tag_key(str(segment).strip())
     if len(normalized) == 0:
         return ""
@@ -269,6 +276,13 @@ def humanize_saip_display_path(
     *,
     limit: int = 4,
 ) -> str | None:
+    """Convert a JSON path tuple to a readable ``"A / B / C"`` breadcrumb.
+
+    Structural noise keys (``sections``, ``intro``, ``@``, ``hex``,
+    ``__ygg_*``) are stripped.  Array index tokens ``[N]`` after EF keys
+    are dropped; after other keys they are merged with the preceding label.
+    Returns ``None`` when the filtered path is empty.
+    """
     parts: list[str] = []
     last_non_index_key: str | None = None
     for raw in path:
@@ -324,6 +338,62 @@ def _encode_ber_tlv_length(byte_length: int) -> bytes:
     return bytes([0x80 | len(buffer)]) + bytes(buffer)
 
 
+def _transform_swap_nibbles(raw: bytes) -> bytes:
+    """``SwapNibbles``: swap the high/low nibbles of every byte.
+
+    Mirrors the nibble-swap step that ETSI TS 102 221 §13.2 (EF.ICCID)
+    and 3GPP TS 31.102 BCD encodings require when carrying an upright
+    digit string through to on-card storage. Example:
+    ``8949001304080000016F`` → ``989400314080000010F6``.
+    """
+    return bytes(((b & 0x0F) << 4) | ((b & 0xF0) >> 4) for b in raw)
+
+
+def _transform_encode_ef_imsi(raw: bytes) -> bytes:
+    """``EncodeEfImsi``: 3GPP TS 31.102 §4.2.2 EF.IMSI encoding.
+
+    Accepts either ASCII digits or a tightly packed BCD representation
+    of the IMSI. Returns the 9-byte EF.IMSI body: 1 length byte +
+    8 bytes of parity-tagged nibble-swapped digits (padded to 15 digits
+    with the ``F`` filler nibble).
+    """
+
+    digits = "".join(ch for ch in raw.decode("ascii", errors="ignore") if ch.isdigit())
+    if len(digits) == 0:
+        # Treat the source as packed BCD (e.g. raw token already hex
+        # digits). Strip any 0xF filler nibbles before re-encoding.
+        text = raw.hex().upper().rstrip("F")
+        digits = "".join(ch for ch in text if ch.isdigit())
+    if len(digits) == 0 or len(digits) > 15:
+        raise ValueError(
+            "EncodeEfImsi expects an IMSI of 1..15 digits "
+            f"(got {len(digits)})."
+        )
+    odd = (len(digits) % 2) == 1
+    # First nibble of byte 1 = parity (0x9 odd, 0x1 even); second nibble = first digit.
+    parity = 0x9 if odd else 0x1
+    first_byte = (int(digits[0]) << 4) | parity
+    body = [first_byte]
+    pairs = digits[1:]
+    if (len(pairs) % 2) == 1:
+        pairs += "F"
+    for index in range(0, len(pairs), 2):
+        high = pairs[index]
+        low = pairs[index + 1]
+        high_nibble = 0xF if high.upper() == "F" else int(high)
+        low_nibble = 0xF if low.upper() == "F" else int(low)
+        body.append((low_nibble << 4) | high_nibble)
+    while len(body) < 8:
+        body.append(0xFF)
+    return bytes([len(body)]) + bytes(body)
+
+
+_PLACEHOLDER_TRANSFORMS: dict[str, Any] = {
+    "SwapNibbles": _transform_swap_nibbles,
+    "EncodeEfImsi": _transform_encode_ef_imsi,
+}
+
+
 class TokenExpansionContext:
     """
     Resolves ``{token}`` (default) or ``[token]`` (alternate) inside hex templates.
@@ -340,6 +410,18 @@ class TokenExpansionContext:
     resolved byte-length of a placeholder changes. The content byte-length is
     encoded in short form (``0x00..0x7F``) or long form
     (``0x81 LL``, ``0x82 LL LL``, ``0x83 LL LL LL`` ...).
+
+    A ``[Func(NAME)]`` / ``{Func(NAME)}`` form runs a registered transformation
+    function on the resolved token bytes before emitting them. Two functions
+    ship by default:
+
+    - ``SwapNibbles``: byte-wise nibble swap, mirroring the ETSI TS 102 221
+      §13.2 EF.ICCID and 3GPP TS 31.102 BCD encodings
+      (``8949...01..0F`` → ``9894...10..F0``).
+    - ``EncodeEfImsi``: takes an IMSI of up to 15 digits and produces the
+      EF.IMSI content per 3GPP TS 31.102 §4.2.2 (length byte + parity-tagged
+      first digit + nibble-swapped digit pairs, ``F``-padded for odd digit
+      counts).
     """
 
     def __init__(
@@ -364,9 +446,15 @@ class TokenExpansionContext:
         # and tags the match as a derived-length companion rather than a
         # content substitution.
         if norm == "brace":
-            self._pat = re.compile(r"\{(#)?([A-Za-z][A-Za-z0-9_]*)\}")
+            self._pat = re.compile(
+                r"\{(#)?([A-Za-z][A-Za-z0-9_]*)"
+                r"(?:\(([A-Za-z][A-Za-z0-9_]*)\))?\}"
+            )
         else:
-            self._pat = re.compile(r"\[(#)?([A-Za-z][A-Za-z0-9_]*)\]")
+            self._pat = re.compile(
+                r"\[(#)?([A-Za-z][A-Za-z0-9_]*)"
+                r"(?:\(([A-Za-z][A-Za-z0-9_]*)\))?\]"
+            )
         self.tolerate_undefined = bool(tolerate_undefined)
         # Names of undefined tokens encountered while tolerate_undefined=True.
         # Callers (e.g. the TUI lint harness) can inspect this to report
@@ -374,6 +462,12 @@ class TokenExpansionContext:
         self.undefined_tokens: set[str] = set()
 
     def resolve_named(self, name: str) -> bytes:
+        """Resolve a ``{NAME}`` / ``[NAME]`` token to its byte value.
+
+        Raises ``ValueError`` for undefined tokens unless
+        ``tolerate_undefined`` is set, in which case an empty byte string
+        is returned and the name is recorded in ``undefined_tokens``.
+        """
         if name not in self.defs:
             if self.tolerate_undefined:
                 self.undefined_tokens.add(str(name))
@@ -383,13 +477,48 @@ class TokenExpansionContext:
             )
         return _placeholder_inner_to_bytes(self.defs[name], self)
 
-    def resolve_length(self, name: str) -> bytes:
+    def resolve_transformed(self, func_name: str, arg_name: str) -> bytes:
+        """Apply a transformation function to a token's resolved bytes.
+
+        Implements the ``[Func(NAME)]`` placeholder form. The function
+        is resolved against ``_PLACEHOLDER_TRANSFORMS``; the inner token
+        is resolved exactly like ``[NAME]`` and then handed to the
+        function.
+        """
+        func = _PLACEHOLDER_TRANSFORMS.get(func_name)
+        if func is None:
+            raise ValueError(
+                f"Unknown placeholder transformation function {func_name!r}; "
+                "supported: " + ", ".join(sorted(_PLACEHOLDER_TRANSFORMS)) + "."
+            )
+        if arg_name not in self.defs:
+            if self.tolerate_undefined:
+                self.undefined_tokens.add(str(arg_name))
+                return b""
+            raise ValueError(
+                f"Undefined placeholder token {arg_name!r} referenced via "
+                f"{func_name}(); add it under {_META_TOKEN_DEFS}."
+            )
+        raw = _placeholder_inner_to_bytes(self.defs[arg_name], self)
+        return func(raw)
+
+    def resolve_length(
+        self,
+        name: str,
+        *,
+        transform: str | None = None,
+    ) -> bytes:
         """Resolve ``{#NAME}`` / ``[#NAME]`` to BER-TLV length octets.
 
         When the companion ``NAME`` token is undefined and
         ``tolerate_undefined`` is set, emits a single ``0x00`` octet (short-form
         length for an empty content token) and records the undefined name so
         the lint harness can surface it.
+
+        When ``transform`` is set (``[#Func(NAME)]``), the length is
+        computed over the transformed bytes — this lets length-companion
+        tokens stay in sync with EncodeEfImsi outputs whose byte length
+        differs from the raw IMSI digit string.
         """
 
         if name not in self.defs:
@@ -401,9 +530,22 @@ class TokenExpansionContext:
                 f"derived-length companion; add it under {_META_TOKEN_DEFS}."
             )
         resolved = _placeholder_inner_to_bytes(self.defs[name], self)
+        if transform is not None:
+            func = _PLACEHOLDER_TRANSFORMS.get(transform)
+            if func is None:
+                raise ValueError(
+                    f"Unknown placeholder transformation function {transform!r}; "
+                    "supported: " + ", ".join(sorted(_PLACEHOLDER_TRANSFORMS)) + "."
+                )
+            resolved = func(resolved)
         return _encode_ber_tlv_length(len(resolved))
 
     def expand_mixed_hex(self, text: str) -> bytes:
+        """Expand a hex string that may contain embedded ``{NAME}`` tokens.
+
+        Literal hex fragments between tokens must each have an even nibble
+        count.  Returns the concatenated byte string.
+        """
         if self._pat.search(text) is None:
             compact = str(text).replace(" ", "").replace("\n", "").replace("\t", "")
             if len(compact) == 0:
@@ -422,11 +564,18 @@ class TokenExpansionContext:
             if len(compact) > 0:
                 parts.append(bytes.fromhex(compact))
             length_marker = match.group(1)
-            token_name = match.group(2)
+            head_name = match.group(2)
+            arg_name = match.group(3) if match.lastindex and match.lastindex >= 3 else None
             if length_marker is not None:
-                parts.append(self.resolve_length(token_name))
+                if arg_name is not None:
+                    parts.append(self.resolve_length(arg_name, transform=head_name))
+                else:
+                    parts.append(self.resolve_length(head_name))
             else:
-                parts.append(self.resolve_named(token_name))
+                if arg_name is not None:
+                    parts.append(self.resolve_transformed(head_name, arg_name))
+                else:
+                    parts.append(self.resolve_named(head_name))
             pos = match.end()
 
         tail = text[pos:].replace(" ", "").replace("\n", "").replace("\t", "")
@@ -1127,6 +1276,7 @@ def build_decoded_document_from_sequence(pes: Any, intro_lines: list[str] | None
     counts: dict[str, int] = {}
 
     def unique_key(base_key: str) -> str:
+        """Return a de-duplicated key string for the JSON serialisation of a tagged tuple."""
         key_text = str(base_key or "section").strip() or "section"
         current_count = counts.get(key_text, 0) + 1
         counts[key_text] = current_count
