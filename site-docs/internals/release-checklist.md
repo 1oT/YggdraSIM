@@ -26,7 +26,7 @@ release.
       package-data in `pyproject.toml`)
 - [ ] operator-facing docs that reference `docs/` describe it as an
       optional local developer tree (not as shipped content)
-- [ ] `V1_RELEASE_AUDIT.md` Pass-set 1 and Pass-set 2 sections show no
+- [ ] The local-only pre-release audit notes show no
       open action items that a release should ship with; anything
       explicitly deferred to post-v1 is listed in the "Deferred" blocks
 - [ ] `pyflakes SCP03/ SCP11/ SCP80/ SIMCARD/ Tools/ main/ plugins/

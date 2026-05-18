@@ -1,3 +1,4 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """SGP.32 EuiccPackageRequest / EuiccPackageResult helpers.
 
 Implements the wire-level encoding and decoding the eUICC needs for

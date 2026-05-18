@@ -55,6 +55,83 @@ YggdraSIM HIL bridge
   -> HTTP APDU relay on localhost -> YggdraSIM side access
 ```
 
+### Optional: stream the card from a remote workstation over SSH
+
+The default topology assumes the physical card sits in the same host
+that runs `pcscd` + `simtrace2` + the modem. When the rig lives in a
+different room (or a different building) than the operator's
+workstation, the card itself can be moved off the rig and streamed
+back over the SSH tunnel that already terminates the bridge's HTTP
+endpoints. The modem, GSMTAP capture, and `osmo-remsim-client-st2`
+keep running on the rig exactly as today; only the card moves.
+
+```text
+operator workstation                          rig (modem + simtrace2)
+--------------------------                    -------------------------
+physical card in PC/SC reader ─┐              ┌─ modem
+                               │              │
+yggdrasim-card-bridge          │── SSH ─────  YggdraSIM HIL bridge
+(publishes /apdu over HTTP)    │  RemoteForward (RemoteRelayCardChannel)
+                               │              │
+                              :8642 ←──────── /apdu
+                                              │
+                                              ├─ GSMTAP UDP -> Wireshark
+                                              └─ HTTP APDU relay
+                                                 (rig-side surface
+                                                  unchanged: any
+                                                  SCP03 / SAIP
+                                                  consumer keeps
+                                                  using the same
+                                                  endpoint)
+```
+
+Setup, end-to-end:
+
+1. **On the operator workstation**, plug the card into a local PC/SC
+   reader and start the publisher. The first run prints a bearer-
+   token fingerprint and writes the actual token under
+   `${XDG_CONFIG_HOME:-~/.config}/yggdrasim/card_bridge/<port>.token`
+   with mode 0600:
+
+   ```bash
+   yggdrasim-card-bridge --port 8642
+   ```
+
+2. **From the rig**, open an SSH `RemoteForward` so the publisher's
+   loopback port is reachable on the rig's loopback interface, and
+   copy the token file across (or read it via `scp` and stash it on
+   the rig with `chmod 600`):
+
+   ```bash
+   ssh -fN -R 8642:127.0.0.1:8642 operator@workstation
+   scp operator@workstation:~/.config/yggdrasim/card_bridge/8642.token \
+       ~/.config/yggdrasim/card_bridge/8642.token
+   chmod 600 ~/.config/yggdrasim/card_bridge/8642.token
+   ```
+
+3. **On the rig**, start the HIL bridge with the remote-card flags.
+   The local `--reader-index` / `--reader-name` flags are ignored in
+   this mode — the card lives at the other end of the tunnel:
+
+   ```bash
+   yggdrasim-hil-bridge \
+     --remote-card-url http://127.0.0.1:8642/apdu \
+     --remote-card-token-file ~/.config/yggdrasim/card_bridge/8642.token
+   ```
+
+   The bridge logs its card source on startup
+   (`Card source: remote (remote: <reader>)`) so the topology is
+   visible at a glance. Equivalent env vars are
+   `YGGDRASIM_HIL_REMOTE_CARD_URL` and
+   `YGGDRASIM_HIL_REMOTE_CARD_TOKEN_FILE`.
+
+GSMTAP capture, the bridge's own HTTP `/apdu` relay, the supervisor,
+and every YggdraSIM consumer keep working unchanged — they all sit
+upstream of the card-source decision and don't observe the swap.
+Drop the `--remote-card-url` flag to fall back to the local PC/SC
+path; the existing physically-connected topology is preserved
+byte-for-byte.
+
 ## Prerequisites
 
 Hardware:

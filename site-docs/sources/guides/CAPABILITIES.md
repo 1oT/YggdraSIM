@@ -19,7 +19,7 @@ YggdraSIM currently provides:
   AKMA / SUCI surfaces
 - in-process 5G-core stubs (`Tools/YggdraCore`: AUSF, AAnF, subscription
   store) plus a BYO-Open5GS provisioning bridge for hosts that already run
-  a real 5GC. (R2-005, post-v1.0.0 staging — see V2_ROADMAP.md.)
+  a real 5GC. (post-v1 staging — not part of this release.)
 - a hardware-in-the-loop SIMtrace2 bridge (`Tools/HilBridge`) with RSPRO
   relay, GSMTAP mirror, modem REFRESH control, AT+CSIM / AT+CRSM
   transcoding (`at_simlink`), and offline pcap review
@@ -52,14 +52,14 @@ command or every internal helper.
 | `SCP11/local_access/` | Direct local shell | local SCP11 auth, metadata upload, direct profile load, ES10c state control | `SCP11/local_access/README.md` |
 | `SCP11/eim_local/` | eIM-side shell | direct eIM lifecycle commands, localized polling, hotfolders, handover | `SCP11/eim_local/README.md` |
 | `SCP11/shared/` | Shared helper layer | crypto, payload, ASN.1, GSMA error, pySim support helpers | `SCP11/shared/README.md` |
-| `SIMCARD/` | In-process simulated UICC / eUICC | ETSI TS 102 221 FS, GP / SCP03 / SCP80, ISD-R + ISD-Ps, ETSI TS 102 223 toolkit, Milenage / TUAK AKA, 5G AKA / AKMA / SUCI / `GET IDENTITY` | `SIMCARD_V1_REVIEW.md` |
+| `SIMCARD/` | In-process simulated UICC / eUICC | ETSI TS 102 221 FS, GP / SCP03 / SCP80, ISD-R + ISD-Ps, ETSI TS 102 223 toolkit, Milenage / TUAK AKA, 5G AKA / AKMA / SUCI / `GET IDENTITY` | `guides/CAPABILITIES.md` §SIMCARD |
 | `Tools/HilBridge/` | SIMtrace2 HIL bridge | RSPRO relay on `127.0.0.1:9997`, GSMTAP mirror on UDP 4729, modem REFRESH, offline pcap review, AT+CSIM / AT+CRSM transcoder (`at_simlink`) | `HIL_BRIDGE_GUIDE.md` |
 | `Tools/ProfilePackage/` | SAIP shell | inspect, lint, transcode, encode, split, extract, DIFF/DIFF-TUI, WATCH-SIMCARD | `README.md` |
 | `Tools/ApduFuzz/` | Opt-in APDU mutation fuzzer | deterministic mutators, PC/SC/null transports, safety gate, crash dumps | `Tools/ApduFuzz/` sources |
 | `Tools/EumDiag/` | EUM / SM-DP+ diagnostics | session-key injection, BF36 Lua dissector, tshark runner, BPP decode | `Tools/EumDiag/` sources |
 | `Tools/SuciTool/` | SUCI shell | key selection, key generation, public-key export | `README.md` |
-| `Tools/YggdraCore/` *(R2-005, post-v1.0.0 staging)* | In-process 5G-core stubs | AUSF (`Nausf_UEAuthentication_Authenticate`), AAnF (`Naanf_AKMA_*`), subscription store, opt-in FastAPI loopback, BYO-Open5GS provisioning bridge | `docs/akma_overview.md` |
-| `yggdrasim_common/gui_server/` | Optional Universal GUI | typed action registry, FastAPI API + pywebview desktop or headless lab server, live APDU dock | `V2_UNIVERSAL_GUI_PLAN.md` |
+| `Tools/YggdraCore/` *(post-v1 staging)* | In-process 5G-core stubs | AUSF (`Nausf_UEAuthentication_Authenticate`), AAnF (`Naanf_AKMA_*`), subscription store, opt-in FastAPI loopback, BYO-Open5GS provisioning bridge | `docs/akma_overview.md` |
+| `yggdrasim_common/gui_server/` | Optional Universal GUI | typed action registry, FastAPI API + pywebview desktop or headless lab server, live APDU dock | `guides/GUI_HOST_SHELL_GUIDE.md` |
 
 ## 3. Launcher And Entry-Point Capabilities
 
@@ -493,7 +493,7 @@ relay. Current capabilities include:
 
 ## 11. YggdraCore 5G Core Stub Capabilities
 
-> **Status: R2-005, post-v1.0.0 staging.** Tracked in [V2_ROADMAP.md](../V2_ROADMAP.md). The v1.0.0 frozen tree (tag `v1.0.0`) does not include this surface.
+> **Status: post-v1 staging.** Not part of the v1.0.0 frozen release tag.
 
 `Tools/YggdraCore/` provides in-process 5G-core stubs and a BYO-Open5GS
 provisioning bridge:
@@ -519,7 +519,7 @@ provisioning bridge:
 
 ## 12. Universal GUI Command Center Capabilities
 
-`yggdrasim_common/gui_server/` (R2-004) is the optional FastAPI +
+`yggdrasim_common/gui_server/` is the optional FastAPI +
 pywebview Command Center. Current capability set includes:
 
 - two launch modes: `--gui` (loopback FastAPI + native pywebview

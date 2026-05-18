@@ -77,6 +77,17 @@ dependencies = [
     "pyyaml",
     "textual>=0.47.0",
     "dnspython>=2.4",
+    # pySim is the upstream Osmocom SCP / OTA / SAIP toolkit. SCP03
+    # session-key derivation (GPC v2.3 Amd D §4.1.5) and SCP80 / 03.48
+    # cipher and CC primitives delegate to it so spec-citation lineage
+    # for the cryptographic primitives lives upstream. The wire-format
+    # helpers (``Scp03Session.wrap_apdu`` / ``CryptoEngine.build_*``)
+    # remain YggdraSIM-specific — see tests/test_scp03_pysim_parity.py
+    # and tests/test_scp80_pysim_parity.py for the pinned divergences.
+    # Upstream does not publish wheels to PyPI, so we install the git
+    # tree directly. The ``saip`` extra is preserved as a no-op alias
+    # for back-compat with onboarding scripts that still reference it.
+    "pySim @ git+https://github.com/osmocom/pysim.git",
 ]
 
 [project.optional-dependencies]
@@ -136,31 +147,18 @@ open5gs = [
 sunrise6g = [
     "sunrise6g-opensdk>=1.0.5,<2.0",
 ]
-# ``saip`` pulls upstream pySim directly from git. The Osmocom SAIP
-# stack (``pySim.esim.saip``, ``pySim.esim.compile_asn1_subdir``,
-# ``pySim.esim.x509_cert``) is what the SCP11 local / eIM-local
-# flows, the SAIP transcode TUI, and the profile-scaffolding
-# wizards rely on. The upstream project does not publish wheels to
-# PyPI (the ``pySim`` name on PyPI belongs to an unrelated package,
-# ``pysimcard`` is the yanked 2021 snapshot), so this extra installs
-# the canonical tree from the GitHub mirror. Keeping it as an
-# optional extra means a fresh ``pip install yggdrasim`` still
-# works without a network round-trip to GitHub, but operators who
-# want the SAIP surfaces just run ``pip install 'yggdrasim[saip]'``
-# and stop having to clone ``pysim/`` by hand. The developer
-# checkout at ``<repo>/pysim`` is still honoured by
-# ``SCP11/pysim_path.py`` for people working against an unreleased
-# upstream branch.
-saip = [
-    "pySim @ git+https://github.com/osmocom/pysim.git",
-]
+# ``saip`` is now a back-compat alias: pySim moved into the base
+# dependency block once SCP03 / SCP80 began routing their KDF and
+# cipher primitives through it. The extra is kept (empty modulo the
+# documentation hook) so onboarding scripts that still reference
+# ``pip install 'yggdrasim[saip]'`` keep working.
+saip = []
 # ``gui`` pulls the FastAPI + uvicorn + pywebview stack for the
-# desktop ``--gui`` flow (R2-004). ``gui-server`` intentionally omits
+# desktop ``--gui`` flow. ``gui-server`` intentionally omits
 # pywebview so a headless lab server (``--web-server``) does not need
 # GTK / Qt / WebKit on the host. Both extras are additive; a host
 # that wants the native desktop window and the remote API installs
-# ``yggdrasim[gui]`` (pywebview implies the server deps). See
-# ``V2_UNIVERSAL_GUI_PLAN.md`` §11.
+# ``yggdrasim[gui]`` (pywebview implies the server deps).
 gui = [
     "fastapi>=0.110,<1.0",
     "uvicorn[standard]>=0.27,<1.0",
@@ -180,7 +178,6 @@ full = [
     "pyudev; sys_platform == 'linux'",
     "pyinstaller",
     "pytest",
-    "pySim @ git+https://github.com/osmocom/pysim.git",
 ]
 
 [project.scripts]
@@ -194,6 +191,7 @@ yggdrasim-scp11-local-access = "yggdrasim_common.console_scripts:scp11_local_acc
 yggdrasim-scp11-eim-local = "yggdrasim_common.console_scripts:scp11_eim_local"
 yggdrasim-hil-bridge = "yggdrasim_common.console_scripts:hil_bridge"
 yggdrasim-hil-supervisor = "yggdrasim_common.console_scripts:hil_bridge_supervisor"
+yggdrasim-card-bridge = "yggdrasim_common.console_scripts:card_bridge"
 yggdrasim-profile-package = "yggdrasim_common.console_scripts:profile_package"
 yggdrasim-suci-tool = "yggdrasim_common.console_scripts:suci_tool"
 yggdrasim-profile-autoload = "yggdrasim_common.console_scripts:profile_autoload"
@@ -205,7 +203,7 @@ Homepage = "https://github.com/hampushellsberg-dev/YggdraSIM"
 Documentation = "https://github.com/hampushellsberg-dev/YggdraSIM/tree/main/guides"
 Repository = "https://github.com/hampushellsberg-dev/YggdraSIM"
 Issues = "https://github.com/hampushellsberg-dev/YggdraSIM/issues"
-Changelog = "https://github.com/hampushellsberg-dev/YggdraSIM/blob/main/V1_RELEASE_AUDIT.md"
+Changelog = "https://github.com/hampushellsberg-dev/YggdraSIM/blob/main/CHANGELOG.md"
 
 [tool.setuptools]
 include-package-data = true

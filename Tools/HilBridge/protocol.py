@@ -1,3 +1,5 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+"""HIL-Bridge wire protocol: framing, message types, and (de)serialisation for the HIL-Bridge IPC channel."""
 from __future__ import annotations
 
 import errno
@@ -181,6 +183,7 @@ class IpaFrameParser:
         self._buffer = bytearray()
 
     def feed(self, data: bytes) -> list[IpaFrame]:
+        """Feed raw bytes into the IPA framing buffer and return any complete IpaFrame objects."""
         frames: list[IpaFrame] = []
         self._buffer.extend(data)
 
@@ -235,6 +238,7 @@ def ensure_bytes(value: bytes | bytearray | list[int] | tuple[int, ...]) -> byte
 
 
 def encode_ber_length(length: int) -> bytes:
+    """Encode an integer length value into BER definite-form bytes."""
     if length < 0:
         raise ValueError("BER length must be non-negative.")
     if length < 0x80:
@@ -256,6 +260,7 @@ def describe_refresh_mode(qualifier: int) -> str:
 
 
 def normalize_refresh_mode(value: str | int) -> tuple[str, int]:
+    """Map a refresh-mode name or integer to a (name, qualifier) tuple."""
     if isinstance(value, int):
         qualifier = int(value) & 0xFF
         return describe_refresh_mode(qualifier), qualifier
@@ -285,6 +290,7 @@ def normalize_refresh_mode(value: str | int) -> tuple[str, int]:
 
 
 def build_proactive_refresh_command(*, command_number: int, qualifier: int | str) -> bytes:
+    """Build a REFRESH proactive command BER-TLV byte string for the given qualifier."""
     command_number_int = int(command_number) & 0xFF
     if command_number_int == 0:
         raise ValueError("Command number must be non-zero.")
@@ -304,6 +310,7 @@ def build_proactive_refresh_command(*, command_number: int, qualifier: int | str
 
 @lru_cache(maxsize=1)
 def load_rspro_codec() -> Any:
+    """Load and return the RSPRO ASN.1 codec module, or raise ImportError if unavailable."""
     try:
         import asn1tools
     except ImportError as exc:
@@ -338,6 +345,7 @@ def get_pdu_message_name(pdu: dict[str, Any]) -> str:
 
 
 def get_pdu_message_body(pdu: dict[str, Any]) -> dict[str, Any]:
+    """Extract and return the body dict from the inner RSPRO PDU choice tuple."""
     message = pdu.get("msg")
     if isinstance(message, tuple) is False or len(message) != 2:
         raise ValueError("Invalid RSPRO PDU choice shape.")
@@ -358,6 +366,7 @@ def build_component_identity(
     software: str,
     sw_version: str,
 ) -> dict[str, Any]:
+    """Build an RSPRO ComponentIdentity dict for a named component (RSPRO §4.2)."""
     return {
         "type": component_type,
         "name": name,
@@ -401,6 +410,7 @@ def build_connect_client_res(
     component_identity: dict[str, Any],
     result: str = RESULT_OK,
 ) -> dict[str, Any]:
+    """Build an RSPRO connectClientRes PDU with the given tag and identity (RSPRO §4.4)."""
     return build_rspro_pdu(
         tag,
         "connectClientRes",
@@ -412,6 +422,7 @@ def build_connect_client_res(
 
 
 def build_config_client_id_req(*, tag: int, client_slot: dict[str, Any]) -> dict[str, Any]:
+    """Build an RSPRO configClientIdReq PDU carrying the client slot assignment."""
     return build_rspro_pdu(
         tag,
         "configClientIdReq",
@@ -428,6 +439,7 @@ def build_config_client_bank_req(
     bank_host: str,
     bank_port: int,
 ) -> dict[str, Any]:
+    """Build an RSPRO configClientBankReq PDU assigning the bank slot to the client."""
     return build_rspro_pdu(
         tag,
         "configClientBankReq",
@@ -442,6 +454,7 @@ def build_config_client_bank_req(
 
 
 def build_config_client_bank_res(*, tag: int, result: str = RESULT_OK) -> dict[str, Any]:
+    """Build an RSPRO configClientBankRes acknowledgement PDU."""
     return build_rspro_pdu(
         tag,
         "configClientBankRes",
@@ -452,6 +465,7 @@ def build_config_client_bank_res(*, tag: int, result: str = RESULT_OK) -> dict[s
 
 
 def build_set_atr_req(*, tag: int, client_slot: dict[str, Any], atr: bytes) -> dict[str, Any]:
+    """Build an RSPRO setAtrReq PDU carrying the ATR bytes for the named client slot."""
     return build_rspro_pdu(
         tag,
         "setAtrReq",
@@ -463,6 +477,7 @@ def build_set_atr_req(*, tag: int, client_slot: dict[str, Any], atr: bytes) -> d
 
 
 def build_set_atr_res(*, tag: int, result: str = RESULT_OK) -> dict[str, Any]:
+    """Build an RSPRO setAtrRes acknowledgement PDU."""
     return build_rspro_pdu(
         tag,
         "setAtrRes",
@@ -479,6 +494,7 @@ def build_tpdu_card_to_modem(
     client_slot: dict[str, Any],
     data: bytes,
 ) -> dict[str, Any]:
+    """Build an RSPRO tpduCardToModem PDU wrapping an R-APDU."""
     return build_rspro_pdu(
         tag,
         "tpduCardToModem",
@@ -492,6 +508,7 @@ def build_tpdu_card_to_modem(
 
 
 def build_reset_state_res(*, tag: int, result: str = RESULT_OK) -> dict[str, Any]:
+    """Build an RSPRO resetStateRes acknowledgement PDU."""
     return build_rspro_pdu(
         tag,
         "resetStateRes",
@@ -502,6 +519,7 @@ def build_reset_state_res(*, tag: int, result: str = RESULT_OK) -> dict[str, Any
 
 
 def build_gsmtap_packet(payload: bytes, *, subtype: int, uplink: bool = False) -> bytes:
+    """Wrap *payload* in a GSMTAP v2 header of the given *subtype* (GSMTAP §3.1)."""
     arfcn = GSMTAP_ARFCN_F_UPLINK if uplink else 0
     header = struct.pack(
         "!BBBBHbbIBBBB",
@@ -525,6 +543,7 @@ def build_simtrace_apdu_payload(
     command: bytes | bytearray | list[int] | tuple[int, ...],
     response: bytes | bytearray | list[int] | tuple[int, ...],
 ) -> bytes:
+    """Build a SIMtrace2 APDU payload record from a C-APDU / R-APDU pair."""
     command_bytes = ensure_bytes(command)
     response_bytes = ensure_bytes(response)
     if len(command_bytes) == 0:
@@ -550,6 +569,7 @@ def build_capture_udp_ipv4_ethernet_frame(
     *,
     udp_port: int = GSMTAP_UDP_PORT,
 ) -> bytes:
+    """Wrap a GSMTAP payload in a minimal UDP/IPv4/Ethernet frame for pcap capture."""
     payload_bytes = ensure_bytes(payload)
     udp_port_value = int(udp_port) & 0xFFFF
     udp_length = 8 + len(payload_bytes)
@@ -601,6 +621,7 @@ PCAP_PACKET_RECORD_STRUCT = struct.Struct("<IIII")
 
 
 def build_pcap_global_header() -> bytes:
+    """Return the 24-byte pcap global header (magic 0xA1B2C3D4, link-type ETHERNET)."""
     return PCAP_GLOBAL_HEADER_STRUCT.pack(
         PCAP_MAGIC_USEC,
         PCAP_VERSION_MAJOR,
@@ -613,6 +634,7 @@ def build_pcap_global_header() -> bytes:
 
 
 def build_pcap_packet_record(frame: bytes, seconds: int, microseconds: int) -> bytes:
+    """Return a pcap packet record header prepended to *frame* with the given timestamp."""
     return PCAP_PACKET_RECORD_STRUCT.pack(
         int(seconds),
         max(0, int(microseconds)),
@@ -644,6 +666,7 @@ class GsmtapPcapWriter:
         self.mirror_fifo_path = str(self.mirror_fifo_path or "").strip()
 
     def close(self) -> None:
+        """Flush and close the underlying pcap file handle."""
         handle = self._handle
         if handle is None:
             return
@@ -652,6 +675,7 @@ class GsmtapPcapWriter:
         self._close_fifo_fd_locked()
 
     def write_gsmtap_packet(self, packet: bytes, *, timestamp: float | None = None) -> None:
+        """Encode *packet* as a pcap record with a timestamp and write it to the file."""
         handle = self._handle
         if handle is None:
             return
@@ -762,6 +786,7 @@ class GsmtapTap:
             self._socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 
     def close(self) -> None:
+        """Flush pending writes, close the capture writer, and tear down the IPA socket."""
         capture_writer = self._capture_writer
         if capture_writer is not None:
             capture_writer.close()
@@ -783,6 +808,7 @@ class GsmtapTap:
         self._send_packet(packet)
 
     def mirror_exchange(self, command: bytes, response: bytes) -> None:
+        """Capture a command/response APDU pair as a GSMTAP SIM-APDU pcap packet."""
         packet = build_gsmtap_packet(
             build_simtrace_apdu_payload(command, response),
             subtype=GSMTAP_SIM_APDU,

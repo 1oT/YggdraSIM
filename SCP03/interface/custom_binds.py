@@ -15,6 +15,7 @@
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 # -----------------------------------------------------------------------------
 
+"""Custom key-binding store and interactive management wizard for the SCP03 shell."""
 import json 
 import os 
 import sys 
@@ -69,6 +70,7 @@ class CommandBinder :
         self ._save ()
 
     def del_bind (self ,trigger ):
+        """Delete the bind entry identified by *bind_id* from the store."""
         trigger_key =trigger .lower ()
         has_key =False 
         if trigger_key in self .binds :
@@ -79,6 +81,7 @@ class CommandBinder :
             self ._save ()
 
     def resolve (self ,command_line ):
+        """Resolve and return the target command string for *bind_id*."""
         parts =command_line .strip ().split ()
 
         is_empty =False 
@@ -139,6 +142,7 @@ class CommandBinder :
 
 
 def manage_binds_wizard (colors_ref ,binder ):
+    """Run the interactive custom key-binding management wizard."""
     wiz =InteractiveWizard ("Manage Custom Binds",colors_ref ,"Add, remove, or list command macros.")
     wiz .add_step ("action","Action (ADD, DEL, LIST) [Default: LIST]:",default ="LIST")
     wiz .add_step ("trigger","Trigger word (for ADD/DEL) [Default: SKIP]:",default ="SKIP")

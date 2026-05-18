@@ -32,7 +32,7 @@ read next.
 | your own SCP03 keyset / KVN / AID / ADM PIN                                   | [§ SCP03 keysets and admin parameters](#scp03-keysets-and-admin-parameters)             |
 | OTA / SCP80 secrets keyed per ICCID                                           | [§ SCP80 OTA parameters](#scp80-ota-parameters)                                         |
 | SUCI Profile A / B home-network keys for the simulated USIM                   | [§ SUCI key files](#suci-key-files)                                                     |
-| K / OPc / AMF / SQN / MCC / MNC / RID for a 5G AKA test subscriber *(R2-005, post-v1.0.0 staging)* | [§ YggdraCore subscription material](#yggdracore-subscription-material)                 |
+| K / OPc / AMF / SQN / MCC / MNC / RID for a 5G AKA test subscriber *(post-v1 staging)* | [§ YggdraCore subscription material](#yggdracore-subscription-material)                 |
 | ShS-ENC / ShS-MAC / DEK from an EUM database for a failing PCAP               | [§ EUM session-key bundles](#eum-session-key-bundles)                                   |
 | an SCP03 / SCP11c session you want re-decoded from a saved pcap               | [§ HIL pcap keybags](#hil-pcap-keybags)                                                 |
 | an `ADD-EIM` / profile-download trigger JSON package                          | [§ eIM packages and hotfolder](#eim-packages-and-hotfolder)                             |
@@ -244,7 +244,7 @@ before any non-test use.
 2. Production GSMA CI roots must not be dropped here. Use the SGP.26
    Test CI under `Variant O/CI/` for test trust, or your own private
    CI for closed labs.
-3. The HSM-backed signer seam (`R2-001` in `V2_ROADMAP.md`) is the
+3. The HSM-backed signer seam (planned, not part of this release) is the
    future home for keys that must stay outside the filesystem
    altogether.
 
@@ -542,14 +542,23 @@ deleting the `[KEYS]` section once a per-card record exists.
 **Consumer.** `SCP80/` admin shell.
 
 **Per-card primary store.** `state/device_inventory.sqlite3`. Every
-ICCID gets its own SCP80 record (SPI / KIC / KID / TAR / `key_enc` /
-`key_mac` / static counter / `cla` / `sender` / SMS sizing) under
-namespace `iccid/<ICCID>/scp80`. The SCP80 admin shell uses
-lowercase verbs (`iccid`, `set`, `show`, `quit`) to manage it:
+ICCID gets its own SCP80 record (SPI / `kic_indicator` / `kid_indicator`
+/ TAR / `kic` / `kid` / static counter / `cla` / `sender` / SMS sizing)
+under namespace `iccid/<ICCID>/scp80`. Slot semantics follow ETSI TS
+102 225 §5.1.1: `kic` / `kid` hold the 16-byte ciphering and integrity
+keys; `kic_indicator` / `kid_indicator` hold the 1-byte indicator bytes
+that select algorithm + key index in the Command Packet header. The
+SCP80 admin shell uses lowercase verbs (`iccid`, `set`, `show`, `quit`)
+to manage it:
 
 ```bash
-yggdrasim-scp80 --cmd "iccid <ICCID>; set kic <hex>; set kid <hex>; set spi <hex>; show; quit"
+yggdrasim-scp80 --cmd "iccid <ICCID>; set kic <16-byte-hex>; set kid <16-byte-hex>; set kic_indicator <hex>; set kid_indicator <hex>; show; quit"
 ```
+
+Pre-rename ini files using `key_enc` / `key_mac` (and `kic` / `kid` for
+the indicator bytes) are auto-migrated on load and rewritten to the
+current schema on the next save. A one-shot stderr notice records each
+rename so operators can see which legacy keys were translated.
 
 `iccid <ICCID>` binds the shell to a card identity (which loads the
 per-ICCID record if one exists, or seeds one from current defaults
@@ -598,7 +607,7 @@ yggdrasim-suci-tool --cmd "USE keys/operator-alpha.key; STATUS; DUMP; EXIT"
 
 ## YggdraCore subscription material
 
-> **Status: R2-005, post-v1.0.0 staging.** Tracked in [V2_ROADMAP.md](../V2_ROADMAP.md). The v1.0.0 frozen tree (tag `v1.0.0`) does not include this surface.
+> **Status: post-v1 staging.** Not part of the v1.0.0 frozen release tag.
 
 **Consumer.** The in-process AUSF / AAnF stubs under `Tools/YggdraCore/`.
 
@@ -705,7 +714,7 @@ preferred when the repository was authored ahead of time:
 export YGGDRASIM_EUM_SESSION_KEYS=~/secrets/eum-keys.json
 yggdrasim-eum-diag inject-keys \
     --bundle-file ~/secrets/eum-keys.json \
-    --pcap ~/captures/failing-2026-04-12.pcapng
+    --pcap ~/captures/failing-example.pcapng
 ```
 
 For pure offline BPP decoding without a pcap, use `decode-bpp --bpp
@@ -959,7 +968,7 @@ non-test environment.
 6. **SUCI keys.** Author per home-network. Never reuse a Profile A / B
    key file across operators.
 7. **YggdraCore subscribers.** Provision through `upsert(...)` or the
-   BYO Open5GS bridge. Stub state is intentionally non-persistent. (R2-005, post-v1.0.0 staging — see V2_ROADMAP.md.)
+   BYO Open5GS bridge. Stub state is intentionally non-persistent. (post-v1 staging — not part of this release.)
 8. **EUM session keys.** Author with `yggdrasim-eum-diag store-keys`,
    chmod 0600, point `YGGDRASIM_EUM_SESSION_KEYS` at the file.
 9. **HIL keybags.** Drop next to the pcap; auto-discovery picks them
@@ -983,7 +992,7 @@ non-test environment.
 | Inventory crypto envelope           | [`yggdrasim_common/inventory_crypto.py`](https://github.com/hampushellsberg-dev/YggdraSIM/blob/main/yggdrasim_common/inventory_crypto.py)           |
 | EUM session-key contract            | [`Tools/EumDiag/session_keys.py`](https://github.com/hampushellsberg-dev/YggdraSIM/blob/main/Tools/EumDiag/session_keys.py)                         |
 | HIL keybag schema                   | [`Tools/HilBridge/scp_keybag_export.py`](https://github.com/hampushellsberg-dev/YggdraSIM/blob/main/Tools/HilBridge/scp_keybag_export.py)           |
-| YggdraCore subscriber store *(R2-005, post-v1.0.0 staging)* | [`Tools/YggdraCore/subscription_store.py`](https://github.com/hampushellsberg-dev/YggdraSIM/blob/main/Tools/YggdraCore/subscription_store.py)       |
+| YggdraCore subscriber store *(post-v1 staging)* | [`Tools/YggdraCore/subscription_store.py`](https://github.com/hampushellsberg-dev/YggdraSIM/blob/main/Tools/YggdraCore/subscription_store.py)       |
 | Runtime root resolution             | [`yggdrasim_common/runtime_paths.py`](https://github.com/hampushellsberg-dev/YggdraSIM/blob/main/yggdrasim_common/runtime_paths.py)                 |
 | AddEim identity sheet               | [`Workspace/LocalEIM/certs/addeim/SIMULATED_EIM_IDENTITY.md`](https://github.com/hampushellsberg-dev/YggdraSIM/blob/main/Workspace/LocalEIM/certs/addeim/SIMULATED_EIM_IDENTITY.md) |
-| HSM seam (planned)                  | [`V2_ROADMAP.md`](../V2_ROADMAP.md) entry `R2-001`                                          |
+| HSM seam (planned)                  | not part of this release                                          |

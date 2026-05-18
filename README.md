@@ -4,10 +4,10 @@ YggdraSIM is a Python toolkit for secure-element research, eUICC analysis, SIM/e
 
 > **Releases.** v1.0.0 was tagged on 2026-04-29. Check out the frozen
 > v1 footprint with `git checkout v1.0.0`. The `main` branch carries
-> in-flight v2 work — surfaces tagged `(R2-005, post-v1.0.0 staging)`
+> in-flight v2 work — surfaces tagged `(post-v1 staging)`
 > below are part of that v2 line and are not covered by the v1.0.0
 > compatibility promise. See [`CHANGELOG.md`](CHANGELOG.md) and
-> [`V2_ROADMAP.md`](V2_ROADMAP.md) for the active backlog.
+> tracked in `CHANGELOG.md` for the active backlog.
 
 ## Distribution at a glance
 
@@ -66,10 +66,10 @@ powershell -ExecutionPolicy Bypass -File scripts\install\install-windows.ps1
 | `Tools/SuciTool/` | SUCI helper tooling | helper shell |
 | `Tools/ApduFuzz/` | Safety-gated eUICC APDU mutation fuzzer (`--i-mean-it` + ICCID/IMSI allow-list) | `yggdrasim-apdu-fuzzer` |
 | `Tools/EumDiag/` | EUM / SM-DP+ "God-Mode": session-key injection + Wireshark/tshark Lua dissector for BF36 BPPs | `yggdrasim-eum-diag` |
-| `Tools/YggdraCore/` *(R2-005, post-v1.0.0 staging)* | In-process 5G core stubs (AUSF / AAnF) for AKA / AKMA flows + BYO-Open5GS provisioning bridge | FastAPI loopback (opt-in via `YGGDRASIM_5GCORE_MODE=stub`) |
-| `Tools/Sunrise6G/` *(R2-005, post-v1.0.0 staging)* | Sunrise-6G QoD / Location stubs feeding the YggdraCore loopback | library only |
-| `Tools/CardBridge/` *(R2-005, post-v1.0.0 staging)* | Loopback HTTP card-relay daemon paired with `yggdrasim_common.card_bridge_auth` | `python -m Tools.CardBridge` |
-| `yggdrasim_common/gui_server/` | Optional Universal GUI Command Center (R2-004): FastAPI API + pywebview desktop window or headless lab server | `--gui` / `--web-server` |
+| `Tools/YggdraCore/` *(post-v1 staging)* | In-process 5G core stubs (AUSF / AAnF) for AKA / AKMA flows + BYO-Open5GS provisioning bridge | FastAPI loopback (opt-in via `YGGDRASIM_5GCORE_MODE=stub`) |
+| `Tools/Sunrise6G/` *(post-v1 staging)* | Sunrise-6G QoD / Location stubs feeding the YggdraCore loopback | library only |
+| `Tools/CardBridge/` *(post-v1 staging)* | Loopback HTTP card-relay daemon paired with `yggdrasim_common.card_bridge_auth` | `python -m Tools.CardBridge` |
+| `yggdrasim_common/gui_server/` | Optional Universal GUI Command Center: FastAPI API + pywebview desktop window or headless lab server | `--gui` / `--web-server` |
 | `plugins/` | Runtime-loaded optional plugins (polling, custom commands) discovered at launch | drop-in `register_plugins()` modules |
 | `pysim/` | **Optional** developer checkout of upstream pySim (gitignored). Only needed when working against an unreleased upstream branch; the released SAIP surface ships via the `[saip]` extra (`pip install 'yggdrasim[saip]'`). | optional external tree |
 
@@ -84,7 +84,7 @@ powershell -ExecutionPolicy Bypass -File scripts\install\install-windows.ps1
 - Hardware-in-the-loop SIMtrace2 bridge with GSMTAP mirroring, brokered APDU side-channel access, modem REFRESH control, and AT+CSIM / AT+CRSM transcoding for modem cold-boot rigs through `Tools/HilBridge`.
 - In-process simulated UICC / eUICC backend (`--card-backend sim`) with full ETSI TS 102 221 file system, ISD-R + ISD-P personalities, persistent EID-scoped store, GP / SCP03 / SCP80 secure messaging, and an ETSI TS 102 223 toolkit + BIP runtime.
 - 3GPP TS 33.501 5G AKA, EAP-AKA' (TS 33.402), AKMA (TS 33.535), and SUPI / SUCI Profile A & B (TS 33.501 §C.3) on the simulated card, including TS 31.102 §7.1.2.4 `GET IDENTITY` (P2 = 0x01 SUCI calculation). *(SIMCARD layer shipped in v1.0.0.)*
-- In-process 5G-core stubs for end-to-end AKA + AKMA loops (`Tools/YggdraCore`: AUSF, AAnF, subscription store, optional FastAPI loopback) plus a BYO-Open5GS provisioning bridge for hosts that already run a real 5GC. *(R2-005, post-v1.0.0 staging on `main`; documentation, CLI surface, and HTTP-loopback hardening pending — see `V2_ROADMAP.md` and `CHANGELOG.md`.)*
+- In-process 5G-core stubs for end-to-end AKA + AKMA loops (`Tools/YggdraCore`: AUSF, AAnF, subscription store, optional FastAPI loopback) plus a BYO-Open5GS provisioning bridge for hosts that already run a real 5GC. *(post-v1 staging on `main`; documentation, CLI surface, and HTTP-loopback hardening not part of this release — see `CHANGELOG.md`.)*
 - SAIP / UPP profile inspection, linting, JSON↔DER transcode, and shell automation through `Tools/ProfilePackage`.
 - Visual side-by-side SAIP profile diffing (shell + Textual TUI) via
   `DIFF` / `DIFF-TUI` inside the profile-package shell.
@@ -194,7 +194,7 @@ python main/main.py --version
 python main/main.py --doctor
 ```
 
-Optional Universal GUI Command Center (R2-004, requires the `gui` or
+Optional Universal GUI Command Center (requires the `gui` or
 `gui-server` extra):
 
 ```bash
@@ -204,9 +204,9 @@ python main/main.py --web-server --token-file ./tok # remote-lab API, bearer-tok
 ```
 
 The GUI is intentionally off by default; neither `--gui` nor
-`--web-server` import FastAPI / uvicorn / pywebview until that path is
-actually selected, so the baseline install stays lean. See
-`V2_UNIVERSAL_GUI_PLAN.md` for the full surface.
+`--web-server` import FastAPI / uvicorn / pywebview until that path
+is actually selected, so the baseline install stays lean. See
+`guides/GUI_HOST_SHELL_GUIDE.md` for the operator surface.
 
 `--version` is sourced from `pyproject.toml` through
 `yggdrasim_common/__about__.py`, so any wrapper, plugin, or installed command
@@ -496,7 +496,10 @@ its pane layout in the workspace, supports OS clipboard copy/paste, and writes
 
 - `site-docs/` - canonical mkdocs source tree. `mkdocs serve -f mkdocs.yml`
   renders it locally; `site/` and `site-oneot/` are generated mirrors and
-  should not be edited by hand.
+  should not be edited by hand. For one concatenated Markdown file of the
+  entire nav (offline reading or PDF export), run
+  `python3 site-docs/_tools/build_combined.py` → root `YggdraSIM.md`
+  (gitignored); see `site-docs/_tools/README.md`.
 - `guides/README.md` - index of authored operator and developer guides
 - `guides/CAPABILITIES.md` - suite-level capability reference grouped by subsystem and workflow
 - `guides/ARCHITECTURE.md` - system structure, interdependency matrix, state model, and flow charts
@@ -512,9 +515,6 @@ its pane layout in the workspace, supports OS clipboard copy/paste, and writes
 - `guides/HIL_BRIDGE_GUIDE.md` - physical-card HIL bridge setup, supervision, and Wireshark usage
 - `guides/TEMPLATE_AND_TOKENS.md` - SAIP profile-template token reference
 - `guides/systemd/yggdrasim-hil-supervisor.service.example` - example `systemd --user` unit for the HIL supervisor
-- `V1_FEATURE_PLAN.md`, `V1_RELEASE_AUDIT.md`, `SIMCARD_V1_REVIEW.md` - V1 design, audit, and SIMCARD review
-- `V2_ROADMAP.md`, `V2_UNIVERSAL_GUI_PLAN.md` - V2 surface plan and the R2-004 Universal GUI design
-- `NEW_FEATURE_IDEAS.md` - intake list for unscheduled enhancements
 - `docs/` - vendor / standards reference workspace (GPC v2.3.1, SGP.02 / 22 / 32, ETSI TS 102 221 / 222 / 223 / 225 / 226, TS 31.102, RSPRO.asn, AKMA overview). The only schema the tool needs at runtime (`RSPRO.asn`) is redistributed inside `Tools/HilBridge/RSPRO.asn` as package data, so a fresh `pip install yggdrasim` works without a `docs/` tree on disk. The folder is gitignored so the verbatim standards copies stay out of the published wheel; operators doing offline reference reading can populate `docs/` themselves.
 - `NOTICE` - standards and third-party notice
 - `AUTHORS` - project attribution
@@ -544,9 +544,9 @@ its pane layout in the workspace, supports OS clipboard copy/paste, and writes
 - `Tools/SuciTool/` - SUCI helper shell
 - `Tools/ApduFuzz/` - eUICC APDU fuzzer
 - `Tools/EumDiag/` - EUM / SM-DP+ diagnostics + tshark Lua dissector
-- `Tools/YggdraCore/` - **(R2-005, post-v1.0.0 staging)** in-process AUSF / AAnF stubs, subscription store, BYO-Open5GS bridge
-- `Tools/Sunrise6G/` - **(R2-005, post-v1.0.0 staging)** Sunrise-6G QoD / Location stubs feeding the YggdraCore loopback
-- `Tools/CardBridge/` - **(R2-005, post-v1.0.0 staging)** loopback HTTP card-relay daemon paired with `yggdrasim_common.card_bridge_auth`
+- `Tools/YggdraCore/` - in-process AUSF / AAnF stubs, subscription store, BYO-Open5GS bridge *(post-v1 staging)*
+- `Tools/Sunrise6G/` - Sunrise-6G QoD / Location stubs feeding the YggdraCore loopback *(post-v1 staging)*
+- `Tools/CardBridge/` - loopback HTTP card-relay daemon paired with `yggdrasim_common.card_bridge_auth` *(post-v1 staging)*
 - `plugins/` - runtime-loaded optional plugins (polling, custom commands)
 - `tests/` - first-party test suite
 - `state/` - shared SQLite inventory and crypto bootstrap config

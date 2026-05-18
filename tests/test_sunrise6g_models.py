@@ -24,9 +24,9 @@ from Tools.Sunrise6G.models import (
 
 class DeviceIdentityTests(unittest.TestCase):
     def test_round_trip_phone_only(self):
-        device = DeviceIdentity(phone_number="+15558675309")
+        device = DeviceIdentity(phone_number="+15550100199")
         camara = device.to_camara()
-        self.assertEqual(camara, {"phoneNumber": "+15558675309"})
+        self.assertEqual(camara, {"phoneNumber": "+15550100199"})
         self.assertEqual(DeviceIdentity.from_camara(camara), device)
 
     def test_round_trip_full(self):
@@ -71,7 +71,7 @@ class DeviceIdentityTests(unittest.TestCase):
 
     def test_stable_key_priority(self):
         device = DeviceIdentity(
-            phone_number="+15558675309",
+            phone_number="+15550100199",
             ipv4_public="203.0.113.4",
         )
         # phone wins over ipv4
@@ -82,7 +82,7 @@ class QodSessionTests(unittest.TestCase):
     def _build(self, **overrides):
         defaults = dict(
             session_id="9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d",
-            device=DeviceIdentity(phone_number="+15558675309"),
+            device=DeviceIdentity(phone_number="+15550100199"),
             application_server_ip="203.0.113.10",
             qos_profile="QOS_E",
             duration_seconds=600,
@@ -102,7 +102,7 @@ class QodSessionTests(unittest.TestCase):
         self.assertEqual(info["qosStatus"], QosStatus.AVAILABLE)
         self.assertEqual(info["qosProfile"], "QOS_E")
         self.assertEqual(info["duration"], 600)
-        self.assertEqual(info["device"], {"phoneNumber": "+15558675309"})
+        self.assertEqual(info["device"], {"phoneNumber": "+15550100199"})
         self.assertEqual(info["applicationServer"], {"ipv4Address": "203.0.113.10"})
         self.assertEqual(info["devicePorts"], {"ports": [80, 443]})
         self.assertEqual(info["applicationServerPorts"], {"ports": [80]})
@@ -150,7 +150,7 @@ class QodSessionTests(unittest.TestCase):
 
 class LocationFixTests(unittest.TestCase):
     def _device(self):
-        return DeviceIdentity(phone_number="+15558675309")
+        return DeviceIdentity(phone_number="+15550100199")
 
     def test_to_camara_location_circle_shape(self):
         fix = LocationFix(
@@ -226,7 +226,7 @@ class LocationFixTests(unittest.TestCase):
 class LocationVerificationTests(unittest.TestCase):
     def test_construct(self):
         verification = LocationVerification(
-            device=DeviceIdentity(phone_number="+15558675309"),
+            device=DeviceIdentity(phone_number="+15550100199"),
             latitude=59.0,
             longitude=18.0,
             accuracy_meters=500,
@@ -237,7 +237,7 @@ class LocationVerificationTests(unittest.TestCase):
     def test_invalid_max_age_rejected(self):
         with self.assertRaises(ValueError):
             LocationVerification(
-                device=DeviceIdentity(phone_number="+15558675309"),
+                device=DeviceIdentity(phone_number="+15550100199"),
                 latitude=0.0,
                 longitude=0.0,
                 accuracy_meters=500,

@@ -1,3 +1,5 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+"""SCP11 crypto engine: ECIES key agreement, AES-GCM envelope, and SCP11b/c session-key derivation (SGP.22 §3.1.4)."""
 # -----------------------------------------------------------------------------
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -36,6 +38,7 @@ class CryptoEngine:
 
     @staticmethod
     def load_credentials(cert_path: str, key_path: str) -> Tuple[Any, Any]:
+        """Load the SGP.22 TLS certificates and private key into the crypto engine from the configured paths."""
         if not os.path.exists(cert_path):
             raise FileNotFoundError(f"Missing credential file: {cert_path}")
         if not os.path.exists(key_path):
@@ -71,6 +74,7 @@ class CryptoEngine:
         server_url: str,
         transaction_id: Optional[bytes] = None,
     ) -> Tuple[Any, bytes, bytes]:
+        """Generate and return the eUICC challenge bytes for the INITIALIZE AUTHENTICATION step (SGP.22 §5.7.12)."""
         if transaction_id is None or len(transaction_id) == 0:
             transaction_id = os.urandom(16)
         else:

@@ -1,3 +1,5 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+"""ISD-R configuration loader: reads the JSON config that sets the simulated card identity (EID, CCSN, SM-DP+ address)."""
 from __future__ import annotations
 
 import json
@@ -8,6 +10,7 @@ from SIMCARD.state import SimCardState
 
 
 def load_isdr_config_into_state(path: str, state: SimCardState) -> bool:
+    """Read the ISD-R config JSON and write OTA keys, AID, and TAR values into *state*."""
     normalized = str(path or "").strip()
     if len(normalized) == 0:
         return False

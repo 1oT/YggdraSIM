@@ -1,3 +1,4 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """
 Reusable SAIP profile-element header form.
 
@@ -18,7 +19,9 @@ from typing import Any
 from textual.app import ComposeResult
 from textual.containers import Horizontal, Vertical
 from textual.message import Message
-from textual.widgets import Checkbox, Input, Static
+from textual.widgets import Checkbox, Static
+
+from ..saip_apply_row import SaipApplyRow
 
 
 class PeHeaderForm(Vertical):
@@ -106,14 +109,14 @@ class PeHeaderForm(Vertical):
                 self._section_label or "(no section selected)",
                 classes="pe_header_name_value",
             )
-        with Horizontal(classes="pe_header_row"):
-            yield Static("Identification:", classes="pe_header_label")
-            yield Input(
-                value="",
-                placeholder="0..255",
-                classes="pe_header_input",
-                id="pe_header_identification",
-            )
+        yield SaipApplyRow(
+            "pe_header_identification",
+            "Identification:",
+            mode="decimal",
+            placeholder="0..255",
+            hint="Decimal 0..255 · cleared draft clears identification on Apply.",
+            id="pe_header_identification_row",
+        )
         with Horizontal(classes="pe_header_row"):
             yield Static("Mandated:", classes="pe_header_label")
             yield Checkbox(
@@ -153,15 +156,15 @@ class PeHeaderForm(Vertical):
         mandated = self._payload.get("mandated") if isinstance(self._payload, dict) else None
         self._suppress_emit = True
         try:
-            ident_input = self.query_one("#pe_header_identification", Input)
+            ident_row = self.query_one("#pe_header_identification_row", SaipApplyRow)
             mandated_box = self.query_one("#pe_header_mandated", Checkbox)
             if isinstance(ident, int) and isinstance(ident, bool) is False:
-                ident_input.value = str(ident)
+                ident_row.set_draft(str(ident))
             elif isinstance(ident, str):
-                ident_input.value = ident.strip()
+                ident_row.set_draft(ident.strip())
             else:
-                ident_input.value = ""
-            ident_input.disabled = self._read_only
+                ident_row.set_draft("")
+            ident_row.set_read_only(self._read_only)
             mandated_box.value = mandated is not None
             mandated_box.disabled = self._read_only
             for static in self.query(".pe_header_name_value"):
@@ -181,10 +184,10 @@ class PeHeaderForm(Vertical):
     # Events
     # ------------------------------------------------------------------
 
-    def on_input_changed(self, event: Input.Changed) -> None:
+    def on_saip_apply_row_committed(self, event: SaipApplyRow.Committed) -> None:
         if self._suppress_emit or self._read_only:
             return
-        if event.input.id != "pe_header_identification":
+        if event.row_id != "pe_header_identification":
             return
         text = str(event.value or "").strip()
         ident_value: int | None
@@ -214,8 +217,8 @@ class PeHeaderForm(Vertical):
         else:
             next_payload.pop("mandated", None)
         self._payload = next_payload
-        ident_input = self.query_one("#pe_header_identification", Input)
-        self._post_changed(str(ident_input.value or ""))
+        ident_row = self.query_one("#pe_header_identification_row", SaipApplyRow)
+        self._post_changed(ident_row.draft_text())
 
     def _post_changed(self, ident_text: str) -> None:
         ident_value = self._payload.get("identification") if isinstance(self._payload, dict) else None

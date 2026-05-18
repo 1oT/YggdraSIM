@@ -55,6 +55,83 @@ YggdraSIM HIL bridge
   -> HTTP APDU relay on localhost -> YggdraSIM side access
 ```
 
+### Optional: stream the card from a remote workstation over SSH
+
+The default topology assumes the physical card sits in the same host
+that runs `pcscd` + `simtrace2` + the modem. When the rig lives in a
+different room (or a different building) than the operator's
+workstation, the card itself can be moved off the rig and streamed
+back over the SSH tunnel that already terminates the bridge's HTTP
+endpoints. The modem, GSMTAP capture, and `osmo-remsim-client-st2`
+keep running on the rig exactly as today; only the card moves.
+
+```text
+operator workstation                          rig (modem + simtrace2)
+--------------------------                    -------------------------
+physical card in PC/SC reader ─┐              ┌─ modem
+                               │              │
+yggdrasim-card-bridge          │── SSH ─────  YggdraSIM HIL bridge
+(publishes /apdu over HTTP)    │  RemoteForward (RemoteRelayCardChannel)
+                               │              │
+                              :8642 ←──────── /apdu
+                                              │
+                                              ├─ GSMTAP UDP -> Wireshark
+                                              └─ HTTP APDU relay
+                                                 (rig-side surface
+                                                  unchanged: any
+                                                  SCP03 / SAIP
+                                                  consumer keeps
+                                                  using the same
+                                                  endpoint)
+```
+
+Setup, end-to-end:
+
+1. **On the operator workstation**, plug the card into a local PC/SC
+   reader and start the publisher. The first run prints a bearer-
+   token fingerprint and writes the actual token under
+   `${XDG_CONFIG_HOME:-~/.config}/yggdrasim/card_bridge/<port>.token`
+   with mode 0600:
+
+   ```bash
+   yggdrasim-card-bridge --port 8642
+   ```
+
+2. **From the rig**, open an SSH `RemoteForward` so the publisher's
+   loopback port is reachable on the rig's loopback interface, and
+   copy the token file across (or read it via `scp` and stash it on
+   the rig with `chmod 600`):
+
+   ```bash
+   ssh -fN -R 8642:127.0.0.1:8642 operator@workstation
+   scp operator@workstation:~/.config/yggdrasim/card_bridge/8642.token \
+       ~/.config/yggdrasim/card_bridge/8642.token
+   chmod 600 ~/.config/yggdrasim/card_bridge/8642.token
+   ```
+
+3. **On the rig**, start the HIL bridge with the remote-card flags.
+   The local `--reader-index` / `--reader-name` flags are ignored in
+   this mode — the card lives at the other end of the tunnel:
+
+   ```bash
+   yggdrasim-hil-bridge \
+     --remote-card-url http://127.0.0.1:8642/apdu \
+     --remote-card-token-file ~/.config/yggdrasim/card_bridge/8642.token
+   ```
+
+   The bridge logs its card source on startup
+   (`Card source: remote (remote: <reader>)`) so the topology is
+   visible at a glance. Equivalent env vars are
+   `YGGDRASIM_HIL_REMOTE_CARD_URL` and
+   `YGGDRASIM_HIL_REMOTE_CARD_TOKEN_FILE`.
+
+GSMTAP capture, the bridge's own HTTP `/apdu` relay, the supervisor,
+and every YggdraSIM consumer keep working unchanged — they all sit
+upstream of the card-source decision and don't observe the swap.
+Drop the `--remote-card-url` flag to fall back to the local PC/SC
+path; the existing physically-connected topology is preserved
+byte-for-byte.
+
 ## Prerequisites
 
 Hardware:
@@ -275,22 +352,40 @@ The bridge log should also print the relay URL:
 Card relay available at http://127.0.0.1:45007/apdu
 ```
 
-### 4.1 Sim-backend launches without SIMtrace2 hardware
+### 4.1 Sim-backend interaction with SIMtrace2 / REMSIM
 
-When `YGGDRASIM_CARD_BACKEND=sim` is set (via the `[C] Card backend`
-menu, the env-flags wizard, or an explicit `Environment=` override),
-the supervisor:
+`YGGDRASIM_CARD_BACKEND` only changes which card the bridge talks to.
+It does **not** disable the modem-in-the-loop path. The supervisor
+keeps two independent gates:
 
-- skips the SIMtrace2 USB-presence gate and launches the bridge child
-  immediately. The supervisor JSON reports `cardBackendGate: sim`,
-  `usbSource: sim-backend`, and `usbPresent: true` with a synthetic
-  `usbMatches` entry that documents the bypass.
-- refuses to spawn `osmo-remsim-client-st2`. Sim mode has no
-  USB-attached modem path, so REMSIM is irrelevant; the JSON reports
-  `remsimClientEnabled: false` and `remsimClientCommand: []` for the
-  duration of sim-mode operation.
+| Card backend | SIMtrace2 USB | Bridge child | REMSIM client |
+|--------------|---------------|--------------|---------------|
+| reader       | present       | running      | running       |
+| reader       | absent        | down (`waiting-usb`) | down  |
+| sim          | present       | running      | running (modem-in-loop sim) |
+| sim          | absent        | running (relay-only sim) | down |
 
-Toggling between `reader` and `sim` between sessions is now
+Practical consequences:
+
+- Sim mode with the SIMtrace2 cable still attached behaves exactly
+  like reader mode from the modem's point of view — REMSIM stays
+  alive so the modem keeps getting answers from the bridge — except
+  the bridge serves APDUs from the simulator instead of the PC/SC
+  reader.
+- Sim mode without SIMtrace2 attached still serves the YggdraSIM-side
+  HTTP relay (`apduUrl`, `statusUrl`, `modemRefreshUrl`); REMSIM is
+  intentionally absent because there is nothing for it to connect
+  to.
+- Yanking the SIMtrace2 cable while sim mode is active drops REMSIM
+  but leaves the bridge running. Plugging it back in spawns REMSIM
+  again on the next reconcile pass.
+
+The supervisor JSON reports the new `cardBackendGate` field
+(`reader` or `sim`) so operators can see at a glance which gating
+matrix is in effect, alongside the regular `usbPresent`,
+`bridgeRunning`, and `remsimClientRunning` flags.
+
+Toggling between `reader` and `sim` between sessions is
 non-destructive: the wizard rewrites the user unit only when the
 generated content actually changes, runs `daemon-reload` only on a
 change, clears the previous run's relay marker, and triggers a real

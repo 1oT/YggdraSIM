@@ -75,7 +75,7 @@ def _large_realistic_notification_list_response(sequences):
         entry = b""
         entry += _tlv(bytes.fromhex("80"), seq_bytes)
         entry += _tlv(bytes.fromhex("81"), bytes.fromhex("0410"))
-        entry += _tlv(bytes.fromhex("0C"), b"dpp1.sm.1ot.com")
+        entry += _tlv(bytes.fromhex("0C"), b"dpp1.example.test")
         entry += _tlv(bytes.fromhex("5A"), bytes.fromhex("98010300004077369781"))
         entries += _tlv(bytes.fromhex("BF2F"), entry)
         entries += _tlv(bytes.fromhex("5F37"), bytes(range(64)))
@@ -746,23 +746,23 @@ class RelayShellHelpTests(unittest.TestCase):
         for module in [self.live_module, self.test_module]:
             console = self._build_console(module)
 
-            console._download_activation_code("1$dpp1.esim.tst.1ot.mobi$MATCH-55$1.2.3")
+            console._download_activation_code("1$dpp1.esim.example.test$MATCH-55$1.2.3")
 
-            self.assertEqual(console.current_smdp_address, "dpp1.esim.tst.1ot.mobi")
-            self.assertEqual(console.current_es9_base_url, "https://dpp1.esim.tst.1ot.mobi")
-            self.assertEqual(console.orchestrator.run_flow_calls, [("MATCH-55", "dpp1.esim.tst.1ot.mobi")])
-            self.assertEqual(console.orchestrator.profile_provider.base_url, "https://dpp1.esim.tst.1ot.mobi")
+            self.assertEqual(console.current_smdp_address, "dpp1.esim.example.test")
+            self.assertEqual(console.current_es9_base_url, "https://dpp1.esim.example.test")
+            self.assertEqual(console.orchestrator.run_flow_calls, [("MATCH-55", "dpp1.esim.example.test")])
+            self.assertEqual(console.orchestrator.profile_provider.base_url, "https://dpp1.esim.example.test")
 
     def test_download_redirects_activation_code_into_profile_flow(self):
         for module in [self.live_module, self.test_module]:
             console = self._build_console(module)
 
-            keep_running = console._cmd_eim_download("1$dpp1.esim.tst.1ot.mobi$MATCH-55$1.2.3")
+            keep_running = console._cmd_eim_download("1$dpp1.esim.example.test$MATCH-55$1.2.3")
 
             self.assertTrue(keep_running)
             self.assertEqual(console.orchestrator.eim_poll_calls, [])
-            self.assertEqual(console.orchestrator.run_flow_calls, [("MATCH-55", "dpp1.esim.tst.1ot.mobi")])
-            self.assertEqual(console.current_es9_base_url, "https://dpp1.esim.tst.1ot.mobi")
+            self.assertEqual(console.orchestrator.run_flow_calls, [("MATCH-55", "dpp1.esim.example.test")])
+            self.assertEqual(console.current_es9_base_url, "https://dpp1.esim.example.test")
 
     def test_execute_command_does_not_double_sync_when_handler_already_synced(self):
         for module in [self.live_module, self.test_module]:

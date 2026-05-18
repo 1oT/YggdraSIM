@@ -15,6 +15,7 @@
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 # -----------------------------------------------------------------------------
 
+"""High-level interactive wizards for PIN management, profile operations, and FS administration."""
 import os 
 import sys 
 import yaml 
@@ -57,6 +58,7 @@ class ShellInteractiveWizards :
 
     @staticmethod 
     def run_put_key_wizard (shell )->None :
+        """Run the interactive PUT KEY wizard: prompts for key version, algorithm, and key material."""
         wiz =InteractiveWizard ("GP PUT KEY Command (GPCS 11.8)",Config .Colors ,"WARNING: CRITICAL CRYPTOGRAPHIC OPERATION\nExecuting PUT KEY overwrites the active session keys. Loss of keys bricks the card.")
         wiz .add_step ("action","Action [1=Add New, 2=Rotate (ID 01), 3=Replace Specific]:",default ="1")
 
@@ -258,6 +260,7 @@ class ShellInteractiveWizards :
 
     @staticmethod 
     def run_manage_pin_wizard (shell ,arg_str ="")->None :
+        """Run the interactive MANAGE PIN wizard: prompts for PIN operation, reference, and data."""
         has_args =False 
         if len (arg_str .strip ())>0 :
             has_args =True 
@@ -350,6 +353,7 @@ class ShellInteractiveWizards :
         wiz .add_step ("curr","Enter PIN [ASCII]:",default ="SKIP",condition =curr_cond )
 
         def new_cond (res ):
+            """Return a MANAGE PROFILE condition predicate bound to *target_state*."""
             action =res .get ("action")
             is_change_or_unblock =False 
             if action =='2':
@@ -425,6 +429,7 @@ class ShellInteractiveWizards :
 
     @staticmethod 
     def run_manage_profile_wizard (shell )->None :
+        """Run the interactive MANAGE PROFILE wizard: load, enable, disable, or delete an eSIM profile."""
         wiz =InteractiveWizard ("eSIM Profile Management",Config .Colors )
         wiz .add_step ("spec","Target Spec [1=SGP.22, 2=SGP.32, 3=SGP.02]:",default ="2")
 
@@ -471,6 +476,7 @@ class ShellInteractiveWizards :
         )
 
         def target_cond (res ):
+            """Return a target-selection condition predicate for the profile wizard."""
             spec =res .get ("spec")
             action =""
             is_spec_22 =False 
@@ -703,6 +709,7 @@ class ShellInteractiveWizards :
 
     @staticmethod 
     def run_auth_wizard (shell )->None :
+        """Run the interactive authentication wizard: INITIALIZE-UPDATE + EXTERNAL-AUTHENTICATE sequence."""
         wiz =InteractiveWizard ("Telecom Authentication Command",Config .Colors )
         wiz .add_step ("ctx","Context [1=GSM, 2=USIM, 3=ISIM]:",default ="1")
         wiz .add_step ("rand","RAND [Hex, 32 chars (16 bytes)]:",default ="")
@@ -753,6 +760,7 @@ class ShellInteractiveWizards :
 
     @staticmethod 
     def run_config_wizard (shell )->None :
+        """Run the interactive configuration wizard: review and update the active SCP03 configuration."""
         wiz =InteractiveWizard ("Environment Configuration",Config .Colors )
         wiz .add_step ("key","Update [1=SCP03 ENC, 2=SCP03 MAC, 3=SCP03 DEK, 4=SCP03 KVN, 5=SCP02 ENC, 6=SCP02 MAC, 7=SCP02 DEK, 8=SCP02 KVN, 9=ADM, 10=AID]:",default ="1")
         wiz .add_step ("val","New Value [Hex]:",default ="")
@@ -827,6 +835,7 @@ class ShellInteractiveWizards :
 
     @staticmethod 
     def run_get_data_wizard (shell )->None :
+        """Run the interactive GET DATA wizard: prompts for tag selection and displays the response."""
         wiz =InteractiveWizard ("GP GET DATA Command (GPCS 11.3)",Config .Colors )
         wiz .add_step ("choice","Action [1=Apps, 2=Pkgs, 3=SDs, 4=CPLC, 5=Custom]:",default ="1")
         wiz .add_step ("p1","Custom P1 [Hex, SKIP for 1-4]:",default ="SKIP")
@@ -881,6 +890,7 @@ class ShellInteractiveWizards :
 
     @staticmethod 
     def run_set_status (shell )->None :
+        """Run the interactive SET STATUS wizard: prompts for target, scope, and lifecycle state."""
         wiz =InteractiveWizard ("GP SET STATUS Command (GPCS 11.10)",Config .Colors ,"WARNING: Irreversible operation.")
         wiz .add_step ("target","Target [1=ISD, 2=App, 3=ELF]:",default ="1")
         wiz .add_step ("state","New State [Hex, e.g. 0F]:",default ="")
@@ -1008,6 +1018,7 @@ class ShellInteractiveWizards :
 
     @staticmethod 
     def run_manage_channel (shell )->None :
+        """Run the interactive MANAGE CHANNEL wizard: open, close, or select a logical channel."""
         wiz =InteractiveWizard ("GP MANAGE CHANNEL Command (GPCS 11.6)",Config .Colors )
         wiz .add_step ("choice","Action [1=Open, 2=Close]:",default ="1")
         wiz .add_step ("chan","Channel to close [Hex, SKIP for Open]:",default ="SKIP")
@@ -1101,6 +1112,7 @@ class ShellInteractiveWizards :
 
     @staticmethod 
     def run_fs_report_wizard (shell )->None :
+        """Run the interactive FS report wizard: traverse and report on the UICC file system."""
         wiz =InteractiveWizard ("File System Reporting Wizard",Config .Colors )
         wiz .add_step (
         "choice",
@@ -1118,6 +1130,7 @@ class ShellInteractiveWizards :
         wiz .add_step ("dest","Destination Directory [SKIP for default FS_DUMP]:",default ="SKIP",condition =dest_cond )
 
         def yaml_cond (res ):
+            """Return a YAML output condition predicate for the FS report wizard."""
             choice =res .get ("choice")
             is_two =False 
             if choice =='2':
@@ -1140,6 +1153,7 @@ class ShellInteractiveWizards :
         wiz .add_step ("yaml","YAML Filename [SKIP for default]:",default ="SKIP",condition =yaml_cond )
 
         def std_cond (res ):
+            """Return a standard condition predicate for the FS admin wizard."""
             choice =res .get ("choice")
             is_three =False 
             if choice =='3':
@@ -1563,6 +1577,7 @@ class ShellInteractiveWizards :
 
     @staticmethod 
     def run_fs_admin_wizard (shell )->None :
+        """Run the interactive FS admin wizard: select, read, update, and delete UICC files."""
         wiz =InteractiveWizard ("ETSI File System Administration",Config .Colors )
         wiz .add_step ("action","Operation [1=ACTIVATE, 2=DEACT, 3=SUSPEND, 4=SEARCH, 5=CREATE, 6=DELETE, 7=TERM DF, 8=TERM EF, 9=RESIZE]:",default ="1")
         wiz .add_step ("target","Target FID/Path [SKIP for current/Suspend/Create]:",default ="SKIP")

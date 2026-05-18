@@ -1,3 +1,5 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+"""SCP11 pySim path resolution: locates the pySim installation for ASN.1 codec and SAIP tool access."""
 import sys
 from pathlib import Path
 
@@ -58,6 +60,7 @@ def ensure_repo_pysim_on_path() -> Path | None:
 
 
 def describe_pysim_resolution() -> str:
+    """Return a human-readable string describing how pySim was (or was not) resolved for this session."""
     pysim_root = ensure_repo_pysim_on_path()
     if pysim_root is not None:
         return f"Optional on-disk pySim checkout resolved at {pysim_root}."

@@ -1,3 +1,5 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+"""SCP11-live entry point: initialises runtime components and starts the live-reader operator REPL."""
 import argparse
 import sys
 
@@ -134,6 +136,7 @@ class SGP22Client:
         return
 
     def run_flow(self):
+        """Execute a single profile-download flow for the configured target EID."""
         try:
             self._run_startup_preflight()
             self._build_runtime()
@@ -161,6 +164,7 @@ class SGP22Client:
 
 
 def entry() -> None:
+    """Initialise live-reader runtime components and start the operator REPL."""
     ensure_plugins_loaded()
     parser = argparse.ArgumentParser(description="SCP11 live relay orchestration shell")
     parser.add_argument(

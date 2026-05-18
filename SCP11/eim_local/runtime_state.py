@@ -1,3 +1,5 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+"""eIM runtime state store: persists per-EID session state between IPA-poll rounds."""
 import json
 import os
 import sys
@@ -70,6 +72,7 @@ class EimRuntimeStateStore:
         return dict(self.state)
 
     def get_next_counter(self, eim_id: str, default_value: int = 1) -> int:
+        """Return the next available IPA-poll transaction counter value."""
         key = str(eim_id or "default").strip()
         inventory_payload = self.inventory.get_namespace("eim_id", key, self.INVENTORY_NAMESPACE)
         if isinstance(inventory_payload, dict):
@@ -90,6 +93,7 @@ class EimRuntimeStateStore:
         return int(default_value)
 
     def set_next_counter(self, eim_id: str, next_value: int) -> int:
+        """Persist a new counter value to the runtime state store."""
         key = str(eim_id or "default").strip()
         value = int(next_value)
         if value <= 0:
@@ -104,6 +108,7 @@ class EimRuntimeStateStore:
         return value
 
     def mark_counter_used(self, eim_id: str, used_value: int) -> None:
+        """Record that a counter value has been consumed in this session."""
         key = str(eim_id or "default").strip()
         table = self.state.get("counter_by_eim_id", {})
         if isinstance(table, dict) is False:
@@ -118,6 +123,7 @@ class EimRuntimeStateStore:
         self._persist_inventory_record(key)
 
     def record_operation(self, operation: str, transaction_id_hex: str = "", matching_id: str = "") -> None:
+        """Append an operation record to the audit log for this EID."""
         self.state["last_operation"] = str(operation).strip()
         self.state["last_transaction_id_hex"] = str(transaction_id_hex).strip().upper()
         self.state["last_matching_id"] = str(matching_id).strip()

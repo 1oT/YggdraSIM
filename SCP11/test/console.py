@@ -116,6 +116,7 @@ class _SCP03RelayTransportAdapter:
             reset_method()
 
     def transmit(self, apdu_hex: str, silent: bool = False) -> Tuple[bytes, int, int]:
+        """Transmit a C-APDU over the test SCP11 transport and return the R-APDU."""
         apdu = bytes.fromhex(apdu_hex)
         response, sw1, sw2 = self._exchange(apdu, "SCP03", silent)
         if sw1 == 0x6C:
@@ -321,6 +322,7 @@ class SCP11Console:
         self._setup_readline()
 
     def run(self) -> None:
+        """Start the interactive operator REPL for this SCP11 session variant."""
         try:
             self._initialize_session()
             self._activate_locked_help_pane_if_supported()
@@ -351,6 +353,7 @@ class SCP11Console:
             self._deactivate_locked_help_pane()
 
     def run_commands(self, cmd_line: str) -> None:
+        """Execute a semicolon-delimited list of operator commands non-interactively."""
         try:
             self._initialize_session()
         except Exception as error:
@@ -556,10 +559,28 @@ class SCP11Console:
         self._session_dirty = False
 
     def _should_skip_post_command_auto_clear(self, command_upper: str) -> bool:
+        # SGP.22 §5.6.4: the LPA must forward operational notifications
+        # to the recipient SM-DP+ before deleting them from the eUICC
+        # queue. When _sync_pending_notifications could not complete the
+        # listNotifications round-trip (channel binding lost after a
+        # profile state change, transport jam, etc.), skipping the
+        # auto-clear preserves the queue for a later sweep instead of
+        # silently dropping unforwarded notifications.
+        if self._notification_sync_failed_on_last_command():
+            return True
         if command_upper not in ("DOWNLOAD", "EIM-DOWNLOAD"):
             return False
         reached = self._last_eim_download_reached_server
         if reached is False:
+            return True
+        return False
+
+    def _notification_sync_failed_on_last_command(self) -> bool:
+        orchestrator = getattr(self, "orchestrator", None)
+        if orchestrator is None:
+            return False
+        outcome = getattr(orchestrator, "_last_notification_sync_succeeded", None)
+        if outcome is False:
             return True
         return False
 

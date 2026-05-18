@@ -1,3 +1,5 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+"""SAIP profile applicator: walks a decoded pySim profile document and writes each PE to the simulated FS."""
 from __future__ import annotations
 
 import ctypes
@@ -23,7 +25,7 @@ from SIMCARD.saip_pysim_specs import (
     pysim_sd_keys,
 )
 
-# Phase E: when pySim is installed, use its TS-aligned service-name maps
+# When pySim is installed, use its TS-aligned service-name maps
 # in place of the inspector's hand-curated copies. The call is a no-op
 # in stripped deployments without pySim.
 apply_pysim_service_table_overlay_to_inspector()
@@ -1589,7 +1591,7 @@ _FILE_SPECS: dict[str, dict[str, Any]] = {
 }
 
 
-# Phase A: overlay pySim's TCA Profile-Interoperability §9 templates on
+# Overlay pySim's TCA Profile-Interoperability §9 templates on
 # top of the literal table. Augmentation is in-place, FID-anchored
 # (parent context preserved) and only fills gaps. The follow-up alias
 # pass surfaces pySim spellings (e.g. V2 ``ef-supi-nai``) onto the same
@@ -1616,6 +1618,7 @@ def decode_profile_image(
     default_imsi: str = "",
     default_impi: str = "",
 ) -> SimProfileImage | None:
+    """Decode a SAIP profile image byte blob into a structured Python dict."""
     raw = bytes(upp_bytes or b"")
     if len(raw) == 0:
         return None
@@ -1834,7 +1837,7 @@ def _consume_profile_element(image: SimProfileImage, pe_type: str, decoded: dict
             continue
         payload, ef_descriptor = materialised
         structure = str(file_spec.get("structure", "transparent") or "transparent")
-        # Phase B: route descriptor parsing through pySim's
+        # FCP-decoder layer: route descriptor parsing through pySim's
         # File.from_fileDescriptor so record_len / efFileSize / lcsi /
         # ARR / fillPattern stay aligned with TS 102 222 + SAIP §5.1.
         attrs = decode_fcp_attributes(ef_descriptor)
@@ -1863,7 +1866,7 @@ def _consume_profile_element(image: SimProfileImage, pe_type: str, decoded: dict
         # here: pySim's ``from_fileDescriptor`` stores the raw
         # ``shortEFID`` byte without unpacking the TS 102 221 §13.2
         # SFI bits (bits 7..3), so the value cannot be used as-is.
-        # The Phase A registry already aligns template SFIs with
+        # The template-overlay registry already aligns template SFIs with
         # pySim's authoritative TCA Profile-Interoperability §9 maps.
         image.nodes.append(
             SimProfileFsNode(
@@ -1974,7 +1977,7 @@ def _consume_pin_codes(image: SimProfileImage, decoded: dict[str, Any]) -> None:
     byte so VERIFY PIN can update both fields independently.
 
     The decoded dict is routed through pySim's
-    ``ProfileElementPin`` wrapper (Phase C) so any future pySim-side
+    ``ProfileElementPin`` wrapper so any future pySim-side
     schema validation surfaces here uniformly. The wrapper is purely
     interpretive -- the local parser remains the authoritative path.
     """
@@ -2048,7 +2051,7 @@ def _consume_puk_codes(image: SimProfileImage, decoded: dict[str, Any]) -> None:
     decimal digit -- 0xAA decodes to "10/10 attempts remaining".
 
     The decoded dict is routed through pySim's ``ProfileElementPuk``
-    wrapper (Phase C) for forward-compat with upstream validation.
+    wrapper for forward-compat with upstream validation.
     """
     wrapper = pysim_pe_wrapper("pukCodes", decoded)
     source = getattr(wrapper, "decoded", decoded) if wrapper is not None else decoded
@@ -2104,7 +2107,7 @@ def _consume_security_domain(image: SimProfileImage, decoded: dict[str, Any]) ->
     Card Spec v2.3.1 Amendment D §7.5.
 
     Key parsing routes through pySim's ``ProfileElementSD`` wrapper
-    (Phase C) -- ``SecurityDomainKey.from_saip_dict`` handles the
+    -- ``SecurityDomainKey.from_saip_dict`` handles the
     ``KeyType`` enum and the ``KeyUsageQualifier`` BitStruct so we
     surface a properly packed usage byte even when the BPP encodes
     the OPTIONAL ``keyUsageQualifier`` as a multi-byte BitStruct.
@@ -2260,7 +2263,7 @@ def _consume_rfm(image: SimProfileImage, decoded: dict[str, Any]) -> None:
     226 §8.4 prohibits more than one ADF binding per RFM instance, so
     the optional ``adfRFMAccess`` is materialised verbatim.
 
-    Routes through pySim's ``ProfileElementRFM`` wrapper (Phase C);
+    Routes through pySim's ``ProfileElementRFM`` wrapper;
     the wrapper currently does no extra post-decoding but lets future
     upstream invariants surface here without re-touching the parser.
     """
@@ -2320,7 +2323,7 @@ _PYSIM_GFM_FILE_TYPE_TO_STRUCTURE: dict[str, str] = {
 def _consume_generic_file_management(image: SimProfileImage, decoded: dict[str, Any]) -> None:
     """SAIP §5.4 -- materialise a ``genericFileManagement`` PE.
 
-    Phase D: routes the PE through pySim's typed ``File`` / GFM
+    Routes the PE through pySim's typed ``File`` / GFM
     walker (see ``pysim_gfm_walk``). pySim handles the FCP decode,
     fill-pattern expansion (TS 102 222 §6.3.2.2.2) and content
     accumulation; this consumer maps the resulting ``GfmEntry`` items
@@ -2872,7 +2875,7 @@ def _consume_aka_parameter(image: SimProfileImage, decoded: dict[str, Any]) -> N
     """SAIP §5.8 -- materialise an ``akaParameter`` PE.
 
     Routes the decoded dict through pySim's ``ProfileElementAKA``
-    wrapper (Phase C). The wrapper's ``_post_decode`` runs
+    wrapper. The wrapper's ``_post_decode`` runs
     ``_fixup_sqnInit_dec``, which substitutes the asn1tools default
     placeholder ``'0x000000000000'`` with a 32-element list of 6-byte
     zeros (TS 33.102 §6.3.7 / 3GPP TS 35.205 Annex E SQN init layout).

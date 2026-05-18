@@ -1,3 +1,5 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+"""SCP11 configuration: loads SM-DP+/eIM URLs, certificate paths, and session policy from the YAML config file."""
 # -----------------------------------------------------------------------------
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -107,6 +109,13 @@ class SGPConfig:
     EIM_REST_CREATE_PATH: str = "/edr/create"
     EIM_REST_LOOKUP_PATH_TEMPLATE: str = "/edr/lookup/{resource_id}"
     REMOTE_DP_ALLOW_LOCAL_FALLBACK: bool = False
+    # FQDN suffix allow-list that gates vendor-specific eIM quirks (initial
+    # eIM challenge inclusion, GetEimPackage timeout retry, etc.). The
+    # shipped tree carries the mechanism only; operators populate the
+    # targets via the env var so production endpoint names stay out of
+    # the public source. Comma- or space-separated. Matched case-folded
+    # against the trailing label sequence of the eIM FQDN.
+    EIM_VENDOR_QUIRK_FQDN_SUFFIXES: tuple = ()
 
     LOCAL_SGP26_TRUST_ANCHOR_PATH: str = field(
         default_factory=lambda: os.path.join(_get_config_dir(), "SGP26_TRUST_ANCHOR.pem")
@@ -154,6 +163,14 @@ class SGPConfig:
         ev_pd_reason = os.environ.get("EIM_PROFILE_DOWNLOAD_ERROR_REASON", "").strip()
         if ev_pd_reason != "":
             object.__setattr__(self, "EIM_PROFILE_DOWNLOAD_ERROR_REASON", ev_pd_reason)
+        ev_quirk = os.environ.get("EIM_VENDOR_QUIRK_FQDN_SUFFIXES", "").strip()
+        if ev_quirk != "":
+            normalized_suffixes = tuple(
+                suffix.lower().lstrip(".")
+                for suffix in ev_quirk.replace(",", " ").split()
+                if len(suffix.strip()) > 0
+            )
+            object.__setattr__(self, "EIM_VENDOR_QUIRK_FQDN_SUFFIXES", normalized_suffixes)
         if self.CAPABILITIES is None:
             object.__setattr__(
                 self,
@@ -180,6 +197,7 @@ class SGPConfig:
                 print(f"Warning: Could not copy default {filename} to {_get_config_dir()}: {error}")
 
     def local_credential_paths(self):
+        """Return a dict of resolved certificate and key file paths for this session variant."""
         return [
             ("DPauth certificate", self.CERT_PATH_AUTH),
             ("DPauth private key", self.KEY_PATH_AUTH),
@@ -188,6 +206,7 @@ class SGPConfig:
         ]
 
     def collect_startup_diagnostics(self):
+        """Check that all required credential files exist and return a list of diagnostic warning strings."""
         errors = []
         warnings = []
 

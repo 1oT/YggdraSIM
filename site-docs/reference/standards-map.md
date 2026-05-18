@@ -33,7 +33,7 @@ package data so that the HIL bridge works from a plain `pip install`.
 | 3GPP TS 31.102 (USIM application + `GET IDENTITY`) | `docs/ts_131102v180400p.md` | [3GPP NAA](../concepts/3gpp-naa.md), [SCP03 Admin Shell](../subsystems/scp03.md), [SUCI Tool](../subsystems/suci-tool.md), [SIMCARD Simulator](../subsystems/simcard-simulator.md) |
 | 3GPP TS 33.501 (5G AKA + SUCI Profile A / B) | `docs/ts_133501.md` (drop in) | [SIMCARD Simulator](../subsystems/simcard-simulator.md), [SUCI Tool](../subsystems/suci-tool.md) |
 | 3GPP TS 33.402 (EAP-AKA') | `docs/ts_133402.md` (drop in) | [SIMCARD Simulator](../subsystems/simcard-simulator.md) |
-| 3GPP TS 33.535 (AKMA) | `docs/ts_133535.md` (drop in) | [SIMCARD Simulator](../subsystems/simcard-simulator.md), YggdraCore AAnF stub *(R2-005, post-v1.0.0 staging)* |
+| 3GPP TS 33.535 (AKMA) | `docs/ts_133535.md` (drop in) | [SIMCARD Simulator](../subsystems/simcard-simulator.md), YggdraCore AAnF stub *(post-v1 staging)* |
 | 3GPP TS 35.205 / 35.206 (Milenage) | `docs/ts_135205.md` / `docs/ts_135206.md` (drop in) | [SIMCARD Simulator](../subsystems/simcard-simulator.md) |
 | 3GPP TS 35.231 (TUAK) | `docs/ts_135231.md` (drop in) | [SIMCARD Simulator](../subsystems/simcard-simulator.md) |
 

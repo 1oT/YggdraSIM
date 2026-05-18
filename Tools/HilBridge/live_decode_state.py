@@ -1,3 +1,5 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+"""HIL-Bridge live-decode state: accumulates captured APDU frames and maintains the decoded protocol tree for the TUI."""
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
@@ -176,6 +178,7 @@ class _PendingProactiveState:
 
 
 def annotate_packet_summary(row: PacketSummary, annotation: StatefulFrameAnnotation | None) -> PacketSummary:
+    """Annotate a single packet summary line with decoded APDU or ATR information."""
     if annotation is None:
         return row
     suffix = str(annotation.summary_suffix or "").strip()
@@ -194,6 +197,7 @@ def build_stateful_packet_annotations(
     *,
     replay_engine: ScpReplayEngine | None = None,
 ) -> dict[int, StatefulFrameAnnotation]:
+    """Process a batch of packet summaries and return stateful decoded annotations."""
     tracker = LiveDecodeStateTracker(replay_engine=replay_engine)
     annotations: dict[int, StatefulFrameAnnotation] = {}
     ordered_rows = sorted(rows, key=lambda row: int(row.number))
@@ -270,6 +274,7 @@ class LiveDecodeStateTracker:
         self,
         annotations: dict[int, StatefulFrameAnnotation],
     ) -> dict[int, StatefulFrameAnnotation]:
+        """Complete any pending multi-packet decode state and return the final annotation list."""
         occurrence_by_channel: dict[int, int] = {}
         ordered_sessions = sorted(
             self._sessions.values(),
@@ -385,6 +390,7 @@ class LiveDecodeStateTracker:
         # when a frame lacks an explicit channel-session tag. The tuple is
         # (start_frame, end_frame, session_id); end_frame is clamped to
         # the sentinel 2_000_000_000 when the session is still open.
+        """Return a list of (start_frame, end_frame) pairs for each APDU session in the capture."""
         ranges: list[tuple[int, int, int]] = []
         for session in self._sessions.values():
             start_frame = session.open_request_frame
@@ -420,6 +426,7 @@ class LiveDecodeStateTracker:
         session.channel_number = int(channel_number)
 
     def consume_row(self, row: PacketSummary) -> StatefulFrameAnnotation:
+        """Consume one summary row dict and advance the decode-state machine."""
         frame_number = int(row.number)
         frame_time_seconds = _parse_capture_time_seconds(row.time_text)
         self._row_time_seconds = frame_time_seconds

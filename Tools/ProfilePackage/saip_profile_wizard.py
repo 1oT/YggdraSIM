@@ -1,3 +1,4 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """
 Tag-granular wizard for scaffolding a brand-new SAIP profile from a preset.
 
@@ -94,6 +95,7 @@ class NewProfileWizard:
         self._state = _WizardState()
 
     def run(self) -> WizardDecision:
+        """Start the interactive SAIP profile wizard and return the resulting profile document."""
         self.step_pick_preset()
         self.step_customise_menu_ids()
         self.step_collect_placeholders()
@@ -115,6 +117,7 @@ class NewProfileWizard:
         )
 
     def step_pick_preset(self) -> None:
+        """Run the 'pick a PE preset' wizard step and return the selected preset key."""
         self._emit("")
         self._emit("Step 1/7 — Pick a base preset")
         presets = list_profile_presets()
@@ -148,6 +151,7 @@ class NewProfileWizard:
         self._state.menu_ids = get_preset(chosen_id).menu_ids
 
     def step_customise_menu_ids(self) -> None:
+        """Wizard step: let the user pick which template menu-ID items to include."""
         self._emit("")
         self._emit("Step 2/7 — Review PE sequence")
         description = describe_preset(self._state.preset_id)
@@ -179,6 +183,7 @@ class NewProfileWizard:
         self._state.menu_ids = reduced
 
     def step_collect_placeholders(self) -> None:
+        """Wizard step: collect all placeholder tokens from the loaded template."""
         self._emit("")
         self._emit("Step 3/7 — Typed placeholder values (optional)")
         available = list_preset_placeholders(self._state.preset_id)
@@ -195,6 +200,7 @@ class NewProfileWizard:
             self._state.placeholders[placeholder_name] = raw
 
     def step_pick_output_format(self) -> None:
+        """Wizard step: ask the user to choose the desired output format."""
         self._emit("")
         self._emit("Step 4/7 — Output format")
         self._emit("  1. DER profile (.der)")
@@ -212,6 +218,7 @@ class NewProfileWizard:
         )
 
     def step_declare_tokens(self) -> None:
+        """Wizard step: prompt the user to declare or confirm token values."""
         self._emit("")
         self._emit("Step 5/7 — Declare template tokens (optional)")
         if self._state.output_format != "json":
@@ -272,6 +279,7 @@ class NewProfileWizard:
                 self._emit(f"    + {name}")
 
     def step_pick_output_path(self) -> None:
+        """Wizard step: ask the user to choose the output file path."""
         self._emit("")
         self._emit("Step 6/7 — Output file")
         default_path = self._build_default_output_path()
@@ -288,6 +296,7 @@ class NewProfileWizard:
         self._state.output_path = candidate
 
     def step_confirm(self) -> None:
+        """Wizard step: show a confirmation summary and ask the user to proceed."""
         self._emit("")
         self._emit("Step 7/7 — Review")
         self._emit(f"  Preset:     {self._state.preset_id}")
@@ -362,6 +371,7 @@ def resolve_default_scaffold_output_path(
 
 
 def summarise_wizard_decision(decision: WizardDecision) -> Iterable[str]:
+    """Return a human-readable summary string for the wizard's current field decision."""
     yield f"preset={decision.preset_id}"
     yield f"format={decision.output_format.upper()}"
     yield f"output={decision.output_path}"

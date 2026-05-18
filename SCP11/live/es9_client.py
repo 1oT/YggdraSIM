@@ -1,3 +1,5 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+"""SCP11-live ES9+ client: HTTP/JSON transport targeting a live SM-DP+ server (live-reader variant)."""
 # -----------------------------------------------------------------------------
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -168,6 +170,7 @@ class Es9LikeClient:
         return self._ca_bundle_path
 
     def set_ca_bundle_path(self, path: str) -> None:
+        """Override the CA bundle path used for server-certificate validation on ES9+ TLS connections."""
         normalized = path.strip()
         if len(normalized) == 0:
             self._ca_bundle_path = ""
@@ -181,6 +184,7 @@ class Es9LikeClient:
         certificate_der: bytes,
         trust_hint_ci_pkid: str = "",
     ) -> str:
+        """Return the CA bundle path to use when validating the SM-DP+ server certificate."""
         if verify_certificate_against_ca_bundle is None:
             return ""
         if len(certificate_der) == 0:
@@ -221,6 +225,7 @@ class Es9LikeClient:
         return dynamic_bundle
 
     def initiate_authentication(self, request_obj: InitiateAuthenticationRequest) -> InitiateAuthenticationResponse:
+        """Send ES9+.InitiateAuthentication and return the server-signed payload (SGP.22 §5.7.13)."""
         payload = {
             "euiccChallenge": request_obj.euicc_challenge,
             "euiccInfo1": request_obj.euicc_info1,
@@ -240,6 +245,7 @@ class Es9LikeClient:
         )
 
     def authenticate_client(self, request_obj: AuthenticateClientRequest) -> AuthenticateClientResponse:
+        """Send ES9+.AuthenticateClient and return the server-signed2 payload (SGP.22 §5.7.14)."""
         payload = {
             "transactionId": request_obj.transaction_id,
             "authenticateServerResponse": request_obj.authenticate_server_response,
@@ -257,6 +263,7 @@ class Es9LikeClient:
     def get_bound_profile_package(
         self, request_obj: GetBoundProfilePackageRequest
     ) -> GetBoundProfilePackageResponse:
+        """Send ES9+.GetBoundProfilePackage and return the BPP download response (SGP.22 §5.7.15)."""
         payload = {
             "transactionId": request_obj.transaction_id,
             "prepareDownloadResponse": request_obj.prepare_download_response,
@@ -277,7 +284,30 @@ class Es9LikeClient:
         payload = {
             "pendingNotification": request_obj.pending_notification,
         }
-        return self._post_json("/gsma/rsp2/es9plus/handleNotification", payload)
+        # SGP.22 §5.6.4: notifications carry the FQDN of the SM-DP+ that
+        # minted them. Route the POST there when present, so a card with
+        # mixed-origin notifications (live + test, or two different live
+        # operators) reaches each target with the correct TLS trust
+        # context, instead of every notification timing out against a
+        # stale base URL.
+        target_base_url = self._resolve_handle_notification_base_url(
+            getattr(request_obj, "smdp_address", "")
+        )
+        return self._post_json_to_base_url(
+            target_base_url,
+            "/gsma/rsp2/es9plus/handleNotification",
+            payload,
+            tls_log_label="ES9-handleNotification",
+        )
+
+    def _resolve_handle_notification_base_url(self, smdp_address: str) -> str:
+        candidate = smdp_address.strip() if isinstance(smdp_address, str) else ""
+        if len(candidate) == 0:
+            return self._base_url
+        lowered = candidate.lower()
+        if lowered.startswith("http://") or lowered.startswith("https://"):
+            return candidate.rstrip("/")
+        return f"https://{candidate.rstrip('/')}"
 
     def get_eim_package(self, request_obj: EimPollRequest) -> EimPollResponse:
         response = self._dispatch_eim_request(request_obj)
@@ -1348,6 +1378,7 @@ class Es9LikeClient:
         seen_paths = set()
 
         def add_candidate(path: str) -> None:
+            """Add a retry candidate to the internal candidate list for the session-retry ladder."""
             normalized_path = self._resolve_lookup_bundle_path(path)
             if len(normalized_path) == 0:
                 return

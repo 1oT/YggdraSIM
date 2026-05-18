@@ -1,3 +1,5 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+"""SCP11-live profile providers: remote ES9+ and SGP.26 local-file delivery for the live-reader session."""
 # -----------------------------------------------------------------------------
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -150,6 +152,7 @@ class RemoteEs9Provider(ProfileProvider):
         certificate_der: bytes,
         trust_hint_ci_pkid: str = "",
     ) -> str:
+        """Return the filesystem path of the CA PEM bundle appropriate for validating this provider's server cert."""
         return self._client.resolve_provider_certificate_validation_bundle(
             certificate_der,
             trust_hint_ci_pkid=trust_hint_ci_pkid,
@@ -172,6 +175,7 @@ class Sgp26LocalProvider(ProfileProvider):
         self._issuer_cert = None
 
     def load_certificate_chain(self) -> None:
+        """Load and return a list of PEM certificate strings from a directory or file path."""
         if len(self._trust_anchor_path) > 0:
             self._trust_anchor = self._load_cert(self._trust_anchor_path)
         else:
@@ -189,6 +193,7 @@ class Sgp26LocalProvider(ProfileProvider):
         self._chain_loaded = True
 
     def validate_chain_time_window(self) -> None:
+        """Raise ``CertificateExpiredError`` if any certificate in the chain is outside its validity period."""
         if self._chain_loaded is False:
             self.load_certificate_chain()
 
@@ -209,6 +214,7 @@ class Sgp26LocalProvider(ProfileProvider):
                 raise ValueError("Expired certificate detected in SGP.26 provider chain")
 
     def validate_chain_subject_issuers(self) -> None:
+        """Raise ``CertificateChainError`` when the issuer/subject chain of the certificate list is broken."""
         if self._chain_loaded is False:
             self.load_certificate_chain()
 

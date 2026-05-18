@@ -1,3 +1,4 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """
 Filesystem-bearing PE editors (USIM / ISIM / CSIM / Telecom families).
 
@@ -13,9 +14,9 @@ Every PE in this family shares the same outer structure::
 
 The editor exposes:
 
-* The reusable ``PeHeaderForm`` (Phase 1).
+* The reusable ``PeHeaderForm``.
 * A ``Template ID`` input with a curated dropdown of the known SAIP
-  filesystem templates (mirrors the screenshot 3 picker).
+  filesystem templates.
 * A check-tree of EF members so the operator can quickly see which EFs
   are currently materialised inside the PE. Toggling a check-box drops
   the corresponding EF from the PE — adding new EFs still routes
@@ -24,8 +25,8 @@ The editor exposes:
   ``saip_pe_quick_add``.
 
 This editor never mutates the EF *content* itself — that lives in the
-File System tab (Phase 6) so the operator gets a single place to edit
-record bodies instead of hunting through the PE editor.
+File System tab so the operator gets a single place to edit record
+bodies instead of hunting through the PE editor.
 """
 
 from __future__ import annotations
@@ -33,8 +34,8 @@ from __future__ import annotations
 from typing import Any
 
 from textual.app import ComposeResult
-from textual.containers import Horizontal, Vertical
-from textual.widgets import Checkbox, Input, OptionList, Static
+from textual.containers import Vertical
+from textual.widgets import Checkbox, OptionList, Static
 from textual.widgets.option_list import Option
 
 from ._base import (
@@ -44,6 +45,7 @@ from ._base import (
     header_value_from_pe,
     rebuild_pe_with_header,
 )
+from ..saip_apply_row import SaipApplyRow
 from ._header import PeHeaderForm
 
 
@@ -94,19 +96,6 @@ class _NaaPeEditorBase(BasePeEditor):
         color: $text-muted;
         margin-top: 1;
     }
-    _NaaPeEditorBase .naa_template_row {
-        width: 100%;
-        height: auto;
-        padding: 0 1;
-        margin-top: 1;
-    }
-    _NaaPeEditorBase .naa_template_label {
-        width: 18;
-        content-align: left middle;
-    }
-    _NaaPeEditorBase .naa_template_input {
-        width: 1fr;
-    }
     _NaaPeEditorBase .naa_template_picker {
         width: 100%;
         height: 8;
@@ -134,14 +123,14 @@ class _NaaPeEditorBase(BasePeEditor):
             id="naa_pe_header",
         )
         yield Static("File system template", classes="naa_section_title")
-        with Horizontal(classes="naa_template_row"):
-            yield Static("Template ID:", classes="naa_template_label")
-            yield Input(
-                value="",
-                placeholder="OID e.g. 2.23.143.1.2.4",
-                classes="naa_template_input",
-                id="naa_template_input",
-            )
+        yield SaipApplyRow(
+            "naa_template_oid",
+            "Template ID:",
+            mode="text",
+            placeholder="OID e.g. 2.23.143.1.2.4",
+            hint="Apply commits templateID on this PE.",
+            id="naa_template_apply_row",
+        )
         yield OptionList(
             *(
                 Option(f"{oid}  {label}", id=oid)
@@ -170,14 +159,14 @@ class _NaaPeEditorBase(BasePeEditor):
             header_payload=header_value_from_pe(self._pe_value) or {},
             read_only=self._read_only,
         )
-        template_input = self.query_one("#naa_template_input", Input)
-        template_input.disabled = self._read_only
+        template_row = self.query_one("#naa_template_apply_row", SaipApplyRow)
+        template_row.set_read_only(self._read_only)
         template_value = ""
         if isinstance(self._pe_value, dict):
             raw = self._pe_value.get("templateID")
             if isinstance(raw, str):
                 template_value = raw
-        template_input.value = template_value
+        template_row.set_draft(template_value)
 
         picker = self.query_one("#naa_template_picker", OptionList)
         picker.disabled = self._read_only
@@ -256,10 +245,10 @@ class _NaaPeEditorBase(BasePeEditor):
         )
         self.emit_change(summary="NAA PE header updated")
 
-    def on_input_changed(self, event: Input.Changed) -> None:
+    def on_saip_apply_row_committed(self, event: SaipApplyRow.Committed) -> None:
         if self._read_only:
             return
-        if event.input.id != "naa_template_input":
+        if event.row_id != "naa_template_oid":
             return
         new_template = str(event.value or "").strip()
         if isinstance(self._pe_value, dict) is False:
@@ -281,9 +270,9 @@ class _NaaPeEditorBase(BasePeEditor):
         if isinstance(self._pe_value, dict) is False:
             return
         self._pe_value["templateID"] = oid
-        template_input = self.query_one("#naa_template_input", Input)
-        if template_input.value != oid:
-            template_input.value = oid
+        template_row = self.query_one("#naa_template_apply_row", SaipApplyRow)
+        if template_row.draft_text().strip() != oid:
+            template_row.set_draft(oid)
         self.emit_change(summary=f"Template ID set to {oid}")
 
     def on_checkbox_changed(self, event: Checkbox.Changed) -> None:

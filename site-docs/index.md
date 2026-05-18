@@ -86,7 +86,7 @@ exercised without switching projects.
 
     ---
 
-    Deep dives for every operator surface in the repository.
+    Operator-surface guides for every subsystem in the repository.
 
     [Open](subsystems/index.md)
 
@@ -118,7 +118,7 @@ exercised without switching projects.
 
 ## Subsystem summary
 
-| Subsystem | Role | Deep dive |
+| Subsystem | Role | Guide |
 | --- | --- | --- |
 | `main/` | Unified launcher, path setup, and in-process dispatch | [Architecture](architecture.md) |
 | `SCP03/` | GlobalPlatform admin shell, filesystem work, retrieval | [SCP03 Admin Shell](subsystems/scp03.md) |
@@ -133,7 +133,7 @@ exercised without switching projects.
 | `Tools/ApduFuzz/` | Opt-in eUICC APDU mutation fuzzer (allow-listed, hard-gated) | [APDU Fuzzer](subsystems/apdu-fuzzer.md) |
 | `Tools/EumDiag/` | EUM / SM-DP+ session-key injection + Wireshark Lua dissector | [EUM Diagnostics](subsystems/eum-diagnostics.md) |
 | `Tools/SuciTool/` | SUCI key management shell | [SUCI Tool](subsystems/suci-tool.md) |
-| `Tools/YggdraCore/` *(R2-005, post-v1.0.0 staging)* | In-process 5G core stubs (AUSF / AAnF) + BYO-Open5GS bridge | [Subsystems index](subsystems/index.md) |
+| `Tools/YggdraCore/` *(post-v1 staging)* | In-process 5G core stubs (AUSF / AAnF) + BYO-Open5GS bridge | [Subsystems index](subsystems/index.md) |
 | `yggdrasim_common/gui_server/` | Optional Universal GUI Command Center (`--gui` / `--web-server`) | [Subsystems index](subsystems/index.md) |
 
 ## What this site covers
@@ -141,7 +141,7 @@ exercised without switching projects.
 - install and launch paths for every operator surface
 - architecture, shared state, runtime root, and plugin model
 - concepts pages that summarize the underlying standards
-- subsystem deep dives with command surfaces and pitfalls
+- subsystem guides with command surfaces and pitfalls
 - how-to runbooks for the most common workflows
 - a reference layer with CLI matrix, state schema, glossary, troubleshooting
 - internals pages for contributors

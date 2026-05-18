@@ -31,7 +31,7 @@ class AnchorManagementTests(unittest.TestCase):
     def setUp(self):
         self.clock = _FakeClock()
         self.client = LocationStubClient(clock=self.clock)
-        self.device = DeviceIdentity(phone_number="+15558675309")
+        self.device = DeviceIdentity(phone_number="+15550100199")
 
     def test_set_anchor_returns_camara_shape_with_device(self):
         anchor = self.client.set_anchor(
@@ -42,7 +42,7 @@ class AnchorManagementTests(unittest.TestCase):
         )
         self.assertEqual(anchor["area"]["areaType"], "CIRCLE")
         self.assertEqual(anchor["area"]["radius"], 500)
-        self.assertEqual(anchor["device"], {"phoneNumber": "+15558675309"})
+        self.assertEqual(anchor["device"], {"phoneNumber": "+15550100199"})
 
     def test_set_anchor_overwrites_existing(self):
         self.client.set_anchor(
@@ -103,7 +103,7 @@ class RetrieveLocationTests(unittest.TestCase):
     def setUp(self):
         self.clock = _FakeClock()
         self.client = LocationStubClient(clock=self.clock)
-        self.device = DeviceIdentity(phone_number="+15558675309")
+        self.device = DeviceIdentity(phone_number="+15550100199")
         self.client.set_anchor(
             self.device,
             latitude=59.32938,
@@ -138,7 +138,7 @@ class VerifyLocationTests(unittest.TestCase):
     def setUp(self):
         self.clock = _FakeClock()
         self.client = LocationStubClient(clock=self.clock)
-        self.device = DeviceIdentity(phone_number="+15558675309")
+        self.device = DeviceIdentity(phone_number="+15550100199")
         self.client.set_anchor(
             self.device,
             latitude=0.0,
@@ -209,7 +209,7 @@ class ListAnchorsTests(unittest.TestCase):
     def test_list_returns_each_anchor_once(self):
         client = LocationStubClient(clock=_FakeClock())
         client.set_anchor(
-            DeviceIdentity(phone_number="+15558675309"),
+            DeviceIdentity(phone_number="+15550100199"),
             latitude=0.0,
             longitude=0.0,
             radius_meters=100,
@@ -223,7 +223,7 @@ class ListAnchorsTests(unittest.TestCase):
         anchors = client.list_anchors()
         self.assertEqual(len(anchors), 2)
         phone_numbers = sorted(a["device"]["phoneNumber"] for a in anchors)
-        self.assertEqual(phone_numbers, ["+12025550123", "+15558675309"])
+        self.assertEqual(phone_numbers, ["+12025550123", "+15550100199"])
 
 
 if __name__ == "__main__":

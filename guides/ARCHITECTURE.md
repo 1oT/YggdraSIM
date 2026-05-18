@@ -62,7 +62,7 @@ flowchart LR
     Test --> Network
     EimLocal --> LocalServices["Localized eIM / SM-DP+ endpoints"]
 
-    Sim --> YggdraCore["Tools.YggdraCore<br/>AUSF / AAnF / Open5GS bridge<br/>(R2-005, post-v1.0.0 staging)"]
+    Sim --> YggdraCore["Tools.YggdraCore<br/>AUSF / AAnF / Open5GS bridge<br/>(post-v1 staging)"]
     YggdraCore --> Open5gs["BYO Open5GS<br/>(optional)"]
 
     ProfileTool --> Files["Profile / JSON / DER files"]
@@ -165,7 +165,7 @@ The table below shows the operational dependency shape of each major subsystem.
 | `Tools.SuciTool` | Primary | No | No | No | No | No | File and stdin helper shell built around the external `suci-keytool` tool |
 | `Tools.ApduFuzz` | Primary | Primary | No | No | No | No | Opt-in eUICC APDU mutation fuzzer with hard `--i-mean-it` + allow-list gates |
 | `Tools.EumDiag` | Primary | No | No | No | No | No | EUM / SM-DP+ session-key injection + Wireshark/tshark Lua dissector for BF36 BPPs |
-| `Tools.YggdraCore` *(R2-005, post-v1.0.0 staging)* | Library | No | Optional | No | No | No | In-process AUSF / AAnF stubs + BYO-Open5GS bridge; opt-in FastAPI loopback (`YGGDRASIM_5GCORE_MODE=stub`) |
+| `Tools.YggdraCore` *(post-v1 staging)* | Library | No | Optional | No | No | No | In-process AUSF / AAnF stubs + BYO-Open5GS bridge; opt-in FastAPI loopback (`YGGDRASIM_5GCORE_MODE=stub`) |
 | `yggdrasim_common.gui_server` | Optional | No | Primary | No | Primary | Primary | Universal GUI Command Center (`--gui` desktop / `--web-server` remote-lab); requires the `gui` or `gui-server` extra |
 
 ## 5. Complete dependency graph
@@ -244,7 +244,7 @@ Direct module entry points:
 `SIMCARD` and `Tools.YggdraCore` are library packages with no
 `__main__`; they are reached through the launcher (`--card-backend
 sim`), through the GUI Command Center, or imported directly from
-operator scripts. (`Tools.YggdraCore` is R2-005, post-v1.0.0 staging — see V2_ROADMAP.md.)
+operator scripts. (`Tools.YggdraCore` is post-v1 staging — not part of this release.)
 
 The menu launcher in `main/main.py` remains the umbrella entry point for
 interactive use. The launcher's flag matrix now includes:
@@ -510,7 +510,7 @@ the PC/SC reader and exposes:
 
 ## 13. YggdraCore 5G core stub architecture
 
-> **Status: R2-005, post-v1.0.0 staging.** Tracked in [V2_ROADMAP.md](../V2_ROADMAP.md). The v1.0.0 frozen tree (tag `v1.0.0`) does not include this surface.
+> **Status: post-v1 staging.** Not part of the v1.0.0 frozen release tag.
 
 `Tools/YggdraCore/` is a library-only package that wraps the SIMCARD
 5G AKA / AKMA primitives so an operator can drive a complete
@@ -545,7 +545,7 @@ Safety gates:
 
 ## 14. Universal GUI architecture
 
-`yggdrasim_common/gui_server/` (R2-004) is the optional Universal GUI
+`yggdrasim_common/gui_server/` is the optional Universal GUI
 Command Center. It is installed via the `gui` or `gui-server` extra
 and never imported until the operator passes `--gui` or
 `--web-server`.
@@ -715,7 +715,7 @@ Documentation and architecture changes should stay aligned with:
 - `../SCP11/shared/README.md`
 - `../SIMCARD/`
 - `../Tools/HilBridge/`
-- `../Tools/YggdraCore/` (R2-005, post-v1.0.0 staging — see V2_ROADMAP.md.)
+- `../Tools/YggdraCore/` (post-v1 staging — not part of this release.)
 - `../yggdrasim_common/gui_server/`
 - `../plugins/README.md`
 

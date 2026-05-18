@@ -1,3 +1,5 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+"""eIM package codec: decodes and lints bound profile package documents from the eIM hot-folder."""
 import json
 import os
 from typing import Any
@@ -12,6 +14,7 @@ def load_eim_package_document(path: str) -> dict[str, Any]:
 
 
 def lint_eim_package_document(document: dict[str, Any]) -> dict[str, Any]:
+    """Validate an eIM package document dict against the SGP.32 ES2+ schema and return a list of error strings."""
     errors: list[str] = []
     warnings: list[str] = []
 
@@ -176,6 +179,7 @@ def lint_eim_package_document(document: dict[str, Any]) -> dict[str, Any]:
 
 
 def encode_additional_tlvs(document: dict[str, Any]) -> list[tuple[bytes, bytes]]:
+    """Encode the additional TLV fields from an eIM package document into a raw bytes sequence."""
     rows = document.get("additional_tlvs", [])
     if rows is None:
         return []
@@ -197,6 +201,7 @@ def encode_additional_tlvs(document: dict[str, Any]) -> list[tuple[bytes, bytes]
 
 
 def encode_optional_tlvs(document: dict[str, Any]) -> list[tuple[bytes, bytes]]:
+    """Encode the optional TLV fields present in an eIM package document."""
     optional_tags = document.get("optional_tags", {})
     if optional_tags is None:
         return []
@@ -220,6 +225,7 @@ def encode_optional_tlvs(document: dict[str, Any]) -> list[tuple[bytes, bytes]]:
 
 
 def resolve_package_runtime_hints(document: dict[str, Any]) -> dict[str, Any]:
+    """Resolve runtime delivery hints (e.g. EID, ICCID, TARs) from an eIM package document."""
     hints = {
         "cert_der_path": _compact_string(document.get("cert_der_path")),
         "matching_id": _compact_string(document.get("matching_id")),

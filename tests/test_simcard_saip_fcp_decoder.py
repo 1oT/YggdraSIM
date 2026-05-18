@@ -1,4 +1,4 @@
-"""Phase B regression coverage for ``decode_fcp_attributes``.
+"""Regression coverage for ``decode_fcp_attributes``.
 
 The adapter routes FCP descriptor parsing through pySim's
 ``File.from_fileDescriptor`` so the simulator stays aligned with the

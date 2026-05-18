@@ -33,6 +33,33 @@ and writes `YggdraSIM.md` at the repo root. The combined file is listed in
 | `--out PATH` | Write the combined Markdown to `PATH` instead of `YggdraSIM.md`. |
 | `--dry-run` | Print the combined Markdown to stdout without writing a file. |
 
+## Single-file Markdown and PDF (full site in one document)
+
+`build_combined.py` walks `mkdocs.yml` `nav`, concatenates every page, demotes
+headings, and rewrites internal links to in-document anchors. The output matches
+the style of a one-shot export such as a VS Code "Markdown PDF" run over the
+combined file.
+
+From the repository root:
+
+```bash
+python3 site-docs/_tools/build_combined.py
+```
+
+That writes `YggdraSIM.md` (gitignored). Open it in your editor and export to
+PDF the same way you produced `Markdown Preview.pdf` (for example the Markdown
+PDF extension: command palette → export PDF), or use any print-to-PDF driver
+from a Markdown preview.
+
+To write elsewhere (for example your Downloads folder):
+
+```bash
+python3 site-docs/_tools/build_combined.py --out /path/to/YggdraSIM-full.md
+```
+
+Regenerate after `mkdocs.yml` nav changes or substantive edits under
+`site-docs/` so anchors and page order stay aligned with the site.
+
 ## Conventions
 
 - These scripts are single-file and standalone.

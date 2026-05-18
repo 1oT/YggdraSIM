@@ -1,3 +1,4 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """DNS query / answer helpers for the SGP.32 IPA-poll DNS-over-BIP path.
 
 The eUICC simulator has no host networking, so it asks a public resolver

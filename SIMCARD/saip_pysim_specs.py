@@ -1,3 +1,4 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """pySim profile-template registry adapter.
 
 Bridges pySim's ``ProfileTemplateRegistry`` (TCA SAIP §9 / Annex A
@@ -229,7 +230,7 @@ def apply_pysim_augmentations(specs: dict[str, dict[str, Any]]) -> dict[str, dic
 
     Aliases (pe_names that pySim knows about but our table does not)
     are NOT injected here; that disambiguation requires parent-context
-    awareness which is handled in Phase B/D.
+    awareness which is handled by the FCP-decoder and GFM-walker layers.
     """
     registry = pysim_file_template_registry()
     if not registry:
@@ -312,6 +313,7 @@ class FcpAttributes:
 
     @property
     def transparent_size(self) -> int:
+        """Return the declared transparent file size from the FCP template in bytes."""
         if self.file_type in ("LF", "CY"):
             if self.nb_rec and self.rec_len:
                 return int(self.nb_rec) * int(self.rec_len)
@@ -651,7 +653,7 @@ def _gfm_collect_link_path(file_elements: Any) -> tuple[str, ...]:
     """Pull the PRIVATE 7 ``linkPath`` extension from a GFM tuple list.
 
     pySim's ``File.from_fileDescriptor`` does not yet recognise the
-    SAIP §8.3.5 ``linkPath`` extension; we mirror Phase B's logic
+    SAIP §8.3.5 ``linkPath`` extension; we mirror the FCP-decoder's logic
     against the same descriptor blob so GFM-routed EFs still surface
     their explicit link target.
     """
@@ -884,7 +886,7 @@ def pysim_alias_specs_for(
 
 
 # ---------------------------------------------------------------------------
-# Phase E: service-bit-table maps lifted from pySim
+# Service-bit-table maps lifted from pySim
 # ---------------------------------------------------------------------------
 #
 # pySim ships authoritative bit -> service-name dictionaries inside its

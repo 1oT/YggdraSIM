@@ -1,3 +1,4 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """
 Persistent preferences for TRANSCODE-TUI (theme and split layout state).
 
@@ -24,6 +25,10 @@ _PANE_MODE_KEYS = (
 )
 _PANE_MODE_VALUES = {"der", "inspect", "lint", "none"}
 
+_OUTLINE_BOOL_KEYS = (
+    "fold_redundant_file_paths",
+)
+
 THEME_CYCLE: list[str] = [
     "textual-ansi",
     "textual-dark",
@@ -45,6 +50,7 @@ def transcode_tui_prefs_path(workspace_root: Path) -> Path:
 
 
 def load_transcode_tui_prefs(workspace_root: Path) -> dict[str, Any]:
+    """Load and return the transcode TUI preferences from the user config file."""
     path = transcode_tui_prefs_path(workspace_root)
     if path.is_file() is False:
         return {}
@@ -90,6 +96,7 @@ def persist_theme(workspace_root: Path, theme_name: str) -> None:
 
 
 def load_split_size_prefs(workspace_root: Path) -> dict[str, int]:
+    """Load and return the pane-split size preferences from the user config file."""
     cur = load_transcode_tui_prefs(workspace_root)
     raw = cur.get("splits")
     if isinstance(raw, dict) is False:
@@ -111,6 +118,7 @@ def persist_split_sizes(
     inspect_width: int,
     bottom_height: int,
 ) -> None:
+    """Persist the current pane split sizes to the prefs file."""
     cur = load_transcode_tui_prefs(workspace_root)
     raw = cur.get("splits")
     if isinstance(raw, dict):
@@ -154,6 +162,7 @@ def _normalize_pane_mode(value: Any) -> str | None:
 
 
 def load_pane_layout_prefs(workspace_root: Path) -> dict[str, Any]:
+    """Load and return the pane layout preferences from the prefs file."""
     cur = load_transcode_tui_prefs(workspace_root)
     raw = cur.get("panes")
     if isinstance(raw, dict) is False:
@@ -178,6 +187,7 @@ def persist_pane_layout_prefs(
     bottom_left_mode: str,
     bottom_right_mode: str,
 ) -> None:
+    """Persist the current pane layout preferences to the prefs file."""
     cur = load_transcode_tui_prefs(workspace_root)
     raw = cur.get("panes")
     if isinstance(raw, dict):
@@ -205,3 +215,39 @@ def next_theme_in_cycle(current: str) -> str:
         nxt = (idx + 1) % len(THEME_CYCLE)
         return THEME_CYCLE[nxt]
     return THEME_CYCLE[0]
+
+
+def load_outline_prefs(workspace_root: Path) -> dict[str, bool]:
+    """Read the ``outline`` prefs sub-object.
+
+    Returns only keys that parsed as a valid ``bool`` so callers can use
+    ``dict.get(...)`` without guarding against sentinel values.
+    """
+    cur = load_transcode_tui_prefs(workspace_root)
+    raw = cur.get("outline")
+    if isinstance(raw, dict) is False:
+        return {}
+    out: dict[str, bool] = {}
+    for key in _OUTLINE_BOOL_KEYS:
+        normalized = _normalize_bool(raw.get(key))
+        if normalized is None:
+            continue
+        out[key] = normalized
+    return out
+
+
+def persist_outline_prefs(
+    workspace_root: Path,
+    *,
+    fold_redundant_file_paths: bool,
+) -> None:
+    """Write the ``outline`` prefs sub-object, preserving other keys."""
+    cur = load_transcode_tui_prefs(workspace_root)
+    raw = cur.get("outline")
+    if isinstance(raw, dict):
+        outline = dict(raw)
+    else:
+        outline = {}
+    outline["fold_redundant_file_paths"] = bool(fold_redundant_file_paths)
+    cur["outline"] = outline
+    save_transcode_tui_prefs(workspace_root, cur)

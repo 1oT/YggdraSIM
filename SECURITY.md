@@ -106,5 +106,3 @@ For context, the following hardening landed before `v1.0.0`:
   excluded from the published wheel and Docker image (see
   `.gitignore`, `.dockerignore`, `MANIFEST.in`).
 
-See `V1_RELEASE_AUDIT.md` for the full pre-release security
-remediation list.

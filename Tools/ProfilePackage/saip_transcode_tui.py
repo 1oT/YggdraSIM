@@ -1,3 +1,4 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """
 Split-pane Textual UI for SAIP decoded JSON editing with DER hex preview.
 
@@ -93,6 +94,7 @@ def _read_text_from_system_clipboard() -> tuple[str | None, str | None]:
 
 
 def run_saip_transcode_tui(bridge: SaipToolBridge) -> None:
+    """Entry point for the SAIP transcode TUI; constructs the Textual app and runs the event loop."""
     import copy
     from dataclasses import dataclass
     import json
@@ -100,6 +102,22 @@ def run_saip_transcode_tui(bridge: SaipToolBridge) -> None:
     resolved_input = bridge.resolve_input_path(str(bridge.get_input_file()), must_exist=True)
     prepared_input = bridge._prepare_input_for_tool(resolved_input)
     raw_der = prepared_input.read_bytes()
+
+    from .saip_hex_template import (
+        read_sidecar as _read_inline_placeholder_sidecar,
+        sidecar_path_for_cache as _inline_placeholder_sidecar_path,
+        splice_literals_into_tagged_document as _splice_inline_placeholders,
+    )
+
+    _inline_placeholder_records: list = []
+    _inline_placeholder_sidecar = _inline_placeholder_sidecar_path(prepared_input)
+    if _inline_placeholder_sidecar.exists():
+        try:
+            _inline_placeholder_records = _read_inline_placeholder_sidecar(
+                _inline_placeholder_sidecar
+            )
+        except (OSError, ValueError):
+            _inline_placeholder_records = []
 
     from .saip_json_codec import ensure_workspace_pysim_on_path
 
@@ -111,6 +129,7 @@ def run_saip_transcode_tui(bridge: SaipToolBridge) -> None:
     from pySim.esim.saip import ProfileElementSequence
 
     def describe_exception_chain(error: Exception) -> str:
+        """Flatten an exception chain into a single string including all cause messages."""
         parts: list[str] = []
         current: Exception | None = error
         while current is not None:
@@ -128,6 +147,7 @@ def run_saip_transcode_tui(bridge: SaipToolBridge) -> None:
         return " | ".join(parts)
 
     def format_der_preview(raw_profile_der: bytes, *, limit: int = 16) -> str:
+        """Return a hex-preview string of the first *limit* bytes of *raw_profile_der*."""
         if len(raw_profile_der) == 0:
             return "(empty)"
         preview = " ".join(f"{byte:02X}" for byte in raw_profile_der[:limit])
@@ -136,6 +156,7 @@ def run_saip_transcode_tui(bridge: SaipToolBridge) -> None:
         return preview
 
     def build_invalid_profile_hints(raw_profile_der: bytes, error: Exception) -> list[str]:
+        """Return a list of human-readable hint strings explaining why a profile ASN.1 decode failed."""
         hints: list[str] = []
         detail = describe_exception_chain(error)
         lowered_detail = detail.lower()
@@ -172,6 +193,7 @@ def run_saip_transcode_tui(bridge: SaipToolBridge) -> None:
         prefix: str = "Profile ASN1 is not valid.",
         source_label: str = "",
     ):
+        """Decode *raw_profile_der* as a SAIP profile sequence or raise a descriptive exception."""
         try:
             return ProfileElementSequence.from_der(raw_profile_der)
         except Exception as error:
@@ -189,11 +211,29 @@ def run_saip_transcode_tui(bridge: SaipToolBridge) -> None:
             raise ValueError(" ".join(message_parts)) from error
 
     def validate_editor_buffer(editor_text: str) -> ValidationIssue | None:
+        """Validate a JSON editor buffer and return a ``ValidationIssue`` if the content is invalid."""
         stripped = str(editor_text or "").strip()
         if len(stripped) == 0:
             return ValidationIssue("JSON buffer is empty.")
+
+        # Vendor-style inline typed placeholders (``{var:TYPE:N[:mod]}``)
+        # would otherwise trip ``parse_editor_json`` with "odd hex length"
+        # or "non-hexadecimal character" errors. Substitute them with
+        # deterministic sentinel hex so the parse/encode round-trip sees
+        # valid bytes. The buffer is template scaffolding, not a broken
+        # profile, so it must not latch the ``invalid-buffer`` CSS class
+        # (red border / orange text).
+        from .saip_hex_template import (
+            detect_inline_placeholders as _detect_inline_placeholders_for_validation,
+            substitute_inline_placeholders_in_editor_json as _substitute_inline_for_validation,
+        )
+
+        parse_text = editor_text
+        if _detect_inline_placeholders_for_validation(editor_text):
+            parse_text, _paths, _count = _substitute_inline_for_validation(editor_text)
+
         try:
-            document = parse_editor_json(editor_text)
+            document = parse_editor_json(parse_text)
         except json.JSONDecodeError as error:
             return ValidationIssue(
                 f"JSON syntax error at line {error.lineno}, column {error.colno}: {error.msg}"
@@ -269,12 +309,18 @@ def run_saip_transcode_tui(bridge: SaipToolBridge) -> None:
         _hex_from_tagged_bytes,
         parent_token_from_file_path_hex,
     )
+    from .saip_apply_row import SaipApplyRow, normalize_hex_bytes_text
     from .saip_decoded_edit import (
         build_decoded_value_editor_model,
         build_decoded_value_raw_hex_model,
         build_decoded_value_readonly_view,
         build_decoded_value_roundtrip_model,
         encode_decoded_value_editor_payload,
+    )
+    from .saip_decoded_gentle_view import (
+        TAB_SHOW_STRUCTURE,
+        gentle_summary_rows,
+        operator_field_heading,
     )
     from .saip_pe_editors import (
         ApplicationsView,
@@ -331,24 +377,51 @@ def run_saip_transcode_tui(bridge: SaipToolBridge) -> None:
         scan_json_object_members,
     )
     from .saip_transcode_tui_prefs import (
+        load_outline_prefs,
         load_pane_layout_prefs,
         load_split_size_prefs,
         load_transcode_tui_prefs,
         next_theme_in_cycle,
+        persist_outline_prefs,
         persist_pane_layout_prefs,
         persist_split_sizes,
         persist_theme,
     )
+    _intro_lines = [
+        (
+            f"Read {len(pes_loaded.pe_list)} profile elements from "
+            f"{resolved_input.name}"
+        ),
+    ]
+    if len(_inline_placeholder_records) > 0:
+        _intro_lines.append(
+            f"Inline typed placeholders preserved in decoded JSON: "
+            f"{len(_inline_placeholder_records)}"
+        )
     document = build_decoded_document_from_sequence(
         pes_loaded,
-        intro_lines=[
-            (
-                f"Read {len(pes_loaded.pe_list)} profile elements from "
-                f"{resolved_input.name}"
-            ),
-        ],
+        intro_lines=_intro_lines,
     )
-    initial_json = document_to_pretty_json(document)
+    if len(_inline_placeholder_records) > 0:
+        # The native document (pySim's decoded output) still holds raw
+        # ``bytes`` values, so the splice has to run on the tagged tree
+        # produced by ``jsonify_document`` — that is where the ``hex``
+        # leaves with the sentinel runs actually materialise.
+        _tagged_for_editor = jsonify_document(document)
+        _spliced = _splice_inline_placeholders(
+            _tagged_for_editor,
+            _inline_placeholder_records,
+        )
+        _intro_lines.append(
+            f"Inline placeholder literals spliced into tagged hex fields: {_spliced}"
+        )
+        _tagged_for_editor["intro"] = list(_intro_lines)
+        document["intro"] = list(_intro_lines)
+        initial_json = (
+            json.dumps(_tagged_for_editor, indent=2, ensure_ascii=False) + "\n"
+        )
+    else:
+        initial_json = document_to_pretty_json(document)
     initial_hex = format_der_hex(raw_der)
     workspace_root = bridge.workspace_root
     profile_label = resolved_input.name
@@ -378,6 +451,8 @@ def run_saip_transcode_tui(bridge: SaipToolBridge) -> None:
         RichLog,
         SelectionList,
         Static,
+        TabbedContent,
+        TabPane,
         TextArea,
         Tree,
     )
@@ -462,6 +537,7 @@ def run_saip_transcode_tui(bridge: SaipToolBridge) -> None:
         )
 
     def build_keybind_help_text() -> str:
+        """Build and return the keybinding help text string for the transcode TUI help overlay."""
         sections: list[tuple[str, list[tuple[str, str]]]] = [
             (
                 "General",
@@ -546,6 +622,7 @@ def run_saip_transcode_tui(bridge: SaipToolBridge) -> None:
             self._target_hint = str(target_hint).strip()
 
         def compose(self) -> ComposeResult:
+            """Compose and yield the Textual widget tree for this modal or panel."""
             options: list[Option] = []
             for oid, title, hint, disabled in iter_option_list_specs(self._blocked_ids):
                 if hint is None:
@@ -565,6 +642,7 @@ def run_saip_transcode_tui(bridge: SaipToolBridge) -> None:
             widget.focus()
 
         def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
+            """Handle an option selection and update the decoded payload."""
             oid = event.option_id
             if oid is None:
                 self.dismiss(None)
@@ -607,6 +685,7 @@ def run_saip_transcode_tui(bridge: SaipToolBridge) -> None:
             return options
 
         def compose(self) -> ComposeResult:
+            """Compose and yield the Textual widget tree for this modal or panel."""
             with Vertical(id="pe_insert_target_shell"):
                 yield Static("Choose insertion target for new PE")
                 anchor_key = str(self._anchor_key or "").strip()
@@ -643,6 +722,7 @@ def run_saip_transcode_tui(bridge: SaipToolBridge) -> None:
             self._pe_key = str(pe_key or "").strip()
 
         def compose(self) -> ComposeResult:
+            """Compose and yield the Textual widget tree for this modal or panel."""
             options = [
                 Option("Keep selected PE", id="_cancel"),
                 Option(f"Remove {self._pe_key}", id="confirm_remove"),
@@ -688,6 +768,7 @@ def run_saip_transcode_tui(bridge: SaipToolBridge) -> None:
             self._target_label = str(target_label or "").strip()
 
         def compose(self) -> ComposeResult:
+            """Compose and yield the Textual widget tree for this modal or panel."""
             options: list[Option] = [Option("— Cancel —", id="_cancel")]
             for option_id, title, hint in self._rows:
                 prompt = str(title or "").strip()
@@ -709,6 +790,7 @@ def run_saip_transcode_tui(bridge: SaipToolBridge) -> None:
             widget.focus()
 
         def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
+            """Handle an option selection and update the decoded payload."""
             oid = event.option_id
             if oid is None:
                 self.dismiss(None)
@@ -741,6 +823,7 @@ def run_saip_transcode_tui(bridge: SaipToolBridge) -> None:
             self._node_label = str(node_label or "").strip()
 
         def compose(self) -> ComposeResult:
+            """Compose and yield the Textual widget tree for this modal or panel."""
             options: list[Option] = [Option("— Cancel —", id="_cancel")]
             for option_id, title, hint, disabled in self._rows:
                 prompt = str(title or "").strip()
@@ -762,6 +845,7 @@ def run_saip_transcode_tui(bridge: SaipToolBridge) -> None:
             widget.focus()
 
         def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
+            """Handle an option selection and update the decoded payload."""
             oid = event.option_id
             if oid is None:
                 self.dismiss(None)
@@ -788,6 +872,7 @@ def run_saip_transcode_tui(bridge: SaipToolBridge) -> None:
             self._target_label = str(target_label or "").strip()
 
         def compose(self) -> ComposeResult:
+            """Compose and yield the Textual widget tree for this modal or panel."""
             root_name = str(self._defaults.get("root_name", "ADF") or "ADF")
             aid_prefix = str(self._defaults.get("aid_prefix", "") or "").strip()
             with Vertical(id="adf_bootstrap_shell"):
@@ -860,6 +945,7 @@ def run_saip_transcode_tui(bridge: SaipToolBridge) -> None:
             self.dismiss(result)
 
         def on_button_pressed(self, event: Button.Pressed) -> None:
+            """Handle a Button press event and dismiss or act on the chosen button ID."""
             button_id = str(event.button.id or "").strip()
             if button_id == "adf_bootstrap_cancel":
                 self.dismiss(None)
@@ -913,6 +999,7 @@ def run_saip_transcode_tui(bridge: SaipToolBridge) -> None:
             ]
 
         def compose(self) -> ComposeResult:
+            """Compose and yield the Textual widget tree for this modal or panel."""
             file_name = str(self._defaults.get("file_name", "file") or "file")
             file_type = str(self._defaults.get("file_type", "") or "").strip().upper()
             with Vertical(id="pe_file_override_shell"):
@@ -943,6 +1030,7 @@ def run_saip_transcode_tui(bridge: SaipToolBridge) -> None:
                     yield Button("Apply values", id="pe_file_override_apply", variant="primary")
 
         def on_mount(self) -> None:
+            """Initialise widget state and apply startup preferences after the widget is mounted."""
             active_fields = self._active_field_names()
             if len(active_fields) == 0:
                 return
@@ -978,6 +1066,7 @@ def run_saip_transcode_tui(bridge: SaipToolBridge) -> None:
             self.dismiss(result)
 
         def on_button_pressed(self, event: Button.Pressed) -> None:
+            """Handle a Button press event and dismiss or act on the chosen button ID."""
             button_id = str(event.button.id or "").strip()
             if button_id == "pe_file_override_cancel":
                 self.dismiss(None)
@@ -1098,13 +1187,16 @@ def run_saip_transcode_tui(bridge: SaipToolBridge) -> None:
                 )
 
         def compose(self) -> ComposeResult:
+            """Compose and yield the Textual widget tree for this modal or panel."""
             yield Static("", classes="service_table_note")
             with Horizontal(classes="service_table_toolbar"):
-                yield Static("Preserve bytes", classes="service_table_byte_label")
-                yield Input(
-                    value="",
+                yield SaipApplyRow(
+                    "svc_preserve_len",
+                    "Preserve bytes:",
+                    mode="decimal",
                     placeholder="0",
-                    classes="service_table_byte_input",
+                    hint="Apply commits preserveByteLength.",
+                    classes="service_table_preserve_row",
                 )
                 yield Static("", classes="service_table_summary")
             with Horizontal(classes="service_table_filter_row"):
@@ -1142,6 +1234,7 @@ def run_saip_transcode_tui(bridge: SaipToolBridge) -> None:
             note: str | None = None,
             read_only: bool | None = None,
         ) -> None:
+            """Update the widget to reflect a new payload dict from the decoded document."""
             self._payload = dict(payload)
             if note is not None:
                 self._note = str(note or "").strip()
@@ -1151,7 +1244,8 @@ def run_saip_transcode_tui(bridge: SaipToolBridge) -> None:
                 self._apply_state_to_widgets()
 
         def current_payload(self) -> dict[str, object]:
-            byte_input = self.query_one(".service_table_byte_input", Input)
+            """Return the current payload dict reflecting the widget's edited state."""
+            preserve_row = self.query_one(".service_table_preserve_row", SaipApplyRow)
             selection_list = self.query_one(".service_table_selection", SelectionList)
             selected_keys = {str(value) for value in selection_list.selected}
             services_payload = self._payload.get("services")
@@ -1164,7 +1258,7 @@ def run_saip_transcode_tui(bridge: SaipToolBridge) -> None:
                     normalized_services[service_key] = "y" if self._flag_enabled(raw_value) else "n"
                 for service_key, _enabled in self._filtered_service_items():
                     normalized_services[service_key] = "y" if service_key in selected_keys else "n"
-            preserve_text = str(byte_input.value or "").strip()
+            preserve_text = str(preserve_row.draft_text() or "").strip()
             preserve_value: object = preserve_text
             if preserve_text.isdigit():
                 preserve_value = int(preserve_text)
@@ -1269,7 +1363,7 @@ def run_saip_transcode_tui(bridge: SaipToolBridge) -> None:
 
         def _apply_state_to_widgets(self) -> None:
             note_widget = self.query_one(".service_table_note", Static)
-            byte_input = self.query_one(".service_table_byte_input", Input)
+            preserve_row = self.query_one(".service_table_preserve_row", SaipApplyRow)
             filter_input = self.query_one(".service_table_filter_input", Input)
             selection_list = self.query_one(".service_table_selection", SelectionList)
             current_highlight_key = self._highlighted_service_key()
@@ -1277,8 +1371,8 @@ def run_saip_transcode_tui(bridge: SaipToolBridge) -> None:
             try:
                 note_widget.update(self._note_markup(self._status_note_text()))
                 preserve_value = self._payload.get("preserveByteLength", 0)
-                byte_input.value = str(preserve_value)
-                byte_input.disabled = self._read_only
+                preserve_row.set_draft(str(preserve_value))
+                preserve_row.set_read_only(self._read_only)
                 filter_input.value = self._filter_query
                 filter_input.disabled = False
                 selection_list.disabled = self._read_only
@@ -1312,6 +1406,7 @@ def run_saip_transcode_tui(bridge: SaipToolBridge) -> None:
             return str(highlighted_option.value or "").strip() or None
 
         def set_service_enabled(self, service_key: str, enabled: bool) -> None:
+            """Enable or disable a service-table entry by key in the selection list."""
             normalized_key = str(service_key or "").strip()
             if len(normalized_key) == 0:
                 return
@@ -1328,6 +1423,7 @@ def run_saip_transcode_tui(bridge: SaipToolBridge) -> None:
             self._emit_changed()
 
         def action_toggle_highlighted(self) -> None:
+            """Toggle the highlighted service-table entry between enabled and disabled."""
             if self._read_only:
                 return
             service_key = self._highlighted_service_key()
@@ -1340,6 +1436,7 @@ def run_saip_transcode_tui(bridge: SaipToolBridge) -> None:
             self.set_service_enabled(service_key, not current_enabled)
 
         def action_enable_highlighted(self) -> None:
+            """Enable the currently highlighted service-table entry."""
             if self._read_only:
                 return
             service_key = self._highlighted_service_key()
@@ -1348,6 +1445,7 @@ def run_saip_transcode_tui(bridge: SaipToolBridge) -> None:
             self.set_service_enabled(service_key, True)
 
         def action_disable_highlighted(self) -> None:
+            """Disable the currently highlighted service-table entry."""
             if self._read_only:
                 return
             service_key = self._highlighted_service_key()
@@ -1365,6 +1463,7 @@ def run_saip_transcode_tui(bridge: SaipToolBridge) -> None:
             self,
             event: SelectionList.SelectedChanged,
         ) -> None:
+            """Sync service table state when a SelectionList selection changes."""
             selection_list = self.query_one(".service_table_selection", SelectionList)
             if event.selection_list is not selection_list:
                 return
@@ -1376,6 +1475,7 @@ def run_saip_transcode_tui(bridge: SaipToolBridge) -> None:
             self,
             event: SelectionList.SelectionHighlighted,
         ) -> None:
+            """Update the byte field when a SelectionList entry is highlighted."""
             selection_list = self.query_one(".service_table_selection", SelectionList)
             if event.selection_list is not selection_list:
                 return
@@ -1383,20 +1483,26 @@ def run_saip_transcode_tui(bridge: SaipToolBridge) -> None:
             self._refresh_summary()
 
         def on_input_changed(self, event: Input.Changed) -> None:
-            if event.input.has_class("service_table_filter_input"):
-                if self._syncing:
-                    return
-                current_highlight_key = self._highlighted_service_key()
-                self._filter_query = str(event.value or "")
-                self._apply_state_to_widgets()
-                self._highlight_visible_service_key(current_highlight_key)
+            """Respond to text input changes (filter box, hex field, or search box)."""
+            if event.input.has_class("service_table_filter_input") is False:
                 return
-            if event.input.has_class("service_table_byte_input") is False:
+            if self._syncing:
                 return
-            self._payload = self.current_payload()
+            current_highlight_key = self._highlighted_service_key()
+            self._filter_query = str(event.value or "")
+            self._apply_state_to_widgets()
+            self._highlight_visible_service_key(current_highlight_key)
+
+        def on_saip_apply_row_committed(self, event: SaipApplyRow.Committed) -> None:
+            if event.row_id != "svc_preserve_len":
+                return
+            if self._syncing or self._read_only:
+                return
+            self._payload = dict(self.current_payload())
             self._emit_changed()
 
         def on_input_submitted(self, event: Input.Submitted) -> None:
+            """Commit an input field value on Enter."""
             if event.input.has_class("service_table_filter_input") is False:
                 return
             if len(self._filter_query_text()) == 0:
@@ -1447,15 +1553,24 @@ def run_saip_transcode_tui(bridge: SaipToolBridge) -> None:
             self._syncing = False
 
         def compose(self) -> ComposeResult:
+            """Compose and yield the Textual widget tree for this modal or panel."""
             yield Static("", classes="structured_field_note")
             yield Checkbox("", classes="structured_field_checkbox")
-            with Horizontal(classes="structured_field_row structured_field_primary_row"):
-                yield Static("", classes="structured_field_label structured_field_primary_label")
-                yield Input(value="", classes="structured_field_input structured_field_primary_input")
-            with Horizontal(classes="structured_field_row structured_field_secondary_row"):
-                yield Static("", classes="structured_field_label structured_field_secondary_label")
-                yield Input(value="", classes="structured_field_input structured_field_secondary_input")
-            yield Static("", classes="structured_field_summary")
+            yield SaipApplyRow(
+                "sdf_primary",
+                "",
+                mode="hex",
+                id="structured_primary_apply",
+                classes="structured_field_apply_primary",
+            )
+            yield SaipApplyRow(
+                "sdf_secondary",
+                "",
+                mode="hex",
+                id="structured_secondary_apply",
+                classes="structured_field_apply_secondary",
+            )
+            yield Static("", classes="structured_field_resolved")
             yield OptionList(classes="structured_field_options")
 
         def on_mount(self) -> None:
@@ -1466,6 +1581,7 @@ def run_saip_transcode_tui(bridge: SaipToolBridge) -> None:
             return self._editor_kind
 
         def focus_editor(self) -> None:
+            """Move keyboard focus to the primary editing widget for this field."""
             if self._editor_kind == "lcsi_state":
                 widget = self.query_one(".structured_field_options", OptionList)
                 widget.focus()
@@ -1473,9 +1589,17 @@ def run_saip_transcode_tui(bridge: SaipToolBridge) -> None:
             checkbox = self.query_one(".structured_field_checkbox", Checkbox)
             if checkbox.display and checkbox.disabled is False:
                 checkbox.focus()
-            primary_input = self.query_one(".structured_field_primary_input", Input)
-            if primary_input.display and primary_input.disabled is False:
-                primary_input.focus()
+            primary_apply = self.query_one("#structured_primary_apply", SaipApplyRow)
+            if primary_apply.display is False:
+                if checkbox.display and checkbox.disabled is False:
+                    checkbox.focus()
+                return
+            try:
+                inp = primary_apply.query_one(".saip_apply_row_input", Input)
+            except Exception:
+                return
+            if inp.disabled is False:
+                inp.focus()
                 return
             if checkbox.display and checkbox.disabled is False:
                 checkbox.focus()
@@ -1488,6 +1612,7 @@ def run_saip_transcode_tui(bridge: SaipToolBridge) -> None:
             note: str | None = None,
             read_only: bool | None = None,
         ) -> None:
+            """Populate the editor with a decoded field payload and option list."""
             self._editor_kind = str(editor_kind or "json").strip().lower() or "json"
             self._payload = dict(payload)
             if note is not None:
@@ -1503,12 +1628,13 @@ def run_saip_transcode_tui(bridge: SaipToolBridge) -> None:
             *,
             refresh_widgets: bool = True,
         ) -> None:
+            """Re-render the field editors when the decoded payload changes."""
             self._payload = dict(payload)
             if refresh_widgets and self.is_mounted:
                 self._apply_state_to_widgets()
             elif self.is_mounted:
-                summary = self.query_one(".structured_field_summary", Static)
-                summary.update(self._summary_markup(self._summary_text()))
+                resolved = self.query_one(".structured_field_resolved", Static)
+                resolved.update(self._summary_markup(self._summary_text()))
             self._emit_changed()
 
         def current_payload(self) -> dict[str, object]:
@@ -1531,7 +1657,8 @@ def run_saip_transcode_tui(bridge: SaipToolBridge) -> None:
                 record_number = str(self._payload.get("recordNumber", "") or "").strip()
                 if len(arr_file_id) == 0:
                     return f"Encodes local EF.ARR record {record_number or '?'}."
-                return f"Encodes EF.ARR {arr_file_id.upper()} record {record_number or '?'}."
+                spaced = " ".join(arr_file_id[i : i + 2] for i in range(0, len(arr_file_id), 2))
+                return f"EF.ARR {spaced} record {record_number or '?'}"
             if self._editor_kind == "short_efid":
                 if bool(self._payload.get("supported", False)) is False:
                     return "Encodes empty bytes when SFI support is disabled."
@@ -1539,9 +1666,12 @@ def run_saip_transcode_tui(bridge: SaipToolBridge) -> None:
             if self._editor_kind == "byte_count":
                 return "Byte count is encoded as minimal big-endian hex."
             if self._editor_kind == "file_id":
+                fid = str(self._payload.get("fid", "") or "").strip().upper()
+                if len(fid) == 4:
+                    return " ".join(fid[i : i + 2] for i in range(0, 4, 2))
                 return "FID must remain exactly four hexadecimal characters."
             if self._editor_kind == "fill_file_offset":
-                return "Offset stays as a plain decimal integer."
+                return f"Offset {self._payload.get('offset', '?')} (decimal)."
             if self._editor_kind == "lcsi_state":
                 state = str(self._payload.get("state", "") or "").strip() or "unknown"
                 return f"Selected LCSI state: {state}."
@@ -1563,65 +1693,107 @@ def run_saip_transcode_tui(bridge: SaipToolBridge) -> None:
             if len(normalized) == 0:
                 return ""
             return (
-                "[bold #8FBCBB]Encoding[/bold #8FBCBB] "
+                "[bold #8FBCBB]Resolved view[/bold #8FBCBB] "
                 f"[#E5E9F0]{escape(normalized)}[/]"
             )
+
+        @staticmethod
+        def _fid_draft_hint(raw: str) -> str:
+            compact = normalize_hex_bytes_text(raw)
+            if len(compact) == 0:
+                return "Four hex digits for a 2-byte FID."
+            if len(compact) != 4:
+                return f"Need 4 hex digits ({len(compact)} nibbles in draft)."
+            return " ".join(compact[i : i + 2] for i in range(0, 4, 2)) + " (2-byte FID)"
 
         def _apply_state_to_widgets(self) -> None:
             note_widget = self.query_one(".structured_field_note", Static)
             checkbox = self.query_one(".structured_field_checkbox", Checkbox)
-            primary_row = self.query_one(".structured_field_primary_row", Horizontal)
-            primary_label = self.query_one(".structured_field_primary_label", Static)
-            primary_input = self.query_one(".structured_field_primary_input", Input)
-            secondary_row = self.query_one(".structured_field_secondary_row", Horizontal)
-            secondary_label = self.query_one(".structured_field_secondary_label", Static)
-            secondary_input = self.query_one(".structured_field_secondary_input", Input)
-            summary = self.query_one(".structured_field_summary", Static)
+            primary_apply = self.query_one("#structured_primary_apply", SaipApplyRow)
+            secondary_apply = self.query_one("#structured_secondary_apply", SaipApplyRow)
+            resolved = self.query_one(".structured_field_resolved", Static)
             options = self.query_one(".structured_field_options", OptionList)
             self._syncing = True
             try:
-                note_widget.update(self._note_markup(self._note))
+                note_tail = " Values are hex bytes unless labelled decimal. Apply commits the splice."
+                note_widget.update(self._note_markup(self._note + note_tail))
                 checkbox.display = False
-                primary_row.display = False
-                secondary_row.display = False
+                primary_apply.display = False
+                secondary_apply.display = False
                 options.display = False
                 checkbox.disabled = self._read_only
-                primary_input.disabled = self._read_only
-                secondary_input.disabled = self._read_only
                 options.disabled = self._read_only
+                primary_apply.set_read_only(self._read_only)
+                secondary_apply.set_read_only(self._read_only)
 
                 if self._editor_kind == "short_efid":
                     checkbox.label = "Supported SFI encoding"
                     checkbox.value = bool(self._payload.get("supported", False))
                     checkbox.display = True
-                    primary_row.display = checkbox.value
-                    primary_label.update("SFI (1-30)")
-                    primary_input.value = str(self._payload.get("sfi", "") or "")
-                    primary_input.disabled = self._read_only or checkbox.value is False
+                    primary_apply.display = checkbox.value
+                    primary_apply.configure(
+                        label="SFI (1-30):",
+                        mode="decimal",
+                        placeholder="1-30",
+                        hint_formatter=None,
+                        static_hint="Decimal SFI · Apply commits.",
+                    )
+                    primary_apply.set_draft(str(self._payload.get("sfi", "") or ""))
+                    primary_apply.set_read_only(self._read_only or checkbox.value is False)
                 elif self._editor_kind == "arr_reference":
                     explicit = len(str(self._payload.get("arrFileId", "") or "").strip()) > 0
                     checkbox.label = "Use explicit ARR file ID"
                     checkbox.value = explicit
                     checkbox.display = True
-                    primary_row.display = True
-                    primary_label.update("Record number")
-                    primary_input.value = str(self._payload.get("recordNumber", "") or "")
-                    secondary_row.display = True
-                    secondary_label.update("ARR file ID")
-                    secondary_input.value = str(self._payload.get("arrFileId", "") or "")
-                    secondary_input.disabled = self._read_only or explicit is False
+                    primary_apply.display = True
+                    primary_apply.configure(
+                        label="Record number:",
+                        mode="decimal",
+                        placeholder="record",
+                        hint_formatter=None,
+                        static_hint="Decimal EF.ARR record index · Apply commits.",
+                    )
+                    primary_apply.set_draft(str(self._payload.get("recordNumber", "") or ""))
+                    secondary_apply.display = True
+                    secondary_apply.configure(
+                        label="ARR file ID:",
+                        mode="hex",
+                        placeholder="e.g. 6F06",
+                        hint_formatter=None,
+                        static_hint="Hex FID · Apply commits.",
+                    )
+                    secondary_apply.set_draft(str(self._payload.get("arrFileId", "") or ""))
+                    secondary_apply.set_read_only(self._read_only or explicit is False)
                 elif self._editor_kind == "byte_count":
-                    primary_row.display = True
-                    primary_label.update("Byte count")
-                    primary_input.value = str(self._payload.get("byteCount", "") or "")
+                    primary_apply.display = True
+                    primary_apply.configure(
+                        label="Byte count:",
+                        mode="decimal",
+                        placeholder="bytes",
+                        hint_formatter=None,
+                        static_hint="Decimal · Apply commits.",
+                    )
+                    primary_apply.set_draft(str(self._payload.get("byteCount", "") or ""))
                 elif self._editor_kind == "file_id":
-                    primary_row.display = True
-                    primary_label.update("File ID (hex)")
-                    primary_input.value = str(self._payload.get("fid", "") or "")
+                    primary_apply.display = True
+                    primary_apply.configure(
+                        label="File ID:",
+                        mode="hex",
+                        placeholder="2 bytes hex",
+                        hint_formatter=self._fid_draft_hint,
+                        static_hint="",
+                    )
+                    primary_apply.set_draft(str(self._payload.get("fid", "") or ""))
                 elif self._editor_kind == "fill_file_offset":
-                    primary_row.display = True
-                    primary_label.update("Offset")
-                    primary_input.value = str(self._payload.get("offset", "") or "")
+                    primary_apply.display = True
+                    primary_apply.configure(
+                        label="Offset:",
+                        mode="decimal",
+                        placeholder="decimal",
+                        hint_formatter=None,
+                        static_hint="Decimal byte offset · Apply commits.",
+                    )
+                    primary_apply.set_draft(str(self._payload.get("offset", "") or ""))
                 elif self._editor_kind == "lcsi_state":
                     options.display = True
                     options.clear_options()
@@ -1638,11 +1810,12 @@ def run_saip_transcode_tui(bridge: SaipToolBridge) -> None:
                     if current_state in self._LCSI_STATES:
                         highlighted_index = self._LCSI_STATES.index(current_state)
                     options.highlighted = highlighted_index
-                summary.update(self._summary_markup(self._summary_text()))
+                resolved.update(self._summary_markup(self._summary_text()))
             finally:
                 self._syncing = False
 
         def on_checkbox_changed(self, event: Checkbox.Changed) -> None:
+            """Propagate a checkbox state change to the decoded payload."""
             checkbox = self.query_one(".structured_field_checkbox", Checkbox)
             if event.checkbox is not checkbox:
                 return
@@ -1664,34 +1837,49 @@ def run_saip_transcode_tui(bridge: SaipToolBridge) -> None:
                     next_payload.pop("arrFileId", None)
                 self.update_payload(next_payload)
 
-        def on_input_changed(self, event: Input.Changed) -> None:
-            if self._syncing:
+        def on_saip_apply_row_committed(self, event: SaipApplyRow.Committed) -> None:
+            """Merge one applied row into the payload and notify the host."""
+            if self._syncing or self._read_only:
                 return
-            primary_input = self.query_one(".structured_field_primary_input", Input)
-            secondary_input = self.query_one(".structured_field_secondary_input", Input)
-            if event.input is primary_input:
-                next_payload = dict(self._payload)
-                if self._editor_kind == "short_efid":
-                    next_payload["supported"] = bool(next_payload.get("supported", False))
-                    next_payload["sfi"] = str(primary_input.value or "").strip()
-                elif self._editor_kind == "arr_reference":
-                    next_payload["recordNumber"] = str(primary_input.value or "").strip()
-                elif self._editor_kind == "byte_count":
-                    next_payload["byteCount"] = str(primary_input.value or "").strip()
-                elif self._editor_kind == "file_id":
-                    next_payload["fid"] = str(primary_input.value or "").strip().upper()
-                elif self._editor_kind == "fill_file_offset":
-                    next_payload["offset"] = str(primary_input.value or "").strip()
-                else:
+            if event.row_id not in {"sdf_primary", "sdf_secondary"}:
+                return
+            next_payload = dict(self._payload)
+            val = str(event.value or "")
+            if self._editor_kind == "short_efid":
+                if event.row_id != "sdf_primary":
                     return
-                self.update_payload(next_payload, refresh_widgets=False)
+                next_payload["supported"] = bool(next_payload.get("supported", False))
+                next_payload["sfi"] = val
+            elif self._editor_kind == "arr_reference":
+                if event.row_id == "sdf_primary":
+                    next_payload["recordNumber"] = val
+                else:
+                    next_payload["arrFileId"] = normalize_hex_bytes_text(val)
+            elif self._editor_kind == "byte_count":
+                if event.row_id != "sdf_primary":
+                    return
+                next_payload["byteCount"] = val
+            elif self._editor_kind == "file_id":
+                if event.row_id != "sdf_primary":
+                    return
+                next_payload["fid"] = val
+            elif self._editor_kind == "fill_file_offset":
+                if event.row_id != "sdf_primary":
+                    return
+                next_payload["offset"] = val
+            else:
                 return
-            if event.input is secondary_input and self._editor_kind == "arr_reference":
-                next_payload = dict(self._payload)
-                next_payload["arrFileId"] = str(secondary_input.value or "").strip().upper()
-                self.update_payload(next_payload, refresh_widgets=False)
+            self._payload = next_payload
+            self._syncing = True
+            try:
+                resolved = self.query_one(".structured_field_resolved", Static)
+                resolved.update(self._summary_markup(self._summary_text()))
+            finally:
+                self._syncing = False
+            self._emit_changed()
 
         def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
+            """Handle an option selection and update the decoded payload."""
             options = self.query_one(".structured_field_options", OptionList)
             if event.option_list is not options:
                 return
@@ -1711,6 +1899,7 @@ def run_saip_transcode_tui(bridge: SaipToolBridge) -> None:
         ]
 
         def compose(self) -> ComposeResult:
+            """Compose and yield the Textual widget tree for this modal or panel."""
             with Vertical(id="keybind_help_shell"):
                 yield Static("Keybind help")
                 yield Static("[dim]Press Esc or F1 to close.[/dim]")
@@ -1743,6 +1932,7 @@ def run_saip_transcode_tui(bridge: SaipToolBridge) -> None:
             self._pane_modes = dict(pane_modes)
 
         def compose(self) -> ComposeResult:
+            """Compose and yield the Textual widget tree for this modal or panel."""
             options: list[Option] = []
             outline_target = "Hide" if self._outline_visible else "Show"
             options.append(
@@ -1836,6 +2026,7 @@ def run_saip_transcode_tui(bridge: SaipToolBridge) -> None:
             self._helper_text = helper_text
 
         def compose(self) -> ComposeResult:
+            """Compose and yield the Textual widget tree for this modal or panel."""
             with Vertical(id="token_prompt_shell"):
                 yield Static(self._title)
                 if self._helper_text is not None:
@@ -1913,6 +2104,7 @@ def run_saip_transcode_tui(bridge: SaipToolBridge) -> None:
             self._cancel_label = str(cancel_label)
 
         def compose(self) -> ComposeResult:
+            """Compose and yield the Textual widget tree for this modal or panel."""
             options = [
                 Option(self._cancel_label, id="cancel"),
                 Option(self._confirm_label, id="confirm"),
@@ -1930,6 +2122,7 @@ def run_saip_transcode_tui(bridge: SaipToolBridge) -> None:
         def on_option_list_option_selected(
             self, event: OptionList.OptionSelected
         ) -> None:
+            """Handle an option selection and update the decoded payload."""
             oid = event.option_id
             if oid == "confirm":
                 self.dismiss(True)
@@ -1965,6 +2158,7 @@ def run_saip_transcode_tui(bridge: SaipToolBridge) -> None:
             self._dirty = False
 
         def compose(self) -> ComposeResult:
+            """Compose and yield the Textual widget tree for this modal or panel."""
             with Vertical(id="token_manager_shell"):
                 yield Static("Token manager")
                 yield Static(
@@ -2035,6 +2229,7 @@ def run_saip_transcode_tui(bridge: SaipToolBridge) -> None:
             return str(option.id)
 
         def action_close_manager(self) -> None:
+            """Close the token manager modal, prompting to save if dirty."""
             if self._dirty is False:
                 self.dismiss(None)
                 return
@@ -2059,6 +2254,7 @@ def run_saip_transcode_tui(bridge: SaipToolBridge) -> None:
             self.dismiss(copy.deepcopy(self._document) if self._dirty else None)
 
         def action_add_token(self) -> None:
+            """Open the add-token dialog to create a new placeholder token."""
             self.app.push_screen(
                 TokenInputPrompt(
                     mode="add",
@@ -2097,6 +2293,7 @@ def run_saip_transcode_tui(bridge: SaipToolBridge) -> None:
             self._refresh_list()
 
         def action_set_value(self) -> None:
+            """Open the set-value dialog for the highlighted token."""
             name = self._selected_token_name()
             if name is None:
                 self._set_status("Select a token first (use ↑/↓).")
@@ -2149,6 +2346,7 @@ def run_saip_transcode_tui(bridge: SaipToolBridge) -> None:
             self._refresh_list()
 
         def action_rename_token(self) -> None:
+            """Open the rename dialog for the highlighted token."""
             name = self._selected_token_name()
             if name is None:
                 self._set_status("Select a token first (use ↑/↓).")
@@ -2250,6 +2448,7 @@ def run_saip_transcode_tui(bridge: SaipToolBridge) -> None:
             self._refresh_list()
 
         def action_delete_token(self) -> None:
+            """Open the delete-confirmation dialog for the highlighted token."""
             name = self._selected_token_name()
             if name is None:
                 self._set_status("Select a token first (use ↑/↓).")
@@ -2299,6 +2498,7 @@ def run_saip_transcode_tui(bridge: SaipToolBridge) -> None:
         """Dedicated split handle with direct mouse capture."""
 
         def on_mouse_down(self, event: events.MouseDown) -> None:
+            """Handle right-click on the JSON outline tree to open the context menu."""
             wid = self.id or ""
             app = self.app
             if hasattr(app, "_begin_split_drag") is False:
@@ -2312,6 +2512,7 @@ def run_saip_transcode_tui(bridge: SaipToolBridge) -> None:
             event.stop()
 
         def on_mouse_move(self, event: events.MouseMove) -> None:
+            """Track mouse position for tooltip and drag-selection state."""
             app = self.app
             if hasattr(app, "_continue_split_drag") is False:
                 return
@@ -2329,6 +2530,77 @@ def run_saip_transcode_tui(bridge: SaipToolBridge) -> None:
                 app._end_split_drag()
             self.release_mouse()
             event.stop()
+
+    class DecodedJsonDualShell(Vertical):
+        """Decoded summary tab plus SHOW JSON TextArea for the same payload."""
+
+        DEFAULT_CSS = """
+        DecodedJsonDualShell {
+            width: 100%;
+            height: 1fr;
+            min-height: 0;
+        }
+        DecodedJsonDualShell TabbedContent {
+            width: 100%;
+            height: 1fr;
+            min-height: 0;
+        }
+        DecodedJsonDualShell .decoded-json-tab-wrap {
+            width: 100%;
+            height: 1fr;
+            min-height: 0;
+        }
+        DecodedJsonDualShell TextArea {
+            width: 100%;
+            height: 1fr;
+            min-height: 0;
+        }
+        DecodedJsonDualShell .decoded-gentle-banner {
+            width: 100%;
+            height: auto;
+            min-height: 1;
+            padding: 0 1;
+            margin-bottom: 1;
+            color: $text-muted;
+        }
+        DecodedJsonDualShell .decoded-gentle-rows {
+            width: 100%;
+            height: auto;
+            min-height: 1;
+        }
+        DecodedJsonDualShell .decoded-gentle-row {
+            width: 100%;
+            height: auto;
+            min-height: 1;
+            padding: 0 1;
+            margin-bottom: 0;
+        }
+        """
+
+        def __init__(self, shell_id: str, textarea_id: str, *, classes: str = "") -> None:
+            merged = "decoded-json-dual-shell"
+            if len(str(classes or "").strip()) > 0:
+                merged = f"{merged} {classes}".strip()
+            super().__init__(id=shell_id, classes=merged)
+            self._textarea_id = textarea_id
+            self._banner_id = f"{shell_id}_gentle_banner"
+            self._rows_id = f"{shell_id}_gentle_rows"
+
+        def compose(self) -> ComposeResult:
+            with TabbedContent():
+                with TabPane("Decoded"):
+                    yield Static("", id=self._banner_id, classes="decoded-gentle-banner")
+                    yield Vertical(id=self._rows_id, classes="decoded-gentle-rows")
+                with TabPane(TAB_SHOW_STRUCTURE):
+                    with Vertical(classes="decoded-json-tab-wrap"):
+                        yield TextArea(
+                            "{}\n",
+                            id=self._textarea_id,
+                            classes="decoded-pane decoded-json-pane",
+                            language="json",
+                            read_only=True,
+                            show_line_numbers=False,
+                        )
 
     class SaipTranscodeApp(App):
         TITLE = "SAIP JSON ↔ DER"
@@ -2416,7 +2688,8 @@ def run_saip_transcode_tui(bridge: SaipToolBridge) -> None:
             "right": {
                 "host": "right_decoded_editor",
                 "switcher": "right_decoded_switcher",
-                "json": "right_decoded_json_editor",
+                "json": "right_decoded_json_shell",
+                "json_text": "right_decoded_json_editor",
                 "structured": "right_decoded_structured_editor",
                 "service": "right_decoded_service_editor",
                 "raw_hex": "right_decoded_raw_hex",
@@ -2424,7 +2697,8 @@ def run_saip_transcode_tui(bridge: SaipToolBridge) -> None:
             "bottom_left": {
                 "host": "inspect_decoded_editor",
                 "switcher": "inspect_decoded_switcher",
-                "json": "inspect_decoded_json_editor",
+                "json": "inspect_decoded_json_shell",
+                "json_text": "inspect_decoded_json_editor",
                 "structured": "inspect_decoded_structured_editor",
                 "service": "inspect_decoded_service_editor",
                 "raw_hex": "inspect_decoded_raw_hex",
@@ -2432,7 +2706,8 @@ def run_saip_transcode_tui(bridge: SaipToolBridge) -> None:
             "bottom_right": {
                 "host": "lint_decoded_editor",
                 "switcher": "lint_decoded_switcher",
-                "json": "lint_decoded_json_editor",
+                "json": "lint_decoded_json_shell",
+                "json_text": "lint_decoded_json_editor",
                 "structured": "lint_decoded_structured_editor",
                 "service": "lint_decoded_service_editor",
                 "raw_hex": "lint_decoded_raw_hex",
@@ -2680,13 +2955,8 @@ def run_saip_transcode_tui(bridge: SaipToolBridge) -> None:
             height: auto;
             margin-top: 1;
         }
-        .service_table_byte_label {
-            width: 16;
-            content-align: left middle;
-        }
-        .service_table_byte_input {
-            width: 12;
-            margin-right: 1;
+        .service_table_preserve_row {
+            width: 1fr;
         }
         .service_table_filter_label {
             width: 16;
@@ -2730,20 +3000,11 @@ def run_saip_transcode_tui(bridge: SaipToolBridge) -> None:
             width: 100%;
             margin-top: 1;
         }
-        .structured_field_row {
+        .structured_field_apply_primary,
+        .structured_field_apply_secondary {
             width: 100%;
-            height: auto;
-            margin-top: 1;
         }
-        .structured_field_label {
-            width: 18;
-            content-align: left middle;
-            padding-right: 1;
-        }
-        .structured_field_input {
-            width: 1fr;
-        }
-        .structured_field_summary {
+        .structured_field_resolved {
             width: 100%;
             min-height: 1;
             margin-top: 1;
@@ -3095,6 +3356,12 @@ def run_saip_transcode_tui(bridge: SaipToolBridge) -> None:
             Binding("f4", "toggle_inspect_left_mode", "Inspect left mode", priority=True),
             Binding("f5", "cycle_right_pane", "Right pane", priority=True),
             Binding("f6", "toggle_outline_pane", "Outline", priority=True),
+            Binding(
+                "ctrl+f6",
+                "toggle_outline_fold_file_paths",
+                "Fold repeated SELECTs",
+                priority=True,
+            ),
             Binding("f7", "cycle_theme", "Cycle theme", priority=True),
             Binding("f8", "cycle_bottom_left_pane", "Bottom-left pane", priority=True),
             Binding("f9", "cycle_bottom_right_pane", "Bottom-right pane", priority=True),
@@ -3156,6 +3423,14 @@ def run_saip_transcode_tui(bridge: SaipToolBridge) -> None:
             self._decoded_pane_raw_hex = ""
             self._decoded_pane_dirty = False
             self._outline_visible = True
+            # Fold consecutive-duplicate ``filePath`` rows in the
+            # ``fileManagementCMD`` outline. Vendors (notably Telna)
+            # encode an explicit SELECT ahead of every single EF even
+            # when the selected DF has not changed, which makes the
+            # outline visually alternate 1:1 between "(File path)" and
+            # EF rows. Folding hides the redundant SELECT so the outline
+            # reads as "DF header → run of EFs". Toggle via Ctrl+F6.
+            self._outline_fold_redundant_file_paths: bool = True
             self._outline_search_query = ""
             self._outline_search_index = -1
             self._outline_search_match_count = 0
@@ -3180,12 +3455,14 @@ def run_saip_transcode_tui(bridge: SaipToolBridge) -> None:
             super().__init__()
 
         def compose(self) -> ComposeResult:
+            """Compose and yield the Textual widget tree for this modal or panel."""
             with Vertical(id="chrome"):
                 yield Static(
                     "SAIP JSON↔DER · Help F1 · Text Ctrl+C/V · Save Ctrl+S/F2 · Tree actions Ctrl+T · "
                     "Add file Ctrl+A · Insert picker F3 · Insert after F11 · Insert before F12 · "
                     "Remove Ctrl+D · Lint Ctrl+L · Inspect F4 · "
-                    "Panes F5/F6/F8/F9 · Pane menu F10 · Theme F7 · Quit Ctrl+Q",
+                    "Panes F5/F6/F8/F9 · Pane menu F10 · Fold SELECTs Ctrl+F6 · "
+                    "Theme F7 · Quit Ctrl+Q",
                     id="chrome_title",
                 )
                 with Vertical(id="upper"):
@@ -3267,17 +3544,13 @@ def run_saip_transcode_tui(bridge: SaipToolBridge) -> None:
                                 )
                                 with Vertical(id="right_decoded_editor", classes="decoded-host"):
                                     with ContentSwitcher(
-                                        initial="right_decoded_json_editor",
+                                        initial="right_decoded_json_shell",
                                         id="right_decoded_switcher",
                                         classes="decoded-host-switcher",
                                     ):
-                                        yield TextArea(
-                                            "{}\n",
-                                            id="right_decoded_json_editor",
-                                            classes="decoded-pane decoded-json-pane",
-                                            language="json",
-                                            read_only=True,
-                                            show_line_numbers=False,
+                                        yield DecodedJsonDualShell(
+                                            "right_decoded_json_shell",
+                                            "right_decoded_json_editor",
                                         )
                                         yield StructuredDecodedFieldEditor(
                                             id="right_decoded_structured_editor",
@@ -3347,17 +3620,13 @@ def run_saip_transcode_tui(bridge: SaipToolBridge) -> None:
                                 )
                                 with Vertical(id="inspect_decoded_editor", classes="decoded-host"):
                                     with ContentSwitcher(
-                                        initial="inspect_decoded_json_editor",
+                                        initial="inspect_decoded_json_shell",
                                         id="inspect_decoded_switcher",
                                         classes="decoded-host-switcher",
                                     ):
-                                        yield TextArea(
-                                            "{}\n",
-                                            id="inspect_decoded_json_editor",
-                                            classes="decoded-pane decoded-json-pane",
-                                            language="json",
-                                            read_only=True,
-                                            show_line_numbers=False,
+                                        yield DecodedJsonDualShell(
+                                            "inspect_decoded_json_shell",
+                                            "inspect_decoded_json_editor",
                                         )
                                         yield StructuredDecodedFieldEditor(
                                             id="inspect_decoded_structured_editor",
@@ -3426,17 +3695,13 @@ def run_saip_transcode_tui(bridge: SaipToolBridge) -> None:
                                 )
                                 with Vertical(id="lint_decoded_editor", classes="decoded-host"):
                                     with ContentSwitcher(
-                                        initial="lint_decoded_json_editor",
+                                        initial="lint_decoded_json_shell",
                                         id="lint_decoded_switcher",
                                         classes="decoded-host-switcher",
                                     ):
-                                        yield TextArea(
-                                            "{}\n",
-                                            id="lint_decoded_json_editor",
-                                            classes="decoded-pane decoded-json-pane",
-                                            language="json",
-                                            read_only=True,
-                                            show_line_numbers=False,
+                                        yield DecodedJsonDualShell(
+                                            "lint_decoded_json_shell",
+                                            "lint_decoded_json_editor",
                                         )
                                         yield StructuredDecodedFieldEditor(
                                             id="lint_decoded_structured_editor",
@@ -3515,7 +3780,10 @@ def run_saip_transcode_tui(bridge: SaipToolBridge) -> None:
                 widget_ids = self._DECODED_SLOT_WIDGETS.get(slot_name)
                 if isinstance(widget_ids, dict) is False:
                     continue
-                views.append(self.query_one(f"#{widget_ids['json']}", TextArea))
+                text_id = widget_ids.get("json_text")
+                if isinstance(text_id, str) is False or len(text_id.strip()) == 0:
+                    continue
+                views.append(self.query_one(f"#{text_id}", TextArea))
             return views
 
         def _visible_decoded_service_views(self) -> list[ServiceTableToggleEditor]:
@@ -3635,6 +3903,77 @@ def run_saip_transcode_tui(bridge: SaipToolBridge) -> None:
                 renderable.append("\n".join(rows), style="#E5E9F0")
             return renderable
 
+        @classmethod
+        def _decoded_raw_hex_renderable_with_placeholders(
+            cls, hex_with_literals: str
+        ) -> Text:
+            """Render a hex + inline-placeholder field for the raw-hex panel.
+
+            Hex runs are grouped into space-separated octets in the same
+            column layout as :meth:`_decoded_raw_hex_renderable`, while
+            placeholder literals are preserved verbatim (styled) so the
+            operator can see exactly where the template scaffolding sits
+            inside the file content.
+            """
+            from .saip_hex_template import (
+                extract_inline_placeholders_from_hex_text,
+            )
+
+            text = str(hex_with_literals or "")
+            entries = extract_inline_placeholders_from_hex_text(text)
+            if len(entries) == 0:
+                fallback = cls._normalize_raw_hex(text)
+                if fallback is None:
+                    return Text("")
+                return cls._decoded_raw_hex_renderable(fallback)
+
+            total_bytes = 0
+            cursor = 0
+            for entry in entries:
+                prefix_hex = "".join(text[cursor : entry["start"]].split())
+                if len(prefix_hex) % 2 == 0:
+                    total_bytes += len(prefix_hex) // 2
+                total_bytes += int(entry["byte_length"])
+                cursor = entry["end"]
+            tail_hex = "".join(text[cursor:].split())
+            if len(tail_hex) % 2 == 0:
+                total_bytes += len(tail_hex) // 2
+
+            renderable = Text(
+                f"Raw hex [{total_bytes}B · {len(entries)} placeholder"
+                f"{'s' if len(entries) != 1 else ''}]",
+                style="bold #8FBCBB",
+            )
+            renderable.append("\n")
+
+            # Render hex in octet-grouped runs with placeholder literals
+            # inserted as distinct styled spans. Octet grouping resets
+            # around each placeholder so the eye can pick out the
+            # scaffolding boundary.
+            cursor = 0
+            first_segment = True
+            for entry in entries:
+                prefix = "".join(text[cursor : entry["start"]].split()).upper()
+                if len(prefix) > 0:
+                    if first_segment is False:
+                        renderable.append(" ", style="#E5E9F0")
+                    octets = [prefix[i : i + 2] for i in range(0, len(prefix), 2)]
+                    renderable.append(" ".join(octets), style="#E5E9F0")
+                    first_segment = False
+                if first_segment is False:
+                    renderable.append(" ")
+                renderable.append(str(entry["literal"]), style="bold #88C0D0")
+                first_segment = False
+                cursor = entry["end"]
+            tail = "".join(text[cursor:].split()).upper()
+            if len(tail) > 0:
+                if first_segment is False:
+                    renderable.append(" ", style="#E5E9F0")
+                octets = [tail[i : i + 2] for i in range(0, len(tail), 2)]
+                renderable.append(" ".join(octets), style="#E5E9F0")
+
+            return renderable
+
         def _raw_hex_from_encoded_value(self, value: object) -> str | None:
             if isinstance(value, dict):
                 return self._normalize_raw_hex(_hex_from_tagged_bytes(value))
@@ -3686,6 +4025,19 @@ def run_saip_transcode_tui(bridge: SaipToolBridge) -> None:
             return fallback_raw_hex
 
         def _refresh_decoded_raw_hex_views(self) -> None:
+            context = self._decoded_pane_context
+            placeholder_hex = ""
+            if isinstance(context, dict):
+                placeholder_hex = str(context.get("inline_placeholder_hex", "") or "")
+            if len(placeholder_hex) > 0:
+                self._decoded_pane_raw_hex = placeholder_hex
+                renderable = self._decoded_raw_hex_renderable_with_placeholders(
+                    placeholder_hex
+                )
+                for view in self._all_decoded_raw_hex_views():
+                    view.display = True
+                    view.update(renderable)
+                return
             raw_hex = self._current_decoded_raw_hex()
             self._decoded_pane_raw_hex = raw_hex or ""
             show = self._normalize_raw_hex(raw_hex) is not None
@@ -3710,8 +4062,58 @@ def run_saip_transcode_tui(bridge: SaipToolBridge) -> None:
             finally:
                 self._decoded_pane_syncing = False
             self._decoded_pane_text = normalized_text
+            self._populate_decoded_gentle_shells()
             self._refresh_slot_captions()
             self._refresh_decoded_raw_hex_views()
+
+        def _populate_decoded_gentle_shells(self) -> None:
+            ctx = self._decoded_pane_context
+            editor_kind = str(self._decoded_pane_editor_kind or "").strip().lower()
+            note = str(self._decoded_pane_note or "").strip()
+            for _slot_name, widget_ids in self._DECODED_SLOT_WIDGETS.items():
+                shell_id = str(widget_ids.get("json") or "").strip()
+                if len(shell_id) == 0:
+                    continue
+                try:
+                    banner = self.query_one(f"#{shell_id}_gentle_banner", Static)
+                    rows_host = self.query_one(f"#{shell_id}_gentle_rows", Vertical)
+                except Exception:
+                    continue
+                if isinstance(ctx, dict) is False:
+                    banner.update("[dim]No decoded selection.[/dim]")
+                    for node in list(rows_host.children):
+                        node.remove()
+                    continue
+                field_name = str(ctx.get("field_name") or "")
+                last_ef_raw = str(ctx.get("last_ef_key") or "").strip()
+                last_ef: str | None
+                if len(last_ef_raw) > 0:
+                    last_ef = last_ef_raw
+                else:
+                    last_ef = None
+                payload = ctx.get("payload")
+                if isinstance(payload, dict) is False:
+                    payload = {}
+                heading = operator_field_heading(field_name, last_ef_key=last_ef)
+                banner_markup = f"[bold]{escape(heading)}[/bold]"
+                if len(note) > 0:
+                    banner_markup += f"\n[dim]{escape(note)}[/dim]"
+                banner.update(banner_markup)
+                pair_rows = gentle_summary_rows(
+                    field_name,
+                    payload,
+                    last_ef_key=last_ef,
+                    editor_kind=editor_kind,
+                )
+                for node in list(rows_host.children):
+                    node.remove()
+                for label, value in pair_rows:
+                    rows_host.mount(
+                        Static(
+                            f"[b]{escape(label)}[/b]  {escape(value)}",
+                            classes="decoded-gentle-row",
+                        )
+                    )
 
         def _set_service_table_views_state(
             self,
@@ -3756,12 +4158,12 @@ def run_saip_transcode_tui(bridge: SaipToolBridge) -> None:
             self._refresh_decoded_raw_hex_views()
 
         def _refresh_decoded_panel(self, *, force: bool = False) -> None:
-            # Decoded pane is a pure viewer in v1; the Decoded Editor
-            # feature has been carved out to the V2 GUI (see
-            # ``V2_UNIVERSAL_GUI_PLAN.md`` section 7.5). Every state
-            # transition below forces ``read_only=True`` so the inline
-            # structured / service-table widgets render the decoded
-            # payload without accepting edits.
+            # Decoded pane is a pure viewer in this surface; the
+            # decoded-edit affordance lives in the universal GUI
+            # (`yggdrasim_common/gui_server`). Every state transition
+            # below forces ``read_only=True`` so the inline structured
+            # / service-table widgets render the decoded payload
+            # without accepting edits.
             if self._has_visible_mode("decoded") is False:
                 return
             try:
@@ -4485,7 +4887,29 @@ def run_saip_transcode_tui(bridge: SaipToolBridge) -> None:
             state = "shown" if self._outline_visible else "hidden"
             self._set_status(f"Outline pane {state} (saved).", remember=False)
 
+        def action_toggle_outline_fold_file_paths(self) -> None:
+            """Flip the filePath fold and re-render the outline."""
+            self._outline_fold_redundant_file_paths = (
+                self._outline_fold_redundant_file_paths is False
+            )
+            try:
+                persist_outline_prefs(
+                    workspace_root,
+                    fold_redundant_file_paths=self._outline_fold_redundant_file_paths,
+                )
+            except Exception:
+                # Persistence is best-effort; the in-memory flag still
+                # takes effect for this session.
+                pass
+            self._refresh_json_outline()
+            state = "on" if self._outline_fold_redundant_file_paths else "off"
+            self._set_status(
+                f"Outline filePath fold {state} (saved).",
+                remember=False,
+            )
+
         def action_focus_outline_search(self) -> None:
+            """Focus the outline search input, showing the outline pane if hidden."""
             if self._outline_visible is False:
                 self._outline_visible = True
                 self._persist_pane_layout()
@@ -4544,6 +4968,7 @@ def run_saip_transcode_tui(bridge: SaipToolBridge) -> None:
             self.push_screen(KeybindHelpPicker())
 
         def action_open_tree_context_menu(self) -> None:
+            """Open the context menu for the currently highlighted outline node."""
             tree = self.query_one("#json_outline", Tree)
             node = tree.cursor_node
             if node is None:
@@ -4587,6 +5012,7 @@ def run_saip_transcode_tui(bridge: SaipToolBridge) -> None:
             )
 
         def on_mount(self) -> None:
+            """Initialise widget state and apply startup preferences after the widget is mounted."""
             prefs = load_transcode_tui_prefs(workspace_root)
             want_theme = str(prefs.get("theme") or "textual-ansi")
             if want_theme == "textual-dark":
@@ -4620,6 +5046,10 @@ def run_saip_transcode_tui(bridge: SaipToolBridge) -> None:
                 saved_mode = pane_prefs.get(pref_key)
                 if isinstance(saved_mode, str):
                     self._pane_modes[slot_name] = saved_mode
+            outline_prefs = load_outline_prefs(workspace_root)
+            saved_fold = outline_prefs.get("fold_redundant_file_paths")
+            if isinstance(saved_fold, bool):
+                self._outline_fold_redundant_file_paths = saved_fold
             self._pes = pes_loaded
             self._raw_der = raw_der
             self._json_snapshot = initial_json
@@ -4781,6 +5211,7 @@ def run_saip_transcode_tui(bridge: SaipToolBridge) -> None:
             return True
 
         def action_copy_text_selection(self) -> None:
+            """Copy the current text selection to the clipboard."""
             if self._copy_selected_text_from_focused_area():
                 return
             self._set_status(
@@ -4789,6 +5220,7 @@ def run_saip_transcode_tui(bridge: SaipToolBridge) -> None:
             )
 
         def action_paste_text_clipboard(self) -> None:
+            """Paste clipboard text into the focused editor."""
             if self._paste_clipboard_into_focused_area():
                 return
             self._set_status(
@@ -4802,6 +5234,7 @@ def run_saip_transcode_tui(bridge: SaipToolBridge) -> None:
             self.action_copy_selected_pe()
 
         def on_text_area_changed(self, event: TextArea.Changed) -> None:
+            """Debounce lint and inspect refresh when the DER or decoded text area changes."""
             if self._is_decoded_text_view(event.text_area):
                 # Decoded pane is read-only in v1 (decoded-edit moved
                 # to V2 GUI); only the programmatic-update skip
@@ -4828,6 +5261,7 @@ def run_saip_transcode_tui(bridge: SaipToolBridge) -> None:
             self._refresh_placeholder_hud(str(event.text_area.text or ""))
 
             def maybe_refresh() -> None:
+                """Debounce guard: run the refresh only if the current generation matches."""
                 if generation != self._lint_debounce_gen:
                     return
                 try:
@@ -4848,6 +5282,7 @@ def run_saip_transcode_tui(bridge: SaipToolBridge) -> None:
             generation = self._inspect_debounce_gen
 
             def maybe_refresh() -> None:
+                """Debounce guard: run the refresh only if the current generation matches."""
                 if generation != self._inspect_debounce_gen:
                     return
                 try:
@@ -4873,6 +5308,7 @@ def run_saip_transcode_tui(bridge: SaipToolBridge) -> None:
             generation = self._decoded_debounce_gen
 
             def maybe_refresh() -> None:
+                """Debounce guard: run the refresh only if the current generation matches."""
                 if generation != self._decoded_debounce_gen:
                     return
                 try:
@@ -4890,6 +5326,7 @@ def run_saip_transcode_tui(bridge: SaipToolBridge) -> None:
             self.set_timer(delay, maybe_refresh)
 
         def action_toggle_inspect_left_mode(self) -> None:
+            """Toggle the left-pane inspect mode between selection and profile ASN.1 views."""
             if self._left_inspect_mode == "selection":
                 self._left_inspect_mode = "profile_asn1"
             else:
@@ -4899,6 +5336,7 @@ def run_saip_transcode_tui(bridge: SaipToolBridge) -> None:
             self._refresh_decoded_panel()
 
         def action_cycle_theme(self) -> None:
+            """Rotate the TUI colour theme to the next entry in the theme cycle."""
             cur = str(self.theme or "textual-dark")
             nxt = next_theme_in_cycle(cur)
             try:
@@ -5339,6 +5777,63 @@ def run_saip_transcode_tui(bridge: SaipToolBridge) -> None:
                 candidate = replacement_path[2]
                 if isinstance(candidate, str) and candidate.startswith("ef-"):
                     last_ef_key = candidate
+
+            # When the tagged hex leaf carries inline typed placeholders
+            # (``{var:TYPE:N[:mod]}``) the regular decoded-cascade returns
+            # ``None`` because ``bytes.fromhex`` trips on the literal.
+            # Short-circuit with a dedicated read-only view so the
+            # operator sees each placeholder broken out cleanly instead
+            # of a "Decoded view not available" placeholder.
+            if (
+                isinstance(raw_value, dict)
+                and set(_structural_data_keys(raw_value)) == {_TAG_BYTES}
+            ):
+                _hex_text = str(
+                    raw_value.get(_TAG_BYTES, raw_value.get(_LEGACY_TAG_BYTES, ""))
+                    or ""
+                )
+                from .saip_hex_template import (
+                    describe_inline_placeholder_hex as _describe_inline_placeholder_hex,
+                    detect_inline_placeholders as _detect_inline_placeholders,
+                )
+                if _detect_inline_placeholders(_hex_text):
+                    inline_payload = _describe_inline_placeholder_hex(
+                        _hex_text,
+                        field_name=field_name,
+                        ef_key=last_ef_key,
+                    )
+                    if isinstance(inline_payload, dict):
+                        placeholder_count = len(inline_payload.get("placeholders", []))
+                        title = (
+                            f"Decoded view: {field_name} — inline template placeholder"
+                            if placeholder_count <= 1
+                            else f"Decoded view: {field_name} — {placeholder_count} inline template placeholders"
+                        )
+                        return {
+                            "replacement_path": replacement_path,
+                            "field_name": field_name,
+                            "last_ef_key": last_ef_key,
+                            "pe_key": pe_key,
+                            "raw_hex": None,
+                            "inline_placeholder_hex": _hex_text,
+                            "title": title,
+                            "note": (
+                                "Field carries vendor-style inline typed "
+                                "placeholders. They are preserved verbatim "
+                                "through decode and will be re-substituted "
+                                "to sentinel bytes on save. Resolve via the "
+                                "vendor template pipeline before shipping."
+                            ),
+                            "editor_kind": "readonly_json",
+                            "payload": copy.deepcopy(inline_payload),
+                            "payload_text": json.dumps(
+                                inline_payload,
+                                indent=2,
+                                ensure_ascii=False,
+                            ),
+                            "read_only": True,
+                        }
+
             model = build_decoded_value_editor_model(
                 field_name=field_name,
                 raw_value=raw_value,
@@ -6134,6 +6629,7 @@ def run_saip_transcode_tui(bridge: SaipToolBridge) -> None:
                 self._set_status(f"{failure_prefix}: {exc}", remember=False)
 
         def on_input_changed(self, event: Input.Changed) -> None:
+            """Respond to text input changes (filter box, hex field, or search box)."""
             if str(event.input.id or "").strip() != "json_outline_search":
                 return
             self._apply_outline_search(
@@ -6144,6 +6640,7 @@ def run_saip_transcode_tui(bridge: SaipToolBridge) -> None:
             )
 
         def on_input_submitted(self, event: Input.Submitted) -> None:
+            """Commit an input field value on Enter."""
             if str(event.input.id or "").strip() != "json_outline_search":
                 return
             previous_query = self._outline_search_query
@@ -6162,6 +6659,7 @@ def run_saip_transcode_tui(bridge: SaipToolBridge) -> None:
             )
 
         def on_key(self, event: events.Key) -> None:
+            """Handle keyboard events within the outline search input."""
             if self._outline_search_input_focused() is False:
                 return
             normalized_key = str(event.key or "").strip().lower()
@@ -6174,6 +6672,7 @@ def run_saip_transcode_tui(bridge: SaipToolBridge) -> None:
                 event.prevent_default()
 
         def on_tree_node_selected(self, event: Tree.NodeSelected) -> None:
+            """Navigate the decoded JSON editor to the node selected in the outline."""
             tree_widget = event.control
             try:
                 json_outline = self.query_one("#json_outline", Tree)
@@ -6241,6 +6740,7 @@ def run_saip_transcode_tui(bridge: SaipToolBridge) -> None:
             )
 
         def on_file_system_view_file_selected(self, event) -> None:
+            """Activate the PE section that owns the file selected in the FS view."""
             pe_section_key = str(getattr(event, "pe_section_key", "") or "").strip()
             if len(pe_section_key) == 0:
                 return
@@ -6252,6 +6752,7 @@ def run_saip_transcode_tui(bridge: SaipToolBridge) -> None:
                 )
 
         def on_applications_view_application_selected(self, event) -> None:
+            """Activate the PE section that owns the application selected in the app view."""
             pe_section_key = str(getattr(event, "pe_section_key", "") or "").strip()
             if len(pe_section_key) == 0:
                 return
@@ -6276,6 +6777,7 @@ def run_saip_transcode_tui(bridge: SaipToolBridge) -> None:
             self._jump_editor_to_span(offset, offset + len(search_token))
 
         def on_tree_node_highlighted(self, event: Tree.NodeHighlighted) -> None:
+            """Update the status bar hint when an outline node is highlighted."""
             tree = self.query_one("#json_outline", Tree)
             if event.control is not tree:
                 return
@@ -6329,6 +6831,7 @@ def run_saip_transcode_tui(bridge: SaipToolBridge) -> None:
             self._schedule_decoded_refresh()
 
         def on_mouse_down(self, event: events.MouseDown) -> None:
+            """Handle right-click on the JSON outline tree to open the context menu."""
             tree = self.query_one("#json_outline", Tree)
             if event.widget is not tree or int(getattr(event, "button", 0)) != 3:
                 return
@@ -6350,6 +6853,7 @@ def run_saip_transcode_tui(bridge: SaipToolBridge) -> None:
             event.prevent_default()
 
         def on_click(self, event: events.Click) -> None:
+            """Handle mouse clicks on the JSON outline tree."""
             tree = self.query_one("#json_outline", Tree)
             if event.widget is tree:
                 if event.chain < 2:
@@ -6412,6 +6916,12 @@ def run_saip_transcode_tui(bridge: SaipToolBridge) -> None:
                 tokens = ", ".join(sorted(outcome.undefined_tokens))
                 return base + (
                     f" · template mode (unresolved: {tokens}) · {hint}"
+                )
+            if outcome.inline_placeholder_count > 0:
+                return (
+                    base
+                    + f" · inline placeholders: {outcome.inline_placeholder_count}"
+                    + " · findings on those paths reported as INFO."
                 )
             if len(outcome.placeholder_paths) > 0:
                 return (
@@ -6533,6 +7043,7 @@ def run_saip_transcode_tui(bridge: SaipToolBridge) -> None:
             self._select_placeholder_by_index(next_index)
 
         def action_jump_prev_placeholder(self) -> None:
+            """Move the cursor to the previous placeholder in the DER editor."""
             if len(self._placeholder_locations) == 0:
                 self._refresh_placeholder_hud()
             if self._placeholder_nav_index < 0:
@@ -7110,6 +7621,18 @@ def run_saip_transcode_tui(bridge: SaipToolBridge) -> None:
             current_record_number = 0
             pending_fill_items: list[object] = []
             pending_fill_spans: list[tuple[int, int]] = []
+            # ``last_emitted_file_path_hex`` tracks the canonical hex of
+            # the most recent ``filePath`` row that actually landed in
+            # the outline. Subsequent ``filePath`` entries with the same
+            # bytes are either folded (suppressed) or emitted, depending
+            # on ``self._outline_fold_redundant_file_paths``.
+            # ``last_emitted_file_path_node`` lets us decorate that row
+            # with a "(+N folded)" counter so the fold is visible.
+            last_emitted_file_path_hex: str | None = None
+            last_emitted_file_path_node: object = None
+            last_emitted_file_path_base_label: str = ""
+            folded_since_last_emit: int = 0
+            fold_redundant: bool = bool(self._outline_fold_redundant_file_paths)
             for idx, item in enumerate(value):
                 if idx >= len(item_spans):
                     break
@@ -7123,6 +7646,10 @@ def run_saip_transcode_tui(bridge: SaipToolBridge) -> None:
                     current_record_number = 0
                     pending_fill_items = []
                     pending_fill_spans = []
+                    last_emitted_file_path_hex = None
+                    last_emitted_file_path_node = None
+                    last_emitted_file_path_base_label = ""
+                    folded_since_last_emit = 0
                     child = parent.add(
                         self._outline_label_for_value(f"[{idx}]", item),
                         data=item_span,
@@ -7151,11 +7678,35 @@ def run_saip_transcode_tui(bridge: SaipToolBridge) -> None:
                     current_record_number = 0
                     pending_fill_items = []
                     pending_fill_spans = []
-                    label = self._outline_label_with_suffix(
+                    path_hex_raw = self._outline_bytes_hex(payload)
+                    canonical_path = "".join(
+                        str(path_hex_raw or "").split()
+                    ).upper()
+                    if (
+                        fold_redundant
+                        and len(canonical_path) > 0
+                        and canonical_path == last_emitted_file_path_hex
+                        and last_emitted_file_path_node is not None
+                    ):
+                        folded_since_last_emit += 1
+                        try:
+                            last_emitted_file_path_node.set_label(
+                                f"{last_emitted_file_path_base_label}"
+                                f"  (+{folded_since_last_emit} folded SELECT"
+                                f"{'s' if folded_since_last_emit != 1 else ''})"
+                            )
+                        except Exception:
+                            # ``Tree.TreeNode.set_label`` should always
+                            # exist, but in the unlikely event it does
+                            # not the unmodified base label is still
+                            # correct — drop the decoration silently.
+                            pass
+                        continue
+                    base_label = self._outline_label_with_suffix(
                         self._outline_label_for_value(f"[{idx}]", item),
-                        self._outline_file_path_label(self._outline_bytes_hex(payload)),
+                        self._outline_file_path_label(path_hex_raw),
                     )
-                    child = parent.add(label, data=item_span)
+                    child = parent.add(base_label, data=item_span)
                     self._populate_json_outline(
                         child,
                         item,
@@ -7165,6 +7716,10 @@ def run_saip_transcode_tui(bridge: SaipToolBridge) -> None:
                         container_key=None,
                         file_management_sequence=False,
                     )
+                    last_emitted_file_path_hex = canonical_path
+                    last_emitted_file_path_node = child
+                    last_emitted_file_path_base_label = base_label
+                    folded_since_last_emit = 0
                     continue
                 if tag_name == "createFCP":
                     current_file_node = None
@@ -7652,6 +8207,25 @@ def run_saip_transcode_tui(bridge: SaipToolBridge) -> None:
 
             transcode_json_path.write_text(stripped + "\n", encoding="utf-8")
             disk_json_text = transcode_json_path.read_text(encoding="utf-8").strip()
+
+            # De-splice inline typed placeholders (literal -> sentinel bytes)
+            # before JSON parse so dejsonify sees valid hex in every tagged
+            # ``hex`` field. Fresh records are allocated per save so
+            # placeholder adds / removes / re-orders in the editor round-trip
+            # without relying on load-time sidecar state.
+            from .saip_hex_template import (
+                detect_inline_placeholders as _detect_inline_placeholders,
+                sidecar_path_for_cache as _inline_sidecar_path_for,
+                splice_literals_into_tagged_document as _splice_save_literals,
+                substitute_inline_placeholders as _substitute_inline_placeholders,
+                write_sidecar as _write_inline_sidecar,
+            )
+            _save_inline_records: list = []
+            if _detect_inline_placeholders(disk_json_text):
+                disk_json_text, _save_inline_records = _substitute_inline_placeholders(
+                    disk_json_text
+                )
+
             pre_loaded = json.loads(disk_json_text)
             if isinstance(pre_loaded, dict) is False:
                 raise ValueError("Root JSON value must be an object.")
@@ -7703,11 +8277,34 @@ def run_saip_transcode_tui(bridge: SaipToolBridge) -> None:
             )
             post_tagged = jsonify_document(doc_round)
             reapply_transcode_editor_placeholders(pre_loaded, post_tagged)
+            if len(_save_inline_records) > 0:
+                # Splice sentinel runs back to their original placeholder
+                # literals so the on-disk transcode JSON and the refreshed
+                # editor buffer both carry the vendor-facing text rather
+                # than the sentinel bytes that materialised in the DER.
+                _splice_save_literals(post_tagged, _save_inline_records)
             pretty = json.dumps(post_tagged, indent=2, ensure_ascii=False) + "\n"
 
             transcode_json_path.write_text(pretty, encoding="utf-8")
             transcode_der_path.write_bytes(der)
             transcode_txt_path.write_text(der.hex().upper() + "\n", encoding="utf-8")
+
+            # Keep the placeholder sidecar co-located with the transcode
+            # DER so re-opening the transcode output picks the literals
+            # back up via ``_prepare_input_for_tool`` + the sidecar lookup
+            # in the load path. Clear any stale sidecar when the current
+            # save has no placeholders so we never reapply a mismatched
+            # literal set on next open.
+            _save_sidecar = _inline_sidecar_path_for(transcode_der_path)
+            if len(_save_inline_records) > 0:
+                _write_inline_sidecar(_save_sidecar, _save_inline_records)
+            else:
+                try:
+                    _save_sidecar.unlink()
+                except FileNotFoundError:
+                    pass
+                except OSError:
+                    pass
 
             self._set_editor_text_programmatically(
                 editor,
@@ -7739,6 +8336,7 @@ def run_saip_transcode_tui(bridge: SaipToolBridge) -> None:
                 der_widget.add_class("flash-ok")
 
             def clear_flash() -> None:
+                """Remove the flash-ok CSS class from the editor after the flash interval."""
                 try:
                     editor.remove_class("flash-ok")
                     for der_widget in self._all_der_views():
@@ -7780,6 +8378,7 @@ def run_saip_transcode_tui(bridge: SaipToolBridge) -> None:
             return spans
 
         def on_text_area_selection_changed(self, event: TextArea.SelectionChanged) -> None:
+            """Synchronise peer editor selection when the active TextArea selection changes."""
             if self._peer_lock:
                 return
             editor = self.query_one("#json_editor", TextArea)
@@ -7827,6 +8426,7 @@ def run_saip_transcode_tui(bridge: SaipToolBridge) -> None:
                 self._schedule_decoded_refresh()
 
         def action_save_refresh(self) -> None:
+            """Save the current editor content and refresh the decoded view."""
             if self._resolved_preview_active:
                 self._set_status(
                     "Resolved preview is read-only. Press Ctrl+R to return to the template before saving.",
@@ -7842,6 +8442,7 @@ def run_saip_transcode_tui(bridge: SaipToolBridge) -> None:
                 self._set_status(f"Save failed: {exc}", remember=False)
 
         def action_run_lint_now(self) -> None:
+            """Trigger an immediate lint run on the current editor document."""
             try:
                 self._refresh_validation_feedback()
                 self._run_lint_for_current_buffer(
@@ -7854,6 +8455,7 @@ def run_saip_transcode_tui(bridge: SaipToolBridge) -> None:
                 self._set_status(f"Lint failed: {exc}", remember=False)
 
         def action_open_token_manager(self) -> None:
+            """Open the token manager overlay for the current profile."""
             if self._resolved_preview_active:
                 self._set_status(
                     "Token manager unavailable in resolved preview. Press Ctrl+R to return to the template.",
@@ -8307,6 +8909,7 @@ def run_saip_transcode_tui(bridge: SaipToolBridge) -> None:
             )
 
         def action_move_selected_pe_up(self) -> None:
+            """Move the selected PE one position up in the document PE list."""
             try:
                 doc = self._current_editor_document()
                 pe_key = self._preferred_selected_pe_key()
@@ -8329,6 +8932,7 @@ def run_saip_transcode_tui(bridge: SaipToolBridge) -> None:
             )
 
         def action_move_selected_pe_down(self) -> None:
+            """Move the selected PE one position down in the document PE list."""
             try:
                 doc = self._current_editor_document()
                 pe_key = self._preferred_selected_pe_key()
@@ -8351,6 +8955,7 @@ def run_saip_transcode_tui(bridge: SaipToolBridge) -> None:
             )
 
         def action_remove_selected_pe(self) -> None:
+            """Remove the currently selected PE from the document after confirmation."""
             try:
                 self._current_editor_document()
                 pe_key = self._preferred_selected_pe_key()
@@ -8394,6 +8999,7 @@ def run_saip_transcode_tui(bridge: SaipToolBridge) -> None:
             )
 
         def action_copy_selected_pe(self) -> None:
+            """Copy the currently selected PE to the quick-add clipboard buffer."""
             try:
                 doc = self._current_editor_document()
                 pe_key = self._preferred_selected_pe_key()
@@ -8440,6 +9046,7 @@ def run_saip_transcode_tui(bridge: SaipToolBridge) -> None:
         def action_quit(self) -> None:
             self.exit()
 
+    import signal
     import warnings
 
     with warnings.catch_warnings():
@@ -8457,4 +9064,68 @@ def run_saip_transcode_tui(bridge: SaipToolBridge) -> None:
             message=r"coroutine 'MessagePump\._post_message' was never awaited",
             category=RuntimeWarning,
         )
-        SaipTranscodeApp().run(inline=False)
+        try:
+            SaipTranscodeApp().run(inline=False)
+        finally:
+            # Textual's Linux driver installs a SIGCONT handler in
+            # ``start_application_mode`` that calls
+            # ``resume_application_mode`` whenever the process receives
+            # SIGCONT (terminal STOP/CONT cycle, job-control resume,
+            # some multiplexer frames). The handler stays registered
+            # after the app exits on Textual 8.x; a later SIGCONT at
+            # the outer REPL prompt (``[SAIP Tool] >``) re-enters
+            # ``asyncio.get_running_loop()`` with no loop and raises
+            # ``RuntimeError: no running event loop`` out of
+            # ``builtins.input``. Resetting to ``SIG_DFL`` on TUI teardown
+            # makes post-exit SIGCONT a no-op.
+            try:
+                signal.signal(signal.SIGCONT, signal.SIG_DFL)
+            except (ValueError, OSError):
+                # Not on the main thread, or the platform is refusing
+                # the reset. Nothing else to do; the handler will
+                # remain until process exit but that is no worse than
+                # the pre-fix state.
+                pass
+
+            # Even after a clean Ctrl+Q exit, Textual's Linux driver
+            # sometimes leaves the tty with the cursor hidden,
+            # bracketed-paste mode still on, and one or more mouse
+            # tracking modes still enabled. The visible symptom at the
+            # outer ``[SAIP Tool] >`` REPL is a "hanging" cursor glyph
+            # and the first keystroke or two being silently consumed by
+            # the still-active bracketed-paste parser before the shell
+            # gets them. Emit the canonical disable sequences and
+            # restore sane line discipline so the parent readline has a
+            # clean tty to hand back to ``builtins.input``.
+            try:
+                import sys as _sys
+
+                _tty_restore = (
+                    "\x1b[?25h"       # DECTCEM — show cursor
+                    "\x1b[?2004l"     # bracketed paste off
+                    "\x1b[?1000l"     # mouse X11 tracking off
+                    "\x1b[?1002l"     # mouse cell-motion tracking off
+                    "\x1b[?1003l"     # mouse all-motion tracking off
+                    "\x1b[?1006l"     # SGR mouse encoding off
+                    "\x1b[?1015l"     # urxvt mouse encoding off
+                    "\x1b[?1049l"     # leave alternate screen buffer
+                    "\x1b[0m"         # reset SGR
+                )
+                _sys.stdout.write(_tty_restore)
+                _sys.stdout.flush()
+            except Exception:
+                pass
+            try:
+                import os as _os
+
+                if hasattr(_os, "isatty") and _os.isatty(0):
+                    import termios as _termios
+
+                    _fd = 0
+                    _attrs = _termios.tcgetattr(_fd)
+                    # Re-enable ICANON + ECHO + ISIG so ``builtins.input``
+                    # sees line-buffered input with echo on next call.
+                    _attrs[3] = _attrs[3] | _termios.ICANON | _termios.ECHO | _termios.ISIG
+                    _termios.tcsetattr(_fd, _termios.TCSADRAIN, _attrs)
+            except Exception:
+                pass

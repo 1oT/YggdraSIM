@@ -1,3 +1,5 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+"""Profile store: tracks enabled/disabled profiles and maps EID profile slots to on-disk state files."""
 from __future__ import annotations
 
 import os
@@ -30,6 +32,7 @@ PROFILE_UPP_FILENAME = "profile.upp.der"
 
 
 def load_profiles_from_store(store_path: str) -> list[SimProfileEntry]:
+    """Load all profile JSON files from the store directory into ``state.profiles``."""
     root_path = _ensure_store_root(store_path)
     if len(root_path) == 0:
         return []
@@ -48,6 +51,7 @@ def load_profiles_from_store(store_path: str) -> list[SimProfileEntry]:
 
 
 def sync_profiles_to_store(store_path: str, profiles: list[SimProfileEntry]) -> None:
+    """Persist the current ``state.profiles`` list back to the store directory as JSON files."""
     root_path = _ensure_store_root(store_path)
     if len(root_path) == 0:
         return
@@ -93,6 +97,7 @@ def load_profile_image_json_file(path: str) -> SimProfileImage | None:
 
 
 def profile_store_has_entries(store_path: str) -> bool:
+    """Return True when the profile store directory contains at least one profile entry."""
     root_path = _ensure_store_root(store_path)
     if len(root_path) == 0:
         return False

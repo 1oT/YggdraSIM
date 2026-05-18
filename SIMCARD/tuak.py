@@ -1,3 +1,4 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """
 TUAK algorithm implementation for the simulated USIM.
 
@@ -63,6 +64,11 @@ def _rotate_left_64(value: int, offset: int) -> int:
 
 
 def keccak_f_1600(state_bytes: bytes) -> bytes:
+    """Apply the Keccak-f[1600] permutation to a 200-byte state block (NIST FIPS 202 §3.4).
+
+    Used as the core one-way function in the TUAK authentication algorithm
+    (3GPP TS 35.231 §5).
+    """
     data = bytes(state_bytes or b"")
     if len(data) != 200:
         raise ValueError("Keccak-f[1600] requires a 200-byte state.")
@@ -244,6 +250,7 @@ def tuak_f1(
     number_of_keccak: int = 1,
     mac_size_bytes: int = 8,
 ) -> bytes:
+    """Compute TUAK f1 (network authentication MAC-A) (3GPP TS 35.231 §5.2)."""
     _validate_tuak_inputs(topc=topc, rand=rand, sqn=sqn, amf=amf, key=key)
     instance = _f1_instance(key_len=len(bytes(key)), mac_len_bytes=int(mac_size_bytes), star=False)
     state = _build_state(
@@ -269,6 +276,7 @@ def tuak_f1_star(
     number_of_keccak: int = 1,
     mac_size_bytes: int = 8,
 ) -> bytes:
+    """Compute TUAK f1* (re-synchronisation MAC-S) (3GPP TS 35.231 §5.2)."""
     _validate_tuak_inputs(topc=topc, rand=rand, sqn=sqn, amf=amf, key=key)
     instance = _f1_instance(key_len=len(bytes(key)), mac_len_bytes=int(mac_size_bytes), star=True)
     state = _build_state(
@@ -294,6 +302,11 @@ def tuak_f2345(
     ck_size_bytes: int = 16,
     ik_size_bytes: int = 16,
 ) -> tuple[bytes, bytes, bytes, bytes]:
+    """Compute TUAK f2/f3/f4/f5 (RES, CK, IK, AK) (3GPP TS 35.231 §5.3).
+
+    Returns the four authentication response and key-material outputs as a
+    ``(RES, CK, IK, AK)`` tuple.
+    """
     _validate_tuak_inputs(topc=topc, rand=rand, sqn=None, amf=None, key=key)
     instance = _f2345_instance(
         key_len=len(bytes(key)),
@@ -323,6 +336,7 @@ def tuak_f5_star(
     key: bytes,
     number_of_keccak: int = 1,
 ) -> bytes:
+    """Compute TUAK f5* (AK for re-synchronisation) (3GPP TS 35.231 §5.3)."""
     _validate_tuak_inputs(topc=topc, rand=rand, sqn=None, amf=None, key=key)
     instance = _f5star_instance(key_len=len(bytes(key)))
     state = _build_state(
@@ -348,6 +362,11 @@ def tuak_vectors(
     mac_size_bytes: int = 8,
     ck_ik_size_bytes: int = 16,
 ) -> TuakVectors:
+    """Run the full TUAK f1/f1*/f2345/f5* function set (3GPP TS 35.231).
+
+    Returns all six outputs (MAC-A, MAC-S, RES, CK, IK, AK, AK*) in a
+    ``TuakVectors`` dataclass, mirroring the ``MilenageVectors`` API.
+    """
     _validate_tuak_inputs(topc=topc, rand=rand, sqn=sqn, amf=amf, key=key)
     mac_a = tuak_f1(
         topc=topc,

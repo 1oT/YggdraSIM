@@ -1,4 +1,4 @@
-"""Regression coverage for the Phase A pySim-derived ``_FILE_SPECS`` overlay.
+"""Regression coverage for the pySim-derived ``_FILE_SPECS`` overlay.
 
 These tests pin three distinct invariants:
 

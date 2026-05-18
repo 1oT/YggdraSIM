@@ -1,3 +1,5 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+"""SCP11 local-access session: drives a full SGP.26 local-delivery exchange without network dependencies."""
 import hashlib
 import os
 import re
@@ -490,6 +492,7 @@ class LocalIsdrSession:
         return " | ".join(parts)
 
     def select_isdr(self) -> bytes:
+        """SELECT the ISD-R application on the active card channel."""
         aid = bytes(self.cfg.AID_ISD_R)
         apdu = bytes([0x00, 0xA4, 0x04, 0x00, len(aid)]) + aid
         response = self.apdu_channel.send(apdu, "LOCAL: Select ISD-R")
@@ -498,6 +501,7 @@ class LocalIsdrSession:
         return response
 
     def get_euicc_info1(self) -> bytes:
+        """Send ES10b.GetEUICCInfo and return the raw EUICCInfo1 bytes."""
         response = self.apdu_channel.send(
             b"\x80\xE2\x91\x00\x03\xBF\x20\x00",
             "LOCAL: GetEuiccInfo1",
@@ -506,6 +510,7 @@ class LocalIsdrSession:
         return response
 
     def get_euicc_challenge(self) -> bytes:
+        """Send ES10b.GetEUICCChallenge and return the 16-byte eUICC challenge."""
         response = self.apdu_channel.send(
             b"\x80\xE2\x91\x00\x03\xBF\x2E\x00",
             "LOCAL: GetEuiccChallenge",
@@ -516,6 +521,7 @@ class LocalIsdrSession:
         return self.state.card_challenge
 
     def get_euicc_configured_data(self) -> bytes:
+        """Send ES10b.GetEUICCConfiguredData and return the response bytes."""
         response = self.apdu_channel.send(
             b"\x80\xE2\x91\x00\x03\xBF\x3C\x00",
             "LOCAL: GetEuiccConfiguredData",
@@ -666,6 +672,7 @@ class LocalIsdrSession:
         return snapshot
 
     def collect_profile_metadata(self) -> list[ProfileMetadataView]:
+        """Collect and return profile metadata rows for the currently enabled profile."""
         self.reset_state()
         self.select_isdr()
         raw_profiles = self.get_profiles_info()
@@ -679,6 +686,7 @@ class LocalIsdrSession:
         return self._resolve_profile_target(identifier)
 
     def decode_profile_metadata_rows(self, raw_data: bytes) -> list[ProfileMetadataView]:
+        """Decode raw profile metadata bytes into a list of human-readable (key, value) pairs."""
         rows: list[ProfileMetadataView] = []
         index = 0
         while index < len(raw_data):
@@ -704,6 +712,7 @@ class LocalIsdrSession:
         return rows
 
     def decode_euicc_configured_data(self, raw_data: bytes) -> dict[str, Any]:
+        """Decode configured-data bytes returned by GET DATA 0x5C0A into a structured dict (SGP.22 §2.6.4)."""
         result: dict[str, Any] = {
             "default_smdp": "",
             "root_smds_primary": "",
@@ -784,6 +793,7 @@ class LocalIsdrSession:
         return self._run_profile_state_command(identifier, self.TAG_DELETE_PROFILE, "DeleteProfile")
 
     def store_metadata(self, metadata_path: str = "") -> bytes:
+        """Persist the supplied metadata dict to the session metadata store."""
         encoded_metadata = self.encode_metadata_asn1(override_path=metadata_path)
         return self._run_metadata_command(
             encoded_metadata,
@@ -792,6 +802,7 @@ class LocalIsdrSession:
         )
 
     def update_metadata(self, metadata_path: str = "") -> bytes:
+        """Update fields in the stored metadata dict without replacing it wholesale."""
         encoded_metadata = self.encode_update_metadata_asn1(override_path=metadata_path)
         return self._run_metadata_command(
             encoded_metadata,
@@ -806,6 +817,7 @@ class LocalIsdrSession:
         return self._run_metadata_command(custom_payload, custom_tag, action_label)
 
     def store_metadata_custom_all(self, metadata_path: str = "") -> list[tuple[str, bytes]]:
+        """Write all custom metadata tags from *payload* into the metadata store."""
         custom_entries = self.load_enabled_custom_metadata_entries(override_path=metadata_path)
         if len(custom_entries) == 0:
             raise ValueError(
@@ -1179,6 +1191,7 @@ class LocalIsdrSession:
         return self._wrap_tlv(new_tag, current_value)
 
     def open_session(self, transaction_id_override: Optional[bytes] = None) -> OpenSessionResult:
+        """Open an ES10b or ES9+ session to the eUICC or SM-DP+ and return the session handle."""
         self.select_isdr()
         self.get_euicc_info1()
         self.get_euicc_configured_data()
@@ -1241,6 +1254,7 @@ class LocalIsdrSession:
         )
 
     def cancel_session(self, reason: int = CANCEL_SESSION_REASON_END_USER_REJECTION) -> bytes:
+        """Cancel the current provisioning session and release associated resources."""
         if len(self.state.transaction_id) == 0:
             raise RuntimeError("No active local SCP11 session is available to cancel.")
 
@@ -1264,6 +1278,7 @@ class LocalIsdrSession:
         return self.cancel_session(reason=reason)
 
     def prepare_download(self) -> bytes:
+        """Issue ES9+.PrepareDownload and return the decoded server response."""
         if self.state.session_open is False:
             raise RuntimeError("No active local SCP11 session. Run OPEN first.")
         if len(self.state.euicc_signature1) == 0:
@@ -1945,6 +1960,7 @@ class LocalIsdrSession:
             a3_plaintext_chunk_size = int(bsp.max_payload_size)
 
         def encode_seq(tag: int, sequence: list[bytes]) -> bytes:
+            """Encode a value as a DER SEQUENCE by wrapping it with tag 0x30."""
             payload = b"".join(sequence)
             return (
                 pysim_es8p.bertlv_encode_tag(tag)
@@ -2782,6 +2798,7 @@ class LocalIsdrSession:
         return False
 
     def load_profile(self, profile_path: str = "") -> bytes:
+        """Load a compiled profile to the eUICC via ES10b.LoadBoundProfilePackage (SGP.22 §5.7.20)."""
         if self.state.session_open is False:
             raise RuntimeError("No active local SCP11 session.")
         if len(self.state.prepare_download_response) == 0:
@@ -2968,6 +2985,7 @@ class LocalIsdrSession:
         }
 
     def list_local_smdp_certificate_inventory(self) -> dict[str, Any]:
+        """Return the sorted inventory of known local SM-DP+ certificates."""
         allowed_ci_pkids = list(self.state.allowed_ci_pkids)
         auth_records = [
             self._smdp_record_summary(record, allowed_ci_pkids)
@@ -2996,6 +3014,7 @@ class LocalIsdrSession:
         }
 
     def local_smdp_reference_address(self) -> str:
+        """Return the active SM-DP+ reference address for the current local session."""
         selected_address = str(self.state.selected_local_smdp_address or "").strip()
         if len(selected_address) > 0:
             return selected_address
@@ -3061,6 +3080,7 @@ class LocalIsdrSession:
                 self.state.selected_ci_pkid = pb_record.root_ci_ski
 
     def set_profile_override_path(self, profile_path: str) -> str:
+        """Set a path override for the profile binary; subsequent resolves will use this path."""
         normalized_path = str(profile_path).strip()
         if len(normalized_path) == 0:
             raise ValueError("Profile override path cannot be empty.")
@@ -3141,6 +3161,7 @@ class LocalIsdrSession:
         return parts[0].strip()
 
     def resolve_profile_path(self, override_path: str = "") -> str:
+        """Resolve the absolute path of the profile binary, respecting any override."""
         candidate_override = str(override_path).strip()
         if len(candidate_override) == 0:
             candidate_override = str(self.state.profile_override_path).strip()
@@ -3168,6 +3189,7 @@ class LocalIsdrSession:
         return default_entries[0]
 
     def set_metadata_override_path(self, metadata_path: str) -> str:
+        """Set a path override for the metadata JSON; subsequent resolves will use this path."""
         normalized_path = str(metadata_path).strip()
         if len(normalized_path) == 0:
             raise ValueError("Metadata override path cannot be empty.")
@@ -3183,6 +3205,7 @@ class LocalIsdrSession:
         self._persist_inventory_profile()
 
     def resolve_metadata_path(self, override_path: str = "") -> str:
+        """Resolve the absolute path of the metadata JSON, respecting any override."""
         candidate_override = str(override_path).strip()
         if len(candidate_override) == 0:
             candidate_override = str(self.state.metadata_override_path).strip()
@@ -3232,6 +3255,7 @@ class LocalIsdrSession:
         return collect_enabled_custom_metadata_tags(document)
 
     def lint_metadata(self, metadata_path: str = "") -> dict[str, Any]:
+        """Run static lint checks on the metadata document and return a list of finding strings."""
         resolved_path = self.resolve_metadata_path(override_path=metadata_path)
         if len(resolved_path) == 0:
             raise FileNotFoundError("No metadata JSON file is available.")
@@ -3274,6 +3298,7 @@ class LocalIsdrSession:
         }
 
     def reset_state(self) -> None:
+        """Reset the local-access session state to defaults without disconnecting from the card."""
         persistent_profile_override_path = self.state.profile_override_path
         persistent_resolved_profile_path = self.state.resolved_profile_path
         persistent_metadata_override_path = self.state.metadata_override_path
@@ -3471,6 +3496,7 @@ class LocalIsdrSession:
         pkid_values: list[str] = []
 
         def walk(blob: bytes) -> None:
+            """Walk the decoded profile tree depth-first and yield (path, node) tuples."""
             offset = 0
             while offset < len(blob):
                 try:

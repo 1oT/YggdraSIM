@@ -1,3 +1,5 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+"""HIL-Bridge APDU relay: forwards C-APDUs from a network client to the connected physical SIM and returns R-APDUs."""
 from __future__ import annotations
 
 import json
@@ -90,6 +92,7 @@ class _PeerThrottle:
         self._lockouts: dict[str, float] = {}
 
     def is_locked(self, peer: str, now: float) -> bool:
+        """Return True when the relay channel is locked (a PCSC session holds exclusive access)."""
         with self._lock:
             until = self._lockouts.get(peer)
             if until is None:
@@ -138,6 +141,7 @@ class _ApduRelayHandler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
 
     def do_GET(self) -> None:
+        """Handle HTTP GET requests on the relay endpoint (APDU fetch)."""
         normalized_path = self.path.rstrip("/") or "/"
         if normalized_path == APDU_RELAY_PING_PATH:
             # Liveness probe stays unauthenticated. It carries no card
@@ -155,6 +159,7 @@ class _ApduRelayHandler(BaseHTTPRequestHandler):
         self._send_text_response(HTTPStatus.NOT_FOUND, b"not found\n")
 
     def do_POST(self) -> None:
+        """Handle HTTP POST requests on the relay endpoint (APDU transmit)."""
         normalized_path = self.path.rstrip("/") or "/"
         if normalized_path == APDU_RELAY_PATH:
             if self._enforce_authorization() is False:
@@ -366,6 +371,7 @@ class HilBridgeApduRelayService:
 
     @property
     def base_url(self) -> str:
+        """Return the base URL string for this relay server instance."""
         host = self._config.host
         port = self._config.port
         if self._server is not None:
@@ -402,6 +408,7 @@ class HilBridgeApduRelayService:
         return self._audit_logger
 
     def start(self) -> None:
+        """Start the APDU relay: open both sockets and begin the forwarding loop."""
         if self.enabled is False:
             return
         if self._server is not None:
@@ -434,6 +441,7 @@ class HilBridgeApduRelayService:
         self._thread.start()
 
     def stop(self) -> None:
+        """Stop the APDU relay and close all open sockets."""
         server = self._server
         thread = self._thread
         self._server = None
@@ -455,6 +463,7 @@ class HilBridgeApduRelayService:
                 pass
 
     def status_payload(self) -> dict[str, Any]:
+        """Return a status payload dict describing the current relay state."""
         payload = dict(self._status_callback())
         payload.setdefault("status", "ok")
         payload.setdefault("url", self.apdu_url)

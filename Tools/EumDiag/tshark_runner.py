@@ -1,3 +1,4 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """
 Subprocess wrapper around tshark + the EUM-BPP Lua dissector.
 
@@ -83,6 +84,7 @@ class TsharkMissingError(RuntimeError):
 
 
 def ensure_tshark_on_path(binary: str = DEFAULT_TSHARK_BINARY) -> str:
+    """Verify that tshark is available on PATH and raise ``RuntimeError`` if not found."""
     resolved = shutil.which(binary)
     if resolved is None:
         raise TsharkMissingError(

@@ -1,3 +1,5 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+"""SCP11 transport: selects and initialises the card-side bearer (PCSC reader, HIL-Bridge relay, or simulated card)."""
 # -----------------------------------------------------------------------------
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -103,12 +105,15 @@ def _print_chunk_banner(log_name: str, total: int, *, raw: bool) -> None:
 
 class ApduChannel(Protocol):
     def send(self, apdu: bytes, log_name: str) -> bytes:
+        """Send an APDU and follow GET RESPONSE chaining (SW 61xx) to retrieve the full response."""
         pass
 
     def exchange(self, apdu: bytes, log_name: str) -> Tuple[bytes, int, int]:
+        """Send one APDU and return (response_bytes, SW1, SW2), logging the exchange under *log_name*."""
         pass
 
     def reset(self) -> bool:
+        """Disconnect and re-connect the underlying card channel, clearing any active session state."""
         pass
 
     def send_chunked(
@@ -121,6 +126,7 @@ class ApduChannel(Protocol):
         log_name: str,
         chunk_size: int = 250,
     ) -> bytes:
+        """Fragment *data* into STORE-DATA chunks and dispatch each via ``exchange`` (SGP.22 §3.1.3)."""
         pass
 
     def set_raw_apdu_logging(self, enabled: bool) -> None:
@@ -145,6 +151,7 @@ class RelayHttpClientJsonHex:
         self._verify_tls = verify_tls
 
     def send_apdu(self, apdu: bytes, session_id: str = "") -> Tuple[bytes, int, int]:
+        """Forward a raw APDU to the remote relay endpoint and return (response_bytes, SW1, SW2)."""
         request_json = {
             "sessionId": session_id,
             "apdu": apdu.hex().upper(),
@@ -206,6 +213,7 @@ class PcscApduChannel:
         return create_card_connection(reader_index=index)
 
     def reset(self) -> bool:
+        """Disconnect and re-connect the underlying card channel, clearing any active session state."""
         try:
             self._conn.disconnect()
         except Exception:
@@ -214,6 +222,7 @@ class PcscApduChannel:
         return True
 
     def exchange(self, apdu: bytes, log_name: str) -> Tuple[bytes, int, int]:
+        """Send one APDU and return (response_bytes, SW1, SW2), logging the exchange under *log_name*."""
         response, sw1, sw2 = self._conn.transmit(list(apdu))
         payload = bytes(response)
         if self._quiet_apdu_logging is False:
@@ -236,6 +245,7 @@ class PcscApduChannel:
         return payload, sw1, sw2
 
     def send(self, apdu: bytes, log_name: str) -> bytes:
+        """Send an APDU and follow GET RESPONSE chaining (SW 61xx) to retrieve the full response."""
         response, sw1, sw2 = self.exchange(apdu, log_name)
 
         while sw1 == 0x61:
@@ -265,6 +275,7 @@ class PcscApduChannel:
         log_name: str,
         chunk_size: int = 250,
     ) -> bytes:
+        """Fragment *data* into STORE-DATA chunks and dispatch each via ``exchange`` (SGP.22 §3.1.3)."""
         total = len(payload)
         offset = 0
         block = p2_start
@@ -310,9 +321,11 @@ class RelayApduChannel:
         self._quiet_apdu_logging = False
 
     def reset(self) -> bool:
+        """Disconnect and re-connect the underlying card channel, clearing any active session state."""
         return False
 
     def exchange(self, apdu: bytes, log_name: str) -> Tuple[bytes, int, int]:
+        """Send one APDU and return (response_bytes, SW1, SW2), logging the exchange under *log_name*."""
         response, sw1, sw2 = self._relay_client.send_apdu(apdu, session_id=self._session_id)
         if self._quiet_apdu_logging is False:
             _print_apdu_exchange(
@@ -334,6 +347,7 @@ class RelayApduChannel:
         return response, sw1, sw2
 
     def send(self, apdu: bytes, log_name: str) -> bytes:
+        """Send an APDU and follow GET RESPONSE chaining (SW 61xx) to retrieve the full response."""
         response, sw1, sw2 = self.exchange(apdu, log_name)
 
         while sw1 == 0x61:
@@ -363,6 +377,7 @@ class RelayApduChannel:
         log_name: str,
         chunk_size: int = 250,
     ) -> bytes:
+        """Fragment *data* into STORE-DATA chunks and dispatch each via ``exchange`` (SGP.22 §3.1.3)."""
         total = len(payload)
         offset = 0
         block = p2_start
@@ -416,9 +431,11 @@ class SGP22Transport:
             self._channel = RelayApduChannel(relay_client=relay_client, session_id=relay_session_id)
 
     def send(self, apdu: bytes, log_name: str) -> bytes:
+        """Send an APDU and follow GET RESPONSE chaining (SW 61xx) to retrieve the full response."""
         return self._channel.send(apdu, log_name)
 
     def exchange(self, apdu: bytes, log_name: str) -> Tuple[bytes, int, int]:
+        """Send one APDU and return (response_bytes, SW1, SW2), logging the exchange under *log_name*."""
         exchange_method = getattr(self._channel, "exchange", None)
         if callable(exchange_method):
             return exchange_method(apdu, log_name)
@@ -426,6 +443,7 @@ class SGP22Transport:
         return response, 0x90, 0x00
 
     def reset(self) -> bool:
+        """Disconnect and re-connect the underlying card channel, clearing any active session state."""
         reset_method = getattr(self._channel, "reset", None)
         if callable(reset_method):
             return bool(reset_method())
@@ -441,6 +459,7 @@ class SGP22Transport:
         log_name: str,
         chunk_size: int = 250,
     ) -> bytes:
+        """Fragment *data* into STORE-DATA chunks and dispatch each via ``exchange`` (SGP.22 §3.1.3)."""
         return self._channel.send_chunked(
             cla=cla,
             ins=ins,

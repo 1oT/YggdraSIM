@@ -1,3 +1,4 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """
 Safety gate for the APDU mutation fuzzer.
 
@@ -113,6 +114,7 @@ def _chmod_best_effort(path: Path, mode: int) -> None:
 
 
 def create_run_dir(config: SafetyConfig, *, tag: str = "run") -> Path:
+    """Create and return a timestamped run directory for this fuzzer session."""
     root = resolve_crash_dump_root(config)
     root.mkdir(parents=True, exist_ok=True)
     _chmod_best_effort(root, 0o700)
@@ -208,6 +210,7 @@ def dump_run_manifest(
     seed: int,
     mutator_names: Iterable[str],
 ) -> Path:
+    """Write the fuzzer run manifest JSON to the run directory."""
     target = run_dir / "manifest.json"
     record = {
         "workspace_root": str(config.workspace_root),

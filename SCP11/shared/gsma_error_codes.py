@@ -1,3 +1,5 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+"""GSMA error-code descriptions: maps SGP.22 profile-state and notification result codes to human-readable strings."""
 from typing import Any, Dict
 
 # SGP.22 / RSP (ES10b) operation result codes currently surfaced by card flows.

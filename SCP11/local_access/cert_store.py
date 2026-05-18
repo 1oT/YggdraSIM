@@ -1,3 +1,5 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+"""SCP11 local-access certificate store: CI and SM-DP+ certificate management for SGP.26 local delivery."""
 import os
 import re
 from dataclasses import dataclass
@@ -66,6 +68,7 @@ class LocalSgp26CertStore:
         self._pb_records: list[SmdpCertificateRecord] = []
 
     def load(self) -> None:
+        """Load the CI and SM-DP+ certificate chains from the configured paths."""
         if self._loaded:
             return
 

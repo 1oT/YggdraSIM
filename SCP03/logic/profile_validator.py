@@ -1,3 +1,5 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+"""SAIP profile static validator: runs rule-based checks on a loaded profile and returns YRL-* findings."""
 import json
 from dataclasses import dataclass
 from pathlib import Path
@@ -340,6 +342,7 @@ class ProfileValidator:
         self.profile_metadata = dict(profile_metadata) if isinstance(profile_metadata, dict) else {}
 
     def run(self, scope: str = "ALL") -> List[ValidationFinding]:
+        """Run all registered validation rules against the loaded profile and return findings."""
         requested_scope = scope.strip().upper()
         restore_target = self._get_restore_target()
         self.findings = []
@@ -640,6 +643,7 @@ class ProfileValidator:
 
     @classmethod
     def load_profile_metadata(cls, metadata_path: str) -> dict:
+        """Load profile metadata from disk and populate the validator state."""
         resolved_path = Path(metadata_path).expanduser().resolve()
         suffix = resolved_path.suffix.lower()
         raw_text = resolved_path.read_text(encoding="utf-8")

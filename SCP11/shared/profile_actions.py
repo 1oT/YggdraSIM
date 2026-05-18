@@ -1,3 +1,4 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """Shared profile-management helpers for the four SCP11 shells.
 
 The eSIM Live, eSIM Test, Local SMDP+, and Local eIM shells all expose the

@@ -1,3 +1,5 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+"""SCP11 local-access configuration: resolves cert, profile, and metadata paths for the local-access session."""
 import os
 from dataclasses import dataclass, field
 
@@ -109,6 +111,7 @@ class LocalAccessConfig:
     )
 
     def credential_paths(self):
+        """Return a dict of resolved local-access credential file paths."""
         return [
             ("DPauth certificate", self.CERT_PATH_AUTH),
             ("DPauth private key", self.KEY_PATH_AUTH),

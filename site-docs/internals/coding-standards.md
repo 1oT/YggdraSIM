@@ -65,7 +65,7 @@ path navigable and the wizard maintainable as the spec evolves.
   covers operator-visible runtime failures, `ValueError` covers malformed
   user or card data, `TypeError` covers contract violations, and dedicated
   `OSError` subclasses cover transport issues. Avoid `raise Exception(...)`
-  entirely — the Pass-set 1 sweep in `V1_RELEASE_AUDIT.md` removed every
+  entirely — the pre-release security sweep removed every
   remaining occurrence from the production tree, so new occurrences show
   up clearly in code review.
 - `except Exception:` catches are acceptable only in display / TLV-fallback

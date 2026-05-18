@@ -42,7 +42,7 @@
 (function () {
   "use strict";
 
-  var BUILD = "2026-04-16-v3-shadow-aware";
+  var BUILD = "v3-shadow-aware";
 
   try {
     console.log("[mermaid-zoom] script loaded, build=" + BUILD);

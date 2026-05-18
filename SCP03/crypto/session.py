@@ -15,10 +15,29 @@
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 # -----------------------------------------------------------------------------
 
+"""SCP03 session key derivation: INITIALIZE-UPDATE and EXTERNAL-AUTHENTICATE key schedule (GP Card Spec v2.3.1 §7.1)."""
 import hmac 
 from typing import List ,Dict 
 from cryptography .hazmat .primitives .ciphers import Cipher ,algorithms ,modes 
 from cryptography .hazmat .primitives import cmac 
+
+# GPC v2.3 Amd D §4.1.5 SCP03 KDF and §6.2.2.2/§6.2.2.3 cryptogram
+# derivation are delegated to pySim.global_platform.scp.scp03_key_derivation
+# so the spec citation lives upstream. We resolve the function lazily —
+# pySim.global_platform.__init__ pulls in pySim.filesystem (and through
+# it the real pyscard ``smartcard.util``), which a few tests install
+# only as a partial stub. Keeping the import inside ``_resolve_kdf``
+# means importing ``Scp03Session`` itself is inert; the chain fires only
+# the first time a key derivation actually runs.
+_PYSIM_SCP03_KDF =None 
+
+
+def _resolve_kdf ():
+    global _PYSIM_SCP03_KDF 
+    if _PYSIM_SCP03_KDF is None :
+        from pySim .global_platform .scp import scp03_key_derivation 
+        _PYSIM_SCP03_KDF =scp03_key_derivation 
+    return _PYSIM_SCP03_KDF 
 
 
 class Scp03Session :
@@ -40,6 +59,7 @@ class Scp03Session :
         self .protocol_name ="SCP03"
 
     def reset_state (self )->None :
+        """Clear the chaining value, SSC counter, and authentication flag to a clean pre-session state."""
         self .chaining_value =b'\x00'*16 
         self .ssc =0 
         self .is_authenticated =False 
@@ -49,6 +69,7 @@ class Scp03Session :
         self .last_cmd_header =b''
 
     def derive_keys (self ,host_challenge :bytes ,card_response :bytes ):
+        """Derive SCP03 session keys from *host_challenge* and *card_response* (GP Card Spec v2.3.1 §7.1.2)."""
         self .host_challenge =host_challenge 
         self .card_challenge =card_response [13 :21 ]
         card_cryptogram =card_response [21 :29 ]
@@ -66,23 +87,24 @@ class Scp03Session :
         return self ._gen_crypto (b'\x01')
 
     def _kdf (self ,key :bytes ,constant :bytes ,context :bytes ,bit_len :int )->bytes :
-        input_data =(b'\x00'*11 )+constant +b'\x00'+bit_len .to_bytes (2 ,'big')+b'\x01'+context 
-        c =cmac .CMAC (algorithms .AES (key ))
-        c .update (input_data )
-        return c .finalize ()[:(bit_len //8 )]
+        # GPC v2.3 Amd D §4.1.5 — NIST SP 800-108 counter-mode KDF with
+        # AES-CMAC PRF. Delegated to pySim so the constant/label encoding
+        # stays spec-anchored (12-byte label = 11 0x00 bytes + 1-byte
+        # derivation constant; 1-byte separator; 2-byte L; 1-byte counter).
+        return _resolve_kdf ()(constant ,context ,key ,bit_len )
 
     def _gen_crypto (self ,constant :bytes )->bytes :
+        # GPC v2.3 Amd D §6.2.2.2 / §6.2.2.3 — host & card cryptograms
+        # are 8-byte (l=64) outputs of the §4.1.5 KDF keyed with S-MAC.
         context =self .host_challenge +self .card_challenge 
-        data =(b'\x00'*11 )+constant +b'\x00'+b'\x00\x40'+b'\x01'+context 
-        c =cmac .CMAC (algorithms .AES (self .s_mac ))
-        c .update (data )
-        return c .finalize ()[:8 ]
+        return self ._kdf (self .s_mac ,constant ,context ,64 )
 
     def _generate_iv_from_bytes (self ,iv_input :bytes )->bytes :
         cipher =Cipher (algorithms .AES (self .s_enc ),modes .ECB ())
         return cipher .encryptor ().update (iv_input )+cipher .encryptor ().finalize ()
 
     def wrap_apdu (self ,apdu :List [int ])->List [int ]:
+        """Apply SCP03 C-MAC (and optionally C-ENC) protection to a plain APDU command list (GP Card Spec v2.3.1 §7.2)."""
         if not self .is_authenticated :return apdu 
 
         self .ssc +=1 
@@ -128,6 +150,7 @@ class Scp03Session :
         return final_apdu 
 
     def unwrap_response (self ,data :bytes ,sw1 :int ,sw2 :int )->bytes :
+        """Strip and verify the SCP03 R-MAC from a card response (GP Card Spec v2.3.1 §7.3)."""
         if not self .is_authenticated or not data :return data 
         if not (self .sec_level &0x20 ):return data 
         if len (data )<8 :return data 
@@ -162,6 +185,7 @@ class Scp03Session :
         return payload 
 
     def encrypt_key_data (self ,key_bytes :bytes )->bytes :
+        """Encrypt key data with the DEK session key for use in a PUT KEY payload (GP Card Spec v2.3.1 §11.8)."""
         import binascii 
 
         target_dek =None 

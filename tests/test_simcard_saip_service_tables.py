@@ -1,4 +1,4 @@
-"""Phase E regression coverage for pySim service-table overlays.
+"""Regression coverage for pySim service-table overlays.
 
 Pins the ``saip_pysim_specs`` helpers used to replace the inspector's
 hand-curated bit -> service-name dictionaries:

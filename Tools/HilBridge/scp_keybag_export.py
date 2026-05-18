@@ -1,3 +1,4 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 # -----------------------------------------------------------------------------
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -135,6 +136,7 @@ def entry_from_scp11_bsp(
 
 
 def build_keybag_document(entries: list[KeybagExportEntry]) -> dict[str, Any]:
+    """Build and return the keybag export document dict from the current session key material."""
     sessions: list[dict[str, Any]] = []
     for entry in entries:
         session_dict: dict[str, Any] = {

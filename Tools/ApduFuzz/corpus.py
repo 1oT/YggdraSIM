@@ -1,3 +1,4 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """
 APDU corpus loader.
 
@@ -43,6 +44,7 @@ class CorpusEntry:
     response_hex: str = ""
 
     def command_bytes(self) -> bytes:
+        """Return the raw APDU command bytes for this corpus entry."""
         cleaned = self.command_hex.strip().replace(" ", "")
         if len(cleaned) == 0:
             return b""

@@ -1,3 +1,4 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """
 Deterministic helpers for generating structurally-valid ICCID / IMSI values
 on demand. Used to back the ``AUTO`` / ``RANDOM`` sentinel in

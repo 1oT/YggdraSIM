@@ -1,3 +1,5 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+"""Network Access Application logic: PIN verification, AUTHENTICATE routing, and NAA file-system scope management (ETSI TS 102 221)."""
 from __future__ import annotations
 
 import hmac
@@ -70,6 +72,7 @@ class NaaLogic:
         return self._query_retry_counter(reference_state.retries_remaining)
 
     def unblock_chv(self, p2: int, payload: bytes) -> tuple[bytes, int, int]:
+        """Handle UNBLOCK CHV (ETSI TS 102 221 §11.1.12) using the supplied PUK and new PIN."""
         reference_state = self._reference_state(p2)
         if reference_state is None:
             return b"", 0x6A, 0x88

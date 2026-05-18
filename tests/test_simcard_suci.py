@@ -107,16 +107,18 @@ class MsinBcdTests(unittest.TestCase):
 
 class SplitImsiTests(unittest.TestCase):
     def test_two_digit_mnc(self) -> None:
-        mcc, mnc, msin = split_imsi("262017830012345", 2)
-        self.assertEqual((mcc, mnc, msin), ("262", "01", "7830012345"))
+        # 3GPP TS 23.003 §2.2 test PLMN (MCC=001 / MNC=01).
+        mcc, mnc, msin = split_imsi("001017830012345", 2)
+        self.assertEqual((mcc, mnc, msin), ("001", "01", "7830012345"))
 
     def test_three_digit_mnc(self) -> None:
-        mcc, mnc, msin = split_imsi("310410123456789", 3)
-        self.assertEqual((mcc, mnc, msin), ("310", "410", "123456789"))
+        # 3GPP TS 23.003 §2.2 alternate test PLMN (MCC=999 / MNC=999).
+        mcc, mnc, msin = split_imsi("999999123456789", 3)
+        self.assertEqual((mcc, mnc, msin), ("999", "999", "123456789"))
 
     def test_rejects_invalid_mnc_length(self) -> None:
         with self.assertRaises(ValueError):
-            split_imsi("262017830012345", 4)
+            split_imsi("001017830012345", 4)
 
     def test_rejects_short_imsi(self) -> None:
         with self.assertRaises(ValueError):
@@ -128,7 +130,7 @@ class SuciMobileIdentityNullSchemeTests(unittest.TestCase):
 
     def test_null_scheme_layout_matches_ts_24_501(self) -> None:
         identity = build_suci_from_imsi(
-            imsi="262017830012345",
+            imsi="001017830012345",
             mnc_length=2,
             routing_indicator="678",
             protection_scheme=ProtectionScheme.NULL,
@@ -137,11 +139,11 @@ class SuciMobileIdentityNullSchemeTests(unittest.TestCase):
         self.assertEqual(len(identity), 13)
         # Octet 1: SUPI format=0 (IMSI, upper nibble), type-of-identity=001 (SUCI)
         self.assertEqual(identity[0], 0x01)
-        # MCC+MNC for 262/01:
-        #   o2 = (m[1]<<4)|m[0] = 0x62
-        #   o3 = (mnc[2]<<4)|m[2] = 0xF2
+        # MCC+MNC for 001/01 (3GPP TS 23.003 §2.2 test PLMN):
+        #   o2 = (m[1]<<4)|m[0] = 0x00
+        #   o3 = (mnc[2]<<4)|m[2] = 0xF1
         #   o4 = (mnc[1]<<4)|mnc[0] = 0x10
-        self.assertEqual(identity[1:4].hex().upper(), "62F210")
+        self.assertEqual(identity[1:4].hex().upper(), "00F110")
         # RI '678' -> [6,7,8,F] -> 0x76 0xF8
         self.assertEqual(identity[4:6].hex().upper(), "76F8")
         self.assertEqual(identity[6], int(ProtectionScheme.NULL))
@@ -151,16 +153,16 @@ class SuciMobileIdentityNullSchemeTests(unittest.TestCase):
 
     def test_three_digit_mnc_packs_third_digit(self) -> None:
         identity = build_suci_from_imsi(
-            imsi="310410123456789",
+            imsi="999999123456789",
             mnc_length=3,
             routing_indicator="0",
             protection_scheme=ProtectionScheme.NULL,
         )
-        # MCC=310, MNC=410:
-        #   o2 = (m[1]<<4)|m[0] = 0x13
-        #   o3 = (mnc[2]<<4)|m[2] = 0x00
-        #   o4 = (mnc[1]<<4)|mnc[0] = 0x14
-        self.assertEqual(identity[1:4].hex().upper(), "130014")
+        # MCC=999, MNC=999 (3GPP TS 23.003 §2.2 alternate test PLMN):
+        #   o2 = (m[1]<<4)|m[0] = 0x99
+        #   o3 = (mnc[2]<<4)|m[2] = 0x99
+        #   o4 = (mnc[1]<<4)|mnc[0] = 0x99
+        self.assertEqual(identity[1:4].hex().upper(), "999999")
 
     def test_routing_indicator_with_one_digit(self) -> None:
         identity = build_suci_from_imsi(
@@ -176,7 +178,7 @@ class SuciMobileIdentityNullSchemeTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             encode_suci_mobile_identity(
                 supi_format=0,
-                mcc="262",
+                mcc="001",
                 mnc="01",
                 routing_indicator="12345",
                 protection_scheme=ProtectionScheme.NULL,
@@ -188,7 +190,7 @@ class SuciMobileIdentityNullSchemeTests(unittest.TestCase):
         with self.assertRaises(NotImplementedError):
             encode_suci_mobile_identity(
                 supi_format=1,
-                mcc="262",
+                mcc="001",
                 mnc="01",
                 routing_indicator="0",
                 protection_scheme=ProtectionScheme.NULL,
@@ -206,7 +208,8 @@ class ProfileARoundTripTests(unittest.TestCase):
         self.hn_private = x25519.X25519PrivateKey.from_private_bytes(b"\x42" * 32)
         self.hn_pub = self.hn_private.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw)
         self.hn_priv_bytes = self.hn_private.private_bytes_raw()
-        self.imsi = "262017830012345"
+        # 3GPP TS 23.003 §2.2 test PLMN (MCC=001 / MNC=01) — never allocated.
+        self.imsi = "001017830012345"
         self.mnc_length = 2
         self.expected_msin_bcd = encode_msin_bcd("7830012345")
 

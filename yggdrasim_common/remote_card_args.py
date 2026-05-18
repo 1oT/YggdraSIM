@@ -1,3 +1,4 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """Argparse helper for the ``--remote-card-url`` / ``--remote-card-token-file`` flags.
 
 Card-consuming CLIs (``main/main.py``, the SCP03 / SCP11 / SAIP shells,

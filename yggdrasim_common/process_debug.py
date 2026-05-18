@@ -1,3 +1,5 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+"""Process debug helpers: thread-dump signal handler and memory-usage reporter for long-running daemon processes."""
 import argparse
 import contextlib
 import os
@@ -35,6 +37,7 @@ def add_debug_argument(
     *,
     help_text: str = "Enable verbose debug output.",
 ) -> None:
+    """Add a `--debug` argument group to *parser* with process diagnostic flags."""
     parser.add_argument(
         "--debug",
         "--verbose",

@@ -1,3 +1,5 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+"""eIM certificate store: loads and validates the eIM identity certificate chain used for ES2+ mutual TLS."""
 import os
 from dataclasses import dataclass
 from pathlib import Path
@@ -49,6 +51,7 @@ class EimCertificateStore:
         self._record_by_path: dict[str, EimCertificateRecord] = {}
 
     def load(self) -> None:
+        """Load the eIM certificate and key from the configured paths and validate the pair."""
         if self._loaded:
             return
         self._loaded = True
@@ -72,6 +75,7 @@ class EimCertificateStore:
         return [record for record in self._records if record.role == "signing"]
 
     def record_for_path(self, path_text: str) -> Optional[EimCertificateRecord]:
+        """Return the certificate record whose key path matches *path*."""
         self.load()
         normalized = self._normalize_path(path_text)
         if len(normalized) == 0:
@@ -88,6 +92,7 @@ class EimCertificateStore:
         preferred_ci_pkids: list[str],
         fallback_path: str = "",
     ) -> Optional[EimCertificateRecord]:
+        """Return the signing certificate record appropriate for a given EID target."""
         self.load()
         allowed = self._normalize_ci_pkid_list(allowed_ci_pkids)
         preferred = self._normalize_ci_pkid_list(preferred_ci_pkids)

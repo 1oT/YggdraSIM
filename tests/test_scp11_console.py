@@ -543,12 +543,12 @@ class SCP11ConsoleStatusDecodeTests(unittest.TestCase):
     def test_set_smdp_address_uses_verified_card_value(self):
         self.console.apdu_channel.configured_data_response = tlv(
             bytes.fromhex("BF3C"),
-            tlv(bytes.fromhex("80"), b"smdpplus2.esim.tst.1ot.mobi"),
+            tlv(bytes.fromhex("80"), b"smdpplus2.smdpp.example.test"),
         )
 
         self.console._set_smdp_address("smdpplus2.esim.tst.1ot")
 
-        self.assertEqual(self.console.current_smdp_address, "smdpplus2.esim.tst.1ot.mobi")
+        self.assertEqual(self.console.current_smdp_address, "smdpplus2.smdpp.example.test")
 
     def test_eim_download_routes_into_orchestrator_flow(self):
         self.console._cmd_eim_download("MATCH-55")
@@ -556,17 +556,17 @@ class SCP11ConsoleStatusDecodeTests(unittest.TestCase):
         self.assertEqual(self.console.orchestrator.eim_poll_calls, [("MATCH-55", 0)])
 
     def test_download_activation_code_updates_es9_base_url_from_server(self):
-        self.console._download_activation_code("1$smdpplus2.esim.tst.1ot.mobi$MATCH-55$1.2.3")
+        self.console._download_activation_code("1$smdpplus2.smdpp.example.test$MATCH-55$1.2.3")
 
-        self.assertEqual(self.console.current_smdp_address, "smdpplus2.esim.tst.1ot.mobi")
-        self.assertEqual(self.console.current_es9_base_url, "https://smdpplus2.esim.tst.1ot.mobi")
+        self.assertEqual(self.console.current_smdp_address, "smdpplus2.smdpp.example.test")
+        self.assertEqual(self.console.current_es9_base_url, "https://smdpplus2.smdpp.example.test")
         self.assertEqual(
             self.console.orchestrator.run_flow_calls,
-            [("MATCH-55", "smdpplus2.esim.tst.1ot.mobi")],
+            [("MATCH-55", "smdpplus2.smdpp.example.test")],
         )
         self.assertEqual(
             self.console.orchestrator.profile_provider.base_url,
-            "https://smdpplus2.esim.tst.1ot.mobi",
+            "https://smdpplus2.smdpp.example.test",
         )
 
 

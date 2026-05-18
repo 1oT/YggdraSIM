@@ -1,0 +1,47 @@
+..F.F.F..FF.                                                             [100%]
+=================================== FAILURES ===================================
+E   ImportError: cannot import name 'split_apdu_sequence' from 'SIMCARD.utils' (/home/hampushellsberg/Documents/Tools/YggdraSIM-dev/SIMCARD/utils.py)
+/home/hampushellsberg/Documents/Tools/YggdraSIM-dev/SIMCARD/scp80.py:11: ImportError: cannot import name 'split_apdu_sequence' from 'SIMCARD.utils' (/home/hampushellsberg/Documents/Tools/YggdraSIM-dev/SIMCARD/utils.py)
+E   AssertionError: Lists differ: ['ef-oplmnwlan', 'ef-uplmnwlan'] != []
+    
+    First list contains 2 additional elements.
+    First extra element 0:
+    'ef-oplmnwlan'
+    
+    - ['ef-oplmnwlan', 'ef-uplmnwlan']
+    + []
+/usr/lib/python3.13/unittest/case.py:732: AssertionError: Lists differ: ['ef-oplmnwlan', 'ef-uplmnwlan'] != []
+E   AssertionError: Lists differ: ['application', 'df-5gprose', 'df-snpn', '[129 chars]lan'] != []
+    
+    First list contains 15 additional elements.
+    First extra element 0:
+    'application'
+    
+    + []
+    - ['application',
+    -  'df-5gprose',
+    -  'df-snpn',
+    -  'df-wlan',
+    -  'iot',
+    -  'isdp',
+    -  'isdr',
+    -  'nonStandard',
+    -  'opt-iot',
+    -  'pinCodes',
+    -  'pukCodes',
+    -  'securityDomain_ssd',
+    -  'ssim',
+    -  'ssimEaptls',
+    -  'wlan'] : missing _SECTION_LABELS: application, df-5gprose, df-snpn, df-wlan, iot, isdp, isdr, nonStandard, opt-iot, pinCodes, pukCodes, securityDomain_ssd, ssim, ssimEaptls, wlan
+/usr/lib/python3.13/unittest/case.py:732: AssertionError: Lists differ: ['application', 'df-5gprose', 'df-snpn', '[129 chars]lan'] != []
+E   ImportError: cannot import name 'known_dispatcher_ef_keys' from 'Tools.ProfilePackage.saip_asn1_decode' (/home/hampushellsberg/Documents/Tools/YggdraSIM-dev/Tools/ProfilePackage/saip_asn1_decode.py)
+/home/hampushellsberg/Documents/Tools/YggdraSIM-dev/Tools/ProfilePackage/saip_ef_wizard_gui_audit.py:221: ImportError: cannot import name 'known_dispatcher_ef_keys' from 'Tools.ProfilePackage.saip_asn1_decode' (/home/hampushellsberg/Documents/Tools/YggdraSIM-dev/Tools/ProfilePackage/saip_asn1_decode.py)
+E   ImportError: cannot import name 'dispatcher_routes_ef_key' from 'Tools.ProfilePackage.saip_asn1_decode' (/home/hampushellsberg/Documents/Tools/YggdraSIM-dev/Tools/ProfilePackage/saip_asn1_decode.py)
+/home/hampushellsberg/Documents/Tools/YggdraSIM-dev/Tools/ProfilePackage/saip_ef_wizard_gui_audit.py:288: ImportError: cannot import name 'dispatcher_routes_ef_key' from 'Tools.ProfilePackage.saip_asn1_decode' (/home/hampushellsberg/Documents/Tools/YggdraSIM-dev/Tools/ProfilePackage/saip_asn1_decode.py)
+=========================== short test summary info ============================
+FAILED tests/test_saip_ef_wizard_five_sweeps.py::Sweep01DedicatedTransparentWizards::test_no_orphan_dedicated_transparent_keys
+FAILED tests/test_saip_ef_wizard_five_sweeps.py::Sweep02RecordFixedWizards::test_no_orphan_record_wizard_keys
+FAILED tests/test_saip_ef_wizard_five_sweeps.py::Sweep04DiffSectionLabelsVsPeUnion::test_union_bases_have_section_labels
+FAILED tests/test_saip_ef_wizard_five_sweeps.py::Sweep06DecodedEditCoverage::test_ef_decoded_edit_coverage_gaps_empty
+FAILED tests/test_saip_ef_wizard_five_sweeps.py::Sweep06DecodedEditCoverage::test_ef_dispatcher_key_gaps_empty
+<sys>:0: DeprecationWarning: builtin type swigvarlink has no __module__ attribute

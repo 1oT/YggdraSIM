@@ -1,10 +1,9 @@
-"""
-Applications view (Phase 7).
+"""Applications view.
 
-Mirrors the screenshot's "Applications" tab — a flat list of every PE
-that maps onto a GP application (PE-SecurityDomain → ISD instances,
-PE-Application → applets) along with their AID and life-cycle state.
-Read-only in this revision; double-click jumps to the PE editor.
+A flat list of every PE that maps onto a GlobalPlatform application
+(PE-SecurityDomain → ISD instances, PE-Application → applets) along
+with their AID and life-cycle state. Read-only — double-click jumps
+to the PE editor.
 """
 
 from __future__ import annotations

@@ -1,4 +1,4 @@
-"""SUNRISE-6G OpenSDK adapter (Phase 3).
+"""SUNRISE-6G OpenSDK adapter.
 
 In-process CAMARA Quality-on-Demand v1.0.0 and Location Retrieval
 v0.4.0 surfaces, plus an optional bridge to the real

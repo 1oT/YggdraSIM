@@ -15,6 +15,7 @@
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 # -----------------------------------------------------------------------------
 
+"""SCP03 core utilities: byte conversion, BCD helpers, and TLV construction."""
 from typing import List ,Dict ,Any ,Union 
 
 class HexUtils :
@@ -82,6 +83,7 @@ class TlvParser :
 
     @staticmethod 
     def parse_detailed (data :bytes )->Dict [str ,Any ]:
+        """Parse a BER-TLV byte blob into a detailed dict with offset, tag, length, value, and nested fields."""
         i ,parsed =0 ,{}
         while i <len (data ):
             item_offset =i 
@@ -176,6 +178,7 @@ class StatusWordTranslator :
 
     @staticmethod 
     def translate (sw1 :int ,sw2 :int )->str :
+        """Return a human-readable description string for the given SW1/SW2 status-word pair (ISO 7816-4 §5.1.3)."""
         sw =(sw1 <<8 )|sw2 
 
         if sw in StatusWordTranslator .SW_MAP :

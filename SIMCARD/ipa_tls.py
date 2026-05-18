@@ -1,3 +1,4 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """In-card TLS-1.2 client used by the SGP.32 IPA-poll eIM leg.
 
 This module wraps Python's ``ssl.MemoryBIO`` so the simulator can drive

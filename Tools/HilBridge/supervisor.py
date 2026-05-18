@@ -1,3 +1,5 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+"""HIL-Bridge supervisor: manages child process lifecycle (modem, bridge, tshark) with restart policy and watchdog timers."""
 from __future__ import annotations
 
 import argparse
@@ -66,6 +68,7 @@ def _normalize_usb_match_terms(values: list[str] | tuple[str, ...] | None) -> tu
 
 
 def normalize_usb_vidpid(value: str) -> str:
+    """Normalise a USB VID:PID string to lowercase colon-separated hex (e.g. '04e6:5116')."""
     text = str(value or "").strip().lower()
     if len(text) == 0:
         return ""
@@ -247,6 +250,7 @@ class LsusbPresenceMonitor:
     timeout_seconds: float = DEFAULT_LSUSB_TIMEOUT_SECONDS
 
     def snapshot(self) -> UsbPresenceSnapshot:
+        """Return a snapshot dict of the current connection state for all managed channels."""
         command = [str(self.lsusb_path or "lsusb")]
         try:
             completed = subprocess.run(
@@ -309,6 +313,7 @@ class PyudevPresenceMonitor:
         match_terms: tuple[str, ...],
         vidpids: tuple[str, ...],
     ) -> "PyudevPresenceMonitor":
+        """Create a new managed channel entry for the given slot configuration."""
         import pyudev
 
         context = pyudev.Context()
@@ -323,6 +328,7 @@ class PyudevPresenceMonitor:
         )
 
     def snapshot(self) -> UsbPresenceSnapshot:
+        """Return a snapshot dict of the current state of this managed channel."""
         matches: list[str] = []
         try:
             devices = list(self._context.list_devices(subsystem="usb"))
@@ -415,6 +421,7 @@ def create_usb_presence_monitor(
     prefer_pyudev: bool,
     lsusb_path: str,
 ) -> UsbPresenceMonitor:
+    """Create a USB device presence monitor thread that detects reader hot-plug events."""
     if prefer_pyudev:
         try:
             monitor = PyudevPresenceMonitor.create(match_terms=match_terms, vidpids=vidpids)
@@ -475,6 +482,7 @@ class HilBridgeSupervisor:
         self._stop_event.set()
 
     def run(self) -> int:
+        """Run the supervisor event loop until the stop signal is received."""
         LOGGER.info(
             "HIL bridge supervisor started with USB selectors terms=%s vidpids=%s",
             list(self.config.usb_match_terms),
@@ -513,6 +521,7 @@ class HilBridgeSupervisor:
             return False
 
     def reconcile(self) -> None:
+        """Reconcile the desired-state channel config against the running connections."""
         now = float(self.monotonic())
         sim_mode = self._sim_backend_active()
         snapshot = self.usb_monitor.snapshot()
@@ -834,6 +843,21 @@ class HilBridgeSupervisor:
             command.append("--no-apdu-relay")
         if bridge.gsmtap_enabled is False:
             command.append("--no-gsmtap")
+        # Card-source overrides — when the operator has pinned a remote
+        # ``yggdrasim-card-bridge`` URL on the supervisor, propagate it
+        # to the spawned bridge subprocess so the card-stream feature
+        # works under supervision too. Empty values are intentionally
+        # not passed so the subprocess defaults to local PC/SC.
+        remote_card_url = str(getattr(bridge, "remote_card_url", "") or "").strip()
+        if len(remote_card_url) > 0:
+            command.extend(["--remote-card-url", remote_card_url])
+        remote_card_token_file = str(
+            getattr(bridge, "remote_card_token_file", "") or ""
+        ).strip()
+        if len(remote_card_token_file) > 0:
+            command.extend(
+                ["--remote-card-token-file", remote_card_token_file]
+            )
         capture_path = str(bridge.gsmtap_capture_path or "").strip()
         if len(capture_path) > 0:
             command.extend(
@@ -959,6 +983,8 @@ class HilBridgeSupervisor:
             "remsimClientPort": self._remsim_port(),
             "readerIndex": int(self.config.bridge.reader_index),
             "readerName": str(self.config.bridge.reader_name),
+            "remoteCardUrl": str(getattr(self.config.bridge, "remote_card_url", "") or ""),
+            "remoteCardTokenFile": str(getattr(self.config.bridge, "remote_card_token_file", "") or ""),
             "pollIntervalSeconds": float(self.config.poll_interval_seconds),
             "restartBackoffSeconds": float(self.config.restart_backoff_seconds),
         }
@@ -1120,6 +1146,7 @@ def _configure_logging(debug_enabled: bool) -> None:
 
 
 def build_supervisor_config_from_args(args: argparse.Namespace) -> HilBridgeSupervisorConfig:
+    """Build the HIL-Bridge supervisor config dict from parsed argparse namespace."""
     state_path = str(args.state_file or "").strip()
     if len(state_path) == 0:
         ensure_runtime_dir("state")
@@ -1155,6 +1182,7 @@ def build_supervisor_config_from_args(args: argparse.Namespace) -> HilBridgeSupe
 
 
 def run_standalone() -> int:
+    """Start the HIL-Bridge supervisor as a standalone foreground process."""
     parser = _build_parser()
     args = parser.parse_args()
     debug_enabled = bool(getattr(args, "debug", False))

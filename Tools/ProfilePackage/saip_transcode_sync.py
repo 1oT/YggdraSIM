@@ -1,3 +1,4 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """
 Map Profile Element boundaries between decoded JSON and concatenated DER hex.
 
@@ -20,6 +21,7 @@ def ordered_section_keys_from_pes(pes: Any) -> list[str]:
     counts: dict[str, int] = {}
 
     def unique_key(base_key: str) -> str:
+        """Return a stable unique key string for a PE entry used as a sync anchor."""
         key_text = str(base_key or "section").strip() or "section"
         current_count = counts.get(key_text, 0) + 1
         counts[key_text] = current_count
@@ -358,6 +360,7 @@ def infer_section_key_from_json_cursor(text: str, cursor_line: int) -> Optional[
 
 
 def location_to_offset(text: str, location: Location) -> int:
+    """Convert a ``(line, col)`` Textual ``Location`` to a flat character offset in ``text``."""
     line_index, col = location
     offset = 0
     current_line = 0
@@ -370,6 +373,7 @@ def location_to_offset(text: str, location: Location) -> int:
 
 
 def offset_to_location(text: str, offset: int) -> Location:
+    """Convert a flat character offset back to a ``(line, col)`` Textual ``Location``."""
     if offset <= 0:
         return (0, 0)
     line = 0
@@ -427,6 +431,7 @@ def byte_range_to_hex_selection(hex_text: str, byte_start: int, byte_end: int, w
         byte_end = byte_start + 1
 
     def byte_to_loc(b: int) -> Location:
+        """Convert a byte offset within the concatenated DER hex to a (pe_index, local_offset) location."""
         line = b // width
         col_in_line = b % width
         lines = hex_text.split("\n")
@@ -452,6 +457,7 @@ def byte_range_to_hex_selection(hex_text: str, byte_start: int, byte_end: int, w
 
 
 def key_for_byte_offset(ranges: list[tuple[str, int, int]], byte_off: int) -> Optional[str]:
+    """Return the section key whose ``[a, b)`` byte range contains ``byte_off``, or ``None``."""
     for key, a, b in ranges:
         if a <= byte_off < b:
             return key
@@ -516,6 +522,7 @@ def json_editor_range_to_der_byte_range(
     touched = sorted(touched, key=lambda key: order_index.get(key, 10**9))
 
     def map_point_in_pe(key: str, offset: int) -> tuple[int, int]:
+        """Map a cursor point within one PE's DER hex to its corresponding decoded JSON path."""
         entry_begin, value_start, value_end = spans[key]
         byte_a, byte_b = ranges_by_key[key]
         v_span = max(value_end - value_start, 1)
@@ -528,6 +535,7 @@ def json_editor_range_to_der_byte_range(
         return (bi, bi + 1)
 
     def map_range_in_pe(key: str, js_lo: int, js_hi: int) -> tuple[int, int]:
+        """Map a byte-range offset/length pair from one PE encoding to the other."""
         _eb, value_start, value_end = spans[key]
         byte_a, byte_b = ranges_by_key[key]
         v_span = max(value_end - value_start, 1)
@@ -597,6 +605,7 @@ def der_byte_range_to_json_editor_range(
         lo_local: int,
         hi_local_exclusive: int,
     ) -> tuple[int, int]:
+        """Convert a byte offset within the raw DER into the corresponding JSON character offset."""
         _eb, value_start, value_end = spans[key]
         byte_a, byte_b = ranges_by_key[key]
         b_span = max(byte_b - byte_a, 1)

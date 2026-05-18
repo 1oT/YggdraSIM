@@ -17,15 +17,9 @@ Notes:
 - [`CODE_OF_CONDUCT.md`](sources/CODE_OF_CONDUCT.md)
 - [`CONTRIBUTING.md`](sources/CONTRIBUTING.md)
 - [`LICENSE`](sources/LICENSE/index.md)
-- [`NEW_FEATURE_IDEAS.md`](sources/NEW_FEATURE_IDEAS.md)
 - [`NOTICE`](sources/NOTICE/index.md)
 - [`README.md`](sources/README.md)
 - [`SECURITY.md`](sources/SECURITY.md)
-- [`SIMCARD_V1_REVIEW.md`](sources/SIMCARD_V1_REVIEW.md)
-- [`V1_FEATURE_PLAN.md`](sources/V1_FEATURE_PLAN.md)
-- [`V1_RELEASE_AUDIT.md`](sources/V1_RELEASE_AUDIT.md)
-- [`V2_ROADMAP.md`](sources/V2_ROADMAP.md)
-- [`V2_UNIVERSAL_GUI_PLAN.md`](sources/V2_UNIVERSAL_GUI_PLAN.md)
 
 ## Authored Guides
 
@@ -42,6 +36,7 @@ Notes:
 - [`guides/INSTALL_FROM_SOURCE.md`](sources/guides/INSTALL_FROM_SOURCE.md)
 - [`guides/INSTALL_FULL.md`](sources/guides/INSTALL_FULL.md)
 - [`guides/INSTALL_RASPBERRYPI.md`](sources/guides/INSTALL_RASPBERRYPI.md)
+- [`guides/NAMING_CONVENTIONS.md`](sources/guides/NAMING_CONVENTIONS.md)
 - [`guides/PROFILE_LIFECYCLE_CLI_CHEATSHEET.md`](sources/guides/PROFILE_LIFECYCLE_CLI_CHEATSHEET.md)
 - [`guides/README.md`](sources/guides/README.md)
 - [`guides/SIMTRACE2_CARDEM_GUIDE.md`](sources/guides/SIMTRACE2_CARDEM_GUIDE.md)

@@ -1,3 +1,5 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+"""HIL-Bridge runtime helpers: process lifecycle, signal handling, and supervisor IPC for the hardware-in-loop bridge."""
 from __future__ import annotations
 
 import json
@@ -51,6 +53,7 @@ def card_relay_state_path() -> str:
 
 
 def load_json_file(path: str) -> dict[str, Any]:
+    """Load and return a parsed JSON object from *path*, raising an informative error on failure."""
     target_path = str(path or "").strip()
     if len(target_path) == 0:
         return {}
@@ -79,6 +82,7 @@ def guess_bridge_python_executable(
     *,
     fallback: str = "",
 ) -> str:
+    """Detect the Python executable the HIL-Bridge supervisor should use."""
     payload = dict(supervisor_state or {})
     bridge_command = payload.get("bridgeCommand", [])
     if isinstance(bridge_command, list):
@@ -96,6 +100,7 @@ def guess_bridge_python_executable(
 def extract_remsim_extra_args_from_supervisor_state(
     supervisor_state: dict[str, Any] | None,
 ) -> tuple[str, ...]:
+    """Extract remsim-specific extra arguments from the supervisor state config."""
     payload = dict(supervisor_state or {})
     remsim_command = payload.get("remsimClientCommand", [])
     if isinstance(remsim_command, list) is False:
@@ -141,6 +146,7 @@ def _systemd_quote(value: str) -> str:
 
 
 def render_user_service_unit(options: HilBridgeUserServiceOptions) -> str:
+    """Render a systemd user-service unit file template for the HIL-Bridge supervisor."""
     documentation_path = str(options.documentation_path or "").strip()
     documentation_line = ""
     if len(documentation_path) > 0:
@@ -221,6 +227,7 @@ def install_user_service(
     *,
     home_dir: str = "",
 ) -> str:
+    """Install or update the HIL-Bridge systemd user service unit."""
     written_path, _ = write_user_service_if_changed(
         unit_text,
         service_name=service_name,
@@ -315,6 +322,7 @@ def run_systemctl_user(
     *,
     timeout_seconds: float = DEFAULT_SYSTEMCTL_TIMEOUT_SECONDS,
 ) -> subprocess.CompletedProcess[str]:
+    """Run a `systemctl --user` sub-command and return the output string."""
     command = ["systemctl", "--user", *[str(arg or "").strip() for arg in args]]
     try:
         return subprocess.run(
@@ -335,6 +343,7 @@ def run_systemctl_user_checked(
     *,
     timeout_seconds: float = DEFAULT_SYSTEMCTL_TIMEOUT_SECONDS,
 ) -> subprocess.CompletedProcess[str]:
+    """Run a `systemctl --user` sub-command and raise on non-zero exit."""
     completed = run_systemctl_user(args, timeout_seconds=timeout_seconds)
     if completed.returncode != 0:
         joined_args = " ".join(str(arg or "").strip() for arg in args)
@@ -343,6 +352,7 @@ def run_systemctl_user_checked(
 
 
 def query_user_service_state(service_name: str = DEFAULT_SERVICE_NAME) -> dict[str, Any]:
+    """Query and return the current state of the HIL-Bridge user service."""
     payload: dict[str, Any] = {
         "serviceName": str(service_name or DEFAULT_SERVICE_NAME).strip(),
         "systemctlAvailable": True,
@@ -468,6 +478,7 @@ def is_hil_bridge_running() -> bool:
 
 
 def hil_bridge_warning_text() -> str:
+    """Return a formatted multi-line warning string for an unhealthy bridge state."""
     if is_hil_bridge_running() is False:
         return ""
     return (
@@ -481,6 +492,7 @@ def wait_for_bridge_ready(
     timeout_seconds: float = DEFAULT_BRIDGE_READY_TIMEOUT_SECONDS,
     poll_interval_seconds: float = DEFAULT_BRIDGE_READY_POLL_SECONDS,
 ) -> dict[str, Any]:
+    """Block until the HIL-Bridge service reports ready or the timeout expires."""
     deadline = time.monotonic() + max(0.5, float(timeout_seconds or DEFAULT_BRIDGE_READY_TIMEOUT_SECONDS))
     last_relay_error_text = ""
     last_status_text = ""

@@ -41,7 +41,7 @@ class _SessionInfoMixin:
             "qosProfile": "QOS_E",
             "duration": 600,
             "applicationServer": {"ipv4Address": "203.0.113.10"},
-            "device": {"phoneNumber": "+15558675309"},
+            "device": {"phoneNumber": "+15550100199"},
         }
         info.update(overrides)
         return info
@@ -59,7 +59,7 @@ class CreateQodSessionTests(unittest.TestCase, _SessionInfoMixin):
         self.assertEqual(out["qosStatus"], "AVAILABLE")
         self.assertEqual(out["qosProfile"], "QOS_E")
         self.assertEqual(out["duration"], 600)
-        self.assertEqual(out["device"], {"phoneNumber": "+15558675309"})
+        self.assertEqual(out["device"], {"phoneNumber": "+15550100199"})
         self.assertEqual(out["applicationServer"], {"ipv4Address": "203.0.113.10"})
 
     def test_string_application_server_ip_is_accepted(self):
@@ -171,10 +171,10 @@ class GetDeleteListTests(unittest.TestCase, _SessionInfoMixin):
             __import__(
                 "Tools.Sunrise6G.models",
                 fromlist=["DeviceIdentity"],
-            ).DeviceIdentity(phone_number="+15558675309")
+            ).DeviceIdentity(phone_number="+15550100199")
         )
         self.assertEqual(len(rows), 1)
-        self.assertEqual(rows[0]["device"], {"phoneNumber": "+15558675309"})
+        self.assertEqual(rows[0]["device"], {"phoneNumber": "+15550100199"})
 
 
 if __name__ == "__main__":

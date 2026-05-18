@@ -1,3 +1,5 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+"""eUICC profile store: on-disk JSON persistence for installed profiles and associated metadata."""
 from __future__ import annotations
 
 import os
@@ -13,6 +15,7 @@ PROFILES_DIRNAME = "profiles"
 
 
 def resolve_euicc_store_path(root_path: str, eid: str) -> str:
+    """Resolve and return the absolute path of the eUICC profile store directory."""
     raw_root = str(root_path or "").strip()
     if len(raw_root) == 0:
         return ""
@@ -33,6 +36,7 @@ def default_profile_store_path(euicc_store_path: str) -> str:
 
 
 def euicc_store_exists(euicc_store_path: str) -> bool:
+    """Return True when the eUICC profile store directory exists and contains at least one profile."""
     raw_path = str(euicc_store_path or "").strip()
     if len(raw_path) == 0:
         return False
@@ -44,6 +48,7 @@ def euicc_store_exists(euicc_store_path: str) -> bool:
 
 
 def sync_euicc_store(state: SimCardState) -> None:
+    """Write current in-memory profile state back to the eUICC profile store directory."""
     raw_path = str(state.euicc_store_path or "").strip()
     if len(raw_path) == 0:
         return
@@ -54,6 +59,7 @@ def sync_euicc_store(state: SimCardState) -> None:
 
 
 def load_euicc_store_into_state(store_path: str, state: SimCardState) -> bool:
+    """Load the eUICC store from disk into the simulator state."""
     raw_path = str(store_path or "").strip()
     if len(raw_path) == 0:
         return False

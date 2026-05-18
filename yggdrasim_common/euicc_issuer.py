@@ -1,3 +1,5 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+"""eUICC issuer identity: loads the simulated EIM certificate chain and private key for ES2+/ES9+ client authentication."""
 from __future__ import annotations
 
 from typing import Any
@@ -35,6 +37,7 @@ KNOWN_EUICC_ISSUER_PREFIXES: dict[str, str] = {
 
 
 def normalize_issuer_digits(value: Any) -> str:
+    """Normalise an eUICC issuer digit string, stripping whitespace and dashes."""
     raw_text = str(value or "").strip()
     digits = []
     for char in raw_text:
@@ -44,6 +47,7 @@ def normalize_issuer_digits(value: Any) -> str:
 
 
 def infer_ecasd_issuer_identity(issuer_number: Any) -> dict[str, str]:
+    """Infer the ECASD issuer identity (EUM IIN prefix and display name) from an EID."""
     normalized = normalize_issuer_digits(issuer_number)
     if len(normalized) == 0:
         return {
@@ -75,6 +79,7 @@ def infer_ecasd_issuer_from_eid(eid_value: Any) -> dict[str, str]:
 
 
 def format_ecasd_issuer_display(issuer_name: Any, issuer_number: Any) -> str:
+    """Format a human-readable ECASD issuer identity string for display in the operator console."""
     normalized_name = str(issuer_name or "").strip()
     normalized_number = normalize_issuer_digits(issuer_number)
     if len(normalized_name) > 0 and len(normalized_number) > 0:

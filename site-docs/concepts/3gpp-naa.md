@@ -106,7 +106,7 @@ USIM `AUTHENTICATE`:
 The simulated UICC implements all three; the in-process YggdraCore stubs
 (`Tools/YggdraCore/`) close the loop on the network side with AUSF and
 AAnF surfaces so the round-trips can be exercised without an external 5G
-core. *(YggdraCore stubs: R2-005, post-v1.0.0 staging — see V2_ROADMAP.md.)*
+core. *(YggdraCore stubs: post-v1 staging — not part of this release.)*
 
 ## Where to look in YggdraSIM
 

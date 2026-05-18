@@ -44,7 +44,7 @@ For how to produce the keybag, see
 
     ```bash
     ls -lh Workspace/hil/captures/
-    # session-2026-04-20.pcapng
+    # session-example.pcapng
     # session-2026-04-20.pcap.keys.json
     ```
 
@@ -58,14 +58,14 @@ For how to produce the keybag, see
 
         ```bash
         python main/main.py \
-            --open-pcap Workspace/hil/captures/session-2026-04-20.pcapng
+            --open-pcap Workspace/hil/captures/session-example.pcapng
         ```
 
     === "CLI, explicit keybag"
 
         ```bash
         python main/main.py \
-            --open-pcap Workspace/hil/captures/session-2026-04-20.pcapng \
+            --open-pcap Workspace/hil/captures/session-example.pcapng \
             --keybag    Workspace/hil/captures/session-2026-04-20.keys.json
         ```
 
@@ -75,7 +75,7 @@ For how to produce the keybag, see
         python main/main.py
         [B]   HIL Bridge Session
          [3]  Open saved .pcap (offline review, no bridge)
-              pcap path  : Workspace/hil/captures/session-2026-04-20.pcapng
+              pcap path  : Workspace/hil/captures/session-example.pcapng
               keybag path: (blank → auto-discover)
         ```
 

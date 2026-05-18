@@ -1,3 +1,4 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """
 CLI entry point for the APDU mutation fuzzer.
 
@@ -47,12 +48,14 @@ class _NullTransport:
         self._imsi = imsi
 
     def probe_card_identity(self) -> tuple[str, str]:
+        """Read the ATR and ICCID from the target card and return a summary dict."""
         return self._iccid, self._imsi
 
     def transmit(self, _apdu: bytes) -> tuple[bytes, int]:
         return b"", 0x9000
 
     def close(self) -> None:
+        """Disconnect from the card reader and release resources."""
         return None
 
 
@@ -95,9 +98,10 @@ def _build_pcsc_transport(args: argparse.Namespace):
     class _PcscTransport:
         def probe_card_identity(self) -> tuple[str, str]:
             # ICCID read is delegated; a full ETSI SELECT dance is
-            # beyond the scope of the MVP. The operator must supply
-            # the identity through --probe-iccid / --probe-imsi when
-            # the card is locked and cannot be queried.
+            # outside the scope of this fuzzer. The operator must
+            # supply the identity through --probe-iccid / --probe-imsi
+            # when the card is locked and cannot be queried.
+            """Read the ATR and ICCID from the target card and return a summary dict."""
             probe_iccid = str(args.probe_iccid or "").strip()
             probe_imsi = str(args.probe_imsi or "").strip()
             return probe_iccid, probe_imsi
@@ -107,6 +111,7 @@ def _build_pcsc_transport(args: argparse.Namespace):
             return bytes(response), (sw1 << 8) | sw2
 
         def close(self) -> None:
+            """Disconnect from the card reader and release resources."""
             try:
                 connection.disconnect()
             except Exception as disconnect_error:
@@ -236,6 +241,7 @@ def _build_argument_parser() -> argparse.ArgumentParser:
 
 
 def run_cli(argv: Sequence[str] | None = None) -> int:
+    """Parse CLI arguments and run the APDU fuzzer against the configured target."""
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s %(message)s",

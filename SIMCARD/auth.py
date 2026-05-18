@@ -1,3 +1,5 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+"""UICC authentication logic: Milenage KAT vectors, 5G AKA, and AuthLogic adapter (ETSI TS 135 206 / 3GPP TS 33.501)."""
 from __future__ import annotations
 
 import hmac
@@ -60,6 +62,10 @@ class FiveGAuthVector:
 
 
 def derive_opc(ki: bytes, op: bytes) -> bytes:
+    """Compute OPc from Ki and OP (3GPP TS 33.102 Annex C.1).
+
+    OPc = AES128_Ki(OP) XOR OP. Both arguments must be exactly 16 bytes.
+    """
     key = bytes(ki or b"")
     operand = bytes(op or b"")
     if len(key) != 16 or len(operand) != 16:
@@ -69,6 +75,11 @@ def derive_opc(ki: bytes, op: bytes) -> bytes:
 
 
 def milenage_vectors(ki: bytes, opc: bytes, rand: bytes, sqn: bytes, amf: bytes) -> MilenageVectors:
+    """Run the full Milenage f1–f5* function set (3GPP TS 33.102 Annex B).
+
+    Returns all six MAC-A, MAC-S, RES, CK, IK, AK, AK* vectors plus the
+    GSM-compatibility SRES and Kc conversions (Annex B.3/B.4).
+    """
     key = bytes(ki or b"")
     operator_variant = bytes(opc or b"")
     challenge = bytes(rand or b"")
@@ -145,6 +156,10 @@ def build_milenage_autn(ki: bytes, opc: bytes, rand: bytes, sqn: bytes, amf: byt
 
 
 def build_milenage_auts(ki: bytes, opc: bytes, rand: bytes, sqn: bytes) -> bytes:
+    """Build the AUTS token for sequence-number re-sync (3GPP TS 33.102 §6.3.3).
+
+    AUTS = Conc(SQN_MS) || MAC-S, with AMF forced to zero per spec.
+    """
     zero_amf = b"\x00\x00"
     vectors = milenage_vectors(ki, opc, rand, sqn, zero_amf)
     concealed_sqn = _xor_bytes(bytes(sqn or b""), vectors.ak_star)
@@ -187,6 +202,11 @@ class AuthLogic:
         return challenge, 0x90, 0x00
 
     def internal_authenticate(self, p2: int, payload: bytes) -> tuple[bytes, int, int]:
+        """Dispatch INTERNAL AUTHENTICATE / AUTHENTICATE by algorithm (ETSI TS 102 221 §11.1.2).
+
+        P2 selects the algorithm context: 0x80 GSM, 0x81 USIM AKA,
+        0x82 IMS AKA, 0x88 VGCS, 0x89 GBA.
+        """
         normalized_p2 = int(p2) & 0xFF
         if normalized_p2 == 0x80:
             return self._run_gsm_algorithm(payload)

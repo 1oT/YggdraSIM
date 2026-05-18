@@ -1,3 +1,5 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+"""Console-script entry points: thin wrappers that delegate each named tool to its module's main function."""
 from __future__ import annotations
 
 import importlib
@@ -83,6 +85,25 @@ def hil_bridge_supervisor() -> int:
     if guard_code != 0:
         return guard_code
     return _invoke("Tools.HilBridge.supervisor", "entry")
+
+
+def card_bridge() -> int:
+    """Operator-laptop side of the APDU-over-SSH card-stream feature.
+
+    Publishes a locally attached PC/SC reader over an HTTP relay
+    endpoint that the rig-side HIL bridge consumes via its
+    ``--remote-card-url`` flag. The rig keeps doing GSMTAP capture
+    and APDU routing exactly as today; only the card itself moves.
+
+    Pre-flight gating intentionally reuses the HIL-bridge guard so
+    flavors that omit the bridge stack also omit the card-bridge
+    counterpart — they share the same pyscard / smartcard runtime
+    requirement.
+    """
+    guard_code = _guard_hil_bridge()
+    if guard_code != 0:
+        return guard_code
+    return _invoke("Tools.CardBridge.server", "main")
 
 
 def profile_package() -> int:

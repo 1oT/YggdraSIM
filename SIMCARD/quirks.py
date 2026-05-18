@@ -1,3 +1,5 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+"""Simulated card quirk flags: opt-out knobs for spec-compliant but interoperability-breaking behaviours."""
 from __future__ import annotations
 
 import copy
@@ -121,6 +123,7 @@ def _path_is_disabled_sentinel(path: str) -> bool:
 
 
 def load_quirk_registry(path: str) -> QuirkRegistry:
+    """Load the per-card quirk overrides from the quirks YAML file into the engine registry."""
     registry = QuirkRegistry()
     if _quirks_disabled_by_env():
         return registry

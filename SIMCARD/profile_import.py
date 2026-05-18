@@ -1,3 +1,5 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+"""Profile import pipeline: DER→pySim decode, ES8+ command sequence execution, and rollback on failure."""
 from __future__ import annotations
 
 import json
@@ -36,6 +38,7 @@ def import_profile_artifact(
     profile_class: str = "operational",
     nickname: str = "",
 ) -> ProfileImportResult:
+    """Import a SAIP profile artifact (bound profile package or decoded JSON) into the card engine."""
     store_path = str(profile_store_path or "").strip()
     if len(store_path) == 0:
         raise ValueError("Simulator profile store path is not configured.")

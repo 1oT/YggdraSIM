@@ -1,3 +1,5 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+"""Polling plugin support: shared timer and event-queue primitives for plugins that drive periodic background tasks."""
 from __future__ import annotations
 
 from typing import Any
@@ -37,6 +39,7 @@ def dispatch_poll_command(
     target: Any,
     argument: str,
 ) -> Any:
+    """Dispatch a poll command to the registered polling plugin."""
     capability = require_polling_plugin()
     handler = getattr(capability, "handle_command", None)
     if callable(handler) is False:
@@ -58,6 +61,7 @@ def parse_eim_local_ipae_options(argument: str = "") -> dict[str, Any]:
 
 
 def parse_eim_local_ipae_args(argument: str = "") -> tuple[int, int, bool]:
+    """Parse IPA-E argument strings for the eIM-local IPAE handler."""
     options = parse_eim_local_ipae_options(argument)
     return (
         int(options.get("poll_attempts_per_fqdn", 1) or 1),

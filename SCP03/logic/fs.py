@@ -15,6 +15,7 @@
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 # -----------------------------------------------------------------------------
 
+"""UICC file-system operations: SELECT, READ RECORD, UPDATE BINARY, and directory scan helpers (ETSI TS 102 221)."""
 import os 
 import time 
 import yaml 
@@ -1011,6 +1012,7 @@ class FileSystemController :
             self .aid_registry [alias_key ]=clean_fid 
 
     def select (self ,target_path :str ,silent :bool =False )->bool :
+        """Navigate to *target_path* by issuing SELECT-by-FID APDUs (ETSI TS 102 221 §11.1.1); return True on success."""
         target_path =target_path .strip ().upper ()
 
 
@@ -1390,6 +1392,7 @@ class FileSystemController :
             print (f"{Config.Colors.FAIL}[-] Read ARR failed: {sw1:02X}{sw2:02X}{Config.Colors.ENDC}")
 
     def print_fcp_info (self ):
+        """Print the File Control Parameters of the currently selected file in a human-readable table."""
         tmpl =self .current_fcp .get ('template','Unknown')
         print (f"{Config.Colors.CYAN}--- {tmpl} ---{Config.Colors.ENDC}")
         info =self .current_fcp 
@@ -1448,6 +1451,7 @@ class FileSystemController :
         print (f"{Config.Colors.ENDC}")
 
     def read_binary (self ,path :Optional [str ]=None ):
+        """Read and decode a transparent EF via READ BINARY (ETSI TS 102 221 §11.1.3)."""
         if path :
             print (f"{Config.Colors.CYAN}[*] Navigating to: {path}{Config.Colors.ENDC}")
             if not self .select (path ):return 
@@ -1473,6 +1477,7 @@ class FileSystemController :
             print (f"Data [{status_text}]: Read Failed")
 
     def read_record (self ,arg_line ):
+        """Read and decode one or all records of the currently selected linear-fixed EF via READ RECORD (ETSI TS 102 221 §11.1.5)."""
         args =str (arg_line ).strip ().split ()
 
         has_no_args =False 
@@ -1757,6 +1762,7 @@ class FileSystemController :
                 print (f"{Config.Colors.FAIL}[!] Invalid record number: {arg}{Config.Colors.ENDC}")
 
     def update_binary (self ,hex_data :str ):
+        """Write a hex payload to the currently selected transparent EF via UPDATE BINARY (ETSI TS 102 221 §11.1.4)."""
         try :
             cleaned_hex =hex_data .replace (" ","").upper ()
             raw_payload =bytes .fromhex (cleaned_hex )
@@ -1768,6 +1774,7 @@ class FileSystemController :
         except Exception as e :print (f"{Config.Colors.FAIL}[!] Update Error: {e}{Config.Colors.ENDC}")
 
     def update_record (self ,rec_num :Union [int ,str ],hex_data :str ):
+        """Write a hex payload to a specific record of the currently selected linear-fixed EF via UPDATE RECORD (ETSI TS 102 221 §11.1.6)."""
         try :
             record_int =self ._parse_record_arg (rec_num )
             cleaned_hex =hex_data .replace (" ","").upper ()
@@ -1786,6 +1793,7 @@ class FileSystemController :
         # (True) additionally materialises a nested structure describing
         # every resolved node so the frontend can render a clickable tree
         # without re-parsing coloured stdout.
+        """Traverse the FID tree defined in fids.txt and decode each file; populates ``scan_cache``."""
         self ._reset_before_scan ("scan")
         print (f"{Config.Colors.HEADER}[*] Auditing File System (Live)...{Config.Colors.ENDC}")
 
@@ -1807,6 +1815,7 @@ class FileSystemController :
         tree_nodes :List [Dict [str ,Any ]]=[]
 
         def live_scan (nodes ,parent_fid ,parent_path ,level =0 ,collect_into =None ):
+            """Perform a live scan of the current DF, reading file headers and returning a summary list."""
             for node in nodes :
                 self ._select_parent_for_live_traversal (parent_fid )
                 selected_fid =None 
@@ -1965,6 +1974,7 @@ class FileSystemController :
         return str (data )
 
     def generate_report (self ,filename :str ="scan_report.yaml"):
+        """Perform a deep card scan and write the full decoded file-system to a YAML report file."""
         self ._reset_before_scan ("report generation")
         print (f"{Config.Colors.HEADER}[*] Generating Deep Report to {filename}...{Config.Colors.ENDC}")
         if not os .path .exists (Config .FIDS_FILE ):print (f"{Config.Colors.FAIL}fids.txt missing{Config.Colors.ENDC}");return 
@@ -1977,6 +1987,7 @@ class FileSystemController :
         report_data ={}
 
         def extract_file_content (fid ,context_path ):
+            """Extract and return the raw content bytes of the currently selected EF."""
             content ={}
             struct =self .current_fcp .get ('structure','Unknown')
             if struct =='Transparent':
@@ -2006,6 +2017,7 @@ class FileSystemController :
             return content if content else None 
 
         def deep_scan (nodes ,parent_fid ,parent_path_list ):
+            """Perform a deep recursive scan of the file system tree from the current DF."""
             processed_fids =set ()
             explicit_nodes =[n for n in nodes if not any ('X'in f for f in n ['fids'])]
             wildcard_nodes =[n for n in nodes if any ('X'in f for f in n ['fids'])]
@@ -2178,6 +2190,7 @@ class FileSystemController :
         return decoded_iccid .rstrip ("F")
 
     def dump_live_fs (self ,output_dir :str ):
+        """Read every EF in the current file system and write the raw hex content to *output_dir* as individual files."""
         import shutil 
         from pathlib import Path 
         import yaml 

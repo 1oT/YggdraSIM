@@ -1,3 +1,4 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """
 Environment preflight checks for the YggdraSIM suite.
 
@@ -51,6 +52,7 @@ class DoctorReport:
         self.checks.append(DoctorCheck(name, status, detail))
 
     def worst_status(self) -> str:
+        """Return the most severe status string from a list of diagnostic check results."""
         rank_table = {"ok": 0, "info": 0, "warn": 1, "fail": 2}
         worst_rank = 0
         saw_info = False
@@ -498,6 +500,153 @@ def _probe_card_relay(report: DoctorReport) -> None:
     report.add("Remote card bridge", "ok", "; ".join(parts))
 
 
+def _probe_hil_remote_card(report: DoctorReport) -> None:
+    """Check the HIL-bridge-side remote card stream configuration.
+
+    Mirrors :func:`_probe_card_relay` but consumes the
+    ``YGGDRASIM_HIL_REMOTE_CARD_*`` env vars that the HIL bridge looks
+    at when it consumes a remote ``yggdrasim-card-bridge`` instance
+    over an SSH tunnel. Decision tree matches the global relay probe
+    — silent ``info`` when not configured, ``warn`` on unreachable /
+    token failures, ``ok`` with a one-line summary when the remote
+    bridge answers.
+    """
+    try:
+        from Tools.HilBridge.remote_card import (
+            REMOTE_CARD_TOKEN_ENV,
+            REMOTE_CARD_TOKEN_FILE_ENV,
+            REMOTE_CARD_URL_ENV,
+            resolve_remote_card_token,
+            resolve_remote_card_url,
+        )
+    except Exception as error:  # noqa: BLE001
+        report.add(
+            "HIL remote card stream",
+            "info",
+            f"HIL remote-card module unavailable: {error.__class__.__name__}",
+        )
+        return
+
+    try:
+        relay_url = resolve_remote_card_url("")
+    except Exception as error:  # noqa: BLE001
+        report.add(
+            "HIL remote card stream",
+            "info",
+            f"resolve URL failed: {error.__class__.__name__}: {error}",
+        )
+        return
+
+    if len(relay_url) == 0:
+        report.add(
+            "HIL remote card stream",
+            "info",
+            "Not configured — set "
+            f"{REMOTE_CARD_URL_ENV} or pass --remote-card-url to the bridge to "
+            "consume a remote yggdrasim-card-bridge over SSH.",
+        )
+        return
+
+    base_url = relay_url
+    if relay_url.endswith("/apdu"):
+        base_url = relay_url[: -len("/apdu")]
+    base_url = base_url.rstrip("/")
+
+    try:
+        token = resolve_remote_card_token()
+    except Exception as error:  # noqa: BLE001
+        report.add(
+            "HIL remote card stream",
+            "warn",
+            f"token resolution failed: {error.__class__.__name__}: {error}",
+        )
+        return
+
+    import urllib.error
+    import urllib.request
+
+    request = urllib.request.Request(f"{base_url}/ping", method="GET")
+    try:
+        with urllib.request.urlopen(request, timeout=2.0) as response:
+            ping_status = int(response.status)
+    except urllib.error.HTTPError as error:
+        report.add(
+            "HIL remote card stream",
+            "warn",
+            f"{base_url}/ping returned HTTP {error.code} ({error.reason}).",
+        )
+        return
+    except (urllib.error.URLError, ConnectionError, TimeoutError, OSError) as error:
+        report.add(
+            "HIL remote card stream",
+            "warn",
+            f"{base_url} unreachable: {error.__class__.__name__}: {error}. "
+            "Open the SSH RemoteForward and confirm yggdrasim-card-bridge is up.",
+        )
+        return
+
+    if ping_status != 200:
+        report.add(
+            "HIL remote card stream",
+            "warn",
+            f"{base_url}/ping returned HTTP {ping_status}.",
+        )
+        return
+
+    # /status carries auth posture + reader label; reuse it to flag
+    # token mismatches and surface the bound reader so the operator
+    # sees what's actually being streamed.
+    status_request = urllib.request.Request(f"{base_url}/status", method="GET")
+    if len(token) > 0:
+        status_request.add_header("Authorization", f"Bearer {token}")
+    try:
+        with urllib.request.urlopen(status_request, timeout=2.0) as response:
+            status_status = int(response.status)
+            payload_raw = response.read().decode("utf-8", errors="replace")
+    except urllib.error.HTTPError as error:
+        if error.code == 401:
+            report.add(
+                "HIL remote card stream",
+                "warn",
+                f"{base_url} reachable but token rejected (HTTP 401). "
+                f"Check {REMOTE_CARD_TOKEN_FILE_ENV} or {REMOTE_CARD_TOKEN_ENV}.",
+            )
+            return
+        report.add(
+            "HIL remote card stream",
+            "warn",
+            f"{base_url}/status returned HTTP {error.code} ({error.reason}).",
+        )
+        return
+    except (urllib.error.URLError, ConnectionError, TimeoutError, OSError) as error:
+        report.add(
+            "HIL remote card stream",
+            "warn",
+            f"{base_url}/status unreachable: {error.__class__.__name__}: {error}",
+        )
+        return
+
+    import json as _json
+
+    try:
+        payload = _json.loads(payload_raw) if status_status == 200 else None
+    except Exception:
+        payload = None
+
+    reader_label = ""
+    atr_hex = ""
+    if isinstance(payload, dict):
+        reader_label = str(payload.get("reader") or "").strip()
+        atr_hex = str(payload.get("atr") or "").strip().upper()
+
+    parts: list[str] = [f"{base_url} reachable"]
+    if len(reader_label) > 0:
+        parts.append(f"reader='{reader_label}'")
+    if len(atr_hex) > 0:
+        parts.append(f"ATR={atr_hex}")
+    report.add("HIL remote card stream", "ok", "; ".join(parts))
+
+
 def _detect_webview_backends() -> tuple[list[str], list[str]]:
     """Return ``(available_backends, install_hints)`` for pywebview.
 
@@ -567,7 +716,7 @@ def _detect_webview_backends() -> tuple[list[str], list[str]]:
 def _probe_gui_stack(report: DoctorReport) -> None:
     """Report the state of the optional universal-GUI dependency stack.
 
-    Mirrors ``V2_UNIVERSAL_GUI_PLAN`` §12:
+    Severity levels:
 
     * ``ok``   — full desktop stack importable AND at least one
       pywebview backend is importable (gtk / qt / cocoa / edgechromium).
@@ -734,6 +883,7 @@ def run_doctor(
     _probe_hil_bridge(report)
     _probe_hil_optional_helpers(report)
     _probe_card_relay(report)
+    _probe_hil_remote_card(report)
     _probe_gui_stack(report)
 
     try:

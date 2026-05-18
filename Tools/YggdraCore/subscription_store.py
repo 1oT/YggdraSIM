@@ -13,10 +13,11 @@ Holds the minimum 3GPP material the AUSF needs to answer
 * ``akma_enabled`` -- mirrors the AKMA indication the UDM would send
   the AUSF (TS 33.535 \u00a76.1 step 2)
 
-The store is intentionally kept process-local; persistence belongs
-in Phase 2 (BYO Open5GS / MongoDB). Mutation is serialised by a
-single :class:`threading.Lock` so the FastAPI thread pool can read
-and write safely.
+The store is intentionally kept process-local; persistence is not
+part of this release (the BYO Open5GS / MongoDB path is the
+production answer). Mutation is serialised by a single
+:class:`threading.Lock` so the FastAPI thread pool can read and
+write safely.
 """
 
 from __future__ import annotations

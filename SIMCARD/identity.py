@@ -1,3 +1,4 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """GET IDENTITY (CLA=80 INS=78) handler -- USIM-side SUCI calculation.
 
 TS 31.102 §7.1.2.4 defines GET IDENTITY:
@@ -49,6 +50,7 @@ class IdentityLogic:
         self.fs = file_system
 
     def handle_get_identity(self, p1: int, p2: int, data: bytes) -> tuple[bytes, int, int]:
+        """Handle the GET IDENTITY command and return the EID or ICCID per the P1 selector."""
         if int(p1) & 0xFF != 0x00:
             return b"", 0x6A, 0x86
         if int(p2) & 0xFF != P2_SUCI_CALCULATION:

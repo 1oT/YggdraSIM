@@ -1,3 +1,5 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+"""SCP11-live data models: ES2+/ES9+ request/response dataclasses for the live physical-reader variant."""
 # -----------------------------------------------------------------------------
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -82,6 +84,16 @@ class CancelSessionRequest:
 @dataclass
 class HandleNotificationRequest:
     pending_notification: str
+    # SGP.22 §5.6.4: each PendingNotification carries the FQDN of the
+    # SM-DP+ that minted it (NotificationMetadata.notificationAddress,
+    # tag 0C UTF8String). The LPA MUST forward the notification to that
+    # address rather than to a global ES9 endpoint -- profiles from
+    # different SM-DP+ instances coexist on the same eUICC and trust
+    # roots / CI keys differ between live and test environments.
+    # Empty string means "fall back to the configured base URL", which
+    # preserves the legacy behaviour for tests and for cards whose
+    # metadata does not carry a notificationAddress.
+    smdp_address: str = ""
 
 
 @dataclass

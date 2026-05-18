@@ -15,6 +15,7 @@
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 # -----------------------------------------------------------------------------
 
+"""Reference-guide printer: renders built-in SCP03 quick-reference text to stdout."""
 import os 
 from SCP03 .config import Config 
 
@@ -29,6 +30,7 @@ class ShellGuides :
 
     @classmethod 
     def print_guide (cls ,topic :str =""):
+        """Print the named reference guide to stdout."""
         original_topic =topic .upper ().strip ()
 
         while True :

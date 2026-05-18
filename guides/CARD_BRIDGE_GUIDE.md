@@ -1,13 +1,13 @@
 # Card Bridge — Operator Guide
 
-> **Status: post-v1.0.0 staging (R2-005).** The `Tools/CardBridge` HTTP
-> daemon described below ships on `main` after the `v1.0.0` tag. The
-> v1.0.0 frozen tree only includes the bearer-token helper
-> (`yggdrasim_common.card_bridge_auth`); the loopback HTTP server, its
-> CLI surface, and the documented hardening pass are tracked under
-> `R2-005` in [`V2_ROADMAP.md`](../V2_ROADMAP.md). v1.0.0 operators
-> reaching for a tunnel between a reader-side host and a tool-side host
-> should fall back to the `Tools/HilBridge` APDU relay (see
+> **Status: post-v1 staging.** The `Tools/CardBridge` HTTP daemon
+> described below ships on `main` after the `v1.0.0` tag. The v1.0.0
+> frozen tree only includes the bearer-token helper
+> (`yggdrasim_common.card_bridge_auth`); the loopback HTTP server,
+> its CLI surface, and the hardening pass are not part of this
+> release. v1.0.0 operators reaching for a tunnel between a
+> reader-side host and a tool-side host should fall back to the
+> `Tools/HilBridge` APDU relay (see
 > [`HIL_BRIDGE_GUIDE.md`](HIL_BRIDGE_GUIDE.md)).
 
 The Card Bridge lets you run YggdraSIM on one machine while the smart

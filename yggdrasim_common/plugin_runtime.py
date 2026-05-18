@@ -1,3 +1,5 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+"""Plugin runtime gate: enforces the absence of optional hardware-dependent plugins in environments that declare them unavailable."""
 from __future__ import annotations
 
 import importlib.util
@@ -78,6 +80,7 @@ class PluginManager:
         # done so they see a consistent capability map. ``_loading`` is kept
         # as a belt-and-suspenders guard for anyone that defeats the lock by
         # calling the internals directly.
+        """Ensure the plugin at *path* is loaded, importing it if not already present."""
         with self._lock:
             if self._loaded or self._loading:
                 return
@@ -234,6 +237,7 @@ class PluginManager:
         return dict(self._load_errors)
 
     def extend_target(self, target: Any) -> Any:
+        """Extend *target* with the callables registered for the named extension point."""
         self.ensure_loaded()
         target_dict = getattr(target, "__dict__", None)
         if isinstance(target_dict, dict) is False:
@@ -257,6 +261,7 @@ _PLUGIN_MANAGER_LOCK = threading.Lock()
 
 
 def get_plugin_manager() -> PluginManager:
+    """Return the singleton PluginManager, creating it on first call."""
     global _PLUGIN_MANAGER
     # Fast path keeps the common case lock-free; slow path serialises the
     # one-time construction so two threads calling ``ensure_plugins_loaded``

@@ -143,8 +143,8 @@ class _SimulatorEimLoopbackBase(unittest.TestCase):
 
 
 class IsdrDiscoveryAgainstSimulatorTests(_SimulatorEimLoopbackBase):
-    """Phase 1 / Mode A. Confirm discover_card() crosses every BFxx
-    surface the eIM relies on and gets a parseable answer."""
+    """Confirm discover_card() crosses every BFxx surface the eIM
+    relies on and gets a parseable answer (Mode A — local simulator)."""
 
     def test_select_isdr_returns_9000_against_simulator(self) -> None:
         session = self._build_session()
@@ -258,9 +258,9 @@ class IsdrDiscoveryAgainstSimulatorTests(_SimulatorEimLoopbackBase):
 
 
 class AddInitialEimAgainstSimulatorTests(_SimulatorEimLoopbackBase):
-    """Phase 1 / Mode A. Confirm a SGP.32 AddInitialEim package
-    travels eIM -> sim and lands a new entry in the simulator's
-    eIM list."""
+    """Confirm a SGP.32 AddInitialEim package travels eIM -> sim and
+    lands a new entry in the simulator's eIM list (Mode A — local
+    simulator)."""
 
     def _write_signing_cert(self, target_dir: Path) -> Path:
         cert_der, key_der = _make_self_signed_cert("Loopback Test eIM")

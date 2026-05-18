@@ -1,3 +1,5 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+"""Simulated SIM persistent state: profile FS nodes, auth config, PIN/PUK entries, and SD key records serialised to JSON."""
 from __future__ import annotations
 
 import os
@@ -62,10 +64,11 @@ def _default_stk_imei_bcd() -> bytes:
 def _default_stk_location_information() -> bytes:
     """ETSI TS 102 223 §8.19 / 3GPP TS 24.008 §10.5.1.3 GSM Location.
 
-    7 bytes: 3-byte packed-BCD PLMN (MCC=262 / MNC=01 / Telekom DE)
-    + 2-byte LAC (0x0001) + 2-byte Cell ID (0x0001).
+    7 bytes: 3-byte packed-BCD PLMN (MCC=001 / MNC=01, the 3GPP TS
+    23.003 §2.2 test PLMN) + 2-byte LAC (0x0001) + 2-byte Cell ID
+    (0x0001).
     """
-    return bytes.fromhex("62F210000100 01".replace(" ", ""))
+    return bytes.fromhex("00F110000100 01".replace(" ", ""))
 
 
 @dataclass

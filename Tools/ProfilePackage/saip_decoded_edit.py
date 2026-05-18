@@ -1,3 +1,12 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+"""SAIP decoded-field editor: model builders and payload encoders.
+
+``build_decoded_value_editor_model`` maps a raw JSON field value to a
+typed editor model (enum, bitmask, roundtrip, raw-hex, …) that the GUI
+renders as a structured form.  ``encode_decoded_value_editor_payload``
+is its inverse — it converts a submitted editor payload back to a
+tagged-bytes JSON value ready for splice into the document tree.
+"""
 from __future__ import annotations
 
 import copy
@@ -5,6 +14,12 @@ import re
 from typing import Any
 
 from .saip_asn1_decode import (
+    _5G_PROSE_ST_SERVICES,
+    _CSIM_SERVICE_NAMES,
+    _EF_BST_SERVICE_NAMES,
+    _EF_MST_SERVICE_NAMES,
+    _EF_PST_SERVICE_NAMES,
+    _EF_VST_SERVICE_NAMES,
     _EST_SERVICE_NAMES,
     _ISIM_SERVICE_NAMES,
     _decode_ef_file_size,
@@ -45,6 +60,17 @@ _SERVICE_TABLE_FILE_DEFS: dict[str, tuple[str, dict[int, str]]] = {
     "ef-ust": ("EF.UST", _UST_SERVICE_NAMES),
     "ef-est": ("EF.EST", _EST_SERVICE_NAMES),
     "ef-ist": ("EF.IST", _ISIM_SERVICE_NAMES),
+    # P1.7 — generic service-table editor scaffold extended to the
+    # remaining 3GPP / TCA service-table EFs. Each pair reuses the
+    # service-name dictionary already defined in saip_asn1_decode so
+    # the bit-list editor surfaces human-readable labels instead of
+    # bare "Service N" placeholders.
+    "ef-bst":             ("EF.BST",            _EF_BST_SERVICE_NAMES),
+    "ef-mst":             ("EF.MST",            _EF_MST_SERVICE_NAMES),
+    "ef-pst":             ("EF.PST",            _EF_PST_SERVICE_NAMES),
+    "ef-vst":             ("EF.VST",            _EF_VST_SERVICE_NAMES),
+    "ef-csim-st":         ("EF.CSIM_ST",        _CSIM_SERVICE_NAMES),
+    "ef-5g-prose-st":     ("EF.5G_PROSE_ST",    _5G_PROSE_ST_SERVICES),
 }
 
 
@@ -329,6 +355,13 @@ def build_decoded_value_editor_model(
     last_ef_key: str | None = None,
     pe_section_key: str | None = None,
 ) -> dict[str, Any] | None:
+    """Build a typed editor model for a single decoded profile field.
+
+    Returns a dict with ``title``, ``editor_kind``, and ``payload`` keys
+    that the GUI renders as a form, or ``None`` when no typed editor is
+    available for the field.  ``last_ef_key`` (e.g. ``"ef-acc"``) narrows
+    the editor for fields whose meaning depends on the containing EF.
+    """
     normalized_field = str(field_name or "").strip()
     if normalized_field == "shortEFID":
         raw_hex = _hex_from_tagged_bytes(raw_value)
@@ -534,6 +567,45 @@ def build_decoded_value_readonly_view(
     normalized_ef = normalized_ef_raw.lower() if len(normalized_ef_raw) > 0 else None
     normalized_pe = str(pe_section_key or "").strip() or None
 
+    if normalized_field == "sdPersoData":
+        # GlobalPlatform Amendment A DGI personalisation blocks. The
+        # SAIP shell's INFO renderer goes through the same decoder so
+        # the Decoded pane in either TUI shows the SCP80 connectivity
+        # tags (84/85/86/89) and the GP Amendment A DGI names
+        # (0070, 8010, ...) without diverging from CLI output.
+        from .saip_dgi_decode import decode_dgi_records as _decode_dgi_records
+
+        candidate_value = raw_value
+        if isinstance(raw_value, dict):
+            tagged_hex = _hex_from_tagged_bytes(raw_value)
+            if tagged_hex is not None:
+                candidate_value = [tagged_hex]
+        elif isinstance(raw_value, list):
+            collected: list[str] = []
+            for item in raw_value:
+                if isinstance(item, dict):
+                    item_hex = _hex_from_tagged_bytes(item)
+                    if item_hex is not None:
+                        collected.append(item_hex)
+                        continue
+                if isinstance(item, str):
+                    collected.append(item)
+            candidate_value = collected
+        try:
+            decoded_dgi = _decode_dgi_records(candidate_value)
+        except Exception:
+            decoded_dgi = None
+        if isinstance(decoded_dgi, list) and len(decoded_dgi) > 0:
+            return {
+                "title": _readonly_view_title(normalized_field, normalized_ef_raw),
+                "note": _READONLY_VIEW_NOTE,
+                "editor_kind": _READONLY_VIEW_EDITOR_KIND,
+                "payload": {
+                    "format": "DGI",
+                    "blocks": decoded_dgi,
+                },
+            }
+
     if normalized_field == "fillFileContent" and normalized_ef is not None:
         raw_hex = _hex_from_tagged_bytes(raw_value)
         if raw_hex is not None and len(raw_hex) > 0:
@@ -595,9 +667,8 @@ def build_decoded_value_readonly_view(
 
 _ROUNDTRIP_EDITOR_KIND = "roundtrip_decoded"
 _ROUNDTRIP_EDITOR_NOTE = (
-    "Round-trip decoded editor. Edit the decoded fields directly as JSON "
-    "(e.g. 'decimal', 'state', 'activeUsageIds'). The editor re-encodes the "
-    "value back to its original SAIP representation on apply."
+    "The default decoded tab shows a short layout summary. Full ASN.1-shaped "
+    "structure is under SHOW JSON; edits there re-encode back to tagged bytes on save."
 )
 
 # Record-structured EFs whose decoders are intentionally lossy (alpha-id
@@ -821,14 +892,75 @@ _LOSSY_SPLICE_EDITOR_NOTE = (
 )
 
 
+# Friendly titles for EFs whose roundtrip editor benefits from a spec
+# citation in the editor header. The gap analysis flagged these as
+# "missing dedicated wizards" — the underlying editor is already
+# round-trip capable, so the only thing missing was a per-EF label that
+# named the file plus the standards section it implements. New entries
+# go here rather than scattering them across the EF decoders.
+_EF_FRIENDLY_TITLES: dict[str, str] = {
+    "ef-dir": "EF.DIR — Application Directory · TS 102 221 §13.1",
+    "ef-routing-indicator": (
+        "EF.Routing_Indicator — TS 31.102 §4.4.11.10"
+    ),
+    "ef-suci-calc-info": (
+        "EF.SUCI_Calc_Info — 5GS SUCI Calculation · TS 31.102 §4.4.11.8"
+    ),
+    "ef-suci-calc-info-usim": (
+        "EF.SUCI_Calc_Info (USIM 4F01) — TS 31.102 §4.4.11.8"
+    ),
+    "ef-ursp": (
+        "EF.URSP — UE Route Selection Policy · TS 31.102 §4.4.11.10 / TS 24.526"
+    ),
+    "ef-imsi": "EF.IMSI — TS 31.102 §4.4.11.1",
+    "ef-iccid": "EF.ICCID — TS 102 221 §13.2",
+    "ef-arr": "EF.ARR — Access Rule Reference · TS 102 221 §11.1.1.4",
+    "ef-ust": "EF.UST — USIM Service Table · TS 31.102 §4.2.8",
+    "ef-est": "EF.EST — Enabled Services Table · TS 31.102 §4.2.24",
+    "ef-ist": "EF.IST — ISIM Service Table · TS 31.103 §4.2.7",
+    "ef-spn": "EF.SPN — Service Provider Name · TS 31.102 §4.2.12",
+    "ef-pl": "EF.PL — Preferred Languages · TS 102 221 §13.3",
+    "ef-li": "EF.LI — Language Indication · TS 31.102 §4.2.6",
+    "ef-acc": "EF.ACC — Access Control Class · TS 31.102 §4.2.15",
+    "ef-ad": "EF.AD — Administrative Data · TS 31.102 §4.2.18",
+    "ef-pnn": "EF.PNN — PLMN Network Name · TS 31.102 §4.2.58",
+    "ef-opl": "EF.OPL — Operator PLMN List · TS 31.102 §4.2.59",
+    "ef-spdi": "EF.SPDI — Service Provider Display · TS 31.102 §4.2.66",
+    "ef-msisdn": "EF.MSISDN — TS 31.102 §4.2.26",
+    "ef-fdn": "EF.FDN — Fixed Dialling Numbers · TS 31.102 §4.4.2",
+    "ef-adn": "EF.ADN — Abbreviated Dialling Numbers · TS 31.102 §4.4.2",
+    "ef-sdn": "EF.SDN — Service Dialling Numbers · TS 31.102 §4.4.2",
+    "ef-ecc": "EF.ECC — Emergency Call Codes · TS 31.102 §4.2.43",
+    "ef-impi": "EF.IMPI — IMS Private User Identity · TS 31.103 §4.2.2",
+    "ef-impu": "EF.IMPU — IMS Public User Identity · TS 31.103 §4.2.4",
+    "ef-domain": "EF.DOMAIN — IMS Home Network Domain · TS 31.103 §4.2.3",
+    "ef-pcscf": "EF.P-CSCF — IMS P-CSCF Address · TS 31.103 §4.2.8",
+    "ef-5g-suci-calc-info": "EF.5G_SUCI_Calc_Info — TS 31.102 §4.4.11.8",
+    "ef-5gauthkeys": "EF.5G_AUTH_KEYS — TS 31.102 §4.4.11.6",
+    "ef-uac-aic": "EF.UAC_AIC — Access Identities Configuration · TS 31.102 §4.4.11.7",
+    "ef-opl5g": "EF.OPL5G — 5GS Operator PLMN List · TS 31.102 §4.4.11.9",
+    "ef-tn3gppsnn": "EF.TN3GPPSNN — Trusted Non-3GPP SSID · TS 31.102 §4.4.11.11",
+    "ef-supinai": "EF.SUPI_NAI — TS 31.102 §4.4.11.13",
+    "ef-cag": "EF.CAG — Pre-configured CAG list · TS 31.102 §4.4.11.14",
+}
+
+
 def _roundtrip_editor_title(field_name: str, last_ef_key: str | None) -> str:
     base = str(field_name or "").strip() or "field"
-    ef_token = str(last_ef_key or "").strip()
-    if base == "fillFileContent" and len(ef_token) > 0:
-        return f"Decoded editor: {ef_token} file content"
-    if len(ef_token) > 0:
-        return f"Decoded editor: {ef_token} / {base}"
-    return f"Decoded editor: {base}"
+    ef_token_raw = str(last_ef_key or "").strip()
+    ef_token_lower = ef_token_raw.lower()
+    friendly = _EF_FRIENDLY_TITLES.get(ef_token_lower)
+    if base == "fillFileContent" and friendly is not None:
+        return f"File data — {friendly}"
+    if base == "fillFileContent" and len(ef_token_raw) > 0:
+        return f"File data — {ef_token_raw}"
+    if base == "fillFileContent":
+        return "File data"
+    if len(ef_token_raw) > 0:
+        if friendly is not None:
+            return f"Decoded — {friendly} / {base}"
+        return f"Decoded — {ef_token_raw} / {base}"
+    return f"Decoded — {base}"
 
 
 def _roundtrip_editor_payload(decoded: Any) -> dict[str, Any]:
@@ -1111,6 +1243,13 @@ def encode_decoded_value_editor_payload(
     target_length: int | None = None,
     editor_kind: str | None = None,
 ) -> Any:
+    """Encode a submitted editor payload back to a tagged-bytes JSON value.
+
+    Inverse of ``build_decoded_value_editor_model``.  ``editor_kind``
+    selects the encoding path; when ``None`` it is inferred from
+    ``field_name``.  Raises ``ValueError`` for invalid or out-of-range
+    input values.
+    """
     normalized_field = str(field_name or "").strip()
     payload = dict(editor_payload)
     if normalized_field == "shortEFID":
@@ -1409,6 +1548,7 @@ def enumerate_pe_decodable_fields(
         raw_value: Any,
         last_ef_key: str | None,
     ) -> None:
+        """Register a decoded-field editor class for the given PE type and tag path."""
         key = tuple(rel_path)
         if key in seen_paths:
             return
@@ -1445,6 +1585,7 @@ def enumerate_pe_decodable_fields(
         })
 
     def walk(node: Any, rel_path: list[Any], last_ef_key: str | None) -> None:
+        """Walk the decoded JSON tree and collect all editable field paths."""
         if isinstance(node, dict):
             for tuple_tag_key in _TUPLE_TAG_KEYS:
                 if tuple_tag_key in node and isinstance(node[tuple_tag_key], list):
@@ -1693,6 +1834,7 @@ def enumerate_pe_form_unknown_paths(
     unknown: list[list[Any]] = []
 
     def walk(node: Any, path: list[Any]) -> None:
+        """Walk the decoded JSON tree recursively, yielding (path, value) tuples."""
         if tuple(path) in expected:
             return
         if isinstance(node, dict):

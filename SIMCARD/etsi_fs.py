@@ -1,3 +1,5 @@
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+"""ETSI TS 102 221 elementary-file emulation: transparent, linear-fixed, and cyclic record access on in-memory byte arrays."""
 from __future__ import annotations
 
 import copy
@@ -1650,6 +1652,7 @@ def _build_name_path_index(nodes: dict[str, SimFileNode]) -> dict[tuple[str, ...
     index: dict[tuple[str, ...], str] = {}
 
     def walk(node_id: str, path: tuple[str, ...]) -> None:
+        """Depth-first walk of the ETSI file-system TLV tree."""
         node = nodes[node_id]
         index[path] = node_id
         for child_id in node.children:
@@ -1681,6 +1684,7 @@ def _resolve_active_profile(state: SimCardState) -> SimProfileEntry | None:
 
 
 def apply_security_domain_config(state: SimCardState) -> None:
+    """Update ISDR, ECASD, and MNO-SD node AIDs and labels in ``state.base_nodes`` from current state fields."""
     _apply_security_domain_node(state.base_nodes, "ISDR", state.isdr_aid, state.isdr_label)
     _apply_security_domain_node(state.base_nodes, "ECASD", state.ecasd_aid, state.ecasd_label)
     _apply_security_domain_node(state.base_nodes, "MNO_SD", state.mno_sd_aid, state.mno_sd_label)
@@ -1706,6 +1710,11 @@ def _apply_security_domain_node(
 
 
 def rebuild_runtime_filesystem(state: SimCardState) -> None:
+    """Rebuild the live node tree from the base snapshot after a profile enable/disable or BPP install.
+
+    Deep-copies ``state.base_nodes``, re-applies the SAIP profile overlay, personalises
+    EF bodies with current ICCID/IMSI/AKA material, then restores the previously selected node.
+    """
     previous_node_id = str(state.current_node_id or "3F00")
     base_nodes = state.base_nodes if len(state.base_nodes) > 0 else state.nodes
     state.nodes = copy.deepcopy(base_nodes)
@@ -2690,6 +2699,11 @@ def _extract_apn_from_ef_acl(
 
 
 def build_default_state() -> SimCardState:
+    """Construct a fully-initialised ``SimCardState`` from the built-in default UICC profile.
+
+    Creates the base ETSI file system tree, personalises it with synthetic test
+    identifiers, and returns the singleton-ready state object.
+    """
     iccid = "89461111111111111112"
     # MCC/MNC 001/01 - 3GPP test PLMN. Keeps the default profile identity
     # compatible with osmo-hlr / open5gs / free5gc lab HSS configurations.
@@ -2949,31 +2963,18 @@ class EtsiFileSystem:
         """ETSI TS 102 221 §11.1.1 SELECT.
 
         P1 encodes the selection scope (FID, AID, parent DF, path from MF,
-        path from current DF). P2 low-nibble (bits b4-b3, mask 0x0C) gates
-        the response template:
-
-        - 0x00 FCI (tag 6F) — current default template for SDs
-        - 0x04 FCP (tag 62) — current default template for regular files
-        - 0x08 FMD (tag 64) — not supported, collapses to FCP
-        - 0x0C no response data
-
-        Backward compatibility: when P1=0x00 and the selector length is 2
-        it is treated as a FID; otherwise it is treated as an AID. This
-        matches the pre-v1 behaviour exercised by the existing SIMCARD
-        test gauntlet.
+        path from current DF). P2 bits b4-b3 would gate FCP return under a
+        strict reading of ETSI TS 102 221 Table 11.2, but UICCs accessed
+        through OTA/SCP80 commonly issue SELECT with P2='0C' and still
+        surface the FCP; the simulator follows that interop profile.
         """
         p1_value = int(p1) & 0xFF
-        p2_value = int(p2) & 0xFF
         normalized = bytes(selector or b"")
 
         node = self._resolve_select_target(p1_value, normalized)
         if node is None:
             return b"", 0x6A, 0x82
         self.state.current_node_id = node.node_id
-
-        response_template = p2_value & 0x0C
-        if response_template == 0x0C:
-            return b"", 0x90, 0x00
         return self.build_fcp(node), 0x90, 0x00
 
     def _resolve_select_target(self, p1: int, selector: bytes) -> SimFileNode | None:
@@ -3579,6 +3580,7 @@ class EtsiFileSystem:
         to_remove: list[str] = []
 
         def collect(node_id: str) -> None:
+            """Collect file descriptors while traversing the directory tree."""
             node = self.state.nodes.get(node_id)
             if node is None:
                 return

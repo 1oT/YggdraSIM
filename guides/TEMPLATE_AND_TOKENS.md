@@ -105,6 +105,53 @@ TOKENS APPLY template_without_defs.json my_template.tokens.json
 The command refuses to overwrite an existing non-empty
 `__ygg_token_defs__` block, protecting against accidental merges.
 
+### 3b. Round-trip with personalisation-data CSV files
+
+Personalisation data shipped from third-party issuance tooling is
+commonly distributed as a plain two-column CSV — the convention used
+across the TCA SAIP ecosystem. One line per variable, `name,hex`, with
+`#`-prefixed comment lines separating independent personalisation-data
+sets when multiple profile packages share a single file. YggdraSIM
+round-trips between the JSON sidecar and this CSV via:
+
+```
+EXPORT-TOKENS-CSV my_template.json my_template.csv
+IMPORT-TOKENS-CSV personalisation.csv personalisation.tokens.json
+```
+
+Multi-block CSV input produces `personalisation_1.tokens.json`,
+`personalisation_2.tokens.json`, ... — one sidecar per CSV block — so
+each set can be fed to `APPLY-TOKENS` independently. Pattern-only token
+definitions (defs that carry only `pattern_hex` / `byte_len`) are
+silently skipped on export, because the CSV format has no column shape
+for placeholder patterns.
+
+### 3c. Transformation functions inside hex templates
+
+Both placeholder styles accept a transformation-function form:
+
+```
+[Func(NAME)]    bracket style
+{Func(NAME)}    brace style
+[#Func(NAME)]   companion that emits the BER-TLV length of Func(NAME)
+```
+
+Two functions are bundled:
+
+- `SwapNibbles(NAME)` — byte-wise nibble swap, mirroring the
+  ETSI TS 102 221 §13.2 (EF.ICCID) and 3GPP TS 31.102 BCD encodings.
+  Example: token value `8949001304080000016F` expands to
+  `989400314080000010F6`. Useful for feeding nibble-swapped EF.ICCID
+  content from an upright ICCID source.
+- `EncodeEfImsi(NAME)` — wraps an ASCII IMSI (1..15 digits) into the
+  EF.IMSI body per 3GPP TS 31.102 §4.2.2: length byte, then a
+  parity-tagged digit-1 byte (low nibble `0x9` for odd digit counts,
+  `0x1` for even per the spec's bit-4 parity flag), then 7
+  nibble-swapped digit-pair bytes (`F`-padded for odd counts).
+
+These transformations resolve against the same `__ygg_token_defs__`
+table; nothing else in the template surface changes.
+
 ### 4. Edit tokens in-place
 
 Three interchangeable surfaces exist:
@@ -206,6 +253,53 @@ Either use the canonical companion form (`{#NAME}{NAME}`) so the
 length is recomputed automatically, or run `RETOKENISE-LENGTHS` /
 `TOKENS RETOKENISE-LENGTHS` to migrate existing literal-length sites
 to the companion form.
+
+## Inline typed hex placeholders (vendor templates)
+
+Some vendor templates ship a profile as ASCII hex with typed
+placeholders baked directly into the hex body:
+
+```
+62128202412183026F078B036F06068001098800810908{imsi:IMSI:8:encode_imsi}80027F20
+```
+
+The grammar is `{<var>:<TYPE>:<byte_length>[:<modifier>]}`. The byte
+length is the only field YggdraSIM interprets; `TYPE` and `modifier`
+are carried along as opaque strings. When `OPEN` / `USE` selects a
+`.txt` / `.hex` file carrying this shape:
+
+1. Each placeholder is replaced with a deterministic, per-index
+   sentinel of the declared byte length so the hex stream decodes as
+   valid DER.
+2. A sidecar JSON (`<cache>.placeholders.json`) is written next to
+   the cached DER, capturing every placeholder's literal, variable
+   name, type, byte length, modifier, and the sentinel that stands
+   in for it inside the materialised DER.
+3. After pySim decodes the sequence, the sidecar is consulted and
+   every sentinel run found inside a tagged hex leaf is rewritten
+   back to the original placeholder literal. The operator sees the
+   placeholder text exactly where it sat in the source file.
+
+Nothing in this path *resolves* the placeholder to real bytes — that
+surface stays with the JSON template / `__ygg_token_defs__`
+machinery. Saving the template round-trips the literals:
+
+1. The editor JSON buffer carries the vendor literal text inside every
+   `"hex"` leaf (e.g. `"hex": "0908{imsi:IMSI:8:encode_imsi}"`).
+2. On save, the literal is substituted back to its sentinel bytes,
+   the buffer is DER-encoded, re-decoded, and re-jsonified, then the
+   literal is re-inserted into the tagged hex leaves of the fresh
+   tree.
+3. The `*.transcode.json` sidecar ships with the literals intact; the
+   `*.transcode.der` carries the sentinel bytes; a placeholder
+   sidecar (`<transcode-der>.placeholders.json`) is written beside
+   the DER so re-opening the transcode output picks the literals back
+   up.
+
+To produce a provisioning-ready DER (one with real ICCID / IMSI /
+keys rather than sentinel fillers), lift the template into the
+native JSON form (`GENERATE-TEMPLATE` or the TUI's export-to-JSON
+action) and drive `APPLY-TEMPLATE` / `GENERATE-BATCH` against it.
 
 ## Standards and references
 

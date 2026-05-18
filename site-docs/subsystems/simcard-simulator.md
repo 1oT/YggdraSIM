@@ -1006,7 +1006,7 @@ wrapper.
 ### SAIP §8.3.5 explicit `Fcp.linkPath` aliases
 
 The TCA Profile Interoperability v2.3.1 specification carries a
-first-class encoding for cross-DF aliases inside the Bound Profile
+explicit encoding for cross-DF aliases inside the Bound Profile
 Package. Every `Fcp` SEQUENCE may include a
 `linkPath [PRIVATE 7] OCTET STRING (SIZE (0..8))` field whose body
 is the concatenation of 2-byte File Identifiers walking from the MF
@@ -1203,7 +1203,7 @@ deployments.
 | D     | `genericFileManagement` walker   | `pysim_gfm_walk` + `_materialize_gfm_via_pysim` + local fallback                | `tests/test_simcard_saip_gfm_walker.py`         |
 | E     | TS service-name tables           | `pysim_service_table`, `apply_pysim_service_table_overlay_to_inspector`         | `tests/test_simcard_saip_service_tables.py`     |
 
-**Phase A** lifts pySim's `ProfileTemplateRegistry` snapshots
+The template-overlay layer lifts pySim's `ProfileTemplateRegistry` snapshots
 (`FilesAtMF`, `FilesUsimMandatory[V2]`, `FilesUsimOptional[V2|V3]`,
 `FilesIsimMandatory`, `FilesIsimOptional[v2]`, `FilesUsimDfGsmAccess`,
 `FilesUsimDf5GS[v2|v3|v4]`, `FilesUsimDfSaip`, `FilesTelecom`)
@@ -1213,16 +1213,16 @@ keys aliases by `(FID, canonical EF name)` so files that share a
 FID across DFs (`ef-pbc` 4F09 in DF.PHONEBOOK vs `ef-supinai`
 4F09 in DF.5GS) cannot collide.
 
-**Phase B** routes every BPP / GFM `fileDescriptor` blob through
+The FCP-decoder layer routes every BPP / GFM `fileDescriptor` blob through
 `pySim.esim.saip.File.from_fileDescriptor`, then projects the
 result onto `FcpAttributes` (typed dataclass with `fid_hex`,
 `structure`, `arr`, `lcsi`, `fill_pattern`, `link_path`, ...).
-SFI assignments still flow from the Phase A template overlay --
+SFI assignments still flow from the template-overlay layer --
 pySim stores the raw `shortEFID` byte rather than the unpacked
 SFI defined by TS 102 221 §13.2, so descriptor-derived SFIs are
 deliberately not used to populate `SimProfileFsNode.sfi`.
 
-**Phase C** wraps `pinCodes`, `pukCodes`, `securityDomain`,
+The PE-wrapper layer wraps `pinCodes`, `pukCodes`, `securityDomain`,
 `rfm` and `akaParameter` PEs through `pysim_pe_wrapper`, which
 constructs the matching pySim subclass and runs `_post_decode`.
 `pysim_sd_keys` returns frozen `PySimSdKeySnapshot`s with the
@@ -1233,7 +1233,7 @@ the `KeyType` enum string mapped to the GP §11.1.8 byte (e.g.
 `'0x000000000000'` default for `sqnInit` materialises into the
 TS 33.102 §6.3.7 32-element list of 6-byte zeros.
 
-**Phase D** rewrites `_consume_generic_file_management` on top
+The GFM-walker layer rewrites `_consume_generic_file_management` on top
 of `ProfileElementGFM`. `pysim_gfm_walk` replicates pySim's
 stream processing (`filePath`, `createFCP`, `fillFileOffset`,
 `fillFileContent`, `linkPath` extension) and emits a tuple of
@@ -1245,7 +1245,7 @@ an explicit `filePath` resolve under it). The original local
 walker is retained as `_consume_generic_file_management_local`
 fallback for when pySim is absent or returns an empty walk.
 
-**Phase E** replaces the inspector's hand-curated bit -> name
+The service-table layer replaces the inspector's hand-curated bit -> name
 dictionaries (`Tools/ProfilePackage/saip_asn1_decode._UST_SERVICE_NAMES`,
 `_EST_SERVICE_NAMES`, `_ISIM_SERVICE_NAMES`) with the
 authoritative pySim maps (`pySim.ts_31_102.EF_UST_map`,
@@ -1811,7 +1811,7 @@ The complementary core-side surface lives under `Tools/YggdraCore/`,
 which exposes an in-process AUSF / AAnF pair plus a FastAPI loopback
 launcher (`YGGDRASIM_5GCORE_MODE=stub`). See the operator-surfaces
 table on the [home page](../index.md) for the entry points.
-*(R2-005, post-v1.0.0 staging — see V2_ROADMAP.md.)*
+*(post-v1 staging — not part of this release.)*
 
 ## Identity files
 
