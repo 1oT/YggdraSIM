@@ -1,0 +1,178 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Enable / disable / delete — YggdraSIM</title>
+  <link rel="icon" href="../assets/images/yggdrasil-mark.svg">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,100..900&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>html{font-size:100%}</style>
+  <script>(function(){var s=localStorage.getItem('ygg-theme');var p=window.matchMedia('(prefers-color-scheme: dark)').matches;if(s==='dark'||(!s&&p))document.documentElement.classList.add('dark');})();</script>
+  <link rel="stylesheet" href="../tailwind.css?v=2">
+  <link rel="stylesheet" href="../ygg.css?v=2">
+</head>
+<body class="antialiased font-sans bg-zinc-50 dark:bg-[var(--bg-page)] text-zinc-900 dark:text-zinc-100"
+      data-ygg-base="../" data-ygg-partial-path="../partials/sidebar.html" data-ygg-active-sub="how-to/enable-disable-delete-profile.html" data-ygg-open-sections="how-to">
+<a class="ygg-skip-link" href="#ygg-main">Skip to content</a>
+<div id="ygg-shell" class="flex min-h-dvh isolate ygg-layout-pending">
+  <div id="ygg-chrome-mount"></div>
+  <script src="../ygg-layout.js?v=2"></script>
+  <div id="ygg-main-column" class="flex-1 lg:ml-64 flex flex-col min-h-dvh">
+    <header class="lg:hidden sticky top-0 z-20 flex items-center gap-3 px-4 py-3 bg-white/95 dark:bg-[var(--bg-page)]/95 backdrop-blur-sm border-b border-zinc-950/[0.07] dark:border-white/[0.05] shrink-0">
+      <button type="button" onclick="openSidebar()" class="ygg-icon-btn flex items-center justify-center size-11 rounded-md text-zinc-500 transition-colors" aria-label="Open menu">
+        <svg aria-hidden="true" focusable="false" class="size-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M3 12h18M3 18h18"/></svg>
+      </button>
+      <span class="font-sans font-semibold text-sm tracking-tight">YggdraSIM</span>
+    </header>
+    <main class="flex-1 px-6 py-10 sm:px-10 lg:px-14 xl:px-16" id="ygg-main" tabindex="-1">
+      <div class="ygg-content-toc">
+      <div class="ygg-toc-body">
+        <nav class="flex flex-wrap items-center gap-1.5 text-xs text-zinc-400 mb-6" aria-label="Breadcrumb">
+          <ol class="ygg-crumbs">
+            <li><a href="../index.html" class="doc-link no-underline">Home</a></li>
+            <li aria-hidden="true"><svg class="size-3 opacity-40" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6 4l4 4-4 4"/></svg></li>
+            <li><a href="index.html" class="hover:text-zinc-600 dark:hover:text-zinc-300 transition-colors no-underline">How To</a></li>
+            <li aria-hidden="true"><svg class="size-3 opacity-40" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6 4l4 4-4 4"/></svg></li>
+            <li><span aria-current="page" class="text-zinc-600 dark:text-zinc-300">Enable / disable / delete</span></li>
+          </ol>
+        </nav>
+        <h1 class="doc-h1 font-sans font-bold text-zinc-950 dark:text-white mb-2">Enable / disable / delete</h1>
+        <p class="page-lead mb-8">Transition a profile between <code>DISABLED</code>, <code>ENABLED</code>, and <code>ERASED</code> states, and
+make sure notifications reach SM-DP+ when required.</p>
+        <details class="toc-mobile xl:hidden mb-8">
+          <summary>On this page <svg class="toc-mobile-chevron size-4" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 6l4 4 4-4"/></svg></summary>
+          <nav>
+            <a href="#prerequisites" class="toc-link">Prerequisites</a>
+            <a href="#choose-the-right-surface" class="toc-link">Choose the right surface</a>
+            <a href="#local-access-path" class="toc-link">Local-access path</a>
+            <a href="#relay-path-with-notification-hygiene" class="toc-link">Relay path with notification hygiene</a>
+            <a href="#validation" class="toc-link">Validation</a>
+            <a href="#common-failures" class="toc-link">Common failures</a>
+            <a href="#related-pages" class="toc-link">Related pages</a>
+          </nav>
+        </details>
+        <div class="doc-prose text-[0.9375rem] leading-relaxed text-zinc-600 dark:text-zinc-400 space-y-4">
+<h2 id="prerequisites">Prerequisites</h2>
+<ul>
+<li>a physical or simulated <abbr title="Embedded UICC">eUICC</abbr> with at least one installed profile</li>
+<li>either <code>SCP11/local_access</code> (for direct <abbr title="ES10c interface for profile state control">ES10c</abbr>) or <code>SCP11/live</code> (for
+  relay-aware handling with notification reconciliation)</li>
+<li>if relay-aware, the SM-DP+ endpoint must be reachable</li>
+</ul>
+<h2 id="choose-the-right-surface">Choose the right surface</h2>
+<div class="-mx-6 sm:mx-0 doc-table-scroll"><table class="doc-table">
+<thead>
+<tr>
+<th>Goal</th>
+<th>Surface</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>State change only, no notification reconciliation needed</td>
+<td><code>SCP11/local_access</code></td>
+</tr>
+<tr>
+<td>State change plus automatic <code>HandleNotification</code> to SM-DP+</td>
+<td><code>SCP11/live</code></td>
+</tr>
+<tr>
+<td>Bulk lifecycle orchestration in <abbr title="SIM Group Permanent (GSMA permanent reference document series; e.g. SGP.02, SGP.22, SGP.32)">SGP</abbr>.32</td>
+<td><code>SCP11/eim_local</code></td>
+</tr>
+</tbody>
+</table></div>
+<h2 id="local-access-path">Local-access path</h2>
+<div class="code-block"><pre><code>[Local SMDPP] &gt; DISCOVER
+[Local SMDPP] &gt; ENABLE-PROFILE
+[Local SMDPP] &gt; STATUS
+[Local SMDPP] &gt; DISABLE-PROFILE
+[Local SMDPP] &gt; DELETE-PROFILE
+</code></pre></div>
+<p>Each command opens its own local <abbr title="Secure Channel Protocol 11 (GP, elliptic curve)">SCP11</abbr> session. If you need to pick which
+profile to act on, set the selection beforehand with <code>PROFILE</code> or with the
+card-aware wizard built into the shell.</p>
+<h2 id="relay-path-with-notification-hygiene">Relay path with notification hygiene</h2>
+<div class="code-block"><pre><code>python -m SCP11.live --cmd &quot;ENABLE-PROFILE; STATUS; EXIT&quot;
+</code></pre></div>
+<p>The live shell pulls notifications from the card after the state change and
+forwards them via <code>HandleNotification</code>, then cleans them off the card. This
+is important when SM-DP+ tracks lifecycle via notifications.</p>
+<h2 id="validation">Validation</h2>
+<p>After each transition:</p>
+<div class="code-block"><pre><code>python -m SCP11.local_access --cmd &quot;DISCOVER; STATUS; EXIT&quot;
+</code></pre></div>
+<p>Confirm the expected state is reflected in the listing and that no
+notifications are left on the card.</p>
+<h2 id="common-failures">Common failures</h2>
+<div class="-mx-6 sm:mx-0 doc-table-scroll"><table class="doc-table">
+<thead>
+<tr>
+<th>Symptom</th>
+<th>Likely cause</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>Policy rule refused enable</code></td>
+<td><abbr title="Profile Policy Rule">PPR</abbr> on the active profile rejects the transition. Disable the blocking profile first.</td>
+</tr>
+<tr>
+<td><code>No profile selected</code></td>
+<td>the shell cannot infer which profile you mean. Pick explicitly.</td>
+</tr>
+<tr>
+<td><code>Notification left on card</code></td>
+<td><code>HandleNotification</code> failed. Re-run the <code>live</code> shell; it reconciles automatically.</td>
+</tr>
+<tr>
+<td>Unexpected <code>DISABLED</code> state</td>
+<td>a prior <code>ENABLE-PROFILE</code> rolled back mid-transaction because a policy rule fired. Check the response log.</td>
+</tr>
+</tbody>
+</table></div>
+<h2 id="related-pages">Related pages</h2>
+<ul>
+<li><a href="../subsystems/scp11-local-access.html"><abbr title="Secure Channel Protocol 11 (GP, elliptic curve)">SCP11</abbr> Local Access</a></li>
+<li><a href="../subsystems/scp11-live.html"><abbr title="Secure Channel Protocol 11 (GP, elliptic curve)">SCP11</abbr> Live Relay</a></li>
+<li><a href="../concepts/rsp-architecture.html"><abbr title="Remote SIM Provisioning">RSP</abbr> Architecture</a></li>
+<li><code>guides/PROFILE_LIFECYCLE_CLI_CHEATSHEET.md</code></li>
+</ul>
+        </div>
+      </div><!-- /ygg-toc-body -->
+      <aside class="ygg-toc-rail" aria-label="On this page">
+        <p class="ygg-toc-rail-label">On this page</p>
+        <nav>
+            <a href="#prerequisites" class="toc-link">Prerequisites</a>
+            <a href="#choose-the-right-surface" class="toc-link">Choose the right surface</a>
+            <a href="#local-access-path" class="toc-link">Local-access path</a>
+            <a href="#relay-path-with-notification-hygiene" class="toc-link">Relay path with notification hygiene</a>
+            <a href="#validation" class="toc-link">Validation</a>
+            <a href="#common-failures" class="toc-link">Common failures</a>
+            <a href="#related-pages" class="toc-link">Related pages</a>
+        </nav>
+      </aside>
+      </div><!-- /ygg-content-toc -->
+    </main>
+    <footer class="px-6 py-6 sm:px-10 lg:px-14 xl:px-16 border-t border-zinc-950/[0.06] dark:border-white/[0.05]">
+      <div class="ygg-content flex flex-col items-center gap-2 text-xs text-zinc-500">
+        <div class="flex items-center gap-1.5 text-sm">
+          <span class="font-sans font-semibold text-zinc-700 dark:text-zinc-300">YggdraSIM</span>
+          <span class="text-zinc-400 dark:text-zinc-500">by</span>
+          <a href="https://1ot.com" target="_blank" rel="noopener" class="font-semibold text-zinc-700 dark:text-zinc-300 hover:text-zinc-600 dark:hover:text-zinc-300 transition-colors">1oT</a>
+        </div>
+        <div class="flex flex-wrap items-center justify-center gap-2 text-zinc-400 dark:text-zinc-500">
+          <span>Copyright © 2026 1oT OÜ</span>
+          <span aria-hidden="true">·</span>
+          <span>Last updated <span data-ygg-updated>May 19, 2026</span></span>
+        </div>
+      </div>
+    </footer>
+  </div>
+</div>
+<script src="../ygg.js?v=2"></script>
+<!-- Mermaid: ygg.js loads ygg-mermaid.js when .doc-prose contains pre.mermaid -->
+</body>
+</html>

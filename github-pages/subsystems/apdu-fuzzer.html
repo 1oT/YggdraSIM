@@ -1,0 +1,169 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>APDU Fuzzer — YggdraSIM</title>
+  <link rel="icon" href="../assets/images/yggdrasil-mark.svg">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,100..900&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>html{font-size:100%}</style>
+  <script>(function(){var s=localStorage.getItem('ygg-theme');var p=window.matchMedia('(prefers-color-scheme: dark)').matches;if(s==='dark'||(!s&&p))document.documentElement.classList.add('dark');})();</script>
+  <link rel="stylesheet" href="../tailwind.css?v=2">
+  <link rel="stylesheet" href="../ygg.css?v=2">
+</head>
+<body class="antialiased font-sans bg-zinc-50 dark:bg-[var(--bg-page)] text-zinc-900 dark:text-zinc-100"
+      data-ygg-base="../" data-ygg-partial-path="../partials/sidebar.html" data-ygg-active-sub="subsystems/apdu-fuzzer.html" data-ygg-open-sections="subsystems">
+<a class="ygg-skip-link" href="#ygg-main">Skip to content</a>
+<div id="ygg-shell" class="flex min-h-dvh isolate ygg-layout-pending">
+  <div id="ygg-chrome-mount"></div>
+  <script src="../ygg-layout.js?v=2"></script>
+  <div id="ygg-main-column" class="flex-1 lg:ml-64 flex flex-col min-h-dvh">
+    <header class="lg:hidden sticky top-0 z-20 flex items-center gap-3 px-4 py-3 bg-white/95 dark:bg-[var(--bg-page)]/95 backdrop-blur-sm border-b border-zinc-950/[0.07] dark:border-white/[0.05] shrink-0">
+      <button type="button" onclick="openSidebar()" class="ygg-icon-btn flex items-center justify-center size-11 rounded-md text-zinc-500 transition-colors" aria-label="Open menu">
+        <svg aria-hidden="true" focusable="false" class="size-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M3 12h18M3 18h18"/></svg>
+      </button>
+      <span class="font-sans font-semibold text-sm tracking-tight">YggdraSIM</span>
+    </header>
+    <main id="ygg-main" tabindex="-1" class="flex-1 px-6 py-10 sm:px-10 lg:px-14 xl:px-16">
+      <div class="ygg-content-toc">
+      <div class="ygg-toc-body">
+        <nav class="flex flex-wrap items-center gap-1.5 text-xs text-zinc-400 mb-6" aria-label="Breadcrumb">
+          <ol class="ygg-crumbs">
+            <li><a href="../index.html" class="doc-link no-underline">Home</a></li>
+            <li aria-hidden="true"><svg class="size-3 opacity-40" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6 4l4 4-4 4"/></svg></li>
+            <li><a href="index.html" class="hover:text-zinc-600 dark:hover:text-zinc-300 transition-colors no-underline">Subsystems</a></li>
+            <li aria-hidden="true"><svg class="size-3 opacity-40" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6 4l4 4-4 4"/></svg></li>
+            <li><span aria-current="page" class="text-zinc-600 dark:text-zinc-300">APDU Fuzzer</span></li>
+          </ol>
+        </nav>
+        <h1 class="doc-h1 font-sans font-bold text-zinc-950 dark:text-white mb-2">APDU Fuzzer</h1>
+        <p class="page-lead mb-8"><code>Tools/ApduFuzz/</code> is an opt-in, safety-gated fuzzing harness for
+<abbr title="Embedded UICC">eUICC</abbr> vulnerability research. It mutates APDUs from a known-good
+corpus and transmits them at a selected transport, halts on
+crash-class responses or transport errors, and dumps forensic
+records per crash.</p>
+        <details class="toc-mobile xl:hidden mb-8">
+          <summary>On this page <svg class="toc-mobile-chevron size-4" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 6l4 4 4-4"/></svg></summary>
+          <nav>
+            <a href="#when-to-use-it" class="toc-link">When to use it</a>
+            <a href="#entry-points" class="toc-link">Entry points</a>
+            <a href="#safety-gate" class="toc-link">Safety gate</a>
+            <a href="#corpus" class="toc-link">Corpus</a>
+            <a href="#transports" class="toc-link">Transports</a>
+            <a href="#crash-records" class="toc-link">Crash records</a>
+            <a href="#related-references" class="toc-link">Related references</a>
+          </nav>
+        </details>
+        <div class="doc-prose text-[0.9375rem] leading-relaxed text-zinc-600 dark:text-zinc-400 space-y-4">
+<div class="admonition danger">
+<p class="admonition-title">Operator responsibility</p>
+<p>Only run this against cards you own and have explicitly
+allow-listed. The tooling refuses to start without an opt-in
+token <strong>and</strong> at least one <code>--allow-iccid</code> / <code>--allow-imsi</code>
+value. Crash dumps land in a <code>0o700</code> run directory under
+<code>--crash-dump-root</code>.</p>
+</div>
+<h2 id="when-to-use-it">When to use it</h2>
+<ul>
+<li>researching mutation-triggered faults on a development <abbr title="Embedded UICC">eUICC</abbr></li>
+<li>regressing a historical bug against a freshly provisioned sample</li>
+<li>stressing a proprietary INS/CLA with deterministic mutations</li>
+</ul>
+<h2 id="entry-points">Entry points</h2>
+<div class="tabbed-set tabbed-alternate" data-tabs="1:2"><input checked="checked" id="__tabbed_1_1" name="__tabbed_1" type="radio" /><input id="__tabbed_1_2" name="__tabbed_1" type="radio" /><div class="tabbed-labels"><label for="__tabbed_1_1">Console script</label><label for="__tabbed_1_2">Module</label></div>
+<div class="tabbed-content">
+<div class="tabbed-block">
+<div class="code-block"><pre><code>yggdrasim-apdu-fuzzer --help
+</code></pre></div>
+</div>
+<div class="tabbed-block">
+<div class="code-block"><pre><code>python -m Tools.ApduFuzz
+</code></pre></div>
+</div>
+</div>
+</div>
+<h2 id="safety-gate">Safety gate</h2>
+<p>All three conditions are required:</p>
+<ol>
+<li><code>--i-mean-it</code> passed on the command line.</li>
+<li>At least one of <code>--allow-iccid &lt;hex&gt;</code> or <code>--allow-imsi &lt;digits&gt;</code>.</li>
+<li>The probed card identity matches the allow-list exactly.</li>
+</ol>
+<p>Additional knobs:</p>
+<ul>
+<li><code>--max-apdus &lt;N&gt;</code> hard cap per run (default 10 000).</li>
+<li><code>--crash-dump-root &lt;path&gt;</code> override the default dump location.</li>
+<li><code>--seed &lt;int&gt;</code> deterministic mutation RNG seed.</li>
+<li><code>--mutator &lt;name&gt;</code> restrict to specific mutators
+  (<code>bit-flip</code>, <code>length-mangle</code>, <code>zero-Lc</code>, <code>tag-shuffle</code>,
+  <code>padding-bloat</code>).</li>
+</ul>
+<h2 id="corpus">Corpus</h2>
+<p>Corpora are JSON files — typically simulator session recordings.
+Three shapes are accepted:</p>
+<ul>
+<li>the full recorder dump (<code>{"session_id": "...", "events": [...]}</code>)</li>
+<li>a bare list of dicts <code>[{"command_hex": "...", "response_hex": "..."}, ...]</code></li>
+<li>a bare list of hex strings <code>["00A40400...", ...]</code></li>
+</ul>
+<p><code>filter_select_only</code> trims to <code>SELECT</code> APDUs for a warm-up probe.</p>
+<h2 id="transports">Transports</h2>
+<ul>
+<li><code>null</code> — synthetic transport that always returns <code>90 00</code>. <abbr title="Certificate Issuer">CI</abbr> and
+  dry-runs only.</li>
+<li><code>pcsc</code> — live <abbr title="Personal Computer/Smart Card (Workgroup)">PC/SC</abbr> reader. Requires <code>pyscard</code>.</li>
+</ul>
+<h2 id="crash-records">Crash records</h2>
+<p>Each crash writes a JSON file in the per-run directory with:</p>
+<ul>
+<li>sequence index within the run</li>
+<li>mutation description</li>
+<li>original <abbr title="Application Protocol Data Unit (ISO 7816-4)">APDU</abbr>, mutated <abbr title="Application Protocol Data Unit (ISO 7816-4)">APDU</abbr>, response bytes</li>
+<li>status word</li>
+<li>optional free-form notes</li>
+</ul>
+<p>The run directory also contains a manifest summarising the seed,
+the safety-config hash, the corpus path, and the halt reason.</p>
+<h2 id="related-references">Related references</h2>
+<ul>
+<li><a href="../how-to/diagnostics-toolbox.html">Diagnostics Toolbox</a></li>
+<li><code>tests/test_apdu_fuzzer.py</code> for the reference behaviour contract</li>
+</ul>
+        </div>
+      </div><!-- /ygg-toc-body -->
+      <aside class="ygg-toc-rail" aria-label="On this page">
+        <p class="ygg-toc-rail-label">On this page</p>
+        <nav>
+            <a href="#when-to-use-it" class="toc-link">When to use it</a>
+            <a href="#entry-points" class="toc-link">Entry points</a>
+            <a href="#safety-gate" class="toc-link">Safety gate</a>
+            <a href="#corpus" class="toc-link">Corpus</a>
+            <a href="#transports" class="toc-link">Transports</a>
+            <a href="#crash-records" class="toc-link">Crash records</a>
+            <a href="#related-references" class="toc-link">Related references</a>
+        </nav>
+      </aside>
+      </div><!-- /ygg-content-toc -->
+    </main>
+    <footer class="px-6 py-6 sm:px-10 lg:px-14 xl:px-16 border-t border-zinc-950/[0.06] dark:border-white/[0.05]">
+      <div class="ygg-content flex flex-col items-center gap-2 text-xs text-zinc-500">
+        <div class="flex items-center gap-1.5 text-sm">
+          <span class="font-sans font-semibold text-zinc-700 dark:text-zinc-300">YggdraSIM</span>
+          <span class="text-zinc-400 dark:text-zinc-500">by</span>
+          <a href="https://1ot.com" target="_blank" rel="noopener" class="font-semibold text-zinc-700 dark:text-zinc-300 hover:text-zinc-600 dark:hover:text-zinc-300 transition-colors">1oT</a>
+        </div>
+        <div class="flex flex-wrap items-center justify-center gap-2 text-zinc-400 dark:text-zinc-500">
+          <span>Copyright © 2026 1oT OÜ</span>
+          <span aria-hidden="true">·</span>
+          <span>Last updated <span data-ygg-updated>May 19, 2026</span></span>
+        </div>
+      </div>
+    </footer>
+  </div>
+</div>
+<script src="../ygg.js?v=2"></script>
+<!-- Mermaid: ygg.js loads ygg-mermaid.js when .doc-prose contains pre.mermaid -->
+</body>
+</html>

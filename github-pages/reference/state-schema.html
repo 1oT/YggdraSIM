@@ -1,0 +1,294 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>State schema — YggdraSIM</title>
+  <link rel="icon" href="../assets/images/yggdrasil-mark.svg">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,100..900&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>html{font-size:100%}</style>
+  <script>(function(){var s=localStorage.getItem('ygg-theme');var p=window.matchMedia('(prefers-color-scheme: dark)').matches;if(s==='dark'||(!s&&p))document.documentElement.classList.add('dark');})();</script>
+  <link rel="stylesheet" href="../tailwind.css?v=2">
+  <link rel="stylesheet" href="../ygg.css?v=2">
+</head>
+<body class="antialiased font-sans bg-zinc-50 dark:bg-[var(--bg-page)] text-zinc-900 dark:text-zinc-100"
+      data-ygg-base="../" data-ygg-partial-path="../partials/sidebar.html" data-ygg-active-sub="reference/state-schema.html" data-ygg-open-sections="reference">
+<a class="ygg-skip-link" href="#ygg-main">Skip to content</a>
+<div id="ygg-shell" class="flex min-h-dvh isolate ygg-layout-pending">
+  <div id="ygg-chrome-mount"></div>
+  <script src="../ygg-layout.js?v=2"></script>
+  <div id="ygg-main-column" class="flex-1 lg:ml-64 flex flex-col min-h-dvh">
+    <header class="lg:hidden sticky top-0 z-20 flex items-center gap-3 px-4 py-3 bg-white/95 dark:bg-[var(--bg-page)]/95 backdrop-blur-sm border-b border-zinc-950/[0.07] dark:border-white/[0.05] shrink-0">
+      <button type="button" onclick="openSidebar()" class="ygg-icon-btn flex items-center justify-center size-11 rounded-md text-zinc-500 transition-colors" aria-label="Open menu">
+        <svg aria-hidden="true" focusable="false" class="size-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M3 12h18M3 18h18"/></svg>
+      </button>
+      <span class="font-sans font-semibold text-sm tracking-tight">YggdraSIM</span>
+    </header>
+    <main class="flex-1 px-6 py-10 sm:px-10 lg:px-14 xl:px-16" id="ygg-main" tabindex="-1">
+      <div class="ygg-content-toc">
+      <div class="ygg-toc-body">
+        <nav class="flex flex-wrap items-center gap-1.5 text-xs text-zinc-400 mb-6" aria-label="Breadcrumb">
+          <ol class="ygg-crumbs">
+            <li><a href="../index.html" class="doc-link no-underline">Home</a></li>
+            <li aria-hidden="true"><svg class="size-3 opacity-40" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6 4l4 4-4 4"/></svg></li>
+            <li><a href="../index.html" class="hover:text-zinc-600 dark:hover:text-zinc-300 transition-colors no-underline">Reference</a></li>
+            <li aria-hidden="true"><svg class="size-3 opacity-40" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6 4l4 4-4 4"/></svg></li>
+            <li><span aria-current="page" class="text-zinc-600 dark:text-zinc-300">State schema</span></li>
+          </ol>
+        </nav>
+        <h1 class="doc-h1 font-sans font-bold text-zinc-950 dark:text-white mb-2">State schema</h1>
+        <p class="page-lead mb-8">YggdraSIM centralizes mutable cross-module state under <code>state/</code>. This page
+documents what lives there, what identity key is used, and which subsystem
+owns each area.</p>
+        <details class="toc-mobile xl:hidden mb-8">
+          <summary>On this page <svg class="toc-mobile-chevron size-4" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 6l4 4 4-4"/></svg></summary>
+          <nav>
+            <a href="#files-under-state" class="toc-link">Files under state/</a>
+            <a href="#logical-sections-in-the-inventory" class="toc-link">Logical sections in the inventory</a>
+            <a href="#migration-sources" class="toc-link">Migration sources</a>
+            <a href="#plain-file-state-that-is-intentionally-not-in-sqlite" class="toc-link">Plain-file state that is intentionally not in SQLite</a>
+            <a href="#optional-encryption-envelope" class="toc-link">Optional encryption envelope</a>
+            <a href="#hil-state-files" class="toc-link">HIL state files</a>
+            <a href="#runtime-root-note" class="toc-link">Runtime-root note</a>
+            <a href="#related-pages" class="toc-link">Related pages</a>
+          </nav>
+        </details>
+        <div class="doc-prose text-[0.9375rem] leading-relaxed text-zinc-600 dark:text-zinc-400 space-y-4">
+<h2 id="files-under-state">Files under <code>state/</code></h2>
+<div class="-mx-6 sm:mx-0 doc-table-scroll"><table class="doc-table">
+<thead>
+<tr>
+<th>File</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>state/device_inventory.sqlite3</code></td>
+<td>primary SQLite inventory database</td>
+</tr>
+<tr>
+<td><code>state/inventory_crypto.json</code></td>
+<td>optional encryption configuration</td>
+</tr>
+<tr>
+<td><code>state/hil_bridge_supervisor.json</code></td>
+<td><abbr title="Hardware-In-The-Loop">HIL</abbr> supervisor runtime status</td>
+</tr>
+<tr>
+<td><code>state/hil_bridge_card_relay.json</code></td>
+<td><abbr title="Hardware-In-The-Loop">HIL</abbr> relay endpoint status</td>
+</tr>
+</tbody>
+</table></div>
+<h2 id="logical-sections-in-the-inventory">Logical sections in the inventory</h2>
+<p>The inventory is organized into logical sections by identity key and owner.
+The concrete table layout is implementation-owned; consumers should go
+through <code>yggdrasim_common/device_inventory.py</code> rather than querying tables
+directly.</p>
+<div class="-mx-6 sm:mx-0 doc-table-scroll"><table class="doc-table">
+<thead>
+<tr>
+<th>Section</th>
+<th>Identity key</th>
+<th>Owner</th>
+<th>Typical payload</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>per-card <abbr title="Integrated Circuit Card Identifier">ICCID</abbr> state</td>
+<td><code>ICCID</code></td>
+<td><code>SCP03/</code>, <code>SCP80/</code>, <code>SCP11/</code></td>
+<td>keysets, <abbr title="Over-The-Air">OTA</abbr> parameters, bind selections, last-seen metadata</td>
+</tr>
+<tr>
+<td>per-card <abbr title="eUICC Identifier">EID</abbr> state</td>
+<td><code>EID</code></td>
+<td><code>SCP11/</code> family</td>
+<td>certificate selection, profile selection, metadata selection, per-flavor relay state</td>
+</tr>
+<tr>
+<td>per-<abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr> state</td>
+<td><code>eim_id</code></td>
+<td><code>SCP11/eim_local/</code></td>
+<td>counter values, runtime markers, error-code overrides, response-log pointers</td>
+</tr>
+<tr>
+<td>module-level settings</td>
+<td>module name</td>
+<td><code>SCP03/</code>, <code>SCP80/</code></td>
+<td>migrated values from legacy <code>.ini</code> files</td>
+</tr>
+</tbody>
+</table></div>
+<h2 id="migration-sources">Migration sources</h2>
+<div class="-mx-6 sm:mx-0 doc-table-scroll"><table class="doc-table">
+<thead>
+<tr>
+<th>Legacy file</th>
+<th>Current role</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>Workspace/SCP03/keys.ini</code></td>
+<td>import source for <abbr title="Secure Channel Protocol 03 (GP)">SCP03</abbr> keyset state</td>
+</tr>
+<tr>
+<td><code>SCP80/ota_config.ini</code></td>
+<td>import source for <abbr title="Secure Channel Protocol 80 (ETSI TS 102 225 / 226)">SCP80</abbr> <abbr title="Over-The-Air">OTA</abbr> parameters</td>
+</tr>
+<tr>
+<td><code>Workspace/LocalEIM/eim_runtime_state.json</code></td>
+<td>import source for <abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr>-local runtime state</td>
+</tr>
+</tbody>
+</table></div>
+<p>These files are imported once into the SQLite inventory, then kept for diff
+review and continuity. Live truth is the SQLite-primary copy.</p>
+<h2 id="plain-file-state-that-is-intentionally-not-in-sqlite">Plain-file state that is intentionally not in SQLite</h2>
+<p>Some state is still better as plain files because manual editing and diff
+review matter:</p>
+<div class="-mx-6 sm:mx-0 doc-table-scroll"><table class="doc-table">
+<thead>
+<tr>
+<th>File</th>
+<th>Why it stays a plain file</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>Workspace/SCP03/aid.txt</code></td>
+<td>human-curated <abbr title="Application Identifier">AID</abbr> list</td>
+</tr>
+<tr>
+<td><code>Workspace/SCP03/fids.txt</code></td>
+<td>human-curated <abbr title="File Identifier">FID</abbr> shortlist</td>
+</tr>
+<tr>
+<td><code>Workspace/SCP03/binds.json</code></td>
+<td>human-curated macro binds</td>
+</tr>
+<tr>
+<td><code>Workspace/LocalEIM/eim_identity.json</code></td>
+<td>authored <abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr> identity</td>
+</tr>
+<tr>
+<td><code>Workspace/SIMCARD/eim_identity.json</code></td>
+<td>authored simulator BF55 identity</td>
+</tr>
+<tr>
+<td><code>Workspace/SIMCARD/isdr_config.json</code></td>
+<td>authored simulator <abbr title="Issuer Security Domain - Root">ISD-R</abbr> layout</td>
+</tr>
+</tbody>
+</table></div>
+<h2 id="optional-encryption-envelope">Optional encryption envelope</h2>
+<p><code>state/inventory_crypto.json</code> controls whether stored payloads are wrapped in
+an encryption envelope. Default is <code>enabled: false</code> for friction-free
+onboarding. When enabled:</p>
+<ul>
+<li>payloads are encrypted on write</li>
+<li>payloads are decrypted on read, only when a module asks for them</li>
+<li>the current provider is the system <code>gpg</code> binary via its agent/keyring</li>
+<li>metadata columns (for example identity keys used for lookup) remain
+  cleartext</li>
+</ul>
+<p>The provider block accepts an optional <code>gpg</code> map:</p>
+<div class="-mx-6 sm:mx-0 doc-table-scroll"><table class="doc-table">
+<thead>
+<tr>
+<th>Field</th>
+<th>Meaning</th>
+<th>Default</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>gpg.binary</code></td>
+<td>name or absolute path of the <code>gpg</code> binary</td>
+<td><code>gpg</code> on <code>PATH</code></td>
+</tr>
+<tr>
+<td><code>gpg.timeout_seconds</code></td>
+<td>per-call wall-clock bound applied to every <code>gpg</code> invocation used by the inventory crypto manager</td>
+<td><code>120</code></td>
+</tr>
+<tr>
+<td><code>gpg.gpg_key_file</code></td>
+<td>optional path to a file listing recipient fingerprints, resolved relative to <code>state/</code> and refused if it escapes that directory</td>
+<td>unset</td>
+</tr>
+</tbody>
+</table></div>
+<p>See <a href="../how-to/enable-inventory-encryption.html">Enable Inventory Encryption</a>.</p>
+<h2 id="hil-state-files"><abbr title="Hardware-In-The-Loop">HIL</abbr> state files</h2>
+<div class="-mx-6 sm:mx-0 doc-table-scroll"><table class="doc-table">
+<thead>
+<tr>
+<th>File</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>state/hil_bridge_supervisor.json</code></td>
+<td>supervisor status, bridge PID, USB presence</td>
+</tr>
+<tr>
+<td><code>state/hil_bridge_card_relay.json</code></td>
+<td>relay status, URLs, reader name, <abbr title="Answer To Reset">ATR</abbr></td>
+</tr>
+</tbody>
+</table></div>
+<p>These are written by <code>Tools/HilBridge/</code> and serve as live health surfaces.</p>
+<h2 id="runtime-root-note">Runtime-root note</h2>
+<p>In source runs, <code>state/</code> lives under the repository. In frozen builds, the
+runtime tree is resolved under the writable runtime root, not the bundled
+application tree. See <a href="runtime-root.html">Runtime Root</a>.</p>
+<h2 id="related-pages">Related pages</h2>
+<ul>
+<li><a href="../architecture.html">Architecture</a></li>
+<li><a href="runtime-root.html">Runtime Root</a></li>
+<li><a href="../how-to/enable-inventory-encryption.html">Enable Inventory Encryption</a></li>
+</ul>
+        </div>
+      </div><!-- /ygg-toc-body -->
+      <aside class="ygg-toc-rail" aria-label="On this page">
+        <p class="ygg-toc-rail-label">On this page</p>
+        <nav>
+            <a href="#files-under-state" class="toc-link">Files under state/</a>
+            <a href="#logical-sections-in-the-inventory" class="toc-link">Logical sections in the inventory</a>
+            <a href="#migration-sources" class="toc-link">Migration sources</a>
+            <a href="#plain-file-state-that-is-intentionally-not-in-sqlite" class="toc-link">Plain-file state that is intentionally not in SQLite</a>
+            <a href="#optional-encryption-envelope" class="toc-link">Optional encryption envelope</a>
+            <a href="#hil-state-files" class="toc-link">HIL state files</a>
+            <a href="#runtime-root-note" class="toc-link">Runtime-root note</a>
+            <a href="#related-pages" class="toc-link">Related pages</a>
+        </nav>
+      </aside>
+      </div><!-- /ygg-content-toc -->
+    </main>
+    <footer class="px-6 py-6 sm:px-10 lg:px-14 xl:px-16 border-t border-zinc-950/[0.06] dark:border-white/[0.05]">
+      <div class="ygg-content flex flex-col items-center gap-2 text-xs text-zinc-500">
+        <div class="flex items-center gap-1.5 text-sm">
+          <span class="font-sans font-semibold text-zinc-700 dark:text-zinc-300">YggdraSIM</span>
+          <span class="text-zinc-400 dark:text-zinc-500">by</span>
+          <a href="https://1ot.com" target="_blank" rel="noopener" class="font-semibold text-zinc-700 dark:text-zinc-300 hover:text-zinc-600 dark:hover:text-zinc-300 transition-colors">1oT</a>
+        </div>
+        <div class="flex flex-wrap items-center justify-center gap-2 text-zinc-400 dark:text-zinc-500">
+          <span>Copyright © 2026 1oT OÜ</span>
+          <span aria-hidden="true">·</span>
+          <span>Last updated <span data-ygg-updated>May 19, 2026</span></span>
+        </div>
+      </div>
+    </footer>
+  </div>
+</div>
+<script src="../ygg.js?v=2"></script>
+<!-- Mermaid: ygg.js loads ygg-mermaid.js when .doc-prose contains pre.mermaid -->
+</body>
+</html>

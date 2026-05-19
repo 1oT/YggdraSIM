@@ -1,0 +1,205 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Registry &amp; launcher — YggdraSIM</title>
+  <link rel="icon" href="../assets/images/yggdrasil-mark.svg">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,100..900&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>html{font-size:100%}</style>
+  <script>(function(){var s=localStorage.getItem('ygg-theme');var p=window.matchMedia('(prefers-color-scheme: dark)').matches;if(s==='dark'||(!s&&p))document.documentElement.classList.add('dark');})();</script>
+  <link rel="stylesheet" href="../tailwind.css?v=2">
+  <link rel="stylesheet" href="../ygg.css?v=2">
+</head>
+<body class="antialiased font-sans bg-zinc-50 dark:bg-[var(--bg-page)] text-zinc-900 dark:text-zinc-100"
+      data-ygg-base="../" data-ygg-partial-path="../partials/sidebar.html" data-ygg-active-sub="internals/registry-and-launcher.html" data-ygg-open-sections="internals">
+<a class="ygg-skip-link" href="#ygg-main">Skip to content</a>
+<div id="ygg-shell" class="flex min-h-dvh isolate ygg-layout-pending">
+  <div id="ygg-chrome-mount"></div>
+  <script src="../ygg-layout.js?v=2"></script>
+  <div id="ygg-main-column" class="flex-1 lg:ml-64 flex flex-col min-h-dvh">
+    <header class="lg:hidden sticky top-0 z-20 flex items-center gap-3 px-4 py-3 bg-white/95 dark:bg-[var(--bg-page)]/95 backdrop-blur-sm border-b border-zinc-950/[0.07] dark:border-white/[0.05] shrink-0">
+      <button type="button" onclick="openSidebar()" class="ygg-icon-btn flex items-center justify-center size-11 rounded-md text-zinc-500 transition-colors" aria-label="Open menu">
+        <svg aria-hidden="true" focusable="false" class="size-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M3 12h18M3 18h18"/></svg>
+      </button>
+      <span class="font-sans font-semibold text-sm tracking-tight">YggdraSIM</span>
+    </header>
+    <main class="flex-1 px-6 py-10 sm:px-10 lg:px-14 xl:px-16" id="ygg-main" tabindex="-1">
+      <div class="ygg-content-toc">
+      <div class="ygg-toc-body">
+        <nav class="flex flex-wrap items-center gap-1.5 text-xs text-zinc-400 mb-6" aria-label="Breadcrumb">
+          <ol class="ygg-crumbs">
+            <li><a href="../index.html" class="doc-link no-underline">Home</a></li>
+            <li aria-hidden="true"><svg class="size-3 opacity-40" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6 4l4 4-4 4"/></svg></li>
+            <li><a href="index.html" class="hover:text-zinc-600 dark:hover:text-zinc-300 transition-colors no-underline">Internals</a></li>
+            <li aria-hidden="true"><svg class="size-3 opacity-40" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6 4l4 4-4 4"/></svg></li>
+            <li><span aria-current="page" class="text-zinc-600 dark:text-zinc-300">Registry &amp; launcher</span></li>
+          </ol>
+        </nav>
+        <h1 class="doc-h1 font-sans font-bold text-zinc-950 dark:text-white mb-2">Registry &amp; launcher</h1>
+        <p class="page-lead mb-8">The launcher and the registry together are how YggdraSIM advertises its
+operator surfaces and how external automation discovers stable entry points.</p>
+        <details class="toc-mobile xl:hidden mb-8">
+          <summary>On this page <svg class="toc-mobile-chevron size-4" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 6l4 4 4-4"/></svg></summary>
+          <nav>
+            <a href="#launcher" class="toc-link">Launcher</a>
+            <a href="#registry" class="toc-link">Registry</a>
+            <a href="#adding-a-new-subsystem" class="toc-link">Adding a new subsystem</a>
+            <a href="#console-scripts" class="toc-link">Console scripts</a>
+            <a href="#in-process-versus-subprocess-dispatch" class="toc-link">In-process versus subprocess dispatch</a>
+            <a href="#related-pages" class="toc-link">Related pages</a>
+          </nav>
+        </details>
+        <div class="doc-prose text-[0.9375rem] leading-relaxed text-zinc-600 dark:text-zinc-400 space-y-4">
+<h2 id="launcher">Launcher</h2>
+<p><code>main/main.py</code> is the unified entry point. Its responsibilities are:</p>
+<ul>
+<li>set up <code>sys.path</code> so both source runs and editable installs work</li>
+<li>dispatch into a chosen subsystem by running its <code>entry</code> callable in-process</li>
+<li>offer a menu surface for interactive users</li>
+<li>expose a handful of wrapper flags that apply globally to dispatched modules</li>
+</ul>
+<p>Key wrapper flags:</p>
+<div class="-mx-6 sm:mx-0 doc-table-scroll"><table class="doc-table">
+<thead>
+<tr>
+<th>Flag</th>
+<th>Effect</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--debug</code>, <code>--verbose</code></td>
+<td>elevate log levels to debug globally</td>
+</tr>
+<tr>
+<td><code>--card-backend reader\|sim</code></td>
+<td>route card work to the <abbr title="Personal Computer/Smart Card (Workgroup)">PC/SC</abbr> reader (default) or the in-process simulator</td>
+</tr>
+<tr>
+<td><code>--sim-eim-identity &lt;path&gt;</code></td>
+<td>pin the simulated card's BF55 <abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr> identity</td>
+</tr>
+<tr>
+<td><code>--sim-isdr-config &lt;path&gt;</code></td>
+<td>seed the simulated <abbr title="Issuer Security Domain - Root">ISD-R</abbr> / <abbr title="Embedded UICC">eUICC</abbr> personality</td>
+</tr>
+<tr>
+<td><code>--sim-quirks &lt;path&gt;</code></td>
+<td>quirks override for the simulated <abbr title="Subscriber Identity Module">SIM</abbr></td>
+</tr>
+<tr>
+<td><code>--sim-euicc-store &lt;dir&gt;</code></td>
+<td>persistent <abbr title="eUICC Identifier">EID</abbr>-scoped <abbr title="Embedded UICC">eUICC</abbr> state root</td>
+</tr>
+<tr>
+<td><code>--sim-profile-store &lt;dir&gt;</code></td>
+<td>persisted simulated-profile artifacts directory</td>
+</tr>
+<tr>
+<td><code>--sim-import-profile &lt;path&gt;</code></td>
+<td>import a <abbr title="Distinguished Encoding Rules">DER</abbr> / BIN / hex / <abbr title="SIMalliance Interoperable Profile">SAIP</abbr>-JSON / <code>profile_image.json</code> before launch</td>
+</tr>
+<tr>
+<td><code>--sim-import-enable</code></td>
+<td>enable the imported simulated profile immediately</td>
+</tr>
+<tr>
+<td><code>--open-pcap &lt;path&gt;</code> / <code>--keybag &lt;path&gt;</code></td>
+<td>offline <abbr title="Hardware-In-The-Loop">HIL</abbr> pcap review (short-circuits the menu)</td>
+</tr>
+<tr>
+<td><code>--doctor</code>, <code>--version</code></td>
+<td>preflight / version helpers (no menu)</td>
+</tr>
+</tbody>
+</table></div>
+<p>In-process dispatch means that module-level singletons, caches, and
+<code>runtime_paths</code> resolution are shared across a single launcher session.
+Separate <code>python -m</code> invocations are fully independent.</p>
+<h2 id="registry">Registry</h2>
+<p><code>yggdrasim_common/registry.py</code> is the discovery surface for stable entry
+points and public symbols. It exposes:</p>
+<ul>
+<li><code>SUBSYSTEMS</code> - short-name-to-description map</li>
+<li><code>CLI_MODULES</code> - list of runnable <code>python -m</code> targets</li>
+<li><code>SYMBOL_REGISTRY</code> - registry-key-to-<code>module:Attribute</code> targets</li>
+<li><code>get(key)</code> - resolve a single symbol by key</li>
+<li><code>resolve(target)</code> - resolve a <code>module:Attribute</code> target string</li>
+<li><code>search(substring)</code> - search over registered symbols</li>
+</ul>
+<p>The point of the registry is to give external tooling a way to find the
+right class or callable without walking the tree. It is lazy: nothing is
+imported until a lookup happens.</p>
+<h2 id="adding-a-new-subsystem">Adding a new subsystem</h2>
+<p>When a new subsystem is added:</p>
+<ol>
+<li>Add a <code>SUBSYSTEMS</code> entry describing the subsystem in one line.</li>
+<li>Add its runnable module name to <code>CLI_MODULES</code> if it should be discoverable
+   as a <code>python -m</code> target.</li>
+<li>Register stable public symbols in <code>SYMBOL_REGISTRY</code>. Keep the registry
+   scoped to long-lived, public APIs.</li>
+<li>Add a console-script entry to <code>pyproject.toml</code> under
+   <code>[project.scripts]</code>.</li>
+<li>Add the entry-point wrapper to <code>yggdrasim_common/console_scripts.py</code>.</li>
+<li>Document the surface in:<ul>
+<li><code>guides/CAPABILITIES.md</code></li>
+<li><code>guides/ARCHITECTURE.md</code></li>
+<li>the appropriate subsystem page under <code>site-docs/subsystems/</code></li>
+<li>the <a href="../reference/command-suite.html">CLI Matrix</a></li>
+</ul>
+</li>
+</ol>
+<h2 id="console-scripts">Console scripts</h2>
+<p><code>yggdrasim_common/console_scripts.py</code> is the thin shim layer that installed
+commands resolve to. Each function there invokes the corresponding
+subsystem's <code>entry</code> callable. Keep those shims minimal so behavior lives in
+the subsystem, not in the shim.</p>
+<h2 id="in-process-versus-subprocess-dispatch">In-process versus subprocess dispatch</h2>
+<p>The launcher uses in-process dispatch intentionally. When a subsystem needs
+isolation (for example, to avoid leaking <code>sys.path</code> or cached modules), use
+<code>subprocess</code> explicitly. Do not invent second-layer dispatch helpers around
+the launcher; favor the plain <code>python -m</code> form.</p>
+<h2 id="related-pages">Related pages</h2>
+<ul>
+<li><a href="../reference/command-suite.html">CLI Matrix</a></li>
+<li><a href="../architecture.html">Architecture</a></li>
+<li><a href="plugin-contract.html">Plugin Contract</a></li>
+</ul>
+        </div>
+      </div><!-- /ygg-toc-body -->
+      <aside class="ygg-toc-rail" aria-label="On this page">
+        <p class="ygg-toc-rail-label">On this page</p>
+        <nav>
+            <a href="#launcher" class="toc-link">Launcher</a>
+            <a href="#registry" class="toc-link">Registry</a>
+            <a href="#adding-a-new-subsystem" class="toc-link">Adding a new subsystem</a>
+            <a href="#console-scripts" class="toc-link">Console scripts</a>
+            <a href="#in-process-versus-subprocess-dispatch" class="toc-link">In-process versus subprocess dispatch</a>
+            <a href="#related-pages" class="toc-link">Related pages</a>
+        </nav>
+      </aside>
+      </div><!-- /ygg-content-toc -->
+    </main>
+    <footer class="px-6 py-6 sm:px-10 lg:px-14 xl:px-16 border-t border-zinc-950/[0.06] dark:border-white/[0.05]">
+      <div class="ygg-content flex flex-col items-center gap-2 text-xs text-zinc-500">
+        <div class="flex items-center gap-1.5 text-sm">
+          <span class="font-sans font-semibold text-zinc-700 dark:text-zinc-300">YggdraSIM</span>
+          <span class="text-zinc-400 dark:text-zinc-500">by</span>
+          <a href="https://1ot.com" target="_blank" rel="noopener" class="font-semibold text-zinc-700 dark:text-zinc-300 hover:text-zinc-600 dark:hover:text-zinc-300 transition-colors">1oT</a>
+        </div>
+        <div class="flex flex-wrap items-center justify-center gap-2 text-zinc-400 dark:text-zinc-500">
+          <span>Copyright © 2026 1oT OÜ</span>
+          <span aria-hidden="true">·</span>
+          <span>Last updated <span data-ygg-updated>May 19, 2026</span></span>
+        </div>
+      </div>
+    </footer>
+  </div>
+</div>
+<script src="../ygg.js?v=2"></script>
+<!-- Mermaid: ygg.js loads ygg-mermaid.js when .doc-prose contains pre.mermaid -->
+</body>
+</html>

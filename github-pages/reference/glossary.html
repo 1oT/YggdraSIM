@@ -1,0 +1,240 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Glossary — YggdraSIM</title>
+  <link rel="icon" href="../assets/images/yggdrasil-mark.svg">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,100..900&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>html{font-size:100%}</style>
+  <script>(function(){var s=localStorage.getItem('ygg-theme');var p=window.matchMedia('(prefers-color-scheme: dark)').matches;if(s==='dark'||(!s&&p))document.documentElement.classList.add('dark');})();</script>
+  <link rel="stylesheet" href="../tailwind.css?v=2">
+  <link rel="stylesheet" href="../ygg.css?v=2">
+</head>
+<body class="antialiased font-sans bg-zinc-50 dark:bg-[var(--bg-page)] text-zinc-900 dark:text-zinc-100"
+      data-ygg-base="../" data-ygg-partial-path="../partials/sidebar.html" data-ygg-active-sub="reference/glossary.html" data-ygg-open-sections="reference">
+<a class="ygg-skip-link" href="#ygg-main">Skip to content</a>
+<div id="ygg-shell" class="flex min-h-dvh isolate ygg-layout-pending">
+  <div id="ygg-chrome-mount"></div>
+  <script src="../ygg-layout.js?v=2"></script>
+  <div id="ygg-main-column" class="flex-1 lg:ml-64 flex flex-col min-h-dvh">
+    <header class="lg:hidden sticky top-0 z-20 flex items-center gap-3 px-4 py-3 bg-white/95 dark:bg-[var(--bg-page)]/95 backdrop-blur-sm border-b border-zinc-950/[0.07] dark:border-white/[0.05] shrink-0">
+      <button type="button" onclick="openSidebar()" class="ygg-icon-btn flex items-center justify-center size-11 rounded-md text-zinc-500 transition-colors" aria-label="Open menu">
+        <svg aria-hidden="true" focusable="false" class="size-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M3 12h18M3 18h18"/></svg>
+      </button>
+      <span class="font-sans font-semibold text-sm tracking-tight">YggdraSIM</span>
+    </header>
+    <main class="flex-1 px-6 py-10 sm:px-10 lg:px-14 xl:px-16" id="ygg-main" tabindex="-1">
+      <div class="ygg-content-toc">
+      <div class="ygg-toc-body">
+        <nav class="flex flex-wrap items-center gap-1.5 text-xs text-zinc-400 mb-6" aria-label="Breadcrumb">
+          <ol class="ygg-crumbs">
+            <li><a href="../index.html" class="doc-link no-underline">Home</a></li>
+            <li aria-hidden="true"><svg class="size-3 opacity-40" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6 4l4 4-4 4"/></svg></li>
+            <li><a href="glossary.html" class="hover:text-zinc-600 dark:hover:text-zinc-300 transition-colors no-underline">Reference</a></li>
+            <li aria-hidden="true"><svg class="size-3 opacity-40" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6 4l4 4-4 4"/></svg></li>
+            <li><span aria-current="page" class="text-zinc-600 dark:text-zinc-300">Glossary</span></li>
+          </ol>
+        </nav>
+        <h1 class="doc-h1 font-sans font-bold text-zinc-950 dark:text-white mb-2">Glossary</h1>
+        <p class="page-lead mb-8">Key terms and abbreviations used throughout the YggdraSIM documentation.</p>
+        <details class="toc-mobile xl:hidden mb-8">
+          <summary>On this page <svg class="toc-mobile-chevron size-4" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 6l4 4 4-4"/></svg></summary>
+          <nav>
+            <a href="#a" class="toc-link">A</a>
+            <a href="#b" class="toc-link">B</a>
+            <a href="#c" class="toc-link">C</a>
+            <a href="#d" class="toc-link">D</a>
+            <a href="#e" class="toc-link">E</a>
+            <a href="#f" class="toc-link">F</a>
+            <a href="#g" class="toc-link">G</a>
+            <a href="#h" class="toc-link">H</a>
+            <a href="#i" class="toc-link">I</a>
+            <a href="#k" class="toc-link">K</a>
+            <a href="#l" class="toc-link">L</a>
+            <a href="#m" class="toc-link">M</a>
+            <a href="#n" class="toc-link">N</a>
+            <a href="#o" class="toc-link">O</a>
+            <a href="#p" class="toc-link">P</a>
+            <a href="#r" class="toc-link">R</a>
+            <a href="#s" class="toc-link">S</a>
+            <a href="#t" class="toc-link">T</a>
+            <a href="#u" class="toc-link">U</a>
+          </nav>
+        </details>
+        <div class="doc-prose text-[0.9375rem] leading-relaxed text-zinc-600 dark:text-zinc-400 space-y-4">
+<p>Every abbreviation used on this site, spelled out. For the interactive
+tooltip version, hover over any abbreviation inside a page; the same terms
+are defined in <code>site-docs/_includes/abbreviations.md</code>.</p>
+<h2 id="a">A</h2>
+<p><strong>AAnF</strong> - AKMA Anchor Function. The 5G core function that anchors AKMA
+keys per UE.</p>
+<p><strong>A-KID</strong> - AKMA Key Identifier. Identifier carried alongside <code>K_AKMA</code>.</p>
+<p><strong>AKA</strong> - Authentication and Key Agreement.</p>
+<p><strong>AKMA</strong> - Authentication and Key Management for Applications (3GPP TS
+33.535).</p>
+<p><strong><abbr title="Application Identifier">AID</abbr></strong> - Application Identifier. A globally unique identifier for an
+on-card application, package, or Security Domain.</p>
+<p><strong><abbr title="Application Protocol Data Unit (ISO 7816-4)">APDU</abbr></strong> - Application Protocol Data Unit. The ISO/IEC 7816-4 command and
+response format exchanged between a host and a card.</p>
+<p><strong><abbr title="Access Rule Application Master">ARA-M</abbr></strong> - Access Rule Application Master. The master applet that governs
+access rules on a <abbr title="Universal Integrated Circuit Card">UICC</abbr>.</p>
+<p><strong><abbr title="Answer To Reset">ATR</abbr></strong> - Answer To Reset. The initial response a card sends after an
+electrical or logical reset.</p>
+<p><strong>AUSF</strong> - Authentication Server Function. The 5G core function that
+performs authentication with the UE.</p>
+<h2 id="b">B</h2>
+<p><strong>BIP</strong> - Bearer Independent Protocol (<abbr title="European Telecommunications Standards Institute">ETSI</abbr> TS 102 223).</p>
+<p><strong><abbr title="Bound Profile Package (GSMA SGP.22)">BPP</abbr></strong> - Bound Profile Package. The bound form of a profile delivered by
+SM-DP+ to a device for installation into an <abbr title="Issuer Security Domain - Profile">ISD-P</abbr>.</p>
+<h2 id="c">C</h2>
+<p><strong><abbr title="Converted Applet (Java Card)">CAP</abbr></strong> - Converted Applet. The JavaCard converted applet binary.</p>
+<p><strong><abbr title="Card Application Toolkit (ETSI TS 102 223)">CAT</abbr></strong> - Card Application Toolkit. <abbr title="European Telecommunications Standards Institute">ETSI</abbr> TS 102 223 proactive-command
+framework.</p>
+<p><strong><abbr title="Certificate Issuer">CI</abbr></strong> - Certificate Issuer. The root of trust for <abbr title="Secure Channel Protocol 11 (GP, elliptic curve)">SCP11</abbr> and <abbr title="Remote SIM Provisioning">RSP</abbr>
+certificates.</p>
+<p><strong><abbr title="Certificate Issuer Public Key Identifier">CI PKID</abbr></strong> - Certificate Issuer Public Key Identifier. A fingerprint of the
+<abbr title="Certificate Issuer">CI</abbr> public key used by the <abbr title="Embedded UICC">eUICC</abbr> to decide what it trusts.</p>
+<p><strong><abbr title="Contactless Registry Service">CRS</abbr></strong> - Contactless Registry Service. A contactless management service
+exposed on some cards.</p>
+<h2 id="d">D</h2>
+<p><strong><abbr title="Distinguished Encoding Rules">DER</abbr></strong> - Distinguished Encoding Rules. A canonical ASN.1 encoding.</p>
+<p><strong><abbr title="Dedicated File">DF</abbr></strong> - Dedicated File. An <abbr title="European Telecommunications Standards Institute">ETSI</abbr>/3GPP filesystem directory.</p>
+<p><strong><abbr title="Data Grouping Identifier">DGI</abbr></strong> - Data Grouping Identifier. A key used in <abbr title="GlobalPlatform">GP</abbr> content-management
+transfers.</p>
+<h2 id="e">E</h2>
+<p><strong>EAP-AKA'</strong> - EAP method for AKA over non-3GPP access (3GPP TS 33.402).</p>
+<p><strong><abbr title="Elementary File">EF</abbr></strong> - Elementary File. An <abbr title="European Telecommunications Standards Institute">ETSI</abbr>/3GPP filesystem data file.</p>
+<p><strong><abbr title="eUICC Identifier">EID</abbr></strong> - <abbr title="Embedded UICC">eUICC</abbr> Identifier. The identity of an <abbr title="Embedded UICC">eUICC</abbr>.</p>
+<p><strong><abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr></strong> - eSIM IoT Manager. The <abbr title="SIM Group Permanent (GSMA permanent reference document series; e.g. SGP.02, SGP.22, SGP.32)">SGP</abbr>.32 orchestrator actor.</p>
+<p><strong>ES9+</strong> - ES9+ interface between an <abbr title="Local Profile Assistant">LPA</abbr>/IPA and SM-DP+.</p>
+<p><strong><abbr title="ES10a interface between LPAd and ISD-R">ES10a</abbr>/b/c</strong> - ES10 interfaces between <abbr title="Local Profile Assistant, device-side">LPAd</abbr>/<abbr title="IoT Profile Assistant, device-side">IPAd</abbr> and the <abbr title="Issuer Security Domain - Root">ISD-R</abbr>.</p>
+<p><strong><abbr title="Embedded Secure Element">eSE</abbr></strong> - Embedded Secure Element. A soldered-down <abbr title="Secure Element">SE</abbr>, distinct from <abbr title="Universal Integrated Circuit Card">UICC</abbr>.</p>
+<p><strong><abbr title="European Telecommunications Standards Institute">ETSI</abbr></strong> - European Telecommunications Standards Institute.</p>
+<p><strong><abbr title="Embedded UICC">eUICC</abbr></strong> - Embedded <abbr title="Universal Integrated Circuit Card">UICC</abbr>. A soldered-down, remotely-provisionable <abbr title="Universal Integrated Circuit Card">UICC</abbr>.</p>
+<h2 id="f">F</h2>
+<p><strong><abbr title="File Control Parameters">FCP</abbr></strong> - File Control Parameters. An <abbr title="European Telecommunications Standards Institute">ETSI</abbr> <abbr title="Tag-Length-Value">TLV</abbr> template describing an <abbr title="Elementary File">EF</abbr>.</p>
+<p><strong><abbr title="File Identifier">FID</abbr></strong> - File Identifier. A 2-byte <abbr title="European Telecommunications Standards Institute">ETSI</abbr> filesystem identifier.</p>
+<h2 id="g">G</h2>
+<p><strong>GET IDENTITY</strong> - 3GPP TS 31.102 §7.1.2.4 <abbr title="Universal Subscriber Identity Module">USIM</abbr> command that returns the
+<abbr title="Subscription Concealed Identifier (3GPP)">SUCI</abbr> built on-card.</p>
+<p><strong><abbr title="GlobalPlatform">GP</abbr></strong> - GlobalPlatform.</p>
+<p><strong><abbr title="GSM Association">GSMA</abbr></strong> - GSM Association. The telecom industry body that authors <abbr title="SIM Group Permanent (GSMA permanent reference document series; e.g. SGP.02, SGP.22, SGP.32)">SGP</abbr>.
+specifications.</p>
+<p><strong>GSMTAP</strong> - Encapsulation used to mirror <abbr title="Subscriber Identity Module">SIM</abbr>/modem traffic for capture
+in Wireshark.</p>
+<h2 id="h">H</h2>
+<p><strong><abbr title="Hardware-In-The-Loop">HIL</abbr></strong> - Hardware-In-The-Loop.</p>
+<h2 id="i">I</h2>
+<p><strong><abbr title="Integrated Circuit">IC</abbr></strong> - Integrated Circuit.</p>
+<p><strong><abbr title="Integrated Circuit Card Identifier">ICCID</abbr></strong> - Integrated Circuit Card Identifier. The identity of a
+subscription-level card state, typically 19-20 digits.</p>
+<p><strong><abbr title="Intermediate Java Card">IJC</abbr></strong> - Intermediate Java Card. An intermediate applet format.</p>
+<p><strong><abbr title="IoT Profile Assistant, device-side">IPAd</abbr></strong> - IoT Profile Assistant, device-side.</p>
+<p><strong><abbr title="IoT Profile Assistant, eUICC-side">IPAe</abbr></strong> - IoT Profile Assistant, <abbr title="Embedded UICC">eUICC</abbr>-side. An IPA implementation
+that runs inside the <abbr title="Embedded UICC">eUICC</abbr> itself rather than on the host device.</p>
+<p><strong><abbr title="Issuer Security Domain - Profile">ISD-P</abbr></strong> - Issuer Security Domain - Profile. The per-profile SD.</p>
+<p><strong><abbr title="Issuer Security Domain - Root">ISD-R</abbr></strong> - Issuer Security Domain - Root. The top SD on an <abbr title="Embedded UICC">eUICC</abbr>.</p>
+<p><strong><abbr title="IP Multimedia Services Identity Module">ISIM</abbr></strong> - IP Multimedia Services Identity Module.</p>
+<h2 id="k">K</h2>
+<p><strong>K_AKMA</strong> - AKMA Anchor Key derived from <code>Kausf</code>.</p>
+<p><strong>Kausf</strong> - 5G AKA anchor key derived during 5G authentication.</p>
+<h2 id="l">L</h2>
+<p><strong><abbr title="Local Profile Assistant">LPA</abbr></strong> - Local Profile Assistant.</p>
+<p><strong><abbr title="Local Profile Assistant, device-side">LPAd</abbr></strong> - Local Profile Assistant, device-side.</p>
+<h2 id="m">M</h2>
+<p><strong><abbr title="Master File">MF</abbr></strong> - Master File. The root of the <abbr title="European Telecommunications Standards Institute">ETSI</abbr>/3GPP filesystem.</p>
+<h2 id="n">N</h2>
+<p><strong><abbr title="Network Access Application (USIM / ISIM / CSIM)">NAA</abbr></strong> - Network Access Application. <abbr title="Universal Subscriber Identity Module">USIM</abbr>, <abbr title="IP Multimedia Services Identity Module">ISIM</abbr>, or CSIM.</p>
+<h2 id="o">O</h2>
+<p><strong><abbr title="Over-The-Air">OTA</abbr></strong> - Over-The-Air.</p>
+<h2 id="p">P</h2>
+<p><strong><abbr title="Personal Computer/Smart Card (Workgroup)">PC/SC</abbr></strong> - Personal Computer/Smart Card Workgroup.</p>
+<p><strong><abbr title="Profile Element (SAIP)">PE</abbr></strong> - Profile Element. A <abbr title="SIMalliance Interoperable Profile">SAIP</abbr> component.</p>
+<p><strong><abbr title="Personal Identification Number">PIN</abbr></strong> - Personal Identification Number.</p>
+<p><strong><abbr title="Public Key Identifier">PKID</abbr></strong> - Public Key Identifier.</p>
+<p><strong><abbr title="Profile Policy Rule">PPR</abbr></strong> - Profile Policy Rule.</p>
+<p><strong><abbr title="Personal Unblocking Key">PUK</abbr></strong> - Personal Unblocking Key.</p>
+<h2 id="r">R</h2>
+<p><strong><abbr title="Remote Application Management">RAM</abbr></strong> - Remote Application Management.</p>
+<p><strong>RES</strong> / <strong>RES</strong>* - AKA response (<code>RES</code>) and the 5G AKA derived response
+(<code>RES*</code>, derived per 3GPP TS 33.501 Annex A.4).</p>
+<p><strong><abbr title="Rules Authorisation Table">RAT</abbr></strong> - Rules Authorisation Table.</p>
+<p><strong><abbr title="Remote File Management">RFM</abbr></strong> - Remote File Management.</p>
+<p><strong><abbr title="Remote SIM Provisioning">RSP</abbr></strong> - Remote <abbr title="Subscriber Identity Module">SIM</abbr> Provisioning.</p>
+<h2 id="s">S</h2>
+<p><strong><abbr title="SIMalliance Interoperable Profile">SAIP</abbr></strong> - SIMalliance Interoperable Profile.</p>
+<p><strong><abbr title="Secure Channel Protocol">SCP</abbr></strong> - Secure Channel Protocol.</p>
+<p><strong><abbr title="Secure Channel Protocol 02 (GP)">SCP02</abbr> / <abbr title="Secure Channel Protocol 03 (GP)">SCP03</abbr> / <abbr title="Secure Channel Protocol 11 (GP, elliptic curve)">SCP11</abbr></strong> - <abbr title="GlobalPlatform">GP</abbr>-defined secure channel protocols.</p>
+<p><strong><abbr title="Secure Channel Protocol 80 (ETSI TS 102 225 / 226)">SCP80</abbr></strong> - <abbr title="European Telecommunications Standards Institute">ETSI</abbr> TS 102 225 / 226 <abbr title="Over-The-Air">OTA</abbr> secured packet format.</p>
+<p><strong><abbr title="Secure Element">SE</abbr></strong> - Secure Element.</p>
+<p><strong><abbr title="SIM Group Permanent (GSMA permanent reference document series; e.g. SGP.02, SGP.22, SGP.32)">SGP</abbr></strong> - <abbr title="Subscriber Identity Module">SIM</abbr> Group Permanent. <abbr title="GSM Association">GSMA</abbr>'s permanent reference document series
+covering <abbr title="Subscriber Identity Module">SIM</abbr> / <abbr title="Embedded UICC">eUICC</abbr> specifications (e.g. <abbr title="SIM Group Permanent (GSMA permanent reference document series; e.g. SGP.02, SGP.22, SGP.32)">SGP</abbr>.02, <abbr title="SIM Group Permanent (GSMA permanent reference document series; e.g. SGP.02, SGP.22, SGP.32)">SGP</abbr>.22, <abbr title="SIM Group Permanent (GSMA permanent reference document series; e.g. SGP.02, SGP.22, SGP.32)">SGP</abbr>.32).</p>
+<p><strong><abbr title="Subscriber Identity Module">SIM</abbr></strong> - Subscriber Identity Module.</p>
+<p><strong>SM-DP+</strong> - Subscription Manager - Data Preparation (enhanced).</p>
+<p><strong><abbr title="Subscription Manager - Secure Routing">SM-SR</abbr></strong> - Subscription Manager - Secure Routing.</p>
+<p><strong><abbr title="Security Parameter Indicator (OTA)">SPI</abbr></strong> - Security Parameter Indicator (<abbr title="Over-The-Air">OTA</abbr>).</p>
+<p><strong><abbr title="SIM Application Toolkit">STK</abbr></strong> - <abbr title="Subscriber Identity Module">SIM</abbr> Application Toolkit.</p>
+<p><strong><abbr title="Subscription Concealed Identifier (3GPP)">SUCI</abbr></strong> - Subscription Concealed Identifier (5G).</p>
+<p><strong><abbr title="Subscription Permanent Identifier (3GPP)">SUPI</abbr></strong> - Subscription Permanent Identifier (5G).</p>
+<h2 id="t">T</h2>
+<p><strong><abbr title="Toolkit Application Command">TAC</abbr></strong> - Toolkit Application Command.</p>
+<p><strong><abbr title="Tag-Length-Value">TLV</abbr></strong> - Tag-Length-Value.</p>
+<p><strong><abbr title="Transport Protocol User Data">TP-UD</abbr></strong> - Transport Protocol User Data (<abbr title="Over-The-Air">OTA</abbr>).</p>
+<p><strong><abbr title="Transport Protocol Data Unit">TPDU</abbr></strong> - Transport Protocol Data Unit (ISO 7816-3).</p>
+<p><strong><abbr title="3GPP TUAK authentication algorithm set">TUAK</abbr></strong> - 3GPP <abbr title="3GPP TUAK authentication algorithm set">TUAK</abbr> authentication algorithm set.</p>
+<p><strong><abbr title="Text User Interface">TUI</abbr></strong> - Text User Interface.</p>
+<h2 id="u">U</h2>
+<p><strong><abbr title="Universal Integrated Circuit Card">UICC</abbr></strong> - Universal Integrated Circuit Card.</p>
+<p><strong><abbr title="Unprotected Profile Package (GSMA SGP.22)">UPP</abbr></strong> - Unprotected Profile Package.</p>
+<p><strong><abbr title="Universal Subscriber Identity Module">USIM</abbr></strong> - Universal Subscriber Identity Module.</p>
+        </div>
+      </div><!-- /ygg-toc-body -->
+      <aside class="ygg-toc-rail" aria-label="On this page">
+        <p class="ygg-toc-rail-label">On this page</p>
+        <nav>
+            <a href="#a" class="toc-link">A</a>
+            <a href="#b" class="toc-link">B</a>
+            <a href="#c" class="toc-link">C</a>
+            <a href="#d" class="toc-link">D</a>
+            <a href="#e" class="toc-link">E</a>
+            <a href="#f" class="toc-link">F</a>
+            <a href="#g" class="toc-link">G</a>
+            <a href="#h" class="toc-link">H</a>
+            <a href="#i" class="toc-link">I</a>
+            <a href="#k" class="toc-link">K</a>
+            <a href="#l" class="toc-link">L</a>
+            <a href="#m" class="toc-link">M</a>
+            <a href="#n" class="toc-link">N</a>
+            <a href="#o" class="toc-link">O</a>
+            <a href="#p" class="toc-link">P</a>
+            <a href="#r" class="toc-link">R</a>
+            <a href="#s" class="toc-link">S</a>
+            <a href="#t" class="toc-link">T</a>
+            <a href="#u" class="toc-link">U</a>
+        </nav>
+      </aside>
+      </div><!-- /ygg-content-toc -->
+    </main>
+    <footer class="px-6 py-6 sm:px-10 lg:px-14 xl:px-16 border-t border-zinc-950/[0.06] dark:border-white/[0.05]">
+      <div class="ygg-content flex flex-col items-center gap-2 text-xs text-zinc-500">
+        <div class="flex items-center gap-1.5 text-sm">
+          <span class="font-sans font-semibold text-zinc-700 dark:text-zinc-300">YggdraSIM</span>
+          <span class="text-zinc-400 dark:text-zinc-500">by</span>
+          <a href="https://1ot.com" target="_blank" rel="noopener" class="font-semibold text-zinc-700 dark:text-zinc-300 hover:text-zinc-600 dark:hover:text-zinc-300 transition-colors">1oT</a>
+        </div>
+        <div class="flex flex-wrap items-center justify-center gap-2 text-zinc-400 dark:text-zinc-500">
+          <span>Copyright © 2026 1oT OÜ</span>
+          <span aria-hidden="true">·</span>
+          <span>Last updated <span data-ygg-updated>May 19, 2026</span></span>
+        </div>
+      </div>
+    </footer>
+  </div>
+</div>
+<script src="../ygg.js?v=2"></script>
+<!-- Mermaid: ygg.js loads ygg-mermaid.js when .doc-prose contains pre.mermaid -->
+</body>
+</html>
