@@ -1,0 +1,476 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Troubleshooting — YggdraSIM</title>
+  <link rel="icon" href="../assets/images/yggdrasil-mark.svg">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,100..900&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>html{font-size:100%}</style>
+  <script>(function(){var s=localStorage.getItem('ygg-theme');var p=window.matchMedia('(prefers-color-scheme: dark)').matches;if(s==='dark'||(!s&&p))document.documentElement.classList.add('dark');})();</script>
+  <link rel="stylesheet" href="../tailwind.css?v=2">
+  <link rel="stylesheet" href="../ygg.css?v=2">
+</head>
+<body class="antialiased font-sans bg-zinc-50 dark:bg-[var(--bg-page)] text-zinc-900 dark:text-zinc-100"
+      data-ygg-base="../" data-ygg-partial-path="../partials/sidebar.html" data-ygg-active-sub="reference/troubleshooting.html" data-ygg-open-sections="reference">
+<a class="ygg-skip-link" href="#ygg-main">Skip to content</a>
+<div id="ygg-shell" class="flex min-h-dvh isolate ygg-layout-pending">
+  <div id="ygg-chrome-mount"></div>
+  <script src="../ygg-layout.js?v=2"></script>
+  <div id="ygg-main-column" class="flex-1 lg:ml-64 flex flex-col min-h-dvh">
+    <header class="lg:hidden sticky top-0 z-20 flex items-center gap-3 px-4 py-3 bg-white/95 dark:bg-[var(--bg-page)]/95 backdrop-blur-sm border-b border-zinc-950/[0.07] dark:border-white/[0.05] shrink-0">
+      <button type="button" onclick="openSidebar()" class="ygg-icon-btn flex items-center justify-center size-11 rounded-md text-zinc-500 transition-colors" aria-label="Open menu">
+        <svg aria-hidden="true" focusable="false" class="size-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M3 12h18M3 18h18"/></svg>
+      </button>
+      <span class="font-sans font-semibold text-sm tracking-tight">YggdraSIM</span>
+    </header>
+    <main class="flex-1 px-6 py-10 sm:px-10 lg:px-14 xl:px-16" id="ygg-main" tabindex="-1">
+      <div class="ygg-content-toc">
+      <div class="ygg-toc-body">
+        <nav class="flex flex-wrap items-center gap-1.5 text-xs text-zinc-400 mb-6" aria-label="Breadcrumb">
+          <ol class="ygg-crumbs">
+            <li><a href="../index.html" class="doc-link no-underline">Home</a></li>
+            <li aria-hidden="true"><svg class="size-3 opacity-40" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6 4l4 4-4 4"/></svg></li>
+            <li><a href="../index.html" class="hover:text-zinc-600 dark:hover:text-zinc-300 transition-colors no-underline">Reference</a></li>
+            <li aria-hidden="true"><svg class="size-3 opacity-40" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6 4l4 4-4 4"/></svg></li>
+            <li><span aria-current="page" class="text-zinc-600 dark:text-zinc-300">Troubleshooting</span></li>
+          </ol>
+        </nav>
+        <h1 class="doc-h1 font-sans font-bold text-zinc-950 dark:text-white mb-2">Troubleshooting</h1>
+        <p class="page-lead mb-8">Symptoms, likely causes, and fixes. Group by subsystem. When a fix is
+non-trivial, the row links to the page that explains it in full.</p>
+        <details class="toc-mobile xl:hidden mb-8">
+          <summary>On this page <svg class="toc-mobile-chevron size-4" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 6l4 4 4-4"/></svg></summary>
+          <nav>
+            <a href="#general" class="toc-link">General</a>
+            <a href="#pcsc-and-reader" class="toc-link">PC/SC and reader</a>
+            <a href="#scp03" class="toc-link">SCP03</a>
+            <a href="#scp80" class="toc-link">SCP80</a>
+            <a href="#scp11-relay-live-and-test" class="toc-link">SCP11 relay (live and test)</a>
+            <a href="#tls-trust-posture-knobs" class="toc-link toc-link-sub">TLS trust-posture knobs</a>
+            <a href="#plugin-loader-knobs" class="toc-link toc-link-sub">Plugin loader knobs</a>
+            <a href="#scp11-local-access" class="toc-link">SCP11 local access</a>
+            <a href="#scp11-eim-local" class="toc-link">SCP11 eIM local</a>
+            <a href="#hil-bridge" class="toc-link">HIL bridge</a>
+            <a href="#profile-package" class="toc-link">Profile package</a>
+            <a href="#runtime-root-and-state" class="toc-link">Runtime root and state</a>
+            <a href="#related-pages" class="toc-link">Related pages</a>
+          </nav>
+        </details>
+        <div class="doc-prose text-[0.9375rem] leading-relaxed text-zinc-600 dark:text-zinc-400 space-y-4">
+<h2 id="general">General</h2>
+<div class="-mx-6 sm:mx-0 doc-table-scroll"><table class="doc-table">
+<thead>
+<tr>
+<th>Symptom</th>
+<th>Likely cause</th>
+<th>Fix</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>ModuleNotFoundError: SCP03</code> etc. when running <code>python -m SCP03</code></td>
+<td>editable install not active</td>
+<td>run <code>python -m pip install -e .</code> from the repo root</td>
+</tr>
+<tr>
+<td><code>yggdrasim-*</code> command not found</td>
+<td>entry points not registered</td>
+<td>re-run editable install, or use <code>python -m ...</code></td>
+</tr>
+<tr>
+<td>launcher cannot find runtime material after a frozen build</td>
+<td>wrong runtime root</td>
+<td>set <code>YGGDRASIM_RUNTIME_ROOT</code> or check <code>YggdraSIM-data</code> placement. See <a href="runtime-root.html">Runtime Root</a>.</td>
+</tr>
+<tr>
+<td>unsure whether the environment is wired correctly before triaging</td>
+<td>optional dependency or reader missing</td>
+<td>run <code>python main/main.py --doctor</code> for a read-only preflight covering Python, <code>cryptography</code>, <code>pycryptodomex</code>, <code>asn1tools</code>, the optional <code>pysim/</code> tree, SQLite, <code>textual</code>, <abbr title="Personal Computer/Smart Card (Workgroup)">PC/SC</abbr> readers, and <code>gpg</code>. Exit code is <code>1</code> on any warning/failure so the helper is <abbr title="Certificate Issuer">CI</abbr>-safe.</td>
+</tr>
+<tr>
+<td>need to pin down which suite version is running</td>
+<td>multiple installs or editable vs frozen builds</td>
+<td>run <code>python main/main.py --version</code> (value comes from <code>yggdrasim_common/__about__.py</code> and always matches <code>pyproject.toml</code>).</td>
+</tr>
+</tbody>
+</table></div>
+<h2 id="pcsc-and-reader"><abbr title="Personal Computer/Smart Card (Workgroup)">PC/SC</abbr> and reader</h2>
+<div class="-mx-6 sm:mx-0 doc-table-scroll"><table class="doc-table">
+<thead>
+<tr>
+<th>Symptom</th>
+<th>Likely cause</th>
+<th>Fix</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>SCardListReaders: no readers available</code></td>
+<td><code>pcscd</code> not running</td>
+<td>start <code>pcscd</code>, check reader USB</td>
+</tr>
+<tr>
+<td><code>Shared mode not available</code> / <code>Card reader in use</code></td>
+<td>reader owned by another process</td>
+<td>close other shells; check if the <abbr title="Hardware-In-The-Loop">HIL</abbr> bridge is running</td>
+</tr>
+<tr>
+<td>Card never ATRs</td>
+<td>card seated wrong, damaged, or not powered</td>
+<td>reseat, try a different reader</td>
+</tr>
+</tbody>
+</table></div>
+<h2 id="scp03"><abbr title="Secure Channel Protocol 03 (GP)">SCP03</abbr></h2>
+<div class="-mx-6 sm:mx-0 doc-table-scroll"><table class="doc-table">
+<thead>
+<tr>
+<th>Symptom</th>
+<th>Likely cause</th>
+<th>Fix</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>6982</code> on <code>EXTERNAL AUTHENTICATE</code></td>
+<td>wrong keyset</td>
+<td>verify <code>Workspace/SCP03/keys.ini</code> or the migrated inventory entry</td>
+</tr>
+<tr>
+<td><code>6A82</code> on <code>SELECT &lt;FID&gt;</code></td>
+<td>file not currently active or wrong path</td>
+<td>walk from <code>3F00</code>, use a path instead of a bare <abbr title="File Identifier">FID</abbr></td>
+</tr>
+<tr>
+<td><code>6985</code> on <code>PUT-KEY</code></td>
+<td>no live authenticated session</td>
+<td>run <code>AUTH-SD</code> first</td>
+</tr>
+<tr>
+<td><abbr title="Embedded UICC">eUICC</abbr> retrieval commands return <code>6A88</code></td>
+<td>wrong SD selected</td>
+<td><code>SELECT</code> the <abbr title="Issuer Security Domain - Root">ISD-R</abbr> first, then retry</td>
+</tr>
+</tbody>
+</table></div>
+<h2 id="scp80"><abbr title="Secure Channel Protocol 80 (ETSI TS 102 225 / 226)">SCP80</abbr></h2>
+<div class="-mx-6 sm:mx-0 doc-table-scroll"><table class="doc-table">
+<thead>
+<tr>
+<th>Symptom</th>
+<th>Likely cause</th>
+<th>Fix</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Response PoR returns a counter error</td>
+<td><abbr title="Security Parameter Indicator (OTA)">SPI</abbr> counter mode mismatch</td>
+<td>align <abbr title="Security Parameter Indicator (OTA)">SPI</abbr> with what the card last saw; reset counter if allowed</td>
+</tr>
+<tr>
+<td>Applet silently swallows payload</td>
+<td>wrong TAR</td>
+<td>verify TAR; pick the correct applet or <abbr title="Remote File Management">RFM</abbr> engine</td>
+</tr>
+<tr>
+<td><code>6988</code> on secured packet</td>
+<td>integrity bits rejected</td>
+<td>match <code>CC</code> / <code>DS</code> / ciphering requirements on both sides</td>
+</tr>
+</tbody>
+</table></div>
+<h2 id="scp11-relay-live-and-test"><abbr title="Secure Channel Protocol 11 (GP, elliptic curve)">SCP11</abbr> relay (live and test)</h2>
+<div class="-mx-6 sm:mx-0 doc-table-scroll"><table class="doc-table">
+<thead>
+<tr>
+<th>Symptom</th>
+<th>Likely cause</th>
+<th>Fix</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>CI PKID unavailable</code> at AuthenticateClient</td>
+<td>SM-DP+ chain not trusted by the card</td>
+<td>check <code>ES9-CERT-INFO</code>, <code>SET-ES9-CA</code>, pick a <abbr title="Certificate Issuer">CI</abbr> the card trusts</td>
+</tr>
+<tr>
+<td>TLS error at <code>InitiateAuthentication</code></td>
+<td>pinned CA or clock skew</td>
+<td>check <code>SET-ES9-TLS</code>, <code>SET-ES9-CA</code>, host clock</td>
+</tr>
+<tr>
+<td><code>self-signed certificate in certificate chain</code> on a freshly-seen <abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr>/SM-DP+ FQDN</td>
+<td>no local trust anchor yet for this host</td>
+<td>the client runs a TOFU chain read, verifies it against a local bundle, and persists the result. If you previously set <code>YGGDRASIM_SCP11_REQUIRE_PINNED_TLS_INTROSPECTION=1</code>, unset it so auto-learn can bootstrap; subsequent runs will be fully pinned against the persisted bundle.</td>
+</tr>
+<tr>
+<td><abbr title="Bound Profile Package (GSMA SGP.22)">BPP</abbr> install fails mid-stream</td>
+<td>insufficient memory or bad <abbr title="Bound Profile Package (GSMA SGP.22)">BPP</abbr> segment</td>
+<td>retry, free space, or relint the source package</td>
+</tr>
+<tr>
+<td><code>POLL</code> verb absent or emits capability error</td>
+<td><code>polling</code> plugin not loaded</td>
+<td>plugins load by default; confirm the startup stderr banner lists <code>polling_plugin.py</code> and that <code>YGGDRASIM_DISALLOW_PLUGINS</code> / <code>YGGDRASIM_ALLOW_PLUGINS=0</code> are not set</td>
+</tr>
+</tbody>
+</table></div>
+<h3 id="tls-trust-posture-knobs">TLS trust-posture knobs</h3>
+<p>Three env flags govern <abbr title="Secure Channel Protocol 11 (GP, elliptic curve)">SCP11</abbr> TLS posture. All three are unset by default.</p>
+<div class="-mx-6 sm:mx-0 doc-table-scroll"><table class="doc-table">
+<thead>
+<tr>
+<th>Env flag</th>
+<th>Role</th>
+<th>Default</th>
+<th>When to set</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>YGGDRASIM_SCP11_ALLOW_INSECURE_TLS</code></td>
+<td>Opt-in to unpinned <em>request</em> traffic (real ES9 POSTs, transport channel). Triggers a one-shot stderr warning banner per caller.</td>
+<td>unset → refused</td>
+<td>Dev boxes running against <abbr title="SIM Group Permanent (GSMA permanent reference document series; e.g. SGP.02, SGP.22, SGP.32)">SGP</abbr>.26 test vectors only. Never against a production <abbr title="Remote SIM Provisioning">RSP</abbr> server.</td>
+</tr>
+<tr>
+<td><code>YGGDRASIM_SCP11_REQUIRE_PINNED_TLS</code></td>
+<td>Hard-lock: refuse unpinned request traffic even if <code>ALLOW_INSECURE_TLS=1</code> is also set.</td>
+<td>unset → opt-in still possible</td>
+<td>Fleet or <abbr title="Certificate Issuer">CI</abbr> where nobody should ever downgrade a request.</td>
+</tr>
+<tr>
+<td><code>YGGDRASIM_SCP11_REQUIRE_PINNED_TLS_INTROSPECTION</code></td>
+<td>Hard-lock: refuse the read-only TOFU chain read that auto-learns new trust anchors. Use only when no new anchor may be learned at runtime.</td>
+<td>unset → auto-learn allowed</td>
+<td>Air-gapped or attestation-only deployments; pre-seed anchors under <code>SCP11/&lt;tree&gt;/certs</code> instead.</td>
+</tr>
+</tbody>
+</table></div>
+<p>Auto-learn is intentionally the default. Popping in a new <abbr title="Embedded UICC">eUICC</abbr> or registering against a new <abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr> FQDN works without any env dance: the client TOFUs the chain once, persists it as a local bundle, and every subsequent call verifies against that bundle with full pinning.</p>
+<h3 id="plugin-loader-knobs">Plugin loader knobs</h3>
+<p>Plugins under the active runtime root's <code>plugins/</code> directory load by default. The first-party <code>polling_plugin.py</code> backs the <code>POLL</code> / <code>IPAE-LIVE</code> / <code>IPAE-TEST</code> command families.</p>
+<div class="-mx-6 sm:mx-0 doc-table-scroll"><table class="doc-table">
+<thead>
+<tr>
+<th>Env flag</th>
+<th>Role</th>
+<th>Default</th>
+<th>When to set</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>YGGDRASIM_DISALLOW_PLUGINS</code></td>
+<td>Hard-lock: refuse every plugin, including the first-party polling plugin.</td>
+<td>unset → plugins load</td>
+<td>Attestation / <abbr title="Certificate Issuer">CI</abbr> / air-gapped deployments where no out-of-tree code may execute.</td>
+</tr>
+<tr>
+<td><code>YGGDRASIM_ALLOW_PLUGINS</code></td>
+<td>Tri-state opt-in / opt-out knob. <code>0</code>/<code>false</code>/<code>no</code>/<code>off</code> → opt-out (same as <code>DISALLOW=1</code>). <code>1</code>/<code>true</code>/<code>yes</code>/<code>on</code> → opt-in (redundant after the default flip, still honoured).</td>
+<td>unset → plugins load</td>
+<td>Backward-compat for deployments that want to keep the old opt-in-only posture.</td>
+</tr>
+</tbody>
+</table></div>
+<p>On first successful load the manager prints a one-line stderr banner naming each loaded <code>.py</code> file, e.g. <code>[plugins] loaded 1: polling_plugin.py (hard-lock with YGGDRASIM_DISALLOW_PLUGINS=1).</code>. If you don't see that line and <code>POLL</code> / <code>IPAE-*</code> are missing, the loader was hard-locked by one of the env flags above.</p>
+<h2 id="scp11-local-access"><abbr title="Secure Channel Protocol 11 (GP, elliptic curve)">SCP11</abbr> local access</h2>
+<div class="-mx-6 sm:mx-0 doc-table-scroll"><table class="doc-table">
+<thead>
+<tr>
+<th>Symptom</th>
+<th>Likely cause</th>
+<th>Fix</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>CI PKID unavailable</code> at AuthenticateServer</td>
+<td>certificate chain not trusted</td>
+<td>drop the correct certs into <code>SCP11/local_access/certs/</code> or runtime root</td>
+</tr>
+<tr>
+<td><code>No profile selected</code></td>
+<td>missing <code>PROFILE &lt;path&gt;</code> in this session</td>
+<td>issue <code>PROFILE</code> before <code>LOAD-PROFILE</code></td>
+</tr>
+<tr>
+<td>Metadata store rejected</td>
+<td>field out of card's accepted range</td>
+<td>lint metadata, adjust JSON</td>
+</tr>
+</tbody>
+</table></div>
+<h2 id="scp11-eim-local"><abbr title="Secure Channel Protocol 11 (GP, elliptic curve)">SCP11</abbr> <abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr> local</h2>
+<div class="-mx-6 sm:mx-0 doc-table-scroll"><table class="doc-table">
+<thead>
+<tr>
+<th>Symptom</th>
+<th>Likely cause</th>
+<th>Fix</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>ADD-INITIAL-EIM</code> rejected</td>
+<td>BF55 row already populated or overwrite not allowed</td>
+<td>check <code>Workspace/SIMCARD/isdr_config.json</code> simulator-side, or use <code>ADD-EIM</code></td>
+</tr>
+<tr>
+<td><code>IPAE-LIVE</code> / <code>IPAE-TEST</code> absent from <code>HELP</code></td>
+<td><code>polling</code> plugin not loaded</td>
+<td>plugins load by default; check the stderr banner at shell startup. If you set <code>YGGDRASIM_DISALLOW_PLUGINS=1</code> (or <code>YGGDRASIM_ALLOW_PLUGINS=0</code>), unset it. Confirm <code>plugins/polling_plugin.py</code> sits under the active runtime root.</td>
+</tr>
+<tr>
+<td><code>POLL</code> absent from <abbr title="Secure Channel Protocol 11 (GP, elliptic curve)">SCP11</abbr> relay shells</td>
+<td><code>polling</code> plugin not loaded</td>
+<td>same as above. Plugin backs <code>POLL</code> / <code>IPAE-LIVE</code> / <code>IPAE-TEST</code> in one module.</td>
+</tr>
+<tr>
+<td>Hotfolder empty after drop</td>
+<td>wrong directory</td>
+<td>confirm the runtime root <code>SCP11/eim_local/eim_packages/hotfolder/</code></td>
+</tr>
+</tbody>
+</table></div>
+<h2 id="hil-bridge"><abbr title="Hardware-In-The-Loop">HIL</abbr> bridge</h2>
+<div class="-mx-6 sm:mx-0 doc-table-scroll"><table class="doc-table">
+<thead>
+<tr>
+<th>Symptom</th>
+<th>Likely cause</th>
+<th>Fix</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>supervisor <code>usbPresent: false</code></td>
+<td>SIMtrace2 not enumerated</td>
+<td>check <code>dmesg</code>, <code>lsusb</code>, USB permissions</td>
+</tr>
+<tr>
+<td>relay never reports <code>status: ok</code></td>
+<td><code>osmo-remsim-client-st2</code> failing</td>
+<td>check its stderr, verify firmware</td>
+</tr>
+<tr>
+<td>missing <code>atr</code> in relay state</td>
+<td>card not powered or inserted</td>
+<td>reseat card</td>
+</tr>
+<tr>
+<td><code>reader busy</code> in a YggdraSIM shell</td>
+<td>direct <abbr title="Personal Computer/Smart Card (Workgroup)">PC/SC</abbr> handle used while bridge owns the reader</td>
+<td>route through the relay</td>
+</tr>
+</tbody>
+</table></div>
+<h2 id="profile-package">Profile package</h2>
+<div class="-mx-6 sm:mx-0 doc-table-scroll"><table class="doc-table">
+<thead>
+<tr>
+<th>Symptom</th>
+<th>Likely cause</th>
+<th>Fix</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>hex parse failed</code> on <code>.txt</code> input</td>
+<td>separators or <code>0x</code> prefixes</td>
+<td>strip to pure hex</td>
+</tr>
+<tr>
+<td>Lint flags <abbr title="Profile Element (SAIP)">PE</abbr> ordering</td>
+<td>non-compliant <abbr title="Profile Element (SAIP)">PE</abbr> order</td>
+<td>reorder in the <abbr title="Text User Interface">TUI</abbr> or in the source</td>
+</tr>
+<tr>
+<td><code>RAW</code> unavailable</td>
+<td>external <code>saip-tool</code> not on <code>PATH</code></td>
+<td>set path with <code>TOOL &lt;path&gt;</code></td>
+</tr>
+</tbody>
+</table></div>
+<h2 id="runtime-root-and-state">Runtime root and state</h2>
+<div class="-mx-6 sm:mx-0 doc-table-scroll"><table class="doc-table">
+<thead>
+<tr>
+<th>Symptom</th>
+<th>Likely cause</th>
+<th>Fix</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>state/device_inventory.sqlite3</code> created in an unexpected place</td>
+<td><code>YGGDRASIM_RUNTIME_ROOT</code> or frozen-build resolution</td>
+<td>check <a href="runtime-root.html">Runtime Root</a></td>
+</tr>
+<tr>
+<td>GPG decrypt fails at read time</td>
+<td>agent not running or wrong <code>GNUPGHOME</code></td>
+<td>start agent, set <code>GNUPGHOME</code></td>
+</tr>
+<tr>
+<td><code>RuntimeError: GPG inventory {encryption,decryption} timed out; check gpg-agent / pinentry availability.</code></td>
+<td>smart-card-backed recipient, stuck <code>pinentry</code>, or dead <code>gpg-agent</code></td>
+<td>restart <code>gpg-agent</code>, clear <code>pinentry</code>, or raise <code>gpg.timeout_seconds</code> in <code>state/inventory_crypto.json</code>. See <a href="../how-to/enable-inventory-encryption.html">Enable Inventory Encryption</a>.</td>
+</tr>
+</tbody>
+</table></div>
+<h2 id="related-pages">Related pages</h2>
+<ul>
+<li><a href="faq.html">FAQ</a></li>
+<li><a href="glossary.html">Glossary</a></li>
+<li><a href="runtime-root.html">Runtime Root</a></li>
+<li><a href="state-schema.html">State Schema</a></li>
+</ul>
+        </div>
+      </div><!-- /ygg-toc-body -->
+      <aside class="ygg-toc-rail" aria-label="On this page">
+        <p class="ygg-toc-rail-label">On this page</p>
+        <nav>
+            <a href="#general" class="toc-link">General</a>
+            <a href="#pcsc-and-reader" class="toc-link">PC/SC and reader</a>
+            <a href="#scp03" class="toc-link">SCP03</a>
+            <a href="#scp80" class="toc-link">SCP80</a>
+            <a href="#scp11-relay-live-and-test" class="toc-link">SCP11 relay (live and test)</a>
+            <a href="#tls-trust-posture-knobs" class="toc-link toc-link-sub">TLS trust-posture knobs</a>
+            <a href="#plugin-loader-knobs" class="toc-link toc-link-sub">Plugin loader knobs</a>
+            <a href="#scp11-local-access" class="toc-link">SCP11 local access</a>
+            <a href="#scp11-eim-local" class="toc-link">SCP11 eIM local</a>
+            <a href="#hil-bridge" class="toc-link">HIL bridge</a>
+            <a href="#profile-package" class="toc-link">Profile package</a>
+            <a href="#runtime-root-and-state" class="toc-link">Runtime root and state</a>
+            <a href="#related-pages" class="toc-link">Related pages</a>
+        </nav>
+      </aside>
+      </div><!-- /ygg-content-toc -->
+    </main>
+    <footer class="px-6 py-6 sm:px-10 lg:px-14 xl:px-16 border-t border-zinc-950/[0.06] dark:border-white/[0.05]">
+      <div class="ygg-content flex flex-col items-center gap-2 text-xs text-zinc-500">
+        <div class="flex items-center gap-1.5 text-sm">
+          <span class="font-sans font-semibold text-zinc-700 dark:text-zinc-300">YggdraSIM</span>
+          <span class="text-zinc-400 dark:text-zinc-500">by</span>
+          <a href="https://1ot.com" target="_blank" rel="noopener" class="font-semibold text-zinc-700 dark:text-zinc-300 hover:text-zinc-600 dark:hover:text-zinc-300 transition-colors">1oT</a>
+        </div>
+        <div class="flex flex-wrap items-center justify-center gap-2 text-zinc-400 dark:text-zinc-500">
+          <span>Copyright © 2026 1oT OÜ</span>
+          <span aria-hidden="true">·</span>
+          <span>Last updated <span data-ygg-updated>May 19, 2026</span></span>
+        </div>
+      </div>
+    </footer>
+  </div>
+</div>
+<script src="../ygg.js?v=2"></script>
+<!-- Mermaid: ygg.js loads ygg-mermaid.js when .doc-prose contains pre.mermaid -->
+</body>
+</html>

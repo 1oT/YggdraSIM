@@ -1,0 +1,262 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Replay HIL PCAP offline — YggdraSIM</title>
+  <link rel="icon" href="../assets/images/yggdrasil-mark.svg">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,100..900&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>html{font-size:100%}</style>
+  <script>(function(){var s=localStorage.getItem('ygg-theme');var p=window.matchMedia('(prefers-color-scheme: dark)').matches;if(s==='dark'||(!s&&p))document.documentElement.classList.add('dark');})();</script>
+  <link rel="stylesheet" href="../tailwind.css?v=2">
+  <link rel="stylesheet" href="../ygg.css?v=2">
+</head>
+<body class="antialiased font-sans bg-zinc-50 dark:bg-[var(--bg-page)] text-zinc-900 dark:text-zinc-100"
+      data-ygg-base="../" data-ygg-partial-path="../partials/sidebar.html" data-ygg-active-sub="how-to/replay-hil-pcap-offline.html" data-ygg-open-sections="how-to">
+<a class="ygg-skip-link" href="#ygg-main">Skip to content</a>
+<div id="ygg-shell" class="flex min-h-dvh isolate ygg-layout-pending">
+  <div id="ygg-chrome-mount"></div>
+  <script src="../ygg-layout.js?v=2"></script>
+  <div id="ygg-main-column" class="flex-1 lg:ml-64 flex flex-col min-h-dvh">
+    <header class="lg:hidden sticky top-0 z-20 flex items-center gap-3 px-4 py-3 bg-white/95 dark:bg-[var(--bg-page)]/95 backdrop-blur-sm border-b border-zinc-950/[0.07] dark:border-white/[0.05] shrink-0">
+      <button type="button" onclick="openSidebar()" class="ygg-icon-btn flex items-center justify-center size-11 rounded-md text-zinc-500 transition-colors" aria-label="Open menu">
+        <svg aria-hidden="true" focusable="false" class="size-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M3 12h18M3 18h18"/></svg>
+      </button>
+      <span class="font-sans font-semibold text-sm tracking-tight">YggdraSIM</span>
+    </header>
+    <main class="flex-1 px-6 py-10 sm:px-10 lg:px-14 xl:px-16" id="ygg-main" tabindex="-1">
+      <div class="ygg-content-toc">
+      <div class="ygg-toc-body">
+        <nav class="flex flex-wrap items-center gap-1.5 text-xs text-zinc-400 mb-6" aria-label="Breadcrumb">
+          <ol class="ygg-crumbs">
+            <li><a href="../index.html" class="doc-link no-underline">Home</a></li>
+            <li aria-hidden="true"><svg class="size-3 opacity-40" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6 4l4 4-4 4"/></svg></li>
+            <li><a href="index.html" class="hover:text-zinc-600 dark:hover:text-zinc-300 transition-colors no-underline">How To</a></li>
+            <li aria-hidden="true"><svg class="size-3 opacity-40" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6 4l4 4-4 4"/></svg></li>
+            <li><span aria-current="page" class="text-zinc-600 dark:text-zinc-300">Replay HIL PCAP offline</span></li>
+          </ol>
+        </nav>
+        <h1 class="doc-h1 font-sans font-bold text-zinc-950 dark:text-white mb-2">Replay HIL PCAP offline</h1>
+        <p class="page-lead mb-8">Open a previously captured <abbr title="Hardware-In-The-Loop">HIL</abbr> <code>.pcap</code> / <code>.pcapng</code> in the decoded-<abbr title="Application Protocol Data Unit (ISO 7816-4)">APDU</abbr>
+Textual <abbr title="Text User Interface">TUI</abbr> without bringing the SIMtrace2 / bridge / supervisor stack
+back up. When a matching keybag JSON is available, decrypt the
+<abbr title="Secure Channel Protocol 03 (GP)">SCP03</abbr> / SCP11c secure messaging sections inline so ciphered APDUs are
+annotated with their plaintext.</p>
+        <details class="toc-mobile xl:hidden mb-8">
+          <summary>On this page <svg class="toc-mobile-chevron size-4" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 6l4 4 4-4"/></svg></summary>
+          <nav>
+            <a href="#prerequisites" class="toc-link">Prerequisites</a>
+            <a href="#steps" class="toc-link">Steps</a>
+            <a href="#session-key-export" class="toc-link">Session key export</a>
+            <a href="#scp03-sessions" class="toc-link toc-link-sub">SCP03 sessions</a>
+            <a href="#scp11-local-access-sessions" class="toc-link toc-link-sub">SCP11 Local Access sessions</a>
+            <a href="#scp11-live-sessions" class="toc-link toc-link-sub">SCP11 Live sessions</a>
+            <a href="#keybag-json-schema" class="toc-link">Keybag JSON schema</a>
+            <a href="#validation" class="toc-link">Validation</a>
+            <a href="#common-failures" class="toc-link">Common failures</a>
+            <a href="#related-pages" class="toc-link">Related pages</a>
+          </nav>
+        </details>
+        <div class="doc-prose text-[0.9375rem] leading-relaxed text-zinc-600 dark:text-zinc-400 space-y-4">
+<p>Offline replay reuses the same <abbr title="Text User Interface">TUI</abbr> that drives live captures; the
+difference is that <code>tshark -r</code> reads the file instead of <code>tshark -i</code>
+streaming a live FIFO.</p>
+<h2 id="prerequisites">Prerequisites</h2>
+<ul>
+<li>a saved <code>.pcap</code> or <code>.pcapng</code> captured by the <abbr title="Hardware-In-The-Loop">HIL</abbr> bridge, Wireshark,
+  <code>tshark</code>, or <code>dumpcap</code> — on-wire frames must be either plain APDUs or
+  GSMTAP over UDP <code>4729</code></li>
+<li><code>tshark</code> on <code>PATH</code></li>
+<li>Python environment with YggdraSIM installed (source checkout or
+  <code>pip install -e .</code>)</li>
+<li><strong>optional</strong>: a keybag JSON with <abbr title="Secure Channel Protocol 03 (GP)">SCP03</abbr> or SCP11c session keys for any
+  secure-channel traffic that appears in the capture</li>
+</ul>
+<p>For how to produce the keybag, see
+<a href="#session-key-export">Session key export</a> below and the subsystem pages
+<a href="../subsystems/scp03.html#session-key-export"><abbr title="Secure Channel Protocol 03 (GP)">SCP03</abbr></a> and
+<a href="../subsystems/scp11-local-access.html#session-key-export"><abbr title="Secure Channel Protocol 11 (GP, elliptic curve)">SCP11</abbr> Local Access</a>.</p>
+<h2 id="steps">Steps</h2>
+<ol>
+<li>
+<p>Locate the capture file. Example:</p>
+<div class="code-block"><pre><code>ls -lh Workspace/hil/captures/
+# session-example.pcapng
+# session-example.pcap.keys.json
+</code></pre></div>
+<p>If the keybag lives next to the capture as
+<code>&lt;capture&gt;.pcap.keys.json</code> or <code>&lt;capture&gt;.keys.json</code>, it is
+auto-discovered.</p>
+</li>
+<li>
+<p>Launch the decoded-<abbr title="Application Protocol Data Unit (ISO 7816-4)">APDU</abbr> <abbr title="Text User Interface">TUI</abbr> in offline mode.</p>
+<div class="tabbed-set tabbed-alternate" data-tabs="1:3"><input checked="checked" id="__tabbed_1_1" name="__tabbed_1" type="radio" /><input id="__tabbed_1_2" name="__tabbed_1" type="radio" /><input id="__tabbed_1_3" name="__tabbed_1" type="radio" /><div class="tabbed-labels"><label for="__tabbed_1_1">CLI, automatic keybag</label><label for="__tabbed_1_2">CLI, explicit keybag</label><label for="__tabbed_1_3">From the <code>[B]</code> menu</label></div>
+<div class="tabbed-content">
+<div class="tabbed-block">
+<div class="code-block"><pre><code>python main/main.py \
+    --open-pcap Workspace/hil/captures/session-example.pcapng
+</code></pre></div>
+</div>
+<div class="tabbed-block">
+<div class="code-block"><pre><code>python main/main.py \
+    --open-pcap Workspace/hil/captures/session-example.pcapng \
+    --keybag    Workspace/hil/captures/session-example.keys.json
+</code></pre></div>
+</div>
+<div class="tabbed-block">
+<div class="code-block"><pre><code>python main/main.py
+[B]   HIL Bridge Session
+ [3]  Open saved .pcap (offline review, no bridge)
+     pcap path  : Workspace/hil/captures/session-example.pcapng
+      keybag path: (blank → auto-discover)
+</code></pre></div>
+</div>
+</div>
+</div>
+</li>
+<li>
+<p>Navigate the capture.</p>
+<p>The <abbr title="Text User Interface">TUI</abbr> behaves the same as in live capture mode — summary list on
+the left, detail pane, hex pane, and stateful context rows.
+Secure-messaging APDUs that match a keybag entry gain an extra
+"plaintext" context line. Entries that do not match (wrong <abbr title="Application Identifier">AID</abbr>, no
+keybag, unknown protocol) stay wrapped.</p>
+</li>
+<li>
+<p>Leave the <abbr title="Text User Interface">TUI</abbr>.</p>
+<p>Press <code>Ctrl+Q</code> (or the normal exit keybind). No background
+processes were started; nothing needs to be torn down.</p>
+</li>
+</ol>
+<h2 id="session-key-export">Session key export</h2>
+<p>Keybag JSONs are produced by the same shells that build the secure
+channel. Pick the path that matches how the capture was made:</p>
+<h3 id="scp03-sessions"><abbr title="Secure Channel Protocol 03 (GP)">SCP03</abbr> sessions</h3>
+<p>Inside the <abbr title="Secure Channel Protocol 03 (GP)">SCP03</abbr> admin shell, after <code>AUTH-SD</code>:</p>
+<div class="code-block"><pre><code>[APDU] &gt; AUTH-SD
+[A0...00] &gt; EXPORT-KEYBAG Workspace/hil/captures/session-example.keys.json case-1234
+</code></pre></div>
+<p>The handler refuses cleanly if the session is not authenticated.</p>
+<h3 id="scp11-local-access-sessions"><abbr title="Secure Channel Protocol 11 (GP, elliptic curve)">SCP11</abbr> Local Access sessions</h3>
+<p>Inside <code>SCP11.local_access</code>, after any verb that builds a BSP (for
+example <code>LOAD-PROFILE</code>, <code>ENABLE-PROFILE</code>, or <code>STORE-METADATA</code>):</p>
+<div class="code-block"><pre><code>[Local SMDPP] &gt; LOAD-PROFILE
+[Local SMDPP] &gt; EXPORT-KEYBAG Workspace/hil/captures/session-example.keys.json case-1234
+</code></pre></div>
+<p>Non-interactively:</p>
+<div class="code-block"><pre><code>python -m SCP11.local_access --dump-keybag \
+    Workspace/hil/captures/session-example.keys.json
+</code></pre></div>
+<h3 id="scp11-live-sessions"><abbr title="Secure Channel Protocol 11 (GP, elliptic curve)">SCP11</abbr> Live sessions</h3>
+<p><code>python -m SCP11.live --dump-keybag</code> is a <strong>stub</strong>. In live mode the
+SCP11c BSP keys are derived inside the <abbr title="Embedded UICC">eUICC</abbr> during <abbr title="Bound Profile Package (GSMA SGP.22)">BPP</abbr> processing and
+never leave the card. The flag prints a clear message and exits with
+code <code>2</code>. Use <code>SCP11.local_access</code> or <abbr title="Secure Channel Protocol 03 (GP)">SCP03</abbr> if a real keybag is needed
+for the capture.</p>
+<h2 id="keybag-json-schema">Keybag JSON schema</h2>
+<div class="code-block"><pre><code>{
+  &quot;format&quot;: &quot;yggdrasim-hil-keybag/v1&quot;,
+  &quot;entries&quot;: [
+    {
+      &quot;label&quot;: &quot;case-1234&quot;,
+      &quot;protocol&quot;: &quot;SCP03&quot;,
+      &quot;aid_hex&quot;: &quot;A000000151000000&quot;,
+      &quot;s_enc_hex&quot;: &quot;...32 hex chars...&quot;,
+      &quot;s_mac_hex&quot;: &quot;...32 hex chars...&quot;,
+      &quot;s_rmac_hex&quot;: &quot;...32 hex chars...&quot;,
+      &quot;ssc_hex&quot;: &quot;0000000000000000&quot;,
+      &quot;chaining_value_hex&quot;: &quot;&quot;,
+      &quot;block_nr&quot;: 0
+    }
+  ]
+}
+</code></pre></div>
+<p>Multiple entries are allowed in one file. <code>protocol</code> is <code>"SCP03"</code> or
+<code>"SCP11c"</code>. The replay engine matches entries against the <abbr title="Application Identifier">AID</abbr> in the
+capture; unmatched entries are skipped silently.</p>
+<h2 id="validation">Validation</h2>
+<ul>
+<li><abbr title="Text User Interface">TUI</abbr> banner shows <code>offline review (no bridge, no live FIFO)</code>.</li>
+<li><abbr title="Text User Interface">TUI</abbr> status line reports the resolved keybag path, or a no-keybag
+  note if nothing was supplied or discovered.</li>
+<li>Secure-messaging APDUs (CLA bit <code>0x04</code>) gain a <code>[plaintext]</code> context
+  row when the keybag entry matches.</li>
+<li><code>state/hil_bridge_supervisor.json</code> is <strong>not</strong> touched; the systemd
+  <abbr title="Hardware-In-The-Loop">HIL</abbr> service is left alone.</li>
+</ul>
+<h2 id="common-failures">Common failures</h2>
+<div class="-mx-6 sm:mx-0 doc-table-scroll"><table class="doc-table">
+<thead>
+<tr>
+<th>Symptom</th>
+<th>Likely cause</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>tshark is not available</code></td>
+<td>Install <code>tshark</code> (<code>wireshark-cli</code>) and retry.</td>
+</tr>
+<tr>
+<td><code>pcap file not found</code></td>
+<td>Path typo, or permissions on the capture.</td>
+</tr>
+<tr>
+<td>Ciphered APDUs stay wrapped</td>
+<td>No keybag, wrong <abbr title="Application Identifier">AID</abbr> in the keybag entry, or the capture actually contains only plaintext APDUs.</td>
+</tr>
+<tr>
+<td><code>SCP11.live --dump-keybag</code> prints "no-op"</td>
+<td>Expected — live mode BSP keys are not host-side. Use Local Access or <abbr title="Secure Channel Protocol 03 (GP)">SCP03</abbr>.</td>
+</tr>
+</tbody>
+</table></div>
+<h2 id="related-pages">Related pages</h2>
+<ul>
+<li><a href="../subsystems/hil-bridge.html"><abbr title="Hardware-In-The-Loop">HIL</abbr> Bridge</a></li>
+<li><a href="run-hil-capture.html">Run a <abbr title="Hardware-In-The-Loop">HIL</abbr> Capture</a></li>
+<li><a href="../subsystems/scp03.html#session-key-export"><abbr title="Secure Channel Protocol 03 (GP)">SCP03</abbr> Admin Shell</a></li>
+<li><a href="../subsystems/scp11-local-access.html#session-key-export"><abbr title="Secure Channel Protocol 11 (GP, elliptic curve)">SCP11</abbr> Local Access</a></li>
+<li><code>guides/HIL_BRIDGE_GUIDE.md</code></li>
+</ul>
+        </div>
+      </div><!-- /ygg-toc-body -->
+      <aside class="ygg-toc-rail" aria-label="On this page">
+        <p class="ygg-toc-rail-label">On this page</p>
+        <nav>
+            <a href="#prerequisites" class="toc-link">Prerequisites</a>
+            <a href="#steps" class="toc-link">Steps</a>
+            <a href="#session-key-export" class="toc-link">Session key export</a>
+            <a href="#scp03-sessions" class="toc-link toc-link-sub">SCP03 sessions</a>
+            <a href="#scp11-local-access-sessions" class="toc-link toc-link-sub">SCP11 Local Access sessions</a>
+            <a href="#scp11-live-sessions" class="toc-link toc-link-sub">SCP11 Live sessions</a>
+            <a href="#keybag-json-schema" class="toc-link">Keybag JSON schema</a>
+            <a href="#validation" class="toc-link">Validation</a>
+            <a href="#common-failures" class="toc-link">Common failures</a>
+            <a href="#related-pages" class="toc-link">Related pages</a>
+        </nav>
+      </aside>
+      </div><!-- /ygg-content-toc -->
+    </main>
+    <footer class="px-6 py-6 sm:px-10 lg:px-14 xl:px-16 border-t border-zinc-950/[0.06] dark:border-white/[0.05]">
+      <div class="ygg-content flex flex-col items-center gap-2 text-xs text-zinc-500">
+        <div class="flex items-center gap-1.5 text-sm">
+          <span class="font-sans font-semibold text-zinc-700 dark:text-zinc-300">YggdraSIM</span>
+          <span class="text-zinc-400 dark:text-zinc-500">by</span>
+          <a href="https://1ot.com" target="_blank" rel="noopener" class="font-semibold text-zinc-700 dark:text-zinc-300 hover:text-zinc-600 dark:hover:text-zinc-300 transition-colors">1oT</a>
+        </div>
+        <div class="flex flex-wrap items-center justify-center gap-2 text-zinc-400 dark:text-zinc-500">
+          <span>Copyright © 2026 1oT OÜ</span>
+          <span aria-hidden="true">·</span>
+          <span>Last updated <span data-ygg-updated>May 19, 2026</span></span>
+        </div>
+      </div>
+    </footer>
+  </div>
+</div>
+<script src="../ygg.js?v=2"></script>
+<!-- Mermaid: ygg.js loads ygg-mermaid.js when .doc-prose contains pre.mermaid -->
+</body>
+</html>

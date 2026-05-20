@@ -1,0 +1,204 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Secure Element Primer — YggdraSIM</title>
+  <link rel="icon" href="../assets/images/yggdrasil-mark.svg">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,100..900&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>html{font-size:100%}</style>
+  <script>(function(){var s=localStorage.getItem('ygg-theme');var p=window.matchMedia('(prefers-color-scheme: dark)').matches;if(s==='dark'||(!s&&p))document.documentElement.classList.add('dark');})();</script>
+  <link rel="stylesheet" href="../tailwind.css?v=2">
+  <link rel="stylesheet" href="../ygg.css?v=2">
+</head>
+<body class="antialiased font-sans bg-zinc-50 dark:bg-[var(--bg-page)] text-zinc-900 dark:text-zinc-100"
+      data-ygg-base="../" data-ygg-partial-path="../partials/sidebar.html" data-ygg-active-sub="concepts/secure-element-primer.html" data-ygg-open-sections="concepts">
+<a class="ygg-skip-link" href="#ygg-main">Skip to content</a>
+<div id="ygg-shell" class="flex min-h-dvh isolate ygg-layout-pending">
+  <div id="ygg-chrome-mount"></div>
+  <script src="../ygg-layout.js?v=2"></script>
+  <div id="ygg-main-column" class="flex-1 lg:ml-64 flex flex-col min-h-dvh">
+    <header class="lg:hidden sticky top-0 z-20 flex items-center gap-3 px-4 py-3 bg-white/95 dark:bg-[var(--bg-page)]/95 backdrop-blur-sm border-b border-zinc-950/[0.07] dark:border-white/[0.05] shrink-0">
+      <button type="button" onclick="openSidebar()" class="ygg-icon-btn flex items-center justify-center size-11 rounded-md text-zinc-500 transition-colors" aria-label="Open menu">
+        <svg class="size-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" focusable="false"><path d="M3 6h18M3 12h18M3 18h18"/></svg>
+      </button>
+      <span class="font-sans font-semibold text-sm tracking-tight">YggdraSIM</span>
+    </header>
+    <main id="ygg-main" tabindex="-1" class="flex-1 px-6 py-10 sm:px-10 lg:px-14 xl:px-16">
+      <div class="ygg-content-toc">
+      <div class="ygg-toc-body">
+        <nav class="flex flex-wrap items-center gap-1.5 text-xs text-zinc-400 mb-6" aria-label="Breadcrumb">
+          <ol class="ygg-crumbs"><li><a href="../index.html" class="doc-link no-underline">Home</a></li><li aria-hidden="true"><svg class="size-3 opacity-40" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6 4l4 4-4 4"/></svg></li><li><a href="index.html" class="hover:text-zinc-600 dark:hover:text-zinc-300 transition-colors no-underline">Concepts</a></li><li aria-hidden="true"><svg class="size-3 opacity-40" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6 4l4 4-4 4"/></svg></li><li><span class="text-zinc-600 dark:text-zinc-300" aria-current="page">Secure Element Primer</span></li></ol>
+        </nav>
+        <h1 class="doc-h1 font-sans font-bold text-zinc-950 dark:text-white mb-2">Secure Element Primer</h1>
+        <p class="page-lead mb-8">A secure element is a tamper-resistant, cryptographically-capable
+microcontroller. In the telecom domain, the most common form is the <abbr title="Universal Integrated Circuit Card">UICC</abbr> in a
+<abbr title="Subscriber Identity Module">SIM</abbr> socket, the <abbr title="Embedded UICC">eUICC</abbr> soldered to a board, or the embedded secure element
+adjacent to a modem or baseband. Every card-facing module in YggdraSIM
+communicates with one of these via standardized transport and command layers.</p>
+        <details class="toc-mobile xl:hidden mb-8">
+          <summary>On this page <svg class="toc-mobile-chevron size-4" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 6l4 4 4-4"/></svg></summary>
+          <nav>
+            <a href="#what-an-se-does" class="toc-link">What an SE does</a>
+            <a href="#anatomy-of-a-card-session" class="toc-link">Anatomy of a card session</a>
+            <a href="#apdu-command-shape" class="toc-link">APDU command shape</a>
+            <a href="#transport-protocols" class="toc-link">Transport protocols</a>
+            <a href="#card-lifecycle-and-ownership" class="toc-link">Card lifecycle and ownership</a>
+            <a href="#where-to-look-in-yggdrasim" class="toc-link">Where to look in YggdraSIM</a>
+          </nav>
+        </details>
+        <div class="doc-prose text-[0.9375rem] leading-relaxed text-zinc-600 dark:text-zinc-400 space-y-4">
+<h2 id="what-an-se-does">What an <abbr title="Secure Element">SE</abbr> does</h2>
+<ul>
+<li>holds persistent keys without exposing them to the host</li>
+<li>runs applet code inside its own isolated runtime</li>
+<li>performs cryptographic operations on behalf of an outside requester</li>
+<li>enforces access policy through <code>PIN</code>, <code>PUK</code>, key ladders, and lifecycle state</li>
+<li>stores identity material under a directory and file model</li>
+</ul>
+<h2 id="anatomy-of-a-card-session">Anatomy of a card session</h2>
+<pre class="mermaid"><code>flowchart LR
+    Host["Host / reader driver"] -->|reset + ATR| Card["UICC / eUICC"]
+    Host -->|SELECT AID| Applet["Applet / NAA / ISD-R"]
+    Applet -->|APDU request / response| Host
+    Applet -->|EF read / update| FS["File system"]
+    Applet -->|key ladders| Crypto["Crypto engine"]</code></pre>
+<p class="fig-caption">Figure: Anatomy of a card session — reset, SELECT, APDU, filesystem, and crypto</p>
+<ol>
+<li>A physical or logical reset returns an <strong><abbr title="Answer To Reset">ATR</abbr></strong> that advertises protocol
+   parameters such as <code>T=0</code> or <code>T=1</code>, baud-rate convention, and historical
+   bytes.</li>
+<li>The host issues a <code>SELECT</code> against an <strong><abbr title="Application Identifier">AID</abbr></strong> to activate either an applet,
+   a directory, or the <code>ISD-R</code> root.</li>
+<li>Subsequent <strong><abbr title="Application Protocol Data Unit (ISO 7816-4)">APDU</abbr></strong> command and response pairs carry either filesystem
+   operations, toolkit operations, or secure-channel operations.</li>
+<li>Persistent state is kept in the <abbr title="Secure Element">SE</abbr>'s own file system, under access rules
+   that the <abbr title="Secure Element">SE</abbr> enforces before it answers.</li>
+</ol>
+<h2 id="apdu-command-shape"><abbr title="Application Protocol Data Unit (ISO 7816-4)">APDU</abbr> command shape</h2>
+<p>An <abbr title="Application Protocol Data Unit (ISO 7816-4)">APDU</abbr> command is always five bytes of header plus optional data. A response
+is zero or more bytes plus two status bytes. YggdraSIM uses the standard
+terminology from ISO/IEC 7816-4 when shells print an <abbr title="Application Protocol Data Unit (ISO 7816-4)">APDU</abbr> trace.</p>
+<div class="-mx-6 sm:mx-0 doc-table-scroll"><table class="doc-table">
+<thead>
+<tr>
+<th>Field</th>
+<th>Width</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>CLA</td>
+<td>1 byte</td>
+<td>command class</td>
+</tr>
+<tr>
+<td>INS</td>
+<td>1 byte</td>
+<td>instruction</td>
+</tr>
+<tr>
+<td>P1</td>
+<td>1 byte</td>
+<td>first parameter</td>
+</tr>
+<tr>
+<td>P2</td>
+<td>1 byte</td>
+<td>second parameter</td>
+</tr>
+<tr>
+<td>Lc</td>
+<td>0, 1, or 3 bytes</td>
+<td>length of command data</td>
+</tr>
+<tr>
+<td>Data</td>
+<td>Lc bytes</td>
+<td>command payload</td>
+</tr>
+<tr>
+<td>Le</td>
+<td>0, 1, or 3 bytes</td>
+<td>expected response length</td>
+</tr>
+<tr>
+<td>SW1 SW2</td>
+<td>2 bytes</td>
+<td>final status word</td>
+</tr>
+</tbody>
+</table></div>
+<p>The response body, when present, is returned before <code>SW1 SW2</code>. <code>9000</code> is
+success. <code>61xx</code> indicates that <code>xx</code> bytes are available for <code>GET RESPONSE</code>.
+<code>6Cxx</code> advertises the required <code>Le</code>. <code>62xx</code>, <code>63xx</code>, <code>6Axx</code>, and <code>6Dxx</code> each
+carry domain-specific meaning.</p>
+<h2 id="transport-protocols">Transport protocols</h2>
+<p>YggdraSIM and the host <abbr title="Personal Computer/Smart Card (Workgroup)">PC/SC</abbr> layer hide most of the transport detail, but the
+layer still matters when comparing traces across shells and captures.</p>
+<ul>
+<li><code>T=0</code> is byte-oriented, asynchronous, and most common on legacy <abbr title="Subscriber Identity Module">SIM</abbr> work.</li>
+<li><code>T=1</code> is block-oriented and more forgiving for large exchanges.</li>
+<li>Extended-length <abbr title="Application Protocol Data Unit (ISO 7816-4)">APDU</abbr> support depends on the card's <abbr title="Answer To Reset">ATR</abbr> advertisement.</li>
+<li>Case 1-4 refers to whether an <abbr title="Application Protocol Data Unit (ISO 7816-4)">APDU</abbr> has command data, expected response data,
+  both, or neither.</li>
+</ul>
+<h2 id="card-lifecycle-and-ownership">Card lifecycle and ownership</h2>
+<p>Each card keeps an <strong>Operating System</strong> that enforces state. Typical states:</p>
+<ul>
+<li><code>OP_READY</code> or <code>INITIALIZED</code> for freshly provisioned material</li>
+<li><code>SECURED</code> for operational cards under a live key set</li>
+<li><code>CARD_LOCKED</code> when a policy lockout applies</li>
+<li><code>TERMINATED</code> when the card has been permanently decommissioned</li>
+</ul>
+<p>GlobalPlatform maintains explicit lifecycle states for each Security Domain
+and each application. See <a href="globalplatform.html">GlobalPlatform</a>.</p>
+<h2 id="where-to-look-in-yggdrasim">Where to look in YggdraSIM</h2>
+<ul>
+<li><a href="../subsystems/scp03.html"><abbr title="Secure Channel Protocol 03 (GP)">SCP03</abbr> Admin Shell</a> when the task is direct card
+  administration, <code>SELECT</code>, <code>READ</code>, <code>UPDATE</code>, or retrieval</li>
+<li><a href="../subsystems/scp11-local-access.html"><abbr title="Secure Channel Protocol 11 (GP, elliptic curve)">SCP11</abbr> Local Access</a> when the task
+  is an <code>ISD-R</code> local session</li>
+<li><a href="../subsystems/hil-bridge.html"><abbr title="Hardware-In-The-Loop">HIL</abbr> Bridge</a> when a live card and a live
+  modem must share the same <abbr title="Secure Element">SE</abbr></li>
+<li><a href="../subsystems/simcard-simulator.html">SIMCARD Simulator</a> when the card
+  side is simulated and the transport still looks like an <abbr title="Application Protocol Data Unit (ISO 7816-4)">APDU</abbr> exchange</li>
+</ul>
+        </div>
+      </div><!-- /ygg-toc-body -->
+      <aside class="ygg-toc-rail" aria-label="On this page">
+        <p class="ygg-toc-rail-label">On this page</p>
+        <nav>
+            <a href="#what-an-se-does" class="toc-link">What an SE does</a>
+            <a href="#anatomy-of-a-card-session" class="toc-link">Anatomy of a card session</a>
+            <a href="#apdu-command-shape" class="toc-link">APDU command shape</a>
+            <a href="#transport-protocols" class="toc-link">Transport protocols</a>
+            <a href="#card-lifecycle-and-ownership" class="toc-link">Card lifecycle and ownership</a>
+            <a href="#where-to-look-in-yggdrasim" class="toc-link">Where to look in YggdraSIM</a>
+        </nav>
+      </aside>
+      </div><!-- /ygg-content-toc -->
+    </main>
+    <footer class="px-6 py-6 sm:px-10 lg:px-14 xl:px-16 border-t border-zinc-950/[0.06] dark:border-white/[0.05]">
+      <div class="ygg-content flex flex-col items-center gap-2 text-xs text-zinc-500">
+        <div class="flex items-center gap-1.5 text-sm">
+          <span class="font-sans font-semibold text-zinc-700 dark:text-zinc-300">YggdraSIM</span>
+          <span class="text-zinc-400 dark:text-zinc-500">by</span>
+          <a href="https://1ot.com" target="_blank" rel="noopener" class="font-semibold text-zinc-700 dark:text-zinc-300 hover:text-zinc-600 dark:hover:text-zinc-300 transition-colors">1oT</a>
+        </div>
+        <div class="flex flex-wrap items-center justify-center gap-2 text-zinc-400 dark:text-zinc-500">
+          <span>Copyright © 2026 1oT OÜ</span>
+          <span aria-hidden="true">·</span>
+          <span>Last updated <span data-ygg-updated>May 19, 2026</span></span>
+        </div>
+      </div>
+    </footer>
+  </div>
+</div>
+<script src="../ygg.js?v=2"></script>
+<!-- Mermaid: ygg.js loads ygg-mermaid.js when .doc-prose contains pre.mermaid -->
+</body>
+</html>

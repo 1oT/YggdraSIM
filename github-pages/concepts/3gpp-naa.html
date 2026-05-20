@@ -1,0 +1,235 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>3GPP NAA — YggdraSIM</title>
+  <link rel="icon" href="../assets/images/yggdrasil-mark.svg">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,100..900&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>html{font-size:100%}</style>
+  <script>(function(){var s=localStorage.getItem('ygg-theme');var p=window.matchMedia('(prefers-color-scheme: dark)').matches;if(s==='dark'||(!s&&p))document.documentElement.classList.add('dark');})();</script>
+  <link rel="stylesheet" href="../tailwind.css?v=2">
+  <link rel="stylesheet" href="../ygg.css?v=2">
+</head>
+<body class="antialiased font-sans bg-zinc-50 dark:bg-[var(--bg-page)] text-zinc-900 dark:text-zinc-100"
+      data-ygg-base="../" data-ygg-partial-path="../partials/sidebar.html" data-ygg-active-sub="concepts/3gpp-naa.html" data-ygg-open-sections="concepts">
+<a class="ygg-skip-link" href="#ygg-main">Skip to content</a>
+<div id="ygg-shell" class="flex min-h-dvh isolate ygg-layout-pending">
+  <div id="ygg-chrome-mount"></div>
+  <script src="../ygg-layout.js?v=2"></script>
+  <div id="ygg-main-column" class="flex-1 lg:ml-64 flex flex-col min-h-dvh">
+    <header class="lg:hidden sticky top-0 z-20 flex items-center gap-3 px-4 py-3 bg-white/95 dark:bg-[var(--bg-page)]/95 backdrop-blur-sm border-b border-zinc-950/[0.07] dark:border-white/[0.05] shrink-0">
+      <button type="button" onclick="openSidebar()" class="ygg-icon-btn flex items-center justify-center size-11 rounded-md text-zinc-500 transition-colors" aria-label="Open menu">
+        <svg class="size-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" focusable="false"><path d="M3 6h18M3 12h18M3 18h18"/></svg>
+      </button>
+      <span class="font-sans font-semibold text-sm tracking-tight">YggdraSIM</span>
+    </header>
+    <main id="ygg-main" tabindex="-1" class="flex-1 px-6 py-10 sm:px-10 lg:px-14 xl:px-16">
+      <div class="ygg-content-toc">
+      <div class="ygg-toc-body">
+        <nav class="flex flex-wrap items-center gap-1.5 text-xs text-zinc-400 mb-6" aria-label="Breadcrumb">
+          <ol class="ygg-crumbs"><li><a href="../index.html" class="doc-link no-underline">Home</a></li><li aria-hidden="true"><svg class="size-3 opacity-40" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6 4l4 4-4 4"/></svg></li><li><a href="index.html" class="hover:text-zinc-600 dark:hover:text-zinc-300 transition-colors no-underline">Concepts</a></li><li aria-hidden="true"><svg class="size-3 opacity-40" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6 4l4 4-4 4"/></svg></li><li><span class="text-zinc-600 dark:text-zinc-300" aria-current="page">3GPP NAA</span></li></ol>
+        </nav>
+        <h1 class="doc-h1 font-sans font-bold text-zinc-950 dark:text-white mb-2">3GPP NAA</h1>
+        <p class="page-lead mb-8">Network Access Applications are the applets inside a <abbr title="Universal Integrated Circuit Card">UICC</abbr> that actually
+authenticate a subscriber to a mobile network. In the 3GPP world the two
+dominant NAAs are the <abbr title="Universal Subscriber Identity Module">USIM</abbr> and the <abbr title="IP Multimedia Services Identity Module">ISIM</abbr>. The 3GPP TS 31.102 specification
+describes the <abbr title="Universal Subscriber Identity Module">USIM</abbr> shape, the file contents, and the authentication commands
+that every modern <abbr title="Subscriber Identity Module">SIM</abbr> and eSIM profile must implement. The vendored copy lives
+in <code>docs/ts_131102v180400p.md</code>.</p>
+        <details class="toc-mobile xl:hidden mb-8">
+          <summary>On this page <svg class="toc-mobile-chevron size-4" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 6l4 4 4-4"/></svg></summary>
+          <nav>
+            <a href="#which-naa-does-what" class="toc-link">Which NAA does what</a>
+            <a href="#authentication-at-a-glance" class="toc-link">Authentication at a glance</a>
+            <a href="#important-usim-efs" class="toc-link">Important USIM EFs</a>
+            <a href="#isim-shape" class="toc-link">ISIM shape</a>
+            <a href="#suci-and-the-subscription-identifier" class="toc-link">SUCI and the subscription identifier</a>
+            <a href="#5g-authentication-and-akma" class="toc-link">5G authentication and AKMA</a>
+            <a href="#where-to-look-in-yggdrasim" class="toc-link">Where to look in YggdraSIM</a>
+          </nav>
+        </details>
+        <div class="doc-prose text-[0.9375rem] leading-relaxed text-zinc-600 dark:text-zinc-400 space-y-4">
+<h2 id="which-naa-does-what">Which <abbr title="Network Access Application (USIM / ISIM / CSIM)">NAA</abbr> does what</h2>
+<div class="-mx-6 sm:mx-0 doc-table-scroll"><table class="doc-table">
+<thead>
+<tr>
+<th><abbr title="Network Access Application (USIM / ISIM / CSIM)">NAA</abbr></th>
+<th>Standard</th>
+<th>Role</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><abbr title="Universal Subscriber Identity Module">USIM</abbr></td>
+<td>3GPP TS 31.102</td>
+<td>2G/3G/4G/5G access authentication</td>
+</tr>
+<tr>
+<td><abbr title="IP Multimedia Services Identity Module">ISIM</abbr></td>
+<td>3GPP TS 31.103</td>
+<td>IMS / VoLTE authentication</td>
+</tr>
+<tr>
+<td>CSIM</td>
+<td>3GPP2 C.S0065</td>
+<td>CDMA access authentication</td>
+</tr>
+</tbody>
+</table></div>
+<p>All three live as <strong>ADFs</strong> under the <abbr title="Master File">MF</abbr>. The profile loader in <abbr title="Remote SIM Provisioning">RSP</abbr> workflows
+always lands at least a <abbr title="Universal Subscriber Identity Module">USIM</abbr> ADF, and often an <abbr title="IP Multimedia Services Identity Module">ISIM</abbr> ADF as well, depending on
+the <abbr title="SIMalliance Interoperable Profile">SAIP</abbr> template.</p>
+<h2 id="authentication-at-a-glance">Authentication at a glance</h2>
+<pre class="mermaid"><code>sequenceDiagram
+    participant NW as Serving network (HLR / HSS)
+    participant TE as Terminal / modem
+    participant USIM as USIM ADF
+    NW->>TE: AUTN + RAND
+    TE->>USIM: AUTHENTICATE (RAND, AUTN)
+    USIM->>USIM: Milenage / TUAK inside card
+    USIM-->>TE: RES, CK, IK (and AUTS on SQN failure)
+    TE-->>NW: RES (or AUTS for resync)</code></pre>
+<p class="fig-caption">Figure: 3GPP AKA authentication — RAND/AUTN challenge to RES, with SQN resync</p>
+<p>The card keeps the long-term key <code>K</code> in tamper-resistant storage and only
+releases derived material. Two algorithm families are standard:</p>
+<ul>
+<li><strong>Milenage</strong>, originally specified in 3GPP TS 35.206</li>
+<li><strong><abbr title="3GPP TUAK authentication algorithm set">TUAK</abbr></strong>, specified in 3GPP TS 35.231, offering a Keccak-based alternative</li>
+</ul>
+<p>YggdraSIM exposes authentication execution from the admin shell for diagnostic
+work. It does not leak <code>K</code> out of the card; it only observes the derived
+output the card returns.</p>
+<h2 id="important-usim-efs">Important <abbr title="Universal Subscriber Identity Module">USIM</abbr> EFs</h2>
+<div class="-mx-6 sm:mx-0 doc-table-scroll"><table class="doc-table">
+<thead>
+<tr>
+<th><abbr title="Elementary File">EF</abbr></th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>EF IMSI</code></td>
+<td>current IMSI</td>
+</tr>
+<tr>
+<td><code>EF Keys</code></td>
+<td>CK/IK cache</td>
+</tr>
+<tr>
+<td><code>EF LOCI</code></td>
+<td>last location info</td>
+</tr>
+<tr>
+<td><code>EF PSLOCI</code></td>
+<td>packet-switched LOCI</td>
+</tr>
+<tr>
+<td><code>EF AD</code></td>
+<td>administrative data</td>
+</tr>
+<tr>
+<td><code>EF SPN</code></td>
+<td>service provider name</td>
+</tr>
+<tr>
+<td><code>EF OPL</code> / <code>EF PNN</code></td>
+<td>PLMN name overrides</td>
+</tr>
+<tr>
+<td><code>EF ACC</code></td>
+<td>access class bits</td>
+</tr>
+<tr>
+<td><code>EF FPLMN</code></td>
+<td>forbidden PLMN list</td>
+</tr>
+<tr>
+<td><code>EF UST</code></td>
+<td><abbr title="Universal Subscriber Identity Module">USIM</abbr> service table</td>
+</tr>
+</tbody>
+</table></div>
+<p>The <code>EF UST</code> service table tells the terminal which optional <abbr title="Universal Subscriber Identity Module">USIM</abbr> features
+are active on this profile. It is a common thing to inspect and lint when a
+profile is built from a <abbr title="SIMalliance Interoperable Profile">SAIP</abbr> template.</p>
+<h2 id="isim-shape"><abbr title="IP Multimedia Services Identity Module">ISIM</abbr> shape</h2>
+<p>An <abbr title="IP Multimedia Services Identity Module">ISIM</abbr> ADF is smaller than a <abbr title="Universal Subscriber Identity Module">USIM</abbr> ADF. Key EFs include:</p>
+<ul>
+<li><code>EF IMPI</code> for the IMS private identity</li>
+<li><code>EF IMPU</code> for IMS public identities</li>
+<li><code>EF DOMAIN</code> for the home network domain</li>
+<li><code>EF IST</code> for the <abbr title="IP Multimedia Services Identity Module">ISIM</abbr> service table</li>
+</ul>
+<h2 id="suci-and-the-subscription-identifier"><abbr title="Subscription Concealed Identifier (3GPP)">SUCI</abbr> and the subscription identifier</h2>
+<p>5G introduced the <strong><abbr title="Subscription Concealed Identifier (3GPP)">SUCI</abbr></strong> to avoid sending <abbr title="Subscription Permanent Identifier (3GPP)">SUPI</abbr> in the clear. The <abbr title="Universal Subscriber Identity Module">USIM</abbr>
+computes the <abbr title="Subscription Concealed Identifier (3GPP)">SUCI</abbr> locally using an ECIES scheme. YggdraSIM includes
+<code>Tools/SuciTool</code> to help generate and export the <abbr title="Subscription Concealed Identifier (3GPP)">SUCI</abbr> key material that a
+profile expects, and the in-process simulator (<code>SIMCARD/</code>) implements the
+full 3GPP TS 33.501 §C.3 <abbr title="Subscription Concealed Identifier (3GPP)">SUCI</abbr> calculation (Profile A and Profile B) plus
+the 3GPP TS 31.102 §7.1.2.4 <code>GET IDENTITY</code> command that surfaces the <abbr title="Subscription Concealed Identifier (3GPP)">SUCI</abbr>
+to the modem.</p>
+<h2 id="5g-authentication-and-akma">5G authentication and AKMA</h2>
+<p>The 5G stack adds a few authentication surfaces on top of the classic
+<abbr title="Universal Subscriber Identity Module">USIM</abbr> <code>AUTHENTICATE</code>:</p>
+<ul>
+<li><strong>5G AKA</strong> (3GPP TS 33.501) — <code>AUTHENTICATE</code> on the 5G UE-context
+  produces <code>RES*</code> (a Kausf-bound transformation of <code>RES</code>) instead of
+  <code>RES</code> directly.</li>
+<li><strong>EAP-AKA'</strong> (3GPP TS 33.402) — non-3GPP access authentication binding
+  the same long-term key into an EAP exchange.</li>
+<li><strong>AKMA</strong> (3GPP TS 33.535) — application-layer keys derived from
+  <code>Kausf</code>, surfaced as <code>K_AKMA</code> and the <code>A-KID</code> identifier.</li>
+</ul>
+<p>The simulated <abbr title="Universal Integrated Circuit Card">UICC</abbr> implements all three. The matching network-side
+AUSF / AAnF surfaces are the operator's responsibility — this release
+ships the <abbr title="Subscriber Identity Module">SIM</abbr>-side primitives only.</p>
+<h2 id="where-to-look-in-yggdrasim">Where to look in YggdraSIM</h2>
+<ul>
+<li><a href="../subsystems/scp03.html"><abbr title="Secure Channel Protocol 03 (GP)">SCP03</abbr> Admin Shell</a> for live <abbr title="Universal Subscriber Identity Module">USIM</abbr>/<abbr title="IP Multimedia Services Identity Module">ISIM</abbr> file
+  access and <code>AUTHENTICATE</code> diagnostics</li>
+<li><a href="../subsystems/suci-tool.html"><abbr title="Subscription Concealed Identifier (3GPP)">SUCI</abbr> Tool</a> for <abbr title="Subscription Concealed Identifier (3GPP)">SUCI</abbr> key handling</li>
+<li><a href="../subsystems/simcard-simulator.html">SIMCARD Simulator</a> for the
+  in-process 5G AKA / EAP-AKA' / AKMA / <abbr title="Subscription Concealed Identifier (3GPP)">SUCI</abbr> / <code>GET IDENTITY</code> surface</li>
+<li><a href="saip-profiles.html"><abbr title="SIMalliance Interoperable Profile">SAIP</abbr> Profiles</a> for how the <abbr title="SIMalliance Interoperable Profile">SAIP</abbr> template encodes
+  the <abbr title="Network Access Application (USIM / ISIM / CSIM)">NAA</abbr> that finally lands on a card</li>
+</ul>
+        </div>
+      </div><!-- /ygg-toc-body -->
+      <aside class="ygg-toc-rail" aria-label="On this page">
+        <p class="ygg-toc-rail-label">On this page</p>
+        <nav>
+            <a href="#which-naa-does-what" class="toc-link">Which NAA does what</a>
+            <a href="#authentication-at-a-glance" class="toc-link">Authentication at a glance</a>
+            <a href="#important-usim-efs" class="toc-link">Important USIM EFs</a>
+            <a href="#isim-shape" class="toc-link">ISIM shape</a>
+            <a href="#suci-and-the-subscription-identifier" class="toc-link">SUCI and the subscription identifier</a>
+            <a href="#5g-authentication-and-akma" class="toc-link">5G authentication and AKMA</a>
+            <a href="#where-to-look-in-yggdrasim" class="toc-link">Where to look in YggdraSIM</a>
+        </nav>
+      </aside>
+      </div><!-- /ygg-content-toc -->
+    </main>
+    <footer class="px-6 py-6 sm:px-10 lg:px-14 xl:px-16 border-t border-zinc-950/[0.06] dark:border-white/[0.05]">
+      <div class="ygg-content flex flex-col items-center gap-2 text-xs text-zinc-500">
+        <div class="flex items-center gap-1.5 text-sm">
+          <span class="font-sans font-semibold text-zinc-700 dark:text-zinc-300">YggdraSIM</span>
+          <span class="text-zinc-400 dark:text-zinc-500">by</span>
+          <a href="https://1ot.com" target="_blank" rel="noopener" class="font-semibold text-zinc-700 dark:text-zinc-300 hover:text-zinc-600 dark:hover:text-zinc-300 transition-colors">1oT</a>
+        </div>
+        <div class="flex flex-wrap items-center justify-center gap-2 text-zinc-400 dark:text-zinc-500">
+          <span>Copyright © 2026 1oT OÜ</span>
+          <span aria-hidden="true">·</span>
+          <span>Last updated <span data-ygg-updated>May 19, 2026</span></span>
+        </div>
+      </div>
+    </footer>
+  </div>
+</div>
+<script src="../ygg.js?v=2"></script>
+<!-- Mermaid: ygg.js loads ygg-mermaid.js when .doc-prose contains pre.mermaid -->
+</body>
+</html>

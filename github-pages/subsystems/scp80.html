@@ -1,0 +1,276 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>SCP80 OTA Shell — YggdraSIM</title>
+  <link rel="icon" href="../assets/images/yggdrasil-mark.svg">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,100..900&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>html{font-size:100%}</style>
+  <script>(function(){var s=localStorage.getItem('ygg-theme');var p=window.matchMedia('(prefers-color-scheme: dark)').matches;if(s==='dark'||(!s&&p))document.documentElement.classList.add('dark');})();</script>
+  <link rel="stylesheet" href="../tailwind.css?v=2">
+  <link rel="stylesheet" href="../ygg.css?v=2">
+</head>
+<body class="antialiased font-sans bg-zinc-50 dark:bg-[var(--bg-page)] text-zinc-900 dark:text-zinc-100"
+      data-ygg-base="../" data-ygg-partial-path="../partials/sidebar.html" data-ygg-active-sub="subsystems/scp80.html" data-ygg-open-sections="subsystems">
+<a class="ygg-skip-link" href="#ygg-main">Skip to content</a>
+<div id="ygg-shell" class="flex min-h-dvh isolate ygg-layout-pending">
+  <div id="ygg-chrome-mount"></div>
+  <script src="../ygg-layout.js?v=2"></script>
+  <div id="ygg-main-column" class="flex-1 lg:ml-64 flex flex-col min-h-dvh">
+    <header class="lg:hidden sticky top-0 z-20 flex items-center gap-3 px-4 py-3 bg-white/95 dark:bg-[var(--bg-page)]/95 backdrop-blur-sm border-b border-zinc-950/[0.07] dark:border-white/[0.05] shrink-0">
+      <button type="button" onclick="openSidebar()" class="ygg-icon-btn flex items-center justify-center size-11 rounded-md text-zinc-500 transition-colors" aria-label="Open menu">
+        <svg aria-hidden="true" focusable="false" class="size-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M3 12h18M3 18h18"/></svg>
+      </button>
+      <span class="font-sans font-semibold text-sm tracking-tight">YggdraSIM</span>
+    </header>
+    <main id="ygg-main" tabindex="-1" class="flex-1 px-6 py-10 sm:px-10 lg:px-14 xl:px-16">
+      <div class="ygg-content-toc">
+      <div class="ygg-toc-body">
+        <nav class="flex flex-wrap items-center gap-1.5 text-xs text-zinc-400 mb-6" aria-label="Breadcrumb">
+          <ol class="ygg-crumbs">
+            <li><a href="../index.html" class="doc-link no-underline">Home</a></li>
+            <li aria-hidden="true"><svg class="size-3 opacity-40" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6 4l4 4-4 4"/></svg></li>
+            <li><a href="index.html" class="hover:text-zinc-600 dark:hover:text-zinc-300 transition-colors no-underline">Subsystems</a></li>
+            <li aria-hidden="true"><svg class="size-3 opacity-40" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6 4l4 4-4 4"/></svg></li>
+            <li><span aria-current="page" class="text-zinc-600 dark:text-zinc-300">SCP80 OTA Shell</span></li>
+          </ol>
+        </nav>
+        <h1 class="doc-h1 font-sans font-bold text-zinc-950 dark:text-white mb-2">SCP80 OTA Shell</h1>
+        <p class="page-lead mb-8"><code>SCP80/</code> is the <abbr title="Over-The-Air">OTA</abbr> construction and send/decode shell. Use it when the task
+is building a secured packet, wrapping a payload with <code>KIc</code>/<code>KID</code>, sending it
+to a reader target, decoding a received response packet, or running a scripted
+<abbr title="Over-The-Air">OTA</abbr> sequence against a per-<abbr title="Integrated Circuit Card Identifier">ICCID</abbr> state.</p>
+        <details class="toc-mobile xl:hidden mb-8">
+          <summary>On this page <svg class="toc-mobile-chevron size-4" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 6l4 4 4-4"/></svg></summary>
+          <nav>
+            <a href="#when-to-use-it" class="toc-link">When to use it</a>
+            <a href="#entry-points" class="toc-link">Entry points</a>
+            <a href="#command-surface" class="toc-link">Command surface</a>
+            <a href="#runtime-dependencies" class="toc-link">Runtime dependencies</a>
+            <a href="#state-the-shell-writes" class="toc-link">State the shell writes</a>
+            <a href="#common-recipes" class="toc-link">Common recipes</a>
+            <a href="#send-a-plain-update-binary-via-ota" class="toc-link toc-link-sub">Send a plain UPDATE BINARY via OTA</a>
+            <a href="#one-shot-ota-wrap-and-send" class="toc-link toc-link-sub">One-shot OTA wrap and send</a>
+            <a href="#reuse-iccid-bound-state-across-sessions" class="toc-link toc-link-sub">Reuse ICCID-bound state across sessions</a>
+            <a href="#script-mode-send" class="toc-link toc-link-sub">Script-mode send</a>
+            <a href="#pitfalls" class="toc-link">Pitfalls</a>
+            <a href="#in-shell-documentation" class="toc-link">In-shell documentation</a>
+            <a href="#related-pages" class="toc-link">Related pages</a>
+          </nav>
+        </details>
+        <div class="doc-prose text-[0.9375rem] leading-relaxed text-zinc-600 dark:text-zinc-400 space-y-4">
+<div class="admonition info">
+<p class="admonition-title">Underlying concept</p>
+<p>This shell builds on <a href="../concepts/ota-scp80.html"><abbr title="Secure Channel Protocol 80 (ETSI TS 102 225 / 226)">SCP80</abbr> <abbr title="Over-The-Air">OTA</abbr></a>. Read that first
+if <abbr title="Security Parameter Indicator (OTA)">SPI</abbr>, TAR, and PoR are not already familiar terms.</p>
+</div>
+<h2 id="when-to-use-it">When to use it</h2>
+<ul>
+<li>wrapping direct hex payloads into <abbr title="Secure Channel Protocol 80 (ETSI TS 102 225 / 226)">SCP80</abbr></li>
+<li>tuning secured-packet parameters</li>
+<li>sending an <abbr title="Over-The-Air">OTA</abbr> payload to a reader-connected card</li>
+<li>decoding a received response packet</li>
+<li>running a scripted <abbr title="Over-The-Air">OTA</abbr> sequence</li>
+<li>reusing per-<abbr title="Integrated Circuit Card Identifier">ICCID</abbr> configuration across sessions</li>
+<li>stepping into <code>SCP03</code> to observe what the <abbr title="Over-The-Air">OTA</abbr> session changed on the
+  filesystem or registry</li>
+</ul>
+<h2 id="entry-points">Entry points</h2>
+<div class="tabbed-set tabbed-alternate" data-tabs="1:3"><input checked="checked" id="__tabbed_1_1" name="__tabbed_1" type="radio" /><input id="__tabbed_1_2" name="__tabbed_1" type="radio" /><input id="__tabbed_1_3" name="__tabbed_1" type="radio" /><div class="tabbed-labels"><label for="__tabbed_1_1">Module</label><label for="__tabbed_1_2">Console script</label><label for="__tabbed_1_3">From the launcher</label></div>
+<div class="tabbed-content">
+<div class="tabbed-block">
+<div class="code-block"><pre><code>python -m SCP80
+python -m SCP80 --cmd &quot;show; iccid 8946xxx; build A0D6...; send; EXIT&quot;
+</code></pre></div>
+</div>
+<div class="tabbed-block">
+<div class="code-block"><pre><code>yggdrasim-scp80
+</code></pre></div>
+</div>
+<div class="tabbed-block">
+<p><code>python main/main.py</code> and pick the <abbr title="Secure Channel Protocol 80 (ETSI TS 102 225 / 226)">SCP80</abbr> entry.</p>
+</div>
+</div>
+</div>
+<h2 id="command-surface">Command surface</h2>
+<div class="-mx-6 sm:mx-0 doc-table-scroll"><table class="doc-table">
+<thead>
+<tr>
+<th>Verb</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>show</code></td>
+<td>print current parameters</td>
+</tr>
+<tr>
+<td><code>set &lt;param&gt; &lt;value&gt;</code></td>
+<td>update an <abbr title="Over-The-Air">OTA</abbr> parameter</td>
+</tr>
+<tr>
+<td><code>iccid &lt;hex&gt;</code></td>
+<td>bind the session to a specific <abbr title="Integrated Circuit Card Identifier">ICCID</abbr> state</td>
+</tr>
+<tr>
+<td><code>build &lt;hex&gt;</code></td>
+<td>assemble a secured packet from direct payload hex</td>
+</tr>
+<tr>
+<td><code>send</code></td>
+<td>transmit the last built packet</td>
+</tr>
+<tr>
+<td><code>sendraw &lt;hex&gt;</code></td>
+<td>transmit a raw <abbr title="Application Protocol Data Unit (ISO 7816-4)">APDU</abbr> without <abbr title="Over-The-Air">OTA</abbr> wrapping</td>
+</tr>
+<tr>
+<td><code>ota &lt;hex&gt;</code></td>
+<td>build and send in one step</td>
+</tr>
+<tr>
+<td><code>script &lt;path&gt;</code></td>
+<td>execute a command script</td>
+</tr>
+<tr>
+<td><code>history</code></td>
+<td>show session history</td>
+</tr>
+<tr>
+<td><code>reset</code></td>
+<td>reset the <abbr title="SIM Application Toolkit">STK</abbr> / toolkit context</td>
+</tr>
+<tr>
+<td><code>exit</code></td>
+<td>leave the shell</td>
+</tr>
+</tbody>
+</table></div>
+<p>The parameter set exposed by <code>set</code> covers:</p>
+<ul>
+<li><code>KIc</code> / <code>KID</code> key indices</li>
+<li><code>TAR</code></li>
+<li><code>SPI</code> (integrity, ciphering, counter, response requirements)</li>
+<li><code>PoR</code> mode</li>
+<li>concatenation and <abbr title="Transport Protocol User Data">TP-UD</abbr> window sizing</li>
+<li>transport selection for reader and external send paths</li>
+</ul>
+<h2 id="runtime-dependencies">Runtime dependencies</h2>
+<ul>
+<li>a <abbr title="Personal Computer/Smart Card (Workgroup)">PC/SC</abbr> reader for reader-mode sends, or an external bearer for print-only
+  workflows</li>
+<li>the shared SQLite inventory for per-<abbr title="Integrated Circuit Card Identifier">ICCID</abbr> <abbr title="Over-The-Air">OTA</abbr> state</li>
+<li>optional <code>SCP03</code> session if the operator wants to observe filesystem
+  changes after an <abbr title="Remote File Management">RFM</abbr>/<abbr title="Remote Application Management">RAM</abbr> <abbr title="Over-The-Air">OTA</abbr></li>
+</ul>
+<h2 id="state-the-shell-writes">State the shell writes</h2>
+<div class="-mx-6 sm:mx-0 doc-table-scroll"><table class="doc-table">
+<thead>
+<tr>
+<th>Location</th>
+<th>Contents</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>state/device_inventory.sqlite3</code></td>
+<td>per-<abbr title="Integrated Circuit Card Identifier">ICCID</abbr> <abbr title="Over-The-Air">OTA</abbr> parameters, history</td>
+</tr>
+<tr>
+<td><code>SCP80/ota_config.ini</code></td>
+<td>legacy import source, retained for migration</td>
+</tr>
+</tbody>
+</table></div>
+<h2 id="common-recipes">Common recipes</h2>
+<h3 id="send-a-plain-update-binary-via-ota">Send a plain <code>UPDATE BINARY</code> via <abbr title="Over-The-Air">OTA</abbr></h3>
+<div class="code-block"><pre><code>[SCP80] &gt; iccid 8946000000000000000F
+[SCP80] &gt; set KIc 15
+[SCP80] &gt; set KID 15
+[SCP80] &gt; set TAR 000000
+[SCP80] &gt; build 00D6000003A0A0A0
+[SCP80] &gt; send
+</code></pre></div>
+<h3 id="one-shot-ota-wrap-and-send">One-shot <abbr title="Over-The-Air">OTA</abbr> wrap and send</h3>
+<div class="code-block"><pre><code>python -m SCP80 --cmd &quot;iccid 8946000000000000000F; ota 00D6000003A0A0A0; exit&quot;
+</code></pre></div>
+<h3 id="reuse-iccid-bound-state-across-sessions">Reuse <abbr title="Integrated Circuit Card Identifier">ICCID</abbr>-bound state across sessions</h3>
+<div class="code-block"><pre><code>[SCP80] &gt; iccid 8946000000000000000F
+[SCP80] &gt; show
+[SCP80] &gt; build 00A40000023F00
+[SCP80] &gt; send
+</code></pre></div>
+<p>Relaunching <code>SCP80</code> with the same <abbr title="Integrated Circuit Card Identifier">ICCID</abbr> restores <code>KIc</code>, <code>KID</code>, <code>TAR</code>, <code>SPI</code>,
+and the rest of the parameter set.</p>
+<h3 id="script-mode-send">Script-mode send</h3>
+<div class="code-block"><pre><code>python -m SCP80 --cmd &quot;script ./my_ota_sequence.scp80; exit&quot;
+</code></pre></div>
+<h2 id="pitfalls">Pitfalls</h2>
+<ul>
+<li><abbr title="Security Parameter Indicator (OTA)">SPI</abbr> must be consistent on both sides. If <code>CC</code> is required, the card will
+  reject any packet missing it with <code>6988</code> or a PoR error code.</li>
+<li>Counter mode must be aligned with whatever the card has seen last. An
+  <code>increasing counter</code> <abbr title="Security Parameter Indicator (OTA)">SPI</abbr> with a counter that is not strictly greater than
+  the previous one is rejected.</li>
+<li><code>TAR</code> mismatches route the payload to a different applet or to the <abbr title="Remote File Management">RFM</abbr>
+  engine silently. Verify the TAR before expecting a response.</li>
+<li>Reader-mode send requires that the reader is not locked by another process.
+  The <abbr title="Hardware-In-The-Loop">HIL</abbr> bridge, for example, takes exclusive ownership; see
+  <a href="hil-bridge.html"><abbr title="Hardware-In-The-Loop">HIL</abbr> Bridge</a>.</li>
+</ul>
+<h2 id="in-shell-documentation">In-shell documentation</h2>
+<p><abbr title="Secure Channel Protocol 80 (ETSI TS 102 225 / 226)">SCP80</abbr> documentation is integrated with the <abbr title="Secure Channel Protocol 03 (GP)">SCP03</abbr> <code>GUIDE OTA</code> topic and the
+authored <code>guides/PROFILE_LIFECYCLE_CLI_CHEATSHEET.md</code> for lifecycle-flavored
+<abbr title="Over-The-Air">OTA</abbr> examples.</p>
+<h2 id="related-pages">Related pages</h2>
+<ul>
+<li><a href="../concepts/ota-scp80.html"><abbr title="Secure Channel Protocol 80 (ETSI TS 102 225 / 226)">SCP80</abbr> <abbr title="Over-The-Air">OTA</abbr></a></li>
+<li><a href="scp03.html"><abbr title="Secure Channel Protocol 03 (GP)">SCP03</abbr> Admin Shell</a></li>
+<li><a href="../reference/command-suite.html">CLI Matrix</a></li>
+</ul>
+        </div>
+      </div><!-- /ygg-toc-body -->
+      <aside class="ygg-toc-rail" aria-label="On this page">
+        <p class="ygg-toc-rail-label">On this page</p>
+        <nav>
+            <a href="#when-to-use-it" class="toc-link">When to use it</a>
+            <a href="#entry-points" class="toc-link">Entry points</a>
+            <a href="#command-surface" class="toc-link">Command surface</a>
+            <a href="#runtime-dependencies" class="toc-link">Runtime dependencies</a>
+            <a href="#state-the-shell-writes" class="toc-link">State the shell writes</a>
+            <a href="#common-recipes" class="toc-link">Common recipes</a>
+            <a href="#send-a-plain-update-binary-via-ota" class="toc-link toc-link-sub">Send a plain UPDATE BINARY via OTA</a>
+            <a href="#one-shot-ota-wrap-and-send" class="toc-link toc-link-sub">One-shot OTA wrap and send</a>
+            <a href="#reuse-iccid-bound-state-across-sessions" class="toc-link toc-link-sub">Reuse ICCID-bound state across sessions</a>
+            <a href="#script-mode-send" class="toc-link toc-link-sub">Script-mode send</a>
+            <a href="#pitfalls" class="toc-link">Pitfalls</a>
+            <a href="#in-shell-documentation" class="toc-link">In-shell documentation</a>
+            <a href="#related-pages" class="toc-link">Related pages</a>
+        </nav>
+      </aside>
+      </div><!-- /ygg-content-toc -->
+    </main>
+    <footer class="px-6 py-6 sm:px-10 lg:px-14 xl:px-16 border-t border-zinc-950/[0.06] dark:border-white/[0.05]">
+      <div class="ygg-content flex flex-col items-center gap-2 text-xs text-zinc-500">
+        <div class="flex items-center gap-1.5 text-sm">
+          <span class="font-sans font-semibold text-zinc-700 dark:text-zinc-300">YggdraSIM</span>
+          <span class="text-zinc-400 dark:text-zinc-500">by</span>
+          <a href="https://1ot.com" target="_blank" rel="noopener" class="font-semibold text-zinc-700 dark:text-zinc-300 hover:text-zinc-600 dark:hover:text-zinc-300 transition-colors">1oT</a>
+        </div>
+        <div class="flex flex-wrap items-center justify-center gap-2 text-zinc-400 dark:text-zinc-500">
+          <span>Copyright © 2026 1oT OÜ</span>
+          <span aria-hidden="true">·</span>
+          <span>Last updated <span data-ygg-updated>May 19, 2026</span></span>
+        </div>
+      </div>
+    </footer>
+  </div>
+</div>
+<script src="../ygg.js?v=2"></script>
+<!-- Mermaid: ygg.js loads ygg-mermaid.js when .doc-prose contains pre.mermaid -->
+</body>
+</html>

@@ -1,0 +1,171 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Download profile (local) — YggdraSIM</title>
+  <link rel="icon" href="../assets/images/yggdrasil-mark.svg">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,100..900&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>html{font-size:100%}</style>
+  <script>(function(){var s=localStorage.getItem('ygg-theme');var p=window.matchMedia('(prefers-color-scheme: dark)').matches;if(s==='dark'||(!s&&p))document.documentElement.classList.add('dark');})();</script>
+  <link rel="stylesheet" href="../tailwind.css?v=2">
+  <link rel="stylesheet" href="../ygg.css?v=2">
+</head>
+<body class="antialiased font-sans bg-zinc-50 dark:bg-[var(--bg-page)] text-zinc-900 dark:text-zinc-100"
+      data-ygg-base="../" data-ygg-partial-path="../partials/sidebar.html" data-ygg-active-sub="how-to/download-a-profile-local.html" data-ygg-open-sections="how-to">
+<a class="ygg-skip-link" href="#ygg-main">Skip to content</a>
+<div id="ygg-shell" class="flex min-h-dvh isolate ygg-layout-pending">
+  <div id="ygg-chrome-mount"></div>
+  <script src="../ygg-layout.js?v=2"></script>
+  <div id="ygg-main-column" class="flex-1 lg:ml-64 flex flex-col min-h-dvh">
+    <header class="lg:hidden sticky top-0 z-20 flex items-center gap-3 px-4 py-3 bg-white/95 dark:bg-[var(--bg-page)]/95 backdrop-blur-sm border-b border-zinc-950/[0.07] dark:border-white/[0.05] shrink-0">
+      <button type="button" onclick="openSidebar()" class="ygg-icon-btn flex items-center justify-center size-11 rounded-md text-zinc-500 transition-colors" aria-label="Open menu">
+        <svg aria-hidden="true" focusable="false" class="size-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M3 12h18M3 18h18"/></svg>
+      </button>
+      <span class="font-sans font-semibold text-sm tracking-tight">YggdraSIM</span>
+    </header>
+    <main class="flex-1 px-6 py-10 sm:px-10 lg:px-14 xl:px-16" id="ygg-main" tabindex="-1">
+      <div class="ygg-content-toc">
+      <div class="ygg-toc-body">
+        <nav class="flex flex-wrap items-center gap-1.5 text-xs text-zinc-400 mb-6" aria-label="Breadcrumb">
+          <ol class="ygg-crumbs">
+            <li><a href="../index.html" class="doc-link no-underline">Home</a></li>
+            <li aria-hidden="true"><svg class="size-3 opacity-40" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6 4l4 4-4 4"/></svg></li>
+            <li><a href="index.html" class="hover:text-zinc-600 dark:hover:text-zinc-300 transition-colors no-underline">How To</a></li>
+            <li aria-hidden="true"><svg class="size-3 opacity-40" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6 4l4 4-4 4"/></svg></li>
+            <li><span aria-current="page" class="text-zinc-600 dark:text-zinc-300">Download profile (local)</span></li>
+          </ol>
+        </nav>
+        <h1 class="doc-h1 font-sans font-bold text-zinc-950 dark:text-white mb-2">Download profile (local)</h1>
+        <p class="page-lead mb-8">Load a prebuilt profile package onto a physical or simulated <abbr title="Embedded UICC">eUICC</abbr> through
+the direct local <code>ISD-R</code> path, without any relay or SM-DP+ session.</p>
+        <details class="toc-mobile xl:hidden mb-8">
+          <summary>On this page <svg class="toc-mobile-chevron size-4" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 6l4 4 4-4"/></svg></summary>
+          <nav>
+            <a href="#prerequisites" class="toc-link">Prerequisites</a>
+            <a href="#steps" class="toc-link">Steps</a>
+            <a href="#one-shot-form" class="toc-link">One-shot form</a>
+            <a href="#common-failures" class="toc-link">Common failures</a>
+            <a href="#related-pages" class="toc-link">Related pages</a>
+          </nav>
+        </details>
+        <div class="doc-prose text-[0.9375rem] leading-relaxed text-zinc-600 dark:text-zinc-400 space-y-4">
+<h2 id="prerequisites">Prerequisites</h2>
+<ul>
+<li>a <abbr title="Personal Computer/Smart Card (Workgroup)">PC/SC</abbr> reader with a compatible <abbr title="Embedded UICC">eUICC</abbr>, or the simulator backend</li>
+<li>a profile package file under <code>Workspace/LocalSMDPP/profile/</code> or any
+  accessible path</li>
+<li>optional metadata JSON under <code>Workspace/LocalSMDPP/profile/metadata/</code></li>
+<li>local <abbr title="Secure Channel Protocol 11 (GP, elliptic curve)">SCP11</abbr> certificate material under <code>SCP11/local_access/certs/</code> or the
+  writable runtime root</li>
+</ul>
+<h2 id="steps">Steps</h2>
+<ol>
+<li>
+<p>Confirm the card is visible.</p>
+<div class="code-block"><pre><code>python -m SCP11.local_access --cmd &quot;DISCOVER; STATUS; CERTS; EXIT&quot;
+</code></pre></div>
+<p><code>DISCOVER</code> returns the <abbr title="Embedded UICC">eUICC</abbr> <abbr title="eUICC Identifier">EID</abbr>, and <code>CERTS</code> lists the certificate set
+the card will accept.</p>
+</li>
+<li>
+<p>Select the profile and the metadata.</p>
+<div class="code-block"><pre><code>[Local SMDPP] &gt; PROFILE Workspace/LocalSMDPP/profile/test_profile.txt
+[Local SMDPP] &gt; METADATA Workspace/LocalSMDPP/profile/metadata/test_metadata.json
+[Local SMDPP] &gt; STATUS
+</code></pre></div>
+<p><code>STATUS</code> should now show both selections.</p>
+</li>
+<li>
+<p>Load the profile.</p>
+<div class="code-block"><pre><code>[Local SMDPP] &gt; LOAD-PROFILE
+</code></pre></div>
+<p>The shell opens a fresh local <abbr title="Secure Channel Protocol 11 (GP, elliptic curve)">SCP11</abbr> session, drives <code>AuthenticateServer</code>,
+<code>PrepareDownload</code>, and <code>LoadBoundProfilePackage</code>, then closes the
+session.</p>
+</li>
+<li>
+<p>Validate.</p>
+<div class="code-block"><pre><code>[Local SMDPP] &gt; DISCOVER
+[Local SMDPP] &gt; STATUS
+</code></pre></div>
+<p>A new entry should show up as <code>DISABLED</code>.</p>
+</li>
+</ol>
+<h2 id="one-shot-form">One-shot form</h2>
+<div class="code-block"><pre><code>python -m SCP11.local_access --stdin &lt;&lt;&#39;EOF&#39;
+PROFILE Workspace/LocalSMDPP/profile/test_profile.txt
+METADATA Workspace/LocalSMDPP/profile/metadata/test_metadata.json
+LOAD-PROFILE
+EXIT
+EOF
+</code></pre></div>
+<h2 id="common-failures">Common failures</h2>
+<div class="-mx-6 sm:mx-0 doc-table-scroll"><table class="doc-table">
+<thead>
+<tr>
+<th>Symptom</th>
+<th>Likely cause</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>CI PKID unavailable</code> at AuthenticateServer</td>
+<td>certificate chain not trusted by the card. Adjust <code>SCP11/local_access/certs/</code> or the runtime-root equivalent.</td>
+</tr>
+<tr>
+<td><code>BPP segment rejected</code></td>
+<td>the package is malformed. Lint with <a href="../subsystems/profile-package.html">Profile Package</a>.</td>
+</tr>
+<tr>
+<td><code>No profile selected</code> from <code>LOAD-PROFILE</code></td>
+<td><code>PROFILE &lt;path&gt;</code> was not issued in this session.</td>
+</tr>
+<tr>
+<td>Silent success but profile missing</td>
+<td>you targeted a different card than expected. Check <code>STATUS</code> and reader selection.</td>
+</tr>
+</tbody>
+</table></div>
+<h2 id="related-pages">Related pages</h2>
+<ul>
+<li><a href="../subsystems/scp11-local-access.html"><abbr title="Secure Channel Protocol 11 (GP, elliptic curve)">SCP11</abbr> Local Access</a></li>
+<li><a href="../concepts/rsp-architecture.html"><abbr title="Remote SIM Provisioning">RSP</abbr> Architecture</a></li>
+<li><a href="inspect-and-transcode-saip.html">Inspect and Transcode <abbr title="SIMalliance Interoperable Profile">SAIP</abbr></a></li>
+</ul>
+        </div>
+      </div><!-- /ygg-toc-body -->
+      <aside class="ygg-toc-rail" aria-label="On this page">
+        <p class="ygg-toc-rail-label">On this page</p>
+        <nav>
+            <a href="#prerequisites" class="toc-link">Prerequisites</a>
+            <a href="#steps" class="toc-link">Steps</a>
+            <a href="#one-shot-form" class="toc-link">One-shot form</a>
+            <a href="#common-failures" class="toc-link">Common failures</a>
+            <a href="#related-pages" class="toc-link">Related pages</a>
+        </nav>
+      </aside>
+      </div><!-- /ygg-content-toc -->
+    </main>
+    <footer class="px-6 py-6 sm:px-10 lg:px-14 xl:px-16 border-t border-zinc-950/[0.06] dark:border-white/[0.05]">
+      <div class="ygg-content flex flex-col items-center gap-2 text-xs text-zinc-500">
+        <div class="flex items-center gap-1.5 text-sm">
+          <span class="font-sans font-semibold text-zinc-700 dark:text-zinc-300">YggdraSIM</span>
+          <span class="text-zinc-400 dark:text-zinc-500">by</span>
+          <a href="https://1ot.com" target="_blank" rel="noopener" class="font-semibold text-zinc-700 dark:text-zinc-300 hover:text-zinc-600 dark:hover:text-zinc-300 transition-colors">1oT</a>
+        </div>
+        <div class="flex flex-wrap items-center justify-center gap-2 text-zinc-400 dark:text-zinc-500">
+          <span>Copyright © 2026 1oT OÜ</span>
+          <span aria-hidden="true">·</span>
+          <span>Last updated <span data-ygg-updated>May 19, 2026</span></span>
+        </div>
+      </div>
+    </footer>
+  </div>
+</div>
+<script src="../ygg.js?v=2"></script>
+<!-- Mermaid: ygg.js loads ygg-mermaid.js when .doc-prose contains pre.mermaid -->
+</body>
+</html>
