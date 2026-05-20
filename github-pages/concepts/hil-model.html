@@ -1,0 +1,209 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>HIL Model — YggdraSIM</title>
+  <link rel="icon" href="../assets/images/yggdrasil-mark.svg">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,100..900&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>html{font-size:100%}</style>
+  <script>(function(){var s=localStorage.getItem('ygg-theme');var p=window.matchMedia('(prefers-color-scheme: dark)').matches;if(s==='dark'||(!s&&p))document.documentElement.classList.add('dark');})();</script>
+  <link rel="stylesheet" href="../tailwind.css?v=2">
+  <link rel="stylesheet" href="../ygg.css?v=2">
+</head>
+<body class="antialiased font-sans bg-zinc-50 dark:bg-[var(--bg-page)] text-zinc-900 dark:text-zinc-100"
+      data-ygg-base="../" data-ygg-partial-path="../partials/sidebar.html" data-ygg-active-sub="concepts/hil-model.html" data-ygg-open-sections="concepts">
+<a class="ygg-skip-link" href="#ygg-main">Skip to content</a>
+<div id="ygg-shell" class="flex min-h-dvh isolate ygg-layout-pending">
+  <div id="ygg-chrome-mount"></div>
+  <script src="../ygg-layout.js?v=2"></script>
+  <div id="ygg-main-column" class="flex-1 lg:ml-64 flex flex-col min-h-dvh">
+    <header class="lg:hidden sticky top-0 z-20 flex items-center gap-3 px-4 py-3 bg-white/95 dark:bg-[var(--bg-page)]/95 backdrop-blur-sm border-b border-zinc-950/[0.07] dark:border-white/[0.05] shrink-0">
+      <button type="button" onclick="openSidebar()" class="ygg-icon-btn flex items-center justify-center size-11 rounded-md text-zinc-500 transition-colors" aria-label="Open menu">
+        <svg class="size-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" focusable="false"><path d="M3 6h18M3 12h18M3 18h18"/></svg>
+      </button>
+      <span class="font-sans font-semibold text-sm tracking-tight">YggdraSIM</span>
+    </header>
+    <main id="ygg-main" tabindex="-1" class="flex-1 px-6 py-10 sm:px-10 lg:px-14 xl:px-16">
+      <div class="ygg-content-toc">
+      <div class="ygg-toc-body">
+        <nav class="flex flex-wrap items-center gap-1.5 text-xs text-zinc-400 mb-6" aria-label="Breadcrumb">
+          <ol class="ygg-crumbs"><li><a href="../index.html" class="doc-link no-underline">Home</a></li><li aria-hidden="true"><svg class="size-3 opacity-40" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6 4l4 4-4 4"/></svg></li><li><a href="index.html" class="hover:text-zinc-600 dark:hover:text-zinc-300 transition-colors no-underline">Concepts</a></li><li aria-hidden="true"><svg class="size-3 opacity-40" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6 4l4 4-4 4"/></svg></li><li><span class="text-zinc-600 dark:text-zinc-300" aria-current="page">HIL Model</span></li></ol>
+        </nav>
+        <h1 class="doc-h1 font-sans font-bold text-zinc-950 dark:text-white mb-2">HIL Model</h1>
+        <p class="page-lead mb-8">The <abbr title="Hardware-In-The-Loop">HIL</abbr> (Hardware-In-The-Loop) model is how YggdraSIM exercises a real
+<abbr title="Universal Integrated Circuit Card">UICC</abbr>/<abbr title="Embedded UICC">eUICC</abbr> against a real modem while still letting operator shells see the
+card. The physical plumbing is built around sysmocom's SIMtrace2 and the
+<code>osmo-remsim-client-st2</code> bridge, with a local RSPRO relay on
+<code>127.0.0.1:9997</code> and GSMTAP mirroring to Wireshark on UDP <code>4729</code>.</p>
+        <details class="toc-mobile xl:hidden mb-8">
+          <summary>On this page <svg class="toc-mobile-chevron size-4" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 6l4 4 4-4"/></svg></summary>
+          <nav>
+            <a href="#physical-topology" class="toc-link">Physical topology</a>
+            <a href="#responsibility-split" class="toc-link">Responsibility split</a>
+            <a href="#access-rules" class="toc-link">Access rules</a>
+            <a href="#lifecycle" class="toc-link">Lifecycle</a>
+            <a href="#signals-to-watch" class="toc-link">Signals to watch</a>
+            <a href="#use-cases" class="toc-link">Use cases</a>
+            <a href="#where-to-look-in-yggdrasim" class="toc-link">Where to look in YggdraSIM</a>
+          </nav>
+        </details>
+        <div class="doc-prose text-[0.9375rem] leading-relaxed text-zinc-600 dark:text-zinc-400 space-y-4">
+<h2 id="physical-topology">Physical topology</h2>
+<pre class="mermaid"><code>flowchart LR
+    Card["Physical UICC / eUICC<br/>in PC/SC reader"] --> PCSC["pcscd"]
+    PCSC --> Bridge["YggdraSIM HIL bridge<br/>127.0.0.1:9997"]
+    Bridge --> Remsim["osmo-remsim-client-st2"]
+    Remsim --> SIMtrace2["SIMtrace2 device"]
+    SIMtrace2 --> Modem["Modem / DUT"]
+    Bridge --> Wireshark["Wireshark<br/>UDP 4729 GSMTAP"]
+    Bridge --> YggdraSide["YggdraSIM operator shells<br/>via local relay"]</code></pre>
+<p class="fig-caption">Figure: HIL physical topology — card, bridge, SIMtrace2, modem, and operator shells</p>
+<p>The card is physically in a reader attached to the host. The SIMtrace2 exposes
+it to a modem as if it were a locally-inserted <abbr title="Subscriber Identity Module">SIM</abbr>. The bridge is the coupler
+and the telemetry source.</p>
+<h2 id="responsibility-split">Responsibility split</h2>
+<div class="-mx-6 sm:mx-0 doc-table-scroll"><table class="doc-table">
+<thead>
+<tr>
+<th>Component</th>
+<th>Owns</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>pcscd</code></td>
+<td>reader arbitration</td>
+</tr>
+<tr>
+<td><abbr title="Hardware-In-The-Loop">HIL</abbr> bridge</td>
+<td>exclusive <abbr title="Personal Computer/Smart Card (Workgroup)">PC/SC</abbr> ownership while active</td>
+</tr>
+<tr>
+<td><abbr title="Hardware-In-The-Loop">HIL</abbr> bridge</td>
+<td>GSMTAP mirror of every <abbr title="Application Protocol Data Unit (ISO 7816-4)">APDU</abbr> on UDP 4729</td>
+</tr>
+<tr>
+<td><abbr title="Hardware-In-The-Loop">HIL</abbr> bridge</td>
+<td>local <abbr title="Application Protocol Data Unit (ISO 7816-4)">APDU</abbr> relay on 127.0.0.1:9997</td>
+</tr>
+<tr>
+<td>supervisor</td>
+<td>lifecycle of bridge + remsim-client</td>
+</tr>
+<tr>
+<td><code>osmo-remsim-client-st2</code></td>
+<td>framing between SIMtrace2 and bridge</td>
+</tr>
+<tr>
+<td>SIMtrace2</td>
+<td>card-emulation signals to the modem</td>
+</tr>
+<tr>
+<td>YggdraSIM shells</td>
+<td>brokered side-channel access to the same card</td>
+</tr>
+</tbody>
+</table></div>
+<h2 id="access-rules">Access rules</h2>
+<ul>
+<li>The <abbr title="Hardware-In-The-Loop">HIL</abbr> bridge keeps <strong>exclusive ownership</strong> of the physical reader while
+  active. A second <abbr title="Personal Computer/Smart Card (Workgroup)">PC/SC</abbr> client cannot open the same reader at the same time.</li>
+<li>YggdraSIM operator shells reach the card through the bridge's <strong>relay
+  side-channel</strong>, not through a second direct <abbr title="Personal Computer/Smart Card (Workgroup)">PC/SC</abbr> handle.</li>
+<li>Modem APDUs and YggdraSIM APDUs are <strong>serialized</strong>, not isolated. They
+  share a single live session with the card.</li>
+<li>GSMTAP mirroring is passive. Wireshark sees every <abbr title="Application Protocol Data Unit (ISO 7816-4)">APDU</abbr> traveling between
+  modem and card, plus the YggdraSIM side-channel traffic.</li>
+</ul>
+<h2 id="lifecycle">Lifecycle</h2>
+<pre class="mermaid"><code>sequenceDiagram
+    participant Op as Operator
+    participant Sup as HIL supervisor
+    participant Br as HIL bridge
+    participant Rem as remsim-client
+    participant ST as SIMtrace2
+    Op->>Sup: start
+    Sup->>Br: spawn bridge
+    Br->>Rem: spawn remsim-client
+    Rem->>ST: attach
+    ST-->>Rem: modem active
+    Br->>Op: relay endpoints ready (apduUrl, statusUrl)
+    Op->>Br: YggdraSIM shell connects via relay
+    Op->>Sup: stop
+    Sup->>Br: shutdown
+    Br->>Rem: terminate</code></pre>
+<p class="fig-caption">Figure: HIL bridge session lifecycle — supervisor-driven start to shutdown</p>
+<p>The recommended launch path is the supervisor, not the bridge alone. The
+supervisor tracks both processes, cleans up on failure, and keeps the
+writable state under <code>state/hil_bridge_supervisor.json</code> and
+<code>state/hil_bridge_card_relay.json</code> up to date.</p>
+<h2 id="signals-to-watch">Signals to watch</h2>
+<p>Healthy state looks like:</p>
+<ul>
+<li><code>status: running</code> and <code>usbPresent: true</code> in supervisor state</li>
+<li>non-zero <code>bridgePid</code></li>
+<li><code>status: ok</code>, <code>apduUrl</code>, <code>statusUrl</code>, <code>modemRefreshUrl</code>, selected <code>reader</code>,
+  and an <code>atr</code> in relay state</li>
+</ul>
+<p>Any of the following means the stack is not fully armed:</p>
+<ul>
+<li>supervisor <code>usbPresent: false</code> means the SIMtrace2 is not enumerated</li>
+<li>relay <code>status</code> other than <code>ok</code> means the bridge is not serving traffic</li>
+<li>missing <code>atr</code> means the card is not currently powered or inserted</li>
+</ul>
+<h2 id="use-cases">Use cases</h2>
+<ul>
+<li>observe a live modem talking to a real <abbr title="Embedded UICC">eUICC</abbr> while an SM-DP+ negotiation
+  happens in an operator shell</li>
+<li>capture an authenticated <abbr title="Secure Channel Protocol 03 (GP)">SCP03</abbr> session end-to-end</li>
+<li>reproduce a field failure with the exact card and exact modem in front of
+  you, without losing administrative access to the card</li>
+<li>run a <abbr title="Hardware-In-The-Loop">HIL</abbr> capture that includes both the modem side and the YggdraSIM side
+  in one Wireshark trace</li>
+</ul>
+<h2 id="where-to-look-in-yggdrasim">Where to look in YggdraSIM</h2>
+<ul>
+<li><a href="../subsystems/hil-bridge.html"><abbr title="Hardware-In-The-Loop">HIL</abbr> Bridge</a> for the operator surface</li>
+<li><a href="../how-to/run-hil-capture.html">Run a <abbr title="Hardware-In-The-Loop">HIL</abbr> Capture</a> for a recipe-style
+  walkthrough</li>
+<li><code>guides/HIL_BRIDGE_GUIDE.md</code> for the full authored procedure</li>
+</ul>
+        </div>
+      </div><!-- /ygg-toc-body -->
+      <aside class="ygg-toc-rail" aria-label="On this page">
+        <p class="ygg-toc-rail-label">On this page</p>
+        <nav>
+            <a href="#physical-topology" class="toc-link">Physical topology</a>
+            <a href="#responsibility-split" class="toc-link">Responsibility split</a>
+            <a href="#access-rules" class="toc-link">Access rules</a>
+            <a href="#lifecycle" class="toc-link">Lifecycle</a>
+            <a href="#signals-to-watch" class="toc-link">Signals to watch</a>
+            <a href="#use-cases" class="toc-link">Use cases</a>
+            <a href="#where-to-look-in-yggdrasim" class="toc-link">Where to look in YggdraSIM</a>
+        </nav>
+      </aside>
+      </div><!-- /ygg-content-toc -->
+    </main>
+    <footer class="px-6 py-6 sm:px-10 lg:px-14 xl:px-16 border-t border-zinc-950/[0.06] dark:border-white/[0.05]">
+      <div class="ygg-content flex flex-col items-center gap-2 text-xs text-zinc-500">
+        <div class="flex items-center gap-1.5 text-sm">
+          <span class="font-sans font-semibold text-zinc-700 dark:text-zinc-300">YggdraSIM</span>
+          <span class="text-zinc-400 dark:text-zinc-500">by</span>
+          <a href="https://1ot.com" target="_blank" rel="noopener" class="font-semibold text-zinc-700 dark:text-zinc-300 hover:text-zinc-600 dark:hover:text-zinc-300 transition-colors">1oT</a>
+        </div>
+        <div class="flex flex-wrap items-center justify-center gap-2 text-zinc-400 dark:text-zinc-500">
+          <span>Copyright © 2026 1oT OÜ</span>
+          <span aria-hidden="true">·</span>
+          <span>Last updated <span data-ygg-updated>May 19, 2026</span></span>
+        </div>
+      </div>
+    </footer>
+  </div>
+</div>
+<script src="../ygg.js?v=2"></script>
+<!-- Mermaid: ygg.js loads ygg-mermaid.js when .doc-prose contains pre.mermaid -->
+</body>
+</html>

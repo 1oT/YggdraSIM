@@ -1,0 +1,192 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>SUCI Tool — YggdraSIM</title>
+  <link rel="icon" href="../assets/images/yggdrasil-mark.svg">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,100..900&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>html{font-size:100%}</style>
+  <script>(function(){var s=localStorage.getItem('ygg-theme');var p=window.matchMedia('(prefers-color-scheme: dark)').matches;if(s==='dark'||(!s&&p))document.documentElement.classList.add('dark');})();</script>
+  <link rel="stylesheet" href="../tailwind.css?v=2">
+  <link rel="stylesheet" href="../ygg.css?v=2">
+</head>
+<body class="antialiased font-sans bg-zinc-50 dark:bg-[var(--bg-page)] text-zinc-900 dark:text-zinc-100"
+      data-ygg-base="../" data-ygg-partial-path="../partials/sidebar.html" data-ygg-active-sub="subsystems/suci-tool.html" data-ygg-open-sections="subsystems">
+<a class="ygg-skip-link" href="#ygg-main">Skip to content</a>
+<div id="ygg-shell" class="flex min-h-dvh isolate ygg-layout-pending">
+  <div id="ygg-chrome-mount"></div>
+  <script src="../ygg-layout.js?v=2"></script>
+  <div id="ygg-main-column" class="flex-1 lg:ml-64 flex flex-col min-h-dvh">
+    <header class="lg:hidden sticky top-0 z-20 flex items-center gap-3 px-4 py-3 bg-white/95 dark:bg-[var(--bg-page)]/95 backdrop-blur-sm border-b border-zinc-950/[0.07] dark:border-white/[0.05] shrink-0">
+      <button type="button" onclick="openSidebar()" class="ygg-icon-btn flex items-center justify-center size-11 rounded-md text-zinc-500 transition-colors" aria-label="Open menu">
+        <svg aria-hidden="true" focusable="false" class="size-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M3 12h18M3 18h18"/></svg>
+      </button>
+      <span class="font-sans font-semibold text-sm tracking-tight">YggdraSIM</span>
+    </header>
+    <main id="ygg-main" tabindex="-1" class="flex-1 px-6 py-10 sm:px-10 lg:px-14 xl:px-16">
+      <div class="ygg-content-toc">
+      <div class="ygg-toc-body">
+        <nav class="flex flex-wrap items-center gap-1.5 text-xs text-zinc-400 mb-6" aria-label="Breadcrumb">
+          <ol class="ygg-crumbs">
+            <li><a href="../index.html" class="doc-link no-underline">Home</a></li>
+            <li aria-hidden="true"><svg class="size-3 opacity-40" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6 4l4 4-4 4"/></svg></li>
+            <li><a href="index.html" class="hover:text-zinc-600 dark:hover:text-zinc-300 transition-colors no-underline">Subsystems</a></li>
+            <li aria-hidden="true"><svg class="size-3 opacity-40" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6 4l4 4-4 4"/></svg></li>
+            <li><span aria-current="page" class="text-zinc-600 dark:text-zinc-300">SUCI Tool</span></li>
+          </ol>
+        </nav>
+        <h1 class="doc-h1 font-sans font-bold text-zinc-950 dark:text-white mb-2">SUCI Tool</h1>
+        <p class="page-lead mb-8"><code>Tools/SuciTool/</code> is the helper shell around the external <code>suci-keytool</code>
+binary. Use it to manage <abbr title="Subscription Concealed Identifier (3GPP)">SUCI</abbr> key material that a profile expects on a <abbr title="Universal Subscriber Identity Module">USIM</abbr>
+when 5G privacy features are in play.</p>
+        <details class="toc-mobile xl:hidden mb-8">
+          <summary>On this page <svg class="toc-mobile-chevron size-4" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 6l4 4 4-4"/></svg></summary>
+          <nav>
+            <a href="#when-to-use-it" class="toc-link">When to use it</a>
+            <a href="#entry-points" class="toc-link">Entry points</a>
+            <a href="#command-surface" class="toc-link">Command surface</a>
+            <a href="#runtime-dependencies" class="toc-link">Runtime dependencies</a>
+            <a href="#state-the-shell-writes" class="toc-link">State the shell writes</a>
+            <a href="#common-recipes" class="toc-link">Common recipes</a>
+            <a href="#generate-a-secp256r1-key-and-export-compressed-form" class="toc-link toc-link-sub">Generate a SECP256R1 key and export compressed form</a>
+            <a href="#switch-active-key" class="toc-link toc-link-sub">Switch active key</a>
+            <a href="#pitfalls" class="toc-link">Pitfalls</a>
+            <a href="#related-pages" class="toc-link">Related pages</a>
+          </nav>
+        </details>
+        <div class="doc-prose text-[0.9375rem] leading-relaxed text-zinc-600 dark:text-zinc-400 space-y-4">
+<div class="admonition info">
+<p class="admonition-title">Underlying concept</p>
+<p>The <abbr title="Subscription Concealed Identifier (3GPP)">SUCI</abbr>/<abbr title="Subscription Permanent Identifier (3GPP)">SUPI</abbr> model is summarized in <a href="../concepts/3gpp-naa.html">3GPP <abbr title="Network Access Application (USIM / ISIM / CSIM)">NAA</abbr></a>.</p>
+</div>
+<h2 id="when-to-use-it">When to use it</h2>
+<ul>
+<li>selecting an active <abbr title="Subscription Concealed Identifier (3GPP)">SUCI</abbr> key file</li>
+<li>generating a <code>SECP256R1</code> or <code>CURVE25519</code> <abbr title="Subscription Concealed Identifier (3GPP)">SUCI</abbr> key</li>
+<li>exporting uncompressed or compressed public-key form</li>
+<li>inspecting the workspace paths the tool resolves</li>
+</ul>
+<h2 id="entry-points">Entry points</h2>
+<div class="tabbed-set tabbed-alternate" data-tabs="1:3"><input checked="checked" id="__tabbed_1_1" name="__tabbed_1" type="radio" /><input id="__tabbed_1_2" name="__tabbed_1" type="radio" /><input id="__tabbed_1_3" name="__tabbed_1" type="radio" /><div class="tabbed-labels"><label for="__tabbed_1_1">Module</label><label for="__tabbed_1_2">Console script</label><label for="__tabbed_1_3">From the launcher</label></div>
+<div class="tabbed-content">
+<div class="tabbed-block">
+<div class="code-block"><pre><code>python -m Tools.SuciTool
+python -m Tools.SuciTool --cmd &quot;STATUS; PWD; EXIT&quot;
+</code></pre></div>
+</div>
+<div class="tabbed-block">
+<div class="code-block"><pre><code>yggdrasim-suci-tool
+</code></pre></div>
+</div>
+<div class="tabbed-block">
+<p><code>python main/main.py</code> and pick the <abbr title="Subscription Concealed Identifier (3GPP)">SUCI</abbr> Tool entry.</p>
+</div>
+</div>
+</div>
+<h2 id="command-surface">Command surface</h2>
+<div class="-mx-6 sm:mx-0 doc-table-scroll"><table class="doc-table">
+<thead>
+<tr>
+<th>Verb</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>USE &lt;path&gt;</code></td>
+<td>select the active <abbr title="Subscription Concealed Identifier (3GPP)">SUCI</abbr> key file</td>
+</tr>
+<tr>
+<td><code>STATUS</code></td>
+<td>show active file and workspace paths</td>
+</tr>
+<tr>
+<td><code>TOOL</code></td>
+<td>override the external <code>suci-keytool</code> command path</td>
+</tr>
+<tr>
+<td><code>GENERATE &lt;curve&gt;</code></td>
+<td>generate a key pair (<code>SECP256R1</code> or <code>CURVE25519</code>)</td>
+</tr>
+<tr>
+<td><code>DUMP</code></td>
+<td>export the public key (uncompressed or compressed form)</td>
+</tr>
+<tr>
+<td><code>PWD</code></td>
+<td>print working directory</td>
+</tr>
+</tbody>
+</table></div>
+<h2 id="runtime-dependencies">Runtime dependencies</h2>
+<ul>
+<li>an available <code>suci-keytool</code> binary on the host</li>
+<li>the workspace or runtime-root directory where <abbr title="Subscription Concealed Identifier (3GPP)">SUCI</abbr> key files live</li>
+</ul>
+<h2 id="state-the-shell-writes">State the shell writes</h2>
+<p><abbr title="Subscription Concealed Identifier (3GPP)">SUCI</abbr> Tool is file-oriented. It does not write into the shared SQLite
+inventory. Key files land in the selected directory, and the tool manages
+selection through the <code>USE</code> verb.</p>
+<h2 id="common-recipes">Common recipes</h2>
+<h3 id="generate-a-secp256r1-key-and-export-compressed-form">Generate a <code>SECP256R1</code> key and export compressed form</h3>
+<div class="code-block"><pre><code>python -m Tools.SuciTool --cmd &quot;GENERATE SECP256R1; DUMP --compressed; EXIT&quot;
+</code></pre></div>
+<h3 id="switch-active-key">Switch active key</h3>
+<div class="code-block"><pre><code>[SUCI] &gt; USE path/to/profile_suci.key
+[SUCI] &gt; STATUS
+</code></pre></div>
+<h2 id="pitfalls">Pitfalls</h2>
+<ul>
+<li><code>GENERATE</code> requires that the external <code>suci-keytool</code> binary is resolvable.
+  Use <code>TOOL &lt;path&gt;</code> if the binary lives outside <code>PATH</code>.</li>
+<li>The <abbr title="Subscription Concealed Identifier (3GPP)">SUCI</abbr> public key that lands on a profile must match the home network
+  public key that the 5G serving network expects. A generated dev key works
+  for loopback testing only.</li>
+</ul>
+<h2 id="related-pages">Related pages</h2>
+<ul>
+<li><a href="../concepts/3gpp-naa.html">3GPP <abbr title="Network Access Application (USIM / ISIM / CSIM)">NAA</abbr></a></li>
+<li><a href="../concepts/saip-profiles.html"><abbr title="SIMalliance Interoperable Profile">SAIP</abbr> Profiles</a></li>
+</ul>
+        </div>
+      </div><!-- /ygg-toc-body -->
+      <aside class="ygg-toc-rail" aria-label="On this page">
+        <p class="ygg-toc-rail-label">On this page</p>
+        <nav>
+            <a href="#when-to-use-it" class="toc-link">When to use it</a>
+            <a href="#entry-points" class="toc-link">Entry points</a>
+            <a href="#command-surface" class="toc-link">Command surface</a>
+            <a href="#runtime-dependencies" class="toc-link">Runtime dependencies</a>
+            <a href="#state-the-shell-writes" class="toc-link">State the shell writes</a>
+            <a href="#common-recipes" class="toc-link">Common recipes</a>
+            <a href="#generate-a-secp256r1-key-and-export-compressed-form" class="toc-link toc-link-sub">Generate a SECP256R1 key and export compressed form</a>
+            <a href="#switch-active-key" class="toc-link toc-link-sub">Switch active key</a>
+            <a href="#pitfalls" class="toc-link">Pitfalls</a>
+            <a href="#related-pages" class="toc-link">Related pages</a>
+        </nav>
+      </aside>
+      </div><!-- /ygg-content-toc -->
+    </main>
+    <footer class="px-6 py-6 sm:px-10 lg:px-14 xl:px-16 border-t border-zinc-950/[0.06] dark:border-white/[0.05]">
+      <div class="ygg-content flex flex-col items-center gap-2 text-xs text-zinc-500">
+        <div class="flex items-center gap-1.5 text-sm">
+          <span class="font-sans font-semibold text-zinc-700 dark:text-zinc-300">YggdraSIM</span>
+          <span class="text-zinc-400 dark:text-zinc-500">by</span>
+          <a href="https://1ot.com" target="_blank" rel="noopener" class="font-semibold text-zinc-700 dark:text-zinc-300 hover:text-zinc-600 dark:hover:text-zinc-300 transition-colors">1oT</a>
+        </div>
+        <div class="flex flex-wrap items-center justify-center gap-2 text-zinc-400 dark:text-zinc-500">
+          <span>Copyright © 2026 1oT OÜ</span>
+          <span aria-hidden="true">·</span>
+          <span>Last updated <span data-ygg-updated>May 19, 2026</span></span>
+        </div>
+      </div>
+    </footer>
+  </div>
+</div>
+<script src="../ygg.js?v=2"></script>
+<!-- Mermaid: ygg.js loads ygg-mermaid.js when .doc-prose contains pre.mermaid -->
+</body>
+</html>

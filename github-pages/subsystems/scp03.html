@@ -1,0 +1,433 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>SCP03 Admin Shell — YggdraSIM</title>
+  <link rel="icon" href="../assets/images/yggdrasil-mark.svg">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,100..900&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>html{font-size:100%}</style>
+  <script>(function(){var s=localStorage.getItem('ygg-theme');var p=window.matchMedia('(prefers-color-scheme: dark)').matches;if(s==='dark'||(!s&&p))document.documentElement.classList.add('dark');})();</script>
+  <link rel="stylesheet" href="../tailwind.css?v=2">
+  <link rel="stylesheet" href="../ygg.css?v=2">
+</head>
+<body class="antialiased font-sans bg-zinc-50 dark:bg-[var(--bg-page)] text-zinc-900 dark:text-zinc-100"
+      data-ygg-base="../" data-ygg-partial-path="../partials/sidebar.html" data-ygg-active-sub="subsystems/scp03.html" data-ygg-open-sections="subsystems">
+<a class="ygg-skip-link" href="#ygg-main">Skip to content</a>
+<div id="ygg-shell" class="flex min-h-dvh isolate ygg-layout-pending">
+  <div id="ygg-chrome-mount"></div>
+  <script src="../ygg-layout.js?v=2"></script>
+  <div id="ygg-main-column" class="flex-1 lg:ml-64 flex flex-col min-h-dvh">
+    <header class="lg:hidden sticky top-0 z-20 flex items-center gap-3 px-4 py-3 bg-white/95 dark:bg-[var(--bg-page)]/95 backdrop-blur-sm border-b border-zinc-950/[0.07] dark:border-white/[0.05] shrink-0">
+      <button type="button" onclick="openSidebar()" class="ygg-icon-btn flex items-center justify-center size-11 rounded-md text-zinc-500 transition-colors" aria-label="Open menu">
+        <svg aria-hidden="true" focusable="false" class="size-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M3 12h18M3 18h18"/></svg>
+      </button>
+      <span class="font-sans font-semibold text-sm tracking-tight">YggdraSIM</span>
+    </header>
+    <main id="ygg-main" tabindex="-1" class="flex-1 px-6 py-10 sm:px-10 lg:px-14 xl:px-16">
+      <div class="ygg-content-toc">
+      <div class="ygg-toc-body">
+        <nav class="flex flex-wrap items-center gap-1.5 text-xs text-zinc-400 mb-6" aria-label="Breadcrumb">
+          <ol class="ygg-crumbs">
+            <li><a href="../index.html" class="doc-link no-underline">Home</a></li>
+            <li aria-hidden="true"><svg class="size-3 opacity-40" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6 4l4 4-4 4"/></svg></li>
+            <li><a href="index.html" class="hover:text-zinc-600 dark:hover:text-zinc-300 transition-colors no-underline">Subsystems</a></li>
+            <li aria-hidden="true"><svg class="size-3 opacity-40" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6 4l4 4-4 4"/></svg></li>
+            <li><span aria-current="page" class="text-zinc-600 dark:text-zinc-300">SCP03 Admin Shell</span></li>
+          </ol>
+        </nav>
+        <h1 class="doc-h1 font-sans font-bold text-zinc-950 dark:text-white mb-2">SCP03 Admin Shell</h1>
+        <p class="page-lead mb-8"><code>SCP03/</code> is the GlobalPlatform-style admin shell. It is the card-administration
+and retrieval surface, not the <abbr title="Secure Channel Protocol 11 (GP, elliptic curve)">SCP11</abbr> provisioning relay. Use it when the task
+is secure-channel authentication, <abbr title="GlobalPlatform">GP</abbr> registry work, <abbr title="European Telecommunications Standards Institute">ETSI</abbr>/3GPP filesystem
+navigation, <abbr title="Embedded UICC">eUICC</abbr> retrieval, <abbr title="Personal Identification Number">PIN</abbr>/auth diagnostics, or report/export.</p>
+        <details class="toc-mobile xl:hidden mb-8">
+          <summary>On this page <svg class="toc-mobile-chevron size-4" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 6l4 4 4-4"/></svg></summary>
+          <nav>
+            <a href="#when-to-use-it" class="toc-link">When to use it</a>
+            <a href="#entry-points" class="toc-link">Entry points</a>
+            <a href="#command-surface-grouped" class="toc-link">Command surface, grouped</a>
+            <a href="#secure-channel-and-session" class="toc-link toc-link-sub">Secure channel and session</a>
+            <a href="#registry-and-content-management" class="toc-link toc-link-sub">Registry and content management</a>
+            <a href="#filesystem" class="toc-link toc-link-sub">Filesystem</a>
+            <a href="#euicc-retrieval" class="toc-link toc-link-sub">eUICC retrieval</a>
+            <a href="#pin-and-authentication" class="toc-link toc-link-sub">PIN and authentication</a>
+            <a href="#reporting" class="toc-link toc-link-sub">Reporting</a>
+            <a href="#hil-diagnostics" class="toc-link toc-link-sub">HIL / diagnostics</a>
+            <a href="#runtime-dependencies" class="toc-link">Runtime dependencies</a>
+            <a href="#state-the-shell-writes" class="toc-link">State the shell writes</a>
+            <a href="#common-recipes" class="toc-link">Common recipes</a>
+            <a href="#open-an-sd-list-apps-read-imsi" class="toc-link toc-link-sub">Open an SD, list apps, read IMSI</a>
+            <a href="#one-shot-dump-of-the-whole-filesystem" class="toc-link toc-link-sub">One-shot dump of the whole filesystem</a>
+            <a href="#authenticate-a-usim" class="toc-link toc-link-sub">Authenticate a USIM</a>
+            <a href="#gold-profile-diff" class="toc-link toc-link-sub">Gold-profile diff</a>
+            <a href="#session-key-export" class="toc-link toc-link-sub">Session key export</a>
+            <a href="#pitfalls" class="toc-link">Pitfalls</a>
+            <a href="#in-shell-documentation" class="toc-link">In-shell documentation</a>
+            <a href="#related-pages" class="toc-link">Related pages</a>
+          </nav>
+        </details>
+        <div class="doc-prose text-[0.9375rem] leading-relaxed text-zinc-600 dark:text-zinc-400 space-y-4">
+<div class="admonition info">
+<p class="admonition-title">Underlying concepts</p>
+<p>This shell builds on <a href="../concepts/globalplatform.html">GlobalPlatform</a>,
+<a href="../concepts/etsi-uicc.html"><abbr title="European Telecommunications Standards Institute">ETSI</abbr> <abbr title="Universal Integrated Circuit Card">UICC</abbr></a>, and <a href="../concepts/3gpp-naa.html">3GPP <abbr title="Network Access Application (USIM / ISIM / CSIM)">NAA</abbr></a>.</p>
+</div>
+<h2 id="when-to-use-it">When to use it</h2>
+<ul>
+<li>opening a <abbr title="GlobalPlatform">GP</abbr> secure channel to an ISD, SSD, or MNO-SD</li>
+<li>listing applications, packages, and security domains</li>
+<li>navigating the <abbr title="Master File">MF</abbr> / <abbr title="Dedicated File">DF</abbr> / ADF / <abbr title="Elementary File">EF</abbr> tree</li>
+<li>reading, updating, and reporting <abbr title="Elementary File">EF</abbr> content</li>
+<li>running GSM, <abbr title="Universal Subscriber Identity Module">USIM</abbr>, and <abbr title="IP Multimedia Services Identity Module">ISIM</abbr> <code>AUTHENTICATE</code> diagnostics</li>
+<li>generating a full filesystem export or YAML-oriented report</li>
+<li>comparing a live card against a stored "gold" profile snapshot</li>
+</ul>
+<p>Do not use it as a relay provisioning shell. Relay work lives in <code>SCP11/live</code>
+and <code>SCP11/test</code>. Direct local <abbr title="Issuer Security Domain - Root">ISD-R</abbr> provisioning lives in
+<code>SCP11/local_access</code>.</p>
+<h2 id="entry-points">Entry points</h2>
+<div class="tabbed-set tabbed-alternate" data-tabs="1:3"><input checked="checked" id="__tabbed_1_1" name="__tabbed_1" type="radio" /><input id="__tabbed_1_2" name="__tabbed_1" type="radio" /><input id="__tabbed_1_3" name="__tabbed_1" type="radio" /><div class="tabbed-labels"><label for="__tabbed_1_1">Module</label><label for="__tabbed_1_2">Console script</label><label for="__tabbed_1_3">From the launcher</label></div>
+<div class="tabbed-content">
+<div class="tabbed-block">
+<div class="code-block"><pre><code>python -m SCP03
+python -m SCP03 --cmd &quot;AUTH-SD; APPS; EXIT&quot;
+</code></pre></div>
+</div>
+<div class="tabbed-block">
+<div class="code-block"><pre><code>yggdrasim-scp03
+yggdrasim-scp03 --cmd &quot;AUTH-SD; APPS; EXIT&quot;
+</code></pre></div>
+</div>
+<div class="tabbed-block">
+<p><code>python main/main.py</code> and pick the <abbr title="Secure Channel Protocol 03 (GP)">SCP03</abbr> entry.</p>
+</div>
+</div>
+</div>
+<h2 id="command-surface-grouped">Command surface, grouped</h2>
+<h3 id="secure-channel-and-session">Secure channel and session</h3>
+<div class="-mx-6 sm:mx-0 doc-table-scroll"><table class="doc-table">
+<thead>
+<tr>
+<th>Command</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>AUTH-SD</code></td>
+<td>authenticate the currently selected Security Domain</td>
+</tr>
+<tr>
+<td><code>AUTH-ISD</code></td>
+<td>authenticate the Issuer Security Domain</td>
+</tr>
+<tr>
+<td><code>AUTH-SSD</code></td>
+<td>authenticate a Supplementary Security Domain</td>
+</tr>
+<tr>
+<td><code>RESELECT</code></td>
+<td>reselect the active applet/SD</td>
+</tr>
+</tbody>
+</table></div>
+<h3 id="registry-and-content-management">Registry and content management</h3>
+<div class="-mx-6 sm:mx-0 doc-table-scroll"><table class="doc-table">
+<thead>
+<tr>
+<th>Command</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>APPS</code></td>
+<td>enumerate applications</td>
+</tr>
+<tr>
+<td><code>LIST</code></td>
+<td>list contents of the active selection</td>
+</tr>
+<tr>
+<td><code>SELECT &lt;AID or path&gt;</code></td>
+<td>select by <abbr title="Application Identifier">AID</abbr> or by <abbr title="European Telecommunications Standards Institute">ETSI</abbr> path</td>
+</tr>
+<tr>
+<td><code>PUT-KEY</code></td>
+<td>install or rotate a key set on the active SD</td>
+</tr>
+</tbody>
+</table></div>
+<h3 id="filesystem">Filesystem</h3>
+<div class="-mx-6 sm:mx-0 doc-table-scroll"><table class="doc-table">
+<thead>
+<tr>
+<th>Command</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>SELECT &lt;FID or path&gt;</code></td>
+<td>select an <abbr title="Elementary File">EF</abbr>, <abbr title="Dedicated File">DF</abbr>, or ADF</td>
+</tr>
+<tr>
+<td><code>READ</code></td>
+<td>read the selected <abbr title="Elementary File">EF</abbr></td>
+</tr>
+<tr>
+<td><code>UPDATE</code></td>
+<td>update the selected <abbr title="Elementary File">EF</abbr></td>
+</tr>
+<tr>
+<td><code>DUMP-FS</code></td>
+<td>export the entire filesystem</td>
+</tr>
+</tbody>
+</table></div>
+<h3 id="euicc-retrieval"><abbr title="Embedded UICC">eUICC</abbr> retrieval</h3>
+<p>Under the selected <code>ISD-R</code>, the shell can drive:</p>
+<ul>
+<li><code>GetProfilesInfo</code></li>
+<li><code>GetEuiccConfiguredData</code></li>
+<li><code>GetEID</code></li>
+<li><code>GetEuiccInfo1</code></li>
+<li><code>GetEuiccInfo2</code></li>
+<li><code>GetRAT</code></li>
+<li><code>RetrieveNotificationsList</code></li>
+<li><code>GetEimConfigurationData</code></li>
+<li><code>GetCerts</code></li>
+</ul>
+<p>These land under wizarded and direct commands inside the <abbr title="Secure Channel Protocol 03 (GP)">SCP03</abbr> shell.</p>
+<h3 id="pin-and-authentication"><abbr title="Personal Identification Number">PIN</abbr> and authentication</h3>
+<div class="-mx-6 sm:mx-0 doc-table-scroll"><table class="doc-table">
+<thead>
+<tr>
+<th>Command</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>VERIFY</code>, <code>CHANGE</code>, <code>DISABLE</code>, <code>ENABLE</code>, <code>UNBLOCK</code></td>
+<td>CHV and <abbr title="Personal Unblocking Key">PUK</abbr> handling</td>
+</tr>
+<tr>
+<td><code>AUTH-GSM</code>, <code>AUTH-USIM</code>, <code>AUTH-ISIM</code></td>
+<td><code>AUTHENTICATE</code> helpers for each <abbr title="Network Access Application (USIM / ISIM / CSIM)">NAA</abbr></td>
+</tr>
+</tbody>
+</table></div>
+<h3 id="reporting">Reporting</h3>
+<div class="-mx-6 sm:mx-0 doc-table-scroll"><table class="doc-table">
+<thead>
+<tr>
+<th>Command</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>report mode</td>
+<td>combined filesystem + <abbr title="Embedded UICC">eUICC</abbr> report generation</td>
+</tr>
+<tr>
+<td><code>DUMP-FS</code></td>
+<td>full filesystem export</td>
+</tr>
+<tr>
+<td>gold-snapshot workflow</td>
+<td>live-vs-gold diff against a stored snapshot</td>
+</tr>
+</tbody>
+</table></div>
+<h3 id="hil-diagnostics"><abbr title="Hardware-In-The-Loop">HIL</abbr> / diagnostics</h3>
+<div class="-mx-6 sm:mx-0 doc-table-scroll"><table class="doc-table">
+<thead>
+<tr>
+<th>Command</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>EXPORT-KEYBAG [Path.keys.json] [Label]</code></td>
+<td>dump the active <abbr title="Secure Channel Protocol 03 (GP)">SCP03</abbr> session keys (S-ENC, S-MAC, S-RMAC, SSC, chaining value) and the active target <abbr title="Application Identifier">AID</abbr> into a keybag JSON for offline <abbr title="Hardware-In-The-Loop">HIL</abbr> pcap decryption</td>
+</tr>
+</tbody>
+</table></div>
+<p>See <a href="#session-key-export">Session key export</a> below and the <abbr title="Hardware-In-The-Loop">HIL</abbr> Bridge
+<a href="hil-bridge.html#offline-pcap-replay">offline replay flow</a>.</p>
+<h2 id="runtime-dependencies">Runtime dependencies</h2>
+<ul>
+<li>a <abbr title="Personal Computer/Smart Card (Workgroup)">PC/SC</abbr> reader with the card inserted</li>
+<li>live <abbr title="GlobalPlatform">GP</abbr> key material under <code>Workspace/SCP03/</code> (keyset, <abbr title="Application Identifier">AID</abbr> choices)</li>
+<li>the shared SQLite inventory for <abbr title="Secure Channel Protocol 03 (GP)">SCP03</abbr> per-card state</li>
+<li>optional <code>gpg</code> if the inventory crypto envelope is enabled</li>
+</ul>
+<h2 id="state-the-shell-writes">State the shell writes</h2>
+<div class="-mx-6 sm:mx-0 doc-table-scroll"><table class="doc-table">
+<thead>
+<tr>
+<th>Location</th>
+<th>Contents</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>state/device_inventory.sqlite3</code></td>
+<td>per-<abbr title="Integrated Circuit Card Identifier">ICCID</abbr> and per-<abbr title="eUICC Identifier">EID</abbr> <abbr title="Secure Channel Protocol 03 (GP)">SCP03</abbr> state</td>
+</tr>
+<tr>
+<td><code>Workspace/SCP03/aid.txt</code></td>
+<td><abbr title="Application Identifier">AID</abbr> choices (plain file for diff review)</td>
+</tr>
+<tr>
+<td><code>Workspace/SCP03/fids.txt</code></td>
+<td><abbr title="File Identifier">FID</abbr> quick-select list</td>
+</tr>
+<tr>
+<td><code>Workspace/SCP03/binds.json</code></td>
+<td>custom bind macros</td>
+</tr>
+<tr>
+<td><code>Workspace/SCP03/keys.ini</code></td>
+<td>legacy import source for keysets</td>
+</tr>
+</tbody>
+</table></div>
+<h2 id="common-recipes">Common recipes</h2>
+<h3 id="open-an-sd-list-apps-read-imsi">Open an SD, list apps, read IMSI</h3>
+<div class="code-block"><pre><code>[APDU] &gt; AUTH-SD
+[A0...00] &gt; APPS
+[A0...00] &gt; SELECT USIM/IMSI
+[A0...00] &gt; READ
+</code></pre></div>
+<h3 id="one-shot-dump-of-the-whole-filesystem">One-shot dump of the whole filesystem</h3>
+<div class="code-block"><pre><code>python -m SCP03 --cmd &quot;AUTH-SD; DUMP-FS; EXIT&quot;
+</code></pre></div>
+<h3 id="authenticate-a-usim">Authenticate a <abbr title="Universal Subscriber Identity Module">USIM</abbr></h3>
+<div class="code-block"><pre><code>[A0...00] &gt; SELECT ADF.USIM
+[A0...00] &gt; AUTH-USIM &lt;RAND&gt; &lt;AUTN&gt;
+</code></pre></div>
+<p>The response carries <code>RES</code>, <code>CK</code>, <code>IK</code>, or an <code>AUTS</code> on SQN mismatch.</p>
+<h3 id="gold-profile-diff">Gold-profile diff</h3>
+<p>After persisting a gold snapshot via the shell:</p>
+<div class="code-block"><pre><code>[APDU] &gt; GOLD-DIFF
+</code></pre></div>
+<p>The diff surfaces <abbr title="Elementary File">EF</abbr>-level changes since the stored baseline.</p>
+<h3 id="session-key-export">Session key export</h3>
+<p><code>EXPORT-KEYBAG</code> snapshots the currently-authenticated <abbr title="Secure Channel Protocol 03 (GP)">SCP03</abbr> session
+into a keybag JSON compatible with the <abbr title="Hardware-In-The-Loop">HIL</abbr> Bridge offline-replay
+decoder.</p>
+<div class="code-block"><pre><code>[APDU] &gt; AUTH-SD
+[A0...00] &gt; EXPORT-KEYBAG Workspace/hil/captures/session-2026-04-20.keys.json case-1234
+</code></pre></div>
+<p>Arguments (both optional):</p>
+<ul>
+<li><code>OutputPath.keys.json</code> — destination file. Defaults to a
+  timestamped path under the <abbr title="Secure Channel Protocol 03 (GP)">SCP03</abbr> workspace when omitted.</li>
+<li><code>Label</code> — free-form identifier written to the entry for operator
+  cross-referencing (ticket id, serial, pcap name, etc.).</li>
+</ul>
+<p>The handler refuses cleanly if:</p>
+<ul>
+<li>there is no active card session</li>
+<li>the session exists but has not authenticated (no derived keys yet)</li>
+</ul>
+<p>Written fields (per entry):</p>
+<ul>
+<li><code>protocol</code>: <code>"SCP03"</code></li>
+<li><code>aid_hex</code>: current target <abbr title="Application Identifier">AID</abbr> (from <code>gp_ctrl.target_aid</code>)</li>
+<li><code>s_enc_hex</code> / <code>s_mac_hex</code> / <code>s_rmac_hex</code>: session keys at time of export</li>
+<li><code>ssc_hex</code> / <code>chaining_value_hex</code>: <abbr title="Secure Channel Protocol 03 (GP)">SCP03</abbr> state at time of export</li>
+<li><code>label</code>: the operator-provided label</li>
+</ul>
+<p>See <a href="hil-bridge.html#keybag-json-schema"><abbr title="Hardware-In-The-Loop">HIL</abbr> Bridge — Keybag JSON schema</a>
+for the complete file structure and
+<a href="../how-to/replay-hil-pcap-offline.html">Replay a <abbr title="Hardware-In-The-Loop">HIL</abbr> pcap offline</a> for
+how the keybag feeds into the decoded-<abbr title="Application Protocol Data Unit (ISO 7816-4)">APDU</abbr> <abbr title="Text User Interface">TUI</abbr>.</p>
+<h2 id="pitfalls">Pitfalls</h2>
+<ul>
+<li>Wrong keyset returns <code>6982</code> before <code>EXTERNAL AUTHENTICATE</code> completes.
+  Check <code>Workspace/SCP03/keys.ini</code> or the migrated inventory state.</li>
+<li>Selecting an <abbr title="Elementary File">EF</abbr> that is not active returns <code>6A82</code>. Walk from <code>3F00</code> when in
+  doubt.</li>
+<li><code>PUT-KEY</code> without a live, authenticated session returns <code>6985</code>.</li>
+<li><abbr title="Embedded UICC">eUICC</abbr> retrieval commands require that the selected SD is the <code>ISD-R</code> or an
+  SD authorized to issue them. Use the wizard when in doubt.</li>
+</ul>
+<h2 id="in-shell-documentation">In-shell documentation</h2>
+<p><abbr title="Secure Channel Protocol 03 (GP)">SCP03</abbr> has an in-session guide and a grouped help surface.</p>
+<ul>
+<li><code>GUIDE</code> opens the topic menu</li>
+<li><code>GUIDE GP</code>, <code>GUIDE ETSI</code>, <code>GUIDE GSMA</code>, <code>GUIDE INSTALL</code>, <code>GUIDE SECURITY</code>,
+  <code>GUIDE OTA</code>, <code>GUIDE CONFIG</code>, <code>GUIDE SAIP</code>, <code>GUIDE SUCI</code>, <code>GUIDE CLI</code> for
+  topic deep dives</li>
+<li><code>HELP</code> prints the grouped command reference</li>
+</ul>
+<p>The same content is mirrored under <a href="../shell-guides/index.html">Shell Guides</a>
+for reading outside the terminal.</p>
+<h2 id="related-pages">Related pages</h2>
+<ul>
+<li><a href="../concepts/globalplatform.html">GlobalPlatform</a></li>
+<li><a href="../concepts/etsi-uicc.html"><abbr title="European Telecommunications Standards Institute">ETSI</abbr> <abbr title="Universal Integrated Circuit Card">UICC</abbr></a></li>
+<li><a href="../concepts/3gpp-naa.html">3GPP <abbr title="Network Access Application (USIM / ISIM / CSIM)">NAA</abbr></a></li>
+<li><a href="../reference/command-suite.html">CLI Matrix</a></li>
+<li><a href="../reference/troubleshooting.html">Troubleshooting</a></li>
+<li><a href="hil-bridge.html#offline-pcap-replay"><abbr title="Hardware-In-The-Loop">HIL</abbr> Bridge — offline pcap replay</a></li>
+<li><a href="../how-to/replay-hil-pcap-offline.html">Replay a <abbr title="Hardware-In-The-Loop">HIL</abbr> pcap offline</a></li>
+</ul>
+        </div>
+      </div><!-- /ygg-toc-body -->
+      <aside class="ygg-toc-rail" aria-label="On this page">
+        <p class="ygg-toc-rail-label">On this page</p>
+        <nav>
+            <a href="#when-to-use-it" class="toc-link">When to use it</a>
+            <a href="#entry-points" class="toc-link">Entry points</a>
+            <a href="#command-surface-grouped" class="toc-link">Command surface, grouped</a>
+            <a href="#secure-channel-and-session" class="toc-link toc-link-sub">Secure channel and session</a>
+            <a href="#registry-and-content-management" class="toc-link toc-link-sub">Registry and content management</a>
+            <a href="#filesystem" class="toc-link toc-link-sub">Filesystem</a>
+            <a href="#euicc-retrieval" class="toc-link toc-link-sub">eUICC retrieval</a>
+            <a href="#pin-and-authentication" class="toc-link toc-link-sub">PIN and authentication</a>
+            <a href="#reporting" class="toc-link toc-link-sub">Reporting</a>
+            <a href="#hil-diagnostics" class="toc-link toc-link-sub">HIL / diagnostics</a>
+            <a href="#runtime-dependencies" class="toc-link">Runtime dependencies</a>
+            <a href="#state-the-shell-writes" class="toc-link">State the shell writes</a>
+            <a href="#common-recipes" class="toc-link">Common recipes</a>
+            <a href="#open-an-sd-list-apps-read-imsi" class="toc-link toc-link-sub">Open an SD, list apps, read IMSI</a>
+            <a href="#one-shot-dump-of-the-whole-filesystem" class="toc-link toc-link-sub">One-shot dump of the whole filesystem</a>
+            <a href="#authenticate-a-usim" class="toc-link toc-link-sub">Authenticate a USIM</a>
+            <a href="#gold-profile-diff" class="toc-link toc-link-sub">Gold-profile diff</a>
+            <a href="#session-key-export" class="toc-link toc-link-sub">Session key export</a>
+            <a href="#pitfalls" class="toc-link">Pitfalls</a>
+            <a href="#in-shell-documentation" class="toc-link">In-shell documentation</a>
+            <a href="#related-pages" class="toc-link">Related pages</a>
+        </nav>
+      </aside>
+      </div><!-- /ygg-content-toc -->
+    </main>
+    <footer class="px-6 py-6 sm:px-10 lg:px-14 xl:px-16 border-t border-zinc-950/[0.06] dark:border-white/[0.05]">
+      <div class="ygg-content flex flex-col items-center gap-2 text-xs text-zinc-500">
+        <div class="flex items-center gap-1.5 text-sm">
+          <span class="font-sans font-semibold text-zinc-700 dark:text-zinc-300">YggdraSIM</span>
+          <span class="text-zinc-400 dark:text-zinc-500">by</span>
+          <a href="https://1ot.com" target="_blank" rel="noopener" class="font-semibold text-zinc-700 dark:text-zinc-300 hover:text-zinc-600 dark:hover:text-zinc-300 transition-colors">1oT</a>
+        </div>
+        <div class="flex flex-wrap items-center justify-center gap-2 text-zinc-400 dark:text-zinc-500">
+          <span>Copyright © 2026 1oT OÜ</span>
+          <span aria-hidden="true">·</span>
+          <span>Last updated <span data-ygg-updated>May 19, 2026</span></span>
+        </div>
+      </div>
+    </footer>
+  </div>
+</div>
+<script src="../ygg.js?v=2"></script>
+<!-- Mermaid: ygg.js loads ygg-mermaid.js when .doc-prose contains pre.mermaid -->
+</body>
+</html>

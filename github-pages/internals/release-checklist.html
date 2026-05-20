@@ -1,0 +1,239 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Release checklist — YggdraSIM</title>
+  <link rel="icon" href="../assets/images/yggdrasil-mark.svg">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,100..900&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>html{font-size:100%}</style>
+  <script>(function(){var s=localStorage.getItem('ygg-theme');var p=window.matchMedia('(prefers-color-scheme: dark)').matches;if(s==='dark'||(!s&&p))document.documentElement.classList.add('dark');})();</script>
+  <link rel="stylesheet" href="../tailwind.css?v=2">
+  <link rel="stylesheet" href="../ygg.css?v=2">
+</head>
+<body class="antialiased font-sans bg-zinc-50 dark:bg-[var(--bg-page)] text-zinc-900 dark:text-zinc-100"
+      data-ygg-base="../" data-ygg-partial-path="../partials/sidebar.html" data-ygg-active-sub="internals/release-checklist.html" data-ygg-open-sections="internals">
+<a class="ygg-skip-link" href="#ygg-main">Skip to content</a>
+<div id="ygg-shell" class="flex min-h-dvh isolate ygg-layout-pending">
+  <div id="ygg-chrome-mount"></div>
+  <script src="../ygg-layout.js?v=2"></script>
+  <div id="ygg-main-column" class="flex-1 lg:ml-64 flex flex-col min-h-dvh">
+    <header class="lg:hidden sticky top-0 z-20 flex items-center gap-3 px-4 py-3 bg-white/95 dark:bg-[var(--bg-page)]/95 backdrop-blur-sm border-b border-zinc-950/[0.07] dark:border-white/[0.05] shrink-0">
+      <button type="button" onclick="openSidebar()" class="ygg-icon-btn flex items-center justify-center size-11 rounded-md text-zinc-500 transition-colors" aria-label="Open menu">
+        <svg aria-hidden="true" focusable="false" class="size-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M3 12h18M3 18h18"/></svg>
+      </button>
+      <span class="font-sans font-semibold text-sm tracking-tight">YggdraSIM</span>
+    </header>
+    <main class="flex-1 px-6 py-10 sm:px-10 lg:px-14 xl:px-16" id="ygg-main" tabindex="-1">
+      <div class="ygg-content-toc">
+      <div class="ygg-toc-body">
+        <nav class="flex flex-wrap items-center gap-1.5 text-xs text-zinc-400 mb-6" aria-label="Breadcrumb">
+          <ol class="ygg-crumbs">
+            <li><a href="../index.html" class="doc-link no-underline">Home</a></li>
+            <li aria-hidden="true"><svg class="size-3 opacity-40" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6 4l4 4-4 4"/></svg></li>
+            <li><a href="index.html" class="hover:text-zinc-600 dark:hover:text-zinc-300 transition-colors no-underline">Internals</a></li>
+            <li aria-hidden="true"><svg class="size-3 opacity-40" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6 4l4 4-4 4"/></svg></li>
+            <li><span aria-current="page" class="text-zinc-600 dark:text-zinc-300">Release checklist</span></li>
+          </ol>
+        </nav>
+        <h1 class="doc-h1 font-sans font-bold text-zinc-950 dark:text-white mb-2">Release checklist</h1>
+        <p class="page-lead mb-8">Publication gate for the three supported distribution shapes: editable
+install, Docker image, and PyInstaller bundle. Run this checklist before any
+release.</p>
+        <details class="toc-mobile xl:hidden mb-8">
+          <summary>On this page <svg class="toc-mobile-chevron size-4" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 6l4 4 4-4"/></svg></summary>
+          <nav>
+            <a href="#pre-flight" class="toc-link">Pre-flight</a>
+            <a href="#editable-install" class="toc-link">Editable install</a>
+            <a href="#targeted-test-suite" class="toc-link">Targeted test suite</a>
+            <a href="#docker" class="toc-link">Docker</a>
+            <a href="#pyinstaller-bundle" class="toc-link">PyInstaller bundle</a>
+            <a href="#documentation-site" class="toc-link">Documentation site</a>
+            <a href="#tagging-and-publishing" class="toc-link">Tagging and publishing</a>
+            <a href="#tagging-contract" class="toc-link toc-link-sub">Tagging contract</a>
+            <a href="#post-release" class="toc-link">Post-release</a>
+            <a href="#related-pages" class="toc-link">Related pages</a>
+          </nav>
+        </details>
+        <div class="doc-prose text-[0.9375rem] leading-relaxed text-zinc-600 dark:text-zinc-400 space-y-4">
+<h2 id="pre-flight">Pre-flight</h2>
+<ul class="task-list">
+<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> working tree is clean; <code>git status</code> shows what you expect</li>
+<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> <code>pyproject.toml</code> <code>version</code> is bumped</li>
+<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> <code>README.md</code> is aligned with the behavior of the new release</li>
+<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> <code>guides/CAPABILITIES.md</code> reflects any new or retired surface</li>
+<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> <code>guides/ARCHITECTURE.md</code> reflects any new cross-module dependency</li>
+<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> <code>site-docs/</code> pages under <code>subsystems/</code>, <code>reference/</code>, and <code>how-to/</code>
+      are updated where relevant</li>
+<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> <code>Tools/HilBridge/RSPRO.asn</code> is an up-to-date mirror of the
+      operator's local <code>docs/RSPRO.asn</code> (and still present as
+      package-data in <code>pyproject.toml</code>)</li>
+<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> operator-facing docs that reference <code>docs/</code> describe it as an
+      optional local developer tree (not as shipped content)</li>
+<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> no local-only audit/report files are required to validate this release;
+      all release gates are represented by tracked tests, docs, and <abbr title="Certificate Issuer">CI</abbr> checks</li>
+<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> <code>pyflakes SCP03/ SCP11/ SCP80/ SIMCARD/ Tools/ main/ plugins/
+      yggdrasim_common/</code> is clean modulo the two documented <code># noqa:
+      F401</code> probes and the <code>SCP11/shared</code> / <code>SCP11/relay</code> star-import
+      shims</li>
+</ul>
+<h2 id="editable-install">Editable install</h2>
+<ul class="task-list">
+<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> <code>python -m pip install -e .</code> succeeds in a clean venv</li>
+<li class="task-list-item">
+<p><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> every installed console script launches:</p>
+<div class="code-block"><pre><code>yggdrasim-scp03 --cmd &quot;EXIT&quot;
+yggdrasim-scp80 --cmd &quot;exit&quot;
+yggdrasim-scp11 --cmd &quot;EXIT&quot;
+yggdrasim-scp11-live --cmd &quot;HELP; EXIT&quot;
+yggdrasim-scp11-test --cmd &quot;HELP; EXIT&quot;
+yggdrasim-scp11-local-access --cmd &quot;HELP; EXIT&quot;
+yggdrasim-scp11-eim-local --cmd &quot;HELP; EXIT&quot;
+yggdrasim-profile-package --cmd &quot;STATUS; EXIT&quot;
+yggdrasim-profile-autoload --help
+yggdrasim-apdu-fuzzer --help
+yggdrasim-eum-diag --help
+yggdrasim-suci-tool --cmd &quot;STATUS; EXIT&quot;
+</code></pre></div>
+</li>
+<li class="task-list-item">
+<p><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> registry resolves:</p>
+<div class="code-block"><pre><code>python -c &quot;from yggdrasim_common.registry import search; \
+    print(list(search(&#39;orchestrator&#39;))[:5])&quot;
+</code></pre></div>
+</li>
+</ul>
+<h2 id="targeted-test-suite">Targeted test suite</h2>
+<p>Run narrowly-targeted pytest invocations that match the touched surfaces.
+Do not mass-run. Redirect noisy runs to a log file and inspect with <code>rg</code>.</p>
+<ul class="task-list">
+<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> each test file that exercises a changed area passes</li>
+<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> plugin runtime behavior is exercised through
+      <code>tests/test_polling_plugin_*.py</code> where applicable</li>
+<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> <abbr title="Hardware-In-The-Loop">HIL</abbr>-related tests pass in their emulated form</li>
+</ul>
+<h2 id="docker">Docker</h2>
+<ul class="task-list">
+<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> <code>docker build -t yggdrasim:test .</code> succeeds</li>
+<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> <code>docker run --rm yggdrasim:test yggdrasim-profile-package --cmd "EXIT"</code>
+      exits cleanly</li>
+<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> mounted-volume run persists state across invocations</li>
+</ul>
+<h2 id="pyinstaller-bundle">PyInstaller bundle</h2>
+<ul class="task-list">
+<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> <code>pyinstaller --clean --noconfirm yggdrasim_main.spec</code> succeeds</li>
+<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> <code>dist/yggdrasim</code> launches and writes the expected runtime tree</li>
+<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> at least one card-facing surface works end-to-end against the bundled
+      runtime material</li>
+<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> the runtime root resolution is correct for the target OS</li>
+</ul>
+<h2 id="documentation-site">Documentation site</h2>
+<ul class="task-list">
+<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> <code>python -m mkdocs build --strict</code> succeeds from the repo root</li>
+<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> the mirrored <code>site-docs/sources/</code> is regenerated via
+      <code>python site-docs/_tools/mirror_source_docs.py</code></li>
+<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> nav entries that reference new pages exist and resolve</li>
+<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> nav entries for removed pages are removed</li>
+</ul>
+<h2 id="tagging-and-publishing">Tagging and publishing</h2>
+<p>The <abbr title="Certificate Issuer">CI</abbr> workflows are currently validation-only for the v1.0.1 cycle. They run
+build/test checks but do not publish release assets and do not push Docker
+images.</p>
+<p>Release publication is therefore a manual maintainer step.</p>
+<h3 id="tagging-contract">Tagging contract</h3>
+<ul class="task-list">
+<li class="task-list-item">
+<p><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> tag the release in git <strong>with an annotation that reads as a
+      release note</strong> (covers headline behavioural changes, defaults,
+      migration considerations):</p>
+<div class="code-block"><pre><code>git tag -a vX.Y.Z -m &quot;$(cat &lt;&lt;&#39;EOF&#39;
+YggdraSIM vX.Y.Z
+
+First / next … release. Notable changes:
+
+- …
+- …
+EOF
+)&quot;
+git push origin vX.Y.Z
+</code></pre></div>
+</li>
+<li class="task-list-item">
+<p><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> watch the workflow at <code>https://github.com/&lt;repo&gt;/actions</code> and
+      confirm the validation jobs complete for the release tag/branch.</p>
+</li>
+<li class="task-list-item">
+<p><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> confirm the GitHub Release page lists the eight asset names plus
+      <code>SHA256SUMS</code>:</p>
+<div class="code-block"><pre><code>yggdrasim-linux-x86_64-clean
+yggdrasim-linux-x86_64-full
+yggdrasim-linux-arm64-clean
+yggdrasim-linux-arm64-full
+yggdrasim-macos-x86_64-clean
+yggdrasim-macos-arm64-clean
+yggdrasim-windows-x86_64-clean.exe
+yggdrasim-clean_X.Y.Z_amd64.deb
+SHA256SUMS
+</code></pre></div>
+</li>
+<li class="task-list-item">
+<p><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> sanity-check that the install-script <code>release</code> mode resolves with
+      the just-published tag, e.g.:</p>
+<div class="code-block"><pre><code>YGGDRASIM_REPO=1oT/YggdraSIM \
+  scripts/install/install-linux.sh --version vX.Y.Z
+</code></pre></div>
+</li>
+</ul>
+<h2 id="post-release">Post-release</h2>
+<ul class="task-list">
+<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> smoke-test the published artifacts on a fresh host</li>
+<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> open issues for any deferred follow-up that surfaced during the
+      checklist</li>
+</ul>
+<h2 id="related-pages">Related pages</h2>
+<ul>
+<li><a href="../build-and-packaging.html">Build and Packaging</a></li>
+<li><a href="../how-to/build-a-bundled-exe.html">Build a Bundled Executable</a></li>
+<li><a href="testing-guide.html">Testing Guide</a></li>
+</ul>
+        </div>
+      </div><!-- /ygg-toc-body -->
+      <aside class="ygg-toc-rail" aria-label="On this page">
+        <p class="ygg-toc-rail-label">On this page</p>
+        <nav>
+            <a href="#pre-flight" class="toc-link">Pre-flight</a>
+            <a href="#editable-install" class="toc-link">Editable install</a>
+            <a href="#targeted-test-suite" class="toc-link">Targeted test suite</a>
+            <a href="#docker" class="toc-link">Docker</a>
+            <a href="#pyinstaller-bundle" class="toc-link">PyInstaller bundle</a>
+            <a href="#documentation-site" class="toc-link">Documentation site</a>
+            <a href="#tagging-and-publishing" class="toc-link">Tagging and publishing</a>
+            <a href="#tagging-contract" class="toc-link toc-link-sub">Tagging contract</a>
+            <a href="#post-release" class="toc-link">Post-release</a>
+            <a href="#related-pages" class="toc-link">Related pages</a>
+        </nav>
+      </aside>
+      </div><!-- /ygg-content-toc -->
+    </main>
+    <footer class="px-6 py-6 sm:px-10 lg:px-14 xl:px-16 border-t border-zinc-950/[0.06] dark:border-white/[0.05]">
+      <div class="ygg-content flex flex-col items-center gap-2 text-xs text-zinc-500">
+        <div class="flex items-center gap-1.5 text-sm">
+          <span class="font-sans font-semibold text-zinc-700 dark:text-zinc-300">YggdraSIM</span>
+          <span class="text-zinc-400 dark:text-zinc-500">by</span>
+          <a href="https://1ot.com" target="_blank" rel="noopener" class="font-semibold text-zinc-700 dark:text-zinc-300 hover:text-zinc-600 dark:hover:text-zinc-300 transition-colors">1oT</a>
+        </div>
+        <div class="flex flex-wrap items-center justify-center gap-2 text-zinc-400 dark:text-zinc-500">
+          <span>Copyright © 2026 1oT OÜ</span>
+          <span aria-hidden="true">·</span>
+          <span>Last updated <span data-ygg-updated>May 19, 2026</span></span>
+        </div>
+      </div>
+    </footer>
+  </div>
+</div>
+<script src="../ygg.js?v=2"></script>
+<!-- Mermaid: ygg.js loads ygg-mermaid.js when .doc-prose contains pre.mermaid -->
+</body>
+</html>

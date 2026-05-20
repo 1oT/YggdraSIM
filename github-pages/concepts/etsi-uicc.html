@@ -1,0 +1,182 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>ETSI UICC — YggdraSIM</title>
+  <link rel="icon" href="../assets/images/yggdrasil-mark.svg">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,100..900&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>html{font-size:100%}</style>
+  <script>(function(){var s=localStorage.getItem('ygg-theme');var p=window.matchMedia('(prefers-color-scheme: dark)').matches;if(s==='dark'||(!s&&p))document.documentElement.classList.add('dark');})();</script>
+  <link rel="stylesheet" href="../tailwind.css?v=2">
+  <link rel="stylesheet" href="../ygg.css?v=2">
+</head>
+<body class="antialiased font-sans bg-zinc-50 dark:bg-[var(--bg-page)] text-zinc-900 dark:text-zinc-100"
+      data-ygg-base="../" data-ygg-partial-path="../partials/sidebar.html" data-ygg-active-sub="concepts/etsi-uicc.html" data-ygg-open-sections="concepts">
+<a class="ygg-skip-link" href="#ygg-main">Skip to content</a>
+<div id="ygg-shell" class="flex min-h-dvh isolate ygg-layout-pending">
+  <div id="ygg-chrome-mount"></div>
+  <script src="../ygg-layout.js?v=2"></script>
+  <div id="ygg-main-column" class="flex-1 lg:ml-64 flex flex-col min-h-dvh">
+    <header class="lg:hidden sticky top-0 z-20 flex items-center gap-3 px-4 py-3 bg-white/95 dark:bg-[var(--bg-page)]/95 backdrop-blur-sm border-b border-zinc-950/[0.07] dark:border-white/[0.05] shrink-0">
+      <button type="button" onclick="openSidebar()" class="ygg-icon-btn flex items-center justify-center size-11 rounded-md text-zinc-500 transition-colors" aria-label="Open menu">
+        <svg class="size-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" focusable="false"><path d="M3 6h18M3 12h18M3 18h18"/></svg>
+      </button>
+      <span class="font-sans font-semibold text-sm tracking-tight">YggdraSIM</span>
+    </header>
+    <main id="ygg-main" tabindex="-1" class="flex-1 px-6 py-10 sm:px-10 lg:px-14 xl:px-16">
+      <div class="ygg-content-toc">
+      <div class="ygg-toc-body">
+        <nav class="flex flex-wrap items-center gap-1.5 text-xs text-zinc-400 mb-6" aria-label="Breadcrumb">
+          <ol class="ygg-crumbs"><li><a href="../index.html" class="doc-link no-underline">Home</a></li><li aria-hidden="true"><svg class="size-3 opacity-40" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6 4l4 4-4 4"/></svg></li><li><a href="index.html" class="hover:text-zinc-600 dark:hover:text-zinc-300 transition-colors no-underline">Concepts</a></li><li aria-hidden="true"><svg class="size-3 opacity-40" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6 4l4 4-4 4"/></svg></li><li><span class="text-zinc-600 dark:text-zinc-300" aria-current="page">ETSI UICC</span></li></ol>
+        </nav>
+        <h1 class="doc-h1 font-sans font-bold text-zinc-950 dark:text-white mb-2">ETSI UICC</h1>
+        <p class="page-lead mb-8"><abbr title="European Telecommunications Standards Institute">ETSI</abbr> TS 102 221 defines the <abbr title="Universal Integrated Circuit Card">UICC</abbr>'s physical, logical, and administrative
+interface. The filesystem model, access conditions, and SELECT semantics used
+by every admin shell come from this specification. The vendored copy lives in
+<code>docs/ts_102221v160200p.md</code>.</p>
+        <details class="toc-mobile xl:hidden mb-8">
+          <summary>On this page <svg class="toc-mobile-chevron size-4" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 6l4 4 4-4"/></svg></summary>
+          <nav>
+            <a href="#filesystem-anatomy" class="toc-link">Filesystem anatomy</a>
+            <a href="#select-semantics" class="toc-link">SELECT semantics</a>
+            <a href="#access-conditions" class="toc-link">Access conditions</a>
+            <a href="#pin-and-authentication" class="toc-link">PIN and authentication</a>
+            <a href="#apdu-pathing" class="toc-link">APDU pathing</a>
+            <a href="#toolkit" class="toc-link">Toolkit</a>
+            <a href="#where-to-look-in-yggdrasim" class="toc-link">Where to look in YggdraSIM</a>
+          </nav>
+        </details>
+        <div class="doc-prose text-[0.9375rem] leading-relaxed text-zinc-600 dark:text-zinc-400 space-y-4">
+<h2 id="filesystem-anatomy">Filesystem anatomy</h2>
+<pre class="mermaid"><code>flowchart TB
+    MF["MF<br/>Master File"] --> DFTelecom["DF<sub>TELECOM</sub>"]
+    MF --> DFGSM["DF<sub>GSM</sub>"]
+    MF --> ADFUSIM["ADF<sub>USIM</sub>"]
+    MF --> ADFISIM["ADF<sub>ISIM</sub>"]
+    DFTelecom --> EFAdn["EF<sub>ADN</sub>"]
+    ADFUSIM --> EFImsi["EF<sub>IMSI</sub>"]
+    ADFUSIM --> EFLoci["EF<sub>LOCI</sub>"]
+    ADFUSIM --> DFAuthn["DF<sub>AUTHN</sub>"]</code></pre>
+<p class="fig-caption">Figure: ETSI UICC filesystem anatomy — MF, DFs, ADFs, and key EFs</p>
+<ul>
+<li><strong><abbr title="Master File">MF</abbr></strong> is the Master File. It is the root of the tree.</li>
+<li><strong><abbr title="Dedicated File">DF</abbr></strong> is a Dedicated File. It groups related EFs and subordinate DFs.</li>
+<li><strong>ADF</strong> is an Application Dedicated File. It is the root of a <abbr title="Network Access Application (USIM / ISIM / CSIM)">NAA</abbr> such as
+  <abbr title="Universal Subscriber Identity Module">USIM</abbr> or <abbr title="IP Multimedia Services Identity Module">ISIM</abbr>.</li>
+<li><strong><abbr title="Elementary File">EF</abbr></strong> is an Elementary File. It is where actual data lives.</li>
+</ul>
+<p>Each <abbr title="Elementary File">EF</abbr> carries a structure that determines the right access verb.</p>
+<div class="-mx-6 sm:mx-0 doc-table-scroll"><table class="doc-table">
+<thead>
+<tr>
+<th><abbr title="Elementary File">EF</abbr> structure</th>
+<th>Access</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Transparent</td>
+<td><code>READ BINARY</code> / <code>UPDATE BINARY</code></td>
+</tr>
+<tr>
+<td>Linear fixed</td>
+<td><code>READ RECORD</code> / <code>UPDATE RECORD</code> by record number</td>
+</tr>
+<tr>
+<td>Cyclic</td>
+<td><code>READ RECORD</code> / <code>UPDATE RECORD</code> with ring behavior</td>
+</tr>
+<tr>
+<td>BER-<abbr title="Tag-Length-Value">TLV</abbr></td>
+<td><abbr title="Tag-Length-Value">TLV</abbr> tag-based access</td>
+</tr>
+</tbody>
+</table></div>
+<h2 id="select-semantics">SELECT semantics</h2>
+<p><code>SELECT</code> addresses a file by <strong><abbr title="File Identifier">FID</abbr></strong>, by <strong><abbr title="Application Identifier">AID</abbr></strong>, by path, or by application
+template depending on <code>P1</code>/<code>P2</code>. The card returns a <strong><abbr title="File Control Parameters">FCP</abbr></strong> template with size,
+structure, access conditions, lifecycle, and proprietary tags.</p>
+<p>The file-identifier space uses 2-byte FIDs, and the common ones are well
+known:</p>
+<ul>
+<li><code>3F00</code> is the <abbr title="Master File">MF</abbr></li>
+<li><code>7FFF</code> is the reserved value</li>
+<li><code>7F10</code> is historical <code>DF TELECOM</code></li>
+<li><code>7F20</code> is historical <code>DF GSM</code></li>
+<li>ADFs for <abbr title="Universal Subscriber Identity Module">USIM</abbr> and <abbr title="IP Multimedia Services Identity Module">ISIM</abbr> are addressed by <abbr title="Application Identifier">AID</abbr> rather than fixed <abbr title="File Identifier">FID</abbr></li>
+</ul>
+<h2 id="access-conditions">Access conditions</h2>
+<p>Every <abbr title="Elementary File">EF</abbr> carries access conditions per operation (<code>READ</code>, <code>UPDATE</code>,
+<code>DEACTIVATE</code>, <code>ACTIVATE</code>, <code>INCREASE</code>, etc.). Common values include:</p>
+<ul>
+<li><code>ALW</code> always allowed</li>
+<li><code>PIN</code> requires verified CHV1</li>
+<li><code>PIN2</code> requires verified CHV2</li>
+<li><code>ADM</code> requires administrative authentication (for example <abbr title="GlobalPlatform">GP</abbr> <abbr title="Secure Channel Protocol 03 (GP)">SCP03</abbr>)</li>
+<li><code>NEV</code> never allowed</li>
+</ul>
+<p>The <abbr title="Universal Integrated Circuit Card">UICC</abbr> enforces these before it answers. The admin shell surfaces them in
+filesystem listing output.</p>
+<h2 id="pin-and-authentication"><abbr title="Personal Identification Number">PIN</abbr> and authentication</h2>
+<p>CHV1 (<code>PIN</code>) and CHV2 (<code>PIN2</code>) are the user-level authentication credentials.
+Blocking counters apply, and <code>PUK</code> values reset a blocked CHV. The commands
+are <code>VERIFY</code>, <code>CHANGE</code>, <code>DISABLE</code>, <code>ENABLE</code>, and <code>UNBLOCK</code>.</p>
+<h2 id="apdu-pathing"><abbr title="Application Protocol Data Unit (ISO 7816-4)">APDU</abbr> pathing</h2>
+<p>Since <code>3F00</code> is addressable explicitly, YggdraSIM's <abbr title="Secure Channel Protocol 03 (GP)">SCP03</abbr> shell uses path
+strings such as <code>3F00/7FFF/6F07</code> when a verb needs an unambiguous target.</p>
+<div class="code-block"><pre><code>[A0...] &gt; SELECT 3F00
+[A0...] &gt; SELECT 7FFF
+[A0...] &gt; SELECT 6F07
+[A0...] &gt; READ
+</code></pre></div>
+<h2 id="toolkit">Toolkit</h2>
+<p><abbr title="European Telecommunications Standards Institute">ETSI</abbr> TS 102 223 defines the Card Application Toolkit that lets the card
+initiate actions toward the terminal. YggdraSIM surfaces toolkit interactions
+indirectly through <abbr title="Secure Channel Protocol 80 (ETSI TS 102 225 / 226)">SCP80</abbr> <abbr title="Over-The-Air">OTA</abbr> flows that install or update toolkit applets.</p>
+<h2 id="where-to-look-in-yggdrasim">Where to look in YggdraSIM</h2>
+<ul>
+<li><a href="../subsystems/scp03.html"><abbr title="Secure Channel Protocol 03 (GP)">SCP03</abbr> Admin Shell</a> for live filesystem work</li>
+<li><a href="../subsystems/scp80.html"><abbr title="Secure Channel Protocol 80 (ETSI TS 102 225 / 226)">SCP80</abbr> <abbr title="Over-The-Air">OTA</abbr> Shell</a> for <abbr title="Remote File Management">RFM</abbr>/<abbr title="Remote Application Management">RAM</abbr> payloads that
+  manipulate the filesystem remotely</li>
+<li><a href="../reference/standards-map.html">Standards Map</a> for the specific
+  TS 102 221 sections mapped to YggdraSIM code paths</li>
+</ul>
+        </div>
+      </div><!-- /ygg-toc-body -->
+      <aside class="ygg-toc-rail" aria-label="On this page">
+        <p class="ygg-toc-rail-label">On this page</p>
+        <nav>
+            <a href="#filesystem-anatomy" class="toc-link">Filesystem anatomy</a>
+            <a href="#select-semantics" class="toc-link">SELECT semantics</a>
+            <a href="#access-conditions" class="toc-link">Access conditions</a>
+            <a href="#pin-and-authentication" class="toc-link">PIN and authentication</a>
+            <a href="#apdu-pathing" class="toc-link">APDU pathing</a>
+            <a href="#toolkit" class="toc-link">Toolkit</a>
+            <a href="#where-to-look-in-yggdrasim" class="toc-link">Where to look in YggdraSIM</a>
+        </nav>
+      </aside>
+      </div><!-- /ygg-content-toc -->
+    </main>
+    <footer class="px-6 py-6 sm:px-10 lg:px-14 xl:px-16 border-t border-zinc-950/[0.06] dark:border-white/[0.05]">
+      <div class="ygg-content flex flex-col items-center gap-2 text-xs text-zinc-500">
+        <div class="flex items-center gap-1.5 text-sm">
+          <span class="font-sans font-semibold text-zinc-700 dark:text-zinc-300">YggdraSIM</span>
+          <span class="text-zinc-400 dark:text-zinc-500">by</span>
+          <a href="https://1ot.com" target="_blank" rel="noopener" class="font-semibold text-zinc-700 dark:text-zinc-300 hover:text-zinc-600 dark:hover:text-zinc-300 transition-colors">1oT</a>
+        </div>
+        <div class="flex flex-wrap items-center justify-center gap-2 text-zinc-400 dark:text-zinc-500">
+          <span>Copyright © 2026 1oT OÜ</span>
+          <span aria-hidden="true">·</span>
+          <span>Last updated <span data-ygg-updated>May 19, 2026</span></span>
+        </div>
+      </div>
+    </footer>
+  </div>
+</div>
+<script src="../ygg.js?v=2"></script>
+<!-- Mermaid: ygg.js loads ygg-mermaid.js when .doc-prose contains pre.mermaid -->
+</body>
+</html>

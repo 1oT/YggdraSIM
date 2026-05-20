@@ -1,0 +1,191 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Run HIL capture — YggdraSIM</title>
+  <link rel="icon" href="../assets/images/yggdrasil-mark.svg">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,100..900&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>html{font-size:100%}</style>
+  <script>(function(){var s=localStorage.getItem('ygg-theme');var p=window.matchMedia('(prefers-color-scheme: dark)').matches;if(s==='dark'||(!s&&p))document.documentElement.classList.add('dark');})();</script>
+  <link rel="stylesheet" href="../tailwind.css?v=2">
+  <link rel="stylesheet" href="../ygg.css?v=2">
+</head>
+<body class="antialiased font-sans bg-zinc-50 dark:bg-[var(--bg-page)] text-zinc-900 dark:text-zinc-100"
+      data-ygg-base="../" data-ygg-partial-path="../partials/sidebar.html" data-ygg-active-sub="how-to/run-hil-capture.html" data-ygg-open-sections="how-to">
+<a class="ygg-skip-link" href="#ygg-main">Skip to content</a>
+<div id="ygg-shell" class="flex min-h-dvh isolate ygg-layout-pending">
+  <div id="ygg-chrome-mount"></div>
+  <script src="../ygg-layout.js?v=2"></script>
+  <div id="ygg-main-column" class="flex-1 lg:ml-64 flex flex-col min-h-dvh">
+    <header class="lg:hidden sticky top-0 z-20 flex items-center gap-3 px-4 py-3 bg-white/95 dark:bg-[var(--bg-page)]/95 backdrop-blur-sm border-b border-zinc-950/[0.07] dark:border-white/[0.05] shrink-0">
+      <button type="button" onclick="openSidebar()" class="ygg-icon-btn flex items-center justify-center size-11 rounded-md text-zinc-500 transition-colors" aria-label="Open menu">
+        <svg aria-hidden="true" focusable="false" class="size-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M3 12h18M3 18h18"/></svg>
+      </button>
+      <span class="font-sans font-semibold text-sm tracking-tight">YggdraSIM</span>
+    </header>
+    <main class="flex-1 px-6 py-10 sm:px-10 lg:px-14 xl:px-16" id="ygg-main" tabindex="-1">
+      <div class="ygg-content-toc">
+      <div class="ygg-toc-body">
+        <nav class="flex flex-wrap items-center gap-1.5 text-xs text-zinc-400 mb-6" aria-label="Breadcrumb">
+          <ol class="ygg-crumbs">
+            <li><a href="../index.html" class="doc-link no-underline">Home</a></li>
+            <li aria-hidden="true"><svg class="size-3 opacity-40" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6 4l4 4-4 4"/></svg></li>
+            <li><a href="index.html" class="hover:text-zinc-600 dark:hover:text-zinc-300 transition-colors no-underline">How To</a></li>
+            <li aria-hidden="true"><svg class="size-3 opacity-40" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6 4l4 4-4 4"/></svg></li>
+            <li><span aria-current="page" class="text-zinc-600 dark:text-zinc-300">Run HIL capture</span></li>
+          </ol>
+        </nav>
+        <h1 class="doc-h1 font-sans font-bold text-zinc-950 dark:text-white mb-2">Run HIL capture</h1>
+        <p class="page-lead mb-8">Bring up the <abbr title="Hardware-In-The-Loop">HIL</abbr> supervisor, attach a real <abbr title="Universal Integrated Circuit Card">UICC</abbr>/<abbr title="Embedded UICC">eUICC</abbr>, expose it to both a
+modem and a YggdraSIM shell, and capture the combined <abbr title="Application Protocol Data Unit (ISO 7816-4)">APDU</abbr> traffic in
+Wireshark for post-mortem review.</p>
+        <details class="toc-mobile xl:hidden mb-8">
+          <summary>On this page <svg class="toc-mobile-chevron size-4" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 6l4 4 4-4"/></svg></summary>
+          <nav>
+            <a href="#prerequisites" class="toc-link">Prerequisites</a>
+            <a href="#steps" class="toc-link">Steps</a>
+            <a href="#validation" class="toc-link">Validation</a>
+            <a href="#common-failures" class="toc-link">Common failures</a>
+            <a href="#related-pages" class="toc-link">Related pages</a>
+          </nav>
+        </details>
+        <div class="doc-prose text-[0.9375rem] leading-relaxed text-zinc-600 dark:text-zinc-400 space-y-4">
+<h2 id="prerequisites">Prerequisites</h2>
+<ul>
+<li><code>pcscd</code> running on the host</li>
+<li><code>osmo-remsim-client-st2</code> installed on <code>PATH</code></li>
+<li>a SIMtrace2 flashed for card emulation</li>
+<li>a physical <abbr title="Universal Integrated Circuit Card">UICC</abbr> or <abbr title="Embedded UICC">eUICC</abbr> in a <abbr title="Personal Computer/Smart Card (Workgroup)">PC/SC</abbr> reader</li>
+<li>Wireshark with a loopback interface available</li>
+<li>optional <code>simtrace2-list</code> / <code>simtrace2-tool</code> for USB inspection</li>
+</ul>
+<h2 id="steps">Steps</h2>
+<ol>
+<li>
+<p>Start Wireshark listening on the loopback interface, filter <code>gsm_sim</code> or
+   <code>udp.port == 4729</code>.</p>
+</li>
+<li>
+<p>Launch the supervisor.</p>
+<div class="code-block"><pre><code>yggdrasim-hil-supervisor \
+  --reader-index 0 \
+  --host 127.0.0.1 \
+  --port 9997 \
+  --advertise-host 127.0.0.1 \
+  --usb-vidpid 1d50:60e3
+</code></pre></div>
+</li>
+<li>
+<p>Confirm healthy state.</p>
+<div class="code-block"><pre><code>cat state/hil_bridge_supervisor.json
+cat state/hil_bridge_card_relay.json
+</code></pre></div>
+<p>Look for <code>status: running</code>, <code>usbPresent: true</code>, and a relay
+<code>status: ok</code> with a non-empty <code>atr</code>.</p>
+</li>
+<li>
+<p>Let the modem attach to the SIMtrace2. Wireshark should now populate with
+   GSMTAP APDUs between modem and card.</p>
+</li>
+<li>
+<p>Open a YggdraSIM shell that can be pointed at the relay side-channel.</p>
+<div class="code-block"><pre><code>python -m SCP11.live
+</code></pre></div>
+<p>Traffic from the shell appears in the same Wireshark capture, serialized
+with modem traffic on the one live card.</p>
+</li>
+<li>
+<p>Save the capture when the observation is complete.</p>
+<p>If the session used a secure channel and you want to be able to
+unwrap it during later offline review, dump the session keys into a
+keybag JSON next to the capture (see
+<a href="replay-hil-pcap-offline.html">Replay a <abbr title="Hardware-In-The-Loop">HIL</abbr> pcap offline</a>):</p>
+<div class="code-block"><pre><code># from the SCP03 admin shell, after AUTH-SD
+[A0...00] &gt; EXPORT-KEYBAG Workspace/hil/captures/session-2026-04-20.keys.json case-1234
+
+# or from SCP11 Local Access, after a BSP-building verb
+[Local SMDPP] &gt; EXPORT-KEYBAG Workspace/hil/captures/session-2026-04-20.keys.json case-1234
+</code></pre></div>
+</li>
+<li>
+<p>Shut the supervisor down cleanly. It terminates both the bridge and
+   <code>osmo-remsim-client-st2</code>.</p>
+</li>
+</ol>
+<h2 id="validation">Validation</h2>
+<ul>
+<li>Wireshark shows APDUs from both the modem and the YggdraSIM side</li>
+<li>no reader contention errors surface from other <abbr title="Personal Computer/Smart Card (Workgroup)">PC/SC</abbr> clients</li>
+<li>state files show <code>status: running</code> / <code>status: ok</code> throughout the session</li>
+</ul>
+<h2 id="common-failures">Common failures</h2>
+<div class="-mx-6 sm:mx-0 doc-table-scroll"><table class="doc-table">
+<thead>
+<tr>
+<th>Symptom</th>
+<th>Likely cause</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>supervisor reports <code>usbPresent: false</code></td>
+<td>SIMtrace2 not enumerated. Check <code>dmesg</code> and <code>lsusb</code>.</td>
+</tr>
+<tr>
+<td>relay never reports <code>status: ok</code></td>
+<td><code>osmo-remsim-client-st2</code> is failing to attach. Check its logs.</td>
+</tr>
+<tr>
+<td>missing <code>atr</code> in relay state</td>
+<td>card not powered or seated. Reseat it in the reader.</td>
+</tr>
+<tr>
+<td>Wireshark sees modem traffic but not YggdraSIM traffic</td>
+<td>YggdraSIM shell is using a direct <abbr title="Personal Computer/Smart Card (Workgroup)">PC/SC</abbr> handle instead of the relay. Verify the configuration.</td>
+</tr>
+</tbody>
+</table></div>
+<h2 id="related-pages">Related pages</h2>
+<ul>
+<li><a href="../subsystems/hil-bridge.html"><abbr title="Hardware-In-The-Loop">HIL</abbr> Bridge</a></li>
+<li><a href="../concepts/hil-model.html"><abbr title="Hardware-In-The-Loop">HIL</abbr> Model</a></li>
+<li><a href="replay-hil-pcap-offline.html">Replay a <abbr title="Hardware-In-The-Loop">HIL</abbr> pcap offline</a></li>
+<li><code>guides/HIL_BRIDGE_GUIDE.md</code></li>
+</ul>
+        </div>
+      </div><!-- /ygg-toc-body -->
+      <aside class="ygg-toc-rail" aria-label="On this page">
+        <p class="ygg-toc-rail-label">On this page</p>
+        <nav>
+            <a href="#prerequisites" class="toc-link">Prerequisites</a>
+            <a href="#steps" class="toc-link">Steps</a>
+            <a href="#validation" class="toc-link">Validation</a>
+            <a href="#common-failures" class="toc-link">Common failures</a>
+            <a href="#related-pages" class="toc-link">Related pages</a>
+        </nav>
+      </aside>
+      </div><!-- /ygg-content-toc -->
+    </main>
+    <footer class="px-6 py-6 sm:px-10 lg:px-14 xl:px-16 border-t border-zinc-950/[0.06] dark:border-white/[0.05]">
+      <div class="ygg-content flex flex-col items-center gap-2 text-xs text-zinc-500">
+        <div class="flex items-center gap-1.5 text-sm">
+          <span class="font-sans font-semibold text-zinc-700 dark:text-zinc-300">YggdraSIM</span>
+          <span class="text-zinc-400 dark:text-zinc-500">by</span>
+          <a href="https://1ot.com" target="_blank" rel="noopener" class="font-semibold text-zinc-700 dark:text-zinc-300 hover:text-zinc-600 dark:hover:text-zinc-300 transition-colors">1oT</a>
+        </div>
+        <div class="flex flex-wrap items-center justify-center gap-2 text-zinc-400 dark:text-zinc-500">
+          <span>Copyright © 2026 1oT OÜ</span>
+          <span aria-hidden="true">·</span>
+          <span>Last updated <span data-ygg-updated>May 19, 2026</span></span>
+        </div>
+      </div>
+    </footer>
+  </div>
+</div>
+<script src="../ygg.js?v=2"></script>
+<!-- Mermaid: ygg.js loads ygg-mermaid.js when .doc-prose contains pre.mermaid -->
+</body>
+</html>

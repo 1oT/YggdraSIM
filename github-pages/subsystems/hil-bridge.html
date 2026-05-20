@@ -1,0 +1,406 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>HIL Bridge — YggdraSIM</title>
+  <link rel="icon" href="../assets/images/yggdrasil-mark.svg">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,100..900&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>html{font-size:100%}</style>
+  <script>(function(){var s=localStorage.getItem('ygg-theme');var p=window.matchMedia('(prefers-color-scheme: dark)').matches;if(s==='dark'||(!s&&p))document.documentElement.classList.add('dark');})();</script>
+  <link rel="stylesheet" href="../tailwind.css?v=2">
+  <link rel="stylesheet" href="../ygg.css?v=2">
+</head>
+<body class="antialiased font-sans bg-zinc-50 dark:bg-[var(--bg-page)] text-zinc-900 dark:text-zinc-100"
+      data-ygg-base="../" data-ygg-partial-path="../partials/sidebar.html" data-ygg-active-sub="subsystems/hil-bridge.html" data-ygg-open-sections="subsystems">
+<a class="ygg-skip-link" href="#ygg-main">Skip to content</a>
+<div id="ygg-shell" class="flex min-h-dvh isolate ygg-layout-pending">
+  <div id="ygg-chrome-mount"></div>
+  <script src="../ygg-layout.js?v=2"></script>
+  <div id="ygg-main-column" class="flex-1 lg:ml-64 flex flex-col min-h-dvh">
+    <header class="lg:hidden sticky top-0 z-20 flex items-center gap-3 px-4 py-3 bg-white/95 dark:bg-[var(--bg-page)]/95 backdrop-blur-sm border-b border-zinc-950/[0.07] dark:border-white/[0.05] shrink-0">
+      <button type="button" onclick="openSidebar()" class="ygg-icon-btn flex items-center justify-center size-11 rounded-md text-zinc-500 transition-colors" aria-label="Open menu">
+        <svg aria-hidden="true" focusable="false" class="size-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M3 12h18M3 18h18"/></svg>
+      </button>
+      <span class="font-sans font-semibold text-sm tracking-tight">YggdraSIM</span>
+    </header>
+    <main id="ygg-main" tabindex="-1" class="flex-1 px-6 py-10 sm:px-10 lg:px-14 xl:px-16">
+      <div class="ygg-content-toc">
+      <div class="ygg-toc-body">
+        <nav class="flex flex-wrap items-center gap-1.5 text-xs text-zinc-400 mb-6" aria-label="Breadcrumb">
+          <ol class="ygg-crumbs">
+            <li><a href="../index.html" class="doc-link no-underline">Home</a></li>
+            <li aria-hidden="true"><svg class="size-3 opacity-40" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6 4l4 4-4 4"/></svg></li>
+            <li><a href="index.html" class="hover:text-zinc-600 dark:hover:text-zinc-300 transition-colors no-underline">Subsystems</a></li>
+            <li aria-hidden="true"><svg class="size-3 opacity-40" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6 4l4 4-4 4"/></svg></li>
+            <li><span aria-current="page" class="text-zinc-600 dark:text-zinc-300">HIL Bridge</span></li>
+          </ol>
+        </nav>
+        <h1 class="doc-h1 font-sans font-bold text-zinc-950 dark:text-white mb-2">HIL Bridge</h1>
+        <p class="page-lead mb-8"><code>Tools/HilBridge/</code> is the physical-card-to-modem bridge. Use it when a real
+<abbr title="Universal Integrated Circuit Card">UICC</abbr>/<abbr title="Embedded UICC">eUICC</abbr> must stay in a <abbr title="Personal Computer/Smart Card (Workgroup)">PC/SC</abbr> reader on the host while serving a modem
+through a SIMtrace2, and YggdraSIM shells still need live side-channel access
+to the same card.</p>
+        <details class="toc-mobile xl:hidden mb-8">
+          <summary>On this page <svg class="toc-mobile-chevron size-4" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 6l4 4 4-4"/></svg></summary>
+          <nav>
+            <a href="#when-to-use-it" class="toc-link">When to use it</a>
+            <a href="#entry-points" class="toc-link">Entry points</a>
+            <a href="#supervisor-responsibilities" class="toc-link">Supervisor responsibilities</a>
+            <a href="#runtime-dependencies" class="toc-link">Runtime dependencies</a>
+            <a href="#state-the-supervisor-and-bridge-write" class="toc-link">State the supervisor and bridge write</a>
+            <a href="#health-signals" class="toc-link">Health signals</a>
+            <a href="#common-recipes" class="toc-link">Common recipes</a>
+            <a href="#start-check-stop" class="toc-link toc-link-sub">Start, check, stop</a>
+            <a href="#pair-with-a-yggdrasim-shell" class="toc-link toc-link-sub">Pair with a YggdraSIM shell</a>
+            <a href="#use-wireshark-to-watch-gsmtap" class="toc-link toc-link-sub">Use Wireshark to watch GSMTAP</a>
+            <a href="#offline-pcap-replay" class="toc-link">Offline pcap replay</a>
+            <a href="#session-key-export" class="toc-link">Session key export</a>
+            <a href="#keybag-json-schema" class="toc-link toc-link-sub">Keybag JSON schema</a>
+            <a href="#pitfalls" class="toc-link">Pitfalls</a>
+            <a href="#atcsim-atcrsm-transcoder" class="toc-link">AT+CSIM / AT+CRSM transcoder</a>
+            <a href="#optional-systemd-user-service" class="toc-link">Optional systemd --user service</a>
+            <a href="#related-pages" class="toc-link">Related pages</a>
+          </nav>
+        </details>
+        <div class="doc-prose text-[0.9375rem] leading-relaxed text-zinc-600 dark:text-zinc-400 space-y-4">
+<div class="admonition info">
+<p class="admonition-title">Underlying concept</p>
+<p>Read <a href="../concepts/hil-model.html"><abbr title="Hardware-In-The-Loop">HIL</abbr> Model</a> first. This page focuses on the
+operator surface and health signals.</p>
+</div>
+<h2 id="when-to-use-it">When to use it</h2>
+<ul>
+<li>reproducing a real modem's behavior against a real <abbr title="Embedded UICC">eUICC</abbr> in the lab</li>
+<li>capturing end-to-end <abbr title="Application Protocol Data Unit (ISO 7816-4)">APDU</abbr> traces with both modem and YggdraSIM activity
+  visible</li>
+<li>observing a live relay or local-access session while the modem is
+  interacting with the same card</li>
+<li>serving a SIMtrace2 in card-emulation mode for a DUT</li>
+<li>re-opening a previously saved <code>.pcap</code> / <code>.pcapng</code> in the decoded-<abbr title="Application Protocol Data Unit (ISO 7816-4)">APDU</abbr>
+  <abbr title="Text User Interface">TUI</abbr> without bringing the bridge stack back up (offline review mode)</li>
+<li>layering <abbr title="Secure Channel Protocol 03 (GP)">SCP03</abbr> / SCP11c plaintext onto ciphered APDUs in either live
+  or offline review by pairing the capture with a keybag JSON sidecar</li>
+</ul>
+<h2 id="entry-points">Entry points</h2>
+<p>The supervisor is the recommended process. The bridge alone is meant for
+manual debugging.</p>
+<div class="tabbed-set tabbed-alternate" data-tabs="1:4"><input checked="checked" id="__tabbed_1_1" name="__tabbed_1" type="radio" /><input id="__tabbed_1_2" name="__tabbed_1" type="radio" /><input id="__tabbed_1_3" name="__tabbed_1" type="radio" /><input id="__tabbed_1_4" name="__tabbed_1" type="radio" /><div class="tabbed-labels"><label for="__tabbed_1_1">Supervisor</label><label for="__tabbed_1_2">Module form</label><label for="__tabbed_1_3">Bridge only</label><label for="__tabbed_1_4">Offline pcap review</label></div>
+<div class="tabbed-content">
+<div class="tabbed-block">
+<div class="code-block"><pre><code>yggdrasim-hil-supervisor \
+  --reader-index 0 \
+  --host 127.0.0.1 \
+  --port 9997 \
+  --advertise-host 127.0.0.1 \
+  --usb-vidpid 1d50:60e3
+</code></pre></div>
+</div>
+<div class="tabbed-block">
+<div class="code-block"><pre><code>python -m Tools.HilBridge.supervisor \
+  --reader-index 0 \
+  --host 127.0.0.1 \
+  --port 9997 \
+  --advertise-host 127.0.0.1 \
+  --usb-vidpid 1d50:60e3
+</code></pre></div>
+</div>
+<div class="tabbed-block">
+<div class="code-block"><pre><code>yggdrasim-hil-bridge
+python -m Tools.HilBridge.main
+</code></pre></div>
+</div>
+<div class="tabbed-block">
+<div class="code-block"><pre><code>python main/main.py --open-pcap /path/to/capture.pcapng
+python main/main.py --open-pcap /path/to/capture.pcap \
+    --keybag /path/to/session.keys.json
+</code></pre></div>
+<p>Opens the decoded-<abbr title="Application Protocol Data Unit (ISO 7816-4)">APDU</abbr> <abbr title="Text User Interface">TUI</abbr> in offline mode. No SIMtrace2, no
+supervisor, no FIFO, no <code>tshark -i</code>. The capture is read via
+<code>tshark -r</code>. When a keybag is provided (or a sibling
+<code>&lt;capture&gt;.keys.json</code> is auto-discovered), <abbr title="Secure Channel Protocol 03 (GP)">SCP03</abbr> / SCP11c ciphered
+APDUs are unwrapped and shown as extra plaintext rows next to the
+matching frame. See <a href="../how-to/replay-hil-pcap-offline.html">Replay a <abbr title="Hardware-In-The-Loop">HIL</abbr> pcap offline</a>.</p>
+</div>
+</div>
+</div>
+<h2 id="supervisor-responsibilities">Supervisor responsibilities</h2>
+<p>The supervisor:</p>
+<ul>
+<li>starts and supervises both the <abbr title="Hardware-In-The-Loop">HIL</abbr> bridge process and
+  <code>osmo-remsim-client-st2</code></li>
+<li>tracks USB presence of the SIMtrace2 by VID:PID</li>
+<li>writes health state to <code>state/hil_bridge_supervisor.json</code></li>
+<li>writes card-relay endpoint state to <code>state/hil_bridge_card_relay.json</code></li>
+<li>cleans up both processes on shutdown</li>
+</ul>
+<h2 id="runtime-dependencies">Runtime dependencies</h2>
+<ul>
+<li><code>pcscd</code> and its reader drivers</li>
+<li><code>osmo-remsim-client-st2</code></li>
+<li>SIMtrace2 hardware flashed for card emulation</li>
+<li>optional <code>simtrace2-list</code> / <code>simtrace2-tool</code> for manual inspection</li>
+<li>optional Wireshark for GSMTAP capture</li>
+</ul>
+<h2 id="state-the-supervisor-and-bridge-write">State the supervisor and bridge write</h2>
+<div class="-mx-6 sm:mx-0 doc-table-scroll"><table class="doc-table">
+<thead>
+<tr>
+<th>File</th>
+<th>Contents</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>state/hil_bridge_supervisor.json</code></td>
+<td>supervisor status, bridge PID, USB presence</td>
+</tr>
+<tr>
+<td><code>state/hil_bridge_card_relay.json</code></td>
+<td>relay status, URLs, reader name, <abbr title="Answer To Reset">ATR</abbr></td>
+</tr>
+</tbody>
+</table></div>
+<h2 id="health-signals">Health signals</h2>
+<p>Healthy state reads:</p>
+<ul>
+<li>supervisor <code>status: running</code></li>
+<li>supervisor <code>usbPresent: true</code></li>
+<li>supervisor <code>bridgePid</code> non-zero</li>
+<li>relay <code>status: ok</code></li>
+<li>relay exposes <code>apduUrl</code>, <code>statusUrl</code>, <code>modemRefreshUrl</code></li>
+<li>relay shows a non-empty <code>reader</code> and a non-empty <code>atr</code></li>
+</ul>
+<p>Anything else means the stack is not fully armed.</p>
+<h2 id="common-recipes">Common recipes</h2>
+<h3 id="start-check-stop">Start, check, stop</h3>
+<div class="code-block"><pre><code>yggdrasim-hil-supervisor --reader-index 0 --host 127.0.0.1 --port 9997
+# ... in another shell ...
+cat state/hil_bridge_supervisor.json
+cat state/hil_bridge_card_relay.json
+# ... stop via the supervisor&#39;s shutdown path or Ctrl-C ...
+</code></pre></div>
+<h3 id="pair-with-a-yggdrasim-shell">Pair with a YggdraSIM shell</h3>
+<p>Once the relay reports <code>status: ok</code>, open any <abbr title="Secure Channel Protocol 11 (GP, elliptic curve)">SCP11</abbr> or <abbr title="Secure Channel Protocol 03 (GP)">SCP03</abbr> shell that can
+be pointed at the relay URLs. The card will see both modem APDUs and
+YggdraSIM APDUs on one session, serialized through the bridge.</p>
+<h3 id="use-wireshark-to-watch-gsmtap">Use Wireshark to watch GSMTAP</h3>
+<p>Open Wireshark on UDP 4729 (loopback). The bridge mirrors every <abbr title="Application Protocol Data Unit (ISO 7816-4)">APDU</abbr> as
+GSMTAP while it is running, even if no YggdraSIM shell is attached.</p>
+<h2 id="offline-pcap-replay">Offline pcap replay</h2>
+<p>The decoded-<abbr title="Application Protocol Data Unit (ISO 7816-4)">APDU</abbr> <abbr title="Text User Interface">TUI</abbr> has two drive modes:</p>
+<div class="-mx-6 sm:mx-0 doc-table-scroll"><table class="doc-table">
+<thead>
+<tr>
+<th>Mode</th>
+<th>How it is launched</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Live capture</td>
+<td><code>[B]</code> <abbr title="Hardware-In-The-Loop">HIL</abbr> sub-menu pick <code>[1]</code> with view <code>[3]</code> (Decoded <abbr title="Application Protocol Data Unit (ISO 7816-4)">APDU</abbr>)</td>
+<td>tails the running bridge's FIFO via <code>tshark -i</code></td>
+</tr>
+<tr>
+<td>Offline review</td>
+<td><code>[B]</code> sub-menu pick <code>[3]</code>, or <code>main/main.py --open-pcap &lt;path&gt;</code></td>
+<td>reads a saved <code>.pcap</code> / <code>.pcapng</code> via <code>tshark -r</code>, with no FIFO and no bridge</td>
+</tr>
+</tbody>
+</table></div>
+<p>Both modes accept a <strong>keybag JSON</strong> sidecar. It stores the per-session
+<abbr title="Secure Channel Protocol 03 (GP)">SCP03</abbr> / SCP11c key material that the <abbr title="Text User Interface">TUI</abbr>'s replay engine needs to
+unwrap secure-messaging APDUs (CLA bit <code>0x04</code>). When resolving the
+keybag, the <abbr title="Text User Interface">TUI</abbr> tries, in order:</p>
+<ol>
+<li><code>--keybag &lt;path&gt;</code> on the launcher, or the prompt in the <code>[B]</code>
+   offline-review flow</li>
+<li><code>&lt;capture&gt;.pcap.keys.json</code> next to the capture</li>
+<li><code>&lt;capture&gt;.keys.json</code> (capture stem + <code>.keys.json</code>)</li>
+</ol>
+<p>A missing or unreadable keybag is non-fatal — ciphered APDUs simply
+stay wrapped in the <abbr title="Text User Interface">TUI</abbr>. See <a href="#keybag-json-schema">Keybag JSON schema</a>
+below for the file shape and how to produce one with
+<a href="#session-key-export"><code>EXPORT-KEYBAG</code></a> in <abbr title="Secure Channel Protocol 03 (GP)">SCP03</abbr> / <abbr title="Secure Channel Protocol 11 (GP, elliptic curve)">SCP11</abbr> Local Access,
+or with <code>--dump-keybag</code> from the same modules.</p>
+<h2 id="session-key-export">Session key export</h2>
+<p>Keybags are produced host-side by the same shells that derive the
+session keys. The two supported flows are:</p>
+<div class="-mx-6 sm:mx-0 doc-table-scroll"><table class="doc-table">
+<thead>
+<tr>
+<th>Source shell</th>
+<th>Command</th>
+<th>Where the keys come from</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>SCP03</code></td>
+<td><code>EXPORT-KEYBAG [OutputPath.keys.json] [Label]</code></td>
+<td><code>Scp03Session</code> S-ENC / S-MAC / S-RMAC + SSC + chaining value after <code>AUTH-SD</code></td>
+</tr>
+<tr>
+<td><code>SCP11.local_access</code> (shell)</td>
+<td><code>EXPORT-KEYBAG [OutputPath.keys.json] [Label]</code></td>
+<td>last-built pySim BSP (S-ENC, S-MAC, MAC chain, block number, <abbr title="Application Identifier">AID</abbr>)</td>
+</tr>
+<tr>
+<td><code>SCP11.local_access</code> (CLI)</td>
+<td><code>python -m SCP11.local_access --dump-keybag &lt;path&gt;</code></td>
+<td>same BSP snapshot, non-interactive</td>
+</tr>
+<tr>
+<td><code>SCP11.live</code> (CLI)</td>
+<td><code>python -m SCP11.live --dump-keybag &lt;path&gt;</code></td>
+<td><strong>no-op</strong>: live-mode BSP keys are derived inside the <abbr title="Embedded UICC">eUICC</abbr> and never reach the host. The flag prints a clear message pointing at <code>SCP11.local_access</code> or <abbr title="Secure Channel Protocol 03 (GP)">SCP03</abbr>.</td>
+</tr>
+</tbody>
+</table></div>
+<p>Both <code>EXPORT-KEYBAG</code> handlers refuse with a clear message when no
+authenticated session / derived BSP snapshot is available.</p>
+<h3 id="keybag-json-schema">Keybag JSON schema</h3>
+<div class="code-block"><pre><code>{
+  &quot;format&quot;: &quot;yggdrasim-hil-keybag/v1&quot;,
+  &quot;entries&quot;: [
+    {
+      &quot;label&quot;: &quot;case-1234&quot;,
+      &quot;protocol&quot;: &quot;SCP03&quot;,
+      &quot;aid_hex&quot;: &quot;A000000151000000&quot;,
+      &quot;s_enc_hex&quot;: &quot;...32 hex chars...&quot;,
+      &quot;s_mac_hex&quot;: &quot;...32 hex chars...&quot;,
+      &quot;s_rmac_hex&quot;: &quot;...32 hex chars...&quot;,
+      &quot;ssc_hex&quot;: &quot;0000000000000000&quot;,
+      &quot;chaining_value_hex&quot;: &quot;&quot;,
+      &quot;block_nr&quot;: 0
+    }
+  ]
+}
+</code></pre></div>
+<p>Keys:</p>
+<ul>
+<li><code>format</code> must be <code>yggdrasim-hil-keybag/v1</code>.</li>
+<li><code>entries</code> is a list; multiple <abbr title="Secure Channel Protocol 03 (GP)">SCP03</abbr> / SCP11c sessions can coexist in
+  a single file.</li>
+<li><code>protocol</code> is <code>"SCP03"</code> or <code>"SCP11c"</code>; the <abbr title="Text User Interface">TUI</abbr> uses it to decide which
+  crypto path to drive.</li>
+<li><code>s_enc_hex</code> / <code>s_mac_hex</code> / <code>s_rmac_hex</code> are the session keys
+  (<abbr title="Secure Channel Protocol 03 (GP)">SCP03</abbr> naming; SCP11c fills S-RMAC with empty string).</li>
+<li><code>ssc_hex</code> / <code>chaining_value_hex</code> / <code>block_nr</code> capture the state the
+  replay engine needs to mirror the on-card counters at the moment of
+  export.</li>
+<li><code>aid_hex</code> binds the entry to the SELECT <abbr title="Application Identifier">AID</abbr> that preceded the secure
+  channel on capture time, so multiple sessions against the same card
+  are disambiguated.</li>
+</ul>
+<p>Write a keybag with <code>EXPORT-KEYBAG</code> / <code>--dump-keybag</code> or by hand; the
+schema is stable across <code>v1</code>.</p>
+<h2 id="pitfalls">Pitfalls</h2>
+<ul>
+<li>A second <abbr title="Personal Computer/Smart Card (Workgroup)">PC/SC</abbr> client cannot open the same reader while the bridge owns
+  it. Close other shells first, or go through the relay side-channel.</li>
+<li>USB presence alone is not readiness. Wait until the relay advertises
+  <code>status: ok</code> and a non-empty <code>atr</code>.</li>
+<li>Restarting only the bridge without the supervisor can leave
+  <code>osmo-remsim-client-st2</code> orphaned. Use the supervisor for normal lifecycle.</li>
+<li>A flashed firmware mismatch on the SIMtrace2 will let the supervisor
+  enumerate the USB device, but the relay will never come up. Check the
+  remsim-client logs.</li>
+<li>Offline review mode trusts the capture's <abbr title="Answer To Reset">ATR</abbr> / SELECT context. If the
+  keybag entry's <code>aid_hex</code> does not match the <abbr title="Application Identifier">AID</abbr> in the capture the
+  corresponding APDUs simply stay wrapped.</li>
+<li><code>SCP11.live --dump-keybag</code> is intentionally a stub — the keys never
+  leave the card in live mode. Use <code>SCP11.local_access</code> or <abbr title="Secure Channel Protocol 03 (GP)">SCP03</abbr> for
+  real exports.</li>
+</ul>
+<h2 id="atcsim-atcrsm-transcoder">AT+CSIM / AT+CRSM transcoder</h2>
+<p><code>Tools/HilBridge/at_simlink.py</code> (3GPP TS 27.007 §8.17 / §8.18) is a
+transport-agnostic transcoder that turns <code>AT+CSIM=...</code> and
+<code>AT+CRSM=...</code> request lines into raw ISO 7816 APDUs and stringifies
+the responses back into <code>+CSIM:</code> / <code>+CRSM:</code> reply lines. Use it when
+an AT-controlled modem must exercise the simulator or a SIMtrace2-bridged
+card without a direct <abbr title="Personal Computer/Smart Card (Workgroup)">PC/SC</abbr> handle:</p>
+<div class="-mx-6 sm:mx-0 doc-table-scroll"><table class="doc-table">
+<thead>
+<tr>
+<th>Request shape</th>
+<th>Decoded <abbr title="Application Protocol Data Unit (ISO 7816-4)">APDU</abbr></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>AT+CSIM=&lt;length&gt;,"&lt;hex&gt;"</code></td>
+<td>raw <code>CLA INS P1 P2 P3 …</code></td>
+</tr>
+<tr>
+<td><code>AT+CRSM=&lt;command&gt;,&lt;fileid&gt;,&lt;P1&gt;,&lt;P2&gt;,&lt;P3&gt;[,"&lt;data&gt;"][,"&lt;path&gt;"]</code></td>
+<td><code>CLA=0x00</code>, <code>INS</code> from the §8.18 command table</td>
+</tr>
+</tbody>
+</table></div>
+<p>Common modem REFRESH and AT-only flows can therefore be replayed
+through the same simulator backend the <abbr title="Secure Channel Protocol">SCP</abbr> shells use, with no host
+<abbr title="Personal Computer/Smart Card (Workgroup)">PC/SC</abbr> involvement on the modem side.</p>
+<h2 id="optional-systemd-user-service">Optional <code>systemd --user</code> service</h2>
+<p><code>guides/systemd/yggdrasim-hil-supervisor.service.example</code> ships as a starting
+point when the supervisor should be launched on demand under user service
+control.</p>
+<h2 id="related-pages">Related pages</h2>
+<ul>
+<li><a href="../concepts/hil-model.html"><abbr title="Hardware-In-The-Loop">HIL</abbr> Model</a></li>
+<li><a href="../how-to/run-hil-capture.html">Run a <abbr title="Hardware-In-The-Loop">HIL</abbr> Capture</a></li>
+<li><a href="../how-to/replay-hil-pcap-offline.html">Replay a <abbr title="Hardware-In-The-Loop">HIL</abbr> pcap offline</a></li>
+<li><a href="scp03.html#session-key-export"><abbr title="Secure Channel Protocol 03 (GP)">SCP03</abbr> Admin Shell — EXPORT-KEYBAG</a></li>
+<li><a href="scp11-local-access.html#session-key-export"><abbr title="Secure Channel Protocol 11 (GP, elliptic curve)">SCP11</abbr> Local Access — EXPORT-KEYBAG / <code>--dump-keybag</code></a></li>
+<li><code>guides/HIL_BRIDGE_GUIDE.md</code> for the deep authored guide</li>
+</ul>
+        </div>
+      </div><!-- /ygg-toc-body -->
+      <aside class="ygg-toc-rail" aria-label="On this page">
+        <p class="ygg-toc-rail-label">On this page</p>
+        <nav>
+            <a href="#when-to-use-it" class="toc-link">When to use it</a>
+            <a href="#entry-points" class="toc-link">Entry points</a>
+            <a href="#supervisor-responsibilities" class="toc-link">Supervisor responsibilities</a>
+            <a href="#runtime-dependencies" class="toc-link">Runtime dependencies</a>
+            <a href="#state-the-supervisor-and-bridge-write" class="toc-link">State the supervisor and bridge write</a>
+            <a href="#health-signals" class="toc-link">Health signals</a>
+            <a href="#common-recipes" class="toc-link">Common recipes</a>
+            <a href="#start-check-stop" class="toc-link toc-link-sub">Start, check, stop</a>
+            <a href="#pair-with-a-yggdrasim-shell" class="toc-link toc-link-sub">Pair with a YggdraSIM shell</a>
+            <a href="#use-wireshark-to-watch-gsmtap" class="toc-link toc-link-sub">Use Wireshark to watch GSMTAP</a>
+            <a href="#offline-pcap-replay" class="toc-link">Offline pcap replay</a>
+            <a href="#session-key-export" class="toc-link">Session key export</a>
+            <a href="#keybag-json-schema" class="toc-link toc-link-sub">Keybag JSON schema</a>
+            <a href="#pitfalls" class="toc-link">Pitfalls</a>
+            <a href="#atcsim-atcrsm-transcoder" class="toc-link">AT+CSIM / AT+CRSM transcoder</a>
+            <a href="#optional-systemd-user-service" class="toc-link">Optional systemd --user service</a>
+            <a href="#related-pages" class="toc-link">Related pages</a>
+        </nav>
+      </aside>
+      </div><!-- /ygg-content-toc -->
+    </main>
+    <footer class="px-6 py-6 sm:px-10 lg:px-14 xl:px-16 border-t border-zinc-950/[0.06] dark:border-white/[0.05]">
+      <div class="ygg-content flex flex-col items-center gap-2 text-xs text-zinc-500">
+        <div class="flex items-center gap-1.5 text-sm">
+          <span class="font-sans font-semibold text-zinc-700 dark:text-zinc-300">YggdraSIM</span>
+          <span class="text-zinc-400 dark:text-zinc-500">by</span>
+          <a href="https://1ot.com" target="_blank" rel="noopener" class="font-semibold text-zinc-700 dark:text-zinc-300 hover:text-zinc-600 dark:hover:text-zinc-300 transition-colors">1oT</a>
+        </div>
+        <div class="flex flex-wrap items-center justify-center gap-2 text-zinc-400 dark:text-zinc-500">
+          <span>Copyright © 2026 1oT OÜ</span>
+          <span aria-hidden="true">·</span>
+          <span>Last updated <span data-ygg-updated>May 19, 2026</span></span>
+        </div>
+      </div>
+    </footer>
+  </div>
+</div>
+<script src="../ygg.js?v=2"></script>
+<!-- Mermaid: ygg.js loads ygg-mermaid.js when .doc-prose contains pre.mermaid -->
+</body>
+</html>

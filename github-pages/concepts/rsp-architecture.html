@@ -1,0 +1,266 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>RSP Architecture — YggdraSIM</title>
+  <link rel="icon" href="../assets/images/yggdrasil-mark.svg">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,100..900&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>html{font-size:100%}</style>
+  <script>(function(){var s=localStorage.getItem('ygg-theme');var p=window.matchMedia('(prefers-color-scheme: dark)').matches;if(s==='dark'||(!s&&p))document.documentElement.classList.add('dark');})();</script>
+  <link rel="stylesheet" href="../tailwind.css?v=2">
+  <link rel="stylesheet" href="../ygg.css?v=2">
+</head>
+<body class="antialiased font-sans bg-zinc-50 dark:bg-[var(--bg-page)] text-zinc-900 dark:text-zinc-100"
+      data-ygg-base="../" data-ygg-partial-path="../partials/sidebar.html" data-ygg-active-sub="concepts/rsp-architecture.html" data-ygg-open-sections="concepts">
+<a class="ygg-skip-link" href="#ygg-main">Skip to content</a>
+<div id="ygg-shell" class="flex min-h-dvh isolate ygg-layout-pending">
+  <div id="ygg-chrome-mount"></div>
+  <script src="../ygg-layout.js?v=2"></script>
+  <div id="ygg-main-column" class="flex-1 lg:ml-64 flex flex-col min-h-dvh">
+    <header class="lg:hidden sticky top-0 z-20 flex items-center gap-3 px-4 py-3 bg-white/95 dark:bg-[var(--bg-page)]/95 backdrop-blur-sm border-b border-zinc-950/[0.07] dark:border-white/[0.05] shrink-0">
+      <button type="button" onclick="openSidebar()" class="ygg-icon-btn flex items-center justify-center size-11 rounded-md text-zinc-500 transition-colors" aria-label="Open menu">
+        <svg class="size-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" focusable="false"><path d="M3 6h18M3 12h18M3 18h18"/></svg>
+      </button>
+      <span class="font-sans font-semibold text-sm tracking-tight">YggdraSIM</span>
+    </header>
+    <main id="ygg-main" tabindex="-1" class="flex-1 px-6 py-10 sm:px-10 lg:px-14 xl:px-16">
+      <div class="ygg-content-toc">
+      <div class="ygg-toc-body">
+        <nav class="flex flex-wrap items-center gap-1.5 text-xs text-zinc-400 mb-6" aria-label="Breadcrumb">
+          <ol class="ygg-crumbs"><li><a href="../index.html" class="doc-link no-underline">Home</a></li><li aria-hidden="true"><svg class="size-3 opacity-40" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6 4l4 4-4 4"/></svg></li><li><a href="index.html" class="hover:text-zinc-600 dark:hover:text-zinc-300 transition-colors no-underline">Concepts</a></li><li aria-hidden="true"><svg class="size-3 opacity-40" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6 4l4 4-4 4"/></svg></li><li><span class="text-zinc-600 dark:text-zinc-300" aria-current="page">RSP Architecture</span></li></ol>
+        </nav>
+        <h1 class="doc-h1 font-sans font-bold text-zinc-950 dark:text-white mb-2">RSP Architecture</h1>
+        <p class="page-lead mb-8">Remote <abbr title="Subscriber Identity Module">SIM</abbr> Provisioning is the <abbr title="GSM Association">GSMA</abbr> family of specifications that governs how
+a profile gets prepared, bound, downloaded, installed, enabled, and ultimately
+retired on an <abbr title="Embedded UICC">eUICC</abbr>. YggdraSIM speaks two of the three families actively:</p>
+        <details class="toc-mobile xl:hidden mb-8">
+          <summary>On this page <svg class="toc-mobile-chevron size-4" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 6l4 4 4-4"/></svg></summary>
+          <nav>
+            <a href="#actors" class="toc-link">Actors</a>
+            <a href="#es-interfaces-relevant-to-yggdrasim" class="toc-link">ES interfaces relevant to YggdraSIM</a>
+            <a href="#consumer-download-flow" class="toc-link">Consumer download flow</a>
+            <a href="#iot-sgp32-flow" class="toc-link">IoT (SGP.32) flow</a>
+            <a href="#profile-lifecycle-states-on-the-euicc" class="toc-link">Profile lifecycle states on the eUICC</a>
+            <a href="#notifications" class="toc-link">Notifications</a>
+            <a href="#eim-identity-and-bf55" class="toc-link">eIM identity and BF55</a>
+            <a href="#where-to-look-in-yggdrasim" class="toc-link">Where to look in YggdraSIM</a>
+          </nav>
+        </details>
+        <div class="doc-prose text-[0.9375rem] leading-relaxed text-zinc-600 dark:text-zinc-400 space-y-4">
+<ul>
+<li><abbr title="SIM Group Permanent (GSMA permanent reference document series; e.g. SGP.02, SGP.22, SGP.32)">SGP</abbr>.22 for consumer-style <abbr title="Remote SIM Provisioning">RSP</abbr> (<code>docs/SGP.22-v3.1.md</code>)</li>
+<li><abbr title="SIM Group Permanent (GSMA permanent reference document series; e.g. SGP.02, SGP.22, SGP.32)">SGP</abbr>.32 for IoT <abbr title="Remote SIM Provisioning">RSP</abbr> with an <abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr> in the middle (<code>docs/SGP.32-v1.2.md</code>)</li>
+</ul>
+<p><abbr title="SIM Group Permanent (GSMA permanent reference document series; e.g. SGP.02, SGP.22, SGP.32)">SGP</abbr>.02 (<code>docs/SGP.02-v4.2.md</code>) is the classical M2M flavor and is referenced
+for context only.</p>
+<h2 id="actors">Actors</h2>
+<pre class="mermaid"><code>flowchart LR
+    subgraph Device
+        LPAd["LPAd<br/>local profile assistant #40;device#41;"]
+        IPAd["IPAd<br/>IoT profile assistant #40;device#41;"]
+    end
+    subgraph Card
+        ISDR["ISD-R"]
+        ISDP["ISD-P #40;one per profile#41;"]
+    end
+    subgraph Network
+        SMDP["SM-DP#43;"]
+        eIM["eIM #40;SGP.32#41;"]
+    end
+
+    LPAd -->|"ES10a/b/c"| ISDR
+    IPAd -->|"ES10b/c"| ISDR
+    LPAd -->|"ES9+"| SMDP
+    IPAd -->|"ES9+"| eIM
+    eIM -->|"ES9+#39;"| SMDP</code></pre>
+<p class="fig-caption">Figure: RSP actors and ES interfaces across device, card, and network</p>
+<ul>
+<li><strong><abbr title="Local Profile Assistant, device-side">LPAd</abbr></strong> is the consumer-device-side agent in <abbr title="SIM Group Permanent (GSMA permanent reference document series; e.g. SGP.02, SGP.22, SGP.32)">SGP</abbr>.22. It speaks to the
+  user, to the card via ES10, and to SM-DP+ via ES9+.</li>
+<li><strong><abbr title="IoT Profile Assistant, device-side">IPAd</abbr></strong> is the IoT-device-side agent in <abbr title="SIM Group Permanent (GSMA permanent reference document series; e.g. SGP.02, SGP.22, SGP.32)">SGP</abbr>.32. It is similar to <abbr title="Local Profile Assistant, device-side">LPAd</abbr> but
+  assumes no UI and expects a remote orchestrator.</li>
+<li><strong><abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr></strong> is the <abbr title="SIM Group Permanent (GSMA permanent reference document series; e.g. SGP.02, SGP.22, SGP.32)">SGP</abbr>.32 orchestrator. It drives an <abbr title="IoT Profile Assistant, device-side">IPAd</abbr> remotely through a
+  bearer such as HTTPS, MQTT, or a vendor channel, and talks to SM-DP+ on the
+  <abbr title="IoT Profile Assistant, device-side">IPAd</abbr>'s behalf.</li>
+<li><strong>SM-DP+</strong> prepares and delivers profiles. It is the source of truth for
+  <code>BPP</code> generation and for notification acknowledgement.</li>
+</ul>
+<h2 id="es-interfaces-relevant-to-yggdrasim">ES interfaces relevant to YggdraSIM</h2>
+<div class="-mx-6 sm:mx-0 doc-table-scroll"><table class="doc-table">
+<thead>
+<tr>
+<th>Interface</th>
+<th>Between</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><abbr title="ES10a interface between LPAd and ISD-R">ES10a</abbr></td>
+<td><abbr title="Local Profile Assistant, device-side">LPAd</abbr> and <abbr title="Issuer Security Domain - Root">ISD-R</abbr></td>
+<td><abbr title="Embedded UICC">eUICC</abbr> memory reset, <abbr title="eUICC Identifier">EID</abbr> read</td>
+</tr>
+<tr>
+<td><abbr title="ES10b interface between LPAd/IPAd and ISD-R">ES10b</abbr></td>
+<td><abbr title="Local Profile Assistant, device-side">LPAd</abbr>/<abbr title="IoT Profile Assistant, device-side">IPAd</abbr> and <abbr title="Issuer Security Domain - Root">ISD-R</abbr></td>
+<td>AuthenticateServer, PrepareDownload, LoadBoundProfilePackage</td>
+</tr>
+<tr>
+<td><abbr title="ES10c interface for profile state control">ES10c</abbr></td>
+<td><abbr title="Local Profile Assistant, device-side">LPAd</abbr>/<abbr title="IoT Profile Assistant, device-side">IPAd</abbr> and <abbr title="Issuer Security Domain - Root">ISD-R</abbr></td>
+<td>profile enable, disable, delete, notifications</td>
+</tr>
+<tr>
+<td>ES9+</td>
+<td><abbr title="Local Profile Assistant, device-side">LPAd</abbr>/<abbr title="IoT Profile Assistant, device-side">IPAd</abbr> and SM-DP+</td>
+<td>InitiateAuthentication, AuthenticateClient, GetBoundProfilePackage</td>
+</tr>
+<tr>
+<td>ES9+'</td>
+<td><abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr> and SM-DP+</td>
+<td><abbr title="IoT Profile Assistant, eUICC-side">IPAe</abbr>-variant handover flows</td>
+</tr>
+</tbody>
+</table></div>
+<h2 id="consumer-download-flow">Consumer download flow</h2>
+<pre class="mermaid"><code>sequenceDiagram
+    participant User
+    participant LPAd
+    participant ISDR
+    participant SMDP
+    User->>LPAd: activation code LPA:1$...
+    LPAd->>SMDP: InitiateAuthentication (eUICC challenge)
+    SMDP-->>LPAd: serverSigned1 + SM-DP+ chain
+    LPAd->>ISDR: AuthenticateServer (serverSigned1)
+    ISDR-->>LPAd: eUICCSigned1
+    LPAd->>SMDP: AuthenticateClient (eUICCSigned1)
+    SMDP-->>LPAd: smdpSigned2 + metadata
+    LPAd->>ISDR: PrepareDownload (smdpSigned2)
+    ISDR-->>LPAd: euiccSigned2
+    LPAd->>SMDP: GetBoundProfilePackage
+    SMDP-->>LPAd: BPP
+    LPAd->>ISDR: LoadBoundProfilePackage (BPP segments)
+    ISDR-->>LPAd: per-segment acks
+    LPAd->>SMDP: HandleNotification (InstallResult)</code></pre>
+<p class="fig-caption">Figure: Consumer RSP profile download — mutual authentication to BPP install</p>
+<p>The <code>BPP</code> is the ASN.1 structure that carries the profile wrapped in a set of
+session keys. The <abbr title="Issuer Security Domain - Root">ISD-R</abbr> unwraps it segment by segment. On completion the
+profile is in the <code>DISABLED</code> state until an <code>EnableProfile</code> is issued.</p>
+<h2 id="iot-sgp32-flow">IoT (<abbr title="SIM Group Permanent (GSMA permanent reference document series; e.g. SGP.02, SGP.22, SGP.32)">SGP</abbr>.32) flow</h2>
+<p>In <abbr title="SIM Group Permanent (GSMA permanent reference document series; e.g. SGP.02, SGP.22, SGP.32)">SGP</abbr>.32 the <abbr title="IoT Profile Assistant, device-side">IPAd</abbr> does not initiate. The <abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr> provisions the <abbr title="IoT Profile Assistant, device-side">IPAd</abbr> through
+<strong>package authoring</strong>, where the <abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr> produces an <code>eIM package</code> carrying a set
+of instructions. The <abbr title="IoT Profile Assistant, device-side">IPAd</abbr> pulls or receives packages and executes them.</p>
+<ul>
+<li><code>ADD-INITIAL-EIM</code> primes an <abbr title="Issuer Security Domain - Root">ISD-R</abbr> with the <abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr> identity fields in BF55.</li>
+<li><code>ADD-EIM</code> authorizes additional eIMs or rotates entries.</li>
+<li><code>LOAD-EIM-PACKAGE</code> is the card-side consumption step.</li>
+<li>Polling loops let the <abbr title="IoT Profile Assistant, device-side">IPAd</abbr> ask the <abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr> for work, execute, and acknowledge.</li>
+</ul>
+<pre class="mermaid"><code>flowchart LR
+    eIMAuth["eIM authoring"] --> Package["eIM package"]
+    Package --> IPAd["IPAd executor"]
+    IPAd --> ISDR["ISD-R"]
+    IPAd --> Notify["Notifications / Ack"]
+    Notify --> eIMAuth</code></pre>
+<p class="fig-caption">Figure: IoT RSP (SGP.32) flow — eIM package authoring to IPAd execution</p>
+<h2 id="profile-lifecycle-states-on-the-euicc">Profile lifecycle states on the <abbr title="Embedded UICC">eUICC</abbr></h2>
+<p>Each installed profile on the <code>ISD-R</code> carries a state.</p>
+<div class="-mx-6 sm:mx-0 doc-table-scroll"><table class="doc-table">
+<thead>
+<tr>
+<th>State</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>DISABLED</code></td>
+<td>present on card, not active, not visible to the modem</td>
+</tr>
+<tr>
+<td><code>ENABLED</code></td>
+<td>active profile, visible to the modem as a <abbr title="Universal Subscriber Identity Module">USIM</abbr></td>
+</tr>
+<tr>
+<td><code>DELETED</code></td>
+<td>reserved for transitional state during a delete</td>
+</tr>
+<tr>
+<td><code>ERASED</code></td>
+<td>not installed</td>
+</tr>
+</tbody>
+</table></div>
+<p><code>SGP.22</code> and <code>SGP.32</code> both constrain which transitions are legal, which
+notifications are emitted, and how the <abbr title="Local Profile Assistant">LPA</abbr>/IPA should acknowledge them.</p>
+<h2 id="notifications">Notifications</h2>
+<p>The <abbr title="Embedded UICC">eUICC</abbr> emits notifications for install, enable, disable, and delete. The
+<abbr title="Local Profile Assistant">LPA</abbr>/IPA must read them from the card, forward them to SM-DP+ via
+<code>HandleNotification</code>, and then remove them from the card with
+<code>RemoveNotificationFromList</code>. YggdraSIM's relay shells automate this around
+transactional flows and surface it under <code>NOTIF-*</code> verbs when a manual retry
+is needed.</p>
+<h2 id="eim-identity-and-bf55"><abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr> identity and BF55</h2>
+<p>The BF55 row in <code>EUICCInfo2</code> advertises the <abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr> identity set an <abbr title="Embedded UICC">eUICC</abbr>
+recognizes. It defines:</p>
+<ul>
+<li><code>eimId</code></li>
+<li><code>eimFqdn</code></li>
+<li><code>eimIdentificationDomain</code></li>
+<li><code>eimPublicKeyData</code></li>
+<li><code>counterValue</code></li>
+</ul>
+<p>YggdraSIM keeps identity configuration split so the simulator card side and
+the Local <abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr> endpoint side can be tuned independently. See
+<a href="../subsystems/scp11-eim-local.html"><abbr title="Secure Channel Protocol 11 (GP, elliptic curve)">SCP11</abbr> <abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr> Local</a>.</p>
+<h2 id="where-to-look-in-yggdrasim">Where to look in YggdraSIM</h2>
+<ul>
+<li><a href="../subsystems/scp11-live.html"><abbr title="Secure Channel Protocol 11 (GP, elliptic curve)">SCP11</abbr> Live Relay</a> and
+  <a href="../subsystems/scp11-test.html">Test Relay</a> for consumer-style ES9+ flows</li>
+<li><a href="../subsystems/scp11-local-access.html"><abbr title="Secure Channel Protocol 11 (GP, elliptic curve)">SCP11</abbr> Local Access</a> for direct
+  <abbr title="ES10b interface between LPAd/IPAd and ISD-R">ES10b</abbr> / <abbr title="ES10c interface for profile state control">ES10c</abbr> without relay</li>
+<li><a href="../subsystems/scp11-eim-local.html"><abbr title="Secure Channel Protocol 11 (GP, elliptic curve)">SCP11</abbr> <abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr> Local</a> for <abbr title="SIM Group Permanent (GSMA permanent reference document series; e.g. SGP.02, SGP.22, SGP.32)">SGP</abbr>.32
+  orchestration with localized <abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr> and <abbr title="IoT Profile Assistant, device-side">IPAd</abbr>/<abbr title="IoT Profile Assistant, eUICC-side">IPAe</abbr> flows</li>
+<li><a href="../reference/standards-map.html">Standards Map</a> for the specific <abbr title="GSM Association">GSMA</abbr>
+  sections mapped to implementation</li>
+</ul>
+        </div>
+      </div><!-- /ygg-toc-body -->
+      <aside class="ygg-toc-rail" aria-label="On this page">
+        <p class="ygg-toc-rail-label">On this page</p>
+        <nav>
+            <a href="#actors" class="toc-link">Actors</a>
+            <a href="#es-interfaces-relevant-to-yggdrasim" class="toc-link">ES interfaces relevant to YggdraSIM</a>
+            <a href="#consumer-download-flow" class="toc-link">Consumer download flow</a>
+            <a href="#iot-sgp32-flow" class="toc-link">IoT (SGP.32) flow</a>
+            <a href="#profile-lifecycle-states-on-the-euicc" class="toc-link">Profile lifecycle states on the eUICC</a>
+            <a href="#notifications" class="toc-link">Notifications</a>
+            <a href="#eim-identity-and-bf55" class="toc-link">eIM identity and BF55</a>
+            <a href="#where-to-look-in-yggdrasim" class="toc-link">Where to look in YggdraSIM</a>
+        </nav>
+      </aside>
+      </div><!-- /ygg-content-toc -->
+    </main>
+    <footer class="px-6 py-6 sm:px-10 lg:px-14 xl:px-16 border-t border-zinc-950/[0.06] dark:border-white/[0.05]">
+      <div class="ygg-content flex flex-col items-center gap-2 text-xs text-zinc-500">
+        <div class="flex items-center gap-1.5 text-sm">
+          <span class="font-sans font-semibold text-zinc-700 dark:text-zinc-300">YggdraSIM</span>
+          <span class="text-zinc-400 dark:text-zinc-500">by</span>
+          <a href="https://1ot.com" target="_blank" rel="noopener" class="font-semibold text-zinc-700 dark:text-zinc-300 hover:text-zinc-600 dark:hover:text-zinc-300 transition-colors">1oT</a>
+        </div>
+        <div class="flex flex-wrap items-center justify-center gap-2 text-zinc-400 dark:text-zinc-500">
+          <span>Copyright © 2026 1oT OÜ</span>
+          <span aria-hidden="true">·</span>
+          <span>Last updated <span data-ygg-updated>May 19, 2026</span></span>
+        </div>
+      </div>
+    </footer>
+  </div>
+</div>
+<script src="../ygg.js?v=2"></script>
+<!-- Mermaid: ygg.js loads ygg-mermaid.js when .doc-prose contains pre.mermaid -->
+</body>
+</html>

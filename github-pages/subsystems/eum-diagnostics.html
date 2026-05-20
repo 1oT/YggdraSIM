@@ -1,0 +1,184 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>EUM Diagnostics — YggdraSIM</title>
+  <link rel="icon" href="../assets/images/yggdrasil-mark.svg">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,100..900&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>html{font-size:100%}</style>
+  <script>(function(){var s=localStorage.getItem('ygg-theme');var p=window.matchMedia('(prefers-color-scheme: dark)').matches;if(s==='dark'||(!s&&p))document.documentElement.classList.add('dark');})();</script>
+  <link rel="stylesheet" href="../tailwind.css?v=2">
+  <link rel="stylesheet" href="../ygg.css?v=2">
+</head>
+<body class="antialiased font-sans bg-zinc-50 dark:bg-[var(--bg-page)] text-zinc-900 dark:text-zinc-100"
+      data-ygg-base="../" data-ygg-partial-path="../partials/sidebar.html" data-ygg-active-sub="subsystems/eum-diagnostics.html" data-ygg-open-sections="subsystems">
+<a class="ygg-skip-link" href="#ygg-main">Skip to content</a>
+<div id="ygg-shell" class="flex min-h-dvh isolate ygg-layout-pending">
+  <div id="ygg-chrome-mount"></div>
+  <script src="../ygg-layout.js?v=2"></script>
+  <div id="ygg-main-column" class="flex-1 lg:ml-64 flex flex-col min-h-dvh">
+    <header class="lg:hidden sticky top-0 z-20 flex items-center gap-3 px-4 py-3 bg-white/95 dark:bg-[var(--bg-page)]/95 backdrop-blur-sm border-b border-zinc-950/[0.07] dark:border-white/[0.05] shrink-0">
+      <button type="button" onclick="openSidebar()" class="ygg-icon-btn flex items-center justify-center size-11 rounded-md text-zinc-500 transition-colors" aria-label="Open menu">
+        <svg aria-hidden="true" focusable="false" class="size-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M3 12h18M3 18h18"/></svg>
+      </button>
+      <span class="font-sans font-semibold text-sm tracking-tight">YggdraSIM</span>
+    </header>
+    <main id="ygg-main" tabindex="-1" class="flex-1 px-6 py-10 sm:px-10 lg:px-14 xl:px-16">
+      <div class="ygg-content-toc">
+      <div class="ygg-toc-body">
+        <nav class="flex flex-wrap items-center gap-1.5 text-xs text-zinc-400 mb-6" aria-label="Breadcrumb">
+          <ol class="ygg-crumbs">
+            <li><a href="../index.html" class="doc-link no-underline">Home</a></li>
+            <li aria-hidden="true"><svg class="size-3 opacity-40" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6 4l4 4-4 4"/></svg></li>
+            <li><a href="index.html" class="hover:text-zinc-600 dark:hover:text-zinc-300 transition-colors no-underline">Subsystems</a></li>
+            <li aria-hidden="true"><svg class="size-3 opacity-40" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6 4l4 4-4 4"/></svg></li>
+            <li><span aria-current="page" class="text-zinc-600 dark:text-zinc-300">EUM Diagnostics</span></li>
+          </ol>
+        </nav>
+        <h1 class="doc-h1 font-sans font-bold text-zinc-950 dark:text-white mb-2">EUM Diagnostics</h1>
+        <p class="page-lead mb-8"><code>Tools/EumDiag/</code> is the <em>server-side</em> diagnostic toolbox for
+ES8+ / Bound Profile Package (<abbr title="Bound Profile Package (GSMA SGP.22)">BPP</abbr>) work. Its purpose is to take
+ShS-ENC / ShS-MAC / DEK session material — which an EUM or
+SM-DP+ operator already has in its session database — and turn
+an otherwise opaque <code>BF36</code> capture into an analysable one through
+a Wireshark/tshark Lua dissector.</p>
+        <details class="toc-mobile xl:hidden mb-8">
+          <summary>On this page <svg class="toc-mobile-chevron size-4" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 6l4 4 4-4"/></svg></summary>
+          <nav>
+            <a href="#when-to-use-it" class="toc-link">When to use it</a>
+            <a href="#entry-points" class="toc-link">Entry points</a>
+            <a href="#subcommands" class="toc-link">Subcommands</a>
+            <a href="#inject-keys" class="toc-link toc-link-sub">inject-keys</a>
+            <a href="#store-keys" class="toc-link toc-link-sub">store-keys</a>
+            <a href="#decode-bpp" class="toc-link toc-link-sub">decode-bpp</a>
+            <a href="#key-repository-on-disk" class="toc-link">Key repository on disk</a>
+            <a href="#runtime-dependencies" class="toc-link">Runtime dependencies</a>
+            <a href="#related-references" class="toc-link">Related references</a>
+          </nav>
+        </details>
+        <div class="doc-prose text-[0.9375rem] leading-relaxed text-zinc-600 dark:text-zinc-400 space-y-4">
+<h2 id="when-to-use-it">When to use it</h2>
+<ul>
+<li>post-mortem analysis of a failed provisioning on a server you
+  operate</li>
+<li>reproducing an ES8+ flow inside Wireshark / tshark during
+  integration testing</li>
+<li>offline <abbr title="Bound Profile Package (GSMA SGP.22)">BPP</abbr> decode (requires the optional pySim checkout)</li>
+</ul>
+<div class="admonition info">
+<p class="admonition-title">Not a decryptor</p>
+<p>The dissector annotates <abbr title="Bound Profile Package (GSMA SGP.22)">BPP</abbr> TLVs with the provided key bundle.
+Full plaintext recovery still requires a downstream decode step;
+that is what the <code>decode-bpp</code> subcommand is for.</p>
+</div>
+<h2 id="entry-points">Entry points</h2>
+<div class="tabbed-set tabbed-alternate" data-tabs="1:2"><input checked="checked" id="__tabbed_1_1" name="__tabbed_1" type="radio" /><input id="__tabbed_1_2" name="__tabbed_1" type="radio" /><div class="tabbed-labels"><label for="__tabbed_1_1">Console script</label><label for="__tabbed_1_2">Module</label></div>
+<div class="tabbed-content">
+<div class="tabbed-block">
+<div class="code-block"><pre><code>yggdrasim-eum-diag --help
+yggdrasim-eum-diag inject-keys --help
+yggdrasim-eum-diag store-keys --help
+yggdrasim-eum-diag decode-bpp --help
+</code></pre></div>
+</div>
+<div class="tabbed-block">
+<div class="code-block"><pre><code>python -m Tools.EumDiag
+</code></pre></div>
+</div>
+</div>
+</div>
+<h2 id="subcommands">Subcommands</h2>
+<h3 id="inject-keys"><code>inject-keys</code></h3>
+<p>Writes a JSON key repository (atomic, <code>0o600</code> on POSIX) and
+launches <code>tshark</code> with the Lua dissector attached to the capture.</p>
+<div class="code-block"><pre><code>yggdrasim-eum-diag inject-keys \
+    --iccid 89000012345678901234 \
+    --shs-enc &lt;32 hex chars&gt; \
+    --shs-mac &lt;32 hex chars&gt; \
+    --dek     &lt;32 hex chars&gt; \
+    --pcap    /captures/provisioning.pcapng
+</code></pre></div>
+<h3 id="store-keys"><code>store-keys</code></h3>
+<p>Writes the key repository only. Useful when a separate
+<code>wireshark</code> / <code>tshark</code> process already has the dissector loaded
+and just needs the key file to be created.</p>
+<div class="code-block"><pre><code>yggdrasim-eum-diag store-keys \
+    --iccid 89000012345678901234 \
+    --shs-enc ... --shs-mac ... \
+    --keys-out /tmp/session-keys.json
+</code></pre></div>
+<h3 id="decode-bpp"><code>decode-bpp</code></h3>
+<p>Offline decode of a <abbr title="Bound Profile Package (GSMA SGP.22)">BPP</abbr> binary through the optional pySim
+checkout. Skips cleanly with a clear message if pySim is not
+available.</p>
+<div class="code-block"><pre><code>yggdrasim-eum-diag decode-bpp --bpp /path/to/bpp.bin
+</code></pre></div>
+<h2 id="key-repository-on-disk">Key repository on disk</h2>
+<div class="code-block"><pre><code>{
+    &quot;format&quot;: &quot;yggdrasim-eum-session-keys/v1&quot;,
+    &quot;entries&quot;: {
+        &quot;89000012345678901234&quot;: {
+            &quot;iccid&quot;: &quot;89000012345678901234&quot;,
+            &quot;shs_enc_hex&quot;: &quot;...&quot;,
+            &quot;shs_mac_hex&quot;: &quot;...&quot;,
+            &quot;dek_hex&quot;: &quot;...&quot;,
+            &quot;comment&quot;: &quot;case-id&quot;
+        }
+    }
+}
+</code></pre></div>
+<p>The Lua dissector picks the path up from <code>YGGDRASIM_EUM_SESSION_KEYS</code>.
+The tshark runner sets that variable for you when using <code>inject-keys</code>.</p>
+<h2 id="runtime-dependencies">Runtime dependencies</h2>
+<ul>
+<li><code>tshark</code> on <code>PATH</code> for <code>inject-keys</code></li>
+<li>the shipped <code>Tools/EumDiag/dissector.lua</code> (part of the wheel's
+  package-data)</li>
+<li>optional pySim checkout for <code>decode-bpp</code></li>
+</ul>
+<h2 id="related-references">Related references</h2>
+<ul>
+<li><a href="../how-to/diagnostics-toolbox.html">Diagnostics Toolbox</a></li>
+<li><code>tests/test_eum_diag.py</code> for the reference behaviour contract</li>
+</ul>
+        </div>
+      </div><!-- /ygg-toc-body -->
+      <aside class="ygg-toc-rail" aria-label="On this page">
+        <p class="ygg-toc-rail-label">On this page</p>
+        <nav>
+            <a href="#when-to-use-it" class="toc-link">When to use it</a>
+            <a href="#entry-points" class="toc-link">Entry points</a>
+            <a href="#subcommands" class="toc-link">Subcommands</a>
+            <a href="#inject-keys" class="toc-link toc-link-sub">inject-keys</a>
+            <a href="#store-keys" class="toc-link toc-link-sub">store-keys</a>
+            <a href="#decode-bpp" class="toc-link toc-link-sub">decode-bpp</a>
+            <a href="#key-repository-on-disk" class="toc-link">Key repository on disk</a>
+            <a href="#runtime-dependencies" class="toc-link">Runtime dependencies</a>
+            <a href="#related-references" class="toc-link">Related references</a>
+        </nav>
+      </aside>
+      </div><!-- /ygg-content-toc -->
+    </main>
+    <footer class="px-6 py-6 sm:px-10 lg:px-14 xl:px-16 border-t border-zinc-950/[0.06] dark:border-white/[0.05]">
+      <div class="ygg-content flex flex-col items-center gap-2 text-xs text-zinc-500">
+        <div class="flex items-center gap-1.5 text-sm">
+          <span class="font-sans font-semibold text-zinc-700 dark:text-zinc-300">YggdraSIM</span>
+          <span class="text-zinc-400 dark:text-zinc-500">by</span>
+          <a href="https://1ot.com" target="_blank" rel="noopener" class="font-semibold text-zinc-700 dark:text-zinc-300 hover:text-zinc-600 dark:hover:text-zinc-300 transition-colors">1oT</a>
+        </div>
+        <div class="flex flex-wrap items-center justify-center gap-2 text-zinc-400 dark:text-zinc-500">
+          <span>Copyright © 2026 1oT OÜ</span>
+          <span aria-hidden="true">·</span>
+          <span>Last updated <span data-ygg-updated>May 19, 2026</span></span>
+        </div>
+      </div>
+    </footer>
+  </div>
+</div>
+<script src="../ygg.js?v=2"></script>
+<!-- Mermaid: ygg.js loads ygg-mermaid.js when .doc-prose contains pre.mermaid -->
+</body>
+</html>

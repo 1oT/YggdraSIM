@@ -1,0 +1,208 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Diagnostics toolbox — YggdraSIM</title>
+  <link rel="icon" href="../assets/images/yggdrasil-mark.svg">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,100..900&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>html{font-size:100%}</style>
+  <script>(function(){var s=localStorage.getItem('ygg-theme');var p=window.matchMedia('(prefers-color-scheme: dark)').matches;if(s==='dark'||(!s&&p))document.documentElement.classList.add('dark');})();</script>
+  <link rel="stylesheet" href="../tailwind.css?v=2">
+  <link rel="stylesheet" href="../ygg.css?v=2">
+</head>
+<body class="antialiased font-sans bg-zinc-50 dark:bg-[var(--bg-page)] text-zinc-900 dark:text-zinc-100"
+      data-ygg-base="../" data-ygg-partial-path="../partials/sidebar.html" data-ygg-active-sub="how-to/diagnostics-toolbox.html" data-ygg-open-sections="how-to">
+<a class="ygg-skip-link" href="#ygg-main">Skip to content</a>
+<div id="ygg-shell" class="flex min-h-dvh isolate ygg-layout-pending">
+  <div id="ygg-chrome-mount"></div>
+  <script src="../ygg-layout.js?v=2"></script>
+  <div id="ygg-main-column" class="flex-1 lg:ml-64 flex flex-col min-h-dvh">
+    <header class="lg:hidden sticky top-0 z-20 flex items-center gap-3 px-4 py-3 bg-white/95 dark:bg-[var(--bg-page)]/95 backdrop-blur-sm border-b border-zinc-950/[0.07] dark:border-white/[0.05] shrink-0">
+      <button type="button" onclick="openSidebar()" class="ygg-icon-btn flex items-center justify-center size-11 rounded-md text-zinc-500 transition-colors" aria-label="Open menu">
+        <svg aria-hidden="true" focusable="false" class="size-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M3 12h18M3 18h18"/></svg>
+      </button>
+      <span class="font-sans font-semibold text-sm tracking-tight">YggdraSIM</span>
+    </header>
+    <main class="flex-1 px-6 py-10 sm:px-10 lg:px-14 xl:px-16" id="ygg-main" tabindex="-1">
+      <div class="ygg-content-toc">
+      <div class="ygg-toc-body">
+        <nav class="flex flex-wrap items-center gap-1.5 text-xs text-zinc-400 mb-6" aria-label="Breadcrumb">
+          <ol class="ygg-crumbs">
+            <li><a href="../index.html" class="doc-link no-underline">Home</a></li>
+            <li aria-hidden="true"><svg class="size-3 opacity-40" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6 4l4 4-4 4"/></svg></li>
+            <li><a href="index.html" class="hover:text-zinc-600 dark:hover:text-zinc-300 transition-colors no-underline">How To</a></li>
+            <li aria-hidden="true"><svg class="size-3 opacity-40" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6 4l4 4-4 4"/></svg></li>
+            <li><span aria-current="page" class="text-zinc-600 dark:text-zinc-300">Diagnostics toolbox</span></li>
+          </ol>
+        </nav>
+        <h1 class="doc-h1 font-sans font-bold text-zinc-950 dark:text-white mb-2">Diagnostics toolbox</h1>
+        <p class="page-lead mb-8">Four capabilities land next to the core subsystems for the v1
+release. Each is additive — nothing existing changes unless the
+new command is explicitly invoked.</p>
+        <details class="toc-mobile xl:hidden mb-8">
+          <summary>On this page <svg class="toc-mobile-chevron size-4" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 6l4 4 4-4"/></svg></summary>
+          <nav>
+            <a href="#1-visual-saip-profile-diffing" class="toc-link">1. Visual SAIP profile diffing</a>
+            <a href="#2-simulator-to-tui-auto-open" class="toc-link">2. Simulator-to-TUI auto-open</a>
+            <a href="#3-apdu-mutation-fuzzer" class="toc-link">3. APDU mutation fuzzer</a>
+            <a href="#4-eum-sm-dp-diagnostics" class="toc-link">4. EUM / SM-DP+ diagnostics</a>
+          </nav>
+        </details>
+        <div class="doc-prose text-[0.9375rem] leading-relaxed text-zinc-600 dark:text-zinc-400 space-y-4">
+<div class="-mx-6 sm:mx-0 doc-table-scroll"><table class="doc-table">
+<thead>
+<tr>
+<th>Capability</th>
+<th>Entry point</th>
+<th>Safety posture</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><abbr title="SIMalliance Interoperable Profile">SAIP</abbr> visual diff</td>
+<td><code>DIFF</code> / <code>DIFF-TUI</code></td>
+<td>Read-only</td>
+</tr>
+<tr>
+<td>SIMCARD → <abbr title="Text User Interface">TUI</abbr> auto-open</td>
+<td><code>yggdrasim-profile-autoload</code></td>
+<td>Read-only</td>
+</tr>
+<tr>
+<td><abbr title="Application Protocol Data Unit (ISO 7816-4)">APDU</abbr> mutation fuzzer</td>
+<td><code>yggdrasim-apdu-fuzzer</code></td>
+<td><strong>Opt-in, allow-listed</strong></td>
+</tr>
+<tr>
+<td>EUM / SM-DP+ diagnostics</td>
+<td><code>yggdrasim-eum-diag</code></td>
+<td>Operator-only</td>
+</tr>
+</tbody>
+</table></div>
+<hr />
+<h2 id="1-visual-saip-profile-diffing">1. Visual <abbr title="SIMalliance Interoperable Profile">SAIP</abbr> profile diffing</h2>
+<p>Drop into the profile-package shell and compare two inputs:</p>
+<div class="code-block"><pre><code>yggdrasim-profile-package
+</code></pre></div>
+<div class="code-block"><pre><code>&gt; DIFF /path/to/profile_a.der /path/to/profile_b.json
+&gt; DIFF /path/to/a.json /path/to/b.json NO-VALUES
+&gt; DIFF-TUI /path/to/a.der /path/to/b.der
+</code></pre></div>
+<p>Both commands accept transcode JSON, simulator profile manifests,
+and raw <abbr title="Distinguished Encoding Rules">DER</abbr>. Top-level <abbr title="SIMalliance Interoperable Profile">SAIP</abbr> section reorders are folded into a
+single <code>moved</code> entry.</p>
+<p>Inside <code>DIFF-TUI</code>:</p>
+<ul>
+<li><code>n</code> / <code>N</code> — next / previous diff</li>
+<li><code>v</code> — toggle value rendering</li>
+<li><code>q</code> — quit</li>
+</ul>
+<p>See <a href="../subsystems/profile-package.html">Profile Package subsystem</a>.</p>
+<hr />
+<h2 id="2-simulator-to-tui-auto-open">2. Simulator-to-<abbr title="Text User Interface">TUI</abbr> auto-open</h2>
+<p>When SIMCARD writes a new <abbr title="Integrated Circuit Card Identifier">ICCID</abbr> to its profile store (typically
+after a successful <abbr title="Secure Channel Protocol 11 (GP, elliptic curve)">SCP11</abbr> download), a polling watcher picks it up
+and launches a command per arrival — by default the <abbr title="SIMalliance Interoperable Profile">SAIP</abbr> <abbr title="Text User Interface">TUI</abbr>.</p>
+<div class="code-block"><pre><code>yggdrasim-profile-autoload --store-root /path/to/profile_store
+yggdrasim-profile-autoload --store-root ... --max-arrivals 5
+yggdrasim-profile-autoload \
+    --launcher &#39;{python} -m Tools.ProfilePackage --cmd &quot;USE {profile}; INFO; TREE; EXIT&quot;&#39;
+</code></pre></div>
+<p>Template variables (single-brace Python <code>str.format</code> style; unknown
+tokens substitute the empty string rather than raising):</p>
+<ul>
+<li><code>{iccid}</code> — the newly seen <abbr title="Integrated Circuit Card Identifier">ICCID</abbr></li>
+<li><code>{profile}</code> — preferred profile path</li>
+<li><code>{profile_path}</code> — alias of <code>{profile}</code></li>
+<li><code>{profile_dir}</code> — the per-profile directory</li>
+<li><code>{manifest}</code> — the manifest JSON path (empty if absent)</li>
+<li><code>{python}</code> — <code>sys.executable</code></li>
+</ul>
+<p>With no <code>--launcher</code> flag the watcher runs
+<code>python -m Tools.ProfilePackage --cmd "USE &lt;profile&gt;; INFO; TREE; EXIT"</code>,
+which opens the new profile in the <abbr title="SIMalliance Interoperable Profile">SAIP</abbr> inspect view immediately.</p>
+<p>From inside the profile-package shell:</p>
+<div class="code-block"><pre><code>&gt; WATCH-SIMCARD STORE /path/to/profile_store POLL 0.5 MAX 5
+&gt; WATCH-SIMCARD LAUNCHER &quot;yggdrasim-profile-package --cmd &#39;USE {profile}; INFO; TREE; EXIT&#39;&quot;
+</code></pre></div>
+<hr />
+<h2 id="3-apdu-mutation-fuzzer">3. <abbr title="Application Protocol Data Unit (ISO 7816-4)">APDU</abbr> mutation fuzzer</h2>
+<div class="admonition danger">
+<p class="admonition-title">Operator responsibility</p>
+<p>Only run this against cards you own and have explicitly
+allow-listed. The tooling refuses to start without both
+<code>--i-mean-it</code> and at least one <code>--allow-iccid</code> / <code>--allow-imsi</code>.</p>
+</div>
+<div class="code-block"><pre><code>yggdrasim-apdu-fuzzer \
+    --corpus /path/to/session.json \
+    --transport pcsc \
+    --allow-iccid 89000012345678901234 \
+    --seed 0xCAFEBABE \
+    --max-apdus 500 \
+    --i-mean-it
+</code></pre></div>
+<p>Dry-runs without a physical card use the null transport:</p>
+<div class="code-block"><pre><code>yggdrasim-apdu-fuzzer --corpus /path/to/session.json --transport null --allow-iccid ANY --i-mean-it
+</code></pre></div>
+<p>See <a href="../subsystems/apdu-fuzzer.html"><abbr title="Application Protocol Data Unit (ISO 7816-4)">APDU</abbr> Mutation Fuzzer</a>.</p>
+<hr />
+<h2 id="4-eum-sm-dp-diagnostics">4. EUM / SM-DP+ diagnostics</h2>
+<p>Operates the server side of an ES8+ / <abbr title="Bound Profile Package (GSMA SGP.22)">BPP</abbr> provisioning flow.
+Supply ShS-ENC, ShS-MAC, and optionally DEK for a given <abbr title="Integrated Circuit Card Identifier">ICCID</abbr>;
+the tooling writes a local JSON key repository (atomic, <code>0o600</code>)
+and launches <code>tshark</code> with the shipped Lua dissector.</p>
+<div class="code-block"><pre><code>yggdrasim-eum-diag inject-keys \
+    --iccid 89000012345678901234 \
+    --shs-enc &lt;32 hex chars&gt; \
+    --shs-mac &lt;32 hex chars&gt; \
+    --dek     &lt;32 hex chars&gt; \
+    --pcap    /captures/provisioning.pcapng
+</code></pre></div>
+<p>Write keys only (for when a separate <code>wireshark</code> instance is
+handling the capture):</p>
+<div class="code-block"><pre><code>yggdrasim-eum-diag store-keys \
+    --iccid 89000012345678901234 \
+    --shs-enc ... --shs-mac ... \
+    --keys-out /tmp/session-keys.json
+</code></pre></div>
+<p>Offline <abbr title="Bound Profile Package (GSMA SGP.22)">BPP</abbr> decode via optional pySim:</p>
+<div class="code-block"><pre><code>yggdrasim-eum-diag decode-bpp --bpp /path/to/bpp.bin
+</code></pre></div>
+<p>See <a href="../subsystems/eum-diagnostics.html">EUM Diagnostics</a>.</p>
+        </div>
+      </div><!-- /ygg-toc-body -->
+      <aside class="ygg-toc-rail" aria-label="On this page">
+        <p class="ygg-toc-rail-label">On this page</p>
+        <nav>
+            <a href="#1-visual-saip-profile-diffing" class="toc-link">1. Visual SAIP profile diffing</a>
+            <a href="#2-simulator-to-tui-auto-open" class="toc-link">2. Simulator-to-TUI auto-open</a>
+            <a href="#3-apdu-mutation-fuzzer" class="toc-link">3. APDU mutation fuzzer</a>
+            <a href="#4-eum-sm-dp-diagnostics" class="toc-link">4. EUM / SM-DP+ diagnostics</a>
+        </nav>
+      </aside>
+      </div><!-- /ygg-content-toc -->
+    </main>
+    <footer class="px-6 py-6 sm:px-10 lg:px-14 xl:px-16 border-t border-zinc-950/[0.06] dark:border-white/[0.05]">
+      <div class="ygg-content flex flex-col items-center gap-2 text-xs text-zinc-500">
+        <div class="flex items-center gap-1.5 text-sm">
+          <span class="font-sans font-semibold text-zinc-700 dark:text-zinc-300">YggdraSIM</span>
+          <span class="text-zinc-400 dark:text-zinc-500">by</span>
+          <a href="https://1ot.com" target="_blank" rel="noopener" class="font-semibold text-zinc-700 dark:text-zinc-300 hover:text-zinc-600 dark:hover:text-zinc-300 transition-colors">1oT</a>
+        </div>
+        <div class="flex flex-wrap items-center justify-center gap-2 text-zinc-400 dark:text-zinc-500">
+          <span>Copyright © 2026 1oT OÜ</span>
+          <span aria-hidden="true">·</span>
+          <span>Last updated <span data-ygg-updated>May 19, 2026</span></span>
+        </div>
+      </div>
+    </footer>
+  </div>
+</div>
+<script src="../ygg.js?v=2"></script>
+<!-- Mermaid: ygg.js loads ygg-mermaid.js when .doc-prose contains pre.mermaid -->
+</body>
+</html>

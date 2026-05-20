@@ -1,0 +1,396 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>SCP11 Local Access — YggdraSIM</title>
+  <link rel="icon" href="../assets/images/yggdrasil-mark.svg">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,100..900&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>html{font-size:100%}</style>
+  <script>(function(){var s=localStorage.getItem('ygg-theme');var p=window.matchMedia('(prefers-color-scheme: dark)').matches;if(s==='dark'||(!s&&p))document.documentElement.classList.add('dark');})();</script>
+  <link rel="stylesheet" href="../tailwind.css?v=2">
+  <link rel="stylesheet" href="../ygg.css?v=2">
+</head>
+<body class="antialiased font-sans bg-zinc-50 dark:bg-[var(--bg-page)] text-zinc-900 dark:text-zinc-100"
+      data-ygg-base="../" data-ygg-partial-path="../partials/sidebar.html" data-ygg-active-sub="subsystems/scp11-local-access.html" data-ygg-open-sections="subsystems">
+<a class="ygg-skip-link" href="#ygg-main">Skip to content</a>
+<div id="ygg-shell" class="flex min-h-dvh isolate ygg-layout-pending">
+  <div id="ygg-chrome-mount"></div>
+  <script src="../ygg-layout.js?v=2"></script>
+  <div id="ygg-main-column" class="flex-1 lg:ml-64 flex flex-col min-h-dvh">
+    <header class="lg:hidden sticky top-0 z-20 flex items-center gap-3 px-4 py-3 bg-white/95 dark:bg-[var(--bg-page)]/95 backdrop-blur-sm border-b border-zinc-950/[0.07] dark:border-white/[0.05] shrink-0">
+      <button type="button" onclick="openSidebar()" class="ygg-icon-btn flex items-center justify-center size-11 rounded-md text-zinc-500 transition-colors" aria-label="Open menu">
+        <svg aria-hidden="true" focusable="false" class="size-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M3 12h18M3 18h18"/></svg>
+      </button>
+      <span class="font-sans font-semibold text-sm tracking-tight">YggdraSIM</span>
+    </header>
+    <main id="ygg-main" tabindex="-1" class="flex-1 px-6 py-10 sm:px-10 lg:px-14 xl:px-16">
+      <div class="ygg-content-toc">
+      <div class="ygg-toc-body">
+        <nav class="flex flex-wrap items-center gap-1.5 text-xs text-zinc-400 mb-6" aria-label="Breadcrumb">
+          <ol class="ygg-crumbs">
+            <li><a href="../index.html" class="doc-link no-underline">Home</a></li>
+            <li aria-hidden="true"><svg class="size-3 opacity-40" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6 4l4 4-4 4"/></svg></li>
+            <li><a href="index.html" class="hover:text-zinc-600 dark:hover:text-zinc-300 transition-colors no-underline">Subsystems</a></li>
+            <li aria-hidden="true"><svg class="size-3 opacity-40" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6 4l4 4-4 4"/></svg></li>
+            <li><span aria-current="page" class="text-zinc-600 dark:text-zinc-300">SCP11 Local Access</span></li>
+          </ol>
+        </nav>
+        <h1 class="doc-h1 font-sans font-bold text-zinc-950 dark:text-white mb-2">SCP11 Local Access</h1>
+        <p class="page-lead mb-8"><code>SCP11/local_access/</code> is the direct local <code>ISD-R</code> shell. Each card-touching
+command opens a fresh local <abbr title="Secure Channel Protocol 11 (GP, elliptic curve)">SCP11</abbr> session, executes the exact ES10 exchange
+it implies, and closes the session in cleanup. Use it when there is no relay
+and the workflow is a direct <abbr title="ES10b interface between LPAd/IPAd and ISD-R">ES10b</abbr> / <abbr title="ES10c interface for profile state control">ES10c</abbr> / metadata operation against a
+physical or simulated <abbr title="Embedded UICC">eUICC</abbr>.</p>
+        <details class="toc-mobile xl:hidden mb-8">
+          <summary>On this page <svg class="toc-mobile-chevron size-4" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 6l4 4 4-4"/></svg></summary>
+          <nav>
+            <a href="#when-to-use-it" class="toc-link">When to use it</a>
+            <a href="#entry-points" class="toc-link">Entry points</a>
+            <a href="#command-surface-grouped" class="toc-link">Command surface, grouped</a>
+            <a href="#discovery-and-inspection" class="toc-link toc-link-sub">Discovery and inspection</a>
+            <a href="#profile-provisioning" class="toc-link toc-link-sub">Profile provisioning</a>
+            <a href="#profile-state-control" class="toc-link toc-link-sub">Profile state control</a>
+            <a href="#hil-diagnostics" class="toc-link toc-link-sub">HIL / diagnostics</a>
+            <a href="#runtime-dependencies" class="toc-link">Runtime dependencies</a>
+            <a href="#state-the-shell-writes" class="toc-link">State the shell writes</a>
+            <a href="#common-recipes" class="toc-link">Common recipes</a>
+            <a href="#one-shot-load-a-profile" class="toc-link toc-link-sub">One-shot load a profile</a>
+            <a href="#compact-status-snapshot" class="toc-link toc-link-sub">Compact status snapshot</a>
+            <a href="#enable-and-delete" class="toc-link toc-link-sub">Enable and delete</a>
+            <a href="#session-key-export" class="toc-link">Session key export</a>
+            <a href="#interactive-shell" class="toc-link toc-link-sub">Interactive shell</a>
+            <a href="#non-interactive-launcher-flag" class="toc-link toc-link-sub">Non-interactive launcher flag</a>
+            <a href="#session-snapshot-data" class="toc-link toc-link-sub">Session snapshot data</a>
+            <a href="#pitfalls" class="toc-link">Pitfalls</a>
+            <a href="#related-pages" class="toc-link">Related pages</a>
+          </nav>
+        </details>
+        <div class="doc-prose text-[0.9375rem] leading-relaxed text-zinc-600 dark:text-zinc-400 space-y-4">
+<div class="admonition info">
+<p class="admonition-title">Underlying concept</p>
+<p>Start with <a href="../concepts/rsp-architecture.html"><abbr title="Remote SIM Provisioning">RSP</abbr> Architecture</a>. This
+shell speaks the ES10 family directly, without an <abbr title="Local Profile Assistant, device-side">LPAd</abbr> in the middle.</p>
+</div>
+<h2 id="when-to-use-it">When to use it</h2>
+<ul>
+<li><code>DISCOVER</code>, <code>INFO</code>, <code>STATUS</code>, <code>CERTS</code>, <code>SMDP-CERTS</code></li>
+<li><code>LOAD-PROFILE</code>, <code>PROFILE</code>, <code>METADATA</code>, <code>METADATA-LINT</code></li>
+<li><code>STORE-METADATA</code>, <code>STORE-METADATA-CUSTOM</code>, <code>UPDATE-METADATA</code></li>
+<li><code>ENABLE-PROFILE</code>, <code>DISABLE-PROFILE</code>, <code>DELETE-PROFILE</code></li>
+<li>any one-shot local <abbr title="Secure Channel Protocol 11 (GP, elliptic curve)">SCP11</abbr> session that does not need an SM-DP+ session</li>
+</ul>
+<h2 id="entry-points">Entry points</h2>
+<div class="tabbed-set tabbed-alternate" data-tabs="1:3"><input checked="checked" id="__tabbed_1_1" name="__tabbed_1" type="radio" /><input id="__tabbed_1_2" name="__tabbed_1" type="radio" /><input id="__tabbed_1_3" name="__tabbed_1" type="radio" /><div class="tabbed-labels"><label for="__tabbed_1_1">Module</label><label for="__tabbed_1_2">Console script</label><label for="__tabbed_1_3">From the launcher</label></div>
+<div class="tabbed-content">
+<div class="tabbed-block">
+<div class="code-block"><pre><code>python -m SCP11.local_access
+python -m SCP11.local_access --cmd &quot;DISCOVER; STATUS; EXIT&quot;
+python -m SCP11.local_access --stdin &lt;&lt;&#39;EOF&#39;
+PROFILE Workspace/LocalSMDPP/profile/test_profile.txt
+LOAD-PROFILE
+EXIT
+EOF
+</code></pre></div>
+</div>
+<div class="tabbed-block">
+<div class="code-block"><pre><code>yggdrasim-scp11-local-access
+</code></pre></div>
+</div>
+<div class="tabbed-block">
+<p><code>python main/main.py</code> and pick the <abbr title="Secure Channel Protocol 11 (GP, elliptic curve)">SCP11</abbr> Local Access entry.</p>
+</div>
+</div>
+</div>
+<h2 id="command-surface-grouped">Command surface, grouped</h2>
+<h3 id="discovery-and-inspection">Discovery and inspection</h3>
+<div class="-mx-6 sm:mx-0 doc-table-scroll"><table class="doc-table">
+<thead>
+<tr>
+<th>Command</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>DISCOVER</code></td>
+<td>scan for <abbr title="Embedded UICC">eUICC</abbr>, <abbr title="Issuer Security Domain - Root">ISD-R</abbr>, certificates, and basic state</td>
+</tr>
+<tr>
+<td><code>INFO</code></td>
+<td>print session and card snapshot</td>
+</tr>
+<tr>
+<td><code>STATUS</code></td>
+<td>print the shell's current configuration</td>
+</tr>
+<tr>
+<td><code>CERTS</code></td>
+<td>list card-aware certificates</td>
+</tr>
+<tr>
+<td><code>SMDP-CERTS</code></td>
+<td>list available SM-DP+ certificate chains</td>
+</tr>
+</tbody>
+</table></div>
+<h3 id="profile-provisioning">Profile provisioning</h3>
+<div class="-mx-6 sm:mx-0 doc-table-scroll"><table class="doc-table">
+<thead>
+<tr>
+<th>Command</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>PROFILE &lt;path&gt;</code></td>
+<td>pick the profile input (<abbr title="Distinguished Encoding Rules">DER</abbr>/<abbr title="Bound Profile Package (GSMA SGP.22)">BPP</abbr>/<abbr title="Unprotected Profile Package (GSMA SGP.22)">UPP</abbr> or hex text)</td>
+</tr>
+<tr>
+<td><code>METADATA &lt;path&gt;</code></td>
+<td>pick the metadata JSON</td>
+</tr>
+<tr>
+<td><code>METADATA-LINT</code></td>
+<td>lint the selected metadata JSON</td>
+</tr>
+<tr>
+<td><code>STORE-METADATA</code></td>
+<td>store metadata on the card</td>
+</tr>
+<tr>
+<td><code>STORE-METADATA-CUSTOM [args]</code></td>
+<td>store a single custom metadata tag</td>
+</tr>
+<tr>
+<td><code>STORE-METADATA-CUSTOM-ALL</code></td>
+<td>store the full custom metadata set</td>
+</tr>
+<tr>
+<td><code>UPDATE-METADATA</code></td>
+<td>update metadata on an already-loaded profile</td>
+</tr>
+<tr>
+<td><code>LOAD-PROFILE</code></td>
+<td>full local <abbr title="Secure Channel Protocol 11 (GP, elliptic curve)">SCP11</abbr> + PrepareDownload + LoadBPP flow</td>
+</tr>
+</tbody>
+</table></div>
+<h3 id="profile-state-control">Profile state control</h3>
+<div class="-mx-6 sm:mx-0 doc-table-scroll"><table class="doc-table">
+<thead>
+<tr>
+<th>Command</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>ENABLE-PROFILE</code></td>
+<td>enable the selected profile</td>
+</tr>
+<tr>
+<td><code>DISABLE-PROFILE</code></td>
+<td>disable the selected profile</td>
+</tr>
+<tr>
+<td><code>DELETE-PROFILE</code></td>
+<td>delete the selected profile</td>
+</tr>
+</tbody>
+</table></div>
+<h3 id="hil-diagnostics"><abbr title="Hardware-In-The-Loop">HIL</abbr> / diagnostics</h3>
+<div class="-mx-6 sm:mx-0 doc-table-scroll"><table class="doc-table">
+<thead>
+<tr>
+<th>Command / flag</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>EXPORT-KEYBAG [Path.keys.json] [Label]</code></td>
+<td>dump the last-built SCP11c BSP snapshot (S-ENC, S-MAC, MAC chain, block number, <abbr title="Application Identifier">AID</abbr>) into a keybag JSON for offline <abbr title="Hardware-In-The-Loop">HIL</abbr> pcap decryption</td>
+</tr>
+<tr>
+<td><code>python -m SCP11.local_access --dump-keybag &lt;path&gt;</code></td>
+<td>non-interactive launcher flag that runs the same export at the end of the batch (or standalone if no <code>--cmd</code> / <code>--stdin</code> is given)</td>
+</tr>
+</tbody>
+</table></div>
+<p>See <a href="#session-key-export">Session key export</a> below and the <abbr title="Hardware-In-The-Loop">HIL</abbr> Bridge
+<a href="hil-bridge.html#offline-pcap-replay">offline replay flow</a>.</p>
+<h2 id="runtime-dependencies">Runtime dependencies</h2>
+<ul>
+<li>a <abbr title="Personal Computer/Smart Card (Workgroup)">PC/SC</abbr> reader with an <abbr title="Embedded UICC">eUICC</abbr>, or the simulator backend</li>
+<li>local <abbr title="Secure Channel Protocol 11 (GP, elliptic curve)">SCP11</abbr> certificate material under <code>SCP11/local_access/certs/</code> or
+  under the writable runtime root</li>
+<li>the shared SQLite inventory for per-<abbr title="eUICC Identifier">EID</abbr> selection state</li>
+<li>no network access is required</li>
+</ul>
+<h2 id="state-the-shell-writes">State the shell writes</h2>
+<div class="-mx-6 sm:mx-0 doc-table-scroll"><table class="doc-table">
+<thead>
+<tr>
+<th>Location</th>
+<th>Contents</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>state/device_inventory.sqlite3</code></td>
+<td>per-<abbr title="eUICC Identifier">EID</abbr> profile, metadata, and cert choices</td>
+</tr>
+<tr>
+<td><code>SCP11/local_access/certs/</code></td>
+<td>drop-in certificate material</td>
+</tr>
+<tr>
+<td><code>SCP11/local_access/profile/</code></td>
+<td>profile input tree</td>
+</tr>
+<tr>
+<td><code>SCP11/local_access/profile/metadata/</code></td>
+<td>metadata JSON tree</td>
+</tr>
+</tbody>
+</table></div>
+<h2 id="common-recipes">Common recipes</h2>
+<h3 id="one-shot-load-a-profile">One-shot load a profile</h3>
+<div class="code-block"><pre><code>python -m SCP11.local_access --stdin &lt;&lt;&#39;EOF&#39;
+PROFILE Workspace/LocalSMDPP/profile/test_profile.txt
+METADATA Workspace/LocalSMDPP/profile/metadata/test_metadata.json
+LOAD-PROFILE
+EXIT
+EOF
+</code></pre></div>
+<h3 id="compact-status-snapshot">Compact status snapshot</h3>
+<div class="code-block"><pre><code>python -m SCP11.local_access --cmd &quot;DISCOVER; STATUS; CERTS --json; EXIT&quot;
+</code></pre></div>
+<h3 id="enable-and-delete">Enable and delete</h3>
+<div class="code-block"><pre><code>[Local SMDPP] &gt; ENABLE-PROFILE
+[Local SMDPP] &gt; STATUS
+[Local SMDPP] &gt; DISABLE-PROFILE
+[Local SMDPP] &gt; DELETE-PROFILE
+</code></pre></div>
+<h2 id="session-key-export">Session key export</h2>
+<p><code>EXPORT-KEYBAG</code> snapshots the last-built pySim BSP session into a
+keybag JSON compatible with the <abbr title="Hardware-In-The-Loop">HIL</abbr> Bridge offline-replay decoder.
+The BSP is (re)built by any verb that needs a secure channel —
+<code>LOAD-PROFILE</code>, <code>ENABLE-PROFILE</code>, <code>DISABLE-PROFILE</code>, <code>DELETE-PROFILE</code>,
+<code>STORE-METADATA</code>, <code>UPDATE-METADATA</code>, etc. — so run the desired verb
+first, then export.</p>
+<h3 id="interactive-shell">Interactive shell</h3>
+<div class="code-block"><pre><code>[Local SMDPP] &gt; LOAD-PROFILE
+[Local SMDPP] &gt; EXPORT-KEYBAG Workspace/hil/captures/session-2026-04-20.keys.json case-1234
+</code></pre></div>
+<p>Arguments (both optional):</p>
+<ul>
+<li><code>OutputPath.keys.json</code> — destination file. Defaults to a
+  timestamped path under <code>Workspace/SCP11/local_access/keybags/</code> when
+  omitted.</li>
+<li><code>Label</code> — free-form identifier written to the entry for operator
+  cross-referencing.</li>
+</ul>
+<p>The handler refuses cleanly if:</p>
+<ul>
+<li>no local <abbr title="Secure Channel Protocol 11 (GP, elliptic curve)">SCP11</abbr> session has been initialized yet</li>
+<li>the session exists but no BSP snapshot has been captured (no
+  BSP-building verb has run during the session)</li>
+</ul>
+<h3 id="non-interactive-launcher-flag">Non-interactive launcher flag</h3>
+<div class="code-block"><pre><code>python -m SCP11.local_access --dump-keybag \
+    Workspace/hil/captures/session-2026-04-20.keys.json
+</code></pre></div>
+<p>Combines cleanly with <code>--cmd</code> / <code>--stdin</code>: the <code>EXPORT-KEYBAG</code> line is
+appended to the batch, runs after the last command, and writes the
+keybag. If no batch is provided, the export runs standalone.</p>
+<h3 id="session-snapshot-data">Session snapshot data</h3>
+<p>The shell's <code>LocalSessionState</code> keeps the BSP material after every
+build via <code>_snapshot_session_bsp</code>:</p>
+<ul>
+<li><code>last_bsp_s_enc_hex</code> — BSP session S-ENC</li>
+<li><code>last_bsp_s_mac_hex</code> — BSP session S-MAC</li>
+<li><code>last_bsp_mac_chain_hex</code> — MAC chaining value</li>
+<li><code>last_bsp_block_nr</code> — per-session block counter</li>
+<li><code>last_bsp_aid_hex</code> — <abbr title="Application Identifier">AID</abbr> under which the BSP was built</li>
+<li><code>last_bsp_protocol</code> — <code>"SCP11c"</code></li>
+</ul>
+<p><code>EXPORT-KEYBAG</code> reads directly from this snapshot, so it is safe to
+run even after the BSP has been torn down by the verb that built it.</p>
+<p>See <a href="hil-bridge.html#keybag-json-schema"><abbr title="Hardware-In-The-Loop">HIL</abbr> Bridge — Keybag JSON schema</a>
+for the complete file structure and
+<a href="../how-to/replay-hil-pcap-offline.html">Replay a <abbr title="Hardware-In-The-Loop">HIL</abbr> pcap offline</a> for
+how the keybag feeds into the decoded-<abbr title="Application Protocol Data Unit (ISO 7816-4)">APDU</abbr> <abbr title="Text User Interface">TUI</abbr>.</p>
+<h2 id="pitfalls">Pitfalls</h2>
+<ul>
+<li>Each command opens a fresh local session. Do not assume an earlier
+  authenticated state carries forward into the next verb.</li>
+<li>Metadata linting is advisory. A JSON that lints clean can still be rejected
+  by the card if a field is out of the card's acceptable range.</li>
+<li><code>LOAD-PROFILE</code> requires both <code>PROFILE</code> and (often) <code>METADATA</code> to be set
+  for the current session. <code>STATUS</code> confirms the choices.</li>
+<li>Certificate matching uses the card's allowed <abbr title="Certificate Issuer Public Key Identifier">CI PKID</abbr> set. Drop-in custom
+  certificates must live in a directory the loader scans; see
+  <a href="../reference/runtime-root.html">Runtime Root</a>.</li>
+</ul>
+<h2 id="related-pages">Related pages</h2>
+<ul>
+<li><a href="../concepts/rsp-architecture.html"><abbr title="Remote SIM Provisioning">RSP</abbr> Architecture</a></li>
+<li><a href="scp11-live.html"><abbr title="Secure Channel Protocol 11 (GP, elliptic curve)">SCP11</abbr> Live Relay</a></li>
+<li><a href="../how-to/download-a-profile-local.html">Download a Profile (Local Access)</a></li>
+<li><a href="../how-to/enable-disable-delete-profile.html">Enable, Disable, Delete a Profile</a></li>
+<li><a href="hil-bridge.html#offline-pcap-replay"><abbr title="Hardware-In-The-Loop">HIL</abbr> Bridge — offline pcap replay</a></li>
+<li><a href="../how-to/replay-hil-pcap-offline.html">Replay a <abbr title="Hardware-In-The-Loop">HIL</abbr> pcap offline</a></li>
+</ul>
+        </div>
+      </div><!-- /ygg-toc-body -->
+      <aside class="ygg-toc-rail" aria-label="On this page">
+        <p class="ygg-toc-rail-label">On this page</p>
+        <nav>
+            <a href="#when-to-use-it" class="toc-link">When to use it</a>
+            <a href="#entry-points" class="toc-link">Entry points</a>
+            <a href="#command-surface-grouped" class="toc-link">Command surface, grouped</a>
+            <a href="#discovery-and-inspection" class="toc-link toc-link-sub">Discovery and inspection</a>
+            <a href="#profile-provisioning" class="toc-link toc-link-sub">Profile provisioning</a>
+            <a href="#profile-state-control" class="toc-link toc-link-sub">Profile state control</a>
+            <a href="#hil-diagnostics" class="toc-link toc-link-sub">HIL / diagnostics</a>
+            <a href="#runtime-dependencies" class="toc-link">Runtime dependencies</a>
+            <a href="#state-the-shell-writes" class="toc-link">State the shell writes</a>
+            <a href="#common-recipes" class="toc-link">Common recipes</a>
+            <a href="#one-shot-load-a-profile" class="toc-link toc-link-sub">One-shot load a profile</a>
+            <a href="#compact-status-snapshot" class="toc-link toc-link-sub">Compact status snapshot</a>
+            <a href="#enable-and-delete" class="toc-link toc-link-sub">Enable and delete</a>
+            <a href="#session-key-export" class="toc-link">Session key export</a>
+            <a href="#interactive-shell" class="toc-link toc-link-sub">Interactive shell</a>
+            <a href="#non-interactive-launcher-flag" class="toc-link toc-link-sub">Non-interactive launcher flag</a>
+            <a href="#session-snapshot-data" class="toc-link toc-link-sub">Session snapshot data</a>
+            <a href="#pitfalls" class="toc-link">Pitfalls</a>
+            <a href="#related-pages" class="toc-link">Related pages</a>
+        </nav>
+      </aside>
+      </div><!-- /ygg-content-toc -->
+    </main>
+    <footer class="px-6 py-6 sm:px-10 lg:px-14 xl:px-16 border-t border-zinc-950/[0.06] dark:border-white/[0.05]">
+      <div class="ygg-content flex flex-col items-center gap-2 text-xs text-zinc-500">
+        <div class="flex items-center gap-1.5 text-sm">
+          <span class="font-sans font-semibold text-zinc-700 dark:text-zinc-300">YggdraSIM</span>
+          <span class="text-zinc-400 dark:text-zinc-500">by</span>
+          <a href="https://1ot.com" target="_blank" rel="noopener" class="font-semibold text-zinc-700 dark:text-zinc-300 hover:text-zinc-600 dark:hover:text-zinc-300 transition-colors">1oT</a>
+        </div>
+        <div class="flex flex-wrap items-center justify-center gap-2 text-zinc-400 dark:text-zinc-500">
+          <span>Copyright © 2026 1oT OÜ</span>
+          <span aria-hidden="true">·</span>
+          <span>Last updated <span data-ygg-updated>May 19, 2026</span></span>
+        </div>
+      </div>
+    </footer>
+  </div>
+</div>
+<script src="../ygg.js?v=2"></script>
+<!-- Mermaid: ygg.js loads ygg-mermaid.js when .doc-prose contains pre.mermaid -->
+</body>
+</html>

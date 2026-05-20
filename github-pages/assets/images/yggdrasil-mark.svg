@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" aria-hidden="true" focusable="false">
+        <defs>
+          <linearGradient id="g-ring" x1="18" x2="110" y1="18" y2="110" gradientUnits="userSpaceOnUse">
+            <stop offset="0" stop-color="#88c0d0"/><stop offset="1" stop-color="#a3be8c"/>
+          </linearGradient>
+          <linearGradient id="g-core" x1="64" x2="64" y1="24" y2="112" gradientUnits="userSpaceOnUse">
+            <stop offset="0" stop-color="#ebcb8b"/><stop offset="1" stop-color="#a3be8c"/>
+          </linearGradient>
+        </defs>
+        <g fill="none" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="64" cy="64" r="57" stroke="url(#g-ring)" stroke-width="6"/>
+          <path d="M64 24v68" stroke="url(#g-core)" stroke-width="6"/>
+          <path d="M64 33c-9 10-16 14-27 19" stroke="#88c0d0" stroke-width="5"/>
+          <path d="M64 33c9 10 16 14 27 19"  stroke="#88c0d0" stroke-width="5"/>
+          <path d="M64 45c-12 7-21 12-34 14" stroke="#81a1c1" stroke-width="5"/>
+          <path d="M64 45c12 7 21 12 34 14"  stroke="#81a1c1" stroke-width="5"/>
+          <path d="M64 60c-10 7-18 10-28 13" stroke="#8fbcbb" stroke-width="5"/>
+          <path d="M64 60c10 7 18 10 28 13"  stroke="#8fbcbb" stroke-width="5"/>
+          <path d="M64 92c-7 12-13 17-24 21" stroke="#a3be8c" stroke-width="5"/>
+          <path d="M64 92c7 12 13 17 24 21"  stroke="#a3be8c" stroke-width="5"/>
+          <path d="M64 92c-1 9-4 15-10 22"   stroke="#ebcb8b" stroke-width="4"/>
+          <path d="M64 92c1 9 4 15 10 22"    stroke="#ebcb8b" stroke-width="4"/>
+          <circle cx="64" cy="22" r="4" fill="#ebcb8b" stroke="none"/>
+        </g>
+      </svg>

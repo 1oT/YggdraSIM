@@ -1,0 +1,227 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>OTA / SCP80 — YggdraSIM</title>
+  <link rel="icon" href="../assets/images/yggdrasil-mark.svg">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,100..900&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>html{font-size:100%}</style>
+  <script>(function(){var s=localStorage.getItem('ygg-theme');var p=window.matchMedia('(prefers-color-scheme: dark)').matches;if(s==='dark'||(!s&&p))document.documentElement.classList.add('dark');})();</script>
+  <link rel="stylesheet" href="../tailwind.css?v=2">
+  <link rel="stylesheet" href="../ygg.css?v=2">
+</head>
+<body class="antialiased font-sans bg-zinc-50 dark:bg-[var(--bg-page)] text-zinc-900 dark:text-zinc-100"
+      data-ygg-base="../" data-ygg-partial-path="../partials/sidebar.html" data-ygg-active-sub="concepts/ota-scp80.html" data-ygg-open-sections="concepts">
+<a class="ygg-skip-link" href="#ygg-main">Skip to content</a>
+<div id="ygg-shell" class="flex min-h-dvh isolate ygg-layout-pending">
+  <div id="ygg-chrome-mount"></div>
+  <script src="../ygg-layout.js?v=2"></script>
+  <div id="ygg-main-column" class="flex-1 lg:ml-64 flex flex-col min-h-dvh">
+    <header class="lg:hidden sticky top-0 z-20 flex items-center gap-3 px-4 py-3 bg-white/95 dark:bg-[var(--bg-page)]/95 backdrop-blur-sm border-b border-zinc-950/[0.07] dark:border-white/[0.05] shrink-0">
+      <button type="button" onclick="openSidebar()" class="ygg-icon-btn flex items-center justify-center size-11 rounded-md text-zinc-500 transition-colors" aria-label="Open menu">
+        <svg class="size-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" focusable="false"><path d="M3 6h18M3 12h18M3 18h18"/></svg>
+      </button>
+      <span class="font-sans font-semibold text-sm tracking-tight">YggdraSIM</span>
+    </header>
+    <main id="ygg-main" tabindex="-1" class="flex-1 px-6 py-10 sm:px-10 lg:px-14 xl:px-16">
+      <div class="ygg-content-toc">
+      <div class="ygg-toc-body">
+        <nav class="flex flex-wrap items-center gap-1.5 text-xs text-zinc-400 mb-6" aria-label="Breadcrumb">
+          <ol class="ygg-crumbs"><li><a href="../index.html" class="doc-link no-underline">Home</a></li><li aria-hidden="true"><svg class="size-3 opacity-40" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6 4l4 4-4 4"/></svg></li><li><a href="index.html" class="hover:text-zinc-600 dark:hover:text-zinc-300 transition-colors no-underline">Concepts</a></li><li aria-hidden="true"><svg class="size-3 opacity-40" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6 4l4 4-4 4"/></svg></li><li><span class="text-zinc-600 dark:text-zinc-300" aria-current="page">OTA / SCP80</span></li></ol>
+        </nav>
+        <h1 class="doc-h1 font-sans font-bold text-zinc-950 dark:text-white mb-2">OTA / SCP80</h1>
+        <p class="page-lead mb-8">Secure Channel Protocol 80 is the <abbr title="Over-The-Air">OTA</abbr> transport defined by <abbr title="European Telecommunications Standards Institute">ETSI</abbr> TS 102 225
+and the associated commands in <abbr title="European Telecommunications Standards Institute">ETSI</abbr> TS 102 226. It is how remote management
+payloads are delivered to a <abbr title="Universal Integrated Circuit Card">UICC</abbr> through the SMS-PP bearer, CAT_TP, or an
+HTTPS bearer. YggdraSIM's <code>SCP80/</code> shell builds, wraps, and decodes <abbr title="Secure Channel Protocol 80 (ETSI TS 102 225 / 226)">SCP80</abbr>
+payloads.</p>
+        <details class="toc-mobile xl:hidden mb-8">
+          <summary>On this page <svg class="toc-mobile-chevron size-4" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 6l4 4 4-4"/></svg></summary>
+          <nav>
+            <a href="#what-scp80-protects" class="toc-link">What SCP80 protects</a>
+            <a href="#packet-shape" class="toc-link">Packet shape</a>
+            <a href="#spi-bits-at-a-glance" class="toc-link">SPI bits at a glance</a>
+            <a href="#sending-and-receiving" class="toc-link">Sending and receiving</a>
+            <a href="#what-rfm-and-ram-carry" class="toc-link">What RFM and RAM carry</a>
+            <a href="#where-to-look-in-yggdrasim" class="toc-link">Where to look in YggdraSIM</a>
+          </nav>
+        </details>
+        <div class="doc-prose text-[0.9375rem] leading-relaxed text-zinc-600 dark:text-zinc-400 space-y-4">
+<p>The vendored specs live in:</p>
+<ul>
+<li><code>docs/ts_102225v180000p.md</code></li>
+<li><code>docs/ts_102226v120000p.md</code></li>
+</ul>
+<h2 id="what-scp80-protects">What <abbr title="Secure Channel Protocol 80 (ETSI TS 102 225 / 226)">SCP80</abbr> protects</h2>
+<p><abbr title="Secure Channel Protocol 80 (ETSI TS 102 225 / 226)">SCP80</abbr> secures <strong>secured packets</strong> sent over a transport, so that the
+receiving card can authenticate the sender, verify integrity, and optionally
+decrypt the payload. The transport itself is typically untrusted.</p>
+<p>Inside a secured packet, the payload is usually:</p>
+<ul>
+<li>an <strong><abbr title="Remote File Management">RFM</abbr></strong> (Remote File Management) command sequence, aimed at <abbr title="Universal Integrated Circuit Card">UICC</abbr> EFs</li>
+<li>an <strong><abbr title="Remote Application Management">RAM</abbr></strong> (Remote Application Management) command sequence, aimed at <abbr title="GlobalPlatform">GP</abbr>
+  administration of applets and packages</li>
+<li>a toolkit command sequence</li>
+</ul>
+<h2 id="packet-shape">Packet shape</h2>
+<p>A secured packet has a header, a command packet, and optionally a counter
+and a cryptographic checksum. The main header fields:</p>
+<div class="-mx-6 sm:mx-0 doc-table-scroll"><table class="doc-table">
+<thead>
+<tr>
+<th>Field</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>CPL</td>
+<td>command packet length</td>
+</tr>
+<tr>
+<td>CHL</td>
+<td>command header length</td>
+</tr>
+<tr>
+<td><abbr title="Security Parameter Indicator (OTA)">SPI</abbr></td>
+<td>Security Parameter Indicator, controls auth / enc / counter mode</td>
+</tr>
+<tr>
+<td>KIc</td>
+<td>key index for ciphering</td>
+</tr>
+<tr>
+<td>KID</td>
+<td>key index for MAC</td>
+</tr>
+<tr>
+<td>TAR</td>
+<td>Toolkit Application Reference, identifies the target applet</td>
+</tr>
+<tr>
+<td>CNTR</td>
+<td>counter value (anti-replay)</td>
+</tr>
+<tr>
+<td>PCNTR</td>
+<td>padding counter</td>
+</tr>
+</tbody>
+</table></div>
+<p>The response packet uses a similar header and includes a <strong>status word</strong> and
+optional response data, with either a checksum, a full cryptographic
+signature, or no integrity protection depending on <abbr title="Security Parameter Indicator (OTA)">SPI</abbr>.</p>
+<h2 id="spi-bits-at-a-glance"><abbr title="Security Parameter Indicator (OTA)">SPI</abbr> bits at a glance</h2>
+<p>The <abbr title="Security Parameter Indicator (OTA)">SPI</abbr> has two bytes. The first controls integrity, ciphering, and counter
+behavior on the command packet. The second controls status-word behavior and
+response packet protection.</p>
+<div class="-mx-6 sm:mx-0 doc-table-scroll"><table class="doc-table">
+<thead>
+<tr>
+<th><abbr title="Security Parameter Indicator (OTA)">SPI</abbr> section</th>
+<th>Bits</th>
+<th>Typical operator concern</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>integrity</td>
+<td>CC / DS / RC</td>
+<td>pick between checksum, full signature, or none</td>
+</tr>
+<tr>
+<td>ciphering</td>
+<td>on / off</td>
+<td>whether the payload is encrypted</td>
+</tr>
+<tr>
+<td>counter</td>
+<td>no counter, counter check, counter greater than</td>
+<td>replay protection</td>
+</tr>
+<tr>
+<td>response</td>
+<td>requested or not</td>
+<td>does the sender expect a PoR</td>
+</tr>
+</tbody>
+</table></div>
+<p>The <abbr title="Secure Channel Protocol 80 (ETSI TS 102 225 / 226)">SCP80</abbr> shell exposes these under structured set commands so the operator
+does not have to hand-encode bit layouts.</p>
+<h2 id="sending-and-receiving">Sending and receiving</h2>
+<pre class="mermaid"><code>flowchart LR
+    Operator["Operator / SCP80 shell"] --> Builder["packet builder"]
+    Builder --> Wrap["ciphering + MAC using KIc/KID"]
+    Wrap --> Transport["SMS-PP / HTTP / direct hex"]
+    Transport --> Card["UICC / eUICC"]
+    Card --> Applet["TAR-routed applet or RFM/RAM engine"]
+    Applet --> Resp["PoR #40;optional#41;"]
+    Resp --> Operator</code></pre>
+<p class="fig-caption">Figure: SCP80 send-and-receive — secured OTA packet round-trip to the card</p>
+<p>A minimal send path in the shell is:</p>
+<div class="code-block"><pre><code>[SCP80] &gt; iccid &lt;ICCID&gt;
+[SCP80] &gt; set KIc 0x15
+[SCP80] &gt; set KID 0x15
+[SCP80] &gt; set TAR 000000
+[SCP80] &gt; build A0D600...
+[SCP80] &gt; send
+</code></pre></div>
+<p>The shell keeps per-<abbr title="Integrated Circuit Card Identifier">ICCID</abbr> inventory so <code>KIc</code>, <code>KID</code>, <code>TAR</code>, and other state
+persist between sessions.</p>
+<h2 id="what-rfm-and-ram-carry">What <abbr title="Remote File Management">RFM</abbr> and <abbr title="Remote Application Management">RAM</abbr> carry</h2>
+<ul>
+<li><strong><abbr title="Remote File Management">RFM</abbr></strong> carries <abbr title="European Telecommunications Standards Institute">ETSI</abbr> TS 102 222 commands (<code>CREATE FILE</code>, <code>DELETE FILE</code>,
+  <code>UPDATE BINARY</code>, <code>READ RECORD</code>, and so on). This is what operators use to
+  push a roaming list update, a PLMN list change, or <abbr title="Elementary File">EF</abbr> content edits.</li>
+<li><strong><abbr title="Remote Application Management">RAM</abbr></strong> carries <abbr title="GlobalPlatform">GP</abbr> content-management commands (<code>INSTALL FOR LOAD</code>,
+  <code>INSTALL FOR INSTALL</code>, <code>LOAD</code>, <code>DELETE</code>, <code>PUT KEY</code>). This is what operators
+  use to push an applet update or rotate a key set remotely.</li>
+</ul>
+<p><abbr title="Secure Channel Protocol 80 (ETSI TS 102 225 / 226)">SCP80</abbr> is the outer envelope. The inner payload shape is whatever the TAR
+advertises inside the card.</p>
+<h2 id="where-to-look-in-yggdrasim">Where to look in YggdraSIM</h2>
+<ul>
+<li><a href="../subsystems/scp80.html"><abbr title="Secure Channel Protocol 80 (ETSI TS 102 225 / 226)">SCP80</abbr> <abbr title="Over-The-Air">OTA</abbr> Shell</a> for the operator surface</li>
+<li><a href="../subsystems/scp03.html"><abbr title="Secure Channel Protocol 03 (GP)">SCP03</abbr> Admin Shell</a> for the decoded view of
+  what a received <abbr title="Remote File Management">RFM</abbr>/<abbr title="Remote Application Management">RAM</abbr> session did to the card filesystem</li>
+<li><a href="../reference/standards-map.html">Standards Map</a> for TS 102 225 and
+  TS 102 226 cross-reference</li>
+</ul>
+        </div>
+      </div><!-- /ygg-toc-body -->
+      <aside class="ygg-toc-rail" aria-label="On this page">
+        <p class="ygg-toc-rail-label">On this page</p>
+        <nav>
+            <a href="#what-scp80-protects" class="toc-link">What SCP80 protects</a>
+            <a href="#packet-shape" class="toc-link">Packet shape</a>
+            <a href="#spi-bits-at-a-glance" class="toc-link">SPI bits at a glance</a>
+            <a href="#sending-and-receiving" class="toc-link">Sending and receiving</a>
+            <a href="#what-rfm-and-ram-carry" class="toc-link">What RFM and RAM carry</a>
+            <a href="#where-to-look-in-yggdrasim" class="toc-link">Where to look in YggdraSIM</a>
+        </nav>
+      </aside>
+      </div><!-- /ygg-content-toc -->
+    </main>
+    <footer class="px-6 py-6 sm:px-10 lg:px-14 xl:px-16 border-t border-zinc-950/[0.06] dark:border-white/[0.05]">
+      <div class="ygg-content flex flex-col items-center gap-2 text-xs text-zinc-500">
+        <div class="flex items-center gap-1.5 text-sm">
+          <span class="font-sans font-semibold text-zinc-700 dark:text-zinc-300">YggdraSIM</span>
+          <span class="text-zinc-400 dark:text-zinc-500">by</span>
+          <a href="https://1ot.com" target="_blank" rel="noopener" class="font-semibold text-zinc-700 dark:text-zinc-300 hover:text-zinc-600 dark:hover:text-zinc-300 transition-colors">1oT</a>
+        </div>
+        <div class="flex flex-wrap items-center justify-center gap-2 text-zinc-400 dark:text-zinc-500">
+          <span>Copyright © 2026 1oT OÜ</span>
+          <span aria-hidden="true">·</span>
+          <span>Last updated <span data-ygg-updated>May 19, 2026</span></span>
+        </div>
+      </div>
+    </footer>
+  </div>
+</div>
+<script src="../ygg.js?v=2"></script>
+<!-- Mermaid: ygg.js loads ygg-mermaid.js when .doc-prose contains pre.mermaid -->
+</body>
+</html>
