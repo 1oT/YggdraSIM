@@ -6,9 +6,11 @@ YggdraSIM is a Python toolkit for secure-element research, eUICC analysis, SIM/e
 > follow-up bug-fix release. See [`CHANGELOG.md`](CHANGELOG.md) for
 > the per-release history.
 
-> ** known issues.**
-> EF.IMSI decoder removing wrong nibble for parity. Fix coming with next release.
-> Thales latest SGP.32 card uses strict CR-flags and state management causing some eSIM management commands to not function properly. investigation ongoing and fixed will be applied as soon as possible.
+## Known issues
+
+EF.IMSI decoder removing wrong nibble for parity. Fix coming with next release.
+
+Thales latest SGP.32 card uses strict CR-flags and state management causing some eSIM management commands to not function properly. investigation ongoing and fixed will be applied as soon as possible.
 
 ## Distribution at a glance
 
