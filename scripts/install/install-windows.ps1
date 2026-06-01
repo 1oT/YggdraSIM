@@ -132,32 +132,86 @@ function Install-YgWindowsPrereqs {
     }
 }
 
+function Resolve-YgLatestTag {
+    $apiUrl = "https://api.github.com/repos/$RepoOwner/releases/latest"
+    try {
+        $release = Invoke-RestMethod -Uri $apiUrl -UseBasicParsing -MaximumRedirection 2
+        return $release.tag_name
+    }
+    catch {
+        Stop-YgError "could not resolve latest release tag for $RepoOwner : $_"
+    }
+}
+
 function Resolve-YgReleaseUrl {
     param(
         [string] $VersionTag,
-        [string] $AssetName
+        [string] $AssetBaseName
     )
-    if ($VersionTag -eq 'latest') {
-        return "$ReleaseBase/latest/download/$AssetName"
+    $tag = $VersionTag
+    if ($tag -eq 'latest') {
+        $tag = Resolve-YgLatestTag
     }
-    return "$ReleaseBase/download/$VersionTag/$AssetName"
+
+    # Strip leading v/V so the asset filename carries plain semver while the
+    # URL path uses the real tag.
+    $assetVer = $tag -replace '^[vV]', ''
+
+    return "$ReleaseBase/download/$tag/$AssetBaseName-$assetVer.zip"
+}
+
+function Expand-YgReleaseZip {
+    param(
+        [string] $ZipPath,
+        [string] $DestDir
+    )
+    # If the asset is a zip archive, extract it.  Otherwise treat it as a
+    # bare binary and return the original path.
+    $isZip = $false
+    try {
+        # .NET will throw if the file is not a valid zip
+        $null = [System.IO.Compression.ZipFile]::OpenRead($ZipPath)
+        $isZip = $true
+    }
+    catch {
+        $isZip = $false
+    }
+
+    if ($isZip) {
+        if (-not (Test-Path -LiteralPath $DestDir)) {
+            New-Item -ItemType Directory -Force -Path $DestDir | Out-Null
+        }
+        Expand-Archive -LiteralPath $ZipPath -DestinationPath $DestDir -Force
+        $extracted = Get-ChildItem -Path $DestDir -File -Recurse |
+            Where-Object { $_.Extension -ne '.zip' } |
+            Select-Object -First 1
+        if (-not $extracted) {
+            Stop-YgError "no binary found in downloaded archive $ZipPath"
+        }
+        return $extracted.FullName
+    }
+
+    # Not a zip — bare binary, pass through
+    return $ZipPath
 }
 
 function Install-YgFromRelease {
     $assetBase = "yggdrasim-windows-$Arch-$Flavor"
-    $assetName = "$assetBase.exe"
-    $url = Resolve-YgReleaseUrl -VersionTag $Version -AssetName $assetName
-    $tempFile = New-TemporaryFile
+    $url = Resolve-YgReleaseUrl -VersionTag $Version -AssetBaseName $assetBase
+    $tempZip = New-TemporaryFile
+    $extractDir = Join-Path ([System.IO.Path]::GetTempPath()) "yggdrasim-extract-$([System.Guid]::NewGuid())"
     try {
         Write-YgInfo "downloading $url"
-        Invoke-WebRequest -Uri $url -OutFile $tempFile -UseBasicParsing -MaximumRedirection 5
+        Invoke-WebRequest -Uri $url -OutFile $tempZip -UseBasicParsing -MaximumRedirection 5
+
+        $binaryPath = Expand-YgReleaseZip -ZipPath $tempZip -DestDir $extractDir
 
         if (-not (Test-Path -LiteralPath $InstallDir)) {
             New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
         }
 
         $targetPath = Join-Path $InstallDir 'yggdrasim.exe'
-        Copy-Item -LiteralPath $tempFile -Destination $targetPath -Force
+        Copy-Item -LiteralPath $binaryPath -Destination $targetPath -Force
         Write-YgInfo "installed $targetPath"
 
         $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
@@ -167,7 +221,10 @@ function Install-YgFromRelease {
         Write-YgInfo 'run: yggdrasim.exe --version'
     }
     finally {
-        Remove-Item -LiteralPath $tempFile -Force -ErrorAction SilentlyContinue
+        Remove-Item -LiteralPath $tempZip -Force -ErrorAction SilentlyContinue
+        if (Test-Path -LiteralPath $extractDir) {
+            Remove-Item -LiteralPath $extractDir -Force -Recurse -ErrorAction SilentlyContinue
+        }
     }
 }
 

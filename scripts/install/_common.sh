@@ -159,6 +159,24 @@ yg_asset_name() {
     printf 'yggdrasim-%s-%s-%s' "${1}" "${2}" "${3}"
 }
 
+yg_resolve_latest_tag() {
+    # Write the tag name of the latest GitHub release to stdout.
+    # Prefers gh CLI when available; falls back to an unauthenticated API
+    # call (subject to tighter rate-limiting).
+    if command -v gh >/dev/null 2>&1; then
+        gh release view --repo "${YGGDRASIM_REPO}" --json tagName --jq .tagName 2>/dev/null && return 0
+    fi
+    yg_need_cmd curl
+    local tag
+    tag="$(curl --fail --silent --show-error --proto '=https' --tlsv1.2 \
+        "https://api.github.com/repos/${YGGDRASIM_REPO}/releases/latest" \
+        | grep -o '"tag_name": *"[^"]*"' | head -1 | sed 's/.*"tag_name": *"\([^"]*\)".*/\1/')"
+    if [ -z "${tag}" ]; then
+        yg_die "could not resolve latest release tag for ${YGGDRASIM_REPO}"
+    fi
+    printf '%s' "${tag}"
+}
+
 yg_download_release_asset() {
     # $1 = asset URL, $2 = destination path
     yg_need_cmd curl
@@ -166,6 +184,42 @@ yg_download_release_asset() {
     local dest="${2}"
     yg_emit "downloading ${url}"
     curl --fail --location --max-redirs 5 --proto '=https' --tlsv1.2 --silent --show-error --output "${dest}" "${url}"
+}
+
+yg_extract_release_zip() {
+    # $1 = path to downloaded asset, $2 = destination directory
+    # If the asset is a zip archive it is extracted and the path to the
+    # first regular file inside is written to stdout.  Otherwise the
+    # asset is treated as a bare binary and its path is echoed as-is so
+    # the same caller works with both layouts.
+    local zip_path="${1}"
+    local dest_dir="${2}"
+
+    local is_zip=0
+    if command -v unzip >/dev/null 2>&1 && unzip -tq "${zip_path}" 2>/dev/null; then
+        is_zip=1
+    elif command -v python3 >/dev/null 2>&1 && python3 -c "import zipfile; zipfile.ZipFile('${zip_path}').close()" 2>/dev/null; then
+        is_zip=1
+    fi
+
+    if [ "${is_zip}" -eq 1 ]; then
+        mkdir -p "${dest_dir}"
+        if command -v unzip >/dev/null 2>&1; then
+            unzip -o -d "${dest_dir}" "${zip_path}" >/dev/null 2>&1
+        else
+            python3 -c "import zipfile; zipfile.ZipFile('${zip_path}').extractall('${dest_dir}')"
+        fi
+        local binary
+        binary="$(find "${dest_dir}" -type f -not -name '*.zip' | head -1)"
+        if [ -z "${binary}" ]; then
+            yg_die "no binary found in downloaded archive ${zip_path}"
+        fi
+        printf '%s' "${binary}"
+        return 0
+    fi
+
+    # Not a zip — bare binary, pass through as-is
+    printf '%s' "${zip_path}"
 }
 
 yg_install_executable() {
@@ -318,13 +372,21 @@ yg_parse_posix_args() {
 
 yg_resolve_release_url() {
     # $1 = version tag ("latest" or explicit tag)
-    # $2 = asset name (without extension)
+    # $2 = asset base name from yg_asset_name (os-arch-flavor, no version)
     # Writes the download URL to stdout.
     local version="${1}"
     local asset_name="${2}"
-    if [ "${version}" = "latest" ]; then
-        printf '%s/latest/download/%s' "${YGGDRASIM_RELEASE_BASE}" "${asset_name}"
-    else
-        printf '%s/download/%s/%s' "${YGGDRASIM_RELEASE_BASE}" "${version}" "${asset_name}"
+
+    local tag="${version}"
+    if [ "${tag}" = "latest" ]; then
+        tag="$(yg_resolve_latest_tag)"
     fi
+
+    # Strip leading v/V so the asset filename carries the plain semver
+    # (v1.2.3 → 1.2.3) while the URL path uses the real tag.
+    local asset_ver="${tag#v}"
+    asset_ver="${asset_ver#V}"
+
+    printf '%s/download/%s/%s-%s.zip' \
+        "${YGGDRASIM_RELEASE_BASE}" "${tag}" "${asset_name}" "${asset_ver}"
 }

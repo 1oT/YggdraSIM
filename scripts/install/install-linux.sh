@@ -67,12 +67,16 @@ install_from_release() {
     asset="$(yg_asset_name "linux" "${YG_HOST_ARCH}" "${YG_FLAVOR}")"
     local asset_tmp
     asset_tmp="$(mktemp -t "${asset}.XXXXXX")"
-    trap 'rm -f "${asset_tmp}"' EXIT
+    local extract_dir
+    extract_dir="$(mktemp -d -t "yggdrasim-extract.XXXXXX")"
+    trap 'rm -rf "${asset_tmp}" "${extract_dir}"' EXIT
 
     local url
     url="$(yg_resolve_release_url "${YG_VERSION}" "${asset}")"
     yg_download_release_asset "${url}" "${asset_tmp}"
-    yg_install_executable "${asset_tmp}" "${YG_INSTALL_DIR}" "yggdrasim"
+    local binary
+    binary="$(yg_extract_release_zip "${asset_tmp}" "${extract_dir}")"
+    yg_install_executable "${binary}" "${YG_INSTALL_DIR}" "yggdrasim"
     yg_emit "run 'yggdrasim --version' to verify"
 }
 
