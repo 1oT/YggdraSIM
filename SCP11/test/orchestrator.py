@@ -3505,23 +3505,66 @@ class SGP22Orchestrator:
             decoded = decode_list_notification_response(raw_response)
         except Exception:
             decoded = None
-        if isinstance(decoded, tuple) is False or len(decoded) != 2:
+        if isinstance(decoded, tuple) is True and len(decoded) == 2:
+            choice_name, choice_value = decoded
+            if choice_name == "notificationMetadataList" and isinstance(choice_value, list):
+                for entry in choice_value:
+                    if isinstance(entry, dict) is False:
+                        continue
+                    seq_number = entry.get("seqNumber")
+                    entries.append(
+                        {
+                            "seqNumber": int(seq_number) if isinstance(seq_number, int) else None,
+                            "metadata": entry,
+                        }
+                    )
+                return entries
+        # pySim decoder returned nothing usable — fall back to manual BER-TLV
+        # parsing so that notifications queued on the eUICC are never missed.
+        try:
+            root_tag, root_value, _, _ = self._read_tlv(raw_response, 0)
+        except Exception:
             return entries
-        choice_name, choice_value = decoded
-        if choice_name != "notificationMetadataList":
+        bf28_tag = bytes.fromhex("BF28")
+        bf2b_tag = bytes.fromhex("BF2B")
+        if root_tag not in (bf28_tag, bf2b_tag):
             return entries
-        if isinstance(choice_value, list) is False:
+        bf2f_tag = bytes.fromhex("BF2F")
+        seq_tag = bytes.fromhex("80")
+        list_value = root_value
+        try:
+            choice_tag, choice_value, _, _ = self._read_tlv(list_value, 0)
+        except Exception:
             return entries
-        for entry in choice_value:
-            if isinstance(entry, dict) is False:
-                continue
-            seq_number = entry.get("seqNumber")
-            entries.append(
-                {
-                    "seqNumber": int(seq_number) if isinstance(seq_number, int) else None,
-                    "metadata": entry,
-                }
-            )
+        if choice_tag in (b"\xA0", b"\x60"):
+            list_value = choice_value
+        inner_offset = 0
+        while inner_offset < len(list_value):
+            try:
+                entry_tag, entry_value, _, next_offset = self._read_tlv(list_value, inner_offset)
+            except Exception:
+                break
+            bf2f_raw = b""
+            if entry_tag == bf2f_tag:
+                bf2f_raw = list_value[inner_offset:next_offset]
+            else:
+                bf2f_raw = self._find_first_tlv_in_value(entry_value, bf2f_tag)
+            if len(bf2f_raw) > 0:
+                seq_raw = self._find_first_tlv_in_value(bf2f_raw, seq_tag)
+                seq_number = None
+                if len(seq_raw) > 0:
+                    try:
+                        _, seq_value, _, _ = self._read_tlv(seq_raw, 0)
+                        seq_number = int.from_bytes(seq_value, "big")
+                    except Exception:
+                        pass
+                entries.append(
+                    {
+                        "seqNumber": seq_number,
+                        "metadata": {"seqNumber": seq_number},
+                    }
+                )
+            inner_offset = next_offset
         return entries
 
     def _retrieve_pending_notification(self, seq_number: int) -> bytes:

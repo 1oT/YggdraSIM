@@ -580,9 +580,9 @@ class SCP11Console:
     def _notification_sync_failed_on_last_command(self) -> bool:
         orchestrator = getattr(self, "orchestrator", None)
         if orchestrator is None:
-            return False
+            return True
         outcome = getattr(orchestrator, "_last_notification_sync_succeeded", None)
-        if outcome is False:
+        if outcome is not True:
             return True
         return False
 
