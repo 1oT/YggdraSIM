@@ -964,10 +964,9 @@ class LocalAccessSessionTests(unittest.TestCase):
         self.assertIn("Canonical command names are listed here", rendered)
         self.assertIn("ENABLE-PROFILE <id>", rendered)
         self.assertIn("DELETE-PROFILE <id>", rendered)
-        self.assertIn("REFRESH-MODEM [mode]", rendered)
         self.assertNotIn("  ENABLE <id>", rendered)
         self.assertNotIn("  DELETE <id>", rendered)
-        self.assertIn("Aliases: ENABLE, DISABLE, DELETE, MODEM-REFRESH", rendered)
+        self.assertIn("Aliases: ENABLE, DISABLE, DELETE", rendered)
         self.assertTrue(
             any(
                 "CERTS [--json|--yaml]" in line and "STATUS" in line
@@ -1028,17 +1027,6 @@ class LocalAccessSessionTests(unittest.TestCase):
         self.assertIn("[DELETE-PROFILE]", rendered)
         self.assertIn("Usage   : DELETE-PROFILE <id>", rendered)
         self.assertIn("Aliases : DELETE", rendered)
-
-    def test_local_shell_help_alias_lookup_resolves_refresh_modem_command(self):
-        shell = LocalAccessShell()
-
-        with contextlib.redirect_stdout(io.StringIO()) as output:
-            shell._cmd_help(["MODEM-REFRESH"])
-
-        rendered = output.getvalue()
-        self.assertIn("[REFRESH-MODEM]", rendered)
-        self.assertIn("Usage   : REFRESH-MODEM [mode]", rendered)
-        self.assertIn("Aliases : MODEM-REFRESH", rendered)
 
     def test_local_shell_debug_flag_strips_argument_and_toggles_raw_apdu_logging(self):
         class _FakeApduChannel:

@@ -143,6 +143,27 @@ class MainWrapperHilBridgeRouteTests(unittest.TestCase):
 
         mocked_hil_bridge.assert_called_once_with()
 
+    def test_launch_hil_bridge_wireshark_uses_dark_adwaita_style(self) -> None:
+        with mock.patch.object(main_wrapper, "_hil_bridge_wireshark_binary_path", return_value="/usr/bin/wireshark"):
+            with mock.patch.object(main_wrapper, "_hil_bridge_capture_interface", return_value="lo"):
+                with mock.patch.object(main_wrapper.subprocess, "Popen") as mocked_popen:
+                    main_wrapper._launch_hil_bridge_wireshark()
+
+        mocked_popen.assert_called_once()
+        self.assertEqual(
+            mocked_popen.call_args.args[0],
+            [
+                "/usr/bin/wireshark",
+                "-k",
+                "-i",
+                "lo",
+                "-f",
+                "udp port 4729",
+                "-style",
+                "Adwaita-Dark",
+            ],
+        )
+
     def test_start_hil_bridge_session_starts_service_and_attaches_live_view(self) -> None:
         with mock.patch.object(main_wrapper, "_ensure_hil_bridge_user_service", return_value=("/tmp/ygg.service", True)):
             with mock.patch.object(main_wrapper.hil_bridge_runtime, "read_supervisor_state", return_value={}):

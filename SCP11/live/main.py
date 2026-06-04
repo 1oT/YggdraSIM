@@ -86,8 +86,7 @@ class SGP22Client:
                         f"({error.__class__.__name__}: {error}). "
                         "Is pcscd running and reachable on this host? "
                         "Headless / containerised hosts can set "
-                        "YGGDRASIM_CARD_BACKEND=sim to bypass PC/SC, "
-                        "or supply a remote card relay endpoint."
+                        "YGGDRASIM_CARD_BACKEND=sim to bypass PC/SC."
                     )
                 else:
                     if len(reader_list) == 0:

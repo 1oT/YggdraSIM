@@ -67,6 +67,7 @@ YggdraSIM Card Bridge — ready
   ATR        : 3B9F95801FC78031E073FE21
   apdu URL   : http://127.0.0.1:8642/apdu
   status URL : http://127.0.0.1:8642/status
+  reset URL  : http://127.0.0.1:8642/card/reset
   token      : <redacted, fingerprint a1b2c3>
   token file : /home/hampus/.config/yggdrasim/card_bridge/8642.token  (written, mode 0600)
   remote use : route via 'ssh -fN -L 8642:127.0.0.1:8642 <pc-host>'

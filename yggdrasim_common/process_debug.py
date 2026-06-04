@@ -29,7 +29,22 @@ def is_global_debug_enabled(default: bool = False) -> bool:
 
 
 def set_global_debug(enabled: bool) -> None:
-    os.environ[GLOBAL_DEBUG_ENV] = "1" if bool(enabled) else "0"
+    """Set the global debug flag and persist it across sessions.
+
+    The persistence path is controlled by the ``EnvFlag.persist_scope`` of
+    ``YGGDRASIM_GLOBAL_DEBUG`` (currently ``PERSIST_FILE``, which writes to
+    ``<runtime_root>/state/env_overrides.json``). The import is lazy to
+    avoid adding a hard dependency from every early-import consumer.
+    """
+    value = "1" if bool(enabled) else "0"
+    os.environ[GLOBAL_DEBUG_ENV] = value
+    try:
+        from yggdrasim_common import env_flags
+    except ImportError:
+        return
+    flag = env_flags.get_flag(GLOBAL_DEBUG_ENV)
+    if flag is not None:
+        env_flags.set_flag_value(flag, value, persist=True)
 
 
 def add_debug_argument(

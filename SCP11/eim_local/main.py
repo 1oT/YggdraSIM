@@ -15,7 +15,6 @@ from yggdrasim_common.process_debug import (
     is_global_debug_enabled,
     set_global_debug,
 )
-from yggdrasim_common.card_backend import trigger_card_relay_modem_refresh
 from yggdrasim_common.hil_bridge_runtime import hil_bridge_warning_text
 from yggdrasim_common.quit_control import quit_all, QuitAllRequested
 from yggdrasim_common.session_recording import ShellSessionRecorder
@@ -108,7 +107,6 @@ class EimLocalShell:
             "ENABLE-PROFILE": self._cmd_enable_profile,
             "DISABLE-PROFILE": self._cmd_disable_profile,
             "DELETE-PROFILE": self._cmd_delete_profile,
-            "REFRESH-MODEM": self._cmd_refresh_modem,
             "PROFILE": self._cmd_profile,
             "PROFILE-CLEAR": self._cmd_profile_clear,
             "METADATA": self._cmd_metadata,
@@ -169,7 +167,6 @@ class EimLocalShell:
             "ENABLE": "ENABLE-PROFILE",
             "DISABLE": "DISABLE-PROFILE",
             "DELETE": "DELETE-PROFILE",
-            "MODEM-REFRESH": "REFRESH-MODEM",
             "GET-METADATA": "METADATA",
             "EIM-ACK": "EIM-ACKNOWLEDGE",
             "ISDR-PACKAGE": "LOAD-EIM-PACKAGE",
@@ -216,11 +213,6 @@ class EimLocalShell:
             "ENABLE-PROFILE": {"usage": "ENABLE-PROFILE <iccid|aid|alias>", "summary": "Enable profile by ICCID, AID, or alias.", "examples": ["ENABLE-PROFILE ISDP1", "ENABLE-PROFILE 8904903200000000000F"]},
             "DISABLE-PROFILE": {"usage": "DISABLE-PROFILE <iccid|aid|alias>", "summary": "Disable profile by ICCID, AID, or alias.", "examples": ["DISABLE-PROFILE ISDP1"]},
             "DELETE-PROFILE": {"usage": "DELETE-PROFILE <iccid|aid|alias>", "summary": "Delete profile by ICCID, AID, or alias.", "examples": ["DELETE-PROFILE ISDP1"]},
-            "REFRESH-MODEM": {
-                "usage": "REFRESH-MODEM [mode]",
-                "summary": "Queue a proactive REFRESH toward the attached modem via the active HIL bridge.",
-                "examples": ["REFRESH-MODEM", "REFRESH-MODEM euicc-profile-state-change", "REFRESH-MODEM uicc-reset"],
-            },
             "PROFILE": {"usage": "PROFILE [profilePath]", "summary": "Show active profile target or set override path.", "examples": ["PROFILE", "PROFILE test_profile.txt"]},
             "PROFILE-CLEAR": {"usage": "PROFILE-CLEAR", "summary": "Clear profile override path.", "examples": ["PROFILE-CLEAR"]},
             "METADATA": {"usage": "METADATA [metadataPath]", "summary": "Show active metadata target or set override path.", "examples": ["METADATA", "METADATA default_profile_metadata.json"]},
@@ -699,24 +691,6 @@ class EimLocalShell:
             return text
         return f"{text[:max_chars]}..."
 
-    def _queue_modem_refresh(self, action_label: str, mode: str = "") -> None:
-        try:
-            payload = trigger_card_relay_modem_refresh(
-                mode=mode,
-                source=f"scp11-eim-local:{action_label}",
-            )
-        except Exception as error:
-            print(f"[*] {action_label}: modem REFRESH queue failed ({error}).")
-            return
-        if payload is None:
-            return
-        status = str(payload.get("status", "queued") or "queued")
-        mode_name = str(payload.get("mode", "") or "")
-        print(
-            f"[*] {action_label}: modem REFRESH {status} "
-            f"({mode_name or 'euicc-profile-state-change'})."
-        )
-
     def _format_target_value(self, value: Any) -> str:
         text = str(value or "").strip()
         if len(text) == 0:
@@ -1030,7 +1004,6 @@ class EimLocalShell:
             self._help_row("ENABLE-PROFILE <id>", "ENABLE-PROFILE"),
             self._help_row("DISABLE-PROFILE <id>", "DISABLE-PROFILE"),
             self._help_row("DELETE-PROFILE <id>", "DELETE-PROFILE"),
-            self._help_row("REFRESH-MODEM [mode]", "REFRESH-MODEM"),
             self._help_row("STORE-METADATA [path]", "STORE-METADATA"),
             self._help_row("UPDATE-METADATA [path]", "UPDATE-METADATA"),
         ]
@@ -1281,7 +1254,6 @@ class EimLocalShell:
                 lambda: self.session.delete_profile(target),
             ),
             policy_allow_auto_disable=None,
-            modem_refresh=self._queue_modem_refresh,
             describe_profile=self._describe_profile_metadata,
             profile_identifier=self._profile_metadata_identifier,
         )
@@ -1329,9 +1301,6 @@ class EimLocalShell:
             self._safe_collect_profile_metadata(),
             identifier,
         )
-
-    def _cmd_refresh_modem(self, argument: str = "") -> None:
-        self._queue_modem_refresh("RefreshModem", mode=argument.strip())
 
     def _cmd_profile(self, argument: str = "") -> None:
         path_text = argument.strip()
@@ -2031,7 +2000,6 @@ class EimLocalShell:
             transport="isdr_store_data",
         )
         print(f"    package   : {package_path}")
-        self._queue_modem_refresh("eUICCMemoryReset")
         self._invalidate_poll_target_cache()
         self._print_post_eim_configuration_snapshot(
             title="ISDR post-reset GetEimConfigurationData",

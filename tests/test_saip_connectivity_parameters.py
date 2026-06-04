@@ -14,6 +14,10 @@ class CatalogTests(unittest.TestCase):
         catalog = C.bearer_catalog()
         bearers = {entry["bearer"] for entry in catalog}
         self.assertEqual(bearers, {"sms", "cat_tp", "https"})
+        tags = {entry["bearer"]: entry["tag_hex"] for entry in catalog}
+        self.assertEqual(tags["sms"], "A0")
+        self.assertEqual(tags["https"], "A1")
+        self.assertEqual(tags["cat_tp"], "A2")
 
 
 class SmsRoundTripTests(unittest.TestCase):
@@ -26,6 +30,8 @@ class SmsRoundTripTests(unittest.TestCase):
             "dcs_hex": "F6",
         }]
         encoded = C.encode_connectivity_parameters(bearers)
+        self.assertTrue(encoded.startswith("A0"))
+        self.assertIn("06", encoded)
         decoded = C.decode_connectivity_parameters(encoded)
         out = decoded["bearers"][0]
         self.assertEqual(out["bearer"], "sms")
@@ -48,11 +54,30 @@ class HttpsRoundTripTests(unittest.TestCase):
             "server_uri": "https://eim.example.test/sgp32",
         }]
         encoded = C.encode_connectivity_parameters(bearers)
+        self.assertTrue(encoded.startswith("A1"))
         decoded = C.decode_connectivity_parameters(encoded)
         out = decoded["bearers"][0]
         self.assertEqual(out["bearer"], "https")
-        self.assertEqual(out["network_access_name"], {"text": "lab.example.test"})
+        self.assertEqual(out["network_access_name"]["text"], "lab.example.test")
         self.assertEqual(out["server_uri"], "https://eim.example.test/sgp32")
+
+    def test_reference_style_http_block_decodes_named_tags(self) -> None:
+        encoded = "A118350702000003000002470D085465726D696E616C0361706E"
+        decoded = C.decode_connectivity_parameters(encoded)
+        out = decoded["bearers"][0]
+        self.assertEqual(out["bearer"], "https")
+        self.assertEqual(out["bearer_description_hex"], "02000003000002")
+        self.assertEqual(out["network_access_name"]["text"], "Terminal.apn")
+
+    def test_empty_http_optional_fields_are_omitted(self) -> None:
+        encoded = C.encode_connectivity_parameters([{
+            "bearer": "https",
+            "bearer_description_hex": "",
+            "network_access_name": {"text": ""},
+            "user_login": {"text": ""},
+            "user_password": {"text": ""},
+        }])
+        self.assertEqual(encoded, "A100")
 
 
 class CatTpRoundTripTests(unittest.TestCase):
@@ -64,10 +89,11 @@ class CatTpRoundTripTests(unittest.TestCase):
             "network_access_name": {"text": "aps.example.test"},
         }]
         encoded = C.encode_connectivity_parameters(bearers)
+        self.assertTrue(encoded.startswith("A2"))
         decoded = C.decode_connectivity_parameters(encoded)
         out = decoded["bearers"][0]
         self.assertEqual(out["bearer"], "cat_tp")
-        self.assertEqual(out["network_access_name"], {"text": "aps.example.test"})
+        self.assertEqual(out["network_access_name"]["text"], "aps.example.test")
 
 
 class UnknownBearerTests(unittest.TestCase):

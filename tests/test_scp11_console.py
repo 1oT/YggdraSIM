@@ -195,14 +195,6 @@ class SCP11ConsoleStatusDecodeTests(unittest.TestCase):
         )
         self.assertEqual(payload.hex().upper(), "BF33124F10A0000005591010FFFFFFFF8900001100")
 
-    def test_queue_modem_refresh_stays_silent_when_hil_bridge_is_unavailable(self):
-        output = io.StringIO()
-        with contextlib.redirect_stdout(output):
-            with mock.patch.object(console_module, "trigger_card_relay_modem_refresh", return_value=None):
-                self.console._queue_modem_refresh("DeleteProfile")
-
-        self.assertEqual(output.getvalue(), "")
-
     def test_build_remove_notification_payload(self):
         payload = self.console._build_remove_notification_payload(7)
         self.assertEqual(payload.hex().upper(), "BF3003800107")
@@ -470,7 +462,7 @@ class SCP11ConsoleStatusDecodeTests(unittest.TestCase):
             ],
         )
 
-    def test_enable_profile_sequence_queues_single_modem_refresh_after_success(self):
+    def test_enable_profile_sequence_runs_without_refresh_side_effect(self):
         profiles = [
             console_module.ProfileMetadataView(
                 iccid="8901000000000000001",
@@ -494,12 +486,10 @@ class SCP11ConsoleStatusDecodeTests(unittest.TestCase):
             ),
         ]
         executed = []
-        refreshes = []
         self.console._collect_profile_metadata = lambda: profiles
         self.console._execute_profile_state_command = lambda resolved, func_tag, action_label: executed.append(
             (resolved, func_tag, action_label)
         ) or True
-        self.console._queue_modem_refresh = lambda action_label, mode="": refreshes.append((action_label, mode))
 
         self.console._run_profile_state_command(
             identifier="8901000000000000002",
@@ -515,16 +505,6 @@ class SCP11ConsoleStatusDecodeTests(unittest.TestCase):
                 ((self.console.TAG_ICCID, "981000000000000000F2"), self.console.TAG_ENABLE_PROFILE, "EnableProfile"),
             ],
         )
-        self.assertEqual(refreshes, [("EnableProfile", "")])
-
-    def test_refresh_modem_command_delegates_to_queue_helper(self):
-        calls = []
-        self.console._queue_modem_refresh = lambda action_label, mode="": calls.append((action_label, mode))
-
-        keep_running = self.console._cmd_refresh_modem("uicc-reset")
-
-        self.assertTrue(keep_running)
-        self.assertEqual(calls, [("RefreshModem", "uicc-reset")])
 
     def test_execute_result_command_syncs_notifications_on_success(self):
         self.console._execute_result_command(

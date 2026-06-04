@@ -824,6 +824,90 @@ def pysim_gfm_walk(decoded: dict[str, Any]) -> tuple[GfmEntry, ...]:
     return tuple(entries)
 
 
+# ---------------------------------------------------------------------------
+# GFM block splitter (GUI helper)
+#
+# Mirrors ``pysim_gfm_walk``'s iteration pattern but returns raw
+# operation blocks instead of fully-decoded ``GfmEntry`` objects.
+# Each block groups one ``createFCP`` with the ``filePath`` (SELECT)
+# that preceded it and any ``fillFileOffset`` / ``fillFileContent``
+# ops that follow it. The frontend's GFM card maps over these blocks
+# to produce one row per file in the left-pane list.
+# ---------------------------------------------------------------------------
+
+
+def pysim_gfm_split_blocks(decoded: dict[str, Any]) -> list[list[tuple]]:
+    """Split ``fileManagementCMD`` sequences into per-file operation blocks.
+
+    Returns a flat list of blocks. Each block is a list of ``(tag, value)``
+    tuples representing one file: an optional leading ``filePath``,
+    the ``createFCP``, and trailing ``fillFileOffset`` /
+    ``fillFileContent`` ops. The frontend's ``saipGfmBuildCommandView``
+    processes each block independently.
+    """
+    if isinstance(decoded, dict) is False:
+        return []
+    cmd_list = decoded.get("fileManagementCMD")
+    if isinstance(cmd_list, list) is False:
+        return []
+
+    blocks: list[list[tuple]] = []
+
+    for sequence in cmd_list:
+        if isinstance(sequence, list) is False:
+            continue
+        pending_path: tuple | None = None
+        current: list[tuple] | None = None
+
+        for command in sequence:
+            if isinstance(command, (tuple, list)) is False:
+                continue
+            # Flatten tagged-tuple wrappers (``{"@": [name, payload]}``)
+            # that may arrive from the JSON codec.
+            if isinstance(command, list) and len(command) >= 2:
+                tag = str(command[0] or "")
+                value = command[1]
+            elif isinstance(command, tuple) and len(command) >= 2:
+                tag = str(command[0] or "")
+                value = command[1]
+            else:
+                continue
+
+            if tag == "filePath":
+                if current is not None:
+                    blocks.append(current)
+                    current = None
+                pending_path = (tag, value)
+                continue
+
+            if tag == "createFCP":
+                if current is not None:
+                    blocks.append(current)
+                    current = None
+                current = ([pending_path, (tag, value)]
+                           if pending_path is not None
+                           else [(tag, value)])
+                pending_path = None
+                continue
+
+            if tag in ("fillFileOffset", "fillFileContent", "fillFileContents"):
+                if current is not None:
+                    current.append((tag, value))
+                elif pending_path is not None:
+                    current = [pending_path, (tag, value)]
+                    pending_path = None
+                continue
+
+            if current is not None:
+                current.append((tag, value))
+
+        if current is not None:
+            blocks.append(current)
+            current = None
+
+    return blocks
+
+
 def pysim_normalize_aka_decoded(decoded: dict[str, Any]) -> dict[str, Any]:
     """Apply pySim's ``ProfileElementAKA._fixup_sqnInit_dec`` normalisation.
 

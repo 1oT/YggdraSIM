@@ -305,6 +305,29 @@ class AddPeRenumberTests(unittest.TestCase):
         )
         self.assertNotEqual(first["identification"], second["identification"])
 
+    def test_insert_at_middle_shifts_existing_pe_rows(self) -> None:
+        self._actions._dispatch_add_pe(
+            ctx=None, session_id=self._sid, pe_type="akaParameter", insert_at=1,
+        )
+        self._actions._dispatch_add_pe(
+            ctx=None, session_id=self._sid, pe_type="pinCodes", insert_at=2,
+        )
+        self._actions._dispatch_add_pe(
+            ctx=None, session_id=self._sid, pe_type="pukCodes", insert_at=3,
+        )
+        before = self._actions._dispatch_list_pes(ctx=None, session_id=self._sid)
+        self.assertEqual(before["rows"][2]["type"], "pinCodes")
+
+        inserted = self._actions._dispatch_add_pe(
+            ctx=None, session_id=self._sid, pe_type="akaParameter", insert_at=2,
+        )
+        after = self._actions._dispatch_list_pes(ctx=None, session_id=self._sid)
+
+        self.assertEqual(inserted["pe_index"], 2)
+        self.assertEqual(after["rows"][2]["type"], "akaParameter")
+        self.assertEqual(after["rows"][3]["type"], "pinCodes")
+        self.assertEqual(after["rows"][4]["type"], "pukCodes")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -2,7 +2,6 @@ __all__ = [
     "ASN1Registry",
     "CryptoEngine",
     "PayloadBuilder",
-    "RelayHttpClientJsonHex",
     "SGP22Transport",
     "safe_parse",
     "reset_safe_parse_rollup",
@@ -20,10 +19,9 @@ def __getattr__(name):
     if name == "PayloadBuilder":
         from .payload_builder import PayloadBuilder
         return PayloadBuilder
-    if name in ("RelayHttpClientJsonHex", "SGP22Transport"):
-        from .transport import RelayHttpClientJsonHex, SGP22Transport
+    if name == "SGP22Transport":
+        from .transport import SGP22Transport
         mapping = {
-            "RelayHttpClientJsonHex": RelayHttpClientJsonHex,
             "SGP22Transport": SGP22Transport,
         }
         return mapping[name]

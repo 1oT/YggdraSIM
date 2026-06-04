@@ -120,9 +120,9 @@ class Scp8061xxChainTests(unittest.TestCase):
 
 
 def _build_concat_tpdu_for_test(fragment: bytes, ref: int, total: int, sequence: int) -> bytes:
-    prefix = bytes.fromhex("4005811250F341F6222222222222222502")
+    header = bytes.fromhex("4005811250F341F6222222222222222502")
     tp_ud = bytes.fromhex("050003") + bytes([ref & 0xFF, total & 0xFF, sequence & 0xFF]) + fragment
-    return prefix + bytes([len(tp_ud) & 0xFF]) + tp_ud
+    return header + bytes([len(tp_ud) & 0xFF]) + tp_ud
 
 
 class Scp80ConcatSmsTests(unittest.TestCase):
@@ -137,3 +137,22 @@ class Scp80ConcatSmsTests(unittest.TestCase):
         self.assertIsNone(logic._resolve_0348_block(tpdu_a))
         merged = logic._resolve_0348_block(tpdu_b)
         self.assertEqual(merged, frag_a + frag_b)
+
+    def test_single_sms_udh_header_strips_0348_block(self) -> None:
+        from SIMCARD.etsi_fs import build_default_state
+
+        block = bytes.fromhex("00281516212222B00000")
+        tpdu = bytes.fromhex("4005811250F341F62222222222222225027000") + block
+        logic = Scp80Logic(build_default_state(), lambda _apdu: (b"", 0x90, 0x00))
+
+        self.assertEqual(logic._resolve_0348_block(tpdu), block)
+
+    def test_plain_single_sms_header_is_rejected(self) -> None:
+        from SIMCARD.etsi_fs import build_default_state
+
+        block = bytes.fromhex("00281516212222B00000")
+        tpdu = bytes.fromhex("0005811250F341F62222222222222222") + bytes([len(block)]) + block
+        logic = Scp80Logic(build_default_state(), lambda _apdu: (b"", 0x90, 0x00))
+
+        with self.assertRaisesRegex(ValueError, "unsupported SMS TPDU layout"):
+            logic._resolve_0348_block(tpdu)

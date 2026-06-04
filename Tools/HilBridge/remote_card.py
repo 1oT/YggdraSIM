@@ -34,11 +34,10 @@ Notes
 * Drop-in for :class:`Tools.HilBridge.pcsc.PcscCardChannel` — exposes
   the same ``connect`` / ``disconnect`` / ``reconnect`` / ``get_atr``
   / ``transmit`` surface :class:`BackendCardChannel` consumes.
-* ``queue_modem_refresh`` and ``proactive_status_payload`` are not
-  implemented over the relay protocol; the laptop side has no modem
-  to refresh and no proactive broker to surface. Calls raise
-  :class:`PcscBridgeError` so callers see a clean error rather than
-  a silent no-op.
+* ``proactive_status_payload`` is not implemented over the relay
+  protocol; the laptop side has no proactive broker to surface. Calls
+  raise :class:`PcscBridgeError` so callers see a clean error rather
+  than a silent no-op.
 * GSMTAP / pcap mirroring keeps working without changes — capture is
   driven from the rig-side router as TPDUs transit it.
 """
@@ -126,6 +125,12 @@ def resolve_remote_card_token(
         raise PcscBridgeError(
             f"Cannot read remote card token file {token_path}: {read_error}"
         ) from read_error
+
+
+def _build_card_relay_reset_url(apdu_url: str) -> str:
+    if apdu_url.endswith("/apdu"):
+        return apdu_url[: -len("/apdu")] + "/card/reset"
+    return apdu_url.rstrip("/") + "/card/reset"
 
 
 # ----------------------------------------------------------------------
@@ -217,6 +222,28 @@ class RemoteRelayCardChannel:
         self.disconnect()
         self.connect()
 
+    def reset_card(self) -> dict[str, Any]:
+        """Request a physical card reset through the upstream relay."""
+        reset_url = _build_card_relay_reset_url(_normalize_card_relay_url(self.url))
+        try:
+            payload = _request_card_relay_json(
+                reset_url,
+                method="POST",
+                request_json={},
+                timeout_seconds=self.timeout_seconds,
+                auth_token=self.auth_token,
+            )
+        except Exception as reset_error:
+            raise PcscBridgeError(
+                f"Remote card relay reset failed: {reset_error}"
+            ) from reset_error
+        self.disconnect()
+        self.connect()
+        return {
+            "mode": "remote-card-reset",
+            "upstream": payload,
+        }
+
     def disconnect(self) -> None:
         if self._connection is None:
             return
@@ -251,21 +278,6 @@ class RemoteRelayCardChannel:
                 f"Remote card relay APDU transmit failed: {transmit_error}"
             ) from transmit_error
         return bytes(data), int(sw1), int(sw2)
-
-    def queue_modem_refresh(self, mode: Any, *, source: str = "") -> dict[str, Any]:
-        """Not supported on the remote relay channel.
-
-        The laptop-side ``yggdrasim-card-bridge`` daemon publishes a
-        physical card and has no modem. ``simtrace2`` / ``cardem``
-        REFRESH live on the rig and are driven by the rig-side
-        router, not by the card channel itself.
-        """
-        del mode, source
-        raise PcscBridgeError(
-            "Modem REFRESH queueing is not available when the HIL bridge "
-            "consumes a remote card relay; trigger REFRESH from the "
-            "rig-side simtrace2 / cardem stack instead."
-        )
 
     def proactive_status_payload(self) -> dict[str, Any]:
         """Empty by design — proactive broker is rig-local."""

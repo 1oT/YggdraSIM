@@ -91,7 +91,8 @@ class DummyTransport:
     def transmit(self, apdu_hex: str) -> None:
         self.transmit_calls.append(apdu_hex)
 
-    def reset_connection(self) -> None:
+    def reset_connection(self, verbose: bool = False) -> None:
+        self.reset_verbose = verbose
         self.reset_calls += 1
 
     def get_protocol_summary(self):
@@ -204,6 +205,58 @@ class OtaShellTests(unittest.TestCase):
 
         self.assertIn("Unknown command or invalid hex.", buffer.getvalue())
 
+    def test_print_result_suppresses_successful_por_summary(self) -> None:
+        shell = OtaShell.__new__(OtaShell)
+        result = {
+            "sw": "9130",
+            "por": "D02E",
+            "por_decoded": {
+                "valid": True,
+                "status_code": "00",
+                "status_meaning": "PoR OK",
+                "tar": "B00001",
+                "cntr": "000000FFFF",
+                "pcntr": "00",
+                "command_count": 1,
+                "command_response": "9000",
+                "command_sw": "9000",
+                "fetch_sw": "9130",
+            },
+        }
+        buffer = io.StringIO()
+
+        with redirect_stdout(buffer):
+            shell._print_result(result)
+
+        output = buffer.getvalue()
+        self.assertIn("[<--]", output)
+        self.assertNotIn("[POR]", output)
+
+    def test_print_result_includes_failed_por_summary(self) -> None:
+        shell = OtaShell.__new__(OtaShell)
+        result = {
+            "sw": "912D",
+            "por": "D02B",
+            "por_decoded": {
+                "valid": True,
+                "status_code": "02",
+                "status_meaning": "CNTR low",
+                "tar": "B00001",
+                "cntr": "0000000000",
+                "pcntr": "00",
+                "fetch_sw": "912D",
+            },
+        }
+        buffer = io.StringIO()
+
+        with redirect_stdout(buffer):
+            shell._print_result(result)
+
+        output = buffer.getvalue()
+        self.assertIn("[POR]", output)
+        self.assertIn("CNTR low (02)", output)
+        self.assertIn("fetch SW 912D", output)
+
     def test_do_set_updates_config_and_saves(self) -> None:
         shell = self._make_shell()
         buffer = io.StringIO()
@@ -225,6 +278,16 @@ class OtaShellTests(unittest.TestCase):
         self.assertEqual(shell.config.set_calls, [("cntr", "9")])
         self.assertEqual(shell.config.save_calls, 1)
         self.assertIn("cntr updated", buffer.getvalue())
+
+    def test_do_set_uses_all_value_tokens(self) -> None:
+        shell = self._make_shell()
+        buffer = io.StringIO()
+
+        with redirect_stdout(buffer):
+            shell.do_set("payload", "AA", "BB")
+
+        self.assertEqual(shell.config.set_calls, [("payload", "AABB")])
+        self.assertEqual(shell.config.save_calls, 1)
 
     def test_do_set_reports_value_errors(self) -> None:
         shell = self._make_shell()
@@ -257,6 +320,36 @@ class OtaShellTests(unittest.TestCase):
         self.assertEqual(shell.transport.send_calls, [(["A1B2"], False)])
         self.assertTrue(shell.last_command_ok)
         self.assertEqual(getattr(shell, "_last_result", None), {"delivered": True, "por": ""})
+
+    def test_do_send_runs_response_decoder_for_successful_por(self) -> None:
+        shell = self._make_shell()
+        decode_calls: list[tuple[str, int, str]] = []
+        payload = "00A4080C022FE200B000000A"
+        por = (
+            "D0388103011300820281830500860280018B27410005811250F341F61D"
+            "02710000180AB000010000010006000002900098648011111111111121"
+        )
+        shell.builder = SimpleNamespace(
+            build_plan=lambda verbose=False, override_payload=None: SimpleNamespace(
+                is_concatenated=False,
+                apdus=[SimpleNamespace(index=0, total=1, apdu_hex="A1B2")],
+                reader_apdus=[],
+                payload_hex=payload,
+            )
+        )
+        shell.transport.send_ota_sequence = lambda apdus, verbose=False: {
+            "delivered": True,
+            "por": por,
+            "sw": "913A",
+        }
+        shell.decoder = SimpleNamespace(
+            sniff_context=lambda raw_apdu: ("2FE2", 10),
+            try_decode=lambda fid, le, por_hex: decode_calls.append((fid, le, por_hex)),
+        )
+
+        shell.do_send()
+
+        self.assertEqual(decode_calls, [("2FE2", 10, por)])
 
     def test_do_send_uses_reader_apdu_when_concatenated_in_reader_mode(self) -> None:
         shell = self._make_shell(transport_mode="reader")

@@ -5,9 +5,11 @@ from __future__ import annotations
 import json
 import logging
 import os
+import queue
 import selectors
 import socket
 import threading
+import time
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
@@ -72,6 +74,10 @@ def _create_simulated_card_connection() -> Any:
     return connection
 
 
+_PCSC_CONNECT_MAX_RETRIES = 5
+_PCSC_CONNECT_BACKOFF_BASE = 0.5
+
+
 @dataclass(slots=True)
 class BackendCardChannel:
     reader_index: int = 0
@@ -115,8 +121,13 @@ class BackendCardChannel:
              not opened in this mode — the card lives elsewhere.
           3. Local PC/SC reader → :class:`PcscCardChannel`. The
              default; mirrors the existing physically-connected
-             topology byte-for-byte.
+             topology byte-for-byte. Transient reader-busy conditions
+             (e.g. a just-exited SCP11 session) are retried with
+             backoff before giving up.
         """
+        self._connect_inner()
+
+    def _connect_inner(self) -> None:
         backend_name = self.backend_name
         if backend_name == "sim":
             connection = _create_simulated_card_connection()
@@ -138,11 +149,33 @@ class BackendCardChannel:
             self._reader_label = str(channel.reader_label or "").strip() or remote_url
             return
 
-        channel = PcscCardChannel(reader_index=self.reader_index, reader_name=self.reader_name)
-        channel.connect()
-        self._channel = channel
-        self._backend_name = "reader"
-        self._reader_label = str(channel.reader_label or "").strip() or "PC/SC reader"
+        # PC/SC reader — retry on transient sharing violations.
+        last_exc: Exception | None = None
+        for attempt in range(_PCSC_CONNECT_MAX_RETRIES):
+            try:
+                channel = PcscCardChannel(reader_index=self.reader_index, reader_name=self.reader_name)
+                channel.connect()
+            except Exception as exc:
+                last_exc = exc
+                if attempt < _PCSC_CONNECT_MAX_RETRIES - 1:
+                    delay = _PCSC_CONNECT_BACKOFF_BASE * (2 ** attempt)
+                    LOGGER.warning(
+                        "PC/SC connect attempt %d/%d failed (%s), retrying in %.1fs…",
+                        attempt + 1,
+                        _PCSC_CONNECT_MAX_RETRIES,
+                        exc,
+                        delay,
+                    )
+                    time.sleep(delay)
+                continue
+            self._channel = channel
+            self._backend_name = "reader"
+            self._reader_label = str(channel.reader_label or "").strip() or "PC/SC reader"
+            return
+
+        raise PcscBridgeError(
+            f"PC/SC connect failed after {_PCSC_CONNECT_MAX_RETRIES} attempts"
+        ) from last_exc
 
     def reconnect(self) -> None:
         """Close and re-open the WebSocket connection."""
@@ -153,6 +186,20 @@ class BackendCardChannel:
             return
         self.disconnect()
         self.connect()
+
+    def reset_card(self) -> dict[str, Any]:
+        """Reset the card slot when the active backend supports it."""
+        channel = self._require_channel()
+        reset_method = getattr(channel, "reset_card", None)
+        if callable(reset_method):
+            reset_payload = reset_method()
+            self._reader_label = str(channel.reader_label or "").strip() or self._reader_label
+            if isinstance(reset_payload, dict):
+                return dict(reset_payload)
+            return {"mode": "backend-reset"}
+        self.reconnect()
+        return {"mode": "backend-reconnect"}
+
 
     def disconnect(self) -> None:
         """Close the WebSocket connection."""
@@ -175,13 +222,6 @@ class BackendCardChannel:
         channel = self._require_channel()
         response_data, sw1, sw2 = channel.transmit(bytes(apdu))
         return bytes(response_data), int(sw1), int(sw2)
-
-    def queue_modem_refresh(self, mode: str | int, *, source: str = "") -> dict[str, Any]:
-        channel = self._require_channel()
-        queue_method = getattr(channel, "queue_refresh", None)
-        if callable(queue_method) is False:
-            raise PcscBridgeError("Configured card backend does not support simulator REFRESH queueing.")
-        return dict(queue_method(mode, source=source))
 
     def proactive_status_payload(self) -> dict[str, Any]:
         channel = self._require_channel()
@@ -295,11 +335,186 @@ class BridgeSession:
         )
 
 
+@dataclass(slots=True)
+class _PendingApduExchange:
+    context: ConnectionContext
+    tag: int
+    bank_slot: dict[str, Any]
+    client_slot: dict[str, Any]
+    request_apdu: bytes
+
+
+@dataclass(slots=True)
+class _CompletedApduExchange:
+    response: bytes
+    error: Exception | None
+    pending: _PendingApduExchange
+
+
+_DRAIN_SENTINEL = object()
+
+
+class CardWorker:
+    """Serializes physical card APDU access through a dedicated thread.
+
+    The event-loop thread submits APDUs via :meth:`submit_async` and
+    picks up completed responses via :meth:`poll_responses` — it never
+    blocks on card I/O.  The relay HTTP thread uses :meth:`submit_sync`
+    which blocks its own thread (not the event loop) until the card
+    responds.
+    """
+
+    def __init__(self, card: BackendCardChannel, card_lock: threading.Lock) -> None:
+        self._card = card
+        self._card_lock = card_lock
+        self._wakeup_r, self._wakeup_w = os.pipe()
+        os.set_blocking(self._wakeup_r, False)
+        self._shutdown = threading.Event()
+        self._lock = threading.Lock()
+        self._request_queue: queue.Queue = queue.Queue()
+        self._completed: list[_CompletedApduExchange] = []
+        self._thread = threading.Thread(
+            target=self._run,
+            daemon=True,
+            name="hilbridge-card-worker",
+        )
+        self._thread.start()
+
+    @property
+    def wakeup_fileno(self) -> int:
+        return self._wakeup_r
+
+    def submit_async(
+        self,
+        apdu: bytes,
+        *,
+        context: ConnectionContext,
+        tag: int,
+        bank_slot: dict[str, Any],
+        client_slot: dict[str, Any],
+    ) -> None:
+        """Enqueue *apdu* for the worker; the response lands in :meth:`poll_responses`.
+
+        Called from the event-loop thread.  Returns immediately.
+        """
+        pending = _PendingApduExchange(
+            context=context,
+            tag=tag,
+            bank_slot=dict(bank_slot),
+            client_slot=dict(client_slot),
+            request_apdu=apdu,
+        )
+        self._request_queue.put((None, apdu, pending))
+
+    def submit_sync(
+        self,
+        apdu: bytes,
+        *,
+        timeout_ms: int = 5000,
+    ) -> tuple[bytes, int, int]:
+        """Submit *apdu* and block the calling thread until the card responds.
+
+        Only called from the relay HTTP thread (or any non-event-loop
+        thread).  The event loop must never call this.
+        """
+        result_q: queue.Queue = queue.Queue(maxsize=1)
+        self._request_queue.put((result_q, apdu, None))
+        try:
+            result = result_q.get(timeout=max(0.1, timeout_ms / 1000.0))
+        except queue.Empty:
+            raise PcscBridgeError(
+                f"Card APDU transmit timed out after {timeout_ms}ms."
+            )
+        response_data, sw1, sw2, error = result
+        if error is not None:
+            raise PcscBridgeError("Card APDU transmit failed.") from error
+        return response_data, sw1, sw2
+
+    def drain(self, timeout: float = 5.0) -> None:
+        """Block until all previously submitted requests have completed.
+
+        Called before touching the card connection (reconnect, get-atr)
+        so the worker thread is guaranteed idle and won't race on the
+        underlying PC/SC handle.
+        """
+        event = threading.Event()
+        self._request_queue.put((_DRAIN_SENTINEL, event, None))
+        event.wait(timeout=timeout)
+
+    def poll_responses(self) -> list[_CompletedApduExchange]:
+        """Drain the wakeup pipe and return every completed async exchange.
+
+        Must be called from the event-loop thread.
+        """
+        try:
+            while True:
+                os.read(self._wakeup_r, 4096)
+        except BlockingIOError:
+            pass
+        with self._lock:
+            completed = list(self._completed)
+            self._completed.clear()
+        return completed
+
+    def shutdown(self) -> None:
+        """Signal the worker thread to exit and wait for it to finish."""
+        self._shutdown.set()
+        self._request_queue.put((None, b"", None))
+        self._thread.join(timeout=5.0)
+        os.close(self._wakeup_r)
+        os.close(self._wakeup_w)
+
+    # -- internals -------------------------------------------------------
+
+    def _run(self) -> None:
+        while not self._shutdown.is_set():
+            try:
+                result_q, apdu, pending = self._request_queue.get(timeout=1.0)
+            except queue.Empty:
+                continue
+            if result_q is None and pending is None:
+                break
+
+            if result_q is _DRAIN_SENTINEL:
+                # apdu is the threading.Event to signal
+                apdu.set()
+                continue
+
+            try:
+                with self._card_lock:
+                    response_data, sw1, sw2 = self._card.transmit(apdu)
+                full_response = response_data + bytes((sw1, sw2))
+                error = None
+            except Exception as exc:
+                full_response = b""
+                sw1, sw2 = 0, 0
+                error = exc
+
+            if result_q is not None:
+                try:
+                    result_q.put_nowait((response_data, sw1, sw2, error))
+                except queue.Full:
+                    pass
+                continue
+
+            with self._lock:
+                self._completed.append(
+                    _CompletedApduExchange(
+                        response=full_response,
+                        error=error,
+                        pending=pending,
+                    )
+                )
+            try:
+                os.write(self._wakeup_w, b"\x01")
+            except BlockingIOError:
+                pass
+
+
 class HilBridgeServer:
     def __init__(self, config: BridgeConfig) -> None:
         self._config = config
         load_rspro_codec()
-        self._card_lock = threading.RLock()
 
         self._selector = selectors.DefaultSelector()
         self._listen_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -316,6 +531,16 @@ class HilBridgeServer:
             remote_card_token_file=config.remote_card_token_file,
         )
         self._card.connect()
+
+        self._card_lock = threading.Lock()
+        self._proactive_lock = threading.Lock()
+        self._card_worker = CardWorker(self._card, self._card_lock)
+        self._wakeup_sentinel = object()
+        self._selector.register(
+            self._card_worker.wakeup_fileno,
+            selectors.EVENT_READ,
+            self._wakeup_sentinel,
+        )
 
         self._gsmtap = GsmtapTap(
             host=config.gsmtap_host,
@@ -335,7 +560,6 @@ class HilBridgeServer:
             ),
             exchange_callback=self._handle_relay_apdu,
             status_callback=self._build_relay_status_payload,
-            modem_refresh_callback=self._handle_relay_modem_refresh,
         )
         self._apdu_relay.start()
         self._publish_card_relay_marker()
@@ -366,6 +590,10 @@ class HilBridgeServer:
                     self._accept_connection()
                     continue
 
+                if key.data is self._wakeup_sentinel:
+                    self._process_completed_exchanges()
+                    continue
+
                 context = key.data
                 if isinstance(context, ConnectionContext) is False or context.closed:
                     continue
@@ -376,6 +604,11 @@ class HilBridgeServer:
         self._remove_card_relay_marker()
         self._apdu_relay.stop()
         self._reset_session("server shutdown", refresh_card=False)
+        self._card_worker.shutdown()
+        try:
+            self._selector.unregister(self._card_worker.wakeup_fileno)
+        except (KeyError, ValueError, OSError):
+            pass
         try:
             self._selector.unregister(self._listen_socket)
         except (KeyError, ValueError, OSError):
@@ -396,12 +629,14 @@ class HilBridgeServer:
         LOGGER.info("Accepted TCP connection from %s:%d", address[0], address[1])
 
     def _service_connection(self, context: ConnectionContext, mask: int) -> None:
-        if mask & selectors.EVENT_READ:
-            self._read_from_connection(context)
-        if context.closed:
-            return
+        # Flush pending writes before reading so responses are delivered
+        # to the modem before the bridge processes the next command.
         if mask & selectors.EVENT_WRITE:
             self._flush_connection(context)
+        if context.closed:
+            return
+        if mask & selectors.EVENT_READ:
+            self._read_from_connection(context)
 
     def _read_from_connection(self, context: ConnectionContext) -> None:
         try:
@@ -644,38 +879,79 @@ class HilBridgeServer:
 
         LOGGER.info("Modem -> bridge APDU %s", request_data.hex().upper())
 
-        with self._card_lock:
-            proactive_decision = None
-            if self._card.backend_name != "sim":
+        proactive_decision = None
+        if self._card.backend_name != "sim":
+            with self._proactive_lock:
                 proactive_decision = self._session.proactive.handle_apdu(request_data)
-            if proactive_decision is None:
-                response_data, sw1, sw2 = self._card.transmit(request_data)
-                full_response = response_data + bytes((sw1, sw2))
-            else:
-                full_response = proactive_decision.response
 
-        if proactive_decision is None:
-            LOGGER.info("Card -> modem APDU %s", full_response.hex().upper())
-        else:
+        if proactive_decision is not None:
+            full_response = proactive_decision.response
             LOGGER.info(
                 "Bridge -> modem proactive %s (%s, %d bytes)",
                 proactive_decision.action,
                 proactive_decision.command.mode_name,
                 len(full_response),
             )
-        self._session.gsmtap.mirror_exchange(request_data, full_response)
+            self._session.gsmtap.mirror_exchange(request_data, full_response)
+            reply_bank_slot = body.get("toBankSlot", self._session.bank_slot)
+            reply_client_slot = body.get("fromClientSlot", self._session.client_slot)
+            self._queue_rspro_pdu(
+                context,
+                build_tpdu_card_to_modem(
+                    tag=get_pdu_tag(pdu),
+                    bank_slot=reply_bank_slot,
+                    client_slot=reply_client_slot,
+                    data=full_response,
+                ),
+            )
+            return
 
+        # Offload card I/O to the worker thread so the event loop stays
+        # responsive while the physical card processes the command.
         reply_bank_slot = body.get("toBankSlot", self._session.bank_slot)
         reply_client_slot = body.get("fromClientSlot", self._session.client_slot)
-        self._queue_rspro_pdu(
-            context,
-            build_tpdu_card_to_modem(
-                tag=get_pdu_tag(pdu),
-                bank_slot=reply_bank_slot,
-                client_slot=reply_client_slot,
-                data=full_response,
-            ),
+        self._card_worker.submit_async(
+            request_data,
+            context=context,
+            tag=get_pdu_tag(pdu),
+            bank_slot=reply_bank_slot,
+            client_slot=reply_client_slot,
         )
+
+    def _process_completed_exchanges(self) -> None:
+        """Pick up every finished async APDU exchange and forward the response.
+
+        Called from the event loop when the CardWorker signals the
+        wakeup pipe.  Each completed exchange has its R-APDU queued on
+        the originating bankd socket.
+        """
+        for completed in self._card_worker.poll_responses():
+            pending = completed.pending
+            if pending.context.closed:
+                continue
+            if completed.error is not None:
+                LOGGER.error(
+                    "Card APDU transmit failed for %s: %s",
+                    pending.request_apdu.hex().upper(),
+                    completed.error,
+                )
+                self._reset_session(
+                    f"Card APDU transmit failed: {completed.error}"
+                )
+                return
+            LOGGER.info("Card -> modem APDU %s", completed.response.hex().upper())
+            self._session.gsmtap.mirror_exchange(
+                pending.request_apdu, completed.response
+            )
+            self._queue_rspro_pdu(
+                pending.context,
+                build_tpdu_card_to_modem(
+                    tag=pending.tag,
+                    bank_slot=pending.bank_slot,
+                    client_slot=pending.client_slot,
+                    data=completed.response,
+                ),
+            )
 
     def _handle_relay_apdu(self, apdu: bytes, *, session_id: str = "") -> tuple[bytes, int, int]:
         if len(apdu) == 0:
@@ -686,8 +962,7 @@ class HilBridgeServer:
         else:
             LOGGER.info("Relay -> card APDU %s", apdu.hex().upper())
 
-        with self._card_lock:
-            response_data, sw1, sw2 = self._card.transmit(apdu)
+        response_data, sw1, sw2 = self._card_worker.submit_sync(apdu)
 
         full_response = response_data + bytes((sw1, sw2))
         if len(session_id) > 0:
@@ -696,21 +971,24 @@ class HilBridgeServer:
             LOGGER.info("Card -> relay APDU %s", full_response.hex().upper())
         return response_data, sw1, sw2
 
-    def _handle_relay_modem_refresh(self, mode: str, *, session_id: str = "") -> dict[str, Any]:
+    def _handle_relay_card_reset(self, *, session_id: str = "") -> dict[str, Any]:
+        self._card_worker.drain(timeout=5.0)
         with self._card_lock:
-            if self._card.backend_name == "sim":
-                payload = self._card.queue_modem_refresh(mode, source=session_id)
-            else:
-                payload = self._session.proactive.queue_refresh(mode, source=session_id)
+            reset_payload = self._card.reset_card()
+            self._session.atr_bytes = self._card.get_atr()
+        self._session.proactive.reset()
         LOGGER.info(
-            "Queued modem REFRESH mode=%s qualifier=%s pending=%s",
-            payload.get("mode", ""),
-            payload.get("qualifier", ""),
-            payload.get("pendingCount", 0),
+            "Relay requested card reset; reader %s ATR %s",
+            self._card.reader_label,
+            self._session.atr_bytes.hex().upper(),
         )
-        payload = dict(payload)
-        payload["modemRefreshUrl"] = self._apdu_relay.modem_refresh_url
-        return payload
+        return {
+            "status": "reset",
+            "sessionId": str(session_id or "").strip(),
+            "atr": self._session.atr_bytes.hex().upper(),
+            "reader": self._card.reader_label,
+            "reset": dict(reset_payload),
+        }
 
     def _build_relay_status_payload(self) -> dict[str, Any]:
         payload = {
@@ -718,7 +996,6 @@ class HilBridgeServer:
             "url": self._apdu_relay.apdu_url,
             "apduUrl": self._apdu_relay.apdu_url,
             "statusUrl": self._apdu_relay.status_url,
-            "modemRefreshUrl": self._apdu_relay.modem_refresh_url,
             "cardBackend": self._card.backend_name,
             "reader": self._card.reader_label,
             "atr": self._session.atr_bytes.hex().upper(),
@@ -822,6 +1099,11 @@ class HilBridgeServer:
             pass
 
     def _refresh_card(self, *, reconnect: bool) -> None:
+        # Drain the worker before touching the card connection so
+        # the event loop never blocks on _card_lock — the worker
+        # is guaranteed idle by the time we acquire it.
+        if reconnect:
+            self._card_worker.drain(timeout=5.0)
         with self._card_lock:
             if reconnect:
                 self._card.reconnect()

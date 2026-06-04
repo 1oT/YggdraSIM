@@ -69,6 +69,13 @@ def list_pe_quick_add_rows() -> List[Tuple[str, str, str]]:
         ("opt-isim", "opt-isim", "ADF.ISIM optional template"),
         ("akaParameter", "akaParameter", "MILENAGE placeholder keys"),
         ("genericFileManagement", "genericFileManagement", "empty GFM command list"),
+        ("csim", "csim", "ADF.CSIM mandatory file shells"),
+        ("opt-csim", "opt-csim", "ADF.CSIM optional template"),
+        ("iot", "iot", "IoT Minimal Profile scaffold"),
+        ("opt-iot", "opt-iot", "IoT optional files"),
+        ("cdmaParameter", "cdmaParameter", "CDMA/CAVE authentication keys"),
+        ("rfm", "rfm", "Remote File Management placeholder"),
+        # ssim / ssimEapTLSParameters deferred — pySim schema v3.4+
     ]
     return rows
 
@@ -99,6 +106,7 @@ def _factory_map() -> Dict[str, Callable[[], Any]]:
         ProfileElementPin,
         ProfileElement,
         ProfileElementPuk,
+        ProfileElementRFM,
         ProfileElementSD,
         ProfileElementSSD,
         ProfileElementUSIM,
@@ -120,7 +128,7 @@ def _factory_map() -> Dict[str, Callable[[], Any]]:
         pe = ProfileElement(
             OrderedDict(
                 {
-                    "nonStandard-header": {"mandated": None},
+                    "nonStandard-header": {"identification": 0, "mandated": None},
                     "issuerID": "1.3.6.1.4.1.0",
                     "content": b"",
                 }
@@ -128,6 +136,79 @@ def _factory_map() -> Dict[str, Callable[[], Any]]:
         )
         pe.type = "nonStandard"
         return pe
+
+    def _blank_cdma_parameter() -> Any:
+        """PE-CDMAParameter — CAVE authentication keys."""
+        pe = ProfileElement(
+            OrderedDict(
+                {
+                    "cdma-header": {"identification": 0, "mandated": None},
+                    "authenticationKey": b"\x00" * 8,
+                }
+            )
+        )
+        pe.type = "cdmaParameter"
+        return pe
+
+    def _make_rfm_blank() -> Any:
+        """PE-RFM with valid defaults for encoding.
+
+        Works around two pySim issues:
+        1. ``ProfileElementRFM()`` defaults ``inst_aid=None`` /
+           ``sd_aid=None`` (mandatory OCTET STRING fields).
+        2. The patched ``ProfileElement.__init__`` overwrites the header
+           ``identification`` key when ``mandated=True``.
+        """
+        pe = ProfileElementRFM(
+            inst_aid=b"\x00" * 5,
+            sd_aid=b"\x00" * 5,
+        )
+        hdr = pe.decoded.get(pe.header_name)
+        if isinstance(hdr, dict) and "identification" not in hdr:
+            hdr["identification"] = 0
+        return pe
+
+    def _blank_filesystem_pe(pe_type: str) -> Any:
+        """Minimal filesystem-template PE skeleton with header + templateID.
+
+        Produces a placeholder suitable for insertion into a profile
+        document.  The skeleton contains only the header and template
+        reference; mandatory ``File`` fields (``adf-csim``, ``ef-imsi``,
+        etc.) are NOT pre-populated because pySim v0.8 lacks dedicated
+        ``ProfileElement`` subclasses for these types.  The operator must
+        populate the file tree via the filesystem editor before encoding
+        to DER — ``to_der()`` will fail on the bare skeleton.
+        """
+        from pySim.esim.saip.oid import OID
+        from pySim.esim.saip.templates import ProfileTemplateRegistry
+
+        header_name = pe_type.replace("-", "") + "-header"
+        tpl = ProfileTemplateRegistry.get_by_oid(
+            _DEFAULT_TEMPLATE_OID.get(pe_type, "")
+        )
+        template_id = str(tpl.oid) if tpl is not None else ""
+
+        pe = ProfileElement(
+            OrderedDict(
+                {
+                    header_name: {"identification": 0, "mandated": None},
+                    "templateID": template_id,
+                }
+            )
+        )
+        pe.type = pe_type
+        return pe
+
+    # SAIP V3.4.1 §Annex A default template OIDs for filesystem PEs
+    # that lack dedicated pySim ProfileElement subclasses.
+    # Note: ssim (2.23.143.1.2.15) and ssimEapTLSParameters are
+    # deferred — they require pySim ASN.1 schema ≥ v3.4.
+    _DEFAULT_TEMPLATE_OID: dict[str, str] = {
+        "csim": "2.23.143.1.2.7",
+        "opt-csim": "2.23.143.1.2.8",
+        "iot": "2.23.143.1.2.13",
+        "opt-iot": "2.23.143.1.2.14",
+    }
 
     mapping: Dict[str, Callable[[], Any]] = {
         "header": ProfileElementHeader,
@@ -154,6 +235,18 @@ def _factory_map() -> Dict[str, Callable[[], Any]]:
         "opt-isim": ProfileElementOptISIM,
         "akaParameter": ProfileElementAKA,
         "genericFileManagement": ProfileElementGFM,
+        # ProfileElementRFM() needs explicit AID bytes and a header
+        # identification fix (the patched base __init__ overwrites
+        # ``identification`` with just ``mandated`` when mandated=True).
+        "rfm": lambda: _make_rfm_blank(),
+        "csim": lambda: _blank_filesystem_pe("csim"),
+        "opt-csim": lambda: _blank_filesystem_pe("opt-csim"),
+        "iot": lambda: _blank_filesystem_pe("iot"),
+        "opt-iot": lambda: _blank_filesystem_pe("opt-iot"),
+        "cdmaParameter": _blank_cdma_parameter,
+        # ssim and ssimEapTLSParameters are deferred — they require
+        # pySim ASN.1 schema ≥ v3.4 (Profile Interop TS V3.4 added
+        # PE-SSIM and PE-SSIM-EAPTLSParameters to the CHOICE).
     }
     return mapping
 

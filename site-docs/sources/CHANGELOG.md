@@ -31,10 +31,9 @@ exposes a frozen v1 footprint; the v2 staging continues on `main`.
 
 ### Added
 
-- Default eUICC identity is now the BCD-clean self-documenting marker
-  `89045967676472615349763031303005` (decodes as
-  `\x89\x04YggdraSIv0100\x05` in any hex viewer; SGP.02 §2.2.2 telecom
-  MII `89` retained; ITU-T E.118 / SGP.22 §4.11.2 Luhn = 5).
+- Default eUICC identity is now the reserved SGP.22 Annex A.2 test EID
+  `89049032123451234512345678901234`, with prefix `89049032` and a valid
+  Luhn check digit.
 - SIMCARD 5G core: TS 33.501 Annex A AKA helpers (`SIMCARD/aka_5g.py`),
   TS 33.535 AKMA (`SIMCARD/akma.py`), TS 33.501 §C.3 SUCI Profile A & B
   with EF.SUCI_Calc_Info codec (`SIMCARD/suci.py`), TS 31.102 §7.1.2.4

@@ -151,9 +151,8 @@ class Scp80WireFormatDivergenceTests(unittest.TestCase):
     and identical primitives. Only the outer framing differs.
     """
 
-    def test_our_envelope_carries_leading_chi_byte(self) -> None:
-        # Reach into the builder's internal block so this test does not
-        # depend on the SMS TPDU outer wrapping.
+    def test_our_envelope_uses_shell_layout(self) -> None:
+        # Validate the v1-compatible YggdraSIM shell layout.
         from SCP80.builder import OtaPacketBuilder
         from SCP80.config import ConfigManager
         import os
@@ -170,11 +169,12 @@ class Scp80WireFormatDivergenceTests(unittest.TestCase):
             override_payload=PAYLOAD.hex().upper()
         ).block_0348
 
-        # Layout pinning: header block is 3 bytes (CHI | CPL | CHL),
-        # then 7 bytes param_data (SPI | KIc | KID | TAR), then ct.
-        self.assertEqual(block[0:1], b"\x00", "leading byte must be CHI=00")
+        # YggdraSIM layout: CHI(1) | CPL(1) | CHL(1) | SPI(2) | KIC(1) | KID(1) | TAR(3) | ct
+        self.assertEqual(block[0], 0x00, "CHI marker")
+        cpl = block[1]
+        self.assertEqual(cpl, len(block) - 2, "CPL covers all bytes after CHI+CPL")
         chl = block[2]
-        self.assertEqual(chl, 0x15, "CHL must be 0x15 per TS 102 225")
+        self.assertEqual(chl, 0x15, "CHL = 13 + len_sig(8) = 21 = 0x15")
         self.assertEqual(block[3:5], bytes.fromhex("1521"), "SPI mirrored")
         self.assertEqual(block[5:6], bytes.fromhex("12"), "KIc indicator")
         self.assertEqual(block[6:7], bytes.fromhex("12"), "KID indicator")

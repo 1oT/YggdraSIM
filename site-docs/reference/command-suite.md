@@ -645,7 +645,6 @@ Exact section titles emitted by the consoles:
 | `ENABLE-PROFILE` | — | `ENABLE-PROFILE <iccid-or-aid>` | ES10c.EnableProfile. Triggers notification sync. |
 | `DISABLE-PROFILE` | — | `DISABLE-PROFILE <iccid-or-aid>` | ES10c.DisableProfile. Triggers notification sync. |
 | `DELETE-PROFILE` | — | `DELETE-PROFILE <iccid-or-aid>` | ES10c.DeleteProfile. Triggers notification sync. |
-| `REFRESH-MODEM` | `MODEM-REFRESH` | `REFRESH-MODEM [mode]` | Queue proactive REFRESH via HIL bridge. |
 
 ### 4.6 IPAd
 
@@ -785,7 +784,6 @@ Only two:
 | `ENABLE-PROFILE` | `ENABLE-PROFILE <iccid-or-aid>` | ES10c.EnableProfile. |
 | `DISABLE-PROFILE` | `DISABLE-PROFILE <iccid-or-aid>` | ES10c.DisableProfile. |
 | `DELETE-PROFILE` | `DELETE-PROFILE <iccid-or-aid>` | ES10c.DeleteProfile. |
-| `REFRESH-MODEM` | `REFRESH-MODEM [mode]` | Queue proactive REFRESH via HIL bridge (alias `MODEM-REFRESH`). |
 | `AIDS` | — | List AID aliases from Admin registry. |
 | `READ-METADATA` | `READ-METADATA [22\|32]` | Read profile metadata summary. |
 | `GET-POL` | `GET-POL <id\|aid\|alias>` | Read PPR from metadata. |
@@ -840,10 +838,9 @@ logging via `_extract_debug_flag`.
 
 | Command | Aliases | Usage | Flags | Purpose |
 | --- | --- | --- | --- | --- |
-| `ENABLE-PROFILE` | `ENABLE` | `ENABLE-PROFILE <id>` | `--debug` | Enable target profile (auto-disables current active; guarded by PPR1). Queues modem REFRESH. |
-| `DISABLE-PROFILE` | `DISABLE` | `DISABLE-PROFILE <id>` | `--debug` | Disable profile by ICCID / AID / alias. Queues REFRESH. |
-| `DELETE-PROFILE` | `DELETE` | `DELETE-PROFILE <id>` | `--debug` | Delete profile by ICCID / AID / alias. Queues REFRESH. |
-| `REFRESH-MODEM` | `MODEM-REFRESH` | `REFRESH-MODEM [mode]` | `--debug` | Queue proactive REFRESH via HIL bridge. |
+| `ENABLE-PROFILE` | `ENABLE` | `ENABLE-PROFILE <id>` | `--debug` | Enable target profile (auto-disables current active; guarded by PPR1). |
+| `DISABLE-PROFILE` | `DISABLE` | `DISABLE-PROFILE <id>` | `--debug` | Disable profile by ICCID / AID / alias. |
+| `DELETE-PROFILE` | `DELETE` | `DELETE-PROFILE <id>` | `--debug` | Delete profile by ICCID / AID / alias. |
 
 ### 6.4 Metadata / ASN.1 runtime
 
@@ -904,10 +901,9 @@ Commands are registered in `__init__` via `self._commands`,
 | `DISCOVER` | `INFO` | `DISCOVER` | Shared discovery snapshot; populates internal poll-target FQDN cache. |
 | `LIST` | — | `LIST` | List known profile aliases (AID registry). |
 | `LOAD-PROFILE` | — | `LOAD-PROFILE [profilePath]` | PrepareDownload + profile load chain. Triggers notification sync. |
-| `ENABLE-PROFILE` | `ENABLE` | `ENABLE-PROFILE <iccid\|aid\|alias>` | Enable profile. Queues modem REFRESH. |
-| `DISABLE-PROFILE` | `DISABLE` | `DISABLE-PROFILE <iccid\|aid\|alias>` | Disable profile. Queues REFRESH. |
-| `DELETE-PROFILE` | `DELETE` | `DELETE-PROFILE <iccid\|aid\|alias>` | Delete profile. Queues REFRESH. |
-| `REFRESH-MODEM` | `MODEM-REFRESH` | `REFRESH-MODEM [mode]` | Queue proactive REFRESH via HIL bridge (`euicc-profile-state-change`, `uicc-reset`, ...). |
+| `ENABLE-PROFILE` | `ENABLE` | `ENABLE-PROFILE <iccid\|aid\|alias>` | Enable profile. |
+| `DISABLE-PROFILE` | `DISABLE` | `DISABLE-PROFILE <iccid\|aid\|alias>` | Disable profile. |
+| `DELETE-PROFILE` | `DELETE` | `DELETE-PROFILE <iccid\|aid\|alias>` | Delete profile. |
 | `STORE-METADATA` | — | `STORE-METADATA [metadataPath]` | Encode / send StoreMetadata (BF25). |
 | `UPDATE-METADATA` | — | `UPDATE-METADATA [metadataPath]` | Encode / send UpdateMetadata (BF2A). |
 

@@ -2,12 +2,8 @@
 """SAIP profile applicator: walks a decoded pySim profile document and writes each PE to the simulated FS."""
 from __future__ import annotations
 
-import ctypes
 import io
-import os
 import sys
-import threading
-import time
 from pathlib import Path
 from typing import Any
 
@@ -44,128 +40,10 @@ from SIMCARD.utils import decode_imsi_ef, encode_iccid_ef, encode_imsi_ef, read_
 _SAIP_ASN1 = None
 _SAIP_ASN1_FAILED = False
 
-# pySim's SAIP ASN.1 decoder can loop for an unbounded amount of time on
-# malformed or pathological ProfileElement payloads (see asn1tools DER
-# decoder ``decode_content`` in ``codecs/der.py``). That hang has been
-# observed to wedge the simulator in the middle of ``STORE DATA`` while
-# processing the final ``A3`` member of a LoadBoundProfilePackage, which
-# blocks the APDU response and leaks memory because the DER decoder keeps
-# appending entries to an inner list on every iteration. Keep a short
-# per-element budget so a bad element is skipped rather than stalling the
-# whole install; operators that specifically need the heavy decode to run
-# can raise the budget via the env var below.
-_SAIP_DECODE_TIMEOUT_ENV = "YGGDRASIM_SIM_SAIP_DECODE_TIMEOUT_SECONDS"
-_SAIP_DECODE_DEFAULT_TIMEOUT = 2.5
-
-
-def _resolve_saip_decode_timeout_seconds() -> float:
-    raw_value = str(os.environ.get(_SAIP_DECODE_TIMEOUT_ENV, "") or "").strip()
-    if len(raw_value) == 0:
-        return _SAIP_DECODE_DEFAULT_TIMEOUT
-    try:
-        parsed = float(raw_value)
-    except ValueError:
-        return _SAIP_DECODE_DEFAULT_TIMEOUT
-    if parsed <= 0.0:
-        return _SAIP_DECODE_DEFAULT_TIMEOUT
-    return parsed
-
-
-# Grace period after the soft deadline during which the worker thread is
-# polled for a cooperative exit. If it is still alive when the grace
-# period elapses, we escalate to an async-exception injection (see
-# ``_stop_runaway_decode_thread``).
-_SAIP_DECODE_WORKER_GRACE_SECONDS = 1.0
-
-
-def _stop_runaway_decode_thread(worker: threading.Thread) -> None:
-    """Force a looping ``asn1tools`` decoder thread to unwind.
-
-    The pathological path in ``asn1tools`` stays in pure-Python bytecode
-    inside the DER ``decode_content`` loop, so ``PyThreadState_SetAsyncExc``
-    is reliable at breaking it. We raise ``SystemExit`` rather than a
-    ``BaseException`` subclass so any lingering references held by the
-    decoder's local list are dropped promptly and the several-GB memory
-    growth observed on repeated installs is avoided. If the ctypes entry
-    point is unavailable (extremely stripped interpreter) we simply give
-    up and let the daemon thread die with the process; we never want the
-    fallback to itself wedge the simulator.
-    """
-    if worker.is_alive() is False:
-        return
-    thread_id = worker.ident
-    if thread_id is None:
-        return
-    try:
-        set_async_exc = ctypes.pythonapi.PyThreadState_SetAsyncExc
-    except AttributeError:
-        return
-    set_async_exc.argtypes = (ctypes.c_ulong, ctypes.py_object)
-    set_async_exc.restype = ctypes.c_int
-    # The first call delivers SystemExit to the worker. If it happens to be
-    # stuck in a C extension call at that exact moment the runtime will not
-    # honour the async exception until it returns to Python bytecode; asn1tools
-    # is implemented in Python so the common case completes immediately.
-    delivered = set_async_exc(ctypes.c_ulong(thread_id), ctypes.py_object(SystemExit))
-    if delivered == 0:
-        return
-    if delivered > 1:
-        # PyThreadState_SetAsyncExc returns the number of threads affected;
-        # >1 means we accidentally hit more than one thread with the same
-        # ident (can only happen if we raced with thread teardown). Undo the
-        # delivery so we don't leak SystemExit into an unrelated thread.
-        set_async_exc(ctypes.c_ulong(thread_id), ctypes.c_long(0))
-        return
-    # Give the worker a short, bounded window to unwind after the exception
-    # is queued; we must not block the install path indefinitely.
-    deadline = time.monotonic() + _SAIP_DECODE_WORKER_GRACE_SECONDS
-    while worker.is_alive() and time.monotonic() < deadline:
-        time.sleep(0.05)
-
-
-def _decode_profile_element_bounded(
-    asn1: Any,
-    raw_tlv: bytes,
-    timeout_seconds: float,
-) -> tuple[Any, dict[str, Any]] | None:
-    """Execute ``asn1.decode('ProfileElement', raw_tlv)`` under a hard deadline.
-
-    Returns the ``(pe_type, decoded)`` tuple on success, or ``None`` on
-    timeout / exception. When the deadline elapses the worker thread is
-    actively killed via ``PyThreadState_SetAsyncExc`` so the asn1 decoder
-    state (including the unbounded inner list that caused the original
-    multi-GB leak) is released promptly instead of being held for the
-    remainder of the process lifetime.
-    """
-    result_slot: list[Any] = [None]
-    exc_slot: list[BaseException | None] = [None]
-
-    def _worker() -> None:
-        try:
-            result_slot[0] = asn1.decode("ProfileElement", raw_tlv)
-        except BaseException as error:
-            exc_slot[0] = error
-
-    worker = threading.Thread(
-        target=_worker,
-        name="saip-profile-element-decode",
-        daemon=True,
-    )
-    worker.start()
-    worker.join(timeout=max(0.5, float(timeout_seconds)))
-    if worker.is_alive():
-        _stop_runaway_decode_thread(worker)
-        return None
-    if exc_slot[0] is not None:
-        return None
-    return result_slot[0]
-
-
 # ---------------------------------------------------------------------------
 # Native ProfileElement salvage
 #
-# When ``asn1tools`` cannot decode a ``ProfileElement`` (either because it
-# hits the DER ``decode_content`` infinite loop or raises on a malformed
+# When ``asn1tools`` cannot decode a ``ProfileElement`` (raises on a malformed
 # inner TLV), we still want to extract the file contents that the SIM
 # simulator needs at runtime. The walkers below implement a hand-rolled
 # DER parser driven by a table of SAIP ``ProfileElement`` alternatives; for
@@ -1639,25 +1517,15 @@ def decode_profile_image(
     if asn1 is None:
         return _finalize_image(image)
 
-    timeout_seconds = _resolve_saip_decode_timeout_seconds()
     offset = 0
     while offset < len(raw):
         try:
             _, _, raw_tlv, next_offset = read_tlv(raw, offset)
         except Exception:
             break
-        decode_result = _decode_profile_element_bounded(
-            asn1,
-            raw_tlv,
-            timeout_seconds=timeout_seconds,
-        )
-        if decode_result is None:
-            # Either the decoder raised or blew past the deadline. Try a
-            # narrow, hand-rolled walker for the handful of PE sections we
-            # know how to salvage (PE-TELECOM in particular, which is the
-            # usual asn1tools hang site). If the salvage path also cannot
-            # make sense of the bytes, skip the element entirely; the raw
-            # UPP is still persisted verbatim so no information is lost.
+        try:
+            pe_type, decoded = asn1.decode("ProfileElement", raw_tlv)
+        except Exception:
             salvage = _salvage_profile_element_natively(raw_tlv)
             if salvage is not None:
                 salvage_type, salvage_decoded = salvage
@@ -1668,7 +1536,6 @@ def decode_profile_image(
                 )
             offset = next_offset
             continue
-        pe_type, decoded = decode_result
         if isinstance(decoded, dict):
             _consume_profile_element(image, str(pe_type or "").strip(), decoded)
         offset = next_offset

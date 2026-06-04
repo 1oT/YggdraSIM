@@ -340,6 +340,7 @@ class SimCardAuthAndToolkitTests(unittest.TestCase):
         self.assertIn(bytes.fromhex("3E0521C21D3604"), tcp_open_command_data)
 
     def test_verify_and_unblock_queries_use_stateful_retry_counters(self) -> None:
+        self.engine.state.chv_references[0x01].enabled = True
         data, sw1, sw2 = self.engine.transmit(bytes.fromhex("0020000100"))
         self.assertEqual(data, b"")
         self.assertEqual((sw1, sw2), (0x63, 0xC3))
@@ -352,6 +353,15 @@ class SimCardAuthAndToolkitTests(unittest.TestCase):
         data, sw1, sw2 = self.engine.transmit(bytes.fromhex("002C000100"))
         self.assertEqual(data, b"")
         self.assertEqual((sw1, sw2), (0x63, 0xCA))
+
+    def test_default_pin_status_probe_does_not_block_headless_attach(self) -> None:
+        data, sw1, sw2 = self.engine.transmit(bytes.fromhex("0020000100"))
+        self.assertEqual(data, b"")
+        self.assertEqual((sw1, sw2), (0x90, 0x00))
+
+        data, sw1, sw2 = self.engine.transmit(bytes.fromhex("0020008100"))
+        self.assertEqual(data, b"")
+        self.assertEqual((sw1, sw2), (0x90, 0x00))
 
     def test_profile_store_round_trip_preserves_auth_config(self) -> None:
         store_path = Path(self._temp_dir.name) / "profile_store_roundtrip"

@@ -110,7 +110,7 @@ class SaipAsn1DecodeTests(unittest.TestCase):
         )
 
         self.assertIn("Field semantics", text)
-        self.assertIn("Transport / Remote Parameters", text)
+        self.assertIn("SMS Connectivity (A0)", text)
         self.assertIn("Network Access Name", text)
         self.assertIn("Terminal.apn", text)
 

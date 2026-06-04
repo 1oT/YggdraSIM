@@ -1000,6 +1000,64 @@ class OrchestratorFlowTests(unittest.TestCase):
         expected_notification = base64.b64encode(pending_notification).decode("utf-8")
         self.assertEqual(provider.handle_notification_calls[0].pending_notification, expected_notification)
 
+    def test_notification_sync_uses_bf2b_fallback_when_bf28_returns_6a88(self):
+        pending_notification = wrap_tlv(
+            "BF37",
+            wrap_tlv(
+                "BF27",
+                b"".join(
+                    [
+                        wrap_tlv("80", bytes.fromhex("0100000000000345")),
+                        wrap_tlv(
+                            "BF2F",
+                            b"".join(
+                                [
+                                    wrap_tlv("80", b"\x6A"),
+                                    wrap_tlv("81", bytes.fromhex("0780")),
+                                    wrap_tlv("0C", b"dpp1.example.test"),
+                                    wrap_tlv("5A", bytes.fromhex("98010300003017672747")),
+                                ]
+                            ),
+                        ),
+                        wrap_tlv("06", bytes.fromhex("2B0601040183A40F0104")),
+                        wrap_tlv("A2", bytes.fromhex("A106800105810108")),
+                    ]
+                ),
+            )
+            + wrap_tlv("5F37", b"\x44" * 64),
+        )
+        notification_retrieve_response = wrap_tlv(
+            "BF2B",
+            wrap_tlv("A0", pending_notification),
+        )
+        provider = FakeProvider(b"")
+        apdu_channel = FakeApduChannel(notification_retrieve_response=notification_retrieve_response)
+        original_send = apdu_channel.send
+
+        def send_with_bf28_quirk(apdu: bytes, log_name: str) -> bytes:
+            if log_name == "DOWNLOAD: ListNotifications":
+                apdu_channel.send_calls.append((log_name, apdu))
+                raise IOError("APDU Failed: 6A88")
+            return original_send(apdu, log_name)
+
+        apdu_channel.send = send_with_bf28_quirk
+        orchestrator = SGP22Orchestrator(
+            cfg=FakeCfg(),
+            apdu_channel=apdu_channel,
+            profile_provider=provider,
+        )
+
+        orchestrator._sync_pending_notifications()
+
+        self.assertEqual(len(provider.handle_notification_calls), 1)
+        expected_notification = base64.b64encode(pending_notification).decode("utf-8")
+        self.assertEqual(provider.handle_notification_calls[0].pending_notification, expected_notification)
+        send_logs = [entry[0] for entry in apdu_channel.send_calls]
+        self.assertIn("DOWNLOAD: RetrieveNotificationsList (BF28 fallback)", send_logs)
+        self.assertIn("DOWNLOAD: RetrieveNotification [106]", send_logs)
+        self.assertIn("DOWNLOAD: RemoveNotificationFromList [106]", send_logs)
+        self.assertIs(orchestrator._last_notification_sync_succeeded, True)
+
     def test_notification_sync_recovers_from_6e00_via_fresh_logical_channel(self):
         # Regression for the EnableProfile → ListNotifications cascade:
         # ETSI TS 102 221 §11.1.17 + SGP.22 §5.7.10. The base-channel
@@ -1070,12 +1128,62 @@ class OrchestratorFlowTests(unittest.TestCase):
                 "DOWNLOAD: ListNotifications [OPEN LOGICAL CHANNEL]",
                 "DOWNLOAD: ListNotifications [SELECT ISD-R CH1]",
                 "DOWNLOAD: ListNotifications [TERMINAL CAPABILITY]",
-                "DOWNLOAD: ListNotifications [STATUS CH1]",
+                "DOWNLOAD: ListNotifications [STATUS CH0]",
                 "DOWNLOAD: ListNotifications [TERMINAL PROFILE CH1]",
                 "DOWNLOAD: ListNotifications [CH1]",
                 "DOWNLOAD: ListNotifications [CLOSE LOGICAL CHANNEL 1]",
             ],
         )
+        self.assertIs(orchestrator._last_notification_sync_succeeded, True)
+
+    def test_notification_sync_primes_active_logical_channel_before_opening_new_one(self):
+        cfg = FakeCfg()
+        provider = FakeProvider(b"")
+        apdu_channel = FakeApduChannel(notification_list_response=bytes.fromhex("BF2802A000"))
+        list_attempts = {"count": 0}
+        reset_calls = {"count": 0}
+
+        def send_with_active_channel_recovery(apdu: bytes, log_name: str) -> bytes:
+            apdu_channel.send_calls.append((log_name, apdu))
+            if log_name == "DOWNLOAD: ListNotifications":
+                list_attempts["count"] += 1
+                raise IOError("APDU Failed: 6985")
+            if log_name == "DOWNLOAD: ListNotifications [OPEN LOGICAL CHANNEL]":
+                raise AssertionError("active channel recovery should run before opening a new channel")
+            if log_name == "DOWNLOAD: ListNotifications [ACTIVE CH1]":
+                return apdu_channel.notification_list_response
+            return b""
+
+        def fake_reset() -> bool:
+            reset_calls["count"] += 1
+            return True
+
+        apdu_channel.send = send_with_active_channel_recovery
+        apdu_channel.reset = fake_reset
+        orchestrator = SGP22Orchestrator(
+            cfg=cfg,
+            apdu_channel=apdu_channel,
+            profile_provider=provider,
+        )
+        orchestrator._es10b_logical_channel = 1
+
+        orchestrator._sync_pending_notifications()
+
+        self.assertEqual(list_attempts["count"], 1)
+        self.assertEqual(reset_calls["count"], 0)
+        self.assertEqual(orchestrator._es10b_logical_channel, 1)
+        self.assertEqual(provider.handle_notification_calls, [])
+        self.assertEqual(
+            [name for name, _ in apdu_channel.send_calls],
+            [
+                "DOWNLOAD: ListNotifications",
+                "DOWNLOAD: ListNotifications [TERMINAL CAPABILITY]",
+                "DOWNLOAD: ListNotifications [STATUS CH0]",
+                "DOWNLOAD: ListNotifications [TERMINAL PROFILE CH1]",
+                "DOWNLOAD: ListNotifications [ACTIVE CH1]",
+            ],
+        )
+        self.assertEqual(apdu_channel.send_calls[-1][1][:2], bytes.fromhex("81E2"))
         self.assertIs(orchestrator._last_notification_sync_succeeded, True)
 
     def test_notification_sync_marks_failure_when_recovery_exhausted(self):
@@ -1422,7 +1530,7 @@ class OrchestratorFlowTests(unittest.TestCase):
         self.assertEqual(provide_request.euicc_package_result, "")
         self.assertEqual(
             provide_request.raw_body,
-            bytes.fromhex("BF50185A1089044045930000000000001492294428BF5103BF3700"),
+            bytes.fromhex("BF50195A108904404593000000000000149229442880053003020101"),
         )
 
         relay_calls = [call for call in apdu_channel.send_calls if call[0].startswith("EIM: RelayPackage")]

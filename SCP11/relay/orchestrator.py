@@ -1,5 +1,5 @@
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
-"""SCP11-relay orchestrator: sequences ES2+ / ES9+ / ES8+ calls over the HIL-Bridge relay channel."""
+"""SCP11-relay orchestrator: sequences ES2+ / ES9+ / ES8+ calls over direct PC/SC."""
 try:
     from ..orchestrator import SGP22Orchestrator
 except ImportError:

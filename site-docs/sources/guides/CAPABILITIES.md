@@ -21,7 +21,7 @@ YggdraSIM currently provides:
   store) plus a BYO-Open5GS provisioning bridge for hosts that already run
   a real 5GC. (post-v1 staging — not part of this release.)
 - a hardware-in-the-loop SIMtrace2 bridge (`Tools/HilBridge`) with RSPRO
-  relay, GSMTAP mirror, modem REFRESH control, AT+CSIM / AT+CRSM
+  relay, GSMTAP mirror, AT+CSIM / AT+CRSM
   transcoding (`at_simlink`), and offline pcap review
 - non-interactive command, script, and report/export entry points where the
   subsystem already exposes them
@@ -53,7 +53,7 @@ command or every internal helper.
 | `SCP11/eim_local/` | eIM-side shell | direct eIM lifecycle commands, localized polling, hotfolders, handover | `SCP11/eim_local/README.md` |
 | `SCP11/shared/` | Shared helper layer | crypto, payload, ASN.1, GSMA error, pySim support helpers | `SCP11/shared/README.md` |
 | `SIMCARD/` | In-process simulated UICC / eUICC | ETSI TS 102 221 FS, GP / SCP03 / SCP80, ISD-R + ISD-Ps, ETSI TS 102 223 toolkit, Milenage / TUAK AKA, 5G AKA / AKMA / SUCI / `GET IDENTITY` | `guides/CAPABILITIES.md` §SIMCARD |
-| `Tools/HilBridge/` | SIMtrace2 HIL bridge | RSPRO relay on `127.0.0.1:9997`, GSMTAP mirror on UDP 4729, modem REFRESH, offline pcap review, AT+CSIM / AT+CRSM transcoder (`at_simlink`) | `HIL_BRIDGE_GUIDE.md` |
+| `Tools/HilBridge/` | SIMtrace2 HIL bridge | RSPRO relay on `127.0.0.1:9997`, GSMTAP mirror on UDP 4729, offline pcap review, AT+CSIM / AT+CRSM transcoder (`at_simlink`) | `HIL_BRIDGE_GUIDE.md` |
 | `Tools/ProfilePackage/` | SAIP shell | inspect, lint, transcode, encode, split, extract, DIFF/DIFF-TUI, WATCH-SIMCARD | `README.md` |
 | `Tools/ApduFuzz/` | Opt-in APDU mutation fuzzer | deterministic mutators, PC/SC/null transports, safety gate, crash dumps | `Tools/ApduFuzz/` sources |
 | `Tools/EumDiag/` | EUM / SM-DP+ diagnostics | session-key injection, BF36 Lua dissector, tshark runner, BPP decode | `Tools/EumDiag/` sources |
@@ -478,7 +478,6 @@ relay. Current capabilities include:
 - exclusive PC/SC reader ownership with brokered side-channel access
   for the YggdraSIM modules
 - GSMTAP mirroring on UDP 4729 for live Wireshark capture
-- modem REFRESH proactive command issuance (`Tools/HilBridge/proactive.py`)
 - AT+CSIM / AT+CRSM transcoding (`Tools/HilBridge/at_simlink.py`) per
   3GPP TS 27.007 §8.17 / §8.18 — turns AT request lines into raw
   ISO 7816 APDUs and back, transport-agnostic so any modem-side serial

@@ -323,16 +323,23 @@ def run_card_bridge(
             f"Cannot open PC/SC reader: {connect_error}"
         ) from connect_error
 
-    reader_label = str(getattr(channel, "reader_label", "") or "PC/SC reader")
-    atr_hex = ""
-    try:
-        atr_value = channel.get_atr()
-        if isinstance(atr_value, (bytes, bytearray)):
-            atr_hex = bytes(atr_value).hex().upper()
-        else:
-            atr_hex = bytes(atr_value).hex().upper()
-    except Exception:
-        atr_hex = ""
+    state = {
+        "reader_label": str(getattr(channel, "reader_label", "") or "PC/SC reader"),
+        "atr_hex": "",
+    }
+
+    def refresh_card_state() -> None:
+        state["reader_label"] = str(getattr(channel, "reader_label", "") or "PC/SC reader")
+        try:
+            atr_value = channel.get_atr()
+            if isinstance(atr_value, (bytes, bytearray)):
+                state["atr_hex"] = bytes(atr_value).hex().upper()
+            else:
+                state["atr_hex"] = bytes(atr_value).hex().upper()
+        except Exception:
+            state["atr_hex"] = ""
+
+    refresh_card_state()
 
     def exchange_callback(apdu: bytes, *, session_id: str = "") -> tuple[bytes, int, int]:
         del session_id
@@ -341,9 +348,34 @@ def run_card_bridge(
 
     def status_callback() -> dict[str, Any]:
         return {
-            "reader": reader_label,
-            "atr": atr_hex,
-            "card": "available" if len(atr_hex) > 0 else "unknown",
+            "reader": state["reader_label"],
+            "atr": state["atr_hex"],
+            "card": "available" if len(state["atr_hex"]) > 0 else "unknown",
+        }
+
+    def card_reset_callback(*, session_id: str = "") -> dict[str, Any]:
+        del session_id
+        reset_method = getattr(channel, "reset_card", None)
+        reset_payload: dict[str, Any] = {}
+        if callable(reset_method):
+            maybe_payload = reset_method()
+            if isinstance(maybe_payload, dict):
+                reset_payload = dict(maybe_payload)
+        else:
+            reconnect_method = getattr(channel, "reconnect", None)
+            if callable(reconnect_method):
+                reconnect_method()
+                reset_payload = {"mode": "reconnect"}
+            else:
+                channel.disconnect()
+                channel.connect()
+                reset_payload = {"mode": "disconnect-connect"}
+        refresh_card_state()
+        return {
+            "status": "reset",
+            "reader": state["reader_label"],
+            "atr": state["atr_hex"],
+            "reset": reset_payload,
         }
 
     relay = HilBridgeApduRelayService(
@@ -358,6 +390,7 @@ def run_card_bridge(
         ),
         exchange_callback=exchange_callback,
         status_callback=status_callback,
+        card_reset_callback=card_reset_callback,
     )
 
     try:
@@ -370,7 +403,7 @@ def run_card_bridge(
         raise CardBridgeError(f"Cannot start relay: {start_error}") from start_error
 
     _emit_startup_banner(
-        config, relay, reader_label=reader_label, atr_hex=atr_hex, output=output
+        config, relay, reader_label=state["reader_label"], atr_hex=state["atr_hex"], output=output
     )
 
     try:

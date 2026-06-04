@@ -47,7 +47,6 @@ class _Recorder:
         self._enable_ok = enable_ok
         self._disable_ok = disable_ok
         self._delete_ok = delete_ok
-        self.modem_refreshes: list[str] = []
         self.info_messages: list[str] = []
         self.warn_messages: list[str] = []
         self.error_messages: list[str] = []
@@ -63,9 +62,6 @@ class _Recorder:
     def delete(self, target: Any) -> Any:
         self.calls.append(("delete", target))
         return b"\x90\x00" if self._delete_ok else b""
-
-    def modem_refresh(self, label: str) -> None:
-        self.modem_refreshes.append(label)
 
     def info(self, message: str) -> None:
         self.info_messages.append(message)
@@ -90,7 +86,6 @@ def _adapter_from_recorder(
         disable_profile=recorder.disable,
         delete_profile=recorder.delete,
         policy_allow_auto_disable=policy_callback,
-        modem_refresh=recorder.modem_refresh,
         describe_profile=lambda profile: f"{profile.nickname} ({profile.iccid})",
         profile_identifier=lambda profile: profile.iccid or profile.aid or profile.nickname,
         info=recorder.info,
@@ -164,7 +159,6 @@ class TestRunEnableProfile:
         ok = profile_actions.run_enable_profile(_adapter_from_recorder(rec), rows, "111F")
         assert ok is True
         assert rec.calls == []
-        assert rec.modem_refreshes == []
         assert any("already enabled" in m for m in rec.info_messages)
 
     def test_auto_disables_active_then_enables_target(self) -> None:
@@ -176,7 +170,6 @@ class TestRunEnableProfile:
         ok = profile_actions.run_enable_profile(_adapter_from_recorder(rec), rows, "222F")
         assert ok is True
         assert rec.calls == [("disable", "111F"), ("enable", "222F")]
-        assert rec.modem_refreshes == ["EnableProfile"]
 
     def test_aborts_when_policy_refuses_auto_disable(self) -> None:
         rec = _Recorder()
@@ -191,7 +184,6 @@ class TestRunEnableProfile:
         )
         assert ok is False
         assert rec.calls == []
-        assert rec.modem_refreshes == []
 
     def test_aborts_when_auto_disable_card_command_fails(self) -> None:
         rec = _Recorder(disable_ok=False)
@@ -202,7 +194,6 @@ class TestRunEnableProfile:
         ok = profile_actions.run_enable_profile(_adapter_from_recorder(rec), rows, "222F")
         assert ok is False
         assert rec.calls == [("disable", "111F")]
-        assert rec.modem_refreshes == []
         assert any("auto-disable" in m for m in rec.error_messages)
 
     def test_enables_directly_when_no_active_profile(self) -> None:
@@ -211,7 +202,6 @@ class TestRunEnableProfile:
         ok = profile_actions.run_enable_profile(_adapter_from_recorder(rec), rows, "222F")
         assert ok is True
         assert rec.calls == [("enable", "222F")]
-        assert rec.modem_refreshes == ["EnableProfile"]
 
     def test_falls_back_to_raw_identifier_when_target_unknown(self) -> None:
         rec = _Recorder()
@@ -235,7 +225,6 @@ class TestRunDisableProfile:
         ok = profile_actions.run_disable_profile(_adapter_from_recorder(rec), rows, "111F")
         assert ok is True
         assert rec.calls == []
-        assert rec.modem_refreshes == []
         assert any("already disabled" in m for m in rec.info_messages)
 
     def test_disables_when_target_enabled(self) -> None:
@@ -244,7 +233,6 @@ class TestRunDisableProfile:
         ok = profile_actions.run_disable_profile(_adapter_from_recorder(rec), rows, "111F")
         assert ok is True
         assert rec.calls == [("disable", "111F")]
-        assert rec.modem_refreshes == ["DisableProfile"]
 
 
 # ---------------------------------------------------------------------------
@@ -261,7 +249,6 @@ class TestRunDeleteProfile:
         ok = profile_actions.run_delete_profile(_adapter_from_recorder(rec), rows, "111F")
         assert ok is True
         assert rec.calls == [("delete", "111F")]
-        assert rec.modem_refreshes == ["DeleteProfile"]
 
     def test_auto_disables_enabled_target_before_delete(self) -> None:
         rec = _Recorder()
@@ -271,7 +258,6 @@ class TestRunDeleteProfile:
         # Order matters: the disable must land before the delete so the
         # card never sees a delete-while-enabled APDU.
         assert rec.calls == [("disable", "111F"), ("delete", "111F")]
-        assert rec.modem_refreshes == ["DeleteProfile"]
 
     def test_aborts_when_auto_disable_fails(self) -> None:
         rec = _Recorder(disable_ok=False)
@@ -279,7 +265,6 @@ class TestRunDeleteProfile:
         ok = profile_actions.run_delete_profile(_adapter_from_recorder(rec), rows, "111F")
         assert ok is False
         assert rec.calls == [("disable", "111F")]
-        assert rec.modem_refreshes == []
         assert any("auto-disable failed" in m for m in rec.error_messages)
 
     def test_respects_ppr1_guard(self) -> None:

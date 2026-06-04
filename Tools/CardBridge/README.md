@@ -77,7 +77,7 @@ APDU relay; all routes mount under the bind URL.
 | GET | `/ping` | open | — | `pong\n` |
 | GET | `/status` | bearer | — | `{"reader", "atr", "authRequired", "tokenFingerprint", ...}` |
 | POST | `/apdu` | bearer | `{"apdu": "<hex>", "sessionId": "<optional>"}` | `{"data": "<hex>", "sw1": "<hex>", "sw2": "<hex>"}` |
-| POST | `/modem/refresh` | bearer | `{"mode": "...", "sessionId": "..."}` | implementation-defined; `503` from the Card Bridge daemon (no modem to refresh). |
+| POST | `/card/reset` | bearer | `{}` | `{"status": "reset", "reader", "atr"}` |
 
 When the bridge is in unauthenticated loopback mode, all routes accept
 requests without a header. As soon as a token is configured, every

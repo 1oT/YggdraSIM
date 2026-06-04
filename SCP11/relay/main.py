@@ -124,7 +124,7 @@ class SGP22Client:
             print(f"[*] {warning}")
 
     def run_flow(self):
-        """Execute a single profile-download flow over the relay transport."""
+        """Execute a single profile-download flow through the compatibility namespace."""
         try:
             self._run_startup_preflight()
             self._build_runtime()

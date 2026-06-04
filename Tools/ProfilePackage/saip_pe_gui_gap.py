@@ -41,15 +41,11 @@ _FILE_TEMPLATE_PE: frozenset[str] = frozenset(
         "df-saip",
         "df-snpn",
         "df-5gprose",
-        "df-eap",
-        "df-tetra",
-        "df-wlan",
         "gsm-access",
         "cd",
-        "wlan",
-        "umts",
         "iot",
         "opt-iot",
+        "ssim",
     },
 )
 
@@ -69,13 +65,10 @@ _TYPED_CARD_PE: frozenset[str] = frozenset(
         "pincodes",
         "pukcodes",
         "akaparameter",
-        "akaparametercsim",
         "genericfilemanagement",
         "gfm",
         "rfm",
-        "ram",
         "application",
-        "applicationmanagement",
         "end",
     },
 )
@@ -85,15 +78,24 @@ _NONSTANDARD_SPARSE_PE: frozenset[str] = frozenset({"nonstandard"})
 _SPARSE_CARD_PE: frozenset[str] = frozenset(
     {
         "cdmaparameter",
-        "5gnasparameter",
-        "5gauthparameter",
         "eap",
+        "ssimeaptlsparameters",
     },
 )
 
 _GAP_NOTES: dict[str, str] = {
     "securitydomain_ssd": "GUI normalises this quick-add key to the ``ssd`` dispatch branch.",
     "profileheader": "GUI normalises legacy ``profileHeader`` to ``header`` before dispatch.",
+    "isdr": "Role variant of ``securityDomain`` — root security domain, not a separate PE type.",
+    "isdp": "Role variant of ``securityDomain`` — MNO-SD, not a separate PE type.",
+    "optusim": "Alias normalised to ``opt-usim``.",
+    "optisim": "Alias normalised to ``opt-isim``.",
+    "optcsim": "Alias normalised to ``opt-csim``.",
+    "df-telecom": "Alias for ``telecom`` parent key.",
+    "df-phonebook": "Alias for ``phonebook`` parent key.",
+    "gfm": "Alias for ``genericFileManagement``.",
+    "ssim": "PE-SSIM requires pySim ASN.1 schema ≥ v3.4 (Profile Interop TS V3.4 §8.3.4.9).",
+    "ssimeaptlsparameters": "PE-SSIM-EAPTLSParameters requires pySim ASN.1 schema ≥ v3.4 (§8.4.4).",
 }
 
 
@@ -160,14 +162,35 @@ _QUICK_ADD_MENU_KEYS: frozenset[str] = frozenset(
         "opt-isim",
         "csim",
         "opt-csim",
-        "ssim",
-        "ssimEaptls",
         "iot",
         "opt-iot",
         "akaParameter",
         "cdmaParameter",
         "rfm",
         "genericFileManagement",
+        # ssim / ssimEaptls deferred — pySim schema v3.4+
+    },
+)
+
+
+_NOT_STANDARD_PE: frozenset[str] = frozenset(
+    {
+        # Vocabulary entries that do not correspond to any PE
+        # in the Profile Interop TS V3.4.1 ``ProfileElement ::= CHOICE``.
+        "5gauthparameter",
+        "5gAuthParameter",
+        "5gnasparameter",
+        "5gNasParameter",
+        "applicationmanagement",
+        "applicationManagement",
+        "df-eap",
+        "df-tetra",
+        "df-wlan",
+        "ram",
+        "ssimeaptls",
+        "ssimEaptls",
+        "umts",
+        "wlan",
     },
 )
 
@@ -183,23 +206,17 @@ def known_pe_types_union() -> set[str]:
     keys.update(_QUICK_ADD_MENU_KEYS)
     keys.update(
         {
-            "ram",
             "rfm",
-            "applicationManagement",
-            "cdmaParameter",
-            "5gNasParameter",
-            "5gAuthParameter",
             "isdr",
             "isdp",
-            "wlan",
-            "df-wlan",
-            "iot",
-            "opt-iot",
-            "umts",
             "profileHeader",
+            "ssim",
+            "ssimEapTLSParameters",
         },
     )
-    return {_canonical_base_pe(k) for k in keys if len(_canonical_base_pe(k)) > 0}
+    canonical = {_canonical_base_pe(k) for k in keys if len(_canonical_base_pe(k)) > 0}
+    canonical.difference_update(_NOT_STANDARD_PE)
+    return canonical
 
 
 def tier_summary_rows() -> list[tuple[str, str, str]]:

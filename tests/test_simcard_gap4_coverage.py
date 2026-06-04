@@ -52,6 +52,7 @@ class _EngineHarness(unittest.TestCase):
             euicc_store_root=str(temp_root / "euicc_store"),
             profile_store_path=str(temp_root / "profile_store"),
         )
+        self.engine.state.chv_references[0x01].enabled = True
         self._select_usim_adf()
 
     def tearDown(self) -> None:

@@ -56,6 +56,19 @@ GET_CHANNEL_STATUS_COMMAND = 0x44
 # 3GPP TS 24.008 §10.5.4.7 Called-party-BCD digit map. Hex digits map
 # directly; '*'=0xA, '#'=0xB; 'a'/'b'/'c' are kept for the rare DTMF
 # extension case (TS 102 223 §8.13).
+def _normalize_command_type(raw_type: int) -> int:
+    """Strip the comprehension-required bit (bit 8) from a proactive command type.
+
+    ETSI TS 102 223 Annex A allows every proactive command tag to be
+    emitted in either comprehension-clear (bit 8 = 0) or
+    comprehension-required (bit 8 = 1) form.  Real cards use both;
+    callers that compare against the named constants must normalize
+    first so ``0xA4`` (SELECT ITEM CR-set) matches ``0x24``
+    (SELECT_ITEM_COMMAND).
+    """
+    return int(raw_type) & 0x7F
+
+
 TOOLKIT_DIGIT_NIBBLES = {
     "0": 0x0,
     "1": 0x1,
@@ -1220,7 +1233,7 @@ class ToolkitLogic:
         )
 
     def _command_name_token(self, command_type: int) -> str:
-        raw_name = self.COMMAND_NAMES.get(int(command_type) & 0xFF, f"0x{int(command_type) & 0xFF:02X}")
+        raw_name = self.COMMAND_NAMES.get(_normalize_command_type(int(command_type)), f"0x{int(command_type) & 0xFF:02X}")
         return raw_name.lower().replace(" ", "-")
 
     @staticmethod
@@ -1486,7 +1499,7 @@ class ToolkitLogic:
         response_fields = self._parse_terminal_response(payload)
         if command_fields is None:
             return
-        command_type = int(command_fields.get("command_type", 0) or 0)
+        command_type = _normalize_command_type(int(command_fields.get("command_type", 0) or 0))
         result_code = int(response_fields.get("result_code", 0x00) or 0x00)
         succeeded = self._result_succeeded(result_code)
         if command_type == OPEN_CHANNEL_COMMAND:
@@ -2661,7 +2674,7 @@ class ToolkitLogic:
             return 0
         if body[offset] != 0x81 or body[offset + 1] != 0x03:
             return 0
-        return int(body[offset + 3]) & 0xFF
+        return _normalize_command_type(int(body[offset + 3]) & 0xFF)
 
     def _apply_send_data_response(
         self,
@@ -4488,7 +4501,7 @@ class ToolkitLogic:
         command_fields = self._parse_proactive_command(payload)
         if command_fields is None:
             return ""
-        command_type = int(command_fields.get("command_type", 0) or 0)
+        command_type = _normalize_command_type(int(command_fields.get("command_type", 0) or 0))
         qualifier = int(command_fields.get("qualifier", 0) or 0)
         if command_type == REFRESH_COMMAND:
             return describe_refresh_mode(qualifier)

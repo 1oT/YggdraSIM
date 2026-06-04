@@ -114,6 +114,10 @@ class EnumNameEncoderTests(unittest.TestCase):
         result = encode_key_type({"type": "DES"})
         self.assertEqual(result, bytes([128]))
 
+    def test_key_type_extended_manual_values(self) -> None:
+        self.assertEqual(encode_key_type({"type": "RSA Private Exponent"}), bytes([0xA3]))
+        self.assertEqual(encode_key_type({"type": "ECC public key"}), bytes([0xB0]))
+
     def test_key_type_unknown_raises(self) -> None:
         with self.assertRaises(RoundtripEncoderError):
             encode_key_type({"type": "bogus"})

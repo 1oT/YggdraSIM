@@ -474,6 +474,9 @@ def is_hil_bridge_running() -> bool:
     supervisor_state = read_supervisor_state()
     if bool(supervisor_state.get("bridgeRunning", False)) is False:
         return False
+    service_state = query_user_service_state()
+    if str(service_state.get("activeState", "") or "").strip() != "active":
+        return False
     return True
 
 

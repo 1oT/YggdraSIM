@@ -1,7 +1,7 @@
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """Tests for ``Tools.HilBridge.apdu_relay.HilBridgeApduRelayService`` helpers.
 
-Covers: expected_token, peer_throttle, exchange_apdu, request_modem_refresh,
+Covers: expected_token, peer_throttle, exchange_apdu, request_card_reset,
 record_apdu_audit, and the private _build_audit_record static method.
 No sockets are opened; the exchange and status callbacks are mocked.
 """
@@ -23,7 +23,7 @@ def _make_service(
     auth_token: str = "",
     audit_enabled: bool = False,
     audit_full_apdu: bool = False,
-    with_modem_refresh: bool = False,
+    with_card_reset: bool = False,
 ) -> HilBridgeApduRelayService:
     config = ApduRelayConfig(
         auth_token=auth_token,
@@ -32,12 +32,12 @@ def _make_service(
     )
     exchange_cb = MagicMock(return_value=(b"\x90\x00", 0x90, 0x00))
     status_cb = MagicMock(return_value={})
-    modem_cb = MagicMock(return_value={"refreshed": True}) if with_modem_refresh else None
+    reset_cb = MagicMock(return_value={"status": "reset"}) if with_card_reset else None
     return HilBridgeApduRelayService(
         config=config,
         exchange_callback=exchange_cb,
         status_callback=status_cb,
-        modem_refresh_callback=modem_cb,
+        card_reset_callback=reset_cb,
     )
 
 
@@ -90,18 +90,18 @@ class ExchangeApduTests(unittest.TestCase):
         self.assertEqual(len(result), 3)
 
 
-class RequestModemRefreshTests(unittest.TestCase):
+class RequestCardResetTests(unittest.TestCase):
 
     def test_raises_when_no_callback(self) -> None:
-        svc = _make_service(with_modem_refresh=False)
+        svc = _make_service(with_card_reset=False)
         with self.assertRaises(RuntimeError):
-            svc.request_modem_refresh()
+            svc.request_card_reset()
 
     def test_delegates_when_callback_present(self) -> None:
-        svc = _make_service(with_modem_refresh=True)
-        result = svc.request_modem_refresh(mode="uicc-reset")
+        svc = _make_service(with_card_reset=True)
+        result = svc.request_card_reset(session_id="scp11-test")
         self.assertIsInstance(result, dict)
-        svc._modem_refresh_callback.assert_called_once()
+        svc._card_reset_callback.assert_called_once_with(session_id="scp11-test")
 
 
 class RecordApduAuditTests(unittest.TestCase):

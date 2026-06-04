@@ -194,7 +194,6 @@ operator-relevant fields are:
 
 - `TRANSPORT_MODE`
 - `READER_INDEX`
-- `RELAY_URL`
 - `BACKEND_MODE`
 - `RSP_SERVER_URL`
 - `ES9_BASE_URL`
@@ -208,8 +207,7 @@ Practical rule:
 
 - if the task is a real relay exchange, confirm `RSP_SERVER_URL`,
   `ES9_BASE_URL`, and TLS settings before issuing profile downloads
-- if the task is a lab replay, confirm whether `TRANSPORT_MODE` should be
-  `pcsc` or `relay`
+- if the task is a lab replay, keep `TRANSPORT_MODE` set to `pcsc`
 
 ## Related guides
 

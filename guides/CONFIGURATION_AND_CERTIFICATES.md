@@ -264,7 +264,7 @@ keyset, see [§ SCP03 keysets and admin parameters](#scp03-keysets-and-admin-par
 
 ```json
 {
-  "eid": "89045967676472615349763031303005",
+  "eid": "89049032123451234512345678901234",
   "atr_hex": "3B9F96801FC78031A073BE21136743200718000001A5",
   "default_dp_address": "rsp.example.com",
   "root_ci_pkid_hex": "F54172BDF98A95D65CBEB88A38A1C11D800A85C3",
@@ -307,11 +307,9 @@ keyset, see [§ SCP03 keysets and admin parameters](#scp03-keysets-and-admin-par
 
 1. `eid` is the 32-hex-digit eUICC identifier (TS 23.003 §10). Choose a
    namespace your lab does not collide with. The shipped default
-   `89045967676472615349763031303005` keeps the SGP.02 §2.2.2 telecom MII
-   prefix `89`, decodes to `\x89\x04YggdraSIv0100\x05` in any hex viewer
-   (so `xxd`/Wireshark captures self-document the build), and carries a
-   correct ITU-T E.118 / SGP.22 §4.11.2 Luhn check digit (`5`). Replace
-   it before any production-adjacent run.
+   `89049032123451234512345678901234` uses the SGP.22 Annex A.2 test
+   EID prefix `89049032` and a valid Luhn check digit. Replace it before
+   any production-adjacent run.
 2. `atr_hex` is replayed verbatim by the simulated reader. Match the
    profile under test (a USIM-only card without a NAA selector should
    not advertise EAP-AKA' capability bits).
