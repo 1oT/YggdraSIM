@@ -22,7 +22,6 @@ from typing import List, Optional
 
 
 TRANSPORT_MODE_PCSC = "pcsc"
-TRANSPORT_MODE_RELAY = "relay"
 
 BACKEND_MODE_REMOTE_DP = "remote_dp"
 BACKEND_MODE_LOCAL_SGP26 = "local_sgp26"

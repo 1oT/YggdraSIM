@@ -111,6 +111,7 @@ _EF_KEY_TO_FID: dict[str, str] = {
     "ef-uplmnwlan": "4F41",
     "ef-oplmnwlan": "4F42",
     "ef-wlrplmn": "4F47",
+    "ef-pst": "4F10",
     "ef-gid1": "6F3E",
     "ef-gid2": "6F3F",
     "ef-smsp": "6F42",
@@ -197,6 +198,7 @@ _EF_KEY_TO_FID: dict[str, str] = {
     "ef-opl5g": "4F08",
     "ef-routing-indicator": "4F0A",
     "ef-ursp": "4F0B",
+    "ef-5g-prose-st": "4F01",
     # 5x10 Pass C — 5G extras.
     "ef-tn3gppsnn": "4F0C",
     # Rel-17 additions (TS 31.102 §4.4.11.14-22). Previously
@@ -326,7 +328,10 @@ _EF_KEY_TO_FID: dict[str, str] = {
     "ef-csim-ssci": "6F4E",
     "ef-csim-mlpl": "6F4F",
     "ef-csim-meruiid": "6F5D",
+    "ef-csim-st": "6F32",
     # 5x20 Pass C — Specialized (ISIM + MCPTT + V2X + ProSe + MCS).
+    "ef-mst": "4F01",
+    "ef-vst": "4F01",
     "ef-prose-pfidg": "4F04",
     "ef-prose-pfddn": "4F05",
     "ef-v2x-cfg": "4F01",
@@ -347,6 +352,7 @@ _EF_KEY_TO_FID: dict[str, str] = {
     "ef-mcs-keyset": "6FAB",
     "ef-mcs-stat": "6FAC",
     "ef-mcs-sec-profile": "6FAF",
+    "ef-ice-dn": "6FE0",
     # 5x20 Pass D — Operator / vendor extensions + auxiliary EFs.
     "ef-opcust1": "4F90",
     "ef-opcust2": "4F91",
@@ -405,6 +411,7 @@ _EF_KEY_TO_PARENT_TOKEN: dict[str, str] = {
     "ef-iccid": "mf",
     "ef-dir": "mf",
     "ef-pl": "mf",
+    "ef-arr": "adf-usim",
     # ADF.USIM (TS 31.102).
     "ef-imsi": "adf-usim",
     "ef-keys": "adf-usim",
@@ -425,6 +432,9 @@ _EF_KEY_TO_PARENT_TOKEN: dict[str, str] = {
     "ef-oplmnwact": "adf-usim",
     "ef-hplmnwact": "adf-usim",
     "ef-fplmn": "adf-usim",
+    "ef-uplmnwlan": "df-wlan",
+    "ef-oplmnwlan": "df-wlan",
+    "ef-wlrplmn": "df-wlan",
     "ef-gid1": "adf-usim",
     "ef-gid2": "adf-usim",
     "ef-smsp": "adf-usim",
@@ -523,6 +533,7 @@ _EF_KEY_TO_PARENT_TOKEN: dict[str, str] = {
     "ef-psc": "df-phonebook",
     "ef-cc": "df-phonebook",
     "ef-puid": "df-phonebook",
+    "ef-ice-dn": "df-telecom",
     # DF.GSM / DF.GSM-ACCESS (TS 51.011 legacy + TS 31.102 §4.4.2).
     "ef-kc": "df-gsm",
     "ef-kcgprs": "df-gsm",
@@ -615,14 +626,18 @@ _EF_KEY_TO_PARENT_TOKEN: dict[str, str] = {
     "ef-csim-ssci": "adf-csim",
     "ef-csim-mlpl": "adf-csim",
     "ef-csim-meruiid": "adf-csim",
+    "ef-csim-st": "adf-csim",
     # ProSe / V2X / MCS application-specific EFs.
+    "ef-pst": "df-prose",
     "ef-prose-pfidg": "adf-prose-ue",
     "ef-prose-pfddn": "adf-prose-ue",
     "ef-prose-pfsr": "df-prose",
+    "ef-vst": "df-v2x",
     "ef-v2x-cfg": "adf-v2x",
     "ef-v2x-pre-cfg": "adf-v2x",
     "ef-v2x-cert": "adf-v2x",
     "ef-v2x-auth-keys": "adf-v2x",
+    "ef-mst": "df-mcs",
     "ef-mcs-root": "df-mcs",
     "ef-mcptt-cfg": "adf-mcptt",
     "ef-mcptt-sip": "adf-mcptt",
@@ -652,12 +667,20 @@ _PE_TYPE_TO_PARENT_TOKEN: dict[str, str] = {
     "opt-telecom": "df-telecom",
     "phonebook": "df-phonebook",
     "gsm-access": "df-gsm-access",
+    "wlan": "df-wlan",
+    "df-wlan": "df-wlan",
     "df-5gs": "df-5gs",
     "df-5g-prose": "df-5gprose",
+    "df-prose": "df-prose",
     "df-snpn": "df-snpn",
     "df-5mbsueconfig": "df-5mbsueconfig",
     "df-hnb": "df-hnb",
     "df-saip": "df-saip",
+    "df-oma-bcast": "df-oma-bcast",
+    "df-mcs": "df-mcs",
+    "mcs": "df-mcs",
+    "df-v2x": "df-v2x",
+    "v2x": "df-v2x",
     "isim": "adf-isim",
     "opt-isim": "adf-isim",
     "csim": "adf-csim",
@@ -821,6 +844,43 @@ def parent_token_from_file_path_hex(path_hex: str | None) -> str | None:
     return None
 
 
+def _df_graphics_name_for_fid(fid_hex: str) -> str | None:
+    """
+    Resolve the DF.GRAPHICS dynamic FID space.
+
+    PEDocumentation §PE-Telecom lists DF.GRAPHICS (5F50) children as
+    EF.IMG (4F20), EF.ICE_GRAPHICS (4F21), EF.LAUNCH_SCWS (4F01), and
+    EF.IIDF over the range 4F40..4F7F.
+    """
+    fid_upper = str(fid_hex or "").strip().upper()
+    if fid_upper == "4F20":
+        return "EF.IMG"
+    if fid_upper == "4F21":
+        return "EF.ICE_GRAPHICS"
+    if fid_upper == "4F01":
+        return "EF.LAUNCH_SCWS"
+    try:
+        fid_int = int(fid_upper, 16)
+    except ValueError:
+        return None
+    if 0x4F40 <= fid_int <= 0x4F7F:
+        return "EF.IIDF"
+    return None
+
+
+def _df_graphics_ef_key_for_fid(fid_hex: str) -> str | None:
+    label = _df_graphics_name_for_fid(fid_hex)
+    if label == "EF.IMG":
+        return "ef-img"
+    if label == "EF.ICE_GRAPHICS":
+        return "ef-ice-graphics"
+    if label == "EF.LAUNCH_SCWS":
+        return "ef-launch-scws"
+    if label == "EF.IIDF":
+        return "ef-iidf"
+    return None
+
+
 def _resolve_ef_key_for_fid(
     fid_hex: str, parent_token: str | None
 ) -> str | None:
@@ -837,6 +897,10 @@ def _resolve_ef_key_for_fid(
     fid_upper = str(fid_hex or "").strip().upper()
     if len(fid_upper) == 0 or parent_token is None:
         return None
+    if parent_token == "df-graphics":
+        graphics_key = _df_graphics_ef_key_for_fid(fid_upper)
+        if graphics_key is not None:
+            return graphics_key
     candidates: list[str] = []
     for ef_key, fid in _EF_KEY_TO_FID.items():
         if fid.upper() != fid_upper:
@@ -864,6 +928,10 @@ def fid_name(fid_hex: str, *, parent_hint: str | None = None) -> str | None:
     if len(fid_upper) == 0:
         return None
     hint_token = _normalize_parent_hint(parent_hint)
+    if hint_token == "df-graphics":
+        graphics_name = _df_graphics_name_for_fid(fid_upper)
+        if graphics_name is not None:
+            return graphics_name
     entries = _FID_TO_PARENTED_NAMES.get(fid_upper)
     if entries is not None and hint_token is not None:
         matches = [label for parent, label in entries if parent == hint_token]
@@ -1149,9 +1217,9 @@ _KEY_ACCESS_NAMES = {
 }
 
 _KEY_ID_COMMON_ROLES = {
-    0x01: "ENC (common SCP02/SCP03 convention)",
-    0x02: "MAC (common SCP02/SCP03 convention)",
-    0x03: "DEK (common SCP02/SCP03 convention)",
+    0x01: "KIC (SCP80) / ENC (common SCP02/SCP03 convention)",
+    0x02: "KID (SCP80) / MAC (common SCP02/SCP03 convention)",
+    0x03: "KIK (SCP80) / DEK (common SCP02/SCP03 convention)",
 }
 
 _KEY_TYPE_NAMES = {
@@ -1163,6 +1231,20 @@ _KEY_TYPE_NAMES = {
     0xA0: "RSA Public Exponent",
     0xA1: "RSA Modulus (cleartext)",
     0xA2: "RSA Modulus",
+    0xA3: "RSA Private Exponent",
+    0xA4: "RSA CRT P",
+    0xA5: "RSA CRT Q",
+    0xA6: "RSA CRT PQ",
+    0xA7: "RSA CRT DP1",
+    0xA8: "RSA CRT DQ1",
+    0xB0: "ECC public key",
+    0xB1: "ECC private key",
+    0xB2: "ECC parameter P",
+    0xB3: "ECC parameter A",
+    0xB4: "ECC parameter B",
+    0xB5: "ECC parameter G",
+    0xB6: "ECC parameter N",
+    0xB7: "ECC parameter k",
 }
 
 _AID_FIELD_NAMES = {
@@ -11573,12 +11655,13 @@ def _decode_small_integer(value_bytes: bytes) -> dict[str, object] | None:
     if len(value_bytes) == 0 or len(value_bytes) > 4:
         return None
     return {
+        "raw": value_bytes.hex().upper(),
         "hex": value_bytes.hex().upper(),
         "decimal": int.from_bytes(value_bytes, "big"),
     }
 
 
-def _decode_network_access_name(value_bytes: bytes) -> str:
+def _decode_network_access_name(value_bytes: bytes) -> dict[str, object]:
     labels: list[str] = []
     cursor = 0
     while cursor < len(value_bytes):
@@ -11592,7 +11675,10 @@ def _decode_network_access_name(value_bytes: bytes) -> str:
             labels.append(label_bytes.decode("ascii"))
         except UnicodeDecodeError:
             labels.append(label_bytes.hex().upper())
-    return ".".join(labels)
+    return {
+        "raw": value_bytes.hex().upper(),
+        "name": ".".join(labels),
+    }
 
 
 def _decode_other_address(value_bytes: bytes) -> dict[str, object] | str:
@@ -11620,7 +11706,23 @@ def _describe_bearer_description(value_bytes: bytes) -> dict[str, object]:
         "bytes": [f"0x{byte_value:02X}" for byte_value in value_bytes],
     }
     if len(value_bytes) > 0:
-        description["bearerType"] = f"0x{value_bytes[0]:02X}"
+        bearer_type = value_bytes[0]
+        bearer_names = {
+            0x01: "GSM/3GPP",
+            0x02: "GSM/3GPP",
+            0x03: "Default bearer for requested transport",
+            0x04: "Local link (technology independent)",
+            0x05: "Bluetooth",
+            0x06: "IrDA",
+            0x07: "RS232",
+            0x08: "cdma2000 packet data",
+            0x09: "GSM/3GPP",
+            0x0A: "3GPP I-WLAN",
+            0x0B: "3GPP E-UTRAN / Mapped UTRAN",
+            0x10: "USB",
+        }
+        description["bearerType"] = bearer_names.get(bearer_type, f"0x{bearer_type:02X}")
+        description["bearerTypeHex"] = f"0x{bearer_type:02X}"
     return description
 
 
@@ -12814,35 +12916,158 @@ def _decode_file_descriptor(value_bytes: bytes) -> dict[str, object] | None:
 
 def _decode_connectivity_parameters(value_bytes: bytes) -> dict[str, object]:
     tag_names = {
-        "A0": "Transport / Remote Parameters",
-        "A1": "Bearer / Access Parameters",
-        "06": "Object Identifier",
+        "A0": "SMS Connectivity (A0)",
+        "A1": "HTTP Connectivity (A1)",
+        "A2": "CAT_TP Connectivity (A2)",
+        "06": "SMSC Address",
         "35": "Bearer Description",
         "39": "Buffer Size",
         "3C": "Transport Level",
         "3E": "Other Address",
         "47": "Network Access Name",
-        "81": "Parameter 81",
-        "82": "Parameter 82",
+        "81": "PID",
+        "82": "DCS",
+        "0D": "Login / Password",
     }
     items = _decode_field_ber_tlv_stream(
         value_bytes,
         tag_names=tag_names,
         force_primitive_tags={"35", "39", "3C", "3E", "47"},
         value_decoders={
+            "06": _decode_smsc_address,
             "35": _describe_bearer_description,
             "39": _decode_small_integer,
             "3C": _describe_transport_level,
             "3E": _decode_other_address,
             "47": _decode_network_access_name,
-            "81": _decode_small_integer,
-            "82": _decode_small_integer,
+            "81": _decode_connectivity_pid,
+            "82": _decode_connectivity_dcs,
         },
     )
     return {
-        "format": "BER-TLV",
+        "format": "TCA SAIP Connectivity Parameters",
         "items": items,
     }
+
+
+def _decode_smsc_address(value_bytes: bytes) -> dict[str, object]:
+    """Decode SMSC Address per ETSI TS 102 223 / 3GPP TS 31.102 (EF.ADN)."""
+    if len(value_bytes) < 1:
+        return {"raw": value_bytes.hex().upper()}
+    ton_npi = value_bytes[0]
+    ton = (ton_npi >> 4) & 0x7
+    npi = ton_npi & 0xF
+    ton_names = {0x0: "Unknown", 0x1: "International", 0x2: "National", 0x3: "Network-specific"}
+    npi_names = {0x0: "Unknown", 0x1: "ISDN/Telephony (E.164/E.163)", 0x3: "Data (X.121)", 0x4: "Telex (F.69)", 0x9: "Private", 0xF: "Reserved for extension"}
+    digits_raw = value_bytes[1:] if len(value_bytes) > 1 else b""
+    digits_str = "".join(f"{b & 0x0F:X}{(b >> 4) & 0x0F:X}" for b in digits_raw).rstrip("F")
+    return {
+        "tonNpi": f"0x{ton_npi:02X}",
+        "ton": ton_names.get(ton, f"0x{ton:1X}"),
+        "npi": npi_names.get(npi, f"0x{npi:1X}"),
+        "dialingDigits": digits_str,
+        "raw": value_bytes.hex().upper(),
+    }
+
+
+def _decode_connectivity_pid(value_bytes: bytes) -> dict[str, object]:
+    """Decode Protocol Identifier per 3GPP TS 23.040 §9.2.3.9."""
+    if len(value_bytes) != 1:
+        return _decode_small_integer(value_bytes) or {"hex": value_bytes.hex().upper()}
+    pid = value_bytes[0]
+    pid_names = {
+        0x00: "SME-to-SME (no interworking)",
+        0x20: "Telematic — implicit",
+        0x21: "Telematic — Telex",
+        0x22: "Telematic — Group 3 Telefax",
+        0x23: "Telematic — Group 4 Telefax",
+        0x24: "Telematic — Voice Telephone",
+        0x25: "Telematic — ERMES",
+        0x26: "Telematic — National Paging",
+        0x27: "Telematic — Videotex",
+        0x28: "Telematic — Teletex (unspecified carrier)",
+        0x29: "Telematic — Teletex (PSPDN)",
+        0x2A: "Telematic — Teletex (CSPDN)",
+        0x2B: "Telematic — Teletex (analog PSTN)",
+        0x2C: "Telematic — Teletex (digital ISDN)",
+        0x2D: "Telematic — UCI",
+        0x30: "Message Handling Facility",
+        0x31: "Any public X.400",
+        0x32: "Internet Electronic Mail",
+        0x38: "SC-specific (mutual agreement)",
+        0x3F: "GSM/UMTS Mobile Station",
+        0x40: "Short Message Type 0",
+        0x41: "Replace Short Message Type 1",
+        0x42: "Replace Short Message Type 2",
+        0x43: "Replace Short Message Type 3",
+        0x44: "Replace Short Message Type 4",
+        0x45: "Replace Short Message Type 5",
+        0x46: "Replace Short Message Type 6",
+        0x47: "Replace Short Message Type 7",
+        0x48: "Device Triggering Short Message",
+        0x5E: "Enhanced Message Service (Obsolete)",
+        0x5F: "Return Call Message",
+        0x7C: "ANSI-136 R-DATA",
+        0x7D: "ME Data Download",
+        0x7E: "ME De-personalization",
+        0x7F: "(U)SIM Data Download",
+    }
+    return {
+        "hex": value_bytes.hex().upper(),
+        "decimal": pid,
+        "name": pid_names.get(pid, f"0x{pid:02X}"),
+    }
+
+
+def _decode_connectivity_dcs(value_bytes: bytes) -> dict[str, object]:
+    """Decode Data Coding Scheme per 3GPP TS 23.038 / TS 23.040 §9.2.3.10."""
+    if len(value_bytes) != 1:
+        return _decode_small_integer(value_bytes) or {"hex": value_bytes.hex().upper()}
+    dcs = value_bytes[0]
+    group = (dcs >> 4) & 0xF
+    detail = dcs & 0xF
+    alphabet_names = {
+        0x0: "GSM 7-bit default alphabet",
+        0x4: "8-bit data",
+        0x8: "UCS2",
+    }
+    class_names = {0b00: "Class 0", 0b01: "Class 1 (ME-specific)", 0b10: "Class 2 (U)SIM-specific", 0b11: "Class 3 (TE-specific)"}
+    decoded: dict[str, object] = {"hex": value_bytes.hex().upper(), "decimal": dcs}
+    if group in (0x0, 0x1, 0x2, 0x3):
+        compressed = (dcs >> 5) & 1
+        alphabet_bits = (dcs >> 2) & 3
+        message_class = dcs & 3
+        alphabet_map = {0: "GSM 7-bit default", 1: "8-bit data", 2: "UCS2"}
+        decoded["alphabet"] = alphabet_map.get(alphabet_bits, f"reserved({alphabet_bits})")
+        decoded["compressed"] = bool(compressed)
+        decoded["messageClass"] = class_names.get(message_class, f"class {message_class}")
+    elif group == 0x8 or group == 0x9:
+        decoded["codingGroup"] = "Reserved"
+    elif group == 0xB:
+        decoded["codingGroup"] = "Reserved"
+    elif group == 0xC:
+        decoded["action"] = "Discard Message"
+        decoded["codingGroup"] = "Message Waiting — Discard"
+    elif group == 0xD:
+        indication_names = {
+            0x00: "Voicemail (inactive)", 0x01: "Fax (inactive)",
+            0x02: "Email (inactive)", 0x03: "Other (inactive)",
+            0x08: "Voicemail (active)", 0x09: "Fax (active)",
+            0x0A: "Email (active)", 0x0B: "Other (active)",
+        }
+        decoded["indication"] = indication_names.get(detail, f"0x{detail:01X}")
+        decoded["codingGroup"] = "Message Waiting — Store"
+    elif group == 0xE:
+        decoded["codingGroup"] = "Message Waiting — Store (UCS2)"
+    elif group == 0xF:
+        class_map = {0: "Class 0", 1: "Class 1 (ME-specific)", 2: "Class 2 (U)SIM-specific", 3: "Class 3 (TE-specific)"}
+        alphabet_map = {0: "GSM 7-bit default", 4: "8-bit data"}
+        decoded["messageClass"] = class_map.get(detail & 3, f"class {detail & 3}")
+        decoded["alphabet"] = alphabet_map.get(detail & 0xC, f"unknown({(detail>>2)&3})")
+        decoded["codingGroup"] = "Data coding / message class"
+    else:
+        decoded["codingGroup"] = f"group 0x{group:X}"
+    return decoded
 
 
 def _decode_sd_install_scp(value_bytes: bytes) -> dict[str, object] | None:

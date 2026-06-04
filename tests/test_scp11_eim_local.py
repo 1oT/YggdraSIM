@@ -2661,7 +2661,6 @@ class EimLocalModelTests(unittest.TestCase):
         self.assertIn("IPAE-LIVE [attempts] [timer-window] [-t 20s] [-s 5] [--debug]", rendered)
         self.assertIn("POLL-CAMPAIGN [cycles] [intervalMs] [...]", rendered)
         self.assertIn("EIM-PACKAGE-EXPLAIN [path] [--yaml]", rendered)
-        self.assertIn("REFRESH-MODEM [mode]", rendered)
         self.assertLess(rendered.index("Localized Routing & Handover"), rendered.index("IPAE-LIVE [attempts] [timer-window] [-t 20s] [-s 5] [--debug]"))
         self.assertLess(rendered.index("Queue Campaigns"), rendered.index("POLL-CAMPAIGN [cycles] [intervalMs] [...]"))
         self.assertTrue(

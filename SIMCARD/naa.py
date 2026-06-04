@@ -22,19 +22,21 @@ class NaaLogic:
     def verify(self, p2: int, payload: bytes) -> tuple[bytes, int, int]:
         """ETSI TS 102 221 §11.1.9 VERIFY PIN.
 
-        Lc=0 queries the retry counter (63 Cx / 69 83). Lc=8 attempts
-        a verification. Any other Lc is rejected with 67 00 and does
-        NOT consume a retry, matching the behaviour of commercial
-        UICC references. Previously non-8-byte payloads were silently
-        compared against the padded stored value and therefore
-        consumed a retry on mismatch, which could lock a CHV after a
-        handful of malformed probes.
+        Lc=0 checks the current PIN state. A disabled or already
+        verified reference returns 90 00; an enabled, unverified
+        reference reports the retry counter (63 Cx / 69 83). Lc=8
+        attempts a verification. Any other Lc is rejected with 67 00
+        and does NOT consume a retry, matching the behaviour of
+        commercial UICC references. Previously non-8-byte payloads
+        were silently compared against the padded stored value and
+        therefore consumed a retry on mismatch, which could lock a CHV
+        after a handful of malformed probes.
 
         Disabled-PIN handling follows TS 102 221 §11.1.9 / §10.2.1.5:
 
-        * Retry-counter probes (Lc=0) report the counter regardless
-          of enable state -- the modem is allowed to query it without
-          attempting a comparison.
+        * Status probes (Lc=0) report success when the PIN is disabled
+          or already verified so a headless modem does not treat the
+          subscription as locked before AKA.
         * A real comparison attempt (Lc=8) against a disabled PIN
           returns 69 84 ("referenced data invalidated") without
           consuming a retry. That matches sysmoUSIM-SJS1, sysmoEUICC,
@@ -48,6 +50,8 @@ class NaaLogic:
             return b"", 0x6A, 0x88
         normalized_payload = bytes(payload or b"")
         if len(normalized_payload) == 0:
+            if reference_state.enabled is False or reference_state.verified:
+                return b"", 0x90, 0x00
             return self._query_retry_counter(reference_state.retries_remaining)
         if len(normalized_payload) != 8:
             return b"", 0x67, 0x00

@@ -204,11 +204,29 @@ class HilBridgeRuntimeTests(unittest.TestCase):
             hil_bridge_runtime,
             "read_supervisor_state",
             return_value={"bridgeRunning": True, "remsimClientRunning": True},
+        ), mock.patch.object(
+            hil_bridge_runtime,
+            "query_user_service_state",
+            return_value={"activeState": "active"},
         ):
             warning_text = hil_bridge_runtime.hil_bridge_warning_text()
 
         self.assertIn("YggdraSIM HIL is running", warning_text)
         self.assertIn("concurrent traffic", warning_text)
+
+    def test_hil_bridge_warning_suppressed_when_service_inactive(self) -> None:
+        with mock.patch.object(
+            hil_bridge_runtime,
+            "read_supervisor_state",
+            return_value={"bridgeRunning": True, "remsimClientRunning": True},
+        ), mock.patch.object(
+            hil_bridge_runtime,
+            "query_user_service_state",
+            return_value={"activeState": "inactive"},
+        ):
+            warning_text = hil_bridge_runtime.hil_bridge_warning_text()
+
+        self.assertEqual(warning_text, "")
 
     def test_wait_for_bridge_ready_returns_live_status_payload(self) -> None:
         response = mock.MagicMock()

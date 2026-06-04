@@ -35,6 +35,7 @@ PROFILE_AID_PREFIX = "A0000005591010FFFFFFFF890000"
 PROFILE_AID_SUFFIX_START = 0x1100
 PROFILE_AID_SUFFIX_STEP = 0x0100
 PROFILE_AID_SUFFIX_MAX = 0xFF00
+DEFAULT_ARR_RECORD = bytes.fromhex("800101A40683010190A004840132")
 
 
 def next_generated_profile_aid(profiles: list[SimProfileEntry]) -> str:
@@ -483,8 +484,6 @@ def _attach_ready_usim_nodes(
     ef_ust_bytes = _encode_ef_ust_default()
     ef_spn_bytes = _encode_ef_spn(service_provider)
     ef_ad_bytes = bytes((0x00, 0x00, 0x00, mnc_length & 0x0F))
-    ef_arr_record = bytes.fromhex("800101A40683010190A004840132")
-
     base: list[SimProfileFsNode] = [
         SimProfileFsNode(
             path=("MF", "ADF.USIM", "EF.ARR"),
@@ -492,7 +491,7 @@ def _attach_ready_usim_nodes(
             kind="ef",
             fid="6F06",
             structure="linear-fixed",
-            records=[ef_arr_record],
+            records=[DEFAULT_ARR_RECORD],
         ),
         SimProfileFsNode(
             path=("MF", "ADF.USIM", "EF.LI"),
@@ -1366,7 +1365,7 @@ def _default_profile_image(
             kind="ef",
             fid="2F06",
             structure="linear-fixed",
-            records=[bytes.fromhex("800101A40683010190A004840132")],
+            records=[DEFAULT_ARR_RECORD],
             sfi=0x06,
         ),
         SimProfileFsNode(
@@ -1386,7 +1385,7 @@ def _default_profile_image(
             kind="ef",
             fid="6F06",
             structure="linear-fixed",
-            records=[bytes.fromhex("800101A40683010190A004840132")],
+            records=[DEFAULT_ARR_RECORD],
         ),
         # 3GPP TS 31.102 §4.4.2 / TS 31.103 §4.4.3 phonebook tree
         # rooted under DF.TELECOM. The DF.PHONEBOOK shell plus a
@@ -1874,6 +1873,8 @@ def rebuild_runtime_filesystem(state: SimCardState) -> None:
             )
             path_index[("MF", "DF.GSM")] = df_gsm_node_id
 
+    _ensure_default_local_arr_nodes(nodes, path_index)
+
     # 3GPP TS 31.102 Annex H "EFs shared between SIM and USIM" /
     # TCA Profile Interoperability §3.5.5: an issuer is free to
     # ship a single physical copy of any of the listed EFs (FID
@@ -1973,6 +1974,61 @@ _TS_31_102_ANNEX_H_SHARED_EFS: frozenset[str] = frozenset(
         "6FE4",  # EF.EPSNSC
     }
 )
+
+
+def _ensure_default_local_arr_nodes(
+    nodes: dict[str, SimFileNode],
+    path_index: dict[tuple[str, ...], str],
+) -> None:
+    """Materialise local EF.ARR files referenced by generated FCPs.
+
+    Operator BPPs may supply an ADF/DF subtree without an explicit
+    EF.ARR, while the runtime FCP still points access-rule references
+    at ``6F06``. Real UICC operating systems provide a default ARR for
+    those template roots. Synthesize the same one-record EF for the
+    active profile roots the modem probes during cold attach.
+    """
+    for parent_path in (
+        ("MF", "ADF.USIM"),
+        ("MF", "ADF.ISIM"),
+        ("MF", "DF.TELECOM"),
+    ):
+        parent_id = path_index.get(parent_path)
+        if parent_id is None:
+            continue
+        parent = nodes.get(parent_id)
+        if parent is None or parent.kind not in ("adf", "df"):
+            continue
+        arr_path = parent_path + ("EF.ARR",)
+        existing_id = path_index.get(arr_path)
+        if existing_id is not None and existing_id in nodes:
+            continue
+        existing_child = None
+        for child_id in parent.children:
+            child = nodes.get(child_id)
+            if child is not None and child.fid.upper() == "6F06":
+                existing_child = child
+                break
+        if existing_child is not None:
+            path_index[arr_path] = existing_child.node_id
+            continue
+        node_id = f"{parent_id}::AUTO_EF_ARR"
+        if node_id in nodes:
+            path_index[arr_path] = node_id
+            continue
+        _register_node(
+            nodes,
+            SimFileNode(
+                node_id=node_id,
+                name="EF.ARR",
+                kind="ef",
+                fid="6F06",
+                parent_id=parent_id,
+                structure="linear-fixed",
+                records=[DEFAULT_ARR_RECORD],
+            ),
+        )
+        path_index[arr_path] = node_id
 
 
 def _mirror_shared_efs_between_df_gsm_and_adf_usim(
@@ -2773,7 +2829,7 @@ def build_default_state() -> SimCardState:
     ]
     state = SimCardState(
         atr=DEFAULT_SIM_ATR,
-        eid="89045967676472615349763031303005",
+        eid="89049032123451234512345678901234",
         iccid=iccid,
         imsi=imsi,
         default_dp_address="rsp.example.com",
@@ -2800,8 +2856,18 @@ def build_default_state() -> SimCardState:
         profiles=profiles,
         active_profile_aid=profiles[0].aid,
         chv_references={
-            0x01: SimChvReference(reference=0x01, value="1234", unblock_value="12345678"),
-            0x81: SimChvReference(reference=0x81, value="1234", unblock_value="12345678"),
+            0x01: SimChvReference(
+                reference=0x01,
+                value="1234",
+                unblock_value="12345678",
+                enabled=False,
+            ),
+            0x81: SimChvReference(
+                reference=0x81,
+                value="1234",
+                unblock_value="12345678",
+                enabled=False,
+            ),
         },
     )
     state.toolkit.menu_title = "YggdraSIM"

@@ -9,8 +9,7 @@ an operator's laptop running ``yggdrasim-card-bridge``. Goes through:
   in-process Card Bridge daemon backed by a fake card channel.
 * ``BackendCardChannel.connect`` selects the remote channel when a
   remote URL is configured and falls back to local PC/SC otherwise.
-* ``queue_modem_refresh`` raises a clear error (the laptop side has
-  no modem to refresh).
+* ``proactive_status_payload`` is empty for remote physical-card relays.
 
 Pyscard is intentionally never imported — the tests stub out the local
 PC/SC channel via ``BackendCardChannel.remote_card_url`` so the suite
@@ -57,6 +56,7 @@ class _FakeCardChannel:
         self.reader_label = "Fake reader (test)"
         self.connected = False
         self.disconnected = False
+        self.reset_card_calls = 0
         self.transmit_log: list[bytes] = []
 
     def connect(self) -> None:
@@ -72,6 +72,10 @@ class _FakeCardChannel:
 
     def disconnect(self) -> None:
         self.disconnected = True
+
+    def reset_card(self) -> None:
+        self.reset_card_calls += 1
+        self.connected = True
 
 
 class _RunningBridge:
@@ -252,16 +256,27 @@ class RoundTripTests(unittest.TestCase):
         with self.assertRaises(PcscBridgeError):
             channel.connect()
 
-    def test_modem_refresh_not_supported(self) -> None:
+    def test_proactive_status_empty_for_remote_card(self) -> None:
         with _RunningBridge(auth_token="rt-token") as (apdu_url, _):
             channel = RemoteRelayCardChannel(
                 url=apdu_url, auth_token="rt-token"
             )
             channel.connect()
             try:
-                with self.assertRaises(PcscBridgeError):
-                    channel.queue_modem_refresh(0)
                 self.assertEqual(channel.proactive_status_payload(), {})
+            finally:
+                channel.disconnect()
+
+    def test_remote_channel_forwards_card_reset(self) -> None:
+        with _RunningBridge(auth_token="rt-token") as (apdu_url, fake_channel):
+            channel = RemoteRelayCardChannel(
+                url=apdu_url, auth_token="rt-token"
+            )
+            channel.connect()
+            try:
+                channel.reset_card()
+                self.assertEqual(fake_channel.reset_card_calls, 1)
+                self.assertEqual(channel.get_atr(), bytes.fromhex("3B9F95800FFE"))
             finally:
                 channel.disconnect()
 

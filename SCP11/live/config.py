@@ -33,7 +33,6 @@ try:
         BACKEND_MODE_REMOTE_DP,
         EIM_TRANSPORT_MODE_ESIPA,
         TRANSPORT_MODE_PCSC,
-        TRANSPORT_MODE_RELAY,
     )
 except ImportError:
     from models import (
@@ -41,7 +40,6 @@ except ImportError:
         BACKEND_MODE_REMOTE_DP,
         EIM_TRANSPORT_MODE_ESIPA,
         TRANSPORT_MODE_PCSC,
-        TRANSPORT_MODE_RELAY,
     )
 
 
@@ -51,7 +49,7 @@ def _get_config_dir():
 
 @dataclass(frozen=True)
 class SGPConfig:
-    """Configuration constants for SCP11 relay flow and SGP.26 local mode."""
+    """Configuration constants for SCP11 physical-reader flow and SGP.26 local mode."""
 
     CERT_PATH_AUTH: str = field(
         default_factory=lambda: os.path.join(_get_config_dir(), "CERT.DPauth.ECDSA.der")
@@ -78,10 +76,6 @@ class SGPConfig:
 
     READER_INDEX: int = 0
     TRANSPORT_MODE: str = TRANSPORT_MODE_PCSC
-    RELAY_URL: str = "http://127.0.0.1:8080/apdu"
-    RELAY_TIMEOUT_SECONDS: int = 30
-    RELAY_VERIFY_TLS: bool = True
-    RELAY_SESSION_ID: str = ""
 
     BACKEND_MODE: str = BACKEND_MODE_REMOTE_DP
     ES9_BASE_URL: str = "https://rsp.example.com"
@@ -175,7 +169,7 @@ class SGPConfig:
         errors = []
         warnings = []
 
-        supported_transports = [TRANSPORT_MODE_PCSC, TRANSPORT_MODE_RELAY]
+        supported_transports = [TRANSPORT_MODE_PCSC]
         if self.TRANSPORT_MODE not in supported_transports:
             errors.append(
                 f"Unsupported TRANSPORT_MODE '{self.TRANSPORT_MODE}'. Supported values: {', '.join(supported_transports)}."
@@ -196,13 +190,6 @@ class SGPConfig:
 
         if self.READER_INDEX < 0:
             errors.append("READER_INDEX must be zero or greater.")
-
-        relay_url = str(self.RELAY_URL).strip()
-        if self.TRANSPORT_MODE == TRANSPORT_MODE_RELAY:
-            if len(relay_url) == 0:
-                errors.append("RELAY_URL is empty while TRANSPORT_MODE is set to relay.")
-            elif relay_url.startswith(("http://", "https://")) is False:
-                errors.append("RELAY_URL must start with http:// or https://.")
 
         es9_url = str(self.ES9_BASE_URL).strip()
         smdp_address = str(self.RSP_SERVER_URL).strip()

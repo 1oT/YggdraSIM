@@ -548,18 +548,6 @@ def _build_card_relay_status_url(apdu_url: str) -> str:
     return urlunparse((parsed.scheme, parsed.netloc, status_path, "", "", ""))
 
 
-def _build_card_relay_modem_refresh_url(apdu_url: str) -> str:
-    parsed = urlparse(apdu_url)
-    normalized_path = parsed.path.rstrip("/")
-    if normalized_path.endswith("/apdu"):
-        refresh_path = normalized_path[: -len("/apdu")] + "/modem/refresh"
-    elif normalized_path == "":
-        refresh_path = "/modem/refresh"
-    else:
-        refresh_path = normalized_path + "/modem/refresh"
-    return urlunparse((parsed.scheme, parsed.netloc, refresh_path, "", "", ""))
-
-
 def _read_card_relay_marker_payload() -> dict[str, Any]:
     """Return the parsed marker payload, or an empty dict on any failure."""
     marker_path = _card_relay_marker_path()
@@ -762,51 +750,6 @@ class RelayCardConnection:
             request_json=request_json,
             auth_token=self._auth_token,
         )
-
-
-def trigger_card_relay_modem_refresh(
-    *,
-    mode: str = "",
-    source: str = "",
-    required: bool = False,
-    timeout_seconds: int = DEFAULT_CARD_RELAY_TIMEOUT_SECONDS,
-) -> dict[str, Any] | None:
-    """Trigger a REFRESH (modem-reset) via the card relay backend."""
-    relay_url, relay_source = _resolve_card_relay_url()
-    if len(relay_url) == 0:
-        if required:
-            raise RuntimeError("No active card relay was discovered for modem REFRESH.")
-        return None
-
-    refresh_url = _build_card_relay_modem_refresh_url(relay_url)
-    request_payload: dict[str, Any] = {}
-    if len(str(mode or "").strip()) > 0:
-        request_payload["mode"] = str(mode or "").strip()
-    if len(str(source or "").strip()) > 0:
-        request_payload["sessionId"] = str(source or "").strip()
-
-    auth_token = _resolve_card_relay_token(allow_marker=relay_source == "marker")
-
-    try:
-        return _request_card_relay_json(
-            refresh_url,
-            method="POST",
-            timeout_seconds=timeout_seconds,
-            request_json=request_payload,
-            auth_token=auth_token,
-        )
-    except Exception as refresh_error:
-        # urllib / socket / JSON decode / RuntimeError from _request_card_relay_json
-        # can all manifest here; escalate only when the caller or the env-based
-        # relay source explicitly required it.
-        if required or relay_source == "env":
-            raise
-        _LOGGER.debug(
-            "card_backend: optional modem REFRESH via relay failed (%s: %s); ignoring.",
-            refresh_error.__class__.__name__,
-            refresh_error,
-        )
-        return None
 
 
 def describe_card_backend() -> str:

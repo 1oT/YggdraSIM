@@ -151,6 +151,14 @@ class SGP22Orchestrator:
         # DISPLAY TEXT "Rejected". The flag self-clears on every
         # ``_phase_connect`` entry after being read.
         self._skip_es10b_bootstrap_for_next_connect = False
+        # Tracks whether the full init sequence (TERMINAL CAPABILITY +
+        # SELECT ISD-R + logical-channel bootstrap) has already been
+        # applied in the current transport session. Subsequent
+        # ``_phase_connect`` calls skip the one-per-session handshake
+        # APDUs and only re-SELECT ISD-R. Cleared when the transport is
+        # cold-reset or rebuilt (see ``_reset_apdu_channel_for_recovery``
+        # and ``_run_watchdog_pre_reset`` in the console layer).
+        self._phase_connect_complete = False
         # Set True once any configured eIM entry successfully reaches the
         # server during ``run_eim_poll``. Consumed by the console layer to
         # gate the post-download notification auto-clear sweep: if nothing
@@ -283,7 +291,10 @@ class SGP22Orchestrator:
                             round_relayed_package_count += int(
                                 outcome.get("packages_relayed", 0) or 0
                             )
-                            if int(outcome.get("final_result_code", 0) or 0) == 1:
+                            final_result_code = outcome.get("final_result_code")
+                            if bool(outcome.get("polling_complete", False)) and final_result_code is not None:
+                                drained_entry_indices.add(current_entry_index)
+                            elif int(final_result_code or 0) == 1:
                                 drained_entry_indices.add(current_entry_index)
                             self._print_eim_poll_entry_summary(
                                 ordinal=entry_ordinal_map.get(
@@ -355,6 +366,12 @@ class SGP22Orchestrator:
                     # rest of the command flow. The ``_last_eim_poll_reached_server``
                     # flag now carries that signal to the console without
                     # short-circuiting notification sync or other post-flow steps.
+            # Sync pending notifications while the logical channel is
+            # still open. Closing the channel first would force the
+            # notification handler to reopen ISD-R on the basic channel,
+            # which is unnecessary churn and triggers spurious STK-mode
+            # recovery paths.
+            self._sync_pending_notifications()
         finally:
             self._close_es10b_logical_channel("EIM")
 
@@ -445,6 +462,7 @@ class SGP22Orchestrator:
                     return {
                         "packages_relayed": relayed_package_count,
                         "final_result_code": response.eim_result_code,
+                        "polling_complete": True,
                     }
                 if response.retry_after_seconds > 0:
                     time.sleep(response.retry_after_seconds)
@@ -471,6 +489,7 @@ class SGP22Orchestrator:
                 provide_result = self._build_provide_eim_package_result_tlv(
                     card_response,
                     eid=request.eid,
+                    request=request,
                 )
                 provide_request = copy.deepcopy(request)
                 provide_request.euicc_package_result = ""
@@ -507,6 +526,7 @@ class SGP22Orchestrator:
                 return {
                     "packages_relayed": relayed_package_count,
                     "final_result_code": completion_response.eim_result_code,
+                    "polling_complete": True,
                 }
             if completion_response.retry_after_seconds > 0:
                 time.sleep(completion_response.retry_after_seconds)
@@ -529,18 +549,33 @@ class SGP22Orchestrator:
     def _phase_connect(self) -> None:
         debug_print("\n[*] Phase: Connect")
         self._use_stk_mode_for_es10b_store_data = False
-        self._es10b_logical_channel = 0
         skip_es10b_bootstrap = bool(self._skip_es10b_bootstrap_for_next_connect)
         self._skip_es10b_bootstrap_for_next_connect = False
-        if bool(getattr(self.cfg, "RESET_CARD_BEFORE_FLOW", False)):
-            reset_method = getattr(self.apdu_channel, "reset", None)
-            if callable(reset_method):
-                try:
-                    did_reset = bool(reset_method())
-                    if did_reset:
-                        debug_print("[*] Card transport reset before flow start.")
-                except Exception as error:
-                    debug_print(f"[*] Card transport reset skipped ({error}).")
+        if self._phase_connect_complete:
+            # The one-time init APDUs (TERMINAL CAPABILITY) have already
+            # been sent. If a logical channel was established, just
+            # re-SELECT ISD-R on it. If the bootstrap failed on a
+            # previous attempt, retry it now — the card state may have
+            # changed (e.g. after a profile state transition or transport
+            # reconnection) and the logical channel may succeed now.
+            if self._es10b_logical_channel > 0:
+                self._select_isd_r_on_channel(
+                    self._es10b_logical_channel,
+                    "INIT: SELECT ISD-R",
+                )
+                return
+            # Logical channel bootstrap was not attempted or failed
+            # previously. Retry it now if enabled.
+            if self._logical_es10b_enabled():
+                self._bootstrap_es10b_logical_channel()
+                if self._es10b_logical_channel > 0:
+                    return
+            # Still no logical channel — fall back to basic.
+            self._select_isd_r("INIT: SELECT ISD-R")
+            return
+        # Fresh init: reset per-flow state and start the one-time
+        # handshake (TERMINAL CAPABILITY + logical channel bootstrap).
+        self._es10b_logical_channel = 0
         # TS 102 221 §11.1.19 TERMINAL CAPABILITY: declare extended logical
         # channels (tag 0x82) and eUICC support (tag 0x84) on the very first
         # call. Some eUICC stacks gate ES10 STORE DATA on the eUICC bit and
@@ -554,7 +589,14 @@ class SGP22Orchestrator:
             )
         except IOError:
             pass
-        self._select_isd_r("INIT: SELECT ISD-R")
+        # Open a logical channel and SELECT ISD-R on it FIRST, before
+        # ISD-R is ever selected on the basic channel. Selecting ISD-R
+        # on the basic channel first binds the AID to channel 0 and
+        # causes subsequent MANAGE CHANNEL OPEN + SELECT ISD-R on the
+        # supplementary channel to fail with 6999 (command not allowed).
+        # When the logical-channel bootstrap succeeds, all ES10b traffic
+        # uses that channel. Fall back to basic channel only when the
+        # bootstrap is disabled by configuration or the card refuses.
         if skip_es10b_bootstrap is False:
             self._bootstrap_es10b_logical_channel()
         else:
@@ -562,6 +604,11 @@ class SGP22Orchestrator:
                 "[*] ES10b logical channel bootstrap: skipped for POLL pre-reset "
                 "(TERMINAL PROFILE deferred to watchdog STK init)."
             )
+        # If no logical channel is active (bootstrap skipped or failed),
+        # select ISD-R on the basic channel as a fallback.
+        if self._es10b_logical_channel == 0:
+            self._select_isd_r("INIT: SELECT ISD-R")
+        self._phase_connect_complete = True
 
     def _select_isd_r(self, log_name: str) -> None:
         select_apdu = b"\x00\xA4\x04\x00" + bytes([len(self.cfg.AID_ISD_R)]) + self.cfg.AID_ISD_R
@@ -589,9 +636,10 @@ class SGP22Orchestrator:
         # extended (logical-channel + eUICC) body. Re-issuing it here would
         # be a duplicate per TS 102 221 §11.1.19, which strict eUICC stacks
         # reject; bootstrap proceeds straight to MANAGE CHANNEL.
+        active_channel = 0
         try:
             open_response = self.apdu_channel.send(
-                bytes.fromhex("0070000001"),
+                bytes.fromhex("0070000000"),
                 "INIT: OPEN LOGICAL CHANNEL",
             )
             if len(open_response) == 0:
@@ -601,17 +649,31 @@ class SGP22Orchestrator:
                 raise RuntimeError(f"Unsupported logical channel returned by card: {active_channel}")
 
             self._select_isd_r_on_channel(active_channel, f"INIT: SELECT ISD-R CH{active_channel}")
+            # Keep STATUS on the basic channel. Some eUICC stacks accept
+            # SELECT ISD-R on the supplementary channel for ES10b traffic
+            # but reject the GP STATUS CLA with logical-channel bits set.
             try:
-                self.apdu_channel.send(bytes.fromhex("80F2000C00"), "INIT: STATUS")
+                self.apdu_channel.send(
+                    bytes.fromhex("80F2000C00"),
+                    "INIT: STATUS CH0",
+                )
             except Exception as error:
-                debug_print(f"[*] ES10b logical channel bootstrap: STATUS skipped ({error}).")
-            try:
-                self.apdu_channel.send(bytes.fromhex("80100000010C"), "INIT: TERMINAL PROFILE")
-            except Exception as error:
-                debug_print(f"[*] ES10b logical channel bootstrap: TERMINAL PROFILE skipped ({error}).")
+                debug_print(f"[*] ES10b logical channel bootstrap: STATUS on CH0 skipped ({error}).")
             self._es10b_logical_channel = active_channel
             debug_print(f"[*] ES10b logical channel active: CH{active_channel}.")
         except Exception as error:
+            if 0 < active_channel <= 3:
+                try:
+                    close_apdu = bytes([0x00, 0x70, 0x80, active_channel & 0xFF, 0x00])
+                    self.apdu_channel.send(
+                        close_apdu,
+                        f"INIT: CLOSE LOGICAL CHANNEL {active_channel} AFTER FAILED BOOTSTRAP",
+                    )
+                except Exception as close_error:
+                    debug_print(
+                        "[*] ES10b logical channel bootstrap: "
+                        f"failed to close CH{active_channel} after bootstrap error ({close_error})."
+                    )
             self._es10b_logical_channel = 0
             debug_print(f"[*] ES10b logical channel bootstrap unavailable ({error}); continuing on basic channel.")
 
@@ -630,10 +692,11 @@ class SGP22Orchestrator:
     def _should_retry_with_stk_bootstrap(error: Exception) -> bool:
         # SGP.22 §5.7.10 ListNotifications and §5.7.13 GetEUICCInfo can
         # both surface 6985 / 6E00 / 6881 / 6882 when the card's logical
-        # channel binding for ISD-R has been invalidated by a profile
-        # state change (EnableProfile / DisableProfile / DeleteProfile).
-        # All four status words are recoverable by reopening ISD-R on a
-        # fresh logical channel — see _send_es10b_store_data_with_logical_channel_recovery.
+        # channel binding or proactive-UICC state for ISD-R has been
+        # invalidated by a profile state change (EnableProfile /
+        # DisableProfile / DeleteProfile). These status words are
+        # recoverable by priming the active channel or reopening ISD-R on
+        # a fresh logical channel.
         error_text = str(error).upper()
         if "6985" in error_text:
             return True
@@ -652,7 +715,10 @@ class SGP22Orchestrator:
         p2: int = 0x00,
         cla: int = 0x80,
     ) -> bytes:
-        return bytes([cla & 0xFF, 0xE2, p1 & 0xFF, p2 & 0xFF, len(payload)]) + payload
+        payload_length = len(payload)
+        if payload_length > 0xFF:
+            raise ValueError("ES10b StoreData payload exceeds short APDU length; use block chaining.")
+        return bytes([cla & 0xFF, 0xE2, p1 & 0xFF, p2 & 0xFF, payload_length]) + payload
 
     def _send_es10b_store_data_with_stk_mode(self, payload: bytes, log_name: str) -> bytes:
         # STK-mode last-resort path: cold-reset the transport, replay
@@ -690,23 +756,31 @@ class SGP22Orchestrator:
         return response
 
     def _reset_apdu_channel_for_recovery(self, log_name: str, attempt_label: str) -> None:
-        # The console-side fallback in _send_store_data_with_logical_fallback
-        # resets the transport before each retry so a stale CLA-bound
-        # logical channel from a previous EnableProfile / DisableProfile
-        # cannot poison the next attempt. Mirror that behaviour here so
-        # the orchestrator's notification sync recovers from the same
-        # 6E00/6985/6882 cascade on cards that drop supplementary
-        # channels at profile state transitions.
-        reset_method = getattr(self.apdu_channel, "reset", None)
-        if callable(reset_method) is False:
+        reset = getattr(self.apdu_channel, "reset", None)
+        if callable(reset) is False:
             return
         try:
-            did_reset = bool(reset_method())
-        except Exception as error:
-            debug_print(f"[*] {log_name}: transport reset before {attempt_label} retry failed ({error}).")
-            return
-        if did_reset:
-            debug_print(f"[*] {log_name}: card transport reset before {attempt_label} retry.")
+            reset()
+        except Exception as reset_error:
+            debug_print(f"[*] {log_name}: {attempt_label} recovery reset skipped ({reset_error}).")
+
+    def _send_es10b_store_data_on_active_channel_after_stk_prime(
+        self,
+        payload: bytes,
+        log_name: str,
+    ) -> bytes:
+        active_channel = int(self._es10b_logical_channel or 0)
+        if active_channel <= 0 or active_channel > 3:
+            raise RuntimeError("No active ES10b logical channel is available for recovery.")
+        self._prime_recovery_channel_for_es10b(log_name, active_channel)
+        recovery_apdu = self._build_es10b_store_data_apdu(
+            payload,
+            cla=(0x80 | (active_channel & 0x03)),
+        )
+        return self.apdu_channel.send(
+            recovery_apdu,
+            f"{log_name} [ACTIVE CH{active_channel}]",
+        )
 
     def _send_es10b_store_data_on_recovery_channel(
         self,
@@ -726,7 +800,7 @@ class SGP22Orchestrator:
         # the recovery channel is closed in finally so we do not leak
         # supplementary channels.
         open_response = self.apdu_channel.send(
-            bytes.fromhex("0070000001"),
+            bytes.fromhex("0070000000"),
             f"{log_name} [OPEN LOGICAL CHANNEL]",
         )
         if len(open_response) == 0:
@@ -768,7 +842,8 @@ class SGP22Orchestrator:
         #    comes back 6985 (Conditions of use not satisfied) until
         #    TERMINAL CAPABILITY is replayed.
         # 2. STATUS (TS 102 221 §11.1.2) -- refreshes the
-        #    active-AID view on the supplementary channel.
+        #    card manager view on the basic channel. Some eUICC stacks
+        #    reject GP STATUS when the logical-channel bits are set.
         # 3. TERMINAL PROFILE + proactive cycle drain (TS 102 223
         #    §5.4 + §6) -- signals proactive-UICC capabilities and
         #    acknowledges any proactive command (SET UP MENU,
@@ -795,12 +870,12 @@ class SGP22Orchestrator:
         try:
             self.apdu_channel.send(
                 bytes.fromhex("80F2000C00"),
-                f"{log_name} [STATUS CH{channel_number}]",
+                f"{log_name} [STATUS CH0]",
             )
         except Exception as status_error:
-            debug_print(f"[*] {log_name}: STATUS on CH{channel_number} skipped ({status_error}).")
+            debug_print(f"[*] {log_name}: STATUS on CH0 skipped ({status_error}).")
         self._drain_proactive_after_terminal_profile(
-            bytes.fromhex("80100000010C"),
+            bytes([0x80 | (channel_number & 0x03), 0x10, 0x00, 0x00, 0x01, 0x0C]),
             f"{log_name} [TERMINAL PROFILE CH{channel_number}]",
         )
 
@@ -937,10 +1012,28 @@ class SGP22Orchestrator:
         except Exception as error:
             if allow_stk_retry is False or self._should_retry_with_stk_bootstrap(error) is False:
                 raise
-            print(
-                f"[*] {log_name} failed ({error}); reopening ISD-R on a fresh "
-                f"logical channel and retrying."
-            )
+            active_channel = int(self._es10b_logical_channel or 0)
+            if active_channel > 0:
+                print(
+                    f"[*] {log_name} failed ({error}); priming active "
+                    f"logical channel {active_channel} and retrying."
+                )
+                try:
+                    return self._send_es10b_store_data_on_active_channel_after_stk_prime(
+                        payload,
+                        log_name,
+                    )
+                except Exception as active_error:
+                    print(
+                        f"[*] {log_name} failed on active logical channel recovery "
+                        f"({active_error}); reopening ISD-R on a fresh logical channel."
+                    )
+            else:
+                active_error = None
+                print(
+                    f"[*] {log_name} failed ({error}); reopening ISD-R on a fresh "
+                    f"logical channel and retrying."
+                )
             self._reset_apdu_channel_for_recovery(log_name, "logical channel")
             self._es10b_logical_channel = 0
             try:
@@ -953,8 +1046,11 @@ class SGP22Orchestrator:
                 try:
                     return self._send_es10b_store_data_with_stk_mode(payload, log_name)
                 except Exception as stk_mode_error:
+                    active_error_text = ""
+                    if active_error is not None:
+                        active_error_text = f"; active channel retry failed: {active_error}"
                     raise RuntimeError(
-                        f"{log_name} failed ({error}); logical channel retry failed: "
+                        f"{log_name} failed ({error}){active_error_text}; logical channel retry failed: "
                         f"{logical_error}; STK mode retry failed: {stk_mode_error}"
                     ) from stk_mode_error
 
@@ -980,10 +1076,13 @@ class SGP22Orchestrator:
         # supplementary channel. The same cards still implement BF2B
         # RetrieveNotificationsList (§5.7.12), which carries the same
         # NotificationMetadata so the queue can still be enumerated.
+        # Other stacks return 6A88 from BF28 even when BF2B can still
+        # expose queued PendingNotification records; only treat 6A88 as
+        # empty after BF2B also returns it.
         # Trigger the fallback for these two SW patterns once the
         # normal logical-channel + STK retries have been exhausted.
         error_text = str(error).upper()
-        return ("6E00" in error_text) or ("6985" in error_text)
+        return ("6E00" in error_text) or ("6985" in error_text) or ("6A88" in error_text)
 
     def _list_pending_notifications_with_context_recovery(self) -> bytes:
         payload = bytes.fromhex("BF2800")
@@ -995,14 +1094,14 @@ class SGP22Orchestrator:
                 allow_stk_retry=True,
             )
         except Exception as error:
+            if self._should_retry_with_retrieve_notifications_fallback(error):
+                return self._list_pending_notifications_via_retrieve_fallback(error)
             if self._is_notification_list_empty_status_word(error):
                 debug_print(
                     f"[*] Notification sync: listNotifications returned {error}; "
                     "treating as empty pending-notification list (card quirk)."
                 )
                 return b""
-            if self._should_retry_with_retrieve_notifications_fallback(error):
-                return self._list_pending_notifications_via_retrieve_fallback(error)
             raise
 
     def _list_pending_notifications_via_retrieve_fallback(self, primary_error: Exception) -> bytes:
@@ -1093,8 +1192,10 @@ class SGP22Orchestrator:
 
     def _phase_eim_card_challenge(self) -> None:
         debug_print("\n[*] Phase: eIM card challenge (GetEuiccChallenge)")
+        cla = self._current_es10b_store_data_cla()
+        challenge_apdu = bytes([cla, 0xE2, 0x91, 0x00, 0x03, 0xBF, 0x2E, 0x00])
         challenge_response = self.apdu_channel.send(
-            bytes.fromhex("80E2910003BF2E00"),
+            challenge_apdu,
             "EIM: GetEuiccChallenge",
         )
         if len(challenge_response) >= 16:
@@ -1175,13 +1276,60 @@ class SGP22Orchestrator:
             raise RuntimeError("Configured APDU channel does not expose raw exchange support.")
         return exchange(apdu, log_name)
 
+    def cache_eim_poll_metadata(
+        self,
+        *,
+        eid: str = "",
+        euicc_configured_data: bytes = b"",
+        eim_configuration_data: bytes = b"",
+        euicc_info1: bytes = b"",
+        euicc_info2: bytes = b"",
+    ) -> None:
+        self._cached_eim_poll_metadata = {
+            "eid": str(eid or "").strip(),
+            "euicc_configured_data": bytes(euicc_configured_data or b""),
+            "eim_configuration_data": bytes(eim_configuration_data or b""),
+            "euicc_info1": bytes(euicc_info1 or b""),
+            "euicc_info2": bytes(euicc_info2 or b""),
+        }
+
+    def _cached_or_retrieve_eim_metadata(self, key: str, payload: bytes, log_name: str) -> bytes:
+        cache = getattr(self, "_cached_eim_poll_metadata", {})
+        if isinstance(cache, dict):
+            value = cache.get(key, b"")
+            if isinstance(value, bytes) and len(value) > 0:
+                debug_print(f"[*] {log_name}: using init banner cache.")
+                return value
+        return self._retrieve_es10b_data(payload, log_name)
+
     def _build_eim_poll_request(self, matching_id: str, entry_index: int) -> EimPollRequest:
         debug_print("\n[*] Phase: Read eIM Metadata")
-        euicc_configured_data = self._retrieve_es10b_data(bytes.fromhex("BF3C00"), "EIM: GetEuiccConfiguredData")
-        eim_configuration_data = self._retrieve_es10b_data(bytes.fromhex("BF5500"), "EIM: GetEimConfigurationData")
-        euicc_info1 = self._retrieve_es10b_data(bytes.fromhex("BF2000"), "EIM: GetEuiccInfo1")
-        euicc_info2 = self._retrieve_es10b_data(bytes.fromhex("BF2200"), "EIM: GetEuiccInfo2")
-        eid = self._read_card_eid(reselect_isdr=True)
+        euicc_configured_data = self._cached_or_retrieve_eim_metadata(
+            "euicc_configured_data",
+            bytes.fromhex("BF3C00"),
+            "EIM: GetEuiccConfiguredData",
+        )
+        eim_configuration_data = self._cached_or_retrieve_eim_metadata(
+            "eim_configuration_data",
+            bytes.fromhex("BF5500"),
+            "EIM: GetEimConfigurationData",
+        )
+        euicc_info1 = self._cached_or_retrieve_eim_metadata(
+            "euicc_info1",
+            bytes.fromhex("BF2000"),
+            "EIM: GetEuiccInfo1",
+        )
+        euicc_info2 = self._cached_or_retrieve_eim_metadata(
+            "euicc_info2",
+            bytes.fromhex("BF2200"),
+            "EIM: GetEuiccInfo2",
+        )
+        cache = getattr(self, "_cached_eim_poll_metadata", {})
+        eid = str(cache.get("eid", "") if isinstance(cache, dict) else "").strip()
+        if len(eid) == 0:
+            eid = self._read_card_eid(reselect_isdr=True)
+        else:
+            debug_print("[*] EIM: GetEID: using init banner cache.")
 
         entries = self._decode_eim_configuration_entries(eim_configuration_data)
         if len(entries) == 0:
@@ -1228,11 +1376,21 @@ class SGP22Orchestrator:
         return self._send_es10b_store_data(payload, log_name)
 
     def _read_card_eid(self, reselect_isdr: bool = True) -> str:
+        active_channel = int(self._es10b_logical_channel or 0)
+        if active_channel > 0:
+            cla_select = active_channel & 0x03
+            cla_cmd = 0x80 | (active_channel & 0x03)
+        else:
+            cla_select = 0x00
+            cla_cmd = 0x80
         try:
             ecasd_aid = bytes.fromhex("A0000005591010FFFFFFFF8900000200")
-            select_apdu = b"\x00\xA4\x04\x00" + bytes([len(ecasd_aid)]) + ecasd_aid
+            select_apdu = bytes([cla_select, 0xA4, 0x04, 0x00, len(ecasd_aid)]) + ecasd_aid
             self.apdu_channel.send(select_apdu, "EIM: SELECT ECASD")
-            response = self.apdu_channel.send(bytes.fromhex("80CA005A00"), "EIM: GetEID")
+            response = self.apdu_channel.send(
+                bytes([cla_cmd, 0xCA, 0x00, 0x5A, 0x00]),
+                "EIM: GetEID",
+            )
             if len(response) == 0:
                 return ""
             try:
@@ -1249,8 +1407,10 @@ class SGP22Orchestrator:
         finally:
             if reselect_isdr:
                 try:
-                    select_apdu = b"\x00\xA4\x04\x00" + bytes([len(self.cfg.AID_ISD_R)]) + self.cfg.AID_ISD_R
-                    self.apdu_channel.send(select_apdu, "EIM: RESELECT ISD-R")
+                    if active_channel > 0:
+                        self._select_isd_r_on_channel(active_channel, "EIM: RESELECT ISD-R")
+                    else:
+                        self._select_isd_r("EIM: RESELECT ISD-R")
                 except Exception:
                     pass
 
@@ -1628,6 +1788,22 @@ class SGP22Orchestrator:
         )
         if parsed.package_type in preserve_signed_wrapper_types:
             print("[*] eIM package will be relayed with its signed wrapper intact.")
+        if parsed.package_type == TYPE_PROFILE_STATE_MANAGEMENT:
+            if len(package_bytes) <= 0xFF:
+                last_response = self._retrieve_es10b_data(package_bytes, log_name)
+            else:
+                last_response = self._send_personalization_store_data(package_bytes, log_name)
+            self.state.eim_package_response = last_response
+            if len(last_response) == 0:
+                print("[*] eIM relay completed with empty card response.")
+                self._sync_pending_notifications()
+                return last_response
+            print(f"[*] eIM card response: {last_response.hex().upper()}")
+            last_response = self._build_profile_state_management_result(
+                last_response, log_name, package_bytes
+            )
+            self._sync_pending_notifications(last_response)
+            return last_response
         if len(parsed.card_request) > 0 and parsed.package_type not in preserve_signed_wrapper_types:
             last_response = self._retrieve_es10b_data(parsed.card_request, log_name)
             self.state.eim_package_response = last_response
@@ -1656,6 +1832,46 @@ class SGP22Orchestrator:
         self._handle_profile_load_result(last_response)
         self._sync_pending_notifications(last_response)
         return last_response
+
+    def _build_profile_state_management_result(self, card_response: bytes, log_name: str, package_bytes: bytes = b"") -> bytes:
+        """Return the card-produced SGP.32 EuiccPackageResult payload."""
+        print(f"[*] eIM ProfileStateManagementResult ({len(card_response)} bytes): {card_response.hex().upper()}")
+        return card_response
+
+    def _extract_request_metadata_sequence(self, package_bytes: bytes) -> bytes:
+        """Extract only the metadata fields (80, 5A, 81, 82) from inside
+        the BF51 request's SEQUENCE. The SEQUENCE may also contain the
+        card request (A7) — we strip that so it is not echoed back in
+        the response.
+        """
+        if len(package_bytes) == 0:
+            return b""
+        try:
+            root_tag, root_value, _, _ = self._read_tlv(package_bytes, 0)
+        except Exception:
+            return b""
+        if root_tag != bytes.fromhex("BF51"):
+            return b""
+        try:
+            seq_tag, seq_value, _, _ = self._read_tlv(root_value, 0)
+        except Exception:
+            return b""
+        if seq_tag != bytes.fromhex("30"):
+            return b""
+        # Rebuild the SEQUENCE with only the correlation metadata fields.
+        rebuilt = b""
+        offset = 0
+        while offset < len(seq_value):
+            try:
+                tag_bytes, field_value, field_raw, next_offset = self._read_tlv(seq_value, offset)
+            except Exception:
+                break
+            if tag_bytes in (b"\x80", b"\x5A", b"\x81", b"\x82"):
+                rebuilt += field_raw
+            offset = next_offset
+        if len(rebuilt) == 0:
+            return b""
+        return self._wrap_tlv(bytes.fromhex("30"), rebuilt)
 
     def _build_ipa_euicc_data_response(self, parsed_package: Any, log_name: str) -> bytes:
         print("[*] Handling ipaEuiccDataRequest locally.")
@@ -3353,7 +3569,9 @@ class SGP22Orchestrator:
         body += card_response
         return self._wrap_tlv(bytes.fromhex("BF54"), body)
 
-    def _build_provide_eim_package_result_tlv(self, card_response: bytes, eid: str = "") -> bytes:
+    def _build_provide_eim_package_result_tlv(
+        self, card_response: bytes, eid: str = "", request: Any = None
+    ) -> bytes:
         """Build ProvideEimPackageResult (BF50) with an EimPackageResult CHOICE payload."""
         if len(card_response) == 0:
             return b""
@@ -3361,10 +3579,18 @@ class SGP22Orchestrator:
         eid_bytes = self._eid_bcd_string_to_bytes(eid)
         if len(eid_bytes) == 16:
             body += self._wrap_tlv(b"\x5A", eid_bytes)
-        if card_response.startswith(bytes.fromhex("BF51")) or card_response.startswith(bytes.fromhex("BF52")) or card_response.startswith(bytes.fromhex("BF54")):
+        if (
+            card_response.startswith(bytes.fromhex("BF51"))
+            or card_response.startswith(bytes.fromhex("BF52"))
+            or card_response.startswith(bytes.fromhex("BF54"))
+        ):
             body += card_response
         else:
-            body += self._wrap_tlv(bytes.fromhex("BF51"), card_response)
+            print(
+                "[!] Card response is not a valid SGP.32 EimPackageResult "
+                "CHOICE; sending invalidPackageFormat(1) to eIM."
+            )
+            body += bytes.fromhex("80053003020101")
         return self._wrap_tlv(bytes.fromhex("BF50"), body)
 
     def _decode_bcd_digits(self, value: bytes) -> str:

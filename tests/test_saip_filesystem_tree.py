@@ -674,6 +674,50 @@ class GfmAdfKindFromDfNameTests(unittest.TestCase):
         self.assertEqual(adf["kind"], "adf")
 
 
+class GfmTransactionContainerCursorTests(unittest.TestCase):
+    """Consecutive GFM creates keep DF-local EFs under the created DF."""
+
+    def test_following_ef_rows_use_created_df_as_parent(self) -> None:
+        doc = {
+            "sections": {
+                "genericFileManagement": {
+                    "fileManagementCMD": [[
+                        ("createFCP", {
+                            "fileDescriptor": _hex("78210000"),
+                            "fileID": _hex("7F20"),
+                        }),
+                        ("createFCP", {
+                            "fileDescriptor": _hex("41210009"),
+                            "fileID": _hex("6F07"),
+                        }),
+                        ("createFCP", {
+                            "fileDescriptor": _hex("78210000"),
+                            "fileID": _hex("7F10"),
+                        }),
+                        ("createFCP", {
+                            "fileDescriptor": _hex("4221001E"),
+                            "fileID": _hex("6F3A"),
+                        }),
+                    ]],
+                },
+            },
+        }
+
+        rows = _filesystem_tree_rows(doc)
+        df_gsm = next(r for r in rows if r["file_id"] == "7F20")
+        imsi = next(r for r in rows if r["file_id"] == "6F07")
+        df_telecom = next(r for r in rows if r["file_id"] == "7F10")
+        adn = next(r for r in rows if r["file_id"] == "6F3A")
+
+        self.assertEqual(df_gsm["fid_chain"], "3F00/7F20")
+        self.assertEqual(imsi["parent_path"], "3F00/7F20")
+        self.assertEqual(imsi["fid_chain"], "3F00/7F20/6F07")
+        self.assertEqual(imsi["friendly_name"], "EF.IMSI")
+        self.assertEqual(df_telecom["parent_path"], "3F00")
+        self.assertEqual(adn["parent_path"], "3F00/7F10")
+        self.assertEqual(adn["friendly_name"], "EF.ADN")
+
+
 class MalformedFilePathTests(unittest.TestCase):
     """Odd-length ``filePath`` is malformed but the row must still be addressable."""
 

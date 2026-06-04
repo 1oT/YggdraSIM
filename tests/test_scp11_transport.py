@@ -1,20 +1,9 @@
 import io
 import unittest
 from contextlib import redirect_stdout
+from unittest import mock
 
-from SCP11.transport import PcscApduChannel, RelayApduChannel
-
-
-class FakeRelayClient:
-    def __init__(self, responses):
-        self.responses = list(responses)
-        self.calls = []
-
-    def send_apdu(self, apdu: bytes, session_id: str = ""):
-        self.calls.append((apdu, session_id))
-        if len(self.responses) == 0:
-            raise RuntimeError("No fake responses remaining")
-        return self.responses.pop(0)
+from SCP11.transport import PcscApduChannel
 
 
 class FakePcscConnection:
@@ -49,56 +38,46 @@ class ScriptedPcscConnection:
         return list(response_bytes), int(sw1), int(sw2)
 
 
-class RelayApduChannelTests(unittest.TestCase):
-    def test_reset_reports_unsupported(self):
-        relay = FakeRelayClient([])
-        channel = RelayApduChannel(relay_client=relay, session_id="S1")
-
-        self.assertFalse(channel.reset())
-
-    def test_handles_61_chaining(self):
-        relay = FakeRelayClient(
-            [
-                (b"\xAA", 0x61, 0x02),
-                (b"\xBB\xCC", 0x90, 0x00),
-            ]
-        )
-        channel = RelayApduChannel(relay_client=relay, session_id="S1")
-
-        result = channel.send(bytes.fromhex("00A4040000"), "TEST")
-
-        self.assertEqual(result, b"\xAA\xBB\xCC")
-        self.assertEqual(relay.calls[1][0], bytes.fromhex("00C0000002"))
-        self.assertEqual(relay.calls[0][1], "S1")
-        self.assertEqual(relay.calls[1][1], "S1")
-
-    def test_handles_6c_length_correction(self):
-        relay = FakeRelayClient(
-            [
-                (b"", 0x6C, 0x10),
-                (b"\xDE\xAD", 0x90, 0x00),
-            ]
-        )
-        channel = RelayApduChannel(relay_client=relay)
-
-        result = channel.send(bytes.fromhex("00B0000000"), "TEST")
-
-        self.assertEqual(result, b"\xDE\xAD")
-        self.assertEqual(relay.calls[1][0], bytes.fromhex("00B0000010"))
-
-    def test_raises_on_error_status(self):
-        relay = FakeRelayClient(
-            [
-                (b"", 0x69, 0x82),
-            ]
-        )
-        channel = RelayApduChannel(relay_client=relay)
-
-        with self.assertRaises(IOError):
-            channel.send(bytes.fromhex("80E2910000"), "TEST")
-
-
 class PcscApduChannelLoggingTests(unittest.TestCase):
+    def test_cardbridge_relay_transport_is_not_exported(self):
+        import SCP11.transport as transport
+
+        self.assertFalse(hasattr(transport, "RelayApduChannel"))
+        self.assertFalse(hasattr(transport, "RelayHttpClientJsonHex"))
+
+    def test_pcsc_connect_bypasses_relay_marker_auto_detection(self):
+        channel = PcscApduChannel.__new__(PcscApduChannel)
+        direct_connection = object()
+
+        with mock.patch("SCP11.transport.is_simulated_card_backend", return_value=False):
+            with mock.patch("SCP11.transport.create_card_connection") as create_connection:
+                with mock.patch.object(
+                    PcscApduChannel,
+                    "_connect_after_power_cycle",
+                    return_value=direct_connection,
+                ) as direct_connect:
+                    result = channel._connect(0)
+
+        self.assertIs(result, direct_connection)
+        direct_connect.assert_called_once_with(0)
+        create_connection.assert_not_called()
+
+    def test_pcsc_connect_keeps_explicit_simulator_backend(self):
+        channel = PcscApduChannel.__new__(PcscApduChannel)
+        simulated_connection = object()
+
+        with mock.patch("SCP11.transport.is_simulated_card_backend", return_value=True):
+            with mock.patch(
+                "SCP11.transport.create_card_connection",
+                return_value=simulated_connection,
+            ) as create_connection:
+                with mock.patch.object(PcscApduChannel, "_connect_after_power_cycle") as direct_connect:
+                    result = channel._connect(0)
+
+        self.assertIs(result, simulated_connection)
+        create_connection.assert_called_once_with(reader_index=0)
+        direct_connect.assert_not_called()
+
     def test_send_logs_compact_hex_without_spaces(self):
         channel = PcscApduChannel.__new__(PcscApduChannel)
         channel._conn = FakePcscConnection(response_data=b"\xDE\xAD", sw1=0x90, sw2=0x00)

@@ -87,7 +87,7 @@ Healthy state looks like:
 
 - `status: running` and `usbPresent: true` in supervisor state
 - non-zero `bridgePid`
-- `status: ok`, `apduUrl`, `statusUrl`, `modemRefreshUrl`, selected `reader`,
+- `status: ok`, `apduUrl`, `statusUrl`, `cardResetUrl`, selected `reader`,
   and an `atr` in relay state
 
 Any of the following means the stack is not fully armed:

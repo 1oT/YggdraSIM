@@ -84,7 +84,7 @@ class StkModeFallbackApduChannel:
             return b""
         if log_name == "GET: EID [STK MODE TERMINAL PROFILE]":
             return b""
-        if log_name == "GET: EID [STK MODE CH1]":
+        if log_name == "GET: EID [STK MODE BASIC]":
             return self.eid_response
         return b""
 
@@ -153,7 +153,7 @@ class LogicalChannelFallbackTests(unittest.TestCase):
                 "GET: EID [STK MODE TERMINAL CAPABILITY]",
                 "GET: EID [STK MODE SELECT ISD-R]",
                 "GET: EID [STK MODE TERMINAL PROFILE]",
-                "GET: EID [STK MODE CH1]",
+                "GET: EID [STK MODE BASIC]",
             ],
         )
         self.assertEqual(
@@ -162,7 +162,7 @@ class LogicalChannelFallbackTests(unittest.TestCase):
         )
         self.assertEqual(console.apdu_channel.send_calls[5][1], bytes([0x00, 0xA4, 0x04, 0x00, len(ISD_R_AID)]) + ISD_R_AID)
         self.assertEqual(console.apdu_channel.send_calls[6][1], bytes.fromhex("80100000010C"))
-        self.assertEqual(console.apdu_channel.send_calls[7][1][:2], bytes.fromhex("81E2"))
+        self.assertEqual(console.apdu_channel.send_calls[7][1][:2], bytes.fromhex("80E2"))
 
     def test_live_console_retries_eid_read_on_logical_channel(self):
         self._assert_eid_fallback(self.live_module)

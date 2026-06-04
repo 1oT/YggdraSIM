@@ -316,7 +316,7 @@ class OtaPacketBuilder :
     def _print_verbose (self ,plan :OtaBuildPlan ,chi ,cpl ,chl ,params ,cntr ,pcntr ,cc ,ct ):
         print (f"\n{Colors.CYAN}[=== 03.48 BLOCK BREAKDOWN ===]{Colors.ENDC}")
         print (f"ALG:    {plan.cipher_mode} / {plan.mac_mode}")
-        print (f"CNTR:   {cntr.hex().upper()}")
+        print (f"CNTR:   {plan.cntr_hex}")
         if plan .is_concatenated :
             print (f"SMS:    {len(plan.apdus)} concatenated segments")
         else :

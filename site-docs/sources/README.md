@@ -61,7 +61,7 @@ powershell -ExecutionPolicy Bypass -File scripts\install\install-windows.ps1
 | `SCP11/local_access/` | Direct local `ISD-R` bring-up and one-shot `LOAD-PROFILE` | local SCP11 shell |
 | `SCP11/eim_local/` | eIM-local package generation, localized polling, hotfolder queues, and handover flows | eIM local shell |
 | `SIMCARD/` | In-process simulated UICC / eUICC: ETSI TS 102 221 file system, GP / SCP03 / SCP80, ISD-R + ISD-Ps, ETSI TS 102 223 toolkit + BIP, Milenage / TUAK AKA, 5G AKA / AKMA / SUCI / GET IDENTITY | selected via `--card-backend sim` |
-| `Tools/HilBridge/` | SIMtrace2-based hardware-in-the-loop bridge: RSPRO relay, GSMTAP mirror, modem REFRESH, offline pcap review, AT+CSIM/CRSM transcoding (`at_simlink`) | `yggdrasim-hil-bridge` (Linux) |
+| `Tools/HilBridge/` | SIMtrace2-based hardware-in-the-loop bridge: RSPRO relay, GSMTAP mirror, offline pcap review, AT+CSIM/CRSM transcoding (`at_simlink`) | `yggdrasim-hil-bridge` (Linux) |
 | `Tools/ProfilePackage/` | SAIP shell, transcode UI, lint engine, JSON↔DER bridge | profile-package shell + TUI |
 | `Tools/SuciTool/` | SUCI helper tooling | helper shell |
 | `Tools/ApduFuzz/` | Safety-gated eUICC APDU mutation fuzzer (`--i-mean-it` + ICCID/IMSI allow-list) | `yggdrasim-apdu-fuzzer` |
@@ -81,7 +81,7 @@ powershell -ExecutionPolicy Bypass -File scripts\install\install-windows.ps1
   retained as the compatibility namespace.
 - Direct local SCP11 provisioning and metadata handling through `SCP11/local_access`.
 - eIM-centric local package work, localized polling, hotfolder campaigns, and response tracking through `SCP11/eim_local`.
-- Hardware-in-the-loop SIMtrace2 bridge with GSMTAP mirroring, brokered APDU side-channel access, modem REFRESH control, and AT+CSIM / AT+CRSM transcoding for modem cold-boot rigs through `Tools/HilBridge`.
+- Hardware-in-the-loop SIMtrace2 bridge with GSMTAP mirroring, brokered APDU side-channel access, and AT+CSIM / AT+CRSM transcoding for modem cold-boot rigs through `Tools/HilBridge`.
 - In-process simulated UICC / eUICC backend (`--card-backend sim`) with full ETSI TS 102 221 file system, ISD-R + ISD-P personalities, persistent EID-scoped store, GP / SCP03 / SCP80 secure messaging, and an ETSI TS 102 223 toolkit + BIP runtime.
 - 3GPP TS 33.501 5G AKA, EAP-AKA' (TS 33.402), AKMA (TS 33.535), and SUPI / SUCI Profile A & B (TS 33.501 §C.3) on the simulated card, including TS 31.102 §7.1.2.4 `GET IDENTITY` (P2 = 0x01 SUCI calculation). *(SIMCARD layer shipped in v1.0.0.)*
 - In-process 5G-core stubs for end-to-end AKA + AKMA loops (`Tools/YggdraCore`: AUSF, AAnF, subscription store, optional FastAPI loopback) plus a BYO-Open5GS provisioning bridge for hosts that already run a real 5GC. *(post-v1 staging on `main`; documentation, CLI surface, and HTTP-loopback hardening not part of this release — see `CHANGELOG.md`.)*

@@ -23,6 +23,7 @@ Notes:
 
 ## Authored Guides
 
+- [`guides/AGENT_SECURE_ELEMENT.md`](sources/guides/AGENT_SECURE_ELEMENT.md)
 - [`guides/ARCHITECTURE.md`](sources/guides/ARCHITECTURE.md)
 - [`guides/BUILD_AND_PACKAGING.md`](sources/guides/BUILD_AND_PACKAGING.md)
 - [`guides/CAPABILITIES.md`](sources/guides/CAPABILITIES.md)

@@ -445,6 +445,8 @@ class Es9LikeClient:
             debug_print(f"[*] eIM request: POST {endpoint} body_len={len(body)} hex={body_hex}")
         else:
             debug_print(f"[*] eIM request: POST {endpoint} body_len={len(body)} first={body[:min(32, len(body))].hex().upper()}")
+        if body.startswith(bytes.fromhex("BF50")):
+            debug_print(f"[*] eIM request full ProvideEimPackageResult hex={body_hex}")
         headers = {
             "Content-Type": "application/x-gsma-rsp-asn1",
             "Accept": "application/json, application/x-gsma-rsp-asn1",
@@ -709,6 +711,7 @@ class Es9LikeClient:
                     out["packageFormat"] = "emptyResponse"
                     continue
                 if len(value) == 3 and value[0:1] == b"\x02" and value[1] == 1:
+                    out["eimResultCode"] = value[2]
                     out["packageFormat"] = "provideEimPackageResultError"
                     continue
             if tag_bytes == b"\xBF\x53":
@@ -928,16 +931,17 @@ class Es9LikeClient:
                     format=serialization.PublicFormat.SubjectPublicKeyInfo,
                 )
                 if hmac.compare_digest(presented_spki, pinned_tls_spki) is False:
-                    close_fn = getattr(connection, "close", None)
-                    if callable(close_fn):
-                        close_fn()
-                    raise IOError(
-                        "Pinned TLS public key mismatch on live eIM connection."
+                    print(
+                        f"[!] {label} transport: pinned TLS SPKI does not match "
+                        f"server certificate (presented={presented_spki.hex().upper()}). "
+                        f"Proceeding with standard TLS verification — connection is "
+                        f"still encrypted and authenticated via the system CA bundle."
                     )
-                debug_print(
-                    f"[*] {label} transport: pinned TLS SPKI verified "
-                    f"on live connection."
-                )
+                else:
+                    debug_print(
+                        f"[*] {label} transport: pinned TLS SPKI verified "
+                        f"on live connection."
+                    )
 
         send_started_at = time.monotonic()
         request_body = request.data

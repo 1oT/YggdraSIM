@@ -680,7 +680,7 @@ class SimulatedConnectionTests(unittest.TestCase):
             self.assertEqual((sw1, sw2), (0x90, 0x00))
             self.assertEqual(
                 bytes(data).hex().upper(),
-                "5A1089045967676472615349763031303005",
+                "5A1089049032123451234512345678901234",
             )
 
             data, sw1, sw2 = connection.transmit(
@@ -1634,7 +1634,7 @@ metadata_overrides = {{
             bpp_segments = build_signed_bpp_segments(
                 transaction_id=transaction_id,
                 euicc_otpk_raw=euicc_otpk_raw,
-                eid_hex="89045967676472615349763031303005",
+                eid_hex="89049032123451234512345678901234",
                 cert_private_key=cert_private_key,
                 iccid="89461111111111111177",
                 provider_name="Test Provider",
@@ -1898,7 +1898,7 @@ metadata_overrides = {{
             bpp_segments = build_signed_bpp_segments(
                 transaction_id=transaction_id,
                 euicc_otpk_raw=euicc_otpk_raw,
-                eid_hex="89045967676472615349763031303005",
+                eid_hex="89049032123451234512345678901234",
                 cert_private_key=cert_private_key,
                 iccid="89461111111111111191",
                 provider_name="Chunked Provider",
@@ -1987,7 +1987,7 @@ metadata_overrides = {{
                 bpp_segments = build_signed_bpp_segments(
                     transaction_id=transaction_id,
                     euicc_otpk_raw=euicc_otpk_raw,
-                    eid_hex="89045967676472615349763031303005",
+                    eid_hex="89049032123451234512345678901234",
                     cert_private_key=cert_private_key,
                     iccid="89461111111111111222",
                     provider_name="Segmented Provider",
@@ -2076,7 +2076,7 @@ metadata_overrides = {{
                 bpp_segments = build_signed_bpp_segments(
                     transaction_id=transaction_id,
                     euicc_otpk_raw=euicc_otpk_raw,
-                    eid_hex="89045967676472615349763031303005",
+                    eid_hex="89049032123451234512345678901234",
                     cert_private_key=cert_private_key,
                     iccid="89461111111111111166",
                     provider_name="Persistent Provider",
@@ -2182,7 +2182,7 @@ metadata_overrides = {{
                 bpp_segments = build_signed_bpp_segments(
                     transaction_id=transaction_id,
                     euicc_otpk_raw=euicc_otpk_raw,
-                    eid_hex="89045967676472615349763031303005",
+                    eid_hex="89049032123451234512345678901234",
                     cert_private_key=cert_private_key,
                     iccid="89461111111111111167",
                     provider_name="Notification Provider",
@@ -2473,7 +2473,7 @@ metadata_overrides = {{
             bpp_segments = build_signed_bpp_segments(
                 transaction_id=transaction_id,
                 euicc_otpk_raw=euicc_otpk_raw,
-                eid_hex="89045967676472615349763031303005",
+                eid_hex="89049032123451234512345678901234",
                 cert_private_key=cert_private_key,
                 iccid="89461111111111111188",
                 provider_name="Tampered Provider",
@@ -2536,7 +2536,7 @@ metadata_overrides = {{
             bpp_segments = build_signed_bpp_segments(
                 transaction_id=transaction_id,
                 euicc_otpk_raw=euicc_otpk_raw,
-                eid_hex="89045967676472615349763031303005",
+                eid_hex="89049032123451234512345678901234",
                 cert_private_key=cert_private_key,
                 iccid="89461111111111111112",
                 provider_name="Duplicate Provider",
@@ -2594,7 +2594,7 @@ metadata_overrides = {{
             bpp_segments = build_signed_bpp_segments(
                 transaction_id=transaction_id,
                 euicc_otpk_raw=euicc_otpk_raw,
-                eid_hex="89045967676472615349763031303005",
+                eid_hex="89049032123451234512345678901234",
                 cert_private_key=cert_private_key,
                 iccid="89461111111111111178",
                 provider_name="Mismatch Provider",
@@ -2625,74 +2625,35 @@ metadata_overrides = {{
 
 class SaipProfileDecodeBoundedTests(unittest.TestCase):
     """
-    Regression tests for the per-element timeout around
-    ``asn1.decode('ProfileElement', raw_tlv)`` inside
-    ``SIMCARD.saip_profile.decode_profile_image``.
+    Regression tests for the asn1tools DER ``decode_content`` fix and
+    the native salvage path inside ``SIMCARD.saip_profile.decode_profile_image``.
 
-    The simulator's LOAD-PROFILE path used to wedge the APDU response
-    whenever pySim's asn1tools DER codec entered its unbounded
-    ``decode_content`` loop on a pathological ProfileElement. These tests
-    pin the contract that the decoder now punts on the offending element
-    instead of blocking the whole install.
+    The DER ``ArrayType.decode_content`` previously lacked a
+    ``check_decode_error`` call, causing it to loop forever appending
+    ``TAG_MISMATCH`` markers when inner TLV data was malformed.  The
+    upstream fix in ``asn1tools/codecs/der.py`` adds that safety break
+    so the decoder raises ``DecodeTagError`` instead of hanging.
     """
 
-    def test_bounded_decode_returns_none_when_asn1_never_finishes(self) -> None:
-        import time
+    def test_der_decode_raises_on_tag_mismatch_in_sequence_of(self) -> None:
+        """
+        The DER ArrayType.decode_content loop must raise DecodeTagError
+        instead of looping forever when an inner element returns TAG_MISMATCH.
+        """
+        import asn1tools
 
-        from SIMCARD.saip_profile import _decode_profile_element_bounded
+        asn1_text = """TestMod DEFINITIONS ::= BEGIN
+            SeqOfInt ::= SEQUENCE OF INTEGER
+        END
+        """
+        spec = asn1tools.compile_string(asn1_text, codec="der")
 
-        class HangingAsn1:
-            def decode(self, _type_name, _raw_tlv):
-                while True:
-                    time.sleep(0.05)
+        # Malformed: BOOLEAN tag (0x01) inside an INTEGER SEQUENCE OF
+        bad = bytes.fromhex("30090101FF020102020103")
+        with self.assertRaises(asn1tools.DecodeError):
+            spec.decode("SeqOfInt", bad)
 
-        started = time.time()
-        result = _decode_profile_element_bounded(
-            HangingAsn1(),
-            b"\x86\x01\xAA",
-            timeout_seconds=0.75,
-        )
-        elapsed = time.time() - started
-
-        self.assertIsNone(result)
-        self.assertLess(elapsed, 2.0, "timeout must fire well before the test harness bails")
-
-    def test_bounded_decode_returns_none_on_exception(self) -> None:
-        from SIMCARD.saip_profile import _decode_profile_element_bounded
-
-        class RaisingAsn1:
-            def decode(self, _type_name, _raw_tlv):
-                raise ValueError("synthetic decoder error")
-
-        result = _decode_profile_element_bounded(
-            RaisingAsn1(),
-            b"\x86\x01\xAA",
-            timeout_seconds=1.0,
-        )
-
-        self.assertIsNone(result)
-
-    def test_bounded_decode_returns_result_when_decode_succeeds(self) -> None:
-        from SIMCARD.saip_profile import _decode_profile_element_bounded
-
-        class StubAsn1:
-            def decode(self, _type_name, _raw_tlv):
-                return ("telecom", {"iccid": b"\x89\x46"})
-
-        result = _decode_profile_element_bounded(
-            StubAsn1(),
-            b"\xB2\x01\xAA",
-            timeout_seconds=1.0,
-        )
-
-        self.assertIsNotNone(result)
-        pe_type, decoded = result
-        self.assertEqual(pe_type, "telecom")
-        self.assertEqual(decoded, {"iccid": b"\x89\x46"})
-
-    def test_decode_profile_image_skips_hanging_element_and_keeps_going(self) -> None:
-        import time
-
+    def test_decode_profile_image_skips_raising_element_and_keeps_going(self) -> None:
         from SIMCARD import saip_profile
 
         if saip_profile._get_saip_asn1() is None:
@@ -2703,77 +2664,56 @@ class SaipProfileDecodeBoundedTests(unittest.TestCase):
         header_value = header_name_tlv + header_iccid_tlv
         header_tlv = bytes([0xA0, len(header_value)]) + header_value
 
-        hanging_tlv = bytes([0xB2, 0x03, 0xAA, 0x01, 0x02])
+        raising_tlv = bytes([0xB2, 0x03, 0xAA, 0x01, 0x02])
         trailing_tlv = bytes([0xB3, 0x02, 0x81, 0x00])
 
-        upp_bytes = header_tlv + hanging_tlv + trailing_tlv
+        upp_bytes = header_tlv + raising_tlv + trailing_tlv
 
-        hang_controller = {"hanging_seen": False, "trailing_seen": False}
+        controller = {"raising_seen": False, "trailing_seen": False}
 
-        class HangingOnceAsn1:
+        class RaisingAsn1:
             def __init__(self, real_asn1) -> None:
                 self._real = real_asn1
 
             def decode(self, type_name, raw_tlv):
                 first_tag = bytes(raw_tlv)[:1]
                 if first_tag == b"\xB2":
-                    hang_controller["hanging_seen"] = True
-                    while True:
-                        time.sleep(0.05)
+                    controller["raising_seen"] = True
+                    raise ValueError("synthetic malformed PE element")
                 if first_tag == b"\xB3":
-                    hang_controller["trailing_seen"] = True
+                    controller["trailing_seen"] = True
                 return self._real.decode(type_name, raw_tlv)
 
         real_asn1 = saip_profile._get_saip_asn1()
         with mock.patch(
             "SIMCARD.saip_profile._get_saip_asn1",
-            return_value=HangingOnceAsn1(real_asn1),
-        ), mock.patch.dict(
-            os.environ,
-            {"YGGDRASIM_SIM_SAIP_DECODE_TIMEOUT_SECONDS": "0.75"},
-            clear=False,
+            return_value=RaisingAsn1(real_asn1),
         ):
-            started = time.time()
             image = saip_profile.decode_profile_image(
                 upp_bytes,
                 default_iccid="",
                 default_name="",
             )
-            elapsed = time.time() - started
 
-        self.assertTrue(hang_controller["hanging_seen"], "hanging B2 element must be attempted")
+        self.assertTrue(controller["raising_seen"], "raising B2 element must be attempted")
         self.assertTrue(
-            hang_controller["trailing_seen"],
-            "elements after the hang must still be attempted",
+            controller["trailing_seen"],
+            "elements after the decode failure must still be attempted",
         )
-        self.assertLess(elapsed, 4.0, "decode_profile_image must not hang on a single bad element")
         self.assertIsNotNone(image)
 
-    def test_native_salvage_recovers_telecom_ef_adn_when_asn1_hangs(self) -> None:
+    def test_native_salvage_recovers_telecom_ef_adn_when_decode_raises(self) -> None:
         """
-        When ``asn1tools`` cannot decode a ``PE-TELECOM`` element (either
-        because it trips the DER ``decode_content`` infinite loop or
-        raises on a malformed inner TLV), the profile image used to lose
-        every file that lived under ``DF.TELECOM``. The native salvage
-        walker now recovers file slots that follow the SAIP
-        ``File ::= SEQUENCE OF CHOICE`` encoding without going through
-        asn1tools. Pin that ``EF.ADN`` is reconstructed with the right
-        FID, structure, and record payload even when the bounded decode
-        returns ``None``.
+        When ``asn1tools`` cannot decode a ``PE-TELECOM`` element (raises
+        on a malformed inner TLV), the native salvage walker recovers file
+        slots that follow the SAIP ``File ::= SEQUENCE OF CHOICE`` encoding
+        without going through asn1tools.
         """
-        import time
-
         from SIMCARD import saip_profile
 
-        # Construct a minimal PE-TELECOM (B2) with an ef-adn [24] File
-        # slot carrying a single ``fillFileContent`` OCTET STRING. The
-        # field layout follows AUTOMATIC TAGS IMPLICIT per SAIP 3.3.1:
-        #   telecom-header [0] -> 0xA0, templateID [1] -> 0x81,
-        #   df-telecom [2] -> 0xA2, ef-adn [24] -> 0xB8,
-        #   fillFileContent [3] -> 0x83.
-        telecom_header = bytes.fromhex("A003810101")  # identification=1
-        template_oid = bytes.fromhex("81020000")  # placeholder, walker ignores value
-        df_telecom = bytes.fromhex("A200")  # empty File
+        telecom_header = bytes.fromhex("A003810101")
+        template_oid = bytes.fromhex("81020000")
+        df_telecom = bytes.fromhex("A200")
 
         file_content = bytes([0x83, 0x05]) + b"ABCDE"
         ef_adn_tlv = bytes([0xB8, len(file_content)]) + file_content
@@ -2791,18 +2731,13 @@ class SaipProfileDecodeBoundedTests(unittest.TestCase):
 
         upp_bytes = header_tlv + pe_tlv
 
-        class HangingAsn1:
+        class RaisingAsn1:
             def decode(self, _type_name, _raw_tlv):
-                while True:
-                    time.sleep(0.05)
+                raise ValueError("synthetic decode error")
 
         with mock.patch(
             "SIMCARD.saip_profile._get_saip_asn1",
-            return_value=HangingAsn1(),
-        ), mock.patch.dict(
-            os.environ,
-            {"YGGDRASIM_SIM_SAIP_DECODE_TIMEOUT_SECONDS": "0.5"},
-            clear=False,
+            return_value=RaisingAsn1(),
         ):
             image = saip_profile.decode_profile_image(
                 upp_bytes,
@@ -2839,14 +2774,10 @@ class SaipProfileDecodeBoundedTests(unittest.TestCase):
         """
         A PE-TELECOM slot whose File starts with ``doNotCreate`` must not
         produce a file-system node even though the section itself is
-        salvageable. This mirrors the behaviour of the asn1tools-driven
-        path via ``_materialize_file_payload``.
+        salvageable.
         """
-        import time
-
         from SIMCARD import saip_profile
 
-        # ef-adn [24] -> File containing only doNotCreate ([0] IMPLICIT NULL).
         do_not_create = bytes([0x80, 0x00])
         ef_adn_tlv = bytes([0xB8, len(do_not_create)]) + do_not_create
 
@@ -2861,18 +2792,13 @@ class SaipProfileDecodeBoundedTests(unittest.TestCase):
         header_tlv = bytes([0xA0, len(header_value)]) + header_value
         upp_bytes = header_tlv + pe_tlv
 
-        class HangingAsn1:
+        class RaisingAsn1:
             def decode(self, _type_name, _raw_tlv):
-                while True:
-                    time.sleep(0.05)
+                raise ValueError("synthetic decode error")
 
         with mock.patch(
             "SIMCARD.saip_profile._get_saip_asn1",
-            return_value=HangingAsn1(),
-        ), mock.patch.dict(
-            os.environ,
-            {"YGGDRASIM_SIM_SAIP_DECODE_TIMEOUT_SECONDS": "0.5"},
-            clear=False,
+            return_value=RaisingAsn1(),
         ):
             image = saip_profile.decode_profile_image(
                 upp_bytes,
@@ -2883,73 +2809,13 @@ class SaipProfileDecodeBoundedTests(unittest.TestCase):
         self.assertIsNotNone(image)
         assert image is not None
 
-        # DF.TELECOM itself should still be materialised...
         self.assertTrue(
             any(node.path == ("MF", "DF.TELECOM") for node in image.nodes),
             "DF.TELECOM root must still be created around a doNotCreate slot",
         )
-        # ...but EF.ADN must be suppressed.
         self.assertFalse(
             any(node.path == ("MF", "DF.TELECOM", "EF.ADN") for node in image.nodes),
             "doNotCreate marker must suppress the EF.ADN node",
-        )
-
-    def test_bounded_decode_actively_terminates_runaway_worker_thread(self) -> None:
-        """
-        Regression: the original daemon-thread implementation merely let the
-        asn1 decode keep running after ``_decode_profile_element_bounded``
-        returned, which allowed the asn1tools inner list to grow unboundedly
-        and leaked several GB of RAM across repeated installs / startups.
-        The ctypes-based async-exception path must actually unwind the
-        worker so it disappears shortly after the soft deadline.
-        """
-        import threading
-        import time
-
-        from SIMCARD.saip_profile import _decode_profile_element_bounded
-
-        worker_name = "saip-profile-element-decode"
-
-        class BytecodeHangingAsn1:
-            def decode(self, _type_name, _raw_tlv):
-                # Pure Python bytecode loop so PyThreadState_SetAsyncExc can
-                # land between opcodes; mirrors the shape of the asn1tools
-                # DER ``decode_content`` loop that caused the original hang.
-                counter = 0
-                while True:
-                    counter = (counter + 1) & 0xFFFF
-
-        before = sum(
-            1 for thread in threading.enumerate() if thread.name == worker_name
-        )
-
-        result = _decode_profile_element_bounded(
-            BytecodeHangingAsn1(),
-            b"\x86\x01\xAA",
-            timeout_seconds=0.5,
-        )
-
-        self.assertIsNone(result)
-
-        # The worker must die within a bounded grace window; allow a couple
-        # of scheduler ticks so the async exception can land even on a busy
-        # test host.
-        deadline = time.time() + 3.0
-        while time.time() < deadline:
-            alive = sum(
-                1 for thread in threading.enumerate() if thread.name == worker_name
-            )
-            if alive <= before:
-                break
-            time.sleep(0.05)
-
-        still_alive = sum(
-            1 for thread in threading.enumerate() if thread.name == worker_name
-        )
-        self.assertLessEqual(
-            still_alive,
-            before,
-            "runaway asn1 decode worker must be killed after the deadline fires",
         )
 
 

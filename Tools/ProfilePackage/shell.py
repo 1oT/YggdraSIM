@@ -1411,9 +1411,9 @@ class ProfilePackageShell:
 
         key_id = value_bytes[0]
         common_roles = {
-            0x01: "ENC (common SCP02/SCP03 convention)",
-            0x02: "MAC (common SCP02/SCP03 convention)",
-            0x03: "DEK (common SCP02/SCP03 convention)",
+            0x01: "KIC (SCP80) / ENC (common SCP02/SCP03 convention)",
+            0x02: "KID (SCP80) / MAC (common SCP02/SCP03 convention)",
+            0x03: "KIK (SCP80) / DEK (common SCP02/SCP03 convention)",
         }
         decoded: dict[str, object] = {
             "hex": value_bytes.hex(),

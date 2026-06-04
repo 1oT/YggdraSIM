@@ -1,0 +1,697 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>YggdraSIM</title>
+    <!-- Content-Security-Policy is delivered as an HTTP response header
+         (see yggdrasim_common/gui_server/auth.py::_CSP_HEADER) so that
+         ``frame-ancestors`` is enforced — browsers ignore that directive
+         when it arrives via ``<meta http-equiv="…">``. -->
+    <meta name="referrer" content="no-referrer" />
+    <link rel="icon" href="data:," />
+    <link rel="stylesheet" href="/static/vendor/xterm/xterm.css" />
+    <link rel="stylesheet" href="/static/app.css" />
+    <script src="/static/theme-init.js"></script>
+    <script src="/static/vendor/xterm/xterm.js" defer></script>
+    <script src="/static/vendor/xterm/addon-fit.js" defer></script>
+  </head>
+  <body>
+    <div id="app" class="app-shell" data-ready="false" data-log-collapsed="true">
+      <header class="topbar">
+        <button
+          type="button"
+          id="sidebar-collapse-toggle"
+          class="sidebar-collapse-toggle"
+          aria-label="Collapse Command Center sidebar"
+          title="Hide the Command Center sidebar. Click again to bring it back.">
+          <span class="sidebar-collapse-glyph" aria-hidden="true">&#x25C0;</span>
+        </button>
+        <div class="brand">
+          <span class="brand-mark">YS</span>
+          <span class="brand-name">YggdraSIM</span>
+        </div>
+        <!--
+          Reader strip — the primary session selector. Each pill represents
+          one PC/SC reader; clicking a pill activates the session bound to
+          that reader across every subsystem (SCP03 tabs, SCP11 flows,
+          action-form "reader" fields). The status dot uses the traffic-
+          light scheme: green = reader has an active session, yellow =
+          reader has a card inserted but no session open, red = reader
+          plugged in but empty. Pills are horizontally scrollable so a
+          15-reader bench is still usable on a 13" laptop.
+        -->
+        <div class="topbar-readers" id="topbar-readers" role="tablist"
+             aria-label="PC/SC readers — pick a reader to bind this session">
+          <div class="topbar-readers-scroll" id="topbar-readers-scroll">
+            <span class="topbar-readers-hint" id="topbar-readers-hint">
+              click ↻ to enumerate readers
+            </span>
+          </div>
+          <button
+            class="topbar-readers-refresh"
+            id="topbar-readers-refresh"
+            title="Refresh PC/SC readers"
+            aria-label="Refresh readers">↻</button>
+        </div>
+        <nav class="breadcrumbs" aria-label="Breadcrumbs">
+          <span class="crumb" id="crumb-subsystem">Overview</span>
+        </nav>
+        <div class="status-cluster">
+          <span class="badge badge-mode" id="badge-mode">mode: …</span>
+          <span class="badge badge-flavor" id="badge-flavor">flavor: …</span>
+          <span class="badge badge-backend" id="badge-backend">backend: …</span>
+          <span class="badge badge-api" id="badge-api" data-state="unknown">
+            <span class="dot"></span>
+            <span id="badge-api-text">probing…</span>
+          </span>
+          <span class="theme-picker">
+            <label for="theme-select">Theme</label>
+            <select id="theme-select" aria-label="Colour theme">
+              <optgroup label="Dark">
+                <option value="nord-dark">Nord · dark</option>
+                <option value="oneot-dark">1oT · dark</option>
+                <option value="ocean-dark">Ocean · dark</option>
+                <option value="gruv-dark">Gruvbox · dark</option>
+                <option value="solarized-dark">Solarized · dark</option>
+                <option value="tokyo-night">Tokyo Night</option>
+                <option value="catppuccin-mocha">Catppuccin · Mocha</option>
+                <option value="dracula">Dracula</option>
+                <option value="github-dark">GitHub · dark</option>
+                <option value="matrix">Matrix</option>
+              </optgroup>
+              <optgroup label="Light">
+                <option value="nord-light">Nord · light</option>
+                <option value="oneot-light">1oT · light</option>
+                <option value="ink-light">Ink · light</option>
+                <option value="solarized-light">Solarized · light</option>
+                <option value="catppuccin-latte">Catppuccin · Latte</option>
+                <option value="github-light">GitHub · light</option>
+              </optgroup>
+            </select>
+          </span>
+        </div>
+        <button
+          type="button"
+          id="topbar-collapse-toggle"
+          class="topbar-collapse-toggle"
+          aria-label="Collapse top bar"
+          title="Hide the top bar to maximise the working area. Click again to bring it back.">
+          <span class="topbar-collapse-glyph" aria-hidden="true">&#x25B2;</span>
+        </button>
+      </header>
+
+      <aside class="sidebar">
+        <div class="sidebar-title">Command Center</div>
+        <ul class="subsystem-list tool-list" id="command-center-nav">
+          <li class="loading">loading…</li>
+        </ul>
+        <!--
+          Legacy "Inspect" and "Advanced" flat-nav groups were folded
+          into the Command Center tree above to avoid duplicated
+          entries for Registry browser / Card backend / Env flags /
+          PC/SC readers / Raw shell. Only the two surfaces that don't
+          fit the taxonomy (the overview dashboard + the About page)
+          remain as a trailing flat list.
+        -->
+        <div class="sidebar-title">Meta</div>
+        <ul class="subsystem-list tool-list">
+          <li data-view="overview" class="subsystem-entry active">Overview</li>
+          <li data-view="card_bridge" class="subsystem-entry">Card bridge</li>
+          <li data-view="about" class="subsystem-entry">About</li>
+        </ul>
+      </aside>
+
+      <main class="main" id="main">
+        <section data-view="overview" class="view view-active">
+          <h1>YggdraSIM Universal GUI</h1>
+          <p class="lead">
+            Task-oriented surface over the YggdraSIM engine. Pick an
+            action from the <strong>Command Center</strong> to run a
+            specific flow with form-driven inputs and structured output,
+            or drop into the raw shell for anything not yet exposed.
+          </p>
+          <div class="card-grid">
+            <article class="card">
+              <h3>Suite health</h3>
+              <dl id="overview-health">
+                <dt>version</dt><dd id="overview-version">…</dd>
+                <dt>flavor</dt><dd id="overview-flavor">…</dd>
+                <dt>mode</dt><dd id="overview-mode">…</dd>
+                <dt>uptime</dt><dd id="overview-uptime">…</dd>
+                <dt>pid</dt><dd id="overview-pid">…</dd>
+              </dl>
+              <button class="btn" id="overview-refresh">Refresh</button>
+            </article>
+            <article class="card">
+              <h3>Card backend</h3>
+              <p>
+                Active backend:
+                <code id="overview-backend-value">…</code>
+                (<span id="overview-backend-source">…</span>).
+              </p>
+              <div class="inline-actions">
+                <button class="btn" data-backend="reader">Switch to reader</button>
+                <button class="btn" data-backend="sim">Switch to sim</button>
+              </div>
+              <p class="hint">
+                Session-scoped. The persisted selection is only
+                changed from the CLI menu.
+              </p>
+            </article>
+            <article class="card">
+              <h3>Command Center</h3>
+              <p class="hint">
+                Task-oriented buttons for every subsystem. Pick an entry
+                from the <strong>Command Center</strong> group on the
+                left to start.
+              </p>
+            </article>
+          </div>
+        </section>
+
+        <section data-view="command_center" class="view">
+          <div class="cc-header">
+            <h1 id="cc-title">Command Center</h1>
+            <p class="lead" id="cc-subtitle">
+              Pick a subsystem on the left to see its available actions.
+            </p>
+          </div>
+          <div id="cc-actions" class="cc-actions">
+            <p class="loading">loading actions…</p>
+          </div>
+        </section>
+
+        <section data-view="registry" class="view">
+          <h1>Registry browser</h1>
+          <p class="lead">
+            Every stable engine entry point. Use this to discover what
+            the CLI / console scripts call into.
+          </p>
+          <div class="toolbar">
+            <input
+              type="search"
+              id="registry-search"
+              placeholder="Search symbols (e.g. 'scp03', 'saip.bridge')"
+              aria-label="Search registry"
+            />
+          </div>
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Key</th>
+                <th>Module</th>
+                <th>Attribute</th>
+              </tr>
+            </thead>
+            <tbody id="registry-rows">
+              <tr><td colspan="3" class="loading">loading…</td></tr>
+            </tbody>
+          </table>
+        </section>
+
+        <section data-view="backend" class="view">
+          <h1>Card backend</h1>
+          <p class="lead">
+            Switch between the PC/SC reader and the simulated SIM
+            backend for the remainder of this GUI process.
+          </p>
+          <div class="card">
+            <dl>
+              <dt>current</dt><dd id="backend-current">…</dd>
+              <dt>source</dt><dd id="backend-source">…</dd>
+              <dt>simulated?</dt><dd id="backend-simulated">…</dd>
+            </dl>
+            <div class="inline-actions">
+              <button class="btn btn-primary" data-backend="reader">reader</button>
+              <button class="btn btn-primary" data-backend="sim">sim</button>
+            </div>
+          </div>
+        </section>
+
+        <section data-view="env_flags" class="view">
+          <h1>Environment flags</h1>
+          <p class="lead">
+            Live view of the <code>YGGDRASIM_*</code> registry. Flags
+            marked <em>process</em> only stick for the current server;
+            <em>session</em> and <em>file</em> scopes persist through
+            <code>yggdrasim_common.env_flags</code>.
+          </p>
+          <div class="env-flag-toolbar">
+            <button id="env-flag-refresh" class="btn">Refresh</button>
+            <button id="env-flag-reset-persisted" class="btn btn-danger">
+              Reset persisted overrides
+            </button>
+            <span id="env-flag-toolbar-status" class="env-flag-toolbar-status"></span>
+          </div>
+          <div id="env-flag-categories" class="env-flag-root">
+            <p class="loading">loading…</p>
+          </div>
+        </section>
+
+        <section data-view="terminal" class="view">
+          <div class="cc-wb-shell">
+            <header class="cc-wb-page-header">
+              <h1>Shell</h1>
+              <p class="cc-wb-lead">
+                Spawn a registered CLI module inside a server-side PTY and
+                drive it from the browser via xterm.js. Only modules listed
+                in <code>yggdrasim_common.registry.CLI_MODULES</code> are
+                accepted — the GUI cannot invoke arbitrary commands.
+              </p>
+            </header>
+            <div class="cc-wb-status-strip">
+              <span class="cc-chip" id="terminal-status">idle</span>
+            </div>
+            <div class="form-row terminal-controls">
+              <label for="terminal-module">Module</label>
+              <select id="terminal-module" aria-label="CLI module to launch"></select>
+              <button class="btn btn-primary" id="terminal-start">Open tab</button>
+              <button class="btn" id="terminal-stop" disabled>Stop</button>
+            </div>
+            <div class="terminal-tab-strip" id="terminal-tabs" role="tablist" aria-label="terminal tabs"></div>
+            <div class="cc-wb-frame cc-wb-frame--canvas">
+              <div id="terminal-host" class="terminal-host" tabindex="0"></div>
+            </div>
+            <p class="cc-wb-foot-hint">
+              Paste works; Ctrl+C sends SIGINT to the child; resizing the
+              browser window re-fits the grid automatically. Opening another
+              module spawns it in a new tab, so several PTYs can run side-by-side.
+            </p>
+          </div>
+        </section>
+
+        <section data-view="host_shell" class="view">
+          <div class="cc-wb-shell">
+            <header class="cc-wb-page-header">
+              <h1>Host shell</h1>
+              <p class="cc-wb-lead">
+                Free-form interactive shell on the GUI host — equivalent to
+                an SSH session as the user that launched <code>yggdrasim</code>.
+                Use for ad-hoc modem CLI workflows
+                (<code>tio</code> / <code>minicom</code> / <code>socat</code>
+                against <code>/dev/ttyUSB*</code>). Disabled by default; flip
+                <code>YGGDRASIM_GUI_HOST_SHELL=1</code> to enable.
+              </p>
+            </header>
+            <div class="cc-wb-disabled-card" id="host-shell-disabled" hidden>
+              <strong>Host shell is disabled.</strong>
+              <p class="hint" id="host-shell-disabled-reason">
+                Set <code>YGGDRASIM_GUI_HOST_SHELL=1</code> in the launcher
+                env and restart <code>yggdrasim --gui</code> /
+                <code>yggdrasim --web-server</code>.
+              </p>
+            </div>
+            <div class="host-shell-enabled" id="host-shell-enabled">
+              <div class="cc-wb-status-strip">
+                <span class="cc-chip" id="host-shell-status">idle</span>
+              </div>
+              <div class="form-row host-shell-controls">
+                <button class="btn btn-primary" id="host-shell-start">Start session</button>
+                <button class="btn" id="host-shell-stop" disabled>Stop</button>
+              </div>
+              <div class="form-row host-shell-device-strip">
+                <label for="host-shell-device">Serial device</label>
+                <select id="host-shell-device" aria-label="Serial device shortcut"></select>
+                <button class="btn" id="host-shell-device-refresh" title="Re-scan /dev/ttyUSB* /dev/ttyACM* /dev/serial/by-id/*">↻</button>
+                <button class="btn" id="host-shell-device-insert" title="Insert the chosen device path at the shell cursor">Insert path</button>
+                <label class="host-shell-toggle">
+                  <input type="checkbox" id="host-shell-decode-toggle" />
+                  <span>Decode AT lines</span>
+                </label>
+              </div>
+              <div class="cc-wb-frame cc-wb-frame--canvas">
+                <div id="host-shell-host" class="terminal-host" tabindex="0"></div>
+              </div>
+              <div class="host-shell-decoded" id="host-shell-decoded" hidden>
+                <header class="host-shell-decoded-header">
+                  <span>AT decode</span>
+                  <button class="btn" id="host-shell-decoded-clear">Clear</button>
+                </header>
+                <div class="host-shell-decoded-rows" id="host-shell-decoded-rows" aria-live="polite"></div>
+              </div>
+              <p class="cc-wb-foot-hint">
+                Free-form RCE-class surface — the bearer token grants
+                shell-equivalent access. Restrict who holds it and prefer
+                an SSH tunnel over a public bind.
+              </p>
+            </div>
+          </div>
+        </section>
+
+        <section data-view="live_readers" class="view">
+          <h1>PC/SC readers</h1>
+          <p class="lead">
+            Enumerate connected PC/SC readers and probe the ATR of the
+            card (if any) currently in the slot. Uses the live PC/SC
+            stack from <code>SCP03.transport.card</code> without opening
+            a secure channel.
+          </p>
+          <div class="inline-actions">
+            <button class="btn btn-primary" id="live-readers-refresh">Refresh</button>
+          </div>
+          <div class="tool-meta" id="live-readers-status">Click refresh to probe.</div>
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Reader</th>
+                <th>ATR</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody id="live-readers-body"></tbody>
+          </table>
+        </section>
+
+        <!--
+          Card Bridge panel — wraps the read-only card_bridge.status /
+          card_bridge.probe actions in a focused diagnostics surface.
+          Polls /api/actions/card_bridge.status/run every 5 s while the
+          view is active so operators see auth posture + latency change
+          in near-real time. Raw bearer tokens are NEVER displayed in
+          this panel — only the 6-char SHA-256 fingerprint that the
+          server-side helper returns.
+        -->
+        <section data-view="card_bridge" class="view">
+          <h1>Card bridge</h1>
+          <p class="lead">
+            Inspect and probe the remote card bridge configured for this
+            YggdraSIM session. Talks exclusively through the
+            <code>card_bridge.status</code> and <code>card_bridge.probe</code>
+            actions — no separate wire format. Useful when a card sits in
+            a reader on a different host (for example a Raspberry Pi) and
+            this YggdraSIM is consuming it over an SSH
+            <code>LocalForward</code>.
+          </p>
+
+          <div class="cb-panel">
+            <header class="cb-panel-header">
+              <h2>Configured target</h2>
+              <div class="cb-panel-controls">
+                <label class="cb-toggle">
+                  <input type="checkbox" id="cb-auto-refresh" checked />
+                  <span>Auto-refresh (5 s)</span>
+                </label>
+                <button class="btn" id="cb-refresh-status">Refresh</button>
+              </div>
+            </header>
+
+            <div class="cb-status-grid">
+              <div class="cb-status-row">
+                <span class="cb-status-label">Status</span>
+                <span class="cb-badge cb-badge-unknown" id="cb-status-badge">unknown</span>
+              </div>
+              <div class="cb-status-row">
+                <span class="cb-status-label">URL</span>
+                <span class="cb-status-value cb-mono" id="cb-status-url">–</span>
+                <button class="btn btn-small" id="cb-copy-url" title="Copy URL to clipboard" disabled>Copy</button>
+              </div>
+              <div class="cb-status-row">
+                <span class="cb-status-label">Source</span>
+                <span class="cb-status-value" id="cb-status-source">–</span>
+              </div>
+              <div class="cb-status-row">
+                <span class="cb-status-label">Token</span>
+                <span class="cb-status-value cb-mono" id="cb-status-token">–</span>
+              </div>
+              <div class="cb-status-row">
+                <span class="cb-status-label">Token source</span>
+                <span class="cb-status-value" id="cb-status-token-source">–</span>
+              </div>
+              <div class="cb-status-row">
+                <span class="cb-status-label">Last probe</span>
+                <span class="cb-status-value" id="cb-status-last-probe">never</span>
+              </div>
+            </div>
+
+            <div class="cb-status-summary" id="cb-status-summary">
+              not configured — set <code>YGGDRASIM_CARD_RELAY_URL</code> or pass
+              <code>--remote-card-url</code> to talk to a Card Bridge over SSH.
+            </div>
+          </div>
+
+          <div class="cb-panel">
+            <header class="cb-panel-header">
+              <h2>Live probe</h2>
+              <div class="cb-panel-controls">
+                <button class="btn btn-primary" id="cb-run-probe">Probe now</button>
+              </div>
+            </header>
+
+            <p class="hint">
+              <code>GET /ping</code> + <code>GET /status</code> against the
+              configured (or supplied) bridge. Bearer tokens are never
+              echoed back — only their 6-char fingerprint, which lets you
+              confirm the token wired up here matches the one printed on
+              the bridge's startup banner.
+            </p>
+
+            <details class="cb-override" id="cb-override-details">
+              <summary>Override URL / token</summary>
+              <div class="form-row cb-override-row">
+                <label for="cb-probe-url">URL</label>
+                <input type="text" id="cb-probe-url"
+                       placeholder="http://127.0.0.1:8642/apdu (blank = use configured)" />
+              </div>
+              <div class="form-row cb-override-row">
+                <label for="cb-probe-token">Token</label>
+                <input type="password" id="cb-probe-token"
+                       placeholder="bearer token (blank = use resolved)"
+                       autocomplete="off" />
+              </div>
+              <label class="cb-toggle">
+                <input type="checkbox" id="cb-probe-fallback" checked />
+                <span>Fall back to configured values when a field is blank</span>
+              </label>
+            </details>
+
+            <div class="cb-probe-result" id="cb-probe-result" hidden>
+              <div class="cb-probe-grid">
+                <div class="cb-probe-card">
+                  <div class="cb-probe-label">Posture</div>
+                  <div class="cb-probe-value">
+                    <span class="cb-badge cb-badge-unknown" id="cb-probe-posture">–</span>
+                  </div>
+                </div>
+                <div class="cb-probe-card">
+                  <div class="cb-probe-label">Ping latency</div>
+                  <div class="cb-probe-value cb-mono" id="cb-probe-ping-latency">–</div>
+                </div>
+                <div class="cb-probe-card">
+                  <div class="cb-probe-label">Status latency</div>
+                  <div class="cb-probe-value cb-mono" id="cb-probe-status-latency">–</div>
+                </div>
+                <div class="cb-probe-card">
+                  <div class="cb-probe-label">Reader</div>
+                  <div class="cb-probe-value cb-mono" id="cb-probe-reader">–</div>
+                </div>
+                <div class="cb-probe-card">
+                  <div class="cb-probe-label">ATR</div>
+                  <div class="cb-probe-value cb-mono" id="cb-probe-atr">–</div>
+                </div>
+                <div class="cb-probe-card">
+                  <div class="cb-probe-label">Audit</div>
+                  <div class="cb-probe-value" id="cb-probe-audit">–</div>
+                </div>
+                <div class="cb-probe-card">
+                  <div class="cb-probe-label">Token fp (this side)</div>
+                  <div class="cb-probe-value cb-mono" id="cb-probe-token-fp">–</div>
+                </div>
+                <div class="cb-probe-card">
+                  <div class="cb-probe-label">Token fp (bridge)</div>
+                  <div class="cb-probe-value cb-mono" id="cb-probe-bridge-fp">–</div>
+                </div>
+                <div class="cb-probe-card">
+                  <div class="cb-probe-label">Bind host</div>
+                  <div class="cb-probe-value cb-mono" id="cb-probe-bind-host">–</div>
+                </div>
+              </div>
+              <div class="cb-probe-reason" id="cb-probe-reason" hidden></div>
+            </div>
+          </div>
+
+          <div class="cb-panel">
+            <header class="cb-panel-header">
+              <h2>Latency history</h2>
+              <div class="cb-panel-controls">
+                <span class="cb-history-meta" id="cb-history-meta">no probes yet</span>
+                <button class="btn btn-small" id="cb-clear-history">Clear</button>
+              </div>
+            </header>
+
+            <p class="hint">
+              Rolling buffer of the last 60 probe round-trips
+              (<code>/ping</code> + <code>/status</code> latency stacked).
+              Use this to spot SSH-tunnel hiccups versus a wedged bridge.
+            </p>
+
+            <svg class="cb-history-chart" id="cb-history-chart"
+                 viewBox="0 0 600 120" preserveAspectRatio="none"
+                 aria-label="Probe latency history"></svg>
+          </div>
+        </section>
+
+        <section data-view="about" class="view">
+          <h1>About this GUI</h1>
+          <p class="lead">
+            YggdraSIM Universal GUI — Phase A scaffolding for
+            roadmap entry <code>R2-004</code>.
+          </p>
+          <ul>
+            <li>Built on FastAPI + a handwritten no-build SPA.</li>
+            <li>Token-gated; same-origin only; CSP locked to <code>self</code>.</li>
+            <li>Engine code stays headless — every endpoint resolves
+              via <code>yggdrasim_common.registry</code>.</li>
+          </ul>
+
+          <div class="about-guides" id="about-guides">
+            <div class="about-guides-header">
+              <h2>Guides &amp; documentation</h2>
+              <p class="hint">
+                Operator and developer documentation shipped with the
+                build. Click any entry to open it in a viewer dialog.
+              </p>
+            </div>
+            <div class="about-guides-status" id="about-guides-status">loading guides…</div>
+            <div class="about-guides-groups" id="about-guides-groups"></div>
+          </div>
+        </section>
+
+        <div class="cc-doc-modal" id="doc-modal" data-state="hidden" aria-hidden="true" role="dialog">
+          <div class="cc-doc-modal-backdrop" data-doc-close="true"></div>
+          <div class="cc-doc-modal-card" role="document">
+            <header class="cc-doc-modal-header">
+              <div class="cc-doc-modal-titles">
+                <h2 id="doc-modal-title">Document</h2>
+                <span class="cc-doc-modal-path" id="doc-modal-path"></span>
+              </div>
+              <div class="cc-doc-modal-actions">
+                <button
+                  type="button"
+                  class="cc-doc-modal-btn"
+                  id="doc-modal-copy"
+                  title="Copy markdown source to clipboard">Copy</button>
+                <button
+                  type="button"
+                  class="cc-doc-modal-btn cc-doc-modal-close"
+                  id="doc-modal-close"
+                  title="Close">×</button>
+              </div>
+            </header>
+            <div class="cc-doc-modal-body" id="doc-modal-body"></div>
+          </div>
+        </div>
+      </main>
+
+      <aside class="log-dock" id="log-dock" data-collapsed="true">
+        <div class="log-dock-tabs" role="tablist" aria-label="Event log">
+          <button
+            class="log-dock-tab is-active"
+            role="tab"
+            aria-selected="true"
+            data-log-tab="messages"
+            id="log-tab-messages">
+            <span class="log-dock-tab-dot log-dock-tab-dot--info"></span>
+            <span class="log-dock-tab-label">Messages</span>
+            <span class="log-dock-tab-count" id="log-count-messages">0</span>
+          </button>
+          <button
+            class="log-dock-tab"
+            role="tab"
+            aria-selected="false"
+            data-log-tab="warnings"
+            id="log-tab-warnings">
+            <span class="log-dock-tab-dot log-dock-tab-dot--warn"></span>
+            <span class="log-dock-tab-label">Warnings</span>
+            <span class="log-dock-tab-count" id="log-count-warnings">0</span>
+          </button>
+          <button
+            class="log-dock-tab"
+            role="tab"
+            aria-selected="false"
+            data-log-tab="errors"
+            id="log-tab-errors">
+            <span class="log-dock-tab-dot log-dock-tab-dot--error"></span>
+            <span class="log-dock-tab-label">Errors</span>
+            <span class="log-dock-tab-count" id="log-count-errors">0</span>
+          </button>
+          <button
+            class="log-dock-tab"
+            role="tab"
+            aria-selected="false"
+            data-log-tab="apdu"
+            id="log-tab-apdu">
+            <span class="log-dock-tab-dot log-dock-tab-dot--apdu"></span>
+            <span class="log-dock-tab-label">APDU</span>
+            <span class="log-dock-tab-count" id="log-count-apdu">0</span>
+          </button>
+          <div class="log-dock-spacer"></div>
+          <button
+            class="log-dock-action"
+            id="log-dock-copy"
+            title="Copy all rows in the active tab to clipboard"
+            aria-label="Copy active tab to clipboard">Copy</button>
+          <button
+            class="log-dock-action"
+            id="log-dock-clear"
+            title="Clear all log entries">Clear all</button>
+          <button
+            class="log-dock-action log-dock-toggle"
+            id="log-dock-toggle"
+            title="Collapse / expand event log"
+            aria-label="Toggle event log dock">▾</button>
+        </div>
+        <div class="log-dock-body">
+          <div class="log-dock-panel is-active" data-log-panel="messages">
+            <div class="log-dock-rows" id="log-panel-messages"></div>
+            <div class="log-dock-placeholder" id="log-empty-messages">
+              No messages yet. Action runs and system events will appear here.
+            </div>
+          </div>
+          <div class="log-dock-panel" data-log-panel="warnings">
+            <div class="log-dock-rows" id="log-panel-warnings"></div>
+            <div class="log-dock-placeholder" id="log-empty-warnings">
+              No warnings yet.
+            </div>
+          </div>
+          <div class="log-dock-panel" data-log-panel="errors">
+            <div class="log-dock-rows" id="log-panel-errors"></div>
+            <div class="log-dock-placeholder" id="log-empty-errors">
+              No errors yet.
+            </div>
+          </div>
+          <div class="log-dock-panel" data-log-panel="apdu">
+            <div class="log-dock-rows log-dock-rows--mono" id="log-panel-apdu"></div>
+            <div class="log-dock-placeholder" id="log-empty-apdu">
+              APDU trace rows will land here when a card-touching action
+              runs (populated by the G-4 slice).
+            </div>
+          </div>
+        </div>
+      </aside>
+
+      <footer class="statusbar">
+        <span id="status-action">ready</span>
+        <span class="sep">·</span>
+        <span class="status-metric">
+          <span class="status-metric-label">readers</span>
+          <span class="status-metric-value" id="status-readers">–</span>
+        </span>
+        <span class="sep">·</span>
+        <span class="status-metric">
+          <span class="status-metric-label">sessions</span>
+          <span class="status-metric-value" id="status-sessions">–</span>
+        </span>
+        <span class="sep">·</span>
+        <span class="status-metric status-metric--muted">
+          <span class="status-metric-label">last activity</span>
+          <span class="status-metric-value" id="status-activity">–</span>
+        </span>
+        <span class="sep">·</span>
+        <span id="status-error" class="status-error"></span>
+      </footer>
+    </div>
+    <script src="/static/app.js"></script>
+  </body>
+</html>

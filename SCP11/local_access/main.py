@@ -18,7 +18,6 @@ from yggdrasim_common.process_debug import (
     is_global_debug_enabled,
     set_global_debug,
 )
-from yggdrasim_common.card_backend import trigger_card_relay_modem_refresh
 from yggdrasim_common.hil_bridge_runtime import hil_bridge_warning_text
 from yggdrasim_common.session_recording import ShellSessionRecorder
 from yggdrasim_common.structured_output import dump_structured_payload
@@ -129,11 +128,9 @@ _COMMANDS = (
     "ENABLE-PROFILE",
     "DISABLE-PROFILE",
     "DELETE-PROFILE",
-    "REFRESH-MODEM",
     "ENABLE",
     "DISABLE",
     "DELETE",
-    "MODEM-REFRESH",
     "STORE-METADATA",
     "STORE-METADATA-CUSTOM",
     "STORE-METADATA-CUSTOM-ALL",
@@ -165,7 +162,6 @@ _COMMAND_ALIASES = {
     "ENABLE": "ENABLE-PROFILE",
     "DISABLE": "DISABLE-PROFILE",
     "DELETE": "DELETE-PROFILE",
-    "MODEM-REFRESH": "REFRESH-MODEM",
     "PROFILE-RESET": "PROFILE-CLEAR",
     "METADATA-RESET": "METADATA-CLEAR",
     "GET-METADATA": "METADATA",
@@ -214,10 +210,6 @@ _COMMAND_DOCS = {
     "DELETE-PROFILE": {
         "usage": "DELETE-PROFILE <id>",
         "summary": "Delete a profile by ICCID, AID, or alias.",
-    },
-    "REFRESH-MODEM": {
-        "usage": "REFRESH-MODEM [mode]",
-        "summary": "Queue a proactive REFRESH toward the attached modem via the active HIL bridge.",
     },
     "STORE-METADATA": {
         "usage": "STORE-METADATA [path]",
@@ -1000,24 +992,6 @@ class LocalAccessShell:
         if len(response) > 0:
             print(f"    {self._hex_preview(response, max_chars=80)}")
 
-    def _queue_modem_refresh(self, action_label: str, mode: str = "") -> None:
-        try:
-            payload = trigger_card_relay_modem_refresh(
-                mode=mode,
-                source=f"scp11-local:{action_label}",
-            )
-        except Exception as error:
-            print(f"[*] {action_label}: modem REFRESH queue failed ({error}).")
-            return
-        if payload is None:
-            return
-        status = str(payload.get("status", "queued") or "queued")
-        mode_name = str(payload.get("mode", "") or "")
-        print(
-            f"[*] {action_label}: modem REFRESH {status} "
-            f"({mode_name or 'euicc-profile-state-change'})."
-        )
-
     def _safe_collect_profile_metadata(self) -> List[Any]:
         if self.session is None:
             return []
@@ -1267,8 +1241,8 @@ class LocalAccessShell:
         The adapter routes the shared helpers in
         ``SCP11.shared.profile_actions`` through the local SMDP+
         session's ``enable_profile`` / ``disable_profile`` /
-        ``delete_profile`` callbacks plus the existing PPR1 guard and
-        the modem-refresh queue. Every shell that wants harmonised
+        ``delete_profile`` callbacks plus the existing PPR1 guard.
+        Every shell that wants harmonised
         ENABLE / DISABLE / DELETE semantics builds the same adapter
         shape so the helpers don't have to grow per-shell branches.
         """
@@ -1286,7 +1260,6 @@ class LocalAccessShell:
                 lambda: self.session.delete_profile(target),
             ),
             policy_allow_auto_disable=self._allow_auto_disable_for_enable,
-            modem_refresh=self._queue_modem_refresh,
             describe_profile=self._describe_profile_metadata,
             profile_identifier=self._profile_metadata_identifier,
         )
@@ -1344,10 +1317,6 @@ class LocalAccessShell:
             list(profiles),
             identifier,
         )
-
-    def _cmd_refresh_modem(self, arguments: list[str]) -> None:
-        mode = " ".join(arguments).strip()
-        self._queue_modem_refresh("RefreshModem", mode=mode)
 
     def _cmd_store_metadata(self, arguments: list[str]) -> None:
         metadata_path = " ".join(arguments).strip()
@@ -1755,8 +1724,8 @@ class LocalAccessShell:
         self._print_help_section(
             "Profile State Management",
             ShellStyle.HEADER,
-            ["ENABLE-PROFILE", "DISABLE-PROFILE", "DELETE-PROFILE", "REFRESH-MODEM"],
-            alias_note="Aliases: ENABLE, DISABLE, DELETE, MODEM-REFRESH",
+            ["ENABLE-PROFILE", "DISABLE-PROFILE", "DELETE-PROFILE"],
+            alias_note="Aliases: ENABLE, DISABLE, DELETE",
         )
         self._print_help_section(
             "Metadata / ASN.1 Runtime",
@@ -1912,8 +1881,6 @@ class LocalAccessShell:
                 self._cmd_disable_profile(filtered_arguments)
             elif canonical_command == "DELETE-PROFILE":
                 self._cmd_delete_profile(filtered_arguments)
-            elif canonical_command == "REFRESH-MODEM":
-                self._cmd_refresh_modem(filtered_arguments)
             elif canonical_command == "STORE-METADATA":
                 self._cmd_store_metadata(filtered_arguments)
             elif canonical_command == "UPDATE-METADATA":

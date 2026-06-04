@@ -21,18 +21,17 @@ try:
     from .asn1_registry import ASN1Registry
     from .crypto_engine import CryptoEngine
     from .payload_builder import PayloadBuilder
-    from .transport import RelayHttpClientJsonHex, SGP22Transport
+    from .transport import SGP22Transport
 except ImportError:
     from asn1_registry import ASN1Registry
     from crypto_engine import CryptoEngine
     from payload_builder import PayloadBuilder
-    from transport import RelayHttpClientJsonHex, SGP22Transport
+    from transport import SGP22Transport
 
 
 __all__ = [
     "ASN1Registry",
     "CryptoEngine",
     "PayloadBuilder",
-    "RelayHttpClientJsonHex",
     "SGP22Transport",
 ]

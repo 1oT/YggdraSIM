@@ -141,6 +141,71 @@ _register_preset(
     )
 )
 
+_register_preset(
+    ProfilePreset(
+        preset_id="IOT",
+        description=(
+            "IoT Minimal Profile: Header + IoT scaffold + PIN codes "
+            "+ MILENAGE AKA parameter + MNO-SD + end. "
+            "Per SAIP V3.4.1 Annex G IoT Minimal Profile example."
+        ),
+        menu_ids=(
+            "header",
+            "iot",
+            "pinCodes",
+            "akaParameter",
+            "securityDomain",
+            "end",
+        ),
+    )
+)
+
+_register_preset(
+    ProfilePreset(
+        preset_id="CSIM",
+        description=(
+            "CDMA profile: Header + MF + CSIM (+ optional) "
+            "+ CDMA CAVE parameter + end."
+        ),
+        menu_ids=(
+            "header",
+            "mf",
+            "csim",
+            "opt-csim",
+            "cdmaParameter",
+            "end",
+        ),
+    )
+)
+
+_register_preset(
+    ProfilePreset(
+        preset_id="FULL-EXTENDED",
+        description=(
+            "Header + MF + PIN/PUK codes + DF.TELECOM + USIM (+ optional) "
+            "+ ISIM (+ optional) + DF.PHONEBOOK + GSM-ACCESS + DF.5GS "
+            "+ DF.EAP + MILENAGE AKA parameter + end."
+        ),
+        menu_ids=(
+            "header",
+            "mf",
+            "pinCodes",
+            "pukCodes",
+            "telecom",
+            "usim",
+            "opt-usim",
+            "isim",
+            "opt-isim",
+            "phonebook",
+            "gsm-access",
+            "df-5gs",
+            "eap",
+            "akaParameter",
+            "end",
+        ),
+    )
+)
+
 
 def list_profile_presets() -> list[ProfilePreset]:
     """Return all registered ``ProfilePreset`` objects in definition order."""

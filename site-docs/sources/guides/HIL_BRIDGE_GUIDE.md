@@ -342,7 +342,7 @@ Relay state should show:
 - `status: ok`
 - `apduUrl`
 - `statusUrl`
-- `modemRefreshUrl`
+- `cardResetUrl`
 - the selected `reader`
 - the card `atr`
 
@@ -373,7 +373,7 @@ Practical consequences:
   the bridge serves APDUs from the simulator instead of the PC/SC
   reader.
 - Sim mode without SIMtrace2 attached still serves the YggdraSIM-side
-  HTTP relay (`apduUrl`, `statusUrl`, `modemRefreshUrl`); REMSIM is
+  HTTP relay (`apduUrl`, `statusUrl`, `cardResetUrl`); REMSIM is
   intentionally absent because there is nothing for it to connect
   to.
 - Yanking the SIMtrace2 cable while sim mode is active drops REMSIM
@@ -531,38 +531,11 @@ The local relay status JSON still exposes bridge health such as:
 - `status`
 - `apduUrl`
 - `statusUrl`
-- `modemRefreshUrl`
+- `cardResetUrl`
 - `controlConnected`
 - `bankdConnected`
 
-## 9. Refresh the modem after card-side changes
-
-The bridge exposes a modem REFRESH path and the SCP11 local shells can use it.
-
-Manual examples:
-
-```bash
-python -m SCP11.local_access --cmd "REFRESH-MODEM; EXIT"
-python -m SCP11.local_access --cmd "REFRESH-MODEM uicc-reset; EXIT"
-python -m SCP11.eim_local --cmd "REFRESH-MODEM euicc-profile-state-change; EXIT"
-```
-
-Current default mode is the eUICC-oriented profile state change refresh:
-
-- `euicc-profile-state-change`
-
-More aggressive manual override:
-
-- `uicc-reset`
-
-Automatic queueing is also wired into the relevant local SCP11 flows after successful state changes such as:
-
-- `ENABLE-PROFILE`
-- `DISABLE-PROFILE`
-- `DELETE-PROFILE`
-- `EUICC-MEMORY-RESET`
-
-## 10. Shutdown behavior
+## 9. Shutdown behavior
 
 Expected safe deactivation behavior:
 
@@ -573,7 +546,7 @@ Expected safe deactivation behavior:
 
 This is the main reason to prefer `yggdrasim-hil-supervisor` over the manual bridge command.
 
-## 11. Offline pcap replay and session-key unwrap
+## 10. Offline pcap replay and session-key unwrap
 
 The decoded-APDU TUI doubles as an offline review surface. Offline mode
 reuses the same `run_live_decode_tui` entry point as the live capture
@@ -691,7 +664,7 @@ Matched APDUs gain a `[plaintext]` row in
 The engine is instantiated fresh on every annotation rebuild, so
 moving between frames in the TUI does not drift the counters.
 
-## 12. Troubleshooting
+## 11. Troubleshooting
 
 ### SIMtrace2 not detected
 
@@ -751,5 +724,4 @@ If the bridge is running but Wireshark sees nothing:
 3. Start `osmo-remsim-client-st2`.
 4. Open Wireshark on UDP `4729`.
 5. Use YggdraSIM side commands only through normal module entry points, not raw direct `pyscard`.
-6. After card-side state changes, queue `REFRESH-MODEM` if the shell did not already do it for you.
-7. Stop the supervisor when you want the reader fully released.
+6. Stop the supervisor when you want the reader fully released.

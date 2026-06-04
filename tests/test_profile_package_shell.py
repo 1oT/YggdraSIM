@@ -364,14 +364,14 @@ class ProfilePackageShellTests(unittest.TestCase):
 
         connectivity = normalized["connectivityParameters"]
         self.assertEqual(connectivity["raw"], "a118350702000003000002470d085465726d696e616c0361706ea00f0607918406010092f88101008201f6")
-        self.assertEqual(connectivity["decoded"]["format"], "BER-TLV")
+        self.assertEqual(connectivity["decoded"]["format"], "TCA SAIP Connectivity Parameters")
         self.assertEqual(
-            connectivity["decoded"]["items"][0]["items"][1]["decoded"],
+            connectivity["decoded"]["items"][0]["items"][1]["decoded"]["name"],
             "Terminal.apn",
         )
         self.assertEqual(
             connectivity["decoded"]["items"][1]["name"],
-            "Transport / Remote Parameters",
+            "SMS Connectivity (A0)",
         )
         self.assertEqual(
             connectivity["decoded"]["items"][1]["items"][0]["raw"],
@@ -404,7 +404,7 @@ class ProfilePackageShellTests(unittest.TestCase):
         )
         self.assertEqual(
             key_entry["keyIdentifier"]["decoded"]["commonRole"],
-            "ENC (common SCP02/SCP03 convention)",
+            "KIC (SCP80) / ENC (common SCP02/SCP03 convention)",
         )
         self.assertEqual(key_entry["keyVersionNumber"]["decoded"]["reservedFor"], "SCP03")
         self.assertEqual(key_entry["keyCounterValue"]["decoded"]["decimal"], 0)

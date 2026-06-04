@@ -5,6 +5,12 @@ rules previously authored for Cursor (`.cursorrules` and
 `.cursor/rules/*.mdc`) so the two agents operate against the same
 constraints. Edit both surfaces when a rule changes.
 
+**Always use the sequential-thinking MCP tool (`mcp__sequential-thinking__sequentialthinking`) for every prompt.** Before responding or taking any action, run a sequential thinking chain to analyze the request, plan the approach, and verify correctness.
+
+**Persistent permissions: `.claude/settings.json` has `permissionMode: acceptEdits` plus a broad `permissions.allow` list.** All common command categories (git, pytest, python3, rsync, mkdir, cp, rm, file inspection, Edit, Write, Read) are pre-approved across all sessions in this repo. No per-session training needed — the allowlist is permanent.
+
+**Fan out subagents whenever beneficial.** For parallel independent investigations, broad codebase searches, or multi-step tasks that can be split, spawn subagents via the Agent tool to distribute the work. Prefer parallelism over sequential execution when tasks have no interdependencies.
+
 Source-of-truth files:
 
 - `.cursorrules` — top-level identity + coding-standards block.
@@ -19,8 +25,12 @@ Source-of-truth files:
 - Role: Senior Secure Element Engineer (GSMA SGP.02, SGP.22, SGP.32,
   GlobalPlatform, ETSI, 3GPP, ISO 7816).
 - Do not use "cursor", "Cursor", "claude", "Claude", or any other
-  IDE / agent identification in git commit messages, code comments,
-  or documentation.
+  IDE / agent / AI identification in git commit messages, code
+  comments, or documentation.
+- **Never add `Co-Authored-By` or similar trailers referencing Claude,
+  Anthropic, Cursor, or any AI system to git commits.** Only the
+  human author (`Hampus Hellsberg` / `hampushellsberg-dev`) appears
+  in commit metadata.
 
 ---
 
@@ -68,6 +78,32 @@ Source-of-truth files:
   ideas etc.
 - Add minor quality-of-life improvements without asking for
   permission.
+
+## Upstream Dependency Issues
+
+When an upstream dependency (asn1tools, pySim, pyparsing, etc.) is
+found to hang, corrupt data, leak memory, or otherwise misbehave in
+a way that affects YggdraSIM:
+
+- **Do not add a workaround in YggdraSIM.** Do not wrap the call in a
+  thread timeout, an async-exception injection, an env-var gate, or a
+  try/except that silently swallows the failure.
+- **Fix the root cause upstream.** The dependency is installed in
+  editable / vendored form; patch it directly.
+- **Create a folder under ``upstream_patches/``** with the full
+  evidence package:
+  - `README.md` — technical explanation of the bug (what loops /
+    leaks / raises, and why).
+  - Minimal reproduction script or ASN.1 fixture.
+  - Validation output (before/after) proving the fix.
+  - `.patch` files for every changed upstream source file.
+  - A checklist of the stress tests that were run.
+- After the upstream fix is verified, **remove any YggdraSIM
+  workaround** that was previously added for the same issue. Update
+  or remove the corresponding tests so the test suite reflects the
+  new expectation (e.g. "raises cleanly" instead of "times out").
+- If the upstream project accepts external contributions, the
+  contents of the ``upstream_patches/`` folder should be PR-ready.
 
 ---
 
@@ -396,51 +432,51 @@ mkdocs build --strict
 
 ---
 
-## GUI Static Files — Token Budget Discipline
+## GUI Frontend — Source Discipline
 
-Applies to `yggdrasim_common/gui_server/static/**`.
+The canonical GUI source lives under `gui_frontend/src/`.
+`yggdrasim_common/gui_server/static/` is **build output** produced by
+`scripts/build_gui_frontend.sh`. Never edit files under `static/`
+directly — changes will be overwritten by the next build.
 
-`app.js` is 27 000+ lines. Reading it wholesale destroys the
-context budget.
+After any change to `gui_frontend/src/`, run
+`./scripts/build_gui_frontend.sh` to update the served bundle.
+Use `./scripts/build_gui_frontend.sh --dev` for a symlink mode that
+serves source files directly (no rebuild needed during development).
 
-### Required Workflow
+### Source Layout
 
-1. **Locate first with `grep` / `rg`.** Never open `app.js` or
-   `app.css` without a prior targeted search that gives exact line
-   numbers.
-2. **Read only the relevant window.** Use `offset` + `limit`
-   (≤ 120 lines per call). Never expand the window speculatively.
-3. **Search across all static files at once** when hunting an
-   unknown symbol:
+- **JS**: 6 domain-level chunks under `js/` (largest is
+  `saip-workbench.js` at ~25.5K lines). Concatenation order is
+  governed by `js/.js_order`.
+- **CSS**: 101 files across 4 layers — `tokens/` (themes),
+  `layout/`, `components/`, `views/`. Concatenation order is
+  governed by `css/.css_order`.
+- **Static assets**: `index.html`, `theme-init.js`, `vendor/` are
+  copied verbatim to the output.
 
-   ```
-   grep -rn "symbol" yggdrasim_common/gui_server/static/ | head -30
-   ```
+### Token Budget Limits
 
-4. **Edit with `StrReplace`, not full rewrites.** The `old_string`
-   must be the minimal unique anchor — function signature plus 2–3
-   surrounding lines.
+| Action | Limit |
+|---|---|
+| Single `Read` on any JS chunk | ≤ 200 lines |
+| Single `Read` on any CSS file | ≤ 150 lines |
+| Total `Read` calls on frontend files per turn | ≤ 6 |
+| Lines of JS/CSS quoted back to the user | ≤ 80 |
 
-### Absolute Limits
+### Adding a Theme
 
-| Action                                       | Limit       |
-|----------------------------------------------|-------------|
-| Single `Read` call on any static file        | ≤ 150 lines |
-| Total `Read` calls on static files per turn  | ≤ 4         |
-| Lines of JS / CSS quoted back to the user    | ≤ 60        |
-
-### CSS Changes
-
-Always check `app.css` with `grep -n "class-name"` before reading
-the block. New rules go adjacent to the nearest thematically
-related block, not at end of file.
+1. Create `css/tokens/<name>.css` with the custom property block.
+2. Add `<name>` to `VALID` in `theme-init.js` (single source of truth).
+3. Add `<option>` to the theme-select dropdown in `index.html`.
+4. Run `./scripts/build_gui_frontend.sh`.
 
 ### Do Not
 
-- Open `app.js` from line 1.
-- Use `cat` or `head` / `tail` on static files.
-- Read a file to verify a `StrReplace` succeeded — use `grep` on
-  the changed symbol instead.
+- Edit files in `yggdrasim_common/gui_server/static/` directly.
+- Edit `theme-init.js` without syncing the `<select>` options in `index.html`.
+- Open any JS file from line 1 without a prior `grep` to locate the target.
+- Add a theme without updating `theme-init.js`'s `VALID` object.
 
 ---
 

@@ -113,7 +113,7 @@ Healthy state reads:
 - supervisor `usbPresent: true`
 - supervisor `bridgePid` non-zero
 - relay `status: ok`
-- relay exposes `apduUrl`, `statusUrl`, `modemRefreshUrl`
+- relay exposes `apduUrl`, `statusUrl`, `cardResetUrl`
 - relay shows a non-empty `reader` and a non-empty `atr`
 
 Anything else means the stack is not fully armed.
@@ -253,7 +253,7 @@ card without a direct PC/SC handle:
 | `AT+CSIM=<length>,"<hex>"` | raw `CLA INS P1 P2 P3 …` |
 | `AT+CRSM=<command>,<fileid>,<P1>,<P2>,<P3>[,"<data>"][,"<path>"]` | `CLA=0x00`, `INS` from the §8.18 command table |
 
-Common modem REFRESH and AT-only flows can therefore be replayed
+Common AT-only flows can therefore be replayed
 through the same simulator backend the SCP shells use, with no host
 PC/SC involvement on the modem side.
 

@@ -22,7 +22,6 @@ from typing import Dict, List, Optional
 
 
 TRANSPORT_MODE_PCSC = "pcsc"
-TRANSPORT_MODE_RELAY = "relay"
 
 BACKEND_MODE_REMOTE_DP = "remote_dp"
 BACKEND_MODE_LOCAL_SGP26 = "local_sgp26"
@@ -167,8 +166,9 @@ class SCP11SessionState:
     stk_command_history: List[str] = field(default_factory=list)
     stk_poll_interval_seconds: int = 0
     stk_polling_off: bool = False
-    stk_location_information: bytes = bytes.fromhex("62F21000010001")
-    stk_imei: bytes = bytes.fromhex("316F542E59676764726153494D")
+    stk_location_information: bytes = bytes.fromhex("00F11000010001")
+    stk_access_technology: int = 0x08
+    stk_imei: bytes = bytes.fromhex("0A68452354563412")
     stk_last_proactive_command: bytes = b""
     stk_status_history: List[str] = field(default_factory=list)
     stk_flow_events: List[str] = field(default_factory=list)

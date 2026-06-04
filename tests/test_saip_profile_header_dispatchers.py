@@ -104,6 +104,16 @@ class ProfileHeaderDispatcherTests(unittest.TestCase):
         )
         self.assertEqual(result["header"]["iccid_digits"], new_iccid)
 
+    def test_update_version_pair_round_trips(self) -> None:
+        result = self._actions._dispatch_update_profile_header_field(
+            ctx=None,
+            session_id=self._opened_session_id,
+            field="version",
+            value="3.3",
+        )
+        self.assertEqual(result["header"]["major_version"], 3)
+        self.assertEqual(result["header"]["minor_version"], 3)
+
     def test_update_unknown_field_raises(self) -> None:
         with self.assertRaises(ValueError):
             self._actions._dispatch_update_profile_header_field(

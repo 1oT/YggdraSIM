@@ -41,14 +41,16 @@ class MainWrapperDebugTests(unittest.TestCase):
         self.assertEqual(debug_value, "1")
         mocked_menu.assert_called_once_with()
 
-    def test_wrapper_without_debug_keeps_global_debug_disabled(self) -> None:
+    def test_wrapper_without_debug_preserves_existing_debug_state(self) -> None:
+        # When --debug is omitted, a previously enabled debug flag survives
+        # across invocations instead of being reset to 0.
         with mock.patch.dict(os.environ, {GLOBAL_DEBUG_ENV: "1"}, clear=False):
             with mock.patch.object(main_wrapper, "main_menu") as mocked_menu:
                 exit_code = main_wrapper.run_cli([])
                 debug_value = os.environ.get(GLOBAL_DEBUG_ENV)
 
         self.assertEqual(exit_code, 0)
-        self.assertEqual(debug_value, "0")
+        self.assertEqual(debug_value, "1")
         mocked_menu.assert_called_once_with()
 
 

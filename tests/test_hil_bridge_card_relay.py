@@ -14,6 +14,7 @@ from Tools.HilBridge.apdu_relay import (
     ApduRelayConfig,
     _APDU_RELAY_MAX_BODY_BYTES,
 )
+from Tools.HilBridge.pcsc import PcscCardChannel
 from Tools.HilBridge.router import BackendCardChannel, HilBridgeServer
 from yggdrasim_common.card_backend import CARD_BACKEND_ENV, create_card_connection
 
@@ -38,13 +39,19 @@ class _FakeReaderConnection:
     def __init__(self) -> None:
         self.connected = False
         self.connect_protocol = None
+        self.connect_mode = None
+        self.disconnect_args = ()
+        self.disconnect_kwargs = {}
 
-    def connect(self, protocol=None) -> None:
+    def connect(self, protocol=None, mode=None) -> None:
         self.connected = True
         self.connect_protocol = protocol
+        self.connect_mode = mode
 
-    def disconnect(self) -> None:
+    def disconnect(self, *args, **kwargs) -> None:
         self.connected = False
+        self.disconnect_args = args
+        self.disconnect_kwargs = dict(kwargs)
 
     def getATR(self):
         return [0x3B, 0x00]
@@ -61,11 +68,29 @@ class _FakeReader:
         return self._connection
 
 
+class _FakeConnectionDecorator:
+    def __init__(self, component: _FakeReaderConnection) -> None:
+        self.component = component
+
+    def connect(self, protocol=None, mode=None, disposition=None) -> None:
+        self.component.connect(protocol=protocol, mode=mode)
+
+    def disconnect(self) -> None:
+        raise AssertionError("reset must unpower the wrapped PC/SC component directly")
+
+    def getATR(self):
+        return self.component.getATR()
+
+    def transmit(self, apdu):
+        return self.component.transmit(apdu)
+
+
 class _FakePcscChannel:
     def __init__(self) -> None:
         self.reader_label = "Mock PCSC Reader"
         self.connect_calls = 0
         self.reconnect_calls = 0
+        self.reset_card_calls = 0
         self.disconnect_calls = 0
         self.last_apdu = b""
 
@@ -74,6 +99,9 @@ class _FakePcscChannel:
 
     def reconnect(self) -> None:
         self.reconnect_calls += 1
+
+    def reset_card(self) -> None:
+        self.reset_card_calls += 1
 
     def disconnect(self) -> None:
         self.disconnect_calls += 1
@@ -173,8 +201,68 @@ class HilBridgeCardRelayTests(unittest.TestCase):
         self.assertEqual(sw2, 0x00)
         self.assertEqual(fake_pcsc.connect_calls, 1)
         self.assertEqual(fake_pcsc.reconnect_calls, 1)
+        self.assertEqual(fake_pcsc.reset_card_calls, 0)
         self.assertEqual(fake_pcsc.disconnect_calls, 1)
         self.assertEqual(fake_pcsc.last_apdu, bytes.fromhex("00A4040000"))
+
+    def test_pcsc_card_channel_reset_unpowers_card_slot(self) -> None:
+        first_connection = _FakeReaderConnection()
+        second_connection = _FakeReaderConnection()
+        reader = mock.Mock()
+        reader.createConnection.side_effect = [first_connection, second_connection]
+        unpower_disposition = object()
+
+        with mock.patch(
+            "Tools.HilBridge.pcsc._load_smartcard_runtime",
+            return_value=(lambda: [reader], "exclusive", unpower_disposition, "leave", None, RuntimeError),
+        ):
+            with mock.patch("Tools.HilBridge.pcsc.time.sleep") as sleep_mock:
+                channel = PcscCardChannel()
+                channel.connect()
+                channel.reset_card()
+
+        self.assertFalse(first_connection.connected)
+        self.assertIs(first_connection.disposition, unpower_disposition)
+        self.assertEqual(first_connection.disconnect_args, ())
+        self.assertEqual(first_connection.disconnect_kwargs, {})
+        self.assertTrue(second_connection.connected)
+        self.assertEqual(second_connection.connect_mode, "exclusive")
+        sleep_mock.assert_called_once_with(0.2)
+
+    def test_pcsc_card_channel_reset_unwraps_exclusive_connection_decorator(self) -> None:
+        first_connection = _FakeReaderConnection()
+        second_connection = _FakeReaderConnection()
+        reader = mock.Mock()
+        reader.createConnection.side_effect = [first_connection, second_connection]
+        unpower_disposition = object()
+
+        def _wrap(connection):
+            return _FakeConnectionDecorator(connection)
+
+        with mock.patch(
+            "Tools.HilBridge.pcsc._load_smartcard_runtime",
+            return_value=(lambda: [reader], "exclusive", unpower_disposition, "leave", _wrap, RuntimeError),
+        ):
+            with mock.patch("Tools.HilBridge.pcsc.time.sleep"):
+                channel = PcscCardChannel()
+                channel.connect()
+                channel.reset_card()
+
+        self.assertFalse(first_connection.connected)
+        self.assertIs(first_connection.disposition, unpower_disposition)
+        self.assertEqual(first_connection.disconnect_args, ())
+        self.assertTrue(second_connection.connected)
+
+    def test_backend_card_channel_reset_uses_pcsc_power_cycle(self) -> None:
+        fake_pcsc = _FakePcscChannel()
+        with mock.patch("Tools.HilBridge.router.is_simulated_card_backend", return_value=False):
+            with mock.patch("Tools.HilBridge.router.PcscCardChannel", return_value=fake_pcsc):
+                channel = BackendCardChannel()
+                channel.connect()
+                channel.reset_card()
+
+        self.assertEqual(fake_pcsc.reset_card_calls, 1)
+        self.assertEqual(fake_pcsc.reconnect_calls, 0)
 
     def test_backend_card_channel_uses_simulated_connection_when_backend_is_sim(self) -> None:
         fake_sim = _FakeSimulatedConnection()
@@ -200,25 +288,6 @@ class HilBridgeCardRelayTests(unittest.TestCase):
         self.assertEqual(fake_sim.connect_calls, 0)
         self.assertEqual(fake_sim.last_apdu, bytes.fromhex("80CA005A00"))
         self.assertEqual(fake_sim.disconnect_calls, 2)
-
-    def test_backend_card_channel_exposes_simulator_refresh_controls(self) -> None:
-        fake_sim = _FakeSimulatedConnection()
-        fake_wrapper = _FakeSimulatedWrapper(fake_sim)
-
-        with mock.patch("Tools.HilBridge.router.is_simulated_card_backend", return_value=True):
-            with mock.patch("Tools.HilBridge.router.describe_card_backend", return_value="sim [profile_store]"):
-                with mock.patch("Tools.HilBridge.router._create_simulated_card_connection", return_value=fake_sim):
-                    with mock.patch("Tools.HilBridge.router.SimulatedModemCardChannel", return_value=fake_wrapper):
-                        channel = BackendCardChannel()
-                        channel.connect()
-                        queue_payload = channel.queue_modem_refresh("euicc-profile-state-change", source="relay-test")
-                        status_payload = channel.proactive_status_payload()
-
-        self.assertEqual(queue_payload["status"], "queued")
-        self.assertEqual(queue_payload["mode"], "euicc-profile-state-change")
-        self.assertEqual(queue_payload["pendingCount"], 1)
-        self.assertEqual(status_payload["pendingCount"], 1)
-        self.assertEqual(status_payload["queuedModes"], ["euicc-profile-state-change"])
 
     def test_apdu_relay_service_handles_status_and_exchange(self) -> None:
         exchanges: list[tuple[str, bytes]] = []
@@ -265,59 +334,46 @@ class HilBridgeCardRelayTests(unittest.TestCase):
         )
         self.assertEqual(exchanges, [("scp11-test", bytes.fromhex("00A4040000"))])
 
-    def test_hil_bridge_server_uses_simulator_queue_for_modem_refresh(self) -> None:
-        queue_modem_refresh = mock.Mock(
-            return_value={
-                "status": "queued",
-                "mode": "euicc-profile-state-change",
-                "qualifier": "00",
-                "pendingCount": 1,
-            }
+    def test_hil_bridge_server_resets_reader_for_card_reset_relay_request(self) -> None:
+        card = types.SimpleNamespace(
+            backend_name="reader",
+            reset_card=mock.Mock(return_value={"mode": "pcsc-reconnect-unpower"}),
+            get_atr=mock.Mock(return_value=bytes.fromhex("3B9F")),
+            reader_label="PCSC test reader",
         )
-        proactive_queue_refresh = mock.Mock(side_effect=AssertionError("bridge proactive broker should not be used"))
+        worker = types.SimpleNamespace(drain=mock.Mock())
+        proactive = types.SimpleNamespace(
+            reset=mock.Mock(),
+            queue_refresh=mock.Mock(side_effect=AssertionError("uicc-reset must not queue proactive REFRESH")),
+        )
 
         server = object.__new__(HilBridgeServer)
         server._card_lock = threading.RLock()
-        server._card = types.SimpleNamespace(
-            backend_name="sim",
-            queue_modem_refresh=queue_modem_refresh,
-            reader_label="sim [profile_store]",
-            proactive_status_payload=lambda: {
-                "pendingCount": 1,
-                "queuedCount": 1,
-                "activeMode": "",
-                "activeQualifier": "",
-                "queuedModes": ["euicc-profile-state-change"],
-                "openChannelActive": True,
-                "openChannelEndpoint": "8.8.8.8:53",
-                "eimPollStage": "dns-await-response",
-                "deliveryHint": "Simulator proactive queue is announced on modem STATUS and served on FETCH.",
-            },
-        )
+        server._proactive_lock = threading.Lock()
+        server._card = card
+        server._card_worker = worker
         server._session = types.SimpleNamespace(
-            proactive=types.SimpleNamespace(queue_refresh=proactive_queue_refresh),
-            atr_bytes=bytes.fromhex("3B9F"),
+            proactive=proactive,
+            atr_bytes=b"",
             control=None,
             bankd=None,
         )
         server._apdu_relay = types.SimpleNamespace(
-            modem_refresh_url="http://127.0.0.1:44215/modem-refresh",
-            apdu_url="http://127.0.0.1:44215/apdu",
-            status_url="http://127.0.0.1:44215/status",
+            card_reset_url="http://127.0.0.1:44215/card/reset",
         )
-        server._config = types.SimpleNamespace(listen_host="127.0.0.1", listen_port=9997)
 
-        refresh_payload = server._handle_relay_modem_refresh("euicc-profile-state-change", session_id="scp11-test")
-        status_payload = server._build_relay_status_payload()
+        reset_payload = server._handle_relay_card_reset(session_id="scp11-test")
 
-        queue_modem_refresh.assert_called_once_with("euicc-profile-state-change", source="scp11-test")
-        proactive_queue_refresh.assert_not_called()
-        self.assertEqual(refresh_payload["mode"], "euicc-profile-state-change")
-        self.assertEqual(refresh_payload["modemRefreshUrl"], "http://127.0.0.1:44215/modem-refresh")
-        self.assertEqual(status_payload["cardBackend"], "sim")
-        self.assertEqual(status_payload["pendingCount"], 1)
-        self.assertEqual(status_payload["openChannelEndpoint"], "8.8.8.8:53")
-        self.assertEqual(status_payload["eimPollStage"], "dns-await-response")
+        worker.drain.assert_called_once_with(timeout=5.0)
+        card.reset_card.assert_called_once_with()
+        card.get_atr.assert_called_once_with()
+        proactive.reset.assert_called_once_with()
+        proactive.queue_refresh.assert_not_called()
+        self.assertEqual(server._session.atr_bytes, bytes.fromhex("3B9F"))
+        self.assertEqual(reset_payload["status"], "reset")
+        self.assertEqual(reset_payload["sessionId"], "scp11-test")
+        self.assertEqual(reset_payload["atr"], "3B9F")
+        self.assertEqual(reset_payload["reset"]["mode"], "pcsc-reconnect-unpower")
 
     def test_create_card_connection_uses_bridge_marker_when_present(self) -> None:
         def exchange_callback(apdu: bytes, *, session_id: str = "") -> tuple[bytes, int, int]:

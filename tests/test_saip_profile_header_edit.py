@@ -53,9 +53,27 @@ class ScalarFieldTests(unittest.TestCase):
         header: dict = {}
         ph.set_iccid_digits(header, "8988201234567890123")
         self.assertEqual(len(header["iccid"]), 10)
-        # First byte: low='9', high='8' → 0x98
-        # ICCID stored swapped per TS 102 221 §13.2.
-        self.assertEqual(header["iccid"][0], 0x98)
+        # ProfileHeader stores the ICCID in header-order hex; EF.ICCID
+        # is the swapped-BCD form handled by the sync helper below.
+        self.assertEqual(header["iccid"][0], 0x89)
+
+    def test_sync_header_iccid_from_ef_iccid(self) -> None:
+        doc = {
+            "sections": {
+                "header": {},
+                "mf": {
+                    "ef-iccid": {
+                        "fillFileContent": bytes.fromhex("988802214365870921F3"),
+                    },
+                },
+            },
+        }
+        msg = ph.sync_header_iccid_from_ef(doc)
+        self.assertIn("iccid set", msg)
+        self.assertEqual(
+            doc["sections"]["header"]["iccid"],
+            bytes.fromhex("8988201234567890123F"),
+        )
 
     def test_set_iccid_digits_rejects_wrong_length(self) -> None:
         with self.assertRaises(ValueError):

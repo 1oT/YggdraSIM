@@ -285,7 +285,7 @@ def normalize_refresh_mode(value: str | int) -> tuple[str, int]:
     canonical = REFRESH_MODE_ALIASES.get(text, text)
     if canonical not in REFRESH_MODE_QUALIFIERS:
         supported = ", ".join(sorted(REFRESH_MODE_QUALIFIERS.keys()))
-        raise ValueError(f"Unsupported modem REFRESH mode '{value}'. Supported modes: {supported}")
+        raise ValueError(f"Unsupported REFRESH mode '{value}'. Supported modes: {supported}")
     return canonical, REFRESH_MODE_QUALIFIERS[canonical]
 
 

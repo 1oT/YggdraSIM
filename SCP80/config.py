@@ -144,6 +144,7 @@ class ConfigManager :
     "key_mac":"kid",
     }
     LEGACY_INDICATOR_HEX_LEN =2 
+    KEY_MATERIAL_BYTE_LENGTHS =(8 ,16 ,24 ,32 )
 
     def __init__ (self ):
         self .file_path =self ._resolve_config_path ()
@@ -354,6 +355,14 @@ class ConfigManager :
 
         is_valid_hex =all (c in "0123456789ABCDEF"for c in normalized )
         if is_valid_hex :
+            if key in ("kic","kid"):
+                byte_len =len (normalized )//2
+                if byte_len in self .KEY_MATERIAL_BYTE_LENGTHS :
+                    return normalized
+                allowed =", ".join (str (length )for length in self .KEY_MATERIAL_BYTE_LENGTHS )
+                if strict :
+                    raise ValueError (f"{key} must be {allowed} bytes.")
+                return self .DEFAULTS .get (key ,"")
             return normalized
         if strict :
             raise ValueError (f"{key} must contain only hex chars.")

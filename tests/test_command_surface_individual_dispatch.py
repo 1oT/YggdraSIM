@@ -185,8 +185,6 @@ class LocalAccessCommandSurfaceDispatchTests(unittest.TestCase):
         "DISABLE": ("_cmd_disable_profile", ["sample-arg"], [["sample-arg"]]),
         "DELETE-PROFILE": ("_cmd_delete_profile", ["sample-arg"], [["sample-arg"]]),
         "DELETE": ("_cmd_delete_profile", ["sample-arg"], [["sample-arg"]]),
-        "REFRESH-MODEM": ("_cmd_refresh_modem", ["sample-arg"], [["sample-arg"]]),
-        "MODEM-REFRESH": ("_cmd_refresh_modem", ["sample-arg"], [["sample-arg"]]),
         "STORE-METADATA": ("_cmd_store_metadata", ["sample-arg"], [["sample-arg"]]),
         "STORE-METADATA-CUSTOM": (
             "_cmd_store_metadata_custom",

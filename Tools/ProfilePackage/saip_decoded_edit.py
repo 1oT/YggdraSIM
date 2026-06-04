@@ -20,6 +20,7 @@ from .saip_asn1_decode import (
     _EF_MST_SERVICE_NAMES,
     _EF_PST_SERVICE_NAMES,
     _EF_VST_SERVICE_NAMES,
+    _decode_file_descriptor,
     _EST_SERVICE_NAMES,
     _ISIM_SERVICE_NAMES,
     _decode_ef_file_size,
@@ -34,7 +35,10 @@ from .saip_asn1_decode import (
     _decode_short_efid,
     _decode_special_field,
     _UST_SERVICE_NAMES,
+    _resolve_ef_key_for_fid,
     _hex_from_tagged_bytes,
+    parent_token_for_container_fid,
+    parent_token_from_file_path_hex,
 )
 from .saip_asn1_encode import (
     RoundtripEncoderError,
@@ -156,6 +160,176 @@ _COMMON_ENUM_CHOICES: dict[str, dict[str, Any]] = {
     "supported": {
         "choices": ["true", "false"],
         "description": "Short EF identifier — present on the card",
+    },
+    # Connectivity parameters — protocol identifiers (3GPP TS 23.040 §9.2.3.9)
+    "connectivityPid": {
+        "choices": [
+            "sme_to_sme",
+            "telematic_implicit",
+            "telematic_telex",
+            "telematic_group3_fax",
+            "telematic_group4_fax",
+            "telematic_voice",
+            "telematic_ermes",
+            "telematic_national_paging",
+            "telematic_videotex",
+            "telematic_teletex_unspec",
+            "telematic_teletex_pspdn",
+            "telematic_teletex_cspdn",
+            "telematic_teletex_pstn",
+            "telematic_teletex_isdn",
+            "telematic_uci",
+            "message_handling",
+            "x400",
+            "internet_email",
+            "sc_specific_38",
+            "sc_specific_39",
+            "sc_specific_3A",
+            "sc_specific_3B",
+            "sc_specific_3C",
+            "sc_specific_3D",
+            "sc_specific_3E",
+            "gsm_umts_ms",
+            "sm_type_0",
+            "replace_sm_1",
+            "replace_sm_2",
+            "replace_sm_3",
+            "replace_sm_4",
+            "replace_sm_5",
+            "replace_sm_6",
+            "replace_sm_7",
+            "device_triggering",
+            "ansi_136",
+            "me_data_download",
+            "me_depersonalization",
+            "usim_data_download",
+        ],
+        "description": "SMS Protocol Identifier (3GPP TS 23.040 §9.2.3.9)",
+        "labels": {
+            "sme_to_sme": "0x00 — SME-to-SME (no interworking)",
+            "telematic_implicit": "0x20 — Telematic (implicit)",
+            "telematic_telex": "0x21 — Telematic (Telex)",
+            "telematic_group3_fax": "0x22 — Telematic (Group 3 Fax)",
+            "telematic_group4_fax": "0x23 — Telematic (Group 4 Fax)",
+            "telematic_voice": "0x24 — Telematic (Voice)",
+            "telematic_ermes": "0x25 — Telematic (ERMES)",
+            "telematic_national_paging": "0x26 — Telematic (National Paging)",
+            "telematic_videotex": "0x27 — Telematic (Videotex)",
+            "telematic_teletex_unspec": "0x28 — Telematic (Teletex, unspecified)",
+            "telematic_teletex_pspdn": "0x29 — Telematic (Teletex, PSPDN)",
+            "telematic_teletex_cspdn": "0x2A — Telematic (Teletex, CSPDN)",
+            "telematic_teletex_pstn": "0x2B — Telematic (Teletex, analog PSTN)",
+            "telematic_teletex_isdn": "0x2C — Telematic (Teletex, digital ISDN)",
+            "telematic_uci": "0x2D — Telematic (UCI)",
+            "message_handling": "0x30 — Message Handling Facility",
+            "x400": "0x31 — Any public X.400",
+            "internet_email": "0x32 — Internet Electronic Mail",
+            "sc_specific_38": "0x38 — SC-specific (mutual agreement)",
+            "gsm_umts_ms": "0x3F — GSM/UMTS MS",
+            "sm_type_0": "0x40 — Short Message Type 0",
+            "replace_sm_1": "0x41 — Replace SM Type 1",
+            "replace_sm_2": "0x42 — Replace SM Type 2",
+            "replace_sm_3": "0x43 — Replace SM Type 3",
+            "replace_sm_4": "0x44 — Replace SM Type 4",
+            "replace_sm_5": "0x45 — Replace SM Type 5",
+            "replace_sm_6": "0x46 — Replace SM Type 6",
+            "replace_sm_7": "0x47 — Replace SM Type 7",
+            "device_triggering": "0x48 — Device Triggering",
+            "ansi_136": "0x7C — ANSI-136 R-DATA",
+            "me_data_download": "0x7D — ME Data Download",
+            "me_depersonalization": "0x7E — ME De-personalization",
+            "usim_data_download": "0x7F — (U)SIM Data Download",
+        },
+    },
+    # Connectivity parameters — bearer types (ETSI TS 102 223)
+    "bearerType": {
+        "choices": [
+            "gsm_3gpp_01", "gsm_3gpp_02", "default_bearer", "local_link",
+            "bluetooth", "irda", "rs232", "cdma2000", "gsm_3gpp_09",
+            "iwlan", "eutran", "usb",
+        ],
+        "description": "Bearer type (ETSI TS 102 223 §8.16)",
+        "labels": {
+            "gsm_3gpp_01": "0x01 — GSM/3GPP",
+            "gsm_3gpp_02": "0x02 — GSM/3GPP",
+            "default_bearer": "0x03 — Default bearer for requested transport",
+            "local_link": "0x04 — Local link (technology independent)",
+            "bluetooth": "0x05 — Bluetooth",
+            "irda": "0x06 — IrDA",
+            "rs232": "0x07 — RS232",
+            "cdma2000": "0x08 — cdma2000 packet data",
+            "gsm_3gpp_09": "0x09 — GSM/3GPP",
+            "iwlan": "0x0A — 3GPP I-WLAN",
+            "eutran": "0x0B — 3GPP E-UTRAN / Mapped UTRAN",
+            "usb": "0x10 — USB",
+        },
+    },
+    # Connectivity parameters — DCS coding groups (3GPP TS 23.038)
+    "dcsCodingGroup": {
+        "choices": [
+            "general_7bit", "general_8bit", "general_ucs2",
+            "compressed_7bit", "compressed_8bit", "compressed_ucs2",
+            "msg_waiting_discard", "msg_waiting_store", "msg_waiting_store_ucs2",
+            "data_coding_class",
+        ],
+        "description": "DCS coding group (3GPP TS 23.038 §4)",
+        "labels": {
+            "general_7bit": "General — GSM 7-bit (uncompressed)",
+            "general_8bit": "General — 8-bit data (uncompressed)",
+            "general_ucs2": "General — UCS2 (uncompressed)",
+            "compressed_7bit": "General — GSM 7-bit (compressed)",
+            "compressed_8bit": "General — 8-bit data (compressed)",
+            "compressed_ucs2": "General — UCS2 (compressed)",
+            "msg_waiting_discard": "Message Waiting — Discard",
+            "msg_waiting_store": "Message Waiting — Store",
+            "msg_waiting_store_ucs2": "Message Waiting — Store (UCS2)",
+            "data_coding_class": "Data coding / message class",
+        },
+    },
+    # Connectivity parameters — TON (Type of Number)
+    "ton": {
+        "choices": ["unknown", "international", "national", "network_specific"],
+        "description": "Type of Number (3GPP TS 31.102 / EF.ADN)",
+        "labels": {
+            "unknown": "0x0 — Unknown",
+            "international": "0x1 — International Number",
+            "national": "0x2 — National Number",
+            "network_specific": "0x3 — Network Specific Number",
+        },
+    },
+    # Connectivity parameters — NPI (Numbering Plan Identifier)
+    "npi": {
+        "choices": ["unknown", "isdn_e164", "data_x121", "telex_f69", "private", "extension"],
+        "description": "Numbering Plan Identifier (3GPP TS 31.102 / EF.ADN)",
+        "labels": {
+            "unknown": "0x0 — Unknown",
+            "isdn_e164": "0x1 — ISDN/Telephony (E.164/E.163)",
+            "data_x121": "0x3 — Data (X.121)",
+            "telex_f69": "0x4 — Telex (F.69)",
+            "private": "0x9 — Private",
+            "extension": "0xF — Reserved for extension",
+        },
+    },
+    # Connectivity section type (add/remove sections)
+    "connectivitySection": {
+        "choices": ["sms", "http", "cat_tp"],
+        "description": "Connectivity parameter section type",
+        "labels": {
+            "sms": "SMS Connectivity (tag A0)",
+            "http": "HTTP Connectivity (tag A1)",
+            "cat_tp": "CAT_TP Connectivity (tag A2)",
+        },
+    },
+    # Message class for DCS
+    "messageClass": {
+        "choices": ["class0", "class1", "class2", "class3"],
+        "description": "DCS message class (3GPP TS 23.038)",
+        "labels": {
+            "class0": "Class 0",
+            "class1": "Class 1 (ME-specific)",
+            "class2": "Class 2 (U)SIM-specific",
+            "class3": "Class 3 (TE-specific)",
+        },
     },
 }
 
@@ -764,6 +938,9 @@ _HEX_HINTED_EF_KEYS: frozenset[str] = frozenset(
         "ef-routing-indicator",
         "ef-ursp",
         "ef-tn3gppsnn",
+        "ef-uplmnwlan",
+        "ef-oplmnwlan",
+        "ef-wlrplmn",
         "ef-5gsedrx",
         "ef-5gnswo-conf",
         # 5x10 additions — Phonebook family.
@@ -939,6 +1116,9 @@ _EF_FRIENDLY_TITLES: dict[str, str] = {
     "ef-5gauthkeys": "EF.5G_AUTH_KEYS — TS 31.102 §4.4.11.6",
     "ef-uac-aic": "EF.UAC_AIC — Access Identities Configuration · TS 31.102 §4.4.11.7",
     "ef-opl5g": "EF.OPL5G — 5GS Operator PLMN List · TS 31.102 §4.4.11.9",
+    "ef-uplmnwlan": "EF.UPLMNWLAN — I-WLAN User PLMN List · TS 31.102 §4.2.82",
+    "ef-oplmnwlan": "EF.OPLMNWLAN — I-WLAN Operator PLMN List · TS 31.102 §4.2.83",
+    "ef-wlrplmn": "EF.WLRPLMN — I-WLAN Last Registered PLMN · TS 31.102 §4.2.91",
     "ef-tn3gppsnn": "EF.TN3GPPSNN — Trusted Non-3GPP SSID · TS 31.102 §4.4.11.11",
     "ef-supinai": "EF.SUPI_NAI — TS 31.102 §4.4.11.13",
     "ef-cag": "EF.CAG — Pre-configured CAG list · TS 31.102 §4.4.11.14",
@@ -1411,6 +1591,138 @@ def _display_path_from_rel(rel_path: list[Any], field_name: str) -> str:
     return " / ".join(parts)
 
 
+_GFM_LEGACY_EF_KEYS_BY_PARENT_FID: dict[tuple[str, str], str] = {
+    # MF-level EFs, ETSI TS 102 221 §13.
+    ("3F00", "2FE2"): "ef-iccid",
+    ("3F00", "2F00"): "ef-dir",
+    ("3F00", "2F05"): "ef-pl",
+    ("3F00", "2F06"): "ef-arr",
+    ("7F10", "6F06"): "ef-arr",
+    ("7FF2", "6F06"): "ef-arr",
+    ("7FF3", "6F06"): "ef-arr",
+    # DF.TELECOM, TS 51.011 §10.4. These share content layouts with
+    # the modern 3GPP EF tokens and must still reach the same editors.
+    ("7F10", "6F3A"): "ef-adn",
+    ("7F10", "6F3B"): "ef-fdn",
+    ("7F10", "6F3C"): "ef-sms",
+    ("7F10", "6F40"): "ef-msisdn",
+    ("7F10", "6F42"): "ef-smsp",
+    ("7F10", "6F43"): "ef-smss",
+    ("7F10", "6F44"): "ef-lnd",
+    ("7F10", "6F47"): "ef-smsr",
+    ("7F10", "6F49"): "ef-sdn",
+    ("7F10", "6F4A"): "ef-ext1",
+    ("7F10", "6F4B"): "ef-ext2",
+    ("7F10", "6F4C"): "ef-ext3",
+    ("7F10", "6F53"): "ef-rma",
+    ("7F10", "6F54"): "ef-sume",
+    # DF.GSM, TS 51.011 §10.3. Parent-token lookup alone is ambiguous
+    # because 7F20 is also reused by DF.EAP in newer templates.
+    ("7F20", "6F05"): "ef-li",
+    ("7F20", "6F07"): "ef-imsi",
+    ("7F20", "6F20"): "ef-kc",
+    ("7F20", "6F30"): "ef-plmnsel",
+    ("7F20", "6F31"): "ef-hpplmn",
+    ("7F20", "6F37"): "ef-acmax",
+    ("7F20", "6F38"): "ef-ust",
+    ("7F20", "6F39"): "ef-acm",
+    ("7F20", "6F41"): "ef-puct",
+    ("7F20", "6F45"): "ef-cbmi",
+    ("7F20", "6F46"): "ef-spn",
+    ("7F20", "6F74"): "ef-bcch",
+    ("7F20", "6F78"): "ef-acc",
+    ("7F20", "6F7B"): "ef-fplmn",
+    ("7F20", "6F7E"): "ef-loci",
+    ("7F20", "6FAD"): "ef-ad",
+    # DF.GSM-ACCESS under USIM.
+    ("5F3B", "4F20"): "ef-kc",
+    ("5F3B", "4F52"): "ef-kcgprs",
+    ("5F3B", "4F63"): "ef-cpbcch",
+    ("5F3B", "4F64"): "ef-invscan",
+}
+
+
+def _gfm_choice_tuple(node: Any) -> tuple[str, Any, str] | None:
+    if isinstance(node, dict) is False:
+        return None
+    for tuple_tag_key in _TUPLE_TAG_KEYS:
+        tagged = node.get(tuple_tag_key)
+        if (
+            isinstance(tagged, list)
+            and len(tagged) == 2
+            and isinstance(tagged[0], str)
+        ):
+            return str(tagged[0]), tagged[1], tuple_tag_key
+    return None
+
+
+def _gfm_path_segments(path_value: Any) -> list[str]:
+    raw_hex = _hex_from_tagged_bytes(path_value)
+    if raw_hex is None:
+        return ["3F00"]
+    compact = re.sub(r"\s+", "", raw_hex).upper()
+    if compact == "":
+        return ["3F00"]
+    if len(compact) % 4 != 0:
+        return ["3F00"]
+    segments = [
+        compact[offset : offset + 4]
+        for offset in range(0, len(compact), 4)
+    ]
+    if len(segments) > 0 and segments[0] == "3F00":
+        return segments
+    return ["3F00"] + segments
+
+
+def _gfm_parent_token(parent_chain: list[str]) -> str | None:
+    if len(parent_chain) == 0:
+        return None
+    parent_hex = "".join(part for part in parent_chain if re.fullmatch(r"[0-9A-F]{4}", part))
+    token = parent_token_from_file_path_hex(parent_hex)
+    if token is not None:
+        return token
+    tail = parent_chain[-1]
+    return parent_token_for_container_fid(tail)
+
+
+def _gfm_ef_key_from_create_fcp(
+    create_fcp_value: Any,
+    parent_chain: list[str],
+) -> str | None:
+    if isinstance(create_fcp_value, dict) is False:
+        return None
+    fid_hex = _hex_from_tagged_bytes(create_fcp_value.get("fileID"))
+    if fid_hex is None:
+        return None
+    fid = re.sub(r"\s+", "", fid_hex).upper()[:4]
+    if len(fid) != 4:
+        return None
+    if len(parent_chain) > 0:
+        legacy_key = _GFM_LEGACY_EF_KEYS_BY_PARENT_FID.get((parent_chain[-1], fid))
+        if legacy_key is not None:
+            return legacy_key
+    parent_token = _gfm_parent_token(parent_chain)
+    resolved = _resolve_ef_key_for_fid(fid, parent_token)
+    if resolved is not None:
+        return resolved
+    return _GFM_LEGACY_EF_KEYS_BY_PARENT_FID.get(("3F00", fid))
+
+
+def _gfm_create_fcp_is_container(create_fcp_value: Any) -> bool:
+    if isinstance(create_fcp_value, dict) is False:
+        return False
+    if _hex_from_tagged_bytes(create_fcp_value.get("dfName")) is not None:
+        return True
+    desc_hex = _hex_from_tagged_bytes(create_fcp_value.get("fileDescriptor"))
+    if desc_hex is None:
+        return False
+    try:
+        desc = _decode_file_descriptor(bytes.fromhex(desc_hex))
+    except ValueError:
+        return False
+    return isinstance(desc, dict) and desc.get("fileType") == "df"
+
+
 def _resolve_pe_editor_model_for_enumeration(
     *,
     field_name: str,
@@ -1476,10 +1788,10 @@ def _resolve_pe_editor_model_for_enumeration(
         pe_section_key=pe_section_key,
     )
     if isinstance(readonly, dict):
-        enriched = dict(readonly)
-        enriched.setdefault("editor_kind", _READONLY_VIEW_EDITOR_KIND)
-        enriched["read_only"] = True
-        return enriched
+        # Fall through to raw-hex — semantic decode succeeded but no
+        # round-trip encoder exists. The decoded form is surfaced as a
+        # reference summary; editing happens via the raw hex surface.
+        pass
 
     raw_hex = build_decoded_value_raw_hex_model(
         field_name=field_name,
@@ -1547,6 +1859,7 @@ def enumerate_pe_decodable_fields(
         rel_path: list[Any],
         raw_value: Any,
         last_ef_key: str | None,
+        gfm_file_path: str | None = None,
     ) -> None:
         """Register a decoded-field editor class for the given PE type and tag path."""
         key = tuple(rel_path)
@@ -1583,8 +1896,82 @@ def enumerate_pe_decodable_fields(
                 payload=model.get("payload"),
             ),
         })
+        if gfm_file_path is not None:
+            entries[-1]["gfm_file_path"] = gfm_file_path
 
-    def walk(node: Any, rel_path: list[Any], last_ef_key: str | None) -> None:
+    def walk_gfm_commands(commands: Any, rel_path: list[Any]) -> None:
+        if isinstance(commands, list) is False:
+            walk(commands, rel_path, None, None)
+            return
+        select_chain: list[str] = ["3F00"]
+        for transaction_index, transaction in enumerate(commands):
+            if isinstance(transaction, list) is False:
+                walk(transaction, rel_path + [transaction_index], None, None)
+                continue
+            transaction_container_chain: list[str] | None = None
+            active_ef_key: str | None = None
+            active_gfm_file_path: str | None = None
+            for command_index, item in enumerate(transaction):
+                tuple_info = _gfm_choice_tuple(item)
+                item_path = rel_path + [transaction_index, command_index]
+                if tuple_info is None:
+                    walk(item, item_path, active_ef_key, active_gfm_file_path)
+                    continue
+                tag_name, value, tuple_tag_key = tuple_info
+                value_path = item_path + [tuple_tag_key, 1]
+                if tag_name == "filePath":
+                    register(
+                        field_name=tag_name,
+                        rel_path=value_path,
+                        raw_value=value,
+                        last_ef_key=None,
+                    )
+                    walk(value, value_path, None, None)
+                    select_chain = _gfm_path_segments(value)
+                    transaction_container_chain = None
+                    active_ef_key = None
+                    active_gfm_file_path = None
+                    continue
+                if tag_name == "createFCP":
+                    parent_chain = transaction_container_chain or select_chain
+                    create_ef_key = _gfm_ef_key_from_create_fcp(value, parent_chain)
+                    create_gfm_file_path = f"fileManagementCMD[{transaction_index}][{command_index}]"
+                    register(
+                        field_name=tag_name,
+                        rel_path=value_path,
+                        raw_value=value,
+                        last_ef_key=create_ef_key,
+                        gfm_file_path=create_gfm_file_path,
+                    )
+                    walk(value, value_path, create_ef_key, create_gfm_file_path)
+                    if _gfm_create_fcp_is_container(value):
+                        fid_hex = _hex_from_tagged_bytes(
+                            value.get("fileID") if isinstance(value, dict) else None
+                        )
+                        fid = re.sub(r"\s+", "", fid_hex or "").upper()[:4]
+                        if len(fid) == 4:
+                            transaction_container_chain = list(parent_chain) + [fid]
+                        active_ef_key = None
+                        active_gfm_file_path = None
+                    else:
+                        active_ef_key = create_ef_key
+                        active_gfm_file_path = create_gfm_file_path
+                    continue
+                register(
+                    field_name=tag_name,
+                    rel_path=value_path,
+                    raw_value=value,
+                    last_ef_key=active_ef_key,
+                    gfm_file_path=active_gfm_file_path,
+                )
+                walk(value, value_path, active_ef_key, active_gfm_file_path)
+
+    def walk(
+        node: Any,
+        rel_path: list[Any],
+        last_ef_key: str | None,
+        gfm_file_path: str | None,
+    ) -> None:
         """Walk the decoded JSON tree and collect all editable field paths."""
         if isinstance(node, dict):
             for tuple_tag_key in _TUPLE_TAG_KEYS:
@@ -1599,15 +1986,20 @@ def enumerate_pe_decodable_fields(
                             rel_path=rel_path + [tuple_tag_key, 1],
                             raw_value=tagged[1],
                             last_ef_key=last_ef_key,
+                            gfm_file_path=gfm_file_path,
                         )
                         walk(
                             tagged[1],
                             rel_path + [tuple_tag_key, 1],
                             last_ef_key,
+                            gfm_file_path,
                         )
                     return
             for key, value in node.items():
                 if key in _TUPLE_TAG_KEYS or key in _BYTES_TAG_KEYS:
+                    continue
+                if key == "fileManagementCMD":
+                    walk_gfm_commands(value, rel_path + [key])
                     continue
                 new_ef_key = last_ef_key
                 if isinstance(key, str) and key.startswith("ef-"):
@@ -1617,14 +2009,15 @@ def enumerate_pe_decodable_fields(
                     rel_path=rel_path + [key],
                     raw_value=value,
                     last_ef_key=new_ef_key,
+                    gfm_file_path=gfm_file_path,
                 )
-                walk(value, rel_path + [key], new_ef_key)
+                walk(value, rel_path + [key], new_ef_key, gfm_file_path)
             return
         if isinstance(node, list):
             for idx, item in enumerate(node):
-                walk(item, rel_path + [idx], last_ef_key)
+                walk(item, rel_path + [idx], last_ef_key, gfm_file_path)
 
-    walk(pe_value, [], None)
+    walk(pe_value, [], None, None)
     return entries
 
 

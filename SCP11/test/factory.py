@@ -23,24 +23,22 @@ try:
         BACKEND_MODE_LOCAL_SGP26,
         BACKEND_MODE_REMOTE_DP,
         TRANSPORT_MODE_PCSC,
-        TRANSPORT_MODE_RELAY,
     )
     from .providers import RemoteEs9Provider, Sgp26LocalProvider
-    from ..live.transport import PcscApduChannel, RelayApduChannel, RelayHttpClientJsonHex
+    from ..live.transport import PcscApduChannel
 except ImportError:
     from es9_client import Es9LikeClient
     from models import (
         BACKEND_MODE_LOCAL_SGP26,
         BACKEND_MODE_REMOTE_DP,
         TRANSPORT_MODE_PCSC,
-        TRANSPORT_MODE_RELAY,
     )
     from providers import RemoteEs9Provider, Sgp26LocalProvider
-    from SCP11.live.transport import PcscApduChannel, RelayApduChannel, RelayHttpClientJsonHex
+    from SCP11.live.transport import PcscApduChannel
 
 
 def build_apdu_channel(cfg):
-    """Construct and return the APDU channel object appropriate for this session variant (PCSC, relay, or simulated)."""
+    """Construct and return the direct PC/SC APDU channel for this session variant."""
     if cfg.TRANSPORT_MODE == TRANSPORT_MODE_PCSC:
         try:
             return PcscApduChannel(reader_index=cfg.READER_INDEX)
@@ -49,18 +47,8 @@ def build_apdu_channel(cfg):
                 f"PC/SC transport startup failed on reader index {cfg.READER_INDEX}: {error}"
             ) from error
 
-    if cfg.TRANSPORT_MODE == TRANSPORT_MODE_RELAY:
-        if len(str(cfg.RELAY_URL).strip()) == 0:
-            raise ValueError("Relay transport requires RELAY_URL to be configured.")
-        relay_client = RelayHttpClientJsonHex(
-            endpoint=cfg.RELAY_URL,
-            timeout_seconds=cfg.RELAY_TIMEOUT_SECONDS,
-            verify_tls=cfg.RELAY_VERIFY_TLS,
-        )
-        return RelayApduChannel(relay_client=relay_client, session_id=cfg.RELAY_SESSION_ID)
-
     raise ValueError(
-        f"Unsupported transport mode: {cfg.TRANSPORT_MODE}. Supported values: {TRANSPORT_MODE_PCSC}, {TRANSPORT_MODE_RELAY}."
+        f"Unsupported transport mode: {cfg.TRANSPORT_MODE}. Supported value: {TRANSPORT_MODE_PCSC}."
     )
 
 

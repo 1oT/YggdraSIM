@@ -16,7 +16,8 @@ Coverage milestones (each asserted byte-exactly):
 * EF.DIR record #1 carries the active USIM AID under tag ``61``.
 * SELECT ADF.USIM by AID returns FCP for the ADF.
 * TERMINAL CAPABILITY + TERMINAL PROFILE both return ``9000``.
-* VERIFY PIN1 with the default ``1234`` succeeds.
+* Default PIN1 / UPIN status probes report that no PIN entry is
+  required for headless attach.
 * EF.IMSI / EF.AD / EF.UST round-trip and decode to the expected
   default identity, including the 5G/SUCI service flags.
 * AUTHENTICATE INS=88 P2=81 produces a TS 31.102 §7.1.2.1 ``DB``-
@@ -261,13 +262,17 @@ class ModemColdBootAttachScriptTests(unittest.TestCase):
             tr = bytes([0x80, 0x14, 0x00, 0x00, len(tr_payload)]) + tr_payload
             _, sw1, sw2 = self.modem.transmit(tr)
 
-    def test_06_verify_pin1_with_default(self) -> None:
-        # Default PIN1 = '1234'. Padded to 8 octets with 0xFF per
-        # TS 102 221 §9.5.1. CLA=00, INS=20, P2=01.
-        pin_block = b"1234" + b"\xFF" * 4
-        verify_apdu = bytes([0x00, 0x20, 0x00, 0x01, len(pin_block)]) + pin_block
-        _, sw1, sw2 = self.modem.transmit(verify_apdu)
-        self.assertEqual((sw1, sw2), (0x90, 0x00), msg=f"VERIFY -> {sw1:02X}{sw2:02X}")
+    def test_06_pin_status_probes_allow_headless_attach(self) -> None:
+        # Default PIN1 / UPIN are provisioned disabled for the built-in
+        # profile. A modem probing with Lc=0 must therefore see success
+        # and continue toward network AKA without a user PIN prompt.
+        for reference in (0x01, 0x81):
+            _data, sw1, sw2 = self.modem.transmit(bytes([0x00, 0x20, 0x00, reference, 0x00]))
+            self.assertEqual(
+                (sw1, sw2),
+                (0x90, 0x00),
+                msg=f"VERIFY status ref={reference:02X} -> {sw1:02X}{sw2:02X}",
+            )
 
     def test_07_read_ef_imsi_round_trips_to_default(self) -> None:
         self._select_active_usim()

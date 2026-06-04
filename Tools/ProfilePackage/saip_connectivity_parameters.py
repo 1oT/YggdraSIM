@@ -13,8 +13,8 @@ Bearer registry (TCA SAIP §A.2 ``ConnectivityParameters``)::
   Tag  Bearer        Reference
   ----  -----------   --------------------------------------------------
   0xA0  SMS-PP        ETSI TS 102 225 §5.1, TS 31.115 §4
-  0xA1  CAT_TP        ETSI TS 102 124, TS 102 127
-  0xA2  HTTPS / TLS   ETSI TS 102 226 §5.7, GP Amd B §3.2
+  0xA1  HTTP / TLS    ETSI TS 102 226 §5.7, GP Amd B §3.2
+  0xA2  CAT_TP        ETSI TS 102 124, TS 102 127
 
 Each bearer block carries a sequence of optional sub-tags. The names
 below come straight from the spec definitions; we never invent a
@@ -90,12 +90,13 @@ def _emit_tlv(tag: int, value: bytes) -> bytes:
 
 
 # ----------------------------------------------------------------------
-# SMS-PP bearer (tag 0xA0). Inner sub-tags per TS 31.115 §4 / TS 102 225:
+# SMS-PP bearer (tag 0xA0). Inner sub-tags per SGP.02 Table 92 /
+# TS 31.115 §4 / TS 102 225:
 #
-#   80   dialing number (TON+NPI byte || BCD digits, TS 24.011 §8.2.5)
+#   06   dialing number (TON+NPI byte || BCD digits, TS 24.011 §8.2.5)
 #   81   PID  (Protocol Identifier, TS 23.040 §9.2.3.9)
 #   82   DCS  (Data Coding Scheme, TS 23.038 §4)
-#   83   SMSC address override (optional, TS 23.040 §9.2.3.7)
+#   83   legacy SMSC address override accepted for existing editor output
 # ----------------------------------------------------------------------
 
 
@@ -181,7 +182,7 @@ def _decode_sms_block(value: bytes) -> dict[str, Any]:
             break
         tag, _length, val_offset, next_offset = parsed
         chunk = value[val_offset:next_offset]
-        if tag == 0x80:
+        if tag in (0x06, 0x80):
             out["dialing_number"] = _decode_dialing_number(chunk)
         elif tag == 0x81 and len(chunk) >= 1:
             out["pid_hex"] = f"{chunk[0]:02X}"
@@ -190,8 +191,7 @@ def _decode_sms_block(value: bytes) -> dict[str, Any]:
         elif tag == 0x83:
             out["smsc_dialing_number"] = _decode_dialing_number(chunk)
         else:
-            extras = out.setdefault("extras", [])
-            extras.append({"tag": f"{tag:02X}", "hex": chunk.hex().upper()})
+            _append_extra(out, tag, chunk)
         cursor = next_offset
     return out
 
@@ -201,7 +201,7 @@ def _encode_sms_block(payload: dict[str, Any]) -> bytes:
     if "dialing_number" in payload:
         dn = payload["dialing_number"] or {}
         body += _emit_tlv(
-            0x80,
+            0x06,
             _encode_dialing_number(dn.get("ton"), dn.get("npi"), dn.get("digits")),
         )
     if payload.get("pid_hex"):
@@ -214,16 +214,16 @@ def _encode_sms_block(payload: dict[str, Any]) -> bytes:
             0x83,
             _encode_dialing_number(sm.get("ton"), sm.get("npi"), sm.get("digits")),
         )
+    body += _encode_extras(payload.get("extras"))
     return _emit_tlv(0xA0, bytes(body))
 
 
 # ----------------------------------------------------------------------
-# CAT_TP bearer (tag 0xA1). Inner sub-tags per TS 102 124 §6 / TS 102 127:
+# CAT_TP bearer (tag 0xA2). Inner sub-tags per TS 102 124 §6 / TS 102 127:
 #
-#   80   bearer description (TS 11.14 §6.6.1)
-#   81   network access name (UTF-8)
-#   82   user login (UTF-8)
-#   83   user password (UTF-8)
+#   35   bearer description (TS 102 223 §8.52)
+#   47   network access name (TS 102 223 §8.70)
+#   0D   text string, first occurrence user login, second user password
 # ----------------------------------------------------------------------
 
 
@@ -232,18 +232,17 @@ def _decode_cat_tp_block(value: bytes) -> dict[str, Any]:
 
 
 def _encode_cat_tp_block(payload: dict[str, Any]) -> bytes:
-    return _encode_named_bearer(payload, outer_tag=0xA1)
+    return _encode_named_bearer(payload, outer_tag=0xA2)
 
 
 # ----------------------------------------------------------------------
-# HTTPS / TLS bearer (tag 0xA2). Sub-tags per ETSI TS 102 226 §5.7 /
+# HTTPS / TLS bearer (tag 0xA1). Sub-tags per ETSI TS 102 226 §5.7 /
 # GP Amd B §3.2:
 #
-#   80   bearer description
-#   81   network access name
-#   82   user login
-#   83   user password
-#   84   server URI (UTF-8, RFC 3986)
+#   35   bearer description
+#   47   network access name
+#   0D   text string, first occurrence user login, second user password
+#   84   legacy server URI (UTF-8, RFC 3986), preserved when present
 # ----------------------------------------------------------------------
 
 
@@ -270,18 +269,19 @@ def _encode_https_block(payload: dict[str, Any]) -> bytes:
         body_inner += _emit_tlv(0x84, str(payload["server_uri"]).encode("utf-8"))
     elif payload.get("server_uri_hex"):
         body_inner += _emit_tlv(0x84, _to_bytes(payload["server_uri_hex"], label="server_uri_hex"))
-    return _emit_tlv(0xA2, body_inner)
+    return _emit_tlv(0xA1, body_inner)
 
 
 # ----------------------------------------------------------------------
 # Shared helpers for the bearer-description / NAN / login / password
-# block used by CAT_TP and HTTPS (tags 80..83).
+# block used by CAT_TP and HTTPS.
 # ----------------------------------------------------------------------
 
 
 def _decode_named_bearer(value: bytes, *, bearer_name: str) -> dict[str, Any]:
     out: dict[str, Any] = {"bearer": bearer_name}
     cursor = 0
+    text_string_count = 0
     while cursor < len(value):
         parsed = _read_tlv(value, cursor)
         if parsed is None:
@@ -289,21 +289,33 @@ def _decode_named_bearer(value: bytes, *, bearer_name: str) -> dict[str, Any]:
             break
         tag, _length, val_offset, next_offset = parsed
         chunk = value[val_offset:next_offset]
-        if tag == 0x80:
+        if tag in (0x35, 0x80):
             out["bearer_description_hex"] = chunk.hex().upper()
-        elif tag == 0x81:
-            out["network_access_name"] = _utf8_or_hex(chunk)
+        elif tag in (0x47, 0x81):
+            out["network_access_name"] = (
+                _decode_network_access_name(chunk) if tag == 0x47 else _utf8_or_hex(chunk)
+            )
+        elif tag == 0x39 and len(chunk) == 2:
+            out["buffer_size"] = int.from_bytes(chunk, "big", signed=False)
         elif tag == 0x82:
             out["user_login"] = _utf8_or_hex(chunk)
         elif tag == 0x83:
             out["user_password"] = _utf8_or_hex(chunk)
+        elif tag == 0x0D:
+            text_string_count += 1
+            if text_string_count == 1:
+                out["user_login"] = _decode_text_string(chunk)
+            elif text_string_count == 2:
+                out["user_password"] = _decode_text_string(chunk)
+            else:
+                _append_extra(out, tag, chunk)
         elif tag == 0x84:
-            # Handled by the HTTPS-specific decoder where applicable;
-            # don't fall through to the extras bucket but still advance.
-            pass
+            try:
+                out["server_uri"] = chunk.decode("utf-8")
+            except UnicodeDecodeError:
+                out["server_uri_hex"] = chunk.hex().upper()
         else:
-            extras = out.setdefault("extras", [])
-            extras.append({"tag": f"{tag:02X}", "hex": chunk.hex().upper()})
+            _append_extra(out, tag, chunk)
         cursor = next_offset
     return out
 
@@ -315,16 +327,104 @@ def _utf8_or_hex(chunk: bytes) -> dict[str, Any]:
         return {"hex": chunk.hex().upper()}
 
 
+def _decode_network_access_name(chunk: bytes) -> dict[str, Any]:
+    labels: list[str] = []
+    offset = 0
+    while offset < len(chunk):
+        label_len = chunk[offset]
+        offset += 1
+        if label_len == 0:
+            break
+        end = offset + label_len
+        if end > len(chunk):
+            return {"hex": chunk.hex().upper()}
+        label = chunk[offset:end]
+        try:
+            labels.append(label.decode("ascii"))
+        except UnicodeDecodeError:
+            return {"hex": chunk.hex().upper()}
+        offset = end
+    if len(labels) == 0:
+        return {"hex": chunk.hex().upper()}
+    return {"text": ".".join(labels), "encoding": "network_access_name"}
+
+
+def _encode_network_access_name(value: Any) -> bytes:
+    if isinstance(value, dict):
+        if "hex" in value:
+            return _to_bytes(value["hex"], label="network_access_name")
+        value = value.get("text", "")
+    text = str(value or "").strip()
+    if len(text) == 0:
+        return b""
+    out = bytearray()
+    for label in text.split("."):
+        if len(label) == 0:
+            continue
+        encoded = label.encode("ascii")
+        if len(encoded) > 63:
+            raise ValueError("network_access_name labels must be at most 63 bytes.")
+        out.append(len(encoded))
+        out += encoded
+    return bytes(out)
+
+
+def _decode_text_string(chunk: bytes) -> dict[str, Any]:
+    if len(chunk) == 0:
+        return {"text": "", "coding_scheme_hex": "04"}
+    coding = chunk[0]
+    payload = chunk[1:] if coding in (0x00, 0x04, 0x08) else chunk
+    try:
+        decoded = payload.decode("utf-8")
+    except UnicodeDecodeError:
+        return {"hex": chunk.hex().upper()}
+    out: dict[str, Any] = {"text": decoded}
+    if payload is not chunk:
+        out["coding_scheme_hex"] = f"{coding:02X}"
+    return out
+
+
+def _encode_text_string(value: Any, *, label: str) -> bytes:
+    if isinstance(value, dict):
+        if "hex" in value:
+            return _to_bytes(value["hex"], label=label)
+        coding = _to_bytes(value.get("coding_scheme_hex", "04"), label=f"{label}.coding_scheme")
+        if len(coding) != 1:
+            raise ValueError(f"{label}.coding_scheme_hex must be one byte.")
+        return coding + str(value.get("text", "")).encode("utf-8")
+    return b"\x04" + str(value or "").encode("utf-8")
+
+
+def _has_text_or_hex(value: Any) -> bool:
+    if value is None:
+        return False
+    if isinstance(value, dict):
+        if "hex" in value:
+            return len(_strip(value.get("hex"))) > 0
+        if "text" in value:
+            return len(str(value.get("text") or "")) > 0
+        return len(value) > 0
+    return len(str(value or "")) > 0
+
+
 def _encode_named_bearer_body(payload: dict[str, Any]) -> bytes:
     body = bytearray()
     if payload.get("bearer_description_hex"):
-        body += _emit_tlv(0x80, _to_bytes(payload["bearer_description_hex"], label="bearer_description"))
-    if payload.get("network_access_name"):
-        body += _emit_tlv(0x81, _coerce_text_or_hex(payload["network_access_name"], label="network_access_name"))
-    if payload.get("user_login"):
-        body += _emit_tlv(0x82, _coerce_text_or_hex(payload["user_login"], label="user_login"))
-    if payload.get("user_password"):
-        body += _emit_tlv(0x83, _coerce_text_or_hex(payload["user_password"], label="user_password"))
+        body += _emit_tlv(0x35, _to_bytes(payload["bearer_description_hex"], label="bearer_description"))
+    if payload.get("buffer_size") not in (None, ""):
+        buffer_size = int(str(payload.get("buffer_size")), 0)
+        if not 0 <= buffer_size <= 0xFFFF:
+            raise ValueError("buffer_size must fit in two bytes.")
+        body += _emit_tlv(0x39, buffer_size.to_bytes(2, "big"))
+    if _has_text_or_hex(payload.get("network_access_name")):
+        encoded_nan = _encode_network_access_name(payload["network_access_name"])
+        if len(encoded_nan) > 0:
+            body += _emit_tlv(0x47, encoded_nan)
+    if _has_text_or_hex(payload.get("user_login")):
+        body += _emit_tlv(0x0D, _encode_text_string(payload["user_login"], label="user_login"))
+    if _has_text_or_hex(payload.get("user_password")):
+        body += _emit_tlv(0x0D, _encode_text_string(payload["user_password"], label="user_password"))
+    body += _encode_extras(payload.get("extras"))
     return bytes(body)
 
 
@@ -345,6 +445,25 @@ def _encode_named_bearer(payload: dict[str, Any], *, outer_tag: int) -> bytes:
     return _emit_tlv(outer_tag, _encode_named_bearer_body(payload))
 
 
+def _append_extra(out: dict[str, Any], tag: int, chunk: bytes) -> None:
+    extras = out.setdefault("extras", [])
+    extras.append({"tag": f"{tag:02X}", "hex": chunk.hex().upper()})
+
+
+def _encode_extras(extras: Any) -> bytes:
+    if isinstance(extras, list) is False:
+        return b""
+    out = bytearray()
+    for entry in extras:
+        if isinstance(entry, dict) is False:
+            continue
+        tag_bytes = _to_bytes(entry.get("tag"), label="extras.tag")
+        if len(tag_bytes) != 1:
+            raise ValueError("extras.tag must be a single byte.")
+        out += _emit_tlv(tag_bytes[0], _to_bytes(entry.get("hex"), label="extras.hex"))
+    return bytes(out)
+
+
 # ----------------------------------------------------------------------
 # Public façade
 # ----------------------------------------------------------------------
@@ -352,8 +471,8 @@ def _encode_named_bearer(payload: dict[str, Any], *, outer_tag: int) -> bytes:
 
 _BEARER_DECODERS: dict[int, Any] = {
     0xA0: _decode_sms_block,
-    0xA1: _decode_cat_tp_block,
-    0xA2: _decode_https_block,
+    0xA1: _decode_https_block,
+    0xA2: _decode_cat_tp_block,
 }
 
 
@@ -440,8 +559,8 @@ def encode_connectivity_parameters(bearers: list[dict[str, Any]]) -> str:
 def bearer_catalog() -> list[dict[str, Any]]:
     return [
         {"bearer": "sms",    "tag_hex": "A0", "spec": "ETSI TS 102 225 §5.1 / 3GPP TS 31.115 §4"},
-        {"bearer": "cat_tp", "tag_hex": "A1", "spec": "ETSI TS 102 124 / TS 102 127"},
-        {"bearer": "https",  "tag_hex": "A2", "spec": "ETSI TS 102 226 §5.7 / GP Amd B §3.2"},
+        {"bearer": "https",  "tag_hex": "A1", "spec": "ETSI TS 102 226 §5.7 / GP Amd B §3.2"},
+        {"bearer": "cat_tp", "tag_hex": "A2", "spec": "ETSI TS 102 124 / TS 102 127"},
     ]
 
 

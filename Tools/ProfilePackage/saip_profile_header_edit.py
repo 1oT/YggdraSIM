@@ -175,8 +175,8 @@ def _bytes_field_repr(value: Any) -> str:
 # ----------------------------------------------------------------------
 
 
-def _iccid_digits_to_bcd_bytes(digits: str) -> bytes:
-    """Encode 19/20-digit ICCID into 10 bytes (manual: encoded, not nibble-swapped)."""
+def _iccid_digits_to_header_bytes(digits: str) -> bytes:
+    """Encode 19/20-digit ICCID into the ProfileHeader byte order."""
     cleaned = re.sub(r"\s+|-", "", digits or "")
     if _DIGITS_RE.fullmatch(cleaned) is None:
         raise ValueError(f"ICCID must contain digits only: {digits!r}")
@@ -186,28 +186,91 @@ def _iccid_digits_to_bcd_bytes(digits: str) -> bytes:
         )
     if len(cleaned) == 19:
         cleaned = cleaned + "F"
-    out = bytearray(10)
-    for index in range(10):
-        high = cleaned[index * 2]
-        low = cleaned[index * 2 + 1]
-        # TS 102 221 §13.2 — ICCID stored as BCD, low nybble first
-        # (i.e. swapped); the manual phrasing "encoded, not nibble-
-        # swapped" refers to the operator-facing input string, which
-        # we preserve as-is and only swap when packing.
-        out[index] = (int(low, 16) << 4) | int(high, 16)
-    return bytes(out)
+    return bytes.fromhex(cleaned)
 
 
-def _iccid_bcd_bytes_to_digits(raw: bytes) -> str:
+def _iccid_header_bytes_to_digits(raw: bytes) -> str:
     if len(raw) == 0:
         return ""
-    digits = []
+    return raw.hex().upper().rstrip("F")
+
+
+def _ef_iccid_bytes_to_digits(raw: bytes) -> str:
+    if len(raw) == 0:
+        return ""
+    digits: list[str] = []
     for byte in raw:
         digits.append(f"{byte & 0x0F:X}")
         digits.append(f"{(byte >> 4) & 0x0F:X}")
-    text = "".join(digits)
-    text = text.rstrip("F")
-    return text
+    return "".join(digits).rstrip("F")
+
+
+def _coerce_hex_bytes(value: Any) -> bytes | None:
+    if value is None:
+        return None
+    if isinstance(value, (bytes, bytearray)):
+        return bytes(value)
+    if isinstance(value, dict):
+        inner = value.get("hex")
+        if isinstance(inner, str):
+            try:
+                return bytes.fromhex(re.sub(r"\s+", "", inner))
+            except ValueError:
+                return None
+        inner = value.get("__ygg_saip_bytes__")
+        if isinstance(inner, str):
+            try:
+                return bytes.fromhex(re.sub(r"\s+", "", inner))
+            except ValueError:
+                return None
+    if isinstance(value, str):
+        try:
+            return bytes.fromhex(re.sub(r"\s+", "", value))
+        except ValueError:
+            return None
+    return None
+
+
+def _walk_choice_paths(payload: Any, base_path: str = "") -> list[tuple[str, Any]]:
+    rows: list[tuple[str, Any]] = []
+    if isinstance(payload, dict):
+        for key_text, value in payload.items():
+            key_part = str(key_text)
+            full_path = key_part if base_path == "" else f"{base_path}.{key_part}"
+            rows.append((full_path, value))
+            rows.extend(_walk_choice_paths(value, full_path))
+        return rows
+    if isinstance(payload, (list, tuple)):
+        if isinstance(payload, tuple) and len(payload) == 2 and isinstance(payload[0], str):
+            name = str(payload[0])
+            value = payload[1]
+            full_path = name if base_path == "" else f"{base_path}.{name}"
+            rows.append((full_path, value))
+            rows.extend(_walk_choice_paths(value, full_path))
+            return rows
+        for index, value in enumerate(payload):
+            full_path = f"{base_path}[{index}]"
+            rows.append((full_path, value))
+            rows.extend(_walk_choice_paths(value, full_path))
+        return rows
+    return rows
+
+
+def _first_ef_iccid_content(decoded_document: dict[str, Any]) -> bytes | None:
+    sections = decoded_document.get("sections") or {}
+    if isinstance(sections, dict) is False:
+        return None
+    for _section_key, payload in sections.items():
+        for path, value in _walk_choice_paths(payload):
+            lowered = path.lower()
+            if "ef-iccid" not in lowered:
+                continue
+            if not lowered.endswith(".fillfilecontent"):
+                continue
+            raw = _coerce_hex_bytes(value)
+            if raw is not None and len(raw) > 0:
+                return raw
+    return None
 
 
 # ----------------------------------------------------------------------
@@ -277,13 +340,13 @@ def set_iccid_digits(header: dict[str, Any], digits: str | None) -> str:
     cleaned = re.sub(r"\s+|-", "", str(digits or ""))
     if len(cleaned) == 0:
         raise ValueError("ICCID is mandatory in ProfileHeader (TCA SAIP §A.2).")
-    encoded = _iccid_digits_to_bcd_bytes(cleaned)
+    encoded = _iccid_digits_to_header_bytes(cleaned)
     header["iccid"] = encoded
     return f"iccid set to {cleaned} ({len(encoded)} bytes)."
 
 
 def set_iccid_hex(header: dict[str, Any], hex_value: str | None) -> str:
-    """Replace ``iccid`` directly from a 20-nybble hex string (already swapped)."""
+    """Replace ``iccid`` directly from a 20-nybble header-order hex string."""
     cleaned = _normalise_hex(hex_value, even_length=True, label="iccid")
     if len(cleaned) != 20:
         raise ValueError(
@@ -301,6 +364,21 @@ def set_pol_hex(header: dict[str, Any], hex_value: str | None) -> str:
         return "pol cleared."
     header["pol"] = bytes.fromhex(text)
     return f"pol set to {text}."
+
+
+def sync_header_iccid_from_ef(decoded_document: dict[str, Any]) -> str:
+    """Set ProfileHeader ``iccid`` from the first EF.ICCID content."""
+    _section_key, header = locate_header_section(decoded_document)
+    ef_bytes = _first_ef_iccid_content(decoded_document)
+    if ef_bytes is None:
+        raise ValueError("EF.ICCID fillFileContent was not found.")
+    digits = _ef_iccid_bytes_to_digits(ef_bytes)
+    if _DIGITS_RE.fullmatch(digits) is None or len(digits) not in (19, 20):
+        raise ValueError(
+            "EF.ICCID does not decode to a 19/20-digit ICCID "
+            f"(got {digits!r})."
+        )
+    return set_iccid_digits(header, digits)
 
 
 def set_mandatory_services(header: dict[str, Any], services: dict[str, Any]) -> str:
@@ -444,7 +522,7 @@ def header_summary(header: dict[str, Any]) -> dict[str, Any]:
         "minor_version": int(header.get("minor-version") or 0),
         "profile_type": str(header.get("profileType") or ""),
         "iccid_hex": iccid_bytes.hex().upper(),
-        "iccid_digits": _iccid_bcd_bytes_to_digits(iccid_bytes),
+        "iccid_digits": _iccid_header_bytes_to_digits(iccid_bytes),
         "pol_hex": _bytes_field_repr(header.get("pol")),
         "mandatory_services": {
             key: True for key in services.keys() if key in SERVICES_LIST_KEYS
@@ -466,6 +544,7 @@ __all__ = [
     "set_connectivity_parameters_hex",
     "set_iccid_digits",
     "set_iccid_hex",
+    "sync_header_iccid_from_ef",
     "set_iot_pix_hex",
     "set_major_minor_version",
     "set_mandatory_aids",

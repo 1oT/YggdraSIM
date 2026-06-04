@@ -1215,6 +1215,8 @@ def _launch_hil_bridge_wireshark ()->None :
     capture_interface ,
     "-f",
     _hil_bridge_gsmtap_capture_filter (),
+    "-style",
+    "Adwaita-Dark",
     ]
     subprocess .Popen (
     command ,
@@ -2633,9 +2635,11 @@ def run_cli (argv =None ):
     gui_exit =_route_gui_modes (args )
     if gui_exit is not None :
         return int (gui_exit )
-    global_debug_enabled =bool (getattr (args ,"debug",False ))
-    # Only the wrapper flag promotes debug to a process-global default.
-    set_global_debug (global_debug_enabled )
+    # When --debug is passed, promote to a process-global default and
+    # persist it.  When omitted, leave any previously persisted value
+    # in place so debug state survives across sessions.
+    if bool (getattr (args ,"debug",False )):
+        set_global_debug (True )
     install_noisy_warning_filters ()
     card_backend_value =getattr (args ,"card_backend",None )
     if card_backend_value is None :
