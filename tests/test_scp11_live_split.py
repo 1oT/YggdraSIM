@@ -2019,6 +2019,58 @@ class LiveSplitTests(unittest.TestCase):
         )
         self.assertEqual(bytes.fromhex(send_log[-1][0])[:2], bytes.fromhex("81E2"))
 
+    def test_active_logical_channel_failure_keeps_error_context(self):
+        send_log: list[tuple[str, str]] = []
+
+        def fake_send(apdu: bytes, log_name: str = "") -> bytes:
+            send_log.append((apdu.hex().upper(), log_name))
+            if log_name == "DOWNLOAD: ListNotifications":
+                raise IOError("APDU Failed: 6985")
+            if log_name == "DOWNLOAD: ListNotifications [ACTIVE CH1]":
+                raise IOError("APDU Failed: 6985 active")
+            if log_name == "DOWNLOAD: ListNotifications [OPEN LOGICAL CHANNEL]":
+                return b"\x01"
+            if log_name == "DOWNLOAD: ListNotifications [CH1]":
+                raise IOError("APDU Failed: 6985 logical")
+            if log_name == "DOWNLOAD: ListNotifications [STK MODE BASIC]":
+                raise IOError("APDU Failed: 6985 stk")
+            return b""
+
+        apdu_channel = SimpleNamespace(send=fake_send, reset=lambda: True)
+        orchestrator = SGP22Orchestrator(
+            cfg=SimpleNamespace(
+                AID_ISD_R=bytes.fromhex("A0000005591010FFFFFFFF8900000100"),
+            ),
+            apdu_channel=apdu_channel,
+            profile_provider=None,
+        )
+        orchestrator._es10b_logical_channel = 1
+
+        with self.assertRaises(RuntimeError) as raised:
+            orchestrator._send_es10b_store_data(
+                bytes.fromhex("BF2800"),
+                "DOWNLOAD: ListNotifications",
+                allow_stk_retry=True,
+            )
+
+        error_text = str(raised.exception)
+        self.assertIn("active channel retry failed: APDU Failed: 6985 active", error_text)
+        self.assertIn("logical channel retry failed: APDU Failed: 6985 logical", error_text)
+        self.assertIn("STK mode retry failed: APDU Failed: 6985 stk", error_text)
+
+    def test_retrieve_notification_request_encodes_high_bit_sequence_as_positive_integer(self):
+        orchestrator = SGP22Orchestrator(
+            cfg=SimpleNamespace(
+                AID_ISD_R=bytes.fromhex("A0000005591010FFFFFFFF8900000100"),
+            ),
+            apdu_channel=SimpleNamespace(send=lambda *_args, **_kwargs: b"", reset=lambda: True),
+            profile_provider=None,
+        )
+
+        payload = orchestrator._build_retrieve_notification_request_payload(188)
+
+        self.assertEqual(payload, bytes.fromhex("BF2B06A004800200BC"))
+
     def test_live_notification_sync_falls_back_to_bf2b_after_bf28_6a88(self):
         pending_notification = wrap_tlv(
             "BF37",

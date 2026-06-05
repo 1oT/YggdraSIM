@@ -2588,11 +2588,13 @@ class LocalIsdrSession:
 
     @staticmethod
     def _encode_notification_sequence(seq_number: int) -> bytes:
-        if seq_number <= 0xFF:
-            return seq_number.to_bytes(1, "big")
-        if seq_number <= 0xFFFF:
-            return seq_number.to_bytes(2, "big")
-        return seq_number.to_bytes(4, "big")
+        if seq_number < 0:
+            raise ValueError("Notification seqNumber must be non-negative.")
+        byte_length = max(1, (seq_number.bit_length() + 7) // 8)
+        encoded = seq_number.to_bytes(byte_length, "big")
+        if encoded[0] & 0x80:
+            return b"\x00" + encoded
+        return encoded
 
     def _describe_bpp_command_sequence(self, bpp_bytes: bytes) -> list[str]:
         descriptions: list[str] = []

@@ -1,9 +1,10 @@
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """Tests for SCP11/shared/gsma_error_codes.py.
 
-Covers all 13 public functions:
+Covers all 14 public functions:
   describe_sgp22_profile_state_result, describe_sgp22_notification_sent_result,
-  describe_sgp22_download_error, describe_sgp22_profile_installation_reason,
+  describe_sgp22_notifications_list_result_error, describe_sgp22_download_error,
+  describe_sgp22_profile_installation_reason,
   describe_sgp32_eim_package_error, describe_sgp32_eim_package_result_error,
   describe_sgp32_profile_download_error_reason,
   resolve_sgp22_profile_state_result_code, resolve_sgp22_download_error_code,
@@ -19,6 +20,7 @@ import unittest
 from SCP11.shared.gsma_error_codes import (
     describe_sgp22_download_error,
     describe_sgp22_notification_sent_result,
+    describe_sgp22_notifications_list_result_error,
     describe_sgp22_profile_installation_reason,
     describe_sgp22_profile_state_result,
     describe_sgp32_eim_package_error,
@@ -57,6 +59,17 @@ class DescribeSgp22NotificationSentResultTests(unittest.TestCase):
 
     def test_unknown_code_contains_code(self) -> None:
         result = describe_sgp22_notification_sent_result(200)
+        self.assertIn("200", result)
+
+
+class DescribeSgp22NotificationsListResultErrorTests(unittest.TestCase):
+
+    def test_known_code_returns_name_and_code(self) -> None:
+        result = describe_sgp22_notifications_list_result_error(127)
+        self.assertEqual(result, "undefinedError(127)")
+
+    def test_unknown_code_contains_code(self) -> None:
+        result = describe_sgp22_notifications_list_result_error(200)
         self.assertIn("200", result)
 
 

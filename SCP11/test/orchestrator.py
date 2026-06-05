@@ -36,7 +36,10 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec, utils as asym_utils
 from SCP03.logic.sgp32_decode import decode_eim_configuration_entries as decode_eim_configuration_entries_shared
 from SCP03.logic.sgp32_decode import decode_eim_configuration_entry as decode_eim_configuration_entry_shared
-from SCP11.shared.gsma_error_codes import describe_sgp32_eim_package_error
+from SCP11.shared.gsma_error_codes import (
+    describe_sgp22_notifications_list_result_error,
+    describe_sgp32_eim_package_error,
+)
 from yggdrasim_common.process_debug import debug_print
 
 try:
@@ -811,6 +814,7 @@ class SGP22Orchestrator:
             if allow_stk_retry is False or self._should_retry_with_stk_bootstrap(error) is False:
                 raise
             active_channel = int(self._es10b_logical_channel or 0)
+            active_channel_error = None
             if active_channel > 0:
                 print(
                     f"[*] {log_name} failed ({error}); priming active "
@@ -822,12 +826,12 @@ class SGP22Orchestrator:
                         log_name,
                     )
                 except Exception as active_error:
+                    active_channel_error = active_error
                     print(
                         f"[*] {log_name} failed on active logical channel recovery "
                         f"({active_error}); reopening ISD-R on a fresh logical channel."
                     )
             else:
-                active_error = None
                 print(
                     f"[*] {log_name} failed ({error}); reopening ISD-R on a fresh "
                     f"logical channel and retrying."
@@ -845,8 +849,8 @@ class SGP22Orchestrator:
                     return self._send_es10b_store_data_with_stk_mode(payload, log_name)
                 except Exception as stk_mode_error:
                     active_error_text = ""
-                    if active_error is not None:
-                        active_error_text = f"; active channel retry failed: {active_error}"
+                    if active_channel_error is not None:
+                        active_error_text = f"; active channel retry failed: {active_channel_error}"
                     raise RuntimeError(
                         f"{log_name} failed ({error}){active_error_text}; logical channel retry failed: "
                         f"{logical_error}; STK mode retry failed: {stk_mode_error}"
@@ -3666,6 +3670,15 @@ class SGP22Orchestrator:
         except Exception as error:
             print(f"[*] Notification sync: retrieveNotification failed for seq={seq_number} ({error}).")
             return b""
+        result_error = self._extract_retrieve_notifications_result_error(response)
+        if isinstance(result_error, int):
+            error_text = describe_sgp22_notifications_list_result_error(result_error)
+            print(
+                f"[*] Notification sync: retrieveNotification returned "
+                f"notificationsListResultError={error_text} for seq={seq_number}; "
+                "leaving the entry on-card for the next attempt."
+            )
+            return b""
         raw_pending_notification = self._extract_pending_notification_payload(response)
         if len(raw_pending_notification) == 0:
             print(f"[*] Notification sync: no decodable pending notification for seq={seq_number}.")
@@ -3708,15 +3721,39 @@ class SGP22Orchestrator:
                     return b""
         return b""
 
+    def _extract_retrieve_notifications_result_error(self, raw_response: bytes) -> Optional[int]:
+        if len(raw_response) == 0:
+            return None
+        try:
+            decoded = decode_retrieve_notifications_list_response(raw_response)
+        except Exception:
+            decoded = None
+        if isinstance(decoded, tuple) and len(decoded) == 2:
+            choice_name, choice_value = decoded
+            if choice_name == "notificationsListResultError" and isinstance(choice_value, int):
+                return int(choice_value)
+        try:
+            root_tag, root_value, _, _ = self._read_tlv(raw_response, 0)
+            if root_tag != bytes.fromhex("BF2B"):
+                return None
+            result_tag, result_value, _, _ = self._read_tlv(root_value, 0)
+        except Exception:
+            return None
+        if result_tag != b"\x81" or len(result_value) == 0:
+            return None
+        return int.from_bytes(result_value, "big", signed=False)
+
     def _wrap_tlv(self, tag_bytes: bytes, value: bytes) -> bytes:
         return tag_bytes + self._encode_der_length(len(value)) + value
 
     def _encode_notification_sequence(self, seq_number: int) -> bytes:
-        if seq_number <= 0xFF:
-            return seq_number.to_bytes(1, "big")
-        if seq_number <= 0xFFFF:
-            return seq_number.to_bytes(2, "big")
-        return seq_number.to_bytes(4, "big")
+        if seq_number < 0:
+            raise ValueError("Notification seqNumber must be non-negative.")
+        byte_length = max(1, (seq_number.bit_length() + 7) // 8)
+        encoded = seq_number.to_bytes(byte_length, "big")
+        if encoded[0] & 0x80:
+            return b"\x00" + encoded
+        return encoded
 
     def _encode_der_length(self, length: int) -> bytes:
         if length < 0x80:
