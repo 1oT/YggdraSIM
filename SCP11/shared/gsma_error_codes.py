@@ -21,6 +21,12 @@ SGP22_NOTIFICATION_SENT_RESULT: Dict[int, str] = {
     127: "undefinedError",
 }
 
+# SGP.22 / RSP (ES10b) RetrieveNotificationsListResponse notificationsListResultError
+SGP22_NOTIFICATIONS_LIST_RESULT_ERROR: Dict[int, str] = {
+    1: "noResultAvailable",
+    127: "undefinedError",
+}
+
 # SGP.22 PrepareDownload / DownloadErrorCode
 SGP22_DOWNLOAD_ERROR_CODE: Dict[int, str] = {
     1: "invalidCertificate",
@@ -102,6 +108,10 @@ def describe_sgp22_profile_state_result(code: int) -> str:
 
 def describe_sgp22_notification_sent_result(code: int) -> str:
     return _describe_code(SGP22_NOTIFICATION_SENT_RESULT, code, "deleteNotificationStatus")
+
+
+def describe_sgp22_notifications_list_result_error(code: int) -> str:
+    return _describe_code(SGP22_NOTIFICATIONS_LIST_RESULT_ERROR, code, "notificationsListResultError")
 
 
 def describe_sgp22_download_error(code: int) -> str:

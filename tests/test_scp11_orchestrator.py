@@ -1058,6 +1058,38 @@ class OrchestratorFlowTests(unittest.TestCase):
         self.assertIn("DOWNLOAD: RemoveNotificationFromList [106]", send_logs)
         self.assertIs(orchestrator._last_notification_sync_succeeded, True)
 
+    def test_retrieve_notification_reports_bf2b_result_error(self):
+        provider = FakeProvider(b"")
+        apdu_channel = FakeApduChannel(notification_retrieve_response=bytes.fromhex("BF2B0381017F"))
+        orchestrator = SGP22Orchestrator(
+            cfg=FakeCfg(),
+            apdu_channel=apdu_channel,
+            profile_provider=provider,
+        )
+
+        with mock.patch("builtins.print") as print_mock:
+            result = orchestrator._retrieve_pending_notification(186)
+
+        rendered = "\n".join(str(call.args[0]) for call in print_mock.call_args_list if len(call.args) > 0)
+        self.assertEqual(result, b"")
+        self.assertIn("notificationsListResultError=undefinedError(127)", rendered)
+        self.assertIn("seq=186", rendered)
+        self.assertNotIn("no decodable pending notification", rendered)
+        retrieve_calls = [call for call in apdu_channel.send_calls if call[0] == "DOWNLOAD: RetrieveNotification [186]"]
+        self.assertEqual(len(retrieve_calls), 1)
+        self.assertEqual(retrieve_calls[0][1], bytes.fromhex("80E2910009BF2B06A004800200BA"))
+
+    def test_retrieve_notification_request_encodes_high_bit_sequence_as_positive_integer(self):
+        orchestrator = SGP22Orchestrator(
+            cfg=FakeCfg(),
+            apdu_channel=FakeApduChannel(),
+            profile_provider=FakeProvider(b""),
+        )
+
+        payload = orchestrator._build_retrieve_notification_request_payload(188)
+
+        self.assertEqual(payload, bytes.fromhex("BF2B06A004800200BC"))
+
     def test_notification_sync_recovers_from_6e00_via_fresh_logical_channel(self):
         # Regression for the EnableProfile → ListNotifications cascade:
         # ETSI TS 102 221 §11.1.17 + SGP.22 §5.7.10. The base-channel
@@ -1185,6 +1217,44 @@ class OrchestratorFlowTests(unittest.TestCase):
         )
         self.assertEqual(apdu_channel.send_calls[-1][1][:2], bytes.fromhex("81E2"))
         self.assertIs(orchestrator._last_notification_sync_succeeded, True)
+
+    def test_active_channel_recovery_failure_preserves_error_context(self):
+        cfg = FakeCfg()
+        apdu_channel = FakeApduChannel()
+
+        def send_with_exhausted_recovery(apdu: bytes, log_name: str) -> bytes:
+            apdu_channel.send_calls.append((log_name, apdu))
+            if log_name == "DOWNLOAD: ListNotifications":
+                raise IOError("APDU Failed: 6985")
+            if log_name == "DOWNLOAD: ListNotifications [ACTIVE CH1]":
+                raise IOError("APDU Failed: 6985 active")
+            if log_name == "DOWNLOAD: ListNotifications [OPEN LOGICAL CHANNEL]":
+                return b"\x01"
+            if log_name == "DOWNLOAD: ListNotifications [CH1]":
+                raise IOError("APDU Failed: 6985 logical")
+            if log_name == "DOWNLOAD: ListNotifications [STK MODE BASIC]":
+                raise IOError("APDU Failed: 6985 stk")
+            return b""
+
+        apdu_channel.send = send_with_exhausted_recovery
+        orchestrator = SGP22Orchestrator(
+            cfg=cfg,
+            apdu_channel=apdu_channel,
+            profile_provider=FakeProvider(b""),
+        )
+        orchestrator._es10b_logical_channel = 1
+
+        with self.assertRaises(RuntimeError) as raised:
+            orchestrator._send_es10b_store_data(
+                bytes.fromhex("BF2800"),
+                "DOWNLOAD: ListNotifications",
+                allow_stk_retry=True,
+            )
+
+        error_text = str(raised.exception)
+        self.assertIn("active channel retry failed: APDU Failed: 6985 active", error_text)
+        self.assertIn("logical channel retry failed: APDU Failed: 6985 logical", error_text)
+        self.assertIn("STK mode retry failed: APDU Failed: 6985 stk", error_text)
 
     def test_notification_sync_marks_failure_when_recovery_exhausted(self):
         # When base channel, MANAGE CHANNEL recovery, and STK mode all

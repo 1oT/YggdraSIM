@@ -1978,6 +1978,13 @@ class LocalAccessSessionTests(unittest.TestCase):
         self.assertIn("LOCAL: RetrieveNotification [543]", log_names)
         self.assertIn("LOCAL: RemoveNotificationFromList [543]", log_names)
 
+    def test_retrieve_notification_request_encodes_high_bit_sequence_as_positive_integer(self):
+        session = LocalIsdrSession(apdu_channel=FakeApduChannel())
+
+        payload = session._build_retrieve_notification_request_payload(188)
+
+        self.assertEqual(payload, bytes.fromhex("BF2B06A004800200BC"))
+
     def test_load_profile_from_bytes_advances_progress_per_segment_and_sync(self):
         """
         Regression: the sticky-footer progress bar must keep moving
