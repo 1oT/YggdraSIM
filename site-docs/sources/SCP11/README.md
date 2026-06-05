@@ -17,11 +17,11 @@ Use this file as the entry point for choosing the correct `SCP11` module.
 
 | Module | Use when | Card transport | Network role | Primary guide |
 | --- | --- | --- | --- | --- |
-| `SCP11/live` | production-like relay work with live-certificate defaults | `pcsc` or `relay` | remote ES9+ / eIM | `SCP11/live/README.md` |
-| `SCP11/test` | lab relay work with test-certificate defaults and extra request shaping | `pcsc` or `relay` | remote ES9+ / eIM | `SCP11/test/README.md` |
+| `SCP11/live` | production-like relay work with live-certificate defaults | `pcsc` | remote ES9+ / eIM | `SCP11/live/README.md` |
+| `SCP11/test` | lab relay work with test-certificate defaults and extra request shaping | `pcsc` | remote ES9+ / eIM | `SCP11/test/README.md` |
 | `SCP11/local_access` | direct local `ISD-R` bring-up and on-card profile loading | `pcsc` | no relay dependency | `SCP11/local_access/README.md` |
 | `SCP11/eim_local` | eIM-side package authoring, localized polling, and handover validation | `pcsc` | local eIM / SM-DP+ bridge | `SCP11/eim_local/README.md` |
-| `SCP11/relay` | preserve older relay imports and automation contracts | `pcsc` or `relay` | compatibility namespace | `SCP11/relay/README.md` |
+| `SCP11/relay` | preserve older relay imports and automation contracts | `pcsc` | compatibility namespace | `SCP11/relay/README.md` |
 | `SCP11/shared` | shared helpers only | n/a | n/a | `SCP11/shared/README.md` |
 
 ### Canonical vs legacy orchestrator / console trees (v1 freeze)
@@ -76,8 +76,8 @@ through the Guides menu and the main module selector.
 
 ## Common runtime assumptions
 
-- card-facing work requires a usable PC/SC reader unless the selected relay
-  shell is configured for HTTP relay transport
+- card-facing work requires a usable PC/SC reader unless the simulator backend
+  is explicitly selected
 - relay shells require ES9+ / SM-DP+ settings that are valid for the target
   environment
 - direct local flows require usable local SCP11 credential material

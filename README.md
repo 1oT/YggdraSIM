@@ -2,12 +2,13 @@
 
 YggdraSIM is a Python toolkit for secure-element research, eUICC analysis, SIM/eSIM management, OTA payload work, SCP11 relay/local flows, and SAIP profile-package tooling. The repository keeps the operator surfaces, protocol helpers, and test suite in one workspace so card work, relay work, and package work can be exercised without switching projects. The SAIP decoding path and the SCP11 local / eIM flows pull in upstream `pySim`; install them in one shot with `pip install -e '.[saip]'` (the `[saip]` extra pins pySim directly from its GitHub mirror).
 
-> **Releases.** v1.0.0 was tagged on 2026-04-29. Check out the frozen
-> v1 footprint with `git checkout v1.0.0`. The `main` branch carries
+> **Releases.** v1.0.1 was tagged on 2026-06-05 for SCP11 notification
+> recovery fixes on the v1 line. Check out the frozen v1.0.0 footprint
+> with `git checkout v1.0.0`. The `main` branch carries
 > in-flight v2 work — surfaces tagged `(post-v1 staging)`
-> below are part of that v2 line and are not covered by the v1.0.0
-> compatibility promise. See [`CHANGELOG.md`](CHANGELOG.md) and
-> tracked in `CHANGELOG.md` for the active backlog.
+> below are part of that v2 line and are not covered by the v1.0.x
+> compatibility promise. See [`CHANGELOG.md`](CHANGELOG.md) for release
+> notes and the active backlog.
 
 ## Distribution at a glance
 
