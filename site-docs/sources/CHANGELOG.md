@@ -24,6 +24,24 @@ file) may change without notice between minor releases.
   pass for these modules are still pending — they are not part of
   the v1.0.0 promise.
 
+## [1.0.1] — 2026-06-05
+
+### Fixed
+
+- SCP11 live and relay notification sync now encode
+  `seqNumber >= 0x80` as positive ASN.1 INTEGER values before
+  `RetrieveNotification`, `RemoveNotificationFromList`, and local-access
+  notification requests. This avoids cards interpreting values such as
+  `188` as a negative INTEGER.
+- SCP11 notification sync now reports
+  `notificationsListResultError` responses such as `undefinedError(127)`
+  directly, instead of treating the response as an undecodable pending
+  notification.
+- SCP11 live notification listing now preserves active-channel recovery
+  context and falls back through active logical channel priming, fresh
+  logical-channel recovery, and STK-mode bootstrap for recoverable
+  `6E00` / `6985` style failures after profile-state changes.
+
 ## [1.0.0] — 2026-04-29
 
 First SemVer-tagged release. Cut at git tag `v1.0.0`. Pinned commit
@@ -88,5 +106,6 @@ exposes a frozen v1 footprint; the v2 staging continues on `main`.
   values; pushing them to a shared remote was a foot-gun. The
   `reports/.gitkeep` placeholder documents the intended layout.
 
-[Unreleased]: https://example.invalid/yggdrasim/compare/v1.0.0...HEAD
+[Unreleased]: https://example.invalid/yggdrasim/compare/v1.0.1...HEAD
+[1.0.1]: https://example.invalid/yggdrasim/releases/tag/v1.0.1
 [1.0.0]: https://example.invalid/yggdrasim/releases/tag/v1.0.0
