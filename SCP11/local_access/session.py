@@ -2435,17 +2435,19 @@ class LocalIsdrSession:
         if isinstance(decoded, tuple) is True and len(decoded) == 2:
             choice_name, choice_value = decoded
             if choice_name == "notificationMetadataList" and isinstance(choice_value, list):
+                decoded_entries: list[dict[str, Optional[int]]] = []
                 for entry in choice_value:
                     if isinstance(entry, dict) is False:
                         continue
                     seq_number = entry.get("seqNumber")
-                    entries.append(
+                    decoded_entries.append(
                         {
                             "seqNumber": int(seq_number) if isinstance(seq_number, int) else None,
                         }
                     )
-                return entries
-        # pySim decoder returned nothing usable — fall back to manual BER-TLV
+                if len(decoded_entries) > 0:
+                    return decoded_entries
+        # pySim decoder returned nothing usable -- fall back to manual BER-TLV
         # parsing so that notifications queued on the eUICC are never missed.
         try:
             root_tag, root_value, _, _ = self._read_tlv(raw_response, 0)
@@ -2514,25 +2516,25 @@ class LocalIsdrSession:
         if len(raw_response) == 0:
             return b""
         try:
-            decoded = decode_retrieve_notifications_list_response(raw_response)
+            decode_retrieve_notifications_list_response(raw_response)
         except Exception:
-            decoded = None
-        if isinstance(decoded, tuple) and len(decoded) == 2:
-            choice_name, _choice_value = decoded
-            if choice_name == "notificationList":
+            pass
+        try:
+            root_tag, root_value, _, _ = self._read_tlv(raw_response, 0)
+            if root_tag != bytes.fromhex("BF2B"):
+                return b""
+            choice_tag, choice_bytes, _, _ = self._read_tlv(root_value, 0)
+            if choice_tag not in [b"\xA0", b"\x60"]:
+                return b""
+            pending_tag, _, pending_raw, _ = self._read_tlv(choice_bytes, 0)
+            if pending_tag in [b"\x30", bytes.fromhex("BF37")]:
                 try:
-                    root_tag, root_value, _, _ = self._read_tlv(raw_response, 0)
-                    if root_tag != bytes.fromhex("BF2B"):
-                        return b""
-                    choice_tag, choice_bytes, _, _ = self._read_tlv(root_value, 0)
-                    if choice_tag not in [b"\xA0", b"\x60"]:
-                        return b""
-                    pending_tag, _, pending_raw, _ = self._read_tlv(choice_bytes, 0)
-                    if pending_tag in [b"\x30", bytes.fromhex("BF37")]:
-                        decode_pending_notification(pending_raw)
-                        return pending_raw
+                    decode_pending_notification(pending_raw)
                 except Exception:
-                    return b""
+                    pass
+                return pending_raw
+        except Exception:
+            return b""
         return b""
 
     def _remove_notification_from_list(self, seq_number: Optional[int]) -> None:
@@ -2588,11 +2590,13 @@ class LocalIsdrSession:
 
     @staticmethod
     def _encode_notification_sequence(seq_number: int) -> bytes:
-        if seq_number <= 0xFF:
-            return seq_number.to_bytes(1, "big")
-        if seq_number <= 0xFFFF:
-            return seq_number.to_bytes(2, "big")
-        return seq_number.to_bytes(4, "big")
+        if seq_number < 0:
+            raise ValueError("Notification seqNumber must be non-negative.")
+        byte_length = max(1, (seq_number.bit_length() + 7) // 8)
+        encoded = seq_number.to_bytes(byte_length, "big")
+        if encoded[0] & 0x80:
+            return b"\x00" + encoded
+        return encoded
 
     def _describe_bpp_command_sequence(self, bpp_bytes: bytes) -> list[str]:
         descriptions: list[str] = []

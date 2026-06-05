@@ -11,6 +11,19 @@ Internal helpers (modules under leading-underscore names and
 undocumented SAIP wrappers) may change without notice between minor
 releases.
 
+## [1.0.2]
+
+### Fixed
+
+- SCP11 notification metadata and pending-notification extraction fall back
+  to manual BER-TLV parsing when pySim returns an empty list or rejects
+  long-form notification TLVs.
+- SCP11 notification sequence values are encoded as positive ASN.1 INTEGERs
+  for retrieve and local notification requests, including values with the
+  high bit set.
+- Source checkouts report the `pyproject.toml` version even when stale
+  installed distribution metadata is present.
+
 ## [1.0.1]
 
 ### Changed
@@ -102,5 +115,6 @@ exposes a frozen v1 footprint; the v2 staging continues on `main`.
   values; pushing them to a shared remote was a foot-gun. The
   `reports/.gitkeep` placeholder documents the intended layout.
 
+[1.0.2]: https://github.com/1oT/YggdraSIM/compare/v1.0.1...v1.0.2
 [1.0.1]: https://github.com/1oT/YggdraSIM/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/1oT/YggdraSIM/releases/tag/v1.0.0

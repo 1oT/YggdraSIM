@@ -999,6 +999,76 @@ class OrchestratorFlowTests(unittest.TestCase):
         expected_notification = base64.b64encode(pending_notification).decode("utf-8")
         self.assertEqual(provider.handle_notification_calls[0].pending_notification, expected_notification)
 
+    def test_notification_metadata_entries_fall_back_after_empty_pysim_decode(self):
+        notification_metadata = wrap_tlv(
+            "BF2F",
+            b"".join(
+                [
+                    wrap_tlv("80", bytes.fromhex("00B5")),
+                    wrap_tlv("81", bytes.fromhex("0640")),
+                    wrap_tlv("0C", b"dpp.example.test"),
+                    wrap_tlv("82", b"\xAA" * 260),
+                ]
+            ),
+        )
+        response = wrap_tlv("BF28", wrap_tlv("A0", notification_metadata))
+        orchestrator = SGP22Orchestrator(
+            cfg=FakeCfg(),
+            apdu_channel=FakeApduChannel(),
+            profile_provider=FakeProvider(b""),
+        )
+
+        with mock.patch("SCP11.orchestrator.decode_list_notification_response") as decode_mock:
+            decode_mock.return_value = ("notificationMetadataList", [])
+
+            entries = orchestrator._extract_notification_metadata_entries(response)
+
+        self.assertEqual(entries, [{"seqNumber": 181, "metadata": {"seqNumber": 181}}])
+
+    def test_pending_notification_payload_uses_manual_two_byte_length_decode(self):
+        notification_metadata = wrap_tlv(
+            "BF2F",
+            b"".join(
+                [
+                    wrap_tlv("80", bytes.fromhex("00B5")),
+                    wrap_tlv("81", bytes.fromhex("0640")),
+                    wrap_tlv("0C", b"dpp.example.test"),
+                ]
+            ),
+        )
+        pending_notification = wrap_tlv(
+            "30",
+            notification_metadata
+            + wrap_tlv("5F37", b"\x44" * 64)
+            + wrap_tlv("82", b"\xAA" * 260),
+        )
+        response = wrap_tlv("BF2B", wrap_tlv("A0", pending_notification))
+        orchestrator = SGP22Orchestrator(
+            cfg=FakeCfg(),
+            apdu_channel=FakeApduChannel(),
+            profile_provider=FakeProvider(b""),
+        )
+
+        with mock.patch("SCP11.orchestrator.decode_retrieve_notifications_list_response") as decode_mock:
+            with mock.patch("SCP11.orchestrator.decode_pending_notification") as pending_decode_mock:
+                decode_mock.side_effect = ValueError("pySim decode failed")
+                pending_decode_mock.side_effect = ValueError("pySim pending decode failed")
+
+                extracted = orchestrator._extract_pending_notification_payload(response)
+
+        self.assertEqual(extracted, pending_notification)
+
+    def test_retrieve_notification_request_encodes_high_bit_sequence_as_positive_integer(self):
+        orchestrator = SGP22Orchestrator(
+            cfg=FakeCfg(),
+            apdu_channel=FakeApduChannel(),
+            profile_provider=FakeProvider(b""),
+        )
+
+        payload = orchestrator._build_retrieve_notification_request_payload(188)
+
+        self.assertEqual(payload, bytes.fromhex("BF2B06A004800200BC"))
+
     def test_notification_sync_recovers_from_6e00_via_fresh_logical_channel(self):
         # Regression for the EnableProfile → ListNotifications cascade:
         # ETSI TS 102 221 §11.1.17 + SGP.22 §5.7.10. The base-channel

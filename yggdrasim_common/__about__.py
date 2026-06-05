@@ -1,12 +1,12 @@
 """
 Single-source version metadata for the YggdraSIM suite.
 
-The value is read from the installed distribution metadata when available
-(i.e. after ``pip install -e .``), and falls back to the ``[project]``
-block in ``pyproject.toml`` when the suite is run straight from a source
-checkout without an editable install. Callers should prefer this module
-over hard-coded version strings so the `pyproject.toml` version stays
-the single point of truth.
+The value is read from the build stamp when present, then from the
+``[project]`` block in ``pyproject.toml`` when the suite is run straight
+from a source checkout, and finally from installed distribution metadata.
+Callers should prefer this module over hard-coded version strings so the
+`pyproject.toml` version stays the single point of truth for source
+checkouts and release builds.
 """
 
 from __future__ import annotations
@@ -74,20 +74,20 @@ def get_version() -> str:
 
     Resolution order:
 
-    1. Installed distribution metadata (``pip install -e .`` / wheel).
-    2. Build stamp written by ``yggdrasim_main.spec`` — used by frozen
+    1. Build stamp written by ``yggdrasim_main.spec`` -- used by frozen
        PyInstaller bundles that do not ship ``pyproject.toml``.
-    3. ``pyproject.toml`` of the source checkout.
+    2. ``pyproject.toml`` of the source checkout.
+    3. Installed distribution metadata (wheel / editable install).
     4. Literal ``"0.0.0+unknown"`` so downstream code never has to
        None-check the version.
     """
-    candidate = _version_from_installed_dist()
-    if candidate is not None and len(candidate.strip()) > 0:
-        return candidate.strip()
     candidate = _version_from_build_stamp()
     if candidate is not None and len(candidate.strip()) > 0:
         return candidate.strip()
     candidate = _version_from_pyproject()
+    if candidate is not None and len(candidate.strip()) > 0:
+        return candidate.strip()
+    candidate = _version_from_installed_dist()
     if candidate is not None and len(candidate.strip()) > 0:
         return candidate.strip()
     return "0.0.0+unknown"
