@@ -2,9 +2,15 @@
 
 YggdraSIM is a Python toolkit for secure-element research, eUICC analysis, SIM/eSIM management, OTA payload work, SCP11 relay/local flows, and SAIP profile-package tooling. The repository keeps the operator surfaces, protocol helpers, and test suite in one workspace so card work, relay work, and package work can be exercised without switching projects. The SAIP decoding path and the SCP11 local / eIM flows pull in upstream `pySim`; install them in one shot with `pip install -e '.[saip]'` (the `[saip]` extra pins pySim directly from its GitHub mirror).
 
-> **Releases.** v1.0.0 was tagged on 2026-04-29; v1.0.1 is the
-> follow-up bug-fix release. See [`CHANGELOG.md`](CHANGELOG.md) for
+> **Releases.** v1.0.0 was tagged on 2026-04-29; v1.0.2 is the
+> current v1 bug-fix release. See [`CHANGELOG.md`](CHANGELOG.md) for
 > the per-release history.
+
+## Known issues
+
+EF.IMSI decoder removing wrong nibble for parity. Fix coming with next release.
+
+Thales latest SGP.32 card uses strict CR-flags and state management causing some eSIM management commands to not function properly. investigation ongoing and fixed will be applied as soon as possible.
 
 ## Distribution at a glance
 

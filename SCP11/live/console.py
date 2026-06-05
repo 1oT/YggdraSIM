@@ -581,6 +581,8 @@ class SCP11Console:
         orchestrator = getattr(self, "orchestrator", None)
         if orchestrator is None:
             return True
+        if hasattr(orchestrator, "_last_notification_sync_succeeded") is False:
+            return False
         outcome = getattr(orchestrator, "_last_notification_sync_succeeded", None)
         if outcome is not True:
             return True
