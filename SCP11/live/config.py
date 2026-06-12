@@ -89,12 +89,12 @@ class SGPConfig:
     EIM_TRANSPORT_MODE: str = EIM_TRANSPORT_MODE_ESIPA
     EIM_HTTP_PATH: str = "/gsma/rsp2/asn1"
     EIM_HTTP_PROTOCOL: str = "gsma/rsp/v2.1.0"
-    EIM_EUICC_CHALLENGE_ASN1: bool = True
     REMOTE_DP_ALLOW_LOCAL_FALLBACK: bool = False
-    # FQDN suffix allow-list that gates vendor-specific eIM quirks. The
-    # shipped tree carries the mechanism only; operators populate the
-    # targets via EIM_VENDOR_QUIRK_FQDN_SUFFIXES so production endpoint
-    # names stay out of the public source. Comma- or space-separated.
+    # FQDN suffix allow-list that gates vendor-specific GetEimPackage
+    # timeout/retry probing. The shipped tree carries the mechanism only;
+    # operators populate the targets via EIM_VENDOR_QUIRK_FQDN_SUFFIXES so
+    # production endpoint names stay out of the public source. Comma- or
+    # space-separated.
     EIM_VENDOR_QUIRK_FQDN_SUFFIXES: tuple = ()
     # Prefer ES10b STORE DATA on a dedicated logical channel, matching the
     # channel layout used by commercial LPAs on physical cards.

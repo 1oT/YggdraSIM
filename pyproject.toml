@@ -65,7 +65,7 @@ dependencies = [
     "pyserial",
     "pytlv",
     "asn1crypto",
-    "asn1tools",
+    "asn1tools @ git+https://github.com/hampushellsberg-dev/asn1tools-loop-fix.git@46b7dc2fed57f086c5aed6b22f5a34d76f9ecc21",
     "jsonpath-ng",
     "construct>=2.10.70",
     "bidict",

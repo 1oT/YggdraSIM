@@ -234,6 +234,38 @@ class DrainRoundSkipProvider:
 
 
 class TestSplitPinningTests(unittest.TestCase):
+    def test_test_eim_poll_request_uses_fqdn_eim_id_when_fqdn_field_absent(self):
+        eim_configuration = wrap_tlv(
+            "BF55",
+            wrap_tlv(
+                "A0",
+                wrap_tlv(
+                    "30",
+                    b"".join(
+                        [
+                            wrap_tlv("80", b"eim1.example.test"),
+                            wrap_tlv("82", b"\x02"),
+                        ]
+                    ),
+                ),
+            ),
+        )
+        configured_data = wrap_tlv("BF3C", wrap_tlv("80", b"rsp.example.test"))
+        orchestrator = SGP22Orchestrator(cfg=DummyCfg(), apdu_channel=None, profile_provider=None)
+        orchestrator.cache_eim_poll_metadata(
+            eid="89044045930000000000001492294428",
+            euicc_configured_data=configured_data,
+            eim_configuration_data=eim_configuration,
+            euicc_info1=wrap_tlv("BF20", b"\x82\x03\x02\x05\x00"),
+            euicc_info2=wrap_tlv("BF22", b"\x81\x03\x02\x03\x01"),
+        )
+
+        request = orchestrator._build_eim_poll_request(matching_id="MATCH-1", entry_index=0)
+
+        self.assertEqual(request.eim_fqdn, "eim1.example.test")
+        self.assertEqual(request.eim_id, "eim1.example.test")
+        self.assertEqual(request.eim_id_type, "eimIdTypeFqdn (2)")
+
     def _run_test_orchestrator_single_entry(self, provider):
         orchestrator = SGP22Orchestrator(cfg=DummyCfg(), apdu_channel=None, profile_provider=provider)
         request = EimPollRequest(
@@ -259,7 +291,6 @@ class TestSplitPinningTests(unittest.TestCase):
         relayed_packages = []
 
         orchestrator._phase_connect = lambda: None
-        orchestrator._phase_eim_card_challenge = lambda: None
         orchestrator._resolve_eim_poll_entry_indices = lambda entry_index=None: [0]
         orchestrator._build_eim_poll_request = lambda matching_id="", entry_index=0: request
 
@@ -278,7 +309,6 @@ class TestSplitPinningTests(unittest.TestCase):
         relayed_packages = []
 
         orchestrator._phase_connect = lambda: None
-        orchestrator._phase_eim_card_challenge = lambda: None
         orchestrator._resolve_eim_poll_entry_indices = (
             lambda entry_index=None: list(range(len(entry_requests)))
         )

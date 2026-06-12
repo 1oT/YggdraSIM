@@ -158,7 +158,7 @@ class LogicalChannelFallbackTests(unittest.TestCase):
         )
         self.assertEqual(
             console.apdu_channel.send_calls[4][1],
-            bytes.fromhex("80AA00000DA90B8100820101830107840101"),
+            bytes.fromhex("80AA000005A903840101"),
         )
         self.assertEqual(console.apdu_channel.send_calls[5][1], bytes([0x00, 0xA4, 0x04, 0x00, len(ISD_R_AID)]) + ISD_R_AID)
         self.assertEqual(console.apdu_channel.send_calls[6][1], bytes.fromhex("80100000010C"))

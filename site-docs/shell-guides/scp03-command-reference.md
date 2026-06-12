@@ -26,9 +26,19 @@ This page mirrors the grouped `HELP` surface from the SCP03 admin shell.
 - `APPS`: shortcut for the applications registry
 - `PKGS`: shortcut for the packages registry
 - `SD`: shortcut for the security domains registry
+- `INSTALL <cap/ijc> <80E604/0C...>`: load a CAP/IJC package, then send the supplied `INSTALL [for install]` APDU
+- `INSTALL-CAP <cap/ijc> [--privs HEX] [--params HEX] [--applet AID] [--module AID]`: build and execute a full CAP load plus instantiate sequence
+- `LOAD <cap/ijc>`: send `INSTALL [for load]` and `LOAD` blocks without instantiating
+- `INSTALL-LOAD <LoadFileAID> [SDAID] [Hash] [Params] [Token]`: send a standalone `INSTALL [for load]`
+- `INSTALL-APP <PkgAID> <AppAID> [ModAID] [Priv] [Params]`: instantiate and make selectable
+- `INSTALL-INSTANCE <PkgAID> <AppAID> [ModAID] [Priv] [Params]`: instantiate only
+- `MAKE-SELECTABLE <AID> [Priv] [Params] [Token]`: make an installed applet selectable
+- `EXTRADITE <App_AID> <SD_AID> [Token]`: send `INSTALL [for extradition]`
+- `REGISTRY-UPDATE <AID> [Priv] [Params]`: send `INSTALL [for registry update]`
+- `PERSONALIZE <AID>`: send `INSTALL [for personalization]`
 - `LOCK <AID>`: set state to locked
 - `UNLOCK <AID>`: set state to selectable
-- `DEL <AID>`: delete an object
+- `DEL <AID>` / `DELETE <AID>`: delete an object
 - `STORE-DATA <hex> [P1] [P2]`: send a raw `STORE DATA` payload
 
 ## Telecom and eSIM retrieval

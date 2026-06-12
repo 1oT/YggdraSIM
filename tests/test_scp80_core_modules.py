@@ -128,8 +128,12 @@ class ConfigManagerTests(unittest.TestCase):
             scp80_config.ConfigManager.DEFAULTS["tp_ud_max"],
         )
         self.assertEqual(manager._normalize_value("cntr", "00 00 00 00 0A", strict=True), "000000000A")
+        self.assertEqual(manager._normalize_value("pid", "7f", strict=True), "7F")
+        self.assertEqual(manager._normalize_value("dcs", "f6", strict=True), "F6")
         with self.assertRaisesRegex(ValueError, "spi must be exactly 4 hex chars"):
             manager._normalize_value("spi", "AB", strict=True)
+        with self.assertRaisesRegex(ValueError, "pid must be exactly 2 hex chars"):
+            manager._normalize_value("pid", "1234", strict=True)
         with self.assertRaisesRegex(ValueError, "kic must be 8, 16, 24, 32 bytes"):
             manager._normalize_value("kic", "11" * 17, strict=True)
         self.assertEqual(manager._normalize_value("kid", "11" * 16, strict=True), "11" * 16)
@@ -304,6 +308,14 @@ class OtaPacketBuilderTests(unittest.TestCase):
         self.assertIn("02028281060280018B", plan.apdus[0].apdu_hex)
         self.assertNotIn("820283818B", plan.apdus[0].apdu_hex)
         self.assertIn("4005811250F341F62222222222222225027000", plan.apdus[0].apdu_hex)
+
+    def test_build_plan_uses_configured_pid_and_dcs(self) -> None:
+        config = DummyBuilderConfig({"payload": "AA" * 10, "pid": "7F", "dcs": "F5"})
+        builder = scp80_builder.OtaPacketBuilder(config)
+
+        plan = builder.build_plan()
+
+        self.assertIn("4005811250F37FF52222222222222225027000", plan.apdus[0].apdu_hex)
 
     def test_build_plan_concatenated_and_build_rejects_single_apdu_api(self) -> None:
         config = DummyBuilderConfig(

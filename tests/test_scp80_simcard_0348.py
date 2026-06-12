@@ -89,6 +89,40 @@ class Scp80EnvelopeDispatchTests(unittest.TestCase):
         self.assertEqual((sw1b, sw2b), (0x90, 0x00))
         self.assertGreater(len(por), 10)
 
+    def test_d1_envelope_accepts_configured_sms_pid_and_dcs(self) -> None:
+        from SCP80.builder import OtaPacketBuilder
+        from SCP80.config import ConfigManager
+
+        os.environ["YGGDRASIM_ALLOW_DEMO_KEYS"] = "1"
+        cfg = ConfigManager()
+        cfg.set("kic", "1122334455667788AABBCCDDEEFF0011")
+        cfg.set("kid", "1122334455667788AABBCCDDEEFF0011")
+        cfg.set("spi", "1621")
+        cfg.set("kic_indicator", "22")
+        cfg.set("kid_indicator", "22")
+        cfg.set("tar", "B00001")
+        cfg.set("cntr", "0000000316")
+        cfg.set("pid", "7F")
+        cfg.set("dcs", "F5")
+        plan = OtaPacketBuilder(cfg).build_plan(override_payload="00A40004023F00")
+        self.assertIn("4005811250F37FF5", plan.reader_apdus[0])
+        apdu = bytes.fromhex(plan.reader_apdus[0])
+        engine = SimulatedSimCardEngine()
+        engine.state.scp80_security.key_enc = bytes.fromhex("1122334455667788AABBCCDDEEFF0011")
+        engine.state.scp80_security.key_mac = bytes.fromhex("1122334455667788AABBCCDDEEFF0011")
+        engine.state.scp80_security.spi = "1621"
+        engine.state.scp80_security.kic = "22"
+        engine.state.scp80_security.kid = "22"
+        engine.state.scp80_security.tar = "B00001"
+
+        _data, sw1, sw2 = engine.transmit(apdu)
+
+        self.assertEqual(sw1, 0x91)
+        fetch = bytes([0x80, 0x12, 0x00, 0x00, sw2 & 0xFF])
+        por, sw1b, sw2b = engine.transmit(fetch)
+        self.assertEqual((sw1b, sw2b), (0x90, 0x00))
+        self.assertGreater(len(por), 10)
+
 
 class ApduSplitTests(unittest.TestCase):
     def test_split_select_then_read_binary(self) -> None:

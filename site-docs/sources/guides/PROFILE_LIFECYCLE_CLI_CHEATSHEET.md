@@ -237,6 +237,8 @@ spi
 kic
 kid
 tar
+pid
+dcs
 key_enc
 key_mac
 cla

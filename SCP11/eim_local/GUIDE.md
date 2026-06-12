@@ -362,18 +362,21 @@ Test orchestrator:
 IPAE-TEST
 ```
 
-The localized watchdog uses the same argument model as relay `POLL` in the
-live/test shells.
+The localized watchdog uses the same STATUS-tick argument model as relay
+`POLL` in the live/test shells. It does not send synthetic TIMER EXPIRATION
+envelopes. Instead, each completed STATUS response is counted as 30 seconds of
+card-side elapsed time.
 
 Plugin note:
 
 - `IPAE-LIVE` and `IPAE-TEST` are exposed only when the optional `polling`
   capability is available through `plugins/`
 
-With explicit attempts, timer window, attempt delay, and post-status loops:
+With explicit attempts, a one-hour virtual timer, optional throttle, and
+post-status loops:
 
 ```text
-IPAE-LIVE 3 15 -t 20s -s 5 --debug
+IPAE-LIVE 3 3600 -t 20s -s 5 --debug
 ```
 
 Practical rule:

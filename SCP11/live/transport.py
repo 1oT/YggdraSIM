@@ -23,6 +23,7 @@ from typing import Protocol, Tuple
 from yggdrasim_common.session_recording import emit_apdu_trace_event
 from yggdrasim_common.card_backend import create_card_connection, is_simulated_card_backend
 from yggdrasim_common.apdu_recorder import wrap_connection
+from SCP11.shared.trace_dump import print_store_data_chunk_plan, split_tlv_aware_chunks
 
 
 def _encode_der_length(length: int) -> bytes:
@@ -127,7 +128,7 @@ class ApduChannel(Protocol):
         p2_start: int,
         payload: bytes,
         log_name: str,
-        chunk_size: int = 250,
+        chunk_size: int = 0xFF,
     ) -> bytes:
         """Fragment *data* into STORE-DATA chunks and dispatch each via ``exchange`` (SGP.22 §3.1.3)."""
         pass
@@ -410,20 +411,28 @@ class PcscApduChannel:
         p2_start: int,
         payload: bytes,
         log_name: str,
-        chunk_size: int = 250,
+        chunk_size: int = 0xFF,
     ) -> bytes:
         """Fragment *data* into STORE-DATA chunks and dispatch each via ``exchange`` (SGP.22 §3.1.3)."""
         total = len(payload)
-        offset = 0
         block = p2_start
         response = b""
+        chunks = split_tlv_aware_chunks(payload, chunk_size)
 
         if self._raw_apdu_logging:
             print(f"\n--- Transmitting {log_name} ({total} bytes) ---")
-        while offset < total:
-            end_offset = offset + chunk_size
-            chunk = payload[offset:end_offset]
-            is_last_chunk = end_offset >= total
+        print_store_data_chunk_plan(
+            log_name,
+            payload,
+            cla=cla,
+            ins=ins,
+            final_p1=p1,
+            p2_start=p2_start,
+            chunk_size=chunk_size,
+            chunks=chunks,
+        )
+        for chunk_index, chunk in enumerate(chunks, start=1):
+            is_last_chunk = chunk_index == len(chunks)
             current_p1 = p1
             if not is_last_chunk:
                 current_p1 = 0x11
@@ -431,7 +440,6 @@ class PcscApduChannel:
             if self._raw_apdu_logging:
                 print(f"  > Block {block:02X} (Len={len(chunk)}) P1={current_p1:02X}")
             response = self.send(apdu, f"{log_name} [Block {block}]")
-            offset += chunk_size
             block += 1
 
         return response
@@ -485,7 +493,7 @@ class SGP22Transport:
         p2_start: int,
         payload: bytes,
         log_name: str,
-        chunk_size: int = 250,
+        chunk_size: int = 0xFF,
     ) -> bytes:
         """Fragment *data* into STORE-DATA chunks and dispatch each via ``exchange`` (SGP.22 §3.1.3)."""
         return self._channel.send_chunked(

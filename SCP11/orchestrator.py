@@ -46,6 +46,12 @@ from SCP11.shared.gsma_error_codes import (
     describe_sgp32_eim_package_error,
 )
 from SCP11.shared.safe_parse import safe_parse
+from SCP11.shared.trace_dump import (
+    print_eim_package_wrapper_summary,
+    print_hex_payload,
+    print_store_data_chunk_plan,
+    split_tlv_aware_chunks,
+)
 from yggdrasim_common.process_debug import debug_print
 
 try:
@@ -53,6 +59,7 @@ try:
     from .crypto_engine import CryptoEngine
     from .eim_packages import (
         TYPE_EUICC_CONFIGURATION,
+        TYPE_EIM_CONFIGURATION_OBJECT,
         TYPE_INDIRECT_PROFILE_DOWNLOAD,
         TYPE_PROFILE_DOWNLOAD_TRIGGER,
         TYPE_PROFILE_STATE_MANAGEMENT,
@@ -90,6 +97,7 @@ except ImportError:
     from crypto_engine import CryptoEngine
     from eim_packages import (
         TYPE_EUICC_CONFIGURATION,
+        TYPE_EIM_CONFIGURATION_OBJECT,
         TYPE_INDIRECT_PROFILE_DOWNLOAD,
         TYPE_PROFILE_DOWNLOAD_TRIGGER,
         TYPE_PROFILE_STATE_MANAGEMENT,
@@ -193,7 +201,8 @@ class SGP22Orchestrator:
         debug_print("--- IOT / SGP.32 eIM POLL - RELAY READY ---")
         self._last_eim_poll_reached_server = False
         self._phase_connect()
-        self._phase_eim_card_challenge()
+        self.state.card_challenge = b""
+        debug_print("[*] eIM poll: skipping GetEuiccChallenge; euiccChallenge will be omitted.")
         entry_indices = self._resolve_eim_poll_entry_indices(entry_index)
         total_entries = len(entry_indices)
         if total_entries > 1:
@@ -405,15 +414,13 @@ class SGP22Orchestrator:
     def _phase_connect(self) -> None:
         debug_print("\n[*] Phase: Connect")
         self._use_stk_mode_for_es10b_store_data = False
-        # TS 102 221 §11.1.19 TERMINAL CAPABILITY: declare extended logical
-        # channels (tag 0x82) and eUICC support (tag 0x84) on the very first
-        # call. Some eUICC stacks gate ES10 STORE DATA on the eUICC bit and
-        # latch the first TERMINAL CAPABILITY they receive, so a stripped
-        # body sent first then "fixed" later does not recover -- ES10 keeps
-        # returning 6985 (Conditions of use not satisfied).
+        # TS 102 221 §11.1.19 TERMINAL CAPABILITY: declare eUICC support
+        # (tag 0x84) on the very first call. Some eUICC stacks gate ES10
+        # STORE DATA on the eUICC bit and latch the first TERMINAL
+        # CAPABILITY they receive.
         try:
             self.apdu_channel.send(
-                bytes.fromhex("80AA00000DA90B8100820101830107840101"),
+                bytes.fromhex("80AA000005A903840101"),
                 "INIT: TERMINAL CAPABILITY",
             )
         except IOError:
@@ -475,7 +482,7 @@ class SGP22Orchestrator:
         print(f"[*] {log_name}: entering STK mode bootstrap.")
         self._reset_apdu_channel_for_recovery(log_name, "STK mode")
         self.apdu_channel.send(
-            bytes.fromhex("80AA00000DA90B8100820101830107840101"),
+            bytes.fromhex("80AA000005A903840101"),
             f"{log_name} [STK MODE TERMINAL CAPABILITY]",
         )
         self._select_isd_r(f"{log_name} [STK MODE SELECT ISD-R]")
@@ -565,8 +572,7 @@ class SGP22Orchestrator:
         # fresh session, in spec-mandated order:
         #
         # 1. TERMINAL CAPABILITY (TS 102 221 §11.1.19) -- declares
-        #    extended logical channels (tag 82) and eUICC support
-        #    (tag 84). MUST precede TERMINAL PROFILE.
+        #    eUICC support (tag 84). MUST precede TERMINAL PROFILE.
         # 2. STATUS (TS 102 221 §11.1.2) -- refreshes the
         #    active-AID view on the supplementary channel.
         # 3. TERMINAL PROFILE + proactive cycle drain (TS 102 223
@@ -583,7 +589,7 @@ class SGP22Orchestrator:
         # proceeds anyway.
         try:
             self.apdu_channel.send(
-                bytes.fromhex("80AA00000DA90B8100820101830107840101"),
+                bytes.fromhex("80AA000005A903840101"),
                 f"{log_name} [TERMINAL CAPABILITY]",
             )
         except Exception as terminal_capability_error:
@@ -907,19 +913,6 @@ class SGP22Orchestrator:
         list_tlv = self._wrap_tlv(b"\xA0", list_value)
         return self._wrap_tlv(bytes.fromhex("BF28"), list_tlv)
 
-    def _phase_eim_card_challenge(self) -> None:
-        debug_print("\n[*] Phase: eIM card challenge (GetEuiccChallenge)")
-        challenge_response = self.apdu_channel.send(
-            bytes.fromhex("80E2910003BF2E00"),
-            "EIM: GetEuiccChallenge",
-        )
-        if len(challenge_response) >= 16:
-            self.state.card_challenge = challenge_response[-16:]
-            debug_print(f"[+] Card challenge: {self.state.card_challenge.hex().upper()}")
-        else:
-            self.state.card_challenge = b""
-            print("[*] GetEuiccChallenge response too short; eIM poll will omit euiccChallenge.")
-
     def _resolve_eim_poll_entry_indices(self, entry_index: Optional[int]) -> list[int]:
         eim_configuration_data = self._retrieve_es10b_data(bytes.fromhex("BF5500"), "EIM: InspectEimConfigurationData")
         entries = self._decode_eim_configuration_entries(eim_configuration_data)
@@ -931,45 +924,9 @@ class SGP22Orchestrator:
             return [entry_index]
         return list(range(len(entries)))
 
-    def _eim_euicc_challenge_b64(self, challenge: bytes) -> str:
-        """Encode eUICC challenge for eIM poll. If EIM_EUICC_CHALLENGE_ASN1: base64(DER(EuiccChallenge)), else raw base64."""
-        if len(challenge) != 16:
-            return ""
-        use_asn1 = getattr(self.cfg, "EIM_EUICC_CHALLENGE_ASN1", True)
-        if use_asn1:
-            try:
-                der = ASN1Registry.EuiccChallenge(challenge).dump()
-                return base64.b64encode(der).decode("ascii")
-            except Exception:
-                pass
-        return self._b64encode(challenge)
-
-    def _eim_euicc_challenge_binary(self, challenge: bytes) -> bytes:
-        if len(challenge) != 16:
-            return b""
-        return bytes(challenge)
-
-    def _decode_eim_euicc_challenge_binary(self, value: str) -> bytes:
-        raw_value = self._decode_string_payload(value)
-        if len(raw_value) == 16:
-            return raw_value
-        try:
-            tag, inner_value, _, end_offset = self._read_tlv(raw_value, 0)
-        except Exception:
-            return b""
-        if end_offset != len(raw_value):
-            return b""
-        if tag != b"\x81":
-            return b""
-        if len(inner_value) != 16:
-            return b""
-        return inner_value
-
     def _matches_vendor_quirk_fqdn(self, eim_fqdn: str) -> bool:
-        # SGP.32 §5.x.x InitialEimChallenge / GetEimPackage allow operator
-        # endpoints to require quirks (challenge inclusion, longer timeout
-        # before retry). The mechanism stays in the shipped tree; the
-        # target FQDN suffixes are operator-configured via
+        # Some operator endpoints require longer timeout/retry probing.
+        # The target FQDN suffixes are operator-configured via
         # EIM_VENDOR_QUIRK_FQDN_SUFFIXES so production endpoint names
         # never appear in the public source.
         suffixes = getattr(self.cfg, "EIM_VENDOR_QUIRK_FQDN_SUFFIXES", ()) or ()
@@ -984,13 +941,6 @@ class SGP22Orchestrator:
                 return True
             if normalized.endswith("." + cleaned):
                 return True
-        return False
-
-    def _should_include_initial_eim_challenge(self, eim_fqdn: str, variant: int) -> bool:
-        if variant == 1:
-            return True
-        if self._matches_vendor_quirk_fqdn(eim_fqdn):
-            return True
         return False
 
     def _should_include_initial_eim_notify_state_change(self, eim_fqdn: str) -> bool:
@@ -1106,20 +1056,19 @@ class SGP22Orchestrator:
             raise ValueError(f"Requested eIM entry index {entry_index} is out of range (entries={len(entries)}).")
 
         entry = entries[entry_index]
-        self.state.current_euicc_ci_pkid = str(entry.get("euicc_ci_pkid", "")).strip()
-        fragments = [f"index={entry_index}", f"fqdn={entry.get('eim_fqdn', '')}"]
         eim_id = str(entry.get("eim_id", "")).strip()
+        eim_id_type = str(entry.get("eim_id_type", "")).strip()
+        eim_fqdn = self._resolve_eim_entry_fqdn(entry, eim_id, eim_id_type)
+        self.state.current_euicc_ci_pkid = str(entry.get("euicc_ci_pkid", "")).strip()
+        fragments = [f"index={entry_index}", f"fqdn={eim_fqdn}"]
         if len(eim_id) > 0:
             fragments.append(f"eimId={eim_id}")
-        eim_id_type = str(entry.get("eim_id_type", "")).strip()
         if len(eim_id_type) > 0:
             fragments.append(f"eimIdType={eim_id_type}")
         debug_print("[*] Selected eIM entry: " + ", ".join(fragments))
 
         variant = getattr(self.cfg, "EIM_REQUEST_VARIANT", 0)
         raw_body = None
-        challenge_b64 = self._eim_euicc_challenge_b64(self.state.card_challenge)
-        eim_fqdn = str(entry.get("eim_fqdn", "")).strip()
         notify_state_change = bool(getattr(self.cfg, "EIM_GET_PACKAGE_NOTIFY_STATE_CHANGE", False))
         if notify_state_change is False and self._should_include_initial_eim_notify_state_change(eim_fqdn):
             notify_state_change = True
@@ -1150,7 +1099,7 @@ class SGP22Orchestrator:
         if variant == 2:
             raw_body = None
         return EimPollRequest(
-            eim_fqdn=str(entry.get("eim_fqdn", "")).strip(),
+            eim_fqdn=eim_fqdn,
             eim_id=eim_id,
             eim_id_type=eim_id_type,
             counter_value=str(entry.get("counter_value", "")).strip(),
@@ -1164,10 +1113,23 @@ class SGP22Orchestrator:
             euicc_info2=self._b64encode(euicc_info2),
             eid=eid,
             matching_id=matching_id,
-            euicc_challenge=challenge_b64,
+            euicc_challenge="",
             trusted_tls_public_key_data=bytes(entry.get("trusted_tls_public_key_data", b"")),
             raw_body=raw_body if raw_body is not None and len(raw_body) > 0 else None,
         )
+
+    @staticmethod
+    def _eim_id_type_is_fqdn(eim_id_type: str) -> bool:
+        normalized = str(eim_id_type).strip().lower()
+        if len(normalized) == 0:
+            return False
+        return normalized == "2" or normalized.endswith("(2)") or "fqdn" in normalized
+
+    def _resolve_eim_entry_fqdn(self, entry: dict[str, Any], eim_id: str, eim_id_type: str) -> str:
+        eim_fqdn = str(entry.get("eim_fqdn", "")).strip()
+        if len(eim_fqdn) == 0 and self._eim_id_type_is_fqdn(eim_id_type):
+            return str(eim_id).strip()
+        return eim_fqdn
 
     def _retrieve_es10b_data(self, payload: bytes, log_name: str) -> bytes:
         return self._send_es10b_store_data(payload, log_name)
@@ -1324,6 +1286,7 @@ class SGP22Orchestrator:
         debug_print("\n[*] Phase: GetEimPackage")
         if self.profile_provider is None:
             raise RuntimeError("No profile provider configured for eIM polling.")
+        request = self._sanitize_eim_poll_request(request)
         try:
             response = self.profile_provider.get_eim_package(request)
         except NotImplementedError as error:
@@ -1353,6 +1316,7 @@ class SGP22Orchestrator:
         debug_print("\n[*] Phase: ProvideEimPackageResult")
         if self.profile_provider is None:
             raise RuntimeError("No profile provider configured for eIM polling.")
+        request = self._sanitize_eim_poll_request(request)
         try:
             response = self.profile_provider.provide_eim_package_result(request)
         except NotImplementedError as error:
@@ -1363,6 +1327,13 @@ class SGP22Orchestrator:
 
     def _poll_eim(self, request: EimPollRequest):
         return self._get_eim_package(request)
+
+    def _sanitize_eim_poll_request(self, request: EimPollRequest) -> EimPollRequest:
+        if str(getattr(request, "euicc_challenge", "") or "") == "":
+            return request
+        sanitized = copy.deepcopy(request)
+        sanitized.euicc_challenge = ""
+        return sanitized
 
     def _coerce_eim_poll_response(self, response: Any) -> EimPollResponse:
         def coerce_ack_sequence_numbers(value: Any) -> list[int]:
@@ -1768,6 +1739,7 @@ class SGP22Orchestrator:
                 continue
             seen_bodies.add(raw_body)
             variant_request = copy.deepcopy(request)
+            variant_request.euicc_challenge = ""
             variant_request.raw_body = raw_body
             variants.append((variant_name, variant_request))
         return variants
@@ -1795,6 +1767,8 @@ class SGP22Orchestrator:
             f"[*] Relaying eIM package {package_index} from poll round {poll_round}: "
             f"tag={self._tag_hex(package_bytes)} len={len(package_bytes)}"
         )
+        print_hex_payload("Full eIM package", package_bytes)
+        print_eim_package_wrapper_summary(package_bytes)
         parsed = parse_eim_package(package_bytes)
         print(f"[*] eIM package type: {parsed.package_type}")
 
@@ -1882,12 +1856,13 @@ class SGP22Orchestrator:
             )
         preserve_signed_wrapper_types = (
             TYPE_PROFILE_STATE_MANAGEMENT,
+            TYPE_EIM_CONFIGURATION_OBJECT,
             TYPE_EUICC_CONFIGURATION,
             TYPE_PROFILE_DOWNLOAD_TRIGGER,
         )
         if parsed.package_type in preserve_signed_wrapper_types:
             print("[*] eIM package will be relayed with its signed wrapper intact.")
-        if parsed.package_type == TYPE_PROFILE_STATE_MANAGEMENT:
+        if parsed.package_type in (TYPE_PROFILE_STATE_MANAGEMENT, TYPE_EIM_CONFIGURATION_OBJECT):
             if len(package_bytes) <= 0xFF:
                 last_response = self._retrieve_es10b_data(package_bytes, log_name)
             else:
@@ -2266,13 +2241,7 @@ class SGP22Orchestrator:
             "HANDSHAKE: GetEuiccInfo1",
             allow_stk_retry=True,
         )
-        challenge_response = self._send_es10b_store_data(
-            bytes.fromhex("BF2E00"),
-            "HANDSHAKE: GetEuiccChallenge",
-            allow_stk_retry=True,
-        )
-        self.state.card_challenge = challenge_response[-16:]
-        print(f"[+] Card Challenge: {self.state.card_challenge.hex().upper()}")
+        self._phase_smdp_card_challenge()
 
         auth_seed = self._initiate_authentication_with_provider(
             euicc_info1,
@@ -2280,6 +2249,18 @@ class SGP22Orchestrator:
         )
         auth_seed["matching_id"] = matching_id
         return auth_seed
+
+    def _phase_smdp_card_challenge(self) -> None:
+        challenge_response = self._send_es10b_store_data(
+            bytes.fromhex("BF2E00"),
+            "HANDSHAKE: GetEuiccChallenge",
+            allow_stk_retry=True,
+        )
+        if len(challenge_response) < 16:
+            self.state.card_challenge = b""
+            raise RuntimeError("GetEuiccChallenge response too short for SMDP+ authentication.")
+        self.state.card_challenge = challenge_response[-16:]
+        print(f"[+] Card Challenge: {self.state.card_challenge.hex().upper()}")
 
     def _initiate_authentication_with_provider(self, euicc_info1: bytes, smdp_address: str) -> dict:
         can_use_provider = self.profile_provider is not None
@@ -3532,8 +3513,9 @@ class SGP22Orchestrator:
         """Build GetEimPackage (BF4F) TLV with EID (5A) and optional fields.
 
         Binary BF4F only supports notifyStateChange [0], stateChangeCause [1],
-        and rPlmn [2] in addition to eidValue. Keep euiccChallenge on the
-        request object for JSON-mode compatibility, but do not encode it here.
+        and rPlmn [2] in addition to eidValue. euiccChallenge is intentionally
+        omitted from eIM polling; GetEuiccChallenge belongs to SMDP+
+        authentication.
         """
         eid_bytes = self._eid_bcd_string_to_bytes(eid)
         if len(eid_bytes) != 16:
@@ -4243,24 +4225,32 @@ class SGP22Orchestrator:
                     break
         return tlv_bytes[:offset].hex().upper()
 
-    def _send_personalization_store_data(self, payload: bytes, log_name: str, chunk_size: int = 120) -> bytes:
+    def _send_personalization_store_data(self, payload: bytes, log_name: str, chunk_size: int = 0xFF) -> bytes:
         total = len(payload)
-        offset = 0
         block = 0
         response = b""
+        chunks = split_tlv_aware_chunks(payload, chunk_size)
 
+        print_store_data_chunk_plan(
+            log_name,
+            payload,
+            cla=0x80,
+            ins=0xE2,
+            final_p1=0x91,
+            p2_start=0,
+            chunk_size=chunk_size,
+            p2_wrap=True,
+            chunks=chunks,
+        )
         print(f"\n--- Transmitting {log_name} ({total} bytes) ---")
-        while offset < total:
-            end_offset = offset + chunk_size
-            chunk = payload[offset:end_offset]
-            is_last_chunk = end_offset >= total
+        for chunk_index, chunk in enumerate(chunks, start=1):
+            is_last_chunk = chunk_index == len(chunks)
             p1 = 0x11
             if is_last_chunk:
                 p1 = 0x91
             apdu = bytes([0x80, 0xE2, p1, block & 0xFF, len(chunk)]) + chunk
             print(f"  > Block {block:02X} (Len={len(chunk)}) P1={p1:02X}")
             response = self.apdu_channel.send(apdu, f"{log_name} [Block {block}]")
-            offset += chunk_size
             block += 1
 
         return response

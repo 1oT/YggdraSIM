@@ -1894,6 +1894,78 @@ def run_scp11_live ():
         print (f"{Colors.FAIL}[!] SCP11 Live Error: {e}{Colors.ENDC}")
         pause ()
 
+class _MainMenuPollingStyle :
+    red =Colors .FAIL 
+    cyan =Colors .CYAN 
+    green =Colors .GREEN 
+    end =Colors .ENDC 
+
+class _MainMenuPollingConsoleAdapter :
+    def __init__ (self ,client ,cached_targets ):
+        self .client =client 
+        self .orchestrator =client .orchestrator 
+        self .apdu_channel =client .apdu_channel 
+        self ._style =_MainMenuPollingStyle ()
+        self ._cached_poll_target_fqdns =list (cached_targets or [])
+
+    def _resolve_cached_poll_target_fqdns (self ):
+        return list (self ._cached_poll_target_fqdns )
+
+    def _run_watchdog_pre_reset (self )->None :
+        build =getattr (self .client ,"_build_apdu_channel",None )
+        if callable (build ):
+            new_channel =build (self .client .cfg )
+            self .apdu_channel =new_channel 
+            self .client .apdu_channel =new_channel 
+            orchestrator =getattr (self ,"orchestrator",None )
+            if orchestrator is not None :
+                orchestrator .apdu_channel =new_channel 
+                orchestrator ._es10b_logical_channel =0 
+                orchestrator ._use_stk_mode_for_es10b_store_data =False 
+                orchestrator ._phase_connect_stk_sent =False 
+                orchestrator ._phase_connect_complete =False 
+                try :
+                    delattr (orchestrator .state ,"_stk_state_captured")
+                except (AttributeError ,TypeError ):
+                    pass 
+
+def _polling_plugin_menu_line ()->str :
+    try :
+        from yggdrasim_common .polling_plugin_support import has_polling_plugin
+        if has_polling_plugin ():
+            return f"{Colors.HEADER} [3P] IPAe Polling Plugin (Live Card){Colors.ENDC}"
+    except Exception :
+        pass 
+    return f"{Colors.BROWN} [3P] IPAe Polling Plugin (plugin unavailable){Colors.ENDC}"
+
+def run_scp11_live_polling_plugin (argument :str |None =None ,pause_after :bool =True ):
+    """Launch the live-card IPAe polling plugin without entering the eSIM shell."""
+    clear_screen ()
+    print (f"{Colors.HEADER}=== IPAe Polling Plugin - Live Card ==={Colors.ENDC}")
+    print (f"{Colors.CYAN}Runs the POLL watchdog directly; the eSIM relay shell banner is skipped.{Colors.ENDC}")
+    poll_argument =str (argument if argument is not None else "").strip ()
+    if argument is None :
+        poll_argument =input (
+            "POLL arguments [default: 1 30; examples: 150 | 150 --auth-apdu <008800...> --debug]: "
+        ).strip ()
+    try :
+        from yggdrasim_common .polling_plugin_support import dispatch_poll_command
+        import SCP11 .live .main as scp11_entry
+        importlib .reload (scp11_entry )
+        client =scp11_entry .SGP22Client ()
+        client ._run_startup_preflight ()
+        client ._build_runtime ()
+        client ._print_startup_warnings ()
+        adapter =_MainMenuPollingConsoleAdapter (client ,[])
+        dispatch_poll_command ("scp11.live","POLL",adapter ,poll_argument )
+    except SystemExit :
+        pass 
+    except Exception as e :
+        print (f"{Colors.FAIL}[!] IPAe Polling Plugin Error: {e}{Colors.ENDC}")
+    finally :
+        if pause_after :
+            pause ()
+
 def run_scp11_test ():
     """Wrapper for SCP11 test relay package."""
     try :
@@ -2278,6 +2350,7 @@ def main_menu ():
         f"{Colors.HEADER} [3B] eSIM Management Relay (Test Certificates){Colors.ENDC}",
         f"{Colors.HEADER} [3C] Local SMDPP{Colors.ENDC}",
         f"{Colors.HEADER} [3D] Local eIM{Colors.ENDC}",
+        _polling_plugin_menu_line (),
         "",
         f"{Colors.BLUE}--- Profile & Key Tools ---{Colors.ENDC}",
         f"{Colors.BLUE} [7] SAIP Tool{Colors.ENDC}",
@@ -2342,6 +2415,9 @@ def _dispatch_main_menu_choice (choice :str )->None :
         return
     if normalized_choice =='3D':
         run_scp11_eim_local ()
+        return
+    if normalized_choice =='3P':
+        run_scp11_live_polling_plugin ()
         return
     if normalized_choice =='7':
         run_profile_package ()

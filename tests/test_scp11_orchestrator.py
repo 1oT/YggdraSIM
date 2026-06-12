@@ -16,6 +16,7 @@ import SCP11.test.pysim_support as test_pysim_support
 from SCP11.asn1_registry import ASN1Registry
 from SCP11.models import BACKEND_MODE_LOCAL_SGP26, EimPollRequest, EimPollResponse
 from SCP11.orchestrator import SGP22Orchestrator
+from SCP11.shared.trace_dump import split_tlv_aware_chunks
 
 try:
     from pySim.esim import compile_asn1_subdir
@@ -153,7 +154,7 @@ class FakeApduChannel:
             return self.eim_package_response
         return b""
 
-    def send_chunked(self, cla, ins, p1, p2_start, payload, log_name, chunk_size=250):
+    def send_chunked(self, cla, ins, p1, p2_start, payload, log_name, chunk_size=0xFF):
         self.chunked_calls.append((log_name, payload))
         if "AuthenticateServer" in log_name:
             return self.auth_response
@@ -348,6 +349,15 @@ class OrchestratorFlowTests(unittest.TestCase):
             offset += 1
         return segment[:offset]
 
+    def _seed_local_credentials(self, orchestrator: SGP22Orchestrator) -> None:
+        cert = build_self_signed_cert()
+        private_key = ec.generate_private_key(ec.SECP256R1())
+        orchestrator.cert_auth = cert
+        orchestrator.key_auth = private_key
+        orchestrator.cert_pb = cert
+        orchestrator.key_pb = private_key
+        orchestrator._local_credentials_loaded = True
+
     def test_flow_runs_local_paths(self):
         cfg = FakeCfg()
         cfg.CAPABILITIES = {
@@ -373,6 +383,31 @@ class OrchestratorFlowTests(unittest.TestCase):
 
         self.assertTrue(len(orchestrator.state.euicc_signature1) == 64)
         self.assertTrue(len(orchestrator.state.prepare_download_response_b64) > 0)
+
+    def test_direct_download_gets_challenge_for_smdp_authentication(self):
+        cfg = FakeCfg()
+        cfg.CAPABILITIES = {
+            "gsmSupportedRelease": b"\x99\x00\x00",
+            "utranSupportedRelease": b"\x99\x00\x00",
+            "eutranEpcSupportedRelease": b"\x99\x00\x00",
+        }
+        apdu_channel = FakeApduChannel()
+        orchestrator = SGP22Orchestrator(
+            cfg=cfg,
+            apdu_channel=apdu_channel,
+            profile_provider=FakeProvider(bpp_bytes=b""),
+        )
+        self._seed_local_credentials(orchestrator)
+
+        orchestrator.run_flow(matching_id="MATCH-DIRECT", smdp_address="rsp.example.com")
+
+        call_names = [name for name, _ in apdu_channel.send_calls]
+        self.assertIn("HANDSHAKE: GetEuiccChallenge", call_names)
+        self.assertFalse(any(name == "EIM: GetEuiccChallenge" for name in call_names))
+        self.assertEqual(
+            orchestrator.state.card_challenge,
+            bytes.fromhex("AA55AA55AA55AA55AA55AA55AA55AA55"),
+        )
 
     def test_authentication_seed_retries_with_stk_mode_after_6985(self):
         apdu_channel = StkBootstrapRetryApduChannel()
@@ -583,9 +618,10 @@ class OrchestratorFlowTests(unittest.TestCase):
             profile_provider=None,
         )
         expected_segments = tmp_orchestrator._segment_bound_profile_package(bpp_bytes)
+        chunk_size = 0xFF
         expected_block_count = 0
         for segment in expected_segments:
-            expected_block_count += max(1, (len(segment) + 119) // 120)
+            expected_block_count += len(split_tlv_aware_chunks(segment, chunk_size))
         apdu_channel = FakeApduChannel(
             load_bpp_response_sequence=[b""] * (expected_block_count - 1) + [inline_notification],
         )
@@ -632,21 +668,15 @@ class OrchestratorFlowTests(unittest.TestCase):
 
         call_index = 0
         for segment_index, segment in enumerate(expected_segments, start=1):
-            total_segment_len = len(segment)
-            offset = 0
-            block_number = 0
-            while offset < total_segment_len:
-                end_offset = offset + 120
-                chunk = segment[offset:end_offset]
-                is_last = end_offset >= total_segment_len
+            chunks = split_tlv_aware_chunks(segment, chunk_size)
+            for block_number, chunk in enumerate(chunks):
+                is_last = block_number == len(chunks) - 1
                 expected_p1 = 0x91 if is_last else 0x11
                 expected_label = f"DOWNLOAD: LoadBoundProfilePackage [{segment_index}/{len(expected_segments)}] [Block {block_number}]"
                 expected_apdu = bytes([0x80, 0xE2, expected_p1, block_number & 0xFF, len(chunk)]) + chunk
                 self.assertEqual(load_calls[call_index][0], expected_label)
                 self.assertEqual(load_calls[call_index][1], expected_apdu)
                 call_index += 1
-                offset += 120
-                block_number += 1
         self.assertEqual(call_index, expected_block_count)
 
     def test_install_package_stops_on_terminal_profile_installation_failure(self):
@@ -1385,18 +1415,20 @@ class OrchestratorFlowTests(unittest.TestCase):
         )
 
         orchestrator._phase_connect()
-        orchestrator._phase_eim_card_challenge()
+        orchestrator.state.card_challenge = bytes.fromhex("AA55AA55AA55AA55AA55AA55AA55AA55")
         request = orchestrator._build_eim_poll_request(matching_id="MATCH-1", entry_index=0)
         expected_body = orchestrator._build_get_eim_package_tlv(request.eid)
 
         self.assertEqual(request.eid, "89044045930000000000001492294428")
         self.assertEqual(request.raw_body, expected_body)
+        self.assertEqual(request.euicc_challenge, "")
+        self.assertFalse(any(call[0] == "EIM: GetEuiccChallenge" for call in apdu_channel.send_calls))
         self.assertTrue(
             any(call[0] == "EIM: RESELECT ISD-R" for call in apdu_channel.send_calls),
             "ISD-R must be reselected after reading EID from ECASD.",
         )
 
-    def test_build_eim_poll_request_variant_one_includes_challenge(self):
+    def test_build_eim_poll_request_variant_one_omits_challenge(self):
         configured_data = wrap_tlv("BF3C", wrap_tlv("80", b"rsp.example.com"))
         eim_configuration = wrap_tlv(
             "BF55",
@@ -1426,18 +1458,50 @@ class OrchestratorFlowTests(unittest.TestCase):
         )
 
         orchestrator._phase_connect()
-        orchestrator._phase_eim_card_challenge()
+        orchestrator.state.card_challenge = bytes.fromhex("AA55AA55AA55AA55AA55AA55AA55AA55")
         request = orchestrator._build_eim_poll_request(matching_id="MATCH-1", entry_index=0)
 
-        self.assertEqual(
-            request.raw_body,
-            orchestrator._build_get_eim_package_tlv(
-                request.eid,
-                orchestrator.state.card_challenge,
+        self.assertEqual(request.raw_body, orchestrator._build_get_eim_package_tlv(request.eid))
+        self.assertEqual(request.euicc_challenge, "")
+        self.assertFalse(any(call[0] == "EIM: GetEuiccChallenge" for call in apdu_channel.send_calls))
+
+    def test_build_eim_poll_request_uses_fqdn_eim_id_when_fqdn_field_absent(self):
+        configured_data = wrap_tlv("BF3C", wrap_tlv("80", b"rsp.example.test"))
+        eim_configuration = wrap_tlv(
+            "BF55",
+            wrap_tlv(
+                "A0",
+                wrap_tlv(
+                    "30",
+                    b"".join(
+                        [
+                            wrap_tlv("80", b"eim1.example.test"),
+                            wrap_tlv("82", b"\x02"),
+                        ]
+                    ),
+                ),
             ),
         )
+        orchestrator = SGP22Orchestrator(
+            cfg=FakeCfg(),
+            apdu_channel=FakeApduChannel(),
+            profile_provider=FakeProvider(bpp_bytes=b""),
+        )
+        orchestrator.cache_eim_poll_metadata(
+            eid="89044045930000000000001492294428",
+            euicc_configured_data=configured_data,
+            eim_configuration_data=eim_configuration,
+            euicc_info1=wrap_tlv("BF20", b"\x82\x03\x02\x05\x00"),
+            euicc_info2=wrap_tlv("BF22", b"\x81\x03\x02\x03\x01"),
+        )
 
-    def test_build_eim_poll_request_includes_challenge_for_vendor_quirk_endpoint(self):
+        request = orchestrator._build_eim_poll_request(matching_id="MATCH-1", entry_index=0)
+
+        self.assertEqual(request.eim_fqdn, "eim1.example.test")
+        self.assertEqual(request.eim_id, "eim1.example.test")
+        self.assertEqual(request.eim_id_type, "eimIdTypeFqdn (2)")
+
+    def test_build_eim_poll_request_omits_challenge_for_vendor_quirk_endpoint(self):
         configured_data = wrap_tlv("BF3C", wrap_tlv("80", b"rsp.example.com"))
         eim_configuration = wrap_tlv(
             "BF55",
@@ -1467,16 +1531,12 @@ class OrchestratorFlowTests(unittest.TestCase):
         )
 
         orchestrator._phase_connect()
-        orchestrator._phase_eim_card_challenge()
+        orchestrator.state.card_challenge = bytes.fromhex("AA55AA55AA55AA55AA55AA55AA55AA55")
         request = orchestrator._build_eim_poll_request(matching_id="MATCH-1", entry_index=0)
 
-        self.assertEqual(
-            request.raw_body,
-            orchestrator._build_get_eim_package_tlv(
-                request.eid,
-                euicc_challenge_bytes=orchestrator.state.card_challenge,
-            ),
-        )
+        self.assertEqual(request.raw_body, orchestrator._build_get_eim_package_tlv(request.eid))
+        self.assertEqual(request.euicc_challenge, "")
+        self.assertFalse(any(call[0] == "EIM: GetEuiccChallenge" for call in apdu_channel.send_calls))
 
     def test_build_get_eim_package_tlv_supports_notify_and_rplmn(self):
         orchestrator = SGP22Orchestrator(
@@ -1487,7 +1547,6 @@ class OrchestratorFlowTests(unittest.TestCase):
 
         payload = orchestrator._build_get_eim_package_tlv(
             "89044045930000000000001492294428",
-            euicc_challenge_bytes=bytes.fromhex("5B2C6EF395AFB69CBFB3212E6427A16E"),
             notify_state_change=True,
             # 3GPP TS 23.003 §2.2 test PLMN: MCC=001, MNC=01 → BCD 00 F1 10.
             rplmn_bytes=bytes.fromhex("00F110"),
@@ -1589,7 +1648,8 @@ class OrchestratorFlowTests(unittest.TestCase):
         self.assertEqual(first_request.euicc_configured_data, base64.b64encode(configured_data).decode("utf-8"))
         self.assertEqual(first_request.eim_configuration_data, base64.b64encode(eim_configuration).decode("utf-8"))
         self.assertEqual(first_request.euicc_package_result, "")
-        self.assertNotEqual(first_request.euicc_challenge, "", "eIM poll must send euiccChallenge (card challenge).")
+        self.assertEqual(first_request.euicc_challenge, "")
+        self.assertFalse(any(call[0] == "EIM: GetEuiccChallenge" for call in apdu_channel.send_calls))
         self.assertEqual(first_request.trusted_tls_public_key_data, wrap_tlv("30", tls_key_material))
         self.assertEqual(
             first_request.raw_body,
@@ -1620,8 +1680,6 @@ class OrchestratorFlowTests(unittest.TestCase):
             apdu_channel=FakeApduChannel(),
             profile_provider=provider,
         )
-        orchestrator.state.card_challenge = bytes.fromhex("AA55AA55AA55AA55AA55AA55AA55AA55")
-        challenge_b64 = orchestrator._eim_euicc_challenge_b64(orchestrator.state.card_challenge)
         request = EimPollRequest(
             eim_fqdn="eim.example.com",
             eim_id="manager-1",
@@ -1634,7 +1692,7 @@ class OrchestratorFlowTests(unittest.TestCase):
             euicc_configured_data="",
             eim_configuration_data="",
             eid="89044045930000000000001492294428",
-            euicc_challenge=challenge_b64,
+            euicc_challenge="stale-eim-challenge",
             raw_body=bytes.fromhex("BF4F125A1089044045930000000000001492294428"),
         )
 
@@ -1644,6 +1702,7 @@ class OrchestratorFlowTests(unittest.TestCase):
         self.assertIn("Provider getEimPackage failed", str(raised.exception))
         self.assertEqual(len(provider.poll_eim_calls), 1)
         self.assertEqual(provider.poll_eim_calls[0].raw_body, request.raw_body)
+        self.assertEqual(provider.poll_eim_calls[0].euicc_challenge, "")
 
     def test_build_get_eim_package_variant_requests_includes_alternatives(self):
         orchestrator = SGP22Orchestrator(
@@ -1664,7 +1723,7 @@ class OrchestratorFlowTests(unittest.TestCase):
             eim_configuration_data="",
             euicc_info2=base64.b64encode(bytes.fromhex("BF2208810302600116840100")).decode("utf-8"),
             eid="89044045930000000000001492294428",
-            euicc_challenge=orchestrator._eim_euicc_challenge_b64(bytes.fromhex("AA55AA55AA55AA55AA55AA55AA55AA55")),
+            euicc_challenge="",
             raw_body=bytes.fromhex(
                 "BF4F195A1089044045930000000000001492294428"
                 "8000"
@@ -1706,7 +1765,7 @@ class OrchestratorFlowTests(unittest.TestCase):
             eim_configuration_data="",
             euicc_info2=base64.b64encode(bytes.fromhex("BF2208810302600116840100")).decode("utf-8"),
             eid="89044045930000000000001492294428",
-            euicc_challenge=orchestrator._eim_euicc_challenge_b64(bytes.fromhex("AA55AA55AA55AA55AA55AA55AA55AA55")),
+            euicc_challenge="",
             raw_body=bytes.fromhex(
                 "BF4F195A1089044045930000000000001492294428"
                 "8000"
@@ -1742,7 +1801,7 @@ class OrchestratorFlowTests(unittest.TestCase):
             eim_configuration_data="",
             euicc_info2=base64.b64encode(bytes.fromhex("BF2208810302600116840100")).decode("utf-8"),
             eid="89044045930000000000001492294428",
-            euicc_challenge=orchestrator._eim_euicc_challenge_b64(bytes.fromhex("AA55AA55AA55AA55AA55AA55AA55AA55")),
+            euicc_challenge="",
             raw_body=bytes.fromhex(
                 "BF4F1C5A1089044045930000000000001492294428"
                 "80008101038203260116"
@@ -1767,7 +1826,6 @@ class OrchestratorFlowTests(unittest.TestCase):
             profile_provider=provider,
         )
         orchestrator._phase_connect = lambda: None
-        orchestrator._phase_eim_card_challenge = lambda: None
         orchestrator._resolve_eim_poll_entry_indices = lambda entry_index=None: [0]
         orchestrator._build_eim_poll_request = lambda matching_id="", entry_index=0: EimPollRequest(
             eim_fqdn="eim1.example.test",
@@ -1817,6 +1875,34 @@ class OrchestratorFlowTests(unittest.TestCase):
         self.assertEqual(captured["smdp_address"], "rsp.example.com")
         self.assertEqual(provider.base_url_calls, ["https://rsp.example.com"])
         self.assertEqual(response, bytes.fromhex("BF5409820401020304BF3700"))
+
+    def test_relay_profile_download_trigger_gets_challenge_via_smdp_flow(self):
+        cfg = FakeCfg()
+        cfg.CAPABILITIES = {
+            "gsmSupportedRelease": b"\x99\x00\x00",
+            "utranSupportedRelease": b"\x99\x00\x00",
+            "eutranEpcSupportedRelease": b"\x99\x00\x00",
+        }
+        apdu_channel = FakeApduChannel()
+        provider = FakeProvider(bpp_bytes=b"")
+        orchestrator = SGP22Orchestrator(
+            cfg=cfg,
+            apdu_channel=apdu_channel,
+            profile_provider=provider,
+        )
+        self._seed_local_credentials(orchestrator)
+        package = wrap_tlv(
+            "BF54",
+            wrap_tlv("82", b"\x01\x02\x03\x04")
+            + wrap_tlv("30", wrap_tlv("80", b"LPA:1$rsp.example.com$MATCH-54")),
+        )
+
+        orchestrator._relay_eim_package_to_card(package, poll_round=1, package_index=1)
+
+        call_names = [name for name, _ in apdu_channel.send_calls]
+        self.assertIn("HANDSHAKE: GetEuiccChallenge", call_names)
+        self.assertFalse(any(name == "EIM: GetEuiccChallenge" for name in call_names))
+        self.assertEqual(provider.base_url_calls, ["https://rsp.example.com"])
 
     def test_provider_certificate_payload_supported_accepts_raw_der_x509(self):
         orchestrator = SGP22Orchestrator(

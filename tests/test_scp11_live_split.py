@@ -620,7 +620,7 @@ class LogicalChannelCaptureApduChannel:
             return bytes.fromhex("AA55AA55AA55AA55AA55AA55AA55AA55")
         return b""
 
-    def send_chunked(self, cla, ins, p1, p2_start, payload, log_name, chunk_size=250):
+    def send_chunked(self, cla, ins, p1, p2_start, payload, log_name, chunk_size=0xFF):
         self.send_chunked_calls.append((cla, ins, p1, p2_start, payload, log_name, chunk_size))
         if "PrepareDownload" in log_name:
             return bytes.fromhex("BF2100")
@@ -707,6 +707,63 @@ class LiveSplitTests(unittest.TestCase):
             main_wrapper._dispatch_main_menu_choice("3D")
         mocked_eim_local.assert_called_once_with()
 
+        with mock.patch.object(main_wrapper, "run_scp11_live_polling_plugin") as mocked_poll:
+            main_wrapper._dispatch_main_menu_choice("3P")
+        mocked_poll.assert_called_once_with()
+
+    def test_main_menu_live_polling_entry_dispatches_plugin_without_console(self):
+        class FakeClient:
+            def __init__(self):
+                self.cfg = SimpleNamespace()
+                self.apdu_channel = SimpleNamespace(name="initial")
+                self.orchestrator = SimpleNamespace(
+                    state=SimpleNamespace(),
+                    apdu_channel=self.apdu_channel,
+                    _es10b_logical_channel=0,
+                    _use_stk_mode_for_es10b_store_data=False,
+                    _phase_connect_stk_sent=False,
+                    _phase_connect_complete=False,
+                )
+                self.orchestrator._retrieve_es10b_data = mock.Mock(
+                    return_value=b"\xBF\x55\x00"
+                )
+                self.orchestrator._decode_eim_configuration_entries = mock.Mock(
+                    return_value=[{"eim_fqdn": "eim.example.test"}]
+                )
+                self._run_startup_preflight = mock.Mock()
+                self._build_runtime = mock.Mock()
+                self._print_startup_warnings = mock.Mock()
+                self._build_apdu_channel = mock.Mock(
+                    return_value=SimpleNamespace(name="reset")
+                )
+
+        fake_client = FakeClient()
+
+        with mock.patch.object(main_wrapper, "clear_screen"):
+            with mock.patch.object(main_wrapper, "pause"):
+                with mock.patch.object(main_wrapper.importlib, "reload", side_effect=lambda module: module):
+                    with mock.patch("SCP11.live.main.SGP22Client", return_value=fake_client):
+                        with mock.patch(
+                            "yggdrasim_common.polling_plugin_support.dispatch_poll_command"
+                        ) as mocked_dispatch:
+                            main_wrapper.run_scp11_live_polling_plugin(
+                                argument="150",
+                                pause_after=False,
+                            )
+
+        fake_client._run_startup_preflight.assert_called_once_with()
+        fake_client._build_runtime.assert_called_once_with()
+        fake_client._print_startup_warnings.assert_called_once_with()
+        mocked_dispatch.assert_called_once()
+        surface, command_name, adapter, argument = mocked_dispatch.call_args.args
+        self.assertEqual(surface, "scp11.live")
+        self.assertEqual(command_name, "POLL")
+        self.assertEqual(argument, "150")
+        self.assertIs(adapter.orchestrator, fake_client.orchestrator)
+        self.assertEqual(adapter._resolve_cached_poll_target_fqdns(), [])
+        fake_client.orchestrator._retrieve_es10b_data.assert_not_called()
+        fake_client.orchestrator._decode_eim_configuration_entries.assert_not_called()
+
     def test_main_menu_alpha_choices_route_automation_entries(self):
         with mock.patch.object(main_wrapper, "run_scp03_script") as mocked_script:
             main_wrapper._dispatch_main_menu_choice("9A")
@@ -754,7 +811,6 @@ class LiveSplitTests(unittest.TestCase):
         )
         cfg = SimpleNamespace(
             AID_ISD_R=bytes.fromhex("A0000005591010FFFFFFFF8900000100"),
-            EIM_EUICC_CHALLENGE_ASN1=True,
         )
         orchestrator = SGP22Orchestrator(
             cfg=cfg,
@@ -762,14 +818,15 @@ class LiveSplitTests(unittest.TestCase):
             profile_provider=None,
         )
 
-        orchestrator._phase_eim_card_challenge()
+        orchestrator.state.card_challenge = bytes.fromhex("AA55AA55AA55AA55AA55AA55AA55AA55")
         request = orchestrator._build_eim_poll_request(matching_id="MATCH-1", entry_index=0)
 
         self.assertEqual(
             request.raw_body,
             bytes.fromhex("BF4F125A1089044045930000000000001492294428"),
         )
-        self.assertNotEqual(request.euicc_challenge, "")
+        self.assertEqual(request.euicc_challenge, "")
+        self.assertFalse(any(call[0] == "EIM: GetEuiccChallenge" for call in apdu_channel.send_calls))
 
     def test_live_profile_download_trigger_keeps_localized_bridge_base_url(self):
         provider = SimpleNamespace(set_base_url=mock.Mock())
@@ -824,7 +881,7 @@ class LiveSplitTests(unittest.TestCase):
         self.assertIn("INIT: TERMINAL CAPABILITY", call_names)
         self.assertEqual(
             apdu_channel.send_calls[0][1],
-            bytes.fromhex("80AA00000DA90B8100820101830107840101"),
+            bytes.fromhex("80AA000005A903840101"),
         )
 
     def test_live_phase_connect_bootstraps_logical_channel_when_enabled(self):
@@ -845,7 +902,7 @@ class LiveSplitTests(unittest.TestCase):
         self.assertIn("INIT: TERMINAL CAPABILITY", all_names)
         self.assertIn("INIT: OPEN LOGICAL CHANNEL", all_names)
         self.assertIn("INIT: SELECT ISD-R CH1", all_names)
-        self.assertEqual(apdu_channel.send_calls[0][1], bytes.fromhex("80AA00000DA90B8100820101830107840101"))
+        self.assertEqual(apdu_channel.send_calls[0][1], bytes.fromhex("80AA000005A903840101"))
         open_channel_call = next(call for call in apdu_channel.send_calls if call[0] == "INIT: OPEN LOGICAL CHANNEL")
         self.assertEqual(open_channel_call[1], bytes.fromhex("0070000000"))
         select_isd_r_ch1_call = next(call for call in apdu_channel.send_calls if call[0] == "INIT: SELECT ISD-R CH1")
@@ -1095,7 +1152,7 @@ class LiveSplitTests(unittest.TestCase):
         self.assertEqual([call[1][2] for call in relay_calls[:-1]], [0x11] * (len(relay_calls) - 1))
         self.assertEqual(relay_calls[-1][1][2], 0x91)
         self.assertEqual([call[1][3] for call in relay_calls], list(range(len(relay_calls))))
-        self.assertTrue(all(call[1][4] <= 120 for call in relay_calls))
+        self.assertTrue(all(call[1][4] <= 0xFF for call in relay_calls))
         self.assertEqual(b"".join(call[1][5:] for call in relay_calls), signed_package)
 
     def test_live_eim_poll_request_uses_init_banner_metadata_cache(self):
@@ -1140,6 +1197,46 @@ class LiveSplitTests(unittest.TestCase):
         self.assertEqual(request.eim_id, "manager-1")
         self.assertTrue(len(request.euicc_configured_data) > 0)
         self.assertTrue(len(request.eim_configuration_data) > 0)
+
+    def test_live_eim_poll_request_uses_fqdn_eim_id_when_fqdn_field_absent(self):
+        eim_configuration = wrap_tlv(
+            "BF55",
+            wrap_tlv(
+                "A0",
+                wrap_tlv(
+                    "30",
+                    b"".join(
+                        [
+                            wrap_tlv("80", b"eim1.example.test"),
+                            wrap_tlv("82", b"\x02"),
+                        ]
+                    ),
+                ),
+            ),
+        )
+        configured_data = wrap_tlv("BF3C", wrap_tlv("80", b"rsp.example.test"))
+        orchestrator = SGP22Orchestrator(
+            cfg=SimpleNamespace(),
+            apdu_channel=MinimalApduChannel(
+                configured_data_response=b"",
+                eim_configuration_response=b"",
+                eid_response=b"",
+            ),
+            profile_provider=None,
+        )
+        orchestrator.cache_eim_poll_metadata(
+            eid="89044045930000000000001492294428",
+            euicc_configured_data=configured_data,
+            eim_configuration_data=eim_configuration,
+            euicc_info1=wrap_tlv("BF20", b"\x82\x03\x02\x05\x00"),
+            euicc_info2=wrap_tlv("BF22", b"\x81\x03\x02\x03\x01"),
+        )
+
+        request = orchestrator._build_eim_poll_request(matching_id="MATCH-1", entry_index=0)
+
+        self.assertEqual(request.eim_fqdn, "eim1.example.test")
+        self.assertEqual(request.eim_id, "eim1.example.test")
+        self.assertEqual(request.eim_id_type, "eimIdTypeFqdn (2)")
 
     def test_live_eim_binary_logs_full_provide_result_body(self):
         client = RecordingPinnedBypassEimClient(base_url="https://rsp.example.com")
@@ -1328,7 +1425,6 @@ class LiveSplitTests(unittest.TestCase):
         )
         cfg = SimpleNamespace(
             AID_ISD_R=bytes.fromhex("A0000005591010FFFFFFFF8900000100"),
-            EIM_EUICC_CHALLENGE_ASN1=True,
             RESET_CARD_BEFORE_FLOW=False,
             EIM_MAX_POLL_ROUNDS=4,
         )
@@ -1388,7 +1484,6 @@ class LiveSplitTests(unittest.TestCase):
         )
         cfg = SimpleNamespace(
             AID_ISD_R=bytes.fromhex("A0000005591010FFFFFFFF8900000100"),
-            EIM_EUICC_CHALLENGE_ASN1=True,
             RESET_CARD_BEFORE_FLOW=False,
             EIM_MAX_POLL_ROUNDS=4,
             EIM_MAX_DRAIN_ROUNDS=3,
@@ -1450,7 +1545,6 @@ class LiveSplitTests(unittest.TestCase):
         )
         cfg = SimpleNamespace(
             AID_ISD_R=bytes.fromhex("A0000005591010FFFFFFFF8900000100"),
-            EIM_EUICC_CHALLENGE_ASN1=True,
             RESET_CARD_BEFORE_FLOW=False,
             EIM_MAX_POLL_ROUNDS=4,
             EIM_MAX_DRAIN_ROUNDS=2,
@@ -1666,37 +1760,37 @@ class LiveSplitTests(unittest.TestCase):
 
         self.assertTrue(install_complete)
         load_calls = [call for call in apdu_channel.send_calls if call[0].startswith("DOWNLOAD: LoadBoundProfilePackage")]
-        # BF23 (segment 1) is 170 bytes → 2 blocks with 120-byte chunking.
-        self.assertEqual(load_calls[2][0], "DOWNLOAD: LoadBoundProfilePackage [2/7] [Block 0]")
+        # BF23 (segment 1) fits in one block with the 0xFF chunk ceiling.
+        self.assertEqual(load_calls[1][0], "DOWNLOAD: LoadBoundProfilePackage [2/7] [Block 0]")
         self.assertEqual(
-            load_calls[2][1],
+            load_calls[1][1],
             bytes([0x80, 0xE2, 0x91, 0x00, len(wrap_tlv("A0", a0_member))]) + wrap_tlv("A0", a0_member),
         )
         a1_header = bytes.fromhex("A1") + encode_der_length(len(a1_member))
-        self.assertEqual(load_calls[3][0], "DOWNLOAD: LoadBoundProfilePackage [3/7] [Block 0]")
+        self.assertEqual(load_calls[2][0], "DOWNLOAD: LoadBoundProfilePackage [3/7] [Block 0]")
         self.assertEqual(
-            load_calls[3][1],
+            load_calls[2][1],
             bytes([0x80, 0xE2, 0x91, 0x00, len(a1_header)]) + a1_header,
         )
-        self.assertEqual(load_calls[4][0], "DOWNLOAD: LoadBoundProfilePackage [4/7] [Block 0]")
+        self.assertEqual(load_calls[3][0], "DOWNLOAD: LoadBoundProfilePackage [4/7] [Block 0]")
         self.assertEqual(
-            load_calls[4][1],
+            load_calls[3][1],
             bytes([0x80, 0xE2, 0x91, 0x00, len(a1_member)]) + a1_member,
         )
         a3_header = bytes.fromhex("A3") + encode_der_length(len(a3_first_member + a3_second_member))
-        self.assertEqual(load_calls[5][0], "DOWNLOAD: LoadBoundProfilePackage [5/7] [Block 0]")
+        self.assertEqual(load_calls[4][0], "DOWNLOAD: LoadBoundProfilePackage [5/7] [Block 0]")
         self.assertEqual(
-            load_calls[5][1],
+            load_calls[4][1],
             bytes([0x80, 0xE2, 0x91, 0x00, len(a3_header)]) + a3_header,
         )
-        self.assertEqual(load_calls[6][0], "DOWNLOAD: LoadBoundProfilePackage [6/7] [Block 0]")
+        self.assertEqual(load_calls[5][0], "DOWNLOAD: LoadBoundProfilePackage [6/7] [Block 0]")
         self.assertEqual(
-            load_calls[6][1],
+            load_calls[5][1],
             bytes([0x80, 0xE2, 0x91, 0x00, len(a3_first_member)]) + a3_first_member,
         )
-        self.assertEqual(load_calls[7][0], "DOWNLOAD: LoadBoundProfilePackage [7/7] [Block 0]")
+        self.assertEqual(load_calls[6][0], "DOWNLOAD: LoadBoundProfilePackage [7/7] [Block 0]")
         self.assertEqual(
-            load_calls[7][1],
+            load_calls[6][1],
             bytes([0x80, 0xE2, 0x91, 0x00, len(a3_second_member)]) + a3_second_member,
         )
 
@@ -1744,7 +1838,7 @@ class LiveSplitTests(unittest.TestCase):
         self.assertEqual((cla, ins, p1, p2_start), (0x81, 0xE2, 0x91, 0x00))
         self.assertEqual(payload, b"\xAA")
         self.assertEqual(log_name, "DOWNLOAD: PrepareDownload")
-        self.assertEqual(chunk_size, 250)
+        self.assertEqual(chunk_size, 0xFF)
 
     def test_live_install_uses_logical_channel_cla_when_active(self):
         bf23_value = b"".join(

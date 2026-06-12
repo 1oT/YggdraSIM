@@ -328,6 +328,7 @@ try:
         encode_notification_sent_request,
         extract_euicc_signed1,
     )
+    from ..shared.trace_dump import print_hex_payload, print_store_data_chunk_plan, split_tlv_aware_chunks
     from ..shared.transport import PcscApduChannel
     from .cert_store import LocalSgp26CertStore, SmdpCertificateRecord
     from .config import LocalAccessConfig
@@ -355,6 +356,7 @@ except ImportError:
         encode_notification_sent_request,
         extract_euicc_signed1,
     )
+    from SCP11.shared.trace_dump import print_hex_payload, print_store_data_chunk_plan, split_tlv_aware_chunks
     from SCP11.shared.transport import PcscApduChannel
     from SCP11.local_access.cert_store import LocalSgp26CertStore, SmdpCertificateRecord
     from SCP11.local_access.config import LocalAccessConfig
@@ -780,6 +782,7 @@ class LocalIsdrSession:
                 log_name,
                 chunk_size=chunk_size,
             )
+        print_hex_payload(f"{log_name} full payload", payload)
         apdu = self._build_store_data_apdu(payload)
         return self.apdu_channel.send(apdu, log_name)
 
@@ -4016,20 +4019,28 @@ class LocalIsdrSession:
             offset = next_offset
         return members
 
-    def _send_personalization_store_data(self, payload: bytes, log_name: str, chunk_size: int = 255) -> bytes:
+    def _send_personalization_store_data(self, payload: bytes, log_name: str, chunk_size: int = 0xFF) -> bytes:
         total = len(payload)
-        offset = 0
         block = 0
         response = b""
-        while offset < total:
-            end_offset = offset + chunk_size
-            chunk = payload[offset:end_offset]
-            is_last_chunk = end_offset >= total
+        chunks = split_tlv_aware_chunks(payload, chunk_size)
+        print_store_data_chunk_plan(
+            log_name,
+            payload,
+            cla=0x80,
+            ins=0xE2,
+            final_p1=0x91,
+            p2_start=0,
+            chunk_size=chunk_size,
+            p2_wrap=True,
+            chunks=chunks,
+        )
+        for chunk_index, chunk in enumerate(chunks, start=1):
+            is_last_chunk = chunk_index == len(chunks)
             p1 = 0x11
             if is_last_chunk:
                 p1 = 0x91
             apdu = bytes([0x80, 0xE2, p1, block & 0xFF, len(chunk)]) + chunk
             response = self.apdu_channel.send(apdu, f"{log_name} [Block {block}]")
-            offset += chunk_size
             block += 1
         return response

@@ -2646,8 +2646,8 @@ class EimLocalModelTests(unittest.TestCase):
         shell._terminal_width = lambda: 140  # type: ignore[method-assign]
         shell._plugin_localized_help_rows = [
             (
-                "IPAE-LIVE [attempts] [timer-window] [-t 20s] [-s 5] [--debug]",
-                "Localized IPAe STK/BIP watchdog via SCP11 live",
+                "IPAE-LIVE [attempts] [virtual-timer] [-t 20s] [-s 5] [--debug]",
+                "Localized IPAe STATUS-tick watchdog via SCP11 live",
             )
         ]
 
@@ -2658,10 +2658,10 @@ class EimLocalModelTests(unittest.TestCase):
         self.assertIn("Use HELP <command> for full usage", rendered)
         self.assertIn("Localized Routing & Handover", rendered)
         self.assertIn("Queue Campaigns", rendered)
-        self.assertIn("IPAE-LIVE [attempts] [timer-window] [-t 20s] [-s 5] [--debug]", rendered)
+        self.assertIn("IPAE-LIVE [attempts] [virtual-timer] [-t 20s] [-s 5] [--debug]", rendered)
         self.assertIn("POLL-CAMPAIGN [cycles] [intervalMs] [...]", rendered)
         self.assertIn("EIM-PACKAGE-EXPLAIN [path] [--yaml]", rendered)
-        self.assertLess(rendered.index("Localized Routing & Handover"), rendered.index("IPAE-LIVE [attempts] [timer-window] [-t 20s] [-s 5] [--debug]"))
+        self.assertLess(rendered.index("Localized Routing & Handover"), rendered.index("IPAE-LIVE [attempts] [virtual-timer] [-t 20s] [-s 5] [--debug]"))
         self.assertLess(rendered.index("Queue Campaigns"), rendered.index("POLL-CAMPAIGN [cycles] [intervalMs] [...]"))
         self.assertTrue(
             any(
@@ -2834,7 +2834,9 @@ class EimLocalModelTests(unittest.TestCase):
         self.assertIn("ack_count", rendered)
 
     def test_run_localized_ipae_maps_attempts_to_watchdog(self) -> None:
-        shell = EimLocalShell()
+        fake_session = SimpleNamespace(apdu_channel=SimpleNamespace())
+        with mock.patch("SCP11.eim_local.main.EimLocalSession", return_value=fake_session):
+            shell = EimLocalShell()
         calls: dict[str, object] = {}
 
         class FakeBridge:
@@ -2889,6 +2891,8 @@ class EimLocalModelTests(unittest.TestCase):
         self.assertTrue(bool(watchdog_kwargs["timer_window_explicit"]))
         self.assertEqual(watchdog_kwargs["poll_attempt_delay_seconds"], 20)
         self.assertEqual(watchdog_kwargs["poll_attempt_post_status_loops"], 5)
+        self.assertTrue(bool(watchdog_kwargs["status_tick_trigger_mode"]))
+        self.assertEqual(watchdog_kwargs["status_tick_seconds"], 30)
         self.assertTrue(bool(watchdog_kwargs["debug"]))
         self.assertEqual(watchdog_kwargs["duration_seconds"], 60)
         self.assertEqual(calls["flow"], "ipae_test")
@@ -2910,10 +2914,13 @@ class EimLocalModelTests(unittest.TestCase):
         )
         self.assertIn("Active path: SIM IP", rendered)
         self.assertIn("SIM <-> bridge <-> eIM/SM-DP+", rendered)
+        self.assertIn("STATUS tick trigger: 1 STATUS = 30s", rendered)
         self.assertIn("Localized IPAe watchdog completed", rendered)
 
-    def test_run_localized_ipae_auto_extends_timer_window_for_delayed_attempts(self) -> None:
-        shell = EimLocalShell()
+    def test_run_localized_ipae_maps_virtual_timer_to_status_ticks(self) -> None:
+        fake_session = SimpleNamespace(apdu_channel=SimpleNamespace())
+        with mock.patch("SCP11.eim_local.main.EimLocalSession", return_value=fake_session):
+            shell = EimLocalShell()
         calls: dict[str, object] = {}
 
         class FakeBridge:
@@ -2954,21 +2961,20 @@ class EimLocalModelTests(unittest.TestCase):
         shell._close_network_runtime = lambda orchestrator: calls.setdefault("closed_runtime", True)
 
         with contextlib.redirect_stdout(io.StringIO()) as output:
-            shell._run_localized_ipae("test", argument="3 -t 15 -s 60")
+            shell._run_localized_ipae("test", argument="3 3600 -t 15 -s 60")
 
         rendered = output.getvalue()
         watchdog_kwargs = calls["watchdog_kwargs"]
         self.assertEqual(calls["profile_name"], "test")
         self.assertEqual(watchdog_kwargs["poll_attempts_per_fqdn"], 3)
-        # Realistic per-attempt budget floor is 20s (covers DNS + TLS + eIM
-        # POST + drain + CLOSE CHANNEL observed on production cards). Expected
-        # floor: 3 attempts * 1 target * 20s + 60 post-status loops * 5s = 360.
-        self.assertEqual(watchdog_kwargs["timer_expiration_window_seconds"], 360)
+        self.assertEqual(watchdog_kwargs["timer_expiration_window_seconds"], 3600)
         self.assertEqual(watchdog_kwargs["poll_attempt_delay_seconds"], 15)
         self.assertEqual(watchdog_kwargs["poll_attempt_post_status_loops"], 60)
+        self.assertTrue(bool(watchdog_kwargs["status_tick_trigger_mode"]))
+        self.assertEqual(watchdog_kwargs["status_tick_seconds"], 30)
         self.assertFalse(bool(watchdog_kwargs["debug"]))
-        self.assertIn("timer expiration stimuli window: 360s (auto)", rendered)
-        self.assertIn("auto-extended to 360s", rendered)
+        self.assertIn("virtual timer window: 3600s (120 STATUS tick(s)/attempt)", rendered)
+        self.assertNotIn("auto-extended", rendered)
 
 
 class PollCampaignSummaryFormattingTests(unittest.TestCase):

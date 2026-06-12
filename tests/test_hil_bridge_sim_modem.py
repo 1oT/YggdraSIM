@@ -153,11 +153,10 @@ class HilBridgeSimulatedModemTests(unittest.TestCase):
 
     def test_terminal_capability_and_logical_channel_alias_flow(self) -> None:
         # Mirror the bootstrap body sent by the SCP11 orchestrator after the
-        # TERMINAL CAPABILITY change: tag 0x82 advertises extended logical
-        # channels and tag 0x84 advertises eUICC support, both required by
-        # eUICC stacks that gate ES10 STORE DATA on the eUICC bit.
+        # TERMINAL CAPABILITY change: tag 0x84 advertises eUICC support
+        # without also advertising extended logical-channel capability.
         capability_data, capability_sw1, capability_sw2 = self.channel.transmit(
-            bytes.fromhex("80AA00000DA90B8100820101830107840101")
+            bytes.fromhex("80AA000005A903840101")
         )
         self.assertEqual(capability_data, b"")
         self.assertEqual((capability_sw1, capability_sw2), (0x90, 0x00))

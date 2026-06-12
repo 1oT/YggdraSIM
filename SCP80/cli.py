@@ -91,18 +91,39 @@ class SmartDecoder :
         except Exception :pass 
         return current_fid ,last_le 
 
-    def try_decode (self ,fid ,le ,por_hex ):
-        """Attempt to decode a POR response hex string and print a human-readable summary."""
+    @staticmethod
+    def _extract_command_payload (le ,por_hex ,por_info =None ):
+        if le <=0 :
+            return ""
+        if isinstance (por_info ,dict ):
+            if por_info .get ("valid")!=True :
+                return ""
+            if por_info .get ("status_code")!="00":
+                return ""
+            command_response =str (por_info .get ("command_response")or "").strip ().upper ()
+            if len (command_response )==0 :
+                return ""
+            command_sw =por_info .get ("command_sw")
+            response_body =command_response
+            if command_sw is not None :
+                sw_text =str (command_sw or "").strip ().upper ()
+                if sw_text !="9000":
+                    return ""
+                if response_body .endswith (sw_text ):
+                    response_body =response_body [:-len (sw_text )]
+            needed =le *2
+            if len (response_body )<needed :
+                return ""
+            return response_body [-needed :]
+
+        if len (por_hex )>=(le *2 ):
+            return por_hex [-(le *2 ):]
+        return ""
+
+    def try_decode (self ,fid ,le ,por_hex ,por_info =None ):
+        """Attempt to decode a successful PoR command payload and print a summary."""
         if not SCP03_AVAIL or not por_hex :return 
-        payload =""
-
-
-        if le >0 and len (por_hex )>=(le *2 ):
-
-
-
-
-            payload =por_hex [-(le *2 ):]
+        payload =self ._extract_command_payload (le ,por_hex ,por_info )
 
         if fid and payload :
             fid_name =self .fid_lookup .get (fid ,fid )
@@ -470,7 +491,7 @@ class OtaShell :
             payload_for_decode =getattr (plan ,"payload_hex",payload_override or self .config .get ("payload")or "")
             if por and payload_for_decode :
                 fid ,le =self .decoder .sniff_context (payload_for_decode )
-                self .decoder .try_decode (fid ,le ,por )
+                self .decoder .try_decode (fid ,le ,por ,result .get ("por_decoded"))
         except Exception as e :
             self .last_command_ok =False 
             print (f"{Colors.FAIL}Send Error: {e}{Colors.ENDC}")
@@ -517,7 +538,7 @@ class OtaShell :
 
             por =result .get ("por")
             if por :
-                self .decoder .try_decode (fid ,le ,por )
+                self .decoder .try_decode (fid ,le ,por ,result .get ("por_decoded"))
 
 
 
@@ -622,7 +643,9 @@ class OtaShell :
         if not por_info :
             return
         if por_info .get ("status_code")=="00":
-            return
+            command_sw =por_info .get ("command_sw")
+            if command_sw is None or str (command_sw ).upper ()=="9000":
+                return
         if por_info .get ("valid")!=True :
             error =por_info .get ("error")
             if error :
@@ -668,6 +691,8 @@ class OtaShell :
         print ("  qa              - Exit YggdraSIM")
         print ("")
         print ("Config keys:")
+        print ("  pid             - SMS TP-PID byte")
+        print ("  dcs             - SMS TP-DCS byte")
         print ("  concat_sms      - ON or OFF automatic concatenation")
         print ("  tp_ud_max       - Per-segment TP-UD ceiling (8-140)")
 

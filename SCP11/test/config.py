@@ -91,7 +91,6 @@ class SGPConfig:
     EIM_TRANSPORT_MODE: str = EIM_TRANSPORT_MODE_ESIPA
     EIM_HTTP_PATH: str = "/gsma/rsp2/asn1"
     EIM_HTTP_PROTOCOL: str = "gsma/rsp/v2.1.0"
-    EIM_EUICC_CHALLENGE_ASN1: bool = True
     EIM_REQUEST_VARIANT: int = 0
     EIM_GET_PACKAGE_NOTIFY_STATE_CHANGE: bool = False
     EIM_GET_PACKAGE_STATE_CHANGE_CAUSE: str = ""
@@ -103,12 +102,11 @@ class SGPConfig:
     EIM_REST_CREATE_PATH: str = "/edr/create"
     EIM_REST_LOOKUP_PATH_TEMPLATE: str = "/edr/lookup/{resource_id}"
     REMOTE_DP_ALLOW_LOCAL_FALLBACK: bool = False
-    # FQDN suffix allow-list that gates vendor-specific eIM quirks (initial
-    # eIM challenge inclusion, GetEimPackage timeout retry, etc.). The
-    # shipped tree carries the mechanism only; operators populate the
-    # targets via the env var so production endpoint names stay out of
-    # the public source. Comma- or space-separated. Matched case-folded
-    # against the trailing label sequence of the eIM FQDN.
+    # FQDN suffix allow-list that gates vendor-specific GetEimPackage
+    # timeout/retry probing. The shipped tree carries the mechanism only;
+    # operators populate the targets via the env var so production endpoint
+    # names stay out of the public source. Comma- or space-separated.
+    # Matched case-folded against the trailing label sequence of the eIM FQDN.
     EIM_VENDOR_QUIRK_FQDN_SUFFIXES: tuple = ()
 
     LOCAL_SGP26_TRUST_ANCHOR_PATH: str = field(

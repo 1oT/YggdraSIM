@@ -104,6 +104,14 @@ Current plugin-owned command families:
 
 - relay `POLL` on `SCP11/live`
 - relay `POLL` on `SCP11/test`
+- top-level launcher `[3P] IPAe Polling Plugin`, which dispatches the
+  live-card `POLL` watchdog without entering the eSIM relay shell
+- `POLL --target fqdn[,fqdn...] --debug`, which enables explicit target
+  accounting and live TX/RX APDU traces for each watchdog command
+- `POLL --location 7-or-9-byte-hex` or `POLL --plmn mcc/mnc --lac hex --cell hex`,
+  which overrides card-requested PLI location for the current command only
+- `Workspace/SCP11/live/poll_location_defaults.json`, an ignored local default
+  file for repeated live-card PLI location testing
 - localized `IPAE-LIVE` / `IPAE-TEST` on `SCP11/eim_local`
 - localized `IPAD-LIVE` / `IPAD-TEST` on `SCP11/eim_local`
 - BIP-over-WiFi / Ethernet polling bridge (`LocalizedPollingBridge`
@@ -168,7 +176,7 @@ deliberately split so the patentable surface can be excised in one
 | File | Purpose |
 | --- | --- |
 | `__init__.py` | Aggregates `PollingCapability`, wires `extend_target` for `SCP11Console` / `EimLocalShell` / `ToolkitLogic` |
-| `watchdog.py` | Poll-watchdog runtimes + timer / STK envelope helpers |
+| `watchdog.py` | Poll-watchdog runtimes + STATUS-tick / STK envelope helpers |
 | `wifi_ethernet_bridge.py` | **Patentable.** BIP-over-WiFi/Ethernet loopback DNS/TLS/HTTP bridge |
 | `ipad_standalone.py` | `LocalizedIPAdRunner` and `LocalizedRelayApduChannel` (bridge-backed IPAd flow) |
 | `sim_toolkit_ipae.py` | SIM-side IPAE emulation (DNS / TLS / HTTP state machine) plugged into `ToolkitLogic` |

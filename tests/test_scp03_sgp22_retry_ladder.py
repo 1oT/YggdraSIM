@@ -113,7 +113,7 @@ class StkBasicRetryTransport:
             return bytes.fromhex(PROFILE_LIST_HEX), 0x90, 0x00
         if normalized == "0070000001":
             return b"", 0x68, 0x81
-        if normalized == "80AA00000DA90B8100820101830107840101":
+        if normalized == "80AA000005A903840101":
             return b"", 0x90, 0x00
         if normalized == "80100000010C":
             return b"", 0x90, 0x00

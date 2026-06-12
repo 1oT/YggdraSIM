@@ -103,12 +103,16 @@ IPAd:
 
 Compatibility polling:
 
-- `POLL [attempts] [timer-window] [-t 20s] [-s 5] [--debug]`
+- `POLL [attempts] [timer-window] [-t 20s] [-s 5] [--target fqdn[,fqdn...]] [--location 7-or-9-byte-hex | --plmn mcc/mnc [--lac hex] [--cell hex]] [--rat hex] [--debug]`
 - alias: `EIM-POLL`
 
 Plugin note:
 
 - `POLL` / `EIM-POLL` is provided by the optional `polling` plugin
+- `--debug` streams watchdog APDUs in both directions, including every STATUS
+- `--location` or `--plmn` overrides card-requested PLI location for the current command only
+- the watchdog does not emit unsolicited LOCATION STATUS envelopes
+- `Workspace/SCP11/live/poll_location_defaults.json` can provide local default `plmn`, `lac`, `cell`, and `rat` values
 - when the plugin is absent, the command is not exposed by the core shell
 - see `plugins/README.md` for the capability contract and publication model
 

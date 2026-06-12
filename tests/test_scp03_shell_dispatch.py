@@ -75,6 +75,34 @@ class ShellDispatcherCommandRegistryTests(unittest.TestCase):
         self.assertTrue(set(optional).issubset(set(command_map)))
         self.assertTrue(set(required).isdisjoint(set(optional)))
 
+    def test_pipeable_gp_install_commands_are_registered(self) -> None:
+        command_map = CommandRegistry.build(_CallableProxy())
+        required, _optional = CommandRegistry.get_arg_requirements()
+        expected = {
+            "INSTALL",
+            "INSTALL-CAP",
+            "INSTALL-FILE",
+            "INSTALL-INSTALL",
+            "LOAD",
+            "LOAD-CAP",
+            "INSTALL-LOAD",
+            "INSTALL-FOR-LOAD",
+            "INSTALL-APP",
+            "INSTALL-INSTANCE",
+            "INSTALL-FOR-INSTALL",
+            "MAKE-SELECTABLE",
+            "INSTALL-SELECTABLE",
+            "EXTRADITE",
+            "INSTALL-EXTRADITION",
+            "REGISTRY-UPDATE",
+            "INSTALL-REGISTRY",
+            "PERSONALIZE",
+            "INSTALL-PERSONALIZE",
+        }
+
+        self.assertTrue(expected.issubset(set(command_map)))
+        self.assertTrue(expected.issubset(set(required)))
+
 
 class ShellDispatcherExecLineTests(unittest.TestCase):
     def _make_shell(self) -> ShellDispatcher:
@@ -172,6 +200,220 @@ class ShellDispatcherExecLineTests(unittest.TestCase):
             shell._exec_line("NOT-A-COMMAND")
 
         self.assertIn("Unknown command: NOT-A-COMMAND", buffer.getvalue())
+
+
+class FakeGpController:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, tuple[object, ...], dict[str, object]]] = []
+
+    def install_cap_file(self, *args, **kwargs) -> None:
+        self.calls.append(("install_cap_file", args, kwargs))
+
+    def install_cap_file_with_install_apdu(self, *args, **kwargs) -> None:
+        self.calls.append(("install_cap_file_with_install_apdu", args, kwargs))
+
+    def install_for_load(self, *args, **kwargs) -> None:
+        self.calls.append(("install_for_load", args, kwargs))
+
+    def install_app(self, *args, **kwargs) -> None:
+        self.calls.append(("install_app", args, kwargs))
+
+    def install_make_selectable(self, *args, **kwargs) -> None:
+        self.calls.append(("install_make_selectable", args, kwargs))
+
+    def install_extradition(self, *args, **kwargs) -> None:
+        self.calls.append(("install_extradition", args, kwargs))
+
+    def install_registry_update(self, *args, **kwargs) -> None:
+        self.calls.append(("install_registry_update", args, kwargs))
+
+    def install_personalization(self, *args, **kwargs) -> None:
+        self.calls.append(("install_personalization", args, kwargs))
+
+
+class ShellDispatcherInstallCommandHandlerTests(unittest.TestCase):
+    @staticmethod
+    def _make_shell() -> ShellDispatcher:
+        shell = ShellDispatcher.__new__(ShellDispatcher)
+        shell.gp_ctrl = FakeGpController()
+        return shell
+
+    def test_install_cap_accepts_flags_and_quoted_paths(self) -> None:
+        shell = self._make_shell()
+
+        shell._handle_install_file('"build output/app.cap" --privs 80 --params C900 --applet AABB --module AACC')
+
+        self.assertEqual(
+            shell.gp_ctrl.calls,
+            [
+                (
+                    "install_cap_file",
+                    ("build output/app.cap",),
+                    {
+                        "privileges": "80",
+                        "install_params": "C900",
+                        "target_app_aid": "AABB",
+                        "target_module_aid": "AACC",
+                        "instantiate": True,
+                    },
+                )
+            ],
+        )
+
+    def test_install_cap_preserves_positional_compatibility(self) -> None:
+        shell = self._make_shell()
+
+        shell._handle_install_file("app.cap 80 C900 AABB AACC")
+
+        self.assertEqual(
+            shell.gp_ctrl.calls,
+            [
+                (
+                    "install_cap_file",
+                    ("app.cap",),
+                    {
+                        "privileges": "80",
+                        "install_params": "C900",
+                        "target_app_aid": "AABB",
+                        "target_module_aid": "AACC",
+                        "instantiate": True,
+                    },
+                )
+            ],
+        )
+
+    def test_install_cap_flags_override_positional_values(self) -> None:
+        shell = self._make_shell()
+
+        shell._handle_install_file("app.cap 00 C900 AABB AACC --privs 80 --params EA00")
+
+        self.assertEqual(
+            shell.gp_ctrl.calls,
+            [
+                (
+                    "install_cap_file",
+                    ("app.cap",),
+                    {
+                        "privileges": "80",
+                        "install_params": "EA00",
+                        "target_app_aid": "AABB",
+                        "target_module_aid": "AACC",
+                        "instantiate": True,
+                    },
+                )
+            ],
+        )
+
+    def test_load_cap_sends_load_only_sequence(self) -> None:
+        shell = self._make_shell()
+
+        shell._handle_load_cap("app.cap")
+
+        self.assertEqual(
+            shell.gp_ctrl.calls,
+            [("install_cap_file", ("app.cap",), {"instantiate": False})],
+        )
+
+    def test_supplied_install_apdu_is_joined_after_filename(self) -> None:
+        shell = self._make_shell()
+
+        shell._handle_install_one_shot('"app.cap" 80 E6 0C 00 02 C9 00')
+
+        self.assertEqual(
+            shell.gp_ctrl.calls,
+            [
+                (
+                    "install_cap_file_with_install_apdu",
+                    ("app.cap", "80E60C0002C900"),
+                    {},
+                )
+            ],
+        )
+
+    def test_install_load_maps_to_explicit_lv_fields(self) -> None:
+        shell = self._make_shell()
+
+        shell._handle_install_load("F000000001 A000000151000000 AABB C900 1122")
+
+        self.assertEqual(
+            shell.gp_ctrl.calls,
+            [
+                (
+                    "install_for_load",
+                    ("F000000001", "A000000151000000", "AABB", "C900", "1122"),
+                    {},
+                )
+            ],
+        )
+
+    def test_install_app_defaults_to_make_selectable(self) -> None:
+        shell = self._make_shell()
+
+        shell._handle_install_app("F000000001 F00000000101 --module F00000000101 --privs 00 --params C900")
+
+        self.assertEqual(
+            shell.gp_ctrl.calls,
+            [
+                (
+                    "install_app",
+                    ("F000000001", "F00000000101", "F00000000101", "00", "C900"),
+                    {"make_selectable": True},
+                )
+            ],
+        )
+
+    def test_install_instance_can_make_selectable_when_requested(self) -> None:
+        shell = self._make_shell()
+
+        shell._handle_install_instance("F000000001 F00000000101 --make-selectable")
+
+        self.assertEqual(
+            shell.gp_ctrl.calls,
+            [
+                (
+                    "install_app",
+                    ("F000000001", "F00000000101", "F00000000101", "00", "C900"),
+                    {"make_selectable": True},
+                )
+            ],
+        )
+
+    def test_install_app_flags_override_positional_values(self) -> None:
+        shell = self._make_shell()
+
+        shell._handle_install_app(
+            "F000000001 F00000000101 F00000000102 00 C900 "
+            "--module F00000000103 --privs 80 --params EA00"
+        )
+
+        self.assertEqual(
+            shell.gp_ctrl.calls,
+            [
+                (
+                    "install_app",
+                    ("F000000001", "F00000000101", "F00000000103", "80", "EA00"),
+                    {"make_selectable": True},
+                )
+            ],
+        )
+
+    def test_remaining_install_variants_are_pipeable_handlers(self) -> None:
+        shell = self._make_shell()
+
+        shell._handle_install_selectable("AABB 80 C900 1122")
+        shell._handle_install_extradition("AABB A000000151000000 1122")
+        shell._handle_install_registry("AABB 80 C900")
+        shell._handle_install_personalization("AABB")
+
+        self.assertEqual(
+            shell.gp_ctrl.calls,
+            [
+                ("install_make_selectable", ("AABB", "80", "C900", "1122"), {}),
+                ("install_extradition", ("AABB", "A000000151000000", "1122"), {}),
+                ("install_registry_update", ("AABB", "80", "C900"), {}),
+                ("install_personalization", ("AABB",), {}),
+            ],
+        )
 
 
 class ShellDispatcherIdentityProbeTests(unittest.TestCase):

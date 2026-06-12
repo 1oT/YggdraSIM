@@ -106,7 +106,7 @@ class OtaShellCommandSurfaceDispatchExtraTests(unittest.TestCase):
         shell.last_command_ok = True
         shell.decoder = SimpleNamespace(
             sniff_context=lambda raw_apdu: (None, 0),
-            try_decode=lambda fid, le, por: None,
+            try_decode=lambda fid, le, por, por_info=None: None,
         )
         shell._print_result = lambda result: None
         shell._print_reader_protocol_caveat = lambda multipart_required=False: None

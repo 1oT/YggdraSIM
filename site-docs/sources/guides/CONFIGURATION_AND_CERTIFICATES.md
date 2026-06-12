@@ -541,11 +541,13 @@ deleting the `[KEYS]` section once a per-card record exists.
 
 **Per-card primary store.** `state/device_inventory.sqlite3`. Every
 ICCID gets its own SCP80 record (SPI / `kic_indicator` / `kid_indicator`
-/ TAR / `kic` / `kid` / static counter / `cla` / `sender` / SMS sizing)
+/ TAR / `kic` / `kid` / static counter / `cla` / `sender` / `pid` /
+`dcs` / SMS sizing)
 under namespace `iccid/<ICCID>/scp80`. Slot semantics follow ETSI TS
 102 225 §5.1.1: `kic` / `kid` hold the 16-byte ciphering and integrity
 keys; `kic_indicator` / `kid_indicator` hold the 1-byte indicator bytes
-that select algorithm + key index in the Command Packet header. The
+that select algorithm + key index in the Command Packet header. `pid`
+and `dcs` set the SMS TP-PID and TP-DCS bytes in the SMS-PP TPDU. The
 SCP80 admin shell uses lowercase verbs (`iccid`, `set`, `show`, `quit`)
 to manage it:
 

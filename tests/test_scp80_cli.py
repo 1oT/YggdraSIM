@@ -113,7 +113,7 @@ class OtaShellTests(unittest.TestCase):
         shell.last_command_ok = True
         shell.decoder = SimpleNamespace(
             sniff_context=lambda raw_apdu: (None, 0),
-            try_decode=lambda fid, le, por: None,
+            try_decode=lambda fid, le, por, por_info=None: None,
         )
         shell._print_result = lambda result: setattr(shell, "_last_result", result)
         shell._print_reader_protocol_caveat = lambda multipart_required=False: setattr(
@@ -257,6 +257,78 @@ class OtaShellTests(unittest.TestCase):
         self.assertIn("CNTR low (02)", output)
         self.assertIn("fetch SW 912D", output)
 
+    def test_print_result_includes_failed_inner_apdu_summary(self) -> None:
+        shell = OtaShell.__new__(OtaShell)
+        result = {
+            "sw": "9130",
+            "por": "D02E",
+            "por_decoded": {
+                "valid": True,
+                "status_code": "00",
+                "status_meaning": "PoR OK",
+                "tar": "B00001",
+                "cntr": "0000010010",
+                "pcntr": "00",
+                "command_count": 1,
+                "command_response": "6A82",
+                "command_sw": "6A82",
+                "fetch_sw": "9130",
+            },
+        }
+        buffer = io.StringIO()
+
+        with redirect_stdout(buffer):
+            shell._print_result(result)
+
+        output = buffer.getvalue()
+        self.assertIn("[POR]", output)
+        self.assertIn("PoR OK (00)", output)
+        self.assertIn("response 6A82", output)
+
+    def test_smart_decoder_skips_failed_inner_apdu_response(self) -> None:
+        decoder = scp80_cli.SmartDecoder.__new__(scp80_cli.SmartDecoder)
+        decoder.fid_lookup = {"2FE2": "EF_ICCID"}
+        decode_calls: list[tuple[str, str]] = []
+        content_decoder = SimpleNamespace(
+            decode=lambda fid, payload: decode_calls.append((fid, payload)) or "decoded"
+        )
+        por_info = {
+            "valid": True,
+            "status_code": "00",
+            "command_count": 1,
+            "command_response": "6A82",
+            "command_sw": "6A82",
+        }
+
+        with patch.object(scp80_cli, "SCP03_AVAIL", True):
+            with patch.object(scp80_cli, "ContentDecoder", content_decoder, create=True):
+                with redirect_stdout(io.StringIO()):
+                    decoder.try_decode("2FE2", 10, "D02E", por_info)
+
+        self.assertEqual(decode_calls, [])
+
+    def test_smart_decoder_uses_successful_command_response_payload(self) -> None:
+        decoder = scp80_cli.SmartDecoder.__new__(scp80_cli.SmartDecoder)
+        decoder.fid_lookup = {"2FE2": "EF_ICCID"}
+        decode_calls: list[tuple[str, str]] = []
+        content_decoder = SimpleNamespace(
+            decode=lambda fid, payload: decode_calls.append((fid, payload)) or "decoded"
+        )
+        por_info = {
+            "valid": True,
+            "status_code": "00",
+            "command_count": 2,
+            "command_response": "900098648011111111111121",
+            "command_sw": None,
+        }
+
+        with patch.object(scp80_cli, "SCP03_AVAIL", True):
+            with patch.object(scp80_cli, "ContentDecoder", content_decoder, create=True):
+                with redirect_stdout(io.StringIO()):
+                    decoder.try_decode("2FE2", 10, "D02E", por_info)
+
+        self.assertEqual(decode_calls, [("2FE2", "98648011111111111121")])
+
     def test_do_set_updates_config_and_saves(self) -> None:
         shell = self._make_shell()
         buffer = io.StringIO()
@@ -344,7 +416,7 @@ class OtaShellTests(unittest.TestCase):
         }
         shell.decoder = SimpleNamespace(
             sniff_context=lambda raw_apdu: ("2FE2", 10),
-            try_decode=lambda fid, le, por_hex: decode_calls.append((fid, le, por_hex)),
+            try_decode=lambda fid, le, por_hex, por_info=None: decode_calls.append((fid, le, por_hex)),
         )
 
         shell.do_send()

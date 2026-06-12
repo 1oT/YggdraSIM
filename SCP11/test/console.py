@@ -1131,7 +1131,7 @@ class SCP11Console:
 
         try:
             self.apdu_channel.send(
-                bytes.fromhex("80AA00000DA90B8100820101830107840101"),
+                bytes.fromhex("80AA000005A903840101"),
                 "INIT-BANNER: TERMINAL CAPABILITY",
             )
         except Exception as error:
@@ -4003,7 +4003,7 @@ class SCP11Console:
         print(f"{self._style.yellow}[*] {log_name}: entering STK mode bootstrap.{self._style.end}")
         with redirect_stdout(io.StringIO()):
             self.apdu_channel.send(
-                bytes.fromhex("80AA00000DA90B8100820101830107840101"),
+                bytes.fromhex("80AA000005A903840101"),
                 f"{log_name} [STK MODE TERMINAL CAPABILITY]",
             )
             aid = self.cfg.AID_ISD_R

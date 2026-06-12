@@ -1123,6 +1123,10 @@ _UST_SERVICE_NAMES: dict[int, str] = {
     144: "Multiplier Coefficient for Higher Priority PLMN search via NG-RAN satellite access",
     145: "K_AUSF derivation configuration",
     146: "Network Identifier for SNPN (NID)",
+    147: "5MBS support",
+    148: "SENSE support",
+    149: "A2X support",
+    150: "IMS Data Channel indication",
 }
 
 # USIM Enabled Services Table (TS 31.102 §4.2.47). Aligned with pySim's
@@ -1911,11 +1915,35 @@ def _decode_iccid(hex_clean: str) -> dict[str, object] | None:
         iccid = _swap_nibbles(hex_clean).rstrip("F")
     except ValueError:
         return None
+    luhn_valid = False
+    if iccid.isdigit() and len(iccid) > 1:
+        total = 0
+        for index, digit in enumerate(reversed(iccid)):
+            value = int(digit)
+            if index % 2 == 1:
+                value *= 2
+                if value > 9:
+                    value -= 9
+            total += value
+        luhn_valid = (total % 10) == 0
+    major_industry_identifier = iccid[:2]
+    mii_labels = {
+        "89": "Telecommunications administrations and private operating agencies",
+    }
     return {
         "iccid": iccid,
         "encoding": "BCD swapped nibbles",
         "digitCount": len(iccid),
+        "majorIndustryIdentifier": major_industry_identifier,
+        "majorIndustryIdentifierLabel": mii_labels.get(
+            major_industry_identifier,
+            "Unknown",
+        ),
+        "luhnValid": luhn_valid,
     }
+
+
+_THREE_DIGIT_MNC_MCCS: set[str] = {"001"}
 
 
 def _decode_imsi(hex_clean: str) -> dict[str, object] | None:
@@ -1932,11 +1960,28 @@ def _decode_imsi(hex_clean: str) -> dict[str, object] | None:
         imsi = swapped[1:]
         if digit_length > 0 and digit_length <= len(imsi):
             imsi = imsi[:digit_length]
-        return {
+        decoded: dict[str, object] = {
             "imsi": imsi,
             "digitCount": len(imsi),
             "oddDigitCount": odd_even == 1,
         }
+        if len(imsi) >= 5:
+            mcc = imsi[:3]
+            mnc_length = 3 if mcc in _THREE_DIGIT_MNC_MCCS else 2
+            mnc = imsi[3 : 3 + mnc_length]
+            alternate_length = 2 if mnc_length == 3 else 3
+            decoded.update(
+                {
+                    "mcc": mcc,
+                    "mnc": mnc,
+                    "mncLengthAssumed": mnc_length,
+                    "mncAlternate": {
+                        "length": alternate_length,
+                        "mnc": imsi[3 : 3 + alternate_length],
+                    },
+                }
+            )
+        return decoded
     except Exception:
         return None
 
@@ -2167,6 +2212,9 @@ def _decode_spn(hex_clean: str) -> dict[str, object] | None:
     decoded: dict[str, object] = {
         "serviceProviderName": provider_name,
         "displayCondition": f"0x{display_condition:02X}",
+        "displayPlmnNameRequiredOnHomePlmn": (display_condition & 0x01) != 0,
+        "spnDisplayNotRequiredOnNonHomePlmn": (display_condition & 0x02) != 0,
+        "displayConditionRfuBits": f"0x{display_condition & 0xFC:02X}",
         "displayInHplmnRequired": (display_condition & 0x01) == 0,
         "hideInOplmnIfEquivalentPlmn": (display_condition & 0x02) != 0,
     }
@@ -3411,15 +3459,22 @@ def _decode_routing_indicator(hex_clean: str) -> dict[str, object] | None:
         return None
     ri_digits = _decode_bcd_digits(raw[:2])
     flag_byte = raw[2]
+    rfu_tail = raw[2:4]
+    rfu_non_default = rfu_tail != b"\xFF\xFF"
     decoded: dict[str, object] = {
         "format": "5G Routing Indicator",
         "hex": raw.hex().upper(),
         "routingIndicator": ri_digits,
+        "routingIndicatorDigitCount": len(ri_digits),
         "flagByte": f"0x{flag_byte:02X}",
         "flagByteDecimal": int(flag_byte),
         "reservedByte": f"0x{raw[3]:02X}",
+        "rfuTrailingHex": rfu_tail.hex().upper(),
+        "rfuNonDefault": rfu_non_default,
         "summary": f"RI={ri_digits or '-'} flag=0x{flag_byte:02X}",
     }
+    if rfu_non_default is True:
+        decoded["summary"] = f"{decoded['summary']} rfu={rfu_tail.hex().upper()}"
     return decoded
 
 
@@ -4179,8 +4234,12 @@ def _decode_kausf_derivation(hex_clean: str) -> dict[str, object] | None:
 _5GS_UPDATE_STATUS_LABELS: dict[int, str] = {
     0x00: "updated",
     0x01: "not updated",
-    0x02: "PLMN not allowed",
-    0x03: "roaming not allowed in this tracking area",
+    0x02: "5U3 ROAMING NOT ALLOWED",
+    0x03: "reserved",
+    0x04: "reserved",
+    0x05: "reserved",
+    0x06: "reserved",
+    0x07: "reserved",
 }
 
 
@@ -5608,13 +5667,20 @@ def _decode_ef_mst(hex_clean: str) -> dict[str, object] | None:
         return None
     if len(raw) == 0:
         return None
-    table = _decode_service_table(hex_clean, _EF_MST_SERVICE_NAMES)
+    table = _decode_service_table(raw[1:].hex(), _EF_MST_SERVICE_NAMES)
     if table is None:
         return None
+    coding_byte = raw[0]
+    coding_name = "XML coding" if coding_byte == 0x00 else "Reserved"
     return {
         "format": "MCS Service Table",
         "hex": raw.hex().upper(),
         "length": len(raw),
+        "codingOfMcsObjects": {
+            "hex": f"{coding_byte:02X}",
+            "decimal": coding_byte,
+            "name": coding_name,
+        },
         **table,
     }
 
@@ -5749,7 +5815,7 @@ def _decode_ef_wlrplmn(hex_clean: str) -> dict[str, object] | None:
         raw = bytes.fromhex(hex_clean)
     except ValueError:
         return None
-    if len(raw) < 3:
+    if len(raw) != 3:
         return None
     head = raw[:3]
     plmn_label: str | None
@@ -9278,15 +9344,36 @@ def _decode_ad(hex_clean: str) -> dict[str, object] | None:
         return None
     mode_map = {
         0x00: "Normal",
-        0x01: "Type Approval",
+        0x01: "Normal + specific facilities",
         0x02: "Normal/Internal",
         0x04: "Normal/Internal",
         0x80: "Proprietary",
     }
-    return {
+    decoded: dict[str, object] = {
         "administrativeMode": mode_map.get(raw[0], f"0x{raw[0]:02X}"),
-        "raw": hex_clean,
+        "raw": raw.hex().upper(),
     }
+    if len(raw) >= 3:
+        flags = raw[2]
+        decoded["additionalInfoFlags"] = {
+            "cipheringIndicatorEnabled": bool(flags & 0x01),
+            "csgDisplayControl": bool(flags & 0x02),
+            "proseForPublicSafetyAuthorized": bool(flags & 0x04),
+            "extendedDrxAuthorized": bool(flags & 0x08),
+            "fiveGProseAuthorized": bool(flags & 0x10),
+        }
+    if len(raw) >= 4:
+        mnc_length = raw[3]
+        decoded["mncLengthDigits"] = mnc_length
+        if mnc_length in (2, 3):
+            decoded["mncLengthSource"] = "explicit"
+        elif mnc_length == 0:
+            decoded["mncLengthSource"] = "service-driven"
+        else:
+            decoded["mncLengthSource"] = "reserved"
+    if len(raw) > 4:
+        decoded["rfuTrailingHex"] = raw[4:].hex().upper()
+    return decoded
 
 
 def _decode_puct(hex_clean: str) -> dict[str, object] | None:
@@ -10213,6 +10300,9 @@ def _decode_known_ef_payload(
     if token == "ef-routing-indicator" or fid_upper == "4F0A":
         return _decode_routing_indicator(hex_clean)
     if token == "ef-ursp" or fid_upper == "4F0B":
+        decoded = _decode_ef_ursp(hex_clean)
+        if decoded is not None:
+            return decoded
         decoded = _decode_generic_tlv_ef(
             hex_clean,
             format_name="UE Route Selection Policy",
@@ -12946,7 +13036,55 @@ def _decode_connectivity_parameters(value_bytes: bytes) -> dict[str, object]:
     )
     return {
         "format": "TCA SAIP Connectivity Parameters",
+        "hex": value_bytes.hex().upper(),
         "items": items,
+    }
+
+
+def _decode_ef_ursp(hex_clean: str) -> dict[str, object] | None:
+    """Decode EF.URSP per-PLMN entries from TS 31.102 §4.4.11.12."""
+
+    try:
+        raw = bytes.fromhex(hex_clean)
+    except ValueError:
+        return None
+    parsed = _parse_ber_tlv_item(raw, 0)
+    if parsed is None:
+        return None
+    envelope, end_offset = parsed
+    if end_offset != len(raw) or envelope.get("tag") != "80":
+        return None
+    value_bytes = bytes(envelope.get("valueBytes") or b"")
+    entries: list[dict[str, object]] = []
+    cursor = 0
+    while cursor < len(value_bytes):
+        if cursor + 5 > len(value_bytes):
+            return None
+        plmn_bytes = value_bytes[cursor : cursor + 3]
+        rules_length = int.from_bytes(
+            value_bytes[cursor + 3 : cursor + 5],
+            "big",
+            signed=False,
+        )
+        cursor += 5
+        if cursor + rules_length > len(value_bytes):
+            return None
+        rules_bytes = value_bytes[cursor : cursor + rules_length]
+        cursor += rules_length
+        entries.append(
+            {
+                "plmnHex": plmn_bytes.hex().upper(),
+                "rulesLength": rules_length,
+                "rulesHex": rules_bytes.hex().upper(),
+            }
+        )
+    return {
+        "format": "UE Route Selection Policy",
+        "hex": raw.hex().upper(),
+        "specReference": "3GPP TS 31.102 §4.4.11.12 / TS 24.526",
+        "perPlmnEntryCount": len(entries),
+        "perPlmnEntries": entries,
+        "summary": f"{len(entries)} per-PLMN URSP entr{'y' if len(entries) == 1 else 'ies'}",
     }
 
 

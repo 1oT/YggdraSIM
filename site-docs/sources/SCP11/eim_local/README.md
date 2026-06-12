@@ -64,6 +64,9 @@ Localized `IPAe` polling:
 
 - use the same plugin-backed watchdog style as relay `POLL` for `IPAE-LIVE` and
   `IPAE-TEST`
+- drive polling with counted STATUS ticks rather than synthetic TIMER
+  EXPIRATION envelopes; one completed STATUS response represents 30 seconds of
+  card-side elapsed time
 - keep handover and transaction continuity under local control through the
   built-in `IPAE-AUTHENTICATE` and `IPAE-DOWNLOAD` helpers
 - intercept, route, and terminate the STK/BIP exchange locally

@@ -24,14 +24,27 @@ class ProSeServiceTableTests(unittest.TestCase):
         self.assertIsNotNone(decoded)
         assert decoded is not None
         self.assertEqual(decoded["format"], "ProSe Service Table")
-        self.assertEqual(decoded["activeServices"], [1, 3])
-        self.assertIn("ProSe direct-discovery parameters", decoded["summary"])
+        self.assertEqual(
+            decoded["activeServices"],
+            [
+                "1: ProSe direct discovery (open)",
+                "3: ProSe direct communication (one-to-many)",
+            ],
+        )
+        self.assertEqual(decoded["activeCount"], 2)
 
     def test_two_byte_payload_walks_into_second_octet(self) -> None:
         decoded = _decode_ef_pst("8003")
         self.assertIsNotNone(decoded)
         assert decoded is not None
-        self.assertEqual(decoded["activeServices"], [8, 9, 10])
+        self.assertEqual(
+            decoded["activeServices"],
+            [
+                "8: ProSe UE-to-network relay (Layer-2)",
+                "9: ProSe UE-to-UE relay (Layer-2)",
+                "10: ProSe per-PLMN authorisation",
+            ],
+        )
 
     def test_empty_payload_returns_none(self) -> None:
         self.assertIsNone(_decode_ef_pst(""))
@@ -47,7 +60,14 @@ class ProSeServiceTableTests(unittest.TestCase):
         )
         self.assertIsNotNone(decoded)
         assert decoded is not None
-        self.assertEqual(decoded["activeServices"], [1, 2, 3])
+        self.assertEqual(
+            decoded["activeServices"],
+            [
+                "1: ProSe direct discovery (open)",
+                "2: ProSe direct discovery (restricted)",
+                "3: ProSe direct communication (one-to-many)",
+            ],
+        )
 
 
 class BcastServiceTableTests(unittest.TestCase):
@@ -56,17 +76,22 @@ class BcastServiceTableTests(unittest.TestCase):
         self.assertIsNotNone(decoded)
         assert decoded is not None
         self.assertEqual(decoded["format"], "BCAST Service Table")
-        self.assertEqual(decoded["activeServices"], [1, 2])
-        self.assertIn("BCMCS", decoded["summary"])
+        self.assertEqual(
+            decoded["activeServices"],
+            [
+                "1: BCAST Service Provider activation",
+                "2: BCAST notification reception",
+            ],
+        )
+        self.assertEqual(decoded["activeCount"], 2)
 
     def test_unknown_service_bit_falls_through_to_anonymous_label(self) -> None:
         # bit 7 → service 8, beyond OMA-defined 1..6 catalogue.
         decoded = _decode_ef_bst("80")
         self.assertIsNotNone(decoded)
         assert decoded is not None
-        self.assertEqual(decoded["activeServices"], [8])
-        # No human label for service 8; summary just shows #8.
-        self.assertIn("#8", decoded["summary"])
+        self.assertEqual(decoded["activeServices"], ["8: BCAST Roaming"])
+        self.assertEqual(decoded["activeCount"], 1)
 
     def test_dispatcher_routes_ef_bst_token(self) -> None:
         decoded = _decode_known_ef_payload(
@@ -76,7 +101,10 @@ class BcastServiceTableTests(unittest.TestCase):
         )
         self.assertIsNotNone(decoded)
         assert decoded is not None
-        self.assertEqual(decoded["activeServices"], [1])
+        self.assertEqual(
+            decoded["activeServices"],
+            ["1: BCAST Service Provider activation"],
+        )
 
 
 class WlrPlmnTests(unittest.TestCase):
@@ -87,14 +115,12 @@ class WlrPlmnTests(unittest.TestCase):
         assert decoded is not None
         self.assertEqual(decoded["format"], "I-WLAN Last Registered PLMN")
         self.assertIsNotNone(decoded["plmn"])
-        self.assertIn("PLMN", decoded["summary"])
 
     def test_all_ones_means_no_registration(self) -> None:
         decoded = _decode_ef_wlrplmn("FFFFFF")
         self.assertIsNotNone(decoded)
         assert decoded is not None
         self.assertIsNone(decoded["plmn"])
-        self.assertEqual(decoded["summary"], "no PLMN registered")
 
     def test_wrong_length_returns_none(self) -> None:
         self.assertIsNone(_decode_ef_wlrplmn("00F1"))
@@ -107,18 +133,18 @@ class WlanPlmnSelectorTests(unittest.TestCase):
         decoded = _decode_known_ef_payload(
             ef_key="ef-oplmnwlan",
             fid=None,
-            hex_clean="00F11099F999",
+            hex_clean="00F110FFFF99F999FFFF",
         )
         self.assertIsNotNone(decoded)
         assert decoded is not None
         self.assertEqual(decoded["entryCount"], 2)
-        self.assertEqual(decoded["encoding"], "PLMN list")
+        self.assertEqual(decoded["entries"][0]["reserved"], "FFFF")
 
     def test_uplmnwlan_skips_all_ones_entries(self) -> None:
         decoded = _decode_known_ef_payload(
             ef_key="ef-uplmnwlan",
             fid=None,
-            hex_clean="00F110FFFFFF",
+            hex_clean="00F110FFFFFFFFFFFFFF",
         )
         self.assertIsNotNone(decoded)
         assert decoded is not None

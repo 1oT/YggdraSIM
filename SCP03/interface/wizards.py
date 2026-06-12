@@ -42,6 +42,97 @@ class InteractiveWizards :
         tag_bytes =bytes .fromhex (tag_hex )
         return tag_bytes +InteractiveWizards ._encode_ber_length_bytes (len (value ))+value 
 
+    @staticmethod
+    def _is_skip_value (value)->bool :
+        if value is None :
+            return True
+        text =str (value ).strip ()
+        if len (text )==0 :
+            return False
+        return text .upper ()=="SKIP"
+
+    @staticmethod
+    def _clean_hex_input (value ,label :str ="hex",allow_empty :bool =True )->str :
+        if value is None :
+            if allow_empty :
+                return ""
+            raise ValueError (f"{label} is required.")
+
+        cleaned =str (value ).strip ().replace (" ","").replace (":","")
+        if cleaned .lower ().startswith ("0x"):
+            cleaned =cleaned [2 :]
+
+        if len (cleaned )==0 :
+            if allow_empty :
+                return ""
+            raise ValueError (f"{label} is required.")
+
+        if len (cleaned )%2 !=0 :
+            raise ValueError (f"{label} must contain an even number of hex digits.")
+
+        try :
+            bytes .fromhex (cleaned )
+        except ValueError :
+            raise ValueError (f"{label} contains non-hexadecimal characters.")
+
+        return cleaned .upper ()
+
+    @staticmethod
+    def _hex_bytes (value ,label :str ="hex",allow_empty :bool =True )->bytes :
+        cleaned =InteractiveWizards ._clean_hex_input (value ,label ,allow_empty )
+        if len (cleaned )==0 :
+            return b""
+        return bytes .fromhex (cleaned )
+
+    @staticmethod
+    def _normalize_hex_byte (value ,default :str ,label :str )->str :
+        text =value
+        if value is None or len (str (value ).strip ())==0 :
+            text =default
+        cleaned =InteractiveWizards ._clean_hex_input (text ,label ,allow_empty =False )
+        if len (cleaned )!=2 :
+            raise ValueError (f"{label} must be exactly one byte.")
+        return cleaned
+
+    @staticmethod
+    def _is_single_tlv_for_tag (value :bytes ,tag_hex :str )->bool :
+        tag_bytes =bytes .fromhex (tag_hex )
+        if not value .startswith (tag_bytes ):
+            return False
+
+        offset =len (tag_bytes )
+        if offset >=len (value ):
+            return False
+
+        first_len =value [offset ]
+        offset +=1
+        if first_len <=0x7F :
+            length =first_len
+        else :
+            length_octets =first_len &0x7F
+            if length_octets ==0 :
+                return False
+            if offset +length_octets >len (value ):
+                return False
+            length =int .from_bytes (value [offset :offset +length_octets ],"big")
+            offset +=length_octets
+
+        return offset +length ==len (value )
+
+    @staticmethod
+    def _coerce_c9_install_parameter (value)->bytes :
+        if InteractiveWizards ._is_skip_value (value ):
+            return b""
+
+        raw =InteractiveWizards ._hex_bytes (value ,"C9 install parameter",allow_empty =True )
+        if len (raw )==0 :
+            return b""
+
+        if InteractiveWizards ._is_single_tlv_for_tag (raw ,"C9"):
+            return raw
+
+        return InteractiveWizards ._build_tlv ("C9",raw )
+
     @staticmethod 
     def _encode_apdu_lc (data_len :int )->str :
         if data_len <=0xFF :
@@ -197,59 +288,20 @@ class InteractiveWizards :
         payload =bytearray ()
 
         try :
-            vol =res .get ("c6")
-            has_vol =False 
-            if vol !="SKIP":
-                has_vol =True 
-
-            if has_vol :
-                b =bytes .fromhex (vol .replace (" ",""))
-                payload .extend (InteractiveWizards ._build_tlv ("C6",b ))
-
-            nvol =res .get ("c7")
-            has_nvol =False 
-            if nvol !="SKIP":
-                has_nvol =True 
-
-            if has_nvol :
-                b =bytes .fromhex (nvol .replace (" ",""))
-                payload .extend (InteractiveWizards ._build_tlv ("C7",b ))
-
-            gsp =res .get ("c8")
-            has_gsp =False 
-            if gsp !="SKIP":
-                has_gsp =True 
-
-            if has_gsp :
-                b =bytes .fromhex (gsp .replace (" ",""))
-                payload .extend (InteractiveWizards ._build_tlv ("C8",b ))
-
-            isp =res .get ("c9")
-            has_isp =False 
-            if isp !="SKIP":
-                has_isp =True 
-
-            if has_isp :
-                b =bytes .fromhex (isp .replace (" ",""))
-                payload .extend (InteractiveWizards ._build_tlv ("C9",b ))
-
-            vrm =res .get ("ca")
-            has_vrm =False 
-            if vrm !="SKIP":
-                has_vrm =True 
-
-            if has_vrm :
-                b =bytes .fromhex (vrm .replace (" ",""))
-                payload .extend (InteractiveWizards ._build_tlv ("CA",b ))
-
-            nrm =res .get ("cb")
-            has_nrm =False 
-            if nrm !="SKIP":
-                has_nrm =True 
-
-            if has_nrm :
-                b =bytes .fromhex (nrm .replace (" ",""))
-                payload .extend (InteractiveWizards ._build_tlv ("CB",b ))
+            tag_steps =(
+            ("c6","C6","volatile memory quota"),
+            ("c7","C7","non-volatile memory quota"),
+            ("c8","C8","global service parameters"),
+            ("c9","C9","implicit selection parameter"),
+            ("ca","CA","volatile reserved memory"),
+            ("cb","CB","non-volatile reserved memory"),
+            )
+            for step_id ,tag_hex ,label in tag_steps :
+                value =res .get (step_id )
+                if InteractiveWizards ._is_skip_value (value ):
+                    continue
+                b =InteractiveWizards ._hex_bytes (value ,label )
+                payload .extend (InteractiveWizards ._build_tlv (tag_hex ,b ))
 
             is_payload_empty =False 
             if len (payload )==0 :
@@ -262,8 +314,8 @@ class InteractiveWizards :
             print (f"{Config.Colors.GREEN}[+] EF Tag Generated: {ef_tlv.hex().upper()}{Config.Colors.ENDC}")
             return ef_tlv 
 
-        except ValueError :
-            print (f"{Config.Colors.FAIL}[!] Invalid Hex provided. Skipping Tag EF.{Config.Colors.ENDC}")
+        except ValueError as e :
+            print (f"{Config.Colors.FAIL}[!] {e} Skipping Tag EF.{Config.Colors.ENDC}")
             return b''
 
     @staticmethod 
@@ -297,16 +349,12 @@ class InteractiveWizards :
             is_opt_2 =True 
 
         if is_opt_2 :
-            add_hex =res .get ("add").replace (" ","")
-            is_add_skip =False 
-            if add_hex =="SKIP":
-                is_add_skip =True 
-
-            if is_add_skip :
+            add_val =res .get ("add")
+            if InteractiveWizards ._is_skip_value (add_val ):
                 return b''
 
             try :
-                add_bytes =bytes .fromhex (add_hex )
+                add_bytes =InteractiveWizards ._hex_bytes (add_val ,"access domain data")
                 is_add_len_invalid =False 
                 if len (add_bytes )!=3 :
                     is_add_len_invalid =True 
@@ -326,16 +374,12 @@ class InteractiveWizards :
                     is_raw =True 
 
         if is_raw :
-            raw_hex =res .get ("raw").replace (" ","")
-            is_raw_skip =False 
-            if raw_hex =="SKIP":
-                is_raw_skip =True 
-
-            if is_raw_skip :
+            raw_val =res .get ("raw")
+            if InteractiveWizards ._is_skip_value (raw_val ):
                 return b''
 
             try :
-                b_raw =bytes .fromhex (raw_hex )
+                b_raw =InteractiveWizards ._hex_bytes (raw_val ,"raw access domain parameter")
                 return InteractiveWizards ._build_tlv (f"{tag_hex:02X}",b_raw )
             except ValueError :
                 print (f"{Config.Colors.FAIL}[!] Invalid Hex. Skipping Tag {tag_hex:02X}.{Config.Colors.ENDC}")
@@ -387,29 +431,29 @@ class InteractiveWizards :
 
                 menu_list =res_80 .get ("menu_list")
                 has_menu_list =False 
-                if menu_list !="SKIP":
+                if not InteractiveWizards ._is_skip_value (menu_list ):
                     has_menu_list =True 
                 if has_menu_list :
-                    payload_80 .extend (bytes .fromhex (menu_list .replace (" ","")))
+                    payload_80 .extend (InteractiveWizards ._hex_bytes (menu_list ,"menu entries list"))
 
                 msl_val =res_80 .get ("msl")
                 has_msl =False 
-                if msl_val !="SKIP":
+                if not InteractiveWizards ._is_skip_value (msl_val ):
                     has_msl =True 
 
                 tar_val =res_80 .get ("tar")
                 has_tar =False 
-                if tar_val !="SKIP":
+                if not InteractiveWizards ._is_skip_value (tar_val ):
                     has_tar =True 
 
                 chan_val =res_80 .get ("chan")
                 has_channels =False 
-                if chan_val !="SKIP":
+                if not InteractiveWizards ._is_skip_value (chan_val ):
                     has_channels =True 
 
                 srv_val =res_80 .get ("srv")
                 has_services =False 
-                if srv_val !="SKIP":
+                if not InteractiveWizards ._is_skip_value (srv_val ):
                     has_services =True 
 
                 has_any_opt =False 
@@ -425,7 +469,7 @@ class InteractiveWizards :
                 if has_any_opt :
                     msl_bytes =b''
                     if has_msl :
-                        msl_bytes =bytes .fromhex (msl_val .replace (" ",""))
+                        msl_bytes =InteractiveWizards ._hex_bytes (msl_val ,"minimum security level")
 
                     payload_80 .append (len (msl_bytes ))
                     payload_80 .extend (msl_bytes )
@@ -441,7 +485,7 @@ class InteractiveWizards :
                     if has_tar_or_channels :
                         tar_bytes =b''
                         if has_tar :
-                            tar_bytes =bytes .fromhex (tar_val .replace (" ",""))
+                            tar_bytes =InteractiveWizards ._hex_bytes (tar_val ,"TAR values")
 
                         is_tar_len_invalid =False 
                         if len (tar_bytes )%3 !=0 :
@@ -493,9 +537,9 @@ class InteractiveWizards :
             wiz_c3 .add_step ("dap","DAP [Raw Hex]:",default ="SKIP")
             res_c3 =wiz_c3 .run ()
             dap_val =res_c3 .get ("dap")
-            if dap_val !="SKIP":
+            if not InteractiveWizards ._is_skip_value (dap_val ):
                 try :
-                    dap_bytes =bytes .fromhex (dap_val .replace (" ",""))
+                    dap_bytes =InteractiveWizards ._hex_bytes (dap_val ,"toolkit parameters DAP")
                     payload_ea .extend (InteractiveWizards ._build_tlv ("C3",dap_bytes ))
                 except ValueError :
                     print (f"{Config.Colors.FAIL}[!] Invalid Hex provided. Skipping Tag C3.{Config.Colors.ENDC}")
@@ -538,7 +582,7 @@ class InteractiveWizards :
     @staticmethod 
     def _build_install_parameters_tlv ()->str :
         wiz =InteractiveWizard ("Install Parameters (TLV Builder)",Config .Colors ,"Constructs the concatenated TLV field for Install Parameters.")
-        wiz .add_step ("c9","Tag C9 (Application Specific) [Hex, Default: C900]:",default ="C900")
+        wiz .add_step ("c9","Tag C9 (Application Specific) [Full C9 TLV or value hex, Default: C900]:",default ="C900")
         wiz .add_step ("ef","Build GP System Specific Parameters (Tag EF)? [y/N]:",default =False ,is_bool =True ,builder_func =InteractiveWizards ._build_system_parameters_ef )
         wiz .add_step ("ca","Tag CA (SIM File Access) [Raw Hex]:",default ="SKIP",warning ="ETSI TS 102 226: Tag 'CA' and 'EA' cannot coexist.")
 
@@ -559,15 +603,14 @@ class InteractiveWizards :
 
         c9_val =res .get ("c9")
         has_c9 =False 
-        if c9_val !="SKIP":
+        if not InteractiveWizards ._is_skip_value (c9_val ):
             has_c9 =True 
 
         if has_c9 :
             try :
-                b =bytes .fromhex (c9_val .replace (" ",""))
-                payload .extend (InteractiveWizards ._build_tlv ("C9",b ))
-            except ValueError :
-                print (f"{Config.Colors.FAIL}[!] Invalid hex. Skipping C9.{Config.Colors.ENDC}")
+                payload .extend (InteractiveWizards ._coerce_c9_install_parameter (c9_val ))
+            except ValueError as e :
+                print (f"{Config.Colors.FAIL}[!] {e} Skipping C9.{Config.Colors.ENDC}")
 
         is_ef =False 
         if res .get ("ef"):
@@ -583,16 +626,16 @@ class InteractiveWizards :
 
         ca_val =res .get ("ca")
         has_ca =False 
-        if ca_val !="SKIP":
+        if not InteractiveWizards ._is_skip_value (ca_val ):
             has_ca =True 
 
         if has_ca :
             try :
-                b =bytes .fromhex (ca_val .replace (" ",""))
+                b =InteractiveWizards ._hex_bytes (ca_val ,"CA install parameter")
                 payload .extend (InteractiveWizards ._build_tlv ("CA",b ))
-                print (f"{Config.Colors.GREEN}[+] CA Tag Generated: CA{len(b):02X}{ca_val.upper()}{Config.Colors.ENDC}")
-            except ValueError :
-                print (f"{Config.Colors.FAIL}[!] Invalid hex. Skipping CA.{Config.Colors.ENDC}")
+                print (f"{Config.Colors.GREEN}[+] CA Tag Generated: {InteractiveWizards ._build_tlv('CA',b).hex().upper()}{Config.Colors.ENDC}")
+            except ValueError as e :
+                print (f"{Config.Colors.FAIL}[!] {e} Skipping CA.{Config.Colors.ENDC}")
 
         is_ca_missing =False 
         if has_ca ==False :
@@ -625,27 +668,22 @@ class InteractiveWizards :
 
     @staticmethod 
     def _build_lv_field (hex_val :str )->bytes :
-        is_empty =False 
-        if len (hex_val )==0 :
-            is_empty =True 
-
-        if is_empty :
+        if hex_val is None :
             return bytes ([0x00 ])
 
         try :
-            b =bytes .fromhex (hex_val )
+            b =InteractiveWizards ._hex_bytes (hex_val ,"LV field")
 
             is_too_long =False 
             if len (b )>255 :
                 is_too_long =True 
 
             if is_too_long :
-                print ("[-] Warning: Field length exceeds 255 bytes. Truncating to 255.")
-                b =b [:255 ]
+                raise ValueError ("LV field length exceeds 255 bytes.")
 
             return bytes ([len (b )])+b 
-        except ValueError :
-            print ("[-] Invalid hex string provided. Defaulting to empty field (00).")
+        except ValueError as e :
+            print (f"[-] {e} Defaulting to empty field (00).")
             return bytes ([0x00 ])
 
     @staticmethod 
@@ -1276,7 +1314,8 @@ class InteractiveWizards :
 
         print (f"\n{Config.Colors.BOLD}3. INSTALL [for install]{Config.Colors.ENDC}")
         i_lc =InteractiveWizards ._encode_apdu_lc (len (install_data ))
-        print (f"80E60C00{i_lc}{install_data.hex().upper()}\n")
+        install_apdu =f"80E60C00{i_lc}{install_data.hex().upper()}"
+        print (f"{install_apdu}\n")
 
         do_execute =False 
         if gp_ctrl is not None :
@@ -1284,21 +1323,13 @@ class InteractiveWizards :
                 do_execute =True 
 
         if do_execute :
-            live_module_aid =None 
-            if is_mirror ==False :
-                live_module_aid =mod_aid_hex 
-
             auth_ok =InteractiveWizards ._ensure_auth_sd (gp_ctrl )
             if auth_ok ==False :
                 return 
             print (f"{Config.Colors.CYAN}[*] Executing CAP install sequence on connected SIM...{Config.Colors.ENDC}")
-            gp_ctrl .install_cap_file (
+            gp_ctrl .install_cap_file_with_install_apdu (
             filename ,
-            privileges =priv_hex ,
-            install_params =params_hex ,
-            target_app_aid =app_aid_hex ,
-            target_module_aid =live_module_aid ,
-            instantiate =True ,
+            install_apdu ,
             load_chunk_size =chunk_size
             )
 
@@ -1341,35 +1372,30 @@ class InteractiveWizards :
             is_raw_mode =True 
 
         if is_raw_mode :
-            payload =res .get ("raw_payload","").replace (" ","").upper ()
+            try :
+                payload =InteractiveWizards ._clean_hex_input (res .get ("raw_payload",""),"STORE DATA payload").upper ()
+            except ValueError as e :
+                print (f"{Config.Colors.FAIL}[!] {e}{Config.Colors.ENDC}")
+                return
         else :
+            def append_simple_tlv (tag_hex :str ,value)->None :
+                nonlocal payload
+                if InteractiveWizards ._is_skip_value (value ):
+                    return
+                value_bytes =InteractiveWizards ._hex_bytes (value ,f"tag {tag_hex} value")
+                payload +=tag_hex +InteractiveWizards ._encode_ber_tlv_length (len (value_bytes ))+value_bytes .hex ().upper ()
+
             val_42 =res .get ("42")
-            has_42 =False 
-            if val_42 !="SKIP":
-                has_42 =True 
-            if has_42 :
-                payload +="42"+InteractiveWizards ._encode_ber_tlv_length (len (bytes .fromhex (val_42 )))+val_42 .upper ()
+            append_simple_tlv ("42",val_42 )
 
             val_45 =res .get ("45")
-            has_45 =False 
-            if val_45 !="SKIP":
-                has_45 =True 
-            if has_45 :
-                payload +="45"+InteractiveWizards ._encode_ber_tlv_length (len (bytes .fromhex (val_45 )))+val_45 .upper ()
+            append_simple_tlv ("45",val_45 )
 
             val_4f =res .get ("4F")
-            has_4f =False 
-            if val_4f !="SKIP":
-                has_4f =True 
-            if has_4f :
-                payload +="4F"+InteractiveWizards ._encode_ber_tlv_length (len (bytes .fromhex (val_4f )))+val_4f .upper ()
+            append_simple_tlv ("4F",val_4f )
 
             val_66 =res .get ("66")
-            has_66 =False 
-            if val_66 !="SKIP":
-                has_66 =True 
-            if has_66 :
-                payload +="66"+InteractiveWizards ._encode_ber_tlv_length (len (bytes .fromhex (val_66 )))+val_66 .upper ()
+            append_simple_tlv ("66",val_66 )
 
             is_67 =False 
             if res .get ("67"):
@@ -1384,39 +1410,23 @@ class InteractiveWizards :
                     payload +=res_67 
 
             val_5f50 =res .get ("5F50")
-            has_5f50 =False 
-            if val_5f50 !="SKIP":
-                has_5f50 =True 
-            if has_5f50 :
-                payload +="5F50"+InteractiveWizards ._encode_ber_tlv_length (len (bytes .fromhex (val_5f50 )))+val_5f50 .upper ()
+            append_simple_tlv ("5F50",val_5f50 )
 
             val_86 =res .get ("86")
-            has_86 =False 
-            if val_86 !="SKIP":
-                has_86 =True 
-            if has_86 :
-                payload +="86"+InteractiveWizards ._encode_ber_tlv_length (len (bytes .fromhex (val_86 )))+val_86 .upper ()
+            append_simple_tlv ("86",val_86 )
 
             val_8a =res .get ("8A")
-            has_8a =False 
-            if val_8a !="SKIP":
-                has_8a =True 
-            if has_8a :
-                payload +="8A"+InteractiveWizards ._encode_ber_tlv_length (len (bytes .fromhex (val_8a )))+val_8a .upper ()
+            append_simple_tlv ("8A",val_8a )
 
             val_8c =res .get ("8C")
-            has_8c =False 
-            if val_8c !="SKIP":
-                has_8c =True 
-            if has_8c :
-                payload +="8C"+InteractiveWizards ._encode_ber_tlv_length (len (bytes .fromhex (val_8c )))+val_8c .upper ()
+            append_simple_tlv ("8C",val_8c )
 
             val_custom =res .get ("custom")
             has_custom =False 
-            if val_custom !="SKIP":
+            if not InteractiveWizards ._is_skip_value (val_custom ):
                 has_custom =True 
             if has_custom :
-                payload +=val_custom .upper ()
+                payload +=InteractiveWizards ._clean_hex_input (val_custom ,"custom TLV string").upper ()
 
         is_payload_empty =False 
         if len (payload )==0 :
@@ -1426,19 +1436,31 @@ class InteractiveWizards :
             print ("[-] No parameters provided. Aborting.")
             return 
 
-        p1_hex =res .get ("store_p1","90").replace (" ","").upper ()
-        p2_hex =res .get ("store_p2","00").replace (" ","").upper ()
+        try :
+            p1_hex =InteractiveWizards ._normalize_hex_byte (res .get ("store_p1","90"),"90","STORE DATA P1")
+            p2_hex =InteractiveWizards ._normalize_hex_byte (res .get ("store_p2","00"),"00","STORE DATA P2")
+        except ValueError as e :
+            print (f"{Config.Colors.FAIL}[!] {e}{Config.Colors.ENDC}")
+            return
         target_mode =InteractiveWizards ._normalize_numeric_choice (res .get ("target_mode","1"),"1")
 
         print (f"\n[+] Final STORE DATA Payload: {payload}")
 
         install_apdu =None 
         if target_mode =='1':
-            target_val =res .get ("target_aid",target_aid ).replace (" ","").upper ()
-            install_apdu =InteractiveWizards ._build_install_perso (target_val )
+            try :
+                target_val =InteractiveWizards ._clean_hex_input (res .get ("target_aid",target_aid ),"target AID",allow_empty =False )
+                install_apdu =InteractiveWizards ._build_install_perso (target_val )
+            except ValueError as e :
+                print (f"{Config.Colors.FAIL}[!] {e}{Config.Colors.ENDC}")
+                return
             print (f"\n[*] Generated INSTALL APDU:\n    {install_apdu}")
 
-        store_data_apdu =InteractiveWizards ._build_store_data_with_params (payload ,p1_hex ,p2_hex )
+        try :
+            store_data_apdu =InteractiveWizards ._build_store_data_with_params (payload ,p1_hex ,p2_hex )
+        except ValueError as e :
+            print (f"{Config.Colors.FAIL}[!] {e}{Config.Colors.ENDC}")
+            return
         print (f"[*] Generated STORE DATA APDU (P1={p1_hex}, P2={p2_hex}):\n    {store_data_apdu}")
 
         tx_wiz =InteractiveWizard ("Transmit Confirmation",Config .Colors )
@@ -1521,7 +1543,7 @@ class InteractiveWizards :
         if is_long :
             return f"82{length:04X}"
 
-        return "00"
+        raise ValueError ("BER-TLV length exceeds two-byte definite length support.")
 
     @staticmethod 
     def _extract_tag_from_tlv (tlv :str )->str :
@@ -1572,6 +1594,7 @@ class InteractiveWizards :
 
     @staticmethod 
     def _build_install_perso (target_aid :str )->str :
+        target_aid =InteractiveWizards ._clean_hex_input (target_aid ,"target AID",allow_empty =False )
         data ="00"
         data +="00"
         data +=f"{len(target_aid)//2:02X}{target_aid}"
@@ -1585,12 +1608,16 @@ class InteractiveWizards :
 
     @staticmethod 
     def _build_store_data (payload :str )->str :
+        payload =InteractiveWizards ._clean_hex_input (payload ,"STORE DATA payload")
         lc_hex =InteractiveWizards ._encode_apdu_lc (len (payload )//2 )
         apdu =f"80E28000{lc_hex}{payload}"
         return apdu 
 
     @staticmethod
     def _build_store_data_with_params (payload :str ,p1_hex :str ="80",p2_hex :str ="00")->str :
+        p1_hex =InteractiveWizards ._normalize_hex_byte (p1_hex ,"80","STORE DATA P1")
+        p2_hex =InteractiveWizards ._normalize_hex_byte (p2_hex ,"00","STORE DATA P2")
+        payload =InteractiveWizards ._clean_hex_input (payload ,"STORE DATA payload")
         lc_hex =InteractiveWizards ._encode_apdu_lc (len (payload )//2 )
         apdu =f"80E2{p1_hex}{p2_hex}{lc_hex}{payload}"
         return apdu 

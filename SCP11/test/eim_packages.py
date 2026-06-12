@@ -41,6 +41,7 @@ TAG_ACTIVATION_CODE_1A = bytes([0x1A])
 TYPE_BOUND_PROFILE_PACKAGE = "boundProfilePackage"
 TYPE_INDIRECT_PROFILE_DOWNLOAD = "indirectProfileDownload"
 TYPE_PROFILE_STATE_MANAGEMENT = "profileStateManagement"
+TYPE_EIM_CONFIGURATION_OBJECT = "eCO"
 TYPE_EUICC_CONFIGURATION = "eUICCConfiguration"
 TYPE_PROFILE_DOWNLOAD_TRIGGER = "profileDownloadTrigger"
 TYPE_GENERIC = "generic"
@@ -258,6 +259,16 @@ def _extract_eim_transaction_id(value: bytes) -> bytes:
     return b""
 
 
+def _tag_of_tlv(raw_tlv: bytes) -> bytes:
+    if len(raw_tlv) == 0:
+        return b""
+    try:
+        tag_bytes, _, _, _ = _read_tlv(raw_tlv, 0)
+    except ValueError:
+        return b""
+    return tag_bytes
+
+
 def parse_eim_package(raw: bytes) -> ParsedEimPackage:
     """
     Parse a single eIM EuiccPackage (BER-TLV) and classify by SGP.32 type.
@@ -299,11 +310,15 @@ def parse_eim_package(raw: bytes) -> ParsedEimPackage:
         )
 
     if root_tag in (TAG_PROFILE_STATE_MANAGEMENT_A2, TAG_PROFILE_STATE_MANAGEMENT_BF51):
+        card_request = _extract_card_request(raw)
+        package_type = TYPE_PROFILE_STATE_MANAGEMENT
+        if root_tag == TAG_PROFILE_STATE_MANAGEMENT_BF51 and _tag_of_tlv(card_request) == b"\xA8":
+            package_type = TYPE_EIM_CONFIGURATION_OBJECT
         return ParsedEimPackage(
-            package_type=TYPE_PROFILE_STATE_MANAGEMENT,
+            package_type=package_type,
             raw=raw,
             root_tag=root_tag,
-            card_request=_extract_card_request(raw),
+            card_request=card_request,
         )
 
     if root_tag in (TAG_EUICC_CONFIGURATION_A3, TAG_EUICC_CONFIGURATION_BF52):
