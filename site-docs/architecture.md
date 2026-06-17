@@ -405,7 +405,7 @@ flowchart TB
 Relay flavors:
 
 - `SCP11.live` is the production-oriented relay shell
-- `SCP11.test` mirrors `live` with test-certificate and shaping defaults
+- `SCP11.test` is a compatibility alias for the shared relay shell
 - `SCP11.relay` is a compatibility namespace
 
 Local flavors:

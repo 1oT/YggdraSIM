@@ -17,34 +17,32 @@ Use this file as the entry point for choosing the correct `SCP11` module.
 
 | Module | Use when | Card transport | Network role | Primary guide |
 | --- | --- | --- | --- | --- |
-| `SCP11/live` | production-like relay work with live-certificate defaults | `pcsc` | remote ES9+ / eIM | `SCP11/live/README.md` |
-| `SCP11/test` | lab relay work with test-certificate defaults and extra request shaping | `pcsc` | remote ES9+ / eIM | `SCP11/test/README.md` |
+| `SCP11/live` | eSIM management relay work against remote ES9+ / eIM endpoints | `pcsc` | remote ES9+ / eIM | `SCP11/live/README.md` |
 | `SCP11/local_access` | direct local `ISD-R` bring-up and on-card profile loading | `pcsc` | no relay dependency | `SCP11/local_access/README.md` |
 | `SCP11/eim_local` | eIM-side package authoring, localized polling, and handover validation | `pcsc` | local eIM / SM-DP+ bridge | `SCP11/eim_local/README.md` |
 | `SCP11/relay` | preserve older relay imports and automation contracts | `pcsc` | compatibility namespace | `SCP11/relay/README.md` |
 | `SCP11/shared` | shared helpers only | n/a | n/a | `SCP11/shared/README.md` |
+| `SCP11/test` | preserve older import paths only | n/a | compatibility namespace | `SCP11/test/README.md` |
 
-### Canonical vs legacy orchestrator / console trees (v1 freeze)
+### Relay implementation layout
 
-Three parallel orchestrator and console trees ship with v1:
+The relay implementation is exposed through one eSIM management entrypoint:
 
 | Tree | Status | Notes |
 | --- | --- | --- |
 | `SCP11/orchestrator.py` and `SCP11/console.py` | **canonical** | Spec-correctness work, bug fixes, and API additions land here first. |
-| `SCP11/live/orchestrator.py` and `SCP11/live/console.py` | **legacy mirror** | Relay-first live-certificate overlay. Includes the `LiveStkPollingMixin` and live ES9+ defaults. |
-| `SCP11/test/orchestrator.py` and `SCP11/test/console.py` | **legacy mirror** | Lab relay flow with test-certificate defaults and extra request shaping. |
+| `SCP11/live/orchestrator.py` and `SCP11/live/console.py` | **relay implementation** | Relay-first shell with LPAd / IPAd / IPAe behavior and physical-card recovery helpers. |
+| `SCP11/test/*.py` | **compatibility shims** | Import the live relay implementation for older imports. This namespace is not a separate operator entrypoint. |
 
-Any change that lands in the canonical tree must be evaluated against both
-legacy mirrors, and vice versa. Audit items `SCP11-P1-01` and `SCP11-P1-02`
-track collapsing the mirrors into shim packages post v1 so fixes only have
-to be made once.
+Remote relay mode uses platform TLS trust by default. `ES9_CA_BUNDLE_PATH`
+is empty unless the operator explicitly pins a CA bundle with `SET-ES9-CA`.
+The SGP.26 test CI material remains available for local SGP.26 and fixture
+flows, but is not selected implicitly by the eSIM management relay.
 
 ## Choose by task
 
-- Use `SCP11/live` when the workflow is relay-first and should reflect the
-  live-default certificate and endpoint model.
-- Use `SCP11/test` when the workflow is relay-first but needs test-default
-  certificates, compatibility toggles, or lab-only eIM request variants.
+- Use `SCP11/live` for relay-first work against the configured ES9+ / eIM
+  endpoints.
 - Use `SCP11/local_access` when the task is direct `ISD-R` discovery,
   `PrepareDownload`, metadata upload, or ES10c profile state control.
 - Use `SCP11/eim_local` when the task is on the eIM side: `ADD-INITIAL-EIM`,
@@ -59,7 +57,6 @@ From the repository root:
 
 ```bash
 python -m SCP11.live
-python -m SCP11.test
 python -m SCP11.local_access
 python -m SCP11.eim_local
 python -m SCP11.relay
@@ -93,7 +90,7 @@ through the Guides menu and the main module selector.
 
 ## Reading order
 
-1. `SCP11/live/README.md` or `SCP11/test/README.md` for relay-side operation
+1. `SCP11/live/README.md` for relay-side operation
 2. `../guides/PROFILE_LIFECYCLE_CLI_CHEATSHEET.md` for ready-to-run lifecycle, poll,
    and logging commands
 3. `SCP11/local_access/README.md` for direct local `ISD-R` work

@@ -66,7 +66,6 @@ python -m SCP03
 python -m SCP80
 python -m SCP11
 python -m SCP11.live
-python -m SCP11.test
 python -m SCP11.relay
 python -m SCP11.local_access
 python -m SCP11.eim_local
@@ -85,7 +84,6 @@ yggdrasim-scp03
 yggdrasim-scp80
 yggdrasim-scp11
 yggdrasim-scp11-live
-yggdrasim-scp11-test
 yggdrasim-scp11-relay
 yggdrasim-scp11-local-access
 yggdrasim-scp11-eim-local
@@ -143,8 +141,7 @@ vendored.
 
 - Use [Operator Surfaces](operator-surfaces.md) to choose the right module.
 - Use the SCP11 subsystem pages for relay, local-access, and eIM-local execution paths:
-  [SCP11 Live Relay](subsystems/scp11-live.md),
-  [SCP11 Test Relay](subsystems/scp11-test.md),
+  [SCP11 eSIM Management Relay](subsystems/scp11-live.md),
   [SCP11 Local Access](subsystems/scp11-local-access.md),
   [SCP11 eIM Local](subsystems/scp11-eim-local.md).
 - Use [Build and Packaging](build-and-packaging.md) for Docker and bundled distribution guidance.

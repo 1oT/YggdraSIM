@@ -1,0 +1,434 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>YggdraSIM</title>
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' ws: wss:; frame-ancestors 'none'; base-uri 'self'; form-action 'self';"
+    />
+    <meta name="referrer" content="no-referrer" />
+    <link rel="icon" href="data:," />
+    <link rel="stylesheet" href="/static/vendor/xterm/xterm.css" />
+    <link rel="stylesheet" href="/static/app.css" />
+    <script src="/static/theme-init.js"></script>
+    <script src="/static/vendor/xterm/xterm.js" defer></script>
+    <script src="/static/vendor/xterm/addon-fit.js" defer></script>
+  </head>
+  <body>
+    <div id="app" class="app-shell" data-ready="false">
+      <header class="topbar">
+        <div class="brand">
+          <span class="brand-mark">YS</span>
+          <span class="brand-name">YggdraSIM</span>
+        </div>
+        <nav class="breadcrumbs" aria-label="Breadcrumbs">
+          <span class="crumb" id="crumb-subsystem">Overview</span>
+        </nav>
+        <div class="status-cluster">
+          <span class="badge badge-mode" id="badge-mode">mode: …</span>
+          <span class="badge badge-flavor" id="badge-flavor">flavor: …</span>
+          <span class="badge badge-backend" id="badge-backend">backend: …</span>
+          <span class="badge badge-api" id="badge-api" data-state="unknown">
+            <span class="dot"></span>
+            <span id="badge-api-text">probing…</span>
+          </span>
+          <span class="theme-picker">
+            <label for="theme-select">Theme</label>
+            <select id="theme-select" aria-label="Colour theme">
+              <option value="nord-dark">Nord · dark</option>
+              <option value="nord-light">Nord · light</option>
+              <option value="oneot-dark">1oT · dark</option>
+              <option value="oneot-light">1oT · light</option>
+              <option value="matrix">Matrix</option>
+            </select>
+          </span>
+        </div>
+      </header>
+
+      <aside class="sidebar">
+        <div class="sidebar-title sidebar-title-readers">
+          <span class="sidebar-title-text">Readers</span>
+          <button
+            class="sidebar-iconbtn"
+            id="reader-pane-refresh"
+            title="Refresh PC/SC readers"
+            aria-label="Refresh readers">↻</button>
+        </div>
+        <div class="reader-pane">
+          <div class="reader-pane-search">
+            <input
+              type="search"
+              id="reader-pane-filter"
+              placeholder="Filter readers…"
+              aria-label="Filter PC/SC readers"
+              autocomplete="off" />
+          </div>
+          <ul class="reader-list" id="reader-pane-list" aria-live="polite">
+            <li class="reader-empty">click ↻ to enumerate.</li>
+          </ul>
+          <div class="reader-pane-note" id="reader-pane-note"></div>
+        </div>
+
+        <div class="sidebar-title">Command Center</div>
+        <ul class="subsystem-list tool-list" id="command-center-nav">
+          <li class="loading">loading…</li>
+        </ul>
+        <div class="sidebar-title">Inspect</div>
+        <ul class="subsystem-list tool-list">
+          <li data-view="overview" class="subsystem-entry active">Overview</li>
+          <li data-view="registry" class="subsystem-entry">Registry browser</li>
+          <li data-view="backend" class="subsystem-entry">Card backend</li>
+          <li data-view="env_flags" class="subsystem-entry">Env flags</li>
+          <li data-view="live_readers" class="subsystem-entry">PC/SC readers</li>
+        </ul>
+        <div class="sidebar-title">Advanced</div>
+        <ul class="subsystem-list tool-list">
+          <li data-view="terminal" class="subsystem-entry">Shell</li>
+          <li data-view="host_shell" class="subsystem-entry">Host shell</li>
+          <li data-view="about" class="subsystem-entry">About</li>
+        </ul>
+      </aside>
+
+      <main class="main" id="main">
+        <section data-view="overview" class="view view-active">
+          <h1>YggdraSIM Universal GUI</h1>
+          <p class="lead">
+            Task-oriented surface over the YggdraSIM engine. Pick an
+            action from the <strong>Command Center</strong> to run a
+            specific flow with form-driven inputs and structured output,
+            or drop into the raw shell for anything not yet exposed.
+          </p>
+          <div class="card-grid">
+            <article class="card">
+              <h3>Suite health</h3>
+              <dl id="overview-health">
+                <dt>version</dt><dd id="overview-version">…</dd>
+                <dt>flavor</dt><dd id="overview-flavor">…</dd>
+                <dt>mode</dt><dd id="overview-mode">…</dd>
+                <dt>uptime</dt><dd id="overview-uptime">…</dd>
+                <dt>pid</dt><dd id="overview-pid">…</dd>
+              </dl>
+              <button class="btn" id="overview-refresh">Refresh</button>
+            </article>
+            <article class="card">
+              <h3>Card backend</h3>
+              <p>
+                Active backend:
+                <code id="overview-backend-value">…</code>
+                (<span id="overview-backend-source">…</span>).
+              </p>
+              <div class="inline-actions">
+                <button class="btn" data-backend="reader">Switch to reader</button>
+                <button class="btn" data-backend="sim">Switch to sim</button>
+              </div>
+              <p class="hint">
+                Session-scoped. The persisted selection is only
+                changed from the CLI menu.
+              </p>
+            </article>
+            <article class="card">
+              <h3>Command Center</h3>
+              <p class="hint">
+                Task-oriented buttons for every subsystem. Pick an entry
+                from the <strong>Command Center</strong> group on the
+                left to start.
+              </p>
+            </article>
+          </div>
+        </section>
+
+        <section data-view="command_center" class="view">
+          <div class="cc-header">
+            <h1 id="cc-title">Command Center</h1>
+            <p class="lead" id="cc-subtitle">
+              Pick a subsystem on the left to see its available actions.
+            </p>
+          </div>
+          <div id="cc-actions" class="cc-actions">
+            <p class="loading">loading actions…</p>
+          </div>
+        </section>
+
+        <section data-view="registry" class="view">
+          <h1>Registry browser</h1>
+          <p class="lead">
+            Every stable engine entry point. Use this to discover what
+            the CLI / console scripts call into.
+          </p>
+          <div class="toolbar">
+            <input
+              type="search"
+              id="registry-search"
+              placeholder="Search symbols (e.g. 'scp03', 'saip.bridge')"
+              aria-label="Search registry"
+            />
+          </div>
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Key</th>
+                <th>Module</th>
+                <th>Attribute</th>
+              </tr>
+            </thead>
+            <tbody id="registry-rows">
+              <tr><td colspan="3" class="loading">loading…</td></tr>
+            </tbody>
+          </table>
+        </section>
+
+        <section data-view="backend" class="view">
+          <h1>Card backend</h1>
+          <p class="lead">
+            Switch between the PC/SC reader and the simulated SIM
+            backend for the remainder of this GUI process.
+          </p>
+          <div class="card">
+            <dl>
+              <dt>current</dt><dd id="backend-current">…</dd>
+              <dt>source</dt><dd id="backend-source">…</dd>
+              <dt>simulated?</dt><dd id="backend-simulated">…</dd>
+            </dl>
+            <div class="inline-actions">
+              <button class="btn btn-primary" data-backend="reader">reader</button>
+              <button class="btn btn-primary" data-backend="sim">sim</button>
+            </div>
+          </div>
+        </section>
+
+        <section data-view="env_flags" class="view">
+          <h1>Environment flags</h1>
+          <p class="lead">
+            Read-only view of the <code>YGGDRASIM_*</code> registry.
+            Edit these through the launcher menu <code>[E]</code>;
+            the GUI does not rewrite persisted overrides in Phase A.
+          </p>
+          <div id="env-flag-categories" class="env-flag-root">
+            <p class="loading">loading…</p>
+          </div>
+        </section>
+
+        <section data-view="terminal" class="view">
+          <h1>Shell</h1>
+          <p class="lead">
+            Spawn a registered CLI module inside a server-side PTY and
+            drive it from the browser via xterm.js. Only modules listed
+            in <code>yggdrasim_common.registry.CLI_MODULES</code> are
+            accepted — the GUI cannot invoke arbitrary commands.
+          </p>
+          <div class="form-row terminal-controls">
+            <label for="terminal-module">Module</label>
+            <select id="terminal-module" aria-label="CLI module to launch"></select>
+            <button class="btn btn-primary" id="terminal-start">Start</button>
+            <button class="btn" id="terminal-stop" disabled>Stop</button>
+            <span class="tool-meta" id="terminal-status">idle</span>
+          </div>
+          <div id="terminal-host" class="terminal-host" tabindex="0"></div>
+          <p class="tool-meta">
+            Tips — paste works; Ctrl+C sends SIGINT to the child;
+            resizing the browser window re-fits the grid automatically.
+          </p>
+        </section>
+
+        <section data-view="host_shell" class="view">
+          <h1>Host shell</h1>
+          <p class="lead">
+            Free-form interactive shell on the GUI host — equivalent to
+            an SSH session as the user that launched <code>yggdrasim</code>.
+            Use for ad-hoc modem CLI workflows
+            (<code>tio</code> / <code>minicom</code> / <code>socat</code>
+            against <code>/dev/ttyUSB*</code>). Disabled by default; flip
+            <code>YGGDRASIM_GUI_HOST_SHELL=1</code> to enable.
+          </p>
+          <div class="host-shell-disabled" id="host-shell-disabled" hidden>
+            <strong>Host shell is disabled.</strong>
+            <p class="hint" id="host-shell-disabled-reason">
+              Set <code>YGGDRASIM_GUI_HOST_SHELL=1</code> in the launcher
+              env and restart <code>yggdrasim --gui</code> /
+              <code>yggdrasim --web-server</code>.
+            </p>
+          </div>
+          <div class="host-shell-enabled" id="host-shell-enabled">
+            <div class="form-row host-shell-controls">
+              <button class="btn btn-primary" id="host-shell-start">Start session</button>
+              <button class="btn" id="host-shell-stop" disabled>Stop</button>
+              <span class="tool-meta" id="host-shell-status">idle</span>
+            </div>
+            <div class="form-row host-shell-device-strip">
+              <label for="host-shell-device">Serial device</label>
+              <select id="host-shell-device" aria-label="Serial device shortcut"></select>
+              <button class="btn" id="host-shell-device-refresh" title="Re-scan /dev/ttyUSB* /dev/ttyACM* /dev/serial/by-id/*">↻</button>
+              <button class="btn" id="host-shell-device-insert" title="Insert the chosen device path at the shell cursor">Insert path</button>
+              <label class="host-shell-toggle">
+                <input type="checkbox" id="host-shell-decode-toggle" />
+                <span>Decode AT lines</span>
+              </label>
+            </div>
+            <div id="host-shell-host" class="terminal-host" tabindex="0"></div>
+            <div class="host-shell-decoded" id="host-shell-decoded" hidden>
+              <header class="host-shell-decoded-header">
+                <span>AT decode</span>
+                <button class="btn" id="host-shell-decoded-clear">Clear</button>
+              </header>
+              <div class="host-shell-decoded-rows" id="host-shell-decoded-rows" aria-live="polite"></div>
+            </div>
+            <p class="tool-meta">
+              Free-form RCE-class surface — the bearer token grants
+              shell-equivalent access. Restrict who holds it and prefer
+              an SSH tunnel over a public bind.
+            </p>
+          </div>
+        </section>
+
+        <section data-view="live_readers" class="view">
+          <h1>PC/SC readers</h1>
+          <p class="lead">
+            Enumerate connected PC/SC readers and probe the ATR of the
+            card (if any) currently in the slot. Uses the live PC/SC
+            stack from <code>SCP03.transport.card</code> without opening
+            a secure channel.
+          </p>
+          <div class="inline-actions">
+            <button class="btn btn-primary" id="live-readers-refresh">Refresh</button>
+          </div>
+          <div class="tool-meta" id="live-readers-status">Click refresh to probe.</div>
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Reader</th>
+                <th>ATR</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody id="live-readers-body"></tbody>
+          </table>
+        </section>
+
+        <section data-view="about" class="view">
+          <h1>About this GUI</h1>
+          <p class="lead">
+            YggdraSIM Universal GUI — Phase A scaffolding for
+            roadmap entry <code>R2-004</code>.
+          </p>
+          <ul>
+            <li>Built on FastAPI + a handwritten no-build SPA.</li>
+            <li>Token-gated; same-origin only; CSP locked to <code>self</code>.</li>
+            <li>Engine code stays headless — every endpoint resolves
+              via <code>yggdrasim_common.registry</code>.</li>
+          </ul>
+          <p class="hint">
+            Planning document: <code>V2_UNIVERSAL_GUI_PLAN.md</code> at
+            the repository root.
+          </p>
+        </section>
+      </main>
+
+      <aside class="log-dock" id="log-dock" data-collapsed="false">
+        <div class="log-dock-tabs" role="tablist" aria-label="Event log">
+          <button
+            class="log-dock-tab is-active"
+            role="tab"
+            aria-selected="true"
+            data-log-tab="messages"
+            id="log-tab-messages">
+            <span class="log-dock-tab-dot log-dock-tab-dot--info"></span>
+            <span class="log-dock-tab-label">Messages</span>
+            <span class="log-dock-tab-count" id="log-count-messages">0</span>
+          </button>
+          <button
+            class="log-dock-tab"
+            role="tab"
+            aria-selected="false"
+            data-log-tab="warnings"
+            id="log-tab-warnings">
+            <span class="log-dock-tab-dot log-dock-tab-dot--warn"></span>
+            <span class="log-dock-tab-label">Warnings</span>
+            <span class="log-dock-tab-count" id="log-count-warnings">0</span>
+          </button>
+          <button
+            class="log-dock-tab"
+            role="tab"
+            aria-selected="false"
+            data-log-tab="errors"
+            id="log-tab-errors">
+            <span class="log-dock-tab-dot log-dock-tab-dot--error"></span>
+            <span class="log-dock-tab-label">Errors</span>
+            <span class="log-dock-tab-count" id="log-count-errors">0</span>
+          </button>
+          <button
+            class="log-dock-tab"
+            role="tab"
+            aria-selected="false"
+            data-log-tab="apdu"
+            id="log-tab-apdu">
+            <span class="log-dock-tab-dot log-dock-tab-dot--apdu"></span>
+            <span class="log-dock-tab-label">APDU</span>
+            <span class="log-dock-tab-count" id="log-count-apdu">0</span>
+          </button>
+          <div class="log-dock-spacer"></div>
+          <button
+            class="log-dock-action"
+            id="log-dock-clear"
+            title="Clear all log entries">Clear all</button>
+          <button
+            class="log-dock-action log-dock-toggle"
+            id="log-dock-toggle"
+            title="Collapse / expand event log"
+            aria-label="Toggle event log dock">▾</button>
+        </div>
+        <div class="log-dock-body">
+          <div class="log-dock-panel is-active" data-log-panel="messages">
+            <div class="log-dock-rows" id="log-panel-messages"></div>
+            <div class="log-dock-placeholder" id="log-empty-messages">
+              No messages yet. Action runs and system events will appear here.
+            </div>
+          </div>
+          <div class="log-dock-panel" data-log-panel="warnings">
+            <div class="log-dock-rows" id="log-panel-warnings"></div>
+            <div class="log-dock-placeholder" id="log-empty-warnings">
+              No warnings yet.
+            </div>
+          </div>
+          <div class="log-dock-panel" data-log-panel="errors">
+            <div class="log-dock-rows" id="log-panel-errors"></div>
+            <div class="log-dock-placeholder" id="log-empty-errors">
+              No errors yet.
+            </div>
+          </div>
+          <div class="log-dock-panel" data-log-panel="apdu">
+            <div class="log-dock-rows log-dock-rows--mono" id="log-panel-apdu"></div>
+            <div class="log-dock-placeholder" id="log-empty-apdu">
+              APDU trace rows will land here when a card-touching action
+              runs (populated by the G-4 slice).
+            </div>
+          </div>
+        </div>
+      </aside>
+
+      <footer class="statusbar">
+        <span id="status-action">ready</span>
+        <span class="sep">·</span>
+        <span class="status-metric">
+          <span class="status-metric-label">readers</span>
+          <span class="status-metric-value" id="status-readers">–</span>
+        </span>
+        <span class="sep">·</span>
+        <span class="status-metric">
+          <span class="status-metric-label">sessions</span>
+          <span class="status-metric-value" id="status-sessions">–</span>
+        </span>
+        <span class="sep">·</span>
+        <span class="status-metric status-metric--muted">
+          <span class="status-metric-label">last activity</span>
+          <span class="status-metric-value" id="status-activity">–</span>
+        </span>
+        <span class="sep">·</span>
+        <span id="status-error" class="status-error"></span>
+      </footer>
+    </div>
+    <script src="/static/app.js"></script>
+  </body>
+</html>

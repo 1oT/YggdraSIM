@@ -67,6 +67,8 @@ def build_profile_provider(cfg):
             eim_transport_mode=cfg.EIM_TRANSPORT_MODE,
             eim_http_path=cfg.EIM_HTTP_PATH,
             eim_http_protocol=cfg.EIM_HTTP_PROTOCOL,
+            eim_rest_create_path=cfg.EIM_REST_CREATE_PATH,
+            eim_rest_lookup_path_template=cfg.EIM_REST_LOOKUP_PATH_TEMPLATE,
         )
         return RemoteEs9Provider(es9_client=es9_client)
 

@@ -111,11 +111,15 @@ class SmartDecoder :
                     return ""
                 if response_body .endswith (sw_text ):
                     response_body =response_body [:-len (sw_text )]
+            elif int (por_info .get ("command_count")or 0 )==1 :
+                return ""
             needed =le *2
             if len (response_body )<needed :
                 return ""
             return response_body [-needed :]
 
+        if por_hex .strip ().upper ().startswith ("D0"):
+            return ""
         if len (por_hex )>=(le *2 ):
             return por_hex [-(le *2 ):]
         return ""
@@ -373,6 +377,8 @@ class OtaShell :
 
     SET_KEY_ALIASES ={
     "counter":"cntr",
+    "kic_identifier":"kic_indicator",
+    "kid_identifier":"kid_indicator",
     "key_enc":"kic",
     "key_mac":"kid",
     }
@@ -691,6 +697,12 @@ class OtaShell :
         print ("  qa              - Exit YggdraSIM")
         print ("")
         print ("Config keys:")
+        print ("  kic             - SCP80 ciphering key material")
+        print ("  kid             - SCP80 integrity key material")
+        print ("  kic_indicator   - KIc command-packet indicator byte")
+        print ("  kid_indicator   - KID command-packet indicator byte")
+        print ("  kic_identifier  - Alias for kic_indicator")
+        print ("  kid_identifier  - Alias for kid_indicator")
         print ("  pid             - SMS TP-PID byte")
         print ("  dcs             - SMS TP-DCS byte")
         print ("  concat_sms      - ON or OFF automatic concatenation")

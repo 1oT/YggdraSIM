@@ -68,7 +68,7 @@ SCP11 README pages.
 
 ## Security and PIN management
 
-- `MANAGE-PIN`: unified wizard to verify, change, enable, disable, or unblock PINs
+- `MANAGE-PIN`: unified wizard to verify, change, enable, disable, or unblock PINs; PIN references accept hex or names such as `PIN-APP1`, `UPIN`, and `ADM1`; use `--hex` or `--binary` in macro form to send raw hex bytes instead of the default ASCII PIN block
 
 ## Environment configuration
 
@@ -98,7 +98,6 @@ SCP11 README pages.
 ## System and developer
 
 - `GUIDE [Topic]`: show in-shell documentation for `GP`, `ETSI`, `GSMA`, `INSTALL`, `SECURITY`, `OTA`, `CONFIG`, `SAIP`, `SUCI`, or `CLI`
-- `DECODE <Hex>`: parse and decode a raw BER-TLV string
 - `RUN` or `SCRIPT <File> [Out.yaml]`: execute a batch script of APDU commands
 - `DEBUG` or `VERBOSE`: toggle raw APDU logging
 - `EXPORT-KEYBAG [Path.keys.json] [Label]`: dump the active SCP03 session keys (S-ENC, S-MAC, S-RMAC, SSC, chaining value) and the target AID into a keybag JSON for offline HIL pcap decryption; refuses cleanly when no authenticated session is present

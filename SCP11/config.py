@@ -83,9 +83,7 @@ class SGPConfig:
     ES9_BASE_URL: str = "https://rsp.example.com"
     ES9_TIMEOUT_SECONDS: int = 15
     ES9_VERIFY_TLS: bool = True
-    ES9_CA_BUNDLE_PATH: str = field(
-        default_factory=lambda: os.path.join(_get_config_dir(), "ES9_TEST_CI_CA.pem")
-    )
+    ES9_CA_BUNDLE_PATH: str = ""
     EIM_BASE_URL: str = ""
     EIM_TIMEOUT_SECONDS: int = 30
     EIM_TRANSPORT_MODE: str = EIM_TRANSPORT_MODE_ESIPA
@@ -174,19 +172,20 @@ class SGPConfig:
                 },
             )
 
-        for filename in [
-            "CERT.DPauth.ECDSA.der",
-            "SK.DPauth.ECDSA.pem",
-            "CERT.DPpb.ECDSA.der",
-            "SK.DPpb.ECDSA.pem",
-            "ES9_TEST_CI_CA.pem",
-            "SGP26_TRUST_ANCHOR.pem",
-            "SGP26_ISSUER.pem",
-        ]:
-            try:
-                ensure_seeded_workspace_file(("SCP11", filename), "SCP11", filename)
-            except Exception as error:
-                print(f"Warning: Could not copy default {filename} to {_get_config_dir()}: {error}")
+        require_local_credentials = self.BACKEND_MODE == BACKEND_MODE_LOCAL_SGP26 or self.REMOTE_DP_ALLOW_LOCAL_FALLBACK
+        if require_local_credentials:
+            for filename in [
+                "CERT.DPauth.ECDSA.der",
+                "SK.DPauth.ECDSA.pem",
+                "CERT.DPpb.ECDSA.der",
+                "SK.DPpb.ECDSA.pem",
+                "SGP26_TRUST_ANCHOR.pem",
+                "SGP26_ISSUER.pem",
+            ]:
+                try:
+                    ensure_seeded_workspace_file(("SCP11", filename), "SCP11", filename)
+                except Exception as error:
+                    print(f"Warning: Could not copy default {filename} to {_get_config_dir()}: {error}")
 
     def local_credential_paths(self):
         """Return a dict of resolved certificate and key file paths for this session variant."""

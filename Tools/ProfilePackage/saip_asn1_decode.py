@@ -13250,104 +13250,205 @@ def _decode_sd_install_parameters(value_bytes: bytes) -> dict[str, object]:
     }
 
 
+def _uicc_toolkit_field_map(
+    name: str,
+    offset: int,
+    value: bytes,
+    *,
+    role: str = "value",
+) -> dict[str, object]:
+    return {
+        "name": name,
+        "offset": offset,
+        "length": len(value),
+        "role": role,
+        "raw": value.hex().upper(),
+    }
+
+
+def _decode_uicc_toolkit_layout(
+    value_bytes: bytes,
+    *,
+    menu_count_present: bool,
+) -> dict[str, object]:
+    """Decode one TS 102 226 §8.2.1.3.2.1 toolkit parameter layout.
+
+    pySim emits the canonical form with an explicit menu-entry count
+    byte. Some commercial tools omit that byte when no menu entries are
+    present; that compact form is still field-aligned as
+    ``maxChannels | len(MSL) | MSL | len(TARs) | TARs``. The decoder
+    tries both forms and the encoder keeps emitting the canonical
+    pySim-compatible form.
+    """
+
+    fields: list[dict[str, object]] = []
+
+    def take(offset: int, length: int, name: str, role: str = "value") -> tuple[bytes, int]:
+        if offset + length > len(value_bytes):
+            raise ValueError(f"truncated {name}")
+        chunk = value_bytes[offset : offset + length]
+        fields.append(_uicc_toolkit_field_map(name, offset, chunk, role=role))
+        return chunk, offset + length
+
+    offset = 0
+    access_len_bytes, offset = take(offset, 1, "accessDomainLength", "length")
+    access_domain_length = access_len_bytes[0]
+    access_domain, offset = take(offset, access_domain_length, "accessDomain")
+    priority_level_bytes, offset = take(
+        offset,
+        1,
+        "priorityLevelOfToolkitAppInstance",
+    )
+    max_timers_bytes, offset = take(offset, 1, "maxNumberOfTimers")
+    max_text_bytes, offset = take(offset, 1, "maxTextLengthForMenuEntry")
+
+    menu_entries: list[dict[str, int]] = []
+    if menu_count_present:
+        menu_count_bytes, offset = take(offset, 1, "menuEntryCount", "length")
+        menu_entry_count = menu_count_bytes[0]
+        for index in range(menu_entry_count):
+            entry_bytes, offset = take(offset, 2, f"menuEntry[{index}]")
+            menu_entries.append(
+                {
+                    "id": entry_bytes[0],
+                    "position": entry_bytes[1],
+                }
+            )
+
+    max_channels_bytes, offset = take(offset, 1, "maxNumberOfChannels")
+    msl_len_bytes, offset = take(offset, 1, "minimumSecurityLevelLength", "length")
+    msl_length = msl_len_bytes[0]
+    msl_value_bytes, offset = take(offset, msl_length, "minimumSecurityLevel")
+    tar_len_bytes, offset = take(offset, 1, "tarDataLength", "length")
+    tar_data_length = tar_len_bytes[0]
+    if tar_data_length % 3 != 0:
+        raise ValueError("TAR values must be 3-byte aligned")
+    tar_bytes, offset = take(offset, tar_data_length, "tarValues")
+
+    trailing_padding = b""
+    if offset != len(value_bytes):
+        trailing_padding = value_bytes[offset:]
+        fields.append(
+            _uicc_toolkit_field_map(
+                "trailingPadding",
+                offset,
+                trailing_padding,
+                role="padding",
+            )
+        )
+        if any(byte_value != 0x00 for byte_value in trailing_padding):
+            raise ValueError("invalid non-zero toolkit trailing bytes")
+
+    tar_values = [
+        tar_bytes[index : index + 3].hex().upper()
+        for index in range(0, len(tar_bytes), 3)
+    ]
+    layout = (
+        "canonical-with-menu-entry-count"
+        if menu_count_present
+        else "compact-no-menu-entry-count"
+    )
+    decoded: dict[str, object] = {
+        "format": "ETSI TS 102 226 toolkit app specific parameters",
+        "reference": "ETSI TS 102 226 §8.2.1.3.2.1",
+        "layout": layout,
+        "rawHex": value_bytes.hex().upper(),
+        "length": len(value_bytes),
+        "consumedLength": offset,
+        "fieldMap": fields,
+        "accessDomain": access_domain.hex().upper(),
+        "priorityLevelOfToolkitAppInstance": priority_level_bytes[0],
+        "maxNumberOfTimers": max_timers_bytes[0],
+        "maxTextLengthForMenuEntry": max_text_bytes[0],
+        "menuEntryCountPresent": menu_count_present,
+        "menuEntries": menu_entries,
+        "maxNumberOfChannels": max_channels_bytes[0],
+        "minimumSecurityLevelRaw": msl_value_bytes.hex().upper(),
+        "tarValues": tar_values,
+    }
+    if len(msl_value_bytes) >= 1:
+        decoded["minimumSecurityLevelInferred"] = f"0x{msl_value_bytes[-1]:02X}"
+        decoded["minimumSecurityLevelDecimal"] = msl_value_bytes[-1]
+    if len(tar_values) > 0:
+        decoded["tarInferred"] = tar_values[0]
+    if len(trailing_padding) > 0:
+        decoded["trailingPadding"] = trailing_padding.hex().upper()
+    return decoded
+
+
+def _score_uicc_toolkit_layout(decoded: dict[str, object]) -> int:
+    score = 0
+    tar_values = decoded.get("tarValues")
+    if isinstance(tar_values, list):
+        score += len(tar_values) * 100
+    msl_raw = str(decoded.get("minimumSecurityLevelRaw") or "")
+    msl_len = len(msl_raw) // 2
+    if 1 <= msl_len <= 3:
+        score += 20
+    elif msl_len == 0:
+        score += 2
+    if decoded.get("menuEntryCountPresent") is True:
+        score += 3
+    return score
+
+
+def _infer_tar_values_from_length_fields(value_bytes: bytes) -> list[str]:
+    values: list[str] = []
+    for index in range(0, len(value_bytes)):
+        length = value_bytes[index]
+        if length == 0 or length % 3 != 0:
+            continue
+        end = index + 1 + length
+        if end > len(value_bytes):
+            continue
+        block = value_bytes[index + 1 : end]
+        for offset in range(0, len(block), 3):
+            tar = block[offset : offset + 3].hex().upper()
+            if tar not in values:
+                values.append(tar)
+    return values
+
+
 def _decode_uicc_toolkit_parameters(value_bytes: bytes) -> dict[str, object]:
     decoded: dict[str, object] = {
         "format": "ETSI TS 102 226 toolkit app specific parameters",
+        "reference": "ETSI TS 102 226 §8.2.1.3.2.1",
         "rawHex": value_bytes.hex().upper(),
         "length": len(value_bytes),
     }
-    try:
-        offset = 0
-        if offset >= len(value_bytes):
-            return decoded
-        access_domain_length = value_bytes[offset]
-        offset += 1
-        if offset + access_domain_length > len(value_bytes):
-            raise ValueError("invalid access domain length")
-        access_domain = value_bytes[offset : offset + access_domain_length]
-        offset += access_domain_length
-        if offset + 4 > len(value_bytes):
-            raise ValueError("missing toolkit fixed header")
-        priority_level = value_bytes[offset]
-        offset += 1
-        max_num_of_timers = value_bytes[offset]
-        offset += 1
-        max_text_length = value_bytes[offset]
-        offset += 1
-        menu_entry_count = value_bytes[offset]
-        offset += 1
-        menu_entries: list[dict[str, int]] = []
-        for _ in range(menu_entry_count):
-            if offset + 2 > len(value_bytes):
-                raise ValueError("truncated toolkit menu entry")
-            menu_entries.append(
-                {
-                    "id": value_bytes[offset],
-                    "position": value_bytes[offset + 1],
-                }
+    if len(value_bytes) == 0:
+        return decoded
+
+    candidates: list[dict[str, object]] = []
+    errors: list[str] = []
+    for menu_count_present in (True, False):
+        try:
+            candidates.append(
+                _decode_uicc_toolkit_layout(
+                    value_bytes,
+                    menu_count_present=menu_count_present,
+                )
             )
-            offset += 2
-        if offset >= len(value_bytes):
-            raise ValueError("missing channel count")
-        max_num_of_channels = value_bytes[offset]
-        offset += 1
-        if offset >= len(value_bytes):
-            raise ValueError("missing MSL length")
-        msl_length = value_bytes[offset]
-        offset += 1
-        if offset + msl_length > len(value_bytes):
-            raise ValueError("invalid MSL length")
-        msl_value_bytes = value_bytes[offset : offset + msl_length]
-        offset += msl_length
-        if offset >= len(value_bytes):
-            raise ValueError("missing TAR length")
-        tar_data_length = value_bytes[offset]
-        offset += 1
-        if offset + tar_data_length > len(value_bytes):
-            raise ValueError("invalid TAR length")
-        tar_end = offset + tar_data_length
-        if tar_data_length % 3 != 0:
-            raise ValueError("TAR values must be 3-byte aligned")
-        tar_values: list[str] = []
-        while offset < tar_end:
-            tar_values.append(value_bytes[offset : offset + 3].hex().upper())
-            offset += 3
-        trailing_padding = b""
-        if offset != len(value_bytes):
-            trailing_padding = value_bytes[offset:]
-            if any(byte_value != 0x00 for byte_value in trailing_padding):
-                raise ValueError("invalid non-zero toolkit trailing bytes")
-        decoded.update(
-            {
-                "accessDomain": access_domain.hex().upper(),
-                "priorityLevelOfToolkitAppInstance": priority_level,
-                "maxNumberOfTimers": max_num_of_timers,
-                "maxTextLengthForMenuEntry": max_text_length,
-                "menuEntries": menu_entries,
-                "maxNumberOfChannels": max_num_of_channels,
-                "minimumSecurityLevelRaw": msl_value_bytes.hex().upper(),
-                "tarValues": tar_values,
-            }
-        )
-        if len(msl_value_bytes) >= 1:
-            decoded["minimumSecurityLevelInferred"] = f"0x{msl_value_bytes[-1]:02X}"
-            decoded["minimumSecurityLevelDecimal"] = msl_value_bytes[-1]
-        if len(tar_values) > 0:
-            decoded["tarInferred"] = tar_values[0]
-        if len(trailing_padding) > 0:
-            decoded["trailingPadding"] = trailing_padding.hex().upper()
-        return decoded
-    except Exception:
-        decoded["bytes"] = [f"0x{byte_value:02X}" for byte_value in value_bytes]
-        for index in range(0, max(0, len(value_bytes) - 2)):
-            if value_bytes[index] == 0x02 and value_bytes[index + 1] == 0x01:
-                decoded["minimumSecurityLevelInferred"] = f"0x{value_bytes[index + 2]:02X}"
-                decoded["minimumSecurityLevelDecimal"] = value_bytes[index + 2]
-                break
-        tar_index = value_bytes.find(bytes.fromhex("B20100"))
-        if tar_index != -1:
-            decoded["tarInferred"] = value_bytes[tar_index : tar_index + 3].hex().upper()
-        return decoded
+        except Exception as error:
+            errors.append(str(error))
+
+    if candidates:
+        candidates.sort(key=_score_uicc_toolkit_layout, reverse=True)
+        return candidates[0]
+
+    decoded["bytes"] = [f"0x{byte_value:02X}" for byte_value in value_bytes]
+    if errors:
+        decoded["parseErrors"] = errors
+    for index in range(0, max(0, len(value_bytes) - 2)):
+        if value_bytes[index] == 0x02 and value_bytes[index + 1] == 0x01:
+            decoded["minimumSecurityLevelInferred"] = f"0x{value_bytes[index + 2]:02X}"
+            decoded["minimumSecurityLevelDecimal"] = value_bytes[index + 2]
+            break
+    inferred_tars = _infer_tar_values_from_length_fields(value_bytes)
+    if inferred_tars:
+        decoded["tarValues"] = inferred_tars
+        decoded["tarInferred"] = inferred_tars[0]
+    return decoded
 
 
 _RESTRICT_PARAMETER_BITS: dict[int, str] = {

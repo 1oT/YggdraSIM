@@ -226,69 +226,6 @@ class ShellDispatcher :
 
         self .transport .transmit =_verbose_transmit 
 
-    def _handle_decode (self ,arg_line :str ):
-        is_empty =False 
-        if len (arg_line )==0 :
-            is_empty =True 
-
-        if is_empty :
-            print (f"{Config.Colors.FAIL}[-] Usage: DECODE <Hex>{Config.Colors.ENDC}")
-            return 
-
-        hex_data =arg_line .replace (" ","")
-
-        try :
-            data =bytes .fromhex (hex_data )
-            parse_info =TlvParser .parse_detailed (data )
-            parsed =parse_info ["parsed"]
-            if parse_info ["complete"]==False or len (parsed )==0 :
-                if self ._try_decode_simple_registry_stream (data ):
-                    return 
-                print (f"{Config.Colors.WARNING}[!] Input does not appear to be valid BER-TLV.{Config.Colors.ENDC}")
-                if parse_info ["error"]:
-                    print (f"{Config.Colors.WARNING}[!] Parser note: {parse_info['error']}{Config.Colors.ENDC}")
-                consumed =parse_info .get ("consumed",0 )
-                print (f"{Config.Colors.WARNING}[!] Consumed {consumed} of {len(data)} bytes before stopping.{Config.Colors.ENDC}")
-                return 
-            self .gp_ctrl .print_tlv_data (parsed )
-        except ValueError :
-            print (f"{Config.Colors.FAIL}[!] Invalid Hex string provided.{Config.Colors.ENDC}")
-        except Exception as e :
-            print (f"{Config.Colors.FAIL}[!] Decode Error: {e}{Config.Colors.ENDC}")
-
-    def _try_decode_simple_registry_stream (self ,data :bytes )->bool :
-        entries =[]
-        i =0 
-        while i <len (data ):
-            if i +3 >len (data ):
-                return False 
-            aid_len =data [i ]
-            if aid_len <5 or aid_len >16 :
-                return False 
-            i +=1 
-            if i +aid_len +2 >len (data ):
-                return False 
-            aid =data [i :i +aid_len ]
-            if len (aid )==0 or aid [0 ]!=0xA0 :
-                return False 
-            i +=aid_len 
-            state_byte =data [i ]
-            extra_byte =data [i +1 ]
-            i +=2 
-            entries .append ((aid .hex ().upper (),state_byte ,extra_byte ))
-
-        if len (entries )==0 :
-            return False 
-
-        print (f"{Config.Colors.CYAN}[i] Detected simple LV registry stream (not BER-TLV).{Config.Colors.ENDC}")
-        print (f"{Config.Colors.HEADER}--- Decoded Registry Stream ---{Config.Colors.ENDC}")
-        print (f"{'AID':<34} | {'State':<12} | Extra")
-        print ("-"*65 )
-        for aid_hex ,state_byte ,extra_byte in entries :
-            state_str =self .gp_ctrl ._state_to_string (state_byte )
-            print (f"{aid_hex:<34} | {state_str:<12} | {extra_byte:02X}")
-        return True 
-
     def _handle_dump_fs (self ,arg_line :str =""):
         target ="ALL"
         has_arg =False 

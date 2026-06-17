@@ -32,7 +32,7 @@ matrix of console scripts and `python -m` invocations see the
   whose sub-prompts are listed directly beneath it.
 - Aliases resolve to the canonical handler and are listed explicitly.
 - Commands marked *(expert)* only appear with `HELP EXPERT` / `HELP-ALL`
-  (SCP11 Live / Test only).
+  (SCP11 eSIM management relay).
 - Commands marked *(not in HELP)* are registered but omitted from the
   default help screen; they still dispatch at the prompt.
 - Commands marked *(hidden)* are dispatchable but removed from
@@ -44,8 +44,7 @@ matrix of console scripts and `python -m` invocations see the
 flowchart TD
     Launcher["main/main.py<br/>top-level menu"] --> SCP03["SCP03 Admin Shell"]
     Launcher --> SCP80["SCP80 OTA Shell"]
-    Launcher --> LiveShell["SCP11 Live relay"]
-    Launcher --> TestShell["SCP11 Test relay"]
+    Launcher --> LiveShell["SCP11 eSIM management relay"]
     Launcher --> LocalShell["SCP11 Local SMDPP"]
     Launcher --> EimShell["SCP11 Local eIM"]
     Launcher --> ProfileShell["Profile Package / SAIP shell"]
@@ -86,6 +85,9 @@ options are consumed by `argparse` before the menu is drawn.
 | `--scp03` | flag | off | Target the SCP03 shell non-interactively (pair with `--cmd`). |
 | `--cmd "<semicolon list>"` | string | — | Batch commands for the `--scp03` pipeline. |
 | `--out <path>` | path | — | YAML output for `--cmd` (forwarded to `run_scp03_cmd`). |
+| `--asn1 [HEX]` | optional hex string | — | Decode BER/DER ASN.1, BER-TLV, or command APDU hex and exit. Omitting `HEX` reads from stdin. |
+| `--asn1-file <path>` | path | — | Read ASN.1/TLV/APDU hex from a file and exit. |
+| `--asn1-format` | `asn1` \| `json` \| `both` | `asn1` | Select output format for `--asn1` / `--asn1-file`. |
 | `--card-backend` | `reader` \| `sim` | persisted | Physical PC/SC reader vs simulated eUICC; re-persists when reused. |
 | `--sim-isdr-config` | JSON path | — | Seed simulated ISD-R/eUICC personality. |
 | `--sim-quirks` | Python path | — | Quirks override for the simulated SIM. |
@@ -111,8 +113,7 @@ options are consumed by `argparse` before the menu is drawn.
 | --- | --- | --- |
 | `1` | Admin Shell — Local Management | SCP03 Admin Shell |
 | `2` | OTA Simulator — Remote Management | SCP80 OTA Shell |
-| `3A` | eSIM Management Relay (Live Certificates) | SCP11 Live console |
-| `3B` | eSIM Management Relay (Test Certificates) | SCP11 Test console |
+| `3A` | eSIM Management Relay | SCP11 Relay console |
 | `3C` | Local SMDPP | SCP11 Local Access shell |
 | `3D` | Local eIM | SCP11 Local eIM shell |
 | `7` | SAIP Tool | Profile Package / SAIP shell |
@@ -134,7 +135,6 @@ Accepted by `_dispatch_main_menu_choice`:
 | Legacy input | Rewritten to |
 | --- | --- |
 | `3` | `3A` |
-| `4` | `3B` |
 | `5` | `3C` |
 | `6` | `3D` |
 | `9` | `9A` |
@@ -192,8 +192,7 @@ picks delegate to `SCP03.interface.guides.ShellGuides`.
 | --- | --- |
 | `1` | Admin Shell guide topics (`ShellGuides.print_guide("WIZARD")`) |
 | `2` | OTA Simulator guide (`ShellGuides._print_ota_guide`) |
-| `3` | eSIM Relay Live — `SCP11/live/README.md` |
-| `4` | eSIM Relay Test — `SCP11/test/README.md` |
+| `3` | eSIM Management Relay — `SCP11/live/README.md` |
 | `5` | Local SMDPP — `SCP11/local_access/README.md` |
 | `5C` | Local SMDPP certificate override — `SCP11/local_access/certs/README.md` |
 | `6` | Local eIM overview — `SCP11/eim_local/README.md` |
@@ -216,7 +215,6 @@ Defined in `pyproject.toml`/`yggdrasim_common/console_scripts.py`:
 | `yggdrasim-scp80` | `SCP80.main.run_standalone` |
 | `yggdrasim-scp11` | `SCP11.main.entry` → `SCP11.live.main.entry` |
 | `yggdrasim-scp11-live` | `SCP11.live.main.entry` |
-| `yggdrasim-scp11-test` | `SCP11.test.main.entry` |
 | `yggdrasim-scp11-relay` | `SCP11.relay.main.entry` |
 | `yggdrasim-scp11-local-access` | `SCP11.local_access.main.entry` |
 | `yggdrasim-scp11-eim-local` | `SCP11.eim_local.main.entry` |
@@ -387,18 +385,26 @@ Each wizard is tag-granular — every sub-prompt is its own step.
 Interactive wizard (`run_manage_pin_wizard`):
 
 1. `action` — [1=Verify, 2=Change, 3=Disable, 4=Enable, 5=Unblock]
-2. `pin_id` — PIN ID [Hex, default 01]
-3. `curr` — Enter PIN [ASCII] *(action ≠ 5)*
-4. `new` — New PIN [ASCII] *(action ∈ {2, 5})*
-5. `puk` — PUK [ASCII] *(action = 5)*
+2. `pin_id` — PIN ID [Hex/name, default 01]
+3. `pin_encoding` — PIN Data Encoding [1=ASCII, 2=HEX/BINARY]
+4. `curr` — Enter PIN / key data *(action ≠ 5)*
+5. `new` — New PIN / key data *(action ∈ {2, 5})*
+6. `puk` — PUK / unblock key data *(action = 5)*
 
 Non-interactive macro forms:
 
-- `MANAGE-PIN verify <pin_id> <pin>`
-- `MANAGE-PIN change <pin_id> <curr> <new>`
-- `MANAGE-PIN disable <pin_id> <curr>`
-- `MANAGE-PIN enable <pin_id> <curr>`
-- `MANAGE-PIN unblock <pin_id> <puk> <new>`
+- `MANAGE-PIN verify [--hex|--binary|--encoding hex] <pin_id> <pin>`
+- `MANAGE-PIN change [--hex|--binary|--encoding hex] <pin_id> <curr> <new>`
+- `MANAGE-PIN disable [--hex|--binary|--encoding hex] <pin_id> <curr>`
+- `MANAGE-PIN enable [--hex|--binary|--encoding hex] <pin_id> <curr>`
+- `MANAGE-PIN unblock [--hex|--binary|--encoding hex] <pin_id> <puk> <new>`
+
+ASCII is the default and uses the legacy 8-byte padded PIN block. HEX/BINARY
+validates hex input and sends those bytes as the APDU data field.
+Friendly PIN references include `PIN-APP1`..`PIN-APP8`,
+`SECOND-PIN-APP1`..`SECOND-PIN-APP8`, `UPIN`, and `ADM1`..`ADM10`.
+Common `PIN1`/`CHV1` and `PIN2`/`CHV2` aliases are also accepted. Common
+separators and case variants are accepted.
 
 ### 2.6 Environment configuration
 
@@ -480,7 +486,6 @@ When the built file is an EF, an **EF Initialization** wizard asks `upd [y/N]`. 
 | Command | Args | Aliases | Purpose |
 | --- | --- | --- | --- |
 | `GUIDE` | `[Topic]` | — | In-shell documentation. Topics: `GP`, `ETSI`, `GSMA`, `INSTALL`, `SECURITY`, `OTA`, `CONFIG`, `SAIP`, `SUCI`, `CLI`, plus implicit `WIZARD`. |
-| `DECODE` | `<Hex>` | — | Parse and decode a raw BER-TLV string (falls back to simple LV decoder when not valid BER-TLV). |
 | `RUN` | `<File> [Out.yaml]` | `SCRIPT` | Execute a batch script; optional YAML transcript output. |
 | `SCRIPT` | `<File>` | `RUN` | Alias (no output-path form). |
 | `DEBUG` | — | `VERBOSE`, *(hidden from tab-completion)* | Toggle raw APDU hex logging. |
@@ -518,7 +523,7 @@ as `STK <commands>`. Commands are handled by their upper-case keyword.
 
 Enforced by `CommandRegistry.get_arg_requirements`:
 
-- **Mandatory argument** (dispatcher errors out if absent): `SET-AID-ALIAS`, `SELECT`, `UPDATE`, `LOCK`, `UNLOCK`, `DEL`, `SCRIPT`, `STORE-DATA`, `DECODE`, `DERIVE-OPC`, `SET-GOLD-PROFILE`.
+- **Mandatory argument** (dispatcher errors out if absent): `SET-AID-ALIAS`, `SELECT`, `UPDATE`, `LOCK`, `UNLOCK`, `DEL`, `SCRIPT`, `STORE-DATA`, `DERIVE-OPC`, `SET-GOLD-PROFILE`.
 - **Optional argument** (handler called with or without tail): `REPORT`, `KEYS`, `READ`, `RECORD`, `RUN`, `GUIDE`, `STK`, `DEBUG`, `VERBOSE`, `DUMP-FS`, `MANAGE-PIN`, `EXPORT-EUICC`, `EXPORT-KEYBAG`, `ARR`, `VALIDATE`, `GOLD-PROFILE`, `CLEAR-GOLD-PROFILE`, `PROFILE-DIFF`.
 - Everything else is called with no arguments; extra tokens are silently ignored.
 
@@ -586,15 +591,12 @@ Per-ICCID persistence covers `cntr, header, spi, kic, kid, tar, key_enc, key_mac
 
 ---
 
-## 4. SCP11 Live / Test consoles
+## 4. SCP11 eSIM Management Relay Console
 
-`python -m SCP11.live` (`yggdrasim-scp11-live`),
-`python -m SCP11.test` (`yggdrasim-scp11-test`). Both consoles share the
-byte-identical `_register_commands` surface in
-`SCP11/live/console.py` and `SCP11/test/console.py`. `python -m SCP11`
-delegates to the Live shell.
+`python -m SCP11.live` (`yggdrasim-scp11-live`) is the consolidated relay
+entrypoint. `python -m SCP11` delegates to the same shell.
 
-### 4.1 Launcher flags (Live, Test)
+### 4.1 Launcher flags
 
 | Flag | Purpose |
 | --- | --- |
@@ -602,7 +604,7 @@ delegates to the Live shell.
 | `--flow` | Run `orchestrator.run_flow()` once and exit. |
 | `--cmd "<c1; c2; ...>"` | Non-interactive batch via `run_commands()`. |
 | `--stdin` | Read newline-separated commands from stdin; `;`-joined batch. |
-| `--dump-keybag <path>` *(Live only)* | **No-op stub**. SCP11c BSP keys are derived inside the eUICC during BPP processing and never reach the host, so live mode cannot export them. The flag prints a guidance message pointing at `SCP11.local_access` (host-derived BSPs) or SCP03 (SCP03 session keys) and exits with code `2`. Present only on `python -m SCP11.live` / `yggdrasim-scp11-live`. |
+| `--dump-keybag <path>` | **No-op stub**. SCP11c BSP keys are derived inside the eUICC during BPP processing and never reach the host, so relay mode cannot export them. The flag prints a guidance message pointing at `SCP11.local_access` (host-derived BSPs) or SCP03 (SCP03 session keys) and exits with code `2`. |
 
 Env: `SCP11_PINNED_HELP ∈ {1, true, yes, on}` pins the command help
 pane to the top half of the terminal (TTY only, ≥24 rows).
@@ -611,8 +613,7 @@ pane to the top half of the terminal (TTY only, ≥24 rows).
 
 | Shell | Prompt | Module state | Inventory namespace | Polling-surface key |
 | --- | --- | --- | --- | --- |
-| Live | `[eSIM Live] >` | `scp11_live_config` | `scp11_live` | `scp11.live` |
-| Test | `[eSIM Test] >` | `scp11_test_config` | `scp11_test` | `scp11.test` |
+| eSIM Management | `[eSIM Management] >` | `scp11_live_config` | `scp11_live` | `scp11.live` |
 
 ### 4.3 HELP categories
 
@@ -701,7 +702,7 @@ Argument grammar (shared via `yggdrasim_common.polling_plugin_support`):
 | `GET-ALL-DATA` | — | Consolidated dump (GET-EID, LIST, STATUS, INFO1, INFO2, RAT, NOTIFICATIONS, EIM-CONFIG, CERTS). |
 | `EIM-AUTHENTICATE` | `EIM-AUTHENTICATE [matchingId]` | SGP.32 / SGP.22 authentication phase only. |
 
-### 4.9 Flag reference (Live / Test)
+### 4.9 Flag reference
 
 | Flag | Commands |
 | --- | --- |
@@ -1441,14 +1442,13 @@ Dispatch rules:
 | Host shell | Commands injected | Default aliases | Help section |
 | --- | --- | --- | --- |
 | `SCP11.live.console.SCP11Console` | `POLL [attempts] [timer-window] [-t 20s] [-s 5] [--debug]` | `EIM-POLL` | IPAe |
-| `SCP11.test.console.SCP11Console` | `POLL [attempts] [timer-window] [-t 20s] [-s 5] [--debug]` | `EIM-POLL` | IPAe |
 | `SCP11.eim_local.main.EimLocalShell` | `IPAE-LIVE` / `IPAE-TEST [attempts] [timer-window] [-t 20s] [-s 5] [--debug]` | — | "3. SIM IP Polling" + Localized Routing & Handover |
 
 Argument grammar (all three): `yggdrasim_common.polling_plugin_support.parse_eim_local_ipae_options`.
 
 ### 11.3 Capability contract for host shells
 
-For Live / Test the plugin uses `target._add_command(name, usage, description, handler, aliases=None, section=..., visible_in_help=True, trigger_notification_sync=False)`; the host console must expose:
+For the eSIM management relay the plugin uses `target._add_command(name, usage, description, handler, aliases=None, section=..., visible_in_help=True, trigger_notification_sync=False)`; the host console must expose:
 
 - `target._commands` — dict keyed by canonical name.
 - `target._add_command(...)` registration helper.

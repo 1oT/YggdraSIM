@@ -138,6 +138,21 @@ class ConfigManagerTests(unittest.TestCase):
             manager._normalize_value("kic", "11" * 17, strict=True)
         self.assertEqual(manager._normalize_value("kid", "11" * 16, strict=True), "11" * 16)
 
+    def test_set_rejects_unknown_keys(self) -> None:
+        manager = self._make_manager()
+
+        with self.assertRaisesRegex(ValueError, "Unknown SCP80 config key: nope"):
+            manager.set("nope", "32")
+
+    def test_set_updates_indicator_slots(self) -> None:
+        manager = self._make_manager()
+
+        manager.set("kic_indicator", "32")
+        manager.set("kid_indicator", "32")
+
+        self.assertEqual(manager.data["kic_indicator"], "32")
+        self.assertEqual(manager.data["kid_indicator"], "32")
+
     def test_bind_iccid_profile_applies_inventory_payload(self) -> None:
         manager = self._make_manager()
         manager.inventory = DummyInventory(namespace={"spi": "A1B2", "concat_sms": "off"})

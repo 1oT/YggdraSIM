@@ -405,7 +405,7 @@ FLAG_REGISTRY: Final[tuple[EnvFlag, ...]] = (
         choices=("1", "0"),
         default_hint="unset → plugins load",
         applies=APPLIES_STARTUP,
-        notes="Plugin loading happens at module-import time of main.py; changing this flag in a running process does not retroactively load/unload plugins.",
+        notes="Plugin loading happens during launcher startup after local utility exits such as --asn1; changing this flag in a running process does not retroactively load/unload plugins.",
     ),
     EnvFlag(
         name="YGGDRASIM_DISALLOW_PLUGINS",

@@ -27,6 +27,16 @@ class HilBridgeLiveDecodeViewTests(unittest.TestCase):
         self.assertIn("udp.payload", command)
         self.assertIn("udp.port==4729,gsmtap", command)
 
+    def test_build_summary_command_can_filter_after_frame(self) -> None:
+        command = build_summary_command(
+            "/tmp/live_capture.pcap",
+            tshark_binary="/usr/bin/tshark",
+            frame_filter="frame.number > 17",
+        )
+
+        self.assertIn("-Y", command)
+        self.assertIn("frame.number > 17", command)
+
     def test_build_packet_commands_target_single_frame(self) -> None:
         detail_command = build_packet_detail_command(
             "/tmp/live_capture.pcap",

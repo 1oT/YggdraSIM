@@ -13,11 +13,12 @@ All `python -m ...` examples in this guide assume one of these is true:
 
 After editable install, you can also use the installed commands directly, for
 example `yggdrasim-scp03`, `yggdrasim-scp80`, `yggdrasim-scp11`,
-`yggdrasim-scp11-live`, `yggdrasim-scp11-test`, `yggdrasim-scp11-relay`,
+`yggdrasim-scp11-live`, `yggdrasim-scp11-relay`,
 `yggdrasim-scp11-local-access`, `yggdrasim-scp11-eim-local`,
 `yggdrasim-hil-bridge`, `yggdrasim-hil-supervisor`,
 `yggdrasim-profile-package`, `yggdrasim-profile-autoload`,
-`yggdrasim-apdu-fuzzer`, `yggdrasim-eum-diag`, and `yggdrasim-suci-tool`.
+`yggdrasim-apdu-fuzzer`, `yggdrasim-eum-diag`, `yggdrasim-suci-tool`, and
+`yggdrasim-asn1`.
 
 ## Scope
 
@@ -28,8 +29,7 @@ The following modules support direct command automation:
 | `python -m SCP03` | Yes | Yes | Yes | Supports `--out` YAML export with `--cmd` or `--stdin`. |
 | `python -m SCP80` | Yes | Yes | Yes | Uses the same OTA shell commands as the interactive prompt. |
 | `python -m SCP11.relay` | Yes | Yes | Yes | Relay shell using the default relay certificate set. |
-| `python -m SCP11.live` | Yes | Yes | Yes | Relay shell using live certificate defaults. |
-| `python -m SCP11.test` | Yes | Yes | Yes | Relay shell using test certificate defaults. |
+| `python -m SCP11.live` | Yes | Yes | Yes | eSIM management relay shell. |
 | `python -m SCP11.local_access` | Yes | Yes | Yes | Local SMDPP shell against ISD-R. |
 | `python -m SCP11.eim_local` | Yes | Yes | Yes | Local eIM shell and localized flows. |
 | `python -m Tools.ProfilePackage` | Yes | Yes | Yes | SAIP/profile package shell. Exposes `DIFF`, `DIFF-TUI`, and `WATCH-SIMCARD`. |
@@ -37,6 +37,7 @@ The following modules support direct command automation:
 | `python -m Tools.ApduFuzz` | No | No | No | Opt-in APDU mutation fuzzer. Refuses to run without `--i-mean-it` and at least one `--allow-iccid` / `--allow-imsi`. Ships as `yggdrasim-apdu-fuzzer`. |
 | `python -m Tools.EumDiag` | No | No | No | EUM diagnostics: `inject-keys` / `store-keys` / `decode-bpp` subcommands. Ships as `yggdrasim-eum-diag`. |
 | `python -m Tools.SuciTool` | Yes | Yes | Yes | SUCI key tool shell. |
+| `python -m Tools.Asn1TlvDecode` | No | No | Yes | BER/DER ASN.1, BER-TLV, and command APDU decoder. Ships as `yggdrasim-asn1`; also exposed through `python main/main.py --asn1`. |
 | `python -m Tools.HilBridge.main` | No | No | No | HIL bridge daemon (Linux only). Long-running RSPRO server. Ships as `yggdrasim-hil-bridge`. |
 | `python -m Tools.HilBridge.supervisor` | No | No | No | HIL bridge supervisor / health-check / restarter (Linux only). Ships as `yggdrasim-hil-supervisor`. |
 
@@ -66,6 +67,25 @@ Practical note:
 
 - `--sim-eim-identity` controls the simulated card's default BF55 eIM identity
 - `Workspace/LocalEIM/eim_identity.json` remains the Local eIM shell identity file and is configured separately
+
+## Wrapper ASN.1/TLV Decode Flags
+
+`python main/main.py --asn1` short-circuits into the ASN.1/TLV/APDU decoder
+without launching the menu or touching the card backend.
+
+```bash
+python main/main.py --asn1 5C06BF51BF449F2A
+echo 5C06BF51BF449F2A | python main/main.py --asn1
+python main/main.py --asn1 --asn1-format json < sample.hex
+python main/main.py --asn1-file sample.hex --asn1-format both
+```
+
+After editable install, the equivalent direct command is:
+
+```bash
+yggdrasim-asn1 5C06BF51BF449F2A
+echo 5C06BF51BF449F2A | yggdrasim-asn1
+```
 
 ## Wrapper HIL offline flags
 
@@ -264,24 +284,18 @@ quit
 EOF
 ```
 
-### SCP11 relay shells
+### SCP11 eSIM management relay
 
-Relay default:
-
-```bash
-python -m SCP11.relay --cmd "DISCOVER; STATUS; EXIT"
-```
-
-Live certificate defaults:
+Relay shell:
 
 ```bash
 python -m SCP11.live --cmd "DISCOVER; STATUS; EXIT"
 ```
 
-Test certificate defaults:
+Stdin batch:
 
 ```bash
-python -m SCP11.test --stdin <<'EOF'
+python -m SCP11.live --stdin <<'EOF'
 DISCOVER
 LIST
 STATUS
@@ -480,7 +494,7 @@ details, and the full operator flow.
 - Redirect stdout when the command output is the artifact:
 
 ```bash
-python -m SCP11.test --cmd "DISCOVER; EXIT" > reports/scp11_test_discover.txt
+python -m SCP11.live --cmd "DISCOVER; EXIT" > reports/scp11_discover.txt
 ```
 
 - Capture stdout and keep it visible with `tee`:

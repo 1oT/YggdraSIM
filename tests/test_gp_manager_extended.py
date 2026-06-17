@@ -144,6 +144,22 @@ class GetRegistryDataTests(unittest.TestCase):
         result = mgr.get_registry_data()
         self.assertIn("raw_hex", result)
 
+    def test_get_status_shortcut_includes_case4_le(self) -> None:
+        mgr = self._make_single_page()
+        mgr.get_registry_data("APPS")
+
+        apdu = mgr.tp.transmit.call_args.args[0].upper()
+
+        self.assertEqual(apdu, "80F24000024F0000")
+
+    def test_list_registry_shortcut_includes_case4_le(self) -> None:
+        mgr = _make_manager(transmit_return=(b"", 0x90, 0x00))
+
+        mgr.list_registry("PACKAGES")
+
+        apdu = mgr.tp.transmit.call_args.args[0].upper()
+        self.assertEqual(apdu, "80F22000024F0000")
+
     def test_pagination_increments_pages(self) -> None:
         mgr = _make_manager()
         responses = iter([
@@ -173,6 +189,19 @@ class GetRegistryDataTests(unittest.TestCase):
         self.assertEqual(result["count"], 1)
         self.assertEqual(result["entries"][0]["aid"], "F000000001")
         self.assertEqual(result["entries"][0]["state"], "OP_READY")
+
+    def test_fcp_template_is_not_parsed_as_compact_registry(self) -> None:
+        raw = bytes.fromhex(
+            "62298202782183023F00A50C800171830400051DE08701018A01058B032F0601"
+            "C60990014083010183010A"
+        )
+        mgr = _make_manager(transmit_return=(raw, 0x90, 0x00))
+
+        result = mgr.get_registry_data("APPS")
+
+        self.assertEqual(result["status"], "9000")
+        self.assertEqual(result["count"], 0)
+        self.assertEqual(result["entries"], [])
 
     def test_compact_registry_ignores_e3_inside_aid(self) -> None:
         raw = bytes.fromhex(

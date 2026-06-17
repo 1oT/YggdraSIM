@@ -101,7 +101,6 @@ class HelpMenu :
 
         print (f"\n{Config.Colors.CYAN}[ System & Developer ]{Config.Colors.ENDC}")
         print ("  GUIDE [Topic]  : Show documentation (Topics: GP, ETSI, GSMA, INSTALL, SECURITY, OTA, CONFIG, SAIP, SUCI, CLI).")
-        print ("  DECODE         : <Hex> - Parse and decode a raw BER-TLV string.")
         print ("  RUN / SCRIPT   : <File> [Out.yaml] - Execute a batch script of APDU commands.")
         print ("  EXPORT-KEYBAG  : [Path.keys.json] [Label] - Dump active SCP03 session keys for HIL offline replay.")
         print ("  DEBUG/VERBOSE  : Toggle raw APDU hex transmission logging.")

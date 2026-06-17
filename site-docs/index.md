@@ -123,8 +123,8 @@ exercised without switching projects.
 | `main/` | Unified launcher, path setup, and in-process dispatch | [Architecture](architecture.md) |
 | `SCP03/` | GlobalPlatform admin shell, filesystem work, retrieval | [SCP03 Admin Shell](subsystems/scp03.md) |
 | `SCP80/` | OTA packet build, wrap, transport, and decode | [SCP80 OTA Shell](subsystems/scp80.md) |
-| `SCP11/live/` | Live relay shell for LPAd, IPAd, and IPAe | [SCP11 Live Relay](subsystems/scp11-live.md) |
-| `SCP11/test/` | Test relay shell with lab-default trust | [SCP11 Test Relay](subsystems/scp11-test.md) |
+| `SCP11/live/` | eSIM management relay shell for LPAd, IPAd, and IPAe | [SCP11 eSIM Management Relay](subsystems/scp11-live.md) |
+| `SCP11/test/` | Compatibility namespace for older imports | [SCP11 Test Compatibility Namespace](subsystems/scp11-test.md) |
 | `SCP11/local_access/` | Direct local `ISD-R` shell | [SCP11 Local Access](subsystems/scp11-local-access.md) |
 | `SCP11/eim_local/` | SGP.32 eIM-local package and polling shell | [SCP11 eIM Local](subsystems/scp11-eim-local.md) |
 | `SIMCARD/` | Simulated UICC / eUICC backend (ETSI / GP / SCP03 / SCP80 / Toolkit / 5G AKA / AKMA / SUCI / `GET IDENTITY`) | [SIMCARD Simulator](subsystems/simcard-simulator.md) |

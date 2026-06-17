@@ -52,10 +52,8 @@ from SCP80.cli import OtaShell
 class DummyConfig:
     def __init__(self, transport: str = "print"):
         self.transport = transport
-        self.data = {
-            "transport": transport,
-            "counter": "1",
-        }
+        self.data = dict(scp80_cli.ConfigManager.DEFAULTS)
+        self.data["transport"] = transport
         self.set_calls: list[tuple[str, str]] = []
         self.save_calls = 0
 
@@ -67,6 +65,8 @@ class DummyConfig:
     def set(self, key: str, value: str) -> None:
         if key == "bad":
             raise ValueError("bad value")
+        if key not in self.data:
+            raise ValueError(f"Unknown SCP80 config key: {key}.")
         self.set_calls.append((key, value))
         self.data[key] = value
 
@@ -307,6 +307,48 @@ class OtaShellTests(unittest.TestCase):
 
         self.assertEqual(decode_calls, [])
 
+    def test_smart_decoder_skips_proactive_pending_inner_apdu_response(self) -> None:
+        decoder = scp80_cli.SmartDecoder.__new__(scp80_cli.SmartDecoder)
+        decoder.fid_lookup = {"6F07": "EF_IMSI"}
+        decode_calls: list[tuple[str, str]] = []
+        content_decoder = SimpleNamespace(
+            decode=lambda fid, payload: decode_calls.append((fid, payload)) or "decoded"
+        )
+        por_info = {
+            "valid": True,
+            "status_code": "00",
+            "command_count": 1,
+            "command_response": "912D",
+            "command_sw": "912D",
+            "fetch_sw": "912D",
+        }
+
+        with patch.object(scp80_cli, "SCP03_AVAIL", True):
+            with patch.object(scp80_cli, "ContentDecoder", content_decoder, create=True):
+                with redirect_stdout(io.StringIO()):
+                    decoder.try_decode("6F07", 9, "D02B810301130082028183050086028001", por_info)
+
+        self.assertEqual(decode_calls, [])
+
+    def test_smart_decoder_skips_raw_proactive_fetch_body_without_por_decode(self) -> None:
+        decoder = scp80_cli.SmartDecoder.__new__(scp80_cli.SmartDecoder)
+        decoder.fid_lookup = {"6F07": "EF_IMSI"}
+        decode_calls: list[tuple[str, str]] = []
+        content_decoder = SimpleNamespace(
+            decode=lambda fid, payload: decode_calls.append((fid, payload)) or "decoded"
+        )
+        fetch_body = (
+            "D02B8103011300820281830500860280018B1A410005811250F341F610"
+            "027100000B0AB0001000000000000009"
+        )
+
+        with patch.object(scp80_cli, "SCP03_AVAIL", True):
+            with patch.object(scp80_cli, "ContentDecoder", content_decoder, create=True):
+                with redirect_stdout(io.StringIO()):
+                    decoder.try_decode("6F07", 9, fetch_body, None)
+
+        self.assertEqual(decode_calls, [])
+
     def test_smart_decoder_uses_successful_command_response_payload(self) -> None:
         decoder = scp80_cli.SmartDecoder.__new__(scp80_cli.SmartDecoder)
         decoder.fid_lookup = {"2FE2": "EF_ICCID"}
@@ -351,6 +393,22 @@ class OtaShellTests(unittest.TestCase):
         self.assertEqual(shell.config.save_calls, 1)
         self.assertIn("cntr updated", buffer.getvalue())
 
+    def test_do_set_aliases_identifier_names_to_indicator_slots(self) -> None:
+        shell = self._make_shell()
+        buffer = io.StringIO()
+
+        with redirect_stdout(buffer):
+            shell.do_set("kic_identifier", "32")
+            shell.do_set("kid_identifier", "32")
+
+        self.assertEqual(
+            shell.config.set_calls,
+            [("kic_indicator", "32"), ("kid_indicator", "32")],
+        )
+        self.assertEqual(shell.config.save_calls, 2)
+        self.assertIn("kic_indicator updated", buffer.getvalue())
+        self.assertIn("kid_indicator updated", buffer.getvalue())
+
     def test_do_set_uses_all_value_tokens(self) -> None:
         shell = self._make_shell()
         buffer = io.StringIO()
@@ -369,6 +427,18 @@ class OtaShellTests(unittest.TestCase):
             shell.do_set("bad", "value")
 
         self.assertIn("bad value", buffer.getvalue())
+        self.assertEqual(shell.config.save_calls, 0)
+
+    def test_do_set_reports_unknown_keys_without_saving(self) -> None:
+        shell = self._make_shell()
+        buffer = io.StringIO()
+
+        with redirect_stdout(buffer):
+            shell.do_set("kic_identifer", "32")
+
+        self.assertIn("Unknown SCP80 config key: kic_identifer", buffer.getvalue())
+        self.assertEqual(shell.config.set_calls, [])
+        self.assertEqual(shell.config.save_calls, 0)
 
     def test_do_iccid_sanitizes_digits_before_binding_profile(self) -> None:
         shell = self._make_shell()

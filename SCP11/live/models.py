@@ -27,6 +27,7 @@ BACKEND_MODE_REMOTE_DP = "remote_dp"
 BACKEND_MODE_LOCAL_SGP26 = "local_sgp26"
 
 EIM_TRANSPORT_MODE_ESIPA = "esipa_direct"
+EIM_TRANSPORT_MODE_REST_RESOURCE = "rest_resource"
 
 
 @dataclass

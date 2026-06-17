@@ -104,11 +104,30 @@ git_agent.log
 .cursor-tmux.log
 .tuak_kat_sanity.py
 
-# Agent probe Python scratch scripts
+# Local assistant/editor scratch and settings
 .smoke_*.py
+.agents/
+.codex/
+.claude/
+.claudeignore
 .cursorrules
 .cursorignore
 .cursor/
+.aider*
+.continue/
+.gemini/
+.windsurf/
+.windsurfrules
+
+# Local assistant/editor markdown
+CLAUDE.md
+CLAUDE.*.md
+GEMINI.md
+GEMINI.*.md
+AGENTS.local.md
+AGENTS.private.md
+AGENTS.override.md
+AGENTS.*.local.md
 
 # Build-flavor stamp written by yggdrasim_main.spec at PyInstaller time
 yggdrasim_common/_build_flavor.py
@@ -177,18 +196,39 @@ yggdrasim_common/gui_server/
 tests/test_gui_*.py
 
 # --- Internal planning / audit / handoff docs ----------------------------
-# Per .cursor/rules/no-internal-roadmap-leaks.mdc: roadmap, release-audit,
-# feature-plan, review and dated handoff / live-run reports are local-only
-# and never tracked. Keep authoring drafts on disk if you like; do not
-# commit them.
+# Roadmap, release-audit, feature-plan, scoping, review, dated handoff and
+# live-run report drafts are local-only and never tracked. Keep authoring
+# drafts on disk if you like; do not commit them.
 V1_*.md
 V2_*.md
+*_PLAN.md
+*_plan.md
+*_ROADMAP.md
+*_roadmap.md
+*_SCOPING.md
+*_scoping.md
+*_SCOPE.md
+*_scope.md
+*_DRAFT.md
+*_draft.md
+*_BACKLOG.md
+*_backlog.md
+*_IDEAS.md
+*_ideas.md
+*_NOTES.md
+*_notes.md
 *_REVIEW.md
+*_review.md
 *_AUDIT.md
+*_audit.md
 *_HANDOFF.md
 *_handoff_*.md
+*_hand_off.md
+*_HAND_OFF.md
 *_RELEASE_NOTES.md
+*_release_notes.md
 *_PATCHES.md
+*_patches.md
 NEW_FEATURE_IDEAS.md
 UPSTREAM_DEPENDENCY_NOTES.md
 

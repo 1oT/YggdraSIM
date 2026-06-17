@@ -95,7 +95,6 @@ class _Scp03ShellExportKeybagTests(unittest.TestCase):
             _set_defaults=lambda *args, **kwargs: None,
             do_manage_binds=lambda *args, **kwargs: None,
             _toggle_debug=lambda *args, **kwargs: None,
-            _handle_decode=lambda *args, **kwargs: None,
             _handle_export_euicc=lambda *args, **kwargs: None,
             _handle_set_gold_profile=lambda *args, **kwargs: None,
             _handle_show_gold_profile=lambda *args, **kwargs: None,
@@ -111,8 +110,10 @@ class _Scp03ShellExportKeybagTests(unittest.TestCase):
             gp_ctrl=SimpleNamespace(set_status=lambda *a, **k: None, delete_object=lambda *a, **k: None),
         ))
         self.assertIn("EXPORT-KEYBAG", command_map)
+        self.assertNotIn("DECODE", command_map)
         _required, optional = CommandRegistry.get_arg_requirements()
         self.assertIn("EXPORT-KEYBAG", optional)
+        self.assertNotIn("DECODE", _required)
 
     def test_handler_refuses_when_session_missing(self) -> None:
         shell = self._make_shell(transport=None)

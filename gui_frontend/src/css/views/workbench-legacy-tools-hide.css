@@ -1,0 +1,5 @@
+/* Hide the legacy inline tools row when a ribbon is also present. */
+.cc-wb-session .cc-wb-session-tools {
+  display: none;
+}
+

@@ -128,6 +128,46 @@ class ApduRecorderUnitTests(unittest.TestCase):
 
         asyncio.run(_run())
 
+    def test_attach_queue_prunes_closed_event_loop(self) -> None:
+        recorder = self.mod._ApduRecorder(max_buffer=2, max_async_queues=4)
+        loop = asyncio.new_event_loop()
+
+        async def _make_queue() -> asyncio.Queue:
+            return asyncio.Queue(maxsize=1)
+
+        queue = loop.run_until_complete(_make_queue())
+        recorder.attach_queue(queue, loop=loop)
+        self.assertEqual(len(recorder._async_queues), 1)
+        loop.close()
+
+        recorder.record(self._make_exchange(apdu="C0DE"))
+        self.assertEqual(recorder.async_queue_count, 0)
+        self.assertGreaterEqual(recorder.dropped, 1)
+
+    def test_attach_queue_caps_registered_consumers(self) -> None:
+        recorder = self.mod._ApduRecorder(max_buffer=2, max_async_queues=2)
+        loops: list[asyncio.AbstractEventLoop] = []
+        detaches: list[Any] = []
+
+        async def _make_queue() -> asyncio.Queue:
+            return asyncio.Queue(maxsize=1)
+
+        try:
+            for _ in range(3):
+                loop = asyncio.new_event_loop()
+                loops.append(loop)
+                queue = loop.run_until_complete(_make_queue())
+                detaches.append(recorder.attach_queue(queue, loop=loop))
+
+            self.assertEqual(recorder.async_queue_count, 2)
+            self.assertEqual(len(recorder._async_queues), 2)
+            self.assertGreaterEqual(recorder.dropped, 1)
+        finally:
+            for detach in detaches:
+                detach()
+            for loop in loops:
+                loop.close()
+
 
 # ----------------------------------------------------------------------
 # Connection wrapper
@@ -334,7 +374,19 @@ class FrontendApduStreamContract(unittest.TestCase):
     def test_reconnect_with_exponential_backoff(self) -> None:
         # Bounded back-off so a missing GUI server doesn't pin the CPU.
         self.assertIn("Math.min(nextDelay * 2, 30000)", self.js)
-        self.assertIn("setTimeout(openApduEventStream, nextDelay)", self.js)
+        self.assertIn("apduStreamState.reconnectTimerId = setTimeout", self.js)
+        self.assertIn("clearApduReconnectTimer();", self.js)
+
+    def test_shutdown_paths_close_stream_and_timer(self) -> None:
+        self.assertIn(
+            'window.addEventListener("pagehide", closeApduEventStream)',
+            self.js,
+        )
+        self.assertIn(
+            'window.addEventListener("beforeunload", closeApduEventStream)',
+            self.js,
+        )
+        self.assertIn("detachApduSocketHandlers(sock)", self.js)
 
     def test_ping_frames_are_silently_ignored(self) -> None:
         self.assertIn('frame.event === "ping"', self.js)
@@ -366,6 +418,9 @@ class BackendRouteRegistration(unittest.TestCase):
         self.assertIn("compare_tokens", rt)
         # Replays the buffer first so a fresh tab isn't blank.
         self.assertIn("recorder.snapshot(limit=200)", rt)
+        self.assertIn("asyncio.wait_for(", rt)
+        self.assertIn("_QUEUE_CAP = 256", rt)
+        self.assertNotIn("asyncio.create_task(_pump_heartbeat", rt)
 
 
 if __name__ == "__main__":

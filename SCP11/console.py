@@ -20,12 +20,10 @@
 """Canonical SCP11 console shell.
 
 This is the ``canonical`` SCP11 console/CLI entry point for YggdraSIM v1.
-``SCP11/live/console.py`` and ``SCP11/test/console.py`` are ``legacy
-mirrors`` that add variant-specific defaults (live vs. test certificates and
-endpoints) on top of the same dispatcher shape. Audit item ``SCP11-P1-02``
-tracks splitting this module into ``console_cli``, ``console_tls_probe``,
-and ``console_state`` post v1; until then, prefer changes here first and
-mirror the behaviour into the sibling variants.
+``SCP11/live/console.py`` carries the relay console used by both the live
+entrypoint and the ``SCP11.test`` compatibility path. Audit item
+``SCP11-P1-02`` tracks splitting this module into ``console_cli``,
+``console_tls_probe``, and ``console_state`` post v1.
 """
 
 import atexit

@@ -1,8 +1,8 @@
 """Coverage for SCP11/shared/profile_actions.py.
 
 The shared helpers underpin the harmonised ENABLE / DISABLE / DELETE
-contract used by all four SCP11 shells (eSIM Live, eSIM Test, Local
-SMDP+, Local eIM). The tests below pin down the auto-disable
+contract used by the SCP11 shells (eSIM Management, Local SMDP+, Local
+eIM). The tests below pin down the auto-disable
 sequencing, idempotency short-circuits, and PPR1 guard so we don't
 regress the cross-shell behaviour an operator now relies on.
 

@@ -35,7 +35,6 @@ flowchart LR
     Launcher --> SCP03["SCP03<br/>admin shell"]
     Launcher --> SCP80["SCP80<br/>OTA shell"]
     Launcher --> Live["SCP11.live"]
-    Launcher --> Test["SCP11.test"]
     Launcher --> Local["SCP11.local_access"]
     Launcher --> EimLocal["SCP11.eim_local"]
     Launcher --> ProfileTool["Tools.ProfilePackage"]
@@ -154,8 +153,7 @@ The table below shows the operational dependency shape of each major subsystem.
 |-----------|----------|-------|---------|----------|------------------|--------------------------|-------|
 | `SCP03` | Primary | Primary | No | Optional | Primary | Primary | GlobalPlatform admin shell and filesystem tools |
 | `SCP80` | Primary | Optional | Optional | No | Primary | Primary | OTA builder / send / decode shell |
-| `SCP11.live` | Primary | Primary | Primary | Primary | Primary | Primary | Live relay-oriented shell; plugin-backed `POLL` surface |
-| `SCP11.test` | Primary | Primary | Primary | Primary | Primary | Primary | Test relay shell; plugin-backed `POLL` surface |
+| `SCP11.live` | Primary | Primary | Primary | Primary | Primary | Primary | eSIM management relay shell; plugin-backed `POLL` surface |
 | `SCP11.relay` | Optional | Optional | Primary | Primary | Optional | Optional | Compatibility namespace |
 | `SCP11.local_access` | Primary | Primary | No | Primary | Primary | Primary | Direct `ISD-R` local flow |
 | `SCP11.eim_local` | Primary | Primary | Primary | Primary | Primary | Primary | eIM-local package, localized polling, handover shell, and standalone `IPAd` export |
@@ -175,7 +173,6 @@ flowchart LR
     Main["main/main.py"] --> SCP03["SCP03"]
     Main --> SCP80["SCP80"]
     Main --> Live["SCP11.live"]
-    Main --> Test["SCP11.test"]
     Main --> Relay["SCP11.relay"]
     Main --> Local["SCP11.local_access"]
     Main --> EimLocal["SCP11.eim_local"]
@@ -232,7 +229,6 @@ Direct module entry points:
 - `python -m SCP80`
 - `python -m SCP11`
 - `python -m SCP11.live`
-- `python -m SCP11.test`
 - `python -m SCP11.relay`
 - `python -m SCP11.local_access`
 - `python -m SCP11.eim_local`
@@ -376,10 +372,10 @@ flowchart TB
     Shared --> Transport
 ```
 
-Relay flavors:
+Relay surfaces:
 
-- `SCP11.live` is the production-oriented relay shell.
-- `SCP11.test` mirrors the live shell with test-certificate defaults.
+- `SCP11.live` is the eSIM management relay shell.
+- `SCP11.test` is an import compatibility namespace, not a launcher surface.
 - `SCP11.relay` is mainly a compatibility namespace.
 
 Local flavors:
@@ -410,12 +406,10 @@ Optional plugin extension path:
 ```mermaid
 flowchart LR
     Live["SCP11.live"] --> PluginRuntime["yggdrasim_common/plugin_runtime.py"]
-    Test["SCP11.test"] --> PluginRuntime
     EimLocal["SCP11.eim_local"] --> PluginRuntime
     PluginRuntime --> Plugins["plugins/"]
     Plugins --> Polling["polling capability"]
     Polling --> Live
-    Polling --> Test
     Polling --> EimLocal
 ```
 
@@ -423,7 +417,7 @@ Plugin notes:
 
 - `yggdrasim_common/plugin_runtime.py` scans `plugins/` from the active runtime root
 - the current shipped contract reserves the `polling` capability name
-- `SCP11.live` and `SCP11.test` use that capability to expose relay `POLL`
+- `SCP11.live` uses that capability to expose relay `POLL`
 - `SCP11.eim_local` uses the same capability for localized `IPAE-*` polling
 - `SCP11.eim_local/ipad_standalone.py` is intentionally separate from the
   plugin runtime so it can be exported into external Python environments

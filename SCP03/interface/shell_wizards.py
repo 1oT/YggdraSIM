@@ -56,6 +56,45 @@ class ShellInteractiveWizards :
             return False 
         return ShellInteractiveWizards ._is_hex_string (cleaned )
 
+    @staticmethod
+    def _normalize_pin_encoding_choice (value :str )->str :
+        text =str (value or "").strip ().lower ()
+        if text .startswith ("--"):
+            text =text [2 :]
+        if len (text )==0 :
+            return "ascii"
+        if text in ("1","a","ascii","text"):
+            return "ascii"
+        if text in ("2","h","hex","binary","bin","raw"):
+            return "hex"
+        raise ValueError ("PIN encoding must be ASCII or HEX/BINARY.")
+
+    @staticmethod
+    def _consume_pin_encoding_args (parts :list [str ])->tuple [str ,list [str ]]:
+        remaining =list (parts )
+        if len (remaining )==0 :
+            return "ascii",remaining
+
+        token =remaining [0 ].strip ().lower ()
+        if token in ("--encoding","--enc","encoding","enc"):
+            if len (remaining )<2 :
+                raise ValueError ("PIN encoding flag requires ASCII or HEX/BINARY.")
+            return ShellInteractiveWizards ._normalize_pin_encoding_choice (remaining [1 ]),remaining [2 :]
+
+        prefixed =False
+        if token .startswith ("--"):
+            prefixed =True
+        if prefixed :
+            candidate =token [2 :]
+            if candidate in ("a","ascii","text","h","hex","binary","bin","raw"):
+                return ShellInteractiveWizards ._normalize_pin_encoding_choice (candidate ),remaining [1 :]
+            return "ascii",remaining
+
+        if token in ("a","ascii","text","h","hex","binary","bin","raw"):
+            return ShellInteractiveWizards ._normalize_pin_encoding_choice (token ),remaining [1 :]
+
+        return "ascii",remaining
+
     @staticmethod 
     def run_put_key_wizard (shell )->None :
         """Run the interactive PUT KEY wizard: prompts for key version, algorithm, and key material."""
@@ -95,7 +134,7 @@ class ShellInteractiveWizards :
 
         if is_exec ==False :
             print ("[-] Execution aborted by user.")
-            return 
+            return
 
         action =res .get ("action")
         is_one =False 
@@ -118,7 +157,7 @@ class ShellInteractiveWizards :
                 is_skip =True 
             if is_skip :
                 print ("[-] Key ID required for Add. Aborting.")
-                return 
+                return
             key_id =int (kid_input ,16 )
 
         if is_two :
@@ -149,7 +188,7 @@ class ShellInteractiveWizards :
 
             if is_still_missing :
                 print ("[-] Error: Current KVN unknown. Aborting.")
-                return 
+                return
 
             old_kvn =int (str (kvn_val ),16 )
             print (f"[*] Sourced current KVN: {old_kvn:02X}")
@@ -161,7 +200,7 @@ class ShellInteractiveWizards :
                 is_okvn_skip =True 
             if is_okvn_skip :
                 print ("[-] Old KVN required for Replace. Aborting.")
-                return 
+                return
             old_kvn =int (okvn_input ,16 )
 
             okid_input =res .get ("okid")
@@ -170,7 +209,7 @@ class ShellInteractiveWizards :
                 is_okid_skip =True 
             if is_okid_skip :
                 print ("[-] Key ID required for Replace. Aborting.")
-                return 
+                return
             key_id =int (okid_input ,16 )
 
         nkvn_input =res .get ("nkvn")
@@ -179,7 +218,7 @@ class ShellInteractiveWizards :
             is_nkvn_empty =True 
         if is_nkvn_empty :
             print ("[-] New KVN required. Aborting.")
-            return 
+            return
         new_kvn =int (nkvn_input ,16 )
 
         enc =res .get ("enc").replace (" ","")
@@ -268,10 +307,15 @@ class ShellInteractiveWizards :
         if has_args :
             parts =arg_str .strip ().split ()
             action =parts [0 ].lower ()
+            try :
+                pin_encoding ,pin_args =ShellInteractiveWizards ._consume_pin_encoding_args (parts [1 :])
+            except ValueError as error :
+                print (f"{Config.Colors.FAIL}[!] {error}{Config.Colors.ENDC}")
+                return
 
             pin_id ="01"
-            if len (parts )>1 :
-                pin_id =parts [1 ].upper ()
+            if len (pin_args )>0 :
+                pin_id =pin_args [0 ].upper ()
 
             print ("\n[*] Executing PIN Command via Macro...")
 
@@ -281,10 +325,10 @@ class ShellInteractiveWizards :
 
             if is_verify :
                 pin =""
-                if len (parts )>2 :
-                    pin =parts [2 ]
-                shell .sec_ctrl .verify_pin (pin_id ,pin )
-                return 
+                if len (pin_args )>1 :
+                    pin =pin_args [1 ]
+                shell .sec_ctrl .verify_pin (pin_id ,pin ,pin_encoding )
+                return
 
             is_change =False 
             if action =="change":
@@ -293,12 +337,12 @@ class ShellInteractiveWizards :
             if is_change :
                 curr =""
                 new_pin =""
-                if len (parts )>2 :
-                    curr =parts [2 ]
-                if len (parts )>3 :
-                    new_pin =parts [3 ]
-                shell .sec_ctrl .change_pin (pin_id ,curr ,new_pin )
-                return 
+                if len (pin_args )>1 :
+                    curr =pin_args [1 ]
+                if len (pin_args )>2 :
+                    new_pin =pin_args [2 ]
+                shell .sec_ctrl .change_pin (pin_id ,curr ,new_pin ,pin_encoding )
+                return
 
             is_disable =False 
             if action =="disable":
@@ -306,10 +350,10 @@ class ShellInteractiveWizards :
 
             if is_disable :
                 curr =""
-                if len (parts )>2 :
-                    curr =parts [2 ]
-                shell .sec_ctrl .disable_pin (pin_id ,curr )
-                return 
+                if len (pin_args )>1 :
+                    curr =pin_args [1 ]
+                shell .sec_ctrl .disable_pin (pin_id ,curr ,pin_encoding )
+                return
 
             is_enable =False 
             if action =="enable":
@@ -317,10 +361,10 @@ class ShellInteractiveWizards :
 
             if is_enable :
                 curr =""
-                if len (parts )>2 :
-                    curr =parts [2 ]
-                shell .sec_ctrl .enable_pin (pin_id ,curr )
-                return 
+                if len (pin_args )>1 :
+                    curr =pin_args [1 ]
+                shell .sec_ctrl .enable_pin (pin_id ,curr ,pin_encoding )
+                return
 
             is_unblock =False 
             if action =="unblock":
@@ -329,19 +373,20 @@ class ShellInteractiveWizards :
             if is_unblock :
                 puk =""
                 new_pin =""
-                if len (parts )>2 :
-                    puk =parts [2 ]
-                if len (parts )>3 :
-                    new_pin =parts [3 ]
-                shell .sec_ctrl .unblock_pin (pin_id ,puk ,new_pin )
-                return 
+                if len (pin_args )>1 :
+                    puk =pin_args [1 ]
+                if len (pin_args )>2 :
+                    new_pin =pin_args [2 ]
+                shell .sec_ctrl .unblock_pin (pin_id ,puk ,new_pin ,pin_encoding )
+                return
 
             print ("[-] Unknown action for MANAGE-PIN macro.")
-            return 
+            return
 
         wiz =InteractiveWizard ("GP PIN Management Command",Config .Colors )
         wiz .add_step ("action","Action [1=Verify, 2=Change, 3=Disable, 4=Enable, 5=Unblock]:",default ="1")
-        wiz .add_step ("pin_id","PIN ID [Hex, Default: 01]:",default ="01")
+        wiz .add_step ("pin_id","PIN ID [Hex/name, Default: 01]:",default ="01")
+        wiz .add_step ("pin_encoding","PIN Data Encoding [1=ASCII, 2=HEX/BINARY]:",default ="1")
 
         def curr_cond (res ):
             action =res .get ("action")
@@ -350,7 +395,7 @@ class ShellInteractiveWizards :
                 is_unblock =True 
             return not is_unblock 
 
-        wiz .add_step ("curr","Enter PIN [ASCII]:",default ="SKIP",condition =curr_cond )
+        wiz .add_step ("curr","Enter PIN / key data:",default ="SKIP",condition =curr_cond )
 
         def new_cond (res ):
             """Return a MANAGE PROFILE condition predicate bound to *target_state*."""
@@ -362,7 +407,7 @@ class ShellInteractiveWizards :
                 is_change_or_unblock =True 
             return is_change_or_unblock 
 
-        wiz .add_step ("new","New PIN [ASCII]:",default ="SKIP",condition =new_cond )
+        wiz .add_step ("new","New PIN / key data:",default ="SKIP",condition =new_cond )
 
         def puk_cond (res ):
             action =res .get ("action")
@@ -371,7 +416,7 @@ class ShellInteractiveWizards :
                 is_unblock =True 
             return is_unblock 
 
-        wiz .add_step ("puk","PUK [ASCII]:",default ="SKIP",condition =puk_cond )
+        wiz .add_step ("puk","PUK / unblock key data:",default ="SKIP",condition =puk_cond )
 
         res =wiz .run ()
         choice =res .get ("action")
@@ -393,6 +438,11 @@ class ShellInteractiveWizards :
             is_five =True 
 
         pin_id =res .get ("pin_id").upper ()
+        try :
+            pin_encoding =ShellInteractiveWizards ._normalize_pin_encoding_choice (res .get ("pin_encoding"))
+        except ValueError as error :
+            print (f"{Config.Colors.FAIL}[!] {error}{Config.Colors.ENDC}")
+            return
 
         curr =res .get ("curr")
         is_curr_skip =False 
@@ -417,15 +467,15 @@ class ShellInteractiveWizards :
 
         print ("\n[*] Executing PIN Command...")
         if is_one :
-            shell .sec_ctrl .verify_pin (pin_id ,curr )
+            shell .sec_ctrl .verify_pin (pin_id ,curr ,pin_encoding )
         if is_two :
-            shell .sec_ctrl .change_pin (pin_id ,curr ,new_pin )
+            shell .sec_ctrl .change_pin (pin_id ,curr ,new_pin ,pin_encoding )
         if is_three :
-            shell .sec_ctrl .disable_pin (pin_id ,curr )
+            shell .sec_ctrl .disable_pin (pin_id ,curr ,pin_encoding )
         if is_four :
-            shell .sec_ctrl .enable_pin (pin_id ,curr )
+            shell .sec_ctrl .enable_pin (pin_id ,curr ,pin_encoding )
         if is_five :
-            shell .sec_ctrl .unblock_pin (pin_id ,puk ,new_pin )
+            shell .sec_ctrl .unblock_pin (pin_id ,puk ,new_pin ,pin_encoding )
 
     @staticmethod 
     def run_manage_profile_wizard (shell )->None :
@@ -533,7 +583,7 @@ class ShellInteractiveWizards :
 
             if is_one :
                 shell ._handle_list_profiles ()
-                return 
+                return
 
             is_two =False 
             if action =='2':
@@ -541,35 +591,35 @@ class ShellInteractiveWizards :
 
             if is_two :
                 shell ._handle_profile_scan ()
-                return 
+                return
 
             is_six =False 
             if action =='6':
                 is_six =True 
             if is_six :
                 shell ._handle_get_euicc_configured_data ()
-                return 
+                return
 
             is_seven =False 
             if action =='7':
                 is_seven =True 
             if is_seven :
                 shell ._handle_get_euicc_certs ()
-                return 
+                return
 
             is_eight =False 
             if action =='8':
                 is_eight =True 
             if is_eight :
                 shell ._handle_get_eid ()
-                return 
+                return
 
             is_nine =False 
             if action =='9':
                 is_nine =True 
             if is_nine :
                 shell ._handle_read_metadata ("SGP.22")
-                return 
+                return
 
             is_three =False 
             if action =='3':
@@ -596,7 +646,7 @@ class ShellInteractiveWizards :
 
                 if is_skip :
                     print ("[-] Target required. Aborting.")
-                    return 
+                    return
 
                 if is_three :
                     r =shell ._handle_enable_profile (target )
@@ -626,28 +676,28 @@ class ShellInteractiveWizards :
                 is_one =True 
             if is_one :
                 shell ._handle_list_profiles ()
-                return 
+                return
 
             is_two =False 
             if action =='2':
                 is_two =True 
             if is_two :
                 shell ._handle_profile_scan ()
-                return 
+                return
 
             is_six =False 
             if action =='6':
                 is_six =True 
             if is_six :
                 shell ._handle_get_sgp32_all_data ()
-                return 
+                return
 
             is_seven =False 
             if action =='7':
                 is_seven =True 
             if is_seven :
                 shell ._handle_read_metadata ("SGP.32")
-                return 
+                return
 
             is_three =False 
             if action =='3':
@@ -674,7 +724,7 @@ class ShellInteractiveWizards :
 
                 if is_skip :
                     print ("[-] Target required. Aborting.")
-                    return 
+                    return
 
                 if is_three :
                     r =shell ._handle_enable_profile (target )
@@ -851,28 +901,28 @@ class ShellInteractiveWizards :
             is_one =True 
         if is_one :
             shell .gp_ctrl .list_registry ('APPS')
-            return 
+            return
 
         is_two =False 
         if choice =='2':
             is_two =True 
         if is_two :
             shell .gp_ctrl .list_registry ('PACKAGES')
-            return 
+            return
 
         is_three =False 
         if choice =='3':
             is_three =True 
         if is_three :
             shell .gp_ctrl .list_registry ('SD')
-            return 
+            return
 
         is_four =False 
         if choice =='4':
             is_four =True 
         if is_four :
             shell .gp_ctrl .get_cplc ()
-            return 
+            return
 
         is_five =False 
         if choice =='5':
@@ -905,7 +955,7 @@ class ShellInteractiveWizards :
 
         if is_exec ==False :
             print ("[-] Execution aborted by user.")
-            return 
+            return
 
         target_choice =res .get ("target")
         p1 ="00"
@@ -996,7 +1046,7 @@ class ShellInteractiveWizards :
 
         if is_ctrl_missing :
             print ("[-] Error: No active transport controller found.")
-            return 
+            return
 
         print ("[*] Transmitting APDU...")
         r ,sw1 ,sw2 =active_ctrl .transmit (apdu )
@@ -1072,7 +1122,7 @@ class ShellInteractiveWizards :
 
         if is_ctrl_missing :
             print ("[-] Error: No active transport controller found.")
-            return 
+            return
 
         print ("[*] Transmitting APDU...")
         r ,sw1 ,sw2 =active_ctrl .transmit (apdu )
@@ -1198,7 +1248,7 @@ class ShellInteractiveWizards :
                 dest =""
 
             shell .do_dump_fs (dest )
-            return 
+            return
 
         is_two =False 
         if choice =='2':
@@ -1218,7 +1268,7 @@ class ShellInteractiveWizards :
 
             shell .fs_ctrl .dump_fs_to_yaml (filename )
             print (f"[+] Full file system report saved to {filename}")
-            return 
+            return
 
         is_three =False 
         if choice =='3':
@@ -1249,7 +1299,7 @@ class ShellInteractiveWizards :
                 standard ="SGP.02"
 
             shell ._handle_export_euicc (filename ,standard =standard )
-            return 
+            return
 
         is_four =False 
         if choice =='4':
@@ -1606,7 +1656,7 @@ class ShellInteractiveWizards :
             is_error =True 
 
         if is_error :
-            return 
+            return
 
         target_fid_only =""
         has_target =False 
@@ -1623,7 +1673,7 @@ class ShellInteractiveWizards :
             is_target_fid_valid =ShellInteractiveWizards ._is_fid_hex (target_fid_only )
             if is_target_fid_valid ==False :
                 print ("[-] Invalid target FID/path. Expected hexadecimal FID/path.")
-                return 
+                return
 
         is_one =False 
         if choice =='1':
@@ -1665,12 +1715,12 @@ class ShellInteractiveWizards :
                 is_search_skip =True 
             if is_search_skip :
                 print ("[-] Search value required for SEARCH.")
-                return 
+                return
             search_clean =search .replace (" ","").upper ()
             is_search_hex =ShellInteractiveWizards ._is_hex_string (search_clean )
             if is_search_hex ==False :
                 print ("[-] Search value must be valid even-length hex.")
-                return 
+                return
             search =search_clean 
             shell .fs_ctrl .search_record (search )
 
@@ -1702,11 +1752,11 @@ class ShellInteractiveWizards :
                     is_data_skip =True 
                 if is_data_skip :
                     print ("[-] Raw FCP is required for CREATE mode 1.")
-                    return 
+                    return
                 is_data_hex =ShellInteractiveWizards ._is_hex_string (data_clean )
                 if is_data_hex ==False :
                     print ("[-] Raw FCP must be valid even-length hex.")
-                    return 
+                    return
                 data =data_clean 
                 shell .fs_ctrl .create_file (data )
 
@@ -1855,7 +1905,7 @@ class ShellInteractiveWizards :
                 has_delete_target =True 
             if has_delete_target ==False :
                 print ("[-] DELETE requires a target FID/path.")
-                return 
+                return
             shell .fs_ctrl .delete_file (target )
 
         is_seven =False 
@@ -1868,7 +1918,7 @@ class ShellInteractiveWizards :
                 has_term_df_target =True 
             if has_term_df_target ==False :
                 print ("[-] TERM DF requires a target FID/path.")
-                return 
+                return
             shell .fs_ctrl .terminate_df (target )
 
         is_eight =False 
@@ -1881,7 +1931,7 @@ class ShellInteractiveWizards :
                 has_term_ef_target =True 
             if has_term_ef_target ==False :
                 print ("[-] TERM EF requires a target FID/path.")
-                return 
+                return
             shell .fs_ctrl .terminate_ef (target )
 
         is_nine =False 
@@ -1909,7 +1959,7 @@ class ShellInteractiveWizards :
             is_resize_fid_ok =ShellInteractiveWizards ._is_fid_hex (target_fid )
             if is_resize_fid_ok ==False :
                 print ("[-] Resize requires a valid 2-byte FID (Tag 83).")
-                return 
+                return
 
             tag_83 =f"8302{target_fid}"
 
@@ -1923,7 +1973,7 @@ class ShellInteractiveWizards :
                 is_80_hex =ShellInteractiveWizards ._is_hex_string (new_size_80 )
                 if is_80_hex ==False :
                     print ("[-] Tag 80 size must be valid even-length hex.")
-                    return 
+                    return
                 size_int =int (new_size_80 ,16 )
                 size_hex =f"{size_int:04X}"
                 size_len =len (size_hex )//2 
@@ -1939,7 +1989,7 @@ class ShellInteractiveWizards :
                 is_81_hex =ShellInteractiveWizards ._is_hex_string (new_size_81 )
                 if is_81_hex ==False :
                     print ("[-] Tag 81 size must be valid even-length hex.")
-                    return 
+                    return
                 size_int =int (new_size_81 ,16 )
                 size_hex =f"{size_int:04X}"
                 size_len =len (size_hex )//2 

@@ -93,8 +93,8 @@ The parameter set exposed by `set` covers:
 
 ```text
 [SCP80] > iccid 8946000000000000000F
-[SCP80] > set KIc 15
-[SCP80] > set KID 15
+[SCP80] > set kic_indicator 15
+[SCP80] > set kid_indicator 15
 [SCP80] > set TAR 000000
 [SCP80] > build 00D6000003A0A0A0
 [SCP80] > send

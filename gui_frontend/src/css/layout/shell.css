@@ -1,0 +1,275 @@
+/* Layout shell ----------------------------------------------------------- */
+
+.app-shell {
+  display: grid;
+  grid-template-rows: 52px 1fr var(--log-dock-height, 180px) 28px;
+  grid-template-columns: 260px 1fr;
+  grid-template-areas:
+    "topbar    topbar"
+    "sidebar   main"
+    "sidebar   logdock"
+    "statusbar statusbar";
+  height: 100vh;
+  min-width: 860px;
+}
+
+.app-shell[data-log-collapsed="true"] {
+  grid-template-rows: 52px 1fr 28px 28px;
+}
+
+/* SA-G8: collapsible Command Center sidebar. The 260px column folds
+   away so the main content gets the full width — matches the
+   ``data-log-collapsed`` pattern already used for the log dock. The
+   chevron handle stays in the topbar at all times so the operator
+   can bring the sidebar back without keyboard tricks. */
+.app-shell[data-sidebar-collapsed="true"] {
+  grid-template-columns: 0 1fr;
+}
+
+.app-shell[data-sidebar-collapsed="true"] .sidebar {
+  display: none;
+}
+
+.app-shell[data-sidebar-collapsed="true"] .sidebar-collapse-glyph {
+  transform: rotate(180deg);
+}
+
+/* Collapsible top bar. Mirrors the sidebar/log-dock pattern: the
+   ``.app-shell`` carries the ``data-topbar-collapsed`` flag so the
+   grid row collapses to a slim handle strip. Both the sidebar
+   toggle (left edge) and the topbar toggle (right edge) stay
+   visible so the operator can independently control either panel
+   regardless of which one is currently collapsed — hiding the top
+   bar must NOT also remove the operator's only handle to the
+   sidebar. */
+.app-shell[data-topbar-collapsed="true"] {
+  grid-template-rows: 30px 1fr var(--log-dock-height, 180px) 28px;
+}
+
+.app-shell[data-topbar-collapsed="true"][data-log-collapsed="true"] {
+  grid-template-rows: 30px 1fr 28px 28px;
+}
+
+.app-shell[data-topbar-collapsed="true"] .topbar {
+  padding: 0 6px;
+  gap: 0;
+  justify-content: space-between;
+  min-height: 30px;
+}
+
+.app-shell[data-topbar-collapsed="true"] .topbar
+  > *:not(.topbar-collapse-toggle):not(.sidebar-collapse-toggle) {
+  display: none;
+}
+
+.app-shell[data-topbar-collapsed="true"] .topbar::after {
+  display: none;
+}
+
+.app-shell[data-topbar-collapsed="true"] .topbar-collapse-glyph {
+  transform: rotate(180deg);
+}
+
+/* When the sidebar is collapsed independently, also drop its column
+   to zero — but the sidebar toggle (always rendered in the topbar)
+   stays clickable so the operator can bring it back. */
+.app-shell[data-sidebar-collapsed="true"][data-topbar-collapsed="true"]
+  .sidebar-collapse-toggle {
+  margin-right: 0;
+}
+
+.topbar-collapse-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 22px;
+  margin-left: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm, 6px);
+  background: transparent;
+  color: var(--fg-muted, #888);
+  cursor: pointer;
+  transition: background-color var(--transition-fast),
+    color var(--transition-fast),
+    border-color var(--transition-fast);
+}
+
+.topbar-collapse-toggle:hover {
+  background: var(--surface-hover, rgba(255, 255, 255, 0.05));
+  color: var(--fg);
+  border-color: var(--accent-soft);
+}
+
+.topbar-collapse-toggle:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.topbar-collapse-glyph {
+  font-size: 10px;
+  line-height: 1;
+  transition: transform var(--transition-fast);
+  display: inline-block;
+}
+
+.sidebar-collapse-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  margin-right: 4px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm, 6px);
+  background: transparent;
+  color: var(--fg-muted, #888);
+  cursor: pointer;
+  transition: background-color var(--transition-fast),
+    color var(--transition-fast),
+    border-color var(--transition-fast);
+}
+
+.sidebar-collapse-toggle:hover {
+  background: var(--surface-hover, rgba(255, 255, 255, 0.05));
+  color: var(--fg);
+  border-color: var(--accent-soft);
+}
+
+.sidebar-collapse-toggle:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.sidebar-collapse-glyph {
+  font-size: 12px;
+  line-height: 1;
+  transition: transform var(--transition-fast);
+  display: inline-block;
+}
+
+.topbar {
+  grid-area: topbar;
+  position: relative;
+  background: var(--topbar-bg);
+  backdrop-filter: saturate(180%) blur(14px);
+  -webkit-backdrop-filter: saturate(180%) blur(14px);
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  padding: 0 20px;
+  z-index: 3;
+}
+
+.topbar::after {
+  content: "";
+  position: absolute;
+  inset: auto 0 -1px 0;
+  height: 1px;
+  background: linear-gradient(90deg,
+    transparent 0%,
+    var(--accent-soft) 50%,
+    transparent 100%);
+  pointer-events: none;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+.brand-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  background: var(--gradient-brand);
+  color: var(--accent-fg);
+  font-weight: 700;
+  border-radius: var(--radius-md);
+  font-size: 12px;
+  letter-spacing: 0.02em;
+  box-shadow: 0 4px 14px -4px var(--accent-glow);
+  transition: transform var(--transition-mid) var(--ease-out-bounce),
+    box-shadow var(--transition-mid);
+}
+
+.brand:hover .brand-mark {
+  transform: rotate(-6deg) scale(1.05);
+  box-shadow: 0 6px 18px -4px var(--accent-glow);
+}
+
+.brand-name {
+  font-size: 15px;
+  background: var(--gradient-brand);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.breadcrumbs {
+  flex: 1 1 auto;
+  color: var(--fg-dim);
+  font-size: 13px;
+  letter-spacing: 0.01em;
+}
+
+.breadcrumbs .crumb {
+  padding: 4px 10px;
+  border-radius: var(--radius-pill);
+  background: var(--bg-hover);
+  border: 1px solid var(--border);
+  color: var(--fg);
+  font-weight: 500;
+}
+
+.status-cluster {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: var(--radius-pill);
+  background: var(--bg-elev-2);
+  border: 1px solid var(--border);
+  font-size: 11px;
+  color: var(--fg-dim);
+  text-transform: lowercase;
+  letter-spacing: 0.02em;
+  transition: border-color var(--transition-fast),
+    background-color var(--transition-fast);
+}
+
+.badge:hover {
+  border-color: var(--border-strong);
+}
+
+.badge-api {
+  font-weight: 500;
+  padding-left: 8px;
+}
+
+.badge-api .dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--fg-dim);
+  position: relative;
+}
+
+.badge-api[data-state="ok"] { color: var(--ok); border-color: var(--ok-soft); background: var(--ok-soft); }
+.badge-api[data-state="ok"] .dot { background: var(--ok); box-shadow: 0 0 0 2px var(--ok-soft); }
+.badge-api[data-state="warn"] { color: var(--warn); border-color: var(--warn-soft); background: var(--warn-soft); }
+.badge-api[data-state="warn"] .dot { background: var(--warn); }
+.badge-api[data-state="fail"] { color: var(--fail); border-color: var(--fail-soft); background: var(--fail-soft); }
+.badge-api[data-state="fail"] .dot { background: var(--fail); }

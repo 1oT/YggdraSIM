@@ -57,10 +57,6 @@ def scp11_live() -> int:
     return _invoke("SCP11.live.main", "entry")
 
 
-def scp11_test() -> int:
-    return _invoke("SCP11.test.main", "entry")
-
-
 def scp11_relay() -> int:
     return _invoke("SCP11.relay.main", "entry")
 
@@ -124,3 +120,7 @@ def apdu_fuzzer() -> int:
 
 def eum_diag() -> int:
     return _invoke("Tools.EumDiag.main", "run_cli")
+
+
+def asn1_tlv_decode() -> int:
+    return _invoke("Tools.Asn1TlvDecode.main", "run_cli")

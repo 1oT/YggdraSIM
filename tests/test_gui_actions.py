@@ -1,0 +1,1668 @@
+"""Tests for the Command Center action framework (R2-004 Phase C).
+
+Covers:
+
+* The typed-input coercion helpers (no FastAPI needed).
+* The in-memory session manager (no hardware needed).
+* The four bundled action specs register themselves on import.
+* The HTTP router: catalogue listing, per-action run, streaming gate,
+  auth gate, and unknown-action handling (FastAPI optional — skipped
+  in environments that did not install the ``gui`` extra).
+"""
+
+from __future__ import annotations
+
+import asyncio
+from dataclasses import dataclass
+from types import SimpleNamespace
+
+import pytest
+
+from yggdrasim_common.gui_server import sessions as sessions_module
+from yggdrasim_common.gui_server.actions.registry import (
+    ActionField,
+    ActionRegistry,
+    ActionSpec,
+    coerce_input,
+    coerce_inputs,
+    ensure_builtin_actions_loaded,
+    get_registry,
+)
+
+
+# ----------------------------------------------------------------------
+# Coercion helpers
+# ----------------------------------------------------------------------
+
+
+class TestCoerceInput:
+    def test_string_passthrough(self) -> None:
+        field = ActionField(name="x", label="x")
+        assert coerce_input(field, "hello") == "hello"
+
+    def test_hex_normalises_case_and_strips_whitespace(self) -> None:
+        field = ActionField(name="apdu", label="apdu", kind="hex")
+        assert coerce_input(field, " 80 e2 ab cd ") == "80E2ABCD"
+
+    def test_hex_rejects_odd_length(self) -> None:
+        field = ActionField(name="apdu", label="apdu", kind="hex")
+        with pytest.raises(ValueError):
+            coerce_input(field, "80E")
+
+    def test_hex_rejects_non_hex(self) -> None:
+        field = ActionField(name="apdu", label="apdu", kind="hex")
+        with pytest.raises(ValueError):
+            coerce_input(field, "80ZZ")
+
+    def test_int_accepts_hex_prefix(self) -> None:
+        field = ActionField(name="count", label="count", kind="int")
+        assert coerce_input(field, "0x10") == 16
+
+    def test_int_respects_min(self) -> None:
+        field = ActionField(name="count", label="count", kind="int", min_value=1)
+        with pytest.raises(ValueError):
+            coerce_input(field, "0")
+
+    def test_bool_truthy(self) -> None:
+        field = ActionField(name="flag", label="flag", kind="bool")
+        assert coerce_input(field, "yes") is True
+        assert coerce_input(field, "on") is True
+        assert coerce_input(field, True) is True
+
+    def test_bool_falsy(self) -> None:
+        field = ActionField(name="flag", label="flag", kind="bool")
+        assert coerce_input(field, "no") is False
+        assert coerce_input(field, False) is False
+
+    def test_empty_optional_bool_yields_none(self) -> None:
+        # An optional field with no default and no input becomes None,
+        # before bool coercion even runs.
+        field = ActionField(name="flag", label="flag", kind="bool")
+        assert coerce_input(field, "") is None
+        assert coerce_input(field, None) is None
+
+    def test_empty_optional_bool_with_default_returns_default(self) -> None:
+        field = ActionField(name="flag", label="flag", kind="bool", default=False)
+        assert coerce_input(field, None) is False
+
+    def test_enum_rejects_unknown_choice(self) -> None:
+        field = ActionField(name="mode", label="mode", kind="enum", choices=["a", "b"])
+        with pytest.raises(ValueError):
+            coerce_input(field, "c")
+
+    def test_missing_required_raises(self) -> None:
+        field = ActionField(name="x", label="x", required=True)
+        with pytest.raises(ValueError):
+            coerce_input(field, None)
+
+    def test_missing_optional_uses_default(self) -> None:
+        field = ActionField(name="count", label="count", kind="int", default=7)
+        assert coerce_input(field, None) == 7
+
+
+class TestCoerceInputs:
+    def _spec(self) -> ActionSpec:
+        return ActionSpec(
+            id="demo.test",
+            subsystem="demo",
+            title="t",
+            description="d",
+            inputs=(
+                ActionField(name="host", label="host", required=True),
+                ActionField(name="port", label="port", kind="int", default=443),
+                ActionField(name="tls", label="tls", kind="bool", default=True),
+            ),
+        )
+
+    def test_happy_path(self) -> None:
+        out = coerce_inputs(
+            self._spec(),
+            {"host": "a.example.com", "port": "8443", "tls": "false"},
+        )
+        assert out == {"host": "a.example.com", "port": 8443, "tls": False}
+
+    def test_missing_required_raises(self) -> None:
+        with pytest.raises(ValueError):
+            coerce_inputs(self._spec(), {"port": "443"})
+
+    def test_unknown_keys_are_silently_dropped(self) -> None:
+        out = coerce_inputs(self._spec(), {"host": "h", "ignored": "x"})
+        assert "ignored" not in out
+
+
+# ----------------------------------------------------------------------
+# Registry
+# ----------------------------------------------------------------------
+
+
+class TestActionRegistry:
+    def test_scoped_register_is_idempotent_same_spec(self) -> None:
+        registry = ActionRegistry()
+        spec = ActionSpec(id="demo.a", subsystem="demo", title="a", description="d")
+        registry.register(spec)
+        registry.register(spec)  # same object — no-op
+        assert registry.has("demo.a")
+        assert len(registry.all()) == 1
+
+    def test_register_duplicate_id_raises(self) -> None:
+        registry = ActionRegistry()
+        registry.register(ActionSpec(id="demo.a", subsystem="demo", title="a", description=""))
+        with pytest.raises(ValueError):
+            registry.register(ActionSpec(id="demo.a", subsystem="other", title="other", description=""))
+
+    def test_by_subsystem_groups_and_sorts(self) -> None:
+        registry = ActionRegistry()
+        registry.register(ActionSpec(id="b.two", subsystem="B", title="T2", description=""))
+        registry.register(ActionSpec(id="a.one", subsystem="A", title="T1", description=""))
+        groups = registry.by_subsystem()
+        assert list(groups.keys()) == ["A", "B"]
+
+    def test_bundled_actions_register_on_load(self) -> None:
+        registry = ensure_builtin_actions_loaded()
+        ids = {spec.id for spec in registry.all()}
+        assert "scp03.scan" in ids
+        assert "scp03.read_selected" in ids
+        assert "scp11.download_profile" in ids
+        assert "eim_local.poll_campaign" in ids
+
+    def test_expanded_command_center_actions_register(self) -> None:
+        registry = ensure_builtin_actions_loaded()
+        ids = {spec.id for spec in registry.all()}
+        expected = {
+            # Engine-panel wraps
+            "tool.tlv.decode",
+            "tool.sw.lookup",
+            "tool.euicc_info2.decode",
+            "tool.saip.lint",
+            "tool.eim.lint",
+            "tool.gsma.codes",
+            # Session-based SCP03 extensions
+            "scp03.select",
+            "scp03.list_apps",
+            "scp03.close_session",
+            # Eim-local helpers
+            "eim_local.list_fixtures",
+            "eim_local.hotfolder_metadata",
+            "eim_local.issue_package",
+        }
+        missing = expected - ids
+        assert not missing, f"missing registered actions: {sorted(missing)}"
+
+    def test_third_slice_actions_register(self) -> None:
+        """Every SCP11-live and HIL action must be in the catalogue."""
+        registry = ensure_builtin_actions_loaded()
+        ids = {spec.id for spec in registry.all()}
+        expected = {
+            # SCP11 live read-only wraps
+            "scp11_live.get_eid",
+            "scp11_live.list_profiles",
+            "scp11_live.get_smdp",
+            "scp11_live.list_notifications",
+            "scp11_live.euicc_info2",
+            # HIL supervisor surfaces
+            "hil.supervisor_status",
+            "hil.bridge_status",
+            "hil.watch_supervisor",
+            "hil.decode_snapshot",
+            "hil.session_start",
+            "hil.session_stop",
+        }
+        missing = expected - ids
+        assert not missing, f"missing third-slice actions: {sorted(missing)}"
+
+    def test_scp11_live_actions_declare_reader_input(self) -> None:
+        """Each live action must take an optional 'reader' field."""
+        registry = ensure_builtin_actions_loaded()
+        for action_id in (
+            "scp11_live.get_eid",
+            "scp11_live.list_profiles",
+            "scp11_live.get_smdp",
+            "scp11_live.list_notifications",
+            "scp11_live.euicc_info2",
+        ):
+            spec = registry.get(action_id)
+            field_names = {f.name for f in spec.inputs}
+            assert "reader" in field_names, f"{action_id} missing reader input"
+            reader_field = next(f for f in spec.inputs if f.name == "reader")
+            assert reader_field.required is False
+            assert reader_field.kind == "reader"
+            assert spec.requires_card is True
+            assert spec.streams is False
+
+    def test_scp11_live_eim_download_form_is_reader_only(self) -> None:
+        registry = ensure_builtin_actions_loaded()
+        spec = registry.get("scp11_live.eim_download")
+        field_names = [field.name for field in spec.inputs]
+
+        assert field_names == ["reader"]
+        assert spec.streams is True
+        assert spec.output_kind == "log_stream"
+        assert "confirm checkbox" not in spec.description
+
+    def test_scp11_live_eim_poll_form_has_no_confirm(self) -> None:
+        registry = ensure_builtin_actions_loaded()
+        spec = registry.get("scp11_live.eim_poll")
+        field_names = [field.name for field in spec.inputs]
+
+        assert field_names == ["reader", "arguments"]
+        assert spec.streams is True
+        assert spec.output_kind == "log_stream"
+
+    def test_scp11_live_stream_uses_console_command_policy(self, monkeypatch) -> None:
+        from yggdrasim_common.gui_server.actions import scp11_live
+
+        calls: list[tuple[str, str, str]] = []
+
+        class DummyConsole:
+            _commands = {"DOWNLOAD": object()}
+
+            def _execute_command(self, command: str, argument: str) -> bool:
+                calls.append(("execute", command, argument))
+                return True
+
+            def _cmd_eim_download(self, argument: str) -> bool:
+                calls.append(("handler", "_cmd_eim_download", argument))
+                return True
+
+        monkeypatch.setattr(
+            scp11_live,
+            "_build_console",
+            lambda reader_index: (DummyConsole(), object()),
+        )
+
+        async def collect_events() -> list[dict[str, object]]:
+            events: list[dict[str, object]] = []
+            async for event in scp11_live._stream_console(
+                0,
+                "_cmd_eim_download",
+                argument="",
+                connect_first=False,
+                command_name="DOWNLOAD",
+                done_message="done",
+            ):
+                events.append(event)
+            return events
+
+        events = asyncio.run(collect_events())
+
+        assert calls == [("execute", "DOWNLOAD", "")]
+        assert events[-1] == {"level": "done", "message": "done", "ok": True}
+
+    def test_scp11_live_build_console_injects_profile_provider(self, monkeypatch) -> None:
+        from yggdrasim_common.gui_server.actions import scp11_live
+
+        @dataclass(frozen=True)
+        class FakeConfig:
+            READER_INDEX: int = 0
+
+        class FakeOrchestrator:
+            def __init__(self, *, cfg, apdu_channel, profile_provider=None):
+                self.cfg = cfg
+                self.apdu_channel = apdu_channel
+                self.profile_provider = profile_provider
+
+        class FakeConsole:
+            def __init__(self, client):
+                self.client = client
+
+        provider = object()
+        channel = object()
+
+        modules = {
+            "config": SimpleNamespace(SGPConfig=FakeConfig),
+            "console": SimpleNamespace(SCP11Console=FakeConsole),
+            "factory": SimpleNamespace(build_profile_provider=lambda cfg: provider),
+            "orchestrator": SimpleNamespace(SGP22Orchestrator=FakeOrchestrator),
+        }
+        monkeypatch.setattr(scp11_live, "_provider_module", lambda name: modules[name])
+        monkeypatch.setattr(scp11_live, "_build_apdu_channel", lambda reader_index: channel)
+
+        console, built_channel = scp11_live._build_console(2)
+
+        assert built_channel is channel
+        assert console.client.profile_provider is provider
+        assert console.client.orchestrator.profile_provider is provider
+        assert console.client.cfg.READER_INDEX == 2
+
+    def test_hil_watch_supervisor_is_streaming(self) -> None:
+        registry = ensure_builtin_actions_loaded()
+        spec = registry.get("hil.watch_supervisor")
+        assert spec.streams is True
+        assert spec.dispatcher is not None
+        assert spec.output_kind == "log_stream"
+        field_names = {f.name for f in spec.inputs}
+        assert {"interval_ms", "cycles"}.issubset(field_names)
+
+    def test_download_profile_is_streaming_without_dispatcher(self) -> None:
+        spec = get_registry().get("scp11.download_profile")
+        assert spec.streams is True
+        assert spec.dispatcher is None  # delegates to /api/flows/download-profile
+
+
+# ----------------------------------------------------------------------
+# Engine-tool dispatchers (pure-function; no hardware, no asn1crypto)
+# ----------------------------------------------------------------------
+
+
+class TestEngineToolDispatchers:
+    """Exercise the six engine-tool actions end to end.
+
+    These dispatchers are deliberately side-effect free — they wrap the
+    same helpers that back ``/api/tools/*``. Running them here guards
+    against accidental drift between the two surfaces.
+    """
+
+    def _ctx(self):
+        from yggdrasim_common.gui_server.actions.registry import ActionContext
+
+        return ActionContext()
+
+    def test_tlv_decode_returns_tree_shape(self) -> None:
+        ensure_builtin_actions_loaded()
+        spec = get_registry().get("tool.tlv.decode")
+        result = spec.dispatcher(
+            self._ctx(),
+            **coerce_inputs(spec, {"hex": "6F 05 84 03 AA BB CC"}),
+        )
+        assert result["complete"] is True
+        assert result["input_length"] == 7
+        assert result["nodes"][0]["tag_hex"] == "6F"
+        # Nested constructed tag 84
+        inner = result["nodes"][0]["children"][0]
+        assert inner["tag_hex"] == "84"
+        assert inner["value_hex"] == "AABBCC"
+
+    def test_tlv_decode_rejects_bad_hex(self) -> None:
+        ensure_builtin_actions_loaded()
+        spec = get_registry().get("tool.tlv.decode")
+        with pytest.raises(ValueError):
+            spec.dispatcher(self._ctx(), **coerce_inputs(spec, {"hex": "not-hex"}))
+
+    def test_sw_lookup_happy_path(self) -> None:
+        ensure_builtin_actions_loaded()
+        spec = get_registry().get("tool.sw.lookup")
+        result = spec.dispatcher(self._ctx(), **coerce_inputs(spec, {"sw": "9000"}))
+        assert result["sw_hex"] == "9000"
+        assert result["sw1"] == 0x90 and result["sw2"] == 0x00
+        assert isinstance(result["description"], str) and len(result["description"]) > 0
+
+    def test_sw_lookup_rejects_wrong_length(self) -> None:
+        ensure_builtin_actions_loaded()
+        spec = get_registry().get("tool.sw.lookup")
+        with pytest.raises(ValueError):
+            spec.dispatcher(self._ctx(), **coerce_inputs(spec, {"sw": "90"}))
+
+    def test_gsma_codes_returns_expected_tables(self) -> None:
+        ensure_builtin_actions_loaded()
+        spec = get_registry().get("tool.gsma.codes")
+        result = spec.dispatcher(self._ctx(), **coerce_inputs(spec, {}))
+        assert "tables" in result and "order" in result
+        # Every ordered key must be present in the tables dict.
+        assert set(result["order"]).issubset(result["tables"].keys())
+        assert "download_error" in result["tables"]
+
+    def test_eim_lint_rejects_non_json(self) -> None:
+        ensure_builtin_actions_loaded()
+        spec = get_registry().get("tool.eim.lint")
+        with pytest.raises(ValueError):
+            spec.dispatcher(
+                self._ctx(),
+                **coerce_inputs(spec, {"document_json": "not-json"}),
+            )
+
+    def test_eim_lint_requires_json_object_root(self) -> None:
+        ensure_builtin_actions_loaded()
+        spec = get_registry().get("tool.eim.lint")
+        with pytest.raises(ValueError):
+            spec.dispatcher(
+                self._ctx(),
+                **coerce_inputs(spec, {"document_json": "[]"}),
+            )
+
+
+# ----------------------------------------------------------------------
+# SCP03 reader binding helpers — no hardware, fake PC/SC enumeration.
+# ----------------------------------------------------------------------
+
+
+class TestScp03ReaderBinding:
+    def test_default_reader_binding_uses_first_pcsc_reader(self, monkeypatch) -> None:
+        import sys
+        import types
+
+        from yggdrasim_common.gui_server.actions import scp03 as scp03_mod
+
+        class FakeReader:
+            def __init__(self, name: str) -> None:
+                self.name = name
+
+            def __str__(self) -> str:
+                return self.name
+
+        system_mod = types.ModuleType("smartcard.System")
+        system_mod.readers = lambda: [FakeReader("Reader A"), FakeReader("Reader B")]
+        smartcard_mod = types.ModuleType("smartcard")
+        smartcard_mod.__path__ = []
+        smartcard_mod.System = system_mod
+        monkeypatch.setitem(sys.modules, "smartcard", smartcard_mod)
+        monkeypatch.setitem(sys.modules, "smartcard.System", system_mod)
+
+        assert scp03_mod._resolve_reader_binding("") == (0, "Reader A")
+        assert scp03_mod._resolve_reader_index("") == 0
+
+    def test_named_reader_binding_uses_matching_pcsc_reader(self, monkeypatch) -> None:
+        import sys
+        import types
+
+        from yggdrasim_common.gui_server.actions import scp03 as scp03_mod
+
+        class FakeReader:
+            def __init__(self, name: str) -> None:
+                self.name = name
+
+            def __str__(self) -> str:
+                return self.name
+
+        system_mod = types.ModuleType("smartcard.System")
+        system_mod.readers = lambda: [FakeReader("Reader A"), FakeReader("Reader B")]
+        smartcard_mod = types.ModuleType("smartcard")
+        smartcard_mod.__path__ = []
+        smartcard_mod.System = system_mod
+        monkeypatch.setitem(sys.modules, "smartcard", smartcard_mod)
+        monkeypatch.setitem(sys.modules, "smartcard.System", system_mod)
+
+        assert scp03_mod._resolve_reader_binding("Reader B") == (1, "Reader B")
+        assert scp03_mod._resolve_reader_index("Reader B") == 1
+
+
+# ----------------------------------------------------------------------
+# SCP03 close_session is the one session-manipulating action that can
+# run without hardware — it's idempotent on unknown ids.
+# ----------------------------------------------------------------------
+
+
+class TestScp03CloseSessionDispatcher:
+    def test_close_unknown_session_is_idempotent(self) -> None:
+        ensure_builtin_actions_loaded()
+        spec = get_registry().get("scp03.close_session")
+        from yggdrasim_common.gui_server.actions.registry import ActionContext
+
+        result = spec.dispatcher(
+            ActionContext(),
+            **coerce_inputs(spec, {"session_id": "nonexistent"}),
+        )
+        assert result == {"session_id": "nonexistent", "closed": False}
+
+    def test_close_session_rejects_blank_id(self) -> None:
+        ensure_builtin_actions_loaded()
+        spec = get_registry().get("scp03.close_session")
+        from yggdrasim_common.gui_server.actions.registry import ActionContext
+
+        with pytest.raises(ValueError):
+            spec.dispatcher(
+                ActionContext(),
+                **coerce_inputs(spec, {"session_id": "   "}),
+            )
+
+
+# ----------------------------------------------------------------------
+# scp03.read_selected — payload shape
+# ----------------------------------------------------------------------
+
+
+class _FakeTransporter:
+    """Tiny programmable stand-in for SCP03 CardTransporter.
+
+    Consumes pre-scripted ``transmit`` responses in order. Tests must
+    provide exactly as many responses as APDUs they expect the
+    dispatcher to send; any extra transmit call raises so a regression
+    that over-reads is caught loudly.
+    """
+
+    def __init__(self, responses):
+        self._responses = list(responses)
+        self.sent = []
+
+    def transmit(self, apdu_hex, silent=False):  # noqa: D401 — mimic prod signature
+        self.sent.append(apdu_hex)
+        if len(self._responses) == 0:
+            raise AssertionError(
+                f"_FakeTransporter ran out of scripted responses "
+                f"(unexpected APDU: {apdu_hex})"
+            )
+        return self._responses.pop(0)
+
+
+class _FakeFs:
+    def __init__(self, fid="6F07", fcp=None):
+        self.current_fid = fid
+        self.current_fcp = dict(fcp or {})
+
+
+class TestScp03ReadPayload:
+    """Cover the three body branches of ``_read_payload_for_file``.
+
+    These exercise the logic the GUI relies on when a user clicks a node
+    in the scan tree: transparent files must return decoded + hex;
+    record-oriented files must enumerate every record (both hex and
+    decoded); DF/MF should return ``kind='none'`` and not transmit any
+    READ BINARY / READ RECORD APDUs.
+    """
+
+    def test_transparent_includes_decoded_and_hex(self) -> None:
+        from yggdrasim_common.gui_server.actions import scp03 as scp03_mod
+
+        transporter = _FakeTransporter(
+            responses=[(b"\x10\x20\x30\x40", 0x90, 0x00)],
+        )
+        fs = _FakeFs(fid="6F07", fcp={"structure": "Transparent"})
+
+        payload = scp03_mod._read_payload_for_file(
+            transporter, fs, "transparent", path="MF/ADF_USIM/EF_IMSI"
+        )
+
+        assert payload["kind"] == "transparent"
+        assert payload["ok"] is True
+        assert payload["sw"] == "9000"
+        assert payload["hex"] == "10203040"
+        assert payload["length"] == 4
+        # decoded may be None (no decoder match) or a dict, but the key
+        # MUST be present so the frontend can branch on it consistently.
+        assert "decoded" in payload
+        assert transporter.sent == ["00B0000000"]
+
+    def test_records_enumerates_until_not_found(self) -> None:
+        from yggdrasim_common.gui_server.actions import scp03 as scp03_mod
+
+        transporter = _FakeTransporter(
+            responses=[
+                (b"\xDE\xAD\xBE\xEF", 0x90, 0x00),  # record 1 — non-empty
+                (b"\xFF\xFF\xFF\xFF", 0x90, 0x00),  # record 2 — empty sentinel
+                (b"", 0x6A, 0x83),                   # record 3 — not found
+            ],
+        )
+        fs = _FakeFs(fid="6F3B", fcp={"structure": "Linear Fixed", "rec_len": 4})
+
+        payload = scp03_mod._read_payload_for_file(
+            transporter, fs, "linear fixed", path="MF/ADF_USIM/EF_FPLMN"
+        )
+
+        assert payload["kind"] == "records"
+        assert payload["rec_len"] == 4
+        assert payload["record_count"] == 3
+        assert payload["non_empty_count"] == 1
+        assert payload["stop_reason"] == "record_not_found"
+
+        records = payload["records"]
+        assert records[0]["record_number"] == 1
+        assert records[0]["ok"] is True
+        assert records[0]["hex"] == "DEADBEEF"
+        assert records[0]["empty"] is False
+        assert "decoded" in records[0]
+
+        assert records[1]["record_number"] == 2
+        assert records[1]["empty"] is True
+        assert records[1]["decoded"] is None
+
+        assert records[2]["record_number"] == 3
+        assert records[2]["ok"] is False
+        assert records[2]["sw"] == "6A83"
+
+        # Must have read with the FCP-reported Le (0x04) for records 1-3.
+        assert transporter.sent == [
+            "00B2010404",
+            "00B2020404",
+            "00B2030404",
+        ]
+
+    def test_cyclic_also_routed_to_records(self) -> None:
+        from yggdrasim_common.gui_server.actions import scp03 as scp03_mod
+
+        transporter = _FakeTransporter(
+            responses=[(b"", 0x6A, 0x83)],
+        )
+        fs = _FakeFs(fid="6F13", fcp={"structure": "Cyclic", "rec_len": 8})
+
+        payload = scp03_mod._read_payload_for_file(
+            transporter, fs, "cyclic", path="MF/ADF_USIM/EF_CYCLIC"
+        )
+
+        assert payload["kind"] == "records"
+        assert payload["rec_len"] == 8
+        assert payload["non_empty_count"] == 0
+        assert payload["stop_reason"] == "record_not_found"
+        # Only one transmit before we hit the 0x6A terminator.
+        assert transporter.sent == ["00B2010408"]
+
+    def test_directory_returns_none_without_transmit(self) -> None:
+        from yggdrasim_common.gui_server.actions import scp03 as scp03_mod
+
+        transporter = _FakeTransporter(responses=[])
+        fs = _FakeFs(fid="7FFF", fcp={"structure": "DF"})
+
+        payload = scp03_mod._read_payload_for_file(
+            transporter, fs, "df", path="MF/ADF_USIM"
+        )
+
+        assert payload["kind"] == "none"
+        assert "No binary payload" in payload["note"]
+        assert transporter.sent == []
+
+
+# ----------------------------------------------------------------------
+# HIL bridge dispatchers (no hardware, no network)
+# ----------------------------------------------------------------------
+
+
+class TestHilSupervisorHelpers:
+    """Cover the pure helpers that underpin ``hil.*`` dispatchers.
+
+    These never touch PC/SC, never spawn tshark, and must be safe to run
+    on a developer laptop with no HIL rig attached.
+    """
+
+    def test_summary_lines_renders_known_fields(self) -> None:
+        from yggdrasim_common.gui_server.actions import hil as hil_mod
+
+        state = {
+            "status": "running",
+            "reason": "usb-attached",
+            "usbPresent": True,
+            "usbSource": "udev",
+            "bridgeRunning": True,
+            "bridgePid": 4242,
+            "bridgePort": 8900,
+            "remsimClientEnabled": True,
+            "remsimClientRunning": False,
+            "remsimClientPid": 0,
+            "readerIndex": 1,
+            "readerName": "Identiv uTrust 3720F",
+        }
+        lines = hil_mod._summary_lines_from_state(state)
+        keys = {line["key"] for line in lines}
+        assert {
+            "Status", "Reason", "USB present", "USB source",
+            "Bridge running", "Bridge pid", "Bridge port",
+            "REMSIM client", "Reader index",
+        }.issubset(keys)
+        reader_row = next(line for line in lines if line["key"] == "Reader index")
+        assert "Identiv" in reader_row["value"]
+        assert "1" in reader_row["value"]
+
+    def test_summary_lines_omits_unset_optional_keys(self) -> None:
+        from yggdrasim_common.gui_server.actions import hil as hil_mod
+
+        lines = hil_mod._summary_lines_from_state({"status": "idle", "usbPresent": False})
+        keys = {line["key"] for line in lines}
+        assert "Status" in keys and "USB present" in keys
+        # Optional fields must not appear when empty/zero.
+        assert "Bridge pid" not in keys
+        assert "REMSIM client" not in keys
+        assert "Reader index" not in keys
+
+    def test_diff_state_reports_initial_and_changed_fields(self) -> None:
+        from yggdrasim_common.gui_server.actions import hil as hil_mod
+
+        assert hil_mod._diff_state({}, {"status": "x"}) == ["initial snapshot"]
+        diff = hil_mod._diff_state(
+            {"status": "stopped", "usbPresent": False, "bridgePid": 0},
+            {"status": "running", "usbPresent": True, "bridgePid": 1234},
+        )
+        # Each tracked-and-changed field must appear in the diff list.
+        joined = " | ".join(diff)
+        assert "status" in joined and "usbPresent" in joined and "bridgePid" in joined
+
+    def test_diff_state_ignores_untracked_fields(self) -> None:
+        from yggdrasim_common.gui_server.actions import hil as hil_mod
+
+        diff = hil_mod._diff_state(
+            {"status": "running"},
+            {"status": "running", "someNewField": "noise"},
+        )
+        assert diff == []
+
+
+class TestHilDispatchers:
+    def _ctx(self):
+        from yggdrasim_common.gui_server.actions.registry import ActionContext
+
+        return ActionContext()
+
+    def test_supervisor_status_handles_missing_state_file(self, monkeypatch) -> None:
+        """When no state file exists the dispatcher must still return a
+        complete shape (no KeyError / no 500). The frontend branches on
+        ``state_exists``."""
+        from yggdrasim_common.gui_server.actions import hil as hil_mod
+
+        monkeypatch.setattr(
+            hil_mod,
+            "_load_supervisor_snapshot",
+            lambda: {
+                "state_path": "/tmp/does-not-exist/hil_supervisor.json",
+                "state_exists": False,
+                "state_mtime": 0.0,
+                "state": {},
+            },
+        )
+        ensure_builtin_actions_loaded()
+        spec = get_registry().get("hil.supervisor_status")
+        result = spec.dispatcher(self._ctx(), **coerce_inputs(spec, {}))
+        assert result["state_exists"] is False
+        assert result["state_mtime"] == 0.0
+        assert isinstance(result["lines"], list) and len(result["lines"]) >= 1
+        # Pretty label must include the missing-state hint.
+        labels = [line["value"] for line in result["lines"]]
+        assert any("supervisor" in value.lower() for value in labels)
+
+    def test_supervisor_status_renders_lines_when_state_present(self, monkeypatch) -> None:
+        from yggdrasim_common.gui_server.actions import hil as hil_mod
+
+        monkeypatch.setattr(
+            hil_mod,
+            "_load_supervisor_snapshot",
+            lambda: {
+                "state_path": "/tmp/hil_supervisor.json",
+                "state_exists": True,
+                "state_mtime": 1234567890.0,
+                "state": {
+                    "status": "running",
+                    "usbPresent": True,
+                    "bridgeRunning": True,
+                    "bridgePid": 42,
+                },
+            },
+        )
+        ensure_builtin_actions_loaded()
+        spec = get_registry().get("hil.supervisor_status")
+        result = spec.dispatcher(self._ctx(), **coerce_inputs(spec, {}))
+        assert result["state_exists"] is True
+        assert result["state_mtime"] == 1234567890.0
+        assert result["raw"]["bridgePid"] == 42
+        status_row = next(line for line in result["lines"] if line["key"] == "Status")
+        assert status_row["value"] == "running"
+
+    def test_bridge_status_wraps_errors(self, monkeypatch) -> None:
+        """A missing relay must surface as ``ok=False`` with the error
+        captured — never as an uncaught exception."""
+        from yggdrasim_common.gui_server.actions import hil as hil_mod
+
+        def _raise():
+            raise FileNotFoundError("hil_bridge_card_relay.json")
+
+        # The module imports ``read_bridge_status`` inside the dispatcher,
+        # so patch on the runtime module (imported lazily).
+        import yggdrasim_common.hil_bridge_runtime as runtime_mod
+
+        monkeypatch.setattr(runtime_mod, "read_bridge_status", _raise)
+        ensure_builtin_actions_loaded()
+        spec = get_registry().get("hil.bridge_status")
+        result = spec.dispatcher(self._ctx(), **coerce_inputs(spec, {}))
+        assert result["ok"] is False
+        assert "FileNotFoundError" in result["error"]
+        assert result["raw"] == {}
+
+    def test_bridge_status_returns_payload_on_success(self, monkeypatch) -> None:
+        from yggdrasim_common.gui_server.actions import hil as hil_mod
+        import yggdrasim_common.hil_bridge_runtime as runtime_mod
+
+        monkeypatch.setattr(
+            runtime_mod,
+            "read_bridge_status",
+            lambda: {"reader": "sim", "apdu_client": "connected"},
+        )
+        ensure_builtin_actions_loaded()
+        spec = get_registry().get("hil.bridge_status")
+        result = spec.dispatcher(self._ctx(), **coerce_inputs(spec, {}))
+        assert result["ok"] is True
+        assert result["error"] == ""
+        assert result["raw"]["reader"] == "sim"
+
+    def test_session_start_prepares_decoded_service(self, monkeypatch, tmp_path) -> None:
+        from yggdrasim_common.gui_server.actions import hil as hil_mod
+        import yggdrasim_common.hil_bridge_runtime as runtime_mod
+
+        capture_path = tmp_path / "live_capture.pcap"
+        calls = {}
+
+        monkeypatch.setattr(
+            hil_mod,
+            "_default_decode_capture_path",
+            lambda: str(capture_path),
+        )
+        monkeypatch.setattr(
+            runtime_mod,
+            "query_user_service_state",
+            lambda service_name: {"activeState": "inactive", "serviceName": service_name},
+        )
+        monkeypatch.setattr(runtime_mod, "read_supervisor_state", lambda: {})
+
+        def _ensure_service(*, gsmtap_enabled=True, gsmtap_capture_path=""):
+            calls["ensure"] = {
+                "gsmtap_enabled": gsmtap_enabled,
+                "gsmtap_capture_path": gsmtap_capture_path,
+            }
+            return "/tmp/yggdrasim-hil-supervisor.service", False, "yggdrasim-hil-supervisor.service"
+
+        def _activate_service(*, active_before, needs_restart, service_name):
+            calls["activate"] = {
+                "active_before": active_before,
+                "needs_restart": needs_restart,
+                "service_name": service_name,
+            }
+            return {"apduUrl": "http://127.0.0.1:9998/apdu", "reader": "test"}
+
+        monkeypatch.setattr(hil_mod, "_ensure_hil_bridge_user_service", _ensure_service)
+        monkeypatch.setattr(hil_mod, "_activate_hil_bridge_service", _activate_service)
+
+        ensure_builtin_actions_loaded()
+        spec = get_registry().get("hil.session_start")
+        result = spec.dispatcher(
+            self._ctx(),
+            **coerce_inputs(spec, {"mode": "decoded"}),
+        )
+
+        assert result["ok"] is True
+        assert result["mode"] == "decoded"
+        assert result["capture_path"] == str(capture_path)
+        assert result["gsmtap_enabled"] is True
+        assert result["status"]["apduUrl"].endswith("/apdu")
+        assert calls["ensure"] == {
+            "gsmtap_enabled": True,
+            "gsmtap_capture_path": str(capture_path),
+        }
+        assert calls["activate"] == {
+            "active_before": False,
+            "needs_restart": False,
+            "service_name": "yggdrasim-hil-supervisor.service",
+        }
+
+    def test_decode_snapshot_uses_existing_decode_helpers(self, monkeypatch, tmp_path) -> None:
+        from Tools.HilBridge.live_decode_view import PacketSummary
+        from yggdrasim_common.gui_server.actions import hil as hil_mod
+        import Tools.HilBridge.live_decode_state as state_mod
+        import Tools.HilBridge.live_decode_view as view_mod
+
+        capture_path = tmp_path / "live_capture.pcap"
+        capture_path.write_bytes(b"0" * 64)
+        sample_row = PacketSummary(
+            number=7,
+            time_text="0.000000",
+            source="127.0.0.1",
+            destination="127.0.0.1",
+            protocol="GSM SIM",
+            length_text="80",
+            info="FETCH",
+            udp_payload_hex="AA55",
+        )
+        sample_annotation = SimpleNamespace(
+            frame_number=7,
+            summary_suffix="STK OPEN CHANNEL",
+            context_lines=("poll 1",),
+            active_channel_count=1,
+            active_timer_count=0,
+            active_timers=(),
+            capture_time_seconds=None,
+            channel_session_id=1,
+            channel_number=1,
+            channel_poll_index=1,
+            state_event=True,
+            card_session_index=1,
+            card_session_reset_reason="",
+            card_session_iccid="",
+        )
+
+        monkeypatch.setattr(
+            hil_mod,
+            "_resolve_decode_capture_path",
+            lambda capture_path=None: str(capture_path),
+        )
+        monkeypatch.setattr(view_mod, "resolve_tshark_binary", lambda: "/usr/bin/tshark")
+        monkeypatch.setattr(
+            view_mod,
+            "read_packet_summaries",
+            lambda *_args, **_kwargs: ([sample_row], ""),
+        )
+        monkeypatch.setattr(
+            view_mod,
+            "read_packet_detail",
+            lambda *_args, **_kwargs: ("Frame 7\n  Protocol: GSM SIM", ""),
+        )
+        monkeypatch.setattr(
+            view_mod,
+            "read_packet_hex",
+            lambda *_args, **_kwargs: ("0000  AA 55", ""),
+        )
+        monkeypatch.setattr(
+            state_mod,
+            "build_stateful_packet_annotations",
+            lambda *_args, **_kwargs: {7: sample_annotation},
+        )
+
+        ensure_builtin_actions_loaded()
+        spec = get_registry().get("hil.decode_snapshot")
+        result = spec.dispatcher(
+            self._ctx(),
+            **coerce_inputs(
+                spec,
+                {
+                    "capture_path": str(capture_path),
+                    "selected_frame": "7",
+                    "limit": "10",
+                },
+            ),
+        )
+
+        assert result["ok"] is True
+        assert result["capture_path"] == str(capture_path)
+        assert result["row_count"] == 1
+        assert result["selected_frame"] == 7
+        assert result["rows"][0]["info"] == "FETCH"
+        assert "STK OPEN CHANNEL" in result["rows"][0]["annotated_info"]
+        assert result["annotations"]["7"]["channel_poll_index"] == 1
+        assert result["detail"].startswith("Frame 7")
+        assert result["bytes"].startswith("0000")
+
+    def test_decode_snapshot_can_skip_detail(self, monkeypatch, tmp_path) -> None:
+        from Tools.HilBridge.live_decode_view import PacketSummary
+        from yggdrasim_common.gui_server.actions import hil as hil_mod
+        import Tools.HilBridge.live_decode_state as state_mod
+        import Tools.HilBridge.live_decode_view as view_mod
+
+        capture_path = tmp_path / "live_capture.pcap"
+        capture_path.write_bytes(b"0" * 64)
+        sample_row = PacketSummary(
+            number=7,
+            time_text="0.000000",
+            source="127.0.0.1",
+            destination="127.0.0.1",
+            protocol="GSM SIM",
+            length_text="80",
+            info="FETCH",
+            udp_payload_hex="AA55",
+        )
+        detail_calls = []
+        hex_calls = []
+
+        monkeypatch.setattr(
+            hil_mod,
+            "_resolve_decode_capture_path",
+            lambda capture_path=None: str(capture_path),
+        )
+        monkeypatch.setattr(view_mod, "resolve_tshark_binary", lambda: "/usr/bin/tshark")
+        monkeypatch.setattr(
+            view_mod,
+            "read_packet_summaries",
+            lambda *_args, **_kwargs: ([sample_row], ""),
+        )
+        monkeypatch.setattr(
+            view_mod,
+            "read_packet_detail",
+            lambda *_args, **_kwargs: detail_calls.append(True) or ("", ""),
+        )
+        monkeypatch.setattr(
+            view_mod,
+            "read_packet_hex",
+            lambda *_args, **_kwargs: hex_calls.append(True) or ("", ""),
+        )
+        monkeypatch.setattr(
+            state_mod,
+            "build_stateful_packet_annotations",
+            lambda *_args, **_kwargs: {},
+        )
+
+        ensure_builtin_actions_loaded()
+        spec = get_registry().get("hil.decode_snapshot")
+        result = spec.dispatcher(
+            self._ctx(),
+            **coerce_inputs(
+                spec,
+                {
+                    "capture_path": str(capture_path),
+                    "selected_frame": "7",
+                    "include_detail": False,
+                    "limit": "10",
+                },
+            ),
+        )
+
+        assert result["ok"] is True
+        assert result["include_detail"] is False
+        assert result["selected_frame"] == 7
+        assert result["detail"] == ""
+        assert result["bytes"] == ""
+        assert detail_calls == []
+        assert hex_calls == []
+
+    def test_decode_snapshot_exposes_raw_apdu_directions(self, monkeypatch, tmp_path) -> None:
+        from Tools.HilBridge.live_decode_view import PacketSummary
+        from Tools.HilBridge.protocol import (
+            GSMTAP_SIM_APDU,
+            build_gsmtap_packet,
+            build_simtrace_apdu_payload,
+        )
+        from yggdrasim_common.gui_server.actions import hil as hil_mod
+        import Tools.HilBridge.live_decode_state as state_mod
+        import Tools.HilBridge.live_decode_view as view_mod
+
+        capture_path = tmp_path / "live_capture.pcap"
+        capture_path.write_bytes(b"0" * 64)
+        udp_payload_hex = build_gsmtap_packet(
+            build_simtrace_apdu_payload(
+                bytes.fromhex("00A40000023F00"),
+                bytes.fromhex("9000"),
+            ),
+            subtype=GSMTAP_SIM_APDU,
+            uplink=True,
+        ).hex().upper()
+        sample_row = PacketSummary(
+            number=7,
+            time_text="0.000000",
+            source="127.0.0.1",
+            destination="127.0.0.1",
+            protocol="GSM SIM",
+            length_text="80",
+            info="SELECT",
+            udp_payload_hex=udp_payload_hex,
+        )
+
+        monkeypatch.setattr(
+            hil_mod,
+            "_resolve_decode_capture_path",
+            lambda capture_path=None: str(capture_path),
+        )
+        monkeypatch.setattr(view_mod, "resolve_tshark_binary", lambda: "/usr/bin/tshark")
+        monkeypatch.setattr(
+            view_mod,
+            "read_packet_summaries",
+            lambda *_args, **_kwargs: ([sample_row], ""),
+        )
+        monkeypatch.setattr(
+            state_mod,
+            "build_stateful_packet_annotations",
+            lambda *_args, **_kwargs: {},
+        )
+
+        ensure_builtin_actions_loaded()
+        spec = get_registry().get("hil.decode_snapshot")
+        result = spec.dispatcher(
+            self._ctx(),
+            **coerce_inputs(
+                spec,
+                {
+                    "capture_path": str(capture_path),
+                    "include_detail": False,
+                    "limit": "10",
+                },
+            ),
+        )
+
+        row = result["rows"][0]
+        assert row["gsmtap_uplink"] is True
+        assert row["apdu_command_hex"] == "00A40000023F00"
+        assert row["apdu_response_hex"] == "9000"
+
+    def test_decode_snapshot_skips_tshark_when_capture_unchanged(self, monkeypatch, tmp_path) -> None:
+        from yggdrasim_common.gui_server.actions import hil as hil_mod
+        import Tools.HilBridge.live_decode_view as view_mod
+
+        capture_path = tmp_path / "live_capture.pcap"
+        capture_path.write_bytes(b"0" * 64)
+        stat_result = capture_path.stat()
+        summary_calls = []
+
+        monkeypatch.setattr(
+            hil_mod,
+            "_resolve_decode_capture_path",
+            lambda capture_path=None: str(capture_path),
+        )
+        monkeypatch.setattr(view_mod, "resolve_tshark_binary", lambda: "/usr/bin/tshark")
+        monkeypatch.setattr(
+            view_mod,
+            "read_packet_summaries",
+            lambda *_args, **_kwargs: summary_calls.append(True) or ([], ""),
+        )
+
+        ensure_builtin_actions_loaded()
+        spec = get_registry().get("hil.decode_snapshot")
+        result = spec.dispatcher(
+            self._ctx(),
+            **coerce_inputs(
+                spec,
+                {
+                    "capture_path": str(capture_path),
+                    "include_detail": False,
+                    "known_capture_size": str(stat_result.st_size),
+                    "known_capture_mtime": str(stat_result.st_mtime),
+                },
+            ),
+        )
+
+        assert result["ok"] is True
+        assert result["not_modified"] is True
+        assert result["rows"] == []
+        assert summary_calls == []
+
+
+class TestHilWatchSupervisorStream:
+    """Exercise the async generator so we catch shape regressions without
+    wiring up a FastAPI websocket client."""
+
+    def test_emits_start_cycle_and_done_events(self, monkeypatch) -> None:
+        import asyncio
+        from yggdrasim_common.gui_server.actions import hil as hil_mod
+        from yggdrasim_common.gui_server.actions.registry import ActionContext
+
+        monkeypatch.setattr(
+            hil_mod,
+            "_load_supervisor_snapshot",
+            lambda: {
+                "state_path": "/tmp/hil_supervisor.json",
+                "state_exists": True,
+                "state_mtime": 1.0,
+                "state": {"status": "idle", "usbPresent": False},
+            },
+        )
+
+        async def _drive():
+            events = []
+            async for event in hil_mod._dispatch_watch_supervisor(
+                ActionContext(),
+                interval_ms=100,
+                cycles=2,
+            ):
+                events.append(event)
+            return events
+
+        events = asyncio.run(_drive())
+        assert len(events) == 4  # start + 2 cycles + done
+        assert events[0]["level"] == "info"
+        assert "starting supervisor watcher" in events[0]["message"]
+        assert events[1]["level"] == "info" and "cycle 1/2" in events[1]["message"]
+        assert events[2]["level"] == "info" and "cycle 2/2" in events[2]["message"]
+        assert events[-1]["level"] == "done"
+        assert "final_state" in events[-1]
+
+    def test_floors_interval_and_cycles(self, monkeypatch) -> None:
+        """interval_ms < 100 must clamp to 100; cycles <= 0 must clamp to 1."""
+        import asyncio
+        from yggdrasim_common.gui_server.actions import hil as hil_mod
+        from yggdrasim_common.gui_server.actions.registry import ActionContext
+
+        monkeypatch.setattr(
+            hil_mod,
+            "_load_supervisor_snapshot",
+            lambda: {
+                "state_path": "/tmp/hil_supervisor.json",
+                "state_exists": False,
+                "state_mtime": 0.0,
+                "state": {},
+            },
+        )
+
+        async def _drive():
+            events = []
+            async for event in hil_mod._dispatch_watch_supervisor(
+                ActionContext(),
+                interval_ms=0,
+                cycles=0,
+            ):
+                events.append(event)
+            return events
+
+        events = asyncio.run(_drive())
+        # Clamped to 1 cycle: expect start + 1 cycle + done = 3 events.
+        assert len(events) == 3
+        assert "interval_ms=100" in events[0]["message"]
+        assert "cycles=1" in events[0]["message"]
+
+
+# ----------------------------------------------------------------------
+# SCP11 live helpers (pure decoders — no reader, no orchestrator)
+# ----------------------------------------------------------------------
+
+
+class TestScp11LiveDecoders:
+    """Exercise the pure TLV-decoding helpers that back the SCP11 live
+    actions. These never touch PC/SC; they just process bytes."""
+
+    def test_swap_nibbles_handles_empty_and_odd(self) -> None:
+        from yggdrasim_common.gui_server.actions import scp11_live as live_mod
+
+        assert live_mod._swap_nibbles("") == ""
+        assert live_mod._swap_nibbles("98") == "89"
+        # BCD ICCID sample with 0xF padding nibble preserved as swap+strip.
+        out = live_mod._swap_nibbles("9814203201654321F7")
+        assert isinstance(out, str) and len(out) > 0
+
+    def test_strip_ansi_removes_escape_sequences(self) -> None:
+        from yggdrasim_common.gui_server.actions import scp11_live as live_mod
+
+        text = "\x1b[31mRED\x1b[0m normal"
+        assert live_mod._strip_ansi(text) == "RED normal"
+
+    def test_decode_profile_entry_parses_e3_payload(self) -> None:
+        """Feed a minimal E3 ProfileInfo TLV and check the decoded row."""
+        from yggdrasim_common.gui_server.actions import scp11_live as live_mod
+
+        # Hand-assembled BER-TLV:
+        #   5A 0A 98 14 20 32 01 65 43 21 F7 00  — ICCID (BCD)
+        #   9F70 01 01                           — state = 0x01 (ENABLED)
+        #   95 01 02                             — class = 0x02 (OPER)
+        #   90 04 54 45 53 54                    — nickname 'TEST'
+        iccid_tlv = bytes.fromhex("5A0A98142032016543 21F700".replace(" ", ""))
+        state_tlv = bytes.fromhex("9F700101")
+        class_tlv = bytes.fromhex("950102")
+        name_tlv = bytes.fromhex("900454455354")
+        body = iccid_tlv + state_tlv + class_tlv + name_tlv
+
+        row = live_mod._decode_profile_entry(body)
+        assert row["state"] == "ENABLED"
+        assert row["profile_class"] == "OPER"
+        assert row["nickname"] == "TEST"
+        assert len(row["iccid"]) > 0
+        assert len(row["iccid_raw_hex"]) > 0
+
+    def test_decode_profile_entry_disabled_state(self) -> None:
+        from yggdrasim_common.gui_server.actions import scp11_live as live_mod
+
+        # state = 0x00 → DISABLED, class defaults to OPER when tag absent.
+        iccid_tlv = bytes.fromhex("5A0A98142032016543 21F700".replace(" ", ""))
+        state_tlv = bytes.fromhex("9F700100")
+        row = live_mod._decode_profile_entry(iccid_tlv + state_tlv)
+        assert row["state"] == "DISABLED"
+        assert row["profile_class"] == "OPER"
+
+    def test_decode_profile_entry_rejects_unparsable_bytes(self) -> None:
+        """Gracefully degrade on junk: no exception, raw_hex preserved."""
+        from yggdrasim_common.gui_server.actions import scp11_live as live_mod
+
+        junk = bytes.fromhex("DEADBEEF")
+        row = live_mod._decode_profile_entry(junk)
+        # Either fully decoded (TlvParser tolerates short inputs) or raw-hex
+        # fallback; both are acceptable — the contract is "never raise".
+        assert isinstance(row, dict)
+        assert "iccid" in row
+
+
+class TestScp11LiveRegistration:
+    """Every live action must declare the short-lived (not streaming),
+    card-requiring contract — otherwise the frontend routes it wrong."""
+
+    def test_all_live_actions_are_short_lived_with_card(self) -> None:
+        ensure_builtin_actions_loaded()
+        live_ids = (
+            "scp11_live.get_eid",
+            "scp11_live.list_profiles",
+            "scp11_live.get_smdp",
+            "scp11_live.list_notifications",
+            "scp11_live.euicc_info2",
+        )
+        for action_id in live_ids:
+            spec = get_registry().get(action_id)
+            assert spec.streams is False, f"{action_id} must not stream"
+            assert spec.requires_card is True, f"{action_id} must require a card"
+            assert spec.dispatcher is not None, f"{action_id} missing dispatcher"
+            assert spec.subsystem == "eSIM Management"
+
+    def test_get_metadata_target_is_optional_all_profiles_default(self) -> None:
+        ensure_builtin_actions_loaded()
+        spec = get_registry().get("scp11_live.get_metadata")
+        target = next(field for field in spec.inputs if field.name == "target")
+        assert target.required is False
+        assert target.default == ""
+        assert "ALL" in target.help
+        assert "ISD-P AID" in target.help
+
+    def test_read_metadata_action_is_get_all_worded(self) -> None:
+        ensure_builtin_actions_loaded()
+        spec = get_registry().get("scp11_live.read_metadata")
+        assert spec.title == "Get all profile metadata"
+
+    def test_get_metadata_blank_target_dispatches_all_profiles(self, monkeypatch) -> None:
+        from yggdrasim_common.gui_server.actions import scp11_live as live_mod
+        from yggdrasim_common.gui_server.actions.registry import ActionContext
+
+        class Entry:
+            iccid = "8988000000000000001"
+            aid = "A0000005591010FFFFFFFF8900001100"
+            state = "ENABLED"
+            profile_class = "OPER"
+            nickname = "Primary"
+            service_provider = "Example"
+            profile_name = "Example Profile"
+            profile_policy_rules_hex = ""
+            additional_fields: list[tuple[str, str]] = []
+
+        class Console:
+            def _collect_profile_metadata(self) -> list[Entry]:
+                return [Entry()]
+
+        def fake_run_console_callable(reader_index, work):
+            return work(Console()), "trace"
+
+        monkeypatch.setattr(live_mod, "_resolve_reader_index", lambda reader: 0)
+        monkeypatch.setattr(live_mod, "_run_console_callable", fake_run_console_callable)
+
+        result = live_mod._dispatch_get_metadata(ActionContext(), reader="", target="")
+
+        assert result["mode"] == "all"
+        assert result["target"] == "ALL"
+        assert result["count"] == 1
+        assert result["rows"][0]["aid"] == "A0000005591010FFFFFFFF8900001100"
+
+
+# ----------------------------------------------------------------------
+# Session manager
+# ----------------------------------------------------------------------
+
+
+class TestSessionManager:
+    def test_open_and_claim(self) -> None:
+        mgr = sessions_module.SessionManager()
+        closed: list[int] = []
+        session = mgr.open(
+            kind="demo",
+            handle={"value": 42},
+            close=lambda: closed.append(1),
+        )
+        assert mgr.has(session.id)
+        assert mgr.claim(session.id) == {"value": 42}
+        assert closed == []
+
+    def test_close_invokes_closer(self) -> None:
+        mgr = sessions_module.SessionManager()
+        flag: list[int] = []
+        session = mgr.open(kind="demo", handle=None, close=lambda: flag.append(1))
+        assert mgr.close(session.id) is True
+        assert flag == [1]
+        assert not mgr.has(session.id)
+
+    def test_idle_reap_closes_expired_sessions(self) -> None:
+        mgr = sessions_module.SessionManager(default_idle_timeout_s=0.0)
+        closed: list[int] = []
+        mgr.open(kind="demo", handle=None, close=lambda: closed.append(1))
+        count = mgr.reap_idle()
+        assert count == 1
+        assert closed == [1]
+
+    def test_cap_evicts_oldest(self) -> None:
+        mgr = sessions_module.SessionManager(max_sessions=2, default_idle_timeout_s=600)
+        closed: list[str] = []
+        first = mgr.open(kind="a", handle=None, close=lambda: closed.append("first"))
+        mgr.open(kind="b", handle=None, close=lambda: closed.append("second"))
+        mgr.open(kind="c", handle=None, close=lambda: closed.append("third"))
+        assert not mgr.has(first.id)
+        assert closed == ["first"]
+
+
+# ----------------------------------------------------------------------
+# GUI lifecycle cleanup
+# ----------------------------------------------------------------------
+
+
+class TestGuiLifecycle:
+    def test_cleanup_closes_sessions_and_registered_subprocess(self, monkeypatch) -> None:
+        from yggdrasim_common.gui_server import lifecycle
+
+        lifecycle._reset_for_tests()
+        sessions_module.get_manager().close_all()
+        closed: list[str] = []
+        sessions_module.get_manager().open(
+            kind="demo",
+            handle=None,
+            close=lambda: closed.append("session"),
+        )
+
+        class FakeProcess:
+            pid = 12345
+
+            def __init__(self) -> None:
+                self.running = True
+
+            def poll(self):
+                return None if self.running else 0
+
+            def wait(self, timeout=None):
+                self.running = False
+                return 0
+
+        signals: list[int] = []
+        fake = FakeProcess()
+        monkeypatch.setattr(
+            lifecycle,
+            "_send_process_signal",
+            lambda process, signum: signals.append(signum),
+        )
+        lifecycle.register_gui_subprocess("demo", fake)
+
+        summary = lifecycle.cleanup_gui_runtime(
+            stop_external_services=True,
+            include_default_hil_service=False,
+        )
+
+        assert closed == ["session"]
+        assert summary["closed_sessions"] == 1
+        assert summary["terminated_processes"][0]["pid"] == 12345
+        assert summary["terminated_processes"][0]["status"] == "terminated"
+        assert len(signals) == 1
+
+    def test_cleanup_stops_registered_and_default_hil_services(self, monkeypatch) -> None:
+        from yggdrasim_common import hil_bridge_runtime
+        from yggdrasim_common.gui_server import lifecycle
+
+        lifecycle._reset_for_tests()
+        stopped: list[str] = []
+        cleared: list[str] = []
+
+        monkeypatch.setattr(
+            hil_bridge_runtime,
+            "query_user_service_state",
+            lambda service_name: {
+                "serviceName": service_name,
+                "activeState": "active",
+            },
+        )
+        monkeypatch.setattr(
+            hil_bridge_runtime,
+            "stop_user_service",
+            lambda service_name: stopped.append(service_name),
+        )
+        monkeypatch.setattr(
+            hil_bridge_runtime,
+            "clear_card_relay_state",
+            lambda: cleared.append("relay"),
+        )
+        monkeypatch.setattr(
+            hil_bridge_runtime,
+            "clear_supervisor_state",
+            lambda: cleared.append("supervisor"),
+        )
+
+        lifecycle.register_gui_service("custom-hil.service")
+        summary = lifecycle.cleanup_gui_runtime(
+            stop_external_services=True,
+            include_default_hil_service=True,
+        )
+
+        assert "custom-hil.service" in stopped
+        assert hil_bridge_runtime.DEFAULT_SERVICE_NAME in stopped
+        assert cleared == ["relay", "supervisor"]
+        assert {row["status"] for row in summary["services"]} == {"stopped"}
+
+    def test_shutdown_adapter_requests_external_cleanup(self, monkeypatch) -> None:
+        from yggdrasim_common.gui_server import app as app_module
+        from yggdrasim_common.gui_server import lifecycle
+
+        calls: list[dict[str, bool]] = []
+        monkeypatch.setattr(
+            lifecycle,
+            "cleanup_gui_runtime",
+            lambda **kwargs: calls.append(dict(kwargs)) or {
+                "closed_sessions": 0,
+                "terminated_processes": [],
+                "services": [],
+            },
+        )
+
+        app_module._cleanup_gui_runtime_on_shutdown(include_default_hil_service=True)
+
+        assert calls == [{
+            "stop_external_services": True,
+            "include_default_hil_service": True,
+        }]
+
+    def test_create_app_registers_shutdown_cleanup(self, monkeypatch) -> None:
+        try:
+            import fastapi  # noqa: F401
+        except ImportError:
+            pytest.skip("FastAPI not installed")
+
+        from yggdrasim_common.gui_server import app as app_module
+        from yggdrasim_common.gui_server.config import GuiServerConfig, MODE_DESKTOP
+
+        calls: list[bool] = []
+        monkeypatch.setattr(
+            app_module,
+            "_cleanup_gui_runtime_on_shutdown",
+            lambda *, include_default_hil_service: calls.append(include_default_hil_service),
+        )
+
+        app = app_module.create_app(
+            GuiServerConfig(
+                mode=MODE_DESKTOP,
+                host="127.0.0.1",
+                port=0,
+                token="x" * 32,
+            )
+        )
+
+        shutdown_handlers = getattr(getattr(app, "router", None), "on_shutdown", [])
+        assert len(shutdown_handlers) >= 1
+        shutdown_handlers[-1]()
+        assert calls == [True]
+
+
+# ----------------------------------------------------------------------
+# HTTP / WS — only when the GUI stack is present
+# ----------------------------------------------------------------------
+
+
+_FASTAPI_AVAILABLE = True
+try:  # pragma: no cover — the import itself is under test
+    import fastapi as _fastapi  # noqa: F401
+    import starlette as _starlette  # noqa: F401
+except ImportError:
+    _FASTAPI_AVAILABLE = False
+
+
+_needs_gui_stack = pytest.mark.skipif(
+    not _FASTAPI_AVAILABLE,
+    reason="FastAPI / Starlette not installed — gui extra missing.",
+)
+
+
+def _build_test_app(token: str = "test-token"):
+    from fastapi import FastAPI
+    from yggdrasim_common.gui_server.routes import actions as actions_routes
+
+    app = FastAPI()
+    app.state.gui_token = token
+    app.include_router(actions_routes.router)
+    return app
+
+
+def _make_client(token: str = "test-token"):
+    from fastapi.testclient import TestClient
+
+    return TestClient(_build_test_app(token))
+
+
+@_needs_gui_stack
+class TestCatalogueRoute:
+    def test_catalogue_lists_all_bundled_specs(self) -> None:
+        with _make_client() as client:
+            resp = client.get("/api/actions")
+        assert resp.status_code == 200
+        payload = resp.json()
+        assert payload["count"] >= 4
+        flat_ids = []
+        for group in payload["subsystems"].values():
+            for entry in group:
+                flat_ids.append(entry["id"])
+        assert "scp03.scan" in flat_ids
+        assert "scp11.download_profile" in flat_ids
+
+
+@_needs_gui_stack
+class TestRunRoute:
+    def test_unknown_action_returns_404(self) -> None:
+        with _make_client() as client:
+            resp = client.post("/api/actions/does.not.exist/run", json={"inputs": {}})
+        assert resp.status_code == 404
+
+    def test_streaming_action_refuses_sync_run(self) -> None:
+        with _make_client() as client:
+            resp = client.post(
+                "/api/actions/scp11.download_profile/run",
+                json={"inputs": {}},
+            )
+        assert resp.status_code == 400
+        assert "streaming" in resp.json()["detail"].lower()
+
+    def test_read_selected_rejects_missing_session(self) -> None:
+        with _make_client() as client:
+            resp = client.post(
+                "/api/actions/scp03.read_selected/run",
+                json={"inputs": {"session_id": "deadbeef", "path": "MF"}},
+            )
+        # The dispatcher should surface a clean 200 with ok=False rather
+        # than 500, because "unknown session" is a user-input error.
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["ok"] is False
+        assert "deadbeef" in (body.get("error") or "")
+
+    def test_validation_error_surfaces_as_422(self) -> None:
+        with _make_client() as client:
+            resp = client.post(
+                "/api/actions/scp03.read_selected/run",
+                json={"inputs": {}},  # both required fields missing
+            )
+        assert resp.status_code == 422
+
+@_needs_gui_stack
+class TestStreamingGate:
+    def test_external_endpoint_closes_with_policy_violation(self) -> None:
+        # ``scp11.download_profile`` is streaming but has no dispatcher —
+        # it delegates to /api/flows/download-profile. Connecting to the
+        # generic streaming route should fail fast with an 'external-endpoint'
+        # reason. We just assert the connection is torn down.
+        with _make_client() as client:
+            with pytest.raises(Exception):
+                with client.websocket_connect(
+                    "/api/actions/scp11.download_profile/stream?t=test-token"
+                ) as ws:
+                    ws.receive_text()
+
+    def test_unauthenticated_ws_rejected(self) -> None:
+        with _make_client() as client:
+            with pytest.raises(Exception):
+                with client.websocket_connect(
+                    "/api/actions/eim_local.poll_campaign/stream"
+                ) as ws:
+                    ws.receive_text()
+
+
+@_needs_gui_stack
+class TestSessionsRoutes:
+    def test_list_sessions_is_json(self) -> None:
+        with _make_client() as client:
+            resp = client.get("/api/sessions")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert "count" in body and "sessions" in body
+
+    def test_close_unknown_session_returns_404(self) -> None:
+        with _make_client() as client:
+            resp = client.delete("/api/sessions/does-not-exist")
+        assert resp.status_code == 404

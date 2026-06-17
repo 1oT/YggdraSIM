@@ -163,7 +163,7 @@ class PluginManager:
         labels = ", ".join(label_parts)
         sys.stderr.write(
             f"[plugins] loaded {len(loaded_paths)}: {labels} "
-            f"(hard-lock with {_DISALLOW_PLUGINS_ENV}=1).\n"
+            f"(set {_DISALLOW_PLUGINS_ENV}=1 to hard-lock plugin loading).\n"
         )
 
     def _load_plugin_module(

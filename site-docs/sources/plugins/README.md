@@ -38,13 +38,13 @@ module file names. Operators can eyeball the line at shell startup to confirm
 which plugins are executing. Example:
 
 ```
-[plugins] loaded 1: __init__.py (hard-lock with YGGDRASIM_DISALLOW_PLUGINS=1).
+[plugins] loaded 1: polling/ (set YGGDRASIM_DISALLOW_PLUGINS=1 to hard-lock plugin loading).
 ```
 
 The first-party `polling` plugin ships as a directory package
 (`plugins/polling/`) so the canonical label is the package's
-`__init__.py`. Legacy single-file plugins (`plugins/<name>.py`) still
-appear under their module filename.
+directory name with a trailing slash. Legacy single-file plugins
+(`plugins/<name>.py`) still appear under their module filename.
 
 When loading is hard-locked the manager records a `__gate__` entry in
 `plugin_load_errors()` pointing at the responsible env flag.
@@ -95,7 +95,6 @@ as optional and capability-scoped.
 The currently supported plugin-backed surfaces are:
 
 - `SCP11/live`
-- `SCP11/test`
 - `SCP11/eim_local`
 
 `SCP11/experimental` is no longer a plugin consumer.
@@ -103,9 +102,6 @@ The currently supported plugin-backed surfaces are:
 Current plugin-owned command families:
 
 - relay `POLL` on `SCP11/live`
-- relay `POLL` on `SCP11/test`
-- top-level launcher `[3P] IPAe Polling Plugin`, which dispatches the
-  live-card `POLL` watchdog without entering the eSIM relay shell
 - `POLL --target fqdn[,fqdn...] --debug`, which enables explicit target
   accounting and live TX/RX APDU traces for each watchdog command
 - `POLL --location 7-or-9-byte-hex` or `POLL --plmn mcc/mnc --lac hex --cell hex`,

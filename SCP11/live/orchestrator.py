@@ -15,15 +15,10 @@
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 # -----------------------------------------------------------------------------
 
-"""Legacy mirror: live-default SCP11 orchestrator.
+"""SCP11 relay orchestrator.
 
-For YggdraSIM v1 the ``canonical`` SCP11 orchestrator lives in
-``SCP11/orchestrator.py``. This module is a ``legacy mirror`` retained for
-the relay-first, live-certificate default flow and adds the
-``LiveStkPollingMixin`` overlay on top of the shared behaviour. Do not fix
-spec issues here in isolation — mirror any change against the canonical
-tree and (where it applies) ``SCP11/test/orchestrator.py``. Tracked by audit
-item ``SCP11-P1-01`` for consolidation into a shim package post v1.
+This module is the relay implementation used by both ``SCP11.live`` and the
+``SCP11.test`` compatibility entrypoint.
 """
 
 import base64
@@ -468,6 +463,35 @@ class SGP22Orchestrator:
                         "eIM GetEimPackage failed with undefinedError(127); "
                         "live endpoint accepted the request family but did not return any packages."
                     )
+                clear_ack = getattr(self.cfg, "EIM_CLEAR_ACK_ON_NO_PACKAGE", False)
+                if clear_ack:
+                    clear_request = copy.deepcopy(request)
+                    if len(response.transaction_id) > 0:
+                        clear_request.transaction_id = response.transaction_id
+                    err_hex = getattr(
+                        self.cfg, "EIM_CLEAR_ACK_GENERIC_ERROR_HEX", ""
+                    ).strip().replace(" ", "")
+                    clear_payload = b""
+                    if len(err_hex) > 0:
+                        try:
+                            clear_payload = bytes.fromhex(err_hex)
+                        except ValueError:
+                            clear_payload = b""
+                    else:
+                        clear_payload = self._build_provide_eim_package_result_error_tlv(127)
+                    clear_request.euicc_package_result = ""
+                    clear_request.raw_body = clear_payload
+                    debug_print(
+                        "[*] Sending eIM clear ack (no packages)"
+                        + (" with ProvideEimPackageResult error" if len(clear_payload) > 0 else "")
+                        + " to close transaction."
+                    )
+                    provide_response = self._provide_eim_package_result(clear_request)
+                    normalized_response = self._coerce_eim_poll_response(provide_response)
+                    if self._has_eim_poll_follow_up(normalized_response):
+                        pending_response = normalized_response
+                        poll_round += 1
+                        continue
                 if response.polling_complete:
                     debug_print("[+] eIM polling completed.")
                     return {
@@ -1257,6 +1281,62 @@ class SGP22Orchestrator:
             raise RuntimeError("Configured APDU channel does not expose raw exchange support.")
         return exchange(apdu, log_name)
 
+    def _should_include_initial_eim_notify_state_change(self, eim_fqdn: str) -> bool:
+        suffixes = tuple(getattr(self.cfg, "EIM_VENDOR_QUIRK_FQDN_SUFFIXES", ()) or ())
+        normalized_fqdn = str(eim_fqdn or "").strip().lower().rstrip(".")
+        if len(normalized_fqdn) == 0:
+            return False
+        return any(normalized_fqdn == suffix or normalized_fqdn.endswith("." + suffix) for suffix in suffixes)
+
+    def _get_initial_eim_state_change_cause(self, eim_fqdn: str) -> Optional[int]:
+        configured_cause = str(getattr(self.cfg, "EIM_GET_PACKAGE_STATE_CHANGE_CAUSE", "")).strip()
+        if len(configured_cause) > 0:
+            try:
+                value = int(configured_cause, 0)
+            except ValueError:
+                print("[*] eIM poll: ignoring invalid EIM_GET_PACKAGE_STATE_CHANGE_CAUSE value.")
+                return None
+            if value < 0 or value > 127:
+                print("[*] eIM poll: ignoring out-of-range EIM_GET_PACKAGE_STATE_CHANGE_CAUSE value.")
+                return None
+            return value
+        if self._should_include_initial_eim_notify_state_change(eim_fqdn):
+            return 3
+        return None
+
+    def _get_eim_package_rplmn_bytes(self) -> bytes:
+        configured_rplmn = str(getattr(self.cfg, "EIM_GET_PACKAGE_RPLMN", "")).strip()
+        if len(configured_rplmn) == 0:
+            return b""
+        normalized = "".join(ch for ch in configured_rplmn if ch not in " :-")
+        if len(normalized) != 6 or self._is_hex(normalized) is False:
+            print(
+                "[*] eIM poll: ignoring invalid EIM_GET_PACKAGE_RPLMN value; "
+                "expected exactly 3 bytes in hex."
+            )
+            return b""
+        return bytes.fromhex(normalized)
+
+    def _extract_candidate_rplmn_from_euicc_info2(self, euicc_info2: bytes) -> bytes:
+        if len(euicc_info2) == 0:
+            return b""
+        try:
+            root_tag, root_value, _, _ = self._read_tlv(euicc_info2, 0)
+        except Exception:
+            return b""
+        if root_tag != bytes.fromhex("BF22"):
+            return b""
+        offset = 0
+        while offset < len(root_value):
+            try:
+                tag_bytes, field_value, _, next_offset = self._read_tlv(root_value, offset)
+            except Exception:
+                return b""
+            if tag_bytes == b"\x83" and len(field_value) == 3:
+                return field_value
+            offset = next_offset
+        return b""
+
     def cache_eim_poll_metadata(
         self,
         *,
@@ -1330,8 +1410,36 @@ class SGP22Orchestrator:
             fragments.append(f"eimIdType={eim_id_type}")
         debug_print("[*] Selected eIM entry: " + ", ".join(fragments))
 
-        raw_body = self._build_get_eim_package_tlv(eid)
-        if len(raw_body) == 0:
+        variant = getattr(self.cfg, "EIM_REQUEST_VARIANT", 0)
+        raw_body = None
+        notify_state_change = bool(getattr(self.cfg, "EIM_GET_PACKAGE_NOTIFY_STATE_CHANGE", False))
+        if notify_state_change is False and self._should_include_initial_eim_notify_state_change(eim_fqdn):
+            notify_state_change = True
+            print("[*] eIM poll: live endpoint detected; including notifyStateChange in initial GetEimPackage.")
+        state_change_cause = self._get_initial_eim_state_change_cause(eim_fqdn)
+        if state_change_cause is not None and notify_state_change:
+            print(
+                "[*] eIM poll: including stateChangeCause in initial GetEimPackage: "
+                f"{state_change_cause}"
+            )
+        rplmn_bytes = self._get_eim_package_rplmn_bytes()
+        if len(rplmn_bytes) == 0 and self._should_include_initial_eim_notify_state_change(eim_fqdn):
+            rplmn_bytes = self._extract_candidate_rplmn_from_euicc_info2(euicc_info2)
+            if len(rplmn_bytes) > 0:
+                print(
+                    "[*] eIM poll: live endpoint detected; including candidate rPLMN from "
+                    f"EuiccInfo2: {rplmn_bytes.hex().upper()}"
+                )
+        if variant != 2:
+            raw_body = self._build_get_eim_package_tlv(
+                eid,
+                notify_state_change=notify_state_change,
+                state_change_cause=state_change_cause,
+                rplmn_bytes=rplmn_bytes,
+            )
+            if len(raw_body) == 0:
+                raw_body = None
+        if variant == 2:
             raw_body = None
         return EimPollRequest(
             eim_fqdn=eim_fqdn,
@@ -1535,7 +1643,20 @@ class SGP22Orchestrator:
         except NotImplementedError as error:
             raise RuntimeError(f"Provider getEimPackage is not implemented: {error}") from error
         except Exception as error:
+            variant_response = self._probe_get_eim_package_variants_after_error(
+                request,
+                error,
+                tried_bodies=[request.raw_body] if request.raw_body is not None else None,
+            )
+            if variant_response is not None:
+                debug_print(
+                    f"[+] eIM poll response: packages={len(variant_response.euicc_package_list)}, "
+                    f"complete={variant_response.polling_complete}, "
+                    f"retryAfter={variant_response.retry_after_seconds}"
+                )
+                return variant_response
             raise RuntimeError(f"Provider getEimPackage failed: {error}") from error
+        response = self._probe_get_eim_package_variants(request, response)
         debug_print(
             f"[+] eIM poll response: packages={len(response.euicc_package_list)}, "
             f"complete={response.polling_complete}, retryAfter={response.retry_after_seconds}"
@@ -1675,6 +1796,230 @@ class SGP22Orchestrator:
         if package_format in {"eimAcknowledgements", "emptyResponse"}:
             return True
         return False
+
+    def _build_eim_timeout_retry_request(
+        self,
+        request: EimPollRequest,
+        error: Exception,
+    ) -> Optional[EimPollRequest]:
+        error_text = str(error).lower()
+        if "timed out" not in error_text:
+            return None
+        if request.raw_body is None or len(request.raw_body) == 0:
+            return None
+        if request.raw_body.startswith(bytes.fromhex("BF4F")) is False:
+            return None
+        variant_requests = self._build_get_eim_package_variant_requests(request)
+        if len(variant_requests) == 0:
+            return None
+        _, retry_request = variant_requests[0]
+        return retry_request
+
+    def _probe_get_eim_package_variants(
+        self,
+        request: EimPollRequest,
+        initial_response: EimPollResponse,
+    ) -> EimPollResponse:
+        if self._should_probe_get_eim_package_variants(request, initial_response) is False:
+            return initial_response
+        if self.profile_provider is None:
+            return initial_response
+        variant_requests = self._build_get_eim_package_variant_requests(request)
+        if len(variant_requests) == 0:
+            return initial_response
+        best_response = initial_response
+        print("[*] eIM poll variant probe: initial response returned undefinedError(127); trying alternative GetEimPackage variants.")
+        for variant_name, variant_request in variant_requests:
+            print(f"[*] eIM poll variant probe: trying {variant_name}.")
+            try:
+                response = self.profile_provider.get_eim_package(variant_request)
+            except Exception as error:
+                print(f"[*] eIM poll variant probe: {variant_name} failed ({error}).")
+                continue
+            result_code = response.eim_result_code
+            print(
+                f"[*] eIM poll variant probe: {variant_name} -> packages={len(response.euicc_package_list)} "
+                f"complete={response.polling_complete} result={result_code}"
+            )
+            best_response = self._select_better_get_eim_package_response(best_response, response)
+            if self._is_acceptable_get_eim_package_response(response):
+                print(f"[+] eIM poll variant probe: selected {variant_name}.")
+                return response
+        print("[*] eIM poll variant probe: no variant improved on undefinedError(127).")
+        return best_response
+
+    def _probe_get_eim_package_variants_after_error(
+        self,
+        request: EimPollRequest,
+        initial_error: Exception,
+        tried_bodies: Optional[list[bytes]] = None,
+    ) -> Optional[EimPollResponse]:
+        if self.profile_provider is None:
+            return None
+        if self._should_probe_get_eim_package_variants_after_error(request, initial_error) is False:
+            return None
+        variant_requests = self._build_get_eim_package_variant_requests(
+            request,
+            additional_seen_bodies=tried_bodies,
+        )
+        if len(variant_requests) == 0:
+            return None
+        best_response = None
+        print(
+            "[*] eIM poll variant probe: initial request failed; trying alternative "
+            "GetEimPackage variants."
+        )
+        for variant_name, variant_request in variant_requests:
+            print(f"[*] eIM poll variant probe: trying {variant_name}.")
+            try:
+                response = self.profile_provider.get_eim_package(variant_request)
+            except Exception as error:
+                print(f"[*] eIM poll variant probe: {variant_name} failed ({error}).")
+                continue
+            result_code = response.eim_result_code
+            print(
+                f"[*] eIM poll variant probe: {variant_name} -> packages={len(response.euicc_package_list)} "
+                f"complete={response.polling_complete} result={result_code}"
+            )
+            best_response = self._select_better_get_eim_package_response(best_response, response)
+            if self._is_acceptable_get_eim_package_response(response):
+                print(f"[+] eIM poll variant probe: selected {variant_name}.")
+                return response
+        if best_response is not None:
+            if (
+                len(best_response.euicc_package_list) == 0
+                and best_response.eim_result_code is None
+            ):
+                print("[*] eIM poll variant probe: no variant produced a meaningful response after the initial failure.")
+                return None
+            best_code = best_response.eim_result_code
+            print(
+                "[*] eIM poll variant probe: no variant produced a usable response after the initial failure; "
+                f"returning best observed result={best_code} packages={len(best_response.euicc_package_list)}."
+            )
+            return best_response
+        print("[*] eIM poll variant probe: no variant produced a usable response after the initial failure.")
+        return None
+
+    def _should_probe_get_eim_package_variants(
+        self,
+        request: EimPollRequest,
+        response: EimPollResponse,
+    ) -> bool:
+        if request.raw_body is None or len(request.raw_body) == 0:
+            return False
+        if request.raw_body.startswith(bytes.fromhex("BF4F")) is False:
+            return False
+        if len(response.euicc_package_list) > 0:
+            return False
+        if response.eim_result_code != 127:
+            return False
+        return True
+
+    def _should_probe_get_eim_package_variants_after_error(
+        self,
+        request: EimPollRequest,
+        error: Exception,
+    ) -> bool:
+        if request.raw_body is None or len(request.raw_body) == 0:
+            return False
+        if request.raw_body.startswith(bytes.fromhex("BF4F")) is False:
+            return False
+        error_text = str(error).lower()
+        if "timed out" in error_text:
+            return True
+        return False
+
+    def _is_acceptable_get_eim_package_response(self, response: EimPollResponse) -> bool:
+        if len(response.euicc_package_list) > 0:
+            return True
+        if response.eim_result_code is None:
+            return False
+        if response.eim_result_code != 127:
+            return True
+        return False
+
+    def _score_get_eim_package_response(self, response: Optional[EimPollResponse]) -> tuple[int, int, int]:
+        if response is None:
+            return (-2, -1, -1)
+        package_count = len(response.euicc_package_list)
+        if package_count > 0:
+            return (3, package_count, 0)
+        if response.eim_result_code is None:
+            return (-1, 0, 0)
+        if response.eim_result_code != 127:
+            return (1, 0, -int(response.eim_result_code))
+        return (0, 0, 0)
+
+    def _select_better_get_eim_package_response(
+        self,
+        current_best: Optional[EimPollResponse],
+        candidate: Optional[EimPollResponse],
+    ) -> Optional[EimPollResponse]:
+        if self._score_get_eim_package_response(candidate) > self._score_get_eim_package_response(current_best):
+            return candidate
+        return current_best
+
+    def _build_get_eim_package_variant_requests(
+        self,
+        request: EimPollRequest,
+        additional_seen_bodies: Optional[list[bytes]] = None,
+    ) -> list[tuple[str, EimPollRequest]]:
+        seen_bodies = set()
+        if request.raw_body is not None and len(request.raw_body) > 0:
+            seen_bodies.add(request.raw_body)
+        if isinstance(additional_seen_bodies, list):
+            for body in additional_seen_bodies:
+                if isinstance(body, bytes) and len(body) > 0:
+                    seen_bodies.add(body)
+        variants = []
+        state_change_cause = self._get_initial_eim_state_change_cause(request.eim_fqdn)
+        info2_bytes = self._decode_string_payload(request.euicc_info2)
+        candidate_rplmn_values = []
+        configured_rplmn = self._get_eim_package_rplmn_bytes()
+        if len(configured_rplmn) > 0:
+            candidate_rplmn_values.append(configured_rplmn)
+        info2_rplmn = self._extract_candidate_rplmn_from_euicc_info2(info2_bytes)
+        if len(info2_rplmn) > 0 and info2_rplmn not in candidate_rplmn_values:
+            candidate_rplmn_values.append(info2_rplmn)
+        candidate_definitions = [
+            ("eid-only", False, None, b""),
+            ("notify-state-change", True, None, b""),
+        ]
+        if state_change_cause is not None:
+            candidate_definitions.append(
+                ("notify-state-change-cause", True, state_change_cause, b"")
+            )
+        for candidate_rplmn in candidate_rplmn_values:
+            candidate_definitions.append(
+                ("notify-state-change-rplmn", True, None, candidate_rplmn)
+            )
+            if state_change_cause is not None:
+                candidate_definitions.append(
+                    (
+                        "notify-state-change-cause-rplmn",
+                        True,
+                        state_change_cause,
+                        candidate_rplmn,
+                    )
+                )
+        for variant_name, use_notify, effective_state_change_cause, rplmn_bytes in candidate_definitions:
+            raw_body = self._build_get_eim_package_tlv(
+                request.eid,
+                notify_state_change=use_notify,
+                state_change_cause=effective_state_change_cause,
+                rplmn_bytes=rplmn_bytes,
+            )
+            if len(raw_body) == 0:
+                continue
+            if raw_body in seen_bodies:
+                continue
+            seen_bodies.add(raw_body)
+            variant_request = copy.deepcopy(request)
+            variant_request.euicc_challenge = ""
+            variant_request.raw_body = raw_body
+            variants.append((variant_name, variant_request))
+        return variants
 
     def _as_https_smdp(self, smdp_address: str) -> str:
         cleaned = smdp_address.strip()
@@ -3550,6 +3895,14 @@ class SGP22Orchestrator:
         if len(rplmn_bytes) > 0:
             inner += self._wrap_tlv(b"\x82", rplmn_bytes)
         return self._wrap_tlv(bytes.fromhex("BF4F"), inner)
+
+    def _build_provide_eim_package_result_error_tlv(self, error_code: int = 127) -> bytes:
+        """Build ProvideEimPackageResult (BF50) with eimPackageResultResponseError [0]."""
+        if error_code < 0 or error_code > 127:
+            error_code = 127
+        inner_seq = bytes([0x30, 0x03, 0x02, 0x01, error_code & 0xFF])
+        eim_result_error = bytes([0x80, len(inner_seq)]) + inner_seq
+        return bytes([0xBF, 0x50, len(eim_result_error)]) + eim_result_error
 
     def _build_profile_download_trigger_result_error(
         self,

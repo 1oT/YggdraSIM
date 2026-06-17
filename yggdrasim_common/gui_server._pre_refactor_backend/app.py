@@ -22,6 +22,7 @@ from __future__ import annotations
 import errno
 import importlib.util
 import logging
+import os
 import socket
 import sys
 import threading
@@ -46,6 +47,18 @@ _LOGGER = logging.getLogger("yggdrasim.gui.app")
 
 _READY_TIMEOUT_SECONDS = 5.0
 _STATIC_DIR = Path(__file__).resolve().parent / "static"
+_PYWEBVIEW_GUI_ENV = "PYWEBVIEW_GUI"
+_QTWEBENGINE_CHROMIUM_FLAGS_ENV = "QTWEBENGINE_CHROMIUM_FLAGS"
+_QTWEBENGINE_DEFAULT_FLAGS = (
+    "--disable-background-networking",
+    "--disable-dev-shm-usage",
+    "--disable-extensions",
+    "--disable-gpu",
+    "--disable-features=AutofillServerCommunication,MediaRouter,OptimizationGuideModelDownloading",
+    "--no-first-run",
+    "--num-raster-threads=1",
+    "--renderer-process-limit=1",
+)
 
 
 class _UvicornRunner:
@@ -590,8 +603,85 @@ def _first_dialog_path(result: Any) -> str:
     return str(result)
 
 
+def _qt_backend_available() -> bool:
+    """Return ``True`` when pywebview's Qt path has a plausible binding."""
+    return importlib.util.find_spec("qtpy") is not None
+
+
+def _gtk_backend_available() -> bool:
+    """Return ``True`` when Linux GTK + WebKit introspection can load."""
+    if importlib.util.find_spec("gi") is None:
+        return False
+    try:
+        import gi  # type: ignore
+
+        gi.require_version("Gtk", "3.0")
+        gi.require_version("Gdk", "3.0")
+        try:
+            gi.require_version("WebKit2", "4.1")
+            gi.require_version("Soup", "3.0")
+        except (ValueError, AttributeError):
+            try:
+                gi.require_version("WebKit2", "4.0")
+                gi.require_version("Soup", "2.4")
+            except (ValueError, AttributeError):
+                return False
+        from gi.repository import Gdk  # type: ignore  # noqa: F401
+        from gi.repository import Gtk  # type: ignore  # noqa: F401
+        from gi.repository import WebKit2  # type: ignore  # noqa: F401
+    except Exception:  # noqa: BLE001
+        return False
+    return True
+
+
+def _select_pywebview_backend() -> str | None:
+    """Choose a pywebview backend without importing the backend itself."""
+    forced = str(os.environ.get(_PYWEBVIEW_GUI_ENV, "") or "").strip().lower()
+    if forced in {"qt", "gtk", "cef", "mshtml", "edgechromium"}:
+        return forced
+
+    if sys.platform.startswith("linux"):
+        if "KDE_FULL_SESSION" in os.environ and _qt_backend_available():
+            return "qt"
+        if not _gtk_backend_available() and _qt_backend_available():
+            return "qt"
+    return None
+
+
+def _append_env_words(name: str, values: tuple[str, ...]) -> None:
+    existing = str(os.environ.get(name, "") or "").strip()
+    words = existing.split() if existing else []
+    seen = set(words)
+    for value in values:
+        if value not in seen:
+            words.append(value)
+            seen.add(value)
+    if words:
+        os.environ[name] = " ".join(words)
+
+
+def _prepare_webview_environment(backend: str | None) -> None:
+    """Apply backend-specific process limits before pywebview imports it."""
+    if backend != "qt":
+        return
+    _append_env_words(
+        _QTWEBENGINE_CHROMIUM_FLAGS_ENV,
+        _QTWEBENGINE_DEFAULT_FLAGS,
+    )
+
+
+def _webview_storage_path() -> str:
+    """Return the persistent pywebview profile directory under runtime state."""
+    from yggdrasim_common.runtime_paths import ensure_runtime_dir
+
+    return ensure_runtime_dir("state", "gui_webview_profile")
+
+
 def _launch_pywebview(config: GuiServerConfig) -> None:
     """Open the native WebView window and block until it closes."""
+    backend = _select_pywebview_backend()
+    _prepare_webview_environment(backend)
+
     try:
         import webview  # type: ignore
     except ImportError as error:
@@ -622,4 +712,9 @@ def _launch_pywebview(config: GuiServerConfig) -> None:
     # selection, recent SAIP packages, sidebar / topbar collapse state)
     # all live in ``window.localStorage`` and would otherwise be
     # discarded on every launcher restart.
-    webview.start(debug=bool(config.webview_debug), private_mode=False)
+    webview.start(
+        debug=bool(config.webview_debug),
+        gui=backend,
+        private_mode=False,
+        storage_path=_webview_storage_path(),
+    )

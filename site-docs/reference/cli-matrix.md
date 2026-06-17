@@ -18,8 +18,7 @@ lookup.
 | `yggdrasim-scp03` | `python -m SCP03` | [SCP03 Admin Shell](../subsystems/scp03.md) |
 | `yggdrasim-scp80` | `python -m SCP80` | [SCP80 OTA Shell](../subsystems/scp80.md) |
 | `yggdrasim-scp11` | `python -m SCP11` | [SCP11 Family](../concepts/rsp-architecture.md) |
-| `yggdrasim-scp11-live` | `python -m SCP11.live` | [SCP11 Live Relay](../subsystems/scp11-live.md) |
-| `yggdrasim-scp11-test` | `python -m SCP11.test` | [SCP11 Test Relay](../subsystems/scp11-test.md) |
+| `yggdrasim-scp11-live` | `python -m SCP11.live` | [SCP11 eSIM Management Relay](../subsystems/scp11-live.md) |
 | `yggdrasim-scp11-relay` | `python -m SCP11.relay` | compatibility namespace |
 | `yggdrasim-scp11-local-access` | `python -m SCP11.local_access` | [SCP11 Local Access](../subsystems/scp11-local-access.md) |
 | `yggdrasim-scp11-eim-local` | `python -m SCP11.eim_local` | [SCP11 eIM Local](../subsystems/scp11-eim-local.md) |
@@ -75,7 +74,7 @@ specifics.
 | SCP03 keybag export | SCP03 shell, after `AUTH-SD`: `EXPORT-KEYBAG [path.keys.json] [label]` |
 | SCP11 Local Access keybag export (shell) | `EXPORT-KEYBAG [path.keys.json] [label]` after any BSP-building verb |
 | SCP11 Local Access keybag export (CLI) | `python -m SCP11.local_access --dump-keybag path.keys.json` |
-| SCP11 Live keybag export | `python -m SCP11.live --dump-keybag …` is a **no-op stub** — live-mode BSP keys never reach the host |
+| SCP11 relay keybag export | `python -m SCP11.live --dump-keybag …` is a **no-op stub** — relay-mode BSP keys never reach the host |
 
 ## One-shot examples
 
@@ -124,10 +123,9 @@ python -m Tools.ProfilePackage --cmd "USE profile.der; LINT --strict; EXIT"
 | `yggdrasim-scp03` | `python -m SCP03` | GlobalPlatform-style admin shell, card transport, TLV/CAP decoders, SGP.22 helpers. |
 | `yggdrasim-scp11` | `python -m SCP11` | Thin facade; live SGP.22 types re-exported from SCP11.live. |
 | `yggdrasim-scp11-eim-local` | `python -m SCP11.eim_local` | eIM-local package, polling, handover, and direct-card tooling. |
-| `yggdrasim-scp11-live` | `python -m SCP11.live` | Production SGP.22 client: orchestrator, PC/SC or relay APDU, ES9+, STK polling. |
+| `yggdrasim-scp11-live` | `python -m SCP11.live` | eSIM management relay: orchestrator, PC/SC or relay APDU, ES9+, STK polling. |
 | `yggdrasim-scp11-local-access` | `python -m SCP11.local_access` | Local ISD-R / metadata codec / certificate helpers for on-card flows. |
 | `yggdrasim-scp11-relay` | `python -m SCP11.relay` | ES9 relay / remote APDU front-end built on shared SCP11 patterns. |
-| `yggdrasim-scp11-test` | `python -m SCP11.test` | Lab/test harness console and orchestrator (mirrors live layout). |
 | `yggdrasim-scp80` | `python -m SCP80` | OTA SMS-SC / CAT-TP style scripting and smart decoding. |
 | `yggdrasim-suci-tool` | `python -m Tools.SuciTool` | SUCI-related helper shell. |
 

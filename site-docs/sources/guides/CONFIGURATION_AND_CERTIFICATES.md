@@ -555,6 +555,9 @@ to manage it:
 yggdrasim-scp80 --cmd "iccid <ICCID>; set kic <16-byte-hex>; set kid <16-byte-hex>; set kic_indicator <hex>; set kid_indicator <hex>; show; quit"
 ```
 
+The shell also accepts `kic_identifier` / `kid_identifier` as aliases for
+the indicator bytes.
+
 Pre-rename ini files using `key_enc` / `key_mac` (and `kic` / `kid` for
 the indicator bytes) are auto-migrated on load and rewritten to the
 current schema on the next save. A one-shot stderr notice records each

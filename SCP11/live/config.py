@@ -32,6 +32,7 @@ try:
         BACKEND_MODE_LOCAL_SGP26,
         BACKEND_MODE_REMOTE_DP,
         EIM_TRANSPORT_MODE_ESIPA,
+        EIM_TRANSPORT_MODE_REST_RESOURCE,
         TRANSPORT_MODE_PCSC,
     )
 except ImportError:
@@ -39,6 +40,7 @@ except ImportError:
         BACKEND_MODE_LOCAL_SGP26,
         BACKEND_MODE_REMOTE_DP,
         EIM_TRANSPORT_MODE_ESIPA,
+        EIM_TRANSPORT_MODE_REST_RESOURCE,
         TRANSPORT_MODE_PCSC,
     )
 
@@ -81,14 +83,22 @@ class SGPConfig:
     ES9_BASE_URL: str = "https://rsp.example.com"
     ES9_TIMEOUT_SECONDS: int = 15
     ES9_VERIFY_TLS: bool = True
-    ES9_CA_BUNDLE_PATH: str = field(
-        default_factory=lambda: os.path.join(_get_config_dir(), "ES9_TEST_CI_CA.pem")
-    )
+    ES9_CA_BUNDLE_PATH: str = ""
     EIM_BASE_URL: str = ""
     EIM_TIMEOUT_SECONDS: int = 30
     EIM_TRANSPORT_MODE: str = EIM_TRANSPORT_MODE_ESIPA
     EIM_HTTP_PATH: str = "/gsma/rsp2/asn1"
     EIM_HTTP_PROTOCOL: str = "gsma/rsp/v2.1.0"
+    EIM_REQUEST_VARIANT: int = 0
+    EIM_GET_PACKAGE_NOTIFY_STATE_CHANGE: bool = False
+    EIM_GET_PACKAGE_STATE_CHANGE_CAUSE: str = ""
+    EIM_GET_PACKAGE_RPLMN: str = ""
+    EIM_CLEAR_ACK_ON_NO_PACKAGE: bool = False
+    EIM_CLEAR_ACK_GENERIC_ERROR_HEX: str = ""
+    EIM_CLEAR_ACK_RESULT_ERROR: str = "undefinedError"
+    EIM_PROFILE_DOWNLOAD_ERROR_REASON: str = "undefinedError"
+    EIM_REST_CREATE_PATH: str = "/edr/create"
+    EIM_REST_LOOKUP_PATH_TEMPLATE: str = "/edr/lookup/{resource_id}"
     REMOTE_DP_ALLOW_LOCAL_FALLBACK: bool = False
     # FQDN suffix allow-list that gates vendor-specific GetEimPackage
     # timeout/retry probing. The shipped tree carries the mechanism only;
@@ -114,6 +124,21 @@ class SGPConfig:
     def __post_init__(self):
         ensure_workspace_dir("SCP11", "live")
         ensure_runtime_dir("SCP11", "live", "dynamic_ca")
+        ev = os.environ.get("EIM_REQUEST_VARIANT", "").strip()
+        if ev != "":
+            try:
+                object.__setattr__(self, "EIM_REQUEST_VARIANT", int(ev))
+            except ValueError:
+                pass
+        ev_notify = os.environ.get("EIM_GET_PACKAGE_NOTIFY_STATE_CHANGE", "").strip().lower()
+        if ev_notify in ("1", "true", "yes"):
+            object.__setattr__(self, "EIM_GET_PACKAGE_NOTIFY_STATE_CHANGE", True)
+        ev_cause = os.environ.get("EIM_GET_PACKAGE_STATE_CHANGE_CAUSE", "").strip()
+        if ev_cause != "":
+            object.__setattr__(self, "EIM_GET_PACKAGE_STATE_CHANGE_CAUSE", ev_cause)
+        ev_rplmn = os.environ.get("EIM_GET_PACKAGE_RPLMN", "").strip()
+        if ev_rplmn != "":
+            object.__setattr__(self, "EIM_GET_PACKAGE_RPLMN", ev_rplmn)
         ev_eim_timeout = os.environ.get("EIM_TIMEOUT_SECONDS", "").strip()
         if ev_eim_timeout != "":
             try:
@@ -122,6 +147,18 @@ class SGPConfig:
                 parsed_timeout = 0
             if parsed_timeout > 0:
                 object.__setattr__(self, "EIM_TIMEOUT_SECONDS", parsed_timeout)
+        ev_clear = os.environ.get("EIM_CLEAR_ACK_ON_NO_PACKAGE", "").strip().lower()
+        if ev_clear in ("1", "true", "yes"):
+            object.__setattr__(self, "EIM_CLEAR_ACK_ON_NO_PACKAGE", True)
+        ev_err = os.environ.get("EIM_CLEAR_ACK_GENERIC_ERROR_HEX", "").strip()
+        if ev_err != "":
+            object.__setattr__(self, "EIM_CLEAR_ACK_GENERIC_ERROR_HEX", ev_err)
+        ev_clear_result = os.environ.get("EIM_CLEAR_ACK_RESULT_ERROR", "").strip()
+        if ev_clear_result != "":
+            object.__setattr__(self, "EIM_CLEAR_ACK_RESULT_ERROR", ev_clear_result)
+        ev_pd_reason = os.environ.get("EIM_PROFILE_DOWNLOAD_ERROR_REASON", "").strip()
+        if ev_pd_reason != "":
+            object.__setattr__(self, "EIM_PROFILE_DOWNLOAD_ERROR_REASON", ev_pd_reason)
         ev_quirk = os.environ.get("EIM_VENDOR_QUIRK_FQDN_SUFFIXES", "").strip()
         if ev_quirk != "":
             normalized_suffixes = tuple(
@@ -141,19 +178,20 @@ class SGPConfig:
                 },
             )
 
-        for filename in [
-            "CERT.DPauth.ECDSA.der",
-            "SK.DPauth.ECDSA.pem",
-            "CERT.DPpb.ECDSA.der",
-            "SK.DPpb.ECDSA.pem",
-            "ES9_TEST_CI_CA.pem",
-            "SGP26_TRUST_ANCHOR.pem",
-            "SGP26_ISSUER.pem",
-        ]:
-            try:
-                ensure_seeded_workspace_file(("SCP11", "live", filename), "SCP11", "live", filename)
-            except Exception as error:
-                print(f"Warning: Could not copy default {filename} to {_get_config_dir()}: {error}")
+        require_local_credentials = self.BACKEND_MODE == BACKEND_MODE_LOCAL_SGP26 or self.REMOTE_DP_ALLOW_LOCAL_FALLBACK
+        if require_local_credentials:
+            for filename in [
+                "CERT.DPauth.ECDSA.der",
+                "SK.DPauth.ECDSA.pem",
+                "CERT.DPpb.ECDSA.der",
+                "SK.DPpb.ECDSA.pem",
+                "SGP26_TRUST_ANCHOR.pem",
+                "SGP26_ISSUER.pem",
+            ]:
+                try:
+                    ensure_seeded_workspace_file(("SCP11", "live", filename), "SCP11", "live", filename)
+                except Exception as error:
+                    print(f"Warning: Could not copy default {filename} to {_get_config_dir()}: {error}")
 
     def local_credential_paths(self):
         """Return a dict of resolved certificate and key file paths for this session variant."""
@@ -181,7 +219,7 @@ class SGPConfig:
                 f"Unsupported BACKEND_MODE '{self.BACKEND_MODE}'. Supported values: {', '.join(supported_backends)}."
             )
 
-        supported_eim_transports = [EIM_TRANSPORT_MODE_ESIPA]
+        supported_eim_transports = [EIM_TRANSPORT_MODE_ESIPA, EIM_TRANSPORT_MODE_REST_RESOURCE]
         if self.EIM_TRANSPORT_MODE not in supported_eim_transports:
             errors.append(
                 f"Unsupported EIM_TRANSPORT_MODE '{self.EIM_TRANSPORT_MODE}'. "

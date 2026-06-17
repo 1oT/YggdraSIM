@@ -21,13 +21,10 @@
 
 This module is the ``canonical`` SCP11 orchestrator tree for YggdraSIM v1.
 Bug-fixes, spec-correctness work, and API additions should land here first.
-``SCP11/live/orchestrator.py`` and ``SCP11/test/orchestrator.py`` mirror this
-implementation with variant-specific overlays (e.g. ``stk_polling`` mixin for
-live, extra request shaping for the test tree) and are treated as *legacy
-mirrors* for v1. Any change made here should be evaluated against both
-mirrors; the long-term goal tracked by audit item ``SCP11-P1-01`` is to turn
-the mirrors into thin shim packages that import from this module and only
-override the variant delta.
+``SCP11/live/orchestrator.py`` carries the relay implementation used by both
+the live entrypoint and the ``SCP11.test`` compatibility path. The long-term
+goal tracked by audit item ``SCP11-P1-01`` is to keep only one implementation
+surface for relay behavior.
 """
 
 import base64

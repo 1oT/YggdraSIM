@@ -1,7 +1,7 @@
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
-"""Shared profile-management helpers for the four SCP11 shells.
+"""Shared profile-management helpers for SCP11 shells.
 
-The eSIM Live, eSIM Test, Local SMDP+, and Local eIM shells all expose the
+The eSIM Management, Local SMDP+, and Local eIM shells all expose the
 same ``ENABLE-PROFILE`` / ``DISABLE-PROFILE`` / ``DELETE-PROFILE`` family of
 commands. Without a shared helper, the safety semantics — auto-disabling the
 currently-active profile before enabling a new one, auto-disabling an
@@ -71,7 +71,7 @@ class ProfileActionAdapter:
 def is_enabled(profile: Any) -> bool:
     """Return True when the metadata row's state is ENABLED.
 
-    All four shells store the state as an upper / mixed-case string on a
+    Shells store the state as an upper / mixed-case string on a
     ``ProfileMetadataView``-shaped object. Compare case-insensitively so
     ``"Enabled"``, ``"ENABLED"``, and the rare ``"ENABLED "`` (trailing
     whitespace) variants all resolve to the same answer.

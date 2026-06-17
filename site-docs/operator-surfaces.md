@@ -7,8 +7,8 @@
 | `main/main.py` | you want a unified launcher and guide entry point | module dispatch, docs, about, license, automation entry points | `python main/main.py` |
 | `SCP03/` | the task is card administration, retrieval, GP auth, or filesystem work | secure-channel auth, app and package enumeration, ETSI and 3GPP file access, report and export flows | `python -m SCP03` |
 | `SCP80/` | the task is OTA build, wrap, preview, send, or decode | OTA packet construction, direct hex handling, scripts, ICCID-bound state reuse | `python -m SCP80` |
-| `SCP11/live/` | the workflow is relay-first and should match live defaults | `DOWNLOAD-PROFILE`, `DISCOVER`, `DOWNLOAD`, optional plugin-backed `POLL` | `python -m SCP11.live` |
-| `SCP11/test/` | the workflow is relay-first but needs lab-only shaping or test defaults | live-shaped relay surface with test certificates and request-variant controls | `python -m SCP11.test` |
+| `SCP11/live/` | the workflow is relay-first | `DOWNLOAD-PROFILE`, `DISCOVER`, `DOWNLOAD`, optional plugin-backed `POLL`, explicit ES9 CA controls | `python -m SCP11.live` |
+| `SCP11/test/` | older imports still reference the test namespace | compatibility shims over the eSIM management relay implementation | import only |
 | `SCP11/local_access/` | the task is direct local `ISD-R` bring-up or one-shot profile load | local SCP11 auth, metadata upload, profile enable, disable, and delete | `python -m SCP11.local_access` |
 | `SCP11/eim_local/` | the task is on the eIM side rather than the relay side | `ADD-EIM`, package queues, localized polling, handover, response logs | `python -m SCP11.eim_local` |
 | `Tools/ProfilePackage/` | the task is SAIP package inspection or transcode work | inspect, lint, transcode, encode, split, extract | `python -m Tools.ProfilePackage` |

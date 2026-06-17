@@ -159,7 +159,8 @@ class PluginGateAnnounceBannerTests(unittest.TestCase):
             announce_lines = [line for line in banner_stream if line.startswith("[plugins]")]
             self.assertEqual(len(announce_lines), 1)
             self.assertIn("demo_plugin.py", announce_lines[0])
-            self.assertIn(_DISALLOW, announce_lines[0])
+            self.assertIn(f"set {_DISALLOW}=1", announce_lines[0])
+            self.assertIn("hard-lock plugin loading", announce_lines[0])
 
 
 if __name__ == "__main__":

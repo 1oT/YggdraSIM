@@ -1,11 +1,10 @@
 """Regression coverage for the harmonised DELETE auto-disable flow.
 
 After SCP11 command harmonisation (matches Local SMDP+/eIM and the
-shared profile_actions helpers), eSIM Live and eSIM Test now
-auto-disable an ENABLED target before issuing the delete instead of
-silently forcing a delete-while-enabled APDU. SGP.22 §5.7.18 forbids
-the latter; the auto-disable is the only safe path on cards that
-honour the spec strictly.
+shared profile_actions helpers), eSIM Management auto-disables an ENABLED
+target before issuing the delete instead of silently forcing a
+delete-while-enabled APDU. SGP.22 §5.7.18 forbids the latter; the
+auto-disable is the only safe path on cards that honour the spec strictly.
 
 The tests below exercise ``SCP11Console._run_delete_profile_state_command``
 in isolation: we stub ``_execute_profile_state_command`` /

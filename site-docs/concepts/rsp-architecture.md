@@ -151,8 +151,8 @@ the Local eIM endpoint side can be tuned independently. See
 
 ## Where to look in YggdraSIM
 
-- [SCP11 Live Relay](../subsystems/scp11-live.md) and
-  [Test Relay](../subsystems/scp11-test.md) for consumer-style ES9+ flows
+- [SCP11 eSIM Management Relay](../subsystems/scp11-live.md) for
+  consumer-style ES9+ flows
 - [SCP11 Local Access](../subsystems/scp11-local-access.md) for direct
   ES10b / ES10c without relay
 - [SCP11 eIM Local](../subsystems/scp11-eim-local.md) for SGP.32

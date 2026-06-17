@@ -1,16 +1,17 @@
 ---
-title: SCP11 Live Relay
+title: SCP11 eSIM Management Relay
 tags:
   - subsystems
   - scp11
-  - live
+  - management
   - relay
 ---
 
-# SCP11 Live Relay
+# SCP11 eSIM Management Relay
 
-`SCP11/live/` is the production-like relay shell. It assumes live-default
-certificate trust, live-default endpoints, and a relay-first operator model.
+`SCP11/live/` is the consolidated eSIM management relay shell. It uses
+platform TLS trust by default, accepts explicit CA bundle overrides, and keeps
+a relay-first operator model.
 Use it when the workflow runs through an SM-DP+ or an eIM and should behave
 the way a shipping LPA/IPA would.
 
@@ -43,7 +44,7 @@ the way a shipping LPA/IPA would.
 
 === "From the launcher"
 
-    `python main/main.py` and pick the SCP11 Live entry.
+    `python main/main.py` and pick the eSIM Management Relay entry.
 
 ## Command surface, grouped
 
@@ -51,7 +52,7 @@ the way a shipping LPA/IPA would.
 
 | Command | Purpose |
 | --- | --- |
-| `STATUS` | print live session snapshot |
+| `STATUS` | print relay session snapshot |
 | `LIST` | list known SM-DP+, ES9+, and CA entries |
 | `RESET` | reset session state to defaults |
 | `HELP` | print the grouped help surface |
@@ -105,7 +106,7 @@ the way a shipping LPA/IPA would.
 
 | Launcher flag | Purpose |
 | --- | --- |
-| `--dump-keybag <path>` | **no-op stub**. SCP11c BSP keys are derived inside the eUICC during BPP processing and never reach the host, so they cannot be exported from the live relay. The flag prints a clear message pointing at `SCP11.local_access` (for host-derived BSPs) or SCP03 (for SCP03 session keys), then exits with code `2`. |
+| `--dump-keybag <path>` | **no-op stub**. SCP11c BSP keys are derived inside the eUICC during BPP processing and never reach the host, so they cannot be exported from the relay. The flag prints a clear message pointing at `SCP11.local_access` (for host-derived BSPs) or SCP03 (for SCP03 session keys), then exits with code `2`. |
 
 For actual keybag exports see
 [SCP11 Local Access](scp11-local-access.md#session-key-export) and
@@ -136,13 +137,13 @@ python -m SCP11.live --cmd "DISCOVER; STATUS; LIST; EXIT"
 ### Download with an activation code
 
 ```text
-[eSIM Live] > DOWNLOAD-PROFILE LPA:1$example.smdp.example.com$ABCDEF123456
+[eSIM Management] > DOWNLOAD-PROFILE LPA:1$example.smdp.example.com$ABCDEF123456
 ```
 
 ### Poll with the plugin-backed path
 
 ```text
-[eSIM Live] > POLL 5 60s -t 20s -s 5
+[eSIM Management] > POLL 5 60s -t 20s -s 5
 ```
 
 Without the plugin, the `POLL` verb is either hidden or emits a clean runtime
@@ -164,7 +165,6 @@ error explaining that the capability is optional.
 ## Related pages
 
 - [RSP Architecture](../concepts/rsp-architecture.md)
-- [SCP11 Test Relay](scp11-test.md)
 - [SCP11 Local Access](scp11-local-access.md)
 - [Download a Profile (Live Relay)](../how-to/download-a-profile-live.md)
 - [HIL Bridge — offline pcap replay](hil-bridge.md#offline-pcap-replay)

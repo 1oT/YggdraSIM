@@ -46,8 +46,8 @@ command or every internal helper.
 | `main/main.py` | Unified launcher | module dispatch, docs, about, license, automation entry points, `--gui` / `--web-server` | `README.md` |
 | `SCP03/` | Admin shell | GP auth, ETSI filesystem, eUICC retrieval, report/export, diff/wizards | `README.md` |
 | `SCP80/` | OTA shell | OTA wrap/build/send/decode, script execution, ICCID-bound runtime | `README.md` |
-| `SCP11/live/` | Live relay shell | LPAd, IPAd, IPAe, relay preflight, ES9+/eIM endpoint control | `SCP11/live/README.md` |
-| `SCP11/test/` | Test relay shell | live-shaped relay surface with test-default certs and request shaping | `SCP11/test/README.md` |
+| `SCP11/live/` | eSIM management relay shell | LPAd, IPAd, IPAe, relay preflight, ES9+/eIM endpoint control | `SCP11/live/README.md` |
+| `SCP11/test/` | Test compatibility namespace | import compatibility for older relay code paths | `SCP11/test/README.md` |
 | `SCP11/relay/` | Compatibility relay namespace | legacy import/script continuity for relay workflows | `SCP11/relay/README.md` |
 | `SCP11/local_access/` | Direct local shell | local SCP11 auth, metadata upload, direct profile load, ES10c state control | `SCP11/local_access/README.md` |
 | `SCP11/eim_local/` | eIM-side shell | direct eIM lifecycle commands, localized polling, hotfolders, handover | `SCP11/eim_local/README.md` |
@@ -68,7 +68,6 @@ The top-level launcher in `main/main.py` can:
 - launch the `SCP03` admin shell
 - launch the `SCP80` OTA shell
 - launch the `SCP11/live` relay shell
-- launch the `SCP11/test` relay shell
 - launch the `SCP11/local_access` local SCP11 shell
 - launch the `SCP11/eim_local` eIM-local shell
 - launch the `Tools/ProfilePackage` SAIP shell
@@ -101,7 +100,6 @@ python -m SCP03
 python -m SCP80
 python -m SCP11
 python -m SCP11.live
-python -m SCP11.test
 python -m SCP11.relay
 python -m SCP11.local_access
 python -m SCP11.eim_local
@@ -119,10 +117,9 @@ yggdrasim-scp03                yggdrasim-hil-bridge
 yggdrasim-scp80                yggdrasim-hil-supervisor
 yggdrasim-scp11                yggdrasim-profile-package
 yggdrasim-scp11-live           yggdrasim-profile-autoload
-yggdrasim-scp11-test           yggdrasim-suci-tool
-yggdrasim-scp11-relay          yggdrasim-apdu-fuzzer
-yggdrasim-scp11-local-access   yggdrasim-eum-diag
-yggdrasim-scp11-eim-local
+yggdrasim-scp11-relay          yggdrasim-suci-tool
+yggdrasim-scp11-local-access   yggdrasim-apdu-fuzzer
+yggdrasim-scp11-eim-local      yggdrasim-eum-diag
 ```
 
 The HIL bridge entry points refuse to start on clean / non-Linux flavors
@@ -132,7 +129,6 @@ Automation-oriented entry points currently include:
 
 - `SCP11.relay` command-mode and stdin execution
 - `SCP11.live` command-mode and stdin execution
-- `SCP11.test` command-mode and stdin execution
 - `SCP11.local_access` command-mode and stdin execution
 - `SCP11.eim_local` command-mode and stdin execution
 - `SCP03` command-mode execution and script-mode execution
@@ -241,12 +237,10 @@ include:
 
 ### `SCP11/test`
 
-`SCP11/test` is the lab-oriented relay shell. Its current capabilities include:
+`SCP11/test` is a compatibility namespace for older imports. It is not an
+operator launcher surface. Its current capabilities include:
 
 - the same primary relay command shape as `SCP11/live`
-- the same optional plugin-backed `POLL [attempts] [timer-window] [-t 20s] [-s 5] [--debug]`
-  surface as `SCP11/live`, with `EIM-POLL` retained as an alias
-- test-default certificate and endpoint assumptions
 - additional request-shaping and result-shaping controls in `config.py`
 - relay/eIM compatibility knobs such as:
   - request variant selection
@@ -283,7 +277,7 @@ The current optional plugin capability model supports:
 - launch-time capability discovery through `yggdrasim_common/plugin_runtime.py`
 - source-tree plugin loading from `plugins/`
 - writable-runtime plugin loading for frozen builds
-- capability-scoped extension of `SCP11/live`, `SCP11/test`, and `SCP11/eim_local`
+- capability-scoped extension of `SCP11/live` and `SCP11/eim_local`
 - the reserved `polling` capability used for relay `POLL` and localized `IPAE-*`
   surfaces
 
@@ -354,12 +348,12 @@ current capability set includes:
 - eIM package authoring from JSON templates
 - canonical fake-eIM peer-provisioning artifacts for `AddEim`
 - eIM package linting and issue workflows
-- localized `IPAd` execution through live/test relay orchestrators
+- localized `IPAd` execution through the eSIM management relay orchestrator
 - adapter-first standalone `IPAd` runner export through `ipad_standalone.py`
 - simulator-side default BF55 eIM identity override through
   `Workspace/SIMCARD/eim_identity.json`, with full card-side layouts still
   overridable through `Workspace/SIMCARD/isdr_config.json` and `eim_entries`
-- optional plugin-backed localized `IPAe` watchdog execution through live/test relay orchestrators
+- optional plugin-backed localized `IPAe` watchdog execution through the eSIM management relay orchestrator
 - built-in localized handover-state management and linked download helpers
 - hotfolder queue polling and fetch flows
 - response logging and filtering
@@ -529,7 +523,7 @@ pywebview Command Center. Current capability set includes:
 - live process-wide APDU recorder (`yggdrasim_common/apdu_recorder.py`)
   feeding the bottom-dock APDU tab via WebSocket without each call
   site having to opt in
-- 148+ actions across SCP03 (71), eSIM Live (38), SAIP (14), SCP11
+- 148+ actions across SCP03 (71), eSIM Management (38), SAIP (14), SCP11
   Local (7), Tools (6), SIMCARD (4), Local eIM (4), HIL (3), SCP11 (1)
 - TLS surface for `--web-server`: BYO PEM via `--tls-cert` /
   `--tls-key`, or generate-and-reuse self-signed under
@@ -726,8 +720,8 @@ Use the following documents together with this capability reference:
 - `INSTALL_CLEAN.md`, `INSTALL_FULL.md`, `INSTALL_FROM_SOURCE.md`, `INSTALL_RASPBERRYPI.md`, `SIMTRACE2_CARDEM_GUIDE.md` for install paths
 - `HIL_BRIDGE_GUIDE.md` for the hardware-in-the-loop bridge (full flavor only)
 - `SCP11/README.md` for eSIM module selection
-- `SCP11/live/README.md` for live relay operation
-- `SCP11/test/README.md` for test relay operation
+- `SCP11/live/README.md` for eSIM management relay operation
+- `SCP11/test/README.md` for test compatibility namespace details
 - `SCP11/local_access/README.md` for direct local SCP11 work
 - `SCP11/eim_local/README.md` for eIM-local overview
 - `SCP11/eim_local/GUIDE.md` for detailed eIM-local workflows

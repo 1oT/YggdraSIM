@@ -126,7 +126,6 @@ class ConsoleScriptTests(unittest.TestCase):
             "scp80": ("SCP80.main", "run_standalone"),
             "scp11": ("SCP11.main", "entry"),
             "scp11_live": ("SCP11.live.main", "entry"),
-            "scp11_test": ("SCP11.test.main", "entry"),
             "scp11_relay": ("SCP11.relay.main", "entry"),
             "scp11_local_access": ("SCP11.local_access.main", "run_standalone"),
             "scp11_eim_local": ("SCP11.eim_local.main", "run_standalone"),

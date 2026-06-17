@@ -15,15 +15,7 @@
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 # -----------------------------------------------------------------------------
 
-"""Legacy mirror: live-default SCP11 console shell.
-
-The ``canonical`` SCP11 console lives in ``SCP11/console.py``. This module
-is a ``legacy mirror`` that ships the live certificate / endpoint defaults
-and relay-first ES9+ helpers. Spec or dispatcher fixes should land in the
-canonical tree first and be mirrored here. Tracked by audit item
-``SCP11-P1-02`` for eventual split into ``console_cli``,
-``console_tls_probe``, and ``console_state``.
-"""
+"""SCP11 eSIM management relay console shell."""
 
 import atexit
 import hashlib
@@ -338,7 +330,7 @@ class SCP11Console:
             while True:
                 try:
                     raw_line = input(
-                        f"\n{self._style.header}[eSIM Live] > {self._style.end}"
+                        f"\n{self._style.header}[eSIM Management] > {self._style.end}"
                     ).strip()
                 except KeyboardInterrupt:
                     print("\n[*] Exiting SCP11 shell.")

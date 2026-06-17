@@ -727,7 +727,7 @@ class GlobalPlatformManager :
         full_data =bytearray ()
 
         while True :
-            cmd =f"80F2{p1:02X}{p2:02X}024F00"
+            cmd =f"80F2{p1:02X}{p2:02X}024F0000"
             data ,sw1 ,sw2 =self .tp .transmit (cmd ,silent =False )
 
             if (sw1 ==0x90 or sw1 ==0x63 )and data :
@@ -757,44 +757,16 @@ class GlobalPlatformManager :
         print (f"{'AID':<34} | {'State':<12} | {last_col}")
         print ("-"*65 )
 
-        if len (data )>0 and data [0 ]==0xE3 :
-            i =0 
-            while i <len (data ):
-                if data [i ]!=0xE3 :
-                    i +=1 
-                    continue 
-                if i +1 >=len (data ):
-                    break
-                tag_len =data [i +1 ]
-                entry =data [i +2 :i +2 +tag_len ]
-                i +=2 +tag_len 
-                parsed =TlvParser .parse (entry )
+        rows =self ._registry_rows_from_data (bytes (data ),kind )
+        if not rows :
+            if len (data )>0 and data [0 ]==0x62 :
+                print (f"{Config.Colors.WARNING}[!] Response is an FCP template, not a GP registry response.{Config.Colors.ENDC}")
+            else :
+                print (f"{Config.Colors.WARNING}[!] No GP registry entries decoded from response.{Config.Colors.ENDC}")
+            return
 
-                aid =""
-                if 0x4F in parsed :
-                    aid =parsed [0x4F ].hex ().upper ()
-
-                lcs_byte =0 
-                if 0x9F70 in parsed :
-                    lcs_byte =parsed [0x9F70 ][0 ]
-
-                privs =""
-                if 0xC5 in parsed :
-                    privs =parsed [0xC5 ].hex ().upper ()
-
-                self ._print_registry_row (aid ,lcs_byte ,privs )
-            return 
-
-        i =0 
-        while i <len (data ):
-            entry =self ._compact_registry_entry_at (data ,i ,kind )
-            if entry is None :
-                i +=1 
-                continue
-
-            aid ,state_byte ,extra_str ,next_i =entry
-            self ._print_registry_row (aid ,state_byte ,extra_str )
-            i =next_i
+        for aid ,state_byte ,extra in rows :
+            self ._print_registry_row (aid ,state_byte ,extra )
 
     def _print_registry_row (self ,aid ,lcs_byte ,extra ):
         state_map ={
@@ -857,8 +829,8 @@ class GlobalPlatformManager :
         aid =data [aid_start :aid_end ].hex ().upper ()
         return aid ,state_byte ,extra ,next_offset
 
-    def _registry_entries_from_data (self ,data :bytes ,kind :str )->List [Dict [str ,Any ]]:
-        entries :List [Dict [str ,Any ]]=[]
+    def _registry_rows_from_data (self ,data :bytes ,kind :str )->List [Tuple [str ,int ,str ]]:
+        rows :List [Tuple [str ,int ,str ]]=[]
         if len (data )>0 and data [0 ]==0xE3 :
             i =0 
             while i <len (data ):
@@ -866,8 +838,7 @@ class GlobalPlatformManager :
                 if data [i ]==0xE3 :
                     is_e3 =True 
                 if is_e3 ==False :
-                    i +=1 
-                    continue 
+                    return rows 
                 has_len =False 
                 if i +1 <len (data ):
                     has_len =True 
@@ -896,23 +867,23 @@ class GlobalPlatformManager :
                 if 0xC5 in parsed :
                     extra =parsed [0xC5 ].hex ().upper ()
 
-                entries .append (
-                {
-                "aid":aid ,
-                "state":self ._state_to_string (lcs_byte ),
-                "extra":extra 
-                }
-                )
-            return entries 
+                rows .append ((aid ,lcs_byte ,extra ))
+            return rows 
 
         i =0 
         while i <len (data ):
             entry =self ._compact_registry_entry_at (data ,i ,kind )
             if entry is None :
-                i +=1 
-                continue
+                return rows
 
             aid ,lcs_byte ,extra ,next_i =entry
+            rows .append ((aid ,lcs_byte ,extra ))
+            i =next_i
+        return rows 
+
+    def _registry_entries_from_data (self ,data :bytes ,kind :str )->List [Dict [str ,Any ]]:
+        entries :List [Dict [str ,Any ]]=[]
+        for aid ,lcs_byte ,extra in self ._registry_rows_from_data (data ,kind ):
             entries .append (
             {
             "aid":aid ,
@@ -920,7 +891,6 @@ class GlobalPlatformManager :
             "extra":extra
             }
             )
-            i =next_i
         return entries 
 
     def get_registry_data (self ,kind :str ='APPS')->Dict [str ,Any ]:
@@ -934,7 +904,7 @@ class GlobalPlatformManager :
         last_sw2 =0x00 
 
         while True :
-            cmd =f"80F2{p1:02X}{p2:02X}024F00"
+            cmd =f"80F2{p1:02X}{p2:02X}024F0000"
             data ,sw1 ,sw2 =self .tp .transmit (cmd ,silent =True )
             last_sw1 =sw1 
             last_sw2 =sw2 

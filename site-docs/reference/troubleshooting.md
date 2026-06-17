@@ -45,7 +45,7 @@ non-trivial, the row links to the page that explains it in full.
 | Applet silently swallows payload | wrong TAR | verify TAR; pick the correct applet or RFM engine |
 | `6988` on secured packet | integrity bits rejected | match `CC` / `DS` / ciphering requirements on both sides |
 
-## SCP11 relay (live and test)
+## SCP11 eSIM management relay
 
 | Symptom | Likely cause | Fix |
 | --- | --- | --- |
@@ -76,7 +76,7 @@ Plugins under the active runtime root's `plugins/` directory load by default. Th
 | `YGGDRASIM_DISALLOW_PLUGINS` | Hard-lock: refuse every plugin, including the first-party polling plugin. | unset → plugins load | Attestation / CI / air-gapped deployments where no out-of-tree code may execute. |
 | `YGGDRASIM_ALLOW_PLUGINS` | Tri-state opt-in / opt-out knob. `0`/`false`/`no`/`off` → opt-out (same as `DISALLOW=1`). `1`/`true`/`yes`/`on` → opt-in (redundant after the default flip, still honoured). | unset → plugins load | Backward-compat for deployments that want to keep the old opt-in-only posture. |
 
-On first successful load the manager prints a one-line stderr banner naming each loaded `.py` file, e.g. `[plugins] loaded 1: polling_plugin.py (hard-lock with YGGDRASIM_DISALLOW_PLUGINS=1).`. If you don't see that line and `POLL` / `IPAE-*` are missing, the loader was hard-locked by one of the env flags above.
+On first successful load the manager prints a one-line stderr banner naming each loaded plugin entry, e.g. `[plugins] loaded 1: polling/ (set YGGDRASIM_DISALLOW_PLUGINS=1 to hard-lock plugin loading).`. If you don't see that line and `POLL` / `IPAE-*` are missing, the loader was hard-locked by one of the env flags above.
 
 ## SCP11 local access
 

@@ -57,14 +57,15 @@ powershell -ExecutionPolicy Bypass -File scripts\install\install-windows.ps1
 | `main/` | Unified launcher, path setup, and in-process module dispatch | `python main/main.py` |
 | `SCP03/` | GlobalPlatform-style admin shell, filesystem work, GSMA retrieval, report/export | interactive shell + one-shot commands |
 | `SCP80/` | OTA packet construction, decode, and reader/send flows | OTA CLI |
-| `SCP11/live/` | Live relay shell for LPAd / IPAd / IPAe work | interactive SCP11 console |
-| `SCP11/test/` | Test relay shell mirroring the live surface | interactive SCP11 console |
+| `SCP11/live/` | eSIM management relay shell for LPAd / IPAd / IPAe work | interactive SCP11 console |
+| `SCP11/test/` | Compatibility namespace for older imports | import compatibility only |
 | `SCP11/local_access/` | Direct local `ISD-R` bring-up and one-shot `LOAD-PROFILE` | local SCP11 shell |
 | `SCP11/eim_local/` | eIM-local package generation, localized polling, hotfolder queues, and handover flows | eIM local shell |
 | `SIMCARD/` | In-process simulated UICC / eUICC: ETSI TS 102 221 file system, GP / SCP03 / SCP80, ISD-R + ISD-Ps, ETSI TS 102 223 toolkit + BIP, Milenage / TUAK AKA, 5G AKA / AKMA / SUCI / GET IDENTITY | selected via `--card-backend sim` |
 | `Tools/HilBridge/` | SIMtrace2-based hardware-in-the-loop bridge: RSPRO relay, GSMTAP mirror, offline pcap review, AT+CSIM/CRSM transcoding (`at_simlink`) | `yggdrasim-hil-bridge` (Linux) |
 | `Tools/ProfilePackage/` | SAIP shell, transcode UI, lint engine, JSON↔DER bridge | profile-package shell + TUI |
 | `Tools/SuciTool/` | SUCI helper tooling | helper shell |
+| `Tools/Asn1TlvDecode/` | BER/DER ASN.1, BER-TLV, and APDU decode helper | `yggdrasim-asn1` or `python main/main.py --asn1` |
 | `Tools/ApduFuzz/` | Safety-gated eUICC APDU mutation fuzzer (`--i-mean-it` + ICCID/IMSI allow-list) | `yggdrasim-apdu-fuzzer` |
 | `Tools/EumDiag/` | EUM / SM-DP+ "God-Mode": session-key injection + Wireshark/tshark Lua dissector for BF36 BPPs | `yggdrasim-eum-diag` |
 | `Tools/YggdraCore/` *(post-v1 staging)* | In-process 5G core stubs (AUSF / AAnF) for AKA / AKMA flows + BYO-Open5GS provisioning bridge | FastAPI loopback (opt-in via `YGGDRASIM_5GCORE_MODE=stub`) |
@@ -78,8 +79,8 @@ powershell -ExecutionPolicy Bypass -File scripts\install\install-windows.ps1
 
 - PC/SC-based GlobalPlatform and UICC/eUICC administration through `SCP03`.
 - OTA packet generation, wrapping, transport, and decode through `SCP80`.
-- Split SCP11 relay environments for live and test work, with `SCP11/relay`
-  retained as the compatibility namespace.
+- Single SCP11 eSIM management relay for live and lab work, with
+  `SCP11/relay` and `SCP11/test` retained as compatibility namespaces.
 - Direct local SCP11 provisioning and metadata handling through `SCP11/local_access`.
 - eIM-centric local package work, localized polling, hotfolder campaigns, and response tracking through `SCP11/eim_local`.
 - Hardware-in-the-loop SIMtrace2 bridge with GSMTAP mirroring, brokered APDU side-channel access, and AT+CSIM / AT+CRSM transcoding for modem cold-boot rigs through `Tools/HilBridge`.
@@ -144,7 +145,6 @@ yggdrasim-scp03
 yggdrasim-scp80
 yggdrasim-scp11
 yggdrasim-scp11-live
-yggdrasim-scp11-test
 yggdrasim-scp11-relay
 yggdrasim-scp11-local-access
 yggdrasim-scp11-eim-local
@@ -155,6 +155,7 @@ yggdrasim-profile-autoload
 yggdrasim-apdu-fuzzer
 yggdrasim-eum-diag
 yggdrasim-suci-tool
+yggdrasim-asn1
 ```
 
 ### Docker and bundle packaging
@@ -234,7 +235,6 @@ python -m SCP03
 python -m SCP80
 python -m SCP11
 python -m SCP11.live
-python -m SCP11.test
 python -m SCP11.relay
 python -m SCP11.local_access
 python -m SCP11.eim_local
@@ -242,6 +242,7 @@ python -m Tools.HilBridge.main
 python -m Tools.HilBridge.supervisor
 python -m Tools.ProfilePackage
 python -m Tools.SuciTool
+python -m Tools.Asn1TlvDecode
 ```
 
 If you skip the editable install, run them from the repository root instead.
@@ -253,7 +254,6 @@ yggdrasim-scp03
 yggdrasim-scp80
 yggdrasim-scp11
 yggdrasim-scp11-live
-yggdrasim-scp11-test
 yggdrasim-scp11-relay
 yggdrasim-scp11-local-access
 yggdrasim-scp11-eim-local
@@ -264,6 +264,7 @@ yggdrasim-profile-autoload
 yggdrasim-apdu-fuzzer
 yggdrasim-eum-diag
 yggdrasim-suci-tool
+yggdrasim-asn1
 ```
 
 For non-interactive automation, piping, and ready-to-run profile lifecycle
@@ -363,9 +364,9 @@ Use `SCP80` for:
 - direct reader-mode or print-only flows
 - `ICCID`-specific OTA state reuse through the shared inventory
 
-### SCP11 relay shells
+### SCP11 eSIM management relay
 
-Use `SCP11/live` or `SCP11/test` for:
+Use `SCP11/live` for:
 
 - `LPAd`: `DOWNLOAD-PROFILE <activation>`
 - `IPAd`: `DISCOVER`, `DOWNLOAD [matchingId]`
@@ -374,16 +375,15 @@ Use `SCP11/live` or `SCP11/test` for:
 Example:
 
 ```text
-[eSIM Live] > HELP
-[eSIM Live] > DISCOVER
-[eSIM Live] > DOWNLOAD-PROFILE LPA:1$...
+[eSIM Management] > HELP
+[eSIM Management] > DISCOVER
+[eSIM Management] > DOWNLOAD-PROFILE LPA:1$...
 ```
 
 See:
 
 - `SCP11/README.md`
 - `SCP11/live/README.md`
-- `SCP11/test/README.md`
 - `guides/PROFILE_LIFECYCLE_CLI_CHEATSHEET.md`
 
 ### HIL bridge and SIMtrace2
@@ -521,8 +521,8 @@ its pane layout in the workspace, supports OS clipboard copy/paste, and writes
 - `AUTHORS` - project attribution
 - `CONTRIBUTING.md` - contributor checklist (style, scope, sign-off)
 - `SCP11/README.md` - eSIM module selection and guide map
-- `SCP11/live/README.md` - live relay operator guide
-- `SCP11/test/README.md` - test relay operator guide
+- `SCP11/live/README.md` - eSIM management relay operator guide
+- `SCP11/test/README.md` - test compatibility namespace note
 - `SCP11/local_access/README.md` - local SCP11 shell guide
 - `SCP11/eim_local/README.md` - eIM module overview
 - `SCP11/eim_local/GUIDE.md` - detailed eIM operational guide
@@ -564,10 +564,10 @@ YggdraSIM builds on.
 ## Scope notes
 
 - `SCP03` is not a generic SCP11 provisioning shell. It is the admin / filesystem / retrieval environment.
-- `SCP11/live` and `SCP11/test` are the primary relay-facing shells.
+- `SCP11/live` is the primary relay-facing shell.
 - historical `SCP11/experimental` references are obsolete; relay work is now
-  split between `SCP11/live`, `SCP11/test`, and the compatibility namespace
-  `SCP11/relay`.
+  consolidated in `SCP11/live`, with compatibility namespaces under
+  `SCP11/relay` and `SCP11/test`.
 - `SCP11/local_access` is the direct local SCP11 path against `ISD-R`.
 - `SCP11/eim_local` is the dedicated eIM-local package, polling, and handover shell.
 - Compatibility helpers remain where card policy, certificate trust, or transport behavior can differ across eUICCs.

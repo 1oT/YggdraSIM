@@ -1,0 +1,9 @@
+/* The legacy ``.cc-wb-extras`` strip is kept in the DOM for backward
+ * compatibility with a handful of defensive ``.innerHTML = ""`` cleanup
+ * sites (cancelled prompts etc.). Action output now lives in floating
+ * ``.cc-popout`` windows anchored to ``#cc-popout-host`` — the strip
+ * itself stays zero-height and invisible. */
+.cc-wb-extras {
+  display: none;
+}
+

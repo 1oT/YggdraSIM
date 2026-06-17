@@ -209,8 +209,9 @@ class ConfigManager :
         return self .data .get (key ,self .DEFAULTS .get (key ,""))
 
     def set (self ,key :str ,value :str ):
-        if key in self .data :
-            self .data [key ]=self ._normalize_value (key ,value ,strict =True )
+        if key not in self .data :
+            raise ValueError (f"Unknown SCP80 config key: {key}.")
+        self .data [key ]=self ._normalize_value (key ,value ,strict =True )
 
     def bind_iccid_profile (self ,iccid :str )->dict :
         """Associate an ICCID with a keyset profile in the runtime config."""

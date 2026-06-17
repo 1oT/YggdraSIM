@@ -22,7 +22,6 @@ yggdrasim-scp03
 yggdrasim-scp80
 yggdrasim-scp11
 yggdrasim-scp11-live
-yggdrasim-scp11-test
 yggdrasim-scp11-relay
 yggdrasim-scp11-local-access
 yggdrasim-scp11-eim-local
@@ -35,8 +34,7 @@ yggdrasim-eum-diag
 yggdrasim-suci-tool
 ```
 
-Use `yggdrasim-scp11-live`, `yggdrasim-scp11-test`, or
-`yggdrasim-scp11-relay` for relay-first work.
+Use `yggdrasim-scp11-live` or `yggdrasim-scp11-relay` for relay-first work.
 
 Use `yggdrasim-scp11-local-access` for direct local card work.
 
@@ -160,7 +158,6 @@ EXPORT-KEYBAG [outputPath.keys.json] [label]
 ARR [path]
 CERT-INFO
 GUIDE [topic]
-DECODE <hex>
 RUN <file> [out.yaml]
 SCRIPT <file>
 DEBUG
@@ -170,6 +167,9 @@ EXIT
 QA
 Q
 ```
+
+For standalone ASN.1/TLV/APDU decoding, use `python main/main.py --asn1 <hex>`
+or the installed `yggdrasim-asn1 <hex>` command.
 
 SCP03 STK subsystem commands:
 
@@ -234,11 +234,15 @@ Common SCP80 `SET` keys:
 cntr
 header
 spi
+kic_indicator
+kid_indicator
 kic
 kid
 tar
 pid
 dcs
+kic_identifier
+kid_identifier
 key_enc
 key_mac
 cla
@@ -252,8 +256,7 @@ payload
 
 ### Relay Shells
 
-Use these with `yggdrasim-scp11-live`, `yggdrasim-scp11-test`, or
-`yggdrasim-scp11-relay`.
+Use these with `yggdrasim-scp11-live` or `yggdrasim-scp11-relay`.
 
 Built-in relay commands:
 
@@ -578,7 +581,7 @@ EXIT
 EOF
 ```
 
-### Live Relay
+### eSIM Management Relay
 
 ```bash
 yggdrasim-scp11-live --cmd "DISCOVER; STATUS; LIST; EXIT"
@@ -598,28 +601,6 @@ yggdrasim-scp11-live --cmd "POLL; EXIT"
 yggdrasim-scp11-live --cmd "POLL [ENTER ATTEMPTS HERE] [ENTER TIMER WINDOW HERE] --debug; EXIT"
 
 yggdrasim-scp11-live --cmd "DISCOVER; STATUS; LIST; EXIT" | tee "[ENTER OUTPUT PATH HERE]"
-```
-
-### Test Relay
-
-```bash
-yggdrasim-scp11-test --cmd "DISCOVER; STATUS; LIST; EXIT"
-
-yggdrasim-scp11-test --cmd "DOWNLOAD-PROFILE [ENTER ACTIVATION CODE HERE]; STATUS; LIST; EXIT"
-
-yggdrasim-scp11-test --cmd "DISCOVER; DOWNLOAD [ENTER MATCHING ID HERE]; STATUS; LIST; EXIT"
-
-yggdrasim-scp11-test --cmd "ENABLE-PROFILE [ENTER ICCID / AID HERE]; EXIT"
-
-yggdrasim-scp11-test --cmd "DISABLE-PROFILE [ENTER ICCID / AID HERE]; EXIT"
-
-yggdrasim-scp11-test --cmd "DELETE-PROFILE [ENTER ICCID / AID HERE]; EXIT"
-
-yggdrasim-scp11-test --cmd "POLL; EXIT"
-
-yggdrasim-scp11-test --cmd "POLL [ENTER ATTEMPTS HERE] [ENTER TIMER WINDOW HERE] --debug; EXIT"
-
-yggdrasim-scp11-test --cmd "DISCOVER; STATUS; LIST; EXIT" | tee "[ENTER OUTPUT PATH HERE]"
 ```
 
 ### Local Card

@@ -75,9 +75,10 @@ def build_summary_command(
     *,
     tshark_binary: str = "tshark",
     decode_rule: str = DEFAULT_DECODE_RULE,
+    frame_filter: str = "",
 ) -> list[str]:
     """Build the tshark command-line args list for the packet-summary view."""
-    return [
+    command = [
         str(tshark_binary or "tshark"),
         "-r",
         str(capture_path or ""),
@@ -107,9 +108,12 @@ def build_summary_command(
         "_ws.col.Info",
         "-e",
         "udp.payload",
-        "-d",
-        str(decode_rule or DEFAULT_DECODE_RULE),
     ]
+    normalized_filter = str(frame_filter or "").strip()
+    if len(normalized_filter) > 0:
+        command.extend(["-Y", normalized_filter])
+    command.extend(["-d", str(decode_rule or DEFAULT_DECODE_RULE)])
+    return command
 
 
 def build_packet_detail_command(
@@ -306,6 +310,7 @@ def read_packet_summaries(
     *,
     tshark_binary: str = "tshark",
     decode_rule: str = DEFAULT_DECODE_RULE,
+    after_frame: int | None = None,
 ) -> tuple[list[PacketSummary], str]:
     """Read packet summaries from the active capture source and return a list of dicts."""
     normalized_path = str(capture_path or "").strip()
@@ -316,11 +321,15 @@ def read_packet_summaries(
         return ([], "")
     if target_path.stat().st_size <= 24:
         return ([], "")
+    frame_filter = ""
+    if after_frame is not None and after_frame > 0:
+        frame_filter = f"frame.number > {int(after_frame)}"
     stdout_text, stderr_text = _run_tshark_text_command(
         build_summary_command(
             normalized_path,
             tshark_binary=tshark_binary,
             decode_rule=decode_rule,
+            frame_filter=frame_filter,
         ),
         capture_path=normalized_path,
     )

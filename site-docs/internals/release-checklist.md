@@ -44,7 +44,6 @@ release.
     yggdrasim-scp80 --cmd "exit"
     yggdrasim-scp11 --cmd "EXIT"
     yggdrasim-scp11-live --cmd "HELP; EXIT"
-    yggdrasim-scp11-test --cmd "HELP; EXIT"
     yggdrasim-scp11-local-access --cmd "HELP; EXIT"
     yggdrasim-scp11-eim-local --cmd "HELP; EXIT"
     yggdrasim-profile-package --cmd "STATUS; EXIT"

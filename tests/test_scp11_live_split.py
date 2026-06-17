@@ -645,21 +645,15 @@ class LiveSplitTests(unittest.TestCase):
         self.assertIn(os.path.join("Workspace", "SCP11", "live"), cfg.CERT_PATH_AUTH)
         self.assertIn(os.path.join("Workspace", "SCP11", "live"), cfg.KEY_PATH_PB)
 
-    def test_test_config_paths_resolve_inside_test_tree(self):
+    def test_test_config_alias_uses_live_tree(self):
         cfg = RelayTestConfig()
-        self.assertIn(os.path.join("Workspace", "SCP11", "test"), cfg.CERT_PATH_AUTH)
-        self.assertIn(os.path.join("Workspace", "SCP11", "test"), cfg.KEY_PATH_PB)
+        self.assertIn(os.path.join("Workspace", "SCP11", "live"), cfg.CERT_PATH_AUTH)
+        self.assertIn(os.path.join("Workspace", "SCP11", "live"), cfg.KEY_PATH_PB)
 
     def test_main_wrapper_launches_live_shell(self):
         with mock.patch.object(main_wrapper.importlib, "reload", side_effect=lambda module: module):
             with mock.patch("SCP11.live.main.SGP22Client.run_shell") as mocked:
                 main_wrapper.run_scp11_live()
-        mocked.assert_called_once_with()
-
-    def test_main_wrapper_launches_test_shell(self):
-        with mock.patch.object(main_wrapper.importlib, "reload", side_effect=lambda module: module):
-            with mock.patch("SCP11.test.main.SGP22Client.run_shell") as mocked:
-                main_wrapper.run_scp11_test()
         mocked.assert_called_once_with()
 
     def test_live_client_applies_global_debug_to_transport(self):
@@ -695,10 +689,6 @@ class LiveSplitTests(unittest.TestCase):
             main_wrapper._dispatch_main_menu_choice("3A")
         mocked_live.assert_called_once_with()
 
-        with mock.patch.object(main_wrapper, "run_scp11_test") as mocked_test:
-            main_wrapper._dispatch_main_menu_choice("3B")
-        mocked_test.assert_called_once_with()
-
         with mock.patch.object(main_wrapper, "run_scp11_local") as mocked_local:
             main_wrapper._dispatch_main_menu_choice("3C")
         mocked_local.assert_called_once_with()
@@ -707,62 +697,16 @@ class LiveSplitTests(unittest.TestCase):
             main_wrapper._dispatch_main_menu_choice("3D")
         mocked_eim_local.assert_called_once_with()
 
-        with mock.patch.object(main_wrapper, "run_scp11_live_polling_plugin") as mocked_poll:
-            main_wrapper._dispatch_main_menu_choice("3P")
-        mocked_poll.assert_called_once_with()
-
-    def test_main_menu_live_polling_entry_dispatches_plugin_without_console(self):
-        class FakeClient:
-            def __init__(self):
-                self.cfg = SimpleNamespace()
-                self.apdu_channel = SimpleNamespace(name="initial")
-                self.orchestrator = SimpleNamespace(
-                    state=SimpleNamespace(),
-                    apdu_channel=self.apdu_channel,
-                    _es10b_logical_channel=0,
-                    _use_stk_mode_for_es10b_store_data=False,
-                    _phase_connect_stk_sent=False,
-                    _phase_connect_complete=False,
-                )
-                self.orchestrator._retrieve_es10b_data = mock.Mock(
-                    return_value=b"\xBF\x55\x00"
-                )
-                self.orchestrator._decode_eim_configuration_entries = mock.Mock(
-                    return_value=[{"eim_fqdn": "eim.example.test"}]
-                )
-                self._run_startup_preflight = mock.Mock()
-                self._build_runtime = mock.Mock()
-                self._print_startup_warnings = mock.Mock()
-                self._build_apdu_channel = mock.Mock(
-                    return_value=SimpleNamespace(name="reset")
-                )
-
-        fake_client = FakeClient()
-
-        with mock.patch.object(main_wrapper, "clear_screen"):
-            with mock.patch.object(main_wrapper, "pause"):
-                with mock.patch.object(main_wrapper.importlib, "reload", side_effect=lambda module: module):
-                    with mock.patch("SCP11.live.main.SGP22Client", return_value=fake_client):
-                        with mock.patch(
-                            "yggdrasim_common.polling_plugin_support.dispatch_poll_command"
-                        ) as mocked_dispatch:
-                            main_wrapper.run_scp11_live_polling_plugin(
-                                argument="150",
-                                pause_after=False,
-                            )
-
-        fake_client._run_startup_preflight.assert_called_once_with()
-        fake_client._build_runtime.assert_called_once_with()
-        fake_client._print_startup_warnings.assert_called_once_with()
-        mocked_dispatch.assert_called_once()
-        surface, command_name, adapter, argument = mocked_dispatch.call_args.args
-        self.assertEqual(surface, "scp11.live")
-        self.assertEqual(command_name, "POLL")
-        self.assertEqual(argument, "150")
-        self.assertIs(adapter.orchestrator, fake_client.orchestrator)
-        self.assertEqual(adapter._resolve_cached_poll_target_fqdns(), [])
-        fake_client.orchestrator._retrieve_es10b_data.assert_not_called()
-        fake_client.orchestrator._decode_eim_configuration_entries.assert_not_called()
+    def test_removed_main_menu_choices_do_not_dispatch(self):
+        for removed_choice in ("3B", "3P", "4"):
+            with self.subTest(choice=removed_choice):
+                with mock.patch.object(main_wrapper, "run_scp11_live") as mocked_live:
+                    with mock.patch.object(main_wrapper, "run_scp11_local") as mocked_local:
+                        with mock.patch.object(main_wrapper, "run_scp11_eim_local") as mocked_eim_local:
+                            main_wrapper._dispatch_main_menu_choice(removed_choice)
+                mocked_live.assert_not_called()
+                mocked_local.assert_not_called()
+                mocked_eim_local.assert_not_called()
 
     def test_main_menu_alpha_choices_route_automation_entries(self):
         with mock.patch.object(main_wrapper, "run_scp03_script") as mocked_script:
@@ -991,7 +935,7 @@ class LiveSplitTests(unittest.TestCase):
         self.assertIn("HANDSHAKE: GetEuiccInfo1 [STK MODE BASIC]", call_names)
         self.assertIn("HANDSHAKE: GetEuiccChallenge [STK MODE BASIC]", call_names)
 
-    def test_live_get_eim_package_timeout_raises_without_retry_logic(self):
+    def test_live_get_eim_package_timeout_probes_variant_before_raising(self):
         orchestrator = SGP22Orchestrator(
             cfg=SimpleNamespace(),
             apdu_channel=None,
@@ -1016,10 +960,23 @@ class LiveSplitTests(unittest.TestCase):
             orchestrator._get_eim_package(request)
 
         self.assertIn("timed out", str(raised.exception))
-        self.assertEqual(len(orchestrator.profile_provider.poll_eim_calls), 1)
+        self.assertEqual(len(orchestrator.profile_provider.poll_eim_calls), 2)
+        self.assertNotEqual(
+            orchestrator.profile_provider.poll_eim_calls[0].raw_body,
+            orchestrator.profile_provider.poll_eim_calls[1].raw_body,
+        )
 
-    def test_live_es9_client_requires_binary_eim_body(self):
-        client = Es9LikeClient(base_url="https://rsp.example.com")
+    def test_live_es9_client_uses_json_eim_request_when_binary_body_absent(self):
+        class JsonFallbackClient(Es9LikeClient):
+            def __init__(self):
+                super().__init__(base_url="https://rsp.example.com")
+                self.json_calls = []
+
+            def _post_json_to_base_url(self, base_url, path, body, **kwargs):
+                self.json_calls.append((base_url, path, body, kwargs))
+                return {"pollingComplete": True}
+
+        client = JsonFallbackClient()
         request = EimPollRequest(
             eim_fqdn="eim1.example.test",
             eim_id="manager-1",
@@ -1033,10 +990,15 @@ class LiveSplitTests(unittest.TestCase):
             eim_configuration_data="",
         )
 
-        with self.assertRaises(ValueError) as raised:
-            client._dispatch_eim_request(request)
+        response = client._dispatch_eim_request(request)
 
-        self.assertIn("binary ASN.1 request body", str(raised.exception))
+        self.assertEqual(response, {"pollingComplete": True})
+        self.assertEqual(len(client.json_calls), 1)
+        base_url, path, body, kwargs = client.json_calls[0]
+        self.assertEqual(base_url, "https://eim1.example.test")
+        self.assertEqual(path, "/gsma/rsp2/asn1")
+        self.assertEqual(body["eimFqdn"], "eim1.example.test")
+        self.assertTrue(kwargs["use_configured_ca_bundle"])
 
     def test_live_binary_bf50_result_error_sets_result_code(self):
         client = Es9LikeClient(base_url="https://rsp.example.com")
@@ -1278,7 +1240,7 @@ class LiveSplitTests(unittest.TestCase):
         )
 
         self.assertEqual(response, {})
-        self.assertEqual(client.use_configured_ca_bundle_flags, [False])
+        self.assertEqual(client.use_configured_ca_bundle_flags, [True])
         self.assertEqual(
             client.dynamic_retry_calls,
             [

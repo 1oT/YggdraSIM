@@ -48,10 +48,9 @@ except ImportError:
 class _LocalAccessTransportAdapter:
     """Wraps a local-access apdu_channel as an Sgp22Manager-compatible transport.
 
-    Mirrors the live/test :class:`_SCP03RelayTransportAdapter` so that the legacy
-    Sgp22 manager — used by eSIM Live and eSIM Test for the DISCOVER bundle —
+    Mirrors the eSIM management relay adapter so that the legacy Sgp22 manager
     can drive the same APDU stream against a local-access session and produce
-    output coherent with those modules.
+    coherent output.
     """
 
     def __init__(self, apdu_channel: Any):
@@ -1415,13 +1414,13 @@ class LocalAccessShell:
         self._cmd_discover_via_local_snapshot()
 
     def _cmd_discover_via_sgp22_manager(self) -> None:
-        """Run the eSIM Live / eSIM Test DISCOVER bundle against the local card.
+        """Run the eSIM management DISCOVER bundle against the local card.
 
         Uses the same `Sgp22Manager.get_sgp32_all_data()` pipeline that the
-        eSIM Live (3a) and eSIM Test (3b) consoles use, so the rendered output
-        is coherent across the three SCP11 surfaces. APDU-level traces from
-        the local-access channel are quieted for the duration so that only
-        the manager's structured sections are visible.
+        eSIM management console uses, so the rendered output is coherent across
+        SCP11 surfaces. APDU-level traces from the local-access channel are
+        quieted for the duration so that only the manager's structured sections
+        are visible.
         """
         apdu_channel = getattr(self.session, "apdu_channel", None)
         if apdu_channel is None:

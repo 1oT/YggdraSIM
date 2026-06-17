@@ -115,15 +115,14 @@ try :
 except ImportError :
     hil_bridge_runtime =None
 
-# Persisted YGGDRASIM_* overrides must land in os.environ before the
-# plugin loader runs, because YGGDRASIM_ALLOW_PLUGINS /
-# YGGDRASIM_DISALLOW_PLUGINS are both consumed by ensure_plugins_loaded().
+# Persisted YGGDRASIM_* overrides must land in os.environ before plugin
+# loading, because YGGDRASIM_ALLOW_PLUGINS / YGGDRASIM_DISALLOW_PLUGINS
+# are both consumed by ensure_plugins_loaded(). Loading is deferred until
+# run_cli has handled local utility exits such as --asn1 and --version.
 # Any value already set in the environment (e.g. from the shell, systemd,
 # or an argparse --flag in run_cli) is left untouched so explicit
 # invocations keep priority.
 _APPLIED_PERSISTED_OVERRIDES =yggdrasim_env_flags .apply_persisted_env_overrides ()
-
-ensure_plugins_loaded ()
 
 
 DIRS ={
@@ -1882,7 +1881,7 @@ def run_scp80_script ():
         pause ()
 
 def run_scp11_live ():
-    """Wrapper for SCP11 live relay package."""
+    """Wrapper for the SCP11 eSIM management relay package."""
     try :
         import SCP11 .live .main as scp11_entry
         importlib .reload (scp11_entry )
@@ -1891,92 +1890,7 @@ def run_scp11_live ():
     except SystemExit :
         pass 
     except Exception as e :
-        print (f"{Colors.FAIL}[!] SCP11 Live Error: {e}{Colors.ENDC}")
-        pause ()
-
-class _MainMenuPollingStyle :
-    red =Colors .FAIL 
-    cyan =Colors .CYAN 
-    green =Colors .GREEN 
-    end =Colors .ENDC 
-
-class _MainMenuPollingConsoleAdapter :
-    def __init__ (self ,client ,cached_targets ):
-        self .client =client 
-        self .orchestrator =client .orchestrator 
-        self .apdu_channel =client .apdu_channel 
-        self ._style =_MainMenuPollingStyle ()
-        self ._cached_poll_target_fqdns =list (cached_targets or [])
-
-    def _resolve_cached_poll_target_fqdns (self ):
-        return list (self ._cached_poll_target_fqdns )
-
-    def _run_watchdog_pre_reset (self )->None :
-        build =getattr (self .client ,"_build_apdu_channel",None )
-        if callable (build ):
-            new_channel =build (self .client .cfg )
-            self .apdu_channel =new_channel 
-            self .client .apdu_channel =new_channel 
-            orchestrator =getattr (self ,"orchestrator",None )
-            if orchestrator is not None :
-                orchestrator .apdu_channel =new_channel 
-                orchestrator ._es10b_logical_channel =0 
-                orchestrator ._use_stk_mode_for_es10b_store_data =False 
-                orchestrator ._phase_connect_stk_sent =False 
-                orchestrator ._phase_connect_complete =False 
-                try :
-                    delattr (orchestrator .state ,"_stk_state_captured")
-                except (AttributeError ,TypeError ):
-                    pass 
-
-def _polling_plugin_menu_line ()->str :
-    try :
-        from yggdrasim_common .polling_plugin_support import has_polling_plugin
-        if has_polling_plugin ():
-            return f"{Colors.HEADER} [3P] IPAe Polling Plugin (Live Card){Colors.ENDC}"
-    except Exception :
-        pass 
-    return f"{Colors.BROWN} [3P] IPAe Polling Plugin (plugin unavailable){Colors.ENDC}"
-
-def run_scp11_live_polling_plugin (argument :str |None =None ,pause_after :bool =True ):
-    """Launch the live-card IPAe polling plugin without entering the eSIM shell."""
-    clear_screen ()
-    print (f"{Colors.HEADER}=== IPAe Polling Plugin - Live Card ==={Colors.ENDC}")
-    print (f"{Colors.CYAN}Runs the POLL watchdog directly; the eSIM relay shell banner is skipped.{Colors.ENDC}")
-    poll_argument =str (argument if argument is not None else "").strip ()
-    if argument is None :
-        poll_argument =input (
-            "POLL arguments [default: 1 30; examples: 150 | 150 --auth-apdu <008800...> --debug]: "
-        ).strip ()
-    try :
-        from yggdrasim_common .polling_plugin_support import dispatch_poll_command
-        import SCP11 .live .main as scp11_entry
-        importlib .reload (scp11_entry )
-        client =scp11_entry .SGP22Client ()
-        client ._run_startup_preflight ()
-        client ._build_runtime ()
-        client ._print_startup_warnings ()
-        adapter =_MainMenuPollingConsoleAdapter (client ,[])
-        dispatch_poll_command ("scp11.live","POLL",adapter ,poll_argument )
-    except SystemExit :
-        pass 
-    except Exception as e :
-        print (f"{Colors.FAIL}[!] IPAe Polling Plugin Error: {e}{Colors.ENDC}")
-    finally :
-        if pause_after :
-            pause ()
-
-def run_scp11_test ():
-    """Wrapper for SCP11 test relay package."""
-    try :
-        import SCP11 .test .main as scp11_entry
-        importlib .reload (scp11_entry )
-        client =scp11_entry .SGP22Client ()
-        client .run_shell ()
-    except SystemExit :
-        pass 
-    except Exception as e :
-        print (f"{Colors.FAIL}[!] SCP11 Test Error: {e}{Colors.ENDC}")
+        print (f"{Colors.FAIL}[!] eSIM Management Relay Error: {e}{Colors.ENDC}")
         pause ()
 
 def run_scp11_local ():
@@ -2143,8 +2057,7 @@ def show_guides ():
         print ("Select a module-specific guide or reference document:")
         print (f"  {Colors.GREEN}[1]{Colors.ENDC} Admin Shell guide topics")
         print (f"  {Colors.CYAN}[2]{Colors.ENDC} OTA Simulator guide")
-        print (f"  {Colors.HEADER}[3]{Colors.ENDC} eSIM Relay Live guide")
-        print (f"  {Colors.HEADER}[4]{Colors.ENDC} eSIM Relay Test guide")
+        print (f"  {Colors.HEADER}[3]{Colors.ENDC} eSIM Management Relay guide")
         print (f"  {Colors.HEADER}[5]{Colors.ENDC} Local SMDPP guide")
         print (f"  {Colors.HEADER}[5C]{Colors.ENDC} Local SMDPP certificate override guide")
         print (f"  {Colors.HEADER}[6]{Colors.ENDC} Local eIM overview")
@@ -2170,10 +2083,7 @@ def show_guides ():
             _show_shell_guide_topic ("OTA")
             continue
         if choice =='3':
-            _show_text_document ("SCP11 Live Relay Guide","SCP11/live/README.md")
-            continue
-        if choice =='4':
-            _show_text_document ("SCP11 Test Relay Guide","SCP11/test/README.md")
+            _show_text_document ("eSIM Management Relay Guide","SCP11/live/README.md")
             continue
         if choice =='5':
             _show_text_document ("SCP11 Local SMDPP Guide","SCP11/local_access/README.md")
@@ -2251,9 +2161,9 @@ def show_about ():
       script execution paths. It allows auditing 3GPP TS 31.115 and
       ETSI TS 102 225 security layering without requiring a live network core.
 
-    * {Colors.CYAN}SCP11 Client (eSIM Management - Relay):{Colors.ENDC}
-      Split relay shells for live-default and test-default certificate work.
-      Both expose grouped `LPAd`, `IPAd`, and `IPAe` commands, compact
+    * {Colors.CYAN}SCP11 Client (eSIM Management Relay):{Colors.ENDC}
+      A single relay implementation is exposed through the eSIM management
+      entrypoint. It exposes grouped `LPAd`, `IPAd`, and `IPAe` commands, compact
       discovery, profile state control, `POLL` / `EIM-POLL`, ES9 URL/TLS/CA
       controls, and expert / compatibility commands behind `HELP EXPERT`.
 
@@ -2322,7 +2232,7 @@ def main_menu ():
         print (
             f"{Colors.WHITE} [ {Colors.GREEN}Admin Shell{Colors.WHITE} | "
             f"{Colors.CYAN}OTA Simulator{Colors.WHITE} | "
-            f"{Colors.HEADER}eSIM Relay Live/Test{Colors.WHITE} |{Colors.ENDC}"
+            f"{Colors.HEADER}eSIM Management{Colors.WHITE} |{Colors.ENDC}"
         )
         print (
             f"{Colors.WHITE}   {Colors.HEADER}Local SMDPP{Colors.WHITE} | "
@@ -2346,11 +2256,9 @@ def main_menu ():
         f"{Colors.CYAN} [2] OTA Simulator - Remote Management{Colors.ENDC}",
         "",
         f"{Colors.HEADER}--- eSIM / eIM Management ---{Colors.ENDC}",
-        f"{Colors.HEADER} [3A] eSIM Management Relay (Live Certificates){Colors.ENDC}",
-        f"{Colors.HEADER} [3B] eSIM Management Relay (Test Certificates){Colors.ENDC}",
+        f"{Colors.HEADER} [3A] eSIM Management Relay{Colors.ENDC}",
         f"{Colors.HEADER} [3C] Local SMDPP{Colors.ENDC}",
         f"{Colors.HEADER} [3D] Local eIM{Colors.ENDC}",
-        _polling_plugin_menu_line (),
         "",
         f"{Colors.BLUE}--- Profile & Key Tools ---{Colors.ENDC}",
         f"{Colors.BLUE} [7] SAIP Tool{Colors.ENDC}",
@@ -2389,7 +2297,6 @@ def _dispatch_main_menu_choice (choice :str )->None :
     normalized_choice =str (choice or "").strip ().upper ()
     legacy_choice_map ={
     '3':'3A',
-    '4':'3B',
     '5':'3C',
     '6':'3D',
     '9':'9A',
@@ -2407,17 +2314,11 @@ def _dispatch_main_menu_choice (choice :str )->None :
     if normalized_choice =='3A':
         run_scp11_live ()
         return
-    if normalized_choice =='3B':
-        run_scp11_test ()
-        return
     if normalized_choice =='3C':
         run_scp11_local ()
         return
     if normalized_choice =='3D':
         run_scp11_eim_local ()
-        return
-    if normalized_choice =='3P':
-        run_scp11_live_polling_plugin ()
         return
     if normalized_choice =='7':
         run_profile_package ()
@@ -2482,6 +2383,22 @@ def run_scp03_cmd (cmd_line :str ,yaml_out :str =None ):
         raise 
 
 
+def run_asn1_decode(hex_text: str | None = None, *, input_file: str | None = None, output_format: str = "asn1") -> int:
+    """Run the ASN.1/TLV/APDU decoder from the unified launcher."""
+
+    from Tools.Asn1TlvDecode.main import run_cli as asn1_run_cli
+
+    decode_argv: list[str] = []
+    normalized_format = str(output_format or "asn1").strip().lower()
+    if normalized_format != "asn1":
+        decode_argv.extend(["--format", normalized_format])
+    if input_file is not None and len(str(input_file).strip()) > 0:
+        decode_argv.extend(["--file", str(input_file)])
+    if hex_text is not None and len(str(hex_text).strip()) > 0:
+        decode_argv.append(str(hex_text).strip())
+    return int(asn1_run_cli(decode_argv) or 0)
+
+
 def _build_cli_parser ():
     import argparse
     from yggdrasim_common.__about__ import __version__
@@ -2493,6 +2410,8 @@ def _build_cli_parser ():
         "  python main/main.py --version\n"
         "  python main/main.py --doctor\n"
         "  python main/main.py --card-backend sim\n"
+        "  python main/main.py --asn1 5C06BF51BF449F2A\n"
+        "  echo 5C06BF51BF449F2A | python main/main.py --asn1\n"
         "  python main/main.py --scp03 --cmd 'HELP; EXIT'\n"
         "\n"
         "Environment variables:\n"
@@ -2521,6 +2440,28 @@ def _build_cli_parser ():
     parser .add_argument ("--scp03",action ="store_true",help ="Use SCP03 Admin Shell")
     parser .add_argument ("--cmd",type =str ,help ="Semicolon-separated commands (non-interactive, use with --scp03)")
     parser .add_argument ("--out",type =str ,help ="Output YAML file for --cmd")
+    parser .add_argument (
+    "--asn1",
+    nargs ="?",
+    const ="",
+    metavar ="HEX",
+    default =None ,
+    help ="Decode BER/DER ASN.1, BER-TLV, or command APDU hex and exit. Omit HEX to read stdin.",
+    )
+    parser .add_argument (
+    "--asn1-file",
+    dest ="asn1_file",
+    type =str ,
+    default =None ,
+    help ="Read ASN.1/TLV/APDU hex from a file and exit.",
+    )
+    parser .add_argument (
+    "--asn1-format",
+    dest ="asn1_format",
+    choices =("asn1","json","both"),
+    default ="asn1",
+    help ="ASN.1 decoder output format for --asn1/--asn1-file. Default: asn1.",
+    )
     parser .add_argument (
     "--open-pcap",
     dest ="open_pcap",
@@ -2699,6 +2640,13 @@ def _apply_remote_card_arguments_with_log (args )->None :
 def run_cli (argv =None ):
     parser =_build_cli_parser ()
     args =parser .parse_args (argv )
+    if getattr (args ,"asn1",None )is not None or getattr (args ,"asn1_file",None )is not None :
+        return run_asn1_decode (
+        getattr (args ,"asn1",None ),
+        input_file =getattr (args ,"asn1_file",None ),
+        output_format =getattr (args ,"asn1_format","asn1"),
+        )
+    ensure_plugins_loaded ()
     _emit_plugin_load_banner ()
     # Mirror --remote-card-url / --remote-card-token-file into the env
     # before any card backend is touched, so the existing

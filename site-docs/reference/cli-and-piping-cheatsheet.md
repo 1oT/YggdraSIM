@@ -26,7 +26,6 @@ After an editable install you can also use the installed console scripts:
 - `yggdrasim-scp03`
 - `yggdrasim-scp80`
 - `yggdrasim-scp11-live`
-- `yggdrasim-scp11-test`
 - `yggdrasim-scp11-relay`
 - `yggdrasim-scp11-local-access`
 - `yggdrasim-scp11-eim-local`
@@ -55,8 +54,7 @@ flowchart LR
 | `python -m SCP03` | Yes | Yes | Yes | Supports `--out` YAML export with `--cmd` or `--stdin`. |
 | `python -m SCP80` | Yes | Yes | Yes | Uses the same OTA shell commands as the interactive prompt. |
 | `python -m SCP11.relay` | Yes | Yes | Yes | Relay shell using the default relay certificate set. |
-| `python -m SCP11.live` | Yes | Yes | Yes | Relay shell using live certificate defaults. |
-| `python -m SCP11.test` | Yes | Yes | Yes | Relay shell using test certificate defaults. |
+| `python -m SCP11.live` | Yes | Yes | Yes | eSIM management relay shell. |
 | `python -m SCP11.local_access` | Yes | Yes | Yes | Local SMDPP shell against ISD-R. |
 | `python -m SCP11.eim_local` | Yes | Yes | Yes | Local eIM shell and localized flows. |
 | `python -m Tools.ProfilePackage` | Yes | Yes | Yes | SAIP / profile package shell. |
@@ -252,10 +250,10 @@ Live certificate defaults:
 python -m SCP11.live --cmd "DISCOVER; STATUS; EXIT"
 ```
 
-Test certificate defaults:
+Stdin batch:
 
 ```bash
-python -m SCP11.test --stdin <<'EOF'
+python -m SCP11.live --stdin <<'EOF'
 DISCOVER
 LIST
 STATUS
@@ -432,7 +430,7 @@ RECORD STOP
 - Redirect stdout when the command output is the artifact:
 
 ```bash
-python -m SCP11.test --cmd "DISCOVER; EXIT" > reports/scp11_test_discover.txt
+python -m SCP11.live --cmd "DISCOVER; EXIT" > reports/scp11_discover.txt
 ```
 
 - Capture stdout and keep it visible with `tee`:

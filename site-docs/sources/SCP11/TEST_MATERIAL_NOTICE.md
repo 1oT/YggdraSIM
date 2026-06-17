@@ -38,9 +38,10 @@ but the same rule applies — **do not deploy on production keys.**
 
 ## Why it ships in the repository
 
-- `SCP11/test/`, `SCP11/local_access/`, and `SCP11/eim_local/` shells
-  default to the SGP.26 test profile so that operators can exercise
-  end-to-end ES9+/ES10 flows offline without rebuilding a full PKI.
+- `SCP11/local_access` and `SCP11/eim_local` use SGP.26-style local
+  fixtures so operators can exercise end-to-end flows offline without
+  rebuilding a full PKI. The relay `SCP11/test` entrypoint is a
+  compatibility alias and does not select the SGP.26 test CA implicitly.
 - `tests/test_scp11_sgp26_provider.py` validates the loader against
   the published SGP.26 test fixtures.
 - The published `SK.*.pem` keys are the only cryptographic material

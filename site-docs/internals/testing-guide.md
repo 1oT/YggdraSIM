@@ -23,8 +23,8 @@ to a subsystem or a cross-cutting concern. Representative file patterns:
 | `tests/test_scp11_*.py` | SCP11 family shells and helpers |
 | `tests/test_scp11_eim_*.py` | SCP11 eIM-local shell and logic |
 | `tests/test_scp11_local_access*.py` | SCP11 local-access shell |
-| `tests/test_scp11_live_*.py` | SCP11 live relay |
-| `tests/test_scp11_test_*.py` | SCP11 test relay |
+| `tests/test_scp11_live_*.py` | SCP11 eSIM management relay |
+| `tests/test_scp11_test_*.py` | SCP11 test compatibility namespace |
 | `tests/test_simcard_*.py` | SIMCARD simulator backend |
 | `tests/test_saip_*.py` | SAIP profile package codecs and tooling |
 | `tests/test_profile_package_*.py` | Profile Package shell / saip tool |

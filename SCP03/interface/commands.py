@@ -130,7 +130,6 @@ class CommandRegistry :
 
         'DEBUG':(shell ._toggle_debug ,""),
         'VERBOSE':(shell ._toggle_debug ,""),
-        'DECODE':(shell ._handle_decode ,"<Hex>"),
 
 
         'EXPORT-EUICC':(shell ._handle_export_euicc ,"[OutputPath.yaml]"),
@@ -174,7 +173,6 @@ class CommandRegistry :
         'DEL',
         'SCRIPT',
         'STORE-DATA',
-        'DECODE',
         'DERIVE-OPC',
         'SET-GOLD-PROFILE',
         'INSTALL',

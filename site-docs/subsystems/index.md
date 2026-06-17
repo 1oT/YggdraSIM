@@ -36,21 +36,13 @@ Subsystem pages are the operator-facing guides. Each page covers:
 
     [Open SCP80](scp80.md)
 
--   :material-sim: __SCP11 Live Relay__
+-   :material-sim: __SCP11 eSIM Management Relay__
 
     ---
 
-    Production-like relay shell for LPAd, IPAd, and optional plugin-backed IPAe.
+    Relay shell for LPAd, IPAd, and optional plugin-backed IPAe.
 
-    [Open Live](scp11-live.md)
-
--   :material-flask-outline: __SCP11 Test Relay__
-
-    ---
-
-    Live-shaped relay with test-default trust and lab-only request shaping.
-
-    [Open Test](scp11-test.md)
+    [Open Management](scp11-live.md)
 
 -   :material-lan-connect: __SCP11 Local Access__
 
@@ -134,7 +126,7 @@ Subsystem pages are the operator-facing guides. Each page covers:
 | --- | --- |
 | SCP03 | [GlobalPlatform](../concepts/globalplatform.md), [ETSI UICC](../concepts/etsi-uicc.md) |
 | SCP80 | [SCP80 OTA](../concepts/ota-scp80.md) |
-| SCP11 Live / Test | [RSP Architecture](../concepts/rsp-architecture.md) |
+| SCP11 eSIM Management | [RSP Architecture](../concepts/rsp-architecture.md) |
 | SCP11 Local Access | [RSP Architecture](../concepts/rsp-architecture.md) |
 | SCP11 eIM Local | [RSP Architecture](../concepts/rsp-architecture.md) |
 | Profile Package | [SAIP Profiles](../concepts/saip-profiles.md) |
