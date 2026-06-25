@@ -18,7 +18,7 @@ def _make_template(directory: Path, *, name: str = "template.json") -> Path:
     path = directory / name
     doc = {
         "__ygg_token_defs__": {
-            "ICCID": {"hex": "89461111111111111112"},
+            "ICCID": {"hex": "89881111111111111112"},
             "SPARE": {"hex": "FF"},
         },
         "__ygg_placeholder_style__": "brace",

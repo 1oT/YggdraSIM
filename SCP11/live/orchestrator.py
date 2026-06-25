@@ -40,10 +40,12 @@ from SCP11.shared.trace_dump import (
     print_eim_package_wrapper_summary,
     print_hex_payload,
     print_store_data_chunk_plan,
+    print_tlv_decode,
     split_tlv_aware_chunks,
 )
 from yggdrasim_common.process_debug import debug_print
 from yggdrasim_common.progress import progress_session
+from yggdrasim_common.terminal_output import status_print as print
 
 try:
     from .asn1_registry import ASN1Registry
@@ -284,14 +286,34 @@ class SGP22Orchestrator:
                     for current_entry_index in remaining_entry_indices:
                         request = None
                         try:
+                            entry_ordinal = entry_ordinal_map.get(
+                                current_entry_index, current_entry_index
+                            )
                             request = self._build_eim_poll_request(
                                 matching_id=matching_id,
                                 entry_index=current_entry_index,
                             )
+                            attempt_label = self._format_eim_poll_attempt_label(
+                                drain_round=drain_round,
+                                ordinal=entry_ordinal,
+                                total_entries=total_entries,
+                                entry_index=current_entry_index,
+                                request=request,
+                            )
+                            print(f"[*] eIM poll {attempt_label}: polling.")
                             bar.set_status(
                                 f"round {drain_round} · entry {current_entry_index}"
                             )
-                            outcome = self._run_single_eim_poll_round(request)
+                            previous_attempt_context = getattr(
+                                self, "_current_eim_poll_attempt_context", None
+                            )
+                            self._current_eim_poll_attempt_context = {
+                                "label": attempt_label,
+                            }
+                            try:
+                                outcome = self._run_single_eim_poll_round(request)
+                            finally:
+                                self._current_eim_poll_attempt_context = previous_attempt_context
                             completed_entry_indices.add(current_entry_index)
                             self._last_eim_poll_reached_server = True
                             round_relayed_package_count += int(
@@ -303,12 +325,12 @@ class SGP22Orchestrator:
                             elif int(final_result_code or 0) == 1:
                                 drained_entry_indices.add(current_entry_index)
                             self._print_eim_poll_entry_summary(
-                                ordinal=entry_ordinal_map.get(
-                                    current_entry_index, current_entry_index
-                                ),
+                                ordinal=entry_ordinal,
                                 total_entries=total_entries,
                                 entry_index=current_entry_index,
                                 request=request,
+                                drain_round=drain_round,
+                                outcome=outcome,
                             )
                         except Exception as error:
                             # A single-entry sweep used to re-raise here,
@@ -398,10 +420,27 @@ class SGP22Orchestrator:
         fqdn = ""
         if request is not None:
             fqdn = str(request.eim_fqdn or "").strip()
-        label_parts = [f"index={entry_index}"]
+        label_parts = [f"config_index={entry_index}"]
         if len(fqdn) > 0:
-            label_parts.append(f"fqdn={fqdn}")
-        return ", ".join(label_parts)
+            label_parts.append(f"eim={fqdn}")
+        return " ".join(label_parts)
+
+    def _format_eim_poll_attempt_label(
+        self,
+        *,
+        drain_round: int,
+        ordinal: int,
+        total_entries: int,
+        entry_index: int,
+        request: Optional[EimPollRequest],
+    ) -> str:
+        parts = [f"attempt=drain-{drain_round}"]
+        if total_entries > 1:
+            parts.append(f"entry={ordinal}/{total_entries}")
+        else:
+            parts.append("entry=1/1")
+        parts.append(self._format_eim_poll_entry_label(entry_index, request=request))
+        return " ".join(part for part in parts if len(part) > 0)
 
     def _print_eim_poll_entry_summary(
         self,
@@ -409,34 +448,44 @@ class SGP22Orchestrator:
         total_entries: int,
         entry_index: int,
         request: Optional[EimPollRequest],
+        drain_round: int,
+        outcome: Optional[dict[str, Any]] = None,
     ) -> None:
         # Compact one-liner so the operator can scan drain results at a
         # glance even with the phase/round debug chatter suppressed.
+        poll_outcome = dict(outcome or {})
         last_response = getattr(self, "_last_eim_poll_response", None)
-        fqdn = ""
-        if request is not None:
-            fqdn = str(getattr(request, "eim_fqdn", "") or "").strip()
-        label_text = fqdn if len(fqdn) > 0 else f"index={entry_index}"
         result_text = ""
         package_count = 0
         complete_flag = False
+        result_code = poll_outcome.get("final_result_code")
         if last_response is not None:
             package_count = len(getattr(last_response, "euicc_package_list", []) or [])
             complete_flag = bool(getattr(last_response, "polling_complete", False))
-            result_code = getattr(last_response, "eim_result_code", None)
-            if result_code is not None:
-                result_text = describe_sgp32_eim_package_error(int(result_code))
-        parts: list[str] = []
-        if total_entries > 1:
-            parts.append(f"[{ordinal}/{total_entries}]")
-        parts.append(label_text)
+            if result_code is None:
+                result_code = getattr(last_response, "eim_result_code", None)
+        if result_code is not None:
+            result_text = describe_sgp32_eim_package_error(int(result_code))
+        packages_relayed = int(poll_outcome.get("packages_relayed", 0) or 0)
+        attempt_label = self._format_eim_poll_attempt_label(
+            drain_round=drain_round,
+            ordinal=ordinal,
+            total_entries=total_entries,
+            entry_index=entry_index,
+            request=request,
+        )
         suffix_parts: list[str] = []
+        if packages_relayed > 0:
+            suffix_parts.append(f"processed={packages_relayed} package(s)")
+        else:
+            suffix_parts.append("nothing to process")
         if len(result_text) > 0:
-            suffix_parts.append(result_text)
-        suffix_parts.append(f"packages={package_count}")
+            suffix_parts.append(f"final={result_text}")
+        elif package_count > 0:
+            suffix_parts.append(f"final_packages={package_count}")
         if complete_flag:
             suffix_parts.append("complete")
-        print(f"[*] eIM poll {' '.join(parts)} -> {', '.join(suffix_parts)}")
+        print(f"[*] eIM poll {attempt_label} -> {', '.join(suffix_parts)}")
 
     def _run_single_eim_poll_round(self, request: EimPollRequest) -> dict[str, Any]:
         poll_round = 1
@@ -513,11 +562,16 @@ class SGP22Orchestrator:
                     raise RuntimeError(
                         f"eIM package {package_index} in poll round {poll_round} was empty after decode."
                     )
-                card_response = self._relay_eim_package_to_card(
-                    package_bytes,
-                    poll_round=poll_round,
-                    package_index=package_index,
-                )
+                previous_eim_poll_request = getattr(self, "_current_eim_poll_request", None)
+                self._current_eim_poll_request = request
+                try:
+                    card_response = self._relay_eim_package_to_card(
+                        package_bytes,
+                        poll_round=poll_round,
+                        package_index=package_index,
+                    )
+                finally:
+                    self._current_eim_poll_request = previous_eim_poll_request
                 relayed_package_count += 1
                 if len(card_response) == 0:
                     raise RuntimeError("eIM polling requires a card package result, but the last relay response was empty.")
@@ -1047,7 +1101,7 @@ class SGP22Orchestrator:
             active_channel = int(self._es10b_logical_channel or 0)
             active_channel_error = None
             if active_channel > 0:
-                print(
+                debug_print(
                     f"[*] {log_name} failed ({error}); priming active "
                     f"logical channel {active_channel} and retrying."
                 )
@@ -1058,12 +1112,12 @@ class SGP22Orchestrator:
                     )
                 except Exception as active_error:
                     active_channel_error = active_error
-                    print(
+                    debug_print(
                         f"[*] {log_name} failed on active logical channel recovery "
                         f"({active_error}); reopening ISD-R on a fresh logical channel."
                     )
             else:
-                print(
+                debug_print(
                     f"[*] {log_name} failed ({error}); reopening ISD-R on a fresh "
                     f"logical channel and retrying."
                 )
@@ -1072,7 +1126,7 @@ class SGP22Orchestrator:
             try:
                 return self._send_es10b_store_data_on_recovery_channel(payload, log_name)
             except Exception as logical_error:
-                print(
+                debug_print(
                     f"[*] {log_name} failed on logical channel recovery ({logical_error}); "
                     f"falling back to STK mode."
                 )
@@ -1144,7 +1198,7 @@ class SGP22Orchestrator:
         # queue to the eIM forwarder. The repackaged buffer feeds
         # _extract_notification_metadata_entries unchanged.
         log_name = "DOWNLOAD: RetrieveNotificationsList (BF28 fallback)"
-        print(
+        debug_print(
             f"[*] DOWNLOAD: ListNotifications rejected ({primary_error}); "
             "falling back to RetrieveNotificationsList (BF2B)."
         )
@@ -2040,11 +2094,20 @@ class SGP22Orchestrator:
 
     def _relay_eim_package_to_card(self, package_bytes: bytes, poll_round: int, package_index: int) -> bytes:
         log_name = f"EIM: RelayPackage [poll={poll_round} package={package_index}]"
+        attempt_context = getattr(self, "_current_eim_poll_attempt_context", None)
+        attempt_label = ""
+        if isinstance(attempt_context, dict):
+            attempt_label = str(attempt_context.get("label", "") or "").strip()
+        if len(attempt_label) > 0:
+            source_text = f"from eIM poll {attempt_label} poll_round={poll_round}"
+        else:
+            source_text = f"from poll round {poll_round}"
         print(
-            f"[*] Relaying eIM package {package_index} from poll round {poll_round}: "
+            f"[*] Relaying eIM package {package_index} {source_text}: "
             f"tag={self._tag_hex(package_bytes)} len={len(package_bytes)}"
         )
         print_hex_payload("Full eIM package", package_bytes)
+        print_tlv_decode("Full eIM package", package_bytes)
         print_eim_package_wrapper_summary(package_bytes)
         parsed = parse_eim_package(package_bytes)
         print(f"[*] eIM package type: {parsed.package_type}")
@@ -2122,7 +2185,7 @@ class SGP22Orchestrator:
         if parsed.package_type == TYPE_EUICC_CONFIGURATION:
             last_response = self._build_ipa_euicc_data_response(parsed, log_name)
             self.state.eim_package_response = last_response
-            print(f"[*] eIM card response: {last_response.hex().upper()}")
+            self._print_eim_card_response(last_response)
             self._sync_pending_notifications(last_response)
             return last_response
 
@@ -2149,7 +2212,7 @@ class SGP22Orchestrator:
                 print("[*] eIM relay completed with empty card response.")
                 self._sync_pending_notifications()
                 return last_response
-            print(f"[*] eIM card response: {last_response.hex().upper()}")
+            self._print_eim_card_response(last_response)
             if parsed.package_type == TYPE_PROFILE_STATE_MANAGEMENT:
                 last_response = self._build_profile_state_management_result(
                     last_response, log_name, package_bytes
@@ -2163,7 +2226,7 @@ class SGP22Orchestrator:
                 print("[*] eIM relay completed with empty card response.")
                 self._sync_pending_notifications()
                 return last_response
-            print(f"[*] eIM card response: {last_response.hex().upper()}")
+            self._print_eim_card_response(last_response)
             self._sync_pending_notifications(last_response)
             return last_response
 
@@ -2180,10 +2243,14 @@ class SGP22Orchestrator:
             print("[*] eIM relay completed with empty card response.")
             self._sync_pending_notifications()
             return last_response
-        print(f"[*] eIM card response: {last_response.hex().upper()}")
+        self._print_eim_card_response(last_response)
         self._handle_profile_load_result(last_response)
         self._sync_pending_notifications(last_response)
         return last_response
+
+    def _print_eim_card_response(self, response: bytes) -> None:
+        print_hex_payload("eIM card response", response)
+        print_tlv_decode("eIM card response", response)
 
     def _build_profile_state_management_result(self, card_response: bytes, log_name: str, package_bytes: bytes = b"") -> bytes:
         """Return the card-produced SGP.32 EuiccPackageResult payload."""
@@ -2245,6 +2312,8 @@ class SGP22Orchestrator:
         pending_notification_list = b""
         euicc_package_result_list = b""
 
+        requested_eim_id = self._resolve_ipa_euicc_data_request_eim_id(parsed_package)
+
         if bytes.fromhex("BF20") in requested_tag_set:
             euicc_info1 = self._retrieve_es10b_data(bytes.fromhex("BF2000"), f"{log_name}: GetEuiccInfo1")
         if bytes.fromhex("BF22") in requested_tag_set:
@@ -2266,7 +2335,10 @@ class SGP22Orchestrator:
                 f"{log_name}: RetrieveEuiccPackageResults",
             )
 
-        first_entry = self._extract_first_eim_entry_bytes(eim_configuration_data)
+        eim_entry = self._extract_eim_entry_bytes_for_request(
+            eim_configuration_data,
+            requested_eim_id,
+        )
 
         response_items = {}
         for requested_tag in requested_tags:
@@ -2285,7 +2357,7 @@ class SGP22Orchestrator:
             elif requested_tag == b"\x83":
                 raw_field = self._build_text_item_from_source(configured_data, b"\x81", b"\x83")
             elif requested_tag == b"\x84":
-                raw_field = self._find_first_raw_tlv_recursive(first_entry, b"\x84")
+                raw_field = self._find_first_raw_tlv_recursive(eim_entry, b"\x84")
             elif requested_tag == b"\xA5":
                 raw_field = self._find_first_raw_tlv_recursive(certs_data, b"\xA5")
             elif requested_tag == b"\xA6":
@@ -2323,6 +2395,15 @@ class SGP22Orchestrator:
 
         ipa_euicc_data = self._wrap_tlv(b"\xA0", body)
         return self._wrap_tlv(bytes.fromhex("BF52"), ipa_euicc_data)
+
+    def _resolve_ipa_euicc_data_request_eim_id(self, parsed_package: Any) -> str:
+        parsed_eim_id = str(getattr(parsed_package, "eim_id", "") or "").strip()
+        if len(parsed_eim_id) > 0:
+            return parsed_eim_id
+        request = getattr(self, "_current_eim_poll_request", None)
+        if request is None:
+            return ""
+        return str(getattr(request, "eim_id", "") or "").strip()
 
     def _extract_notification_list_item(self, response: bytes) -> bytes:
         raw_field = self._extract_choice_item(response, b"\xA0")
@@ -2406,6 +2487,37 @@ class SGP22Orchestrator:
         if len(entries) == 0:
             return b""
         return entries[0]
+
+    @staticmethod
+    def _normalize_eim_identifier(value: str) -> str:
+        return str(value or "").strip().casefold()
+
+    def _extract_eim_entry_bytes_for_request(self, response: bytes, eim_id: str) -> bytes:
+        try:
+            root_tag, root_value, _, _ = self._read_tlv(response, 0)
+        except Exception:
+            return b""
+        if root_tag != bytes.fromhex("BF55"):
+            return b""
+        entries = self._find_eim_entry_values(root_value)
+        if len(entries) == 0:
+            return b""
+        target_eim_id = self._normalize_eim_identifier(eim_id)
+        if len(target_eim_id) == 0:
+            return entries[0]
+        for entry_value in entries:
+            try:
+                entry = self._decode_eim_configuration_entry(entry_value)
+            except Exception:
+                continue
+            entry_eim_id = self._normalize_eim_identifier(str(entry.get("eim_id", "")))
+            if entry_eim_id == target_eim_id:
+                return entry_value
+        debug_print(
+            "[*] GetEuiccData: no BF55 eIM entry matched requester "
+            f"eimId={eim_id}; omitting entry-scoped fields."
+        )
+        return b""
 
     def _find_first_raw_tlv_recursive(self, data: bytes, target_tag: bytes) -> bytes:
         if len(data) == 0:
@@ -3711,17 +3823,9 @@ class SGP22Orchestrator:
         return ", ".join(fragments)
 
     def _format_sima_response(self, sima_response: bytes) -> str:
-        raw_hex = sima_response.hex().upper()
-        translation = self._translate_sima_response_tlv(sima_response)
-        semantic = self._decode_sima_response_semantics(sima_response)
-        parts = []
-        if len(translation) > 0:
-            parts.append(translation)
-        if len(semantic) > 0:
-            parts.append(semantic)
-        if len(parts) == 0:
-            return raw_hex
-        return raw_hex + " [" + "; ".join(parts) + "]"
+        from SCP11.shared.sima_response import format_sima_response
+
+        return format_sima_response(sima_response)
 
     def _translate_sima_response_tlv(self, data: bytes) -> str:
         return self._translate_sima_response_tlv_with_path(data, path=[])

@@ -52,8 +52,8 @@ from yggdrasim_common.runtime_paths import ensure_seeded_workspace_file, runtime
 DEFAULT_SIM_EIM_IDENTITY: dict[str, str] = {
     "eim_id": "2.25.311782205282738360923618091971140414400",
     "eim_id_type": "oid",
-    "eim_fqdn": "yggdrasim.eim.test.1ot.com",
-    "eim_endpoint": "https://yggdrasim.eim.test.1ot.com/gsma/rsp2/asn1",
+    "eim_fqdn": "eim.example.test",
+    "eim_endpoint": "https://eim.example.test/gsma/rsp2/asn1",
     "euicc_ci_pk_id": "F54172BDF98A95D65CBEB88A38A1C11D800A85C3",
     "eim_public_key_cert_path": "",
     "trusted_tls_cert_path": "",
@@ -3489,6 +3489,7 @@ class SgpLogic:
             auth_config=profile_auth_config,
         )
         self.state.profiles.append(profile)
+        rebuild_runtime_filesystem(self.state)
         self._sync_profile_store()
         return profile
 
@@ -3549,7 +3550,7 @@ class SgpLogic:
         used = {profile.iccid for profile in self.state.profiles}
         suffix = len(self.state.profiles) + 11
         while True:
-            candidate = f"894611111111111111{suffix:02d}"
+            candidate = f"898811111111111111{suffix:02d}"
             if candidate not in used:
                 return candidate
             suffix += 1

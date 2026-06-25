@@ -177,7 +177,7 @@ list, and on-card SCP03 / SCP80 keysets used by the **simulated** card.
       "scp80_security": { "spi": "1621", "kic": "15", "kid": "15", "tar": "B00000",
                           "key_enc_hex": "...", "key_mac_hex": "..." },
       "configured_data": {
-        "root_smds_address": "lpa.ds.gsma.com",
+        "root_smds_address": "root-smds.example.com",
         "additional_root_smds_addresses": ["smds2.example", "smds3.example"],
         "allowed_ci_pkids_hex":            ["F54172BDF98A95D65CBEB88A38A1C11D800A85C3"],
         "ci_list_hex":                     ["F54172BDF98A95D65CBEB88A38A1C11D800A85C3"]
@@ -212,7 +212,7 @@ the override env var `YGGDRASIM_SIM_EIM_IDENTITY` and the schema below:
 
 ```json
 {
-  "display_name": "Operator alpha lab",
+  "display_name": "Example lab",
   "eim_id": "2.25....",
   "eim_id_type": "oid",
   "eim_fqdn": "eim.operator.example",
@@ -350,7 +350,7 @@ download.
 
     ```bash
     yggdrasim-eum-diag store-keys \
-        --iccid 8901260000000000001 \
+        --iccid 8988000000000000001 \
         --shs-enc AABBCCDDEEFF00112233445566778899 \
         --shs-mac 00112233445566778899AABBCCDDEEFF \
         --dek    0F0E0D0C0B0A09080706050403020100 \

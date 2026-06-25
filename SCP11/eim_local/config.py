@@ -109,8 +109,8 @@ class EimLocalConfig(LocalAccessConfig):
     EIM_NO_PACKAGE_RESULT_CODE: int = 1
     EIM_POLL_INCLUDE_FIXED_FIXTURES: bool = True
 
-    EIM_BIP_ENDPOINT: str = "https://yggdrasim.eim.test.1ot.com/gsma/rsp2/asn1"
-    SMDPP_BIP_ENDPOINT: str = "https://yggdrasim.smdpp.test.1ot.com/gsma/rsp2/es9plus"
+    EIM_BIP_ENDPOINT: str = "https://eim.example.test/gsma/rsp2/asn1"
+    SMDPP_BIP_ENDPOINT: str = "https://smdpp.example.test/gsma/rsp2/es9plus"
     POLL_BRIDGE_BIND_HOST: str = "127.0.0.1"
     POLL_BRIDGE_DNS_PORT: int = 15353
     POLL_BRIDGE_EIM_TLS_PORT: int = 18443

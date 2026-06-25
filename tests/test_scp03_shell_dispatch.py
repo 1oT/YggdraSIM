@@ -437,7 +437,7 @@ class ShellDispatcherIdentityProbeTests(unittest.TestCase):
 
         iccid = shell._read_live_iccid()
 
-        self.assertEqual(iccid, "89103000000598450712")
+        self.assertEqual(iccid, "89880000000598450712")
         self.assertEqual(
             shell.transport.calls,
             [
@@ -460,7 +460,7 @@ class ShellDispatcherIdentityProbeTests(unittest.TestCase):
 
         iccid = shell._read_live_iccid()
 
-        self.assertEqual(iccid, "89103000000598450712")
+        self.assertEqual(iccid, "89880000000598450712")
 
 
 class ShellDispatcherPromptStateTests(unittest.TestCase):

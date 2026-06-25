@@ -6,6 +6,8 @@ import os
 import sys
 import warnings
 
+from yggdrasim_common.terminal_output import colorize_status_text
+
 
 GLOBAL_DEBUG_ENV = "YGGDRASIM_GLOBAL_DEBUG"
 
@@ -74,7 +76,8 @@ def debug_print(message: str, *, stream=None) -> None:
         return
     target = stream if stream is not None else sys.stdout
     try:
-        target.write(f"{message}\n")
+        rendered = colorize_status_text(str(message), stream=target)
+        target.write(f"{rendered}\n")
         flush = getattr(target, "flush", None)
         if callable(flush):
             flush()

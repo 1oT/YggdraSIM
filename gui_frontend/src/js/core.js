@@ -74,6 +74,33 @@
     return resolved;
   }
 
+  async function apiErrorDetail(response) {
+    var text = "";
+    try {
+      text = await response.text();
+    } catch (_err) {
+      return "";
+    }
+    if (!text) return "";
+    try {
+      var payload = JSON.parse(text);
+      if (payload && typeof payload.detail === "string") return payload.detail;
+      if (payload && typeof payload.error === "string") return payload.error;
+      if (payload && Array.isArray(payload.detail)) {
+        return payload.detail.map(function (entry) {
+          if (!entry) return "";
+          if (typeof entry === "string") return entry;
+          var loc = Array.isArray(entry.loc) ? entry.loc.join(".") : "";
+          var msg = entry.msg || entry.message || "";
+          return [loc, msg].filter(Boolean).join(": ");
+        }).filter(Boolean).join("; ");
+      }
+    } catch (_err) {
+      return text.length > 240 ? text.slice(0, 240) + "..." : text;
+    }
+    return text.length > 240 ? text.slice(0, 240) + "..." : text;
+  }
+
   async function apiFetch(path, options) {
     var opts = options || {};
     var headers = Object.assign({}, opts.headers || {});
@@ -97,7 +124,10 @@
     }
     if (!response.ok) {
       setApiBadge("warn", "error " + response.status);
-      throw new Error("HTTP " + response.status + " for " + path);
+      var message = "HTTP " + response.status + " for " + path;
+      var detail = await apiErrorDetail(response);
+      if (detail) message += ": " + detail;
+      throw new Error(message);
     }
     return response.json();
   }
@@ -182,6 +212,7 @@
     if (name !== "command_center") {
       var mainEl = document.querySelector(".main");
       if (mainEl) {
+        mainEl.classList.remove("main--module-workbench");
         mainEl.classList.remove("main--saip-workbench");
         mainEl.classList.remove("main--hil-workbench");
       }
@@ -193,12 +224,12 @@
       overview: "Overview",
       registry: "Registry browser",
       backend: "Card backend",
-      env_flags: "Environment flags",
+      env_flags: "Configuration",
       about: "About",
       terminal: "Advanced · Shell",
       host_shell: "Advanced · Host shell",
       live_readers: "Inspect · PC/SC readers",
-      card_bridge: "Meta · Card bridge",
+      card_bridge: "Advanced · Remote Bridge",
       command_center: (options && options.crumb) || "Command Center",
     }[name] || "Overview");
     highlightSidebar(name);
@@ -219,13 +250,8 @@
   async function loadHealth() {
     try {
       var data = await apiFetch("/api/health");
-      setText("overview-version", data.version);
-      setText("overview-flavor", data.flavor);
-      setText("overview-mode", data.mode);
-      setText("overview-uptime", formatUptime(data.uptime_seconds));
-      setText("overview-pid", data.pid);
-      setText("badge-mode", "mode: " + data.mode);
-      setText("badge-flavor", "flavor: " + data.flavor);
+      setText("topbar-suite-version", "v" + String(data.version || "…"));
+      setText("topbar-suite-active", "active " + formatUptime(data.uptime_seconds));
       setApiBadge("ok", "online");
       clearError();
     } catch (err) {
@@ -241,10 +267,20 @@
       setText("backend-current", data.backend);
       setText("backend-source", data.source);
       setText("backend-simulated", data.is_simulated ? "yes" : "no");
-      setText("badge-backend", "backend: " + data.backend);
+      syncBackendSwitch(data.backend);
     } catch (err) {
       // keep prior state; overview header already reports API state
     }
+  }
+
+  function syncBackendSwitch(backend) {
+    var active = String(backend || "").toLowerCase();
+    document.querySelectorAll(".topbar-backend-option[data-backend]").forEach(function (btn) {
+      var value = String(btn.getAttribute("data-backend") || "").toLowerCase();
+      var selected = value === active;
+      btn.classList.toggle("is-active", selected);
+      btn.setAttribute("aria-pressed", selected ? "true" : "false");
+    });
   }
 
   async function setBackend(backend) {
@@ -300,6 +336,15 @@
     el.textContent = message || "";
   }
 
+  function setEnvFlagStats(flags) {
+    flags = Array.isArray(flags) ? flags : [];
+    var setCount = flags.filter(function (flag) { return !!flag.is_set; }).length;
+    var sensitiveCount = flags.filter(function (flag) { return !!flag.sensitive; }).length;
+    setText("env-flag-count", "flags: " + flags.length);
+    setText("env-flag-set-count", "set: " + setCount);
+    setText("env-flag-sensitive-count", "sensitive: " + sensitiveCount);
+  }
+
   async function resetPersistedEnvFlags() {
     setEnvFlagToolbarStatus("resetting…");
     try {
@@ -308,7 +353,7 @@
         headers: { "content-type": "application/json" },
         body: "{}",
       });
-      var cleared = Array.isArray(result && result.cleared) ? result.cleared.length : 0;
+      var cleared = Number(result && result.removed || 0);
       setEnvFlagToolbarStatus("reset " + cleared + " persisted override" + (cleared === 1 ? "" : "s"));
       await loadEnvFlags();
     } catch (err) {
@@ -324,48 +369,68 @@
       var data = await apiFetch("/api/env_flags/list");
       var categories = data.categories || [];
       var flags = data.flags || [];
+      setEnvFlagStats(flags);
       root.innerHTML = "";
       categories.forEach(function (cat) {
         var catFlags = flags.filter(function (f) { return f.category === cat; });
         if (catFlags.length === 0) return;
-        var section = document.createElement("section");
+        var section = document.createElement("details");
         section.className = "env-flag-category";
-        var h2 = document.createElement("h2");
-        h2.textContent = cat;
-        section.appendChild(h2);
+        var summary = document.createElement("summary");
+        summary.className = "env-flag-category-summary";
+        var title = document.createElement("span");
+        title.className = "env-flag-category-title";
+        title.textContent = cat;
+        var count = document.createElement("span");
+        count.className = "env-flag-category-count";
+        count.textContent = catFlags.length + " flag" + (catFlags.length === 1 ? "" : "s");
+        var body = document.createElement("div");
+        body.className = "env-flag-category-body";
+        summary.appendChild(title);
+        summary.appendChild(count);
+        section.appendChild(summary);
         catFlags.forEach(function (flag) {
-          section.appendChild(renderEnvFlag(flag));
+          body.appendChild(renderEnvFlag(flag));
         });
+        section.appendChild(body);
         root.appendChild(section);
       });
       if (root.children.length === 0) {
         root.innerHTML = "<p class=\"loading\">no flags registered</p>";
       }
     } catch (err) {
+      setEnvFlagStats([]);
       root.innerHTML = "<p class=\"loading\">failed: " + escapeHtml(err.message) + "</p>";
     }
   }
 
   function renderEnvFlag(flag) {
     var row = document.createElement("div");
-    row.className = "env-flag";
+    row.className = "env-flag" + (flag.is_set ? " env-flag--set" : " env-flag--unset");
+    if (flag.sensitive) {
+      row.className += " env-flag--sensitive";
+    }
 
     var meta = document.createElement("div");
+    meta.className = "env-flag-meta";
     var nameEl = document.createElement("div");
     nameEl.className = "env-flag-name";
-    nameEl.textContent = flag.name;
+    var nameText = document.createElement("code");
+    nameText.className = "env-flag-name-text";
+    nameText.textContent = flag.name;
+    nameEl.appendChild(nameText);
     var kind = document.createElement("span");
-    kind.className = "kind";
+    kind.className = "env-flag-chip env-flag-chip--kind";
     kind.textContent = flag.kind;
     nameEl.appendChild(kind);
     if (flag.sensitive) {
       var sens = document.createElement("span");
-      sens.className = "sensitive";
+      sens.className = "env-flag-chip env-flag-chip--sensitive";
       sens.textContent = "sensitive";
       nameEl.appendChild(sens);
     }
     var scope = document.createElement("span");
-    scope.className = "kind";
+    scope.className = "env-flag-chip env-flag-chip--scope";
     scope.textContent = flag.persist_scope || "persist";
     nameEl.appendChild(scope);
     var summary = document.createElement("div");
@@ -419,6 +484,7 @@
 
     var setBtn = document.createElement("button");
     setBtn.type = "button";
+    setBtn.className = "btn btn-primary env-flag-action";
     setBtn.textContent = "Set";
     setBtn.addEventListener("click", function () {
       applyEnvFlag(flag.name, input.value, persistBox.checked, setBtn);
@@ -426,7 +492,7 @@
 
     var clearBtn = document.createElement("button");
     clearBtn.type = "button";
-    clearBtn.className = "secondary";
+    clearBtn.className = "btn env-flag-action env-flag-action--clear";
     clearBtn.textContent = "Clear";
     clearBtn.addEventListener("click", function () {
       applyEnvFlag(flag.name, "", persistBox.checked, clearBtn);
@@ -447,24 +513,30 @@
     if (btn) {
       btn.disabled = true;
     }
+    setEnvFlagToolbarStatus("applying " + name + "...");
     try {
       var cleaned = String(value || "").trim();
+      var result;
       if (cleaned.length === 0) {
-        await apiFetch("/api/env_flags/" + encodeURIComponent(name) + "/clear", {
+        result = await apiFetch("/api/env_flags/" + encodeURIComponent(name) + "/clear", {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ value: "", persist: !!persist }),
+          body: JSON.stringify({ persist: !!persist }),
         });
       } else {
-        await apiFetch("/api/env_flags/" + encodeURIComponent(name) + "/set", {
+        result = await apiFetch("/api/env_flags/" + encodeURIComponent(name) + "/set", {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({ value: cleaned, persist: !!persist }),
         });
       }
+      setEnvFlagToolbarStatus((result && result.note) || "updated " + name);
+      clearError();
       await loadEnvFlags();
     } catch (err) {
-      alert("env flag mutation failed: " + err.message);
+      var message = "env flag mutation failed: " + (err && err.message ? err.message : String(err));
+      setEnvFlagToolbarStatus(message);
+      setStatusError(message);
     } finally {
       if (btn) {
         btn.disabled = false;
@@ -525,15 +597,6 @@
         }
       });
     });
-
-    var refreshBtn = $("overview-refresh");
-    if (refreshBtn) {
-      refreshBtn.addEventListener("click", function () {
-        setStatusAction("refreshing…");
-        loadHealth();
-        loadBackend();
-      });
-    }
 
     var envRefreshBtn = $("env-flag-refresh");
     if (envRefreshBtn) {
@@ -1053,7 +1116,48 @@
     autoRefreshTimer: null,
     autoRefreshIntervalMs: 5000,
     lastStatus: null,
+    globalState: "idle",
+    globalLabel: "idle",
   };
+
+  function cbBridgeStatusFromPayload(data) {
+    if (!data || !data.configured) return { state: "idle", label: "idle" };
+    if (data.url_source === "marker") return { state: "running", label: "running" };
+    return { state: "configured", label: "configured" };
+  }
+
+  function cbSetGlobalBridgeStatus(state, label) {
+    var nextState = state || "idle";
+    var nextLabel = label || nextState;
+    cbState.globalState = nextState;
+    cbState.globalLabel = nextLabel;
+    var pill = $("topbar-card-bridge");
+    if (pill) {
+      pill.setAttribute("data-state", nextState);
+      pill.title = "Remote Bridge status: " + nextLabel
+        + ". Click to " + (nextState === "running" ? "stop" : "start") + ".";
+      pill.setAttribute("aria-label", pill.title);
+    }
+    setText("topbar-card-bridge-value", nextLabel);
+    cbSyncCommandCenterBridgeIndicators();
+  }
+
+  function cbSyncCommandCenterBridgeIndicators() {
+    var state = cbState.globalState || "idle";
+    var label = cbState.globalLabel || state;
+    document.querySelectorAll('#command-center-nav [data-cc-leaf-id="leaf-adv-card-bridge"]').forEach(function (entry) {
+      entry.setAttribute("data-cb-state", state);
+      entry.classList.toggle("is-cb-active", state === "running");
+      var marker = entry.querySelector(".cc-nav-card-bridge-state");
+      if (marker) marker.textContent = state === "running" ? "running" : "";
+    });
+    document.querySelectorAll('.overview-module-card[data-cc-view="card_bridge"]').forEach(function (card) {
+      card.setAttribute("data-cb-state", state);
+      card.classList.toggle("is-cb-active", state === "running");
+      var badge = card.querySelector('[data-cb-role="overview-status"]');
+      if (badge) badge.textContent = label;
+    });
+  }
 
   function cbSetBadge(elId, posture) {
     var el = $(elId);
@@ -1139,6 +1243,7 @@
       });
       if (!resp.ok) {
         cbSetBadge("cb-status-badge", "error");
+        cbSetGlobalBridgeStatus("error", "error");
         if (summary) summary.textContent = "status action failed: " + (resp.error || "unknown error");
         return;
       }
@@ -1146,6 +1251,7 @@
       renderCardBridgeStatus(cbState.lastStatus);
     } catch (err) {
       cbSetBadge("cb-status-badge", "error");
+      cbSetGlobalBridgeStatus("error", "error");
       if (summary) summary.textContent = "status request failed: " + (err && err.message || String(err));
     }
   }
@@ -1154,6 +1260,8 @@
     if (!data) return;
     var configured = !!data.configured;
     cbSetBadge("cb-status-badge", configured ? "configured" : "not-configured");
+    var global = cbBridgeStatusFromPayload(data);
+    cbSetGlobalBridgeStatus(global.state, global.label);
     setText("cb-status-url", data.url || "–");
     setText("cb-status-source", data.url_source || "–");
     var fp = data.token_fingerprint || "";
@@ -1184,7 +1292,7 @@
       } else {
         summary.innerHTML =
           "Not configured — set <code>YGGDRASIM_CARD_RELAY_URL</code> or pass " +
-          "<code>--remote-card-url</code> to talk to a Card Bridge over SSH.";
+          "<code>--remote-card-url</code> to talk to a Remote Bridge over SSH.";
       }
     }
 
@@ -1482,8 +1590,532 @@
     });
   }
 
+  var CB_RIG_STORAGE_KEY = "yggdrasim.card_bridge.remote_rig";
+  var CB_RIG_PROFILES_STORAGE_KEY = "yggdrasim.card_bridge.remote_rig.profiles";
+  var CB_RIG_FIELD_IDS = [
+    "cb-rig-ssh-target",
+    "cb-rig-identity-file",
+    "cb-rig-reader-index",
+    "cb-rig-reader-name",
+    "cb-rig-card-port",
+    "cb-rig-gui-port",
+    "cb-rig-service-name",
+    "cb-rig-remote-workdir",
+    "cb-rig-remote-python",
+    "cb-rig-remote-token",
+    "cb-rig-remsim-binary",
+    "cb-rig-usb-vidpid",
+    "cb-rig-hil-port",
+  ];
+  var cbRigApplyingProfile = false;
+
+  function cbRigReadField(id) {
+    var el = $(id);
+    return el ? String(el.value || "").trim() : "";
+  }
+
+  function cbRigWriteField(id, value) {
+    var el = $(id);
+    if (!el || value == null) return;
+    el.value = String(value);
+  }
+
+  function cbRigReadSettingsPayload() {
+    var payload = {};
+    CB_RIG_FIELD_IDS.forEach(function (id) { payload[id] = cbRigReadField(id); });
+    return payload;
+  }
+
+  function cbRigLoadProfiles() {
+    var profiles = {};
+    try {
+      profiles = JSON.parse(window.localStorage.getItem(CB_RIG_PROFILES_STORAGE_KEY) || "{}") || {};
+    } catch (_err) {
+      profiles = {};
+    }
+    return profiles && typeof profiles === "object" && !Array.isArray(profiles) ? profiles : {};
+  }
+
+  function cbRigLoadStoredSettingsPayload(profiles) {
+    var stored = {};
+    var knownProfiles = profiles || cbRigLoadProfiles();
+    try {
+      stored = JSON.parse(window.localStorage.getItem(CB_RIG_STORAGE_KEY) || "{}") || {};
+    } catch (_err) {
+      stored = {};
+    }
+    if (!stored || typeof stored !== "object" || Array.isArray(stored)) stored = {};
+    var storedTarget = String(stored["cb-rig-ssh-target"] || "").trim();
+    if (storedTarget && knownProfiles[storedTarget]) {
+      stored = Object.assign({}, knownProfiles[storedTarget], stored);
+    }
+    return stored;
+  }
+
+  function cbRigWriteProfiles(profiles) {
+    try {
+      window.localStorage.setItem(CB_RIG_PROFILES_STORAGE_KEY, JSON.stringify(profiles || {}));
+    } catch (_err) {}
+  }
+
+  function cbRigRenderProfileOptions(profiles) {
+    var list = $("cb-rig-ssh-target-options");
+    if (!list) return;
+    list.textContent = "";
+    Object.keys(profiles || {}).sort().forEach(function (target) {
+      if (!target) return;
+      var option = document.createElement("option");
+      option.value = target;
+      list.appendChild(option);
+    });
+  }
+
+  function cbRigSaveProfile(payload) {
+    var target = String((payload && payload["cb-rig-ssh-target"]) || "").trim();
+    if (!target) return;
+    var profiles = cbRigLoadProfiles();
+    profiles[target] = Object.assign({}, profiles[target] || {}, payload);
+    cbRigWriteProfiles(profiles);
+    cbRigRenderProfileOptions(profiles);
+  }
+
+  function cbRigApplyProfileForTarget(target) {
+    var normalized = String(target || "").trim();
+    if (!normalized) return false;
+    var profiles = cbRigLoadProfiles();
+    var profile = profiles[normalized];
+    if (!profile || typeof profile !== "object") return false;
+    cbRigApplyingProfile = true;
+    CB_RIG_FIELD_IDS.forEach(function (id) {
+      if (Object.prototype.hasOwnProperty.call(profile, id)) {
+        cbRigWriteField(id, profile[id]);
+      }
+    });
+    cbRigApplyingProfile = false;
+    cbRigUpdateGuiUrl();
+    return true;
+  }
+
+  function cbRigLoadSettings() {
+    var profiles = cbRigLoadProfiles();
+    cbRigRenderProfileOptions(profiles);
+    var stored = cbRigLoadStoredSettingsPayload(profiles);
+    Object.keys(stored).forEach(function (id) {
+      cbRigWriteField(id, stored[id]);
+    });
+    cbRigUpdateGuiUrl();
+  }
+
+  function cbRigSaveSettings(options) {
+    var payload = cbRigReadSettingsPayload();
+    try {
+      window.localStorage.setItem(CB_RIG_STORAGE_KEY, JSON.stringify(payload));
+    } catch (_err) {}
+    if (!options || options.updateProfile !== false) {
+      cbRigSaveProfile(payload);
+    }
+  }
+
+  function cbRigNumber(id, fallback) {
+    var parsed = parseInt(cbRigReadField(id), 10);
+    if (!isFinite(parsed) || parsed <= 0) return fallback;
+    return parsed;
+  }
+
+  function cbRigPayloadValue(payload, id) {
+    return String((payload && payload[id]) || "").trim();
+  }
+
+  function cbRigPayloadNumber(payload, id, fallback) {
+    var parsed = parseInt(cbRigPayloadValue(payload, id), 10);
+    if (!isFinite(parsed) || parsed <= 0) return fallback;
+    return parsed;
+  }
+
+  function cbRigInputsFromPayload(payload) {
+    var cardPort = cbRigPayloadNumber(payload, "cb-rig-card-port", 8642);
+    var guiPort = cbRigPayloadNumber(payload, "cb-rig-gui-port", 27854);
+    return {
+      ssh_target: cbRigPayloadValue(payload, "cb-rig-ssh-target"),
+      identity_file: cbRigPayloadValue(payload, "cb-rig-identity-file"),
+      reader_index: cbRigPayloadNumber(payload, "cb-rig-reader-index", 0),
+      reader_name: cbRigPayloadValue(payload, "cb-rig-reader-name"),
+      local_card_port: cardPort,
+      remote_card_port: cardPort,
+      local_gui_port: guiPort,
+      remote_gui_port: guiPort,
+      service_name: cbRigPayloadValue(payload, "cb-rig-service-name") || "yggdrasim-hil-supervisor.service",
+      remote_card_url: "http://127.0.0.1:" + cardPort + "/apdu",
+      remote_token_file: cbRigPayloadValue(payload, "cb-rig-remote-token") || "~/.config/yggdrasim/card_bridge/" + cardPort + ".token",
+      remote_workdir: cbRigPayloadValue(payload, "cb-rig-remote-workdir") || "~/YggdraSIM",
+      remote_python: cbRigPayloadValue(payload, "cb-rig-remote-python") || "~/YggdraSIM/python/bin/python",
+      remsim_binary: cbRigPayloadValue(payload, "cb-rig-remsim-binary") || "osmo-remsim-client-st2",
+      usb_vidpid: cbRigPayloadValue(payload, "cb-rig-usb-vidpid") || "1d50:60e3",
+      hil_port: cbRigPayloadNumber(payload, "cb-rig-hil-port", 9997),
+      apdu_timeout_ms: 30000,
+    };
+  }
+
+  function cbRigCommonInputs() {
+    return cbRigInputsFromPayload(cbRigReadSettingsPayload());
+  }
+
+  function cbRigHasRenderedFields() {
+    return CB_RIG_FIELD_IDS.some(function (id) { return !!$(id); });
+  }
+
+  function cbRigInputsFromSavedSettings() {
+    if (cbRigHasRenderedFields()) {
+      cbRigSaveSettings();
+      return cbRigCommonInputs();
+    }
+    return cbRigInputsFromPayload(cbRigLoadStoredSettingsPayload());
+  }
+
+  function cbRigRemoteRigStartInputs(cfg) {
+    return {
+      ssh_target: cfg.ssh_target,
+      identity_file: cfg.identity_file,
+      reader_index: cfg.reader_index,
+      reader_name: cfg.reader_name,
+      local_card_port: cfg.local_card_port,
+      remote_card_port: cfg.remote_card_port,
+      local_gui_port: cfg.local_gui_port,
+      remote_gui_port: cfg.remote_gui_port,
+      service_name: cfg.service_name,
+      remote_workdir: cfg.remote_workdir,
+      remote_python: cfg.remote_python,
+      remote_card_url: cfg.remote_card_url,
+      remote_token_file: cfg.remote_token_file,
+      remsim_binary: cfg.remsim_binary,
+      usb_vidpid: cfg.usb_vidpid,
+      hil_port: cfg.hil_port,
+      apdu_timeout_ms: cfg.apdu_timeout_ms,
+      forward_gui: true,
+      restart_processes: true,
+      install_service: true,
+      confirm: true,
+    };
+  }
+
+  function cbRigSetBusy(button, busyText) {
+    if (!button) return function () {};
+    var previous = button.textContent;
+    button.disabled = true;
+    button.textContent = busyText || "working…";
+    return function () {
+      button.disabled = false;
+      button.textContent = previous;
+    };
+  }
+
+  function cbRigSetNote(message, isError, options) {
+    var note = $("cb-rig-note");
+    if (!note) return;
+    note.textContent = message || "";
+    note.classList.toggle("cb-rig-note-error", !!isError);
+    var flashOk = !!(options && options.flashOk && !isError);
+    note.classList.toggle("cb-rig-note-ok", flashOk);
+    note.classList.remove("cb-rig-note-ok-flash");
+    if (flashOk) {
+      void note.offsetWidth;
+      note.classList.add("cb-rig-note-ok-flash");
+    }
+  }
+
+  function cbRigRequireSshTarget() {
+    if (cbRigReadField("cb-rig-ssh-target")) return true;
+    cbRigSetNote("SSH target is required for RPi actions.", true);
+    var field = $("cb-rig-ssh-target");
+    if (field && typeof field.focus === "function") field.focus();
+    return false;
+  }
+
+  function cbRigDescribeAction(data, fallback) {
+    if (!data) return fallback || "";
+    var message = data.note || fallback || "action completed";
+    var steps = Array.isArray(data.steps) ? data.steps : [];
+    if (!steps.length) return message;
+    var failed = steps.slice().reverse().find(function (step) { return step && step.ok === false; });
+    var step = failed || steps[steps.length - 1] || {};
+    var pieces = [message];
+    if (step.name) pieces.push("step: " + step.name);
+    if (step.note) pieces.push(step.note);
+    if (step.log_tail) pieces.push(step.log_tail);
+    return pieces.filter(Boolean).join(" | ");
+  }
+
+  function cbRigUpdateGuiUrl() {
+    var port = cbRigNumber("cb-rig-gui-port", 27854);
+    setText("cb-rig-gui-url", "http://127.0.0.1:" + port);
+  }
+
+  function cbRigRenderStatus(data, options) {
+    var state = data && data.state ? data.state : {};
+    setText("cb-rig-local-status", state.local_card_bridge_running ? "running" : "stopped");
+    setText("cb-rig-tunnel-status", state.ssh_tunnel_running ? "running" : "stopped");
+    var remote = state.remote_service || {};
+    var remoteStatus = remote.ActiveState || (state.remote_error ? "error" : "–");
+    if (remote.SubState) remoteStatus += " · " + remote.SubState;
+    setText("cb-rig-service-status", remoteStatus);
+    var hil = state.remote_hil || {};
+    var bridgeStatus = Object.prototype.hasOwnProperty.call(hil, "bridge_running")
+      ? (hil.bridge_running ? "running" : "stopped")
+      : "–";
+    var usbStatus = Object.prototype.hasOwnProperty.call(hil, "usb_present")
+      ? (hil.usb_present ? "present" : "missing")
+      : "–";
+    var remsimStatus = Object.prototype.hasOwnProperty.call(hil, "remsim_client_running")
+      ? (hil.remsim_client_running ? "running" : (hil.remsim_binary_missing ? "missing" : (hil.remsim_client_enabled === false ? "disabled" : "stopped")))
+      : "–";
+    var linkStatus = "–";
+    if (Object.prototype.hasOwnProperty.call(hil, "modem_path_ready")) {
+      if (hil.modem_path_ready) {
+        linkStatus = "connected";
+      } else if (hil.control_connected === false) {
+        linkStatus = "control waiting";
+      } else if (hil.bankd_connected === false) {
+        linkStatus = "bankd waiting";
+      } else {
+        linkStatus = "waiting";
+      }
+    }
+    setText("cb-rig-bridge-status", bridgeStatus);
+    setText("cb-rig-usb-status", usbStatus);
+    setText("cb-rig-remsim-status", remsimStatus);
+    setText("cb-rig-modem-link-status", linkStatus);
+    if (state.local_gui_url) setText("cb-rig-gui-url", state.local_gui_url);
+    if (state.local_card_bridge_running) {
+      cbSetGlobalBridgeStatus("running", "running");
+    } else if (Object.prototype.hasOwnProperty.call(state, "local_card_bridge_running")) {
+      var global = cbBridgeStatusFromPayload(cbState.lastStatus);
+      if (global.state === "running") global = { state: "idle", label: "idle" };
+      cbSetGlobalBridgeStatus(global.state, global.label);
+    }
+    cbRigSetNote(
+      cbRigDescribeAction(data, "Remote rig status refreshed."),
+      !!(state.remote_error || (hil && hil.ok === false) || (data && data.ok === false)),
+      options && options.flashOk ? { flashOk: true } : null
+    );
+  }
+
+  async function cbRigRun(actionId, inputs, button, busyText, options) {
+    if (!options || options.saveSettings !== false) {
+      cbRigSaveSettings();
+    }
+    var clearBusy = cbRigSetBusy(button, busyText);
+    try {
+      var resp = await apiFetch("/api/actions/" + encodeURIComponent(actionId) + "/run", {
+        method: "POST",
+        body: JSON.stringify({ inputs: inputs || {} }),
+      });
+      var data = resp && resp.data ? resp.data : {};
+      if (!resp || !resp.ok || data.ok === false) {
+        cbRigSetNote((resp && resp.error) || cbRigDescribeAction(data, "action failed") || data.stderr, true);
+        return data;
+      }
+      cbRigSetNote(
+        cbRigDescribeAction(data, "action completed"),
+        false,
+        options && options.flashOk ? { flashOk: true } : null
+      );
+      return data;
+    } catch (err) {
+      cbRigSetNote(String((err && err.message) || err), true);
+      return null;
+    } finally {
+      clearBusy();
+    }
+  }
+
+  async function cbRigRefreshStatus(button) {
+    var cfg = cbRigCommonInputs();
+    var data = await cbRigRun("card_bridge.remote_rig_status", {
+      ssh_target: cfg.ssh_target,
+      identity_file: cfg.identity_file,
+      service_name: cfg.service_name,
+      local_gui_port: cfg.local_gui_port,
+      remote_workdir: cfg.remote_workdir,
+      remote_python: cfg.remote_python,
+    }, button, "checking…");
+    if (data) cbRigRenderStatus(data);
+  }
+
+  async function cbRigStartLocal(button) {
+    var cfg = cbRigCommonInputs();
+    var data = await cbRigRun("card_bridge.local_start", {
+      port: cfg.local_card_port,
+      reader_index: cbRigNumber("cb-rig-reader-index", 0),
+      reader_name: cbRigReadField("cb-rig-reader-name"),
+      apdu_timeout_ms: cfg.apdu_timeout_ms,
+      restart: false,
+      confirm: true,
+    }, button, "starting…", { flashOk: true });
+    if (data) {
+      loadCardBridgeStatus();
+      cbRigRefreshStatus(null);
+    }
+  }
+
+  async function cbRigStopLocal(button) {
+    var data = await cbRigRun("card_bridge.local_stop", { confirm: true }, button, "stopping…");
+    if (data) cbRigRefreshStatus(null);
+  }
+
+  async function cbRigStartTunnel(button) {
+    if (!cbRigRequireSshTarget()) return;
+    var cfg = cbRigCommonInputs();
+    var data = await cbRigRun("card_bridge.remote_rig_tunnel_start", {
+      ssh_target: cfg.ssh_target,
+      identity_file: cfg.identity_file,
+      local_card_port: cfg.local_card_port,
+      remote_card_port: cfg.remote_card_port,
+      local_gui_port: cfg.local_gui_port,
+      remote_gui_port: cfg.remote_gui_port,
+      forward_gui: true,
+      restart: false,
+      confirm: true,
+    }, button, "opening…", { flashOk: true });
+    if (data) cbRigRefreshStatus(null);
+  }
+
+  async function cbRigStartAll(button) {
+    if (!cbRigRequireSshTarget()) return;
+    var cfg = cbRigCommonInputs();
+    var data = await cbRigRun(
+      "card_bridge.remote_rig_start",
+      cbRigRemoteRigStartInputs(cfg),
+      button,
+      "starting rig…",
+      { flashOk: true }
+    );
+    if (data) {
+      loadCardBridgeStatus();
+      cbRigRenderStatus(data, { flashOk: data.ok !== false });
+    }
+  }
+
+  async function cbRigStartAllFromSavedSettings() {
+    var cfg = cbRigInputsFromSavedSettings();
+    if (!cfg.ssh_target) {
+      var missing = "Remote Bridge SSH target is required. Configure it once in Remote Bridge.";
+      cbRigSetNote(missing, true);
+      return { ok: false, note: missing };
+    }
+    var data = await cbRigRun(
+      "card_bridge.remote_rig_start",
+      cbRigRemoteRigStartInputs(cfg),
+      null,
+      "starting rig…",
+      { flashOk: true, saveSettings: false }
+    );
+    if (data) {
+      loadCardBridgeStatus();
+      cbRigRenderStatus(data, { flashOk: data.ok !== false });
+    }
+    return data;
+  }
+
+  async function cbRigStopAll(button) {
+    var cfg = cbRigCommonInputs();
+    var data = await cbRigRun("card_bridge.remote_rig_stop", {
+      ssh_target: cfg.ssh_target,
+      identity_file: cfg.identity_file,
+      service_name: cfg.service_name,
+      local_gui_port: cfg.local_gui_port,
+      remote_workdir: cfg.remote_workdir,
+      remote_python: cfg.remote_python,
+      confirm: true,
+    }, button, "stopping rig…");
+    if (data) {
+      loadCardBridgeStatus();
+      cbRigRenderStatus(data, { flashOk: data.ok !== false });
+    }
+  }
+
+  async function cbRigStopAllFromSavedSettings() {
+    var cfg = cbRigInputsFromSavedSettings();
+    if (!cfg.ssh_target) {
+      var missing = "Remote Bridge SSH target is required. Configure it once in Remote Bridge.";
+      cbRigSetNote(missing, true);
+      return { ok: false, note: missing };
+    }
+    var data = await cbRigRun("card_bridge.remote_rig_stop", {
+      ssh_target: cfg.ssh_target,
+      identity_file: cfg.identity_file,
+      service_name: cfg.service_name,
+      local_gui_port: cfg.local_gui_port,
+      remote_workdir: cfg.remote_workdir,
+      remote_python: cfg.remote_python,
+      confirm: true,
+    }, null, "stopping rig…", { saveSettings: false });
+    if (data) {
+      loadCardBridgeStatus();
+      cbRigRenderStatus(data, { flashOk: data.ok !== false });
+    }
+    return data;
+  }
+
+  async function cbRigStopTunnel(button) {
+    var data = await cbRigRun("card_bridge.remote_rig_tunnel_stop", { confirm: true }, button, "stopping…");
+    if (data) cbRigRefreshStatus(null);
+  }
+
+  async function cbRigSyncToken(button) {
+    if (!cbRigRequireSshTarget()) return;
+    var cfg = cbRigCommonInputs();
+    await cbRigRun("card_bridge.remote_rig_sync_token", {
+      ssh_target: cfg.ssh_target,
+      identity_file: cfg.identity_file,
+      remote_token_file: cfg.remote_token_file,
+      confirm: true,
+    }, button, "syncing…");
+  }
+
+  async function cbRigInstallService(button) {
+    if (!cbRigRequireSshTarget()) return;
+    var cfg = cbRigCommonInputs();
+    var data = await cbRigRun("card_bridge.remote_rig_install_service", {
+      ssh_target: cfg.ssh_target,
+      identity_file: cfg.identity_file,
+      service_name: cfg.service_name,
+      remote_workdir: cfg.remote_workdir,
+      remote_python: cfg.remote_python,
+      remote_card_url: cfg.remote_card_url,
+      remote_token_file: cfg.remote_token_file,
+      remsim_binary: cfg.remsim_binary,
+      usb_vidpid: cfg.usb_vidpid,
+      hil_port: cfg.hil_port,
+      apdu_timeout_ms: cfg.apdu_timeout_ms,
+      start_now: true,
+      confirm: true,
+    }, button, "installing…");
+    if (data) cbRigRefreshStatus(null);
+  }
+
+  async function cbRigServiceAction(action, button) {
+    if (!cbRigRequireSshTarget()) return;
+    var cfg = cbRigCommonInputs();
+    var data = await cbRigRun("card_bridge.remote_rig_service", {
+      ssh_target: cfg.ssh_target,
+      identity_file: cfg.identity_file,
+      service_name: cfg.service_name,
+      action: action,
+      confirm: action !== "status",
+    }, button, action + "…");
+    if (data) cbRigRefreshStatus(null);
+  }
+
+  function cbRigOpenGui() {
+    cbRigSaveSettings();
+    var port = cbRigNumber("cb-rig-gui-port", 27854);
+    window.open("http://127.0.0.1:" + port, "_blank", "noopener");
+  }
+
   function loadCardBridge() {
+    cbRigLoadSettings();
     loadCardBridgeStatus();
+    cbRigRefreshStatus(null);
     if ($("cb-auto-refresh") && $("cb-auto-refresh").checked) {
       cbStartAutoRefresh();
     }
@@ -1524,6 +2156,52 @@
         }
       });
     }
+
+    CB_RIG_FIELD_IDS.forEach(function (id) {
+      var el = $(id);
+      if (!el) return;
+      el.addEventListener("change", function () {
+        if (id === "cb-rig-ssh-target") {
+          cbRigApplyProfileForTarget(cbRigReadField(id));
+        }
+        cbRigSaveSettings();
+        cbRigUpdateGuiUrl();
+      });
+      el.addEventListener("input", function () {
+        if (id === "cb-rig-ssh-target") {
+          var applied = cbRigApplyProfileForTarget(cbRigReadField(id));
+          cbRigSaveSettings({ updateProfile: applied });
+        } else if (!cbRigApplyingProfile) {
+          cbRigSaveSettings();
+        }
+        cbRigUpdateGuiUrl();
+      });
+    });
+
+    var rigRefresh = $("cb-rig-refresh");
+    if (rigRefresh) rigRefresh.addEventListener("click", function () { cbRigRefreshStatus(rigRefresh); });
+    var rigOpen = $("cb-rig-open-gui");
+    if (rigOpen) rigOpen.addEventListener("click", cbRigOpenGui);
+    var startAll = $("cb-rig-start-all");
+    if (startAll) startAll.addEventListener("click", function () { cbRigStartAll(startAll); });
+    var stopAll = $("cb-rig-stop-all");
+    if (stopAll) stopAll.addEventListener("click", function () { cbRigStopAll(stopAll); });
+    var startLocal = $("cb-rig-start-local");
+    if (startLocal) startLocal.addEventListener("click", function () { cbRigStartLocal(startLocal); });
+    var stopLocal = $("cb-rig-stop-local");
+    if (stopLocal) stopLocal.addEventListener("click", function () { cbRigStopLocal(stopLocal); });
+    var startTunnel = $("cb-rig-start-tunnel");
+    if (startTunnel) startTunnel.addEventListener("click", function () { cbRigStartTunnel(startTunnel); });
+    var stopTunnel = $("cb-rig-stop-tunnel");
+    if (stopTunnel) stopTunnel.addEventListener("click", function () { cbRigStopTunnel(stopTunnel); });
+    var syncToken = $("cb-rig-sync-token");
+    if (syncToken) syncToken.addEventListener("click", function () { cbRigSyncToken(syncToken); });
+    var installService = $("cb-rig-install-service");
+    if (installService) installService.addEventListener("click", function () { cbRigInstallService(installService); });
+    var startService = $("cb-rig-start-service");
+    if (startService) startService.addEventListener("click", function () { cbRigServiceAction("restart", startService); });
+    var stopService = $("cb-rig-stop-service");
+    if (stopService) stopService.addEventListener("click", function () { cbRigServiceAction("stop", stopService); });
   }
 
   // Reusable streaming-log row appender. Used by both the Command Center

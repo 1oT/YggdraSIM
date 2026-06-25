@@ -160,7 +160,7 @@ def test_failure_rate_limiter_triggers_after_limit():
     assert over is True
     assert limiter.is_blocked("127.0.0.1") is True
     # Isolation per source.
-    assert limiter.is_blocked("10.0.0.1") is False
+    assert limiter.is_blocked("192.0.2.1") is False
 
 
 def test_failure_rate_limiter_recovers_after_window():

@@ -69,7 +69,7 @@ class TestLevelInference:
 class TestReaderRowHelpers:
     def test_remote_row_duplicate_matches_local_reader_name(self) -> None:
         remote = live_module.ReaderInfo(
-            name="🌐 HID Global OMNIKEY 3x21 (remote@http://127.0.0.1:9997)",
+            name="🌐 Example USB Reader (remote@http://127.0.0.1:9997)",
             atr_hex="3B00",
             status="card present (remote bridge)",
             kind="remote",
@@ -78,7 +78,7 @@ class TestReaderRowHelpers:
 
         assert live_module._remote_row_duplicates_local_reader(
             remote,
-            ["HID Global OMNIKEY 3x21", "Broadcom Corp 58200"],
+            ["Example USB Reader", "Example Contacted Reader"],
         )
 
     def test_remote_row_distinct_reader_is_kept(self) -> None:
@@ -92,7 +92,7 @@ class TestReaderRowHelpers:
 
         assert not live_module._remote_row_duplicates_local_reader(
             remote,
-            ["HID Global OMNIKEY 3x21"],
+            ["Example USB Reader"],
         )
 
 

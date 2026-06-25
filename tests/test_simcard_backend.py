@@ -23,6 +23,7 @@ from SIMCARD.bsp import BspInstance
 from SIMCARD.engine import SimulatedSimCardEngine
 from SIMCARD.etsi_fs import next_generated_profile_aid
 from SIMCARD.profile_import import import_profile_artifact
+from SIMCARD.toolkit import REFRESH_COMMAND
 from SIMCARD.utils import encode_iccid_ef, encode_imsi_ef
 from SCP03.config import Config
 from SCP03.crypto.session import Scp03Session
@@ -518,7 +519,7 @@ def build_signed_bpp_segments(
     provider_name: str,
     profile_name: str,
     imsi: str = "1234567812345678",
-    impi: str = "user@install.test",
+    impi: str = "user@example.test",
     upp_payload: bytes | None = None,
     a3_plaintext_chunk_size: int | None = None,
 ) -> dict[str, bytes | list[bytes]]:
@@ -635,6 +636,23 @@ class SimulatedConnectionTests(unittest.TestCase):
         self._env_patch.stop()
         self._temp_dir.cleanup()
 
+    def _transmit_store_data_to_engine(
+        self,
+        engine: SimulatedSimCardEngine,
+        payload: bytes,
+    ) -> tuple[bytes, int, int]:
+        apdu = bytes([0x80, 0xE2, 0x91, 0x00, len(payload)]) + bytes(payload)
+        response, sw1, sw2 = engine.transmit(apdu)
+        return bytes(response), int(sw1), int(sw2)
+
+    def _assert_refresh_queued(self, engine: SimulatedSimCardEngine) -> None:
+        self.assertEqual(len(engine.state.pending_fetch_queue), 1)
+        fields = engine.toolkit._parse_proactive_command(engine.state.pending_fetch_queue[0])
+        self.assertIsNotNone(fields)
+        if fields is None:
+            return
+        self.assertEqual(fields.get("command_type"), REFRESH_COMMAND)
+
     def test_sgp_replace_session_keys_parser_accepts_context_specific_fields(self) -> None:
         engine = SimulatedSimCardEngine()
         initial_mcv = bytes.fromhex("000102030405060708090A0B0C0D0E0F")
@@ -650,6 +668,56 @@ class SimulatedConnectionTests(unittest.TestCase):
         self.assertEqual(parsed["initialMacChainingValue"], initial_mcv)
         self.assertEqual(parsed["ppkEnc"], ppk_enc)
         self.assertEqual(parsed["ppkCmac"], ppk_cmac)
+
+    def test_default_dp_and_eim_config_mutations_queue_card_reread_refresh(self) -> None:
+        engine = SimulatedSimCardEngine()
+
+        response, sw1, sw2 = self._transmit_store_data_to_engine(
+            engine,
+            wrap_tlv("BF3F", wrap_tlv("80", b"smdp.refresh.example.test")),
+        )
+        self.assertEqual((sw1, sw2), (0x90, 0x00))
+        self.assertEqual(response, bytes.fromhex("BF3F03800100"))
+        self._assert_refresh_queued(engine)
+
+        engine.state.pending_fetch_queue.clear()
+        target_eim_id = "2.25.123456789012345678901234567890123456"
+        response, sw1, sw2 = self._transmit_store_data_to_engine(
+            engine,
+            build_add_eim_command_payload(
+                "BF58",
+                eim_id=target_eim_id,
+                eim_fqdn="added.eim.example.test",
+            ),
+        )
+        self.assertEqual((sw1, sw2), (0x90, 0x00))
+        self.assertEqual(response, bytes.fromhex("BF5800"))
+        self._assert_refresh_queued(engine)
+
+        engine.state.pending_fetch_queue.clear()
+        response, sw1, sw2 = self._transmit_store_data_to_engine(
+            engine,
+            wrap_tlv("BF59", wrap_tlv("80", target_eim_id.encode("utf-8"))),
+        )
+        self.assertEqual((sw1, sw2), (0x90, 0x00))
+        self.assertEqual(response, bytes.fromhex("BF5900"))
+        self._assert_refresh_queued(engine)
+
+    def test_downloaded_disabled_profile_rebuilds_runtime_isdp_registry(self) -> None:
+        engine = SimulatedSimCardEngine()
+        engine.state.sgp_session.bpp_store_metadata = {
+            "iccid": "89881111111111111177",
+            "profile_name": "Runtime Registry Profile",
+            "profile_class": "operational",
+            "service_provider": "Test Provider",
+        }
+        engine.state.sgp_session.bpp_unprotected_profile = b"\x00"
+
+        profile = engine.sgp._create_installed_profile_from_bpp()
+
+        self.assertEqual(profile.state, "disabled")
+        self.assertIn(f"ISDP::{profile.aid.upper()}", engine.state.nodes)
+        self.assertEqual(engine.state.nodes[f"ISDP::{profile.aid.upper()}"].aid, profile.aid)
 
     def test_simulated_connection_supports_basic_fs_and_sgp_reads(self) -> None:
         with mock.patch.dict(os.environ, {CARD_BACKEND_ENV: "sim"}, clear=False):
@@ -1026,7 +1094,7 @@ class SimulatedConnectionTests(unittest.TestCase):
             configured_response, sw1, sw2 = connection.transmit(list(bytes.fromhex("80E2910003BF3C00")))
             self.assertEqual((sw1, sw2), (0x90, 0x00))
             self.assertIn(b"rsp.example.com", bytes(configured_response))
-            self.assertIn(b"lpa.ds.gsma.com", bytes(configured_response))
+            self.assertIn(b"root-smds.example.com", bytes(configured_response))
             self.assertGreater(len(find_first_tlv(bytes(configured_response), "83")), 0)
             self.assertGreater(len(find_first_tlv(bytes(configured_response), "A4")), 0)
 
@@ -1036,7 +1104,7 @@ class SimulatedConnectionTests(unittest.TestCase):
             self.assertGreaterEqual(len(entries), 1)
             first_entry = entries[0]
             self.assertEqual(first_entry["eim_id"], "2.25.311782205282738360923618091971140414400")
-            self.assertEqual(first_entry["eim_fqdn"], "yggdrasim.eim.test.1ot.com")
+            self.assertEqual(first_entry["eim_fqdn"], "eim.example.test")
             self.assertIn("eimRetrieveHttps", first_entry["supported_protocol"])
             self.assertIn("eimInjectHttps", first_entry["supported_protocol"])
             self.assertEqual(
@@ -1079,7 +1147,7 @@ class SimulatedConnectionTests(unittest.TestCase):
         )
         self.assertEqual(
             str(payload.get("eim_fqdn", "")).strip(),
-            "yggdrasim.eim.test.1ot.com",
+            "eim.example.test",
         )
 
     def test_simulated_connection_applies_metadata_overrides_from_quirks_file(self) -> None:
@@ -1562,12 +1630,12 @@ metadata_overrides = {{
                 entries = decode_eim_configuration_entries(bytes(eim_response))
                 self.assertEqual(len(entries), 1)
                 self.assertEqual(entries[0]["eim_id"], default_eim_id)
-                self.assertEqual(entries[0]["eim_fqdn"], "yggdrasim.eim.test.1ot.com")
+                self.assertEqual(entries[0]["eim_fqdn"], "eim.example.test")
 
             recreated_engine = SimulatedSimCardEngine(euicc_store_root=temp_dir)
             self.assertEqual(len(recreated_engine.state.eim_entries), 1)
             self.assertEqual(recreated_engine.state.eim_entries[0].eim_id, default_eim_id)
-            self.assertEqual(recreated_engine.state.eim_entries[0].eim_fqdn, "yggdrasim.eim.test.1ot.com")
+            self.assertEqual(recreated_engine.state.eim_entries[0].eim_fqdn, "eim.example.test")
 
     def test_simulated_connection_tracks_stateful_es10_session_and_install_flow(self) -> None:
         with mock.patch.dict(os.environ, {CARD_BACKEND_ENV: "sim"}, clear=False):
@@ -1636,7 +1704,7 @@ metadata_overrides = {{
                 euicc_otpk_raw=euicc_otpk_raw,
                 eid_hex="89049032123451234512345678901234",
                 cert_private_key=cert_private_key,
-                iccid="89461111111111111177",
+                iccid="89881111111111111177",
                 provider_name="Test Provider",
                 profile_name="Cryptographic Install",
             )
@@ -1694,7 +1762,7 @@ metadata_overrides = {{
             self.assertEqual((sw1, sw2), (0x90, 0x00))
             data, sw1, sw2 = connection.transmit(list(bytes.fromhex("00B000000A")))
             self.assertEqual((sw1, sw2), (0x90, 0x00))
-            self.assertEqual(bytes(data), encode_iccid_ef("89461111111111111177"))
+            self.assertEqual(bytes(data), encode_iccid_ef("89881111111111111177"))
 
             data, sw1, sw2 = connection.transmit(list(bytes.fromhex(f"00A4040010{USIM_AID}")))
             self.assertEqual((sw1, sw2), (0x90, 0x00))
@@ -1704,7 +1772,7 @@ metadata_overrides = {{
             self.assertEqual((sw1, sw2), (0x90, 0x00))
             self.assertEqual(bytes(data), encode_imsi_ef("1234567812345678"))
 
-            impi_payload = b"user@install.test"
+            impi_payload = b"user@example.test"
             data, sw1, sw2 = connection.transmit(list(bytes.fromhex(f"00A4040010{ISIM_AID}")))
             self.assertEqual((sw1, sw2), (0x90, 0x00))
             data, sw1, sw2 = connection.transmit(list(bytes.fromhex("00A40004026F02")))
@@ -1732,7 +1800,7 @@ metadata_overrides = {{
             self.assertEqual((sw1, sw2), (0x90, 0x00))
 
             deleted_aid = "A0000005591010FFFFFFFF8900001200"
-            deleted_iccid = "89461111111111111129"
+            deleted_iccid = "89881111111111111129"
             delete_request = wrap_tlv("BF33", wrap_tlv("4F", bytes.fromhex(deleted_aid)))
             delete_response, sw1, sw2 = send_store_data_payload(connection, delete_request)
             self.assertEqual((sw1, sw2), (0x90, 0x00))
@@ -1816,10 +1884,10 @@ metadata_overrides = {{
 
             first, second = decoded["notifications"]
             self.assertEqual(first.get("seqNumber"), "1")
-            self.assertEqual(first.get("iccid"), "89461111111111111112")
+            self.assertEqual(first.get("iccid"), "89881111111111111112")
             self.assertEqual(first.get("notificationAddress"), '"rsp.example.com"')
             self.assertEqual(second.get("seqNumber"), "2")
-            self.assertEqual(second.get("iccid"), "89461111111111111129")
+            self.assertEqual(second.get("iccid"), "89881111111111111129")
             self.assertEqual(second.get("notificationAddress"), '"rsp.example.com"')
 
     def test_simulated_connection_retrieve_euicc_package_results_is_explicit_empty_branch(self) -> None:
@@ -1900,7 +1968,7 @@ metadata_overrides = {{
                 euicc_otpk_raw=euicc_otpk_raw,
                 eid_hex="89049032123451234512345678901234",
                 cert_private_key=cert_private_key,
-                iccid="89461111111111111191",
+                iccid="89881111111111111191",
                 provider_name="Chunked Provider",
                 profile_name="Chunked Bootstrap",
                 upp_payload=b"\x01",
@@ -1989,7 +2057,7 @@ metadata_overrides = {{
                     euicc_otpk_raw=euicc_otpk_raw,
                     eid_hex="89049032123451234512345678901234",
                     cert_private_key=cert_private_key,
-                    iccid="89461111111111111222",
+                    iccid="89881111111111111222",
                     provider_name="Segmented Provider",
                     profile_name="Segmented A3 Profile",
                     upp_payload=oversized_upp,
@@ -2078,7 +2146,7 @@ metadata_overrides = {{
                     euicc_otpk_raw=euicc_otpk_raw,
                     eid_hex="89049032123451234512345678901234",
                     cert_private_key=cert_private_key,
-                    iccid="89461111111111111166",
+                    iccid="89881111111111111166",
                     provider_name="Persistent Provider",
                     profile_name="Persistent Profile",
                 )
@@ -2111,7 +2179,7 @@ metadata_overrides = {{
             loaded_profiles = {profile.aid.upper(): profile for profile in recreated_engine.state.profiles}
             self.assertIn(installed_aid_hex, loaded_profiles)
             persisted_profile = loaded_profiles[installed_aid_hex]
-            self.assertEqual(persisted_profile.iccid, "89461111111111111166")
+            self.assertEqual(persisted_profile.iccid, "89881111111111111166")
             self.assertEqual(persisted_profile.profile_name, "Persistent Profile")
             self.assertEqual(persisted_profile.service_provider, "Persistent Provider")
             self.assertEqual(persisted_profile.state, "enabled")
@@ -2184,7 +2252,7 @@ metadata_overrides = {{
                     euicc_otpk_raw=euicc_otpk_raw,
                     eid_hex="89049032123451234512345678901234",
                     cert_private_key=cert_private_key,
-                    iccid="89461111111111111167",
+                    iccid="89881111111111111167",
                     provider_name="Notification Provider",
                     profile_name="Notification Profile",
                     upp_payload=b"\x01",
@@ -2265,9 +2333,9 @@ metadata_overrides = {{
             upp_path = Path(temp_dir) / "external_profile.der"
             upp_path.write_bytes(
                 build_minimal_saip_upp(
-                    iccid="89461111111111111144",
+                    iccid="89881111111111111144",
                     imsi="1234567812345678",
-                    impi="imported@sim.test",
+                    impi="imported@example.test",
                     profile_name="Imported From ASN1",
                 )
             )
@@ -2279,7 +2347,7 @@ metadata_overrides = {{
             )
 
             self.assertEqual(result.profile_name, "Imported From ASN1")
-            self.assertEqual(result.iccid, "89461111111111111144")
+            self.assertEqual(result.iccid, "89881111111111111144")
             self.assertEqual(result.profile_source, "upp")
             self.assertEqual(result.aid, "A0000005591010FFFFFFFF8900001300")
             self.assertTrue(result.enabled)
@@ -2289,7 +2357,7 @@ metadata_overrides = {{
             self.assertIn(result.aid.upper(), loaded_profiles)
             imported_profile = loaded_profiles[result.aid.upper()]
             self.assertEqual(imported_profile.profile_name, "Imported From ASN1")
-            self.assertEqual(imported_profile.iccid, "89461111111111111144")
+            self.assertEqual(imported_profile.iccid, "89881111111111111144")
             self.assertEqual(imported_profile.service_provider, "Imported SAIP")
             self.assertEqual(imported_profile.state, "enabled")
             self.assertEqual(imported_profile.profile_source, "upp")
@@ -2309,9 +2377,9 @@ metadata_overrides = {{
             upp_hex_path = Path(temp_dir) / "external_profile.txt"
             upp_hex_path.write_text(
                 build_minimal_saip_upp(
-                    iccid="89461111111111111145",
+                    iccid="89881111111111111145",
                     imsi="1234567812345678",
-                    impi="hex@sim.test",
+                    impi="hex@example.test",
                     profile_name="Imported From Hex Text",
                 ).hex().upper()
                 + "\n",
@@ -2325,7 +2393,7 @@ metadata_overrides = {{
             )
 
             self.assertEqual(result.profile_name, "Imported From Hex Text")
-            self.assertEqual(result.iccid, "89461111111111111145")
+            self.assertEqual(result.iccid, "89881111111111111145")
             self.assertEqual(result.profile_source, "upp")
 
             recreated_engine = SimulatedSimCardEngine(euicc_store_root=temp_dir)
@@ -2348,7 +2416,7 @@ metadata_overrides = {{
                             "major-version": 2,
                             "minor-version": 3,
                             "profileType": "Imported From Tagged JSON",
-                            "iccid": bytes.fromhex("89461111111111111146"),
+                            "iccid": bytes.fromhex("89881111111111111146"),
                             "eUICC-Mandatory-services": {"usim": None, "isim": None},
                             "eUICC-Mandatory-GFSTEList": [
                                 "2.23.143.1.2.1",
@@ -2360,7 +2428,7 @@ metadata_overrides = {{
                             "mf-header": {"mandated": None, "identification": 2},
                             "templateID": "2.23.143.1.2.1",
                             "mf": [],
-                            "ef-iccid": [("fillFileContent", encode_iccid_ef("89461111111111111146"))],
+                            "ef-iccid": [("fillFileContent", encode_iccid_ef("89881111111111111146"))],
                             "ef-dir": [],
                             "ef-arr": [],
                         },
@@ -2380,7 +2448,7 @@ metadata_overrides = {{
                             "isim-header": {"mandated": None, "identification": 4},
                             "templateID": "2.23.143.1.2.8",
                             "adf-isim": [],
-                            "ef-impi": [("fillFileContent", b"tagged@sim.test")],
+                            "ef-impi": [("fillFileContent", b"tagged@example.test")],
                             "ef-impu": [],
                             "ef-domain": [],
                             "ef-ist": [],
@@ -2399,7 +2467,7 @@ metadata_overrides = {{
             )
 
             self.assertEqual(result.profile_name, "Imported From Tagged JSON")
-            self.assertEqual(result.iccid, "89461111111111111146")
+            self.assertEqual(result.iccid, "89881111111111111146")
             self.assertEqual(result.profile_source, "upp")
 
             recreated_engine = SimulatedSimCardEngine(euicc_store_root=temp_dir)
@@ -2475,7 +2543,7 @@ metadata_overrides = {{
                 euicc_otpk_raw=euicc_otpk_raw,
                 eid_hex="89049032123451234512345678901234",
                 cert_private_key=cert_private_key,
-                iccid="89461111111111111188",
+                iccid="89881111111111111188",
                 provider_name="Tampered Provider",
                 profile_name="Tampered Install",
             )
@@ -2538,7 +2606,7 @@ metadata_overrides = {{
                 euicc_otpk_raw=euicc_otpk_raw,
                 eid_hex="89049032123451234512345678901234",
                 cert_private_key=cert_private_key,
-                iccid="89461111111111111112",
+                iccid="89881111111111111112",
                 provider_name="Duplicate Provider",
                 profile_name="Duplicate ICCID",
                 upp_payload=b"\x01",
@@ -2596,13 +2664,13 @@ metadata_overrides = {{
                 euicc_otpk_raw=euicc_otpk_raw,
                 eid_hex="89049032123451234512345678901234",
                 cert_private_key=cert_private_key,
-                iccid="89461111111111111178",
+                iccid="89881111111111111178",
                 provider_name="Mismatch Provider",
                 profile_name="Mismatch ICCID",
                 upp_payload=b"\x01",
             )
             fake_profile = types.SimpleNamespace(
-                iccid="89461111111111111179",
+                iccid="89881111111111111179",
                 profile_name="Patched Profile",
                 imsi="",
                 impi="",
@@ -2725,7 +2793,7 @@ class ProfileStoreLoadPrefersJsonImageTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as store_root:
             profile = SimProfileEntry(
                 aid="A0000005591010FFFFFFFF8900001100",
-                iccid="89460811111111111112",
+                iccid="89880811111111111112",
                 state="disabled",
                 profile_class="operational",
                 nickname="Lab (EU 01)",
@@ -2739,7 +2807,7 @@ class ProfileStoreLoadPrefersJsonImageTests(unittest.TestCase):
                 upp_bytes=b"\xA0\x04\x82\x02AB",
                 profile_image=SimProfileImage(
                     profile_name="Lab EU 01",
-                    iccid="89460811111111111112",
+                    iccid="89880811111111111112",
                     imsi="001010123456789",
                     impi="",
                     nodes=[
@@ -2798,7 +2866,7 @@ class ProfileStoreLoadPrefersJsonImageTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as store_root:
             profile = SimProfileEntry(
                 aid="A0000005591010FFFFFFFF8900001100",
-                iccid="89460811111111111112",
+                iccid="89880811111111111112",
                 state="disabled",
                 profile_class="operational",
                 nickname="Lab (EU 01)",
@@ -2810,7 +2878,7 @@ class ProfileStoreLoadPrefersJsonImageTests(unittest.TestCase):
                 upp_bytes=b"\xA0\x04\x82\x02AB",
                 profile_image=SimProfileImage(
                     profile_name="Lab EU 01",
-                    iccid="89460811111111111112",
+                    iccid="89880811111111111112",
                     imsi="001010123456789",
                     impi="",
                     nodes=[
@@ -2840,7 +2908,7 @@ class ProfileStoreLoadPrefersJsonImageTests(unittest.TestCase):
 
             decoded_image = SimProfileImage(
                 profile_name="Lab EU 01",
-                iccid="89460811111111111112",
+                iccid="89880811111111111112",
                 imsi="001010123456789",
                 impi="",
                 nodes=[],
@@ -2951,9 +3019,9 @@ class MainWrapperCardBackendTests(unittest.TestCase):
             artifact_path = Path(temp_dir) / "wrapper_import.der"
             artifact_path.write_bytes(
                 build_minimal_saip_upp(
-                    iccid="89461111111111111155",
+                    iccid="89881111111111111155",
                     imsi="1234567812345678",
-                    impi="wrapper@sim.test",
+                    impi="wrapper@example.test",
                     profile_name="Wrapper Import",
                 )
             )
@@ -2992,7 +3060,7 @@ class MainWrapperCardBackendTests(unittest.TestCase):
                 profile for profile in recreated_engine.state.profiles if profile.profile_name == "Wrapper Import"
             ]
             self.assertEqual(len(imported), 1)
-            self.assertEqual(imported[0].iccid, "89461111111111111155")
+            self.assertEqual(imported[0].iccid, "89881111111111111155")
             self.assertEqual(imported[0].state, "enabled")
 
     def test_runtime_settings_menu_can_update_simulator_paths(self) -> None:
@@ -3057,9 +3125,9 @@ class MainWrapperCardBackendTests(unittest.TestCase):
                 json.dumps(
                     {
                         "profile_name": "Runtime Menu Import",
-                        "iccid": "89461111111111111166",
+                        "iccid": "89881111111111111166",
                         "imsi": "1234567812345678",
-                        "impi": "runtime@sim.test",
+                        "impi": "runtime@example.test",
                         "nodes": [
                             {
                                 "path": ["MF", "EF.ICCID"],
@@ -3067,7 +3135,7 @@ class MainWrapperCardBackendTests(unittest.TestCase):
                                 "kind": "ef",
                                 "fid": "2FE2",
                                 "structure": "transparent",
-                                "data_hex": encode_iccid_ef("89461111111111111166").hex().upper(),
+                                "data_hex": encode_iccid_ef("89881111111111111166").hex().upper(),
                                 "records_hex": [],
                                 "aid": "",
                                 "label": "",
@@ -3123,7 +3191,7 @@ class MainWrapperCardBackendTests(unittest.TestCase):
 
         self.assertEqual(backend_value, "sim")
         self.assertEqual(len(imported), 1)
-        self.assertEqual(imported[0].iccid, "89461111111111111166")
+        self.assertEqual(imported[0].iccid, "89881111111111111166")
         self.assertEqual(imported[0].state, "enabled")
 
     def test_runtime_settings_menu_can_reset_simulator_baseline(self) -> None:

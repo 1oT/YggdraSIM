@@ -11,15 +11,15 @@ DEFAULT_SIM_ATR = bytes.fromhex("3B9F96801FC78031A073BE21136743200718000001A5")
 
 
 # SGP.32 §3.5 IPA-poll bearer defaults. The simulator ships an APN of
-# ``internet.apn`` because every commercial test SIM has at least that
-# context activated; ``8.8.8.8`` is the public Google resolver used to
+# ``internet.apn`` because test profiles commonly expose that packet-data
+# context; ``192.0.2.53`` is the documentation-reserved resolver used to
 # translate the eIM FQDN to an IPv4 address before OPEN CHANNEL is
 # emitted (ETSI TS 102 223 §8.59 "Other address" requires a literal
 # IPv4/IPv6 destination, not an FQDN). Both knobs are env-overridable
 # at process start so a CI lab or operator harness can pin a different
 # APN / DNS server without editing source.
 _DEFAULT_IPA_POLL_APN: str = "internet.apn"
-_DEFAULT_IPA_POLL_DNS_SERVER: str = "8.8.8.8"
+_DEFAULT_IPA_POLL_DNS_SERVER: str = "192.0.2.53"
 
 
 def _env_str(name: str, fallback: str) -> str:
@@ -434,7 +434,7 @@ class SimEuiccInfoConfig:
 
 @dataclass
 class SimEuiccConfiguredData:
-    root_smds_address: str = "lpa.ds.gsma.com"
+    root_smds_address: str = "root-smds.example.com"
     additional_root_smds_addresses: list[str] = field(
         default_factory=lambda: ["smds2.yggdrasim.test", "smds3.yggdrasim.test"]
     )
@@ -626,7 +626,7 @@ class SimToolkitState:
     #   tag 3C = transport type + port
     #   tag 3E = literal IPv4/IPv6 destination
     # The eIM is published via FQDN, so the IPA first opens a UDP/53
-    # bearer to a public resolver (defaults to Google ``8.8.8.8``)
+    # bearer to a documentation-reserved resolver (defaults to ``192.0.2.53``)
     # and asks for the eIM A-record. Once the resolved IPv4 lands in
     # ``ipa_poll_resolved_ip`` the next timer expiry opens a TCP/443
     # bearer to that address with the same APN. ``ipa_poll_apn`` is

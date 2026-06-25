@@ -21,6 +21,78 @@ if TYPE_CHECKING:
     from .saip_tool import SaipToolBridge
 
 
+def _saip_transcode_available_theme_names(app: object) -> tuple[str, ...]:
+    raw = getattr(app, "available_themes", None)
+    if isinstance(raw, dict):
+        return tuple(str(name) for name in raw.keys())
+    if raw is None:
+        return ()
+    try:
+        return tuple(str(name) for name in raw)
+    except TypeError:
+        return ()
+
+
+def _saip_transcode_theme_is_available(app: object, theme_name: str) -> bool:
+    name = str(theme_name or "").strip()
+    if len(name) == 0:
+        return False
+    available = _saip_transcode_available_theme_names(app)
+    if len(available) == 0:
+        return True
+    return name in available
+
+
+def _resolve_saip_transcode_theme(app: object, preferred_theme: object) -> str:
+    preferred = str(preferred_theme or "").strip() or "textual-ansi"
+    candidates: list[str] = []
+
+    def add_candidate(name: object) -> None:
+        text = str(name or "").strip()
+        if len(text) == 0 or text in candidates:
+            return
+        candidates.append(text)
+
+    if preferred == "textual-dark":
+        add_candidate("textual-ansi")
+        add_candidate("textual-dark")
+    else:
+        add_candidate(preferred)
+    add_candidate("textual-ansi")
+    add_candidate("textual-dark")
+    add_candidate("nord")
+    add_candidate("textual-light")
+    add_candidate(getattr(app, "theme", ""))
+
+    for candidate in candidates:
+        if _saip_transcode_theme_is_available(app, candidate):
+            return candidate
+
+    available = _saip_transcode_available_theme_names(app)
+    if len(available) > 0:
+        return available[0]
+    return "textual-dark"
+
+
+def _next_available_saip_transcode_theme(
+    app: object,
+    current_theme: object,
+    theme_cycle: list[str],
+) -> str:
+    current = str(current_theme or "").strip() or "textual-dark"
+    if len(theme_cycle) == 0:
+        return _resolve_saip_transcode_theme(app, current)
+    if current in theme_cycle:
+        start = theme_cycle.index(current)
+    else:
+        start = -1
+    for offset in range(1, len(theme_cycle) + 1):
+        candidate = theme_cycle[(start + offset) % len(theme_cycle)]
+        if _saip_transcode_theme_is_available(app, candidate):
+            return candidate
+    return _resolve_saip_transcode_theme(app, current)
+
+
 def _clipboard_write_commands() -> list[tuple[str, list[str]]]:
     commands: list[tuple[str, list[str]]] = []
     if len(str(os.environ.get("WAYLAND_DISPLAY", "") or "").strip()) > 0:
@@ -377,6 +449,7 @@ def run_saip_transcode_tui(bridge: SaipToolBridge) -> None:
         scan_json_object_members,
     )
     from .saip_transcode_tui_prefs import (
+        THEME_CYCLE,
         load_outline_prefs,
         load_pane_layout_prefs,
         load_split_size_prefs,
@@ -2043,7 +2116,7 @@ def run_saip_transcode_tui(bridge: SaipToolBridge) -> None:
                 if self._mode in ("add", "value"):
                     label = (
                         "Value — hex string or JSON object "
-                        "(e.g. 89461111111111111112 or {\"zero_len\":10})"
+                        "(e.g. 89881111111111111112 or {\"zero_len\":10})"
                     )
                     if self._mode == "value":
                         label = "New value (current: " + self._existing_value + ")"
@@ -5010,13 +5083,16 @@ def run_saip_transcode_tui(bridge: SaipToolBridge) -> None:
         def on_mount(self) -> None:
             """Initialise widget state and apply startup preferences after the widget is mounted."""
             prefs = load_transcode_tui_prefs(workspace_root)
-            want_theme = str(prefs.get("theme") or "textual-ansi")
-            if want_theme == "textual-dark":
-                want_theme = "textual-ansi"
+            want_theme = _resolve_saip_transcode_theme(self, prefs.get("theme"))
             try:
                 self.theme = want_theme
             except Exception:
-                self.theme = "textual-ansi"
+                fallback_theme = _resolve_saip_transcode_theme(self, "textual-dark")
+                if fallback_theme != want_theme:
+                    try:
+                        self.theme = fallback_theme
+                    except Exception:
+                        pass
             split_prefs = load_split_size_prefs(workspace_root)
             saved_json_outline_width = split_prefs.get("json_outline_width")
             if saved_json_outline_width is not None:
@@ -5334,7 +5410,7 @@ def run_saip_transcode_tui(bridge: SaipToolBridge) -> None:
         def action_cycle_theme(self) -> None:
             """Rotate the TUI colour theme to the next entry in the theme cycle."""
             cur = str(self.theme or "textual-dark")
-            nxt = next_theme_in_cycle(cur)
+            nxt = _next_available_saip_transcode_theme(self, cur, THEME_CYCLE)
             try:
                 self.theme = nxt
             except Exception as exc:

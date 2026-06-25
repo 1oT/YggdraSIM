@@ -13,7 +13,10 @@ Covers:
 from __future__ import annotations
 
 import asyncio
+import importlib
+import json
 from dataclasses import dataclass
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -171,11 +174,16 @@ class TestActionRegistry:
         expected = {
             # Engine-panel wraps
             "tool.tlv.decode",
+            "tool.asn1_tlv.decode",
             "tool.sw.lookup",
             "tool.euicc_info2.decode",
+            "tool.sima_response.decode",
             "tool.saip.lint",
             "tool.eim.lint",
             "tool.gsma.codes",
+            "suci.status",
+            "suci.generate_key",
+            "simcard.tuak_derive_topc",
             # Session-based SCP03 extensions
             "scp03.select",
             "scp03.list_apps",
@@ -184,9 +192,139 @@ class TestActionRegistry:
             "eim_local.list_fixtures",
             "eim_local.hotfolder_metadata",
             "eim_local.issue_package",
+            # Local SM-DP+ helpers
+            "scp11_local.import_certificate",
         }
         missing = expected - ids
         assert not missing, f"missing registered actions: {sorted(missing)}"
+
+    def test_offline_tools_collect_non_card_actions(self) -> None:
+        registry = ensure_builtin_actions_loaded()
+        offline_ids = {spec.id for spec in registry.by_subsystem().get("Offline Tools", [])}
+        expected = {
+            "tool.tlv.decode",
+            "tool.asn1_tlv.decode",
+            "tool.sw.lookup",
+            "tool.euicc_info2.decode",
+            "tool.sima_response.decode",
+            "tool.saip.lint",
+            "tool.eim.lint",
+            "tool.gsma.codes",
+            "suci.status",
+            "suci.use_key_file",
+            "suci.set_tool_command",
+            "suci.generate_key",
+            "suci.dump_pub_key",
+            "simcard.tuak_derive_topc",
+        }
+        assert expected.issubset(offline_ids)
+        assert get_registry().get("simcard.quirks_status").subsystem == "SIMCARD"
+        assert get_registry().get("simcard.profile_store_list").subsystem == "SIMCARD"
+
+    def test_eim_load_package_exposes_cert_override(self, monkeypatch) -> None:
+        from yggdrasim_common.gui_server.actions import eim_local
+        from yggdrasim_common.gui_server.actions.registry import ActionContext
+
+        registry = ensure_builtin_actions_loaded()
+        spec = registry.get("eim_local.load_eim_package")
+        fields = {field.name: field for field in spec.inputs}
+
+        assert fields["package_path"].kind == "path"
+        assert fields["package_path"].required is True
+        assert fields["cert_path"].kind == "path"
+        assert fields["cert_path"].required is False
+
+        calls: list[tuple[str, str]] = []
+
+        class FakeSession:
+            def load_eim_package_to_isdr(
+                self,
+                package_path: str = "",
+                cert_path: str = "",
+            ) -> dict[str, object]:
+                calls.append((package_path, cert_path))
+                return {
+                    "package_path": package_path,
+                    "package_type": "add_eim",
+                    "selected_cert_path": cert_path,
+                }
+
+        monkeypatch.setattr(eim_local, "_build_eim_session", lambda: FakeSession())
+
+        result = eim_local._dispatch_load_eim_package(
+            ActionContext(),
+            package_path="/tmp/package.json",
+            cert_path="/tmp/cert.pem",
+        )
+
+        assert calls == [("/tmp/package.json", "/tmp/cert.pem")]
+        assert result["cert_path"] == "/tmp/cert.pem"
+        assert result["report"]["selected_cert_path"] == "/tmp/cert.pem"
+
+    def test_local_smdp_import_certificate_copies_to_persistent_store(
+        self,
+        tmp_path,
+        monkeypatch,
+    ) -> None:
+        from SCP11.local_access import config as config_module
+        from SCP11.local_access import session as session_module
+        from yggdrasim_common.gui_server.actions import scp11_local
+        from yggdrasim_common.gui_server.actions.registry import ActionContext
+
+        certs_dir = tmp_path / "Workspace" / "LocalSMDPP" / "certs"
+        source_dir = tmp_path / "source"
+        source_dir.mkdir()
+        cert_path = source_dir / "CERT.DPauth.ECDSA.der"
+        key_path = source_dir / "SK.DPauth.ECDSA.pem"
+        cert_path.write_bytes(b"certificate")
+        key_path.write_bytes(b"private-key")
+
+        class FakeConfig:
+            def __init__(self, **kwargs):
+                self.CERTS_DIR = str(certs_dir)
+
+        class FakeSession:
+            def __init__(self, cfg, apdu_channel=None):
+                self.cfg = cfg
+                self.apdu_channel = apdu_channel
+
+            def list_local_smdp_certificate_inventory(self):
+                return {
+                    "auth_records": [
+                        {"certificate_path": str(certs_dir / "SM-DP+" / "SM_DPauth" / cert_path.name)}
+                    ],
+                    "pb_records": [],
+                    "selected_auth": {
+                        "certificate_path": str(certs_dir / "SM-DP+" / "SM_DPauth" / cert_path.name)
+                    },
+                    "selected_pb": None,
+                }
+
+        monkeypatch.setattr(config_module, "LocalAccessConfig", FakeConfig)
+        monkeypatch.setattr(session_module, "LocalIsdrSession", FakeSession)
+
+        result = scp11_local._dispatch_import_certificate(
+            ActionContext(),
+            certificate_path=str(cert_path),
+            private_key_path=str(key_path),
+            certificate_role="DPauth",
+            root_ci_pkid="F54172BDF98A95D65CBEB88A38A1C11D800A85C3",
+            server_address="local.example.test",
+        )
+
+        target_dir = certs_dir / "SM-DP+" / "SM_DPauth"
+        target_cert = target_dir / cert_path.name
+        target_key = target_dir / key_path.name
+        metadata = json.loads(Path(result["metadata_path"]).read_text(encoding="utf-8"))
+
+        assert target_cert.read_bytes() == b"certificate"
+        assert target_key.read_bytes() == b"private-key"
+        assert result["certificate_path"] == str(target_cert)
+        assert result["private_key_path"] == str(target_key)
+        assert metadata["role"] == "auth"
+        assert metadata["private_key_path"] == key_path.name
+        assert metadata["server_address"] == "local.example.test"
+        assert result["inventory"]["selected_auth"]["certificate_path"] == str(target_cert)
 
     def test_third_slice_actions_register(self) -> None:
         """Every SCP11-live and HIL action must be in the catalogue."""
@@ -340,12 +478,12 @@ class TestActionRegistry:
 
 
 # ----------------------------------------------------------------------
-# Engine-tool dispatchers (pure-function; no hardware, no asn1crypto)
+# Offline-tool dispatchers (pure-function; no hardware, no asn1crypto)
 # ----------------------------------------------------------------------
 
 
 class TestEngineToolDispatchers:
-    """Exercise the six engine-tool actions end to end.
+    """Exercise the offline decoder/reference actions end to end.
 
     These dispatchers are deliberately side-effect free — they wrap the
     same helpers that back ``/api/tools/*``. Running them here guards
@@ -377,6 +515,34 @@ class TestEngineToolDispatchers:
         spec = get_registry().get("tool.tlv.decode")
         with pytest.raises(ValueError):
             spec.dispatcher(self._ctx(), **coerce_inputs(spec, {"hex": "not-hex"}))
+
+    def test_asn1_tlv_decode_returns_tag_registry_result(self) -> None:
+        ensure_builtin_actions_loaded()
+        spec = get_registry().get("tool.asn1_tlv.decode")
+        result = spec.dispatcher(
+            self._ctx(),
+            **coerce_inputs(spec, {"hex_text": "BF 22 03 81 01 02"}),
+        )
+        assert result["format"] == "BER/DER TLV"
+        assert result["complete"] is True
+        assert result["items"][0]["tag"] == "BF22"
+        assert result["items"][0]["name"] == "EUICC_INFO_2"
+        assert "asn1Notation" in result
+
+    def test_sima_response_decode_returns_semantic_result(self) -> None:
+        ensure_builtin_actions_loaded()
+        spec = get_registry().get("tool.sima_response.decode")
+        result = spec.dispatcher(
+            self._ctx(),
+            **coerce_inputs(spec, {"hex": "30 07 A0 05 30 03 80 01 00"}),
+        )
+
+        assert result["format"] == "SIMa response"
+        assert result["complete"] is True
+        assert result["semantic"]["choice"] == "successResult"
+        assert result["semantic"]["result_code"] == 0
+        assert result["nodes"][0]["label"] == "simaResponse"
+        assert "successResult.resultCode=0" in result["formatted"]
 
     def test_sw_lookup_happy_path(self) -> None:
         ensure_builtin_actions_loaded()
@@ -817,6 +983,187 @@ class TestHilDispatchers:
         assert result["error"] == ""
         assert result["raw"]["reader"] == "sim"
 
+    def test_service_control_stop_clears_default_runtime_marker(self, monkeypatch) -> None:
+        from yggdrasim_common.gui_server import lifecycle
+        import yggdrasim_common.hil_bridge_runtime as runtime_mod
+
+        calls: list[tuple[str, str]] = []
+        monkeypatch.setattr(
+            runtime_mod,
+            "stop_user_service",
+            lambda service_name: calls.append(("stop", service_name)),
+        )
+        monkeypatch.setattr(
+            runtime_mod,
+            "clear_card_relay_state",
+            lambda: calls.append(("clear", "relay")),
+        )
+        monkeypatch.setattr(
+            runtime_mod,
+            "clear_supervisor_state",
+            lambda: calls.append(("clear", "supervisor")),
+        )
+        monkeypatch.setattr(
+            runtime_mod,
+            "query_user_service_state",
+            lambda service_name: {
+                "serviceName": service_name,
+                "activeState": "inactive",
+            },
+        )
+        monkeypatch.setattr(
+            lifecycle,
+            "unregister_gui_service",
+            lambda service_name: calls.append(("unregister", service_name)),
+        )
+
+        ensure_builtin_actions_loaded()
+        spec = get_registry().get("hil.service_control")
+        result = spec.dispatcher(
+            self._ctx(),
+            **coerce_inputs(spec, {"action": "stop", "confirm": True}),
+        )
+
+        assert result["ok"] is True
+        assert ("stop", runtime_mod.DEFAULT_SERVICE_NAME) in calls
+        assert ("clear", "relay") in calls
+        assert ("clear", "supervisor") in calls
+
+    def test_session_stop_clears_default_runtime_marker(self, monkeypatch) -> None:
+        from yggdrasim_common.gui_server import lifecycle
+        import yggdrasim_common.hil_bridge_runtime as runtime_mod
+
+        calls: list[tuple[str, str]] = []
+        monkeypatch.setattr(
+            runtime_mod,
+            "stop_user_service",
+            lambda service_name: calls.append(("stop", service_name)),
+        )
+        monkeypatch.setattr(
+            runtime_mod,
+            "clear_card_relay_state",
+            lambda: calls.append(("clear", "relay")),
+        )
+        monkeypatch.setattr(
+            runtime_mod,
+            "clear_supervisor_state",
+            lambda: calls.append(("clear", "supervisor")),
+        )
+        monkeypatch.setattr(
+            runtime_mod,
+            "query_user_service_state",
+            lambda service_name: {
+                "serviceName": service_name,
+                "activeState": "inactive",
+            },
+        )
+        monkeypatch.setattr(
+            lifecycle,
+            "unregister_gui_service",
+            lambda service_name: calls.append(("unregister", service_name)),
+        )
+
+        ensure_builtin_actions_loaded()
+        spec = get_registry().get("hil.session_stop")
+        result = spec.dispatcher(
+            self._ctx(),
+            **coerce_inputs(spec, {"confirm": True}),
+        )
+
+        assert result["ok"] is True
+        assert ("stop", runtime_mod.DEFAULT_SERVICE_NAME) in calls
+        assert ("clear", "relay") in calls
+        assert ("clear", "supervisor") in calls
+
+    def test_remote_capture_sync_ignores_stopped_tunnel(self, monkeypatch) -> None:
+        from yggdrasim_common.gui_server.actions import card_bridge as cb
+        from yggdrasim_common.gui_server.actions import hil as hil_mod
+
+        monkeypatch.setattr(
+            cb,
+            "_load_remote_rig_state",
+            lambda: {
+                "ssh_target": "pi@example.test",
+                "ssh_tunnel_pid": 0,
+                "remote_gsmtap_capture_path": "~/YggdraSIM/state/hil_termshark/live_capture.pcap",
+            },
+        )
+        monkeypatch.setattr(
+            hil_mod.subprocess,
+            "run",
+            lambda *_args, **_kwargs: (_ for _ in ()).throw(
+                AssertionError("stopped tunnel should not probe remote capture")
+            ),
+        )
+
+        result = hil_mod._sync_remote_decode_capture_if_available()
+
+        assert result["configured"] is True
+        assert result["ok"] is False
+        assert "tunnel" in result["error"]
+
+    def test_session_start_ignores_stale_remote_capture_when_tunnel_stopped(self, monkeypatch, tmp_path) -> None:
+        from yggdrasim_common.gui_server.actions import card_bridge as cb
+        from yggdrasim_common.gui_server.actions import hil as hil_mod
+        import yggdrasim_common.hil_bridge_runtime as runtime_mod
+
+        capture_path = tmp_path / "live_capture.pcap"
+        calls = {}
+        monkeypatch.setattr(
+            cb,
+            "_load_remote_rig_state",
+            lambda: {
+                "ssh_target": "pi@example.test",
+                "ssh_tunnel_pid": 0,
+                "remote_gsmtap_capture_path": "~/YggdraSIM/state/hil_termshark/live_capture.pcap",
+            },
+        )
+        monkeypatch.setattr(
+            hil_mod,
+            "_default_decode_capture_path",
+            lambda: str(capture_path),
+        )
+        monkeypatch.setattr(
+            runtime_mod,
+            "query_user_service_state",
+            lambda service_name: {"activeState": "inactive", "serviceName": service_name},
+        )
+        monkeypatch.setattr(runtime_mod, "read_supervisor_state", lambda: {})
+
+        def _ensure_service(*, gsmtap_enabled=True, gsmtap_capture_path=""):
+            calls["ensure"] = {
+                "gsmtap_enabled": gsmtap_enabled,
+                "gsmtap_capture_path": gsmtap_capture_path,
+            }
+            return "/tmp/yggdrasim-hil-supervisor.service", False, "yggdrasim-hil-supervisor.service"
+
+        def _activate_service(*, active_before, needs_restart, service_name):
+            calls["activate"] = {
+                "active_before": active_before,
+                "needs_restart": needs_restart,
+                "service_name": service_name,
+            }
+            return {"apduUrl": "http://127.0.0.1:9998/apdu", "reader": "local"}
+
+        monkeypatch.setattr(hil_mod, "_ensure_hil_bridge_user_service", _ensure_service)
+        monkeypatch.setattr(hil_mod, "_activate_hil_bridge_service", _activate_service)
+
+        ensure_builtin_actions_loaded()
+        spec = get_registry().get("hil.session_start")
+        result = spec.dispatcher(
+            self._ctx(),
+            **coerce_inputs(spec, {"mode": "decoded"}),
+        )
+
+        assert result["ok"] is True
+        assert result["mode"] == "decoded"
+        assert result["status"]["reader"] == "local"
+        assert calls["activate"] == {
+            "active_before": False,
+            "needs_restart": False,
+            "service_name": "yggdrasim-hil-supervisor.service",
+        }
+
     def test_session_start_prepares_decoded_service(self, monkeypatch, tmp_path) -> None:
         from yggdrasim_common.gui_server.actions import hil as hil_mod
         import yggdrasim_common.hil_bridge_runtime as runtime_mod
@@ -835,6 +1182,11 @@ class TestHilDispatchers:
             lambda service_name: {"activeState": "inactive", "serviceName": service_name},
         )
         monkeypatch.setattr(runtime_mod, "read_supervisor_state", lambda: {})
+        monkeypatch.setattr(
+            hil_mod,
+            "_sync_remote_decode_capture_if_available",
+            lambda: {"configured": False, "ok": False},
+        )
 
         def _ensure_service(*, gsmtap_enabled=True, gsmtap_capture_path=""):
             calls["ensure"] = {
@@ -876,12 +1228,48 @@ class TestHilDispatchers:
             "service_name": "yggdrasim-hil-supervisor.service",
         }
 
+    def test_session_start_attaches_remote_capture_when_available(self, monkeypatch, tmp_path) -> None:
+        from yggdrasim_common.gui_server.actions import hil as hil_mod
+
+        capture_path = tmp_path / "remote_live_capture.pcap"
+        capture_path.write_bytes(b"0" * 64)
+        monkeypatch.setattr(
+            hil_mod,
+            "_sync_remote_decode_capture_if_available",
+            lambda: {
+                "configured": True,
+                "ok": True,
+                "capture_path": str(capture_path),
+                "remote_capture_path": "~/YggdraSIM/state/hil_termshark/live_capture.pcap",
+                "copied": True,
+            },
+        )
+        monkeypatch.setattr(
+            hil_mod,
+            "_ensure_hil_bridge_user_service",
+            lambda **_kwargs: (_ for _ in ()).throw(AssertionError("local service should not start")),
+        )
+
+        ensure_builtin_actions_loaded()
+        spec = get_registry().get("hil.session_start")
+        result = spec.dispatcher(
+            self._ctx(),
+            **coerce_inputs(spec, {"mode": "decoded"}),
+        )
+
+        assert result["ok"] is True
+        assert result["mode"] == "remote"
+        assert result["capture_source"] == "remote"
+        assert result["capture_path"] == str(capture_path)
+        assert result["note"] == "Attached to remote HIL GSMTAP capture."
+
     def test_decode_snapshot_uses_existing_decode_helpers(self, monkeypatch, tmp_path) -> None:
         from Tools.HilBridge.live_decode_view import PacketSummary
         from yggdrasim_common.gui_server.actions import hil as hil_mod
         import Tools.HilBridge.live_decode_state as state_mod
         import Tools.HilBridge.live_decode_view as view_mod
 
+        importlib.import_module("Tools.HilBridge.live_decode_tui")
         capture_path = tmp_path / "live_capture.pcap"
         capture_path.write_bytes(b"0" * 64)
         sample_row = PacketSummary(
@@ -933,6 +1321,23 @@ class TestHilDispatchers:
             lambda *_args, **_kwargs: ("0000  AA 55", ""),
         )
         monkeypatch.setattr(
+            view_mod,
+            "read_packet_field_ranges",
+            lambda *_args, **_kwargs: (
+                [
+                    {
+                        "name": "gsm_sim.apdu",
+                        "label": "APDU: AA 55",
+                        "start": 0,
+                        "end": 2,
+                        "size": 2,
+                        "depth": 1,
+                    }
+                ],
+                "",
+            ),
+        )
+        monkeypatch.setattr(
             state_mod,
             "build_stateful_packet_annotations",
             lambda *_args, **_kwargs: {7: sample_annotation},
@@ -940,6 +1345,9 @@ class TestHilDispatchers:
 
         ensure_builtin_actions_loaded()
         spec = get_registry().get("hil.decode_snapshot")
+        limit_field = next(field for field in spec.inputs if field.name == "limit")
+        assert limit_field.default == 5000
+        assert limit_field.max_value == 5000
         result = spec.dispatcher(
             self._ctx(),
             **coerce_inputs(
@@ -959,8 +1367,197 @@ class TestHilDispatchers:
         assert result["rows"][0]["info"] == "FETCH"
         assert "STK OPEN CHANNEL" in result["rows"][0]["annotated_info"]
         assert result["annotations"]["7"]["channel_poll_index"] == 1
+        assert [
+            (item["kind"], item["depth"], item.get("label"), item.get("frame_number"))
+            for item in result["context_tree"]
+        ] == [
+            ("poll_group", 0, "Poll", None),
+            ("poll", 1, "Poll 1", None),
+            ("poll_target", 2, "Target 1", None),
+            ("session", 3, "DNS", None),
+            ("frame", 4, None, 7),
+        ]
         assert result["detail"].startswith("Frame 7")
         assert result["bytes"].startswith("0000")
+        assert result["detail_ranges"][0]["name"] == "gsm_sim.apdu"
+
+    def test_decode_snapshot_incremental_annotations_use_full_context(self, monkeypatch, tmp_path) -> None:
+        from Tools.HilBridge.live_decode_view import PacketSummary
+        from yggdrasim_common.gui_server.actions import hil as hil_mod
+        import Tools.HilBridge.live_decode_state as state_mod
+        import Tools.HilBridge.live_decode_view as view_mod
+
+        capture_path = tmp_path / "live_capture.pcap"
+        capture_path.write_bytes(b"0" * 64)
+        rows = [
+            PacketSummary(
+                number=1,
+                time_text="0.000001",
+                source="127.0.0.1",
+                destination="127.0.0.1",
+                protocol="GSM SIM",
+                length_text="80",
+                info="SELECT",
+                udp_payload_hex="AA55",
+            ),
+            PacketSummary(
+                number=2,
+                time_text="0.000002",
+                source="127.0.0.1",
+                destination="127.0.0.1",
+                protocol="GSM SIM",
+                length_text="80",
+                info="FETCH",
+                udp_payload_hex="AA55",
+            ),
+            PacketSummary(
+                number=3,
+                time_text="0.000003",
+                source="127.0.0.1",
+                destination="127.0.0.1",
+                protocol="GSM SIM",
+                length_text="80",
+                info="READ BINARY",
+                udp_payload_hex="AA55",
+            ),
+        ]
+        summary_after_frames: list[int | None] = []
+        annotation_row_numbers: list[int] = []
+
+        def fake_read_packet_summaries(*_args, **kwargs):
+            summary_after_frames.append(kwargs.get("after_frame"))
+            return rows, ""
+
+        def fake_build_annotations(annotation_rows, **_kwargs):
+            annotation_row_numbers.extend(int(row.number) for row in annotation_rows)
+            return {
+                3: SimpleNamespace(
+                    frame_number=3,
+                    summary_suffix="FS MF/EF READ BINARY",
+                    context_lines=("FS MF/EF",),
+                    active_channel_count=0,
+                    active_timer_count=0,
+                    active_timers=(),
+                    capture_time_seconds=None,
+                    channel_session_id=None,
+                    channel_number=None,
+                    channel_poll_index=None,
+                    state_event=True,
+                    card_session_index=1,
+                    card_session_reset_reason="",
+                    card_session_iccid="",
+                )
+            }
+
+        monkeypatch.setattr(
+            hil_mod,
+            "_resolve_decode_capture_path",
+            lambda capture_path=None: str(capture_path),
+        )
+        monkeypatch.setattr(view_mod, "resolve_tshark_binary", lambda: "/usr/bin/tshark")
+        monkeypatch.setattr(view_mod, "read_packet_summaries", fake_read_packet_summaries)
+        monkeypatch.setattr(
+            state_mod,
+            "build_stateful_packet_annotations",
+            fake_build_annotations,
+        )
+
+        ensure_builtin_actions_loaded()
+        spec = get_registry().get("hil.decode_snapshot")
+        result = spec.dispatcher(
+            self._ctx(),
+            **coerce_inputs(
+                spec,
+                {
+                    "capture_path": str(capture_path),
+                    "include_detail": False,
+                    "include_annotations": True,
+                    "after_frame": "2",
+                    "context_after_frame": "1",
+                    "limit": "10",
+                },
+            ),
+        )
+
+        assert summary_after_frames == [None]
+        assert annotation_row_numbers == [1, 2, 3]
+        assert [row["number"] for row in result["rows"]] == [3]
+        assert "1" not in result["annotations"]
+        assert "2" in result["annotations"]
+        assert result["annotations"]["3"]["summary_suffix"] == "FS MF/EF READ BINARY"
+        context_frames = [
+            item["frame_number"]
+            for item in result["context_tree"]
+            if item["kind"] == "frame"
+        ]
+        assert context_frames == [2, 3]
+        assert any(
+            item["kind"] == "group" and item["label"] == "ETSI FS"
+            for item in result["context_tree"]
+        )
+        assert result["incremental"] is True
+        assert result["after_frame"] == 2
+
+    def test_decode_snapshot_uses_remote_rig_capture_when_available(self, monkeypatch, tmp_path) -> None:
+        from Tools.HilBridge.live_decode_view import PacketSummary
+        from yggdrasim_common.gui_server.actions import hil as hil_mod
+        import Tools.HilBridge.live_decode_state as state_mod
+        import Tools.HilBridge.live_decode_view as view_mod
+
+        capture_path = tmp_path / "remote_live_capture.pcap"
+        capture_path.write_bytes(b"0" * 64)
+        sample_row = PacketSummary(
+            number=3,
+            time_text="0.000000",
+            source="127.0.0.1",
+            destination="127.0.0.1",
+            protocol="GSM SIM",
+            length_text="80",
+            info="SELECT",
+            udp_payload_hex="AA55",
+        )
+
+        monkeypatch.setattr(
+            hil_mod,
+            "_sync_remote_decode_capture_if_available",
+            lambda: {
+                "configured": True,
+                "ok": True,
+                "capture_path": str(capture_path),
+                "remote_capture_path": "~/YggdraSIM/state/hil_termshark/live_capture.pcap",
+                "copied": True,
+            },
+        )
+        monkeypatch.setattr(view_mod, "resolve_tshark_binary", lambda: "/usr/bin/tshark")
+        monkeypatch.setattr(
+            view_mod,
+            "read_packet_summaries",
+            lambda *_args, **_kwargs: ([sample_row], ""),
+        )
+        monkeypatch.setattr(
+            state_mod,
+            "build_stateful_packet_annotations",
+            lambda *_args, **_kwargs: {},
+        )
+
+        ensure_builtin_actions_loaded()
+        spec = get_registry().get("hil.decode_snapshot")
+        result = spec.dispatcher(
+            self._ctx(),
+            **coerce_inputs(
+                spec,
+                {
+                    "include_detail": False,
+                    "limit": "10",
+                },
+            ),
+        )
+
+        assert result["ok"] is True
+        assert result["capture_source"] == "remote"
+        assert result["capture_path"] == str(capture_path)
+        assert result["remote_capture"]["remote_capture_path"].endswith("live_capture.pcap")
+        assert result["rows"][0]["info"] == "SELECT"
 
     def test_decode_snapshot_can_skip_detail(self, monkeypatch, tmp_path) -> None:
         from Tools.HilBridge.live_decode_view import PacketSummary
@@ -1005,6 +1602,11 @@ class TestHilDispatchers:
             lambda *_args, **_kwargs: hex_calls.append(True) or ("", ""),
         )
         monkeypatch.setattr(
+            view_mod,
+            "read_packet_field_ranges",
+            lambda *_args, **_kwargs: detail_calls.append("ranges") or ([], ""),
+        )
+        monkeypatch.setattr(
             state_mod,
             "build_stateful_packet_annotations",
             lambda *_args, **_kwargs: {},
@@ -1030,6 +1632,7 @@ class TestHilDispatchers:
         assert result["selected_frame"] == 7
         assert result["detail"] == ""
         assert result["bytes"] == ""
+        assert result["detail_ranges"] == []
         assert detail_calls == []
         assert hex_calls == []
 
@@ -1283,6 +1886,63 @@ class TestScp11LiveDecoders:
         assert isinstance(row, dict)
         assert "iccid" in row
 
+    def test_scan_dispatch_uses_start_snapshot_bootstrap(self, monkeypatch) -> None:
+        from yggdrasim_common.gui_server.actions import scp11_live as live_mod
+        from yggdrasim_common.gui_server.actions.registry import ActionContext
+
+        calls: list[str] = []
+
+        class Profile:
+            iccid = "8988000000000000001"
+            aid = "A0000005591010FFFFFFFF8900001200"
+            state = "ENABLED"
+            profile_class = "OPER"
+            nickname = "Primary"
+
+        class Console:
+            def _collect_snapshot(self):
+                raise AssertionError("raw snapshot collector should not run")
+
+            def _collect_start_snapshot(self):
+                calls.append("start")
+                return SimpleNamespace(
+                    eid="89049032111100000000000000000001",
+                    issuer_number="89049032",
+                    issuer_name="TestIssuer",
+                    profiles=[Profile()],
+                    notification_count=1,
+                    euicc_info2_summary={"profile_version": "v2.3.1 (020301)"},
+                    eim_summary={
+                        "entries": [
+                            {
+                                "eim_fqdn": "eim.example.test",
+                                "eim_id": "1.3.6.1.4.1.53375.1.5.1.1",
+                            }
+                        ]
+                    },
+                    configured_decoded={
+                        "default_smdp": "smdp.example.test",
+                        "root_smds_primary": "root-smds.example.test",
+                    },
+                )
+
+        def fake_run_console_callable(reader_index, work, *, connect_first=True):
+            assert reader_index == 3
+            assert connect_first is False
+            return work(Console()), "trace"
+
+        monkeypatch.setattr(live_mod, "_resolve_reader_index", lambda reader: 3)
+        monkeypatch.setattr(live_mod, "_run_console_callable", fake_run_console_callable)
+
+        result = live_mod._dispatch_scan(ActionContext(), reader="Reader A")
+
+        assert calls == ["start"]
+        assert result["reader_index"] == 3
+        assert result["snapshot"]["eid"] == "89049032111100000000000000000001"
+        assert result["snapshot"]["profiles"][0]["aid"] == "A0000005591010FFFFFFFF8900001200"
+        assert result["snapshot"]["configured_decoded"]["default_smdp"] == "smdp.example.test"
+        assert result["trace"] == "trace"
+
 
 class TestScp11LiveRegistration:
     """Every live action must declare the short-lived (not streaming),
@@ -1509,6 +2169,7 @@ class TestGuiLifecycle:
         assert calls == [{
             "stop_external_services": True,
             "include_default_hil_service": True,
+            "include_card_bridge_state": True,
         }]
 
     def test_create_app_registers_shutdown_cleanup(self, monkeypatch) -> None:

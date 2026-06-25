@@ -6,7 +6,7 @@ repository root.
 
 | Script | Purpose |
 | --- | --- |
-| `mirror_source_docs.py` | Mirror authored source docs from `guides/`, `plugins/`, `SCP11/`, `tests/`, `reports/`, and root text pages into `site-docs/sources/`, and rebuild the `site-docs/source-library.md` index. |
+| `mirror_source_docs.py` | Mirror authored source docs from `guides/`, `plugins/`, `SCP11/`, `tests/`, and root text pages into `site-docs/sources/`, and rebuild the `site-docs/source-library.md` index. |
 | `check_internal_links.py` | Walk every Markdown file under `site-docs/` and verify inline links resolve to an existing file. Exits non-zero on failure. |
 | `build_cli_matrix.py` | Regenerate the CLI matrix section of `site-docs/reference/cli-matrix.md` from `pyproject.toml` and `yggdrasim_common/registry.py`. |
 | `build_combined.py` | Concatenate every page referenced in `mkdocs.yml` `nav` into a single Markdown file (default `YggdraSIM.md` at the repo root). Headings are shifted and internal links are rewritten to in-document anchors so the output is self-contained. |

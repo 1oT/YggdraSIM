@@ -46,12 +46,16 @@
       startMode: "decoded",
       selectedFrameNumber: null,
       capturePath: "",
+      captureSource: "",
       keybagPath: "",
       rows: [],
       annotations: {},
       detail: "",
       bytes: "",
+      detailRanges: [],
       detailFrameNumber: 0,
+      byteHighlightHoverRange: null,
+      byteHighlightPinnedRange: null,
       statusText: "not started",
       errorText: "",
       actionStatusText: "",
@@ -59,10 +63,13 @@
       refreshTimerId: null,
       inflight: false,
       refreshQueuedForce: false,
+      refreshQueuedSelectedFrame: null,
       startInFlight: false,
       stopInFlight: false,
+      cardBridgeLaunchInFlight: false,
       paused: false,
       followTail: true,
+      selectionFollowsTail: true,
       rawPaused: false,
       rawRows: [],
       rawPendingRows: [],
@@ -74,6 +81,9 @@
       rawFrameSeen: {},
       rawClearedFrameNumber: 0,
       modemShellCommand: "",
+      modemShellDefaultCommand: "",
+      modemShellDefaultSource: "",
+      modemShellRemoteTarget: "",
       modemShellCapability: null,
       modemShellDevices: [],
       modemShellMetadataLoading: false,
@@ -88,7 +98,16 @@
       packetClientHeight: 0,
       packetScrollBottomGap: 0,
       lastPacketScrollAt: 0,
+      packetScrollRestoring: false,
       packetSectionOpen: {},
+      packetRenderPending: false,
+      packetRenderTimerId: null,
+      packetVirtualRenderTimerId: null,
+      packetPointerActive: false,
+      packetPointerId: null,
+      packetPointerReleaseTimerId: null,
+      packetPointerReleaseListenersInstalled: false,
+      contextTree: [],
       liveBaselinePending: false,
       liveBaselineFrameNumber: 0,
       liveBaselineCaptureSize: 0,
@@ -102,6 +121,10 @@
       bytesScrollLeft: 0,
       lastRefreshAt: 0,
       lastStableStatusText: "",
+      timerSnapshotAppliedAt: 0,
+      timerSnapshotCaptureSeconds: null,
+      timerSnapshotSignature: "",
+      timerStatusTimerId: null,
     },
     // Top-bar reader strip. Promoted from the per-SCP03-tab sidebar to
     // a global app-level control: each detected PC/SC reader gets a
@@ -143,11 +166,77 @@
 
   var HIL_MODEM_COMMAND_KEY = "ygg.hil.modemShellCommand";
   var HIL_MODEM_DEFAULT_COMMAND = "sudo tio /dev/ttyUSB2";
+  var HIL_PACKET_FETCH_LIMIT = 5000;
+  var HIL_PACKET_RENDER_LIMIT = 750;
+  var HIL_PACKET_VIRTUAL_ROW_HEIGHT = 26;
+  var HIL_PACKET_VIRTUAL_OVERSCAN = 16;
+  var HIL_RAW_TRACE_LIMIT = 750;
   var CC_READER_SESSION_SUBSYSTEMS = {
     "eSIM Management": true,
     "SCP11 Local": true,
     "Local eIM": true,
   };
+  var CC_OFFLINE_TOOLS_HIDDEN_ACTIONS = {
+    "suci.status": true,
+    "tool.euicc_info2.decode": true,
+    "tool.saip.lint": true,
+    "tool.tlv.decode": true,
+  };
+  var CC_GLOBAL_DEBUG_FLAG = "YGGDRASIM_GLOBAL_DEBUG";
+  var CC_TRUE_ENV_FLAG_VALUES = {
+    "1": true,
+    true: true,
+    yes: true,
+    y: true,
+    on: true,
+    debug: true,
+    verbose: true,
+  };
+  var ccGlobalDebugEnabled = false;
+  var ccGlobalDebugRefreshPromise = null;
+
+  function ccEnvFlagBool(value) {
+    return !!CC_TRUE_ENV_FLAG_VALUES[String(value || "").trim().toLowerCase()];
+  }
+
+  function ccSetGlobalDebugFromEnvFlags(flags) {
+    flags = Array.isArray(flags) ? flags : [];
+    ccGlobalDebugEnabled = false;
+    for (var i = 0; i < flags.length; i++) {
+      var flag = flags[i] || {};
+      if (flag.name === CC_GLOBAL_DEBUG_FLAG) {
+        ccGlobalDebugEnabled = !!flag.is_set && ccEnvFlagBool(flag.current_value);
+        return ccGlobalDebugEnabled;
+      }
+    }
+    return false;
+  }
+
+  function ccRefreshGlobalDebugFlag() {
+    if (ccGlobalDebugRefreshPromise) return ccGlobalDebugRefreshPromise;
+    ccGlobalDebugRefreshPromise = apiFetch("/api/env_flags/list").then(
+      function (data) {
+        return ccSetGlobalDebugFromEnvFlags(data && data.flags);
+      },
+      function () {
+        ccGlobalDebugEnabled = false;
+        return false;
+      }
+    ).then(function (enabled) {
+      ccGlobalDebugRefreshPromise = null;
+      return enabled;
+    });
+    return ccGlobalDebugRefreshPromise;
+  }
+
+  function ccIsGlobalDebugEnabled() {
+    return !!ccGlobalDebugEnabled;
+  }
+
+  function ccShouldShowStreamFrame(level) {
+    if (String(level || "info").toLowerCase() !== "error") return true;
+    return ccIsGlobalDebugEnabled();
+  }
 
   function ccSubsystemRequiresReaderSession(subsystem) {
     return !!CC_READER_SESSION_SUBSYSTEMS[String(subsystem || "")];
@@ -237,7 +326,141 @@
     }
   }
 
+  function ccSetTopbarBridgeBusy(pillId, busy) {
+    var pill = $(pillId);
+    if (!pill) return;
+    pill.disabled = !!busy;
+    if (busy) {
+      pill.setAttribute("data-busy", "true");
+    } else {
+      pill.removeAttribute("data-busy");
+    }
+  }
+
+  function ccDescribeTopbarBridgeAction(data, fallback) {
+    if (typeof cbRigDescribeAction === "function") {
+      return cbRigDescribeAction(data, fallback);
+    }
+    return (data && data.note) || fallback || "";
+  }
+
+  async function cbToggleTopbarRemoteBridge() {
+    var pill = $("topbar-card-bridge");
+    if (pill && pill.getAttribute("data-busy") === "true") return;
+    var previousState = (typeof cbState !== "undefined" && cbState.globalState)
+      || (pill && pill.getAttribute("data-state"))
+      || "idle";
+    var value = $("topbar-card-bridge-value");
+    var previousLabel = (typeof cbState !== "undefined" && cbState.globalLabel)
+      || (value && value.textContent)
+      || previousState;
+    var running = previousState === "running";
+    ccSetTopbarBridgeBusy("topbar-card-bridge", true);
+    setText("topbar-card-bridge-value", running ? "stopping" : "starting");
+    try {
+      var data;
+      if (running) {
+        if (typeof cbRigStopAllFromSavedSettings !== "function") {
+          throw new Error("Remote Bridge stop helper is unavailable.");
+        }
+        data = await cbRigStopAllFromSavedSettings();
+      } else {
+        if (typeof cbRigStartAllFromSavedSettings !== "function") {
+          throw new Error("Remote Bridge start helper is unavailable.");
+        }
+        data = await cbRigStartAllFromSavedSettings();
+      }
+      if (!data || data.ok === false) {
+        if (typeof cbSetGlobalBridgeStatus === "function" && (!data || !data.state)) {
+          cbSetGlobalBridgeStatus(previousState, previousLabel);
+        }
+        setStatusAction(ccDescribeTopbarBridgeAction(
+          data,
+          running ? "Remote Bridge stop failed." : "Remote Bridge start failed."
+        ));
+      }
+    } catch (err) {
+      if (typeof cbSetGlobalBridgeStatus === "function") {
+        cbSetGlobalBridgeStatus(previousState, previousLabel);
+      }
+      setStatusAction(String((err && err.message) || err));
+    } finally {
+      ccSetTopbarBridgeBusy("topbar-card-bridge", false);
+      if (typeof loadCardBridgeStatus === "function") loadCardBridgeStatus();
+    }
+  }
+
+  function hilTopbarActions() {
+    var cat = commandState.catalogue || {};
+    var subsystems = cat.subsystems || {};
+    return subsystems.HIL || [];
+  }
+
+  function hilTopbarLeaf() {
+    return ccFindLeaf("leaf-adv-hil") || {
+      id: "leaf-adv-hil",
+      label: "HIL Bridge",
+      subsystem: "HIL",
+      scope: "all",
+      hint: "Hardware-in-the-loop APDU relay / capture",
+    };
+  }
+
+  async function hilEnsureTopbarCatalogue() {
+    if (commandState.catalogue) return true;
+    await loadCommandCatalogue();
+    return !!commandState.catalogue;
+  }
+
+  async function hilToggleTopbarBridge() {
+    var pill = $("topbar-hil-bridge");
+    if (pill && pill.getAttribute("data-busy") === "true") return;
+    var state = commandState.hilWorkbench;
+    if (state.startInFlight || state.stopInFlight) return;
+    var running = state.armed && state.startMode !== "offline";
+    ccSetTopbarBridgeBusy("topbar-hil-bridge", true);
+    try {
+      var ready = await hilEnsureTopbarCatalogue();
+      if (!ready) {
+        setStatusAction("HIL Bridge actions are unavailable.");
+        return;
+      }
+      var leaf = hilTopbarLeaf();
+      openCommandSubsystem("HIL", { scope: "all", leafId: "leaf-adv-hil" });
+      var container = $("cc-actions");
+      var actions = hilTopbarActions();
+      if (running) {
+        await hilStopLiveSession(actions, container, leaf);
+      } else {
+        await hilStartLiveSession(actions, container, leaf);
+      }
+    } finally {
+      ccSetTopbarBridgeBusy("topbar-hil-bridge", false);
+      hilSyncCommandCenterTraceIndicators();
+    }
+  }
+
+  function wireTopbarBridgeControls() {
+    var hil = $("topbar-hil-bridge");
+    if (hil && hil.getAttribute("data-bridge-control-wired") !== "true") {
+      hil.setAttribute("data-bridge-control-wired", "true");
+      hil.addEventListener("click", function (event) {
+        event.preventDefault();
+        hilToggleTopbarBridge();
+      });
+    }
+    var remote = $("topbar-card-bridge");
+    if (remote && remote.getAttribute("data-bridge-control-wired") !== "true") {
+      remote.setAttribute("data-bridge-control-wired", "true");
+      remote.addEventListener("click", function (event) {
+        event.preventDefault();
+        cbToggleTopbarRemoteBridge();
+      });
+    }
+  }
+
   function wireCommandCenter() {
+    wireTopbarBridgeControls();
     document.addEventListener("click", function (event) {
       // Ignore clicks on the group header (expand/collapse) — that
       // has its own listener. We only care about leaf clicks here.
@@ -1427,7 +1650,7 @@
     {
       id: "group-tools",
       label: "Tools",
-      hint: "Offline helpers and decoders.",
+      hint: "Offline helpers and package tooling.",
       defaultOpen: true,
       children: [
         {
@@ -1437,42 +1660,10 @@
           hint: "Profile package (SAIP) inspector / editor",
         },
         {
-          id: "leaf-tool-suci",
-          label: "SUCI Calculator",
-          subsystem: "SUCI Tool",
-          hint: "3GPP TS 33.501 SUCI encapsulation",
-        },
-        {
-          id: "leaf-tool-decoders",
-          label: "Decoders",
-          subsystem: "Tools",
-          hint: "TLV, status word, eUICC info2, SAIP/eIM lint, GSMA codes",
-        },
-      ],
-    },
-    {
-      id: "group-env",
-      label: "Environment",
-      hint: "Runtime configuration — flags, backend, reader probe.",
-      defaultOpen: false,
-      children: [
-        {
-          id: "leaf-env-config",
-          label: "Configuration",
-          inspectView: "env_flags",
-          hint: "YGGDRASIM_* env flags (process / session / file scope)",
-        },
-        {
-          id: "leaf-env-backend",
-          label: "Card backend",
-          inspectView: "backend",
-          hint: "Toggle between reader and simulated backends",
-        },
-        {
-          id: "leaf-env-readers",
-          label: "PC/SC readers",
-          inspectView: "live_readers",
-          hint: "Live reader enumeration & ATR probe",
+          id: "leaf-tool-offline",
+          label: "Offline Tools",
+          subsystem: "Offline Tools",
+          hint: "Decoders, ASN.1/TLV, SUCI, TUAK/TOPc, lint, status words",
         },
       ],
     },
@@ -1483,6 +1674,12 @@
       defaultOpen: false,
       children: [
         {
+          id: "leaf-adv-card-bridge",
+          label: "Remote Bridge",
+          inspectView: "card_bridge",
+          hint: "Remote card relay diagnostics and remote HIL rig controls",
+        },
+        {
           id: "leaf-adv-hil",
           label: "HIL Bridge",
           subsystem: "HIL",
@@ -1492,7 +1689,7 @@
           id: "leaf-adv-simcard",
           label: "SIMCARD helpers",
           subsystem: "SIMCARD",
-          hint: "Simulator-side helpers (quirks, profile store, TUAK)",
+          hint: "Simulator-side helpers (quirks, profile store)",
         },
         {
           id: "leaf-adv-terminal",
@@ -1511,6 +1708,20 @@
           label: "Registry browser",
           inspectView: "registry",
           hint: "Every stable engine entry point",
+        },
+      ],
+    },
+    {
+      id: "group-env",
+      label: "Environment",
+      hint: "Runtime configuration flags.",
+      defaultOpen: false,
+      children: [
+        {
+          id: "leaf-env-config",
+          label: "Configuration",
+          inspectView: "env_flags",
+          hint: "YGGDRASIM_* env flags (process / session / file scope)",
         },
       ],
     },
@@ -1598,6 +1809,19 @@
         nameEl.textContent = leaf.label;
         li.appendChild(nameEl);
 
+        if (leaf.inspectView === "card_bridge") {
+          var bridgeStateEl = document.createElement("span");
+          bridgeStateEl.className = "cc-nav-card-bridge-state";
+          bridgeStateEl.textContent = "running";
+          li.appendChild(bridgeStateEl);
+        }
+        if (leaf.subsystem === "HIL") {
+          var hilTraceStateEl = document.createElement("span");
+          hilTraceStateEl.className = "cc-nav-hil-trace-state";
+          hilTraceStateEl.textContent = "tracing";
+          li.appendChild(hilTraceStateEl);
+        }
+
         // Only subsystem-backed leaves get the action-count badge; the
         // inspectView leaves (env_flags / backend / readers / shell)
         // route to the existing non-CC views and have no action list.
@@ -1617,6 +1841,10 @@
       groupLi.appendChild(childList);
       nav.appendChild(groupLi);
     });
+    if (typeof cbSyncCommandCenterBridgeIndicators === "function") {
+      cbSyncCommandCenterBridgeIndicators();
+    }
+    hilSyncCommandCenterTraceIndicators();
   }
 
   function renderOverviewModuleLauncher(catalogue) {
@@ -1649,6 +1877,7 @@
       groupEl.appendChild(grid);
       host.appendChild(groupEl);
     });
+    hilSyncCommandCenterTraceIndicators();
   }
 
   function renderOverviewModuleCard(leaf, subsystems) {
@@ -1656,6 +1885,8 @@
     card.type = "button";
     card.className = "overview-module-card";
     card.setAttribute("data-cc-leaf-id", leaf.id || "");
+    if (leaf.subsystem) card.setAttribute("data-cc-subsystem", leaf.subsystem);
+    if (leaf.inspectView) card.setAttribute("data-cc-view", leaf.inspectView);
     if (leaf.stub) card.classList.add("is-stub");
     if (leaf.requiresReader) card.setAttribute("data-cc-requires-reader", "1");
 
@@ -1669,6 +1900,12 @@
     if (leaf.subsystem) {
       var count = (subsystems[leaf.subsystem] || []).length;
       badge.textContent = leaf.stub ? "reserved" : (String(count) + " action" + (count === 1 ? "" : "s"));
+      if (leaf.subsystem === "HIL") {
+        badge.setAttribute("data-hil-role", "overview-status");
+      }
+    } else if (leaf.inspectView === "card_bridge") {
+      badge.setAttribute("data-cb-role", "overview-status");
+      badge.textContent = "idle";
     } else {
       badge.textContent = "view";
     }
@@ -1694,6 +1931,57 @@
       }
     });
     return card;
+  }
+
+  function hilTraceIndicatorStatus() {
+    var state = commandState.hilWorkbench || {};
+    if (state.stopInFlight) {
+      return { state: "running", label: "stopping" };
+    }
+    if (state.armed && state.startMode !== "offline") {
+      if (state.startInFlight || state.liveBaselinePending) {
+        return { state: "running", label: "starting" };
+      }
+      if (state.paused) {
+        return { state: "running", label: "paused" };
+      }
+      return { state: "running", label: "tracing" };
+    }
+    return { state: "idle", label: "" };
+  }
+
+  function hilOverviewDefaultBadgeText() {
+    var catalogue = commandState.catalogue || {};
+    var subsystems = catalogue.subsystems || {};
+    var count = (subsystems.HIL || []).length;
+    return String(count) + " action" + (count === 1 ? "" : "s");
+  }
+
+  function hilSyncCommandCenterTraceIndicators() {
+    var status = hilTraceIndicatorStatus();
+    var running = status.state === "running";
+    var label = status.label || "tracing";
+    var topbar = $("topbar-hil-bridge");
+    if (topbar) {
+      var topbarLabel = running ? label : "idle";
+      topbar.setAttribute("data-state", running ? "running" : "idle");
+      topbar.title = "HIL Bridge status: " + topbarLabel
+        + ". Click to " + (running ? "stop" : "start") + ".";
+      topbar.setAttribute("aria-label", topbar.title);
+      setText("topbar-hil-bridge-value", topbarLabel);
+    }
+    document.querySelectorAll('#command-center-nav [data-cc-leaf-id="leaf-adv-hil"]').forEach(function (entry) {
+      entry.setAttribute("data-hil-trace-state", status.state);
+      entry.classList.toggle("is-hil-tracing", running);
+      var marker = entry.querySelector(".cc-nav-hil-trace-state");
+      if (marker) marker.textContent = running ? label : "";
+    });
+    document.querySelectorAll('.overview-module-card[data-cc-subsystem="HIL"]').forEach(function (card) {
+      card.setAttribute("data-hil-trace-state", status.state);
+      card.classList.toggle("is-hil-tracing", running);
+      var badge = card.querySelector('[data-hil-role="overview-status"]');
+      if (badge) badge.textContent = running ? label : hilOverviewDefaultBadgeText();
+    });
   }
 
   function _ccNavGroupStoredState(groupId) {
@@ -1944,6 +2232,7 @@
     if (!container || !cat) return;
     var mainEl = container.closest ? container.closest(".main") : null;
     if (mainEl) {
+      mainEl.classList.toggle("main--module-workbench", true);
       mainEl.classList.toggle("main--saip-workbench", subsystem === "SAIP");
       mainEl.classList.toggle("main--hil-workbench", subsystem === "HIL");
     }
@@ -2255,6 +2544,17 @@
     return null;
   }
 
+  function ccFindCatalogueActionById(actionId) {
+    var cat = commandState && commandState.catalogue;
+    var subsystems = cat && cat.subsystems ? cat.subsystems : {};
+    var names = Object.keys(subsystems);
+    for (var i = 0; i < names.length; i++) {
+      var action = ccFindActionById(subsystems[names[i]], actionId);
+      if (action) return action;
+    }
+    return null;
+  }
+
   function ccProfileTargetCacheKey(subsystem, readerName) {
     return String(subsystem || "") + "\x1f" + String(readerName || "");
   }
@@ -2366,6 +2666,7 @@
     if (
       suffix === "load_profile"
       || suffix === "get_certs_inventory"
+      || suffix === "import_certificate"
       || suffix === "store_metadata"
       || suffix === "update_metadata"
       || suffix === "store_metadata_custom"
@@ -2449,6 +2750,11 @@
     return !ccActionNeedsManualInput(action);
   }
 
+  function ccActionShouldAutoRunInEsimFlowPane(action) {
+    if (!action) return false;
+    return !ccActionNeedsManualInput(action);
+  }
+
   // -- Action popout builder ------------------------------------------
   // Opens a floating popout with the action's form + run button.
   // Reuses _ccBuildCompactPopout (dedup + cascade) and buildField()
@@ -2471,6 +2777,7 @@
     (action.inputs || []).forEach(function (field) {
       form.appendChild(buildField(action, field));
     });
+    ccEnhanceActionForm(action, form);
 
     // Run button + status
     var actionsBar = document.createElement("div");
@@ -2528,8 +2835,12 @@
     var scopedReader = ccSubsystemRequiresReaderSession(subsystem)
       ? ccActiveReaderName()
       : "";
+    var isEsimModuleSurface = ccSubsystemRequiresReaderSession(subsystem);
     var wb = document.createElement("section");
     wb.className = "cc-workbench cc-workbench--compact";
+    if (subsystem === "Offline Tools") {
+      wb.classList.add("cc-workbench--offline-tools");
+    }
     wb.setAttribute("data-wb", subsystem);
 
     var header = document.createElement("header");
@@ -2554,6 +2865,50 @@
       titleBlock.appendChild(backendHint);
     }
     header.appendChild(titleBlock);
+
+    var moduleToolbar = null;
+    var moduleToolbarStatus = null;
+    var moduleToolbarButtons = [];
+    if (isEsimModuleSurface) {
+      moduleToolbar = document.createElement("div");
+      moduleToolbar.className = "cc-esim-module-toolbar";
+      moduleToolbar.setAttribute("aria-label", "eSIM module actions");
+
+      function addModuleTool(labelText, titleText, handler, accentClass) {
+        var button = document.createElement("button");
+        button.type = "button";
+        button.className = "cc-esim-module-tool"
+          + (accentClass ? " " + accentClass : "");
+        button.title = titleText || labelText;
+        button.textContent = labelText;
+        button.addEventListener("click", function (event) {
+          event.preventDefault();
+          handler();
+        });
+        moduleToolbar.appendChild(button);
+        moduleToolbarButtons.push(button);
+        return button;
+      }
+
+      addModuleTool(
+        "Refresh",
+        "Re-read the card and reload the displayed eSIM data",
+        function () { refreshEsimSurface({ manual: true }); },
+        ""
+      );
+      addModuleTool(
+        "Reset",
+        "Reset the selected reader/card connection and reload the displayed data",
+        resetEsimSurface,
+        "cc-esim-module-tool--reset"
+      );
+
+      moduleToolbarStatus = document.createElement("span");
+      moduleToolbarStatus.className = "cc-esim-module-toolbar-status";
+      moduleToolbarStatus.textContent = "idle";
+      moduleToolbar.appendChild(moduleToolbarStatus);
+      header.appendChild(moduleToolbar);
+    }
 
     // Filter input only materialises when there are enough entries
     // to justify it. Below the threshold the sidenav is already
@@ -2580,9 +2935,42 @@
     var activeCategoryId = null;
     var categoryTabRecs = [];
     var allCards = [];
+    var actionFilterRecords = [];
     var searchInput = null;
 
+    function groupedActionCategoryId(action) {
+      if (!groupedBuckets || !action) return "";
+      var actionId = String(action.id || "");
+      for (var i = 0; i < groupedBuckets.length; i++) {
+        var bucket = groupedBuckets[i] || {};
+        var items = bucket.items || [];
+        for (var j = 0; j < items.length; j++) {
+          if (items[j] && String(items[j].id || "") === actionId) {
+            return bucket.group && bucket.group.id ? bucket.group.id : "";
+          }
+        }
+      }
+      return "";
+    }
+
+    function applyGroupedActionFilters() {
+      if (!groupedBuckets || actionFilterRecords.length === 0) return false;
+      var q = searchInput
+        ? searchInput.value.trim().toLowerCase()
+        : "";
+      actionFilterRecords.forEach(function (rec) {
+        var catMatch = !activeCategoryId
+          || !rec.categoryId
+          || rec.categoryId === activeCategoryId;
+        var searchMatch = q.length === 0
+          || rec.haystack.indexOf(q) !== -1;
+        rec.btn.hidden = !(catMatch && searchMatch);
+      });
+      return true;
+    }
+
     function applyCardFilters() {
+      if (applyGroupedActionFilters()) return;
       var q = searchInput
         ? searchInput.value.trim().toLowerCase()
         : "";
@@ -2661,6 +3049,339 @@
       "SCP11 Local": "scp11_local.discover",
       "Local eIM": "eim_local.scan",
     };
+    var useEsimSplitPane = isDashboardSubsystem;
+    var esimFlowPane = null;
+    var esimFlowTitle = null;
+    var esimFlowStatus = null;
+    var esimFlowBody = null;
+    var inlineActionPane = null;
+    var inlineActionTitle = null;
+    var inlineActionStatus = null;
+    var inlineActionBody = null;
+    var actionButtonRecords = [];
+    var localOverviewRefreshers = [];
+
+    function _setEsimModuleToolbarBusy(busy, statusText) {
+      moduleToolbarButtons.forEach(function (button) {
+        button.disabled = !!busy;
+      });
+      if (moduleToolbarStatus) {
+        moduleToolbarStatus.textContent = statusText || (busy ? "running" : "idle");
+      }
+    }
+
+    function _setEsimFlowStatus(text) {
+      if (esimFlowStatus) {
+        esimFlowStatus.textContent = text || "idle";
+      }
+    }
+
+    function _setEsimFlowActiveAction(action) {
+      var actionId = String(action && action.id || "");
+      actionButtonRecords.forEach(function (rec) {
+        rec.btn.classList.toggle("is-active", actionId.length > 0 && rec.action.id === actionId);
+      });
+    }
+
+    function _resetEsimFlowPane(action, statusText) {
+      if (!useEsimSplitPane || !esimFlowBody) return null;
+      var titleText = action
+        ? (action.title || action.id || "Action")
+        : "APDU flow";
+      esimFlowPane.setAttribute("data-action-id", action && action.id ? action.id : "");
+      esimFlowTitle.textContent = titleText;
+      _setEsimFlowStatus(statusText || "idle");
+      esimFlowBody.innerHTML = "";
+      return esimFlowBody;
+    }
+
+    function _renderEsimFlowPlaceholder() {
+      var body = _resetEsimFlowPane(null, "idle");
+      if (!body) return;
+      var empty = document.createElement("div");
+      empty.className = "cc-esim-flow-placeholder";
+      var title = document.createElement("div");
+      title.className = "cc-esim-flow-placeholder-title";
+      title.textContent = "Select an operation";
+      empty.appendChild(title);
+      var copy = document.createElement("p");
+      copy.textContent = "APDU trace and action output render here.";
+      empty.appendChild(copy);
+      body.appendChild(empty);
+    }
+
+    function _renderEsimFlowError(message, action) {
+      var body = _resetEsimFlowPane(action || null, "error");
+      if (!body) return;
+      body.appendChild(renderErrorBlock(message));
+    }
+
+    function _buildEsimFlowResult(action, runningText) {
+      var body = _resetEsimFlowPane(action, "running");
+      if (!body) return null;
+      if (action && action.description) {
+        var desc = document.createElement("p");
+        desc.className = "cc-action-desc";
+        desc.textContent = action.description;
+        body.appendChild(desc);
+      }
+      var result = document.createElement("div");
+      result.className = "cc-action-result cc-esim-flow-result cc-action-result--"
+        + (action && action.output_kind || "json");
+      result.appendChild(loadingEl(runningText || ("running " + (action && (action.title || action.id) || "action") + "...")));
+      body.appendChild(result);
+      return result;
+    }
+
+    async function _runActionInEsimFlowPane(action, inputsMap, options) {
+      if (!action) {
+        _renderEsimFlowError("Action is not registered.", null);
+        return null;
+      }
+      var opts = options || {};
+      _setEsimFlowActiveAction(action);
+      var inputs = Object.assign({}, inputsMap || {});
+      applyActiveReaderDefault(action, inputs);
+      if (ccActionUsesReaderSession(action) && !ccActiveReaderName()) {
+        _renderEsimFlowError("Select a reader before running this eSIM action.", action);
+        setStatusAction("action blocked: reader required");
+        return null;
+      }
+      var result = _buildEsimFlowResult(action, opts.runningText);
+      setStatusAction("action: " + action.id);
+      logBus.emit({
+        level: "info",
+        source: action.id,
+        message: "run: starting",
+      });
+      try {
+        var resp = await apiFetch("/api/actions/" + encodeURIComponent(action.id) + "/run", {
+          method: "POST",
+          body: JSON.stringify({ inputs: inputs }),
+        });
+        if (!resp || !resp.ok) {
+          var errText = resp && resp.error ? resp.error : "unknown error";
+          if (result) {
+            result.innerHTML = "";
+            result.appendChild(renderErrorBlock(errText));
+          }
+          _setEsimFlowStatus("error");
+          logBus.emit({
+            level: "error",
+            source: action.id,
+            message: "run: failed - " + errText,
+          });
+          return null;
+        }
+        var data = resp.data || {};
+        if (result) {
+          result.innerHTML = "";
+          renderActionResult(action, data, result);
+        }
+        _setEsimFlowStatus(opts.doneText || "ok");
+        logBus.emit({
+          level: "info",
+          source: action.id,
+          message: "run: ok",
+        });
+        return data;
+      } catch (err) {
+        var message = String(err && err.message || err);
+        if (result) {
+          result.innerHTML = "";
+          result.appendChild(renderErrorBlock(message));
+        }
+        _setEsimFlowStatus("error");
+        logBus.emit({
+          level: "error",
+          source: action.id,
+          message: "run: " + message,
+        });
+        return null;
+      }
+    }
+
+    function _openEsimActionPane(action) {
+      if (!useEsimSplitPane || !esimFlowBody) {
+        _openInlineActionPane(action);
+        return;
+      }
+      _setEsimFlowActiveAction(action);
+      var body = _resetEsimFlowPane(action, "idle");
+      if (!body) return;
+      if (action.description) {
+        var desc = document.createElement("p");
+        desc.className = "cc-action-desc";
+        desc.textContent = action.description;
+        body.appendChild(desc);
+      }
+
+      var form = document.createElement("form");
+      form.className = "cc-action-form cc-esim-flow-form";
+      (action.inputs || []).forEach(function (field) {
+        form.appendChild(buildField(action, field));
+      });
+
+      var actionsBar = document.createElement("div");
+      actionsBar.className = "inline-actions cc-action-bar";
+      var runBtn = document.createElement("button");
+      runBtn.type = "submit";
+      runBtn.className = "btn btn-primary";
+      runBtn.textContent = action.streams ? "Start" : "Run";
+      actionsBar.appendChild(runBtn);
+      var status = document.createElement("span");
+      status.className = "cc-action-status";
+      status.textContent = "idle";
+      actionsBar.appendChild(status);
+      form.appendChild(actionsBar);
+
+      var result = document.createElement("div");
+      result.className = "cc-action-result cc-esim-flow-result cc-action-result--"
+        + (action.output_kind || "json");
+      form.appendChild(result);
+
+      form.addEventListener("submit", function (event) {
+        event.preventDefault();
+        runActionFromForm(action, form, status, result);
+      });
+
+      (action.inputs || []).forEach(function (field) {
+        if (field.kind === "reader" && !ccShouldHideReaderField(action, field)) {
+          var sel = form.querySelector('[name="' + field.name + '"]');
+          if (sel) prefillReaderSelect(sel);
+        }
+      });
+
+      body.appendChild(form);
+
+      if (ccActionShouldAutoRunInEsimFlowPane(action)) {
+        runBtn.textContent = action.streams ? "Restart" : "Re-run";
+        window.setTimeout(function () {
+          runActionFromForm(action, form, status, result);
+        }, 0);
+      }
+    }
+
+    function _ensureInlineActionPane() {
+      if (inlineActionPane) return inlineActionPane;
+      inlineActionPane = document.createElement("section");
+      inlineActionPane.className = "cc-inline-action-pane";
+      inlineActionPane.hidden = true;
+      inlineActionPane.setAttribute("aria-label", "Action panel");
+
+      var head = document.createElement("header");
+      head.className = "cc-inline-action-head";
+      inlineActionTitle = document.createElement("div");
+      inlineActionTitle.className = "cc-inline-action-title";
+      inlineActionTitle.textContent = "Action";
+      head.appendChild(inlineActionTitle);
+
+      inlineActionStatus = document.createElement("span");
+      inlineActionStatus.className = "cc-action-status cc-inline-action-status";
+      inlineActionStatus.textContent = "idle";
+      head.appendChild(inlineActionStatus);
+
+      var close = document.createElement("button");
+      close.type = "button";
+      close.className = "cc-inline-action-close";
+      close.setAttribute("aria-label", "Close action panel");
+      close.title = "Close action panel";
+      close.textContent = "\u00d7";
+      close.addEventListener("click", function () {
+        inlineActionPane.hidden = true;
+        _setEsimFlowActiveAction(null);
+      });
+      head.appendChild(close);
+      inlineActionPane.appendChild(head);
+
+      inlineActionBody = document.createElement("div");
+      inlineActionBody.className = "cc-inline-action-body";
+      inlineActionPane.appendChild(inlineActionBody);
+      return inlineActionPane;
+    }
+
+    function _openInlineActionPane(action) {
+      var pane = _ensureInlineActionPane();
+      pane.hidden = false;
+      pane.setAttribute("data-action-id", action && action.id ? action.id : "");
+      _setEsimFlowActiveAction(action);
+
+      inlineActionTitle.textContent = action.title || action.id || "Action";
+      inlineActionStatus.textContent = "idle";
+      inlineActionBody.innerHTML = "";
+
+      if (action.description) {
+        var desc = document.createElement("p");
+        desc.className = "cc-action-desc";
+        desc.textContent = action.description;
+        inlineActionBody.appendChild(desc);
+      }
+
+      var form = document.createElement("form");
+      form.className = "cc-action-form cc-inline-action-form";
+      (action.inputs || []).forEach(function (field) {
+        form.appendChild(buildField(action, field));
+      });
+      ccEnhanceActionForm(action, form);
+
+      var actionsBar = document.createElement("div");
+      actionsBar.className = "inline-actions cc-action-bar";
+      var runBtn = document.createElement("button");
+      runBtn.type = "submit";
+      runBtn.className = "btn btn-primary";
+      runBtn.textContent = action.streams ? "Start" : "Run";
+      actionsBar.appendChild(runBtn);
+      var formStatus = document.createElement("span");
+      formStatus.className = "cc-action-status";
+      formStatus.textContent = "idle";
+      actionsBar.appendChild(formStatus);
+      form.appendChild(actionsBar);
+
+      var result = document.createElement("div");
+      result.className = "cc-action-result cc-action-result--" + (action.output_kind || "json");
+      form.appendChild(result);
+
+      form.addEventListener("submit", function (event) {
+        event.preventDefault();
+        inlineActionStatus.textContent = "running";
+        runActionFromForm(action, form, formStatus, result);
+      });
+
+      (action.inputs || []).forEach(function (field) {
+        if (field.kind === "reader" && !ccShouldHideReaderField(action, field)) {
+          var sel = form.querySelector('[name="' + field.name + '"]');
+          if (sel) prefillReaderSelect(sel);
+        }
+      });
+
+      if (pane._statusObserver) {
+        pane._statusObserver.disconnect();
+      }
+      var observer = new MutationObserver(function () {
+        inlineActionStatus.textContent = formStatus.textContent || "idle";
+      });
+      observer.observe(formStatus, { childList: true, characterData: true, subtree: true });
+      pane._statusObserver = observer;
+
+      inlineActionBody.appendChild(form);
+
+      if (ccActionShouldAutoRunOnOpen(action)) {
+        runBtn.textContent = "Re-run";
+        window.setTimeout(function () {
+          if (form.requestSubmit) {
+            form.requestSubmit(runBtn);
+          } else {
+            form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+          }
+        }, 0);
+      }
+
+      try {
+        pane.scrollIntoView({ block: "nearest", behavior: "smooth" });
+      } catch (_err) {
+        pane.scrollIntoView();
+      }
+    }
 
     // Mutation suffixes — actions that are NOT shown in the dashboard
     // button strip (they're covered by dashboard sections or are heavy
@@ -2677,6 +3398,26 @@
       "protocol_summary",
     ];
 
+    var LOCAL_EIM_OVERVIEW_SUFFIXES = {
+      eim_certs_inventory: true,
+      eim_package_explain: true,
+      eim_package_lint: true,
+      hotfolder_fetch: true,
+      hotfolder_list: true,
+      hotfolder_metadata: true,
+      hotfolder_poll: true,
+      issue_package: true,
+      list_fixtures: true,
+      load_eim_package: true,
+      poll_campaign: true,
+    };
+
+    var LOCAL_SMDP_OVERVIEW_SUFFIXES = {
+      get_certs_inventory: true,
+      import_certificate: true,
+      load_profile: true,
+    };
+
     function _shouldShowInDashboard(action) {
       if (!isDashboardSubsystem) return true; // show all for non-dashboard subsystems
       var id = (action.id || "").toLowerCase();
@@ -2684,6 +3425,16 @@
         if (id.indexOf(DASHBOARD_SKIP_SUFFIXES[i]) !== -1) return false;
       }
       return true;
+    }
+
+    function _shouldShowLocalEimDashboardAction(action) {
+      var suffix = ccActionSuffix(String(action && action.id || "").toLowerCase());
+      return !LOCAL_EIM_OVERVIEW_SUFFIXES[suffix] && _shouldShowInDashboard(action);
+    }
+
+    function _shouldShowLocalSmdpDashboardAction(action) {
+      var suffix = ccActionSuffix(String(action && action.id || "").toLowerCase());
+      return !LOCAL_SMDP_OVERVIEW_SUFFIXES[suffix] && _shouldShowInDashboard(action);
     }
 
     function _profileTarget(profile) {
@@ -2781,13 +3532,12 @@
         if (_profileLifecycleNeedsConfirm(action)) {
           inputs.confirm = true;
         }
-        applyActiveReaderDefault(action, inputs);
-        var resp = await apiFetch("/api/actions/" + encodeURIComponent(action.id) + "/run", {
-          method: "POST",
-          body: JSON.stringify({ inputs: inputs }),
+        var data = await _runActionInEsimFlowPane(action, inputs, {
+          runningText: operation + " profile",
+          doneText: operation + " ok",
         });
-        if (!resp || !resp.ok) {
-          throw new Error(resp && resp.error ? resp.error : "unknown error");
+        if (!data) {
+          throw new Error("action failed");
         }
         if (statusEl) statusEl.textContent = operation + " ok";
         logBus.emit({
@@ -3102,6 +3852,731 @@
       parent.appendChild(div);
     }
 
+    function _localEimAction(actionId) {
+      return ccFindActionById(actions, actionId);
+    }
+
+    function _localEimText(value) {
+      return String(value == null ? "" : value).trim();
+    }
+
+    function _localEimShortPath(pathValue) {
+      var text = _localEimText(pathValue);
+      if (!text) return "-";
+      var normalized = text.replace(/\\/g, "/");
+      var parts = normalized.split("/").filter(function (part) {
+        return part.length > 0;
+      });
+      var tail = parts.slice(Math.max(0, parts.length - 3)).join("/");
+      if (!tail) tail = text;
+      return tail.length > 72 ? "..." + tail.slice(tail.length - 69) : tail;
+    }
+
+    function _localEimPathField(labelText, kind, placeholderText) {
+      var wrap = document.createElement("label");
+      wrap.className = "cc-local-eim-path";
+      var label = document.createElement("span");
+      label.className = "cc-local-eim-path-label";
+      label.textContent = labelText;
+      wrap.appendChild(label);
+
+      var input = document.createElement("input");
+      input.type = "text";
+      input.className = "cc-local-eim-path-input cc-path-input";
+      input.placeholder = placeholderText || "";
+      input.autocomplete = "off";
+      var field = { kind: kind || "path", name: labelText, placeholder: placeholderText || "" };
+      var choosePath = async function () {
+        if (typeof pickForField !== "function") return;
+        var chosen = await pickForField(field);
+        if (!chosen) return;
+        input.value = chosen;
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+        input.dispatchEvent(new Event("change", { bubbles: true }));
+      };
+      input.addEventListener("dblclick", choosePath);
+
+      var row = document.createElement("div");
+      row.className = "cc-path-row cc-local-eim-path-row";
+      row.appendChild(input);
+      var browse = document.createElement("button");
+      browse.type = "button";
+      browse.className = "btn btn-small cc-path-browse";
+      browse.textContent = "Browse...";
+      browse.addEventListener("click", choosePath);
+      row.appendChild(browse);
+      wrap.appendChild(row);
+      if (typeof enableFilePathDrop === "function") {
+        enableFilePathDrop(input);
+      }
+      return { wrap: wrap, input: input };
+    }
+
+    function _localSmdpAction(actionId) {
+      return ccFindActionById(actions, actionId);
+    }
+
+    function _buildLocalSmdpOverviewPanel() {
+      var panel = document.createElement("section");
+      panel.className = "cc-local-smdp-overview cc-local-eim-overview";
+      panel.setAttribute("data-local-smdp-overview", "1");
+
+      var head = document.createElement("div");
+      head.className = "cc-local-eim-head cc-local-smdp-head";
+      var title = document.createElement("div");
+      title.className = "cc-local-eim-title cc-local-smdp-title";
+      title.textContent = "Local SM-DP+";
+      head.appendChild(title);
+      var status = document.createElement("span");
+      status.className = "cc-local-eim-status cc-local-smdp-status";
+      status.textContent = "idle";
+      head.appendChild(status);
+      panel.appendChild(head);
+
+      var inputs = document.createElement("div");
+      inputs.className = "cc-local-eim-inputs cc-local-smdp-inputs";
+      var profilePath = _localEimPathField("Profile", "path", ".bpp / .der / .hex");
+      var certPath = _localEimPathField("Certificate", "path", "DPauth or DPpb cert");
+      var keyPath = _localEimPathField("Private key", "path", "(optional)");
+      inputs.appendChild(profilePath.wrap);
+      inputs.appendChild(certPath.wrap);
+      inputs.appendChild(keyPath.wrap);
+      panel.appendChild(inputs);
+
+      var tools = document.createElement("div");
+      tools.className = "cc-local-eim-tools cc-local-smdp-tools";
+      panel.appendChild(tools);
+
+      var roleSelect = document.createElement("select");
+      roleSelect.className = "cc-local-smdp-role";
+      roleSelect.setAttribute("aria-label", "Certificate role");
+      ["DPauth", "DPpb", "auto"].forEach(function (roleName) {
+        var option = document.createElement("option");
+        option.value = roleName;
+        option.textContent = roleName;
+        roleSelect.appendChild(option);
+      });
+      tools.appendChild(roleSelect);
+
+      var summary = document.createElement("div");
+      summary.className = "cc-local-eim-summary cc-local-smdp-summary";
+      var authHost = document.createElement("div");
+      authHost.className = "cc-local-eim-card cc-local-smdp-card cc-local-smdp-card--auth";
+      var pbHost = document.createElement("div");
+      pbHost.className = "cc-local-eim-card cc-local-smdp-card cc-local-smdp-card--pb";
+      summary.appendChild(authHost);
+      summary.appendChild(pbHost);
+      panel.appendChild(summary);
+
+      var resultHost = document.createElement("div");
+      resultHost.className = "cc-local-eim-result cc-local-smdp-result";
+      panel.appendChild(resultHost);
+
+      var toolButtons = [];
+      function setBusy(busy, text) {
+        panel.classList.toggle("is-busy", !!busy);
+        status.textContent = text || (busy ? "running" : "idle");
+        toolButtons.forEach(function (button) {
+          button.disabled = !!busy;
+        });
+        roleSelect.disabled = !!busy;
+      }
+
+      async function runLocalSmdpAction(actionId, inputsMap, options) {
+        var action = _localSmdpAction(actionId);
+        if (!action) {
+          throw new Error(actionId + " is not registered.");
+        }
+        var opts = options || {};
+        setBusy(true, opts.runningText || "running");
+        try {
+          var data;
+          if (opts.renderResult === false) {
+            var silentInputs = Object.assign({}, inputsMap || {});
+            applyActiveReaderDefault(action, silentInputs);
+            var resp = await apiFetch("/api/actions/" + encodeURIComponent(action.id) + "/run", {
+              method: "POST",
+              body: JSON.stringify({ inputs: silentInputs }),
+            });
+            if (!resp || !resp.ok) {
+              throw new Error(resp && resp.error ? resp.error : "unknown error");
+            }
+            data = resp.data || {};
+          } else {
+            data = await _runActionInEsimFlowPane(action, inputsMap || {}, {
+              runningText: opts.runningText || "running",
+              doneText: opts.doneText || "ok",
+            });
+          }
+          resultHost.innerHTML = "";
+          if (!data) {
+            setBusy(false, "error");
+            return null;
+          }
+          setBusy(false, opts.doneText || "ok");
+          return data;
+        } catch (err) {
+          resultHost.innerHTML = "";
+          if (opts.renderResult === false) {
+            resultHost.appendChild(renderErrorBlock(String(err && err.message || err)));
+          } else {
+            _renderEsimFlowError(String(err && err.message || err), action);
+          }
+          setBusy(false, "error");
+          return null;
+        }
+      }
+
+      function addTool(iconText, labelText, titleText, handler, primary) {
+        var button = document.createElement("button");
+        button.type = "button";
+        button.className = "cc-local-eim-tool cc-local-smdp-tool" + (primary ? " is-primary" : "");
+        button.title = titleText || labelText;
+        var icon = document.createElement("span");
+        icon.className = "cc-local-eim-tool-icon cc-local-smdp-tool-icon";
+        icon.setAttribute("aria-hidden", "true");
+        icon.textContent = iconText || ">";
+        button.appendChild(icon);
+        var label = document.createElement("span");
+        label.className = "cc-local-eim-tool-label cc-local-smdp-tool-label";
+        label.textContent = labelText;
+        button.appendChild(label);
+        button.addEventListener("click", function (event) {
+          event.preventDefault();
+          handler();
+        });
+        tools.appendChild(button);
+        toolButtons.push(button);
+        return button;
+      }
+
+      function appendSmdpKv(parent, labelText, valueText) {
+        var row = document.createElement("div");
+        row.className = "cc-local-eim-kv cc-local-smdp-kv";
+        var k = document.createElement("span");
+        k.className = "cc-local-eim-k cc-local-smdp-k";
+        k.textContent = labelText;
+        row.appendChild(k);
+        var v = document.createElement("span");
+        v.className = "cc-local-eim-v cc-local-smdp-v";
+        v.textContent = _localEimText(valueText) || "-";
+        row.appendChild(v);
+        parent.appendChild(row);
+      }
+
+      function renderEmptySmdpCard(host, titleText, messageText) {
+        host.innerHTML = "";
+        var h = document.createElement("div");
+        h.className = "cc-local-eim-card-title cc-local-smdp-card-title";
+        h.textContent = titleText;
+        host.appendChild(h);
+        var empty = document.createElement("div");
+        empty.className = "cc-local-eim-empty cc-local-smdp-empty";
+        empty.textContent = messageText;
+        host.appendChild(empty);
+      }
+
+      function renderRoleCard(host, titleText, selected, count) {
+        host.innerHTML = "";
+        var h = document.createElement("div");
+        h.className = "cc-local-eim-card-title cc-local-smdp-card-title";
+        h.textContent = titleText;
+        host.appendChild(h);
+        var body = document.createElement("div");
+        body.className = "cc-local-eim-card-body cc-local-smdp-card-body";
+        appendSmdpKv(body, "Cert", _localEimShortPath(selected && selected.certificate_path));
+        appendSmdpKv(body, "Key", _localEimShortPath(selected && selected.private_key_path));
+        appendSmdpKv(body, "Mode", selected && selected.selection_reason);
+        appendSmdpKv(body, "Count", count);
+        host.appendChild(body);
+      }
+
+      function renderInventory(data) {
+        var inventory = (data && data.inventory) || data || {};
+        var authRecords = Array.isArray(inventory.auth_records) ? inventory.auth_records : [];
+        var pbRecords = Array.isArray(inventory.pb_records) ? inventory.pb_records : [];
+        renderRoleCard(authHost, "DPauth", inventory.selected_auth || {}, authRecords.length);
+        renderRoleCard(pbHost, "DPpb", inventory.selected_pb || {}, pbRecords.length);
+      }
+
+      async function refreshInventory(renderResult) {
+        var data = await runLocalSmdpAction("scp11_local.get_certs_inventory", {
+          reader: scopedReader,
+        }, {
+          runningText: "loading certs",
+          doneText: "certs ready",
+          renderResult: renderResult !== false,
+        });
+        if (data) renderInventory(data);
+      }
+
+      localOverviewRefreshers.push(function () {
+        return refreshInventory(false);
+      });
+
+      async function importCertificate() {
+        var action = _localSmdpAction("scp11_local.import_certificate");
+        if (!action) return;
+        var field = { kind: "path", name: "certificate_path", placeholder: "DPauth or DPpb cert" };
+        var chosen = "";
+        if (typeof pickForField === "function") {
+          chosen = await pickForField(field);
+        }
+        if (!chosen) return;
+        certPath.input.value = chosen;
+        certPath.input.dispatchEvent(new Event("change", { bubbles: true }));
+        var data = await runLocalSmdpAction("scp11_local.import_certificate", {
+          certificate_path: chosen,
+          private_key_path: _localEimText(keyPath.input.value),
+          certificate_role: roleSelect.value || "DPauth",
+        }, { runningText: "importing cert" });
+        if (data) renderInventory(data.inventory || data);
+      }
+
+      addTool("↻", "Refresh", "Refresh local SM-DP+ certificate state", function () {
+        refreshInventory(true);
+      });
+      addTool("＋", "Import cert", "Choose and persist a local SM-DP+ certificate", importCertificate, true);
+      addTool("⊙", "Inventory", "Open certificate inventory", function () {
+        refreshInventory(true);
+      });
+      addTool("↓", "Load profile", "Load the selected profile to the card", function () {
+        var pathValue = _localEimText(profilePath.input.value);
+        if (!pathValue) {
+          resultHost.innerHTML = "";
+          _renderEsimFlowError(
+            "Select a profile package first.",
+            _localSmdpAction("scp11_local.load_profile")
+          );
+          return;
+        }
+        runLocalSmdpAction("scp11_local.load_profile", {
+          reader: scopedReader,
+          profile_path: pathValue,
+        }, { runningText: "loading profile" });
+      }, true);
+
+      renderEmptySmdpCard(authHost, "DPauth", "Loading...");
+      renderEmptySmdpCard(pbHost, "DPpb", "Loading...");
+      window.setTimeout(function () { refreshInventory(false); }, 0);
+      return panel;
+    }
+
+    function _buildLocalEimOverviewPanel() {
+      var panel = document.createElement("section");
+      panel.className = "cc-local-eim-overview";
+      panel.setAttribute("data-local-eim-overview", "1");
+
+      var state = {
+        queue: null,
+        certs: null,
+        nextFile: "",
+      };
+
+      var head = document.createElement("div");
+      head.className = "cc-local-eim-head";
+      var title = document.createElement("div");
+      title.className = "cc-local-eim-title";
+      title.textContent = "Local eIM";
+      head.appendChild(title);
+      var status = document.createElement("span");
+      status.className = "cc-local-eim-status";
+      status.textContent = "idle";
+      head.appendChild(status);
+      panel.appendChild(head);
+
+      var inputs = document.createElement("div");
+      inputs.className = "cc-local-eim-inputs";
+      var packagePath = _localEimPathField("Package", "path", "package JSON");
+      var certPath = _localEimPathField("Signing cert", "path", "CERT_S_EIMsign.pem");
+      var hotfolderPath = _localEimPathField("Hotfolder", "directory", "(default)");
+      inputs.appendChild(packagePath.wrap);
+      inputs.appendChild(certPath.wrap);
+      inputs.appendChild(hotfolderPath.wrap);
+      panel.appendChild(inputs);
+
+      var tools = document.createElement("div");
+      tools.className = "cc-local-eim-tools";
+      panel.appendChild(tools);
+
+      var summary = document.createElement("div");
+      summary.className = "cc-local-eim-summary";
+      var certHost = document.createElement("div");
+      certHost.className = "cc-local-eim-card cc-local-eim-card--certs";
+      var queueHost = document.createElement("div");
+      queueHost.className = "cc-local-eim-card cc-local-eim-card--queue";
+      summary.appendChild(certHost);
+      summary.appendChild(queueHost);
+      panel.appendChild(summary);
+
+      var resultHost = document.createElement("div");
+      resultHost.className = "cc-local-eim-result";
+      panel.appendChild(resultHost);
+
+      var toolButtons = [];
+      function setBusy(busy, text) {
+        panel.classList.toggle("is-busy", !!busy);
+        status.textContent = text || (busy ? "running" : "idle");
+        toolButtons.forEach(function (button) {
+          button.disabled = !!busy;
+        });
+      }
+
+      function packageInputValue() {
+        return _localEimText(packagePath.input.value) || state.nextFile || "";
+      }
+
+      function hotfolderInputValue() {
+        return _localEimText(hotfolderPath.input.value);
+      }
+
+      function certInputValue() {
+        return _localEimText(certPath.input.value);
+      }
+
+      async function runLocalEimAction(actionId, inputsMap, options) {
+        var action = _localEimAction(actionId);
+        if (!action) {
+          throw new Error(actionId + " is not registered.");
+        }
+        var opts = options || {};
+        setBusy(true, opts.runningText || "running");
+        try {
+          var data;
+          if (opts.renderResult === false) {
+            var silentInputs = Object.assign({}, inputsMap || {});
+            applyActiveReaderDefault(action, silentInputs);
+            var resp = await apiFetch("/api/actions/" + encodeURIComponent(action.id) + "/run", {
+              method: "POST",
+              body: JSON.stringify({ inputs: silentInputs }),
+            });
+            if (!resp || !resp.ok) {
+              throw new Error(resp && resp.error ? resp.error : "unknown error");
+            }
+            data = resp.data || {};
+          } else {
+            data = await _runActionInEsimFlowPane(action, inputsMap || {}, {
+              runningText: opts.runningText || "running",
+              doneText: opts.doneText || "ok",
+            });
+          }
+          resultHost.innerHTML = "";
+          if (!data) {
+            setBusy(false, "error");
+            return null;
+          }
+          setBusy(false, opts.doneText || "ok");
+          return data;
+        } catch (err) {
+          resultHost.innerHTML = "";
+          if (opts.renderResult === false) {
+            resultHost.appendChild(renderErrorBlock(String(err && err.message || err)));
+          } else {
+            _renderEsimFlowError(String(err && err.message || err), action);
+          }
+          setBusy(false, "error");
+          return null;
+        }
+      }
+
+      function addTool(iconText, labelText, titleText, handler, primary) {
+        var button = document.createElement("button");
+        button.type = "button";
+        button.className = "cc-local-eim-tool" + (primary ? " is-primary" : "");
+        button.title = titleText || labelText;
+        var icon = document.createElement("span");
+        icon.className = "cc-local-eim-tool-icon";
+        icon.setAttribute("aria-hidden", "true");
+        icon.textContent = iconText || ">";
+        button.appendChild(icon);
+        var label = document.createElement("span");
+        label.className = "cc-local-eim-tool-label";
+        label.textContent = labelText;
+        button.appendChild(label);
+        button.addEventListener("click", function (event) {
+          event.preventDefault();
+          handler();
+        });
+        tools.appendChild(button);
+        toolButtons.push(button);
+        return button;
+      }
+
+      function renderEmptyCard(host, titleText, messageText) {
+        host.innerHTML = "";
+        var h = document.createElement("div");
+        h.className = "cc-local-eim-card-title";
+        h.textContent = titleText;
+        host.appendChild(h);
+        var empty = document.createElement("div");
+        empty.className = "cc-local-eim-empty";
+        empty.textContent = messageText;
+        host.appendChild(empty);
+      }
+
+      function appendLocalEimKv(parent, labelText, valueText) {
+        var row = document.createElement("div");
+        row.className = "cc-local-eim-kv";
+        var k = document.createElement("span");
+        k.className = "cc-local-eim-k";
+        k.textContent = labelText;
+        row.appendChild(k);
+        var v = document.createElement("span");
+        v.className = "cc-local-eim-v";
+        v.textContent = _localEimText(valueText) || "-";
+        row.appendChild(v);
+        parent.appendChild(row);
+      }
+
+      function renderCertInventory(data) {
+        state.certs = data || {};
+        certHost.innerHTML = "";
+        var h = document.createElement("div");
+        h.className = "cc-local-eim-card-title";
+        h.textContent = "Signing certificate";
+        certHost.appendChild(h);
+
+        var selected = (data && data.selected) || {};
+        var selectedPath = _localEimText(selected.path);
+        var body = document.createElement("div");
+        body.className = "cc-local-eim-card-body";
+        appendLocalEimKv(body, "Selected", _localEimShortPath(selectedPath));
+        appendLocalEimKv(body, "Reason", selected.reason || "-");
+        var pkids = Array.isArray(selected.root_ci_pkids)
+          ? selected.root_ci_pkids.join(", ")
+          : "";
+        appendLocalEimKv(body, "Root CI", pkids || "-");
+        appendLocalEimKv(body, "Private key", _localEimShortPath(selected.private_key_path || ""));
+        certHost.appendChild(body);
+
+        var selectedActions = document.createElement("div");
+        selectedActions.className = "cc-local-eim-mini-actions";
+        var useSelected = document.createElement("button");
+        useSelected.type = "button";
+        useSelected.className = "cc-local-eim-mini-btn";
+        useSelected.textContent = "Use";
+        useSelected.disabled = !selectedPath;
+        useSelected.addEventListener("click", function () {
+          certPath.input.value = selectedPath;
+          certPath.input.dispatchEvent(new Event("change", { bubbles: true }));
+          status.textContent = "cert selected";
+        });
+        selectedActions.appendChild(useSelected);
+        var clearSelected = document.createElement("button");
+        clearSelected.type = "button";
+        clearSelected.className = "cc-local-eim-mini-btn";
+        clearSelected.textContent = "Auto";
+        clearSelected.addEventListener("click", function () {
+          certPath.input.value = "";
+          certPath.input.dispatchEvent(new Event("change", { bubbles: true }));
+          refreshCerts();
+        });
+        selectedActions.appendChild(clearSelected);
+        certHost.appendChild(selectedActions);
+
+        var rows = Array.isArray(data && data.rows) ? data.rows : [];
+        if (rows.length > 0) {
+          var list = document.createElement("div");
+          list.className = "cc-local-eim-cert-list";
+          rows.slice(0, 4).forEach(function (row) {
+            var item = document.createElement("button");
+            item.type = "button";
+            item.className = "cc-local-eim-cert-row";
+            item.title = _localEimText(row.path);
+            var name = document.createElement("span");
+            name.className = "cc-local-eim-cert-name";
+            name.textContent = row.subject_cn || _localEimShortPath(row.path);
+            item.appendChild(name);
+            var meta = document.createElement("span");
+            meta.className = "cc-local-eim-cert-meta";
+            meta.textContent = row.curve || row.source || "-";
+            item.appendChild(meta);
+            item.addEventListener("click", function () {
+              certPath.input.value = _localEimText(row.path);
+              certPath.input.dispatchEvent(new Event("change", { bubbles: true }));
+              refreshCerts();
+            });
+            list.appendChild(item);
+          });
+          certHost.appendChild(list);
+        }
+      }
+
+      function queueRowAction(labelText, actionId, rowPath) {
+        var button = document.createElement("button");
+        button.type = "button";
+        button.className = "cc-local-eim-row-btn";
+        button.textContent = labelText;
+        button.addEventListener("click", function () {
+          if (actionId === "eim_local.load_eim_package") {
+            runLocalEimAction(actionId, {
+              package_path: rowPath,
+              cert_path: certInputValue(),
+            }, { runningText: "loading package" });
+          } else {
+            runLocalEimAction(actionId, {
+              package_path: rowPath,
+            }, { runningText: "checking package" });
+          }
+        });
+        return button;
+      }
+
+      function renderQueue(data) {
+        state.queue = data || {};
+        state.nextFile = _localEimText(data && data.next_file);
+        queueHost.innerHTML = "";
+        var h = document.createElement("div");
+        h.className = "cc-local-eim-card-title";
+        h.textContent = "Queued packages";
+        queueHost.appendChild(h);
+
+        var body = document.createElement("div");
+        body.className = "cc-local-eim-card-body";
+        appendLocalEimKv(body, "Hotfolder", _localEimShortPath(data && data.hotfolder_dir));
+        appendLocalEimKv(body, "Count", data && data.package_count);
+        appendLocalEimKv(body, "Next", _localEimShortPath(state.nextFile));
+        appendLocalEimKv(body, "Result", data && data.eim_result_name);
+        queueHost.appendChild(body);
+
+        var rows = Array.isArray(data && data.queue_preview) ? data.queue_preview : [];
+        if (rows.length === 0) {
+          var empty = document.createElement("div");
+          empty.className = "cc-local-eim-empty";
+          empty.textContent = "Queue empty";
+          queueHost.appendChild(empty);
+          return;
+        }
+
+        var list = document.createElement("div");
+        list.className = "cc-local-eim-queue-list";
+        rows.slice(0, 6).forEach(function (row) {
+          var rowPath = _localEimText(row.path);
+          var item = document.createElement("div");
+          item.className = "cc-local-eim-queue-row";
+          var main = document.createElement("div");
+          main.className = "cc-local-eim-queue-main";
+          var name = document.createElement("span");
+          name.className = "cc-local-eim-queue-name";
+          name.textContent = _localEimText(row.name) || _localEimShortPath(rowPath);
+          main.appendChild(name);
+          var meta = document.createElement("span");
+          meta.className = "cc-local-eim-queue-meta";
+          meta.textContent = [
+            _localEimText(row.package_id),
+            _localEimText(row.eim_id),
+          ].filter(function (part) { return part.length > 0; }).join(" · ") || "-";
+          main.appendChild(meta);
+          item.appendChild(main);
+          var rowActions = document.createElement("div");
+          rowActions.className = "cc-local-eim-row-actions";
+          rowActions.appendChild(queueRowAction("Load", "eim_local.load_eim_package", rowPath));
+          rowActions.appendChild(queueRowAction("Lint", "eim_local.eim_package_lint", rowPath));
+          rowActions.appendChild(queueRowAction("Explain", "eim_local.eim_package_explain", rowPath));
+          item.appendChild(rowActions);
+          list.appendChild(item);
+        });
+        queueHost.appendChild(list);
+      }
+
+      async function refreshCerts() {
+        var data = await runLocalEimAction("eim_local.eim_certs_inventory", {
+          package_path: packageInputValue(),
+          cert_path: certInputValue(),
+        }, {
+          runningText: "loading certs",
+          doneText: "certs ready",
+          renderResult: false,
+        });
+        if (data) renderCertInventory(data);
+      }
+
+      async function refreshQueue() {
+        var data = await runLocalEimAction("eim_local.hotfolder_metadata", {
+          hotfolder_dir: hotfolderInputValue(),
+        }, {
+          runningText: "loading queue",
+          doneText: "queue ready",
+          renderResult: false,
+        });
+        if (data) renderQueue(data);
+      }
+
+      async function refreshAll() {
+        renderEmptyCard(certHost, "Signing certificate", "Loading...");
+        renderEmptyCard(queueHost, "Queued packages", "Loading...");
+        await refreshQueue();
+        await refreshCerts();
+        status.textContent = "ready";
+      }
+
+      localOverviewRefreshers.push(refreshAll);
+
+      addTool("↻", "Refresh", "Refresh certificate and queue state", refreshAll, true);
+      addTool("⊙", "Certs", "Open certificate inventory", function () {
+        refreshCerts();
+      });
+      addTool("✓", "Lint", "Lint the selected or next package", function () {
+        var pathValue = packageInputValue();
+        if (!pathValue) {
+          resultHost.innerHTML = "";
+          _renderEsimFlowError(
+            "Select a package or queue a package first.",
+            _localEimAction("eim_local.eim_package_lint")
+          );
+          return;
+        }
+        runLocalEimAction("eim_local.eim_package_lint", {
+          package_path: pathValue,
+        }, { runningText: "linting package" });
+      });
+      addTool("▣", "Explain", "Explain the selected or next package", function () {
+        var pathValue = packageInputValue();
+        if (!pathValue) {
+          resultHost.innerHTML = "";
+          _renderEsimFlowError(
+            "Select a package or queue a package first.",
+            _localEimAction("eim_local.eim_package_explain")
+          );
+          return;
+        }
+        runLocalEimAction("eim_local.eim_package_explain", {
+          package_path: pathValue,
+        }, { runningText: "explaining package" });
+      });
+      addTool("↓", "Load", "Load the selected or next package to the card", function () {
+        var pathValue = packageInputValue();
+        if (!pathValue) {
+          resultHost.innerHTML = "";
+          _renderEsimFlowError(
+            "Select a package or queue a package first.",
+            _localEimAction("eim_local.load_eim_package")
+          );
+          return;
+        }
+        runLocalEimAction("eim_local.load_eim_package", {
+          package_path: pathValue,
+          cert_path: certInputValue(),
+        }, { runningText: "loading package" });
+      }, true);
+      addTool("❐", "Queue", "Refresh queued package metadata", refreshQueue);
+      addTool("▶", "Issue next", "Issue the next queued package", async function () {
+        await runLocalEimAction("eim_local.issue_package", {
+          hotfolder_dir: hotfolderInputValue(),
+        }, { runningText: "issuing next package" });
+        refreshQueue();
+      });
+      addTool("⟳", "Poll", "Open poll campaign", function () {
+        var action = _localEimAction("eim_local.poll_campaign");
+        if (action) _openEsimActionPane(action);
+      });
+
+      renderEmptyCard(certHost, "Signing certificate", "Loading...");
+      renderEmptyCard(queueHost, "Queued packages", "Loading...");
+      window.setTimeout(refreshAll, 0);
+      return panel;
+    }
+
     // --- Main content area ---
     var grid = document.createElement("div");
     grid.className = "cc-compact-action-grid";
@@ -3109,14 +4584,56 @@
     // Dashboard body
     var dashBody = document.createElement("div");
     dashBody.className = "cc-dashboard";
-    grid.appendChild(dashBody);
+    var contentHost = grid;
+    if (useEsimSplitPane) {
+      grid.className += " cc-esim-split-grid";
+
+      contentHost = document.createElement("div");
+      contentHost.className = "cc-esim-split-pane cc-esim-left-pane";
+      grid.appendChild(contentHost);
+
+      esimFlowPane = document.createElement("aside");
+      esimFlowPane.className = "cc-esim-split-pane cc-esim-flow-pane";
+      esimFlowPane.setAttribute("aria-label", "APDU flow output");
+      var flowHead = document.createElement("div");
+      flowHead.className = "cc-esim-flow-head";
+      esimFlowTitle = document.createElement("div");
+      esimFlowTitle.className = "cc-esim-flow-title";
+      flowHead.appendChild(esimFlowTitle);
+      esimFlowStatus = document.createElement("span");
+      esimFlowStatus.className = "cc-esim-flow-status";
+      flowHead.appendChild(esimFlowStatus);
+      esimFlowPane.appendChild(flowHead);
+      esimFlowBody = document.createElement("div");
+      esimFlowBody.className = "cc-esim-flow-body";
+      esimFlowPane.appendChild(esimFlowBody);
+      grid.appendChild(esimFlowPane);
+      _renderEsimFlowPlaceholder();
+    }
+
+    function _appendCompactContent(node) {
+      contentHost.appendChild(node);
+    }
 
     // Mutation actions
     var mutationActions = actions.filter(_shouldShowInDashboard);
     if (subsystem === "eSIM Management") {
       mutationActions = actions.filter(ccShouldShowEsimManagementAction);
     } else if (subsystem === "SCP11 Local") {
-      mutationActions = actions.slice();
+      mutationActions = actions.filter(_shouldShowLocalSmdpDashboardAction);
+    } else if (subsystem === "Local eIM") {
+      mutationActions = actions.filter(_shouldShowLocalEimDashboardAction);
+    } else if (subsystem === "Offline Tools") {
+      mutationActions = actions.filter(function (action) {
+        var actionId = String(action && action.id || "");
+        return !CC_OFFLINE_TOOLS_HIDDEN_ACTIONS[actionId];
+      });
+    }
+    if (subsystem === "SCP11 Local") {
+      _appendCompactContent(_buildLocalSmdpOverviewPanel());
+    }
+    if (subsystem === "Local eIM") {
+      _appendCompactContent(_buildLocalEimOverviewPanel());
     }
     if (mutationActions.length > 0) {
       var dashActions = document.createElement("div");
@@ -3145,28 +4662,102 @@
         label.className = "cc-compact-rbtn-label";
         label.textContent = action.title || action.id;
         btn.appendChild(label);
+        if (subsystem === "Offline Tools") {
+          if (action.description) {
+            var desc = document.createElement("span");
+            desc.className = "cc-compact-rbtn-desc";
+            desc.textContent = action.description;
+            btn.appendChild(desc);
+          }
+          var meta = document.createElement("span");
+          meta.className = "cc-compact-rbtn-meta";
+          meta.appendChild(makeBadge("cc-badge " + (action.streams ? "cc-badge--stream" : "cc-badge--sync"),
+            action.streams ? "stream" : "sync"));
+          if (action.requires_card) {
+            meta.appendChild(makeBadge("cc-badge cc-badge--card", "card"));
+          }
+          meta.appendChild(makeBadge("cc-badge cc-badge--out", action.output_kind || "json"));
+          btn.appendChild(meta);
+        }
         btn.addEventListener("click", function () {
-          _ccBuildActionPopout(action);
+          if (useEsimSplitPane) {
+            _openEsimActionPane(action);
+          } else {
+            _openInlineActionPane(action);
+          }
         });
         parent.appendChild(btn);
         return btn;
       }
 
-      var actionButtonRecords = [];
+      actionButtonRecords = [];
       if (subsystem === "eSIM Management" || subsystem === "SCP11 Local") {
         dashActions.classList.add("cc-esim-action-rails");
+        var actionFlavorTabRecords = [];
+        var activeActionFlavorId = "";
+
+        function switchActionFlavor(flavorId) {
+          activeActionFlavorId = flavorId;
+          actionFlavorTabRecords.forEach(function (tabRec) {
+            var isActive = tabRec.id === flavorId;
+            tabRec.tab.classList.toggle("active", isActive);
+            tabRec.tab.setAttribute("aria-selected", String(isActive));
+            tabRec.section.hidden = !isActive;
+          });
+        }
+
         if (subsystem === "SCP11 Local") {
           dashActions.classList.add("cc-local-smdp-action-rails");
         }
         var flavorGroups = subsystem === "SCP11 Local"
           ? ccLocalSmdpActionFlavorGroups(mutationActions)
           : ccEsimActionFlavorGroups(mutationActions);
+        if (subsystem === "eSIM Management" && flavorGroups.length > 0) {
+          dashActions.classList.add("cc-esim-action-rails--tabbed");
+          var actionTabs = document.createElement("div");
+          actionTabs.className = "cc-esim-action-tabs";
+          actionTabs.setAttribute("role", "tablist");
+          actionTabs.setAttribute("aria-label", "eSIM action modes");
+          dashActions.appendChild(actionTabs);
+          activeActionFlavorId = flavorGroups[0].meta.id;
+        }
         flavorGroups.forEach(function (group) {
+          var isTabbedEsim = subsystem === "eSIM Management";
           var section = document.createElement("section");
           section.className = "cc-esim-action-section cc-esim-action-section--" + group.meta.id;
           if (subsystem === "SCP11 Local") {
             section.className += " cc-local-smdp-action-section"
               + " cc-local-smdp-action-section--" + group.meta.id;
+          } else if (isTabbedEsim) {
+            section.className += " cc-esim-action-panel";
+            section.setAttribute("role", "tabpanel");
+            section.setAttribute("data-action-flavor", group.meta.id);
+            section.hidden = group.meta.id !== activeActionFlavorId;
+            var tab = document.createElement("button");
+            tab.type = "button";
+            tab.className = "cc-esim-action-tab"
+              + (group.meta.id === activeActionFlavorId ? " active" : "");
+            tab.setAttribute("role", "tab");
+            tab.setAttribute("aria-selected", String(group.meta.id === activeActionFlavorId));
+            tab.setAttribute("data-action-flavor", group.meta.id);
+            tab.title = group.meta.hint || group.meta.label || "";
+            var tabLabel = document.createElement("span");
+            tabLabel.className = "cc-esim-action-tab-label";
+            tabLabel.textContent = group.meta.label;
+            tab.appendChild(tabLabel);
+            var tabCount = document.createElement("span");
+            tabCount.className = "cc-esim-action-tab-count";
+            tabCount.textContent = String(group.items.length);
+            tab.appendChild(tabCount);
+            tab.addEventListener("click", function () {
+              switchActionFlavor(group.meta.id);
+            });
+            actionTabs.appendChild(tab);
+            actionFlavorTabRecords.push({
+              id: group.meta.id,
+              tab: tab,
+              section: section,
+            });
           }
           var sectionHead = document.createElement("div");
           sectionHead.className = "cc-esim-action-section-head";
@@ -3199,8 +4790,12 @@
         });
         dashActions.appendChild(dashActionsInner);
       }
-      grid.appendChild(dashActions);
+      _appendCompactContent(dashActions);
     }
+    if (!useEsimSplitPane && mutationActions.length > 0) {
+      _appendCompactContent(_ensureInlineActionPane());
+    }
+    _appendCompactContent(dashBody);
 
     // --- Search filter (filters mutation buttons) ---
     var allButtons = [];
@@ -3212,8 +4807,17 @@
           + act.id + " "
           + (act.description || "")
         ).toLowerCase();
-        allButtons.push({ btn: rec.btn, haystack: haystack, section: rec.section });
+        allButtons.push({
+          btn: rec.btn,
+          haystack: haystack,
+          section: rec.section,
+          categoryId: groupedBuckets ? groupedActionCategoryId(act) : "",
+        });
       });
+    }
+    actionFilterRecords = allButtons;
+    if (groupedBuckets) {
+      applyCardFilters();
     }
 
     if (actions.length >= 8) {
@@ -3221,17 +4825,105 @@
       if (searchInput) {
         searchInput.addEventListener("input", function () {
           var q = searchInput.value.trim().toLowerCase();
+          if (groupedBuckets) {
+            applyCardFilters();
+            return;
+          }
           allButtons.forEach(function (rec) {
             rec.btn.hidden = q.length > 0 && rec.haystack.indexOf(q) === -1;
           });
-          wb.querySelectorAll(".cc-esim-action-section").forEach(function (section) {
-            var visible = section.querySelector(".cc-compact-rbtn:not([hidden])");
-            section.hidden = !visible;
-          });
+          var tabbedEsim = wb.querySelector(".cc-esim-action-rails--tabbed");
+          if (tabbedEsim) {
+            var activeStillVisible = false;
+            tabbedEsim.querySelectorAll(".cc-esim-action-panel").forEach(function (section) {
+              var hasVisible = !!section.querySelector(".cc-compact-rbtn:not([hidden])");
+              var flavorId = section.getAttribute("data-action-flavor") || "";
+              var tab = tabbedEsim.querySelector(
+                '.cc-esim-action-tab[data-action-flavor="' + cssEscape(flavorId) + '"]'
+              );
+              if (tab) tab.hidden = q.length > 0 && !hasVisible;
+              if (flavorId === activeActionFlavorId && hasVisible) {
+                activeStillVisible = true;
+              }
+            });
+            if (!activeStillVisible && q.length > 0) {
+              var firstVisibleTab = tabbedEsim.querySelector(".cc-esim-action-tab:not([hidden])");
+              if (firstVisibleTab) {
+                switchActionFlavor(firstVisibleTab.getAttribute("data-action-flavor") || "");
+              }
+            } else {
+              switchActionFlavor(activeActionFlavorId);
+            }
+          } else {
+            wb.querySelectorAll(".cc-esim-action-section").forEach(function (section) {
+              var visible = section.querySelector(".cc-compact-rbtn:not([hidden])");
+              section.hidden = !visible;
+            });
+          }
         });
       }
     }
     wb.appendChild(grid);
+
+    async function refreshEsimSurface(opts) {
+      if (!isDashboardSubsystem) return null;
+      var options = opts || {};
+      _setEsimModuleToolbarBusy(true, "refreshing");
+      try {
+        if (typeof readerBarRefresh === "function") {
+          await Promise.resolve(readerBarRefresh({ manual: !!options.manual }));
+        }
+        var resp = await refreshDashboard({ quiet: false });
+        for (var i = 0; i < localOverviewRefreshers.length; i++) {
+          await Promise.resolve(localOverviewRefreshers[i]());
+        }
+        _setEsimModuleToolbarBusy(false, "ready");
+        return resp;
+      } catch (err) {
+        _setEsimModuleToolbarBusy(false, "error");
+        logBus.emit({
+          level: "error",
+          source: subsystem,
+          message: "refresh: " + String(err && err.message || err),
+        });
+        return null;
+      }
+    }
+
+    async function resetEsimSurface() {
+      if (!isDashboardSubsystem) return;
+      var action = ccFindCatalogueActionById("scp11_live.reset_card")
+        || ccFindActionById(actions, "scp11_live.reset_card");
+      if (!action) {
+        _renderEsimFlowError("Card reset action is not registered.", null);
+        return;
+      }
+      if (!scopedReader) {
+        _renderEsimFlowError("Select a reader before resetting the card.", action);
+        return;
+      }
+      _setEsimModuleToolbarBusy(true, "resetting");
+      try {
+        var data = await _runActionInEsimFlowPane(action, {
+          reader: scopedReader,
+          confirm: true,
+        }, {
+          runningText: "resetting card",
+          doneText: "reset ok",
+        });
+        if (typeof readerBarRefresh === "function") {
+          await Promise.resolve(readerBarRefresh({ manual: true }));
+        }
+        await refreshDashboard({ quiet: true });
+        for (var i = 0; i < localOverviewRefreshers.length; i++) {
+          await Promise.resolve(localOverviewRefreshers[i]());
+        }
+        _setEsimModuleToolbarBusy(false, data ? "reset ok" : "reset error");
+      } catch (err) {
+        _setEsimModuleToolbarBusy(false, "reset error");
+        _renderEsimFlowError(String(err && err.message || err), action);
+      }
+    }
 
     // --- Auto-fetch dashboard ---
     function refreshDashboard(opts) {
@@ -3295,10 +4987,15 @@
       clearTimeout(state.rawRenderTimerId);
       state.rawRenderTimerId = null;
     }
+    if (state.timerStatusTimerId !== null) {
+      clearInterval(state.timerStatusTimerId);
+      state.timerStatusTimerId = null;
+    }
   }
 
   function renderHilWorkbench(container, actions, leaf) {
     var state = commandState.hilWorkbench;
+    hilSyncCommandCenterTraceIndicators();
     stopHilWorkbenchRuntime();
     if (!container) return;
     container.innerHTML = "";
@@ -3382,13 +5079,16 @@
       var nextPath = window.prompt("Capture path", state.capturePath || "");
       if (nextPath === null) return;
       state.capturePath = String(nextPath || "").trim();
+      state.captureSource = state.capturePath ? "explicit" : "";
       state.armed = true;
       state.startMode = "offline";
       state.autoRefresh = false;
       state.statusText = "offline pcap";
       state.selectedFrameNumber = null;
+      state.selectionFollowsTail = true;
       state.detail = "";
       state.bytes = "";
+      state.detailRanges = [];
       state.detailFrameNumber = 0;
       hilResetLiveBaseline();
       hilResetDetailScroll();
@@ -3400,13 +5100,16 @@
     }));
     moduleGroup.appendChild(hilToolbarButton("⌂", "Live", "Use the active live capture", function () {
       state.capturePath = "";
+      state.captureSource = "";
       state.armed = true;
       state.startMode = "decoded";
       state.autoRefresh = true;
       state.statusText = "live";
       state.selectedFrameNumber = null;
+      state.selectionFollowsTail = true;
       state.detail = "";
       state.bytes = "";
+      state.detailRanges = [];
       state.detailFrameNumber = 0;
       state.liveBaselinePending = true;
       hilResetDetailScroll();
@@ -3427,8 +5130,11 @@
       state.annotations = {};
       state.detail = "";
       state.bytes = "";
+      state.detailRanges = [];
       state.detailFrameNumber = 0;
       state.selectedFrameNumber = null;
+      state.selectionFollowsTail = true;
+      hilClearByteHighlight(true);
       hilResetDetailScroll();
       hilResetPacketSections();
       hilResetPacketScroll();
@@ -3440,6 +5146,16 @@
     var bridgeGroup = document.createElement("div");
     bridgeGroup.className = "cc-hil-toolbar-group cc-hil-toolbar-group--actions";
     toolbar.appendChild(bridgeGroup);
+    bridgeGroup.appendChild(hilToolbarButton(
+      state.cardBridgeLaunchInFlight ? "..." : "⇄",
+      state.cardBridgeLaunchInFlight ? "Starting bridge" : "Remote Bridge",
+      "Launch the saved Remote Bridge rig sequence",
+      function () {
+        hilLaunchCardBridgeRig(actions, container, leaf);
+      },
+      state.cardBridgeLaunchInFlight,
+      state.cardBridgeLaunchInFlight
+    ));
     actions.filter(function (action) {
       return action
         && action.id !== "hil.decode_snapshot"
@@ -3453,6 +5169,7 @@
         function () { _ccBuildActionPopout(action); }
       ));
     });
+
     wb.appendChild(toolbar);
 
     var tabs = document.createElement("div");
@@ -3475,6 +5192,7 @@
       renderHilModemShellTab(body);
     } else {
       renderHilDissectorTab(body);
+      hilStartTimerStatusTicker();
     }
     if (state.armed) {
       installHilRawTraceSubscription(body);
@@ -3492,7 +5210,7 @@
           return;
         }
         hilRefreshSnapshot({ force: false });
-      }, 1400);
+      }, 700);
     }
 
     function hilTabButton(tabId, labelText) {
@@ -3585,8 +5303,10 @@
     state.annotations = {};
     state.detail = "";
     state.bytes = "";
+    state.detailRanges = [];
     state.detailFrameNumber = 0;
     state.selectedFrameNumber = null;
+    state.selectionFollowsTail = true;
     hilResetDetailScroll();
     hilResetPacketSections();
     hilResetPacketScroll();
@@ -3621,6 +5341,7 @@
       state.liveBaselineCaptureSize = Number(data.capture_size || 0);
       state.liveBaselineCaptureMtime = Number(data.capture_mtime || 0);
       state.lastCapturePath = String(data.capture_path || state.lastCapturePath || "");
+      state.captureSource = String(data.capture_source || state.captureSource || "");
       state.statusText = maxFrame > 0
         ? "waiting for new packets"
         : "capture empty";
@@ -3700,11 +5421,14 @@
     state.armed = true;
     state.startMode = "decoded";
     state.capturePath = "";
+    state.captureSource = "";
     state.rows = [];
     state.annotations = {};
     state.detail = "";
     state.bytes = "";
+    state.detailRanges = [];
     state.detailFrameNumber = 0;
+    hilClearByteHighlight(true);
     state.rawRows = [];
     state.rawPendingRows = [];
     state.rawPendingDropCount = 0;
@@ -3713,9 +5437,11 @@
     state.rawClearedFrameNumber = 0;
     state.lastRenderedRawId = 0;
     state.refreshQueuedForce = false;
+    state.refreshQueuedSelectedFrame = null;
     state.readerName = "";
     state.readerIndex = -1;
     state.selectedFrameNumber = null;
+    state.selectionFollowsTail = true;
     state.liveBaselinePending = true;
     state.liveBaselineFrameNumber = 0;
     state.liveBaselineCaptureSize = 0;
@@ -3751,6 +5477,7 @@
       state.startMode = String(data.mode || "decoded");
       state.capturePath = "";
       state.lastCapturePath = String(data.capture_path || "");
+      state.captureSource = String(data.capture_source || state.captureSource || "");
       state.actionStatusText = data.note ? String(data.note) : "HIL session active";
       hilApplyReaderBinding(data);
       var baselineReady = await hilEstablishLiveBaseline();
@@ -3778,6 +5505,40 @@
     if (!state.armed && state.statusText === "not started") {
       return;
     }
+    if (state.startMode === "remote" || state.captureSource === "remote") {
+      state.armed = false;
+      state.rows = [];
+      state.annotations = {};
+      state.detail = "";
+      state.bytes = "";
+      state.detailRanges = [];
+      state.detailFrameNumber = 0;
+      state.rawRows = [];
+      state.rawPendingRows = [];
+      state.rawPendingDropCount = 0;
+      state.rawSnapshotSeeded = false;
+      state.rawFrameSeen = {};
+      state.rawClearedFrameNumber = 0;
+      state.lastRenderedRawId = 0;
+      state.refreshQueuedForce = false;
+      state.refreshQueuedSelectedFrame = null;
+      state.captureSize = 0;
+      state.captureMtime = 0;
+      state.captureSource = "";
+      hilClearReaderBinding();
+      state.selectedFrameNumber = null;
+      state.selectionFollowsTail = true;
+      hilResetLiveBaseline();
+      hilResetDetailScroll();
+      hilResetPacketSections();
+      state.followTail = true;
+      hilResetPacketScroll();
+      state.statusText = "detached";
+      state.actionStatusText = "Remote HIL view detached.";
+      stopHilWorkbenchRuntime();
+      renderHilWorkbench(container, actions, leaf);
+      return;
+    }
     if (!window.confirm("Stop the HIL session?")) {
       return;
     }
@@ -3801,6 +5562,7 @@
       state.annotations = {};
       state.detail = "";
       state.bytes = "";
+      state.detailRanges = [];
       state.detailFrameNumber = 0;
       state.rawRows = [];
       state.rawPendingRows = [];
@@ -3810,10 +5572,12 @@
       state.rawClearedFrameNumber = 0;
       state.lastRenderedRawId = 0;
       state.refreshQueuedForce = false;
+      state.refreshQueuedSelectedFrame = null;
       state.captureSize = 0;
       state.captureMtime = 0;
       hilClearReaderBinding();
       state.selectedFrameNumber = null;
+      state.selectionFollowsTail = true;
       hilResetLiveBaseline();
       hilResetDetailScroll();
       hilResetPacketSections();
@@ -3836,22 +5600,48 @@
     }
   }
 
+  async function hilLaunchCardBridgeRig(actions, container, leaf) {
+    var state = commandState.hilWorkbench;
+    if (state.cardBridgeLaunchInFlight) return;
+    state.cardBridgeLaunchInFlight = true;
+    state.errorText = "";
+    state.actionStatusText = "starting Remote Bridge rig";
+    renderHilWorkbench(container, actions, leaf);
+    try {
+      if (typeof cbRigStartAllFromSavedSettings !== "function") {
+        throw new Error("Remote Bridge launch helper is unavailable.");
+      }
+      var data = await cbRigStartAllFromSavedSettings();
+      var describe = typeof cbRigDescribeAction === "function"
+        ? cbRigDescribeAction
+        : function (payload, fallback) { return (payload && payload.note) || fallback || ""; };
+      if (!data || data.ok === false) {
+        var failure = describe(data, "Remote Bridge rig start failed.");
+        state.errorText = failure;
+        state.actionStatusText = failure;
+      } else {
+        state.errorText = "";
+        state.actionStatusText = describe(data, "Remote Bridge rig is active.");
+      }
+    } catch (err) {
+      var message = String((err && err.message) || err);
+      state.errorText = message;
+      state.actionStatusText = message;
+    } finally {
+      state.cardBridgeLaunchInFlight = false;
+      if (commandState.activeSubsystem === "HIL") {
+        renderHilWorkbench(container, actions, leaf);
+      }
+    }
+  }
+
   function renderHilDissectorTab(body) {
     var state = commandState.hilWorkbench;
     body.innerHTML = "";
 
     var status = document.createElement("div");
     status.className = "cc-hil-statusbar";
-    status.appendChild(hilStatusChip("session", state.armed ? state.startMode || "live" : "stopped"));
-    status.appendChild(hilStatusChip("status", state.inflight ? "refreshing" : state.statusText));
-    if (state.actionStatusText) {
-      status.appendChild(hilStatusChip("action", state.actionStatusText));
-    }
-    status.appendChild(hilStatusChip("packets", String(state.rows.length)));
-    status.appendChild(hilStatusChip("selected", state.selectedFrameNumber ? "#" + state.selectedFrameNumber : "-"));
-    var captureLabel = state.capturePath || hilCapturePathFromRows(state) || "live";
-    status.appendChild(hilStatusChip("capture", captureLabel));
-    if (state.paused) status.appendChild(hilStatusChip("paused", "yes"));
+    hilRenderStatusbar(status);
     body.appendChild(status);
 
     if (state.errorText) {
@@ -3870,8 +5660,35 @@
     var list = document.createElement("div");
     list.className = "cc-hil-packet-list";
     list.setAttribute("role", "listbox");
+    list.addEventListener("wheel", function () {
+      state.lastPacketScrollAt = Date.now();
+    }, { passive: true });
+    list.addEventListener("pointerdown", function (event) {
+      hilBeginPacketPointerInteraction(event);
+    });
+    list.addEventListener("pointerup", function () {
+      hilEndPacketPointerInteraction();
+    });
+    list.addEventListener("pointercancel", function () {
+      hilEndPacketPointerInteraction();
+    });
+    list.addEventListener("lostpointercapture", function () {
+      hilEndPacketPointerInteraction();
+    });
+    if (!state.packetPointerReleaseListenersInstalled) {
+      state.packetPointerReleaseListenersInstalled = true;
+      window.addEventListener("pointerup", function () {
+        hilEndPacketPointerInteraction();
+      }, true);
+      window.addEventListener("pointercancel", function () {
+        hilEndPacketPointerInteraction();
+      }, true);
+    }
     list.addEventListener("scroll", function () {
       hilRememberPacketScroll(list);
+      if (!state.packetScrollRestoring) {
+        hilSchedulePacketVirtualRender(list);
+      }
     });
     listPane.appendChild(list);
     renderHilPacketList(list);
@@ -3884,14 +5701,61 @@
     detailHead.textContent = state.selectedFrameNumber ? "Frame #" + state.selectedFrameNumber : "Frame";
     detailPane.appendChild(detailHead);
     detailPane.appendChild(hilDecodedBlock("Decoded", state.detail || "No decoded frame selected.", "detail"));
-    detailPane.appendChild(hilPreBlock("Bytes", state.bytes || "No byte view selected.", "bytes"));
+    detailPane.appendChild(hilBytesBlock("Bytes", state.bytes || "No byte view selected.", "bytes"));
     grid.appendChild(detailPane);
 
     body.appendChild(grid);
+    hilApplyByteHighlightClasses();
   }
 
   function hilCapturePathFromRows(state) {
     return state.lastCapturePath || "";
+  }
+
+  function hilRenderStatusbar(status) {
+    var state = commandState.hilWorkbench;
+    if (!status) return;
+    status.innerHTML = "";
+    status.appendChild(hilStatusChip("session", state.armed ? state.startMode || "live" : "stopped"));
+    status.appendChild(hilStatusChip("status", state.statusText));
+    if (state.actionStatusText) {
+      status.appendChild(hilStatusChip("action", state.actionStatusText));
+    }
+    status.appendChild(hilStatusChip("packets", String(state.rows.length)));
+    status.appendChild(hilStatusChip("selected", state.selectedFrameNumber ? "#" + state.selectedFrameNumber : "-"));
+    hilRefreshTimerAnchor();
+    hilActiveTimerStatusChips().forEach(function (chip) {
+      status.appendChild(chip);
+    });
+    if (state.captureSource) {
+      status.appendChild(hilStatusChip("source", state.captureSource));
+    }
+    var captureLabel = state.capturePath || hilCapturePathFromRows(state) || "live";
+    status.appendChild(hilStatusChip("capture", captureLabel));
+    if (state.paused) status.appendChild(hilStatusChip("paused", "yes"));
+  }
+
+  function hilRefreshTimerStatusbar() {
+    if (commandState.activeSubsystem !== "HIL") return false;
+    var state = commandState.hilWorkbench;
+    if (!state || state.activeTab !== "dissector") return false;
+    var status = document.querySelector(".cc-hil-workbench .cc-hil-statusbar");
+    if (!status) return false;
+    hilRenderStatusbar(status);
+    return true;
+  }
+
+  function hilStartTimerStatusTicker() {
+    var state = commandState.hilWorkbench;
+    if (!state || state.timerStatusTimerId !== null) return;
+    state.timerStatusTimerId = setInterval(function () {
+      if (!hilRefreshTimerStatusbar()) {
+        if (state.timerStatusTimerId !== null) {
+          clearInterval(state.timerStatusTimerId);
+          state.timerStatusTimerId = null;
+        }
+      }
+    }, 500);
   }
 
   function hilStatusChip(label, value) {
@@ -3908,6 +5772,119 @@
     return chip;
   }
 
+  function hilActiveTimerStatusChips() {
+    var timerSummary = hilActiveTimerSummary();
+    if (!timerSummary) return [];
+    return [
+      hilStatusChip("timers", String(timerSummary.count)),
+      hilStatusChip("countdown", timerSummary.text),
+    ];
+  }
+
+  function hilActiveTimerSummary() {
+    var state = commandState.hilWorkbench;
+    var ann = hilLatestTimerAnnotation();
+    if (!ann || !Array.isArray(ann.active_timers)) return null;
+    hilRefreshTimerAnchor(ann);
+    var visible = [];
+    var visibleCount = 0;
+    ann.active_timers.forEach(function (timer) {
+      var remainingSeconds = hilTimerRemainingSeconds(timer);
+      if (remainingSeconds <= 0) return;
+      visibleCount += 1;
+      if (visible.length >= 3) return;
+      var label = String(timer && timer.display_label || "").trim();
+      if (!label) label = "T" + String(parseInt(timer && timer.timer_id || 0, 10) || 0);
+      visible.push(label + " " + hilFormatDurationClock(remainingSeconds));
+    });
+    if (visibleCount === 0) return null;
+    if (visibleCount > visible.length) visible.push("+" + String(visibleCount - visible.length) + " more");
+    return {
+      count: visibleCount,
+      text: visible.join(", "),
+      annotation: ann,
+    };
+  }
+
+  function hilRefreshTimerAnchor(annotation) {
+    var state = commandState.hilWorkbench;
+    var ann = annotation || hilLatestTimerAnnotation();
+    if (!ann || !Array.isArray(ann.active_timers) || ann.active_timers.length === 0) {
+      state.timerSnapshotAppliedAt = 0;
+      state.timerSnapshotCaptureSeconds = null;
+      state.timerSnapshotSignature = "";
+      return;
+    }
+    var signature = hilTimerAnnotationSignature(ann);
+    var captureSeconds = hilTimerAnnotationCaptureSeconds(ann);
+    if (
+      state.timerSnapshotSignature !== signature
+      || state.timerSnapshotCaptureSeconds !== captureSeconds
+    ) {
+      state.timerSnapshotSignature = signature;
+      state.timerSnapshotCaptureSeconds = captureSeconds;
+      state.timerSnapshotAppliedAt = Date.now();
+    }
+  }
+
+  function hilTimerAnnotationSignature(annotation) {
+    var timers = Array.isArray(annotation && annotation.active_timers)
+      ? annotation.active_timers
+      : [];
+    return [
+      String(hilTimerAnnotationCaptureSeconds(annotation)),
+      timers.map(function (timer) {
+        return [
+          String(parseInt(timer && timer.timer_id || 0, 10) || 0),
+          String(parseInt(timer && timer.configured_seconds || 0, 10) || 0),
+          String(parseInt(timer && timer.remaining_seconds || 0, 10) || 0),
+          String(timer && timer.display_label || ""),
+        ].join(":");
+      }).join("|"),
+    ].join("/");
+  }
+
+  function hilTimerAnnotationCaptureSeconds(annotation) {
+    var value = Number(annotation && annotation.capture_time_seconds);
+    if (!isFinite(value)) return null;
+    return Math.round(value * 1000) / 1000;
+  }
+
+  function hilLatestTimerAnnotation() {
+    var state = commandState.hilWorkbench;
+    var annotations = state.annotations || {};
+    var rows = state.rows || [];
+    for (var i = rows.length - 1; i >= 0; i -= 1) {
+      var frameNumber = parseInt(rows[i] && rows[i].number || 0, 10);
+      var ann = annotations[String(frameNumber)] || null;
+      if (ann && Array.isArray(ann.active_timers) && ann.active_timers.length > 0) return ann;
+    }
+    var selected = annotations[String(state.selectedFrameNumber || "")] || null;
+    if (selected && Array.isArray(selected.active_timers) && selected.active_timers.length > 0) return selected;
+    return null;
+  }
+
+  function hilTimerRemainingSeconds(timer) {
+    var state = commandState.hilWorkbench;
+    var remainingSeconds = parseInt(timer && timer.remaining_seconds || 0, 10) || 0;
+    var liveCountdown = hilIsLiveCaptureMode(state) || state.captureSource === "remote";
+    if (!liveCountdown || !state.timerSnapshotAppliedAt) return Math.max(0, remainingSeconds);
+    var elapsedSeconds = Math.max(0, (Date.now() - Number(state.timerSnapshotAppliedAt || 0)) / 1000);
+    return Math.max(0, Math.ceil(remainingSeconds - elapsedSeconds));
+  }
+
+  function hilFormatDurationClock(totalSeconds) {
+    var normalizedSeconds = Math.max(0, parseInt(totalSeconds || 0, 10) || 0);
+    var hours = Math.floor(normalizedSeconds / 3600);
+    var minutes = Math.floor((normalizedSeconds % 3600) / 60);
+    var seconds = normalizedSeconds % 60;
+    return [
+      String(hours).padStart(2, "0"),
+      String(minutes).padStart(2, "0"),
+      String(seconds).padStart(2, "0"),
+    ].join(":");
+  }
+
   function hilPreBlock(titleText, bodyText, scrollSlot) {
     var state = commandState.hilWorkbench;
     var wrap = document.createElement("div");
@@ -3919,6 +5896,21 @@
     var pre = document.createElement("pre");
     pre.className = "cc-hil-pre";
     pre.textContent = bodyText;
+    hilInstallScrollMemory(pre, scrollSlot);
+    wrap.appendChild(pre);
+    return wrap;
+  }
+
+  function hilBytesBlock(titleText, bodyText, scrollSlot) {
+    var wrap = document.createElement("div");
+    wrap.className = "cc-hil-pre-block cc-hil-bytes-block";
+    var title = document.createElement("div");
+    title.className = "cc-hil-pre-title";
+    title.textContent = titleText;
+    wrap.appendChild(title);
+    var pre = document.createElement("pre");
+    pre.className = "cc-hil-pre cc-hil-byte-dump";
+    hilRenderByteDump(pre, bodyText);
     hilInstallScrollMemory(pre, scrollSlot);
     wrap.appendChild(pre);
     return wrap;
@@ -3953,7 +5945,10 @@
       var details = document.createElement("details");
       details.className = "cc-hil-decoded-section";
       var stateKey = hilDecodedSectionKey(section.title, index);
-      details.open = state.detailSectionOpen[stateKey] === true;
+      var hasStoredState = Object.prototype.hasOwnProperty.call(state.detailSectionOpen, stateKey);
+      details.open = hasStoredState
+        ? state.detailSectionOpen[stateKey] === true
+        : hilDecodedSectionDefaultOpen(section.title);
       details.addEventListener("toggle", function () {
         state.detailSectionOpen[stateKey] = details.open;
       });
@@ -3961,19 +5956,329 @@
       var summary = document.createElement("summary");
       summary.className = "cc-hil-decoded-summary";
       summary.textContent = section.title;
+      hilAttachRangeEvents(summary, hilFindRangeForDecodedLine(section.title));
       details.appendChild(summary);
 
-      var pre = document.createElement("pre");
-      pre.className = "cc-hil-decoded-section-body";
-      pre.textContent = section.lines.length > 0
-        ? section.lines.join("\n")
-        : "(no decoded child fields)";
-      details.appendChild(pre);
+      details.appendChild(hilDecodedSectionBody(section.lines));
       list.appendChild(details);
     });
     scroller.appendChild(list);
     wrap.appendChild(scroller);
     return wrap;
+  }
+
+  function hilDecodedSectionDefaultOpen(titleText) {
+    return String(titleText || "").trim().toUpperCase() === "GSM SIM 11.11";
+  }
+
+  function hilDecodedSectionBody(lines) {
+    var body = document.createElement("div");
+    body.className = "cc-hil-decoded-section-body";
+    var sourceLines = Array.isArray(lines) && lines.length > 0
+      ? lines
+      : ["(no decoded child fields)"];
+    sourceLines.forEach(function (line) {
+      var row = document.createElement("div");
+      row.className = "cc-hil-decoded-line";
+      var text = String(line || "");
+      row.textContent = text.length > 0 ? text : " ";
+      hilAttachRangeEvents(row, hilFindRangeForDecodedLine(text));
+      body.appendChild(row);
+    });
+    return body;
+  }
+
+  function hilRenderByteDump(pre, bodyText) {
+    var lines = String(bodyText || "").replace(/\r\n/g, "\n").split("\n");
+    var renderedAny = false;
+    lines.forEach(function (line, lineIndex) {
+      if (lineIndex > 0) pre.appendChild(document.createTextNode("\n"));
+      var rendered = hilRenderByteDumpLine(line);
+      pre.appendChild(rendered);
+      renderedAny = renderedAny || !!rendered.dataset.byteLine;
+    });
+    if (!renderedAny && pre.textContent.length === 0) {
+      pre.textContent = bodyText;
+    }
+  }
+
+  function hilRenderByteDumpLine(line) {
+    var raw = String(line || "");
+    var row = document.createElement("span");
+    row.className = "cc-hil-byte-line";
+    var match = raw.match(/^\s*([0-9A-Fa-f]{4,8})\s+(.+)$/);
+    if (!match) {
+      row.textContent = raw;
+      return row;
+    }
+    var startOffset = parseInt(match[1], 16);
+    if (!isFinite(startOffset)) {
+      row.textContent = raw;
+      return row;
+    }
+    var rest = match[2] || "";
+    var tokens = rest.trim().split(/\s+/);
+    var bytes = [];
+    for (var i = 0; i < tokens.length && bytes.length < 16; i += 1) {
+      if (!/^[0-9A-Fa-f]{2}$/.test(tokens[i])) break;
+      bytes.push(tokens[i].toUpperCase());
+    }
+    if (bytes.length === 0) {
+      row.textContent = raw;
+      return row;
+    }
+    row.dataset.byteLine = "1";
+    var offset = document.createElement("span");
+    offset.className = "cc-hil-byte-offset";
+    offset.textContent = match[1].toLowerCase();
+    row.appendChild(offset);
+    row.appendChild(document.createTextNode("  "));
+    bytes.forEach(function (byteText, index) {
+      var byteOffset = startOffset + index;
+      var span = document.createElement("span");
+      span.className = "cc-hil-byte";
+      span.dataset.offset = String(byteOffset);
+      span.textContent = byteText;
+      hilAttachByteEvents(span, byteOffset);
+      row.appendChild(span);
+      if (index < bytes.length - 1) {
+        row.appendChild(document.createTextNode(index === 7 ? "  " : " "));
+      }
+    });
+    var asciiIndex = nthIndexOfHexByte(rest, bytes.length);
+    if (asciiIndex >= 0) {
+      var asciiText = rest.slice(asciiIndex).trim();
+      if (asciiText.length > 0) {
+        row.appendChild(document.createTextNode("   " + asciiText));
+      }
+    }
+    return row;
+  }
+
+  function nthIndexOfHexByte(text, count) {
+    var re = /[0-9A-Fa-f]{2}/g;
+    var match = null;
+    var seen = 0;
+    while ((match = re.exec(String(text || ""))) !== null) {
+      seen += 1;
+      if (seen === count) return re.lastIndex;
+    }
+    return -1;
+  }
+
+  function hilAttachRangeEvents(el, range) {
+    if (!el || !range) return;
+    el.classList.add("cc-hil-decoded-range");
+    el.dataset.rangeKey = hilRangeKey(range);
+    el.dataset.rangeStart = String(range.start);
+    el.dataset.rangeEnd = String(range.end);
+    el.title = hilRangeLabel(range);
+    el.addEventListener("mouseenter", function () {
+      hilSetByteHighlight(range, false);
+    });
+    el.addEventListener("mouseleave", function () {
+      hilClearByteHighlight(false);
+    });
+    el.addEventListener("click", function (event) {
+      event.stopPropagation();
+      hilSetByteHighlight(range, true);
+    });
+  }
+
+  function hilAttachByteEvents(el, byteOffset) {
+    if (!el) return;
+    el.addEventListener("mouseenter", function () {
+      var range = hilBestRangeForByte(byteOffset);
+      if (range) {
+        hilSetByteHighlight(range, false);
+      } else {
+        hilApplyByteOffsetHighlight(byteOffset, false);
+      }
+    });
+    el.addEventListener("mouseleave", function () {
+      hilClearByteHighlight(false);
+    });
+    el.addEventListener("click", function (event) {
+      event.stopPropagation();
+      var range = hilBestRangeForByte(byteOffset);
+      if (range) {
+        hilSetByteHighlight(range, true);
+      } else {
+        hilApplyByteOffsetHighlight(byteOffset, true);
+      }
+    });
+  }
+
+  function hilSetByteHighlight(range, pinned) {
+    var state = commandState.hilWorkbench;
+    var normalized = hilNormalizeRange(range);
+    if (!normalized) return;
+    if (pinned) {
+      var pinnedKey = hilRangeKey(state.byteHighlightPinnedRange);
+      var nextKey = hilRangeKey(normalized);
+      state.byteHighlightPinnedRange = pinnedKey === nextKey ? null : normalized;
+      state.byteHighlightHoverRange = null;
+    } else {
+      state.byteHighlightHoverRange = normalized;
+    }
+    hilApplyByteHighlightClasses();
+  }
+
+  function hilClearByteHighlight(includePinned) {
+    var state = commandState.hilWorkbench;
+    state.byteHighlightHoverRange = null;
+    if (includePinned) state.byteHighlightPinnedRange = null;
+    hilApplyByteHighlightClasses();
+  }
+
+  function hilApplyByteOffsetHighlight(byteOffset, pinned) {
+    hilSetByteHighlight({
+      start: byteOffset,
+      end: byteOffset + 1,
+      size: 1,
+      label: "Byte " + byteOffset,
+      name: "frame.byte",
+    }, pinned);
+  }
+
+  function hilApplyByteHighlightClasses() {
+    var state = commandState.hilWorkbench;
+    var hoverRange = hilNormalizeRange(state.byteHighlightHoverRange);
+    var pinnedRange = hilNormalizeRange(state.byteHighlightPinnedRange);
+    var activeRange = hoverRange || pinnedRange;
+    var activeKey = hilRangeKey(activeRange);
+    var pinnedKey = hilRangeKey(pinnedRange);
+    document.querySelectorAll(".cc-hil-byte").forEach(function (el) {
+      var offset = parseInt(el.dataset.offset || "-1", 10);
+      var active = !!(activeRange && offset >= activeRange.start && offset < activeRange.end);
+      var pinned = !!(pinnedRange && offset >= pinnedRange.start && offset < pinnedRange.end);
+      el.classList.toggle("is-highlighted", active);
+      el.classList.toggle("is-pinned", pinned);
+    });
+    document.querySelectorAll(".cc-hil-decoded-range").forEach(function (el) {
+      var key = String(el.dataset.rangeKey || "");
+      el.classList.toggle("is-highlighted", !!activeKey && key === activeKey);
+      el.classList.toggle("is-pinned", !!pinnedKey && key === pinnedKey);
+    });
+  }
+
+  function hilFindRangeForDecodedLine(lineText) {
+    var state = commandState.hilWorkbench;
+    var ranges = Array.isArray(state.detailRanges) ? state.detailRanges : [];
+    if (ranges.length === 0) return null;
+    var normalizedLine = hilNormalizeHighlightText(lineText);
+    if (normalizedLine.length < 3) return null;
+    var best = null;
+    var bestScore = -1;
+    ranges.forEach(function (range) {
+      var normalized = hilNormalizeRange(range);
+      if (!normalized) return;
+      var score = hilDecodedLineRangeScore(normalizedLine, normalized);
+      if (score > bestScore || (score === bestScore && best && normalized.size < best.size)) {
+        best = normalized;
+        bestScore = score;
+      }
+    });
+    return bestScore > 0 ? best : null;
+  }
+
+  function hilDecodedLineRangeScore(normalizedLine, range) {
+    var candidates = hilRangeTextCandidates(range);
+    var best = 0;
+    candidates.forEach(function (candidate) {
+      if (candidate.length < 3) return;
+      if (normalizedLine === candidate) {
+        best = Math.max(best, 100000 - range.size);
+      } else if (normalizedLine.indexOf(candidate) >= 0) {
+        best = Math.max(best, 10000 + candidate.length - range.size);
+      } else if (candidate.indexOf(normalizedLine) >= 0 && normalizedLine.length >= 8) {
+        best = Math.max(best, 1000 + normalizedLine.length - range.size);
+      }
+    });
+    return best;
+  }
+
+  function hilBestRangeForByte(byteOffset) {
+    var state = commandState.hilWorkbench;
+    var ranges = Array.isArray(state.detailRanges) ? state.detailRanges : [];
+    var best = null;
+    ranges.forEach(function (range) {
+      var normalized = hilNormalizeRange(range);
+      if (!normalized) return;
+      if (byteOffset < normalized.start || byteOffset >= normalized.end) return;
+      if (!best || normalized.size < best.size || (
+        normalized.size === best.size && normalized.depth > best.depth
+      )) {
+        best = normalized;
+      }
+    });
+    return best;
+  }
+
+  function hilNormalizeRange(range) {
+    if (!range) return null;
+    var start = parseInt(range.start, 10);
+    var end = parseInt(range.end, 10);
+    var size = parseInt(range.size, 10);
+    if (!isFinite(start) || start < 0) return null;
+    if (!isFinite(end) || end <= start) {
+      if (!isFinite(size) || size <= 0) return null;
+      end = start + size;
+    }
+    size = end - start;
+    return {
+      start: start,
+      end: end,
+      size: size,
+      depth: parseInt(range.depth || 0, 10) || 0,
+      name: String(range.name || ""),
+      label: String(range.label || ""),
+      show: String(range.show || ""),
+      value: String(range.value || ""),
+    };
+  }
+
+  function hilRangeTextCandidates(range) {
+    var values = [
+      range.label,
+      range.name,
+      range.show,
+      range.value,
+      range.name && range.show ? range.name + ": " + range.show : "",
+    ];
+    var seen = {};
+    return values.map(hilNormalizeHighlightText).filter(function (value) {
+      if (value.length === 0 || seen[value]) return false;
+      seen[value] = true;
+      return true;
+    });
+  }
+
+  function hilNormalizeHighlightText(value) {
+    return String(value || "")
+      .replace(/\[[^\]]+\]/g, " ")
+      .replace(/[<>]/g, " ")
+      .replace(/\s+/g, " ")
+      .trim()
+      .toLowerCase();
+  }
+
+  function hilRangeKey(range) {
+    var normalized = hilNormalizeRange(range);
+    if (!normalized) return "";
+    return [
+      normalized.start,
+      normalized.end,
+      normalized.name,
+      normalized.label,
+    ].join("|");
+  }
+
+  function hilRangeLabel(range) {
+    var normalized = hilNormalizeRange(range);
+    if (!normalized) return "";
+    var label = normalized.label || normalized.name || "frame bytes";
+    return label + " [" + normalized.start + ".." + (normalized.end - 1) + "]";
   }
 
   function hilInstallScrollMemory(el, scrollSlot) {
@@ -4051,10 +6356,27 @@
   function hilResetPacketSections() {
     var state = commandState.hilWorkbench;
     state.packetSectionOpen = {};
+    state.contextTree = [];
+    hilResetTimerSnapshot();
+  }
+
+  function hilResetTimerSnapshot() {
+    var state = commandState.hilWorkbench;
+    state.timerSnapshotAppliedAt = 0;
+    state.timerSnapshotCaptureSeconds = null;
+    state.timerSnapshotSignature = "";
   }
 
   function hilResetPacketScroll() {
     var state = commandState.hilWorkbench;
+    hilCancelDeferredPacketRender();
+    hilCancelPacketVirtualRender();
+    if (state.packetPointerReleaseTimerId) {
+      clearTimeout(state.packetPointerReleaseTimerId);
+      state.packetPointerReleaseTimerId = null;
+    }
+    state.packetPointerActive = false;
+    state.packetPointerId = null;
     state.packetScrollTop = 0;
     state.packetScrollHeight = 0;
     state.packetClientHeight = 0;
@@ -4062,7 +6384,7 @@
     state.lastPacketScrollAt = 0;
   }
 
-  function hilRememberPacketScroll(list) {
+  function hilStorePacketScroll(list, markUserScroll) {
     var state = commandState.hilWorkbench;
     if (!list) return;
     var maxTop = Math.max(0, (list.scrollHeight || 0) - (list.clientHeight || 0));
@@ -4072,23 +6394,152 @@
     state.packetScrollHeight = list.scrollHeight || 0;
     state.packetClientHeight = list.clientHeight || 0;
     state.packetScrollBottomGap = bottomGap;
-    state.lastPacketScrollAt = Date.now();
-    state.followTail = bottomGap <= 24;
+    if (markUserScroll) {
+      state.lastPacketScrollAt = Date.now();
+      state.followTail = bottomGap <= 24;
+    }
   }
 
-  function hilRestorePacketScroll(list) {
+  function hilRememberPacketScroll(list) {
     var state = commandState.hilWorkbench;
-    if (!list) return;
-    var applyScroll = function () {
-      if (state.followTail) {
-        list.scrollTop = list.scrollHeight || 0;
-        hilRememberPacketScroll(list);
+    hilStorePacketScroll(list, !state.packetScrollRestoring);
+  }
+
+  function hilCancelDeferredPacketRender() {
+    var state = commandState.hilWorkbench;
+    if (state.packetRenderTimerId) {
+      clearTimeout(state.packetRenderTimerId);
+      state.packetRenderTimerId = null;
+    }
+    state.packetRenderPending = false;
+  }
+
+  function hilCancelPacketVirtualRender() {
+    var state = commandState.hilWorkbench;
+    if (state.packetVirtualRenderTimerId) {
+      clearTimeout(state.packetVirtualRenderTimerId);
+      state.packetVirtualRenderTimerId = null;
+    }
+  }
+
+  function hilPacketPointerIsActive() {
+    var state = commandState.hilWorkbench;
+    return !!state.packetPointerActive;
+  }
+
+  function hilBeginPacketPointerInteraction(event) {
+    var state = commandState.hilWorkbench;
+    if (event && event.button !== undefined && event.button !== 0) return;
+    if (state.packetPointerReleaseTimerId) {
+      clearTimeout(state.packetPointerReleaseTimerId);
+      state.packetPointerReleaseTimerId = null;
+    }
+    state.packetPointerActive = true;
+    state.packetPointerId = event && event.pointerId !== undefined ? event.pointerId : null;
+  }
+
+  function hilEndPacketPointerInteraction() {
+    var state = commandState.hilWorkbench;
+    if (!state.packetPointerActive && !state.packetPointerReleaseTimerId) return;
+    if (state.packetPointerReleaseTimerId) {
+      clearTimeout(state.packetPointerReleaseTimerId);
+    }
+    state.packetPointerReleaseTimerId = setTimeout(function () {
+      state.packetPointerReleaseTimerId = null;
+      state.packetPointerActive = false;
+      state.packetPointerId = null;
+      hilFlushDeferredPacketRender();
+    }, 0);
+  }
+
+  function hilSchedulePacketVirtualRender(list) {
+    var state = commandState.hilWorkbench;
+    if (!list || state.packetVirtualRenderTimerId) return;
+    state.packetVirtualRenderTimerId = setTimeout(function () {
+      state.packetVirtualRenderTimerId = null;
+      if (!list.isConnected) return;
+      if (hilPacketPointerIsActive()) {
+        hilSchedulePacketVirtualRender(list);
         return;
       }
-      var maxTop = Math.max(0, (list.scrollHeight || 0) - (list.clientHeight || 0));
-      var top = Math.max(0, Math.min(Number(state.packetScrollTop || 0), maxTop));
-      list.scrollTop = top;
-      hilRememberPacketScroll(list);
+      renderHilPacketList(list, { preserveExactScroll: true });
+    }, 16);
+  }
+
+  function hilPacketListIsUserActive() {
+    var state = commandState.hilWorkbench;
+    return Date.now() - Number(state.lastPacketScrollAt || 0) < 450;
+  }
+
+  function hilShouldDeferPacketRender(options) {
+    var opts = options || {};
+    var state = commandState.hilWorkbench;
+    if (opts.force) return false;
+    if (commandState.activeSubsystem !== "HIL") return false;
+    if (state.activeTab !== "dissector") return false;
+    return hilPacketPointerIsActive() || hilPacketListIsUserActive();
+  }
+
+  function hilScheduleDeferredPacketRender() {
+    var state = commandState.hilWorkbench;
+    state.packetRenderPending = true;
+    if (state.packetRenderTimerId) return;
+    state.packetRenderTimerId = setTimeout(function () {
+      state.packetRenderTimerId = null;
+      if (!state.packetRenderPending) return;
+      if (hilShouldDeferPacketRender({ force: false })) {
+        hilScheduleDeferredPacketRender();
+        return;
+      }
+      state.packetRenderPending = false;
+      hilRenderActivePaneOnly();
+    }, 450);
+  }
+
+  function hilFlushDeferredPacketRender() {
+    var state = commandState.hilWorkbench;
+    if (!state.packetRenderPending) return;
+    if (hilShouldDeferPacketRender({ force: false })) {
+      hilScheduleDeferredPacketRender();
+      return;
+    }
+    if (state.packetRenderTimerId) {
+      clearTimeout(state.packetRenderTimerId);
+      state.packetRenderTimerId = null;
+    }
+    state.packetRenderPending = false;
+    hilRenderActivePaneOnly();
+  }
+
+  function hilRestorePacketScroll(list, options) {
+    var state = commandState.hilWorkbench;
+    if (!list) return;
+    var opts = options || {};
+    var applyScroll = function () {
+      state.packetScrollRestoring = true;
+      if (opts.preserveExactScroll) {
+        var exactMaxTop = Math.max(0, (list.scrollHeight || 0) - (list.clientHeight || 0));
+        var exactTop = typeof opts.preservedTop === "number" && !isNaN(opts.preservedTop)
+          ? opts.preservedTop
+          : Number(state.packetScrollTop || 0);
+        list.scrollTop = Math.max(0, Math.min(exactTop, exactMaxTop));
+        hilStorePacketScroll(list, false);
+      } else if (state.followTail) {
+        list.scrollTop = list.scrollHeight || 0;
+        hilStorePacketScroll(list, false);
+      } else {
+        var maxTop = Math.max(0, (list.scrollHeight || 0) - (list.clientHeight || 0));
+        var top = Number(state.packetScrollTop || 0);
+        if (typeof opts.preservedTop === "number" && !isNaN(opts.preservedTop)) {
+          top = opts.preservedTop;
+        }
+        top = Math.max(0, Math.min(top, maxTop));
+        list.scrollTop = top;
+        hilStorePacketScroll(list, false);
+      }
+      setTimeout(function () {
+        state.packetScrollRestoring = false;
+      }, 0);
     };
     if (window.requestAnimationFrame) {
       window.requestAnimationFrame(applyScroll);
@@ -4124,8 +6575,21 @@
     state.liveBaselineFrameNumber = maxFrame;
   }
 
-  function renderHilPacketList(list) {
+  function hilRenderPacketListOnly(options) {
+    if (commandState.activeSubsystem !== "HIL") return false;
+    var list = document.querySelector(".cc-hil-workbench .cc-hil-packet-list");
+    if (!list) return false;
+    renderHilPacketList(list, options || {});
+    return true;
+  }
+
+  function renderHilPacketList(list, options) {
     var state = commandState.hilWorkbench;
+    var opts = options || {};
+    var preservedScrollTop = typeof opts.preservedTop === "number"
+      ? opts.preservedTop
+      : (list.childNodes.length > 0 ? Number(list.scrollTop || 0) : null);
+    var items = [];
     list.innerHTML = "";
     if (!state.rows || state.rows.length === 0) {
       var empty = document.createElement("div");
@@ -4137,222 +6601,221 @@
       return;
     }
     if (state.viewMode === "context") {
-      renderHilContextGroups(list, state.rows, state.annotations || {});
+      items = hilBuildContextPacketItems(state.rows, state.annotations || {});
     } else {
-      state.rows.forEach(function (row) {
-        list.appendChild(hilPacketRow(row, state.annotations[String(row.number)] || null));
-      });
+      items = hilBuildFlatPacketItems(state.rows, state.annotations || {});
     }
-    hilRestorePacketScroll(list);
+    if (items.length === 0) {
+      var noVisible = document.createElement("div");
+      noVisible.className = "cc-hil-empty";
+      noVisible.textContent = "No visible packets.";
+      list.appendChild(noVisible);
+      return;
+    }
+    hilRenderPacketItems(list, items, {
+      preserveExactScroll: !!opts.preserveExactScroll,
+      preservedTop: preservedScrollTop,
+    });
   }
 
-  function renderHilContextGroups(list, rows, annotations) {
-    var state = commandState.hilWorkbench;
-    var groups = hilBuildContextGroups(rows, annotations);
-    groups.forEach(function (group, index) {
-      var groupEl = document.createElement("details");
-      groupEl.className = "cc-hil-context-group";
-      var stateKey = hilPacketSectionKey(group.label, index);
-      groupEl.open = state.packetSectionOpen[stateKey] === true;
-      groupEl.addEventListener("toggle", function () {
-        state.packetSectionOpen[stateKey] = groupEl.open;
-      });
-      var title = document.createElement("summary");
-      title.className = "cc-hil-context-title";
-      title.textContent = group.label + " (" + group.rows.length + ")";
-      groupEl.appendChild(title);
-      var rowHost = document.createElement("div");
-      rowHost.className = "cc-hil-context-rows";
-      var renderGroupRows = function () {
-        rowHost.innerHTML = "";
-        if (!groupEl.open) return;
-        group.rows.forEach(function (row) {
-          rowHost.appendChild(hilPacketRow(row, annotations[String(row.number)] || null));
-        });
+  function renderHilContextTree(list, rows, annotations) {
+    hilBuildContextPacketItems(rows, annotations).forEach(function (item) {
+      list.appendChild(hilPacketRenderItem(item));
+    });
+  }
+
+  function hilBuildFlatPacketItems(rows, annotations) {
+    return (rows || []).map(function (row) {
+      return {
+        kind: "frame",
+        row: row,
+        annotation: annotations[String(row.number)] || null,
+        options: null,
       };
-      renderGroupRows();
-      groupEl.addEventListener("toggle", renderGroupRows);
-      groupEl.appendChild(rowHost);
-      list.appendChild(groupEl);
     });
   }
 
-  function hilPacketSectionKey(labelText, index) {
-    return String(index) + "|" + String(labelText || "");
-  }
-
-  function hilBuildContextGroups(rows, annotations) {
-    var groups = [];
-    var byKey = Object.create(null);
-    function push(label, row) {
-      if (!byKey[label]) {
-        byKey[label] = { label: label, rows: [] };
-        groups.push(byKey[label]);
-      }
-      byKey[label].rows.push(row);
-    }
-    (rows || []).forEach(function (row) {
-      var ann = annotations[String(row.number)] || {};
-      var session = ann.card_session_index || 1;
-      var label = "Card session " + session;
-      if (ann.card_session_iccid) label += " · ICCID " + ann.card_session_iccid;
-      if (ann.channel_poll_index) {
-        label += " · Poll " + ann.channel_poll_index;
-      } else if (ann.channel_session_id) {
-        label += " · Channel session " + ann.channel_session_id;
-      } else {
-        label += " · " + hilClassifyPacket(row, ann);
-      }
-      push(label, row);
-    });
-    return groups;
-  }
-
-  function hilClassifyPacket(row, ann) {
-    var text = hilPacketSearchText(row, ann);
-    if (hilTextHasAny(text, [
-      "TERMINAL PROFILE",
-      "TERMINAL CAPABILITY",
-      "TERMINAL RESPONSE",
-      "SET UP EVENT LIST",
-      "PROACTIVE",
-      "FETCH",
-      "ENVELOPE",
-      "OPEN CHANNEL",
-      "CLOSE CHANNEL",
-      "SEND DATA",
-      "RECEIVE DATA",
-      "POLL INTERVAL",
-      "POLLING OFF",
-      "REFRESH",
-      "STK",
-      "SIM TOOLKIT",
-    ])) return "SIM Toolkit";
-    if (hilTextHasAny(text, [
-      "VERIFY CHV",
-      "UNBLOCK CHV",
-      "CHANGE CHV",
-      "DISABLE CHV",
-      "ENABLE CHV",
-      "VERIFY PIN",
-      "UNBLOCK PIN",
-      "PIN",
-      "PUK",
-    ])) return "CHV / PIN";
-    if (hilTextHasAny(text, [
-      "ISD-R",
-      "ECASD",
-      "EUICC",
-      "ES10",
-      "ES9",
-      "EID",
-      "PROFILEINFO",
-      "PROFILE INFO",
-      "GETPROFILESINFO",
-      "BF20",
-      "BF22",
-      "BF2D",
-      "BF31",
-      "BF32",
-      "BF33",
-      "BF3C",
-      "BF43",
-      "BF55",
-      "BF56",
-    ])) return "eUICC / RSP";
-    if (hilTextHasAny(text, [
-      "SECURE CHANNEL",
-      "EXTERNAL AUTHENTICATE",
-      "INITIALIZE UPDATE",
-      "SCP03",
-      "SCP11",
-      "SCP80",
-      "GLOBALPLATFORM",
-      "INSTALL [",
-      "PUT KEY",
-      "DELETE ",
-      "LOAD ",
-      "STORE DATA",
-      "AUTHENTICATE",
-      "SECURE",
-    ])) return "GlobalPlatform / security";
-    if (hilTextHasAny(text, [
-      "MANAGE CHANNEL",
-      "LOGICAL CHANNEL",
-    ])) return "Logical channel";
-    if (hilTextHasAny(text, [
-      "FS MF/AID",
-      "FS AID",
-      "FS MF/EF",
-      "FS MF/DF",
-      "FS MF",
-      " AID ",
-      "/AID ",
-      "SELECT AID",
-      "APPLICATION ID",
-      "EF.",
-      "DF.",
-      "FID ",
-      "ICCID",
-      "EF-DIR",
-      "EF.DIR",
-      "DF TELECOM",
-      "DF GSM",
-      "DF USIM",
-      "READ BINARY",
-      "READ RECORD",
-      "UPDATE BINARY",
-      "UPDATE RECORD",
-      "GET RESPONSE",
-      "SELECT FILE",
-      "ISO/IEC 7816-4 STATUS",
-      "FILE STATUS",
-    ])) return "UICC filesystem";
-    if (hilTextHasAny(text, [
-      "ATR",
-      "RESET",
-      "POWER",
-    ])) return "Card reset / ATR";
-    if (hilTextHasAny(text, [
-      "UNKNOWN STATUS",
-      "STATUS WORD",
-      "FAIL",
-      "ERROR",
-      "WARNING",
-      " 6A",
-      " 69",
-      " 67",
-      " 63C",
-      " 62",
-    ])) return "Status / errors";
-    return "Other APDU";
-  }
-
-  function hilPacketSearchText(row, ann) {
-    return (
-      String(row && (row.annotated_info || row.info) || "") + " "
-      + String(row && row.protocol || "") + " "
-      + String(ann && ann.summary_suffix || "")
-      + " "
-      + String(ann && Array.isArray(ann.context_lines) ? ann.context_lines.join(" ") : "")
-    ).toUpperCase();
-  }
-
-  function hilTextHasAny(text, needles) {
-    var haystack = String(text || "");
-    for (var i = 0; i < needles.length; i++) {
-      if (haystack.indexOf(String(needles[i] || "")) >= 0) return true;
-    }
-    return false;
-  }
-
-  function hilPacketRow(row, annotation) {
+  function hilBuildContextPacketItems(rows, annotations) {
     var state = commandState.hilWorkbench;
+    var treeItems = Array.isArray(state.contextTree) ? state.contextTree : [];
+    var rowByFrame = Object.create(null);
+    (rows || []).forEach(function (row) {
+      var frameNumber = parseInt(row && row.number || 0, 10);
+      if (frameNumber) rowByFrame[String(frameNumber)] = row;
+    });
+    if (treeItems.length === 0) {
+      return hilBuildFlatPacketItems(rows, annotations);
+    }
+    var rendered = [];
+    var collapsedDepths = [];
+    treeItems.forEach(function (item) {
+      if (!item) return;
+      var depth = Math.max(0, parseInt(item.depth || 0, 10) || 0);
+      while (
+        collapsedDepths.length > 0
+        && depth <= collapsedDepths[collapsedDepths.length - 1]
+      ) {
+        collapsedDepths.pop();
+      }
+      if (collapsedDepths.length > 0) return;
+      if (item.kind === "frame") {
+        var frameNumber = parseInt(item.frame_number || 0, 10);
+        var row = rowByFrame[String(frameNumber)];
+        if (!row) return;
+        rendered.push({
+          kind: "frame",
+          row: row,
+          annotation: annotations[String(frameNumber)] || null,
+          options: {
+            depth: depth,
+            primary: item.primary || "",
+            secondary: item.secondary || "",
+            groupName: item.group_name || "",
+          },
+        });
+        return;
+      }
+      var open = hilContextHeaderIsOpen(item);
+      rendered.push({
+        kind: "header",
+        item: item,
+        open: open,
+      });
+      if (!open) collapsedDepths.push(depth);
+    });
+    return rendered;
+  }
+
+  function renderHilFlatContextFallback(list, rows, annotations) {
+    (rows || []).forEach(function (row) {
+      list.appendChild(hilPacketRow(row, annotations[String(row.number)] || null));
+    });
+  }
+
+  function hilRenderPacketItems(list, items, options) {
+    var state = commandState.hilWorkbench;
+    var opts = options || {};
+    var rowHeight = hilPacketVirtualRowHeight();
+    var clientHeight = Math.max(Number(list.clientHeight || 0), rowHeight * 12);
+    var targetTop = typeof opts.preservedTop === "number" && !isNaN(opts.preservedTop)
+      ? Math.max(0, opts.preservedTop)
+      : Number(state.packetScrollTop || 0);
+    if (state.followTail && !opts.preserveExactScroll) {
+      targetTop = Math.max(0, (items.length * rowHeight) - clientHeight);
+    }
+    var overscan = HIL_PACKET_VIRTUAL_OVERSCAN;
+    var visibleCount = Math.ceil(clientHeight / rowHeight) + (overscan * 2);
+    visibleCount = Math.min(hilPacketRenderLimit(), Math.max(1, visibleCount));
+    var start = Math.max(0, Math.floor(targetTop / rowHeight) - overscan);
+    var end = Math.min(items.length, start + visibleCount);
+    if (end - start < visibleCount) {
+      start = Math.max(0, end - visibleCount);
+    }
+    list.appendChild(hilPacketSpacer(start * rowHeight, "top"));
+    for (var i = start; i < end; i++) {
+      list.appendChild(hilPacketRenderItem(items[i]));
+    }
+    list.appendChild(hilPacketSpacer((items.length - end) * rowHeight, "bottom"));
+    hilRestorePacketScroll(list, {
+      preserveExactScroll: !!opts.preserveExactScroll,
+      preservedTop: targetTop,
+    });
+  }
+
+  function hilPacketRenderItem(item) {
+    if (item && item.kind === "header") {
+      return hilContextHeader(item.item, item.open);
+    }
+    return hilPacketRow(
+      item && item.row,
+      item && item.annotation || null,
+      item && item.options || null
+    );
+  }
+
+  function hilPacketSpacer(height, position) {
+    var spacer = document.createElement("div");
+    spacer.className = "cc-hil-packet-spacer cc-hil-packet-spacer--" + String(position || "");
+    spacer.setAttribute("aria-hidden", "true");
+    spacer.style.height = String(Math.max(0, Math.round(height || 0))) + "px";
+    return spacer;
+  }
+
+  function hilContextSectionKey(item) {
+    if (!item) return "context:";
+    return "context:" + String(item.key || [
+      String(item.kind || "group"),
+      String(item.depth || 0),
+      String(item.display || item.label || ""),
+    ].join("|"));
+  }
+
+  function hilContextHeaderIsOpen(item) {
+    var state = commandState.hilWorkbench;
+    return state.packetSectionOpen[hilContextSectionKey(item)] === true;
+  }
+
+  function hilToggleContextHeader(item, sourceElement) {
+    var state = commandState.hilWorkbench;
+    var list = sourceElement && sourceElement.closest
+      ? sourceElement.closest(".cc-hil-packet-list")
+      : null;
+    var preservedTop = list ? Number(list.scrollTop || 0) : null;
+    if (list) hilStorePacketScroll(list, false);
+    var key = hilContextSectionKey(item);
+    if (state.packetSectionOpen[key] === true) {
+      delete state.packetSectionOpen[key];
+    } else {
+      state.packetSectionOpen[key] = true;
+    }
+    if (list) {
+      renderHilPacketList(list, {
+        preserveExactScroll: true,
+        preservedTop: preservedTop,
+      });
+    } else {
+      hilRenderPacketListOnly({ preserveExactScroll: true });
+    }
+  }
+
+  function hilContextHeader(item, open) {
+    var depth = Math.max(0, parseInt(item && item.depth || 0, 10) || 0);
+    var header = document.createElement("button");
+    var isOpen = open !== false;
+    header.className = "cc-hil-context-title";
+    if (!isOpen) header.classList.add("is-collapsed");
+    header.type = "button";
+    header.setAttribute("aria-expanded", String(isOpen));
+    header.setAttribute("data-context-key", hilContextSectionKey(item));
+    header.style.paddingLeft = String(10 + (depth * 18)) + "px";
+    var marker = document.createElement("span");
+    marker.className = "cc-hil-context-caret";
+    marker.setAttribute("aria-hidden", "true");
+    marker.textContent = isOpen ? "▾" : "▸";
+    var label = document.createElement("span");
+    label.className = "cc-hil-context-label";
+    label.textContent = String(item && (item.display || item.label) || "");
+    header.appendChild(marker);
+    header.appendChild(label);
+    header.addEventListener("click", function () {
+      hilToggleContextHeader(item, header);
+    });
+    return header;
+  }
+
+  function hilPacketRow(row, annotation, options) {
+    var state = commandState.hilWorkbench;
+    var opts = options || {};
     var frameNumber = parseInt(row.number || 0, 10);
     var selected = state.selectedFrameNumber === frameNumber;
     var btn = document.createElement("button");
     btn.type = "button";
     btn.className = "cc-hil-packet-row" + (selected ? " is-selected" : "");
+    if (opts.depth) {
+      btn.classList.add("cc-hil-packet-row--context");
+      btn.style.paddingLeft = String(10 + (Math.max(0, parseInt(opts.depth || 0, 10) || 0) * 18)) + "px";
+    }
+    if (opts.groupName) btn.setAttribute("data-group", String(opts.groupName || ""));
     btn.setAttribute("role", "option");
     btn.setAttribute("aria-selected", String(selected));
     btn.setAttribute("data-frame", String(frameNumber));
@@ -4374,7 +6837,13 @@
 
     var info = document.createElement("span");
     info.className = "cc-hil-packet-info";
-    info.textContent = row.annotated_info || row.info || "";
+    var primaryText = String(opts.primary || "").trim();
+    var secondaryText = String(opts.secondary || "").trim();
+    if (primaryText.length > 0 && secondaryText.length > 0) {
+      info.textContent = primaryText + " · " + secondaryText;
+    } else {
+      info.textContent = primaryText || row.annotated_info || row.info || "";
+    }
     btn.appendChild(info);
 
     if (annotation && annotation.active_channel_count) {
@@ -4385,6 +6854,8 @@
     }
 
     btn.addEventListener("click", function () {
+      var list = btn.closest ? btn.closest(".cc-hil-packet-list") : null;
+      if (list) hilStorePacketScroll(list, false);
       hilSelectFrame(frameNumber);
     });
     return btn;
@@ -4440,15 +6911,50 @@
     } catch (_err) {
       stored = "";
     }
-    state.modemShellCommand = String(stored || HIL_MODEM_DEFAULT_COMMAND).trim();
+    var preferred = hilPreferredModemShellCommand();
+    if (stored === HIL_MODEM_DEFAULT_COMMAND && preferred !== HIL_MODEM_DEFAULT_COMMAND) {
+      stored = "";
+    }
+    state.modemShellCommand = String(stored || preferred).trim();
     return state.modemShellCommand;
   }
 
-  function hilSaveModemShellCommand(command) {
+  function hilPreferredModemShellCommand() {
+    var state = commandState.hilWorkbench;
+    var configured = String(state.modemShellDefaultCommand || "").trim();
+    return configured || HIL_MODEM_DEFAULT_COMMAND;
+  }
+
+  function hilSetModemShellDefaultFromCapability(capability) {
+    var state = commandState.hilWorkbench;
+    var previous = hilPreferredModemShellCommand();
+    var next = String((capability && capability.default_command) || "").trim()
+      || HIL_MODEM_DEFAULT_COMMAND;
+    state.modemShellDefaultCommand = next;
+    state.modemShellDefaultSource = String(
+      (capability && capability.default_command_source) || ""
+    ).trim();
+    state.modemShellRemoteTarget = String((capability && capability.remote_target) || "").trim();
+
+    var input = $("hil-modem-command");
+    var current = String((input && input.value) || state.modemShellCommand || "").trim();
+    if (
+      current.length === 0
+      || current === previous
+      || (current === HIL_MODEM_DEFAULT_COMMAND && next !== HIL_MODEM_DEFAULT_COMMAND)
+    ) {
+      state.modemShellCommand = next;
+      if (input) input.value = next;
+    }
+    if (input) input.placeholder = next;
+  }
+
+  function hilSaveModemShellCommand(command, options) {
+    var opts = options || {};
     var state = commandState.hilWorkbench;
     var text = String(command || "").trim();
     state.modemShellCommand = text;
-    if (!text) return;
+    if (!text || opts.persist === false) return;
     try {
       window.localStorage.setItem(HIL_MODEM_COMMAND_KEY, text);
     } catch (_err) {}
@@ -4470,7 +6976,7 @@
     commandInput.type = "text";
     commandInput.autocomplete = "off";
     commandInput.spellcheck = false;
-    commandInput.placeholder = HIL_MODEM_DEFAULT_COMMAND;
+    commandInput.placeholder = hilPreferredModemShellCommand();
     commandInput.setAttribute("aria-label", "Modem shell command");
     commandInput.value = hilGetModemShellCommand();
     commandInput.addEventListener("change", function () {
@@ -4541,6 +7047,7 @@
     try {
       var capability = await apiFetch("/api/host-shell/capabilities?scope=hil-modem");
       state.modemShellCapability = capability || null;
+      hilSetModemShellDefaultFromCapability(capability || null);
       var devices = await apiFetch("/api/host-shell/devices");
       state.modemShellDevices = (devices && Array.isArray(devices.devices))
         ? devices.devices
@@ -4597,6 +7104,8 @@
     if (start) start.disabled = running || !!capDisabled;
     if (stop) stop.disabled = !running && !state.modemShellSocket;
     if (useDevice) useDevice.disabled = !select || !select.value;
+    var input = $("hil-modem-command");
+    if (input) input.placeholder = hilPreferredModemShellCommand();
 
     if (!status) return;
     if (running) {
@@ -4724,10 +7233,12 @@
     var input = $("hil-modem-command");
     var command = String((input && input.value) || hilGetModemShellCommand()).trim();
     if (!command) {
-      command = HIL_MODEM_DEFAULT_COMMAND;
+      command = hilPreferredModemShellCommand();
       if (input) input.value = command;
     }
-    hilSaveModemShellCommand(command);
+    var generatedDefault = command === hilPreferredModemShellCommand()
+      && state.modemShellDefaultSource === "remote-card-bridge";
+    hilSaveModemShellCommand(command, { persist: !generatedDefault });
 
     var term = hilEnsureModemShellTerminal();
     if (!term) return;
@@ -5046,7 +7557,7 @@
   }
 
   function hilRawTraceLimit() {
-    return 2000;
+    return HIL_RAW_TRACE_LIMIT;
   }
 
   function hilRawPaneIsVisible() {
@@ -5173,19 +7684,18 @@
   function hilSelectFrame(frameNumber) {
     var state = commandState.hilWorkbench;
     state.selectedFrameNumber = frameNumber;
+    state.selectionFollowsTail = false;
     hilResetDetailScroll();
+    hilClearByteHighlight(true);
     var last = state.rows && state.rows.length > 0 ? state.rows[state.rows.length - 1] : null;
     state.followTail = !!(last && parseInt(last.number || 0, 10) === frameNumber);
     state.detail = "Loading decoded fields...";
     state.bytes = "Loading byte view...";
+    state.detailRanges = [];
     state.detailFrameNumber = 0;
-    var container = $("cc-actions");
-    if (container) {
-      renderCommandSubsystem("HIL", {
-        leaf: ccFindLeaf(commandState.activeLeafId || "leaf-adv-hil"),
-      });
-    }
-    hilRefreshSnapshot({ force: true });
+    hilCancelDeferredPacketRender();
+    hilRenderActivePaneOnly();
+    hilRefreshSnapshot({ force: true, selectedFrame: frameNumber });
   }
 
   async function hilRefreshSnapshot(options) {
@@ -5201,7 +7711,12 @@
       return;
     }
     if (state.inflight) {
-      if (opts.force) state.refreshQueuedForce = true;
+      if (opts.force) {
+        state.refreshQueuedForce = true;
+        if (opts.selectedFrame) {
+          state.refreshQueuedSelectedFrame = opts.selectedFrame;
+        }
+      }
       return;
     }
     if (state.paused && !opts.force) return;
@@ -5209,10 +7724,9 @@
     state.inflight = true;
     state.lastRefreshAt = Date.now();
     state.lastStableStatusText = state.statusText || "";
-    state.statusText = "refreshing";
     state.errorText = "";
     var shouldRender = false;
-    var selected = state.selectedFrameNumber;
+    var selected = opts.selectedFrame || (state.selectionFollowsTail ? "" : state.selectedFrameNumber);
     if (
       hilIsLiveCaptureMode(state)
       && selected
@@ -5231,7 +7745,10 @@
           hilIsLiveCaptureMode(state) ? Number(state.liveBaselineFrameNumber || 0) : 0
         )
       : 0;
-    var includeAnnotations = !deltaMode;
+    var includeAnnotations = state.activeTab === "dissector" || !deltaMode;
+    var contextAfterFrame = hilIsLiveCaptureMode(state)
+      ? Number(state.liveBaselineFrameNumber || 0)
+      : 0;
     try {
       var resp = await apiFetch("/api/actions/hil.decode_snapshot/run", {
         method: "POST",
@@ -5243,9 +7760,10 @@
             include_detail: includeDetail,
             include_annotations: includeAnnotations,
             after_frame: afterFrame,
+            context_after_frame: contextAfterFrame,
             known_capture_size: state.captureSize || 0,
             known_capture_mtime: state.captureMtime || 0,
-            limit: 2000,
+            limit: hilPacketFetchLimit(),
           },
         }),
       });
@@ -5263,12 +7781,19 @@
     } finally {
       state.inflight = false;
       if (commandState.activeSubsystem === "HIL" && (shouldRender || opts.force)) {
-        hilRenderActivePaneOnly();
+        if (hilShouldDeferPacketRender(opts)) {
+          hilScheduleDeferredPacketRender();
+        } else {
+          hilCancelDeferredPacketRender();
+          hilRenderActivePaneOnly();
+        }
       }
       if (state.refreshQueuedForce && commandState.activeSubsystem === "HIL") {
+        var queuedSelectedFrame = state.refreshQueuedSelectedFrame;
         state.refreshQueuedForce = false;
+        state.refreshQueuedSelectedFrame = null;
         setTimeout(function () {
-          hilRefreshSnapshot({ force: true });
+          hilRefreshSnapshot({ force: true, selectedFrame: queuedSelectedFrame || state.selectedFrameNumber });
         }, 0);
       }
     }
@@ -5289,6 +7814,7 @@
   function hilApplySnapshot(data) {
     var state = commandState.hilWorkbench;
     var previousRowsKey = hilRowsRenderKey(state.rows || []);
+    var previousContextTreeKey = hilContextTreeRenderKey(state.contextTree || []);
     var previousStatus = state.lastStableStatusText || state.statusText || "";
     var previousError = state.errorText || "";
     state.captureSize = Number(data.capture_size || state.captureSize || 0);
@@ -5296,7 +7822,7 @@
     if (data.not_modified === true) {
       state.statusText = previousStatus || "ok";
       state.errorText = "";
-      return previousError !== "";
+      return previousError !== "" || !!hilActiveTimerSummary();
     }
     var rawRows = Array.isArray(data.rows) ? data.rows : [];
     var rawAnnotations = data.annotations || {};
@@ -5306,6 +7832,8 @@
     var previousSelected = state.selectedFrameNumber;
     var previousDetail = state.detail || "";
     var previousBytes = state.bytes || "";
+    var previousDetailRanges = Array.isArray(state.detailRanges) ? state.detailRanges : [];
+    var previousDetailRangesKey = JSON.stringify(previousDetailRanges);
     var incremental = data.incremental === true;
     var nextRows = incremental
       ? hilMergePacketRows(state.rows || [], incomingRows)
@@ -5315,8 +7843,17 @@
       : incomingAnnotations;
     state.rows = nextRows;
     state.annotations = nextAnnotations;
+    if (Array.isArray(data.context_tree)) {
+      state.contextTree = hilFilterContextTreeForRows(data.context_tree, nextRows);
+    } else if (!incremental) {
+      state.contextTree = [];
+    }
+    if (data.include_annotations !== false) {
+      hilRefreshTimerAnchor();
+    }
     var rawChanged = hilAppendRawRowsFromPackets(incomingRows);
     state.lastCapturePath = data.capture_path || state.capturePath || "";
+    state.captureSource = String(data.capture_source || state.captureSource || "");
     var baseStatus = data.note ? String(data.note) : (data.ok === false ? "error" : "ok");
     if (filtered.baselineActive && incomingRows.length === 0 && data.ok !== false) {
       baseStatus = "waiting for new packets";
@@ -5333,52 +7870,68 @@
     var selectedFromData = parseInt(data.selected_frame || 0, 10);
     var selectedFromDataVisible = !!(selectedFromData && frameNumbers[selectedFromData]);
     var nextSelected = null;
-    var nextFollowTail = true;
+    var nextFollowTail = !!state.followTail;
+    var nextSelectionFollowsTail = !!state.selectionFollowsTail;
     if (nextRows.length === 0) {
       nextSelected = null;
       nextFollowTail = true;
-    } else if (previousSelected && frameNumbers[previousSelected]) {
+      nextSelectionFollowsTail = true;
+    } else if (selectedFromDataVisible && previousSelected === selectedFromData) {
+      nextSelected = selectedFromData;
+      nextSelectionFollowsTail = false;
+    } else if (!state.selectionFollowsTail && previousSelected && frameNumbers[previousSelected]) {
       nextSelected = previousSelected;
-      nextFollowTail = !!state.followTail;
+      nextSelectionFollowsTail = false;
+    } else if (state.selectionFollowsTail || !previousSelected) {
+      nextSelected = lastFrameNumber;
+      nextSelectionFollowsTail = true;
     } else if (selectedFromDataVisible) {
       nextSelected = selectedFromData;
-      nextFollowTail = previousSelected === null || selectedFromData === lastFrameNumber;
+      nextSelectionFollowsTail = false;
     } else {
       nextSelected = lastFrameNumber;
-      nextFollowTail = true;
+      nextSelectionFollowsTail = true;
     }
     var detailIncluded = data.include_detail !== false;
     if (nextRows.length === 0) {
       state.detail = "";
       state.bytes = "";
+      state.detailRanges = [];
       state.detailFrameNumber = 0;
     } else if (selectedFromDataVisible && selectedFromData === nextSelected && detailIncluded) {
       state.detail = data.detail || "";
       state.bytes = data.bytes || "";
+      state.detailRanges = Array.isArray(data.detail_ranges) ? data.detail_ranges : [];
       state.detailFrameNumber = nextSelected || 0;
     } else if (previousSelected === nextSelected) {
       state.detail = previousDetail;
       state.bytes = previousBytes;
+      state.detailRanges = previousDetailRanges;
       if (!state.detailFrameNumber && previousDetail) {
         state.detailFrameNumber = nextSelected || 0;
       }
     } else {
       state.detail = "";
       state.bytes = "";
+      state.detailRanges = [];
       state.detailFrameNumber = 0;
     }
     state.selectedFrameNumber = nextSelected;
     state.followTail = nextFollowTail;
+    state.selectionFollowsTail = nextSelectionFollowsTail;
     if (previousSelected !== nextSelected) {
       hilResetDetailScroll();
+      hilClearByteHighlight(true);
     }
     return (
       previousRowsKey !== hilRowsRenderKey(nextRows)
+      || previousContextTreeKey !== hilContextTreeRenderKey(state.contextTree || [])
       || previousStatus !== String(state.statusText || "")
       || previousError !== String(state.errorText || "")
       || previousSelected !== nextSelected
       || previousDetail !== String(state.detail || "")
       || previousBytes !== String(state.bytes || "")
+      || previousDetailRangesKey !== JSON.stringify(state.detailRanges || [])
       || rawChanged
     );
   }
@@ -5395,6 +7948,60 @@
       String(last.annotated_info || last.info || ""),
       String(last.udp_payload_hex || ""),
     ].join("|");
+  }
+
+  function hilContextTreeRenderKey(items) {
+    var list = Array.isArray(items) ? items : [];
+    if (list.length === 0) return "0";
+    return JSON.stringify(list.map(function (item) {
+      return [
+        String(item && item.kind || ""),
+        String(item && item.depth || 0),
+        String(item && item.frame_number || ""),
+        String(item && (item.display || item.label || item.primary || "") || ""),
+        String(item && item.secondary || ""),
+      ];
+    }));
+  }
+
+  function hilFilterContextTreeForRows(items, rows) {
+    var list = Array.isArray(items) ? items : [];
+    if (list.length === 0) return [];
+    var frameSet = Object.create(null);
+    (rows || []).forEach(function (row) {
+      var frameNumber = parseInt(row && row.number || 0, 10);
+      if (frameNumber) frameSet[String(frameNumber)] = true;
+    });
+    var filtered = [];
+    var headerStack = [];
+    function flushHeaders(depth) {
+      for (var i = 0; i < headerStack.length; i++) {
+        var header = headerStack[i];
+        if (!header || header.depth >= depth || header.flushed) continue;
+        filtered.push(header.item);
+        header.flushed = true;
+      }
+    }
+    list.forEach(function (item) {
+      if (!item) return;
+      var depth = Math.max(0, parseInt(item.depth || 0, 10) || 0);
+      while (headerStack.length > 0 && headerStack[headerStack.length - 1].depth >= depth) {
+        headerStack.pop();
+      }
+      if (item.kind === "frame") {
+        var frameNumber = parseInt(item.frame_number || 0, 10);
+        if (!frameNumber || !frameSet[String(frameNumber)]) return;
+        flushHeaders(depth + 1);
+        filtered.push(item);
+        return;
+      }
+      headerStack.push({
+        depth: depth,
+        item: item,
+        flushed: false,
+      });
+    });
+    return filtered;
   }
 
   function hilMergePacketRows(existingRows, incomingRows) {
@@ -5414,10 +8021,6 @@
     }
     (existingRows || []).forEach(push);
     (incomingRows || []).forEach(push);
-    var limit = hilPacketRowLimit();
-    if (merged.length > limit) {
-      merged = merged.slice(merged.length - limit);
-    }
     return merged;
   }
 
@@ -5441,8 +8044,16 @@
     return merged;
   }
 
-  function hilPacketRowLimit() {
-    return 2000;
+  function hilPacketFetchLimit() {
+    return HIL_PACKET_FETCH_LIMIT;
+  }
+
+  function hilPacketRenderLimit() {
+    return HIL_PACKET_RENDER_LIMIT;
+  }
+
+  function hilPacketVirtualRowHeight() {
+    return HIL_PACKET_VIRTUAL_ROW_HEIGHT;
   }
 
   function hilFilterLiveBaseline(data, rows, annotations) {
@@ -5536,6 +8147,7 @@
     (action.inputs || []).forEach(function (field) {
       form.appendChild(buildField(action, field));
     });
+    ccEnhanceActionForm(action, form);
     var actionsBar = document.createElement("div");
     actionsBar.className = "inline-actions cc-action-bar";
     var runBtn = document.createElement("button");
@@ -5574,6 +8186,127 @@
     span.className = cls;
     span.textContent = text;
     return span;
+  }
+
+  function ccActionFieldRow(form, fieldName) {
+    if (!form || !fieldName) return null;
+    var input = form.querySelector('[name="' + fieldName + '"]');
+    return input && input.closest ? input.closest(".cc-form-row") : null;
+  }
+
+  function ccCompactHexText(raw) {
+    return String(raw || "").replace(/0x/gi, "").replace(/[^0-9A-Fa-f]/g, "").toUpperCase();
+  }
+
+  function ccEnhanceActionForm(action, form) {
+    if (!action || !form) return;
+    if (action.id === "tool.asn1_tlv.decode") {
+      ccEnhanceAsn1TlvDecodeForm(form);
+    }
+  }
+
+  function ccEnhanceAsn1TlvDecodeForm(form) {
+    if (!form || form.classList.contains("cc-asn1-decode-form")) return;
+    form.classList.add("cc-asn1-decode-form");
+
+    var hexInput = form.querySelector('[name="hex_text"]');
+    var hexRow = ccActionFieldRow(form, "hex_text");
+    if (hexRow) {
+      hexRow.classList.add("cc-asn1-decode-row", "cc-asn1-decode-row--hex");
+    }
+    if (hexInput) {
+      hexInput.rows = Math.max(Number(hexInput.rows || 0), 5);
+      hexInput.spellcheck = false;
+      hexInput.setAttribute("autocomplete", "off");
+      hexInput.setAttribute("autocapitalize", "off");
+
+      var inputTools = document.createElement("div");
+      inputTools.className = "cc-asn1-decode-input-tools";
+
+      var formatBtn = document.createElement("button");
+      formatBtn.type = "button";
+      formatBtn.className = "btn btn-small";
+      formatBtn.textContent = "Format bytes";
+      formatBtn.title = "Group the pasted hex as space-separated bytes.";
+      inputTools.appendChild(formatBtn);
+
+      var clearBtn = document.createElement("button");
+      clearBtn.type = "button";
+      clearBtn.className = "btn btn-small";
+      clearBtn.textContent = "Clear";
+      clearBtn.title = "Clear the input hex field.";
+      inputTools.appendChild(clearBtn);
+
+      var byteCount = document.createElement("span");
+      byteCount.className = "cc-asn1-decode-byte-count";
+      inputTools.appendChild(byteCount);
+
+      function refreshByteCount() {
+        var compact = ccCompactHexText(hexInput.value);
+        var hasOddNibble = compact.length % 2 === 1;
+        byteCount.dataset.state = hasOddNibble ? "warn" : "ok";
+        if (compact.length === 0) {
+          byteCount.textContent = "0 B";
+        } else if (hasOddNibble) {
+          byteCount.textContent = Math.floor(compact.length / 2) + " B + nibble";
+        } else {
+          byteCount.textContent = (compact.length / 2) + " B";
+        }
+      }
+
+      formatBtn.addEventListener("click", function () {
+        hexInput.value = formatHexInline(ccCompactHexText(hexInput.value));
+        hexInput.dispatchEvent(new Event("input", { bubbles: true }));
+        hexInput.focus();
+      });
+      clearBtn.addEventListener("click", function () {
+        hexInput.value = "";
+        hexInput.dispatchEvent(new Event("input", { bubbles: true }));
+        hexInput.focus();
+      });
+      hexInput.addEventListener("input", refreshByteCount);
+      hexInput.addEventListener("keydown", function (event) {
+        if ((event.ctrlKey || event.metaKey) && event.key === "Enter") {
+          event.preventDefault();
+          if (form.requestSubmit) {
+            form.requestSubmit();
+          }
+        }
+      });
+      refreshByteCount();
+      if (hexRow) {
+        hexRow.appendChild(inputTools);
+      }
+    }
+
+    var schemaRows = ["schema_paths", "type_name", "codec"].map(function (name) {
+      return ccActionFieldRow(form, name);
+    }).filter(function (row) {
+      return !!row;
+    });
+    if (schemaRows.length > 0) {
+      var details = document.createElement("details");
+      details.className = "cc-asn1-schema-options";
+      var summary = document.createElement("summary");
+      summary.textContent = "Schema-aware decode";
+      details.appendChild(summary);
+      var hint = document.createElement("p");
+      hint.className = "cc-asn1-schema-hint";
+      hint.textContent = "Optional asn1tools decode. Leave closed for tag-registry TLV inspection.";
+      details.appendChild(hint);
+      var grid = document.createElement("div");
+      grid.className = "cc-asn1-schema-grid";
+      schemaRows.forEach(function (row) {
+        row.classList.add("cc-asn1-decode-row", "cc-asn1-decode-row--schema");
+        grid.appendChild(row);
+      });
+      details.appendChild(grid);
+      if (hexRow && hexRow.parentNode) {
+        hexRow.parentNode.insertBefore(details, hexRow.nextSibling);
+      } else {
+        form.insertBefore(details, form.firstChild);
+      }
+    }
   }
 
   function buildField(action, field) {
@@ -5823,8 +8556,26 @@
   async function runActionFromForm(action, form, statusEl, resultEl) {
     var inputs = collectFormValues(form);
     applyActiveReaderDefault(action, inputs);
+    var currentEsimFlowPane = resultEl && resultEl.closest
+      ? resultEl.closest(".cc-esim-flow-pane")
+      : null;
+    var currentInlineActionPane = resultEl && resultEl.closest
+      ? resultEl.closest(".cc-inline-action-pane")
+      : null;
+    function setEsimInlinePaneStatus(text) {
+      if (!currentEsimFlowPane) return;
+      var paneStatus = currentEsimFlowPane.querySelector(".cc-esim-flow-status");
+      if (paneStatus) paneStatus.textContent = text;
+    }
+    function setInlineActionPaneStatus(text) {
+      if (!currentInlineActionPane) return;
+      var paneStatus = currentInlineActionPane.querySelector(".cc-inline-action-status");
+      if (paneStatus) paneStatus.textContent = text;
+    }
     if (ccActionUsesReaderSession(action) && !ccActiveReaderName()) {
       statusEl.textContent = "select reader";
+      setEsimInlinePaneStatus("select reader");
+      setInlineActionPaneStatus("select reader");
       resultEl.innerHTML = "";
       resultEl.appendChild(renderErrorBlock(
         "Select a reader before running this eSIM action."
@@ -5834,6 +8585,8 @@
     }
     var card = findHostCard(form);
     statusEl.textContent = action.streams ? "starting…" : "running…";
+    setEsimInlinePaneStatus(action.streams ? "starting" : "running");
+    setInlineActionPaneStatus(action.streams ? "starting" : "running");
     setStatusAction("action: " + action.id);
     resultEl.innerHTML = "";
     setActionBusy(card, action, true);
@@ -5848,22 +8601,6 @@
       return;
     }
 
-    // --- popout path (compact workbench: eSIM Management, SCP11 Local,
-    //     Local eIM, Tools, HIL, SUCI, SIMCARD, …) ---------------
-    var sub = commandState && commandState.activeSubsystem;
-    var currentPopoutBody = resultEl && resultEl.closest
-      ? resultEl.closest(".cc-popout-body")
-      : null;
-    var usePopout = sub && sub !== "SCP03" && sub !== "SAIP" && !currentPopoutBody;
-    var popBody = null;
-
-    if (usePopout) {
-      var title = (action.title || action.id || "Result");
-      popBody = _ccBuildCompactPopout(title);
-      popBody.innerHTML = "";
-      popBody.appendChild(loadingEl("running " + (action.title || action.id) + "…"));
-    }
-
     try {
       var resp = await apiFetch("/api/actions/" + encodeURIComponent(action.id) + "/run", {
         method: "POST",
@@ -5871,13 +8608,10 @@
       });
       if (!resp.ok) {
         statusEl.textContent = "error";
+        setEsimInlinePaneStatus("error");
+        setInlineActionPaneStatus("error");
         var errBlock = renderErrorBlock(resp.error || "unknown error");
-        if (popBody) {
-          popBody.innerHTML = "";
-          popBody.appendChild(errBlock);
-        } else {
-          resultEl.appendChild(errBlock);
-        }
+        resultEl.appendChild(errBlock);
         logBus.emit({
           level: "error",
           source: action.id,
@@ -5886,10 +8620,9 @@
         return;
       }
       statusEl.textContent = "ok";
-      if (popBody) {
-        popBody.innerHTML = "";
-      }
-      renderActionResult(action, resp.data || {}, popBody || resultEl);
+      setEsimInlinePaneStatus("ok");
+      setInlineActionPaneStatus("ok");
+      renderActionResult(action, resp.data || {}, resultEl);
       logBus.emit({
         level: "info",
         source: action.id,
@@ -5897,13 +8630,10 @@
       });
     } catch (err) {
       statusEl.textContent = "error";
+      setEsimInlinePaneStatus("error");
+      setInlineActionPaneStatus("error");
       var catchBlock = renderErrorBlock(String(err && err.message || err));
-      if (popBody) {
-        popBody.innerHTML = "";
-        popBody.appendChild(catchBlock);
-      } else {
-        resultEl.appendChild(catchBlock);
-      }
+      resultEl.appendChild(catchBlock);
       logBus.emit({
         level: "error",
         source: action.id,
@@ -5937,83 +8667,121 @@
     log.className = "flow-log cc-log";
     resultEl.appendChild(log);
 
-    var sock = new WebSocket(url);
     var runBtn = resultEl.parentElement.querySelector(".cc-action-bar .btn");
+    var inlinePane = resultEl && resultEl.closest
+      ? resultEl.closest(".cc-esim-flow-pane")
+      : null;
+    var hiddenErrorCount = 0;
+    function setInlinePaneStatus(text) {
+      if (!inlinePane) return;
+      var paneStatus = inlinePane.querySelector(".cc-esim-flow-status");
+      if (paneStatus) paneStatus.textContent = text;
+    }
     if (runBtn) runBtn.disabled = true;
 
-    sock.onopen = function () {
-      appendLogRow(log, "info", "connected — sending start frame");
-      logBus.emit({
-        level: "info",
-        source: action.id,
-        message: "stream: connected",
-      });
-      var startPayload;
-      if (action.id === "scp11.download_profile") {
-        // legacy shape: reader/activation_code/... at top level.
-        startPayload = Object.assign({ type: "start" }, inputs);
-      } else {
-        startPayload = { type: "start", inputs: inputs };
-      }
-      sock.send(JSON.stringify(startPayload));
-      statusEl.textContent = "running";
-    };
-    sock.onmessage = function (event) {
-      try {
-        var msg = JSON.parse(event.data);
-        var level = msg.level || "info";
-        var text = msg.message || JSON.stringify(msg);
-        appendLogRow(log, level, text);
-        logBus.emit({
-          level: level,
-          source: action.id,
-          message: text,
-          data: msg,
-        });
-        if (level === "done") {
-          statusEl.textContent = "done";
-          if (msg.report) {
-            resultEl.appendChild(renderReportSummary(msg.report));
-          }
-        } else if (level === "error") {
-          statusEl.textContent = "error";
-        }
-      } catch (_err) {
-        appendLogRow(log, "info", String(event.data));
+    ccRefreshGlobalDebugFlag().then(function () {
+      startStreamingSocket();
+    });
+
+    function startStreamingSocket() {
+      var sock = new WebSocket(url);
+
+      sock.onopen = function () {
+        appendLogRow(log, "info", "connected — sending start frame");
         logBus.emit({
           level: "info",
           source: action.id,
-          message: String(event.data),
+          message: "stream: connected",
         });
-      }
-    };
-    sock.onclose = function () {
-      if (runBtn) runBtn.disabled = false;
-      setActionBusy(card, action, false);
-      appendLogRow(log, "info", "socket closed");
-      logBus.emit({
-        level: "info",
-        source: action.id,
-        message: "stream: closed",
-      });
-      // Detach handlers so the browser can free the buffered frames
-      // and closure chain right away. Long dogfooding sessions
-      // (several hundred action runs) used to hold a multi-MB chain
-      // of dead sockets here.
-      sock.onmessage = null;
-      sock.onopen = null;
-      sock.onerror = null;
-      sock.onclose = null;
-    };
-    sock.onerror = function () {
-      statusEl.textContent = "socket error";
-      setActionBusy(card, action, false);
-      logBus.emit({
-        level: "error",
-        source: action.id,
-        message: "stream: socket error",
-      });
-    };
+        var startPayload;
+        if (action.id === "scp11.download_profile") {
+          // legacy shape: reader/activation_code/... at top level.
+          startPayload = Object.assign({ type: "start" }, inputs);
+        } else {
+          startPayload = { type: "start", inputs: inputs };
+        }
+        sock.send(JSON.stringify(startPayload));
+        statusEl.textContent = "running";
+        setInlinePaneStatus("running");
+      };
+      sock.onmessage = function (event) {
+        try {
+          var msg = JSON.parse(event.data);
+          var level = msg.level || "info";
+          var text = msg.message || JSON.stringify(msg);
+          var showFrame = ccShouldShowStreamFrame(level);
+          if (showFrame) {
+            appendLogRow(log, level, text);
+            logBus.emit({
+              level: level,
+              source: action.id,
+              message: text,
+              data: msg,
+            });
+          } else {
+            hiddenErrorCount += 1;
+          }
+          if (level === "done") {
+            statusEl.textContent = "done";
+            setInlinePaneStatus("done");
+            if (msg.report) {
+              resultEl.appendChild(renderReportSummary(msg.report));
+            }
+          } else if (level === "error") {
+            if (showFrame) {
+              statusEl.textContent = "error";
+              setInlinePaneStatus("error");
+            }
+          }
+        } catch (_err) {
+          appendLogRow(log, "info", String(event.data));
+          logBus.emit({
+            level: "info",
+            source: action.id,
+            message: String(event.data),
+          });
+        }
+      };
+      sock.onclose = function () {
+        if (runBtn) runBtn.disabled = false;
+        setActionBusy(card, action, false);
+        if (hiddenErrorCount > 0 && statusEl.textContent !== "done") {
+          appendLogRow(log, "warn", "Flow stopped before completion. Enable debug for details.");
+          logBus.emit({
+            level: "warn",
+            source: action.id,
+            message: "stream: hidden error details; enable debug for APDU diagnostics",
+          });
+        }
+        appendLogRow(log, "info", "socket closed");
+        if (statusEl.textContent !== "done" && statusEl.textContent !== "error") {
+          setInlinePaneStatus("closed");
+        }
+        logBus.emit({
+          level: "info",
+          source: action.id,
+          message: "stream: closed",
+        });
+        // Detach handlers so the browser can free the buffered frames
+        // and closure chain right away. Long dogfooding sessions
+        // (several hundred action runs) used to hold a multi-MB chain
+        // of dead sockets here.
+        sock.onmessage = null;
+        sock.onopen = null;
+        sock.onerror = null;
+        sock.onclose = null;
+      };
+      sock.onerror = function () {
+        statusEl.textContent = "socket error";
+        setInlinePaneStatus("socket error");
+        setActionBusy(card, action, false);
+        logBus.emit({
+          level: "error",
+          source: action.id,
+          message: "stream: socket error",
+        });
+      };
+    }
   }
 
   function renderReportSummary(report) {
@@ -6221,6 +8989,267 @@
     container.appendChild(sheet);
   }
 
+  function asn1TlvItemsToNodes(items) {
+    if (!Array.isArray(items)) return [];
+    return items.map(function (item) {
+      var node = {
+        tag_hex: String(item && item.tag || "").toUpperCase(),
+        length: Number(item && item.length || 0),
+      };
+      if (item && item.name) {
+        node.label = String(item.name);
+      }
+      var children = asn1TlvItemsToNodes(item && item.items);
+      if (children.length > 0) {
+        node.children = children;
+      } else if (item && typeof item.raw === "string") {
+        node.value_hex = item.raw;
+      }
+      return node;
+    });
+  }
+
+  function ccCopyPlainText(text, button) {
+    var value = String(text || "");
+    if (typeof copyTextToClipboard === "function") {
+      copyTextToClipboard(value);
+    } else if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(value).catch(function () {});
+    }
+    if (button) {
+      button.classList.add("is-copied");
+      setTimeout(function () { button.classList.remove("is-copied"); }, 700);
+    }
+  }
+
+  function renderAsn1TlvDecodeResult(data, container) {
+    if (!data || typeof data !== "object") {
+      container.appendChild(renderDecodedBlock(data, null, { omitHead: true }));
+      return;
+    }
+
+    var sheet = document.createElement("div");
+    sheet.className = "cc-action-datasheet cc-asn1-decode-result";
+    var itemCount = Array.isArray(data.items) ? data.items.length : 0;
+    var metaRows = [
+      { label: "Format", value: data.format || "BER/DER TLV" },
+      { label: "Input", value: String(data.byteCount || 0) + " B" },
+      { label: "Status", value: data.complete ? "complete" : "incomplete" },
+      { label: "Top-level", value: String(itemCount) },
+    ];
+    if (data.schemaDecode) {
+      metaRows.push({ label: "Schema", value: "decoded" });
+    }
+    scp03DatasheetAppendMetaKvl(sheet, metaRows);
+
+    var notationText = String(data.asn1Notation || "").trim();
+    if (notationText.length > 0) {
+      var notationMain = scp03DatasheetWrapMain();
+      notationMain.classList.add("cc-asn1-notation-panel");
+      var notationHead = document.createElement("div");
+      notationHead.className = "cc-action-datasheet-main-head cc-action-datasheet-main-head--split";
+      var notationTitle = document.createElement("span");
+      notationTitle.className = "cc-action-datasheet-main-title";
+      notationTitle.textContent = "ASN.1 notation";
+      notationHead.appendChild(notationTitle);
+      var copyNotation = document.createElement("button");
+      copyNotation.type = "button";
+      copyNotation.className = "cc-decoded-tools-btn";
+      copyNotation.textContent = "Copy";
+      copyNotation.title = "Copy the ASN.1-like notation.";
+      copyNotation.addEventListener("click", function () {
+        ccCopyPlainText(notationText, copyNotation);
+      });
+      notationHead.appendChild(copyNotation);
+      notationMain.appendChild(notationHead);
+      var notationPre = document.createElement("pre");
+      notationPre.className = "cc-asn1-notation";
+      notationPre.textContent = notationText;
+      notationMain.appendChild(notationPre);
+      sheet.appendChild(notationMain);
+    }
+
+    var nodes = asn1TlvItemsToNodes(data.items);
+    if (nodes.length > 0) {
+      var treeMain = scp03DatasheetWrapMain();
+      treeMain.classList.add("cc-asn1-tlv-panel");
+      var treeHead = document.createElement("div");
+      treeHead.className = "cc-action-datasheet-main-head cc-action-datasheet-main-head--split";
+      var treeTitle = document.createElement("span");
+      treeTitle.className = "cc-action-datasheet-main-title";
+      treeTitle.textContent = "Decoded TLV tree";
+      treeHead.appendChild(treeTitle);
+      var treeSub = document.createElement("span");
+      treeSub.className = "cc-action-datasheet-main-sub";
+      treeSub.textContent = formatHexInline(String(data.inputHex || ""));
+      treeHead.appendChild(treeSub);
+      treeMain.appendChild(treeHead);
+      var treeWrap = document.createElement("div");
+      treeWrap.className = "cc-tlv-tree cc-asn1-tlv-tree";
+      treeWrap.appendChild(renderTlvNodes(nodes, 0));
+      treeMain.appendChild(treeWrap);
+      sheet.appendChild(treeMain);
+    }
+
+    if (data.schemaDecode) {
+      var schemaMain = scp03DatasheetWrapMain();
+      var schemaHead = document.createElement("div");
+      schemaHead.className = "cc-action-datasheet-main-head";
+      schemaHead.textContent = "Schema decode";
+      schemaMain.appendChild(schemaHead);
+      var schemaBody = document.createElement("div");
+      schemaBody.className = "cc-action-tree";
+      schemaBody.appendChild(renderPrettyValue(data.schemaDecode, 0));
+      schemaMain.appendChild(schemaBody);
+      sheet.appendChild(schemaMain);
+    }
+
+    var rawDetails = document.createElement("details");
+    rawDetails.className = "cc-action-datasheet-raw cc-details cc-asn1-raw-json";
+    var rawSummary = document.createElement("summary");
+    rawSummary.textContent = "Raw JSON";
+    rawDetails.appendChild(rawSummary);
+    var rawToolbar = document.createElement("div");
+    rawToolbar.className = "cc-asn1-raw-toolbar";
+    var copyJson = document.createElement("button");
+    copyJson.type = "button";
+    copyJson.className = "cc-decoded-tools-btn";
+    copyJson.textContent = "Copy JSON";
+    copyJson.addEventListener("click", function () {
+      ccCopyPlainText(JSON.stringify(data, null, 2), copyJson);
+    });
+    rawToolbar.appendChild(copyJson);
+    rawDetails.appendChild(rawToolbar);
+    var rawPre = document.createElement("pre");
+    rawPre.className = "cc-json";
+    rawPre.textContent = JSON.stringify(data, null, 2);
+    rawDetails.appendChild(rawPre);
+    sheet.appendChild(rawDetails);
+
+    container.appendChild(sheet);
+  }
+
+  function renderSimaResponseResult(data, container) {
+    if (!data || typeof data !== "object") {
+      container.appendChild(renderDecodedBlock(data, null, { omitHead: true }));
+      return;
+    }
+    var semantic = data.semantic && typeof data.semantic === "object"
+      ? data.semantic
+      : {};
+    var metaRows = [
+      { label: "Format", value: data.format || "SIMa response" },
+      { label: "Input", value: String(data.input_length || 0) + " B" },
+      { label: "Status", value: data.complete ? "complete" : "incomplete" },
+    ];
+    if (semantic.choice) {
+      metaRows.push({ label: "Result", value: String(semantic.choice) });
+    }
+    if (semantic.result_code !== undefined) {
+      metaRows.push({ label: "Code", value: String(semantic.result_code) });
+    }
+    if (semantic.result_detail !== undefined) {
+      metaRows.push({ label: "Detail", value: String(semantic.result_detail) });
+    }
+
+    var sheet = document.createElement("div");
+    sheet.className = "cc-action-datasheet cc-sima-response-result";
+    scp03DatasheetAppendMetaKvl(sheet, metaRows);
+
+    var summaryMain = scp03DatasheetWrapMain();
+    var summaryHead = document.createElement("div");
+    summaryHead.className = "cc-action-datasheet-main-head cc-action-datasheet-main-head--split";
+    var summaryTitle = document.createElement("span");
+    summaryTitle.className = "cc-action-datasheet-main-title";
+    summaryTitle.textContent = "SIMa final result";
+    summaryHead.appendChild(summaryTitle);
+    if (data.summary) {
+      var summarySub = document.createElement("span");
+      summarySub.className = "cc-action-datasheet-main-sub";
+      summarySub.textContent = data.summary;
+      summaryHead.appendChild(summarySub);
+    }
+    summaryMain.appendChild(summaryHead);
+
+    var summaryBody = document.createElement("div");
+    summaryBody.className = "cc-sima-summary";
+    var resultChip = document.createElement("span");
+    resultChip.className = "cc-sima-result-chip";
+    if (semantic.choice === "successResult") {
+      resultChip.classList.add("cc-sima-result-chip--success");
+    } else if (semantic.choice === "failureResult") {
+      resultChip.classList.add("cc-sima-result-chip--failure");
+    }
+    resultChip.textContent = semantic.choice || "unknown result";
+    summaryBody.appendChild(resultChip);
+    if (semantic.result_code !== undefined) {
+      var code = document.createElement("code");
+      code.className = "cc-sima-code";
+      code.textContent = "resultCode=" + semantic.result_code;
+      summaryBody.appendChild(code);
+    }
+    if (semantic.result_detail !== undefined) {
+      var detail = document.createElement("code");
+      detail.className = "cc-sima-code";
+      detail.textContent = "resultDetail=" + semantic.result_detail;
+      summaryBody.appendChild(detail);
+    }
+    if (!semantic.choice && data.error) {
+      var error = document.createElement("span");
+      error.className = "cc-error-block";
+      error.textContent = data.error;
+      summaryBody.appendChild(error);
+    }
+    summaryMain.appendChild(summaryBody);
+    sheet.appendChild(summaryMain);
+
+    if (Array.isArray(data.nodes) && data.nodes.length > 0) {
+      var treeMain = scp03DatasheetWrapMain();
+      var treeHead = document.createElement("div");
+      treeHead.className = "cc-action-datasheet-main-head cc-action-datasheet-main-head--split";
+      var treeTitle = document.createElement("span");
+      treeTitle.className = "cc-action-datasheet-main-title";
+      treeTitle.textContent = "SIMa TLV tree";
+      treeHead.appendChild(treeTitle);
+      var treeSub = document.createElement("span");
+      treeSub.className = "cc-action-datasheet-main-sub";
+      treeSub.textContent = formatHexInline(String(data.input_hex || ""));
+      treeHead.appendChild(treeSub);
+      treeMain.appendChild(treeHead);
+      var treeWrap = document.createElement("div");
+      treeWrap.className = "cc-tlv-tree cc-sima-tlv-tree";
+      treeWrap.appendChild(renderTlvNodes(data.nodes, 0));
+      treeMain.appendChild(treeWrap);
+      sheet.appendChild(treeMain);
+    }
+
+    if (data.formatted) {
+      var formattedDetails = document.createElement("details");
+      formattedDetails.className = "cc-action-datasheet-raw cc-details cc-sima-formatted";
+      var formattedSummary = document.createElement("summary");
+      formattedSummary.textContent = "One-line format";
+      formattedDetails.appendChild(formattedSummary);
+      var formattedPre = document.createElement("pre");
+      formattedPre.className = "cc-json";
+      formattedPre.textContent = String(data.formatted);
+      formattedDetails.appendChild(formattedPre);
+      sheet.appendChild(formattedDetails);
+    }
+
+    var rawDetails = document.createElement("details");
+    rawDetails.className = "cc-action-datasheet-raw cc-details cc-sima-raw-json";
+    var rawSummary = document.createElement("summary");
+    rawSummary.textContent = "Raw JSON";
+    rawDetails.appendChild(rawSummary);
+    var rawPre = document.createElement("pre");
+    rawPre.className = "cc-json";
+    rawPre.textContent = JSON.stringify(data, null, 2);
+    rawDetails.appendChild(rawPre);
+    sheet.appendChild(rawDetails);
+
+    container.appendChild(sheet);
+  }
+
   function renderActionResult(action, data, container) {
     pipeApduSignals(action, data);
     var kind = action.output_kind || "json";
@@ -6238,6 +9267,12 @@
     }
     if (kind === "key_value_lines") {
       return renderKeyValueLinesResult(data, container);
+    }
+    if (kind === "asn1_tlv") {
+      return renderAsn1TlvDecodeResult(data, container);
+    }
+    if (kind === "sima_response") {
+      return renderSimaResponseResult(data, container);
     }
     if (ccActionResultPrefersTree(action, kind, data)) {
       renderStructuredActionTreeResult(action, data, container);
@@ -6688,6 +9723,9 @@
 
       var tagUpper = (typeof node.tag_hex === "string") ? node.tag_hex.toUpperCase() : "";
       var label = tlvLookupLabel(tagUpper, parentTagHex || "");
+      if (!label && node.label) {
+        label = String(node.label);
+      }
 
       if (label) {
         var labelEl = document.createElement("span");
@@ -15058,9 +18096,14 @@
   // input element after ``scp03ShowFsUpdateBinary`` paints because
   // the popout builder is async-ish (DOM append happens in the same
   // tick but we want belt + braces).
-  function scp03StageOpenUpdateBinary(tab, stagedHex) {
+  function scp03StageOpenUpdateBinary(tab, stagedHex, pathText) {
     if (typeof scp03ShowFsUpdateBinary !== "function") return;
     Promise.resolve(scp03ShowFsUpdateBinary(tab)).then(function () {
+      var pathInput = document.getElementById("cc-fs-wiz-path");
+      if (pathInput && pathText) {
+        pathInput.value = String(pathText);
+        pathInput.dispatchEvent(new Event("input", { bubbles: true }));
+      }
       // The wizard's data textarea is keyed by ``cc-fs-wiz-hex_data``.
       var hexInput = document.getElementById("cc-fs-wiz-hex_data");
       if (hexInput) {

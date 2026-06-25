@@ -69,7 +69,7 @@ YggdraSIM Card Bridge — ready
   status URL : http://127.0.0.1:8642/status
   reset URL  : http://127.0.0.1:8642/card/reset
   token      : <redacted, fingerprint a1b2c3>
-  token file : /home/hampus/.config/yggdrasim/card_bridge/8642.token  (written, mode 0600)
+  token file : /home/example/.config/yggdrasim/card_bridge/8642.token  (written, mode 0600)
   remote use : route via 'ssh -fN -L 8642:127.0.0.1:8642 <pc-host>'
 ========================================================================
 ```
@@ -84,6 +84,10 @@ Use either:
 * `--reader-index N` — position in the PC/SC reader list (default 0).
 * `--reader-name "substring"` — case-insensitive substring match;
   overrides `--reader-index`.
+* `--pcsc-share-mode shared|exclusive` — defaults to `shared` so the
+  bridge can start while the GUI or `pcsc_scan` has a non-exclusive
+  handle open. Use `exclusive` only for isolated reader hosts where no
+  other local process touches the reader.
 
 Run `pcsc_scan -n` on the reader machine to inspect the available
 reader names.
@@ -159,11 +163,39 @@ is configured, so it's obvious at a glance which card the session is
 talking to:
 
 ```
-[i] remote card bridge: http://127.0.0.1:8642/apdu; token file (flag): /home/hampus/.config/yggdrasim/card_bridge/8642.token
+[i] remote card bridge: http://127.0.0.1:8642/apdu; token file (flag): /home/example/.config/yggdrasim/card_bridge/8642.token
 ```
 
 Pass `--remote-card-url ""` (empty string) to clear an inherited env
 value without rewriting your shell config.
+
+### HIL remote-card mode
+
+When the consumer is a HIL rig, keep `yggdrasim-card-bridge` running
+on the reader workstation and make the workstation port visible on the
+rig's loopback interface:
+
+```bash
+# Run on the rig, connecting to the reader workstation:
+ssh -fN -L 8642:127.0.0.1:8642 hampus@pc-host
+
+# Or run on the reader workstation, connecting to the rig:
+ssh -fN -R 8642:127.0.0.1:8642 hampus@rig-host
+```
+
+Then start HIL on the rig:
+
+```bash
+yggdrasim-hil-bridge \
+    --remote-card-url http://127.0.0.1:8642/apdu \
+    --remote-card-token-file ~/.config/yggdrasim/card_bridge/8642.token \
+    --apdu-timeout-ms 30000
+```
+
+The remote card becomes the HIL card source. The rig-side HIL relay
+still publishes its normal `apduUrl`, `statusUrl`, and `cardResetUrl`,
+so local SCP03 / SAIP consumers on the rig keep using the same relay
+surface while the physical card stays on the workstation.
 
 ### Doctor preflight
 
@@ -182,15 +214,16 @@ to spot before the first APDU.
 
 ### GUI surfaces (CB-4)
 
-When the GUI server is running, two read-only Command Center actions
-expose the same diagnostics:
+When the GUI server is running, Command Center actions expose the
+same diagnostics and the remote-HIL rig bootstrap:
 
 | Action id | Purpose |
 |---|---|
 | `card_bridge.status` | Snapshot of the resolved URL and token posture (no network traffic). |
 | `card_bridge.probe`  | Live `/ping` + `/status` probe with latency, ATR, and auth posture. Bearer tokens are never echoed back; only their 6-char fingerprint is returned. |
+| `card_bridge.remote_rig_start` | Starts or verifies the PC Card Bridge, refreshes its PC/SC handle, opens the SSH reverse tunnel, syncs the token to the RPi, verifies authenticated card status from the RPi, and installs/restarts the RPi HIL supervisor service. |
 
-A dedicated **Card bridge** panel (Meta sidebar) wraps these actions
+A dedicated **Card bridge** panel in the sidebar wraps these actions
 in a focused diagnostics surface:
 
 * Configured-target card showing URL, token fingerprint, source, and
@@ -200,6 +233,24 @@ in a focused diagnostics surface:
   if the local fingerprint matches the bridge's).
 * Optional URL/token override (collapsed by default) for ad-hoc
   testing of an alternative endpoint.
+* Remote HIL rig controls. **Start full rig** runs the end-to-end setup in
+  the background using the SSH target, PC reader selector, RPi repo
+  directory, RPi Python, token file, REMSIM binary, SIMtrace2 VID:PID,
+  and HIL port fields. It resets the local PC/SC handle before
+  restarting the RPi service so a stale reader session is not reused.
+  The manual buttons remain available for
+  stopping or probing each layer independently.
+* Remote HIL GSMTAP capture. The RPi service writes
+  `state/hil_termshark/live_capture.pcap` under the remote YggdraSIM
+  repo. The GUI HIL module reuses its normal `hil.decode_snapshot`
+  path by pulling that pcap over SSH into the local runtime before
+  running `tshark`, so the Dissector and Raw APDU tabs display remote
+  modem traffic the same way as a local HIL session.
+* Remote HIL modem shell. When the remote rig state contains an SSH
+  target, the HIL module's **Modem shell** tab uses that target as its
+  default command and opens `sudo tio /dev/ttyUSB2` on the RPi through
+  `ssh -tt`. Custom modem-shell commands remain editable and are saved
+  by the browser.
 * Auto-refresh toggle (5 s) — pauses automatically when the operator
   navigates to another view so the GUI doesn't poll in the background.
 * Latency history sparkline (60-sample rolling buffer) with stacked
@@ -209,6 +260,65 @@ The reader picker on `/api/live/readers` also surfaces a
 `🌐 remote@<base-url>` row whenever a bridge URL is configured, so
 operators can pick a remote bridge from the same control as a local
 PC/SC reader.
+
+### GUI-managed remote HIL rig
+
+The Card bridge panel also includes a **Remote HIL rig** block for the
+workstation-card / Raspberry Pi-rig topology:
+
+```text
+PC reader -> local CardBridge -> ssh -R -> RPi HIL supervisor -> SIMtrace2 -> device
+PC browser <- ssh -L <- RPi web-server GUI
+```
+
+The block wraps these action ids:
+
+| Action id | Purpose |
+|---|---|
+| `card_bridge.local_start` / `card_bridge.local_stop` | Start or stop the PC-side `yggdrasim-card-bridge` subprocess. |
+| `card_bridge.remote_rig_tunnel_start` / `card_bridge.remote_rig_tunnel_stop` | Open or close the SSH forwards (`-R` for CardBridge, `-L` for the RPi GUI). |
+| `card_bridge.remote_rig_sync_token` | Copy the local CardBridge bearer token to the RPi with mode `0600`. |
+| `card_bridge.remote_rig_install_service` | Write a `systemd --user` service on the RPi for the HIL supervisor, including `--remote-card-url`. |
+| `card_bridge.remote_rig_service` | Start, stop, restart, or query the RPi HIL service through SSH. |
+| `card_bridge.remote_rig_status` | Show local process state plus the remote service state when an SSH target is set. |
+
+The GUI process still runs on the PC. It controls the RPi through SSH,
+so SSH key login must already work from the PC account that launched
+the GUI. The action uses `BatchMode=yes`; it will not block on a
+password prompt.
+
+The RPi must have `osmo-remsim-client-st2` installed, or the **RPi
+REMSIM binary** field must point to an executable path such as
+`/usr/local/bin/osmo-remsim-client-st2`. The full-rig action resolves
+that path before writing the systemd unit so the service does not
+depend on systemd's default `PATH`.
+
+For unattended use, install the RPi service once from the GUI or by
+copying `guides/systemd/yggdrasim-hil-supervisor.service.example` and
+adding the remote-card flags:
+
+```text
+--remote-card-url http://127.0.0.1:8642/apdu
+--remote-card-token-file ~/.config/yggdrasim/card_bridge/8642.token
+--apdu-timeout-ms 30000
+```
+
+Enable linger on the RPi user when the service must survive logout or
+start without an interactive SSH session:
+
+```bash
+loginctl enable-linger "$USER"
+```
+
+The persistent RPi service removes the need to log into the RPi for
+normal runs. The PC still needs a live SSH tunnel whenever the card is
+on the PC, because the RPi consumes the CardBridge endpoint through
+that tunnel.
+
+When the RPi boots before the PC-side CardBridge/tunnel exists, the
+supervisor remains active and retries the bridge child with a slower
+remote-card backoff. This keeps the service ready for unattended Pi
+recovery without burning CPU on a tight restart loop.
 
 ## Verifying the link
 
@@ -269,7 +379,8 @@ of `journalctl` can tell whether PIN material rode through the log.
 | `card-bridge: Refusing to bind …` | `--host` is not loopback and no token was provided. | Drop the host flag, supply `--token-file`, or remove `--no-token`. |
 | `401 Missing or invalid bearer token` | Consumer didn't pick up the token file or env var. | Confirm `YGGDRASIM_CARD_RELAY_TOKEN_FILE` resolves and is readable. Verify the fingerprint (`yggdrasim ... --doctor` matches the bridge banner). |
 | `429 Too many authentication failures` | The peer hit the 3-failure threshold. | Wait 60 s, then retry with the correct token. The bridge logs which peer locked out. |
-| `Cannot open PC/SC reader` | Bridge can't see the reader. | `pcsc_scan -n`; verify the reader name; restart `pcscd`. |
+| `Cannot open PC/SC reader` | Bridge can't see the reader or another process holds the reader exclusively. | `pcsc_scan -n`; verify the reader name; restart `pcscd`; close other card tools. The GUI-launched bridge uses `--pcsc-share-mode shared` to avoid normal reader-probe conflicts. |
+| `REMSIM client failed to start: [Errno 2] No such file or directory` | `osmo-remsim-client-st2` is not installed on the RPi or is outside the service path. | Install the RPi REMSIM package as described in `guides/INSTALL_RASPBERRYPI.md`, or set **RPi REMSIM binary** to the executable's absolute path. |
 | Tunnel works but APDUs hang | SSH session closed. | `ServerAliveInterval`/`ServerAliveCountMax` in `~/.ssh/config`. |
 
 ## Compatibility with HilBridge

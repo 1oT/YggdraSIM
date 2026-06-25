@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import threading
 import time
 from dataclasses import dataclass, field
@@ -10,17 +11,41 @@ from typing import Any
 
 _LOGGER = logging.getLogger(__name__)
 
-_PCSC_TRANSMIT_TIMEOUT_MS = 5000
+DEFAULT_APDU_TIMEOUT_MS = 5000
+APDU_TIMEOUT_ENV = "YGGDRASIM_HIL_APDU_TIMEOUT_MS"
+PCSC_SHARE_MODE_EXCLUSIVE = "exclusive"
+PCSC_SHARE_MODE_SHARED = "shared"
+PCSC_SHARE_MODES = (PCSC_SHARE_MODE_EXCLUSIVE, PCSC_SHARE_MODE_SHARED)
+
+
+def resolve_apdu_timeout_ms(value: Any = None) -> int:
+    """Return a bounded APDU transmit timeout in milliseconds."""
+    raw_value = value
+    if raw_value is None:
+        raw_value = os.environ.get(APDU_TIMEOUT_ENV, "")
+    text = str(raw_value or "").strip()
+    if len(text) == 0:
+        return DEFAULT_APDU_TIMEOUT_MS
+    try:
+        parsed = int(text)
+    except (TypeError, ValueError):
+        return DEFAULT_APDU_TIMEOUT_MS
+    return max(100, parsed)
 
 
 class PcscBridgeError(RuntimeError):
     """Raised when the physical reader bridge cannot be established."""
 
 
-def _load_smartcard_runtime() -> tuple[Any, Any, Any, Any, Any, Any]:
+def _load_smartcard_runtime() -> tuple[Any, Any, Any, Any, Any, Any, Any]:
     try:
         from smartcard.System import readers
-        from smartcard.scard import SCARD_LEAVE_CARD, SCARD_SHARE_EXCLUSIVE, SCARD_UNPOWER_CARD
+        from smartcard.scard import (
+            SCARD_LEAVE_CARD,
+            SCARD_SHARE_EXCLUSIVE,
+            SCARD_SHARE_SHARED,
+            SCARD_UNPOWER_CARD,
+        )
     except ImportError as exc:
         raise PcscBridgeError(
             "pyscard is required for the HIL bridge. Install it in the active Python environment."
@@ -31,20 +56,38 @@ def _load_smartcard_runtime() -> tuple[Any, Any, Any, Any, Any, Any]:
     except ImportError:
         ExclusiveConnectCardConnection = None
 
-    return readers, SCARD_SHARE_EXCLUSIVE, SCARD_UNPOWER_CARD, SCARD_LEAVE_CARD, ExclusiveConnectCardConnection, PcscBridgeError
+    return (
+        readers,
+        SCARD_SHARE_EXCLUSIVE,
+        SCARD_SHARE_SHARED,
+        SCARD_UNPOWER_CARD,
+        SCARD_LEAVE_CARD,
+        ExclusiveConnectCardConnection,
+        PcscBridgeError,
+    )
+
+
+def _normalize_share_mode(value: Any) -> str:
+    normalized = str(value or PCSC_SHARE_MODE_EXCLUSIVE).strip().lower()
+    if normalized in PCSC_SHARE_MODES:
+        return normalized
+    raise PcscBridgeError(
+        "PC/SC share mode must be one of: " + ", ".join(PCSC_SHARE_MODES)
+    )
 
 
 @dataclass(slots=True)
 class PcscCardChannel:
     reader_index: int = 0
     reader_name: str = ""
+    share_mode: str = PCSC_SHARE_MODE_EXCLUSIVE
     _connection: Any = field(default=None, init=False, repr=False)
     _reader_label: str = field(default="", init=False)
     _last_reset_summary: dict[str, Any] = field(default_factory=dict, init=False, repr=False)
 
     @staticmethod
     def list_reader_names() -> list[str]:
-        readers, _, _, _, _, _ = _load_smartcard_runtime()
+        readers, _, _, _, _, _, _ = _load_smartcard_runtime()
         return [str(reader) for reader in readers()]
 
     @property
@@ -53,21 +96,40 @@ class PcscCardChannel:
 
     def connect(self) -> None:
         """Connect to the PCSC reader identified by *reader_name* and return True on success."""
-        readers, share_exclusive, _, _, exclusive_wrapper, error_type = _load_smartcard_runtime()
+        (
+            readers,
+            share_exclusive,
+            share_shared,
+            _unpower_card,
+            _leave_card,
+            exclusive_wrapper,
+            error_type,
+        ) = _load_smartcard_runtime()
         available_readers = list(readers())
         if len(available_readers) == 0:
             raise error_type("No PC/SC readers are available.")
 
         selected_reader = self._select_reader(available_readers)
         connection = selected_reader.createConnection()
-        if exclusive_wrapper is not None:
+        share_mode = _normalize_share_mode(self.share_mode)
+        pcsc_share_mode = (
+            share_shared
+            if share_mode == PCSC_SHARE_MODE_SHARED
+            else share_exclusive
+        )
+        if share_mode == PCSC_SHARE_MODE_EXCLUSIVE and exclusive_wrapper is not None:
             connection = exclusive_wrapper(connection)
 
         try:
-            connection.connect(mode=share_exclusive)
+            connection.connect(mode=pcsc_share_mode)
         except Exception as exc:
+            pcsc_name = (
+                "SCARD_SHARE_SHARED"
+                if share_mode == PCSC_SHARE_MODE_SHARED
+                else "SCARD_SHARE_EXCLUSIVE"
+            )
             raise error_type(
-                f"Failed to open reader '{selected_reader}' in SCARD_SHARE_EXCLUSIVE mode."
+                f"Failed to open reader '{selected_reader}' in {pcsc_name} mode."
             ) from exc
 
         self._connection = connection
@@ -88,12 +150,25 @@ class PcscCardChannel:
             self._last_reset_summary = {"mode": "connect-only", "pcscHandle": False}
             return self.last_reset_summary
 
-        _, share_exclusive, unpower_card, leave_card, _, _ = _load_smartcard_runtime()
+        (
+            _readers,
+            share_exclusive,
+            share_shared,
+            unpower_card,
+            leave_card,
+            _exclusive_wrapper,
+            _error_type,
+        ) = _load_smartcard_runtime()
+        pcsc_share_mode = (
+            share_shared
+            if _normalize_share_mode(self.share_mode) == PCSC_SHARE_MODE_SHARED
+            else share_exclusive
+        )
         connection = self._connection
         self._connection = None
         target = self._unwrap_connection(connection)
         had_handle = getattr(target, "hcard", None) is not None
-        did_reconnect = self._reconnect_with_unpower(target, share_exclusive, unpower_card)
+        did_reconnect = self._reconnect_with_unpower(target, pcsc_share_mode, unpower_card)
         disconnect_disposition = leave_card if did_reconnect else unpower_card
         self._disconnect_with_disposition(target, disconnect_disposition)
         time.sleep(0.2)
@@ -179,7 +254,7 @@ class PcscCardChannel:
         atr = connection.getATR()
         return bytes(atr)
 
-    def transmit(self, apdu: bytes, *, timeout_ms: int = _PCSC_TRANSMIT_TIMEOUT_MS) -> tuple[bytes, int, int]:
+    def transmit(self, apdu: bytes, *, timeout_ms: int | None = None) -> tuple[bytes, int, int]:
         """Transmit a raw APDU byte list and return (response_bytes, SW1, SW2).
 
         The underlying PC/SC ``transmit`` call blocks until the card
@@ -189,6 +264,7 @@ class PcscCardChannel:
         eventually completes (or errors) against the old connection and
         exits cleanly.
         """
+        effective_timeout_ms = resolve_apdu_timeout_ms(timeout_ms)
         connection = self._require_connection()
         apdu_list = list(bytes(apdu))
         result_holder: list[tuple[list[int], int, int]] = []
@@ -202,11 +278,11 @@ class PcscCardChannel:
 
         worker = threading.Thread(target=_do_transmit, daemon=True)
         worker.start()
-        worker.join(timeout=max(0.1, timeout_ms / 1000.0))
+        worker.join(timeout=max(0.1, effective_timeout_ms / 1000.0))
 
         if worker.is_alive():
             raise PcscBridgeError(
-                f"PC/SC APDU transmit timed out after {timeout_ms}ms."
+                f"PC/SC APDU transmit timed out after {effective_timeout_ms}ms."
             )
 
         if error_holder:

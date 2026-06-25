@@ -12,10 +12,17 @@ import unittest
 from unittest.mock import MagicMock
 
 import yggdrasim_common.gui_server.app as gui_app
+from yggdrasim_common.gui_server import lifecycle
+from yggdrasim_common.gui_server.actions import card_bridge
 from yggdrasim_common.gui_server.app import _PywebviewJsBridge
 
 
-def _make_bridge(*, dialog_result=None, dialog_raises=False) -> _PywebviewJsBridge:
+def _make_bridge(
+    *,
+    dialog_result=None,
+    dialog_raises=False,
+    on_close_requested=None,
+) -> _PywebviewJsBridge:
     mock_wv = MagicMock()
     window = MagicMock()
     mock_wv.windows = [window]
@@ -23,7 +30,7 @@ def _make_bridge(*, dialog_result=None, dialog_raises=False) -> _PywebviewJsBrid
         window.create_file_dialog.side_effect = RuntimeError("dialog unavailable")
     else:
         window.create_file_dialog.return_value = dialog_result
-    bridge = _PywebviewJsBridge()
+    bridge = _PywebviewJsBridge(on_close_requested=on_close_requested)
     bridge.attach(mock_wv)
     return bridge
 
@@ -47,6 +54,58 @@ class AttachStateTests(unittest.TestCase):
         bridge = _make_bridge(dialog_result=None)
         win = bridge._active_window()
         self.assertIsNotNone(win)
+
+    def test_close_app_destroys_active_window(self) -> None:
+        bridge = _make_bridge(dialog_result=None)
+        win = bridge._active_window()
+
+        self.assertTrue(bridge.close_app())
+        win.destroy.assert_called_once_with()
+
+    def test_close_app_returns_false_without_window(self) -> None:
+        bridge = _PywebviewJsBridge()
+
+        self.assertFalse(bridge.close_app())
+
+    def test_close_app_falls_back_to_close_method(self) -> None:
+        bridge = _make_bridge(dialog_result=None)
+        win = bridge._active_window()
+        win.destroy = None
+
+        self.assertTrue(bridge.close_app())
+        win.close.assert_called_once_with()
+
+    def test_close_app_runs_shutdown_callback_before_destroy(self) -> None:
+        calls: list[str] = []
+        bridge = _make_bridge(
+            dialog_result=None,
+            on_close_requested=lambda: calls.append("cleanup"),
+        )
+        win = bridge._active_window()
+        win.destroy.side_effect = lambda: calls.append("destroy")
+
+        self.assertTrue(bridge.close_app())
+        self.assertEqual(calls, ["cleanup", "destroy"])
+
+    def test_desktop_close_shutdown_cleans_up_and_schedules_exit(self) -> None:
+        with unittest.mock.patch.object(gui_app, "_cleanup_gui_runtime_on_shutdown") as cleanup:
+            with unittest.mock.patch.object(gui_app, "_schedule_desktop_process_exit") as schedule:
+                gui_app._request_desktop_close_shutdown()
+
+        cleanup.assert_called_once_with(include_default_hil_service=True)
+        schedule.assert_called_once_with()
+
+    def test_desktop_close_shutdown_schedules_exit_after_cleanup_error(self) -> None:
+        with unittest.mock.patch.object(
+            gui_app,
+            "_cleanup_gui_runtime_on_shutdown",
+            side_effect=RuntimeError("cleanup failed"),
+        ):
+            with unittest.mock.patch.object(gui_app, "_schedule_desktop_process_exit") as schedule:
+                with self.assertRaises(RuntimeError):
+                    gui_app._request_desktop_close_shutdown()
+
+        schedule.assert_called_once_with()
 
 
 class FilePickerModeTests(unittest.TestCase):
@@ -199,14 +258,85 @@ class WebviewBackendSelectionTests(unittest.TestCase):
         self.assertEqual(first, second)
         self.assertIn("--custom-flag", first)
         self.assertIn("--renderer-process-limit=1", first)
-        self.assertNotIn("--disable-gpu", first)
-        self.assertNotIn("--num-raster-threads=1", first)
+        self.assertIn("--disable-gpu", first)
+        self.assertIn("--disable-gpu-compositing", first)
+        self.assertIn("--num-raster-threads=1", first)
+        self.assertIn("--disk-cache-size=67108864", first)
+        self.assertIn("--media-cache-size=16777216", first)
+        self.assertIn("--js-flags=--max-old-space-size=256", first)
         self.assertEqual(first.count("--disable-background-networking"), 1)
 
     def test_non_qt_backend_leaves_qt_environment_alone(self) -> None:
         with unittest.mock.patch.dict("os.environ", {}, clear=True):
             gui_app._prepare_webview_environment("gtk")
             self.assertNotIn("QTWEBENGINE_CHROMIUM_FLAGS", gui_app.os.environ)
+
+
+class RuntimeCleanupTests(unittest.TestCase):
+    def tearDown(self) -> None:
+        lifecycle._reset_for_tests()
+
+    def test_cleanup_runtime_can_include_card_bridge_state(self) -> None:
+        with unittest.mock.patch.object(lifecycle, "_close_card_sessions", return_value=0):
+            with unittest.mock.patch.object(lifecycle, "_terminate_registered_processes", return_value=[]):
+                with unittest.mock.patch.object(
+                    lifecycle,
+                    "_stop_card_bridge_runtime_state",
+                    return_value=[{"action": "pc"}],
+                ) as stop_bridge:
+                    with unittest.mock.patch.object(lifecycle, "_stop_registered_services", return_value=[]):
+                        payload = lifecycle.cleanup_gui_runtime(
+                            include_card_bridge_state=True,
+                        )
+
+        stop_bridge.assert_called_once_with()
+        self.assertEqual(payload["card_bridge"], [{"action": "pc"}])
+
+    def test_card_bridge_state_cleanup_stops_tunnel_and_local_bridge(self) -> None:
+        state = {
+            "ssh_tunnel_pid": 1001,
+            "local_card_bridge_pid": 1002,
+            "local_card_bridge_external": False,
+        }
+        with unittest.mock.patch.object(card_bridge, "_load_remote_rig_state", return_value=state):
+            with unittest.mock.patch.object(
+                card_bridge,
+                "_dispatch_tunnel_stop",
+                return_value={"ok": True, "status": "terminated"},
+            ) as tunnel:
+                with unittest.mock.patch.object(
+                    card_bridge,
+                    "_dispatch_local_stop",
+                    return_value={"ok": True, "status": "terminated"},
+                ) as local:
+                    payload = lifecycle._stop_card_bridge_runtime_state()
+
+        tunnel.assert_called_once()
+        local.assert_called_once()
+        self.assertEqual(
+            [entry["action"] for entry in payload],
+            ["ssh_tunnel_stop", "pc_card_bridge_stop"],
+        )
+
+    def test_card_bridge_state_cleanup_stops_reused_local_bridge(self) -> None:
+        state = {
+            "local_card_bridge_pid": 1002,
+            "local_card_bridge_external": True,
+        }
+        with unittest.mock.patch.object(card_bridge, "_load_remote_rig_state", return_value=state):
+            with unittest.mock.patch.object(
+                card_bridge,
+                "_dispatch_local_stop",
+                return_value={"ok": True, "status": "terminated"},
+            ) as local:
+                payload = lifecycle._stop_card_bridge_runtime_state()
+
+        local.assert_called_once()
+        self.assertEqual(payload, [{
+            "action": "pc_card_bridge_stop",
+            "ok": True,
+            "status": "terminated",
+        }])
 
 
 if __name__ == "__main__":

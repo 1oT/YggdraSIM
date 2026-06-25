@@ -56,6 +56,18 @@ def _post(url: str, payload: dict, *, token: str = "") -> tuple[int, dict]:
         return exc.code, json.loads(exc.read().decode("utf-8") or "{}")
 
 
+def _get(url: str, *, token: str = "") -> tuple[int, dict]:
+    request = urllib_request.Request(url, method="GET")
+    if len(token) > 0:
+        request.add_header("Authorization", f"Bearer {token}")
+    try:
+        with urllib_request.urlopen(request, timeout=5) as response:
+            raw = response.read().decode("utf-8")
+            return response.status, json.loads(raw) if len(raw) > 0 else {}
+    except urllib_error.HTTPError as exc:
+        return exc.code, json.loads(exc.read().decode("utf-8") or "{}")
+
+
 class _FakeCardChannel:
     def __init__(self, reader_index: int = 0, reader_name: str = "") -> None:
         self.reader_index = reader_index
@@ -123,6 +135,27 @@ class ConfigBuildingTests(unittest.TestCase):
         with self.assertRaises(CardBridgeError):
             build_config_from_args(self._parse("--port", "0", "--no-token"))
 
+    def test_apdu_timeout_flag_is_resolved(self) -> None:
+        config = build_config_from_args(
+            self._parse("--token-file", str(self.tempdir / "tok"), "--apdu-timeout-ms", "12000")
+        )
+        self.assertEqual(config.apdu_timeout_ms, 12000)
+
+    def test_pcsc_share_mode_defaults_to_shared_and_can_be_overridden(self) -> None:
+        default_config = build_config_from_args(
+            self._parse("--token-file", str(self.tempdir / "tok-default"))
+        )
+        exclusive_config = build_config_from_args(
+            self._parse(
+                "--token-file",
+                str(self.tempdir / "tok-exclusive"),
+                "--pcsc-share-mode",
+                "exclusive",
+            )
+        )
+        self.assertEqual(default_config.pcsc_share_mode, "shared")
+        self.assertEqual(exclusive_config.pcsc_share_mode, "exclusive")
+
 
 class RunCardBridgeTests(unittest.TestCase):
     def setUp(self) -> None:
@@ -188,6 +221,8 @@ class RunCardBridgeTests(unittest.TestCase):
         apdu_url = url_line.split("apdu URL", 1)[1].split(":", 1)[1].strip()
 
         try:
+            status_url = apdu_url.rsplit("/", 1)[0] + "/status"
+            status_code, status_payload = _get(status_url, token="round-trip-token")
             status, payload = _post(
                 apdu_url, {"apdu": "00A40400"}, token="round-trip-token"
             )
@@ -195,6 +230,8 @@ class RunCardBridgeTests(unittest.TestCase):
             stop_event.set()
             thread.join(timeout=2.0)
 
+        self.assertEqual(status_code, 200)
+        self.assertEqual(status_payload["pid"], os.getpid())
         self.assertEqual(status, 200)
         self.assertEqual(payload, {"data": "CAFEBABE", "sw1": "90", "sw2": "00"})
         self.assertEqual(channel.last_apdu, bytes.fromhex("00A40400"))

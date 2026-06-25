@@ -2,7 +2,7 @@
 """DNS query / answer helpers for the SGP.32 IPA-poll DNS-over-BIP path.
 
 The eUICC simulator has no host networking, so it asks a public resolver
-(default ``8.8.8.8``) for the eIM A-record over BIP UDP just like real
+(default ``192.0.2.53``) for the eIM A-record over BIP UDP just like real
 cards do. This module deals strictly with wire-format DNS messages --
 encoding the question section the IPA puts inside SEND DATA, and parsing
 the answer section the resolver returns through RECEIVE DATA.

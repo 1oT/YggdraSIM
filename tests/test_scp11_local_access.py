@@ -238,7 +238,7 @@ def build_profile_installation_failure(transaction_id: bytes) -> bytes:
         wrap_tlv(b"\x80", bytes.fromhex("021F"))
         + wrap_tlv(b"\x81", bytes.fromhex("07"))
         + wrap_tlv(b"\x0C", b"smdpplus2.smdpp.example.test")
-        + wrap_tlv(b"\x5A", bytes.fromhex("89460811111111111112"))
+        + wrap_tlv(b"\x5A", bytes.fromhex("89880811111111111112"))
     )
     failure_result = wrap_tlv(
         b"\xA1",
@@ -507,7 +507,7 @@ class LocalAccessSessionTests(unittest.TestCase):
         session.collect_profile_metadata = lambda: []  # type: ignore[method-assign]
         session._sync_pending_notifications = lambda response=b"": None  # type: ignore[method-assign]
 
-        response = session.delete_profile("89460811111111111112")
+        response = session.delete_profile("89880811111111111112")
 
         expected_payload = session._build_profile_state_payload(
             session.TAG_DELETE_PROFILE,
@@ -538,7 +538,7 @@ class LocalAccessSessionTests(unittest.TestCase):
 
             metadata = session._build_effective_metadata_document(profile_bytes)
 
-        self.assertEqual(metadata["profile"]["iccid"], "89460811111111111112")
+        self.assertEqual(metadata["profile"]["iccid"], "89880811111111111112")
         self.assertEqual(metadata["profile"]["name"], "Sample Lab")
         self.assertEqual(metadata["profile"]["profile_type"], "Sample Lab")
         self.assertEqual(metadata["operator"]["name"], "Sample Lab")
@@ -565,7 +565,7 @@ class LocalAccessSessionTests(unittest.TestCase):
             ):
                 metadata = session._build_effective_metadata_document(profile_bytes)
 
-        self.assertEqual(metadata["profile"]["iccid"], "89460811111111111112")
+        self.assertEqual(metadata["profile"]["iccid"], "89880811111111111112")
         self.assertEqual(metadata["profile"]["name"], "Sample Lab")
         self.assertEqual(metadata["profile"]["profile_type"], "Sample Lab")
         self.assertEqual(metadata["operator"]["name"], "Sample Lab")
@@ -576,7 +576,7 @@ class LocalAccessSessionTests(unittest.TestCase):
         metadata_document = {
             "profile": {
                 "name": "Sample Lab",
-                "iccid": "89460811111111111112",
+                "iccid": "89880811111111111112",
             },
             "operator": {
                 "name": "Sample Lab",
@@ -596,7 +596,7 @@ class LocalAccessSessionTests(unittest.TestCase):
 
         self.assertEqual(metadata["profile"]["name"], "Sample Lab")
         self.assertEqual(metadata["profile"]["profile_type"], "Sample Lab")
-        self.assertEqual(metadata["profile"]["iccid"], "89460811111111111112")
+        self.assertEqual(metadata["profile"]["iccid"], "89880811111111111112")
         self.assertEqual(metadata["operator"]["name"], "Sample Lab")
         self.assertEqual(metadata["operator"]["mcc"], "999")
         self.assertEqual(metadata["operator"]["mnc"], "99")
@@ -1496,7 +1496,7 @@ class LocalAccessSessionTests(unittest.TestCase):
                 "name": "Hampus test profile",
                 "profile_class": "OPERATIONAL",
                 "profile_type": "Hampus Test",
-                "iccid": "89460811111111111112",
+                "iccid": "89880811111111111112",
                 "icon": {
                     "type": "NONE",
                     "data_hex": "",
@@ -1540,7 +1540,7 @@ class LocalAccessSessionTests(unittest.TestCase):
         self.assertEqual(notif_bits, (b"\x70", 0), "NotificationEvent bits 1,2,3 (enable,disable,delete) per ASN.1")
 
         decoded = decode_rsp_type("StoreMetadataRequest", encoded)
-        self.assertEqual(decoded["iccid"], bytes.fromhex("89460811111111111112"))
+        self.assertEqual(decoded["iccid"], bytes.fromhex("89880811111111111112"))
         self.assertEqual(decoded["serviceProviderName"], "Hampus Test")
         self.assertEqual(decoded["profileName"], "Hampus test profile")
         self.assertEqual(decoded["iconType"], 0)
@@ -1564,7 +1564,7 @@ class LocalAccessSessionTests(unittest.TestCase):
             "profile": {
                 "name": "Local pySim profile",
                 "profile_class": "OPERATIONAL",
-                "iccid": "89460811111111111112",
+                "iccid": "89880811111111111112",
                 "icon": {
                     "type": "NONE",
                     "data_hex": "",
@@ -1636,7 +1636,7 @@ class LocalAccessSessionTests(unittest.TestCase):
             "profile": {
                 "name": "Local pySim profile",
                 "profile_class": "OPERATIONAL",
-                "iccid": "89460811111111111112",
+                "iccid": "89880811111111111112",
                 "icon": {
                     "type": "NONE",
                     "data_hex": "",
@@ -1728,7 +1728,7 @@ class LocalAccessSessionTests(unittest.TestCase):
             "profile": {
                 "name": "Local pySim profile",
                 "profile_class": "OPERATIONAL",
-                "iccid": "89460811111111111112",
+                "iccid": "89880811111111111112",
                 "icon": {
                     "type": "NONE",
                     "data_hex": "",
@@ -1970,7 +1970,7 @@ class LocalAccessSessionTests(unittest.TestCase):
         error_text = str(error.exception)
         self.assertIn("bppCommandId=5", error_text)
         self.assertIn("errorReason=13", error_text)
-        self.assertIn("iccid=89460811111111111112", error_text)
+        self.assertIn("iccid=89880811111111111112", error_text)
         self.assertIn("\n  [ERROR 13]", error_text)
         self.assertIn("\n  command=A3.ProtectedProfilePackageCommand", error_text)
         log_names = [name for name, _apdu in session.apdu_channel.send_calls]

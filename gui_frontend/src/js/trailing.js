@@ -1061,22 +1061,6 @@
       onClick: scp03GateOpen(tab, "scp03.fs_resize",
         function () { scp03ShowFsResize(tab); }),
     });
-    // UPDATE BINARY (transparent) / UPDATE RECORD (linear / cyclic) gate
-    // is decided up front by ``avail.update``; a single button keeps the
-    // toolbar compact and the wizard branches on ``info.kind`` so the
-    // operator only sees the relevant fields.
-    var updateBtn = scp03MakeFsActionButton({
-      label: "Update",
-      title: avail.update.reason,
-      disabledReason: avail.update.reason,
-      enabled: avail.update.enabled,
-      danger: true,
-      onClick: scp03GateOpen(tab,
-        avail.update.apdu === "record"
-          ? "scp03.update_record"
-          : "scp03.update_binary",
-        function () { scp03ShowFsUpdate(tab, info.kind); }),
-    });
     var lifecycleBtn = scp03MakeFsActionButton({
       label: "Lifecycle",
       title: (avail.activate.enabled || avail.terminate.enabled)
@@ -1111,7 +1095,6 @@
     group.appendChild(createBtn);
     group.appendChild(deleteBtn);
     group.appendChild(resizeBtn);
-    group.appendChild(updateBtn);
     group.appendChild(lifecycleBtn);
     group.appendChild(searchBtn);
     bar.appendChild(group);
@@ -1215,11 +1198,13 @@
       wrap.appendChild(renderTransparentPayload(payload, {
         path: data.path || "",
         fid: data.fid || "",
+        tab: tab || null,
       }));
     } else if (payload.kind === "records") {
       wrap.appendChild(renderRecordsPayload(payload, {
         path: data.path || "",
         fid: data.fid || "",
+        tab: tab || null,
       }));
     } else {
       // Unknown kind — render the raw payload for transparency.
@@ -1228,15 +1213,63 @@
     container.appendChild(wrap);
   }
 
+  function scp03BuildPayloadUpdateButton(options) {
+    var opts = options || {};
+    var mode = opts.mode === "record" ? "record" : "binary";
+    var tab = opts.tab || null;
+    var rawHex = scp03StageHexNormalise(opts.hex || "");
+    var pathText = String(opts.path || "").trim();
+    var recordNo = Number(opts.record || 0);
+    var button = document.createElement("button");
+    button.type = "button";
+    button.className = "cc-payload-update-btn";
+    button.textContent = mode === "record" ? "Update record" : "Update body";
+    button.title = mode === "record"
+      ? "Open UPDATE RECORD with this record number and hex pre-filled."
+      : "Open UPDATE BINARY with this EF body hex pre-filled.";
+    if (!tab || !tab.sessionId || rawHex.length === 0) {
+      button.disabled = true;
+      button.title = !tab || !tab.sessionId
+        ? "Open a session first."
+        : "No bytes available to update.";
+      return button;
+    }
+    button.addEventListener("click", function () {
+      var actionId = mode === "record" ? "scp03.update_record" : "scp03.update_binary";
+      var open = function () {
+        if (mode === "record") {
+          scp03StageOpenUpdateRecord(tab, rawHex, recordNo, pathText);
+        } else {
+          scp03StageOpenUpdateBinary(tab, rawHex, pathText);
+        }
+      };
+      if (typeof scp03GateOpen === "function") {
+        scp03GateOpen(tab, actionId, open)();
+        return;
+      }
+      open();
+    });
+    return button;
+  }
+
   function renderTransparentPayload(payload) {
     var sourceMeta = arguments.length > 1 ? arguments[1] : null;
     var box = document.createElement("div");
     box.className = "cc-payload cc-payload-transparent";
+    var head = document.createElement("div");
+    head.className = "cc-payload-head";
     var sw = document.createElement("p");
     sw.className = "cc-sw";
     sw.innerHTML = "SW: <code>" + escapeHtml(payload.sw || "") + "</code> · length "
       + String(payload.length || 0);
-    box.appendChild(sw);
+    head.appendChild(sw);
+    head.appendChild(scp03BuildPayloadUpdateButton({
+      mode: "binary",
+      tab: sourceMeta && sourceMeta.tab ? sourceMeta.tab : null,
+      path: sourceMeta && sourceMeta.path ? String(sourceMeta.path) : "",
+      hex: payload.hex || "",
+    }));
+    box.appendChild(head);
     if (payload.decoded) {
       // Thread the raw EF body through to the decoded toolbar so the
       // service-table renderer can wire its "Stage edit" affordance —
@@ -1376,6 +1409,18 @@
       }));
     }
     if (rec.hex) {
+      var actions = document.createElement("div");
+      actions.className = "cc-record-actions";
+      actions.appendChild(scp03BuildPayloadUpdateButton({
+        mode: "record",
+        tab: sourceMeta && sourceMeta.tab ? sourceMeta.tab : null,
+        path:
+          (payload && payload.path ? String(payload.path) : "")
+          || (sourceMeta && sourceMeta.path ? String(sourceMeta.path) : ""),
+        record: Number(rec.record_number || 0),
+        hex: rec.hex || "",
+      }));
+      card.appendChild(actions);
       card.appendChild(renderHexBlock(rec.hex));
     }
     return card;
@@ -4471,6 +4516,7 @@
     loadHealth();
     loadBackend();
     loadCommandCatalogue();
+    loadCardBridgeStatus();
     scheduleHealthPoll();
     refreshReaderPane();
     // Top-bar reader strip — installs its own refresh button handler,
@@ -4485,6 +4531,7 @@
     // operator hide brand / reader strip / breadcrumbs / theme picker
     // to recover the full vertical extent for a workbench.
     topbarCollapseBootstrap();
+    appCloseBootstrap();
     logBus.emit({
       level: "info",
       source: "system",
@@ -4571,5 +4618,35 @@
     btn.addEventListener("click", function () {
       var currently = shell.getAttribute("data-topbar-collapsed") === "true";
       _apply(!currently);
+    });
+  }
+
+  function appCloseBootstrap() {
+    var btn = document.getElementById("app-close-button");
+    if (!btn) return;
+    btn.addEventListener("click", async function () {
+      btn.disabled = true;
+      try {
+        if (
+          window.pywebview
+          && window.pywebview.api
+          && typeof window.pywebview.api.close_app === "function"
+        ) {
+          var closed = await window.pywebview.api.close_app();
+          if (closed) return;
+        }
+        window.close();
+        setTimeout(function () {
+          btn.disabled = false;
+          if (!window.closed && typeof setStatusAction === "function") {
+            setStatusAction("Close this browser tab/window to exit the web view.");
+          }
+        }, 150);
+      } catch (_err) {
+        btn.disabled = false;
+        if (typeof setStatusError === "function") {
+          setStatusError("Application close request failed.");
+        }
+      }
     });
   }

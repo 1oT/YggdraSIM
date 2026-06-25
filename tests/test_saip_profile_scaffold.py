@@ -186,7 +186,7 @@ class NewProfileScaffoldShellTests(unittest.TestCase):
                     [
                         ("major-version", 2),
                         ("minor-version", 3),
-                        ("iccid", bytes.fromhex("89461111111111111112")),
+                        ("iccid", bytes.fromhex("89881111111111111112")),
                         ("eUICC-Mandatory-services", {}),
                         ("eUICC-Mandatory-GFSTEList", []),
                     ]
@@ -203,7 +203,7 @@ class NewProfileScaffoldShellTests(unittest.TestCase):
             ) as mocked_build:
                 with contextlib.redirect_stdout(io.StringIO()) as captured:
                     self.shell._cmd_new_template(
-                        f'"{output_path}" PRESET=MINIMAL ICCID=89461111111111111112'
+                        f'"{output_path}" PRESET=MINIMAL ICCID=89881111111111111112'
                     )
 
             rendered = json.loads(output_path.read_text(encoding="utf-8"))
@@ -212,7 +212,7 @@ class NewProfileScaffoldShellTests(unittest.TestCase):
         self.assertEqual(rendered["sections"]["header"]["iccid"]["hex"], "{ICCID}")
         self.assertEqual(
             rendered["__ygg_token_defs__"]["ICCID"]["hex"],
-            "89461111111111111112",
+            "89881111111111111112",
         )
         self.assertIn("Scaffolded MINIMAL template", captured.getvalue())
 
@@ -263,7 +263,7 @@ class NewProfileScaffoldShellTests(unittest.TestCase):
             "sections": {
                 "header": OrderedDict(
                     [
-                        ("iccid", bytes.fromhex("89461111111111111112")),
+                        ("iccid", bytes.fromhex("89881111111111111112")),
                     ]
                 ),
                 "end": OrderedDict(),
@@ -338,13 +338,13 @@ class NewProfileScaffoldShellTests(unittest.TestCase):
                         with contextlib.redirect_stdout(io.StringIO()) as captured:
                             self.shell._cmd_new_profile(
                                 f'"{output_path}" PRESET=BASIC-MF '
-                                "ICCID=89461111111111111112"
+                                "ICCID=89881111111111111112"
                             )
 
         encoded_document = mocked_encode.call_args.args[0]
         self.assertEqual(
             encoded_document["sections"]["header"]["iccid"],
-            bytes.fromhex("89461111111111111112"),
+            bytes.fromhex("89881111111111111112"),
         )
         self.assertEqual(
             encoded_document["sections"]["mf"]["ef-iccid"][0][1],
@@ -352,7 +352,7 @@ class NewProfileScaffoldShellTests(unittest.TestCase):
         )
         self.assertEqual(
             encoded_document["__ygg_token_defs__"]["ICCID"]["hex"],
-            "89461111111111111112",
+            "89881111111111111112",
         )
         self.assertIn("Placeholder override summary", captured.getvalue())
 

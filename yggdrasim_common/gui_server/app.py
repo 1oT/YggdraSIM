@@ -29,7 +29,7 @@ import threading
 import time
 from contextlib import closing
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 from .auth import AuthMiddleware, FailureRateLimiter
 from .config import (
@@ -58,9 +58,16 @@ _QTWEBENGINE_DEFAULT_FLAGS = (
     "--disable-dev-shm-usage",
     "--disable-extensions",
     "--disable-features=AutofillServerCommunication,MediaRouter,OptimizationGuideModelDownloading",
+    "--disable-gpu",
+    "--disable-gpu-compositing",
+    "--disk-cache-size=67108864",
+    "--js-flags=--max-old-space-size=256",
+    "--media-cache-size=16777216",
     "--no-first-run",
+    "--num-raster-threads=1",
     "--renderer-process-limit=1",
 )
+_DESKTOP_FORCE_EXIT_DELAY_SECONDS = 1.0
 
 
 class _UvicornRunner:
@@ -476,8 +483,31 @@ def _cleanup_gui_runtime_on_shutdown(*, include_default_hil_service: bool) -> No
     summary = cleanup_gui_runtime(
         stop_external_services=True,
         include_default_hil_service=include_default_hil_service,
+        include_card_bridge_state=include_default_hil_service,
     )
     _LOGGER.info("GUI shutdown cleanup: %s", summary)
+
+
+def _request_desktop_close_shutdown() -> None:
+    """Run desktop cleanup and ensure pywebview cannot leave the process alive."""
+    try:
+        _cleanup_gui_runtime_on_shutdown(include_default_hil_service=True)
+    finally:
+        _schedule_desktop_process_exit()
+
+
+def _schedule_desktop_process_exit(
+    *,
+    delay_seconds: float = _DESKTOP_FORCE_EXIT_DELAY_SECONDS,
+) -> None:
+    """Force-exit the desktop host if pywebview does not unwind cleanly."""
+
+    def _exit_process() -> None:
+        os._exit(0)
+
+    timer = threading.Timer(max(0.0, float(delay_seconds)), _exit_process)
+    timer.daemon = True
+    timer.start()
 
 
 def _ensure_self_signed_tls() -> tuple[str, str]:
@@ -563,8 +593,9 @@ class _PywebviewJsBridge:
     picked an empty location.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, on_close_requested: Callable[[], None] | None = None) -> None:
         self._webview = None  # set lazily via :meth:`attach`
+        self._on_close_requested = on_close_requested
 
     def attach(self, webview_module: Any) -> None:
         self._webview = webview_module
@@ -635,6 +666,27 @@ class _PywebviewJsBridge:
         except Exception:  # noqa: BLE001
             return ""
         return _first_dialog_path(result)
+
+    def close_app(self) -> bool:
+        """Clean up GUI-owned processes and close the desktop WebView window."""
+        if self._on_close_requested is not None:
+            try:
+                self._on_close_requested()
+            except Exception as error:  # noqa: BLE001
+                _LOGGER.warning("desktop close cleanup failed: %s", error)
+        try:
+            window = self._active_window()
+            destroy = getattr(window, "destroy", None)
+            if callable(destroy):
+                destroy()
+                return True
+            close = getattr(window, "close", None)
+            if callable(close):
+                close()
+                return True
+        except Exception:  # noqa: BLE001
+            return False
+        return False
 
 
 def _first_dialog_path(result: Any) -> str:
@@ -746,7 +798,7 @@ def _launch_pywebview(config: GuiServerConfig) -> None:
     # is expected to strip it and promote it to sessionStorage.
     url = f"{config.base_url}/?t={config.token}"
 
-    bridge = _PywebviewJsBridge()
+    bridge = _PywebviewJsBridge(on_close_requested=_request_desktop_close_shutdown)
     bridge.attach(webview)
 
     window = webview.create_window(

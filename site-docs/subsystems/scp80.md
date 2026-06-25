@@ -92,7 +92,7 @@ The parameter set exposed by `set` covers:
 ### Send a plain `UPDATE BINARY` via OTA
 
 ```text
-[SCP80] > iccid 8946000000000000000F
+[SCP80] > iccid 8988000000000000000F
 [SCP80] > set kic_indicator 15
 [SCP80] > set kid_indicator 15
 [SCP80] > set TAR 000000
@@ -103,13 +103,13 @@ The parameter set exposed by `set` covers:
 ### One-shot OTA wrap and send
 
 ```bash
-python -m SCP80 --cmd "iccid 8946000000000000000F; ota 00D6000003A0A0A0; exit"
+python -m SCP80 --cmd "iccid 8988000000000000000F; ota 00D6000003A0A0A0; exit"
 ```
 
 ### Reuse ICCID-bound state across sessions
 
 ```text
-[SCP80] > iccid 8946000000000000000F
+[SCP80] > iccid 8988000000000000000F
 [SCP80] > show
 [SCP80] > build 00A40000023F00
 [SCP80] > send

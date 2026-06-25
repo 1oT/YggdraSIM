@@ -35,6 +35,7 @@ class SaipOpenPickerTuiTests(unittest.TestCase):
         browse_directory.mkdir(parents=True, exist_ok=True)
         (browse_directory / "alpha.der").write_bytes(b"\x01")
         (browse_directory / "beta.upp").write_bytes(b"\x02")
+        (browse_directory / "gamma.varder").write_text("A0", encoding="utf-8")
         (browse_directory / "notes.md").write_text("ignore\n", encoding="utf-8")
         (browse_directory / ".hidden.der").write_bytes(b"\x03")
         (browse_directory / "subdir").mkdir()
@@ -46,6 +47,7 @@ class SaipOpenPickerTuiTests(unittest.TestCase):
         self.assertIn("DIR  subdir/", labels)
         self.assertIn("alpha.der", labels)
         self.assertIn("beta.upp", labels)
+        self.assertIn("gamma.varder", labels)
         self.assertNotIn("notes.md", labels)
         self.assertNotIn(".hidden.der", labels)
 

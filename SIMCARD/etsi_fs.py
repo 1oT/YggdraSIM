@@ -2760,7 +2760,7 @@ def build_default_state() -> SimCardState:
     Creates the base ETSI file system tree, personalises it with synthetic test
     identifiers, and returns the singleton-ready state object.
     """
-    iccid = "89461111111111111112"
+    iccid = "89881111111111111112"
     # MCC/MNC 001/01 - 3GPP test PLMN. Keeps the default profile identity
     # compatible with osmo-hlr / open5gs / free5gc lab HSS configurations.
     imsi = "001010000000001"
@@ -2778,7 +2778,7 @@ def build_default_state() -> SimCardState:
         sqn=bytes.fromhex("000000000001"),
     )
     configured_data = SimEuiccConfiguredData(
-        root_smds_address="lpa.ds.gsma.com",
+        root_smds_address="root-smds.example.com",
         additional_root_smds_addresses=["smds2.yggdrasim.test", "smds3.yggdrasim.test"],
         allowed_ci_pkids=[root_ci_pkid],
         ci_list=[root_ci_pkid],
@@ -2793,12 +2793,12 @@ def build_default_state() -> SimCardState:
             service_provider=primary_service_provider,
             profile_name="Yggdrasil Primary",
             imsi=imsi,
-            impi="user@yggdrasim.test",
+            impi="user@example.test",
             notification_address="rsp.example.com",
             profile_image=_default_profile_image(
                 iccid,
                 imsi,
-                "user@yggdrasim.test",
+                "user@example.test",
                 service_provider=primary_service_provider,
                 mnc_length=mnc_length_default,
             ),
@@ -2807,19 +2807,19 @@ def build_default_state() -> SimCardState:
         ),
         SimProfileEntry(
             aid=ISDP2_AID,
-            iccid="89461111111111111129",
+            iccid="89881111111111111129",
             state="disabled",
             profile_class="test",
             nickname="Lab (EU 02)",
             service_provider=secondary_service_provider,
             profile_name="Yggdrasil Secondary",
             imsi=secondary_imsi,
-            impi="user-secondary@yggdrasim.test",
+            impi="user-secondary@example.test",
             notification_address="rsp.example.com",
             profile_image=_default_profile_image(
-                "89461111111111111129",
+                "89881111111111111129",
                 secondary_imsi,
-                "user-secondary@yggdrasim.test",
+                "user-secondary@example.test",
                 service_provider=secondary_service_provider,
                 mnc_length=mnc_length_default,
             ),
@@ -2844,7 +2844,7 @@ def build_default_state() -> SimCardState:
         eim_entries=[
             SimEimEntry(
                 eim_id="2.25.311782205282738360923618091971140414400",
-                eim_fqdn="yggdrasim.eim.test.1ot.com",
+                eim_fqdn="eim.example.test",
                 eim_id_type=1,
                 counter_value=1,
                 association_token=16,
@@ -4059,9 +4059,9 @@ class EtsiFileSystem:
             )
         else:
             descriptor = b"\x41\x21"
-        # Tag order mirrors commercial UICCs (sysmoUSIM-SJS1 reference
-        # trace): 82 83 [84] [A5] 8A 8B [80] [88] [C6]. Strict baseband
-        # parsers (e.g. Qualcomm RIL) walk the FCP linearly and
+        # Tag order mirrors commonly observed UICC FCP traces:
+        # 82 83 [84] [A5] 8A 8B [80] [88] [C6]. Strict baseband
+        # parsers can walk the FCP linearly and
         # tolerate missing tags but reject unexpected ordering, so we
         # keep this identical to the on-the-wire format observed.
         body = tlv("82", descriptor)

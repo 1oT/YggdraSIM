@@ -1,10 +1,16 @@
 from __future__ import annotations
 
+import argparse
 import threading
 import unittest
 from unittest import mock
 
-from Tools.HilBridge.main import build_stop_signal_handler, run_bridge_server
+from Tools.HilBridge.main import (
+    add_bridge_runtime_arguments,
+    build_bridge_config_from_args,
+    build_stop_signal_handler,
+    run_bridge_server,
+)
 
 
 class _FakeBridgeServer:
@@ -39,6 +45,15 @@ class HilBridgeMainTests(unittest.TestCase):
         self.assertIsNotNone(server.stop_event)
         self.assertTrue(server.stop_event.is_set())
         self.assertEqual(server.close_calls, 1)
+
+    def test_bridge_config_accepts_apdu_timeout_flag(self) -> None:
+        parser = argparse.ArgumentParser()
+        add_bridge_runtime_arguments(parser, include_list_readers=False)
+        args = parser.parse_args(["--apdu-timeout-ms", "15000"])
+
+        config = build_bridge_config_from_args(args)
+
+        self.assertEqual(config.apdu_timeout_ms, 15000)
 
 
 if __name__ == "__main__":

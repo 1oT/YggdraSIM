@@ -204,7 +204,7 @@ class LauncherSafetyTests(unittest.TestCase):
     def test_main_refuses_nonloopback_without_override(self) -> None:
         os.environ["YGGDRASIM_5GCORE_MODE"] = "stub"
         try:
-            rc = main(["--host", "10.0.0.1", "--port", "0"])
+            rc = main(["--host", "192.0.2.1", "--port", "0"])
         finally:
             del os.environ["YGGDRASIM_5GCORE_MODE"]
         self.assertEqual(rc, 2)

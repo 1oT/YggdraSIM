@@ -10,7 +10,6 @@ import shutil
 INCLUDED_TOP_LEVEL_DIRS = {
     "guides",
     "plugins",
-    "reports",
     "scripts",
     "SCP11",
     "tests",
@@ -38,7 +37,6 @@ GROUP_TITLES = {
     "scripts": "Scripts",
     "SCP11": "SCP11 Module Docs",
     "tests": "Test And Harness Docs",
-    "reports": "Reports",
 }
 
 GROUP_ORDER = [
@@ -48,7 +46,6 @@ GROUP_ORDER = [
     "Plugins",
     "Scripts",
     "Test And Harness Docs",
-    "Reports",
     "Other Docs",
 ]
 

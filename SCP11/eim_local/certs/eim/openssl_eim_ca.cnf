@@ -12,7 +12,7 @@ L = Stockholm
 O = YggdraSIM
 OU = eSIM Simulator CA
 CN = YggdraSIM.eSIM.Simulator.RootCA
-emailAddress = certops@yggdrasim.local
+emailAddress = certops@example.test
 
 [ v3_ca ]
 subjectKeyIdentifier = hash

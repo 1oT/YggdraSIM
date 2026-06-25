@@ -16,7 +16,7 @@ verbatim:
          Applications (SCP03 Global Platform)
          Over-the-Air (SCP80)
        eSIM (SCP11) [Management / Local SMDP+ / Local eIM]
-       Tools [SAIP Tool / SUCI Calculator]
+       Tools [SAIP Tool / Offline Tools]
        Environment [Configuration]
      Here we separate the Filesystem from the Application section
      within the SCP03 module to offload the cognitive information
@@ -107,11 +107,13 @@ def test_scp11_family_grouped_under_esim() -> None:
     assert 'subsystem: "eSIM Test"' not in js
 
 
-def test_tools_group_hosts_saip_and_suci() -> None:
-    """SAIP Tool + SUCI Calculator land under the Tools group."""
+def test_tools_group_hosts_saip_and_offline_tools() -> None:
+    """SAIP Tool stays separate while non-card tools share one module."""
     js = _read("app.js")
     assert re.search(r'leaf-tool-saip[\s\S]{0,400}?subsystem: "SAIP"', js)
-    assert re.search(r'leaf-tool-suci[\s\S]{0,400}?subsystem: "SUCI Tool"', js)
+    assert re.search(r'leaf-tool-offline[\s\S]{0,400}?subsystem: "Offline Tools"', js)
+    assert "leaf-tool-suci" not in js
+    assert 'subsystem: "SUCI Tool"' not in js
 
 
 def test_environment_group_routes_to_configuration_inspect_view() -> None:

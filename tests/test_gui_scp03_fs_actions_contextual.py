@@ -205,11 +205,9 @@ def test_css_tokens_for_action_bar_present() -> None:
 
 
 # ----------------------------------------------------------------------
-# Update wiring — operator request: "We are missing the update actions
-# (Update binary/update record)". The button must be present in the
-# contextual action bar and gated by file kind, and the wizards must
-# dispatch the existing scp03.update_binary / scp03.update_record
-# actions through the auth gate.
+# Update wiring — the FCP contextual bar exposes file administration.
+# Data mutation lives next to the transparent body / record hex so the
+# selected path, record number, and bytes are inferred by the tool.
 # ----------------------------------------------------------------------
 
 
@@ -247,27 +245,58 @@ def test_availability_matrix_exposes_update_slot() -> None:
             f"{guard} branch must keep UPDATE disabled (EF-only)"
 
 
-def test_action_bar_renders_update_button() -> None:
-    """The contextual action bar exposes ``Update`` between Resize and Lifecycle."""
+def test_action_bar_does_not_render_update_button() -> None:
+    """The contextual action bar no longer exposes the data-update action."""
     js = _read("app.js")
-    assert 'label: "Update",' in js, "Update button label missing from action bar"
-    # The button must consult ``avail.update`` (so the gating actually
-    # works) and route through ``scp03ShowFsUpdate`` via the auth gate.
-    assert "avail.update.enabled" in js, \
-        "Update button no longer reads avail.update.enabled"
-    assert "scp03ShowFsUpdate(tab, info.kind)" in js, \
-        "Update button no longer calls the kind-aware wizard router"
-    # Auth gate IDs must match the registered specs so requires_auth
-    # actually fires the credential modal.
-    assert '"scp03.update_binary"' in js
-    assert '"scp03.update_record"' in js
-    # The button is appended to the file-scoped group (not the card-wide
-    # group) — pin the order so it stays next to Resize/Lifecycle.
+    bar_idx = js.index("function scp03BuildFsActionBar(tab, data)")
+    bar_end = js.index("function renderFcpResult(data, container, tab)", bar_idx)
+    bar_body = js[bar_idx:bar_end]
+
+    assert 'label: "Update",' not in bar_body
+    assert "scp03ShowFsUpdate(tab, info.kind)" not in bar_body
+
     create_pos = js.index('group.appendChild(createBtn);')
-    update_pos = js.index('group.appendChild(updateBtn);')
     lifecycle_pos = js.index('group.appendChild(lifecycleBtn);')
-    assert create_pos < update_pos < lifecycle_pos, \
-        "Update button is no longer between Resize and Lifecycle in the file group"
+    search_pos = js.index('group.appendChild(searchBtn);')
+    assert create_pos < lifecycle_pos < search_pos, \
+        "Lifecycle/Search ordering drifted in the file action group"
+
+
+def test_payload_update_buttons_infer_path_record_and_hex() -> None:
+    """Transparent bodies and records carry their own update buttons."""
+    js = _read("app.js")
+    assert "function scp03BuildPayloadUpdateButton(options)" in js
+    assert "cc-payload-update-btn" in js
+
+    transparent_idx = js.index("function renderTransparentPayload(payload)")
+    transparent_end = js.index("function scp03IsRecordTerminator", transparent_idx)
+    transparent_body = js[transparent_idx:transparent_end]
+    for token in (
+        'mode: "binary"',
+        "tab: sourceMeta && sourceMeta.tab ? sourceMeta.tab : null",
+        "path: sourceMeta && sourceMeta.path ? String(sourceMeta.path) : \"\"",
+        "hex: payload.hex || \"\"",
+        "scp03StageOpenUpdateBinary(tab, rawHex, pathText)",
+    ):
+        assert token in transparent_body or token in js
+
+    record_idx = js.index("function renderSingleRecord(rec, payload)")
+    record_end = js.index("function renderDecodedBlock(decoded, meta, options)", record_idx)
+    record_body = js[record_idx:record_end]
+    for token in (
+        "cc-record-actions",
+        'mode: "record"',
+        "record: Number(rec.record_number || 0)",
+        "hex: rec.hex || \"\"",
+        "scp03StageOpenUpdateRecord(tab, rawHex, recordNo, pathText)",
+    ):
+        assert token in record_body or token in js
+
+    helper_idx = js.index("function scp03StageOpenUpdateBinary")
+    helper_end = js.index("function scp03StageOpenUpdateRecord", helper_idx)
+    helper_body = js[helper_idx:helper_end]
+    assert 'document.getElementById("cc-fs-wiz-path")' in helper_body
+    assert 'document.getElementById("cc-fs-wiz-hex_data")' in helper_body
 
 
 def test_fs_update_wizards_present() -> None:

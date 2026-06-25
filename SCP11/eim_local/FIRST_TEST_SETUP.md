@@ -6,10 +6,10 @@ This setup seeds one concrete first-test identity and package set for the local 
 
 - eIM ID: `2.25.311782205282738360923618091971140414400`
 - eIM ID type: `OID`
-- eIM FQDN: `yggdrasim.eim.test.1ot.com`
-- eIM endpoint: `https://yggdrasim.eim.test.1ot.com/gsma/rsp2/asn1`
-- SM-DP+ endpoint: `https://yggdrasim.smdpp.test.1ot.com/gsma/rsp2/es9plus`
-- SM-DP+ address: `yggdrasim.smdpp.test.1ot.com`
+- eIM FQDN: `eim.example.test`
+- eIM endpoint: `https://eim.example.test/gsma/rsp2/asn1`
+- SM-DP+ endpoint: `https://smdpp.example.test/gsma/rsp2/es9plus`
+- SM-DP+ address: `smdpp.example.test`
 - CI PKID: `F54172BDF98A95D65CBEB88A38A1C11D800A85C3`
 
 The first-test signing and TLS-trust material is no longer bundled in the
@@ -96,4 +96,4 @@ RESP-LOG 20
 
 ## Operational Note
 
-The shipped OID is a UUID-derived dummy under `2.25`, not a copied private-enterprise branch. `yggdrasim.eim.test.1ot.com` and `yggdrasim.smdpp.test.1ot.com` can still be carried through the package runtime fields, while the module continues to use its local intercept path for execution.
+The shipped OID is a UUID-derived dummy under `2.25`, not a copied private-enterprise branch. `eim.example.test` and `smdpp.example.test` can still be carried through the package runtime fields, while the module continues to use its local intercept path for execution.

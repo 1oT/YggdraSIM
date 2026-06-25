@@ -1380,7 +1380,7 @@ def _dispatch_scan(
     reader_index = _resolve_reader_index(reader_name)
 
     def _work(console: Any) -> dict[str, Any]:
-        snapshot = console._collect_snapshot()
+        snapshot = console._collect_start_snapshot()
         profiles: list[dict[str, Any]] = []
         for row in getattr(snapshot, "profiles", []) or []:
             profiles.append({

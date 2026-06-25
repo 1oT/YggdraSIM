@@ -18,8 +18,7 @@ file) may change without notice between minor releases.
 - Post-v1 Tools tier staging (not part of this release):
   in-process `Tools/YggdraCore/` stubs (subscription store, AUSF
   stub, AAnF stub, FastAPI loopback, BYO Open5GS bridge);
-  `Tools/Sunrise6G/` QoD / Location / models stubs; local-loopback
-  `Tools/CardBridge/` HTTP card-relay daemon. The HTTP / CLI surface
+  local-loopback `Tools/CardBridge/` HTTP card-relay daemon. The HTTP / CLI surface
   hardening, BYO-Open5GS resilience checks, and the public docs
   pass for these modules are still pending — they are not part of
   the v1.0.0 promise.

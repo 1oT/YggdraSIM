@@ -2,6 +2,7 @@
 """HIL-Bridge APDU router: dispatches incoming C-APDUs to the registered handler (relay, recorder, or simulated card)."""
 from __future__ import annotations
 
+import inspect
 import json
 import logging
 import os
@@ -18,7 +19,7 @@ from yggdrasim_common.card_backend import describe_card_backend, is_simulated_ca
 from yggdrasim_common.runtime_paths import ensure_runtime_dir, runtime_path
 
 from .apdu_relay import ApduRelayConfig, HilBridgeApduRelayService
-from .pcsc import PcscBridgeError, PcscCardChannel
+from .pcsc import DEFAULT_APDU_TIMEOUT_MS, PcscBridgeError, PcscCardChannel, resolve_apdu_timeout_ms
 from .proactive import ProactiveRefreshBroker
 from .remote_card import (
     RemoteRelayCardChannel,
@@ -78,6 +79,20 @@ _PCSC_CONNECT_MAX_RETRIES = 5
 _PCSC_CONNECT_BACKOFF_BASE = 0.5
 
 
+def _transmit_with_timeout(channel: Any, apdu: bytes, timeout_ms: int) -> tuple[bytes, int, int]:
+    transmit = getattr(channel, "transmit")
+    try:
+        signature = inspect.signature(transmit)
+    except (TypeError, ValueError):
+        response_data, sw1, sw2 = transmit(bytes(apdu))
+    else:
+        if "timeout_ms" in signature.parameters:
+            response_data, sw1, sw2 = transmit(bytes(apdu), timeout_ms=timeout_ms)
+        else:
+            response_data, sw1, sw2 = transmit(bytes(apdu))
+    return bytes(response_data), int(sw1), int(sw2)
+
+
 @dataclass(slots=True)
 class BackendCardChannel:
     reader_index: int = 0
@@ -90,6 +105,7 @@ class BackendCardChannel:
     remote_card_url: str = ""
     remote_card_auth_token: str = ""
     remote_card_token_file: str = ""
+    apdu_timeout_ms: int = DEFAULT_APDU_TIMEOUT_MS
     _backend_name: str = field(default="", init=False, repr=False)
     _channel: Any = field(default=None, init=False, repr=False)
     _reader_label: str = field(default="", init=False, repr=False)
@@ -142,7 +158,12 @@ class BackendCardChannel:
                 explicit_token=self.remote_card_auth_token,
                 explicit_token_file=self.remote_card_token_file,
             )
-            channel = RemoteRelayCardChannel(url=remote_url, auth_token=token)
+            timeout_ms = resolve_apdu_timeout_ms(self.apdu_timeout_ms)
+            channel = RemoteRelayCardChannel(
+                url=remote_url,
+                auth_token=token,
+                timeout_seconds=max(1, (timeout_ms + 999) // 1000),
+            )
             channel.connect()
             self._channel = channel
             self._backend_name = "remote"
@@ -200,7 +221,6 @@ class BackendCardChannel:
         self.reconnect()
         return {"mode": "backend-reconnect"}
 
-
     def disconnect(self) -> None:
         """Close the WebSocket connection."""
         channel = self._channel
@@ -218,10 +238,12 @@ class BackendCardChannel:
             return bytes(channel.get_atr())
         return bytes(channel.getATR())
 
-    def transmit(self, apdu: bytes) -> tuple[bytes, int, int]:
+    def transmit(self, apdu: bytes, *, timeout_ms: int | None = None) -> tuple[bytes, int, int]:
         channel = self._require_channel()
-        response_data, sw1, sw2 = channel.transmit(bytes(apdu))
-        return bytes(response_data), int(sw1), int(sw2)
+        effective_timeout_ms = resolve_apdu_timeout_ms(
+            self.apdu_timeout_ms if timeout_ms is None else timeout_ms
+        )
+        return _transmit_with_timeout(channel, bytes(apdu), effective_timeout_ms)
 
     def proactive_status_payload(self) -> dict[str, Any]:
         channel = self._require_channel()
@@ -252,6 +274,7 @@ class BridgeConfig:
     # ``reader_index`` / ``reader_name`` are ignored in this mode.
     remote_card_url: str = ""
     remote_card_token_file: str = ""
+    apdu_timeout_ms: int = DEFAULT_APDU_TIMEOUT_MS
     client_id: int = 0
     client_slot: int = 0
     bank_id: int = 1
@@ -364,9 +387,16 @@ class CardWorker:
     responds.
     """
 
-    def __init__(self, card: BackendCardChannel, card_lock: threading.Lock) -> None:
+    def __init__(
+        self,
+        card: BackendCardChannel,
+        card_lock: threading.Lock,
+        *,
+        apdu_timeout_ms: int = DEFAULT_APDU_TIMEOUT_MS,
+    ) -> None:
         self._card = card
         self._card_lock = card_lock
+        self._apdu_timeout_ms = resolve_apdu_timeout_ms(apdu_timeout_ms)
         self._wakeup_r, self._wakeup_w = os.pipe()
         os.set_blocking(self._wakeup_r, False)
         self._shutdown = threading.Event()
@@ -410,20 +440,23 @@ class CardWorker:
         self,
         apdu: bytes,
         *,
-        timeout_ms: int = 5000,
+        timeout_ms: int | None = None,
     ) -> tuple[bytes, int, int]:
         """Submit *apdu* and block the calling thread until the card responds.
 
         Only called from the relay HTTP thread (or any non-event-loop
         thread).  The event loop must never call this.
         """
+        effective_timeout_ms = resolve_apdu_timeout_ms(
+            self._apdu_timeout_ms if timeout_ms is None else timeout_ms
+        )
         result_q: queue.Queue = queue.Queue(maxsize=1)
         self._request_queue.put((result_q, apdu, None))
         try:
-            result = result_q.get(timeout=max(0.1, timeout_ms / 1000.0))
+            result = result_q.get(timeout=max(0.1, effective_timeout_ms / 1000.0))
         except queue.Empty:
             raise PcscBridgeError(
-                f"Card APDU transmit timed out after {timeout_ms}ms."
+                f"Card APDU transmit timed out after {effective_timeout_ms}ms."
             )
         response_data, sw1, sw2, error = result
         if error is not None:
@@ -482,10 +515,14 @@ class CardWorker:
 
             try:
                 with self._card_lock:
-                    response_data, sw1, sw2 = self._card.transmit(apdu)
+                    response_data, sw1, sw2 = self._card.transmit(
+                        apdu,
+                        timeout_ms=self._apdu_timeout_ms,
+                    )
                 full_response = response_data + bytes((sw1, sw2))
                 error = None
             except Exception as exc:
+                response_data = b""
                 full_response = b""
                 sw1, sw2 = 0, 0
                 error = exc
@@ -529,12 +566,17 @@ class HilBridgeServer:
             reader_name=config.reader_name,
             remote_card_url=config.remote_card_url,
             remote_card_token_file=config.remote_card_token_file,
+            apdu_timeout_ms=config.apdu_timeout_ms,
         )
         self._card.connect()
 
         self._card_lock = threading.Lock()
         self._proactive_lock = threading.Lock()
-        self._card_worker = CardWorker(self._card, self._card_lock)
+        self._card_worker = CardWorker(
+            self._card,
+            self._card_lock,
+            apdu_timeout_ms=config.apdu_timeout_ms,
+        )
         self._wakeup_sentinel = object()
         self._selector.register(
             self._card_worker.wakeup_fileno,
@@ -560,6 +602,7 @@ class HilBridgeServer:
             ),
             exchange_callback=self._handle_relay_apdu,
             status_callback=self._build_relay_status_payload,
+            card_reset_callback=self._handle_relay_card_reset,
         )
         self._apdu_relay.start()
         self._publish_card_relay_marker()
@@ -999,6 +1042,7 @@ class HilBridgeServer:
             "cardBackend": self._card.backend_name,
             "reader": self._card.reader_label,
             "atr": self._session.atr_bytes.hex().upper(),
+            "apduTimeoutMs": int(self._config.apdu_timeout_ms),
             "controlConnected": self._session.control is not None and self._session.control.closed is False,
             "bankdConnected": self._session.bankd is not None and self._session.bankd.closed is False,
             "bridgeHost": self._config.listen_host,

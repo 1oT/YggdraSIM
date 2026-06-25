@@ -248,7 +248,7 @@ class FrontendLoadWarningsWiring(unittest.TestCase):
         )
         js = (static_dir / "app.js").read_text(encoding="utf-8")
 
-        self.assertIn("resp.data && resp.data.load_warnings", js)
+        self.assertIn("respData && respData.load_warnings", js)
         # Each entry becomes its own warn-level logBus event so the
         # Warnings dock lists them individually instead of folding them
         # into a single line.
@@ -283,6 +283,18 @@ class HexTextLoaderTests(unittest.TestCase):
         ascii_hex = der.hex().upper().encode("ascii")
         self.assertEqual(self.saip._sniff_encoding(ascii_hex), "hex")
 
+    def test_sniff_recognises_bom_prefixed_ascii_hex_payloads(self) -> None:
+        der = self._build_end_pe_der()
+        ascii_hex = b"\xef\xbb\xbf" + der.hex().upper().encode("ascii")
+        self.assertEqual(self.saip._sniff_encoding(ascii_hex), "hex")
+
+    def test_sniff_recognises_simple_placeholder_hex_templates(self) -> None:
+        self.assertEqual(self.saip._sniff_encoding(b"A0{ICCID}FF"), "hex")
+
+    def test_sniff_recognises_asn1_value_notation(self) -> None:
+        payload = "\ufeffheader ProfileElement ::= header : { }".encode("utf-8")
+        self.assertEqual(self.saip._sniff_encoding(payload), "asn")
+
     def test_sniff_keeps_der_for_binary_payloads(self) -> None:
         der = self._build_end_pe_der()
         self.assertEqual(self.saip._sniff_encoding(der), "der")
@@ -299,6 +311,13 @@ class HexTextLoaderTests(unittest.TestCase):
         )
         self.assertEqual(decoded, bytes.fromhex("ABCDEF0123456789"))
 
+    def test_decode_hex_text_payload_strips_utf8_bom(self) -> None:
+        decoded = self.saip._decode_hex_text_payload(
+            Path("/tmp/dummy.hex"),
+            b"\xef\xbb\xbfAB CD",
+        )
+        self.assertEqual(decoded, bytes.fromhex("ABCD"))
+
     def test_decode_hex_text_payload_rejects_odd_length(self) -> None:
         with self.assertRaises(ValueError) as ctx:
             self.saip._decode_hex_text_payload(Path("/tmp/dummy.hex"), b"ABC")
@@ -308,6 +327,28 @@ class HexTextLoaderTests(unittest.TestCase):
         with self.assertRaises(ValueError) as ctx:
             self.saip._decode_hex_text_payload(Path("/tmp/dummy.hex"), b"AB ZZ")
         self.assertIn("non-hex", str(ctx.exception))
+
+    def test_decode_hex_text_payload_rejects_simple_placeholder_template(self) -> None:
+        with self.assertRaises(ValueError) as ctx:
+            self.saip._decode_hex_text_payload(
+                Path("/tmp/dummy.varder"),
+                b"A0{ICCID}FF",
+            )
+        message = str(ctx.exception)
+        self.assertIn("placeholders", message)
+        self.assertIn("Materialise", message)
+
+    def test_decode_hex_text_payload_accepts_compact_typed_placeholder(self) -> None:
+        decoded, records = self.saip._decode_hex_text_payload_with_placeholders(
+            Path("/tmp/dummy.varder"),
+            b"AA{imsiIMSI8EncodeIMSI}BB",
+        )
+        self.assertEqual(len(decoded), 10)
+        self.assertEqual(len(records), 1)
+        self.assertEqual(records[0].variable_name, "imsi")
+        self.assertEqual(records[0].type_name, "IMSI")
+        self.assertEqual(records[0].byte_length, 8)
+        self.assertEqual(records[0].modifier, "EncodeIMSI")
 
     def test_decode_hex_text_payload_rejects_empty_input(self) -> None:
         with self.assertRaises(ValueError) as ctx:
@@ -395,6 +436,97 @@ class HexTextLoaderTests(unittest.TestCase):
         # Encoding stays ``der`` once the hex fallback unwinds.
         self.assertEqual(package["encoding"], "der")
         self.assertGreaterEqual(len(package["pes"].pe_list), 1)
+
+    def test_load_package_rejects_varder_simple_placeholder_template(self) -> None:
+        import tempfile
+
+        with tempfile.NamedTemporaryFile(
+            suffix=".varder", delete=False, mode="w", encoding="utf-8-sig"
+        ) as tmp:
+            tmp.write("A0{ICCID}FF")
+            tmp.flush()
+            tmp_path = Path(tmp.name)
+
+        try:
+            with self.assertRaises(ValueError) as ctx:
+                self.saip._load_package_from_path(tmp_path)
+        finally:
+            tmp_path.unlink(missing_ok=True)
+
+        self.assertIn("placeholders", str(ctx.exception))
+        self.assertIn("Materialise", str(ctx.exception))
+
+    def test_load_package_accepts_asn1_value_notation(self) -> None:
+        import tempfile
+
+        with tempfile.NamedTemporaryFile(
+            suffix=".asn", delete=False, mode="w", encoding="utf-8-sig"
+        ) as tmp:
+            tmp.write(
+                """
+                end ProfileElement ::= end :
+                {
+                  end-header
+                  {
+                    mandated NULL,
+                    identification 1
+                  }
+                }
+                """
+            )
+            tmp.flush()
+            tmp_path = Path(tmp.name)
+
+        try:
+            package = self.saip._load_package_from_path(tmp_path)
+        finally:
+            tmp_path.unlink(missing_ok=True)
+
+        self.assertEqual(package["encoding"], "asn")
+        self.assertEqual(len(package["pes"].pe_list), 1)
+        self.assertEqual(package["pes"].pe_list[0].type, "end")
+
+    def test_load_package_accepts_asn1_compact_typed_placeholders(self) -> None:
+        import tempfile
+
+        with tempfile.NamedTemporaryFile(
+            suffix=".asn", delete=False, mode="w", encoding="utf-8-sig"
+        ) as tmp:
+            tmp.write(
+                """
+                pukCodes ProfileElement ::= pukCodes :
+                {
+                  puk-Header
+                  {
+                    mandated NULL,
+                    identification 1
+                  },
+                  pukCodes
+                  {
+                    {
+                      keyReference pukAppl1,
+                      pukValue '[pukBINARY8]'H
+                    }
+                  }
+                }
+                """
+            )
+            tmp.flush()
+            tmp_path = Path(tmp.name)
+
+        try:
+            package = self.saip._load_package_from_path(tmp_path)
+        finally:
+            tmp_path.unlink(missing_ok=True)
+
+        self.assertEqual(package["encoding"], "asn")
+        self.assertEqual(len(package["pes"].pe_list), 1)
+        self.assertEqual(package["pes"].pe_list[0].type, "pukCodes")
+        self.assertEqual(len(package.get("inline_placeholder_records") or []), 1)
+        record = package["inline_placeholder_records"][0]
+        self.assertEqual(record.variable_name, "puk")
+        self.assertEqual(record.type_name, "BINARY")
+        self.assertEqual(record.byte_length, 8)
 
 
 if __name__ == "__main__":

@@ -1,10 +1,10 @@
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
-"""SUCI Tool Command Center actions.
+"""SUCI Command Center actions.
 
-Wraps the ``Tools.SuciTool`` shell surface into structured actions. The
-underlying ``SuciKeyToolBridge`` calls the external ``suci-keytool``
-binary — operators must have it installed (``YGGDRASIM_SUCI_TOOL`` env
-var, or ``suci-keytool`` on ``$PATH``).
+Wraps the ``Tools.SuciTool`` shell surface into structured Offline Tools
+actions. The underlying ``SuciKeyToolBridge`` calls the external
+``suci-keytool`` binary — operators must have it installed
+(``YGGDRASIM_SUCI_TOOL`` env var, or ``suci-keytool`` on ``$PATH``).
 
 Actions registered:
 
@@ -34,6 +34,7 @@ from .registry import ActionContext, ActionField, ActionSpec, get_registry
 
 
 _LOGGER = logging.getLogger("yggdrasim.gui.actions.suci")
+OFFLINE_TOOLS_SUBSYSTEM = "Offline Tools"
 
 _last_key_file: str | None = None
 
@@ -200,7 +201,7 @@ def _dispatch_dump_pub_key(
 
 STATUS_SPEC = ActionSpec(
     id="suci.status",
-    subsystem="SUCI Tool",
+    subsystem=OFFLINE_TOOLS_SUBSYSTEM,
     title="Status",
     description=(
         "Report the workspace root, the currently selected SUCI key file, "
@@ -216,7 +217,7 @@ STATUS_SPEC = ActionSpec(
 
 USE_KEY_FILE_SPEC = ActionSpec(
     id="suci.use_key_file",
-    subsystem="SUCI Tool",
+    subsystem=OFFLINE_TOOLS_SUBSYSTEM,
     title="Use key file",
     description=(
         "Select the active SUCI key file. The path is validated to be "
@@ -241,7 +242,7 @@ USE_KEY_FILE_SPEC = ActionSpec(
 
 SET_TOOL_COMMAND_SPEC = ActionSpec(
     id="suci.set_tool_command",
-    subsystem="SUCI Tool",
+    subsystem=OFFLINE_TOOLS_SUBSYSTEM,
     title="Set suci-keytool command",
     description=(
         "Override the binary invocation used to call suci-keytool. "
@@ -266,7 +267,7 @@ SET_TOOL_COMMAND_SPEC = ActionSpec(
 
 GENERATE_KEY_SPEC = ActionSpec(
     id="suci.generate_key",
-    subsystem="SUCI Tool",
+    subsystem=OFFLINE_TOOLS_SUBSYSTEM,
     title="Generate SUCI key",
     description=(
         "Run ``suci-keytool ... generate-key --curve <name>`` against "
@@ -300,7 +301,7 @@ GENERATE_KEY_SPEC = ActionSpec(
 
 DUMP_PUB_KEY_SPEC = ActionSpec(
     id="suci.dump_pub_key",
-    subsystem="SUCI Tool",
+    subsystem=OFFLINE_TOOLS_SUBSYSTEM,
     title="Dump public key",
     description=(
         "Run ``suci-keytool ... dump-pub-key`` on the selected key file. "

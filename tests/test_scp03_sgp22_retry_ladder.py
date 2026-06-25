@@ -20,7 +20,7 @@ PROFILE_LIST_HEX = (
 PROFILE_LIST_SEQUENCE_HEX = PROFILE_LIST_HEX.replace("A047E345", "A0473045", 1)
 
 DUMMY_TEST_EIM_OID = "2.25.311782205282738360923618091971140414400"
-DEFAULT_TEST_EIM_FQDN = "yggdrasim.eim.test.1ot.com"
+DEFAULT_TEST_EIM_FQDN = "eim.example.test"
 
 
 def _encode_length(value: int) -> bytes:

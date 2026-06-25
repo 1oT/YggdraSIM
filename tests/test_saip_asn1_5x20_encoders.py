@@ -246,7 +246,7 @@ class PassAOpaqueTests(unittest.TestCase):
 
 class VsuriTests(unittest.TestCase):
     def test_uri_tlv_roundtrip(self) -> None:
-        body = b"sip:voicemail@carrier.net"
+        body = b"sip:voicemail@example.com"
         raw = bytes([0x80, len(body)]) + body
         self.assertEqual(
             _roundtrip(ef_key="ef-vsuri", fid="6FE9", raw=raw), raw

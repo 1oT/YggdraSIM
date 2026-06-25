@@ -125,13 +125,13 @@ class SecretFileEncryptionTests(unittest.TestCase):
             store_path = Path(temp_dir) / "profiles"
             profile = SimProfileEntry(
                 aid="A0000005591010FFFFFFFF8900001100",
-                iccid="89460811111111111112",
+                iccid="89880811111111111112",
                 profile_name="Encrypted Test",
                 imsi="001010123456789",
                 impi="user@example.test",
                 profile_image=SimProfileImage(
                     profile_name="Encrypted Test",
-                    iccid="89460811111111111112",
+                    iccid="89880811111111111112",
                     imsi="001010123456789",
                     impi="user@example.test",
                     nodes=[
@@ -179,7 +179,7 @@ class SecretFileEncryptionTests(unittest.TestCase):
             state = SimCardState(
                 atr=DEFAULT_SIM_ATR,
                 eid="89049032000000000000000000000001",
-                iccid="89460811111111111112",
+                iccid="89880811111111111112",
                 imsi="001010123456789",
                 default_dp_address="smdpplus.example.test",
                 root_ci_pkid=bytes.fromhex("00112233445566778899AABBCCDDEEFF00112233"),

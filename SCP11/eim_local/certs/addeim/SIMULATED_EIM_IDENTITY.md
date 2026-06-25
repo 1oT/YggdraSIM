@@ -47,7 +47,7 @@ lab posture targets this CI.
 
 ```
 eimId                          2.25.311782205282738360923618091971140414400
-eimFqdn                        yggdrasim.eim.test.1ot.com
+eimFqdn                        eim.example.test
 eimIdType                      Oid
 eimPublicKeyData
 -----BEGIN CERTIFICATE-----
@@ -88,7 +88,7 @@ Identity breakdown:
    real-world eIM operator can use it verbatim; it is globally unique
    and not registered to any production CA.
 2. `eimFqdn` is the canonical lab hostname. It matches the TLS leaf CN
-   and the Subject Alternative Name (`DNS:yggdrasim.eim.test.1ot.com`).
+   and the Subject Alternative Name (`DNS:eim.example.test`).
 3. `eimIdType` is `Oid`. `Fqdn` or `ProprietaryId` would require the
    signing leaf's SAN layout to carry the same identifier value, which
    YggdraSIM does not currently emit.
@@ -97,7 +97,7 @@ Identity breakdown:
    `CN=Test CI, OU=TESTCERT, O=RSPTEST, C=IT`).
 5. `trustedPublicKeyDataTls` is the TLS server leaf (serial
    `5D0BCDE2 C9060B8C 94F3D298 DC02DF22 B3E86C2C`, SAN
-   `DNS:yggdrasim.eim.test.1ot.com, Registered ID:2.999.20`, EKU
+   `DNS:eim.example.test, Registered ID:2.999.20`, EKU
    `serverAuth + clientAuth`).
 6. `eimSupportedProtocols` is exactly the single-protocol array
    `["HttpsPull"]`. YggdraSIM does not currently expose a push-mode
@@ -221,15 +221,15 @@ openssl x509 -in <paste-trustedPublicKeyDataTls> -noout -subject -issuer -serial
 
 Expected output for Profile 3:
 
-1. Signing leaf subject: `C=DE, CN=yggdrasim.eim.test.1ot.com`
+1. Signing leaf subject: `C=DE, CN=eim.example.test`
 2. Signing leaf issuer:  `CN=Test CI, OU=TESTCERT, O=RSPTEST, C=IT`
 3. Signing leaf serial:  `6ABC01D36775D4B1BA6C263A9B33A441BF6731CF`
 4. Signing leaf validity: `Mar 23 19:50:51 2026 GMT – Mar 22 19:50:51 2033 GMT`
-5. TLS leaf subject:     `C=DE, CN=yggdrasim.eim.test.1ot.com`
+5. TLS leaf subject:     `C=DE, CN=eim.example.test`
 6. TLS leaf issuer:      `CN=Test CI, OU=TESTCERT, O=RSPTEST, C=IT`
 7. TLS leaf serial:      `5D0BCDE2C9060B8C94F3D298DC02DF22B3E86C2C`
 8. TLS leaf validity:    `Mar 23 19:50:51 2026 GMT – Mar 23 19:50:51 2029 GMT`
-9. TLS leaf SAN:         `DNS:yggdrasim.eim.test.1ot.com, Registered ID:2.999.20`
+9. TLS leaf SAN:         `DNS:eim.example.test, Registered ID:2.999.20`
 10. TLS leaf EKU:        `TLS Web Server Authentication, TLS Web Client Authentication`
 
 Expected output for Profile 4:

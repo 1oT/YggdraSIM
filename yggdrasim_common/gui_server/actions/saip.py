@@ -150,11 +150,20 @@ def _patch_pysim_profile_element() -> None:
     _PYSIM_PROFILE_ELEMENT_PATCHED = True
 
 
-# Suffixes that the SAIP TUI / SaipToolBridge treats as ASCII hex-text
-# rather than binary DER. We mirror the bridge so the GUI accepts
-# exactly the same inputs as the picker (Tools/ProfilePackage/
-# saip_open_picker_tui.py declares ``_SUPPORTED_PROFILE_SUFFIXES``).
-_HEX_INPUT_SUFFIXES = {".hex", ".txt"}
+# Suffixes that the SAIP GUI treats as ASCII hex-text rather than
+# binary DER. ``.varder`` is a vendor template convention: it is still
+# hex text, but may carry placeholder literals instead of concrete
+# bytes.
+_TEMPLATE_HEX_INPUT_SUFFIXES = {".varder"}
+_HEX_INPUT_SUFFIXES = {".hex", ".txt"} | _TEMPLATE_HEX_INPUT_SUFFIXES
+_ASN_VALUE_INPUT_SUFFIXES = {".asn", ".asn1"}
+_SIMPLE_PLACEHOLDER_RE = re.compile(
+    r"\{#?[A-Za-z][A-Za-z0-9_]*\}|\[#?[A-Za-z][A-Za-z0-9_]*\]"
+)
+
+
+class _HexTemplateInputError(ValueError):
+    """Raised when hex text is a template that needs materialisation first."""
 
 
 def _looks_like_ascii_hex(raw: bytes) -> bool:
@@ -166,6 +175,8 @@ def _looks_like_ascii_hex(raw: bytes) -> bool:
     payloads that happen to start with a hex digit from being
     misclassified.
     """
+    if raw.startswith(b"\xef\xbb\xbf"):
+        raw = raw[3:]
     if len(raw) < 8:
         return False
     # Only allow the canonical hex alphabet plus whitespace separators.
@@ -183,7 +194,70 @@ def _looks_like_ascii_hex(raw: bytes) -> bool:
     return any(bytes([b]) in allowed_letters for b in raw[:64])
 
 
-def _decode_hex_text_payload(resolved_path: Path, raw: bytes) -> bytes:
+def _looks_like_ascii_hex_template(raw: bytes) -> bool:
+    """Return True for hex text containing simple template placeholders."""
+    if len(raw) < 8:
+        return False
+    try:
+        text_payload = raw.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        return False
+    if _SIMPLE_PLACEHOLDER_RE.search(text_payload) is None:
+        return False
+    without_placeholders = _SIMPLE_PLACEHOLDER_RE.sub("", text_payload)
+    normalized_hex = "".join(without_placeholders.split()).upper()
+    if len(normalized_hex) == 0:
+        return False
+    for character in normalized_hex:
+        if character not in "0123456789ABCDEF":
+            return False
+    return True
+
+
+def _looks_like_asn1_value_notation(raw: bytes) -> bool:
+    """Return True for ASN.1 value notation rather than encoded DER."""
+    try:
+        text_payload = raw[:8192].decode("utf-8-sig")
+    except UnicodeDecodeError:
+        return False
+    head = text_payload.lstrip()
+    if len(head) == 0:
+        return False
+    if "::=" not in head[:4096]:
+        return False
+    if "ProfileElement" in head[:4096]:
+        return True
+    return False
+
+
+def _raise_hex_text_payload_error(resolved_path: Path, raw_text: str) -> None:
+    """Emit a context-aware error when hex text is not concrete hex."""
+    from Tools.ProfilePackage.saip_hex_template import iter_inline_placeholders
+
+    typed_matches = [match.group(0) for match in iter_inline_placeholders(raw_text)]
+    if len(typed_matches) > 0:
+        preview = ", ".join(sorted(set(typed_matches))[:4])
+        raise _HexTemplateInputError(
+            "Hex input file contains inline typed placeholders that did not "
+            f"substitute cleanly ({preview}): {resolved_path}. Remove the "
+            "placeholders or report the template shape as a bug."
+        )
+
+    simple_placeholder = _SIMPLE_PLACEHOLDER_RE.search(raw_text)
+    if simple_placeholder is not None:
+        raise _HexTemplateInputError(
+            "Hex input file carries YggdraSIM-style placeholders "
+            f"({simple_placeholder.group(0)}): {resolved_path}. Materialise "
+            "the template with token definitions before opening it as raw hex."
+        )
+
+    raise ValueError(f"Hex input file contains non-hex characters: {resolved_path}")
+
+
+def _decode_hex_text_payload_with_placeholders(
+    resolved_path: Path,
+    raw: bytes,
+) -> tuple[bytes, list[Any]]:
     """Convert an ASCII hex-text profile to its binary DER payload.
 
     Mirrors the validation done by
@@ -192,47 +266,95 @@ def _decode_hex_text_payload(resolved_path: Path, raw: bytes) -> bytes:
     hex (empty / odd-length / stray non-hex characters).
     """
     try:
-        text_payload = raw.decode("utf-8")
+        text_payload = raw.decode("utf-8-sig")
     except UnicodeDecodeError as decode_err:
         raise ValueError(
             f"Hex input file is not UTF-8 decodable: {resolved_path}: {decode_err}"
         ) from decode_err
-    normalized_hex = "".join(text_payload.split()).upper()
+
+    from Tools.ProfilePackage.saip_hex_template import (
+        detect_inline_placeholders,
+        substitute_inline_placeholders,
+    )
+
+    placeholder_records: list[Any] = []
+    working_text = text_payload
+    if detect_inline_placeholders(text_payload):
+        working_text, placeholder_records = substitute_inline_placeholders(text_payload)
+
+    normalized_hex = "".join(working_text.split()).upper()
     if len(normalized_hex) == 0:
         raise ValueError(f"Hex input file is empty: {resolved_path}")
     for character in normalized_hex:
         if character not in "0123456789ABCDEF":
-            raise ValueError(
-                f"Hex input file contains non-hex characters: {resolved_path}"
-            )
+            _raise_hex_text_payload_error(resolved_path, text_payload)
     if len(normalized_hex) % 2 != 0:
         raise ValueError(f"Hex input file has odd-length payload: {resolved_path}")
-    return bytes.fromhex(normalized_hex)
+    return bytes.fromhex(normalized_hex), placeholder_records
+
+
+def _decode_hex_text_payload(resolved_path: Path, raw: bytes) -> bytes:
+    """Convert an ASCII hex-text profile to concrete DER bytes."""
+    payload, _placeholder_records = _decode_hex_text_payload_with_placeholders(
+        resolved_path,
+        raw,
+    )
+    return payload
 
 
 def _sniff_encoding(raw: bytes) -> str:
-    """Return ``"der"``, ``"json"`` or ``"hex"``.
+    """Return ``"der"``, ``"json"``, ``"hex"`` or ``"asn"``.
 
     JSON wins on a leading ``{`` / ``[``; otherwise we look for ASCII
-    hex content (matches the TUI's ``.hex`` / ``.txt`` handling). The
-    final fall-through is ``"der"`` so already-binary payloads keep
-    their fast path.
+    hex content (including template text) and ASN.1 value notation. The
+    final fall-through is ``"der"`` so already-binary payloads keep their
+    fast path.
     """
+    if raw.startswith(b"\xef\xbb\xbf"):
+        raw = raw[3:]
     head = raw.lstrip()
     if len(head) == 0:
         return "der"
     first = head[0:1]
     if first in (b"{", b"["):
         return "json"
+    if _looks_like_asn1_value_notation(raw):
+        return "asn"
     if _looks_like_ascii_hex(raw):
         return "hex"
+    if _looks_like_ascii_hex_template(raw):
+        return "hex"
     return "der"
+
+
+def _load_asn1_value_package(resolved_path: Path) -> dict[str, Any]:
+    """Load SAIP ASN.1 value notation as a decoded PE sequence."""
+    from Tools.ProfilePackage.saip_asn1_value import parse_asn1_value_profile
+
+    try:
+        text_payload = resolved_path.read_text(encoding="utf-8-sig")
+    except UnicodeDecodeError as decode_err:
+        raise ValueError(
+            f"ASN.1 value-notation file is not UTF-8 decodable: "
+            f"{resolved_path}: {decode_err}"
+        ) from decode_err
+    parsed = parse_asn1_value_profile(
+        text_payload,
+        workspace_root=_workspace_root(),
+    )
+    return {
+        "pes": parsed.pes,
+        "decoded_document": _build_decoded_document(parsed.pes, resolved_path),
+        "encoding": "asn",
+        "warnings": [],
+        "inline_placeholder_records": parsed.inline_placeholder_records,
+    }
 
 
 def _load_package_from_path(resolved_path: Path) -> dict[str, Any]:
     """Return ``{"pes", "decoded_document", "encoding", "warnings"}`` for a package.
 
-    Supports three input flavours, matching what the SAIP TUI accepts
+    Supports four input flavours, matching what the SAIP TUI accepts
     (``Tools/ProfilePackage/saip_open_picker_tui.py``):
 
     1. **Binary DER** — passed straight to ``ProfileElementSequence.from_der``.
@@ -241,7 +363,10 @@ def _load_package_from_path(resolved_path: Path) -> dict[str, Any]:
        resulting hex is decoded with ``bytes.fromhex`` before being fed
        to the DER parser. Matches
        :meth:`SaipToolBridge._prepare_input_for_tool`.
-    3. **Decoded JSON** (transcode output) — round-tripped through
+    3. **ASN.1 value notation** (``.asn`` / ``.asn1``) — parsed into
+       decoded PE values, then encoded and decoded through pySim so
+       defaults and post-decode hooks match DER imports.
+    4. **Decoded JSON** (transcode output) — round-tripped through
        :func:`build_profile_sequence_from_document`.
 
     DER parsing itself uses a two-stage strategy:
@@ -274,16 +399,28 @@ def _load_package_from_path(resolved_path: Path) -> dict[str, Any]:
     raw_disk = resolved_path.read_bytes()
     suffix = resolved_path.suffix.lower()
     warnings: list[dict[str, Any]] = []
+    inline_placeholder_records: list[Any] = []
 
     # Suffix wins over content sniffing — operators occasionally save
     # genuine DER under a ``.txt`` extension; we still want to honour
-    # the explicit hint by trying hex first and falling back to DER if
-    # the hex decode fails. Extension-less inputs use the heuristic.
+    # that legacy hint by trying hex first and falling back to DER if
+    # the generic hex decode fails. Template-specific failures stay
+    # explicit so we do not bury token/materialisation guidance under
+    # the tolerant DER parser's BER-TLV diagnostics. Extension-less
+    # inputs use the heuristic.
+    if suffix in _ASN_VALUE_INPUT_SUFFIXES:
+        return _load_asn1_value_package(resolved_path)
     if suffix in _HEX_INPUT_SUFFIXES:
         try:
-            raw = _decode_hex_text_payload(resolved_path, raw_disk)
+            raw, inline_placeholder_records = (
+                _decode_hex_text_payload_with_placeholders(resolved_path, raw_disk)
+            )
             encoding = "hex"
+        except _HexTemplateInputError:
+            raise
         except ValueError:
+            if suffix in _TEMPLATE_HEX_INPUT_SUFFIXES:
+                raise
             # Hex decode failed — treat the original bytes as DER and
             # let the strict / tolerant pipeline below report what's
             # actually wrong instead of swallowing a clue.
@@ -293,8 +430,12 @@ def _load_package_from_path(resolved_path: Path) -> dict[str, Any]:
                 encoding = "der"
     else:
         encoding = _sniff_encoding(raw_disk)
+        if encoding == "asn":
+            return _load_asn1_value_package(resolved_path)
         if encoding == "hex":
-            raw = _decode_hex_text_payload(resolved_path, raw_disk)
+            raw, inline_placeholder_records = (
+                _decode_hex_text_payload_with_placeholders(resolved_path, raw_disk)
+            )
         else:
             raw = raw_disk
 
@@ -321,6 +462,7 @@ def _load_package_from_path(resolved_path: Path) -> dict[str, Any]:
         "decoded_document": decoded_document,
         "encoding": encoding,
         "warnings": warnings,
+        "inline_placeholder_records": inline_placeholder_records,
     }
 
 
@@ -2100,6 +2242,14 @@ def _template_default_value_wire(value: Any) -> tuple[Any, str]:
     return str(value), "text"
 
 
+def _minimal_unsigned_hex(value: int) -> str:
+    """Return minimal whole-octet uppercase hex for SAIP integer fields."""
+    if value <= 0:
+        return ""
+    width = max(2, ((int(value).bit_length() + 7) // 8) * 2)
+    return f"{int(value):0{width}X}"
+
+
 def _template_default_info(ft: Any, value: Any) -> dict[str, Any]:
     """Return operator-facing template default metadata for a file row."""
     if ft is None:
@@ -2168,7 +2318,7 @@ def _template_fcp_info(ft: Any) -> dict[str, Any]:
         ):
             size_value = int(rec_len) * int(nb_rec)
     if isinstance(size_value, int) and size_value > 0:
-        info["ef_size"] = f"{size_value & 0xFFFF:04X}"
+        info["ef_size"] = _minimal_unsigned_hex(size_value)
         info["ef_size_source"] = "template"
     return info
 
@@ -3521,6 +3671,7 @@ def _dispatch_open_package(
     decoded_document = package["decoded_document"]
     encoding = package["encoding"]
     warnings = package.get("warnings") or []
+    inline_placeholder_records = package.get("inline_placeholder_records") or []
 
     manager = get_manager()
     handle = {
@@ -3530,6 +3681,7 @@ def _dispatch_open_package(
         "source_path": str(resolved),
         "size_bytes": resolved.stat().st_size,
         "load_warnings": warnings,
+        "inline_placeholder_records": inline_placeholder_records,
     }
     _ensure_session_state(handle)
     session = manager.open(
@@ -3541,6 +3693,7 @@ def _dispatch_open_package(
             "encoding": encoding,
             "pe_count": len(pes.pe_list),
             "load_warning_count": len(warnings),
+            "inline_placeholder_count": len(inline_placeholder_records),
         },
     )
 
@@ -3555,6 +3708,7 @@ def _dispatch_open_package(
             {str(getattr(pe, "type", "unknown")) for pe in pes.pe_list}
         ),
         "load_warnings": warnings,
+        "inline_placeholder_count": len(inline_placeholder_records),
     }
 
 
@@ -3647,6 +3801,16 @@ def _dispatch_show_pe(
 
     pe = pes.pe_list[idx]
     decoded = _jsonify_decoded(getattr(pe, "decoded", {}))
+    inline_placeholder_records = handle.get("inline_placeholder_records") or []
+    if len(inline_placeholder_records) > 0:
+        try:
+            from Tools.ProfilePackage.saip_hex_template import (
+                splice_literals_into_tagged_document,
+            )
+
+            splice_literals_into_tagged_document(decoded, inline_placeholder_records)
+        except Exception:
+            pass
 
     # Encoded PE bytes — pySim ``ProfileElement.to_der()`` re-encodes
     # the in-memory dict back through asn1tools so the Editor tab can

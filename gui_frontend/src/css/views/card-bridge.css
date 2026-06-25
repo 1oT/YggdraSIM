@@ -1,10 +1,8 @@
 /* ============================================================
  * Top-bar reader strip
  *
- * Moved out of the left sidebar per operator request: "place the
- * readers in the top bar next to YggdraSIM and make the pills the
- * session tabs — pick a reader there, and the reader is pre-set
- * across every module in the workspace". One pill per PC/SC
+ * Moved out of the left sidebar into the top-bar runtime controls.
+ * One pill per PC/SC
  * reader; clicking a pill activates the session bound to that
  * reader across subsystems. Status dots are a traffic-light:
  *   green  = reader is in an active session
@@ -16,11 +14,11 @@
 
 .topbar-readers {
   display: flex;
-  flex: 1 1 auto;
+  flex: 1 1 280px;
   align-items: center;
   gap: 6px;
-  min-width: 0;
-  max-width: 100%;
+  min-width: 180px;
+  max-width: min(36vw, 440px);
   padding: 4px 6px;
   background: var(--bg-elev, rgba(255, 255, 255, 0.03));
   border: 1px solid var(--border);
@@ -55,6 +53,8 @@
   color: var(--fg-dim, var(--fg-muted));
   padding: 4px 10px;
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .topbar-readers-refresh {
@@ -86,3 +86,9 @@
   to { transform: rotate(360deg); }
 }
 
+@media (max-width: 1040px) {
+  .topbar-readers {
+    flex-basis: 210px;
+    max-width: 260px;
+  }
+}

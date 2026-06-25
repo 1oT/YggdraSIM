@@ -2,8 +2,8 @@
   "display_name": "Simulator default eIM identity",
   "eim_id": "2.25.311782205282738360923618091971140414400",
   "eim_id_type": "oid",
-  "eim_fqdn": "yggdrasim.eim.test.1ot.com",
-  "eim_endpoint": "https://yggdrasim.eim.test.1ot.com/gsma/rsp2/asn1",
+  "eim_fqdn": "eim.example.test",
+  "eim_endpoint": "https://eim.example.test/gsma/rsp2/asn1",
   "euicc_ci_pk_id": "F54172BDF98A95D65CBEB88A38A1C11D800A85C3",
   "eim_public_key_cert_path": "",
   "trusted_tls_cert_path": ""

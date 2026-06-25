@@ -1,11 +1,11 @@
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
-"""Engine-tool Command Center actions.
+"""Offline-tool Command Center actions.
 
-Wraps the pure-function engine panels (TLV parse, SW translate,
-EUICCInfo2 decode, SAIP lint, eIM lint, GSMA error-code tables) as
-Command Center actions so the same task lives alongside subsystem flows
-in one unified surface. No hardware is involved; dispatchers run
-synchronously on the FastAPI threadpool.
+Wraps the pure-function engine panels (BER-TLV parse, ASN.1/TLV decode,
+SW translate, EUICCInfo2 decode, SAIP lint, eIM lint, GSMA error-code
+tables) as Command Center actions so the same task lives alongside
+subsystem flows in one unified surface. No hardware is involved;
+dispatchers run synchronously on the FastAPI threadpool.
 
 All dispatchers resolve their backend through
 ``yggdrasim_common.registry`` so the action layer stays uncoupled from
@@ -17,12 +17,14 @@ from __future__ import annotations
 import binascii
 import json
 import logging
+from pathlib import Path
 from typing import Any
 
 from .registry import ActionContext, ActionField, ActionSpec, get_registry
 
 
 _LOGGER = logging.getLogger("yggdrasim.gui.actions.tools")
+OFFLINE_TOOLS_SUBSYSTEM = "Offline Tools"
 
 
 # ----------------------------------------------------------------------
@@ -40,6 +42,24 @@ def _parse_hex(raw: str, *, field_name: str = "hex") -> bytes:
         return binascii.unhexlify(compact)
     except (binascii.Error, ValueError) as error:
         raise ValueError(f"{field_name} is not valid hex: {error}") from error
+
+
+def _schema_paths_from_text(raw: Any) -> list[Path] | None:
+    text = str(raw or "").strip()
+    if len(text) == 0:
+        return None
+    paths: list[Path] = []
+    for chunk in text.replace(",", "\n").replace(";", "\n").splitlines():
+        item = chunk.strip()
+        if len(item) == 0:
+            continue
+        path = Path(item).expanduser()
+        if path.is_dir():
+            paths.extend(sorted(path.glob("*.asn")))
+            paths.extend(sorted(path.glob("*.asn1")))
+        else:
+            paths.append(path)
+    return paths or None
 
 
 def _tlv_dict_to_nodes(parsed: dict) -> list[dict[str, Any]]:
@@ -104,6 +124,36 @@ def _dispatch_tlv_decode(ctx: ActionContext, *, hex: Any = None) -> dict[str, An
     }
 
 
+def _dispatch_asn1_tlv_decode(
+    ctx: ActionContext,
+    *,
+    hex_text: Any = None,
+    schema_paths: Any = None,
+    type_name: Any = None,
+    codec: Any = None,
+) -> dict[str, Any]:
+    from Tools.Asn1TlvDecode.main import TagRegistry, decode_bytes, normalise_hex
+
+    data = normalise_hex(str(hex_text or ""))
+    schema_path_list = _schema_paths_from_text(schema_paths)
+    type_name_s = str(type_name or "").strip() or None
+    codec_s = str(codec or "der").strip().lower() or "der"
+    if schema_path_list and type_name_s is None:
+        raise ValueError("type_name is required when schema_paths is set.")
+    if type_name_s is not None and not schema_path_list:
+        raise ValueError("schema_paths is required when type_name is set.")
+    try:
+        return decode_bytes(
+            data,
+            registry=TagRegistry.load(),
+            schema_paths=schema_path_list,
+            type_name=type_name_s,
+            codec=codec_s,
+        )
+    except ValueError as error:
+        raise ValueError(f"ASN.1/TLV decode failed: {error}") from error
+
+
 def _dispatch_sw_lookup(ctx: ActionContext, *, sw: Any = None) -> dict[str, Any]:
     from yggdrasim_common import registry as yggdrasim_registry
 
@@ -151,6 +201,13 @@ def _dispatch_euicc_info2(ctx: ActionContext, *, hex: Any = None) -> dict[str, A
         "validation_lines": validation,
         "input_length": len(data),
     }
+
+
+def _dispatch_sima_response_decode(ctx: ActionContext, *, hex: Any = None) -> dict[str, Any]:
+    from SCP11.shared.sima_response import decode_sima_response
+
+    data = _parse_hex(str(hex or ""), field_name="hex")
+    return decode_sima_response(data)
 
 
 def _dispatch_saip_lint(
@@ -241,7 +298,7 @@ def _dispatch_gsma_codes(ctx: ActionContext) -> dict[str, Any]:
 
 TLV_DECODE_SPEC = ActionSpec(
     id="tool.tlv.decode",
-    subsystem="Tools",
+    subsystem=OFFLINE_TOOLS_SUBSYSTEM,
     title="TLV parse",
     description="Decode a BER-TLV hex buffer into a tag / length / value tree.",
     inputs=(
@@ -261,9 +318,60 @@ TLV_DECODE_SPEC = ActionSpec(
 )
 
 
+ASN1_TLV_DECODE_SPEC = ActionSpec(
+    id="tool.asn1_tlv.decode",
+    subsystem=OFFLINE_TOOLS_SUBSYSTEM,
+    title="ASN.1/TLV decode",
+    description=(
+        "Decode BER/DER ASN.1, BER-TLV, or command APDU hex into JSON "
+        "and ASN.1-like value notation."
+    ),
+    inputs=(
+        ActionField(
+            name="hex_text",
+            label="Input hex",
+            kind="text",
+            required=True,
+            multiline=True,
+            placeholder="BF 22 03 81 01 02",
+            help="Compact or spaced hex; common separators and 0x prefixes are accepted.",
+        ),
+        ActionField(
+            name="schema_paths",
+            label="ASN.1 schema paths",
+            kind="text",
+            required=False,
+            multiline=True,
+            placeholder="path/to/schema.asn",
+            help="Optional newline/comma-separated .asn/.asn1 files or directories.",
+        ),
+        ActionField(
+            name="type_name",
+            label="ASN.1 type name",
+            kind="string",
+            required=False,
+            placeholder="EuiccPackageRequest",
+            help="Optional schema type to decode with asn1tools.",
+        ),
+        ActionField(
+            name="codec",
+            label="Schema codec",
+            kind="enum",
+            required=False,
+            default="der",
+            choices=["der", "ber", "uper", "per", "oer", "jer", "gser", "xer"],
+            help="asn1tools codec used only for schema-aware decode.",
+        ),
+    ),
+    output_kind="asn1_tlv",
+    dispatcher=_dispatch_asn1_tlv_decode,
+    tags=("decode", "asn1", "tlv", "apdu"),
+)
+
+
 SW_LOOKUP_SPEC = ActionSpec(
     id="tool.sw.lookup",
-    subsystem="Tools",
+    subsystem=OFFLINE_TOOLS_SUBSYSTEM,
     title="Status-word lookup",
     description="Translate a 2-byte SW response (e.g. 9000, 6A82) into a human description.",
     inputs=(
@@ -284,7 +392,7 @@ SW_LOOKUP_SPEC = ActionSpec(
 
 EUICC_INFO2_SPEC = ActionSpec(
     id="tool.euicc_info2.decode",
-    subsystem="Tools",
+    subsystem=OFFLINE_TOOLS_SUBSYSTEM,
     title="EUICCInfo2 decode",
     description="Decode an EUICCInfo2 (tag BF22) TLV blob into labeled detail lines + validation.",
     inputs=(
@@ -304,9 +412,31 @@ EUICC_INFO2_SPEC = ActionSpec(
 )
 
 
+SIMA_RESPONSE_DECODE_SPEC = ActionSpec(
+    id="tool.sima_response.decode",
+    subsystem=OFFLINE_TOOLS_SUBSYSTEM,
+    title="SIMa response decode",
+    description="Decode a SIMa simaResponse TLV into final-result fields and a TLV tree.",
+    inputs=(
+        ActionField(
+            name="hex",
+            label="SIMa response hex",
+            kind="hex",
+            required=True,
+            multiline=True,
+            placeholder="30 07 A0 05 30 03 80 01 00",
+            help="Paste the simaResponse value from ProfileInstallationResult.",
+        ),
+    ),
+    output_kind="sima_response",
+    dispatcher=_dispatch_sima_response_decode,
+    tags=("decode", "sima", "sgp22"),
+)
+
+
 SAIP_LINT_SPEC = ActionSpec(
     id="tool.saip.lint",
-    subsystem="Tools",
+    subsystem=OFFLINE_TOOLS_SUBSYSTEM,
     title="SAIP lint",
     description="Lint a SAIP TRANSCODE-TUI editor JSON buffer. Returns findings grouped by severity.",
     inputs=(
@@ -343,7 +473,7 @@ SAIP_LINT_SPEC = ActionSpec(
 
 EIM_LINT_SPEC = ActionSpec(
     id="tool.eim.lint",
-    subsystem="Tools",
+    subsystem=OFFLINE_TOOLS_SUBSYSTEM,
     title="eIM package lint",
     description="Validate an eIM package document (JSON object) and surface errors + warnings.",
     inputs=(
@@ -364,7 +494,7 @@ EIM_LINT_SPEC = ActionSpec(
 
 GSMA_CODES_SPEC = ActionSpec(
     id="tool.gsma.codes",
-    subsystem="Tools",
+    subsystem=OFFLINE_TOOLS_SUBSYSTEM,
     title="GSMA error-code reference",
     description="Dump the bundled GSMA error-code tables (SGP.22 / SGP.32) for quick lookup.",
     inputs=(),
@@ -375,8 +505,10 @@ GSMA_CODES_SPEC = ActionSpec(
 
 
 get_registry().register(TLV_DECODE_SPEC)
+get_registry().register(ASN1_TLV_DECODE_SPEC)
 get_registry().register(SW_LOOKUP_SPEC)
 get_registry().register(EUICC_INFO2_SPEC)
+get_registry().register(SIMA_RESPONSE_DECODE_SPEC)
 get_registry().register(SAIP_LINT_SPEC)
 get_registry().register(EIM_LINT_SPEC)
 get_registry().register(GSMA_CODES_SPEC)

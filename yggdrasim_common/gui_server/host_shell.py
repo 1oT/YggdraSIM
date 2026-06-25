@@ -86,8 +86,17 @@ _SERIAL_PATH_RE = re.compile(
 )
 
 _MAX_COMMAND_LENGTH = 512
+_HIL_MODEM_DEFAULT_DEVICE = "/dev/ttyUSB2"
+_HIL_MODEM_DEFAULT_COMMAND = f"sudo tio {_HIL_MODEM_DEFAULT_DEVICE}"
 _HIL_MODEM_TERMINAL_COMMANDS = frozenset({"tio", "minicom", "picocom", "screen"})
 _HIL_MODEM_PRIVILEGE_WRAPPERS = frozenset({"sudo", "doas"})
+_HIL_MODEM_SSH_FLAGS = frozenset({"-t", "-tt"})
+_HIL_MODEM_SSH_ALLOWED_OPTIONS = frozenset({
+    "BatchMode=yes",
+    "ConnectTimeout=8",
+    "ServerAliveInterval=30",
+    "ServerAliveCountMax=3",
+})
 
 
 # ---------------------------------------------------------------------------
@@ -163,6 +172,7 @@ def describe_hil_modem_capability() -> dict:
             "scope": "hil-modem",
             "reason": "PTY bridge is not supported on this platform.",
         }
+    command_payload = _hil_modem_default_command_payload()
     return {
         "supported": True,
         "enabled": True,
@@ -171,6 +181,47 @@ def describe_hil_modem_capability() -> dict:
         "reason": None,
         "command_policy": "serial-terminal-only",
         "allowed_commands": sorted(_HIL_MODEM_TERMINAL_COMMANDS),
+        **command_payload,
+    }
+
+
+def _hil_modem_default_command_payload() -> dict[str, str]:
+    """Return the modem-shell command preference for the current rig."""
+    remote_command = _remote_card_bridge_modem_command()
+    if remote_command:
+        return {
+            "default_command": remote_command["command"],
+            "default_command_source": "remote-card-bridge",
+            "remote_target": remote_command["target"],
+        }
+    return {
+        "default_command": _HIL_MODEM_DEFAULT_COMMAND,
+        "default_command_source": "local",
+        "remote_target": "",
+    }
+
+
+def _remote_card_bridge_modem_command() -> Optional[dict[str, str]]:
+    """Build a constrained SSH terminal command from saved Card Bridge state."""
+    try:
+        from yggdrasim_common.gui_server.actions import card_bridge
+
+        state = card_bridge._load_remote_rig_state()
+        target = card_bridge._validate_ssh_target(state.get("ssh_target"))
+        ssh_command = card_bridge._ssh_base_command(
+            ssh_target=target,
+            identity_file=state.get("identity_file"),
+            connect_timeout=8,
+        )
+    except Exception:
+        return None
+    if len(ssh_command) == 0:
+        return None
+    ssh_command.insert(1, "-tt")
+    ssh_command.extend(["sudo", "tio", _HIL_MODEM_DEFAULT_DEVICE])
+    return {
+        "command": shlex.join(ssh_command),
+        "target": target,
     }
 
 
@@ -397,6 +448,15 @@ def parse_hil_modem_command(command: Optional[str]) -> list[str]:
     argv = parse_host_command(command)
     if len(argv) == 0:
         raise ValueError("HIL modem shell command is required.")
+    if Path(argv[0]).name == "ssh":
+        _validate_hil_modem_ssh_command(argv)
+        return argv
+    _validate_hil_modem_terminal_command(argv)
+    return argv
+
+
+def _validate_hil_modem_terminal_command(argv: list[str]) -> None:
+    """Validate a direct serial-terminal argv vector."""
     command_index = 0
     executable = Path(argv[command_index]).name
     if executable in _HIL_MODEM_PRIVILEGE_WRAPPERS:
@@ -416,7 +476,68 @@ def parse_hil_modem_command(command: Optional[str]) -> list[str]:
             "HIL modem shell command must include a serial device path "
             "under /dev/ttyUSB*, /dev/ttyACM*, /dev/ttyS*, or /dev/serial/by-id/*."
         )
-    return argv
+
+
+def _validate_hil_modem_ssh_command(argv: list[str]) -> None:
+    """Validate the SSH form generated for remote Card Bridge rigs."""
+    if len(argv) < 4:
+        raise ValueError("HIL modem SSH command is incomplete.")
+
+    index = 1
+    while index < len(argv):
+        arg = argv[index]
+        if arg in _HIL_MODEM_SSH_FLAGS:
+            index += 1
+            continue
+        if arg == "-o":
+            if index + 1 >= len(argv):
+                raise ValueError("HIL modem SSH -o option is missing a value.")
+            _validate_hil_modem_ssh_option(argv[index + 1])
+            index += 2
+            continue
+        if arg.startswith("-o") and len(arg) > 2:
+            _validate_hil_modem_ssh_option(arg[2:])
+            index += 1
+            continue
+        if arg == "-i":
+            if index + 1 >= len(argv):
+                raise ValueError("HIL modem SSH identity option is missing a path.")
+            _validate_hil_modem_ssh_identity(argv[index + 1])
+            index += 2
+            continue
+        if arg.startswith("-"):
+            raise ValueError("HIL modem SSH command contains an unsupported SSH option.")
+        break
+
+    if index >= len(argv):
+        raise ValueError("HIL modem SSH command is missing a target.")
+    target = argv[index]
+    _validate_hil_modem_ssh_target(target)
+    remote_argv = argv[index + 1:]
+    if len(remote_argv) == 0:
+        raise ValueError("HIL modem SSH command is missing the remote terminal command.")
+    _validate_hil_modem_terminal_command(remote_argv)
+
+
+def _validate_hil_modem_ssh_option(value: str) -> None:
+    if value not in _HIL_MODEM_SSH_ALLOWED_OPTIONS:
+        raise ValueError("HIL modem SSH command contains an unsupported SSH option.")
+
+
+def _validate_hil_modem_ssh_identity(value: str) -> None:
+    text = str(value or "").strip()
+    if len(text) == 0 or len(text) > 256:
+        raise ValueError("HIL modem SSH identity path is invalid.")
+    if text.startswith("-") or "\x00" in text or any(ord(ch) < 32 for ch in text):
+        raise ValueError("HIL modem SSH identity path is invalid.")
+
+
+def _validate_hil_modem_ssh_target(value: str) -> None:
+    text = str(value or "").strip()
+    if len(text) == 0 or len(text) > 256:
+        raise ValueError("HIL modem SSH target is invalid.")
+    if text.startswith("-") or "\x00" in text or any(ord(ch) < 32 for ch in text):
+        raise ValueError("HIL modem SSH target is invalid.")
 
 
 async def spawn_host_shell(spec: HostShellStartSpec) -> PtySession:

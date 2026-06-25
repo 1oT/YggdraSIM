@@ -56,11 +56,11 @@ class ProfileDownloadHookTests(unittest.TestCase):
         engine.register_profile_download_hook(events.append)
         engine._sync_all_stores()
         engine.state.profiles.append(
-            SimProfileEntry(aid="A000000087", iccid="89000055550000111122")
+            SimProfileEntry(aid="A000000087", iccid="89880055550000111122")
         )
         engine._sync_all_stores()
         self.assertEqual(len(events), 1)
-        self.assertEqual(events[0]["iccid"], "89000055550000111122")
+        self.assertEqual(events[0]["iccid"], "89880055550000111122")
         engine._sync_all_stores()
         self.assertEqual(len(events), 1)
 
@@ -72,7 +72,7 @@ class ProfileDownloadHookTests(unittest.TestCase):
         engine.register_profile_download_hook(events_b.append)
         engine._sync_all_stores()
         engine.state.profiles.append(
-            SimProfileEntry(aid="A0000000871A", iccid="89000066660000222233")
+            SimProfileEntry(aid="A0000000871A", iccid="89880066660000222233")
         )
         engine._sync_all_stores()
         self.assertEqual(len(events_a), 1)
@@ -89,12 +89,12 @@ class ProfileDownloadHookTests(unittest.TestCase):
         engine.register_profile_download_hook(_exploding_hook)
         engine._sync_all_stores()
         engine.state.profiles.append(
-            SimProfileEntry(aid="A000000087", iccid="89000077770000333344")
+            SimProfileEntry(aid="A000000087", iccid="89880077770000333344")
         )
         engine._sync_all_stores()
         engine._sync_all_stores()
         self.assertEqual(len(events), 1)
-        self.assertIn("89000077770000333344", engine._last_profile_iccids)
+        self.assertIn("89880077770000333344", engine._last_profile_iccids)
 
     def test_unregister_tolerates_unknown_callable(self) -> None:
         engine = self._build_engine_with_isolated_stores()

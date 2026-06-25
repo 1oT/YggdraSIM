@@ -137,3 +137,91 @@
   margin: 4px 0;
 }
 
+.cc-asn1-decode-result .cc-action-datasheet-main-sub {
+  max-width: min(62vw, 720px);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cc-asn1-notation {
+  margin: 0;
+  padding: 14px 16px;
+  overflow: auto;
+  background: color-mix(in oklab, var(--bg), var(--bg-elev) 42%);
+  color: var(--fg);
+  font-family: var(--font-mono);
+  font-size: 13px;
+  line-height: 1.55;
+  white-space: pre;
+}
+
+.cc-asn1-tlv-tree {
+  max-height: min(48vh, 520px);
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+}
+
+.cc-asn1-raw-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+  background: color-mix(in oklab, var(--bg-hover) 88%, transparent);
+}
+
+.cc-asn1-raw-json .cc-json {
+  max-height: min(42vh, 480px);
+}
+
+.cc-sima-summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 14px 16px;
+}
+
+.cc-sima-result-chip {
+  padding: 4px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  background: var(--bg-elev-2);
+  color: var(--fg);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.cc-sima-result-chip--success {
+  border-color: color-mix(in oklab, var(--ok), transparent 42%);
+  background: var(--ok-soft);
+  color: var(--ok);
+}
+
+.cc-sima-result-chip--failure {
+  border-color: color-mix(in oklab, var(--fail), transparent 42%);
+  background: var(--fail-soft);
+  color: var(--fail);
+}
+
+.cc-sima-code {
+  padding: 3px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  background: color-mix(in oklab, var(--bg), var(--bg-elev) 40%);
+  color: var(--fg);
+  font-size: 12px;
+}
+
+.cc-sima-tlv-tree {
+  max-height: min(48vh, 520px);
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+}
+
+.cc-sima-formatted .cc-json,
+.cc-sima-raw-json .cc-json {
+  max-height: min(42vh, 480px);
+}

@@ -152,7 +152,7 @@ def _build_full_document() -> dict[str, Any]:
         "sections": {
             "header": {
                 "profile-header": {"identification": 0, "mandated": None},
-                "iccid": {"__ygg_saip_bytes__": "89460811111111111112"},
+                "iccid": {"__ygg_saip_bytes__": "89880811111111111112"},
                 "profileType": "Sample Lab",
                 "major-version": 2,
                 "minor-version": 3,

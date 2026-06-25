@@ -20,7 +20,7 @@ class BuildResolvedPreviewDocumentTests(unittest.TestCase):
     def _base_document(self) -> dict:
         return {
             "__ygg_token_defs__": {
-                "ICCID": {"hex": "89461111111111111112"},
+                "ICCID": {"hex": "89881111111111111112"},
                 "IMSI": "0899999999999999",
             },
             "__ygg_placeholder_style__": "brace",
@@ -42,7 +42,7 @@ class BuildResolvedPreviewDocumentTests(unittest.TestCase):
         resolved, undef = build_resolved_preview_document(self._base_document())
         self.assertEqual(
             resolved["sections"]["header"]["iccid"]["hex"],
-            "89461111111111111112",
+            "89881111111111111112",
         )
         self.assertEqual(set(undef.keys()), {"UNKNOWN"})
 
@@ -64,7 +64,7 @@ class BuildResolvedPreviewDocumentTests(unittest.TestCase):
         resolved, _undef = build_resolved_preview_document(self._base_document())
         self.assertEqual(
             resolved["sections"]["header"]["prefixed"]["hex"],
-            "BF370A89461111111111111112",
+            "BF370A89881111111111111112",
         )
 
     def test_unknown_token_collected_with_dotted_path(self) -> None:
@@ -80,7 +80,7 @@ class BuildResolvedPreviewDocumentTests(unittest.TestCase):
         resolved, _undef = build_resolved_preview_document(self._base_document())
         self.assertEqual(
             resolved["__ygg_token_defs__"]["ICCID"],
-            {"hex": "89461111111111111112"},
+            {"hex": "89881111111111111112"},
         )
         self.assertEqual(resolved["__ygg_placeholder_style__"], "brace")
 

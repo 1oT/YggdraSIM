@@ -12,7 +12,7 @@ L = Stockholm
 O = YggdraSIM
 OU = eSIM Simulator
 CN = YggdraSIM.eSIM.Simulator.Cert.Chain
-emailAddress = certops@yggdrasim.local
+emailAddress = certops@example.test
 
 [ v3_req ]
 basicConstraints = critical, CA:FALSE

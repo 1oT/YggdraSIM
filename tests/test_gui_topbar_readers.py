@@ -1,11 +1,11 @@
 """Static assertions for the top-bar reader strip (Phase C UX pivot).
 
 Operators asked for the reader selector to move out of the sidebar
-and up next to the YggdraSIM brand: one pill per PC/SC reader, with
-a traffic-light status dot (green = active session, yellow = card
-present / no session, red = empty / no session). Pills behave like
-session tabs — the reader picked in the top bar is pre-set across
-every subsystem for that session.
+and into the top-bar runtime controls: one pill per PC/SC reader,
+with a traffic-light status dot (green = active session, yellow =
+card present / no session, red = empty / no session). Pills behave
+like session tabs — the reader picked in the top bar is pre-set
+across every subsystem for that session.
 
 Because the reader strip is pure frontend wiring (HTML markup + a
 JavaScript state machine + CSS colour tokens), the cheapest
@@ -15,6 +15,7 @@ refactors that would:
 
   * drop the top-bar markup (``#topbar-readers``, ``#topbar-readers-scroll``,
     ``#topbar-readers-refresh``);
+  * move suite health back out of the top bar;
   * reintroduce the legacy sidebar Readers section;
   * rename the ``readerBar*`` helpers that SCP03 flows hook into;
   * lose the traffic-light palette classes
@@ -56,6 +57,51 @@ def test_topbar_reader_strip_lives_inside_topbar_header() -> None:
     inside = html[head_start:head_end]
     assert 'id="topbar-readers"' in inside, "strip must be inside <header class='topbar'>"
     assert "brand-name" in inside, "brand must still live in the topbar"
+    cluster_start = inside.index('<div class="status-cluster">')
+    cluster_end = inside.index('id="topbar-collapse-toggle"', cluster_start)
+    cluster = inside[cluster_start:cluster_end]
+    assert 'id="topbar-readers"' in cluster, "strip must live with the runtime controls"
+
+
+def test_topbar_backend_switch_markup_present() -> None:
+    html = _read("index.html")
+    assert 'class="topbar-backend-switch"' in html
+    assert 'id="topbar-backend-reader"' in html
+    assert 'id="topbar-backend-sim"' in html
+    assert 'data-backend="reader"' in html
+    assert 'data-backend="sim"' in html
+
+
+def test_topbar_suite_health_markup_present() -> None:
+    html = _read("index.html")
+    assert 'id="topbar-suite-health"' in html
+    assert 'id="topbar-suite-version"' in html
+    assert 'id="topbar-suite-active"' in html
+    assert 'id="badge-mode"' not in html
+    assert 'id="badge-flavor"' not in html
+
+
+def test_app_close_button_lives_at_topbar_right_edge() -> None:
+    html = _read("index.html")
+    css = _read("app.css")
+    js = _read("app.js")
+    head_start = html.index('<header class="topbar">')
+    head_end = html.index("</header>", head_start)
+    inside = html[head_start:head_end]
+
+    assert 'id="app-close-button"' in inside
+    assert inside.index('id="topbar-collapse-toggle"') < inside.index('id="app-close-button"')
+    assert ".app-close-button" in css
+    assert ":not(.app-close-button)" in css
+    assert "function appCloseBootstrap()" in js
+    assert "window.pywebview.api.close_app" in js
+
+
+def test_overview_suite_health_card_retired() -> None:
+    html = _read("index.html")
+    assert "<h3>Suite health</h3>" not in html
+    assert 'id="overview-health"' not in html
+    assert 'id="overview-refresh"' not in html
 
 
 def test_sidebar_readers_section_retired() -> None:
@@ -80,6 +126,17 @@ def test_reader_bar_state_in_command_state() -> None:
     # Core state fields that the render/polling helpers depend on.
     for field in ("readers", "activeReader", "pollTimerId", "pollIntervalMs"):
         assert field in js, f"commandState.readerBar.{field} field missing"
+
+
+def test_load_health_updates_topbar_suite_badge_only() -> None:
+    js = _read("app.js")
+    start = js.index("async function loadHealth()")
+    window = js[start:start + 900]
+    assert 'setText("topbar-suite-version"' in window
+    assert 'setText("topbar-suite-active"' in window
+    assert "formatUptime(data.uptime_seconds)" in window
+    assert "overview-version" not in window
+    assert "badge-mode" not in window
 
 
 def test_reader_bar_public_helpers_defined() -> None:
@@ -192,6 +249,12 @@ def test_topbar_reader_pill_css_tokens() -> None:
         ".topbar-reader-pill-dot",
         ".topbar-reader-pill-label",
         ".topbar-reader-pill-close",
+        ".topbar-backend-switch",
+        ".topbar-backend-option",
+        ".topbar-backend-option.is-active",
+        ".topbar-suite-health",
+        ".topbar-suite-version",
+        ".topbar-suite-active",
     ):
         assert selector in css, f"CSS selector missing: {selector}"
 

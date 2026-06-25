@@ -27,6 +27,8 @@ try:
     from .providers import RemoteEs9Provider, Sgp26LocalProvider
     from .transport import PcscApduChannel
 except ImportError:
+    if __package__:
+        raise
     from es9_client import Es9LikeClient
     from models import (
         BACKEND_MODE_LOCAL_SGP26,

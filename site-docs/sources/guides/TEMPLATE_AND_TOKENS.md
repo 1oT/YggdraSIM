@@ -35,7 +35,7 @@ Token definitions live in a sibling metadata key:
 
 ```json
 "__ygg_token_defs__": {
-  "ICCID": "89461111111111111112",
+  "ICCID": "89881111111111111112",
   "IMSI": { "pattern_hex": "FF", "byte_len": 8 }
 }
 ```

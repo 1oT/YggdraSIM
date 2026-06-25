@@ -72,7 +72,7 @@ class DerivedLengthTokenTests(unittest.TestCase):
     """``{#NAME}`` / ``[#NAME]`` companion token semantics."""
 
     def test_short_form_matches_literal_length_byte(self) -> None:
-        defs = {"ICCID": {"hex": "89461111111111111112"}}
+        defs = {"ICCID": {"hex": "89881111111111111112"}}
         ctx = TokenExpansionContext(defs, "brace")
         self.assertEqual(
             ctx.expand_mixed_hex("0A{ICCID}"),
@@ -99,13 +99,13 @@ class DerivedLengthTokenTests(unittest.TestCase):
 
     def test_bracket_style_supports_companion(self) -> None:
         ctx = TokenExpansionContext(
-            {"ICCID": {"hex": "89461111111111111112"}},
+            {"ICCID": {"hex": "89881111111111111112"}},
             "bracket",
         )
         out = ctx.expand_mixed_hex("5F[#ICCID][ICCID]")
         self.assertEqual(
             out,
-            bytes.fromhex("5F0A89461111111111111112"),
+            bytes.fromhex("5F0A89881111111111111112"),
         )
 
     def test_undefined_companion_tolerated(self) -> None:
@@ -225,7 +225,7 @@ class TokenSidecarIOTests(unittest.TestCase):
         template = {
             "__ygg_placeholder_style__": "brace",
             "__ygg_token_defs__": {
-                "ICCID": {"hex": "89461111111111111112"},
+                "ICCID": {"hex": "89881111111111111112"},
                 "IMSI": "08" + "99" * 7,
             },
             "sections": {
@@ -258,14 +258,14 @@ class TokenSidecarIOTests(unittest.TestCase):
         loaded = load_sidecar(self._sidecar_path)
         self.assertEqual(
             loaded["__ygg_token_defs__"]["ICCID"],
-            {"hex": "89461111111111111112"},
+            {"hex": "89881111111111111112"},
         )
 
     def test_merge_additive_preserves_existing_defs(self) -> None:
         sidecar = {
             "__ygg_placeholder_style__": "brace",
             "__ygg_token_defs__": {
-                "ICCID": {"hex": "89461111111111111112"},
+                "ICCID": {"hex": "89881111111111111112"},
                 "IMSI": "08" + "99" * 7,
             },
         }
@@ -298,7 +298,7 @@ class TokenSidecarIOTests(unittest.TestCase):
         sidecar = {
             "__ygg_placeholder_style__": "brace",
             "__ygg_token_defs__": {
-                "ICCID": {"hex": "89461111111111111112"},
+                "ICCID": {"hex": "89881111111111111112"},
             },
         }
         template = {
@@ -311,7 +311,7 @@ class TokenSidecarIOTests(unittest.TestCase):
         merge_sidecar_into_template(template, sidecar, overwrite=True)
         self.assertEqual(
             template["__ygg_token_defs__"]["ICCID"],
-            {"hex": "89461111111111111112"},
+            {"hex": "89881111111111111112"},
         )
 
     def test_template_has_unresolved_placeholders_reports_names(self) -> None:
@@ -347,14 +347,14 @@ class TokenListEditTests(unittest.TestCase):
     def test_list_returns_deep_copy(self) -> None:
         doc = {
             "__ygg_token_defs__": {
-                "ICCID": {"hex": "89461111111111111112"},
+                "ICCID": {"hex": "89881111111111111112"},
             },
         }
         listed = list_token_definitions(doc)
         listed["ICCID"]["hex"] = "TOUCHED"
         self.assertEqual(
             doc["__ygg_token_defs__"]["ICCID"]["hex"],
-            "89461111111111111112",
+            "89881111111111111112",
         )
 
     def test_set_creates_when_missing(self) -> None:
@@ -526,7 +526,7 @@ class RetokeniseLengthsTests(unittest.TestCase):
         return {
             "__ygg_placeholder_style__": "brace",
             "__ygg_token_defs__": {
-                "ICCID": {"hex": "89461111111111111112"},
+                "ICCID": {"hex": "89881111111111111112"},
                 "IMSI": {"hex": "08" + "99" * 7},
                 "BIG": {"zero_len": 200},
             },
@@ -623,7 +623,7 @@ class RetokeniseOnlyTokensTests(unittest.TestCase):
     def _base_doc(self) -> dict[str, object]:
         return {
             "__ygg_token_defs__": {
-                "ICCID": {"hex": "89461111111111111112"},
+                "ICCID": {"hex": "89881111111111111112"},
                 "IMSI": "AABB",
             },
             "__ygg_placeholder_style__": "brace",
@@ -666,7 +666,7 @@ class FindUnmigratedLengthCandidatesTests(unittest.TestCase):
     def _base_doc(self) -> dict[str, object]:
         return {
             "__ygg_token_defs__": {
-                "ICCID": {"hex": "89461111111111111112"},
+                "ICCID": {"hex": "89881111111111111112"},
                 "IMSI": "AABB",
             },
             "__ygg_placeholder_style__": "brace",

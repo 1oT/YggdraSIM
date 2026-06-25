@@ -26,9 +26,10 @@ import pytest
 
 
 @pytest.fixture(autouse=True)
-def _clear_host_shell_env(monkeypatch):
+def _clear_host_shell_env(monkeypatch, tmp_path):
     """Default-off posture mirrors a fresh shell."""
     monkeypatch.delenv("YGGDRASIM_GUI_HOST_SHELL", raising=False)
+    monkeypatch.setenv("YGGDRASIM_RUNTIME_ROOT", str(tmp_path))
     yield
 
 
@@ -133,6 +134,26 @@ def test_describe_hil_modem_capability_does_not_require_full_host_shell(monkeypa
     if snapshot["supported"]:
         assert snapshot["enabled"] is True
         assert "tio" in snapshot["allowed_commands"]
+        assert snapshot["default_command"] == "sudo tio /dev/ttyUSB2"
+        assert snapshot["default_command_source"] == "local"
+
+
+def test_describe_hil_modem_capability_prefers_remote_card_bridge_target() -> None:
+    from yggdrasim_common.gui_server import host_shell
+    from yggdrasim_common.gui_server.actions import card_bridge
+
+    card_bridge._write_remote_rig_state({
+        "ssh_target": "pi@example.test",
+        "identity_file": "~/.ssh/id_rpi",
+    })
+    snapshot = host_shell.describe_hil_modem_capability()
+
+    if snapshot["supported"]:
+        assert snapshot["default_command_source"] == "remote-card-bridge"
+        assert snapshot["remote_target"] == "pi@example.test"
+        assert "ssh -tt" in snapshot["default_command"]
+        assert "pi@example.test" in snapshot["default_command"]
+        assert "sudo tio /dev/ttyUSB2" in snapshot["default_command"]
 
 
 def test_parse_hil_modem_command_accepts_sudo_tio() -> None:
@@ -145,11 +166,37 @@ def test_parse_hil_modem_command_accepts_sudo_tio() -> None:
     ]
 
 
+def test_parse_hil_modem_command_accepts_remote_ssh_tio() -> None:
+    from yggdrasim_common.gui_server import host_shell
+
+    command = (
+        "ssh -tt -o BatchMode=yes -o ConnectTimeout=8 "
+        "-i /home/user/.ssh/id_rpi pi@example.test sudo tio /dev/ttyUSB2"
+    )
+    assert host_shell.parse_hil_modem_command(command) == [
+        "ssh",
+        "-tt",
+        "-o",
+        "BatchMode=yes",
+        "-o",
+        "ConnectTimeout=8",
+        "-i",
+        "/home/user/.ssh/id_rpi",
+        "pi@example.test",
+        "sudo",
+        "tio",
+        "/dev/ttyUSB2",
+    ]
+
+
 @pytest.mark.parametrize("command", [
     "bash",
     "sudo bash",
     "tio /etc/passwd",
     "python -c print(1)",
+    "ssh -tt pi@example.test sudo bash",
+    "ssh -tt -o ProxyCommand=sh pi@example.test sudo tio /dev/ttyUSB2",
+    "ssh -tt pi@example.test sudo tio /etc/passwd",
 ])
 def test_parse_hil_modem_command_rejects_non_serial_commands(command: str) -> None:
     from yggdrasim_common.gui_server import host_shell

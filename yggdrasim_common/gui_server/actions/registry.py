@@ -230,7 +230,6 @@ def ensure_builtin_actions_loaded() -> ActionRegistry:
         "yggdrasim_common.gui_server.actions.scp80",
         "yggdrasim_common.gui_server.actions.akma",
         "yggdrasim_common.gui_server.actions.yggdracore",
-        "yggdrasim_common.gui_server.actions.sunrise6g",
     )
     for module_name in modules:
         try:

@@ -70,7 +70,7 @@ from SIMCARD.state import (
 )
 
 
-_BPP_PATH = Path("Workspace/LocalSMDPP/profile/89103000000466311335_test.txt")
+_BPP_PATH = Path("Workspace/LocalSMDPP/profile/89880000000466311335_test.txt")
 
 
 def _walk_efs(state, root_node_id: str):
@@ -168,8 +168,8 @@ class _LinkRuntimeFixture(unittest.TestCase):
     def _build_state(self) -> SimCardState:
         state = SimCardState(
             atr=DEFAULT_SIM_ATR,
-            eid="89000000000000000000000000000000",
-            iccid="89000000000000000000",
+            eid="89049032000000000000000000000000",
+            iccid="89880000000000000000",
             imsi="001010000000001",
             default_dp_address="rsp.example.com",
             root_ci_pkid=b"\x00" * 20,
@@ -370,7 +370,7 @@ class UsimOnlyEfPreservedTests(unittest.TestCase):
 
         image = SimProfileImage(
             profile_name="usim-only fixture",
-            iccid="8946000000000000001",
+            iccid="8988000000000000001",
             imsi="001010000000002",
             nodes=[
                 SimProfileFsNode(
@@ -445,7 +445,7 @@ class OperatorBppLinkPathTests(unittest.TestCase):
         state.profiles.append(
             SimProfileEntry(
                 aid=forced_aid,
-                iccid=image.iccid or "8946000000000000000",
+                iccid=image.iccid or "8988000000000000000",
                 state="enabled",
                 profile_class="operational",
                 profile_name=image.profile_name or "Linkpath BPP probe",

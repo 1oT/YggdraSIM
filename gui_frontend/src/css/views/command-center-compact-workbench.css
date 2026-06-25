@@ -66,6 +66,70 @@
   overflow: hidden;
 }
 
+.main--module-workbench {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 10px 12px 12px;
+}
+
+.main--module-workbench > section[data-view="command_center"].view-active {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.main--module-workbench .cc-header {
+  display: none;
+}
+
+.main--module-workbench .cc-actions {
+  display: block;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.main--module-workbench .cc-workbench {
+  height: 100%;
+  max-height: 100%;
+  flex: 1 1 auto;
+  min-height: 0;
+  gap: 8px;
+  padding: 8px;
+  border-color: var(--border-soft, var(--border));
+  border-radius: var(--radius-md, 8px);
+  box-shadow: none;
+  background: var(--surface, rgba(255, 255, 255, 0.02));
+}
+
+.main--module-workbench .cc-workbench.cc-workbench--compact {
+  gap: 0;
+  padding: 0;
+}
+
+.main--module-workbench .cc-wb-tabs {
+  gap: 4px;
+  padding-bottom: 5px;
+}
+
+.main--module-workbench .cc-wb-tab {
+  padding: 4px 10px;
+  font-size: 12px;
+}
+
+.main--module-workbench .cc-wb-tab-add {
+  padding: 4px 9px;
+}
+
+.main--module-workbench .cc-wb-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+}
+
 .cc-compact-header {
   display: flex;
   align-items: flex-start;
@@ -114,6 +178,81 @@
 .cc-compact-search-input:focus {
   border-color: var(--accent);
   box-shadow: 0 0 0 2px var(--accent-soft);
+}
+
+.cc-esim-module-toolbar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  min-width: 0;
+  flex: 0 1 auto;
+}
+
+.cc-esim-module-tool {
+  min-height: 29px;
+  padding: 5px 9px;
+  border: 1px solid var(--border-soft, var(--border));
+  border-radius: var(--radius-sm, 6px);
+  background: var(--bg-elev);
+  color: var(--fg);
+  cursor: pointer;
+  font: inherit;
+  font-size: 11.5px;
+  font-weight: 700;
+}
+
+.cc-esim-module-tool:hover:not(:disabled) {
+  background: var(--bg-hover);
+  border-color: var(--border-strong, var(--border));
+}
+
+.cc-esim-module-tool:disabled {
+  cursor: default;
+  opacity: 0.58;
+}
+
+.cc-esim-module-tool--reset {
+  color: var(--warn);
+}
+
+.cc-esim-module-toolbar-status {
+  max-width: 104px;
+  overflow: hidden;
+  padding-left: 2px;
+  color: var(--fg-muted);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.main--module-workbench .cc-compact-header {
+  padding: 9px 12px 8px;
+  gap: 10px;
+  background: transparent;
+  border-bottom-color: var(--border-soft, var(--border));
+}
+
+.main--module-workbench .cc-compact-title h2 {
+  margin-bottom: 2px;
+  font-size: 14px;
+}
+
+.main--module-workbench .cc-compact-hint {
+  font-size: 11.5px;
+  line-height: 1.35;
+}
+
+.main--module-workbench .cc-compact-search-input {
+  padding: 5px 9px;
+  font-size: 12px;
+}
+
+.main--module-workbench .cc-esim-module-tool {
+  min-height: 27px;
+  padding: 4px 8px;
+  font-size: 11px;
 }
 
 /* -- Category tab strip (ribbon pattern) ------------------------------ */
@@ -476,54 +615,60 @@
 }
 
 .cc-hil-packet-list {
+  position: relative;
+  isolation: isolate;
   flex: 1 1 auto;
   min-height: 0;
   max-height: 100%;
   overflow: auto;
-  padding: 4px 0;
-}
-
-.cc-hil-context-group {
-  border-bottom: 1px solid color-mix(in oklab, var(--border), transparent 40%);
+  padding: 0;
+  background: var(--bg);
 }
 
 .cc-hil-context-title {
-  position: sticky;
-  top: 0;
-  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  width: 100%;
   padding: 5px 10px;
   color: var(--fg-dim);
   background: var(--bg);
   border-top: 1px solid var(--border);
+  border-right: none;
   border-bottom: 1px solid var(--border);
+  border-left: none;
   font-size: 10.5px;
   font-weight: 700;
   letter-spacing: 0.05em;
   text-transform: uppercase;
-  cursor: pointer;
+  text-align: left;
   user-select: none;
-  list-style: none;
-}
-
-.cc-hil-context-title::-webkit-details-marker {
-  display: none;
-}
-
-.cc-hil-context-title::before {
-  content: "▾";
-  display: inline-block;
-  width: 12px;
-  margin-right: 4px;
-  color: var(--fg-dim);
-}
-
-.cc-hil-context-group:not([open]) .cc-hil-context-title::before {
-  content: "▸";
+  cursor: pointer;
+  font-family: inherit;
 }
 
 .cc-hil-context-title:hover {
   color: var(--fg);
-  background: var(--bg-hover);
+  background: color-mix(in oklab, var(--bg-elev), var(--bg) 35%);
+}
+
+.cc-hil-context-title.is-collapsed {
+  color: var(--fg-muted);
+}
+
+.cc-hil-context-caret {
+  flex: 0 0 10px;
+  color: var(--accent);
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 10px;
+  line-height: 1;
+}
+
+.cc-hil-context-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .cc-hil-context-title:focus,
@@ -566,6 +711,10 @@
 .cc-hil-packet-row.is-selected {
   border-left-color: var(--accent);
   background: color-mix(in oklab, var(--accent-soft), var(--bg-elev) 55%);
+}
+
+.cc-hil-packet-row--context {
+  border-left-color: color-mix(in oklab, var(--border), transparent 40%);
 }
 
 .cc-hil-packet-num,
@@ -690,6 +839,50 @@
 
 .cc-hil-decoded-fallback {
   padding-left: 10px;
+}
+
+.cc-hil-decoded-line {
+  min-height: 1.45em;
+}
+
+.cc-hil-decoded-range {
+  cursor: pointer;
+  border-radius: 3px;
+}
+
+.cc-hil-decoded-range.is-highlighted {
+  color: var(--fg);
+  background: color-mix(in oklab, var(--accent-soft), var(--bg-elev) 52%);
+}
+
+.cc-hil-decoded-range.is-pinned {
+  color: var(--fg);
+  background: color-mix(in oklab, var(--accent), var(--bg-elev) 76%);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
+.cc-hil-byte-dump {
+  tab-size: 8;
+}
+
+.cc-hil-byte-offset {
+  color: var(--fg-dim);
+}
+
+.cc-hil-byte {
+  border-radius: 2px;
+  cursor: crosshair;
+}
+
+.cc-hil-byte.is-highlighted {
+  color: var(--fg);
+  background: color-mix(in oklab, var(--accent-soft), var(--bg-elev) 42%);
+}
+
+.cc-hil-byte.is-pinned {
+  color: var(--fg);
+  background: color-mix(in oklab, var(--accent), var(--bg-elev) 66%);
+  box-shadow: inset 0 -2px 0 var(--accent);
 }
 
 .cc-hil-empty {
@@ -817,6 +1010,25 @@
 }
 
 @media (max-width: 1040px) {
+  .main--module-workbench {
+    display: block;
+    overflow-y: auto;
+  }
+
+  .main--module-workbench > section[data-view="command_center"].view-active {
+    display: block;
+    overflow: visible;
+  }
+
+  .main--module-workbench .cc-actions {
+    overflow: visible;
+  }
+
+  .main--module-workbench .cc-workbench {
+    height: auto;
+    max-height: none;
+  }
+
   .main--hil-workbench {
     display: block;
     overflow-y: auto;

@@ -235,10 +235,10 @@ class TimerExpirationIpaPollTests(unittest.TestCase):
         toolkit_logic.state.toolkit.timer_management_id = 1
         toolkit_logic.state.toolkit.timer_management_auto_rearm = True
         toolkit_logic.state.toolkit.ipa_poll_enabled = True
-        toolkit_logic.state.toolkit.ipa_poll_eim_fqdn = "yggdrasim.eim.test.1ot.com"
+        toolkit_logic.state.toolkit.ipa_poll_eim_fqdn = "eim.example.test"
         toolkit_logic.state.toolkit.ipa_poll_eim_port = 443
         toolkit_logic.state.toolkit.ipa_poll_apn = "internet.apn"
-        toolkit_logic.state.toolkit.ipa_poll_dns_server = "8.8.8.8"
+        toolkit_logic.state.toolkit.ipa_poll_dns_server = "192.0.2.53"
         toolkit_logic.state.toolkit.ipa_poll_alpha_id = ""
         toolkit_logic.state.toolkit.ipa_poll_request_payload = b""
         # The bringup tests pin the linear command queue from Stage 1;
@@ -343,7 +343,7 @@ class TimerExpirationIpaPollTests(unittest.TestCase):
 
         # UDP_REMOTE on port 53.
         self.assertIn(b"\x3C\x03\x01\x00\x35", open_channel)
-        # Resolver IPv4 = 8.8.8.8.
+        # Resolver IPv4 = 192.0.2.53.
         self.assertIn(b"\x3E\x05\x21\x08\x08\x08\x08", open_channel)
         # APN under tag 47.
         self.assertIn(b"\x47\x0D\x08internet\x03apn", open_channel)
@@ -359,7 +359,7 @@ class TimerExpirationIpaPollTests(unittest.TestCase):
         )
 
         self.assertIn(b"POST /gsma/rsp2/asn1 HTTP/1.1", send_data)
-        self.assertIn(b"Host: yggdrasim.eim.test.1ot.com", send_data)
+        self.assertIn(b"Host: eim.example.test", send_data)
         self.assertIn(b"\x36", send_data)
 
     def test_custom_request_payload_overrides_default(self) -> None:

@@ -755,7 +755,7 @@ class RelayShellHelpTests(unittest.TestCase):
                     "firmware_version": "931100",
                 },
                 {
-                    "eim_fqdn": "yggdrasim.eim.test.1ot.com",
+                    "eim_fqdn": "eim.example.test",
                     "eim_id": "2.25.311782205282738360923618091971140414400",
                 },
             )
@@ -765,11 +765,11 @@ class RelayShellHelpTests(unittest.TestCase):
             lines = console._build_snapshot_pane_lines(120)
 
             self.assertEqual(snapshot.euicc_info2_summary["profile_version"], "v2.3.1 (020301)")
-            self.assertEqual(snapshot.eim_summary["eim_fqdn"], "yggdrasim.eim.test.1ot.com")
+            self.assertEqual(snapshot.eim_summary["eim_fqdn"], "eim.example.test")
             self.assertEqual(snapshot.issuer_name, "Kigen")
             self.assertTrue(any("Issuer" in line and "Kigen" in line for line in lines))
             self.assertTrue(any("Profile Version" in line and "v2.3.1 (020301)" in line for line in lines))
-            self.assertTrue(any("eIM FQDN" in line and "yggdrasim.eim.test.1ot.com" in line for line in lines))
+            self.assertTrue(any("eIM FQDN" in line and "eim.example.test" in line for line in lines))
             self.assertFalse(any("Active Flow Target" in line for line in lines))
             self.assertFalse(any("Active ES9 URL" in line for line in lines))
 
@@ -965,14 +965,14 @@ class RelayShellHelpTests(unittest.TestCase):
             console._style = module.ConsoleStyle("", "", "<G>", "", "<R>", "", "</>")
             rows = [
                 module.ProfileRow(
-                    iccid="89103000000477637736",
+                    iccid="89883000000477637736",
                     state="ENABLED",
                     profile_class="OPER",
                     nickname="One",
                     aid="A0000005591010FFFFFFFF8900001100",
                 ),
                 module.ProfileRow(
-                    iccid="89103000000477637737",
+                    iccid="89883000000477637737",
                     state="DISABLED",
                     profile_class="OPER",
                     nickname="Two",

@@ -52,7 +52,7 @@ class BuildTokenRowsTests(unittest.TestCase):
     def _sample_doc(self) -> dict:
         return {
             "__ygg_token_defs__": {
-                "ICCID": {"hex": "89461111111111111112"},
+                "ICCID": {"hex": "89881111111111111112"},
                 "IMSI": "0899999999999999",
                 "BIG": {"zero_len": 200},
             },
@@ -80,7 +80,7 @@ class BuildTokenRowsTests(unittest.TestCase):
         rows = {row["name"]: row for row in build_token_rows(self._sample_doc())}
         self.assertEqual(rows["IMSI"]["value_preview"], "0899999999999999")
         self.assertEqual(
-            rows["ICCID"]["value_preview"], '{"hex": "89461111111111111112"}'
+            rows["ICCID"]["value_preview"], '{"hex": "89881111111111111112"}'
         )
 
     def test_raw_value_preserved(self) -> None:

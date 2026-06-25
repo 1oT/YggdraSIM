@@ -13,7 +13,8 @@ GUI without dropping into a raw shell:
 * ``simcard.euicc_store_list``   — enumerate child eUICC stores under
   a chosen root path (EID-keyed directories).
 * ``simcard.tuak_derive_topc``   — derive TOPc from a TOP + K pair
-  using the simulator's TUAK helper. Pure math; does not read card.
+  using the simulator's TUAK helper. Registered under Offline Tools;
+  pure math, does not read card.
 
 No action here reaches the PC/SC transport layer — these are
 module-local utilities that supplement the SCP03 workbench.
@@ -25,6 +26,9 @@ import os
 from typing import Any
 
 from .registry import ActionContext, ActionField, ActionSpec, get_registry
+
+
+OFFLINE_TOOLS_SUBSYSTEM = "Offline Tools"
 
 
 # ----------------------------------------------------------------------
@@ -358,7 +362,7 @@ EUICC_STORE_LIST_SPEC = ActionSpec(
 
 TUAK_DERIVE_TOPC_SPEC = ActionSpec(
     id="simcard.tuak_derive_topc",
-    subsystem="SIMCARD",
+    subsystem=OFFLINE_TOOLS_SUBSYSTEM,
     title="TUAK — derive TOPc",
     description=(
         "Derive TOPc from TOP (32 bytes) and subscriber key K "

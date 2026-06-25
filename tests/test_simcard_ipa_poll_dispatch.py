@@ -48,7 +48,7 @@ def _make_toolkit_with_ipa_session() -> ToolkitLogic:
     toolkit_logic.state.toolkit.timer_management_id = 1
     toolkit_logic.state.toolkit.timer_management_auto_rearm = False
     toolkit_logic.state.toolkit.ipa_poll_enabled = True
-    toolkit_logic.state.toolkit.ipa_poll_eim_fqdn = "yggdrasim.eim.test.1ot.com"
+    toolkit_logic.state.toolkit.ipa_poll_eim_fqdn = "eim.example.test"
     toolkit_logic.state.toolkit.ipa_poll_eim_port = 443
     toolkit_logic.state.toolkit.ipa_poll_alpha_id = "eIM Poll"
     toolkit_logic.state.toolkit.ipa_poll_request_payload = b""
@@ -637,7 +637,7 @@ class IpaPollDnsPhaseTests(unittest.TestCase):
         toolkit_logic = _make_toolkit_with_ipa_session()
         toolkit_logic.state.toolkit.ipa_poll_resolved_ip = ""
         toolkit_logic.state.toolkit.ipa_poll_apn = "lab.test.apn"
-        toolkit_logic.state.toolkit.ipa_poll_dns_server = "8.8.8.8"
+        toolkit_logic.state.toolkit.ipa_poll_dns_server = "192.0.2.53"
         toolkit_logic._queue_ipa_poll_sequence()
 
         first = bytes(toolkit_logic.state.pending_fetch_queue[0])

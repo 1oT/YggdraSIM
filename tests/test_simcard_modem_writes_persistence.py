@@ -207,12 +207,12 @@ class ProfileStoreWriteAclRoundTripTests(unittest.TestCase):
             os.makedirs(store_path, exist_ok=True)
             profile = SimProfileEntry(
                 aid="A0000005591010FFFFFFFF8900001100",
-                iccid="89461111111111111112",
+                iccid="89881111111111111112",
                 state="enabled",
                 profile_class="test",
                 imsi="001010000000001",
                 profile_image=SimProfileImage(
-                    iccid="89461111111111111112",
+                    iccid="89881111111111111112",
                     imsi="001010000000001",
                     nodes=[
                         SimProfileFsNode(
@@ -255,7 +255,7 @@ class ProfileStoreWriteAclRoundTripTests(unittest.TestCase):
                     """
                     {
                         "profile_name": "Legacy",
-                        "iccid": "89461111111111111199",
+                        "iccid": "89881111111111111199",
                         "imsi": "001010000000099",
                         "impi": "",
                         "auth": null,

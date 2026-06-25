@@ -58,7 +58,7 @@
 }
 
 .app-shell[data-topbar-collapsed="true"] .topbar
-  > *:not(.topbar-collapse-toggle):not(.sidebar-collapse-toggle) {
+  > *:not(.topbar-collapse-toggle):not(.sidebar-collapse-toggle):not(.app-close-button) {
   display: none;
 }
 
@@ -78,7 +78,8 @@
   margin-right: 0;
 }
 
-.topbar-collapse-toggle {
+.topbar-collapse-toggle,
+.app-close-button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -95,13 +96,24 @@
     border-color var(--transition-fast);
 }
 
-.topbar-collapse-toggle:hover {
+.app-close-button {
+  margin-left: 4px;
+}
+
+.topbar-collapse-toggle:hover,
+.app-close-button:hover {
   background: var(--surface-hover, rgba(255, 255, 255, 0.05));
   color: var(--fg);
   border-color: var(--accent-soft);
 }
 
-.topbar-collapse-toggle:focus-visible {
+.app-close-button:hover {
+  color: var(--error, #bf616a);
+  border-color: var(--error, #bf616a);
+}
+
+.topbar-collapse-toggle:focus-visible,
+.app-close-button:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 1px;
 }
@@ -186,17 +198,22 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 30px;
-  height: 30px;
-  background: var(--gradient-brand);
-  color: var(--accent-fg);
-  font-weight: 700;
-  border-radius: var(--radius-md);
-  font-size: 12px;
-  letter-spacing: 0.02em;
-  box-shadow: 0 4px 14px -4px var(--accent-glow);
+  width: 32px;
+  height: 32px;
+  padding: 3px;
+  overflow: hidden;
+  background: color-mix(in oklab, var(--bg-elev), var(--bg) 28%);
+  border: 1px solid color-mix(in oklab, var(--accent), var(--border) 48%);
+  border-radius: 50%;
+  box-shadow: 0 4px 14px -6px var(--accent-glow);
   transition: transform var(--transition-mid) var(--ease-out-bounce),
     box-shadow var(--transition-mid);
+}
+
+.brand-mark-svg {
+  display: block;
+  width: 100%;
+  height: 100%;
 }
 
 .brand:hover .brand-mark {
@@ -232,6 +249,175 @@
   display: flex;
   gap: 8px;
   align-items: center;
+  justify-content: flex-end;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.topbar-suite-health {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+  min-height: 30px;
+  padding: 4px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  background: var(--bg-elev-2);
+  color: var(--fg-dim);
+  font-size: 11px;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.topbar-suite-version {
+  color: var(--fg);
+  font-weight: 750;
+}
+
+.topbar-suite-separator {
+  color: var(--fg-muted);
+}
+
+.topbar-suite-active {
+  color: var(--fg-dim);
+  font-weight: 600;
+}
+
+.topbar-card-bridge {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+  min-height: 30px;
+  padding: 4px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  background: var(--bg-elev-2);
+  color: var(--fg-dim);
+  cursor: pointer;
+  font: inherit;
+  font-size: 11px;
+  line-height: 1;
+  text-align: left;
+  white-space: nowrap;
+  transition: background-color var(--transition-fast),
+    border-color var(--transition-fast),
+    color var(--transition-fast);
+}
+
+.topbar-card-bridge:hover {
+  border-color: var(--accent-soft);
+  color: var(--fg);
+}
+
+.topbar-card-bridge:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.topbar-card-bridge:disabled,
+.topbar-card-bridge[data-busy="true"] {
+  cursor: wait;
+  opacity: 0.78;
+}
+
+.topbar-card-bridge-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: 0.72;
+}
+
+.topbar-card-bridge-label {
+  color: var(--fg-dim);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.topbar-card-bridge-value {
+  color: currentColor;
+  font-weight: 700;
+}
+
+.topbar-card-bridge[data-state="configured"] {
+  border-color: color-mix(in srgb, var(--accent) 36%, var(--border));
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.topbar-card-bridge[data-state="running"] {
+  border-color: rgba(163, 190, 140, 0.45);
+  background: var(--ok-soft);
+  color: var(--ok);
+}
+
+.topbar-card-bridge[data-state="running"] .topbar-card-bridge-dot {
+  opacity: 1;
+  box-shadow: 0 0 0 2px var(--ok-soft), 0 0 10px rgba(163, 190, 140, 0.38);
+}
+
+.topbar-card-bridge[data-state="error"] {
+  border-color: rgba(191, 97, 106, 0.42);
+  background: var(--fail-soft);
+  color: var(--fail);
+}
+
+.topbar-control-label {
+  color: var(--fg-dim);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.topbar-backend-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: 0 0 auto;
+  min-height: 30px;
+  padding: 3px 5px 3px 9px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  background: var(--bg-elev-2);
+}
+
+.topbar-backend-option {
+  min-height: 22px;
+  padding: 3px 8px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--fg-muted);
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 650;
+  line-height: 1;
+  transition: background var(--transition-fast),
+    border-color var(--transition-fast),
+    color var(--transition-fast);
+}
+
+.topbar-backend-option:hover {
+  background: var(--bg-hover);
+  color: var(--fg);
+}
+
+.topbar-backend-option:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.topbar-backend-option.is-active {
+  background: var(--accent-soft);
+  border-color: color-mix(in oklab, var(--accent) 48%, var(--border));
+  color: var(--fg);
 }
 
 .badge {
@@ -273,3 +459,15 @@
 .badge-api[data-state="warn"] .dot { background: var(--warn); }
 .badge-api[data-state="fail"] { color: var(--fail); border-color: var(--fail-soft); background: var(--fail-soft); }
 .badge-api[data-state="fail"] .dot { background: var(--fail); }
+
+@media (max-width: 1040px) {
+  .topbar > .breadcrumbs {
+    display: none;
+  }
+
+  .theme-picker label,
+  .topbar-control-label,
+  .topbar-card-bridge-label {
+    display: none;
+  }
+}

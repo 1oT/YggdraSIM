@@ -230,7 +230,7 @@ python -m SCP80 --cmd "show; build; quit"
 
 ```bash
 python -m SCP80 --stdin <<'EOF'
-iccid 8946001234567890123
+iccid 8988001234567890123
 build
 quit
 EOF

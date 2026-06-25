@@ -289,7 +289,7 @@ class SimCardAuthAndToolkitTests(unittest.TestCase):
         _send_response_data, send_response_sw1, send_response_sw2 = self.engine.transmit(send_response_apdu)
         self.assertEqual((_send_response_data, send_response_sw1, send_response_sw2), (b"", 0x90, 0x00))
 
-        dns_response = _build_dns_response(dns_query, "194.29.54.4")
+        dns_response = _build_dns_response(dns_query, "198.51.100.4")
         data_available_data, data_available_sw1, data_available_sw2 = self.engine.transmit(
             _envelope_apdu(_data_available_envelope(len(dns_response)))
         )

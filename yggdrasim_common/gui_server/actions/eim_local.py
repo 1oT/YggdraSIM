@@ -1309,8 +1309,10 @@ def _dispatch_load_eim_package(
     ctx: ActionContext,
     *,
     package_path: Any = None,
+    cert_path: Any = None,
 ) -> dict[str, Any]:
     path_s = str(package_path or "").strip()
+    cert_s = str(cert_path or "").strip()
     if len(path_s) == 0:
         raise ValueError("package_path is required.")
     session = _build_eim_session()
@@ -1319,13 +1321,17 @@ def _dispatch_load_eim_package(
     note_parts: list[str] = []
     try:
         with contextlib.redirect_stdout(trace_sink), contextlib.redirect_stderr(trace_sink):
-            report = session.load_eim_package_to_isdr(package_path=path_s) or {}
+            report = session.load_eim_package_to_isdr(
+                package_path=path_s,
+                cert_path=cert_s,
+            ) or {}
     except Exception as error:  # noqa: BLE001
         note_parts.append(f"{type(error).__name__}: {error}")
 
     return {
         "ok": len(note_parts) == 0,
         "package_path": path_s,
+        "cert_path": cert_s,
         "report": _scrub_bytes(report),
         "note": "; ".join(note_parts) if note_parts else (
             f"eIM package loaded: {report.get('package_type', '-')}"
@@ -2267,6 +2273,16 @@ LOAD_EIM_PACKAGE_SPEC = ActionSpec(
             kind="path",
             required=True,
             help="Path to the eIM package JSON file.",
+        ),
+        ActionField(
+            name="cert_path",
+            label="Signing certificate",
+            kind="path",
+            required=False,
+            help=(
+                "Optional eIM signing certificate override. Leave blank "
+                "for card-aware auto-selection."
+            ),
         ),
     ),
     output_kind="json",

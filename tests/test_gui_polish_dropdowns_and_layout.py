@@ -38,10 +38,11 @@ def _read(name: str) -> str:
 def test_legacy_sidebar_groups_removed() -> None:
     """No more "Inspect" / "Advanced" flat groups in the shell.
 
-    The nested ``CC_NAV_TREE`` now owns Registry browser, Card backend,
-    Env flags, PC/SC readers and Raw shell under its Environment /
-    Advanced buckets. Keeping the old groups produced duplicated entries
-    and made the sidebar visibly messy.
+    The nested ``CC_NAV_TREE`` owns Registry browser, Env flags and Raw
+    shell under its Environment / Advanced buckets. Backend switching
+    and PC/SC reader selection live in the top-bar runtime controls.
+    Keeping the old groups produced duplicated entries and made the
+    sidebar visibly messy.
     """
     html = _read("index.html")
     assert ">Inspect<" not in html, "legacy Inspect group must be removed"
@@ -59,28 +60,49 @@ def test_meta_group_retains_overview_and_about() -> None:
     assert ">Meta<" in html
     assert 'data-view="overview"' in html
     assert 'data-view="about"' in html
+    assert 'data-view="card_bridge" class="subsystem-entry"' not in html
+
+
+def test_remote_bridge_lives_under_advanced_before_environment() -> None:
+    """Remote Bridge belongs in Advanced, and Advanced renders before Environment."""
+    js = _read("app.js")
+    advanced_pos = js.index('id: "group-advanced"')
+    environment_pos = js.index('id: "group-env"')
+    advanced_block = js[advanced_pos:environment_pos]
+
+    assert advanced_pos < environment_pos
+    assert 'id: "leaf-adv-card-bridge"' in advanced_block
+    assert 'label: "Remote Bridge"' in advanced_block
+    assert 'inspectView: "card_bridge"' in advanced_block
+    assert 'card_bridge: "Advanced · Remote Bridge"' in js
 
 
 def test_duplicated_flat_nav_entries_are_gone() -> None:
-    """Registry browser / Card backend / Env flags / PC/SC readers / Raw
-    shell must no longer appear as flat sidebar ``<li data-view=…>``
-    entries; they live inside the nested tree now.
-
-    The corresponding view panels (``<section data-view="…">``) do still
-    exist in ``index.html`` — nav leaves dispatch into them via
-    ``showView(inspectView)`` — so we pin the absence of the list-item
-    markers specifically.
+    """Registry browser / Env flags / Raw shell must no longer appear as
+    flat sidebar ``<li data-view=…>`` entries; they live inside the
+    nested tree now.
     """
     html = _read("index.html")
     for view_id in (
         "registry",
-        "backend",
         "env_flags",
-        "live_readers",
         "terminal",
     ):
         marker = '<li data-view="' + view_id + '"'
         assert marker not in html, "legacy flat sidebar entry still present: " + marker
+
+
+def test_backend_and_reader_probe_are_topbar_controls_not_modules() -> None:
+    """Backend switching and PC/SC enumeration are top-bar controls."""
+    html = _read("index.html")
+    js = _read("app.js")
+    assert 'id="topbar-backend-reader"' in html
+    assert 'id="topbar-backend-sim"' in html
+    assert 'id="topbar-readers"' in html
+    assert 'data-view="backend"' not in html
+    assert 'data-view="live_readers"' not in html
+    assert "leaf-env-backend" not in js
+    assert "leaf-env-readers" not in js
 
 
 # ----------------------------------------------------------------------
@@ -153,16 +175,17 @@ def test_render_command_subsystem_falls_through_to_compact_workbench() -> None:
     assert "actions.forEach(function (action) {\n      var card = buildActionCard" not in block
 
 
-def test_compact_workbench_defined_with_sidenav_and_main() -> None:
-    """The helper must emit a two-column layout: action picker + card."""
+def test_compact_workbench_defined_with_action_grid_dashboard() -> None:
+    """The helper must emit the dense action-rail + dashboard layout."""
     js = _read("app.js")
     assert "function renderCompactWorkbench(container, subsystem, actions, leaf)" in js
     block = js.split("function renderCompactWorkbench(container, subsystem, actions, leaf)", 1)[1]
     block = block.split("\n  }\n", 1)[0]
     assert 'className = "cc-workbench cc-workbench--compact"' in block
-    assert 'className = "cc-compact-sidenav"' in block
-    assert 'className = "cc-compact-main"' in block
-    assert 'className = "cc-compact-entry"' in block
+    assert 'className = "cc-compact-action-grid"' in block
+    assert 'className = "cc-dashboard"' in block
+    assert 'className = "cc-dash-actions"' in block
+    assert 'className = "cc-compact-rbtn"' in block
 
 
 def test_compact_workbench_filter_threshold() -> None:
@@ -182,14 +205,15 @@ def test_compact_workbench_css_contract() -> None:
     """CSS for the compact layout must ship alongside the JS."""
     css = _read("app.css")
     for selector in (
+        ".main--module-workbench",
+        ".main--module-workbench .cc-workbench",
         ".cc-workbench--compact",
         ".cc-compact-header",
         ".cc-compact-title",
-        ".cc-compact-body",
-        ".cc-compact-sidenav",
-        ".cc-compact-entry",
-        ".cc-compact-entry.active",
-        ".cc-compact-main",
+        ".cc-compact-action-grid",
+        ".cc-dashboard",
+        ".cc-dash-actions",
+        ".cc-compact-rbtn",
     ):
         assert selector in css, "compact workbench CSS missing: " + selector
 
@@ -235,7 +259,7 @@ def test_reader_scoped_actions_hide_reader_field_and_inject_active_reader() -> N
     assert "cc-reader-session-chip" not in hidden_branch
     assert "forceSessionReader = ccActionUsesReaderSession(action)" in apply_default
     assert "inputs[fieldName] = activeReader" in apply_default
-    assert "Select a reader session before running this eSIM action." in run_form
+    assert "Select a reader before running this eSIM action." in run_form
 
 
 def test_reader_scoped_action_results_render_as_tree() -> None:
@@ -312,20 +336,120 @@ def test_reader_session_gate_css_contract() -> None:
         assert selector in css, "reader-session CSS missing: " + selector
 
 
-def test_hil_aid_context_groups_with_filesystem() -> None:
-    """AID-scoped file paths belong under the file-system HIL group.
-
-    The HIL context list should not split ``FS MF/AID`` traffic into a
-    separate Application AID section; those are still filesystem paths.
-    """
+def test_hil_context_grouping_comes_from_backend_tree() -> None:
+    """The web HIL view must not keep a second APDU grouping classifier."""
     js = _read("app.js")
-    block = js.split("function hilClassifyPacket(row, ann)", 1)[1]
-    block = block.split("function hilPacketSearchText", 1)[0]
-    filesystem_block = block.split('return "UICC filesystem"', 1)[0]
 
-    assert 'return "Application AID"' not in block
-    assert '"FS MF/AID"' in filesystem_block
-    assert '"SELECT AID"' in filesystem_block
+    assert "function renderHilContextTree" in js
+    assert "function hilFilterContextTreeForRows" in js
+    assert "function hilContextSectionKey" in js
+    assert "function hilToggleContextHeader" in js
+    assert 'header.setAttribute("aria-expanded"' in js
+    assert "collapsedDepths" in js
+    assert "preserveExactScroll: true" in js
+    assert "return state.packetSectionOpen[hilContextSectionKey(item)] === true" in js
+    assert "state.packetSectionOpen[key] = true" in js
+    assert "data.context_tree" in js
+    assert "context_after_frame: contextAfterFrame" in js
+    assert "function hilClassifyPacket" not in js
+    assert "function hilPacketClassifyText" not in js
+    assert "function hilPacketSearchText" not in js
+
+
+def test_hil_packet_refresh_defers_visible_repaint_during_user_activity() -> None:
+    """Automatic packet imports update state without rebuilding the active list."""
+    js = _read("app.js")
+    pointer_block = js.split("function hilBeginPacketPointerInteraction", 1)[1]
+    pointer_block = pointer_block.split("function hilEndPacketPointerInteraction", 1)[0]
+
+    assert "packetRenderPending" in js
+    assert "packetRenderTimerId" in js
+    assert "packetPointerActive" in js
+    assert "packetPointerReleaseTimerId" in js
+    assert "function hilShouldDeferPacketRender" in js
+    assert "function hilScheduleDeferredPacketRender" in js
+    assert "function hilBeginPacketPointerInteraction" in js
+    assert "function hilEndPacketPointerInteraction" in js
+    assert "function hilFlushDeferredPacketRender" in js
+    assert "setPointerCapture" not in pointer_block
+    assert 'hilShouldDeferPacketRender(opts)' in js
+    assert 'list.addEventListener("wheel"' in js
+    assert 'list.addEventListener("pointerdown"' in js
+    assert 'list.addEventListener("pointerup"' in js
+    assert 'list.addEventListener("lostpointercapture"' in js
+    assert 'window.addEventListener("pointerup"' in js
+    assert ".cc-hil-packet-list:hover" not in js
+    assert "Date.now() - Number(state.lastPacketScrollAt || 0) < 450" in js
+    assert "return hilPacketPointerIsActive() || hilPacketListIsUserActive()" in js
+    assert "if (hilPacketPointerIsActive()) {\n        hilSchedulePacketVirtualRender(list);\n        return;\n      }" in js
+    assert "if (markUserScroll) {\n      state.lastPacketScrollAt = Date.now();\n      state.followTail = bottomGap <= 24;\n    }" in js
+    assert "hilCancelDeferredPacketRender()" in js
+
+
+def test_hil_packet_selection_does_not_rebuild_workbench() -> None:
+    """Selecting a packet should not race a full Command Center rebuild."""
+    js = _read("app.js")
+    select_block = js.split("function hilSelectFrame(frameNumber)", 1)[1]
+    select_block = select_block.split("async function hilRefreshSnapshot", 1)[0]
+    row_block = js.split("function hilPacketRow(row, annotation, options)", 1)[1]
+    row_block = row_block.split("function renderHilRawTab", 1)[0]
+    apply_block = js.split("function hilApplySnapshot(data)", 1)[1]
+    apply_block = apply_block.split("var detailIncluded", 1)[0]
+    explicit_selected_branch = "} else if (selectedFromDataVisible && previousSelected === selectedFromData) {"
+    pinned_selected_branch = "} else if (!state.selectionFollowsTail && previousSelected && frameNumbers[previousSelected]) {"
+
+    assert 'renderCommandSubsystem("HIL"' not in select_block
+    assert "state.selectionFollowsTail = false" in select_block
+    assert "hilCancelDeferredPacketRender()" in select_block
+    assert "hilRenderActivePaneOnly()" in select_block
+    assert "hilRefreshSnapshot({ force: true, selectedFrame: frameNumber })" in select_block
+    assert "hilStorePacketScroll(list, false)" in row_block
+    assert "selectionFollowsTail: true" in js
+    assert explicit_selected_branch in apply_block
+    assert pinned_selected_branch in apply_block
+    assert "state.selectionFollowsTail = nextSelectionFollowsTail" in js
+    assert "} else if (state.followTail) {" not in apply_block
+    assert apply_block.index(explicit_selected_branch) < apply_block.index("} else if (state.selectionFollowsTail || !previousSelected) {")
+    assert apply_block.index(pinned_selected_branch) < apply_block.index("} else if (state.selectionFollowsTail || !previousSelected) {")
+
+
+def test_hil_live_gui_memory_caps_are_bounded() -> None:
+    """The live HIL GUI caps DOM rendering without dropping loaded packets."""
+    js = _read("app.js")
+
+    assert "var HIL_PACKET_FETCH_LIMIT = 5000" in js
+    assert "var HIL_PACKET_RENDER_LIMIT = 750" in js
+    assert "var HIL_RAW_TRACE_LIMIT = 750" in js
+    assert "limit: hilPacketFetchLimit()" in js
+    assert "function hilRenderPacketItems" in js
+    assert "function hilPacketSpacer" in js
+    assert "return HIL_PACKET_RENDER_LIMIT" in js
+    assert "return HIL_RAW_TRACE_LIMIT" in js
+    assert "merged.slice(merged.length - limit)" not in js
+
+
+def test_hil_context_trace_chain_ui_is_retired() -> None:
+    """The HIL packet list must not render the retired trace strip."""
+    js = _read("app.js")
+    css = _read("app.css")
+
+    for needle in (
+        "function hilTraceBar",
+        "function hilTraceForFrame",
+        "function hilNormalizeFrameList",
+        "is-trace-related",
+        "is-trace-parent",
+        "cc-hil-trace-chip",
+    ):
+        assert needle not in js
+
+    for selector in (
+        ".cc-hil-trace-bar",
+        ".cc-hil-trace-chip",
+        ".cc-hil-packet-row.is-trace-related",
+        ".cc-hil-packet-row.is-trace-parent",
+    ):
+        assert selector not in css
 
 
 def test_hil_modem_shell_tab_contract() -> None:
@@ -335,6 +459,9 @@ def test_hil_modem_shell_tab_contract() -> None:
 
     assert 'hilTabButton("modem", "Modem shell")' in js
     assert 'HIL_MODEM_DEFAULT_COMMAND = "sudo tio /dev/ttyUSB2"' in js
+    assert "modemShellDefaultCommand" in js
+    assert "default_command_source" in js
+    assert '"remote-card-bridge"' in js
     assert '"/api/host-shell"' in js
     assert '"/api/host-shell/capabilities?scope=hil-modem"' in js
     assert '"&scope=hil-modem"' in js
@@ -348,6 +475,34 @@ def test_hil_modem_shell_tab_contract() -> None:
         ".cc-hil-modem-terminal",
     ):
         assert selector in css, "HIL modem shell CSS missing: " + selector
+
+
+def test_hil_web_context_refresh_contract() -> None:
+    """The web HIL context view keeps classifications and deltas current."""
+    js = _read("app.js")
+    css = _read("app.css")
+    refresh_block = js.split("async function hilRefreshSnapshot(options)", 1)[1]
+    refresh_block = refresh_block.split("function hilShouldIncludeDetail", 1)[0]
+    status_block = js.split("function hilRenderStatusbar", 1)[1]
+    status_block = status_block.split("function hilCapturePathFromRows", 1)[0]
+    context_title_block = css.split(".cc-hil-context-title", 1)[1]
+    context_title_block = context_title_block.split("}", 1)[0]
+
+    assert "var selected = opts.selectedFrame || (state.selectionFollowsTail ? \"\" : state.selectedFrameNumber)" in refresh_block
+    assert 'state.statusText = "refreshing"' not in refresh_block
+    assert 'state.inflight ? "refreshing" : state.statusText' not in status_block
+    assert 'hilStatusChip("status", state.statusText)' in status_block
+    assert 'var includeAnnotations = state.activeTab === "dissector" || !deltaMode' in refresh_block
+    assert "var contextAfterFrame = hilIsLiveCaptureMode(state)" in refresh_block
+    assert "context_after_frame: contextAfterFrame" in refresh_block
+    assert "contextTree: []" in js
+    assert "hilContextTreeRenderKey" in js
+    assert "packetScrollRestoring" in js
+    assert "function hilStorePacketScroll" in js
+    assert "position: sticky" not in context_title_block
+    assert "cursor: pointer" in context_title_block
+    assert "cc-hil-context-caret" in css
+    assert ".cc-hil-toolbar-group--exit" not in css
 
 
 def test_hil_modem_shell_survives_hil_tab_switches() -> None:
@@ -375,7 +530,7 @@ def test_hil_auto_refresh_uses_incremental_decode() -> None:
     assert "afterFrame = deltaMode" in block
     assert "hilMaxFrameNumber(state.rows || [])" in block
     assert "state.liveBaselineFrameNumber" in block
-    assert "includeAnnotations = !deltaMode" in block
+    assert 'includeAnnotations = state.activeTab === "dissector" || !deltaMode' in block
 
 
 def test_hil_auto_refresh_timer_is_dissector_scoped() -> None:
@@ -403,6 +558,19 @@ def test_hil_live_baseline_is_lightweight_and_skips_history_refresh() -> None:
     assert "hilRefreshSnapshot({ force: false })" in start
 
 
+def test_hil_remote_capture_attach_does_not_stop_remote_service() -> None:
+    """Remote HIL capture attach should detach the view instead of stopping services."""
+    js = _read("app.js")
+    stop_block = js.split("async function hilStopLiveSession", 1)[1]
+    stop_block = stop_block.split("if (!window.confirm", 1)[0]
+    status_block = js.split("function hilRenderStatusbar", 1)[1]
+    status_block = status_block.split("function hilRefreshTimerStatusbar", 1)[0]
+
+    assert 'state.startMode === "remote" || state.captureSource === "remote"' in stop_block
+    assert 'state.actionStatusText = "Remote HIL view detached."' in stop_block
+    assert 'hilStatusChip("source", state.captureSource)' in status_block
+
+
 def test_hil_refresh_is_single_flight_with_queued_force() -> None:
     """Forced refreshes should queue, not stack concurrent tshark decodes."""
     js = _read("app.js")
@@ -410,10 +578,12 @@ def test_hil_refresh_is_single_flight_with_queued_force() -> None:
     block = block.split("function hilShouldIncludeDetail", 1)[0]
 
     assert "refreshQueuedForce" in js
+    assert "refreshQueuedSelectedFrame" in js
     assert "if (state.inflight) {" in block
     assert "state.refreshQueuedForce = true" in block
+    assert "state.refreshQueuedSelectedFrame = opts.selectedFrame" in block
     assert "setTimeout(function ()" in block
-    assert "hilRefreshSnapshot({ force: true })" in block
+    assert "hilRefreshSnapshot({ force: true, selectedFrame: queuedSelectedFrame || state.selectedFrameNumber })" in block
 
 
 def test_hil_collapsible_focus_ring_uses_theme_tokens() -> None:
@@ -428,6 +598,62 @@ def test_hil_collapsible_focus_ring_uses_theme_tokens() -> None:
     block = block.split("}", 1)[0]
     assert "var(--accent)" in block
     assert "box-shadow: inset" in block
+
+
+def test_hil_decoded_gsm_sim_section_opens_by_default() -> None:
+    """Opening a packet should expand the GSM SIM 11.11 decoded section."""
+    js = _read("app.js")
+    decoded_block = js.split("function hilDecodedBlock", 1)[1]
+    decoded_block = decoded_block.split("function hilDecodedSectionBody", 1)[0]
+
+    assert "hilDecodedSectionDefaultOpen(section.title)" in decoded_block
+    assert 'toUpperCase() === "GSM SIM 11.11"' in js
+    assert "Object.prototype.hasOwnProperty.call(state.detailSectionOpen, stateKey)" in decoded_block
+
+
+def test_hil_statusbar_surfaces_active_timer_countdown() -> None:
+    """HIL status chips should mirror the TUI timer countdown summary."""
+    js = _read("app.js")
+    status_block = js.split("function hilRenderStatusbar", 1)[1]
+    status_block = status_block.split("function hilRefreshTimerStatusbar", 1)[0]
+
+    assert "hilActiveTimerStatusChips().forEach" in status_block
+    assert 'hilStatusChip("timers", String(timerSummary.count))' in js
+    assert 'hilStatusChip("countdown", timerSummary.text)' in js
+    assert "function hilLatestTimerAnnotation" in js
+    assert "function hilRefreshTimerStatusbar" in js
+    assert "function hilStartTimerStatusTicker" in js
+    assert "function hilRefreshTimerAnchor" in js
+    assert "function hilTimerAnnotationSignature" in js
+    assert "function hilFormatDurationClock" in js
+    assert "state.timerStatusTimerId = setInterval" in js
+    assert "state.timerSnapshotSignature !== signature" in js
+    assert "state.timerSnapshotAppliedAt = Date.now()" in js
+
+
+def test_hil_decoded_and_bytes_panes_share_byte_highlighting() -> None:
+    """Decoded rows and byte spans should share Wireshark-style ranges."""
+    js = _read("app.js")
+    css = _read("app.css")
+
+    for needle in (
+        "detailRanges",
+        "function hilRenderByteDumpLine",
+        "function hilFindRangeForDecodedLine",
+        "function hilBestRangeForByte",
+        "function hilApplyByteHighlightClasses",
+        "cc-hil-byte",
+        "cc-hil-decoded-range",
+    ):
+        assert needle in js
+
+    for selector in (
+        ".cc-hil-byte.is-highlighted",
+        ".cc-hil-byte.is-pinned",
+        ".cc-hil-decoded-range.is-highlighted",
+        ".cc-hil-decoded-range.is-pinned",
+    ):
+        assert selector in css
 
 
 def test_idle_api_badge_does_not_animate_forever() -> None:
@@ -638,3 +864,221 @@ def test_drop_hover_visual_state_styled() -> None:
     assert ".cc-path-drop-target.cc-path-drop-hover" in css
     # The after-element prompts the operator with a drop hint.
     assert "drop to paste path" in css
+
+
+def test_card_bridge_remote_rig_promotes_one_click_start() -> None:
+    """The Card Bridge rig UI must keep the full sequence as the primary path."""
+    html = _read("index.html")
+    assert 'id="cb-rig-start-all">Start full rig</button>' in html
+    assert '<details class="cb-override cb-rig-manual">' in html
+    primary_pos = html.index('id="cb-rig-start-all"')
+    manual_pos = html.index('<details class="cb-override cb-rig-manual">')
+    local_pos = html.index('id="cb-rig-start-local"')
+    assert primary_pos < manual_pos < local_pos
+
+    css = _read("app.css")
+    assert ".cb-rig-primary-actions" in css
+    assert ".cb-rig-manual .cb-rig-actions" in css
+
+
+def test_card_bridge_start_full_rig_forwards_rpi_gui() -> None:
+    """The one-click Card Bridge start should include the GUI tunnel."""
+    js = _read("app.js")
+    block = js.split("async function cbRigStartAll(button)", 1)[1]
+    block = block.split("async function cbRigStopTunnel(button)", 1)[0]
+    helper_block = js.split("function cbRigRemoteRigStartInputs(cfg)", 1)[1]
+    helper_block = helper_block.split("function cbRigSetBusy", 1)[0]
+    assert '"card_bridge.remote_rig_start"' in block
+    assert "cbRigRemoteRigStartInputs(cfg)" in block
+    assert "forward_gui: true" in helper_block
+
+
+def test_card_bridge_remote_rig_surfaces_hil_path_status() -> None:
+    """Remote rig status must distinguish HIL service from modem APDU path."""
+    html = _read("index.html")
+    for marker in (
+        'id="cb-rig-bridge-status"',
+        'id="cb-rig-usb-status"',
+        'id="cb-rig-remsim-status"',
+        'id="cb-rig-modem-link-status"',
+    ):
+        assert marker in html
+
+    js = _read("app.js")
+    status_block = js.split("function cbRigRenderStatus(data", 1)[1]
+    status_block = status_block.split("async function cbRigRun", 1)[0]
+    assert "state.remote_hil" in status_block
+    assert "cb-rig-bridge-status" in status_block
+    assert "cb-rig-usb-status" in status_block
+    assert "cb-rig-remsim-status" in status_block
+    assert "cb-rig-modem-link-status" in status_block
+    assert "control waiting" in status_block
+    assert "bankd waiting" in status_block
+
+    refresh_block = js.split("async function cbRigRefreshStatus(button)", 1)[1]
+    refresh_block = refresh_block.split("async function cbRigStartLocal", 1)[0]
+    assert "remote_workdir: cfg.remote_workdir" in refresh_block
+    assert "remote_python: cfg.remote_python" in refresh_block
+
+    describe_block = js.split("function cbRigDescribeAction(data, fallback)", 1)[1]
+    describe_block = describe_block.split("function cbRigUpdateGuiUrl", 1)[0]
+    assert "steps.slice().reverse().find" in describe_block
+
+
+def test_card_bridge_remote_rig_allows_remsim_binary_override() -> None:
+    """RPi profiles must persist the REMSIM binary path used by the service."""
+    html = _read("index.html")
+    assert 'id="cb-rig-remsim-binary"' in html
+    assert 'value="osmo-remsim-client-st2"' in html
+
+    js = _read("app.js")
+    assert '"cb-rig-remsim-binary"' in js
+    assert 'remsim_binary: cbRigPayloadValue(payload, "cb-rig-remsim-binary")' in js
+
+    start_block = js.split("async function cbRigStartAll(button)", 1)[1]
+    start_block = start_block.split("async function cbRigStopTunnel(button)", 1)[0]
+    helper_block = js.split("function cbRigRemoteRigStartInputs(cfg)", 1)[1]
+    helper_block = helper_block.split("function cbRigSetBusy", 1)[0]
+    assert "cbRigRemoteRigStartInputs(cfg)" in start_block
+    assert "remsim_binary: cfg.remsim_binary" in helper_block
+
+    install_block = js.split("async function cbRigInstallService(button)", 1)[1]
+    install_block = install_block.split("async function cbRigServiceAction", 1)[0]
+    assert "remsim_binary: cfg.remsim_binary" in install_block
+
+
+def test_card_bridge_remote_rig_numeric_fields_match_text_input_design() -> None:
+    """Numeric rig fields should use the same styled input surface as SSH target."""
+    html = _read("index.html")
+    for field_id in (
+        "cb-rig-reader-index",
+        "cb-rig-card-port",
+        "cb-rig-gui-port",
+        "cb-rig-hil-port",
+    ):
+        marker = f'type="text" id="{field_id}" inputmode="numeric" pattern="[0-9]*"'
+        assert marker in html
+        assert f'type="number" id="{field_id}"' not in html
+
+
+def test_card_bridge_remote_rig_profiles_are_keyed_by_ssh_target() -> None:
+    """Saved Card Bridge rig profiles should be selectable by SSH target."""
+    html = _read("index.html")
+    assert 'list="cb-rig-ssh-target-options"' in html
+    assert '<datalist id="cb-rig-ssh-target-options"></datalist>' in html
+
+    js = _read("app.js")
+    assert "CB_RIG_PROFILES_STORAGE_KEY" in js
+    assert "CB_RIG_FIELD_IDS" in js
+    assert "function cbRigApplyProfileForTarget(target)" in js
+    assert "cbRigRenderProfileOptions(profiles)" in js
+    assert "Object.assign({}, knownProfiles[storedTarget], stored)" in js
+    assert "cbRigSaveSettings({ updateProfile: applied });" in js
+
+
+def test_remote_bridge_running_state_surfaces_globally() -> None:
+    """A live Remote Bridge should be visible outside the Remote Bridge page."""
+    html = _read("index.html")
+    assert 'id="topbar-hil-bridge"' in html
+    assert re.search(r'<button\s+type="button"\s+class="topbar-card-bridge"\s+id="topbar-hil-bridge"', html)
+    assert '<span class="topbar-card-bridge-label">HIL bridge</span>' in html
+    assert 'id="topbar-hil-bridge-value">idle</span>' in html
+    assert 'id="topbar-card-bridge"' in html
+    assert re.search(r'<button\s+type="button"\s+class="topbar-card-bridge"\s+id="topbar-card-bridge"', html)
+    assert 'title="Remote Bridge status"' in html
+    assert '<span class="topbar-card-bridge-label">Remote bridge</span>' in html
+    assert 'id="topbar-card-bridge-value">idle</span>' in html
+
+    css = _read("app.css")
+    assert '.topbar-card-bridge[data-state="running"]' in css
+    assert '.topbar-card-bridge:disabled' in css
+    assert '.topbar-card-bridge[data-busy="true"]' in css
+    assert '.topbar-card-bridge:focus-visible' in css
+    assert '#command-center-nav .cc-nav-leaf[data-cb-state="running"] .cc-nav-card-bridge-state' in css
+    assert '.overview-module-card[data-cb-state="running"] .overview-module-card-badge' in css
+
+    js = _read("app.js")
+    assert "function cbSetGlobalBridgeStatus(state, label)" in js
+    assert "function cbSyncCommandCenterBridgeIndicators()" in js
+    assert 'pill.title = "Remote Bridge status: " + nextLabel' in js
+    assert '"leaf-adv-card-bridge"' in js
+    assert '"cc-nav-card-bridge-state"' in js
+    assert 'leaf.inspectView === "card_bridge"' in js
+    assert 'loadCardBridgeStatus();' in js
+    assert 'cbSetGlobalBridgeStatus("running", "running")' in js
+
+
+def test_hil_trace_running_state_surfaces_in_command_center_list() -> None:
+    """An active HIL trace should be visible in the module list."""
+    css = _read("app.css")
+    assert '#command-center-nav .cc-nav-leaf[data-hil-trace-state="running"] .cc-nav-hil-trace-state' in css
+    assert '.overview-module-card[data-hil-trace-state="running"] .overview-module-card-badge' in css
+
+    js = _read("app.js")
+    assert "function hilSyncCommandCenterTraceIndicators()" in js
+    assert "function hilTraceIndicatorStatus()" in js
+    assert 'state.armed && state.startMode !== "offline"' in js
+    assert 'var topbar = $("topbar-hil-bridge")' in js
+    assert 'setText("topbar-hil-bridge-value", topbarLabel)' in js
+    assert '"cc-nav-hil-trace-state"' in js
+    assert 'leaf.subsystem === "HIL"' in js
+    assert 'badge.setAttribute("data-hil-role", "overview-status")' in js
+    assert 'card.setAttribute("data-cc-subsystem", leaf.subsystem)' in js
+    assert 'label: "tracing"' in js
+
+
+def test_card_bridge_launch_success_flashes_note_green() -> None:
+    """Successful rig launch should paint the inline status note green."""
+    css = _read("app.css")
+    assert ".cb-rig-note-ok" in css
+    assert ".cb-rig-note-ok-flash" in css
+    assert "@keyframes cb-rig-note-ok-flash" in css
+
+    js = _read("app.js")
+    assert "function cbRigSetNote(message, isError, options)" in js
+    assert "options && options.flashOk" in js
+    start_block = js.split("async function cbRigStartAll(button)", 1)[1]
+    start_block = start_block.split("async function cbRigStopTunnel", 1)[0]
+    assert '"starting rig…"' in start_block
+    assert "{ flashOk: true }" in start_block
+    assert "cbRigRenderStatus(data, { flashOk: data.ok !== false });" in js
+
+
+def test_hil_toolbar_can_launch_saved_remote_bridge_rig() -> None:
+    """HIL should expose the saved Remote Bridge one-click launch path."""
+    js = _read("app.js")
+    assert "function cbRigStartAllFromSavedSettings()" in js
+    assert "function cbRigStopAllFromSavedSettings()" in js
+    assert "function cbRigInputsFromSavedSettings()" in js
+    assert "function cbRigRemoteRigStartInputs(cfg)" in js
+    assert "cardBridgeLaunchInFlight" in js
+    assert "function hilLaunchCardBridgeRig(actions, container, leaf)" in js
+
+    block = js.split("function renderHilWorkbench(container, actions, leaf)", 1)[1]
+    block = block.split("function hilToolbarButton", 1)[0]
+    assert 'state.cardBridgeLaunchInFlight ? "..." : "⇄"' in block
+    assert 'state.cardBridgeLaunchInFlight ? "Starting bridge" : "Remote Bridge"' in block
+    assert "hilLaunchCardBridgeRig(actions, container, leaf);" in block
+
+    launch_block = js.split("function hilLaunchCardBridgeRig(actions, container, leaf)", 1)[1]
+    launch_block = launch_block.split("function renderHilDissectorTab", 1)[0]
+    assert "cbRigStartAllFromSavedSettings()" in launch_block
+    assert 'state.actionStatusText = "starting Remote Bridge rig"' in launch_block
+    assert "Remote Bridge rig start failed." in launch_block
+
+
+def test_topbar_bridge_pills_toggle_start_stop_actions() -> None:
+    """Top-bar bridge pills should act as global start/stop controls."""
+    js = _read("app.js")
+    assert "function wireTopbarBridgeControls()" in js
+    assert "function hilToggleTopbarBridge()" in js
+    assert "function cbToggleTopbarRemoteBridge()" in js
+    assert 'hil.addEventListener("click"' in js
+    assert 'remote.addEventListener("click"' in js
+    assert 'cbRigStartAllFromSavedSettings()' in js
+    assert 'cbRigStopAllFromSavedSettings()' in js
+    assert 'openCommandSubsystem("HIL", { scope: "all", leafId: "leaf-adv-hil" });' in js
+    assert 'hilStartLiveSession(actions, container, leaf)' in js
+    assert 'hilStopLiveSession(actions, container, leaf)' in js
+    assert "options.saveSettings !== false" in js
+    assert "cbRigInputsFromSavedSettings()" in js

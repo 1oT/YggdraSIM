@@ -11,7 +11,7 @@ from typing import Any
 from yggdrasim_common.process_debug import add_debug_argument, set_global_debug
 from yggdrasim_common.quit_control import QuitAllRequested
 
-from .pcsc import PcscBridgeError, PcscCardChannel
+from .pcsc import APDU_TIMEOUT_ENV, PcscBridgeError, PcscCardChannel, resolve_apdu_timeout_ms
 from .protocol import GSMTAP_COMPAT_MODES, GSMTAP_COMPAT_NATIVE
 from .router import BridgeConfig, HilBridgeServer
 
@@ -59,7 +59,8 @@ def add_bridge_runtime_arguments(
         help=(
             "Stream APDUs from a remote 'yggdrasim-card-bridge' instance "
             "(e.g. http://127.0.0.1:8642/apdu after opening an SSH "
-            "RemoteForward from the operator's laptop). When set, the "
+            "LocalForward from the rig, or a RemoteForward from the "
+            "reader host). When set, the "
             "local --reader-index / --reader-name flags are ignored. "
             "Mirrors the YGGDRASIM_HIL_REMOTE_CARD_URL environment variable."
         ),
@@ -72,6 +73,15 @@ def add_bridge_runtime_arguments(
             "Path to a 0600-mode bearer-token file matching the token "
             "the remote 'yggdrasim-card-bridge' wrote on startup. "
             "Mirrors YGGDRASIM_HIL_REMOTE_CARD_TOKEN_FILE."
+        ),
+    )
+    parser.add_argument(
+        "--apdu-timeout-ms",
+        type=int,
+        default=None,
+        help=(
+            "Maximum APDU wait time in milliseconds for HIL card traffic "
+            f"(default from {APDU_TIMEOUT_ENV}, fallback 5000)."
         ),
     )
     if include_list_readers:
@@ -130,6 +140,9 @@ def build_bridge_config_from_args(args: argparse.Namespace) -> BridgeConfig:
         remote_card_token_file=str(
             getattr(args, "remote_card_token_file", "") or ""
         ).strip(),
+        apdu_timeout_ms=resolve_apdu_timeout_ms(
+            getattr(args, "apdu_timeout_ms", None)
+        ),
         client_id=int(args.client_id),
         client_slot=int(args.client_slot),
         bank_id=int(args.bank_id),

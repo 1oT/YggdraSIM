@@ -85,6 +85,33 @@
     return resolved;
   }
 
+  async function apiErrorDetail(response) {
+    var text = "";
+    try {
+      text = await response.text();
+    } catch (_err) {
+      return "";
+    }
+    if (!text) return "";
+    try {
+      var payload = JSON.parse(text);
+      if (payload && typeof payload.detail === "string") return payload.detail;
+      if (payload && typeof payload.error === "string") return payload.error;
+      if (payload && Array.isArray(payload.detail)) {
+        return payload.detail.map(function (entry) {
+          if (!entry) return "";
+          if (typeof entry === "string") return entry;
+          var loc = Array.isArray(entry.loc) ? entry.loc.join(".") : "";
+          var msg = entry.msg || entry.message || "";
+          return [loc, msg].filter(Boolean).join(": ");
+        }).filter(Boolean).join("; ");
+      }
+    } catch (_err) {
+      return text.length > 240 ? text.slice(0, 240) + "..." : text;
+    }
+    return text.length > 240 ? text.slice(0, 240) + "..." : text;
+  }
+
   async function apiFetch(path, options) {
     var opts = options || {};
     var headers = Object.assign({}, opts.headers || {});
@@ -108,7 +135,10 @@
     }
     if (!response.ok) {
       setApiBadge("warn", "error " + response.status);
-      throw new Error("HTTP " + response.status + " for " + path);
+      var message = "HTTP " + response.status + " for " + path;
+      var detail = await apiErrorDetail(response);
+      if (detail) message += ": " + detail;
+      throw new Error(message);
     }
     return response.json();
   }
@@ -193,6 +223,7 @@
     if (name !== "command_center") {
       var mainEl = document.querySelector(".main");
       if (mainEl) {
+        mainEl.classList.remove("main--module-workbench");
         mainEl.classList.remove("main--saip-workbench");
         mainEl.classList.remove("main--hil-workbench");
       }
@@ -204,12 +235,12 @@
       overview: "Overview",
       registry: "Registry browser",
       backend: "Card backend",
-      env_flags: "Environment flags",
+      env_flags: "Configuration",
       about: "About",
       terminal: "Advanced · Shell",
       host_shell: "Advanced · Host shell",
       live_readers: "Inspect · PC/SC readers",
-      card_bridge: "Meta · Card bridge",
+      card_bridge: "Advanced · Remote Bridge",
       command_center: (options && options.crumb) || "Command Center",
     }[name] || "Overview");
     highlightSidebar(name);
@@ -230,13 +261,8 @@
   async function loadHealth() {
     try {
       var data = await apiFetch("/api/health");
-      setText("overview-version", data.version);
-      setText("overview-flavor", data.flavor);
-      setText("overview-mode", data.mode);
-      setText("overview-uptime", formatUptime(data.uptime_seconds));
-      setText("overview-pid", data.pid);
-      setText("badge-mode", "mode: " + data.mode);
-      setText("badge-flavor", "flavor: " + data.flavor);
+      setText("topbar-suite-version", "v" + String(data.version || "…"));
+      setText("topbar-suite-active", "active " + formatUptime(data.uptime_seconds));
       setApiBadge("ok", "online");
       clearError();
     } catch (err) {
@@ -252,10 +278,20 @@
       setText("backend-current", data.backend);
       setText("backend-source", data.source);
       setText("backend-simulated", data.is_simulated ? "yes" : "no");
-      setText("badge-backend", "backend: " + data.backend);
+      syncBackendSwitch(data.backend);
     } catch (err) {
       // keep prior state; overview header already reports API state
     }
+  }
+
+  function syncBackendSwitch(backend) {
+    var active = String(backend || "").toLowerCase();
+    document.querySelectorAll(".topbar-backend-option[data-backend]").forEach(function (btn) {
+      var value = String(btn.getAttribute("data-backend") || "").toLowerCase();
+      var selected = value === active;
+      btn.classList.toggle("is-active", selected);
+      btn.setAttribute("aria-pressed", selected ? "true" : "false");
+    });
   }
 
   async function setBackend(backend) {
@@ -311,6 +347,15 @@
     el.textContent = message || "";
   }
 
+  function setEnvFlagStats(flags) {
+    flags = Array.isArray(flags) ? flags : [];
+    var setCount = flags.filter(function (flag) { return !!flag.is_set; }).length;
+    var sensitiveCount = flags.filter(function (flag) { return !!flag.sensitive; }).length;
+    setText("env-flag-count", "flags: " + flags.length);
+    setText("env-flag-set-count", "set: " + setCount);
+    setText("env-flag-sensitive-count", "sensitive: " + sensitiveCount);
+  }
+
   async function resetPersistedEnvFlags() {
     setEnvFlagToolbarStatus("resetting…");
     try {
@@ -319,7 +364,7 @@
         headers: { "content-type": "application/json" },
         body: "{}",
       });
-      var cleared = Array.isArray(result && result.cleared) ? result.cleared.length : 0;
+      var cleared = Number(result && result.removed || 0);
       setEnvFlagToolbarStatus("reset " + cleared + " persisted override" + (cleared === 1 ? "" : "s"));
       await loadEnvFlags();
     } catch (err) {
@@ -335,48 +380,68 @@
       var data = await apiFetch("/api/env_flags/list");
       var categories = data.categories || [];
       var flags = data.flags || [];
+      setEnvFlagStats(flags);
       root.innerHTML = "";
       categories.forEach(function (cat) {
         var catFlags = flags.filter(function (f) { return f.category === cat; });
         if (catFlags.length === 0) return;
-        var section = document.createElement("section");
+        var section = document.createElement("details");
         section.className = "env-flag-category";
-        var h2 = document.createElement("h2");
-        h2.textContent = cat;
-        section.appendChild(h2);
+        var summary = document.createElement("summary");
+        summary.className = "env-flag-category-summary";
+        var title = document.createElement("span");
+        title.className = "env-flag-category-title";
+        title.textContent = cat;
+        var count = document.createElement("span");
+        count.className = "env-flag-category-count";
+        count.textContent = catFlags.length + " flag" + (catFlags.length === 1 ? "" : "s");
+        var body = document.createElement("div");
+        body.className = "env-flag-category-body";
+        summary.appendChild(title);
+        summary.appendChild(count);
+        section.appendChild(summary);
         catFlags.forEach(function (flag) {
-          section.appendChild(renderEnvFlag(flag));
+          body.appendChild(renderEnvFlag(flag));
         });
+        section.appendChild(body);
         root.appendChild(section);
       });
       if (root.children.length === 0) {
         root.innerHTML = "<p class=\"loading\">no flags registered</p>";
       }
     } catch (err) {
+      setEnvFlagStats([]);
       root.innerHTML = "<p class=\"loading\">failed: " + escapeHtml(err.message) + "</p>";
     }
   }
 
   function renderEnvFlag(flag) {
     var row = document.createElement("div");
-    row.className = "env-flag";
+    row.className = "env-flag" + (flag.is_set ? " env-flag--set" : " env-flag--unset");
+    if (flag.sensitive) {
+      row.className += " env-flag--sensitive";
+    }
 
     var meta = document.createElement("div");
+    meta.className = "env-flag-meta";
     var nameEl = document.createElement("div");
     nameEl.className = "env-flag-name";
-    nameEl.textContent = flag.name;
+    var nameText = document.createElement("code");
+    nameText.className = "env-flag-name-text";
+    nameText.textContent = flag.name;
+    nameEl.appendChild(nameText);
     var kind = document.createElement("span");
-    kind.className = "kind";
+    kind.className = "env-flag-chip env-flag-chip--kind";
     kind.textContent = flag.kind;
     nameEl.appendChild(kind);
     if (flag.sensitive) {
       var sens = document.createElement("span");
-      sens.className = "sensitive";
+      sens.className = "env-flag-chip env-flag-chip--sensitive";
       sens.textContent = "sensitive";
       nameEl.appendChild(sens);
     }
     var scope = document.createElement("span");
-    scope.className = "kind";
+    scope.className = "env-flag-chip env-flag-chip--scope";
     scope.textContent = flag.persist_scope || "persist";
     nameEl.appendChild(scope);
     var summary = document.createElement("div");
@@ -430,6 +495,7 @@
 
     var setBtn = document.createElement("button");
     setBtn.type = "button";
+    setBtn.className = "btn btn-primary env-flag-action";
     setBtn.textContent = "Set";
     setBtn.addEventListener("click", function () {
       applyEnvFlag(flag.name, input.value, persistBox.checked, setBtn);
@@ -437,7 +503,7 @@
 
     var clearBtn = document.createElement("button");
     clearBtn.type = "button";
-    clearBtn.className = "secondary";
+    clearBtn.className = "btn env-flag-action env-flag-action--clear";
     clearBtn.textContent = "Clear";
     clearBtn.addEventListener("click", function () {
       applyEnvFlag(flag.name, "", persistBox.checked, clearBtn);
@@ -458,24 +524,30 @@
     if (btn) {
       btn.disabled = true;
     }
+    setEnvFlagToolbarStatus("applying " + name + "...");
     try {
       var cleaned = String(value || "").trim();
+      var result;
       if (cleaned.length === 0) {
-        await apiFetch("/api/env_flags/" + encodeURIComponent(name) + "/clear", {
+        result = await apiFetch("/api/env_flags/" + encodeURIComponent(name) + "/clear", {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ value: "", persist: !!persist }),
+          body: JSON.stringify({ persist: !!persist }),
         });
       } else {
-        await apiFetch("/api/env_flags/" + encodeURIComponent(name) + "/set", {
+        result = await apiFetch("/api/env_flags/" + encodeURIComponent(name) + "/set", {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({ value: cleaned, persist: !!persist }),
         });
       }
+      setEnvFlagToolbarStatus((result && result.note) || "updated " + name);
+      clearError();
       await loadEnvFlags();
     } catch (err) {
-      alert("env flag mutation failed: " + err.message);
+      var message = "env flag mutation failed: " + (err && err.message ? err.message : String(err));
+      setEnvFlagToolbarStatus(message);
+      setStatusError(message);
     } finally {
       if (btn) {
         btn.disabled = false;
@@ -536,15 +608,6 @@
         }
       });
     });
-
-    var refreshBtn = $("overview-refresh");
-    if (refreshBtn) {
-      refreshBtn.addEventListener("click", function () {
-        setStatusAction("refreshing…");
-        loadHealth();
-        loadBackend();
-      });
-    }
 
     var envRefreshBtn = $("env-flag-refresh");
     if (envRefreshBtn) {
@@ -1064,7 +1127,48 @@
     autoRefreshTimer: null,
     autoRefreshIntervalMs: 5000,
     lastStatus: null,
+    globalState: "idle",
+    globalLabel: "idle",
   };
+
+  function cbBridgeStatusFromPayload(data) {
+    if (!data || !data.configured) return { state: "idle", label: "idle" };
+    if (data.url_source === "marker") return { state: "running", label: "running" };
+    return { state: "configured", label: "configured" };
+  }
+
+  function cbSetGlobalBridgeStatus(state, label) {
+    var nextState = state || "idle";
+    var nextLabel = label || nextState;
+    cbState.globalState = nextState;
+    cbState.globalLabel = nextLabel;
+    var pill = $("topbar-card-bridge");
+    if (pill) {
+      pill.setAttribute("data-state", nextState);
+      pill.title = "Remote Bridge status: " + nextLabel
+        + ". Click to " + (nextState === "running" ? "stop" : "start") + ".";
+      pill.setAttribute("aria-label", pill.title);
+    }
+    setText("topbar-card-bridge-value", nextLabel);
+    cbSyncCommandCenterBridgeIndicators();
+  }
+
+  function cbSyncCommandCenterBridgeIndicators() {
+    var state = cbState.globalState || "idle";
+    var label = cbState.globalLabel || state;
+    document.querySelectorAll('#command-center-nav [data-cc-leaf-id="leaf-adv-card-bridge"]').forEach(function (entry) {
+      entry.setAttribute("data-cb-state", state);
+      entry.classList.toggle("is-cb-active", state === "running");
+      var marker = entry.querySelector(".cc-nav-card-bridge-state");
+      if (marker) marker.textContent = state === "running" ? "running" : "";
+    });
+    document.querySelectorAll('.overview-module-card[data-cc-view="card_bridge"]').forEach(function (card) {
+      card.setAttribute("data-cb-state", state);
+      card.classList.toggle("is-cb-active", state === "running");
+      var badge = card.querySelector('[data-cb-role="overview-status"]');
+      if (badge) badge.textContent = label;
+    });
+  }
 
   function cbSetBadge(elId, posture) {
     var el = $(elId);
@@ -1150,6 +1254,7 @@
       });
       if (!resp.ok) {
         cbSetBadge("cb-status-badge", "error");
+        cbSetGlobalBridgeStatus("error", "error");
         if (summary) summary.textContent = "status action failed: " + (resp.error || "unknown error");
         return;
       }
@@ -1157,6 +1262,7 @@
       renderCardBridgeStatus(cbState.lastStatus);
     } catch (err) {
       cbSetBadge("cb-status-badge", "error");
+      cbSetGlobalBridgeStatus("error", "error");
       if (summary) summary.textContent = "status request failed: " + (err && err.message || String(err));
     }
   }
@@ -1165,6 +1271,8 @@
     if (!data) return;
     var configured = !!data.configured;
     cbSetBadge("cb-status-badge", configured ? "configured" : "not-configured");
+    var global = cbBridgeStatusFromPayload(data);
+    cbSetGlobalBridgeStatus(global.state, global.label);
     setText("cb-status-url", data.url || "–");
     setText("cb-status-source", data.url_source || "–");
     var fp = data.token_fingerprint || "";
@@ -1195,7 +1303,7 @@
       } else {
         summary.innerHTML =
           "Not configured — set <code>YGGDRASIM_CARD_RELAY_URL</code> or pass " +
-          "<code>--remote-card-url</code> to talk to a Card Bridge over SSH.";
+          "<code>--remote-card-url</code> to talk to a Remote Bridge over SSH.";
       }
     }
 
@@ -1493,8 +1601,532 @@
     });
   }
 
+  var CB_RIG_STORAGE_KEY = "yggdrasim.card_bridge.remote_rig";
+  var CB_RIG_PROFILES_STORAGE_KEY = "yggdrasim.card_bridge.remote_rig.profiles";
+  var CB_RIG_FIELD_IDS = [
+    "cb-rig-ssh-target",
+    "cb-rig-identity-file",
+    "cb-rig-reader-index",
+    "cb-rig-reader-name",
+    "cb-rig-card-port",
+    "cb-rig-gui-port",
+    "cb-rig-service-name",
+    "cb-rig-remote-workdir",
+    "cb-rig-remote-python",
+    "cb-rig-remote-token",
+    "cb-rig-remsim-binary",
+    "cb-rig-usb-vidpid",
+    "cb-rig-hil-port",
+  ];
+  var cbRigApplyingProfile = false;
+
+  function cbRigReadField(id) {
+    var el = $(id);
+    return el ? String(el.value || "").trim() : "";
+  }
+
+  function cbRigWriteField(id, value) {
+    var el = $(id);
+    if (!el || value == null) return;
+    el.value = String(value);
+  }
+
+  function cbRigReadSettingsPayload() {
+    var payload = {};
+    CB_RIG_FIELD_IDS.forEach(function (id) { payload[id] = cbRigReadField(id); });
+    return payload;
+  }
+
+  function cbRigLoadProfiles() {
+    var profiles = {};
+    try {
+      profiles = JSON.parse(window.localStorage.getItem(CB_RIG_PROFILES_STORAGE_KEY) || "{}") || {};
+    } catch (_err) {
+      profiles = {};
+    }
+    return profiles && typeof profiles === "object" && !Array.isArray(profiles) ? profiles : {};
+  }
+
+  function cbRigLoadStoredSettingsPayload(profiles) {
+    var stored = {};
+    var knownProfiles = profiles || cbRigLoadProfiles();
+    try {
+      stored = JSON.parse(window.localStorage.getItem(CB_RIG_STORAGE_KEY) || "{}") || {};
+    } catch (_err) {
+      stored = {};
+    }
+    if (!stored || typeof stored !== "object" || Array.isArray(stored)) stored = {};
+    var storedTarget = String(stored["cb-rig-ssh-target"] || "").trim();
+    if (storedTarget && knownProfiles[storedTarget]) {
+      stored = Object.assign({}, knownProfiles[storedTarget], stored);
+    }
+    return stored;
+  }
+
+  function cbRigWriteProfiles(profiles) {
+    try {
+      window.localStorage.setItem(CB_RIG_PROFILES_STORAGE_KEY, JSON.stringify(profiles || {}));
+    } catch (_err) {}
+  }
+
+  function cbRigRenderProfileOptions(profiles) {
+    var list = $("cb-rig-ssh-target-options");
+    if (!list) return;
+    list.textContent = "";
+    Object.keys(profiles || {}).sort().forEach(function (target) {
+      if (!target) return;
+      var option = document.createElement("option");
+      option.value = target;
+      list.appendChild(option);
+    });
+  }
+
+  function cbRigSaveProfile(payload) {
+    var target = String((payload && payload["cb-rig-ssh-target"]) || "").trim();
+    if (!target) return;
+    var profiles = cbRigLoadProfiles();
+    profiles[target] = Object.assign({}, profiles[target] || {}, payload);
+    cbRigWriteProfiles(profiles);
+    cbRigRenderProfileOptions(profiles);
+  }
+
+  function cbRigApplyProfileForTarget(target) {
+    var normalized = String(target || "").trim();
+    if (!normalized) return false;
+    var profiles = cbRigLoadProfiles();
+    var profile = profiles[normalized];
+    if (!profile || typeof profile !== "object") return false;
+    cbRigApplyingProfile = true;
+    CB_RIG_FIELD_IDS.forEach(function (id) {
+      if (Object.prototype.hasOwnProperty.call(profile, id)) {
+        cbRigWriteField(id, profile[id]);
+      }
+    });
+    cbRigApplyingProfile = false;
+    cbRigUpdateGuiUrl();
+    return true;
+  }
+
+  function cbRigLoadSettings() {
+    var profiles = cbRigLoadProfiles();
+    cbRigRenderProfileOptions(profiles);
+    var stored = cbRigLoadStoredSettingsPayload(profiles);
+    Object.keys(stored).forEach(function (id) {
+      cbRigWriteField(id, stored[id]);
+    });
+    cbRigUpdateGuiUrl();
+  }
+
+  function cbRigSaveSettings(options) {
+    var payload = cbRigReadSettingsPayload();
+    try {
+      window.localStorage.setItem(CB_RIG_STORAGE_KEY, JSON.stringify(payload));
+    } catch (_err) {}
+    if (!options || options.updateProfile !== false) {
+      cbRigSaveProfile(payload);
+    }
+  }
+
+  function cbRigNumber(id, fallback) {
+    var parsed = parseInt(cbRigReadField(id), 10);
+    if (!isFinite(parsed) || parsed <= 0) return fallback;
+    return parsed;
+  }
+
+  function cbRigPayloadValue(payload, id) {
+    return String((payload && payload[id]) || "").trim();
+  }
+
+  function cbRigPayloadNumber(payload, id, fallback) {
+    var parsed = parseInt(cbRigPayloadValue(payload, id), 10);
+    if (!isFinite(parsed) || parsed <= 0) return fallback;
+    return parsed;
+  }
+
+  function cbRigInputsFromPayload(payload) {
+    var cardPort = cbRigPayloadNumber(payload, "cb-rig-card-port", 8642);
+    var guiPort = cbRigPayloadNumber(payload, "cb-rig-gui-port", 27854);
+    return {
+      ssh_target: cbRigPayloadValue(payload, "cb-rig-ssh-target"),
+      identity_file: cbRigPayloadValue(payload, "cb-rig-identity-file"),
+      reader_index: cbRigPayloadNumber(payload, "cb-rig-reader-index", 0),
+      reader_name: cbRigPayloadValue(payload, "cb-rig-reader-name"),
+      local_card_port: cardPort,
+      remote_card_port: cardPort,
+      local_gui_port: guiPort,
+      remote_gui_port: guiPort,
+      service_name: cbRigPayloadValue(payload, "cb-rig-service-name") || "yggdrasim-hil-supervisor.service",
+      remote_card_url: "http://127.0.0.1:" + cardPort + "/apdu",
+      remote_token_file: cbRigPayloadValue(payload, "cb-rig-remote-token") || "~/.config/yggdrasim/card_bridge/" + cardPort + ".token",
+      remote_workdir: cbRigPayloadValue(payload, "cb-rig-remote-workdir") || "~/YggdraSIM",
+      remote_python: cbRigPayloadValue(payload, "cb-rig-remote-python") || "~/YggdraSIM/python/bin/python",
+      remsim_binary: cbRigPayloadValue(payload, "cb-rig-remsim-binary") || "osmo-remsim-client-st2",
+      usb_vidpid: cbRigPayloadValue(payload, "cb-rig-usb-vidpid") || "1d50:60e3",
+      hil_port: cbRigPayloadNumber(payload, "cb-rig-hil-port", 9997),
+      apdu_timeout_ms: 30000,
+    };
+  }
+
+  function cbRigCommonInputs() {
+    return cbRigInputsFromPayload(cbRigReadSettingsPayload());
+  }
+
+  function cbRigHasRenderedFields() {
+    return CB_RIG_FIELD_IDS.some(function (id) { return !!$(id); });
+  }
+
+  function cbRigInputsFromSavedSettings() {
+    if (cbRigHasRenderedFields()) {
+      cbRigSaveSettings();
+      return cbRigCommonInputs();
+    }
+    return cbRigInputsFromPayload(cbRigLoadStoredSettingsPayload());
+  }
+
+  function cbRigRemoteRigStartInputs(cfg) {
+    return {
+      ssh_target: cfg.ssh_target,
+      identity_file: cfg.identity_file,
+      reader_index: cfg.reader_index,
+      reader_name: cfg.reader_name,
+      local_card_port: cfg.local_card_port,
+      remote_card_port: cfg.remote_card_port,
+      local_gui_port: cfg.local_gui_port,
+      remote_gui_port: cfg.remote_gui_port,
+      service_name: cfg.service_name,
+      remote_workdir: cfg.remote_workdir,
+      remote_python: cfg.remote_python,
+      remote_card_url: cfg.remote_card_url,
+      remote_token_file: cfg.remote_token_file,
+      remsim_binary: cfg.remsim_binary,
+      usb_vidpid: cfg.usb_vidpid,
+      hil_port: cfg.hil_port,
+      apdu_timeout_ms: cfg.apdu_timeout_ms,
+      forward_gui: true,
+      restart_processes: true,
+      install_service: true,
+      confirm: true,
+    };
+  }
+
+  function cbRigSetBusy(button, busyText) {
+    if (!button) return function () {};
+    var previous = button.textContent;
+    button.disabled = true;
+    button.textContent = busyText || "working…";
+    return function () {
+      button.disabled = false;
+      button.textContent = previous;
+    };
+  }
+
+  function cbRigSetNote(message, isError, options) {
+    var note = $("cb-rig-note");
+    if (!note) return;
+    note.textContent = message || "";
+    note.classList.toggle("cb-rig-note-error", !!isError);
+    var flashOk = !!(options && options.flashOk && !isError);
+    note.classList.toggle("cb-rig-note-ok", flashOk);
+    note.classList.remove("cb-rig-note-ok-flash");
+    if (flashOk) {
+      void note.offsetWidth;
+      note.classList.add("cb-rig-note-ok-flash");
+    }
+  }
+
+  function cbRigRequireSshTarget() {
+    if (cbRigReadField("cb-rig-ssh-target")) return true;
+    cbRigSetNote("SSH target is required for RPi actions.", true);
+    var field = $("cb-rig-ssh-target");
+    if (field && typeof field.focus === "function") field.focus();
+    return false;
+  }
+
+  function cbRigDescribeAction(data, fallback) {
+    if (!data) return fallback || "";
+    var message = data.note || fallback || "action completed";
+    var steps = Array.isArray(data.steps) ? data.steps : [];
+    if (!steps.length) return message;
+    var failed = steps.slice().reverse().find(function (step) { return step && step.ok === false; });
+    var step = failed || steps[steps.length - 1] || {};
+    var pieces = [message];
+    if (step.name) pieces.push("step: " + step.name);
+    if (step.note) pieces.push(step.note);
+    if (step.log_tail) pieces.push(step.log_tail);
+    return pieces.filter(Boolean).join(" | ");
+  }
+
+  function cbRigUpdateGuiUrl() {
+    var port = cbRigNumber("cb-rig-gui-port", 27854);
+    setText("cb-rig-gui-url", "http://127.0.0.1:" + port);
+  }
+
+  function cbRigRenderStatus(data, options) {
+    var state = data && data.state ? data.state : {};
+    setText("cb-rig-local-status", state.local_card_bridge_running ? "running" : "stopped");
+    setText("cb-rig-tunnel-status", state.ssh_tunnel_running ? "running" : "stopped");
+    var remote = state.remote_service || {};
+    var remoteStatus = remote.ActiveState || (state.remote_error ? "error" : "–");
+    if (remote.SubState) remoteStatus += " · " + remote.SubState;
+    setText("cb-rig-service-status", remoteStatus);
+    var hil = state.remote_hil || {};
+    var bridgeStatus = Object.prototype.hasOwnProperty.call(hil, "bridge_running")
+      ? (hil.bridge_running ? "running" : "stopped")
+      : "–";
+    var usbStatus = Object.prototype.hasOwnProperty.call(hil, "usb_present")
+      ? (hil.usb_present ? "present" : "missing")
+      : "–";
+    var remsimStatus = Object.prototype.hasOwnProperty.call(hil, "remsim_client_running")
+      ? (hil.remsim_client_running ? "running" : (hil.remsim_binary_missing ? "missing" : (hil.remsim_client_enabled === false ? "disabled" : "stopped")))
+      : "–";
+    var linkStatus = "–";
+    if (Object.prototype.hasOwnProperty.call(hil, "modem_path_ready")) {
+      if (hil.modem_path_ready) {
+        linkStatus = "connected";
+      } else if (hil.control_connected === false) {
+        linkStatus = "control waiting";
+      } else if (hil.bankd_connected === false) {
+        linkStatus = "bankd waiting";
+      } else {
+        linkStatus = "waiting";
+      }
+    }
+    setText("cb-rig-bridge-status", bridgeStatus);
+    setText("cb-rig-usb-status", usbStatus);
+    setText("cb-rig-remsim-status", remsimStatus);
+    setText("cb-rig-modem-link-status", linkStatus);
+    if (state.local_gui_url) setText("cb-rig-gui-url", state.local_gui_url);
+    if (state.local_card_bridge_running) {
+      cbSetGlobalBridgeStatus("running", "running");
+    } else if (Object.prototype.hasOwnProperty.call(state, "local_card_bridge_running")) {
+      var global = cbBridgeStatusFromPayload(cbState.lastStatus);
+      if (global.state === "running") global = { state: "idle", label: "idle" };
+      cbSetGlobalBridgeStatus(global.state, global.label);
+    }
+    cbRigSetNote(
+      cbRigDescribeAction(data, "Remote rig status refreshed."),
+      !!(state.remote_error || (hil && hil.ok === false) || (data && data.ok === false)),
+      options && options.flashOk ? { flashOk: true } : null
+    );
+  }
+
+  async function cbRigRun(actionId, inputs, button, busyText, options) {
+    if (!options || options.saveSettings !== false) {
+      cbRigSaveSettings();
+    }
+    var clearBusy = cbRigSetBusy(button, busyText);
+    try {
+      var resp = await apiFetch("/api/actions/" + encodeURIComponent(actionId) + "/run", {
+        method: "POST",
+        body: JSON.stringify({ inputs: inputs || {} }),
+      });
+      var data = resp && resp.data ? resp.data : {};
+      if (!resp || !resp.ok || data.ok === false) {
+        cbRigSetNote((resp && resp.error) || cbRigDescribeAction(data, "action failed") || data.stderr, true);
+        return data;
+      }
+      cbRigSetNote(
+        cbRigDescribeAction(data, "action completed"),
+        false,
+        options && options.flashOk ? { flashOk: true } : null
+      );
+      return data;
+    } catch (err) {
+      cbRigSetNote(String((err && err.message) || err), true);
+      return null;
+    } finally {
+      clearBusy();
+    }
+  }
+
+  async function cbRigRefreshStatus(button) {
+    var cfg = cbRigCommonInputs();
+    var data = await cbRigRun("card_bridge.remote_rig_status", {
+      ssh_target: cfg.ssh_target,
+      identity_file: cfg.identity_file,
+      service_name: cfg.service_name,
+      local_gui_port: cfg.local_gui_port,
+      remote_workdir: cfg.remote_workdir,
+      remote_python: cfg.remote_python,
+    }, button, "checking…");
+    if (data) cbRigRenderStatus(data);
+  }
+
+  async function cbRigStartLocal(button) {
+    var cfg = cbRigCommonInputs();
+    var data = await cbRigRun("card_bridge.local_start", {
+      port: cfg.local_card_port,
+      reader_index: cbRigNumber("cb-rig-reader-index", 0),
+      reader_name: cbRigReadField("cb-rig-reader-name"),
+      apdu_timeout_ms: cfg.apdu_timeout_ms,
+      restart: false,
+      confirm: true,
+    }, button, "starting…", { flashOk: true });
+    if (data) {
+      loadCardBridgeStatus();
+      cbRigRefreshStatus(null);
+    }
+  }
+
+  async function cbRigStopLocal(button) {
+    var data = await cbRigRun("card_bridge.local_stop", { confirm: true }, button, "stopping…");
+    if (data) cbRigRefreshStatus(null);
+  }
+
+  async function cbRigStartTunnel(button) {
+    if (!cbRigRequireSshTarget()) return;
+    var cfg = cbRigCommonInputs();
+    var data = await cbRigRun("card_bridge.remote_rig_tunnel_start", {
+      ssh_target: cfg.ssh_target,
+      identity_file: cfg.identity_file,
+      local_card_port: cfg.local_card_port,
+      remote_card_port: cfg.remote_card_port,
+      local_gui_port: cfg.local_gui_port,
+      remote_gui_port: cfg.remote_gui_port,
+      forward_gui: true,
+      restart: false,
+      confirm: true,
+    }, button, "opening…", { flashOk: true });
+    if (data) cbRigRefreshStatus(null);
+  }
+
+  async function cbRigStartAll(button) {
+    if (!cbRigRequireSshTarget()) return;
+    var cfg = cbRigCommonInputs();
+    var data = await cbRigRun(
+      "card_bridge.remote_rig_start",
+      cbRigRemoteRigStartInputs(cfg),
+      button,
+      "starting rig…",
+      { flashOk: true }
+    );
+    if (data) {
+      loadCardBridgeStatus();
+      cbRigRenderStatus(data, { flashOk: data.ok !== false });
+    }
+  }
+
+  async function cbRigStartAllFromSavedSettings() {
+    var cfg = cbRigInputsFromSavedSettings();
+    if (!cfg.ssh_target) {
+      var missing = "Remote Bridge SSH target is required. Configure it once in Remote Bridge.";
+      cbRigSetNote(missing, true);
+      return { ok: false, note: missing };
+    }
+    var data = await cbRigRun(
+      "card_bridge.remote_rig_start",
+      cbRigRemoteRigStartInputs(cfg),
+      null,
+      "starting rig…",
+      { flashOk: true, saveSettings: false }
+    );
+    if (data) {
+      loadCardBridgeStatus();
+      cbRigRenderStatus(data, { flashOk: data.ok !== false });
+    }
+    return data;
+  }
+
+  async function cbRigStopAll(button) {
+    var cfg = cbRigCommonInputs();
+    var data = await cbRigRun("card_bridge.remote_rig_stop", {
+      ssh_target: cfg.ssh_target,
+      identity_file: cfg.identity_file,
+      service_name: cfg.service_name,
+      local_gui_port: cfg.local_gui_port,
+      remote_workdir: cfg.remote_workdir,
+      remote_python: cfg.remote_python,
+      confirm: true,
+    }, button, "stopping rig…");
+    if (data) {
+      loadCardBridgeStatus();
+      cbRigRenderStatus(data, { flashOk: data.ok !== false });
+    }
+  }
+
+  async function cbRigStopAllFromSavedSettings() {
+    var cfg = cbRigInputsFromSavedSettings();
+    if (!cfg.ssh_target) {
+      var missing = "Remote Bridge SSH target is required. Configure it once in Remote Bridge.";
+      cbRigSetNote(missing, true);
+      return { ok: false, note: missing };
+    }
+    var data = await cbRigRun("card_bridge.remote_rig_stop", {
+      ssh_target: cfg.ssh_target,
+      identity_file: cfg.identity_file,
+      service_name: cfg.service_name,
+      local_gui_port: cfg.local_gui_port,
+      remote_workdir: cfg.remote_workdir,
+      remote_python: cfg.remote_python,
+      confirm: true,
+    }, null, "stopping rig…", { saveSettings: false });
+    if (data) {
+      loadCardBridgeStatus();
+      cbRigRenderStatus(data, { flashOk: data.ok !== false });
+    }
+    return data;
+  }
+
+  async function cbRigStopTunnel(button) {
+    var data = await cbRigRun("card_bridge.remote_rig_tunnel_stop", { confirm: true }, button, "stopping…");
+    if (data) cbRigRefreshStatus(null);
+  }
+
+  async function cbRigSyncToken(button) {
+    if (!cbRigRequireSshTarget()) return;
+    var cfg = cbRigCommonInputs();
+    await cbRigRun("card_bridge.remote_rig_sync_token", {
+      ssh_target: cfg.ssh_target,
+      identity_file: cfg.identity_file,
+      remote_token_file: cfg.remote_token_file,
+      confirm: true,
+    }, button, "syncing…");
+  }
+
+  async function cbRigInstallService(button) {
+    if (!cbRigRequireSshTarget()) return;
+    var cfg = cbRigCommonInputs();
+    var data = await cbRigRun("card_bridge.remote_rig_install_service", {
+      ssh_target: cfg.ssh_target,
+      identity_file: cfg.identity_file,
+      service_name: cfg.service_name,
+      remote_workdir: cfg.remote_workdir,
+      remote_python: cfg.remote_python,
+      remote_card_url: cfg.remote_card_url,
+      remote_token_file: cfg.remote_token_file,
+      remsim_binary: cfg.remsim_binary,
+      usb_vidpid: cfg.usb_vidpid,
+      hil_port: cfg.hil_port,
+      apdu_timeout_ms: cfg.apdu_timeout_ms,
+      start_now: true,
+      confirm: true,
+    }, button, "installing…");
+    if (data) cbRigRefreshStatus(null);
+  }
+
+  async function cbRigServiceAction(action, button) {
+    if (!cbRigRequireSshTarget()) return;
+    var cfg = cbRigCommonInputs();
+    var data = await cbRigRun("card_bridge.remote_rig_service", {
+      ssh_target: cfg.ssh_target,
+      identity_file: cfg.identity_file,
+      service_name: cfg.service_name,
+      action: action,
+      confirm: action !== "status",
+    }, button, action + "…");
+    if (data) cbRigRefreshStatus(null);
+  }
+
+  function cbRigOpenGui() {
+    cbRigSaveSettings();
+    var port = cbRigNumber("cb-rig-gui-port", 27854);
+    window.open("http://127.0.0.1:" + port, "_blank", "noopener");
+  }
+
   function loadCardBridge() {
+    cbRigLoadSettings();
     loadCardBridgeStatus();
+    cbRigRefreshStatus(null);
     if ($("cb-auto-refresh") && $("cb-auto-refresh").checked) {
       cbStartAutoRefresh();
     }
@@ -1535,6 +2167,52 @@
         }
       });
     }
+
+    CB_RIG_FIELD_IDS.forEach(function (id) {
+      var el = $(id);
+      if (!el) return;
+      el.addEventListener("change", function () {
+        if (id === "cb-rig-ssh-target") {
+          cbRigApplyProfileForTarget(cbRigReadField(id));
+        }
+        cbRigSaveSettings();
+        cbRigUpdateGuiUrl();
+      });
+      el.addEventListener("input", function () {
+        if (id === "cb-rig-ssh-target") {
+          var applied = cbRigApplyProfileForTarget(cbRigReadField(id));
+          cbRigSaveSettings({ updateProfile: applied });
+        } else if (!cbRigApplyingProfile) {
+          cbRigSaveSettings();
+        }
+        cbRigUpdateGuiUrl();
+      });
+    });
+
+    var rigRefresh = $("cb-rig-refresh");
+    if (rigRefresh) rigRefresh.addEventListener("click", function () { cbRigRefreshStatus(rigRefresh); });
+    var rigOpen = $("cb-rig-open-gui");
+    if (rigOpen) rigOpen.addEventListener("click", cbRigOpenGui);
+    var startAll = $("cb-rig-start-all");
+    if (startAll) startAll.addEventListener("click", function () { cbRigStartAll(startAll); });
+    var stopAll = $("cb-rig-stop-all");
+    if (stopAll) stopAll.addEventListener("click", function () { cbRigStopAll(stopAll); });
+    var startLocal = $("cb-rig-start-local");
+    if (startLocal) startLocal.addEventListener("click", function () { cbRigStartLocal(startLocal); });
+    var stopLocal = $("cb-rig-stop-local");
+    if (stopLocal) stopLocal.addEventListener("click", function () { cbRigStopLocal(stopLocal); });
+    var startTunnel = $("cb-rig-start-tunnel");
+    if (startTunnel) startTunnel.addEventListener("click", function () { cbRigStartTunnel(startTunnel); });
+    var stopTunnel = $("cb-rig-stop-tunnel");
+    if (stopTunnel) stopTunnel.addEventListener("click", function () { cbRigStopTunnel(stopTunnel); });
+    var syncToken = $("cb-rig-sync-token");
+    if (syncToken) syncToken.addEventListener("click", function () { cbRigSyncToken(syncToken); });
+    var installService = $("cb-rig-install-service");
+    if (installService) installService.addEventListener("click", function () { cbRigInstallService(installService); });
+    var startService = $("cb-rig-start-service");
+    if (startService) startService.addEventListener("click", function () { cbRigServiceAction("restart", startService); });
+    var stopService = $("cb-rig-stop-service");
+    if (stopService) stopService.addEventListener("click", function () { cbRigServiceAction("stop", stopService); });
   }
 
   // Reusable streaming-log row appender. Used by both the Command Center
@@ -1631,12 +2309,16 @@
       startMode: "decoded",
       selectedFrameNumber: null,
       capturePath: "",
+      captureSource: "",
       keybagPath: "",
       rows: [],
       annotations: {},
       detail: "",
       bytes: "",
+      detailRanges: [],
       detailFrameNumber: 0,
+      byteHighlightHoverRange: null,
+      byteHighlightPinnedRange: null,
       statusText: "not started",
       errorText: "",
       actionStatusText: "",
@@ -1644,10 +2326,13 @@
       refreshTimerId: null,
       inflight: false,
       refreshQueuedForce: false,
+      refreshQueuedSelectedFrame: null,
       startInFlight: false,
       stopInFlight: false,
+      cardBridgeLaunchInFlight: false,
       paused: false,
       followTail: true,
+      selectionFollowsTail: true,
       rawPaused: false,
       rawRows: [],
       rawPendingRows: [],
@@ -1659,6 +2344,9 @@
       rawFrameSeen: {},
       rawClearedFrameNumber: 0,
       modemShellCommand: "",
+      modemShellDefaultCommand: "",
+      modemShellDefaultSource: "",
+      modemShellRemoteTarget: "",
       modemShellCapability: null,
       modemShellDevices: [],
       modemShellMetadataLoading: false,
@@ -1673,7 +2361,16 @@
       packetClientHeight: 0,
       packetScrollBottomGap: 0,
       lastPacketScrollAt: 0,
+      packetScrollRestoring: false,
       packetSectionOpen: {},
+      packetRenderPending: false,
+      packetRenderTimerId: null,
+      packetVirtualRenderTimerId: null,
+      packetPointerActive: false,
+      packetPointerId: null,
+      packetPointerReleaseTimerId: null,
+      packetPointerReleaseListenersInstalled: false,
+      contextTree: [],
       liveBaselinePending: false,
       liveBaselineFrameNumber: 0,
       liveBaselineCaptureSize: 0,
@@ -1687,6 +2384,10 @@
       bytesScrollLeft: 0,
       lastRefreshAt: 0,
       lastStableStatusText: "",
+      timerSnapshotAppliedAt: 0,
+      timerSnapshotCaptureSeconds: null,
+      timerSnapshotSignature: "",
+      timerStatusTimerId: null,
     },
     // Top-bar reader strip. Promoted from the per-SCP03-tab sidebar to
     // a global app-level control: each detected PC/SC reader gets a
@@ -1728,11 +2429,77 @@
 
   var HIL_MODEM_COMMAND_KEY = "ygg.hil.modemShellCommand";
   var HIL_MODEM_DEFAULT_COMMAND = "sudo tio /dev/ttyUSB2";
+  var HIL_PACKET_FETCH_LIMIT = 5000;
+  var HIL_PACKET_RENDER_LIMIT = 750;
+  var HIL_PACKET_VIRTUAL_ROW_HEIGHT = 26;
+  var HIL_PACKET_VIRTUAL_OVERSCAN = 16;
+  var HIL_RAW_TRACE_LIMIT = 750;
   var CC_READER_SESSION_SUBSYSTEMS = {
     "eSIM Management": true,
     "SCP11 Local": true,
     "Local eIM": true,
   };
+  var CC_OFFLINE_TOOLS_HIDDEN_ACTIONS = {
+    "suci.status": true,
+    "tool.euicc_info2.decode": true,
+    "tool.saip.lint": true,
+    "tool.tlv.decode": true,
+  };
+  var CC_GLOBAL_DEBUG_FLAG = "YGGDRASIM_GLOBAL_DEBUG";
+  var CC_TRUE_ENV_FLAG_VALUES = {
+    "1": true,
+    true: true,
+    yes: true,
+    y: true,
+    on: true,
+    debug: true,
+    verbose: true,
+  };
+  var ccGlobalDebugEnabled = false;
+  var ccGlobalDebugRefreshPromise = null;
+
+  function ccEnvFlagBool(value) {
+    return !!CC_TRUE_ENV_FLAG_VALUES[String(value || "").trim().toLowerCase()];
+  }
+
+  function ccSetGlobalDebugFromEnvFlags(flags) {
+    flags = Array.isArray(flags) ? flags : [];
+    ccGlobalDebugEnabled = false;
+    for (var i = 0; i < flags.length; i++) {
+      var flag = flags[i] || {};
+      if (flag.name === CC_GLOBAL_DEBUG_FLAG) {
+        ccGlobalDebugEnabled = !!flag.is_set && ccEnvFlagBool(flag.current_value);
+        return ccGlobalDebugEnabled;
+      }
+    }
+    return false;
+  }
+
+  function ccRefreshGlobalDebugFlag() {
+    if (ccGlobalDebugRefreshPromise) return ccGlobalDebugRefreshPromise;
+    ccGlobalDebugRefreshPromise = apiFetch("/api/env_flags/list").then(
+      function (data) {
+        return ccSetGlobalDebugFromEnvFlags(data && data.flags);
+      },
+      function () {
+        ccGlobalDebugEnabled = false;
+        return false;
+      }
+    ).then(function (enabled) {
+      ccGlobalDebugRefreshPromise = null;
+      return enabled;
+    });
+    return ccGlobalDebugRefreshPromise;
+  }
+
+  function ccIsGlobalDebugEnabled() {
+    return !!ccGlobalDebugEnabled;
+  }
+
+  function ccShouldShowStreamFrame(level) {
+    if (String(level || "info").toLowerCase() !== "error") return true;
+    return ccIsGlobalDebugEnabled();
+  }
 
   function ccSubsystemRequiresReaderSession(subsystem) {
     return !!CC_READER_SESSION_SUBSYSTEMS[String(subsystem || "")];
@@ -1822,7 +2589,141 @@
     }
   }
 
+  function ccSetTopbarBridgeBusy(pillId, busy) {
+    var pill = $(pillId);
+    if (!pill) return;
+    pill.disabled = !!busy;
+    if (busy) {
+      pill.setAttribute("data-busy", "true");
+    } else {
+      pill.removeAttribute("data-busy");
+    }
+  }
+
+  function ccDescribeTopbarBridgeAction(data, fallback) {
+    if (typeof cbRigDescribeAction === "function") {
+      return cbRigDescribeAction(data, fallback);
+    }
+    return (data && data.note) || fallback || "";
+  }
+
+  async function cbToggleTopbarRemoteBridge() {
+    var pill = $("topbar-card-bridge");
+    if (pill && pill.getAttribute("data-busy") === "true") return;
+    var previousState = (typeof cbState !== "undefined" && cbState.globalState)
+      || (pill && pill.getAttribute("data-state"))
+      || "idle";
+    var value = $("topbar-card-bridge-value");
+    var previousLabel = (typeof cbState !== "undefined" && cbState.globalLabel)
+      || (value && value.textContent)
+      || previousState;
+    var running = previousState === "running";
+    ccSetTopbarBridgeBusy("topbar-card-bridge", true);
+    setText("topbar-card-bridge-value", running ? "stopping" : "starting");
+    try {
+      var data;
+      if (running) {
+        if (typeof cbRigStopAllFromSavedSettings !== "function") {
+          throw new Error("Remote Bridge stop helper is unavailable.");
+        }
+        data = await cbRigStopAllFromSavedSettings();
+      } else {
+        if (typeof cbRigStartAllFromSavedSettings !== "function") {
+          throw new Error("Remote Bridge start helper is unavailable.");
+        }
+        data = await cbRigStartAllFromSavedSettings();
+      }
+      if (!data || data.ok === false) {
+        if (typeof cbSetGlobalBridgeStatus === "function" && (!data || !data.state)) {
+          cbSetGlobalBridgeStatus(previousState, previousLabel);
+        }
+        setStatusAction(ccDescribeTopbarBridgeAction(
+          data,
+          running ? "Remote Bridge stop failed." : "Remote Bridge start failed."
+        ));
+      }
+    } catch (err) {
+      if (typeof cbSetGlobalBridgeStatus === "function") {
+        cbSetGlobalBridgeStatus(previousState, previousLabel);
+      }
+      setStatusAction(String((err && err.message) || err));
+    } finally {
+      ccSetTopbarBridgeBusy("topbar-card-bridge", false);
+      if (typeof loadCardBridgeStatus === "function") loadCardBridgeStatus();
+    }
+  }
+
+  function hilTopbarActions() {
+    var cat = commandState.catalogue || {};
+    var subsystems = cat.subsystems || {};
+    return subsystems.HIL || [];
+  }
+
+  function hilTopbarLeaf() {
+    return ccFindLeaf("leaf-adv-hil") || {
+      id: "leaf-adv-hil",
+      label: "HIL Bridge",
+      subsystem: "HIL",
+      scope: "all",
+      hint: "Hardware-in-the-loop APDU relay / capture",
+    };
+  }
+
+  async function hilEnsureTopbarCatalogue() {
+    if (commandState.catalogue) return true;
+    await loadCommandCatalogue();
+    return !!commandState.catalogue;
+  }
+
+  async function hilToggleTopbarBridge() {
+    var pill = $("topbar-hil-bridge");
+    if (pill && pill.getAttribute("data-busy") === "true") return;
+    var state = commandState.hilWorkbench;
+    if (state.startInFlight || state.stopInFlight) return;
+    var running = state.armed && state.startMode !== "offline";
+    ccSetTopbarBridgeBusy("topbar-hil-bridge", true);
+    try {
+      var ready = await hilEnsureTopbarCatalogue();
+      if (!ready) {
+        setStatusAction("HIL Bridge actions are unavailable.");
+        return;
+      }
+      var leaf = hilTopbarLeaf();
+      openCommandSubsystem("HIL", { scope: "all", leafId: "leaf-adv-hil" });
+      var container = $("cc-actions");
+      var actions = hilTopbarActions();
+      if (running) {
+        await hilStopLiveSession(actions, container, leaf);
+      } else {
+        await hilStartLiveSession(actions, container, leaf);
+      }
+    } finally {
+      ccSetTopbarBridgeBusy("topbar-hil-bridge", false);
+      hilSyncCommandCenterTraceIndicators();
+    }
+  }
+
+  function wireTopbarBridgeControls() {
+    var hil = $("topbar-hil-bridge");
+    if (hil && hil.getAttribute("data-bridge-control-wired") !== "true") {
+      hil.setAttribute("data-bridge-control-wired", "true");
+      hil.addEventListener("click", function (event) {
+        event.preventDefault();
+        hilToggleTopbarBridge();
+      });
+    }
+    var remote = $("topbar-card-bridge");
+    if (remote && remote.getAttribute("data-bridge-control-wired") !== "true") {
+      remote.setAttribute("data-bridge-control-wired", "true");
+      remote.addEventListener("click", function (event) {
+        event.preventDefault();
+        cbToggleTopbarRemoteBridge();
+      });
+    }
+  }
+
   function wireCommandCenter() {
+    wireTopbarBridgeControls();
     document.addEventListener("click", function (event) {
       // Ignore clicks on the group header (expand/collapse) — that
       // has its own listener. We only care about leaf clicks here.
@@ -3012,7 +3913,7 @@
     {
       id: "group-tools",
       label: "Tools",
-      hint: "Offline helpers and decoders.",
+      hint: "Offline helpers and package tooling.",
       defaultOpen: true,
       children: [
         {
@@ -3022,42 +3923,10 @@
           hint: "Profile package (SAIP) inspector / editor",
         },
         {
-          id: "leaf-tool-suci",
-          label: "SUCI Calculator",
-          subsystem: "SUCI Tool",
-          hint: "3GPP TS 33.501 SUCI encapsulation",
-        },
-        {
-          id: "leaf-tool-decoders",
-          label: "Decoders",
-          subsystem: "Tools",
-          hint: "TLV, status word, eUICC info2, SAIP/eIM lint, GSMA codes",
-        },
-      ],
-    },
-    {
-      id: "group-env",
-      label: "Environment",
-      hint: "Runtime configuration — flags, backend, reader probe.",
-      defaultOpen: false,
-      children: [
-        {
-          id: "leaf-env-config",
-          label: "Configuration",
-          inspectView: "env_flags",
-          hint: "YGGDRASIM_* env flags (process / session / file scope)",
-        },
-        {
-          id: "leaf-env-backend",
-          label: "Card backend",
-          inspectView: "backend",
-          hint: "Toggle between reader and simulated backends",
-        },
-        {
-          id: "leaf-env-readers",
-          label: "PC/SC readers",
-          inspectView: "live_readers",
-          hint: "Live reader enumeration & ATR probe",
+          id: "leaf-tool-offline",
+          label: "Offline Tools",
+          subsystem: "Offline Tools",
+          hint: "Decoders, ASN.1/TLV, SUCI, TUAK/TOPc, lint, status words",
         },
       ],
     },
@@ -3068,6 +3937,12 @@
       defaultOpen: false,
       children: [
         {
+          id: "leaf-adv-card-bridge",
+          label: "Remote Bridge",
+          inspectView: "card_bridge",
+          hint: "Remote card relay diagnostics and remote HIL rig controls",
+        },
+        {
           id: "leaf-adv-hil",
           label: "HIL Bridge",
           subsystem: "HIL",
@@ -3077,7 +3952,7 @@
           id: "leaf-adv-simcard",
           label: "SIMCARD helpers",
           subsystem: "SIMCARD",
-          hint: "Simulator-side helpers (quirks, profile store, TUAK)",
+          hint: "Simulator-side helpers (quirks, profile store)",
         },
         {
           id: "leaf-adv-terminal",
@@ -3096,6 +3971,20 @@
           label: "Registry browser",
           inspectView: "registry",
           hint: "Every stable engine entry point",
+        },
+      ],
+    },
+    {
+      id: "group-env",
+      label: "Environment",
+      hint: "Runtime configuration flags.",
+      defaultOpen: false,
+      children: [
+        {
+          id: "leaf-env-config",
+          label: "Configuration",
+          inspectView: "env_flags",
+          hint: "YGGDRASIM_* env flags (process / session / file scope)",
         },
       ],
     },
@@ -3183,6 +4072,19 @@
         nameEl.textContent = leaf.label;
         li.appendChild(nameEl);
 
+        if (leaf.inspectView === "card_bridge") {
+          var bridgeStateEl = document.createElement("span");
+          bridgeStateEl.className = "cc-nav-card-bridge-state";
+          bridgeStateEl.textContent = "running";
+          li.appendChild(bridgeStateEl);
+        }
+        if (leaf.subsystem === "HIL") {
+          var hilTraceStateEl = document.createElement("span");
+          hilTraceStateEl.className = "cc-nav-hil-trace-state";
+          hilTraceStateEl.textContent = "tracing";
+          li.appendChild(hilTraceStateEl);
+        }
+
         // Only subsystem-backed leaves get the action-count badge; the
         // inspectView leaves (env_flags / backend / readers / shell)
         // route to the existing non-CC views and have no action list.
@@ -3202,6 +4104,10 @@
       groupLi.appendChild(childList);
       nav.appendChild(groupLi);
     });
+    if (typeof cbSyncCommandCenterBridgeIndicators === "function") {
+      cbSyncCommandCenterBridgeIndicators();
+    }
+    hilSyncCommandCenterTraceIndicators();
   }
 
   function renderOverviewModuleLauncher(catalogue) {
@@ -3234,6 +4140,7 @@
       groupEl.appendChild(grid);
       host.appendChild(groupEl);
     });
+    hilSyncCommandCenterTraceIndicators();
   }
 
   function renderOverviewModuleCard(leaf, subsystems) {
@@ -3241,6 +4148,8 @@
     card.type = "button";
     card.className = "overview-module-card";
     card.setAttribute("data-cc-leaf-id", leaf.id || "");
+    if (leaf.subsystem) card.setAttribute("data-cc-subsystem", leaf.subsystem);
+    if (leaf.inspectView) card.setAttribute("data-cc-view", leaf.inspectView);
     if (leaf.stub) card.classList.add("is-stub");
     if (leaf.requiresReader) card.setAttribute("data-cc-requires-reader", "1");
 
@@ -3254,6 +4163,12 @@
     if (leaf.subsystem) {
       var count = (subsystems[leaf.subsystem] || []).length;
       badge.textContent = leaf.stub ? "reserved" : (String(count) + " action" + (count === 1 ? "" : "s"));
+      if (leaf.subsystem === "HIL") {
+        badge.setAttribute("data-hil-role", "overview-status");
+      }
+    } else if (leaf.inspectView === "card_bridge") {
+      badge.setAttribute("data-cb-role", "overview-status");
+      badge.textContent = "idle";
     } else {
       badge.textContent = "view";
     }
@@ -3279,6 +4194,57 @@
       }
     });
     return card;
+  }
+
+  function hilTraceIndicatorStatus() {
+    var state = commandState.hilWorkbench || {};
+    if (state.stopInFlight) {
+      return { state: "running", label: "stopping" };
+    }
+    if (state.armed && state.startMode !== "offline") {
+      if (state.startInFlight || state.liveBaselinePending) {
+        return { state: "running", label: "starting" };
+      }
+      if (state.paused) {
+        return { state: "running", label: "paused" };
+      }
+      return { state: "running", label: "tracing" };
+    }
+    return { state: "idle", label: "" };
+  }
+
+  function hilOverviewDefaultBadgeText() {
+    var catalogue = commandState.catalogue || {};
+    var subsystems = catalogue.subsystems || {};
+    var count = (subsystems.HIL || []).length;
+    return String(count) + " action" + (count === 1 ? "" : "s");
+  }
+
+  function hilSyncCommandCenterTraceIndicators() {
+    var status = hilTraceIndicatorStatus();
+    var running = status.state === "running";
+    var label = status.label || "tracing";
+    var topbar = $("topbar-hil-bridge");
+    if (topbar) {
+      var topbarLabel = running ? label : "idle";
+      topbar.setAttribute("data-state", running ? "running" : "idle");
+      topbar.title = "HIL Bridge status: " + topbarLabel
+        + ". Click to " + (running ? "stop" : "start") + ".";
+      topbar.setAttribute("aria-label", topbar.title);
+      setText("topbar-hil-bridge-value", topbarLabel);
+    }
+    document.querySelectorAll('#command-center-nav [data-cc-leaf-id="leaf-adv-hil"]').forEach(function (entry) {
+      entry.setAttribute("data-hil-trace-state", status.state);
+      entry.classList.toggle("is-hil-tracing", running);
+      var marker = entry.querySelector(".cc-nav-hil-trace-state");
+      if (marker) marker.textContent = running ? label : "";
+    });
+    document.querySelectorAll('.overview-module-card[data-cc-subsystem="HIL"]').forEach(function (card) {
+      card.setAttribute("data-hil-trace-state", status.state);
+      card.classList.toggle("is-hil-tracing", running);
+      var badge = card.querySelector('[data-hil-role="overview-status"]');
+      if (badge) badge.textContent = running ? label : hilOverviewDefaultBadgeText();
+    });
   }
 
   function _ccNavGroupStoredState(groupId) {
@@ -3529,6 +4495,7 @@
     if (!container || !cat) return;
     var mainEl = container.closest ? container.closest(".main") : null;
     if (mainEl) {
+      mainEl.classList.toggle("main--module-workbench", true);
       mainEl.classList.toggle("main--saip-workbench", subsystem === "SAIP");
       mainEl.classList.toggle("main--hil-workbench", subsystem === "HIL");
     }
@@ -3840,6 +4807,17 @@
     return null;
   }
 
+  function ccFindCatalogueActionById(actionId) {
+    var cat = commandState && commandState.catalogue;
+    var subsystems = cat && cat.subsystems ? cat.subsystems : {};
+    var names = Object.keys(subsystems);
+    for (var i = 0; i < names.length; i++) {
+      var action = ccFindActionById(subsystems[names[i]], actionId);
+      if (action) return action;
+    }
+    return null;
+  }
+
   function ccProfileTargetCacheKey(subsystem, readerName) {
     return String(subsystem || "") + "\x1f" + String(readerName || "");
   }
@@ -3951,6 +4929,7 @@
     if (
       suffix === "load_profile"
       || suffix === "get_certs_inventory"
+      || suffix === "import_certificate"
       || suffix === "store_metadata"
       || suffix === "update_metadata"
       || suffix === "store_metadata_custom"
@@ -4034,6 +5013,11 @@
     return !ccActionNeedsManualInput(action);
   }
 
+  function ccActionShouldAutoRunInEsimFlowPane(action) {
+    if (!action) return false;
+    return !ccActionNeedsManualInput(action);
+  }
+
   // -- Action popout builder ------------------------------------------
   // Opens a floating popout with the action's form + run button.
   // Reuses _ccBuildCompactPopout (dedup + cascade) and buildField()
@@ -4056,6 +5040,7 @@
     (action.inputs || []).forEach(function (field) {
       form.appendChild(buildField(action, field));
     });
+    ccEnhanceActionForm(action, form);
 
     // Run button + status
     var actionsBar = document.createElement("div");
@@ -4113,8 +5098,12 @@
     var scopedReader = ccSubsystemRequiresReaderSession(subsystem)
       ? ccActiveReaderName()
       : "";
+    var isEsimModuleSurface = ccSubsystemRequiresReaderSession(subsystem);
     var wb = document.createElement("section");
     wb.className = "cc-workbench cc-workbench--compact";
+    if (subsystem === "Offline Tools") {
+      wb.classList.add("cc-workbench--offline-tools");
+    }
     wb.setAttribute("data-wb", subsystem);
 
     var header = document.createElement("header");
@@ -4139,6 +5128,50 @@
       titleBlock.appendChild(backendHint);
     }
     header.appendChild(titleBlock);
+
+    var moduleToolbar = null;
+    var moduleToolbarStatus = null;
+    var moduleToolbarButtons = [];
+    if (isEsimModuleSurface) {
+      moduleToolbar = document.createElement("div");
+      moduleToolbar.className = "cc-esim-module-toolbar";
+      moduleToolbar.setAttribute("aria-label", "eSIM module actions");
+
+      function addModuleTool(labelText, titleText, handler, accentClass) {
+        var button = document.createElement("button");
+        button.type = "button";
+        button.className = "cc-esim-module-tool"
+          + (accentClass ? " " + accentClass : "");
+        button.title = titleText || labelText;
+        button.textContent = labelText;
+        button.addEventListener("click", function (event) {
+          event.preventDefault();
+          handler();
+        });
+        moduleToolbar.appendChild(button);
+        moduleToolbarButtons.push(button);
+        return button;
+      }
+
+      addModuleTool(
+        "Refresh",
+        "Re-read the card and reload the displayed eSIM data",
+        function () { refreshEsimSurface({ manual: true }); },
+        ""
+      );
+      addModuleTool(
+        "Reset",
+        "Reset the selected reader/card connection and reload the displayed data",
+        resetEsimSurface,
+        "cc-esim-module-tool--reset"
+      );
+
+      moduleToolbarStatus = document.createElement("span");
+      moduleToolbarStatus.className = "cc-esim-module-toolbar-status";
+      moduleToolbarStatus.textContent = "idle";
+      moduleToolbar.appendChild(moduleToolbarStatus);
+      header.appendChild(moduleToolbar);
+    }
 
     // Filter input only materialises when there are enough entries
     // to justify it. Below the threshold the sidenav is already
@@ -4165,9 +5198,42 @@
     var activeCategoryId = null;
     var categoryTabRecs = [];
     var allCards = [];
+    var actionFilterRecords = [];
     var searchInput = null;
 
+    function groupedActionCategoryId(action) {
+      if (!groupedBuckets || !action) return "";
+      var actionId = String(action.id || "");
+      for (var i = 0; i < groupedBuckets.length; i++) {
+        var bucket = groupedBuckets[i] || {};
+        var items = bucket.items || [];
+        for (var j = 0; j < items.length; j++) {
+          if (items[j] && String(items[j].id || "") === actionId) {
+            return bucket.group && bucket.group.id ? bucket.group.id : "";
+          }
+        }
+      }
+      return "";
+    }
+
+    function applyGroupedActionFilters() {
+      if (!groupedBuckets || actionFilterRecords.length === 0) return false;
+      var q = searchInput
+        ? searchInput.value.trim().toLowerCase()
+        : "";
+      actionFilterRecords.forEach(function (rec) {
+        var catMatch = !activeCategoryId
+          || !rec.categoryId
+          || rec.categoryId === activeCategoryId;
+        var searchMatch = q.length === 0
+          || rec.haystack.indexOf(q) !== -1;
+        rec.btn.hidden = !(catMatch && searchMatch);
+      });
+      return true;
+    }
+
     function applyCardFilters() {
+      if (applyGroupedActionFilters()) return;
       var q = searchInput
         ? searchInput.value.trim().toLowerCase()
         : "";
@@ -4246,6 +5312,339 @@
       "SCP11 Local": "scp11_local.discover",
       "Local eIM": "eim_local.scan",
     };
+    var useEsimSplitPane = isDashboardSubsystem;
+    var esimFlowPane = null;
+    var esimFlowTitle = null;
+    var esimFlowStatus = null;
+    var esimFlowBody = null;
+    var inlineActionPane = null;
+    var inlineActionTitle = null;
+    var inlineActionStatus = null;
+    var inlineActionBody = null;
+    var actionButtonRecords = [];
+    var localOverviewRefreshers = [];
+
+    function _setEsimModuleToolbarBusy(busy, statusText) {
+      moduleToolbarButtons.forEach(function (button) {
+        button.disabled = !!busy;
+      });
+      if (moduleToolbarStatus) {
+        moduleToolbarStatus.textContent = statusText || (busy ? "running" : "idle");
+      }
+    }
+
+    function _setEsimFlowStatus(text) {
+      if (esimFlowStatus) {
+        esimFlowStatus.textContent = text || "idle";
+      }
+    }
+
+    function _setEsimFlowActiveAction(action) {
+      var actionId = String(action && action.id || "");
+      actionButtonRecords.forEach(function (rec) {
+        rec.btn.classList.toggle("is-active", actionId.length > 0 && rec.action.id === actionId);
+      });
+    }
+
+    function _resetEsimFlowPane(action, statusText) {
+      if (!useEsimSplitPane || !esimFlowBody) return null;
+      var titleText = action
+        ? (action.title || action.id || "Action")
+        : "APDU flow";
+      esimFlowPane.setAttribute("data-action-id", action && action.id ? action.id : "");
+      esimFlowTitle.textContent = titleText;
+      _setEsimFlowStatus(statusText || "idle");
+      esimFlowBody.innerHTML = "";
+      return esimFlowBody;
+    }
+
+    function _renderEsimFlowPlaceholder() {
+      var body = _resetEsimFlowPane(null, "idle");
+      if (!body) return;
+      var empty = document.createElement("div");
+      empty.className = "cc-esim-flow-placeholder";
+      var title = document.createElement("div");
+      title.className = "cc-esim-flow-placeholder-title";
+      title.textContent = "Select an operation";
+      empty.appendChild(title);
+      var copy = document.createElement("p");
+      copy.textContent = "APDU trace and action output render here.";
+      empty.appendChild(copy);
+      body.appendChild(empty);
+    }
+
+    function _renderEsimFlowError(message, action) {
+      var body = _resetEsimFlowPane(action || null, "error");
+      if (!body) return;
+      body.appendChild(renderErrorBlock(message));
+    }
+
+    function _buildEsimFlowResult(action, runningText) {
+      var body = _resetEsimFlowPane(action, "running");
+      if (!body) return null;
+      if (action && action.description) {
+        var desc = document.createElement("p");
+        desc.className = "cc-action-desc";
+        desc.textContent = action.description;
+        body.appendChild(desc);
+      }
+      var result = document.createElement("div");
+      result.className = "cc-action-result cc-esim-flow-result cc-action-result--"
+        + (action && action.output_kind || "json");
+      result.appendChild(loadingEl(runningText || ("running " + (action && (action.title || action.id) || "action") + "...")));
+      body.appendChild(result);
+      return result;
+    }
+
+    async function _runActionInEsimFlowPane(action, inputsMap, options) {
+      if (!action) {
+        _renderEsimFlowError("Action is not registered.", null);
+        return null;
+      }
+      var opts = options || {};
+      _setEsimFlowActiveAction(action);
+      var inputs = Object.assign({}, inputsMap || {});
+      applyActiveReaderDefault(action, inputs);
+      if (ccActionUsesReaderSession(action) && !ccActiveReaderName()) {
+        _renderEsimFlowError("Select a reader before running this eSIM action.", action);
+        setStatusAction("action blocked: reader required");
+        return null;
+      }
+      var result = _buildEsimFlowResult(action, opts.runningText);
+      setStatusAction("action: " + action.id);
+      logBus.emit({
+        level: "info",
+        source: action.id,
+        message: "run: starting",
+      });
+      try {
+        var resp = await apiFetch("/api/actions/" + encodeURIComponent(action.id) + "/run", {
+          method: "POST",
+          body: JSON.stringify({ inputs: inputs }),
+        });
+        if (!resp || !resp.ok) {
+          var errText = resp && resp.error ? resp.error : "unknown error";
+          if (result) {
+            result.innerHTML = "";
+            result.appendChild(renderErrorBlock(errText));
+          }
+          _setEsimFlowStatus("error");
+          logBus.emit({
+            level: "error",
+            source: action.id,
+            message: "run: failed - " + errText,
+          });
+          return null;
+        }
+        var data = resp.data || {};
+        if (result) {
+          result.innerHTML = "";
+          renderActionResult(action, data, result);
+        }
+        _setEsimFlowStatus(opts.doneText || "ok");
+        logBus.emit({
+          level: "info",
+          source: action.id,
+          message: "run: ok",
+        });
+        return data;
+      } catch (err) {
+        var message = String(err && err.message || err);
+        if (result) {
+          result.innerHTML = "";
+          result.appendChild(renderErrorBlock(message));
+        }
+        _setEsimFlowStatus("error");
+        logBus.emit({
+          level: "error",
+          source: action.id,
+          message: "run: " + message,
+        });
+        return null;
+      }
+    }
+
+    function _openEsimActionPane(action) {
+      if (!useEsimSplitPane || !esimFlowBody) {
+        _openInlineActionPane(action);
+        return;
+      }
+      _setEsimFlowActiveAction(action);
+      var body = _resetEsimFlowPane(action, "idle");
+      if (!body) return;
+      if (action.description) {
+        var desc = document.createElement("p");
+        desc.className = "cc-action-desc";
+        desc.textContent = action.description;
+        body.appendChild(desc);
+      }
+
+      var form = document.createElement("form");
+      form.className = "cc-action-form cc-esim-flow-form";
+      (action.inputs || []).forEach(function (field) {
+        form.appendChild(buildField(action, field));
+      });
+
+      var actionsBar = document.createElement("div");
+      actionsBar.className = "inline-actions cc-action-bar";
+      var runBtn = document.createElement("button");
+      runBtn.type = "submit";
+      runBtn.className = "btn btn-primary";
+      runBtn.textContent = action.streams ? "Start" : "Run";
+      actionsBar.appendChild(runBtn);
+      var status = document.createElement("span");
+      status.className = "cc-action-status";
+      status.textContent = "idle";
+      actionsBar.appendChild(status);
+      form.appendChild(actionsBar);
+
+      var result = document.createElement("div");
+      result.className = "cc-action-result cc-esim-flow-result cc-action-result--"
+        + (action.output_kind || "json");
+      form.appendChild(result);
+
+      form.addEventListener("submit", function (event) {
+        event.preventDefault();
+        runActionFromForm(action, form, status, result);
+      });
+
+      (action.inputs || []).forEach(function (field) {
+        if (field.kind === "reader" && !ccShouldHideReaderField(action, field)) {
+          var sel = form.querySelector('[name="' + field.name + '"]');
+          if (sel) prefillReaderSelect(sel);
+        }
+      });
+
+      body.appendChild(form);
+
+      if (ccActionShouldAutoRunInEsimFlowPane(action)) {
+        runBtn.textContent = action.streams ? "Restart" : "Re-run";
+        window.setTimeout(function () {
+          runActionFromForm(action, form, status, result);
+        }, 0);
+      }
+    }
+
+    function _ensureInlineActionPane() {
+      if (inlineActionPane) return inlineActionPane;
+      inlineActionPane = document.createElement("section");
+      inlineActionPane.className = "cc-inline-action-pane";
+      inlineActionPane.hidden = true;
+      inlineActionPane.setAttribute("aria-label", "Action panel");
+
+      var head = document.createElement("header");
+      head.className = "cc-inline-action-head";
+      inlineActionTitle = document.createElement("div");
+      inlineActionTitle.className = "cc-inline-action-title";
+      inlineActionTitle.textContent = "Action";
+      head.appendChild(inlineActionTitle);
+
+      inlineActionStatus = document.createElement("span");
+      inlineActionStatus.className = "cc-action-status cc-inline-action-status";
+      inlineActionStatus.textContent = "idle";
+      head.appendChild(inlineActionStatus);
+
+      var close = document.createElement("button");
+      close.type = "button";
+      close.className = "cc-inline-action-close";
+      close.setAttribute("aria-label", "Close action panel");
+      close.title = "Close action panel";
+      close.textContent = "\u00d7";
+      close.addEventListener("click", function () {
+        inlineActionPane.hidden = true;
+        _setEsimFlowActiveAction(null);
+      });
+      head.appendChild(close);
+      inlineActionPane.appendChild(head);
+
+      inlineActionBody = document.createElement("div");
+      inlineActionBody.className = "cc-inline-action-body";
+      inlineActionPane.appendChild(inlineActionBody);
+      return inlineActionPane;
+    }
+
+    function _openInlineActionPane(action) {
+      var pane = _ensureInlineActionPane();
+      pane.hidden = false;
+      pane.setAttribute("data-action-id", action && action.id ? action.id : "");
+      _setEsimFlowActiveAction(action);
+
+      inlineActionTitle.textContent = action.title || action.id || "Action";
+      inlineActionStatus.textContent = "idle";
+      inlineActionBody.innerHTML = "";
+
+      if (action.description) {
+        var desc = document.createElement("p");
+        desc.className = "cc-action-desc";
+        desc.textContent = action.description;
+        inlineActionBody.appendChild(desc);
+      }
+
+      var form = document.createElement("form");
+      form.className = "cc-action-form cc-inline-action-form";
+      (action.inputs || []).forEach(function (field) {
+        form.appendChild(buildField(action, field));
+      });
+      ccEnhanceActionForm(action, form);
+
+      var actionsBar = document.createElement("div");
+      actionsBar.className = "inline-actions cc-action-bar";
+      var runBtn = document.createElement("button");
+      runBtn.type = "submit";
+      runBtn.className = "btn btn-primary";
+      runBtn.textContent = action.streams ? "Start" : "Run";
+      actionsBar.appendChild(runBtn);
+      var formStatus = document.createElement("span");
+      formStatus.className = "cc-action-status";
+      formStatus.textContent = "idle";
+      actionsBar.appendChild(formStatus);
+      form.appendChild(actionsBar);
+
+      var result = document.createElement("div");
+      result.className = "cc-action-result cc-action-result--" + (action.output_kind || "json");
+      form.appendChild(result);
+
+      form.addEventListener("submit", function (event) {
+        event.preventDefault();
+        inlineActionStatus.textContent = "running";
+        runActionFromForm(action, form, formStatus, result);
+      });
+
+      (action.inputs || []).forEach(function (field) {
+        if (field.kind === "reader" && !ccShouldHideReaderField(action, field)) {
+          var sel = form.querySelector('[name="' + field.name + '"]');
+          if (sel) prefillReaderSelect(sel);
+        }
+      });
+
+      if (pane._statusObserver) {
+        pane._statusObserver.disconnect();
+      }
+      var observer = new MutationObserver(function () {
+        inlineActionStatus.textContent = formStatus.textContent || "idle";
+      });
+      observer.observe(formStatus, { childList: true, characterData: true, subtree: true });
+      pane._statusObserver = observer;
+
+      inlineActionBody.appendChild(form);
+
+      if (ccActionShouldAutoRunOnOpen(action)) {
+        runBtn.textContent = "Re-run";
+        window.setTimeout(function () {
+          if (form.requestSubmit) {
+            form.requestSubmit(runBtn);
+          } else {
+            form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+          }
+        }, 0);
+      }
+
+      try {
+        pane.scrollIntoView({ block: "nearest", behavior: "smooth" });
+      } catch (_err) {
+        pane.scrollIntoView();
+      }
+    }
 
     // Mutation suffixes — actions that are NOT shown in the dashboard
     // button strip (they're covered by dashboard sections or are heavy
@@ -4262,6 +5661,26 @@
       "protocol_summary",
     ];
 
+    var LOCAL_EIM_OVERVIEW_SUFFIXES = {
+      eim_certs_inventory: true,
+      eim_package_explain: true,
+      eim_package_lint: true,
+      hotfolder_fetch: true,
+      hotfolder_list: true,
+      hotfolder_metadata: true,
+      hotfolder_poll: true,
+      issue_package: true,
+      list_fixtures: true,
+      load_eim_package: true,
+      poll_campaign: true,
+    };
+
+    var LOCAL_SMDP_OVERVIEW_SUFFIXES = {
+      get_certs_inventory: true,
+      import_certificate: true,
+      load_profile: true,
+    };
+
     function _shouldShowInDashboard(action) {
       if (!isDashboardSubsystem) return true; // show all for non-dashboard subsystems
       var id = (action.id || "").toLowerCase();
@@ -4269,6 +5688,16 @@
         if (id.indexOf(DASHBOARD_SKIP_SUFFIXES[i]) !== -1) return false;
       }
       return true;
+    }
+
+    function _shouldShowLocalEimDashboardAction(action) {
+      var suffix = ccActionSuffix(String(action && action.id || "").toLowerCase());
+      return !LOCAL_EIM_OVERVIEW_SUFFIXES[suffix] && _shouldShowInDashboard(action);
+    }
+
+    function _shouldShowLocalSmdpDashboardAction(action) {
+      var suffix = ccActionSuffix(String(action && action.id || "").toLowerCase());
+      return !LOCAL_SMDP_OVERVIEW_SUFFIXES[suffix] && _shouldShowInDashboard(action);
     }
 
     function _profileTarget(profile) {
@@ -4366,13 +5795,12 @@
         if (_profileLifecycleNeedsConfirm(action)) {
           inputs.confirm = true;
         }
-        applyActiveReaderDefault(action, inputs);
-        var resp = await apiFetch("/api/actions/" + encodeURIComponent(action.id) + "/run", {
-          method: "POST",
-          body: JSON.stringify({ inputs: inputs }),
+        var data = await _runActionInEsimFlowPane(action, inputs, {
+          runningText: operation + " profile",
+          doneText: operation + " ok",
         });
-        if (!resp || !resp.ok) {
-          throw new Error(resp && resp.error ? resp.error : "unknown error");
+        if (!data) {
+          throw new Error("action failed");
         }
         if (statusEl) statusEl.textContent = operation + " ok";
         logBus.emit({
@@ -4687,6 +6115,731 @@
       parent.appendChild(div);
     }
 
+    function _localEimAction(actionId) {
+      return ccFindActionById(actions, actionId);
+    }
+
+    function _localEimText(value) {
+      return String(value == null ? "" : value).trim();
+    }
+
+    function _localEimShortPath(pathValue) {
+      var text = _localEimText(pathValue);
+      if (!text) return "-";
+      var normalized = text.replace(/\\/g, "/");
+      var parts = normalized.split("/").filter(function (part) {
+        return part.length > 0;
+      });
+      var tail = parts.slice(Math.max(0, parts.length - 3)).join("/");
+      if (!tail) tail = text;
+      return tail.length > 72 ? "..." + tail.slice(tail.length - 69) : tail;
+    }
+
+    function _localEimPathField(labelText, kind, placeholderText) {
+      var wrap = document.createElement("label");
+      wrap.className = "cc-local-eim-path";
+      var label = document.createElement("span");
+      label.className = "cc-local-eim-path-label";
+      label.textContent = labelText;
+      wrap.appendChild(label);
+
+      var input = document.createElement("input");
+      input.type = "text";
+      input.className = "cc-local-eim-path-input cc-path-input";
+      input.placeholder = placeholderText || "";
+      input.autocomplete = "off";
+      var field = { kind: kind || "path", name: labelText, placeholder: placeholderText || "" };
+      var choosePath = async function () {
+        if (typeof pickForField !== "function") return;
+        var chosen = await pickForField(field);
+        if (!chosen) return;
+        input.value = chosen;
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+        input.dispatchEvent(new Event("change", { bubbles: true }));
+      };
+      input.addEventListener("dblclick", choosePath);
+
+      var row = document.createElement("div");
+      row.className = "cc-path-row cc-local-eim-path-row";
+      row.appendChild(input);
+      var browse = document.createElement("button");
+      browse.type = "button";
+      browse.className = "btn btn-small cc-path-browse";
+      browse.textContent = "Browse...";
+      browse.addEventListener("click", choosePath);
+      row.appendChild(browse);
+      wrap.appendChild(row);
+      if (typeof enableFilePathDrop === "function") {
+        enableFilePathDrop(input);
+      }
+      return { wrap: wrap, input: input };
+    }
+
+    function _localSmdpAction(actionId) {
+      return ccFindActionById(actions, actionId);
+    }
+
+    function _buildLocalSmdpOverviewPanel() {
+      var panel = document.createElement("section");
+      panel.className = "cc-local-smdp-overview cc-local-eim-overview";
+      panel.setAttribute("data-local-smdp-overview", "1");
+
+      var head = document.createElement("div");
+      head.className = "cc-local-eim-head cc-local-smdp-head";
+      var title = document.createElement("div");
+      title.className = "cc-local-eim-title cc-local-smdp-title";
+      title.textContent = "Local SM-DP+";
+      head.appendChild(title);
+      var status = document.createElement("span");
+      status.className = "cc-local-eim-status cc-local-smdp-status";
+      status.textContent = "idle";
+      head.appendChild(status);
+      panel.appendChild(head);
+
+      var inputs = document.createElement("div");
+      inputs.className = "cc-local-eim-inputs cc-local-smdp-inputs";
+      var profilePath = _localEimPathField("Profile", "path", ".bpp / .der / .hex");
+      var certPath = _localEimPathField("Certificate", "path", "DPauth or DPpb cert");
+      var keyPath = _localEimPathField("Private key", "path", "(optional)");
+      inputs.appendChild(profilePath.wrap);
+      inputs.appendChild(certPath.wrap);
+      inputs.appendChild(keyPath.wrap);
+      panel.appendChild(inputs);
+
+      var tools = document.createElement("div");
+      tools.className = "cc-local-eim-tools cc-local-smdp-tools";
+      panel.appendChild(tools);
+
+      var roleSelect = document.createElement("select");
+      roleSelect.className = "cc-local-smdp-role";
+      roleSelect.setAttribute("aria-label", "Certificate role");
+      ["DPauth", "DPpb", "auto"].forEach(function (roleName) {
+        var option = document.createElement("option");
+        option.value = roleName;
+        option.textContent = roleName;
+        roleSelect.appendChild(option);
+      });
+      tools.appendChild(roleSelect);
+
+      var summary = document.createElement("div");
+      summary.className = "cc-local-eim-summary cc-local-smdp-summary";
+      var authHost = document.createElement("div");
+      authHost.className = "cc-local-eim-card cc-local-smdp-card cc-local-smdp-card--auth";
+      var pbHost = document.createElement("div");
+      pbHost.className = "cc-local-eim-card cc-local-smdp-card cc-local-smdp-card--pb";
+      summary.appendChild(authHost);
+      summary.appendChild(pbHost);
+      panel.appendChild(summary);
+
+      var resultHost = document.createElement("div");
+      resultHost.className = "cc-local-eim-result cc-local-smdp-result";
+      panel.appendChild(resultHost);
+
+      var toolButtons = [];
+      function setBusy(busy, text) {
+        panel.classList.toggle("is-busy", !!busy);
+        status.textContent = text || (busy ? "running" : "idle");
+        toolButtons.forEach(function (button) {
+          button.disabled = !!busy;
+        });
+        roleSelect.disabled = !!busy;
+      }
+
+      async function runLocalSmdpAction(actionId, inputsMap, options) {
+        var action = _localSmdpAction(actionId);
+        if (!action) {
+          throw new Error(actionId + " is not registered.");
+        }
+        var opts = options || {};
+        setBusy(true, opts.runningText || "running");
+        try {
+          var data;
+          if (opts.renderResult === false) {
+            var silentInputs = Object.assign({}, inputsMap || {});
+            applyActiveReaderDefault(action, silentInputs);
+            var resp = await apiFetch("/api/actions/" + encodeURIComponent(action.id) + "/run", {
+              method: "POST",
+              body: JSON.stringify({ inputs: silentInputs }),
+            });
+            if (!resp || !resp.ok) {
+              throw new Error(resp && resp.error ? resp.error : "unknown error");
+            }
+            data = resp.data || {};
+          } else {
+            data = await _runActionInEsimFlowPane(action, inputsMap || {}, {
+              runningText: opts.runningText || "running",
+              doneText: opts.doneText || "ok",
+            });
+          }
+          resultHost.innerHTML = "";
+          if (!data) {
+            setBusy(false, "error");
+            return null;
+          }
+          setBusy(false, opts.doneText || "ok");
+          return data;
+        } catch (err) {
+          resultHost.innerHTML = "";
+          if (opts.renderResult === false) {
+            resultHost.appendChild(renderErrorBlock(String(err && err.message || err)));
+          } else {
+            _renderEsimFlowError(String(err && err.message || err), action);
+          }
+          setBusy(false, "error");
+          return null;
+        }
+      }
+
+      function addTool(iconText, labelText, titleText, handler, primary) {
+        var button = document.createElement("button");
+        button.type = "button";
+        button.className = "cc-local-eim-tool cc-local-smdp-tool" + (primary ? " is-primary" : "");
+        button.title = titleText || labelText;
+        var icon = document.createElement("span");
+        icon.className = "cc-local-eim-tool-icon cc-local-smdp-tool-icon";
+        icon.setAttribute("aria-hidden", "true");
+        icon.textContent = iconText || ">";
+        button.appendChild(icon);
+        var label = document.createElement("span");
+        label.className = "cc-local-eim-tool-label cc-local-smdp-tool-label";
+        label.textContent = labelText;
+        button.appendChild(label);
+        button.addEventListener("click", function (event) {
+          event.preventDefault();
+          handler();
+        });
+        tools.appendChild(button);
+        toolButtons.push(button);
+        return button;
+      }
+
+      function appendSmdpKv(parent, labelText, valueText) {
+        var row = document.createElement("div");
+        row.className = "cc-local-eim-kv cc-local-smdp-kv";
+        var k = document.createElement("span");
+        k.className = "cc-local-eim-k cc-local-smdp-k";
+        k.textContent = labelText;
+        row.appendChild(k);
+        var v = document.createElement("span");
+        v.className = "cc-local-eim-v cc-local-smdp-v";
+        v.textContent = _localEimText(valueText) || "-";
+        row.appendChild(v);
+        parent.appendChild(row);
+      }
+
+      function renderEmptySmdpCard(host, titleText, messageText) {
+        host.innerHTML = "";
+        var h = document.createElement("div");
+        h.className = "cc-local-eim-card-title cc-local-smdp-card-title";
+        h.textContent = titleText;
+        host.appendChild(h);
+        var empty = document.createElement("div");
+        empty.className = "cc-local-eim-empty cc-local-smdp-empty";
+        empty.textContent = messageText;
+        host.appendChild(empty);
+      }
+
+      function renderRoleCard(host, titleText, selected, count) {
+        host.innerHTML = "";
+        var h = document.createElement("div");
+        h.className = "cc-local-eim-card-title cc-local-smdp-card-title";
+        h.textContent = titleText;
+        host.appendChild(h);
+        var body = document.createElement("div");
+        body.className = "cc-local-eim-card-body cc-local-smdp-card-body";
+        appendSmdpKv(body, "Cert", _localEimShortPath(selected && selected.certificate_path));
+        appendSmdpKv(body, "Key", _localEimShortPath(selected && selected.private_key_path));
+        appendSmdpKv(body, "Mode", selected && selected.selection_reason);
+        appendSmdpKv(body, "Count", count);
+        host.appendChild(body);
+      }
+
+      function renderInventory(data) {
+        var inventory = (data && data.inventory) || data || {};
+        var authRecords = Array.isArray(inventory.auth_records) ? inventory.auth_records : [];
+        var pbRecords = Array.isArray(inventory.pb_records) ? inventory.pb_records : [];
+        renderRoleCard(authHost, "DPauth", inventory.selected_auth || {}, authRecords.length);
+        renderRoleCard(pbHost, "DPpb", inventory.selected_pb || {}, pbRecords.length);
+      }
+
+      async function refreshInventory(renderResult) {
+        var data = await runLocalSmdpAction("scp11_local.get_certs_inventory", {
+          reader: scopedReader,
+        }, {
+          runningText: "loading certs",
+          doneText: "certs ready",
+          renderResult: renderResult !== false,
+        });
+        if (data) renderInventory(data);
+      }
+
+      localOverviewRefreshers.push(function () {
+        return refreshInventory(false);
+      });
+
+      async function importCertificate() {
+        var action = _localSmdpAction("scp11_local.import_certificate");
+        if (!action) return;
+        var field = { kind: "path", name: "certificate_path", placeholder: "DPauth or DPpb cert" };
+        var chosen = "";
+        if (typeof pickForField === "function") {
+          chosen = await pickForField(field);
+        }
+        if (!chosen) return;
+        certPath.input.value = chosen;
+        certPath.input.dispatchEvent(new Event("change", { bubbles: true }));
+        var data = await runLocalSmdpAction("scp11_local.import_certificate", {
+          certificate_path: chosen,
+          private_key_path: _localEimText(keyPath.input.value),
+          certificate_role: roleSelect.value || "DPauth",
+        }, { runningText: "importing cert" });
+        if (data) renderInventory(data.inventory || data);
+      }
+
+      addTool("↻", "Refresh", "Refresh local SM-DP+ certificate state", function () {
+        refreshInventory(true);
+      });
+      addTool("＋", "Import cert", "Choose and persist a local SM-DP+ certificate", importCertificate, true);
+      addTool("⊙", "Inventory", "Open certificate inventory", function () {
+        refreshInventory(true);
+      });
+      addTool("↓", "Load profile", "Load the selected profile to the card", function () {
+        var pathValue = _localEimText(profilePath.input.value);
+        if (!pathValue) {
+          resultHost.innerHTML = "";
+          _renderEsimFlowError(
+            "Select a profile package first.",
+            _localSmdpAction("scp11_local.load_profile")
+          );
+          return;
+        }
+        runLocalSmdpAction("scp11_local.load_profile", {
+          reader: scopedReader,
+          profile_path: pathValue,
+        }, { runningText: "loading profile" });
+      }, true);
+
+      renderEmptySmdpCard(authHost, "DPauth", "Loading...");
+      renderEmptySmdpCard(pbHost, "DPpb", "Loading...");
+      window.setTimeout(function () { refreshInventory(false); }, 0);
+      return panel;
+    }
+
+    function _buildLocalEimOverviewPanel() {
+      var panel = document.createElement("section");
+      panel.className = "cc-local-eim-overview";
+      panel.setAttribute("data-local-eim-overview", "1");
+
+      var state = {
+        queue: null,
+        certs: null,
+        nextFile: "",
+      };
+
+      var head = document.createElement("div");
+      head.className = "cc-local-eim-head";
+      var title = document.createElement("div");
+      title.className = "cc-local-eim-title";
+      title.textContent = "Local eIM";
+      head.appendChild(title);
+      var status = document.createElement("span");
+      status.className = "cc-local-eim-status";
+      status.textContent = "idle";
+      head.appendChild(status);
+      panel.appendChild(head);
+
+      var inputs = document.createElement("div");
+      inputs.className = "cc-local-eim-inputs";
+      var packagePath = _localEimPathField("Package", "path", "package JSON");
+      var certPath = _localEimPathField("Signing cert", "path", "CERT_S_EIMsign.pem");
+      var hotfolderPath = _localEimPathField("Hotfolder", "directory", "(default)");
+      inputs.appendChild(packagePath.wrap);
+      inputs.appendChild(certPath.wrap);
+      inputs.appendChild(hotfolderPath.wrap);
+      panel.appendChild(inputs);
+
+      var tools = document.createElement("div");
+      tools.className = "cc-local-eim-tools";
+      panel.appendChild(tools);
+
+      var summary = document.createElement("div");
+      summary.className = "cc-local-eim-summary";
+      var certHost = document.createElement("div");
+      certHost.className = "cc-local-eim-card cc-local-eim-card--certs";
+      var queueHost = document.createElement("div");
+      queueHost.className = "cc-local-eim-card cc-local-eim-card--queue";
+      summary.appendChild(certHost);
+      summary.appendChild(queueHost);
+      panel.appendChild(summary);
+
+      var resultHost = document.createElement("div");
+      resultHost.className = "cc-local-eim-result";
+      panel.appendChild(resultHost);
+
+      var toolButtons = [];
+      function setBusy(busy, text) {
+        panel.classList.toggle("is-busy", !!busy);
+        status.textContent = text || (busy ? "running" : "idle");
+        toolButtons.forEach(function (button) {
+          button.disabled = !!busy;
+        });
+      }
+
+      function packageInputValue() {
+        return _localEimText(packagePath.input.value) || state.nextFile || "";
+      }
+
+      function hotfolderInputValue() {
+        return _localEimText(hotfolderPath.input.value);
+      }
+
+      function certInputValue() {
+        return _localEimText(certPath.input.value);
+      }
+
+      async function runLocalEimAction(actionId, inputsMap, options) {
+        var action = _localEimAction(actionId);
+        if (!action) {
+          throw new Error(actionId + " is not registered.");
+        }
+        var opts = options || {};
+        setBusy(true, opts.runningText || "running");
+        try {
+          var data;
+          if (opts.renderResult === false) {
+            var silentInputs = Object.assign({}, inputsMap || {});
+            applyActiveReaderDefault(action, silentInputs);
+            var resp = await apiFetch("/api/actions/" + encodeURIComponent(action.id) + "/run", {
+              method: "POST",
+              body: JSON.stringify({ inputs: silentInputs }),
+            });
+            if (!resp || !resp.ok) {
+              throw new Error(resp && resp.error ? resp.error : "unknown error");
+            }
+            data = resp.data || {};
+          } else {
+            data = await _runActionInEsimFlowPane(action, inputsMap || {}, {
+              runningText: opts.runningText || "running",
+              doneText: opts.doneText || "ok",
+            });
+          }
+          resultHost.innerHTML = "";
+          if (!data) {
+            setBusy(false, "error");
+            return null;
+          }
+          setBusy(false, opts.doneText || "ok");
+          return data;
+        } catch (err) {
+          resultHost.innerHTML = "";
+          if (opts.renderResult === false) {
+            resultHost.appendChild(renderErrorBlock(String(err && err.message || err)));
+          } else {
+            _renderEsimFlowError(String(err && err.message || err), action);
+          }
+          setBusy(false, "error");
+          return null;
+        }
+      }
+
+      function addTool(iconText, labelText, titleText, handler, primary) {
+        var button = document.createElement("button");
+        button.type = "button";
+        button.className = "cc-local-eim-tool" + (primary ? " is-primary" : "");
+        button.title = titleText || labelText;
+        var icon = document.createElement("span");
+        icon.className = "cc-local-eim-tool-icon";
+        icon.setAttribute("aria-hidden", "true");
+        icon.textContent = iconText || ">";
+        button.appendChild(icon);
+        var label = document.createElement("span");
+        label.className = "cc-local-eim-tool-label";
+        label.textContent = labelText;
+        button.appendChild(label);
+        button.addEventListener("click", function (event) {
+          event.preventDefault();
+          handler();
+        });
+        tools.appendChild(button);
+        toolButtons.push(button);
+        return button;
+      }
+
+      function renderEmptyCard(host, titleText, messageText) {
+        host.innerHTML = "";
+        var h = document.createElement("div");
+        h.className = "cc-local-eim-card-title";
+        h.textContent = titleText;
+        host.appendChild(h);
+        var empty = document.createElement("div");
+        empty.className = "cc-local-eim-empty";
+        empty.textContent = messageText;
+        host.appendChild(empty);
+      }
+
+      function appendLocalEimKv(parent, labelText, valueText) {
+        var row = document.createElement("div");
+        row.className = "cc-local-eim-kv";
+        var k = document.createElement("span");
+        k.className = "cc-local-eim-k";
+        k.textContent = labelText;
+        row.appendChild(k);
+        var v = document.createElement("span");
+        v.className = "cc-local-eim-v";
+        v.textContent = _localEimText(valueText) || "-";
+        row.appendChild(v);
+        parent.appendChild(row);
+      }
+
+      function renderCertInventory(data) {
+        state.certs = data || {};
+        certHost.innerHTML = "";
+        var h = document.createElement("div");
+        h.className = "cc-local-eim-card-title";
+        h.textContent = "Signing certificate";
+        certHost.appendChild(h);
+
+        var selected = (data && data.selected) || {};
+        var selectedPath = _localEimText(selected.path);
+        var body = document.createElement("div");
+        body.className = "cc-local-eim-card-body";
+        appendLocalEimKv(body, "Selected", _localEimShortPath(selectedPath));
+        appendLocalEimKv(body, "Reason", selected.reason || "-");
+        var pkids = Array.isArray(selected.root_ci_pkids)
+          ? selected.root_ci_pkids.join(", ")
+          : "";
+        appendLocalEimKv(body, "Root CI", pkids || "-");
+        appendLocalEimKv(body, "Private key", _localEimShortPath(selected.private_key_path || ""));
+        certHost.appendChild(body);
+
+        var selectedActions = document.createElement("div");
+        selectedActions.className = "cc-local-eim-mini-actions";
+        var useSelected = document.createElement("button");
+        useSelected.type = "button";
+        useSelected.className = "cc-local-eim-mini-btn";
+        useSelected.textContent = "Use";
+        useSelected.disabled = !selectedPath;
+        useSelected.addEventListener("click", function () {
+          certPath.input.value = selectedPath;
+          certPath.input.dispatchEvent(new Event("change", { bubbles: true }));
+          status.textContent = "cert selected";
+        });
+        selectedActions.appendChild(useSelected);
+        var clearSelected = document.createElement("button");
+        clearSelected.type = "button";
+        clearSelected.className = "cc-local-eim-mini-btn";
+        clearSelected.textContent = "Auto";
+        clearSelected.addEventListener("click", function () {
+          certPath.input.value = "";
+          certPath.input.dispatchEvent(new Event("change", { bubbles: true }));
+          refreshCerts();
+        });
+        selectedActions.appendChild(clearSelected);
+        certHost.appendChild(selectedActions);
+
+        var rows = Array.isArray(data && data.rows) ? data.rows : [];
+        if (rows.length > 0) {
+          var list = document.createElement("div");
+          list.className = "cc-local-eim-cert-list";
+          rows.slice(0, 4).forEach(function (row) {
+            var item = document.createElement("button");
+            item.type = "button";
+            item.className = "cc-local-eim-cert-row";
+            item.title = _localEimText(row.path);
+            var name = document.createElement("span");
+            name.className = "cc-local-eim-cert-name";
+            name.textContent = row.subject_cn || _localEimShortPath(row.path);
+            item.appendChild(name);
+            var meta = document.createElement("span");
+            meta.className = "cc-local-eim-cert-meta";
+            meta.textContent = row.curve || row.source || "-";
+            item.appendChild(meta);
+            item.addEventListener("click", function () {
+              certPath.input.value = _localEimText(row.path);
+              certPath.input.dispatchEvent(new Event("change", { bubbles: true }));
+              refreshCerts();
+            });
+            list.appendChild(item);
+          });
+          certHost.appendChild(list);
+        }
+      }
+
+      function queueRowAction(labelText, actionId, rowPath) {
+        var button = document.createElement("button");
+        button.type = "button";
+        button.className = "cc-local-eim-row-btn";
+        button.textContent = labelText;
+        button.addEventListener("click", function () {
+          if (actionId === "eim_local.load_eim_package") {
+            runLocalEimAction(actionId, {
+              package_path: rowPath,
+              cert_path: certInputValue(),
+            }, { runningText: "loading package" });
+          } else {
+            runLocalEimAction(actionId, {
+              package_path: rowPath,
+            }, { runningText: "checking package" });
+          }
+        });
+        return button;
+      }
+
+      function renderQueue(data) {
+        state.queue = data || {};
+        state.nextFile = _localEimText(data && data.next_file);
+        queueHost.innerHTML = "";
+        var h = document.createElement("div");
+        h.className = "cc-local-eim-card-title";
+        h.textContent = "Queued packages";
+        queueHost.appendChild(h);
+
+        var body = document.createElement("div");
+        body.className = "cc-local-eim-card-body";
+        appendLocalEimKv(body, "Hotfolder", _localEimShortPath(data && data.hotfolder_dir));
+        appendLocalEimKv(body, "Count", data && data.package_count);
+        appendLocalEimKv(body, "Next", _localEimShortPath(state.nextFile));
+        appendLocalEimKv(body, "Result", data && data.eim_result_name);
+        queueHost.appendChild(body);
+
+        var rows = Array.isArray(data && data.queue_preview) ? data.queue_preview : [];
+        if (rows.length === 0) {
+          var empty = document.createElement("div");
+          empty.className = "cc-local-eim-empty";
+          empty.textContent = "Queue empty";
+          queueHost.appendChild(empty);
+          return;
+        }
+
+        var list = document.createElement("div");
+        list.className = "cc-local-eim-queue-list";
+        rows.slice(0, 6).forEach(function (row) {
+          var rowPath = _localEimText(row.path);
+          var item = document.createElement("div");
+          item.className = "cc-local-eim-queue-row";
+          var main = document.createElement("div");
+          main.className = "cc-local-eim-queue-main";
+          var name = document.createElement("span");
+          name.className = "cc-local-eim-queue-name";
+          name.textContent = _localEimText(row.name) || _localEimShortPath(rowPath);
+          main.appendChild(name);
+          var meta = document.createElement("span");
+          meta.className = "cc-local-eim-queue-meta";
+          meta.textContent = [
+            _localEimText(row.package_id),
+            _localEimText(row.eim_id),
+          ].filter(function (part) { return part.length > 0; }).join(" · ") || "-";
+          main.appendChild(meta);
+          item.appendChild(main);
+          var rowActions = document.createElement("div");
+          rowActions.className = "cc-local-eim-row-actions";
+          rowActions.appendChild(queueRowAction("Load", "eim_local.load_eim_package", rowPath));
+          rowActions.appendChild(queueRowAction("Lint", "eim_local.eim_package_lint", rowPath));
+          rowActions.appendChild(queueRowAction("Explain", "eim_local.eim_package_explain", rowPath));
+          item.appendChild(rowActions);
+          list.appendChild(item);
+        });
+        queueHost.appendChild(list);
+      }
+
+      async function refreshCerts() {
+        var data = await runLocalEimAction("eim_local.eim_certs_inventory", {
+          package_path: packageInputValue(),
+          cert_path: certInputValue(),
+        }, {
+          runningText: "loading certs",
+          doneText: "certs ready",
+          renderResult: false,
+        });
+        if (data) renderCertInventory(data);
+      }
+
+      async function refreshQueue() {
+        var data = await runLocalEimAction("eim_local.hotfolder_metadata", {
+          hotfolder_dir: hotfolderInputValue(),
+        }, {
+          runningText: "loading queue",
+          doneText: "queue ready",
+          renderResult: false,
+        });
+        if (data) renderQueue(data);
+      }
+
+      async function refreshAll() {
+        renderEmptyCard(certHost, "Signing certificate", "Loading...");
+        renderEmptyCard(queueHost, "Queued packages", "Loading...");
+        await refreshQueue();
+        await refreshCerts();
+        status.textContent = "ready";
+      }
+
+      localOverviewRefreshers.push(refreshAll);
+
+      addTool("↻", "Refresh", "Refresh certificate and queue state", refreshAll, true);
+      addTool("⊙", "Certs", "Open certificate inventory", function () {
+        refreshCerts();
+      });
+      addTool("✓", "Lint", "Lint the selected or next package", function () {
+        var pathValue = packageInputValue();
+        if (!pathValue) {
+          resultHost.innerHTML = "";
+          _renderEsimFlowError(
+            "Select a package or queue a package first.",
+            _localEimAction("eim_local.eim_package_lint")
+          );
+          return;
+        }
+        runLocalEimAction("eim_local.eim_package_lint", {
+          package_path: pathValue,
+        }, { runningText: "linting package" });
+      });
+      addTool("▣", "Explain", "Explain the selected or next package", function () {
+        var pathValue = packageInputValue();
+        if (!pathValue) {
+          resultHost.innerHTML = "";
+          _renderEsimFlowError(
+            "Select a package or queue a package first.",
+            _localEimAction("eim_local.eim_package_explain")
+          );
+          return;
+        }
+        runLocalEimAction("eim_local.eim_package_explain", {
+          package_path: pathValue,
+        }, { runningText: "explaining package" });
+      });
+      addTool("↓", "Load", "Load the selected or next package to the card", function () {
+        var pathValue = packageInputValue();
+        if (!pathValue) {
+          resultHost.innerHTML = "";
+          _renderEsimFlowError(
+            "Select a package or queue a package first.",
+            _localEimAction("eim_local.load_eim_package")
+          );
+          return;
+        }
+        runLocalEimAction("eim_local.load_eim_package", {
+          package_path: pathValue,
+          cert_path: certInputValue(),
+        }, { runningText: "loading package" });
+      }, true);
+      addTool("❐", "Queue", "Refresh queued package metadata", refreshQueue);
+      addTool("▶", "Issue next", "Issue the next queued package", async function () {
+        await runLocalEimAction("eim_local.issue_package", {
+          hotfolder_dir: hotfolderInputValue(),
+        }, { runningText: "issuing next package" });
+        refreshQueue();
+      });
+      addTool("⟳", "Poll", "Open poll campaign", function () {
+        var action = _localEimAction("eim_local.poll_campaign");
+        if (action) _openEsimActionPane(action);
+      });
+
+      renderEmptyCard(certHost, "Signing certificate", "Loading...");
+      renderEmptyCard(queueHost, "Queued packages", "Loading...");
+      window.setTimeout(refreshAll, 0);
+      return panel;
+    }
+
     // --- Main content area ---
     var grid = document.createElement("div");
     grid.className = "cc-compact-action-grid";
@@ -4694,14 +6847,56 @@
     // Dashboard body
     var dashBody = document.createElement("div");
     dashBody.className = "cc-dashboard";
-    grid.appendChild(dashBody);
+    var contentHost = grid;
+    if (useEsimSplitPane) {
+      grid.className += " cc-esim-split-grid";
+
+      contentHost = document.createElement("div");
+      contentHost.className = "cc-esim-split-pane cc-esim-left-pane";
+      grid.appendChild(contentHost);
+
+      esimFlowPane = document.createElement("aside");
+      esimFlowPane.className = "cc-esim-split-pane cc-esim-flow-pane";
+      esimFlowPane.setAttribute("aria-label", "APDU flow output");
+      var flowHead = document.createElement("div");
+      flowHead.className = "cc-esim-flow-head";
+      esimFlowTitle = document.createElement("div");
+      esimFlowTitle.className = "cc-esim-flow-title";
+      flowHead.appendChild(esimFlowTitle);
+      esimFlowStatus = document.createElement("span");
+      esimFlowStatus.className = "cc-esim-flow-status";
+      flowHead.appendChild(esimFlowStatus);
+      esimFlowPane.appendChild(flowHead);
+      esimFlowBody = document.createElement("div");
+      esimFlowBody.className = "cc-esim-flow-body";
+      esimFlowPane.appendChild(esimFlowBody);
+      grid.appendChild(esimFlowPane);
+      _renderEsimFlowPlaceholder();
+    }
+
+    function _appendCompactContent(node) {
+      contentHost.appendChild(node);
+    }
 
     // Mutation actions
     var mutationActions = actions.filter(_shouldShowInDashboard);
     if (subsystem === "eSIM Management") {
       mutationActions = actions.filter(ccShouldShowEsimManagementAction);
     } else if (subsystem === "SCP11 Local") {
-      mutationActions = actions.slice();
+      mutationActions = actions.filter(_shouldShowLocalSmdpDashboardAction);
+    } else if (subsystem === "Local eIM") {
+      mutationActions = actions.filter(_shouldShowLocalEimDashboardAction);
+    } else if (subsystem === "Offline Tools") {
+      mutationActions = actions.filter(function (action) {
+        var actionId = String(action && action.id || "");
+        return !CC_OFFLINE_TOOLS_HIDDEN_ACTIONS[actionId];
+      });
+    }
+    if (subsystem === "SCP11 Local") {
+      _appendCompactContent(_buildLocalSmdpOverviewPanel());
+    }
+    if (subsystem === "Local eIM") {
+      _appendCompactContent(_buildLocalEimOverviewPanel());
     }
     if (mutationActions.length > 0) {
       var dashActions = document.createElement("div");
@@ -4730,28 +6925,102 @@
         label.className = "cc-compact-rbtn-label";
         label.textContent = action.title || action.id;
         btn.appendChild(label);
+        if (subsystem === "Offline Tools") {
+          if (action.description) {
+            var desc = document.createElement("span");
+            desc.className = "cc-compact-rbtn-desc";
+            desc.textContent = action.description;
+            btn.appendChild(desc);
+          }
+          var meta = document.createElement("span");
+          meta.className = "cc-compact-rbtn-meta";
+          meta.appendChild(makeBadge("cc-badge " + (action.streams ? "cc-badge--stream" : "cc-badge--sync"),
+            action.streams ? "stream" : "sync"));
+          if (action.requires_card) {
+            meta.appendChild(makeBadge("cc-badge cc-badge--card", "card"));
+          }
+          meta.appendChild(makeBadge("cc-badge cc-badge--out", action.output_kind || "json"));
+          btn.appendChild(meta);
+        }
         btn.addEventListener("click", function () {
-          _ccBuildActionPopout(action);
+          if (useEsimSplitPane) {
+            _openEsimActionPane(action);
+          } else {
+            _openInlineActionPane(action);
+          }
         });
         parent.appendChild(btn);
         return btn;
       }
 
-      var actionButtonRecords = [];
+      actionButtonRecords = [];
       if (subsystem === "eSIM Management" || subsystem === "SCP11 Local") {
         dashActions.classList.add("cc-esim-action-rails");
+        var actionFlavorTabRecords = [];
+        var activeActionFlavorId = "";
+
+        function switchActionFlavor(flavorId) {
+          activeActionFlavorId = flavorId;
+          actionFlavorTabRecords.forEach(function (tabRec) {
+            var isActive = tabRec.id === flavorId;
+            tabRec.tab.classList.toggle("active", isActive);
+            tabRec.tab.setAttribute("aria-selected", String(isActive));
+            tabRec.section.hidden = !isActive;
+          });
+        }
+
         if (subsystem === "SCP11 Local") {
           dashActions.classList.add("cc-local-smdp-action-rails");
         }
         var flavorGroups = subsystem === "SCP11 Local"
           ? ccLocalSmdpActionFlavorGroups(mutationActions)
           : ccEsimActionFlavorGroups(mutationActions);
+        if (subsystem === "eSIM Management" && flavorGroups.length > 0) {
+          dashActions.classList.add("cc-esim-action-rails--tabbed");
+          var actionTabs = document.createElement("div");
+          actionTabs.className = "cc-esim-action-tabs";
+          actionTabs.setAttribute("role", "tablist");
+          actionTabs.setAttribute("aria-label", "eSIM action modes");
+          dashActions.appendChild(actionTabs);
+          activeActionFlavorId = flavorGroups[0].meta.id;
+        }
         flavorGroups.forEach(function (group) {
+          var isTabbedEsim = subsystem === "eSIM Management";
           var section = document.createElement("section");
           section.className = "cc-esim-action-section cc-esim-action-section--" + group.meta.id;
           if (subsystem === "SCP11 Local") {
             section.className += " cc-local-smdp-action-section"
               + " cc-local-smdp-action-section--" + group.meta.id;
+          } else if (isTabbedEsim) {
+            section.className += " cc-esim-action-panel";
+            section.setAttribute("role", "tabpanel");
+            section.setAttribute("data-action-flavor", group.meta.id);
+            section.hidden = group.meta.id !== activeActionFlavorId;
+            var tab = document.createElement("button");
+            tab.type = "button";
+            tab.className = "cc-esim-action-tab"
+              + (group.meta.id === activeActionFlavorId ? " active" : "");
+            tab.setAttribute("role", "tab");
+            tab.setAttribute("aria-selected", String(group.meta.id === activeActionFlavorId));
+            tab.setAttribute("data-action-flavor", group.meta.id);
+            tab.title = group.meta.hint || group.meta.label || "";
+            var tabLabel = document.createElement("span");
+            tabLabel.className = "cc-esim-action-tab-label";
+            tabLabel.textContent = group.meta.label;
+            tab.appendChild(tabLabel);
+            var tabCount = document.createElement("span");
+            tabCount.className = "cc-esim-action-tab-count";
+            tabCount.textContent = String(group.items.length);
+            tab.appendChild(tabCount);
+            tab.addEventListener("click", function () {
+              switchActionFlavor(group.meta.id);
+            });
+            actionTabs.appendChild(tab);
+            actionFlavorTabRecords.push({
+              id: group.meta.id,
+              tab: tab,
+              section: section,
+            });
           }
           var sectionHead = document.createElement("div");
           sectionHead.className = "cc-esim-action-section-head";
@@ -4784,8 +7053,12 @@
         });
         dashActions.appendChild(dashActionsInner);
       }
-      grid.appendChild(dashActions);
+      _appendCompactContent(dashActions);
     }
+    if (!useEsimSplitPane && mutationActions.length > 0) {
+      _appendCompactContent(_ensureInlineActionPane());
+    }
+    _appendCompactContent(dashBody);
 
     // --- Search filter (filters mutation buttons) ---
     var allButtons = [];
@@ -4797,8 +7070,17 @@
           + act.id + " "
           + (act.description || "")
         ).toLowerCase();
-        allButtons.push({ btn: rec.btn, haystack: haystack, section: rec.section });
+        allButtons.push({
+          btn: rec.btn,
+          haystack: haystack,
+          section: rec.section,
+          categoryId: groupedBuckets ? groupedActionCategoryId(act) : "",
+        });
       });
+    }
+    actionFilterRecords = allButtons;
+    if (groupedBuckets) {
+      applyCardFilters();
     }
 
     if (actions.length >= 8) {
@@ -4806,17 +7088,105 @@
       if (searchInput) {
         searchInput.addEventListener("input", function () {
           var q = searchInput.value.trim().toLowerCase();
+          if (groupedBuckets) {
+            applyCardFilters();
+            return;
+          }
           allButtons.forEach(function (rec) {
             rec.btn.hidden = q.length > 0 && rec.haystack.indexOf(q) === -1;
           });
-          wb.querySelectorAll(".cc-esim-action-section").forEach(function (section) {
-            var visible = section.querySelector(".cc-compact-rbtn:not([hidden])");
-            section.hidden = !visible;
-          });
+          var tabbedEsim = wb.querySelector(".cc-esim-action-rails--tabbed");
+          if (tabbedEsim) {
+            var activeStillVisible = false;
+            tabbedEsim.querySelectorAll(".cc-esim-action-panel").forEach(function (section) {
+              var hasVisible = !!section.querySelector(".cc-compact-rbtn:not([hidden])");
+              var flavorId = section.getAttribute("data-action-flavor") || "";
+              var tab = tabbedEsim.querySelector(
+                '.cc-esim-action-tab[data-action-flavor="' + cssEscape(flavorId) + '"]'
+              );
+              if (tab) tab.hidden = q.length > 0 && !hasVisible;
+              if (flavorId === activeActionFlavorId && hasVisible) {
+                activeStillVisible = true;
+              }
+            });
+            if (!activeStillVisible && q.length > 0) {
+              var firstVisibleTab = tabbedEsim.querySelector(".cc-esim-action-tab:not([hidden])");
+              if (firstVisibleTab) {
+                switchActionFlavor(firstVisibleTab.getAttribute("data-action-flavor") || "");
+              }
+            } else {
+              switchActionFlavor(activeActionFlavorId);
+            }
+          } else {
+            wb.querySelectorAll(".cc-esim-action-section").forEach(function (section) {
+              var visible = section.querySelector(".cc-compact-rbtn:not([hidden])");
+              section.hidden = !visible;
+            });
+          }
         });
       }
     }
     wb.appendChild(grid);
+
+    async function refreshEsimSurface(opts) {
+      if (!isDashboardSubsystem) return null;
+      var options = opts || {};
+      _setEsimModuleToolbarBusy(true, "refreshing");
+      try {
+        if (typeof readerBarRefresh === "function") {
+          await Promise.resolve(readerBarRefresh({ manual: !!options.manual }));
+        }
+        var resp = await refreshDashboard({ quiet: false });
+        for (var i = 0; i < localOverviewRefreshers.length; i++) {
+          await Promise.resolve(localOverviewRefreshers[i]());
+        }
+        _setEsimModuleToolbarBusy(false, "ready");
+        return resp;
+      } catch (err) {
+        _setEsimModuleToolbarBusy(false, "error");
+        logBus.emit({
+          level: "error",
+          source: subsystem,
+          message: "refresh: " + String(err && err.message || err),
+        });
+        return null;
+      }
+    }
+
+    async function resetEsimSurface() {
+      if (!isDashboardSubsystem) return;
+      var action = ccFindCatalogueActionById("scp11_live.reset_card")
+        || ccFindActionById(actions, "scp11_live.reset_card");
+      if (!action) {
+        _renderEsimFlowError("Card reset action is not registered.", null);
+        return;
+      }
+      if (!scopedReader) {
+        _renderEsimFlowError("Select a reader before resetting the card.", action);
+        return;
+      }
+      _setEsimModuleToolbarBusy(true, "resetting");
+      try {
+        var data = await _runActionInEsimFlowPane(action, {
+          reader: scopedReader,
+          confirm: true,
+        }, {
+          runningText: "resetting card",
+          doneText: "reset ok",
+        });
+        if (typeof readerBarRefresh === "function") {
+          await Promise.resolve(readerBarRefresh({ manual: true }));
+        }
+        await refreshDashboard({ quiet: true });
+        for (var i = 0; i < localOverviewRefreshers.length; i++) {
+          await Promise.resolve(localOverviewRefreshers[i]());
+        }
+        _setEsimModuleToolbarBusy(false, data ? "reset ok" : "reset error");
+      } catch (err) {
+        _setEsimModuleToolbarBusy(false, "reset error");
+        _renderEsimFlowError(String(err && err.message || err), action);
+      }
+    }
 
     // --- Auto-fetch dashboard ---
     function refreshDashboard(opts) {
@@ -4880,10 +7250,15 @@
       clearTimeout(state.rawRenderTimerId);
       state.rawRenderTimerId = null;
     }
+    if (state.timerStatusTimerId !== null) {
+      clearInterval(state.timerStatusTimerId);
+      state.timerStatusTimerId = null;
+    }
   }
 
   function renderHilWorkbench(container, actions, leaf) {
     var state = commandState.hilWorkbench;
+    hilSyncCommandCenterTraceIndicators();
     stopHilWorkbenchRuntime();
     if (!container) return;
     container.innerHTML = "";
@@ -4967,13 +7342,16 @@
       var nextPath = window.prompt("Capture path", state.capturePath || "");
       if (nextPath === null) return;
       state.capturePath = String(nextPath || "").trim();
+      state.captureSource = state.capturePath ? "explicit" : "";
       state.armed = true;
       state.startMode = "offline";
       state.autoRefresh = false;
       state.statusText = "offline pcap";
       state.selectedFrameNumber = null;
+      state.selectionFollowsTail = true;
       state.detail = "";
       state.bytes = "";
+      state.detailRanges = [];
       state.detailFrameNumber = 0;
       hilResetLiveBaseline();
       hilResetDetailScroll();
@@ -4985,13 +7363,16 @@
     }));
     moduleGroup.appendChild(hilToolbarButton("⌂", "Live", "Use the active live capture", function () {
       state.capturePath = "";
+      state.captureSource = "";
       state.armed = true;
       state.startMode = "decoded";
       state.autoRefresh = true;
       state.statusText = "live";
       state.selectedFrameNumber = null;
+      state.selectionFollowsTail = true;
       state.detail = "";
       state.bytes = "";
+      state.detailRanges = [];
       state.detailFrameNumber = 0;
       state.liveBaselinePending = true;
       hilResetDetailScroll();
@@ -5012,8 +7393,11 @@
       state.annotations = {};
       state.detail = "";
       state.bytes = "";
+      state.detailRanges = [];
       state.detailFrameNumber = 0;
       state.selectedFrameNumber = null;
+      state.selectionFollowsTail = true;
+      hilClearByteHighlight(true);
       hilResetDetailScroll();
       hilResetPacketSections();
       hilResetPacketScroll();
@@ -5025,6 +7409,16 @@
     var bridgeGroup = document.createElement("div");
     bridgeGroup.className = "cc-hil-toolbar-group cc-hil-toolbar-group--actions";
     toolbar.appendChild(bridgeGroup);
+    bridgeGroup.appendChild(hilToolbarButton(
+      state.cardBridgeLaunchInFlight ? "..." : "⇄",
+      state.cardBridgeLaunchInFlight ? "Starting bridge" : "Remote Bridge",
+      "Launch the saved Remote Bridge rig sequence",
+      function () {
+        hilLaunchCardBridgeRig(actions, container, leaf);
+      },
+      state.cardBridgeLaunchInFlight,
+      state.cardBridgeLaunchInFlight
+    ));
     actions.filter(function (action) {
       return action
         && action.id !== "hil.decode_snapshot"
@@ -5038,6 +7432,7 @@
         function () { _ccBuildActionPopout(action); }
       ));
     });
+
     wb.appendChild(toolbar);
 
     var tabs = document.createElement("div");
@@ -5060,6 +7455,7 @@
       renderHilModemShellTab(body);
     } else {
       renderHilDissectorTab(body);
+      hilStartTimerStatusTicker();
     }
     if (state.armed) {
       installHilRawTraceSubscription(body);
@@ -5077,7 +7473,7 @@
           return;
         }
         hilRefreshSnapshot({ force: false });
-      }, 1400);
+      }, 700);
     }
 
     function hilTabButton(tabId, labelText) {
@@ -5170,8 +7566,10 @@
     state.annotations = {};
     state.detail = "";
     state.bytes = "";
+    state.detailRanges = [];
     state.detailFrameNumber = 0;
     state.selectedFrameNumber = null;
+    state.selectionFollowsTail = true;
     hilResetDetailScroll();
     hilResetPacketSections();
     hilResetPacketScroll();
@@ -5206,6 +7604,7 @@
       state.liveBaselineCaptureSize = Number(data.capture_size || 0);
       state.liveBaselineCaptureMtime = Number(data.capture_mtime || 0);
       state.lastCapturePath = String(data.capture_path || state.lastCapturePath || "");
+      state.captureSource = String(data.capture_source || state.captureSource || "");
       state.statusText = maxFrame > 0
         ? "waiting for new packets"
         : "capture empty";
@@ -5285,11 +7684,14 @@
     state.armed = true;
     state.startMode = "decoded";
     state.capturePath = "";
+    state.captureSource = "";
     state.rows = [];
     state.annotations = {};
     state.detail = "";
     state.bytes = "";
+    state.detailRanges = [];
     state.detailFrameNumber = 0;
+    hilClearByteHighlight(true);
     state.rawRows = [];
     state.rawPendingRows = [];
     state.rawPendingDropCount = 0;
@@ -5298,9 +7700,11 @@
     state.rawClearedFrameNumber = 0;
     state.lastRenderedRawId = 0;
     state.refreshQueuedForce = false;
+    state.refreshQueuedSelectedFrame = null;
     state.readerName = "";
     state.readerIndex = -1;
     state.selectedFrameNumber = null;
+    state.selectionFollowsTail = true;
     state.liveBaselinePending = true;
     state.liveBaselineFrameNumber = 0;
     state.liveBaselineCaptureSize = 0;
@@ -5336,6 +7740,7 @@
       state.startMode = String(data.mode || "decoded");
       state.capturePath = "";
       state.lastCapturePath = String(data.capture_path || "");
+      state.captureSource = String(data.capture_source || state.captureSource || "");
       state.actionStatusText = data.note ? String(data.note) : "HIL session active";
       hilApplyReaderBinding(data);
       var baselineReady = await hilEstablishLiveBaseline();
@@ -5363,6 +7768,40 @@
     if (!state.armed && state.statusText === "not started") {
       return;
     }
+    if (state.startMode === "remote" || state.captureSource === "remote") {
+      state.armed = false;
+      state.rows = [];
+      state.annotations = {};
+      state.detail = "";
+      state.bytes = "";
+      state.detailRanges = [];
+      state.detailFrameNumber = 0;
+      state.rawRows = [];
+      state.rawPendingRows = [];
+      state.rawPendingDropCount = 0;
+      state.rawSnapshotSeeded = false;
+      state.rawFrameSeen = {};
+      state.rawClearedFrameNumber = 0;
+      state.lastRenderedRawId = 0;
+      state.refreshQueuedForce = false;
+      state.refreshQueuedSelectedFrame = null;
+      state.captureSize = 0;
+      state.captureMtime = 0;
+      state.captureSource = "";
+      hilClearReaderBinding();
+      state.selectedFrameNumber = null;
+      state.selectionFollowsTail = true;
+      hilResetLiveBaseline();
+      hilResetDetailScroll();
+      hilResetPacketSections();
+      state.followTail = true;
+      hilResetPacketScroll();
+      state.statusText = "detached";
+      state.actionStatusText = "Remote HIL view detached.";
+      stopHilWorkbenchRuntime();
+      renderHilWorkbench(container, actions, leaf);
+      return;
+    }
     if (!window.confirm("Stop the HIL session?")) {
       return;
     }
@@ -5386,6 +7825,7 @@
       state.annotations = {};
       state.detail = "";
       state.bytes = "";
+      state.detailRanges = [];
       state.detailFrameNumber = 0;
       state.rawRows = [];
       state.rawPendingRows = [];
@@ -5395,10 +7835,12 @@
       state.rawClearedFrameNumber = 0;
       state.lastRenderedRawId = 0;
       state.refreshQueuedForce = false;
+      state.refreshQueuedSelectedFrame = null;
       state.captureSize = 0;
       state.captureMtime = 0;
       hilClearReaderBinding();
       state.selectedFrameNumber = null;
+      state.selectionFollowsTail = true;
       hilResetLiveBaseline();
       hilResetDetailScroll();
       hilResetPacketSections();
@@ -5421,22 +7863,48 @@
     }
   }
 
+  async function hilLaunchCardBridgeRig(actions, container, leaf) {
+    var state = commandState.hilWorkbench;
+    if (state.cardBridgeLaunchInFlight) return;
+    state.cardBridgeLaunchInFlight = true;
+    state.errorText = "";
+    state.actionStatusText = "starting Remote Bridge rig";
+    renderHilWorkbench(container, actions, leaf);
+    try {
+      if (typeof cbRigStartAllFromSavedSettings !== "function") {
+        throw new Error("Remote Bridge launch helper is unavailable.");
+      }
+      var data = await cbRigStartAllFromSavedSettings();
+      var describe = typeof cbRigDescribeAction === "function"
+        ? cbRigDescribeAction
+        : function (payload, fallback) { return (payload && payload.note) || fallback || ""; };
+      if (!data || data.ok === false) {
+        var failure = describe(data, "Remote Bridge rig start failed.");
+        state.errorText = failure;
+        state.actionStatusText = failure;
+      } else {
+        state.errorText = "";
+        state.actionStatusText = describe(data, "Remote Bridge rig is active.");
+      }
+    } catch (err) {
+      var message = String((err && err.message) || err);
+      state.errorText = message;
+      state.actionStatusText = message;
+    } finally {
+      state.cardBridgeLaunchInFlight = false;
+      if (commandState.activeSubsystem === "HIL") {
+        renderHilWorkbench(container, actions, leaf);
+      }
+    }
+  }
+
   function renderHilDissectorTab(body) {
     var state = commandState.hilWorkbench;
     body.innerHTML = "";
 
     var status = document.createElement("div");
     status.className = "cc-hil-statusbar";
-    status.appendChild(hilStatusChip("session", state.armed ? state.startMode || "live" : "stopped"));
-    status.appendChild(hilStatusChip("status", state.inflight ? "refreshing" : state.statusText));
-    if (state.actionStatusText) {
-      status.appendChild(hilStatusChip("action", state.actionStatusText));
-    }
-    status.appendChild(hilStatusChip("packets", String(state.rows.length)));
-    status.appendChild(hilStatusChip("selected", state.selectedFrameNumber ? "#" + state.selectedFrameNumber : "-"));
-    var captureLabel = state.capturePath || hilCapturePathFromRows(state) || "live";
-    status.appendChild(hilStatusChip("capture", captureLabel));
-    if (state.paused) status.appendChild(hilStatusChip("paused", "yes"));
+    hilRenderStatusbar(status);
     body.appendChild(status);
 
     if (state.errorText) {
@@ -5455,8 +7923,35 @@
     var list = document.createElement("div");
     list.className = "cc-hil-packet-list";
     list.setAttribute("role", "listbox");
+    list.addEventListener("wheel", function () {
+      state.lastPacketScrollAt = Date.now();
+    }, { passive: true });
+    list.addEventListener("pointerdown", function (event) {
+      hilBeginPacketPointerInteraction(event);
+    });
+    list.addEventListener("pointerup", function () {
+      hilEndPacketPointerInteraction();
+    });
+    list.addEventListener("pointercancel", function () {
+      hilEndPacketPointerInteraction();
+    });
+    list.addEventListener("lostpointercapture", function () {
+      hilEndPacketPointerInteraction();
+    });
+    if (!state.packetPointerReleaseListenersInstalled) {
+      state.packetPointerReleaseListenersInstalled = true;
+      window.addEventListener("pointerup", function () {
+        hilEndPacketPointerInteraction();
+      }, true);
+      window.addEventListener("pointercancel", function () {
+        hilEndPacketPointerInteraction();
+      }, true);
+    }
     list.addEventListener("scroll", function () {
       hilRememberPacketScroll(list);
+      if (!state.packetScrollRestoring) {
+        hilSchedulePacketVirtualRender(list);
+      }
     });
     listPane.appendChild(list);
     renderHilPacketList(list);
@@ -5469,14 +7964,61 @@
     detailHead.textContent = state.selectedFrameNumber ? "Frame #" + state.selectedFrameNumber : "Frame";
     detailPane.appendChild(detailHead);
     detailPane.appendChild(hilDecodedBlock("Decoded", state.detail || "No decoded frame selected.", "detail"));
-    detailPane.appendChild(hilPreBlock("Bytes", state.bytes || "No byte view selected.", "bytes"));
+    detailPane.appendChild(hilBytesBlock("Bytes", state.bytes || "No byte view selected.", "bytes"));
     grid.appendChild(detailPane);
 
     body.appendChild(grid);
+    hilApplyByteHighlightClasses();
   }
 
   function hilCapturePathFromRows(state) {
     return state.lastCapturePath || "";
+  }
+
+  function hilRenderStatusbar(status) {
+    var state = commandState.hilWorkbench;
+    if (!status) return;
+    status.innerHTML = "";
+    status.appendChild(hilStatusChip("session", state.armed ? state.startMode || "live" : "stopped"));
+    status.appendChild(hilStatusChip("status", state.statusText));
+    if (state.actionStatusText) {
+      status.appendChild(hilStatusChip("action", state.actionStatusText));
+    }
+    status.appendChild(hilStatusChip("packets", String(state.rows.length)));
+    status.appendChild(hilStatusChip("selected", state.selectedFrameNumber ? "#" + state.selectedFrameNumber : "-"));
+    hilRefreshTimerAnchor();
+    hilActiveTimerStatusChips().forEach(function (chip) {
+      status.appendChild(chip);
+    });
+    if (state.captureSource) {
+      status.appendChild(hilStatusChip("source", state.captureSource));
+    }
+    var captureLabel = state.capturePath || hilCapturePathFromRows(state) || "live";
+    status.appendChild(hilStatusChip("capture", captureLabel));
+    if (state.paused) status.appendChild(hilStatusChip("paused", "yes"));
+  }
+
+  function hilRefreshTimerStatusbar() {
+    if (commandState.activeSubsystem !== "HIL") return false;
+    var state = commandState.hilWorkbench;
+    if (!state || state.activeTab !== "dissector") return false;
+    var status = document.querySelector(".cc-hil-workbench .cc-hil-statusbar");
+    if (!status) return false;
+    hilRenderStatusbar(status);
+    return true;
+  }
+
+  function hilStartTimerStatusTicker() {
+    var state = commandState.hilWorkbench;
+    if (!state || state.timerStatusTimerId !== null) return;
+    state.timerStatusTimerId = setInterval(function () {
+      if (!hilRefreshTimerStatusbar()) {
+        if (state.timerStatusTimerId !== null) {
+          clearInterval(state.timerStatusTimerId);
+          state.timerStatusTimerId = null;
+        }
+      }
+    }, 500);
   }
 
   function hilStatusChip(label, value) {
@@ -5493,6 +8035,119 @@
     return chip;
   }
 
+  function hilActiveTimerStatusChips() {
+    var timerSummary = hilActiveTimerSummary();
+    if (!timerSummary) return [];
+    return [
+      hilStatusChip("timers", String(timerSummary.count)),
+      hilStatusChip("countdown", timerSummary.text),
+    ];
+  }
+
+  function hilActiveTimerSummary() {
+    var state = commandState.hilWorkbench;
+    var ann = hilLatestTimerAnnotation();
+    if (!ann || !Array.isArray(ann.active_timers)) return null;
+    hilRefreshTimerAnchor(ann);
+    var visible = [];
+    var visibleCount = 0;
+    ann.active_timers.forEach(function (timer) {
+      var remainingSeconds = hilTimerRemainingSeconds(timer);
+      if (remainingSeconds <= 0) return;
+      visibleCount += 1;
+      if (visible.length >= 3) return;
+      var label = String(timer && timer.display_label || "").trim();
+      if (!label) label = "T" + String(parseInt(timer && timer.timer_id || 0, 10) || 0);
+      visible.push(label + " " + hilFormatDurationClock(remainingSeconds));
+    });
+    if (visibleCount === 0) return null;
+    if (visibleCount > visible.length) visible.push("+" + String(visibleCount - visible.length) + " more");
+    return {
+      count: visibleCount,
+      text: visible.join(", "),
+      annotation: ann,
+    };
+  }
+
+  function hilRefreshTimerAnchor(annotation) {
+    var state = commandState.hilWorkbench;
+    var ann = annotation || hilLatestTimerAnnotation();
+    if (!ann || !Array.isArray(ann.active_timers) || ann.active_timers.length === 0) {
+      state.timerSnapshotAppliedAt = 0;
+      state.timerSnapshotCaptureSeconds = null;
+      state.timerSnapshotSignature = "";
+      return;
+    }
+    var signature = hilTimerAnnotationSignature(ann);
+    var captureSeconds = hilTimerAnnotationCaptureSeconds(ann);
+    if (
+      state.timerSnapshotSignature !== signature
+      || state.timerSnapshotCaptureSeconds !== captureSeconds
+    ) {
+      state.timerSnapshotSignature = signature;
+      state.timerSnapshotCaptureSeconds = captureSeconds;
+      state.timerSnapshotAppliedAt = Date.now();
+    }
+  }
+
+  function hilTimerAnnotationSignature(annotation) {
+    var timers = Array.isArray(annotation && annotation.active_timers)
+      ? annotation.active_timers
+      : [];
+    return [
+      String(hilTimerAnnotationCaptureSeconds(annotation)),
+      timers.map(function (timer) {
+        return [
+          String(parseInt(timer && timer.timer_id || 0, 10) || 0),
+          String(parseInt(timer && timer.configured_seconds || 0, 10) || 0),
+          String(parseInt(timer && timer.remaining_seconds || 0, 10) || 0),
+          String(timer && timer.display_label || ""),
+        ].join(":");
+      }).join("|"),
+    ].join("/");
+  }
+
+  function hilTimerAnnotationCaptureSeconds(annotation) {
+    var value = Number(annotation && annotation.capture_time_seconds);
+    if (!isFinite(value)) return null;
+    return Math.round(value * 1000) / 1000;
+  }
+
+  function hilLatestTimerAnnotation() {
+    var state = commandState.hilWorkbench;
+    var annotations = state.annotations || {};
+    var rows = state.rows || [];
+    for (var i = rows.length - 1; i >= 0; i -= 1) {
+      var frameNumber = parseInt(rows[i] && rows[i].number || 0, 10);
+      var ann = annotations[String(frameNumber)] || null;
+      if (ann && Array.isArray(ann.active_timers) && ann.active_timers.length > 0) return ann;
+    }
+    var selected = annotations[String(state.selectedFrameNumber || "")] || null;
+    if (selected && Array.isArray(selected.active_timers) && selected.active_timers.length > 0) return selected;
+    return null;
+  }
+
+  function hilTimerRemainingSeconds(timer) {
+    var state = commandState.hilWorkbench;
+    var remainingSeconds = parseInt(timer && timer.remaining_seconds || 0, 10) || 0;
+    var liveCountdown = hilIsLiveCaptureMode(state) || state.captureSource === "remote";
+    if (!liveCountdown || !state.timerSnapshotAppliedAt) return Math.max(0, remainingSeconds);
+    var elapsedSeconds = Math.max(0, (Date.now() - Number(state.timerSnapshotAppliedAt || 0)) / 1000);
+    return Math.max(0, Math.ceil(remainingSeconds - elapsedSeconds));
+  }
+
+  function hilFormatDurationClock(totalSeconds) {
+    var normalizedSeconds = Math.max(0, parseInt(totalSeconds || 0, 10) || 0);
+    var hours = Math.floor(normalizedSeconds / 3600);
+    var minutes = Math.floor((normalizedSeconds % 3600) / 60);
+    var seconds = normalizedSeconds % 60;
+    return [
+      String(hours).padStart(2, "0"),
+      String(minutes).padStart(2, "0"),
+      String(seconds).padStart(2, "0"),
+    ].join(":");
+  }
+
   function hilPreBlock(titleText, bodyText, scrollSlot) {
     var state = commandState.hilWorkbench;
     var wrap = document.createElement("div");
@@ -5504,6 +8159,21 @@
     var pre = document.createElement("pre");
     pre.className = "cc-hil-pre";
     pre.textContent = bodyText;
+    hilInstallScrollMemory(pre, scrollSlot);
+    wrap.appendChild(pre);
+    return wrap;
+  }
+
+  function hilBytesBlock(titleText, bodyText, scrollSlot) {
+    var wrap = document.createElement("div");
+    wrap.className = "cc-hil-pre-block cc-hil-bytes-block";
+    var title = document.createElement("div");
+    title.className = "cc-hil-pre-title";
+    title.textContent = titleText;
+    wrap.appendChild(title);
+    var pre = document.createElement("pre");
+    pre.className = "cc-hil-pre cc-hil-byte-dump";
+    hilRenderByteDump(pre, bodyText);
     hilInstallScrollMemory(pre, scrollSlot);
     wrap.appendChild(pre);
     return wrap;
@@ -5538,7 +8208,10 @@
       var details = document.createElement("details");
       details.className = "cc-hil-decoded-section";
       var stateKey = hilDecodedSectionKey(section.title, index);
-      details.open = state.detailSectionOpen[stateKey] === true;
+      var hasStoredState = Object.prototype.hasOwnProperty.call(state.detailSectionOpen, stateKey);
+      details.open = hasStoredState
+        ? state.detailSectionOpen[stateKey] === true
+        : hilDecodedSectionDefaultOpen(section.title);
       details.addEventListener("toggle", function () {
         state.detailSectionOpen[stateKey] = details.open;
       });
@@ -5546,19 +8219,329 @@
       var summary = document.createElement("summary");
       summary.className = "cc-hil-decoded-summary";
       summary.textContent = section.title;
+      hilAttachRangeEvents(summary, hilFindRangeForDecodedLine(section.title));
       details.appendChild(summary);
 
-      var pre = document.createElement("pre");
-      pre.className = "cc-hil-decoded-section-body";
-      pre.textContent = section.lines.length > 0
-        ? section.lines.join("\n")
-        : "(no decoded child fields)";
-      details.appendChild(pre);
+      details.appendChild(hilDecodedSectionBody(section.lines));
       list.appendChild(details);
     });
     scroller.appendChild(list);
     wrap.appendChild(scroller);
     return wrap;
+  }
+
+  function hilDecodedSectionDefaultOpen(titleText) {
+    return String(titleText || "").trim().toUpperCase() === "GSM SIM 11.11";
+  }
+
+  function hilDecodedSectionBody(lines) {
+    var body = document.createElement("div");
+    body.className = "cc-hil-decoded-section-body";
+    var sourceLines = Array.isArray(lines) && lines.length > 0
+      ? lines
+      : ["(no decoded child fields)"];
+    sourceLines.forEach(function (line) {
+      var row = document.createElement("div");
+      row.className = "cc-hil-decoded-line";
+      var text = String(line || "");
+      row.textContent = text.length > 0 ? text : " ";
+      hilAttachRangeEvents(row, hilFindRangeForDecodedLine(text));
+      body.appendChild(row);
+    });
+    return body;
+  }
+
+  function hilRenderByteDump(pre, bodyText) {
+    var lines = String(bodyText || "").replace(/\r\n/g, "\n").split("\n");
+    var renderedAny = false;
+    lines.forEach(function (line, lineIndex) {
+      if (lineIndex > 0) pre.appendChild(document.createTextNode("\n"));
+      var rendered = hilRenderByteDumpLine(line);
+      pre.appendChild(rendered);
+      renderedAny = renderedAny || !!rendered.dataset.byteLine;
+    });
+    if (!renderedAny && pre.textContent.length === 0) {
+      pre.textContent = bodyText;
+    }
+  }
+
+  function hilRenderByteDumpLine(line) {
+    var raw = String(line || "");
+    var row = document.createElement("span");
+    row.className = "cc-hil-byte-line";
+    var match = raw.match(/^\s*([0-9A-Fa-f]{4,8})\s+(.+)$/);
+    if (!match) {
+      row.textContent = raw;
+      return row;
+    }
+    var startOffset = parseInt(match[1], 16);
+    if (!isFinite(startOffset)) {
+      row.textContent = raw;
+      return row;
+    }
+    var rest = match[2] || "";
+    var tokens = rest.trim().split(/\s+/);
+    var bytes = [];
+    for (var i = 0; i < tokens.length && bytes.length < 16; i += 1) {
+      if (!/^[0-9A-Fa-f]{2}$/.test(tokens[i])) break;
+      bytes.push(tokens[i].toUpperCase());
+    }
+    if (bytes.length === 0) {
+      row.textContent = raw;
+      return row;
+    }
+    row.dataset.byteLine = "1";
+    var offset = document.createElement("span");
+    offset.className = "cc-hil-byte-offset";
+    offset.textContent = match[1].toLowerCase();
+    row.appendChild(offset);
+    row.appendChild(document.createTextNode("  "));
+    bytes.forEach(function (byteText, index) {
+      var byteOffset = startOffset + index;
+      var span = document.createElement("span");
+      span.className = "cc-hil-byte";
+      span.dataset.offset = String(byteOffset);
+      span.textContent = byteText;
+      hilAttachByteEvents(span, byteOffset);
+      row.appendChild(span);
+      if (index < bytes.length - 1) {
+        row.appendChild(document.createTextNode(index === 7 ? "  " : " "));
+      }
+    });
+    var asciiIndex = nthIndexOfHexByte(rest, bytes.length);
+    if (asciiIndex >= 0) {
+      var asciiText = rest.slice(asciiIndex).trim();
+      if (asciiText.length > 0) {
+        row.appendChild(document.createTextNode("   " + asciiText));
+      }
+    }
+    return row;
+  }
+
+  function nthIndexOfHexByte(text, count) {
+    var re = /[0-9A-Fa-f]{2}/g;
+    var match = null;
+    var seen = 0;
+    while ((match = re.exec(String(text || ""))) !== null) {
+      seen += 1;
+      if (seen === count) return re.lastIndex;
+    }
+    return -1;
+  }
+
+  function hilAttachRangeEvents(el, range) {
+    if (!el || !range) return;
+    el.classList.add("cc-hil-decoded-range");
+    el.dataset.rangeKey = hilRangeKey(range);
+    el.dataset.rangeStart = String(range.start);
+    el.dataset.rangeEnd = String(range.end);
+    el.title = hilRangeLabel(range);
+    el.addEventListener("mouseenter", function () {
+      hilSetByteHighlight(range, false);
+    });
+    el.addEventListener("mouseleave", function () {
+      hilClearByteHighlight(false);
+    });
+    el.addEventListener("click", function (event) {
+      event.stopPropagation();
+      hilSetByteHighlight(range, true);
+    });
+  }
+
+  function hilAttachByteEvents(el, byteOffset) {
+    if (!el) return;
+    el.addEventListener("mouseenter", function () {
+      var range = hilBestRangeForByte(byteOffset);
+      if (range) {
+        hilSetByteHighlight(range, false);
+      } else {
+        hilApplyByteOffsetHighlight(byteOffset, false);
+      }
+    });
+    el.addEventListener("mouseleave", function () {
+      hilClearByteHighlight(false);
+    });
+    el.addEventListener("click", function (event) {
+      event.stopPropagation();
+      var range = hilBestRangeForByte(byteOffset);
+      if (range) {
+        hilSetByteHighlight(range, true);
+      } else {
+        hilApplyByteOffsetHighlight(byteOffset, true);
+      }
+    });
+  }
+
+  function hilSetByteHighlight(range, pinned) {
+    var state = commandState.hilWorkbench;
+    var normalized = hilNormalizeRange(range);
+    if (!normalized) return;
+    if (pinned) {
+      var pinnedKey = hilRangeKey(state.byteHighlightPinnedRange);
+      var nextKey = hilRangeKey(normalized);
+      state.byteHighlightPinnedRange = pinnedKey === nextKey ? null : normalized;
+      state.byteHighlightHoverRange = null;
+    } else {
+      state.byteHighlightHoverRange = normalized;
+    }
+    hilApplyByteHighlightClasses();
+  }
+
+  function hilClearByteHighlight(includePinned) {
+    var state = commandState.hilWorkbench;
+    state.byteHighlightHoverRange = null;
+    if (includePinned) state.byteHighlightPinnedRange = null;
+    hilApplyByteHighlightClasses();
+  }
+
+  function hilApplyByteOffsetHighlight(byteOffset, pinned) {
+    hilSetByteHighlight({
+      start: byteOffset,
+      end: byteOffset + 1,
+      size: 1,
+      label: "Byte " + byteOffset,
+      name: "frame.byte",
+    }, pinned);
+  }
+
+  function hilApplyByteHighlightClasses() {
+    var state = commandState.hilWorkbench;
+    var hoverRange = hilNormalizeRange(state.byteHighlightHoverRange);
+    var pinnedRange = hilNormalizeRange(state.byteHighlightPinnedRange);
+    var activeRange = hoverRange || pinnedRange;
+    var activeKey = hilRangeKey(activeRange);
+    var pinnedKey = hilRangeKey(pinnedRange);
+    document.querySelectorAll(".cc-hil-byte").forEach(function (el) {
+      var offset = parseInt(el.dataset.offset || "-1", 10);
+      var active = !!(activeRange && offset >= activeRange.start && offset < activeRange.end);
+      var pinned = !!(pinnedRange && offset >= pinnedRange.start && offset < pinnedRange.end);
+      el.classList.toggle("is-highlighted", active);
+      el.classList.toggle("is-pinned", pinned);
+    });
+    document.querySelectorAll(".cc-hil-decoded-range").forEach(function (el) {
+      var key = String(el.dataset.rangeKey || "");
+      el.classList.toggle("is-highlighted", !!activeKey && key === activeKey);
+      el.classList.toggle("is-pinned", !!pinnedKey && key === pinnedKey);
+    });
+  }
+
+  function hilFindRangeForDecodedLine(lineText) {
+    var state = commandState.hilWorkbench;
+    var ranges = Array.isArray(state.detailRanges) ? state.detailRanges : [];
+    if (ranges.length === 0) return null;
+    var normalizedLine = hilNormalizeHighlightText(lineText);
+    if (normalizedLine.length < 3) return null;
+    var best = null;
+    var bestScore = -1;
+    ranges.forEach(function (range) {
+      var normalized = hilNormalizeRange(range);
+      if (!normalized) return;
+      var score = hilDecodedLineRangeScore(normalizedLine, normalized);
+      if (score > bestScore || (score === bestScore && best && normalized.size < best.size)) {
+        best = normalized;
+        bestScore = score;
+      }
+    });
+    return bestScore > 0 ? best : null;
+  }
+
+  function hilDecodedLineRangeScore(normalizedLine, range) {
+    var candidates = hilRangeTextCandidates(range);
+    var best = 0;
+    candidates.forEach(function (candidate) {
+      if (candidate.length < 3) return;
+      if (normalizedLine === candidate) {
+        best = Math.max(best, 100000 - range.size);
+      } else if (normalizedLine.indexOf(candidate) >= 0) {
+        best = Math.max(best, 10000 + candidate.length - range.size);
+      } else if (candidate.indexOf(normalizedLine) >= 0 && normalizedLine.length >= 8) {
+        best = Math.max(best, 1000 + normalizedLine.length - range.size);
+      }
+    });
+    return best;
+  }
+
+  function hilBestRangeForByte(byteOffset) {
+    var state = commandState.hilWorkbench;
+    var ranges = Array.isArray(state.detailRanges) ? state.detailRanges : [];
+    var best = null;
+    ranges.forEach(function (range) {
+      var normalized = hilNormalizeRange(range);
+      if (!normalized) return;
+      if (byteOffset < normalized.start || byteOffset >= normalized.end) return;
+      if (!best || normalized.size < best.size || (
+        normalized.size === best.size && normalized.depth > best.depth
+      )) {
+        best = normalized;
+      }
+    });
+    return best;
+  }
+
+  function hilNormalizeRange(range) {
+    if (!range) return null;
+    var start = parseInt(range.start, 10);
+    var end = parseInt(range.end, 10);
+    var size = parseInt(range.size, 10);
+    if (!isFinite(start) || start < 0) return null;
+    if (!isFinite(end) || end <= start) {
+      if (!isFinite(size) || size <= 0) return null;
+      end = start + size;
+    }
+    size = end - start;
+    return {
+      start: start,
+      end: end,
+      size: size,
+      depth: parseInt(range.depth || 0, 10) || 0,
+      name: String(range.name || ""),
+      label: String(range.label || ""),
+      show: String(range.show || ""),
+      value: String(range.value || ""),
+    };
+  }
+
+  function hilRangeTextCandidates(range) {
+    var values = [
+      range.label,
+      range.name,
+      range.show,
+      range.value,
+      range.name && range.show ? range.name + ": " + range.show : "",
+    ];
+    var seen = {};
+    return values.map(hilNormalizeHighlightText).filter(function (value) {
+      if (value.length === 0 || seen[value]) return false;
+      seen[value] = true;
+      return true;
+    });
+  }
+
+  function hilNormalizeHighlightText(value) {
+    return String(value || "")
+      .replace(/\[[^\]]+\]/g, " ")
+      .replace(/[<>]/g, " ")
+      .replace(/\s+/g, " ")
+      .trim()
+      .toLowerCase();
+  }
+
+  function hilRangeKey(range) {
+    var normalized = hilNormalizeRange(range);
+    if (!normalized) return "";
+    return [
+      normalized.start,
+      normalized.end,
+      normalized.name,
+      normalized.label,
+    ].join("|");
+  }
+
+  function hilRangeLabel(range) {
+    var normalized = hilNormalizeRange(range);
+    if (!normalized) return "";
+    var label = normalized.label || normalized.name || "frame bytes";
+    return label + " [" + normalized.start + ".." + (normalized.end - 1) + "]";
   }
 
   function hilInstallScrollMemory(el, scrollSlot) {
@@ -5636,10 +8619,27 @@
   function hilResetPacketSections() {
     var state = commandState.hilWorkbench;
     state.packetSectionOpen = {};
+    state.contextTree = [];
+    hilResetTimerSnapshot();
+  }
+
+  function hilResetTimerSnapshot() {
+    var state = commandState.hilWorkbench;
+    state.timerSnapshotAppliedAt = 0;
+    state.timerSnapshotCaptureSeconds = null;
+    state.timerSnapshotSignature = "";
   }
 
   function hilResetPacketScroll() {
     var state = commandState.hilWorkbench;
+    hilCancelDeferredPacketRender();
+    hilCancelPacketVirtualRender();
+    if (state.packetPointerReleaseTimerId) {
+      clearTimeout(state.packetPointerReleaseTimerId);
+      state.packetPointerReleaseTimerId = null;
+    }
+    state.packetPointerActive = false;
+    state.packetPointerId = null;
     state.packetScrollTop = 0;
     state.packetScrollHeight = 0;
     state.packetClientHeight = 0;
@@ -5647,7 +8647,7 @@
     state.lastPacketScrollAt = 0;
   }
 
-  function hilRememberPacketScroll(list) {
+  function hilStorePacketScroll(list, markUserScroll) {
     var state = commandState.hilWorkbench;
     if (!list) return;
     var maxTop = Math.max(0, (list.scrollHeight || 0) - (list.clientHeight || 0));
@@ -5657,23 +8657,152 @@
     state.packetScrollHeight = list.scrollHeight || 0;
     state.packetClientHeight = list.clientHeight || 0;
     state.packetScrollBottomGap = bottomGap;
-    state.lastPacketScrollAt = Date.now();
-    state.followTail = bottomGap <= 24;
+    if (markUserScroll) {
+      state.lastPacketScrollAt = Date.now();
+      state.followTail = bottomGap <= 24;
+    }
   }
 
-  function hilRestorePacketScroll(list) {
+  function hilRememberPacketScroll(list) {
     var state = commandState.hilWorkbench;
-    if (!list) return;
-    var applyScroll = function () {
-      if (state.followTail) {
-        list.scrollTop = list.scrollHeight || 0;
-        hilRememberPacketScroll(list);
+    hilStorePacketScroll(list, !state.packetScrollRestoring);
+  }
+
+  function hilCancelDeferredPacketRender() {
+    var state = commandState.hilWorkbench;
+    if (state.packetRenderTimerId) {
+      clearTimeout(state.packetRenderTimerId);
+      state.packetRenderTimerId = null;
+    }
+    state.packetRenderPending = false;
+  }
+
+  function hilCancelPacketVirtualRender() {
+    var state = commandState.hilWorkbench;
+    if (state.packetVirtualRenderTimerId) {
+      clearTimeout(state.packetVirtualRenderTimerId);
+      state.packetVirtualRenderTimerId = null;
+    }
+  }
+
+  function hilPacketPointerIsActive() {
+    var state = commandState.hilWorkbench;
+    return !!state.packetPointerActive;
+  }
+
+  function hilBeginPacketPointerInteraction(event) {
+    var state = commandState.hilWorkbench;
+    if (event && event.button !== undefined && event.button !== 0) return;
+    if (state.packetPointerReleaseTimerId) {
+      clearTimeout(state.packetPointerReleaseTimerId);
+      state.packetPointerReleaseTimerId = null;
+    }
+    state.packetPointerActive = true;
+    state.packetPointerId = event && event.pointerId !== undefined ? event.pointerId : null;
+  }
+
+  function hilEndPacketPointerInteraction() {
+    var state = commandState.hilWorkbench;
+    if (!state.packetPointerActive && !state.packetPointerReleaseTimerId) return;
+    if (state.packetPointerReleaseTimerId) {
+      clearTimeout(state.packetPointerReleaseTimerId);
+    }
+    state.packetPointerReleaseTimerId = setTimeout(function () {
+      state.packetPointerReleaseTimerId = null;
+      state.packetPointerActive = false;
+      state.packetPointerId = null;
+      hilFlushDeferredPacketRender();
+    }, 0);
+  }
+
+  function hilSchedulePacketVirtualRender(list) {
+    var state = commandState.hilWorkbench;
+    if (!list || state.packetVirtualRenderTimerId) return;
+    state.packetVirtualRenderTimerId = setTimeout(function () {
+      state.packetVirtualRenderTimerId = null;
+      if (!list.isConnected) return;
+      if (hilPacketPointerIsActive()) {
+        hilSchedulePacketVirtualRender(list);
         return;
       }
-      var maxTop = Math.max(0, (list.scrollHeight || 0) - (list.clientHeight || 0));
-      var top = Math.max(0, Math.min(Number(state.packetScrollTop || 0), maxTop));
-      list.scrollTop = top;
-      hilRememberPacketScroll(list);
+      renderHilPacketList(list, { preserveExactScroll: true });
+    }, 16);
+  }
+
+  function hilPacketListIsUserActive() {
+    var state = commandState.hilWorkbench;
+    return Date.now() - Number(state.lastPacketScrollAt || 0) < 450;
+  }
+
+  function hilShouldDeferPacketRender(options) {
+    var opts = options || {};
+    var state = commandState.hilWorkbench;
+    if (opts.force) return false;
+    if (commandState.activeSubsystem !== "HIL") return false;
+    if (state.activeTab !== "dissector") return false;
+    return hilPacketPointerIsActive() || hilPacketListIsUserActive();
+  }
+
+  function hilScheduleDeferredPacketRender() {
+    var state = commandState.hilWorkbench;
+    state.packetRenderPending = true;
+    if (state.packetRenderTimerId) return;
+    state.packetRenderTimerId = setTimeout(function () {
+      state.packetRenderTimerId = null;
+      if (!state.packetRenderPending) return;
+      if (hilShouldDeferPacketRender({ force: false })) {
+        hilScheduleDeferredPacketRender();
+        return;
+      }
+      state.packetRenderPending = false;
+      hilRenderActivePaneOnly();
+    }, 450);
+  }
+
+  function hilFlushDeferredPacketRender() {
+    var state = commandState.hilWorkbench;
+    if (!state.packetRenderPending) return;
+    if (hilShouldDeferPacketRender({ force: false })) {
+      hilScheduleDeferredPacketRender();
+      return;
+    }
+    if (state.packetRenderTimerId) {
+      clearTimeout(state.packetRenderTimerId);
+      state.packetRenderTimerId = null;
+    }
+    state.packetRenderPending = false;
+    hilRenderActivePaneOnly();
+  }
+
+  function hilRestorePacketScroll(list, options) {
+    var state = commandState.hilWorkbench;
+    if (!list) return;
+    var opts = options || {};
+    var applyScroll = function () {
+      state.packetScrollRestoring = true;
+      if (opts.preserveExactScroll) {
+        var exactMaxTop = Math.max(0, (list.scrollHeight || 0) - (list.clientHeight || 0));
+        var exactTop = typeof opts.preservedTop === "number" && !isNaN(opts.preservedTop)
+          ? opts.preservedTop
+          : Number(state.packetScrollTop || 0);
+        list.scrollTop = Math.max(0, Math.min(exactTop, exactMaxTop));
+        hilStorePacketScroll(list, false);
+      } else if (state.followTail) {
+        list.scrollTop = list.scrollHeight || 0;
+        hilStorePacketScroll(list, false);
+      } else {
+        var maxTop = Math.max(0, (list.scrollHeight || 0) - (list.clientHeight || 0));
+        var top = Number(state.packetScrollTop || 0);
+        if (typeof opts.preservedTop === "number" && !isNaN(opts.preservedTop)) {
+          top = opts.preservedTop;
+        }
+        top = Math.max(0, Math.min(top, maxTop));
+        list.scrollTop = top;
+        hilStorePacketScroll(list, false);
+      }
+      setTimeout(function () {
+        state.packetScrollRestoring = false;
+      }, 0);
     };
     if (window.requestAnimationFrame) {
       window.requestAnimationFrame(applyScroll);
@@ -5709,8 +8838,21 @@
     state.liveBaselineFrameNumber = maxFrame;
   }
 
-  function renderHilPacketList(list) {
+  function hilRenderPacketListOnly(options) {
+    if (commandState.activeSubsystem !== "HIL") return false;
+    var list = document.querySelector(".cc-hil-workbench .cc-hil-packet-list");
+    if (!list) return false;
+    renderHilPacketList(list, options || {});
+    return true;
+  }
+
+  function renderHilPacketList(list, options) {
     var state = commandState.hilWorkbench;
+    var opts = options || {};
+    var preservedScrollTop = typeof opts.preservedTop === "number"
+      ? opts.preservedTop
+      : (list.childNodes.length > 0 ? Number(list.scrollTop || 0) : null);
+    var items = [];
     list.innerHTML = "";
     if (!state.rows || state.rows.length === 0) {
       var empty = document.createElement("div");
@@ -5722,222 +8864,221 @@
       return;
     }
     if (state.viewMode === "context") {
-      renderHilContextGroups(list, state.rows, state.annotations || {});
+      items = hilBuildContextPacketItems(state.rows, state.annotations || {});
     } else {
-      state.rows.forEach(function (row) {
-        list.appendChild(hilPacketRow(row, state.annotations[String(row.number)] || null));
-      });
+      items = hilBuildFlatPacketItems(state.rows, state.annotations || {});
     }
-    hilRestorePacketScroll(list);
+    if (items.length === 0) {
+      var noVisible = document.createElement("div");
+      noVisible.className = "cc-hil-empty";
+      noVisible.textContent = "No visible packets.";
+      list.appendChild(noVisible);
+      return;
+    }
+    hilRenderPacketItems(list, items, {
+      preserveExactScroll: !!opts.preserveExactScroll,
+      preservedTop: preservedScrollTop,
+    });
   }
 
-  function renderHilContextGroups(list, rows, annotations) {
-    var state = commandState.hilWorkbench;
-    var groups = hilBuildContextGroups(rows, annotations);
-    groups.forEach(function (group, index) {
-      var groupEl = document.createElement("details");
-      groupEl.className = "cc-hil-context-group";
-      var stateKey = hilPacketSectionKey(group.label, index);
-      groupEl.open = state.packetSectionOpen[stateKey] === true;
-      groupEl.addEventListener("toggle", function () {
-        state.packetSectionOpen[stateKey] = groupEl.open;
-      });
-      var title = document.createElement("summary");
-      title.className = "cc-hil-context-title";
-      title.textContent = group.label + " (" + group.rows.length + ")";
-      groupEl.appendChild(title);
-      var rowHost = document.createElement("div");
-      rowHost.className = "cc-hil-context-rows";
-      var renderGroupRows = function () {
-        rowHost.innerHTML = "";
-        if (!groupEl.open) return;
-        group.rows.forEach(function (row) {
-          rowHost.appendChild(hilPacketRow(row, annotations[String(row.number)] || null));
-        });
+  function renderHilContextTree(list, rows, annotations) {
+    hilBuildContextPacketItems(rows, annotations).forEach(function (item) {
+      list.appendChild(hilPacketRenderItem(item));
+    });
+  }
+
+  function hilBuildFlatPacketItems(rows, annotations) {
+    return (rows || []).map(function (row) {
+      return {
+        kind: "frame",
+        row: row,
+        annotation: annotations[String(row.number)] || null,
+        options: null,
       };
-      renderGroupRows();
-      groupEl.addEventListener("toggle", renderGroupRows);
-      groupEl.appendChild(rowHost);
-      list.appendChild(groupEl);
     });
   }
 
-  function hilPacketSectionKey(labelText, index) {
-    return String(index) + "|" + String(labelText || "");
-  }
-
-  function hilBuildContextGroups(rows, annotations) {
-    var groups = [];
-    var byKey = Object.create(null);
-    function push(label, row) {
-      if (!byKey[label]) {
-        byKey[label] = { label: label, rows: [] };
-        groups.push(byKey[label]);
-      }
-      byKey[label].rows.push(row);
-    }
-    (rows || []).forEach(function (row) {
-      var ann = annotations[String(row.number)] || {};
-      var session = ann.card_session_index || 1;
-      var label = "Card session " + session;
-      if (ann.card_session_iccid) label += " · ICCID " + ann.card_session_iccid;
-      if (ann.channel_poll_index) {
-        label += " · Poll " + ann.channel_poll_index;
-      } else if (ann.channel_session_id) {
-        label += " · Channel session " + ann.channel_session_id;
-      } else {
-        label += " · " + hilClassifyPacket(row, ann);
-      }
-      push(label, row);
-    });
-    return groups;
-  }
-
-  function hilClassifyPacket(row, ann) {
-    var text = hilPacketSearchText(row, ann);
-    if (hilTextHasAny(text, [
-      "TERMINAL PROFILE",
-      "TERMINAL CAPABILITY",
-      "TERMINAL RESPONSE",
-      "SET UP EVENT LIST",
-      "PROACTIVE",
-      "FETCH",
-      "ENVELOPE",
-      "OPEN CHANNEL",
-      "CLOSE CHANNEL",
-      "SEND DATA",
-      "RECEIVE DATA",
-      "POLL INTERVAL",
-      "POLLING OFF",
-      "REFRESH",
-      "STK",
-      "SIM TOOLKIT",
-    ])) return "SIM Toolkit";
-    if (hilTextHasAny(text, [
-      "VERIFY CHV",
-      "UNBLOCK CHV",
-      "CHANGE CHV",
-      "DISABLE CHV",
-      "ENABLE CHV",
-      "VERIFY PIN",
-      "UNBLOCK PIN",
-      "PIN",
-      "PUK",
-    ])) return "CHV / PIN";
-    if (hilTextHasAny(text, [
-      "ISD-R",
-      "ECASD",
-      "EUICC",
-      "ES10",
-      "ES9",
-      "EID",
-      "PROFILEINFO",
-      "PROFILE INFO",
-      "GETPROFILESINFO",
-      "BF20",
-      "BF22",
-      "BF2D",
-      "BF31",
-      "BF32",
-      "BF33",
-      "BF3C",
-      "BF43",
-      "BF55",
-      "BF56",
-    ])) return "eUICC / RSP";
-    if (hilTextHasAny(text, [
-      "SECURE CHANNEL",
-      "EXTERNAL AUTHENTICATE",
-      "INITIALIZE UPDATE",
-      "SCP03",
-      "SCP11",
-      "SCP80",
-      "GLOBALPLATFORM",
-      "INSTALL [",
-      "PUT KEY",
-      "DELETE ",
-      "LOAD ",
-      "STORE DATA",
-      "AUTHENTICATE",
-      "SECURE",
-    ])) return "GlobalPlatform / security";
-    if (hilTextHasAny(text, [
-      "MANAGE CHANNEL",
-      "LOGICAL CHANNEL",
-    ])) return "Logical channel";
-    if (hilTextHasAny(text, [
-      "FS MF/AID",
-      "FS AID",
-      "FS MF/EF",
-      "FS MF/DF",
-      "FS MF",
-      " AID ",
-      "/AID ",
-      "SELECT AID",
-      "APPLICATION ID",
-      "EF.",
-      "DF.",
-      "FID ",
-      "ICCID",
-      "EF-DIR",
-      "EF.DIR",
-      "DF TELECOM",
-      "DF GSM",
-      "DF USIM",
-      "READ BINARY",
-      "READ RECORD",
-      "UPDATE BINARY",
-      "UPDATE RECORD",
-      "GET RESPONSE",
-      "SELECT FILE",
-      "ISO/IEC 7816-4 STATUS",
-      "FILE STATUS",
-    ])) return "UICC filesystem";
-    if (hilTextHasAny(text, [
-      "ATR",
-      "RESET",
-      "POWER",
-    ])) return "Card reset / ATR";
-    if (hilTextHasAny(text, [
-      "UNKNOWN STATUS",
-      "STATUS WORD",
-      "FAIL",
-      "ERROR",
-      "WARNING",
-      " 6A",
-      " 69",
-      " 67",
-      " 63C",
-      " 62",
-    ])) return "Status / errors";
-    return "Other APDU";
-  }
-
-  function hilPacketSearchText(row, ann) {
-    return (
-      String(row && (row.annotated_info || row.info) || "") + " "
-      + String(row && row.protocol || "") + " "
-      + String(ann && ann.summary_suffix || "")
-      + " "
-      + String(ann && Array.isArray(ann.context_lines) ? ann.context_lines.join(" ") : "")
-    ).toUpperCase();
-  }
-
-  function hilTextHasAny(text, needles) {
-    var haystack = String(text || "");
-    for (var i = 0; i < needles.length; i++) {
-      if (haystack.indexOf(String(needles[i] || "")) >= 0) return true;
-    }
-    return false;
-  }
-
-  function hilPacketRow(row, annotation) {
+  function hilBuildContextPacketItems(rows, annotations) {
     var state = commandState.hilWorkbench;
+    var treeItems = Array.isArray(state.contextTree) ? state.contextTree : [];
+    var rowByFrame = Object.create(null);
+    (rows || []).forEach(function (row) {
+      var frameNumber = parseInt(row && row.number || 0, 10);
+      if (frameNumber) rowByFrame[String(frameNumber)] = row;
+    });
+    if (treeItems.length === 0) {
+      return hilBuildFlatPacketItems(rows, annotations);
+    }
+    var rendered = [];
+    var collapsedDepths = [];
+    treeItems.forEach(function (item) {
+      if (!item) return;
+      var depth = Math.max(0, parseInt(item.depth || 0, 10) || 0);
+      while (
+        collapsedDepths.length > 0
+        && depth <= collapsedDepths[collapsedDepths.length - 1]
+      ) {
+        collapsedDepths.pop();
+      }
+      if (collapsedDepths.length > 0) return;
+      if (item.kind === "frame") {
+        var frameNumber = parseInt(item.frame_number || 0, 10);
+        var row = rowByFrame[String(frameNumber)];
+        if (!row) return;
+        rendered.push({
+          kind: "frame",
+          row: row,
+          annotation: annotations[String(frameNumber)] || null,
+          options: {
+            depth: depth,
+            primary: item.primary || "",
+            secondary: item.secondary || "",
+            groupName: item.group_name || "",
+          },
+        });
+        return;
+      }
+      var open = hilContextHeaderIsOpen(item);
+      rendered.push({
+        kind: "header",
+        item: item,
+        open: open,
+      });
+      if (!open) collapsedDepths.push(depth);
+    });
+    return rendered;
+  }
+
+  function renderHilFlatContextFallback(list, rows, annotations) {
+    (rows || []).forEach(function (row) {
+      list.appendChild(hilPacketRow(row, annotations[String(row.number)] || null));
+    });
+  }
+
+  function hilRenderPacketItems(list, items, options) {
+    var state = commandState.hilWorkbench;
+    var opts = options || {};
+    var rowHeight = hilPacketVirtualRowHeight();
+    var clientHeight = Math.max(Number(list.clientHeight || 0), rowHeight * 12);
+    var targetTop = typeof opts.preservedTop === "number" && !isNaN(opts.preservedTop)
+      ? Math.max(0, opts.preservedTop)
+      : Number(state.packetScrollTop || 0);
+    if (state.followTail && !opts.preserveExactScroll) {
+      targetTop = Math.max(0, (items.length * rowHeight) - clientHeight);
+    }
+    var overscan = HIL_PACKET_VIRTUAL_OVERSCAN;
+    var visibleCount = Math.ceil(clientHeight / rowHeight) + (overscan * 2);
+    visibleCount = Math.min(hilPacketRenderLimit(), Math.max(1, visibleCount));
+    var start = Math.max(0, Math.floor(targetTop / rowHeight) - overscan);
+    var end = Math.min(items.length, start + visibleCount);
+    if (end - start < visibleCount) {
+      start = Math.max(0, end - visibleCount);
+    }
+    list.appendChild(hilPacketSpacer(start * rowHeight, "top"));
+    for (var i = start; i < end; i++) {
+      list.appendChild(hilPacketRenderItem(items[i]));
+    }
+    list.appendChild(hilPacketSpacer((items.length - end) * rowHeight, "bottom"));
+    hilRestorePacketScroll(list, {
+      preserveExactScroll: !!opts.preserveExactScroll,
+      preservedTop: targetTop,
+    });
+  }
+
+  function hilPacketRenderItem(item) {
+    if (item && item.kind === "header") {
+      return hilContextHeader(item.item, item.open);
+    }
+    return hilPacketRow(
+      item && item.row,
+      item && item.annotation || null,
+      item && item.options || null
+    );
+  }
+
+  function hilPacketSpacer(height, position) {
+    var spacer = document.createElement("div");
+    spacer.className = "cc-hil-packet-spacer cc-hil-packet-spacer--" + String(position || "");
+    spacer.setAttribute("aria-hidden", "true");
+    spacer.style.height = String(Math.max(0, Math.round(height || 0))) + "px";
+    return spacer;
+  }
+
+  function hilContextSectionKey(item) {
+    if (!item) return "context:";
+    return "context:" + String(item.key || [
+      String(item.kind || "group"),
+      String(item.depth || 0),
+      String(item.display || item.label || ""),
+    ].join("|"));
+  }
+
+  function hilContextHeaderIsOpen(item) {
+    var state = commandState.hilWorkbench;
+    return state.packetSectionOpen[hilContextSectionKey(item)] === true;
+  }
+
+  function hilToggleContextHeader(item, sourceElement) {
+    var state = commandState.hilWorkbench;
+    var list = sourceElement && sourceElement.closest
+      ? sourceElement.closest(".cc-hil-packet-list")
+      : null;
+    var preservedTop = list ? Number(list.scrollTop || 0) : null;
+    if (list) hilStorePacketScroll(list, false);
+    var key = hilContextSectionKey(item);
+    if (state.packetSectionOpen[key] === true) {
+      delete state.packetSectionOpen[key];
+    } else {
+      state.packetSectionOpen[key] = true;
+    }
+    if (list) {
+      renderHilPacketList(list, {
+        preserveExactScroll: true,
+        preservedTop: preservedTop,
+      });
+    } else {
+      hilRenderPacketListOnly({ preserveExactScroll: true });
+    }
+  }
+
+  function hilContextHeader(item, open) {
+    var depth = Math.max(0, parseInt(item && item.depth || 0, 10) || 0);
+    var header = document.createElement("button");
+    var isOpen = open !== false;
+    header.className = "cc-hil-context-title";
+    if (!isOpen) header.classList.add("is-collapsed");
+    header.type = "button";
+    header.setAttribute("aria-expanded", String(isOpen));
+    header.setAttribute("data-context-key", hilContextSectionKey(item));
+    header.style.paddingLeft = String(10 + (depth * 18)) + "px";
+    var marker = document.createElement("span");
+    marker.className = "cc-hil-context-caret";
+    marker.setAttribute("aria-hidden", "true");
+    marker.textContent = isOpen ? "▾" : "▸";
+    var label = document.createElement("span");
+    label.className = "cc-hil-context-label";
+    label.textContent = String(item && (item.display || item.label) || "");
+    header.appendChild(marker);
+    header.appendChild(label);
+    header.addEventListener("click", function () {
+      hilToggleContextHeader(item, header);
+    });
+    return header;
+  }
+
+  function hilPacketRow(row, annotation, options) {
+    var state = commandState.hilWorkbench;
+    var opts = options || {};
     var frameNumber = parseInt(row.number || 0, 10);
     var selected = state.selectedFrameNumber === frameNumber;
     var btn = document.createElement("button");
     btn.type = "button";
     btn.className = "cc-hil-packet-row" + (selected ? " is-selected" : "");
+    if (opts.depth) {
+      btn.classList.add("cc-hil-packet-row--context");
+      btn.style.paddingLeft = String(10 + (Math.max(0, parseInt(opts.depth || 0, 10) || 0) * 18)) + "px";
+    }
+    if (opts.groupName) btn.setAttribute("data-group", String(opts.groupName || ""));
     btn.setAttribute("role", "option");
     btn.setAttribute("aria-selected", String(selected));
     btn.setAttribute("data-frame", String(frameNumber));
@@ -5959,7 +9100,13 @@
 
     var info = document.createElement("span");
     info.className = "cc-hil-packet-info";
-    info.textContent = row.annotated_info || row.info || "";
+    var primaryText = String(opts.primary || "").trim();
+    var secondaryText = String(opts.secondary || "").trim();
+    if (primaryText.length > 0 && secondaryText.length > 0) {
+      info.textContent = primaryText + " · " + secondaryText;
+    } else {
+      info.textContent = primaryText || row.annotated_info || row.info || "";
+    }
     btn.appendChild(info);
 
     if (annotation && annotation.active_channel_count) {
@@ -5970,6 +9117,8 @@
     }
 
     btn.addEventListener("click", function () {
+      var list = btn.closest ? btn.closest(".cc-hil-packet-list") : null;
+      if (list) hilStorePacketScroll(list, false);
       hilSelectFrame(frameNumber);
     });
     return btn;
@@ -6025,15 +9174,50 @@
     } catch (_err) {
       stored = "";
     }
-    state.modemShellCommand = String(stored || HIL_MODEM_DEFAULT_COMMAND).trim();
+    var preferred = hilPreferredModemShellCommand();
+    if (stored === HIL_MODEM_DEFAULT_COMMAND && preferred !== HIL_MODEM_DEFAULT_COMMAND) {
+      stored = "";
+    }
+    state.modemShellCommand = String(stored || preferred).trim();
     return state.modemShellCommand;
   }
 
-  function hilSaveModemShellCommand(command) {
+  function hilPreferredModemShellCommand() {
+    var state = commandState.hilWorkbench;
+    var configured = String(state.modemShellDefaultCommand || "").trim();
+    return configured || HIL_MODEM_DEFAULT_COMMAND;
+  }
+
+  function hilSetModemShellDefaultFromCapability(capability) {
+    var state = commandState.hilWorkbench;
+    var previous = hilPreferredModemShellCommand();
+    var next = String((capability && capability.default_command) || "").trim()
+      || HIL_MODEM_DEFAULT_COMMAND;
+    state.modemShellDefaultCommand = next;
+    state.modemShellDefaultSource = String(
+      (capability && capability.default_command_source) || ""
+    ).trim();
+    state.modemShellRemoteTarget = String((capability && capability.remote_target) || "").trim();
+
+    var input = $("hil-modem-command");
+    var current = String((input && input.value) || state.modemShellCommand || "").trim();
+    if (
+      current.length === 0
+      || current === previous
+      || (current === HIL_MODEM_DEFAULT_COMMAND && next !== HIL_MODEM_DEFAULT_COMMAND)
+    ) {
+      state.modemShellCommand = next;
+      if (input) input.value = next;
+    }
+    if (input) input.placeholder = next;
+  }
+
+  function hilSaveModemShellCommand(command, options) {
+    var opts = options || {};
     var state = commandState.hilWorkbench;
     var text = String(command || "").trim();
     state.modemShellCommand = text;
-    if (!text) return;
+    if (!text || opts.persist === false) return;
     try {
       window.localStorage.setItem(HIL_MODEM_COMMAND_KEY, text);
     } catch (_err) {}
@@ -6055,7 +9239,7 @@
     commandInput.type = "text";
     commandInput.autocomplete = "off";
     commandInput.spellcheck = false;
-    commandInput.placeholder = HIL_MODEM_DEFAULT_COMMAND;
+    commandInput.placeholder = hilPreferredModemShellCommand();
     commandInput.setAttribute("aria-label", "Modem shell command");
     commandInput.value = hilGetModemShellCommand();
     commandInput.addEventListener("change", function () {
@@ -6126,6 +9310,7 @@
     try {
       var capability = await apiFetch("/api/host-shell/capabilities?scope=hil-modem");
       state.modemShellCapability = capability || null;
+      hilSetModemShellDefaultFromCapability(capability || null);
       var devices = await apiFetch("/api/host-shell/devices");
       state.modemShellDevices = (devices && Array.isArray(devices.devices))
         ? devices.devices
@@ -6182,6 +9367,8 @@
     if (start) start.disabled = running || !!capDisabled;
     if (stop) stop.disabled = !running && !state.modemShellSocket;
     if (useDevice) useDevice.disabled = !select || !select.value;
+    var input = $("hil-modem-command");
+    if (input) input.placeholder = hilPreferredModemShellCommand();
 
     if (!status) return;
     if (running) {
@@ -6309,10 +9496,12 @@
     var input = $("hil-modem-command");
     var command = String((input && input.value) || hilGetModemShellCommand()).trim();
     if (!command) {
-      command = HIL_MODEM_DEFAULT_COMMAND;
+      command = hilPreferredModemShellCommand();
       if (input) input.value = command;
     }
-    hilSaveModemShellCommand(command);
+    var generatedDefault = command === hilPreferredModemShellCommand()
+      && state.modemShellDefaultSource === "remote-card-bridge";
+    hilSaveModemShellCommand(command, { persist: !generatedDefault });
 
     var term = hilEnsureModemShellTerminal();
     if (!term) return;
@@ -6631,7 +9820,7 @@
   }
 
   function hilRawTraceLimit() {
-    return 2000;
+    return HIL_RAW_TRACE_LIMIT;
   }
 
   function hilRawPaneIsVisible() {
@@ -6758,19 +9947,18 @@
   function hilSelectFrame(frameNumber) {
     var state = commandState.hilWorkbench;
     state.selectedFrameNumber = frameNumber;
+    state.selectionFollowsTail = false;
     hilResetDetailScroll();
+    hilClearByteHighlight(true);
     var last = state.rows && state.rows.length > 0 ? state.rows[state.rows.length - 1] : null;
     state.followTail = !!(last && parseInt(last.number || 0, 10) === frameNumber);
     state.detail = "Loading decoded fields...";
     state.bytes = "Loading byte view...";
+    state.detailRanges = [];
     state.detailFrameNumber = 0;
-    var container = $("cc-actions");
-    if (container) {
-      renderCommandSubsystem("HIL", {
-        leaf: ccFindLeaf(commandState.activeLeafId || "leaf-adv-hil"),
-      });
-    }
-    hilRefreshSnapshot({ force: true });
+    hilCancelDeferredPacketRender();
+    hilRenderActivePaneOnly();
+    hilRefreshSnapshot({ force: true, selectedFrame: frameNumber });
   }
 
   async function hilRefreshSnapshot(options) {
@@ -6786,7 +9974,12 @@
       return;
     }
     if (state.inflight) {
-      if (opts.force) state.refreshQueuedForce = true;
+      if (opts.force) {
+        state.refreshQueuedForce = true;
+        if (opts.selectedFrame) {
+          state.refreshQueuedSelectedFrame = opts.selectedFrame;
+        }
+      }
       return;
     }
     if (state.paused && !opts.force) return;
@@ -6794,10 +9987,9 @@
     state.inflight = true;
     state.lastRefreshAt = Date.now();
     state.lastStableStatusText = state.statusText || "";
-    state.statusText = "refreshing";
     state.errorText = "";
     var shouldRender = false;
-    var selected = state.selectedFrameNumber;
+    var selected = opts.selectedFrame || (state.selectionFollowsTail ? "" : state.selectedFrameNumber);
     if (
       hilIsLiveCaptureMode(state)
       && selected
@@ -6816,7 +10008,10 @@
           hilIsLiveCaptureMode(state) ? Number(state.liveBaselineFrameNumber || 0) : 0
         )
       : 0;
-    var includeAnnotations = !deltaMode;
+    var includeAnnotations = state.activeTab === "dissector" || !deltaMode;
+    var contextAfterFrame = hilIsLiveCaptureMode(state)
+      ? Number(state.liveBaselineFrameNumber || 0)
+      : 0;
     try {
       var resp = await apiFetch("/api/actions/hil.decode_snapshot/run", {
         method: "POST",
@@ -6828,9 +10023,10 @@
             include_detail: includeDetail,
             include_annotations: includeAnnotations,
             after_frame: afterFrame,
+            context_after_frame: contextAfterFrame,
             known_capture_size: state.captureSize || 0,
             known_capture_mtime: state.captureMtime || 0,
-            limit: 2000,
+            limit: hilPacketFetchLimit(),
           },
         }),
       });
@@ -6848,12 +10044,19 @@
     } finally {
       state.inflight = false;
       if (commandState.activeSubsystem === "HIL" && (shouldRender || opts.force)) {
-        hilRenderActivePaneOnly();
+        if (hilShouldDeferPacketRender(opts)) {
+          hilScheduleDeferredPacketRender();
+        } else {
+          hilCancelDeferredPacketRender();
+          hilRenderActivePaneOnly();
+        }
       }
       if (state.refreshQueuedForce && commandState.activeSubsystem === "HIL") {
+        var queuedSelectedFrame = state.refreshQueuedSelectedFrame;
         state.refreshQueuedForce = false;
+        state.refreshQueuedSelectedFrame = null;
         setTimeout(function () {
-          hilRefreshSnapshot({ force: true });
+          hilRefreshSnapshot({ force: true, selectedFrame: queuedSelectedFrame || state.selectedFrameNumber });
         }, 0);
       }
     }
@@ -6874,6 +10077,7 @@
   function hilApplySnapshot(data) {
     var state = commandState.hilWorkbench;
     var previousRowsKey = hilRowsRenderKey(state.rows || []);
+    var previousContextTreeKey = hilContextTreeRenderKey(state.contextTree || []);
     var previousStatus = state.lastStableStatusText || state.statusText || "";
     var previousError = state.errorText || "";
     state.captureSize = Number(data.capture_size || state.captureSize || 0);
@@ -6881,7 +10085,7 @@
     if (data.not_modified === true) {
       state.statusText = previousStatus || "ok";
       state.errorText = "";
-      return previousError !== "";
+      return previousError !== "" || !!hilActiveTimerSummary();
     }
     var rawRows = Array.isArray(data.rows) ? data.rows : [];
     var rawAnnotations = data.annotations || {};
@@ -6891,6 +10095,8 @@
     var previousSelected = state.selectedFrameNumber;
     var previousDetail = state.detail || "";
     var previousBytes = state.bytes || "";
+    var previousDetailRanges = Array.isArray(state.detailRanges) ? state.detailRanges : [];
+    var previousDetailRangesKey = JSON.stringify(previousDetailRanges);
     var incremental = data.incremental === true;
     var nextRows = incremental
       ? hilMergePacketRows(state.rows || [], incomingRows)
@@ -6900,8 +10106,17 @@
       : incomingAnnotations;
     state.rows = nextRows;
     state.annotations = nextAnnotations;
+    if (Array.isArray(data.context_tree)) {
+      state.contextTree = hilFilterContextTreeForRows(data.context_tree, nextRows);
+    } else if (!incremental) {
+      state.contextTree = [];
+    }
+    if (data.include_annotations !== false) {
+      hilRefreshTimerAnchor();
+    }
     var rawChanged = hilAppendRawRowsFromPackets(incomingRows);
     state.lastCapturePath = data.capture_path || state.capturePath || "";
+    state.captureSource = String(data.capture_source || state.captureSource || "");
     var baseStatus = data.note ? String(data.note) : (data.ok === false ? "error" : "ok");
     if (filtered.baselineActive && incomingRows.length === 0 && data.ok !== false) {
       baseStatus = "waiting for new packets";
@@ -6918,52 +10133,68 @@
     var selectedFromData = parseInt(data.selected_frame || 0, 10);
     var selectedFromDataVisible = !!(selectedFromData && frameNumbers[selectedFromData]);
     var nextSelected = null;
-    var nextFollowTail = true;
+    var nextFollowTail = !!state.followTail;
+    var nextSelectionFollowsTail = !!state.selectionFollowsTail;
     if (nextRows.length === 0) {
       nextSelected = null;
       nextFollowTail = true;
-    } else if (previousSelected && frameNumbers[previousSelected]) {
+      nextSelectionFollowsTail = true;
+    } else if (selectedFromDataVisible && previousSelected === selectedFromData) {
+      nextSelected = selectedFromData;
+      nextSelectionFollowsTail = false;
+    } else if (!state.selectionFollowsTail && previousSelected && frameNumbers[previousSelected]) {
       nextSelected = previousSelected;
-      nextFollowTail = !!state.followTail;
+      nextSelectionFollowsTail = false;
+    } else if (state.selectionFollowsTail || !previousSelected) {
+      nextSelected = lastFrameNumber;
+      nextSelectionFollowsTail = true;
     } else if (selectedFromDataVisible) {
       nextSelected = selectedFromData;
-      nextFollowTail = previousSelected === null || selectedFromData === lastFrameNumber;
+      nextSelectionFollowsTail = false;
     } else {
       nextSelected = lastFrameNumber;
-      nextFollowTail = true;
+      nextSelectionFollowsTail = true;
     }
     var detailIncluded = data.include_detail !== false;
     if (nextRows.length === 0) {
       state.detail = "";
       state.bytes = "";
+      state.detailRanges = [];
       state.detailFrameNumber = 0;
     } else if (selectedFromDataVisible && selectedFromData === nextSelected && detailIncluded) {
       state.detail = data.detail || "";
       state.bytes = data.bytes || "";
+      state.detailRanges = Array.isArray(data.detail_ranges) ? data.detail_ranges : [];
       state.detailFrameNumber = nextSelected || 0;
     } else if (previousSelected === nextSelected) {
       state.detail = previousDetail;
       state.bytes = previousBytes;
+      state.detailRanges = previousDetailRanges;
       if (!state.detailFrameNumber && previousDetail) {
         state.detailFrameNumber = nextSelected || 0;
       }
     } else {
       state.detail = "";
       state.bytes = "";
+      state.detailRanges = [];
       state.detailFrameNumber = 0;
     }
     state.selectedFrameNumber = nextSelected;
     state.followTail = nextFollowTail;
+    state.selectionFollowsTail = nextSelectionFollowsTail;
     if (previousSelected !== nextSelected) {
       hilResetDetailScroll();
+      hilClearByteHighlight(true);
     }
     return (
       previousRowsKey !== hilRowsRenderKey(nextRows)
+      || previousContextTreeKey !== hilContextTreeRenderKey(state.contextTree || [])
       || previousStatus !== String(state.statusText || "")
       || previousError !== String(state.errorText || "")
       || previousSelected !== nextSelected
       || previousDetail !== String(state.detail || "")
       || previousBytes !== String(state.bytes || "")
+      || previousDetailRangesKey !== JSON.stringify(state.detailRanges || [])
       || rawChanged
     );
   }
@@ -6980,6 +10211,60 @@
       String(last.annotated_info || last.info || ""),
       String(last.udp_payload_hex || ""),
     ].join("|");
+  }
+
+  function hilContextTreeRenderKey(items) {
+    var list = Array.isArray(items) ? items : [];
+    if (list.length === 0) return "0";
+    return JSON.stringify(list.map(function (item) {
+      return [
+        String(item && item.kind || ""),
+        String(item && item.depth || 0),
+        String(item && item.frame_number || ""),
+        String(item && (item.display || item.label || item.primary || "") || ""),
+        String(item && item.secondary || ""),
+      ];
+    }));
+  }
+
+  function hilFilterContextTreeForRows(items, rows) {
+    var list = Array.isArray(items) ? items : [];
+    if (list.length === 0) return [];
+    var frameSet = Object.create(null);
+    (rows || []).forEach(function (row) {
+      var frameNumber = parseInt(row && row.number || 0, 10);
+      if (frameNumber) frameSet[String(frameNumber)] = true;
+    });
+    var filtered = [];
+    var headerStack = [];
+    function flushHeaders(depth) {
+      for (var i = 0; i < headerStack.length; i++) {
+        var header = headerStack[i];
+        if (!header || header.depth >= depth || header.flushed) continue;
+        filtered.push(header.item);
+        header.flushed = true;
+      }
+    }
+    list.forEach(function (item) {
+      if (!item) return;
+      var depth = Math.max(0, parseInt(item.depth || 0, 10) || 0);
+      while (headerStack.length > 0 && headerStack[headerStack.length - 1].depth >= depth) {
+        headerStack.pop();
+      }
+      if (item.kind === "frame") {
+        var frameNumber = parseInt(item.frame_number || 0, 10);
+        if (!frameNumber || !frameSet[String(frameNumber)]) return;
+        flushHeaders(depth + 1);
+        filtered.push(item);
+        return;
+      }
+      headerStack.push({
+        depth: depth,
+        item: item,
+        flushed: false,
+      });
+    });
+    return filtered;
   }
 
   function hilMergePacketRows(existingRows, incomingRows) {
@@ -6999,10 +10284,6 @@
     }
     (existingRows || []).forEach(push);
     (incomingRows || []).forEach(push);
-    var limit = hilPacketRowLimit();
-    if (merged.length > limit) {
-      merged = merged.slice(merged.length - limit);
-    }
     return merged;
   }
 
@@ -7026,8 +10307,16 @@
     return merged;
   }
 
-  function hilPacketRowLimit() {
-    return 2000;
+  function hilPacketFetchLimit() {
+    return HIL_PACKET_FETCH_LIMIT;
+  }
+
+  function hilPacketRenderLimit() {
+    return HIL_PACKET_RENDER_LIMIT;
+  }
+
+  function hilPacketVirtualRowHeight() {
+    return HIL_PACKET_VIRTUAL_ROW_HEIGHT;
   }
 
   function hilFilterLiveBaseline(data, rows, annotations) {
@@ -7121,6 +10410,7 @@
     (action.inputs || []).forEach(function (field) {
       form.appendChild(buildField(action, field));
     });
+    ccEnhanceActionForm(action, form);
     var actionsBar = document.createElement("div");
     actionsBar.className = "inline-actions cc-action-bar";
     var runBtn = document.createElement("button");
@@ -7159,6 +10449,127 @@
     span.className = cls;
     span.textContent = text;
     return span;
+  }
+
+  function ccActionFieldRow(form, fieldName) {
+    if (!form || !fieldName) return null;
+    var input = form.querySelector('[name="' + fieldName + '"]');
+    return input && input.closest ? input.closest(".cc-form-row") : null;
+  }
+
+  function ccCompactHexText(raw) {
+    return String(raw || "").replace(/0x/gi, "").replace(/[^0-9A-Fa-f]/g, "").toUpperCase();
+  }
+
+  function ccEnhanceActionForm(action, form) {
+    if (!action || !form) return;
+    if (action.id === "tool.asn1_tlv.decode") {
+      ccEnhanceAsn1TlvDecodeForm(form);
+    }
+  }
+
+  function ccEnhanceAsn1TlvDecodeForm(form) {
+    if (!form || form.classList.contains("cc-asn1-decode-form")) return;
+    form.classList.add("cc-asn1-decode-form");
+
+    var hexInput = form.querySelector('[name="hex_text"]');
+    var hexRow = ccActionFieldRow(form, "hex_text");
+    if (hexRow) {
+      hexRow.classList.add("cc-asn1-decode-row", "cc-asn1-decode-row--hex");
+    }
+    if (hexInput) {
+      hexInput.rows = Math.max(Number(hexInput.rows || 0), 5);
+      hexInput.spellcheck = false;
+      hexInput.setAttribute("autocomplete", "off");
+      hexInput.setAttribute("autocapitalize", "off");
+
+      var inputTools = document.createElement("div");
+      inputTools.className = "cc-asn1-decode-input-tools";
+
+      var formatBtn = document.createElement("button");
+      formatBtn.type = "button";
+      formatBtn.className = "btn btn-small";
+      formatBtn.textContent = "Format bytes";
+      formatBtn.title = "Group the pasted hex as space-separated bytes.";
+      inputTools.appendChild(formatBtn);
+
+      var clearBtn = document.createElement("button");
+      clearBtn.type = "button";
+      clearBtn.className = "btn btn-small";
+      clearBtn.textContent = "Clear";
+      clearBtn.title = "Clear the input hex field.";
+      inputTools.appendChild(clearBtn);
+
+      var byteCount = document.createElement("span");
+      byteCount.className = "cc-asn1-decode-byte-count";
+      inputTools.appendChild(byteCount);
+
+      function refreshByteCount() {
+        var compact = ccCompactHexText(hexInput.value);
+        var hasOddNibble = compact.length % 2 === 1;
+        byteCount.dataset.state = hasOddNibble ? "warn" : "ok";
+        if (compact.length === 0) {
+          byteCount.textContent = "0 B";
+        } else if (hasOddNibble) {
+          byteCount.textContent = Math.floor(compact.length / 2) + " B + nibble";
+        } else {
+          byteCount.textContent = (compact.length / 2) + " B";
+        }
+      }
+
+      formatBtn.addEventListener("click", function () {
+        hexInput.value = formatHexInline(ccCompactHexText(hexInput.value));
+        hexInput.dispatchEvent(new Event("input", { bubbles: true }));
+        hexInput.focus();
+      });
+      clearBtn.addEventListener("click", function () {
+        hexInput.value = "";
+        hexInput.dispatchEvent(new Event("input", { bubbles: true }));
+        hexInput.focus();
+      });
+      hexInput.addEventListener("input", refreshByteCount);
+      hexInput.addEventListener("keydown", function (event) {
+        if ((event.ctrlKey || event.metaKey) && event.key === "Enter") {
+          event.preventDefault();
+          if (form.requestSubmit) {
+            form.requestSubmit();
+          }
+        }
+      });
+      refreshByteCount();
+      if (hexRow) {
+        hexRow.appendChild(inputTools);
+      }
+    }
+
+    var schemaRows = ["schema_paths", "type_name", "codec"].map(function (name) {
+      return ccActionFieldRow(form, name);
+    }).filter(function (row) {
+      return !!row;
+    });
+    if (schemaRows.length > 0) {
+      var details = document.createElement("details");
+      details.className = "cc-asn1-schema-options";
+      var summary = document.createElement("summary");
+      summary.textContent = "Schema-aware decode";
+      details.appendChild(summary);
+      var hint = document.createElement("p");
+      hint.className = "cc-asn1-schema-hint";
+      hint.textContent = "Optional asn1tools decode. Leave closed for tag-registry TLV inspection.";
+      details.appendChild(hint);
+      var grid = document.createElement("div");
+      grid.className = "cc-asn1-schema-grid";
+      schemaRows.forEach(function (row) {
+        row.classList.add("cc-asn1-decode-row", "cc-asn1-decode-row--schema");
+        grid.appendChild(row);
+      });
+      details.appendChild(grid);
+      if (hexRow && hexRow.parentNode) {
+        hexRow.parentNode.insertBefore(details, hexRow.nextSibling);
+      } else {
+        form.insertBefore(details, form.firstChild);
+      }
+    }
   }
 
   function buildField(action, field) {
@@ -7408,8 +10819,26 @@
   async function runActionFromForm(action, form, statusEl, resultEl) {
     var inputs = collectFormValues(form);
     applyActiveReaderDefault(action, inputs);
+    var currentEsimFlowPane = resultEl && resultEl.closest
+      ? resultEl.closest(".cc-esim-flow-pane")
+      : null;
+    var currentInlineActionPane = resultEl && resultEl.closest
+      ? resultEl.closest(".cc-inline-action-pane")
+      : null;
+    function setEsimInlinePaneStatus(text) {
+      if (!currentEsimFlowPane) return;
+      var paneStatus = currentEsimFlowPane.querySelector(".cc-esim-flow-status");
+      if (paneStatus) paneStatus.textContent = text;
+    }
+    function setInlineActionPaneStatus(text) {
+      if (!currentInlineActionPane) return;
+      var paneStatus = currentInlineActionPane.querySelector(".cc-inline-action-status");
+      if (paneStatus) paneStatus.textContent = text;
+    }
     if (ccActionUsesReaderSession(action) && !ccActiveReaderName()) {
       statusEl.textContent = "select reader";
+      setEsimInlinePaneStatus("select reader");
+      setInlineActionPaneStatus("select reader");
       resultEl.innerHTML = "";
       resultEl.appendChild(renderErrorBlock(
         "Select a reader before running this eSIM action."
@@ -7419,6 +10848,8 @@
     }
     var card = findHostCard(form);
     statusEl.textContent = action.streams ? "starting…" : "running…";
+    setEsimInlinePaneStatus(action.streams ? "starting" : "running");
+    setInlineActionPaneStatus(action.streams ? "starting" : "running");
     setStatusAction("action: " + action.id);
     resultEl.innerHTML = "";
     setActionBusy(card, action, true);
@@ -7433,22 +10864,6 @@
       return;
     }
 
-    // --- popout path (compact workbench: eSIM Management, SCP11 Local,
-    //     Local eIM, Tools, HIL, SUCI, SIMCARD, …) ---------------
-    var sub = commandState && commandState.activeSubsystem;
-    var currentPopoutBody = resultEl && resultEl.closest
-      ? resultEl.closest(".cc-popout-body")
-      : null;
-    var usePopout = sub && sub !== "SCP03" && sub !== "SAIP" && !currentPopoutBody;
-    var popBody = null;
-
-    if (usePopout) {
-      var title = (action.title || action.id || "Result");
-      popBody = _ccBuildCompactPopout(title);
-      popBody.innerHTML = "";
-      popBody.appendChild(loadingEl("running " + (action.title || action.id) + "…"));
-    }
-
     try {
       var resp = await apiFetch("/api/actions/" + encodeURIComponent(action.id) + "/run", {
         method: "POST",
@@ -7456,13 +10871,10 @@
       });
       if (!resp.ok) {
         statusEl.textContent = "error";
+        setEsimInlinePaneStatus("error");
+        setInlineActionPaneStatus("error");
         var errBlock = renderErrorBlock(resp.error || "unknown error");
-        if (popBody) {
-          popBody.innerHTML = "";
-          popBody.appendChild(errBlock);
-        } else {
-          resultEl.appendChild(errBlock);
-        }
+        resultEl.appendChild(errBlock);
         logBus.emit({
           level: "error",
           source: action.id,
@@ -7471,10 +10883,9 @@
         return;
       }
       statusEl.textContent = "ok";
-      if (popBody) {
-        popBody.innerHTML = "";
-      }
-      renderActionResult(action, resp.data || {}, popBody || resultEl);
+      setEsimInlinePaneStatus("ok");
+      setInlineActionPaneStatus("ok");
+      renderActionResult(action, resp.data || {}, resultEl);
       logBus.emit({
         level: "info",
         source: action.id,
@@ -7482,13 +10893,10 @@
       });
     } catch (err) {
       statusEl.textContent = "error";
+      setEsimInlinePaneStatus("error");
+      setInlineActionPaneStatus("error");
       var catchBlock = renderErrorBlock(String(err && err.message || err));
-      if (popBody) {
-        popBody.innerHTML = "";
-        popBody.appendChild(catchBlock);
-      } else {
-        resultEl.appendChild(catchBlock);
-      }
+      resultEl.appendChild(catchBlock);
       logBus.emit({
         level: "error",
         source: action.id,
@@ -7522,83 +10930,121 @@
     log.className = "flow-log cc-log";
     resultEl.appendChild(log);
 
-    var sock = new WebSocket(url);
     var runBtn = resultEl.parentElement.querySelector(".cc-action-bar .btn");
+    var inlinePane = resultEl && resultEl.closest
+      ? resultEl.closest(".cc-esim-flow-pane")
+      : null;
+    var hiddenErrorCount = 0;
+    function setInlinePaneStatus(text) {
+      if (!inlinePane) return;
+      var paneStatus = inlinePane.querySelector(".cc-esim-flow-status");
+      if (paneStatus) paneStatus.textContent = text;
+    }
     if (runBtn) runBtn.disabled = true;
 
-    sock.onopen = function () {
-      appendLogRow(log, "info", "connected — sending start frame");
-      logBus.emit({
-        level: "info",
-        source: action.id,
-        message: "stream: connected",
-      });
-      var startPayload;
-      if (action.id === "scp11.download_profile") {
-        // legacy shape: reader/activation_code/... at top level.
-        startPayload = Object.assign({ type: "start" }, inputs);
-      } else {
-        startPayload = { type: "start", inputs: inputs };
-      }
-      sock.send(JSON.stringify(startPayload));
-      statusEl.textContent = "running";
-    };
-    sock.onmessage = function (event) {
-      try {
-        var msg = JSON.parse(event.data);
-        var level = msg.level || "info";
-        var text = msg.message || JSON.stringify(msg);
-        appendLogRow(log, level, text);
-        logBus.emit({
-          level: level,
-          source: action.id,
-          message: text,
-          data: msg,
-        });
-        if (level === "done") {
-          statusEl.textContent = "done";
-          if (msg.report) {
-            resultEl.appendChild(renderReportSummary(msg.report));
-          }
-        } else if (level === "error") {
-          statusEl.textContent = "error";
-        }
-      } catch (_err) {
-        appendLogRow(log, "info", String(event.data));
+    ccRefreshGlobalDebugFlag().then(function () {
+      startStreamingSocket();
+    });
+
+    function startStreamingSocket() {
+      var sock = new WebSocket(url);
+
+      sock.onopen = function () {
+        appendLogRow(log, "info", "connected — sending start frame");
         logBus.emit({
           level: "info",
           source: action.id,
-          message: String(event.data),
+          message: "stream: connected",
         });
-      }
-    };
-    sock.onclose = function () {
-      if (runBtn) runBtn.disabled = false;
-      setActionBusy(card, action, false);
-      appendLogRow(log, "info", "socket closed");
-      logBus.emit({
-        level: "info",
-        source: action.id,
-        message: "stream: closed",
-      });
-      // Detach handlers so the browser can free the buffered frames
-      // and closure chain right away. Long dogfooding sessions
-      // (several hundred action runs) used to hold a multi-MB chain
-      // of dead sockets here.
-      sock.onmessage = null;
-      sock.onopen = null;
-      sock.onerror = null;
-      sock.onclose = null;
-    };
-    sock.onerror = function () {
-      statusEl.textContent = "socket error";
-      setActionBusy(card, action, false);
-      logBus.emit({
-        level: "error",
-        source: action.id,
-        message: "stream: socket error",
-      });
-    };
+        var startPayload;
+        if (action.id === "scp11.download_profile") {
+          // legacy shape: reader/activation_code/... at top level.
+          startPayload = Object.assign({ type: "start" }, inputs);
+        } else {
+          startPayload = { type: "start", inputs: inputs };
+        }
+        sock.send(JSON.stringify(startPayload));
+        statusEl.textContent = "running";
+        setInlinePaneStatus("running");
+      };
+      sock.onmessage = function (event) {
+        try {
+          var msg = JSON.parse(event.data);
+          var level = msg.level || "info";
+          var text = msg.message || JSON.stringify(msg);
+          var showFrame = ccShouldShowStreamFrame(level);
+          if (showFrame) {
+            appendLogRow(log, level, text);
+            logBus.emit({
+              level: level,
+              source: action.id,
+              message: text,
+              data: msg,
+            });
+          } else {
+            hiddenErrorCount += 1;
+          }
+          if (level === "done") {
+            statusEl.textContent = "done";
+            setInlinePaneStatus("done");
+            if (msg.report) {
+              resultEl.appendChild(renderReportSummary(msg.report));
+            }
+          } else if (level === "error") {
+            if (showFrame) {
+              statusEl.textContent = "error";
+              setInlinePaneStatus("error");
+            }
+          }
+        } catch (_err) {
+          appendLogRow(log, "info", String(event.data));
+          logBus.emit({
+            level: "info",
+            source: action.id,
+            message: String(event.data),
+          });
+        }
+      };
+      sock.onclose = function () {
+        if (runBtn) runBtn.disabled = false;
+        setActionBusy(card, action, false);
+        if (hiddenErrorCount > 0 && statusEl.textContent !== "done") {
+          appendLogRow(log, "warn", "Flow stopped before completion. Enable debug for details.");
+          logBus.emit({
+            level: "warn",
+            source: action.id,
+            message: "stream: hidden error details; enable debug for APDU diagnostics",
+          });
+        }
+        appendLogRow(log, "info", "socket closed");
+        if (statusEl.textContent !== "done" && statusEl.textContent !== "error") {
+          setInlinePaneStatus("closed");
+        }
+        logBus.emit({
+          level: "info",
+          source: action.id,
+          message: "stream: closed",
+        });
+        // Detach handlers so the browser can free the buffered frames
+        // and closure chain right away. Long dogfooding sessions
+        // (several hundred action runs) used to hold a multi-MB chain
+        // of dead sockets here.
+        sock.onmessage = null;
+        sock.onopen = null;
+        sock.onerror = null;
+        sock.onclose = null;
+      };
+      sock.onerror = function () {
+        statusEl.textContent = "socket error";
+        setInlinePaneStatus("socket error");
+        setActionBusy(card, action, false);
+        logBus.emit({
+          level: "error",
+          source: action.id,
+          message: "stream: socket error",
+        });
+      };
+    }
   }
 
   function renderReportSummary(report) {
@@ -7806,6 +11252,267 @@
     container.appendChild(sheet);
   }
 
+  function asn1TlvItemsToNodes(items) {
+    if (!Array.isArray(items)) return [];
+    return items.map(function (item) {
+      var node = {
+        tag_hex: String(item && item.tag || "").toUpperCase(),
+        length: Number(item && item.length || 0),
+      };
+      if (item && item.name) {
+        node.label = String(item.name);
+      }
+      var children = asn1TlvItemsToNodes(item && item.items);
+      if (children.length > 0) {
+        node.children = children;
+      } else if (item && typeof item.raw === "string") {
+        node.value_hex = item.raw;
+      }
+      return node;
+    });
+  }
+
+  function ccCopyPlainText(text, button) {
+    var value = String(text || "");
+    if (typeof copyTextToClipboard === "function") {
+      copyTextToClipboard(value);
+    } else if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(value).catch(function () {});
+    }
+    if (button) {
+      button.classList.add("is-copied");
+      setTimeout(function () { button.classList.remove("is-copied"); }, 700);
+    }
+  }
+
+  function renderAsn1TlvDecodeResult(data, container) {
+    if (!data || typeof data !== "object") {
+      container.appendChild(renderDecodedBlock(data, null, { omitHead: true }));
+      return;
+    }
+
+    var sheet = document.createElement("div");
+    sheet.className = "cc-action-datasheet cc-asn1-decode-result";
+    var itemCount = Array.isArray(data.items) ? data.items.length : 0;
+    var metaRows = [
+      { label: "Format", value: data.format || "BER/DER TLV" },
+      { label: "Input", value: String(data.byteCount || 0) + " B" },
+      { label: "Status", value: data.complete ? "complete" : "incomplete" },
+      { label: "Top-level", value: String(itemCount) },
+    ];
+    if (data.schemaDecode) {
+      metaRows.push({ label: "Schema", value: "decoded" });
+    }
+    scp03DatasheetAppendMetaKvl(sheet, metaRows);
+
+    var notationText = String(data.asn1Notation || "").trim();
+    if (notationText.length > 0) {
+      var notationMain = scp03DatasheetWrapMain();
+      notationMain.classList.add("cc-asn1-notation-panel");
+      var notationHead = document.createElement("div");
+      notationHead.className = "cc-action-datasheet-main-head cc-action-datasheet-main-head--split";
+      var notationTitle = document.createElement("span");
+      notationTitle.className = "cc-action-datasheet-main-title";
+      notationTitle.textContent = "ASN.1 notation";
+      notationHead.appendChild(notationTitle);
+      var copyNotation = document.createElement("button");
+      copyNotation.type = "button";
+      copyNotation.className = "cc-decoded-tools-btn";
+      copyNotation.textContent = "Copy";
+      copyNotation.title = "Copy the ASN.1-like notation.";
+      copyNotation.addEventListener("click", function () {
+        ccCopyPlainText(notationText, copyNotation);
+      });
+      notationHead.appendChild(copyNotation);
+      notationMain.appendChild(notationHead);
+      var notationPre = document.createElement("pre");
+      notationPre.className = "cc-asn1-notation";
+      notationPre.textContent = notationText;
+      notationMain.appendChild(notationPre);
+      sheet.appendChild(notationMain);
+    }
+
+    var nodes = asn1TlvItemsToNodes(data.items);
+    if (nodes.length > 0) {
+      var treeMain = scp03DatasheetWrapMain();
+      treeMain.classList.add("cc-asn1-tlv-panel");
+      var treeHead = document.createElement("div");
+      treeHead.className = "cc-action-datasheet-main-head cc-action-datasheet-main-head--split";
+      var treeTitle = document.createElement("span");
+      treeTitle.className = "cc-action-datasheet-main-title";
+      treeTitle.textContent = "Decoded TLV tree";
+      treeHead.appendChild(treeTitle);
+      var treeSub = document.createElement("span");
+      treeSub.className = "cc-action-datasheet-main-sub";
+      treeSub.textContent = formatHexInline(String(data.inputHex || ""));
+      treeHead.appendChild(treeSub);
+      treeMain.appendChild(treeHead);
+      var treeWrap = document.createElement("div");
+      treeWrap.className = "cc-tlv-tree cc-asn1-tlv-tree";
+      treeWrap.appendChild(renderTlvNodes(nodes, 0));
+      treeMain.appendChild(treeWrap);
+      sheet.appendChild(treeMain);
+    }
+
+    if (data.schemaDecode) {
+      var schemaMain = scp03DatasheetWrapMain();
+      var schemaHead = document.createElement("div");
+      schemaHead.className = "cc-action-datasheet-main-head";
+      schemaHead.textContent = "Schema decode";
+      schemaMain.appendChild(schemaHead);
+      var schemaBody = document.createElement("div");
+      schemaBody.className = "cc-action-tree";
+      schemaBody.appendChild(renderPrettyValue(data.schemaDecode, 0));
+      schemaMain.appendChild(schemaBody);
+      sheet.appendChild(schemaMain);
+    }
+
+    var rawDetails = document.createElement("details");
+    rawDetails.className = "cc-action-datasheet-raw cc-details cc-asn1-raw-json";
+    var rawSummary = document.createElement("summary");
+    rawSummary.textContent = "Raw JSON";
+    rawDetails.appendChild(rawSummary);
+    var rawToolbar = document.createElement("div");
+    rawToolbar.className = "cc-asn1-raw-toolbar";
+    var copyJson = document.createElement("button");
+    copyJson.type = "button";
+    copyJson.className = "cc-decoded-tools-btn";
+    copyJson.textContent = "Copy JSON";
+    copyJson.addEventListener("click", function () {
+      ccCopyPlainText(JSON.stringify(data, null, 2), copyJson);
+    });
+    rawToolbar.appendChild(copyJson);
+    rawDetails.appendChild(rawToolbar);
+    var rawPre = document.createElement("pre");
+    rawPre.className = "cc-json";
+    rawPre.textContent = JSON.stringify(data, null, 2);
+    rawDetails.appendChild(rawPre);
+    sheet.appendChild(rawDetails);
+
+    container.appendChild(sheet);
+  }
+
+  function renderSimaResponseResult(data, container) {
+    if (!data || typeof data !== "object") {
+      container.appendChild(renderDecodedBlock(data, null, { omitHead: true }));
+      return;
+    }
+    var semantic = data.semantic && typeof data.semantic === "object"
+      ? data.semantic
+      : {};
+    var metaRows = [
+      { label: "Format", value: data.format || "SIMa response" },
+      { label: "Input", value: String(data.input_length || 0) + " B" },
+      { label: "Status", value: data.complete ? "complete" : "incomplete" },
+    ];
+    if (semantic.choice) {
+      metaRows.push({ label: "Result", value: String(semantic.choice) });
+    }
+    if (semantic.result_code !== undefined) {
+      metaRows.push({ label: "Code", value: String(semantic.result_code) });
+    }
+    if (semantic.result_detail !== undefined) {
+      metaRows.push({ label: "Detail", value: String(semantic.result_detail) });
+    }
+
+    var sheet = document.createElement("div");
+    sheet.className = "cc-action-datasheet cc-sima-response-result";
+    scp03DatasheetAppendMetaKvl(sheet, metaRows);
+
+    var summaryMain = scp03DatasheetWrapMain();
+    var summaryHead = document.createElement("div");
+    summaryHead.className = "cc-action-datasheet-main-head cc-action-datasheet-main-head--split";
+    var summaryTitle = document.createElement("span");
+    summaryTitle.className = "cc-action-datasheet-main-title";
+    summaryTitle.textContent = "SIMa final result";
+    summaryHead.appendChild(summaryTitle);
+    if (data.summary) {
+      var summarySub = document.createElement("span");
+      summarySub.className = "cc-action-datasheet-main-sub";
+      summarySub.textContent = data.summary;
+      summaryHead.appendChild(summarySub);
+    }
+    summaryMain.appendChild(summaryHead);
+
+    var summaryBody = document.createElement("div");
+    summaryBody.className = "cc-sima-summary";
+    var resultChip = document.createElement("span");
+    resultChip.className = "cc-sima-result-chip";
+    if (semantic.choice === "successResult") {
+      resultChip.classList.add("cc-sima-result-chip--success");
+    } else if (semantic.choice === "failureResult") {
+      resultChip.classList.add("cc-sima-result-chip--failure");
+    }
+    resultChip.textContent = semantic.choice || "unknown result";
+    summaryBody.appendChild(resultChip);
+    if (semantic.result_code !== undefined) {
+      var code = document.createElement("code");
+      code.className = "cc-sima-code";
+      code.textContent = "resultCode=" + semantic.result_code;
+      summaryBody.appendChild(code);
+    }
+    if (semantic.result_detail !== undefined) {
+      var detail = document.createElement("code");
+      detail.className = "cc-sima-code";
+      detail.textContent = "resultDetail=" + semantic.result_detail;
+      summaryBody.appendChild(detail);
+    }
+    if (!semantic.choice && data.error) {
+      var error = document.createElement("span");
+      error.className = "cc-error-block";
+      error.textContent = data.error;
+      summaryBody.appendChild(error);
+    }
+    summaryMain.appendChild(summaryBody);
+    sheet.appendChild(summaryMain);
+
+    if (Array.isArray(data.nodes) && data.nodes.length > 0) {
+      var treeMain = scp03DatasheetWrapMain();
+      var treeHead = document.createElement("div");
+      treeHead.className = "cc-action-datasheet-main-head cc-action-datasheet-main-head--split";
+      var treeTitle = document.createElement("span");
+      treeTitle.className = "cc-action-datasheet-main-title";
+      treeTitle.textContent = "SIMa TLV tree";
+      treeHead.appendChild(treeTitle);
+      var treeSub = document.createElement("span");
+      treeSub.className = "cc-action-datasheet-main-sub";
+      treeSub.textContent = formatHexInline(String(data.input_hex || ""));
+      treeHead.appendChild(treeSub);
+      treeMain.appendChild(treeHead);
+      var treeWrap = document.createElement("div");
+      treeWrap.className = "cc-tlv-tree cc-sima-tlv-tree";
+      treeWrap.appendChild(renderTlvNodes(data.nodes, 0));
+      treeMain.appendChild(treeWrap);
+      sheet.appendChild(treeMain);
+    }
+
+    if (data.formatted) {
+      var formattedDetails = document.createElement("details");
+      formattedDetails.className = "cc-action-datasheet-raw cc-details cc-sima-formatted";
+      var formattedSummary = document.createElement("summary");
+      formattedSummary.textContent = "One-line format";
+      formattedDetails.appendChild(formattedSummary);
+      var formattedPre = document.createElement("pre");
+      formattedPre.className = "cc-json";
+      formattedPre.textContent = String(data.formatted);
+      formattedDetails.appendChild(formattedPre);
+      sheet.appendChild(formattedDetails);
+    }
+
+    var rawDetails = document.createElement("details");
+    rawDetails.className = "cc-action-datasheet-raw cc-details cc-sima-raw-json";
+    var rawSummary = document.createElement("summary");
+    rawSummary.textContent = "Raw JSON";
+    rawDetails.appendChild(rawSummary);
+    var rawPre = document.createElement("pre");
+    rawPre.className = "cc-json";
+    rawPre.textContent = JSON.stringify(data, null, 2);
+    rawDetails.appendChild(rawPre);
+    sheet.appendChild(rawDetails);
+
+    container.appendChild(sheet);
+  }
+
   function renderActionResult(action, data, container) {
     pipeApduSignals(action, data);
     var kind = action.output_kind || "json";
@@ -7823,6 +11530,12 @@
     }
     if (kind === "key_value_lines") {
       return renderKeyValueLinesResult(data, container);
+    }
+    if (kind === "asn1_tlv") {
+      return renderAsn1TlvDecodeResult(data, container);
+    }
+    if (kind === "sima_response") {
+      return renderSimaResponseResult(data, container);
     }
     if (ccActionResultPrefersTree(action, kind, data)) {
       renderStructuredActionTreeResult(action, data, container);
@@ -8273,6 +11986,9 @@
 
       var tagUpper = (typeof node.tag_hex === "string") ? node.tag_hex.toUpperCase() : "";
       var label = tlvLookupLabel(tagUpper, parentTagHex || "");
+      if (!label && node.label) {
+        label = String(node.label);
+      }
 
       if (label) {
         var labelEl = document.createElement("span");
@@ -16643,9 +20359,14 @@
   // input element after ``scp03ShowFsUpdateBinary`` paints because
   // the popout builder is async-ish (DOM append happens in the same
   // tick but we want belt + braces).
-  function scp03StageOpenUpdateBinary(tab, stagedHex) {
+  function scp03StageOpenUpdateBinary(tab, stagedHex, pathText) {
     if (typeof scp03ShowFsUpdateBinary !== "function") return;
     Promise.resolve(scp03ShowFsUpdateBinary(tab)).then(function () {
+      var pathInput = document.getElementById("cc-fs-wiz-path");
+      if (pathInput && pathText) {
+        pathInput.value = String(pathText);
+        pathInput.dispatchEvent(new Event("input", { bubbles: true }));
+      }
       // The wizard's data textarea is keyed by ``cc-fs-wiz-hex_data``.
       var hexInput = document.getElementById("cc-fs-wiz-hex_data");
       if (hexInput) {
@@ -18252,7 +21973,7 @@
     var active = saipActivePackage();
     if (active && active.sourcePath) defaultPath = active.sourcePath;
     var fileTypes = [
-      "SAIP profile (*.der;*.json;*.hex;*.txt)",
+      "SAIP profile/template (*.der;*.json;*.hex;*.txt;*.varder;*.asn;*.asn1)",
       "All files (*.*)",
     ];
     var chosen = "";
@@ -21362,19 +25083,30 @@
       var card = saipBuildPeCard(row, pkg, dirtySet, peWorstSev);
       saipWirePeCardDragDrop(card, row, pkg, list, peList, detail, validation);
       card.addEventListener("click", function () {
-        var selectedIndex = row.index;
-        pkg.selectedPeIndex = selectedIndex;
-        pkg.activeTopTab = "profile_elements";
-        saipMarkSelectedPeCard(list, selectedIndex);
-        renderSaipDetail(detail, pkg, peList, validation);
-        saipLoadShowPe(pkg, selectedIndex).then(function () {
-          if (pkg.selectedPeIndex !== selectedIndex) return;
-          renderSaipDetail(detail, pkg, peList, validation);
-        });
+        saipSelectPeRow(row, pkg, list, peList, detail, validation);
+      });
+      card.addEventListener("contextmenu", function (event) {
+        event.preventDefault();
+        event.stopPropagation();
+        saipSelectPeRow(row, pkg, list, peList, detail, validation);
+        saipShowPeContextMenu(row, pkg, peList, detail, validation, event.clientX, event.clientY);
       });
       list.appendChild(card);
     });
     scroll.appendChild(list);
+  }
+
+  function saipSelectPeRow(row, pkg, list, peList, detail, validation) {
+    var selectedIndex = Number(row && row.index);
+    if (!Number.isFinite(selectedIndex)) return;
+    pkg.selectedPeIndex = selectedIndex;
+    pkg.activeTopTab = "profile_elements";
+    saipMarkSelectedPeCard(list, selectedIndex);
+    renderSaipDetail(detail, pkg, peList, validation);
+    saipLoadShowPe(pkg, selectedIndex).then(function () {
+      if (pkg.selectedPeIndex !== selectedIndex) return;
+      renderSaipDetail(detail, pkg, peList, validation);
+    });
   }
 
   function saipMarkSelectedPeCard(list, selectedIndex) {
@@ -21384,6 +25116,165 @@
       el.classList.toggle("is-active", isActive);
       el.setAttribute("aria-selected", isActive ? "true" : "false");
     });
+  }
+
+  var _saipPeContextMenu = { root: null, dismiss: null };
+
+  function saipEnsurePeContextMenuRoot() {
+    if (_saipPeContextMenu.root) return _saipPeContextMenu.root;
+    var menu = document.createElement("div");
+    menu.className = "ctx-menu saip-pe-context-menu";
+    menu.setAttribute("role", "menu");
+    document.body.appendChild(menu);
+    _saipPeContextMenu.root = menu;
+    return menu;
+  }
+
+  function saipHidePeContextMenu() {
+    if (_saipPeContextMenu.root) {
+      _saipPeContextMenu.root.classList.remove("is-open");
+      _saipPeContextMenu.root.innerHTML = "";
+    }
+    if (_saipPeContextMenu.dismiss) {
+      document.removeEventListener("click", _saipPeContextMenu.dismiss, true);
+      document.removeEventListener("keydown", _saipPeContextMenu.dismiss, true);
+      _saipPeContextMenu.dismiss = null;
+    }
+  }
+
+  function saipPositionPeContextMenu(menu, x, y) {
+    menu.style.visibility = "hidden";
+    menu.classList.add("is-open");
+    var rect = menu.getBoundingClientRect();
+    var px = x;
+    var py = y;
+    if (px + rect.width > window.innerWidth - 4) {
+      px = Math.max(4, window.innerWidth - rect.width - 4);
+    }
+    if (py + rect.height > window.innerHeight - 4) {
+      py = Math.max(4, window.innerHeight - rect.height - 4);
+    }
+    menu.style.left = px + "px";
+    menu.style.top = py + "px";
+    menu.style.visibility = "visible";
+  }
+
+  function saipBuildPeContextMenuItem(spec) {
+    var btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "ctx-menu-item" + (spec.danger ? " ctx-menu-item--danger" : "");
+    btn.setAttribute("role", "menuitem");
+    if (spec.disabled) btn.disabled = true;
+    var icon = document.createElement("span");
+    icon.className = "ctx-menu-icon";
+    icon.textContent = spec.icon || ">";
+    var label = document.createElement("span");
+    label.className = "ctx-menu-label";
+    label.textContent = spec.label || "";
+    btn.appendChild(icon);
+    btn.appendChild(label);
+    btn.addEventListener("click", function () {
+      saipHidePeContextMenu();
+      if (typeof spec.onClick === "function") spec.onClick();
+    });
+    return btn;
+  }
+
+  function saipPeIsSequenceAnchor(row, pkg) {
+    var index = Number(row && row.index);
+    var type = String((row && row.type) || "").toLowerCase();
+    var rows = Array.isArray(pkg && pkg.peRows) ? pkg.peRows : [];
+    return index === 0
+      || index === rows.length - 1
+      || type === "header"
+      || type === "profileheader"
+      || type === "end";
+  }
+
+  function saipShowPeContextMenu(row, pkg, peList, detail, validation, x, y) {
+    if (!pkg || !pkg.sessionId) return;
+    saipHidePeContextMenu();
+    var rows = Array.isArray(pkg.peRows) ? pkg.peRows : [];
+    var index = Number(row && row.index);
+    var anchor = saipPeIsSequenceAnchor(row, pkg);
+    var lastBodyIndex = Math.max(1, rows.length - 2);
+    var canMoveUp = !anchor && index > 1;
+    var canMoveDown = !anchor && index < lastBodyIndex;
+    var items = [
+      {
+        icon: "↑+",
+        label: "Add PE above",
+        onClick: function () { saipRibbonAddPe(pkg, "above", peList, detail, validation); },
+      },
+      {
+        icon: "↓+",
+        label: "Add PE below",
+        onClick: function () { saipRibbonAddPe(pkg, "below", peList, detail, validation); },
+      },
+      {
+        icon: "in",
+        label: "Import PE below",
+        onClick: function () { saipRibbonImportPe(pkg, peList, detail, validation); },
+      },
+      { divider: true },
+      {
+        icon: "up",
+        label: "Move up",
+        disabled: !canMoveUp,
+        onClick: function () { saipRibbonMovePe(pkg, "up", peList, detail, validation); },
+      },
+      {
+        icon: "dn",
+        label: "Move down",
+        disabled: !canMoveDown,
+        onClick: function () { saipRibbonMovePe(pkg, "down", peList, detail, validation); },
+      },
+      {
+        icon: "out",
+        label: "Export PE",
+        disabled: !Number.isFinite(index),
+        onClick: function () { saipRibbonExportPe(pkg); },
+      },
+      {
+        icon: "i",
+        label: "Reference card",
+        disabled: !Number.isFinite(index),
+        onClick: function () { saipRibbonShowPeInfo(pkg); },
+      },
+      { divider: true },
+      {
+        icon: "x",
+        label: anchor ? "Delete PE (anchor)" : "Delete PE",
+        danger: true,
+        disabled: anchor,
+        onClick: function () { saipRibbonDeletePe(pkg, peList, detail, validation); },
+      },
+    ];
+    var menu = saipEnsurePeContextMenuRoot();
+    menu.innerHTML = "";
+    items.forEach(function (item) {
+      if (item && item.divider) {
+        var sep = document.createElement("div");
+        sep.className = "ctx-menu-sep";
+        menu.appendChild(sep);
+      } else if (item) {
+        menu.appendChild(saipBuildPeContextMenuItem(item));
+      }
+    });
+    saipPositionPeContextMenu(menu, x, y);
+    var dismiss = function (event) {
+      if (event.type === "keydown") {
+        if (event.key === "Escape") saipHidePeContextMenu();
+        return;
+      }
+      if (menu.contains(event.target)) return;
+      saipHidePeContextMenu();
+    };
+    _saipPeContextMenu.dismiss = dismiss;
+    setTimeout(function () {
+      document.addEventListener("click", dismiss, true);
+      document.addEventListener("keydown", dismiss, true);
+    }, 0);
   }
 
   function saipClearPeDropMarkers(list) {
@@ -25721,6 +29612,95 @@
     }).join("\n");
   }
 
+  function saipHeaderGfsteRowsFromText(text) {
+    return String(text || "")
+      .split(/[\n,;]+/)
+      .map(function (row) { return row.trim(); })
+      .filter(function (row) { return row.length > 0; });
+  }
+
+  function saipHeaderGfsteTokenRanges(text) {
+    var source = String(text || "");
+    var out = [];
+    var tokenRe = /[^,\n;]+/g;
+    var match;
+    while ((match = tokenRe.exec(source)) !== null) {
+      var raw = String(match[0] || "");
+      var trimmed = raw.trim();
+      if (!trimmed) continue;
+      var leading = raw.search(/\S/);
+      var trailing = raw.length - raw.replace(/\s+$/, "").length;
+      out.push({
+        start: match.index + Math.max(0, leading),
+        end: match.index + raw.length - trailing,
+        text: trimmed,
+      });
+    }
+    return out;
+  }
+
+  function saipHeaderSelectGfsteToken(input, index) {
+    if (!input || typeof input.setSelectionRange !== "function") return;
+    var ranges = saipHeaderGfsteTokenRanges(input.value);
+    var range = ranges[index];
+    if (!range) return;
+    input.focus();
+    input.setSelectionRange(range.start, range.end);
+  }
+
+  function saipHeaderGfsteIndexAtSelection(input) {
+    if (!input) return 0;
+    var pos = Number(input.selectionStart);
+    if (!Number.isFinite(pos)) return 0;
+    var ranges = saipHeaderGfsteTokenRanges(input.value);
+    for (var i = 0; i < ranges.length; i += 1) {
+      if (pos >= ranges[i].start && pos <= ranges[i].end) return i;
+    }
+    return 0;
+  }
+
+  function saipHeaderRenderGfsteRail(rail, input, activeIndex, onSelect) {
+    if (!rail || !input) return 0;
+    rail.innerHTML = "";
+    var rows = saipHeaderGfsteRowsFromText(input.value);
+    if (activeIndex >= rows.length) activeIndex = Math.max(0, rows.length - 1);
+    rows.forEach(function (oid, index) {
+      var btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "saip-profile-gfste-rail-btn";
+      btn.classList.toggle("is-active", index === activeIndex);
+      btn.setAttribute("role", "radio");
+      btn.setAttribute("aria-checked", index === activeIndex ? "true" : "false");
+      btn.title = oid;
+      var dot = document.createElement("span");
+      dot.className = "saip-profile-gfste-rail-dot";
+      dot.textContent = String(index + 1);
+      btn.appendChild(dot);
+      var label = document.createElement("span");
+      label.className = "saip-profile-gfste-rail-label";
+      label.textContent = oid;
+      btn.appendChild(label);
+      btn.addEventListener("click", function () {
+        if (typeof onSelect === "function") {
+          onSelect(index);
+          return;
+        }
+        activeIndex = index;
+        saipHeaderRenderGfsteRail(rail, input, activeIndex);
+        saipHeaderSelectGfsteToken(input, index);
+      });
+      rail.appendChild(btn);
+    });
+    if (rows.length === 0) {
+      var empty = document.createElement("span");
+      empty.className = "saip-profile-gfste-rail-empty";
+      empty.textContent = "0";
+      empty.title = "No GFSTE templates";
+      rail.appendChild(empty);
+    }
+    return activeIndex;
+  }
+
   function saipHeaderServicesMap(decoded) {
     var raw = decoded && decoded["eUICC-Mandatory-services"];
     var out = {};
@@ -26644,7 +30624,59 @@
     gfsteInput.spellcheck = false;
     gfsteInput.rows = 5;
     gfsteInput.value = saipHeaderGfsteText(decoded);
-    gfsteCard.appendChild(gfsteInput);
+    var gfsteBody = document.createElement("div");
+    gfsteBody.className = "saip-profile-gfste-editor";
+    var gfsteRail = document.createElement("div");
+    gfsteRail.className = "saip-profile-gfste-rail";
+    gfsteRail.setAttribute("role", "radiogroup");
+    gfsteRail.setAttribute("aria-label", "Applied GFSTE templates");
+    gfsteBody.appendChild(gfsteRail);
+    gfsteBody.appendChild(gfsteInput);
+    gfsteCard.appendChild(gfsteBody);
+    var gfsteActiveIndex = 0;
+    function refreshGfsteRail() {
+      gfsteActiveIndex = saipHeaderRenderGfsteRail(
+      gfsteRail,
+      gfsteInput,
+      gfsteActiveIndex,
+      function (index) {
+        gfsteActiveIndex = index;
+        refreshGfsteRail();
+        saipHeaderSelectGfsteToken(gfsteInput, index);
+      },
+    );
+    }
+    refreshGfsteRail();
+    gfsteInput.addEventListener("input", refreshGfsteRail);
+    gfsteInput.addEventListener("click", function () {
+      gfsteActiveIndex = saipHeaderGfsteIndexAtSelection(gfsteInput);
+      refreshGfsteRail();
+    });
+    gfsteInput.addEventListener("keyup", function () {
+      gfsteActiveIndex = saipHeaderGfsteIndexAtSelection(gfsteInput);
+      refreshGfsteRail();
+    });
+    gfsteRail.addEventListener("keydown", function (ev) {
+      var rows = saipHeaderGfsteRowsFromText(gfsteInput.value);
+      if (rows.length === 0) return;
+      if (ev.key === "ArrowDown" || ev.key === "ArrowRight") {
+        ev.preventDefault();
+        gfsteActiveIndex = Math.min(rows.length - 1, gfsteActiveIndex + 1);
+      } else if (ev.key === "ArrowUp" || ev.key === "ArrowLeft") {
+        ev.preventDefault();
+        gfsteActiveIndex = Math.max(0, gfsteActiveIndex - 1);
+      } else if (ev.key === "Home") {
+        ev.preventDefault();
+        gfsteActiveIndex = 0;
+      } else if (ev.key === "End") {
+        ev.preventDefault();
+        gfsteActiveIndex = rows.length - 1;
+      } else {
+        return;
+      }
+      refreshGfsteRail();
+      saipHeaderSelectGfsteToken(gfsteInput, gfsteActiveIndex);
+    });
     var gfsteActions = document.createElement("div");
     gfsteActions.className = "saip-profile-header-actions";
     var gfsteApply = document.createElement("button");
@@ -26657,10 +30689,7 @@
     gfsteActions.appendChild(gfsteStatus);
     gfsteCard.appendChild(gfsteActions);
     gfsteApply.addEventListener("click", function () {
-      var rows = String(gfsteInput.value || "")
-        .split(/[\n,;]+/)
-        .map(function (row) { return row.trim(); })
-        .filter(function (row) { return row.length > 0; });
+      var rows = saipHeaderGfsteRowsFromText(gfsteInput.value);
       void saipApplyMandatoryGfste(pkg, rows, sectionKey, peList, validation, gfsteStatus);
     });
     host.appendChild(gfsteCard);
@@ -27292,6 +31321,31 @@
         hint.className = "saip-edit-card-hint";
         hint.textContent = "Tick the file in the list to materialise it with template defaults.";
         detailPanel.appendChild(hint);
+        return;
+      }
+      if (!pkg || !sectionKey) {
+        return;
+      }
+      var cacheKey = sectionKey + "::" + row.key;
+      var cached = pkg.showFileCache ? pkg.showFileCache[cacheKey] : null;
+      if (!cached) {
+        var loading = document.createElement("p");
+        loading.className = "loading";
+        loading.textContent = "Loading template defaults...";
+        detailPanel.appendChild(loading);
+        saipLoadShowFile(pkg, sectionKey, row.key).then(renderDetail);
+        return;
+      }
+      if (cached.error || cached.not_found) {
+        return;
+      }
+      var fileData = Object.assign({}, cached, {
+        section_key: cached.section_key || sectionKey,
+        field_path: cached.field_path || row.key,
+      });
+      var templateDefaultCard = saipBuildTemplateDefaultInfoCardForData(fileData);
+      if (templateDefaultCard) {
+        detailPanel.appendChild(templateDefaultCard);
       }
     }
 
@@ -27349,7 +31403,14 @@
         field_path: cached.field_path || row.key,
       });
       if (activeTab === "data") {
-        saipFileRenderData(detailPanel, fileData, pkg, peList, validation);
+        saipFileRenderData(
+          detailPanel,
+          fileData,
+          pkg,
+          peList,
+          validation,
+          { showTemplateDefault: false },
+        );
       } else {
         saipFileRenderGeneral(detailPanel, fileData, pkg, peList, validation, sectionKey, row.key);
       }
@@ -33048,6 +37109,16 @@
       "Data",
       "EF body bytes plus decoded view (hex + interpreted). Record-fixed files use the record navigator (dropdown + prev/next).",
     );
+    var hasTemplateTab = !!(
+      data && data.fcp && data.fcp.template_default_active === true
+    );
+    var tabTemplate = hasTemplateTab
+      ? mkTab(
+        "template",
+        "Template",
+        "Template default content and resolved materialised body.",
+      )
+      : null;
     var tabJson = mkTab(
       "json",
       "JSON",
@@ -33062,21 +37133,35 @@
       || pkg.activeFileTab === "decoded") {
       pkg.activeFileTab = "data";
     }
+    if (pkg.activeFileTab === "template" && !hasTemplateTab) {
+      pkg.activeFileTab = "data";
+    }
     tabs.appendChild(tabGeneral);
     tabs.appendChild(tabData);
+    if (tabTemplate) tabs.appendChild(tabTemplate);
     tabs.appendChild(tabJson);
     host.appendChild(tabs);
     host.appendChild(bodyHost);
 
     function activate(id) {
       pkg.activeFileTab = id;
-      [tabGeneral, tabData, tabJson].forEach(function (b) {
+      [tabGeneral, tabData, tabTemplate, tabJson].forEach(function (b) {
+        if (!b) return;
         b.classList.toggle("is-active", b.dataset.fileTab === id);
       });
       bodyHost.innerHTML = "";
       bodyHost.classList.toggle("saip-detail-body--data-view", id === "data");
       if (id === "data") {
-        saipFileRenderData(bodyHost, data, pkg, peList, validation);
+        saipFileRenderData(
+          bodyHost,
+          data,
+          pkg,
+          peList,
+          validation,
+          { showTemplateDefault: false },
+        );
+      } else if (id === "template") {
+        saipFileRenderTemplate(bodyHost, data);
       } else if (id === "json") {
         saipFileRenderJson(bodyHost, data, pkg);
       } else {
@@ -33085,6 +37170,9 @@
     }
     tabGeneral.addEventListener("click", function () { activate("general"); });
     tabData.addEventListener("click", function () { activate("data"); });
+    if (tabTemplate) {
+      tabTemplate.addEventListener("click", function () { activate("template"); });
+    }
     tabJson.addEventListener("click", function () { activate("json"); });
     activate(pkg.activeFileTab);
   }
@@ -35801,7 +39889,7 @@
         host,
         "ICCID digits",
         input,
-        "Use the 8988xxxx test range (per .cursor/rules) — never a real IIN.",
+        "Use the 8988xxxx test range; never a real IIN.",
       );
 
       var preview = document.createElement("code");
@@ -40698,8 +44786,8 @@
     ta.rows = Math.min(12, Math.max(3, Math.ceil(
       (String(opts.currentHex || "").length / 2) / 16,
     )));
-    ta.value = String(opts.currentHex || "")
-      .replace(/(.{32})/g, "$1\n");
+    ta.wrap = "soft";
+    ta.value = saipFormatHexPretty(String(opts.currentHex || ""));
     card.appendChild(ta);
 
     var actions = document.createElement("div");
@@ -40954,8 +45042,28 @@
     return card;
   }
 
-  function saipFileRenderData(host, data, pkg, peList, validation) {
+  function saipBuildTemplateDefaultInfoCardForData(data) {
+    var ctx = saipFileRecordLayoutForData(data || {});
+    return saipBuildTemplateDefaultInfoCard(ctx.fcp, ctx.image);
+  }
+
+  function saipFileRenderTemplate(host, data) {
     host.innerHTML = "";
+    var card = saipBuildTemplateDefaultInfoCardForData(data || {});
+    if (card) {
+      host.appendChild(card);
+      return;
+    }
+    var msg = document.createElement("p");
+    msg.className = "saip-placeholder";
+    msg.textContent = "No template default content is defined for this file.";
+    host.appendChild(msg);
+  }
+
+  function saipFileRenderData(host, data, pkg, peList, validation, options) {
+    host.innerHTML = "";
+    var renderOptions = options || {};
+    var showTemplateDefault = renderOptions.showTemplateDefault !== false;
 
     var fcpForData = (data && data.fcp) || {};
     var declaredDataSize = saipParseEfFileSizeHex(fcpForData.ef_size);
@@ -40995,16 +45103,22 @@
       return ("0" + v.toString(16)).slice(-2).toUpperCase();
     }).join("");
 
-    var templateDefaultCard = saipBuildTemplateDefaultInfoCard(fcpForData, image);
-    if (templateDefaultCard) {
-      host.appendChild(templateDefaultCard);
+    if (showTemplateDefault) {
+      var templateDefaultCard = saipBuildTemplateDefaultInfoCard(fcpForData, image);
+      if (templateDefaultCard) {
+        host.appendChild(templateDefaultCard);
+      }
     }
 
     if (image.bytes.length === 0) {
       var msg = document.createElement("p");
       msg.className = "saip-edit-card-hint";
       msg.textContent = fcpForData.template_default_active === true
-        ? "No explicit fillFileContent is present; content is inherited from the template default shown above."
+        ? (
+          showTemplateDefault
+            ? "No explicit fillFileContent is present; content is inherited from the template default shown above."
+            : "No explicit fillFileContent is present; content is inherited from the template default on the Template tab."
+        )
         : "No inline content (this entry is metadata-only, fill-from-template, or doNotCreate).";
       host.appendChild(msg);
       return;
@@ -45927,54 +50041,81 @@
   // and surface its computed value: ``saipFormRenderNode`` consults
   // this registry before falling through to the editable inputs.
   //
-  // The intent matches the user-visible promise: "lengths the editor
-  // can compute should never need typing". Right now we cover the
-  // three lengths the manual actually exposes (macLength + the two
-  // FCP size fields); more rules slot in here as the manual grows.
+  // The intent matches the user-visible promise: lengths the editor
+  // can compute should not require typing. The rules cover common
+  // byte-bearing shapes ({hex}, {rawHex}, {valueHex}, AID objects,
+  // TLV payloads), security-domain key lengths, and FCP record sizes.
+  function _saipCleanWholeByteHex(rawValue) {
+    if (typeof rawValue !== "string") return null;
+    var clean = saipFormHexNorm(rawValue);
+    if (!/^[0-9A-F]*$/.test(clean) || (clean.length % 2) !== 0) {
+      return null;
+    }
+    return clean;
+  }
+
   function _saipExtractHexFromSibling(siblingValue) {
     if (siblingValue == null) return null;
+    var tupleInfo = saipChoiceTuple(siblingValue);
+    if (tupleInfo) return _saipExtractHexFromSibling(tupleInfo.payload);
     var info = saipFormBytesValue(siblingValue);
     if (info) return String(info.hex || "");
-    if (siblingValue && typeof siblingValue === "object" && !Array.isArray(siblingValue)
-        && typeof siblingValue.hex === "string") {
-      var objectHex = saipFormHexNorm(siblingValue.hex);
-      if (/^[0-9A-F]*$/.test(objectHex) && (objectHex.length % 2) === 0) {
-        return objectHex;
+    if (siblingValue && typeof siblingValue === "object" && !Array.isArray(siblingValue)) {
+      var hexKeys = [
+        "hex", "rawHex", "raw", "valueHex", "value",
+        "dataHex", "data", "payloadHex", "payload",
+        "contentHex", "content", "aid", "applicationAID",
+        "identifierHex", "identifier",
+      ];
+      for (var hk = 0; hk < hexKeys.length; hk += 1) {
+        if (!Object.prototype.hasOwnProperty.call(siblingValue, hexKeys[hk])) continue;
+        var nestedHex = _saipExtractHexFromSibling(siblingValue[hexKeys[hk]]);
+        if (nestedHex != null) return nestedHex;
       }
     }
     if (typeof siblingValue === "string") {
-      var clean = saipFormHexNorm(siblingValue);
-      if (/^[0-9A-F]*$/.test(clean) && (clean.length % 2) === 0) {
-        return clean;
-      }
+      return _saipCleanWholeByteHex(siblingValue);
     }
     return null;
   }
 
-  function _saipSiblingByteCount(parentObj, siblingName) {
-    if (!parentObj || typeof parentObj !== "object") return null;
+  function _saipSiblingValue(parentObj, siblingName) {
+    if (!parentObj || typeof parentObj !== "object") return undefined;
     var keys = Object.keys(parentObj);
-    var hit = null;
     var lc = String(siblingName).toLowerCase();
     for (var i = 0; i < keys.length; i += 1) {
       if (String(keys[i]).toLowerCase() === lc) {
-        hit = parentObj[keys[i]];
-        break;
+        return parentObj[keys[i]];
       }
     }
+    return undefined;
+  }
+
+  function _saipSiblingByteCount(parentObj, siblingName) {
+    var hit = _saipSiblingValue(parentObj, siblingName);
     var hex = _saipExtractHexFromSibling(hit);
     if (hex == null) return null;
     return hex.length / 2;
   }
 
+  function _saipSiblingByteCountAny(parentObj, siblingNames) {
+    for (var i = 0; i < siblingNames.length; i += 1) {
+      var count = _saipSiblingByteCount(parentObj, siblingNames[i]);
+      if (count != null) return {
+        count: count,
+        source: siblingNames[i],
+      };
+    }
+    return null;
+  }
+
   function _saipHexByteCountFromObject(parentObj) {
     if (!parentObj || typeof parentObj !== "object" || Array.isArray(parentObj)) return null;
-    if (typeof parentObj.hex !== "string") return null;
-    var clean = saipFormHexNorm(parentObj.hex);
-    if (clean.length === 0 || !/^[0-9A-F]+$/.test(clean) || (clean.length % 2) !== 0) {
+    var hex = _saipExtractHexFromSibling(parentObj);
+    if (hex == null || hex.length === 0) {
       return null;
     }
-    return clean.length / 2;
+    return hex.length / 2;
   }
 
   function _saipFormRootFieldCompact(formState) {
@@ -46009,41 +50150,173 @@
   }
 
   function _saipSiblingNumber(parentObj, siblingName) {
-    if (!parentObj || typeof parentObj !== "object") return null;
-    var keys = Object.keys(parentObj);
-    var lc = String(siblingName).toLowerCase();
-    for (var i = 0; i < keys.length; i += 1) {
-      if (String(keys[i]).toLowerCase() === lc) {
-        var v = parentObj[keys[i]];
-        if (typeof v === "number" && Number.isFinite(v)) return v;
-        if (typeof v === "string") {
-          // Tolerant parse: hex bytes encode a small integer in this
-          // position for some FCP fields (e.g. ``efFileSize`` arrives
-          // as 2 hex bytes of big-endian length).
-          var hex = saipFormHexNorm(v);
-          if (/^[0-9A-F]+$/.test(hex)) {
-            var n = parseInt(hex, 16);
-            if (Number.isFinite(n)) return n;
-          }
-          var dec = Number(v);
-          if (Number.isFinite(dec)) return dec;
-        }
-        var info = saipFormBytesValue(v);
-        if (info) {
-          var b = String(info.hex || "");
-          if (b.length > 0) {
-            var bn = parseInt(b, 16);
-            if (Number.isFinite(bn)) return bn;
-          }
-        }
-        return null;
+    var v = _saipSiblingValue(parentObj, siblingName);
+    if (typeof v === "number" && Number.isFinite(v)) return v;
+    if (typeof v === "string") {
+      // Tolerant parse: hex bytes encode a small integer in this
+      // position for some FCP fields (e.g. ``efFileSize`` arrives
+      // as 2 hex bytes of big-endian length).
+      var hex = saipFormHexNorm(v);
+      if (/^[0-9A-F]+$/.test(hex)) {
+        var n = parseInt(hex, 16);
+        if (Number.isFinite(n)) return n;
+      }
+      var dec = Number(v);
+      if (Number.isFinite(dec)) return dec;
+    }
+    var info = saipFormBytesValue(v);
+    if (info) {
+      var b = String(info.hex || "");
+      if (b.length > 0) {
+        var bn = parseInt(b, 16);
+        if (Number.isFinite(bn)) return bn;
       }
     }
     return null;
   }
 
+  function _saipSiblingNumberAny(parentObj, siblingNames) {
+    for (var i = 0; i < siblingNames.length; i += 1) {
+      var value = _saipSiblingNumber(parentObj, siblingNames[i]);
+      if (value != null) return {
+        value: value,
+        source: siblingNames[i],
+      };
+    }
+    return null;
+  }
+
+  function _saipSiblingArray(parentObj, siblingNames) {
+    for (var i = 0; i < siblingNames.length; i += 1) {
+      var value = _saipSiblingValue(parentObj, siblingNames[i]);
+      if (Array.isArray(value)) return {
+        value: value,
+        source: siblingNames[i],
+      };
+    }
+    return null;
+  }
+
+  function _saipUniformRecordLength(parentObj) {
+    var found = _saipSiblingArray(parentObj, [
+      "records", "recordList", "recordItems", "recordValues",
+      "fillFileContents", "entries",
+    ]);
+    if (!found || found.value.length === 0) return null;
+    var expected = null;
+    for (var i = 0; i < found.value.length; i += 1) {
+      var hex = _saipExtractHexFromSibling(found.value[i]);
+      if (hex == null || hex.length === 0) return null;
+      var count = hex.length / 2;
+      if (expected == null) {
+        expected = count;
+      } else if (expected !== count) {
+        return null;
+      }
+    }
+    return {
+      value: expected,
+      count: found.value.length,
+      source: found.source,
+    };
+  }
+
+  function _saipRecordCountFromArray(parentObj) {
+    var found = _saipSiblingArray(parentObj, [
+      "records", "recordList", "recordItems", "recordValues",
+      "fillFileContents", "entries",
+    ]);
+    if (!found) return null;
+    return {
+      value: found.value.length,
+      source: found.source,
+    };
+  }
+
+  function _saipRecordProductFromSiblings(parentObj) {
+    var recordSize = _saipSiblingNumberAny(parentObj, [
+      "recordSize", "recordLength", "record_length",
+      "record_size", "recLen", "rec_len",
+    ]);
+    var recordCount = _saipSiblingNumberAny(parentObj, [
+      "recordCount", "numberOfRecords", "record_count",
+      "nbRec", "nb_rec",
+    ]);
+    if (!recordSize) {
+      var inferredRecordSize = _saipUniformRecordLength(parentObj);
+      if (inferredRecordSize) {
+        recordSize = {
+          value: inferredRecordSize.value,
+          source: inferredRecordSize.source + " uniform byte length",
+        };
+      }
+    }
+    if (!recordCount) {
+      var inferredRecordCount = _saipRecordCountFromArray(parentObj);
+      if (inferredRecordCount) {
+        recordCount = inferredRecordCount;
+      }
+    }
+    if (
+      !recordSize || !recordCount
+      || recordSize.value <= 0 || recordCount.value <= 0
+    ) {
+      return null;
+    }
+    return {
+      recordSize: recordSize.value,
+      recordCount: recordCount.value,
+      total: recordSize.value * recordCount.value,
+      source: recordSize.source + " x " + recordCount.source,
+    };
+  }
+
+  function _saipEncodeInferredByteCountHex(byteCount, minBytes) {
+    if (!Number.isFinite(byteCount) || byteCount < 0) return "";
+    var hex = Math.floor(byteCount).toString(16).toUpperCase();
+    if (hex.length % 2 !== 0) hex = "0" + hex;
+    var minChars = Math.max(1, Number(minBytes) || 1) * 2;
+    while (hex.length < minChars) hex = "00" + hex;
+    return hex;
+  }
+
+  function _saipLengthFieldByteCount(parentObj, fn) {
+    var direct = _saipHexByteCountFromObject(parentObj);
+    if (direct != null) {
+      return { count: direct, source: "hex byte length" };
+    }
+    var genericNames = [
+      "valueHex", "value", "rawHex", "raw", "hex",
+      "dataHex", "data", "payloadHex", "payload",
+      "contentHex", "content", "aid", "applicationAID",
+      "identifierHex", "identifier",
+    ];
+    if (fn === "aidlength") {
+      genericNames = ["aid", "applicationAID"].concat(genericNames);
+    } else if (fn === "identifierlength") {
+      genericNames = ["identifier", "identifierHex"].concat(genericNames);
+    } else if (fn === "keydatalength") {
+      genericNames = ["keyData", "keyValue"].concat(genericNames);
+    }
+    return _saipSiblingByteCountAny(parentObj, genericNames);
+  }
+
+  function _saipIsByteLengthField(fn) {
+    return fn === "length"
+      || fn === "len"
+      || fn === "bytelength"
+      || fn === "valuelength"
+      || fn === "payloadlength"
+      || fn === "datalength"
+      || fn === "contentlength"
+      || fn === "rawlength"
+      || fn === "aidlength"
+      || fn === "identifierlength"
+      || fn === "keydatalength";
+  }
+
   function saipFormFieldInferred(fieldName, parentObj, peTypeHint, formState) {
-    var fn = String(fieldName || "").toLowerCase();
+    var fn = String(fieldName || "").toLowerCase().replace(/[^a-z0-9]/g, "");
 
     if (fn === "length" && _saipLooksLikeKeyDataObject(parentObj, formState)) {
       var keyDataLen = _saipHexByteCountFromObject(parentObj);
@@ -46065,6 +50338,35 @@
           kind: "number",
           source: "keyData hex byte length",
           hint: "Inferred from keyData (" + keyDataLenBits + " B × 8).",
+        };
+      }
+    }
+
+    if (fn === "recordcount" || fn === "numberofrecords" || fn === "nbrec") {
+      var arrayCount = _saipRecordCountFromArray(parentObj);
+      if (arrayCount) {
+        return {
+          value: arrayCount.value,
+          kind: "number",
+          source: arrayCount.source + " entries",
+          hint: "Inferred from " + arrayCount.source
+            + " (" + arrayCount.value + " record"
+            + (arrayCount.value === 1 ? "" : "s") + ").",
+        };
+      }
+    }
+
+    if (fn === "recordlength" || fn === "recordsize" || fn === "reclen") {
+      var uniformRecord = _saipUniformRecordLength(parentObj);
+      if (uniformRecord) {
+        return {
+          value: uniformRecord.value,
+          kind: "number",
+          source: uniformRecord.source + " byte length",
+          hint: "Inferred from " + uniformRecord.source + " ("
+            + uniformRecord.count + " uniform record"
+            + (uniformRecord.count === 1 ? "" : "s") + " x "
+            + uniformRecord.value + " B).",
         };
       }
     }
@@ -46093,46 +50395,64 @@
     // PEDocumentation §createFCP → efFileSize: total EF size for
     // transparent EFs equals the byte count of the first
     // ``fillFileContent`` payload. Record-based EFs derive total
-    // size from recordSize × recordCount (handled below).
+    // size from recordSize x recordCount when those inputs exist.
     if (fn === "effilesize") {
-      var contentBytes = _saipSiblingByteCount(parentObj, "fillFileContent");
-      if (contentBytes == null) {
-        contentBytes = _saipSiblingByteCount(parentObj, "fillFileContents");
-      }
-      if (contentBytes != null && contentBytes > 0) {
-        var hex = contentBytes.toString(16).toUpperCase();
-        if (hex.length % 2 !== 0) hex = "0" + hex;
-        // pad to 2 bytes — efFileSize is encoded as a 2-byte
-        // big-endian integer in FCP tag 80 (ETSI TS 102 221 §11.1.1.4.1).
-        if (hex.length < 4) hex = ("0000" + hex).slice(-4);
+      var recordProduct = _saipRecordProductFromSiblings(parentObj);
+      if (recordProduct) {
         return {
-          value: hex,
+          value: _saipEncodeInferredByteCountHex(recordProduct.total, 2),
           kind: "hex_bytes",
-          source: "fillFileContent byte length",
-          hint: "Inferred from fillFileContent (" + contentBytes + " B). "
-            + "Record-based EFs override this via recordSize × recordCount.",
+          source: recordProduct.source,
+          hint: "Inferred from record layout: "
+            + recordProduct.recordSize + " B x "
+            + recordProduct.recordCount + " = "
+            + recordProduct.total + " B.",
+        };
+      }
+      var contentBytes = _saipSiblingByteCountAny(parentObj, [
+        "fillFileContent", "fillFileContents", "content",
+        "contentHex", "data", "dataHex",
+      ]);
+      if (contentBytes != null && contentBytes.count > 0) {
+        return {
+          value: _saipEncodeInferredByteCountHex(contentBytes.count, 2),
+          kind: "hex_bytes",
+          source: contentBytes.source + " byte length",
+          hint: "Inferred from " + contentBytes.source
+            + " (" + contentBytes.count + " B). "
+            + "Record-based EFs override this via recordSize x recordCount.",
         };
       }
       return null;
+    }
+
+    if (_saipIsByteLengthField(fn)) {
+      var lengthBytes = _saipLengthFieldByteCount(parentObj, fn);
+      if (lengthBytes != null) {
+        return {
+          value: lengthBytes.count,
+          kind: "number",
+          source: lengthBytes.source,
+          hint: "Inferred from " + lengthBytes.source
+            + " (" + lengthBytes.count + " B).",
+        };
+      }
     }
 
     // PEDocumentation §createFCP → maximumFileSize: when both
     // recordSize and recordCount are present, this is their product
     // (TS 102 221 §11.1.1.4 proprietary tag for record window).
     if (fn === "maximumfilesize") {
-      var rs = _saipSiblingNumber(parentObj, "recordSize");
-      var rc = _saipSiblingNumber(parentObj, "recordCount");
-      if (rs != null && rc != null && rs > 0 && rc > 0) {
-        var total = rs * rc;
-        var thex = total.toString(16).toUpperCase();
-        if (thex.length % 2 !== 0) thex = "0" + thex;
-        if (thex.length < 4) thex = ("0000" + thex).slice(-4);
+      var maxProduct = _saipRecordProductFromSiblings(parentObj);
+      if (maxProduct) {
         return {
-          value: thex,
+          value: _saipEncodeInferredByteCountHex(maxProduct.total, 2),
           kind: "hex_bytes",
-          source: "recordSize × recordCount",
-          hint: "Inferred from recordSize × recordCount = "
-            + rs + " × " + rc + " = " + total + " B.",
+          source: maxProduct.source,
+          hint: "Inferred from record layout: "
+            + maxProduct.recordSize + " B x "
+            + maxProduct.recordCount + " = "
+            + maxProduct.total + " B.",
         };
       }
       return null;
@@ -48840,32 +53160,6 @@
       return;
     }
 
-    // Encoder-managed lock — render the current value read-only.
-    // Children of locked containers are still rendered editable;
-    // we only freeze the leaf carrying the locked field name.
-    var locked = (typeof key === "string")
-      ? saipFormFieldLocked(fieldName, peTypeHint, parent)
-      : null;
-    if (locked && (value == null || typeof value !== "object" || saipFormBytesValue(value))) {
-      var lockedDisplay = value;
-      var lockedKind = "auto";
-      var bInfo = saipFormBytesValue(value);
-      if (bInfo) {
-        lockedDisplay = bInfo.hex;
-        lockedKind = "hex_bytes";
-      } else if (value === null || value === undefined) {
-        lockedDisplay = "(NULL)";
-      }
-      var rowL = saipFormReadOnlyRow(
-        labelText,
-        locked.reason,
-        lockedDisplay,
-        { kind: lockedKind, chipText: "locked", chipTitle: locked.reason },
-      );
-      host.appendChild(rowL.row);
-      return;
-    }
-
     // Inferred from siblings — recompute live, write back to the
     // parent so Apply ships the derived value, render read-only.
     if (typeof key === "string") {
@@ -48907,6 +53201,34 @@
         host.appendChild(rowI.row);
         return;
       }
+    }
+
+    // Encoder-managed lock — render the current value read-only.
+    // Children of locked containers are still rendered editable;
+    // we only freeze the leaf carrying the locked field name. This
+    // runs after inference so structural length fields can be stamped
+    // from their source bytes instead of merely displayed as locked.
+    var locked = (typeof key === "string")
+      ? saipFormFieldLocked(fieldName, peTypeHint, parent)
+      : null;
+    if (locked && (value == null || typeof value !== "object" || saipFormBytesValue(value))) {
+      var lockedDisplay = value;
+      var lockedKind = "auto";
+      var bInfo = saipFormBytesValue(value);
+      if (bInfo) {
+        lockedDisplay = bInfo.hex;
+        lockedKind = "hex_bytes";
+      } else if (value === null || value === undefined) {
+        lockedDisplay = "(NULL)";
+      }
+      var rowL = saipFormReadOnlyRow(
+        labelText,
+        locked.reason,
+        lockedDisplay,
+        { kind: lockedKind, chipText: "locked", chipTitle: locked.reason },
+      );
+      host.appendChild(rowL.row);
+      return;
     }
 
     if (saipFormAccessDomainRow(host, labelText, parent, key, value, fieldName, localPath)) {
@@ -52612,22 +56934,6 @@
       onClick: scp03GateOpen(tab, "scp03.fs_resize",
         function () { scp03ShowFsResize(tab); }),
     });
-    // UPDATE BINARY (transparent) / UPDATE RECORD (linear / cyclic) gate
-    // is decided up front by ``avail.update``; a single button keeps the
-    // toolbar compact and the wizard branches on ``info.kind`` so the
-    // operator only sees the relevant fields.
-    var updateBtn = scp03MakeFsActionButton({
-      label: "Update",
-      title: avail.update.reason,
-      disabledReason: avail.update.reason,
-      enabled: avail.update.enabled,
-      danger: true,
-      onClick: scp03GateOpen(tab,
-        avail.update.apdu === "record"
-          ? "scp03.update_record"
-          : "scp03.update_binary",
-        function () { scp03ShowFsUpdate(tab, info.kind); }),
-    });
     var lifecycleBtn = scp03MakeFsActionButton({
       label: "Lifecycle",
       title: (avail.activate.enabled || avail.terminate.enabled)
@@ -52662,7 +56968,6 @@
     group.appendChild(createBtn);
     group.appendChild(deleteBtn);
     group.appendChild(resizeBtn);
-    group.appendChild(updateBtn);
     group.appendChild(lifecycleBtn);
     group.appendChild(searchBtn);
     bar.appendChild(group);
@@ -52766,11 +57071,13 @@
       wrap.appendChild(renderTransparentPayload(payload, {
         path: data.path || "",
         fid: data.fid || "",
+        tab: tab || null,
       }));
     } else if (payload.kind === "records") {
       wrap.appendChild(renderRecordsPayload(payload, {
         path: data.path || "",
         fid: data.fid || "",
+        tab: tab || null,
       }));
     } else {
       // Unknown kind — render the raw payload for transparency.
@@ -52779,15 +57086,63 @@
     container.appendChild(wrap);
   }
 
+  function scp03BuildPayloadUpdateButton(options) {
+    var opts = options || {};
+    var mode = opts.mode === "record" ? "record" : "binary";
+    var tab = opts.tab || null;
+    var rawHex = scp03StageHexNormalise(opts.hex || "");
+    var pathText = String(opts.path || "").trim();
+    var recordNo = Number(opts.record || 0);
+    var button = document.createElement("button");
+    button.type = "button";
+    button.className = "cc-payload-update-btn";
+    button.textContent = mode === "record" ? "Update record" : "Update body";
+    button.title = mode === "record"
+      ? "Open UPDATE RECORD with this record number and hex pre-filled."
+      : "Open UPDATE BINARY with this EF body hex pre-filled.";
+    if (!tab || !tab.sessionId || rawHex.length === 0) {
+      button.disabled = true;
+      button.title = !tab || !tab.sessionId
+        ? "Open a session first."
+        : "No bytes available to update.";
+      return button;
+    }
+    button.addEventListener("click", function () {
+      var actionId = mode === "record" ? "scp03.update_record" : "scp03.update_binary";
+      var open = function () {
+        if (mode === "record") {
+          scp03StageOpenUpdateRecord(tab, rawHex, recordNo, pathText);
+        } else {
+          scp03StageOpenUpdateBinary(tab, rawHex, pathText);
+        }
+      };
+      if (typeof scp03GateOpen === "function") {
+        scp03GateOpen(tab, actionId, open)();
+        return;
+      }
+      open();
+    });
+    return button;
+  }
+
   function renderTransparentPayload(payload) {
     var sourceMeta = arguments.length > 1 ? arguments[1] : null;
     var box = document.createElement("div");
     box.className = "cc-payload cc-payload-transparent";
+    var head = document.createElement("div");
+    head.className = "cc-payload-head";
     var sw = document.createElement("p");
     sw.className = "cc-sw";
     sw.innerHTML = "SW: <code>" + escapeHtml(payload.sw || "") + "</code> · length "
       + String(payload.length || 0);
-    box.appendChild(sw);
+    head.appendChild(sw);
+    head.appendChild(scp03BuildPayloadUpdateButton({
+      mode: "binary",
+      tab: sourceMeta && sourceMeta.tab ? sourceMeta.tab : null,
+      path: sourceMeta && sourceMeta.path ? String(sourceMeta.path) : "",
+      hex: payload.hex || "",
+    }));
+    box.appendChild(head);
     if (payload.decoded) {
       // Thread the raw EF body through to the decoded toolbar so the
       // service-table renderer can wire its "Stage edit" affordance —
@@ -52927,6 +57282,18 @@
       }));
     }
     if (rec.hex) {
+      var actions = document.createElement("div");
+      actions.className = "cc-record-actions";
+      actions.appendChild(scp03BuildPayloadUpdateButton({
+        mode: "record",
+        tab: sourceMeta && sourceMeta.tab ? sourceMeta.tab : null,
+        path:
+          (payload && payload.path ? String(payload.path) : "")
+          || (sourceMeta && sourceMeta.path ? String(sourceMeta.path) : ""),
+        record: Number(rec.record_number || 0),
+        hex: rec.hex || "",
+      }));
+      card.appendChild(actions);
       card.appendChild(renderHexBlock(rec.hex));
     }
     return card;
@@ -56022,6 +60389,7 @@
     loadHealth();
     loadBackend();
     loadCommandCatalogue();
+    loadCardBridgeStatus();
     scheduleHealthPoll();
     refreshReaderPane();
     // Top-bar reader strip — installs its own refresh button handler,
@@ -56036,6 +60404,7 @@
     // operator hide brand / reader strip / breadcrumbs / theme picker
     // to recover the full vertical extent for a workbench.
     topbarCollapseBootstrap();
+    appCloseBootstrap();
     logBus.emit({
       level: "info",
       source: "system",
@@ -56122,6 +60491,36 @@
     btn.addEventListener("click", function () {
       var currently = shell.getAttribute("data-topbar-collapsed") === "true";
       _apply(!currently);
+    });
+  }
+
+  function appCloseBootstrap() {
+    var btn = document.getElementById("app-close-button");
+    if (!btn) return;
+    btn.addEventListener("click", async function () {
+      btn.disabled = true;
+      try {
+        if (
+          window.pywebview
+          && window.pywebview.api
+          && typeof window.pywebview.api.close_app === "function"
+        ) {
+          var closed = await window.pywebview.api.close_app();
+          if (closed) return;
+        }
+        window.close();
+        setTimeout(function () {
+          btn.disabled = false;
+          if (!window.closed && typeof setStatusAction === "function") {
+            setStatusAction("Close this browser tab/window to exit the web view.");
+          }
+        }, 150);
+      } catch (_err) {
+        btn.disabled = false;
+        if (typeof setStatusError === "function") {
+          setStatusError("Application close request failed.");
+        }
+      }
     });
   }
   if (document.readyState === "loading") {

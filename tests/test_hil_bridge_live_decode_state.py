@@ -530,7 +530,7 @@ class HilBridgeLiveDecodeStateTests(unittest.TestCase):
         self.assertIn("DNS Query:", annotations[3].summary_suffix)
         self.assertIn("qname=eim.example.test", annotations[3].summary_suffix)
         self.assertIn("DNS Response:", annotations[6].summary_suffix)
-        self.assertIn("answers=A:8.8.8.8", annotations[6].summary_suffix)
+        self.assertIn("answers=A:192.0.2.53", annotations[6].summary_suffix)
         self.assertTrue(any("Last SEND summary: DNS Query:" in line for line in annotations[6].context_lines))
         self.assertTrue(any("Last RECEIVE summary: DNS Response:" in line for line in annotations[6].context_lines))
 
@@ -582,7 +582,7 @@ class HilBridgeLiveDecodeStateTests(unittest.TestCase):
             _apdu_exchange_row(
                 3,
                 bytes.fromhex("00B000000A"),
-                bytes.fromhex("894611111111111111129000"),
+                bytes.fromhex("898811111111111111129000"),
             ),
         ]
 
@@ -600,16 +600,56 @@ class HilBridgeLiveDecodeStateTests(unittest.TestCase):
             any("Recent op: READ BINARY MF/EF.ICCID 10B @0" in line for line in annotations[3].context_lines)
         )
 
+    def test_etsi_file_trace_chain_explains_select_failure_context(self) -> None:
+        rows = [
+            _apdu_exchange_row(1, bytes.fromhex("00A40004023F00")),
+            _apdu_exchange_row(2, bytes.fromhex("00A40004022F00")),
+            _apdu_exchange_row(
+                3,
+                bytes.fromhex("00B2010400"),
+                bytes.fromhex("0102039000"),
+            ),
+            _apdu_exchange_row(
+                4,
+                bytes.fromhex("00B2020400"),
+                bytes.fromhex("0405069000"),
+            ),
+            _apdu_exchange_row(
+                5,
+                bytes.fromhex("00A4040010A0000000871002FF86FF112233445566"),
+            ),
+            _apdu_exchange_row(
+                6,
+                bytes.fromhex("00A40004022F00"),
+                bytes.fromhex("6A82"),
+            ),
+        ]
+
+        annotations = build_stateful_packet_annotations(rows)
+        failed_select = annotations[6]
+
+        self.assertEqual(failed_select.trace_group, "filesystem")
+        self.assertEqual(failed_select.trace_operation, "SELECT")
+        self.assertEqual(failed_select.trace_path, "MF/EF.DIR")
+        self.assertEqual(failed_select.trace_status, "fail 6A82")
+        self.assertEqual(failed_select.trace_parent_frame, 5)
+        self.assertEqual(failed_select.trace_related_frames, (1, 2, 3, 4, 5, 6))
+        self.assertIn("Current selection stayed MF/ADF.USIM", failed_select.trace_reason)
+        self.assertIn("requested file resolved to MF/EF.DIR", failed_select.trace_reason)
+        self.assertIn("outside active context MF/ADF.USIM", failed_select.trace_reason)
+        self.assertTrue(
+            any("outside active context MF/ADF.USIM" in line for line in failed_select.context_lines)
+        )
 
     def test_decode_iccid_bytes_handles_even_and_odd_length_identifiers(self) -> None:
         from Tools.HilBridge.live_decode_state import _decode_iccid_bytes
 
-        even_bytes = bytes.fromhex("89461111111111111112")
+        even_bytes = bytes.fromhex("89881111111111111112")
         self.assertEqual(_decode_iccid_bytes(even_bytes), "98641111111111111121")
 
         # 19-digit ICCID: digit 19 sits in the low nibble of byte 9, the
         # high nibble is the 0xF padding, producing a 0xF1 terminator.
-        odd_bytes = bytes.fromhex("894611111111111111F1")
+        odd_bytes = bytes.fromhex("898811111111111111F1")
         self.assertEqual(_decode_iccid_bytes(odd_bytes), "9864111111111111111")
 
         too_short = bytes.fromhex("89461111")
@@ -625,7 +665,7 @@ class HilBridgeLiveDecodeStateTests(unittest.TestCase):
             _apdu_exchange_row(
                 3,
                 bytes.fromhex("00B000000A"),
-                bytes.fromhex("894611111111111111129000"),
+                bytes.fromhex("898811111111111111129000"),
             ),
             _apdu_exchange_row(4, bytes.fromhex("00A40004023F00")),
         ]
@@ -645,7 +685,7 @@ class HilBridgeLiveDecodeStateTests(unittest.TestCase):
             _apdu_exchange_row(
                 5,
                 bytes.fromhex("00B000000A"),
-                bytes.fromhex("894611111111111111129000"),
+                bytes.fromhex("898811111111111111129000"),
             ),
         ]
         refresh_payload = _proactive_command(2, 0x01, 0x04)
@@ -659,7 +699,7 @@ class HilBridgeLiveDecodeStateTests(unittest.TestCase):
             _apdu_exchange_row(
                 10,
                 bytes.fromhex("00B000000A"),
-                bytes.fromhex("894622222222222222349000"),
+                bytes.fromhex("898822222222222222349000"),
             ),
         ]
 

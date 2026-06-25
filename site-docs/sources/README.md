@@ -69,7 +69,6 @@ powershell -ExecutionPolicy Bypass -File scripts\install\install-windows.ps1
 | `Tools/ApduFuzz/` | Safety-gated eUICC APDU mutation fuzzer (`--i-mean-it` + ICCID/IMSI allow-list) | `yggdrasim-apdu-fuzzer` |
 | `Tools/EumDiag/` | EUM / SM-DP+ "God-Mode": session-key injection + Wireshark/tshark Lua dissector for BF36 BPPs | `yggdrasim-eum-diag` |
 | `Tools/YggdraCore/` *(post-v1 staging)* | In-process 5G core stubs (AUSF / AAnF) for AKA / AKMA flows + BYO-Open5GS provisioning bridge | FastAPI loopback (opt-in via `YGGDRASIM_5GCORE_MODE=stub`) |
-| `Tools/Sunrise6G/` *(post-v1 staging)* | Sunrise-6G QoD / Location stubs feeding the YggdraCore loopback | library only |
 | `Tools/CardBridge/` *(post-v1 staging)* | Loopback HTTP card-relay daemon paired with `yggdrasim_common.card_bridge_auth` | `python -m Tools.CardBridge` |
 | `yggdrasim_common/gui_server/` | Optional Universal GUI Command Center: FastAPI API + pywebview desktop window or headless lab server | `--gui` / `--web-server` |
 | `plugins/` | Runtime-loaded optional plugins (polling, custom commands) discovered at launch | drop-in `register_plugins()` modules |
@@ -546,7 +545,6 @@ its pane layout in the workspace, supports OS clipboard copy/paste, and writes
 - `Tools/ApduFuzz/` - eUICC APDU fuzzer
 - `Tools/EumDiag/` - EUM / SM-DP+ diagnostics + tshark Lua dissector
 - `Tools/YggdraCore/` - in-process AUSF / AAnF stubs, subscription store, BYO-Open5GS bridge *(post-v1 staging)*
-- `Tools/Sunrise6G/` - Sunrise-6G QoD / Location stubs feeding the YggdraCore loopback *(post-v1 staging)*
 - `Tools/CardBridge/` - loopback HTTP card-relay daemon paired with `yggdrasim_common.card_bridge_auth` *(post-v1 staging)*
 - `plugins/` - runtime-loaded optional plugins (polling, custom commands)
 - `tests/` - first-party test suite

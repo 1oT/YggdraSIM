@@ -71,7 +71,7 @@ operator workstation                          rig (modem + simtrace2)
 physical card in PC/SC reader ─┐              ┌─ modem
                                │              │
 yggdrasim-card-bridge          │── SSH ─────  YggdraSIM HIL bridge
-(publishes /apdu over HTTP)    │  RemoteForward (RemoteRelayCardChannel)
+(publishes /apdu over HTTP)    │  SSH forward (RemoteRelayCardChannel)
                                │              │
                               :8642 ←──────── /apdu
                                               │
@@ -97,13 +97,22 @@ Setup, end-to-end:
    yggdrasim-card-bridge --port 8642
    ```
 
-2. **From the rig**, open an SSH `RemoteForward` so the publisher's
-   loopback port is reachable on the rig's loopback interface, and
-   copy the token file across (or read it via `scp` and stash it on
-   the rig with `chmod 600`):
+2. Open the SSH tunnel so the publisher's loopback port is reachable
+   on the rig's loopback interface. Use one of these two equivalent
+   forms, depending on where you run the `ssh` command:
 
    ```bash
-   ssh -fN -R 8642:127.0.0.1:8642 operator@workstation
+   # Run on the rig, connecting to the reader workstation:
+   ssh -fN -L 8642:127.0.0.1:8642 operator@workstation
+
+   # Or run on the reader workstation, connecting to the rig:
+   ssh -fN -R 8642:127.0.0.1:8642 operator@rig-host
+   ```
+
+   Copy the token file to the rig, or read it via `scp` and stash it
+   with `chmod 600`:
+
+   ```bash
    scp operator@workstation:~/.config/yggdrasim/card_bridge/8642.token \
        ~/.config/yggdrasim/card_bridge/8642.token
    chmod 600 ~/.config/yggdrasim/card_bridge/8642.token
@@ -116,18 +125,24 @@ Setup, end-to-end:
    ```bash
    yggdrasim-hil-bridge \
      --remote-card-url http://127.0.0.1:8642/apdu \
-     --remote-card-token-file ~/.config/yggdrasim/card_bridge/8642.token
+     --remote-card-token-file ~/.config/yggdrasim/card_bridge/8642.token \
+     --apdu-timeout-ms 30000
    ```
 
    The bridge logs its card source on startup
    (`Card source: remote (remote: <reader>)`) so the topology is
    visible at a glance. Equivalent env vars are
    `YGGDRASIM_HIL_REMOTE_CARD_URL` and
-   `YGGDRASIM_HIL_REMOTE_CARD_TOKEN_FILE`.
+   `YGGDRASIM_HIL_REMOTE_CARD_TOKEN_FILE`. `--apdu-timeout-ms` is
+   optional; raise it for slow eUICC operations or high-latency SSH
+   paths.
 
 GSMTAP capture, the bridge's own HTTP `/apdu` relay, the supervisor,
 and every YggdraSIM consumer keep working unchanged — they all sit
 upstream of the card-source decision and don't observe the swap.
+The rig-side relay exposes `apduUrl`, `statusUrl`, and `cardResetUrl`;
+YggdraSIM tools on the rig discover that relay through the runtime
+marker while the bridge is active.
 Drop the `--remote-card-url` flag to fall back to the local PC/SC
 path; the existing physically-connected topology is preserved
 byte-for-byte.
@@ -225,8 +240,8 @@ python -m Tools.HilBridge.main --list-readers
 Example:
 
 ```text
-0: HID Global OMNIKEY 3x21 Smart Card Reader [OMNIKEY 3x21 Smart Card Reader] 00 00
-1: Broadcom Corp 58200 [Contacted SmartCard] (0123456789ABCD) 01 00
+0: Example USB Smart Card Reader [Example Reader] 00 00
+1: Example Contacted SmartCard Reader (0123456789ABCD) 01 00
 ```
 
 Use either:
@@ -518,6 +533,9 @@ Current behaviour:
 - `raw APDU flow only` disables GSMTAP and shows only the journal-derived APDU stream in the terminal
 - `raw APDU flow + Wireshark` keeps the raw journal-derived APDU stream in the terminal and launches Wireshark for GSMTAP decode
 - `decoded APDU view` keeps GSMTAP enabled and opens the in-terminal decoded viewer instead of the raw APDU stream
+- the GUI HIL dissector links decoded fields to the selected packet's
+  byte dump when `tshark` exposes PDML offsets; hover a decoded row or
+  byte to highlight the matching range, and click to pin that range
 
 That means the operator flow is now:
 

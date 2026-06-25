@@ -16,9 +16,9 @@ that lights up ``state.chv_references`` / ``state.gp_apps`` /
 profile's image.
 
 The tests deliberately use a real operator BPP (the user's
-``89103000000466311335_test`` profile) so we exercise the same byte
+``89880000000466311335_test`` profile) so we exercise the same byte
 streams that show up in HIL traces. The fixture is checked out at
-``Workspace/LocalSMDPP/profile/89103000000466311335_test.txt``; if
+``Workspace/LocalSMDPP/profile/89880000000466311335_test.txt``; if
 it goes missing the suite skips rather than asserting against
 fabricated data.
 """
@@ -52,7 +52,7 @@ from SIMCARD.state import (
 )
 
 
-_BPP_PATH = Path("Workspace/LocalSMDPP/profile/89103000000466311335_test.txt")
+_BPP_PATH = Path("Workspace/LocalSMDPP/profile/89880000000466311335_test.txt")
 
 
 def _load_image_or_skip(test_case: unittest.TestCase):
@@ -93,7 +93,7 @@ class SaipPinCodesConsumerTests(unittest.TestCase):
         state.profiles.append(
             SimProfileEntry(
                 aid=forced_aid,
-                iccid=image.iccid or "8946000000000000000",
+                iccid=image.iccid or "8988000000000000000",
                 state="enabled",
                 profile_class="operational",
                 profile_name=image.profile_name,
@@ -149,7 +149,7 @@ class SaipSecurityDomainConsumerTests(unittest.TestCase):
         state.profiles.append(
             SimProfileEntry(
                 aid=forced_aid,
-                iccid=image.iccid or "8946000000000000000",
+                iccid=image.iccid or "8988000000000000000",
                 state="enabled",
                 profile_class="operational",
                 profile_name=image.profile_name,
@@ -190,7 +190,7 @@ class SaipSecurityDomainConsumerTests(unittest.TestCase):
         state.profiles.append(
             SimProfileEntry(
                 aid=forced_aid,
-                iccid=image.iccid or "8946000000000000000",
+                iccid=image.iccid or "8988000000000000000",
                 state="enabled",
                 profile_class="operational",
                 profile_name=image.profile_name,
@@ -261,7 +261,7 @@ class SaipRfmConsumerTests(unittest.TestCase):
         state.profiles.append(
             SimProfileEntry(
                 aid=forced_aid,
-                iccid=image.iccid or "8946000000000000000",
+                iccid=image.iccid or "8988000000000000000",
                 state="enabled",
                 profile_class="operational",
                 profile_name=image.profile_name,
@@ -351,7 +351,7 @@ class SaipGenericFileManagementConsumerTests(unittest.TestCase):
         state.profiles.append(
             SimProfileEntry(
                 aid=forced_aid,
-                iccid=image.iccid or "8946000000000000000",
+                iccid=image.iccid or "8988000000000000000",
                 state="enabled",
                 profile_class="operational",
                 profile_name=image.profile_name,
@@ -483,7 +483,7 @@ class BppPinLifecycleTests(unittest.TestCase):
         self.state.profiles.append(
             SimProfileEntry(
                 aid=forced_aid,
-                iccid=self.image.iccid or "8946000000000000000",
+                iccid=self.image.iccid or "8988000000000000000",
                 state="enabled",
                 profile_class="operational",
                 profile_name=self.image.profile_name,
@@ -656,7 +656,7 @@ class Scp03BppKeysWiringTests(unittest.TestCase):
         self.state.profiles.append(
             SimProfileEntry(
                 aid=forced_aid,
-                iccid=image.iccid or "8946000000000000000",
+                iccid=image.iccid or "8988000000000000000",
                 state="enabled",
                 profile_class="operational",
                 profile_name=image.profile_name,

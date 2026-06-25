@@ -40,9 +40,13 @@ from __future__ import annotations
 
 import contextlib
 import io
+import json
 import logging
+import os
 import re
+import shutil
 from dataclasses import asdict, is_dataclass
+from pathlib import Path
 from typing import Any
 
 from .registry import ActionContext, ActionField, ActionSpec, get_registry
@@ -397,8 +401,14 @@ def _dispatch_list_certs_inventory(
 ) -> dict[str, Any]:
     """Report the local SM-DP+ certificate inventory (pure file-system scan)."""
     reader_name = str(reader or "")
-    reader_index = _resolve_reader_index(reader_name)
-    session, channel = _build_session(reader_index)
+    reader_index = 0
+    from SCP11.local_access.config import LocalAccessConfig
+    from SCP11.local_access.session import LocalIsdrSession
+
+    session = LocalIsdrSession(
+        cfg=LocalAccessConfig(READER_INDEX=reader_index),
+        apdu_channel=None,
+    )
     trace_sink = io.StringIO()
     report: dict[str, Any] = {}
     note_parts: list[str] = []
@@ -407,8 +417,6 @@ def _dispatch_list_certs_inventory(
             report = session.list_local_smdp_certificate_inventory() or {}
     except Exception as error:  # noqa: BLE001
         note_parts.append(f"{type(error).__name__}: {error}")
-    finally:
-        _close_channel(channel)
 
     scrubbed = _scrub_bytes(report) if isinstance(report, dict) else {}
     auth_records = scrubbed.get("auth_records") or []
@@ -439,6 +447,106 @@ def _dispatch_list_certs_inventory(
         "inventory": scrubbed,
         "note": "; ".join(note_parts) if note_parts else "ok",
         "trace": _strip_ansi(trace_sink.getvalue()),
+    }
+
+
+def _normalize_import_certificate_role(role: Any, certificate_path: str) -> str:
+    role_s = str(role or "DPauth").strip().lower()
+    if role_s in {"dpauth", "auth", "sm_dpauth", "sm-dpauth"}:
+        return "auth"
+    if role_s in {"dppb", "pb", "sm_dppb", "sm-dppb"}:
+        return "pb"
+    if role_s != "auto":
+        raise ValueError("certificate_role must be DPauth, DPpb, or auto.")
+
+    basename = os.path.basename(str(certificate_path)).upper()
+    if "DPAUTH" in basename or "SM_DPAUTH" in basename:
+        return "auth"
+    if "DPPB" in basename or "SM_DPPB" in basename:
+        return "pb"
+    raise ValueError(
+        "certificate_role=auto could not infer DPauth or DPpb from the file name."
+    )
+
+
+def _local_smdp_import_target_dir(certs_dir: str, role: str) -> Path:
+    role_dir = "SM_DPauth" if role == "auth" else "SM_DPpb"
+    return Path(certs_dir).expanduser().resolve() / "SM-DP+" / role_dir
+
+
+def _copy_local_smdp_import_file(source_path: Path, target_dir: Path, *, overwrite: bool) -> Path:
+    if source_path.is_file() is False:
+        raise ValueError(f"source file does not exist: {source_path}")
+    target_dir.mkdir(parents=True, exist_ok=True)
+    target_path = target_dir / source_path.name
+    if target_path.exists() and overwrite is False:
+        raise ValueError(f"target already exists: {target_path}")
+    if source_path.resolve() != target_path.resolve():
+        shutil.copy2(source_path, target_path)
+    return target_path
+
+
+def _dispatch_import_certificate(
+    ctx: ActionContext,
+    *,
+    certificate_path: Any = None,
+    private_key_path: Any = None,
+    certificate_role: Any = "DPauth",
+    root_ci_pkid: Any = None,
+    server_address: Any = None,
+    overwrite: Any = False,
+) -> dict[str, Any]:
+    cert_s = str(certificate_path or "").strip()
+    if len(cert_s) == 0:
+        raise ValueError("certificate_path is required.")
+
+    from SCP11.local_access.config import LocalAccessConfig
+    from SCP11.local_access.session import LocalIsdrSession
+
+    cfg = LocalAccessConfig()
+    role = _normalize_import_certificate_role(certificate_role, cert_s)
+    role_label = "DPauth" if role == "auth" else "DPpb"
+    overwrite_bool = bool(overwrite)
+    target_dir = _local_smdp_import_target_dir(cfg.CERTS_DIR, role)
+    imported_cert = _copy_local_smdp_import_file(
+        Path(cert_s).expanduser(),
+        target_dir,
+        overwrite=overwrite_bool,
+    )
+
+    imported_key = ""
+    key_s = str(private_key_path or "").strip()
+    if len(key_s) > 0:
+        imported_key_path = _copy_local_smdp_import_file(
+            Path(key_s).expanduser(),
+            target_dir,
+            overwrite=overwrite_bool,
+        )
+        imported_key = str(imported_key_path)
+
+    metadata: dict[str, Any] = {"role": role}
+    if len(imported_key) > 0:
+        metadata["private_key_path"] = os.path.basename(imported_key)
+    root_ci_s = str(root_ci_pkid or "").strip().upper()
+    if len(root_ci_s) > 0:
+        metadata["root_ci_pkid"] = root_ci_s
+    server_s = str(server_address or "").strip()
+    if len(server_s) > 0:
+        metadata["server_address"] = server_s
+    meta_path = Path(str(imported_cert) + ".meta.json")
+    meta_path.write_text(json.dumps(metadata, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+    session = LocalIsdrSession(cfg=cfg, apdu_channel=None)
+    inventory = session.list_local_smdp_certificate_inventory() or {}
+    return {
+        "ok": True,
+        "certificate_role": role_label,
+        "certificate_path": str(imported_cert),
+        "private_key_path": imported_key,
+        "metadata_path": str(meta_path),
+        "certs_dir": cfg.CERTS_DIR,
+        "inventory": _scrub_bytes(inventory) if isinstance(inventory, dict) else {},
+        "note": f"Imported {role_label} certificate into the local SM-DP+ certificate store.",
     }
 
 
@@ -601,6 +709,70 @@ GET_CERTS_INVENTORY_SPEC = ActionSpec(
     requires_card=False,
     streams=False,
     tags=("scp11", "local", "read-only", "certs"),
+)
+
+
+IMPORT_CERTIFICATE_SPEC = ActionSpec(
+    id="scp11_local.import_certificate",
+    subsystem="SCP11 Local",
+    title="Import local SM-DP+ cert",
+    description=(
+        "Copy a DPauth or DPpb certificate into the persistent local "
+        "SM-DP+ certificate store and write the metadata sidecar used by "
+        "LocalSgp26CertStore."
+    ),
+    inputs=(
+        ActionField(
+            name="certificate_path",
+            label="Certificate path",
+            kind="path",
+            required=True,
+            help="Certificate file to copy into Workspace/LocalSMDPP/certs.",
+        ),
+        ActionField(
+            name="private_key_path",
+            label="Private key path",
+            kind="path",
+            required=False,
+            help="Optional matching private key copied next to the certificate.",
+        ),
+        ActionField(
+            name="certificate_role",
+            label="Role",
+            kind="enum",
+            required=True,
+            default="DPauth",
+            choices=["DPauth", "DPpb", "auto"],
+            help="SM-DP+ certificate role for local profile delivery.",
+        ),
+        ActionField(
+            name="root_ci_pkid",
+            label="Root CI PKID",
+            kind="hex",
+            required=False,
+            help="Optional root CI PKID override written to the metadata sidecar.",
+        ),
+        ActionField(
+            name="server_address",
+            label="SM-DP+ address",
+            kind="string",
+            required=False,
+            help="Optional server address written to the metadata sidecar.",
+        ),
+        ActionField(
+            name="overwrite",
+            label="Overwrite existing file",
+            kind="bool",
+            required=False,
+            default=False,
+            help="Replace an existing imported file with the same basename.",
+        ),
+    ),
+    output_kind="json",
+    dispatcher=_dispatch_import_certificate,
+    requires_card=False,
+    streams=False,
+    tags=("scp11", "local", "certs", "import"),
 )
 
 
@@ -1541,6 +1713,7 @@ get_registry().register(GET_EUICC_INFO2_SPEC)
 get_registry().register(GET_CONFIGURED_DATA_SPEC)
 get_registry().register(LIST_NOTIFICATIONS_SPEC)
 get_registry().register(GET_CERTS_INVENTORY_SPEC)
+get_registry().register(IMPORT_CERTIFICATE_SPEC)
 get_registry().register(DISCOVER_SPEC)
 get_registry().register(ENABLE_PROFILE_SPEC)
 get_registry().register(DISABLE_PROFILE_SPEC)

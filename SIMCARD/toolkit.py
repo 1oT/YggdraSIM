@@ -3766,7 +3766,7 @@ class ToolkitLogic:
         """
 
         toolkit = self.state.toolkit
-        dns_server = str(toolkit.ipa_poll_dns_server or "").strip() or "8.8.8.8"
+        dns_server = str(toolkit.ipa_poll_dns_server or "").strip() or "192.0.2.53"
         dns_port = max(1, min(0xFFFF, int(toolkit.ipa_poll_dns_port or 53)))
         buffer_size = max(0x40, min(0xFFFF, int(toolkit.ipa_poll_buffer_size or 0x0400)))
         receive_size = max(1, min(0xFF, int(toolkit.ipa_poll_receive_size or 0xFA)))

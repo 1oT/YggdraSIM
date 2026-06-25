@@ -101,7 +101,7 @@ def parse_placeholder_assignment_tokens(tokens: Sequence[str]) -> dict[str, str]
         if match is None:
             raise ValueError(
                 "Placeholder assignments must use NAME=value, for example "
-                "ICCID=89461111111111111112 or {IMSI}=123456781234567."
+                "ICCID=89881111111111111112 or {IMSI}=123456781234567."
             )
         name = normalize_placeholder_name(match.group("name"))
         value = str(match.group("value") or "").strip()

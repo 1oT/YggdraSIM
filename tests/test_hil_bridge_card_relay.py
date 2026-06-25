@@ -214,7 +214,7 @@ class HilBridgeCardRelayTests(unittest.TestCase):
 
         with mock.patch(
             "Tools.HilBridge.pcsc._load_smartcard_runtime",
-            return_value=(lambda: [reader], "exclusive", unpower_disposition, "leave", None, RuntimeError),
+            return_value=(lambda: [reader], "exclusive", "shared", unpower_disposition, "leave", None, RuntimeError),
         ):
             with mock.patch("Tools.HilBridge.pcsc.time.sleep") as sleep_mock:
                 channel = PcscCardChannel()
@@ -229,6 +229,21 @@ class HilBridgeCardRelayTests(unittest.TestCase):
         self.assertEqual(second_connection.connect_mode, "exclusive")
         sleep_mock.assert_called_once_with(0.2)
 
+    def test_pcsc_card_channel_can_connect_in_shared_mode(self) -> None:
+        connection = _FakeReaderConnection()
+        reader = mock.Mock()
+        reader.createConnection.return_value = connection
+
+        with mock.patch(
+            "Tools.HilBridge.pcsc._load_smartcard_runtime",
+            return_value=(lambda: [reader], "exclusive", "shared", "unpower", "leave", None, RuntimeError),
+        ):
+            channel = PcscCardChannel(share_mode="shared")
+            channel.connect()
+
+        self.assertTrue(connection.connected)
+        self.assertEqual(connection.connect_mode, "shared")
+
     def test_pcsc_card_channel_reset_unwraps_exclusive_connection_decorator(self) -> None:
         first_connection = _FakeReaderConnection()
         second_connection = _FakeReaderConnection()
@@ -241,7 +256,7 @@ class HilBridgeCardRelayTests(unittest.TestCase):
 
         with mock.patch(
             "Tools.HilBridge.pcsc._load_smartcard_runtime",
-            return_value=(lambda: [reader], "exclusive", unpower_disposition, "leave", _wrap, RuntimeError),
+            return_value=(lambda: [reader], "exclusive", "shared", unpower_disposition, "leave", _wrap, RuntimeError),
         ):
             with mock.patch("Tools.HilBridge.pcsc.time.sleep"):
                 channel = PcscCardChannel()
@@ -333,6 +348,42 @@ class HilBridgeCardRelayTests(unittest.TestCase):
             },
         )
         self.assertEqual(exchanges, [("scp11-test", bytes.fromhex("00A4040000"))])
+
+    def test_apdu_relay_service_exposes_card_reset_endpoint(self) -> None:
+        reset_sessions: list[str] = []
+
+        def exchange_callback(apdu: bytes, *, session_id: str = "") -> tuple[bytes, int, int]:
+            del apdu, session_id
+            return b"", 0x90, 0x00
+
+        def status_callback() -> dict[str, str]:
+            return {"reader": "Mock Reader", "atr": "3B00"}
+
+        def card_reset_callback(*, session_id: str = "") -> dict[str, str]:
+            reset_sessions.append(session_id)
+            return {"status": "reset", "reader": "Mock Reader", "atr": "3B9F"}
+
+        relay = HilBridgeApduRelayService(
+            ApduRelayConfig(host="127.0.0.1", port=0, enabled=True),
+            exchange_callback=exchange_callback,
+            status_callback=status_callback,
+            card_reset_callback=card_reset_callback,
+        )
+        relay.start()
+        try:
+            reset_url = relay.card_reset_url
+            status_payload = _read_json(relay.status_url)
+            reset_payload = _post_json(
+                reset_url,
+                {"sessionId": "scp11-test"},
+            )
+        finally:
+            relay.stop()
+
+        self.assertEqual(status_payload["cardResetUrl"], reset_url)
+        self.assertEqual(reset_payload["status"], "reset")
+        self.assertEqual(reset_payload["atr"], "3B9F")
+        self.assertEqual(reset_sessions, ["scp11-test"])
 
     def test_hil_bridge_server_resets_reader_for_card_reset_relay_request(self) -> None:
         card = types.SimpleNamespace(

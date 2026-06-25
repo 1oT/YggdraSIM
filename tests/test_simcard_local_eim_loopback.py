@@ -84,7 +84,7 @@ class _SimulatorEimLoopbackBase(unittest.TestCase):
                 {
                     "eim_id": "2.25.311782205282738360923618091971140414400",
                     "eim_id_type": "oid",
-                    "eim_fqdn": "yggdrasim.eim.test.1ot.com",
+                    "eim_fqdn": "eim.example.test",
                     "counter_value": 0,
                     "association_token": -1,
                     "supported_protocol_bits": [0],

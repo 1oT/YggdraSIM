@@ -92,7 +92,7 @@ class ParseEditorJsonTemplateAwareTests(unittest.TestCase):
     def test_template_aware_parser_handles_defined_tokens(self) -> None:
         defined = dict(_BASE_TEMPLATE)
         defined["__ygg_token_defs__"] = {
-            "ICCID": {"hex": "89461111111111111112"},
+            "ICCID": {"hex": "89881111111111111112"},
         }
         document, paths, tokens = parse_editor_json_template_aware(
             json.dumps(defined)
@@ -102,7 +102,7 @@ class ParseEditorJsonTemplateAwareTests(unittest.TestCase):
         self.assertNotIn("ICCID", set(tokens))
         self.assertEqual(
             document["sections"]["header"]["iccid"],
-            bytes.fromhex("89461111111111111112"),
+            bytes.fromhex("89881111111111111112"),
         )
 
 

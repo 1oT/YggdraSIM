@@ -1,4 +1,6 @@
 import base64
+import contextlib
+import io
 import os
 import unittest
 import importlib.util
@@ -10,6 +12,7 @@ import ssl
 import urllib.error
 import urllib.request
 from pathlib import Path
+from unittest import mock
 
 from cryptography import x509 as crypto_x509
 from cryptography.hazmat.primitives import hashes, serialization
@@ -182,6 +185,7 @@ class _FakeHttpConnection:
         self.send_error = None
         self.response_error = None
         self.closed = False
+        self.sock = None
 
     def connect(self):
         self.calls.append(("connect",))
@@ -221,6 +225,16 @@ class RecordingHttpStageClient(Es9LikeClient):
         error: Exception,
     ) -> None:
         self.logged_failures.append((label, endpoint, stage, type(error).__name__, str(error)))
+
+
+class _FakeTlsSocket:
+    def __init__(self, certificate_der: bytes):
+        self._certificate_der = bytes(certificate_der)
+
+    def getpeercert(self, binary_form: bool = False) -> bytes | None:
+        if binary_form:
+            return self._certificate_der
+        return None
 
 
 def build_test_ca_and_leaf(hostname: str) -> tuple[bytes, bytes]:
@@ -796,6 +810,50 @@ class Es9LikeClientTransportLogGatingTests(unittest.TestCase):
         self.assertIn("transport: connect/TLS completed in", captured)
         self.assertIn("transport: request sent in", captured)
         self.assertIn("transport: response headers received in", captured)
+
+    def test_pinned_tls_spki_mismatch_is_hidden_when_debug_off(self) -> None:
+        from yggdrasim_common.process_debug import GLOBAL_DEBUG_ENV
+
+        client = RecordingHttpStageClient(base_url="https://rsp.example.com")
+        leaf_der, _ = build_test_ca_and_leaf("rsp.example.com")
+        client.connection.sock = _FakeTlsSocket(leaf_der)
+        request = urllib.request.Request("https://rsp.example.com/gsma/rsp2/asn1")
+        buffer = io.StringIO()
+
+        with mock.patch.dict(os.environ, {GLOBAL_DEBUG_ENV: "0"}, clear=False):
+            with contextlib.redirect_stdout(buffer):
+                with client._open_http_response(
+                    request,
+                    None,
+                    request.full_url,
+                    label="eIM",
+                    pinned_tls_spki=b"\x01",
+                ):
+                    pass
+
+        self.assertNotIn("pinned TLS SPKI does not match", buffer.getvalue())
+
+    def test_pinned_tls_spki_mismatch_surfaces_when_debug_on(self) -> None:
+        from yggdrasim_common.process_debug import GLOBAL_DEBUG_ENV
+
+        client = RecordingHttpStageClient(base_url="https://rsp.example.com")
+        leaf_der, _ = build_test_ca_and_leaf("rsp.example.com")
+        client.connection.sock = _FakeTlsSocket(leaf_der)
+        request = urllib.request.Request("https://rsp.example.com/gsma/rsp2/asn1")
+        buffer = io.StringIO()
+
+        with mock.patch.dict(os.environ, {GLOBAL_DEBUG_ENV: "1"}, clear=False):
+            with contextlib.redirect_stdout(buffer):
+                with client._open_http_response(
+                    request,
+                    None,
+                    request.full_url,
+                    label="eIM",
+                    pinned_tls_spki=b"\x01",
+                ):
+                    pass
+
+        self.assertIn("pinned TLS SPKI does not match", buffer.getvalue())
 
 
 if __name__ == "__main__":

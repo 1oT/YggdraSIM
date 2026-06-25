@@ -267,7 +267,7 @@ def _next_generated_iccid(profiles: list[SimProfileEntry], seed: str = "") -> st
     if len(seed) > 0 and seed[-2:].isdigit():
         suffix = int(seed[-2:]) + 1
     while True:
-        candidate = f"894611111111111111{suffix:02d}"
+        candidate = f"898811111111111111{suffix:02d}"
         if candidate not in used:
             return candidate
         suffix += 1

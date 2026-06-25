@@ -61,11 +61,13 @@ local copy in subsequent invocations.
 | `--port` | `8642` | TCP listen port. |
 | `--reader-index` | `0` | Position within the local PC/SC reader list. |
 | `--reader-name` | empty | Substring match; overrides `--reader-index`. |
+| `--pcsc-share-mode` | `shared` | PC/SC sharing mode. `shared` avoids conflicts with GUI reader probes; use `exclusive` only when no other local process may touch the reader. |
 | `--token-file` | `${XDG_CONFIG_HOME:-~/.config}/yggdrasim/card_bridge/<port>.token` | If the file exists, the bridge reads it; if missing, generates a fresh token and writes it 0600. |
 | `--no-token` | off | Run unauthenticated. Refused on non-loopback bind. |
 | `--audit` | off | Emit a header-only audit record per APDU. |
 | `--audit-full-apdu` | off | Also log full APDU and response hex. **Captures PIN material — only enable for forensic work on test cards.** |
 | `--audit-logger-name` | `yggdrasim.card_bridge.audit` | Name of the Python logger that receives audit records. |
+| `--apdu-timeout-ms` | `YGGDRASIM_HIL_APDU_TIMEOUT_MS`, fallback `5000` | Maximum PC/SC APDU wait time. Raise for slow eUICC operations over a tunnel. |
 
 ## Wire protocol
 

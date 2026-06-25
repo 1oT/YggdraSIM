@@ -297,7 +297,7 @@ class HilBridgeLiveDecodeTuiTests(unittest.TestCase):
         annotations = {
             1: StatefulFrameAnnotation(
                 frame_number=1,
-                summary_suffix="STK OPEN CHANNEL | CH1 OPEN udp-client-remote://8.8.8.8:53",
+                summary_suffix="STK OPEN CHANNEL | CH1 OPEN udp-client-remote://192.0.2.53:53",
                 channel_session_id=1,
                 channel_number=1,
                 channel_poll_index=1,
@@ -406,7 +406,7 @@ class HilBridgeLiveDecodeTuiTests(unittest.TestCase):
         annotations = {
             1: StatefulFrameAnnotation(
                 frame_number=1,
-                summary_suffix="STK OPEN CHANNEL | CH1 OPEN udp-client-remote://8.8.8.8:53",
+                summary_suffix="STK OPEN CHANNEL | CH1 OPEN udp-client-remote://192.0.2.53:53",
                 channel_session_id=1,
                 channel_number=1,
                 channel_poll_index=1,
@@ -747,6 +747,72 @@ class HilBridgeLiveDecodeTuiTests(unittest.TestCase):
 
         self.assertEqual(hidden_primary, "CLOSED")
         self.assertIsNone(hidden_secondary)
+
+    def test_summary_filter_matches_info_and_state_summary_suffix(self) -> None:
+        from Tools.HilBridge.live_decode_state import StatefulFrameAnnotation
+        from Tools.HilBridge.live_decode_tui import _summary_row_matches_filter
+
+        row = self._summary_row(1, info="FETCH")
+        annotation = StatefulFrameAnnotation(
+            frame_number=1,
+            summary_suffix="STK OPEN CHANNEL | CH1 OPEN tcp-client-remote://192.0.2.4:443",
+        )
+
+        self.assertTrue(
+            _summary_row_matches_filter(
+                row,
+                annotation,
+                "fetch",
+                show_expert_details=True,
+            )
+        )
+        self.assertTrue(
+            _summary_row_matches_filter(
+                row,
+                annotation,
+                "open channel",
+                show_expert_details=True,
+            )
+        )
+        self.assertTrue(
+            _summary_row_matches_filter(
+                row,
+                annotation,
+                "192.0.2.4",
+                show_expert_details=True,
+            )
+        )
+        self.assertFalse(
+            _summary_row_matches_filter(
+                row,
+                annotation,
+                "read binary",
+                show_expert_details=True,
+            )
+        )
+
+    def test_filter_summary_rows_requires_all_query_terms(self) -> None:
+        from Tools.HilBridge.live_decode_state import StatefulFrameAnnotation
+        from Tools.HilBridge.live_decode_tui import _filter_summary_rows
+
+        rows = [
+            self._summary_row(1, info="FETCH"),
+            self._summary_row(2, info="READ BINARY"),
+            self._summary_row(3, info="STATUS"),
+        ]
+        annotations = {
+            1: StatefulFrameAnnotation(frame_number=1, summary_suffix="STK FETCH PENDING 18B"),
+            3: StatefulFrameAnnotation(frame_number=3, summary_suffix="STK OPEN CHANNEL"),
+        }
+
+        filtered = _filter_summary_rows(
+            rows,
+            annotations,
+            "stk fetch",
+            show_expert_details=True,
+        )
+
+        self.assertEqual([int(row.number) for row in filtered], [1])
 
     def test_packet_route_text_hides_loopback_endpoints(self) -> None:
         from Tools.HilBridge.live_decode_tui import _packet_route_text
@@ -1223,7 +1289,11 @@ class HilBridgeLiveDecodeTuiTests(unittest.TestCase):
     def test_hil_tui_css_uses_nord_selectors_for_tmux_lists_and_modal_controls(self) -> None:
         app = self._build_app()
 
-        self.assertIn("PaneLayoutPicker, TraceSavePicker, CaptureOpenPicker, KeybindHelpScreen", app.CSS)
+        self.assertIn(
+            "PaneLayoutPicker, TraceSavePicker, CaptureOpenPicker, SummaryFilterPrompt, KeybindHelpScreen",
+            app.CSS,
+        )
+        self.assertIn("#chrome_exit_button", app.CSS)
         self.assertIn("#summary_tree > .tree--cursor", app.CSS)
         self.assertIn("Input > .input--cursor", app.CSS)
         self.assertIn("Button.-primary", app.CSS)
@@ -1812,7 +1882,7 @@ class HilBridgeLiveDecodeTuiTests(unittest.TestCase):
             annotations = {
                 1: StatefulFrameAnnotation(
                     frame_number=1,
-                    summary_suffix="STK OPEN CHANNEL | CH1 OPEN udp-client-remote://8.8.8.8:53",
+                    summary_suffix="STK OPEN CHANNEL | CH1 OPEN udp-client-remote://192.0.2.53:53",
                     channel_session_id=1,
                     channel_number=1,
                     channel_poll_index=1,
@@ -1900,20 +1970,42 @@ class HilBridgeLiveDecodeTuiTests(unittest.TestCase):
                         )
                         self.assertTrue(
                             any(
-                                label.startswith("Poll 1")
+                                label.startswith("Poll (")
                                 for label in top_level_labels
                             ),
-                            msg="Poll 1 must be a top-level sibling of STK/ETSI FS/Timer groups",
+                            msg="Poll category must be a top-level sibling of STK/ETSI FS/Timer groups",
                         )
 
-                        poll_node = next(
+                        poll_root_node = next(
                             node
                             for node in summary_tree.root.children
-                            if "Poll 1" in getattr(node.label, "plain", str(node.label))
+                            if getattr(node.label, "plain", str(node.label)).startswith("Poll (")
+                        )
+                        poll_node = next(
+                            node
+                            for node in poll_root_node.children
+                            if getattr(node.label, "plain", str(node.label)).startswith("Poll 1")
+                        )
+                        target_labels = [
+                            getattr(node.label, "plain", str(node.label))
+                            for node in poll_node.children
+                        ]
+                        self.assertEqual(len(target_labels), 1)
+                        self.assertTrue(
+                            any(
+                                label.startswith("eim.example.test")
+                                for label in target_labels
+                            ),
+                            msg=f"Expected eIM target below Poll 1, got {target_labels!r}",
+                        )
+                        target_node = next(
+                            node
+                            for node in poll_node.children
+                            if getattr(node.label, "plain", str(node.label)).startswith("eim.example.test")
                         )
                         poll_child_labels = [
                             getattr(node.label, "plain", str(node.label))
-                            for node in poll_node.children
+                            for node in target_node.children
                         ]
                         self.assertTrue(
                             any(
@@ -1929,12 +2021,12 @@ class HilBridgeLiveDecodeTuiTests(unittest.TestCase):
                         )
                         dns_node = next(
                             node
-                            for node in poll_node.children
+                            for node in target_node.children
                             if getattr(node.label, "plain", str(node.label)).startswith("DNS ")
                         )
                         fqdn_node = next(
                             node
-                            for node in poll_node.children
+                            for node in target_node.children
                             if getattr(node.label, "plain", str(node.label)).startswith("eIM ")
                         )
                         dns_frame_labels = [
@@ -1949,7 +2041,7 @@ class HilBridgeLiveDecodeTuiTests(unittest.TestCase):
                         self.assertEqual(len(fqdn_frame_labels), 4)
                         self.assertTrue(
                             any(
-                                "STK OPEN CHANNEL | OPEN udp-client-remote://8.8.8.8:53" in label
+                                "STK OPEN CHANNEL | OPEN udp-client-remote://192.0.2.53:53" in label
                                 for label in dns_frame_labels
                             )
                         )
@@ -2034,19 +2126,28 @@ class HilBridgeLiveDecodeTuiTests(unittest.TestCase):
                         await pilot.pause()
 
                         summary_tree = app.query_one("#summary_tree", Tree)
-                        poll_node = next(
+                        poll_root_node = next(
                             node
                             for node in summary_tree.root.children
-                            if "Poll 1" in getattr(node.label, "plain", str(node.label))
+                            if getattr(node.label, "plain", str(node.label)).startswith("Poll (")
+                        )
+                        poll_node = next(
+                            node
+                            for node in poll_root_node.children
+                            if getattr(node.label, "plain", str(node.label)).startswith("Poll 1")
                         )
                         # The test endpoint is tcp://192.0.2.4:443, which is
                         # classified as an eIM leg (port 443 / TCP) rather
                         # than a DNS lookup. The orphan eIM still gets a
-                        # standalone poll; we simply look up the session by
-                        # its eIM label instead of a DNS one.
-                        session_node = next(
+                        # standalone target node in the poll cycle.
+                        target_node = next(
                             node
                             for node in poll_node.children
+                            if "192.0.2.4:443" in getattr(node.label, "plain", str(node.label))
+                        )
+                        session_node = next(
+                            node
+                            for node in target_node.children
                             if getattr(node.label, "plain", str(node.label)).startswith("eIM ")
                         )
                         session_labels = [
@@ -2727,6 +2828,251 @@ class HilBridgeLiveDecodeTuiTests(unittest.TestCase):
         self.assertTrue(render_calls[1])
         self.assertFalse(app._summary_rebuild_pending)
 
+    def test_summary_mouse_wheel_disables_follow_tail(self) -> None:
+        app = self._build_app()
+        app._follow_tail = True
+        event = SimpleNamespace(widget=SimpleNamespace(id="summary_tree"))
+
+        with mock.patch.object(app, "_refresh_captions") as captions_mock, mock.patch.object(
+            app, "_refresh_status_line"
+        ) as status_mock:
+            app.on_mouse_scroll_up(event)
+
+        self.assertFalse(app._follow_tail)
+        captions_mock.assert_called_once()
+        status_mock.assert_called_once()
+
+    def test_summary_mouse_wheel_ignores_non_summary_widgets(self) -> None:
+        app = self._build_app()
+        app._follow_tail = True
+        event = SimpleNamespace(widget=SimpleNamespace(id="detail_view"))
+
+        with mock.patch.object(app, "_refresh_captions") as captions_mock, mock.patch.object(
+            app, "_refresh_status_line"
+        ) as status_mock:
+            app.on_mouse_scroll_up(event)
+
+        self.assertTrue(app._follow_tail)
+        captions_mock.assert_not_called()
+        status_mock.assert_not_called()
+
+    def test_render_summary_tree_preserves_scroll_on_passive_selection_change(self) -> None:
+        app = self._build_app()
+        app._selected_frame_number = 7
+        app._displayed_selected_frame_number = 6
+        scroll_calls: list[dict[str, float | bool]] = []
+
+        class FakeTree:
+            scroll_x = 3.0
+            scroll_y = 42.0
+            app = None
+
+            def scroll_to(self, **kwargs) -> None:
+                scroll_calls.append(dict(kwargs))
+
+        fake_tree = FakeTree()
+
+        with mock.patch.object(app, "_summary_widget", return_value=fake_tree):
+            with mock.patch.object(app, "_rebuild_summary_view"):
+                with mock.patch.object(app, "_sync_summary_selection") as sync_mock:
+                    app._render_summary_tree_now(scroll=False)
+
+        sync_mock.assert_called_once_with(
+            scroll=False,
+            selection_target_changed=False,
+        )
+        self.assertEqual(scroll_calls, [{"x": 3.0, "y": 42.0, "animate": False}])
+
+    def test_live_stream_additions_force_context_tree_render(self) -> None:
+        app = self._build_app()
+        app._summary_view_mode = "context"
+        new_row = self._summary_row(1, info="FETCH")
+
+        with mock.patch.object(app, "_rebuild_state_annotations"):
+            with mock.patch.object(app, "_refresh_summary_tree_visual") as visual_mock:
+                with mock.patch.object(app, "_refresh_captions"):
+                    with mock.patch.object(app, "_refresh_status_line"):
+                        with mock.patch.object(app, "_schedule_detail_refresh"):
+                            app._apply_live_stream_additions([new_row])
+
+        visual_mock.assert_called_once_with(scroll=True, force=True)
+
+    def test_live_stream_additions_follow_tail_advances_selected_packet(self) -> None:
+        app = self._build_app()
+        app._summary_view_mode = "context"
+        app._base_rows = [self._summary_row(1, info="SELECT")]
+        app._rows = list(app._base_rows)
+        app._selected_frame_number = 1
+        app._highlighted_node_key = "Status"
+        app._follow_tail = True
+
+        with mock.patch.object(app, "_rebuild_state_annotations"):
+            with mock.patch.object(app, "_refresh_summary_tree_visual") as visual_mock:
+                with mock.patch.object(app, "_refresh_captions"):
+                    with mock.patch.object(app, "_refresh_status_line"):
+                        with mock.patch.object(app, "_schedule_detail_refresh") as detail_mock:
+                            app._apply_live_stream_additions(
+                                [self._summary_row(2, info="STATUS")]
+                            )
+
+        self.assertEqual(app._selected_frame_number, 2)
+        self.assertIsNone(app._highlighted_node_key)
+        visual_mock.assert_called_once_with(scroll=True, force=True)
+        detail_mock.assert_called_once()
+
+    def test_live_stream_additions_manual_browse_preserves_selected_packet(self) -> None:
+        app = self._build_app()
+        app._summary_view_mode = "context"
+        app._base_rows = [self._summary_row(1, info="SELECT")]
+        app._rows = list(app._base_rows)
+        app._selected_frame_number = 1
+        app._follow_tail = False
+
+        with mock.patch.object(app, "_rebuild_state_annotations"):
+            with mock.patch.object(app, "_refresh_summary_tree_visual") as visual_mock:
+                with mock.patch.object(app, "_refresh_captions"):
+                    with mock.patch.object(app, "_refresh_status_line"):
+                        with mock.patch.object(app, "_schedule_detail_refresh"):
+                            app._apply_live_stream_additions(
+                                [self._summary_row(2, info="STATUS")]
+                            )
+
+        self.assertEqual(app._selected_frame_number, 1)
+        visual_mock.assert_called_once_with(scroll=False, force=True)
+
+    def test_apply_summary_refresh_forces_context_tree_render(self) -> None:
+        app = self._build_app()
+        app._summary_view_mode = "context"
+        rows = [self._summary_row(1, info="FETCH")]
+
+        with mock.patch.object(app, "_merge_polling_rows_with_live_tail", return_value=rows):
+            with mock.patch.object(app, "_rebuild_state_annotations"):
+                with mock.patch.object(app, "_refresh_summary_tree_visual") as visual_mock:
+                    with mock.patch.object(app, "_refresh_captions"):
+                        with mock.patch.object(app, "_schedule_detail_refresh"):
+                            with mock.patch.object(app, "_refresh_status_line"):
+                                with mock.patch.object(app, "_seed_live_stream_from_base_rows"):
+                                    app._apply_summary_refresh(
+                                        rows,
+                                        "",
+                                        pre_parse_size=24,
+                                        capture_generation=int(app._capture_generation),
+                                    )
+
+        visual_mock.assert_called_once_with(scroll=True, force=True)
+
+    def test_apply_summary_refresh_follow_tail_advances_selected_packet(self) -> None:
+        app = self._build_app()
+        app._summary_view_mode = "context"
+        app._base_rows = [self._summary_row(1, info="SELECT")]
+        app._rows = list(app._base_rows)
+        app._selected_frame_number = 1
+        app._highlighted_node_key = "Status"
+        app._follow_tail = True
+        rows = [
+            self._summary_row(1, info="SELECT"),
+            self._summary_row(2, info="STATUS"),
+        ]
+
+        with mock.patch.object(app, "_merge_polling_rows_with_live_tail", return_value=rows):
+            with mock.patch.object(app, "_rebuild_state_annotations"):
+                with mock.patch.object(app, "_refresh_summary_tree_visual"):
+                    with mock.patch.object(app, "_refresh_captions"):
+                        with mock.patch.object(app, "_schedule_detail_refresh") as detail_mock:
+                            with mock.patch.object(app, "_refresh_status_line"):
+                                with mock.patch.object(app, "_seed_live_stream_from_base_rows"):
+                                    app._apply_summary_refresh(
+                                        rows,
+                                        "",
+                                        pre_parse_size=24,
+                                        capture_generation=int(app._capture_generation),
+                                    )
+
+        self.assertEqual(app._selected_frame_number, 2)
+        self.assertIsNone(app._highlighted_node_key)
+        detail_mock.assert_called_once()
+
+    def test_apply_summary_filter_selects_first_matching_packet(self) -> None:
+        app = self._build_app()
+        app._base_rows = [
+            self._summary_row(1, info="FETCH"),
+            self._summary_row(2, info="READ BINARY"),
+            self._summary_row(3, info="UPDATE BINARY"),
+        ]
+        app._rows = app._decorate_summary_rows(app._base_rows)
+        app._selected_frame_number = 1
+        app._follow_tail = True
+
+        with mock.patch.object(app, "_refresh_summary_tree_visual") as visual_mock:
+            with mock.patch.object(app, "_sync_summary_selection") as sync_mock:
+                with mock.patch.object(app, "_schedule_detail_refresh") as detail_mock:
+                    with mock.patch.object(app, "_refresh_captions") as captions_mock:
+                        with mock.patch.object(app, "_refresh_status_line") as status_mock:
+                            app._apply_summary_filter("binary")
+
+        self.assertEqual(app._summary_filter_text, "binary")
+        self.assertEqual(app._selected_frame_number, 2)
+        self.assertFalse(app._follow_tail)
+        visual_mock.assert_called_once_with(scroll=False, force=True)
+        sync_mock.assert_called_once_with(scroll=True)
+        detail_mock.assert_called_once()
+        captions_mock.assert_called_once()
+        status_mock.assert_called_once()
+        status_message = str(status_mock.call_args.kwargs.get("message") or "")
+        self.assertIn("2/3", status_message)
+
+    def test_rebuild_summary_view_passes_only_filtered_rows_to_tree(self) -> None:
+        app = self._build_app()
+        app._base_rows = [
+            self._summary_row(1, info="FETCH"),
+            self._summary_row(2, info="READ BINARY"),
+            self._summary_row(3, info="UPDATE BINARY"),
+        ]
+        app._rows = app._decorate_summary_rows(app._base_rows)
+        app._summary_filter_text = "read"
+        captured_rows: list[int] = []
+        fake_tree = SimpleNamespace(
+            root=SimpleNamespace(children=[]),
+            show_root=False,
+        )
+
+        def fake_populate(_tree, rows, *_args, **_kwargs):
+            captured_rows.extend(int(row.number) for row in rows)
+            return {2: object()}
+
+        with mock.patch.object(app, "_summary_widget", return_value=fake_tree):
+            with mock.patch("Tools.HilBridge.live_decode_tui._populate_summary_tree", side_effect=fake_populate):
+                with mock.patch("Tools.HilBridge.live_decode_tui._collect_summary_tree_header_nodes", return_value={}):
+                    app._rebuild_summary_view()
+
+        self.assertEqual(captured_rows, [2])
+        self.assertEqual(app._selected_frame_number, 2)
+
+    def test_clear_summary_filter_restores_unfiltered_summary_view(self) -> None:
+        app = self._build_app()
+        app._base_rows = [
+            self._summary_row(1, info="FETCH"),
+            self._summary_row(2, info="READ BINARY"),
+        ]
+        app._rows = app._decorate_summary_rows(app._base_rows)
+        app._summary_filter_text = "missing"
+        app._selected_frame_number = None
+
+        with mock.patch.object(app, "_refresh_summary_tree_visual") as visual_mock:
+            with mock.patch.object(app, "_sync_summary_selection") as sync_mock:
+                with mock.patch.object(app, "_schedule_detail_refresh") as detail_mock:
+                    with mock.patch.object(app, "_refresh_captions") as captions_mock:
+                        with mock.patch.object(app, "_refresh_status_line") as status_mock:
+                            app.action_clear_summary_filter()
+
+        self.assertEqual(app._summary_filter_text, "")
+        self.assertEqual(app._selected_frame_number, 2)
+        visual_mock.assert_called_once_with(scroll=False, force=True)
+        sync_mock.assert_called_once_with(scroll=True)
+        detail_mock.assert_called_once()
+        captions_mock.assert_called_once()
+        status_mock.assert_called_once()
+
     def test_drain_live_stream_tick_stops_stream_when_not_alive(self) -> None:
         app = self._build_app()
 
@@ -3018,11 +3364,11 @@ class HilBridgeLiveDecodeTuiTests(unittest.TestCase):
         )
 
         self.assertEqual(
-            _classify_session_role("8.8.8.8:53", "udp-client-remote"),
+            _classify_session_role("192.0.2.53:53", "udp-client-remote"),
             _SESSION_ROLE_DNS,
         )
         self.assertEqual(
-            _classify_session_role("194.29.54.4:443", "tcp-client-remote"),
+            _classify_session_role("198.51.100.4:443", "tcp-client-remote"),
             _SESSION_ROLE_EIM,
         )
         # Port 443 over UDP (QUIC/DTLS-style) still classifies as eIM.
@@ -3063,14 +3409,14 @@ class HilBridgeLiveDecodeTuiTests(unittest.TestCase):
                 frame_number=10,
                 summary_suffix=(
                     "STK OPEN CHANNEL | CH1 OPEN "
-                    "tcp-client-remote://194.29.54.4:443 APN:Terminal.apn"
+                    "tcp-client-remote://198.51.100.4:443 APN:Terminal.apn"
                 ),
             ),
             20: StatefulFrameAnnotation(
                 frame_number=20,
                 summary_suffix=(
                     "STK OPEN CHANNEL | CH2 OPEN "
-                    "udp-client-remote://8.8.8.8:53 APN:Terminal.apn"
+                    "udp-client-remote://192.0.2.53:53 APN:Terminal.apn"
                 ),
             ),
         }
@@ -3088,11 +3434,11 @@ class HilBridgeLiveDecodeTuiTests(unittest.TestCase):
         self.assertEqual(len(poll_1_sessions), 1)
         self.assertEqual(len(poll_2_sessions), 1)
         self.assertTrue(
-            poll_1_sessions[0][1].startswith("eIM - 194.29.54.4:443"),
+            poll_1_sessions[0][1].startswith("eIM - 198.51.100.4:443"),
             msg=f"Unexpected first-poll label: {poll_1_sessions[0][1]!r}",
         )
         self.assertTrue(
-            poll_2_sessions[0][1].startswith("DNS - 8.8.8.8:53"),
+            poll_2_sessions[0][1].startswith("DNS - 192.0.2.53:53"),
             msg=f"Unexpected second-poll label: {poll_2_sessions[0][1]!r}",
         )
 
@@ -3111,7 +3457,7 @@ class HilBridgeLiveDecodeTuiTests(unittest.TestCase):
                 frame_number=1,
                 summary_suffix=(
                     "STK OPEN CHANNEL | CH1 OPEN "
-                    "udp-client-remote://8.8.8.8:53 APN:Terminal.apn"
+                    "udp-client-remote://192.0.2.53:53 APN:Terminal.apn"
                 ),
             ),
             2: StatefulFrameAnnotation(
@@ -3125,7 +3471,7 @@ class HilBridgeLiveDecodeTuiTests(unittest.TestCase):
                 frame_number=3,
                 summary_suffix=(
                     "STK OPEN CHANNEL | CH1 OPEN "
-                    "udp-client-remote://8.8.8.8:53 APN:Terminal.apn"
+                    "udp-client-remote://192.0.2.53:53 APN:Terminal.apn"
                 ),
             ),
             4: StatefulFrameAnnotation(
@@ -3145,10 +3491,167 @@ class HilBridgeLiveDecodeTuiTests(unittest.TestCase):
         self.assertEqual([index for index, _sessions in polls], [1, 2])
         self.assertEqual(len(polls[0][1]), 2)
         self.assertEqual(len(polls[1][1]), 2)
-        self.assertTrue(polls[0][1][0][1].startswith("DNS - 8.8.8.8:53"))
+        self.assertTrue(polls[0][1][0][1].startswith("DNS - 192.0.2.53:53"))
         self.assertTrue(polls[0][1][1][1].startswith("eIM - 192.0.2.4:443"))
-        self.assertTrue(polls[1][1][0][1].startswith("DNS - 8.8.8.8:53"))
+        self.assertTrue(polls[1][1][0][1].startswith("DNS - 192.0.2.53:53"))
         self.assertTrue(polls[1][1][1][1].startswith("eIM - 198.51.100.4:443"))
+
+    def test_summary_partition_poll_cycles_group_targets_by_occurrence(self) -> None:
+        from Tools.HilBridge.live_decode_state import StatefulFrameAnnotation
+        from Tools.HilBridge.live_decode_tui import (
+            _summary_partition_poll_cycles_with_targets,
+            _summary_partition_poll_rows_with_labels,
+        )
+
+        annotations = {
+            1: StatefulFrameAnnotation(
+                frame_number=1,
+                summary_suffix=(
+                    "STK OPEN CHANNEL | CH1 OPEN "
+                    "udp-client-remote://192.0.2.53:53 APN:Terminal.apn"
+                ),
+            ),
+            2: StatefulFrameAnnotation(
+                frame_number=2,
+                summary_suffix=(
+                    "CH1 SEND 33B | DNS Query: id=0x0001 "
+                    "qname=eim-a.example.test type=A class=IN"
+                ),
+            ),
+            3: StatefulFrameAnnotation(
+                frame_number=3,
+                summary_suffix=(
+                    "STK OPEN CHANNEL | CH2 OPEN "
+                    "tcp-client-remote://192.0.2.4:443 APN:Terminal.apn"
+                ),
+            ),
+            4: StatefulFrameAnnotation(
+                frame_number=4,
+                summary_suffix=(
+                    "CH2 SEND 87B | TLS Handshake: ClientHello "
+                    "sni=eim-a.example.test (67 byte(s))"
+                ),
+            ),
+            5: StatefulFrameAnnotation(
+                frame_number=5,
+                summary_suffix=(
+                    "STK OPEN CHANNEL | CH3 OPEN "
+                    "udp-client-remote://192.0.2.53:53 APN:Terminal.apn"
+                ),
+            ),
+            6: StatefulFrameAnnotation(
+                frame_number=6,
+                summary_suffix=(
+                    "CH3 SEND 33B | DNS Query: id=0x0002 "
+                    "qname=eim-b.example.test type=A class=IN"
+                ),
+            ),
+            7: StatefulFrameAnnotation(
+                frame_number=7,
+                summary_suffix=(
+                    "STK OPEN CHANNEL | CH4 OPEN "
+                    "tcp-client-remote://198.51.100.4:443 APN:Terminal.apn"
+                ),
+            ),
+            8: StatefulFrameAnnotation(
+                frame_number=8,
+                summary_suffix=(
+                    "CH4 SEND 87B | TLS Handshake: ClientHello "
+                    "sni=eim-b.example.test (67 byte(s))"
+                ),
+            ),
+            9: StatefulFrameAnnotation(
+                frame_number=9,
+                summary_suffix=(
+                    "STK OPEN CHANNEL | CH5 OPEN "
+                    "udp-client-remote://192.0.2.53:53 APN:Terminal.apn"
+                ),
+            ),
+            10: StatefulFrameAnnotation(
+                frame_number=10,
+                summary_suffix=(
+                    "CH5 SEND 33B | DNS Query: id=0x0003 "
+                    "qname=eim-a.example.test type=A class=IN"
+                ),
+            ),
+            11: StatefulFrameAnnotation(
+                frame_number=11,
+                summary_suffix=(
+                    "STK OPEN CHANNEL | CH6 OPEN "
+                    "tcp-client-remote://192.0.2.4:443 APN:Terminal.apn"
+                ),
+            ),
+            12: StatefulFrameAnnotation(
+                frame_number=12,
+                summary_suffix=(
+                    "CH6 SEND 87B | TLS Handshake: ClientHello "
+                    "sni=eim-a.example.test (67 byte(s))"
+                ),
+            ),
+            13: StatefulFrameAnnotation(
+                frame_number=13,
+                summary_suffix=(
+                    "STK OPEN CHANNEL | CH7 OPEN "
+                    "udp-client-remote://192.0.2.53:53 APN:Terminal.apn"
+                ),
+            ),
+            14: StatefulFrameAnnotation(
+                frame_number=14,
+                summary_suffix=(
+                    "CH7 SEND 33B | DNS Query: id=0x0004 "
+                    "qname=eim-b.example.test type=A class=IN"
+                ),
+            ),
+            15: StatefulFrameAnnotation(
+                frame_number=15,
+                summary_suffix=(
+                    "STK OPEN CHANNEL | CH8 OPEN "
+                    "tcp-client-remote://198.51.100.4:443 APN:Terminal.apn"
+                ),
+            ),
+            16: StatefulFrameAnnotation(
+                frame_number=16,
+                summary_suffix=(
+                    "CH8 SEND 87B | TLS Handshake: ClientHello "
+                    "sni=eim-b.example.test (67 byte(s))"
+                ),
+            ),
+        }
+        session_buckets = [
+            (1, [self._summary_row(1), self._summary_row(2)]),
+            (2, [self._summary_row(3), self._summary_row(4)]),
+            (3, [self._summary_row(5), self._summary_row(6)]),
+            (4, [self._summary_row(7), self._summary_row(8)]),
+            (5, [self._summary_row(9), self._summary_row(10)]),
+            (6, [self._summary_row(11), self._summary_row(12)]),
+            (7, [self._summary_row(13), self._summary_row(14)]),
+            (8, [self._summary_row(15), self._summary_row(16)]),
+        ]
+
+        poll_buckets = _summary_partition_poll_rows_with_labels(
+            session_buckets,
+            annotations,
+        )
+        poll_cycles = _summary_partition_poll_cycles_with_targets(
+            poll_buckets,
+            annotations,
+        )
+
+        self.assertEqual([cycle_index for cycle_index, _targets in poll_cycles], [1, 2])
+        self.assertEqual(
+            [
+                target_title
+                for _target_key, target_title, _sessions in poll_cycles[0][1]
+            ],
+            ["eim-a.example.test", "eim-b.example.test"],
+        )
+        self.assertEqual(
+            [
+                target_title
+                for _target_key, target_title, _sessions in poll_cycles[1][1]
+            ],
+            ["eim-a.example.test", "eim-b.example.test"],
+        )
 
     def test_summary_partition_rows_by_card_session_groups_in_capture_order(self) -> None:
         from Tools.HilBridge.live_decode_state import StatefulFrameAnnotation
@@ -3164,23 +3667,23 @@ class HilBridgeLiveDecodeTuiTests(unittest.TestCase):
             1: StatefulFrameAnnotation(
                 frame_number=1,
                 card_session_index=1,
-                card_session_iccid="8946000000000000001",
+                card_session_iccid="8988000000000000001",
             ),
             2: StatefulFrameAnnotation(
                 frame_number=2,
                 card_session_index=1,
-                card_session_iccid="8946000000000000001",
+                card_session_iccid="8988000000000000001",
             ),
             3: StatefulFrameAnnotation(
                 frame_number=3,
                 card_session_index=2,
                 card_session_reset_reason="REFRESH UICC Reset",
-                card_session_iccid="8946000000000000002",
+                card_session_iccid="8988000000000000002",
             ),
             4: StatefulFrameAnnotation(
                 frame_number=4,
                 card_session_index=2,
-                card_session_iccid="8946000000000000002",
+                card_session_iccid="8988000000000000002",
             ),
         }
 
@@ -3193,8 +3696,8 @@ class HilBridgeLiveDecodeTuiTests(unittest.TestCase):
         self.assertEqual([row.number for row in session_rows[1][1]], [3, 4])
         self.assertEqual(reasons.get(2), "REFRESH UICC Reset")
         self.assertNotIn(1, reasons)
-        self.assertEqual(iccids.get(1), "8946000000000000001")
-        self.assertEqual(iccids.get(2), "8946000000000000002")
+        self.assertEqual(iccids.get(1), "8988000000000000001")
+        self.assertEqual(iccids.get(2), "8988000000000000002")
 
     def test_summary_card_session_title_includes_iccid_and_reset_reason_when_present(self) -> None:
         from Tools.HilBridge.live_decode_tui import _summary_card_session_title
@@ -3208,14 +3711,14 @@ class HilBridgeLiveDecodeTuiTests(unittest.TestCase):
             "Card Session 2 - idle 42s",
         )
         self.assertEqual(
-            _summary_card_session_title(3, "", "8946000000000000003"),
-            "Card Session 3 - [8946000000000000003]",
+            _summary_card_session_title(3, "", "8988000000000000003"),
+            "Card Session 3 - [8988000000000000003]",
         )
         self.assertEqual(
             _summary_card_session_title(
-                4, "REFRESH UICC Reset", "8946000000000000004"
+                4, "REFRESH UICC Reset", "8988000000000000004"
             ),
-            "Card Session 4 - [8946000000000000004] - REFRESH UICC Reset",
+            "Card Session 4 - [8988000000000000004] - REFRESH UICC Reset",
         )
 
     def test_summary_tree_renders_card_session_wrappers_when_reset_detected(self) -> None:
@@ -3233,7 +3736,7 @@ class HilBridgeLiveDecodeTuiTests(unittest.TestCase):
             annotations = {
                 1: StatefulFrameAnnotation(
                     frame_number=1,
-                    summary_suffix="STK OPEN CHANNEL | CH1 OPEN udp-remote://8.8.8.8:53",
+                    summary_suffix="STK OPEN CHANNEL | CH1 OPEN udp-remote://192.0.2.53:53",
                     channel_session_id=1,
                     channel_number=1,
                     channel_poll_index=1,
@@ -3251,14 +3754,14 @@ class HilBridgeLiveDecodeTuiTests(unittest.TestCase):
                 ),
                 3: StatefulFrameAnnotation(
                     frame_number=3,
-                    summary_suffix="STK OPEN CHANNEL | CH1 OPEN udp-remote://8.8.8.8:53",
+                    summary_suffix="STK OPEN CHANNEL | CH1 OPEN udp-remote://192.0.2.53:53",
                     channel_session_id=2,
                     channel_number=1,
                     channel_poll_index=1,
                     state_event=True,
                     card_session_index=2,
                     card_session_reset_reason="REFRESH UICC Reset",
-                    card_session_iccid="8946000000000000002",
+                    card_session_iccid="8988000000000000002",
                 ),
                 4: StatefulFrameAnnotation(
                     frame_number=4,
@@ -3268,7 +3771,7 @@ class HilBridgeLiveDecodeTuiTests(unittest.TestCase):
                     channel_poll_index=1,
                     state_event=True,
                     card_session_index=2,
-                    card_session_iccid="8946000000000000002",
+                    card_session_iccid="8988000000000000002",
                 ),
             }
 
@@ -3298,7 +3801,7 @@ class HilBridgeLiveDecodeTuiTests(unittest.TestCase):
                             any(
                                 label.startswith("Card Session 2")
                                 and "REFRESH UICC Reset" in label
-                                and "[8946000000000000002]" in label
+                                and "[8988000000000000002]" in label
                                 for label in top_labels
                             ),
                             msg=f"Expected a 'Card Session 2' wrapper tagged with ICCID and REFRESH reason, got {top_labels!r}",
@@ -3317,10 +3820,22 @@ class HilBridgeLiveDecodeTuiTests(unittest.TestCase):
                         ]
                         self.assertTrue(
                             any(
-                                label.startswith("Poll 1")
+                                label.startswith("Poll (")
                                 for label in session_2_poll_labels
                             ),
-                            msg=f"Expected Poll 1 inside Card Session 2, got {session_2_poll_labels!r}",
+                            msg=f"Expected Poll category inside Card Session 2, got {session_2_poll_labels!r}",
+                        )
+                        session_2_poll_root = next(
+                            child
+                            for child in session_2_node.children
+                            if getattr(child.label, "plain", str(child.label)).startswith("Poll (")
+                        )
+                        self.assertTrue(
+                            any(
+                                getattr(child.label, "plain", str(child.label)).startswith("Poll 1")
+                                for child in session_2_poll_root.children
+                            ),
+                            msg="Expected Poll 1 below the Card Session 2 Poll category",
                         )
 
         asyncio.run(scenario())
@@ -3338,7 +3853,7 @@ class HilBridgeLiveDecodeTuiTests(unittest.TestCase):
             annotations = {
                 1: StatefulFrameAnnotation(
                     frame_number=1,
-                    summary_suffix="STK OPEN CHANNEL | CH1 OPEN udp-remote://8.8.8.8:53",
+                    summary_suffix="STK OPEN CHANNEL | CH1 OPEN udp-remote://192.0.2.53:53",
                     channel_session_id=1,
                     channel_number=1,
                     channel_poll_index=1,
@@ -3379,8 +3894,20 @@ class HilBridgeLiveDecodeTuiTests(unittest.TestCase):
                             msg=f"Expected no 'Card Session' wrappers for a single-session trace, got {top_labels!r}",
                         )
                         self.assertTrue(
-                            any(label.startswith("Poll 1") for label in top_labels),
-                            msg=f"Expected Poll 1 at the top level when no reset has occurred, got {top_labels!r}",
+                            any(label.startswith("Poll (") for label in top_labels),
+                            msg=f"Expected Poll category at the top level when no reset has occurred, got {top_labels!r}",
+                        )
+                        poll_root_node = next(
+                            node
+                            for node in summary_tree.root.children
+                            if getattr(node.label, "plain", str(node.label)).startswith("Poll (")
+                        )
+                        self.assertTrue(
+                            any(
+                                getattr(child.label, "plain", str(child.label)).startswith("Poll 1")
+                                for child in poll_root_node.children
+                            ),
+                            msg="Expected Poll 1 below the top-level Poll category",
                         )
 
         asyncio.run(scenario())
@@ -3861,7 +4388,7 @@ class HilBridgeLiveDecodeTuiTests(unittest.TestCase):
                     frame_number=1,
                     summary_suffix=(
                         "STK OPEN CHANNEL | CH1 OPEN "
-                        "udp-client-remote://8.8.8.8:53 APN:Terminal.apn"
+                        "udp-client-remote://192.0.2.53:53 APN:Terminal.apn"
                     ),
                     channel_session_id=1,
                     channel_number=1,
@@ -3938,26 +4465,41 @@ class HilBridgeLiveDecodeTuiTests(unittest.TestCase):
                             any(label.startswith("Channels ") for label in top_level_labels),
                             msg=f"Channels wrapper must not appear, got {top_level_labels!r}",
                         )
-                        poll_label_candidates = [
+                        poll_root_candidates = [
                             label
                             for label in top_level_labels
-                            if label.startswith("Poll 1")
+                            if label.startswith("Poll (")
                         ]
-                        self.assertEqual(len(poll_label_candidates), 1)
-                        self.assertIn("eim.example.test", poll_label_candidates[0])
+                        self.assertEqual(len(poll_root_candidates), 1)
 
-                        poll_node = next(
+                        poll_root_node = next(
                             node
                             for node in summary_tree.root.children
-                            if "Poll 1" in getattr(node.label, "plain", str(node.label))
+                            if getattr(node.label, "plain", str(node.label)).startswith("Poll (")
                         )
-                        child_labels = [
+                        poll_node = next(
+                            node
+                            for node in poll_root_node.children
+                            if getattr(node.label, "plain", str(node.label)).startswith("Poll 1")
+                        )
+                        self.assertEqual(
+                            getattr(poll_node.label, "plain", str(poll_node.label)).split(" (", 1)[0],
+                            "Poll 1",
+                        )
+                        target_labels = [
                             getattr(node.label, "plain", str(node.label))
                             for node in poll_node.children
                         ]
+                        self.assertEqual(len(target_labels), 1)
+                        self.assertIn("eim.example.test", target_labels[0])
+                        target_node = poll_node.children[0]
+                        child_labels = [
+                            getattr(node.label, "plain", str(node.label))
+                            for node in target_node.children
+                        ]
                         self.assertEqual(len(child_labels), 2)
                         self.assertTrue(
-                            child_labels[0].startswith("DNS - 8.8.8.8:53 - Terminal.apn"),
+                            child_labels[0].startswith("DNS - 192.0.2.53:53 - Terminal.apn"),
                             msg=f"DNS session label wrong: {child_labels[0]!r}",
                         )
                         self.assertTrue(
@@ -4647,6 +5189,25 @@ class HilBridgeLiveDecodeTuiTests(unittest.TestCase):
 
         self.assertNotIn("paused-banner", chrome.classes)
 
+    def test_chrome_exit_button_invokes_quit_action(self) -> None:
+        async def scenario() -> None:
+            app = self._build_app()
+
+            async with app.run_test() as pilot:
+                await pilot.pause()
+                exit_button = app.query_one("#chrome_exit_button")
+                stopped: list[bool] = []
+
+                with mock.patch.object(app, "exit") as exit_mock:
+                    exit_button.on_click(
+                        SimpleNamespace(stop=lambda: stopped.append(True))
+                    )
+
+                exit_mock.assert_called_once_with()
+                self.assertEqual(stopped, [True])
+
+        asyncio.run(scenario())
+
     def test_summary_caption_prefixes_paused_badge_when_paused(self) -> None:
         from textual.widgets import Tree as _TreeType
 
@@ -4697,7 +5258,7 @@ class HilBridgeLiveDecodeTuiTests(unittest.TestCase):
             number=3,
             time_text="0.1",
             source="127.0.0.1",
-            destination="8.8.8.8",
+            destination="192.0.2.53",
             protocol="DNS",
             length_text="80",
             info="Standard query",

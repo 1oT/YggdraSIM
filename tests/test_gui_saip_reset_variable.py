@@ -100,7 +100,7 @@ class TestNoOpReset:
             None,
             session_id=saip_session.id,
             name="ICCID",
-            value="89000000000000000007",
+            value="89880000000000000007",
         )
         before = _dispatch_list_variables(
             None,
@@ -126,7 +126,7 @@ class TestSingleOverrideRollback:
             None,
             session_id=saip_session.id,
             name="ICCID",
-            value="89000000000000000007",
+            value="89880000000000000007",
         )
         result = _dispatch_reset_variable(
             None,
@@ -164,7 +164,7 @@ class TestSingleOverrideRollback:
             None,
             session_id=saip_session.id,
             name="ICCID",
-            value="89000000000000000007",
+            value="89880000000000000007",
         )
         result = _dispatch_reset_variable(
             None,
@@ -187,7 +187,7 @@ class TestMultiOverrideRollback:
             None,
             session_id=saip_session.id,
             name="ICCID",
-            value="89000000000000000007",
+            value="89880000000000000007",
         )
         _dispatch_set_variable(
             None,
@@ -215,7 +215,7 @@ class TestMultiOverrideRollback:
             None,
             session_id=saip_session.id,
             name="ICCID",
-            value="89000000000000000007",
+            value="89880000000000000007",
         )
         _dispatch_set_variable(
             None,

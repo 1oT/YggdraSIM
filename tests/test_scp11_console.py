@@ -121,7 +121,7 @@ class SCP11ConsoleStatusDecodeTests(unittest.TestCase):
 
     def test_decode_euicc_configured_data_extracts_addresses(self):
         default_smdp = b"rsp.example.com"
-        primary_smds = b"lpa.ds.gsma.com"
+        primary_smds = b"root-smds.example.com"
         additional_smds_1 = b"smds1.example.com"
         additional_smds_2 = b"smds2.example.com"
         allowed_ci_pkid = b"\xAA\xBB\xCC\xDD"
@@ -141,7 +141,7 @@ class SCP11ConsoleStatusDecodeTests(unittest.TestCase):
         decoded = self.console._decode_euicc_configured_data(payload)
 
         self.assertEqual(decoded["default_smdp"], "rsp.example.com")
-        self.assertEqual(decoded["root_smds_primary"], "lpa.ds.gsma.com")
+        self.assertEqual(decoded["root_smds_primary"], "root-smds.example.com")
         self.assertEqual(
             decoded["root_smds_additional"],
             ["smds1.example.com", "smds2.example.com"],
@@ -230,7 +230,7 @@ class SCP11ConsoleStatusDecodeTests(unittest.TestCase):
     def test_resolve_profile_target_by_decimal_iccid_prefers_encoded_metadata_value(self):
         self.console._fetch_profiles = lambda: [
             console_module.ProfileMetadataView(
-                iccid="89460811111111111112",
+                iccid="89880811111111111112",
                 aid="A0000005591010FFFFFFFF8900001303",
                 state="DISABLED",
                 profile_class="OPER",
@@ -241,7 +241,7 @@ class SCP11ConsoleStatusDecodeTests(unittest.TestCase):
             )
         ]
 
-        resolved = self.console._resolve_profile_target("89460811111111111112")
+        resolved = self.console._resolve_profile_target("89880811111111111112")
 
         self.assertEqual(
             resolved,
@@ -259,7 +259,7 @@ class SCP11ConsoleStatusDecodeTests(unittest.TestCase):
             }
             console._fetch_profiles = lambda module=module: [
                 module.ProfileMetadataView(
-                    iccid="89460811111111111112",
+                    iccid="89880811111111111112",
                     aid="A0000005591010FFFFFFFF8900001303",
                     state="DISABLED",
                     profile_class="OPER",
@@ -271,7 +271,7 @@ class SCP11ConsoleStatusDecodeTests(unittest.TestCase):
             ]
 
             self.assertEqual(
-                console._resolve_profile_target("89460811111111111112"),
+                console._resolve_profile_target("89880811111111111112"),
                 (console.TAG_ICCID, "98648011111111111121"),
             )
             self.assertEqual(

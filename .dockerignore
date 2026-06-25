@@ -1,12 +1,6 @@
-# Agent, IDE, and SCM metadata not needed inside the image.
-.cursor/
-.git/
-.github/
-.mypy_cache/
-.pytest_cache/
-.ruff_cache/
-.venv/
-agent-transcripts/
+# Hidden local metadata, SCM metadata, and caches not needed inside the image.
+.*
+*-transcripts/
 venv/
 
 # Python bytecode and local caches.
@@ -28,11 +22,9 @@ Latjo/
 # Developer capture / scratch trees that can balloon context size.
 trace/
 .profilepackage-cache/
-.pytest_agent_log*.txt
 .pytest_chunk_log*.txt
 .pytest_last_run*.log
 .pytest_pre_log*.txt
-.unittest_agent_log*.txt
 .unittest_last_run*.log
 .run_*.txt
 .smoke_*

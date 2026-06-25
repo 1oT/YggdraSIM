@@ -265,7 +265,7 @@ Session-key export (for HIL offline pcap unwrap — see below):
 
 ```bash
 python -m SCP03 --cmd \
-    "SCP03-SD; EXPORT-KEYBAG reports/session-2026-04-20.keys.json case-1234; EXIT"
+    "SCP03-SD; EXPORT-KEYBAG reports/session-example.keys.json case-1234; EXIT"
 ```
 
 ### SCP80
@@ -278,7 +278,7 @@ python -m SCP80 --cmd "show; build; quit"
 
 ```bash
 python -m SCP80 --stdin <<'EOF'
-iccid 8946001234567890123
+iccid 8988001234567890123
 build
 quit
 EOF
@@ -328,12 +328,12 @@ Session-key export (for HIL offline pcap unwrap — see below):
 
 ```bash
 python -m SCP11.local_access --cmd "LOAD-PROFILE" \
-    --dump-keybag reports/session-2026-04-20.keys.json
+    --dump-keybag reports/session-example.keys.json
 ```
 
 ```bash
 python -m SCP11.local_access --stdin \
-    --dump-keybag reports/session-2026-04-20.keys.json <<'EOF'
+    --dump-keybag reports/session-example.keys.json <<'EOF'
 PROFILE Workspace/LocalSMDPP/profile/test_profile.txt
 METADATA Workspace/LocalSMDPP/profile/metadata/default_profile_metadata.json
 LOAD-PROFILE

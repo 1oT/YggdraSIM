@@ -631,7 +631,7 @@ def parse_token_value_argument(raw: str) -> Any:
 
     - A JSON object starting with ``{`` (e.g. ``{"zero_len": 10}``).
     - A hex string (whitespace tolerated) for the convenience of CLI users.
-      Example: ``89461111111111111112``.
+      Example: ``89881111111111111112``.
 
     Empty / pure whitespace input is rejected to avoid silent misconfiguration.
     """

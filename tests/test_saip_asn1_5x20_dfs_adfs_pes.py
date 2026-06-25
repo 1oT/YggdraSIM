@@ -206,9 +206,9 @@ class ProfileElementHintTests(unittest.TestCase):
 
 class IccidFieldTests(unittest.TestCase):
     def test_roundtrip(self) -> None:
-        payload = {"hex": "89460811111111111112"}
+        payload = {"hex": "89880811111111111112"}
         encoded = encode_decoded_roundtrip_bytes("iccid", payload)
-        self.assertEqual(encoded.hex().upper(), "89460811111111111112")
+        self.assertEqual(encoded.hex().upper(), "89880811111111111112")
 
     def test_rejects_oversize(self) -> None:
         with self.assertRaises(RoundtripEncoderError):

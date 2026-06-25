@@ -15,6 +15,7 @@ _SUPPORTED_PROFILE_SUFFIXES = {
     ".der",
     ".hex",
     ".txt",
+    ".varder",
     ".upp",
 }
 

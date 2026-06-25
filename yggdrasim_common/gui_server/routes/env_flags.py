@@ -16,7 +16,7 @@ from __future__ import annotations
 import os
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Body, HTTPException
 from pydantic import BaseModel
 
 
@@ -44,6 +44,10 @@ class EnvFlagListResponse(BaseModel):
 
 class EnvFlagSetRequest(BaseModel):
     value: str
+    persist: bool = True
+
+
+class EnvFlagClearRequest(BaseModel):
     persist: bool = True
 
 
@@ -121,7 +125,10 @@ def set_flag(name: str, payload: EnvFlagSetRequest) -> EnvFlagMutationResponse:
 
 
 @router.post("/{name}/clear", response_model=EnvFlagMutationResponse)
-def clear_flag(name: str, payload: EnvFlagSetRequest | None = None) -> EnvFlagMutationResponse:
+def clear_flag(
+    name: str,
+    payload: EnvFlagClearRequest | None = Body(default=None),
+) -> EnvFlagMutationResponse:
     """Clear an env flag (drops from ``os.environ`` and persistence)."""
     from yggdrasim_common import env_flags as ef
 

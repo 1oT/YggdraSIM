@@ -43,7 +43,7 @@ class EimPackageParsingTests(unittest.TestCase):
             b"".join(
                 [
                     wrap_tlv("80", DUMMY_TEST_EIM_OID.encode("utf-8")),
-                    wrap_tlv("5A", bytes.fromhex("89044045930000000000001492294428")),
+                    wrap_tlv("5A", bytes.fromhex("89049032123456789012345678901234")),
                     wrap_tlv("81", b"\x34"),
                     wrap_tlv("82", b"\x00\x00\x00\x00\x00\x00\x04\x9D"),
                     wrap_tlv("A0", wrap_tlv("BF2D", b"")),
@@ -63,7 +63,7 @@ class EimPackageParsingTests(unittest.TestCase):
             b"".join(
                 [
                     wrap_tlv("80", DUMMY_TEST_EIM_OID.encode("utf-8")),
-                    wrap_tlv("5A", bytes.fromhex("89044045930000000000001492294428")),
+                    wrap_tlv("5A", bytes.fromhex("89049032123456789012345678901234")),
                     wrap_tlv("81", b"\x34"),
                     wrap_tlv("82", b"\x00\x00\x00\x00\x00\x00\x04\x9E"),
                     wrap_tlv("A0", wrap_tlv("A8", wrap_tlv("80", b"1.3.6.1.4.1"))),
@@ -140,6 +140,34 @@ class EimPackageParsingTests(unittest.TestCase):
         self.assertEqual(parsed.notification_seq_number, 2)
         self.assertEqual(parsed.euicc_package_result_seq_number, 9)
         self.assertEqual(parsed.request_token, bytes.fromhex("00000000000004A2"))
+
+    def test_signed_euicc_configuration_extracts_outer_eim_id_and_nested_request(self):
+        inner_request = wrap_tlv(
+            "BF52",
+            wrap_tlv("5C", bytes.fromhex("84"))
+            + wrap_tlv("83", bytes.fromhex("00000000000004A3")),
+        )
+        signed_request = wrap_tlv(
+            "30",
+            b"".join(
+                [
+                    wrap_tlv("80", b"manager-2"),
+                    wrap_tlv("5A", bytes.fromhex("89044045930000000000001492294428")),
+                    wrap_tlv("81", b"\x35"),
+                    wrap_tlv("82", b"\x00\x00\x00\x00\x00\x00\x04\xA3"),
+                    wrap_tlv("A0", inner_request),
+                ]
+            ),
+        )
+        raw = wrap_tlv("BF52", signed_request + wrap_tlv("5F37", b"\xCC" * 64))
+
+        parsed = parse_eim_package(raw)
+
+        self.assertEqual(parsed.package_type, TYPE_EUICC_CONFIGURATION)
+        self.assertEqual(parsed.eim_id, "manager-2")
+        self.assertEqual(parsed.requested_tags, (bytes.fromhex("84"),))
+        self.assertEqual(parsed.request_token, bytes.fromhex("00000000000004A3"))
+        self.assertEqual(parsed.card_request, inner_request)
 
     def test_profile_download_trigger_extracts_activation_code(self):
         trigger = wrap_tlv(

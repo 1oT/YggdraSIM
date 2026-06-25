@@ -134,19 +134,6 @@ docs = [
 open5gs = [
     "pymongo>=4.5,<5.0",
 ]
-# ``sunrise6g`` pulls in the SUNRISE-6G OpenSDK and lets the
-# ``Tools/Sunrise6G/bridge.py`` SDK adapter delegate CAMARA QoD /
-# Location calls to a real testbed. The bridge defaults to its
-# in-process stub mode so a fresh ``pip install yggdrasim`` works
-# without the SDK; operators who actually have a SUNRISE-6G
-# testbed reachable run ``pip install 'yggdrasim[sunrise6g]'`` and
-# flip ``YGGDRASIM_SUNRISE6G_MODE=sdk``. Pin range follows the
-# 1.0.x line that exposes the network-adapter surface this bridge
-# targets (``create_qod_session`` / ``get_qod_session`` /
-# ``delete_qod_session`` / ``create_monitoring_event_subscription``).
-sunrise6g = [
-    "sunrise6g-opensdk>=1.0.5,<2.0",
-]
 # ``saip`` is now a back-compat alias: pySim moved into the base
 # dependency block once SCP03 / SCP80 began routing their KDF and
 # cipher primitives through it. The extra is kept (empty modulo the

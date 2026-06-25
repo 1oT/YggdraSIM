@@ -23,6 +23,59 @@
   text-align: center;
 }
 
+#command-center-nav .cc-nav-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#command-center-nav .cc-nav-card-bridge-state,
+#command-center-nav .cc-nav-hil-trace-state {
+  display: none;
+  align-items: center;
+  gap: 5px;
+  flex: 0 0 auto;
+  border: 1px solid rgba(163, 190, 140, 0.42);
+  border-radius: var(--radius-pill);
+  background: var(--ok-soft);
+  color: var(--ok);
+  padding: 1px 8px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0;
+}
+
+#command-center-nav .cc-nav-card-bridge-state::before,
+#command-center-nav .cc-nav-hil-trace-state::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  box-shadow: 0 0 0 2px var(--ok-soft);
+}
+
+#command-center-nav .cc-nav-leaf[data-cb-state="running"] .cc-nav-card-bridge-state {
+  display: inline-flex;
+}
+
+#command-center-nav .cc-nav-leaf[data-hil-trace-state="running"] .cc-nav-hil-trace-state {
+  display: inline-flex;
+}
+
+.overview-module-card[data-cb-state="running"],
+.overview-module-card[data-hil-trace-state="running"] {
+  border-color: rgba(163, 190, 140, 0.45);
+}
+
+.overview-module-card[data-cb-state="running"] .overview-module-card-badge,
+.overview-module-card[data-hil-trace-state="running"] .overview-module-card-badge {
+  border-color: rgba(163, 190, 140, 0.42);
+  background: var(--ok-soft);
+  color: var(--ok);
+}
+
 .cc-header {
   margin-bottom: 18px;
 }

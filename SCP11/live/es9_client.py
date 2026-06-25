@@ -38,6 +38,7 @@ from yggdrasim_common.process_debug import (
     suppress_noisy_crypto_warnings,
 )
 from yggdrasim_common.runtime_paths import ensure_runtime_dir, ensure_seeded_runtime_file, runtime_path
+from yggdrasim_common.terminal_output import status_print as print
 from SCP11.shared.gsma_error_codes import describe_sgp32_eim_package_error
 from SCP11.shared.tls_helpers import create_insecure_context, create_introspection_context
 
@@ -904,7 +905,7 @@ class Es9LikeClient:
                     format=serialization.PublicFormat.SubjectPublicKeyInfo,
                 )
                 if hmac.compare_digest(presented_spki, pinned_tls_spki) is False:
-                    print(
+                    debug_print(
                         f"[!] {label} transport: pinned TLS SPKI does not match "
                         f"server certificate (presented={presented_spki.hex().upper()}). "
                         f"Proceeding with standard TLS verification — connection is "

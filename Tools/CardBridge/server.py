@@ -22,6 +22,7 @@ channel without dragging in pyscard.
 from __future__ import annotations
 
 import argparse
+import inspect
 import logging
 import os
 import signal
@@ -35,6 +36,13 @@ from Tools.HilBridge.apdu_relay import (
     ApduRelayConfig,
     DEFAULT_AUDIT_LOGGER_NAME,
     HilBridgeApduRelayService,
+)
+from Tools.HilBridge.pcsc import (
+    APDU_TIMEOUT_ENV,
+    DEFAULT_APDU_TIMEOUT_MS,
+    PCSC_SHARE_MODE_SHARED,
+    PCSC_SHARE_MODES,
+    resolve_apdu_timeout_ms,
 )
 from yggdrasim_common.card_bridge_auth import (
     default_token_file_for_port,
@@ -76,16 +84,26 @@ class CardBridgeConfig:
     audit_enabled: bool = False
     audit_full_apdu: bool = False
     audit_logger_name: str = DEFAULT_AUDIT_LOGGER_NAME
-    card_channel_factory: Callable[[int, str], Any] | None = field(
+    apdu_timeout_ms: int = DEFAULT_APDU_TIMEOUT_MS
+    pcsc_share_mode: str = PCSC_SHARE_MODE_SHARED
+    card_channel_factory: Callable[..., Any] | None = field(
         default=None, repr=False
     )
 
 
-def _default_pcsc_channel_factory(reader_index: int, reader_name: str) -> Any:
+def _default_pcsc_channel_factory(
+    reader_index: int,
+    reader_name: str,
+    pcsc_share_mode: str = PCSC_SHARE_MODE_SHARED,
+) -> Any:
     """Build a real :class:`PcscCardChannel`. Imported lazily for testability."""
     from Tools.HilBridge.pcsc import PcscCardChannel
 
-    return PcscCardChannel(reader_index=reader_index, reader_name=reader_name)
+    return PcscCardChannel(
+        reader_index=reader_index,
+        reader_name=reader_name,
+        share_mode=pcsc_share_mode,
+    )
 
 
 def _build_argument_parser() -> argparse.ArgumentParser:
@@ -165,6 +183,25 @@ def _build_argument_parser() -> argparse.ArgumentParser:
         default=DEFAULT_AUDIT_LOGGER_NAME,
         help="Name of the Python logger that receives audit records.",
     )
+    parser.add_argument(
+        "--apdu-timeout-ms",
+        type=int,
+        default=None,
+        help=(
+            "Maximum PC/SC APDU wait time in milliseconds "
+            f"(default from {APDU_TIMEOUT_ENV}, fallback {DEFAULT_APDU_TIMEOUT_MS})."
+        ),
+    )
+    parser.add_argument(
+        "--pcsc-share-mode",
+        choices=PCSC_SHARE_MODES,
+        default=PCSC_SHARE_MODE_SHARED,
+        help=(
+            "PC/SC sharing mode for the local reader. Defaults to shared "
+            "so GUI reader probes do not block Card Bridge startup; use "
+            "exclusive when no other local process may touch the reader."
+        ),
+    )
     return parser
 
 
@@ -236,7 +273,56 @@ def build_config_from_args(args: argparse.Namespace) -> CardBridgeConfig:
         audit_full_apdu=bool(args.audit_full_apdu),
         audit_logger_name=str(args.audit_logger_name or DEFAULT_AUDIT_LOGGER_NAME).strip()
         or DEFAULT_AUDIT_LOGGER_NAME,
+        apdu_timeout_ms=resolve_apdu_timeout_ms(
+            getattr(args, "apdu_timeout_ms", None)
+        ),
+        pcsc_share_mode=str(args.pcsc_share_mode or PCSC_SHARE_MODE_SHARED),
     )
+
+
+def _transmit_with_optional_timeout(
+    channel: Any,
+    apdu: bytes,
+    *,
+    timeout_ms: int,
+) -> tuple[bytes, int, int]:
+    transmit = getattr(channel, "transmit")
+    try:
+        signature = inspect.signature(transmit)
+    except (TypeError, ValueError):
+        data, sw1, sw2 = transmit(bytes(apdu))
+    else:
+        if "timeout_ms" in signature.parameters:
+            data, sw1, sw2 = transmit(bytes(apdu), timeout_ms=timeout_ms)
+        else:
+            data, sw1, sw2 = transmit(bytes(apdu))
+    return bytes(data), int(sw1), int(sw2)
+
+
+def _build_card_channel(config: CardBridgeConfig) -> Any:
+    factory = config.card_channel_factory or _default_pcsc_channel_factory
+    try:
+        signature = inspect.signature(factory)
+    except (TypeError, ValueError):
+        return factory(config.reader_index, config.reader_name, config.pcsc_share_mode)
+
+    parameters = tuple(signature.parameters.values())
+    accepts_varargs = any(
+        parameter.kind == inspect.Parameter.VAR_POSITIONAL
+        for parameter in parameters
+    )
+    positional_count = sum(
+        1
+        for parameter in parameters
+        if parameter.kind
+        in (
+            inspect.Parameter.POSITIONAL_ONLY,
+            inspect.Parameter.POSITIONAL_OR_KEYWORD,
+        )
+    )
+    if accepts_varargs or positional_count >= 3:
+        return factory(config.reader_index, config.reader_name, config.pcsc_share_mode)
+    return factory(config.reader_index, config.reader_name)
 
 
 def _emit_startup_banner(
@@ -273,8 +359,12 @@ def _emit_startup_banner(
         banner_lines.append(f"  audit log  : enabled via logger '{config.audit_logger_name}'{marker}")
     if is_loopback_host(config.host) is True:
         banner_lines.append(
-            "  ssh tunnel : rig$ ssh -fN -R "
-            f"{config.port}:127.0.0.1:{config.port} <operator-host>"
+            "  ssh tunnel : rig$ ssh -fN -L "
+            f"{config.port}:127.0.0.1:{config.port} <reader-host>"
+        )
+        banner_lines.append(
+            "               or reader-host$ ssh -fN -R "
+            f"{config.port}:127.0.0.1:{config.port} <rig-host>"
         )
     else:
         banner_lines.append(
@@ -313,8 +403,7 @@ def run_card_bridge(
     if stop_event is None:
         stop_event = threading.Event()
 
-    factory = config.card_channel_factory or _default_pcsc_channel_factory
-    channel = factory(config.reader_index, config.reader_name)
+    channel = _build_card_channel(config)
 
     try:
         channel.connect()
@@ -343,14 +432,19 @@ def run_card_bridge(
 
     def exchange_callback(apdu: bytes, *, session_id: str = "") -> tuple[bytes, int, int]:
         del session_id
-        data, sw1, sw2 = channel.transmit(bytes(apdu))
-        return bytes(data), int(sw1), int(sw2)
+        return _transmit_with_optional_timeout(
+            channel,
+            bytes(apdu),
+            timeout_ms=config.apdu_timeout_ms,
+        )
 
     def status_callback() -> dict[str, Any]:
         return {
+            "pid": os.getpid(),
             "reader": state["reader_label"],
             "atr": state["atr_hex"],
             "card": "available" if len(state["atr_hex"]) > 0 else "unknown",
+            "apduTimeoutMs": int(config.apdu_timeout_ms),
         }
 
     def card_reset_callback(*, session_id: str = "") -> dict[str, Any]:

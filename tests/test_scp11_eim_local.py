@@ -42,7 +42,7 @@ from yggdrasim_common.session_recording import emit_apdu_trace_event
 
 
 DEFAULT_TEST_EIM_OID = "2.25.311782205282738360923618091971140414400"
-DEFAULT_TEST_EIM_FQDN = "yggdrasim.eim.test.1ot.com"
+DEFAULT_TEST_EIM_FQDN = "eim.example.test"
 
 
 def create_poll_fixture_dirs(base_dir: Path) -> tuple[Path, Path]:
@@ -1883,7 +1883,7 @@ class EimLocalModelTests(unittest.TestCase):
         rendered = output.getvalue()
         self.assertIn("ISDR GetEimConfigurationData", rendered)
         self.assertIn("eIM rows : 1", rendered)
-        self.assertIn("yggdrasim.eim.test.1ot.com", rendered)
+        self.assertIn("eim.example.test", rendered)
         self.assertIn("LOAD-EIM-PACKAGE completed", rendered)
         self.assertIn("transport : local_auth", rendered)
         self.assertEqual(
@@ -2114,13 +2114,13 @@ class EimLocalModelTests(unittest.TestCase):
                 response = bridge._handle_smdp_initiate_authentication(
                     {
                         "euiccChallenge": base64.b64encode(expected_challenge).decode("ascii"),
-                        "smdpAddress": "yggdrasim.smdpp.test.1ot.com",
+                        "smdpAddress": "smdpp.example.test",
                     }
                 )
 
             mocked_generate.assert_called_once_with(
                 expected_challenge,
-                "yggdrasim.smdpp.test.1ot.com",
+                "smdpp.example.test",
             )
             mocked_sign.assert_called_once_with(signed1, session._key_auth)
             self.assertEqual(base64.b64decode(response["transactionId"]), b"\x10" * 16)
@@ -2175,7 +2175,7 @@ class EimLocalModelTests(unittest.TestCase):
             hotfolder_dir.mkdir(parents=True, exist_ok=True)
             eim_to_esim_dir, esim_to_eim_dir = create_poll_fixture_dirs(base_dir)
             profile_path = base_dir / "profile" / "duplicate_profile.txt"
-            write_minimal_profile_payload(profile_path, "89460811111111111112")
+            write_minimal_profile_payload(profile_path, "89880811111111111112")
             (eim_to_esim_dir / "010_first.json").write_text(
                 json.dumps(
                     {
@@ -2185,7 +2185,7 @@ class EimLocalModelTests(unittest.TestCase):
                             "transaction_id_hex": "10000000000000000000000000000001",
                             "matching_id": "FIRST",
                             "profile_path": str(profile_path),
-                            "smdp_address": "yggdrasim.smdpp.test.1ot.com",
+                            "smdp_address": "smdpp.example.test",
                         },
                     }
                 ),
@@ -2200,7 +2200,7 @@ class EimLocalModelTests(unittest.TestCase):
                             "transaction_id_hex": "11000000000000000000000000000001",
                             "matching_id": "SECOND",
                             "profile_path": str(profile_path),
-                            "smdp_address": "yggdrasim.smdpp.test.1ot.com",
+                            "smdp_address": "smdpp.example.test",
                         },
                     }
                 ),
@@ -2242,7 +2242,7 @@ class EimLocalModelTests(unittest.TestCase):
             hotfolder_dir.mkdir(parents=True, exist_ok=True)
             eim_to_esim_dir, esim_to_eim_dir = create_poll_fixture_dirs(base_dir)
             profile_path = base_dir / "profile" / "duplicate_profile.txt"
-            write_minimal_profile_payload(profile_path, "89460811111111111112")
+            write_minimal_profile_payload(profile_path, "89880811111111111112")
             (eim_to_esim_dir / "010_first.json").write_text(
                 json.dumps(
                     {
@@ -2252,7 +2252,7 @@ class EimLocalModelTests(unittest.TestCase):
                             "transaction_id_hex": "10000000000000000000000000000001",
                             "matching_id": "FIRST",
                             "profile_path": str(profile_path),
-                            "smdp_address": "yggdrasim.smdpp.test.1ot.com",
+                            "smdp_address": "smdpp.example.test",
                         },
                     }
                 ),
@@ -2267,7 +2267,7 @@ class EimLocalModelTests(unittest.TestCase):
                             "transaction_id_hex": "11000000000000000000000000000001",
                             "matching_id": "SECOND",
                             "profile_path": str(profile_path),
-                            "smdp_address": "yggdrasim.smdpp.test.1ot.com",
+                            "smdp_address": "smdpp.example.test",
                         },
                     }
                 ),
@@ -2309,7 +2309,7 @@ class EimLocalModelTests(unittest.TestCase):
             hotfolder_dir.mkdir(parents=True, exist_ok=True)
             eim_to_esim_dir, esim_to_eim_dir = create_poll_fixture_dirs(base_dir)
             profile_path = base_dir / "profile" / "duplicate_profile.txt"
-            write_minimal_profile_payload(profile_path, "89460811111111111112")
+            write_minimal_profile_payload(profile_path, "89880811111111111112")
             (eim_to_esim_dir / "010_first.json").write_text(
                 json.dumps(
                     {
@@ -2319,7 +2319,7 @@ class EimLocalModelTests(unittest.TestCase):
                             "transaction_id_hex": "10000000000000000000000000000001",
                             "matching_id": "FIRST",
                             "profile_path": str(profile_path),
-                            "smdp_address": "yggdrasim.smdpp.test.1ot.com",
+                            "smdp_address": "smdpp.example.test",
                         },
                     }
                 ),
@@ -2335,7 +2335,7 @@ class EimLocalModelTests(unittest.TestCase):
             )
             session = EimLocalSession(cfg=config, apdu_channel=SimpleNamespace())
             bridge = LocalizedPollingBridge(session)
-            bridge.set_card_query_session(SimpleNamespace(collect_profile_metadata=lambda: [SimpleNamespace(iccid="89460811111111111112")]))
+            bridge.set_card_query_session(SimpleNamespace(collect_profile_metadata=lambda: [SimpleNamespace(iccid="89880811111111111112")]))
 
             payload = bridge._serve_eim_package()
 
@@ -2351,7 +2351,7 @@ class EimLocalModelTests(unittest.TestCase):
             hotfolder_dir.mkdir(parents=True, exist_ok=True)
             eim_to_esim_dir, esim_to_eim_dir = create_poll_fixture_dirs(base_dir)
             profile_path = base_dir / "profile" / "builder_profile.txt"
-            write_minimal_profile_payload(profile_path, "89460811111111111112")
+            write_minimal_profile_payload(profile_path, "89880811111111111112")
             (eim_to_esim_dir / "010_first.json").write_text(
                 json.dumps(
                     {
@@ -2361,7 +2361,7 @@ class EimLocalModelTests(unittest.TestCase):
                             "transaction_id_hex": "10000000000000000000000000000001",
                             "matching_id": "FIRST",
                             "profile_path": "missing/profile/path.txt",
-                            "smdp_address": "yggdrasim.smdpp.test.1ot.com",
+                            "smdp_address": "smdpp.example.test",
                         },
                     }
                 ),
@@ -2377,7 +2377,7 @@ class EimLocalModelTests(unittest.TestCase):
             )
             session = EimLocalSession(cfg=config, apdu_channel=SimpleNamespace())
             bridge = LocalizedPollingBridge(session)
-            bridge.set_card_query_session(SimpleNamespace(collect_profile_metadata=lambda: [SimpleNamespace(iccid="89460811111111111112")]))
+            bridge.set_card_query_session(SimpleNamespace(collect_profile_metadata=lambda: [SimpleNamespace(iccid="89880811111111111112")]))
             profile_bytes = session._read_profile_source_bytes(profile_path=str(profile_path))
             bridge._build_offline_profile_builder_session = lambda: SimpleNamespace(  # type: ignore[assignment]
                 _read_profile_source_bytes=lambda profile_path="": profile_bytes
@@ -2724,8 +2724,8 @@ class EimLocalModelTests(unittest.TestCase):
         shell = EimLocalShell()
         shell.session = SimpleNamespace(
             identity_summary=lambda: {
-                "eim_fqdn": "yggdrasim.eim.test.1ot.com",
-                "smdp_address": "yggdrasim.smdpp.test.1ot.com",
+                "eim_fqdn": "eim.example.test",
+                "smdp_address": "smdpp.example.test",
             }
         )
         shell._bridge_status_payload = lambda: {
@@ -2734,7 +2734,7 @@ class EimLocalModelTests(unittest.TestCase):
             "dns_port": 15353,
             "eim_base_url": "https://127.0.0.1:18443",
             "smdp_base_url": "https://127.0.0.1:19443",
-            "smdp_fqdn": "yggdrasim.smdpp.test.1ot.com",
+            "smdp_fqdn": "smdpp.example.test",
         }
         shell._plugin_path_sections = [
             {
@@ -2758,7 +2758,7 @@ class EimLocalModelTests(unittest.TestCase):
         self.assertIn("SIM <-> bridge <-> eIM/SM-DP+", rendered)
         self.assertIn("SIM IP Polling", rendered)
         self.assertIn("127.0.0.1:15353", rendered)
-        self.assertIn("yggdrasim.eim.test.1ot.com", rendered)
+        self.assertIn("eim.example.test", rendered)
 
     def test_localized_bridge_provider_disables_direct_eim_tls_public_key_pinning(self) -> None:
         shell = EimLocalShell()

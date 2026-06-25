@@ -72,7 +72,9 @@ When enabled:
 - The HIL module can also open a **Modem shell** tab backed by the
   same WebSocket route. Its command field is persisted in the browser
   and can launch a configured tool directly, for example
-  `sudo tio /dev/ttyUSB2`.
+  `sudo tio /dev/ttyUSB2`. When the Card Bridge remote-rig state has
+  an SSH target, this tab defaults to `ssh -tt ... sudo tio /dev/ttyUSB2`
+  so the terminal attaches to the modem serial device on the RPi.
 
 ---
 

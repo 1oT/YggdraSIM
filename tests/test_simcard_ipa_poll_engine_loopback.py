@@ -280,6 +280,7 @@ class IpaPollEngineLoopbackTests(unittest.TestCase):
         # Toolkit bookkeeping must reflect the dispatched package.
         dispatched_tags = list(toolkit_logic.state.toolkit.ipa_poll_dispatched_packages)
         self.assertEqual(dispatched_tags, [bytes.fromhex("BF58")])
+        self.assertEqual(toolkit_logic.state.toolkit.refresh_attempts, 1)
 
         # Session must be torn down at the end of the cycle.
         self.assertFalse(toolkit_logic.state.toolkit.ipa_poll_session_active)

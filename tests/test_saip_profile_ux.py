@@ -80,7 +80,7 @@ class RandomizerTests(unittest.TestCase):
         self.assertTrue(is_auto_sentinel("AUTO"))
         self.assertTrue(is_auto_sentinel("random"))
         self.assertTrue(is_auto_sentinel(" Rand "))
-        self.assertFalse(is_auto_sentinel("89460000000000000001"))
+        self.assertFalse(is_auto_sentinel("89880000000000000001"))
         self.assertFalse(is_auto_sentinel(""))
 
     def test_generate_random_iccid_yields_20_digits_with_valid_luhn(self) -> None:
@@ -114,8 +114,8 @@ class RandomizerTests(unittest.TestCase):
         self.assertTrue(value.isdigit())
 
     def test_resolve_auto_value_passes_through_concrete_value(self) -> None:
-        value = resolve_auto_value("ICCID", "89460000000000000001")
-        self.assertEqual(value, "89460000000000000001")
+        value = resolve_auto_value("ICCID", "89880000000000000001")
+        self.assertEqual(value, "89880000000000000001")
 
     def test_resolve_auto_value_rejects_unsupported_placeholder(self) -> None:
         with self.assertRaisesRegex(ValueError, "only supported for ICCID / IMSI"):
@@ -269,7 +269,7 @@ class WizardFlowTests(unittest.TestCase):
                     "2",
                     "bracket",
                     "ICCID",
-                    "89461111111111111112",
+                    "89881111111111111112",
                     "IMSI",
                     '{"pattern_hex":"FF","byte_len":8}',
                     "",
@@ -285,7 +285,7 @@ class WizardFlowTests(unittest.TestCase):
         self.assertEqual(
             set(decision.token_defs.keys()), {"ICCID", "IMSI"}
         )
-        self.assertEqual(decision.token_defs["ICCID"], "89461111111111111112")
+        self.assertEqual(decision.token_defs["ICCID"], "89881111111111111112")
         self.assertEqual(
             decision.token_defs["IMSI"],
             {"pattern_hex": "FF", "byte_len": 8},

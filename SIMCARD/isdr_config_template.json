@@ -30,7 +30,7 @@
     "key_mac_hex": "1111111111111111"
   },
   "configured_data": {
-    "root_smds_address": "lpa.ds.gsma.com",
+    "root_smds_address": "root-smds.example.com",
     "additional_root_smds_addresses": [
       "smds2.yggdrasim.test",
       "smds3.yggdrasim.test"

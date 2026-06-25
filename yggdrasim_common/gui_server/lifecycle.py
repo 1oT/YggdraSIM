@@ -66,6 +66,7 @@ def cleanup_gui_runtime(
     *,
     stop_external_services: bool = True,
     include_default_hil_service: bool = False,
+    include_card_bridge_state: bool = False,
 ) -> dict[str, Any]:
     """Release GUI-owned runtime resources.
 
@@ -75,14 +76,87 @@ def cleanup_gui_runtime(
     summary: dict[str, Any] = {
         "closed_sessions": _close_card_sessions(),
         "terminated_processes": [],
+        "card_bridge": [],
         "services": [],
     }
     if stop_external_services:
         summary["terminated_processes"] = _terminate_registered_processes()
+        if include_card_bridge_state:
+            summary["card_bridge"] = _stop_card_bridge_runtime_state()
         summary["services"] = _stop_registered_services(
             include_default_hil_service=include_default_hil_service,
         )
     return summary
+
+
+def _stop_card_bridge_runtime_state() -> list[dict[str, Any]]:
+    try:
+        from yggdrasim_common.gui_server.actions import card_bridge
+        from yggdrasim_common.gui_server.actions.registry import ActionContext
+    except Exception as error:  # noqa: BLE001
+        return [{
+            "action": "card_bridge",
+            "status": "unavailable",
+            "error": f"{type(error).__name__}: {error}",
+        }]
+
+    try:
+        state = card_bridge._load_remote_rig_state()
+    except Exception as error:  # noqa: BLE001
+        return [{
+            "action": "card_bridge",
+            "status": "state-error",
+            "error": f"{type(error).__name__}: {error}",
+        }]
+    if len(state) == 0:
+        return []
+
+    results: list[dict[str, Any]] = []
+    tunnel_pid = _coerce_pid(state.get("ssh_tunnel_pid"))
+    if tunnel_pid > 0:
+        results.append(_run_card_bridge_stop_action(
+            "ssh_tunnel_stop",
+            lambda: card_bridge._dispatch_tunnel_stop(ActionContext(), confirm=True),
+        ))
+
+    local_pid = _coerce_pid(state.get("local_card_bridge_pid"))
+    has_local_bridge_state = (
+        local_pid > 0
+        or "local_card_bridge_port" in state
+        or "local_card_bridge_log" in state
+        or "local_card_bridge_command" in state
+    )
+    if has_local_bridge_state:
+        results.append(_run_card_bridge_stop_action(
+            "pc_card_bridge_stop",
+            lambda: card_bridge._dispatch_local_stop(ActionContext(), confirm=True),
+        ))
+
+    return results
+
+
+def _run_card_bridge_stop_action(label: str, action: Any) -> dict[str, Any]:
+    try:
+        payload = action()
+    except Exception as error:  # noqa: BLE001
+        _LOGGER.warning("GUI Card Bridge cleanup failed action=%s: %s", label, error)
+        return {
+            "action": label,
+            "ok": False,
+            "status": "error",
+            "error": f"{type(error).__name__}: {error}",
+        }
+    result = dict(payload or {})
+    result["action"] = label
+    return result
+
+
+def _coerce_pid(value: Any) -> int:
+    try:
+        pid = int(value or 0)
+    except (TypeError, ValueError):
+        return 0
+    return pid if pid > 0 else 0
 
 
 def _close_card_sessions() -> int:

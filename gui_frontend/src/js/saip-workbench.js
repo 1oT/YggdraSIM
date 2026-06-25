@@ -607,7 +607,7 @@
     var active = saipActivePackage();
     if (active && active.sourcePath) defaultPath = active.sourcePath;
     var fileTypes = [
-      "SAIP profile (*.der;*.json;*.hex;*.txt)",
+      "SAIP profile/template (*.der;*.json;*.hex;*.txt;*.varder;*.asn;*.asn1)",
       "All files (*.*)",
     ];
     var chosen = "";
@@ -3717,19 +3717,30 @@
       var card = saipBuildPeCard(row, pkg, dirtySet, peWorstSev);
       saipWirePeCardDragDrop(card, row, pkg, list, peList, detail, validation);
       card.addEventListener("click", function () {
-        var selectedIndex = row.index;
-        pkg.selectedPeIndex = selectedIndex;
-        pkg.activeTopTab = "profile_elements";
-        saipMarkSelectedPeCard(list, selectedIndex);
-        renderSaipDetail(detail, pkg, peList, validation);
-        saipLoadShowPe(pkg, selectedIndex).then(function () {
-          if (pkg.selectedPeIndex !== selectedIndex) return;
-          renderSaipDetail(detail, pkg, peList, validation);
-        });
+        saipSelectPeRow(row, pkg, list, peList, detail, validation);
+      });
+      card.addEventListener("contextmenu", function (event) {
+        event.preventDefault();
+        event.stopPropagation();
+        saipSelectPeRow(row, pkg, list, peList, detail, validation);
+        saipShowPeContextMenu(row, pkg, peList, detail, validation, event.clientX, event.clientY);
       });
       list.appendChild(card);
     });
     scroll.appendChild(list);
+  }
+
+  function saipSelectPeRow(row, pkg, list, peList, detail, validation) {
+    var selectedIndex = Number(row && row.index);
+    if (!Number.isFinite(selectedIndex)) return;
+    pkg.selectedPeIndex = selectedIndex;
+    pkg.activeTopTab = "profile_elements";
+    saipMarkSelectedPeCard(list, selectedIndex);
+    renderSaipDetail(detail, pkg, peList, validation);
+    saipLoadShowPe(pkg, selectedIndex).then(function () {
+      if (pkg.selectedPeIndex !== selectedIndex) return;
+      renderSaipDetail(detail, pkg, peList, validation);
+    });
   }
 
   function saipMarkSelectedPeCard(list, selectedIndex) {
@@ -3739,6 +3750,165 @@
       el.classList.toggle("is-active", isActive);
       el.setAttribute("aria-selected", isActive ? "true" : "false");
     });
+  }
+
+  var _saipPeContextMenu = { root: null, dismiss: null };
+
+  function saipEnsurePeContextMenuRoot() {
+    if (_saipPeContextMenu.root) return _saipPeContextMenu.root;
+    var menu = document.createElement("div");
+    menu.className = "ctx-menu saip-pe-context-menu";
+    menu.setAttribute("role", "menu");
+    document.body.appendChild(menu);
+    _saipPeContextMenu.root = menu;
+    return menu;
+  }
+
+  function saipHidePeContextMenu() {
+    if (_saipPeContextMenu.root) {
+      _saipPeContextMenu.root.classList.remove("is-open");
+      _saipPeContextMenu.root.innerHTML = "";
+    }
+    if (_saipPeContextMenu.dismiss) {
+      document.removeEventListener("click", _saipPeContextMenu.dismiss, true);
+      document.removeEventListener("keydown", _saipPeContextMenu.dismiss, true);
+      _saipPeContextMenu.dismiss = null;
+    }
+  }
+
+  function saipPositionPeContextMenu(menu, x, y) {
+    menu.style.visibility = "hidden";
+    menu.classList.add("is-open");
+    var rect = menu.getBoundingClientRect();
+    var px = x;
+    var py = y;
+    if (px + rect.width > window.innerWidth - 4) {
+      px = Math.max(4, window.innerWidth - rect.width - 4);
+    }
+    if (py + rect.height > window.innerHeight - 4) {
+      py = Math.max(4, window.innerHeight - rect.height - 4);
+    }
+    menu.style.left = px + "px";
+    menu.style.top = py + "px";
+    menu.style.visibility = "visible";
+  }
+
+  function saipBuildPeContextMenuItem(spec) {
+    var btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "ctx-menu-item" + (spec.danger ? " ctx-menu-item--danger" : "");
+    btn.setAttribute("role", "menuitem");
+    if (spec.disabled) btn.disabled = true;
+    var icon = document.createElement("span");
+    icon.className = "ctx-menu-icon";
+    icon.textContent = spec.icon || ">";
+    var label = document.createElement("span");
+    label.className = "ctx-menu-label";
+    label.textContent = spec.label || "";
+    btn.appendChild(icon);
+    btn.appendChild(label);
+    btn.addEventListener("click", function () {
+      saipHidePeContextMenu();
+      if (typeof spec.onClick === "function") spec.onClick();
+    });
+    return btn;
+  }
+
+  function saipPeIsSequenceAnchor(row, pkg) {
+    var index = Number(row && row.index);
+    var type = String((row && row.type) || "").toLowerCase();
+    var rows = Array.isArray(pkg && pkg.peRows) ? pkg.peRows : [];
+    return index === 0
+      || index === rows.length - 1
+      || type === "header"
+      || type === "profileheader"
+      || type === "end";
+  }
+
+  function saipShowPeContextMenu(row, pkg, peList, detail, validation, x, y) {
+    if (!pkg || !pkg.sessionId) return;
+    saipHidePeContextMenu();
+    var rows = Array.isArray(pkg.peRows) ? pkg.peRows : [];
+    var index = Number(row && row.index);
+    var anchor = saipPeIsSequenceAnchor(row, pkg);
+    var lastBodyIndex = Math.max(1, rows.length - 2);
+    var canMoveUp = !anchor && index > 1;
+    var canMoveDown = !anchor && index < lastBodyIndex;
+    var items = [
+      {
+        icon: "↑+",
+        label: "Add PE above",
+        onClick: function () { saipRibbonAddPe(pkg, "above", peList, detail, validation); },
+      },
+      {
+        icon: "↓+",
+        label: "Add PE below",
+        onClick: function () { saipRibbonAddPe(pkg, "below", peList, detail, validation); },
+      },
+      {
+        icon: "in",
+        label: "Import PE below",
+        onClick: function () { saipRibbonImportPe(pkg, peList, detail, validation); },
+      },
+      { divider: true },
+      {
+        icon: "up",
+        label: "Move up",
+        disabled: !canMoveUp,
+        onClick: function () { saipRibbonMovePe(pkg, "up", peList, detail, validation); },
+      },
+      {
+        icon: "dn",
+        label: "Move down",
+        disabled: !canMoveDown,
+        onClick: function () { saipRibbonMovePe(pkg, "down", peList, detail, validation); },
+      },
+      {
+        icon: "out",
+        label: "Export PE",
+        disabled: !Number.isFinite(index),
+        onClick: function () { saipRibbonExportPe(pkg); },
+      },
+      {
+        icon: "i",
+        label: "Reference card",
+        disabled: !Number.isFinite(index),
+        onClick: function () { saipRibbonShowPeInfo(pkg); },
+      },
+      { divider: true },
+      {
+        icon: "x",
+        label: anchor ? "Delete PE (anchor)" : "Delete PE",
+        danger: true,
+        disabled: anchor,
+        onClick: function () { saipRibbonDeletePe(pkg, peList, detail, validation); },
+      },
+    ];
+    var menu = saipEnsurePeContextMenuRoot();
+    menu.innerHTML = "";
+    items.forEach(function (item) {
+      if (item && item.divider) {
+        var sep = document.createElement("div");
+        sep.className = "ctx-menu-sep";
+        menu.appendChild(sep);
+      } else if (item) {
+        menu.appendChild(saipBuildPeContextMenuItem(item));
+      }
+    });
+    saipPositionPeContextMenu(menu, x, y);
+    var dismiss = function (event) {
+      if (event.type === "keydown") {
+        if (event.key === "Escape") saipHidePeContextMenu();
+        return;
+      }
+      if (menu.contains(event.target)) return;
+      saipHidePeContextMenu();
+    };
+    _saipPeContextMenu.dismiss = dismiss;
+    setTimeout(function () {
+      document.addEventListener("click", dismiss, true);
+      document.addEventListener("keydown", dismiss, true);
+    }, 0);
   }
 
   function saipClearPeDropMarkers(list) {
@@ -8076,6 +8246,95 @@
     }).join("\n");
   }
 
+  function saipHeaderGfsteRowsFromText(text) {
+    return String(text || "")
+      .split(/[\n,;]+/)
+      .map(function (row) { return row.trim(); })
+      .filter(function (row) { return row.length > 0; });
+  }
+
+  function saipHeaderGfsteTokenRanges(text) {
+    var source = String(text || "");
+    var out = [];
+    var tokenRe = /[^,\n;]+/g;
+    var match;
+    while ((match = tokenRe.exec(source)) !== null) {
+      var raw = String(match[0] || "");
+      var trimmed = raw.trim();
+      if (!trimmed) continue;
+      var leading = raw.search(/\S/);
+      var trailing = raw.length - raw.replace(/\s+$/, "").length;
+      out.push({
+        start: match.index + Math.max(0, leading),
+        end: match.index + raw.length - trailing,
+        text: trimmed,
+      });
+    }
+    return out;
+  }
+
+  function saipHeaderSelectGfsteToken(input, index) {
+    if (!input || typeof input.setSelectionRange !== "function") return;
+    var ranges = saipHeaderGfsteTokenRanges(input.value);
+    var range = ranges[index];
+    if (!range) return;
+    input.focus();
+    input.setSelectionRange(range.start, range.end);
+  }
+
+  function saipHeaderGfsteIndexAtSelection(input) {
+    if (!input) return 0;
+    var pos = Number(input.selectionStart);
+    if (!Number.isFinite(pos)) return 0;
+    var ranges = saipHeaderGfsteTokenRanges(input.value);
+    for (var i = 0; i < ranges.length; i += 1) {
+      if (pos >= ranges[i].start && pos <= ranges[i].end) return i;
+    }
+    return 0;
+  }
+
+  function saipHeaderRenderGfsteRail(rail, input, activeIndex, onSelect) {
+    if (!rail || !input) return 0;
+    rail.innerHTML = "";
+    var rows = saipHeaderGfsteRowsFromText(input.value);
+    if (activeIndex >= rows.length) activeIndex = Math.max(0, rows.length - 1);
+    rows.forEach(function (oid, index) {
+      var btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "saip-profile-gfste-rail-btn";
+      btn.classList.toggle("is-active", index === activeIndex);
+      btn.setAttribute("role", "radio");
+      btn.setAttribute("aria-checked", index === activeIndex ? "true" : "false");
+      btn.title = oid;
+      var dot = document.createElement("span");
+      dot.className = "saip-profile-gfste-rail-dot";
+      dot.textContent = String(index + 1);
+      btn.appendChild(dot);
+      var label = document.createElement("span");
+      label.className = "saip-profile-gfste-rail-label";
+      label.textContent = oid;
+      btn.appendChild(label);
+      btn.addEventListener("click", function () {
+        if (typeof onSelect === "function") {
+          onSelect(index);
+          return;
+        }
+        activeIndex = index;
+        saipHeaderRenderGfsteRail(rail, input, activeIndex);
+        saipHeaderSelectGfsteToken(input, index);
+      });
+      rail.appendChild(btn);
+    });
+    if (rows.length === 0) {
+      var empty = document.createElement("span");
+      empty.className = "saip-profile-gfste-rail-empty";
+      empty.textContent = "0";
+      empty.title = "No GFSTE templates";
+      rail.appendChild(empty);
+    }
+    return activeIndex;
+  }
+
   function saipHeaderServicesMap(decoded) {
     var raw = decoded && decoded["eUICC-Mandatory-services"];
     var out = {};
@@ -8999,7 +9258,59 @@
     gfsteInput.spellcheck = false;
     gfsteInput.rows = 5;
     gfsteInput.value = saipHeaderGfsteText(decoded);
-    gfsteCard.appendChild(gfsteInput);
+    var gfsteBody = document.createElement("div");
+    gfsteBody.className = "saip-profile-gfste-editor";
+    var gfsteRail = document.createElement("div");
+    gfsteRail.className = "saip-profile-gfste-rail";
+    gfsteRail.setAttribute("role", "radiogroup");
+    gfsteRail.setAttribute("aria-label", "Applied GFSTE templates");
+    gfsteBody.appendChild(gfsteRail);
+    gfsteBody.appendChild(gfsteInput);
+    gfsteCard.appendChild(gfsteBody);
+    var gfsteActiveIndex = 0;
+    function refreshGfsteRail() {
+      gfsteActiveIndex = saipHeaderRenderGfsteRail(
+      gfsteRail,
+      gfsteInput,
+      gfsteActiveIndex,
+      function (index) {
+        gfsteActiveIndex = index;
+        refreshGfsteRail();
+        saipHeaderSelectGfsteToken(gfsteInput, index);
+      },
+    );
+    }
+    refreshGfsteRail();
+    gfsteInput.addEventListener("input", refreshGfsteRail);
+    gfsteInput.addEventListener("click", function () {
+      gfsteActiveIndex = saipHeaderGfsteIndexAtSelection(gfsteInput);
+      refreshGfsteRail();
+    });
+    gfsteInput.addEventListener("keyup", function () {
+      gfsteActiveIndex = saipHeaderGfsteIndexAtSelection(gfsteInput);
+      refreshGfsteRail();
+    });
+    gfsteRail.addEventListener("keydown", function (ev) {
+      var rows = saipHeaderGfsteRowsFromText(gfsteInput.value);
+      if (rows.length === 0) return;
+      if (ev.key === "ArrowDown" || ev.key === "ArrowRight") {
+        ev.preventDefault();
+        gfsteActiveIndex = Math.min(rows.length - 1, gfsteActiveIndex + 1);
+      } else if (ev.key === "ArrowUp" || ev.key === "ArrowLeft") {
+        ev.preventDefault();
+        gfsteActiveIndex = Math.max(0, gfsteActiveIndex - 1);
+      } else if (ev.key === "Home") {
+        ev.preventDefault();
+        gfsteActiveIndex = 0;
+      } else if (ev.key === "End") {
+        ev.preventDefault();
+        gfsteActiveIndex = rows.length - 1;
+      } else {
+        return;
+      }
+      refreshGfsteRail();
+      saipHeaderSelectGfsteToken(gfsteInput, gfsteActiveIndex);
+    });
     var gfsteActions = document.createElement("div");
     gfsteActions.className = "saip-profile-header-actions";
     var gfsteApply = document.createElement("button");
@@ -9012,10 +9323,7 @@
     gfsteActions.appendChild(gfsteStatus);
     gfsteCard.appendChild(gfsteActions);
     gfsteApply.addEventListener("click", function () {
-      var rows = String(gfsteInput.value || "")
-        .split(/[\n,;]+/)
-        .map(function (row) { return row.trim(); })
-        .filter(function (row) { return row.length > 0; });
+      var rows = saipHeaderGfsteRowsFromText(gfsteInput.value);
       void saipApplyMandatoryGfste(pkg, rows, sectionKey, peList, validation, gfsteStatus);
     });
     host.appendChild(gfsteCard);
@@ -9647,6 +9955,31 @@
         hint.className = "saip-edit-card-hint";
         hint.textContent = "Tick the file in the list to materialise it with template defaults.";
         detailPanel.appendChild(hint);
+        return;
+      }
+      if (!pkg || !sectionKey) {
+        return;
+      }
+      var cacheKey = sectionKey + "::" + row.key;
+      var cached = pkg.showFileCache ? pkg.showFileCache[cacheKey] : null;
+      if (!cached) {
+        var loading = document.createElement("p");
+        loading.className = "loading";
+        loading.textContent = "Loading template defaults...";
+        detailPanel.appendChild(loading);
+        saipLoadShowFile(pkg, sectionKey, row.key).then(renderDetail);
+        return;
+      }
+      if (cached.error || cached.not_found) {
+        return;
+      }
+      var fileData = Object.assign({}, cached, {
+        section_key: cached.section_key || sectionKey,
+        field_path: cached.field_path || row.key,
+      });
+      var templateDefaultCard = saipBuildTemplateDefaultInfoCardForData(fileData);
+      if (templateDefaultCard) {
+        detailPanel.appendChild(templateDefaultCard);
       }
     }
 
@@ -9704,7 +10037,14 @@
         field_path: cached.field_path || row.key,
       });
       if (activeTab === "data") {
-        saipFileRenderData(detailPanel, fileData, pkg, peList, validation);
+        saipFileRenderData(
+          detailPanel,
+          fileData,
+          pkg,
+          peList,
+          validation,
+          { showTemplateDefault: false },
+        );
       } else {
         saipFileRenderGeneral(detailPanel, fileData, pkg, peList, validation, sectionKey, row.key);
       }
@@ -15403,6 +15743,16 @@
       "Data",
       "EF body bytes plus decoded view (hex + interpreted). Record-fixed files use the record navigator (dropdown + prev/next).",
     );
+    var hasTemplateTab = !!(
+      data && data.fcp && data.fcp.template_default_active === true
+    );
+    var tabTemplate = hasTemplateTab
+      ? mkTab(
+        "template",
+        "Template",
+        "Template default content and resolved materialised body.",
+      )
+      : null;
     var tabJson = mkTab(
       "json",
       "JSON",
@@ -15417,21 +15767,35 @@
       || pkg.activeFileTab === "decoded") {
       pkg.activeFileTab = "data";
     }
+    if (pkg.activeFileTab === "template" && !hasTemplateTab) {
+      pkg.activeFileTab = "data";
+    }
     tabs.appendChild(tabGeneral);
     tabs.appendChild(tabData);
+    if (tabTemplate) tabs.appendChild(tabTemplate);
     tabs.appendChild(tabJson);
     host.appendChild(tabs);
     host.appendChild(bodyHost);
 
     function activate(id) {
       pkg.activeFileTab = id;
-      [tabGeneral, tabData, tabJson].forEach(function (b) {
+      [tabGeneral, tabData, tabTemplate, tabJson].forEach(function (b) {
+        if (!b) return;
         b.classList.toggle("is-active", b.dataset.fileTab === id);
       });
       bodyHost.innerHTML = "";
       bodyHost.classList.toggle("saip-detail-body--data-view", id === "data");
       if (id === "data") {
-        saipFileRenderData(bodyHost, data, pkg, peList, validation);
+        saipFileRenderData(
+          bodyHost,
+          data,
+          pkg,
+          peList,
+          validation,
+          { showTemplateDefault: false },
+        );
+      } else if (id === "template") {
+        saipFileRenderTemplate(bodyHost, data);
       } else if (id === "json") {
         saipFileRenderJson(bodyHost, data, pkg);
       } else {
@@ -15440,6 +15804,9 @@
     }
     tabGeneral.addEventListener("click", function () { activate("general"); });
     tabData.addEventListener("click", function () { activate("data"); });
+    if (tabTemplate) {
+      tabTemplate.addEventListener("click", function () { activate("template"); });
+    }
     tabJson.addEventListener("click", function () { activate("json"); });
     activate(pkg.activeFileTab);
   }
@@ -18156,7 +18523,7 @@
         host,
         "ICCID digits",
         input,
-        "Use the 8988xxxx test range (per .cursor/rules) — never a real IIN.",
+        "Use the 8988xxxx test range; never a real IIN.",
       );
 
       var preview = document.createElement("code");
@@ -23053,8 +23420,8 @@
     ta.rows = Math.min(12, Math.max(3, Math.ceil(
       (String(opts.currentHex || "").length / 2) / 16,
     )));
-    ta.value = String(opts.currentHex || "")
-      .replace(/(.{32})/g, "$1\n");
+    ta.wrap = "soft";
+    ta.value = saipFormatHexPretty(String(opts.currentHex || ""));
     card.appendChild(ta);
 
     var actions = document.createElement("div");
@@ -23309,8 +23676,28 @@
     return card;
   }
 
-  function saipFileRenderData(host, data, pkg, peList, validation) {
+  function saipBuildTemplateDefaultInfoCardForData(data) {
+    var ctx = saipFileRecordLayoutForData(data || {});
+    return saipBuildTemplateDefaultInfoCard(ctx.fcp, ctx.image);
+  }
+
+  function saipFileRenderTemplate(host, data) {
     host.innerHTML = "";
+    var card = saipBuildTemplateDefaultInfoCardForData(data || {});
+    if (card) {
+      host.appendChild(card);
+      return;
+    }
+    var msg = document.createElement("p");
+    msg.className = "saip-placeholder";
+    msg.textContent = "No template default content is defined for this file.";
+    host.appendChild(msg);
+  }
+
+  function saipFileRenderData(host, data, pkg, peList, validation, options) {
+    host.innerHTML = "";
+    var renderOptions = options || {};
+    var showTemplateDefault = renderOptions.showTemplateDefault !== false;
 
     var fcpForData = (data && data.fcp) || {};
     var declaredDataSize = saipParseEfFileSizeHex(fcpForData.ef_size);
@@ -23350,16 +23737,22 @@
       return ("0" + v.toString(16)).slice(-2).toUpperCase();
     }).join("");
 
-    var templateDefaultCard = saipBuildTemplateDefaultInfoCard(fcpForData, image);
-    if (templateDefaultCard) {
-      host.appendChild(templateDefaultCard);
+    if (showTemplateDefault) {
+      var templateDefaultCard = saipBuildTemplateDefaultInfoCard(fcpForData, image);
+      if (templateDefaultCard) {
+        host.appendChild(templateDefaultCard);
+      }
     }
 
     if (image.bytes.length === 0) {
       var msg = document.createElement("p");
       msg.className = "saip-edit-card-hint";
       msg.textContent = fcpForData.template_default_active === true
-        ? "No explicit fillFileContent is present; content is inherited from the template default shown above."
+        ? (
+          showTemplateDefault
+            ? "No explicit fillFileContent is present; content is inherited from the template default shown above."
+            : "No explicit fillFileContent is present; content is inherited from the template default on the Template tab."
+        )
         : "No inline content (this entry is metadata-only, fill-from-template, or doNotCreate).";
       host.appendChild(msg);
       return;
@@ -28282,54 +28675,81 @@
   // and surface its computed value: ``saipFormRenderNode`` consults
   // this registry before falling through to the editable inputs.
   //
-  // The intent matches the user-visible promise: "lengths the editor
-  // can compute should never need typing". Right now we cover the
-  // three lengths the manual actually exposes (macLength + the two
-  // FCP size fields); more rules slot in here as the manual grows.
+  // The intent matches the user-visible promise: lengths the editor
+  // can compute should not require typing. The rules cover common
+  // byte-bearing shapes ({hex}, {rawHex}, {valueHex}, AID objects,
+  // TLV payloads), security-domain key lengths, and FCP record sizes.
+  function _saipCleanWholeByteHex(rawValue) {
+    if (typeof rawValue !== "string") return null;
+    var clean = saipFormHexNorm(rawValue);
+    if (!/^[0-9A-F]*$/.test(clean) || (clean.length % 2) !== 0) {
+      return null;
+    }
+    return clean;
+  }
+
   function _saipExtractHexFromSibling(siblingValue) {
     if (siblingValue == null) return null;
+    var tupleInfo = saipChoiceTuple(siblingValue);
+    if (tupleInfo) return _saipExtractHexFromSibling(tupleInfo.payload);
     var info = saipFormBytesValue(siblingValue);
     if (info) return String(info.hex || "");
-    if (siblingValue && typeof siblingValue === "object" && !Array.isArray(siblingValue)
-        && typeof siblingValue.hex === "string") {
-      var objectHex = saipFormHexNorm(siblingValue.hex);
-      if (/^[0-9A-F]*$/.test(objectHex) && (objectHex.length % 2) === 0) {
-        return objectHex;
+    if (siblingValue && typeof siblingValue === "object" && !Array.isArray(siblingValue)) {
+      var hexKeys = [
+        "hex", "rawHex", "raw", "valueHex", "value",
+        "dataHex", "data", "payloadHex", "payload",
+        "contentHex", "content", "aid", "applicationAID",
+        "identifierHex", "identifier",
+      ];
+      for (var hk = 0; hk < hexKeys.length; hk += 1) {
+        if (!Object.prototype.hasOwnProperty.call(siblingValue, hexKeys[hk])) continue;
+        var nestedHex = _saipExtractHexFromSibling(siblingValue[hexKeys[hk]]);
+        if (nestedHex != null) return nestedHex;
       }
     }
     if (typeof siblingValue === "string") {
-      var clean = saipFormHexNorm(siblingValue);
-      if (/^[0-9A-F]*$/.test(clean) && (clean.length % 2) === 0) {
-        return clean;
-      }
+      return _saipCleanWholeByteHex(siblingValue);
     }
     return null;
   }
 
-  function _saipSiblingByteCount(parentObj, siblingName) {
-    if (!parentObj || typeof parentObj !== "object") return null;
+  function _saipSiblingValue(parentObj, siblingName) {
+    if (!parentObj || typeof parentObj !== "object") return undefined;
     var keys = Object.keys(parentObj);
-    var hit = null;
     var lc = String(siblingName).toLowerCase();
     for (var i = 0; i < keys.length; i += 1) {
       if (String(keys[i]).toLowerCase() === lc) {
-        hit = parentObj[keys[i]];
-        break;
+        return parentObj[keys[i]];
       }
     }
+    return undefined;
+  }
+
+  function _saipSiblingByteCount(parentObj, siblingName) {
+    var hit = _saipSiblingValue(parentObj, siblingName);
     var hex = _saipExtractHexFromSibling(hit);
     if (hex == null) return null;
     return hex.length / 2;
   }
 
+  function _saipSiblingByteCountAny(parentObj, siblingNames) {
+    for (var i = 0; i < siblingNames.length; i += 1) {
+      var count = _saipSiblingByteCount(parentObj, siblingNames[i]);
+      if (count != null) return {
+        count: count,
+        source: siblingNames[i],
+      };
+    }
+    return null;
+  }
+
   function _saipHexByteCountFromObject(parentObj) {
     if (!parentObj || typeof parentObj !== "object" || Array.isArray(parentObj)) return null;
-    if (typeof parentObj.hex !== "string") return null;
-    var clean = saipFormHexNorm(parentObj.hex);
-    if (clean.length === 0 || !/^[0-9A-F]+$/.test(clean) || (clean.length % 2) !== 0) {
+    var hex = _saipExtractHexFromSibling(parentObj);
+    if (hex == null || hex.length === 0) {
       return null;
     }
-    return clean.length / 2;
+    return hex.length / 2;
   }
 
   function _saipFormRootFieldCompact(formState) {
@@ -28364,41 +28784,173 @@
   }
 
   function _saipSiblingNumber(parentObj, siblingName) {
-    if (!parentObj || typeof parentObj !== "object") return null;
-    var keys = Object.keys(parentObj);
-    var lc = String(siblingName).toLowerCase();
-    for (var i = 0; i < keys.length; i += 1) {
-      if (String(keys[i]).toLowerCase() === lc) {
-        var v = parentObj[keys[i]];
-        if (typeof v === "number" && Number.isFinite(v)) return v;
-        if (typeof v === "string") {
-          // Tolerant parse: hex bytes encode a small integer in this
-          // position for some FCP fields (e.g. ``efFileSize`` arrives
-          // as 2 hex bytes of big-endian length).
-          var hex = saipFormHexNorm(v);
-          if (/^[0-9A-F]+$/.test(hex)) {
-            var n = parseInt(hex, 16);
-            if (Number.isFinite(n)) return n;
-          }
-          var dec = Number(v);
-          if (Number.isFinite(dec)) return dec;
-        }
-        var info = saipFormBytesValue(v);
-        if (info) {
-          var b = String(info.hex || "");
-          if (b.length > 0) {
-            var bn = parseInt(b, 16);
-            if (Number.isFinite(bn)) return bn;
-          }
-        }
-        return null;
+    var v = _saipSiblingValue(parentObj, siblingName);
+    if (typeof v === "number" && Number.isFinite(v)) return v;
+    if (typeof v === "string") {
+      // Tolerant parse: hex bytes encode a small integer in this
+      // position for some FCP fields (e.g. ``efFileSize`` arrives
+      // as 2 hex bytes of big-endian length).
+      var hex = saipFormHexNorm(v);
+      if (/^[0-9A-F]+$/.test(hex)) {
+        var n = parseInt(hex, 16);
+        if (Number.isFinite(n)) return n;
+      }
+      var dec = Number(v);
+      if (Number.isFinite(dec)) return dec;
+    }
+    var info = saipFormBytesValue(v);
+    if (info) {
+      var b = String(info.hex || "");
+      if (b.length > 0) {
+        var bn = parseInt(b, 16);
+        if (Number.isFinite(bn)) return bn;
       }
     }
     return null;
   }
 
+  function _saipSiblingNumberAny(parentObj, siblingNames) {
+    for (var i = 0; i < siblingNames.length; i += 1) {
+      var value = _saipSiblingNumber(parentObj, siblingNames[i]);
+      if (value != null) return {
+        value: value,
+        source: siblingNames[i],
+      };
+    }
+    return null;
+  }
+
+  function _saipSiblingArray(parentObj, siblingNames) {
+    for (var i = 0; i < siblingNames.length; i += 1) {
+      var value = _saipSiblingValue(parentObj, siblingNames[i]);
+      if (Array.isArray(value)) return {
+        value: value,
+        source: siblingNames[i],
+      };
+    }
+    return null;
+  }
+
+  function _saipUniformRecordLength(parentObj) {
+    var found = _saipSiblingArray(parentObj, [
+      "records", "recordList", "recordItems", "recordValues",
+      "fillFileContents", "entries",
+    ]);
+    if (!found || found.value.length === 0) return null;
+    var expected = null;
+    for (var i = 0; i < found.value.length; i += 1) {
+      var hex = _saipExtractHexFromSibling(found.value[i]);
+      if (hex == null || hex.length === 0) return null;
+      var count = hex.length / 2;
+      if (expected == null) {
+        expected = count;
+      } else if (expected !== count) {
+        return null;
+      }
+    }
+    return {
+      value: expected,
+      count: found.value.length,
+      source: found.source,
+    };
+  }
+
+  function _saipRecordCountFromArray(parentObj) {
+    var found = _saipSiblingArray(parentObj, [
+      "records", "recordList", "recordItems", "recordValues",
+      "fillFileContents", "entries",
+    ]);
+    if (!found) return null;
+    return {
+      value: found.value.length,
+      source: found.source,
+    };
+  }
+
+  function _saipRecordProductFromSiblings(parentObj) {
+    var recordSize = _saipSiblingNumberAny(parentObj, [
+      "recordSize", "recordLength", "record_length",
+      "record_size", "recLen", "rec_len",
+    ]);
+    var recordCount = _saipSiblingNumberAny(parentObj, [
+      "recordCount", "numberOfRecords", "record_count",
+      "nbRec", "nb_rec",
+    ]);
+    if (!recordSize) {
+      var inferredRecordSize = _saipUniformRecordLength(parentObj);
+      if (inferredRecordSize) {
+        recordSize = {
+          value: inferredRecordSize.value,
+          source: inferredRecordSize.source + " uniform byte length",
+        };
+      }
+    }
+    if (!recordCount) {
+      var inferredRecordCount = _saipRecordCountFromArray(parentObj);
+      if (inferredRecordCount) {
+        recordCount = inferredRecordCount;
+      }
+    }
+    if (
+      !recordSize || !recordCount
+      || recordSize.value <= 0 || recordCount.value <= 0
+    ) {
+      return null;
+    }
+    return {
+      recordSize: recordSize.value,
+      recordCount: recordCount.value,
+      total: recordSize.value * recordCount.value,
+      source: recordSize.source + " x " + recordCount.source,
+    };
+  }
+
+  function _saipEncodeInferredByteCountHex(byteCount, minBytes) {
+    if (!Number.isFinite(byteCount) || byteCount < 0) return "";
+    var hex = Math.floor(byteCount).toString(16).toUpperCase();
+    if (hex.length % 2 !== 0) hex = "0" + hex;
+    var minChars = Math.max(1, Number(minBytes) || 1) * 2;
+    while (hex.length < minChars) hex = "00" + hex;
+    return hex;
+  }
+
+  function _saipLengthFieldByteCount(parentObj, fn) {
+    var direct = _saipHexByteCountFromObject(parentObj);
+    if (direct != null) {
+      return { count: direct, source: "hex byte length" };
+    }
+    var genericNames = [
+      "valueHex", "value", "rawHex", "raw", "hex",
+      "dataHex", "data", "payloadHex", "payload",
+      "contentHex", "content", "aid", "applicationAID",
+      "identifierHex", "identifier",
+    ];
+    if (fn === "aidlength") {
+      genericNames = ["aid", "applicationAID"].concat(genericNames);
+    } else if (fn === "identifierlength") {
+      genericNames = ["identifier", "identifierHex"].concat(genericNames);
+    } else if (fn === "keydatalength") {
+      genericNames = ["keyData", "keyValue"].concat(genericNames);
+    }
+    return _saipSiblingByteCountAny(parentObj, genericNames);
+  }
+
+  function _saipIsByteLengthField(fn) {
+    return fn === "length"
+      || fn === "len"
+      || fn === "bytelength"
+      || fn === "valuelength"
+      || fn === "payloadlength"
+      || fn === "datalength"
+      || fn === "contentlength"
+      || fn === "rawlength"
+      || fn === "aidlength"
+      || fn === "identifierlength"
+      || fn === "keydatalength";
+  }
+
   function saipFormFieldInferred(fieldName, parentObj, peTypeHint, formState) {
-    var fn = String(fieldName || "").toLowerCase();
+    var fn = String(fieldName || "").toLowerCase().replace(/[^a-z0-9]/g, "");
 
     if (fn === "length" && _saipLooksLikeKeyDataObject(parentObj, formState)) {
       var keyDataLen = _saipHexByteCountFromObject(parentObj);
@@ -28420,6 +28972,35 @@
           kind: "number",
           source: "keyData hex byte length",
           hint: "Inferred from keyData (" + keyDataLenBits + " B × 8).",
+        };
+      }
+    }
+
+    if (fn === "recordcount" || fn === "numberofrecords" || fn === "nbrec") {
+      var arrayCount = _saipRecordCountFromArray(parentObj);
+      if (arrayCount) {
+        return {
+          value: arrayCount.value,
+          kind: "number",
+          source: arrayCount.source + " entries",
+          hint: "Inferred from " + arrayCount.source
+            + " (" + arrayCount.value + " record"
+            + (arrayCount.value === 1 ? "" : "s") + ").",
+        };
+      }
+    }
+
+    if (fn === "recordlength" || fn === "recordsize" || fn === "reclen") {
+      var uniformRecord = _saipUniformRecordLength(parentObj);
+      if (uniformRecord) {
+        return {
+          value: uniformRecord.value,
+          kind: "number",
+          source: uniformRecord.source + " byte length",
+          hint: "Inferred from " + uniformRecord.source + " ("
+            + uniformRecord.count + " uniform record"
+            + (uniformRecord.count === 1 ? "" : "s") + " x "
+            + uniformRecord.value + " B).",
         };
       }
     }
@@ -28448,46 +29029,64 @@
     // PEDocumentation §createFCP → efFileSize: total EF size for
     // transparent EFs equals the byte count of the first
     // ``fillFileContent`` payload. Record-based EFs derive total
-    // size from recordSize × recordCount (handled below).
+    // size from recordSize x recordCount when those inputs exist.
     if (fn === "effilesize") {
-      var contentBytes = _saipSiblingByteCount(parentObj, "fillFileContent");
-      if (contentBytes == null) {
-        contentBytes = _saipSiblingByteCount(parentObj, "fillFileContents");
-      }
-      if (contentBytes != null && contentBytes > 0) {
-        var hex = contentBytes.toString(16).toUpperCase();
-        if (hex.length % 2 !== 0) hex = "0" + hex;
-        // pad to 2 bytes — efFileSize is encoded as a 2-byte
-        // big-endian integer in FCP tag 80 (ETSI TS 102 221 §11.1.1.4.1).
-        if (hex.length < 4) hex = ("0000" + hex).slice(-4);
+      var recordProduct = _saipRecordProductFromSiblings(parentObj);
+      if (recordProduct) {
         return {
-          value: hex,
+          value: _saipEncodeInferredByteCountHex(recordProduct.total, 2),
           kind: "hex_bytes",
-          source: "fillFileContent byte length",
-          hint: "Inferred from fillFileContent (" + contentBytes + " B). "
-            + "Record-based EFs override this via recordSize × recordCount.",
+          source: recordProduct.source,
+          hint: "Inferred from record layout: "
+            + recordProduct.recordSize + " B x "
+            + recordProduct.recordCount + " = "
+            + recordProduct.total + " B.",
+        };
+      }
+      var contentBytes = _saipSiblingByteCountAny(parentObj, [
+        "fillFileContent", "fillFileContents", "content",
+        "contentHex", "data", "dataHex",
+      ]);
+      if (contentBytes != null && contentBytes.count > 0) {
+        return {
+          value: _saipEncodeInferredByteCountHex(contentBytes.count, 2),
+          kind: "hex_bytes",
+          source: contentBytes.source + " byte length",
+          hint: "Inferred from " + contentBytes.source
+            + " (" + contentBytes.count + " B). "
+            + "Record-based EFs override this via recordSize x recordCount.",
         };
       }
       return null;
+    }
+
+    if (_saipIsByteLengthField(fn)) {
+      var lengthBytes = _saipLengthFieldByteCount(parentObj, fn);
+      if (lengthBytes != null) {
+        return {
+          value: lengthBytes.count,
+          kind: "number",
+          source: lengthBytes.source,
+          hint: "Inferred from " + lengthBytes.source
+            + " (" + lengthBytes.count + " B).",
+        };
+      }
     }
 
     // PEDocumentation §createFCP → maximumFileSize: when both
     // recordSize and recordCount are present, this is their product
     // (TS 102 221 §11.1.1.4 proprietary tag for record window).
     if (fn === "maximumfilesize") {
-      var rs = _saipSiblingNumber(parentObj, "recordSize");
-      var rc = _saipSiblingNumber(parentObj, "recordCount");
-      if (rs != null && rc != null && rs > 0 && rc > 0) {
-        var total = rs * rc;
-        var thex = total.toString(16).toUpperCase();
-        if (thex.length % 2 !== 0) thex = "0" + thex;
-        if (thex.length < 4) thex = ("0000" + thex).slice(-4);
+      var maxProduct = _saipRecordProductFromSiblings(parentObj);
+      if (maxProduct) {
         return {
-          value: thex,
+          value: _saipEncodeInferredByteCountHex(maxProduct.total, 2),
           kind: "hex_bytes",
-          source: "recordSize × recordCount",
-          hint: "Inferred from recordSize × recordCount = "
-            + rs + " × " + rc + " = " + total + " B.",
+          source: maxProduct.source,
+          hint: "Inferred from record layout: "
+            + maxProduct.recordSize + " B x "
+            + maxProduct.recordCount + " = "
+            + maxProduct.total + " B.",
         };
       }
       return null;
@@ -31195,32 +31794,6 @@
       return;
     }
 
-    // Encoder-managed lock — render the current value read-only.
-    // Children of locked containers are still rendered editable;
-    // we only freeze the leaf carrying the locked field name.
-    var locked = (typeof key === "string")
-      ? saipFormFieldLocked(fieldName, peTypeHint, parent)
-      : null;
-    if (locked && (value == null || typeof value !== "object" || saipFormBytesValue(value))) {
-      var lockedDisplay = value;
-      var lockedKind = "auto";
-      var bInfo = saipFormBytesValue(value);
-      if (bInfo) {
-        lockedDisplay = bInfo.hex;
-        lockedKind = "hex_bytes";
-      } else if (value === null || value === undefined) {
-        lockedDisplay = "(NULL)";
-      }
-      var rowL = saipFormReadOnlyRow(
-        labelText,
-        locked.reason,
-        lockedDisplay,
-        { kind: lockedKind, chipText: "locked", chipTitle: locked.reason },
-      );
-      host.appendChild(rowL.row);
-      return;
-    }
-
     // Inferred from siblings — recompute live, write back to the
     // parent so Apply ships the derived value, render read-only.
     if (typeof key === "string") {
@@ -31262,6 +31835,34 @@
         host.appendChild(rowI.row);
         return;
       }
+    }
+
+    // Encoder-managed lock — render the current value read-only.
+    // Children of locked containers are still rendered editable;
+    // we only freeze the leaf carrying the locked field name. This
+    // runs after inference so structural length fields can be stamped
+    // from their source bytes instead of merely displayed as locked.
+    var locked = (typeof key === "string")
+      ? saipFormFieldLocked(fieldName, peTypeHint, parent)
+      : null;
+    if (locked && (value == null || typeof value !== "object" || saipFormBytesValue(value))) {
+      var lockedDisplay = value;
+      var lockedKind = "auto";
+      var bInfo = saipFormBytesValue(value);
+      if (bInfo) {
+        lockedDisplay = bInfo.hex;
+        lockedKind = "hex_bytes";
+      } else if (value === null || value === undefined) {
+        lockedDisplay = "(NULL)";
+      }
+      var rowL = saipFormReadOnlyRow(
+        labelText,
+        locked.reason,
+        lockedDisplay,
+        { kind: lockedKind, chipText: "locked", chipTitle: locked.reason },
+      );
+      host.appendChild(rowL.row);
+      return;
     }
 
     if (saipFormAccessDomainRow(host, labelText, parent, key, value, fieldName, localPath)) {

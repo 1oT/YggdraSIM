@@ -29,39 +29,96 @@
           <span class="sidebar-collapse-glyph" aria-hidden="true">&#x25C0;</span>
         </button>
         <div class="brand">
-          <span class="brand-mark">YS</span>
+          <span class="brand-mark" aria-hidden="true">
+            <svg class="brand-mark-svg" viewBox="0 0 128 128" focusable="false">
+              <defs>
+                <linearGradient id="brand-ring" x1="18" x2="110" y1="18" y2="110" gradientUnits="userSpaceOnUse">
+                  <stop offset="0" stop-color="#88c0d0"/>
+                  <stop offset="1" stop-color="#a3be8c"/>
+                </linearGradient>
+                <linearGradient id="brand-core" x1="64" x2="64" y1="24" y2="112" gradientUnits="userSpaceOnUse">
+                  <stop offset="0" stop-color="#ebcb8b"/>
+                  <stop offset="1" stop-color="#a3be8c"/>
+                </linearGradient>
+              </defs>
+              <g fill="none" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="64" cy="64" r="57" stroke="url(#brand-ring)" stroke-width="6"/>
+                <path d="M64 24v68" stroke="url(#brand-core)" stroke-width="6"/>
+                <path d="M64 33c-9 10-16 14-27 19" stroke="#88c0d0" stroke-width="5"/>
+                <path d="M64 33c9 10 16 14 27 19" stroke="#88c0d0" stroke-width="5"/>
+                <path d="M64 45c-12 7-21 12-34 14" stroke="#81a1c1" stroke-width="5"/>
+                <path d="M64 45c12 7 21 12 34 14" stroke="#81a1c1" stroke-width="5"/>
+                <path d="M64 60c-10 7-18 10-28 13" stroke="#8fbcbb" stroke-width="5"/>
+                <path d="M64 60c10 7 18 10 28 13" stroke="#8fbcbb" stroke-width="5"/>
+                <path d="M64 92c-7 12-13 17-24 21" stroke="#a3be8c" stroke-width="5"/>
+                <path d="M64 92c7 12 13 17 24 21" stroke="#a3be8c" stroke-width="5"/>
+                <path d="M64 92c-1 9-4 15-10 22" stroke="#ebcb8b" stroke-width="4"/>
+                <path d="M64 92c1 9 4 15 10 22" stroke="#ebcb8b" stroke-width="4"/>
+                <circle cx="64" cy="22" r="4" fill="#ebcb8b" stroke="none"/>
+              </g>
+            </svg>
+          </span>
           <span class="brand-name">YggdraSIM</span>
-        </div>
-        <!--
-          Reader strip — the primary session selector. Each pill represents
-          one PC/SC reader; clicking a pill activates the session bound to
-          that reader across every subsystem (SCP03 tabs, SCP11 flows,
-          action-form "reader" fields). The status dot uses the traffic-
-          light scheme: green = reader has an active session, yellow =
-          reader has a card inserted but no session open, red = reader
-          plugged in but empty. Pills are horizontally scrollable so a
-          15-reader bench is still usable on a 13" laptop.
-        -->
-        <div class="topbar-readers" id="topbar-readers" role="tablist"
-             aria-label="PC/SC readers — pick a reader to bind this session">
-          <div class="topbar-readers-scroll" id="topbar-readers-scroll">
-            <span class="topbar-readers-hint" id="topbar-readers-hint">
-              click ↻ to enumerate readers
-            </span>
-          </div>
-          <button
-            class="topbar-readers-refresh"
-            id="topbar-readers-refresh"
-            title="Refresh PC/SC readers"
-            aria-label="Refresh readers">↻</button>
         </div>
         <nav class="breadcrumbs" aria-label="Breadcrumbs">
           <span class="crumb" id="crumb-subsystem">Overview</span>
         </nav>
         <div class="status-cluster">
-          <span class="badge badge-mode" id="badge-mode">mode: …</span>
-          <span class="badge badge-flavor" id="badge-flavor">flavor: …</span>
-          <span class="badge badge-backend" id="badge-backend">backend: …</span>
+          <span class="topbar-suite-health" id="topbar-suite-health" aria-label="Suite health">
+            <span class="topbar-suite-version" id="topbar-suite-version">v…</span>
+            <span class="topbar-suite-separator" aria-hidden="true">·</span>
+            <span class="topbar-suite-active" id="topbar-suite-active">active …</span>
+          </span>
+          <button
+            type="button"
+            class="topbar-card-bridge"
+            id="topbar-hil-bridge"
+            data-state="idle"
+            title="HIL Bridge status"
+            aria-label="HIL Bridge status">
+            <span class="topbar-card-bridge-dot" aria-hidden="true"></span>
+            <span class="topbar-card-bridge-label">HIL bridge</span>
+            <span class="topbar-card-bridge-value" id="topbar-hil-bridge-value">idle</span>
+          </button>
+          <button
+            type="button"
+            class="topbar-card-bridge"
+            id="topbar-card-bridge"
+            data-state="idle"
+            title="Remote Bridge status"
+            aria-label="Remote Bridge status">
+            <span class="topbar-card-bridge-dot" aria-hidden="true"></span>
+            <span class="topbar-card-bridge-label">Remote bridge</span>
+            <span class="topbar-card-bridge-value" id="topbar-card-bridge-value">idle</span>
+          </button>
+          <span class="topbar-backend-switch" role="group" aria-label="Card backend">
+            <span class="topbar-control-label">Backend</span>
+            <button
+              type="button"
+              class="topbar-backend-option"
+              data-backend="reader"
+              id="topbar-backend-reader"
+              aria-pressed="false">Reader</button>
+            <button
+              type="button"
+              class="topbar-backend-option"
+              data-backend="sim"
+              id="topbar-backend-sim"
+              aria-pressed="false">SIM</button>
+          </span>
+          <div class="topbar-readers" id="topbar-readers" role="tablist"
+               aria-label="PC/SC readers">
+            <div class="topbar-readers-scroll" id="topbar-readers-scroll">
+              <span class="topbar-readers-hint" id="topbar-readers-hint">
+                click ↻ to enumerate readers
+              </span>
+            </div>
+            <button
+              class="topbar-readers-refresh"
+              id="topbar-readers-refresh"
+              title="Refresh PC/SC readers"
+              aria-label="Refresh readers">↻</button>
+          </div>
           <span class="badge badge-api" id="badge-api" data-state="unknown">
             <span class="dot"></span>
             <span id="badge-api-text">probing…</span>
@@ -100,6 +157,14 @@
           title="Hide the top bar to maximise the working area. Click again to bring it back.">
           <span class="topbar-collapse-glyph" aria-hidden="true">&#x25B2;</span>
         </button>
+        <button
+          type="button"
+          id="app-close-button"
+          class="app-close-button"
+          aria-label="Close YggdraSIM"
+          title="Close YggdraSIM">
+          <span aria-hidden="true">&times;</span>
+        </button>
       </header>
 
       <aside class="sidebar">
@@ -110,15 +175,13 @@
         <!--
           Legacy "Inspect" and "Advanced" flat-nav groups were folded
           into the Command Center tree above to avoid duplicated
-          entries for Registry browser / Card backend / Env flags /
-          PC/SC readers / Raw shell. Only the two surfaces that don't
-          fit the taxonomy (the overview dashboard + the About page)
-          remain as a trailing flat list.
+          entries for Registry browser / Env flags / Raw shell. Backend
+          switching and PC/SC reader selection live in the top bar; the
+          overview dashboard + About page remain as a trailing flat list.
         -->
         <div class="sidebar-title">Meta</div>
         <ul class="subsystem-list tool-list">
           <li data-view="overview" class="subsystem-entry active">Overview</li>
-          <li data-view="card_bridge" class="subsystem-entry">Card bridge</li>
           <li data-view="about" class="subsystem-entry">About</li>
         </ul>
       </aside>
@@ -142,27 +205,12 @@
           </section>
           <div class="card-grid overview-status-grid">
             <article class="card">
-              <h3>Suite health</h3>
-              <dl id="overview-health">
-                <dt>version</dt><dd id="overview-version">…</dd>
-                <dt>flavor</dt><dd id="overview-flavor">…</dd>
-                <dt>mode</dt><dd id="overview-mode">…</dd>
-                <dt>uptime</dt><dd id="overview-uptime">…</dd>
-                <dt>pid</dt><dd id="overview-pid">…</dd>
-              </dl>
-              <button class="btn" id="overview-refresh">Refresh</button>
-            </article>
-            <article class="card">
               <h3>Card backend</h3>
               <p>
                 Active backend:
                 <code id="overview-backend-value">…</code>
                 (<span id="overview-backend-source">…</span>).
               </p>
-              <div class="inline-actions">
-                <button class="btn" data-backend="reader">Switch to reader</button>
-                <button class="btn" data-backend="sim">Switch to sim</button>
-              </div>
               <p class="hint">
                 Session-scoped. The persisted selection is only
                 changed from the CLI menu.
@@ -211,42 +259,33 @@
           </table>
         </section>
 
-        <section data-view="backend" class="view">
-          <h1>Card backend</h1>
-          <p class="lead">
-            Switch between the PC/SC reader and the simulated SIM
-            backend for the remainder of this GUI process.
-          </p>
-          <div class="card">
-            <dl>
-              <dt>current</dt><dd id="backend-current">…</dd>
-              <dt>source</dt><dd id="backend-source">…</dd>
-              <dt>simulated?</dt><dd id="backend-simulated">…</dd>
-            </dl>
-            <div class="inline-actions">
-              <button class="btn btn-primary" data-backend="reader">reader</button>
-              <button class="btn btn-primary" data-backend="sim">sim</button>
-            </div>
-          </div>
-        </section>
-
         <section data-view="env_flags" class="view">
-          <h1>Environment flags</h1>
-          <p class="lead">
-            Live view of the <code>YGGDRASIM_*</code> registry. Flags
-            marked <em>process</em> only stick for the current server;
-            <em>session</em> and <em>file</em> scopes persist through
-            <code>yggdrasim_common.env_flags</code>.
-          </p>
-          <div class="env-flag-toolbar">
-            <button id="env-flag-refresh" class="btn">Refresh</button>
-            <button id="env-flag-reset-persisted" class="btn btn-danger">
-              Reset persisted overrides
-            </button>
-            <span id="env-flag-toolbar-status" class="env-flag-toolbar-status"></span>
-          </div>
-          <div id="env-flag-categories" class="env-flag-root">
-            <p class="loading">loading…</p>
+          <div class="cc-wb-shell env-config-shell">
+            <header class="cc-wb-page-header env-config-head">
+              <div>
+                <h1>Configuration</h1>
+                <p class="cc-wb-lead">
+                  Runtime <code>YGGDRASIM_*</code> flags grouped by subsystem.
+                </p>
+              </div>
+              <div class="env-flag-toolbar" aria-label="Configuration actions">
+                <button id="env-flag-refresh" class="btn">Refresh</button>
+                <button id="env-flag-reset-persisted" class="btn btn-danger">
+                  Reset persisted overrides
+                </button>
+              </div>
+            </header>
+            <div class="cc-wb-status-strip env-flag-status-strip" aria-live="polite">
+              <span class="cc-chip" id="env-flag-count">flags: ...</span>
+              <span class="cc-chip" id="env-flag-set-count">set: ...</span>
+              <span class="cc-chip" id="env-flag-sensitive-count">sensitive: ...</span>
+              <span id="env-flag-toolbar-status" class="env-flag-toolbar-status"></span>
+            </div>
+            <div class="cc-wb-frame cc-wb-frame--padded-tight env-flag-frame">
+              <div id="env-flag-categories" class="env-flag-root">
+                <p class="loading">loading…</p>
+              </div>
+            </div>
           </div>
         </section>
 
@@ -340,32 +379,8 @@
           </div>
         </section>
 
-        <section data-view="live_readers" class="view">
-          <h1>PC/SC readers</h1>
-          <p class="lead">
-            Enumerate connected PC/SC readers and probe the ATR of the
-            card (if any) currently in the slot. Uses the live PC/SC
-            stack from <code>SCP03.transport.card</code> without opening
-            a secure channel.
-          </p>
-          <div class="inline-actions">
-            <button class="btn btn-primary" id="live-readers-refresh">Refresh</button>
-          </div>
-          <div class="tool-meta" id="live-readers-status">Click refresh to probe.</div>
-          <table class="data-table">
-            <thead>
-              <tr>
-                <th>Reader</th>
-                <th>ATR</th>
-                <th>Status</th>
-              </tr>
-            </thead>
-            <tbody id="live-readers-body"></tbody>
-          </table>
-        </section>
-
         <!--
-          Card Bridge panel — wraps the read-only card_bridge.status /
+          Remote Bridge panel — wraps the read-only card_bridge.status /
           card_bridge.probe actions in a focused diagnostics surface.
           Polls /api/actions/card_bridge.status/run every 5 s while the
           view is active so operators see auth posture + latency change
@@ -374,7 +389,7 @@
           server-side helper returns.
         -->
         <section data-view="card_bridge" class="view">
-          <h1>Card bridge</h1>
+          <h1>Remote bridge</h1>
           <p class="lead">
             Inspect and probe the remote card bridge configured for this
             YggdraSIM session. Talks exclusively through the
@@ -427,8 +442,135 @@
 
             <div class="cb-status-summary" id="cb-status-summary">
               not configured — set <code>YGGDRASIM_CARD_RELAY_URL</code> or pass
-              <code>--remote-card-url</code> to talk to a Card Bridge over SSH.
+              <code>--remote-card-url</code> to talk to a Remote Bridge over SSH.
             </div>
+          </div>
+
+          <div class="cb-panel cb-rig-panel">
+            <header class="cb-panel-header">
+              <h2>Remote HIL rig</h2>
+              <div class="cb-panel-controls">
+                <button class="btn btn-small" id="cb-rig-refresh">Refresh</button>
+                <button class="btn btn-small" id="cb-rig-open-gui">Open RPi GUI</button>
+              </div>
+            </header>
+
+            <div class="cb-rig-grid">
+              <div class="form-row cb-rig-field">
+                <label for="cb-rig-ssh-target">SSH target</label>
+                <input type="text" id="cb-rig-ssh-target" list="cb-rig-ssh-target-options" placeholder="pi@rpi-host" autocomplete="off" />
+                <datalist id="cb-rig-ssh-target-options"></datalist>
+              </div>
+              <div class="form-row cb-rig-field">
+                <label for="cb-rig-identity-file">SSH key</label>
+                <input type="text" id="cb-rig-identity-file" placeholder="optional private key path" autocomplete="off" />
+              </div>
+              <div class="form-row cb-rig-field">
+                <label for="cb-rig-reader-index">PC reader index</label>
+                <input type="text" id="cb-rig-reader-index" inputmode="numeric" pattern="[0-9]*" value="0" autocomplete="off" />
+              </div>
+              <div class="form-row cb-rig-field">
+                <label for="cb-rig-reader-name">PC reader name</label>
+                <input type="text" id="cb-rig-reader-name" placeholder="optional substring" autocomplete="off" />
+              </div>
+              <div class="form-row cb-rig-field">
+                <label for="cb-rig-card-port">Card port</label>
+                <input type="text" id="cb-rig-card-port" inputmode="numeric" pattern="[0-9]*" value="8642" autocomplete="off" />
+              </div>
+              <div class="form-row cb-rig-field">
+                <label for="cb-rig-gui-port">GUI port</label>
+                <input type="text" id="cb-rig-gui-port" inputmode="numeric" pattern="[0-9]*" value="27854" autocomplete="off" />
+              </div>
+            </div>
+
+            <details class="cb-override cb-rig-advanced">
+              <summary>RPi service settings</summary>
+              <div class="cb-rig-grid">
+                <div class="form-row cb-rig-field">
+                  <label for="cb-rig-service-name">Service</label>
+                  <input type="text" id="cb-rig-service-name" value="yggdrasim-hil-supervisor.service" />
+                </div>
+                <div class="form-row cb-rig-field">
+                  <label for="cb-rig-remote-workdir">RPi repo directory</label>
+                  <input type="text" id="cb-rig-remote-workdir" value="~/YggdraSIM" />
+                </div>
+                <div class="form-row cb-rig-field">
+                  <label for="cb-rig-remote-python">RPi Python</label>
+                  <input type="text" id="cb-rig-remote-python" value="~/YggdraSIM/python/bin/python" />
+                </div>
+                <div class="form-row cb-rig-field">
+                  <label for="cb-rig-remote-token">RPi token file</label>
+                  <input type="text" id="cb-rig-remote-token" value="~/.config/yggdrasim/card_bridge/8642.token" />
+                </div>
+                <div class="form-row cb-rig-field">
+                  <label for="cb-rig-remsim-binary">RPi REMSIM binary</label>
+                  <input type="text" id="cb-rig-remsim-binary" value="osmo-remsim-client-st2" autocomplete="off" />
+                </div>
+                <div class="form-row cb-rig-field">
+                  <label for="cb-rig-usb-vidpid">SIMtrace2 VID:PID</label>
+                  <input type="text" id="cb-rig-usb-vidpid" value="1d50:60e3" />
+                </div>
+                <div class="form-row cb-rig-field">
+                  <label for="cb-rig-hil-port">HIL port</label>
+                  <input type="text" id="cb-rig-hil-port" inputmode="numeric" pattern="[0-9]*" value="9997" autocomplete="off" />
+                </div>
+              </div>
+            </details>
+
+            <div class="cb-rig-primary-actions">
+              <button class="btn btn-primary" id="cb-rig-start-all">Start full rig</button>
+              <button class="btn" id="cb-rig-stop-all">Stop full rig</button>
+            </div>
+
+            <details class="cb-override cb-rig-manual">
+              <summary>Manual controls</summary>
+              <div class="cb-rig-actions">
+                <button class="btn btn-primary" id="cb-rig-start-local">Start PC bridge</button>
+                <button class="btn" id="cb-rig-stop-local">Stop PC bridge</button>
+                <button class="btn btn-primary" id="cb-rig-start-tunnel">Open tunnel</button>
+                <button class="btn" id="cb-rig-stop-tunnel">Stop tunnel</button>
+                <button class="btn" id="cb-rig-sync-token">Sync token</button>
+                <button class="btn" id="cb-rig-install-service">Install service</button>
+                <button class="btn btn-primary" id="cb-rig-start-service">Start HIL</button>
+                <button class="btn" id="cb-rig-stop-service">Stop HIL</button>
+              </div>
+            </details>
+
+            <div class="cb-rig-status-grid">
+              <div class="cb-probe-card">
+                <div class="cb-probe-label">PC bridge</div>
+                <div class="cb-probe-value" id="cb-rig-local-status">–</div>
+              </div>
+              <div class="cb-probe-card">
+                <div class="cb-probe-label">SSH tunnel</div>
+                <div class="cb-probe-value" id="cb-rig-tunnel-status">–</div>
+              </div>
+              <div class="cb-probe-card">
+                <div class="cb-probe-label">RPi service</div>
+                <div class="cb-probe-value" id="cb-rig-service-status">–</div>
+              </div>
+              <div class="cb-probe-card">
+                <div class="cb-probe-label">RPi bridge</div>
+                <div class="cb-probe-value" id="cb-rig-bridge-status">–</div>
+              </div>
+              <div class="cb-probe-card">
+                <div class="cb-probe-label">SIMtrace2</div>
+                <div class="cb-probe-value" id="cb-rig-usb-status">–</div>
+              </div>
+              <div class="cb-probe-card">
+                <div class="cb-probe-label">REMSIM</div>
+                <div class="cb-probe-value" id="cb-rig-remsim-status">–</div>
+              </div>
+              <div class="cb-probe-card">
+                <div class="cb-probe-label">Modem link</div>
+                <div class="cb-probe-value" id="cb-rig-modem-link-status">–</div>
+              </div>
+              <div class="cb-probe-card">
+                <div class="cb-probe-label">RPi GUI</div>
+                <div class="cb-probe-value cb-mono" id="cb-rig-gui-url">http://127.0.0.1:27854</div>
+              </div>
+            </div>
+            <div class="cb-status-summary" id="cb-rig-note">Remote rig controls are idle.</div>
           </div>
 
           <div class="cb-panel">

@@ -200,7 +200,7 @@ class ProfilePackageShellTests(unittest.TestCase):
         self.assertIn("SCP03", rendered)
         self.assertIn("minimumSecurityLevelInferred", rendered)
         self.assertIn("b20100", rendered)
-        self.assertIn("10.10.10.10", rendered)
+        self.assertIn("192.0.2.10", rendered)
         self.assertIn("Remote Endpoint", rendered)
         self.assertIn("identifierAscii", rendered)
         self.assertIn("8944501605246763362", rendered)
@@ -496,13 +496,13 @@ class ProfilePackageShellTests(unittest.TestCase):
     def test_normalize_dump_value_decodes_header_iccid_and_key_material(self) -> None:
         normalized = self.shell._normalize_dump_value(
             {
-                "iccid": "89460811111111111112",
+                "iccid": "89880811111111111112",
                 "keyData": "1122334455667788aabbccddeeff0011",
                 "macLength": 8,
             }
         )
 
-        self.assertEqual(normalized["iccid"]["decoded"]["iccid"], "89460811111111111112")
+        self.assertEqual(normalized["iccid"]["decoded"]["iccid"], "89880811111111111112")
         self.assertEqual(normalized["keyData"]["decoded"]["keySizeBits"], 128)
         self.assertEqual(normalized["macLength"]["decoded"]["decimal"], 8)
 
@@ -775,7 +775,7 @@ class ProfilePackageShellTests(unittest.TestCase):
             "intro": ["Read 3 PEs from file '/tmp/demo.der'"],
             "sections": {
                 "header": {
-                    "iccid": bytes.fromhex("89461111111111111112"),
+                    "iccid": bytes.fromhex("89881111111111111112"),
                 },
                 "mf": {
                     "ef-iccid": [
@@ -796,7 +796,7 @@ class ProfilePackageShellTests(unittest.TestCase):
             output_path = Path(temp_dir) / "profile_template.json"
             with contextlib.redirect_stdout(io.StringIO()) as captured:
                 self.shell._cmd_generate_template(
-                    f'"{output_path}" ICCID=89461111111111111112 IMSI=1234567812345678'
+                    f'"{output_path}" ICCID=89881111111111111112 IMSI=1234567812345678'
                 )
 
             rendered = json.loads(output_path.read_text(encoding="utf-8"))
@@ -810,7 +810,7 @@ class ProfilePackageShellTests(unittest.TestCase):
             rendered["sections"]["usim"]["ef-imsi"][0]["@"][1]["hex"],
             "{IMSI}",
         )
-        self.assertEqual(rendered["__ygg_token_defs__"]["ICCID"]["hex"], "89461111111111111112")
+        self.assertEqual(rendered["__ygg_token_defs__"]["ICCID"]["hex"], "89881111111111111112")
         self.assertEqual(rendered["__ygg_token_defs__"]["ICCID_EF"]["hex"], "98641111111111111121")
         self.assertEqual(rendered["__ygg_token_defs__"]["IMSI"]["hex"], "091132547618325476F8")
         self.assertIn("Placeholder injection summary", captured.getvalue())
@@ -860,13 +860,13 @@ class ProfilePackageShellTests(unittest.TestCase):
                     with contextlib.redirect_stdout(io.StringIO()) as captured:
                         self.shell._cmd_generate_profile(
                             f'"{template_path}" "{output_path}" '
-                            "ICCID=89461111111111111112 IMSI=1234567812345678"
+                            "ICCID=89881111111111111112 IMSI=1234567812345678"
                         )
                     written_bytes = output_path.read_bytes()
 
         mocked_ensure.assert_called_once_with(self.shell.bridge.workspace_root)
         document = mocked_encode.call_args.args[0]
-        self.assertEqual(document["sections"]["header"]["iccid"], bytes.fromhex("89461111111111111112"))
+        self.assertEqual(document["sections"]["header"]["iccid"], bytes.fromhex("89881111111111111112"))
         self.assertEqual(
             document["sections"]["mf"]["ef-iccid"][0][1],
             bytes.fromhex("98641111111111111121"),
@@ -875,7 +875,7 @@ class ProfilePackageShellTests(unittest.TestCase):
             document["sections"]["usim"]["ef-imsi"][0][1],
             bytes.fromhex("091132547618325476F8"),
         )
-        self.assertEqual(document["__ygg_token_defs__"]["ICCID"]["hex"], "89461111111111111112")
+        self.assertEqual(document["__ygg_token_defs__"]["ICCID"]["hex"], "89881111111111111112")
         self.assertEqual(document["__ygg_token_defs__"]["ICCID_EF"]["hex"], "98641111111111111121")
         self.assertEqual(document["__ygg_token_defs__"]["IMSI"]["hex"], "091132547618325476F8")
         self.assertEqual(written_bytes, b"\xAA\xBB")
@@ -918,8 +918,8 @@ class ProfilePackageShellTests(unittest.TestCase):
             template_path.write_text(json.dumps(template), encoding="utf-8")
             data_path.write_text(
                 "ICCID,IMSI\n"
-                "89461111111111111112,1234567812345678\n"
-                "89461111111111111113,1234567812345679\n",
+                "89881111111111111112,1234567812345678\n"
+                "89881111111111111113,1234567812345679\n",
                 encoding="utf-8",
             )
 
@@ -945,17 +945,17 @@ class ProfilePackageShellTests(unittest.TestCase):
         self.assertEqual(mocked_encode.call_count, 2)
         first_document = mocked_encode.call_args_list[0].args[0]
         second_document = mocked_encode.call_args_list[1].args[0]
-        self.assertEqual(first_document["sections"]["header"]["iccid"], bytes.fromhex("89461111111111111112"))
-        self.assertEqual(second_document["sections"]["header"]["iccid"], bytes.fromhex("89461111111111111113"))
+        self.assertEqual(first_document["sections"]["header"]["iccid"], bytes.fromhex("89881111111111111112"))
+        self.assertEqual(second_document["sections"]["header"]["iccid"], bytes.fromhex("89881111111111111113"))
         self.assertEqual(
             generated_files,
             [
-                "profile_iccid_89461111111111111112.der",
-                "profile_iccid_89461111111111111113.der",
+                "profile_iccid_89881111111111111112.der",
+                "profile_iccid_89881111111111111113.der",
             ],
         )
-        self.assertEqual(generated_payloads["profile_iccid_89461111111111111112.der"], b"\xAA\x01")
-        self.assertEqual(generated_payloads["profile_iccid_89461111111111111113.der"], b"\xAA\x02")
+        self.assertEqual(generated_payloads["profile_iccid_89881111111111111112.der"], b"\xAA\x01")
+        self.assertEqual(generated_payloads["profile_iccid_89881111111111111113.der"], b"\xAA\x02")
         self.assertIn("Generated 2 DER profiles", captured.getvalue())
 
     def test_cmd_info_apps_invokes_bridge_with_expected_arguments(self) -> None:

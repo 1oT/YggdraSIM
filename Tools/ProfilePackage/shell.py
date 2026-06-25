@@ -2767,7 +2767,7 @@ class ProfilePackageShell:
         print("    PRESETS USIM")
         print("    PREVIEW-PRESET USIM-ISIM")
         print("    DIFF-PRESET USIM FULL")
-        print("    NEW-TEMPLATE reports/scaffold_template.json PRESET=USIM ICCID=89461111111111111112 IMSI=123456781234567")
+        print("    NEW-TEMPLATE reports/scaffold_template.json PRESET=USIM ICCID=89881111111111111112 IMSI=123456781234567")
         print("    NEW-TEMPLATE PRESET=MINIMAL")
         print("    NEW-PROFILE reports/scaffold_profile.der PRESET=MINIMAL")
         print("    NEW-PROFILE PRESET=USIM ICCID=AUTO IMSI=AUTO VERIFY")
@@ -2777,8 +2777,8 @@ class ProfilePackageShell:
         print("    RANDOMIZE-AKA reports/dev_profile.der ALGORITHM=tuak INCLUDE-AUTH-COUNTER-MAX")
         print("    NEW-PROFILE-WIZARD")
         print("    APPLY-TEMPLATE reports/scaffold_template.json reports/apply_out.der ICCID=AUTO VERIFY")
-        print("    GENERATE-TEMPLATE reports/profile_template.json ICCID=89461111111111111112 IMSI=123456781234567")
-        print("    GENERATE-PROFILE reports/profile_template.json reports/profile.der ICCID=89461111111111111112")
+        print("    GENERATE-TEMPLATE reports/profile_template.json ICCID=89881111111111111112 IMSI=123456781234567")
+        print("    GENERATE-PROFILE reports/profile_template.json reports/profile.der ICCID=89881111111111111112")
         print("    GENERATE-BATCH reports/profile_template.json Workspace/SAIP/examples/saip_batch_data_template.yaml reports/generated_profiles")
         print("    EXPORT-TOKENS reports/profile_template.json")
         print("    APPLY-TOKENS reports/imported_template.json reports/imported_template.tokens.json")
@@ -2828,7 +2828,7 @@ class ProfilePackageShell:
         print("    [NAME] / [#NAME] are accepted when __ygg_placeholder_style__ is 'bracket'")
         print("")
         print("  Token value forms:")
-        print("    hex string                   literal bytes, e.g. 89461111111111111112")
+        print("    hex string                   literal bytes, e.g. 89881111111111111112")
         print('    {"hex":"FF"}                 same, JSON object form')
         print('    {"zero_len":10}              a fixed-length block of 0x00 octets')
         print('    {"pattern_hex":"FF","byte_len":4}')
@@ -4226,7 +4226,7 @@ class ProfilePackageShell:
         if len(tokens) != 3:
             raise ValueError(
                 f"Usage: {verb} <file.json> <NAME> <VALUE>\n"
-                "       VALUE may be a hex string (e.g. 89461111111111111112)\n"
+                "       VALUE may be a hex string (e.g. 89881111111111111112)\n"
                 "       or a JSON object (e.g. '{\"zero_len\":10}')."
             )
         path, loaded = self._load_token_host_document(tokens[0])

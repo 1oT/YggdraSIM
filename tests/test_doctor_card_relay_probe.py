@@ -226,7 +226,7 @@ class DoctorCardRelayProbeTests(unittest.TestCase):
         bridge = _StubBridge(
             status_payload={
                 "authRequired": False,
-                "host": "10.0.0.5",
+                "host": "192.0.2.5",
             },
         )
         try:

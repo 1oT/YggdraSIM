@@ -159,7 +159,7 @@ class FrozenRuntimePathTests(unittest.TestCase):
             addeim_template_text = addeim_template.read_text(encoding="utf-8")
             self.assertIn("/path/to/local_eim_signing_cert.pem", addeim_template_text)
             self.assertNotIn("Workspace/LocalEIM/certs/addeim/", addeim_template_text)
-            self.assertIn('"eim_hostname_fqdn": "yggdrasim.eim.test.1ot.com"', addeim_template_text)
+            self.assertIn('"eim_hostname_fqdn": "eim.example.test"', addeim_template_text)
             self.assertIn('"tls_connection_certificate_choice": "server_certificate"', addeim_template_text)
             self.assertIn('"https_over_tcp_retrieval": true', addeim_template_text)
 

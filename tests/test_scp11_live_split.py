@@ -772,6 +772,74 @@ class LiveSplitTests(unittest.TestCase):
         self.assertEqual(request.euicc_challenge, "")
         self.assertFalse(any(call[0] == "EIM: GetEuiccChallenge" for call in apdu_channel.send_calls))
 
+    def test_live_ipa_euicc_data_uses_requesting_eim_association_token(self):
+        eim_configuration = wrap_tlv(
+            "BF55",
+            b"".join(
+                [
+                    wrap_tlv(
+                        "A0",
+                        wrap_tlv(
+                            "30",
+                            b"".join(
+                                [
+                                    wrap_tlv("80", b"manager-1"),
+                                    wrap_tlv("81", b"eim1.example.test"),
+                                    wrap_tlv("82", b"\x01"),
+                                    wrap_tlv("84", b"\x01"),
+                                ]
+                            ),
+                        ),
+                    ),
+                    wrap_tlv(
+                        "A0",
+                        wrap_tlv(
+                            "30",
+                            b"".join(
+                                [
+                                    wrap_tlv("80", b"manager-2"),
+                                    wrap_tlv("81", b"eim2.example.test"),
+                                    wrap_tlv("82", b"\x01"),
+                                    wrap_tlv("84", b"\x02"),
+                                ]
+                            ),
+                        ),
+                    ),
+                ]
+            ),
+        )
+        apdu_channel = MinimalApduChannel(
+            configured_data_response=b"",
+            eim_configuration_response=eim_configuration,
+            eid_response=wrap_tlv("5A", bytes.fromhex("89049032123456789012345678901234")),
+        )
+        orchestrator = SGP22Orchestrator(
+            cfg=SimpleNamespace(),
+            apdu_channel=apdu_channel,
+            profile_provider=None,
+        )
+        orchestrator._sync_pending_notifications = lambda *args, **kwargs: None
+        inner_request = wrap_tlv("BF52", wrap_tlv("5C", bytes.fromhex("84")))
+        signed_request = wrap_tlv(
+            "30",
+            b"".join(
+                [
+                    wrap_tlv("80", b"manager-2"),
+                    wrap_tlv("5A", bytes.fromhex("89049032123456789012345678901234")),
+                    wrap_tlv("81", b"\x35"),
+                    wrap_tlv("82", b"\x00\x00\x00\x00\x00\x00\x04\xA3"),
+                    wrap_tlv("A0", inner_request),
+                ]
+            ),
+        )
+        package = wrap_tlv("BF52", signed_request + wrap_tlv("5F37", b"\xCC" * 64))
+
+        response = orchestrator._relay_eim_package_to_card(package, poll_round=1, package_index=1)
+
+        self.assertTrue(response.startswith(bytes.fromhex("BF52")))
+        self.assertIn(bytes.fromhex("840102"), response)
+        self.assertNotIn(bytes.fromhex("840101"), response)
+
     def test_live_profile_download_trigger_keeps_localized_bridge_base_url(self):
         provider = SimpleNamespace(set_base_url=mock.Mock())
         orchestrator = SGP22Orchestrator(
@@ -1199,6 +1267,54 @@ class LiveSplitTests(unittest.TestCase):
         self.assertEqual(request.eim_fqdn, "eim1.example.test")
         self.assertEqual(request.eim_id, "eim1.example.test")
         self.assertEqual(request.eim_id_type, "eimIdTypeFqdn (2)")
+
+    def test_live_eim_poll_summary_reports_processed_packages_for_attempt(self):
+        orchestrator = SGP22Orchestrator(
+            cfg=SimpleNamespace(),
+            apdu_channel=SimpleNamespace(),
+            profile_provider=None,
+        )
+        request = EimPollRequest(
+            eim_fqdn="eim1.example.test",
+            eim_id="eim1.example.test",
+            eim_id_type="eimIdTypeFqdn (2)",
+            counter_value="1",
+            association_token="0",
+            supported_protocol="1",
+            euicc_ci_pkid="",
+            indirect_profile_download="0",
+            euicc_configured_data="",
+            eim_configuration_data="",
+        )
+        orchestrator._last_eim_poll_response = SimpleNamespace(
+            euicc_package_list=[],
+            polling_complete=True,
+            eim_result_code=1,
+        )
+        stdout = io.StringIO()
+
+        with redirect_stdout(stdout):
+            orchestrator._print_eim_poll_entry_summary(
+                ordinal=1,
+                total_entries=2,
+                entry_index=7,
+                request=request,
+                drain_round=2,
+                outcome={
+                    "packages_relayed": 1,
+                    "final_result_code": 1,
+                    "polling_complete": True,
+                },
+            )
+
+        rendered = stdout.getvalue()
+        self.assertIn(
+            "attempt=drain-2 entry=1/2 config_index=7 eim=eim1.example.test",
+            rendered,
+        )
+        self.assertIn("processed=1 package(s)", rendered)
+        self.assertIn("final=noEimPackageAvailable(1)", rendered)
+        self.assertNotIn("packages=0", rendered)
 
     def test_live_eim_binary_logs_full_provide_result_body(self):
         client = RecordingPinnedBypassEimClient(base_url="https://rsp.example.com")

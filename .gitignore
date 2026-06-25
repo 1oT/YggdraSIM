@@ -19,10 +19,9 @@ tmp_*.txt
 tmp_*/
 tmp[a-z0-9]*/
 
-# Agent-side pytest scratch and audit logs (local-only).
+# Local pytest scratch and audit logs.
 .ptlog.txt
 .pytest_baseline_log.txt
-.pytest_agent_log.txt
 .saip_key_audit_log.txt
 
 # SCP11 mutable runtime caches and reports
@@ -78,15 +77,10 @@ venv/
 # Generated single-file concatenation of the MkDocs site
 YggdraSIM.md
 
-# Automation logs
-git_agent.log
-
 # Local pytest, probe, and smoke log dotfiles left at repo root
-.pytest_agent_log*.txt
 .pytest_chunk_log*.txt
 .pytest_last_run*.log
 .pytest_pre_log*.txt
-.unittest_agent_log*.txt
 .unittest_last_run*.log
 .run_*.txt
 .smoke_*
@@ -101,33 +95,7 @@ git_agent.log
 .hil_tui_*
 .hil_decode_tui_probe*
 .strace_exec.txt
-.cursor-tmux.log
 .tuak_kat_sanity.py
-
-# Local assistant/editor scratch and settings
-.smoke_*.py
-.agents/
-.codex/
-.claude/
-.claudeignore
-.cursorrules
-.cursorignore
-.cursor/
-.aider*
-.continue/
-.gemini/
-.windsurf/
-.windsurfrules
-
-# Local assistant/editor markdown
-CLAUDE.md
-CLAUDE.*.md
-GEMINI.md
-GEMINI.*.md
-AGENTS.local.md
-AGENTS.private.md
-AGENTS.override.md
-AGENTS.*.local.md
 
 # Build-flavor stamp written by yggdrasim_main.spec at PyInstaller time
 yggdrasim_common/_build_flavor.py

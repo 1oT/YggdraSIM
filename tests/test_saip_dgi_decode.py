@@ -135,7 +135,7 @@ class StkLeafDecoderTests(unittest.TestCase):
     def test_other_address_ipv4(self) -> None:
         decoded = decode_other_address(b"\x21\x0a\x0a\x0a\x0a")
         self.assertEqual(decoded["typeName"], "IPv4")
-        self.assertEqual(decoded["address"], "10.10.10.10")
+        self.assertEqual(decoded["address"], "192.0.2.10")
 
 
 class DgiRecordsHighLevelTests(unittest.TestCase):

@@ -36,8 +36,10 @@ Actions registered:
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
+import subprocess
 import sys
 from pathlib import Path
 from typing import Any, AsyncIterator
@@ -47,6 +49,8 @@ from .registry import ActionContext, ActionField, ActionSpec, get_registry
 
 _LOGGER = logging.getLogger("yggdrasim.gui.actions.hil")
 
+_DEFAULT_DECODE_LIMIT = 5000
+_MAX_DECODE_LIMIT = 5000
 _HIL_SESSION_MODE_RAW = "raw"
 _HIL_SESSION_MODE_RAW_WIRESHARK = "raw_wireshark"
 _HIL_SESSION_MODE_DECODED = "decoded"
@@ -240,6 +244,232 @@ def _resolve_decode_capture_path(capture_path: Any = None) -> str:
     if len(command_path) > 0:
         return os.path.abspath(os.path.expanduser(command_path))
     return _default_decode_capture_path()
+
+
+def _remote_decode_capture_local_path() -> str:
+    from yggdrasim_common.runtime_paths import runtime_path
+
+    capture_path = runtime_path("state", "hil_termshark", "remote_live_capture.pcap")
+    Path(capture_path).parent.mkdir(parents=True, exist_ok=True)
+    return capture_path
+
+
+def _remote_decode_capture_metadata_path(local_capture_path: str) -> Path:
+    return Path(str(local_capture_path) + ".remote.json")
+
+
+def _load_remote_decode_capture_metadata(local_capture_path: str) -> dict[str, Any]:
+    metadata_path = _remote_decode_capture_metadata_path(local_capture_path)
+    if metadata_path.is_file() is False:
+        return {}
+    try:
+        with metadata_path.open("r", encoding="utf-8") as handle:
+            payload = json.load(handle)
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _write_remote_decode_capture_metadata(
+    local_capture_path: str,
+    *,
+    remote_path: str,
+    remote_size: int,
+    remote_mtime: float,
+) -> None:
+    metadata_path = _remote_decode_capture_metadata_path(local_capture_path)
+    metadata_path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "remote_path": str(remote_path or ""),
+        "remote_size": int(remote_size),
+        "remote_mtime": float(remote_mtime),
+    }
+    with metadata_path.open("w", encoding="utf-8") as handle:
+        json.dump(payload, handle, indent=2, sort_keys=True)
+        handle.write("\n")
+
+
+def _sync_remote_decode_capture_if_available() -> dict[str, Any]:
+    try:
+        from yggdrasim_common.gui_server.actions import card_bridge as cb
+    except Exception as error:  # noqa: BLE001
+        return {
+            "configured": False,
+            "ok": False,
+            "error": f"{type(error).__name__}: {error}",
+        }
+
+    state = cb._load_remote_rig_state()
+    ssh_target = str(state.get("ssh_target") or "").strip()
+    remote_path = str(state.get("remote_gsmtap_capture_path") or "").strip()
+    if len(ssh_target) == 0 or len(remote_path) == 0:
+        return {
+            "configured": False,
+            "ok": False,
+            "error": "",
+        }
+
+    try:
+        tunnel_pid = int(state.get("ssh_tunnel_pid", 0) or 0)
+    except (TypeError, ValueError):
+        tunnel_pid = 0
+    if tunnel_pid <= 0 or cb._pid_is_running(tunnel_pid) is False:
+        return {
+            "configured": True,
+            "ok": False,
+            "capture_path": _remote_decode_capture_local_path(),
+            "remote_capture_path": remote_path,
+            "error": "remote HIL tunnel is not running",
+        }
+
+    identity_file = str(state.get("identity_file") or "").strip()
+    local_path = _remote_decode_capture_local_path()
+    remote_expr = cb._remote_shell_path_expr(remote_path)
+    stat_command = (
+        f"if [ ! -f {remote_expr} ]; then exit 3; fi; "
+        f"printf '%s\\t%s\\n' \"$(wc -c < {remote_expr})\" "
+        f"\"$(stat -c %Y {remote_expr})\""
+    )
+    stat_argv = cb._ssh_base_command(
+        ssh_target=ssh_target,
+        identity_file=identity_file,
+        connect_timeout=5,
+    )
+    stat_argv.append(stat_command)
+    try:
+        stat_result = subprocess.run(
+            stat_argv,
+            capture_output=True,
+            text=True,
+            timeout=8,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError) as error:
+        return {
+            "configured": True,
+            "ok": False,
+            "capture_path": local_path,
+            "remote_capture_path": remote_path,
+            "error": f"{type(error).__name__}: {error}",
+        }
+
+    if stat_result.returncode != 0:
+        return {
+            "configured": True,
+            "ok": False,
+            "capture_path": local_path,
+            "remote_capture_path": remote_path,
+            "returncode": int(stat_result.returncode),
+            "error": str(stat_result.stderr or "").strip() or "remote capture is not available yet",
+        }
+
+    fields = str(stat_result.stdout or "").strip().split()
+    try:
+        remote_size = int(fields[0])
+        remote_mtime = float(fields[1])
+    except (IndexError, TypeError, ValueError):
+        return {
+            "configured": True,
+            "ok": False,
+            "capture_path": local_path,
+            "remote_capture_path": remote_path,
+            "error": "remote capture stat output was not parseable",
+        }
+
+    metadata = _load_remote_decode_capture_metadata(local_path)
+    local_file = Path(local_path)
+    if (
+        local_file.is_file()
+        and int(metadata.get("remote_size", -1) or -1) == remote_size
+        and float(metadata.get("remote_mtime", -1.0) or -1.0) == remote_mtime
+        and str(metadata.get("remote_path") or "") == remote_path
+    ):
+        return {
+            "configured": True,
+            "ok": True,
+            "capture_path": local_path,
+            "remote_capture_path": remote_path,
+            "remote_capture_size": remote_size,
+            "remote_capture_mtime": remote_mtime,
+            "copied": False,
+        }
+
+    cat_argv = cb._ssh_base_command(
+        ssh_target=ssh_target,
+        identity_file=identity_file,
+        connect_timeout=5,
+    )
+    cat_argv.append(f"cat {remote_expr}")
+    try:
+        cat_result = subprocess.run(
+            cat_argv,
+            capture_output=True,
+            text=False,
+            timeout=20,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError) as error:
+        return {
+            "configured": True,
+            "ok": False,
+            "capture_path": local_path,
+            "remote_capture_path": remote_path,
+            "error": f"{type(error).__name__}: {error}",
+        }
+    if cat_result.returncode != 0:
+        stderr_text = bytes(cat_result.stderr or b"").decode("utf-8", errors="replace").strip()
+        return {
+            "configured": True,
+            "ok": False,
+            "capture_path": local_path,
+            "remote_capture_path": remote_path,
+            "returncode": int(cat_result.returncode),
+            "error": stderr_text or "remote capture copy failed",
+        }
+
+    tmp_path = Path(local_path + ".tmp")
+    local_file.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path.write_bytes(bytes(cat_result.stdout or b""))
+    tmp_path.replace(local_file)
+    _write_remote_decode_capture_metadata(
+        local_path,
+        remote_path=remote_path,
+        remote_size=remote_size,
+        remote_mtime=remote_mtime,
+    )
+    return {
+        "configured": True,
+        "ok": True,
+        "capture_path": local_path,
+        "remote_capture_path": remote_path,
+        "remote_capture_size": remote_size,
+        "remote_capture_mtime": remote_mtime,
+        "copied": True,
+    }
+
+
+def _prepare_decode_capture(capture_path: Any = None) -> dict[str, Any]:
+    explicit_path = str(capture_path or "").strip()
+    if len(explicit_path) > 0:
+        return {
+            "capture_path": _resolve_decode_capture_path(explicit_path),
+            "capture_source": "explicit",
+            "remote_capture": {},
+        }
+
+    remote_capture = _sync_remote_decode_capture_if_available()
+    if bool(remote_capture.get("ok")):
+        return {
+            "capture_path": str(remote_capture.get("capture_path") or ""),
+            "capture_source": "remote",
+            "remote_capture": remote_capture,
+        }
+
+    return {
+        "capture_path": _resolve_decode_capture_path(None),
+        "capture_source": "local",
+        "remote_capture": remote_capture,
+    }
 
 
 def _normalize_session_mode(mode: Any) -> str:
@@ -477,6 +707,17 @@ def _annotation_to_dict(annotation: Any) -> dict[str, Any]:
         "channel_number": getattr(annotation, "channel_number", None),
         "channel_poll_index": getattr(annotation, "channel_poll_index", None),
         "state_event": bool(getattr(annotation, "state_event", False)),
+        "trace_group": str(getattr(annotation, "trace_group", "") or ""),
+        "trace_label": str(getattr(annotation, "trace_label", "") or ""),
+        "trace_operation": str(getattr(annotation, "trace_operation", "") or ""),
+        "trace_path": str(getattr(annotation, "trace_path", "") or ""),
+        "trace_status": str(getattr(annotation, "trace_status", "") or ""),
+        "trace_parent_frame": getattr(annotation, "trace_parent_frame", None),
+        "trace_related_frames": [
+            int(frame_number)
+            for frame_number in (getattr(annotation, "trace_related_frames", ()) or ())
+        ],
+        "trace_reason": str(getattr(annotation, "trace_reason", "") or ""),
         "card_session_index": int(getattr(annotation, "card_session_index", 1) or 1),
         "card_session_reset_reason": str(
             getattr(annotation, "card_session_reset_reason", "") or ""
@@ -485,14 +726,236 @@ def _annotation_to_dict(annotation: Any) -> dict[str, Any]:
     }
 
 
+def _build_context_tree_payload(
+    rows: list[Any],
+    annotations: dict[int, Any],
+) -> list[dict[str, Any]]:
+    try:
+        from Tools.HilBridge.live_decode_tui import (
+            _SUMMARY_GROUP_ORDER,
+            _summary_card_session_key,
+            _summary_card_session_title,
+            _summary_channel_poll_title,
+            _summary_channel_session_key,
+            _summary_group_name,
+            _summary_partition_channel_rows,
+            _summary_partition_poll_cycles_with_targets,
+            _summary_partition_poll_rows_with_labels,
+            _summary_partition_rows_by_card_session,
+            _summary_poll_root_key,
+            _summary_poll_root_title,
+            _summary_poll_top_level_key,
+            _summary_primary_text,
+            _summary_secondary_text,
+        )
+    except Exception:
+        return []
+
+    items: list[dict[str, Any]] = []
+    frame_seen: set[int] = set()
+
+    def _frame_number(row: Any) -> int:
+        return int(getattr(row, "number", 0) or 0)
+
+    def _time_text(row: Any) -> str:
+        wall_time = str(getattr(row, "wall_time_text", "") or "").strip()
+        if len(wall_time) > 0:
+            return wall_time
+        return str(getattr(row, "time_text", "") or "").strip()
+
+    def _append_header(
+        *,
+        depth: int,
+        key: str,
+        label: str,
+        frame_count: int,
+        group_name: str = "",
+        kind: str = "header",
+    ) -> None:
+        suffix = f" ({int(frame_count)} frames)" if int(frame_count) != 1 else " (1 frame)"
+        items.append({
+            "kind": kind,
+            "depth": int(depth),
+            "key": str(key or label),
+            "label": str(label or ""),
+            "frame_count": int(frame_count),
+            "display": f"{label}{suffix}",
+            "group_name": str(group_name or ""),
+        })
+
+    def _append_frame(row: Any, annotation: Any, *, depth: int, group_name: str) -> None:
+        frame_number = _frame_number(row)
+        if frame_number <= 0:
+            return
+        frame_seen.add(frame_number)
+        secondary = _summary_secondary_text(row, annotation)
+        items.append({
+            "kind": "frame",
+            "depth": int(depth),
+            "frame_number": frame_number,
+            "group_name": str(group_name or ""),
+            "time_text": _time_text(row),
+            "protocol": str(getattr(row, "protocol", "") or ""),
+            "primary": str(_summary_primary_text(row, annotation) or ""),
+            "secondary": "" if secondary is None else str(secondary),
+        })
+
+    def _render_context_section(section_rows: list[Any], key_prefix: str, depth: int) -> None:
+        grouped_rows: dict[str, list[Any]] = {}
+        for row in section_rows:
+            frame_number = _frame_number(row)
+            annotation = annotations.get(frame_number)
+            group_name = str(_summary_group_name(row, annotation) or "Other APDU")
+            grouped_rows.setdefault(group_name, []).append(row)
+
+        channel_group_rows = grouped_rows.get("Channels", [])
+        unbound_channel_rows: list[Any] = []
+        if len(channel_group_rows) > 0:
+            session_buckets, unbound_channel_rows = _summary_partition_channel_rows(
+                channel_group_rows,
+                annotations,
+            )
+            poll_buckets = _summary_partition_poll_rows_with_labels(
+                session_buckets,
+                annotations,
+            )
+            poll_cycles = _summary_partition_poll_cycles_with_targets(
+                poll_buckets,
+                annotations,
+            )
+            poll_root_frame_count = sum(
+                len(session_rows)
+                for _cycle_index, poll_targets in poll_cycles
+                for _target_key, _target_title, poll_sessions in poll_targets
+                for _session_id, _title, session_rows in poll_sessions
+            )
+            if poll_root_frame_count > 0:
+                _append_header(
+                    depth=depth,
+                    key=f"{key_prefix}{_summary_poll_root_key()}",
+                    label=_summary_poll_root_title(),
+                    frame_count=poll_root_frame_count,
+                    group_name="Channels",
+                    kind="poll_group",
+                )
+            for cycle_index, poll_targets in poll_cycles:
+                poll_frame_count = sum(
+                    len(session_rows)
+                    for _target_key, _target_title, poll_sessions in poll_targets
+                    for _sid, _title, session_rows in poll_sessions
+                )
+                poll_key = f"{key_prefix}{_summary_poll_top_level_key(cycle_index)}"
+                poll_title = _summary_channel_poll_title(cycle_index)
+                _append_header(
+                    depth=depth + 1,
+                    key=poll_key,
+                    label=poll_title,
+                    frame_count=poll_frame_count,
+                    group_name="Channels",
+                    kind="poll",
+                )
+                for target_key, target_title, poll_sessions in poll_targets:
+                    target_frame_count = sum(
+                        len(session_rows)
+                        for _session_id, _title, session_rows in poll_sessions
+                    )
+                    _append_header(
+                        depth=depth + 2,
+                        key=f"{poll_key}/{target_key}",
+                        label=target_title,
+                        frame_count=target_frame_count,
+                        group_name="Channels",
+                        kind="poll_target",
+                    )
+                    for session_id, session_title, session_rows in poll_sessions:
+                        session_key = f"{key_prefix}{_summary_channel_session_key(session_id)}"
+                        _append_header(
+                            depth=depth + 3,
+                            key=session_key,
+                            label=session_title,
+                            frame_count=len(session_rows),
+                            group_name="Channels",
+                            kind="session",
+                        )
+                        for session_row in session_rows:
+                            session_annotation = annotations.get(_frame_number(session_row))
+                            _append_frame(
+                                session_row,
+                                session_annotation,
+                                depth=depth + 4,
+                                group_name="Channels",
+                            )
+
+        ordered_groups = [
+            group for group in _SUMMARY_GROUP_ORDER if group in grouped_rows
+        ]
+        ordered_groups.extend(
+            group for group in grouped_rows if group not in ordered_groups
+        )
+        for group_name in ordered_groups:
+            if group_name == "Channels":
+                continue
+            group_rows = grouped_rows.get(group_name, [])
+            group_key = f"{key_prefix}{group_name}"
+            _append_header(
+                depth=depth,
+                key=group_key,
+                label=group_name,
+                frame_count=len(group_rows),
+                group_name=group_name,
+                kind="group",
+            )
+            for row in group_rows:
+                annotation = annotations.get(_frame_number(row))
+                _append_frame(row, annotation, depth=depth + 1, group_name=group_name)
+
+        for row in unbound_channel_rows:
+            if _frame_number(row) in frame_seen:
+                continue
+            annotation = annotations.get(_frame_number(row))
+            _append_frame(row, annotation, depth=depth, group_name="Channels")
+
+    if len(rows) == 0:
+        return []
+
+    card_session_rows, card_session_reasons, card_session_iccids = (
+        _summary_partition_rows_by_card_session(rows, annotations)
+    )
+    if len(card_session_rows) <= 1:
+        _render_context_section(
+            card_session_rows[0][1] if len(card_session_rows) == 1 else rows,
+            "",
+            0,
+        )
+        return items
+
+    for card_session_index, session_rows in card_session_rows:
+        session_key = _summary_card_session_key(card_session_index)
+        session_title = _summary_card_session_title(
+            card_session_index,
+            card_session_reasons.get(int(card_session_index), ""),
+            card_session_iccids.get(int(card_session_index), ""),
+        )
+        _append_header(
+            depth=0,
+            key=session_key,
+            label=session_title,
+            frame_count=len(session_rows),
+            group_name="Card Session",
+            kind="card_session",
+        )
+        _render_context_section(session_rows, f"{session_key}/", 1)
+    return items
+
+
 def _bounded_decode_limit(limit: Any = None) -> int:
     try:
-        limit_i = int(limit) if limit is not None else 2000
+        limit_i = int(limit) if limit is not None else _DEFAULT_DECODE_LIMIT
     except (TypeError, ValueError):
-        limit_i = 2000
+        limit_i = _DEFAULT_DECODE_LIMIT
     if limit_i <= 0:
-        return 2000
-    return min(limit_i, 5000)
+        return _DEFAULT_DECODE_LIMIT
+    return min(limit_i, _MAX_DECODE_LIMIT)
 
 
 def _build_replay_engine(keybag_path: str) -> tuple[Any, dict[str, Any]]:
@@ -535,6 +998,7 @@ def _dispatch_decode_snapshot(
     include_detail: Any = None,
     include_annotations: Any = None,
     after_frame: Any = None,
+    context_after_frame: Any = None,
     known_capture_size: Any = None,
     known_capture_mtime: Any = None,
 ) -> dict[str, Any]:
@@ -548,6 +1012,7 @@ def _dispatch_decode_snapshot(
         from Tools.HilBridge.live_decode_view import (
             DEFAULT_DECODE_RULE,
             read_packet_detail,
+            read_packet_field_ranges,
             read_packet_hex,
             read_packet_summaries,
             resolve_tshark_binary,
@@ -558,15 +1023,20 @@ def _dispatch_decode_snapshot(
             "ok": False,
             "rows": [],
             "annotations": {},
+            "context_tree": [],
             "detail": "",
             "bytes": "",
+            "detail_ranges": [],
             "include_detail": True,
             "include_annotations": True,
             "not_modified": False,
             "note": f"decoder unavailable: {type(error).__name__}: {error}",
         }
 
-    resolved_capture_path = _resolve_decode_capture_path(capture_path)
+    capture_resolution = _prepare_decode_capture(capture_path)
+    resolved_capture_path = str(capture_resolution.get("capture_path") or "")
+    capture_source = str(capture_resolution.get("capture_source") or "local")
+    remote_capture = dict(capture_resolution.get("remote_capture") or {})
     target_path = Path(resolved_capture_path)
     capture_exists = target_path.is_file()
     capture_size = 0
@@ -583,13 +1053,17 @@ def _dispatch_decode_snapshot(
         return {
             "ok": False,
             "capture_path": resolved_capture_path,
+            "capture_source": capture_source,
+            "remote_capture": remote_capture,
             "capture_exists": capture_exists,
             "capture_size": capture_size,
             "capture_mtime": capture_mtime,
             "rows": [],
             "annotations": {},
+            "context_tree": [],
             "detail": "",
             "bytes": "",
+            "detail_ranges": [],
             "selected_frame": None,
             "include_detail": True,
             "include_annotations": True,
@@ -619,6 +1093,11 @@ def _dispatch_decode_snapshot(
         after_frame_i = max(0, int(after_frame or 0))
     except (TypeError, ValueError):
         after_frame_i = 0
+    context_after_frame_i = 0
+    try:
+        context_after_frame_i = max(0, int(context_after_frame or 0))
+    except (TypeError, ValueError):
+        context_after_frame_i = 0
     known_capture_size_i: int | None = None
     known_capture_mtime_f: float | None = None
     try:
@@ -632,24 +1111,32 @@ def _dispatch_decode_snapshot(
     except (TypeError, ValueError):
         known_capture_mtime_f = None
     if capture_exists is False or capture_size <= 24:
+        remote_error = str(remote_capture.get("error") or "").strip()
+        note = "capture is empty or not available yet."
+        if capture_source == "local" and bool(remote_capture.get("configured")) and len(remote_error) > 0:
+            note = f"remote capture unavailable: {remote_error}"
         return {
             "ok": True,
             "capture_path": resolved_capture_path,
+            "capture_source": capture_source,
+            "remote_capture": remote_capture,
             "capture_exists": capture_exists,
             "capture_size": capture_size,
             "capture_mtime": capture_mtime,
             "tshark_binary": tshark_binary,
             "rows": [],
             "annotations": {},
+            "context_tree": [],
             "detail": "",
             "bytes": "",
+            "detail_ranges": [],
             "selected_frame": None,
             "include_detail": include_detail_bool,
             "include_annotations": include_annotations_bool,
             "incremental": after_frame_i > 0,
             "after_frame": after_frame_i,
             "not_modified": False,
-            "note": "capture is empty or not available yet.",
+            "note": note,
         }
     if (
         not include_detail_bool
@@ -660,6 +1147,8 @@ def _dispatch_decode_snapshot(
         return {
             "ok": True,
             "capture_path": resolved_capture_path,
+            "capture_source": capture_source,
+            "remote_capture": remote_capture,
             "capture_exists": True,
             "capture_size": capture_size,
             "capture_mtime": capture_mtime,
@@ -671,6 +1160,7 @@ def _dispatch_decode_snapshot(
             "selected_frame": None,
             "rows": [],
             "annotations": {},
+            "context_tree": [],
             "include_detail": include_detail_bool,
             "include_annotations": include_annotations_bool,
             "incremental": after_frame_i > 0,
@@ -678,18 +1168,31 @@ def _dispatch_decode_snapshot(
             "not_modified": True,
             "detail": "",
             "bytes": "",
+            "detail_ranges": [],
             "keybag": {},
             "note": "",
         }
 
+    summary_after_frame = after_frame_i if after_frame_i > 0 else None
+    if include_annotations_bool and after_frame_i > 0:
+        summary_after_frame = None
     rows, summary_error = read_packet_summaries(
         resolved_capture_path,
         tshark_binary=tshark_binary,
         decode_rule=DEFAULT_DECODE_RULE,
-        after_frame=after_frame_i if after_frame_i > 0 else None,
+        after_frame=summary_after_frame,
     )
     row_limit = _bounded_decode_limit(limit)
-    returned_rows = list(rows[-row_limit:])
+    if include_annotations_bool and after_frame_i > 0:
+        returned_source_rows = [
+            row for row in rows if int(getattr(row, "number", 0) or 0) > after_frame_i
+        ]
+    else:
+        returned_source_rows = list(rows)
+    returned_rows = list(returned_source_rows[-row_limit:])
+    context_rows = [
+        row for row in rows if int(getattr(row, "number", 0) or 0) > context_after_frame_i
+    ][-row_limit:]
     keybag_summary: dict[str, Any] = {}
     annotations: dict[int, Any] = {}
     if include_annotations_bool:
@@ -699,8 +1202,9 @@ def _dispatch_decode_snapshot(
                 try_autodiscover_sidecar_keybag(resolved_capture_path) or ""
             ).strip()
         replay_engine, keybag_summary = _build_replay_engine(resolved_keybag_path)
+        annotation_rows = list(rows if after_frame_i > 0 else context_rows)
         annotations = build_stateful_packet_annotations(
-            returned_rows,
+            annotation_rows,
             replay_engine=replay_engine,
         )
 
@@ -727,6 +1231,19 @@ def _dispatch_decode_snapshot(
         )
         if include_annotations_bool:
             annotations_payload[str(frame_number)] = _annotation_to_dict(annotation)
+    if include_annotations_bool:
+        for row in context_rows:
+            frame_number = int(row.number)
+            if str(frame_number) in annotations_payload:
+                continue
+            annotations_payload[str(frame_number)] = _annotation_to_dict(
+                annotations.get(frame_number)
+            )
+    context_tree = (
+        _build_context_tree_payload(context_rows, annotations)
+        if include_annotations_bool
+        else []
+    )
 
     selected_frame_i: int | None = None
     try:
@@ -745,6 +1262,8 @@ def _dispatch_decode_snapshot(
     detail_error = ""
     bytes_text = ""
     bytes_error = ""
+    detail_ranges: list[dict[str, Any]] = []
+    detail_ranges_error = ""
     if include_detail_bool and selected_frame_i is not None:
         detail_text, detail_error = read_packet_detail(
             resolved_capture_path,
@@ -758,18 +1277,31 @@ def _dispatch_decode_snapshot(
             tshark_binary=tshark_binary,
             decode_rule=DEFAULT_DECODE_RULE,
         )
+        detail_ranges, detail_ranges_error = read_packet_field_ranges(
+            resolved_capture_path,
+            selected_frame_i,
+            tshark_binary=tshark_binary,
+            decode_rule=DEFAULT_DECODE_RULE,
+        )
 
     note_parts: list[str] = []
     if len(summary_error.strip()) > 0:
         note_parts.append(summary_error.strip())
+    remote_error = str(remote_capture.get("error") or "").strip()
+    if capture_source == "local" and bool(remote_capture.get("configured")) and len(remote_error) > 0:
+        note_parts.append(f"remote capture unavailable: {remote_error}")
     if len(detail_error.strip()) > 0:
         note_parts.append(f"detail: {detail_error.strip()}")
     if len(bytes_error.strip()) > 0:
         note_parts.append(f"bytes: {bytes_error.strip()}")
+    if len(detail_ranges_error.strip()) > 0:
+        note_parts.append(f"field ranges: {detail_ranges_error.strip()}")
 
     return {
         "ok": True,
         "capture_path": resolved_capture_path,
+        "capture_source": capture_source,
+        "remote_capture": remote_capture,
         "capture_exists": True,
         "capture_size": capture_size,
         "capture_mtime": capture_mtime,
@@ -781,6 +1313,7 @@ def _dispatch_decode_snapshot(
         "selected_frame": selected_frame_i,
         "rows": rows_payload,
         "annotations": annotations_payload,
+        "context_tree": context_tree,
         "include_detail": include_detail_bool,
         "include_annotations": include_annotations_bool,
         "incremental": after_frame_i > 0,
@@ -788,6 +1321,7 @@ def _dispatch_decode_snapshot(
         "not_modified": False,
         "detail": detail_text,
         "bytes": bytes_text,
+        "detail_ranges": detail_ranges,
         "keybag": keybag_summary,
         "note": " | ".join(note_parts),
     }
@@ -973,9 +1507,9 @@ DECODE_SNAPSHOT_SPEC = ActionSpec(
             label="Packet limit",
             kind="int",
             required=False,
-            default=2000,
+            default=_DEFAULT_DECODE_LIMIT,
             min_value=1,
-            max_value=5000,
+            max_value=_MAX_DECODE_LIMIT,
             help="Maximum packet rows to return to the GUI.",
         ),
         ActionField(
@@ -1001,6 +1535,14 @@ DECODE_SNAPSHOT_SPEC = ActionSpec(
             required=False,
             min_value=0,
             help="Return only packet summaries with frame.number greater than this value.",
+        ),
+        ActionField(
+            name="context_after_frame",
+            label="Context after frame",
+            kind="int",
+            required=False,
+            min_value=0,
+            help="Build the context tree from packets after this baseline frame.",
         ),
         ActionField(
             name="known_capture_size",
@@ -1124,6 +1666,8 @@ def _dispatch_service_control(
     """Run one of the supported systemd user-service actions."""
     from yggdrasim_common.hil_bridge_runtime import (
         DEFAULT_SERVICE_NAME,
+        clear_card_relay_state,
+        clear_supervisor_state,
         daemon_reload_user_services,
         disable_user_service,
         enable_now_user_service,
@@ -1144,6 +1688,14 @@ def _dispatch_service_control(
     if destructive and bool(confirm) is False:
         raise ValueError(f"confirm must be true — '{action_s}' is destructive.")
 
+    def _clear_remote_attachment_state() -> None:
+        try:
+            from yggdrasim_common.gui_server.actions import card_bridge as cb
+
+            cb._clear_remote_hil_attachment_state()
+        except Exception:  # noqa: BLE001 - best-effort stale UI state cleanup
+            pass
+
     try:
         if action_s == "status":
             query_user_service_state(service)
@@ -1155,6 +1707,10 @@ def _dispatch_service_control(
             enable_now_user_service(service)
         elif action_s == "stop":
             stop_user_service(service)
+            if service == DEFAULT_SERVICE_NAME:
+                clear_card_relay_state()
+                clear_supervisor_state()
+                _clear_remote_attachment_state()
         elif action_s == "disable":
             disable_user_service(service)
         elif action_s == "daemon-reload":
@@ -1225,6 +1781,27 @@ def _dispatch_session_start(
 
     mode_s = _normalize_session_mode(mode)
     gsmtap_enabled = mode_s != _HIL_SESSION_MODE_RAW
+    if gsmtap_enabled:
+        remote_capture = _sync_remote_decode_capture_if_available()
+        if bool(remote_capture.get("ok")):
+            return {
+                "ok": True,
+                "mode": "remote",
+                "service": "remote HIL rig",
+                "unit_path": "",
+                "unit_changed": False,
+                "capture_path": str(remote_capture.get("capture_path") or ""),
+                "capture_source": "remote",
+                "remote_capture": remote_capture,
+                "gsmtap_enabled": True,
+                "active_before": True,
+                "needs_restart": False,
+                "status": {
+                    "cardBackend": "remote",
+                    "reader": "remote HIL rig",
+                },
+                "note": "Attached to remote HIL GSMTAP capture.",
+            }
     capture_path = _default_decode_capture_path() if gsmtap_enabled else ""
     service_state = query_user_service_state(DEFAULT_SERVICE_NAME)
     active_before = str(service_state.get("activeState", "") or "").strip() == "active"
@@ -1316,12 +1893,22 @@ def _dispatch_session_stop(
 
     from yggdrasim_common.hil_bridge_runtime import (
         DEFAULT_SERVICE_NAME,
+        clear_card_relay_state,
+        clear_supervisor_state,
         query_user_service_state,
         stop_user_service,
     )
 
     try:
         stop_user_service(DEFAULT_SERVICE_NAME)
+        clear_card_relay_state()
+        clear_supervisor_state()
+        try:
+            from yggdrasim_common.gui_server.actions import card_bridge as cb
+
+            cb._clear_remote_hil_attachment_state()
+        except Exception:  # noqa: BLE001 - best-effort stale UI state cleanup
+            pass
     except Exception as error:  # noqa: BLE001
         return {
             "ok": False,

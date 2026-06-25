@@ -99,7 +99,6 @@ python -m Tools.ProfilePackage --cmd "USE profile.der; LINT --strict; EXIT"
 | `YGGDRASIM_FLAVOR` | force `clean` / `full` / `source` when probing from a shared tree |
 | `YGGDRASIM_5GCORE_MODE` *(post-v1 staging)* | switch YggdraCore between in-process stub and BYO-Open5GS bridge |
 | `YGGDRASIM_EUM_SESSION_KEYS` | session-key staging for the EUM diagnostics dissector |
-| `YGGDRASIM_SUNRISE6G_MODE` *(post-v1 staging)* | toggle the Sunrise6G bridge between stub and SDK adapter |
 | `GNUPGHOME` | pick the gpg home directory when inventory crypto is enabled |
 
 ## Related pages

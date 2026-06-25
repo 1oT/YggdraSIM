@@ -508,7 +508,7 @@ manual configuration.
 `_apply_timer_expiration` drives the SGP.32 §3.5 polling
 cadence. Each `D7` envelope queues a two-leg BIP cycle followed
 by a TIMER MANAGEMENT START re-arm. The first leg is a DNS
-resolution against a public resolver (default `8.8.8.8`); the
+resolution against a public resolver (default `192.0.2.53`); the
 second is the ESipa exchange against the resolved eIM IP.
 
 #### Cold-cache cycle (no resolved IP yet)
@@ -1117,7 +1117,7 @@ via SFI=0x07 selection mode) used to return `9000` with no body
 once the operator BPP overrode the lab default. Regression
 coverage lives in `tests/test_simcard_shared_ef_mirror.py`,
 including a slot that replays the SFI READ BINARY against the
-real `89103000000466311335` BPP fixture.
+real `89880000000466311335` BPP fixture.
 
 ### TCA Profile Interoperability §3.5 / §9 template default fill-in
 
@@ -1183,7 +1183,7 @@ Regression coverage in
 `tests/test_simcard_saip_template_defaults.py` pins the registry
 shape, the fill-in invariants (issuer wins, `content_rqd=True`
 never auto-populated, SFIs always synced), and an end-to-end
-replay of the `89103000000466311335` cold-attach SFI `READ BINARY`
+replay of the `89880000000466311335` cold-attach SFI `READ BINARY`
 sequence (`00B0830004` -> EF.AD `00000002`, `00B0870009` ->
 EF.IMSI from BPP, `00B0920001` -> EF.HPPLMN).
 

@@ -207,7 +207,7 @@ timestamped subdirectory. The dump root itself is created `0o700`.
 yggdrasim-apdu-fuzzer \
     --corpus /path/to/session.json \
     --transport pcsc \
-    --allow-iccid 89000012345678901234 \
+    --allow-iccid 89880012345678901234 \
     --seed 0xCAFEBABE \
     --max-apdus 500 \
     --i-mean-it
@@ -241,7 +241,7 @@ ICCID.
 ```
 # Write keys + launch tshark against a capture:
 yggdrasim-eum-diag inject-keys \
-    --iccid 89000012345678901234 \
+    --iccid 89880012345678901234 \
     --shs-enc <32 hex chars> \
     --shs-mac <32 hex chars> \
     --dek     <32 hex chars> \
@@ -250,7 +250,7 @@ yggdrasim-eum-diag inject-keys \
 # Write keys only (useful when a separate tshark/wireshark session
 # already has the dissector loaded):
 yggdrasim-eum-diag store-keys \
-    --iccid 89000012345678901234 \
+    --iccid 89880012345678901234 \
     --shs-enc ... --shs-mac ... \
     --keys-out /tmp/session-keys.json
 
@@ -267,8 +267,8 @@ on POSIX. Format:
 {
     "format": "yggdrasim-eum-session-keys/v1",
     "entries": {
-        "89000012345678901234": {
-            "iccid": "89000012345678901234",
+        "89880012345678901234": {
+            "iccid": "89880012345678901234",
             "shs_enc_hex": "...",
             "shs_mac_hex": "...",
             "dek_hex": "...",

@@ -1,6 +1,9 @@
 import datetime
 import base64
+import contextlib
 import copy
+import io
+import os
 import unittest
 from dataclasses import dataclass
 from unittest import mock
@@ -1088,6 +1091,104 @@ class OrchestratorFlowTests(unittest.TestCase):
         self.assertIn("DOWNLOAD: RemoveNotificationFromList [106]", send_logs)
         self.assertIs(orchestrator._last_notification_sync_succeeded, True)
 
+    def test_list_notifications_bf2b_fallback_notice_is_hidden_when_debug_off(self):
+        from yggdrasim_common.process_debug import GLOBAL_DEBUG_ENV
+
+        notification_retrieve_response = wrap_tlv("BF2B", wrap_tlv("A0", b""))
+        orchestrator = SGP22Orchestrator(
+            cfg=FakeCfg(),
+            apdu_channel=FakeApduChannel(notification_retrieve_response=notification_retrieve_response),
+            profile_provider=FakeProvider(b""),
+        )
+        buffer = io.StringIO()
+
+        with mock.patch.dict(os.environ, {GLOBAL_DEBUG_ENV: "0"}, clear=False):
+            with contextlib.redirect_stdout(buffer):
+                result = orchestrator._list_pending_notifications_via_retrieve_fallback(
+                    IOError("APDU Failed: 6985")
+                )
+
+        self.assertEqual(result, b"")
+        self.assertNotIn("ListNotifications rejected", buffer.getvalue())
+
+    def test_list_notifications_bf2b_fallback_notice_surfaces_when_debug_on(self):
+        from yggdrasim_common.process_debug import GLOBAL_DEBUG_ENV
+
+        notification_retrieve_response = wrap_tlv("BF2B", wrap_tlv("A0", b""))
+        orchestrator = SGP22Orchestrator(
+            cfg=FakeCfg(),
+            apdu_channel=FakeApduChannel(notification_retrieve_response=notification_retrieve_response),
+            profile_provider=FakeProvider(b""),
+        )
+        buffer = io.StringIO()
+
+        with mock.patch.dict(os.environ, {GLOBAL_DEBUG_ENV: "1"}, clear=False):
+            with contextlib.redirect_stdout(buffer):
+                result = orchestrator._list_pending_notifications_via_retrieve_fallback(
+                    IOError("APDU Failed: 6985")
+                )
+
+        self.assertEqual(result, b"")
+        self.assertIn("ListNotifications rejected", buffer.getvalue())
+
+    def test_list_notifications_recovery_notices_are_hidden_when_debug_off(self):
+        from yggdrasim_common.process_debug import GLOBAL_DEBUG_ENV
+
+        response = bytes.fromhex("BF2802A000")
+
+        def fake_send(apdu: bytes, log_name: str = "") -> bytes:
+            if log_name == "DOWNLOAD: ListNotifications":
+                raise IOError("APDU Failed: 6985")
+            if log_name == "DOWNLOAD: ListNotifications [ACTIVE CH1]":
+                return response
+            return b""
+
+        apdu_channel = FakeApduChannel()
+        apdu_channel.send = fake_send
+        orchestrator = SGP22Orchestrator(
+            cfg=FakeCfg(),
+            apdu_channel=apdu_channel,
+            profile_provider=FakeProvider(b""),
+        )
+        orchestrator._es10b_logical_channel = 1
+        buffer = io.StringIO()
+
+        with mock.patch.dict(os.environ, {GLOBAL_DEBUG_ENV: "0"}, clear=False):
+            with contextlib.redirect_stdout(buffer):
+                result = orchestrator._list_pending_notifications_with_context_recovery()
+
+        self.assertEqual(result, response)
+        self.assertNotIn("priming active logical channel", buffer.getvalue())
+
+    def test_list_notifications_recovery_notices_surface_when_debug_on(self):
+        from yggdrasim_common.process_debug import GLOBAL_DEBUG_ENV
+
+        response = bytes.fromhex("BF2802A000")
+
+        def fake_send(apdu: bytes, log_name: str = "") -> bytes:
+            if log_name == "DOWNLOAD: ListNotifications":
+                raise IOError("APDU Failed: 6985")
+            if log_name == "DOWNLOAD: ListNotifications [ACTIVE CH1]":
+                return response
+            return b""
+
+        apdu_channel = FakeApduChannel()
+        apdu_channel.send = fake_send
+        orchestrator = SGP22Orchestrator(
+            cfg=FakeCfg(),
+            apdu_channel=apdu_channel,
+            profile_provider=FakeProvider(b""),
+        )
+        orchestrator._es10b_logical_channel = 1
+        buffer = io.StringIO()
+
+        with mock.patch.dict(os.environ, {GLOBAL_DEBUG_ENV: "1"}, clear=False):
+            with contextlib.redirect_stdout(buffer):
+                result = orchestrator._list_pending_notifications_with_context_recovery()
+
+        self.assertEqual(result, response)
+        self.assertIn("priming active logical channel 1", buffer.getvalue())
+
     def test_retrieve_notification_reports_bf2b_result_error(self):
         provider = FakeProvider(b"")
         apdu_channel = FakeApduChannel(notification_retrieve_response=bytes.fromhex("BF2B0381017F"))
@@ -1922,7 +2023,7 @@ class OrchestratorFlowTests(unittest.TestCase):
             b"".join(
                 [
                     wrap_tlv("80", b"rsp.example.com"),
-                    wrap_tlv("81", b"lpa.ds.gsma.com"),
+                    wrap_tlv("81", b"root-smds.example.com"),
                 ]
             ),
         )
@@ -1993,7 +2094,7 @@ class OrchestratorFlowTests(unittest.TestCase):
         self.assertIn(wrap_tlv("A2", b""), response)
         self.assertIn(bytes.fromhex("BF2000"), response)
         self.assertIn(euicc_info2, response)
-        self.assertIn(wrap_tlv("83", b"lpa.ds.gsma.com"), response)
+        self.assertIn(wrap_tlv("83", b"root-smds.example.com"), response)
         self.assertIn(bytes.fromhex("8404DEADBEEF"), response)
         self.assertIn(eum_cert, response)
         self.assertIn(euicc_cert, response)
@@ -2021,13 +2122,75 @@ class OrchestratorFlowTests(unittest.TestCase):
         self.assertEqual(len(package_result_calls), 1)
         self.assertEqual(package_result_calls[0][1], bytes.fromhex("80E2910005BF2B028200"))
 
+    def test_relay_ipa_euicc_data_request_uses_requesting_eim_association_token(self):
+        eim_configuration = wrap_tlv(
+            "BF55",
+            b"".join(
+                [
+                    wrap_tlv(
+                        "A0",
+                        wrap_tlv(
+                            "30",
+                            b"".join(
+                                [
+                                    wrap_tlv("80", b"manager-1"),
+                                    wrap_tlv("81", b"eim1.example.test"),
+                                    wrap_tlv("82", b"\x01"),
+                                    wrap_tlv("84", b"\x01"),
+                                ]
+                            ),
+                        ),
+                    ),
+                    wrap_tlv(
+                        "A0",
+                        wrap_tlv(
+                            "30",
+                            b"".join(
+                                [
+                                    wrap_tlv("80", b"manager-2"),
+                                    wrap_tlv("81", b"eim2.example.test"),
+                                    wrap_tlv("82", b"\x01"),
+                                    wrap_tlv("84", b"\x02"),
+                                ]
+                            ),
+                        ),
+                    ),
+                ]
+            ),
+        )
+        orchestrator = SGP22Orchestrator(
+            cfg=FakeCfg(),
+            apdu_channel=FakeApduChannel(eim_configuration_response=eim_configuration),
+            profile_provider=FakeProvider(bpp_bytes=b""),
+        )
+        inner_request = wrap_tlv("BF52", wrap_tlv("5C", bytes.fromhex("84")))
+        signed_request = wrap_tlv(
+            "30",
+            b"".join(
+                [
+                    wrap_tlv("80", b"manager-2"),
+                    wrap_tlv("5A", bytes.fromhex("89049032123456789012345678901234")),
+                    wrap_tlv("81", b"\x35"),
+                    wrap_tlv("82", b"\x00\x00\x00\x00\x00\x00\x04\xA3"),
+                    wrap_tlv("A0", inner_request),
+                ]
+            ),
+        )
+        package = wrap_tlv("BF52", signed_request + wrap_tlv("5F37", b"\xCC" * 64))
+
+        response = orchestrator._relay_eim_package_to_card(package, poll_round=1, package_index=1)
+
+        self.assertTrue(response.startswith(bytes.fromhex("BF52")))
+        self.assertIn(bytes.fromhex("840102"), response)
+        self.assertNotIn(bytes.fromhex("840101"), response)
+
     def test_relay_ipa_euicc_data_request_returns_empty_a2_when_card_returns_other_choice(self):
         configured_data = wrap_tlv(
             "BF3C",
             b"".join(
                 [
                     wrap_tlv("80", b"rsp.example.com"),
-                    wrap_tlv("81", b"lpa.ds.gsma.com"),
+                    wrap_tlv("81", b"root-smds.example.com"),
                 ]
             ),
         )

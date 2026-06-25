@@ -63,7 +63,7 @@ def _build_null_transport(args: argparse.Namespace) -> _NullTransport:
     iccid = str(args.null_iccid or "").strip()
     imsi = str(args.null_imsi or "").strip()
     if len(iccid) == 0 and len(imsi) == 0:
-        iccid = "8900000000000000TEST"
+        iccid = "8988000000000000TEST"
     return _NullTransport(iccid=iccid, imsi=imsi)
 
 

@@ -40,6 +40,8 @@ try:
         InitiateAuthenticationResponse,
     )
 except ImportError:
+    if __package__:
+        raise
     from es9_client import Es9LikeClient
     from models import (
         AuthenticateClientRequest,

@@ -47,9 +47,11 @@ from SCP11.shared.trace_dump import (
     print_eim_package_wrapper_summary,
     print_hex_payload,
     print_store_data_chunk_plan,
+    print_tlv_decode,
     split_tlv_aware_chunks,
 )
 from yggdrasim_common.process_debug import debug_print
+from yggdrasim_common.terminal_output import status_print as print
 
 try:
     from .asn1_registry import ASN1Registry
@@ -310,11 +312,16 @@ class SGP22Orchestrator:
                     raise RuntimeError(
                         f"eIM package {package_index} in poll round {poll_round} was empty after decode."
                     )
-                card_response = self._relay_eim_package_to_card(
-                    package_bytes,
-                    poll_round=poll_round,
-                    package_index=package_index,
-                )
+                previous_eim_poll_request = getattr(self, "_current_eim_poll_request", None)
+                self._current_eim_poll_request = request
+                try:
+                    card_response = self._relay_eim_package_to_card(
+                        package_bytes,
+                        poll_round=poll_round,
+                        package_index=package_index,
+                    )
+                finally:
+                    self._current_eim_poll_request = previous_eim_poll_request
                 if len(card_response) == 0:
                     raise RuntimeError("eIM polling requires a card package result, but the last relay response was empty.")
                 provide_result = self._build_provide_eim_package_result_tlv(
@@ -739,7 +746,7 @@ class SGP22Orchestrator:
             active_channel = int(self._es10b_logical_channel or 0)
             active_channel_error = None
             if active_channel > 0:
-                print(
+                debug_print(
                     f"[*] {log_name} failed ({error}); priming active "
                     f"logical channel {active_channel} and retrying."
                 )
@@ -750,12 +757,12 @@ class SGP22Orchestrator:
                     )
                 except Exception as active_error:
                     active_channel_error = active_error
-                    print(
+                    debug_print(
                         f"[*] {log_name} failed on active logical channel recovery "
                         f"({active_error}); reopening ISD-R on a fresh logical channel."
                     )
             else:
-                print(
+                debug_print(
                     f"[*] {log_name} failed ({error}); reopening ISD-R on a fresh "
                     f"logical channel and retrying."
                 )
@@ -764,7 +771,7 @@ class SGP22Orchestrator:
             try:
                 return self._send_es10b_store_data_on_recovery_channel(payload, log_name)
             except Exception as logical_error:
-                print(
+                debug_print(
                     f"[*] {log_name} failed on logical channel recovery ({logical_error}); "
                     f"falling back to STK mode."
                 )
@@ -830,7 +837,7 @@ class SGP22Orchestrator:
         # eUICC OSes that refuse BF28 can still surface their pending
         # queue to the eIM forwarder.
         log_name = "DOWNLOAD: RetrieveNotificationsList (BF28 fallback)"
-        print(
+        debug_print(
             f"[*] DOWNLOAD: ListNotifications rejected ({primary_error}); "
             "falling back to RetrieveNotificationsList (BF2B)."
         )
@@ -1765,6 +1772,7 @@ class SGP22Orchestrator:
             f"tag={self._tag_hex(package_bytes)} len={len(package_bytes)}"
         )
         print_hex_payload("Full eIM package", package_bytes)
+        print_tlv_decode("Full eIM package", package_bytes)
         print_eim_package_wrapper_summary(package_bytes)
         parsed = parse_eim_package(package_bytes)
         print(f"[*] eIM package type: {parsed.package_type}")
@@ -1842,7 +1850,7 @@ class SGP22Orchestrator:
         if parsed.package_type == TYPE_EUICC_CONFIGURATION:
             last_response = self._build_ipa_euicc_data_response(parsed, log_name)
             self.state.eim_package_response = last_response
-            print(f"[*] eIM card response: {last_response.hex().upper()}")
+            self._print_eim_card_response(last_response)
             self._sync_pending_notifications(last_response)
             return last_response
 
@@ -1869,7 +1877,7 @@ class SGP22Orchestrator:
                 print("[*] eIM relay completed with empty card response.")
                 self._sync_pending_notifications()
                 return last_response
-            print(f"[*] eIM card response: {last_response.hex().upper()}")
+            self._print_eim_card_response(last_response)
             self._sync_pending_notifications(last_response)
             return last_response
         if len(parsed.card_request) > 0 and parsed.package_type not in preserve_signed_wrapper_types:
@@ -1879,7 +1887,7 @@ class SGP22Orchestrator:
                 print("[*] eIM relay completed with empty card response.")
                 self._sync_pending_notifications()
                 return last_response
-            print(f"[*] eIM card response: {last_response.hex().upper()}")
+            self._print_eim_card_response(last_response)
             self._sync_pending_notifications(last_response)
             return last_response
 
@@ -1896,10 +1904,14 @@ class SGP22Orchestrator:
             print("[*] eIM relay completed with empty card response.")
             self._sync_pending_notifications()
             return last_response
-        print(f"[*] eIM card response: {last_response.hex().upper()}")
+        self._print_eim_card_response(last_response)
         self._handle_profile_load_result(last_response)
         self._sync_pending_notifications(last_response)
         return last_response
+
+    def _print_eim_card_response(self, response: bytes) -> None:
+        print_hex_payload("eIM card response", response)
+        print_tlv_decode("eIM card response", response)
 
     def _build_ipa_euicc_data_response(self, parsed_package: Any, log_name: str) -> bytes:
         print("[*] Handling ipaEuiccDataRequest locally.")
@@ -1927,6 +1939,8 @@ class SGP22Orchestrator:
             euicc_info2 = self._retrieve_es10b_data(bytes.fromhex("BF2200"), f"{log_name}: GetEuiccInfo2")
         if b"\x81" in requested_tag_set or b"\x83" in requested_tag_set:
             configured_data = self._retrieve_es10b_data(bytes.fromhex("BF3C00"), f"{log_name}: GetEuiccConfiguredData")
+        requested_eim_id = self._resolve_ipa_euicc_data_request_eim_id(parsed_package)
+
         if b"\x84" in requested_tag_set:
             eim_configuration_data = self._retrieve_es10b_data(bytes.fromhex("BF5500"), f"{log_name}: GetEimConfigurationData")
         if b"\xA5" in requested_tag_set or b"\xA6" in requested_tag_set:
@@ -1942,7 +1956,10 @@ class SGP22Orchestrator:
                 f"{log_name}: RetrieveEuiccPackageResults",
             )
 
-        first_entry = self._extract_first_eim_entry_bytes(eim_configuration_data)
+        eim_entry = self._extract_eim_entry_bytes_for_request(
+            eim_configuration_data,
+            requested_eim_id,
+        )
 
         response_items = {}
         for requested_tag in requested_tags:
@@ -1961,7 +1978,7 @@ class SGP22Orchestrator:
             elif requested_tag == b"\x83":
                 raw_field = self._build_text_item_from_source(configured_data, b"\x81", b"\x83")
             elif requested_tag == b"\x84":
-                raw_field = self._find_first_raw_tlv_recursive(first_entry, b"\x84")
+                raw_field = self._find_first_raw_tlv_recursive(eim_entry, b"\x84")
             elif requested_tag == b"\xA5":
                 raw_field = self._find_first_raw_tlv_recursive(certs_data, b"\xA5")
             elif requested_tag == b"\xA6":
@@ -1999,6 +2016,15 @@ class SGP22Orchestrator:
 
         ipa_euicc_data = self._wrap_tlv(b"\xA0", body)
         return self._wrap_tlv(bytes.fromhex("BF52"), ipa_euicc_data)
+
+    def _resolve_ipa_euicc_data_request_eim_id(self, parsed_package: Any) -> str:
+        parsed_eim_id = str(getattr(parsed_package, "eim_id", "") or "").strip()
+        if len(parsed_eim_id) > 0:
+            return parsed_eim_id
+        request = getattr(self, "_current_eim_poll_request", None)
+        if request is None:
+            return ""
+        return str(getattr(request, "eim_id", "") or "").strip()
 
     def _extract_notification_list_item(self, response: bytes) -> bytes:
         raw_field = self._extract_choice_item(response, b"\xA0")
@@ -2087,6 +2113,42 @@ class SGP22Orchestrator:
         if len(entries) == 0:
             return b""
         return entries[0]
+
+    @staticmethod
+    def _normalize_eim_identifier(value: str) -> str:
+        return str(value or "").strip().casefold()
+
+    def _extract_eim_entry_bytes_for_request(self, response: bytes, eim_id: str) -> bytes:
+        tlv = safe_parse(
+            "scp11.request_eim_entry.root",
+            response,
+            lambda buf: self._read_tlv(buf, 0),
+            default=None,
+        )
+        if tlv is None:
+            return b""
+        root_tag, root_value, _, _ = tlv
+        if root_tag != bytes.fromhex("BF55"):
+            return b""
+        entries = self._find_eim_entry_values(root_value)
+        if len(entries) == 0:
+            return b""
+        target_eim_id = self._normalize_eim_identifier(eim_id)
+        if len(target_eim_id) == 0:
+            return entries[0]
+        for entry_value in entries:
+            try:
+                entry = self._decode_eim_configuration_entry(entry_value)
+            except Exception:
+                continue
+            entry_eim_id = self._normalize_eim_identifier(str(entry.get("eim_id", "")))
+            if entry_eim_id == target_eim_id:
+                return entry_value
+        debug_print(
+            "[*] GetEuiccData: no BF55 eIM entry matched requester "
+            f"eimId={eim_id}; omitting entry-scoped fields."
+        )
+        return b""
 
     def _find_first_raw_tlv_recursive(self, data: bytes, target_tag: bytes) -> bytes:
         if len(data) == 0:
@@ -3332,17 +3394,9 @@ class SGP22Orchestrator:
         return ", ".join(fragments)
 
     def _format_sima_response(self, sima_response: bytes) -> str:
-        raw_hex = sima_response.hex().upper()
-        translation = self._translate_sima_response_tlv(sima_response)
-        semantic = self._decode_sima_response_semantics(sima_response)
-        parts = []
-        if len(translation) > 0:
-            parts.append(translation)
-        if len(semantic) > 0:
-            parts.append(semantic)
-        if len(parts) == 0:
-            return raw_hex
-        return raw_hex + " [" + "; ".join(parts) + "]"
+        from SCP11.shared.sima_response import format_sima_response
+
+        return format_sima_response(sima_response)
 
     def _translate_sima_response_tlv(self, data: bytes) -> str:
         return self._translate_sima_response_tlv_with_path(data, path=[])

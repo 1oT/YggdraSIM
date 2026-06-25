@@ -258,7 +258,7 @@ class SaipAsn1DecodeTests(unittest.TestCase):
 
     def test_subtree_report_decodes_header_iccid_and_key_material(self) -> None:
         subtree = {
-            "iccid": {_TAG_BYTES: "89460811111111111112"},
+            "iccid": {_TAG_BYTES: "89880811111111111112"},
             "keyData": {_TAG_BYTES: "1122334455667788AABBCCDDEEFF0011"},
             "macLength": 8,
         }
@@ -270,7 +270,7 @@ class SaipAsn1DecodeTests(unittest.TestCase):
         )
 
         self.assertIn("Profile ICCID", text)
-        self.assertIn("89460811111111111112", text)
+        self.assertIn("89880811111111111112", text)
         self.assertIn("Security domain key material", text)
         self.assertIn("128-bit key material", text)
         self.assertIn("MAC length", text)
@@ -911,16 +911,16 @@ class SaipAsn1DecodeTests(unittest.TestCase):
         )
 
         self.assertIn("ISIM private user identity", text)
-        self.assertIn("tagged@sim.test", text)
+        self.assertIn("tagged@example.test", text)
         self.assertIn("ISIM home network domain", text)
         self.assertIn("ims.example", text)
         self.assertIn("ISIM public user identity", text)
-        self.assertIn("sip:tagged@sim.test", text)
+        self.assertIn("sip:tagged@example.test", text)
         self.assertIn("ISIM service table", text)
         self.assertIn("P-CSCF address", text)
         self.assertIn("activeCount", text)
         self.assertIn("ISIM P-CSCF address", text)
-        self.assertIn("192.168.12.34", text)
+        self.assertIn("192.0.2.34", text)
         self.assertIn("recordIdentifier", text)
         self.assertIn("AABB", text)
         self.assertIn("Equivalent HPLMN presentation indication", text)

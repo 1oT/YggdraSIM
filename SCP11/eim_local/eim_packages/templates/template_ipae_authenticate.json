@@ -12,7 +12,7 @@
       },
       "smdp_address": {
         "include": true,
-        "value": "yggdrasim.smdpp.test.1ot.com"
+        "value": "smdpp.example.test"
       },
       "euicc_info1": {
         "include": false,

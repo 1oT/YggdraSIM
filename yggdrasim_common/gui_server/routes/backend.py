@@ -1,11 +1,11 @@
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """``/api/backend/*`` — thin wrapper over ``yggdrasim_common.card_backend``.
 
-The GUI's top-bar card-backend badge and the "Card backend" settings
-panel both route through these endpoints. Setting the backend here is
-scoped to the server process (``persist=False``) so a GUI toggle cannot
-silently rewrite the operator's on-disk selection; the existing CLI
-menu remains the surface for persistent changes.
+The GUI's top-bar card-backend switch routes through these endpoints.
+Setting the backend here is scoped to the server process
+(``persist=False``) so a GUI toggle cannot silently rewrite the
+operator's on-disk selection; the existing CLI menu remains the surface
+for persistent changes.
 """
 
 from __future__ import annotations

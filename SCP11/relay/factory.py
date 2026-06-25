@@ -3,4 +3,6 @@
 try:
     from ..factory import *
 except ImportError:
+    if __package__:
+        raise
     from SCP11.factory import *

@@ -55,7 +55,7 @@ class OpenChannelEmitsAllRequiredTLVs(unittest.TestCase):
 
     def test_default_tcp_client_remote_open_channel_round_trip(self) -> None:
         result = self.engine.toolkit.queue_open_channel(
-            remote_address="10.0.0.42",
+            remote_address="192.0.2.42",
             remote_port=8443,
             transport_protocol_type=0x02,
             network_access_name="iot.example.com",
@@ -67,13 +67,13 @@ class OpenChannelEmitsAllRequiredTLVs(unittest.TestCase):
         self.assertEqual(parsed["qualifier"], 0x00)
         self.assertEqual(parsed["transport_protocol_type"], 0x02)
         self.assertEqual(parsed["transport_port"], 8443)
-        self.assertEqual(parsed["remote_address"], "10.0.0.42")
+        self.assertEqual(parsed["remote_address"], "192.0.2.42")
         self.assertEqual(parsed["network_access_name"], "iot.example.com")
         self.assertEqual(parsed["buffer_size"], 0x0400)
 
     def test_immediate_qualifier_bit_is_set(self) -> None:
         self.engine.toolkit.queue_open_channel(
-            remote_address="10.0.0.1",
+            remote_address="192.0.2.1",
             remote_port=443,
             transport_protocol_type=0x02,
             immediate=True,
@@ -87,7 +87,7 @@ class OpenChannelEmitsAllRequiredTLVs(unittest.TestCase):
         # simulator builds incorrectly used bit b8 (0x80); the real
         # bit is b2 and the reference modem trace confirms it.
         self.engine.toolkit.queue_open_channel(
-            remote_address="10.0.0.1",
+            remote_address="192.0.2.1",
             remote_port=443,
             transport_protocol_type=0x02,
             automatic_reconnect=True,
@@ -181,7 +181,7 @@ class TerminalResponsesUpdateOpenChannelBookkeeping(unittest.TestCase):
 
     def test_close_channel_terminal_response_clears_open_state(self) -> None:
         self.engine.state.toolkit.open_channel_active = True
-        self.engine.state.toolkit.open_channel_endpoint = "10.0.0.1:443"
+        self.engine.state.toolkit.open_channel_endpoint = "192.0.2.1:443"
         self.engine.toolkit.queue_close_channel()
         parsed = self._drain_proactive(self.engine.state.pending_fetch_queue.pop(0))
         details = bytes(parsed["command_details_tlv"])

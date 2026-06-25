@@ -275,7 +275,7 @@ keyset, see [§ SCP03 keysets and admin parameters](#scp03-keysets-and-admin-par
   "scp80_security": { "spi": "1621", "kic": "15", "kid": "15", "tar": "B00000",
                       "key_enc_hex": "...", "key_mac_hex": "..." },
   "configured_data": {
-    "root_smds_address": "lpa.ds.gsma.com",
+    "root_smds_address": "root-smds.example.com",
     "additional_root_smds_addresses": ["smds2.example", "smds3.example"],
     "allowed_ci_pkids_hex":            ["F54172BDF98A95D65CBEB88A38A1C11D800A85C3"],
     "ci_list_hex":                     ["F54172BDF98A95D65CBEB88A38A1C11D800A85C3"]
@@ -296,7 +296,7 @@ keyset, see [§ SCP03 keysets and admin parameters](#scp03-keysets-and-admin-par
       "receive_size":        250,
       "alpha_id":            "",
       "apn":                 "internet.apn",
-      "dns_server":          "8.8.8.8",
+      "dns_server":          "192.0.2.53",
       "request_payload_hex": ""
     }
   }
@@ -386,8 +386,8 @@ keyset, see [§ SCP03 keysets and admin parameters](#scp03-keysets-and-admin-par
        `toolkit.ipa_poll_apn_source = "bpp"`). The env override
        `YGGDRASIM_SIM_IPA_POLL_APN` wins when no profile-side APN
        is published.
-     - `dns_server` — IPv4 of the public resolver the IPA targets
-       in the DNS leg. Default `"8.8.8.8"` (Google). Override via
+     - `dns_server` — IPv4 of the resolver the IPA targets in the
+       DNS leg. Default `"192.0.2.53"`. Override via
        env flag `YGGDRASIM_SIM_IPA_POLL_DNS_SERVER` for closed-lab
        deployments with a captive resolver.
      - `request_payload_hex` — explicit hex-encoded body delivered
@@ -441,8 +441,8 @@ YGGDRASIM_CARD_BACKEND=sim yggdrasim-scp03 --cmd "STATUS; EXIT"
   "display_name": "Simulator default eIM identity",
   "eim_id": "2.25.311782205282738360923618091971140414400",
   "eim_id_type": "oid",
-  "eim_fqdn": "yggdrasim.eim.test.1ot.com",
-  "eim_endpoint": "https://yggdrasim.eim.test.1ot.com/gsma/rsp2/asn1",
+  "eim_fqdn": "eim.example.test",
+  "eim_endpoint": "https://eim.example.test/gsma/rsp2/asn1",
   "euicc_ci_pk_id": "F54172BDF98A95D65CBEB88A38A1C11D800A85C3",
   "eim_public_key_cert_path": "",
   "trusted_tls_cert_path": ""
@@ -678,12 +678,12 @@ locates it through `YGGDRASIM_EUM_SESSION_KEYS=<absolute path>`.
 {
   "format": "yggdrasim-eum-session-keys/v1",
   "entries": {
-    "8901260000000000001": {
-      "iccid": "8901260000000000001",
+    "8988000000000000001": {
+      "iccid": "8988000000000000001",
       "shs_enc_hex": "AABBCCDDEEFF00112233445566778899",
       "shs_mac_hex": "00112233445566778899AABBCCDDEEFF",
       "dek_hex":     "0F0E0D0C0B0A09080706050403020100",
-      "comment":     "Operator alpha — failing download 2026-04-12"
+      "comment":     "Example lab download"
     }
   }
 }
@@ -702,7 +702,7 @@ locates it through `YGGDRASIM_EUM_SESSION_KEYS=<absolute path>`.
 
 ```bash
 yggdrasim-eum-diag store-keys \
-    --iccid 8901260000000000001 \
+    --iccid 8988000000000000001 \
     --shs-enc AABBCCDDEEFF00112233445566778899 \
     --shs-mac 00112233445566778899AABBCCDDEEFF \
     --dek 0F0E0D0C0B0A09080706050403020100 \

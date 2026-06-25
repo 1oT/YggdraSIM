@@ -316,14 +316,14 @@ FLAG_REGISTRY: Final[tuple[EnvFlag, ...]] = (
         category=CATEGORY_CARD_BACKEND,
         summary="Override the SGP.32 IPA-poll DNS resolver",
         description=(
-            "IPv4 address of the public DNS resolver the simulated\n"
+            "IPv4 address of the DNS resolver the simulated\n"
             "IPA targets when resolving the eIM FQDN over BIP UDP.\n"
-            "The default mirrors what every reference card emits:\n"
-            "Google's 8.8.8.8 on port 53. Override only when running\n"
-            "in a closed lab where a captive resolver replaces 8.8.8.8."
+            "The default uses documentation-reserved address\n"
+            "192.0.2.53 on port 53. Override only when running\n"
+            "in a closed lab where a captive resolver replaces 192.0.2.53."
         ),
         kind=KIND_STRING,
-        default_hint="8.8.8.8",
+        default_hint="192.0.2.53",
         applies=APPLIES_RUNTIME,
     ),
 
