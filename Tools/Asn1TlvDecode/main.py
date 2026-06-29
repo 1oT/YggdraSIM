@@ -26,8 +26,8 @@ _UNIVERSAL_TAG_NAMES: dict[int, str] = {
     10: "ENUMERATED",
     12: "UTF8String",
     13: "RELATIVE-OID",
-    16: "SEQUENCE",
-    17: "SET",
+    16: "ASN1_SEQUENCE",
+    17: "ASN1_SET",
     18: "NumericString",
     19: "PrintableString",
     20: "TeletexString",
@@ -143,6 +143,10 @@ _FALLBACK_TAGS: dict[str, tuple[str, str]] = {
     "BF63": ("DELETE_NOTIFICATION_FOR_DC", "SGP.22 / reserved in SGP.32"),
     "BF64": ("EUICC_MEMORY_RESET", "SGP.32"),
     "BF65": ("SET_DEFAULT_DP_ADDRESS", "SGP.32"),
+}
+
+_FALLBACK_ALIASES: dict[str, tuple[str, ...]] = {
+    "BF51": ("EUICC_PACKAGE",),
 }
 
 
@@ -387,7 +391,12 @@ class TagRegistry:
         entries: dict[str, TagInfo] = {}
         sources: list[str] = []
         for tag_hex, (name, source) in _FALLBACK_TAGS.items():
-            entries[tag_hex] = TagInfo(tag=tag_hex, name=name, source=source)
+            entries[tag_hex] = TagInfo(
+                tag=tag_hex,
+                name=name,
+                aliases=_FALLBACK_ALIASES.get(tag_hex, ()),
+                source=source,
+            )
         sources.append("built-in fallback")
         if spec_root.is_dir():
             for source_name, loaded in _load_spec_tag_entries(spec_root).items():

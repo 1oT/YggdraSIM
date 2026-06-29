@@ -96,6 +96,8 @@ class GuiServerConfig:
     path_allowlist: tuple[str, ...] = field(default_factory=tuple)
     webview_debug: bool = False
     allow_ephemeral_port: bool = True
+    token_source: str = ""
+    token_strength: str = ""
     # Computed in __post_init__; handy for log messages and the banner.
     base_url: str = ""
 
@@ -128,6 +130,8 @@ class GuiServerConfig:
             "idle_seconds": self.idle_seconds,
             "path_allowlist": list(self.path_allowlist),
             "webview_debug": self.webview_debug,
+            "token_source": self.token_source,
+            "token_strength": self.token_strength,
         }
 
 

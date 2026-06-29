@@ -3930,7 +3930,7 @@
           var html = ['<table class="cc-doc-table"><thead><tr>'];
           headerCells.forEach(function (cell, idx) {
             var alignAttr = alignCells[idx]
-              ? ' class="cc-doc-align-' + alignCells[idx] + '"'
+              ? ' class="cc-doc-align-' + alignCells[idx] + '" style="text-align: ' + alignCells[idx] + ';"'
               : "";
             html.push("<th" + alignAttr + ">" + renderInline(cell) + "</th>");
           });
@@ -3940,7 +3940,7 @@
             for (var k = 0; k < headerCells.length; k++) {
               var cellText = row[k] != null ? row[k] : "";
               var align2 = alignCells[k]
-                ? ' class="cc-doc-align-' + alignCells[k] + '"'
+                ? ' class="cc-doc-align-' + alignCells[k] + '" style="text-align: ' + alignCells[k] + ';"'
                 : "";
               html.push("<td" + align2 + ">" + renderInline(cellText) + "</td>");
             }

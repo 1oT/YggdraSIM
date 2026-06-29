@@ -18195,14 +18195,17 @@
     return "";
   }
 
-  function scp03ShowGenericStaging(decoded, currentHex, meta) {
+  function scp03ShowGenericStaging(decoded, currentHex) {
     var tab = scp03GetActiveTab();
     var label = scp03StageInferLabel(decoded);
     var card = scp03BuildExtrasCard("Stage edit \u2014 " + label);
     if (!card) return;
+    var stageGateOpen = (typeof scp03GateOpen === "function") ? scp03GateOpen : null;
+    var stageOpenUpdateBinary = scp03StageOpenUpdateBinary;
 
     var startHex = scp03StageHexNormalise(currentHex);
     var startBytes = startHex.length / 2;
+    var meta = arguments.length > 2 ? arguments[2] : null;
     var stageMeta = meta || {};
     var pathText = String(stageMeta.path || "").trim();
     var recordNo = Number(stageMeta.record || 0);
@@ -18426,12 +18429,12 @@
       }
       if (!isRecordMode && typeof scp03ShowFsUpdateBinary !== "function") return;
       try {
-        if (typeof scp03GateOpen === "function") {
-          var gated = scp03GateOpen(tab, isRecordMode ? "scp03.update_record" : "scp03.update_binary", function () {
+        if (stageGateOpen) {
+          var gated = stageGateOpen(tab, isRecordMode ? "scp03.update_record" : "scp03.update_binary", function () {
             if (isRecordMode) {
               scp03StageOpenUpdateRecord(tab, raw, recordNo, pathText);
             } else {
-              scp03StageOpenUpdateBinary(tab, raw);
+              stageOpenUpdateBinary(tab, raw);
             }
           });
           gated();
@@ -18439,14 +18442,14 @@
           if (isRecordMode) {
             scp03StageOpenUpdateRecord(tab, raw, recordNo, pathText);
           } else {
-            scp03StageOpenUpdateBinary(tab, raw);
+            stageOpenUpdateBinary(tab, raw);
           }
         }
       } catch (_err) {
         if (isRecordMode) {
           scp03StageOpenUpdateRecord(tab, raw, recordNo, pathText);
         } else {
-          scp03StageOpenUpdateBinary(tab, raw);
+          stageOpenUpdateBinary(tab, raw);
         }
       }
     });

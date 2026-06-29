@@ -36,8 +36,32 @@ import logging
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
+try:
+    from fastapi import APIRouter, HTTPException
+except ModuleNotFoundError:
+    class HTTPException(Exception):
+        def __init__(self, status_code: int, detail: str) -> None:
+            super().__init__(detail)
+            self.status_code = status_code
+            self.detail = detail
+
+    class APIRouter:
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            pass
+
+        def get(self, *args: Any, **kwargs: Any):
+            def decorator(func):
+                return func
+
+            return decorator
+
+try:
+    from pydantic import BaseModel
+except ModuleNotFoundError:
+    class BaseModel:
+        def __init__(self, **kwargs: Any) -> None:
+            for key, value in kwargs.items():
+                setattr(self, key, value)
 
 from yggdrasim_common.runtime_paths import bundle_path
 
