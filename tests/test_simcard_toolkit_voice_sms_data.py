@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 """ETSI TS 102 223 §6.6 voice / SMS / data / UI proactive queueables.
 
 These tests exercise every public ``queue_*`` helper added to

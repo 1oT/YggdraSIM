@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """SGP.32 eIM response decoders: EUICCInfo1, GetRAT, GetCerts, and eIM configuration TLV parsers."""
 from typing import Any, Dict, List, Optional

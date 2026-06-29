@@ -1,3 +1,8 @@
+<!--
+SPDX-License-Identifier: GPL-3.0-or-later
+Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+-->
+
 # Build and Packaging Guide
 
 This repository supports three practical distribution models:
@@ -8,10 +13,10 @@ This repository supports three practical distribution models:
 
 Each of those is published in two **flavors**:
 
-| Flavor | HIL bridge included | Platforms                                   | Dependencies                         |
-|--------|---------------------|---------------------------------------------|--------------------------------------|
-| `clean` | No                 | Windows / macOS / Linux / Raspberry Pi arm64 | core only, no `pyudev`, no SIMtrace2 |
-| `full`  | Yes                | Linux x86_64                                | core + `pyudev` + `osmo-remsim-client-st2` on host |
+| Flavor | Card Bridge / remote APDU | Direct SIMtrace2 HIL | Platforms | Dependencies |
+|--------|---------------------------|----------------------|-----------|--------------|
+| `clean` | Yes | No | Windows / macOS / Linux / Raspberry Pi arm64 | core only, no `pyudev`, no SIMtrace2 |
+| `full`  | Yes | Yes | Linux x86_64 | core + `pyudev` + `osmo-remsim-client-st2` on host |
 
 The active flavor is controlled by the `YGGDRASIM_FLAVOR` environment
 variable at **build time**. The spec writes the resolved flavor into
@@ -29,8 +34,10 @@ Operator install notes for each flavor live in dedicated guides:
 
 ## Optional extras orthogonal to the flavor split
 
-The `clean` / `full` split only controls whether the HIL bridge stack
-is bundled. Several feature surfaces sit on **opt-in extras** that are
+The `clean` / `full` split only controls whether the local
+SIMtrace2/RemSIM HIL stack is bundled. Card Bridge and remote APDU
+streaming are part of the clean cross-platform surface. Several feature
+surfaces sit on **opt-in extras** that are
 declared in `pyproject.toml` and are not pulled in by either default
 flavor:
 
@@ -173,9 +180,11 @@ Build notes:
 - The spec writes `yggdrasim_common/_build_flavor.py` so the resulting
   executable reports its own flavor in `--version`, in the banner, and
   in `--doctor`. The stamp file is git-ignored.
-- The clean bundle explicitly excludes `Tools/HilBridge`,
-  `yggdrasim_common.hil_bridge_runtime`, and `pyudev`. Tests and
-  launcher logic already handle those surfaces being absent at runtime.
+- The clean bundle explicitly excludes the local HIL supervisor/runtime
+  (`yggdrasim_common.hil_bridge_runtime`, `pyudev`, and the Linux
+  SIMtrace2/RemSIM modules) while retaining `Tools.CardBridge` plus the
+  minimal APDU relay/PCSC helpers it uses. Tests and launcher logic handle
+  direct HIL being absent at runtime.
 - Console-script entry points such as `yggdrasim-scp11-live` remain the
   simpler operator surface for editable installs and Docker usage.
 
@@ -225,8 +234,10 @@ For Windows publication:
 
 - build the executable on Windows with
   `YGGDRASIM_FLAVOR=clean python -m PyInstaller --noconfirm --clean yggdrasim_main.spec`
-- Windows only ships the `clean` flavor; the HIL bridge is Linux-only
-- validate bundled smart-card and TLS flows on a reader-equipped Windows host
+- Windows only ships the `clean` flavor; direct SIMtrace2 HIL is Linux-only,
+  but Card Bridge / remote APDU streaming is included
+- validate bundled smart-card, Card Bridge, SSH tunnel, and TLS flows on a
+  reader-equipped Windows host
 - treat `.exe` publication as a packaging layer, not as a substitute for host
   driver installation
 
@@ -236,7 +247,8 @@ For macOS publication:
 
 - build per architecture on that architecture (`x86_64` and `arm64`
   separately); CI runs both
-- only `clean` is published; the HIL bridge is Linux-only
+- only `clean` is published; direct SIMtrace2 HIL is Linux-only, but Card
+  Bridge / remote APDU streaming is included
 - operators need Xcode command-line tools to run editable installs on
   source checkouts
 

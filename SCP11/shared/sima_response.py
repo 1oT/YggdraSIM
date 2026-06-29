@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """SIMa response TLV decoder used by SCP11 flows and offline tools."""
 

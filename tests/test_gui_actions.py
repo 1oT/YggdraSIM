@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 """Tests for the Command Center action framework (R2-004 Phase C).
 
 Covers:
@@ -147,6 +150,39 @@ class TestActionRegistry:
         assert registry.has("demo.a")
         assert len(registry.all()) == 1
 
+    def test_register_is_idempotent_for_equivalent_reimported_spec(self) -> None:
+        registry = ActionRegistry()
+
+        def _make_dispatcher():
+            def _dispatch(ctx):
+                return {"ok": True}
+
+            _dispatch.__module__ = "demo.actions"
+            _dispatch.__qualname__ = "_dispatch"
+            return _dispatch
+
+        first = ActionSpec(
+            id="demo.a",
+            subsystem="demo",
+            title="a",
+            description="d",
+            dispatcher=_make_dispatcher(),
+        )
+        second = ActionSpec(
+            id="demo.a",
+            subsystem="demo",
+            title="a",
+            description="d",
+            dispatcher=_make_dispatcher(),
+        )
+
+        registry.register(first)
+        returned = registry.register(second)
+
+        assert returned is first
+        assert registry.get("demo.a") is first
+        assert len(registry.all()) == 1
+
     def test_register_duplicate_id_raises(self) -> None:
         registry = ActionRegistry()
         registry.register(ActionSpec(id="demo.a", subsystem="demo", title="a", description=""))
@@ -166,7 +202,7 @@ class TestActionRegistry:
         assert "scp03.scan" in ids
         assert "scp03.read_selected" in ids
         assert "scp11.download_profile" in ids
-        assert "eim_local.poll_campaign" in ids
+        assert "eim_local.hotfolder_campaign" in ids
 
     def test_expanded_command_center_actions_register(self) -> None:
         registry = ensure_builtin_actions_loaded()
@@ -886,6 +922,37 @@ class TestHilSupervisorHelpers:
             {"status": "running", "someNewField": "noise"},
         )
         assert diff == []
+
+    def test_service_options_carry_remote_card_environment(self, monkeypatch) -> None:
+        from yggdrasim_common.gui_server.actions import hil as hil_mod
+        import yggdrasim_common.card_backend as card_backend_mod
+        import yggdrasim_common.hil_bridge_runtime as runtime_mod
+
+        monkeypatch.setenv("YGGDRASIM_CARD_RELAY_URL", "http://127.0.0.1:8642/apdu")
+        monkeypatch.setenv("YGGDRASIM_CARD_RELAY_TOKEN_FILE", "/tmp/card.token")
+        monkeypatch.setattr(runtime_mod, "read_supervisor_state", lambda: {})
+        monkeypatch.setattr(
+            runtime_mod,
+            "guess_bridge_python_executable",
+            lambda _state, *, fallback: "/opt/ygg/bin/python3",
+        )
+        monkeypatch.setattr(
+            runtime_mod,
+            "extract_remsim_extra_args_from_supervisor_state",
+            lambda _state: (),
+        )
+        monkeypatch.setattr(runtime_mod, "resolve_card_trace_enabled", lambda: False)
+        monkeypatch.setattr(card_backend_mod, "get_card_backend", lambda: "reader")
+        monkeypatch.setattr(card_backend_mod, "get_sim_isdr_config_path", lambda: "")
+        monkeypatch.setattr(card_backend_mod, "get_sim_quirks_path", lambda: "")
+        monkeypatch.setattr(card_backend_mod, "get_sim_eim_identity_path", lambda: "")
+        monkeypatch.setattr(card_backend_mod, "get_sim_euicc_store_root", lambda: "")
+        monkeypatch.setattr(card_backend_mod, "get_sim_profile_store_path", lambda: "")
+
+        options = hil_mod._build_hil_bridge_service_options()
+
+        assert options.remote_card_url == "http://127.0.0.1:8642/apdu"
+        assert options.remote_card_token_file == "/tmp/card.token"
 
 
 class TestHilDispatchers:
@@ -2291,6 +2358,40 @@ class TestRunRoute:
             )
         assert resp.status_code == 422
 
+    def test_missing_file_surfaces_without_server_traceback(self, monkeypatch) -> None:
+        from yggdrasim_common.gui_server.routes import actions as actions_routes
+
+        def _missing_file(ctx):
+            return {"ok": True}
+
+        async def _raise_missing_file(spec, ctx, coerced):
+            raise FileNotFoundError("not a file: /tmp/missing.saip")
+
+        registry = ActionRegistry()
+        registry.register(
+            ActionSpec(
+                id="demo.missing_file",
+                subsystem="demo",
+                title="Missing file",
+                description="exercise FileNotFoundError handling",
+                dispatcher=_missing_file,
+            )
+        )
+        monkeypatch.setattr(actions_routes, "ensure_builtin_actions_loaded", lambda: registry)
+        monkeypatch.setattr(actions_routes, "_invoke_dispatcher", _raise_missing_file)
+
+        response = asyncio.run(
+            actions_routes.run_action(
+                "demo.missing_file",
+                actions_routes.RunRequest(inputs={}),
+            )
+        )
+
+        assert response.ok is False
+        assert response.action_id == "demo.missing_file"
+        assert "not a file" in (response.error or "")
+
+
 @_needs_gui_stack
 class TestStreamingGate:
     def test_external_endpoint_closes_with_policy_violation(self) -> None:
@@ -2309,7 +2410,7 @@ class TestStreamingGate:
         with _make_client() as client:
             with pytest.raises(Exception):
                 with client.websocket_connect(
-                    "/api/actions/eim_local.poll_campaign/stream"
+                    "/api/actions/eim_local.hotfolder_campaign/stream"
                 ) as ws:
                     ws.receive_text()
 

@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """ASN.1/TLV decoder: renders pasted BER/DER hex as JSON and value notation."""
 from __future__ import annotations
@@ -120,7 +123,7 @@ _FALLBACK_TAGS: dict[str, tuple[str, str]] = {
     "BF4F": ("GET_EIM_PACKAGE", "SGP.32"),
     "BF50": ("PROVIDE_EIM_PACKAGE_RESULT", "SGP.32"),
     "BF51": ("EIM_PACKAGE", "SGP.32 §6.3.2.6/§6.3.2.7"),
-    "BF52": ("IPA_EUICC_DATA", "SGP.32"),
+    "BF52": ("PACKAGE_DATA", "SGP.32"),
     "BF53": ("EIM_ACKNOWLEDGEMENTS", "SGP.32"),
     "BF54": ("PROFILE_DOWNLOAD_TRIGGER", "SGP.32"),
     "BF55": ("GET_EIM_CONFIGURATION_DATA", "SGP.32"),

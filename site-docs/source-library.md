@@ -79,6 +79,5 @@ Notes:
 ## Test And Harness Docs
 
 - [`tests/eim-sh/EIM_ESIPA_ASN1_REFERENCE.md`](sources/tests/eim-sh/EIM_ESIPA_ASN1_REFERENCE.md)
-- [`tests/eim-sh/EIM_POLL_SEQUENCE.md`](sources/tests/eim-sh/EIM_POLL_SEQUENCE.md)
 - [`tests/eim-sh/README_venv.md`](sources/tests/eim-sh/README_venv.md)
 - [`tests/live_scp03/README.md`](sources/tests/live_scp03/README.md)

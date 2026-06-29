@@ -1,3 +1,8 @@
+<!--
+SPDX-License-Identifier: GPL-3.0-or-later
+Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+-->
+
 # Installation — Raspberry Pi (arm64)
 
 YggdraSIM runs on Raspberry Pi 4 / 5 boards using Raspberry Pi OS 64-bit
@@ -56,7 +61,7 @@ chmod +x yggdrasim-linux-arm64-clean-<version>
 `--doctor` should report:
 
 ```text
-[+] Build flavor: clean (no HIL bridge) (source: build-stamp)
+[+] Build flavor: clean (no local SIMtrace2 HIL bridge) (source: build-stamp)
 ```
 
 Move the binary to somewhere on `PATH` if you want a persistent install:
@@ -115,8 +120,8 @@ python main/main.py --version
 python main/main.py --doctor
 ```
 
-The doctor report should now include `HIL bridge readiness: OK` once the
-prerequisites below are in place.
+The doctor report should now include `Local HIL bridge readiness: OK` once
+the prerequisites below are in place.
 
 ## Scripted install on the Pi
 

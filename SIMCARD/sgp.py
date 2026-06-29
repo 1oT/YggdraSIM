@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """SGP.22 / SGP.32 BPP consumer: ES8+ APDU-sequence delivery, IccidMismatch / DuplicateIccid guard, and profile-install lifecycle."""
 from __future__ import annotations
@@ -114,7 +117,7 @@ class SgpLogic:
         self.state.sgp_session = SimSgpSession()
 
     def handle_store_data(self, payload: bytes) -> tuple[bytes, int, int]:
-        """Handle STORE DATA (SGP.22 §3.1.1 / GP Card Spec v2.3 §11.11): accumulate, decode, and dispatch IPA-poll payloads."""
+        """Handle STORE DATA (SGP.22 §3.1.1 / GP Card Spec v2.3 §11.11): accumulate and decode payloads."""
         normalized = bytes(payload or b"")
         if normalized == bytes.fromhex("BF2000"):
             return self._build_euicc_info1_response(), 0x90, 0x00

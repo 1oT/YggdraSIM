@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 """Unit tests for the TUI token-manager data helpers.
 
 These tests intentionally avoid importing the Textual-based TUI module. They

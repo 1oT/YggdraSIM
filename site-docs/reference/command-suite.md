@@ -6,6 +6,11 @@ tags:
   - cli
   - wizards
 ---
+<!--
+SPDX-License-Identifier: GPL-3.0-or-later
+Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+-->
+
 
 # Command Suite
 
@@ -49,21 +54,23 @@ flowchart TD
     Launcher --> EimShell["SCP11 Local eIM"]
     Launcher --> ProfileShell["Profile Package / SAIP shell"]
     Launcher --> SuciShell["SUCI Tool shell"]
-    Launcher --> HilMenu["HIL Bridge session menu"]
+    Launcher --> HilMenu["Local SIMtrace2 HIL menu"]
+    Launcher --> CardBridgeMenu["Card Bridge / remote APDU menu"]
     Launcher --> Backend["Card Backend menu"]
     Launcher --> Guides["Guides menu"]
     HilMenu -. spawns .-> HilBridge["yggdrasim-hil-bridge"]
     HilMenu -. spawns .-> HilSup["yggdrasim-hil-supervisor"]
     HilSup -. supervises .-> HilBridge
     HilSup -. spawns .-> Remsim["osmo-remsim-client-st2"]
+    CardBridgeMenu -. spawns .-> CardBridge["yggdrasim-card-bridge"]
     SCP03 -- WIZARD / PUT-KEY / SET-STATUS / MANAGE-* / CONFIG / FS-ADMIN / REPORT --> SCP03Wiz["SCP03 wizards"]
     SCP03 -- OTA --> SCP80
     SCP03 -- STK --> StkSub["STK sub-shell"]
     ProfileShell -- INSPECT / OPEN / TUI --> SaipTui["SAIP split-pane TUI"]
     SaipTui -- decoded edit --> SaipModal["Decoded editor modal"]
-    LiveShell -. polling plugin .-> PollCmd["POLL / EIM-POLL"]
-    TestShell -. polling plugin .-> PollCmd
-    EimShell -. polling plugin .-> IpaeCmd["IPAE-LIVE / IPAE-TEST"]
+    LiveShell -. local extension .-> RelayExt["optional relay verbs"]
+    TestShell -. local extension .-> RelayExt
+    EimShell -. local extension .-> EimExt["optional eIM verbs"]
 ```
 
 ---
@@ -98,6 +105,18 @@ options are consumed by `argparse` before the menu is drawn.
 | `--sim-import-enable` | flag | off | Enable the imported simulated profile immediately. |
 | `--open-pcap <path>` | path | — | Open a saved `.pcap` / `.pcapng` directly in the HIL decoded-APDU TUI in offline review mode. No SIMtrace2, no supervisor, no FIFO, no systemd service touch. Short-circuits the main menu. |
 | `--keybag <path>` | path | — | Optional keybag JSON with SCP03 / SCP11c session keys. Used with `--open-pcap` to decrypt secure-messaging APDUs inline. If omitted, `<pcap>.keys.json` / `<stem>.keys.json` sidecars are auto-discovered. |
+| `--card-bridge` | flag | off | Start the local PC/SC Card Bridge daemon from the main launcher. Short-circuits plugin loading and the menu. |
+| `--card-bridge-host <addr>` | str | `127.0.0.1` | Bind host forwarded to `Tools.CardBridge.server --host`. |
+| `--card-bridge-port <n>` | int | `8642` | Bind port forwarded to `Tools.CardBridge.server --port`. |
+| `--card-bridge-reader-index <n>` | int | `0` | PC/SC reader index to publish when no reader name is set. |
+| `--card-bridge-reader-name <text>` | str | — | PC/SC reader-name substring; overrides `--card-bridge-reader-index`. |
+| `--card-bridge-token-file <path>` | path | default under `~/.config/yggdrasim/card_bridge/` | Bearer-token file used by the bridge. Created with mode `0600` when missing. |
+| `--card-bridge-no-token` | flag | off | Disable bearer auth; loopback bind only. |
+| `--card-bridge-audit` | flag | off | Emit header-only APDU audit records. |
+| `--card-bridge-audit-full-apdu` | flag | off | Log full APDU / response hex. Test-card forensic use only. |
+| `--card-bridge-audit-logger-name <name>` | str | `yggdrasim.card_bridge.audit` | Python logger that receives Card Bridge audit records. |
+| `--card-bridge-apdu-timeout-ms <n>` | int | env/default | Maximum PC/SC APDU wait for the published reader. |
+| `--card-bridge-pcsc-share-mode` | `shared` \| `exclusive` | `shared` | PC/SC sharing mode for the published reader. |
 | `--gui` | flag | off | Launch the desktop Universal GUI Command Center (requires the `[gui]` extra; `pywebview`-backed). Short-circuits the menu. |
 | `--web-server` | flag | off | Launch the Universal GUI as a FastAPI loopback service (requires the `[gui-server]` extra). Short-circuits the menu. |
 | `--host <addr>` | str | `127.0.0.1` | Bind address for `--web-server`. |
@@ -121,9 +140,10 @@ options are consumed by `argparse` before the menu is drawn.
 | `9A` | Admin Shell — Script Execution | SCP03 batch-script mode (prompts for path) |
 | `9B` | Admin Shell — Report & DUMP-FS | SCP03 report-wizard pipeline |
 | `9C` | OTA Simulator — Script Execution | SCP80 batch-script mode |
-| `C` | Card Backend / Simulator Settings | Nested backend/sim picker (§1.5) |
-| `B` | HIL Bridge Session | Nested HIL session controller (§1.4) |
-| `G` | Guides & Documentation | Nested in-terminal guide menu (§1.6) |
+| `C` | Card Backend / Simulator Settings | Nested backend/sim picker (§1.6) |
+| `CB` | Card Bridge / Remote APDU Streaming | Nested Card Bridge controller (§1.5) |
+| `B` | Local SIMtrace2 HIL Bridge Session | Nested local HIL session controller (§1.4) |
+| `G` | Guides & Documentation | Nested in-terminal guide menu (§1.7) |
 | `A` | About | Read-only splash |
 | `L` | License (GPLv3) | License text |
 | `Q` / `QA` | Quit | Exit YggdraSIM |
@@ -141,7 +161,7 @@ Accepted by `_dispatch_main_menu_choice`:
 | `10` | `9B` |
 | `11` | `9C` |
 
-### 1.4 `[B]` HIL Bridge sub-menu
+### 1.4 `[B]` Local SIMtrace2 HIL Bridge sub-menu
 
 Managed from `main/main.py::manage_hil_bridge`. Renders live status
 (service state, supervisor state, bridge/REMSIM presence, card-relay
@@ -163,7 +183,33 @@ Sub-tooling spawned from `[B]`:
 - **Pcap writers** — `Tools/HilBridge/termshark_capture_pcap.py` (preferred) or `tshark`/`dumpcap`. Mirror fan-out via `termshark_capture_mirror.py` when `--gsmtap-capture-mirror-fifo-path` is set.
 - **Offline replay engine** — `Tools.HilBridge.scp_replay.ScpReplayEngine` unwraps secure-messaging APDUs (CLA bit `0x04`) for SCP03 / SCP11c when a keybag JSON is loaded via `load_keybag()` / `try_autodiscover_sidecar_keybag()`. Keybags are produced by `EXPORT-KEYBAG` in SCP03 / SCP11 Local Access or by `python -m SCP11.local_access --dump-keybag`.
 
-### 1.5 `[C]` Card Backend sub-menu
+### 1.5 `[CB]` Card Bridge / Remote APDU Streaming sub-menu
+
+Managed from `main/main.py::manage_card_bridge`. Renders the configured
+remote-card posture and any locally managed Card Bridge process on every
+iteration.
+
+| Pick | Action |
+| --- | --- |
+| `1` | Start local Card Bridge — prompts for port, reader selector, token file, timeout, reuse/restart behavior, then starts `Tools.CardBridge.server` as a managed subprocess. |
+| `2` | Stop local Card Bridge — stops the subprocess started by the launcher or GUI action layer. |
+| `3` | Probe configured remote APDU bridge — runs `/ping` and authenticated `/status` against the resolved `YGGDRASIM_CARD_RELAY_*` target. |
+| `4` | Configure remote APDU consumer for this CLI session — applies `--remote-card-url` / `--remote-card-token-file` equivalents to the current process. |
+| `5` | Show SSH tunnel commands — prints matching `ssh -L` and `ssh -R` recipes for the selected port and token file. |
+| `H` | Open local SIMtrace2 HIL session with current remote-card settings when the HIL runtime is available. |
+| `R` | Refresh status header. |
+| `Q` / *(empty)* | Return to main menu. |
+
+Direct daemon shortcut:
+
+```bash
+python main/main.py --card-bridge \
+  --card-bridge-port 8642 \
+  --card-bridge-reader-index 0 \
+  --card-bridge-token-file ~/.config/yggdrasim/card_bridge/8642.token
+```
+
+### 1.6 `[C]` Card Backend sub-menu
 
 `configure_card_backend()` re-prints the live backend (`reader` / `sim`)
 plus paths for ISDR config, quirks, eIM identity, eUICC store, and
@@ -183,7 +229,7 @@ profile store on every iteration.
 | `9` | Reset simulator state + workspace personality (destructive, requires `Y`/`YES`). |
 | `Q` / *(empty)* | Back to main menu. |
 
-### 1.6 `[G]` Guides sub-menu
+### 1.7 `[G]` Guides sub-menu
 
 Every pick paginates via `_show_text_document` (20 lines/page). Topic
 picks delegate to `SCP03.interface.guides.ShellGuides`.
@@ -205,7 +251,7 @@ picks delegate to `SCP03.interface.guides.ShellGuides`.
 | `N` | `NOTICE` |
 | `Q` | Back to main menu |
 
-### 1.7 Console-script entry points
+### 1.8 Console-script entry points
 
 Defined in `pyproject.toml`/`yggdrasim_common/console_scripts.py`:
 
@@ -220,6 +266,7 @@ Defined in `pyproject.toml`/`yggdrasim_common/console_scripts.py`:
 | `yggdrasim-scp11-eim-local` | `SCP11.eim_local.main.entry` |
 | `yggdrasim-hil-bridge` | `Tools.HilBridge.main.entry` |
 | `yggdrasim-hil-supervisor` | `Tools.HilBridge.supervisor.entry` |
+| `yggdrasim-card-bridge` | `Tools.CardBridge.server.main` |
 | `yggdrasim-profile-package` | `Tools.ProfilePackage.main.run_standalone` |
 | `yggdrasim-profile-autoload` | `Tools.ProfilePackage.simcard_watch.run_cli` |
 | `yggdrasim-apdu-fuzzer` | `Tools.ApduFuzz.main.run_cli` |
@@ -611,7 +658,7 @@ pane to the top half of the terminal (TTY only, ≥24 rows).
 
 ### 4.2 Prompts / namespaces
 
-| Shell | Prompt | Module state | Inventory namespace | Polling-surface key |
+| Shell | Prompt | Module state | Inventory namespace | Extension key |
 | --- | --- | --- | --- | --- |
 | eSIM Management | `[eSIM Management] >` | `scp11_live_config` | `scp11_live` | `scp11.live` |
 
@@ -622,7 +669,6 @@ Exact section titles emitted by the consoles:
 - `Relay Utilities`
 - `LPAd`
 - `IPAd`
-- `IPAe`
 - `Expert / Compatibility` *(only with `HELP EXPERT` / `HELP ALL` / `HELP-ALL`)*
 
 ### 4.4 Relay Utilities
@@ -652,24 +698,16 @@ Exact section titles emitted by the consoles:
 | Command | Aliases | Usage | Purpose |
 | --- | --- | --- | --- |
 | `DISCOVER` | `EIM-DISCOVER` | `DISCOVER` | IPAd consolidated eUICC + eIM discovery (SGP.32 get_all_data compact). |
-| `DOWNLOAD` | `EIM-DOWNLOAD` | `DOWNLOAD` | IPAd eIM package request + relay flow via `orchestrator.run_eim_poll`. If the argument parses as an LPA activation code, falls through to `DOWNLOAD-PROFILE`. Triggers notification sync. |
+| `DOWNLOAD` | `EIM-DOWNLOAD` | `DOWNLOAD` | IPAd eIM package request + relay flow. If the argument parses as an LPA activation code, falls through to `DOWNLOAD-PROFILE`. Triggers notification sync. |
 
-### 4.7 IPAe (plugin-injected)
+### 4.7 Optional extension commands
 
-Present only when the polling plugin is loaded. Host shells must call
-`extend_target_with_plugins(self)` (Live/Test constructors do).
+Optional local extension commands are intentionally not listed in the public
+command-suite reference. Loaded extensions should document their own verbs in
+the operator environment that enables them.
 
 | Command | Aliases | Usage | Purpose |
 | --- | --- | --- | --- |
-| `POLL` | `EIM-POLL` | `POLL [attempts] [timer-window] [-t 20s] [-s 5] [--debug]` | IPAe poll trigger + continuous STATUS watchdog (Ctrl+C to stop). |
-
-Argument grammar (shared via `yggdrasim_common.polling_plugin_support`):
-
-- Positional 1 → `poll_attempts_per_fqdn`.
-- Positional 2 → `timer_expiration_window_seconds`.
-- `-t <n[s]>` / `--attempt-delay=<n>` / `--poll-delay=<n>` / shorthand `-Ns` → `poll_attempt_delay_seconds`.
-- `-s <n>` / `--status-loops=<n>` → `poll_attempt_post_status_loops`.
-- `--debug` / `-d` / `debug` → debug mode.
 
 ### 4.8 Expert / Compatibility *(`HELP EXPERT` / `HELP-ALL` only)*
 
@@ -707,7 +745,6 @@ Argument grammar (shared via `yggdrasim_common.polling_plugin_support`):
 | Flag | Commands |
 | --- | --- |
 | `--persist` | `SET-ES9`, `SET-ES9-TLS`, `SET-ES9-CA` |
-| `--debug`, `-d`, `-t <n[s]>`, `-s <n>`, `--status-loops=<n>`, `--attempt-delay=<n>`, `--poll-delay=<n>`, `-Ns` | `POLL` / `EIM-POLL` (plugin) |
 | `--flow`, `--cmd`, `--stdin`, `--debug` | Launcher-level only |
 
 `--json` / `--yaml` are *(not in source)* for Live/Test.
@@ -715,8 +752,8 @@ Argument grammar (shared via `yggdrasim_common.polling_plugin_support`):
 ### 4.10 Divergences
 
 Live ↔ Test: no semantic command differences. Housekeeping only —
-prompt string, module state name, inventory namespace, polling-surface
-key. No command exists in one shell and not the other. Test carries a
+prompt string, module state name, inventory namespace, and extension key.
+No command exists in one shell and not the other. Test carries a
 dead-code `_add_scaffold` helper that is never called.
 
 ---
@@ -725,15 +762,13 @@ dead-code `_add_scaffold` helper that is never called.
 
 `python -m SCP11.relay` (`yggdrasim-scp11-relay`) re-exports the
 standalone `SCP11.console.SCP11Console`. This is a narrower surface
-than Live/Test (no IPAe, no notification auto-sync, only two help
 sections).
 
 ### 5.1 Launcher flags
 
 Same shape as Live/Test launchers (`--debug`, `--flow`, `--cmd`, `--stdin`).
-The relay launcher does **not** call `ensure_plugins_loaded()`, so the
-polling plugin never extends this shell — `POLL` / `EIM-POLL` are
-unavailable.
+The relay launcher does **not** call `ensure_plugins_loaded()`, so local
+extensions never attach command handlers to this shell.
 
 ### 5.2 Prompt / namespace
 
@@ -742,7 +777,6 @@ unavailable.
 | Prompt | `[SCP11] >` |
 | Module state | `scp11_relay_config` |
 | Inventory namespace | `scp11` |
-| Polling plugin | Not wired |
 
 ### 5.3 HELP sections
 
@@ -800,7 +834,6 @@ Only two:
 ### 5.6 Commands present in Live/Test but not in Relay
 
 `RESET`, `HELP-ALL`, `CLEAR-NOTIFICATIONS`, `GET-ALL-DATA`,
-`POLL` / `EIM-POLL`, `METADATA` alias for `GET-METADATA`,
 `DOWNLOAD-PROFILE` alias for `DOWNLOAD-AC`, `DISCOVER` alias for
 `EIM-DISCOVER`, `DOWNLOAD` alias for `EIM-DOWNLOAD`. No
 section-aware hidden / expert partitioning; no automatic
@@ -922,14 +955,9 @@ Commands are registered in `__init__` via `self._commands`,
 
 | Command | Aliases | Usage | Purpose |
 | --- | --- | --- | --- |
-| `PATHS` | — | `PATHS` | Show Direct Auth / IPAd polling / IPAe polling / localized bridge endpoints. |
 | `IPAD-DISCOVER` | — | `IPAD-DISCOVER [packagePath]` | IPAd discovery + optional package selection. |
-| `IPAD-LIVE` | — | `IPAD-LIVE [matchingId] [--debug]` | Localized IPAd polling via the Live orchestrator (internal `--debug`). |
-| `IPAD-TEST` | — | `IPAD-TEST [matchingId] [--debug]` | Localized IPAd polling via the Test orchestrator (internal `--debug`). |
-| `IPAE-AUTHENTICATE` | — | `IPAE-AUTHENTICATE [matchingId]` | Seed handover context with `transactionId`. |
-| `IPAE-DOWNLOAD` | — | `IPAE-DOWNLOAD [profilePath] [matchingId]` | Handover-linked download / load profile chain. Triggers notification sync. |
-| *(plugin)* `IPAE-LIVE` | — | `IPAE-LIVE [attempts] [timer-window] [-t 20s] [-s 5] [--debug]` | Localized IPAe STK/BIP watchdog via SCP11.live (internal `--debug`). |
-| *(plugin)* `IPAE-TEST` | — | `IPAE-TEST [attempts] [timer-window] [-t 20s] [-s 5] [--debug]` | Localized IPAe STK/BIP watchdog via SCP11.test (internal `--debug`). |
+| `IPAD-LIVE` | — | `IPAD-LIVE [matchingId] [--debug]` | Localized IPAd relay via the Live orchestrator (internal `--debug`). |
+| `IPAD-TEST` | — | `IPAD-TEST [matchingId] [--debug]` | Localized IPAd relay via the Test orchestrator (internal `--debug`). |
 | `HANDOVER-SET` | — | `HANDOVER-SET <txidHex> [matchingId]` | Manually seed handover context. |
 | `HANDOVER-STATUS` | — | `HANDOVER-STATUS [--json\|--yaml]` | Print current handover context. |
 
@@ -956,18 +984,14 @@ Commands are registered in `__init__` via `self._commands`,
 | `LOAD-EIM-PACKAGE` | `ISDR-PACKAGE`, `ISDR-LOAD-PACKAGE` | `LOAD-EIM-PACKAGE [pkgPath] [certPath]` | Execute a card-facing package toward ISD-R. |
 | `EIM-ACKNOWLEDGE` | `EIM-ACK` | `EIM-ACKNOWLEDGE [txidHex] [matchingId]` | Close pending eIM ops + sync notifications. |
 
-### 7.6 Queue Campaigns
+### 7.6 Hotfolder Queue
 
 | Command | Usage | Purpose |
 | --- | --- | --- |
 | `HOTFOLDER` | `HOTFOLDER [directory]` | Show / set hotfolder override. |
 | `HOTFOLDER-CLEAR` | `HOTFOLDER-CLEAR` | Clear hotfolder override. |
-| `HOTFOLDER-LIST` | `HOTFOLDER-LIST [dir] [--json\|--yaml]` | Preview effective poll queue without issuing. |
-| `HOTFOLDER-POLL` | `HOTFOLDER-POLL [dir] [--json\|--yaml]` | Effective poll metadata for harnesses. |
-| `HOTFOLDER-FETCH` | `HOTFOLDER-FETCH [dir] [--json\|--yaml]` | Issue effective poll queue deterministically. |
-| `POLL-CAMPAIGN` | `POLL-CAMPAIGN [cycles] [intervalMs] [dir] [--until-empty] [--max-cycles <n>] [--json\|--yaml]` | Run a poll-queue campaign (one package per cycle). |
-| `POLL-EXPORT` | `POLL-EXPORT [cycles] [intervalMs] [dir] [--until-empty] [--max-cycles <n>] [out]` | Run a campaign and export a JSON report. |
-| `POLL-AGGREGATE` | `POLL-AGGREGATE [reportsDir] [--json\|--yaml] [--export [out]]` | Aggregate exported campaign reports. |
+| `HOTFOLDER-LIST` | `HOTFOLDER-LIST [dir] [--json\|--yaml]` | Preview the effective queue without issuing. |
+| `HOTFOLDER-FETCH` | `HOTFOLDER-FETCH [dir] [--json\|--yaml]` | Issue the effective queue deterministically. |
 
 ### 7.7 Diagnostics & Runtime
 
@@ -997,8 +1021,6 @@ Commands are registered in `__init__` via `self._commands`,
 Commands that automatically run `_sync_pending_notifications`
 (followed by `load_notifications_synced = True`):
 
-- `LOAD-PROFILE`, `IPAE-DOWNLOAD`.
-- `EIM-PACKAGE-ISSUE`, `EIM-PACKAGE-ISSUE-ALL`, `HOTFOLDER-FETCH`, `POLL-CAMPAIGN`, `POLL-EXPORT` — but only when the queued package is one of `eim_package_result`, `euicc_package_result`, `ipa_euicc_data_response`, `profile_download_trigger_result`, `eim_acknowledgements`.
 - `EIM-ACKNOWLEDGE` (alias `EIM-ACK`).
 - `LOAD-EIM-PACKAGE` on load-chain package types.
 
@@ -1010,8 +1032,7 @@ Commands that re-read BF55 without notification sync:
 
 `EimLocalShell._execute_command_line` strips `--debug` / `-d` unless
 the canonical command is in `_commands_with_internal_debug_flags()`:
-`IPAD-LIVE`, `IPAD-TEST`, `IPAE-LIVE`, `IPAE-TEST`. Those four keep
-the flag internal so their localized runner / polling plugin can
+the flag internal so the localized runner or local extension can
 parse it together with `[matchingId]` or `[attempts] [timer-window]
 [-t 20s] [-s 5]`.
 
@@ -1253,7 +1274,7 @@ shell: `generate-key --curve {secp256r1, curve25519}` and
 
 Both binaries are non-interactive daemons — there is no shell and no
 command dispatcher. They run stand-alone or via the
-`[B]` HIL Bridge Session menu (§1.4).
+`[B]` Local SIMtrace2 HIL Bridge Session menu (§1.4).
 
 ### 10.1 `yggdrasim-hil-bridge`
 
@@ -1434,26 +1455,19 @@ startup.
 `extend_target(target)` once per target (idempotent via a per-instance
 attribute).
 
-### 11.2 Current plugin — `plugins/polling_plugin.py`
+### 11.2 Capability contract for host shells
 
-Registers capability `polling` → `PollingCapability()`.
-Dispatch rules:
+Plugin packages register named capabilities and may attach command handlers to
+host shells. The core does not document restricted plugin implementation file
+names; plugin-owned command families are documented by the plugin package that
+ships them.
 
-| Host shell | Commands injected | Default aliases | Help section |
-| --- | --- | --- | --- |
-| `SCP11.live.console.SCP11Console` | `POLL [attempts] [timer-window] [-t 20s] [-s 5] [--debug]` | `EIM-POLL` | IPAe |
-| `SCP11.eim_local.main.EimLocalShell` | `IPAE-LIVE` / `IPAE-TEST [attempts] [timer-window] [-t 20s] [-s 5] [--debug]` | — | "3. SIM IP Polling" + Localized Routing & Handover |
-
-Argument grammar (all three): `yggdrasim_common.polling_plugin_support.parse_eim_local_ipae_options`.
-
-### 11.3 Capability contract for host shells
-
-For the eSIM management relay the plugin uses `target._add_command(name, usage, description, handler, aliases=None, section=..., visible_in_help=True, trigger_notification_sync=False)`; the host console must expose:
+For the eSIM management relay a plugin may use `target._add_command(name, usage, description, handler, aliases=None, section=..., visible_in_help=True, trigger_notification_sync=False)`; the host console must expose:
 
 - `target._commands` — dict keyed by canonical name.
 - `target._add_command(...)` registration helper.
-- `target.HELP_SECTION_IPAE` — section constant.
-- `target._cmd_eim_poll(self, argument)` — pre-defined handler.
+- a plugin-specific help section constant when the plugin exposes help rows.
+- a pre-defined handler or dispatch shim for each optional command.
 
 For eIM Local the plugin writes directly into the shell instance:
 
@@ -1461,14 +1475,13 @@ For eIM Local the plugin writes directly into the shell instance:
 - `target._command_docs` (dict) — receives `{"usage", "summary", "examples"}` entries.
 - `target._plugin_path_sections` — list for `PATHS` rendering.
 - `target._plugin_localized_help_rows` — list for localized help rows.
-- `target._cmd_ipae_live` / `target._cmd_ipae_test` — pre-defined handlers.
+- pre-defined handlers or dispatch shims for optional commands.
 
 Runtime dispatch helpers in `yggdrasim_common/polling_plugin_support.py`:
 
 - `dispatch_poll_command(surface, command_name, target, argument)` — routes to the capability.
 - `dispatch_poll_method(target, method_name, *args, **kwargs)` — routes to polling-owned methods.
-- `install_poll_method_stubs(target_cls)` — installs the 92-name `POLLING_METHOD_NAMES` forwarding stubs.
-- `require_polling_plugin()` — raises with a helpful message when the plugin is absent.
+- `require_polling_plugin()` — raises with a helpful message when the capability is absent.
 
 See [Plugin Contract](../internals/plugin-contract.md) for the formal
 spec.

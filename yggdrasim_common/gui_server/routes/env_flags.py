@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """``/api/env_flags/*`` — view / edit over the YGGDRASIM_* registry.
 

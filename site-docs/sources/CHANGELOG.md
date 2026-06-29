@@ -1,3 +1,8 @@
+<!--
+SPDX-License-Identifier: GPL-3.0-or-later
+Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+-->
+
 # Changelog
 
 All notable changes to YggdraSIM are recorded here. The format follows
@@ -55,7 +60,6 @@ exposes a frozen v1 footprint; the v2 staging continues on `main`.
   TS 33.535 AKMA (`SIMCARD/akma.py`), TS 33.501 §C.3 SUCI Profile A & B
   with EF.SUCI_Calc_Info codec (`SIMCARD/suci.py`), TS 31.102 §7.1.2.4
   `GET IDENTITY` handler (`SIMCARD/identity.py`).
-- IPA poll over DNS resolution (`SIMCARD/ipa_poll_dns.py`) and TLS
   transport (`SIMCARD/ipa_tls.py`); SAIP pySIM specs bridge
   (`SIMCARD/saip_pysim_specs.py`); SGP.32 package surfaces
   (`SIMCARD/sgp32_packages.py`); modem write persistence; shared EF
@@ -75,8 +79,8 @@ exposes a frozen v1 footprint; the v2 staging continues on `main`.
 - Documentation: configuration & certificates guide, GUI host shell
   guide, "Load certificates and config" how-to recipe.
 - `tests/live_scp03/` golden inputs for the SCP03 admin shell.
-- Demo scripts under `scripts/demos/` covering 3GPP attach, eIM
-  polling, and profile lifecycle.
+- Demo scripts under `scripts/demos/` covering 3GPP attach and profile
+  lifecycle.
 
 ### Changed
 

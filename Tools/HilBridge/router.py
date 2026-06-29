@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """HIL-Bridge APDU router: dispatches incoming C-APDUs to the registered handler (relay, recorder, or simulated card)."""
 from __future__ import annotations
@@ -60,6 +63,8 @@ from .protocol import (
 
 LOGGER = logging.getLogger(__name__)
 CARD_RELAY_MARKER_FILENAME = "hil_bridge_card_relay.json"
+CARD_TRACE_ENV = "YGGDRASIM_HIL_CARD_TRACE"
+_MALFORMED_ENVELOPE_STATUS = b"\x6F\x00"
 
 
 class ConnectionRole(str, Enum):
@@ -91,6 +96,100 @@ def _transmit_with_timeout(channel: Any, apdu: bytes, timeout_ms: int) -> tuple[
         else:
             response_data, sw1, sw2 = transmit(bytes(apdu))
     return bytes(response_data), int(sw1), int(sw2)
+
+
+def resolve_card_trace_enabled(value: Any = None) -> bool:
+    """Return whether physical-card boundary APDU tracing should be enabled."""
+    if value is not None:
+        return bool(value)
+    text = str(os.environ.get(CARD_TRACE_ENV, "") or "").strip().lower()
+    return text in {"1", "true", "yes", "on", "debug"}
+
+
+def _extract_apdu_data_field(apdu: bytes) -> tuple[bytes, str | None]:
+    if len(apdu) < 5:
+        return b"", None
+
+    p3 = apdu[4]
+    if p3 != 0:
+        data_end = 5 + p3
+        if len(apdu) < data_end:
+            return b"", f"short APDU Lc={p3} exceeds payload length {len(apdu)}"
+        if len(apdu) not in (data_end, data_end + 1):
+            return b"", "short APDU has trailing bytes after data/Le"
+        return apdu[5:data_end], None
+
+    if len(apdu) == 5:
+        return b"", None
+    if len(apdu) < 7:
+        return b"", "extended APDU is missing two-byte Lc/Le"
+
+    lc = int.from_bytes(apdu[5:7], "big")
+    if lc == 0:
+        return b"", None
+    data_end = 7 + lc
+    if len(apdu) < data_end:
+        return b"", f"extended APDU Lc={lc} exceeds payload length {len(apdu)}"
+    if len(apdu) not in (data_end, data_end + 1, data_end + 2):
+        return b"", "extended APDU has trailing bytes after data/Le"
+    return apdu[7:data_end], None
+
+
+def _ber_tlv_sequence_error(data: bytes) -> str | None:
+    pos = 0
+    while pos < len(data):
+        first_tag_byte = data[pos]
+        pos += 1
+
+        if first_tag_byte & 0x1F == 0x1F:
+            while True:
+                if pos >= len(data):
+                    return "truncated high-tag-number field"
+                tag_byte = data[pos]
+                pos += 1
+                if tag_byte & 0x80 == 0:
+                    break
+
+        if pos >= len(data):
+            return "missing length field"
+        first_length_byte = data[pos]
+        pos += 1
+
+        if first_length_byte == 0x80:
+            return "indefinite length is not valid in ENVELOPE BER-TLV"
+        if first_length_byte & 0x80:
+            length_len = first_length_byte & 0x7F
+            if length_len == 0:
+                return "invalid long-form length field"
+            if pos + length_len > len(data):
+                return "truncated long-form length field"
+            value_len = int.from_bytes(data[pos : pos + length_len], "big")
+            pos += length_len
+        else:
+            value_len = first_length_byte
+
+        if pos + value_len > len(data):
+            remaining = len(data) - pos
+            return f"TLV value length {value_len} exceeds remaining data {remaining}"
+        pos += value_len
+
+    return None
+
+
+def _malformed_envelope_rejection_reason(apdu: bytes) -> str | None:
+    if len(apdu) < 2 or apdu[1] != 0xC2:
+        return None
+
+    data, apdu_error = _extract_apdu_data_field(apdu)
+    if apdu_error is not None:
+        return apdu_error
+    if len(data) == 0:
+        return None
+
+    tlv_error = _ber_tlv_sequence_error(data)
+    if tlv_error is None:
+        return None
+    return f"invalid ENVELOPE BER-TLV: {tlv_error}"
 
 
 @dataclass(slots=True)
@@ -288,6 +387,7 @@ class BridgeConfig:
     gsmtap_compat_mode: str = GSMTAP_COMPAT_NATIVE
     gsmtap_capture_path: str = ""
     gsmtap_capture_mirror_fifo_path: str = ""
+    card_trace_enabled: bool = False
 
 
 @dataclass(slots=True)
@@ -393,10 +493,12 @@ class CardWorker:
         card_lock: threading.Lock,
         *,
         apdu_timeout_ms: int = DEFAULT_APDU_TIMEOUT_MS,
+        card_trace_enabled: bool = False,
     ) -> None:
         self._card = card
         self._card_lock = card_lock
         self._apdu_timeout_ms = resolve_apdu_timeout_ms(apdu_timeout_ms)
+        self._card_trace_enabled = bool(card_trace_enabled)
         self._wakeup_r, self._wakeup_w = os.pipe()
         os.set_blocking(self._wakeup_r, False)
         self._shutdown = threading.Event()
@@ -513,7 +615,15 @@ class CardWorker:
                 apdu.set()
                 continue
 
+            trace_label = self._trace_label(pending)
+            start_time = time.monotonic()
             try:
+                if self._card_trace_enabled:
+                    LOGGER.info(
+                        "Card boundary -> card [%s] APDU %s",
+                        trace_label,
+                        bytes(apdu).hex().upper(),
+                    )
                 with self._card_lock:
                     response_data, sw1, sw2 = self._card.transmit(
                         apdu,
@@ -526,6 +636,25 @@ class CardWorker:
                 full_response = b""
                 sw1, sw2 = 0, 0
                 error = exc
+            finally:
+                elapsed_ms = (time.monotonic() - start_time) * 1000.0
+
+            if self._card_trace_enabled:
+                if error is None:
+                    LOGGER.info(
+                        "Card boundary <- card [%s] APDU %s (%.1f ms)",
+                        trace_label,
+                        full_response.hex().upper(),
+                        elapsed_ms,
+                    )
+                else:
+                    LOGGER.error(
+                        "Card boundary <- card [%s] error %s: %s (%.1f ms)",
+                        trace_label,
+                        error.__class__.__name__,
+                        error,
+                        elapsed_ms,
+                    )
 
             if result_q is not None:
                 try:
@@ -546,6 +675,11 @@ class CardWorker:
                 os.write(self._wakeup_w, b"\x01")
             except BlockingIOError:
                 pass
+
+    def _trace_label(self, pending: _PendingApduExchange | None) -> str:
+        if pending is None:
+            return "relay"
+        return f"modem tag={int(pending.tag)}"
 
 
 class HilBridgeServer:
@@ -576,6 +710,7 @@ class HilBridgeServer:
             self._card,
             self._card_lock,
             apdu_timeout_ms=config.apdu_timeout_ms,
+            card_trace_enabled=config.card_trace_enabled,
         )
         self._wakeup_sentinel = object()
         self._selector.register(
@@ -621,6 +756,11 @@ class HilBridgeServer:
         )
         if config.apdu_relay_enabled:
             LOGGER.info("Card relay available at %s", self._apdu_relay.apdu_url)
+        if config.card_trace_enabled:
+            LOGGER.info(
+                "Physical-card boundary APDU trace is enabled (%s=1 or --card-trace)",
+                CARD_TRACE_ENV,
+            )
 
     def serve_forever(self, *, stop_event: threading.Event | None = None) -> None:
         """Accept connections and route RSPRO messages until the stop event fires."""
@@ -875,6 +1015,7 @@ class HilBridgeServer:
 
         if message_name == "clientSlotStatusInd":
             if self._session.atr_sent is False:
+                self._reset_card_for_modem_session()
                 self._queue_rspro_pdu(
                     context,
                     build_set_atr_req(
@@ -921,6 +1062,29 @@ class HilBridgeServer:
             raise PcscBridgeError("Received empty tpduModemToCard payload.")
 
         LOGGER.info("Modem -> bridge APDU %s", request_data.hex().upper())
+
+        envelope_rejection_reason = _malformed_envelope_rejection_reason(request_data)
+        if envelope_rejection_reason is not None:
+            full_response = _MALFORMED_ENVELOPE_STATUS
+            LOGGER.error(
+                "Rejecting malformed modem ENVELOPE APDU before card: %s (%s)",
+                request_data.hex().upper(),
+                envelope_rejection_reason,
+            )
+            LOGGER.info("Bridge -> modem APDU %s", full_response.hex().upper())
+            self._session.gsmtap.mirror_exchange(request_data, full_response)
+            reply_bank_slot = body.get("toBankSlot", self._session.bank_slot)
+            reply_client_slot = body.get("fromClientSlot", self._session.client_slot)
+            self._queue_rspro_pdu(
+                context,
+                build_tpdu_card_to_modem(
+                    tag=get_pdu_tag(pdu),
+                    bank_slot=reply_bank_slot,
+                    client_slot=reply_client_slot,
+                    data=full_response,
+                ),
+            )
+            return
 
         proactive_decision = None
         if self._card.backend_name != "sim":
@@ -1014,12 +1178,25 @@ class HilBridgeServer:
             LOGGER.info("Card -> relay APDU %s", full_response.hex().upper())
         return response_data, sw1, sw2
 
+    def _reset_card_for_modem_session(self) -> None:
+        self._card_worker.drain(timeout=5.0)
+        with self._card_lock:
+            reset_payload = self._card.reset_card()
+            self._session.atr_bytes = self._card.get_atr()
+        self._session.proactive.clear()
+        LOGGER.info(
+            "Reset card for modem session; reader %s ATR %s reset=%s",
+            self._card.reader_label,
+            self._session.atr_bytes.hex().upper(),
+            reset_payload,
+        )
+
     def _handle_relay_card_reset(self, *, session_id: str = "") -> dict[str, Any]:
         self._card_worker.drain(timeout=5.0)
         with self._card_lock:
             reset_payload = self._card.reset_card()
             self._session.atr_bytes = self._card.get_atr()
-        self._session.proactive.reset()
+        self._session.proactive.clear()
         LOGGER.info(
             "Relay requested card reset; reader %s ATR %s",
             self._card.reader_label,

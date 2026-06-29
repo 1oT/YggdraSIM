@@ -1,3 +1,8 @@
+<!--
+SPDX-License-Identifier: GPL-3.0-or-later
+Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+-->
+
 # Build and Packaging
 
 ## Distribution models
@@ -42,6 +47,17 @@ SKU even when the variable is not exported afterwards.
 
 External host dependencies still matter for real card workflows,
 especially PC/SC libraries, reader drivers, and optional `gpg`.
+
+For GUI-driven remote labs, install from source with combined extras:
+
+```bash
+python -m pip install -e '.[full,gui]'
+```
+
+That profile gives the local workstation the GUI and Card Bridge pieces while
+keeping the Linux-only HIL/RemSIM dependencies available for local rigs. A
+headless Raspberry Pi rig normally uses `.[full]` plus the RemSIM/SIMtrace2
+system packages documented in [Install RemSIM / APDU Streaming](how-to/install-remsim-apdu-streaming.md).
 
 ## Docker
 
@@ -157,6 +173,8 @@ Validate these before publication:
 - smart-card flows are tested on each target OS that will be supported
 - on `full` builds, the HIL bridge can acquire the reader, launch
   `osmo-remsim-client-st2`, and mirror GSMTAP to Wireshark
+- on GUI/source lab installs, the live APDU dock connects and Card Bridge
+  `/status` probes succeed through the intended SSH tunnel
 
 ## Deep reference
 
@@ -168,3 +186,5 @@ Use these authored guides for the complete reference:
 - `guides/INSTALL_FROM_SOURCE.md` - source install matrix
 - `guides/INSTALL_RASPBERRYPI.md` - Raspberry Pi notes
 - `guides/SIMTRACE2_CARDEM_GUIDE.md` - SIMtrace2 firmware / toolchain
+- [Universal GUI Command Center](subsystems/gui-command-center.md)
+- [Remote APDU Streaming](how-to/remote-apdu-streaming.md)

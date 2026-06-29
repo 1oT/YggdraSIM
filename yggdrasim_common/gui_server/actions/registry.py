@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """Action registry and spec dataclasses.
 
@@ -164,7 +167,11 @@ class ActionRegistry:
     def register(self, spec: ActionSpec) -> ActionSpec:
         """Register *fn* as the handler for *action_id*."""
         existing = self._specs.get(spec.id)
-        if existing is not None and existing is not spec:
+        if existing is spec:
+            return spec
+        if existing is not None and _equivalent_action_spec(existing, spec):
+            return existing
+        if existing is not None:
             # Same id from a different ActionSpec → developer error. We
             # raise rather than silently overwrite so the tests catch it.
             raise ValueError(f"action id already registered: {spec.id!r}")
@@ -197,6 +204,31 @@ class ActionRegistry:
 
 
 _REGISTRY = ActionRegistry()
+
+
+def _dispatcher_identity(dispatcher: Optional[Dispatcher]) -> tuple[str, str] | None:
+    if dispatcher is None:
+        return None
+    return (
+        str(getattr(dispatcher, "__module__", "")),
+        str(getattr(dispatcher, "__qualname__", repr(dispatcher))),
+    )
+
+
+def _equivalent_action_spec(left: ActionSpec, right: ActionSpec) -> bool:
+    """Return whether two specs expose the same action contract.
+
+    During GUI startup a failed or interrupted module import can leave a
+    few already-created specs in the process-wide registry. If the module is
+    imported again, Python creates fresh dataclass and dispatcher objects even
+    though the public action contract is unchanged. Treat that as idempotent,
+    while still rejecting genuinely conflicting duplicate IDs.
+    """
+    if left.to_schema() != right.to_schema():
+        return False
+    if tuple(left.inputs) != tuple(right.inputs):
+        return False
+    return _dispatcher_identity(left.dispatcher) == _dispatcher_identity(right.dispatcher)
 
 
 def get_registry() -> ActionRegistry:

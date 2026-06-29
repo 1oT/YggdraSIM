@@ -4,6 +4,11 @@ tags:
   - reference
   - glossary
 ---
+<!--
+SPDX-License-Identifier: GPL-3.0-or-later
+Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+-->
+
 
 # Glossary
 
@@ -124,7 +129,6 @@ subscription-level card state, typically 19-20 digits.
 
 **IPAd** - IoT Profile Assistant, device-side.
 
-**IPAe** - IoT Profile Assistant, eUICC-side. An IPA implementation
 that runs inside the eUICC itself rather than on the host device.
 
 **ISD-P** - Issuer Security Domain - Profile. The per-profile SD.

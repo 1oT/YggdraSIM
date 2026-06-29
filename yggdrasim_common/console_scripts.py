@@ -1,4 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 """Console-script entry points: thin wrappers that delegate each named tool to its module's main function."""
 from __future__ import annotations
 
@@ -23,20 +25,21 @@ def _invoke(module_name: str, attribute_name: str) -> int:
 
 
 def _guard_hil_bridge() -> int:
-    """Short-circuit HIL bridge entries when they are not available.
+    """Short-circuit local SIMtrace2 HIL entries when they are unavailable.
 
     Returns a non-zero exit code and writes a friendly message to stderr
-    when the current build flavor omits the HIL bridge, or when the host
-    platform does not support it. Returns ``0`` when the caller may
-    continue into the real entry point.
+    when the current build flavor omits the local SIMtrace2/RemSIM bridge,
+    or when the host platform does not support it. Card Bridge remains a
+    separate cross-platform entry point.
     """
     reason = hil_bridge_unavailable_reason()
     if len(reason) == 0:
         return 0
     sys.stderr.write(f"yggdrasim-hil: {reason}\n")
     sys.stderr.write(
-        "See guides/INSTALL_FULL.md and guides/SIMTRACE2_CARDEM_GUIDE.md "
-        "for the HIL-capable install path.\n"
+        "Use yggdrasim-card-bridge or main.py --card-bridge for cross-platform "
+        "remote APDU streaming. See guides/INSTALL_FULL.md and "
+        "guides/SIMTRACE2_CARDEM_GUIDE.md for direct SIMtrace2 HIL on Linux.\n"
     )
     return 2
 
@@ -84,21 +87,13 @@ def hil_bridge_supervisor() -> int:
 
 
 def card_bridge() -> int:
-    """Operator-laptop side of the APDU-over-SSH card-stream feature.
+    """Reader-side APDU bridge CLI entry.
 
-    Publishes a locally attached PC/SC reader over an HTTP relay
-    endpoint that the rig-side HIL bridge consumes via its
-    ``--remote-card-url`` flag. The rig keeps doing GSMTAP capture
-    and APDU routing exactly as today; only the card itself moves.
-
-    Pre-flight gating intentionally reuses the HIL-bridge guard so
-    flavors that omit the bridge stack also omit the card-bridge
-    counterpart — they share the same pyscard / smartcard runtime
-    requirement.
+    The Card Bridge is useful from clean and source installs as a
+    standalone PC/SC publisher. It intentionally does not use the HIL
+    flavor guard; missing ``pyscard`` / PCSC support is reported by
+    ``Tools.CardBridge.server`` when the reader is opened.
     """
-    guard_code = _guard_hil_bridge()
-    if guard_code != 0:
-        return guard_code
     return _invoke("Tools.CardBridge.server", "main")
 
 

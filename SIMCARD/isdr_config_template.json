@@ -48,16 +48,6 @@
     "timer_management_id": 1,
     "timer_management_auto_rearm": true,
     "poll_interval_seconds": 60,
-    "provide_imei": true,
-    "ipa_poll": {
-      "enabled": true,
-      "eim_fqdn": "",
-      "eim_port": 443,
-      "transport_type": 2,
-      "buffer_size": 1024,
-      "receive_size": 250,
-      "alpha_id": "eIM Poll",
-      "request_payload_hex": ""
-    }
+    "provide_imei": true
   }
 }

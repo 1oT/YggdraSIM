@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 """Regression coverage for the harmonised DELETE auto-disable flow.
 
 After SCP11 command harmonisation (matches Local SMDP+/eIM and the

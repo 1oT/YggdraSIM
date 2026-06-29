@@ -1,3 +1,8 @@
+/*
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+ */
+
 /* datasheet decoded + GetCerts folded trace: soften the monospace slab */
 .cc-action-datasheet-trace {
   margin-top: 10px;

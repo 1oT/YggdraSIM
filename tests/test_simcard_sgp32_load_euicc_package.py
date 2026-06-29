@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 """ES10b.LoadEuiccPackage (SGP.32 v1.2 §5.9.1) coverage.
 
 The eUICC verification ladder is exercised end-to-end:

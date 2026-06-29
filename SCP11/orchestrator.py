@@ -196,7 +196,7 @@ class SGP22Orchestrator:
         print("\n[*] Sequence completed without profile installation.")
 
     def run_eim_poll(self, matching_id: str = "", entry_index: Optional[int] = None) -> None:
-        """Drive one IPA-poll round: GetBoundProfilePackage → ES8+ STORE-DATA delivery (SGP.32 §3.2)."""
+        """Drive one eIM package round through ES8+ STORE-DATA delivery."""
         debug_print("--- IOT / SGP.32 eIM POLL - RELAY READY ---")
         self._last_eim_poll_reached_server = False
         self._phase_connect()
@@ -297,7 +297,7 @@ class SGP22Orchestrator:
                         poll_round += 1
                         continue
                 if response.polling_complete:
-                    debug_print("[+] eIM polling completed.")
+                    debug_print("[+] eIM package exchange completed.")
                     return
                 if response.retry_after_seconds > 0:
                     time.sleep(response.retry_after_seconds)
@@ -323,7 +323,7 @@ class SGP22Orchestrator:
                 finally:
                     self._current_eim_poll_request = previous_eim_poll_request
                 if len(card_response) == 0:
-                    raise RuntimeError("eIM polling requires a card package result, but the last relay response was empty.")
+                    raise RuntimeError("eIM package exchange requires a card package result, but the last relay response was empty.")
                 provide_result = self._build_provide_eim_package_result_tlv(
                     card_response,
                     eid=request.eid,
@@ -352,11 +352,11 @@ class SGP22Orchestrator:
                 pending_response = follow_up_response
                 continue
             if completion_response.polling_complete:
-                debug_print("[+] eIM polling completed.")
+                debug_print("[+] eIM package exchange completed.")
                 return
             if completion_response.retry_after_seconds > 0:
                 time.sleep(completion_response.retry_after_seconds)
-        raise RuntimeError("eIM polling exceeded maximum follow-up rounds without completion.")
+        raise RuntimeError("eIM package exchange exceeded maximum follow-up rounds without completion.")
 
     def _log_eim_poll_round(self, response: EimPollResponse, poll_round: int) -> None:
         self._last_eim_poll_response = response
@@ -1289,7 +1289,7 @@ class SGP22Orchestrator:
     def _get_eim_package(self, request: EimPollRequest):
         debug_print("\n[*] Phase: GetEimPackage")
         if self.profile_provider is None:
-            raise RuntimeError("No profile provider configured for eIM polling.")
+            raise RuntimeError("No profile provider configured for eIM package exchange.")
         request = self._sanitize_eim_poll_request(request)
         try:
             response = self.profile_provider.get_eim_package(request)
@@ -1303,7 +1303,7 @@ class SGP22Orchestrator:
             )
             if variant_response is not None:
                 debug_print(
-                    f"[+] eIM poll response: packages={len(variant_response.euicc_package_list)}, "
+                    f"[+] eIM package response: packages={len(variant_response.euicc_package_list)}, "
                     f"complete={variant_response.polling_complete}, "
                     f"retryAfter={variant_response.retry_after_seconds}"
                 )
@@ -1311,7 +1311,7 @@ class SGP22Orchestrator:
             raise RuntimeError(f"Provider getEimPackage failed: {error}") from error
         response = self._probe_get_eim_package_variants(request, response)
         debug_print(
-            f"[+] eIM poll response: packages={len(response.euicc_package_list)}, "
+            f"[+] eIM package response: packages={len(response.euicc_package_list)}, "
             f"complete={response.polling_complete}, retryAfter={response.retry_after_seconds}"
         )
         return response
@@ -1319,7 +1319,7 @@ class SGP22Orchestrator:
     def _provide_eim_package_result(self, request: EimPollRequest) -> dict:
         debug_print("\n[*] Phase: ProvideEimPackageResult")
         if self.profile_provider is None:
-            raise RuntimeError("No profile provider configured for eIM polling.")
+            raise RuntimeError("No profile provider configured for eIM package exchange.")
         request = self._sanitize_eim_poll_request(request)
         try:
             response = self.profile_provider.provide_eim_package_result(request)
@@ -1848,7 +1848,7 @@ class SGP22Orchestrator:
             return eim_response
 
         if parsed.package_type == TYPE_EUICC_CONFIGURATION:
-            last_response = self._build_ipa_euicc_data_response(parsed, log_name)
+            last_response = self._build_package_data_response(parsed, log_name)
             self.state.eim_package_response = last_response
             self._print_eim_card_response(last_response)
             self._sync_pending_notifications(last_response)
@@ -1913,8 +1913,8 @@ class SGP22Orchestrator:
         print_hex_payload("eIM card response", response)
         print_tlv_decode("eIM card response", response)
 
-    def _build_ipa_euicc_data_response(self, parsed_package: Any, log_name: str) -> bytes:
-        print("[*] Handling ipaEuiccDataRequest locally.")
+    def _build_package_data_response(self, parsed_package: Any, log_name: str) -> bytes:
+        print("[*] Handling package data request locally.")
         requested_tags = tuple(getattr(parsed_package, "requested_tags", ()) or ())
         request_token = bytes(getattr(parsed_package, "request_token", b"") or b"")
         notification_seq_number = getattr(parsed_package, "notification_seq_number", None)
@@ -1939,7 +1939,7 @@ class SGP22Orchestrator:
             euicc_info2 = self._retrieve_es10b_data(bytes.fromhex("BF2200"), f"{log_name}: GetEuiccInfo2")
         if b"\x81" in requested_tag_set or b"\x83" in requested_tag_set:
             configured_data = self._retrieve_es10b_data(bytes.fromhex("BF3C00"), f"{log_name}: GetEuiccConfiguredData")
-        requested_eim_id = self._resolve_ipa_euicc_data_request_eim_id(parsed_package)
+        requested_eim_id = self._resolve_package_data_request_eim_id(parsed_package)
 
         if b"\x84" in requested_tag_set:
             eim_configuration_data = self._retrieve_es10b_data(bytes.fromhex("BF5500"), f"{log_name}: GetEimConfigurationData")
@@ -2014,10 +2014,10 @@ class SGP22Orchestrator:
             if len(item) > 0:
                 body += item
 
-        ipa_euicc_data = self._wrap_tlv(b"\xA0", body)
-        return self._wrap_tlv(bytes.fromhex("BF52"), ipa_euicc_data)
+        package_data = self._wrap_tlv(b"\xA0", body)
+        return self._wrap_tlv(bytes.fromhex("BF52"), package_data)
 
-    def _resolve_ipa_euicc_data_request_eim_id(self, parsed_package: Any) -> str:
+    def _resolve_package_data_request_eim_id(self, parsed_package: Any) -> str:
         parsed_eim_id = str(getattr(parsed_package, "eim_id", "") or "").strip()
         if len(parsed_eim_id) > 0:
             return parsed_eim_id
@@ -3565,7 +3565,7 @@ class SGP22Orchestrator:
 
         Binary BF4F only supports notifyStateChange [0], stateChangeCause [1],
         and rPlmn [2] in addition to eidValue. euiccChallenge is intentionally
-        omitted from eIM polling; GetEuiccChallenge belongs to SMDP+
+        omitted from eIM package exchange; GetEuiccChallenge belongs to SMDP+
         authentication.
         """
         eid_bytes = self._eid_bcd_string_to_bytes(eid)

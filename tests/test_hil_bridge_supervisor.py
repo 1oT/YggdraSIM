@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """Tests for pure helpers in ``Tools.HilBridge.supervisor``.
 
@@ -110,6 +113,7 @@ class BridgeCommandTests(unittest.TestCase):
                     remote_card_url="http://127.0.0.1:8642/apdu",
                     remote_card_token_file="/tmp/card-bridge.token",
                     apdu_timeout_ms=30000,
+                    card_trace_enabled=True,
                 ),
                 remsim_client=RemsimClientConfig(enabled=False),
                 bridge_python="python3",
@@ -125,6 +129,7 @@ class BridgeCommandTests(unittest.TestCase):
         self.assertIn("/tmp/card-bridge.token", command)
         self.assertIn("--apdu-timeout-ms", command)
         self.assertEqual(command[command.index("--apdu-timeout-ms") + 1], "30000")
+        self.assertIn("--card-trace", command)
 
 
 class BridgeRestartBackoffTests(unittest.TestCase):

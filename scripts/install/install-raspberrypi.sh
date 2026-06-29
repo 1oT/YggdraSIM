@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 # YggdraSIM installer for Raspberry Pi OS 64-bit (arm64).
 #
 # Both clean and full flavors are supported on Raspberry Pi. The full

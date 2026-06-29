@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 """Cold-attach SELECT coverage for the default ADF.USIM / DF.TELECOM tree.
 
 The HIL trace captured on 2026-04-27 showed the modem walking a fixed

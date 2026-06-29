@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 """Command Center actions (R2-004 Phase C).
 
 Actions are small, structured wrappers around existing engine entry points

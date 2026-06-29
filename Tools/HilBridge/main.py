@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """HIL-Bridge package entry point."""
 from __future__ import annotations
@@ -13,7 +16,7 @@ from yggdrasim_common.quit_control import QuitAllRequested
 
 from .pcsc import APDU_TIMEOUT_ENV, PcscBridgeError, PcscCardChannel, resolve_apdu_timeout_ms
 from .protocol import GSMTAP_COMPAT_MODES, GSMTAP_COMPAT_NATIVE
-from .router import BridgeConfig, HilBridgeServer
+from .router import CARD_TRACE_ENV, BridgeConfig, HilBridgeServer, resolve_card_trace_enabled
 
 
 def add_bridge_runtime_arguments(
@@ -123,6 +126,15 @@ def add_bridge_runtime_arguments(
         help="GSMTAP compatibility mode. Use wireshark44 for legacy Wireshark SIM dissectors.",
     )
     parser.add_argument("--no-gsmtap", action="store_true", help="Disable GSMTAP Wireshark mirroring")
+    parser.add_argument(
+        "--card-trace",
+        action="store_true",
+        default=resolve_card_trace_enabled(),
+        help=(
+            "Log every APDU at the physical-card boundary. "
+            f"Can also be enabled with {CARD_TRACE_ENV}=1."
+        ),
+    )
 
 
 def build_bridge_config_from_args(args: argparse.Namespace) -> BridgeConfig:
@@ -158,6 +170,7 @@ def build_bridge_config_from_args(args: argparse.Namespace) -> BridgeConfig:
         gsmtap_capture_mirror_fifo_path=str(
             getattr(args, "gsmtap_capture_mirror_fifo_path", "") or ""
         ).strip(),
+        card_trace_enabled=bool(getattr(args, "card_trace", False)),
     )
 
 

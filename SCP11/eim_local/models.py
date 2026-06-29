@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """eIM-local data models: handover context, runtime state, and transaction helpers for the local eIM session."""
 from dataclasses import asdict, dataclass, field
@@ -23,8 +26,8 @@ class EimHandoverContext:
 class EimLocalState:
     eim_package_override_path: str = ""
     hotfolder_override_path: str = ""
-    hotfolder_poll_session_dir: str = ""
-    hotfolder_poll_session_issued_paths: set[str] = field(default_factory=set)
+    hotfolder_metadata_session_dir: str = ""
+    hotfolder_metadata_session_issued_paths: set[str] = field(default_factory=set)
     selected_eim_certificate_path: str = ""
     selected_eim_certificate_reason: str = ""
     selected_eim_certificate_ci_pkids: list[str] = field(default_factory=list)
@@ -41,5 +44,5 @@ class EimLocalState:
 def ensure_handover_transaction(handover: EimHandoverContext) -> bytes:
     transaction_id = bytes(handover.transaction_id)
     if len(transaction_id) == 0:
-        raise RuntimeError("No handover transaction is present. Run IPAE-AUTHENTICATE first.")
+        raise RuntimeError("No handover transaction is present. Set a handover transaction first.")
     return transaction_id

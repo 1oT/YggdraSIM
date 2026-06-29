@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 """Unit coverage for ``yggdrasim_common.gui_server.config`` and ``.auth``.
 
 These helpers intentionally have *no* FastAPI / uvicorn / pywebview

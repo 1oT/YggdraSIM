@@ -1,3 +1,8 @@
+<!--
+SPDX-License-Identifier: GPL-3.0-or-later
+Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+-->
+
 # YggdraSIM Architecture
 
 This document explains how YggdraSIM is organized, which subsystems depend on
@@ -153,10 +158,10 @@ The table below shows the operational dependency shape of each major subsystem.
 |-----------|----------|-------|---------|----------|------------------|--------------------------|-------|
 | `SCP03` | Primary | Primary | No | Optional | Primary | Primary | GlobalPlatform admin shell and filesystem tools |
 | `SCP80` | Primary | Optional | Optional | No | Primary | Primary | OTA builder / send / decode shell |
-| `SCP11.live` | Primary | Primary | Primary | Primary | Primary | Primary | eSIM management relay shell; plugin-backed `POLL` surface |
+| `SCP11.live` | Primary | Primary | Primary | Primary | Primary | Primary | eSIM management relay shell; LPAd / eIM endpoint control |
 | `SCP11.relay` | Optional | Optional | Primary | Primary | Optional | Optional | Compatibility namespace |
 | `SCP11.local_access` | Primary | Primary | No | Primary | Primary | Primary | Direct `ISD-R` local flow |
-| `SCP11.eim_local` | Primary | Primary | Primary | Primary | Primary | Primary | eIM-local package, localized polling, handover shell, and standalone `IPAd` export |
+| `SCP11.eim_local` | Primary | Primary | Primary | Primary | Primary | Primary | eIM-local package authoring, hotfolders, response logging, and handover shell |
 | `SIMCARD` | Backend | No | No | No | Primary | Primary | In-process simulated UICC / eUICC; selected via `--card-backend sim` for SCP03 / SCP80 / SCP11.local_access |
 | `Tools.HilBridge` | Primary (Linux) | Primary | Optional | No | No | No | SIMtrace2 bridge (`pyudev`, `osmo-remsim-client-st2`); RSPRO 9997, GSMTAP 4729, AT+CSIM transcoder |
 | `Tools.ProfilePackage` | Primary | No | No | Primary | No | No | SAIP tooling and transcode UI |
@@ -382,19 +387,17 @@ Local flavors:
 
 - `SCP11.local_access` performs direct local `ISD-R` flows such as
   `DISCOVER`, metadata operations, and `LOAD-PROFILE`.
-- `SCP11.eim_local` layers eIM package authoring, localized polling,
-  hotfolder execution, response logging, handover orchestration, and an
-  adapter-first standalone `IPAd` runner on top of the local SCP11 stack.
+- `SCP11.eim_local` layers eIM package authoring, hotfolder execution,
+  response logging, handover orchestration, and local eIM command helpers on
+  top of the local SCP11 stack.
 
 Shared state in SCP11:
 
 - relay shells persist per-card settings by `EID`
 - local access persists selected certificate, profile, and metadata state by
   `EID`
-- relay and eIM-local polling surfaces depend on the optional `polling`
-  capability when that plugin is present
 - eIM local persists eIM identity counters and runtime markers in the shared
-  inventory and keeps poll-result evidence in SQLite and JSONL logs
+  inventory and keeps response evidence in SQLite and JSONL logs
 - the Local eIM endpoint identity in `Workspace/LocalEIM/eim_identity.json` is
   intentionally separate from the simulated card's default BF55 identity in
   `Workspace/SIMCARD/eim_identity.json`
@@ -408,19 +411,14 @@ flowchart LR
     Live["SCP11.live"] --> PluginRuntime["yggdrasim_common/plugin_runtime.py"]
     EimLocal["SCP11.eim_local"] --> PluginRuntime
     PluginRuntime --> Plugins["plugins/"]
-    Plugins --> Polling["polling capability"]
-    Polling --> Live
-    Polling --> EimLocal
 ```
 
 Plugin notes:
 
 - `yggdrasim_common/plugin_runtime.py` scans `plugins/` from the active runtime root
-- the current shipped contract reserves the `polling` capability name
-- `SCP11.live` uses that capability to expose relay `POLL`
-- `SCP11.eim_local` uses the same capability for localized `IPAE-*` polling
-- `SCP11.eim_local/ipad_standalone.py` is intentionally separate from the
-  plugin runtime so it can be exported into external Python environments
+- shipped source code does not assume a plugin capability is present
+- eIM-local standalone exports stay separate from the plugin runtime so they
+  can be moved into external Python environments when needed
 - seeded fake-eIM peer-provisioning artifacts live under
   `Workspace/LocalEIM/eim_packages/` and remain file-based rather than plugin-owned
 - the wrapper-level simulator override surface owns card-side defaults such as

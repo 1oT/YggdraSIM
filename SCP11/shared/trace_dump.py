@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """SCP11 trace dump helpers: render card-bound payloads and STORE DATA chunk plans."""
 from __future__ import annotations
@@ -59,7 +62,7 @@ _TAG_NAMES: dict[str, str] = {
     "BF3C": "EuiccConfiguredData",
     "BF50": "ProvideEimPackageResult",
     "BF51": "EuiccPackageRequest/Result",
-    "BF52": "IpaEuiccData",
+    "BF52": "PackageData",
     "BF53": "EimAcknowledgements",
     "BF54": "ProfileDownloadTrigger",
     "BF55": "EimConfigurationData",
@@ -262,11 +265,11 @@ def _format_semantic_tlv_decode(data: bytes, *, indent: str) -> list[str] | None
         return None
     tag_hex = data[tag_start:tag_end].hex().upper()
     if tag_hex == "BF52":
-        return _format_ipa_euicc_data_decode(data, root, indent=indent)
+        return _format_package_data_decode(data, root, indent=indent)
     return None
 
 
-def _format_ipa_euicc_data_decode(
+def _format_package_data_decode(
     data: bytes,
     root: tuple[int, int, int, int, bool],
     *,
@@ -274,7 +277,7 @@ def _format_ipa_euicc_data_decode(
 ) -> list[str]:
     tag_start, tag_end, value_start, value_end, _ = root
     tag_hex = data[tag_start:tag_end].hex().upper()
-    lines = [f"{indent}{tag_hex} IpaEuiccData len={value_end - value_start}"]
+    lines = [f"{indent}{tag_hex} PackageData len={value_end - value_start}"]
     root_children = _iter_tlv_headers(data, value_start, value_end)
     if len(root_children) == 0:
         lines.append(f"{indent}  <empty>")
@@ -287,12 +290,12 @@ def _format_ipa_euicc_data_decode(
             _append_compact_tlv_item(lines, data, child, indent=indent + "  ")
             continue
 
-        lines.append(f"{indent}  A0 ipaEuiccDataResponse len={child_value_end - child_value_start}")
-        items = _collect_ipa_euicc_data_items(data, child_value_start, child_value_end)
+        lines.append(f"{indent}  A0 packageDataResponse len={child_value_end - child_value_start}")
+        items = _collect_package_data_items(data, child_value_start, child_value_end)
         _append_ipa_notifications_section(lines, items, indent=indent + "    ")
         _append_ipa_configured_data_section(lines, items, indent=indent + "    ")
-        _append_ipa_euicc_info1_section(lines, items, indent=indent + "    ")
-        _append_ipa_euicc_info2_section(lines, items, indent=indent + "    ")
+        _append_package_info1_section(lines, items, indent=indent + "    ")
+        _append_package_info2_section(lines, items, indent=indent + "    ")
         _append_ipa_link_data_section(lines, items, indent=indent + "    ")
         _append_ipa_package_results_section(lines, items, indent=indent + "    ")
         _append_ipa_get_certs_section(lines, items, indent=indent + "    ")
@@ -300,7 +303,7 @@ def _format_ipa_euicc_data_decode(
     return lines
 
 
-def _collect_ipa_euicc_data_items(
+def _collect_package_data_items(
     data: bytes,
     start: int,
     end: int,
@@ -374,7 +377,7 @@ def _append_ipa_configured_data_section(
         _append_pipe_value(lines, indent, "Root SM-DS Address", _decode_text_or_hex(root_smds) or "-")
 
 
-def _append_ipa_euicc_info1_section(
+def _append_package_info1_section(
     lines: list[str],
     items: dict[str, list[dict[str, bytes]]],
     *,
@@ -398,7 +401,7 @@ def _append_ipa_euicc_info1_section(
     _append_pipe_value(lines, indent, "CI PK Sign Entries", summary.get("ci_pk_sign_entries", 0))
 
 
-def _append_ipa_euicc_info2_section(
+def _append_package_info2_section(
     lines: list[str],
     items: dict[str, list[dict[str, bytes]]],
     *,
@@ -1050,6 +1053,22 @@ def _display_name(tag_hex: str, path: tuple[str, ...]) -> str:
         name = profile_names.get(tag_hex)
         if name is not None:
             return name
+    if _inside_eim_configuration_data(path):
+        eim_config_names = {
+            "80": "eimId",
+            "81": "eimFqdn",
+            "82": "eimIdType",
+            "83": "counterValue",
+            "84": "associationToken",
+            "87": "eimSupportedProtocol",
+            "88": "euiccCiPKId",
+            "89": "indirectProfileDownload",
+            "A5": "eimPublicKeyData",
+            "A6": "trustedPublicKeyDataTls",
+        }
+        name = eim_config_names.get(tag_hex)
+        if name is not None:
+            return name
     return _TAG_NAMES.get(tag_hex, "")
 
 
@@ -1057,6 +1076,25 @@ def _inside_profile_info(path: tuple[str, ...]) -> bool:
     if "E3" in path:
         return True
     return "BF2D" in path
+
+
+def _inside_eim_configuration_data(path: tuple[str, ...]) -> bool:
+    if len(path) >= 4 and path[-4:] in {
+        ("BF51", "30", "A1", "A8"),
+        ("BF51", "30", "A1", "AA"),
+    }:
+        return True
+    if len(path) >= 3 and path[-3:] == ("BF57", "A0", "30"):
+        return True
+    if len(path) >= 3 and path[-3:] == ("BF58", "A0", "30"):
+        return True
+    if len(path) >= 1 and path[-1:] == ("BF55",):
+        return True
+    if len(path) >= 2 and path[-2:] == ("BF55", "30"):
+        return True
+    if len(path) >= 3 and path[-3:] == ("BF55", "A0", "30"):
+        return True
+    return False
 
 
 def _tlv_value_summary(
@@ -1073,6 +1111,17 @@ def _tlv_value_summary(
         if _looks_like_der_certificate(tag, value):
             return "X.509 certificate DER"
         return ""
+    if _inside_eim_configuration_data(path):
+        if tag_hex in {"81", "80"}:
+            decoded = _decode_printable_text(value)
+            if len(decoded) > 0:
+                return f'value="{decoded}"'
+        if tag_hex == "82" and len(value) <= 8:
+            return f"value={_format_eim_id_type(value)}"
+        if tag_hex in {"83", "84"} and len(value) <= 8:
+            return f"value={int.from_bytes(value, 'big', signed=False)} ({value.hex().upper()})"
+        if tag_hex == "87":
+            return f"value={_format_eim_supported_protocol(value)}"
     if tag_hex == "06":
         oid = _decode_der_oid(value)
         if len(oid) > 0:
@@ -1124,6 +1173,47 @@ def _format_bool_byte(value: int) -> str:
     if value == 1:
         return "true"
     return str(value)
+
+
+def _format_eim_id_type(value: bytes) -> str:
+    if len(value) == 0:
+        return "0 (00)"
+    integer_value = int.from_bytes(value, "big", signed=False)
+    names = {
+        1: "eimIdTypeOid",
+        2: "eimIdTypeFqdn",
+        3: "eimIdTypeProprietary",
+    }
+    label = names.get(integer_value)
+    if label is None:
+        return f"{integer_value} ({value.hex().upper()})"
+    return f"{label} ({value.hex().upper()})"
+
+
+def _format_eim_supported_protocol(value: bytes) -> str:
+    if len(value) == 0:
+        return ""
+    unused_bits = value[0]
+    bit_payload = value[1:]
+    if len(bit_payload) == 0:
+        return f"none ({value.hex().upper()})"
+    names = {
+        0: "eimRetrieveHttps",
+        1: "eimRetrieveCoaps",
+        2: "eimInjectHttps",
+        3: "eimInjectCoaps",
+        4: "eimProprietary",
+    }
+    enabled: list[str] = []
+    bit_count = max((len(bit_payload) * 8) - int(unused_bits), 0)
+    for bit_index in range(bit_count):
+        byte_value = bit_payload[bit_index // 8]
+        mask = 0x80 >> (bit_index % 8)
+        if byte_value & mask:
+            enabled.append(names.get(bit_index, f"bit{bit_index}"))
+    if len(enabled) == 0:
+        return f"none ({value.hex().upper()})"
+    return f"{','.join(enabled)} ({value.hex().upper()})"
 
 
 def _decode_der_oid(value: bytes) -> str:

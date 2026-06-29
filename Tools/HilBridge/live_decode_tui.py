@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """HIL-Bridge live-decode TUI: Textual app displaying a real-time decoded APDU transcript with protocol annotations."""
 from __future__ import annotations

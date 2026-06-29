@@ -1,3 +1,8 @@
+/*
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+ */
+
 /* Drag-and-drop visual state for path inputs.
    Applied to the ``.cc-path-row`` wrapper (or the raw input when no
    wrapper is present) while a file is being dragged over the surface.

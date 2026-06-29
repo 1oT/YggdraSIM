@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 """Split the monolithic app.js into domain-level chunks under gui_frontend/src/js/.
 
 Produces 4 functional chunks plus IIFE wrapper files. The build script

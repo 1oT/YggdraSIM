@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 """Tests for ``saip.list_applications`` (SA-G4 backend dispatcher).
 
 Covers:

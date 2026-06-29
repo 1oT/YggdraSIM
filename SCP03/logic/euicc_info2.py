@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """EUICCInfo2 TLV decoder: parses tag BF22 into a structured dict (SGP.22 §2.6.2)."""
 from typing import Dict, List, Optional, Tuple
@@ -329,7 +332,7 @@ def decode_ipa_mode(value: bytes) -> str:
         return value.hex().upper()
     ipa_modes = {
         0: "ipad (IPAd is active)",
-        1: "ipae (IPAe is active)",
+        1: "mode1 active",
     }
     ipa_value = value[0]
     ipa_name = ipa_modes.get(ipa_value, "unknown")

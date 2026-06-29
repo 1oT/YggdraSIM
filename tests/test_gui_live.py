@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 """Narrow tests for the live-hardware GUI surface (Milestone B-3).
 
 These target the parts that are safe to exercise without a physical

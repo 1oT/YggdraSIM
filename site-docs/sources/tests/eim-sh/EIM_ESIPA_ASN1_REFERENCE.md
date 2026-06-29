@@ -1,3 +1,8 @@
+<!--
+SPDX-License-Identifier: GPL-3.0-or-later
+Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+-->
+
 # ESIPA ASN.1 reference (eIM ↔ IPA)
 
 Abbreviated reference for ESIPA message set. SGP.32 / GSMA.
@@ -47,7 +52,6 @@ StateChangeCause ::= INTEGER {
 ## GetEimPackageResponse ::= [79] CHOICE — Tag BF4F
 
 - euiccPackageRequest [81] — Tag BF51
-- ipaEuiccDataRequest [82] — Tag BF52
 - profileDownloadTriggerRequest [84] — Tag BF54
 - eimPackageError INTEGER {
     noEimPackageAvailable(1), eidNotFound(2), invalidEid(3), missingEid(4), undefinedError(127) }
@@ -67,7 +71,6 @@ Sent by IPA to eIM to provide the result of processing an eIM package (or to sig
 
 - euiccPackageResult [81] EuiccPackageResult — Tag BF51
 - ePRAndNotifications SEQUENCE { euiccPackageResult [81], notificationList [0] }
-- ipaEuiccDataResponse [82] IpaEuiccDataResponse — Tag BF52 (CHOICE: ipaEuiccData [0] tag A0, ipaEuiccDataResponseError [1] tag A1)
 - profileDownloadTriggerResult [84] — Tag BF54
 - **eimPackageResultResponseError [0]** EimPackageResultResponseError
 

@@ -2345,6 +2345,9 @@ class ShellDispatcher :
 
         if is_a4 :
             selected_hex =None 
+            restore_commands =None
+            previous_restore_commands =list (getattr (self .fs_ctrl ,"_selection_restore_commands",[])or [])
+            previous_fcp =dict (getattr (self .fs_ctrl ,"current_fcp",{})or {})
             has_len =False 
             if len (apdu )>5 :
                 has_len =True 
@@ -2357,7 +2360,16 @@ class ShellDispatcher :
 
                 if has_payload :
                     selected_hex =apdu [5 :5 +lc ].hex ().upper ()
+                    if hasattr (self .fs_ctrl ,"_build_restore_command_trail"):
+                        restore_commands =self .fs_ctrl ._build_restore_command_trail (
+                        selected_hex ,
+                        apdu .hex ().upper (),
+                        previous_restore_commands ,
+                        previous_fcp ,
+                        )
                     self .fs_ctrl .current_fid =selected_hex 
+                    if restore_commands is not None :
+                        self .fs_ctrl ._selection_restore_commands =restore_commands
                     context_label =self ._context_label_from_selection (selected_hex )
                     self .fs_ctrl .current_path_hint =context_label 
                     self ._set_prompt_context (context_label )
@@ -2367,7 +2379,11 @@ class ShellDispatcher :
                 has_data =True 
 
             if has_data :
-                self .fs_ctrl ._parse_fcp_internal (data ,selected_hex )
+                self .fs_ctrl ._parse_fcp_internal (
+                data ,
+                selected_hex ,
+                restore_commands =restore_commands ,
+                )
                 self .fs_ctrl .print_fcp_info ()
 
         is_b0 =False 

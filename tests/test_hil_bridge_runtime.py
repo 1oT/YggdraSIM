@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 import json
 import subprocess
 import tempfile
@@ -51,6 +54,7 @@ class HilBridgeRuntimeTests(unittest.TestCase):
             reader_index=1,
             port=9997,
             usb_vidpid="1d50:60e3",
+            remsim_binary="/work/YggdraSIM/state/bin/osmo-remsim-client-st2-patched",
             remsim_args=("-H", "3-3"),
             documentation_path="/work/YggdraSIM/guides/HIL_BRIDGE_GUIDE.md",
             environment_overrides=(
@@ -66,6 +70,10 @@ class HilBridgeRuntimeTests(unittest.TestCase):
         self.assertIn("Environment=YGGDRASIM_CARD_BACKEND=sim", unit_text)
         self.assertIn("Environment=YGGDRASIM_SIM_QUIRKS=/work/YggdraSIM/SIMCARD/sim_quirks.py", unit_text)
         self.assertIn("ExecStart=/opt/ygg/bin/python3 -m Tools.HilBridge.supervisor", unit_text)
+        self.assertIn(
+            "--remsim-binary /work/YggdraSIM/state/bin/osmo-remsim-client-st2-patched",
+            unit_text,
+        )
         self.assertIn("--remsim-arg=-H --remsim-arg=3-3", unit_text)
 
     def test_render_user_service_unit_can_disable_gsmtap(self) -> None:
@@ -90,6 +98,33 @@ class HilBridgeRuntimeTests(unittest.TestCase):
 
         self.assertIn("--gsmtap-capture-path", unit_text)
         self.assertIn("/work/YggdraSIM/state/hil_termshark/live_capture.pcap", unit_text)
+
+    def test_render_user_service_unit_can_enable_card_trace(self) -> None:
+        options = hil_bridge_runtime.HilBridgeUserServiceOptions(
+            python_executable="/opt/ygg/bin/python3",
+            working_directory="/work/YggdraSIM",
+            card_trace_enabled=True,
+        )
+
+        unit_text = hil_bridge_runtime.render_user_service_unit(options)
+
+        self.assertIn("--card-trace", unit_text)
+
+    def test_render_user_service_unit_can_forward_remote_card_settings(self) -> None:
+        options = hil_bridge_runtime.HilBridgeUserServiceOptions(
+            python_executable="/opt/ygg/bin/python3",
+            working_directory="/work/YggdraSIM",
+            remote_card_url="http://127.0.0.1:8642/apdu",
+            remote_card_token_file="/home/pi/.config/yggdrasim/card_bridge/8642.token",
+        )
+
+        unit_text = hil_bridge_runtime.render_user_service_unit(options)
+
+        self.assertIn("--remote-card-url http://127.0.0.1:8642/apdu", unit_text)
+        self.assertIn(
+            "--remote-card-token-file /home/pi/.config/yggdrasim/card_bridge/8642.token",
+            unit_text,
+        )
 
     def test_install_user_service_writes_unit_under_user_systemd_dir(self) -> None:
         state_dir = Path(__file__).resolve().parents[1] / "state"

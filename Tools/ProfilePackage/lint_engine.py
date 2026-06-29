@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """SAIP profile linter: static analysis of decoded profile documents emitting YRL-* findings (TS.48 / SGP.22 / ETSI TS 102 221)."""
 import re

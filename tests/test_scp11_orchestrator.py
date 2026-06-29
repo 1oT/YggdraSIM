@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 import datetime
 import base64
 import contextlib
@@ -2017,7 +2020,7 @@ class OrchestratorFlowTests(unittest.TestCase):
         )
         self.assertFalse(orchestrator._provider_certificate_payload_supported(b"not-a-certificate"))
 
-    def test_relay_ipa_euicc_data_request_builds_local_bf52_response(self):
+    def test_relay_package_data_request_builds_local_bf52_response(self):
         configured_data = wrap_tlv(
             "BF3C",
             b"".join(
@@ -2087,7 +2090,7 @@ class OrchestratorFlowTests(unittest.TestCase):
         _, bf52_value, _, _ = _read_test_tlv(response, 0)
         self.assertTrue(
             bf52_value.startswith(b"\xA0"),
-            "IpaEuiccDataResponse CHOICE ipaEuiccData requires [0] (0xA0) tag",
+            "PackageDataResponse CHOICE packageData requires [0] (0xA0) tag",
         )
         self.assertIn(notification_item, response)
         self.assertIn(wrap_tlv("81", b"rsp.example.com"), response)
@@ -2122,7 +2125,7 @@ class OrchestratorFlowTests(unittest.TestCase):
         self.assertEqual(len(package_result_calls), 1)
         self.assertEqual(package_result_calls[0][1], bytes.fromhex("80E2910005BF2B028200"))
 
-    def test_relay_ipa_euicc_data_request_uses_requesting_eim_association_token(self):
+    def test_relay_package_data_request_uses_requesting_eim_association_token(self):
         eim_configuration = wrap_tlv(
             "BF55",
             b"".join(
@@ -2184,7 +2187,7 @@ class OrchestratorFlowTests(unittest.TestCase):
         self.assertIn(bytes.fromhex("840102"), response)
         self.assertNotIn(bytes.fromhex("840101"), response)
 
-    def test_relay_ipa_euicc_data_request_returns_empty_a2_when_card_returns_other_choice(self):
+    def test_relay_package_data_request_returns_empty_a2_when_card_returns_other_choice(self):
         configured_data = wrap_tlv(
             "BF3C",
             b"".join(
@@ -2214,14 +2217,14 @@ class OrchestratorFlowTests(unittest.TestCase):
         _, bf52_value, _, _ = _read_test_tlv(response, 0)
         self.assertTrue(
             bf52_value.startswith(b"\xA0"),
-            "IpaEuiccDataResponse CHOICE ipaEuiccData requires [0] (0xA0) tag",
+            "PackageDataResponse CHOICE packageData requires [0] (0xA0) tag",
         )
         self.assertIn(wrap_tlv("81", b"rsp.example.com"), response)
         self.assertIn(wrap_tlv("A2", b""), response)
         self.assertIn(bytes.fromhex("A808800202C481020780"), response)
         self.assertIn(bytes.fromhex("870800000000000004A4"), response)
 
-    def test_relay_ipa_euicc_data_request_filters_package_results_by_sequence_number(self):
+    def test_relay_package_data_request_filters_package_results_by_sequence_number(self):
         euicc_package_result = wrap_tlv("BF51", bytes.fromhex("010203"))
         orchestrator = SGP22Orchestrator(
             cfg=FakeCfg(),

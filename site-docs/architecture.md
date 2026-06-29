@@ -4,6 +4,11 @@ tags:
   - architecture
   - overview
 ---
+<!--
+SPDX-License-Identifier: GPL-3.0-or-later
+Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+-->
+
 
 # Architecture
 
@@ -159,11 +164,11 @@ flowchart TB
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | `SCP03` | Primary | Primary | No | Optional | Primary | Primary | GP admin, filesystem, retrieval |
 | `SCP80` | Primary | Optional | Optional | No | Primary | Primary | OTA build, send, decode |
-| `SCP11.live` | Primary | Primary | Primary | Primary | Primary | Primary | Live relay-oriented shell, plugin-backed `POLL` |
+| `SCP11.live` | Primary | Primary | Primary | Primary | Primary | Primary | Live relay-oriented shell with optional local extensions |
 | `SCP11.test` | Primary | Primary | Primary | Primary | Primary | Primary | Test relay shell with lab-only shaping |
 | `SCP11.relay` | Optional | Optional | Primary | Primary | Optional | Optional | Compatibility namespace |
 | `SCP11.local_access` | Primary | Primary | No | Primary | Primary | Primary | Direct local `ISD-R` flow |
-| `SCP11.eim_local` | Primary | Primary | Primary | Primary | Primary | Primary | eIM-local package, polling, handover, IPAd standalone |
+| `SCP11.eim_local` | Primary | Primary | Primary | Primary | Primary | Primary | eIM-local package authoring, hotfolders, response logging, handover |
 | `Tools.ProfilePackage` | Primary | No | No | Primary | No | No | SAIP tooling and transcode UI |
 | `Tools.HilBridge` | Primary | Primary | No | No | No | No | HIL supervisor, relay, GSMTAP mirror, AT+CSIM/CRSM transcoder |
 | `Tools.SuciTool` | Primary | No | No | No | No | No | File/stdin shell around `suci-keytool` |
@@ -411,9 +416,8 @@ Relay flavors:
 Local flavors:
 
 - `SCP11.local_access` performs direct local `ISD-R` flows
-- `SCP11.eim_local` layers eIM package authoring, localized polling,
-  hotfolder execution, response logging, handover, and a standalone `IPAd`
-  runner on top of the local SCP11 stack
+- `SCP11.eim_local` layers eIM package authoring, hotfolder execution,
+  response logging, and handover on top of the local SCP11 stack
 
 ## Optional plugin runtime
 
@@ -428,7 +432,7 @@ flowchart LR
     EimLocal["SCP11.eim_local"] --> Manager
 
     Manager --> Runtime[("plugins/ under runtime root")]
-    Runtime -->|register_plugins| Capability["reserved capability 'polling'"]
+    Runtime -->|register_plugins| Capability["private capability contract"]
 
     Capability --> Live
     Capability --> Test
@@ -438,7 +442,7 @@ flowchart LR
 ```
 
 See [Plugin Contract](internals/plugin-contract.md) for the loader
-contract, reserved capability names, and absent-plugin behavior.
+contract, capability registration, and absent-plugin behavior.
 
 ## Profile lifecycle on the eUICC
 
@@ -538,7 +542,8 @@ flowchart LR
   relay shell
 - `SCP11/live` and `SCP11/test` are the primary relay-facing shells
 - `SCP11/local_access` is the direct local `ISD-R` path
-- `SCP11/eim_local` is the eIM-side package, polling, and handover shell
+- `SCP11/eim_local` is the eIM-side package, hotfolder, response-log, and
+  handover shell
 - `Tools/ProfilePackage` is the SAIP package inspection and transcode
   surface
 - `Tools/HilBridge` is the dedicated physical-card-to-modem bridge path

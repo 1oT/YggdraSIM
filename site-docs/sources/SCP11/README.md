@@ -1,3 +1,8 @@
+<!--
+SPDX-License-Identifier: GPL-3.0-or-later
+Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+-->
+
 # SCP11 eSIM Module Guide
 
 `SCP11/` contains the repository's eSIM-facing shells and helper layers. The
@@ -19,7 +24,7 @@ Use this file as the entry point for choosing the correct `SCP11` module.
 | --- | --- | --- | --- | --- |
 | `SCP11/live` | eSIM management relay work against remote ES9+ / eIM endpoints | `pcsc` | remote ES9+ / eIM | `SCP11/live/README.md` |
 | `SCP11/local_access` | direct local `ISD-R` bring-up and on-card profile loading | `pcsc` | no relay dependency | `SCP11/local_access/README.md` |
-| `SCP11/eim_local` | eIM-side package authoring, localized polling, and handover validation | `pcsc` | local eIM / SM-DP+ bridge | `SCP11/eim_local/README.md` |
+| `SCP11/eim_local` | eIM-side package authoring, hotfolder queues, response tracking, and handover validation | `pcsc` | local eIM / SM-DP+ bridge | `SCP11/eim_local/README.md` |
 | `SCP11/relay` | preserve older relay imports and automation contracts | `pcsc` | compatibility namespace | `SCP11/relay/README.md` |
 | `SCP11/shared` | shared helpers only | n/a | n/a | `SCP11/shared/README.md` |
 | `SCP11/test` | preserve older import paths only | n/a | compatibility namespace | `SCP11/test/README.md` |
@@ -31,7 +36,7 @@ The relay implementation is exposed through one eSIM management entrypoint:
 | Tree | Status | Notes |
 | --- | --- | --- |
 | `SCP11/orchestrator.py` and `SCP11/console.py` | **canonical** | Spec-correctness work, bug fixes, and API additions land here first. |
-| `SCP11/live/orchestrator.py` and `SCP11/live/console.py` | **relay implementation** | Relay-first shell with LPAd / IPAd / IPAe behavior and physical-card recovery helpers. |
+| `SCP11/live/orchestrator.py` and `SCP11/live/console.py` | **relay implementation** | Relay-first shell with LPAd / IPAd behavior and physical-card recovery helpers. |
 | `SCP11/test/*.py` | **compatibility shims** | Import the live relay implementation for older imports. This namespace is not a separate operator entrypoint. |
 
 Remote relay mode uses platform TLS trust by default. `ES9_CA_BUNDLE_PATH`
@@ -46,7 +51,7 @@ flows, but is not selected implicitly by the eSIM management relay.
 - Use `SCP11/local_access` when the task is direct `ISD-R` discovery,
   `PrepareDownload`, metadata upload, or ES10c profile state control.
 - Use `SCP11/eim_local` when the task is on the eIM side: `ADD-INITIAL-EIM`,
-  `ADD-EIM`, package queues, localized IPAd / IPAe polling, or handover
+  `ADD-EIM`, package queues, hotfolders, response logs, or handover
   orchestration.
 - Use `SCP11/relay` only when an older import path or script contract depends
   on that namespace.
@@ -91,9 +96,9 @@ through the Guides menu and the main module selector.
 ## Reading order
 
 1. `SCP11/live/README.md` for relay-side operation
-2. `../guides/PROFILE_LIFECYCLE_CLI_CHEATSHEET.md` for ready-to-run lifecycle, poll,
+2. `../guides/PROFILE_LIFECYCLE_CLI_CHEATSHEET.md` for ready-to-run lifecycle
    and logging commands
 3. `SCP11/local_access/README.md` for direct local `ISD-R` work
 4. `SCP11/eim_local/README.md` for the eIM-side shell overview
-5. `SCP11/eim_local/GUIDE.md` for deep eIM-local package, polling, and
+5. `SCP11/eim_local/GUIDE.md` for deep eIM-local package, hotfolder, and
    handover workflows

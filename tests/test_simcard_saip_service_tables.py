@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 """Regression coverage for pySim service-table overlays.
 
 Pins the ``saip_pysim_specs`` helpers used to replace the inspector's

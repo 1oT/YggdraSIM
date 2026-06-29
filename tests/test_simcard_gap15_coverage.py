@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 """Fifteenth-pass gap-coverage suite for SIMCARD surfaces beyond ES10.
 
 Round-15 closes the following:

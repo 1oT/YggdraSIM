@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 """ETSI TS 102 223 conformance regressions for the STK trace surface.
 
 These tests pin the parser to the spec values for the Duration TLV
@@ -67,7 +70,7 @@ class DurationTlvDecodingTests(unittest.TestCase):
 
 class ProactiveNameMapTests(unittest.TestCase):
     """Spot-check the proactive-command name map covers the codes the
-    simulator can emit at bootstrap and in the IPAE polling chain."""
+    simulator can emit at bootstrap and in the management chain."""
 
     def test_set_up_menu_is_named(self):
         controller = StkController(transport=None)

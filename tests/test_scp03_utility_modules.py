@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 import io
 import tempfile
 import unittest
@@ -45,7 +48,7 @@ class HexUtilsAndTlvParserTests(unittest.TestCase):
 class EuiccInfo2HelperTests(unittest.TestCase):
     def test_basic_decoders_render_human_readable_values(self) -> None:
         self.assertEqual(format_version_bytes(b"\x01\x02\x03"), "v1.2.3 (010203)")
-        self.assertEqual(decode_ipa_mode(b"\x01"), "ipae (IPAe is active) (1)")
+        self.assertEqual(decode_ipa_mode(b"\x01"), "mode1 active (1)")
 
     def test_build_detail_lines_includes_iot_and_validation_sections(self) -> None:
         response = bytes.fromhex(
@@ -58,7 +61,7 @@ class EuiccInfo2HelperTests(unittest.TestCase):
 
         lines = build_euicc_info2_detail_lines(response)
 
-        self.assertTrue(any(label == "IPA Mode" and "ipae" in value for _, label, value in lines))
+        self.assertTrue(any(label == "IPA Mode" and "mode1 active" in value for _, label, value in lines))
         self.assertTrue(any(label == "IoT Specific Info" for _, label, _ in lines))
         self.assertTrue(any(label == "SGP.32 Validation" for _, label, _ in lines))
 

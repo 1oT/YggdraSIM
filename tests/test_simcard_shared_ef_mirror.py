@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 """Runtime mirror of TS 31.102 Annex H "EFs shared between SIM and USIM".
 
 A real-world operator BPP only ships the canonical bytes of EF.IMSI /

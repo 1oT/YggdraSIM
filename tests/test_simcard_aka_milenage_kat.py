@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 """3GPP TS 35.208 Milenage Test Set 1 known-answer tests, end-to-end.
 
 The simulator's ``SIMCARD.auth`` Milenage primitive is already locked

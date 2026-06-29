@@ -1,3 +1,8 @@
+<!--
+SPDX-License-Identifier: GPL-3.0-or-later
+Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+-->
+
 # Contributing to YggdraSIM
 
 YggdraSIM is maintained by **1oT OÜ** (IP owner) with **Hampus Hellsberg** as

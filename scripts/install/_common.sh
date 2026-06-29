@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 # Shared helpers for the YggdraSIM POSIX install scripts.
 #
 # This file is sourced by install-linux.sh, install-macos.sh, and

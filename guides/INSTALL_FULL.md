@@ -1,11 +1,16 @@
+<!--
+SPDX-License-Identifier: GPL-3.0-or-later
+Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+-->
+
 # Installation — Full Flavor (HIL-Capable)
 
 The **full** flavor is the Linux-only superset of YggdraSIM. It packages
 everything the clean flavor offers plus:
 
-- `Tools/HilBridge` and `yggdrasim_common.hil_bridge_runtime`
+- the local SIMtrace2/RemSIM HIL runtime
 - the `pyudev` dependency used by the supervisor for USB hot-plug events
-- the `[B] HIL Bridge Session` entry in the main menu
+- the `[B] Local SIMtrace2 HIL Bridge Session` entry in the main menu
 - the `yggdrasim-hil-bridge` and `yggdrasim-hil-supervisor` console
   scripts
 
@@ -21,6 +26,8 @@ supported on Linux hosts. On Windows / macOS use
   in-terminal view.
 - You need YggdraSIM to share a live card with the modem through the
   local APDU relay.
+- You run the modem / SIMtrace2 rig on Linux but need to stream the
+  physical card from an operator workstation over SSH.
 
 If you just want to run the SIM simulator, the SAIP tooling, or the SCP11
 flows, the clean flavor is enough.
@@ -57,10 +64,10 @@ host prerequisites through `apt-get`, and refuse to run on non-Linux
 hosts because the HIL bridge cannot function there. Full flag reference
 lives in `scripts/install/README.md`.
 
-The `--doctor` probe adds two HIL-specific rows:
+The `--doctor` probe adds HIL-specific rows:
 
 ```text
-[+] HIL bridge readiness: pyudev present; osmo-remsim-client-st2 at /usr/local/bin/...
+[+] Local HIL bridge readiness: pyudev present; osmo-remsim-client-st2 at /usr/local/bin/...
 [+] tshark (Wireshark CLI): /usr/bin/tshark
 [+] termshark (terminal decode): /usr/bin/termshark
 [+] dfu-util (SIMtrace2 flashing): /usr/bin/dfu-util
@@ -93,7 +100,10 @@ sudo usermod -a -G wireshark "$USER"
 Install or build `osmo-remsim-client-st2`. The cleanest path is a distro
 or an Osmocom-provided package; otherwise build from source. See
 [`SIMTRACE2_CARDEM_GUIDE.md`](SIMTRACE2_CARDEM_GUIDE.md) for a
-step-by-step walk-through.
+step-by-step walk-through. For the complete RemSIM, Card Bridge, SSH
+tunnel, remote-card service setup, and upstream dependency links, use the
+site runbook
+[`site-docs/how-to/install-remsim-apdu-streaming.md`](../site-docs/how-to/install-remsim-apdu-streaming.md#external-dependency-references).
 
 ## Building the full bundle yourself
 
@@ -131,11 +141,42 @@ Detailed operator flow lives in
 
 ```bash
 ./yggdrasim-full
-# Menu -> [B] HIL Bridge Session -> Start HIL session
+# Menu -> [B] Local SIMtrace2 HIL Bridge Session -> Start HIL session
 ```
 
 Stop the session from the same menu; the supervisor, bridge, and
 `osmo-remsim-client-st2` children are cleaned up together.
+
+### Remote-card HIL session
+
+When the Linux rig owns the modem and SIMtrace2 but the card sits in a
+PC/SC reader on another workstation, publish the workstation reader with
+Card Bridge and tunnel it to the rig. Start the supervisor on the rig
+with the remote-card source:
+
+```bash
+yggdrasim-hil-supervisor \
+  --remote-card-url http://127.0.0.1:8642/apdu \
+  --remote-card-token-file ~/.config/yggdrasim/card_bridge/8642.token \
+  --apdu-timeout-ms 30000 \
+  --usb-vidpid 1d50:60e3
+```
+
+The supervisor still owns the SIMtrace2 and `osmo-remsim-client-st2`
+lifecycle locally. Only card APDUs cross the SSH tunnel.
+
+### GUI-driven remote rig
+
+For a Linux source install that should expose both HIL and the Universal
+GUI Command Center, use:
+
+```bash
+python -m pip install -e '.[full,gui]'
+```
+
+The GUI's Card Bridge panel can start the local bridge, copy the bearer
+token to a Raspberry Pi or lab host, open SSH forwards, and install or
+restart the remote `systemd --user` HIL supervisor service.
 
 ## Optional systemd --user unit
 
@@ -151,3 +192,5 @@ with your login session.
   [`INSTALL_FROM_SOURCE.md`](INSTALL_FROM_SOURCE.md)
 - Flashing / updating SIMtrace2 firmware →
   [`SIMTRACE2_CARDEM_GUIDE.md`](SIMTRACE2_CARDEM_GUIDE.md)
+- Streaming a PC/SC reader to a remote HIL rig →
+  [`CARD_BRIDGE_GUIDE.md`](CARD_BRIDGE_GUIDE.md)

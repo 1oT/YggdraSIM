@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 """Integration tests for the bearer-auth / audit additions to ``apdu_relay``.
 
 The historical functional tests in ``tests/test_hil_bridge_card_relay.py``

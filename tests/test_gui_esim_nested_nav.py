@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 """Static contract for the eSIM Command Center management surfaces.
 
 The eSIM Management workbench is intentionally flatter than the older
@@ -301,7 +304,7 @@ def test_local_eim_overview_wires_cert_and_queue_actions() -> None:
         "eim_local.eim_package_lint",
         "eim_local.eim_package_explain",
         "eim_local.load_eim_package",
-        "eim_local.poll_campaign",
+        "eim_local.hotfolder_campaign",
         "_openEsimActionPane(action)",
         "cert_path: certInputValue()",
         "enableFilePathDrop(input)",
@@ -359,7 +362,7 @@ def test_esim_action_runs_stay_in_flow_pane_not_popout() -> None:
     fn_start = js.index("function renderCompactWorkbench(container, subsystem, actions, leaf)")
     fn_window = js[fn_start : js.index("function stopHilWorkbenchRuntime", fn_start)]
     assert "if (useEsimSplitPane) {\n            _openEsimActionPane(action);" in fn_window
-    assert "_ccBuildActionPopout(action);" in fn_window
+    assert "_openInlineActionPane(action);" in fn_window
 
     pane_start = fn_window.index("function _openEsimActionPane(action)")
     pane_window = fn_window[pane_start : fn_window.index("// Mutation suffixes", pane_start)]

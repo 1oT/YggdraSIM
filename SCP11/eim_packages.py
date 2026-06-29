@@ -219,7 +219,7 @@ def _extract_search_criteria_seq_number(value: bytes) -> Optional[int]:
     return int.from_bytes(field_value, "big", signed=False)
 
 
-def _extract_ipa_euicc_data_metadata_from_value(value: bytes) -> tuple[tuple[bytes, ...], bytes, Optional[int], Optional[int]]:
+def _extract_package_data_metadata_from_value(value: bytes) -> tuple[tuple[bytes, ...], bytes, Optional[int], Optional[int]]:
     requested_tags = ()
     request_token = b""
     notification_seq_number = None
@@ -242,7 +242,7 @@ def _extract_ipa_euicc_data_metadata_from_value(value: bytes) -> tuple[tuple[byt
     return requested_tags, request_token, notification_seq_number, euicc_package_result_seq_number
 
 
-def _extract_ipa_euicc_data_metadata(raw: bytes) -> tuple[tuple[bytes, ...], bytes, Optional[int], Optional[int]]:
+def _extract_package_data_metadata(raw: bytes) -> tuple[tuple[bytes, ...], bytes, Optional[int], Optional[int]]:
     try:
         root_tag, root_value, _, _ = _read_tlv(raw, 0)
     except ValueError:
@@ -250,13 +250,13 @@ def _extract_ipa_euicc_data_metadata(raw: bytes) -> tuple[tuple[bytes, ...], byt
     if root_tag not in (TAG_EUICC_CONFIGURATION_A3, TAG_EUICC_CONFIGURATION_BF52):
         return (), b"", None, None
     requested_tags, request_token, notification_seq_number, euicc_package_result_seq_number = (
-        _extract_ipa_euicc_data_metadata_from_value(root_value)
+        _extract_package_data_metadata_from_value(root_value)
     )
     if len(requested_tags) > 0 or len(request_token) > 0:
         return requested_tags, request_token, notification_seq_number, euicc_package_result_seq_number
     card_request = _extract_card_request(raw)
     if len(card_request) > 0 and card_request != raw:
-        return _extract_ipa_euicc_data_metadata(card_request)
+        return _extract_package_data_metadata(card_request)
     return requested_tags, request_token, notification_seq_number, euicc_package_result_seq_number
 
 
@@ -389,7 +389,7 @@ def parse_eim_package(raw: bytes) -> ParsedEimPackage:
             request_token,
             notification_seq_number,
             euicc_package_result_seq_number,
-        ) = _extract_ipa_euicc_data_metadata(raw)
+        ) = _extract_package_data_metadata(raw)
         return ParsedEimPackage(
             package_type=TYPE_EUICC_CONFIGURATION,
             raw=raw,

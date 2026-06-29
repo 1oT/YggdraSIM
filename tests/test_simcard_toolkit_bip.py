@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 """ETSI TS 102 223 §6.4.27 .. §6.4.31 BIP queueables.
 
 Verifies the simulator-side BIP command queueables (OPEN CHANNEL,

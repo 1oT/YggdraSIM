@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 """Regression tests for the APDU recorder + GUI live stream.
 
 The user reported that the bottom-dock APDU panel only showed

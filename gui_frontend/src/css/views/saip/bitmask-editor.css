@@ -1,3 +1,8 @@
+/*
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+ */
+
 /* ---- Bit-mask field editor (P1.8 / P1.9 / P2.11) -------------------- */
 .saip-form-bitmask-wrap {
   display: grid;

@@ -1,3 +1,8 @@
+<!--
+SPDX-License-Identifier: GPL-3.0-or-later
+Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+-->
+
 # SCP11 Test Compatibility Namespace
 
 `SCP11/test` is a compatibility namespace for older imports. It imports the
@@ -13,7 +18,7 @@ operator entrypoint. Use `SCP11/live` for the eSIM management relay.
 
 - you need an operator shell or CLI entrypoint
 - the task is direct local `ISD-R` provisioning or metadata upload
-- the work is eIM-side package orchestration, hotfolder polling, or handover
+- the work is eIM-side package orchestration, hotfolder execution, or handover
 - the goal is to select a different certificate trust mode; use `SET-ES9-CA`
   or `ES9_CA_BUNDLE_PATH` instead
 
@@ -30,7 +35,6 @@ One-shot and batch modes are available there:
 ```bash
 python -m SCP11.live --flow
 python -m SCP11.live --cmd "DISCOVER; STATUS; LIST; EXIT"
-python -m SCP11.live --cmd "POLL 3 30 --debug; EXIT"
 ```
 
 See `../../guides/PROFILE_LIFECYCLE_CLI_CHEATSHEET.md` for ready-to-paste lifecycle
@@ -92,21 +96,6 @@ IPAd:
 - `DISCOVER`
 - `DOWNLOAD`
 
-Compatibility polling:
-
-- `POLL [attempts] [timer-window] [-t 20s] [-s 5] [--target fqdn[,fqdn...]] [--location 7-or-9-byte-hex | --plmn mcc/mnc [--lac hex] [--cell hex]] [--rat hex] [--debug]`
-- alias: `EIM-POLL`
-
-Plugin note:
-
-- `POLL` / `EIM-POLL` is provided by the optional `polling` plugin
-- `--debug` streams watchdog APDUs in both directions, including every STATUS
-- `--location` or `--plmn` overrides card-requested PLI location for the current command only
-- the watchdog does not emit unsolicited LOCATION STATUS envelopes
-- `Workspace/SCP11/live/poll_location_defaults.json` can provide local default `plmn`, `lac`, `cell`, and `rat` values
-- when the plugin is absent, the command is not exposed by the core shell
-- see `plugins/README.md` for the capability contract and publication model
-
 ## Expert commands
 
 Use `HELP EXPERT` to expose the hidden relay controls:
@@ -158,18 +147,6 @@ Test IPAd cycle:
 ```text
 DISCOVER
 DOWNLOAD
-```
-
-Compatibility polling:
-
-```text
-POLL
-```
-
-For long-running or timing-sensitive cases:
-
-```text
-POLL 3 30 --debug
 ```
 
 ## Compatibility configuration knobs

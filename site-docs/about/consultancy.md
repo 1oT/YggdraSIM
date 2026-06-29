@@ -7,6 +7,11 @@ tags:
   - commercial
   - contact
 ---
+<!--
+SPDX-License-Identifier: GPL-3.0-or-later
+Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+-->
+
 
 # Consultancy, custom features, and contact
 
@@ -19,7 +24,7 @@ team directly for tailored work.
 ## What 1oT can help with
 
 - **eUICC / eSIM integration** — SGP.22 and SGP.32 bring-up, device-side
-  LPAd and IPAd, eUICC-side IPAe, eIM remote management, and ES9+ interop
+  LPAd and IPAd, eIM remote management, and ES9+ interop
 - **SAIP profile work** — profile audits, linting, transcoding,
   operator-specific binders, `3GPP-USIM` and `GSM-ACCESS` templates
 - **SCP11 relay debugging** — live ES9+ flows, PK/SK negotiation,

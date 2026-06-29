@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """Plugin registry: maps capability tokens to provider callables and enforces single-registration invariants."""
 # -----------------------------------------------------------------------------
@@ -28,11 +31,12 @@ SUBSYSTEMS: dict[str, str] = {
     "SCP03": "GlobalPlatform-style admin shell, card transport, TLV/CAP decoders, SGP.22 helpers.",
     "SCP80": "OTA SMS-SC / CAT-TP style scripting and smart decoding.",
     "SCP11": "Thin facade; live SGP.22 types re-exported from SCP11.live.",
-    "SCP11.live": "eSIM management relay: orchestrator, PC/SC or relay APDU, ES9+, STK polling.",
+    "SCP11.live": "eSIM management relay: orchestrator, PC/SC or relay APDU, ES9+, STK/proactive handling.",
     "SCP11.relay": "Compatibility SCP11 entry point built on direct PC/SC.",
     "SCP11.local_access": "Local ISD-R / metadata codec / certificate helpers for on-card flows.",
-    "SCP11.eim_local": "eIM-local package, polling, handover, and direct-card tooling.",
+    "SCP11.eim_local": "eIM-local package authoring, hotfolders, handover, and direct-card tooling.",
     "SCP11.shared": "Cross-flavour crypto, transport helpers, ASN.1 registry, GSMA error codes.",
+    "Tools.CardBridge": "Loopback PC/SC-to-HTTP APDU bridge for SSH-forwarded remote-card workflows.",
     "Tools.ProfilePackage": "SAIP / UPP shell, saip-tool bridge, lint engine, JSON↔DER transcode.",
     "Tools.SuciTool": "SUCI-related helper shell.",
     "gui_server": "Optional universal GUI layer: FastAPI API + pywebview desktop window + headless lab server.",
@@ -49,6 +53,7 @@ CLI_MODULES: list[str] = [
     "SCP11.relay",
     "SCP11.local_access",
     "SCP11.eim_local",
+    "Tools.CardBridge",
     "Tools.ProfilePackage",
     "Tools.SuciTool",
 ]

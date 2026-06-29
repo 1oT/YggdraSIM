@@ -1,3 +1,8 @@
+/*
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+ */
+
 /* -- Theme: Catppuccin · Mocha (warm pastel dark, mauve accent) ---------- */
 html[data-theme="catppuccin-mocha"] {
   --bg: #1e1e2e;

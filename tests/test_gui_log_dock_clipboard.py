@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 """Regression tests for the bottom-dock copy-to-clipboard flow.
 
 The bottom event-log dock surfaces every ``logBus`` event in one of

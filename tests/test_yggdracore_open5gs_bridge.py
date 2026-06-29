@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 """BYO Open5GS bridge tests (Tools/YggdraCore/open5gs_bridge.py).
 
 Locks the provisioning surface using a hand-rolled fake of the

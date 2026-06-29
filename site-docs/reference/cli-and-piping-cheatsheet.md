@@ -6,6 +6,11 @@ tags:
   - automation
   - cicd
 ---
+<!--
+SPDX-License-Identifier: GPL-3.0-or-later
+Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+-->
+
 
 # CLI And Piping Cheatsheet
 
@@ -185,13 +190,12 @@ Local eIM queue run:
 
 ```bash
 python -m SCP11.eim_local --cmd \
-  "HOTFOLDER-LIST --json; POLL-CAMPAIGN --until-empty --max-cycles 20 --json; EXIT"
+  "HOTFOLDER-LIST --json; HOTFOLDER-FETCH --json; RESP-LOG 5 --json; EXIT"
 ```
 
-IPAe watchdog (plugin-injected):
 
 ```bash
-python -m SCP11.live --cmd "DISCOVER; POLL 3 -t 20s -s 5; EXIT"
+python -m SCP11.live --cmd "DISCOVER; STATUS; LIST; EXIT"
 ```
 
 ## Module examples
@@ -291,7 +295,8 @@ python -m SCP11.eim_local --cmd "DISCOVER; PATHS; STATUS; EXIT"
 ```bash
 python -m SCP11.eim_local --stdin <<'EOF'
 HOTFOLDER-LIST --json
-POLL-CAMPAIGN --until-empty --max-cycles 20 --json
+HOTFOLDER-FETCH --json
+RESP-LOG 5 --json
 EXIT
 EOF
 ```
@@ -337,7 +342,7 @@ EOF
 
 Both `yggdrasim-hil-bridge` and `yggdrasim-hil-supervisor` are
 `argparse`-only daemons — no `--cmd` / `--stdin`. Drive them through
-systemd or the launcher's `[B]` HIL Bridge Session menu instead:
+systemd or the launcher's `[B]` Local SIMtrace2 HIL Bridge Session menu instead:
 
 ```bash
 yggdrasim-hil-bridge \

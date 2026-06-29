@@ -1,12 +1,15 @@
+<!--
+SPDX-License-Identifier: GPL-3.0-or-later
+Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+-->
+
 # Local eIM Dry-Run Command Scripts
 
-## Script 1: IPAd Snapshot + IPAe Auth
 
 ```
 HELP
 IPAD-DISCOVER
 EIM-PACKAGE-LINT
-IPAE-AUTHENTICATE EIM-FIRST-TEST
 HANDOVER-STATUS
 NOTIF-HYGIENE 0
 Q
@@ -18,8 +21,6 @@ Q
 HELP
 HANDOVER-SET 11223344556677889900AABBCCDDEEFF EIM-FIRST-TEST
 HANDOVER-STATUS
-# Runtime will auto-handover BIP route to SM-DP+ during IPAE-DOWNLOAD.
-IPAE-DOWNLOAD Workspace/LocalEIM/profile/test_profile.txt EIM-FIRST-TEST
 NOTIF-HYGIENE 0
 Q
 ```

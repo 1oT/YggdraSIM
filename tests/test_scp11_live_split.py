@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 import base64
 import datetime
 import io
@@ -772,7 +775,7 @@ class LiveSplitTests(unittest.TestCase):
         self.assertEqual(request.euicc_challenge, "")
         self.assertFalse(any(call[0] == "EIM: GetEuiccChallenge" for call in apdu_channel.send_calls))
 
-    def test_live_ipa_euicc_data_uses_requesting_eim_association_token(self):
+    def test_live_package_data_uses_requesting_eim_association_token(self):
         eim_configuration = wrap_tlv(
             "BF55",
             b"".join(
@@ -847,8 +850,8 @@ class LiveSplitTests(unittest.TestCase):
             apdu_channel=SimpleNamespace(),
             profile_provider=provider,
         )
-        # The polling plugin seeds this override on the orchestrator in
-        # plugin-driven flows. Core ES9+ code reads it as an opaque
+        # A local extension seeds this override on the orchestrator in
+        # extension-driven flows. Core ES9+ code reads it as an opaque
         # string without knowing about the bridge.
         orchestrator._profile_download_base_url_override = "https://127.0.0.1:19443"
         orchestrator.state.load_bpp_response = bytes.fromhex("BF3700")

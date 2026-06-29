@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 """SGP.22 §5.7.13 ES10b.LoadCRL — eUICC-side acceptance.
 
 The simulator persists every CRL DER blob the RSP server pushes

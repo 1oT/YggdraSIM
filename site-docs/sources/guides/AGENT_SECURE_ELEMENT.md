@@ -1,3 +1,8 @@
+<!--
+SPDX-License-Identifier: GPL-3.0-or-later
+Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+-->
+
 # YggdraSIM Secure Element Guide
 
 Load this guide for APDU encoding/decoding, ASN.1 profiles, secure channels,

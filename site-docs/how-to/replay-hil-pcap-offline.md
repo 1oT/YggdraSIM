@@ -7,6 +7,11 @@ tags:
   - scp03
   - scp11
 ---
+<!--
+SPDX-License-Identifier: GPL-3.0-or-later
+Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+-->
+
 
 # Replay a HIL pcap offline
 
@@ -73,7 +78,7 @@ For how to produce the keybag, see
 
         ```text
         python main/main.py
-        [B]   HIL Bridge Session
+        [B]   Local SIMtrace2 HIL Bridge Session
          [3]  Open saved .pcap (offline review, no bridge)
               pcap path  : Workspace/hil/captures/session-example.pcapng
               keybag path: (blank → auto-discover)

@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 """YggdraSIM Card Bridge — standalone PC/SC relay daemon.
 
 The Card Bridge publishes a locally-attached PC/SC reader over a

@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 """YggdraCore -- in-process 5G core stubs for AKA / AKMA flows.
 
 Ships the AKMA Anchor Function (AAnF) state machine so the GUI

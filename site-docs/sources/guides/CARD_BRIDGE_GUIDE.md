@@ -1,14 +1,9 @@
-# Card Bridge — Operator Guide
+<!--
+SPDX-License-Identifier: GPL-3.0-or-later
+Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+-->
 
-> **Status: post-v1 staging.** The `Tools/CardBridge` HTTP daemon
-> described below ships on `main` after the `v1.0.0` tag. The v1.0.0
-> frozen tree only includes the bearer-token helper
-> (`yggdrasim_common.card_bridge_auth`); the loopback HTTP server,
-> its CLI surface, and the hardening pass are not part of this
-> release. v1.0.0 operators reaching for a tunnel between a
-> reader-side host and a tool-side host should fall back to the
-> `Tools/HilBridge` APDU relay (see
-> [`HIL_BRIDGE_GUIDE.md`](HIL_BRIDGE_GUIDE.md)).
+# Card Bridge — Operator Guide
 
 The Card Bridge lets you run YggdraSIM on one machine while the smart
 card reader is plugged into another. The reader-side machine runs
@@ -52,6 +47,19 @@ common troubleshooting paths.
 ## Step 1 — Start the bridge on the reader machine
 
 ```bash
+python main/main.py --card-bridge \
+    --card-bridge-port 8642 \
+    --card-bridge-reader-name "ACR38U"
+```
+
+Installed environments can also use the dedicated command:
+
+```bash
+yggdrasim-card-bridge \
+    --port 8642 \
+    --reader-name "ACR38U"
+
+# equivalent module form from a source checkout
 python -m Tools.CardBridge \
     --port 8642 \
     --reader-name "ACR38U"
@@ -81,10 +89,12 @@ the running daemon with the on-disk token file.
 
 Use either:
 
-* `--reader-index N` — position in the PC/SC reader list (default 0).
-* `--reader-name "substring"` — case-insensitive substring match;
+* `--card-bridge-reader-index N` / `--reader-index N` — position in
+  the PC/SC reader list (default 0).
+* `--card-bridge-reader-name "substring"` / `--reader-name "substring"` — case-insensitive substring match;
   overrides `--reader-index`.
-* `--pcsc-share-mode shared|exclusive` — defaults to `shared` so the
+* `--card-bridge-pcsc-share-mode shared|exclusive` /
+  `--pcsc-share-mode shared|exclusive` — defaults to `shared` so the
   bridge can start while the GUI or `pcsc_scan` has a non-exclusive
   handle open. Use `exclusive` only for isolated reader hosts where no
   other local process touches the reader.
@@ -139,6 +149,10 @@ export YGGDRASIM_CARD_RELAY_TOKEN_FILE=$HOME/.config/yggdrasim/card_bridge/8642.
 Then run the tool as normal:
 
 ```bash
+python main/main.py \
+    --remote-card-url http://127.0.0.1:8642/apdu \
+    --remote-card-token-file ~/.config/yggdrasim/card_bridge/8642.token
+
 yggdrasim ...
 ```
 
@@ -168,6 +182,24 @@ talking to:
 
 Pass `--remote-card-url ""` (empty string) to clear an inherited env
 value without rewriting your shell config.
+
+### Unified CLI menu
+
+The main launcher has a Card Bridge menu for operators who prefer a
+guided terminal flow:
+
+```bash
+python main/main.py
+# choose [CB] Card Bridge / Remote APDU Streaming
+```
+
+The `[CB]` menu can:
+
+* start or stop the local Card Bridge
+* probe the configured remote APDU endpoint
+* apply a remote-card URL and token file to the current CLI session
+* print the matching `ssh -L` and `ssh -R` tunnel commands
+* hand off to the HIL session menu when the HIL runtime is available
 
 ### HIL remote-card mode
 
@@ -393,3 +425,11 @@ discovers the relay automatically. The Card Bridge daemon does
 **not** write that marker — its address is intentional, explicit,
 and operator-supplied, because the relay is being exposed through
 SSH rather than auto-discovered on a single host.
+
+## Related runbooks
+
+- `site-docs/how-to/remote-apdu-streaming.md` — compact end-to-end
+  recipe for Card Bridge over SSH.
+- `site-docs/how-to/install-remsim-apdu-streaming.md` — Linux /
+  Raspberry Pi RemSIM, SIMtrace2, Card Bridge, and service setup.
+- `guides/HIL_BRIDGE_GUIDE.md` — full HIL operator procedure.

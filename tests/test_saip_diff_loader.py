@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 """Regression tests for ``Tools.ProfilePackage.saip_diff_loader``.
 
 The loader is the entry point used by both the SAIP shell ``DIFF``

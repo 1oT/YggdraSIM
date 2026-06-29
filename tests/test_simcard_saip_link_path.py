@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 """Regression coverage for SAIP / TCA Profile Interoperability §8.3.5
 explicit ``Fcp.linkPath`` aliases.
 

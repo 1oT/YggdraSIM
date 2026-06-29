@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """SCP11 eIM-local Command Center actions.
 
@@ -11,7 +14,7 @@ flows without dropping into a raw REPL. Coverage:
 * eIM commands (get_eim_config, delete_eim, add_eim).
 * eIM package tooling (lint, issue, hotfolder list).
 * Error-code vocabulary + counter inspection.
-* The existing streaming poll-campaign flow.
+* The existing streaming hotfolder campaign flow.
 
 All synchronous dispatchers construct a fresh ``EimLocalSession`` per
 call so there's no hidden cross-action state. The session's default
@@ -73,7 +76,7 @@ def _hex_preview(payload: Any, max_chars: int = 160) -> str:
 # ----------------------------------------------------------------------
 
 
-async def _dispatch_poll_campaign(
+async def _dispatch_hotfolder_campaign(
     ctx: ActionContext,
     *,
     cycles: Any = None,
@@ -108,7 +111,7 @@ async def _dispatch_poll_campaign(
             _emit(
                 "info",
                 (
-                    f"starting poll-campaign "
+                    f"starting hotfolder campaign "
                     f"cycles={cycles_i} interval_ms={interval_i} "
                     f"until_empty={until_empty_b} max_cycles={max_cycles_v} "
                     f"hotfolder={hotfolder_s or '(default)'}"
@@ -117,7 +120,7 @@ async def _dispatch_poll_campaign(
 
             capture = _CapturingStream(post=_emit)
             with contextlib.redirect_stdout(capture), contextlib.redirect_stderr(capture):
-                report = session.poll_hotfolder_campaign(
+                report = session.run_hotfolder_campaign(
                     cycles=cycles_i,
                     interval_ms=interval_i,
                     hotfolder_dir=hotfolder_s,
@@ -140,7 +143,7 @@ async def _dispatch_poll_campaign(
             )
             _emit(
                 "done",
-                f"poll-campaign finished with {len(rows)} cycle(s).",
+                f"hotfolder campaign finished with {len(rows)} cycle(s).",
                 report=report,
             )
         except Exception as error:  # noqa: BLE001 — surface every failure mode
@@ -148,11 +151,11 @@ async def _dispatch_poll_campaign(
 
             _emit("error", f"{type(error).__name__}: {error}")
             _emit("error", traceback.format_exc())
-            _emit("done", "poll-campaign aborted.")
+            _emit("done", "hotfolder campaign aborted.")
 
     worker = threading.Thread(
         target=_worker,
-        name="yggdrasim-gui-eim-poll-campaign",
+        name="yggdrasim-gui-eim-hotfolder-campaign",
         daemon=True,
     )
     worker.start()
@@ -218,11 +221,11 @@ def _infer_level(line: str) -> str:
 
 
 def _dispatch_list_fixtures(ctx: ActionContext) -> dict[str, Any]:
-    """Return the fixed fixture package files that always seed the poll queue."""
+    """Return the fixed fixture package files that always seed the queue."""
     from SCP11.eim_local.session import EimLocalSession
 
     session = EimLocalSession()
-    fixtures = session.list_fixed_poll_fixture_package_files() or []
+    fixtures = session.list_fixed_package_fixture_files() or []
     rows = [
         {"index": index, "path": str(path)} for index, path in enumerate(fixtures, start=1)
     ]
@@ -242,7 +245,7 @@ def _dispatch_hotfolder_metadata(
 
     session = EimLocalSession()
     resolved_dir = str(hotfolder_dir or "").strip()
-    metadata = session.hotfolder_poll_metadata(hotfolder_dir=resolved_dir)
+    metadata = session.hotfolder_queue_metadata(hotfolder_dir=resolved_dir)
     queue_preview = metadata.get("queue_preview", []) or []
     compact_preview = []
     for entry in queue_preview:
@@ -296,7 +299,7 @@ LIST_FIXTURES_SPEC = ActionSpec(
     id="eim_local.list_fixtures",
     subsystem="Local eIM",
     title="List fixed fixtures",
-    description="Enumerate the bundled fixture packages that seed every poll queue run.",
+    description="Enumerate the bundled fixture packages that seed every queue run.",
     inputs=(),
     output_kind="table",
     dispatcher=_dispatch_list_fixtures,
@@ -355,12 +358,12 @@ ISSUE_PACKAGE_SPEC = ActionSpec(
 )
 
 
-POLL_CAMPAIGN_SPEC = ActionSpec(
-    id="eim_local.poll_campaign",
+HOTFOLDER_CAMPAIGN_SPEC = ActionSpec(
+    id="eim_local.hotfolder_campaign",
     subsystem="Local eIM",
-    title="Poll campaign (hotfolder)",
+    title="Hotfolder campaign",
     description=(
-        "Run the effective poll queue campaign (fixed fixtures + hotfolder) "
+        "Run the effective hotfolder queue campaign (fixed fixtures + hotfolder) "
         "and issue one eIM package per cycle. Streams per-cycle progress "
         "and returns a structured report when finished."
     ),
@@ -372,7 +375,7 @@ POLL_CAMPAIGN_SPEC = ActionSpec(
             required=False,
             default=10,
             min_value=1,
-            help="Number of poll cycles to run. Ignored if 'until empty' is set.",
+            help="Number of queue cycles to run. Ignored if 'until empty' is set.",
         ),
         ActionField(
             name="interval_ms",
@@ -397,7 +400,7 @@ POLL_CAMPAIGN_SPEC = ActionSpec(
             kind="bool",
             required=False,
             default=False,
-            help="Stop as soon as the poll queue is drained.",
+            help="Stop as soon as the queue is drained.",
         ),
         ActionField(
             name="max_cycles",
@@ -410,10 +413,10 @@ POLL_CAMPAIGN_SPEC = ActionSpec(
         ),
     ),
     output_kind="log_stream",
-    dispatcher=_dispatch_poll_campaign,
+    dispatcher=_dispatch_hotfolder_campaign,
     requires_card=False,
     streams=True,
-    tags=("eim", "poll", "campaign"),
+    tags=("eim", "hotfolder", "campaign"),
 )
 
 
@@ -949,8 +952,8 @@ def _dispatch_eim_package_issue(
 # Additional dispatchers (scan, explain_last, resp_log, resp_log_filter,
 # counter, load_profile, isdr_*, add_eim, add_initial_eim,
 # eim_package_explain, eim_package_issue_all, load_eim_package,
-# eim_acknowledge, poll_export, poll_aggregate, handover_set,
-# hotfolder_poll, hotfolder_fetch, notif_hygiene)
+# eim_acknowledge, hotfolder_export, hotfolder_aggregate, handover_set,
+# hotfolder_metadata, hotfolder_fetch, notif_hygiene)
 # ----------------------------------------------------------------------
 
 
@@ -1362,7 +1365,7 @@ def _dispatch_eim_acknowledge(
     }
 
 
-def _dispatch_poll_export(
+def _dispatch_hotfolder_export(
     ctx: ActionContext,
     *,
     output_path: Any = None,
@@ -1374,7 +1377,7 @@ def _dispatch_poll_export(
     exported = ""
     try:
         with contextlib.redirect_stdout(trace_sink), contextlib.redirect_stderr(trace_sink):
-            campaign = session.poll_hotfolder_campaign(cycles=1, interval_ms=0)
+            campaign = session.run_hotfolder_campaign(cycles=1, interval_ms=0)
             exported = session.export_campaign_report(campaign, output_path=path_s)
     except Exception as error:  # noqa: BLE001
         note_parts.append(f"{type(error).__name__}: {error}")
@@ -1387,7 +1390,7 @@ def _dispatch_poll_export(
     }
 
 
-def _dispatch_poll_aggregate(
+def _dispatch_hotfolder_aggregate(
     ctx: ActionContext,
     *,
     campaign_dirs: Any = None,
@@ -1440,7 +1443,7 @@ def _dispatch_handover_set(
     }
 
 
-def _dispatch_hotfolder_poll(
+def _dispatch_hotfolder_cycle(
     ctx: ActionContext,
     *,
     hotfolder_dir: Any = None,
@@ -1452,7 +1455,7 @@ def _dispatch_hotfolder_poll(
     rows: list[dict[str, Any]] = []
     try:
         with contextlib.redirect_stdout(trace_sink), contextlib.redirect_stderr(trace_sink):
-            rows = session.poll_hotfolder(cycles=1, interval_ms=500, hotfolder_dir=dir_s) or []
+            rows = session.run_hotfolder_once(cycles=1, interval_ms=500, hotfolder_dir=dir_s) or []
     except Exception as error:  # noqa: BLE001
         note_parts.append(f"{type(error).__name__}: {error}")
 
@@ -1461,7 +1464,7 @@ def _dispatch_hotfolder_poll(
         "hotfolder_dir": session.resolve_hotfolder_path(override_path=dir_s),
         "rows": _scrub_bytes(rows),
         "count": len(rows),
-        "note": "; ".join(note_parts) if note_parts else f"{len(rows)} cycle(s) polled.",
+        "note": "; ".join(note_parts) if note_parts else f"{len(rows)} cycle(s) processed.",
         "trace": _strip_ansi(trace_sink.getvalue()),
     }
 
@@ -1478,7 +1481,7 @@ def _dispatch_hotfolder_fetch(
     meta: dict[str, Any] = {}
     try:
         with contextlib.redirect_stdout(trace_sink), contextlib.redirect_stderr(trace_sink):
-            meta = session.hotfolder_poll_response_meta(hotfolder_dir=dir_s) or {}
+            meta = session.hotfolder_queue_response_meta(hotfolder_dir=dir_s) or {}
     except Exception as error:  # noqa: BLE001
         note_parts.append(f"{type(error).__name__}: {error}")
 
@@ -2322,12 +2325,12 @@ EIM_ACKNOWLEDGE_SPEC = ActionSpec(
     tags=("eim", "acknowledge"),
 )
 
-POLL_EXPORT_SPEC = ActionSpec(
-    id="eim_local.poll_export",
+HOTFOLDER_EXPORT_SPEC = ActionSpec(
+    id="eim_local.hotfolder_export",
     subsystem="Local eIM",
-    title="Export poll report",
+    title="Export hotfolder report",
     description=(
-        "Run a single-cycle poll and export the campaign report to a "
+        "Run a single-cycle hotfolder pass and export the campaign report to a "
         "JSON file for offline analysis."
     ),
     inputs=(
@@ -2340,15 +2343,15 @@ POLL_EXPORT_SPEC = ActionSpec(
         ),
     ),
     output_kind="json",
-    dispatcher=_dispatch_poll_export,
+    dispatcher=_dispatch_hotfolder_export,
     requires_card=False,
-    tags=("eim", "poll", "export"),
+    tags=("eim", "hotfolder", "export"),
 )
 
-POLL_AGGREGATE_SPEC = ActionSpec(
-    id="eim_local.poll_aggregate",
+HOTFOLDER_AGGREGATE_SPEC = ActionSpec(
+    id="eim_local.hotfolder_aggregate",
     subsystem="Local eIM",
-    title="Aggregate poll reports",
+    title="Aggregate hotfolder reports",
     description=(
         "Scan a directory for campaign report files and aggregate them "
         "into a combined multi-campaign summary."
@@ -2359,13 +2362,13 @@ POLL_AGGREGATE_SPEC = ActionSpec(
             label="Reports directory",
             kind="directory",
             required=False,
-            help="Directory containing eim_poll_campaign_*.json files; leave blank for default.",
+            help="Directory containing eim_hotfolder_campaign_*.json files; leave blank for default.",
         ),
     ),
     output_kind="json",
-    dispatcher=_dispatch_poll_aggregate,
+    dispatcher=_dispatch_hotfolder_aggregate,
     requires_card=False,
-    tags=("eim", "poll", "aggregate"),
+    tags=("eim", "hotfolder", "aggregate"),
 )
 
 HANDOVER_SET_SPEC = ActionSpec(
@@ -2374,7 +2377,7 @@ HANDOVER_SET_SPEC = ActionSpec(
     title="Set handover context",
     description=(
         "Manually seed the handover context with a matchingId and "
-        "optional transactionId so that subsequent IPAe operations "
+        "optional transactionId so that subsequent handover operations "
         "pick up the transfer state."
     ),
     inputs=(
@@ -2399,12 +2402,12 @@ HANDOVER_SET_SPEC = ActionSpec(
     tags=("eim", "handover"),
 )
 
-HOTFOLDER_POLL_SPEC = ActionSpec(
-    id="eim_local.hotfolder_poll",
+HOTFOLDER_CYCLE_SPEC = ActionSpec(
+    id="eim_local.hotfolder_cycle",
     subsystem="Local eIM",
-    title="Hotfolder poll (single cycle)",
+    title="Hotfolder cycle",
     description=(
-        "Run a single hotfolder poll cycle: check the queue, issue "
+        "Run a single hotfolder cycle: check the queue, issue "
         "one package if available, and return the cycle result."
     ),
     inputs=(
@@ -2417,9 +2420,9 @@ HOTFOLDER_POLL_SPEC = ActionSpec(
         ),
     ),
     output_kind="json",
-    dispatcher=_dispatch_hotfolder_poll,
+    dispatcher=_dispatch_hotfolder_cycle,
     requires_card=True,
-    tags=("eim", "hotfolder", "poll"),
+    tags=("eim", "hotfolder", "cycle"),
 )
 
 HOTFOLDER_FETCH_SPEC = ActionSpec(
@@ -2427,7 +2430,7 @@ HOTFOLDER_FETCH_SPEC = ActionSpec(
     subsystem="Local eIM",
     title="Hotfolder fetch (response meta)",
     description=(
-        "Fetch the response metadata for the current hotfolder poll "
+        "Fetch the response metadata for the current hotfolder queue "
         "state without issuing a package. Useful for checking the "
         "initial ES25 response before committing to a cycle."
     ),
@@ -2474,7 +2477,7 @@ NOTIF_HYGIENE_SPEC = ActionSpec(
 get_registry().register(LIST_FIXTURES_SPEC)
 get_registry().register(HOTFOLDER_METADATA_SPEC)
 get_registry().register(ISSUE_PACKAGE_SPEC)
-get_registry().register(POLL_CAMPAIGN_SPEC)
+get_registry().register(HOTFOLDER_CAMPAIGN_SPEC)
 get_registry().register(STATUS_SPEC)
 get_registry().register(DISCOVER_SPEC)
 get_registry().register(LIST_PROFILE_ALIASES_SPEC)
@@ -2509,9 +2512,9 @@ get_registry().register(EIM_PACKAGE_EXPLAIN_SPEC)
 get_registry().register(EIM_PACKAGE_ISSUE_ALL_SPEC)
 get_registry().register(LOAD_EIM_PACKAGE_SPEC)
 get_registry().register(EIM_ACKNOWLEDGE_SPEC)
-get_registry().register(POLL_EXPORT_SPEC)
-get_registry().register(POLL_AGGREGATE_SPEC)
+get_registry().register(HOTFOLDER_EXPORT_SPEC)
+get_registry().register(HOTFOLDER_AGGREGATE_SPEC)
 get_registry().register(HANDOVER_SET_SPEC)
-get_registry().register(HOTFOLDER_POLL_SPEC)
+get_registry().register(HOTFOLDER_CYCLE_SPEC)
 get_registry().register(HOTFOLDER_FETCH_SPEC)
 get_registry().register(NOTIF_HYGIENE_SPEC)

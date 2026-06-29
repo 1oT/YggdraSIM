@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 """Modem-initiated FS write persistence + ACL gating.
 
 A live modem talks to the UICC over a basic logical channel and

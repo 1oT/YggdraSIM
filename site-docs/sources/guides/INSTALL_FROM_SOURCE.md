@@ -1,13 +1,21 @@
+<!--
+SPDX-License-Identifier: GPL-3.0-or-later
+Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+-->
+
 # Installation — From Source Checkout
 
 This path is the right choice when you want to run the full test suite,
 modify the code, or cherry-pick HIL features without committing to a
 published executable.
 
-A source checkout contains **every** module (including the HIL bridge)
-on any operating system. HIL-specific behaviour is still runtime-gated:
+A source checkout contains the cross-platform Card Bridge / remote APDU
+streaming modules on every operating system. Local SIMtrace2 HIL behaviour
+is still runtime-gated:
 
-- the `[B] HIL Bridge Session` main-menu entry is only shown on Linux and
+- the `[CB] Card Bridge / Remote APDU Streaming` menu is available on
+  Windows, macOS, Linux, and Raspberry Pi when PC/SC is available.
+- the `[B] Local SIMtrace2 HIL Bridge Session` main-menu entry is only shown on Linux and
   only after `pip install -e '.[hil]'` (or `.[full]`) makes `pyudev`
   available.
 - `yggdrasim-hil-bridge` / `yggdrasim-hil-supervisor` emit a pointer to
@@ -98,6 +106,9 @@ python -m pip install -e '.[full]'
 python -m pip install -e '.[gui]'        # desktop window via pywebview
 python -m pip install -e '.[gui-server]' # headless web server only
 
+# Common remote-lab profile: HIL/RemSIM/CardBridge code + desktop GUI.
+python -m pip install -e '.[full,gui]'
+
 # Optional: YggdraCore BYO-Open5GS bridge (lazy pymongo). (post-v1 staging — not part of this release.)
 python -m pip install -e '.[open5gs]'
 
@@ -109,6 +120,11 @@ python -m pip install -e '.[docs]'
 installable on Windows / macOS — the package simply gets skipped. The
 extras can be combined: `pip install -e '.[full,gui,open5gs]'` is a
 common Linux-developer profile.
+
+The Python extras do not install SIMtrace2 firmware, `pcscd`,
+`osmo-remsim-client-st2`, SSH tunnels, or remote HIL services. Use
+`site-docs/how-to/install-remsim-apdu-streaming.md` when the checkout
+will drive a RemSIM/APDU-streaming rig.
 
 ## 4. Verify the install
 
@@ -124,8 +140,8 @@ YggdraSIM <version> (source checkout)
 ```
 
 On a Linux box with `.[hil]` or `.[full]` installed the doctor report
-adds `HIL bridge readiness: OK` once `osmo-remsim-client-st2` is on
-`PATH`.
+adds `Local HIL bridge readiness: OK` once `osmo-remsim-client-st2` is
+on `PATH`.
 
 ## 5. Directly invoke module entry points
 
@@ -173,12 +189,16 @@ The resulting onefile is written to
 
 ## HIL caveats when using a source checkout
 
-- On macOS / Windows the HIL surfaces print a friendly "Linux only"
-  pointer and never attempt to import `pyudev`.
+- On macOS / Windows, Card Bridge and `--remote-card-url` consumers are
+  available. Only the local SIMtrace2/RemSIM HIL surfaces print a friendly
+  "Linux only" pointer and avoid importing `pyudev`.
 - On Linux without `pyudev` the supervisor switches to `lsusb` polling,
   which is slower but still correct.
 - SIMtrace2 firmware flashing / updating is documented separately in
   [`SIMTRACE2_CARDEM_GUIDE.md`](SIMTRACE2_CARDEM_GUIDE.md).
+- Remote-card HIL mode uses Card Bridge over SSH instead of a rig-local
+  PC/SC reader. See [`CARD_BRIDGE_GUIDE.md`](CARD_BRIDGE_GUIDE.md) and
+  `site-docs/how-to/remote-apdu-streaming.md`.
 
 ## Related guides
 
@@ -187,3 +207,4 @@ The resulting onefile is written to
 - [`INSTALL_RASPBERRYPI.md`](INSTALL_RASPBERRYPI.md) — arm64 / Pi-specific notes.
 - [`BUILD_AND_PACKAGING.md`](BUILD_AND_PACKAGING.md) — PyInstaller, `.deb`, and Docker notes.
 - [`HIL_BRIDGE_GUIDE.md`](HIL_BRIDGE_GUIDE.md) — operator flow once the HIL bundle is running.
+- [`CARD_BRIDGE_GUIDE.md`](CARD_BRIDGE_GUIDE.md) — stream a PC/SC reader to a remote rig.

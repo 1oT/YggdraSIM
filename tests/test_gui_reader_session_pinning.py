@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 """Static contract for reader-as-session plumbing (Task 2 of the v1.1 sweep).
 
 The operator-visible promise is that activating a top-bar reader pill

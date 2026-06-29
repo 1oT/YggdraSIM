@@ -1,21 +1,22 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 """Pytest session bootstrap for the YggdraSIM test suite.
 
 The runtime hardening layers below have distinct default postures:
 
 - ``YGGDRASIM_ALLOW_PLUGINS`` / ``YGGDRASIM_DISALLOW_PLUGINS``: plugin
-  modules under ``plugins/`` load by default. Set ``DISALLOW=1`` (or
-  ``ALLOW=0``) to hard-lock the loader. See
+  modules under ``plugins/`` are refused by default. Set ``ALLOW=1`` to
+  load them for tests; set ``DISALLOW=1`` to hard-lock the loader. See
   ``yggdrasim_common/plugin_runtime.py``.
 - ``YGGDRASIM_ALLOW_QUIRKS``: simulator quirks files (executed as Python)
   must still be explicitly enabled at launch; otherwise the simulator
   refuses to load them (see ``SIMCARD/quirks.py``).
 
 Unit tests exercise the real plugin / quirk contracts, so the full test
-suite runs with both gates open. The ``YGGDRASIM_ALLOW_PLUGINS=1``
-default below is redundant after the plugin-loader default flip but
-kept as a belt-and-suspenders guard for future changes. Individual
-tests that want to verify the refusal path override these flags
-locally via ``mock.patch.dict(os.environ, {...}, clear=False)``.
+suite runs with both gates open. Individual tests that want to verify
+the refusal path override these flags locally via
+``mock.patch.dict(os.environ, {...}, clear=False)``.
 """
 
 from __future__ import annotations

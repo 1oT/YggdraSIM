@@ -1,3 +1,8 @@
+/*
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+ */
+
 /* SCP03 action popouts: KVL meta strip + primary block (table / JSON /
    trace) + optional ``details`` raw hex. Mirrors ``Profiles (ES10c)``.
    Used by registry, keys, GET DATA, GetCerts, eUICC scan, etc. */

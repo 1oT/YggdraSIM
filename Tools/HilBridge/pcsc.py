@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """HIL-Bridge PCSC channel: wraps pyscard to open a physical reader slot and exchange raw ISO 7816 APDUs."""
 from __future__ import annotations

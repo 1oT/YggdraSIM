@@ -1,3 +1,8 @@
+/*
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+ */
+
 /* Subsystems that render a full workbench (SCP03, SAIP) must occupy the
    entire ``.cc-actions`` row — the default 2-column grid is only meant
    for stacked action cards. Without this override, the workbench gets

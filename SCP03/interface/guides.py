@@ -354,7 +354,7 @@ class ShellGuides :
 
 {Config.Colors.CYAN}4. SCP11 / SM-DP+ Simulation{Config.Colors.ENDC}
    SCP11 is now split into relay and local-access paths:
-   - {Config.Colors.BOLD}`SCP11/live`:{Config.Colors.ENDC} live-certificate relay shell with `LPAd`, `IPAd`, and `IPAe`.
+   - {Config.Colors.BOLD}`SCP11/live`:{Config.Colors.ENDC} live-certificate relay shell with `LPAd` and `IPAd`.
    - {Config.Colors.BOLD}`SCP11/test`:{Config.Colors.ENDC} test-certificate relay shell with the same relay model, but a smaller default command surface.
    - {Config.Colors.BOLD}`SCP11/local_access`:{Config.Colors.ENDC} local `AuthenticateServer` and `LOAD-PROFILE` path using certificate material in `Workspace/LocalSMDPP/certs`.
 """)

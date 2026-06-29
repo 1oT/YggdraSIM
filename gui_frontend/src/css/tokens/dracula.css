@@ -1,3 +1,8 @@
+/*
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+ */
+
 /* -- Theme: Dracula (canonical purple/cyan dark, zenodb / vim) ----------- */
 html[data-theme="dracula"] {
   --bg: #282a36;

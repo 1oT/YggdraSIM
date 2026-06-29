@@ -1,3 +1,8 @@
+/*
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+ */
+
 /* -- Theme: Ink · light (paper field + steel blue accent) ---------------- */
 html[data-theme="ink-light"] {
   --bg: #f5f4f1;

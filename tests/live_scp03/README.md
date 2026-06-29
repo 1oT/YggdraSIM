@@ -20,5 +20,9 @@ Layout:
                       `reports/scp03_live_run_<timestamp>.md`.
 
 The runner sets `YGGDRASIM_CARD_BACKEND=sim`, `YGGDRASIM_DISALLOW_PLUGINS=1`
-(to silence the optional polling plugin), and `PYTHONIOENCODING=utf-8` for
+(to silence optional local extensions), and `PYTHONIOENCODING=utf-8` for
 deterministic output. ANSI colour escapes are stripped before SW extraction.
+<!--
+SPDX-License-Identifier: GPL-3.0-or-later
+Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+-->

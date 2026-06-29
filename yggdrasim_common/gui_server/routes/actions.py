@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """``/api/actions/*`` — Command Center route layer.
 
@@ -133,6 +136,8 @@ async def run_action(action_id: str, body: RunRequest) -> RunResponse:
     except ValueError as user_error:
         # Typed user-input / session errors → 422 rather than 500.
         return RunResponse(ok=False, action_id=action_id, error=str(user_error))
+    except FileNotFoundError as missing_file:
+        return RunResponse(ok=False, action_id=action_id, error=str(missing_file))
     except KeyError as missing_session:
         return RunResponse(ok=False, action_id=action_id, error=str(missing_session))
     except RuntimeError as runtime_error:

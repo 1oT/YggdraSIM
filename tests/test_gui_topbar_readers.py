@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 """Static assertions for the top-bar reader strip (Phase C UX pivot).
 
 Operators asked for the reader selector to move out of the sidebar

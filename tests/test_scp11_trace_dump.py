@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 from __future__ import annotations
 
@@ -120,7 +123,19 @@ class Scp11TraceDumpTests(unittest.TestCase):
                 + _tlv("5A", bytes.fromhex("89033023931110000000074959384263"))
                 + _tlv("81", bytes.fromhex("04"))
                 + _tlv("82", bytes.fromhex("0000000000000AD8"))
-                + _tlv("A1", _tlv("A8", _tlv("84", b"\x16"))),
+                + _tlv(
+                    "A1",
+                    _tlv(
+                        "A8",
+                        _tlv("80", b"1.3.6.1.4.1.53775.0.5.1.1")
+                        + _tlv("81", b"eim.t")
+                        + _tlv("82", b"\x01")
+                        + _tlv("83", b"\x02")
+                        + _tlv("84", b"\x16")
+                        + _tlv("87", bytes.fromhex("0780"))
+                        + _tlv("89", b""),
+                    ),
+                ),
             )
             + _tlv("5F37", b"\xAA" * 64),
         )
@@ -131,12 +146,39 @@ class Scp11TraceDumpTests(unittest.TestCase):
         self.assertIn('80 eimId len=25 value="1.3.6.1.4.1.53775.1.5.1.1"', decoded)
         self.assertIn("5A eidValue len=16 value=89033023931110000000074959384263", decoded)
         self.assertIn("81 counterValue len=1 value=4 (04)", decoded)
-        self.assertIn("A1 len=5", decoded)
-        self.assertIn("SEQUENCE len=65", decoded)
+        self.assertIn('81 eimFqdn len=5 value="eim.t"', decoded)
+        self.assertIn("82 eimIdType len=1 value=eimIdTypeOid (01)", decoded)
+        self.assertIn("83 counterValue len=1 value=2 (02)", decoded)
+        self.assertIn("84 associationToken len=1 value=22 (16)", decoded)
+        self.assertIn("87 eimSupportedProtocol len=2 value=eimRetrieveHttps (0780)", decoded)
+        self.assertIn("89 indirectProfileDownload len=0", decoded)
+        self.assertIn("SEQUENCE len=111", decoded)
         self.assertIn("5F37 signature len=64 value=64B ECDSA-rs", decoded)
         self.assertNotIn("primitive", decoded)
         self.assertNotIn("constructed", decoded)
         self.assertNotIn("context [", decoded)
+
+    def test_format_tlv_decode_names_direct_bf58_add_eim_fields(self) -> None:
+        payload = _tlv(
+            "BF58",
+            _tlv(
+                "A0",
+                _tlv(
+                    "30",
+                    _tlv("80", b"1.3.6.1.4.1.53775.0.5.1.1")
+                    + _tlv("81", b"eim.t")
+                    + _tlv("82", b"\x01")
+                    + _tlv("83", b"\x02"),
+                ),
+            ),
+        )
+
+        decoded = "\n".join(format_tlv_decode(payload))
+
+        self.assertIn('81 eimFqdn len=5 value="eim.t"', decoded)
+        self.assertIn("82 eimIdType len=1 value=eimIdTypeOid (01)", decoded)
+        self.assertIn("83 counterValue len=1 value=2 (02)", decoded)
+        self.assertNotIn("82 eimTransactionId len=1 value=01", decoded)
 
     def test_format_tlv_decode_names_profile_info_fields(self) -> None:
         profile_info = _tlv(
@@ -155,7 +197,7 @@ class Scp11TraceDumpTests(unittest.TestCase):
         decoded = "\n".join(format_tlv_decode(payload))
 
         self.assertIn("E3 ProfileInfo len=", decoded)
-        self.assertIn("5A ICCID len=10 value=89882038090000000086", decoded)
+        self.assertIn("5A ICCID len=10 value=89462038090000000086", decoded)
         self.assertIn("4F isdpAid len=16 value=A0000005591010FFFFFFFF8900001100", decoded)
         self.assertIn("9F70 profileState len=1 value=enabled (01)", decoded)
         self.assertIn('91 serviceProviderName len=7 value="Example"', decoded)
@@ -164,7 +206,7 @@ class Scp11TraceDumpTests(unittest.TestCase):
         self.assertIn("9F7B eCallIndication len=1 value=false (00)", decoded)
         self.assertIn("9F67 fallbackAllowed len=1 value=255 (FF)", decoded)
 
-    def test_format_tlv_decode_renders_ipa_euicc_data_semantically(self) -> None:
+    def test_format_tlv_decode_renders_package_data_semantically(self) -> None:
         ecdsa_sha256_oid = bytes.fromhex("2A8648CE3D040302")
         ec_public_key_oid = bytes.fromhex("2A8648CE3D0201")
         prime256v1_oid = bytes.fromhex("2A8648CE3D030107")
@@ -216,8 +258,8 @@ class Scp11TraceDumpTests(unittest.TestCase):
 
         decoded = "\n".join(format_tlv_decode(response))
 
-        self.assertIn("BF52 IpaEuiccData len=", decoded)
-        self.assertIn("A0 ipaEuiccDataResponse len=", decoded)
+        self.assertIn("BF52 PackageData len=", decoded)
+        self.assertIn("A0 packageDataResponse len=", decoded)
         self.assertIn("[+] RetrieveNotificationsList", decoded)
         self.assertIn("Notification Entries", decoded)
         self.assertIn("[+] EuiccConfiguredData", decoded)

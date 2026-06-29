@@ -1,3 +1,8 @@
+<!--
+SPDX-License-Identifier: GPL-3.0-or-later
+Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+-->
+
 # Install scripts
 
 This directory holds thin, reviewable installer scripts for each
@@ -25,8 +30,9 @@ The Windows script is self-contained PowerShell.
 
 ## Flavors
 
-- `clean` — no HIL bridge; cross-platform.
-- `full` — HIL bridge included; Linux only (including Raspberry Pi
+- `clean` — Card Bridge / remote APDU streaming included; no direct
+  SIMtrace2/RemSIM HIL runtime; cross-platform.
+- `full` — direct SIMtrace2/RemSIM HIL runtime included; Linux only (including Raspberry Pi
   arm64). Any non-Linux installer will refuse `--flavor full` with a
   clear error.
 
@@ -90,6 +96,10 @@ powershell -ExecutionPolicy Bypass -File scripts\install\install-windows.ps1 -Mo
 
 - They do not flash or update the SIMtrace2 firmware. Use
   `guides/SIMTRACE2_CARDEM_GUIDE.md` for that.
+- They do not build or install `osmo-remsim-client-st2` when your
+  distro does not package it.
+- They do not open SSH tunnels, copy Card Bridge bearer tokens, or
+  install remote HIL `systemd --user` services.
 - They do not install system-wide (everything lands in user-local
   paths unless `--install-dir` points elsewhere).
 - They do not configure the runtime tree layout. The launcher still
@@ -102,3 +112,6 @@ powershell -ExecutionPolicy Bypass -File scripts\install\install-windows.ps1 -Mo
 - `guides/INSTALL_FROM_SOURCE.md`
 - `guides/INSTALL_RASPBERRYPI.md`
 - `guides/SIMTRACE2_CARDEM_GUIDE.md`
+- `guides/CARD_BRIDGE_GUIDE.md`
+- `site-docs/how-to/install-remsim-apdu-streaming.md`
+- `site-docs/how-to/remote-apdu-streaming.md`

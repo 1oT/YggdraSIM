@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 """sim ↔ local eIM ISD-R loopback validation (SGP.32 mode A).
 
 Goal: prove the simulated SIMCARD answers the local eIM ESipa-driver

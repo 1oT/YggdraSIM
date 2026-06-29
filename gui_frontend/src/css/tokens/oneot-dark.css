@@ -1,3 +1,8 @@
+/*
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+ */
+
 /* -- Theme: 1oT Dark ----------------------------------------------------- */
 html[data-theme="oneot-dark"] {
   --bg: #03152a;

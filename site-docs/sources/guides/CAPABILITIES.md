@@ -1,3 +1,8 @@
+<!--
+SPDX-License-Identifier: GPL-3.0-or-later
+Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+-->
+
 # YggdraSIM Capability Reference
 
 This document records the current subsystem-level capabilities of YggdraSIM.
@@ -46,11 +51,11 @@ command or every internal helper.
 | `main/main.py` | Unified launcher | module dispatch, docs, about, license, automation entry points, `--gui` / `--web-server` | `README.md` |
 | `SCP03/` | Admin shell | GP auth, ETSI filesystem, eUICC retrieval, report/export, diff/wizards | `README.md` |
 | `SCP80/` | OTA shell | OTA wrap/build/send/decode, script execution, ICCID-bound runtime | `README.md` |
-| `SCP11/live/` | eSIM management relay shell | LPAd, IPAd, IPAe, relay preflight, ES9+/eIM endpoint control | `SCP11/live/README.md` |
+| `SCP11/live/` | eSIM management relay shell | LPAd, IPAd, relay preflight, ES9+/eIM endpoint control | `SCP11/live/README.md` |
 | `SCP11/test/` | Test compatibility namespace | import compatibility for older relay code paths | `SCP11/test/README.md` |
 | `SCP11/relay/` | Compatibility relay namespace | legacy import/script continuity for relay workflows | `SCP11/relay/README.md` |
 | `SCP11/local_access/` | Direct local shell | local SCP11 auth, metadata upload, direct profile load, ES10c state control | `SCP11/local_access/README.md` |
-| `SCP11/eim_local/` | eIM-side shell | direct eIM lifecycle commands, localized polling, hotfolders, handover | `SCP11/eim_local/README.md` |
+| `SCP11/eim_local/` | eIM-side shell | direct eIM lifecycle commands, package hotfolders, response logs, handover | `SCP11/eim_local/README.md` |
 | `SCP11/shared/` | Shared helper layer | crypto, payload, ASN.1, GSMA error, pySim support helpers | `SCP11/shared/README.md` |
 | `SIMCARD/` | In-process simulated UICC / eUICC | ETSI TS 102 221 FS, GP / SCP03 / SCP80, ISD-R + ISD-Ps, ETSI TS 102 223 toolkit, Milenage / TUAK AKA, 5G AKA / AKMA / SUCI / `GET IDENTITY` | `guides/CAPABILITIES.md` §SIMCARD |
 | `Tools/HilBridge/` | SIMtrace2 HIL bridge | RSPRO relay on `127.0.0.1:9997`, GSMTAP mirror on UDP 4729, offline pcap review, AT+CSIM / AT+CRSM transcoder (`at_simlink`) | `HIL_BRIDGE_GUIDE.md` |
@@ -211,12 +216,9 @@ test, and relay namespaces, the current capability envelope includes:
 - startup preflight for transport, backend mode, endpoint shape, and credential
   availability
 - session snapshot rendering at shell startup
-- relay-side `LPAd`, `IPAd`, and `IPAe` flows
 - ES9+ / SM-DP+ endpoint and TLS control
 - notification retrieval and cleanup operations
 - eUICC inventory retrieval and certificate readout
-- optional plugin-backed relay-side eIM polling and watchdog flows
-- optional concise or debug-oriented watchdog reporting
 - hidden expert commands for lower-level inspection and compatibility probes
 
 ### `SCP11/live`
@@ -227,8 +229,6 @@ include:
 - live-default certificate and endpoint assumptions
 - `DOWNLOAD-PROFILE` for activation-code-driven relay download
 - `DISCOVER` and `DOWNLOAD` for `IPAd`
-- optional plugin-backed `POLL [attempts] [timer-window] [-t 20s] [-s 5] [--debug]` for `IPAe`,
-  with `EIM-POLL` retained as an alias
 - `ENABLE-PROFILE`, `DISABLE-PROFILE`, and `DELETE-PROFILE`
 - `SET-SMDP`, `SET-ES9`, `SET-ES9-TLS`, and `SET-ES9-CA`
 - `ES9-CERT-INFO`
@@ -277,9 +277,7 @@ The current optional plugin capability model supports:
 - launch-time capability discovery through `yggdrasim_common/plugin_runtime.py`
 - source-tree plugin loading from `plugins/`
 - writable-runtime plugin loading for frozen builds
-- capability-scoped extension of `SCP11/live` and `SCP11/eim_local`
-- the reserved `polling` capability used for relay `POLL` and localized `IPAE-*`
-  surfaces
+- opt-in extension of trusted local operator surfaces
 
 ## 7. SCP11 Local-Card Capabilities
 
@@ -348,25 +346,23 @@ current capability set includes:
 - eIM package authoring from JSON templates
 - canonical fake-eIM peer-provisioning artifacts for `AddEim`
 - eIM package linting and issue workflows
-- localized `IPAd` execution through the eSIM management relay orchestrator
+- localized relay execution through the eSIM management relay orchestrator
 - adapter-first standalone `IPAd` runner export through `ipad_standalone.py`
 - simulator-side default BF55 eIM identity override through
   `Workspace/SIMCARD/eim_identity.json`, with full card-side layouts still
   overridable through `Workspace/SIMCARD/isdr_config.json` and `eim_entries`
-- optional plugin-backed localized `IPAe` watchdog execution through the eSIM management relay orchestrator
 - built-in localized handover-state management and linked download helpers
-- hotfolder queue polling and fetch flows
+- hotfolder queue execution and fetch flows
 - response logging and filtering
 - counter inspection and override by `eim_id`
 - error-code inspection and override
-- poll audit export and aggregate reporting
-- direct-to-`ISD-R` package validation without relay polling
+- response audit export and aggregate reporting
+- direct-to-`ISD-R` package validation without relay transport
 
 Current execution-path families are:
 
 - Direct Auth
-- Localized `IPAd`
-- Localized `IPAe`
+- Localized relay
 
 Current lifecycle and direct-card operations include:
 
@@ -381,24 +377,16 @@ Current lifecycle and direct-card operations include:
 - `ISDR-DELETE-EIM`
 - `LOAD-EIM-PACKAGE`
 
-Current localized polling and handover operations include:
+Current localized relay and handover operations include:
 
 - `IPAD-DISCOVER`
 - `IPAD-LIVE`
 - `IPAD-TEST`
-- `IPAE-AUTHENTICATE`
-- `IPAE-DOWNLOAD`
-- `IPAE-LIVE` (optional plugin-backed)
-- `IPAE-TEST` (optional plugin-backed)
 
-Current queue-campaign operations include:
+Current hotfolder and response operations include:
 
-- `POLL-CAMPAIGN`
-- `POLL-EXPORT`
-- `POLL-AGGREGATE`
 - `HOTFOLDER`
 - `HOTFOLDER-LIST`
-- `HOTFOLDER-POLL`
 - `HOTFOLDER-FETCH`
 - `EIM-ACKNOWLEDGE`
 
@@ -652,9 +640,8 @@ The repository currently includes:
 
 - module-specific help and guide surfaces
 - SCP03 YAML and filesystem export/report generation
-- eIM-local poll audit export and aggregate views
+- eIM-local response-log capture and aggregate views
 - response-log capture and filtering for eIM-local flows
-- live and concise watchdog reporting for relay polling
 - a root architecture document with flowcharts
 - a registry for stable symbol discovery
 - a pytest suite for targeted regression validation
@@ -671,11 +658,11 @@ The repository currently includes:
 
 The suite is published in two executable flavors and a source option:
 
-| Flavor | Platforms | HIL bridge | Entry point label |
-| --- | --- | --- | --- |
-| `clean` | Windows x86_64 / macOS x86_64 + arm64 / Linux x86_64 / Raspberry Pi arm64 | not bundled | `yggdrasim-clean[.exe]` |
-| `full`  | Linux x86_64 only | bundled (requires SIMtrace2 + `osmo-remsim-client-st2` at runtime) | `yggdrasim-full` |
-| source  | any supported Python host | optional via `pip install -e '.[hil]'` | `yggdrasim` from `main/main.py` |
+| Flavor | Platforms | Card Bridge / remote APDU | Direct SIMtrace2 HIL | Entry point label |
+| --- | --- | --- | --- | --- |
+| `clean` | Windows x86_64 / macOS x86_64 + arm64 / Linux x86_64 / Raspberry Pi arm64 | bundled | not bundled | `yggdrasim-clean[.exe]` |
+| `full`  | Linux x86_64 only | bundled | bundled (requires SIMtrace2 + `osmo-remsim-client-st2` at runtime) | `yggdrasim-full` |
+| source  | any supported Python host | available | Linux only via `pip install -e '.[hil]'` | `yggdrasim` from `main/main.py` |
 
 Launcher features that are flavor-aware:
 
@@ -684,12 +671,16 @@ Launcher features that are flavor-aware:
 - `main/main.py --doctor` reports the active flavor and probes HIL
   prerequisites (`pyudev`, `osmo-remsim-client-st2`, `dfu-util`,
   `lsusb`) where relevant
-- the main menu hides or visibly disables the `[B] HIL Bridge Session`
-  entry on clean builds and on non-Linux hosts, with a pointer to the
-  right install guide
+- the main menu always exposes `[CB] Card Bridge / Remote APDU Streaming`
+  on supported Python hosts, including Windows and macOS
+- the main menu hides or visibly disables the `[B] Local SIMtrace2 HIL
+  Bridge Session` entry on clean builds and on non-Linux hosts, with a
+  pointer to the right install guide
 - console-script entry points `yggdrasim-hil-bridge` and
   `yggdrasim-hil-supervisor` refuse to start on clean or non-Linux
   hosts with a friendly message
+- `yggdrasim-card-bridge` remains available on clean Windows/macOS/Linux
+  builds for reader-side remote APDU streaming
 
 Install-path documentation:
 
@@ -714,7 +705,7 @@ Use the following documents together with this capability reference:
 
 - `README.md` for launch paths, runtime model, and repository map
 - `CLI_AND_PIPING_GUIDE.md` for shared `--cmd` / `--stdin` automation rules
-- `PROFILE_LIFECYCLE_CLI_CHEATSHEET.md` for ready-to-run lifecycle and polling examples
+- `PROFILE_LIFECYCLE_CLI_CHEATSHEET.md` for ready-to-run lifecycle and logging examples
 - `ARCHITECTURE.md` for dependency and state-flow structure
 - `BUILD_AND_PACKAGING.md` for flavor-aware build, Docker, and `.deb` details
 - `INSTALL_CLEAN.md`, `INSTALL_FULL.md`, `INSTALL_FROM_SOURCE.md`, `INSTALL_RASPBERRYPI.md`, `SIMTRACE2_CARDEM_GUIDE.md` for install paths

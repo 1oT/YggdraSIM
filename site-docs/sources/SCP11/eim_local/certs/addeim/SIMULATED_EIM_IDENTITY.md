@@ -1,3 +1,8 @@
+<!--
+SPDX-License-Identifier: GPL-3.0-or-later
+Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+-->
+
 # YggdraSIM Simulated eIM – AddEim Identity Sheet
 
 This document is the concrete, vendor-neutral identity record for the

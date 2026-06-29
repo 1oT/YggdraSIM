@@ -1,3 +1,8 @@
+<!--
+SPDX-License-Identifier: GPL-3.0-or-later
+Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+-->
+
 # HIL Bridge Guide
 
 This guide covers the YggdraSIM hardware-in-the-loop path built around:
@@ -8,6 +13,7 @@ This guide covers the YggdraSIM hardware-in-the-loop path built around:
 - the YggdraSIM HIL bridge on `127.0.0.1:9997`
 - GSMTAP mirroring to Wireshark on UDP `4729`
 - brokered side access from YggdraSIM through the local APDU relay
+- optional remote-card input from Card Bridge over an SSH tunnel
 
 > **Naming note.** "sysmocom SIMtrace2" is the USB product identifier
 > that the Linux `lsusb` tool reports for VID:PID `1d50:60e3`. It is
@@ -16,12 +22,13 @@ This guide covers the YggdraSIM hardware-in-the-loop path built around:
 > endorsement, partnership, or certification. The same applies to
 > `osmo-remsim-client-st2`, which is the upstream tool name.
 
-> **Build flavor note.** The HIL bridge is Linux-only and is only
-> bundled in the **full** executable and in source checkouts installed
-> with the `[hil]` / `[full]` extras. The **clean** executable shipped
-> for Windows, macOS, Linux, and Raspberry Pi intentionally omits this
-> path; the launcher still renders a menu entry explaining where to
-> find the full build. See
+> **Build flavor note.** The direct SIMtrace2/RemSIM HIL bridge is
+> Linux-only and is bundled in the **full** executable and in source
+> checkouts installed with the `[hil]` / `[full]` extras. The **clean**
+> executable shipped for Windows, macOS, Linux, and Raspberry Pi still
+> includes Card Bridge / remote APDU streaming, but intentionally omits
+> this direct local rig path; the launcher still renders a menu entry
+> explaining where to find the full build. See
 > [`INSTALL_FULL.md`](INSTALL_FULL.md),
 > [`INSTALL_FROM_SOURCE.md`](INSTALL_FROM_SOURCE.md), and
 > [`SIMTRACE2_CARDEM_GUIDE.md`](SIMTRACE2_CARDEM_GUIDE.md).
@@ -146,6 +153,11 @@ marker while the bridge is active.
 Drop the `--remote-card-url` flag to fall back to the local PC/SC
 path; the existing physically-connected topology is preserved
 byte-for-byte.
+
+For a shorter recipe with only the Card Bridge, SSH, and HIL flags,
+see `site-docs/how-to/remote-apdu-streaming.md`. For the full Linux /
+Raspberry Pi package checklist, RemSIM setup, and service install
+flow, see `site-docs/how-to/install-remsim-apdu-streaming.md`.
 
 ## Prerequisites
 
@@ -583,7 +595,7 @@ python main/main.py \
     --keybag    /path/to/session.keys.json
 ```
 
-From the `[B]` HIL Bridge Session menu, pick `[3] Open saved .pcap
+From the `[B]` Local SIMtrace2 HIL Bridge Session menu, pick `[3] Open saved .pcap
 (offline review, no bridge)`. The prompt first offers a native file
 picker, then falls back to manual path entry, and finally asks for an
 optional keybag JSON path.

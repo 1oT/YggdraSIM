@@ -4,6 +4,11 @@ tags:
   - how-to
   - plugins
 ---
+<!--
+SPDX-License-Identifier: GPL-3.0-or-later
+Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+-->
+
 
 # Write a Plugin
 
@@ -15,7 +20,7 @@ plugin runtime, so the relay and eIM-local shells pick it up at launch.
 ## Prerequisites
 
 - a working YggdraSIM editable install
-- a target capability. The currently reserved capability name is `polling`.
+- a target capability name agreed with the local consumer.
 
 ## File layout
 
@@ -34,7 +39,7 @@ Every plugin module or package must expose:
 
 ```python
 def register_plugins(manager):
-    manager.register_capability("polling", MyPollingCapability())
+    manager.register_capability("example.diagnostics", MyDiagnosticsCapability())
 ```
 
 `manager` is the plugin runtime's capability manager. `register_capability`
@@ -46,46 +51,43 @@ capability's expected interface.
 1. Create the file.
 
     ```bash
-    touch plugins/my_polling.py
+    touch plugins/my_diagnostics.py
     ```
 
 2. Implement the capability.
 
     ```python
-    class MyPollingCapability:
+    class MyDiagnosticsCapability:
         def __init__(self):
             pass
 
-        def poll(self, context, attempts, window, **kwargs):
+        def run(self, context, **kwargs):
             # context carries the active shell, session, and logger.
-            # Return a structured result the shell surfaces as POLL output.
+            # Return a structured result the shell can surface.
             return {
                 "status": "ok",
-                "attempts": attempts,
-                "matched": [],
+                "details": [],
             }
 
 
     def register_plugins(manager):
-        manager.register_capability("polling", MyPollingCapability())
+        manager.register_capability("example.diagnostics", MyDiagnosticsCapability())
     ```
 
 3. Launch a consumer shell.
 
     ```bash
-    python -m SCP11.live --cmd "POLL 3 60s; EXIT"
+    YGGDRASIM_ALLOW_PLUGINS=1 python main/main.py
     ```
 
-    The shell picks up the plugin, routes `POLL` to it, and surfaces the
-    returned structure.
+    A consumer that knows `example.diagnostics` can retrieve it through the
+    shared plugin manager and surface the returned structure.
 
 ## Where plugins are consumed
 
-| Shell | Verb | Capability |
-| --- | --- | --- |
-| `SCP11/live` | `POLL`, `EIM-POLL` | `polling` |
-| `SCP11/test` | `POLL`, `EIM-POLL` | `polling` |
-| `SCP11/eim_local` | `IPAE-LIVE`, `IPAE-TEST` | `polling` |
+Consumer bindings are private to the extension and the shell that owns them.
+For public distributions, document the loader contract and keep local
+capability names in private deployment notes.
 
 ## Absent-plugin behavior
 

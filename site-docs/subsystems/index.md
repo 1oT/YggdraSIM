@@ -3,6 +3,11 @@ title: Subsystems
 tags:
   - subsystems
 ---
+<!--
+SPDX-License-Identifier: GPL-3.0-or-later
+Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+-->
+
 
 # Subsystems
 
@@ -40,7 +45,7 @@ Subsystem pages are the operator-facing guides. Each page covers:
 
     ---
 
-    Relay shell for LPAd, IPAd, and optional plugin-backed IPAe.
+    Relay shell for LPAd, IPAd, and optional local extensions.
 
     [Open Management](scp11-live.md)
 
@@ -56,7 +61,7 @@ Subsystem pages are the operator-facing guides. Each page covers:
 
     ---
 
-    SGP.32 eIM-local package authoring, hotfolders, poll campaigns, handover.
+    SGP.32 eIM-local package authoring, hotfolders, handover, response tracking.
 
     [Open eIM Local](scp11-eim-local.md)
 
@@ -68,11 +73,21 @@ Subsystem pages are the operator-facing guides. Each page covers:
 
     [Open Profile Package](profile-package.md)
 
+-   :material-monitor-dashboard: __Universal GUI Command Center__
+
+    ---
+
+    Desktop/web workbench with typed actions, reader selection, live APDU dock,
+    and remote-rig controls.
+
+    [Open GUI](gui-command-center.md)
+
 -   :material-bridge: __HIL Bridge__
 
     ---
 
-    SIMtrace2-backed physical-card bridge and supervisor workflow.
+    SIMtrace2-backed physical-card bridge, RemSIM lifecycle, remote-card input,
+    and supervisor workflow.
 
     [Open HIL Bridge](hil-bridge.md)
 
@@ -130,6 +145,7 @@ Subsystem pages are the operator-facing guides. Each page covers:
 | SCP11 Local Access | [RSP Architecture](../concepts/rsp-architecture.md) |
 | SCP11 eIM Local | [RSP Architecture](../concepts/rsp-architecture.md) |
 | Profile Package | [SAIP Profiles](../concepts/saip-profiles.md) |
+| Universal GUI Command Center | [Secure Element Primer](../concepts/secure-element-primer.md), [HIL Model](../concepts/hil-model.md) |
 | HIL Bridge | [HIL Model](../concepts/hil-model.md) |
 | SIMCARD Simulator | [Secure Element Primer](../concepts/secure-element-primer.md) |
 | SUCI Tool | [3GPP NAA](../concepts/3gpp-naa.md) |

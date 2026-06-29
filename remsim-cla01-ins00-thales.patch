@@ -1,0 +1,73 @@
+diff --git a/src/client/user_simtrace2.c b/src/client/user_simtrace2.c
+index 2535efb..5629ec9 100644
+--- a/src/client/user_simtrace2.c
++++ b/src/client/user_simtrace2.c
+@@ -18,6 +18,7 @@
+ 
+ #include <stdio.h>
+ #include <errno.h>
++#include <string.h>
+ 
+ #include <libusb.h>
+ 
+@@ -84,6 +85,43 @@ __attribute__((unused)) static int process_do_error(struct osmo_st2_cardem_inst
+ 
+ static struct osmo_apdu_context ac; // this will hold the complete APDU (across calls)
+ 
++static int classify_local_proprietary_apdu(struct osmo_apdu_context *ac,
++					   const struct cardemu_usb_msg_rx_data *data)
++{
++	const uint8_t *hdr = data->data;
++
++	if (!(data->flags & CEMU_DATA_F_TPDU_HDR))
++		return 0;
++	if (data->data_len < sizeof(ac->hdr))
++		return 0;
++
++	/* Thales eSIM applet command seen on logical channel 1.
++	 * libosmocore's generic UICC table does not know INS=00, so the
++	 * regular APDU segmenter returns -1.  For this command P3 is Lc.
++	 */
++	if (hdr[0] == 0x01 && hdr[1] == 0x00) {
++		unsigned int body_len = data->data_len - sizeof(ac->hdr);
++
++		memset(ac, 0, sizeof(*ac));
++		memcpy(&ac->hdr, hdr, sizeof(ac->hdr));
++		ac->apdu_case = 3;
++		ac->lc.tot = ac->hdr.p3;
++
++		if (body_len > ac->lc.tot)
++			body_len = ac->lc.tot;
++		if (body_len) {
++			memcpy(ac->dc, hdr + sizeof(ac->hdr), body_len);
++			ac->lc.cur = body_len;
++		}
++
++		if (ac->lc.cur < ac->lc.tot)
++			return APDU_ACT_RX_MORE_CAPDU_FROM_READER;
++		return APDU_ACT_TX_CAPDU_TO_CARD;
++	}
++
++	return 0;
++}
++
+ /*! \brief Process a RX-DATA indication message from the SIMtrace2 */
+ static int process_do_rx_da(struct osmo_st2_cardem_inst *ci, uint8_t *buf, int len)
+ {
+@@ -98,6 +136,16 @@ static int process_do_rx_da(struct osmo_st2_cardem_inst *ci, uint8_t *buf, int l
+  	/* parse the APDU data in the USB message */
+ 	rc = osmo_apdu_segment_in(&ac, data->data, data->data_len,
+ 				  data->flags & CEMU_DATA_F_TPDU_HDR);
++	if (rc < 0) {
++		int local_rc = classify_local_proprietary_apdu(&ac, data);
++
++		if (local_rc <= 0) {
++			LOGCI(ci, LOGL_ERROR, "Unable to classify modem TPDU header: flags=%x, %s\n",
++				data->flags, osmo_hexdump(data->data, data->data_len));
++			return rc;
++		}
++		rc = local_rc;
++	}
+ 
+ 	if (rc & APDU_ACT_TX_CAPDU_TO_CARD) {
+ 		/* there is no pending data coming from the modem */

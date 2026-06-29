@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """SIM Toolkit logic: proactive command encoding/decoding and TERMINAL RESPONSE handling (ETSI TS 102 223)."""
 from __future__ import annotations

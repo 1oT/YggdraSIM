@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 """ETSI TS 102 223 default-encoding conformance for STK state.
 
 Locks the byte layout of the simulator-side and controller-side

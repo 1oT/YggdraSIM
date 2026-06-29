@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 """End-to-end tests for the YggdraCore stub AUSF (Tools/YggdraCore/ausf_stub.py).
 
 The stub AUSF is exercised exactly the way an external test rig

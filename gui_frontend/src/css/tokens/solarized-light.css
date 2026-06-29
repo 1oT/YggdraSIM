@@ -1,3 +1,8 @@
+/*
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+ */
+
 /* -- Theme: Solarized · light (base3 ground, classic operator palette) --- */
 html[data-theme="solarized-light"] {
   --bg: #fdf6e3;

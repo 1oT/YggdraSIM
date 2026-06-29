@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
   // -- SAIP Workbench (SA-2) ----------------------------------------------
 
   // Workbench-wide drop zone. Pushes the picked path into the open

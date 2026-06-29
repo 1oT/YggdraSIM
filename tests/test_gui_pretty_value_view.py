@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 """Regression tests for the polished file-data view.
 
 The SCP03 file-system module used to render FCP fields and decoded

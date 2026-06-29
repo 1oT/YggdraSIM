@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 """Concatenate every page in the MkDocs nav into a single Markdown file.
 
 Walks the ``nav`` tree from ``mkdocs.yml`` in declared order. Each nav

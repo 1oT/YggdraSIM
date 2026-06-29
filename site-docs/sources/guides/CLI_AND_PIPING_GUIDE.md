@@ -1,3 +1,8 @@
+<!--
+SPDX-License-Identifier: GPL-3.0-or-later
+Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+-->
+
 # CLI And Piping Guide
 
 This guide documents the non-interactive command surfaces intended for CI/CD,
@@ -38,8 +43,9 @@ The following modules support direct command automation:
 | `python -m Tools.EumDiag` | No | No | No | EUM diagnostics: `inject-keys` / `store-keys` / `decode-bpp` subcommands. Ships as `yggdrasim-eum-diag`. |
 | `python -m Tools.SuciTool` | Yes | Yes | Yes | SUCI key tool shell. |
 | `python -m Tools.Asn1TlvDecode` | No | No | Yes | BER/DER ASN.1, BER-TLV, and command APDU decoder. Ships as `yggdrasim-asn1`; also exposed through `python main/main.py --asn1`. |
-| `python -m Tools.HilBridge.main` | No | No | No | HIL bridge daemon (Linux only). Long-running RSPRO server. Ships as `yggdrasim-hil-bridge`. |
-| `python -m Tools.HilBridge.supervisor` | No | No | No | HIL bridge supervisor / health-check / restarter (Linux only). Ships as `yggdrasim-hil-supervisor`. |
+| `python -m Tools.CardBridge` | No | No | No | Cross-platform PC/SC-to-HTTP APDU bridge for SSH-forwarded remote-card workflows. Ships as `yggdrasim-card-bridge` and is also exposed through `python main/main.py --card-bridge`. |
+| `python -m Tools.HilBridge.main` | No | No | No | Local SIMtrace2 HIL bridge daemon (Linux only). Long-running RSPRO server. Ships as `yggdrasim-hil-bridge`. |
+| `python -m Tools.HilBridge.supervisor` | No | No | No | Local SIMtrace2 HIL supervisor / health-check / restarter (Linux only). Ships as `yggdrasim-hil-supervisor`. |
 
 ## Wrapper simulator flags
 
@@ -232,7 +238,7 @@ EOF
 Local eIM queue run:
 
 ```bash
-python -m SCP11.eim_local --cmd "HOTFOLDER-LIST --json; POLL-CAMPAIGN --until-empty --max-cycles 20 --json; EXIT"
+python -m SCP11.eim_local --cmd "HOTFOLDER-LIST --json; HOTFOLDER-FETCH --json; RESP-LOG 5 --json; EXIT"
 ```
 
 ## Module examples
@@ -350,7 +356,8 @@ python -m SCP11.eim_local --cmd "DISCOVER; PATHS; STATUS; EXIT"
 ```bash
 python -m SCP11.eim_local --stdin <<'EOF'
 HOTFOLDER-LIST --json
-POLL-CAMPAIGN --until-empty --max-cycles 20 --json
+HOTFOLDER-FETCH --json
+RESP-LOG 5 --json
 EXIT
 EOF
 ```
@@ -469,7 +476,7 @@ python main/main.py \
     --keybag    captures/session-2026-04-20.keys.json
 ```
 
-The same flow is reachable from the `[B]` HIL Bridge Session menu via
+The same flow is reachable from the `[B]` Local SIMtrace2 HIL Bridge Session menu via
 pick `[3] Open saved .pcap (offline review, no bridge)`.
 
 If `--keybag` is omitted, sidecar JSONs named `<pcap>.keys.json` or

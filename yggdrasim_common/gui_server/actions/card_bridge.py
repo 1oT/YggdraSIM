@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """``card_bridge.*`` actions — Command Center surface for the Card Bridge (CB-4).
 
@@ -201,6 +204,16 @@ def _terminate_process_group(pid: Any) -> dict[str, Any]:
             "error": f"{type(error).__name__}: {error}",
         }
     return {"ok": True, "pid": pid_i, "status": "terminated"}
+
+
+def _detached_subprocess_kwargs() -> dict[str, Any]:
+    """Return subprocess options for a separately terminable helper."""
+    if os.name == "nt":
+        creation_flag = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+        if creation_flag:
+            return {"creationflags": creation_flag}
+        return {}
+    return {"start_new_session": True}
 
 
 def _listen_socket_inodes_for_port(port: int) -> set[str]:
@@ -1495,7 +1508,7 @@ def _dispatch_local_start(
             command,
             stdout=log_handle,
             stderr=subprocess.STDOUT,
-            start_new_session=True,
+            **_detached_subprocess_kwargs(),
         )
     time.sleep(0.2)
     if process.poll() is not None:
@@ -1617,7 +1630,7 @@ def _dispatch_tunnel_start(
             command,
             stdout=log_handle,
             stderr=subprocess.STDOUT,
-            start_new_session=True,
+            **_detached_subprocess_kwargs(),
         )
     time.sleep(0.35)
     if process.poll() is not None:

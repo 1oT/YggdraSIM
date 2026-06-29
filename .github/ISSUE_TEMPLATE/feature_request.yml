@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 name: Feature request
 description: Propose new behaviour, a new tool, a new wizard step, a new APDU surface, or a new GSMA / GlobalPlatform / 3GPP feature for YggdraSIM.
 title: "[feat] <short, specific summary>"
@@ -28,7 +31,6 @@ body:
         - SIMCARD engine / NAA / profile store
         - SAIP profile tooling
         - HIL bridge
-        - Polling plugin
         - Device inventory / envelope encryption
         - Docs (mkdocs / guides / offline mirror)
         - Installers / packaging / CI

@@ -1,3 +1,8 @@
+<!--
+SPDX-License-Identifier: GPL-3.0-or-later
+Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+-->
+
 # Configuration and Certificates
 
 Operator guide for every place YggdraSIM consumes operator-owned material:
@@ -287,7 +292,6 @@ keyset, see [§ SCP03 keysets and admin parameters](#scp03-keysets-and-admin-par
     "timer_management_auto_rearm": true,
     "poll_interval_seconds":       60,
     "provide_imei":                true,
-    "ipa_poll": {
       "enabled":             true,
       "eim_fqdn":            "",
       "eim_port":            443,
@@ -330,7 +334,6 @@ keyset, see [§ SCP03 keysets and admin parameters](#scp03-keysets-and-admin-par
      `"off"`. Default `"timer"` arms an ME timer per ETSI TS 102 223
      §6.6.21 (TIMER MANAGEMENT START) so the modem returns a TIMER
      EXPIRATION (D7) envelope on cadence; this is the trigger SGP.32
-     IPA-poll relies on. `"poll_interval"` falls back to the legacy
      §6.6.5 POLL INTERVAL heartbeat. `"both"` queues both proactive
      commands at TERMINAL PROFILE. `"off"` emits no proactive bring-up.
    - `timer_management_seconds` — initial timer value (1..86399 s).
@@ -344,7 +347,6 @@ keyset, see [§ SCP03 keysets and admin parameters](#scp03-keysets-and-admin-par
    - `provide_imei` — when `true` (default) the bootstrap also queues
      a PROVIDE LOCAL INFORMATION (IMEI) proactive command after the
      timer/poll trigger, mirroring real eUICC bring-up.
-   - `ipa_poll` — SGP.32 §3.5 IPA-poll BIP trigger. When enabled
      (default), every TIMER EXPIRATION (`D7`) envelope drives a
      two-leg BIP exchange before the timer re-arms:
      1. **DNS leg** — OPEN CHANNEL UDP_REMOTE → `dns_server:53`,
@@ -355,7 +357,6 @@ keyset, see [§ SCP03 keysets and admin parameters](#scp03-keysets-and-admin-par
         RECEIVE DATA, CLOSE CHANNEL.
 
      The eIM leg is only queued once the DNS leg writes a usable
-     A-record into `toolkit.ipa_poll_resolved_ip`. The cache
      persists across cycles, so steady-state polling skips the
      DNS leg until the operator clears the cache or a new APN
      forces a re-resolve.
@@ -382,13 +383,9 @@ keyset, see [§ SCP03 keysets and admin parameters](#scp03-keysets-and-admin-par
        `"internet.apn"`. Active SAIP profile EF.ACL (`6F57`)
        overrides this when the profile gets enabled (the
        filesystem rebuild copies the first APN into
-       `toolkit.ipa_poll_apn` and sets
-       `toolkit.ipa_poll_apn_source = "bpp"`). The env override
-       `YGGDRASIM_SIM_IPA_POLL_APN` wins when no profile-side APN
        is published.
      - `dns_server` — IPv4 of the resolver the IPA targets in the
        DNS leg. Default `"192.0.2.53"`. Override via
-       env flag `YGGDRASIM_SIM_IPA_POLL_DNS_SERVER` for closed-lab
        deployments with a captive resolver.
      - `request_payload_hex` — explicit hex-encoded body delivered
        under SEND DATA TLV `36` on the eIM leg. Empty (default)
@@ -409,7 +406,6 @@ keyset, see [§ SCP03 keysets and admin parameters](#scp03-keysets-and-admin-par
    wire bytes for diagnostics; operators tighten the chain by
    populating the eIM identity JSON. Disable the in-card TLS
    path (e.g. when the modem itself terminates TLS) by setting
-   `toolkit.ipa_poll.tls_enabled = false`.
 
 **Verification.**
 
@@ -787,7 +783,7 @@ fields are:
 | `optional_tags`       | `include`, `tag_hex`, `value_hex` triples for spec-defined optional TLVs.      |
 | `additional_tlvs`     | Same shape as `optional_tags`, used for vendor-specific extensions.            |
 
-**Queueing rules.** The effective hotfolder queue merges fixed poll
+**Queueing rules.** The effective hotfolder queue merges package
 fixtures with any `.json` files under the hotfolder directory, ordered
 by `runtime.queue_id`, then top-level `queue_id`, then
 `runtime.transaction_id_hex`, then numeric filename prefix, then
@@ -795,7 +791,6 @@ lexical fallback. Exposure verbs:
 
 ```text
 HOTFOLDER-LIST [dir]   # preview
-HOTFOLDER-POLL [dir]   # JSON for external harness integration
 HOTFOLDER-FETCH [dir]  # execute the queue
 ```
 

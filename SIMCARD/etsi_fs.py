@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """ETSI TS 102 221 elementary-file emulation: transparent, linear-fixed, and cyclic record access on in-memory byte arrays."""
 from __future__ import annotations
@@ -1925,14 +1928,6 @@ def rebuild_runtime_filesystem(state: SimCardState) -> None:
         _apply_security_domains_from_profile(state, active_image.security_domains)
         _apply_rfm_instances_from_profile(state, active_image.rfm_instances)
 
-    # SGP.32 §3.5 / TS 31.102 §4.2.48: the active SAIP profile may ship
-    # an EF.ACL (FID 6F57) carrying one or more APNs. The first record
-    # there outranks the env / workspace fallbacks for the IPA-poll
-    # bearer description so the IPA polls the eIM through the cellular
-    # context the BPP commissioned. ``_extract_acl_apn`` is idempotent
-    # and silently no-ops when the EF is missing or malformed.
-    _apply_profile_apn_to_ipa_poll(state, nodes, path_index)
-
     state.current_node_id = previous_node_id if previous_node_id in nodes else "3F00"
 
 
@@ -2667,91 +2662,6 @@ def _apply_rfm_instances_from_profile(
     rfm_entries: list[SimProfileRfmInstance],
 ) -> None:
     state.rfm_instances = list(rfm_entries)
-
-
-def _apply_profile_apn_to_ipa_poll(
-    state: SimCardState,
-    nodes: dict[str, SimFileNode],
-    path_index: dict[tuple[str, ...], str],
-) -> None:
-    """Project the SAIP-supplied APN onto ``state.toolkit.ipa_poll_apn``.
-
-    The APN lives in EF.ACL (FID 6F57, transparent) per
-    3GPP TS 31.102 §4.2.48: byte 0 is the APN count followed by N
-    BER-TLVs with tag ``0xDD``, length, then ASCII APN bytes. The
-    first APN wins because that is what real IPA implementations use
-    for the eIM-poll bearer. When the EF is missing or empty the
-    helper preserves whatever the env / workspace fallback already
-    placed in ``ipa_poll_apn``.
-    """
-
-    apn = _extract_apn_from_ef_acl(nodes, path_index)
-    if len(apn) == 0:
-        # Reset BPP override only if the previously active source was
-        # itself a BPP override -- env / default sources persist.
-        if str(getattr(state.toolkit, "ipa_poll_apn_source", "") or "") == "bpp":
-            from SIMCARD.state import _resolve_default_ipa_poll_apn  # local to avoid cycles
-            state.toolkit.ipa_poll_apn = _resolve_default_ipa_poll_apn()
-            state.toolkit.ipa_poll_apn_source = "default"
-        return
-    state.toolkit.ipa_poll_apn = apn
-    state.toolkit.ipa_poll_apn_source = "bpp"
-    # Invalidate any previously cached resolved IP -- a new APN may
-    # route to a different cellular context whose carrier-grade NAT
-    # answers DNS differently.
-    state.toolkit.ipa_poll_resolved_ip = ""
-    state.toolkit.ipa_poll_resolved_ip_family = 0
-
-
-def _extract_apn_from_ef_acl(
-    nodes: dict[str, SimFileNode],
-    path_index: dict[tuple[str, ...], str],
-) -> str:
-    """Return the first APN in EF.ACL (FID 6F57), or an empty string."""
-
-    candidate_paths: list[tuple[str, ...]] = [
-        ("MF", "ADF.USIM", "EF.ACL"),
-        ("MF", "DF.GSM", "EF.ACL"),
-        ("MF", "EF.ACL"),
-    ]
-    payload: bytes = b""
-    for path in candidate_paths:
-        node_id = path_index.get(path)
-        if node_id is None:
-            continue
-        node = nodes.get(node_id)
-        if node is None:
-            continue
-        data = bytes(getattr(node, "data", b"") or b"")
-        if len(data) > 0:
-            payload = data
-            break
-    if len(payload) == 0:
-        # Fall back to a raw FID scan -- some profile images do not
-        # name EF.ACL via the canonical (MF, ADF.USIM, EF.ACL) path.
-        for node in nodes.values():
-            fid = str(getattr(node, "fid", "") or "").upper()
-            if fid == "6F57":
-                data = bytes(getattr(node, "data", b"") or b"")
-                if len(data) > 0:
-                    payload = data
-                    break
-    if len(payload) < 2:
-        return ""
-    # Byte 0 is APN count (often 0x01 for single-APN profiles); the
-    # remaining bytes are TLV-encoded.
-    offset = 1
-    if payload[offset] != 0xDD:
-        return ""
-    offset += 1
-    if offset >= len(payload):
-        return ""
-    length = payload[offset]
-    offset += 1
-    if length == 0 or offset + length > len(payload):
-        return ""
-    apn_bytes = payload[offset : offset + length]
-    return apn_bytes.decode("ascii", errors="ignore").strip()
 
 
 def build_default_state() -> SimCardState:

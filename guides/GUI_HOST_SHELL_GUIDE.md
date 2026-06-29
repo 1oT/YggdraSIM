@@ -1,3 +1,8 @@
+<!--
+SPDX-License-Identifier: GPL-3.0-or-later
+Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+-->
+
 # GUI Host Shell Guide
 
 The **Advanced > Host shell** tab in the YggdraSIM Universal GUI gives

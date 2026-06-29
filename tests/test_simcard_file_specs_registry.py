@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 """Regression coverage for the pySim-derived ``_FILE_SPECS`` overlay.
 
 These tests pin three distinct invariants:

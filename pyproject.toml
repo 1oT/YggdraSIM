@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 [build-system]
 requires = ["setuptools>=69"]
 build-backend = "setuptools.build_meta"
@@ -53,10 +56,11 @@ classifiers = [
     "Topic :: Software Development :: Libraries :: Python Modules",
     "Topic :: System :: Hardware",
 ]
-# Core dependencies are kept cross-platform. Linux-only packages and the
-# HIL bridge runtime live under optional extras so Windows, macOS, and
-# Raspberry Pi installs stay lean. See guides/INSTALL_CLEAN.md and
-# guides/INSTALL_FULL.md for the two supported bundling paths.
+# Core dependencies are kept cross-platform. Card Bridge and remote APDU
+# streaming live in the base install; Linux-only local SIMtrace2 HIL packages
+# live under optional extras so Windows, macOS, and Raspberry Pi installs stay
+# lean. See guides/INSTALL_CLEAN.md and guides/INSTALL_FULL.md for the two
+# supported bundling paths.
 dependencies = [
     "pyscard",
     "cryptography",
@@ -91,9 +95,9 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# Adds the hardware-in-the-loop bridge dependency stack. pyudev only has
-# Linux wheels, so we gate it by platform to keep Windows / macOS installs
-# from failing even when the extra is requested accidentally.
+# Adds the local SIMtrace2/RemSIM hardware-in-the-loop dependency stack.
+# pyudev only has Linux wheels, so we gate it by platform to keep Windows /
+# macOS installs from failing even when the extra is requested accidentally.
 hil = [
     "pyudev; sys_platform == 'linux'",
 ]

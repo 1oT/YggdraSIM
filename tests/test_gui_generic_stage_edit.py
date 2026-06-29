@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 """Static contract for the generic Stage-edit popout (Task 3).
 
 The Stage-edit affordance was originally bitmap-only (EF.UST / EF.IST /

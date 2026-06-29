@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 """Coverage for the HIL-Bridge remote-relay card channel.
 
 Verifies the streaming-card path that lets the rig consume APDUs from

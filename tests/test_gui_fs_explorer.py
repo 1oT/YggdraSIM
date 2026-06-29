@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 """Regression tests for the in-browser fallback file explorer.
 
 When the GUI runs without pywebview (web-server mode, headless dev,

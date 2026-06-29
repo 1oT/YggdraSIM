@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 """Regression tests for ``_normalise_fs_path`` in the SCP03 dispatcher.
 
 Pinned bug: top-level EFs under MF (e.g. ``EF.ICCID``) arrived at

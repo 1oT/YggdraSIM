@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """HIL-Bridge supervisor: manages child process lifecycle (modem, bridge, tshark) with restart policy and watchdog timers."""
 from __future__ import annotations
@@ -884,6 +887,8 @@ class HilBridgeSupervisor:
             command.append("--no-apdu-relay")
         if bridge.gsmtap_enabled is False:
             command.append("--no-gsmtap")
+        if bridge.card_trace_enabled:
+            command.append("--card-trace")
         # Card-source overrides — when the operator has pinned a remote
         # ``yggdrasim-card-bridge`` URL on the supervisor, propagate it
         # to the spawned bridge subprocess so the card-stream feature
@@ -1027,6 +1032,7 @@ class HilBridgeSupervisor:
             "remoteCardUrl": str(getattr(self.config.bridge, "remote_card_url", "") or ""),
             "remoteCardTokenFile": str(getattr(self.config.bridge, "remote_card_token_file", "") or ""),
             "apduTimeoutMs": int(getattr(self.config.bridge, "apdu_timeout_ms", 0) or 0),
+            "cardTraceEnabled": bool(getattr(self.config.bridge, "card_trace_enabled", False)),
             "pollIntervalSeconds": float(self.config.poll_interval_seconds),
             "restartBackoffSeconds": float(self.config.restart_backoff_seconds),
             "remoteCardRestartBackoffSeconds": float(self.config.remote_card_restart_backoff_seconds),

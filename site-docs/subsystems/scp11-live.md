@@ -6,6 +6,11 @@ tags:
   - management
   - relay
 ---
+<!--
+SPDX-License-Identifier: GPL-3.0-or-later
+Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+-->
+
 
 # SCP11 eSIM Management Relay
 
@@ -17,13 +22,13 @@ the way a shipping LPA/IPA would.
 
 !!! info "Underlying concept"
     Read [RSP Architecture](../concepts/rsp-architecture.md) first. The
-    LPAd / IPAd / IPAe split there is what the command surface reflects.
+    LPAd / IPAd split there is what the command surface reflects.
 
 ## When to use it
 
 - `DOWNLOAD-PROFILE` driven by an activation code
 - `DISCOVER` and `DOWNLOAD` for IPAd-style pulls
-- optional plugin-backed relay-side `POLL` for IPAe polling campaigns
+- optional local extensions for deployment-specific relay commands
 - setting SM-DP+, ES9+, or ES9+ CA parameters for the session
 - running notification synchronization around transactional flows
 
@@ -70,12 +75,10 @@ the way a shipping LPA/IPA would.
 | `DISCOVER` | contact SM-DP+ for pending events |
 | `DOWNLOAD [matchingId]` | pull a specific profile event |
 
-### IPAe (plugin-backed)
+### Optional extension commands
 
 | Command | Purpose |
 | --- | --- |
-| `POLL [attempts] [window] [-t 20s] [-s 5] [--debug]` | plugin-backed relay poll |
-| `EIM-POLL` | retained alias for `POLL` |
 
 ### Profile state
 
@@ -117,14 +120,14 @@ For actual keybag exports see
 - a PC/SC reader with an eUICC, or a relay transport endpoint for the card
 - certificate material under `SCP11/` and under the writable runtime root
 - network reachability to the chosen SM-DP+ or eIM
-- optional `polling` plugin for `POLL`
+- optional local extension packages under the runtime root
 
 ## State the shell writes
 
 | Location | Contents |
 | --- | --- |
 | `state/device_inventory.sqlite3` | per-EID live session settings |
-| runtime root `plugins/` | optional `polling` plugin code and artifacts |
+| runtime root `plugins/` | optional local extension code and artifacts |
 
 ## Common recipes
 
@@ -140,7 +143,6 @@ python -m SCP11.live --cmd "DISCOVER; STATUS; LIST; EXIT"
 [eSIM Management] > DOWNLOAD-PROFILE LPA:1$example.smdp.example.com$ABCDEF123456
 ```
 
-### Poll with the plugin-backed path
 
 ```text
 [eSIM Management] > POLL 5 60s -t 20s -s 5

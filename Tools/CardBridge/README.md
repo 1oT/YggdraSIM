@@ -1,8 +1,18 @@
+<!--
+SPDX-License-Identifier: GPL-3.0-or-later
+Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+-->
+
 # Card Bridge
 
 Standalone PC/SC relay daemon. Publishes a locally-attached smart-card
 reader over a loopback HTTP endpoint; intended for SSH-tunnelled access
 from another machine running the YggdraSIM toolchain.
+
+Card Bridge is cross-platform. It can run on Windows, macOS, Linux, or
+Raspberry Pi wherever PC/SC, `pyscard`, and SSH are available. The
+SIMtrace2/RemSIM HIL supervisor that may consume this bridge is Linux-only,
+but the reader-side bridge is not.
 
 ```
 +------------------+        ssh -L 8642:127.0.0.1:8642        +------------------+
@@ -17,6 +27,11 @@ from another machine running the YggdraSIM toolchain.
 **1. On the PC (where the card lives):**
 
 ```bash
+python main/main.py --card-bridge \
+    --card-bridge-port 8642 \
+    --card-bridge-reader-name "ACR38U"
+
+# equivalent module form
 python -m Tools.CardBridge \
     --port 8642 \
     --reader-name "ACR38U"

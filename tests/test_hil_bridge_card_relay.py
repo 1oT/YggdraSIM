@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 from __future__ import annotations
 
 import json
@@ -15,6 +18,7 @@ from Tools.HilBridge.apdu_relay import (
     _APDU_RELAY_MAX_BODY_BYTES,
 )
 from Tools.HilBridge.pcsc import PcscCardChannel
+from Tools.HilBridge.proactive import ProactiveRefreshBroker
 from Tools.HilBridge.router import BackendCardChannel, HilBridgeServer
 from yggdrasim_common.card_backend import CARD_BACKEND_ENV, create_card_connection
 
@@ -393,10 +397,8 @@ class HilBridgeCardRelayTests(unittest.TestCase):
             reader_label="PCSC test reader",
         )
         worker = types.SimpleNamespace(drain=mock.Mock())
-        proactive = types.SimpleNamespace(
-            reset=mock.Mock(),
-            queue_refresh=mock.Mock(side_effect=AssertionError("uicc-reset must not queue proactive REFRESH")),
-        )
+        proactive = ProactiveRefreshBroker()
+        proactive.queue_refresh(source="test")
 
         server = object.__new__(HilBridgeServer)
         server._card_lock = threading.RLock()
@@ -418,8 +420,7 @@ class HilBridgeCardRelayTests(unittest.TestCase):
         worker.drain.assert_called_once_with(timeout=5.0)
         card.reset_card.assert_called_once_with()
         card.get_atr.assert_called_once_with()
-        proactive.reset.assert_called_once_with()
-        proactive.queue_refresh.assert_not_called()
+        self.assertEqual(proactive.status_payload()["pendingCount"], 0)
         self.assertEqual(server._session.atr_bytes, bytes.fromhex("3B9F"))
         self.assertEqual(reset_payload["status"], "reset")
         self.assertEqual(reset_payload["sessionId"], "scp11-test")

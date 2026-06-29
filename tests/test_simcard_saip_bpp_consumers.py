@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 """SAIP BPP consumer regression suite.
 
 Covers the four ProfileElement consumers added in the round closing

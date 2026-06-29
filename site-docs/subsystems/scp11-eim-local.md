@@ -6,13 +6,17 @@ tags:
   - eim
   - sgp32
 ---
+<!--
+SPDX-License-Identifier: GPL-3.0-or-later
+Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+-->
+
 
 # SCP11 eIM Local
 
 `SCP11/eim_local/` is the eIM-side shell for SGP.32 IoT RSP work. It layers
-eIM package authoring, hotfolder queues, poll campaigns, response logging, and
-handover helpers on top of the local SCP11 stack, and exposes a standalone
-IPAd runner suitable for export.
+eIM package authoring, hotfolder queues, response logging, and handover
+helpers on top of the local SCP11 stack.
 
 !!! info "Underlying concept"
     Read [RSP Architecture](../concepts/rsp-architecture.md) first. This
@@ -22,14 +26,12 @@ IPAd runner suitable for export.
 
 - `ADD-INITIAL-EIM`, `ADD-EIM`, `GET-EIM-CONFIG`, `DELETE-EIM`
 - `LOAD-EIM-PACKAGE` direct to ISD-R
-- localized IPAd runs through live or test relay orchestrators
-- localized IPAe polling with a plugin-backed path
+- localized relay runs through live or test relay orchestrators
 - hotfolder-driven package campaigns
-- poll campaign execution, export, and aggregate reporting
 - counter and error-code inspection
 - response log capture, filtering, and clear-out
 - handover orchestration between Auth, Download, and status verbs
-- direct-to-ISD-R package validation without polling
+- direct-to-ISD-R package validation without relay transport
 
 ## Entry points
 
@@ -82,29 +84,20 @@ IPAd runner suitable for export.
 | `ISDR-DELETE-EIM` | direct-to-ISD-R variant of delete-eim |
 | `LOAD-EIM-PACKAGE` | load a generated eIM package onto the card |
 
-### IPAd and IPAe
 
 | Command | Purpose |
 | --- | --- |
 | `IPAD-DISCOVER` | IPAd discovery via orchestrator |
 | `IPAD-LIVE` | localized IPAd run through live orchestrator |
 | `IPAD-TEST` | localized IPAd run through test orchestrator |
-| `IPAE-AUTHENTICATE` | direct IPAe auth against the local eIM/SM-DP+ |
-| `IPAE-DOWNLOAD` | direct IPAe download handover |
-| `IPAE-LIVE` | plugin-backed localized IPAe via live orchestrator |
-| `IPAE-TEST` | plugin-backed localized IPAe via test orchestrator |
 | `HANDOVER-STATUS` | inspect the current handover state |
 
 ### Queues and campaigns
 
 | Command | Purpose |
 | --- | --- |
-| `POLL-CAMPAIGN` | run a poll campaign |
-| `POLL-EXPORT` | export audit trails |
-| `POLL-AGGREGATE` | print aggregate stats |
 | `HOTFOLDER` | manage the hotfolder |
 | `HOTFOLDER-LIST` | list pending packages |
-| `HOTFOLDER-POLL` | poll the hotfolder for new packages |
 | `HOTFOLDER-FETCH` | fetch a specific hotfolder package |
 | `EIM-ACKNOWLEDGE` | explicit eIM acknowledgement |
 
@@ -126,7 +119,6 @@ row. Keep them aligned on purpose.
 - local SCP11 certificates for the direct-to-ISD-R flows
 - local eIM certificates under `SCP11/eim_local/certs/`
 - the shared SQLite inventory for per-`eim_id` state
-- optional `polling` plugin for `IPAE-LIVE` and `IPAE-TEST`
 
 ## State the shell writes
 
@@ -147,18 +139,18 @@ row. Keep them aligned on purpose.
 [eSIM eIM] > GET-EIM-CONFIG
 ```
 
-### Hotfolder poll loop
+### Hotfolder fetch loop
 
 ```bash
-python -m SCP11.eim_local --cmd "HOTFOLDER-LIST; HOTFOLDER-POLL; EXIT"
+python -m SCP11.eim_local --cmd "HOTFOLDER-LIST; HOTFOLDER-FETCH; RESP-LOG 5; EXIT"
 ```
 
-### Export a campaign audit
+### Review response evidence
 
 ```text
-[eSIM eIM] > POLL-CAMPAIGN
-[eSIM eIM] > POLL-AGGREGATE
-[eSIM eIM] > POLL-EXPORT
+[eSIM eIM] > HOTFOLDER-LIST
+[eSIM eIM] > HOTFOLDER-FETCH
+[eSIM eIM] > RESP-LOG
 ```
 
 ## Pitfalls
@@ -166,9 +158,6 @@ python -m SCP11.eim_local --cmd "HOTFOLDER-LIST; HOTFOLDER-POLL; EXIT"
 - `ADD-INITIAL-EIM` can only run when the target BF55 row is empty or the
   card-side configuration explicitly allows overwrite. Check the simulator
   `isdr_config.json` before retrying.
-- The optional `polling` plugin is mandatory for `IPAE-LIVE` and
-  `IPAE-TEST`. Without it, the shell will either hide those verbs or emit a
-  clean runtime error.
 - Hotfolder artifacts live under the writable runtime root on frozen builds,
   not under the source tree.
 - Counter overrides through `COUNTER <eim_id> <value>` persist until changed
@@ -178,5 +167,4 @@ python -m SCP11.eim_local --cmd "HOTFOLDER-LIST; HOTFOLDER-POLL; EXIT"
 
 - [RSP Architecture](../concepts/rsp-architecture.md)
 - [SCP11 Local Access](scp11-local-access.md)
-- [Write a Plugin](../how-to/write-a-plugin.md)
 - `SCP11/eim_local/GUIDE.md` for the full authored eIM-local guide

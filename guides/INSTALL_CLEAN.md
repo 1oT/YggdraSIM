@@ -1,20 +1,29 @@
+<!--
+SPDX-License-Identifier: GPL-3.0-or-later
+Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+-->
+
 # Installation — Clean Flavor
 
 The **clean** flavor is the default distribution of YggdraSIM. It targets
-operators who do not need the SIMtrace2-based hardware-in-the-loop (HIL)
-bridge and want a lean executable that runs on Windows, macOS, desktop
-Linux, and Raspberry Pi OS 64-bit.
+operators who need the normal CLI, GUI, Card Bridge, and remote APDU
+streaming on Windows, macOS, desktop Linux, and Raspberry Pi OS 64-bit,
+but do not need the same machine to drive a SIMtrace2 through the local
+RemSIM/HIL runtime.
 
 ## What the clean flavor ships
 
 - Full SCP03 / SCP11 / SCP11 local / SCP11 eIM local / SCP80 OTA surfaces
 - SAIP profile-package tooling, SUCI key tooling
 - Simulated SIM backend (`--card-backend sim`) and PC/SC reader backend
+- Card Bridge / remote APDU streaming:
+  `python main/main.py --card-bridge`, `yggdrasim-card-bridge`,
+  and `--remote-card-url` consumers
 - `--version`, `--doctor`, and the main menu
 
 ## What the clean flavor deliberately omits
 
-- `Tools/HilBridge` and `yggdrasim_common.hil_bridge_runtime`
+- the local SIMtrace2/RemSIM HIL supervisor/runtime
 - the Linux-only `pyudev` dependency
 - any reliance on `osmo-remsim-client-st2` or SIMtrace2 firmware
 
@@ -71,18 +80,21 @@ Full option reference lives in `scripts/install/README.md`.
 ./yggdrasim-linux-x86_64-clean-<version>
 ```
 
-The `--doctor` probe reports the active build flavor and confirms the HIL
-bridge is intentionally unavailable:
+The `--doctor` probe reports the active build flavor, confirms remote-card
+streaming support, and marks only the local SIMtrace2 HIL runtime as
+intentionally unavailable:
 
 ```text
-[+] Build flavor: clean (no HIL bridge) (source: build-stamp)
-[*] HIL bridge readiness: The HIL bridge is not bundled in this clean build. ...
+[+] Build flavor: clean (no local SIMtrace2 HIL bridge) (source: build-stamp)
+[*] Local HIL bridge readiness: The local SIMtrace2/RemSIM HIL bridge is not bundled in this clean build. ...
+[*] Remote card bridge: Not configured — set YGGDRASIM_CARD_RELAY_URL or pass --remote-card-url to talk to a Card Bridge over SSH.
 ```
 
-If the user opens the `[B] HIL Bridge Session` entry in the main menu the
-launcher prints a pointer to [`INSTALL_FULL.md`](INSTALL_FULL.md) and
-[`SIMTRACE2_CARDEM_GUIDE.md`](SIMTRACE2_CARDEM_GUIDE.md) instead of
-crashing.
+Use `[CB] Card Bridge / Remote APDU Streaming` to publish a local PC/SC
+reader or configure a tunneled remote reader. If the user opens the
+`[B] Local SIMtrace2 HIL Bridge Session` entry, the launcher prints a
+pointer to [`INSTALL_FULL.md`](INSTALL_FULL.md) and
+[`SIMTRACE2_CARDEM_GUIDE.md`](SIMTRACE2_CARDEM_GUIDE.md) instead of crashing.
 
 ## Host dependencies (runtime)
 
@@ -93,12 +105,14 @@ baseline to talk to smart-card readers and optional encryption tooling:
 
 - A working PC/SC stack (built in to Windows 10 / 11).
 - Vendor driver for your smart-card reader.
+- OpenSSH client when Card Bridge traffic is tunneled to or from another host.
 - Optional: `gpg4win` when `state/inventory_crypto.json` is enabled.
 
 ### macOS
 
 - `pcscd` ships with the OS; no extra install is required for most USB
   CCID readers.
+- OpenSSH client ships with the OS and is used for Card Bridge tunnel recipes.
 - Optional: `brew install gnupg` for the encrypted-inventory provider.
 - First launch may prompt for network / USB permissions for the reader.
 

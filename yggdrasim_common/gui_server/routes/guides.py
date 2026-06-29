@@ -130,7 +130,7 @@ _CATALOG: tuple[tuple[str, str, str, str, str], ...] = (
         "Profile Lifecycle Cheatsheet",
         "guides/PROFILE_LIFECYCLE_CLI_CHEATSHEET.md",
         "Operator Guides",
-        "Ready-to-run lifecycle, polling, and logging recipes.",
+        "Ready-to-run lifecycle and logging recipes.",
     ),
     (
         "hil-bridge",

@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 """Tests for the remote-bridge entry in ``GET /api/live/readers`` (CB-3).
 
 The live route module pulls FastAPI / Pydantic at import time. When

@@ -1,3 +1,8 @@
+<!--
+SPDX-License-Identifier: GPL-3.0-or-later
+Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+-->
+
 # ASN.1/TLV Decode Tool
 
 Decode pasted BER/DER ASN.1, BER-TLV, or command APDU hex into JSON and

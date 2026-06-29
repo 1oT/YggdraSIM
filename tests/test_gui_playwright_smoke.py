@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 """End-to-end Playwright smoke for the Universal GUI Command Center.
 
 Spins up the real FastAPI app via uvicorn on a loopback port, then

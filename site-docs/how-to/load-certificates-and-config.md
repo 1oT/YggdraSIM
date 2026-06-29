@@ -6,6 +6,11 @@ tags:
   - certificates
   - configuration
 ---
+<!--
+SPDX-License-Identifier: GPL-3.0-or-later
+Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+-->
+
 
 # Load Certificates and Configuration
 
@@ -463,8 +468,9 @@ non-test environment:
 9. **HIL keybags.** Drop next to the pcap; auto-discovery picks them
    up. Delete after use.
 10. **Inventory crypto.** Turn on before any non-test card is bound.
-11. **Plugins.** Disable in attestation builds with
-    `YGGDRASIM_DISALLOW_PLUGINS=1`.
+11. **Plugins.** Leave disabled unless a local plugin is required. Opt
+    in with `YGGDRASIM_ALLOW_PLUGINS=1`; hard-lock attestation builds
+    with `YGGDRASIM_DISALLOW_PLUGINS=1`.
 12. **Workspace seed material.** Treat every committed sample as a
     test fixture. Replace, override, or relocate before non-test use.
 

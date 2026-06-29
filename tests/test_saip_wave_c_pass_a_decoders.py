@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 """
 Wave C Pass A — semantic decoder coverage for DF.5GS / DF.5G_ProSe /
 DF.SNPN / ADF.USIM ePDG EFs.

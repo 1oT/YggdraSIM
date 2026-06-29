@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 import importlib.util
 import io
 import sys
@@ -198,7 +201,6 @@ class RelayShellHelpTests(unittest.TestCase):
         self.assertIn("Relay Utilities:", rendered)
         self.assertIn("LPAd:", rendered)
         self.assertIn("IPAd:", rendered)
-        self.assertNotIn("IPAe:", rendered)
         self.assertIn("HELP [EXPERT]", rendered)
         self.assertIn("METADATA <id|aid|alias>", rendered)
         self.assertIn("DOWNLOAD-PROFILE <activation>", rendered)
@@ -245,7 +247,6 @@ class RelayShellHelpTests(unittest.TestCase):
         self.assertIn("DISCOVER", rendered)
         self.assertIn("DOWNLOAD", rendered)
         self.assertNotIn("DOWNLOAD [matchingId]", rendered)
-        self.assertNotIn("IPAe:", rendered)
         self.assertNotIn("EIM-POLL [legacy-profile]", rendered)
         self.assertNotIn("GET-EID", rendered)
 

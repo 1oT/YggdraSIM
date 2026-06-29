@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """
 Environment preflight checks for the YggdraSIM suite.
@@ -248,26 +251,27 @@ def _probe_flavor(report: DoctorReport) -> None:
 
 
 def _probe_hil_bridge(report: DoctorReport) -> None:
+    label = "Local HIL bridge readiness"
     try:
         from yggdrasim_common import flavor as _flavor
     except Exception as error:
         report.add(
-            "HIL bridge readiness",
+            label,
             "info",
             f"flavor module unavailable: {error.__class__.__name__}",
         )
         return
     reason = _flavor.hil_bridge_unavailable_reason()
     if len(reason) > 0:
-        report.add("HIL bridge readiness", "info", reason)
+        report.add(label, "info", reason)
         return
-    # Module presence check — the clean build strips these, but a ``full``
-    # or ``source`` install should have them available.
+    # Module presence check — the clean build strips the local HIL entrypoint,
+    # but a ``full`` or ``source`` install should have it available.
     try:
         importlib.import_module("Tools.HilBridge.main")
     except Exception as error:
         report.add(
-            "HIL bridge readiness",
+            label,
             "warn",
             f"Tools.HilBridge.main import failed: {error.__class__.__name__}",
         )
@@ -282,14 +286,14 @@ def _probe_hil_bridge(report: DoctorReport) -> None:
     remsim_binary = shutil.which("osmo-remsim-client-st2")
     if remsim_binary is None:
         report.add(
-            "HIL bridge readiness",
+            label,
             "warn",
             "osmo-remsim-client-st2 not on PATH — see "
             "guides/SIMTRACE2_CARDEM_GUIDE.md",
         )
         return
     detail = f"{pyudev_detail}; osmo-remsim-client-st2 at {remsim_binary}"
-    report.add("HIL bridge readiness", "ok", detail)
+    report.add(label, "ok", detail)
 
 
 def _probe_hil_optional_helpers(report: DoctorReport) -> None:

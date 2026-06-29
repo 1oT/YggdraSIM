@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 """Twenty-fifth-pass gap-coverage suite for DF.GSM-ACCESS.
 
 3GPP TS 31.102 §4.4.3 places ``DF.GSM-ACCESS`` under

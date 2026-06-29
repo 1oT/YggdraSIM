@@ -1,4 +1,7 @@
 # -*- mode: python ; coding: utf-8 -*-
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 #
 # Flavor-aware PyInstaller spec for YggdraSIM.
 #
@@ -6,9 +9,9 @@
 # environment variable at build time:
 #
 #   * ``clean`` (default) — Windows / macOS / Linux / Raspberry Pi target.
-#     The ``Tools/HilBridge`` tree and the ``yggdrasim_common.hil_bridge_runtime``
-#     module are excluded so the bundle has no residual Linux-only ``pyudev`` or
-#     ``osmo-remsim`` coupling.
+#     The Linux HIL supervisor/runtime modules are excluded so the bundle has
+#     no residual ``pyudev`` or ``osmo-remsim`` coupling. The small APDU relay
+#     helpers used by ``Tools/CardBridge`` remain available.
 #   * ``full`` — Linux-only superset that ships the HIL bridge so the bundled
 #     launcher can drive a SIMtrace2 through ``osmo-remsim-client-st2``.
 #
@@ -145,8 +148,13 @@ package_candidates = [
 if INCLUDE_HIL:
     package_candidates.append("Tools")
 else:
-    for package_name in ("Tools.ProfilePackage", "Tools.SuciTool"):
+    for package_name in ("Tools.CardBridge", "Tools.ProfilePackage", "Tools.SuciTool"):
         hiddenimports.extend(collect_submodules(package_name))
+    hiddenimports.extend([
+        "Tools.HilBridge",
+        "Tools.HilBridge.apdu_relay",
+        "Tools.HilBridge.pcsc",
+    ])
 
 for package_name in package_candidates:
     hiddenimports.extend(collect_submodules(package_name))
@@ -154,17 +162,16 @@ for package_name in package_candidates:
 
 excludes = ["tests"]
 if INCLUDE_HIL is False:
-    # Keep the bundle lean by cutting every HIL-bridge module and the
+    # Keep the bundle lean by cutting the HIL supervisor stack and the
     # optional ``pyudev`` import that would otherwise trigger a Linux-only
-    # dependency during analysis.
+    # dependency during analysis. ``Tools.HilBridge.apdu_relay`` and
+    # ``Tools.HilBridge.pcsc`` are intentionally kept because the clean
+    # Card Bridge daemon reuses those platform-neutral helpers.
     excludes.extend([
-        "Tools.HilBridge",
         "Tools.HilBridge.main",
         "Tools.HilBridge.supervisor",
         "Tools.HilBridge.router",
-        "Tools.HilBridge.pcsc",
         "Tools.HilBridge.protocol",
-        "Tools.HilBridge.apdu_relay",
         "Tools.HilBridge.proactive",
         "Tools.HilBridge.sim_modem",
         "Tools.HilBridge.live_decode_state",

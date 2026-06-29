@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 import unittest
 import importlib.util
 import sys
@@ -172,7 +175,7 @@ class SCP11ConsoleStatusDecodeTests(unittest.TestCase):
         self.assertIn("PP Version", rendered)
         self.assertIn("v255.255.255 (FFFFFF)", rendered)
         self.assertIn("IPA Mode", rendered)
-        self.assertIn("ipae (IPAe is active)", rendered)
+        self.assertIn("mode1 active", rendered)
         self.assertIn("IoT Specific Info", rendered)
         self.assertIn("eCall Supported", rendered)
         self.assertIn("SGP.32 Validation", rendered)

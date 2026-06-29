@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 """
 Tests for the HIL-bridge guard in ``yggdrasim_common.console_scripts``.
 
@@ -46,6 +49,7 @@ class GuardReturnCodeTests(unittest.TestCase):
                     rc = console_scripts._guard_hil_bridge()
                 self.assertNotEqual(rc, 0)
                 self.assertIn("Linux", buffer.getvalue())
+                self.assertIn("yggdrasim-card-bridge", buffer.getvalue())
 
     def test_full_linux_returns_zero(self) -> None:
         with mock.patch.dict(os.environ, {flavor.FLAVOR_ENV: "full"}, clear=False):
@@ -68,6 +72,16 @@ class GuardIntegrationWithEntryPointsTests(unittest.TestCase):
             with mock.patch.object(console_scripts.sys, "stderr", buffer):
                 rc = console_scripts.hil_bridge_supervisor()
             self.assertNotEqual(rc, 0)
+
+    def test_card_bridge_entry_is_available_on_clean_flavor(self) -> None:
+        with mock.patch.dict(os.environ, {flavor.FLAVOR_ENV: "clean"}, clear=False):
+            with mock.patch.object(console_scripts, "_guard_hil_bridge") as mocked_guard:
+                with mock.patch.object(console_scripts, "_invoke", return_value=0) as mocked_invoke:
+                    rc = console_scripts.card_bridge()
+
+        self.assertEqual(rc, 0)
+        mocked_guard.assert_not_called()
+        mocked_invoke.assert_called_once_with("Tools.CardBridge.server", "main")
 
 
 class ConsoleScriptsResolveTests(unittest.TestCase):

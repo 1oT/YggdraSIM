@@ -1,3 +1,8 @@
+/*
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+ */
+
 /* Hide 1oT-branding blocks in the default Nord variant. The same blocks
  * are revealed and styled by oneot.css on the 1oT build (mkdocs.oneot.yml).
  */

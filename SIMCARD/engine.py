@@ -1,5 +1,8 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
-"""Simulated UICC/eUICC engine: process-wide singleton owning the in-memory file-system, authentication state, and IPA-poll dispatch loop."""
+
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+"""Simulated UICC/eUICC engine: process-wide singleton owning the in-memory file-system and authentication state."""
 from __future__ import annotations
 
 import collections
@@ -163,14 +166,6 @@ class SimulatedSimCardEngine:
         self.sgp = SgpLogic(self.state, sim_eim_identity_path=selected_sim_eim_identity_path)
         self.scp80 = Scp80Logic(self.state, self.transmit)
         self.toolkit = ToolkitLogic(self.state)
-        # SGP.32 §6.5 IPA-side ESipa fan-out. The toolkit emits a BIP
-        # poll cycle on TIMER EXPIRATION; when the modem returns the
-        # eIM payload via RECEIVE DATA, each parsed EuiccPackage is
-        # delivered to ISD-R via the standard STORE DATA path. Wiring
-        # the dispatcher here keeps the toolkit module decoupled from
-        # ``SgpLogic`` while still letting the simulator behave as a
-        # real in-card SGP.32 IPA.
-        self.toolkit.set_eim_package_dispatcher(self._handle_ipa_eim_package)
         self._fault_ring: "collections.deque[dict[str, str]]" = collections.deque(maxlen=32)
         self._sync_all_stores()
 
@@ -894,17 +889,6 @@ class SimulatedSimCardEngine:
             normalized = self.state.store_data_buffer + normalized
             self.state.store_data_buffer = b""
             self.state.store_data_expected_block = 0
-        before_snapshot = self._card_reread_snapshot()
-        result = self.sgp.handle_store_data(normalized)
-        self._maybe_queue_refresh_after_store_data(
-            normalized,
-            result,
-            before_snapshot=before_snapshot,
-        )
-        return result
-
-    def _handle_ipa_eim_package(self, payload: bytes) -> ApduResult:
-        normalized = bytes(payload or b"")
         before_snapshot = self._card_reread_snapshot()
         result = self.sgp.handle_store_data(normalized)
         self._maybe_queue_refresh_after_store_data(

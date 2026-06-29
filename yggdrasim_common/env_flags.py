@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """Single-source-of-truth registry for YGGDRASIM_* runtime flags.
 
@@ -295,37 +298,6 @@ FLAG_REGISTRY: Final[tuple[EnvFlag, ...]] = (
         default_hint="derived per-EID under the eUICC store root",
         applies=APPLIES_RUNTIME,
     ),
-    EnvFlag(
-        name="YGGDRASIM_SIM_IPA_POLL_APN",
-        category=CATEGORY_CARD_BACKEND,
-        summary="Override the SGP.32 IPA-poll APN",
-        description=(
-            "Cellular APN the simulated IPA emits in OPEN CHANNEL\n"
-            "(ETSI TS 102 223 §8.70 Network Access Name, tag 47)\n"
-            "when polling the eIM. Set per-process to pin a lab APN.\n"
-            "An active SAIP profile that ships an APN (BPP override)\n"
-            "wins over this env flag; ``internet.apn`` is the\n"
-            "workspace fallback when neither is set."
-        ),
-        kind=KIND_STRING,
-        default_hint="internet.apn",
-        applies=APPLIES_RUNTIME,
-    ),
-    EnvFlag(
-        name="YGGDRASIM_SIM_IPA_POLL_DNS_SERVER",
-        category=CATEGORY_CARD_BACKEND,
-        summary="Override the SGP.32 IPA-poll DNS resolver",
-        description=(
-            "IPv4 address of the DNS resolver the simulated\n"
-            "IPA targets when resolving the eIM FQDN over BIP UDP.\n"
-            "The default uses documentation-reserved address\n"
-            "192.0.2.53 on port 53. Override only when running\n"
-            "in a closed lab where a captive resolver replaces 192.0.2.53."
-        ),
-        kind=KIND_STRING,
-        default_hint="192.0.2.53",
-        applies=APPLIES_RUNTIME,
-    ),
 
     # --- Simulator behaviour -------------------------------------------
     EnvFlag(
@@ -392,18 +364,18 @@ FLAG_REGISTRY: Final[tuple[EnvFlag, ...]] = (
     EnvFlag(
         name="YGGDRASIM_ALLOW_PLUGINS",
         category=CATEGORY_PLUGINS,
-        summary="Tri-state plugin opt-in / opt-out",
+        summary="Opt in to runtime plugin loading",
         description=(
-            "Tri-state knob controlling plugin loading. Plugins load by\n"
-            "default since the loader-default flip; this flag is kept for\n"
-            "back-compat.\n"
-            "  1 / true / yes / on  → explicit opt-in (redundant)\n"
-            "  0 / false / no / off → opt-out (plugins refused)\n"
-            "  unset                → default-on"
+            "Controls loading of Python plugins from the active runtime\n"
+            "root. Plugins are executable operator-supplied code, so the\n"
+            "loader is opt-in by default.\n"
+            "  1 / true / yes / on  → import plugins\n"
+            "  0 / false / no / off → refuse plugins\n"
+            "  unset / other        → refuse plugins"
         ),
         kind=KIND_CHOICE,
         choices=("1", "0"),
-        default_hint="unset → plugins load",
+        default_hint="unset → plugins refused",
         applies=APPLIES_STARTUP,
         notes="Plugin loading happens during launcher startup after local utility exits such as --asn1; changing this flag in a running process does not retroactively load/unload plugins.",
     ),
@@ -417,7 +389,7 @@ FLAG_REGISTRY: Final[tuple[EnvFlag, ...]] = (
             "deployments where no out-of-tree code may execute."
         ),
         kind=KIND_BOOL_TOGGLE,
-        default_hint="unset → plugins may load",
+        default_hint="unset → still requires YGGDRASIM_ALLOW_PLUGINS=1",
         applies=APPLIES_STARTUP,
         sensitive=True,
     ),

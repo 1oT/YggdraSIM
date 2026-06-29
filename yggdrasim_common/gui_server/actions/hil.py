@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """HIL bridge Command Center actions.
 
@@ -506,6 +509,44 @@ def _resolve_supervisor_quirks_env() -> tuple[str, str]:
     return "none", ""
 
 
+def _extract_bridge_command_option(command_parts: Any, option_name: str) -> str:
+    normalized_option = str(option_name or "").strip()
+    if len(normalized_option) == 0 or isinstance(command_parts, (list, tuple)) is False:
+        return ""
+    prefix = normalized_option + "="
+    for index, raw_part in enumerate(command_parts):
+        part_text = str(raw_part or "").strip()
+        if part_text == normalized_option and index + 1 < len(command_parts):
+            return str(command_parts[index + 1] or "").strip()
+        if part_text.startswith(prefix):
+            return part_text[len(prefix) :].strip()
+    return ""
+
+
+def _resolve_hil_remote_card_service_settings(supervisor_state: dict[str, Any]) -> tuple[str, str]:
+    from yggdrasim_common.card_backend import (
+        CARD_RELAY_TOKEN_FILE_ENV,
+        CARD_RELAY_URL_ENV,
+    )
+
+    state = dict(supervisor_state or {})
+    remote_card_url = str(os.environ.get(CARD_RELAY_URL_ENV, "") or "").strip()
+    remote_card_token_file = str(os.environ.get(CARD_RELAY_TOKEN_FILE_ENV, "") or "").strip()
+    bridge_command = state.get("bridgeCommand", [])
+    if len(remote_card_url) == 0:
+        remote_card_url = str(state.get("remoteCardUrl", "") or "").strip()
+    if len(remote_card_url) == 0:
+        remote_card_url = _extract_bridge_command_option(bridge_command, "--remote-card-url")
+    if len(remote_card_token_file) == 0:
+        remote_card_token_file = str(state.get("remoteCardTokenFile", "") or "").strip()
+    if len(remote_card_token_file) == 0:
+        remote_card_token_file = _extract_bridge_command_option(
+            bridge_command,
+            "--remote-card-token-file",
+        )
+    return remote_card_url, remote_card_token_file
+
+
 def _build_hil_bridge_service_options(
     *,
     gsmtap_enabled: bool = True,
@@ -527,9 +568,13 @@ def _build_hil_bridge_service_options(
     from yggdrasim_common.hil_bridge_runtime import (
         DEFAULT_USB_VIDPID,
         HilBridgeUserServiceOptions,
+        REMSIM_ARGS_ENV,
+        REMSIM_BINARY_ENV,
         extract_remsim_extra_args_from_supervisor_state,
         guess_bridge_python_executable,
         read_supervisor_state,
+        resolve_card_trace_enabled,
+        split_shell_like_arguments,
     )
     from yggdrasim_common.runtime_paths import bundle_path
 
@@ -559,6 +604,11 @@ def _build_hil_bridge_service_options(
     profile_store_path = get_sim_profile_store_path()
     if len(profile_store_path) > 0:
         environment_overrides.append((SIM_PROFILE_STORE_ENV, profile_store_path))
+    remsim_args = extract_remsim_extra_args_from_supervisor_state(supervisor_state)
+    remsim_args += split_shell_like_arguments(os.environ.get(REMSIM_ARGS_ENV, ""))
+    remote_card_url, remote_card_token_file = _resolve_hil_remote_card_service_settings(
+        supervisor_state
+    )
 
     return HilBridgeUserServiceOptions(
         python_executable=python_executable,
@@ -570,7 +620,11 @@ def _build_hil_bridge_service_options(
         usb_vidpid=DEFAULT_USB_VIDPID,
         gsmtap_enabled=bool(gsmtap_enabled),
         gsmtap_capture_path=str(gsmtap_capture_path or "").strip(),
-        remsim_args=extract_remsim_extra_args_from_supervisor_state(supervisor_state),
+        card_trace_enabled=resolve_card_trace_enabled(),
+        remote_card_url=remote_card_url,
+        remote_card_token_file=remote_card_token_file,
+        remsim_binary=str(os.environ.get(REMSIM_BINARY_ENV, "") or "").strip(),
+        remsim_args=remsim_args,
         documentation_path=bundle_path("guides", "HIL_BRIDGE_GUIDE.md"),
         environment_overrides=tuple(environment_overrides),
     )

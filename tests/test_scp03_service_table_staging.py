@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 """Regression tests for the service-table staging encoder.
 
 Operators wanted a "what if I flipped these flags?" view for bitmap

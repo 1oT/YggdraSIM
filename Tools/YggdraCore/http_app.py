@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 """Loopback HTTP launcher for the YggdraCore stub AUSF.
 
 Runs **off by default**; the launcher refuses to start unless

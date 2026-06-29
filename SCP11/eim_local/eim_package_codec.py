@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """eIM package codec: decodes and lints bound profile package documents from the eIM hot-folder."""
 import json
@@ -124,8 +127,6 @@ def lint_eim_package_document(document: dict[str, Any]) -> dict[str, Any]:
         errors.extend(_lint_get_eim_package_spec(document))
     elif package_type_lc == "provide_eim_package_result":
         errors.extend(_lint_provide_eim_package_result_spec(document))
-    elif package_type_lc in ("ipae_handover", "ipae_download"):
-        errors.extend(_lint_ipae_handover_spec(document))
     elif package_type_lc == "eim_package_request":
         errors.extend(_lint_eim_package_request_spec(document))
     elif package_type_lc == "euicc_package_request_eim_configuration_data":
@@ -134,8 +135,6 @@ def lint_eim_package_document(document: dict[str, Any]) -> dict[str, Any]:
         errors.extend(_lint_euicc_package_request_ecos_spec(document))
     elif package_type_lc == "euicc_package_request_psmos":
         errors.extend(_lint_euicc_package_request_psmos_spec(document))
-    elif package_type_lc == "ipa_euicc_data_request":
-        errors.extend(_lint_ipa_euicc_data_request_spec(document))
     elif package_type_lc == "profile_download_trigger_request":
         errors.extend(_lint_profile_download_trigger_request_spec(document))
     elif package_type_lc in ("bound_profile_package", "direct_profile_download"):
@@ -148,8 +147,6 @@ def lint_eim_package_document(document: dict[str, Any]) -> dict[str, Any]:
         errors.extend(_lint_eim_package_result_spec(document))
     elif package_type_lc == "euicc_package_result":
         errors.extend(_lint_euicc_package_result_spec(document))
-    elif package_type_lc == "ipa_euicc_data_response":
-        errors.extend(_lint_ipa_euicc_data_response_spec(document))
     elif package_type_lc == "profile_download_trigger_result":
         errors.extend(_lint_profile_download_trigger_result_spec(document))
     spec_checks = _build_spec_checks(document, package_type_lc)
@@ -460,7 +457,6 @@ def _lint_provide_eim_package_result_spec(document: dict[str, Any]) -> list[str]
     allowed = (
         "euicc_package_result",
         "epr_and_notifications",
-        "ipa_euicc_data_response",
         "profile_download_trigger_result",
         "eim_package_result_response_error",
     )
@@ -482,17 +478,6 @@ def _lint_provide_eim_package_result_spec(document: dict[str, Any]) -> list[str]
     return errors
 
 
-def _lint_ipae_handover_spec(document: dict[str, Any]) -> list[str]:
-    errors: list[str] = []
-    txid = _compact_hex_lenient(document.get("transaction_id_hex"))
-    if len(txid) > 0 and len(txid) % 2 != 0:
-        errors.append("transaction_id_hex must be even-length hex for ipae_handover.")
-    profile_path = _compact_string(document.get("profile_path"))
-    if len(profile_path) == 0:
-        errors.append("profile_path should be set for ipae_handover package_type.")
-    return errors
-
-
 def _lint_eim_package_request_spec(document: dict[str, Any]) -> list[str]:
     errors: list[str] = []
     sgp32 = _mapping_value(document.get("sgp32"))
@@ -502,7 +487,6 @@ def _lint_eim_package_request_spec(document: dict[str, Any]) -> list[str]:
     choice = _compact_string(request.get("choice")).lower()
     allowed = (
         "euicc_package_request",
-        "ipa_euicc_data_request",
         "profile_download_trigger_request",
         "eim_acknowledgements",
     )
@@ -556,20 +540,6 @@ def _lint_euicc_package_request_psmos_spec(document: dict[str, Any]) -> list[str
     rows = section.get("psmos")
     if isinstance(rows, list) is False or len(rows) == 0:
         errors.append("sgp32.euicc_package_request_containing_psmos.psmos must contain at least one entry.")
-    return errors
-
-
-def _lint_ipa_euicc_data_request_spec(document: dict[str, Any]) -> list[str]:
-    errors: list[str] = []
-    sgp32 = _mapping_value(document.get("sgp32"))
-    request = _mapping_value(sgp32.get("ipa_euicc_data_request"))
-    if _bool_value(request.get("include"), True) is False:
-        errors.append("sgp32.ipa_euicc_data_request.include must be true.")
-    txid = _mapping_value(request.get("transaction_id"))
-    if _bool_value(txid.get("include"), True):
-        txid_hex = _compact_hex_lenient(txid.get("value_hex"))
-        if len(txid_hex) == 0 or len(txid_hex) % 2 != 0:
-            errors.append("sgp32.ipa_euicc_data_request.transaction_id.value_hex must be non-empty even-length hex.")
     return errors
 
 
@@ -671,7 +641,6 @@ def _lint_eim_package_result_spec(document: dict[str, Any]) -> list[str]:
     choice = _compact_string(result.get("choice")).lower()
     allowed = (
         "euicc_package_result",
-        "ipa_euicc_data_response",
         "profile_download_trigger_result",
     )
     if choice not in allowed:
@@ -690,20 +659,6 @@ def _lint_euicc_package_result_spec(document: dict[str, Any]) -> list[str]:
         txid_hex = _compact_hex_lenient(txid.get("value_hex"))
         if len(txid_hex) == 0 or len(txid_hex) % 2 != 0:
             errors.append("sgp32.euicc_package_result.transaction_id.value_hex must be non-empty even-length hex.")
-    return errors
-
-
-def _lint_ipa_euicc_data_response_spec(document: dict[str, Any]) -> list[str]:
-    errors: list[str] = []
-    sgp32 = _mapping_value(document.get("sgp32"))
-    result = _mapping_value(sgp32.get("ipa_euicc_data_response"))
-    if _bool_value(result.get("include"), True) is False:
-        errors.append("sgp32.ipa_euicc_data_response.include must be true.")
-    txid = _mapping_value(result.get("transaction_id"))
-    if _bool_value(txid.get("include"), True):
-        txid_hex = _compact_hex_lenient(txid.get("value_hex"))
-        if len(txid_hex) == 0 or len(txid_hex) % 2 != 0:
-            errors.append("sgp32.ipa_euicc_data_response.transaction_id.value_hex must be non-empty even-length hex.")
     return errors
 
 
@@ -827,7 +782,7 @@ def _build_spec_checks(document: dict[str, Any], package_type_lc: str) -> list[d
         if _bool_value(rplmn.get("include"), False):
             checks.append(_spec_check("rPLMN size 3 bytes", len(_compact_hex_lenient(rplmn.get("value_hex"))) == 6, "rplmn.value_hex must be 6 hex chars."))
 
-    elif package_type_lc in ("provide_eim_package_result", "ipae_handover", "ipae_download"):
+    elif package_type_lc == "provide_eim_package_result":
         request = _mapping_value(sgp32.get("provide_eim_package_result"))
         checks.append(_spec_check("SGP.32 ESipa ProvideEimPackageResult tag BF50", _compact_string(request.get("command_tag_hex")).upper() == "BF50", "command_tag_hex should be BF50."))
         choice = _compact_string(request.get("result_choice")).lower()
@@ -838,7 +793,6 @@ def _build_spec_checks(document: dict[str, Any], package_type_lc: str) -> list[d
                 in (
                     "euicc_package_result",
                     "epr_and_notifications",
-                    "ipa_euicc_data_response",
                     "profile_download_trigger_result",
                     "eim_package_result_response_error",
                 ),
@@ -900,35 +854,6 @@ def _build_spec_checks(document: dict[str, Any], package_type_lc: str) -> list[d
             )
         )
 
-    elif package_type_lc in ("ipae_authenticate", "ipae_auth"):
-        request = _mapping_value(sgp32.get("initiate_authentication_request_esipa"))
-        checks.append(
-            _spec_check(
-                "SGP.32 ESipa InitiateAuthenticationRequest tag BF39",
-                _compact_string(request.get("command_tag_hex")).upper() == "BF39",
-                "command_tag_hex should be BF39.",
-            )
-        )
-        challenge = _mapping_value(request.get("euicc_challenge"))
-        include_challenge = _bool_value(challenge.get("include"), False)
-        if include_challenge:
-            value_hex = _compact_hex_lenient(challenge.get("value_hex"))
-            checks.append(
-                _spec_check(
-                    "euiccChallenge length 16 bytes",
-                    len(value_hex) == 32,
-                    "euicc_challenge.value_hex should be 32 hex chars when include=true.",
-                )
-            )
-        else:
-            checks.append(
-                _spec_check(
-                    "euiccChallenge deferred to runtime",
-                    True,
-                    "euicc_challenge.include is false; challenge expected from runtime flow.",
-                )
-            )
-
     elif package_type_lc == "eim_package_request":
         request = _mapping_value(sgp32.get("eim_package_request"))
         choice = _compact_string(request.get("choice")).lower()
@@ -937,7 +862,6 @@ def _build_spec_checks(document: dict[str, Any], package_type_lc: str) -> list[d
                 "eIM Package Request family CHOICE valid",
                 choice in (
                     "euicc_package_request",
-                    "ipa_euicc_data_request",
                     "profile_download_trigger_request",
                     "eim_acknowledgements",
                 ),
@@ -998,16 +922,6 @@ def _build_spec_checks(document: dict[str, Any], package_type_lc: str) -> list[d
                 "psmos must contain at least one entry.",
             )
         )
-    elif package_type_lc == "ipa_euicc_data_request":
-        request = _mapping_value(sgp32.get("ipa_euicc_data_request"))
-        txid_hex = _compact_hex_lenient(_mapping_value(request.get("transaction_id")).get("value_hex"))
-        checks.append(
-            _spec_check(
-                "IPAeUiccDataRequest transactionId present",
-                len(txid_hex) > 0 and len(txid_hex) % 2 == 0,
-                "transaction_id.value_hex should be non-empty even-length hex.",
-            )
-        )
     elif package_type_lc == "profile_download_trigger_request":
         request = _mapping_value(sgp32.get("profile_download_trigger_request"))
         txid_hex = _compact_hex_lenient(_mapping_value(request.get("transaction_id")).get("value_hex"))
@@ -1044,7 +958,6 @@ def _build_spec_checks(document: dict[str, Any], package_type_lc: str) -> list[d
                 "eIM Package Result family CHOICE valid",
                 choice in (
                     "euicc_package_result",
-                    "ipa_euicc_data_response",
                     "profile_download_trigger_result",
                 ),
                 "choice must be one of the SGP.32 eIM Package Result families.",
@@ -1056,16 +969,6 @@ def _build_spec_checks(document: dict[str, Any], package_type_lc: str) -> list[d
         checks.append(
             _spec_check(
                 "EuiccPackageResult transactionId present",
-                len(txid_hex) > 0 and len(txid_hex) % 2 == 0,
-                "transaction_id.value_hex should be non-empty even-length hex.",
-            )
-        )
-    elif package_type_lc == "ipa_euicc_data_response":
-        result = _mapping_value(sgp32.get("ipa_euicc_data_response"))
-        txid_hex = _compact_hex_lenient(_mapping_value(result.get("transaction_id")).get("value_hex"))
-        checks.append(
-            _spec_check(
-                "IpaEuiccDataResponse transactionId present",
                 len(txid_hex) > 0 and len(txid_hex) % 2 == 0,
                 "transaction_id.value_hex should be non-empty even-length hex.",
             )

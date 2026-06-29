@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 """AAnF stub state-machine tests (Tools/YggdraCore/aanf_stub.py).
 
 Locks the in-process AKMA Anchor Function the GUI Command Center

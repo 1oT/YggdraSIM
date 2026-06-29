@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 """Narrow tests for ``yggdrasim_common/gui_server/routes/tools.py`` (B-1).
 
 The file is structured so the low-level helpers run in every environment

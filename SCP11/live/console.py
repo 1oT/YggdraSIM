@@ -30,10 +30,13 @@ from urllib.parse import urlparse
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
-from yggdrasim_common.hil_bridge_runtime import hil_bridge_warning_text
+try:
+    from yggdrasim_common.hil_bridge_runtime import hil_bridge_warning_text
+except Exception:
+    def hil_bridge_warning_text() -> str:
+        return ""
 from yggdrasim_common.plugin_runtime import extend_target_with_plugins
 from yggdrasim_common.quit_control import quit_all
-from yggdrasim_common.polling_plugin_support import dispatch_poll_command
 from yggdrasim_common.euicc_issuer import (
     format_ecasd_issuer_display,
     infer_ecasd_issuer_from_eid,
@@ -248,7 +251,6 @@ class SCP11Console:
     HELP_SECTION_UTILITIES = "utilities"
     HELP_SECTION_LPAD = "lpad"
     HELP_SECTION_IPAD = "ipad"
-    HELP_SECTION_IPAE = "ipae"
     HELP_SECTION_EXPERT = "expert"
     TAG_ENABLE_PROFILE = 0xBF31
     TAG_DISABLE_PROFILE = 0xBF32
@@ -816,7 +818,6 @@ class SCP11Console:
             "Relay Utilities:",
             "LPAd:",
             "IPAd:",
-            "IPAe:",
             "Expert / Compatibility:",
         ]:
             return f"{self._style.bold}{self._style.cyan}{text}{self._style.end}"
@@ -1218,8 +1219,6 @@ class SCP11Console:
             return self._style.header
         if section == self.HELP_SECTION_IPAD:
             return self._style.green
-        if section == self.HELP_SECTION_IPAE:
-            return self._style.yellow
         if section == self.HELP_SECTION_EXPERT:
             return self._style.red
         return self._style.header
@@ -1229,7 +1228,6 @@ class SCP11Console:
             ("Relay Utilities", self.HELP_SECTION_UTILITIES),
             ("LPAd", self.HELP_SECTION_LPAD),
             ("IPAd", self.HELP_SECTION_IPAD),
-            ("IPAe", self.HELP_SECTION_IPAE),
         ]
         if include_expert:
             sections.append(("Expert / Compatibility", self.HELP_SECTION_EXPERT))
@@ -2196,15 +2194,6 @@ class SCP11Console:
                 f"{self._style.yellow}[*] eIM poll flow completed without reaching any configured "
                 f"eIM server; on-card notifications left untouched.{self._style.end}"
             )
-        return True
-
-    def _cmd_eim_poll(self, argument: str) -> bool:
-        try:
-            dispatch_poll_command("scp11.live", "POLL", self, argument)
-        except KeyboardInterrupt:
-            print(f"{self._style.yellow}[*] EIM-POLL interrupted by user.{self._style.end}")
-        except Exception as error:
-            print(f"{self._style.red}[!] EIM-POLL failed: {error}{self._style.end}")
         return True
 
     def _collect_snapshot(self) -> CardSnapshot:

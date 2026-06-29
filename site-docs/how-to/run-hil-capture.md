@@ -6,6 +6,11 @@ tags:
   - simtrace2
   - wireshark
 ---
+<!--
+SPDX-License-Identifier: GPL-3.0-or-later
+Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+-->
+
 
 # Run a HIL Capture
 
@@ -23,6 +28,7 @@ Wireshark for post-mortem review.
 - a physical UICC or eUICC in a PC/SC reader
 - Wireshark with a loopback interface available
 - optional `simtrace2-list` / `simtrace2-tool` for USB inspection
+- optional Card Bridge and SSH tunnel when the physical card is remote
 
 ## Steps
 
@@ -39,6 +45,19 @@ Wireshark for post-mortem review.
       --advertise-host 127.0.0.1 \
       --usb-vidpid 1d50:60e3
     ```
+
+    If the card is on a remote workstation, use remote-card mode instead:
+
+    ```bash
+    yggdrasim-hil-supervisor \
+      --remote-card-url http://127.0.0.1:8642/apdu \
+      --remote-card-token-file ~/.config/yggdrasim/card_bridge/8642.token \
+      --apdu-timeout-ms 30000 \
+      --usb-vidpid 1d50:60e3
+    ```
+
+    See [Remote APDU Streaming](remote-apdu-streaming.md) for the Card
+    Bridge and SSH setup.
 
 3. Confirm healthy state.
 
@@ -61,6 +80,10 @@ Wireshark for post-mortem review.
 
     Traffic from the shell appears in the same Wireshark capture, serialized
     with modem traffic on the one live card.
+
+    In the GUI, open the HIL module or Card bridge view and watch the live
+    APDU dock. The GUI receives APDU rows from the same process-wide recorder
+    that card-consuming actions use.
 
 6. Save the capture when the observation is complete.
 
@@ -94,10 +117,14 @@ Wireshark for post-mortem review.
 | relay never reports `status: ok` | `osmo-remsim-client-st2` is failing to attach. Check its logs. |
 | missing `atr` in relay state | card not powered or seated. Reseat it in the reader. |
 | Wireshark sees modem traffic but not YggdraSIM traffic | YggdraSIM shell is using a direct PC/SC handle instead of the relay. Verify the configuration. |
+| remote-card HIL starts but APDUs time out | SSH tunnel latency or stale token | raise `--apdu-timeout-ms`, re-copy the token, verify `/status` |
 
 ## Related pages
 
 - [HIL Bridge](../subsystems/hil-bridge.md)
+- [Remote APDU Streaming](remote-apdu-streaming.md)
+- [Install RemSIM / APDU Streaming](install-remsim-apdu-streaming.md)
+- [Universal GUI Command Center](../subsystems/gui-command-center.md)
 - [HIL Model](../concepts/hil-model.md)
 - [Replay a HIL pcap offline](replay-hil-pcap-offline.md)
 - `guides/HIL_BRIDGE_GUIDE.md`

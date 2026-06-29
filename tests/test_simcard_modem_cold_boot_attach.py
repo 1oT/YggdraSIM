@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 """End-to-end modem cold-boot + USIM attach script.
 
 This test scripts the canonical APDU sequence a real modem issues

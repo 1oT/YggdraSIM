@@ -70,7 +70,7 @@ class HelpMenu :
         print ("  DERIVE-OPC     : <Ki_hex> <OP_hex> - Derive OPc per 3GPP TS 35.206.")
 
         print (f"\n{Config.Colors.CYAN}[ SCP11 module map ]{Config.Colors.ENDC}")
-        print ("  Main menu [3]  : SCP11 live relay shell (LPAd/IPAd/IPAe).")
+        print ("  Main menu [3]  : SCP11 live relay shell (LPAd/IPAd).")
         print ("  Main menu [4]  : SCP11 test relay shell (LPAd/IPAd).")
         print ("  Main menu [5]  : SCP11 local access shell (LOAD-PROFILE workflow).")
 

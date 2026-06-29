@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 """
 TUAK known-answer tests against 3GPP TS 35.232 Test Set 1 + Keccak-f[1600] KAT.
 

@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 """Tests for ``yggdrasim_common.gui_server.actions.card_bridge`` (CB-4 backend).
 
 Coverage:
@@ -372,6 +375,19 @@ class CardBridgeProbeTests(unittest.TestCase):
 
 
 class RemoteRigActionHelperTests(unittest.TestCase):
+    def test_detached_subprocess_kwargs_use_posix_session_by_default(self) -> None:
+        from unittest.mock import patch
+
+        with patch.object(cb.os, "name", "posix"):
+            self.assertEqual(cb._detached_subprocess_kwargs(), {"start_new_session": True})
+
+    def test_detached_subprocess_kwargs_use_windows_process_group(self) -> None:
+        from unittest.mock import patch
+
+        with patch.object(cb.os, "name", "nt"):
+            with patch.object(cb.subprocess, "CREATE_NEW_PROCESS_GROUP", 512, create=True):
+                self.assertEqual(cb._detached_subprocess_kwargs(), {"creationflags": 512})
+
     def test_publish_local_card_relay_marker_configures_status_action(self) -> None:
         import tempfile
         from pathlib import Path

@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 """Unit tests for ``yggdrasim_common.card_bridge_auth``.
 
 Pure-function module; no network, no card. Every test runs against a

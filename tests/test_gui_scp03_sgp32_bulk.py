@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 """Regression tests for the restructured ``scp03.get_sgp32_all_data`` dispatcher.
 
 Before this change the dispatcher simply captured ``get_sgp32_all_data``'s

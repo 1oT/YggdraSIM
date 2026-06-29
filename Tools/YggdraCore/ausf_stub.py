@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 """In-process stub of the 3GPP AUSF (TS 33.501 \u00a76.1.3 / \u00a76.1.4).
 
 Implements the minimum AUSF surface needed to drive a 5G AKA round

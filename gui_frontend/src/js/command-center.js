@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
   // -- Command Center (R2-004 Phase C) -------------------------------------
 
   var commandState = {
@@ -1629,7 +1632,7 @@
           label: "Management",
           subsystem: "eSIM Management",
           requiresReader: true,
-          hint: "SM-DP+ / eIM relay management — TLS, ES9+ and IPA polling",
+          hint: "SM-DP+ / eIM relay management — TLS and ES9+",
         },
         {
           id: "leaf-esim-local-smdp",
@@ -1643,7 +1646,7 @@
           label: "Local eIM",
           subsystem: "Local eIM",
           requiresReader: true,
-          hint: "eIM local — poll / audit / package builder",
+          hint: "eIM local - queue / audit / package builder",
         },
       ],
     },
@@ -2324,7 +2327,7 @@
       {
         id: "esim-sgp32-iot",
         label: "SGP.32 IoT (IPA-d)",
-        hint: "IPA-d / eIM discovery, authentication, poll, metadata, policy, and RAT operations.",
+        hint: "IPA-d / eIM discovery, authentication, package exchange, metadata, policy, and RAT operations.",
         suffixes: [
           "discover", "eim_authenticate", "eim_download", "eim_poll",
           "get_eim_config", "get_rat", "get_all_data",
@@ -2412,17 +2415,17 @@
       {
         id: "eim-hotfolder",
         label: "Hotfolder",
-        hint: "Hotfolder list, metadata, poll, fetch.",
+        hint: "Hotfolder list, metadata, cycle, fetch.",
         suffixes: [
           "hotfolder_list", "hotfolder_metadata",
-          "hotfolder_poll", "hotfolder_fetch",
+          "hotfolder_metadata", "hotfolder_fetch",
         ],
       },
       {
         id: "eim-campaign",
-        label: "Campaign / poll",
+        label: "Campaign / reports",
         hint: "Cross-card eIM campaign, export, and aggregate.",
-        suffixes: ["poll_campaign", "poll_export", "poll_aggregate"],
+        suffixes: ["hotfolder_campaign", "hotfolder_export", "hotfolder_aggregate"],
       },
       {
         id: "eim-notif",
@@ -2475,7 +2478,7 @@
     sgp32: {
       id: "sgp32",
       label: "SGP.32 IoT (IPA-d)",
-      hint: "IPA-d / eIM discovery, authentication, poll, metadata, policy, and RAT operations.",
+      hint: "IPA-d / eIM discovery, authentication, package exchange, metadata, policy, and RAT operations.",
     },
   };
 
@@ -3405,11 +3408,11 @@
       hotfolder_fetch: true,
       hotfolder_list: true,
       hotfolder_metadata: true,
-      hotfolder_poll: true,
+      hotfolder_metadata: true,
       issue_package: true,
       list_fixtures: true,
       load_eim_package: true,
-      poll_campaign: true,
+      hotfolder_campaign: true,
     };
 
     var LOCAL_SMDP_OVERVIEW_SUFFIXES = {
@@ -4566,8 +4569,8 @@
         }, { runningText: "issuing next package" });
         refreshQueue();
       });
-      addTool("⟳", "Poll", "Open poll campaign", function () {
-        var action = _localEimAction("eim_local.poll_campaign");
+      addTool("⟳", "Hotfolder", "Open hotfolder campaign", function () {
+        var action = _localEimAction("eim_local.hotfolder_campaign");
         if (action) _openEsimActionPane(action);
       });
 
@@ -8559,7 +8562,7 @@
     var currentEsimFlowPane = resultEl && resultEl.closest
       ? resultEl.closest(".cc-esim-flow-pane")
       : null;
-    var currentInlineActionPane = resultEl && resultEl.closest
+    var currentInlineActionPane = resultEl && resultEl.closest && !currentEsimFlowPane
       ? resultEl.closest(".cc-inline-action-pane")
       : null;
     function setEsimInlinePaneStatus(text) {

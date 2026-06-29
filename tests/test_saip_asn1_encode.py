@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 """Roundtrip tests for ``saip_asn1_encode``.
 
 Every registered encoder must satisfy the stability invariant:

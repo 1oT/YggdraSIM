@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 """
 Standalone ES10c / ES10b tag-surface smoke tests that bypass the inventory
 crypto layer by exercising SgpLogic.handle_store_data directly.

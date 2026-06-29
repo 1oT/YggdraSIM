@@ -1,12 +1,16 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """
 Distribution-flavor detection for the YggdraSIM suite.
 
 The suite is published in three shapes:
 
-* ``clean``  — bundled executable without the HIL bridge. Targets Windows,
-  macOS, desktop Linux, and Raspberry Pi. No ``pyudev``, no ``osmo-remsim``,
-  no SIMtrace2 dependency.
+* ``clean``  — bundled executable without the local SIMtrace2/RemSIM HIL
+  bridge. Targets Windows, macOS, desktop Linux, and Raspberry Pi. Card
+  Bridge and remote-card consumption remain available; there is no
+  ``pyudev``, ``osmo-remsim``, or direct SIMtrace2 dependency.
 * ``full``   — bundled executable with the HIL bridge included. Linux-only
   operationally, because the HIL bridge drives a SIMtrace2 through
   ``osmo-remsim-client-st2`` and ``pyudev``.
@@ -125,9 +129,9 @@ def is_hil_bridge_included() -> bool:
     """Return True when the current build ships the HIL bridge modules.
 
     ``source`` checkouts and ``full`` builds both include the code. A
-    ``clean`` build explicitly strips the Tools/HilBridge tree and the
-    ``yggdrasim_common.hil_bridge_runtime`` module, so HIL features cannot
-    be reached at all.
+    ``clean`` build explicitly strips the local SIMtrace2/RemSIM supervisor
+    runtime, so direct HIL sessions cannot be reached. Card Bridge and
+    remote-card consumption are cross-platform and are not gated here.
     """
     flavor = get_flavor()
     if flavor == FLAVOR_CLEAN:
@@ -150,13 +154,16 @@ def hil_bridge_unavailable_reason() -> str:
     """Return a human-friendly explanation, or ``""`` when HIL is usable."""
     if is_hil_bridge_included() is False:
         return (
-            "The HIL bridge is not bundled in this clean build. "
-            "Use the 'full' executable or install from source to access it."
+            "The local SIMtrace2/RemSIM HIL bridge is not bundled in this "
+            "clean build. Card Bridge and remote-card streaming remain "
+            "available; use the 'full' Linux executable or install from "
+            "source on Linux for direct SIMtrace2 HIL sessions."
         )
     if is_hil_bridge_supported_platform() is False:
         return (
-            "The HIL bridge requires Linux (for udev monitoring and "
-            "osmo-remsim-client-st2)."
+            "The local SIMtrace2/RemSIM HIL bridge requires Linux (for "
+            "udev monitoring and osmo-remsim-client-st2). Card Bridge and "
+            "remote-card streaming remain available on this platform."
         )
     return ""
 
@@ -165,7 +172,7 @@ def describe_flavor() -> str:
     """Render a one-line description used by ``--version`` and banners."""
     flavor = get_flavor()
     labels = {
-        FLAVOR_CLEAN: "clean (no HIL bridge)",
+        FLAVOR_CLEAN: "clean (no local SIMtrace2 HIL bridge)",
         FLAVOR_FULL: "full (HIL bridge included)",
         FLAVOR_SOURCE: "source checkout",
     }

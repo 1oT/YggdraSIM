@@ -1,3 +1,8 @@
+<!--
+SPDX-License-Identifier: GPL-3.0-or-later
+Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+-->
+
 # First Test Setup
 
 This setup seeds one concrete first-test identity and package set for the local eIM module.
@@ -55,7 +60,7 @@ The document is already pinned to:
 
 ## Retrieval And Acknowledgement Queue
 
-Fixed fixture packages remain in the permanent poll queue:
+Fixed fixture packages remain in the permanent package queue:
 
 - `Workspace/LocalEIM/eim_packages/fixtures/eim_to_esim/010_profile_download_trigger_request_first_download.json`
 - `Workspace/LocalEIM/eim_packages/fixtures/esim_to_eim/020_provide_eim_package_result_first_download.json`
@@ -90,7 +95,7 @@ ADD-INITIAL-EIM package "/path/to/local_eim_signing_cert.pem" Workspace/LocalEIM
 GET-EIM-CONFIG
 ADD-EIM package "/path/to/local_eim_signing_cert.pem" Workspace/LocalEIM/eim_packages/fake_eim_add_eim_package.json
 HOTFOLDER-LIST --json
-POLL-CAMPAIGN --until-empty --max-cycles 10 --json
+HOTFOLDER-FETCH --json
 RESP-LOG 20
 ```
 

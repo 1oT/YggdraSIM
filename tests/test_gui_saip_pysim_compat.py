@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 """Regression tests for the pySim compatibility shim used by the SAIP GUI.
 
 Guards :func:`yggdrasim_common.gui_server.actions.saip._patch_pysim_profile_element`.

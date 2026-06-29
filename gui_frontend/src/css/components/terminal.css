@@ -1,3 +1,8 @@
+/*
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+ */
+
 /* Terminal (B-2) --------------------------------------------------------- */
 /*
  * The PTY canvas itself is unavoidably text-mode (xterm.js), but the

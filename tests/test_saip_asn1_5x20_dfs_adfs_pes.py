@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 """Tests for the 5×20 DF / ADF / ProfileElement / field sweep.
 
 Covers 100 new decoded-edit additions across:

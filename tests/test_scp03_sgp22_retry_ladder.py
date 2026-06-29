@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 import datetime
 import io
 import unittest
@@ -232,7 +235,7 @@ class Sgp22RetryLadderTests(unittest.TestCase):
         )
         self.assertEqual(
             self.manager._decode_value(0x90, bytes.fromhex("01"), 0xBF22),
-            "ipae (IPAe is active) (1)",
+            "mode1 active (1)",
         )
         self.assertIn(
             "ppr1",

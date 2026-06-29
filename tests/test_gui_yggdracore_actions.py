@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 """YggdraCore Command Center action conformance tests.
 
 Locks the six Phase-1c actions registered by

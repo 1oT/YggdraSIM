@@ -6,6 +6,11 @@ tags:
   - test
   - compatibility
 ---
+<!--
+SPDX-License-Identifier: GPL-3.0-or-later
+Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+-->
+
 
 # SCP11 Test Compatibility Namespace
 
@@ -45,7 +50,7 @@ explicit CA bundle.
 
 ## Runtime dependencies
 
-- optional `polling` plugin for the `POLL` verb
+- optional local extensions under the runtime root
 - the shared SQLite inventory for per-EID state
 
 ## State

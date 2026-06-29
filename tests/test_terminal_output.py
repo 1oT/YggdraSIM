@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 from __future__ import annotations
 
@@ -23,7 +26,7 @@ class _TtyBuffer(io.StringIO):
 class TerminalOutputTests(unittest.TestCase):
     def test_classifies_common_status_roles(self) -> None:
         cases = {
-            "[+] eIM polling completed.": "success",
+            "[+] eIM package exchange completed.": "success",
             "[OK] profile state verified": "success",
             "OK": "success",
             "[!] eIM entry failed: eIM2": "error",

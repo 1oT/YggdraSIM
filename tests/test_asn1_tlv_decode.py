@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """ASN.1/TLV decoder tests."""
 from __future__ import annotations
@@ -118,7 +121,7 @@ class Asn1TlvDecodeTests(unittest.TestCase):
             "BF4F": "GET_EIM_PACKAGE",
             "BF50": "PROVIDE_EIM_PACKAGE_RESULT",
             "BF51": "EIM_PACKAGE",
-            "BF52": "IPA_EUICC_DATA",
+            "BF52": "PACKAGE_DATA",
             "BF53": "EIM_ACKNOWLEDGEMENTS",
             "BF54": "PROFILE_DOWNLOAD_TRIGGER",
             "BF55": "GET_EIM_CONFIGURATION_DATA",

@@ -1,3 +1,8 @@
+<!--
+SPDX-License-Identifier: GPL-3.0-or-later
+Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+-->
+
 # SCP11 eSIM Management Relay
 
 `SCP11/live` is the eSIM management relay shell. Use it when the
@@ -7,14 +12,13 @@ access.
 ## Use this module when
 
 - the operator flow is relay-first rather than card-local
-- `LPAd`, `IPAd`, or `IPAe` behavior is the primary concern
 - the active transport should be local PC/SC or an HTTP APDU relay
 - the backend should speak to remote ES9+ / eIM endpoints
 
 ## Do not use this module when
 
 - the task is direct local `ISD-R` provisioning or metadata upload
-- the task is eIM-side package generation, localized polling, or handover
+- the task is eIM-side package generation, hotfolder execution, or handover
 
 ## Launch
 
@@ -35,7 +39,6 @@ Batch automation examples:
 ```bash
 python -m SCP11.live --cmd "DISCOVER; STATUS; LIST; EXIT"
 python -m SCP11.live --cmd "DOWNLOAD-PROFILE LPA:1$SMDP.EXAMPLE$TOKEN; STATUS; EXIT"
-python -m SCP11.live --cmd "POLL 3 30 --debug; EXIT"
 ```
 
 See `../../guides/PROFILE_LIFECYCLE_CLI_CHEATSHEET.md` for ready-to-paste lifecycle
@@ -106,20 +109,7 @@ IPAd:
 - `DISCOVER`
 - `DOWNLOAD`
 
-IPAe:
 
-- `POLL [attempts] [timer-window] [-t 20s] [-s 5] [--target fqdn[,fqdn...]] [--location 7-or-9-byte-hex | --plmn mcc/mnc [--lac hex] [--cell hex]] [--rat hex] [--debug]`
-- alias: `EIM-POLL`
-
-Plugin note:
-
-- `POLL` / `EIM-POLL` is provided by the optional `polling` plugin
-- `--debug` streams watchdog APDUs in both directions, including every STATUS
-- `--location` or `--plmn` overrides card-requested PLI location for the current command only
-- the watchdog does not emit unsolicited LOCATION STATUS envelopes
-- `Workspace/SCP11/live/poll_location_defaults.json` can provide local default `plmn`, `lac`, `cell`, and `rat` values
-- when the plugin is absent, the command is not exposed by the core shell
-- see `plugins/README.md` for the capability contract and publication model
 
 ## Expert commands
 
@@ -178,17 +168,6 @@ DOWNLOAD
 STATUS
 ```
 
-IPAe polling run:
-
-```text
-POLL
-```
-
-For long-running or timing-sensitive cases:
-
-```text
-POLL 3 30 --debug
-```
 
 ## Configuration fields to know first
 

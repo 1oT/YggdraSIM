@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 """HTTP routes for the GUI server.
 
 Each submodule owns a FastAPI ``APIRouter`` mounted under a subsystem

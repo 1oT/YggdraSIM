@@ -32,10 +32,6 @@
         "include": false,
         "value_hex": ""
       },
-      "ipa_euicc_data_response": {
-        "include": false,
-        "value_hex": ""
-      },
       "eim_package_result_response_error": {
         "include": false,
         "error_code": "undefinedError(127)"

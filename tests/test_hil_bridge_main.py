@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 from __future__ import annotations
 
 import argparse
@@ -54,6 +57,25 @@ class HilBridgeMainTests(unittest.TestCase):
         config = build_bridge_config_from_args(args)
 
         self.assertEqual(config.apdu_timeout_ms, 15000)
+
+    def test_bridge_config_accepts_card_trace_flag(self) -> None:
+        parser = argparse.ArgumentParser()
+        add_bridge_runtime_arguments(parser, include_list_readers=False)
+        args = parser.parse_args(["--card-trace"])
+
+        config = build_bridge_config_from_args(args)
+
+        self.assertTrue(config.card_trace_enabled)
+
+    def test_bridge_config_accepts_card_trace_env_default(self) -> None:
+        with mock.patch.dict("os.environ", {"YGGDRASIM_HIL_CARD_TRACE": "1"}):
+            parser = argparse.ArgumentParser()
+            add_bridge_runtime_arguments(parser, include_list_readers=False)
+            args = parser.parse_args([])
+
+        config = build_bridge_config_from_args(args)
+
+        self.assertTrue(config.card_trace_enabled)
 
 
 if __name__ == "__main__":

@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 """Coverage for SCP11/shared/profile_actions.py.
 
 The shared helpers underpin the harmonised ENABLE / DISABLE / DELETE

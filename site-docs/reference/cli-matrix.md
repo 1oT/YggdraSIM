@@ -4,6 +4,11 @@ tags:
   - reference
   - cli
 ---
+<!--
+SPDX-License-Identifier: GPL-3.0-or-later
+Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+-->
+
 
 # CLI Matrix
 
@@ -58,6 +63,13 @@ specifics.
 | `--sim-import-enable` | enable the imported simulated profile immediately |
 | `--open-pcap <path>` | open a saved `.pcap` / `.pcapng` in the HIL decoded-APDU TUI (offline review; no bridge, no supervisor, no FIFO) |
 | `--keybag <path>` | optional keybag JSON paired with `--open-pcap`; unwraps SCP03 / SCP11c secure-messaging APDUs inline |
+| `--card-bridge` | start the local PC/SC Card Bridge daemon from the unified launcher and exit when it stops |
+| `--card-bridge-host <addr>` / `--card-bridge-port <n>` | bind address / port for the Card Bridge daemon |
+| `--card-bridge-reader-index <n>` / `--card-bridge-reader-name <text>` | select the PC/SC reader to publish |
+| `--card-bridge-token-file <path>` / `--card-bridge-no-token` | choose bearer-token storage, or disable auth for loopback-only testing |
+| `--card-bridge-audit` / `--card-bridge-audit-full-apdu` | enable header-only audit records, or full APDU hex for test-card forensics |
+| `--card-bridge-apdu-timeout-ms <n>` | PC/SC APDU timeout for the published reader |
+| `--card-bridge-pcsc-share-mode shared\|exclusive` | PC/SC sharing mode for the published reader |
 | `--gui` | launch the desktop Universal GUI Command Center (requires the `[gui]` extra) |
 | `--web-server` | launch the FastAPI Universal GUI variant (requires the `[gui-server]` extra) |
 | `--host <addr>` / `--port <n>` | bind address / port for `--web-server` |
@@ -114,6 +126,8 @@ python -m Tools.ProfilePackage --cmd "USE profile.der; LINT --strict; EXIT"
 | Installed command | Module form | Description |
 | --- | --- | --- |
 | `yggdrasim-apdu-fuzzer` | _(manual module)_ |  |
+| `yggdrasim-asn1` | _(manual module)_ |  |
+| `yggdrasim-card-bridge` | `python -m Tools.CardBridge` | Loopback PC/SC-to-HTTP APDU bridge for SSH-forwarded remote-card workflows. |
 | `yggdrasim-eum-diag` | _(manual module)_ |  |
 | `yggdrasim-hil-bridge` | `python -m Tools.HilBridge.main` | SIMtrace2-backed HIL bridge (direct). |
 | `yggdrasim-hil-supervisor` | `python -m Tools.HilBridge.supervisor` | HIL supervisor that manages the bridge and remsim-client lifecycle. |
@@ -121,10 +135,10 @@ python -m Tools.ProfilePackage --cmd "USE profile.der; LINT --strict; EXIT"
 | `yggdrasim-profile-package` | `python -m Tools.ProfilePackage` | SAIP / UPP shell, saip-tool bridge, lint engine, JSON↔DER transcode. |
 | `yggdrasim-scp03` | `python -m SCP03` | GlobalPlatform-style admin shell, card transport, TLV/CAP decoders, SGP.22 helpers. |
 | `yggdrasim-scp11` | `python -m SCP11` | Thin facade; live SGP.22 types re-exported from SCP11.live. |
-| `yggdrasim-scp11-eim-local` | `python -m SCP11.eim_local` | eIM-local package, polling, handover, and direct-card tooling. |
-| `yggdrasim-scp11-live` | `python -m SCP11.live` | eSIM management relay: orchestrator, PC/SC or relay APDU, ES9+, STK polling. |
+| `yggdrasim-scp11-eim-local` | `python -m SCP11.eim_local` | eIM-local package authoring, hotfolders, handover, and direct-card tooling. |
+| `yggdrasim-scp11-live` | `python -m SCP11.live` | eSIM management relay: orchestrator, PC/SC or relay APDU, ES9+, STK/proactive handling. |
 | `yggdrasim-scp11-local-access` | `python -m SCP11.local_access` | Local ISD-R / metadata codec / certificate helpers for on-card flows. |
-| `yggdrasim-scp11-relay` | `python -m SCP11.relay` | ES9 relay / remote APDU front-end built on shared SCP11 patterns. |
+| `yggdrasim-scp11-relay` | `python -m SCP11.relay` | Compatibility SCP11 entry point built on direct PC/SC. |
 | `yggdrasim-scp80` | `python -m SCP80` | OTA SMS-SC / CAT-TP style scripting and smart decoding. |
 | `yggdrasim-suci-tool` | `python -m Tools.SuciTool` | SUCI-related helper shell. |
 

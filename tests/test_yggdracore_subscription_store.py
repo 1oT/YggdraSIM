@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 """Tests for the YggdraCore subscription store (Tools/YggdraCore/subscription_store.py).
 
 Locks the CRUD surface and the SQN reservation arithmetic the stub
