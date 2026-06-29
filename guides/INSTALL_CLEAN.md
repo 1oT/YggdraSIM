@@ -41,8 +41,8 @@ yggdrasim-<os>-<arch>-clean-<version>[.exe]
 | Platform             | Artefact                                             |
 |----------------------|------------------------------------------------------|
 | Windows x86_64       | `yggdrasim-windows-x86_64-clean-<version>.exe`       |
-| macOS Intel          | `yggdrasim-macos-x86_64-clean-<version>`             |
 | macOS Apple Silicon  | `yggdrasim-macos-arm64-clean-<version>`              |
+| macOS Intel          | no prebuilt release bundle; use `scripts/install/install-macos.sh --mode source` |
 | Linux x86_64         | `yggdrasim-linux-x86_64-clean-<version>`             |
 | Linux arm64 / RPi OS | `yggdrasim-linux-arm64-clean-<version>` — see the Raspberry Pi guide |
 

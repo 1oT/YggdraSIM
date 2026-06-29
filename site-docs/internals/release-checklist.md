@@ -101,8 +101,8 @@ Do not mass-run. Redirect noisy runs to a log file and inspect with `rg`.
 ## Tagging and publishing
 
 The publish flow is wired end-to-end in `.github/workflows/build.yml`. Pushing
-an annotated `v*` tag triggers `docs-strict` + `pytest-suite`, the seven-way
-build matrix (Linux x86_64 / arm64 clean+full, macOS x86_64+arm64 clean,
+an annotated `v*` tag triggers `docs-strict` + `pytest-suite`, the release
+build matrix (Linux x86_64 / arm64 clean+full, macOS arm64 clean,
 Windows x86_64 clean, Debian package) and the `publish-release` job. The
 `publish-release` job:
 
@@ -143,7 +143,7 @@ The release page's body comes from the **annotated** tag message via
       `publish-release` job only runs on `refs/tags/v*`; failures in
       `docs-strict`, `pytest-suite`, or any build leg short-circuit the
       release publish.
-- [ ] confirm the GitHub Release page lists the eight asset names plus
+- [ ] confirm the GitHub Release page lists the seven asset names plus
       `SHA256SUMS`:
 
     ```
@@ -151,7 +151,6 @@ The release page's body comes from the **annotated** tag message via
     yggdrasim-linux-x86_64-full
     yggdrasim-linux-arm64-clean
     yggdrasim-linux-arm64-full
-    yggdrasim-macos-x86_64-clean
     yggdrasim-macos-arm64-clean
     yggdrasim-windows-x86_64-clean.exe
     yggdrasim-clean_X.Y.Z_amd64.deb

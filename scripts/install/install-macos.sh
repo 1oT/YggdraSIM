@@ -2,9 +2,11 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# YggdraSIM installer for macOS (x86_64 or arm64).
+# YggdraSIM installer for macOS.
 #
-# Only the clean flavor is published for macOS. The HIL bridge depends
+# Only the clean flavor is published for macOS, and prebuilt release
+# bundles are currently published for Apple Silicon arm64. Intel macOS
+# hosts remain supported through ``--mode source``. The HIL bridge depends
 # on Linux-specific tooling (udev + osmo-remsim-client-st2) and cannot
 # be installed on macOS.
 #
@@ -55,6 +57,9 @@ install_macos_prereqs() {
 
 
 install_from_release() {
+    if [ "${YG_HOST_ARCH}" = "x86_64" ]; then
+        yg_die "macOS Intel release bundles are not published; use --mode source on this host"
+    fi
     local asset
     asset="$(yg_asset_name "macos" "${YG_HOST_ARCH}" "${YG_FLAVOR}")"
     local asset_tmp

@@ -4,7 +4,7 @@
 name: Build Bundles
 
 # The matrix publishes:
-#   * clean bundles for Linux (x86_64), Windows (x86_64), macOS (x86_64+arm64)
+#   * clean bundles for Linux (x86_64), Windows (x86_64), macOS (arm64)
 #   * clean bundle for Linux arm64 via QEMU, aimed at Raspberry Pi OS 64-bit
 #   * full bundle for Linux (x86_64) — includes the HIL bridge
 #   * full bundle for Linux arm64 via QEMU, aimed at Raspberry Pi + SIMtrace2
@@ -330,8 +330,6 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - arch: x86_64
-            runner: macos-13
           - arch: arm64
             runner: macos-14
     runs-on: ${{ matrix.runner }}
@@ -494,12 +492,6 @@ jobs:
           name: yggdrasim-windows-x86_64-clean-${{ steps.meta.outputs.version }}
           path: dl/windows-x86_64-clean
 
-      - name: Download macOS x86_64 clean
-        uses: actions/download-artifact@v6
-        with:
-          name: yggdrasim-macos-x86_64-clean-${{ steps.meta.outputs.version }}
-          path: dl/macos-x86_64-clean
-
       - name: Download macOS arm64 clean
         uses: actions/download-artifact@v6
         with:
@@ -525,7 +517,6 @@ jobs:
           install -m 0755 dl/linux-x86_64-full/yggdrasim-full     release-assets/yggdrasim-linux-x86_64-full
           install -m 0755 dl/linux-arm64-clean/yggdrasim-clean    release-assets/yggdrasim-linux-arm64-clean
           install -m 0755 dl/linux-arm64-full/yggdrasim-full      release-assets/yggdrasim-linux-arm64-full
-          install -m 0755 dl/macos-x86_64-clean/yggdrasim-clean   release-assets/yggdrasim-macos-x86_64-clean
           install -m 0755 dl/macos-arm64-clean/yggdrasim-clean    release-assets/yggdrasim-macos-arm64-clean
           install -m 0755 dl/windows-x86_64-clean/yggdrasim-clean.exe release-assets/yggdrasim-windows-x86_64-clean.exe
           cp dl/linux-deb-clean/yggdrasim-clean_${{ steps.meta.outputs.version }}_amd64.deb release-assets/
@@ -554,7 +545,6 @@ jobs:
             yggdrasim-linux-x86_64-full
             yggdrasim-linux-arm64-clean
             yggdrasim-linux-arm64-full
-            yggdrasim-macos-x86_64-clean
             yggdrasim-macos-arm64-clean
             yggdrasim-windows-x86_64-clean.exe
             SHA256SUMS

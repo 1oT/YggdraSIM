@@ -660,7 +660,7 @@ The suite is published in two executable flavors and a source option:
 
 | Flavor | Platforms | Card Bridge / remote APDU | Direct SIMtrace2 HIL | Entry point label |
 | --- | --- | --- | --- | --- |
-| `clean` | Windows x86_64 / macOS x86_64 + arm64 / Linux x86_64 / Raspberry Pi arm64 | bundled | not bundled | `yggdrasim-clean[.exe]` |
+| `clean` | Windows x86_64 / macOS arm64 / Linux x86_64 / Raspberry Pi arm64 | bundled | not bundled | `yggdrasim-clean[.exe]` |
 | `full`  | Linux x86_64 only | bundled | bundled (requires SIMtrace2 + `osmo-remsim-client-st2` at runtime) | `yggdrasim-full` |
 | source  | any supported Python host | available | Linux only via `pip install -e '.[hil]'` | `yggdrasim` from `main/main.py` |
 

@@ -15,7 +15,7 @@ Each of those is published in two **flavors**:
 
 | Flavor | Card Bridge / remote APDU | Direct SIMtrace2 HIL | Platforms | Dependencies |
 |--------|---------------------------|----------------------|-----------|--------------|
-| `clean` | Yes | No | Windows / macOS / Linux / Raspberry Pi arm64 | core only, no `pyudev`, no SIMtrace2 |
+| `clean` | Yes | No | Windows / macOS arm64 / Linux / Raspberry Pi arm64 | core only, no `pyudev`, no SIMtrace2 |
 | `full`  | Yes | Yes | Linux x86_64 | core + `pyudev` + `osmo-remsim-client-st2` on host |
 
 The active flavor is controlled by the `YGGDRASIM_FLAVOR` environment
