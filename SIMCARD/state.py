@@ -189,6 +189,61 @@ class SimProfileRfmInstance:
 
 
 @dataclass
+class SimProfileCdmaParameter:
+    """SAIP ``cdmaParameter`` ProfileElement projection."""
+
+    authentication_key: bytes = b""
+    ssd: bytes = b""
+    hrpd_access_authentication_data: bytes = b""
+    simple_ip_authentication_data: bytes = b""
+    mobile_ip_authentication_data: bytes = b""
+
+
+@dataclass
+class SimProfileApplicationPackage:
+    """SAIP ``application.loadBlock`` package payload."""
+
+    load_package_aid: str = ""
+    security_domain_aid: str = ""
+    non_volatile_code_limit: bytes = b""
+    load_block_object: bytes = b""
+
+
+@dataclass
+class SimProfileApplicationInstance:
+    """SAIP ``application.instanceList`` application registry entry."""
+
+    application_load_package_aid: str = ""
+    class_aid: str = ""
+    instance_aid: str = ""
+    privileges: bytes = b""
+    lifecycle_state: int = 0x07
+    application_specific_parameters: bytes = b""
+    uicc_toolkit_parameters: bytes = b""
+    uicc_access_parameters: bytes = b""
+    process_data: list[bytes] = field(default_factory=list)
+
+
+@dataclass
+class SimProfileNonStandardBlob:
+    """SAIP ``nonStandard`` vendor extension payload."""
+
+    issuer_oid: str = ""
+    content: bytes = b""
+
+
+@dataclass
+class SimProfileSsimEaptlsBundle:
+    """SAIP 3.4 ``ssimEaptls`` certificate/key bundle."""
+
+    instance_aid: str = ""
+    ca_certificate: bytes = b""
+    client_certificate: bytes = b""
+    client_certificate_chain: bytes = b""
+    client_private_key: bytes = b""
+
+
+@dataclass
 class SimProfileImage:
     profile_name: str = ""
     iccid: str = ""
@@ -215,6 +270,20 @@ class SimProfileImage:
     # but available to ``SIMCARD.scp80`` so OTA dispatch can be wired
     # up without re-parsing the BPP.
     rfm_instances: list[SimProfileRfmInstance] = field(default_factory=list)
+    # ProfileHeader metadata not already projected to top-level fields.
+    header_major_version: int = 0
+    header_minor_version: int = 0
+    header_pol: bytes = b""
+    header_mandatory_services: tuple[str, ...] = field(default_factory=tuple)
+    header_mandatory_gfste: tuple[str, ...] = field(default_factory=tuple)
+    header_mandatory_aids: tuple[tuple[str, str], ...] = field(default_factory=tuple)
+    header_iot_pix: bytes = b""
+    # SAIP metadata PEs that do not directly materialise EF nodes.
+    cdma_parameter: SimProfileCdmaParameter | None = None
+    application_packages: list[SimProfileApplicationPackage] = field(default_factory=list)
+    application_instances: list[SimProfileApplicationInstance] = field(default_factory=list)
+    non_standard_blobs: list[SimProfileNonStandardBlob] = field(default_factory=list)
+    ssim_eaptls_bundles: list[SimProfileSsimEaptlsBundle] = field(default_factory=list)
 
 
 @dataclass

@@ -28,14 +28,19 @@ from SIMCARD.saip_pysim_specs import (
 # in stripped deployments without pySim.
 apply_pysim_service_table_overlay_to_inspector()
 from SIMCARD.state import (
+    SimProfileApplicationInstance,
+    SimProfileApplicationPackage,
     SimProfileAuthConfig,
+    SimProfileCdmaParameter,
     SimProfileFsNode,
     SimProfileImage,
+    SimProfileNonStandardBlob,
     SimProfilePinEntry,
     SimProfilePukEntry,
     SimProfileRfmInstance,
     SimProfileSecurityDomain,
     SimProfileSecurityDomainKey,
+    SimProfileSsimEaptlsBundle,
 )
 from SIMCARD.utils import decode_imsi_ef, encode_iccid_ef, encode_imsi_ef, read_tlv
 
@@ -769,6 +774,30 @@ def _install_pysim_aliases(specs: dict[str, dict[str, Any]]) -> None:
 _install_pysim_aliases(_FILE_SPECS)
 
 
+_NOOP_PE_TYPES = frozenset({"end", "iot", "opt-iot", "ssim"})
+
+
+def known_profile_element_types() -> frozenset[str]:
+    """Return ProfileElement names understood by the SAIP loader."""
+
+    return frozenset(_SECTION_SPECS) | _NOOP_PE_TYPES | frozenset(
+        {
+            "header",
+            "genericFileManagement",
+            "pinCodes",
+            "pukCodes",
+            "akaParameter",
+            "cdmaParameter",
+            "securityDomain",
+            "rfm",
+            "application",
+            "nonStandard",
+            "ssimEaptls",
+            "ssim-eaptls",
+        }
+    )
+
+
 def decode_profile_image(
     upp_bytes: bytes,
     *,
@@ -865,25 +894,18 @@ def _extract_profile_identity_from_header_tlv(profile_bytes: bytes) -> tuple[str
 
 def _consume_profile_element(image: SimProfileImage, pe_type: str, decoded: dict[str, Any]) -> None:
     if pe_type == "header":
-        profile_name = decoded.get("profileType")
-        if isinstance(profile_name, str) and len(profile_name.strip()) > 0:
-            image.profile_name = profile_name.strip()
-        header_iccid = decoded.get("iccid")
-        if isinstance(header_iccid, (bytes, bytearray, memoryview)) and len(header_iccid) > 0:
-            image.iccid = bytes(header_iccid).hex().upper().rstrip("F")
-        # TCA Profile Interoperability §3.4.2 connectivityParameters.
-        # The SAIP header carries an optional TLV stream describing the
-        # MNO bearer (BIP / RAM-HTTP). The bytes are kept verbatim so
-        # SGP.32 ES10b.GetConnectivityParameters can return them
-        # unmodified; conversion to the [1] httpParams OCTET STRING is
-        # done by the SGP layer.
-        connectivity_value = decoded.get("connectivityParameters")
-        if isinstance(connectivity_value, (bytes, bytearray, memoryview)):
-            image.connectivity_params_http = bytes(connectivity_value)
+        _consume_profile_header(image, decoded)
+        return
+
+    if pe_type in _NOOP_PE_TYPES:
         return
 
     if pe_type == "akaParameter":
         _consume_aka_parameter(image, decoded)
+        return
+
+    if pe_type == "cdmaParameter":
+        _consume_cdma_parameter(image, decoded)
         return
 
     if pe_type == "pinCodes":
@@ -900,6 +922,18 @@ def _consume_profile_element(image: SimProfileImage, pe_type: str, decoded: dict
 
     if pe_type == "rfm":
         _consume_rfm(image, decoded)
+        return
+
+    if pe_type == "application":
+        _consume_application(image, decoded)
+        return
+
+    if pe_type == "nonStandard":
+        _consume_non_standard(image, decoded)
+        return
+
+    if pe_type in ("ssimEaptls", "ssim-eaptls"):
+        _consume_ssim_eaptls(image, decoded)
         return
 
     if pe_type == "genericFileManagement":
@@ -1022,6 +1056,235 @@ def _consume_profile_element(image: SimProfileImage, pe_type: str, decoded: dict
                 link_path=attrs.link_path,
             )
         )
+
+
+def _consume_profile_header(image: SimProfileImage, decoded: dict[str, Any]) -> None:
+    profile_name = decoded.get("profileType")
+    if isinstance(profile_name, str) and len(profile_name.strip()) > 0:
+        image.profile_name = profile_name.strip()
+    image.header_major_version = _coerce_uint8(decoded.get("major-version"))
+    image.header_minor_version = _coerce_uint8(decoded.get("minor-version"))
+    header_iccid = decoded.get("iccid")
+    if isinstance(header_iccid, (bytes, bytearray, memoryview)) and len(header_iccid) > 0:
+        image.iccid = bytes(header_iccid).hex().upper().rstrip("F")
+    image.header_pol = _coerce_octet_string(decoded.get("pol"))
+    image.header_mandatory_services = _coerce_service_names(
+        decoded.get("eUICC-Mandatory-services")
+    )
+    image.header_mandatory_gfste = _coerce_string_tuple(
+        decoded.get("eUICC-Mandatory-GFSTEList")
+    )
+    image.header_mandatory_aids = _coerce_header_aids(
+        decoded.get("eUICC-Mandatory-AIDs")
+    )
+    iot_options = decoded.get("iotOptions")
+    if isinstance(iot_options, dict):
+        image.header_iot_pix = _coerce_octet_string(iot_options.get("pix"))
+    # TCA Profile Interoperability §3.4.2 connectivityParameters.
+    # The SAIP header carries an optional TLV stream describing the
+    # MNO bearer (BIP / RAM-HTTP). The bytes are kept verbatim so
+    # SGP.32 ES10b.GetConnectivityParameters can return them
+    # unmodified; conversion to the [1] httpParams OCTET STRING is
+    # done by the SGP layer.
+    connectivity_value = decoded.get("connectivityParameters")
+    if isinstance(connectivity_value, (bytes, bytearray, memoryview)):
+        image.connectivity_params_http = bytes(connectivity_value)
+
+
+def _consume_cdma_parameter(image: SimProfileImage, decoded: dict[str, Any]) -> None:
+    authentication_key = _coerce_octet_string(decoded.get("authenticationKey"))
+    # 3GPP2 C.S0023 fixes the CDMA A-Key at 64 bits.
+    if len(authentication_key) != 8:
+        return
+    image.cdma_parameter = SimProfileCdmaParameter(
+        authentication_key=authentication_key,
+        ssd=_coerce_octet_string(decoded.get("ssd")),
+        hrpd_access_authentication_data=_coerce_octet_string(
+            decoded.get("hrpdAccessAuthenticationData")
+        ),
+        simple_ip_authentication_data=_coerce_octet_string(
+            decoded.get("simpleIPAuthenticationData")
+        ),
+        mobile_ip_authentication_data=_coerce_octet_string(
+            decoded.get("mobileIPAuthenticationData")
+        ),
+    )
+
+
+def _consume_application(image: SimProfileImage, decoded: dict[str, Any]) -> None:
+    load_block = decoded.get("loadBlock")
+    if isinstance(load_block, dict):
+        load_package_aid = _coerce_aid_hex(load_block.get("loadPackageAID"))
+        if len(load_package_aid) > 0:
+            image.application_packages.append(
+                SimProfileApplicationPackage(
+                    load_package_aid=load_package_aid,
+                    security_domain_aid=_coerce_aid_hex(
+                        load_block.get("securityDomainAID")
+                    ),
+                    non_volatile_code_limit=_coerce_octet_string(
+                        load_block.get("nonVolatileCodeLimitC6")
+                    ),
+                    load_block_object=_coerce_octet_string(
+                        load_block.get("loadBlockObject")
+                    ),
+                )
+            )
+
+    instance_list = decoded.get("instanceList")
+    if isinstance(instance_list, list) is False:
+        return
+    for entry in instance_list:
+        if isinstance(entry, dict) is False:
+            continue
+        instance_aid = _coerce_aid_hex(entry.get("instanceAID"))
+        if len(instance_aid) == 0:
+            continue
+        application_parameters = entry.get("applicationParameters")
+        toolkit_parameters = b""
+        access_parameters = b""
+        if isinstance(application_parameters, dict):
+            toolkit_parameters = _coerce_octet_string(
+                application_parameters.get("uiccToolkitApplicationSpecificParametersField")
+            )
+            access_parameters = _coerce_octet_string(
+                application_parameters.get("uiccAccessApplicationSpecificParametersField")
+            )
+        image.application_instances.append(
+            SimProfileApplicationInstance(
+                application_load_package_aid=_coerce_aid_hex(
+                    entry.get("applicationLoadPackageAID")
+                ),
+                class_aid=_coerce_aid_hex(entry.get("classAID")),
+                instance_aid=instance_aid,
+                privileges=_coerce_octet_string(entry.get("applicationPrivileges")),
+                lifecycle_state=_coerce_byte(entry.get("lifeCycleState")) or 0x07,
+                application_specific_parameters=_coerce_octet_string(
+                    entry.get("applicationSpecificParametersC9")
+                ),
+                uicc_toolkit_parameters=toolkit_parameters,
+                uicc_access_parameters=access_parameters,
+                process_data=_coerce_octet_string_list(entry.get("processData")),
+            )
+        )
+
+
+def _consume_non_standard(image: SimProfileImage, decoded: dict[str, Any]) -> None:
+    issuer_oid = _coerce_oid_text(decoded.get("issuerID"))
+    if len(issuer_oid) == 0:
+        return
+    image.non_standard_blobs.append(
+        SimProfileNonStandardBlob(
+            issuer_oid=issuer_oid,
+            content=_coerce_octet_string(decoded.get("content")),
+        )
+    )
+
+
+def _consume_ssim_eaptls(image: SimProfileImage, decoded: dict[str, Any]) -> None:
+    bundle = SimProfileSsimEaptlsBundle(
+        instance_aid=_coerce_aid_hex(_get_any(decoded, "instanceAID", "instance-aid")),
+        ca_certificate=_coerce_octet_string(
+            _get_any(decoded, "caCertificate", "ca-certificate")
+        ),
+        client_certificate=_coerce_octet_string(
+            _get_any(decoded, "clientCertificate", "client-certificate")
+        ),
+        client_certificate_chain=_coerce_octet_string(
+            _get_any(decoded, "clientCertificateChain", "client-certificate-chain")
+        ),
+        client_private_key=_coerce_octet_string(
+            _get_any(decoded, "clientPrivateKey", "client-private-key")
+        ),
+    )
+    if (
+        len(bundle.instance_aid) == 0
+        and len(bundle.ca_certificate) == 0
+        and len(bundle.client_certificate) == 0
+        and len(bundle.client_certificate_chain) == 0
+        and len(bundle.client_private_key) == 0
+    ):
+        return
+    image.ssim_eaptls_bundles.append(bundle)
+
+
+def _coerce_uint8(value: Any) -> int:
+    try:
+        return max(0, min(0xFF, int(value)))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _coerce_aid_hex(value: Any) -> str:
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        return bytes(value).hex().upper()
+    if isinstance(value, str):
+        return value.strip().replace(" ", "").replace(":", "").replace("-", "").upper()
+    return ""
+
+
+def _coerce_service_names(value: Any) -> tuple[str, ...]:
+    if isinstance(value, dict):
+        names = [str(item or "").strip() for item in value.keys()]
+    elif isinstance(value, (list, tuple, set)):
+        names = [str(item or "").strip() for item in value]
+    else:
+        return tuple()
+    return tuple(sorted(name for name in names if len(name) > 0))
+
+
+def _coerce_string_tuple(value: Any) -> tuple[str, ...]:
+    if isinstance(value, (list, tuple, set)) is False:
+        return tuple()
+    return tuple(str(item or "").strip() for item in value if len(str(item or "").strip()) > 0)
+
+
+def _coerce_header_aids(value: Any) -> tuple[tuple[str, str], ...]:
+    if isinstance(value, list) is False:
+        return tuple()
+    entries: list[tuple[str, str]] = []
+    for item in value:
+        if isinstance(item, dict) is False:
+            continue
+        aid_hex = _coerce_aid_hex(item.get("aid"))
+        if len(aid_hex) == 0:
+            continue
+        entries.append((aid_hex, _coerce_octet_string(item.get("version")).hex().upper()))
+    return tuple(entries)
+
+
+def _coerce_octet_string_list(value: Any) -> list[bytes]:
+    if isinstance(value, list) is False:
+        return []
+    return [
+        data
+        for data in (_coerce_octet_string(item) for item in value)
+        if len(data) > 0
+    ]
+
+
+def _coerce_oid_text(value: Any) -> str:
+    if isinstance(value, str):
+        return value.strip()
+    if isinstance(value, (list, tuple)):
+        parts: list[str] = []
+        for item in value:
+            try:
+                number = int(item)
+            except (TypeError, ValueError):
+                return ""
+            if number < 0:
+                return ""
+            parts.append(str(number))
+        return ".".join(parts)
+    return ""
+
+
+def _get_any(mapping: dict[str, Any], *keys: str) -> Any:
+    for key in keys:
+        if key in mapping:
+            return mapping.get(key)
+    return None
 
 
 def _extract_file_descriptor_dict(value: Any) -> dict[str, Any]:
