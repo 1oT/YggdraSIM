@@ -71,7 +71,7 @@ class FrozenRuntimePathTests(unittest.TestCase):
                     / "Variant O"
                     / "SM-DP+"
                     / "SM_DPauth"
-                    / "CERT_S_SM_DPauth_VARO_SIG_NIST.der"
+                    / "SM_DPauth-csr.cnf"
                 ).exists()
             )
             self.assertTrue((runtime_root / "Workspace" / "LocalSMDPP" / "profile" / "test_profile.txt").exists())

@@ -49,6 +49,13 @@ os.environ.pop("YGGDRASIM_DISALLOW_PLUGINS", None)
 _default_env("YGGDRASIM_ALLOW_QUIRKS", "1")
 
 
+@pytest.fixture(autouse=True)
+def _restore_regression_env_defaults():
+    """Restore process-wide defaults after tests that deliberately clear env vars."""
+    _default_env("YGGDRASIM_ALLOW_QUIRKS", "1")
+    yield
+
+
 def pytest_addoption(parser):
     parser.addoption(
         "--runslow",
