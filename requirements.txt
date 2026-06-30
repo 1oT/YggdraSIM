@@ -33,6 +33,7 @@ cmd2>=2.6.2,<3.0
 termcolor
 colorlog
 packaging
+requests>=2.31,<3.0
 
 # Upstream Osmocom pySim. SCP03 KDF (GPC v2.3 Amd D §4.1.5) and the
 # SCP80 / 03.48 cipher / CC primitives delegate to it for spec-citation

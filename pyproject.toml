@@ -78,6 +78,7 @@ dependencies = [
     "termcolor",
     "colorlog",
     "packaging",
+    "requests>=2.31,<3.0",
     "pyyaml",
     "textual>=0.47.0",
     "dnspython>=2.4",
