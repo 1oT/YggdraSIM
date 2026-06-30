@@ -30,10 +30,15 @@ The following files are GSMA SGP.26 public test material:
   ES9+/ES10 certificate chain inside the local test mode.
 - Everything below `SCP11/SGP.26_test_Certs/` — the OpenSSL `*.cnf`
   inputs (CSR / extension config) that build the corresponding
-  `.pem` / `.der` material on demand. The generated key and
-  certificate files themselves are gitignored and rebuilt locally
-  (see `SCP11/SGP.26_test_Certs/Valid Test Cases/build.sh` and the
+  `.pem` / `.der` material on demand. Most generated key and
+  certificate files remain gitignored and are rebuilt locally (see
+  `SCP11/SGP.26_test_Certs/Valid Test Cases/build.sh` and the
   matching invalid-case helpers).
+- The minimal NIST Variant O CI / EUM / eUICC / SM-DP+ auth / SM-DP+
+  profile-binding fixture set under `SCP11/SGP.26_test_Certs/Valid Test
+  Cases/` is intentionally tracked so clean CI checkouts can run the
+  local-access and simulated-backend regression suite without a
+  certificate generation step.
 
 The `SCP11/local_access/certs/`, `SCP11/eim_local/certs/`, and
 `SCP11/test/certs/` subtrees follow the same posture: they hold either
