@@ -303,7 +303,7 @@ class SaipProfileLinterTests(unittest.TestCase):
         # printable digit string — this is the canonical SAIP
         # arrangement.
         doc = self._profile_with_iccid_fields(
-            header_iccid=bytes.fromhex("89880811111111111112"),
+            header_iccid=bytes.fromhex("89460811111111111112"),
             ef_iccid_content=bytes.fromhex("98648011111111111121"),
         )
         report = SaipProfileLinter(strict=False).lint_decoded_document(
@@ -314,7 +314,7 @@ class SaipProfileLinterTests(unittest.TestCase):
 
     def test_iccid_consistency_skip_when_ef_iccid_absent(self) -> None:
         doc = self._profile_with_iccid_fields(
-            header_iccid=bytes.fromhex("89880811111111111112"),
+            header_iccid=bytes.fromhex("89460811111111111112"),
             ef_iccid_content=None,
         )
         report = SaipProfileLinter(strict=False).lint_decoded_document(
@@ -330,7 +330,7 @@ class SaipProfileLinterTests(unittest.TestCase):
         # the **leading** nibble of the last byte. Both decode to the
         # same 19-digit string, so the consistency check must pass.
         doc = self._profile_with_iccid_fields(
-            header_iccid=bytes.fromhex("8988081111111111111F"),
+            header_iccid=bytes.fromhex("8946081111111111111F"),
             ef_iccid_content=bytes.fromhex("986480111111111111F1"),
         )
         report = SaipProfileLinter(strict=False).lint_decoded_document(

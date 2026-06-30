@@ -4653,7 +4653,7 @@ class SaipProfileLinter:
     #
     # TS 35.231 Annex F.1 defines TUAK K as 128 or 256 bits, so the linter
     # accepts both 16-byte and 32-byte K material. TOPc tracks K width
-    # (128-bit TUAK → 16-byte TOPc, 256-bit TUAK → 32-byte TOPc).
+    # (128-bit TUAK -> 16-byte TOPc, 256-bit TUAK -> 32-byte TOPc).
     _AKA_ALGO_SPECS: dict[int, tuple[tuple[int, ...], str, tuple[int, ...], str]] = {
         1: ((16,), "opc",  (16,), "MILENAGE"),
         2: ((16, 32), "topc", (16, 32), "TUAK"),
@@ -4676,7 +4676,7 @@ class SaipProfileLinter:
         Validates ``PE-AKAParameter`` / ``PE-AKAParameter2`` key material:
 
         - ``YRL-AKA-001``: K field (``key``) must be 16 B for MILENAGE /
-          XOR-test, 32 B for TUAK (3GPP TS 35.206 §8, TS 35.231 §8).
+          XOR-test, 16 or 32 B for TUAK (3GPP TS 35.206 §8, TS 35.231 §8).
         - ``YRL-AKA-002``: OP(c) / TOP(c) byte length must match algorithm.
         - ``YRL-AKA-003``: Fixed-length SGP.22 §B.3 fields out of spec
           (``algorithmOptions`` 1 B, ``authCounterMax`` 3 B, ``sqnDelta``
@@ -4750,6 +4750,14 @@ class SaipProfileLinter:
         if key_hex and self._looks_like_hex(key_hex):
             actual_key_bytes = len(key_hex) // 2
             if actual_key_bytes not in key_bytes_allowed:
+                allowed_key_bytes = sorted(set(key_bytes_allowed))
+                evidence = {
+                    "algorithm": algo_name,
+                    "actual_bytes": actual_key_bytes,
+                    "allowed_bytes": allowed_key_bytes,
+                }
+                if len(allowed_key_bytes) == 1:
+                    evidence["expected_bytes"] = allowed_key_bytes[0]
                 self._add(
                     code="YRL-AKA-001",
                     severity="FAIL",
@@ -4757,16 +4765,12 @@ class SaipProfileLinter:
                     path=f"{section_key}.algoConfiguration.key",
                     message=(
                         f"{algo_name} K field is {actual_key_bytes} B; allowed "
-                        f"sizes: {sorted(set(key_bytes_allowed))} B."
+                        f"sizes: {allowed_key_bytes} B."
                     ),
                     recommendation=(
-                        f"Re-encode K as one of {sorted(set(key_bytes_allowed))} bytes."
+                        f"Re-encode K as one of {allowed_key_bytes} bytes."
                     ),
-                    evidence={
-                        "algorithm": algo_name,
-                        "actual_bytes": actual_key_bytes,
-                        "allowed_bytes": sorted(set(key_bytes_allowed)),
-                    },
+                    evidence=evidence,
                 )
 
         # OP(c) / TOP(c). When TUAK K and TOPc widths must match, prefer the

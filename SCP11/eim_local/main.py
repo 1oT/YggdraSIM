@@ -134,6 +134,7 @@ class EimLocalShell:
             "HOTFOLDER-METADATA": self._cmd_hotfolder_metadata,
             "HOTFOLDER-FETCH": self._cmd_hotfolder_fetch,
             "HOTFOLDER-CAMPAIGN": self._cmd_hotfolder_campaign,
+            "POLL-CAMPAIGN": self._cmd_hotfolder_campaign,
             "HOTFOLDER-EXPORT": self._cmd_hotfolder_export,
             "HOTFOLDER-AGGREGATE": self._cmd_hotfolder_aggregate,
             "ADD-INITIAL-EIM": self._cmd_add_initial_eim,
@@ -251,6 +252,8 @@ class EimLocalShell:
             "HOTFOLDER-CLEAR": {"usage": "HOTFOLDER-CLEAR", "summary": "Clear hotfolder override path.", "examples": ["HOTFOLDER-CLEAR"]},
             "HOTFOLDER-LIST": {"usage": "HOTFOLDER-LIST [directory] [--json|--yaml]", "summary": "Preview the effective package queue without issuing.", "examples": ["HOTFOLDER-LIST", "HOTFOLDER-LIST --json", "HOTFOLDER-LIST --yaml", "HOTFOLDER-LIST Workspace/LocalEIM/eim_packages/hotfolder --json"]},
             "HOTFOLDER-FETCH": {"usage": "HOTFOLDER-FETCH [directory] [--json|--yaml]", "summary": "Issue the effective package queue in deterministic order.", "examples": ["HOTFOLDER-FETCH", "HOTFOLDER-FETCH --json", "HOTFOLDER-FETCH --yaml"]},
+            "POLL-CAMPAIGN": {"usage": "POLL-CAMPAIGN [cycles] [intervalMs] [hotfolderDir] [--until-empty] [--max-cycles n] [--json|--yaml]", "summary": "Run a deterministic hotfolder queue campaign and print cycle results.", "examples": ["POLL-CAMPAIGN", "POLL-CAMPAIGN 5 0 --until-empty", "POLL-CAMPAIGN 10 1000 Workspace/LocalEIM/eim_packages/hotfolder"]},
+            "HOTFOLDER-CAMPAIGN": {"usage": "HOTFOLDER-CAMPAIGN [cycles] [intervalMs] [hotfolderDir] [--until-empty] [--max-cycles n] [--json|--yaml]", "summary": "Run a deterministic hotfolder queue campaign and print cycle results.", "examples": ["HOTFOLDER-CAMPAIGN", "HOTFOLDER-CAMPAIGN 5 0 --until-empty"]},
             "ADD-INITIAL-EIM": {"usage": "ADD-INITIAL-EIM [package|isdr] [certPath] [packagePath]", "summary": "Issue AddInitialEim using package or ISDR mode, with card-aware cert auto-selection when certPath is omitted.", "examples": ["ADD-INITIAL-EIM isdr", "ADD-INITIAL-EIM package Workspace/LocalEIM/eim_packages/templates/template_add_initial_eim.json"]},
             "ADD-EIM": {"usage": "ADD-EIM [package|isdr] [certPath] [packagePath]", "summary": "Issue AddEim using package or ISDR mode, with card-aware cert auto-selection when certPath is omitted.", "examples": ["ADD-EIM package", "ADD-EIM package Workspace/LocalEIM/eim_packages/templates/template_add_eim.json"]},
             "ISDR-ADD-INITIAL-EIM": {"usage": "ISDR-ADD-INITIAL-EIM [certPath] [packagePath]", "summary": "Validate AddInitialEim directly on-card, with package-through-local-auth when packagePath is supplied.", "examples": ["ISDR-ADD-INITIAL-EIM /path/to/local_eim_signing_cert.pem", "ISDR-ADD-INITIAL-EIM Workspace/LocalEIM/eim_packages/templates/template_add_initial_eim.json"]},
@@ -1040,6 +1043,7 @@ class EimLocalShell:
             self._help_row("HOTFOLDER-CLEAR", "HOTFOLDER-CLEAR"),
             self._help_row("HOTFOLDER-LIST [dir] [--json|--yaml]", "HOTFOLDER-LIST"),
             self._help_row("HOTFOLDER-FETCH [dir] [--json|--yaml]", "HOTFOLDER-FETCH"),
+            self._help_row("POLL-CAMPAIGN [cycles] [intervalMs] [...]", "POLL-CAMPAIGN"),
         ]
         diagnostic_rows = [
             self._help_row("STATUS", "STATUS"),
@@ -1460,6 +1464,9 @@ class EimLocalShell:
             return "-"
         return self._HOTFOLDER_CAMPAIGN_TYPE_CODES.get(normalized, normalized)
 
+    def _compact_poll_campaign_type(self, kind: str) -> str:
+        return self._compact_hotfolder_campaign_type(kind)
+
     def _hotfolder_campaign_common_base(self, rows: list[dict[str, Any]]) -> str:
         paths: list[str] = []
         for row in rows:
@@ -1477,6 +1484,9 @@ class EimLocalShell:
             return os.path.commonpath(paths)
         except ValueError:
             return ""
+
+    def _poll_campaign_common_base(self, rows: list[dict[str, Any]]) -> str:
+        return self._hotfolder_campaign_common_base(rows)
 
     def _print_hotfolder_campaign_rows(self, rows: list[dict[str, Any]]) -> None:
         if len(rows) == 0:
@@ -1504,6 +1514,9 @@ class EimLocalShell:
                 print(f"    {cycle_cell}  {'no-package':<11}  {'':>4}   result={code_text} ({name})")
             if len(error_text) > 0:
                 print(f"    {' ' * cycle_width}  [error] {error_text}")
+
+    def _print_poll_campaign_rows(self, rows: list[dict[str, Any]]) -> None:
+        self._print_hotfolder_campaign_rows(rows)
 
     def _cmd_hotfolder_export(self, argument: str = "") -> None:
         parts = argument.split()

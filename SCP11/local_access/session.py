@@ -44,6 +44,7 @@ _SMPP_STUB_MODULES = [
     "smpp.pdu.pdu_types",
     "smpp.pdu.operations",
 ]
+_DEFAULT_PCSC_CHANNEL = object()
 
 
 def _install_minimal_smartcard_stubs() -> None:
@@ -458,9 +459,13 @@ class LocalIsdrSession:
     TAG_CTX_0 = b"\xA0"
     TAG_RESULT = b"\x80"
 
-    def __init__(self, cfg: Optional[LocalAccessConfig] = None, apdu_channel: Optional[Any] = None):
+    def __init__(self, cfg: Optional[LocalAccessConfig] = None, apdu_channel: Any = _DEFAULT_PCSC_CHANNEL):
         self.cfg = cfg or LocalAccessConfig()
-        self.apdu_channel = apdu_channel or PcscApduChannel(reader_index=self.cfg.READER_INDEX)
+        self.apdu_channel = (
+            PcscApduChannel(reader_index=self.cfg.READER_INDEX)
+            if apdu_channel is _DEFAULT_PCSC_CHANNEL
+            else apdu_channel
+        )
         set_raw_logging = getattr(self.apdu_channel, "set_raw_apdu_logging", None)
         if callable(set_raw_logging):
             set_raw_logging(False)

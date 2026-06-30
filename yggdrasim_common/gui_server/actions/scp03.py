@@ -417,7 +417,7 @@ def _dispatch_read_selected(
     # path-walk branch always pre-selects MF before the leaf.
     walked_path = _normalise_fs_path(path_s)
 
-    # Hard-anchor to MF before any MF-rooted FS read. Prior dispatchers
+    # Hard-anchor to MF before MF-rooted FS reads. Prior dispatchers
     # (card-info probe, cert-info, raw SELECT-by-AID, sgp22 / sgp32
     # helpers, anything that punches into ISD-R or ECASD) leave the
     # card's current DF pointing away from MF. The fs_controller's
@@ -429,11 +429,8 @@ def _dispatch_read_selected(
     # guarantees the subsequent walk starts from a clean slate. This
     # closes the "FS → any AID → FS click no longer reads" regression.
     #
-    # Always restore to MF before any SELECT. After ISD-R, ECASD, or
-    # raw APDU operations the card's current DF can drift. Unconditionally
-    # anchoring to MF is a single cheap APDU (00A40004023F00) with no
-    # side-effects, and guarantees every file-tree click starts clean.
-    _restore_fs_root_best_effort(session)
+    if "/" in walked_path or walked_path.upper() == "MF":
+        _restore_fs_root_best_effort(session)
 
     # SELECT — capture the (noisy) CLI print so we can bubble the trace
     # back to the UI without polluting the server log. Any PC/SC layer

@@ -101,6 +101,8 @@ class _SimulatorEimLoopbackBase(unittest.TestCase):
             {
                 CARD_BACKEND_ENV: "sim",
                 "YGGDRASIM_RUNTIME_ROOT": str(runtime_root),
+                "YGGDRASIM_ALLOW_QUIRKS": "1",
+                "YGGDRASIM_DISABLE_QUIRKS": "",
                 SIM_EUICC_STORE_ENV: str(euicc_store),
                 SIM_PROFILE_STORE_ENV: str(profile_store),
                 SIM_EIM_IDENTITY_ENV: str(eim_identity),

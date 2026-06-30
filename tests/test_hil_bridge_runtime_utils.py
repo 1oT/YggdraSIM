@@ -15,6 +15,7 @@ import json
 import os
 import tempfile
 import unittest
+from unittest import mock
 
 from yggdrasim_common.hil_bridge_runtime import (
     is_hil_bridge_running,
@@ -147,8 +148,10 @@ class IsHilBridgeRunningTests(unittest.TestCase):
         self.assertIsInstance(result, bool)
 
     def test_false_when_no_state_file(self) -> None:
-        # No supervisor state exists in the test environment.
-        result = is_hil_bridge_running()
+        from yggdrasim_common import hil_bridge_runtime
+
+        with mock.patch.object(hil_bridge_runtime, "read_supervisor_state", return_value={}):
+            result = is_hil_bridge_running()
         self.assertFalse(result)
 
 

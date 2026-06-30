@@ -10366,6 +10366,23 @@ def _dispatch_update_profile_header_field(
     return _profile_header_finish(sid, handle, pe_index, [summary])
 
 
+def _dispatch_set_profile_header_versions(
+    ctx: ActionContext,
+    *,
+    session_id: Any = None,
+    major: Any = None,
+    minor: Any = None,
+) -> dict[str, Any]:
+    """Compatibility dispatcher for the typed ProfileHeader version editor."""
+    from Tools.ProfilePackage.saip_profile_header_edit import set_major_minor_version
+
+    sid, handle, _section_key, header_dict, pe_index = (
+        _profile_header_dispatch_prelude(session_id)
+    )
+    summary = set_major_minor_version(header_dict, major=major, minor=minor)
+    return _profile_header_finish(sid, handle, pe_index, [summary])
+
+
 def _dispatch_set_mandatory_services(
     ctx: ActionContext,
     *,
@@ -11049,6 +11066,607 @@ def _dispatch_list_cdma_field_catalog(
     from Tools.ProfilePackage.saip_cdma_edit import supported_fields
 
     return {"fields": supported_fields()}
+
+
+def _section_key_base(section_key: str) -> str:
+    """Return a section base key without a numeric duplicate suffix."""
+    return re.sub(r"_\d+$", "", str(section_key or ""))
+
+
+def _typed_pe_dispatch_prelude(
+    sid_raw: Any,
+    pe_index_raw: Any,
+    *,
+    allowed_bases: set[str],
+    label: str,
+) -> tuple[str, dict[str, Any], str, dict[str, Any], int]:
+    """Resolve a typed PE section by session and PE index."""
+    from yggdrasim_common.gui_server.sessions import get_manager
+
+    sid = str(sid_raw or "").strip()
+    if len(sid) == 0:
+        raise ValueError("session_id is required.")
+    try:
+        pe_index = int(pe_index_raw)
+    except Exception as error:
+        raise ValueError(f"pe_index must be an integer: {pe_index_raw!r}") from error
+
+    handle = get_manager().claim(sid)
+    _ensure_session_state(handle)
+    keys = _sections_by_pe_index(handle["decoded_document"])
+    if pe_index < 0 or pe_index >= len(keys):
+        raise IndexError(f"pe_index {pe_index} out of range 0..{len(keys) - 1}")
+    section_key = keys[pe_index]
+    base = _section_key_base(section_key)
+    if base not in allowed_bases:
+        raise ValueError(f"PE at index {pe_index} is {base!r}, not {label}.")
+    section = handle["decoded_document"].get("sections", {}).get(section_key)
+    if isinstance(section, dict) is False:
+        raise LookupError(f"section {section_key!r} is not a dict.")
+    return sid, handle, section_key, section, pe_index
+
+
+def _typed_pe_finish(
+    sid: str,
+    handle: dict[str, Any],
+    section_key: str,
+    section: dict[str, Any],
+    pe_index: int,
+    *,
+    summary: str | None = None,
+    projector: Any = None,
+) -> dict[str, Any]:
+    """Rebuild best-effort and return a JSON-safe typed-PE projection."""
+    from Tools.ProfilePackage.saip_json_codec import (
+        build_profile_sequence_from_document,
+    )
+
+    warnings: list[str] = []
+    try:
+        handle["pes"] = build_profile_sequence_from_document(
+            handle["decoded_document"], workspace_root=_workspace_root()
+        )
+    except Exception as error:
+        warnings.append(f"Document mutated; re-encode failed: {error}")
+    _mark_dirty(handle, pe_index)
+    payload: dict[str, Any] = {
+        "session_id": sid,
+        "section_key": section_key,
+        "pe_index": pe_index,
+    }
+    if summary is not None:
+        payload["summary"] = summary
+    if callable(projector):
+        payload.update(projector(section))
+    if warnings:
+        payload["warnings"] = warnings
+    return payload
+
+
+_SD_SECTION_BASES = {"securityDomain", "mno-sd", "mnosd", "ssd", "isdr", "isdp"}
+
+
+def _security_domain_prelude(
+    session_id: Any,
+    pe_index: Any,
+) -> tuple[str, dict[str, Any], str, dict[str, Any], int]:
+    return _typed_pe_dispatch_prelude(
+        session_id,
+        pe_index,
+        allowed_bases=_SD_SECTION_BASES,
+        label="securityDomain",
+    )
+
+
+def _dispatch_get_security_domain(
+    ctx: ActionContext,
+    *,
+    session_id: Any = None,
+    pe_index: Any = None,
+) -> dict[str, Any]:
+    """Project PE-SecurityDomain into the typed editor summary."""
+    from Tools.ProfilePackage.saip_security_domain_edit import security_domain_summary
+
+    sid, _handle, section_key, section, idx = _security_domain_prelude(session_id, pe_index)
+    payload = {
+        "session_id": sid,
+        "section_key": section_key,
+        "pe_index": idx,
+    }
+    payload.update(security_domain_summary(section))
+    return payload
+
+
+def _dispatch_add_security_domain_key(
+    ctx: ActionContext,
+    *,
+    session_id: Any = None,
+    pe_index: Any = None,
+    key_version: Any = None,
+    key_identifier: Any = None,
+    usage_qualifier_hex: Any = None,
+    key_components: Any = None,
+    key_access: Any = 0,
+    counter_hex: Any = "",
+) -> dict[str, Any]:
+    """Append a key entry to PE-SecurityDomain keyList."""
+    from Tools.ProfilePackage.saip_security_domain_edit import (
+        add_key,
+        security_domain_summary,
+    )
+
+    if isinstance(key_components, list) is False:
+        raise ValueError("key_components must be a JSON array.")
+    sid, handle, section_key, section, idx = _security_domain_prelude(session_id, pe_index)
+    summary = add_key(
+        section,
+        key_version=key_version,
+        key_identifier=key_identifier,
+        usage_qualifier_hex=str(usage_qualifier_hex or ""),
+        key_components=key_components,
+        key_access=key_access,
+        counter_hex=str(counter_hex or ""),
+    )
+    return _typed_pe_finish(
+        sid, handle, section_key, section, idx,
+        summary=summary, projector=security_domain_summary,
+    )
+
+
+def _dispatch_remove_security_domain_key(
+    ctx: ActionContext,
+    *,
+    session_id: Any = None,
+    pe_index: Any = None,
+    key_version: Any = None,
+    key_identifier: Any = None,
+) -> dict[str, Any]:
+    """Remove a key entry from PE-SecurityDomain keyList."""
+    from Tools.ProfilePackage.saip_security_domain_edit import (
+        remove_key,
+        security_domain_summary,
+    )
+
+    sid, handle, section_key, section, idx = _security_domain_prelude(session_id, pe_index)
+    summary = remove_key(section, key_version=key_version, key_identifier=key_identifier)
+    return _typed_pe_finish(
+        sid, handle, section_key, section, idx,
+        summary=summary, projector=security_domain_summary,
+    )
+
+
+def _dispatch_replace_security_domain_key(
+    ctx: ActionContext,
+    *,
+    session_id: Any = None,
+    pe_index: Any = None,
+    key_version: Any = None,
+    key_identifier: Any = None,
+    usage_qualifier_hex: Any = None,
+    key_components: Any = None,
+    key_access: Any = 0,
+    counter_hex: Any = "",
+) -> dict[str, Any]:
+    """Replace a PE-SecurityDomain key entry in place."""
+    from Tools.ProfilePackage.saip_security_domain_edit import (
+        replace_key,
+        security_domain_summary,
+    )
+
+    if isinstance(key_components, list) is False:
+        raise ValueError("key_components must be a JSON array.")
+    sid, handle, section_key, section, idx = _security_domain_prelude(session_id, pe_index)
+    summary = replace_key(
+        section,
+        key_version=key_version,
+        key_identifier=key_identifier,
+        usage_qualifier_hex=str(usage_qualifier_hex or ""),
+        key_components=key_components,
+        key_access=key_access,
+        counter_hex=str(counter_hex or ""),
+    )
+    return _typed_pe_finish(
+        sid, handle, section_key, section, idx,
+        summary=summary, projector=security_domain_summary,
+    )
+
+
+def _dispatch_add_security_domain_perso_block(
+    ctx: ActionContext,
+    *,
+    session_id: Any = None,
+    pe_index: Any = None,
+    block_hex: Any = None,
+) -> dict[str, Any]:
+    """Append an opaque SD personalisation block."""
+    from Tools.ProfilePackage.saip_security_domain_edit import (
+        add_perso_data_block,
+        security_domain_summary,
+    )
+
+    sid, handle, section_key, section, idx = _security_domain_prelude(session_id, pe_index)
+    summary = add_perso_data_block(section, str(block_hex or ""))
+    return _typed_pe_finish(
+        sid, handle, section_key, section, idx,
+        summary=summary, projector=security_domain_summary,
+    )
+
+
+def _dispatch_remove_security_domain_perso_block(
+    ctx: ActionContext,
+    *,
+    session_id: Any = None,
+    pe_index: Any = None,
+    index: Any = None,
+) -> dict[str, Any]:
+    """Remove an SD personalisation block by index."""
+    from Tools.ProfilePackage.saip_security_domain_edit import (
+        remove_perso_data_block,
+        security_domain_summary,
+    )
+
+    sid, handle, section_key, section, idx = _security_domain_prelude(session_id, pe_index)
+    try:
+        block_index = int(index)
+    except Exception as error:
+        raise ValueError(f"index must be an integer: {index!r}") from error
+    summary = remove_perso_data_block(section, block_index)
+    return _typed_pe_finish(
+        sid, handle, section_key, section, idx,
+        summary=summary, projector=security_domain_summary,
+    )
+
+
+def _dispatch_set_security_domain_instance_field(
+    ctx: ActionContext,
+    *,
+    session_id: Any = None,
+    pe_index: Any = None,
+    field: Any = None,
+    value: Any = None,
+) -> dict[str, Any]:
+    """Mutate one PE-SecurityDomain instance scalar."""
+    from Tools.ProfilePackage.saip_security_domain_edit import (
+        security_domain_summary,
+        set_instance_aid_hex,
+        set_lifecycle_state,
+        set_privileges_hex,
+    )
+
+    field_text = str(field or "").strip().lower()
+    sid, handle, section_key, section, idx = _security_domain_prelude(session_id, pe_index)
+    if field_text in ("instance_aid", "instanceaid"):
+        summary = set_instance_aid_hex(section, str(value or ""))
+    elif field_text in ("privileges", "application_privileges", "applicationprivileges"):
+        summary = set_privileges_hex(section, str(value or ""))
+    elif field_text in ("lifecycle_state", "life_cycle_state", "lifecyclestate"):
+        summary = set_lifecycle_state(section, value)
+    else:
+        raise ValueError(f"unknown SecurityDomain instance field {field!r}.")
+    return _typed_pe_finish(
+        sid, handle, section_key, section, idx,
+        summary=summary, projector=security_domain_summary,
+    )
+
+
+def _application_prelude(
+    session_id: Any,
+    pe_index: Any,
+) -> tuple[str, dict[str, Any], str, dict[str, Any], int]:
+    return _typed_pe_dispatch_prelude(
+        session_id,
+        pe_index,
+        allowed_bases={"application"},
+        label="application",
+    )
+
+
+def _dispatch_get_application(
+    ctx: ActionContext,
+    *,
+    session_id: Any = None,
+    pe_index: Any = None,
+) -> dict[str, Any]:
+    """Project PE-Application into the typed editor summary."""
+    from Tools.ProfilePackage.saip_application_edit import application_summary
+
+    sid, _handle, section_key, section, idx = _application_prelude(session_id, pe_index)
+    payload = {
+        "session_id": sid,
+        "section_key": section_key,
+        "pe_index": idx,
+    }
+    payload.update(application_summary(section))
+    return payload
+
+
+def _dispatch_add_application_instance(
+    ctx: ActionContext,
+    *,
+    session_id: Any = None,
+    pe_index: Any = None,
+    load_package_aid_hex: Any = None,
+    class_aid_hex: Any = None,
+    instance_aid_hex: Any = None,
+    privileges_hex: Any = None,
+    application_specific_parameters_hex: Any = "",
+    lifecycle_state: Any = 0x07,
+    extradite_sd_aid_hex: Any = "",
+    uicc_toolkit_parameters_hex: Any = "",
+    uicc_access_parameters_hex: Any = "",
+    uicc_admin_access_parameters_hex: Any = "",
+    process_data_hex_list: Any = None,
+) -> dict[str, Any]:
+    """Append an ApplicationInstance to PE-Application."""
+    from Tools.ProfilePackage.saip_application_edit import (
+        add_instance,
+        application_summary,
+    )
+
+    process_list = process_data_hex_list if isinstance(process_data_hex_list, list) else []
+    sid, handle, section_key, section, idx = _application_prelude(session_id, pe_index)
+    summary = add_instance(
+        section,
+        load_package_aid_hex=str(load_package_aid_hex or ""),
+        class_aid_hex=str(class_aid_hex or ""),
+        instance_aid_hex=str(instance_aid_hex or ""),
+        privileges_hex=str(privileges_hex or ""),
+        application_specific_parameters_hex=str(application_specific_parameters_hex or ""),
+        lifecycle_state=lifecycle_state,
+        extradite_sd_aid_hex=str(extradite_sd_aid_hex or ""),
+        uicc_toolkit_parameters_hex=str(uicc_toolkit_parameters_hex or ""),
+        uicc_access_parameters_hex=str(uicc_access_parameters_hex or ""),
+        uicc_admin_access_parameters_hex=str(uicc_admin_access_parameters_hex or ""),
+        process_data_hex_list=process_list,
+    )
+    return _typed_pe_finish(
+        sid, handle, section_key, section, idx,
+        summary=summary, projector=application_summary,
+    )
+
+
+def _dispatch_remove_application_instance(
+    ctx: ActionContext,
+    *,
+    session_id: Any = None,
+    pe_index: Any = None,
+    instance_aid_hex: Any = None,
+) -> dict[str, Any]:
+    """Remove an ApplicationInstance from PE-Application."""
+    from Tools.ProfilePackage.saip_application_edit import (
+        application_summary,
+        remove_instance,
+    )
+
+    sid, handle, section_key, section, idx = _application_prelude(session_id, pe_index)
+    summary = remove_instance(section, str(instance_aid_hex or ""))
+    return _typed_pe_finish(
+        sid, handle, section_key, section, idx,
+        summary=summary, projector=application_summary,
+    )
+
+
+def _dispatch_set_application_load_block(
+    ctx: ActionContext,
+    *,
+    session_id: Any = None,
+    pe_index: Any = None,
+    load_package_aid_hex: Any = None,
+    load_block_object_hex: Any = None,
+    security_domain_aid_hex: Any = "",
+    non_volatile_code_limit_hex: Any = "",
+    volatile_data_limit_hex: Any = "",
+    non_volatile_data_limit_hex: Any = "",
+    hash_value_hex: Any = "",
+) -> dict[str, Any]:
+    """Install or replace the PE-Application loadBlock."""
+    from Tools.ProfilePackage.saip_application_edit import (
+        application_summary,
+        set_load_block,
+    )
+
+    sid, handle, section_key, section, idx = _application_prelude(session_id, pe_index)
+    summary = set_load_block(
+        section,
+        load_package_aid_hex=str(load_package_aid_hex or ""),
+        load_block_object_hex=str(load_block_object_hex or ""),
+        security_domain_aid_hex=str(security_domain_aid_hex or ""),
+        non_volatile_code_limit_hex=str(non_volatile_code_limit_hex or ""),
+        volatile_data_limit_hex=str(volatile_data_limit_hex or ""),
+        non_volatile_data_limit_hex=str(non_volatile_data_limit_hex or ""),
+        hash_value_hex=str(hash_value_hex or ""),
+    )
+    return _typed_pe_finish(
+        sid, handle, section_key, section, idx,
+        summary=summary, projector=application_summary,
+    )
+
+
+def _dispatch_remove_application_load_block(
+    ctx: ActionContext,
+    *,
+    session_id: Any = None,
+    pe_index: Any = None,
+) -> dict[str, Any]:
+    """Remove the PE-Application loadBlock."""
+    from Tools.ProfilePackage.saip_application_edit import (
+        application_summary,
+        remove_load_block,
+    )
+
+    sid, handle, section_key, section, idx = _application_prelude(session_id, pe_index)
+    summary = remove_load_block(section)
+    return _typed_pe_finish(
+        sid, handle, section_key, section, idx,
+        summary=summary, projector=application_summary,
+    )
+
+
+def _rfm_prelude(
+    session_id: Any,
+    pe_index: Any,
+) -> tuple[str, dict[str, Any], str, dict[str, Any], int]:
+    return _typed_pe_dispatch_prelude(
+        session_id,
+        pe_index,
+        allowed_bases={"rfm"},
+        label="rfm",
+    )
+
+
+def _dispatch_get_rfm(
+    ctx: ActionContext,
+    *,
+    session_id: Any = None,
+    pe_index: Any = None,
+) -> dict[str, Any]:
+    """Project PE-RFM into the typed editor summary."""
+    from Tools.ProfilePackage.saip_rfm_edit import rfm_summary
+
+    sid, _handle, section_key, section, idx = _rfm_prelude(session_id, pe_index)
+    payload = {
+        "session_id": sid,
+        "section_key": section_key,
+        "pe_index": idx,
+    }
+    payload.update(rfm_summary(section))
+    return payload
+
+
+def _dispatch_add_rfm_tar(
+    ctx: ActionContext,
+    *,
+    session_id: Any = None,
+    pe_index: Any = None,
+    tar_hex: Any = None,
+) -> dict[str, Any]:
+    """Append a TAR to PE-RFM tarList."""
+    from Tools.ProfilePackage.saip_rfm_edit import add_tar, rfm_summary
+
+    sid, handle, section_key, section, idx = _rfm_prelude(session_id, pe_index)
+    summary = add_tar(section, str(tar_hex or ""))
+    return _typed_pe_finish(
+        sid, handle, section_key, section, idx,
+        summary=summary, projector=rfm_summary,
+    )
+
+
+def _dispatch_remove_rfm_tar(
+    ctx: ActionContext,
+    *,
+    session_id: Any = None,
+    pe_index: Any = None,
+    tar_hex: Any = None,
+) -> dict[str, Any]:
+    """Remove a TAR from PE-RFM tarList."""
+    from Tools.ProfilePackage.saip_rfm_edit import remove_tar, rfm_summary
+
+    sid, handle, section_key, section, idx = _rfm_prelude(session_id, pe_index)
+    summary = remove_tar(section, str(tar_hex or ""))
+    return _typed_pe_finish(
+        sid, handle, section_key, section, idx,
+        summary=summary, projector=rfm_summary,
+    )
+
+
+def _dispatch_set_rfm_tar_list(
+    ctx: ActionContext,
+    *,
+    session_id: Any = None,
+    pe_index: Any = None,
+    tar_hex_list: Any = None,
+) -> dict[str, Any]:
+    """Replace PE-RFM tarList."""
+    from Tools.ProfilePackage.saip_rfm_edit import rfm_summary, set_tar_list
+
+    if isinstance(tar_hex_list, list) is False:
+        raise ValueError("tar_hex_list must be a JSON array.")
+    sid, handle, section_key, section, idx = _rfm_prelude(session_id, pe_index)
+    summary = set_tar_list(section, tar_hex_list)
+    return _typed_pe_finish(
+        sid, handle, section_key, section, idx,
+        summary=summary, projector=rfm_summary,
+    )
+
+
+def _dispatch_set_rfm_field(
+    ctx: ActionContext,
+    *,
+    session_id: Any = None,
+    pe_index: Any = None,
+    field: Any = None,
+    value: Any = None,
+) -> dict[str, Any]:
+    """Mutate one PE-RFM scalar field."""
+    from Tools.ProfilePackage.saip_rfm_edit import (
+        rfm_summary,
+        set_instance_aid_hex,
+        set_minimum_security_level,
+        set_security_domain_aid_hex,
+        set_uicc_access_domain,
+        set_uicc_admin_access_domain,
+    )
+
+    field_text = str(field or "").strip().lower()
+    sid, handle, section_key, section, idx = _rfm_prelude(session_id, pe_index)
+    if field_text in ("instance_aid", "instanceaid"):
+        summary = set_instance_aid_hex(section, str(value or ""))
+    elif field_text in ("security_domain_aid", "securitydomainaid"):
+        summary = set_security_domain_aid_hex(section, str(value or ""))
+    elif field_text in ("minimum_security_level", "minimumsecuritylevel"):
+        summary = set_minimum_security_level(section, value)
+    elif field_text in ("uicc_access_domain", "uiccaccessdomain"):
+        summary = set_uicc_access_domain(section, str(value or ""))
+    elif field_text in ("uicc_admin_access_domain", "uiccadminaccessdomain"):
+        summary = set_uicc_admin_access_domain(section, str(value or ""))
+    else:
+        raise ValueError(f"unknown RFM field {field!r}.")
+    return _typed_pe_finish(
+        sid, handle, section_key, section, idx,
+        summary=summary, projector=rfm_summary,
+    )
+
+
+def _dispatch_set_rfm_adf_access(
+    ctx: ActionContext,
+    *,
+    session_id: Any = None,
+    pe_index: Any = None,
+    adf_aid_hex: Any = None,
+    adf_access_domain_hex: Any = "",
+    adf_admin_access_domain_hex: Any = "",
+) -> dict[str, Any]:
+    """Install or replace PE-RFM ADF access binding."""
+    from Tools.ProfilePackage.saip_rfm_edit import rfm_summary, set_adf_access
+
+    sid, handle, section_key, section, idx = _rfm_prelude(session_id, pe_index)
+    summary = set_adf_access(
+        section,
+        adf_aid_hex=str(adf_aid_hex or ""),
+        adf_access_domain_hex=str(adf_access_domain_hex or ""),
+        adf_admin_access_domain_hex=str(adf_admin_access_domain_hex or ""),
+    )
+    return _typed_pe_finish(
+        sid, handle, section_key, section, idx,
+        summary=summary, projector=rfm_summary,
+    )
+
+
+def _dispatch_remove_rfm_adf_access(
+    ctx: ActionContext,
+    *,
+    session_id: Any = None,
+    pe_index: Any = None,
+) -> dict[str, Any]:
+    """Remove PE-RFM ADF access binding."""
+    from Tools.ProfilePackage.saip_rfm_edit import remove_adf_access, rfm_summary
+
+    sid, handle, section_key, section, idx = _rfm_prelude(session_id, pe_index)
+    summary = remove_adf_access(section)
+    return _typed_pe_finish(
+        sid, handle, section_key, section, idx,
+        summary=summary, projector=rfm_summary,
+    )
 
 
 def _dispatch_list_mandatory_service_keys(
@@ -11754,6 +12372,15 @@ _SESSION_FIELD = ActionField(
     kind="string",
     required=True,
     help="Session id returned by saip.open_package.",
+)
+
+_PE_INDEX_FIELD = ActionField(
+    name="pe_index",
+    label="PE index",
+    kind="int",
+    required=True,
+    min_value=0,
+    help="Zero-based PE index as returned by saip.list_pes.",
 )
 
 
@@ -13031,6 +13658,38 @@ UPDATE_PROFILE_HEADER_FIELD_SPEC = ActionSpec(
 )
 
 
+SET_PROFILE_HEADER_VERSIONS_SPEC = ActionSpec(
+    id="saip.set_profile_header_versions",
+    subsystem="SAIP",
+    title="Set ProfileHeader version pair",
+    description="Set the ProfileHeader major/minor SAIP version fields.",
+    inputs=(
+        _SESSION_FIELD,
+        ActionField(
+            name="major",
+            label="Major",
+            kind="int",
+            required=False,
+            min_value=0,
+            help="SAIP major version. Omit to keep the current value.",
+        ),
+        ActionField(
+            name="minor",
+            label="Minor",
+            kind="int",
+            required=False,
+            min_value=0,
+            help="SAIP minor version. Omit to keep the current value.",
+        ),
+    ),
+    output_kind="json",
+    dispatcher=_with_history(_dispatch_set_profile_header_versions),
+    requires_card=False,
+    streams=False,
+    tags=("saip", "header", "write"),
+)
+
+
 SET_MANDATORY_SERVICES_SPEC = ActionSpec(
     id="saip.set_mandatory_services",
     subsystem="SAIP",
@@ -13518,6 +14177,346 @@ LIST_CDMA_FIELD_CATALOG_SPEC = ActionSpec(
 )
 
 
+GET_SECURITY_DOMAIN_SPEC = ActionSpec(
+    id="saip.get_security_domain",
+    subsystem="SAIP",
+    title="Get PE-SecurityDomain",
+    description="Project a SecurityDomain PE into the typed editor summary.",
+    inputs=(_SESSION_FIELD, _PE_INDEX_FIELD),
+    output_kind="json",
+    dispatcher=_dispatch_get_security_domain,
+    requires_card=False,
+    streams=False,
+    tags=("saip", "security-domain", "read-only"),
+)
+
+
+ADD_SECURITY_DOMAIN_KEY_SPEC = ActionSpec(
+    id="saip.add_security_domain_key",
+    subsystem="SAIP",
+    title="Add SecurityDomain key",
+    description="Append a key entry to a SecurityDomain keyList.",
+    inputs=(
+        _SESSION_FIELD,
+        _PE_INDEX_FIELD,
+        ActionField(name="key_version", label="KVN", kind="int", required=True, min_value=0),
+        ActionField(name="key_identifier", label="KID", kind="int", required=True, min_value=0),
+        ActionField(name="usage_qualifier_hex", label="Usage qualifier", kind="string", required=True),
+        ActionField(name="key_components", label="Key components", kind="json", required=True),
+        ActionField(name="key_access", label="Key access", kind="int", required=False, default=0, min_value=0),
+        ActionField(name="counter_hex", label="Counter", kind="string", required=False, default=""),
+    ),
+    output_kind="json",
+    dispatcher=_with_history(_dispatch_add_security_domain_key),
+    requires_card=False,
+    streams=False,
+    tags=("saip", "security-domain", "write"),
+)
+
+
+REMOVE_SECURITY_DOMAIN_KEY_SPEC = ActionSpec(
+    id="saip.remove_security_domain_key",
+    subsystem="SAIP",
+    title="Remove SecurityDomain key",
+    description="Remove a key entry from a SecurityDomain keyList.",
+    inputs=(
+        _SESSION_FIELD,
+        _PE_INDEX_FIELD,
+        ActionField(name="key_version", label="KVN", kind="int", required=True, min_value=0),
+        ActionField(name="key_identifier", label="KID", kind="int", required=True, min_value=0),
+    ),
+    output_kind="json",
+    dispatcher=_with_history(_dispatch_remove_security_domain_key),
+    requires_card=False,
+    streams=False,
+    tags=("saip", "security-domain", "write"),
+)
+
+
+REPLACE_SECURITY_DOMAIN_KEY_SPEC = ActionSpec(
+    id="saip.replace_security_domain_key",
+    subsystem="SAIP",
+    title="Replace SecurityDomain key",
+    description="Replace a key entry in a SecurityDomain keyList.",
+    inputs=ADD_SECURITY_DOMAIN_KEY_SPEC.inputs,
+    output_kind="json",
+    dispatcher=_with_history(_dispatch_replace_security_domain_key),
+    requires_card=False,
+    streams=False,
+    tags=("saip", "security-domain", "write"),
+)
+
+
+ADD_SECURITY_DOMAIN_PERSO_BLOCK_SPEC = ActionSpec(
+    id="saip.add_security_domain_perso_block",
+    subsystem="SAIP",
+    title="Add SecurityDomain perso block",
+    description="Append an opaque personalisation block to sdPersoData.",
+    inputs=(
+        _SESSION_FIELD,
+        _PE_INDEX_FIELD,
+        ActionField(name="block_hex", label="Block hex", kind="string", required=True),
+    ),
+    output_kind="json",
+    dispatcher=_with_history(_dispatch_add_security_domain_perso_block),
+    requires_card=False,
+    streams=False,
+    tags=("saip", "security-domain", "write"),
+)
+
+
+REMOVE_SECURITY_DOMAIN_PERSO_BLOCK_SPEC = ActionSpec(
+    id="saip.remove_security_domain_perso_block",
+    subsystem="SAIP",
+    title="Remove SecurityDomain perso block",
+    description="Remove a personalisation block from sdPersoData by index.",
+    inputs=(
+        _SESSION_FIELD,
+        _PE_INDEX_FIELD,
+        ActionField(name="index", label="Block index", kind="int", required=True, min_value=0),
+    ),
+    output_kind="json",
+    dispatcher=_with_history(_dispatch_remove_security_domain_perso_block),
+    requires_card=False,
+    streams=False,
+    tags=("saip", "security-domain", "write"),
+)
+
+
+SET_SECURITY_DOMAIN_INSTANCE_FIELD_SPEC = ActionSpec(
+    id="saip.set_security_domain_instance_field",
+    subsystem="SAIP",
+    title="Set SecurityDomain instance field",
+    description="Mutate one SecurityDomain instance scalar.",
+    inputs=(
+        _SESSION_FIELD,
+        _PE_INDEX_FIELD,
+        ActionField(name="field", label="Field", kind="string", required=True),
+        ActionField(name="value", label="Value", kind="string", required=True),
+    ),
+    output_kind="json",
+    dispatcher=_with_history(_dispatch_set_security_domain_instance_field),
+    requires_card=False,
+    streams=False,
+    tags=("saip", "security-domain", "write"),
+)
+
+
+GET_APPLICATION_SPEC = ActionSpec(
+    id="saip.get_application",
+    subsystem="SAIP",
+    title="Get PE-Application",
+    description="Project an Application PE into the typed editor summary.",
+    inputs=(_SESSION_FIELD, _PE_INDEX_FIELD),
+    output_kind="json",
+    dispatcher=_dispatch_get_application,
+    requires_card=False,
+    streams=False,
+    tags=("saip", "application", "read-only"),
+)
+
+
+ADD_APPLICATION_INSTANCE_SPEC = ActionSpec(
+    id="saip.add_application_instance",
+    subsystem="SAIP",
+    title="Add application instance",
+    description="Append an ApplicationInstance to a PE-Application.",
+    inputs=(
+        _SESSION_FIELD,
+        _PE_INDEX_FIELD,
+        ActionField(name="load_package_aid_hex", label="Load package AID", kind="string", required=True),
+        ActionField(name="class_aid_hex", label="Class AID", kind="string", required=True),
+        ActionField(name="instance_aid_hex", label="Instance AID", kind="string", required=True),
+        ActionField(name="privileges_hex", label="Privileges", kind="string", required=True),
+        ActionField(name="application_specific_parameters_hex", label="Parameters C9", kind="string", required=False, default=""),
+        ActionField(name="lifecycle_state", label="Life cycle", kind="int", required=False, default=7, min_value=0),
+        ActionField(name="extradite_sd_aid_hex", label="Extradite SD AID", kind="string", required=False, default=""),
+        ActionField(name="uicc_toolkit_parameters_hex", label="Toolkit params", kind="string", required=False, default=""),
+        ActionField(name="uicc_access_parameters_hex", label="Access params", kind="string", required=False, default=""),
+        ActionField(name="uicc_admin_access_parameters_hex", label="Admin params", kind="string", required=False, default=""),
+        ActionField(name="process_data_hex_list", label="Process data", kind="json", required=False, default=[]),
+    ),
+    output_kind="json",
+    dispatcher=_with_history(_dispatch_add_application_instance),
+    requires_card=False,
+    streams=False,
+    tags=("saip", "application", "write"),
+)
+
+
+REMOVE_APPLICATION_INSTANCE_SPEC = ActionSpec(
+    id="saip.remove_application_instance",
+    subsystem="SAIP",
+    title="Remove application instance",
+    description="Remove an ApplicationInstance by instance AID.",
+    inputs=(
+        _SESSION_FIELD,
+        _PE_INDEX_FIELD,
+        ActionField(name="instance_aid_hex", label="Instance AID", kind="string", required=True),
+    ),
+    output_kind="json",
+    dispatcher=_with_history(_dispatch_remove_application_instance),
+    requires_card=False,
+    streams=False,
+    tags=("saip", "application", "write"),
+)
+
+
+SET_APPLICATION_LOAD_BLOCK_SPEC = ActionSpec(
+    id="saip.set_application_load_block",
+    subsystem="SAIP",
+    title="Set application load block",
+    description="Install or replace the PE-Application loadBlock.",
+    inputs=(
+        _SESSION_FIELD,
+        _PE_INDEX_FIELD,
+        ActionField(name="load_package_aid_hex", label="Load package AID", kind="string", required=True),
+        ActionField(name="load_block_object_hex", label="Load block object", kind="string", required=True),
+        ActionField(name="security_domain_aid_hex", label="Security Domain AID", kind="string", required=False, default=""),
+        ActionField(name="non_volatile_code_limit_hex", label="NV code limit", kind="string", required=False, default=""),
+        ActionField(name="volatile_data_limit_hex", label="Volatile data limit", kind="string", required=False, default=""),
+        ActionField(name="non_volatile_data_limit_hex", label="NV data limit", kind="string", required=False, default=""),
+        ActionField(name="hash_value_hex", label="Hash", kind="string", required=False, default=""),
+    ),
+    output_kind="json",
+    dispatcher=_with_history(_dispatch_set_application_load_block),
+    requires_card=False,
+    streams=False,
+    tags=("saip", "application", "write"),
+)
+
+
+REMOVE_APPLICATION_LOAD_BLOCK_SPEC = ActionSpec(
+    id="saip.remove_application_load_block",
+    subsystem="SAIP",
+    title="Remove application load block",
+    description="Remove the PE-Application loadBlock.",
+    inputs=(_SESSION_FIELD, _PE_INDEX_FIELD),
+    output_kind="json",
+    dispatcher=_with_history(_dispatch_remove_application_load_block),
+    requires_card=False,
+    streams=False,
+    tags=("saip", "application", "write"),
+)
+
+
+GET_RFM_SPEC = ActionSpec(
+    id="saip.get_rfm",
+    subsystem="SAIP",
+    title="Get PE-RFM",
+    description="Project an RFM PE into the typed editor summary.",
+    inputs=(_SESSION_FIELD, _PE_INDEX_FIELD),
+    output_kind="json",
+    dispatcher=_dispatch_get_rfm,
+    requires_card=False,
+    streams=False,
+    tags=("saip", "rfm", "read-only"),
+)
+
+
+ADD_RFM_TAR_SPEC = ActionSpec(
+    id="saip.add_rfm_tar",
+    subsystem="SAIP",
+    title="Add RFM TAR",
+    description="Append a TAR to PE-RFM tarList.",
+    inputs=(
+        _SESSION_FIELD,
+        _PE_INDEX_FIELD,
+        ActionField(name="tar_hex", label="TAR", kind="string", required=True),
+    ),
+    output_kind="json",
+    dispatcher=_with_history(_dispatch_add_rfm_tar),
+    requires_card=False,
+    streams=False,
+    tags=("saip", "rfm", "write"),
+)
+
+
+REMOVE_RFM_TAR_SPEC = ActionSpec(
+    id="saip.remove_rfm_tar",
+    subsystem="SAIP",
+    title="Remove RFM TAR",
+    description="Remove a TAR from PE-RFM tarList.",
+    inputs=ADD_RFM_TAR_SPEC.inputs,
+    output_kind="json",
+    dispatcher=_with_history(_dispatch_remove_rfm_tar),
+    requires_card=False,
+    streams=False,
+    tags=("saip", "rfm", "write"),
+)
+
+
+SET_RFM_TAR_LIST_SPEC = ActionSpec(
+    id="saip.set_rfm_tar_list",
+    subsystem="SAIP",
+    title="Set RFM TAR list",
+    description="Replace PE-RFM tarList.",
+    inputs=(
+        _SESSION_FIELD,
+        _PE_INDEX_FIELD,
+        ActionField(name="tar_hex_list", label="TAR list", kind="json", required=True),
+    ),
+    output_kind="json",
+    dispatcher=_with_history(_dispatch_set_rfm_tar_list),
+    requires_card=False,
+    streams=False,
+    tags=("saip", "rfm", "write"),
+)
+
+
+SET_RFM_FIELD_SPEC = ActionSpec(
+    id="saip.set_rfm_field",
+    subsystem="SAIP",
+    title="Set RFM field",
+    description="Mutate one PE-RFM scalar field.",
+    inputs=(
+        _SESSION_FIELD,
+        _PE_INDEX_FIELD,
+        ActionField(name="field", label="Field", kind="string", required=True),
+        ActionField(name="value", label="Value", kind="string", required=True),
+    ),
+    output_kind="json",
+    dispatcher=_with_history(_dispatch_set_rfm_field),
+    requires_card=False,
+    streams=False,
+    tags=("saip", "rfm", "write"),
+)
+
+
+SET_RFM_ADF_ACCESS_SPEC = ActionSpec(
+    id="saip.set_rfm_adf_access",
+    subsystem="SAIP",
+    title="Set RFM ADF access",
+    description="Install or replace PE-RFM ADF access binding.",
+    inputs=(
+        _SESSION_FIELD,
+        _PE_INDEX_FIELD,
+        ActionField(name="adf_aid_hex", label="ADF AID", kind="string", required=True),
+        ActionField(name="adf_access_domain_hex", label="ADF access", kind="string", required=False, default=""),
+        ActionField(name="adf_admin_access_domain_hex", label="ADF admin access", kind="string", required=False, default=""),
+    ),
+    output_kind="json",
+    dispatcher=_with_history(_dispatch_set_rfm_adf_access),
+    requires_card=False,
+    streams=False,
+    tags=("saip", "rfm", "write"),
+)
+
+
+REMOVE_RFM_ADF_ACCESS_SPEC = ActionSpec(
+    id="saip.remove_rfm_adf_access",
+    subsystem="SAIP",
+    title="Remove RFM ADF access",
+    description="Remove PE-RFM ADF access binding.",
+    inputs=(_SESSION_FIELD, _PE_INDEX_FIELD),
+    output_kind="json",
+    dispatcher=_with_history(_dispatch_remove_rfm_adf_access),
+    requires_card=False,
+    streams=False,
+    tags=("saip", "rfm", "write"),
+)
+
+
 LIST_MANDATORY_SERVICE_KEYS_SPEC = ActionSpec(
     id="saip.list_mandatory_service_keys",
     subsystem="SAIP",
@@ -13608,6 +14607,7 @@ get_registry().register(RESET_VARIABLE_SPEC)
 
 get_registry().register(GET_PROFILE_HEADER_SPEC)
 get_registry().register(UPDATE_PROFILE_HEADER_FIELD_SPEC)
+get_registry().register(SET_PROFILE_HEADER_VERSIONS_SPEC)
 get_registry().register(SET_MANDATORY_SERVICES_SPEC)
 get_registry().register(SET_MANDATORY_GFSTE_SPEC)
 get_registry().register(SET_MANDATORY_AIDS_SPEC)
@@ -13629,6 +14629,25 @@ get_registry().register(GET_CDMA_SPEC)
 get_registry().register(SET_CDMA_FIELD_SPEC)
 get_registry().register(SET_CDMA_SSD_SPLIT_SPEC)
 get_registry().register(LIST_CDMA_FIELD_CATALOG_SPEC)
+get_registry().register(GET_SECURITY_DOMAIN_SPEC)
+get_registry().register(ADD_SECURITY_DOMAIN_KEY_SPEC)
+get_registry().register(REMOVE_SECURITY_DOMAIN_KEY_SPEC)
+get_registry().register(REPLACE_SECURITY_DOMAIN_KEY_SPEC)
+get_registry().register(ADD_SECURITY_DOMAIN_PERSO_BLOCK_SPEC)
+get_registry().register(REMOVE_SECURITY_DOMAIN_PERSO_BLOCK_SPEC)
+get_registry().register(SET_SECURITY_DOMAIN_INSTANCE_FIELD_SPEC)
+get_registry().register(GET_APPLICATION_SPEC)
+get_registry().register(ADD_APPLICATION_INSTANCE_SPEC)
+get_registry().register(REMOVE_APPLICATION_INSTANCE_SPEC)
+get_registry().register(SET_APPLICATION_LOAD_BLOCK_SPEC)
+get_registry().register(REMOVE_APPLICATION_LOAD_BLOCK_SPEC)
+get_registry().register(GET_RFM_SPEC)
+get_registry().register(ADD_RFM_TAR_SPEC)
+get_registry().register(REMOVE_RFM_TAR_SPEC)
+get_registry().register(SET_RFM_TAR_LIST_SPEC)
+get_registry().register(SET_RFM_FIELD_SPEC)
+get_registry().register(SET_RFM_ADF_ACCESS_SPEC)
+get_registry().register(REMOVE_RFM_ADF_ACCESS_SPEC)
 
 
 # ----------------------------------------------------------------------

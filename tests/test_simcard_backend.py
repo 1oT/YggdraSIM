@@ -630,6 +630,8 @@ class SimulatedConnectionTests(unittest.TestCase):
                 SIM_EUICC_STORE_ENV: str(Path(self._temp_dir.name) / "euicc"),
                 SIM_ISDR_CONFIG_ENV: str(Path(self._temp_dir.name) / "missing_isdr_config.json"),
                 SIM_PROFILE_STORE_ENV: str(Path(self._temp_dir.name) / "profiles"),
+                "YGGDRASIM_ALLOW_QUIRKS": "1",
+                "YGGDRASIM_DISABLE_QUIRKS": "",
             },
             clear=False,
         )
@@ -1887,7 +1889,7 @@ metadata_overrides = {{
 
             first, second = decoded["notifications"]
             self.assertEqual(first.get("seqNumber"), "1")
-            self.assertEqual(first.get("iccid"), "89881111111111111112")
+            self.assertEqual(first.get("iccid"), "89461111111111111112")
             self.assertEqual(first.get("notificationAddress"), '"rsp.example.com"')
             self.assertEqual(second.get("seqNumber"), "2")
             self.assertEqual(second.get("iccid"), "89881111111111111129")
@@ -2609,7 +2611,7 @@ metadata_overrides = {{
                 euicc_otpk_raw=euicc_otpk_raw,
                 eid_hex="89049032123451234512345678901234",
                 cert_private_key=cert_private_key,
-                iccid="89881111111111111112",
+                iccid="89461111111111111112",
                 provider_name="Duplicate Provider",
                 profile_name="Duplicate ICCID",
                 upp_payload=b"\x01",
@@ -2942,6 +2944,8 @@ class SimulatedBackendIntegrationTests(unittest.TestCase):
                 SIM_EUICC_STORE_ENV: str(Path(self._temp_dir.name) / "euicc"),
                 SIM_ISDR_CONFIG_ENV: str(Path(self._temp_dir.name) / "missing_isdr_config.json"),
                 SIM_PROFILE_STORE_ENV: str(Path(self._temp_dir.name) / "profiles"),
+                "YGGDRASIM_ALLOW_QUIRKS": "1",
+                "YGGDRASIM_DISABLE_QUIRKS": "",
             },
             clear=False,
         )
@@ -2975,6 +2979,8 @@ class MainWrapperCardBackendTests(unittest.TestCase):
                 os.environ,
                 {
                     "YGGDRASIM_RUNTIME_ROOT": runtime_root,
+                    "YGGDRASIM_ALLOW_QUIRKS": "1",
+                    "YGGDRASIM_DISABLE_QUIRKS": "",
                     CARD_BACKEND_ENV: "reader",
                     SIM_EIM_IDENTITY_ENV: "",
                     SIM_ISDR_CONFIG_ENV: "",
@@ -3034,6 +3040,8 @@ class MainWrapperCardBackendTests(unittest.TestCase):
                 os.environ,
                 {
                     "YGGDRASIM_RUNTIME_ROOT": runtime_root,
+                    "YGGDRASIM_ALLOW_QUIRKS": "1",
+                    "YGGDRASIM_DISABLE_QUIRKS": "",
                     CARD_BACKEND_ENV: "reader",
                     SIM_EIM_IDENTITY_ENV: "",
                     SIM_ISDR_CONFIG_ENV: str(Path(temp_dir) / "missing_isdr_config.json"),
@@ -3078,6 +3086,8 @@ class MainWrapperCardBackendTests(unittest.TestCase):
                 os.environ,
                 {
                     "YGGDRASIM_RUNTIME_ROOT": runtime_root,
+                    "YGGDRASIM_ALLOW_QUIRKS": "1",
+                    "YGGDRASIM_DISABLE_QUIRKS": "",
                     CARD_BACKEND_ENV: "reader",
                     SIM_EIM_IDENTITY_ENV: "",
                     SIM_ISDR_CONFIG_ENV: "",
@@ -3167,6 +3177,8 @@ class MainWrapperCardBackendTests(unittest.TestCase):
                 os.environ,
                 {
                     "YGGDRASIM_RUNTIME_ROOT": runtime_root,
+                    "YGGDRASIM_ALLOW_QUIRKS": "1",
+                    "YGGDRASIM_DISABLE_QUIRKS": "",
                     CARD_BACKEND_ENV: "reader",
                     SIM_EIM_IDENTITY_ENV: "",
                     SIM_ISDR_CONFIG_ENV: str(Path(temp_dir) / "missing_runtime_isdr.json"),

@@ -809,10 +809,17 @@ class EimLocalSession(LocalIsdrSession):
             "profile_path": profile_path,
         }
         try:
-            response = self.run_load_profile_chain_with_transaction(
-                transaction_id=eim_txid,
-                profile_path=profile_path,
-            )
+            download_hook = getattr(self, "ipae_download", None)
+            if callable(download_hook):
+                response = download_hook(
+                    profile_path=profile_path,
+                    matching_id=resolved_matching_id,
+                )
+            else:
+                response = self.run_load_profile_chain_with_transaction(
+                    transaction_id=eim_txid,
+                    profile_path=profile_path,
+                )
             branch = self._build_profile_download_trigger_result_tlv(
                 card_response=response,
                 eim_transaction_id=eim_txid,
@@ -3078,6 +3085,19 @@ class EimLocalSession(LocalIsdrSession):
             return rows
         return []
 
+    def poll_hotfolder(
+        self,
+        cycles: int = 10,
+        interval_ms: int = 1000,
+        hotfolder_dir: str = "",
+    ) -> list[dict[str, Any]]:
+        """Compatibility alias for the former hot-folder polling name."""
+        return self.run_hotfolder_once(
+            cycles=cycles,
+            interval_ms=interval_ms,
+            hotfolder_dir=hotfolder_dir,
+        )
+
     def run_hotfolder_campaign(
         self,
         cycles: int = 10,
@@ -3176,6 +3196,23 @@ class EimLocalSession(LocalIsdrSession):
             "rows": rows,
         }
 
+    def poll_hotfolder_campaign(
+        self,
+        cycles: int = 10,
+        interval_ms: int = 1000,
+        hotfolder_dir: str = "",
+        until_empty: bool = False,
+        max_cycles: Optional[int] = None,
+    ) -> dict[str, Any]:
+        """Compatibility alias for the former campaign polling name."""
+        return self.run_hotfolder_campaign(
+            cycles=cycles,
+            interval_ms=interval_ms,
+            hotfolder_dir=hotfolder_dir,
+            until_empty=until_empty,
+            max_cycles=max_cycles,
+        )
+
     def export_campaign_report(
         self,
         campaign_report: dict[str, Any],
@@ -3226,7 +3263,10 @@ class EimLocalSession(LocalIsdrSession):
         files: list[str] = []
         for name in sorted(os.listdir(resolved)):
             lowered = name.lower()
-            if lowered.startswith("eim_hotfolder_campaign_") is False:
+            if not (
+                lowered.startswith("eim_hotfolder_campaign_")
+                or lowered.startswith("eim_poll_campaign_")
+            ):
                 continue
             if lowered.endswith(".json") is False:
                 continue
@@ -3330,6 +3370,17 @@ class EimLocalSession(LocalIsdrSession):
             "response_tlv_hex": response_tlv_hex,
         }
 
+    def hotfolder_poll_response_meta(
+        self,
+        hotfolder_dir: str = "",
+        exclude_package_paths: Optional[set[str]] = None,
+    ) -> dict[str, Any]:
+        """Compatibility alias for the former hot-folder poll metadata name."""
+        return self.hotfolder_queue_response_meta(
+            hotfolder_dir=hotfolder_dir,
+            exclude_package_paths=exclude_package_paths,
+        )
+
     def hotfolder_queue_metadata(
         self,
         hotfolder_dir: str = "",
@@ -3361,6 +3412,17 @@ class EimLocalSession(LocalIsdrSession):
             "next_file": next_file,
             "queue_preview": queue_preview,
         }
+
+    def hotfolder_poll_metadata(
+        self,
+        hotfolder_dir: str = "",
+        exclude_package_paths: Optional[set[str]] = None,
+    ) -> dict[str, Any]:
+        """Compatibility alias for the former hot-folder poll metadata name."""
+        return self.hotfolder_queue_metadata(
+            hotfolder_dir=hotfolder_dir,
+            exclude_package_paths=exclude_package_paths,
+        )
 
     def _resolve_package_endpoint(self, package_document: dict[str, Any]) -> str:
         runtime_hints = resolve_package_runtime_hints(package_document)

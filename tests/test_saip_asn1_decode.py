@@ -789,7 +789,7 @@ class SaipAsn1DecodeTests(unittest.TestCase):
                     _TAG_TUPLE: [
                         "fillFileContent",
                         {
-                            _TAG_BYTES: "800F7461676765644073696D2E74657374",
+                            _TAG_BYTES: "8013746167676564406578616D706C652E74657374",
                         },
                     ]
                 }
@@ -809,7 +809,7 @@ class SaipAsn1DecodeTests(unittest.TestCase):
                     _TAG_TUPLE: [
                         "fillFileContent",
                         {
-                            _TAG_BYTES: "80137369703A7461676765644073696D2E74657374",
+                            _TAG_BYTES: "80177369703A746167676564406578616D706C652E74657374",
                         },
                     ]
                 }
@@ -829,7 +829,7 @@ class SaipAsn1DecodeTests(unittest.TestCase):
                     _TAG_TUPLE: [
                         "fillFileContent",
                         {
-                            _TAG_BYTES: "800501C0A80C22",
+                            _TAG_BYTES: "800501C0000222",
                         },
                     ]
                 }

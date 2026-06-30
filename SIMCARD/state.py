@@ -576,6 +576,9 @@ class SimToolkitState:
     open_channel_endpoint: str = ""
     open_channel_network_access_name: str = ""
     open_channel_transport_protocol_type: int = 0
+    bip_bootstrap_phase: str = ""
+    bip_bootstrap_dns_query: bytes = b""
+    bip_bootstrap_resolved_address: str = ""
     # ETSI TS 102 223 §8.7 / §8.56 — channel identifier reported by
     # the terminal in the OPEN CHANNEL TR channel-status TLV
     # (``38 02 [byte1] [byte2]``, channel id = byte1 & 0x07). Stored

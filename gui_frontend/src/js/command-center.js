@@ -1076,6 +1076,7 @@
       }
     } catch (_err) { /* YggdraSimReaderStore not loaded */ }
     ccRefreshReaderSessionFormFields(readerName);
+    readerBarNotifySessionChanged();
 
     // Sync the reader-bar-picked name into the old SCP03 sidebar
     // data so the per-reader-Name sidebar still works even in the
@@ -1131,11 +1132,15 @@
       var wb = commandState.scp03Workbench;
       if (wb) {
         var tab = scp03FindTab(wb.activeTabId);
-        if (tab && !tab.readerName && !tab.sessionId
-            && !scp03HasPersistedState(tab)) {
+        if (tab) {
+          if (tab.sessionId) return;
+          if (tab.status === "scanning") return;
+        }
+        if (tab && !tab.readerName && !scp03HasPersistedState(tab)) {
           tab.pendingReader = readerName;
-          // The workbench welcome panel will show an "Open" button.
-          // Defer to the operator — don't auto-fire a scan.
+          var tabBar = document.querySelector(".cc-scp03-tabs");
+          var tabBody = document.querySelector(".cc-scp03-body");
+          scp03OpenSessionForTab(tab, tabBar, tabBody);
         }
       }
     }
@@ -10447,19 +10452,23 @@
     toggle.type = "button";
     toggle.className = "cc-decoded-tools-btn";
     toggle.setAttribute("data-mode", "pretty");
-    toggle.textContent = "SHOW JSON";
+    toggle.textContent = "Show JSON";
     toggle.title = "Toggle between the decoded layout and ASN.1-shaped JSON";
     toggle.addEventListener("click", function () {
       var nextMode = toggle.getAttribute("data-mode") === "pretty" ? "json" : "pretty";
       toggle.setAttribute("data-mode", nextMode);
       if (nextMode === "json") {
         prettyEl.hidden = true;
+        prettyEl.style.display = "none";
         jsonEl.hidden = false;
+        jsonEl.style.display = "";
         toggle.textContent = "Decoded";
       } else {
         prettyEl.hidden = false;
+        prettyEl.style.display = "";
         jsonEl.hidden = true;
-        toggle.textContent = "SHOW JSON";
+        jsonEl.style.display = "none";
+        toggle.textContent = "Show JSON";
       }
     });
     bar.appendChild(toggle);

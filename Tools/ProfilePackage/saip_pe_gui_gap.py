@@ -44,11 +44,15 @@ _FILE_TEMPLATE_PE: frozenset[str] = frozenset(
         "df-saip",
         "df-snpn",
         "df-5gprose",
+        "df-eap",
+        "df-tetra",
+        "df-wlan",
         "gsm-access",
         "cd",
+        "umts",
+        "wlan",
         "iot",
         "opt-iot",
-        "ssim",
     },
 )
 
@@ -186,14 +190,9 @@ _NOT_STANDARD_PE: frozenset[str] = frozenset(
         "5gNasParameter",
         "applicationmanagement",
         "applicationManagement",
-        "df-eap",
-        "df-tetra",
-        "df-wlan",
         "ram",
         "ssimeaptls",
         "ssimEaptls",
-        "umts",
-        "wlan",
     },
 )
 

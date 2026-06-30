@@ -212,6 +212,8 @@ def decode_euicc_info2(body: EuiccInfo2Request) -> EuiccInfo2Response:
     from yggdrasim_common import registry as yggdrasim_registry
 
     data = _parse_hex(body.hex)
+    if len(data) < 2 or data[:2] != b"\xBF\x22":
+        raise HTTPException(status_code=400, detail="EUICCInfo2 payload must start with tag BF22.")
     build_detail = yggdrasim_registry.get("scp03.logic.euicc_info2.build_detail")
     build_validation = yggdrasim_registry.get("scp03.logic.euicc_info2.build_validation")
 

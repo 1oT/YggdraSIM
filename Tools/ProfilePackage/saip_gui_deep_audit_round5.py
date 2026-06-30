@@ -115,8 +115,25 @@ def _render_saip_pe_editor_body(app_js: str | None = None) -> str:
     return text[start:end]
 
 
+def _indirect_decoded_editor_pe_coverage(
+    app_js: str,
+    body: str,
+) -> frozenset[str]:
+    """PE bases covered by the direct decoded-editor dispatch path."""
+    covered: set[str] = set()
+    if "directEditor: true" not in body:
+        return frozenset()
+    if "saipIsPinPukSectionKey(sectionKey)" in app_js:
+        covered.update({"pincodes", "pukcodes"})
+    if "saipIsAkaSectionKey(sectionKey)" in app_js:
+        covered.add("akaparameter")
+    if "ssimEapTLSParameters" in app_js:
+        covered.add("ssimeaptlsparameters")
+    return frozenset(covered)
+
+
 def dispatch_branch_literals_for_tiered_pe_types(app_js: str | None = None) -> list[str]:
-    """Typed / sparse / SD PE bases from ``saip_pe_gui_gap`` appear in ``renderSaipPeEditor``."""
+    """Tiered PE bases have an explicit or direct-decoded editor path."""
     from Tools.ProfilePackage.saip_pe_gui_gap import (
         _NONSTANDARD_SPARSE_PE,
         _SECURITY_DOMAIN_PE,
@@ -124,14 +141,16 @@ def dispatch_branch_literals_for_tiered_pe_types(app_js: str | None = None) -> l
         _TYPED_CARD_PE,
     )
 
-    body = _render_saip_pe_editor_body(app_js)
+    text = app_js if app_js is not None else _APP_JS.read_text(encoding="utf-8")
+    body = _render_saip_pe_editor_body(text)
     if len(body) == 0:
         return ["missing_renderSaipPeEditor_body"]
     required = _TYPED_CARD_PE | _SPARSE_CARD_PE | _NONSTANDARD_SPARSE_PE | _SECURITY_DOMAIN_PE
+    covered = set(re.findall(r't\s*===\s*"([^"]+)"', body))
+    covered.update(_indirect_decoded_editor_pe_coverage(text, body))
     missing: list[str] = []
     for pe in sorted(required):
-        token = 't === "' + pe + '"'
-        if token not in body:
+        if pe not in covered:
             missing.append(pe)
     return missing
 

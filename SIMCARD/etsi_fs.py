@@ -2670,7 +2670,7 @@ def build_default_state() -> SimCardState:
     Creates the base ETSI file system tree, personalises it with synthetic test
     identifiers, and returns the singleton-ready state object.
     """
-    iccid = "89881111111111111112"
+    iccid = "89461111111111111112"
     # MCC/MNC 001/01 - 3GPP test PLMN. Keeps the default profile identity
     # compatible with osmo-hlr / open5gs / free5gc lab HSS configurations.
     imsi = "001010000000001"

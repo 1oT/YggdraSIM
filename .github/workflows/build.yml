@@ -80,6 +80,7 @@ jobs:
         shell: bash
         env:
           PYTHONUNBUFFERED: "1"
+          YGGDRASIM_ALLOW_PLUGINS: "0"
         # ``-q --tb=short`` keeps the log small; ``--maxfail=5`` stops after
         # a handful of failures so CI aborts fast on systemic regressions
         # without dumping the whole failure report. pySim-dependent tests

@@ -36,6 +36,13 @@ _LOSSY_SPLICE_WITHOUT_FILE_SPEC: frozenset[str] = frozenset(
     },
 )
 
+_HAND_WRITTEN_FILL_WITHOUT_FILE_SPEC: frozenset[str] = frozenset(
+    {
+        "ef-bst",
+        "ef-pst",
+    },
+)
+
 
 def _app_action_pe_sets() -> tuple[frozenset[str], frozenset[str], dict[str, str]]:
     from yggdrasim_common.gui_server.actions.saip import (
@@ -92,7 +99,7 @@ def hand_written_fill_ef_keys_backed_by_file_specs() -> list[str]:
     bad: list[str] = []
     for raw in sorted(_HAND_WRITTEN_FILL_FILE_CONTENT_EFS):
         k = normalize_ef_gui_key(raw)
-        if k not in spec:
+        if k not in spec and k not in _HAND_WRITTEN_FILL_WITHOUT_FILE_SPEC:
             bad.append(raw)
     return bad
 

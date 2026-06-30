@@ -233,7 +233,7 @@ class SCP11ConsoleStatusDecodeTests(unittest.TestCase):
     def test_resolve_profile_target_by_decimal_iccid_prefers_encoded_metadata_value(self):
         self.console._fetch_profiles = lambda: [
             console_module.ProfileMetadataView(
-                iccid="89880811111111111112",
+                iccid="89460811111111111112",
                 aid="A0000005591010FFFFFFFF8900001303",
                 state="DISABLED",
                 profile_class="OPER",
@@ -244,7 +244,7 @@ class SCP11ConsoleStatusDecodeTests(unittest.TestCase):
             )
         ]
 
-        resolved = self.console._resolve_profile_target("89880811111111111112")
+        resolved = self.console._resolve_profile_target("89460811111111111112")
 
         self.assertEqual(
             resolved,
@@ -262,7 +262,7 @@ class SCP11ConsoleStatusDecodeTests(unittest.TestCase):
             }
             console._fetch_profiles = lambda module=module: [
                 module.ProfileMetadataView(
-                    iccid="89880811111111111112",
+                    iccid="89460811111111111112",
                     aid="A0000005591010FFFFFFFF8900001303",
                     state="DISABLED",
                     profile_class="OPER",
@@ -274,7 +274,7 @@ class SCP11ConsoleStatusDecodeTests(unittest.TestCase):
             ]
 
             self.assertEqual(
-                console._resolve_profile_target("89880811111111111112"),
+                console._resolve_profile_target("89460811111111111112"),
                 (console.TAG_ICCID, "98648011111111111121"),
             )
             self.assertEqual(

@@ -3042,11 +3042,35 @@
   window.YggdraSimFormatLogRowsForClipboard = formatLogRowsForClipboard;
   window.YggdraSimCopyTextToClipboard = copyTextToClipboard;
 
-  // Single delegated listener per host — installed lazily the first
-  // time we add a row to a bucket. Each individual row used to attach
-  // its own click + dblclick listeners which, at the 5000-row APDU
-  // cap, leaks ~10 000 closures (≈ tens of MB after a long session).
-  // Delegation collapses that to a constant two listeners per panel.
+  function copyLogDockRowElement(row) {
+    if (!row) return Promise.resolve(false);
+    var text = formatLogRowForClipboard({
+      ts: row.dataset.logTs,
+      source: row.dataset.logSource,
+      message: row.dataset.logMessage,
+    });
+    return copyTextToClipboard(text).then(function (ok) {
+      if (ok) flashLogDockCopiedAck(row);
+      return ok;
+    });
+  }
+
+  function wireLogDockRowDblclick(el) {
+    el.addEventListener("dblclick", function (evt) {
+      // Don't override a user-driven text selection — only copy the
+      // whole row when there isn't one.
+      var sel = window.getSelection ? window.getSelection() : null;
+      if (sel && !sel.isCollapsed && sel.toString().length > 0) return;
+      evt.preventDefault();
+      evt.stopPropagation();
+      copyLogDockRowElement(el);
+    });
+  }
+
+  // Single delegated click listener per host — installed lazily the first
+  // time we add a row to a bucket. The copy button is delegated to avoid
+  // thousands of button listeners; double-click stays on the row because
+  // older GUI contract tests and operator muscle memory pin that surface.
   function ensureLogDockHostDelegation(host) {
     if (!host || host.dataset.logDelegated === "1") return;
     host.dataset.logDelegated = "1";
@@ -3058,33 +3082,7 @@
       var row = btn.closest(".log-dock-row");
       if (!row) return;
       evt.stopPropagation();
-      var text = formatLogRowForClipboard({
-        ts: row.dataset.logTs,
-        source: row.dataset.logSource,
-        message: row.dataset.logMessage,
-      });
-      copyTextToClipboard(text).then(function (ok) {
-        if (ok) flashLogDockCopiedAck(row);
-      });
-    });
-    host.addEventListener("dblclick", function (evt) {
-      var row = evt.target && evt.target.closest
-        ? evt.target.closest(".log-dock-row")
-        : null;
-      if (!row) return;
-      // Don't override a user-driven text selection — only copy the
-      // whole row when there isn't one.
-      var sel = window.getSelection ? window.getSelection() : null;
-      if (sel && !sel.isCollapsed && sel.toString().length > 0) return;
-      evt.preventDefault();
-      var text = formatLogRowForClipboard({
-        ts: row.dataset.logTs,
-        source: row.dataset.logSource,
-        message: row.dataset.logMessage,
-      });
-      copyTextToClipboard(text).then(function (ok) {
-        if (ok) flashLogDockCopiedAck(row);
-      });
+      copyLogDockRowElement(row);
     });
   }
 
@@ -3138,6 +3136,7 @@
     el.dataset.logSource = String(row.source || "");
     el.dataset.logMessage = String(row.message || "");
     el.title = "Double-click or press the copy button to copy this row";
+    wireLogDockRowDblclick(el);
     var ts = document.createElement("span");
     ts.className = "log-dock-row-ts";
     ts.textContent = formatTime(row.ts);
@@ -3447,6 +3446,7 @@
     el.dataset.logSource = String(row.source || "");
     el.dataset.logMessage = String(row.message || "");
     el.title = "Double-click or press the copy button to copy this row";
+    wireLogDockRowDblclick(el);
     var ts = document.createElement("span");
     ts.className = "log-dock-row-ts";
     ts.textContent = formatTime(row.ts);

@@ -763,6 +763,7 @@
   // source path exists, for when the operator wants to fork a copy.
   async function saipRibbonSavePackage(pkg, drawer, peList, detail, validation, shiftToSaveAs) {
     if (!pkg || !pkg.sessionId) return;
+    await saipFlushPendingAutoApplies(pkg);
     var encoding = (pkg.encoding === "json") ? "json" : "der";
     var outPath = pkg.sourcePath || "";
     var needsPicker = shiftToSaveAs || !outPath;
@@ -2586,6 +2587,7 @@
       // ``<section_key>::<rel_path>``. Used by the row-level "Revert"
       // button to roll the field back to its as-opened value.
       decodedPristine: {},
+      autoApplyJobs: {},
       fileDataViewMode: "split",
       validation: null,
       validationError: null,
@@ -2862,6 +2864,7 @@
   // the format follows ``pkg.encoding``. See ``saipRibbonSavePackage``.
 
   async function saipSavePackage(pkg, outputPath, fmt, drawer, peList, detail, validation) {
+    await saipFlushPendingAutoApplies(pkg);
     pkg.saveStatus = "Saving…";
     renderSaipDrawer(drawer, peList, detail, validation);
     logBus.emit({ level: "info", source: "saip.save_package", message: "save → " + outputPath + " (" + fmt + ")" });
@@ -2906,6 +2909,7 @@
   }
 
   async function saipRevertPackage(pkg, drawer, peList, detail, validation) {
+    saipCancelPendingAutoApplies(pkg);
     pkg.saveStatus = "Reverting…";
     renderSaipDrawer(drawer, peList, detail, validation);
     logBus.emit({ level: "info", source: "saip.revert_changes", message: "revert → " + pkg.filename });
@@ -2985,6 +2989,7 @@
     var wb = commandState.saipWorkbench;
     var pkg = saipFindPackage(packageId);
     if (!pkg) return;
+    saipCancelPendingAutoApplies(pkg);
     if (pkg.sessionId) {
       try {
         await apiFetch("/api/actions/saip.close_package/run", {
@@ -4131,6 +4136,7 @@
     ssim: { glyph: "SS", kind: "template", friendly: "SSIM" },
     "ssim-eaptls": { glyph: "STL", kind: "auth", friendly: "SSIM EAP-TLS" },
     ssimEaptls: { glyph: "STL", kind: "auth", friendly: "SSIM EAP-TLS" },
+    ssimEapTLSParameters: { glyph: "STL", kind: "auth", friendly: "SSIM EAP-TLS Parameters" },
     isdr: { glyph: "IR", kind: "domain", friendly: "ISD-R" },
     isdp: { glyph: "IP", kind: "domain", friendly: "ISD-P" },
     applicationManagement: { glyph: "AM", kind: "app", friendly: "Application management" },
@@ -5783,6 +5789,10 @@
       );
     }
 
+    function saipEditorRenderFilesystemDecodedWizards() {
+      saipEditorRenderUntypedPeWizard(data.type || "filesystem");
+    }
+
     // SA-G3 default: every PE gets a section-wide decoded edit panel.
     // The single exception is USIM/ISIM/CSIM application templates,
     // which already ship a rich typed editor (template card + files
@@ -5848,6 +5858,35 @@
       saipEditorRenderRamCard(wrap, decoded);
     } else if (t === "applicationmanagement") {
       saipEditorRenderAppMgmtCard(wrap, decoded);
+    } else if (t === "cdmaparameter") {
+      saipEditorRenderSparseCard(
+        wrap,
+        data,
+        "CDMA Parameter",
+        "CDMA authentication parameters; decoded fields below carry the editable values.",
+      );
+    } else if (t === "5gnasparameter") {
+      saipEditorRenderSparseCard(
+        wrap,
+        data,
+        "5G NAS Parameter",
+        "5G NAS / authentication parameters; decoded fields below carry the editable values.",
+      );
+    } else if (t === "eap") {
+      saipEditorRenderSparseCard(
+        wrap,
+        data,
+        "EAP",
+        "EAP application parameters; decoded fields below carry the editable values.",
+      );
+    } else if (t === "nonstandard") {
+      saipEditorRenderSparseCard(
+        wrap,
+        data,
+        "Non-Standard PE",
+        "No dedicated typed card exists for this PE; decoded fields below carry the editable values.",
+      );
+      saipEditorRenderUntypedPeWizard("nonstandard");
     } else if (t === "end") {
       saipEditorRenderEndCard(wrap);
     }
@@ -5877,6 +5916,8 @@
         validation,
         data,
       );
+      var renderFsDecodedWizards = saipEditorRenderFilesystemDecodedWizards;
+      renderFsDecodedWizards();
       supportsDecodedPanel = false;
     } else if (
       t === "usim" || t === "opt-usim" || t === "optusim"
@@ -5901,6 +5942,7 @@
         sectionKey,
         (data && typeof data.pe_index === "number") ? data.pe_index : -1,
       );
+      saipEditorRenderFilesystemDecodedWizards();
       supportsDecodedPanel = false;
     }
     // All other non-FS types fall through to the unified form below.
@@ -15094,7 +15136,7 @@
     var t = String(data.type || "?");
     var card = saipEditorCard(
       saipPeFriendlyName(data.type) + " — generic editor",
-      "Every encodable scalar of this PE is editable from the "
+      "This PE has no typed editor; every encodable scalar is editable from the "
         + "Decoded fields panel below; the JSON tree carries the "
         + "structural / nested view.",
     );
@@ -27504,6 +27546,127 @@
     saipValidatePinPukFieldPayload(pkg, sectionKey, field, payload);
   }
 
+  function saipDecodedInstallAutoApply(pkg) {
+    if (!pkg) return null;
+    if (!pkg.autoApplyJobs || typeof pkg.autoApplyJobs !== "object") {
+      pkg.autoApplyJobs = {};
+    }
+    return pkg.autoApplyJobs;
+  }
+
+  function saipDecodedQueuePayload(pkg, sectionKey, field, payload, opts) {
+    var jobs = saipDecodedInstallAutoApply(pkg);
+    if (!jobs || !sectionKey || !field) return null;
+    var key = sectionKey + "::" + saipDecodedRelPathKey(field.rel_path);
+    var job = {
+      sectionKey: sectionKey,
+      field: {
+        rel_path: field.rel_path,
+        field_name: field.field_name,
+        last_ef_key: field.last_ef_key || null,
+        editor_kind: field.editor_kind,
+        model: field.model || null,
+      },
+      payload: payload,
+      targetLength: opts && typeof opts.targetLength === "number" ? opts.targetLength : null,
+      status: "Pending auto-apply",
+      statusEl: opts && opts.statusEl ? opts.statusEl : null,
+    };
+    jobs[key] = job;
+    if (job.statusEl) {
+      job.statusEl.textContent = job.status;
+      job.statusEl.dataset.tone = "pending";
+    }
+    return job;
+  }
+
+  function saipCancelPendingAutoApplies(pkg) {
+    if (!pkg) return;
+    pkg.autoApplyJobs = {};
+  }
+
+  async function saipDecodedApplyPayload(pkg, job) {
+    if (!pkg || !pkg.sessionId || !job) return null;
+    var field = job.field || {};
+    var inputs = {
+      session_id: pkg.sessionId,
+      section_key: job.sectionKey,
+      rel_path: field.rel_path || job.rel_path || [],
+      field_name: field.field_name || job.fieldName || "",
+      last_ef_key: field.last_ef_key || null,
+      editor_kind: field.editor_kind || job.editorKind || "json",
+      editor_payload: job.payload || {},
+    };
+    var targetLength = job.targetLength;
+    if (targetLength == null && field.model && typeof field.model.target_length === "number") {
+      targetLength = field.model.target_length;
+    }
+    if (typeof targetLength === "number") inputs.target_length = targetLength;
+    if (job.statusEl) {
+      job.statusEl.textContent = "Auto-applying";
+      job.statusEl.dataset.tone = "pending";
+    }
+    return apiFetch("/api/actions/saip.apply_decoded_edit/run", {
+      method: "POST",
+      body: JSON.stringify({ inputs: inputs }),
+    });
+  }
+
+  async function saipDecodedDrainJob(pkg, key) {
+    if (!pkg || !pkg.autoApplyJobs || !key) return null;
+    var job = pkg.autoApplyJobs[key];
+    if (!job) return null;
+    try {
+      var resp = await saipDecodedApplyPayload(pkg, job);
+      if (!resp || !resp.ok) {
+        job.status = resp && resp.error ? resp.error : "Auto-apply failed";
+        if (job.statusEl) {
+          job.statusEl.textContent = job.status;
+          job.statusEl.dataset.tone = "error";
+        }
+        return resp;
+      }
+      delete pkg.autoApplyJobs[key];
+      var data = resp.data || {};
+      var sectionKey = job.sectionKey || "";
+      var field = job.field || {};
+      var fieldPath = String(field.last_ef_key || (field.rel_path && field.rel_path[0]) || "");
+      var fileKey = sectionKey + "::" + fieldPath;
+      if (pkg.showFileCache) delete pkg.showFileCache[fileKey];
+      if (typeof data.pe_index === "number" && pkg.showPeCache) {
+        delete pkg.showPeCache[data.pe_index];
+      }
+      pkg.fileRows = null;
+      pkg.peRows = null;
+      pkg.validation = null;
+      pkg.applications = null;
+      pkg.applicationsError = null;
+      pkg.valAutoRunPending = true;
+      if (pkg.decodedFieldsCache && sectionKey) delete pkg.decodedFieldsCache[sectionKey];
+      await saipRefreshDirty(pkg);
+      if (job.statusEl) {
+        job.statusEl.textContent = "Applied.";
+        job.statusEl.dataset.tone = "ok";
+      }
+      return resp;
+    } catch (err) {
+      job.status = String(err && err.message || err);
+      if (job.statusEl) {
+        job.statusEl.textContent = job.status;
+        job.statusEl.dataset.tone = "error";
+      }
+      throw err;
+    }
+  }
+
+  async function saipFlushPendingAutoApplies(pkg) {
+    if (!pkg || !pkg.autoApplyJobs) return;
+    var keys = Object.keys(pkg.autoApplyJobs);
+    for (var i = 0; i < keys.length; i++) {
+      await saipDecodedDrainJob(pkg, keys[i]);
+    }
+  }
+
   async function saipDecodedRevertField(pkg, sectionKey, field, pristinePayload, peList, validation) {
     // Revert routes through apply_decoded_edit with the captured
     // pristine payload so the encoder & splicer enforce the same
@@ -27664,8 +27827,9 @@
         return;
       }
       if (!payload) return;
+      var manual = true;
       applyBtn.disabled = true;
-      status.textContent = "Applying…";
+      status.textContent = manual ? "Applying…" : "Auto-applying…";
       status.dataset.tone = "pending";
       try {
         var inputs = {
@@ -27694,7 +27858,7 @@
           });
           return;
         }
-        status.textContent = "Applied.";
+        status.textContent = manual ? "Applied." : "Auto-applied.";
         status.dataset.tone = "ok";
         logBus.emit({
           level: "info",

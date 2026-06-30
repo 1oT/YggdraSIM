@@ -417,6 +417,8 @@ def decode_fcp_attributes(fcp: Any) -> FcpAttributes:
     except (TypeError, ValueError):
         file_size_int = None
     raw_lcsi = getattr(instance, "lcsi", None)
+    if raw_lcsi is None:
+        raw_lcsi = descriptor.get("lcsi")
     # asn1tools decodes ``lcsi`` as an OCTET STRING (single byte); pySim
     # stores the raw bytes verbatim. Normalise to the integer life-cycle
     # status indicator so consumers do not have to repeat the conversion.
@@ -705,6 +707,16 @@ def _gfm_entry_from_file(
         else b""
     )
     raw_lcsi = getattr(instance, "lcsi", None)
+    if raw_lcsi is None:
+        for element_name, element_value in file_elements:
+            if str(element_name) == "lcsi":
+                raw_lcsi = element_value
+                break
+            if str(element_name) == "fileDescriptor":
+                descriptor = _coerce_descriptor_dict(element_value)
+                if "lcsi" in descriptor:
+                    raw_lcsi = descriptor.get("lcsi")
+                    break
     if isinstance(raw_lcsi, (bytes, bytearray, memoryview)) and len(raw_lcsi) >= 1:
         lcsi_int: int | None = int(bytes(raw_lcsi)[0])
     elif isinstance(raw_lcsi, int):

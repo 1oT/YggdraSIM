@@ -21,6 +21,7 @@ import atexit
 import hashlib
 import io
 import os
+import shlex
 import shutil
 import socket
 import ssl
@@ -36,6 +37,7 @@ except Exception:
     def hil_bridge_warning_text() -> str:
         return ""
 from yggdrasim_common.plugin_runtime import extend_target_with_plugins
+from yggdrasim_common.process_debug import is_global_debug_enabled
 from yggdrasim_common.quit_control import quit_all
 from yggdrasim_common.euicc_issuer import (
     format_ecasd_issuer_display,
@@ -412,18 +414,30 @@ class SCP11Console:
     def _enter_command_session(self, spec: CommandSpec, command_upper: str) -> None:
         """Apply the command's session reset policy before handler dispatch.
 
-        SHARED commands are left untouched. Every card-touching command
-        starts by building a fresh APDU transport. Handlers that only
-        issue ES10 STORE DATA get the standard connect/bootstrap here;
-        full flows that own their connect phase run it themselves.
+        SHARED commands are left untouched. SOFT_RESET commands clear
+        only per-flow state while preserving the active transport.
+        HARD_RESET commands reconnect only when a prior handler has
+        marked the session dirty. Clients that expose an APDU transport
+        builder get an additional per-command transport rebind so CLI
+        and GUI sessions do not share a stale PC/SC handle.
         """
         policy = getattr(spec, "session_policy", SessionPolicy.SHARED)
         if policy == SessionPolicy.SHARED:
             return
-        self._reset_card_transport_for_command(reason=spec.name)
-        if self._command_runs_own_connect(spec.name) is False:
-            self._connect_card_for_command(reason=spec.name)
-        self._session_dirty = False
+        if self._can_rebuild_command_transport():
+            self._reset_card_transport_for_command(reason=spec.name)
+            if self._command_runs_own_connect(command_upper) is False:
+                self._connect_card_for_command(reason=spec.name)
+            self._session_dirty = False
+            return
+        if policy == SessionPolicy.SOFT_RESET:
+            self._reset_orchestrator_ephemeral_state()
+            return
+        if policy == SessionPolicy.HARD_RESET and self._session_dirty:
+            self._reset_card_session_hard(reason=spec.name)
+
+    def _can_rebuild_command_transport(self) -> bool:
+        return callable(getattr(self.client, "_build_apdu_channel", None))
 
     @staticmethod
     def _command_runs_own_connect(command_name: str) -> bool:
@@ -446,12 +460,13 @@ class SCP11Console:
             return
 
     def _leave_command_session(self, spec: CommandSpec, command_upper: str) -> None:
-        """Release card transport after every card-touching command."""
+        """Mark card-touching command sessions dirty after handler dispatch."""
         del command_upper
         policy = getattr(spec, "session_policy", SessionPolicy.SHARED)
         if policy == SessionPolicy.SHARED:
             return
-        self._disconnect_card_transport_after_command(reason=spec.name)
+        if self._can_rebuild_command_transport():
+            self._disconnect_card_transport_after_command(reason=spec.name)
         self._session_dirty = True
 
     def _disconnect_card_transport_after_command(self, reason: str) -> None:
@@ -993,6 +1008,9 @@ class SCP11Console:
                     pass
         self._session_dirty = True
 
+    def _hil_bridge_warning_text(self) -> str:
+        return hil_bridge_warning_text()
+
     def _print_start_snapshot(self, announce_when_pinned: bool = False) -> None:
         snapshot, init_trace = self._run_with_stdout_captured(self._collect_start_snapshot)
         self._latest_snapshot = snapshot
@@ -1067,7 +1085,7 @@ class SCP11Console:
             if len(eim_id) > 0:
                 print(f"eIM ID:             {self._style.cyan}{eim_id}{self._style.end}")
         self._print_profiles_table(snapshot.profiles, title="Profiles on Card")
-        warning_text = hil_bridge_warning_text()
+        warning_text = self._hil_bridge_warning_text()
         if len(warning_text) > 0:
             print(f"{self._style.yellow}[!] {warning_text}{self._style.end}")
 
@@ -1619,6 +1637,15 @@ class SCP11Console:
             aliases=["EIM-DOWNLOAD"],
             section=self.HELP_SECTION_IPAD,
             trigger_notification_sync=True,
+            session_policy=SessionPolicy.HARD_RESET,
+        )
+        self._add_command(
+            "POLL",
+            "POLL [attempts] [timerSeconds] [-t delaySeconds] [-s statusLoops] [--debug]",
+            "Run legacy status watchdog flow",
+            self._cmd_eim_poll,
+            section=self.HELP_SECTION_EXPERT,
+            visible_in_help=False,
             session_policy=SessionPolicy.HARD_RESET,
         )
 
@@ -2195,6 +2222,110 @@ class SCP11Console:
                 f"eIM server; on-card notifications left untouched.{self._style.end}"
             )
         return True
+
+    def _cmd_eim_poll(self, argument: str) -> bool:
+        options = self._parse_eim_poll_options(argument)
+        if options is None:
+            print(
+                f"{self._style.yellow}[!] Usage: "
+                "POLL [attempts] [timerSeconds] [-t delaySeconds] [-s statusLoops] [--debug]"
+                f"{self._style.end}"
+            )
+            return True
+        runner = getattr(self.orchestrator, "run_eim_status_watchdog", None)
+        if callable(runner) is False:
+            print(f"{self._style.red}[!] POLL failed: orchestrator does not expose status watchdog.{self._style.end}")
+            return True
+        try:
+            runner(**options)
+        except KeyboardInterrupt:
+            print(f"{self._style.yellow}[*] POLL interrupted by user.{self._style.end}")
+        except Exception as error:
+            print(f"{self._style.red}[!] POLL failed: {error}{self._style.end}")
+        return True
+
+    def _parse_eim_poll_options(self, argument: str) -> Optional[Dict[str, Any]]:
+        try:
+            tokens = shlex.split(str(argument or ""))
+        except ValueError:
+            return None
+        positional: List[str] = []
+        poll_attempt_delay_seconds = 0
+        poll_attempt_post_status_loops = 0
+        debug = is_global_debug_enabled()
+        index = 0
+        while index < len(tokens):
+            token = tokens[index]
+            normalized = token.strip().lower()
+            if normalized in ("--debug", "-d"):
+                debug = True
+                index += 1
+                continue
+            if normalized in ("-t", "--delay", "--poll-delay"):
+                if index + 1 >= len(tokens):
+                    return None
+                delay_value = self._parse_poll_seconds(tokens[index + 1])
+                if delay_value is None:
+                    return None
+                poll_attempt_delay_seconds = delay_value
+                index += 2
+                continue
+            if normalized in ("-s", "--status-loops", "--post-status"):
+                if index + 1 >= len(tokens):
+                    return None
+                loop_value = self._parse_poll_int(tokens[index + 1])
+                if loop_value is None:
+                    return None
+                poll_attempt_post_status_loops = loop_value
+                index += 2
+                continue
+            if token.startswith("-"):
+                return None
+            positional.append(token)
+            index += 1
+        if len(positional) > 2:
+            return None
+        poll_attempts_per_fqdn = 1
+        timer_expiration_window_seconds = 30
+        timer_window_explicit = False
+        if len(positional) >= 1:
+            parsed_attempts = self._parse_poll_int(positional[0])
+            if parsed_attempts is None:
+                return None
+            poll_attempts_per_fqdn = parsed_attempts
+        if len(positional) >= 2:
+            parsed_window = self._parse_poll_seconds(positional[1])
+            if parsed_window is None:
+                return None
+            timer_expiration_window_seconds = parsed_window
+            timer_window_explicit = True
+        return {
+            "poll_attempts_per_fqdn": poll_attempts_per_fqdn,
+            "timer_expiration_window_seconds": timer_expiration_window_seconds,
+            "timer_window_explicit": timer_window_explicit,
+            "poll_attempt_delay_seconds": poll_attempt_delay_seconds,
+            "poll_attempt_post_status_loops": poll_attempt_post_status_loops,
+            "status_tick_trigger_mode": poll_attempt_post_status_loops > 0,
+            "status_tick_seconds": 30,
+            "debug": debug,
+        }
+
+    @staticmethod
+    def _parse_poll_int(value: str) -> Optional[int]:
+        text = str(value or "").strip()
+        if text.isdigit() is False:
+            return None
+        parsed = int(text)
+        if parsed < 0:
+            return None
+        return parsed
+
+    @classmethod
+    def _parse_poll_seconds(cls, value: str) -> Optional[int]:
+        text = str(value or "").strip().lower()
+        if text.endswith("s"):
+            text = text[:-1]
+        return cls._parse_poll_int(text)
 
     def _collect_snapshot(self) -> CardSnapshot:
         eid = self._get_eid()

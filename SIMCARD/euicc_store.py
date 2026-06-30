@@ -27,7 +27,33 @@ def resolve_euicc_store_path(root_path: str, eid: str) -> str:
     eid_text = str(eid or "").strip().upper()
     if len(eid_text) == 0:
         eid_text = "UNKNOWN"
-    return os.path.join(normalized_root, f"EID_{eid_text}")
+    preferred_path = os.path.join(normalized_root, f"EID_{eid_text}")
+    if os.path.exists(preferred_path):
+        return preferred_path
+    discovered_path = _single_existing_euicc_store_path(normalized_root)
+    if len(discovered_path) > 0:
+        return discovered_path
+    return preferred_path
+
+
+def _single_existing_euicc_store_path(root_path: str) -> str:
+    try:
+        entries = os.listdir(root_path)
+    except OSError:
+        return ""
+    matches: list[str] = []
+    for entry in entries:
+        if entry.upper().startswith("EID_") is False:
+            continue
+        candidate = os.path.join(root_path, entry)
+        if os.path.isdir(candidate) is False:
+            continue
+        manifest_path = os.path.join(candidate, EUICC_MANIFEST_FILENAME)
+        if os.path.isfile(manifest_path):
+            matches.append(candidate)
+    if len(matches) == 1:
+        return matches[0]
+    return ""
 
 
 def default_profile_store_path(euicc_store_path: str) -> str:
@@ -78,13 +104,14 @@ def load_euicc_store_into_state(store_path: str, state: SimCardState) -> bool:
     )
     if isinstance(payload, dict) is False:
         return False
-    # The runtime cache must not shadow card-identity fields. Identity
-    # (ATR, EID, default DP address, root CI PKID, ISDR/ECASD/MNO_SD AIDs
+    # The runtime cache must not shadow operator card-identity fields.
+    # Identity (ATR, EID, default DP address, ISDR/ECASD/MNO_SD AIDs
     # and labels) is operator configuration and comes from
     # ``isdr_config.json`` / quirks. Persisting it back here would mean a
     # stale cache pins a value forever and silently overrides any later
     # change in ``isdr_config.json`` — which is what bit the simulated
-    # ATR after the ISO 7816-3 fix landed.
+    # ATR after the ISO 7816-3 fix landed. Root CI PKID is protected key
+    # material for the eUICC store, so it is still restored below.
     apply_euicc_state_payload(state, payload, apply_identity=False)
     return True
 
@@ -232,8 +259,6 @@ def apply_euicc_state_payload(
             state.atr = _hex_bytes(payload.get("atr_hex"), fallback=bytes(state.atr))
         if "default_dp_address" in payload:
             state.default_dp_address = str(payload.get("default_dp_address", state.default_dp_address)).strip()
-        if "root_ci_pkid_hex" in payload:
-            state.root_ci_pkid = _hex_bytes(payload.get("root_ci_pkid_hex"), fallback=bytes(state.root_ci_pkid))
         isdr = payload.get("isdr")
         if isinstance(isdr, dict):
             if "aid" in isdr:
@@ -252,6 +277,9 @@ def apply_euicc_state_payload(
                 state.mno_sd_aid = str(mno_sd.get("aid", state.mno_sd_aid)).strip().upper() or state.mno_sd_aid
             if "label" in mno_sd:
                 state.mno_sd_label = str(mno_sd.get("label", state.mno_sd_label)).strip() or state.mno_sd_label
+
+    if "root_ci_pkid_hex" in payload:
+        state.root_ci_pkid = _hex_bytes(payload.get("root_ci_pkid_hex"), fallback=bytes(state.root_ci_pkid))
 
     euicc_info = payload.get("euicc_info")
     if isinstance(euicc_info, dict):

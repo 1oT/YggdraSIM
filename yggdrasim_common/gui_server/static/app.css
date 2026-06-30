@@ -8415,6 +8415,7 @@ kbd {
 .cc-decoded-body.cc-pv-object {
   display: flex;
   flex-direction: column;
+  grid-template-columns: minmax(96px, 200px) 1fr;
   gap: 8px;
 }
 
@@ -9041,6 +9042,7 @@ kbd {
 .cc-pv-object {
   display: flex;
   flex-direction: column;
+  grid-template-columns: minmax(96px, 200px) 1fr;
   gap: 8px;
   margin: 0;
   font-family: var(--font-mono);

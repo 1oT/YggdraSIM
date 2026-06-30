@@ -546,7 +546,7 @@ _FILE_SPECS: dict[str, dict[str, Any]] = {
         "structure": "transparent",
         "sfi": None,
     },
-    "ef-ice-dn": {"name": "EF.ICE-DN", "fid": "6FE1", "structure": "linear-fixed", "sfi": None},
+    "ef-ice-dn": {"name": "EF.ICE-DN", "fid": "6FE0", "structure": "linear-fixed", "sfi": None},
     "ef-ice-ff": {"name": "EF.ICE-FF", "fid": "6FE2", "structure": "linear-fixed", "sfi": None},
     "ef-ice-graphics": {
         "name": "EF.ICE-GRAPHICS",

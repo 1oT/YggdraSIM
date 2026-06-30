@@ -433,7 +433,7 @@ class ShellDispatcherIdentityProbeTests(unittest.TestCase):
                 [
                     (b"", 0x90, 0x00),
                     (b"", 0x90, 0x00),
-                    (bytes.fromhex("98010300005089547021"), 0x62, 0x82),
+                    (bytes.fromhex("98880000005089547021"), 0x62, 0x82),
                 ]
             )
         )
@@ -456,7 +456,7 @@ class ShellDispatcherIdentityProbeTests(unittest.TestCase):
                 [
                     (b"", 0x90, 0x00),
                     (b"", 0x9F, 0x10),
-                    (bytes.fromhex("98010300005089547021"), 0x90, 0x00),
+                    (bytes.fromhex("98880000005089547021"), 0x90, 0x00),
                 ]
             )
         )

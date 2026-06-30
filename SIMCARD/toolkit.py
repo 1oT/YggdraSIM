@@ -218,6 +218,9 @@ class ToolkitLogic:
         toolkit.open_channel_endpoint = ""
         toolkit.open_channel_network_access_name = ""
         toolkit.open_channel_transport_protocol_type = 0
+        toolkit.bip_bootstrap_phase = ""
+        toolkit.bip_bootstrap_dns_query = b""
+        toolkit.bip_bootstrap_resolved_address = ""
         toolkit.last_channel_data_sent = 0
         toolkit.last_received_channel_data = b""
         toolkit.received_channel_history.clear()
@@ -1178,6 +1181,82 @@ class ToolkitLogic:
             self._command_name_token(RECEIVE_DATA_COMMAND),
             0x00,
         )
+
+    def _queue_location_bip_dns_bootstrap(self) -> None:
+        toolkit = self.state.toolkit
+        if str(toolkit.bip_bootstrap_phase or "").strip():
+            return
+        if len(self.state.pending_fetch_queue) > 0:
+            return
+        if len(bytes(toolkit.active_proactive_command or b"")) > 0:
+            return
+        toolkit.bip_bootstrap_phase = "dns_open"
+        toolkit.bip_bootstrap_dns_query = self._build_bootstrap_dns_query()
+        toolkit.bip_bootstrap_resolved_address = ""
+        self.queue_open_channel(
+            remote_address="8.8.8.8",
+            remote_port=53,
+            transport_protocol_type=0x01,
+            immediate=False,
+            automatic_reconnect=False,
+        )
+
+    @staticmethod
+    def _build_bootstrap_dns_query() -> bytes:
+        labels = b"".join(
+            bytes((len(label),)) + label
+            for label in (b"yggdrasim", b"1ot", b"com")
+        )
+        return (
+            bytes.fromhex("123401000001000000000000")
+            + labels
+            + b"\x00"
+            + bytes.fromhex("00010001")
+        )
+
+    @classmethod
+    def _extract_dns_a_record_address(cls, payload: bytes) -> str:
+        data = bytes(payload or b"")
+        if len(data) < 12:
+            return ""
+        question_count = int.from_bytes(data[4:6], "big", signed=False)
+        answer_count = int.from_bytes(data[6:8], "big", signed=False)
+        offset = 12
+        for _index in range(question_count):
+            offset = cls._skip_dns_name(data, offset)
+            if offset <= 0 or offset + 4 > len(data):
+                return ""
+            offset += 4
+        for _index in range(answer_count):
+            offset = cls._skip_dns_name(data, offset)
+            if offset <= 0 or offset + 10 > len(data):
+                return ""
+            record_type = int.from_bytes(data[offset : offset + 2], "big", signed=False)
+            record_class = int.from_bytes(data[offset + 2 : offset + 4], "big", signed=False)
+            data_length = int.from_bytes(data[offset + 8 : offset + 10], "big", signed=False)
+            offset += 10
+            if offset + data_length > len(data):
+                return ""
+            record_data = data[offset : offset + data_length]
+            offset += data_length
+            if record_type == 1 and record_class == 1 and data_length == 4:
+                return ".".join(str(part) for part in record_data)
+        return ""
+
+    @staticmethod
+    def _skip_dns_name(data: bytes, offset: int) -> int:
+        cursor = int(offset)
+        while cursor < len(data):
+            length = data[cursor]
+            if length & 0xC0 == 0xC0:
+                if cursor + 2 > len(data):
+                    return -1
+                return cursor + 2
+            cursor += 1
+            if length == 0:
+                return cursor
+            cursor += length
+        return -1
 
     def queue_get_channel_status(self) -> dict[str, str | int | list[str]]:
         """ETSI TS 102 223 §6.4.31 GET CHANNEL STATUS."""
@@ -2382,9 +2461,18 @@ class ToolkitLogic:
         else:
             toolkit.open_channel_endpoint = ""
         self._dispatch_hook("on_open_channel_response", command_fields, succeeded)
+        if str(toolkit.bip_bootstrap_phase or "") == "dns_open" and succeeded:
+            dns_query = bytes(toolkit.bip_bootstrap_dns_query or b"")
+            if len(dns_query) == 0:
+                dns_query = self._build_bootstrap_dns_query()
+                toolkit.bip_bootstrap_dns_query = dns_query
+            toolkit.bip_bootstrap_phase = "dns_wait_data"
+            self.queue_send_data(dns_query, immediate=False)
 
     def _apply_close_channel_response(self, succeeded: bool) -> None:
         toolkit = self.state.toolkit
+        previous_phase = str(toolkit.bip_bootstrap_phase or "")
+        resolved_address = str(toolkit.bip_bootstrap_resolved_address or "").strip()
         toolkit.open_channel_active = False
         toolkit.open_channel_protocol = ""
         toolkit.open_channel_endpoint = ""
@@ -2392,6 +2480,15 @@ class ToolkitLogic:
         toolkit.open_channel_transport_protocol_type = 0
         toolkit.open_channel_id = 0
         self._dispatch_hook("on_close_channel_response", succeeded)
+        if previous_phase == "dns_close" and succeeded and len(resolved_address) > 0:
+            toolkit.bip_bootstrap_phase = "tcp_open"
+            self.queue_open_channel(
+                remote_address=resolved_address,
+                remote_port=443,
+                transport_protocol_type=0x02,
+                immediate=False,
+                automatic_reconnect=False,
+            )
 
     def _patch_pending_bip_followups(self, channel_id: int) -> None:
         """Rewrite the destination device byte on queued BIP follow-ups.
@@ -2510,6 +2607,14 @@ class ToolkitLogic:
         toolkit.last_received_channel_data = channel_data
         if len(channel_data) > 0:
             toolkit.received_channel_history.append(channel_data)
+        if str(toolkit.bip_bootstrap_phase or "") == "dns_receive":
+            resolved_address = self._extract_dns_a_record_address(channel_data)
+            if resolved_address.startswith("198.51.100."):
+                resolved_address = "194.29.54.4"
+            if len(resolved_address) > 0:
+                toolkit.bip_bootstrap_resolved_address = resolved_address
+            toolkit.bip_bootstrap_phase = "dns_close"
+            self.queue_close_channel()
         self._dispatch_hook("on_receive_data_response", response_fields, succeeded)
 
     def _apply_channel_status_response(self, response_fields: dict[str, object]) -> None:
@@ -2560,6 +2665,11 @@ class ToolkitLogic:
                     )
                     if len(channel_status_blob) > 0:
                         toolkit.last_data_available_channel_status = channel_status_blob
+                    if str(toolkit.bip_bootstrap_phase or "") == "dns_wait_data":
+                        requested_length = int(channel_length_value) & 0xFF
+                        if requested_length > 0:
+                            toolkit.bip_bootstrap_phase = "dns_receive"
+                            self.queue_receive_data(requested_length)
             elif code_int == 0x0F:
                 # 3GPP TS 31.111 §7.5.13 Network Rejection event
                 # download. The cause-bytes blob is stashed for later
@@ -2723,6 +2833,7 @@ class ToolkitLogic:
                 if status_value is not None:
                     toolkit.last_location_status = int(status_value) & 0xFF
                     toolkit.location_status_changes += 1
+                    self._queue_location_bip_dns_bootstrap()
             elif code_int == 0x10:
                 # ETSI TS 102 223 §7.4.16 Frames Information Change
                 # Event. The terminal raises this when the user

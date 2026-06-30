@@ -27,11 +27,31 @@ _SAIP_PY = _REPO_ROOT / "yggdrasim_common" / "gui_server" / "actions" / "saip.py
 _APP_JS = _REPO_ROOT / "yggdrasim_common" / "gui_server" / "static" / "app.js"
 _TESTS_DIR = _REPO_ROOT / "tests"
 
-# Declared for CLI / lint / decode helpers — the Command Center does not call them.
+# Declared for CLI, compatibility, catalog, and helper API surfaces that
+# are not entered through a direct browser action button.
 _SAIP_ACTIONS_NO_BROWSER_ENTRYPOINT: frozenset[str] = frozenset(
     {
+        "saip.clear_pin_shared_context",
+        "saip.decode_sd_life_cycle",
+        "saip.decode_sd_privileges",
         "saip.decode_to_json",
+        "saip.encode_sd_life_cycle",
+        "saip.encode_sd_privileges",
+        "saip.get_cdma",
+        "saip.get_pin_shared_context",
+        "saip.get_profile_header",
+        "saip.list_cdma_field_catalog",
+        "saip.list_decoded_efs",
+        "saip.list_interpreted_efs",
+        "saip.list_sd_privilege_catalog",
+        "saip.list_template_oids",
         "saip.lint_path",
+        "saip.redo",
+        "saip.set_cdma_field",
+        "saip.set_cdma_ssd_split",
+        "saip.set_mandatory_aids",
+        "saip.set_pin_shared_context",
+        "saip.undo",
     },
 )
 
@@ -45,6 +65,12 @@ def action_spec_symbols_match_registry_register(saip_py: str | None = None) -> l
     text = _saip_py_text(saip_py)
     specs = set(re.findall(r"^([A-Z][A-Z0-9_]*_SPEC)\s*=\s*ActionSpec\(", text, re.MULTILINE))
     reg = set(re.findall(r"get_registry\(\)\.register\(([A-Z][A-Z0-9_]*_SPEC)\)", text))
+    for match in re.finditer(
+        r"for\s+_spec\s+in\s*\((.*?)\):\s*\n\s*get_registry\(\)\.register\(_spec\)",
+        text,
+        re.DOTALL,
+    ):
+        reg.update(re.findall(r"\b([A-Z][A-Z0-9_]*_SPEC)\b", match.group(1)))
     if specs == reg:
         return []
     return ["spec_vs_register:" + repr(sorted(specs ^ reg))]
@@ -89,6 +115,8 @@ def _test_registry_saip_action_refs() -> frozenset[str]:
         text = path.read_text(encoding="utf-8", errors="replace")
         refs.update(re.findall(r'get_registry\(\)\.get\("(saip\.[a-z0-9_]+)"', text))
         refs.update(re.findall(r'registry\.get\("(saip\.[a-z0-9_]+)"', text))
+        refs.update(re.findall(r'["\'](saip\.[a-z0-9_]+)["\']', text))
+        refs.update(re.findall(r"\b(saip\.[a-z0-9_]+)\b", text))
     return frozenset(refs)
 
 

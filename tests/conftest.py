@@ -13,15 +13,17 @@ The runtime hardening layers below have distinct default postures:
   must still be explicitly enabled at launch; otherwise the simulator
   refuses to load them (see ``SIMCARD/quirks.py``).
 
-Unit tests exercise the real plugin / quirk contracts, so the full test
-suite runs with both gates open. Individual tests that want to verify
-the refusal path override these flags locally via
-``mock.patch.dict(os.environ, {...}, clear=False)``.
+The default regression suite keeps runtime plugin loading closed so
+operator-local extension folders cannot affect CI. Individual tests that
+exercise the plugin gate opt in locally via
+``mock.patch.dict(os.environ, {...}, clear=False)`` or the local
+``_EnvScope`` helper.
 """
 
 from __future__ import annotations
 
 import os
+import subprocess
 import sys
 from pathlib import Path
 
@@ -42,7 +44,8 @@ def _default_env(name: str, value: str) -> None:
         os.environ[name] = value
 
 
-_default_env("YGGDRASIM_ALLOW_PLUGINS", "1")
+os.environ["YGGDRASIM_ALLOW_PLUGINS"] = "0"
+os.environ.pop("YGGDRASIM_DISALLOW_PLUGINS", None)
 _default_env("YGGDRASIM_ALLOW_QUIRKS", "1")
 
 
@@ -76,6 +79,70 @@ _PYSIM_DEPENDENT_TEST_BASENAMES = frozenset(
         "test_simcard_backend.py",
     }
 )
+
+_LOCAL_EXTENSION_TESTS = _REPO_ROOT / "tests" / "plugins"
+
+
+def _ignored_test_paths() -> frozenset[Path]:
+    try:
+        result = subprocess.run(
+            [
+                "git",
+                "ls-files",
+                "-z",
+                "--others",
+                "--ignored",
+                "--exclude-standard",
+                "tests",
+            ],
+            cwd=str(_REPO_ROOT),
+            check=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+        )
+    except Exception:
+        return frozenset()
+    if result.returncode != 0:
+        return frozenset()
+    paths: set[Path] = set()
+    for raw_path in result.stdout.split(b"\0"):
+        if len(raw_path) == 0:
+            continue
+        try:
+            decoded_path = raw_path.decode("utf-8")
+        except UnicodeDecodeError:
+            continue
+        candidate = (_REPO_ROOT / decoded_path).resolve()
+        if candidate.suffix == ".py":
+            paths.add(candidate)
+    return frozenset(paths)
+
+
+_IGNORED_LOCAL_TESTS = _ignored_test_paths()
+
+
+def _path_is_under(path: Path, parent: Path) -> bool:
+    try:
+        path.resolve().relative_to(parent.resolve())
+    except ValueError:
+        return False
+    return True
+
+
+def pytest_ignore_collect(collection_path, config):
+    del config
+    if os.environ.get("YGGDRASIM_RUN_LOCAL_EXTENSION_TESTS", "").strip() == "1":
+        return None
+    path = Path(str(collection_path))
+    if _path_is_under(path, _LOCAL_EXTENSION_TESTS):
+        return True
+    try:
+        resolved_path = path.resolve()
+    except Exception:
+        resolved_path = path
+    if resolved_path in _IGNORED_LOCAL_TESTS:
+        return True
+    return None
 
 
 def _pysim_available() -> tuple[bool, str]:

@@ -69,6 +69,7 @@ _LIFE_CYCLE_STATES: tuple[tuple[int, str], ...] = (
     (0x07, "SELECTABLE"),
     (0x0F, "PERSONALIZED"),
     (0x83, "LOCKED"),
+    (0xBF, "LOCKED_CARD_MANAGER"),
     (0xFF, "TERMINATED"),
 )
 

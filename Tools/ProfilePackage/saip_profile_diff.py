@@ -244,6 +244,8 @@ _SECTION_LABELS: Mapping[str, str] = {
     "opt-isim": "ISIM (optional)",
     "csim": "CSIM Application",
     "opt-csim": "CSIM (optional)",
+    "ssim": "SSIM Application",
+    "ssimEapTLSParameters": "SSIM EAP-TLS Parameters",
     "umts": "UMTS configuration",
     "phonebook": "DF.PHONEBOOK",
     "gsm-access": "GSM Access",

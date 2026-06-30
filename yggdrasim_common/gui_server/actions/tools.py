@@ -182,6 +182,8 @@ def _dispatch_euicc_info2(ctx: ActionContext, *, hex: Any = None) -> dict[str, A
     from yggdrasim_common import registry as yggdrasim_registry
 
     data = _parse_hex(str(hex or ""), field_name="hex")
+    if len(data) < 2 or data[:2] != b"\xBF\x22":
+        raise ValueError("EUICCInfo2 payload must start with tag BF22.")
     build_detail = yggdrasim_registry.get("scp03.logic.euicc_info2.build_detail")
     build_validation = yggdrasim_registry.get("scp03.logic.euicc_info2.build_validation")
     try:

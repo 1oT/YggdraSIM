@@ -142,7 +142,13 @@ class SimulatedSimCardEngine:
         selected_euicc_store_root = (
             str(euicc_store_root or "").strip() or get_sim_euicc_store_root()
         )
-        selected_profile_store_override = str(profile_store_path or "").strip() or get_sim_profile_store_path()
+        explicit_profile_store_path = str(profile_store_path or "").strip()
+        if len(explicit_profile_store_path) > 0:
+            selected_profile_store_override = explicit_profile_store_path
+        elif len(str(euicc_store_root or "").strip()) > 0:
+            selected_profile_store_override = ""
+        else:
+            selected_profile_store_override = get_sim_profile_store_path()
         self.state.euicc_store_path = resolve_euicc_store_path(selected_euicc_store_root, self.state.eid)
         if len(selected_profile_store_override) > 0:
             self.state.profile_store_path = selected_profile_store_override

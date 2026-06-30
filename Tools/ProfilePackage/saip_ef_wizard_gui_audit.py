@@ -96,6 +96,11 @@ _EF_WIZARD_ORPHAN_TRANSPARENT_KEYS: frozenset[str] = frozenset(
         "ef-5gsn3gppguti",
         "ef-gba",
         "ef-pscoi",
+        "ef-bst",
+        "ef-plmnsel",
+        "ef-pst",
+        "ef-rplmnact",
+        "ef-wlrplmn",
     },
 )
 
@@ -122,7 +127,15 @@ def record_wizard_keys_subset_of_specs_or_orphans(app_js: str | None = None) -> 
     """Return record-wizard keys that are not backed by ``_FILE_SPECS``."""
     text = (app_js if app_js is not None else _APP_JS.read_text(encoding="utf-8"))
     specs = file_spec_normalized_keys()
-    orphans = frozenset({"ef-ext1", "ef-ext2", "ef-ext3", "ef-ext4", "ef-ext5"})
+    orphans = frozenset({
+        "ef-ext1",
+        "ef-ext2",
+        "ef-ext3",
+        "ef-ext4",
+        "ef-ext5",
+        "ef-oplmnwlan",
+        "ef-uplmnwlan",
+    })
     bad: list[str] = []
     for key in sorted(parse_saip_record_wizard_ef_keys(text)):
         if key in specs or key in orphans:

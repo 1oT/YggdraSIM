@@ -537,6 +537,7 @@ class MainWrapperHilBridgeRouteTests(unittest.TestCase):
                                         main_wrapper.hil_bridge_runtime.CARD_TRACE_ENV: "1",
                                         main_wrapper.CARD_RELAY_URL_ENV: "http://127.0.0.1:8642/apdu",
                                         main_wrapper.CARD_RELAY_TOKEN_FILE_ENV: "/tmp/card.token",
+                                        "YGGDRASIM_ALLOW_QUIRKS": "1",
                                     },
                                     clear=False,
                                 ):

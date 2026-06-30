@@ -5670,7 +5670,8 @@ def _decode_ef_mst(hex_clean: str) -> dict[str, object] | None:
         return None
     if len(raw) == 0:
         return None
-    table = _decode_service_table(raw[1:].hex(), _EF_MST_SERVICE_NAMES)
+    service_bytes = raw[1:] if raw[0] in (0x00, 0xFF) else raw
+    table = _decode_service_table(service_bytes.hex(), _EF_MST_SERVICE_NAMES)
     if table is None:
         return None
     coding_byte = raw[0]

@@ -72,12 +72,12 @@ class SharedProfileTargetingTests(unittest.TestCase):
 
     def test_decimal_iccid_prefers_profile_metadata_encoding(self) -> None:
         row = SimpleNamespace(
-            iccid="89880811111111111112",
+            iccid="89460811111111111112",
             aid="A0000005591010FFFFFFFF8900001303",
         )
 
         resolved = resolve_profile_target_identifier(
-            "89880811111111111112",
+            "89460811111111111112",
             tag_aid="AID",
             tag_iccid="ICCID",
             resolve_aid_from_alias=lambda alias: None,
@@ -94,7 +94,7 @@ class SharedProfileTargetingTests(unittest.TestCase):
             raise RuntimeError("reader offline")
 
         resolved = resolve_profile_target_identifier(
-            "89880811111111111112",
+            "89460811111111111112",
             tag_aid="AID",
             tag_iccid="ICCID",
             resolve_aid_from_alias=lambda alias: None,

@@ -25,6 +25,8 @@ import contextlib
 import io
 import json
 import logging
+import os
+import sys
 import threading
 import traceback
 from dataclasses import dataclass, field
@@ -261,10 +263,42 @@ def _remote_row_duplicates_local_reader(remote_row: ReaderInfo | None, local_nam
     return False
 
 
+def _pcsc_import_is_explicitly_stubbed() -> bool:
+    """Return True when tests have injected an in-memory smartcard stub.
+
+    A real missing pyscard install leaves ``smartcard`` absent from
+    ``sys.modules`` until import time, and remote-only rows should still
+    be shown. The route tests deliberately inject ``None`` or simple
+    ``types.ModuleType`` objects, so suppress remote bridge discovery
+    only for those explicit in-process stubs.
+    """
+    sentinel = object()
+    smartcard_mod = sys.modules.get("smartcard", sentinel)
+    system_mod = sys.modules.get("smartcard.System", sentinel)
+    if smartcard_mod is None or system_mod is None:
+        return True
+    for mod in (smartcard_mod, system_mod):
+        if mod is sentinel:
+            continue
+        if getattr(mod, "__file__", None) is None and getattr(mod, "__spec__", None) is None:
+            return True
+    return False
+
+
+def _should_suppress_remote_rows_for_stubbed_pcsc() -> bool:
+    if not _pcsc_import_is_explicitly_stubbed():
+        return False
+    try:
+        from yggdrasim_common.card_backend import CARD_RELAY_URL_ENV
+    except Exception:  # noqa: BLE001
+        CARD_RELAY_URL_ENV = "YGGDRASIM_CARD_RELAY_URL"
+    return len(str(os.environ.get(CARD_RELAY_URL_ENV, "") or "").strip()) == 0
+
+
 @router.get("/api/live/readers", response_model=ReadersResponse)
 def list_readers() -> ReadersResponse:
     """Return a JSON list of available PCSC readers and simulated-card backends."""
-    remote_row = _probe_remote_bridge_reader()
+    remote_row = None if _should_suppress_remote_rows_for_stubbed_pcsc() else _probe_remote_bridge_reader()
 
     try:
         from smartcard.System import readers as list_pcsc_readers

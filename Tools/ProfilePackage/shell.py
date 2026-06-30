@@ -19,7 +19,11 @@ import yaml
 from yggdrasim_common.progress import progress_session
 from yggdrasim_common.quit_control import quit_all
 from yggdrasim_common.nord_palette import NORD
-from .saip_asn1_decode import _FID_TO_NAME, fid_name as _fid_name_lookup
+from .saip_asn1_decode import (
+    _FID_TO_NAME,
+    _decode_special_field as _asn1_decode_special_field,
+    fid_name as _fid_name_lookup,
+)
 from .saip_dgi_decode import (
     decode_compact_binary_value as _dgi_decode_compact_binary_value,
     decode_dgi_records as _dgi_decode_records,
@@ -1072,6 +1076,9 @@ class ProfilePackageShell:
         value_bytes = self._value_to_bytes(value)
         if value_bytes is None:
             return None
+        decoded = _asn1_decode_special_field("connectivityParameters", value_bytes)
+        if decoded is not None:
+            return decoded
 
         tag_names = {
             "A0": "Transport / Remote Parameters",
