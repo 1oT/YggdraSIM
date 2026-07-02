@@ -1,5 +1,9 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
-"""Filesystem-bearing PE editors (USIM / ISIM / CSIM / Telecom families).
+
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+"""
+Filesystem-bearing PE editors (USIM / ISIM / CSIM / Telecom families).
 
 Every PE in this family shares the same outer structure::
 

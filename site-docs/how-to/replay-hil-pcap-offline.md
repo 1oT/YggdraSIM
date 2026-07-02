@@ -7,6 +7,11 @@ tags:
   - scp03
   - scp11
 ---
+<!--
+SPDX-License-Identifier: GPL-3.0-or-later
+Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+-->
+
 
 # Replay a HIL pcap offline
 
@@ -45,7 +50,7 @@ For how to produce the keybag, see
     ```bash
     ls -lh Workspace/hil/captures/
     # session-example.pcapng
-    # session-example.pcap.keys.json
+    # session-2026-04-20.pcap.keys.json
     ```
 
     If the keybag lives next to the capture as
@@ -66,16 +71,16 @@ For how to produce the keybag, see
         ```bash
         python main/main.py \
             --open-pcap Workspace/hil/captures/session-example.pcapng \
-            --keybag    Workspace/hil/captures/session-example.keys.json
+            --keybag    Workspace/hil/captures/session-2026-04-20.keys.json
         ```
 
     === "From the `[B]` menu"
 
         ```text
         python main/main.py
-        [B]   HIL Bridge Session
+        [B]   Local SIMtrace2 HIL Bridge Session
          [3]  Open saved .pcap (offline review, no bridge)
-             pcap path  : Workspace/hil/captures/session-example.pcapng
+              pcap path  : Workspace/hil/captures/session-example.pcapng
               keybag path: (blank → auto-discover)
         ```
 
@@ -103,7 +108,7 @@ Inside the SCP03 admin shell, after `AUTH-SD`:
 
 ```text
 [APDU] > AUTH-SD
-[A0...00] > EXPORT-KEYBAG Workspace/hil/captures/session-example.keys.json case-1234
+[A0...00] > EXPORT-KEYBAG Workspace/hil/captures/session-2026-04-20.keys.json case-1234
 ```
 
 The handler refuses cleanly if the session is not authenticated.
@@ -115,14 +120,14 @@ example `LOAD-PROFILE`, `ENABLE-PROFILE`, or `STORE-METADATA`):
 
 ```text
 [Local SMDPP] > LOAD-PROFILE
-[Local SMDPP] > EXPORT-KEYBAG Workspace/hil/captures/session-example.keys.json case-1234
+[Local SMDPP] > EXPORT-KEYBAG Workspace/hil/captures/session-2026-04-20.keys.json case-1234
 ```
 
 Non-interactively:
 
 ```bash
 python -m SCP11.local_access --dump-keybag \
-    Workspace/hil/captures/session-example.keys.json
+    Workspace/hil/captures/session-2026-04-20.keys.json
 ```
 
 ### SCP11 Live sessions

@@ -46,9 +46,19 @@ class HelpMenu :
         print ("  APPS           : Shortcut to retrieve Applications registry.")
         print ("  PKGS           : Shortcut to retrieve Packages registry.")
         print ("  SD             : Shortcut to retrieve Security Domains registry.")
+        print ("  INSTALL        : <cap/ijc> <80E604/0C...> - Load CAP/IJC, then send the supplied INSTALL [for install] APDU.")
+        print ("  INSTALL-CAP    : <cap/ijc> [--privs HEX] [--params HEX] [--applet AID] [--module AID].")
+        print ("  LOAD           : <cap/ijc> - Send INSTALL [for load] and LOAD blocks only.")
+        print ("  INSTALL-LOAD   : <LoadFileAID> [SDAID] [Hash] [Params] [Token] - Send INSTALL [for load].")
+        print ("  INSTALL-APP    : <PkgAID> <AppAID> [ModAID] [Priv] [Params] - Instantiate and make selectable.")
+        print ("  INSTALL-INSTANCE: <PkgAID> <AppAID> [ModAID] [Priv] [Params] - Instantiate only.")
+        print ("  MAKE-SELECTABLE: <AID> [Priv] [Params] [Token] - Make an installed applet selectable.")
+        print ("  EXTRADITE      : <App_AID> <SD_AID> [Token] - Send INSTALL [for extradition].")
+        print ("  REGISTRY-UPDATE: <AID> [Priv] [Params] - Send INSTALL [for registry update].")
+        print ("  PERSONALIZE    : <AID> - Send INSTALL [for personalization].")
         print ("  LOCK <AID>     : Shortcut to set state to LOCKED (0x80).")
         print ("  UNLOCK <AID>   : Shortcut to set state to SELECTABLE (0x07).")
-        print ("  DEL <AID>      : Shortcut to delete an object.")
+        print ("  DEL/DELETE <AID>: Shortcut to delete an object.")
         print ("  STORE-DATA     : <Hex> [P1] [P2] - Send raw STORE DATA payload.")
 
         print (f"\n{Config.Colors.CYAN}[ Telecom & eSIM (SGP.22 / SGP.32 / SGP.02) - retrieval + local profile state ]{Config.Colors.ENDC}")
@@ -60,7 +70,7 @@ class HelpMenu :
         print ("  DERIVE-OPC     : <Ki_hex> <OP_hex> - Derive OPc per 3GPP TS 35.206.")
 
         print (f"\n{Config.Colors.CYAN}[ SCP11 module map ]{Config.Colors.ENDC}")
-        print ("  Main menu [3]  : SCP11 live relay shell (LPAd/IPAd/IPAe).")
+        print ("  Main menu [3]  : SCP11 live relay shell (LPAd/IPAd).")
         print ("  Main menu [4]  : SCP11 test relay shell (LPAd/IPAd).")
         print ("  Main menu [5]  : SCP11 local access shell (LOAD-PROFILE workflow).")
 
@@ -91,7 +101,6 @@ class HelpMenu :
 
         print (f"\n{Config.Colors.CYAN}[ System & Developer ]{Config.Colors.ENDC}")
         print ("  GUIDE [Topic]  : Show documentation (Topics: GP, ETSI, GSMA, INSTALL, SECURITY, OTA, CONFIG, SAIP, SUCI, CLI).")
-        print ("  DECODE         : <Hex> - Parse and decode a raw BER-TLV string.")
         print ("  RUN / SCRIPT   : <File> [Out.yaml] - Execute a batch script of APDU commands.")
         print ("  EXPORT-KEYBAG  : [Path.keys.json] [Label] - Dump active SCP03 session keys for HIL offline replay.")
         print ("  DEBUG/VERBOSE  : Toggle raw APDU hex transmission logging.")

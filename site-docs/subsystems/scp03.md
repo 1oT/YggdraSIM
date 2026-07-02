@@ -6,6 +6,11 @@ tags:
   - globalplatform
   - filesystem
 ---
+<!--
+SPDX-License-Identifier: GPL-3.0-or-later
+Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+-->
+
 
 # SCP03 Admin Shell
 
@@ -28,8 +33,8 @@ navigation, eUICC retrieval, PIN/auth diagnostics, or report/export.
 - generating a full filesystem export or YAML-oriented report
 - comparing a live card against a stored "gold" profile snapshot
 
-Do not use it as a relay provisioning shell. Relay work lives in `SCP11/live`
-and `SCP11/test`. Direct local ISD-R provisioning lives in
+Do not use it as a relay provisioning shell. Relay work lives in `SCP11/live`.
+Direct local ISD-R provisioning lives in
 `SCP11/local_access`.
 
 ## Entry points

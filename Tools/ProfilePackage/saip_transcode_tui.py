@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """
 Split-pane Textual UI for SAIP decoded JSON editing with DER hex preview.
@@ -19,6 +22,78 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from .saip_tool import SaipToolBridge
+
+
+def _saip_transcode_available_theme_names(app: object) -> tuple[str, ...]:
+    raw = getattr(app, "available_themes", None)
+    if isinstance(raw, dict):
+        return tuple(str(name) for name in raw.keys())
+    if raw is None:
+        return ()
+    try:
+        return tuple(str(name) for name in raw)
+    except TypeError:
+        return ()
+
+
+def _saip_transcode_theme_is_available(app: object, theme_name: str) -> bool:
+    name = str(theme_name or "").strip()
+    if len(name) == 0:
+        return False
+    available = _saip_transcode_available_theme_names(app)
+    if len(available) == 0:
+        return True
+    return name in available
+
+
+def _resolve_saip_transcode_theme(app: object, preferred_theme: object) -> str:
+    preferred = str(preferred_theme or "").strip() or "textual-ansi"
+    candidates: list[str] = []
+
+    def add_candidate(name: object) -> None:
+        text = str(name or "").strip()
+        if len(text) == 0 or text in candidates:
+            return
+        candidates.append(text)
+
+    if preferred == "textual-dark":
+        add_candidate("textual-ansi")
+        add_candidate("textual-dark")
+    else:
+        add_candidate(preferred)
+    add_candidate("textual-ansi")
+    add_candidate("textual-dark")
+    add_candidate("nord")
+    add_candidate("textual-light")
+    add_candidate(getattr(app, "theme", ""))
+
+    for candidate in candidates:
+        if _saip_transcode_theme_is_available(app, candidate):
+            return candidate
+
+    available = _saip_transcode_available_theme_names(app)
+    if len(available) > 0:
+        return available[0]
+    return "textual-dark"
+
+
+def _next_available_saip_transcode_theme(
+    app: object,
+    current_theme: object,
+    theme_cycle: list[str],
+) -> str:
+    current = str(current_theme or "").strip() or "textual-dark"
+    if len(theme_cycle) == 0:
+        return _resolve_saip_transcode_theme(app, current)
+    if current in theme_cycle:
+        start = theme_cycle.index(current)
+    else:
+        start = -1
+    for offset in range(1, len(theme_cycle) + 1):
+        candidate = theme_cycle[(start + offset) % len(theme_cycle)]
+        if _saip_transcode_theme_is_available(app, candidate):
+            return candidate
+    return _resolve_saip_transcode_theme(app, current)
 
 
 def _clipboard_write_commands() -> list[tuple[str, list[str]]]:
@@ -377,6 +452,7 @@ def run_saip_transcode_tui(bridge: SaipToolBridge) -> None:
         scan_json_object_members,
     )
     from .saip_transcode_tui_prefs import (
+        THEME_CYCLE,
         load_outline_prefs,
         load_pane_layout_prefs,
         load_split_size_prefs,
@@ -2043,7 +2119,7 @@ def run_saip_transcode_tui(bridge: SaipToolBridge) -> None:
                 if self._mode in ("add", "value"):
                     label = (
                         "Value — hex string or JSON object "
-                        "(e.g. 89461111111111111112 or {\"zero_len\":10})"
+                        "(e.g. 89881111111111111112 or {\"zero_len\":10})"
                     )
                     if self._mode == "value":
                         label = "New value (current: " + self._existing_value + ")"
@@ -3318,6 +3394,7 @@ def run_saip_transcode_tui(bridge: SaipToolBridge) -> None:
             Binding("f1", "open_keybind_help", "Key help", priority=True),
             Binding("ctrl+f", "focus_outline_search", "Tree search", priority=True),
             Binding("ctrl+s", "save_refresh", "Save / re-encode", priority=True),
+            Binding("ctrl+enter", "apply_decoded_edit", "Apply decoded edit", priority=True),
             Binding("ctrl+t", "open_tree_context_menu", "Tree actions", priority=True),
             Binding("ctrl+a", "add_selected_pe_file", "Add file", priority=True),
             Binding("ctrl+up", "move_selected_pe_up", "Move PE up", priority=True),
@@ -4158,10 +4235,6 @@ def run_saip_transcode_tui(bridge: SaipToolBridge) -> None:
             self._refresh_decoded_raw_hex_views()
 
         def _refresh_decoded_panel(self, *, force: bool = False) -> None:
-            # Decoded pane is a pure viewer in this release. Every
-            # state transition below forces ``read_only=True`` so the
-            # inline structured / service-table widgets render the
-            # decoded payload without accepting edits.
             if self._has_visible_mode("decoded") is False:
                 return
             try:
@@ -4202,6 +4275,7 @@ def run_saip_transcode_tui(bridge: SaipToolBridge) -> None:
             payload = context.get("payload")
             if isinstance(payload, dict) is False:
                 payload = {}
+            context_read_only = bool(context.get("read_only", False))
             self._decoded_pane_context = context
             self._decoded_pane_context_key = context_key
             self._decoded_pane_editor_kind = editor_kind
@@ -4211,7 +4285,7 @@ def run_saip_transcode_tui(bridge: SaipToolBridge) -> None:
                 self._set_service_table_views_state(
                     payload,
                     note=self._decoded_pane_note,
-                    read_only=True,
+                    read_only=context_read_only,
                 )
                 return
             if editor_kind in STRUCTURED_DECODED_EDITOR_KINDS:
@@ -4219,11 +4293,11 @@ def run_saip_transcode_tui(bridge: SaipToolBridge) -> None:
                     editor_kind,
                     payload,
                     note=self._decoded_pane_note,
-                    read_only=True,
+                    read_only=context_read_only,
                 )
                 return
             self._decoded_pane_payload = copy.deepcopy(payload)
-            self._set_decoded_text_views_state(payload_text, read_only=True)
+            self._set_decoded_text_views_state(payload_text, read_only=context_read_only)
 
         # ------------------------------------------------------------------
         # PE editor / filesystem / applications panes
@@ -5012,13 +5086,16 @@ def run_saip_transcode_tui(bridge: SaipToolBridge) -> None:
         def on_mount(self) -> None:
             """Initialise widget state and apply startup preferences after the widget is mounted."""
             prefs = load_transcode_tui_prefs(workspace_root)
-            want_theme = str(prefs.get("theme") or "textual-ansi")
-            if want_theme == "textual-dark":
-                want_theme = "textual-ansi"
+            want_theme = _resolve_saip_transcode_theme(self, prefs.get("theme"))
             try:
                 self.theme = want_theme
             except Exception:
-                self.theme = "textual-ansi"
+                fallback_theme = _resolve_saip_transcode_theme(self, "textual-dark")
+                if fallback_theme != want_theme:
+                    try:
+                        self.theme = fallback_theme
+                    except Exception:
+                        pass
             split_prefs = load_split_size_prefs(workspace_root)
             saved_json_outline_width = split_prefs.get("json_outline_width")
             if saved_json_outline_width is not None:
@@ -5234,9 +5311,6 @@ def run_saip_transcode_tui(bridge: SaipToolBridge) -> None:
         def on_text_area_changed(self, event: TextArea.Changed) -> None:
             """Debounce lint and inspect refresh when the DER or decoded text area changes."""
             if self._is_decoded_text_view(event.text_area):
-                # Decoded pane is read-only in v1 (decoded-edit moved
-                # to V2 GUI); only the programmatic-update skip
-                # counter needs to run here.
                 if self._decoded_pane_syncing:
                     return
                 current_text = str(event.text_area.text or "")
@@ -5247,6 +5321,9 @@ def run_saip_transcode_tui(bridge: SaipToolBridge) -> None:
                     self._skip_decoded_change_remaining -= 1
                     if self._skip_decoded_change_remaining == 0:
                         self._skip_decoded_change_text = None
+                    return
+                self._decoded_pane_dirty = True
+                self._refresh_slot_captions()
                 return
             if event.text_area.id != "json_editor":
                 return
@@ -5336,7 +5413,7 @@ def run_saip_transcode_tui(bridge: SaipToolBridge) -> None:
         def action_cycle_theme(self) -> None:
             """Rotate the TUI colour theme to the next entry in the theme cycle."""
             cur = str(self.theme or "textual-dark")
-            nxt = next_theme_in_cycle(cur)
+            nxt = _next_available_saip_transcode_theme(self, cur, THEME_CYCLE)
             try:
                 self.theme = nxt
             except Exception as exc:
@@ -5899,26 +5976,9 @@ def run_saip_transcode_tui(bridge: SaipToolBridge) -> None:
                     pe_section_key=pe_key,
                 )
                 if isinstance(readonly_view, dict):
-                    readonly_payload = readonly_view.get("payload", {})
-                    if isinstance(readonly_payload, dict) is False:
-                        readonly_payload = {"value": readonly_payload}
-                    return {
-                        "replacement_path": replacement_path,
-                        "field_name": field_name,
-                        "last_ef_key": last_ef_key,
-                        "pe_key": pe_key,
-                        "raw_hex": self._normalize_raw_hex(_hex_from_tagged_bytes(raw_value)),
-                        "title": str(readonly_view.get("title", "") or "Read-only decode"),
-                        "note": readonly_view.get("note"),
-                        "editor_kind": "readonly_json",
-                        "payload": copy.deepcopy(readonly_payload),
-                        "payload_text": json.dumps(
-                            readonly_payload,
-                            indent=2,
-                            ensure_ascii=False,
-                        ),
-                        "read_only": True,
-                    }
+                    # Fall through to raw-hex — semantic decode succeeded
+                    # but no round-trip encoder exists.
+                    pass
                 raw_hex_model = build_decoded_value_raw_hex_model(
                     field_name=field_name,
                     raw_value=raw_value,
@@ -6736,6 +6796,64 @@ def run_saip_transcode_tui(bridge: SaipToolBridge) -> None:
                 status_ok=status_ok,
                 failure_prefix=f"PE editor change for {pe_section_key} failed",
             )
+
+        def _apply_decoded_edit_from_payload(self, editor_payload: dict[str, object]) -> None:
+            context = self._decoded_pane_context
+            if isinstance(context, dict) is False:
+                self._set_status("Decoded edit: no active context.", remember=False)
+                return
+            replacement_path = context.get("replacement_path")
+            if isinstance(replacement_path, list) is False or len(replacement_path) == 0:
+                self._set_status("Decoded edit: no replacement path.", remember=False)
+                return
+            field_name = str(context.get("field_name", "") or "").strip()
+            if len(field_name) == 0:
+                self._set_status("Decoded edit: no field name.", remember=False)
+                return
+            last_ef_key = str(context.get("last_ef_key", "") or "").strip() or None
+            target_length = context.get("target_length")
+            if isinstance(target_length, int) is False or isinstance(target_length, bool):
+                target_length = None
+            editor_kind = self._decoded_pane_editor_kind
+            try:
+                encoded_value = encode_decoded_value_editor_payload(
+                    field_name=field_name,
+                    editor_payload=dict(editor_payload),
+                    last_ef_key=last_ef_key,
+                    target_length=target_length,
+                    editor_kind=editor_kind,
+                )
+            except Exception as exc:
+                self._set_status(f"Decoded edit re-encode failed: {exc}", remember=False)
+                return
+            try:
+                document = self._current_editor_document()
+            except Exception as exc:
+                self._set_status(f"Decoded edit rejected: {exc}", remember=False)
+                return
+            try:
+                self._json_set_by_path(document, list(replacement_path), encoded_value)
+            except Exception as exc:
+                self._set_status(f"Decoded edit splice failed: {exc}", remember=False)
+                return
+            self._decoded_pane_dirty = False
+            self._apply_document_edit(
+                document,
+                status_ok=f"Decoded edit applied: {field_name}",
+                failure_prefix=f"Decoded edit for {field_name} failed",
+            )
+
+        def on_structured_decoded_field_editor_changed(self, event) -> None:
+            payload = getattr(event, "payload", None)
+            if isinstance(payload, dict) is False:
+                return
+            self._apply_decoded_edit_from_payload(payload)
+
+        def on_service_table_toggle_editor_changed(self, event) -> None:
+            payload = getattr(event, "payload", None)
+            if isinstance(payload, dict) is False:
+                return
+            self._apply_decoded_edit_from_payload(payload)
 
         def on_file_system_view_file_selected(self, event) -> None:
             """Activate the PE section that owns the file selected in the FS view."""
@@ -8422,6 +8540,27 @@ def run_saip_transcode_tui(bridge: SaipToolBridge) -> None:
                 self._peer_lock = False
                 self._schedule_inspect_refresh()
                 self._schedule_decoded_refresh()
+
+        def action_apply_decoded_edit(self) -> None:
+            if self._has_visible_mode("decoded") is False:
+                return
+            if self._decoded_pane_dirty is False:
+                return
+            context = self._decoded_pane_context
+            if isinstance(context, dict) is False:
+                return
+            editor_kind = self._decoded_pane_editor_kind
+            if editor_kind in STRUCTURED_DECODED_EDITOR_KINDS or editor_kind == "service_table":
+                return
+            try:
+                parsed_payload = json.loads(str(self._decoded_pane_text or "").strip())
+            except Exception as exc:
+                self._set_status(f"Decoded edit: JSON parse failed: {exc}", remember=False)
+                return
+            if isinstance(parsed_payload, dict) is False:
+                self._set_status("Decoded edit: expected a JSON object.", remember=False)
+                return
+            self._apply_decoded_edit_from_payload(parsed_payload)
 
         def action_save_refresh(self) -> None:
             """Save the current editor content and refresh the decoded view."""

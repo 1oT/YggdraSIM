@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """UICC authentication logic: Milenage KAT vectors, 5G AKA, and AuthLogic adapter (ETSI TS 135 206 / 3GPP TS 33.501)."""
 from __future__ import annotations

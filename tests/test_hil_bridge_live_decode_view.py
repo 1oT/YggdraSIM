@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 from __future__ import annotations
 
 import tempfile
@@ -10,9 +13,11 @@ from Tools.HilBridge.live_decode_view import (
     _compute_pane_specs,
     _run_tshark_text_command,
     _summary_row_text,
+    build_packet_field_range_command,
     build_packet_detail_command,
     build_packet_hex_command,
     build_summary_command,
+    parse_packet_field_ranges,
     parse_summary_output,
 )
 
@@ -26,6 +31,16 @@ class HilBridgeLiveDecodeViewTests(unittest.TestCase):
         self.assertIn("_ws.col.Info", command)
         self.assertIn("udp.payload", command)
         self.assertIn("udp.port==4729,gsmtap", command)
+
+    def test_build_summary_command_can_filter_after_frame(self) -> None:
+        command = build_summary_command(
+            "/tmp/live_capture.pcap",
+            tshark_binary="/usr/bin/tshark",
+            frame_filter="frame.number > 17",
+        )
+
+        self.assertIn("-Y", command)
+        self.assertIn("frame.number > 17", command)
 
     def test_build_packet_commands_target_single_frame(self) -> None:
         detail_command = build_packet_detail_command(
@@ -43,6 +58,38 @@ class HilBridgeLiveDecodeViewTests(unittest.TestCase):
         self.assertIn("-V", detail_command)
         self.assertIn("(frame.number >= 17) and (frame.number < 18)", hex_command)
         self.assertIn("-x", hex_command)
+
+        range_command = build_packet_field_range_command(
+            "/tmp/live_capture.pcap",
+            17,
+            tshark_binary="/usr/bin/tshark",
+        )
+        self.assertIn("(frame.number >= 17) and (frame.number < 18)", range_command)
+        self.assertIn("-T", range_command)
+        self.assertIn("pdml", range_command)
+
+    def test_parse_packet_field_ranges_extracts_pdml_offsets(self) -> None:
+        ranges = parse_packet_field_ranges(
+            """<?xml version="1.0"?>
+<pdml>
+  <packet>
+    <proto name="frame" showname="Frame 7: 12 bytes on wire" pos="0" size="12">
+      <field name="frame.number" showname="Frame Number: 7" show="7" pos="0" size="0"/>
+    </proto>
+    <proto name="gsm_sim" showname="GSM SIM APDU" pos="8" size="4">
+      <field name="gsm_sim.apdu" showname="APDU: 00 A4 00 00" show="00:A4:00:00" pos="8" size="4" value="00a40000"/>
+      <field name="gsm_sim.ins" showname="INS: SELECT" show="SELECT" pos="9" size="1" value="a4"/>
+    </proto>
+  </packet>
+</pdml>"""
+        )
+
+        self.assertEqual(ranges[0]["name"], "frame")
+        self.assertEqual(ranges[0]["start"], 0)
+        self.assertEqual(ranges[0]["end"], 12)
+        self.assertEqual(ranges[-1]["name"], "gsm_sim.ins")
+        self.assertEqual(ranges[-1]["start"], 9)
+        self.assertEqual(ranges[-1]["size"], 1)
 
     def test_parse_summary_output_handles_tabular_tshark_rows(self) -> None:
         rows = parse_summary_output(

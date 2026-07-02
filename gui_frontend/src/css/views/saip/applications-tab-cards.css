@@ -1,0 +1,1271 @@
+/*
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+ */
+
+/* ---- SA-G4: Applications tab cards -------------------------------- */
+
+.saip-apps-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 4px;
+  margin-bottom: 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+.saip-apps-head h4 {
+  margin: 0;
+  font-size: 14px;
+  letter-spacing: 0.02em;
+}
+
+.saip-apps-meta {
+  font-family: var(--mono, "JetBrains Mono", monospace);
+  font-size: 11px;
+  color: var(--fg-muted, #888);
+  flex-grow: 1;
+}
+
+.saip-apps-refresh {
+  margin-left: auto;
+}
+
+.saip-apps-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 4px 0 12px 0;
+}
+
+.saip-app-card {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-alt, rgba(255, 255, 255, 0.03));
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  cursor: pointer;
+  transition: border-color 0.12s ease, background-color 0.12s ease;
+}
+
+.saip-app-card:hover {
+  background: var(--surface, rgba(255, 255, 255, 0.05));
+  border-color: var(--accent-soft);
+}
+
+.saip-app-card--sd {
+  border-left: 3px solid rgba(163, 190, 140, 0.55);
+  padding-left: 9px;
+}
+
+.saip-app-card-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.saip-app-card-title {
+  flex-grow: 1;
+  min-width: 0;
+}
+
+.saip-app-card-type {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--fg);
+}
+
+.saip-app-card-sub {
+  font-size: 11px;
+  color: var(--fg-muted, #888);
+  font-family: var(--mono, "JetBrains Mono", monospace);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.saip-app-lifecycle {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 3px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--surface, rgba(255, 255, 255, 0.04));
+  color: var(--fg-muted, #888);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+/* Lifecycle palette deliberately uses fixed tints (not the workbench
+ * accent) so PERSONALIZED / INSTALLED / LOCKED read as semantic
+ * traffic-lights regardless of the active theme. */
+.saip-app-lifecycle.is-personalized {
+  border-color: rgba(163, 190, 140, 0.5);
+  background: rgba(163, 190, 140, 0.12);
+  color: #b4cf99;
+}
+
+.saip-app-lifecycle.is-installed {
+  border-color: rgba(235, 203, 139, 0.5);
+  background: rgba(235, 203, 139, 0.10);
+  color: #ddc485;
+}
+
+.saip-app-lifecycle.is-locked {
+  border-color: rgba(208, 135, 112, 0.5);
+  background: rgba(208, 135, 112, 0.12);
+  color: #e2a288;
+}
+
+.saip-app-lifecycle.is-unknown {
+  border-color: var(--border);
+  color: var(--fg-muted, #888);
+}
+
+.saip-app-card-jump {
+  flex-shrink: 0;
+}
+
+.saip-app-card-edit {
+  flex-shrink: 0;
+}
+
+.saip-app-card-edit[aria-expanded="true"] {
+  background: var(--accent-soft, rgba(120, 160, 240, 0.18));
+  border-color: var(--accent, #6c8aff);
+  color: var(--accent, #6c8aff);
+}
+
+.saip-app-card-inline {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
+.saip-app-card-inline[hidden] {
+  display: none;
+}
+
+.saip-app-aid-grid {
+  display: grid;
+  grid-template-columns: minmax(140px, 24%) 1fr;
+  row-gap: 4px;
+  column-gap: 12px;
+  padding: 8px 0;
+  border-top: 1px solid var(--border);
+}
+
+.saip-app-aid-row {
+  display: contents;
+}
+
+.saip-app-aid-label {
+  font-size: 11px;
+  color: var(--fg-muted, #888);
+  letter-spacing: 0.02em;
+  align-self: center;
+}
+
+.saip-app-aid-value {
+  font-family: var(--mono, "JetBrains Mono", monospace);
+  font-size: 11px;
+  color: var(--fg);
+  word-break: break-all;
+  background: transparent;
+  padding: 0;
+}
+
+.saip-app-aid-value.is-muted {
+  color: var(--fg-muted, #888);
+  font-style: italic;
+}
+
+.saip-app-privs,
+.saip-app-tars {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 0;
+  border-top: 1px solid var(--border);
+}
+
+.saip-app-privs-label {
+  font-size: 11px;
+  color: var(--fg-muted, #888);
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.saip-app-privs-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.saip-app-priv {
+  font-size: 10px;
+  letter-spacing: 0.02em;
+  padding: 2px 8px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  background: var(--surface, rgba(255, 255, 255, 0.04));
+  color: var(--fg);
+  white-space: nowrap;
+}
+
+.saip-app-priv--tar {
+  font-family: var(--mono, "JetBrains Mono", monospace);
+  background: rgba(94, 129, 172, 0.12);
+  border-color: rgba(94, 129, 172, 0.45);
+  color: #8fa6cc;
+}
+
+.saip-app-privs-hex {
+  font-family: var(--mono, "JetBrains Mono", monospace);
+  font-size: 10px;
+  color: var(--fg-muted, #888);
+  background: transparent;
+}
+
+.saip-app-foot {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+}
+
+.saip-app-foot-chip {
+  font-size: 11px;
+  padding: 3px 8px;
+  border-radius: 4px;
+  background: var(--surface, rgba(255, 255, 255, 0.04));
+  color: var(--fg-muted, #888);
+  border: 1px solid var(--border);
+}
+
+.saip-app-foot-chip--mono {
+  font-family: var(--mono, "JetBrains Mono", monospace);
+  font-size: 10px;
+  letter-spacing: 0.02em;
+}
+
+.saip-file-card {
+  background: var(--surface-alt, rgba(255, 255, 255, 0.03));
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-height: 0;
+}
+
+.saip-file-card h5 {
+  margin: 0;
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--fg-muted, #888);
+}
+
+/* Full-width stack used by the File Control Parameters tab. The
+ * historical 320 px / 1fr grid forced the decoded-fields list into
+ * a narrow gutter; operators reported the layout as "narrow and
+ * long instead of wide". A vertical stack keeps each sub-card at
+ * the full detail-pane width. */
+.saip-file-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 0;
+  margin-top: 8px;
+}
+
+.saip-file-card--wide {
+  width: 100%;
+}
+
+.saip-template-default-card {
+  background:
+    linear-gradient(90deg, rgba(180, 207, 153, 0.14), rgba(180, 207, 153, 0.04));
+  border-color: rgba(180, 207, 153, 0.38);
+}
+
+.saip-template-default-card .saip-edit-card-title,
+.saip-template-default-card h5 {
+  color: #b4cf99;
+}
+
+.saip-file-card-title {
+  margin: 0 0 4px 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--fg, #eceff4);
+}
+
+.saip-file-card--decoded-edit .saip-decoded-card {
+  margin-top: 0;
+}
+
+.saip-file-decoded-edit {
+  margin-top: 0;
+}
+
+.saip-file-decoded-edit > .saip-decoded-card {
+  margin-top: 2px;
+}
+
+.saip-backend-decoded-tree {
+  list-style: none;
+  margin: 4px 0 0;
+  padding: 0;
+  font-size: 12px;
+}
+
+.saip-backend-decoded-tree--root {
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  padding-top: 8px;
+  margin-top: 4px;
+}
+
+.saip-backend-decoded-tree--nested {
+  margin: 4px 0 6px 0;
+  padding: 0 0 0 16px;
+  border-left: 1px solid var(--border, rgba(255, 255, 255, 0.08));
+}
+
+.saip-backend-decoded-item {
+  margin: 3px 0;
+  line-height: 1.45;
+}
+
+.saip-backend-decoded-key {
+  color: var(--fg-muted, #888);
+  font-size: 11px;
+}
+
+.saip-backend-decoded-sep {
+  display: inline;
+}
+
+.saip-backend-decoded-val {
+  color: var(--fg, #eceff4);
+  word-break: break-word;
+}
+
+.saip-backend-decoded-val.is-mono {
+  font-family: var(--mono, "JetBrains Mono", monospace);
+  font-size: 11px;
+}
+
+.saip-backend-decoded-val.is-muted {
+  color: var(--fg-muted, #888);
+  font-style: italic;
+}
+
+/* Inner host wrapper that hosts saipFileRenderAccess output inside
+ * the FCP card. Drops the leading margin its top-level cards apply
+ * so the access section reads as part of the parent card rather
+ * than as a stand-alone block. */
+.saip-access-host > .saip-edit-card:first-child {
+  margin-top: 0;
+}
+
+.saip-card-divider {
+  width: 100%;
+  height: 1px;
+  border: 0;
+  background: var(--border, #4c566a);
+  margin: 12px 0 6px 0;
+  opacity: 0.4;
+}
+
+.saip-card-subhead {
+  margin: 0 0 6px 0;
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--fg-muted, #888);
+  font-weight: 600;
+}
+
+.saip-file-data-summary {
+  font-weight: 600;
+  color: var(--fg, #eceff4);
+}
+
+.saip-file-card dl {
+  margin: 0;
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 4px 12px;
+  font-size: 12px;
+}
+
+.saip-file-card dt {
+  color: var(--fg-muted, #888);
+  font-size: 11px;
+}
+
+.saip-file-card dd {
+  margin: 0;
+  font-family: var(--mono, "JetBrains Mono", monospace);
+  font-size: 11px;
+  color: var(--fg);
+  word-break: break-word;
+}
+
+.saip-file-data-tools {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 8px;
+}
+
+.saip-file-data-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.saip-file-data-row {
+  display: grid;
+  grid-template-columns: 140px 1fr;
+  gap: 8px;
+  align-items: center;
+  padding: 6px 8px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--surface-alt, rgba(255, 255, 255, 0.03));
+}
+
+.saip-file-data-op {
+  font-size: 11px;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--fg-muted, #888);
+}
+
+.saip-file-data-meta {
+  font-family: var(--mono, "JetBrains Mono", monospace);
+  font-size: 12px;
+  color: var(--fg);
+}
+
+/* Two-pane GFM editor */
+
+.saip-gfm-card {
+  padding-bottom: 4px;
+}
+
+/* Per-GFM parent-path summary chip. Sits above the Add-file bar so
+   the operator sees at a glance which DF this GFM targets. State
+   colours: bound = accent (everything is consistent), unbound =
+   muted (first add will stamp the parent), mixed = warn-tinted
+   (encourages splitting the GFM into one PE per parent path). */
+.saip-gfm-parent-chip {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px 10px;
+  padding: 6px 10px;
+  margin: 0 0 6px 0;
+  border: 1px solid var(--border);
+  border-left-width: 3px;
+  border-radius: 3px;
+  background: var(--bg-2, var(--bg));
+  font-size: 0.82rem;
+}
+
+.saip-gfm-parent-chip[data-state="bound"] {
+  border-left-color: var(--accent);
+}
+
+.saip-gfm-parent-chip[data-state="unbound"] {
+  border-left-color: var(--fg-muted);
+}
+
+.saip-gfm-parent-chip[data-state="mixed"] {
+  border-left-color: var(--warn, #d6a73a);
+  background: color-mix(in srgb, var(--warn, #d6a73a) 8%, var(--bg));
+}
+
+.saip-gfm-parent-chip-label {
+  color: var(--fg-muted);
+  text-transform: uppercase;
+  font-size: 0.7rem;
+  letter-spacing: 0.04em;
+  font-weight: 600;
+}
+
+.saip-gfm-parent-chip-value {
+  font-family: var(--font-mono);
+  color: var(--fg);
+}
+
+.saip-gfm-parent-chip-hint {
+  flex: 1 1 100%;
+  font-size: 0.74rem;
+  color: var(--fg-muted);
+  font-style: italic;
+}
+
+/* "Add file element" inline form mounted at the top of the GFM card.
+   See eUICC Profile Creator manual, "Profile Elements for File
+   System Creation" → "File System Creation by Generic File
+   Management" for the affordance this mirrors. The bar's parent
+   field hides automatically when the parent chip above shows
+   ``data-state="bound"`` — the dispatcher then reuses that path. */
+.saip-gfm-addbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 8px;
+  padding: 6px 8px 10px 8px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 6px;
+}
+
+.saip-gfm-addbar-heading {
+  width: 100%;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--fg-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.saip-gfm-addbar-field {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 0.78rem;
+}
+
+.saip-gfm-addbar-label {
+  color: var(--fg-muted);
+  font-size: 0.72rem;
+}
+
+.saip-gfm-addbar-field input {
+  width: 100px;
+  padding: 2px 6px;
+  font-family: var(--font-mono);
+  font-size: 0.82rem;
+  background: var(--bg);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+}
+
+.saip-gfm-addbar-submit {
+  height: 26px;
+  padding: 0 12px;
+  background: var(--accent);
+  color: var(--bg);
+  border: 1px solid var(--accent);
+  border-radius: 3px;
+  font-size: 0.82rem;
+  cursor: pointer;
+}
+
+.saip-gfm-addbar-submit:hover {
+  filter: brightness(1.08);
+}
+
+.saip-gfm-addbar-submit:disabled {
+  opacity: 0.6;
+  cursor: progress;
+}
+
+.saip-gfm-addbar-status {
+  font-size: 0.78rem;
+  align-self: center;
+  color: var(--fg-muted);
+}
+
+.saip-gfm-addbar-status[data-state="ok"] {
+  color: var(--accent);
+}
+
+.saip-gfm-addbar-status[data-state="error"] {
+  color: var(--danger, #d44);
+}
+
+.saip-gfm-panes {
+  display: flex;
+  gap: 0;
+  min-height: 320px;
+}
+
+.saip-gfm-list-pane {
+  width: 220px;
+  min-width: 160px;
+  flex-shrink: 0;
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+}
+
+.saip-gfm-list-header {
+  display: grid;
+  grid-template-columns: 1fr 52px;
+  padding: 6px 10px;
+  background: var(--surface-alt, rgba(255, 255, 255, 0.03));
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--fg-muted, #888);
+  border-bottom: 1px solid var(--border);
+}
+
+.saip-gfm-list-body {
+  overflow-y: auto;
+  flex: 1;
+}
+
+.saip-gfm-list-row {
+  display: grid;
+  grid-template-columns: 1fr 52px;
+  padding: 7px 10px;
+  cursor: pointer;
+  border-bottom: 1px solid var(--border);
+  transition: background 0.12s;
+  align-items: center;
+}
+
+.saip-gfm-list-row:last-child {
+  border-bottom: none;
+}
+
+.saip-gfm-list-row:hover {
+  background: var(--surface-hover, rgba(255, 255, 255, 0.06));
+}
+
+.saip-gfm-list-row.is-active {
+  background: var(--accent-muted, rgba(94, 129, 244, 0.22));
+  border-left: 3px solid var(--accent, #5e81f4);
+}
+
+.saip-gfm-row-name {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--fg);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.saip-gfm-list-row.is-active .saip-gfm-row-name {
+  color: var(--accent, #5e81f4);
+}
+
+.saip-gfm-row-fid {
+  font-family: var(--mono, "JetBrains Mono", monospace);
+  font-size: 10px;
+  color: var(--fg-muted, #888);
+  text-align: right;
+}
+
+.saip-gfm-detail-pane {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.saip-gfm-detail-panel {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px 12px 8px 12px;
+}
+
+.saip-template-workbench-card {
+  min-height: 0;
+}
+
+.saip-template-workbench-summary {
+  margin-bottom: 0;
+}
+
+.saip-template-workbench-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 0 0 6px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.saip-template-workbench-panes {
+  min-height: 360px;
+  max-height: min(62vh, 720px);
+}
+
+.saip-template-workbench-list-pane {
+  width: 320px;
+  min-width: 240px;
+}
+
+.saip-template-workbench-list-header {
+  grid-template-columns: minmax(0, 1fr) 64px;
+}
+
+.saip-template-workbench-list-body {
+  min-height: 0;
+}
+
+.saip-template-workbench-row {
+  grid-template-columns: minmax(0, 1fr) 64px;
+  min-height: 36px;
+}
+
+.saip-template-workbench-row--absent {
+  opacity: 0.72;
+}
+
+.saip-template-workbench-row-main {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.saip-template-workbench-row-main .saip-template-check {
+  flex: 0 0 auto;
+}
+
+.saip-template-workbench-detail-pane {
+  min-height: 0;
+}
+
+.saip-template-workbench-detail-panel {
+  min-height: 0;
+}
+
+.saip-record-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  margin-bottom: 8px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--surface-alt, rgba(255, 255, 255, 0.03));
+}
+
+.saip-record-toolbar-label {
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--fg-muted, #888);
+}
+
+.saip-record-select {
+  min-width: 9rem;
+  font-family: var(--mono, "JetBrains Mono", monospace);
+  font-size: 12px;
+}
+
+.saip-record-nav {
+  min-width: 2rem;
+}
+
+.saip-record-toolbar-meta {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--fg-muted, #888);
+  font-family: var(--mono, "JetBrains Mono", monospace);
+}
+
+.saip-rt-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-bottom: 8px;
+}
+
+.saip-rt-panel {
+  min-height: 0;
+}
+
+/* Inline form-editor for nested decoded payloads.
+ * Replaces the previous read-only "Decoded" pretty-print so operators
+ * can edit individual leaves without opening Show JSON. */
+
+.saip-form-root {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 11px;
+}
+
+.saip-form-section {
+  border: 1px solid var(--border, #2c313a);
+  border-radius: 5px;
+  background: var(--bg-elev1, rgba(255, 255, 255, 0.02));
+  margin: 1px 0;
+}
+
+.saip-form-section[data-depth="0"] > .saip-form-section-summary {
+  background: var(--bg-elev2, rgba(255, 255, 255, 0.04));
+  font-weight: 600;
+}
+
+.saip-form-section[data-depth="1"] > .saip-form-section-summary {
+  background: var(--bg-elev1, rgba(255, 255, 255, 0.025));
+}
+
+.saip-form-section-summary {
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 5px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  list-style: none;
+  user-select: none;
+}
+
+.saip-form-section-summary::-webkit-details-marker {
+  display: none;
+}
+
+.saip-form-section-summary::before {
+  content: "▸";
+  display: inline-block;
+  font-size: 10px;
+  color: var(--fg-muted, #7a8290);
+  width: 10px;
+  transition: transform 0.12s ease;
+}
+
+.saip-form-section[open] > .saip-form-section-summary::before {
+  transform: rotate(90deg);
+}
+
+.saip-form-section-title {
+  font-family: var(--mono, "JetBrains Mono", monospace);
+  font-size: 11px;
+  letter-spacing: 0.02em;
+  color: var(--fg, #d8dde6);
+}
+
+.saip-form-section-chip {
+  font-size: 9px;
+  padding: 1px 6px;
+  border-radius: 8px;
+  background: var(--bg-elev3, rgba(255, 255, 255, 0.06));
+  color: var(--fg-muted, #8a93a3);
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.saip-form-section-body {
+  padding: 4px 8px 6px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  border-top: 1px solid var(--border, #2c313a);
+  background: var(--bg, transparent);
+}
+
+.saip-form-row {
+  display: grid;
+  grid-template-columns: minmax(130px, 0.85fr) minmax(180px, 2fr);
+  align-items: start;
+  gap: 6px;
+  padding: 2px 0;
+}
+
+.saip-form-row-label {
+  font-family: var(--mono, "JetBrains Mono", monospace);
+  font-size: 11px;
+  color: var(--fg, #d8dde6);
+  padding-top: 3px;
+}
+
+.saip-form-row-body {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex-wrap: wrap;
+}
+
+.saip-form-row-hint {
+  grid-column: 1 / -1;
+  font-size: 10px;
+  color: var(--fg-muted, #7a8290);
+  font-style: italic;
+  padding-left: 2px;
+}
+
+.saip-form-input {
+  font: inherit;
+  font-family: var(--mono, "JetBrains Mono", monospace);
+  font-size: 11px;
+  background: var(--bg-input, #1c1f25);
+  color: var(--fg, #d8dde6);
+  border: 1px solid var(--border, #2c313a);
+  border-radius: 4px;
+  padding: 3px 5px;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.saip-form-input:focus {
+  outline: none;
+  border-color: var(--accent, #5e9bff);
+  box-shadow: 0 0 0 1px var(--accent, #5e9bff);
+}
+
+.saip-form-bool {
+  flex: 0 0 auto;
+  width: 16px;
+  height: 16px;
+}
+
+.saip-form-num {
+  flex: 0 0 auto;
+  width: 96px;
+}
+
+.saip-form-select {
+  font-family: var(--mono, "JetBrains Mono", monospace);
+  font-size: 12px;
+  background: var(--bg-input, #1c1f25);
+  color: var(--fg, #d8dde6);
+  border: 1px solid var(--border, #2c313a);
+  border-radius: 4px;
+  padding: 3px 6px;
+  flex: 1 1 auto;
+  min-width: 160px;
+  cursor: pointer;
+}
+
+.saip-form-select:focus {
+  outline: none;
+  border-color: var(--accent, #5e9bff);
+  box-shadow: 0 0 0 1px var(--accent, #5e9bff);
+}
+
+.saip-form-null {
+  font-size: 11px;
+  color: var(--fg-muted, #7a8290);
+  font-style: italic;
+}
+
+.saip-form-hex-wrap {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  width: 100%;
+}
+
+.saip-form-hex {
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.saip-form-hex-chip {
+  font-size: 10px;
+  padding: 2px 6px;
+  border-radius: 8px;
+  background: var(--bg-elev3, rgba(255, 255, 255, 0.06));
+  color: var(--fg-muted, #8a93a3);
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+
+.saip-form-hex-chip[data-tone="ok"] {
+  color: var(--accent, #5e9bff);
+}
+
+.saip-form-hex-chip[data-tone="error"] {
+  color: var(--err, #ef6c6c);
+}
+
+.saip-form-list-csv {
+  width: 100%;
+}
+
+.saip-form-row-add,
+.saip-form-row-remove {
+  font-size: 11px;
+  padding: 2px 8px;
+}
+
+.saip-form-row-remove {
+  margin-left: auto;
+}
+
+/* Read-only row: encoder-managed (locked) or sibling-derived
+   (auto). The body is a non-input chip + display so the operator
+   sees the current value, the lock chip, and a tooltip hint
+   without being able to type into it. */
+.saip-form-row-readonly .saip-form-row-body {
+  align-items: center;
+}
+
+.saip-form-readonly-holder {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.saip-form-readonly-value {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  padding: 2px 6px;
+  border: 1px dashed var(--border, rgba(255, 255, 255, 0.12));
+  border-radius: 3px;
+  background: var(--bg-elev2, rgba(255, 255, 255, 0.03));
+  color: var(--fg, #d8dee9);
+  user-select: text;
+}
+
+.saip-form-readonly-value.is-empty {
+  color: var(--fg-muted, #8a93a3);
+  font-style: italic;
+}
+
+.saip-form-lock-chip {
+  font-size: 9px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 1px 6px;
+  border-radius: 8px;
+  background: var(--bg-elev3, rgba(255, 255, 255, 0.06));
+  color: var(--fg-muted, #8a93a3);
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.10));
+  cursor: help;
+}
+
+.saip-form-row[data-inferred] .saip-form-lock-chip {
+  color: var(--accent, #5e9bff);
+  border-color: color-mix(in srgb, var(--accent, #5e9bff) 30%, transparent);
+}
+
+.saip-form-row-add {
+  align-self: flex-start;
+  margin-top: 4px;
+}
+
+.saip-form-record-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  padding: 5px 6px;
+  margin: 0 0 6px 0;
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.12));
+  border-radius: 4px;
+  background: var(--bg-elev2, rgba(255, 255, 255, 0.03));
+}
+
+.saip-form-record-label {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--fg-muted, #8a93a3);
+}
+
+.saip-form-record-select {
+  min-width: min(340px, 100%);
+  flex: 1 1 220px;
+}
+
+.saip-form-record-step {
+  font-size: 11px;
+  padding: 2px 8px;
+}
+
+/* Inline tokenize button rendered next to every editable leaf in
+   the decoded form. Compact glyph style so it slots beside hex /
+   text inputs without disrupting the row rhythm. */
+.saip-form-tokenize {
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  padding: 1px 6px;
+  margin-left: 6px;
+  border: 1px dashed color-mix(in srgb, var(--accent, #5e9bff) 35%, transparent);
+  background: transparent;
+  color: var(--accent, #5e9bff);
+  cursor: pointer;
+  border-radius: 3px;
+  align-self: center;
+  white-space: nowrap;
+}
+
+.saip-form-tokenize:hover {
+  background: color-mix(in srgb, var(--accent, #5e9bff) 10%, transparent);
+  border-style: solid;
+}
+
+/* Token-bound row variant: same shell as the read-only row but
+   tinted with the accent so the operator can scan for placeholder
+   bindings at a glance. The chip carries [NAME] and the action
+   strip below holds Edit value. Unresolved tokens (no entry in
+   the token-defs map) get the warning tone. */
+.saip-form-row-token .saip-form-readonly-value {
+  border-style: solid;
+  border-color: color-mix(in srgb, var(--accent, #5e9bff) 35%, transparent);
+  color: var(--accent, #5e9bff);
+}
+
+.saip-form-row-token[data-token-state="unresolved"] .saip-form-readonly-value {
+  border-color: color-mix(in srgb, var(--warn, #ffcb6b) 50%, transparent);
+  color: var(--warn, #ffcb6b);
+  font-style: italic;
+}
+
+.saip-form-row-token .saip-form-lock-chip {
+  background: color-mix(in srgb, var(--accent, #5e9bff) 18%, transparent);
+  border-color: color-mix(in srgb, var(--accent, #5e9bff) 50%, transparent);
+  color: var(--accent, #5e9bff);
+  letter-spacing: 0.04em;
+  text-transform: none;
+}
+
+.saip-form-token-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+  margin-left: 12px;
+}
+
+.saip-form-token-edit {
+  font-size: 10px;
+  padding: 2px 8px;
+}
+
+/* Validation dock */
+
+.saip-val-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.saip-val-score {
+  font-size: 12px;
+  color: var(--fg-muted, #888);
+  font-family: var(--mono, "JetBrains Mono", monospace);
+}
+
+.saip-val-tools {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.saip-val-strict {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--fg-muted, #888);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.saip-val-hint {
+  font-size: 11px;
+  color: var(--fg-muted, #888);
+  font-style: italic;
+}
+
+.saip-val-summary {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.saip-val-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  border: 1px solid var(--border);
+}
+
+.saip-val-chip.is-zero {
+  opacity: 0.4;
+}
+
+.saip-val-chip--fail {
+  background: rgba(255, 102, 128, 0.12);
+  color: #ff6680;
+  border-color: rgba(255, 102, 128, 0.4);
+}
+
+.saip-val-chip--warn {
+  background: rgba(255, 200, 80, 0.12);
+  color: #ffc850;
+  border-color: rgba(255, 200, 80, 0.4);
+}
+
+.saip-val-chip--info {
+  background: var(--accent-soft);
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.saip-val-chip--pass {
+  background: rgba(120, 220, 130, 0.12);
+  color: #78dc82;
+  border-color: rgba(120, 220, 130, 0.4);
+}
+
+.saip-val-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+/* Flat (non-grouped) table keeps its own scroll region */
+.saip-val-table:not(.saip-val-domain-table) {
+  display: block;
+  overflow: auto;
+  max-height: 26vh;
+}
+
+.saip-val-table thead th {
+  position: sticky;
+  top: 0;
+  background: var(--surface, #1e2128);
+  text-align: left;
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--fg-muted, #888);
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+.saip-val-row td {
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+}
+
+.saip-val-row--fail {
+  background: rgba(255, 102, 128, 0.04);
+}
+
+.saip-val-row--warn {
+  background: rgba(255, 200, 80, 0.04);
+}

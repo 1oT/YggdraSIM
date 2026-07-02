@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """HIL-Bridge supervisor: manages child process lifecycle (modem, bridge, tshark) with restart policy and watchdog timers."""
 from __future__ import annotations
@@ -29,6 +32,7 @@ LOGGER = logging.getLogger(__name__)
 DEFAULT_USB_MATCH_TERMS: tuple[str, ...] = ("simtrace", "sysmocom")
 DEFAULT_POLL_INTERVAL_SECONDS = 2.0
 DEFAULT_RESTART_BACKOFF_SECONDS = 1.0
+DEFAULT_REMOTE_CARD_RESTART_BACKOFF_SECONDS = 15.0
 DEFAULT_TERMINATION_TIMEOUT_SECONDS = 5.0
 DEFAULT_LSUSB_TIMEOUT_SECONDS = 5.0
 DEFAULT_REMSIM_USB_CONFIG_ID = "1"
@@ -451,6 +455,7 @@ class HilBridgeSupervisorConfig:
     lsusb_path: str = "lsusb"
     poll_interval_seconds: float = DEFAULT_POLL_INTERVAL_SECONDS
     restart_backoff_seconds: float = DEFAULT_RESTART_BACKOFF_SECONDS
+    remote_card_restart_backoff_seconds: float = DEFAULT_REMOTE_CARD_RESTART_BACKOFF_SECONDS
     termination_timeout_seconds: float = DEFAULT_TERMINATION_TIMEOUT_SECONDS
     state_path: str = field(default_factory=lambda: runtime_path("state", SUPERVISOR_STATE_FILENAME))
 
@@ -477,6 +482,7 @@ class HilBridgeSupervisor:
     _stop_event: Event = field(default_factory=Event, init=False, repr=False)
     _next_start_not_before: float = field(default=0.0, init=False, repr=False)
     _next_remsim_start_not_before: float = field(default=0.0, init=False, repr=False)
+    _next_start_reason: str = field(default="", init=False, repr=False)
 
     def request_stop(self) -> None:
         self._stop_event.set()
@@ -557,7 +563,7 @@ class HilBridgeSupervisor:
                     self._write_state(
                         status="restart-pending",
                         snapshot=snapshot,
-                        reason=f"Waiting {remaining:.1f}s before bridge restart.",
+                        reason=self._bridge_restart_pending_reason(remaining),
                     )
                     return
                 self._start_bridge_child(snapshot)
@@ -618,6 +624,28 @@ class HilBridgeSupervisor:
             return "SIMtrace2 present; bridge child is active. REMSIM client management is disabled."
         return "SIMtrace2 present; bridge child is active."
 
+    def _bridge_uses_remote_card(self) -> bool:
+        remote_card_url = str(
+            getattr(self.config.bridge, "remote_card_url", "") or ""
+        ).strip()
+        return len(remote_card_url) > 0
+
+    def _bridge_restart_backoff_seconds(self) -> float:
+        default_backoff = max(0.0, float(self.config.restart_backoff_seconds))
+        if self._bridge_uses_remote_card() is False:
+            return default_backoff
+        remote_backoff = max(
+            default_backoff,
+            float(self.config.remote_card_restart_backoff_seconds),
+        )
+        return remote_backoff
+
+    def _bridge_restart_pending_reason(self, remaining_seconds: float) -> str:
+        base = f"Waiting {remaining_seconds:.1f}s before bridge restart."
+        if len(self._next_start_reason.strip()) == 0:
+            return base
+        return f"{base} {self._next_start_reason.strip()}"
+
     def _start_bridge_child(self, snapshot: UsbPresenceSnapshot) -> None:
         self._cleanup_stale_bridge_marker()
         command = self._build_bridge_command()
@@ -635,6 +663,7 @@ class HilBridgeSupervisor:
             )
         except Exception as exc:
             self._next_start_not_before = float(self.monotonic()) + float(self.config.restart_backoff_seconds)
+            self._next_start_reason = ""
             self._write_state(
                 status="start-failed",
                 snapshot=snapshot,
@@ -645,6 +674,7 @@ class HilBridgeSupervisor:
 
         self._child = child
         self._next_start_not_before = 0.0
+        self._next_start_reason = ""
         LOGGER.info("Started bridge child pid=%s", getattr(child, "pid", 0))
         reason = "SIMtrace2 present; bridge child started."
         if self.config.remsim_client.enabled:
@@ -761,9 +791,21 @@ class HilBridgeSupervisor:
 
         pid = int(getattr(child, "pid", 0) or 0)
         self._child = None
-        self._next_start_not_before = now + float(self.config.restart_backoff_seconds)
+        restart_backoff = self._bridge_restart_backoff_seconds()
+        self._next_start_not_before = now + restart_backoff
+        self._next_start_reason = ""
+        if self._bridge_uses_remote_card():
+            self._next_start_reason = (
+                "Remote card relay is configured; the PC Card Bridge or SSH "
+                "reverse tunnel may be unavailable."
+            )
         self._cleanup_stale_bridge_marker(managed_pid=pid)
-        LOGGER.warning("Bridge child pid=%s exited with code %s", pid, return_code)
+        LOGGER.warning(
+            "Bridge child pid=%s exited with code %s; next restart in %.1fs",
+            pid,
+            return_code,
+            restart_backoff,
+        )
         if self._remsim_is_running():
             self._stop_remsim_child("bridge child exited unexpectedly")
 
@@ -825,6 +867,8 @@ class HilBridgeSupervisor:
                 str(bridge.bank_id),
                 "--bank-slot",
                 str(bridge.bank_slot),
+                "--apdu-timeout-ms",
+                str(bridge.apdu_timeout_ms),
                 "--bridge-name",
                 str(bridge.bridge_name),
                 "--bridge-software",
@@ -843,6 +887,23 @@ class HilBridgeSupervisor:
             command.append("--no-apdu-relay")
         if bridge.gsmtap_enabled is False:
             command.append("--no-gsmtap")
+        if bridge.card_trace_enabled:
+            command.append("--card-trace")
+        # Card-source overrides — when the operator has pinned a remote
+        # ``yggdrasim-card-bridge`` URL on the supervisor, propagate it
+        # to the spawned bridge subprocess so the card-stream feature
+        # works under supervision too. Empty values are intentionally
+        # not passed so the subprocess defaults to local PC/SC.
+        remote_card_url = str(getattr(bridge, "remote_card_url", "") or "").strip()
+        if len(remote_card_url) > 0:
+            command.extend(["--remote-card-url", remote_card_url])
+        remote_card_token_file = str(
+            getattr(bridge, "remote_card_token_file", "") or ""
+        ).strip()
+        if len(remote_card_token_file) > 0:
+            command.extend(
+                ["--remote-card-token-file", remote_card_token_file]
+            )
         capture_path = str(bridge.gsmtap_capture_path or "").strip()
         if len(capture_path) > 0:
             command.extend(
@@ -968,8 +1029,13 @@ class HilBridgeSupervisor:
             "remsimClientPort": self._remsim_port(),
             "readerIndex": int(self.config.bridge.reader_index),
             "readerName": str(self.config.bridge.reader_name),
+            "remoteCardUrl": str(getattr(self.config.bridge, "remote_card_url", "") or ""),
+            "remoteCardTokenFile": str(getattr(self.config.bridge, "remote_card_token_file", "") or ""),
+            "apduTimeoutMs": int(getattr(self.config.bridge, "apdu_timeout_ms", 0) or 0),
+            "cardTraceEnabled": bool(getattr(self.config.bridge, "card_trace_enabled", False)),
             "pollIntervalSeconds": float(self.config.poll_interval_seconds),
             "restartBackoffSeconds": float(self.config.restart_backoff_seconds),
+            "remoteCardRestartBackoffSeconds": float(self.config.remote_card_restart_backoff_seconds),
         }
         with open(state_path, "w", encoding="utf-8") as handle:
             json.dump(payload, handle, indent=2, sort_keys=True)
@@ -1045,6 +1111,15 @@ def _build_parser() -> argparse.ArgumentParser:
         type=float,
         default=DEFAULT_RESTART_BACKOFF_SECONDS,
         help="Delay in seconds before restarting the bridge after an unexpected child exit.",
+    )
+    parser.add_argument(
+        "--remote-card-restart-backoff",
+        type=float,
+        default=DEFAULT_REMOTE_CARD_RESTART_BACKOFF_SECONDS,
+        help=(
+            "Delay in seconds before restarting the bridge after an unexpected "
+            "child exit while --remote-card-url is configured."
+        ),
     )
     parser.add_argument(
         "--termination-timeout",
@@ -1156,6 +1231,13 @@ def build_supervisor_config_from_args(args: argparse.Namespace) -> HilBridgeSupe
         lsusb_path=str(args.lsusb_path or "lsusb"),
         poll_interval_seconds=max(0.1, float(args.poll_interval or DEFAULT_POLL_INTERVAL_SECONDS)),
         restart_backoff_seconds=max(0.0, float(args.restart_backoff or DEFAULT_RESTART_BACKOFF_SECONDS)),
+        remote_card_restart_backoff_seconds=max(
+            0.0,
+            float(
+                args.remote_card_restart_backoff
+                or DEFAULT_REMOTE_CARD_RESTART_BACKOFF_SECONDS
+            ),
+        ),
         termination_timeout_seconds=max(
             1.0,
             float(args.termination_timeout or DEFAULT_TERMINATION_TIMEOUT_SECONDS),

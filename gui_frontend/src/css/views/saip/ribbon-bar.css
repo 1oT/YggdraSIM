@@ -1,0 +1,111 @@
+/*
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+ */
+
+/* ---- SA-G1: ribbon command bar ------------------------------------- */
+/*
+ * The ribbon is a horizontal grouped command bar above the workbench.
+ * Groups are visually delimited by a thin divider; each button is a
+ * stacked icon-over-label affordance. Disabled "stub" buttons render
+ * desaturated so operators can see the layout we're building toward
+ * without being able to fire half-implemented features.
+ */
+.saip-ribbon {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface, rgba(255, 255, 255, 0.025));
+  align-items: stretch;
+}
+
+.saip-ribbon-group {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 4px;
+  padding-right: 14px;
+  border-right: 1px solid var(--border);
+}
+
+.saip-ribbon-group:last-child {
+  border-right: none;
+  padding-right: 0;
+}
+
+.saip-ribbon-buttons {
+  display: flex;
+  gap: 4px;
+  align-items: stretch;
+}
+
+.saip-ribbon-group-label {
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--fg-muted, #888);
+  text-align: center;
+}
+
+.saip-ribbon-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 2px;
+  min-width: 56px;
+  padding: 6px 8px 4px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  color: var(--fg);
+  cursor: pointer;
+  transition:
+    background-color 0.12s ease,
+    border-color 0.12s ease,
+    color 0.12s ease;
+}
+
+.saip-ribbon-btn:hover:not(.is-disabled):not([disabled]) {
+  background: var(--surface-alt, rgba(255, 255, 255, 0.05));
+  border-color: var(--border);
+}
+
+.saip-ribbon-btn:active:not(.is-disabled):not([disabled]) {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+}
+
+.saip-ribbon-btn.is-disabled,
+.saip-ribbon-btn[disabled] {
+  opacity: 0.42;
+  cursor: not-allowed;
+}
+
+.saip-ribbon-btn--primary {
+  color: var(--accent);
+}
+
+.saip-ribbon-btn--stub .saip-ribbon-btn-icon {
+  opacity: 0.6;
+}
+
+.saip-ribbon-btn-icon {
+  font-size: 16px;
+  line-height: 1.1;
+  font-family: var(--mono, "JetBrains Mono", monospace);
+  height: 20px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.saip-ribbon-btn-label {
+  font-size: 11px;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+

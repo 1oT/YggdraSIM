@@ -1,3 +1,8 @@
+<!--
+SPDX-License-Identifier: GPL-3.0-or-later
+Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+-->
+
 # YggdraSIM Capability Reference
 
 This document records the current subsystem-level capabilities of YggdraSIM.
@@ -17,11 +22,16 @@ YggdraSIM currently provides:
   TS 102 221 file system, GP / SCP03 / SCP80, ISD-R + ISD-Ps, the ETSI TS
   102 223 toolkit + BIP runtime, and the 3GPP TS 33.501 / TS 33.535 5G AKA /
   AKMA / SUCI surfaces
+- in-process 5G-core stubs (`Tools/YggdraCore`: AUSF, AAnF, subscription
+  store) plus a BYO-Open5GS provisioning bridge for hosts that already run
+  a real 5GC. (post-v1 staging — not part of this release.)
 - a hardware-in-the-loop SIMtrace2 bridge (`Tools/HilBridge`) with RSPRO
-  relay, GSMTAP mirror, modem REFRESH control, AT+CSIM / AT+CRSM
+  relay, GSMTAP mirror, AT+CSIM / AT+CRSM
   transcoding (`at_simlink`), and offline pcap review
 - non-interactive command, script, and report/export entry points where the
   subsystem already exposes them
+- an optional Universal GUI Command Center (`--gui` desktop / `--web-server`
+  remote-lab) with a typed action registry and a process-wide APDU recorder
 - shared mutable state through SQLite, keyed by card identity or eIM identity
 - optional encryption for stored runtime payloads
 - a writable runtime-tree model for frozen executables
@@ -38,21 +48,23 @@ command or every internal helper.
 
 | Surface | Primary role | Representative capabilities | Deep guide |
 | --- | --- | --- | --- |
-| `main/main.py` | Unified launcher | module dispatch, docs, about, license, automation entry points | `README.md` |
+| `main/main.py` | Unified launcher | module dispatch, docs, about, license, automation entry points, `--gui` / `--web-server` | `README.md` |
 | `SCP03/` | Admin shell | GP auth, ETSI filesystem, eUICC retrieval, report/export, diff/wizards | `README.md` |
 | `SCP80/` | OTA shell | OTA wrap/build/send/decode, script execution, ICCID-bound runtime | `README.md` |
-| `SCP11/live/` | Live relay shell | LPAd, IPAd, IPAe, relay preflight, ES9+/eIM endpoint control | `SCP11/live/README.md` |
-| `SCP11/test/` | Test relay shell | live-shaped relay surface with test-default certs and request shaping | `SCP11/test/README.md` |
+| `SCP11/live/` | eSIM management relay shell | LPAd, IPAd, relay preflight, ES9+/eIM endpoint control | `SCP11/live/README.md` |
+| `SCP11/test/` | Test compatibility namespace | import compatibility for older relay code paths | `SCP11/test/README.md` |
 | `SCP11/relay/` | Compatibility relay namespace | legacy import/script continuity for relay workflows | `SCP11/relay/README.md` |
 | `SCP11/local_access/` | Direct local shell | local SCP11 auth, metadata upload, direct profile load, ES10c state control | `SCP11/local_access/README.md` |
-| `SCP11/eim_local/` | eIM-side shell | direct eIM lifecycle commands, localized polling, hotfolders, handover | `SCP11/eim_local/README.md` |
+| `SCP11/eim_local/` | eIM-side shell | direct eIM lifecycle commands, package hotfolders, response logs, handover | `SCP11/eim_local/README.md` |
 | `SCP11/shared/` | Shared helper layer | crypto, payload, ASN.1, GSMA error, pySim support helpers | `SCP11/shared/README.md` |
-| `SIMCARD/` | In-process simulated UICC / eUICC | ETSI TS 102 221 FS, GP / SCP03 / SCP80, ISD-R + ISD-Ps, ETSI TS 102 223 toolkit, Milenage / TUAK AKA, 5G AKA / AKMA / SUCI / `GET IDENTITY` | `SIMCARD/` module sources |
-| `Tools/HilBridge/` | SIMtrace2 HIL bridge | RSPRO relay on `127.0.0.1:9997`, GSMTAP mirror on UDP 4729, modem REFRESH, offline pcap review, AT+CSIM / AT+CRSM transcoder (`at_simlink`) | `HIL_BRIDGE_GUIDE.md` |
+| `SIMCARD/` | In-process simulated UICC / eUICC | ETSI TS 102 221 FS, GP / SCP03 / SCP80, ISD-R + ISD-Ps, ETSI TS 102 223 toolkit, Milenage / TUAK AKA, 5G AKA / AKMA / SUCI / `GET IDENTITY` | `guides/CAPABILITIES.md` §SIMCARD |
+| `Tools/HilBridge/` | SIMtrace2 HIL bridge | RSPRO relay on `127.0.0.1:9997`, GSMTAP mirror on UDP 4729, offline pcap review, AT+CSIM / AT+CRSM transcoder (`at_simlink`) | `HIL_BRIDGE_GUIDE.md` |
 | `Tools/ProfilePackage/` | SAIP shell | inspect, lint, transcode, encode, split, extract, DIFF/DIFF-TUI, WATCH-SIMCARD | `README.md` |
 | `Tools/ApduFuzz/` | Opt-in APDU mutation fuzzer | deterministic mutators, PC/SC/null transports, safety gate, crash dumps | `Tools/ApduFuzz/` sources |
 | `Tools/EumDiag/` | EUM / SM-DP+ diagnostics | session-key injection, BF36 Lua dissector, tshark runner, BPP decode | `Tools/EumDiag/` sources |
 | `Tools/SuciTool/` | SUCI shell | key selection, key generation, public-key export | `README.md` |
+| `Tools/YggdraCore/` *(post-v1 staging)* | In-process 5G-core stubs | AUSF (`Nausf_UEAuthentication_Authenticate`), AAnF (`Naanf_AKMA_*`), subscription store, opt-in FastAPI loopback, BYO-Open5GS provisioning bridge | `docs/akma_overview.md` |
+| `yggdrasim_common/gui_server/` | Optional Universal GUI | typed action registry, FastAPI API + pywebview desktop or headless lab server, live APDU dock | `guides/GUI_HOST_SHELL_GUIDE.md` |
 
 ## 3. Launcher And Entry-Point Capabilities
 
@@ -61,7 +73,6 @@ The top-level launcher in `main/main.py` can:
 - launch the `SCP03` admin shell
 - launch the `SCP80` OTA shell
 - launch the `SCP11/live` relay shell
-- launch the `SCP11/test` relay shell
 - launch the `SCP11/local_access` local SCP11 shell
 - launch the `SCP11/eim_local` eIM-local shell
 - launch the `Tools/ProfilePackage` SAIP shell
@@ -82,6 +93,10 @@ The top-level launcher in `main/main.py` can:
   `--sim-quirks`, `--sim-eim-identity`, `--sim-euicc-store`,
   `--sim-profile-store`, `--sim-import-profile`, and
   `--sim-import-enable`
+- launch the optional Universal GUI Command Center via `--gui` (FastAPI
+  loopback + native pywebview window) or `--web-server` (FastAPI only,
+  bearer-token mandatory; `--token-file`, `--tls-cert`, `--tls-key`, and
+  `--tls-self-signed` complete the surface)
 
 The repository also supports direct module entry:
 
@@ -90,7 +105,6 @@ python -m SCP03
 python -m SCP80
 python -m SCP11
 python -m SCP11.live
-python -m SCP11.test
 python -m SCP11.relay
 python -m SCP11.local_access
 python -m SCP11.eim_local
@@ -108,10 +122,9 @@ yggdrasim-scp03                yggdrasim-hil-bridge
 yggdrasim-scp80                yggdrasim-hil-supervisor
 yggdrasim-scp11                yggdrasim-profile-package
 yggdrasim-scp11-live           yggdrasim-profile-autoload
-yggdrasim-scp11-test           yggdrasim-suci-tool
-yggdrasim-scp11-relay          yggdrasim-apdu-fuzzer
-yggdrasim-scp11-local-access   yggdrasim-eum-diag
-yggdrasim-scp11-eim-local
+yggdrasim-scp11-relay          yggdrasim-suci-tool
+yggdrasim-scp11-local-access   yggdrasim-apdu-fuzzer
+yggdrasim-scp11-eim-local      yggdrasim-eum-diag
 ```
 
 The HIL bridge entry points refuse to start on clean / non-Linux flavors
@@ -121,7 +134,6 @@ Automation-oriented entry points currently include:
 
 - `SCP11.relay` command-mode and stdin execution
 - `SCP11.live` command-mode and stdin execution
-- `SCP11.test` command-mode and stdin execution
 - `SCP11.local_access` command-mode and stdin execution
 - `SCP11.eim_local` command-mode and stdin execution
 - `SCP03` command-mode execution and script-mode execution
@@ -204,12 +216,9 @@ test, and relay namespaces, the current capability envelope includes:
 - startup preflight for transport, backend mode, endpoint shape, and credential
   availability
 - session snapshot rendering at shell startup
-- relay-side `LPAd`, `IPAd`, and `IPAe` flows
 - ES9+ / SM-DP+ endpoint and TLS control
 - notification retrieval and cleanup operations
 - eUICC inventory retrieval and certificate readout
-- optional plugin-backed relay-side eIM polling and watchdog flows
-- optional concise or debug-oriented watchdog reporting
 - hidden expert commands for lower-level inspection and compatibility probes
 
 ### `SCP11/live`
@@ -220,8 +229,6 @@ include:
 - live-default certificate and endpoint assumptions
 - `DOWNLOAD-PROFILE` for activation-code-driven relay download
 - `DISCOVER` and `DOWNLOAD` for `IPAd`
-- optional plugin-backed `POLL [attempts] [timer-window] [-t 20s] [-s 5] [--debug]` for `IPAe`,
-  with `EIM-POLL` retained as an alias
 - `ENABLE-PROFILE`, `DISABLE-PROFILE`, and `DELETE-PROFILE`
 - `SET-SMDP`, `SET-ES9`, `SET-ES9-TLS`, and `SET-ES9-CA`
 - `ES9-CERT-INFO`
@@ -230,12 +237,10 @@ include:
 
 ### `SCP11/test`
 
-`SCP11/test` is the lab-oriented relay shell. Its current capabilities include:
+`SCP11/test` is a compatibility namespace for older imports. It is not an
+operator launcher surface. Its current capabilities include:
 
 - the same primary relay command shape as `SCP11/live`
-- the same optional plugin-backed `POLL [attempts] [timer-window] [-t 20s] [-s 5] [--debug]`
-  surface as `SCP11/live`, with `EIM-POLL` retained as an alias
-- test-default certificate and endpoint assumptions
 - additional request-shaping and result-shaping controls in `config.py`
 - relay/eIM compatibility knobs such as:
   - request variant selection
@@ -272,9 +277,7 @@ The current optional plugin capability model supports:
 - launch-time capability discovery through `yggdrasim_common/plugin_runtime.py`
 - source-tree plugin loading from `plugins/`
 - writable-runtime plugin loading for frozen builds
-- capability-scoped extension of `SCP11/live`, `SCP11/test`, and `SCP11/eim_local`
-- the reserved `polling` capability used for relay `POLL` and localized `IPAE-*`
-  surfaces
+- opt-in extension of trusted local operator surfaces
 
 ## 7. SCP11 Local-Card Capabilities
 
@@ -343,25 +346,23 @@ current capability set includes:
 - eIM package authoring from JSON templates
 - canonical fake-eIM peer-provisioning artifacts for `AddEim`
 - eIM package linting and issue workflows
-- localized `IPAd` execution through live/test relay orchestrators
+- localized relay execution through the eSIM management relay orchestrator
 - adapter-first standalone `IPAd` runner export through `ipad_standalone.py`
 - simulator-side default BF55 eIM identity override through
   `Workspace/SIMCARD/eim_identity.json`, with full card-side layouts still
   overridable through `Workspace/SIMCARD/isdr_config.json` and `eim_entries`
-- optional plugin-backed localized `IPAe` watchdog execution through live/test relay orchestrators
 - built-in localized handover-state management and linked download helpers
-- hotfolder queue polling and fetch flows
+- hotfolder queue execution and fetch flows
 - response logging and filtering
 - counter inspection and override by `eim_id`
 - error-code inspection and override
-- poll audit export and aggregate reporting
-- direct-to-`ISD-R` package validation without relay polling
+- response audit export and aggregate reporting
+- direct-to-`ISD-R` package validation without relay transport
 
 Current execution-path families are:
 
 - Direct Auth
-- Localized `IPAd`
-- Localized `IPAe`
+- Localized relay
 
 Current lifecycle and direct-card operations include:
 
@@ -376,24 +377,16 @@ Current lifecycle and direct-card operations include:
 - `ISDR-DELETE-EIM`
 - `LOAD-EIM-PACKAGE`
 
-Current localized polling and handover operations include:
+Current localized relay and handover operations include:
 
 - `IPAD-DISCOVER`
 - `IPAD-LIVE`
 - `IPAD-TEST`
-- `IPAE-AUTHENTICATE`
-- `IPAE-DOWNLOAD`
-- `IPAE-LIVE` (optional plugin-backed)
-- `IPAE-TEST` (optional plugin-backed)
 
-Current queue-campaign operations include:
+Current hotfolder and response operations include:
 
-- `POLL-CAMPAIGN`
-- `POLL-EXPORT`
-- `POLL-AGGREGATE`
 - `HOTFOLDER`
 - `HOTFOLDER-LIST`
-- `HOTFOLDER-POLL`
 - `HOTFOLDER-FETCH`
 - `EIM-ACKNOWLEDGE`
 
@@ -467,7 +460,6 @@ relay. Current capabilities include:
 - exclusive PC/SC reader ownership with brokered side-channel access
   for the YggdraSIM modules
 - GSMTAP mirroring on UDP 4729 for live Wireshark capture
-- modem REFRESH proactive command issuance (`Tools/HilBridge/proactive.py`)
 - AT+CSIM / AT+CRSM transcoding (`Tools/HilBridge/at_simlink.py`) per
   3GPP TS 27.007 §8.17 / §8.18 — turns AT request lines into raw
   ISO 7816 APDUs and back, transport-agnostic so any modem-side serial
@@ -480,7 +472,54 @@ relay. Current capabilities include:
 - decoded-APDU TUI for both live capture and offline pcap review
   (`--open-pcap <path> [--keybag <path>]` from the launcher)
 
-## 11. SAIP And SUCI Tooling Capabilities
+## 11. YggdraCore 5G Core Stub Capabilities
+
+> **Status: post-v1 staging.** Not part of the v1.0.0 frozen release tag.
+
+`Tools/YggdraCore/` provides in-process 5G-core stubs and a BYO-Open5GS
+provisioning bridge:
+
+- `subscription_store.py` — in-memory subscriber DB
+  (K / OPc / AMF / SQN / MCC / MNC / RID / `akma_enabled`) with
+  monotone SQN advance per successful authentication
+- `ausf_stub.py` — `Nausf_UEAuthentication_Authenticate` POST and PUT
+  (`5g-aka-confirmation`) per TS 33.501 §6.1.3; produces a 5G HE AV
+  (RAND, AUTN, XRES*, KAUSF) and verifies UE-side RES* before
+  deriving KSEAF and pushing `(SUPI, A-KID, KAKMA)` into the AAnF
+  when AKMA is enabled
+- `aanf_stub.py` — TS 33.535 §6 AAnF state with
+  `Naanf_AKMA_KeyRegistration` and `Naanf_AKMA_ApplicationKey_Get`
+- `http_app.py` — opt-in FastAPI loopback launcher; refuses to start
+  unless `YGGDRASIM_5GCORE_MODE=stub` is set, refuses non-loopback
+  binds unless `YGGDRASIM_5GCORE_ALLOW_NONLOOPBACK=1` is set
+- `open5gs_bridge.py` — pymongo-backed wrapper around the
+  `open5gs.subscribers` collection. Detects an installed Open5GS
+  deployment via `$PATH` + a short MongoDB server-selection probe.
+  Every YggdraSIM-provisioned doc carries `_yggdrasim_provisioned`
+  so a later `purge_yggdrasim` removes only its own entries
+
+## 12. Universal GUI Command Center Capabilities
+
+`yggdrasim_common/gui_server/` is the optional FastAPI +
+pywebview Command Center. Current capability set includes:
+
+- two launch modes: `--gui` (loopback FastAPI + native pywebview
+  window) and `--web-server` (bare FastAPI, bearer-token mandatory)
+- typed action registry with auto-generated SPA forms,
+  scan-tree / FCP / hex / TLV / findings / key-value / log-stream
+  renderers, and per-tab xterm.js PTY tabs for sub-shell handoffs
+- live process-wide APDU recorder (`yggdrasim_common/apdu_recorder.py`)
+  feeding the bottom-dock APDU tab via WebSocket without each call
+  site having to opt in
+- 148+ actions across SCP03 (71), eSIM Management (38), SAIP (14), SCP11
+  Local (7), Tools (6), SIMCARD (4), Local eIM (4), HIL (3), SCP11 (1)
+- TLS surface for `--web-server`: BYO PEM via `--tls-cert` /
+  `--tls-key`, or generate-and-reuse self-signed under
+  `state/gui_tls/` via `--tls-self-signed`
+- Playwright headless-Chromium smoke skeleton (auto-skips when
+  Playwright is not installed)
+
+## 13. SAIP And SUCI Tooling Capabilities
 
 ### `Tools/ProfilePackage`
 
@@ -560,7 +599,7 @@ Representative shell verbs include:
 - `DUMP`
 - `PWD`
 
-## 12. Shared Runtime, Security, And Persistence Capabilities
+## 14. Shared Runtime, Security, And Persistence Capabilities
 
 Cross-cutting runtime capabilities currently include:
 
@@ -595,15 +634,14 @@ Certificate and trust-management capabilities currently include:
 - full simulator card-side eIM row override through
   `Workspace/SIMCARD/isdr_config.json` with `eim_entries`
 
-## 13. Diagnostics, Reporting, And Validation Capabilities
+## 15. Diagnostics, Reporting, And Validation Capabilities
 
 The repository currently includes:
 
 - module-specific help and guide surfaces
 - SCP03 YAML and filesystem export/report generation
-- eIM-local poll audit export and aggregate views
+- eIM-local response-log capture and aggregate views
 - response-log capture and filtering for eIM-local flows
-- live and concise watchdog reporting for relay polling
 - a root architecture document with flowcharts
 - a registry for stable symbol discovery
 - a pytest suite for targeted regression validation
@@ -616,15 +654,15 @@ The repository currently includes:
   replay engine (`Tools.HilBridge.scp_replay.ScpReplayEngine`) for
   plaintext overlay of secure-messaging APDUs
 
-## 14. Distribution And Packaging Capabilities
+## 16. Distribution And Packaging Capabilities
 
 The suite is published in two executable flavors and a source option:
 
-| Flavor | Platforms | HIL bridge | Entry point label |
-| --- | --- | --- | --- |
-| `clean` | Windows x86_64 / macOS arm64 / Linux x86_64 / Raspberry Pi arm64 | not bundled | `yggdrasim-clean[.exe]` |
-| `full`  | Linux x86_64 only | bundled (requires SIMtrace2 + `osmo-remsim-client-st2` at runtime) | `yggdrasim-full` |
-| source  | any supported Python host | optional via `pip install -e '.[hil]'` | `yggdrasim` from `main/main.py` |
+| Flavor | Platforms | Card Bridge / remote APDU | Direct SIMtrace2 HIL | Entry point label |
+| --- | --- | --- | --- | --- |
+| `clean` | Windows x86_64 / macOS arm64 / Linux x86_64 / Raspberry Pi arm64 | bundled | not bundled | `yggdrasim-clean[.exe]` |
+| `full`  | Linux x86_64 only | bundled | bundled (requires SIMtrace2 + `osmo-remsim-client-st2` at runtime) | `yggdrasim-full` |
+| source  | any supported Python host | available | Linux only via `pip install -e '.[hil]'` | `yggdrasim` from `main/main.py` |
 
 Launcher features that are flavor-aware:
 
@@ -633,12 +671,16 @@ Launcher features that are flavor-aware:
 - `main/main.py --doctor` reports the active flavor and probes HIL
   prerequisites (`pyudev`, `osmo-remsim-client-st2`, `dfu-util`,
   `lsusb`) where relevant
-- the main menu hides or visibly disables the `[B] HIL Bridge Session`
-  entry on clean builds and on non-Linux hosts, with a pointer to the
-  right install guide
+- the main menu always exposes `[CB] Card Bridge / Remote APDU Streaming`
+  on supported Python hosts, including Windows and macOS
+- the main menu hides or visibly disables the `[B] Local SIMtrace2 HIL
+  Bridge Session` entry on clean builds and on non-Linux hosts, with a
+  pointer to the right install guide
 - console-script entry points `yggdrasim-hil-bridge` and
   `yggdrasim-hil-supervisor` refuse to start on clean or non-Linux
   hosts with a friendly message
+- `yggdrasim-card-bridge` remains available on clean Windows/macOS/Linux
+  builds for reader-side remote APDU streaming
 
 Install-path documentation:
 
@@ -657,20 +699,20 @@ Build tooling:
   supported OSes, a full Linux artifact, and an arm64 clean Debian
   artifact through QEMU/Buildx
 
-## 15. Related Documents
+## 17. Related Documents
 
 Use the following documents together with this capability reference:
 
 - `README.md` for launch paths, runtime model, and repository map
 - `CLI_AND_PIPING_GUIDE.md` for shared `--cmd` / `--stdin` automation rules
-- `PROFILE_LIFECYCLE_CLI_CHEATSHEET.md` for ready-to-run lifecycle and polling examples
+- `PROFILE_LIFECYCLE_CLI_CHEATSHEET.md` for ready-to-run lifecycle and logging examples
 - `ARCHITECTURE.md` for dependency and state-flow structure
 - `BUILD_AND_PACKAGING.md` for flavor-aware build, Docker, and `.deb` details
 - `INSTALL_CLEAN.md`, `INSTALL_FULL.md`, `INSTALL_FROM_SOURCE.md`, `INSTALL_RASPBERRYPI.md`, `SIMTRACE2_CARDEM_GUIDE.md` for install paths
 - `HIL_BRIDGE_GUIDE.md` for the hardware-in-the-loop bridge (full flavor only)
 - `SCP11/README.md` for eSIM module selection
-- `SCP11/live/README.md` for live relay operation
-- `SCP11/test/README.md` for test relay operation
+- `SCP11/live/README.md` for eSIM management relay operation
+- `SCP11/test/README.md` for test compatibility namespace details
 - `SCP11/local_access/README.md` for direct local SCP11 work
 - `SCP11/eim_local/README.md` for eIM-local overview
 - `SCP11/eim_local/GUIDE.md` for detailed eIM-local workflows

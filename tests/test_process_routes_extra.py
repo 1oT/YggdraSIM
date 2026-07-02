@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 import importlib.util
 import io
 import os
@@ -154,6 +157,33 @@ class MainWrapperProcessRouteTests(unittest.TestCase):
         self.assertEqual(exit_code, 0)
         self.assertEqual(debug_value, "1")
         mocked_entry_cmd.assert_called_once_with("AUTH-SD; LIST", yaml_out=None)
+
+    def test_main_wrapper_asn1_routes_hex_to_decoder_before_menu(self) -> None:
+        with mock.patch.object(main_wrapper, "_emit_plugin_load_banner") as mocked_banner:
+            with mock.patch.object(main_wrapper, "ensure_plugins_loaded") as mocked_plugins:
+                with mock.patch("Tools.Asn1TlvDecode.main.run_cli", return_value=0) as mocked_decode:
+                    exit_code = main_wrapper.run_cli(["--asn1", "5C06BF51BF449F2A"])
+
+        self.assertEqual(exit_code, 0)
+        mocked_plugins.assert_not_called()
+        mocked_banner.assert_not_called()
+        mocked_decode.assert_called_once_with(["5C06BF51BF449F2A"])
+
+    def test_main_wrapper_asn1_without_hex_delegates_to_decoder_stdin_mode(self) -> None:
+        with mock.patch("Tools.Asn1TlvDecode.main.run_cli", return_value=0) as mocked_decode:
+            exit_code = main_wrapper.run_cli(["--asn1"])
+
+        self.assertEqual(exit_code, 0)
+        mocked_decode.assert_called_once_with([])
+
+    def test_main_wrapper_asn1_forwards_format_and_file(self) -> None:
+        with mock.patch("Tools.Asn1TlvDecode.main.run_cli", return_value=0) as mocked_decode:
+            exit_code = main_wrapper.run_cli(
+                ["--asn1", "--asn1-format", "json", "--asn1-file", "sample.hex"]
+            )
+
+        self.assertEqual(exit_code, 0)
+        mocked_decode.assert_called_once_with(["--format", "json", "--file", "sample.hex"])
 
     def test_run_scp03_script_launches_script_execution_with_prompted_path(self) -> None:
         with mock.patch.object(main_wrapper, "clear_screen"):

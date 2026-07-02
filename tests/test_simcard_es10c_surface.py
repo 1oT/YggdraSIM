@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 """
 Standalone ES10c / ES10b tag-surface smoke tests that bypass the inventory
 crypto layer by exercising SgpLogic.handle_store_data directly.
@@ -133,8 +136,8 @@ class Es10aStandaloneMetadataTests(unittest.TestCase):
         payload = tlv(
             "BF25",
             tlv("5A", encode_iccid_ef(target.iccid))
-            + tlv("91", b"Acme MNO")
-            + tlv("92", b"Acme Primary")
+            + tlv("91", b"Example Operator")
+            + tlv("92", b"Example Primary")
             + tlv("95", b"\x02"),
         )
 
@@ -143,8 +146,8 @@ class Es10aStandaloneMetadataTests(unittest.TestCase):
         self.assertEqual((sw1, sw2), (0x90, 0x00))
         outer = _read_simple_value(response, "BF25")
         self.assertEqual(_read_simple_value(outer, "80"), b"\x00")
-        self.assertEqual(state.profiles[0].service_provider, "Acme MNO")
-        self.assertEqual(state.profiles[0].profile_name, "Acme Primary")
+        self.assertEqual(state.profiles[0].service_provider, "Example Operator")
+        self.assertEqual(state.profiles[0].profile_name, "Example Primary")
         self.assertEqual(state.profiles[0].profile_class, "operational")
 
     def test_standalone_update_metadata_matches_by_iccid(self) -> None:

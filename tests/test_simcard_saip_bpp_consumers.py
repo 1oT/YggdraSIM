@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 """SAIP BPP consumer regression suite.
 
 Covers the four ProfileElement consumers added in the round closing
@@ -16,9 +19,9 @@ that lights up ``state.chv_references`` / ``state.gp_apps`` /
 profile's image.
 
 The tests deliberately use a real operator BPP (the user's
-``89103000000466311335_test`` profile) so we exercise the same byte
+``89880000000466311335_test`` profile) so we exercise the same byte
 streams that show up in HIL traces. The fixture is checked out at
-``Workspace/LocalSMDPP/profile/89103000000466311335_test.txt``; if
+``Workspace/LocalSMDPP/profile/89880000000466311335_test.txt``; if
 it goes missing the suite skips rather than asserting against
 fabricated data.
 """
@@ -52,7 +55,7 @@ from SIMCARD.state import (
 )
 
 
-_BPP_PATH = Path("Workspace/LocalSMDPP/profile/89103000000466311335_test.txt")
+_BPP_PATH = Path("Workspace/LocalSMDPP/profile/89880000000466311335_test.txt")
 
 
 def _load_image_or_skip(test_case: unittest.TestCase):
@@ -525,19 +528,14 @@ class BppPinLifecycleTests(unittest.TestCase):
         self.assertEqual((sw1, sw2), (0x69, 0x84))
         self.assertEqual(self.state.chv_references[0x01].retries_remaining, before)
 
-    def test_retry_counter_probe_works_on_disabled_pin(self) -> None:
-        # Lc=0 retry-counter probes ("VERIFY without payload") must
-        # still report 63 Cx regardless of enable state -- the modem
-        # is allowed to query without attempting a comparison.
+    def test_status_probe_works_on_disabled_pin(self) -> None:
+        # Lc=0 status probes ("VERIFY without payload") against a
+        # disabled PIN return success so a modem can proceed to AKA
+        # without prompting for a PIN the profile has disabled.
         self.assertFalse(self.state.chv_references[0x01].enabled)
         data, sw1, sw2 = self.naa.verify(0x01, b"")
         self.assertEqual(data, b"")
-        self.assertEqual(sw1, 0x63)
-        self.assertEqual(sw2 & 0xF0, 0xC0)
-        self.assertEqual(
-            sw2 & 0x0F,
-            min(0x0F, self.state.chv_references[0x01].retries_remaining),
-        )
+        self.assertEqual((sw1, sw2), (0x90, 0x00))
 
     def test_unblock_pin_still_works_on_disabled_pin(self) -> None:
         # TS 102 221 §11.1.13: UNBLOCK PIN operates on the PUK / PIN

@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """ISD-R configuration loader: reads the JSON config that sets the simulated card identity (EID, CCSN, SM-DP+ address)."""
 from __future__ import annotations

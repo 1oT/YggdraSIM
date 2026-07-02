@@ -1,0 +1,78 @@
+/*
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+ */
+
+/* ---- SA-G1: applications tab placeholder --------------------------- */
+
+.saip-apps-host {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 6px 4px 4px;
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
+.saip-apps-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.saip-apps-head h4 {
+  margin: 0;
+  font-size: 13px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--fg-muted, #888);
+}
+
+.saip-apps-meta {
+  font-size: 11px;
+  color: var(--fg-muted, #888);
+  font-family: var(--mono, "JetBrains Mono", monospace);
+}
+
+.saip-apps-hint {
+  margin: 0;
+  font-size: 12px;
+  color: var(--fg-muted, #888);
+  background: var(--surface-alt, rgba(255, 255, 255, 0.03));
+  border: 1px dashed var(--border);
+  border-radius: 6px;
+  padding: 8px 10px;
+}
+
+.saip-apps-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.saip-apps-table thead th {
+  text-align: left;
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--fg-muted, #888);
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+.saip-apps-row td {
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border);
+  vertical-align: middle;
+}
+
+.saip-apps-carries {
+  display: flex;
+  gap: 6px;
+}
+
+.saip-apps-jump {
+  text-align: right;
+}
+

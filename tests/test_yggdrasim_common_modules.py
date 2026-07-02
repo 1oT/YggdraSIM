@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 import os
 import tempfile
 import unittest
@@ -6,7 +9,6 @@ from types import SimpleNamespace
 from unittest import mock
 
 import yggdrasim_common.plugin_runtime as plugin_runtime
-import yggdrasim_common.polling_plugin_support as polling_plugin_support
 import yggdrasim_common.quit_control as quit_control
 import yggdrasim_common.registry as registry
 import yggdrasim_common.console_scripts as console_scripts
@@ -126,7 +128,6 @@ class ConsoleScriptTests(unittest.TestCase):
             "scp80": ("SCP80.main", "run_standalone"),
             "scp11": ("SCP11.main", "entry"),
             "scp11_live": ("SCP11.live.main", "entry"),
-            "scp11_test": ("SCP11.test.main", "entry"),
             "scp11_relay": ("SCP11.relay.main", "entry"),
             "scp11_local_access": ("SCP11.local_access.main", "run_standalone"),
             "scp11_eim_local": ("SCP11.eim_local.main", "run_standalone"),
@@ -146,57 +147,6 @@ class QuitControlTests(unittest.TestCase):
     def test_quit_all_raises_control_exception(self) -> None:
         with self.assertRaises(quit_control.QuitAllRequested):
             quit_control.quit_all()
-
-
-class PollingPluginSupportTests(unittest.TestCase):
-    def test_require_polling_plugin_raises_when_missing(self) -> None:
-        with mock.patch.object(polling_plugin_support, "get_capability", return_value=None):
-            with self.assertRaisesRegex(RuntimeError, "Polling capability is not installed"):
-                polling_plugin_support.require_polling_plugin()
-
-    def test_dispatch_poll_command_normalizes_surface_and_command_name(self) -> None:
-        calls: list[dict[str, object]] = []
-
-        class Provider:
-            @staticmethod
-            def handle_command(**kwargs):
-                calls.append(kwargs)
-                return kwargs
-
-        with mock.patch.object(
-            polling_plugin_support,
-            "get_capability",
-            return_value=Provider(),
-        ):
-            result = polling_plugin_support.dispatch_poll_command(
-                " Eim_Local ",
-                "ipae-live",
-                target=object(),
-                argument="--debug",
-            )
-
-        self.assertEqual(result["surface"], "eim_local")
-        self.assertEqual(result["command_name"], "IPAE-LIVE")
-        self.assertEqual(result["argument"], "--debug")
-        self.assertEqual(len(calls), 1)
-
-    def test_parse_eim_local_ipae_args_uses_plugin_parser(self) -> None:
-        provider = SimpleNamespace(
-            parse_eim_local_ipae_options=lambda arg: {
-                "poll_attempts_per_fqdn": 5,
-                "timer_expiration_window_seconds": 40,
-                "debug": "--debug" in arg,
-            }
-        )
-        with mock.patch.object(
-            polling_plugin_support,
-            "get_capability",
-            return_value=provider,
-        ):
-            self.assertEqual(
-                polling_plugin_support.parse_eim_local_ipae_args("--debug"),
-                (5, 40, True),
-            )
 
 
 if __name__ == "__main__":

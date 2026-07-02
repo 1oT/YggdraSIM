@@ -1,3 +1,8 @@
+<!--
+SPDX-License-Identifier: GPL-3.0-or-later
+Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+-->
+
 # Contributing to YggdraSIM
 
 YggdraSIM is maintained by **1oT OÜ** (IP owner) with **Hampus Hellsberg** as
@@ -25,21 +30,22 @@ below.
 1. Open an issue before starting non-trivial work. Describe the scope,
    affected subsystem (`SCP03`, `SCP80`, `SCP11/*`, `SIMCARD`, `main/`,
    `Tools/HilBridge`, `Tools/ProfilePackage`, `Tools/SuciTool`,
-   `Tools/ApduFuzz`, `Tools/EumDiag`, `plugins/`), and the
-   specification the change references.
+   `Tools/ApduFuzz`, `Tools/EumDiag`, `Tools/YggdraCore`,
+   `yggdrasim_common/gui_server`, `plugins/`), and the specification the
+   change references.
 2. Fork the repository and branch from `main`. Use one topic branch per
    logical change.
 3. Keep the diff minimal. Prefer editing existing files to creating new
    ones. Follow the style already present in the neighbourhood of the
    change.
 4. Respect the coding standards captured in the docs:
-   [Coding Standards](https://github.com/1oT/YggdraSIM/blob/main/site-docs/internals/coding-standards.md).
+   [Coding Standards](https://github.com/hampushellsberg-dev/YggdraSIM/blob/main/site-docs/internals/coding-standards.md).
    Notably: never collapse `if` / `try` / `except` / `with` / `for` onto a
    single line with their block.
 5. Add or update tests for any behavioural change. Run the narrowest
    relevant `pytest` target. Do not run the full suite in CI-at-a-glance
    mode; see
-   [Testing Guide](https://github.com/1oT/YggdraSIM/blob/main/site-docs/internals/testing-guide.md).
+   [Testing Guide](https://github.com/hampushellsberg-dev/YggdraSIM/blob/main/site-docs/internals/testing-guide.md).
 6. Update documentation in the same PR. If you change a CLI surface or an
    operator flow, update at minimum:
    - the subsystem page under `site-docs/subsystems/`
@@ -71,7 +77,7 @@ APDU-layer decoding must:
   `CMAC`, `KDF`, or `ECDSA` check with a no-op for convenience).
 
 For coordinated vulnerability disclosure, see
-[`.github/SECURITY.md`](https://github.com/1oT/YggdraSIM/blob/main/.github/SECURITY.md)
+[`.github/SECURITY.md`](https://github.com/hampushellsberg-dev/YggdraSIM/blob/main/.github/SECURITY.md)
 at the repository root instead of opening a public issue.
 
 ## Licensing of contributions

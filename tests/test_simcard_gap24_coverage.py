@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 """Twenty-fourth-pass gap-coverage suite for ISIM SMS storage.
 
 3GPP TS 31.103 §4.2.7 lays out the ISIM Service Table, and the

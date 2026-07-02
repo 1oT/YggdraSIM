@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """Single-source-of-truth registry for YGGDRASIM_* runtime flags.
 
@@ -56,6 +59,7 @@ CATEGORY_DEBUG: Final[str] = "Debug"
 CATEGORY_HIL_BRIDGE: Final[str] = "HIL bridge"
 CATEGORY_TOOLS: Final[str] = "External tool locators"
 CATEGORY_SESSION: Final[str] = "Session recording"
+CATEGORY_GUI: Final[str] = "Universal GUI"
 
 
 CATEGORY_ORDER: Final[tuple[str, ...]] = (
@@ -70,6 +74,7 @@ CATEGORY_ORDER: Final[tuple[str, ...]] = (
     CATEGORY_HIL_BRIDGE,
     CATEGORY_TOOLS,
     CATEGORY_SESSION,
+    CATEGORY_GUI,
 )
 
 
@@ -293,37 +298,6 @@ FLAG_REGISTRY: Final[tuple[EnvFlag, ...]] = (
         default_hint="derived per-EID under the eUICC store root",
         applies=APPLIES_RUNTIME,
     ),
-    EnvFlag(
-        name="YGGDRASIM_SIM_IPA_POLL_APN",
-        category=CATEGORY_CARD_BACKEND,
-        summary="Override the SGP.32 IPA-poll APN",
-        description=(
-            "Cellular APN the simulated IPA emits in OPEN CHANNEL\n"
-            "(ETSI TS 102 223 §8.70 Network Access Name, tag 47)\n"
-            "when polling the eIM. Set per-process to pin a lab APN.\n"
-            "An active SAIP profile that ships an APN (BPP override)\n"
-            "wins over this env flag; ``internet.apn`` is the\n"
-            "workspace fallback when neither is set."
-        ),
-        kind=KIND_STRING,
-        default_hint="internet.apn",
-        applies=APPLIES_RUNTIME,
-    ),
-    EnvFlag(
-        name="YGGDRASIM_SIM_IPA_POLL_DNS_SERVER",
-        category=CATEGORY_CARD_BACKEND,
-        summary="Override the SGP.32 IPA-poll DNS resolver",
-        description=(
-            "IPv4 address of the public DNS resolver the simulated\n"
-            "IPA targets when resolving the eIM FQDN over BIP UDP.\n"
-            "The default mirrors what every reference card emits:\n"
-            "Google's 8.8.8.8 on port 53. Override only when running\n"
-            "in a closed lab where a captive resolver replaces 8.8.8.8."
-        ),
-        kind=KIND_STRING,
-        default_hint="8.8.8.8",
-        applies=APPLIES_RUNTIME,
-    ),
 
     # --- Simulator behaviour -------------------------------------------
     EnvFlag(
@@ -390,20 +364,20 @@ FLAG_REGISTRY: Final[tuple[EnvFlag, ...]] = (
     EnvFlag(
         name="YGGDRASIM_ALLOW_PLUGINS",
         category=CATEGORY_PLUGINS,
-        summary="Tri-state plugin opt-in / opt-out",
+        summary="Opt in to runtime plugin loading",
         description=(
-            "Tri-state knob controlling plugin loading. Plugins load by\n"
-            "default since the loader-default flip; this flag is kept for\n"
-            "back-compat.\n"
-            "  1 / true / yes / on  → explicit opt-in (redundant)\n"
-            "  0 / false / no / off → opt-out (plugins refused)\n"
-            "  unset                → default-on"
+            "Controls loading of Python plugins from the active runtime\n"
+            "root. Plugins are executable operator-supplied code, so the\n"
+            "loader is opt-in by default.\n"
+            "  1 / true / yes / on  → import plugins\n"
+            "  0 / false / no / off → refuse plugins\n"
+            "  unset / other        → refuse plugins"
         ),
         kind=KIND_CHOICE,
         choices=("1", "0"),
-        default_hint="unset → plugins load",
+        default_hint="unset → plugins refused",
         applies=APPLIES_STARTUP,
-        notes="Plugin loading happens at module-import time of main.py; changing this flag in a running process does not retroactively load/unload plugins.",
+        notes="Plugin loading happens during launcher startup after local utility exits such as --asn1; changing this flag in a running process does not retroactively load/unload plugins.",
     ),
     EnvFlag(
         name="YGGDRASIM_DISALLOW_PLUGINS",
@@ -415,7 +389,7 @@ FLAG_REGISTRY: Final[tuple[EnvFlag, ...]] = (
             "deployments where no out-of-tree code may execute."
         ),
         kind=KIND_BOOL_TOGGLE,
-        default_hint="unset → plugins may load",
+        default_hint="unset → still requires YGGDRASIM_ALLOW_PLUGINS=1",
         applies=APPLIES_STARTUP,
         sensitive=True,
     ),
@@ -708,6 +682,208 @@ FLAG_REGISTRY: Final[tuple[EnvFlag, ...]] = (
         applies=APPLIES_RUNTIME,
     ),
 
+    # --- Universal GUI -------------------------------------------------
+    EnvFlag(
+        name="YGGDRASIM_GUI_HOST",
+        category=CATEGORY_GUI,
+        summary="Desktop GUI bind host",
+        description=(
+            "Override the bind host for `yggdrasim --gui`. Defaults to\n"
+            "127.0.0.1 so the surface stays on loopback. On Linux / macOS\n"
+            "an operator can set this to 127.0.0.7 for loopback isolation\n"
+            "(keeps the GUI away from the shared 127.0.0.1 alias). The\n"
+            "CLI flag --host wins over this value."
+        ),
+        kind=KIND_STRING,
+        default_hint="127.0.0.1",
+        applies=APPLIES_STARTUP,
+    ),
+    EnvFlag(
+        name="YGGDRASIM_GUI_PORT",
+        category=CATEGORY_GUI,
+        summary="Desktop GUI bind port",
+        description=(
+            "Override the bind port for `yggdrasim --gui`. Defaults to\n"
+            "27853 which is clear of every other loopback claim in the\n"
+            "suite (4729/8080/9997/15353/18443/19443/44215). If the\n"
+            "configured port is busy, desktop mode falls back to an\n"
+            "OS-assigned ephemeral port."
+        ),
+        kind=KIND_INT,
+        default_hint="27853",
+        applies=APPLIES_STARTUP,
+    ),
+    EnvFlag(
+        name="YGGDRASIM_GUI_SERVER_HOST",
+        category=CATEGORY_GUI,
+        summary="Remote lab GUI bind host",
+        description=(
+            "Override the bind host for `yggdrasim --web-server`.\n"
+            "Default is 0.0.0.0 so a remote operator can reach the lab;\n"
+            "the safer posture is 127.0.0.1 plus SSH tunnelling. See\n"
+            "guides/GUI_HOST_SHELL_GUIDE.md for the runbook."
+        ),
+        kind=KIND_STRING,
+        default_hint="0.0.0.0 (SSH-tunnel-friendly: prefer 127.0.0.1)",
+        applies=APPLIES_STARTUP,
+        sensitive=True,
+        notes="Binding 0.0.0.0 exposes the API beyond loopback; keep TLS or SSH tunnelling documented as non-optional.",
+    ),
+    EnvFlag(
+        name="YGGDRASIM_GUI_SERVER_PORT",
+        category=CATEGORY_GUI,
+        summary="Remote lab GUI bind port",
+        description=(
+            "Override the bind port for `yggdrasim --web-server`.\n"
+            "Default 27854. Unlike desktop mode, server mode refuses to\n"
+            "fall back to an ephemeral port — operators rely on a stable\n"
+            "URL."
+        ),
+        kind=KIND_INT,
+        default_hint="27854",
+        applies=APPLIES_STARTUP,
+    ),
+    EnvFlag(
+        name="YGGDRASIM_GUI_TOKEN",
+        category=CATEGORY_GUI,
+        summary="Bearer token for the GUI API (inline)",
+        description=(
+            "Literal bearer-token value used by --gui / --web-server\n"
+            "when neither --token-file nor YGGDRASIM_GUI_TOKEN_FILE is\n"
+            "supplied. Must be >= 32 characters for --web-server. The\n"
+            "file-based sources are preferred because this variable is\n"
+            "visible to anyone who can read the process environment."
+        ),
+        kind=KIND_STRING,
+        default_hint="unset → auto-generated for --gui, rejected for --web-server",
+        applies=APPLIES_STARTUP,
+        sensitive=True,
+        persist_scope=PERSIST_SESSION,
+        notes="Session-scoped. Never persisted. Operator's responsibility to rotate.",
+    ),
+    EnvFlag(
+        name="YGGDRASIM_GUI_TOKEN_FILE",
+        category=CATEGORY_GUI,
+        summary="Path to a bearer-token file for the GUI API",
+        description=(
+            "Absolute path to a file whose contents are used as the\n"
+            "bearer token. The file must be `chmod 600` on POSIX; the\n"
+            "GUI loader refuses group- or world-readable files."
+        ),
+        kind=KIND_PATH,
+        default_hint="unset",
+        applies=APPLIES_STARTUP,
+        sensitive=True,
+    ),
+    EnvFlag(
+        name="YGGDRASIM_GUI_TLS_CERT",
+        category=CATEGORY_GUI,
+        summary="TLS certificate path for --web-server",
+        description=(
+            "PEM-encoded TLS server certificate. Paired with\n"
+            "YGGDRASIM_GUI_TLS_KEY. When both are set the server binds\n"
+            "HTTPS; without them the operator must tunnel (SSH) or use\n"
+            "--tls-self-signed for a one-time local pair."
+        ),
+        kind=KIND_PATH,
+        default_hint="unset (plain HTTP unless --tls-self-signed is passed)",
+        applies=APPLIES_STARTUP,
+    ),
+    EnvFlag(
+        name="YGGDRASIM_GUI_TLS_KEY",
+        category=CATEGORY_GUI,
+        summary="TLS private key path for --web-server",
+        description=(
+            "PEM-encoded TLS private key matching\n"
+            "YGGDRASIM_GUI_TLS_CERT. Must be `chmod 600` on POSIX."
+        ),
+        kind=KIND_PATH,
+        default_hint="unset",
+        applies=APPLIES_STARTUP,
+        sensitive=True,
+    ),
+    EnvFlag(
+        name="YGGDRASIM_GUI_ALLOW_ORIGIN",
+        category=CATEGORY_GUI,
+        summary="Additional CORS origin(s) for --web-server",
+        description=(
+            "Comma-separated list of origins permitted to call the GUI\n"
+            "API. Defaults to deny-all (same-origin only). Wildcards\n"
+            "('*') are refused so a misconfiguration cannot silently\n"
+            "open the surface."
+        ),
+        kind=KIND_STRING,
+        default_hint="unset → deny-all (same-origin SPA only)",
+        applies=APPLIES_STARTUP,
+    ),
+    EnvFlag(
+        name="YGGDRASIM_GUI_IDLE_SECONDS",
+        category=CATEGORY_GUI,
+        summary="WebSocket idle cutoff for GUI shell sessions",
+        description=(
+            "Seconds of no WebSocket traffic before an interactive shell\n"
+            "session is disconnected. Default 1800 (30 minutes). Set to\n"
+            "0 to disable (not recommended for --web-server)."
+        ),
+        kind=KIND_INT,
+        default_hint="1800",
+        applies=APPLIES_STARTUP,
+    ),
+    EnvFlag(
+        name="YGGDRASIM_GUI_PATH_ALLOWLIST",
+        category=CATEGORY_GUI,
+        summary="Extra path roots the GUI is permitted to read",
+        description=(
+            "Colon-separated (POSIX) / semicolon-separated (Windows)\n"
+            "list of absolute path roots the GUI's path-taking\n"
+            "endpoints may read from. Always includes the runtime root,\n"
+            "the eUICC store root, and the current working directory."
+        ),
+        kind=KIND_STRING,
+        default_hint="unset → runtime root + eUICC store + CWD",
+        applies=APPLIES_STARTUP,
+    ),
+    EnvFlag(
+        name="YGGDRASIM_GUI_WEBVIEW_DEBUG",
+        category=CATEGORY_GUI,
+        summary="Open the pywebview dev tools on --gui launch",
+        description=(
+            "When truthy, the pywebview window is created with its\n"
+            "debug menu / dev tools enabled. Useful during frontend\n"
+            "development; leave off for normal operation."
+        ),
+        kind=KIND_BOOL_TOGGLE,
+        default_hint="unset → dev tools closed",
+        applies=APPLIES_STARTUP,
+    ),
+    EnvFlag(
+        name="YGGDRASIM_GUI_HOST_SHELL",
+        category=CATEGORY_GUI,
+        summary="Expose the GUI Host-Shell tab (free-form OS shell PTY)",
+        description=(
+            "Opt-in switch for the Advanced > Host shell sidebar entry.\n"
+            "When truthy (1/true/yes/on) the GUI registers a WebSocket\n"
+            "endpoint that bridges xterm.js to a free-form interactive\n"
+            "shell (resolved $SHELL, fallback /bin/bash) running as the\n"
+            "process that launched yggdrasim. This is functionally\n"
+            "equivalent to giving every bearer-token holder a remote SSH\n"
+            "session — operators must opt in explicitly. The accompanying\n"
+            "'AT decode' overlay (off by default per session) tee's the\n"
+            "PTY byte stream through Tools.HilBridge.at_simlink so\n"
+            "AT+CSIM / AT+CRSM lines surface a decoded ISO 7816 / TS\n"
+            "27.007 view alongside the raw modem dialogue."
+        ),
+        kind=KIND_BOOL_TOGGLE,
+        default_hint="unset → Host shell tab is hidden, route refuses connections",
+        applies=APPLIES_STARTUP,
+        sensitive=True,
+        notes=(
+            "Free-form RCE-class surface. Restrict the bearer token's "
+            "blast radius and prefer an SSH tunnel over a public "
+            "--web-server bind. Full operator guide: "
+            "guides/GUI_HOST_SHELL_GUIDE.md."
+        ),
+    ),
 )
 
 

@@ -4,6 +4,11 @@ tags:
   - architecture
   - overview
 ---
+<!--
+SPDX-License-Identifier: GPL-3.0-or-later
+Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+-->
+
 
 # Architecture
 
@@ -49,7 +54,9 @@ flowchart LR
     Launcher --> Suci["Tools.SuciTool"]
     Launcher --> ApduFuzz["Tools.ApduFuzz"]
     Launcher --> EumDiag["Tools.EumDiag"]
+    Launcher --> YggdraCore["Tools.YggdraCore<br/>(library + HTTP stub)<br/>(post-v1 staging)"]
     Launcher --> Simulator["SIMCARD<br/>simulator backend"]
+    Launcher --> GuiServer["yggdrasim_common.gui_server<br/>(Universal GUI)"]
 
     SCP03 --> Card[("PC/SC reader or<br/>SIMCARD simulator<br/>UICC / eUICC")]
     SCP80 --> Card
@@ -65,6 +72,7 @@ flowchart LR
     Live --> Network[("ES9+ / SM-DP+ endpoints")]
     Test --> Network
     EimLocal --> LocalServices[("Localized eIM / SM-DP+ endpoints")]
+    YggdraCore --> Network
 
     ProfileTool --> Files[("Profile / JSON / DER files")]
     Suci --> Files
@@ -156,16 +164,17 @@ flowchart TB
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | `SCP03` | Primary | Primary | No | Optional | Primary | Primary | GP admin, filesystem, retrieval |
 | `SCP80` | Primary | Optional | Optional | No | Primary | Primary | OTA build, send, decode |
-| `SCP11.live` | Primary | Primary | Primary | Primary | Primary | Primary | Live relay-oriented shell, plugin-backed `POLL` |
+| `SCP11.live` | Primary | Primary | Primary | Primary | Primary | Primary | Live relay-oriented shell with optional local extensions |
 | `SCP11.test` | Primary | Primary | Primary | Primary | Primary | Primary | Test relay shell with lab-only shaping |
 | `SCP11.relay` | Optional | Optional | Primary | Primary | Optional | Optional | Compatibility namespace |
 | `SCP11.local_access` | Primary | Primary | No | Primary | Primary | Primary | Direct local `ISD-R` flow |
-| `SCP11.eim_local` | Primary | Primary | Primary | Primary | Primary | Primary | eIM-local package, polling, handover, IPAd standalone |
+| `SCP11.eim_local` | Primary | Primary | Primary | Primary | Primary | Primary | eIM-local package authoring, hotfolders, response logging, handover |
 | `Tools.ProfilePackage` | Primary | No | No | Primary | No | No | SAIP tooling and transcode UI |
 | `Tools.HilBridge` | Primary | Primary | No | No | No | No | HIL supervisor, relay, GSMTAP mirror, AT+CSIM/CRSM transcoder |
 | `Tools.SuciTool` | Primary | No | No | No | No | No | File/stdin shell around `suci-keytool` |
 | `Tools.ApduFuzz` | Primary | Primary | No | No | No | No | Allow-listed eUICC APDU mutation fuzzer (opt-in, hard-gated) |
 | `Tools.EumDiag` | Primary | Optional | No | No | No | No | EUM / SM-DP+ session-key staging and Wireshark Lua dissector |
+| `Tools.YggdraCore` *(post-v1 staging)* | No (library / HTTP stub) | No | Optional | No | No | No | In-process AUSF / AAnF stubs and BYO-Open5GS bridge |
 | `SIMCARD` | Selected via `--card-backend sim` | No | No | No | Optional | No | Simulated UICC / eUICC backend (ETSI / GP / SCP03 / SCP80 / Toolkit / 5G AKA / AKMA / SUCI) |
 
 ## Complete dependency graph
@@ -401,15 +410,14 @@ flowchart TB
 Relay flavors:
 
 - `SCP11.live` is the production-oriented relay shell
-- `SCP11.test` mirrors `live` with test-certificate and shaping defaults
+- `SCP11.test` is a compatibility alias for the shared relay shell
 - `SCP11.relay` is a compatibility namespace
 
 Local flavors:
 
 - `SCP11.local_access` performs direct local `ISD-R` flows
-- `SCP11.eim_local` layers eIM package authoring, localized polling,
-  hotfolder execution, response logging, handover, and a standalone `IPAd`
-  runner on top of the local SCP11 stack
+- `SCP11.eim_local` layers eIM package authoring, hotfolder execution,
+  response logging, and handover on top of the local SCP11 stack
 
 ## Optional plugin runtime
 
@@ -424,7 +432,7 @@ flowchart LR
     EimLocal["SCP11.eim_local"] --> Manager
 
     Manager --> Runtime[("plugins/ under runtime root")]
-    Runtime -->|register_plugins| Capability["reserved capability 'polling'"]
+    Runtime -->|register_plugins| Capability["private capability contract"]
 
     Capability --> Live
     Capability --> Test
@@ -434,7 +442,7 @@ flowchart LR
 ```
 
 See [Plugin Contract](internals/plugin-contract.md) for the loader
-contract, reserved capability names, and absent-plugin behavior.
+contract, capability registration, and absent-plugin behavior.
 
 ## Profile lifecycle on the eUICC
 
@@ -534,7 +542,8 @@ flowchart LR
   relay shell
 - `SCP11/live` and `SCP11/test` are the primary relay-facing shells
 - `SCP11/local_access` is the direct local `ISD-R` path
-- `SCP11/eim_local` is the eIM-side package, polling, and handover shell
+- `SCP11/eim_local` is the eIM-side package, hotfolder, response-log, and
+  handover shell
 - `Tools/ProfilePackage` is the SAIP package inspection and transcode
   surface
 - `Tools/HilBridge` is the dedicated physical-card-to-modem bridge path
@@ -543,9 +552,13 @@ flowchart LR
 - `Tools/ApduFuzz` is the opt-in, allow-listed APDU mutation fuzzer
 - `Tools/EumDiag` is the EUM / SM-DP+ diagnostics surface (session-key
   injection plus Wireshark / tshark Lua dissector)
+- `Tools/YggdraCore` is the in-process 5G core stub (AUSF / AAnF) plus
+  optional BYO-Open5GS provisioning bridge. (post-v1 staging — not part of this release.)
 - `SIMCARD` is the simulator backend activated by `--card-backend sim`,
   including ETSI / GP / SCP03 / SCP80 / Toolkit and the 5G AKA / EAP-AKA' /
   AKMA / SUCI / `GET IDENTITY` stack
+- `yggdrasim_common/gui_server/` is the optional Universal GUI Command
+  Center, started with `--gui` (desktop) or `--web-server` (FastAPI)
 
 ## Deep reference
 

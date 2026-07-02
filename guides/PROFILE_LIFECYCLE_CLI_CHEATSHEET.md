@@ -1,3 +1,8 @@
+<!--
+SPDX-License-Identifier: GPL-3.0-or-later
+Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+-->
+
 # Profile Lifecycle CLI Cheatsheet
 
 Replace anything inside `[ENTER ... HERE]` before you run it. That can be an
@@ -22,7 +27,6 @@ yggdrasim-scp03
 yggdrasim-scp80
 yggdrasim-scp11
 yggdrasim-scp11-live
-yggdrasim-scp11-test
 yggdrasim-scp11-relay
 yggdrasim-scp11-local-access
 yggdrasim-scp11-eim-local
@@ -35,13 +39,12 @@ yggdrasim-eum-diag
 yggdrasim-suci-tool
 ```
 
-Use `yggdrasim-scp11-live`, `yggdrasim-scp11-test`, or
-`yggdrasim-scp11-relay` for relay-first work.
+Use `yggdrasim-scp11-live` or `yggdrasim-scp11-relay` for relay-first work.
 
 Use `yggdrasim-scp11-local-access` for direct local card work.
 
-Use `yggdrasim-scp11-eim-local` for local eIM, queue, handover, and localized
-polling work.
+Use `yggdrasim-scp11-eim-local` for local eIM, hotfolder, handover, and
+response-log work.
 
 Use `yggdrasim-hil-bridge` and `yggdrasim-hil-supervisor` for HIL bridge work
 on Linux (full-flavor / `[hil]` extra only).
@@ -77,7 +80,6 @@ transport testing.
   `HOTFOLDER`, and `EIM-PACKAGE`.
 - Do the action second. Typical actions are `LOAD-PROFILE`,
   `DOWNLOAD-PROFILE`, `DOWNLOAD`, `ENABLE-PROFILE`, `DISABLE-PROFILE`,
-  `DELETE-PROFILE`, `IPAE-DOWNLOAD`, and `POLL-CAMPAIGN`.
 - Verify third. Typical verification commands are `STATUS`, `LIST`,
   `HANDOVER-STATUS`, `RESP-LOG`, and `COUNTERS`.
 
@@ -89,8 +91,7 @@ Relay IPAd: DISCOVER -> DOWNLOAD -> STATUS -> LIST
 Profile state change: LIST -> ENABLE-PROFILE / DISABLE-PROFILE / DELETE-PROFILE -> STATUS -> LIST
 Local load: PROFILE -> METADATA -> LOAD-PROFILE -> STATUS -> LIST
 Local metadata update: METADATA-LINT -> STORE-METADATA or UPDATE-METADATA -> STATUS
-Localized IPAE: IPAE-AUTHENTICATE or HANDOVER-SET -> HANDOVER-STATUS -> IPAE-DOWNLOAD -> RESP-LOG
-Queue campaign: PATHS -> HOTFOLDER-LIST -> HOTFOLDER-FETCH or POLL-CAMPAIGN -> RESP-LOG -> COUNTERS -> NOTIF-HYGIENE
+Hotfolder package flow: PATHS -> HOTFOLDER-LIST -> HOTFOLDER-FETCH -> RESP-LOG -> COUNTERS -> NOTIF-HYGIENE
 Profile package triage: USE -> INFO -> TREE -> CHECK -> DUMP or LINT
 SCP03 admin: INFO -> SHOW -> SCP03-SD / SCP02-SD -> APPS / PKGS / SD -> SELECT / READ / RECORD
 SCP80 OTA: ICCID -> SHOW -> BUILD -> SEND / OTA -> HISTORY
@@ -160,7 +161,6 @@ EXPORT-KEYBAG [outputPath.keys.json] [label]
 ARR [path]
 CERT-INFO
 GUIDE [topic]
-DECODE <hex>
 RUN <file> [out.yaml]
 SCRIPT <file>
 DEBUG
@@ -170,6 +170,9 @@ EXIT
 QA
 Q
 ```
+
+For standalone ASN.1/TLV/APDU decoding, use `python main/main.py --asn1 <hex>`
+or the installed `yggdrasim-asn1 <hex>` command.
 
 SCP03 STK subsystem commands:
 
@@ -234,9 +237,15 @@ Common SCP80 `SET` keys:
 cntr
 header
 spi
+kic_indicator
+kid_indicator
 kic
 kid
 tar
+pid
+dcs
+kic_identifier
+kid_identifier
 key_enc
 key_mac
 cla
@@ -250,8 +259,7 @@ payload
 
 ### Relay Shells
 
-Use these with `yggdrasim-scp11-live`, `yggdrasim-scp11-test`, or
-`yggdrasim-scp11-relay`.
+Use these with `yggdrasim-scp11-live` or `yggdrasim-scp11-relay`.
 
 Built-in relay commands:
 
@@ -306,7 +314,6 @@ EIM-AUTHENTICATE [matchingId]
 Relay optional plugin commands:
 
 ```text
-POLL [attempts] [timer-window] [-t 20s] [-s 5] [--debug]
 ```
 
 Relay aliases:
@@ -318,7 +325,6 @@ DOWNLOAD-AC -> DOWNLOAD-PROFILE
 GET-METADATA -> METADATA
 EIM-DISCOVER -> DISCOVER
 EIM-DOWNLOAD -> DOWNLOAD
-EIM-POLL -> POLL
 QUIT, Q -> EXIT
 ```
 
@@ -409,10 +415,8 @@ IPAd and handover commands:
 IPAD-DISCOVER [packagePath]
 IPAD-LIVE [matchingId] [--debug]
 IPAD-TEST [matchingId] [--debug]
-IPAE-AUTHENTICATE [matchingId]
 HANDOVER-SET <transactionIdHex> [matchingId]
 HANDOVER-STATUS [--json|--yaml]
-IPAE-DOWNLOAD [profilePath] [matchingId]
 EIM-ACKNOWLEDGE [transactionIdHex] [matchingId]
 ```
 
@@ -434,30 +438,19 @@ ERROR-CODES [SGP.02|SGP.22|SGP.32|ALL]
 ERROR-CODE-SET <family> <code|name> [packagePath]
 ```
 
-Queue, polling, and audit commands:
+Queue and audit commands:
 
 ```text
 HOTFOLDER [directory]
 HOTFOLDER-CLEAR
 HOTFOLDER-LIST [directory] [--json|--yaml]
-HOTFOLDER-POLL [directory] [--json|--yaml]
 HOTFOLDER-FETCH [directory] [--json|--yaml]
-POLL-CAMPAIGN [cycles] [intervalMs] [hotfolderDir] [--until-empty] [--max-cycles <n>] [--json|--yaml]
-POLL-EXPORT [cycles] [intervalMs] [hotfolderDir] [--until-empty] [--max-cycles <n>] [outputPath]
-POLL-AGGREGATE [reportsDir] [--json|--yaml] [--export [outputPath]]
 COUNTERS
 COUNTER <eimId> [set <n>]
 NOTIF-HYGIENE [maxPending]
 RESP-LOG [n] [--json|--yaml]
 RESP-LOG-FILTER <query> [n] [--json|--yaml]
 RESP-LOG-CLEAR
-```
-
-Local eIM optional plugin commands:
-
-```text
-IPAE-LIVE [attempts] [timer-window] [-t 20s] [-s 5] [--debug]
-IPAE-TEST [attempts] [timer-window] [-t 20s] [-s 5] [--debug]
 ```
 
 Local eIM aliases:
@@ -576,7 +569,7 @@ EXIT
 EOF
 ```
 
-### Live Relay
+### eSIM Management Relay
 
 ```bash
 yggdrasim-scp11-live --cmd "DISCOVER; STATUS; LIST; EXIT"
@@ -593,31 +586,8 @@ yggdrasim-scp11-live --cmd "DELETE-PROFILE [ENTER ICCID / AID HERE]; EXIT"
 
 yggdrasim-scp11-live --cmd "POLL; EXIT"
 
-yggdrasim-scp11-live --cmd "POLL [ENTER ATTEMPTS HERE] [ENTER TIMER WINDOW HERE] --debug; EXIT"
 
 yggdrasim-scp11-live --cmd "DISCOVER; STATUS; LIST; EXIT" | tee "[ENTER OUTPUT PATH HERE]"
-```
-
-### Test Relay
-
-```bash
-yggdrasim-scp11-test --cmd "DISCOVER; STATUS; LIST; EXIT"
-
-yggdrasim-scp11-test --cmd "DOWNLOAD-PROFILE [ENTER ACTIVATION CODE HERE]; STATUS; LIST; EXIT"
-
-yggdrasim-scp11-test --cmd "DISCOVER; DOWNLOAD [ENTER MATCHING ID HERE]; STATUS; LIST; EXIT"
-
-yggdrasim-scp11-test --cmd "ENABLE-PROFILE [ENTER ICCID / AID HERE]; EXIT"
-
-yggdrasim-scp11-test --cmd "DISABLE-PROFILE [ENTER ICCID / AID HERE]; EXIT"
-
-yggdrasim-scp11-test --cmd "DELETE-PROFILE [ENTER ICCID / AID HERE]; EXIT"
-
-yggdrasim-scp11-test --cmd "POLL; EXIT"
-
-yggdrasim-scp11-test --cmd "POLL [ENTER ATTEMPTS HERE] [ENTER TIMER WINDOW HERE] --debug; EXIT"
-
-yggdrasim-scp11-test --cmd "DISCOVER; STATUS; LIST; EXIT" | tee "[ENTER OUTPUT PATH HERE]"
 ```
 
 ### Local Card
@@ -700,11 +670,9 @@ yggdrasim-scp11-eim-local --cmd "IPAD-LIVE [ENTER MATCHING ID HERE] --debug; EXI
 
 yggdrasim-scp11-eim-local --cmd "IPAD-TEST [ENTER MATCHING ID HERE]; EXIT"
 
-yggdrasim-scp11-eim-local --cmd "IPAE-AUTHENTICATE [ENTER MATCHING ID HERE]; HANDOVER-STATUS; EXIT"
 
 yggdrasim-scp11-eim-local --cmd "HANDOVER-SET [ENTER TXID HEX HERE] [ENTER MATCHING ID HERE]; HANDOVER-STATUS; EXIT"
 
-yggdrasim-scp11-eim-local --cmd "IPAE-DOWNLOAD [ENTER PROFILE PATH HERE] [ENTER MATCHING ID HERE]; EXIT"
 
 yggdrasim-scp11-eim-local --cmd "HOTFOLDER [ENTER HOTFOLDER DIR HERE]; EXIT"
 
@@ -713,12 +681,6 @@ yggdrasim-scp11-eim-local --cmd "HOTFOLDER-CLEAR; EXIT"
 yggdrasim-scp11-eim-local --cmd "HOTFOLDER-LIST [ENTER HOTFOLDER DIR HERE]; EXIT"
 
 yggdrasim-scp11-eim-local --cmd "HOTFOLDER-FETCH [ENTER HOTFOLDER DIR HERE]; EXIT"
-
-yggdrasim-scp11-eim-local --cmd "POLL-CAMPAIGN --until-empty --max-cycles [ENTER MAX CYCLES HERE]; EXIT"
-
-yggdrasim-scp11-eim-local --cmd "POLL-EXPORT --until-empty --max-cycles [ENTER MAX CYCLES HERE] [ENTER OUTPUT PATH HERE]; EXIT"
-
-yggdrasim-scp11-eim-local --cmd "POLL-AGGREGATE [ENTER REPORTS DIR HERE]; EXIT"
 
 yggdrasim-scp11-eim-local --cmd "RESP-LOG [ENTER COUNT HERE]; EXIT"
 

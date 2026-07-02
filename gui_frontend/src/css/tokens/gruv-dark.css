@@ -1,0 +1,43 @@
+/*
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+ */
+
+/* -- Theme: Gruv · dark (brown paper + orange accent, popular lab palette) ----- */
+html[data-theme="gruv-dark"] {
+  --bg: #282828;
+  --bg-elev: #32302f;
+  --bg-elev-2: #3c3836;
+  --surface: #32302f;
+  --surface-alt: rgba(255, 255, 255, 0.04);
+  --bg-hover: rgba(235, 219, 178, 0.07);
+  --border: rgba(235, 219, 178, 0.12);
+  --border-strong: rgba(235, 219, 178, 0.28);
+  --fg: #ebdbb2;
+  --fg-dim: #a89984;
+  --fg-muted: #928374;
+  --accent: #fe8019;
+  --accent-strong: #d65d0e;
+  --accent-soft: rgba(254, 128, 25, 0.14);
+  --accent-fg: #282828;
+  --accent-glow: rgba(254, 128, 25, 0.45);
+  --gradient-accent: linear-gradient(135deg, #fe8019 0%, #fabd2f 55%, #d79921 100%);
+  --gradient-brand: linear-gradient(135deg, #fe8019 0%, #fabd2f 100%);
+  --ok: #b8bb26;
+  --ok-soft: rgba(184, 187, 38, 0.16);
+  --warn: #fabd2f;
+  --warn-soft: rgba(250, 189, 47, 0.14);
+  --fail: #fb4934;
+  --fail-soft: rgba(251, 73, 52, 0.16);
+  --code-bg: #1d2021;
+  --kbd-bg: rgba(29, 32, 33, 0.96);
+  --shadow-card: 0 10px 26px rgba(0, 0, 0, 0.32);
+  --shadow-card-hover: 0 18px 42px rgba(0, 0, 0, 0.48);
+  --shadow-glow-accent: 0 0 0 1px var(--accent-soft), 0 14px 40px -12px var(--accent-glow);
+  --topbar-bg: rgba(50, 48, 47, 0.82);
+  --theme-tint:
+    radial-gradient(circle at 12% 0%, rgba(254, 128, 25, 0.12), transparent 44%),
+    radial-gradient(circle at 92% 88%, rgba(250, 189, 47, 0.07), transparent 48%),
+    radial-gradient(circle at 48% 40%, rgba(184, 187, 38, 0.05), transparent 52%);
+}
+

@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 import contextlib
 import datetime
 import io
@@ -90,7 +93,7 @@ def build_eim_configuration_response() -> bytes:
             b"".join(
                 [
                     wrap_tlv(b"\x80", b"manager-1"),
-                    wrap_tlv(b"\x81", b"eim.example.test"),
+                    wrap_tlv(b"\x81", b"eim1.example.test"),
                     wrap_tlv(b"\x82", b"\x01"),
                 ]
             ),
@@ -237,7 +240,7 @@ def build_profile_installation_failure(transaction_id: bytes) -> bytes:
     notification_metadata = (
         wrap_tlv(b"\x80", bytes.fromhex("021F"))
         + wrap_tlv(b"\x81", bytes.fromhex("07"))
-        + wrap_tlv(b"\x0C", b"smdpplus2.esim.tst.1ot.mobi")
+        + wrap_tlv(b"\x0C", b"smdpplus2.smdpp.example.test")
         + wrap_tlv(b"\x5A", bytes.fromhex("89880811111111111112"))
     )
     failure_result = wrap_tlv(
@@ -280,7 +283,7 @@ class FakeApduChannel:
         if log_name == "LOCAL: GetEuiccConfiguredData":
             return wrap_tlv(
                 bytes.fromhex("BF3C"),
-                wrap_tlv(b"\x80", b"smdpplus2.esim.tst.1ot.mobi")
+                wrap_tlv(b"\x80", b"smdpplus2.smdpp.example.test")
                 + wrap_tlv(b"\x83", bytes.fromhex("F54172BDF98A95D65CBEB88A38A1C11D800A85C3")),
             )
         if log_name == "LOCAL: GetEuiccChallenge":
@@ -507,12 +510,12 @@ class LocalAccessSessionTests(unittest.TestCase):
         session.collect_profile_metadata = lambda: []  # type: ignore[method-assign]
         session._sync_pending_notifications = lambda response=b"": None  # type: ignore[method-assign]
 
-        response = session.delete_profile("89880811111111111112")
+        response = session.delete_profile("89460811111111111112")
 
         expected_payload = session._build_profile_state_payload(
             session.TAG_DELETE_PROFILE,
             session.TAG_ICCID,
-            "98888011111111111121",
+            "98648011111111111121",
         )
         expected_apdu = bytes([0x80, 0xE2, 0x91, 0x00, len(expected_payload)]) + expected_payload
 
@@ -713,7 +716,7 @@ class LocalAccessSessionTests(unittest.TestCase):
         self.assertEqual(snapshot["eid"], "89049032118427504800000000000607")
         self.assertEqual(snapshot["issuer_number"], "89049032")
         self.assertEqual(snapshot["issuer_name"], "Giesecke+Devrient")
-        self.assertEqual(snapshot["configured_decoded"]["default_smdp"], "smdpplus2.esim.tst.1ot.mobi")
+        self.assertEqual(snapshot["configured_decoded"]["default_smdp"], "smdpplus2.smdpp.example.test")
         self.assertEqual(len(snapshot["profiles"]), 2)
         self.assertEqual(snapshot["profiles"][0].state, "ENABLED")
         self.assertEqual(snapshot["profiles"][1].nickname, "Secondary")
@@ -964,10 +967,9 @@ class LocalAccessSessionTests(unittest.TestCase):
         self.assertIn("Canonical command names are listed here", rendered)
         self.assertIn("ENABLE-PROFILE <id>", rendered)
         self.assertIn("DELETE-PROFILE <id>", rendered)
-        self.assertIn("REFRESH-MODEM [mode]", rendered)
         self.assertNotIn("  ENABLE <id>", rendered)
         self.assertNotIn("  DELETE <id>", rendered)
-        self.assertIn("Aliases: ENABLE, DISABLE, DELETE, MODEM-REFRESH", rendered)
+        self.assertIn("Aliases: ENABLE, DISABLE, DELETE", rendered)
         self.assertTrue(
             any(
                 "CERTS [--json|--yaml]" in line and "STATUS" in line
@@ -1028,17 +1030,6 @@ class LocalAccessSessionTests(unittest.TestCase):
         self.assertIn("[DELETE-PROFILE]", rendered)
         self.assertIn("Usage   : DELETE-PROFILE <id>", rendered)
         self.assertIn("Aliases : DELETE", rendered)
-
-    def test_local_shell_help_alias_lookup_resolves_refresh_modem_command(self):
-        shell = LocalAccessShell()
-
-        with contextlib.redirect_stdout(io.StringIO()) as output:
-            shell._cmd_help(["MODEM-REFRESH"])
-
-        rendered = output.getvalue()
-        self.assertIn("[REFRESH-MODEM]", rendered)
-        self.assertIn("Usage   : REFRESH-MODEM [mode]", rendered)
-        self.assertIn("Aliases : MODEM-REFRESH", rendered)
 
     def test_local_shell_debug_flag_strips_argument_and_toggles_raw_apdu_logging(self):
         class _FakeApduChannel:
@@ -1163,10 +1154,10 @@ class LocalAccessSessionTests(unittest.TestCase):
                 ],
                 "configured_raw": wrap_tlv(
                     bytes.fromhex("BF3C"),
-                    wrap_tlv(b"\x80", b"smdpplus2.esim.tst.1ot.mobi"),
+                    wrap_tlv(b"\x80", b"smdpplus2.smdpp.example.test"),
                 ),
                 "configured_decoded": {
-                    "default_smdp": "smdpplus2.esim.tst.1ot.mobi",
+                    "default_smdp": "smdpplus2.smdpp.example.test",
                     "root_smds_primary": "",
                     "root_smds_additional": [],
                     "allowed_ci_pkid": [],
@@ -1620,7 +1611,7 @@ class LocalAccessSessionTests(unittest.TestCase):
             session.state.transaction_id = b"\x10" * 16
             session.state.configured_data = wrap_tlv(
                 bytes.fromhex("BF3C"),
-                wrap_tlv(b"\x80", b"smdpplus2.esim.tst.1ot.mobi"),
+                wrap_tlv(b"\x80", b"smdpplus2.smdpp.example.test"),
             )
 
             euicc_otpk_key = ec.generate_private_key(ec.SECP256R1())
@@ -1696,7 +1687,7 @@ class LocalAccessSessionTests(unittest.TestCase):
             session.state.transaction_id = b"\x10" * 16
             session.state.configured_data = wrap_tlv(
                 bytes.fromhex("BF3C"),
-                wrap_tlv(b"\x80", b"smdpplus2.esim.tst.1ot.mobi"),
+                wrap_tlv(b"\x80", b"smdpplus2.smdpp.example.test"),
             )
 
             euicc_otpk_key = ec.generate_private_key(ec.SECP256R1())
@@ -1787,7 +1778,7 @@ class LocalAccessSessionTests(unittest.TestCase):
             session.state.transaction_id = b"\x10" * 16
             session.state.configured_data = wrap_tlv(
                 bytes.fromhex("BF3C"),
-                wrap_tlv(b"\x80", b"smdpplus2.esim.tst.1ot.mobi"),
+                wrap_tlv(b"\x80", b"smdpplus2.smdpp.example.test"),
             )
 
             euicc_otpk_key = ec.generate_private_key(ec.SECP256R1())
@@ -1883,6 +1874,71 @@ class LocalAccessSessionTests(unittest.TestCase):
         self.assertEqual(calls[2], ("build", bytes.fromhex("A00100")))
         self.assertEqual(calls[3], ("load", generated_bpp))
         self.assertEqual(calls[4][0], "close")
+
+    def test_run_load_profile_chain_wraps_when_session_bound_metadata_is_missing(self):
+        with tempfile.TemporaryDirectory() as profile_dir:
+            profile_path = Path(profile_dir) / "local-profile.hex"
+            profile_path.write_text("A00100", encoding="utf-8")
+            session = LocalIsdrSession(
+                cfg=LocalAccessConfig(
+                    PROFILE_DIR=str(profile_dir),
+                    GENERATE_SESSION_BOUND_BPP=True,
+                    WRAP_SEGMENT_IN_BOOTSTRAP=True,
+                ),
+                apdu_channel=FakeApduChannel(),
+            )
+            calls = []
+
+            def fake_open(transaction_id_override=None):
+                calls.append(("open", transaction_id_override))
+                session.state.session_open = True
+                session.state.transaction_id = b"\x55" * 16
+                return None
+
+            def fake_prepare():
+                calls.append(("prepare", None))
+                session.state.prepare_download_response = b"\x01"
+                return b"\x01"
+
+            def fake_build(payload: bytes) -> bytes:
+                calls.append(("build", payload))
+                raise ValueError(
+                    "Metadata field profile.iccid must not be empty for local BPP generation."
+                )
+
+            def fake_load(payload: bytes, *, progress_bar=None) -> bytes:
+                _ = progress_bar
+                calls.append(("load", payload))
+                return bytes.fromhex("9000")
+
+            def fake_close(reason=LocalIsdrSession.CANCEL_SESSION_REASON_END_USER_REJECTION):
+                calls.append(("close", reason))
+                session.state.session_open = False
+                return b""
+
+            session.open_session = fake_open
+            session.prepare_download = fake_prepare
+            session._build_session_bound_profile_package = fake_build
+            session._load_profile_from_bytes = fake_load
+            session.close_session = fake_close
+
+            response = session.run_load_profile_chain()
+
+        expected_wrapped = wrap_tlv(
+            bytes.fromhex("BF36"),
+            wrap_tlv(bytes.fromhex("BF23"), wrap_tlv(b"\x80", b"\x55" * 16))
+            + bytes.fromhex("A00100"),
+        )
+        self.assertEqual(response, bytes.fromhex("9000"))
+        self.assertEqual(calls[0], ("open", None))
+        self.assertEqual(calls[1], ("prepare", None))
+        self.assertEqual(calls[2], ("build", bytes.fromhex("A00100")))
+        self.assertEqual(calls[3], ("load", expected_wrapped))
+        self.assertEqual(calls[4][0], "close")
+        self.assertIn(
+            "Session-bound BPP metadata unavailable; used legacy BF36/BF23 wrapper.",
+            session.state.last_bpp_crypto_debug_lines,
+        )
 
     def test_run_load_profile_chain_resets_prepare_download_state_between_attempts(self):
         with tempfile.TemporaryDirectory() as profile_dir:

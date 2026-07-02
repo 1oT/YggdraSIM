@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 from __future__ import annotations
 
 import types
@@ -153,11 +156,10 @@ class HilBridgeSimulatedModemTests(unittest.TestCase):
 
     def test_terminal_capability_and_logical_channel_alias_flow(self) -> None:
         # Mirror the bootstrap body sent by the SCP11 orchestrator after the
-        # TERMINAL CAPABILITY change: tag 0x82 advertises extended logical
-        # channels and tag 0x84 advertises eUICC support, both required by
-        # eUICC stacks that gate ES10 STORE DATA on the eUICC bit.
+        # TERMINAL CAPABILITY change: tag 0x84 advertises eUICC support
+        # without also advertising extended logical-channel capability.
         capability_data, capability_sw1, capability_sw2 = self.channel.transmit(
-            bytes.fromhex("80AA00000DA90B8100820101830107840101")
+            bytes.fromhex("80AA000005A903840101")
         )
         self.assertEqual(capability_data, b"")
         self.assertEqual((capability_sw1, capability_sw2), (0x90, 0x00))
@@ -175,6 +177,60 @@ class HilBridgeSimulatedModemTests(unittest.TestCase):
         fcp_data, fcp_sw1, fcp_sw2 = self._drain_get_response(0x01, select_sw2)
         self.assertEqual((fcp_sw1, fcp_sw2), (0x90, 0x00))
         self.assertIn(LEGACY_ISIM_AID, fcp_data)
+
+    def test_trace_style_pin_probe_and_isim_channel_do_not_block_auth(self) -> None:
+        _, usim_sw1, usim_sw2 = self.channel.transmit(
+            bytes([0x00, 0xA4, 0x04, 0x04, len(LEGACY_USIM_AID)]) + LEGACY_USIM_AID
+        )
+        self.assertEqual(usim_sw1, 0x61)
+        _, usim_drain_sw1, usim_drain_sw2 = self._drain_get_response(0x00, usim_sw2)
+        self.assertEqual((usim_drain_sw1, usim_drain_sw2), (0x90, 0x00))
+
+        for reference in (0x01, 0x81):
+            data, sw1, sw2 = self.channel.transmit(bytes([0x00, 0x20, 0x00, reference, 0x00]))
+            self.assertEqual(data, b"")
+            self.assertEqual((sw1, sw2), (0x90, 0x00))
+
+        open_data, open_sw1, open_sw2 = self.channel.transmit(bytes.fromhex("0070000001"))
+        self.assertEqual(open_data, bytes((0x01,)))
+        self.assertEqual((open_sw1, open_sw2), (0x90, 0x00))
+
+        _, isim_sw1, isim_sw2 = self.channel.transmit(
+            bytes([0x01, 0xA4, 0x04, 0x04, len(LEGACY_ISIM_AID)]) + LEGACY_ISIM_AID
+        )
+        self.assertEqual(isim_sw1, 0x61)
+        _, isim_drain_sw1, isim_drain_sw2 = self._drain_get_response(0x01, isim_sw2)
+        self.assertEqual((isim_drain_sw1, isim_drain_sw2), (0x90, 0x00))
+
+        _, li_sw1, li_sw2 = self.channel.transmit(bytes.fromhex("00A40804047FFF6F05"))
+        self.assertEqual(li_sw1, 0x61)
+        li_fcp, li_drain_sw1, li_drain_sw2 = self._drain_get_response(0x00, li_sw2)
+        self.assertEqual((li_drain_sw1, li_drain_sw2), (0x90, 0x00))
+        self.assertIn(bytes.fromhex("83026F05"), li_fcp)
+
+        auth_config = self.connection._engine.state.profiles[0].auth_config
+        self.assertIsNotNone(auth_config)
+        assert auth_config is not None
+        autn = build_milenage_autn(
+            bytes(auth_config.ki),
+            bytes(auth_config.opc),
+            bytes.fromhex(AUTH_TEST_VECTOR["RAND"]),
+            bytes(auth_config.sqn),
+            bytes(auth_config.amf),
+        )
+        auth_apdu = (
+            bytes.fromhex("00880081")
+            + bytes((0x22, 0x10))
+            + bytes.fromhex(AUTH_TEST_VECTOR["RAND"])
+            + bytes((0x10,))
+            + autn
+        )
+        auth_data, auth_sw1, auth_sw2 = self.channel.transmit(auth_apdu)
+        self.assertEqual(auth_data, b"")
+        self.assertEqual(auth_sw1, 0x61)
+        response_data, response_sw1, response_sw2 = self._drain_get_response(0x00, auth_sw2)
+        self.assertEqual((response_sw1, response_sw2), (0x90, 0x00))
+        self.assertEqual(response_data[:2], bytes.fromhex("DB08"))
 
     def test_toolkit_status_fetch_and_terminal_response_flow(self) -> None:
         profile_data, profile_sw1, profile_sw2 = self.channel.transmit(bytes.fromhex("8010000001FF"))

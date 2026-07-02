@@ -17,17 +17,6 @@
           "value_hex": ""
         }
       },
-      "ipa_euicc_data_response": {
-        "include": false,
-        "transaction_id": {
-          "include": true,
-          "value_hex": "0102030405060708090A0B0C0D0E0F10"
-        },
-        "response_payload": {
-          "include": true,
-          "value_hex": ""
-        }
-      },
       "profile_download_trigger_result": {
         "include": false,
         "transaction_id": {

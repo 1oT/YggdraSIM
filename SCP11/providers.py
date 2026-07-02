@@ -40,6 +40,8 @@ try:
         InitiateAuthenticationResponse,
     )
 except ImportError:
+    if __package__:
+        raise
     from es9_client import Es9LikeClient
     from models import (
         AuthenticateClientRequest,
@@ -270,7 +272,7 @@ class Sgp26LocalProvider(ProfileProvider):
 
     def poll_eim(self, request_obj: EimPollRequest) -> EimPollResponse:
         self._ensure_chain()
-        raise NotImplementedError("SGP.26 local eIM polling is not implemented yet")
+        raise NotImplementedError("SGP.26 local eIM package exchange is not implemented yet")
 
     def _ensure_chain(self) -> None:
         self.validate_chain_time_window()

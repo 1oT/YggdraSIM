@@ -1,3 +1,8 @@
+<!--
+SPDX-License-Identifier: GPL-3.0-or-later
+Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+-->
+
 # Guide Index
 
 This directory holds authored operator and developer documentation for
@@ -18,19 +23,21 @@ reading can populate `docs/` themselves from the issuing body.
 - `INSTALL_FROM_SOURCE.md` - editable source install with the extras matrix
 - `INSTALL_RASPBERRYPI.md` - Raspberry Pi specific install notes
 - `SIMTRACE2_CARDEM_GUIDE.md` - flashing / updating SIMtrace2 and `osmo-remsim-client-st2`
+- `CARD_BRIDGE_GUIDE.md` - remote reader / APDU streaming setup over SSH
 
 ## Core Guides
 
 - `ARCHITECTURE.md` - system structure, dependency map, runtime state, and flow charts
 - `CAPABILITIES.md` - suite-level capability reference grouped by subsystem
 - `CLI_AND_PIPING_GUIDE.md` - non-interactive command, piping, and automation patterns
-- `PROFILE_LIFECYCLE_CLI_CHEATSHEET.md` - ready-to-run lifecycle, polling, and logging recipes
+- `PROFILE_LIFECYCLE_CLI_CHEATSHEET.md` - ready-to-run lifecycle and logging recipes
 - `BUILD_AND_PACKAGING.md` - Docker, PyInstaller, `.deb`, and packaging guidance
 - `HIL_BRIDGE_GUIDE.md` - SIMtrace2 / PCSC HIL bridge setup and operation
 - `DIAGNOSTICS_TOOLBOX.md` - SAIP diff, SIMCARD-to-TUI auto-open, APDU fuzzer, EUM/tshark dissector
 - `TEMPLATE_AND_TOKENS.md` - SAIP template authoring, token sidecars, placeholder lifecycle
 - `GUI_HOST_SHELL_GUIDE.md` - GUI `Advanced > Host shell` opt-in PTY surface, AT-decode overlay, threat model
 - `CONFIGURATION_AND_CERTIFICATES.md` - canonical operator guide for every certificate, keyset, identity, and configuration drop-in surface
+- `NAMING_CONVENTIONS.md` - source of truth for every operator-visible label, with the spec citation or YggdraSIM-coined provenance for each
 
 ## Supporting Examples
 

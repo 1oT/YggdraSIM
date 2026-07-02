@@ -1,9 +1,12 @@
-"""SAIP applications view.
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-Flat list of every PE that maps onto a GP application
+"""Applications view.
+
+A flat list of every PE that maps onto a GlobalPlatform application
 (PE-SecurityDomain → ISD instances, PE-Application → applets) along
-with their AID and life-cycle state. Read-only; double-click jumps to
-the PE editor.
+with their AID and life-cycle state. Read-only — double-click jumps
+to the PE editor.
 """
 
 from __future__ import annotations

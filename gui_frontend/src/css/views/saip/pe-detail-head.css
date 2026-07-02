@@ -1,0 +1,37 @@
+/*
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+ */
+
+/* ---- SA-G2: detail head adjustments -------------------------------- */
+
+.saip-detail-head-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+
+/* Detail-head chips (FID / sEFID / size / path) — harmonised with
+   the FCP editor controls so the surface tone is uniform across
+   the file detail panel. The previous ``cc-chip`` background was
+   noticeably darker than the editable rows below, which read as
+   "clunky black boxes" in operator review. */
+.saip-detail-head-chips .cc-chip {
+  background: var(--surface-alt, rgba(255, 255, 255, 0.04));
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--fg-muted);
+  padding: 3px 8px;
+  font-size: 11px;
+  margin: 0;
+}
+
+.saip-detail-head-chips .cc-chip code {
+  font-family: var(--mono, "JetBrains Mono", monospace);
+  font-size: 11px;
+  color: var(--fg);
+  background: transparent;
+  padding: 0;
+}
+

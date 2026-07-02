@@ -15,20 +15,13 @@
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 # -----------------------------------------------------------------------------
 
-"""Legacy mirror: live-default SCP11 console shell.
-
-The ``canonical`` SCP11 console lives in ``SCP11/console.py``. This module
-is a ``legacy mirror`` that ships the live certificate / endpoint defaults
-and relay-first ES9+ helpers. Spec or dispatcher fixes should land in the
-canonical tree first and be mirrored here. Tracked by audit item
-``SCP11-P1-02`` for eventual split into ``console_cli``,
-``console_tls_probe``, and ``console_state``.
-"""
+"""SCP11 eSIM management relay console shell."""
 
 import atexit
 import hashlib
 import io
 import os
+import shlex
 import shutil
 import socket
 import ssl
@@ -38,11 +31,14 @@ from urllib.parse import urlparse
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
-from yggdrasim_common.card_backend import trigger_card_relay_modem_refresh
-from yggdrasim_common.hil_bridge_runtime import hil_bridge_warning_text
+try:
+    from yggdrasim_common.hil_bridge_runtime import hil_bridge_warning_text
+except Exception:
+    def hil_bridge_warning_text() -> str:
+        return ""
 from yggdrasim_common.plugin_runtime import extend_target_with_plugins
+from yggdrasim_common.process_debug import is_global_debug_enabled
 from yggdrasim_common.quit_control import quit_all
-from yggdrasim_common.polling_plugin_support import dispatch_poll_command
 from yggdrasim_common.euicc_issuer import (
     format_ecasd_issuer_display,
     infer_ecasd_issuer_from_eid,
@@ -66,8 +62,10 @@ from SCP11.shared.device_inventory_support import EidInventoryNamespace
 
 try:
     from SCP03.logic.euicc_info2 import build_euicc_info2_detail_lines
+    from SCP03.logic.euicc_info2 import decode_ipa_mode
 except Exception:
     build_euicc_info2_detail_lines = None
+    decode_ipa_mode = None
 
 try:
     from SCP03.logic.sgp32_decode import decode_eim_configuration_entries
@@ -229,7 +227,7 @@ class CardSnapshot:
     configured_decoded: Dict[str, Any]
     profiles: List[ProfileRow]
     notification_count: int
-    euicc_info2_summary: Dict[str, str]
+    euicc_info2_summary: Dict[str, Any]
     eim_summary: Dict[str, Any]
 
 
@@ -257,7 +255,6 @@ class SCP11Console:
     HELP_SECTION_UTILITIES = "utilities"
     HELP_SECTION_LPAD = "lpad"
     HELP_SECTION_IPAD = "ipad"
-    HELP_SECTION_IPAE = "ipae"
     HELP_SECTION_EXPERT = "expert"
     TAG_ENABLE_PROFILE = 0xBF31
     TAG_DISABLE_PROFILE = 0xBF32
@@ -339,7 +336,7 @@ class SCP11Console:
             while True:
                 try:
                     raw_line = input(
-                        f"\n{self._style.header}[eSIM Live] > {self._style.end}"
+                        f"\n{self._style.header}[eSIM Management] > {self._style.end}"
                     ).strip()
                 except KeyboardInterrupt:
                     print("\n[*] Exiting SCP11 shell.")
@@ -398,57 +395,97 @@ class SCP11Console:
         spec = self._commands[command_upper]
         self._notification_sync_attempted = False
         self._last_eim_download_reached_server = None
-        self._enter_command_session(spec, command_upper)
         try:
+            self._enter_command_session(spec, command_upper)
             keep_running = spec.handler(argument)
+            if keep_running is False:
+                return keep_running
+            if spec.trigger_notification_sync and self._notification_sync_attempted is False:
+                self._sync_notifications_after_success(b"")
+            if spec.trigger_notification_sync and command_upper != "CLEAR-NOTIFICATIONS":
+                if self._should_skip_post_command_auto_clear(command_upper):
+                    # Leave pending notifications intact: the eIM sweep never
+                    # reached any server so nothing was acknowledged upstream.
+                    pass
+                else:
+                    self._clear_notifications_internal(quiet=True)
+            return keep_running
         finally:
             self._leave_command_session(spec, command_upper)
-        if keep_running is False:
-            return keep_running
-        if spec.trigger_notification_sync and self._notification_sync_attempted is False:
-            self._sync_notifications_after_success(b"")
-        if spec.trigger_notification_sync and command_upper != "CLEAR-NOTIFICATIONS":
-            if self._should_skip_post_command_auto_clear(command_upper):
-                # Leave pending notifications intact: the eIM sweep never
-                # reached any server so nothing was acknowledged upstream.
-                pass
-            else:
-                self._clear_notifications_internal(quiet=True)
-        return keep_running
 
     def _enter_command_session(self, spec: CommandSpec, command_upper: str) -> None:
         """Apply the command's session reset policy before handler dispatch.
 
-        SHARED commands are left untouched. SOFT_RESET clears ephemeral
-        orchestrator / STK state without reconnecting. HARD_RESET closes
-        any live logical channel and re-runs ``_phase_connect`` +
-        ``_phase_load_credentials`` so the handler starts on a clean
-        transport. The first command after :meth:`_initialize_session`
-        skips HARD_RESET work unless something already dirtied the
-        session, avoiding a redundant double-init on shell startup.
-        """
-        policy = getattr(spec, "session_policy", SessionPolicy.SHARED)
-        if policy == SessionPolicy.HARD_RESET:
-            if self._session_dirty:
-                self._reset_card_session_hard(reason=command_upper)
-            return
-        if policy == SessionPolicy.SOFT_RESET:
-            self._reset_orchestrator_ephemeral_state()
-            return
-
-    def _leave_command_session(self, spec: CommandSpec, command_upper: str) -> None:
-        """Mark the session dirty after any non-SHARED command.
-
-        We treat the session as potentially dirty whenever a handler
-        either completes or raises under a non-SHARED policy. This lets
-        the next HARD_RESET command do its full reinit and keeps SHARED
-        commands free of the cost. Running under SHARED never flips the
-        dirty bit because these handlers do not touch the card.
+        SHARED commands are left untouched. SOFT_RESET commands clear
+        only per-flow state while preserving the active transport.
+        HARD_RESET commands reconnect only when a prior handler has
+        marked the session dirty. Clients that expose an APDU transport
+        builder get an additional per-command transport rebind so CLI
+        and GUI sessions do not share a stale PC/SC handle.
         """
         policy = getattr(spec, "session_policy", SessionPolicy.SHARED)
         if policy == SessionPolicy.SHARED:
             return
+        if self._can_rebuild_command_transport():
+            self._reset_card_transport_for_command(reason=spec.name)
+            if self._command_runs_own_connect(command_upper) is False:
+                self._connect_card_for_command(reason=spec.name)
+            self._session_dirty = False
+            return
+        if policy == SessionPolicy.SOFT_RESET:
+            self._reset_orchestrator_ephemeral_state()
+            return
+        if policy == SessionPolicy.HARD_RESET and self._session_dirty:
+            self._reset_card_session_hard(reason=spec.name)
+
+    def _can_rebuild_command_transport(self) -> bool:
+        return callable(getattr(self.client, "_build_apdu_channel", None))
+
+    @staticmethod
+    def _command_runs_own_connect(command_name: str) -> bool:
+        return command_name in {
+            "SCAN",
+            "RESET",
+            "VERIFY-SCP11",
+            "FLOW",
+            "DOWNLOAD-PROFILE",
+            "EIM-AUTHENTICATE",
+            "DOWNLOAD",
+        }
+
+    def _connect_card_for_command(self, reason: str) -> None:
+        del reason
+        orchestrator = getattr(self, "orchestrator", None)
+        phase_connect = getattr(orchestrator, "_phase_connect", None) if orchestrator is not None else None
+        if callable(phase_connect):
+            phase_connect()
+            return
+
+    def _leave_command_session(self, spec: CommandSpec, command_upper: str) -> None:
+        """Mark card-touching command sessions dirty after handler dispatch."""
+        del command_upper
+        policy = getattr(spec, "session_policy", SessionPolicy.SHARED)
+        if policy == SessionPolicy.SHARED:
+            return
+        if self._can_rebuild_command_transport():
+            self._disconnect_card_transport_after_command(reason=spec.name)
         self._session_dirty = True
+
+    def _disconnect_card_transport_after_command(self, reason: str) -> None:
+        disconnect = getattr(self.apdu_channel, "disconnect", None)
+        if callable(disconnect):
+            try:
+                disconnect()
+            except Exception as error:
+                print(f"[*] {reason}: APDU transport release skipped ({error}).")
+                return
+        orchestrator = getattr(self, "orchestrator", None)
+        if orchestrator is not None:
+            orchestrator._es10b_logical_channel = 0
+            if hasattr(orchestrator, "_phase_connect_complete"):
+                orchestrator._phase_connect_complete = False
+            orchestrator._use_stk_mode_for_es10b_store_data = False
+        print(f"[*] {reason}: released card transport after command flow.")
 
     def _reset_orchestrator_ephemeral_state(self) -> None:
         """Zero per-flow crypto + STK history fields on ``orchestrator.state``.
@@ -538,8 +575,7 @@ class SCP11Console:
             close_method = getattr(orchestrator, "_close_es10b_logical_channel", None)
             if callable(close_method):
                 try:
-                    with redirect_stdout(io.StringIO()):
-                        close_method(f"SESSION-RESET:{reason}")
+                    close_method(f"SESSION-RESET:{reason}")
                 except Exception:
                     pass
 
@@ -550,15 +586,63 @@ class SCP11Console:
         phase_load = getattr(orchestrator, "_phase_load_credentials", None) if orchestrator is not None else None
         if callable(phase_connect) and callable(phase_load):
             try:
-                with redirect_stdout(io.StringIO()):
-                    phase_connect()
-                    phase_load()
+                phase_connect()
+                phase_load()
             except Exception:
                 # The next HARD_RESET attempt will retry. Leave the
                 # dirty flag set so a subsequent SHARED read does not
                 # mask a broken transport.
                 return
         self._session_dirty = False
+
+    def _reset_card_transport_for_command(self, reason: str) -> None:
+        self._reset_orchestrator_ephemeral_state()
+        self._latest_snapshot = None
+        self._invalidate_poll_target_cache()
+        raw_apdu_logging_enabled = False
+        get_raw_logging = getattr(self.apdu_channel, "get_raw_apdu_logging", None)
+        if callable(get_raw_logging):
+            try:
+                raw_apdu_logging_enabled = bool(get_raw_logging())
+            except Exception:
+                raw_apdu_logging_enabled = False
+
+        old_disconnect = getattr(self.apdu_channel, "disconnect", None)
+        if callable(old_disconnect):
+            try:
+                old_disconnect()
+            except Exception as error:
+                print(f"[*] {reason}: previous APDU transport release skipped ({error}).")
+
+        build = getattr(self.client, "_build_apdu_channel", None)
+        if callable(build):
+            try:
+                new_channel = build(self.client.cfg)
+            except Exception:
+                pass
+            else:
+                set_raw_logging = getattr(new_channel, "set_raw_apdu_logging", None)
+                if callable(set_raw_logging):
+                    try:
+                        set_raw_logging(raw_apdu_logging_enabled)
+                    except Exception:
+                        pass
+                self.apdu_channel = new_channel
+                self.client.apdu_channel = new_channel
+                orchestrator = getattr(self, "orchestrator", None)
+                if orchestrator is not None:
+                    orchestrator.apdu_channel = new_channel
+
+        self._reset_orchestrator_after_transport_rebind()
+        print(f"[*] {reason}: rebuilt card transport before command flow.")
+
+    def _reset_orchestrator_after_transport_rebind(self) -> None:
+        orchestrator = getattr(self, "orchestrator", None)
+        if orchestrator is not None:
+            orchestrator._es10b_logical_channel = 0
+            orchestrator._phase_connect_complete = False
+            orchestrator._use_stk_mode_for_es10b_store_data = False
+            orchestrator._last_eim_poll_reached_server = False
 
     def _should_skip_post_command_auto_clear(self, command_upper: str) -> bool:
         # SGP.22 §5.6.4: the LPA must forward operational notifications
@@ -568,6 +652,12 @@ class SCP11Console:
         # profile state change, transport jam, etc.), skipping the
         # auto-clear preserves the queue for a later sweep instead of
         # silently dropping unforwarded notifications.
+        if self._notification_sync_attempted:
+            # Notification sync was already handled during the command
+            # flow (e.g. run_eim_poll syncs before closing the logical
+            # channel). Running a second clear after the channel is
+            # closed causes unnecessary STK-mode recovery churn.
+            return True
         if self._notification_sync_failed_on_last_command():
             return True
         if command_upper not in ("DOWNLOAD", "EIM-DOWNLOAD"):
@@ -581,8 +671,6 @@ class SCP11Console:
         orchestrator = getattr(self, "orchestrator", None)
         if orchestrator is None:
             return True
-        if hasattr(orchestrator, "_last_notification_sync_succeeded") is False:
-            return False
         outcome = getattr(orchestrator, "_last_notification_sync_succeeded", None)
         if outcome is not True:
             return True
@@ -747,7 +835,6 @@ class SCP11Console:
             "Relay Utilities:",
             "LPAd:",
             "IPAd:",
-            "IPAe:",
             "Expert / Compatibility:",
         ]:
             return f"{self._style.bold}{self._style.cyan}{text}{self._style.end}"
@@ -895,32 +982,43 @@ class SCP11Console:
         return lines
 
     def _initialize_session(self) -> None:
-        with redirect_stdout(io.StringIO()):
-            self.orchestrator._phase_connect()
-            self.orchestrator._phase_load_credentials()
-        self._session_dirty = False
+        self._session_dirty = True
+        if self.orchestrator is not None:
+            self.orchestrator._phase_connect_complete = False
+            self.orchestrator._es10b_logical_channel = 0
+            self.orchestrator._use_stk_mode_for_es10b_store_data = False
         print(f"{self._style.green}[+] Relay shell ready.{self._style.end}")
 
     def _run_watchdog_pre_reset(self) -> None:
-        orchestrator = getattr(self, "orchestrator", None)
-        if orchestrator is not None and hasattr(orchestrator, "_skip_es10b_bootstrap_for_next_connect"):
-            orchestrator._skip_es10b_bootstrap_for_next_connect = True
-        try:
-            with redirect_stdout(io.StringIO()):
-                self._cmd_reset("")
-        finally:
-            if orchestrator is not None and hasattr(orchestrator, "_skip_es10b_bootstrap_for_next_connect"):
-                orchestrator._skip_es10b_bootstrap_for_next_connect = False
-        # The watchdog runs its own STK initialization on top of the
-        # pre-reset; treat the session as dirty so the next HARD_RESET
-        # command gets a fresh ``_phase_connect`` rather than assuming
-        # the watchdog's inlined STK state matches a clean orchestrator.
+        # Build a brand-new APDU channel just like exiting and
+        # re-entering the module would.
+        build = getattr(self.client, "_build_apdu_channel", None)
+        if callable(build):
+            new_channel = build(self.client.cfg)
+            self.apdu_channel = new_channel
+            self.client.apdu_channel = new_channel
+            orchestrator = getattr(self, "orchestrator", None)
+            if orchestrator is not None:
+                orchestrator.apdu_channel = new_channel
+                orchestrator._es10b_logical_channel = 0
+                orchestrator._use_stk_mode_for_es10b_store_data = False
+                orchestrator._phase_connect_stk_sent = False
+                orchestrator._phase_connect_complete = False
+                try:
+                    delattr(orchestrator.state, "_stk_state_captured")
+                except (AttributeError, TypeError):
+                    pass
         self._session_dirty = True
 
+    def _hil_bridge_warning_text(self) -> str:
+        return hil_bridge_warning_text()
+
     def _print_start_snapshot(self, announce_when_pinned: bool = False) -> None:
-        snapshot = self._run_with_stdout_suppressed(self._collect_snapshot)
+        snapshot, init_trace = self._run_with_stdout_captured(self._collect_start_snapshot)
         self._latest_snapshot = snapshot
         self._cache_poll_target_fqdns_from_eim_summary(snapshot.eim_summary)
+        self._print_init_banner_trace(init_trace)
+        self._session_dirty = True
 
         if self._help_pane_locked:
             self._refresh_locked_help_pane()
@@ -989,9 +1087,96 @@ class SCP11Console:
             if len(eim_id) > 0:
                 print(f"eIM ID:             {self._style.cyan}{eim_id}{self._style.end}")
         self._print_profiles_table(snapshot.profiles, title="Profiles on Card")
-        warning_text = hil_bridge_warning_text()
+        warning_text = self._hil_bridge_warning_text()
         if len(warning_text) > 0:
             print(f"{self._style.yellow}[!] {warning_text}{self._style.end}")
+
+    def _collect_start_snapshot(self) -> CardSnapshot:
+        self._prepare_start_snapshot_basic_channel()
+        previous_force_basic = bool(getattr(self, "_force_basic_es10b_store_data", False))
+        self._force_basic_es10b_store_data = True
+        try:
+            return self._collect_snapshot()
+        finally:
+            self._force_basic_es10b_store_data = previous_force_basic
+            orchestrator = getattr(self, "orchestrator", None)
+            if orchestrator is not None:
+                orchestrator._es10b_logical_channel = 0
+                orchestrator._phase_connect_complete = False
+                orchestrator._use_stk_mode_for_es10b_store_data = False
+            self._release_start_snapshot_transport()
+
+    def _release_start_snapshot_transport(self) -> None:
+        raw_apdu_logging_enabled = False
+        get_raw_logging = getattr(self.apdu_channel, "get_raw_apdu_logging", None)
+        if callable(get_raw_logging):
+            try:
+                raw_apdu_logging_enabled = bool(get_raw_logging())
+            except Exception:
+                raw_apdu_logging_enabled = False
+
+        disconnect = getattr(self.apdu_channel, "disconnect", None)
+        if callable(disconnect):
+            try:
+                disconnect()
+            except Exception as error:
+                print(f"[*] Init banner: APDU transport release skipped ({error}).")
+                return
+
+        orchestrator = getattr(self, "orchestrator", None)
+        if orchestrator is not None:
+            orchestrator._es10b_logical_channel = 0
+            orchestrator._phase_connect_complete = False
+            orchestrator._use_stk_mode_for_es10b_store_data = False
+        del raw_apdu_logging_enabled
+        print("[*] Init banner: released APDU transport after snapshot.")
+
+    def _prepare_start_snapshot_basic_channel(self) -> None:
+        orchestrator = getattr(self, "orchestrator", None)
+        active_channel = int(getattr(orchestrator, "_es10b_logical_channel", 0) or 0)
+        if active_channel > 0:
+            close_method = getattr(orchestrator, "_close_es10b_logical_channel", None)
+            if callable(close_method):
+                try:
+                    close_method("INIT-BANNER")
+                except Exception:
+                    pass
+            else:
+                try:
+                    self.apdu_channel.send(
+                        bytes([0x00, 0x70, 0x80, active_channel & 0xFF, 0x00]),
+                        f"INIT-BANNER: CLOSE LOGICAL CHANNEL {active_channel}",
+                    )
+                except Exception:
+                    pass
+        if orchestrator is not None:
+            orchestrator._es10b_logical_channel = 0
+            orchestrator._phase_connect_complete = False
+            orchestrator._use_stk_mode_for_es10b_store_data = False
+
+        try:
+            self.apdu_channel.send(
+                bytes.fromhex("80AA000005A903840101"),
+                "INIT-BANNER: TERMINAL CAPABILITY",
+            )
+        except Exception as error:
+            print(f"[*] Init banner: TERMINAL CAPABILITY skipped ({error}).")
+
+        aid = bytes(getattr(self.cfg, "AID_ISD_R", b"") or b"")
+        if len(aid) == 0:
+            aid = bytes.fromhex("A0000005591010FFFFFFFF8900000100")
+        try:
+            self.apdu_channel.send(
+                b"\x00\xA4\x04\x00" + bytes([len(aid)]) + aid,
+                "INIT-BANNER: SELECT ISD-R CH0",
+            )
+        except Exception as error:
+            print(f"[*] Init banner: SELECT ISD-R on CH0 skipped ({error}).")
+            return
+        try:
+            self.apdu_channel.send(bytes.fromhex("80F2000C00"), "INIT-BANNER: STATUS CH0")
+        except Exception as error:
+            print(f"[*] Init banner: STATUS on CH0 skipped ({error}).")
 
     def _set_cached_poll_target_fqdns(self, targets: List[str]) -> None:
         cached_targets: List[str] = []
@@ -1054,8 +1239,6 @@ class SCP11Console:
             return self._style.header
         if section == self.HELP_SECTION_IPAD:
             return self._style.green
-        if section == self.HELP_SECTION_IPAE:
-            return self._style.yellow
         if section == self.HELP_SECTION_EXPERT:
             return self._style.red
         return self._style.header
@@ -1065,7 +1248,6 @@ class SCP11Console:
             ("Relay Utilities", self.HELP_SECTION_UTILITIES),
             ("LPAd", self.HELP_SECTION_LPAD),
             ("IPAd", self.HELP_SECTION_IPAD),
-            ("IPAe", self.HELP_SECTION_IPAE),
         ]
         if include_expert:
             sections.append(("Expert / Compatibility", self.HELP_SECTION_EXPERT))
@@ -1351,15 +1533,6 @@ class SCP11Console:
             session_policy=SessionPolicy.HARD_RESET,
         )
         self._add_command(
-            "REFRESH-MODEM",
-            "REFRESH-MODEM [mode]",
-            "Queue proactive REFRESH toward modem",
-            self._cmd_refresh_modem,
-            aliases=["MODEM-REFRESH"],
-            section=self.HELP_SECTION_LPAD,
-            session_policy=SessionPolicy.SOFT_RESET,
-        )
-        self._add_command(
             "AIDS",
             "AIDS",
             "List AID aliases loaded from Admin registry",
@@ -1466,6 +1639,15 @@ class SCP11Console:
             aliases=["EIM-DOWNLOAD"],
             section=self.HELP_SECTION_IPAD,
             trigger_notification_sync=True,
+            session_policy=SessionPolicy.HARD_RESET,
+        )
+        self._add_command(
+            "POLL",
+            "POLL [attempts] [timerSeconds] [-t delaySeconds] [-s statusLoops] [--debug]",
+            "Run legacy status watchdog flow",
+            self._cmd_eim_poll,
+            section=self.HELP_SECTION_EXPERT,
+            visible_in_help=False,
             session_policy=SessionPolicy.HARD_RESET,
         )
 
@@ -1770,10 +1952,6 @@ class SCP11Console:
         )
         return True
 
-    def _cmd_refresh_modem(self, argument: str) -> bool:
-        self._queue_modem_refresh("RefreshModem", mode=argument.strip())
-        return True
-
     def _cmd_aids(self, _: str) -> bool:
         self._print_aid_registry()
         return True
@@ -1909,8 +2087,37 @@ class SCP11Console:
         return self._run_consolidated_discovery_suite()
 
     def _run_with_stdout_suppressed(self, func: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
+        active_capture = getattr(self, "_stdout_capture_buffer", None)
+        if active_capture is not None:
+            with redirect_stdout(active_capture):
+                return func(*args, **kwargs)
         with redirect_stdout(io.StringIO()):
             return func(*args, **kwargs)
+
+    def _run_with_stdout_captured(self, func: Callable[..., Any], *args: Any, **kwargs: Any) -> Tuple[Any, str]:
+        buffer = io.StringIO()
+        previous_capture = getattr(self, "_stdout_capture_buffer", None)
+        self._stdout_capture_buffer = buffer
+        try:
+            with redirect_stdout(buffer):
+                result = func(*args, **kwargs)
+            return result, buffer.getvalue()
+        finally:
+            if previous_capture is None:
+                try:
+                    delattr(self, "_stdout_capture_buffer")
+                except AttributeError:
+                    pass
+            else:
+                self._stdout_capture_buffer = previous_capture
+
+    def _print_init_banner_trace(self, trace_text: str) -> None:
+        cleaned = trace_text.strip()
+        if len(cleaned) == 0:
+            return
+        print(f"\n{self._style.header}--- SCP11 Init Banner APDU Trace ---{self._style.end}")
+        print(cleaned)
+        print(f"{self._style.header}--- End SCP11 Init Banner APDU Trace ---{self._style.end}")
 
     def _run_scp03_sgp32_get_all_data(self) -> bool:
         if Sgp22Manager is None:
@@ -1964,6 +2171,7 @@ class SCP11Console:
         print(f"{self._style.cyan}[*] Running authentication phase only...{self._style.end}")
         try:
             self.orchestrator._phase_connect()
+            self.orchestrator._bootstrap_es10b_logical_channel()
             self.orchestrator._phase_load_credentials()
             auth_seed = self.orchestrator._phase_authentication_seed(
                 matching_id=matching_id,
@@ -1999,6 +2207,11 @@ class SCP11Console:
             self._last_eim_download_reached_server = False
             print(f"{self._style.red}[!] EIM-DOWNLOAD failed: {error}{self._style.end}")
             return True
+        # run_eim_poll already synced pending notifications before
+        # closing the logical channel. Prevent the post-command hook
+        # from running a redundant ListNotifications on the now-closed
+        # channel.
+        self._notification_sync_attempted = True
         reached_server = bool(
             getattr(self.orchestrator, "_last_eim_poll_reached_server", False)
         )
@@ -2013,13 +2226,108 @@ class SCP11Console:
         return True
 
     def _cmd_eim_poll(self, argument: str) -> bool:
+        options = self._parse_eim_poll_options(argument)
+        if options is None:
+            print(
+                f"{self._style.yellow}[!] Usage: "
+                "POLL [attempts] [timerSeconds] [-t delaySeconds] [-s statusLoops] [--debug]"
+                f"{self._style.end}"
+            )
+            return True
+        runner = getattr(self.orchestrator, "run_eim_status_watchdog", None)
+        if callable(runner) is False:
+            print(f"{self._style.red}[!] POLL failed: orchestrator does not expose status watchdog.{self._style.end}")
+            return True
         try:
-            dispatch_poll_command("scp11.live", "POLL", self, argument)
+            runner(**options)
         except KeyboardInterrupt:
-            print(f"{self._style.yellow}[*] EIM-POLL interrupted by user.{self._style.end}")
+            print(f"{self._style.yellow}[*] POLL interrupted by user.{self._style.end}")
         except Exception as error:
-            print(f"{self._style.red}[!] EIM-POLL failed: {error}{self._style.end}")
+            print(f"{self._style.red}[!] POLL failed: {error}{self._style.end}")
         return True
+
+    def _parse_eim_poll_options(self, argument: str) -> Optional[Dict[str, Any]]:
+        try:
+            tokens = shlex.split(str(argument or ""))
+        except ValueError:
+            return None
+        positional: List[str] = []
+        poll_attempt_delay_seconds = 0
+        poll_attempt_post_status_loops = 0
+        debug = is_global_debug_enabled()
+        index = 0
+        while index < len(tokens):
+            token = tokens[index]
+            normalized = token.strip().lower()
+            if normalized in ("--debug", "-d"):
+                debug = True
+                index += 1
+                continue
+            if normalized in ("-t", "--delay", "--poll-delay"):
+                if index + 1 >= len(tokens):
+                    return None
+                delay_value = self._parse_poll_seconds(tokens[index + 1])
+                if delay_value is None:
+                    return None
+                poll_attempt_delay_seconds = delay_value
+                index += 2
+                continue
+            if normalized in ("-s", "--status-loops", "--post-status"):
+                if index + 1 >= len(tokens):
+                    return None
+                loop_value = self._parse_poll_int(tokens[index + 1])
+                if loop_value is None:
+                    return None
+                poll_attempt_post_status_loops = loop_value
+                index += 2
+                continue
+            if token.startswith("-"):
+                return None
+            positional.append(token)
+            index += 1
+        if len(positional) > 2:
+            return None
+        poll_attempts_per_fqdn = 1
+        timer_expiration_window_seconds = 30
+        timer_window_explicit = False
+        if len(positional) >= 1:
+            parsed_attempts = self._parse_poll_int(positional[0])
+            if parsed_attempts is None:
+                return None
+            poll_attempts_per_fqdn = parsed_attempts
+        if len(positional) >= 2:
+            parsed_window = self._parse_poll_seconds(positional[1])
+            if parsed_window is None:
+                return None
+            timer_expiration_window_seconds = parsed_window
+            timer_window_explicit = True
+        return {
+            "poll_attempts_per_fqdn": poll_attempts_per_fqdn,
+            "timer_expiration_window_seconds": timer_expiration_window_seconds,
+            "timer_window_explicit": timer_window_explicit,
+            "poll_attempt_delay_seconds": poll_attempt_delay_seconds,
+            "poll_attempt_post_status_loops": poll_attempt_post_status_loops,
+            "status_tick_trigger_mode": poll_attempt_post_status_loops > 0,
+            "status_tick_seconds": 30,
+            "debug": debug,
+        }
+
+    @staticmethod
+    def _parse_poll_int(value: str) -> Optional[int]:
+        text = str(value or "").strip()
+        if text.isdigit() is False:
+            return None
+        parsed = int(text)
+        if parsed < 0:
+            return None
+        return parsed
+
+    @classmethod
+    def _parse_poll_seconds(cls, value: str) -> Optional[int]:
+        text = str(value or "").strip().lower()
+        if text.endswith("s"):
+            text = text[:-1]
+        return cls._parse_poll_int(text)
 
     def _collect_snapshot(self) -> CardSnapshot:
         eid = self._get_eid()
@@ -2030,6 +2338,7 @@ class SCP11Console:
         profiles = self._fetch_profiles()
         notification_count = self._get_notification_count()
         euicc_info2_summary, eim_summary = self._collect_discovery_snapshot_summary()
+        self._cache_snapshot_eim_poll_metadata(eid, configured_raw)
 
         inventory_profile = self._inventory.load(eid)
         inventory_target_loaded = False
@@ -2059,6 +2368,19 @@ class SCP11Console:
             eim_summary=eim_summary,
         )
 
+    def _cache_snapshot_eim_poll_metadata(self, eid: str, configured_raw: bytes) -> None:
+        orchestrator = getattr(self, "orchestrator", None)
+        cache_method = getattr(orchestrator, "cache_eim_poll_metadata", None)
+        if callable(cache_method) is False:
+            return
+        cache_method(
+            eid=eid,
+            euicc_configured_data=configured_raw,
+            eim_configuration_data=bytes(getattr(self, "_last_snapshot_eim_configuration_data", b"") or b""),
+            euicc_info1=bytes(getattr(self, "_last_snapshot_euicc_info1", b"") or b""),
+            euicc_info2=bytes(getattr(self, "_last_snapshot_euicc_info2", b"") or b""),
+        )
+
     def _get_ecasd_issuer_identity(self, eid: str = "") -> Dict[str, str]:
         if Sgp22Manager is not None:
             try:
@@ -2071,18 +2393,24 @@ class SCP11Console:
                 pass
         return infer_ecasd_issuer_from_eid(eid)
 
-    def _collect_discovery_snapshot_summary(self) -> Tuple[Dict[str, str], Dict[str, Any]]:
+    def _collect_discovery_snapshot_summary(self) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+        self._last_snapshot_euicc_info1 = self._fetch_snapshot_retrieve_response_quiet(
+            bytes.fromhex("BF2000"),
+            "GET: EuiccInfo1",
+        )
+        self._last_snapshot_euicc_info2 = self._fetch_snapshot_retrieve_response_quiet(
+            bytes.fromhex("BF2200"),
+            "GET: EuiccInfo2",
+        )
+        self._last_snapshot_eim_configuration_data = self._fetch_snapshot_retrieve_response_quiet(
+            bytes.fromhex("BF5500"),
+            "GET: GetEimConfigurationData",
+        )
         euicc_info2_summary = self._summarize_euicc_info2_response(
-            self._fetch_snapshot_retrieve_response_quiet(
-                bytes.fromhex("BF2200"),
-                "GET: EuiccInfo2",
-            )
+            self._last_snapshot_euicc_info2
         )
         eim_summary = self._summarize_eim_configuration_response(
-            self._fetch_snapshot_retrieve_response_quiet(
-                bytes.fromhex("BF5500"),
-                "GET: GetEimConfigurationData",
-            )
+            self._last_snapshot_eim_configuration_data
         )
         return euicc_info2_summary, eim_summary
 
@@ -2102,8 +2430,8 @@ class SCP11Console:
             return f"v{value[0]}.{value[1]}.{value[2]} ({hex_text})"
         return hex_text
 
-    def _summarize_euicc_info2_response(self, response: bytes) -> Dict[str, str]:
-        summary: Dict[str, str] = {}
+    def _summarize_euicc_info2_response(self, response: bytes) -> Dict[str, Any]:
+        summary: Dict[str, Any] = {}
         if len(response) == 0:
             return summary
         parsed = self._parse_tlv_simple(response)
@@ -2114,12 +2442,27 @@ class SCP11Console:
         profile_version = self._first_bytes(root_parsed.get(0x81))
         supported_version = self._first_bytes(root_parsed.get(0x82))
         firmware_version = self._first_bytes(root_parsed.get(0x83))
+        ipa_mode = self._first_bytes(root_parsed.get(0x90))
+        iot_specific_info = self._first_bytes(root_parsed.get(0xB4))
         if profile_version is not None:
             summary["profile_version"] = self._format_version_triplet(profile_version)
         if supported_version is not None:
             summary["supported_version"] = self._format_version_triplet(supported_version)
         if firmware_version is not None:
             summary["firmware_version"] = self._format_version_triplet(firmware_version)
+        if ipa_mode is not None:
+            if callable(decode_ipa_mode):
+                summary["ipa_mode"] = decode_ipa_mode(ipa_mode)
+            else:
+                summary["ipa_mode"] = ipa_mode.hex().upper()
+        summary["iot_specific_info"] = iot_specific_info is not None
+        if iot_specific_info is not None:
+            iot_parsed = self._parse_tlv_simple(iot_specific_info)
+            summary["ecall_supported"] = 0x81 in iot_parsed
+            summary["fallback_supported"] = 0x82 in iot_parsed
+        else:
+            summary["ecall_supported"] = False
+            summary["fallback_supported"] = False
         return summary
 
     def _summarize_eim_configuration_response(self, response: bytes) -> Dict[str, Any]:
@@ -2713,6 +3056,7 @@ class SCP11Console:
 
         try:
             self.orchestrator._phase_connect()
+            self.orchestrator._bootstrap_es10b_logical_channel()
             connect_ok = True
             checks.append(("Connect / select ISD-R", True, "ok"))
         except Exception as error:
@@ -2905,8 +3249,7 @@ class SCP11Console:
 
     def _execute_result_command(self, title: str, payload: bytes, result_outer_tag: int) -> bool:
         try:
-            apdu = self._build_store_data_apdu(payload)
-            response = self.apdu_channel.send(apdu, f"CMD: {title}")
+            response = self._send_store_data_with_logical_fallback(payload, f"CMD: {title}")
         except Exception as error:
             print(f"{self._style.red}[!] {title} failed: {error}{self._style.end}")
             return False
@@ -2960,32 +3303,13 @@ class SCP11Console:
             result_outer_tag=func_tag,
         )
 
-    def _queue_modem_refresh(self, action_label: str, mode: str = "") -> None:
-        try:
-            payload = trigger_card_relay_modem_refresh(
-                mode=mode,
-                source=f"scp11-live:{action_label}",
-            )
-        except Exception as error:
-            print(f"{self._style.yellow}[*] {action_label}: modem REFRESH queue failed ({error}).{self._style.end}")
-            return
-        if payload is None:
-            return
-        status = str(payload.get("status", "queued") or "queued")
-        mode_name = str(payload.get("mode", "") or "")
-        print(
-            f"{self._style.yellow}[*] {action_label}: modem REFRESH {status} "
-            f"({mode_name or 'euicc-profile-state-change'}).{self._style.end}"
-        )
-
     def _run_enable_profile_state_command(
         self,
         resolved: Tuple[int, str],
         target_metadata: Optional[ProfileMetadataView],
     ) -> None:
         if target_metadata is None:
-            if self._execute_profile_state_command(resolved, self.TAG_ENABLE_PROFILE, "EnableProfile"):
-                self._queue_modem_refresh("EnableProfile")
+            self._execute_profile_state_command(resolved, self.TAG_ENABLE_PROFILE, "EnableProfile")
             return
 
         if target_metadata.state.upper() == "ENABLED":
@@ -3008,8 +3332,7 @@ class SCP11Console:
             ) is False:
                 return
 
-        if self._execute_profile_state_command(resolved, self.TAG_ENABLE_PROFILE, "EnableProfile"):
-            self._queue_modem_refresh("EnableProfile")
+        self._execute_profile_state_command(resolved, self.TAG_ENABLE_PROFILE, "EnableProfile")
 
     def _run_disable_profile_state_command(
         self,
@@ -3020,8 +3343,7 @@ class SCP11Console:
             if target_metadata.state.upper() != "ENABLED":
                 print(f"{self._style.green}[+] DisableProfile: target is already disabled.{self._style.end}")
                 return
-        if self._execute_profile_state_command(resolved, self.TAG_DISABLE_PROFILE, "DisableProfile"):
-            self._queue_modem_refresh("DisableProfile")
+        self._execute_profile_state_command(resolved, self.TAG_DISABLE_PROFILE, "DisableProfile")
 
     def _run_delete_profile_state_command(
         self,
@@ -3054,8 +3376,7 @@ class SCP11Console:
                 )
                 return
 
-        if self._execute_profile_state_command(resolved, self.TAG_DELETE_PROFILE, "DeleteProfile"):
-            self._queue_modem_refresh("DeleteProfile")
+        self._execute_profile_state_command(resolved, self.TAG_DELETE_PROFILE, "DeleteProfile")
 
     def _run_enable_profile_sequence_for_metadata(self, target_metadata: ProfileMetadataView) -> bool:
         resolved = self._profile_metadata_to_resolved(target_metadata)
@@ -3722,7 +4043,22 @@ class SCP11Console:
         return bytes([cla, 0xE2, p1, p2, len(payload)]) + payload
 
     def _send_store_data_with_logical_fallback(self, payload: bytes, log_name: str) -> bytes:
+        if bool(getattr(self, "_force_basic_es10b_store_data", False)) is False:
+            orchestrator = getattr(self, "orchestrator", None)
+            orchestrator_sender = getattr(orchestrator, "_send_es10b_store_data", None)
+            if callable(orchestrator_sender):
+                try:
+                    return orchestrator_sender(payload, log_name, allow_stk_retry=True)
+                except TypeError:
+                    try:
+                        return orchestrator_sender(payload, log_name)
+                    except Exception:
+                        pass
+                except Exception:
+                    pass
         apdu = self._build_store_data_apdu(payload)
+        if bool(getattr(self, "_force_basic_es10b_store_data", False)):
+            return self.apdu_channel.send(apdu, log_name)
         try:
             return self.apdu_channel.send(apdu, log_name)
         except Exception as base_error:
@@ -3747,19 +4083,17 @@ class SCP11Console:
                     ) from stk_mode_error
 
     def _reset_card_before_store_data_retry(self, log_name: str, attempt_label: str) -> None:
-        reset_method = getattr(self.apdu_channel, "reset", None)
-        if callable(reset_method) is False:
+        reset = getattr(self.apdu_channel, "reset", None)
+        if callable(reset) is False:
             return
-        did_reset = bool(reset_method())
-        if did_reset:
-            print(
-                f"{self._style.yellow}[*] {log_name}: card transport reset before {attempt_label} retry."
-                f"{self._style.end}"
-            )
+        try:
+            reset()
+        except Exception as reset_error:
+            print(f"{self._style.yellow}[*] {log_name}: {attempt_label} reset skipped ({reset_error}).{self._style.end}")
 
     def _send_store_data_on_logical_channel(self, payload: bytes, log_name: str, channel_number: int = 1) -> bytes:
         open_response = self.apdu_channel.send(
-            bytes.fromhex("0070000001"),
+            bytes([0x00, 0x70, 0x00, 0x00, channel_number & 0xFF]),
             f"{log_name} [OPEN LOGICAL CHANNEL]",
         )
         if len(open_response) == 0:
@@ -3786,15 +4120,15 @@ class SCP11Console:
         print(f"{self._style.yellow}[*] {log_name}: entering STK mode bootstrap.{self._style.end}")
         with redirect_stdout(io.StringIO()):
             self.apdu_channel.send(
-                bytes.fromhex("80AA00000DA90B8100820101830107840101"),
+                bytes.fromhex("80AA000005A903840101"),
                 f"{log_name} [STK MODE TERMINAL CAPABILITY]",
             )
             aid = self.cfg.AID_ISD_R
             select_apdu = bytes([0x00, 0xA4, 0x04, 0x00, len(aid)]) + aid
             self.apdu_channel.send(select_apdu, f"{log_name} [STK MODE SELECT ISD-R]")
             self.apdu_channel.send(bytes.fromhex("80100000010C"), f"{log_name} [STK MODE TERMINAL PROFILE]")
-        stk_mode_apdu = self._build_store_data_apdu(payload, cla=0x81)
-        return self.apdu_channel.send(stk_mode_apdu, f"{log_name} [STK MODE CH1]")
+        stk_mode_apdu = self._build_store_data_apdu(payload, cla=0x80)
+        return self.apdu_channel.send(stk_mode_apdu, f"{log_name} [STK MODE BASIC]")
 
     def _decode_euicc_configured_data(self, raw_data: bytes) -> Dict[str, Any]:
         result: Dict[str, Any] = {
@@ -4159,8 +4493,10 @@ class SCP11Console:
         print(f"    | eUICC Certificate    : {'Present' if isinstance(euicc, bytes) and len(euicc) > 0 else 'Absent'}")
         if isinstance(eum, bytes) and len(eum) > 0:
             print(f"    | EUM Cert Bytes       : {len(eum)}")
+            print(f"    | EUM Cert DER Hex     : {eum.hex().upper()}")
         if isinstance(euicc, bytes) and len(euicc) > 0:
             print(f"    | eUICC Cert Bytes     : {len(euicc)}")
+            print(f"    | eUICC Cert DER Hex   : {euicc.hex().upper()}")
 
     def _print_eim_configuration_compact(self, response: bytes) -> None:
         if self.orchestrator is None or decode_eim_configuration_entries is None:

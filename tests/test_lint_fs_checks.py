@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """Tests for YRL-FS-* lint rules (EF content size consistency).
 
@@ -452,11 +455,11 @@ class AkaParameterLintTests(unittest.TestCase):
         codes = [f.code for f in _lint(doc)]
         self.assertIn("YRL-AKA-002", codes)
 
-    def test_tuak_requires_32_byte_key(self) -> None:
-        # TUAK algorithmID=2, key must be 32 bytes
-        doc = _aka_profile(2, "00" * 16, "00" * 32)
+    def test_tuak_accepts_16_byte_key(self) -> None:
+        # TUAK algorithmID=2 accepts 128-bit and 256-bit keys.
+        doc = _aka_profile(2, "00" * 16, "00" * 16)
         codes = [f.code for f in _lint(doc)]
-        self.assertIn("YRL-AKA-001", codes)
+        self.assertNotIn("YRL-AKA-001", codes)
 
     def test_tuak_valid_32_byte_key_passes(self) -> None:
         doc = _aka_profile(2, "00" * 32, "00" * 32)

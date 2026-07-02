@@ -1,0 +1,48 @@
+/*
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+ */
+
+/* -- Pretty value renderer (FCP fields, decoded record bodies) ---------- */
+
+.cc-decoded-tools {
+  display: flex;
+  gap: 6px;
+  justify-content: flex-end;
+  margin-bottom: 8px;
+}
+
+.cc-decoded-tools-btn {
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  color: var(--fg-muted);
+  padding: 3px 10px;
+  border-radius: var(--radius-sm);
+  font-size: 11px;
+  font-family: inherit;
+  cursor: pointer;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  transition: background var(--transition-fast),
+    color var(--transition-fast),
+    border-color var(--transition-fast);
+}
+
+.cc-decoded-tools-btn:hover {
+  background: var(--bg-hover);
+  color: var(--fg);
+  border-color: var(--accent);
+}
+
+.cc-decoded-tools-btn[data-mode="json"] {
+  background: var(--accent-soft, rgba(99, 169, 255, 0.10));
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.cc-decoded-tools-btn.is-copied {
+  background: var(--ok, #22c55e);
+  color: var(--bg);
+  border-color: var(--ok, #22c55e);
+}
+

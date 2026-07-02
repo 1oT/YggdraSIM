@@ -1,5 +1,8 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
-"""eIM-local session: drives a single ES2+ IPA-poll exchange from GetBoundProfilePackage through ES8+ delivery."""
+
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+"""eIM-local session: drives local package exchange through ES8+ delivery."""
 import json
 import os
 import time
@@ -32,8 +35,7 @@ from .eim_package_codec import (
     resolve_package_runtime_hints,
 )
 from .identity import load_eim_identity
-from .models import EimLocalState, EimHandoverContext, ensure_handover_transaction
-from .poll_audit_store import EimPollAuditStore
+from .models import EimLocalState, EimHandoverContext
 from .response_logger import EimResponseLogger
 from .runtime_state import EimRuntimeStateStore
 from SCP11.shared.gsma_error_codes import (
@@ -47,7 +49,7 @@ from SCP11.shared.gsma_error_codes import (
 
 
 class EimLocalSession(LocalIsdrSession):
-    """Isolated local SCP11 session with eIM/IPAd/IPAe additions."""
+    """Isolated local SCP11 session with eIM/IPAd additions."""
 
     EIM_ID_TYPE_CODE_MAP: dict[str, int] = {
         "1": 1,
@@ -90,7 +92,6 @@ class EimLocalSession(LocalIsdrSession):
         )
         self.runtime_state = EimRuntimeStateStore(self.cfg.EIM_RUNTIME_STATE_FILE)
         self.response_logger = EimResponseLogger(self.cfg.EIM_RESPONSE_LOG_FILE)
-        self.poll_audit_store = EimPollAuditStore(self.cfg.EIM_POLL_AUDIT_DB_FILE)
         self._workspace_root = self._detect_workspace_root()
         self._workspace_root_entries = self._list_workspace_root_entries(self._workspace_root)
         identity_cert_path = ""
@@ -109,13 +110,13 @@ class EimLocalSession(LocalIsdrSession):
         self.eim_state.current_bip_endpoint = self._effective_eim_endpoint()
 
     def reset_state(self) -> None:
-        """Clear transient session data between IPA-poll rounds."""
+        """Clear transient session data between package rounds."""
         super().reset_state()
         self.eim_state.handover = EimHandoverContext()
         self._activate_runtime_bip_role("eim", reason="reset")
         self.eim_state.last_intercepted_target = ""
         self.eim_state.last_intercept_reason = ""
-        self.reset_hotfolder_poll_session()
+        self.reset_hotfolder_metadata_session()
 
     def _normalize_user_path(self, path_text: str, base_dir: str = "") -> str:
         candidate = os.path.expandvars(os.path.expanduser(str(path_text).strip()))
@@ -433,7 +434,7 @@ class EimLocalSession(LocalIsdrSession):
             package_files.append(full_path)
         return package_files
 
-    def _sort_poll_queue_files(self, package_files: list[str]) -> list[str]:
+    def _sort_package_queue_files(self, package_files: list[str]) -> list[str]:
         scored_rows: list[tuple[int, int, str]] = []
         for index, path in enumerate(package_files):
             order_value = self._resolve_hotfolder_order_value(path)
@@ -441,7 +442,7 @@ class EimLocalSession(LocalIsdrSession):
         scored_rows.sort(key=lambda row: (row[0], row[1], row[2]))
         return [row[2] for row in scored_rows]
 
-    def _poll_fixture_directories(self) -> list[tuple[str, str]]:
+    def _package_fixture_directories(self) -> list[tuple[str, str]]:
         return [
             ("fixture.eim_to_esim", self.cfg.EIM_POLL_EIM_TO_ESIM_DIR),
             ("fixture.esim_to_eim", self.cfg.EIM_POLL_ESIM_TO_EIM_DIR),
@@ -468,26 +469,26 @@ class EimLocalSession(LocalIsdrSession):
             remaining.append(package_path)
         return remaining
 
-    def reset_hotfolder_poll_session(self, hotfolder_dir: str = "") -> str:
+    def reset_hotfolder_metadata_session(self, hotfolder_dir: str = "") -> str:
         resolved_dir = self.resolve_hotfolder_path(override_path=hotfolder_dir.strip())
-        self.eim_state.hotfolder_poll_session_dir = resolved_dir
-        self.eim_state.hotfolder_poll_session_issued_paths = set()
+        self.eim_state.hotfolder_metadata_session_dir = resolved_dir
+        self.eim_state.hotfolder_metadata_session_issued_paths = set()
         return resolved_dir
 
-    def _effective_hotfolder_poll_excludes(
+    def _effective_hotfolder_metadata_excludes(
         self,
         hotfolder_dir: str = "",
         exclude_package_paths: Optional[set[str]] = None,
     ) -> tuple[str, set[str]]:
         resolved_dir = self.resolve_hotfolder_path(override_path=hotfolder_dir.strip())
-        session_dir = str(self.eim_state.hotfolder_poll_session_dir).strip()
+        session_dir = str(self.eim_state.hotfolder_metadata_session_dir).strip()
         if len(session_dir) == 0:
-            self.eim_state.hotfolder_poll_session_dir = resolved_dir
+            self.eim_state.hotfolder_metadata_session_dir = resolved_dir
         else:
             if os.path.abspath(session_dir) != os.path.abspath(resolved_dir):
-                self.reset_hotfolder_poll_session(hotfolder_dir=resolved_dir)
+                self.reset_hotfolder_metadata_session(hotfolder_dir=resolved_dir)
         excludes: set[str] = set()
-        for package_path in self.eim_state.hotfolder_poll_session_issued_paths:
+        for package_path in self.eim_state.hotfolder_metadata_session_issued_paths:
             normalized_path = os.path.abspath(str(package_path).strip())
             if len(normalized_path) == 0:
                 continue
@@ -500,36 +501,36 @@ class EimLocalSession(LocalIsdrSession):
                 excludes.add(normalized_path)
         return resolved_dir, excludes
 
-    def _record_hotfolder_poll_issue(self, package_path: str, hotfolder_dir: str = "") -> None:
+    def _record_hotfolder_metadata_issue(self, package_path: str, hotfolder_dir: str = "") -> None:
         resolved_dir = self.resolve_hotfolder_path(override_path=hotfolder_dir.strip())
-        session_dir = str(self.eim_state.hotfolder_poll_session_dir).strip()
+        session_dir = str(self.eim_state.hotfolder_metadata_session_dir).strip()
         if len(session_dir) == 0:
-            self.eim_state.hotfolder_poll_session_dir = resolved_dir
+            self.eim_state.hotfolder_metadata_session_dir = resolved_dir
         else:
             if os.path.abspath(session_dir) != os.path.abspath(resolved_dir):
-                self.reset_hotfolder_poll_session(hotfolder_dir=resolved_dir)
+                self.reset_hotfolder_metadata_session(hotfolder_dir=resolved_dir)
         normalized_path = os.path.abspath(str(package_path).strip())
         if len(normalized_path) == 0:
             return
-        self.eim_state.hotfolder_poll_session_issued_paths.add(normalized_path)
+        self.eim_state.hotfolder_metadata_session_issued_paths.add(normalized_path)
 
-    def list_fixed_poll_fixture_package_files(self) -> list[str]:
-        """Return file-info dicts for all files in the fixed poll-fixture package."""
+    def list_fixed_package_fixture_files(self) -> list[str]:
+        """Return file-info dicts for all files in the fixed fixture package."""
         if bool(getattr(self.cfg, "EIM_POLL_INCLUDE_FIXED_FIXTURES", True)) is False:
             return []
         package_files: list[str] = []
-        for _, target_dir in self._poll_fixture_directories():
+        for _, target_dir in self._package_fixture_directories():
             resolved_dir = self._normalize_user_path(target_dir, base_dir=self.cfg.EIM_PACKAGES_DIR)
             if os.path.isdir(resolved_dir) is False:
                 continue
             package_files.extend(self.list_eim_package_files(package_dir=resolved_dir))
-        return self._sort_poll_queue_files(package_files)
+        return self._sort_package_queue_files(package_files)
 
     def list_hotfolder_package_files(self, hotfolder_dir: str = "") -> list[str]:
         resolved_dir = self.resolve_hotfolder_path(override_path=hotfolder_dir.strip())
-        package_files = self.list_fixed_poll_fixture_package_files()
+        package_files = self.list_fixed_package_fixture_files()
         package_files.extend(self.list_eim_package_files(package_dir=resolved_dir))
-        return self._sort_poll_queue_files(package_files)
+        return self._sort_package_queue_files(package_files)
 
     def list_hotfolder_preview(
         self,
@@ -537,7 +538,7 @@ class EimLocalSession(LocalIsdrSession):
         exclude_package_paths: Optional[set[str]] = None,
     ) -> list[dict[str, Any]]:
         """Return a preview list of files discovered in the hot-folder staging area."""
-        resolved_dir, effective_excludes = self._effective_hotfolder_poll_excludes(
+        resolved_dir, effective_excludes = self._effective_hotfolder_metadata_excludes(
             hotfolder_dir=hotfolder_dir,
             exclude_package_paths=exclude_package_paths,
         )
@@ -565,42 +566,6 @@ class EimLocalSession(LocalIsdrSession):
         if len(package_path.strip()) > 0:
             self.set_eim_package_override_path(package_path)
         return sequence
-
-    def ipae_authenticate(self, matching_id: str = "") -> EimHandoverContext:
-        """Authenticate to the eIM via IPA-E; return the session credential bundle."""
-        self._activate_runtime_bip_role("eim", reason="ipae_authenticate")
-        self.reset_state()
-        self.select_isdr()
-        self.open_session()
-        self._sync_pending_notifications()
-        effective_matching_id = matching_id.strip()
-        if len(effective_matching_id) == 0:
-            effective_matching_id = self._default_matching_id()
-        self.eim_state.handover = EimHandoverContext(
-            transaction_id=bytes(self.state.transaction_id),
-            matching_id=effective_matching_id,
-            source="IPAe-AUTHENTICATE",
-        )
-        return self.eim_state.handover
-
-    def ipae_download(self, profile_path: str = "", matching_id: str = "") -> bytes:
-        """Download the IPA-E payload from the eIM; return the raw response bytes."""
-        handover = self.eim_state.handover
-        transaction_id = ensure_handover_transaction(handover)
-        if len(matching_id.strip()) > 0:
-            handover.matching_id = matching_id.strip()
-        if len(profile_path.strip()) > 0:
-            handover.profile_path = profile_path.strip()
-        self._activate_runtime_bip_role("smdpp", reason="ipae_download_handover")
-        try:
-            response = self.run_load_profile_chain_with_transaction(
-                transaction_id=transaction_id,
-                profile_path=handover.profile_path or profile_path,
-            )
-            self._sync_pending_notifications(response)
-        finally:
-            self._activate_runtime_bip_role("eim", reason="ipae_download_complete")
-        return response
 
     def run_load_profile_chain_with_transaction(self, transaction_id: bytes, profile_path: str = "") -> bytes:
         """Execute the full load-profile chain wrapped in a recoverable transaction."""
@@ -721,21 +686,6 @@ class EimLocalSession(LocalIsdrSession):
             body += self._wrap_tlv(b"\x80", transaction_id)
         body += card_response
         return self._wrap_tlv(bytes.fromhex("BF51"), body)
-
-    def _build_ipa_euicc_data_response_tlv(
-        self,
-        card_response: bytes,
-        transaction_id: bytes = b"",
-    ) -> bytes:
-        if len(card_response) == 0 and len(transaction_id) == 0:
-            return b""
-        if card_response.startswith(bytes.fromhex("BF52")):
-            return card_response
-        body = b""
-        if len(transaction_id) > 0:
-            body += self._wrap_tlv(b"\x80", transaction_id)
-        body += card_response
-        return self._wrap_tlv(bytes.fromhex("BF52"), body)
 
     def _build_profile_download_trigger_result_error(
         self,
@@ -859,10 +809,17 @@ class EimLocalSession(LocalIsdrSession):
             "profile_path": profile_path,
         }
         try:
-            response = self.ipae_download(
-                profile_path=profile_path,
-                matching_id=resolved_matching_id,
-            )
+            download_hook = getattr(self, "ipae_download", None)
+            if callable(download_hook):
+                response = download_hook(
+                    profile_path=profile_path,
+                    matching_id=resolved_matching_id,
+                )
+            else:
+                response = self.run_load_profile_chain_with_transaction(
+                    transaction_id=eim_txid,
+                    profile_path=profile_path,
+                )
             branch = self._build_profile_download_trigger_result_tlv(
                 card_response=response,
                 eim_transaction_id=eim_txid,
@@ -1852,7 +1809,6 @@ class EimLocalSession(LocalIsdrSession):
         payload = self.runtime_state.to_dict()
         payload["state_file"] = self.cfg.EIM_RUNTIME_STATE_FILE
         payload["response_log_file"] = self.cfg.EIM_RESPONSE_LOG_FILE
-        payload["poll_audit_db_file"] = self.cfg.EIM_POLL_AUDIT_DB_FILE
         return payload
 
     def identity_summary(self) -> dict[str, str]:
@@ -1925,9 +1881,6 @@ class EimLocalSession(LocalIsdrSession):
     def response_log_path(self) -> str:
         return self.cfg.EIM_RESPONSE_LOG_FILE
 
-    def poll_audit_db_path(self) -> str:
-        return self.cfg.EIM_POLL_AUDIT_DB_FILE
-
     def read_response_log(self, limit: int = 25) -> list[dict[str, Any]]:
         """Return the stored response-log entries as a list of decoded dicts."""
         path = self.response_log_path()
@@ -1967,25 +1920,6 @@ class EimLocalSession(LocalIsdrSession):
         with open(path, "w", encoding="utf-8") as handle:
             handle.write("")
         return count
-
-    def read_poll_audit_rows(
-        self,
-        limit: int = 25,
-        *,
-        eid: str = "",
-        flow: str = "",
-        package_type: str = "",
-    ) -> list[dict[str, Any]]:
-        """Return all stored poll-audit rows as a list of dicts."""
-        return self.poll_audit_store.list_events(
-            limit=limit,
-            eid=eid,
-            flow=flow,
-            package_type=package_type,
-        )
-
-    def clear_poll_audit_rows(self) -> int:
-        return self.poll_audit_store.clear()
 
     def filter_response_log(self, query: str, limit: int = 50) -> list[dict[str, Any]]:
         """Return response-log entries filtered by *criteria* dict fields."""
@@ -2243,10 +2177,10 @@ class EimLocalSession(LocalIsdrSession):
         details_payload = details if isinstance(details, dict) else {}
         transport = str(details_payload.get("transport", "") or "").strip().lower()
         execution_path = str(details_payload.get("execution_path", "") or "").strip().lower()
-        if normalized_action in ("poll_cycle", "hotfolder_fetch"):
-            return "hotfolder_poll"
+        if normalized_action in ("hotfolder_cycle", "hotfolder_fetch"):
+            return "hotfolder_metadata"
         if normalized_action.startswith("localized_"):
-            return "localized_poll"
+            return "localized_relay"
         if transport in ("local_auth", "direct_card", "isdr_store_data"):
             return "direct_auth"
         if normalized_action in (
@@ -2265,13 +2199,6 @@ class EimLocalSession(LocalIsdrSession):
             return "direct_auth"
         if normalized_package_type in ("ipad_discover", "ipad", "get_eim_package"):
             return "ipad_direct"
-        if normalized_package_type in (
-            "ipae_authenticate",
-            "ipae_auth",
-            "ipae_handover",
-            "ipae_download",
-        ):
-            return "ipae_direct"
         if execution_path == "indirect_profile_download":
             return "profile_download_trigger"
         if execution_path == "direct_profile_download":
@@ -2279,40 +2206,6 @@ class EimLocalSession(LocalIsdrSession):
         if execution_path == "pending_operation_register":
             return "model_only"
         return "runtime"
-
-    def record_poll_audit_event(
-        self,
-        *,
-        action: str,
-        package_path: str = "",
-        package_type: str = "",
-        transaction_id_hex: str = "",
-        matching_id: str = "",
-        success: bool,
-        result_len: int = 0,
-        response_preview_hex: str = "",
-        details: Optional[dict[str, Any]] = None,
-        error: Optional[Exception] = None,
-        flow: str = "",
-        flow_run_id: str = "",
-        eid: str = "",
-    ) -> None:
-        """Append a poll-audit event row to the persistent store."""
-        self._append_response_log_event(
-            action=action,
-            package_path=package_path,
-            package_type=package_type,
-            transaction_id_hex=transaction_id_hex,
-            matching_id=matching_id,
-            success=success,
-            result_len=result_len,
-            response_preview_hex=response_preview_hex,
-            details=details,
-            error=error,
-            flow=flow,
-            flow_run_id=flow_run_id,
-            eid=eid,
-        )
 
     def _append_response_log_event(
         self,
@@ -2372,11 +2265,6 @@ class EimLocalSession(LocalIsdrSession):
             self.response_logger.append_event(event)
         except Exception:
             pass
-        try:
-            self.poll_audit_store.append_event(event)
-        except Exception:
-            pass
-
     def get_counter_value(self, eim_id: str = "") -> tuple[str, int]:
         target_id = str(eim_id).strip()
         if len(target_id) == 0:
@@ -2441,23 +2329,17 @@ class EimLocalSession(LocalIsdrSession):
             "ipad_discover": {"mode": "executable", "execution_path": "ipad_discover"},
             "ipad": {"mode": "executable", "execution_path": "ipad_discover"},
             "get_eim_package": {"mode": "executable", "execution_path": "get_eim_package_discover"},
-            "ipae_authenticate": {"mode": "executable", "execution_path": "ipae_authenticate"},
-            "ipae_auth": {"mode": "executable", "execution_path": "ipae_authenticate"},
-            "ipae_handover": {"mode": "executable", "execution_path": "ipae_download"},
-            "ipae_download": {"mode": "executable", "execution_path": "ipae_download"},
             "provide_eim_package_result": {"mode": "executable", "execution_path": "provide_eim_package_result_preview"},
             "bound_profile_package": {"mode": "executable", "execution_path": "direct_profile_download"},
             "direct_profile_download": {"mode": "executable", "execution_path": "direct_profile_download"},
             "eim_acknowledgements": {"mode": "executable", "execution_path": "acknowledge_pending"},
             "eim_package_result": {"mode": "executable", "execution_path": "result_acknowledge"},
             "euicc_package_result": {"mode": "executable", "execution_path": "result_acknowledge"},
-            "ipa_euicc_data_response": {"mode": "executable", "execution_path": "result_acknowledge"},
             "profile_download_trigger_result": {"mode": "executable", "execution_path": "result_acknowledge"},
             "eim_package_request": {"mode": "model_only", "execution_path": "pending_operation_register"},
             "euicc_package_request_eim_configuration_data": {"mode": "model_only", "execution_path": "pending_operation_register"},
             "euicc_package_request_ecos": {"mode": "model_only", "execution_path": "pending_operation_register"},
             "euicc_package_request_psmos": {"mode": "model_only", "execution_path": "pending_operation_register"},
-            "ipa_euicc_data_request": {"mode": "model_only", "execution_path": "pending_operation_register"},
             "profile_download_trigger_request": {"mode": "executable", "execution_path": "indirect_profile_download"},
         }
 
@@ -2609,21 +2491,6 @@ class EimLocalSession(LocalIsdrSession):
                             except ValueError:
                                 payload = b""
             return self._build_euicc_package_result_tlv(payload, transaction_id=txid)
-        if package_type in ("ipa_euicc_data_response",):
-            payload = b""
-            sgp32 = package_document.get("sgp32", {})
-            if isinstance(sgp32, dict):
-                result = sgp32.get("ipa_euicc_data_response", {})
-                if isinstance(result, dict):
-                    payload_field = result.get("response_payload", {})
-                    if isinstance(payload_field, dict) and bool(payload_field.get("include", False)):
-                        payload_hex = str(payload_field.get("value_hex", "")).strip().replace(" ", "")
-                        if len(payload_hex) > 0 and len(payload_hex) % 2 == 0:
-                            try:
-                                payload = bytes.fromhex(payload_hex)
-                            except ValueError:
-                                payload = b""
-            return self._build_ipa_euicc_data_response_tlv(payload, transaction_id=txid)
         if package_type in ("profile_download_trigger_result",):
             inner = b""
             if len(txid) > 0:
@@ -2646,12 +2513,6 @@ class EimLocalSession(LocalIsdrSession):
                     if choice == "euicc_package_result":
                         synthetic = {
                             "package_type": "euicc_package_result",
-                            "runtime": {"transaction_id_hex": txid_hex},
-                        }
-                        return self.build_wire_payload_preview(synthetic)
-                    if choice == "ipa_euicc_data_response":
-                        synthetic = {
-                            "package_type": "ipa_euicc_data_response",
                             "runtime": {"transaction_id_hex": txid_hex},
                         }
                         return self.build_wire_payload_preview(synthetic)
@@ -2692,19 +2553,6 @@ class EimLocalSession(LocalIsdrSession):
                                 except ValueError:
                                     payload = b""
                             branch = self._build_euicc_package_result_tlv(payload, transaction_id=inner_txid)
-                            return self._build_provide_eim_package_result_tlv(branch, eid=eid_value)
-                    if choice == "ipa_euicc_data_response":
-                        inner_txid = txid
-                        ipa_section = provide.get("ipa_euicc_data_response", {})
-                        if isinstance(ipa_section, dict):
-                            payload_hex = str(ipa_section.get("value_hex", "")).strip().replace(" ", "")
-                            payload = b""
-                            if len(payload_hex) > 0 and len(payload_hex) % 2 == 0:
-                                try:
-                                    payload = bytes.fromhex(payload_hex)
-                                except ValueError:
-                                    payload = b""
-                            branch = self._build_ipa_euicc_data_response_tlv(payload, transaction_id=inner_txid)
                             return self._build_provide_eim_package_result_tlv(branch, eid=eid_value)
                     if choice == "profile_download_trigger_result":
                         inner_txid = str(
@@ -2982,7 +2830,6 @@ class EimLocalSession(LocalIsdrSession):
                 "euicc_package_request_eim_configuration_data",
                 "euicc_package_request_ecos",
                 "euicc_package_request_psmos",
-                "ipa_euicc_data_request",
             ):
                 counter_assignments = self._apply_runtime_counters(package_document)
                 self._register_pending_operation(package_type, runtime_hints)
@@ -3063,48 +2910,6 @@ class EimLocalSession(LocalIsdrSession):
                     details=details,
                 )
                 return resolved_path, package_type, 0
-            if package_type in ("ipae_authenticate", "ipae_auth"):
-                self.ipae_authenticate(matching_id=str(runtime_hints.get("matching_id", "")))
-                result_len = len(self.state.transaction_id)
-                details["execution_path"] = "ipae_authenticate"
-                self._append_response_log_event(
-                    action="issue_package",
-                    package_path=resolved_path,
-                    package_type=package_type,
-                    transaction_id_hex=bytes(self.state.transaction_id).hex().upper() or txid,
-                    matching_id=matching_id,
-                    success=True,
-                    result_len=result_len,
-                    response_preview_hex="",
-                    details=details,
-                )
-                return resolved_path, package_type, result_len
-            if package_type in ("ipae_handover", "ipae_download"):
-                transaction_id_hex = str(runtime_hints.get("transaction_id_hex", "")).strip()
-                if len(transaction_id_hex) > 0:
-                    self.set_handover_transaction(
-                        transaction_id_hex,
-                        matching_id=str(runtime_hints.get("matching_id", "")),
-                    )
-                response = self.ipae_download(
-                    profile_path=str(runtime_hints.get("profile_path", "")),
-                    matching_id=str(runtime_hints.get("matching_id", "")),
-                )
-                result_len = len(response)
-                response_preview = self._response_preview_hex(response)
-                details["execution_path"] = "ipae_download"
-                self._append_response_log_event(
-                    action="issue_package",
-                    package_path=resolved_path,
-                    package_type=package_type,
-                    transaction_id_hex=txid,
-                    matching_id=matching_id,
-                    success=True,
-                    result_len=result_len,
-                    response_preview_hex=response_preview,
-                    details=details,
-                )
-                return resolved_path, package_type, result_len
             if package_type in ("provide_eim_package_result",):
                 wire_payload = self.build_wire_payload_preview(package_document)
                 closed = self._close_pending_from_hints(runtime_hints)
@@ -3135,7 +2940,6 @@ class EimLocalSession(LocalIsdrSession):
             if package_type in (
                 "eim_package_result",
                 "euicc_package_result",
-                "ipa_euicc_data_response",
                 "profile_download_trigger_result",
             ):
                 wire_payload = self.build_wire_payload_preview(package_document)
@@ -3195,8 +2999,8 @@ class EimLocalSession(LocalIsdrSession):
 
     def issue_hotfolder_packages(self, hotfolder_dir: str = "") -> list[tuple[str, str, int]]:
         """Issue all packages found in the hot-folder staging area."""
-        resolved_dir = self.reset_hotfolder_poll_session(hotfolder_dir=hotfolder_dir)
-        poll_meta = self.hotfolder_poll_response_meta(hotfolder_dir=resolved_dir)
+        resolved_dir = self.reset_hotfolder_metadata_session(hotfolder_dir=hotfolder_dir)
+        poll_meta = self.hotfolder_queue_response_meta(hotfolder_dir=resolved_dir)
         if poll_meta.get("eim_result_code") == self.cfg.EIM_NO_PACKAGE_RESULT_CODE:
             self.runtime_state.record_operation("hotfolder_empty_no_eim_package_available")
             self._append_response_log_event(
@@ -3219,7 +3023,7 @@ class EimLocalSession(LocalIsdrSession):
         for package_file in self.list_hotfolder_package_files(hotfolder_dir=resolved_dir):
             try:
                 issued = self.issue_eim_package_file(package_file)
-                self._record_hotfolder_poll_issue(package_file, hotfolder_dir=resolved_dir)
+                self._record_hotfolder_metadata_issue(package_file, hotfolder_dir=resolved_dir)
                 results.append(issued)
             except Exception as error:
                 results.append((package_file, f"error:{type(error).__name__}", -1))
@@ -3249,7 +3053,7 @@ class EimLocalSession(LocalIsdrSession):
 
     def issue_next_hotfolder_package(self, hotfolder_dir: str = "") -> Optional[tuple[str, str, int]]:
         """Issue the next unprocessed hot-folder package and advance the cursor."""
-        resolved_dir, effective_excludes = self._effective_hotfolder_poll_excludes(hotfolder_dir=hotfolder_dir)
+        resolved_dir, effective_excludes = self._effective_hotfolder_metadata_excludes(hotfolder_dir=hotfolder_dir)
         package_files = self.list_hotfolder_package_files(hotfolder_dir=resolved_dir)
         package_files = self._exclude_campaign_seen_package_files(
             package_files,
@@ -3259,17 +3063,17 @@ class EimLocalSession(LocalIsdrSession):
             return None
         next_file = package_files[0]
         issued = self.issue_eim_package_file(next_file)
-        self._record_hotfolder_poll_issue(next_file, hotfolder_dir=resolved_dir)
+        self._record_hotfolder_metadata_issue(next_file, hotfolder_dir=resolved_dir)
         return issued
 
-    def poll_hotfolder(
+    def run_hotfolder_once(
         self,
         cycles: int = 10,
         interval_ms: int = 1000,
         hotfolder_dir: str = "",
     ) -> list[dict[str, Any]]:
-        """Poll the hot-folder for new packages and issue them to the card."""
-        report = self.poll_hotfolder_campaign(
+        """Check the hot-folder for new packages and issue them to the card."""
+        report = self.run_hotfolder_campaign(
             cycles=cycles,
             interval_ms=interval_ms,
             hotfolder_dir=hotfolder_dir,
@@ -3281,7 +3085,20 @@ class EimLocalSession(LocalIsdrSession):
             return rows
         return []
 
-    def poll_hotfolder_campaign(
+    def poll_hotfolder(
+        self,
+        cycles: int = 10,
+        interval_ms: int = 1000,
+        hotfolder_dir: str = "",
+    ) -> list[dict[str, Any]]:
+        """Compatibility alias for the former hot-folder polling name."""
+        return self.run_hotfolder_once(
+            cycles=cycles,
+            interval_ms=interval_ms,
+            hotfolder_dir=hotfolder_dir,
+        )
+
+    def run_hotfolder_campaign(
         self,
         cycles: int = 10,
         interval_ms: int = 1000,
@@ -3289,7 +3106,7 @@ class EimLocalSession(LocalIsdrSession):
         until_empty: bool = False,
         max_cycles: Optional[int] = None,
     ) -> dict[str, Any]:
-        """Run a hot-folder poll campaign loop until all packages are processed or the limit is reached."""
+        """Run a hot-folder package loop until all packages are processed or the limit is reached."""
         requested_cycles = int(cycles)
         if requested_cycles <= 0:
             requested_cycles = 1
@@ -3304,18 +3121,18 @@ class EimLocalSession(LocalIsdrSession):
         if sleep_ms < 0:
             sleep_ms = 0
         rows: list[dict[str, Any]] = []
-        resolved_dir = self.reset_hotfolder_poll_session(hotfolder_dir=hotfolder_dir)
+        resolved_dir = self.reset_hotfolder_metadata_session(hotfolder_dir=hotfolder_dir)
         stop_reason = "cycles_completed"
         # Determinate bar — we know the cycle budget up front. When
         # ``until_empty`` is set the bar may finish early (early break
         # below); the sticky footer just shows the real completion
         # state whenever the caller exits the ``with`` block.
         with progress_session(
-            "eIM hotfolder poll", total=run_cycles
+            "eIM hotfolder campaign", total=run_cycles
         ) as bar:
             for index in range(run_cycles):
                 cycle_no = index + 1
-                meta = self.hotfolder_poll_metadata(hotfolder_dir=resolved_dir)
+                meta = self.hotfolder_queue_metadata(hotfolder_dir=resolved_dir)
                 package_count = int(meta.get("package_count", 0))
                 bar.advance(
                     f"cycle {cycle_no}/{run_cycles} · {package_count} pending"
@@ -3346,7 +3163,7 @@ class EimLocalSession(LocalIsdrSession):
                         row["error"] = f"{type(error).__name__}: {error}"
                 rows.append(row)
                 self._append_response_log_event(
-                    action="poll_cycle",
+                    action="hotfolder_cycle",
                     package_path=str(row.get("issued_file", "")),
                     package_type=str(row.get("issued_type", "")),
                     transaction_id_hex="",
@@ -3379,6 +3196,23 @@ class EimLocalSession(LocalIsdrSession):
             "rows": rows,
         }
 
+    def poll_hotfolder_campaign(
+        self,
+        cycles: int = 10,
+        interval_ms: int = 1000,
+        hotfolder_dir: str = "",
+        until_empty: bool = False,
+        max_cycles: Optional[int] = None,
+    ) -> dict[str, Any]:
+        """Compatibility alias for the former campaign polling name."""
+        return self.run_hotfolder_campaign(
+            cycles=cycles,
+            interval_ms=interval_ms,
+            hotfolder_dir=hotfolder_dir,
+            until_empty=until_empty,
+            max_cycles=max_cycles,
+        )
+
     def export_campaign_report(
         self,
         campaign_report: dict[str, Any],
@@ -3388,7 +3222,7 @@ class EimLocalSession(LocalIsdrSession):
         target = str(output_path).strip()
         if len(target) == 0:
             file_name = (
-                "eim_poll_campaign_"
+                "eim_hotfolder_campaign_"
                 + datetime.now(timezone.utc).replace(microsecond=0).strftime("%Y%m%dT%H%M%SZ")
                 + ".json"
             )
@@ -3429,7 +3263,10 @@ class EimLocalSession(LocalIsdrSession):
         files: list[str] = []
         for name in sorted(os.listdir(resolved)):
             lowered = name.lower()
-            if lowered.startswith("eim_poll_campaign_") is False:
+            if not (
+                lowered.startswith("eim_hotfolder_campaign_")
+                or lowered.startswith("eim_poll_campaign_")
+            ):
                 continue
             if lowered.endswith(".json") is False:
                 continue
@@ -3481,7 +3318,7 @@ class EimLocalSession(LocalIsdrSession):
         target = str(output_path).strip()
         if len(target) == 0:
             file_name = (
-                "eim_poll_campaign_aggregate_"
+                "eim_hotfolder_campaign_aggregate_"
                 + datetime.now(timezone.utc).replace(microsecond=0).strftime("%Y%m%dT%H%M%SZ")
                 + ".json"
             )
@@ -3499,13 +3336,13 @@ class EimLocalSession(LocalIsdrSession):
             handle.write("\n")
         return target
 
-    def hotfolder_poll_response_meta(
+    def hotfolder_queue_response_meta(
         self,
         hotfolder_dir: str = "",
         exclude_package_paths: Optional[set[str]] = None,
     ) -> dict[str, Any]:
-        """Return the response metadata dict for the hot-folder poll operation."""
-        resolved_dir, effective_excludes = self._effective_hotfolder_poll_excludes(
+        """Return the response metadata dict for the hot-folder queue operation."""
+        resolved_dir, effective_excludes = self._effective_hotfolder_metadata_excludes(
             hotfolder_dir=hotfolder_dir,
             exclude_package_paths=exclude_package_paths,
         )
@@ -3533,13 +3370,24 @@ class EimLocalSession(LocalIsdrSession):
             "response_tlv_hex": response_tlv_hex,
         }
 
-    def hotfolder_poll_metadata(
+    def hotfolder_poll_response_meta(
         self,
         hotfolder_dir: str = "",
         exclude_package_paths: Optional[set[str]] = None,
     ) -> dict[str, Any]:
-        """Return the full metadata dict for a completed hot-folder poll session."""
-        resolved_dir, effective_excludes = self._effective_hotfolder_poll_excludes(
+        """Compatibility alias for the former hot-folder poll metadata name."""
+        return self.hotfolder_queue_response_meta(
+            hotfolder_dir=hotfolder_dir,
+            exclude_package_paths=exclude_package_paths,
+        )
+
+    def hotfolder_queue_metadata(
+        self,
+        hotfolder_dir: str = "",
+        exclude_package_paths: Optional[set[str]] = None,
+    ) -> dict[str, Any]:
+        """Return the full metadata dict for a completed hot-folder queue session."""
+        resolved_dir, effective_excludes = self._effective_hotfolder_metadata_excludes(
             hotfolder_dir=hotfolder_dir,
             exclude_package_paths=exclude_package_paths,
         )
@@ -3547,7 +3395,7 @@ class EimLocalSession(LocalIsdrSession):
             hotfolder_dir=resolved_dir,
             exclude_package_paths=effective_excludes,
         )
-        response_meta = self.hotfolder_poll_response_meta(
+        response_meta = self.hotfolder_queue_response_meta(
             hotfolder_dir=resolved_dir,
             exclude_package_paths=effective_excludes,
         )
@@ -3564,6 +3412,17 @@ class EimLocalSession(LocalIsdrSession):
             "next_file": next_file,
             "queue_preview": queue_preview,
         }
+
+    def hotfolder_poll_metadata(
+        self,
+        hotfolder_dir: str = "",
+        exclude_package_paths: Optional[set[str]] = None,
+    ) -> dict[str, Any]:
+        """Compatibility alias for the former hot-folder poll metadata name."""
+        return self.hotfolder_queue_metadata(
+            hotfolder_dir=hotfolder_dir,
+            exclude_package_paths=exclude_package_paths,
+        )
 
     def _resolve_package_endpoint(self, package_document: dict[str, Any]) -> str:
         runtime_hints = resolve_package_runtime_hints(package_document)
@@ -3715,12 +3574,12 @@ class EimLocalSession(LocalIsdrSession):
                 pass
         return 2**63 - 1
 
-    def _poll_session_source(self, package_path: str, hotfolder_dir: str = "") -> str:
+    def _queue_session_source(self, package_path: str, hotfolder_dir: str = "") -> str:
         target_path = os.path.abspath(package_path)
         source_dirs: list[tuple[str, str]] = []
         if len(hotfolder_dir.strip()) > 0:
             source_dirs.append(("hotfolder", hotfolder_dir.strip()))
-        for label, target_dir in self._poll_fixture_directories():
+        for label, target_dir in self._package_fixture_directories():
             source_dirs.append((label, target_dir))
         for label, target_dir in source_dirs:
             candidate_dir = str(target_dir).strip()
@@ -3745,7 +3604,7 @@ class EimLocalSession(LocalIsdrSession):
         row: dict[str, Any] = {
             "order": int(order_index),
             "path": package_path,
-            "session_source": self._poll_session_source(package_path, hotfolder_dir=hotfolder_dir),
+            "session_source": self._queue_session_source(package_path, hotfolder_dir=hotfolder_dir),
             "package_type": "",
             "queue_order": 2**63 - 1,
             "queue_source": "fallback",

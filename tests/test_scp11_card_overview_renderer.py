@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 """Coverage for ``render_card_overview_snapshot`` in the shared layer.
 
 The quick-overview renderer is the SCAN/INFO output every SCP11 shell

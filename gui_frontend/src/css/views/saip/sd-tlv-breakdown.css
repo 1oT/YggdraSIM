@@ -1,0 +1,63 @@
+/*
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+ */
+
+/* ---- SD instance parameter TLV breakdown (P2.13) ------------------- */
+.saip-form-sd-tlv {
+  margin-top: 6px;
+  border: 1px dashed var(--border);
+  border-radius: 4px;
+  padding: 4px 8px;
+  background: var(--surface-alt, rgba(255, 255, 255, 0.025));
+}
+
+.saip-form-sd-tlv-summary {
+  font-size: 11px;
+  color: var(--fg-muted, #888);
+  cursor: pointer;
+  font-family: var(--mono, "JetBrains Mono", monospace);
+}
+
+.saip-form-sd-tlv[open] > .saip-form-sd-tlv-summary {
+  margin-bottom: 4px;
+}
+
+.saip-form-sd-tlv-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.saip-form-sd-tlv-row {
+  display: grid;
+  grid-template-columns: 56px 1fr 60px 2fr;
+  gap: 8px;
+  font-family: var(--mono, "JetBrains Mono", monospace);
+  font-size: 11px;
+  color: var(--fg);
+  padding: 2px 0;
+}
+
+.saip-form-sd-tlv-tag {
+  font-weight: 600;
+  color: var(--accent, #5a8de0);
+}
+
+.saip-form-sd-tlv-label {
+  color: var(--fg-muted, #888);
+}
+
+.saip-form-sd-tlv-len {
+  color: var(--fg-muted, #888);
+  text-align: right;
+}
+
+.saip-form-sd-tlv-val {
+  color: var(--fg);
+  word-break: break-all;
+}
+

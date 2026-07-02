@@ -5,6 +5,11 @@ tags:
   - launcher
   - registry
 ---
+<!--
+SPDX-License-Identifier: GPL-3.0-or-later
+Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+-->
+
 
 # Registry and Launcher
 
@@ -34,6 +39,8 @@ Key wrapper flags:
 | `--sim-import-profile <path>` | import a DER / BIN / hex / SAIP-JSON / `profile_image.json` before launch |
 | `--sim-import-enable` | enable the imported simulated profile immediately |
 | `--open-pcap <path>` / `--keybag <path>` | offline HIL pcap review (short-circuits the menu) |
+| `--gui` / `--web-server` | launch the desktop or web Universal GUI Command Center (short-circuits the menu) |
+| `--host` / `--port` / `--token-file` / `--tls-cert` / `--tls-key` / `--tls-self-signed` | bind / TLS settings for `--web-server` |
 | `--doctor`, `--version` | preflight / version helpers (no menu) |
 
 In-process dispatch means that module-level singletons, caches, and

@@ -1,8 +1,13 @@
+<!--
+SPDX-License-Identifier: GPL-3.0-or-later
+Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+-->
+
 # eIM Package Hotfolder
 
-This directory contributes the dynamic runtime entries for `HOTFOLDER-FETCH`,
-`POLL-CAMPAIGN`, and related queue operations. Use `HOTFOLDER-LIST` to preview
-resolved queue order before issuing.
+This directory contributes the dynamic runtime entries for `HOTFOLDER-FETCH`
+and related queue operations. Use `HOTFOLDER-LIST` to preview resolved queue
+order before issuing.
 
 ## Ordering rules
 
@@ -14,7 +19,7 @@ Files are issued in ascending numeric order using this precedence:
 4. leading numeric filename prefix (for example `001_...json`)
 5. fallback lexical filename order
 
-When the effective queue has no remaining JSON files, runtime poll response is:
+When the effective queue has no remaining JSON files, the runtime response is:
 
 - `eimPackageError = noEimPackageAvailable(1)`
 - encoded as `BF4F03020101` (SGP.32 GetEimPackageResponse error branch)

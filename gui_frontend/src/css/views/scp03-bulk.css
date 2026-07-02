@@ -1,0 +1,471 @@
+/*
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+ */
+
+/* ---------------------------------------------------------------------
+ * Service-table staging popout — mock-edit a UST / IST / generic
+ * bitmap EF without touching the card. Live hex preview at the top,
+ * checkbox list below, action bar (copy / reset / send to UPDATE
+ * BINARY) docked between them.
+ * ------------------------------------------------------------------- */
+.cc-decoded-tools-btn--stage {
+  border-color: var(--accent, #88c0d0);
+  color: var(--accent, #88c0d0);
+}
+
+.cc-decoded-tools-btn--stage:hover {
+  background: rgba(136, 192, 208, 0.12);
+}
+
+.cc-svc-stage-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border-soft, var(--border));
+  margin: 6px 0 8px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.cc-svc-stage-hex-row {
+  display: grid;
+  grid-template-columns: 70px minmax(0, 1fr);
+  gap: 8px;
+  align-items: baseline;
+}
+
+.cc-svc-stage-hex-label {
+  color: var(--fg-muted);
+  text-transform: uppercase;
+  font-size: 10px;
+  letter-spacing: 0.06em;
+}
+
+.cc-svc-stage-hex-val {
+  color: var(--fg);
+  word-break: break-all;
+  white-space: pre-wrap;
+  background: var(--bg-deep, var(--bg));
+  border: 1px solid var(--border-soft, var(--border));
+  border-radius: 4px;
+  padding: 2px 6px;
+}
+
+.cc-svc-stage-hex-row--new .cc-svc-stage-hex-val {
+  border-color: var(--accent, #88c0d0);
+  color: var(--accent, #88c0d0);
+}
+
+.cc-svc-stage-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-top: 2px;
+}
+
+.cc-svc-stage-counts {
+  color: var(--fg-muted);
+  font-size: 11px;
+}
+
+.cc-svc-stage-diff {
+  margin-left: auto;
+  color: var(--fg-muted);
+  font-size: 11px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: var(--bg-deep, var(--bg));
+  border: 1px dashed var(--border-soft, var(--border));
+}
+
+.cc-svc-stage-diff.is-changed {
+  color: var(--accent, #88c0d0);
+  border-color: var(--accent, #88c0d0);
+  border-style: solid;
+}
+
+.cc-svc-stage-actions {
+  display: flex;
+  gap: 6px;
+  padding-top: 6px;
+  border-top: 1px dashed var(--border-soft, var(--border));
+  margin-top: 4px;
+}
+
+.cc-svc-stage-actions .btn.is-copied {
+  outline: 1px solid var(--accent, #88c0d0);
+}
+
+/* Generic stage-edit popout (Task 3) — non-bitmap decoded EFs ---------- */
+.cc-stage-context {
+  margin: 0 0 8px;
+  border: 1px solid var(--border-soft, var(--border));
+  border-radius: 6px;
+  background: var(--bg-elev);
+}
+
+.cc-stage-context-summary {
+  cursor: pointer;
+  padding: 6px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--fg-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  outline-offset: -2px;
+}
+
+.cc-stage-context[open] > .cc-stage-context-summary {
+  color: var(--fg);
+}
+
+.cc-stage-context-body {
+  margin: 0;
+  padding: 6px 10px 10px;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 11.5px;
+  color: var(--fg);
+  background: transparent;
+  max-height: 240px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.cc-stage-decoded-preview {
+  margin: 0 0 8px;
+  border: 1px solid var(--border-soft, var(--border));
+  border-radius: 6px;
+  background: color-mix(in oklab, var(--bg-elev), transparent 30%);
+  padding: 8px 10px;
+}
+
+.cc-stage-decoded-preview > .cc-fs-op-hint {
+  margin: 0 0 6px;
+}
+
+.cc-stage-decoded-preview > .cc-decoded {
+  margin-top: 2px;
+}
+
+.cc-stage-editor {
+  width: 100%;
+  min-height: 88px;
+  padding: 8px 10px;
+  margin: 4px 0 6px;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 12.5px;
+  color: var(--fg);
+  background: var(--bg-deep, var(--bg));
+  border: 1px solid var(--border-soft, var(--border));
+  border-radius: 6px;
+  resize: vertical;
+}
+
+.cc-stage-editor:focus {
+  outline: 2px solid var(--accent, #88c0d0);
+  outline-offset: -2px;
+  border-color: var(--accent, #88c0d0);
+}
+
+.cc-svc-stage-filter {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+
+.cc-svc-stage-search {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 4px 8px;
+  background: var(--bg-deep, var(--bg));
+  border: 1px solid var(--border-soft, var(--border));
+  color: var(--fg);
+  border-radius: 4px;
+  font-family: inherit;
+  font-size: 12px;
+}
+
+.cc-svc-stage-mode {
+  flex: 0 0 auto;
+}
+
+.cc-svc-stage-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 1px 8px;
+  max-height: 420px;
+  overflow-y: auto;
+  padding: 4px 6px;
+  border: 1px solid var(--border-soft, var(--border));
+  border-radius: 4px;
+  background: var(--bg);
+}
+
+.cc-svc-stage-row {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr);
+  gap: 6px;
+  align-items: center;
+  padding: 2px 4px;
+  border-radius: 3px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.cc-svc-stage-row.is-active {
+  background: rgba(136, 192, 208, 0.06);
+}
+
+.cc-svc-stage-row.is-dirty {
+  background: rgba(235, 203, 139, 0.10);
+  outline: 1px dashed var(--ygg-amber, #ebcb8b);
+}
+
+.cc-svc-stage-cb {
+  margin: 0;
+  cursor: pointer;
+}
+
+.cc-svc-stage-label {
+  display: grid;
+  grid-template-columns: 36px minmax(0, 1fr);
+  gap: 4px;
+  align-items: baseline;
+  cursor: pointer;
+  color: var(--fg);
+  min-width: 0;
+}
+
+.cc-svc-stage-num {
+  color: var(--fg-muted);
+  text-align: right;
+}
+
+.cc-svc-stage-name {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cc-svc-stage-row.is-active .cc-svc-stage-name {
+  color: var(--fg);
+}
+
+.cc-svc-stage-row:not(.is-active) .cc-svc-stage-name {
+  color: var(--fg-muted);
+  opacity: 0.85;
+}
+
+.cc-pv-array-row {
+  display: grid;
+  grid-template-columns: minmax(40px, auto) 1fr;
+  gap: 8px 10px;
+  align-items: start;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: color-mix(in oklab, var(--bg-elev), transparent 35%);
+}
+
+.cc-pv-array-idx {
+  color: var(--fg-muted);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  padding-top: 4px;
+  font-weight: 600;
+}
+
+.cc-pv-array-body {
+  min-width: 0;
+}
+
+.cc-pv-object {
+  display: flex;
+  flex-direction: column;
+  grid-template-columns: minmax(96px, 200px) 1fr;
+  gap: 8px;
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.cc-pv-field {
+  display: grid;
+  grid-template-columns: minmax(96px, 200px) 1fr;
+  gap: 8px 14px;
+  align-items: start;
+  margin: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: color-mix(in oklab, var(--bg-elev), transparent 42%);
+}
+
+.cc-pv-field .cc-pv-object {
+  gap: 6px;
+}
+
+.cc-pv-field .cc-pv-field {
+  padding: 6px 8px;
+  background: color-mix(in oklab, var(--bg), var(--bg-elev) 45%);
+  border-color: color-mix(in oklab, var(--border), transparent 8%);
+}
+
+@media (max-width: 520px) {
+  .cc-pv-field {
+    grid-template-columns: 1fr;
+  }
+}
+
+.cc-pv-object--depth-1,
+.cc-pv-object--depth-2,
+.cc-pv-object--depth-3 {
+  margin-left: 0;
+  padding-left: 0;
+  border-left: none;
+}
+
+.cc-pv-key {
+  margin: 0;
+  color: var(--fg-dim);
+  word-break: break-word;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.cc-pv-val {
+  margin: 0;
+  color: var(--fg);
+  min-width: 0;
+}
+
+.cc-pv-collapsible {
+  width: 100%;
+}
+
+.cc-pv-collapsible-head {
+  cursor: pointer;
+  color: var(--fg-muted);
+  font-size: 11px;
+  padding: 2px 4px;
+  list-style: none;
+}
+
+.cc-pv-collapsible-head::-webkit-details-marker {
+  display: none;
+}
+
+.cc-pv-collapsible-head::before {
+  content: "▸";
+  display: inline-block;
+  margin-right: 6px;
+  transition: transform var(--transition-fast);
+}
+
+.cc-pv-collapsible[open] > .cc-pv-collapsible-head::before {
+  transform: rotate(90deg);
+}
+
+/* FCP block specifically — share the depth-0 grid with the decoded
+   body so visual rhythm is consistent across FCP + decoded. */
+
+.cc-fcp-block .cc-fcp-fields {
+  font-size: 12px;
+}
+
+.cc-payload-transparent .cc-pv-field,
+.cc-fcp-block .cc-pv-field {
+  grid-template-columns: minmax(76px, 148px) 1fr;
+  gap: 6px 10px;
+  padding: 5px 8px;
+  border-radius: var(--radius-sm);
+}
+
+.cc-payload-transparent .cc-pv-key,
+.cc-fcp-block .cc-pv-key {
+  font-size: 10px;
+  letter-spacing: 0.01em;
+}
+
+.cc-payload-transparent .cc-pv-val,
+.cc-fcp-block .cc-pv-val {
+  font-size: 11.5px;
+}
+
+.cc-fcp-block .cc-decoded-tools {
+  margin-bottom: 4px;
+}
+
+.cc-decoded-json-full {
+  margin: 0;
+  padding: 8px 10px;
+  background: var(--code-bg, rgba(0, 0, 0, 0.25));
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  font-size: 11.5px;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+/* -- Command Center: Maximize overlay ----------------------------------- */
+
+.cc-max-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  z-index: 9000;
+  display: flex;
+  align-items: stretch;
+  justify-content: stretch;
+  padding: 24px;
+  backdrop-filter: blur(2px);
+}
+
+.cc-max-shell {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  gap: 10px;
+}
+
+.cc-max-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  color: var(--fg-muted);
+  font-size: 12px;
+  flex-shrink: 0;
+}
+
+.cc-max-hint {
+  font-family: var(--mono, "JetBrains Mono", monospace);
+}
+
+.cc-max-mounted {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  max-width: none;
+  max-height: none;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .cc-max-backdrop {
+    animation: ccMaxFade 120ms ease-out;
+  }
+}
+
+@keyframes ccMaxFade {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}

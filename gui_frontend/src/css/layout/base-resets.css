@@ -1,0 +1,144 @@
+/*
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+ */
+
+/* ----------------------------------------------------------------------- */
+/* Base layout                                                             */
+/* ----------------------------------------------------------------------- */
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 1.5;
+  height: 100%;
+  transition: background-color var(--transition-mid), color var(--transition-mid);
+}
+
+body {
+  overflow: hidden;
+  background-image: var(--theme-tint);
+  background-attachment: fixed;
+}
+
+code,
+pre {
+  font-family: var(--font-mono);
+  font-size: 0.9em;
+}
+
+pre {
+  background: var(--code-bg);
+  padding: 12px 14px;
+  border-radius: var(--radius-md);
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  color: var(--fg);
+}
+
+code {
+  background: var(--code-bg);
+  padding: 1px 5px;
+  border-radius: 3px;
+  border: 1px solid var(--border);
+}
+
+button,
+select,
+input {
+  font: inherit;
+  color: inherit;
+}
+
+/* ----------------------------------------------------------------------- */
+/* Dropdown / <select> theming                                             */
+/* ----------------------------------------------------------------------- */
+/*
+ * Browsers render the dropdown popup (``<option>`` list) with OS-native
+ * chrome by default, so any page CSS that only colours ``select`` ends up
+ * with invisible text on themes where the OS widget background doesn't
+ * match the page. The rules below:
+ *
+ *   - give every select + its options a GUI-theme-aware background and
+ *     foreground so "white text on white background" can't happen;
+ *   - keep the control itself aligned with the rest of the form chrome
+ *     (button / input) via the shared elevated-surface + border tokens;
+ *   - swap the default black arrow for a CSS-drawn chevron that inherits
+ *     ``--fg``, so the indicator is visible on dark themes too.
+ *
+ * Component-specific selectors (``.cc-form-row > select`` /
+ * ``.scp03-apdu-preset-select``) can still override the width / padding
+ * without losing theme colouring.
+ */
+select {
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  appearance: none;
+  background-color: var(--bg-elev, #2b303b);
+  color: var(--fg, #eceff4);
+  border: 1px solid var(--border-strong, rgba(216, 222, 233, 0.22));
+  border-radius: var(--radius-sm, 6px);
+  padding: 6px 32px 6px 10px;
+  background-image: linear-gradient(
+      45deg,
+      transparent 50%,
+      currentColor 50%
+    ),
+    linear-gradient(135deg, currentColor 50%, transparent 50%);
+  background-position:
+    calc(100% - 16px) 52%,
+    calc(100% - 11px) 52%;
+  background-size:
+    5px 5px,
+    5px 5px;
+  background-repeat: no-repeat;
+  cursor: pointer;
+  transition:
+    border-color 120ms ease,
+    box-shadow 120ms ease,
+    background-color 120ms ease;
+}
+
+select:hover:not(:disabled) {
+  border-color: var(--accent, #88c0d0);
+}
+
+select:focus {
+  outline: none;
+  border-color: var(--accent, #88c0d0);
+  box-shadow: 0 0 0 3px var(--accent-soft, rgba(136, 192, 208, 0.2));
+}
+
+select:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+/* ``<option>`` uses system paint on all major engines; force colours so
+   the popup list stays readable on every theme. Chromium + Firefox both
+   honour background-color / color here; Safari partially honours them. */
+select option,
+select optgroup {
+  background-color: var(--bg-elev, #2b303b);
+  color: var(--fg, #eceff4);
+}
+
+select option:checked,
+select option:hover {
+  background-color: var(--accent-soft, rgba(136, 192, 208, 0.2));
+  color: var(--fg, #eceff4);
+}
+
+/* ``<datalist>`` popups inherit option styling where the engine allows
+   it (Chromium). Firefox renders them natively — operators will still
+   see readable colours from the list above. */
+

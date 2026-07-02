@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 """SAIP template default-value fill-in regression suite.
 
 Operator BPPs routinely ship skeleton FCPs for template-defined EFs
@@ -7,7 +10,7 @@ materialise the SAIP / TS 31.102 §9 template default at runtime
 ``EF.Keys = 07FF...FF`` and so on). Without this fill-in the modem
 sees ``9000`` with an empty body when reading via SFI -- the exact
 symptom that surfaced in the
-``89103000000466311335`` HIL trace.
+``89880000000466311335`` HIL trace.
 
 These tests pin:
 
@@ -52,7 +55,7 @@ from SIMCARD.state import (
 )
 
 
-_BPP_PATH = Path("Workspace/LocalSMDPP/profile/89103000000466311335_test.txt")
+_BPP_PATH = Path("Workspace/LocalSMDPP/profile/89880000000466311335_test.txt")
 
 
 def _find_ef(state, parent_name: str, fid: str) -> SimFileNode | None:
@@ -103,8 +106,8 @@ class SaipTemplateDefaultsRuntimeFillInTests(unittest.TestCase):
     def _bare_state_with_usim(self) -> SimCardState:
         state = SimCardState(
             atr=DEFAULT_SIM_ATR,
-            eid="89000000000000000000000000000000",
-            iccid="89000000000000000000",
+            eid="89049032000000000000000000000000",
+            iccid="89880000000000000000",
             imsi="001010000000001",
             default_dp_address="rsp.example.com",
             root_ci_pkid=b"\x00" * 20,

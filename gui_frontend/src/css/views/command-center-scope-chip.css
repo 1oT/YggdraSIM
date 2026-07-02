@@ -1,0 +1,42 @@
+/*
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+ */
+
+/* Scope chip in the SCP03 session header. Neutral accent so the
+   ATR / session / auth chips retain their semantic colours. */
+.cc-chip-scope {
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  color: var(--fg-dim);
+  letter-spacing: 0.02em;
+  text-transform: lowercase;
+}
+
+.cc-apps-hint {
+  padding: 14px 18px;
+  margin-top: 8px;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-elev);
+  color: var(--fg-dim);
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.cc-apps-hint p {
+  margin: 0;
+}
+
+.cc-stub-card {
+  padding: 22px 24px 20px;
+  border: 1px dashed var(--border);
+  background: var(--bg-elev);
+  color: var(--fg-dim);
+}
+
+.cc-stub-card h3 {
+  margin: 0 0 6px;
+  color: var(--fg);
+}
+

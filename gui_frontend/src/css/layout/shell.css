@@ -1,0 +1,478 @@
+/*
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+ */
+
+/* Layout shell ----------------------------------------------------------- */
+
+.app-shell {
+  display: grid;
+  grid-template-rows: 52px 1fr var(--log-dock-height, 180px) 28px;
+  grid-template-columns: 260px 1fr;
+  grid-template-areas:
+    "topbar    topbar"
+    "sidebar   main"
+    "sidebar   logdock"
+    "statusbar statusbar";
+  height: 100vh;
+  min-width: 860px;
+}
+
+.app-shell[data-log-collapsed="true"] {
+  grid-template-rows: 52px 1fr 28px 28px;
+}
+
+/* SA-G8: collapsible Command Center sidebar. The 260px column folds
+   away so the main content gets the full width — matches the
+   ``data-log-collapsed`` pattern already used for the log dock. The
+   chevron handle stays in the topbar at all times so the operator
+   can bring the sidebar back without keyboard tricks. */
+.app-shell[data-sidebar-collapsed="true"] {
+  grid-template-columns: 0 1fr;
+}
+
+.app-shell[data-sidebar-collapsed="true"] .sidebar {
+  display: none;
+}
+
+.app-shell[data-sidebar-collapsed="true"] .sidebar-collapse-glyph {
+  transform: rotate(180deg);
+}
+
+/* Collapsible top bar. Mirrors the sidebar/log-dock pattern: the
+   ``.app-shell`` carries the ``data-topbar-collapsed`` flag so the
+   grid row collapses to a slim handle strip. Both the sidebar
+   toggle (left edge) and the topbar toggle (right edge) stay
+   visible so the operator can independently control either panel
+   regardless of which one is currently collapsed — hiding the top
+   bar must NOT also remove the operator's only handle to the
+   sidebar. */
+.app-shell[data-topbar-collapsed="true"] {
+  grid-template-rows: 30px 1fr var(--log-dock-height, 180px) 28px;
+}
+
+.app-shell[data-topbar-collapsed="true"][data-log-collapsed="true"] {
+  grid-template-rows: 30px 1fr 28px 28px;
+}
+
+.app-shell[data-topbar-collapsed="true"] .topbar {
+  padding: 0 6px;
+  gap: 0;
+  justify-content: space-between;
+  min-height: 30px;
+}
+
+.app-shell[data-topbar-collapsed="true"] .topbar
+  > *:not(.topbar-collapse-toggle):not(.sidebar-collapse-toggle):not(.app-close-button) {
+  display: none;
+}
+
+.app-shell[data-topbar-collapsed="true"] .topbar::after {
+  display: none;
+}
+
+.app-shell[data-topbar-collapsed="true"] .topbar-collapse-glyph {
+  transform: rotate(180deg);
+}
+
+/* When the sidebar is collapsed independently, also drop its column
+   to zero — but the sidebar toggle (always rendered in the topbar)
+   stays clickable so the operator can bring it back. */
+.app-shell[data-sidebar-collapsed="true"][data-topbar-collapsed="true"]
+  .sidebar-collapse-toggle {
+  margin-right: 0;
+}
+
+.topbar-collapse-toggle,
+.app-close-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 22px;
+  margin-left: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm, 6px);
+  background: transparent;
+  color: var(--fg-muted, #888);
+  cursor: pointer;
+  transition: background-color var(--transition-fast),
+    color var(--transition-fast),
+    border-color var(--transition-fast);
+}
+
+.app-close-button {
+  margin-left: 4px;
+}
+
+.topbar-collapse-toggle:hover,
+.app-close-button:hover {
+  background: var(--surface-hover, rgba(255, 255, 255, 0.05));
+  color: var(--fg);
+  border-color: var(--accent-soft);
+}
+
+.app-close-button:hover {
+  color: var(--error, #bf616a);
+  border-color: var(--error, #bf616a);
+}
+
+.topbar-collapse-toggle:focus-visible,
+.app-close-button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.topbar-collapse-glyph {
+  font-size: 10px;
+  line-height: 1;
+  transition: transform var(--transition-fast);
+  display: inline-block;
+}
+
+.sidebar-collapse-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  margin-right: 4px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm, 6px);
+  background: transparent;
+  color: var(--fg-muted, #888);
+  cursor: pointer;
+  transition: background-color var(--transition-fast),
+    color var(--transition-fast),
+    border-color var(--transition-fast);
+}
+
+.sidebar-collapse-toggle:hover {
+  background: var(--surface-hover, rgba(255, 255, 255, 0.05));
+  color: var(--fg);
+  border-color: var(--accent-soft);
+}
+
+.sidebar-collapse-toggle:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.sidebar-collapse-glyph {
+  font-size: 12px;
+  line-height: 1;
+  transition: transform var(--transition-fast);
+  display: inline-block;
+}
+
+.topbar {
+  grid-area: topbar;
+  position: relative;
+  background: var(--topbar-bg);
+  backdrop-filter: saturate(180%) blur(14px);
+  -webkit-backdrop-filter: saturate(180%) blur(14px);
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  padding: 0 20px;
+  z-index: 3;
+}
+
+.topbar::after {
+  content: "";
+  position: absolute;
+  inset: auto 0 -1px 0;
+  height: 1px;
+  background: linear-gradient(90deg,
+    transparent 0%,
+    var(--accent-soft) 50%,
+    transparent 100%);
+  pointer-events: none;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+.brand-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 3px;
+  overflow: hidden;
+  background: color-mix(in oklab, var(--bg-elev), var(--bg) 28%);
+  border: 1px solid color-mix(in oklab, var(--accent), var(--border) 48%);
+  border-radius: 50%;
+  box-shadow: 0 4px 14px -6px var(--accent-glow);
+  transition: transform var(--transition-mid) var(--ease-out-bounce),
+    box-shadow var(--transition-mid);
+}
+
+.brand-mark-svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.brand:hover .brand-mark {
+  transform: rotate(-6deg) scale(1.05);
+  box-shadow: 0 6px 18px -4px var(--accent-glow);
+}
+
+.brand-name {
+  font-size: 15px;
+  background: var(--gradient-brand);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.breadcrumbs {
+  flex: 1 1 auto;
+  color: var(--fg-dim);
+  font-size: 13px;
+  letter-spacing: 0.01em;
+}
+
+.breadcrumbs .crumb {
+  padding: 4px 10px;
+  border-radius: var(--radius-pill);
+  background: var(--bg-hover);
+  border: 1px solid var(--border);
+  color: var(--fg);
+  font-weight: 500;
+}
+
+.status-cluster {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: flex-end;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.topbar-suite-health {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+  min-height: 30px;
+  padding: 4px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  background: var(--bg-elev-2);
+  color: var(--fg-dim);
+  font-size: 11px;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.topbar-suite-version {
+  color: var(--fg);
+  font-weight: 750;
+}
+
+.topbar-suite-separator {
+  color: var(--fg-muted);
+}
+
+.topbar-suite-active {
+  color: var(--fg-dim);
+  font-weight: 600;
+}
+
+.topbar-card-bridge {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+  min-height: 30px;
+  padding: 4px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  background: var(--bg-elev-2);
+  color: var(--fg-dim);
+  cursor: pointer;
+  font: inherit;
+  font-size: 11px;
+  line-height: 1;
+  text-align: left;
+  white-space: nowrap;
+  transition: background-color var(--transition-fast),
+    border-color var(--transition-fast),
+    color var(--transition-fast);
+}
+
+.topbar-card-bridge:hover {
+  border-color: var(--accent-soft);
+  color: var(--fg);
+}
+
+.topbar-card-bridge:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.topbar-card-bridge:disabled,
+.topbar-card-bridge[data-busy="true"] {
+  cursor: wait;
+  opacity: 0.78;
+}
+
+.topbar-card-bridge-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: 0.72;
+}
+
+.topbar-card-bridge-label {
+  color: var(--fg-dim);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.topbar-card-bridge-value {
+  color: currentColor;
+  font-weight: 700;
+}
+
+.topbar-card-bridge[data-state="configured"] {
+  border-color: color-mix(in srgb, var(--accent) 36%, var(--border));
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.topbar-card-bridge[data-state="running"] {
+  border-color: rgba(163, 190, 140, 0.45);
+  background: var(--ok-soft);
+  color: var(--ok);
+}
+
+.topbar-card-bridge[data-state="running"] .topbar-card-bridge-dot {
+  opacity: 1;
+  box-shadow: 0 0 0 2px var(--ok-soft), 0 0 10px rgba(163, 190, 140, 0.38);
+}
+
+.topbar-card-bridge[data-state="error"] {
+  border-color: rgba(191, 97, 106, 0.42);
+  background: var(--fail-soft);
+  color: var(--fail);
+}
+
+.topbar-control-label {
+  color: var(--fg-dim);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.topbar-backend-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: 0 0 auto;
+  min-height: 30px;
+  padding: 3px 5px 3px 9px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  background: var(--bg-elev-2);
+}
+
+.topbar-backend-option {
+  min-height: 22px;
+  padding: 3px 8px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--fg-muted);
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 650;
+  line-height: 1;
+  transition: background var(--transition-fast),
+    border-color var(--transition-fast),
+    color var(--transition-fast);
+}
+
+.topbar-backend-option:hover {
+  background: var(--bg-hover);
+  color: var(--fg);
+}
+
+.topbar-backend-option:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.topbar-backend-option.is-active {
+  background: var(--accent-soft);
+  border-color: color-mix(in oklab, var(--accent) 48%, var(--border));
+  color: var(--fg);
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: var(--radius-pill);
+  background: var(--bg-elev-2);
+  border: 1px solid var(--border);
+  font-size: 11px;
+  color: var(--fg-dim);
+  text-transform: lowercase;
+  letter-spacing: 0.02em;
+  transition: border-color var(--transition-fast),
+    background-color var(--transition-fast);
+}
+
+.badge:hover {
+  border-color: var(--border-strong);
+}
+
+.badge-api {
+  font-weight: 500;
+  padding-left: 8px;
+}
+
+.badge-api .dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--fg-dim);
+  position: relative;
+}
+
+.badge-api[data-state="ok"] { color: var(--ok); border-color: var(--ok-soft); background: var(--ok-soft); }
+.badge-api[data-state="ok"] .dot { background: var(--ok); box-shadow: 0 0 0 2px var(--ok-soft); }
+.badge-api[data-state="warn"] { color: var(--warn); border-color: var(--warn-soft); background: var(--warn-soft); }
+.badge-api[data-state="warn"] .dot { background: var(--warn); }
+.badge-api[data-state="fail"] { color: var(--fail); border-color: var(--fail-soft); background: var(--fail-soft); }
+.badge-api[data-state="fail"] .dot { background: var(--fail); }
+
+@media (max-width: 1040px) {
+  .topbar > .breadcrumbs {
+    display: none;
+  }
+
+  .theme-picker label,
+  .topbar-control-label,
+  .topbar-card-bridge-label {
+    display: none;
+  }
+}

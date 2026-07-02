@@ -1,14 +1,14 @@
 {
   "theme": "textual-ansi",
   "splits": {
-    "json_outline_width": 71,
-    "json_col_width": 180,
+    "json_outline_width": 38,
+    "json_col_width": 95,
     "inspect_width": 141,
     "bottom_height": 38
   },
   "panes": {
     "outline_visible": true,
-    "right_mode": "inspect",
+    "right_mode": "lint",
     "bottom_left_mode": "none",
     "bottom_right_mode": "none"
   },

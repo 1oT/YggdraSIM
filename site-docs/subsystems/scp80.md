@@ -5,6 +5,11 @@ tags:
   - scp80
   - ota
 ---
+<!--
+SPDX-License-Identifier: GPL-3.0-or-later
+Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+-->
+
 
 # SCP80 OTA Shell
 
@@ -92,9 +97,9 @@ The parameter set exposed by `set` covers:
 ### Send a plain `UPDATE BINARY` via OTA
 
 ```text
-[SCP80] > iccid 8988201234567890123
-[SCP80] > set KIc 15
-[SCP80] > set KID 15
+[SCP80] > iccid 8988000000000000000F
+[SCP80] > set kic_indicator 15
+[SCP80] > set kid_indicator 15
 [SCP80] > set TAR 000000
 [SCP80] > build 00D6000003A0A0A0
 [SCP80] > send
@@ -103,13 +108,13 @@ The parameter set exposed by `set` covers:
 ### One-shot OTA wrap and send
 
 ```bash
-python -m SCP80 --cmd "iccid 8988201234567890123; ota 00D6000003A0A0A0; exit"
+python -m SCP80 --cmd "iccid 8988000000000000000F; ota 00D6000003A0A0A0; exit"
 ```
 
 ### Reuse ICCID-bound state across sessions
 
 ```text
-[SCP80] > iccid 8988201234567890123
+[SCP80] > iccid 8988000000000000000F
 [SCP80] > show
 [SCP80] > build 00A40000023F00
 [SCP80] > send

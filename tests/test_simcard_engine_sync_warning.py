@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 """Regression test for the SIMCARD engine surfacing store-sync failures.
 
 ``SimulatedSimCardEngine._sync_all_stores`` used to silently swallow any

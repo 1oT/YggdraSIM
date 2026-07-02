@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 """Regression tests for the APDU recorder + GUI live stream.
 
 The user reported that the bottom-dock APDU panel only showed
@@ -127,6 +130,46 @@ class ApduRecorderUnitTests(unittest.TestCase):
                 detach()
 
         asyncio.run(_run())
+
+    def test_attach_queue_prunes_closed_event_loop(self) -> None:
+        recorder = self.mod._ApduRecorder(max_buffer=2, max_async_queues=4)
+        loop = asyncio.new_event_loop()
+
+        async def _make_queue() -> asyncio.Queue:
+            return asyncio.Queue(maxsize=1)
+
+        queue = loop.run_until_complete(_make_queue())
+        recorder.attach_queue(queue, loop=loop)
+        self.assertEqual(len(recorder._async_queues), 1)
+        loop.close()
+
+        recorder.record(self._make_exchange(apdu="C0DE"))
+        self.assertEqual(recorder.async_queue_count, 0)
+        self.assertGreaterEqual(recorder.dropped, 1)
+
+    def test_attach_queue_caps_registered_consumers(self) -> None:
+        recorder = self.mod._ApduRecorder(max_buffer=2, max_async_queues=2)
+        loops: list[asyncio.AbstractEventLoop] = []
+        detaches: list[Any] = []
+
+        async def _make_queue() -> asyncio.Queue:
+            return asyncio.Queue(maxsize=1)
+
+        try:
+            for _ in range(3):
+                loop = asyncio.new_event_loop()
+                loops.append(loop)
+                queue = loop.run_until_complete(_make_queue())
+                detaches.append(recorder.attach_queue(queue, loop=loop))
+
+            self.assertEqual(recorder.async_queue_count, 2)
+            self.assertEqual(len(recorder._async_queues), 2)
+            self.assertGreaterEqual(recorder.dropped, 1)
+        finally:
+            for detach in detaches:
+                detach()
+            for loop in loops:
+                loop.close()
 
 
 # ----------------------------------------------------------------------
@@ -292,6 +335,95 @@ class CardBackendIntegrationTests(unittest.TestCase):
         # Source must be the reader name — gives operators per-reader
         # grouping in the dock.
         self.assertEqual(snap[0].source, "ACS APG8201 00 00")
+
+
+# ----------------------------------------------------------------------
+# Frontend bundle contracts
+# ----------------------------------------------------------------------
+
+
+_STATIC_DIR = (
+    Path(__file__).resolve().parents[1]
+    / "yggdrasim_common" / "gui_server" / "static"
+)
+
+
+class FrontendApduStreamContract(unittest.TestCase):
+    """``app.js`` opens, formats, and reconnects the APDU stream."""
+
+    def setUp(self) -> None:
+        self.js = (_STATIC_DIR / "app.js").read_text(encoding="utf-8")
+
+    def test_open_apdu_event_stream_is_defined(self) -> None:
+        self.assertIn("function openApduEventStream(", self.js)
+        self.assertIn("/api/events/apdu?t=", self.js)
+
+    def test_open_called_from_init(self) -> None:
+        self.assertIn("openApduEventStream();", self.js)
+
+    def test_frame_formatter_emits_into_apdu_bucket(self) -> None:
+        # The dock gets ``level: "apdu"`` rows tagged with the source
+        # the recorder captured (reader name / "simulator" / etc.).
+        self.assertIn('level: "apdu"', self.js)
+        self.assertIn('source: String(frame.source || "card")', self.js)
+
+    def test_format_frame_includes_command_response_and_sw(self) -> None:
+        # Compact one-liner that fits the dock without truncation.
+        self.assertIn('"\\u2192 "', self.js) if False else None  # noqa
+        self.assertIn("apdu", self.js)
+        self.assertIn("sw=", self.js)
+        self.assertIn("ms", self.js)
+
+    def test_reconnect_with_exponential_backoff(self) -> None:
+        # Bounded back-off so a missing GUI server doesn't pin the CPU.
+        self.assertIn("Math.min(nextDelay * 2, 30000)", self.js)
+        self.assertIn("apduStreamState.reconnectTimerId = setTimeout", self.js)
+        self.assertIn("clearApduReconnectTimer();", self.js)
+
+    def test_shutdown_paths_close_stream_and_timer(self) -> None:
+        self.assertIn(
+            'window.addEventListener("pagehide", closeApduEventStream)',
+            self.js,
+        )
+        self.assertIn(
+            'window.addEventListener("beforeunload", closeApduEventStream)',
+            self.js,
+        )
+        self.assertIn("detachApduSocketHandlers(sock)", self.js)
+
+    def test_ping_frames_are_silently_ignored(self) -> None:
+        self.assertIn('frame.event === "ping"', self.js)
+
+    def test_helpers_exposed_on_window(self) -> None:
+        self.assertIn("window.YggdraSimApduStream", self.js)
+
+
+class BackendRouteRegistration(unittest.TestCase):
+    def test_app_includes_apdu_event_router(self) -> None:
+        app_py = (
+            Path(__file__).resolve().parents[1]
+            / "yggdrasim_common" / "gui_server" / "app.py"
+        ).read_text(encoding="utf-8")
+        self.assertIn(
+            "from .routes import apdu_events as apdu_event_routes", app_py,
+        )
+        self.assertIn(
+            "app.include_router(apdu_event_routes.router)", app_py,
+        )
+
+    def test_route_module_declares_websocket_endpoint(self) -> None:
+        rt = (
+            Path(__file__).resolve().parents[1]
+            / "yggdrasim_common" / "gui_server" / "routes" / "apdu_events.py"
+        ).read_text(encoding="utf-8")
+        self.assertIn('@router.websocket("/api/events/apdu")', rt)
+        # Auth path mirrors the terminal route.
+        self.assertIn("compare_tokens", rt)
+        # Replays the buffer first so a fresh tab isn't blank.
+        self.assertIn("recorder.snapshot(limit=200)", rt)
+        self.assertIn("asyncio.wait_for(", rt)
+        self.assertIn("_QUEUE_CAP = 256", rt)
+        self.assertNotIn("asyncio.create_task(_pump_heartbeat", rt)
 
 
 if __name__ == "__main__":

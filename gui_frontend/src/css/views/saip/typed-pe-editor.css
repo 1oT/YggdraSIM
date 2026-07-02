@@ -1,0 +1,643 @@
+/*
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+ */
+
+/* ---- SA-G2: typed PE editor cards ---------------------------------- */
+
+.saip-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 4px 0;
+}
+
+.saip-edit-card {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-alt, rgba(255, 255, 255, 0.03));
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.saip-edit-card-title {
+  margin: 0;
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--fg-muted, #888);
+}
+
+.saip-edit-card-hint {
+  margin: 0 0 4px 0;
+  font-size: 11px;
+  color: var(--fg-muted, #888);
+  font-style: italic;
+}
+
+.saip-edit-kv {
+  display: grid;
+  grid-template-columns: minmax(140px, 28%) 1fr;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 12px;
+  padding: 2px 0;
+}
+
+.saip-edit-kv-label {
+  color: var(--fg-muted, #888);
+  font-size: 11px;
+  letter-spacing: 0.02em;
+}
+
+.saip-edit-kv-value {
+  color: var(--fg);
+  word-break: break-word;
+}
+
+.saip-edit-kv-value.is-mono {
+  font-family: var(--mono, "JetBrains Mono", monospace);
+  font-size: 11px;
+}
+
+.saip-edit-kv-value.is-muted {
+  color: var(--fg-muted, #888);
+  font-style: italic;
+}
+
+.saip-edit-card .saip-edit-card {
+  background: var(--surface, rgba(255, 255, 255, 0.02));
+  border-color: rgba(255, 255, 255, 0.06);
+}
+
+.saip-decoded-edit-fold {
+  display: block;
+}
+
+.saip-decoded-edit-fold-summary {
+  cursor: pointer;
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.saip-decoded-edit-fold-summary::-webkit-details-marker {
+  display: none;
+}
+
+.saip-decoded-edit-fold[open] > .saip-decoded-edit-fold-summary {
+  margin-bottom: 6px;
+}
+
+.saip-decoded-edit-fold-body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.saip-sd-param-card {
+  padding: 0;
+  gap: 0;
+  overflow: hidden;
+}
+
+.saip-sd-param-summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 38px;
+  padding: 8px 12px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.saip-sd-param-summary::-webkit-details-marker {
+  display: none;
+}
+
+.saip-sd-param-summary-title {
+  color: var(--fg);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.saip-sd-param-summary-meta,
+.saip-sd-param-summary-chip,
+.saip-sd-param-group-chip {
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--fg-muted, #888);
+  font-size: 10px;
+  line-height: 1;
+  padding: 4px 7px;
+  white-space: nowrap;
+}
+
+.saip-sd-param-summary-chip {
+  color: var(--accent, #8bd3e6);
+}
+
+.saip-sd-param-body {
+  border-top: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+}
+
+.saip-sd-param-shell {
+  display: grid;
+  grid-template-columns: minmax(220px, 28%) minmax(0, 1fr);
+  height: clamp(320px, 58vh, 560px);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.saip-sd-param-tree,
+.saip-sd-param-pane {
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+.saip-sd-param-tree {
+  border-right: 1px solid var(--border);
+  background: var(--surface, rgba(255, 255, 255, 0.02));
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px;
+}
+
+.saip-sd-param-pane {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+  overscroll-behavior: contain;
+  padding: 10px;
+}
+
+.saip-sd-param-pane > * {
+  flex: 0 0 auto;
+}
+
+.saip-sd-param-tree-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  min-height: 30px;
+  padding: 2px;
+  border-radius: 6px;
+}
+
+.saip-sd-param-tree-row.depth-1 {
+  padding-left: 12px;
+}
+
+.saip-sd-param-tree-row.is-active {
+  background: var(--accent-soft, rgba(116, 184, 205, 0.16));
+}
+
+.saip-sd-param-tree-label {
+  appearance: none;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--fg);
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font: inherit;
+  text-align: left;
+  padding: 6px 8px;
+  min-width: 0;
+  cursor: pointer;
+}
+
+.saip-sd-param-tree-row.is-active .saip-sd-param-tree-label {
+  border-color: var(--accent, rgba(116, 184, 205, 0.75));
+}
+
+.saip-sd-param-tree-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.saip-sd-param-dot {
+  border-radius: 999px;
+  background: var(--fg-muted, #888);
+  flex: 0 0 auto;
+  height: 7px;
+  opacity: 0.5;
+  width: 7px;
+}
+
+.saip-sd-param-dot.is-on {
+  background: var(--accent, #8bd3e6);
+  opacity: 1;
+}
+
+.saip-sd-param-toggle {
+  margin: 0 6px 0 0;
+}
+
+.saip-sd-param-pane-title,
+.saip-sd-param-subtitle {
+  margin: 0;
+  color: var(--fg-muted, #888);
+  font-size: 11px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.saip-sd-param-field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  font-size: 11px;
+  color: var(--fg-muted, #888);
+}
+
+.saip-sd-param-field textarea {
+  min-height: 76px;
+  resize: vertical;
+}
+
+.saip-sd-param-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.saip-sd-param-list--inactive {
+  min-height: 84px;
+  justify-content: center;
+}
+
+.saip-sd-param-presets,
+.saip-sd-param-c9-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.saip-sd-param-presets {
+  flex-direction: row;
+  flex-wrap: wrap;
+}
+
+.saip-sd-param-list-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: start;
+}
+
+.saip-sd-param-list-row--wide {
+  grid-template-columns: minmax(72px, 96px) minmax(0, 1fr) auto;
+}
+
+.saip-sd-param-list-row input[type="number"] {
+  min-width: 84px;
+}
+
+.saip-sd-param-list-row .saip-form-row-hint {
+  grid-column: 1 / -1;
+}
+
+.saip-sd-param-footer {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding-top: 4px;
+}
+
+.saip-sd-param-status {
+  color: var(--fg-muted, #888);
+  font-size: 11px;
+}
+
+.saip-sd-param-status[data-state="ok"] {
+  color: var(--ok, #8fd19e);
+}
+
+.saip-sd-param-status[data-state="error"] {
+  color: var(--danger, #e07a7a);
+}
+
+@media (max-width: 900px) {
+  .saip-sd-param-shell {
+    grid-template-columns: 1fr;
+    grid-template-rows: minmax(120px, 32%) minmax(0, 1fr);
+    height: clamp(360px, 70vh, 640px);
+  }
+
+  .saip-sd-param-tree {
+    border-right: 0;
+    border-bottom: 1px solid var(--border);
+  }
+}
+
+/* ── Add-file modal (Phase 3 wizard-parity) ─────────────────────────── */
+
+.saip-add-file-btn {
+  margin-left: auto;
+  align-self: center;
+}
+
+.saip-add-file-body {
+  max-height: 70vh;
+  overflow-y: auto;
+  padding: 10px 14px;
+}
+
+.saip-add-file-tree {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 0;
+}
+
+.saip-add-file-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 6px;
+  border-radius: 4px;
+  font-size: 12px;
+}
+
+.saip-add-file-row + .saip-add-file-row {
+  border-top: 1px solid var(--surface-border, rgba(255, 255, 255, 0.04));
+}
+
+.saip-add-file-row--df {
+  font-weight: 600;
+}
+
+.saip-add-file-row--disabled {
+  opacity: 0.55;
+}
+
+.saip-add-file-glyph {
+  flex: 0 0 auto;
+  color: var(--fg-muted, #888);
+  font-size: 11px;
+  width: 12px;
+  text-align: center;
+}
+
+.saip-add-file-label {
+  flex: 1 1 auto;
+  color: var(--fg);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.saip-add-file-pename {
+  flex: 0 0 auto;
+  color: var(--fg-muted, #888);
+  font-size: 11px;
+  font-family: var(--mono, "JetBrains Mono", monospace);
+}
+
+.saip-add-file-actions {
+  display: inline-flex;
+  gap: 6px;
+  flex: 0 0 auto;
+}
+
+.saip-add-file-present {
+  font-size: 11px;
+  font-style: italic;
+  color: var(--fg-muted, #888);
+}
+
+/* Editor-specific tables (Files / Key list) */
+
+.saip-editor-files,
+.saip-editor-keylist {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 11px;
+  margin-top: 4px;
+}
+
+.saip-editor-files thead th,
+.saip-editor-keylist thead th {
+  text-align: left;
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--fg-muted, #888);
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+.saip-editor-files-row {
+  cursor: pointer;
+  transition: background-color 0.12s ease;
+}
+
+.saip-editor-files-row:hover {
+  background: var(--surface, rgba(255, 255, 255, 0.04));
+}
+
+.saip-editor-files td,
+.saip-editor-keylist td {
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+}
+
+.saip-editor-keylist-health {
+  white-space: nowrap;
+}
+
+.saip-editor-app-health {
+  margin-top: 6px;
+}
+
+.saip-chip {
+  display: inline-block;
+  border-radius: 999px;
+  padding: 1px 8px;
+  font-size: 10px;
+  line-height: 1.5;
+  letter-spacing: 0.03em;
+  border: 1px solid transparent;
+}
+
+.saip-chip-ok {
+  color: #9ddf9d;
+  border-color: rgba(157, 223, 157, 0.45);
+  background: rgba(73, 138, 73, 0.22);
+}
+
+.saip-chip-warn {
+  color: #f2c48a;
+  border-color: rgba(242, 196, 138, 0.45);
+  background: rgba(156, 104, 38, 0.22);
+}
+
+.saip-row-flash {
+  outline: 1px solid rgba(123, 194, 255, 0.85);
+  background: rgba(88, 143, 196, 0.2);
+}
+
+.saip-cell-sub {
+  margin-top: 2px;
+  font-size: 10px;
+  color: var(--fg-muted, #888);
+  font-style: italic;
+}
+
+/* Template catalog tree — TCA SAIP §9 file-template registry projected
+   into a checkable tree. Mirrors the eUICC Profile Creator's *File
+   System Template* group. */
+
+.saip-template-tree,
+.saip-template-children,
+.saip-template-flat {
+  list-style: none;
+  margin: 6px 0 0 0;
+  padding: 0;
+}
+
+.saip-template-children {
+  margin-left: 18px;
+  border-left: 1px dashed var(--border, rgba(255, 255, 255, 0.1));
+  padding-left: 10px;
+}
+
+.saip-template-node {
+  margin: 2px 0;
+}
+
+.saip-template-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 3px 6px;
+  border-radius: 4px;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.saip-template-row:hover {
+  background: var(--surface, rgba(255, 255, 255, 0.04));
+}
+
+.saip-template-row--present {
+  color: var(--nord-frost-1, #8FBCBB);
+}
+
+.saip-template-row--required:not(.saip-template-row--present) {
+  color: var(--fg, #ECEFF4);
+}
+
+.saip-template-row--volatile {
+  font-style: italic;
+}
+
+.saip-template-check {
+  flex: 0 0 auto;
+  margin-top: 2px;
+  cursor: pointer;
+}
+
+.saip-template-row-label {
+  flex: 1 1 auto;
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  column-gap: 4px;
+  row-gap: 2px;
+}
+
+.saip-template-row-label strong {
+  color: inherit;
+  font-weight: 600;
+}
+
+.saip-template-row-fid,
+.saip-template-row-sfi {
+  font-family: var(--mono, "JetBrains Mono", monospace);
+  font-size: 11px;
+  color: var(--fg-muted, #888);
+}
+
+.saip-template-row-type,
+.saip-template-row-dim {
+  font-size: 11px;
+  color: var(--fg-muted, #888);
+}
+
+.saip-template-row-badges {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-left: 4px;
+}
+
+.saip-template-badge {
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 1px 6px;
+  border-radius: 3px;
+  background: var(--surface, rgba(255, 255, 255, 0.06));
+  color: var(--fg-muted, #888);
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.08));
+}
+
+.saip-template-badge--req {
+  color: var(--nord-aurora-3, #EBCB8B);
+  border-color: rgba(235, 203, 139, 0.3);
+}
+
+.saip-template-badge--hu {
+  color: var(--nord-aurora-2, #D08770);
+  border-color: rgba(208, 135, 112, 0.3);
+}
+
+.saip-template-badge--arr {
+  color: var(--nord-frost-2, #88C0D0);
+  border-color: rgba(136, 192, 208, 0.3);
+}
+
+.saip-tag-muted {
+  display: inline-block;
+  margin-left: 4px;
+  padding: 0 4px;
+  font-size: 9px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--fg-muted, #888);
+  background: var(--surface, rgba(255, 255, 255, 0.05));
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  vertical-align: middle;
+}
+
+.saip-editor-keylist-idx {
+  font-family: var(--mono, "JetBrains Mono", monospace);
+  color: var(--fg-muted, #888);
+  width: 28px;
+}
+
+.saip-editor-keylist-comps {
+  white-space: pre-wrap;
+  font-family: var(--mono, "JetBrains Mono", monospace);
+  font-size: 10px;
+  color: var(--fg-muted, #888);
+  max-width: 240px;
+}

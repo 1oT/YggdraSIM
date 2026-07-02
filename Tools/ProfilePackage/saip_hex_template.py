@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """Inline typed hex placeholder handling for vendor SAIP templates.
 
@@ -8,13 +11,15 @@ values:
     62128202412183026F078B036F06068001098800810908{imsi:IMSI:8:encode_imsi}80027F20
 
 The ``{name:TYPE:length[:modifier]}`` form declares the byte length of
-the region each placeholder occupies. YggdraSIM keeps every placeholder
-literal intact through ``OPEN`` / ``INSPECT`` but still needs valid DER
-bytes for pySim to decode. This module replaces each placeholder with
-a deterministic, per-index sentinel of the declared byte length,
-records the original literals in a sidecar, and re-inserts them into
-the tagged JSON document after decode so the operator sees the
-placeholder text exactly where it sat in the source file.
+the region each placeholder occupies. Some vendor templates use a compact
+form where the type and length are folded into the token name, for example
+``{imsiIMSI8EncodeIMSI}`` or ``[iccidICCID10]``. YggdraSIM keeps every
+placeholder literal intact through ``OPEN`` / ``INSPECT`` but still needs
+valid DER bytes for pySim to decode. This module replaces each placeholder
+with a deterministic, per-index sentinel of the declared byte length,
+records the original literals in a sidecar, and re-inserts them into the
+tagged JSON document after decode so the operator sees the placeholder
+text exactly where it sat in the source file.
 
 The placeholder itself is treated as opaque: nothing here parses the
 ``TYPE`` or ``modifier`` component, only the declared byte length.
@@ -41,6 +46,16 @@ _INLINE_PLACEHOLDER_RE = re.compile(
     r"(?P<length>\d+)"
     r"(?::(?P<modifier>[A-Za-z_][A-Za-z0-9_]*))?"
     r"\}"
+)
+_COMPACT_PLACEHOLDER_RE = re.compile(
+    r"\{(?P<brace>[A-Za-z_][A-Za-z0-9_]*)\}"
+    r"|\[(?P<bracket>[A-Za-z_][A-Za-z0-9_]*)\]"
+)
+_COMPACT_PLACEHOLDER_BODY_RE = re.compile(
+    r"^(?P<var>[A-Za-z_][A-Za-z0-9_]*)"
+    r"(?P<type>ICCID|IMSI|MSISDN|BINARY|TEXT)"
+    r"(?P<length>\d+)"
+    r"(?P<modifier>[A-Za-z_][A-Za-z0-9_]*)?$"
 )
 
 
@@ -74,11 +89,64 @@ class InlinePlaceholderRecord:
     sentinel_hex: str
 
 
+@dataclass(frozen=True)
+class _InlinePlaceholderToken:
+    literal: str
+    variable_name: str
+    type_name: str
+    byte_length: int
+    modifier: str | None
+    start: int
+    end: int
+
+
+def _token_from_typed_match(match: re.Match[str]) -> _InlinePlaceholderToken:
+    modifier = match.group("modifier")
+    return _InlinePlaceholderToken(
+        literal=match.group(0),
+        variable_name=match.group("var"),
+        type_name=match.group("type"),
+        byte_length=int(match.group("length")),
+        modifier=modifier if modifier is not None else None,
+        start=match.start(),
+        end=match.end(),
+    )
+
+
+def _token_from_compact_match(match: re.Match[str]) -> _InlinePlaceholderToken | None:
+    body = match.group("brace") or match.group("bracket") or ""
+    parsed = _COMPACT_PLACEHOLDER_BODY_RE.fullmatch(body)
+    if parsed is None:
+        return None
+    modifier = parsed.group("modifier")
+    return _InlinePlaceholderToken(
+        literal=match.group(0),
+        variable_name=parsed.group("var"),
+        type_name=parsed.group("type"),
+        byte_length=int(parsed.group("length")),
+        modifier=modifier if modifier is not None else None,
+        start=match.start(),
+        end=match.end(),
+    )
+
+
+def _iter_inline_placeholder_tokens(raw_text: str) -> Iterator[_InlinePlaceholderToken]:
+    tokens: list[_InlinePlaceholderToken] = [
+        _token_from_typed_match(match)
+        for match in _INLINE_PLACEHOLDER_RE.finditer(raw_text)
+    ]
+    for match in _COMPACT_PLACEHOLDER_RE.finditer(raw_text):
+        token = _token_from_compact_match(match)
+        if token is not None:
+            tokens.append(token)
+    yield from sorted(tokens, key=lambda token: token.start)
+
+
 def detect_inline_placeholders(raw_text: str) -> bool:
     """Return True if ``raw_text`` contains at least one inline placeholder."""
     if isinstance(raw_text, str) is False:
         return False
-    return _INLINE_PLACEHOLDER_RE.search(raw_text) is not None
+    return next(_iter_inline_placeholder_tokens(raw_text), None) is not None
 
 
 def iter_inline_placeholders(raw_text: str) -> Iterator[re.Match[str]]:
@@ -100,17 +168,16 @@ def extract_inline_placeholders_from_hex_text(hex_text: str) -> list[dict[str, A
     if isinstance(hex_text, str) is False:
         return []
     entries: list[dict[str, Any]] = []
-    for match in _INLINE_PLACEHOLDER_RE.finditer(hex_text):
-        modifier = match.group("modifier")
+    for token in _iter_inline_placeholder_tokens(hex_text):
         entries.append(
             {
-                "literal": match.group(0),
-                "variable": match.group("var"),
-                "type": match.group("type"),
-                "byte_length": int(match.group("length")),
-                "modifier": modifier if modifier is not None else None,
-                "start": match.start(),
-                "end": match.end(),
+                "literal": token.literal,
+                "variable": token.variable_name,
+                "type": token.type_name,
+                "byte_length": token.byte_length,
+                "modifier": token.modifier,
+                "start": token.start,
+                "end": token.end,
             }
         )
     return entries
@@ -224,7 +291,7 @@ def substitute_inline_placeholders(
     parts: list[str] = []
     cursor = 0
 
-    for match in _INLINE_PLACEHOLDER_RE.finditer(raw_text):
+    for token in _iter_inline_placeholder_tokens(raw_text):
         placeholder_index = len(records)
         if placeholder_index >= _MAX_PLACEHOLDERS_PER_FILE:
             raise ValueError(
@@ -232,7 +299,7 @@ def substitute_inline_placeholders(
                 f"inline placeholders; refusing to continue."
             )
 
-        byte_length = int(match.group("length"))
+        byte_length = token.byte_length
         sentinel = _sentinel_bytes(placeholder_index, byte_length).hex().upper()
 
         # Re-salt and retry if blake2s hands us a sentinel that happens
@@ -252,25 +319,24 @@ def substitute_inline_placeholders(
         if sentinel in sentinels_seen:
             raise ValueError(
                 f"Failed to allocate unique sentinel for placeholder "
-                f"{match.group(0)!r}; report this as a bug."
+                f"{token.literal!r}; report this as a bug."
             )
         sentinels_seen.add(sentinel)
 
-        modifier_text = match.group("modifier")
         record = InlinePlaceholderRecord(
             index=placeholder_index,
-            literal=match.group(0),
-            variable_name=match.group("var"),
-            type_name=match.group("type"),
+            literal=token.literal,
+            variable_name=token.variable_name,
+            type_name=token.type_name,
             byte_length=byte_length,
-            modifier=(modifier_text if modifier_text is not None else None),
+            modifier=token.modifier,
             sentinel_hex=sentinel,
         )
         records.append(record)
 
-        parts.append(raw_text[cursor:match.start()])
+        parts.append(raw_text[cursor:token.start])
         parts.append(sentinel)
-        cursor = match.end()
+        cursor = token.end
 
     parts.append(raw_text[cursor:])
     return "".join(parts), records

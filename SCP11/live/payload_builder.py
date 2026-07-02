@@ -26,7 +26,7 @@ ensure_repo_pysim_on_path()
 
 try:
     from pySim.esim import compile_asn1_subdir
-except ImportError:
+except Exception:
     compile_asn1_subdir = None
 
 try:

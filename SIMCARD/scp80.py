@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
 """SMS-PP / SCP80 secured command execution inside the simulator."""
@@ -20,6 +23,8 @@ _SINGLE_SMS_TP_PREFIX = bytes.fromhex("4005811250F341F62222222222222225027000")
 _CONCAT_SMS_TP_PREFIX = bytes.fromhex("4005811250F341F6222222222222222502")
 _CONCAT_UDH_PREFIX = bytes.fromhex("050003")
 _GET_RESPONSE_MAX_ROUNDS = 64
+_TPDU_PID_OFFSET = 6
+_TPDU_DCS_OFFSET = 7
 
 
 class Scp80Logic:
@@ -85,7 +90,7 @@ class Scp80Logic:
     def _strip_single_segment_0348(self, tpdu: bytes) -> bytes | None:
         if len(tpdu) <= len(_SINGLE_SMS_TP_PREFIX):
             return None
-        if not tpdu.startswith(_SINGLE_SMS_TP_PREFIX):
+        if self._tpdu_prefix_matches(tpdu, _SINGLE_SMS_TP_PREFIX) is False:
             return None
         return tpdu[len(_SINGLE_SMS_TP_PREFIX) :]
 
@@ -93,7 +98,7 @@ class Scp80Logic:
         prefix = _CONCAT_SMS_TP_PREFIX
         if len(tpdu) < len(prefix) + 1:
             raise ValueError("concat SMS TPDU shorter than minimum prefix")
-        if not tpdu.startswith(prefix):
+        if self._tpdu_prefix_matches(tpdu, prefix) is False:
             raise ValueError("unsupported SMS TPDU layout")
         tp_len = tpdu[len(prefix)]
         end = len(prefix) + 1 + int(tp_len)
@@ -123,6 +128,19 @@ class Scp80Logic:
         block = b"".join(self._concat_asm_parts[i] for i in range(1, total + 1))
         self._reset_sms_reassembly()
         return block
+
+    @staticmethod
+    def _tpdu_prefix_matches(tpdu: bytes, prefix: bytes) -> bool:
+        raw = bytes(tpdu or b"")
+        expected = bytes(prefix or b"")
+        if len(raw) < len(expected):
+            return False
+        for index, value in enumerate(expected):
+            if index in (_TPDU_PID_OFFSET, _TPDU_DCS_OFFSET):
+                continue
+            if raw[index] != value:
+                return False
+        return True
 
     @staticmethod
     def _d1_envelope_value(envelope: bytes) -> bytes:

@@ -4,6 +4,11 @@ tags:
   - reference
   - faq
 ---
+<!--
+SPDX-License-Identifier: GPL-3.0-or-later
+Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+-->
+
 
 # FAQ
 
@@ -16,14 +21,14 @@ view with links into the deep dives.
 ## Is `SCP03` a relay shell?
 
 No. `SCP03/` is the card-administration and retrieval shell. Relay work
-lives in `SCP11/live` and `SCP11/test`. Direct local ISD-R work lives in
+lives in `SCP11/live`. Direct local ISD-R work lives in
 `SCP11/local_access`. eIM-side SGP.32 work lives in `SCP11/eim_local`.
 
-## What is the difference between `SCP11/live` and `SCP11/test`?
+## What happened to `SCP11/test`?
 
-Same operator model. The intended drift is certificate trust, endpoint
-defaults, and lab-only request/result shaping. See
-[SCP11 Test Relay](../subsystems/scp11-test.md).
+`SCP11/test` is now an import compatibility namespace. Operator relay work
+uses `SCP11/live`, which contains the lab request-shaping controls and explicit
+CA-bundle configuration.
 
 ## What does `Workspace/LocalEIM/eim_identity.json` do and why is it separate from `Workspace/SIMCARD/eim_identity.json`?
 

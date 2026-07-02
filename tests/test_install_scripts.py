@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 """
 Static and smoke tests for the install scripts under ``scripts/install``.
 
@@ -107,6 +110,7 @@ class PosixHelpOutputTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0)
         self.assertIn("--flavor", result.stdout)
         self.assertIn("--mode", result.stdout)
+        self.assertIn("--with-gui", result.stdout)
         self.assertIn("clean|full", result.stdout)
 
     def test_macos_help_lists_flavor_and_mode(self) -> None:
@@ -114,12 +118,14 @@ class PosixHelpOutputTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0)
         self.assertIn("--flavor", result.stdout)
         self.assertIn("--mode", result.stdout)
+        self.assertIn("--with-gui", result.stdout)
 
     def test_raspberrypi_help_lists_flavor_and_mode(self) -> None:
         result = self._run_help("install-raspberrypi.sh")
         self.assertEqual(result.returncode, 0)
         self.assertIn("--flavor", result.stdout)
         self.assertIn("--mode", result.stdout)
+        self.assertIn("--with-gui", result.stdout)
 
 
 @unittest.skipIf(shutil.which("bash") is None, "bash not available")
@@ -164,6 +170,7 @@ class WindowsScriptShapeTests(unittest.TestCase):
             "$Version",
             "$InstallDir",
             "$RepoRoot",
+            "$WithGui",
             "'clean'",
             "'full'",
             "'release'",
@@ -202,6 +209,19 @@ class CiWorkflowCoverageTests(unittest.TestCase):
         workflow = REPO_ROOT / ".github" / "workflows" / "build.yml"
         text = workflow.read_text(encoding="utf-8")
         self.assertIn("yggdrasim-linux-arm64-full-", text)
+
+    def test_workflow_publishes_gui_companion_artifacts(self) -> None:
+        workflow = REPO_ROOT / ".github" / "workflows" / "build.yml"
+        text = workflow.read_text(encoding="utf-8")
+        for asset in (
+            "yggdrasim-gui-linux-x86_64-clean",
+            "yggdrasim-gui-linux-x86_64-full",
+            "yggdrasim-gui-linux-arm64-clean",
+            "yggdrasim-gui-linux-arm64-full",
+            "yggdrasim-gui-macos-arm64-clean",
+            "yggdrasim-gui-windows-x86_64-clean.exe",
+        ):
+            self.assertIn(asset, text)
 
 
 if __name__ == "__main__":

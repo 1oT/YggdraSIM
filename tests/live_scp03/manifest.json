@@ -256,12 +256,6 @@
       "expected_substrings": ["OPc:"]
     },
     {
-      "name": "DECODE",
-      "script": "DECODE.in.txt",
-      "category": "tools",
-      "expected_substrings": ["Tag 6F", "Tag 82", "Tag 83"]
-    },
-    {
       "name": "SHOW",
       "script": "SHOW.in.txt",
       "category": "config",

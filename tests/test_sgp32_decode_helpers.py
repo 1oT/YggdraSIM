@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 import unittest
 
 from SCP03.logic.sgp32_decode import decode_eim_configuration_entries

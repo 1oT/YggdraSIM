@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 """Fourth-pass gap-coverage suite for SIMCARD surfaces beyond ES10.
 
 Earlier passes exhausted the SGP.32 v1.2 / SGP.22 v3.1 ES10b/c command
@@ -52,6 +55,7 @@ class _EngineHarness(unittest.TestCase):
             euicc_store_root=str(temp_root / "euicc_store"),
             profile_store_path=str(temp_root / "profile_store"),
         )
+        self.engine.state.chv_references[0x01].enabled = True
         self._select_usim_adf()
 
     def tearDown(self) -> None:
@@ -248,12 +252,9 @@ class EnvelopeDispatchTests(unittest.TestCase):
             root_ci_pkid=b"",
         )
         self.toolkit = ToolkitLogic(self.state)
-        # Disable IPA-poll and timer auto-rearm so D7 TIMER
-        # EXPIRATION is acknowledged with bare 9000 instead of 9113
-        # (proactive pending) -- the proactive paths are exercised
-        # by ``test_simcard_ipa_poll_*`` and
-        # ``test_simcard_stk_timer_management_bringup`` instead.
-        self.toolkit.state.toolkit.ipa_poll_enabled = False
+        # Disable timer auto-rearm so D7 TIMER EXPIRATION is
+        # acknowledged with bare 9000 instead of 9113
+        # (proactive pending).
         self.toolkit.state.toolkit.timer_management_auto_rearm = False
         self.fallback_called: list[bytes] = []
 

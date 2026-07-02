@@ -28,25 +28,25 @@ Typical use:
 
     from SCP11.shared.safe_parse import safe_parse
 
-    def _decode_eim_euicc_challenge_binary(self, value: str) -> bytes:
+    def _decode_wrapped_identifier(self, value: str) -> bytes:
         raw_value = self._decode_string_payload(value)
-        if len(raw_value) == 16:
+        if len(raw_value) > 0 and raw_value[0] != 0x80:
             return raw_value
 
-        def _parse_challenge(buf: bytes) -> bytes:
+        def _parse_identifier(buf: bytes) -> bytes:
             tag, inner_value, _, end_offset = self._read_tlv(buf, 0)
             if end_offset != len(buf):
-                raise ValueError("trailing bytes after challenge TLV")
-            if tag != b"\\x81":
+                raise ValueError("trailing bytes after identifier TLV")
+            if tag != b"\\x80":
                 raise ValueError("unexpected outer tag")
-            if len(inner_value) != 16:
-                raise ValueError("challenge length != 16 bytes")
+            if len(inner_value) == 0:
+                raise ValueError("empty identifier")
             return inner_value
 
         return safe_parse(
-            "eim.euicc_challenge",
+            "tlv.identifier",
             raw_value,
-            _parse_challenge,
+            _parse_identifier,
             default=b"",
         )
 

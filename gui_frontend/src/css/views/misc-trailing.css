@@ -1,0 +1,573 @@
+/*
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+ */
+
+/* ============================================================
+ * Reader pill popover (Connect / Disconnect panel)
+ *
+ * Anchored under the pill the operator clicks. Provides explicit
+ * Connect / Disconnect controls so attaching to a card no longer
+ * requires drilling into the SCP03 Filesystem subsystem first.
+ * ============================================================ */
+
+.topbar-reader-popover {
+  width: 320px;
+  max-width: calc(100vw - 24px);
+  background: var(--bg-elev, var(--bg-card, #2a2f3a));
+  color: var(--fg, #e8e8ec);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+  padding: 12px 14px 14px;
+  font-size: 13px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  animation: topbar-reader-popover-in 80ms ease-out;
+}
+
+@keyframes topbar-reader-popover-in {
+  from { opacity: 0; transform: translateY(-4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.topbar-reader-popover-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.topbar-reader-popover-title {
+  flex: 1 1 auto;
+  font-weight: 600;
+  font-size: 13px;
+  line-height: 1.35;
+  color: var(--fg);
+  word-break: break-word;
+}
+
+.topbar-reader-popover-close {
+  flex: 0 0 auto;
+  width: 22px;
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--fg-muted);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0;
+}
+
+.topbar-reader-popover-close:hover {
+  background: var(--bg-hover, rgba(255, 255, 255, 0.08));
+  color: var(--fg);
+  border-color: var(--border);
+}
+
+.topbar-reader-popover-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  background: var(--bg-deep, rgba(0, 0, 0, 0.18));
+  border: 1px solid var(--border);
+}
+
+.topbar-reader-popover-status-label {
+  font-size: 12px;
+  color: var(--fg);
+  letter-spacing: 0.01em;
+}
+
+.topbar-reader-popover-atr {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11.5px;
+  color: var(--fg-muted);
+}
+
+.topbar-reader-popover-atr-label {
+  flex: 0 0 auto;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 10px;
+  color: var(--fg-muted);
+}
+
+.topbar-reader-popover-atr-val {
+  flex: 1 1 auto;
+  font-family: var(--mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 11px;
+  background: var(--bg-deep, rgba(0, 0, 0, 0.22));
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 2px 6px;
+  color: var(--fg);
+  word-break: break-all;
+  cursor: copy;
+  transition: background 120ms ease, border-color 120ms ease;
+}
+
+.topbar-reader-popover-atr-val:hover {
+  border-color: var(--accent, #5e81ac);
+}
+
+.topbar-reader-popover-atr-val.is-copied {
+  background: var(--ok-bg, rgba(120, 200, 120, 0.18));
+  border-color: var(--ok, #8fbc8f);
+}
+
+.topbar-reader-popover-hint {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--fg-muted);
+}
+
+.topbar-reader-popover-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 2px;
+}
+
+.topbar-reader-popover-actions .btn {
+  flex: 1 1 50%;
+  padding: 7px 10px;
+  font-size: 12.5px;
+  font-weight: 600;
+  border-radius: 6px;
+  cursor: pointer;
+  border: 1px solid var(--border);
+  transition: background 120ms ease, border-color 120ms ease,
+              color 120ms ease, opacity 120ms ease;
+}
+
+.topbar-reader-popover-actions .btn-primary {
+  background: var(--accent, #5e81ac);
+  color: #fff;
+  border-color: var(--accent, #5e81ac);
+}
+
+.topbar-reader-popover-actions .btn-primary:hover:not(:disabled) {
+  filter: brightness(1.08);
+}
+
+.topbar-reader-popover-actions .btn-secondary {
+  background: var(--bg-deep, rgba(0, 0, 0, 0.18));
+  color: var(--fg);
+}
+
+.topbar-reader-popover-actions .btn-secondary:hover:not(:disabled) {
+  background: var(--bg-hover, rgba(255, 255, 255, 0.06));
+  border-color: var(--accent, #5e81ac);
+}
+
+.topbar-reader-popover-actions .btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* -- Card Bridge panel (CB-4 frontend) ------------------------------------
+ * Read-only diagnostics surface for the remote card bridge. Each
+ * ``.cb-panel`` is an elevated card with a header, primary content,
+ * and optional controls; the layout deliberately mirrors the existing
+ * SCP03/SCP11 dashboard cards so the panel feels native rather than
+ * bolted-on. The latency sparkline is plain SVG with two stacked
+ * polylines (ping vs status) so the operator can spot whether a slow
+ * round-trip is the SSH tunnel itself or the bridge's PC/SC stack.
+ */
+
+.cb-panel {
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 16px 20px;
+  margin-bottom: 16px;
+  box-shadow: var(--shadow-card);
+}
+
+.cb-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+
+.cb-panel-header h2 {
+  margin: 0;
+  font-size: 1.05rem;
+  letter-spacing: 0.02em;
+  color: var(--fg);
+}
+
+.cb-panel-controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.cb-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.85rem;
+  color: var(--fg-dim);
+  cursor: pointer;
+  user-select: none;
+}
+
+.cb-toggle input {
+  margin: 0;
+  cursor: pointer;
+}
+
+.cb-status-grid {
+  display: grid;
+  grid-template-columns: minmax(140px, max-content) 1fr auto;
+  row-gap: 8px;
+  column-gap: 14px;
+  align-items: center;
+}
+
+.cb-status-row {
+  display: contents;
+}
+
+.cb-status-label {
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--fg-dim);
+}
+
+.cb-status-value {
+  color: var(--fg);
+  word-break: break-all;
+}
+
+.cb-mono {
+  font-family: "JetBrains Mono", "Fira Mono", "Source Code Pro", monospace;
+  font-size: 0.88rem;
+}
+
+.cb-status-summary {
+  margin-top: 14px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: var(--bg);
+  border: 1px dashed var(--border);
+  font-size: 0.85rem;
+  color: var(--fg-dim);
+  line-height: 1.4;
+}
+
+.cb-rig-panel {
+  border-color: color-mix(in srgb, var(--accent) 28%, var(--border));
+}
+
+.cb-rig-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 10px 14px;
+  align-items: end;
+}
+
+.cb-rig-field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin: 0;
+}
+
+.cb-rig-field label {
+  font-size: 0.76rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--fg-dim);
+}
+
+.cb-rig-field input {
+  width: 100%;
+  min-width: 0;
+}
+
+.cb-rig-advanced {
+  margin-top: 14px;
+}
+
+.cb-rig-primary-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 14px 0 10px;
+}
+
+.cb-rig-primary-actions .btn {
+  min-height: 36px;
+}
+
+.cb-rig-manual {
+  margin-top: 8px;
+}
+
+.cb-rig-manual .cb-rig-actions {
+  margin: 0;
+}
+
+.cb-rig-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 14px 0;
+}
+
+.cb-rig-actions .btn {
+  min-height: 32px;
+}
+
+.cb-rig-status-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 10px;
+}
+
+.cb-rig-note-error {
+  background: var(--fail-soft);
+  border-color: rgba(191, 97, 106, 0.35);
+  color: var(--fail);
+}
+
+.cb-rig-note-ok {
+  background: var(--ok-soft);
+  border-color: rgba(163, 190, 140, 0.42);
+  color: var(--ok);
+}
+
+.cb-rig-note-ok-flash {
+  animation: cb-rig-note-ok-flash 1100ms ease-out 1;
+}
+
+@keyframes cb-rig-note-ok-flash {
+  0% {
+    box-shadow: 0 0 0 0 rgba(163, 190, 140, 0.42);
+  }
+  42% {
+    box-shadow: 0 0 0 3px rgba(163, 190, 140, 0.28);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(163, 190, 140, 0);
+  }
+}
+
+/* Status / posture badges. The five postures map to the four
+ * standard severity colours plus a neutral "unknown" placeholder.
+ */
+.cb-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--fg-dim);
+}
+
+.cb-badge::before {
+  content: "";
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: 0.85;
+}
+
+.cb-badge-ok {
+  color: var(--ok);
+  border-color: rgba(163, 190, 140, 0.4);
+  background: var(--ok-soft);
+}
+
+.cb-badge-warn {
+  color: var(--warn);
+  border-color: rgba(235, 203, 139, 0.4);
+  background: var(--warn-soft);
+}
+
+.cb-badge-fail {
+  color: var(--fail);
+  border-color: rgba(191, 97, 106, 0.4);
+  background: var(--fail-soft);
+}
+
+.cb-badge-info {
+  color: var(--accent);
+  border-color: rgba(136, 192, 208, 0.4);
+  background: var(--accent-soft);
+}
+
+.cb-badge-unknown {
+  color: var(--fg-dim);
+}
+
+/* Manual probe override panel — collapsed by default so the common
+ * case (no overrides) keeps the panel compact.
+ */
+.cb-override {
+  margin: 12px 0 14px;
+  padding: 10px 14px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.cb-override summary {
+  cursor: pointer;
+  font-size: 0.85rem;
+  color: var(--fg-dim);
+  user-select: none;
+}
+
+.cb-override summary:hover {
+  color: var(--fg);
+}
+
+.cb-override[open] summary {
+  margin-bottom: 10px;
+  color: var(--fg);
+}
+
+.cb-override-row {
+  margin-bottom: 8px;
+}
+
+.cb-override-row input {
+  flex: 1;
+}
+
+.cb-probe-result {
+  margin-top: 14px;
+}
+
+.cb-probe-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 10px;
+}
+
+.cb-probe-card {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+
+.cb-probe-label {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--fg-dim);
+  margin-bottom: 4px;
+}
+
+.cb-probe-value {
+  color: var(--fg);
+  font-size: 0.92rem;
+  word-break: break-all;
+}
+
+.cb-probe-value.cb-probe-bridge-fp--match {
+  color: var(--ok);
+}
+
+.cb-probe-value.cb-probe-bridge-fp--mismatch {
+  color: var(--warn);
+}
+
+.saip-file-tree-row--clickable {
+  cursor: pointer;
+}
+
+.cb-probe-reason {
+  margin-top: 12px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: var(--fail-soft);
+  border: 1px solid rgba(191, 97, 106, 0.3);
+  color: var(--fail);
+  font-size: 0.88rem;
+  line-height: 1.4;
+}
+
+/* Latency history sparkline. Two polylines — ``--cb-history-ping``
+ * and ``--cb-history-status`` — share the same SVG. We plot from the
+ * left so the freshest sample is on the right edge, matching the
+ * convention of the SCP03 throughput chart.
+ */
+.cb-history-chart {
+  width: 100%;
+  height: 140px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  display: block;
+}
+
+.cb-history-chart .cb-history-axis {
+  stroke: var(--border);
+  stroke-width: 1;
+  stroke-dasharray: 2 4;
+}
+
+.cb-history-chart .cb-history-line-ping {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 1.6;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+
+.cb-history-chart .cb-history-line-status {
+  fill: none;
+  stroke: var(--ok);
+  stroke-width: 1.6;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+
+.cb-history-chart .cb-history-point-fail {
+  fill: var(--fail);
+  stroke: none;
+}
+
+.cb-history-chart .cb-history-label {
+  fill: var(--fg-dim);
+  font-size: 10px;
+  font-family: "JetBrains Mono", "Fira Mono", monospace;
+}
+
+.cb-history-meta {
+  font-size: 0.8rem;
+  color: var(--fg-dim);
+  font-family: "JetBrains Mono", "Fira Mono", monospace;
+}
+
+.btn-small {
+  padding: 4px 10px;
+  font-size: 0.78rem;
+}

@@ -1,0 +1,70 @@
+/*
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+ */
+
+/* -- Command Center: key/value lines ------------------------------------ */
+
+.cc-kvl-meta {
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  color: var(--fg-muted);
+  margin-top: 6px;
+}
+
+.cc-action-result-note {
+  display: inline-block;
+  font-size: 11.5px;
+  color: var(--fg-dim);
+  font-style: italic;
+  padding: 4px 0;
+}
+
+.cc-kvl-head {
+  margin: 14px 0 6px;
+  font-size: 12px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--fg-muted);
+}
+
+.cc-kvl-block {
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 10px 14px;
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+}
+
+.cc-kvl-row {
+  display: grid;
+  grid-template-columns: minmax(160px, auto) 1fr;
+  gap: 12px;
+  padding: 2px 0;
+  border-bottom: 1px dashed transparent;
+}
+
+.cc-kvl-row-indent-0 { padding-left: 0; }
+.cc-kvl-row-indent-1 { padding-left: 14px; }
+.cc-kvl-row-indent-2 { padding-left: 28px; }
+.cc-kvl-row-indent-3 { padding-left: 42px; }
+.cc-kvl-row-indent-4 { padding-left: 56px; }
+.cc-kvl-row-indent-5 { padding-left: 70px; }
+.cc-kvl-row-indent-6 { padding-left: 84px; }
+.cc-kvl-row-indent-7 { padding-left: 98px; }
+.cc-kvl-row-indent-8 { padding-left: 112px; }
+
+.cc-kvl-row:not(:last-child) {
+  border-bottom-color: rgba(255, 255, 255, 0.04);
+}
+
+.cc-kvl-label {
+  color: var(--fg-muted);
+}
+
+.cc-kvl-value {
+  color: var(--fg);
+  word-break: break-all;
+}
+

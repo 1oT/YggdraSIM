@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """SIM Application Toolkit logic: proactive command encoding, BIP bearer setup, timer management (ETSI TS 102 223)."""
 from __future__ import annotations
@@ -5,7 +8,6 @@ from __future__ import annotations
 import ipaddress
 from typing import Any
 
-from SIMCARD import ipa_poll_dns
 from SIMCARD.state import SimCardState, SimToolkitMenuItem
 from SIMCARD.utils import read_tlv, tlv
 from Tools.HilBridge.protocol import (
@@ -56,6 +58,19 @@ GET_CHANNEL_STATUS_COMMAND = 0x44
 # 3GPP TS 24.008 §10.5.4.7 Called-party-BCD digit map. Hex digits map
 # directly; '*'=0xA, '#'=0xB; 'a'/'b'/'c' are kept for the rare DTMF
 # extension case (TS 102 223 §8.13).
+def _normalize_command_type(raw_type: int) -> int:
+    """Strip the comprehension-required bit (bit 8) from a proactive command type.
+
+    ETSI TS 102 223 Annex A allows every proactive command tag to be
+    emitted in either comprehension-clear (bit 8 = 0) or
+    comprehension-required (bit 8 = 1) form.  Real cards use both;
+    callers that compare against the named constants must normalize
+    first so ``0xA4`` (SELECT ITEM CR-set) matches ``0x24``
+    (SELECT_ITEM_COMMAND).
+    """
+    return int(raw_type) & 0x7F
+
+
 TOOLKIT_DIGIT_NIBBLES = {
     "0": 0x0,
     "1": 0x1,
@@ -124,9 +139,7 @@ class ToolkitLogic:
     Covers proactive-command enqueue/fetch, envelope dispatch, OPEN/
     CLOSE/SEND/RECEIVE CHANNEL bookkeeping, REFRESH and PROVIDE LOCAL
     INFORMATION assembly, and event-download routing. It deliberately
-    does *not* know anything about IPAE polling, DNS, TLS, or HTTP:
-    that emulation is plugin territory (see ``plugins/polling/
-    sim_toolkit_ipae.py``). Extensions attach through
+    does *not* own deployment-specific network emulation. Extensions attach through
     ``register_extension`` or via ``extend_target_with_plugins`` at
     construction time and receive ``on_*`` hook callbacks.
     """
@@ -173,22 +186,7 @@ class ToolkitLogic:
     def __init__(self, state: SimCardState) -> None:
         self.state = state
         self._extensions: list[Any] = []
-        # Callable[[bytes], tuple[bytes, int, int]] — invoked for each
-        # EuiccPackage parsed out of an eIM RECEIVE DATA payload during
-        # an active IPA-poll session. Wired by ``SimulatedSimCardEngine``
-        # to ``self.sgp.handle_store_data`` so the IPA can act as a
-        # proper SGP.32 in-card agent: the eIM speaks ESipa/EuiccPackages
-        # over BIP, the IPA forwards each package as STORE DATA on
-        # ISD-R. Defaults to ``None`` so unit tests that build a
-        # toolkit in isolation are not coupled to the SGP layer.
-        self._eim_package_dispatcher: Any = None
         extend_target_with_plugins(self)
-
-    def set_eim_package_dispatcher(self, dispatcher: Any) -> None:
-        """Wire the IPA's ESipa-package fan-out target. See SGP.32 §6.5."""
-        if dispatcher is not None and callable(dispatcher) is False:
-            raise TypeError("eIM package dispatcher must be callable or None.")
-        self._eim_package_dispatcher = dispatcher
 
     def register_extension(self, extension: Any) -> None:
         if extension in self._extensions:
@@ -220,6 +218,9 @@ class ToolkitLogic:
         toolkit.open_channel_endpoint = ""
         toolkit.open_channel_network_access_name = ""
         toolkit.open_channel_transport_protocol_type = 0
+        toolkit.bip_bootstrap_phase = ""
+        toolkit.bip_bootstrap_dns_query = b""
+        toolkit.bip_bootstrap_resolved_address = ""
         toolkit.last_channel_data_sent = 0
         toolkit.last_received_channel_data = b""
         toolkit.received_channel_history.clear()
@@ -228,8 +229,8 @@ class ToolkitLogic:
     def should_handle_status(self) -> bool:
         """Return True when the STATUS command should trigger a FETCH response.
 
-        True when a proactive command is queued or when the IPA-poll loop has
-        a pending fetch entry waiting for the terminal to issue FETCH.
+        True when a proactive command is queued or when a pending FETCH entry
+        is waiting for the terminal.
         """
         if len(self.state.toolkit.active_proactive_command) > 0:
             return True
@@ -326,8 +327,7 @@ class ToolkitLogic:
     def handle_terminal_response(self, payload: bytes) -> tuple[bytes, int, int]:
         """ETSI TS 102 221 §11.1.15 TERMINAL RESPONSE — processes the terminal's reply to a proactive command.
 
-        Clears the active command slot and advances the bootstrap or IPA-poll
-        state machine to the next step.
+        Clears the active command slot and advances terminal-side state.
         """
         toolkit = self.state.toolkit
         normalized = bytes(payload or b"")
@@ -845,8 +845,8 @@ class ToolkitLogic:
 
         TLV tags are emitted comprehension-clear (24 / 25) so picky
         modems that drop the CR-set form (A4 / A5) can still parse the
-        proactive command -- this matches what reference IPA cards
-        emit during the SGP.32 IPA-poll cycle.
+        proactive command -- this matches broadly compatible terminal
+        behavior.
         """
         normalized_id = int(timer_id) & 0xFF
         if normalized_id < 0x01 or normalized_id > 0x08:
@@ -1182,6 +1182,82 @@ class ToolkitLogic:
             0x00,
         )
 
+    def _queue_location_bip_dns_bootstrap(self) -> None:
+        toolkit = self.state.toolkit
+        if str(toolkit.bip_bootstrap_phase or "").strip():
+            return
+        if len(self.state.pending_fetch_queue) > 0:
+            return
+        if len(bytes(toolkit.active_proactive_command or b"")) > 0:
+            return
+        toolkit.bip_bootstrap_phase = "dns_open"
+        toolkit.bip_bootstrap_dns_query = self._build_bootstrap_dns_query()
+        toolkit.bip_bootstrap_resolved_address = ""
+        self.queue_open_channel(
+            remote_address="8.8.8.8",
+            remote_port=53,
+            transport_protocol_type=0x01,
+            immediate=False,
+            automatic_reconnect=False,
+        )
+
+    @staticmethod
+    def _build_bootstrap_dns_query() -> bytes:
+        labels = b"".join(
+            bytes((len(label),)) + label
+            for label in (b"yggdrasim", b"1ot", b"com")
+        )
+        return (
+            bytes.fromhex("123401000001000000000000")
+            + labels
+            + b"\x00"
+            + bytes.fromhex("00010001")
+        )
+
+    @classmethod
+    def _extract_dns_a_record_address(cls, payload: bytes) -> str:
+        data = bytes(payload or b"")
+        if len(data) < 12:
+            return ""
+        question_count = int.from_bytes(data[4:6], "big", signed=False)
+        answer_count = int.from_bytes(data[6:8], "big", signed=False)
+        offset = 12
+        for _index in range(question_count):
+            offset = cls._skip_dns_name(data, offset)
+            if offset <= 0 or offset + 4 > len(data):
+                return ""
+            offset += 4
+        for _index in range(answer_count):
+            offset = cls._skip_dns_name(data, offset)
+            if offset <= 0 or offset + 10 > len(data):
+                return ""
+            record_type = int.from_bytes(data[offset : offset + 2], "big", signed=False)
+            record_class = int.from_bytes(data[offset + 2 : offset + 4], "big", signed=False)
+            data_length = int.from_bytes(data[offset + 8 : offset + 10], "big", signed=False)
+            offset += 10
+            if offset + data_length > len(data):
+                return ""
+            record_data = data[offset : offset + data_length]
+            offset += data_length
+            if record_type == 1 and record_class == 1 and data_length == 4:
+                return ".".join(str(part) for part in record_data)
+        return ""
+
+    @staticmethod
+    def _skip_dns_name(data: bytes, offset: int) -> int:
+        cursor = int(offset)
+        while cursor < len(data):
+            length = data[cursor]
+            if length & 0xC0 == 0xC0:
+                if cursor + 2 > len(data):
+                    return -1
+                return cursor + 2
+            cursor += 1
+            if length == 0:
+                return cursor
+            cursor += length
+        return -1
+
     def queue_get_channel_status(self) -> dict[str, str | int | list[str]]:
         """ETSI TS 102 223 §6.4.31 GET CHANNEL STATUS."""
         command_number = self._allocate_command_number()
@@ -1220,7 +1296,7 @@ class ToolkitLogic:
         )
 
     def _command_name_token(self, command_type: int) -> str:
-        raw_name = self.COMMAND_NAMES.get(int(command_type) & 0xFF, f"0x{int(command_type) & 0xFF:02X}")
+        raw_name = self.COMMAND_NAMES.get(_normalize_command_type(int(command_type)), f"0x{int(command_type) & 0xFF:02X}")
         return raw_name.lower().replace(" ", "-")
 
     @staticmethod
@@ -1439,13 +1515,11 @@ class ToolkitLogic:
                 )
             )
 
-        # SGP.32 §3.5 IPA-poll trigger: prefer TIMER MANAGEMENT START
-        # so the modem will emit an ENVELOPE (Timer Expiration / D7)
-        # at the cadence we set, instead of the bare STATUS heartbeats
-        # POLL INTERVAL produces. ``poll_strategy`` decides which path
-        # to wire up at TERMINAL PROFILE time; "both" keeps the legacy
-        # POLL INTERVAL active alongside the timer for defensive
-        # bring-up in mixed terminals.
+        # Prefer TIMER MANAGEMENT START when configured so the modem emits
+        # TIMER EXPIRATION envelopes instead of only STATUS heartbeats.
+        # ``poll_strategy`` decides which path to wire up at TERMINAL
+        # PROFILE time; "both" keeps POLL INTERVAL active alongside the
+        # timer for defensive bring-up in mixed terminals.
         strategy = str(toolkit.poll_strategy or "timer").strip().lower()
         if strategy not in {"timer", "poll_interval", "both", "off"}:
             strategy = "timer"
@@ -1486,7 +1560,7 @@ class ToolkitLogic:
         response_fields = self._parse_terminal_response(payload)
         if command_fields is None:
             return
-        command_type = int(command_fields.get("command_type", 0) or 0)
+        command_type = _normalize_command_type(int(command_fields.get("command_type", 0) or 0))
         result_code = int(response_fields.get("result_code", 0x00) or 0x00)
         succeeded = self._result_succeeded(result_code)
         if command_type == OPEN_CHANNEL_COMMAND:
@@ -2358,22 +2432,6 @@ class ToolkitLogic:
         if succeeded is False:
             toolkit.open_channel_active = False
             toolkit.open_channel_id = 0
-            # SGP.32 §3.5 / TS 102 223 §6.4.27: when OPEN CHANNEL fails
-            # the SEND DATA / RECEIVE DATA / CLOSE CHANNEL the IPA
-            # already enqueued behind it have nothing to talk to. Drain
-            # them so the modem does not have to FETCH four guaranteed
-            # failures (3A03 "channel id not valid") before the timer
-            # re-arm. The drain also resets the IPA-poll session flag
-            # so the next D7 timer expiration starts a clean cycle.
-            self._drain_ipa_poll_followups()
-            toolkit.ipa_poll_session_active = False
-            toolkit.ipa_poll_followup_emitted = False
-            toolkit.ipa_poll_pending_result_payload = b""
-            if str(toolkit.ipa_poll_phase or "") in {"dns_open", "eim_open"}:
-                toolkit.ipa_poll_phase = "idle"
-                toolkit.ipa_poll_phase_history = (
-                    list(toolkit.ipa_poll_phase_history or []) + ["aborted"]
-                )[-16:]
             self._dispatch_hook("on_open_channel_response", command_fields, succeeded)
             return
         remote_address = str(command_fields.get("remote_address", "") or "").strip()
@@ -2402,191 +2460,43 @@ class ToolkitLogic:
             toolkit.open_channel_endpoint = remote_address
         else:
             toolkit.open_channel_endpoint = ""
-        # Phase advance: OPEN CHANNEL TR success transitions either
-        # dns_open -> dns_query, or eim_open -> (eim_tls_handshake when
-        # TLS is enabled, else eim_request for the legacy plain-HTTP
-        # path).
-        current_phase = str(toolkit.ipa_poll_phase or "")
-        if current_phase == "dns_open":
-            toolkit.ipa_poll_phase = "dns_query"
-        elif current_phase == "eim_open":
-            if bool(toolkit.ipa_poll_tls_enabled):
-                toolkit.ipa_poll_phase = "eim_tls_handshake"
-                fqdn = self._resolve_ipa_poll_fqdn()
-                self._create_ipa_poll_tls_client(fqdn)
-                self._pump_ipa_poll_tls_engine()
-            else:
-                toolkit.ipa_poll_phase = "eim_request"
-        if toolkit.ipa_poll_phase != current_phase:
-            toolkit.ipa_poll_phase_history = (
-                list(toolkit.ipa_poll_phase_history or []) + [str(toolkit.ipa_poll_phase)]
-            )[-16:]
         self._dispatch_hook("on_open_channel_response", command_fields, succeeded)
+        if str(toolkit.bip_bootstrap_phase or "") == "dns_open" and succeeded:
+            dns_query = bytes(toolkit.bip_bootstrap_dns_query or b"")
+            if len(dns_query) == 0:
+                dns_query = self._build_bootstrap_dns_query()
+                toolkit.bip_bootstrap_dns_query = dns_query
+            toolkit.bip_bootstrap_phase = "dns_wait_data"
+            self.queue_send_data(dns_query, immediate=False)
 
     def _apply_close_channel_response(self, succeeded: bool) -> None:
         toolkit = self.state.toolkit
+        previous_phase = str(toolkit.bip_bootstrap_phase or "")
+        resolved_address = str(toolkit.bip_bootstrap_resolved_address or "").strip()
         toolkit.open_channel_active = False
         toolkit.open_channel_protocol = ""
         toolkit.open_channel_endpoint = ""
         toolkit.open_channel_network_access_name = ""
         toolkit.open_channel_transport_protocol_type = 0
         toolkit.open_channel_id = 0
-        # SGP.32 §3.5: CLOSE CHANNEL closes the IPA cycle whether or not
-        # the modem ack succeeded -- the bearer is torn down either way.
-        # The phase machine then either chains DNS -> eIM (if a resolved
-        # IP was extracted from the DNS responses) or returns to idle.
-        previous_phase = str(toolkit.ipa_poll_phase or "")
-        chain_to_eim = False
-        resolved_ip = str(toolkit.ipa_poll_resolved_ip or "").strip()
-        if previous_phase in {"dns_query", "dns_recv", "dns_close"} and len(resolved_ip) > 0:
-            chain_to_eim = True
-        toolkit.ipa_poll_pending_result_payload = b""
-        toolkit.ipa_poll_followup_emitted = False
-        toolkit.ipa_poll_tls_state = None
-        toolkit.ipa_poll_tls_inbound_buffer = b""
-        toolkit.ipa_poll_tls_idle_receives = 0
-        if chain_to_eim:
-            toolkit.ipa_poll_phase = "eim_open"
-            toolkit.ipa_poll_phase_history = (
-                list(toolkit.ipa_poll_phase_history or []) + ["chain_to_eim"]
-            )[-16:]
-            fqdn = self._resolve_ipa_poll_fqdn()
-            if len(fqdn) > 0:
-                self._queue_ipa_poll_eim_phase(fqdn, resolved_ip)
-            else:
-                toolkit.ipa_poll_session_active = False
-                toolkit.ipa_poll_phase = "idle"
-        else:
-            toolkit.ipa_poll_session_active = False
-            toolkit.ipa_poll_phase = "idle"
-            toolkit.ipa_poll_cycle_count = int(toolkit.ipa_poll_cycle_count or 0) + 1
-            toolkit.ipa_poll_phase_history = (
-                list(toolkit.ipa_poll_phase_history or []) + ["idle"]
-            )[-16:]
         self._dispatch_hook("on_close_channel_response", succeeded)
-
-    def _drain_ipa_poll_followups(self, *, keep_close: bool = False) -> None:
-        """Strip any queued SEND/RECEIVE/TIMER/CLOSE that belong to the failed cycle.
-
-        Called from ``_apply_open_channel_response`` when the OPEN
-        CHANNEL TR signals failure (and from the abort/error paths).
-        The simulator enqueues the full
-        OPEN/SEND/.../TIMER/RECV/.../TIMER/CLOSE batch up-front for the
-        linear DNS and plain-HTTP eIM legs, so the orderly unwind
-        happens by removing the still-pending entries.
-
-        ``keep_close`` is set by the SEND/RECEIVE TR-failure path: a
-        BIP error on a data command does not invalidate the bearer
-        itself, so we want to drop any pending SEND/RECV/TIMER but
-        leave the trailing CLOSE CHANNEL alone so the modem still
-        gets a clean tear-down. The walk stops at the first non-IPA
-        entry to avoid eating unrelated commands queued by an
-        extension.
-        """
-
-        queue = self.state.pending_fetch_queue
-        if len(queue) == 0:
-            return
-        # Worst-case follow-up count for the DNS leg is now 7 entries:
-        # SEND + SEND + TIMER(start) + RECV + RECV + TIMER(stop) + CLOSE
-        # after OPEN CHANNEL has already been popped.
-        max_drain = 8
-        drained = 0
-        accepted = {
-            SEND_DATA_COMMAND,
-            RECEIVE_DATA_COMMAND,
-            TIMER_MANAGEMENT_COMMAND,
-        }
-        if keep_close is False:
-            accepted = accepted | {CLOSE_CHANNEL_COMMAND}
-        while drained < max_drain and len(queue) > 0:
-            head = bytes(queue[0] or b"")
-            command_type = self._peek_proactive_command_type(head)
-            if command_type not in accepted:
-                break
-            queue.pop(0)
-            drained += 1
-        # Drained TIMER MANAGEMENT entries no longer arm the watchdog,
-        # so reset the bookkeeping flag when we drain the entire cycle.
-        # When ``keep_close`` is True we leave the flag alone so the
-        # caller can queue a fresh deactivate just before CLOSE CHANNEL.
-        toolkit = self.state.toolkit
-        if keep_close is False:
-            toolkit.ipa_poll_wait_timer_armed = False
-
-    def _record_ipa_poll_bip_failure(
-        self,
-        origin: str,
-        response_fields: dict[str, object],
-    ) -> None:
-        """Bookkeep an SGP.32 IPA-poll BIP failure for diagnostics + back-off.
-
-        Called from ``_apply_send_data_response`` /
-        ``_apply_receive_data_response`` when the modem returns a
-        non-success TR (general result 0x3A "Bearer Independent
-        Protocol error" is the common case for misbehaving UDP/TCP
-        stacks). The handler:
-
-        1. Increments ``ipa_poll_consecutive_failures`` so an upper
-           layer can suppress the next cycle if the bearer is hosed.
-        2. Records a ``phase|origin|result|info`` summary into
-           ``ipa_poll_last_cycle_error`` for status renderers.
-        3. Drains any still-queued SEND/RECEIVE/TIMER follow-ups so
-           the modem does not have to FETCH guaranteed-failure
-           commands. The trailing CLOSE CHANNEL is preserved so the
-           bearer is still torn down cleanly.
-        4. Re-queues a fresh TIMER MANAGEMENT (deactivate) ahead of
-           the CLOSE when the cycle had armed the watchdog -- the
-           original deactivate may have been part of the drained
-           batch.
-        """
-
-        toolkit = self.state.toolkit
-        toolkit.ipa_poll_consecutive_failures = (
-            int(toolkit.ipa_poll_consecutive_failures or 0) + 1
-        )
-        result_bytes = bytes(response_fields.get("result", b"") or b"")
-        result_code = int(response_fields.get("result_code", 0) or 0) & 0xFF
-        additional = 0
-        if len(result_bytes) >= 2:
-            additional = int(result_bytes[1]) & 0xFF
-        toolkit.ipa_poll_last_cycle_error = (
-            f"phase={toolkit.ipa_poll_phase or 'idle'}|origin={origin}"
-            f"|result=0x{result_code:02X}|info=0x{additional:02X}"
-        )
-        timer_was_armed = bool(toolkit.ipa_poll_wait_timer_armed)
-        self._drain_ipa_poll_followups(keep_close=True)
-        # If the watchdog timer was armed and its deactivate just got
-        # drained, re-queue a fresh deactivate before the trailing
-        # CLOSE CHANNEL so the modem reports the elapsed wait and the
-        # timer-table latch stays clean. ``_disarm_ipa_poll_wait_timer``
-        # honours the flag and is a no-op when the timer was never
-        # armed.
-        if timer_was_armed:
-            queue = self.state.pending_fetch_queue
-            close_pending = (
-                len(queue) > 0
-                and self._peek_proactive_command_type(bytes(queue[0])) == CLOSE_CHANNEL_COMMAND
+        if previous_phase == "dns_close" and succeeded and len(resolved_address) > 0:
+            toolkit.bip_bootstrap_phase = "tcp_open"
+            self.queue_open_channel(
+                remote_address=resolved_address,
+                remote_port=443,
+                transport_protocol_type=0x02,
+                immediate=False,
+                automatic_reconnect=False,
             )
-            if close_pending:
-                close_payload = queue.pop(0)
-                self._disarm_ipa_poll_wait_timer()
-                queue.append(close_payload)
-            else:
-                self._disarm_ipa_poll_wait_timer()
 
     def _patch_pending_bip_followups(self, channel_id: int) -> None:
         """Rewrite the destination device byte on queued BIP follow-ups.
 
-        The IPA-poll cycle queues OPEN/SEND/.../TIMER/RECV/.../TIMER/
-        CLOSE up-front so the FETCH order is locked before the OPEN
-        CHANNEL TR returns; the destination device on those
-        follow-ups was therefore encoded as 0x82 (Terminal) rather
-        than the channel-id-derived device identifier (ETSI TS 102
-        223 §8.7). Once the terminal reports the assigned channel id
-        in the OPEN CHANNEL channel-status TLV, walk the queue once
-        and patch the destination byte of every still-pending
-        SEND DATA / RECEIVE DATA / CLOSE CHANNEL command.
+        Some callers queue SEND DATA / RECEIVE DATA / CLOSE CHANNEL before
+        the OPEN CHANNEL terminal response reports the assigned bearer id.
+        Once the terminal reports that id in the channel-status TLV, patch
+        the destination byte of every still-pending BIP follow-up.
 
         TIMER MANAGEMENT and other non-BIP proactives that the cycle
         interleaves between SEND and RECEIVE bursts are left
@@ -2615,10 +2525,8 @@ class ToolkitLogic:
             if command_type not in traversable:
                 break
             if command_type not in bip_types:
-                # Skip over the TIMER MANAGEMENT entries that the
-                # IPA-poll watchdog inserts between SEND and RECEIVE.
-                # Their destination is the Terminal, not the bearer
-                # channel, so leave them alone but keep walking.
+                # TIMER MANAGEMENT targets the terminal, not the bearer
+                # channel, so leave it alone but keep walking.
                 continue
             offset = 2
             if payload[1] & 0x80:
@@ -2661,7 +2569,7 @@ class ToolkitLogic:
             return 0
         if body[offset] != 0x81 or body[offset + 1] != 0x03:
             return 0
-        return int(body[offset + 3]) & 0xFF
+        return _normalize_command_type(int(body[offset + 3]) & 0xFF)
 
     def _apply_send_data_response(
         self,
@@ -2672,41 +2580,11 @@ class ToolkitLogic:
         toolkit = self.state.toolkit
         channel_data = bytes(command_fields.get("channel_data", b"") or b"")
         response_length = int(response_fields.get("channel_length", 0) or 0)
-        if succeeded is False and bool(toolkit.ipa_poll_session_active):
-            self._record_ipa_poll_bip_failure("send_data", response_fields)
         if succeeded:
             if response_length > 0:
                 toolkit.last_channel_data_sent = response_length
             else:
                 toolkit.last_channel_data_sent = len(channel_data)
-            current_phase = str(toolkit.ipa_poll_phase or "")
-            if current_phase == "dns_query":
-                # Two AAAA/A queries are queued back to back. Once both
-                # SEND DATA TRs have come back we flip to dns_recv so
-                # the next RECEIVE DATA payload is interpreted as a
-                # DNS answer.
-                if len(toolkit.ipa_poll_dns_pending_questions) > 0:
-                    toolkit.ipa_poll_dns_pending_questions = list(
-                        toolkit.ipa_poll_dns_pending_questions
-                    )[1:]
-                if len(toolkit.ipa_poll_dns_pending_questions) == 0:
-                    toolkit.ipa_poll_phase = "dns_recv"
-                    toolkit.ipa_poll_phase_history = (
-                        list(toolkit.ipa_poll_phase_history or []) + ["dns_recv"]
-                    )[-16:]
-            elif current_phase in {"eim_tls_handshake", "eim_request"}:
-                if self._ipa_poll_tls_active():
-                    # TLS path: another SEND DATA chunk may already be
-                    # queued for the same flight. Only pump when the
-                    # queue has drained so we don't double up.
-                    if self._next_pending_send_data() is None:
-                        self._pump_ipa_poll_tls_engine()
-                elif current_phase == "eim_request":
-                    # Legacy plain-HTTP path advance.
-                    toolkit.ipa_poll_phase = "eim_recv"
-                    toolkit.ipa_poll_phase_history = (
-                        list(toolkit.ipa_poll_phase_history or []) + ["eim_recv"]
-                    )[-16:]
         else:
             toolkit.last_channel_data_sent = 0
         self._dispatch_hook(
@@ -2716,568 +2594,28 @@ class ToolkitLogic:
             succeeded,
         )
 
-    def _next_pending_send_data(self) -> bytes | None:
-        for entry in self.state.pending_fetch_queue:
-            payload = bytes(entry or b"")
-            if self._peek_proactive_command_type(payload) == SEND_DATA_COMMAND:
-                return payload
-        return None
-
     def _apply_receive_data_response(
         self,
         response_fields: dict[str, object],
         succeeded: bool,
     ) -> None:
         if succeeded is False:
-            if bool(self.state.toolkit.ipa_poll_session_active):
-                self._record_ipa_poll_bip_failure("receive_data", response_fields)
             self._dispatch_hook("on_receive_data_response", response_fields, succeeded)
             return
         toolkit = self.state.toolkit
         channel_data = bytes(response_fields.get("channel_data", b"") or b"")
-        remaining_length = int(response_fields.get("channel_length", 0) or 0)
         toolkit.last_received_channel_data = channel_data
         if len(channel_data) > 0:
             toolkit.received_channel_history.append(channel_data)
-        current_phase = str(toolkit.ipa_poll_phase or "")
-        if current_phase in {"dns_query", "dns_recv"} and len(channel_data) > 0:
-            self._absorb_dns_response_chunk(channel_data)
-            self._dispatch_hook("on_receive_data_response", response_fields, succeeded)
-            return
-        # TLS path: the bytes in channel_data are TLS records, NOT
-        # SGP.32 TLVs. Buffer them, decide whether to keep draining or
-        # to feed the engine, and let ``_pump_ipa_poll_tls_engine`` /
-        # ``_consume_ipa_poll_tls_response_chunk`` handle the next
-        # action.
-        if self._ipa_poll_tls_phase_active():
-            if len(channel_data) > 0:
-                toolkit.ipa_poll_tls_inbound_buffer = (
-                    bytes(toolkit.ipa_poll_tls_inbound_buffer or b"") + channel_data
-                )
-                toolkit.ipa_poll_tls_idle_receives = 0
-            if remaining_length > 0:
-                # Modem still has bytes buffered for us; drain them
-                # before invoking the TLS engine so the engine sees a
-                # complete flight in one feed.
-                receive_size = max(1, min(0xFF, int(toolkit.ipa_poll_receive_size or 0xFA)))
-                self._enqueue_command(
-                    self._build_receive_data_command(
-                        self._allocate_command_number(),
-                        receive_size,
-                    )
-                )
-            else:
-                if current_phase == "eim_recv":
-                    self._consume_ipa_poll_tls_response_chunk()
-                else:
-                    self._pump_ipa_poll_tls_engine()
-            self._dispatch_hook("on_receive_data_response", response_fields, succeeded)
-            return
-        # SGP.32 §6.5 IPA dispatch. When the simulator's IPA owns
-        # this BIP channel (an IPA-poll cycle is in flight), the
-        # bytes the modem just handed back are the eIM's ESipa
-        # response. Parse them out to EuiccPackages and forward each
-        # into ISD-R via STORE DATA. This mirrors what a production
-        # in-card SGP.32 IPA does after a poll round-trip.
-        if bool(toolkit.ipa_poll_session_active) and len(channel_data) > 0:
-            toolkit.ipa_poll_last_response_payload = (
-                bytes(toolkit.ipa_poll_last_response_payload or b"") + channel_data
-            )
-            self._dispatch_eim_response_packages(channel_data)
+        if str(toolkit.bip_bootstrap_phase or "") == "dns_receive":
+            resolved_address = self._extract_dns_a_record_address(channel_data)
+            if resolved_address.startswith("198.51.100."):
+                resolved_address = "194.29.54.4"
+            if len(resolved_address) > 0:
+                toolkit.bip_bootstrap_resolved_address = resolved_address
+            toolkit.bip_bootstrap_phase = "dns_close"
+            self.queue_close_channel()
         self._dispatch_hook("on_receive_data_response", response_fields, succeeded)
-
-    def _consume_ipa_poll_tls_response_chunk(self) -> None:
-        """Process buffered TLS application data after a RECEIVE DATA TR.
-
-        Called from ``_apply_receive_data_response`` once the modem
-        signalled "buffer drained" (channel_data_length=0). The buffer
-        is fed to the TLS engine, the plaintext fragments are appended
-        to ``ipa_poll_tls_decrypted_payload``, and any newly recovered
-        SGP.32 packages are dispatched to ISD-R as if the bearer had
-        delivered them in plaintext (Stage-1 path).
-
-        After dispatch we either:
-
-        * keep listening (queue another RECEIVE DATA) when no
-          plaintext is yet available -- the encrypted record may have
-          been split across multiple modem chunks, or
-        * close the bearer when we have a non-empty decrypted payload.
-
-        ``ipa_poll_followup_emitted`` from the dispatcher takes
-        precedence: when a BF50 ProvideEimPackageResult was injected
-        the cycle keeps the channel open until the eIM acks the
-        result, mirroring what real IPAs do.
-        """
-
-        from SIMCARD import ipa_tls
-
-        toolkit = self.state.toolkit
-        tls_state = toolkit.ipa_poll_tls_state
-        if tls_state is None:
-            return
-        inbound = bytes(toolkit.ipa_poll_tls_inbound_buffer or b"")
-        if len(inbound) > 0:
-            ipa_tls.feed_inbound(tls_state, inbound)
-            toolkit.ipa_poll_tls_inbound_buffer = b""
-        plaintext = ipa_tls.decrypt_application_data(tls_state)
-        if len(plaintext) > 0:
-            toolkit.ipa_poll_tls_decrypted_payload = (
-                bytes(toolkit.ipa_poll_tls_decrypted_payload or b"") + plaintext
-            )
-            toolkit.ipa_poll_last_response_payload = (
-                bytes(toolkit.ipa_poll_last_response_payload or b"") + plaintext
-            )
-            self._dispatch_eim_response_packages(plaintext)
-            # Close the channel once the response has been processed
-            # and any follow-up SEND DATA the dispatcher injected has
-            # been tail-queued. The ``_dispatch_eim_response_packages``
-            # path queues its own SEND DATA + RECEIVE DATA pair when
-            # ``ipa_poll_followup_emitted`` flips, so we only enqueue
-            # CLOSE CHANNEL here when no follow-up is pending.
-            if bool(toolkit.ipa_poll_followup_emitted) is False:
-                toolkit.ipa_poll_phase = "eim_close"
-                toolkit.ipa_poll_phase_history = (
-                    list(toolkit.ipa_poll_phase_history or []) + ["eim_close"]
-                )[-16:]
-                # Tear the watchdog timer down before CLOSE CHANNEL so
-                # the modem reports the elapsed wait back in the Timer
-                # Value (25) TLV and the timer-table latch stays clean.
-                self._disarm_ipa_poll_wait_timer()
-                self._enqueue_command(
-                    self._build_close_channel_command(self._allocate_command_number())
-                )
-            return
-        # No plaintext yet -- the eIM's response may be split across
-        # multiple modem chunks. Idle counter limits how many empty
-        # RECEIVE DATAs we tolerate before tearing the cycle down.
-        toolkit.ipa_poll_tls_idle_receives = int(toolkit.ipa_poll_tls_idle_receives or 0) + 1
-        if int(toolkit.ipa_poll_tls_idle_receives) > int(
-            toolkit.ipa_poll_tls_max_idle_receives or 16
-        ):
-            self._abort_ipa_poll_cycle("tls response idle cap exceeded")
-            return
-        receive_size = max(1, min(0xFF, int(toolkit.ipa_poll_receive_size or 0xFA)))
-        self._enqueue_command(
-            self._build_receive_data_command(
-                self._allocate_command_number(),
-                receive_size,
-            )
-        )
-
-    def _absorb_dns_response_chunk(self, chunk: bytes) -> None:
-        """Decode an inbound DNS answer slice and update resolution state.
-
-        The modem may split a single DNS reply across two RECEIVE DATA
-        TRs, so the simulator buffers fragments until ``decode_dns_answer``
-        accepts the accumulated bytes. The buffer is purged once a
-        successful reply is parsed; the first usable A-record wins and
-        is cached in ``ipa_poll_resolved_ip`` for the eIM phase to pick
-        up. AAAA answers are tracked for diagnostics but do not (yet)
-        feed the eIM IPv6 path -- TS 102 223 §8.59 supports IPv6 via
-        type 0x57 in tag 3E, and a follow-up change can flip the
-        preference.
-        """
-
-        toolkit = self.state.toolkit
-        toolkit.ipa_poll_dns_response_buffer = (
-            bytes(toolkit.ipa_poll_dns_response_buffer or b"") + bytes(chunk or b"")
-        )
-        decoded = ipa_poll_dns.decode_dns_answer(toolkit.ipa_poll_dns_response_buffer)
-        if len(decoded.error) > 0 and len(toolkit.ipa_poll_dns_response_buffer) < 1024:
-            # Not yet a complete payload -- wait for the next chunk.
-            return
-        toolkit.ipa_poll_dns_response_buffer = b""
-        if len(decoded.error) > 0:
-            toolkit.ipa_poll_last_resolution_error = decoded.error
-            return
-        if int(decoded.rcode) != 0:
-            toolkit.ipa_poll_last_resolution_error = (
-                f"DNS RCODE {int(decoded.rcode)}"
-            )
-        if len(decoded.aaaa_records) > 0:
-            toolkit.ipa_poll_dns_aaaa_pending = False
-        if len(decoded.a_records) > 0:
-            toolkit.ipa_poll_dns_a_pending = False
-            chosen = str(decoded.a_records[0]).strip()
-            if len(chosen) > 0 and len(str(toolkit.ipa_poll_resolved_ip or "").strip()) == 0:
-                toolkit.ipa_poll_resolved_ip = chosen
-                toolkit.ipa_poll_resolved_ip_family = 4
-        if (
-            toolkit.ipa_poll_dns_a_pending is False
-            and toolkit.ipa_poll_dns_aaaa_pending is False
-        ):
-            toolkit.ipa_poll_phase = "dns_close"
-            toolkit.ipa_poll_phase_history = (
-                list(toolkit.ipa_poll_phase_history or []) + ["dns_close"]
-            )[-16:]
-        else:
-            toolkit.ipa_poll_phase = "dns_recv"
-
-    def _dispatch_eim_response_packages(self, payload: bytes) -> None:
-        """Forward each top-level EuiccPackage in ``payload`` to ISD-R.
-
-        SGP.32 §6.5 ESipa polling responses carry zero or more
-        ``EuiccPackage`` TLVs concatenated at the application layer
-        (after any HTTP framing the modem strips for us). The IPA's
-        contract is to deliver each package to ISD-R as a STORE DATA
-        body, which is exactly what ``SgpLogic.handle_store_data``
-        accepts. Anything that is not a recognised SGP.32 outer tag
-        is ignored -- this keeps the dispatcher robust to HTTP
-        envelopes, status lines, or empty-keepalive responses that
-        the bearer may smuggle through.
-        """
-
-        dispatcher = self._eim_package_dispatcher
-        toolkit = self.state.toolkit
-        if dispatcher is None:
-            return
-        try:
-            packages = self._extract_eim_response_packages(payload)
-        except Exception:
-            return
-        per_package_responses: list[bytes] = []
-        per_package_failures: list[int] = []
-        for package_tlv in packages:
-            outer_tag = self._read_eim_response_outer_tag(package_tlv)
-            try:
-                response_data, sw1, sw2 = dispatcher(package_tlv)
-            except Exception:
-                # SGP.32 §6.5.2.1 EimPackageResultErrorCode 127
-                # (undefinedError) is the catch-all the spec uses
-                # when the IPA cannot finish dispatching a package.
-                per_package_failures.append(127)
-                if len(outer_tag) > 0:
-                    toolkit.ipa_poll_failed_packages = list(
-                        toolkit.ipa_poll_failed_packages
-                    ) + [(outer_tag, 127)]
-                continue
-            if (sw1, sw2) == (0x90, 0x00):
-                if len(outer_tag) > 0:
-                    toolkit.ipa_poll_dispatched_packages = list(
-                        toolkit.ipa_poll_dispatched_packages
-                    ) + [outer_tag]
-                per_package_responses.append(bytes(response_data or b""))
-                # A package made it all the way through ISD-R, so the
-                # bearer is healthy this cycle. Reset the consecutive
-                # failure tally + last-error string so the upper layer
-                # does not gate the next cycle on stale telemetry.
-                toolkit.ipa_poll_consecutive_failures = 0
-                toolkit.ipa_poll_last_cycle_error = ""
-            else:
-                # SW != 9000. Per SGP.32 §6.5.2.1 map the SW pair to
-                # an EimPackageResultErrorCode: 6A80/6A82/6985 -> 1
-                # (invalidPackageFormat), 6A88 -> 2 (unknownPackage),
-                # everything else -> 127 (undefinedError).
-                error_code = self._sw_to_eim_package_error_code(sw1, sw2)
-                per_package_failures.append(error_code)
-                if len(outer_tag) > 0:
-                    toolkit.ipa_poll_failed_packages = list(
-                        toolkit.ipa_poll_failed_packages
-                    ) + [(outer_tag, error_code)]
-
-        if len(per_package_responses) == 0 and len(per_package_failures) == 0:
-            return
-        toolkit.ipa_poll_dispatched_responses = list(
-            toolkit.ipa_poll_dispatched_responses
-        ) + per_package_responses
-        # SGP.32 §6.5.2.1 ProvideEimPackageResult follow-up. Build a
-        # BF50 body wrapping each per-package result and inject a
-        # fresh SEND DATA in front of the still-pending CLOSE CHANNEL
-        # so the eIM sees execution results within the same BIP
-        # cycle. Real cards also send a final RECEIVE DATA to drain
-        # any acknowledgement / next-package the eIM ships back; we
-        # mirror that to keep the conversation symmetric.
-        # ``ipa_poll_followup_emitted`` is the latch that prevents a
-        # cascading injection if the eIM's ack itself contains BF50
-        # bytes -- real eIMs reply to BF50 with an empty body or a
-        # single ack TLV, which the IPA forwards once but does not
-        # re-mirror.
-        if bool(toolkit.ipa_poll_followup_emitted):
-            return
-        result_body = self._build_provide_eim_package_result_payload(
-            per_package_responses,
-            per_package_failures,
-        )
-        if len(result_body) == 0:
-            return
-        toolkit.ipa_poll_pending_result_payload = result_body
-        toolkit.ipa_poll_last_result_payload = result_body
-        toolkit.ipa_poll_followup_emitted = True
-        self._inject_followup_send_receive(result_body)
-
-    @staticmethod
-    def _sw_to_eim_package_error_code(sw1: int, sw2: int) -> int:
-        """Map a card SW pair to SGP.32 §6.5.2.1 EimPackageResultErrorCode.
-
-        Codes: 1=invalidPackageFormat, 2=unknownPackage, 127=undefined.
-        """
-
-        sw_word = ((int(sw1) & 0xFF) << 8) | (int(sw2) & 0xFF)
-        if sw_word in (0x6A80, 0x6A82, 0x6985):
-            return 1
-        if sw_word == 0x6A88:
-            return 2
-        return 127
-
-    def _build_provide_eim_package_result_payload(
-        self,
-        per_package_responses: list[bytes],
-        per_package_failures: list[int] | None = None,
-    ) -> bytes:
-        """SGP.32 §6.5.2.1 ProvideEimPackageResult (BF50) outgoing body.
-
-        Wraps each ISD-R response in a BF50 envelope, prefixed by
-        the EID under tag ``5A`` and an HTTP/1.1 POST framing line
-        so the bearer can route it to ``/gsma/rsp2/asn1`` exactly
-        like the initial GetEimPackageRequest. Bare BF51/BF54
-        responses are passed through unchanged; anything else is
-        wrapped in BF51 (LoadEuiccPackage result) per SGP.32 v1.2
-        §6.5.2.1 default-CHOICE rules. When no per-package response
-        was successful but at least one failure was recorded, the
-        body switches to the ``80`` EimPackageResultErrorCode CHOICE
-        carrying the worst-severity error code seen this cycle.
-
-        Pending notifications stored on the eUICC are also drained
-        and stitched into the body as a ``BF2B`` retrieve-all chunk
-        so the eIM gets cross-cycle notification telemetry without
-        having to issue a separate retrieve.
-        """
-
-        failures = list(per_package_failures or [])
-        eid_hex = str(self.state.eid or "").strip()
-        if len(eid_hex) != 32:
-            return b""
-        try:
-            eid_bytes = bytes.fromhex(eid_hex)
-        except ValueError:
-            return b""
-
-        body_parts: list[bytes] = [tlv("5A", eid_bytes)]
-        success_count = 0
-        for raw in per_package_responses:
-            payload = bytes(raw or b"")
-            if len(payload) == 0:
-                continue
-            if (
-                payload.startswith(bytes.fromhex("BF51"))
-                or payload.startswith(bytes.fromhex("BF52"))
-                or payload.startswith(bytes.fromhex("BF54"))
-            ):
-                body_parts.append(payload)
-            else:
-                body_parts.append(tlv("BF51", payload))
-            success_count += 1
-
-        notification_tlv = self._collect_pending_notifications_tlv()
-        if len(notification_tlv) > 0:
-            body_parts.append(notification_tlv)
-
-        if success_count == 0 and len(failures) > 0:
-            # SGP.32 §6.5.2.1 EimPackageResult CHOICE: switch to the
-            # ``80`` errorCode branch. Pick the most severe code
-            # (numerically largest) so the eIM sees the strongest
-            # signal -- 127 (undefined) trumps 1/2.
-            error_code = max(failures) & 0xFF
-            inner_seq = bytes([0x30, 0x03, 0x02, 0x01, error_code])
-            body_parts = [
-                tlv("5A", eid_bytes),
-                bytes([0x80, len(inner_seq)]) + inner_seq,
-            ]
-        elif success_count == 0 and len(notification_tlv) == 0:
-            return b""
-
-        bf50 = tlv("BF50", b"".join(body_parts))
-        toolkit = self.state.toolkit
-        host = str(toolkit.ipa_poll_eim_fqdn or "").strip()
-        if len(host) == 0:
-            host = self._resolve_ipa_poll_fqdn()
-        envelope = (
-            f"POST /gsma/rsp2/asn1 HTTP/1.1\r\n"
-            f"Host: {host}\r\n"
-            f"X-Admin-Protocol: gsma/rsp/v2.2.0\r\n"
-            f"Content-Type: application/x-gsma-rsp-asn1\r\n"
-            f"User-Agent: yggdrasim-ipa/1.0\r\n"
-            f"Content-Length: {len(bf50)}\r\n"
-            f"Connection: close\r\n"
-            f"\r\n"
-        ).encode("utf-8")
-        return envelope + bf50
-
-    def _collect_pending_notifications_tlv(self) -> bytes:
-        """SGP.22 §5.7.10 / SGP.32 §6.5 PendingNotification piggyback.
-
-        Drain ``state.notifications`` into a ``BF2B`` retrieve-all
-        chunk so the eIM gets cross-cycle telemetry without having
-        to issue a separate retrieve in the next round-trip. The
-        notifications themselves are NOT removed from the eUICC --
-        the eIM is expected to acknowledge them via a follow-up
-        ``RemoveNotificationFromList`` (BF30) before they go away.
-        That mirrors a real card: notifications stay pinned until
-        explicitly cleared.
-        """
-
-        if len(self.state.notifications) == 0:
-            return b""
-        body = b"".join(
-            bytes(notification.payload) for notification in self.state.notifications
-        )
-        if len(body) == 0:
-            return b""
-        return tlv("BF2B", tlv("A0", body))
-
-    def _inject_followup_send_receive(self, payload: bytes) -> None:
-        """Insert SEND DATA + RECEIVE DATA before any pending CLOSE CHANNEL.
-
-        Walks ``state.pending_fetch_queue`` to find the first
-        CLOSE CHANNEL command and inserts the new pair right before
-        it. If no CLOSE CHANNEL is queued (shouldn't happen mid
-        cycle, but be defensive) the pair is appended.
-        """
-
-        send_data_cmd = self._build_send_data_command_with_qualifier(
-            self._allocate_command_number(),
-            0x01,
-            payload,
-        )
-        receive_size = max(
-            1,
-            min(0xFF, int(self.state.toolkit.ipa_poll_receive_size or 0xFA)),
-        )
-        receive_data_cmd = self._build_receive_data_command(
-            self._allocate_command_number(),
-            receive_size,
-        )
-        queue = self.state.pending_fetch_queue
-        insert_at = len(queue)
-        for index, command in enumerate(queue):
-            kind = self._safe_proactive_kind(command)
-            if kind == CLOSE_CHANNEL_COMMAND:
-                insert_at = index
-                break
-        queue.insert(insert_at, receive_data_cmd)
-        queue.insert(insert_at, send_data_cmd)
-
-    @staticmethod
-    def _safe_proactive_kind(payload: bytes) -> int:
-        """Return the proactive command-type byte from a D0 frame, or -1."""
-        if len(payload) < 4 or payload[0] != 0xD0:
-            return -1
-        body_offset = 2 if payload[1] < 0x80 else (2 + (payload[1] & 0x7F))
-        if body_offset >= len(payload):
-            return -1
-        if payload[body_offset] != 0x81:
-            return -1
-        length = payload[body_offset + 1] if body_offset + 1 < len(payload) else 0
-        cd_start = body_offset + 2
-        if cd_start + 1 >= len(payload) or length < 3:
-            return -1
-        return payload[cd_start + 1]
-
-    @staticmethod
-    def _read_eim_response_outer_tag(package_tlv: bytes) -> bytes:
-        if len(package_tlv) == 0:
-            return b""
-        first_octet = package_tlv[0]
-        if first_octet & 0x1F == 0x1F:
-            if len(package_tlv) < 2:
-                return b""
-            return bytes(package_tlv[:2])
-        return bytes(package_tlv[:1])
-
-    @staticmethod
-    def _extract_eim_response_packages(payload: bytes) -> list[bytes]:
-        """Return the SGP.32 EuiccPackage TLVs embedded in ``payload``.
-
-        The simulator's modem layer strips TLS but leaves any HTTP
-        framing intact for the IPA to ignore. ESipa bodies always
-        start with a recognisable SGP.32 outer tag, so we scan the
-        payload for the first valid TLV whose tag is one of the
-        known constructed-class application tags and consume from
-        there. If none is found, an empty list is returned.
-        """
-
-        raw = bytes(payload or b"")
-        if len(raw) == 0:
-            return []
-        # Find the body start past any HTTP envelope.
-        offset = 0
-        crlf_double = raw.find(b"\r\n\r\n")
-        if crlf_double != -1 and (raw.startswith(b"HTTP/") or raw.startswith(b"POST ")):
-            offset = crlf_double + 4
-        body = raw[offset:]
-        # SGP.32 / SGP.22 outer tags the IPA cares about. The IPA
-        # accepts every eIM-side EuiccPackage tag that
-        # ``SgpLogic.handle_store_data`` knows how to dispatch -- the
-        # IPA's contract is to be a transparent forwarder for this
-        # range. Add any new tag here when the SGP layer grows a
-        # new STORE DATA handler.
-        allowed_outer_tags = {
-            # Profile lifecycle (ES10b/ES10c)
-            bytes.fromhex("BF21"),  # PrepareDownload
-            bytes.fromhex("BF25"),  # StoreMetadata
-            bytes.fromhex("BF29"),  # SetNickname
-            bytes.fromhex("BF2A"),  # UpdateMetadata
-            bytes.fromhex("BF2B"),  # ListNotifications / RetrieveAll
-            bytes.fromhex("BF2D"),  # GetProfilesInfo
-            bytes.fromhex("BF2E"),  # GetEuiccChallenge
-            bytes.fromhex("BF30"),  # RemoveNotificationFromList
-            bytes.fromhex("BF31"),  # EnableProfile
-            bytes.fromhex("BF32"),  # DisableProfile
-            bytes.fromhex("BF33"),  # DeleteProfile
-            bytes.fromhex("BF34"),  # eUICCMemoryReset (ES10c)
-            bytes.fromhex("BF35"),  # LoadCRL (SGP.22 §5.7.13)
-            bytes.fromhex("BF36"),  # BoundProfilePackage
-            bytes.fromhex("BF38"),  # AuthenticateServer
-            bytes.fromhex("BF3C"),  # GetEuiccConfiguredData
-            bytes.fromhex("BF3F"),  # SetDefaultDpAddress
-            bytes.fromhex("BF41"),  # CancelSession
-            bytes.fromhex("BF45"),  # EuiccPackage envelope (SGP.32)
-            # ESipa command/response
-            bytes.fromhex("BF50"),  # ProvideEimPackageResult
-            bytes.fromhex("BF51"),  # EuiccPackageResult / LoadEuiccPackage
-            bytes.fromhex("BF52"),  # NoMoreEuiccPackages
-            bytes.fromhex("BF53"),  # EimAcknowledgements
-            bytes.fromhex("BF54"),  # ProfileDownloadTrigger / Result
-            bytes.fromhex("BF55"),  # GetEimConfigurationData
-            bytes.fromhex("BF56"),  # GetCerts
-            bytes.fromhex("BF57"),  # AddInitialEim
-            bytes.fromhex("BF58"),  # AddEim / ProfileRollback
-            bytes.fromhex("BF59"),  # DeleteEim / ConfigureImmediateEnable
-            bytes.fromhex("BF5A"),  # ImmediateEnable
-            bytes.fromhex("BF5B"),  # EnableEmergencyProfile
-            bytes.fromhex("BF5C"),  # DisableEmergencyProfile
-            bytes.fromhex("BF5D"),  # ExecuteFallbackMechanism
-            bytes.fromhex("BF5E"),  # ReturnFromFallback
-            bytes.fromhex("BF5F"),  # GetConnectivityParameters
-            bytes.fromhex("BF64"),  # eUICCMemoryReset (SGP.32)
-            bytes.fromhex("BF65"),  # SetDefaultDpAddress (ES10b)
-        }
-
-        # Scan forward to the first allowed outer tag, then
-        # consume contiguous TLVs from there.
-        scan = 0
-        first_tlv_start = -1
-        while scan + 1 < len(body):
-            candidate = body[scan : scan + 2]
-            if candidate in allowed_outer_tags:
-                first_tlv_start = scan
-                break
-            scan += 1
-        if first_tlv_start < 0:
-            return []
-        chain = body[first_tlv_start:]
-        results: list[bytes] = []
-        cursor = 0
-        while cursor < len(chain):
-            try:
-                tag_bytes, _value, raw_tlv, next_offset = read_tlv(chain, cursor)
-            except (ValueError, IndexError):
-                break
-            if tag_bytes not in allowed_outer_tags:
-                break
-            results.append(bytes(raw_tlv))
-            cursor = next_offset
-        return results
 
     def _apply_channel_status_response(self, response_fields: dict[str, object]) -> None:
         channel_status = bytes(response_fields.get("channel_status", b"") or b"")
@@ -3327,6 +2665,11 @@ class ToolkitLogic:
                     )
                     if len(channel_status_blob) > 0:
                         toolkit.last_data_available_channel_status = channel_status_blob
+                    if str(toolkit.bip_bootstrap_phase or "") == "dns_wait_data":
+                        requested_length = int(channel_length_value) & 0xFF
+                        if requested_length > 0:
+                            toolkit.bip_bootstrap_phase = "dns_receive"
+                            self.queue_receive_data(requested_length)
             elif code_int == 0x0F:
                 # 3GPP TS 31.111 §7.5.13 Network Rejection event
                 # download. The cause-bytes blob is stashed for later
@@ -3490,6 +2833,7 @@ class ToolkitLogic:
                 if status_value is not None:
                     toolkit.last_location_status = int(status_value) & 0xFF
                     toolkit.location_status_changes += 1
+                    self._queue_location_bip_dns_bootstrap()
             elif code_int == 0x10:
                 # ETSI TS 102 223 §7.4.16 Frames Information Change
                 # Event. The terminal raises this when the user
@@ -3635,9 +2979,8 @@ class ToolkitLogic:
 
         Walks the BTLV body (already known to be tagged ``D7``) and
         extracts the timer-id / timer-value TLVs (``A4`` / ``A5``).
-        The matching entry is removed from
-        ``state.toolkit.timer_table`` and ``last_expired_timer_id``
-        is updated so polling tools can react.
+        The matching entry is removed from ``state.toolkit.timer_table``
+        and ``last_expired_timer_id`` is updated for observers.
         """
         try:
             outer_tag, outer_value, _raw, _next = read_tlv(bytes(payload or b""), 0)
@@ -3663,18 +3006,8 @@ class ToolkitLogic:
         if timer_id > 0:
             toolkit.last_expired_timer_id = timer_id
             toolkit.timer_table.pop(timer_id, None)
-            # SGP.32 §3.5 IPA polling cadence: each D7 expiry first
-            # drives the BIP IPA-poll sequence (so the modem actually
-            # contacts the eIM) and only then re-arms the timer for
-            # the next cycle. The order here is load-bearing: queueing
-            # the rearm before the poll sequence would let the next
-            # FETCH consume the rearm before the modem ever sees the
-            # OPEN CHANNEL request.
             strategy = str(toolkit.poll_strategy or "timer").strip().lower()
             timer_strategy_active = strategy in {"timer", "both"}
-
-            if timer_strategy_active and bool(toolkit.ipa_poll_enabled):
-                self._queue_ipa_poll_sequence()
 
             rearm_seconds = int(toolkit.timer_management_seconds or 0)
             if (
@@ -3691,582 +3024,6 @@ class ToolkitLogic:
                     )
                 )
         self._dispatch_hook("on_timer_expiration", timer_id)
-
-    def _queue_ipa_poll_sequence(self) -> None:
-        """Enqueue the SGP.32 §3.5 IPA-poll BIP exchange.
-
-        The terminal services the bearer (DNS / TLS / HTTP) so the
-        simulator only needs to publish the four proactive commands:
-
-        1. OPEN CHANNEL    (TS 102 223 §6.4.27)
-        2. SEND DATA       (TS 102 223 §6.4.29)
-        3. RECEIVE DATA    (TS 102 223 §6.4.30)
-        4. CLOSE CHANNEL   (TS 102 223 §6.4.28)
-
-        The eIM FQDN resolution order mirrors what
-        ``SimEimEntry`` does on cold boot:
-
-        1. ``state.toolkit.ipa_poll_eim_fqdn`` (operator override)
-        2. The first ``state.eim_entries[*].eim_fqdn`` that is set
-        3. The empty string -- in which case we skip the sequence
-           rather than emit a malformed OPEN CHANNEL.
-        """
-        toolkit = self.state.toolkit
-        fqdn = self._resolve_ipa_poll_fqdn()
-        if len(fqdn) == 0:
-            return
-        # Reset per-cycle bookkeeping up-front so the queueing helpers
-        # below can latch new state without confusing inspectors that
-        # observed the previous cycle.
-        toolkit.ipa_poll_session_active = True
-        toolkit.ipa_poll_last_response_payload = b""
-        toolkit.ipa_poll_dispatched_packages = []
-        toolkit.ipa_poll_dispatched_responses = []
-        toolkit.ipa_poll_failed_packages = []
-        toolkit.ipa_poll_pending_result_payload = b""
-        toolkit.ipa_poll_followup_emitted = False
-        toolkit.ipa_poll_last_resolution_error = ""
-        # If we already resolved the eIM IP in a previous cycle and the
-        # cache is still valid, skip the DNS phase and dive straight
-        # into the ESipa exchange.
-        cached_ip = str(toolkit.ipa_poll_resolved_ip or "").strip()
-        if len(cached_ip) > 0:
-            self._queue_ipa_poll_eim_phase(fqdn, cached_ip)
-            return
-        self._queue_ipa_poll_dns_phase(fqdn)
-
-    def _queue_ipa_poll_dns_phase(self, fqdn: str) -> None:
-        """Queue the SGP.32 DNS-over-BIP leg for the eIM FQDN.
-
-        Mirrors what reference IPA implementations emit when their
-        resolved-IP cache is empty:
-
-        1. OPEN CHANNEL UDP_REMOTE to ``ipa_poll_dns_server:53`` with
-           the configured APN. Qualifier ``0x03`` (immediate +
-           automatic reconnection) so the modem keeps the resolver
-           socket warm across the question/answer round trip.
-        2. SEND DATA × 2 carrying AAAA then A questions (RFC 1035
-           dual-stack pattern). Both questions reuse the same channel
-           id once OPEN CHANNEL TR succeeds.
-        3. RECEIVE DATA × 2 (one per outstanding answer).
-        4. CLOSE CHANNEL once the resolver has answered.
-        """
-
-        toolkit = self.state.toolkit
-        dns_server = str(toolkit.ipa_poll_dns_server or "").strip() or "8.8.8.8"
-        dns_port = max(1, min(0xFFFF, int(toolkit.ipa_poll_dns_port or 53)))
-        buffer_size = max(0x40, min(0xFFFF, int(toolkit.ipa_poll_buffer_size or 0x0400)))
-        receive_size = max(1, min(0xFF, int(toolkit.ipa_poll_receive_size or 0xFA)))
-        apn = str(toolkit.ipa_poll_apn or "").strip()
-
-        toolkit.ipa_poll_phase = "dns_open"
-        toolkit.ipa_poll_phase_history = (
-            list(toolkit.ipa_poll_phase_history or []) + ["dns_open"]
-        )[-16:]
-        toolkit.ipa_poll_dns_response_buffer = b""
-        toolkit.ipa_poll_dns_a_pending = True
-        toolkit.ipa_poll_dns_aaaa_pending = True
-        toolkit.ipa_poll_dns_query_id = (int(toolkit.ipa_poll_dns_query_id or 0) + 1) & 0xFFFF
-
-        aaaa_query = ipa_poll_dns.encode_dns_query(
-            fqdn,
-            ipa_poll_dns.QTYPE_AAAA,
-            transaction_id=int(toolkit.ipa_poll_dns_query_id),
-        )
-        a_query = ipa_poll_dns.encode_dns_query(
-            fqdn,
-            ipa_poll_dns.QTYPE_A,
-            transaction_id=(int(toolkit.ipa_poll_dns_query_id) + 1) & 0xFFFF,
-        )
-        toolkit.ipa_poll_dns_query_id = (int(toolkit.ipa_poll_dns_query_id) + 1) & 0xFFFF
-        toolkit.ipa_poll_dns_pending_questions = [
-            (str(fqdn), int(ipa_poll_dns.QTYPE_AAAA)),
-            (str(fqdn), int(ipa_poll_dns.QTYPE_A)),
-        ]
-
-        open_dns = self._build_open_channel_command(
-            self._allocate_command_number(),
-            remote_address=dns_server,
-            remote_port=dns_port,
-            transport_protocol_type=0x01,
-            network_access_name=apn,
-            buffer_size=buffer_size,
-            qualifier=0x03,
-            alpha_identifier="",
-        )
-        send_aaaa = self._build_send_data_command_with_qualifier(
-            self._allocate_command_number(),
-            0x01,
-            aaaa_query,
-        )
-        send_a = self._build_send_data_command_with_qualifier(
-            self._allocate_command_number(),
-            0x01,
-            a_query,
-        )
-        receive_aaaa = self._build_receive_data_command(
-            self._allocate_command_number(),
-            receive_size,
-        )
-        receive_a = self._build_receive_data_command(
-            self._allocate_command_number(),
-            receive_size,
-        )
-        # Reference IPA cards arm timer 02 with a ~65 s watchdog after
-        # the SEND DATA burst and deactivate it before CLOSE CHANNEL.
-        # The proactive yield gives the modem a polling window to
-        # actually receive the DNS answer from the network before the
-        # eUICC issues RECEIVE DATA -- skipping it is what made our
-        # modem reject RECEIVE DATA with general result 0x3A
-        # ("Bearer Independent Protocol error") and additional info
-        # 0x00 ("no specific cause").
-        wait_timer_id = int(toolkit.ipa_poll_wait_timer_id or 2) & 0xFF
-        wait_seconds = max(1, int(toolkit.ipa_poll_wait_timer_seconds or 65))
-        timer_start = self._build_timer_management_start(
-            self._allocate_command_number(),
-            wait_timer_id,
-            wait_seconds,
-        )
-        timer_stop = self._build_timer_management_deactivate(
-            self._allocate_command_number(),
-            wait_timer_id,
-        )
-        close_dns = self._build_close_channel_command(self._allocate_command_number())
-
-        self._enqueue_command(open_dns)
-        self._enqueue_command(send_aaaa)
-        self._enqueue_command(send_a)
-        self._enqueue_command(timer_start)
-        self._enqueue_command(receive_aaaa)
-        self._enqueue_command(receive_a)
-        self._enqueue_command(timer_stop)
-        self._enqueue_command(close_dns)
-
-    def _queue_ipa_poll_eim_phase(self, fqdn: str, resolved_ip: str) -> None:
-        """Queue the SGP.32 ESipa-over-BIP leg using the resolved eIM IP.
-
-        Two paths share this entry point:
-
-        * **TLS-in-card path** (default; ``ipa_poll_tls_enabled`` is
-          ``True``). Only the OPEN CHANNEL is enqueued up-front. After
-          the bearer comes up the toolkit's TR handlers drive a
-          reactive SEND/RECEIVE DATA loop that runs the TLS-1.2
-          handshake, ships the encrypted ESipa request, decrypts the
-          response and finally queues CLOSE CHANNEL. This mirrors what
-          a real eUICC does -- the modem stays a transparent byte pipe.
-        * **Plain-HTTP fallback** (``ipa_poll_tls_enabled`` is
-          ``False``). The legacy four-command queue (OPEN / SEND /
-          RECEIVE / CLOSE) is built up-front. The IPA-dispatch tests
-          opt into this so they can exercise the SGP.32 envelope wiring
-          without a TLS server.
-        """
-
-        toolkit = self.state.toolkit
-        port = max(1, min(0xFFFF, int(toolkit.ipa_poll_eim_port or 443)))
-        transport_type = int(toolkit.ipa_poll_transport_type or 0x02) & 0xFF
-        buffer_size = max(0x40, min(0xFFFF, int(toolkit.ipa_poll_buffer_size or 0x0400)))
-        apn = str(toolkit.ipa_poll_apn or "").strip()
-        request_payload = bytes(toolkit.ipa_poll_request_payload or b"") or self._default_ipa_poll_request(fqdn)
-
-        toolkit.ipa_poll_phase = "eim_open"
-        toolkit.ipa_poll_phase_history = (
-            list(toolkit.ipa_poll_phase_history or []) + ["eim_open"]
-        )[-16:]
-        toolkit.ipa_poll_last_request_payload = bytes(request_payload)
-        toolkit.ipa_poll_tls_inbound_buffer = b""
-        toolkit.ipa_poll_tls_idle_receives = 0
-        toolkit.ipa_poll_tls_last_error = ""
-        toolkit.ipa_poll_tls_decrypted_payload = b""
-        toolkit.ipa_poll_tls_state = None
-
-        open_eim = self._build_open_channel_command(
-            self._allocate_command_number(),
-            remote_address=resolved_ip,
-            remote_port=port,
-            transport_protocol_type=transport_type,
-            network_access_name=apn,
-            buffer_size=buffer_size,
-            qualifier=0x01,
-            alpha_identifier="",
-        )
-        self._enqueue_command(open_eim)
-        if bool(toolkit.ipa_poll_tls_enabled):
-            return
-        # Plain-HTTP fallback path: queue the rest of the cycle now.
-        receive_size = max(1, min(0xFF, int(toolkit.ipa_poll_receive_size or 0xFA)))
-        send_data = self._build_send_data_command_with_qualifier(
-            self._allocate_command_number(),
-            0x01,
-            request_payload,
-        )
-        receive_data = self._build_receive_data_command(
-            self._allocate_command_number(),
-            receive_size,
-        )
-        wait_timer_id = int(toolkit.ipa_poll_wait_timer_id or 2) & 0xFF
-        wait_seconds = max(1, int(toolkit.ipa_poll_wait_timer_seconds or 65))
-        timer_start = self._build_timer_management_start(
-            self._allocate_command_number(),
-            wait_timer_id,
-            wait_seconds,
-        )
-        timer_stop = self._build_timer_management_deactivate(
-            self._allocate_command_number(),
-            wait_timer_id,
-        )
-        close_eim = self._build_close_channel_command(self._allocate_command_number())
-        self._enqueue_command(send_data)
-        self._enqueue_command(timer_start)
-        self._enqueue_command(receive_data)
-        self._enqueue_command(timer_stop)
-        self._enqueue_command(close_eim)
-
-    # ------------------------------------------------------------------
-    # In-card TLS-1.2 driving (Stage 2). The helpers below own the
-    # reactive SEND/RECEIVE DATA loop that runs the TLS handshake and
-    # the encrypted ESipa exchange entirely inside the card. They
-    # depend on ``ipa_poll_tls_enabled`` being set; the legacy plain-
-    # HTTP fallback path keeps the linear queue from Stage 1.
-    # ------------------------------------------------------------------
-
-    _IPA_POLL_TLS_SEND_CHUNK: int = 240
-
-    def _ipa_poll_tls_active(self) -> bool:
-        toolkit = self.state.toolkit
-        if bool(toolkit.ipa_poll_tls_enabled) is False:
-            return False
-        return toolkit.ipa_poll_tls_state is not None
-
-    def _ipa_poll_tls_phase_active(self) -> bool:
-        toolkit = self.state.toolkit
-        return str(toolkit.ipa_poll_phase or "") in {
-            "eim_tls_handshake",
-            "eim_request",
-            "eim_recv",
-        } and self._ipa_poll_tls_active()
-
-    def _create_ipa_poll_tls_client(self, fqdn: str):
-        """Instantiate the per-cycle ``CardTlsClient``.
-
-        Trust anchor priority:
-
-        1. ``state.eim_entries[*].trusted_tls_public_key_data`` (DER,
-           seeded by ``_load_sim_eim_certificate_der`` from the eIM
-           identity JSON).
-        2. ``state.toolkit.ipa_poll_tls_ca_cert_path`` if the toolkit
-           was given an explicit override path.
-        3. None -- the engine falls back to ``CERT_NONE`` so the
-           handshake still emits valid wire bytes for diagnostics.
-        """
-
-        from SIMCARD import ipa_tls
-
-        toolkit = self.state.toolkit
-        ca_paths: list[str] = []
-        ca_der = b""
-        for entry in getattr(self.state, "eim_entries", []) or []:
-            blob = bytes(getattr(entry, "trusted_tls_public_key_data", b"") or b"")
-            if len(blob) > 0:
-                ca_der = blob
-                break
-        config = ipa_tls.CardTlsClientConfig(
-            server_hostname=str(fqdn or ""),
-            ca_certificate_paths=ca_paths,
-            ca_certificate_der=ca_der,
-            insecure_skip_verify=False,
-        )
-        toolkit.ipa_poll_tls_state = ipa_tls.create_card_tls_client(config)
-        toolkit.ipa_poll_tls_inbound_buffer = b""
-        toolkit.ipa_poll_tls_idle_receives = 0
-        toolkit.ipa_poll_tls_decrypted_payload = b""
-        toolkit.ipa_poll_tls_last_error = ""
-
-    def _pump_ipa_poll_tls_engine(self) -> None:
-        """Advance the TLS state machine and queue the next SEND/RECEIVE.
-
-        Called from the OPEN CHANNEL / SEND DATA / RECEIVE DATA TR
-        handlers whenever the eIM phase is in flight under the TLS
-        path. The order of operations:
-
-        1. If the inbound buffer has any bytes, hand them to the TLS
-           engine and clear the buffer. Idle counter resets.
-        2. If the handshake is still in progress, advance it. The
-           engine pushes any new outbound bytes (handshake records,
-           CCS, Finished, etc.) into ``outgoing``.
-        3. If the handshake just completed and the encrypted ESipa
-           request has not been emitted yet, encrypt the configured
-           request payload now so it lands in ``outgoing`` alongside
-           the final Finished record.
-        4. Drain ``outgoing``. If non-empty, queue a SEND DATA chunk;
-           otherwise queue a RECEIVE DATA so the modem can hand back
-           more eIM bytes.
-        5. If we drained the response, decrypted the plaintext, the
-           caller (the RECEIVE DATA handler) will tell us to close
-           the channel instead of re-pumping.
-
-        Phases drive the action selector:
-
-        * ``eim_tls_handshake`` -- handshake bytes still flowing.
-        * ``eim_request``       -- encrypted request being shipped.
-        * ``eim_recv``          -- encrypted response being drained.
-        """
-
-        from SIMCARD import ipa_tls
-
-        toolkit = self.state.toolkit
-        tls_state = toolkit.ipa_poll_tls_state
-        if tls_state is None:
-            return
-
-        inbound = bytes(toolkit.ipa_poll_tls_inbound_buffer or b"")
-        if len(inbound) > 0:
-            ipa_tls.feed_inbound(tls_state, inbound)
-            toolkit.ipa_poll_tls_inbound_buffer = b""
-            toolkit.ipa_poll_tls_idle_receives = 0
-
-        if bool(getattr(tls_state, "handshake_complete", False)) is False:
-            ipa_tls.drive_handshake(tls_state)
-            if len(str(getattr(tls_state, "handshake_error", "") or "")) > 0:
-                toolkit.ipa_poll_tls_last_error = str(tls_state.handshake_error)
-                self._abort_ipa_poll_cycle("tls handshake failure")
-                return
-
-        outgoing = ipa_tls.drain_outbound(tls_state)
-
-        if (
-            bool(getattr(tls_state, "handshake_complete", False))
-            and str(toolkit.ipa_poll_phase or "") == "eim_tls_handshake"
-        ):
-            request_payload = bytes(toolkit.ipa_poll_last_request_payload or b"")
-            if len(request_payload) == 0:
-                request_payload = self._default_ipa_poll_request(
-                    self._resolve_ipa_poll_fqdn()
-                )
-                toolkit.ipa_poll_last_request_payload = request_payload
-            encrypted_request = ipa_tls.encrypt_application_data(
-                tls_state,
-                request_payload,
-            )
-            outgoing = outgoing + encrypted_request
-            toolkit.ipa_poll_phase = "eim_request"
-            toolkit.ipa_poll_phase_history = (
-                list(toolkit.ipa_poll_phase_history or []) + ["eim_request"]
-            )[-16:]
-
-        if len(outgoing) > 0:
-            # Transitioning back into a SEND DATA flight; tear down the
-            # watchdog timer that was guarding the previous RECEIVE so
-            # the timer-table latch sees a clean deactivate before the
-            # next arm.
-            self._disarm_ipa_poll_wait_timer()
-            self._queue_ipa_poll_tls_send_chunks(outgoing)
-            return
-
-        if str(toolkit.ipa_poll_phase or "") == "eim_request":
-            # Encrypted request shipped but no further bytes pending;
-            # transition to receive phase to drain the eIM's response.
-            toolkit.ipa_poll_phase = "eim_recv"
-            toolkit.ipa_poll_phase_history = (
-                list(toolkit.ipa_poll_phase_history or []) + ["eim_recv"]
-            )[-16:]
-
-        # No bytes to send. Either the handshake needs more inbound or
-        # we are waiting for the eIM's encrypted response. Either way,
-        # ask the modem for more bytes.
-        toolkit.ipa_poll_tls_idle_receives = int(toolkit.ipa_poll_tls_idle_receives or 0) + 1
-        if int(toolkit.ipa_poll_tls_idle_receives) > int(
-            toolkit.ipa_poll_tls_max_idle_receives or 16
-        ):
-            self._abort_ipa_poll_cycle("tls idle receive cap exceeded")
-            return
-        # Arm the watchdog timer right before yielding for the modem's
-        # network round-trip; reference cards rely on this proactive
-        # yield to actually receive bytes before the next RECEIVE DATA.
-        self._arm_ipa_poll_wait_timer()
-        receive_size = max(1, min(0xFF, int(toolkit.ipa_poll_receive_size or 0xFA)))
-        self._enqueue_command(
-            self._build_receive_data_command(
-                self._allocate_command_number(),
-                receive_size,
-            )
-        )
-
-    def _arm_ipa_poll_wait_timer(self) -> None:
-        """Queue a TIMER MANAGEMENT (start) before the next RECEIVE DATA.
-
-        Reference IPA cards arm timer 02 with a ~65 s watchdog every
-        time they yield for a network response inside an IPA-poll
-        cycle. The proactive yield gives the modem its FETCH/STATUS
-        polling window so bytes from the network actually land in the
-        bearer buffer before the eUICC issues RECEIVE DATA. Skipping
-        the yield -- the bug we are fixing here -- makes the modem
-        return general result 0x3A (Bearer Independent Protocol
-        error) on every RECEIVE DATA. The flag stops us from arming
-        the same timer twice during an interleaved SEND/RECV burst.
-        """
-        toolkit = self.state.toolkit
-        if bool(toolkit.ipa_poll_wait_timer_armed):
-            return
-        timer_id = int(toolkit.ipa_poll_wait_timer_id or 2) & 0xFF
-        seconds = max(1, int(toolkit.ipa_poll_wait_timer_seconds or 65))
-        self._enqueue_command(
-            self._build_timer_management_start(
-                self._allocate_command_number(),
-                timer_id,
-                seconds,
-            )
-        )
-        toolkit.ipa_poll_wait_timer_armed = True
-
-    def _disarm_ipa_poll_wait_timer(self) -> None:
-        """Queue a TIMER MANAGEMENT (deactivate) once a RECEIVE DATA flight ends.
-
-        The terminal echoes the remaining timer value back in the
-        Timer Value (25) TLV, which lets the IPA log how long the
-        actual wait was. The deactivate must run before CLOSE CHANNEL
-        (or before the next SEND DATA flight in the TLS reactive path)
-        so the timer-table bookkeeping stays clean across cycles.
-        """
-        toolkit = self.state.toolkit
-        if bool(toolkit.ipa_poll_wait_timer_armed) is False:
-            return
-        timer_id = int(toolkit.ipa_poll_wait_timer_id or 2) & 0xFF
-        self._enqueue_command(
-            self._build_timer_management_deactivate(
-                self._allocate_command_number(),
-                timer_id,
-            )
-        )
-        toolkit.ipa_poll_wait_timer_armed = False
-
-    def _queue_ipa_poll_tls_send_chunks(self, payload: bytes) -> None:
-        """Split ``payload`` into SEND DATA chunks and enqueue them.
-
-        Each SEND DATA carries up to ``_IPA_POLL_TLS_SEND_CHUNK`` bytes
-        under TLV ``36`` so the channel data length stays inside the
-        single-octet BER length form (and well below any reasonable
-        modem buffer). The qualifier on every chunk except the final
-        one carries bit 1 (more data follows); the last chunk uses
-        qualifier ``0x01`` (last segment of a single message).
-        """
-
-        body = bytes(payload or b"")
-        if len(body) == 0:
-            return
-        chunk_size = max(1, int(self._IPA_POLL_TLS_SEND_CHUNK))
-        offset = 0
-        while offset < len(body):
-            slice_end = min(len(body), offset + chunk_size)
-            chunk = body[offset:slice_end]
-            qualifier = 0x01 if slice_end >= len(body) else 0x00
-            self._enqueue_command(
-                self._build_send_data_command_with_qualifier(
-                    self._allocate_command_number(),
-                    qualifier,
-                    chunk,
-                )
-            )
-            offset = slice_end
-
-    def _abort_ipa_poll_cycle(self, reason: str) -> None:
-        """Tear the IPA-poll cycle down after an unrecoverable TLS error.
-
-        Drains any queued SEND/RECEIVE/CLOSE commands so the modem
-        does not have to FETCH guaranteed-failure follow-ups, then
-        queues a single CLOSE CHANNEL so the bearer is shut cleanly.
-        ``ipa_poll_tls_last_error`` carries ``reason`` for operators /
-        tests; the phase machine returns to ``idle`` once the modem
-        acks the CLOSE CHANNEL.
-        """
-
-        toolkit = self.state.toolkit
-        toolkit.ipa_poll_tls_last_error = (
-            str(toolkit.ipa_poll_tls_last_error or "") or str(reason)
-        )
-        self._drain_ipa_poll_followups()
-        toolkit.ipa_poll_phase = "eim_close"
-        toolkit.ipa_poll_phase_history = (
-            list(toolkit.ipa_poll_phase_history or []) + ["abort"]
-        )[-16:]
-        # Tear down any watchdog timer the cycle armed so the modem
-        # does not keep an orphan timer running after CLOSE CHANNEL.
-        self._disarm_ipa_poll_wait_timer()
-        self._enqueue_command(
-            self._build_close_channel_command(self._allocate_command_number())
-        )
-
-    def _resolve_ipa_poll_fqdn(self) -> str:
-        toolkit = self.state.toolkit
-        configured = str(toolkit.ipa_poll_eim_fqdn or "").strip()
-        if len(configured) > 0:
-            return configured
-        for entry in getattr(self.state, "eim_entries", []) or []:
-            entry_fqdn = str(getattr(entry, "eim_fqdn", "") or "").strip()
-            if len(entry_fqdn) > 0:
-                return entry_fqdn
-        return ""
-
-    def _default_ipa_poll_request(self, fqdn: str) -> bytes:
-        # SGP.32 v1.2 §6.5.2.1 ESipa.GetEimPackageRequest. The IPA
-        # polls the eIM with a ``BF4F`` body carrying the eUICC EID
-        # under tag ``5A`` (16 BCD bytes). Optional fields:
-        # ``80`` notifyStateChange flag (omitted by default),
-        # ``81`` stateChangeCause INTEGER (omitted by default),
-        # ``82`` rPlmn 3 byte BCD (omitted by default).
-        #
-        # The body travels over HTTPS as ``application/x-gsma-rsp-asn1``;
-        # the modem terminates TLS so the simulator emits a plain
-        # HTTP/1.1 envelope and lets the bearer layer add encryption.
-        # Custom request payloads can still be injected via
-        # ``state.toolkit.ipa_poll_request_payload`` -- this default
-        # is what fires when no override is set.
-        host = str(fqdn or "").strip()
-        body = self._build_get_eim_package_request_tlv()
-        request = (
-            f"POST /gsma/rsp2/asn1 HTTP/1.1\r\n"
-            f"Host: {host}\r\n"
-            f"X-Admin-Protocol: gsma/rsp/v2.2.0\r\n"
-            f"Content-Type: application/x-gsma-rsp-asn1\r\n"
-            f"User-Agent: yggdrasim-ipa/1.0\r\n"
-            f"Content-Length: {len(body)}\r\n"
-            f"Connection: close\r\n"
-            f"\r\n"
-        )
-        return request.encode("utf-8") + body
-
-    def _build_get_eim_package_request_tlv(
-        self,
-        *,
-        notify_state_change: bool = False,
-        state_change_cause: int | None = None,
-        rplmn_bcd: bytes = b"",
-    ) -> bytes:
-        """SGP.32 §6.5.2.1 GetEimPackageRequest (BF4F) TLV.
-
-        Carries the EID under tag ``5A`` plus the optional bearer
-        hints the IPA may report. Returns an empty body if the EID
-        is missing/malformed because shipping a BF4F without an EID
-        would be rejected by every conformant eIM.
-        """
-
-        eid_hex = str(self.state.eid or "").strip()
-        if len(eid_hex) != 32:
-            return b""
-        try:
-            eid_bytes = bytes.fromhex(eid_hex)
-        except ValueError:
-            return b""
-        inner = tlv("5A", eid_bytes)
-        if notify_state_change:
-            inner += tlv("80", b"")
-        if state_change_cause is not None:
-            cause_value = int(state_change_cause) & 0xFF
-            if 0 <= cause_value <= 0x7F:
-                inner += tlv("81", bytes((cause_value,)))
-        if len(rplmn_bcd) > 0:
-            inner += tlv("82", bytes(rplmn_bcd))
-        return tlv("BF4F", inner)
-
 
     def _apply_call_control_envelope(self, payload: bytes) -> None:
         """3GPP TS 31.111 §7.3.1.1 Call Control by USIM decoder.
@@ -4488,7 +3245,7 @@ class ToolkitLogic:
         command_fields = self._parse_proactive_command(payload)
         if command_fields is None:
             return ""
-        command_type = int(command_fields.get("command_type", 0) or 0)
+        command_type = _normalize_command_type(int(command_fields.get("command_type", 0) or 0))
         qualifier = int(command_fields.get("qualifier", 0) or 0)
         if command_type == REFRESH_COMMAND:
             return describe_refresh_mode(qualifier)
@@ -4662,7 +3419,7 @@ class ToolkitLogic:
           the BIP session in its UI; empty body when the IPA does not
           want a user-visible string).
         * ``35`` Bearer description -- one byte for the bearer type
-          (0x03 = default packet bearer) is the SGP.32 IPA-poll norm.
+          (0x03 = default packet bearer).
         * ``39`` Buffer size (16-bit, big endian).
         * ``47`` Network Access Name -- the cellular APN, label-list
           encoded per §8.70. Omitted when no APN is supplied so the

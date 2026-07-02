@@ -1,0 +1,123 @@
+/*
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+ */
+
+/* -- scan result layout -------------------------------------------------- */
+
+.cc-scan-header {
+  display: flex;
+  flex-wrap: wrap;
+  margin-bottom: 14px;
+}
+
+.cc-scan-layout {
+  display: grid;
+  grid-template-columns: minmax(260px, 1fr) minmax(260px, 1.2fr);
+  gap: 18px;
+}
+
+@media (max-width: 900px) {
+  .cc-scan-layout {
+    grid-template-columns: 1fr;
+  }
+}
+
+.cc-tree {
+  background: var(--code-bg, var(--bg-hover));
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 10px 12px;
+  /* The tree historically capped at 460px which left a third of the
+     viewport empty on tall monitors and forced extra scrolling on
+     deep ETSI hierarchies (MF/ADF.USIM/DF.GSM-ACCESS/...). Cap to a
+     viewport-relative height so the panel grows with the window but
+     still leaves room for the dock + ribbon. The hard floor keeps it
+     usable on very short windows. */
+  min-height: 360px;
+  max-height: calc(100vh - 280px);
+  overflow: auto;
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+}
+
+.cc-tree-list {
+  list-style: none;
+  margin: 0;
+  padding-left: 14px;
+}
+
+.cc-tree-list .cc-tree-list {
+  padding-left: 18px;
+  border-left: 1px dashed var(--border);
+  margin-left: 6px;
+}
+
+.cc-tree-list[hidden] {
+  display: none;
+}
+
+.cc-tree-node {
+  margin: 0;
+  padding: 0;
+}
+
+.cc-tree-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 8px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background var(--transition-fast);
+}
+
+.cc-tree-caret {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 16px;
+  width: 16px;
+  height: 16px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  padding: 0;
+  background: transparent;
+  color: var(--fg-muted);
+  cursor: pointer;
+  font-size: 10px;
+  line-height: 1;
+}
+
+.cc-tree-caret:hover {
+  background: var(--bg-hover);
+  color: var(--accent);
+}
+
+.cc-tree-caret--leaf {
+  cursor: default;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.cc-tree-row:hover {
+  background: var(--accent-soft);
+}
+
+.cc-tree-row.active {
+  background: var(--accent-soft);
+  outline: 1px solid var(--accent);
+}
+
+.cc-tree-icon {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  padding: 1px 6px;
+  min-width: 28px;
+  text-align: center;
+  border-radius: var(--radius-pill);
+  background: var(--bg-elev);
+  color: var(--fg-muted);
+  text-transform: uppercase;
+}

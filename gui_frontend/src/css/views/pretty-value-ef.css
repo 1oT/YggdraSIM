@@ -1,0 +1,171 @@
+/*
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+ */
+
+/* ---------------------------------------------------------------------
+ * Service-table checklist (EF.UST / EF.IST / EF_PSISMSC, …)
+ *
+ * Operators asked for parity with what is *not* set so they can audit
+ * a card without re-decoding the bitmap manually. The renderer pairs
+ * an "Active" column (filled bullet) with a "Not set" column (hollow
+ * bullet), keeping both stacked vertically so longer service tables
+ * stay scannable.
+ * ------------------------------------------------------------------- */
+.cc-svc-table {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--fg);
+}
+
+.cc-svc-table-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 4px 8px;
+  border-radius: 6px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border-soft, var(--border));
+}
+
+.cc-svc-table-title {
+  font-weight: 600;
+  color: var(--fg);
+  letter-spacing: 0.04em;
+}
+
+.cc-svc-table-fullname {
+  color: var(--fg-muted);
+}
+
+.cc-svc-table-spec {
+  color: var(--fg-muted);
+  font-size: 11px;
+  opacity: 0.8;
+}
+
+.cc-svc-table-summary {
+  margin-left: auto;
+  color: var(--fg-muted);
+  font-size: 11px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: var(--bg-deep, var(--bg));
+  border: 1px solid var(--border-soft, var(--border));
+}
+
+.cc-svc-table-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 12px;
+}
+
+@media (max-width: 720px) {
+  .cc-svc-table-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.cc-svc-table-col {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border-soft, var(--border));
+  min-width: 0;
+}
+
+.cc-svc-table-col-head {
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--fg-muted);
+  padding-bottom: 2px;
+  border-bottom: 1px dashed var(--border-soft, var(--border));
+  margin-bottom: 2px;
+}
+
+.cc-svc-table-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  max-height: 360px;
+  overflow-y: auto;
+}
+
+.cc-svc-table-row {
+  display: grid;
+  grid-template-columns: 12px minmax(0, 1fr);
+  gap: 6px;
+  align-items: baseline;
+  padding: 1px 2px;
+  line-height: 1.45;
+}
+
+.cc-svc-table-mark {
+  font-size: 10px;
+  line-height: 1;
+  user-select: none;
+  display: inline-block;
+  text-align: center;
+}
+
+.cc-svc-table-name {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.cc-svc-table-row--active .cc-svc-table-mark {
+  color: var(--accent, #88c0d0);
+}
+
+.cc-svc-table-row--active .cc-svc-table-name {
+  color: var(--fg);
+}
+
+.cc-svc-table-row--inactive .cc-svc-table-mark {
+  color: var(--fg-muted);
+  opacity: 0.6;
+}
+
+.cc-svc-table-row--inactive .cc-svc-table-name {
+  color: var(--fg-muted);
+  opacity: 0.7;
+}
+
+.cc-svc-table-empty {
+  color: var(--fg-muted);
+  font-style: italic;
+  padding: 2px 4px;
+  font-size: 11px;
+}
+
+.cc-svc-table-err {
+  color: var(--danger, #bf616a);
+  font-size: 11px;
+  padding: 4px 8px;
+  border-radius: 4px;
+  border: 1px solid var(--danger, #bf616a);
+  background: rgba(191, 97, 106, 0.08);
+}
+
+/* Yggdrasil-Nord palette accent on the active column — keeps the
+ * checklist visually anchored to the wider Norse-tinted theme but
+ * stays subtle so the inactive column doesn't fight for attention. */
+[data-theme="nord"] .cc-svc-table-row--active .cc-svc-table-mark {
+  color: var(--ygg-frost, #88c0d0);
+}
+
+[data-theme="nord"] .cc-svc-table-col--active {
+  border-color: rgba(136, 192, 208, 0.25);
+}
+

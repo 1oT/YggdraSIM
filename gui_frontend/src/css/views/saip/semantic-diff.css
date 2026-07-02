@@ -1,0 +1,211 @@
+/*
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+ */
+
+/* ---- Semantic diff section inside compare / diff-vs-saved views ---- */
+
+.saip-cmp-sem-clean {
+  font-size: 12px;
+  color: var(--fg-muted, #888);
+  margin: 8px 0;
+}
+
+.saip-cmp-sem-chips {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin: 6px 0 10px;
+}
+
+.saip-cmp-sem-chip {
+  display: inline-block;
+  padding: 2px 7px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: lowercase;
+  border-radius: 4px;
+  border: 1px solid transparent;
+}
+
+.saip-cmp-sem-chip--crit {
+  background: rgba(255, 90, 90, 0.18);
+  color: #ff5a5a;
+  border-color: rgba(255, 90, 90, 0.35);
+}
+
+.saip-cmp-sem-chip--warn {
+  background: rgba(235, 180, 50, 0.18);
+  color: #ebcb32;
+  border-color: rgba(235, 180, 50, 0.35);
+}
+
+.saip-cmp-sem-chip--info {
+  background: rgba(80, 160, 240, 0.18);
+  color: #50a0f0;
+  border-color: rgba(80, 160, 240, 0.35);
+}
+
+.saip-cmp-sem-chip--note {
+  background: var(--surface, rgba(255, 255, 255, 0.05));
+  color: var(--fg-muted, #888);
+  border-color: var(--border);
+}
+
+.saip-cmp-sem-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 11px;
+  margin-top: 4px;
+}
+
+.saip-cmp-sem-table thead th {
+  text-align: left;
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--fg-muted, #888);
+  padding: 3px 6px;
+  border-bottom: 1px solid var(--border);
+}
+
+.saip-cmp-sem-row td {
+  padding: 4px 6px;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+}
+
+.saip-cmp-sem-row--critical {
+  background: rgba(255, 90, 90, 0.05);
+}
+
+.saip-cmp-sem-row--warning {
+  background: rgba(235, 180, 50, 0.04);
+}
+
+.saip-cmp-sem-sev {
+  white-space: nowrap;
+  padding-right: 4px;
+}
+
+.saip-cmp-sem-cat {
+  color: var(--fg-muted, #888);
+  white-space: nowrap;
+}
+
+.saip-cmp-sem-op {
+  color: var(--fg-muted, #888);
+  font-family: var(--mono, "JetBrains Mono", monospace);
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+.saip-cmp-sem-sec code {
+  font-size: 10px;
+  color: var(--fg-muted, #888);
+}
+
+.saip-cmp-sem-sum {
+  color: var(--fg);
+}
+
+.saip-cmp-sem-group {
+  margin: 6px 0;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.saip-cmp-sem-group-summary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 8px;
+  cursor: pointer;
+  background: var(--bg-card, var(--bg-secondary));
+  font-size: 11px;
+  user-select: none;
+  list-style: none;
+}
+
+.saip-cmp-sem-group-summary::-webkit-details-marker {
+  display: none;
+}
+
+.saip-cmp-sem-group-label {
+  font-weight: 500;
+  text-transform: capitalize;
+}
+
+.saip-cmp-sem-group .saip-cmp-sem-table {
+  margin: 0;
+  border-top: 1px solid var(--border);
+}
+
+.saip-cmp-sem-row--clickable {
+  cursor: pointer;
+}
+
+.saip-cmp-sem-row--clickable:hover td {
+  background: var(--hover-bg, rgba(100, 160, 255, 0.07));
+}
+
+.saip-cmp-view-cell {
+  padding: 4px 6px;
+  vertical-align: middle;
+  white-space: nowrap;
+}
+
+.saip-cmp-view-btn {
+  font-size: 10px;
+  padding: 2px 8px;
+}
+
+.saip-cmp-expand-row > td {
+  padding: 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.saip-cmp-side {
+  display: flex;
+  gap: 0;
+  border-top: 1px solid var(--border);
+}
+
+.saip-cmp-side-pane {
+  flex: 1 1 0;
+  min-width: 0;
+  padding: 12px 14px;
+  overflow: auto;
+  max-height: 480px;
+}
+
+.saip-cmp-side-pane--a {
+  border-right: 1px solid var(--border);
+}
+
+.saip-cmp-side-pane--b {
+  border-left: none;
+}
+
+.saip-cmp-side-label {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  margin-bottom: 8px;
+  color: var(--fg-muted, #888);
+}
+
+.cc-chip--a {
+  background: rgba(255, 154, 106, 0.18);
+  color: #ff9a6a;
+  border-color: rgba(255, 154, 106, 0.35);
+}
+
+.cc-chip--b {
+  background: rgba(120, 220, 130, 0.18);
+  color: #78dc82;
+  border-color: rgba(120, 220, 130, 0.35);
+}
+

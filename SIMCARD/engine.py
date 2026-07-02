@@ -1,5 +1,8 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
-"""Simulated UICC/eUICC engine: process-wide singleton owning the in-memory file-system, authentication state, and IPA-poll dispatch loop."""
+
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+"""Simulated UICC/eUICC engine: process-wide singleton owning the in-memory file-system and authentication state."""
 from __future__ import annotations
 
 import collections
@@ -48,6 +51,42 @@ _SIMCARD_SYNC_WARNED: dict[str, bool] = {
     "euicc": False,
     "profiles": False,
 }
+
+_CARD_REREAD_STORE_DATA_TAGS: frozenset[bytes] = frozenset(
+    bytes.fromhex(tag)
+    for tag in (
+        "BF25",  # StoreMetadata
+        "BF29",  # SetNickname
+        "BF2A",  # UpdateMetadata
+        "BF31",  # EnableProfile
+        "BF32",  # DisableProfile
+        "BF33",  # DeleteProfile
+        "BF34",  # ES10c.eUICCMemoryReset
+        "BF3F",  # SetDefaultDpAddress
+        "BF51",  # LoadEuiccPackage / PSMO / eCO
+        "BF57",  # AddInitialEim
+        "BF58",  # AddEim / ProfileRollback
+        "BF59",  # DeleteEim / ConfigureImmediateProfileEnabling
+        "BF5A",  # ImmediateEnable
+        "BF5B",  # EnableEmergencyProfile
+        "BF5C",  # DisableEmergencyProfile
+        "BF5D",  # ExecuteFallbackMechanism
+        "BF5E",  # ReturnFromFallback
+        "BF64",  # ES10b.eUICCMemoryReset
+        "BF65",  # ES10b.SetDefaultDpAddress
+    )
+)
+_BPP_STORE_DATA_FIRST_BYTES: frozenset[int] = frozenset(
+    {
+        0x86,
+        0x87,
+        0x88,
+        0xA0,
+        0xA1,
+        0xA2,
+        0xA3,
+    }
+)
 
 
 def _notify_sync_failure(category: str, store_path: str, error: BaseException) -> None:
@@ -103,7 +142,13 @@ class SimulatedSimCardEngine:
         selected_euicc_store_root = (
             str(euicc_store_root or "").strip() or get_sim_euicc_store_root()
         )
-        selected_profile_store_override = str(profile_store_path or "").strip() or get_sim_profile_store_path()
+        explicit_profile_store_path = str(profile_store_path or "").strip()
+        if len(explicit_profile_store_path) > 0:
+            selected_profile_store_override = explicit_profile_store_path
+        elif len(str(euicc_store_root or "").strip()) > 0:
+            selected_profile_store_override = ""
+        else:
+            selected_profile_store_override = get_sim_profile_store_path()
         self.state.euicc_store_path = resolve_euicc_store_path(selected_euicc_store_root, self.state.eid)
         if len(selected_profile_store_override) > 0:
             self.state.profile_store_path = selected_profile_store_override
@@ -127,14 +172,6 @@ class SimulatedSimCardEngine:
         self.sgp = SgpLogic(self.state, sim_eim_identity_path=selected_sim_eim_identity_path)
         self.scp80 = Scp80Logic(self.state, self.transmit)
         self.toolkit = ToolkitLogic(self.state)
-        # SGP.32 §6.5 IPA-side ESipa fan-out. The toolkit emits a BIP
-        # poll cycle on TIMER EXPIRATION; when the modem returns the
-        # eIM payload via RECEIVE DATA, each parsed EuiccPackage is
-        # delivered to ISD-R via the standard STORE DATA path. Wiring
-        # the dispatcher here keeps the toolkit module decoupled from
-        # ``SgpLogic`` while still letting the simulator behave as a
-        # real in-card SGP.32 IPA.
-        self.toolkit.set_eim_package_dispatcher(self.sgp.handle_store_data)
         self._fault_ring: "collections.deque[dict[str, str]]" = collections.deque(maxlen=32)
         self._sync_all_stores()
 
@@ -858,11 +895,22 @@ class SimulatedSimCardEngine:
             normalized = self.state.store_data_buffer + normalized
             self.state.store_data_buffer = b""
             self.state.store_data_expected_block = 0
+        before_snapshot = self._card_reread_snapshot()
         result = self.sgp.handle_store_data(normalized)
-        self._maybe_queue_refresh_after_store_data(normalized, result)
+        self._maybe_queue_refresh_after_store_data(
+            normalized,
+            result,
+            before_snapshot=before_snapshot,
+        )
         return result
 
-    def _maybe_queue_refresh_after_store_data(self, command: bytes, result: "ApduResult") -> None:
+    def _maybe_queue_refresh_after_store_data(
+        self,
+        command: bytes,
+        result: "ApduResult",
+        *,
+        before_snapshot: tuple[object, ...] | None = None,
+    ) -> None:
         if result is None:
             return
         _response_bytes, sw1, sw2 = result
@@ -871,15 +919,9 @@ class SimulatedSimCardEngine:
         head = bytes(command or b"")
         if len(head) == 0:
             return
-        tag2 = head[:2]
-        profile_state_tags = (
-            bytes.fromhex("BF31"),
-            bytes.fromhex("BF32"),
-            bytes.fromhex("BF33"),
-            bytes.fromhex("BF64"),
-        )
-        bpp_commit_first_byte = head[0] == 0xA3
-        if tag2 not in profile_state_tags and bpp_commit_first_byte is False:
+        if self._store_data_can_change_card_view(head) is False:
+            return
+        if before_snapshot is not None and before_snapshot == self._card_reread_snapshot():
             return
         queue_refresh = getattr(self.toolkit, "queue_refresh", None)
         if callable(queue_refresh) is False:
@@ -888,6 +930,74 @@ class SimulatedSimCardEngine:
             queue_refresh(source="sgp-store-data")
         except Exception:
             return
+
+    @staticmethod
+    def _store_data_can_change_card_view(command: bytes) -> bool:
+        head = bytes(command or b"")
+        if len(head) == 0:
+            return False
+        if int(head[0]) in _BPP_STORE_DATA_FIRST_BYTES:
+            return True
+        if len(head) < 2:
+            return False
+        return head[:2] in _CARD_REREAD_STORE_DATA_TAGS
+
+    def _card_reread_snapshot(self) -> tuple[object, ...]:
+        configured = self.state.configured_data
+        profiles = tuple(
+            (
+                str(profile.aid or "").strip().upper(),
+                str(profile.iccid or "").strip(),
+                str(profile.state or "").strip().lower(),
+                str(profile.profile_class or "").strip().lower(),
+                str(profile.nickname or "").strip(),
+                str(profile.service_provider or "").strip(),
+                str(profile.profile_name or "").strip(),
+                str(profile.imsi or "").strip(),
+                str(profile.impi or "").strip(),
+                str(profile.notification_address or "").strip(),
+                bool(getattr(profile, "fallback_attribute", False)),
+                bool(getattr(profile, "rollback_armed", False)),
+                bool(getattr(profile, "ecall_indication", False)),
+                bytes(getattr(profile, "connectivity_params_http", b"") or b""),
+                len(bytes(getattr(profile, "upp_bytes", b"") or b"")),
+            )
+            for profile in self.state.profiles
+        )
+        eim_entries = tuple(
+            (
+                str(entry.eim_id or "").strip(),
+                str(entry.eim_fqdn or "").strip(),
+                int(entry.eim_id_type or 0),
+                int(entry.counter_value or 0),
+                int(entry.association_token or 0),
+                tuple(int(bit) for bit in list(entry.supported_protocol_bits or [])),
+                bytes(entry.euicc_ci_pkid or b""),
+                bool(entry.indirect_profile_download),
+                bytes(entry.eim_public_key_data or b""),
+                bytes(entry.trusted_tls_public_key_data or b""),
+            )
+            for entry in self.state.eim_entries
+        )
+        return (
+            str(self.state.active_profile_aid or "").strip().upper(),
+            str(self.state.previous_enabled_aid or "").strip().upper(),
+            str(self.state.emergency_pre_aid or "").strip().upper(),
+            bool(self.state.emergency_profile_active),
+            str(self.state.default_dp_address or "").strip(),
+            bool(self.state.immediate_enable_flag),
+            str(self.state.immediate_enable_smdp_oid or "").strip(),
+            str(self.state.immediate_enable_smdp_address or "").strip(),
+            str(configured.root_smds_address or "").strip(),
+            tuple(
+                str(address or "").strip()
+                for address in list(configured.additional_root_smds_addresses or [])
+            ),
+            tuple(bytes(pkid or b"") for pkid in list(configured.allowed_ci_pkids or [])),
+            tuple(bytes(pkid or b"") for pkid in list(configured.ci_list or [])),
+            profiles,
+            eim_entries,
+        )
 
     @staticmethod
     def _is_supported_cla(cla: int) -> bool:

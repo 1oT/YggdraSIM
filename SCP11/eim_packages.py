@@ -44,6 +44,7 @@ TYPE_BOUND_PROFILE_PACKAGE = "boundProfilePackage"
 TYPE_INDIRECT_PROFILE_DOWNLOAD = "indirectProfileDownload"
 TYPE_PROFILE_STATE_MANAGEMENT = "profileStateManagement"
 TYPE_EUICC_CONFIGURATION = "eUICCConfiguration"
+TYPE_EIM_CONFIGURATION_OBJECT = "eCO"
 TYPE_PROFILE_DOWNLOAD_TRIGGER = "profileDownloadTrigger"
 TYPE_GENERIC = "generic"
 
@@ -62,6 +63,7 @@ class ParsedEimPackage:
     notification_seq_number: Optional[int] = None
     euicc_package_result_seq_number: Optional[int] = None
     eim_transaction_id: bytes = b""
+    eim_id: str = ""
 
 
 def _read_tlv(data: bytes, offset: int) -> Tuple[bytes, bytes, bytes, int]:
@@ -217,21 +219,15 @@ def _extract_search_criteria_seq_number(value: bytes) -> Optional[int]:
     return int.from_bytes(field_value, "big", signed=False)
 
 
-def _extract_ipa_euicc_data_metadata(raw: bytes) -> tuple[tuple[bytes, ...], bytes, Optional[int], Optional[int]]:
-    try:
-        root_tag, root_value, _, _ = _read_tlv(raw, 0)
-    except ValueError:
-        return (), b"", None, None
-    if root_tag not in (TAG_EUICC_CONFIGURATION_A3, TAG_EUICC_CONFIGURATION_BF52):
-        return (), b"", None, None
+def _extract_package_data_metadata_from_value(value: bytes) -> tuple[tuple[bytes, ...], bytes, Optional[int], Optional[int]]:
     requested_tags = ()
     request_token = b""
     notification_seq_number = None
     euicc_package_result_seq_number = None
     offset = 0
-    while offset < len(root_value):
+    while offset < len(value):
         try:
-            tag_bytes, field_value, _, next_offset = _read_tlv(root_value, offset)
+            tag_bytes, field_value, _, next_offset = _read_tlv(value, offset)
         except ValueError:
             break
         if tag_bytes == b"\x5C":
@@ -246,6 +242,69 @@ def _extract_ipa_euicc_data_metadata(raw: bytes) -> tuple[tuple[bytes, ...], byt
     return requested_tags, request_token, notification_seq_number, euicc_package_result_seq_number
 
 
+def _extract_package_data_metadata(raw: bytes) -> tuple[tuple[bytes, ...], bytes, Optional[int], Optional[int]]:
+    try:
+        root_tag, root_value, _, _ = _read_tlv(raw, 0)
+    except ValueError:
+        return (), b"", None, None
+    if root_tag not in (TAG_EUICC_CONFIGURATION_A3, TAG_EUICC_CONFIGURATION_BF52):
+        return (), b"", None, None
+    requested_tags, request_token, notification_seq_number, euicc_package_result_seq_number = (
+        _extract_package_data_metadata_from_value(root_value)
+    )
+    if len(requested_tags) > 0 or len(request_token) > 0:
+        return requested_tags, request_token, notification_seq_number, euicc_package_result_seq_number
+    card_request = _extract_card_request(raw)
+    if len(card_request) > 0 and card_request != raw:
+        return _extract_package_data_metadata(card_request)
+    return requested_tags, request_token, notification_seq_number, euicc_package_result_seq_number
+
+
+def _decode_text_or_empty(value: bytes) -> str:
+    try:
+        return value.decode("utf-8").strip()
+    except UnicodeDecodeError:
+        return value.decode("ascii", errors="ignore").strip()
+
+
+def _extract_outer_sequence_value(root_value: bytes) -> bytes:
+    offset = 0
+    while offset < len(root_value):
+        try:
+            tag_bytes, field_value, _, next_offset = _read_tlv(root_value, offset)
+        except ValueError:
+            break
+        if tag_bytes in (b"\x30", b"\x31"):
+            return field_value
+        offset = next_offset
+    return b""
+
+
+def _extract_outer_eim_id(raw: bytes) -> str:
+    try:
+        root_tag, root_value, _, _ = _read_tlv(raw, 0)
+    except ValueError:
+        return ""
+    if root_tag not in (
+        TAG_PROFILE_STATE_MANAGEMENT_A2,
+        TAG_PROFILE_STATE_MANAGEMENT_BF51,
+        TAG_EUICC_CONFIGURATION_A3,
+        TAG_EUICC_CONFIGURATION_BF52,
+    ):
+        return ""
+    sequence_value = _extract_outer_sequence_value(root_value)
+    offset = 0
+    while offset < len(sequence_value):
+        try:
+            tag_bytes, field_value, _, next_offset = _read_tlv(sequence_value, offset)
+        except ValueError:
+            break
+        if tag_bytes == b"\x80":
+            return _decode_text_or_empty(field_value)
+        offset = next_offset
+    return ""
+
+
 def _extract_eim_transaction_id(value: bytes) -> bytes:
     """Extract eimTransactionId [2] (wire tag 0x82) from a BF54 SEQUENCE value."""
     offset = 0
@@ -258,6 +317,16 @@ def _extract_eim_transaction_id(value: bytes) -> bytes:
             return field_value
         offset = next_offset
     return b""
+
+
+def _tag_of_tlv(raw_tlv: bytes) -> bytes:
+    if len(raw_tlv) == 0:
+        return b""
+    try:
+        tag_bytes, _, _, _ = _read_tlv(raw_tlv, 0)
+    except ValueError:
+        return b""
+    return tag_bytes
 
 
 def parse_eim_package(raw: bytes) -> ParsedEimPackage:
@@ -301,11 +370,17 @@ def parse_eim_package(raw: bytes) -> ParsedEimPackage:
         )
 
     if root_tag in (TAG_PROFILE_STATE_MANAGEMENT_A2, TAG_PROFILE_STATE_MANAGEMENT_BF51):
+        card_request = _extract_card_request(raw)
+        eim_id = _extract_outer_eim_id(raw)
+        package_type = TYPE_PROFILE_STATE_MANAGEMENT
+        if root_tag == TAG_PROFILE_STATE_MANAGEMENT_BF51 and _tag_of_tlv(card_request) == b"\xA8":
+            package_type = TYPE_EIM_CONFIGURATION_OBJECT
         return ParsedEimPackage(
-            package_type=TYPE_PROFILE_STATE_MANAGEMENT,
+            package_type=package_type,
             raw=raw,
             root_tag=root_tag,
-            card_request=_extract_card_request(raw),
+            card_request=card_request,
+            eim_id=eim_id,
         )
 
     if root_tag in (TAG_EUICC_CONFIGURATION_A3, TAG_EUICC_CONFIGURATION_BF52):
@@ -314,7 +389,7 @@ def parse_eim_package(raw: bytes) -> ParsedEimPackage:
             request_token,
             notification_seq_number,
             euicc_package_result_seq_number,
-        ) = _extract_ipa_euicc_data_metadata(raw)
+        ) = _extract_package_data_metadata(raw)
         return ParsedEimPackage(
             package_type=TYPE_EUICC_CONFIGURATION,
             raw=raw,
@@ -324,6 +399,7 @@ def parse_eim_package(raw: bytes) -> ParsedEimPackage:
             request_token=request_token,
             notification_seq_number=notification_seq_number,
             euicc_package_result_seq_number=euicc_package_result_seq_number,
+            eim_id=_extract_outer_eim_id(raw),
         )
 
     if root_tag in (TAG_PROFILE_DOWNLOAD_TRIGGER_A4, TAG_PROFILE_DOWNLOAD_TRIGGER_BF54):

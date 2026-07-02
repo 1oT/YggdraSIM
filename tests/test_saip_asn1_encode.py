@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 """Roundtrip tests for ``saip_asn1_encode``.
 
 Every registered encoder must satisfy the stability invariant:
@@ -48,6 +51,8 @@ from Tools.ProfilePackage.saip_asn1_decode import (
     _decode_three_byte_counter,
     _decode_tlv80_text,
     _decode_two_byte_language_records,
+    _decode_ef_wlrplmn,
+    _decode_wlan_plmn_list,
     _decode_xoring_constants,
 )
 from Tools.ProfilePackage.saip_asn1_encode import (
@@ -435,6 +440,39 @@ class SaipEncodeEfContentRoundtripTests(unittest.TestCase):
         redecoded = _decode_plmn_list(encoded.hex().upper(), with_act=True)
         self.assertEqual(decoded["entries"], redecoded["entries"])
 
+    def test_ef_wlan_plmn_list_roundtrip(self) -> None:
+        # PLMN 234-15 with the two reserved bytes preserved.
+        hex_fixture = "32F410FFFF" + "FFFFFFFFFF"
+        decoded = _decode_wlan_plmn_list(
+            hex_fixture,
+            format_name="User-controlled I-WLAN PLMN selector",
+            spec_reference="TS 31.102 §4.2.82",
+        )
+        assert decoded is not None
+        encoded = encode_decoded_roundtrip_ef_content(
+            "ef-uplmnwlan",
+            decoded,
+            target_length=len(bytes.fromhex(hex_fixture)),
+        )
+        self.assertEqual(encoded, bytes.fromhex(hex_fixture))
+        assert encoded is not None
+        redecoded = _decode_wlan_plmn_list(
+            encoded.hex().upper(),
+            format_name="User-controlled I-WLAN PLMN selector",
+            spec_reference="TS 31.102 §4.2.82",
+        )
+        self.assertEqual(decoded["entries"], redecoded["entries"])
+
+    def test_ef_wlrplmn_roundtrip(self) -> None:
+        hex_fixture = "32F410"
+        decoded = _decode_ef_wlrplmn(hex_fixture)
+        assert decoded is not None
+        encoded = encode_decoded_roundtrip_ef_content("ef-wlrplmn", decoded)
+        self.assertEqual(encoded, bytes.fromhex(hex_fixture))
+        assert encoded is not None
+        redecoded = _decode_ef_wlrplmn(encoded.hex().upper())
+        self.assertEqual(decoded["plmn"], redecoded["plmn"])
+
 
 class SaipEncodeDispatcherTests(unittest.TestCase):
     def test_unknown_field_returns_none(self) -> None:
@@ -454,7 +492,17 @@ class SaipEncodeDispatcherTests(unittest.TestCase):
 
     def test_roundtrip_capable_ef_keys_include_expected_entries(self) -> None:
         ef_keys = roundtrip_capable_ef_keys()
-        for expected in ("ef-acc", "ef-start-hfn", "ef-smss", "ef-li", "ef-impi", "ef-fplmn"):
+        for expected in (
+            "ef-acc",
+            "ef-start-hfn",
+            "ef-smss",
+            "ef-li",
+            "ef-impi",
+            "ef-fplmn",
+            "ef-oplmnwlan",
+            "ef-uplmnwlan",
+            "ef-wlrplmn",
+        ):
             self.assertIn(expected, ef_keys)
 
     def test_unknown_ef_key_returns_none(self) -> None:

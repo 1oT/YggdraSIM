@@ -1,0 +1,106 @@
+/*
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+ */
+
+/* -- destructive banner (C-3 mutation actions) -------------------------- */
+
+.cc-destructive-banner {
+  margin: 0 0 10px;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm, 6px);
+  background: color-mix(in srgb, var(--accent-danger, #ff6b6b) 15%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent-danger, #ff6b6b) 55%, transparent);
+  color: var(--accent-danger, #ff6b6b);
+  font-size: 12.5px;
+  line-height: 1.4;
+}
+
+.cc-empty {
+  color: var(--fg-subtle, var(--fg-muted));
+  font-size: 12.5px;
+  margin: 6px 0;
+  font-style: italic;
+}
+
+.cc-empty-plain {
+  font-style: normal;
+}
+
+.cc-inline-actions-center {
+  justify-content: center;
+}
+
+.cc-decode-input {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 12px;
+  background: var(--bg-elev);
+  color: var(--fg);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm, 6px);
+  padding: 7px 11px;
+}
+
+.cc-section-title-sm {
+  margin: 8px 0 4px;
+  font-size: 12px;
+  color: var(--fg-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.cc-warn {
+  color: var(--accent-warning, #f0c674);
+  font-size: 12.5px;
+  margin: 6px 0;
+}
+
+.cc-details > summary {
+  cursor: pointer;
+  color: var(--fg-muted);
+  font-size: 12px;
+  padding: 4px 2px;
+}
+
+.cc-wb-record-block > h5 {
+  margin: 6px 0 4px;
+  font-size: 12.5px;
+  color: var(--fg-muted);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.cc-report-summary {
+  margin-top: 14px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 12px 16px;
+}
+
+.cc-report-summary h4 {
+  margin: 6px 0;
+  font-size: 13px;
+  color: var(--fg-muted);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.cc-report-summary dl {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 4px 14px;
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  margin: 0 0 8px;
+}
+
+.cc-report-summary dt {
+  color: var(--fg-muted);
+}
+
+.cc-table {
+  margin-top: 8px;
+}
+
+

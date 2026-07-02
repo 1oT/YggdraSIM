@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 """
 Wave C Pass D — semantic decoder coverage for ADF.CSIM / OPT-CSIM core
 EFs (3GPP2 C.S0023 / C.S0065).

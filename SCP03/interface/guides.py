@@ -282,6 +282,18 @@ class ShellGuides :
    - {Config.Colors.BOLD}7 — INSTALL [for install and make selectable] (11.5.2.3.7):{Config.Colors.ENDC} P1=0C. Single step: install applet and make it selectable.
    - {Config.Colors.BOLD}8 — Full CAP Install Sequence:{Config.Colors.ENDC} Parses a CAP/IJC file, extracts Package/Applet AIDs, builds INSTALL [for load], LOAD (chunked), INSTALL [for install]. Supports OTA chunk sizes (e.g. SMS-PP block limits).
 
+{Config.Colors.CYAN}2a. One-shot CAP install command{Config.Colors.ENDC}
+   `INSTALL <cap/ijc> <INSTALL-for-install APDU>` parses the CAP/IJC, sends INSTALL [for load] and LOAD, then sends the supplied INSTALL [for install] or INSTALL [for install and make selectable] APDU unchanged. The command verifies that the APDU Load File AID matches the CAP package AID before loading.
+   `INSTALL-CAP <cap/ijc> --privs 00 --params C900 --applet <AID> --module <AID>` builds the complete CAP load and instantiate sequence from arguments. Positional compatibility is also accepted: `INSTALL-CAP <cap/ijc> [Priv] [Params] [AppletAID] [ModuleAID]`.
+
+{Config.Colors.CYAN}2b. Direct INSTALL verbs for scripts{Config.Colors.ENDC}
+   - `LOAD <cap/ijc>` sends INSTALL [for load] and LOAD blocks only.
+   - `INSTALL-LOAD <LoadFileAID> [SecurityDomainAID] [LoadFileHash] [Params] [Token]` sends a standalone INSTALL [for load].
+   - `INSTALL-APP <PkgAID> <AppAID> [ModAID] [Priv] [Params]` instantiates and makes selectable.
+   - `INSTALL-INSTANCE <PkgAID> <AppAID> [ModAID] [Priv] [Params]` instantiates only.
+   - `MAKE-SELECTABLE <AID> [Priv] [Params] [Token]` sends INSTALL [for make selectable].
+   - `EXTRADITE <App_AID> <SD_AID> [Token]`, `REGISTRY-UPDATE <AID> [Priv] [Params]`, and `PERSONALIZE <AID>` map to the remaining GP INSTALL variants.
+
 {Config.Colors.CYAN}3. APDU Structure (80 E6){Config.Colors.ENDC}
    `80 E6 <P1> 00 <Lc> <LoadFileAID_LV> <ModuleAID_LV> <AppletAID_LV> <Priv_LV> <Params_LV> <Token_LV>`. Mandatory empty fields encoded as length 00 (no value).
 
@@ -289,7 +301,7 @@ class ShellGuides :
    0x80=Security Domain, 0x40=DAP Verification, 0x20=Delegated Management, 0x10=Card Lock, 0x08=Card Terminate, 0x04=Default Selected, 0x02=CVM Management.
 
 {Config.Colors.CYAN}5. Install Parameters (TLV){Config.Colors.ENDC}
-   - {Config.Colors.BOLD}C9 (Application Specific):{Config.Colors.ENDC} Passed to applet install().
+   - {Config.Colors.BOLD}C9 (Application Specific):{Config.Colors.ENDC} Passed to applet install(). The builder accepts either a complete `C9` TLV such as `C900`, or a raw C9 value to wrap.
    - {Config.Colors.BOLD}EF (GP System):{Config.Colors.ENDC} C6/C7=Memory Quotas, C8=Global Service, C9=Implicit Selection, CA/CB=Reserved Memory.
    - {Config.Colors.BOLD}EA (UICC System, TS 102 226):{Config.Colors.ENDC} 80=Toolkit, 81=Access, 82=Admin, 83=Update, C3=DAP. ADP: 00=Full, 02=UICC, FF=None.
    - {Config.Colors.BOLD}CA (SIM File Access):{Config.Colors.ENDC} Legacy 2G. ETSI TS 102 226 forbids CA and EA in the same install parameters; wizard enforces this.
@@ -342,7 +354,7 @@ class ShellGuides :
 
 {Config.Colors.CYAN}4. SCP11 / SM-DP+ Simulation{Config.Colors.ENDC}
    SCP11 is now split into relay and local-access paths:
-   - {Config.Colors.BOLD}`SCP11/live`:{Config.Colors.ENDC} live-certificate relay shell with `LPAd`, `IPAd`, and `IPAe`.
+   - {Config.Colors.BOLD}`SCP11/live`:{Config.Colors.ENDC} live-certificate relay shell with `LPAd` and `IPAd`.
    - {Config.Colors.BOLD}`SCP11/test`:{Config.Colors.ENDC} test-certificate relay shell with the same relay model, but a smaller default command surface.
    - {Config.Colors.BOLD}`SCP11/local_access`:{Config.Colors.ENDC} local `AuthenticateServer` and `LOAD-PROFILE` path using certificate material in `Workspace/LocalSMDPP/certs`.
 """)
@@ -487,6 +499,7 @@ class ShellGuides :
 {Config.Colors.CYAN}3. Non-Interactive Command Execution{Config.Colors.ENDC}
    Some modules expose a direct `--cmd` entrypoint for shell automation.
    - {Config.Colors.BOLD}SCP03:{Config.Colors.ENDC} `python3 -m SCP03 --cmd "SCP03-SD; LIST" --out report.yaml`
+   - {Config.Colors.BOLD}SCP03 CAP install:{Config.Colors.ENDC} `python3 -m SCP03 --cmd "SCP03-SD; INSTALL-CAP app.cap --privs 00 --params C900; APPS; PKGS"`
    - {Config.Colors.BOLD}SAIP Tool:{Config.Colors.ENDC} `python3 -m Tools.ProfilePackage --cmd "USE reference_test_profile.txt; DUMP ALL DECODED > reports/profile.yaml"`
    - {Config.Colors.BOLD}SUCI Tool:{Config.Colors.ENDC} `python3 -m Tools.SuciTool --cmd "USE keys/demo.key; GENERATE SECP256R1; DUMP"`
 
@@ -498,7 +511,7 @@ class ShellGuides :
    - {Config.Colors.BOLD}SUCI Tool via pipe:{Config.Colors.ENDC}
      `printf 'USE keys/demo.key\\nGENERATE CURVE25519\\nDUMP\\nQ\\n' | python3 -m Tools.SuciTool`
    - {Config.Colors.BOLD}SCP03 via pipe:{Config.Colors.ENDC}
-     `printf 'HELP\\nQ\\n' | python3 -m SCP03`
+     `printf 'SCP03-SD\\nINSTALL-CAP app.cap --privs 00 --params C900\\nAPPS\\nQ\\n' | python3 -m SCP03`
 
 {Config.Colors.CYAN}5. Redirecting Output{Config.Colors.ENDC}
    Shell output can be redirected at the process level, and module-specific commands may also support native report export.

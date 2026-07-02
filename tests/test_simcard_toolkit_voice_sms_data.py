@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 """ETSI TS 102 223 §6.6 voice / SMS / data / UI proactive queueables.
 
 These tests exercise every public ``queue_*`` helper added to
@@ -77,7 +80,7 @@ class VoiceCommandsBuildSpecCompliantTLVs(unittest.TestCase):
 
     def test_setup_call_carries_alpha_id_and_address(self) -> None:
         result = self.engine.toolkit.queue_setup_call(
-            "+46701234567",
+            "+15550100199",
             alpha_identifier="Lab",
         )
         self.assertEqual(result["mode"], "set-up-call")
@@ -86,7 +89,7 @@ class VoiceCommandsBuildSpecCompliantTLVs(unittest.TestCase):
         self.assertEqual(parsed["qualifier"], 0x00)
         self.assertEqual(parsed["alpha_identifier"], "Lab")
         self.assertEqual(parsed["address_ton_npi"], 0x91)
-        self.assertEqual(parsed["address_digits"], "46701234567")
+        self.assertEqual(parsed["address_digits"], "15550100199")
 
     def test_send_dtmf_packs_digits_with_filler_nibble(self) -> None:
         self.engine.toolkit.queue_send_dtmf("123#")
@@ -96,7 +99,7 @@ class VoiceCommandsBuildSpecCompliantTLVs(unittest.TestCase):
         self.assertEqual(parsed["dtmf_string"], "123#")
 
     def test_send_ss_emits_ss_string_object(self) -> None:
-        self.engine.toolkit.queue_send_ss("*21*0701234567#")
+        self.engine.toolkit.queue_send_ss("*21*5550100199#")
         parsed = _parse(self.engine, _last_queued(self.engine))
         self.assertEqual(parsed["command_type"], SEND_SS_COMMAND)
         self.assertIn("*", parsed["ss_string"])
@@ -118,7 +121,7 @@ class SmsCommandsBuildValidTpdu(unittest.TestCase):
 
     def test_short_message_with_destination_and_text_builds_minimal_submit(self) -> None:
         self.engine.toolkit.queue_send_short_message(
-            destination="46701234567",
+            destination="15550100199",
             text="Hello",
             alpha_identifier="Status",
         )

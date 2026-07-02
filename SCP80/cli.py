@@ -91,18 +91,43 @@ class SmartDecoder :
         except Exception :pass 
         return current_fid ,last_le 
 
-    def try_decode (self ,fid ,le ,por_hex ):
-        """Attempt to decode a POR response hex string and print a human-readable summary."""
+    @staticmethod
+    def _extract_command_payload (le ,por_hex ,por_info =None ):
+        if le <=0 :
+            return ""
+        if isinstance (por_info ,dict ):
+            if por_info .get ("valid")!=True :
+                return ""
+            if por_info .get ("status_code")!="00":
+                return ""
+            command_response =str (por_info .get ("command_response")or "").strip ().upper ()
+            if len (command_response )==0 :
+                return ""
+            command_sw =por_info .get ("command_sw")
+            response_body =command_response
+            if command_sw is not None :
+                sw_text =str (command_sw or "").strip ().upper ()
+                if sw_text !="9000":
+                    return ""
+                if response_body .endswith (sw_text ):
+                    response_body =response_body [:-len (sw_text )]
+            elif int (por_info .get ("command_count")or 0 )==1 :
+                return ""
+            needed =le *2
+            if len (response_body )<needed :
+                return ""
+            return response_body [-needed :]
+
+        if por_hex .strip ().upper ().startswith ("D0"):
+            return ""
+        if len (por_hex )>=(le *2 ):
+            return por_hex [-(le *2 ):]
+        return ""
+
+    def try_decode (self ,fid ,le ,por_hex ,por_info =None ):
+        """Attempt to decode a successful PoR command payload and print a summary."""
         if not SCP03_AVAIL or not por_hex :return 
-        payload =""
-
-
-        if le >0 and len (por_hex )>=(le *2 ):
-
-
-
-
-            payload =por_hex [-(le *2 ):]
+        payload =self ._extract_command_payload (le ,por_hex ,por_info )
 
         if fid and payload :
             fid_name =self .fid_lookup .get (fid ,fid )
@@ -177,7 +202,7 @@ class OtaShell :
         transport_mode =self .config .get ("transport")
         if transport_mode =="reader":
             try :
-                self .transport .connect ()
+                self .transport .connect (verbose =bool (getattr (self ,"global_debug",False )))
             except Exception as e :
                 if announce :
                     print (f"{Colors.FAIL}[!] Reader connect failed: {e}{Colors.ENDC}")
@@ -352,6 +377,8 @@ class OtaShell :
 
     SET_KEY_ALIASES ={
     "counter":"cntr",
+    "kic_identifier":"kic_indicator",
+    "kid_identifier":"kid_indicator",
     "key_enc":"kic",
     "key_mac":"kid",
     }
@@ -363,9 +390,10 @@ class OtaShell :
             return 
         raw_key =args [0 ].lower ()
         key =self .SET_KEY_ALIASES .get (raw_key ,raw_key )
+        value =''.join (args [1 :])
         previous_transport =self .config .get ("transport")
         try :
-            self .config .set (key ,args [1 ])
+            self .config .set (key ,value )
             self .config .save ()
             print (f"{Colors.GREEN}[+] {key} updated.{Colors.ENDC}")
         except ValueError as e :
@@ -465,6 +493,11 @@ class OtaShell :
             result =self .transport .send_ota_sequence (self ._plan_apdu_list_for_transport (plan ),verbose =verbose )
             self .last_command_ok =bool (result .get ("delivered"))
             self ._print_result (result )
+            por =result .get ("por")
+            payload_for_decode =getattr (plan ,"payload_hex",payload_override or self .config .get ("payload")or "")
+            if por and payload_for_decode :
+                fid ,le =self .decoder .sniff_context (payload_for_decode )
+                self .decoder .try_decode (fid ,le ,por ,result .get ("por_decoded"))
         except Exception as e :
             self .last_command_ok =False 
             print (f"{Colors.FAIL}Send Error: {e}{Colors.ENDC}")
@@ -473,7 +506,8 @@ class OtaShell :
         if args :self .transport .transmit ("".join (args ))
 
     def do_reset (self ,*args ):
-        self .transport .reset_connection ()
+        verbose =bool (getattr (self ,"global_debug",False ))or "-v"in args
+        self .transport .reset_connection (verbose =verbose )
         if self .config .get ("transport")=="reader":
             self ._refresh_inventory_from_reader (announce =True )
 
@@ -510,7 +544,7 @@ class OtaShell :
 
             por =result .get ("por")
             if por :
-                self .decoder .try_decode (fid ,le ,por )
+                self .decoder .try_decode (fid ,le ,por ,result .get ("por_decoded"))
 
 
 
@@ -603,12 +637,47 @@ class OtaShell :
                 print (f"{Colors.CYAN}[SMS]{Colors.ENDC} Concatenated sequence with {segment_count} segments.")
         if por :
             print (f"{Colors.BLUE}[<--]{Colors.ENDC} {por} {sw}")
+            self ._print_por_decoded (result .get ("por_decoded"))
         else :
             print (f"{Colors.BLUE}[<--]{Colors.ENDC} {sw}")
         if failed_segment is not None :
             print (f"{Colors.FAIL}[!] Failed at segment {failed_segment}.{Colors.ENDC}")
         if error :
             print (f"{Colors.FAIL}[!] {error}{Colors.ENDC}")
+
+    def _print_por_decoded (self ,por_info ):
+        if not por_info :
+            return
+        if por_info .get ("status_code")=="00":
+            command_sw =por_info .get ("command_sw")
+            if command_sw is None or str (command_sw ).upper ()=="9000":
+                return
+        if por_info .get ("valid")!=True :
+            error =por_info .get ("error")
+            if error :
+                print (f"{Colors.WARNING}[POR]{Colors.ENDC} decode unavailable: {error}")
+            return
+        status_code =por_info .get ("status_code")or "??"
+        status_meaning =por_info .get ("status_meaning")or "Unknown"
+        parts =[
+        f"{status_meaning} ({status_code})",
+        f"TAR {por_info.get('tar')}",
+        f"CNTR {por_info.get('cntr')}",
+        f"PCNTR {por_info.get('pcntr')}",
+        ]
+        command_count =por_info .get ("command_count")
+        if command_count is not None :
+            parts .append (f"commands {command_count}")
+        command_sw =por_info .get ("command_sw")
+        command_response =por_info .get ("command_response")
+        if command_sw :
+            parts .append (f"response {command_sw}")
+        elif command_response :
+            parts .append (f"response {command_response}")
+        fetch_sw =por_info .get ("fetch_sw")
+        if fetch_sw :
+            parts .append (f"fetch SW {fetch_sw}")
+        print (f"{Colors.CYAN}[POR]{Colors.ENDC} "+", ".join (str (part )for part in parts if part ))
 
     def do_help (self ,*args ):
         """Print the command reference for the interactive SCP80 CLI."""
@@ -623,11 +692,19 @@ class OtaShell :
         print ("  build [-v] [hex]- View OTA APDU or multipart sequence")
         print ("  show            - View parameters")
         print ("  sendraw <hex>   - Send raw APDU (no OTA)")
-        print ("  reset           - Re-initialize STK")
+        print ("  reset [-v]      - Re-initialize STK")
         print ("  quit            - Exit SCP80 shell")
         print ("  qa              - Exit YggdraSIM")
         print ("")
         print ("Config keys:")
+        print ("  kic             - SCP80 ciphering key material")
+        print ("  kid             - SCP80 integrity key material")
+        print ("  kic_indicator   - KIc command-packet indicator byte")
+        print ("  kid_indicator   - KID command-packet indicator byte")
+        print ("  kic_identifier  - Alias for kic_indicator")
+        print ("  kid_identifier  - Alias for kid_indicator")
+        print ("  pid             - SMS TP-PID byte")
+        print ("  dcs             - SMS TP-DCS byte")
         print ("  concat_sms      - ON or OFF automatic concatenation")
         print ("  tp_ud_max       - Per-segment TP-UD ceiling (8-140)")
 
@@ -710,7 +787,7 @@ class OtaShell :
                 is_reader_mode =True 
 
             if is_reader_mode :
-                self .transport .connect ()
+                self .transport .connect (verbose =bool (getattr (self ,"global_debug",False )))
                 print (f"{Colors.GREEN}[+] Card Reader Re-connected.{Colors.ENDC}")
 
         except Exception as e :

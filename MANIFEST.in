@@ -1,0 +1,62 @@
+include README.md
+include LICENSE
+include NOTICE
+include AUTHORS
+include SECURITY.md
+include pyproject.toml
+recursive-include yggdrasim_common/gui_server/static *
+
+prune .github
+prune .pytest_cache
+prune .ruff_cache
+prune .mypy_cache
+prune .profilepackage-cache
+prune .venv
+prune build
+prune dist
+prune docs
+prune Legal
+prune Latjo
+prune plugins
+prune pyscard
+prune pysim
+prune reports
+prune scripts/docs
+prune site
+prune site-oneot
+prune trace
+prune Workspace
+prune YggdraSIM-data
+prune tests/plugins
+
+recursive-exclude . *~
+recursive-exclude . __pycache__
+recursive-exclude . *.py[cod]
+recursive-exclude . *.pyo
+recursive-exclude . *.swp
+recursive-exclude . .DS_Store
+recursive-exclude SCP11/eim_local eim_last_response.bin
+recursive-exclude SCP11/eim_local eim_last_response_hex.txt
+recursive-exclude SCP11/eim_local eim_response_log.jsonl
+recursive-exclude SCP11/eim_local eim_poll_audit.sqlite3
+recursive-exclude SCP11/eim_local eim_runtime_state.json
+recursive-exclude SCP11/local_access/debug *
+global-exclude *.db
+global-exclude *.sqlite3
+global-exclude *.jsonl
+global-exclude *.pem
+global-exclude *.der
+global-exclude *.crt
+global-exclude *.csr
+global-exclude *.key
+global-exclude *.p8
+global-exclude *.p12
+global-exclude *.pfx
+global-exclude *.jks
+global-exclude *.keystore
+global-exclude *.srl
+global-exclude *.secret
+global-exclude *.secrets
+global-exclude *.pcap
+global-exclude *.pcapng
+global-exclude *.pdml

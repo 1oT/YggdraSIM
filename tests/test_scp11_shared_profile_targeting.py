@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 import unittest
 from types import SimpleNamespace
 
@@ -69,12 +72,12 @@ class SharedProfileTargetingTests(unittest.TestCase):
 
     def test_decimal_iccid_prefers_profile_metadata_encoding(self) -> None:
         row = SimpleNamespace(
-            iccid="89880811111111111112",
+            iccid="89460811111111111112",
             aid="A0000005591010FFFFFFFF8900001303",
         )
 
         resolved = resolve_profile_target_identifier(
-            "89880811111111111112",
+            "89460811111111111112",
             tag_aid="AID",
             tag_iccid="ICCID",
             resolve_aid_from_alias=lambda alias: None,
@@ -84,14 +87,14 @@ class SharedProfileTargetingTests(unittest.TestCase):
             fetch_profiles=lambda: [row],
         )
 
-        self.assertEqual(resolved, ("ICCID", "98888011111111111121"))
+        self.assertEqual(resolved, ("ICCID", "98648011111111111121"))
 
     def test_profile_fetch_failure_still_allows_decimal_fallback(self) -> None:
         def fetch_profiles():
             raise RuntimeError("reader offline")
 
         resolved = resolve_profile_target_identifier(
-            "89880811111111111112",
+            "89460811111111111112",
             tag_aid="AID",
             tag_iccid="ICCID",
             resolve_aid_from_alias=lambda alias: None,
@@ -101,4 +104,4 @@ class SharedProfileTargetingTests(unittest.TestCase):
             fetch_profiles=fetch_profiles,
         )
 
-        self.assertEqual(resolved, ("ICCID", "98888011111111111121"))
+        self.assertEqual(resolved, ("ICCID", "98648011111111111121"))

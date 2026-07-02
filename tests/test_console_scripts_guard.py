@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 """
 Tests for the HIL-bridge guard in ``yggdrasim_common.console_scripts``.
 
@@ -46,6 +49,7 @@ class GuardReturnCodeTests(unittest.TestCase):
                     rc = console_scripts._guard_hil_bridge()
                 self.assertNotEqual(rc, 0)
                 self.assertIn("Linux", buffer.getvalue())
+                self.assertIn("yggdrasim-card-bridge", buffer.getvalue())
 
     def test_full_linux_returns_zero(self) -> None:
         with mock.patch.dict(os.environ, {flavor.FLAVOR_ENV: "full"}, clear=False):
@@ -55,6 +59,46 @@ class GuardReturnCodeTests(unittest.TestCase):
 
 
 class GuardIntegrationWithEntryPointsTests(unittest.TestCase):
+    def test_launcher_entry_delegates_to_unified_cli(self) -> None:
+        with mock.patch("main.main.run_cli", return_value=0) as mocked_run_cli:
+            with mock.patch.object(console_scripts.sys, "argv", ["yggdrasim", "--version"]):
+                rc = console_scripts.launcher()
+
+        self.assertEqual(rc, 0)
+        mocked_run_cli.assert_called_once_with(["--version"])
+
+    def test_gui_entry_defaults_to_desktop_mode(self) -> None:
+        with mock.patch("main.main.run_cli", return_value=0) as mocked_run_cli:
+            with mock.patch.object(console_scripts.sys, "argv", ["yggdrasim-gui", "--port", "27860"]):
+                rc = console_scripts.gui()
+
+        self.assertEqual(rc, 0)
+        mocked_run_cli.assert_called_once_with(["--gui", "--port", "27860"])
+
+    def test_gui_entry_respects_explicit_web_server_mode(self) -> None:
+        with mock.patch("main.main.run_cli", return_value=0) as mocked_run_cli:
+            with mock.patch.object(
+                console_scripts.sys,
+                "argv",
+                ["yggdrasim-gui", "--web-server", "--token-file", "./tok"],
+            ):
+                rc = console_scripts.gui()
+
+        self.assertEqual(rc, 0)
+        mocked_run_cli.assert_called_once_with(["--web-server", "--token-file", "./tok"])
+
+    def test_web_server_entry_defaults_to_web_server_mode(self) -> None:
+        with mock.patch("main.main.run_cli", return_value=0) as mocked_run_cli:
+            with mock.patch.object(
+                console_scripts.sys,
+                "argv",
+                ["yggdrasim-web-server", "--token-file", "./tok"],
+            ):
+                rc = console_scripts.web_server()
+
+        self.assertEqual(rc, 0)
+        mocked_run_cli.assert_called_once_with(["--web-server", "--token-file", "./tok"])
+
     def test_hil_bridge_entry_refuses_on_clean_without_import(self) -> None:
         with mock.patch.dict(os.environ, {flavor.FLAVOR_ENV: "clean"}, clear=False):
             buffer = io.StringIO()
@@ -68,6 +112,16 @@ class GuardIntegrationWithEntryPointsTests(unittest.TestCase):
             with mock.patch.object(console_scripts.sys, "stderr", buffer):
                 rc = console_scripts.hil_bridge_supervisor()
             self.assertNotEqual(rc, 0)
+
+    def test_card_bridge_entry_is_available_on_clean_flavor(self) -> None:
+        with mock.patch.dict(os.environ, {flavor.FLAVOR_ENV: "clean"}, clear=False):
+            with mock.patch.object(console_scripts, "_guard_hil_bridge") as mocked_guard:
+                with mock.patch.object(console_scripts, "_invoke", return_value=0) as mocked_invoke:
+                    rc = console_scripts.card_bridge()
+
+        self.assertEqual(rc, 0)
+        mocked_guard.assert_not_called()
+        mocked_invoke.assert_called_once_with("Tools.CardBridge.server", "main")
 
 
 class ConsoleScriptsResolveTests(unittest.TestCase):

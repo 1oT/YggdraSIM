@@ -1,13 +1,39 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 import io
 import unittest
 from contextlib import redirect_stdout
 
+from SCP03.interface.shell_wizards import ShellInteractiveWizards
 from SCP03.logic.security import AUTH_TEST_VECTOR, SecurityController
 
 
 class _UnexpectedTransmitTransport:
     def transmit(self, *_args, **_kwargs):
         raise AssertionError("RUN-AUTH-TEST should not hit live transport in offline mode.")
+
+
+class _RecordingTransport:
+    def __init__(self) -> None:
+        self.commands: list[str] = []
+
+    def transmit(self, command: str, **_kwargs):
+        self.commands.append(command)
+        return b"", 0x90, 0x00
+
+
+class _RecordingPinController:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, tuple[str, ...]]] = []
+
+    def verify_pin(self, pin_id: str, pin: str, pin_encoding: str = "ascii") -> None:
+        self.calls.append(("verify", (pin_id, pin, pin_encoding)))
+
+
+class _PinShell:
+    def __init__(self) -> None:
+        self.sec_ctrl = _RecordingPinController()
 
 
 class SecurityControllerOfflineAuthTests(unittest.TestCase):
@@ -86,6 +112,87 @@ class SecurityControllerOfflineAuthTests(unittest.TestCase):
         self.assertIn("OPc check:", rendered)
         self.assertIn("00 88 APDU (derived):", rendered)
         self.assertIn("Response check:", rendered)
+
+
+class SecurityControllerPinEncodingTests(unittest.TestCase):
+    def test_verify_pin_ascii_keeps_legacy_padding(self) -> None:
+        transport = _RecordingTransport()
+        controller = SecurityController(transport)
+
+        output = io.StringIO()
+        with redirect_stdout(output):
+            controller.verify_pin("0a", "1234")
+
+        self.assertEqual(transport.commands, ["0020000A0831323334FFFFFFFF"])
+
+    def test_verify_pin_hex_sends_raw_bytes(self) -> None:
+        transport = _RecordingTransport()
+        controller = SecurityController(transport)
+
+        output = io.StringIO()
+        with redirect_stdout(output):
+            controller.verify_pin("0a", "523D3BE7AD38DE19", pin_encoding="hex")
+
+        self.assertEqual(transport.commands, ["0020000A08523D3BE7AD38DE19"])
+
+    def test_change_pin_binary_sends_raw_bytes_with_dynamic_lc(self) -> None:
+        transport = _RecordingTransport()
+        controller = SecurityController(transport)
+
+        output = io.StringIO()
+        with redirect_stdout(output):
+            controller.change_pin("01", "0102", "AABBCC", pin_encoding="binary")
+
+        self.assertEqual(transport.commands, ["00240001050102AABBCC"])
+
+    def test_verify_pin_accepts_friendly_pin_reference_names(self) -> None:
+        cases =(
+            ("PIN App 1","01"),
+            ("UPIN","11"),
+            ("SECOND-PIN-APP1","81"),
+            ("ADM1","0A"),
+            ("ADM10","8E"),
+        )
+
+        for pin_ref ,expected_ref in cases:
+            with self.subTest(pin_ref=pin_ref):
+                transport = _RecordingTransport()
+                controller = SecurityController(transport)
+
+                output = io.StringIO()
+                with redirect_stdout(output):
+                    controller.verify_pin(pin_ref, "1234")
+
+                self.assertEqual(
+                    transport.commands,
+                    [f"002000{expected_ref}0831323334FFFFFFFF"],
+                )
+
+
+class ShellManagePinEncodingTests(unittest.TestCase):
+    def test_manage_pin_macro_defaults_to_ascii_encoding(self) -> None:
+        shell = _PinShell()
+
+        output = io.StringIO()
+        with redirect_stdout(output):
+            ShellInteractiveWizards.run_manage_pin_wizard(shell, "verify 0a 1234")
+
+        self.assertEqual(shell.sec_ctrl.calls, [("verify", ("0A", "1234", "ascii"))])
+
+    def test_manage_pin_macro_accepts_hex_flag(self) -> None:
+        shell = _PinShell()
+
+        output = io.StringIO()
+        with redirect_stdout(output):
+            ShellInteractiveWizards.run_manage_pin_wizard(
+                shell,
+                "verify --hex 0a 523D3BE7AD38DE19",
+            )
+
+        self.assertEqual(
+            shell.sec_ctrl.calls,
+            [("verify", ("0A", "523D3BE7AD38DE19", "hex"))],
+        )
 
 
 if __name__ == "__main__":

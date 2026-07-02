@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """Tests for SCP03/logic/euicc_info2.py utility decoders.
 
@@ -114,7 +117,7 @@ class DecodeEuiccInfo2ValueTests(unittest.TestCase):
     def test_ipa_mode_decoded(self) -> None:
         result = decode_euicc_info2_value(0x90, bytes([0x00]), 0xBF22)
         self.assertIsNotNone(result)
-        self.assertIn("ipad", str(result))
+        self.assertIn("ipad", str(result).lower())
 
     def test_unknown_combination_returns_none(self) -> None:
         result = decode_euicc_info2_value(0xFF, bytes([0x00]), None)

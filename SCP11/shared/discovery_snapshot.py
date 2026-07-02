@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """SCP11 discovery snapshot: serialises ES10b.GetEUICCInfo / GetProfilesInfo responses for offline inspection."""
 from __future__ import annotations
@@ -235,8 +238,10 @@ def _print_get_certs_compact(response: bytes) -> None:
     print(f"    | eUICC Certificate   : {'Present' if isinstance(euicc, bytes) and len(euicc) > 0 else 'Absent'}")
     if isinstance(eum, bytes) and len(eum) > 0:
         print(f"    | EUM Cert Bytes      : {len(eum)}")
+        print(f"    | EUM Cert DER Hex    : {eum.hex().upper()}")
     if isinstance(euicc, bytes) and len(euicc) > 0:
         print(f"    | eUICC Cert Bytes    : {len(euicc)}")
+        print(f"    | eUICC Cert DER Hex  : {euicc.hex().upper()}")
 
 
 def render_consolidated_discovery_snapshot(

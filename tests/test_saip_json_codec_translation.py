@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 """
 Exhaustive tests for decoded ASN.1 / pySim object trees → tagged JSON (and back).
 
@@ -298,12 +301,13 @@ class DerToJsonGoldenPathTests(unittest.TestCase):
     def setUpClass(cls) -> None:
         cls.workspace = Path(__file__).resolve().parents[1]
 
-    def test_der_decode_jsonify_preserves_pe_types(self) -> None:
-        der_dir = self.workspace / ".profilepackage-cache"
-        candidates = sorted(der_dir.glob("*.der"))
-        if len(candidates) == 0:
-            self.skipTest("No cached DER under .profilepackage-cache")
+    def _reference_profile_der(self) -> bytes:
+        path = self.workspace / "Tools" / "ProfilePackage" / "profile" / "reference_test_profile.txt"
+        if path.is_file() is False:
+            self.skipTest("No tracked reference SAIP profile fixture")
+        return bytes.fromhex("".join(path.read_text(encoding="utf-8").split()))
 
+    def test_der_decode_jsonify_preserves_pe_types(self) -> None:
         from Tools.ProfilePackage.saip_json_codec import (
             build_decoded_document_from_sequence,
             ensure_workspace_pysim_on_path,
@@ -312,7 +316,7 @@ class DerToJsonGoldenPathTests(unittest.TestCase):
         ensure_workspace_pysim_on_path(self.workspace)
         from pySim.esim.saip import ProfileElementSequence
 
-        raw = candidates[0].read_bytes()
+        raw = self._reference_profile_der()
         pes = ProfileElementSequence.from_der(raw)
         doc = build_decoded_document_from_sequence(pes, intro_lines=["golden"])
         text = document_to_pretty_json(doc)

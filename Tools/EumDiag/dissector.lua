@@ -1,3 +1,6 @@
+-- SPDX-License-Identifier: GPL-3.0-or-later
+-- Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 -- YggdraSIM EUM Diagnostics — Wireshark/tshark Lua dissector.
 --
 -- Purpose: annotate Bound Profile Package (BF36) frames with the

@@ -6,6 +6,11 @@ tags:
   - automation
   - cicd
 ---
+<!--
+SPDX-License-Identifier: GPL-3.0-or-later
+Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+-->
+
 
 # CLI And Piping Cheatsheet
 
@@ -26,7 +31,6 @@ After an editable install you can also use the installed console scripts:
 - `yggdrasim-scp03`
 - `yggdrasim-scp80`
 - `yggdrasim-scp11-live`
-- `yggdrasim-scp11-test`
 - `yggdrasim-scp11-relay`
 - `yggdrasim-scp11-local-access`
 - `yggdrasim-scp11-eim-local`
@@ -55,8 +59,7 @@ flowchart LR
 | `python -m SCP03` | Yes | Yes | Yes | Supports `--out` YAML export with `--cmd` or `--stdin`. |
 | `python -m SCP80` | Yes | Yes | Yes | Uses the same OTA shell commands as the interactive prompt. |
 | `python -m SCP11.relay` | Yes | Yes | Yes | Relay shell using the default relay certificate set. |
-| `python -m SCP11.live` | Yes | Yes | Yes | Relay shell using live certificate defaults. |
-| `python -m SCP11.test` | Yes | Yes | Yes | Relay shell using test certificate defaults. |
+| `python -m SCP11.live` | Yes | Yes | Yes | eSIM management relay shell. |
 | `python -m SCP11.local_access` | Yes | Yes | Yes | Local SMDPP shell against ISD-R. |
 | `python -m SCP11.eim_local` | Yes | Yes | Yes | Local eIM shell and localized flows. |
 | `python -m Tools.ProfilePackage` | Yes | Yes | Yes | SAIP / profile package shell. |
@@ -187,13 +190,12 @@ Local eIM queue run:
 
 ```bash
 python -m SCP11.eim_local --cmd \
-  "HOTFOLDER-LIST --json; POLL-CAMPAIGN --until-empty --max-cycles 20 --json; EXIT"
+  "HOTFOLDER-LIST --json; HOTFOLDER-FETCH --json; RESP-LOG 5 --json; EXIT"
 ```
 
-IPAe watchdog (plugin-injected):
 
 ```bash
-python -m SCP11.live --cmd "DISCOVER; POLL 3 -t 20s -s 5; EXIT"
+python -m SCP11.live --cmd "DISCOVER; STATUS; LIST; EXIT"
 ```
 
 ## Module examples
@@ -232,7 +234,7 @@ python -m SCP80 --cmd "show; build; quit"
 
 ```bash
 python -m SCP80 --stdin <<'EOF'
-iccid 8988201234567890123
+iccid 8988001234567890123
 build
 quit
 EOF
@@ -252,10 +254,10 @@ Live certificate defaults:
 python -m SCP11.live --cmd "DISCOVER; STATUS; EXIT"
 ```
 
-Test certificate defaults:
+Stdin batch:
 
 ```bash
-python -m SCP11.test --stdin <<'EOF'
+python -m SCP11.live --stdin <<'EOF'
 DISCOVER
 LIST
 STATUS
@@ -293,7 +295,8 @@ python -m SCP11.eim_local --cmd "DISCOVER; PATHS; STATUS; EXIT"
 ```bash
 python -m SCP11.eim_local --stdin <<'EOF'
 HOTFOLDER-LIST --json
-POLL-CAMPAIGN --until-empty --max-cycles 20 --json
+HOTFOLDER-FETCH --json
+RESP-LOG 5 --json
 EXIT
 EOF
 ```
@@ -339,7 +342,7 @@ EOF
 
 Both `yggdrasim-hil-bridge` and `yggdrasim-hil-supervisor` are
 `argparse`-only daemons — no `--cmd` / `--stdin`. Drive them through
-systemd or the launcher's `[B]` HIL Bridge Session menu instead:
+systemd or the launcher's `[B]` Local SIMtrace2 HIL Bridge Session menu instead:
 
 ```bash
 yggdrasim-hil-bridge \
@@ -367,7 +370,7 @@ stack up:
 python main/main.py --open-pcap captures/session-example.pcapng
 python main/main.py \
     --open-pcap captures/session-example.pcapng \
-    --keybag    captures/session-example.keys.json
+    --keybag    captures/session-2026-04-20.keys.json
 ```
 
 Sidecar keybag files named `<pcap>.keys.json` or `<stem>.keys.json`
@@ -432,7 +435,7 @@ RECORD STOP
 - Redirect stdout when the command output is the artifact:
 
 ```bash
-python -m SCP11.test --cmd "DISCOVER; EXIT" > reports/scp11_test_discover.txt
+python -m SCP11.live --cmd "DISCOVER; EXIT" > reports/scp11_discover.txt
 ```
 
 - Capture stdout and keep it visible with `tee`:

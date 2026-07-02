@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 """3GPP TS 27.007 §8.17 / §8.18 AT+CSIM and AT+CRSM transcoder tests.
 
 Verifies the small at_simlink helper turns AT requests into the

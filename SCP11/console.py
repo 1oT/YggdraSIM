@@ -20,12 +20,10 @@
 """Canonical SCP11 console shell.
 
 This is the ``canonical`` SCP11 console/CLI entry point for YggdraSIM v1.
-``SCP11/live/console.py`` and ``SCP11/test/console.py`` are ``legacy
-mirrors`` that add variant-specific defaults (live vs. test certificates and
-endpoints) on top of the same dispatcher shape. Audit item ``SCP11-P1-02``
-tracks splitting this module into ``console_cli``, ``console_tls_probe``,
-and ``console_state`` post v1; until then, prefer changes here first and
-mirror the behaviour into the sibling variants.
+``SCP11/live/console.py`` carries the relay console used by both the live
+entrypoint and the ``SCP11.test`` compatibility path. Audit item
+``SCP11-P1-02`` tracks splitting this module into ``console_cli``,
+``console_tls_probe``, and ``console_state`` post v1.
 """
 
 import atexit
@@ -39,7 +37,6 @@ from urllib.parse import urlparse
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
-from yggdrasim_common.card_backend import trigger_card_relay_modem_refresh
 from yggdrasim_common.hil_bridge_runtime import hil_bridge_warning_text
 from yggdrasim_common.quit_control import quit_all
 from yggdrasim_common.euicc_issuer import (
@@ -628,7 +625,6 @@ class SCP11Console:
             ("ENABLE-PROFILE <id|aid|alias>", "ES10c.EnableProfile"),
             ("DISABLE-PROFILE <id|aid|alias>", "ES10c.DisableProfile"),
             ("DELETE-PROFILE <id|aid|alias>", "ES10c.DeleteProfile"),
-            ("REFRESH-MODEM [mode]", "Queue proactive REFRESH toward modem"),
             ("AIDS", "List AID aliases loaded from Admin registry"),
             ("READ-METADATA [22|32]", "Read profile metadata from GetProfilesInfo"),
             ("GET-POL <id|aid|alias>", "Read profilePolicyRules (PPR) from metadata"),
@@ -729,13 +725,6 @@ class SCP11Console:
             "DELETE-PROFILE <iccid-or-aid>",
             "ES10c.DeleteProfile",
             self._cmd_delete_profile,
-        )
-        self._add_command(
-            "REFRESH-MODEM",
-            "REFRESH-MODEM [mode]",
-            "Queue proactive REFRESH toward modem",
-            self._cmd_refresh_modem,
-            aliases=["MODEM-REFRESH"],
         )
         self._add_command("AIDS", "AIDS", "List AID aliases loaded from Admin registry", self._cmd_aids)
         self._add_command("READ-METADATA", "READ-METADATA [22|32]", "Read metadata", self._cmd_read_metadata)
@@ -1027,10 +1016,6 @@ class SCP11Console:
         )
         return True
 
-    def _cmd_refresh_modem(self, argument: str) -> bool:
-        self._queue_modem_refresh("RefreshModem", mode=argument.strip())
-        return True
-
     def _cmd_aids(self, _: str) -> bool:
         self._print_aid_registry()
         return True
@@ -1161,6 +1146,7 @@ class SCP11Console:
         print(f"{self._style.cyan}[*] Running authentication phase only...{self._style.end}")
         try:
             self.orchestrator._phase_connect()
+            self.orchestrator._bootstrap_es10b_logical_channel()
             self.orchestrator._phase_load_credentials()
             auth_seed = self.orchestrator._phase_authentication_seed(
                 matching_id=matching_id,
@@ -1765,6 +1751,7 @@ class SCP11Console:
 
         try:
             self.orchestrator._phase_connect()
+            self.orchestrator._bootstrap_es10b_logical_channel()
             connect_ok = True
             checks.append(("Connect / select ISD-R", True, "ok"))
         except Exception as error:
@@ -1931,8 +1918,7 @@ class SCP11Console:
 
     def _execute_result_command(self, title: str, payload: bytes, result_outer_tag: int) -> bool:
         try:
-            apdu = self._build_store_data_apdu(payload)
-            response = self.apdu_channel.send(apdu, f"CMD: {title}")
+            response = self._send_result_store_data(payload, f"CMD: {title}")
         except Exception as error:
             print(f"{self._style.red}[!] {title} failed: {error}{self._style.end}")
             return False
@@ -1992,32 +1978,13 @@ class SCP11Console:
             result_outer_tag=func_tag,
         )
 
-    def _queue_modem_refresh(self, action_label: str, mode: str = "") -> None:
-        try:
-            payload = trigger_card_relay_modem_refresh(
-                mode=mode,
-                source=f"scp11-console:{action_label}",
-            )
-        except Exception as error:
-            print(f"{self._style.yellow}[*] {action_label}: modem REFRESH queue failed ({error}).{self._style.end}")
-            return
-        if payload is None:
-            return
-        status = str(payload.get("status", "queued") or "queued")
-        mode_name = str(payload.get("mode", "") or "")
-        print(
-            f"{self._style.yellow}[*] {action_label}: modem REFRESH {status} "
-            f"({mode_name or 'euicc-profile-state-change'}).{self._style.end}"
-        )
-
     def _run_enable_profile_state_command(
         self,
         resolved: Tuple[int, str],
         target_metadata: Optional[ProfileMetadataView],
     ) -> None:
         if target_metadata is None:
-            if self._execute_profile_state_command(resolved, self.TAG_ENABLE_PROFILE, "EnableProfile"):
-                self._queue_modem_refresh("EnableProfile")
+            self._execute_profile_state_command(resolved, self.TAG_ENABLE_PROFILE, "EnableProfile")
             return
 
         if target_metadata.state.upper() == "ENABLED":
@@ -2040,8 +2007,7 @@ class SCP11Console:
             ) is False:
                 return
 
-        if self._execute_profile_state_command(resolved, self.TAG_ENABLE_PROFILE, "EnableProfile"):
-            self._queue_modem_refresh("EnableProfile")
+        self._execute_profile_state_command(resolved, self.TAG_ENABLE_PROFILE, "EnableProfile")
 
     def _run_disable_profile_state_command(
         self,
@@ -2052,8 +2018,7 @@ class SCP11Console:
             if target_metadata.state.upper() != "ENABLED":
                 print(f"{self._style.green}[+] DisableProfile: target is already disabled.{self._style.end}")
                 return
-        if self._execute_profile_state_command(resolved, self.TAG_DISABLE_PROFILE, "DisableProfile"):
-            self._queue_modem_refresh("DisableProfile")
+        self._execute_profile_state_command(resolved, self.TAG_DISABLE_PROFILE, "DisableProfile")
 
     def _run_delete_profile_state_command(
         self,
@@ -2061,8 +2026,7 @@ class SCP11Console:
         target_metadata: Optional[ProfileMetadataView],
     ) -> None:
         if target_metadata is None:
-            if self._execute_profile_state_command(resolved, self.TAG_DELETE_PROFILE, "DeleteProfile"):
-                self._queue_modem_refresh("DeleteProfile")
+            self._execute_profile_state_command(resolved, self.TAG_DELETE_PROFILE, "DeleteProfile")
             return
 
         if target_metadata.state.upper() == "ENABLED":
@@ -2081,8 +2045,7 @@ class SCP11Console:
             if self._run_enable_profile_sequence_for_metadata(replacement) is False:
                 return
 
-        if self._execute_profile_state_command(resolved, self.TAG_DELETE_PROFILE, "DeleteProfile"):
-            self._queue_modem_refresh("DeleteProfile")
+        self._execute_profile_state_command(resolved, self.TAG_DELETE_PROFILE, "DeleteProfile")
 
     def _run_enable_profile_sequence_for_metadata(self, target_metadata: ProfileMetadataView) -> bool:
         resolved = self._profile_metadata_to_resolved(target_metadata)
@@ -2620,10 +2583,21 @@ class SCP11Console:
             return True
         return False
 
-    def _build_store_data_apdu(self, payload: bytes, p1: int = 0x91, p2: int = 0x00) -> bytes:
+    def _send_result_store_data(self, payload: bytes, log_name: str) -> bytes:
+        orchestrator = getattr(self, "orchestrator", None)
+        orchestrator_sender = getattr(orchestrator, "_send_es10b_store_data", None)
+        if callable(orchestrator_sender):
+            try:
+                return orchestrator_sender(payload, log_name, allow_stk_retry=True)
+            except TypeError:
+                return orchestrator_sender(payload, log_name)
+        apdu = self._build_store_data_apdu(payload)
+        return self.apdu_channel.send(apdu, log_name)
+
+    def _build_store_data_apdu(self, payload: bytes, p1: int = 0x91, p2: int = 0x00, cla: int = 0x80) -> bytes:
         if len(payload) > 255:
             raise ValueError("Payload too long for single APDU. Use chunking path for large payloads.")
-        return bytes([0x80, 0xE2, p1, p2, len(payload)]) + payload
+        return bytes([cla, 0xE2, p1, p2, len(payload)]) + payload
 
     def _decode_euicc_configured_data(self, raw_data: bytes) -> Dict[str, Any]:
         result: Dict[str, Any] = {
@@ -2965,8 +2939,10 @@ class SCP11Console:
         print(f"    | eUICC Certificate    : {'Present' if isinstance(euicc, bytes) and len(euicc) > 0 else 'Absent'}")
         if isinstance(eum, bytes) and len(eum) > 0:
             print(f"    | EUM Cert Bytes       : {len(eum)}")
+            print(f"    | EUM Cert DER Hex     : {eum.hex().upper()}")
         if isinstance(euicc, bytes) and len(euicc) > 0:
             print(f"    | eUICC Cert Bytes     : {len(euicc)}")
+            print(f"    | eUICC Cert DER Hex   : {euicc.hex().upper()}")
 
     def _print_eim_configuration_compact(self, response: bytes) -> None:
         if self.orchestrator is None or decode_eim_configuration_entries is None:

@@ -1,0 +1,41 @@
+/*
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+ */
+
+/* Text selection -------------------------------------------------------- */
+
+::selection {
+  background: var(--accent-soft);
+  color: var(--fg);
+}
+
+.cc-popout-body,
+.cc-dash-kv-value,
+.cc-esim-profile-ident,
+.cc-esim-profile-meta,
+.cc-datasheet-chip-value,
+.cc-kvl-value,
+.cc-tlv-value,
+.cc-tlv-decoded,
+.cc-chip code,
+.cc-json,
+.cc-hex,
+.cc-error,
+.cc-decoded,
+.cc-decoded-body,
+.cc-decoded-json,
+.cc-pv-field,
+.cc-pv-value,
+.cc-log-inline,
+.cc-trace-block pre,
+.cc-hil-pre,
+.cc-hil-status-value,
+.cc-hil-packet-info,
+.cc-hil-decoded-section-body,
+.cc-hil-decoded-fallback,
+.host-shell-decoded-raw,
+.host-shell-decoded-detail {
+  user-select: text;
+  -webkit-user-select: text;
+}

@@ -1,3 +1,8 @@
+<!--
+SPDX-License-Identifier: GPL-3.0-or-later
+Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+-->
+
 # Contributing to YggdraSIM
 
 YggdraSIM is maintained by **1oT OÜ** (IP owner) with **Hampus Hellsberg** as
@@ -25,8 +30,9 @@ below.
 1. Open an issue before starting non-trivial work. Describe the scope,
    affected subsystem (`SCP03`, `SCP80`, `SCP11/*`, `SIMCARD`, `main/`,
    `Tools/HilBridge`, `Tools/ProfilePackage`, `Tools/SuciTool`,
-   `Tools/ApduFuzz`, `Tools/EumDiag`, `plugins/`), and the
-   specification the change references.
+   `Tools/ApduFuzz`, `Tools/EumDiag`, `Tools/YggdraCore`,
+   `yggdrasim_common/gui_server`, `plugins/`), and the specification the
+   change references.
 2. Fork the repository and branch from `main`. Use one topic branch per
    logical change.
 3. Keep the diff minimal. Prefer editing existing files to creating new

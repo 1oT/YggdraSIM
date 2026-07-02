@@ -1,0 +1,56 @@
+/*
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+ */
+
+/* Theme picker ----------------------------------------------------------- */
+
+.theme-picker {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px;
+  border-radius: var(--radius-pill);
+  background: var(--bg-elev-2);
+  border: 1px solid var(--border);
+  color: var(--fg-dim);
+  font-size: 11px;
+  transition: border-color var(--transition-fast);
+}
+
+.theme-picker:hover {
+  border-color: var(--accent);
+}
+
+.theme-picker label {
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.theme-picker select {
+  background: transparent;
+  color: var(--fg);
+  border: 0;
+  padding: 2px 22px 2px 4px;
+  font-size: 11px;
+  cursor: pointer;
+  font-weight: 500;
+}
+
+.theme-picker select:focus {
+  outline: 2px solid var(--accent-soft);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+/* Match the popup to the page theme — the old rule hard-coded a light
+   palette which looked broken on every dark theme (white-on-dark
+   trigger + black-on-white popup). Now options track the active theme
+   via ``--bg-elev`` / ``--fg``. */
+.theme-picker select option {
+  background-color: var(--bg-elev);
+  color: var(--fg);
+}
+

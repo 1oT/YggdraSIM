@@ -1,3 +1,8 @@
+<!--
+SPDX-License-Identifier: GPL-3.0-or-later
+Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+-->
+
 # AddEIM Registration Notes
 
 Use this note when registering the simulated YggdraSIM eIM in another eIM or

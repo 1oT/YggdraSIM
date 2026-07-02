@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """SCP11-live pySim support: codec and OTA keyset wrappers for the live physical-reader variant."""
 import os
@@ -17,7 +20,7 @@ try:
     from pySim.esim import compile_asn1_subdir
     from pySim.esim import rsp as pysim_rsp
     from pySim.esim import x509_cert as pysim_x509
-except ImportError:
+except Exception:
     compile_asn1_subdir = None
     pysim_rsp = None
     pysim_x509 = None

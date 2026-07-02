@@ -1,0 +1,147 @@
+/*
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+ */
+
+/* ---- Token editor — wider modal + two-column layout ----------------- */
+/*
+ * The token editor modal carries a list-on-left + bind-form-on-right
+ * layout. It needs more horizontal real estate than the default modal
+ * card so the bind form can stay inline rather than wrapping under the
+ * token table on every paint.
+ */
+.saip-token-modal {
+  width: min(1080px, 96vw);
+}
+
+.saip-token-modal-header {
+  padding: 12px 16px;
+  background:
+    linear-gradient(
+      180deg,
+      var(--surface-alt, rgba(255, 255, 255, 0.04)) 0%,
+      transparent 100%
+    );
+}
+
+.saip-token-modal-title-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.saip-token-modal-glyph {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 6px;
+  background: var(--accent-soft, rgba(110, 160, 220, 0.18));
+  color: var(--accent);
+  font-family: var(--mono, "JetBrains Mono", monospace);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+
+.saip-token-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(280px, 360px);
+  gap: 16px;
+  align-items: start;
+}
+
+@media (max-width: 880px) {
+  .saip-token-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.saip-token-col {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+
+.saip-token-list-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.saip-token-list-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+  flex: 0 0 auto;
+}
+
+.saip-token-list-title-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.saip-token-list-title {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--fg);
+}
+
+.saip-token-list-lead {
+  margin: 0;
+  font-size: 11px;
+  color: var(--fg-muted, #888);
+  line-height: 1.4;
+}
+
+.saip-token-empty {
+  margin: 0;
+  padding: 18px 14px;
+  border: 1px dashed var(--border);
+  border-radius: 6px;
+  font-size: 12px;
+  color: var(--fg-muted, #888);
+  line-height: 1.5;
+}
+
+.saip-token-table {
+  margin-top: 0;
+}
+
+.saip-token-bind-card {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 14px;
+  background: var(--surface-alt, rgba(255, 255, 255, 0.025));
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.saip-token-bind-title {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--fg);
+}
+
+.saip-token-bind-lead {
+  margin: 0;
+  font-size: 11px;
+  color: var(--fg-muted, #888);
+  line-height: 1.5;
+}
+
+.saip-token-bind-form {
+  margin-top: 0;
+  padding: 0;
+  border: none;
+  background: transparent;
+}

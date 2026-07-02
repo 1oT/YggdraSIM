@@ -4,6 +4,11 @@ tags:
   - internals
   - style
 ---
+<!--
+SPDX-License-Identifier: GPL-3.0-or-later
+Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+-->
+
 
 # Coding Standards
 
@@ -65,7 +70,9 @@ path navigable and the wizard maintainable as the spec evolves.
   covers operator-visible runtime failures, `ValueError` covers malformed
   user or card data, `TypeError` covers contract violations, and dedicated
   `OSError` subclasses cover transport issues. Avoid `raise Exception(...)`
-  entirely so broad failures remain visible in review.
+  entirely — the pre-release security sweep removed every
+  remaining occurrence from the production tree, so new occurrences show
+  up clearly in code review.
 - `except Exception:` catches are acceptable only in display / TLV-fallback
   paths where any failure collapses to "render the raw hex instead". New
   production code should catch the specific exception it cares about.

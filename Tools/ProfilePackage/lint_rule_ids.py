@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """
 YggdraSIM-native lint rule identifiers (``YRL-*``).
@@ -10,7 +13,6 @@ Pattern: ``YRL-<domain>-<suffix>``
 Domains (suffix is numeric or mnemonic):
   DOC  Decoded document / empty PE list
   SEQ  PE sequence shape (header / mf / end, singleton counts)
-  DEP  PE dependency ordering (opt-usim, df-5gs, …)
   SVC  Header ``eUICC-Mandatory-services`` vs PE presence
   ICC  ICCID encoding in header (-001..-003) and cross-PE consistency
        between header.iccid and EF.ICCID fillFileContent (-010, TS 102 221 §13.2);
@@ -32,18 +34,60 @@ Domains (suffix is numeric or mnemonic):
   HDR  Profile header fields: mandatory field presence (-001 WARN),
        connectivityParameters non-hex sub-field (-002 WARN), port outside
        1..65535 (-003 WARN), transport protocol not UDP/TCP (-004 INFO)
-       (ETSI TS 102 223 §8.52 / GSMA TS.48 §7.2)
-  PID  PE ``identification`` uniqueness
-  SDM  Security domain instance / keys (shape: -001..-004)
+       (ETSI TS 102 223 §8.52 / GSMA TS.48 §7.2); eUICC-Mandatory-AIDs entry
+       shape: AID outside ISO 7816-5 5..16 byte range, version not 2 bytes,
+       missing aid/version, duplicate AID (-005 FAIL/WARN, TCA SAIP §A.2);
+       SAIP (major, minor) version not in TCA-published set + iotOptions on
+       SAIP < 3.3 (-006 FAIL/WARN, TCA PP TS §3.1 / §A.2);
+       eUICC-Mandatory-GFSTEList OID component invalid / non-dotted /
+       duplicate (-007 FAIL/WARN, TCA SAIP §A.2 / ITU-T X.660); profileType
+       empty or > 100 UTF-8 bytes (-008 WARN/FAIL, TCA SAIP §A.2)
+  PID  PE ``identification`` uniqueness (-001 FAIL, -002 WARN); profile
+       must declare at least one NAA (-003 WARN, TCA PP TS §4.4 /
+       GSMA TS.48 §6 — a profile without USIM/CSIM/ISIM/SSIM has no
+       subscription identity to expose)
+  NAA  Each NAA needs a set of authentication parameters (-005 WARN,
+       TCA PP TS §4.4.1 / 3GPP TS 33.102 §6.3 — USIM / CSIM / ISIM
+       require an akaParameter PE; SSIM may use SSIM-EAPTLSParameters
+       instead, per the TCA PP TS NAA rules covering EAP-TLS, RFC 9190 /
+       RFC 9048)
+  DEP  PE dependency ordering: opt-usim/-isim → host NAA, gsm-access /
+       phonebook / df-5gs / df-saip / df-snpn / df-5gprose → USIM
+       (TCA PP TS GSM-ACCESS / PHONEBOOK / DF-5GS / DF-SAIP / DF-SNPN /
+       DF-5GPROSE: each shall come after the creation of an ADF USIM)
+  SDM  Security domain instance / keys (shape: -001..-004) and Application
+       extraditeSecurityDomainAID cross-reference (-005 FAIL,
+       TCA PP TS PP-004 — the extradite target must be defined by a
+       preceding PE-SecurityDomain)
   SDK  Security domain key-list entry-level checks: keyVersionNumber=0 (-001
        WARN), keyType outside GP CPS §11.1.8 registry (-002 WARN),
        keyUsageQualifier absent or zero (-003 WARN)
-  JCA  Application load block / package AID
-  JCI  Application instance list entries
+  JCA  Application load block / package AID; PE-Application missing both
+       loadBlock and instanceList (-004 FAIL, TCA PP TS APP-004);
+       instance applicationLoadPackageAID does not match the parent
+       loadBlock or any preceding PE-Application load package (-005
+       WARN, ETSI TS 102 226 / GP CS §11.5)
+  JCI  Application instance list entries; applicationModuleAID outside
+       5..16 byte AID range (-005 WARN, ISO 7816-4 §8.2.1)
   HEX  Hex field length / padding
   APD  APDU-shaped hex fields
   N5G  DF.5GS vs USIM presence
-  FIL  File definition FCP / fileID / EF sizing (ETSI TS 102 22x)
+  FIL  File definition FCP / fileID / EF sizing (ETSI TS 102 22x); linked
+       file also declares size or content fields — efFileSize /
+       maximumFileSize / fillFileContent / fillFileOffset / fillFilePattern
+       (-015 FAIL, TCA PP TS FS-015 — the link target owns size and
+       proprietary information per ETSI TS 102 222 file-management
+       semantics); linkPath declared on an ADF (-024 FAIL, TCA PP TS
+       FS-024 — linkPath is the EF/DF-only symlink-target field);
+       fileDescriptor byte 0 file-class bits vs declared kind — DF/ADF
+       must use 0b11, EF must not (-040 FAIL, ETSI TS 102 222 §6.2 /
+       ISO 7816-4 §5.3.1.1); lifeCycleStatus byte outside the registered
+       set 0x00/0x01/0x03/0x04/0x05/0x0C..0x0F (-041 WARN, ETSI TS 102
+       221 §11.1.1.1 / TS 102 222 §6.10); securityAttributesReferenced
+       and securityAttributesCompact declared on the same FCP (-042
+       FAIL, ETSI TS 102 221 §11.1.1.4 — mutually exclusive); dfName
+       declared on an EF / MF, or ADF dfName outside 5..16 byte AID
+       range (-043 FAIL/WARN, ETSI TS 102 222 §6.4 / ISO 7816-4 §8.2.1)
   GFM  genericFileManagement command-block sequence coherence: write op
        without preceding filePath/createFCP (-001 WARN), createFCP with no
        subsequent fillFileContent (-002 INFO), empty block (-003 INFO)
@@ -52,22 +96,40 @@ Domains (suffix is numeric or mnemonic):
        length (TS 102 222 §6.4 — -001), BER-TLV integrity checks
   ARR  EF.ARR reference checks: rule-index vs record count (-001 WARN),
        unresolvable EF.ARR reference (-002 INFO) (TS 102 221 §11.1.1)
-  AKA  AKA parameter field-length checks: K byte length (-001 FAIL),
-       OP(c)/TOP(c) byte length (-002 FAIL), fixed SGP.22 §B.3 fields
-       (algorithmOptions/authCounterMax/sqnDelta/sqnAgeLimit/rotationConstants)
-       out of spec (-003 WARN), unknown algorithmID (-004 WARN)
+  AKA  AKA parameter field-length checks: K byte length (-001 FAIL —
+       MILENAGE 16 B, TUAK 16 or 32 B per TS 35.231 Annex F),
+       OP(c)/TOP(c) byte length (-002 FAIL, mismatched TUAK K/TOPc width
+       WARN), fixed SGP.22 §B.3 fields (algorithmOptions / authCounterMax /
+       sqnDelta / sqnAgeLimit / rotationConstants) out of spec (-003 WARN),
+       unknown algorithmID (-004 WARN); mappingSource AID must resolve to
+       a NAA defined earlier in the profile (-005 WARN, TCA PP TS
+       PE-AKAParameter / ISO 7816-5 §8.5)
+  CDMA PE-CDMAParameter material sanity: A-Key (authenticationKey) 8 B and
+       SSD 16 B (-001 FAIL, 3GPP2 C.S0023 §3.4); HRPD / Simple-IP /
+       Mobile-IP authentication-data declared but empty (-002 WARN, GSMA
+       SAIP Annex D)
+  SSIM PE-SSIM-EAPTLSParameters mandatory cert / key fields missing
+       (-001 FAIL) or declared but empty (-002 FAIL) (TCA PP TS
+       PE-SSIM-EAPTLSParameters / RFC 9190 / RFC 9048)
   PIN  PIN / PUK byte-level encoding: packed retry-byte nibbles (-001 max=0,
-       -004 remaining>max), pinValue/pukValue length exactly 8 bytes
-       (-002/-003) (SGP.22 §B.2)
+       -004 remaining>max, -006 remaining=0 ships blocked), pinValue/pukValue
+       length exactly 8 bytes (-002/-003) (SGP.22 §B.2); PIN unblocking
+       reference must resolve to a PE-PUKCodes keyReference (-005 FAIL,
+       TCA PP TS PIN-007); keyReference outside ETSI TS 102 221 §9.5 Table
+       9.3 ranges — global 0x01..0x08, local 0x81..0x88 (-007 FAIL)
   UCR  USIM decoded shape expectations
   UST  EF(UST) service bits vs related files (informational coherence)
   MET  Sidecar metadata alignment / operator fields
   RFM  Remote File Management PE coherence: duplicate TAR value across PEs
        (-001 FAIL, ETSI TS 102 226 §8.2), TAR not exactly 3 bytes (-002 WARN,
-       TS 102 226 §8.1), keyReference is 0x00 (-003 WARN, GP CPS §11.1.8)
+       TS 102 226 §8.1), keyReference is 0x00 (-003 WARN, GP CPS §11.1.8);
+       minimumSecurityLevel (SPI MSL) not 1 byte or 0x00 disables crypto
+       on remote-management traffic (-004 WARN, ETSI TS 102 225 §5.1.1)
   RAM  Remote Application Management PE integrity: securityDomainAID absent
        (-001 FAIL, GP CPS §11.1.4), AID out of 5–16 byte range (-002 WARN),
-       applicationLoadPackageAID out of range (-003 WARN) (ISO 7816-4 §8.2.1)
+       applicationLoadPackageAID out of range (-003 WARN) (ISO 7816-4 §8.2.1);
+       minimumSecurityLevel (SPI MSL) not 1 byte or 0x00 disables crypto
+       on remote-management traffic (-004 WARN, ETSI TS 102 225 §5.1.1)
   SUCI    EF.SUCI-CALC-INFO (4F07) SUCI computation parameters (3GPP TS
           31.102 §4.4.11.3): unknown Protection Scheme Identifier (-001
           FAIL), non-null PSI but HNPK absent (-002 WARN — ME falls back

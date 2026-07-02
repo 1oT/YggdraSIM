@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """
 Environment preflight checks for the YggdraSIM suite.
@@ -248,26 +251,27 @@ def _probe_flavor(report: DoctorReport) -> None:
 
 
 def _probe_hil_bridge(report: DoctorReport) -> None:
+    label = "Local HIL bridge readiness"
     try:
         from yggdrasim_common import flavor as _flavor
     except Exception as error:
         report.add(
-            "HIL bridge readiness",
+            label,
             "info",
             f"flavor module unavailable: {error.__class__.__name__}",
         )
         return
     reason = _flavor.hil_bridge_unavailable_reason()
     if len(reason) > 0:
-        report.add("HIL bridge readiness", "info", reason)
+        report.add(label, "info", reason)
         return
-    # Module presence check — the clean build strips these, but a ``full``
-    # or ``source`` install should have them available.
+    # Module presence check — the clean build strips the local HIL entrypoint,
+    # but a ``full`` or ``source`` install should have it available.
     try:
         importlib.import_module("Tools.HilBridge.main")
     except Exception as error:
         report.add(
-            "HIL bridge readiness",
+            label,
             "warn",
             f"Tools.HilBridge.main import failed: {error.__class__.__name__}",
         )
@@ -282,14 +286,14 @@ def _probe_hil_bridge(report: DoctorReport) -> None:
     remsim_binary = shutil.which("osmo-remsim-client-st2")
     if remsim_binary is None:
         report.add(
-            "HIL bridge readiness",
+            label,
             "warn",
             "osmo-remsim-client-st2 not on PATH — see "
             "guides/SIMTRACE2_CARDEM_GUIDE.md",
         )
         return
     detail = f"{pyudev_detail}; osmo-remsim-client-st2 at {remsim_binary}"
-    report.add("HIL bridge readiness", "ok", detail)
+    report.add(label, "ok", detail)
 
 
 def _probe_hil_optional_helpers(report: DoctorReport) -> None:
@@ -500,6 +504,308 @@ def _probe_card_relay(report: DoctorReport) -> None:
     report.add("Remote card bridge", "ok", "; ".join(parts))
 
 
+def _probe_hil_remote_card(report: DoctorReport) -> None:
+    """Check the HIL-bridge-side remote card stream configuration.
+
+    Mirrors :func:`_probe_card_relay` but consumes the
+    ``YGGDRASIM_HIL_REMOTE_CARD_*`` env vars that the HIL bridge looks
+    at when it consumes a remote ``yggdrasim-card-bridge`` instance
+    over an SSH tunnel. Decision tree matches the global relay probe
+    — silent ``info`` when not configured, ``warn`` on unreachable /
+    token failures, ``ok`` with a one-line summary when the remote
+    bridge answers.
+    """
+    try:
+        from Tools.HilBridge.remote_card import (
+            REMOTE_CARD_TOKEN_ENV,
+            REMOTE_CARD_TOKEN_FILE_ENV,
+            REMOTE_CARD_URL_ENV,
+            resolve_remote_card_token,
+            resolve_remote_card_url,
+        )
+    except Exception as error:  # noqa: BLE001
+        report.add(
+            "HIL remote card stream",
+            "info",
+            f"HIL remote-card module unavailable: {error.__class__.__name__}",
+        )
+        return
+
+    try:
+        relay_url = resolve_remote_card_url("")
+    except Exception as error:  # noqa: BLE001
+        report.add(
+            "HIL remote card stream",
+            "info",
+            f"resolve URL failed: {error.__class__.__name__}: {error}",
+        )
+        return
+
+    if len(relay_url) == 0:
+        report.add(
+            "HIL remote card stream",
+            "info",
+            "Not configured — set "
+            f"{REMOTE_CARD_URL_ENV} or pass --remote-card-url to the bridge to "
+            "consume a remote yggdrasim-card-bridge over SSH.",
+        )
+        return
+
+    base_url = relay_url
+    if relay_url.endswith("/apdu"):
+        base_url = relay_url[: -len("/apdu")]
+    base_url = base_url.rstrip("/")
+
+    try:
+        token = resolve_remote_card_token()
+    except Exception as error:  # noqa: BLE001
+        report.add(
+            "HIL remote card stream",
+            "warn",
+            f"token resolution failed: {error.__class__.__name__}: {error}",
+        )
+        return
+
+    import urllib.error
+    import urllib.request
+
+    request = urllib.request.Request(f"{base_url}/ping", method="GET")
+    try:
+        with urllib.request.urlopen(request, timeout=2.0) as response:
+            ping_status = int(response.status)
+    except urllib.error.HTTPError as error:
+        report.add(
+            "HIL remote card stream",
+            "warn",
+            f"{base_url}/ping returned HTTP {error.code} ({error.reason}).",
+        )
+        return
+    except (urllib.error.URLError, ConnectionError, TimeoutError, OSError) as error:
+        report.add(
+            "HIL remote card stream",
+            "warn",
+            f"{base_url} unreachable: {error.__class__.__name__}: {error}. "
+            "Open the SSH RemoteForward and confirm yggdrasim-card-bridge is up.",
+        )
+        return
+
+    if ping_status != 200:
+        report.add(
+            "HIL remote card stream",
+            "warn",
+            f"{base_url}/ping returned HTTP {ping_status}.",
+        )
+        return
+
+    # /status carries auth posture + reader label; reuse it to flag
+    # token mismatches and surface the bound reader so the operator
+    # sees what's actually being streamed.
+    status_request = urllib.request.Request(f"{base_url}/status", method="GET")
+    if len(token) > 0:
+        status_request.add_header("Authorization", f"Bearer {token}")
+    try:
+        with urllib.request.urlopen(status_request, timeout=2.0) as response:
+            status_status = int(response.status)
+            payload_raw = response.read().decode("utf-8", errors="replace")
+    except urllib.error.HTTPError as error:
+        if error.code == 401:
+            report.add(
+                "HIL remote card stream",
+                "warn",
+                f"{base_url} reachable but token rejected (HTTP 401). "
+                f"Check {REMOTE_CARD_TOKEN_FILE_ENV} or {REMOTE_CARD_TOKEN_ENV}.",
+            )
+            return
+        report.add(
+            "HIL remote card stream",
+            "warn",
+            f"{base_url}/status returned HTTP {error.code} ({error.reason}).",
+        )
+        return
+    except (urllib.error.URLError, ConnectionError, TimeoutError, OSError) as error:
+        report.add(
+            "HIL remote card stream",
+            "warn",
+            f"{base_url}/status unreachable: {error.__class__.__name__}: {error}",
+        )
+        return
+
+    import json as _json
+
+    try:
+        payload = _json.loads(payload_raw) if status_status == 200 else None
+    except Exception:
+        payload = None
+
+    reader_label = ""
+    atr_hex = ""
+    if isinstance(payload, dict):
+        reader_label = str(payload.get("reader") or "").strip()
+        atr_hex = str(payload.get("atr") or "").strip().upper()
+
+    parts: list[str] = [f"{base_url} reachable"]
+    if len(reader_label) > 0:
+        parts.append(f"reader='{reader_label}'")
+    if len(atr_hex) > 0:
+        parts.append(f"ATR={atr_hex}")
+    report.add("HIL remote card stream", "ok", "; ".join(parts))
+
+
+def _detect_webview_backends() -> tuple[list[str], list[str]]:
+    """Return ``(available_backends, install_hints)`` for pywebview.
+
+    pywebview is a thin wrapper over a platform-native web widget. The
+    widget itself has its own dependency tree and must be installed
+    separately:
+
+    * Linux — **GTK** (``gi`` + WebKit2 GObject introspection) or
+      **Qt** (``qtpy`` + QtWebEngine).
+    * macOS — **cocoa** (PyObjC / WKWebView).
+    * Windows — **EdgeChromium** (pythonnet + WebView2).
+
+    The probe attempts the minimal import path for each candidate
+    backend without instantiating a window, so ``--doctor`` can fail
+    fast before ``webview.start()`` raises at runtime.
+    """
+    import sys as _sys
+
+    available: list[str] = []
+    hints: list[str] = []
+
+    if _sys.platform.startswith("linux"):
+        try:
+            import gi  # type: ignore  # noqa: F401
+            from gi.repository import WebKit2  # type: ignore  # noqa: F401
+
+            available.append("gtk")
+        except Exception:
+            hints.append(
+                "GTK backend: `sudo apt install python3-gi gir1.2-webkit2-4.1` "
+                "(plus `pip install PyGObject` if the venv is not "
+                "`--system-site-packages`)."
+            )
+        try:
+            import qtpy  # type: ignore  # noqa: F401
+            from qtpy import QtWebEngineWidgets  # type: ignore  # noqa: F401
+
+            available.append("qt")
+        except Exception:
+            hints.append(
+                "Qt backend (pip-only): "
+                "`pip install 'qtpy>=2.4' 'PyQt6>=6.7' 'PyQt6-WebEngine>=6.7'`."
+            )
+    elif _sys.platform == "darwin":
+        try:
+            import webview.platforms.cocoa  # type: ignore  # noqa: F401
+
+            available.append("cocoa")
+        except Exception:
+            hints.append(
+                "Cocoa backend: `pip install pyobjc-framework-WebKit`."
+            )
+    elif _sys.platform == "win32":
+        try:
+            import webview.platforms.edgechromium  # type: ignore  # noqa: F401
+
+            available.append("edgechromium")
+        except Exception:
+            hints.append(
+                "EdgeChromium backend: install the WebView2 runtime and "
+                "`pip install pythonnet`."
+            )
+
+    return available, hints
+
+
+def _probe_gui_stack(report: DoctorReport) -> None:
+    """Report the state of the optional universal-GUI dependency stack.
+
+    Severity levels:
+
+    * ``ok``   — full desktop stack importable AND at least one
+      pywebview backend is importable (gtk / qt / cocoa / edgechromium).
+    * ``info`` — headless lab-server stack importable (fastapi +
+      uvicorn) but pywebview is not installed; only ``--web-server``
+      is usable from this host.
+    * ``warn`` — pywebview is installed but no platform backend
+      resolves, or the configured desktop port is in use.
+    * ``fail`` — ``YGGDRASIM_GUI_TLS_CERT`` is set but unreadable.
+    """
+    from yggdrasim_common.gui_server import config as gui_config
+
+    try:
+        import fastapi  # type: ignore  # noqa: F401
+        import uvicorn  # type: ignore  # noqa: F401
+    except Exception as import_error:
+        report.add(
+            "GUI server deps (fastapi + uvicorn)",
+            "info",
+            f"not installed — run `pip install 'yggdrasim[gui-server]'` "
+            f"(remote) or `pip install 'yggdrasim[gui]'` (desktop). "
+            f"({type(import_error).__name__}: {import_error})",
+        )
+        return
+
+    try:
+        import webview  # type: ignore  # noqa: F401
+    except Exception:
+        report.add(
+            "GUI desktop stack (pywebview)",
+            "info",
+            "pywebview not installed — desktop --gui disabled; --web-server "
+            "still usable. Install with `pip install 'yggdrasim[gui]'`.",
+        )
+    else:
+        backends, hints = _detect_webview_backends()
+        if backends:
+            report.add(
+                "GUI desktop stack (pywebview)",
+                "ok",
+                f"pywebview importable; usable backends: {', '.join(backends)}",
+            )
+        else:
+            detail = (
+                "pywebview is installed but no platform backend could be "
+                "loaded — `--gui` will fail with `WebViewException`. "
+                "Pick one of the options below and re-run `--doctor` "
+                "to confirm."
+            )
+            if hints:
+                detail = detail + " " + " | ".join(hints)
+            report.add("GUI desktop stack (pywebview)", "warn", detail)
+
+    # Port probe (desktop default). Warn only — operators may intend
+    # to use ephemeral fallback or to remap via YGGDRASIM_GUI_PORT.
+    desktop_port = gui_config.DEFAULT_DESKTOP_PORT
+    desktop_host = gui_config.DEFAULT_DESKTOP_HOST
+    try:
+        import socket
+
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            sock.bind((desktop_host, desktop_port))
+        report.add(
+            "GUI desktop default port",
+            "ok",
+            f"{desktop_host}:{desktop_port} is free",
+        )
+    except OSError:
+        report.add(
+            "GUI desktop default port",
+            "warn",
+            f"{desktop_host}:{desktop_port} already in use — desktop mode "
+            f"will fall back to an ephemeral port.",
+        )
+
+    cert_path = os.environ.get(gui_config.ENV_GUI_TLS_CERT, "")
+    if cert_path and not Path(cert_path).is_file():
+        report.add(
+            "GUI TLS certificate",
+            "fail",
+            f"{gui_config.ENV_GUI_TLS_CERT}={cert_path!r} does not resolve to a readable file.",
+        )
+
+
 def _probe_workspace(report: DoctorReport, workspace_root: Path) -> None:
     if workspace_root.is_dir():
         report.add("Workspace root", "ok", str(workspace_root))
@@ -581,6 +887,8 @@ def run_doctor(
     _probe_hil_bridge(report)
     _probe_hil_optional_helpers(report)
     _probe_card_relay(report)
+    _probe_hil_remote_card(report)
+    _probe_gui_stack(report)
 
     try:
         from yggdrasim_common.__about__ import __version__

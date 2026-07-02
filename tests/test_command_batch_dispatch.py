@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 import tempfile
 import unittest
 from pathlib import Path
@@ -79,7 +82,6 @@ class CommandBatchDispatchTests(unittest.TestCase):
             "ENABLE-PROFILE": "_cmd_enable_profile",
             "DISABLE-PROFILE": "_cmd_disable_profile",
             "DELETE-PROFILE": "_cmd_delete_profile",
-            "REFRESH-MODEM": "_cmd_refresh_modem",
             "STORE-METADATA": "_cmd_store_metadata",
             "UPDATE-METADATA": "_cmd_update_metadata",
             "STORE-METADATA-CUSTOM": "_cmd_store_metadata_custom",

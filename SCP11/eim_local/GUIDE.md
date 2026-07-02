@@ -1,7 +1,12 @@
+<!--
+SPDX-License-Identifier: GPL-3.0-or-later
+Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+-->
+
 # Local eIM Operator Guide
 
 This guide explains how to operate `SCP11/eim_local` as the Local eIM shell for
-local SGP.32 package work, direct card validation, localized polling, and
+local SGP.32 package work, direct card validation, response logging, and
 handover testing.
 
 ## 1. Scope and boundaries
@@ -14,10 +19,9 @@ handover testing.
   - `GET-EIM-CONFIG`
   - `DELETE-EIM`
 - direct package execution against `ISD-R`
-- localized `IPAd` and `IPAe` polling through the live/test relay
   orchestrators
 - indirect and direct profile download package testing
-- `BF50` result serialization, queue work, and campaign reporting
+- `BF50` result serialization, queue work, and response reporting
 
 Current limit:
 
@@ -68,7 +72,7 @@ download, handover, or queue command sequence rather than a deep operator walk.
 Use Direct Auth when:
 
 - the goal is to validate a command directly against the card
-- relay polling must be bypassed
+- relay transport must be bypassed
 - package semantics should be debugged without eIM/SM-DP+ transport effects
 
 Primary commands:
@@ -98,29 +102,20 @@ Primary commands:
 - `IPAD-TEST`
 - `PATHS`
 
-### 3.3 Localized IPAe
 
-Use localized `IPAe` when:
 
-- the workflow must exercise polling, handover, or watchdog behavior
 - the relay orchestrator should drive the timing while the eIM/SM-DP+ side
   stays local
 
 Primary commands:
 
-- `IPAE-AUTHENTICATE`
-- `IPAE-DOWNLOAD`
-- `IPAE-LIVE`
-- `IPAE-TEST`
 - `HANDOVER-SET`
 - `HANDOVER-STATUS`
 - `PATHS`
 
 Practical split:
 
-- `IPAE-AUTHENTICATE` and `IPAE-DOWNLOAD` are built into the Local eIM shell
-- `IPAE-LIVE` and `IPAE-TEST` are the optional plugin-backed watchdog entry
-  points that mirror relay `POLL`
+  points in builds that provide them
 
 ## 4. Identity and certificate model
 
@@ -186,7 +181,7 @@ Common runtime fields:
 - `bip_endpoints`
 - `queue_id`
 
-Hotfolder and poll order is resolved by:
+Hotfolder queue order is resolved by:
 
 1. `runtime.queue_id`
 2. top-level `queue_id`
@@ -289,14 +284,13 @@ IPAD-DISCOVER
 ```
 
 `PATHS` shows the active Direct Auth path plus the localized bridge endpoints
-used for `IPAd` and `IPAe`.
 
 Before proving a simulated-card loop:
 
 - make sure the simulated card's BF55 view matches the intended eIM by checking `Workspace/SIMCARD/eim_identity.json` or the wrapper `eIM identity` override
 - do not assume that changing `Workspace/LocalEIM/eim_identity.json` alone changes what the simulated card advertises
 
-### 8.2 Run the polling path
+### 8.2 Run the localized relay path
 
 Live-default relay orchestrator:
 
@@ -310,7 +304,7 @@ Test-default relay orchestrator:
 IPAD-TEST [matchingId] [--debug]
 ```
 
-These commands use the same relay-side `run_eim_poll()` path as the live/test
+These commands use the same relay-side package exchange path as the live/test
 shell `DOWNLOAD` command, but the eIM / SM-DP+ traffic is intercepted and
 terminated by the local bridge. Use `--debug` when you want raw APDU hex and
 server-tagged labels such as `[eIM]` and `[SM-DP+]`; omit it for concise
@@ -330,55 +324,47 @@ RESP-LOG 20
 HOTFOLDER-LIST --json
 ```
 
-## 9. Workflow: localized `IPAe`
 
-Localized `IPAe` is the polling/watchdog path. Transaction continuity matters
 more here than in Direct Auth.
 
 ### 9.1 Seed handover
 
 ```text
-IPAE-AUTHENTICATE EIM-TEST-001
 HANDOVER-STATUS
 ```
 
 ### 9.2 Continue with the linked download
 
 ```text
-IPAE-DOWNLOAD test_profile.txt EIM-TEST-001
 ```
 
-### 9.3 Run watchdog-style polling
 
 Live orchestrator:
 
 ```text
-IPAE-LIVE
 ```
 
 Test orchestrator:
 
 ```text
-IPAE-TEST
 ```
 
-The localized watchdog uses the same argument model as relay `POLL` in the
-live/test shells.
+`POLL` in the live/test shells. It does not send synthetic TIMER EXPIRATION
+envelopes. Instead, each completed STATUS response is counted as 30 seconds of
+card-side elapsed time.
 
-Plugin note:
+Extension note:
 
-- `IPAE-LIVE` and `IPAE-TEST` are exposed only when the optional `polling`
-  capability is available through `plugins/`
+  extension registers those verbs.
 
-With explicit attempts, timer window, attempt delay, and post-status loops:
+With explicit attempts, a one-hour virtual timer, optional throttle, and
+post-status loops:
 
 ```text
-IPAE-LIVE 3 15 -t 20s -s 5 --debug
 ```
 
 Practical rule:
 
-- if transaction continuity is lost, reseed it with `IPAE-AUTHENTICATE` or
   `HANDOVER-SET`
 
 ## 10. Workflow: indirect and direct profile download packages
@@ -419,7 +405,6 @@ The following families serialize result branches only:
 - `provide_eim_package_result`
 - `eim_package_result`
 - `euicc_package_result`
-- `ipa_euicc_data_response`
 - `profile_download_trigger_result`
 
 These do not start a download flow by themselves.
@@ -444,20 +429,11 @@ Issue one deterministic queue pass:
 HOTFOLDER-FETCH --json
 ```
 
-Run repeated campaigns:
+Queue behavior:
 
-```text
-POLL-CAMPAIGN --until-empty --max-cycles 100 --json
-POLL-EXPORT --until-empty --max-cycles 100
-POLL-AGGREGATE reports --json
-```
-
-Campaign behavior:
-
-- each campaign run issues each effective queue file at most once
 - fixed fixtures and hotfolder files are merged into one ordered queue for that
   run
-- `--until-empty` stops as soon as the effective queue has been drained
+- `HOTFOLDER-FETCH` issues the resolved queue in deterministic order
 
 Expected empty-queue result:
 
@@ -472,9 +448,9 @@ Response log file:
 
 - `Workspace/LocalEIM/eim_response_log.jsonl`
 
-Poll audit database:
+Additional audit state:
 
-- `Workspace/LocalEIM/eim_poll_audit.sqlite3`
+- response evidence is retained through the JSONL response log
 
 Shared mutable inventory:
 
@@ -532,7 +508,7 @@ Check:
 If the source is not already `BF36`, the shell must be able to build a
 session-bound BPP for the current session.
 
-### 13.4 Localized polling does not hit the expected endpoint
+### 13.4 Localized relay does not hit the expected endpoint
 
 Check:
 
@@ -579,7 +555,6 @@ For most sessions, this order keeps the shell deterministic:
 3. run `STATUS`
 4. run `PATHS`
 5. lint the package that will be issued
-6. choose Direct Auth, localized `IPAd`, or localized `IPAe`
 7. inspect `RESP-LOG`
 8. drain notifications if needed with `NOTIF-HYGIENE 0`
 9. export campaign reports when running queues over time

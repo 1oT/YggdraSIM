@@ -5,6 +5,11 @@ tags:
   - release
   - packaging
 ---
+<!--
+SPDX-License-Identifier: GPL-3.0-or-later
+Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+-->
+
 
 # Release Checklist
 
@@ -26,8 +31,9 @@ release.
       package-data in `pyproject.toml`)
 - [ ] operator-facing docs that reference `docs/` describe it as an
       optional local developer tree (not as shipped content)
-- [ ] no local-only audit/report files are required to validate this release;
-      all release gates are represented by tracked tests, docs, and CI checks
+- [ ] The local-only pre-release audit notes show no
+      open action items that a release should ship with; anything
+      explicitly deferred to post-v1 is listed in the "Deferred" blocks
 - [ ] `pyflakes SCP03/ SCP11/ SCP80/ SIMCARD/ Tools/ main/ plugins/
       yggdrasim_common/` is clean modulo the two documented `# noqa:
       F401` probes and the `SCP11/shared` / `SCP11/relay` star-import
@@ -43,7 +49,6 @@ release.
     yggdrasim-scp80 --cmd "exit"
     yggdrasim-scp11 --cmd "EXIT"
     yggdrasim-scp11-live --cmd "HELP; EXIT"
-    yggdrasim-scp11-test --cmd "HELP; EXIT"
     yggdrasim-scp11-local-access --cmd "HELP; EXIT"
     yggdrasim-scp11-eim-local --cmd "HELP; EXIT"
     yggdrasim-profile-package --cmd "STATUS; EXIT"
@@ -95,13 +100,27 @@ Do not mass-run. Redirect noisy runs to a log file and inspect with `rg`.
 
 ## Tagging and publishing
 
-The CI workflows are currently validation-only for the v1.0.1 cycle. They run
-build/test checks but do not publish release assets and do not push Docker
-images.
+The publish flow is wired end-to-end in `.github/workflows/build.yml`. Pushing
+an annotated `v*` tag triggers `docs-strict` + `pytest-suite`, the release
+build matrix (Linux x86_64 / arm64 clean+full, macOS arm64 clean,
+Windows x86_64 clean, Debian package) and the `publish-release` job. The
+`publish-release` job:
 
-Release publication is therefore a manual maintainer step.
+- downloads every matrix artefact;
+- renames each binary to the canonical name the install scripts consume
+  (`yggdrasim-{os}-{arch}-{flavor}[.exe]`, see
+  `scripts/install/_common.sh::yg_asset_name` and
+  `scripts/install/install-windows.ps1::Install-YgFromRelease`);
+- generates a `SHA256SUMS` manifest;
+- guards the matrix against silent drift with an explicit "required asset"
+  list before calling `gh release create`;
+- calls `gh release create <tag> --notes-from-tag --verify-tag …`, which
+  reuses the annotated tag message as the public release notes.
 
-### Tagging contract
+### Annotated-tag-message contract
+
+The release page's body comes from the **annotated** tag message via
+`gh release create --notes-from-tag`. Tagging steps:
 
 - [ ] tag the release in git **with an annotation that reads as a
       release note** (covers headline behavioural changes, defaults,
@@ -120,9 +139,11 @@ Release publication is therefore a manual maintainer step.
     git push origin vX.Y.Z
     ```
 
-- [ ] watch the workflow at `https://github.com/<repo>/actions` and
-      confirm the validation jobs complete for the release tag/branch.
-- [ ] confirm the GitHub Release page lists the seven binary asset names plus
+- [ ] watch the workflow at `https://github.com/<repo>/actions`. The
+      `publish-release` job only runs on `refs/tags/v*`; failures in
+      `docs-strict`, `pytest-suite`, or any build leg short-circuit the
+      release publish.
+- [ ] confirm the GitHub Release page lists the seven asset names plus
       `SHA256SUMS`:
 
     ```
@@ -143,6 +164,9 @@ Release publication is therefore a manual maintainer step.
     YGGDRASIM_REPO=1oT/YggdraSIM \
       scripts/install/install-linux.sh --version vX.Y.Z
     ```
+
+- [ ] publish the Docker image (`.github/workflows/docker.yml`) if that
+      is part of the release.
 
 ## Post-release
 

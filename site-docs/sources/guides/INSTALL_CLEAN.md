@@ -1,20 +1,29 @@
+<!--
+SPDX-License-Identifier: GPL-3.0-or-later
+Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+-->
+
 # Installation — Clean Flavor
 
 The **clean** flavor is the default distribution of YggdraSIM. It targets
-operators who do not need the SIMtrace2-based hardware-in-the-loop (HIL)
-bridge and want a lean executable that runs on Windows, macOS, desktop
-Linux, and Raspberry Pi OS 64-bit.
+operators who need the normal CLI, GUI, Card Bridge, and remote APDU
+streaming on Windows, macOS, desktop Linux, and Raspberry Pi OS 64-bit,
+but do not need the same machine to drive a SIMtrace2 through the local
+RemSIM/HIL runtime.
 
 ## What the clean flavor ships
 
 - Full SCP03 / SCP11 / SCP11 local / SCP11 eIM local / SCP80 OTA surfaces
 - SAIP profile-package tooling, SUCI key tooling
 - Simulated SIM backend (`--card-backend sim`) and PC/SC reader backend
+- Card Bridge / remote APDU streaming:
+  `python main/main.py --card-bridge`, `yggdrasim-card-bridge`,
+  and `--remote-card-url` consumers
 - `--version`, `--doctor`, and the main menu
 
 ## What the clean flavor deliberately omits
 
-- `Tools/HilBridge` and `yggdrasim_common.hil_bridge_runtime`
+- the local SIMtrace2/RemSIM HIL supervisor/runtime
 - the Linux-only `pyudev` dependency
 - any reliance on `osmo-remsim-client-st2` or SIMtrace2 firmware
 
@@ -27,15 +36,16 @@ Release artefacts follow this naming pattern:
 
 ```text
 yggdrasim-<os>-<arch>-clean-<version>[.exe]
+yggdrasim-gui-<os>-<arch>-clean-<version>[.exe]
 ```
 
 | Platform             | Artefact                                             |
 |----------------------|------------------------------------------------------|
-| Windows x86_64       | `yggdrasim-windows-x86_64-clean-<version>.exe`       |
-| macOS Apple Silicon  | `yggdrasim-macos-arm64-clean-<version>`              |
-| macOS Intel          | no pre-built Intel macOS binary from CI; use [`INSTALL_FROM_SOURCE.md`](INSTALL_FROM_SOURCE.md) or PyInstaller locally |
-| Linux x86_64         | `yggdrasim-linux-x86_64-clean-<version>`             |
-| Linux arm64 / RPi OS | `yggdrasim-linux-arm64-clean-<version>` — see the Raspberry Pi guide |
+| Windows x86_64       | `yggdrasim-windows-x86_64-clean-<version>.exe`, `yggdrasim-gui-windows-x86_64-clean-<version>.exe` |
+| macOS Apple Silicon  | `yggdrasim-macos-arm64-clean-<version>`, `yggdrasim-gui-macos-arm64-clean-<version>` |
+| macOS Intel          | no prebuilt release bundle; use `scripts/install/install-macos.sh --mode source` |
+| Linux x86_64         | `yggdrasim-linux-x86_64-clean-<version>`, `yggdrasim-gui-linux-x86_64-clean-<version>` |
+| Linux arm64 / RPi OS | `yggdrasim-linux-arm64-clean-<version>`, `yggdrasim-gui-linux-arm64-clean-<version>` — see the Raspberry Pi guide |
 
 Download the artefact that matches your OS and CPU, then make the file
 executable (Linux / macOS):
@@ -58,10 +68,18 @@ stand-alone download of just the script.
 | Windows | `scripts/install/install-windows.ps1` | `powershell -ExecutionPolicy Bypass -File scripts\install\install-windows.ps1` |
 | Raspberry Pi | `scripts/install/install-raspberrypi.sh` | `scripts/install/install-raspberrypi.sh` |
 
-The scripts default to the clean flavor, latest release, and a
-user-local install directory. Pass `--version <tag>` to pin to a
-specific release or `--mode source` to do an editable install instead.
-Full option reference lives in `scripts/install/README.md`.
+The scripts default to the clean CLI flavor, latest release, and a
+user-local install directory. Add `--with-gui` when you also want the
+desktop GUI executable installed beside the CLI executable. Pass
+`--version <tag>` to pin to a specific release or `--mode source` to do
+an editable install instead. Full option reference lives in
+`scripts/install/README.md`.
+
+```bash
+scripts/install/install-linux.sh --with-gui
+scripts/install/install-macos.sh --with-gui
+powershell -ExecutionPolicy Bypass -File scripts\install\install-windows.ps1 -WithGui
+```
 
 ## First run
 
@@ -71,18 +89,35 @@ Full option reference lives in `scripts/install/README.md`.
 ./yggdrasim-linux-x86_64-clean-<version>
 ```
 
-The `--doctor` probe reports the active build flavor and confirms the HIL
-bridge is intentionally unavailable:
+If you installed the companion GUI artifact, launch it directly:
 
-```text
-[+] Build flavor: clean (no HIL bridge) (source: build-stamp)
-[*] HIL bridge readiness: The HIL bridge is not bundled in this clean build. ...
+```bash
+yggdrasim-gui
 ```
 
-If the user opens the `[B] HIL Bridge Session` entry in the main menu the
-launcher prints a pointer to [`INSTALL_FULL.md`](INSTALL_FULL.md) and
-[`SIMTRACE2_CARDEM_GUIDE.md`](SIMTRACE2_CARDEM_GUIDE.md) instead of
-crashing.
+The CLI binary remains available as `yggdrasim`; use it for shell/TUI
+work, `--doctor`, batch commands, and headless web-server mode:
+
+```bash
+yggdrasim --doctor
+yggdrasim --web-server --token-file ./gui.token
+```
+
+The `--doctor` probe reports the active build flavor, confirms remote-card
+streaming support, and marks only the local SIMtrace2 HIL runtime as
+intentionally unavailable:
+
+```text
+[+] Build flavor: clean (no local SIMtrace2 HIL bridge) (source: build-stamp)
+[*] Local HIL bridge readiness: The local SIMtrace2/RemSIM HIL bridge is not bundled in this clean build. ...
+[*] Remote card bridge: Not configured — set YGGDRASIM_CARD_RELAY_URL or pass --remote-card-url to talk to a Card Bridge over SSH.
+```
+
+Use `[CB] Card Bridge / Remote APDU Streaming` to publish a local PC/SC
+reader or configure a tunneled remote reader. If the user opens the
+`[B] Local SIMtrace2 HIL Bridge Session` entry, the launcher prints a
+pointer to [`INSTALL_FULL.md`](INSTALL_FULL.md) and
+[`SIMTRACE2_CARDEM_GUIDE.md`](SIMTRACE2_CARDEM_GUIDE.md) instead of crashing.
 
 ## Host dependencies (runtime)
 
@@ -93,12 +128,14 @@ baseline to talk to smart-card readers and optional encryption tooling:
 
 - A working PC/SC stack (built in to Windows 10 / 11).
 - Vendor driver for your smart-card reader.
+- OpenSSH client when Card Bridge traffic is tunneled to or from another host.
 - Optional: `gpg4win` when `state/inventory_crypto.json` is enabled.
 
 ### macOS
 
 - `pcscd` ships with the OS; no extra install is required for most USB
   CCID readers.
+- OpenSSH client ships with the OS and is used for Card Bridge tunnel recipes.
 - Optional: `brew install gnupg` for the encrypted-inventory provider.
 - First launch may prompt for network / USB permissions for the reader.
 
@@ -122,9 +159,10 @@ for the additional steps specific to Raspberry Pi hardware.
 The same onefile can be produced from a source checkout:
 
 ```bash
-python -m pip install -e '.[build,test]'
+python -m pip install -e '.[build,test,gui]'
 YGGDRASIM_FLAVOR=clean python -m PyInstaller --noconfirm --clean yggdrasim_main.spec
 ./dist/yggdrasim-clean --version
+./dist/yggdrasim-gui-clean --version
 ```
 
 The spec writes a build stamp into `yggdrasim_common/_build_flavor.py` so

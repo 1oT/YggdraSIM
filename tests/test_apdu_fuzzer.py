@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 """Unit tests for the APDU mutation fuzzer.
 
 The tests cover the three safety-critical layers without requiring a
@@ -152,10 +155,10 @@ class SafetyGateTests(unittest.TestCase):
             config = SafetyConfig(
                 workspace_root=Path(td),
                 i_mean_it=False,
-                allowed_iccids=build_allow_set(["89000011112222"]),
+                allowed_iccids=build_allow_set(["89880011112222"]),
             )
             with self.assertRaises(FuzzerSafetyError) as ctx:
-                assert_safety_gate(config, probed_iccid="89000011112222", probed_imsi="")
+                assert_safety_gate(config, probed_iccid="89880011112222", probed_imsi="")
             self.assertIn("--i-mean-it", str(ctx.exception))
 
     def test_gate_refuses_without_allowlist(self) -> None:
@@ -285,7 +288,7 @@ class _FakeTransport:
     def __init__(
         self,
         *,
-        iccid: str = "8900000000000000AA",
+        iccid: str = "8988000000000000AA",
         imsi: str = "",
         responses: list[tuple[bytes, int]] | None = None,
     ) -> None:
@@ -316,7 +319,7 @@ class RunnerTests(unittest.TestCase):
         return SafetyConfig(
             workspace_root=workspace,
             i_mean_it=True,
-            allowed_iccids=build_allow_set(["8900000000000000AA"]),
+            allowed_iccids=build_allow_set(["8988000000000000AA"]),
             max_apdus_per_run=100,
         )
 

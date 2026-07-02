@@ -1547,7 +1547,7 @@ class Sgp22Manager :
             self .tp .transmit (f"007080{channel_id:02X}00",silent =True )
 
     def _send_store_data_with_stk_mode (self ,payload :str )->Tuple [bytes ,int ,int ]:
-        self .tp .transmit ("80AA00000DA90B8100820101830107840101",silent =True )
+        self .tp .transmit ("80AA000005A903840101",silent =True )
         self ._select_isd_r ()
         self .tp .transmit ("80100000010C",silent =True )
         last_data ,last_sw1 ,last_sw2 =b"" ,0x6F ,0x00
@@ -3206,4 +3206,4 @@ class Sgp22Manager :
         if (clean .startswith ("89")or clean .startswith ("98"))and len (clean )>=18 :
             return (self .TAG_ICCID ,self ._swap_nibbles (clean )if clean .startswith ("89")else clean )
         print (f"{Config.Colors.FAIL}[!] Unknown Profile: '{identifier}'. Run LIST first.{Config.Colors.ENDC}")
-        return None 
+        return None

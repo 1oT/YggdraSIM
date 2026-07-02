@@ -1,0 +1,104 @@
+/*
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+ */
+
+/* Per-kind colour cues so the eye immediately separates directory
+   files from elementary files in deep ETSI hierarchies. Each kind
+   pulls its hue from a ``--tree-<kind>-*`` triplet so themes can
+   override the look without touching these rules. The fallbacks
+   match the legacy hard-coded RGB so non-Nord themes keep their
+   established palette. */
+.cc-tree-icon--mf {
+  background: var(--tree-mf-bg, var(--accent-soft, rgba(99, 169, 255, 0.18)));
+  color: var(--tree-mf-fg, var(--accent, #6aa9ff));
+  border: 1px solid var(--tree-mf-edge, var(--accent, #6aa9ff));
+}
+.cc-tree-icon--adf {
+  background: var(--tree-adf-bg, rgba(255, 184, 92, 0.18));
+  color: var(--tree-adf-fg, #ffb85c);
+  border: 1px solid var(--tree-adf-edge, rgba(255, 184, 92, 0.55));
+}
+.cc-tree-icon--df {
+  background: var(--tree-df-bg, rgba(177, 156, 217, 0.18));
+  color: var(--tree-df-fg, #b19cd9);
+  border: 1px solid var(--tree-df-edge, rgba(177, 156, 217, 0.55));
+}
+.cc-tree-icon--ef {
+  background: var(--tree-ef-bg, rgba(120, 220, 180, 0.14));
+  color: var(--tree-ef-fg, #78dcb4);
+  border: 1px solid var(--tree-ef-edge, rgba(120, 220, 180, 0.45));
+}
+
+.cc-tree-name {
+  flex: 1;
+  color: var(--fg);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cc-tree-fid {
+  color: var(--accent);
+  font-size: 11px;
+}
+
+.cc-tree-sep {
+  padding: 6px 10px 4px;
+  margin-top: 4px;
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--fg-muted);
+  border-top: 1px solid var(--border);
+}
+
+.cc-scan-preview {
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 14px 16px;
+  min-height: 200px;
+  overflow: auto;
+}
+
+.cc-fcp-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.cc-fcp-header {
+  display: flex;
+  flex-wrap: wrap;
+}
+
+.cc-fcp-block dl {
+  display: grid;
+  grid-template-columns: minmax(100px, auto) 1fr;
+  gap: 4px 12px;
+  font-size: 12px;
+  margin: 0;
+}
+
+.cc-fcp-block dt {
+  color: var(--fg-muted);
+  font-family: var(--font-mono);
+}
+
+.cc-fcp-block dd {
+  margin: 0;
+  font-family: var(--font-mono);
+}
+
+.cc-sw {
+  margin: 4px 0;
+  font-size: 12.5px;
+  color: var(--fg-muted);
+}
+
+.cc-sw code {
+  color: var(--accent);
+}
+

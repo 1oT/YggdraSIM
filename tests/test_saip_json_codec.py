@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 import json
 import unittest
 from collections import OrderedDict
@@ -256,14 +259,14 @@ class SaipDerRoundTripIntegrationTests(unittest.TestCase):
     def setUpClass(cls) -> None:
         cls.workspace = Path(__file__).resolve().parents[1]
 
-    def test_json_tagged_roundtrip_preserves_pe_sequence(self) -> None:
-        der_path = self.workspace / ".profilepackage-cache"
-        candidates = sorted(der_path.glob("*.der"))
-        if len(candidates) == 0:
-            self.skipTest("No cached DER under .profilepackage-cache")
+    def _reference_profile_der(self) -> bytes:
+        path = self.workspace / "Tools" / "ProfilePackage" / "profile" / "reference_test_profile.txt"
+        if path.is_file() is False:
+            self.skipTest("No tracked reference SAIP profile fixture")
+        return bytes.fromhex("".join(path.read_text(encoding="utf-8").split()))
 
-        der_file = candidates[0]
-        raw = der_file.read_bytes()
+    def test_json_tagged_roundtrip_preserves_pe_sequence(self) -> None:
+        raw = self._reference_profile_der()
 
         from Tools.ProfilePackage.saip_json_codec import (
             build_decoded_document_from_sequence,

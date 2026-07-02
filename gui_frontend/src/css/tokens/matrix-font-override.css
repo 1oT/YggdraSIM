@@ -1,0 +1,14 @@
+/*
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+ */
+
+/* -- Matrix font override: use mono everywhere for the terminal look. */
+html[data-theme="matrix"] body,
+html[data-theme="matrix"] input,
+html[data-theme="matrix"] button,
+html[data-theme="matrix"] select {
+  font-family: var(--font-mono);
+  letter-spacing: 0.01em;
+}
+

@@ -46,6 +46,51 @@ AUTH_TEST_VECTOR ={
 }
 
 
+def _pin_ref_alias_key (value :str )->str :
+    return "".join (char for char in str (value or "").upper ()if char .isalnum ())
+
+
+def _build_pin_ref_aliases ()->dict [str ,int ]:
+    aliases :dict [str ,int ]={}
+
+    def add (ref_byte :int ,*names :str )->None :
+        for name in names :
+            aliases [_pin_ref_alias_key (name )]=ref_byte
+
+    for index in range (1 ,9 ):
+        add (
+        index ,
+        f"PIN-APP{index}",
+        f"PIN-APPL{index}",
+        f"PIN-APPLICATION{index}",
+        f"APPLICATION-PIN{index}",
+        f"APP{index}-PIN",
+        )
+        add (
+        0x80 +index ,
+        f"SECOND-PIN-APP{index}",
+        f"SECOND-PIN-APPL{index}",
+        f"SECOND-PIN-APPLICATION{index}",
+        f"PIN2-APP{index}",
+        f"APP{index}-PIN2",
+        )
+
+    add (0x01 ,"PIN1","CHV1")
+    add (0x81 ,"PIN2","CHV2")
+    add (0x11 ,"UPIN","UNIVERSAL-PIN","PIN-UNIVERSAL","UNIVERSALPIN")
+
+    for index in range (1 ,6 ):
+        add (0x09 +index ,f"ADM{index}",f"ADM-{index}",f"ADMIN{index}")
+
+    for index in range (6 ,11 ):
+        add (0x84 +index ,f"ADM{index}",f"ADM-{index}",f"ADMIN{index}")
+
+    return aliases
+
+
+PIN_REF_ALIASES =_build_pin_ref_aliases ()
+
+
 @dataclass(frozen=True)
 class OfflineAuthVector:
     rand :str
@@ -108,12 +153,72 @@ class SecurityController :
         padding =b'\xFF'*(8 -len (pin_bytes ))
         return (pin_bytes +padding ).hex ().upper ()
 
-    def verify_pin (self ,pin_ref :str ,pin_value :str ):
+    @staticmethod
+    def _normalize_pin_ref (pin_ref :str )->int :
+        text =str (pin_ref or "").strip ()
+        if len (text )==0 :
+            raise ValueError ("PIN reference must not be empty")
+
+        alias_key =_pin_ref_alias_key (text )
+        if alias_key in PIN_REF_ALIASES :
+            return PIN_REF_ALIASES [alias_key ]
+
+        numeric =text
+        if numeric .lower ().startswith ("0x"):
+            numeric =numeric [2 :]
+        if len (numeric )==0 :
+            raise ValueError ("PIN reference must not be empty")
+
+        ref_byte =int (numeric ,16 )if len (numeric )>1 else int (numeric )
+        if ref_byte <0 or ref_byte >0xFF :
+            raise ValueError ("PIN reference must fit in one byte")
+        return ref_byte
+
+    @staticmethod
+    def _normalize_pin_encoding (pin_encoding :str ="ascii")->str :
+        encoding =str (pin_encoding or "ascii").strip ().lower ()
+        if len (encoding )==0 :
+            return "ascii"
+        if encoding in ("1","a","ascii","text"):
+            return "ascii"
+        if encoding in ("2","h","hex","binary","bin","raw"):
+            return "hex"
+        raise ValueError ("PIN encoding must be ASCII or HEX/BINARY")
+
+    @staticmethod
+    def _normalize_pin_hex (pin_value :str ,label :str )->str :
+        cleaned =str (pin_value or "").strip ().replace (" ","").replace (":","").replace ("-","")
+        if cleaned .lower ().startswith ("0x"):
+            cleaned =cleaned [2 :]
+        if len (cleaned )==0 :
+            raise ValueError (f"{label} must not be empty")
+        if len (cleaned )%2 !=0 :
+            raise ValueError (f"{label} must contain an even number of hex chars")
+        try :
+            bytes .fromhex (cleaned )
+        except ValueError :
+            raise ValueError (f"{label} contains non-hexadecimal characters")
+        return cleaned .upper ()
+
+    def _encode_pin_data (self ,pin_value :str ,pin_encoding :str ="ascii",label :str ="PIN")->str :
+        encoding =self ._normalize_pin_encoding (pin_encoding )
+        if encoding =="ascii":
+            return self ._pad_pin (pin_value )
+        return self ._normalize_pin_hex (pin_value ,label )
+
+    @staticmethod
+    def _pin_lc (pin_data_hex :str )->str :
+        byte_len =len (pin_data_hex )//2
+        if byte_len >0xFF :
+            raise ValueError ("PIN data field exceeds short APDU length")
+        return f"{byte_len:02X}"
+
+    def verify_pin (self ,pin_ref :str ,pin_value :str ,pin_encoding :str ="ascii")->None :
         """Send VERIFY PIN (ISO 7816-4 §7.5.6) for *pin_ref* and *pin_value*."""
         try :
-            ref_byte =int (str (pin_ref ),16 )if len (str (pin_ref ))>1 else int (str (pin_ref ))
-            hex_data =self ._pad_pin (pin_value )
-            cmd =f"002000{ref_byte:02X}08{hex_data}"
+            ref_byte =self ._normalize_pin_ref (pin_ref )
+            hex_data =self ._encode_pin_data (pin_value ,pin_encoding )
+            cmd =f"002000{ref_byte:02X}{self ._pin_lc (hex_data )}{hex_data}"
             print (f"{Config.Colors.CYAN}[*] Verifying PIN (Ref: {ref_byte:02X})...{Config.Colors.ENDC}")
             _ ,sw1 ,sw2 =self .tp .transmit (cmd ,silent =False )
 
@@ -125,12 +230,12 @@ class SecurityController :
         except Exception as e :print (f"{Config.Colors.FAIL}[!] Error: {e}{Config.Colors.ENDC}")
 
 
-    def change_pin (self ,pin_ref :str ,old_pin :str ,new_pin :str ):
+    def change_pin (self ,pin_ref :str ,old_pin :str ,new_pin :str ,pin_encoding :str ="ascii")->None :
         """Send CHANGE REFERENCE DATA (ISO 7816-4 §7.5.7) for *pin_ref*."""
         try :
-            ref_byte =int (str (pin_ref ),16 )if len (str (pin_ref ))>1 else int (str (pin_ref ))
-            payload =self ._pad_pin (old_pin )+self ._pad_pin (new_pin )
-            cmd =f"002400{ref_byte:02X}10{payload}"
+            ref_byte =self ._normalize_pin_ref (pin_ref )
+            payload =self ._encode_pin_data (old_pin ,pin_encoding ,"Current PIN")+self ._encode_pin_data (new_pin ,pin_encoding ,"New PIN")
+            cmd =f"002400{ref_byte:02X}{self ._pin_lc (payload )}{payload}"
             print (f"{Config.Colors.CYAN}[*] Changing PIN (Ref: {ref_byte:02X})...{Config.Colors.ENDC}")
             _ ,sw1 ,sw2 =self .tp .transmit (cmd ,silent =False )
             if sw1 ==0x90 :print (f"{Config.Colors.GREEN}[+] PIN Changed.{Config.Colors.ENDC}")
@@ -138,34 +243,34 @@ class SecurityController :
             else :print (f"{Config.Colors.FAIL}[-] Error: {sw1:02X}{sw2:02X}{Config.Colors.ENDC}")
         except Exception as e :print (f"{Config.Colors.FAIL}[!] Error: {e}{Config.Colors.ENDC}")
 
-    def disable_pin (self ,pin_ref :str ,pin_value :str ):
+    def disable_pin (self ,pin_ref :str ,pin_value :str ,pin_encoding :str ="ascii")->None :
         """Send DISABLE VERIFICATION REQUIREMENT (ISO 7816-4 §7.5.9) for *pin_ref*."""
         try :
-            ref_byte =int (str (pin_ref ),16 )if len (str (pin_ref ))>1 else int (str (pin_ref ))
-            hex_data =self ._pad_pin (pin_value )
-            cmd =f"002600{ref_byte:02X}08{hex_data}"
+            ref_byte =self ._normalize_pin_ref (pin_ref )
+            hex_data =self ._encode_pin_data (pin_value ,pin_encoding )
+            cmd =f"002600{ref_byte:02X}{self ._pin_lc (hex_data )}{hex_data}"
             _ ,sw1 ,sw2 =self .tp .transmit (cmd ,silent =False )
             if sw1 ==0x90 :print (f"{Config.Colors.GREEN}[+] PIN Disabled.{Config.Colors.ENDC}")
             else :print (f"{Config.Colors.FAIL}[-] Failed: {sw1:02X}{sw2:02X}{Config.Colors.ENDC}")
         except Exception as e :print (f"{Config.Colors.FAIL}[!] Error: {e}{Config.Colors.ENDC}")
 
-    def enable_pin (self ,pin_ref :str ,pin_value :str ):
+    def enable_pin (self ,pin_ref :str ,pin_value :str ,pin_encoding :str ="ascii")->None :
         """Send ENABLE VERIFICATION REQUIREMENT (ISO 7816-4 §7.5.9) for *pin_ref*."""
         try :
-            ref_byte =int (str (pin_ref ),16 )if len (str (pin_ref ))>1 else int (str (pin_ref ))
-            hex_data =self ._pad_pin (pin_value )
-            cmd =f"002800{ref_byte:02X}08{hex_data}"
+            ref_byte =self ._normalize_pin_ref (pin_ref )
+            hex_data =self ._encode_pin_data (pin_value ,pin_encoding )
+            cmd =f"002800{ref_byte:02X}{self ._pin_lc (hex_data )}{hex_data}"
             _ ,sw1 ,sw2 =self .tp .transmit (cmd ,silent =False )
             if sw1 ==0x90 :print (f"{Config.Colors.GREEN}[+] PIN Enabled.{Config.Colors.ENDC}")
             else :print (f"{Config.Colors.FAIL}[-] Failed: {sw1:02X}{sw2:02X}{Config.Colors.ENDC}")
         except Exception as e :print (f"{Config.Colors.FAIL}[!] Error: {e}{Config.Colors.ENDC}")
 
-    def unblock_pin (self ,pin_ref :str ,puk :str ,new_pin :str ):
+    def unblock_pin (self ,pin_ref :str ,puk :str ,new_pin :str ,pin_encoding :str ="ascii")->None :
         """Send RESET RETRY COUNTER / UNBLOCK PIN (ISO 7816-4 §7.5.10) using the PUK."""
         try :
-            ref_byte =int (str (pin_ref ),16 )if len (str (pin_ref ))>1 else int (str (pin_ref ))
-            payload =self ._pad_pin (puk )+self ._pad_pin (new_pin )
-            cmd =f"002C00{ref_byte:02X}10{payload}"
+            ref_byte =self ._normalize_pin_ref (pin_ref )
+            payload =self ._encode_pin_data (puk ,pin_encoding ,"PUK")+self ._encode_pin_data (new_pin ,pin_encoding ,"New PIN")
+            cmd =f"002C00{ref_byte:02X}{self ._pin_lc (payload )}{payload}"
             print (f"{Config.Colors.CYAN}[*] Unblocking PIN (Ref: {ref_byte:02X})...{Config.Colors.ENDC}")
             _ ,sw1 ,sw2 =self .tp .transmit (cmd ,silent =False )
             if sw1 ==0x90 :print (f"{Config.Colors.GREEN}[+] PIN Unblocked.{Config.Colors.ENDC}")

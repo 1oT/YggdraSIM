@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """HIL-Bridge wire protocol: framing, message types, and (de)serialisation for the HIL-Bridge IPC channel."""
 from __future__ import annotations
@@ -285,7 +288,7 @@ def normalize_refresh_mode(value: str | int) -> tuple[str, int]:
     canonical = REFRESH_MODE_ALIASES.get(text, text)
     if canonical not in REFRESH_MODE_QUALIFIERS:
         supported = ", ".join(sorted(REFRESH_MODE_QUALIFIERS.keys()))
-        raise ValueError(f"Unsupported modem REFRESH mode '{value}'. Supported modes: {supported}")
+        raise ValueError(f"Unsupported REFRESH mode '{value}'. Supported modes: {supported}")
     return canonical, REFRESH_MODE_QUALIFIERS[canonical]
 
 

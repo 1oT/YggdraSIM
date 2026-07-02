@@ -1,24 +1,26 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 name: Build Bundles
 
 # The matrix publishes:
-#   * clean bundles for Linux (x86_64), Windows (x86_64), macOS (arm64 only)
-#   * clean bundle for Linux arm64 via QEMU, aimed at Raspberry Pi OS 64-bit
-#   * full bundle for Linux (x86_64) — includes the HIL bridge
-#   * full bundle for Linux arm64 via QEMU, aimed at Raspberry Pi + SIMtrace2
+#   * clean CLI + GUI bundles for Linux (x86_64), Windows (x86_64), macOS (arm64)
+#   * clean CLI + GUI bundles for Linux arm64 via QEMU, aimed at Raspberry Pi OS 64-bit
+#   * full CLI + GUI bundles for Linux (x86_64) — includes the HIL bridge
+#   * full CLI + GUI bundles for Linux arm64 via QEMU, aimed at Raspberry Pi + SIMtrace2
 #   * a Debian package wrapping the clean Linux x86_64 bundle
 #
 # See guides/INSTALL_CLEAN.md, guides/INSTALL_FULL.md, and
 # guides/INSTALL_RASPBERRYPI.md for how each artefact is expected to be
 # consumed downstream.
-#
-# The full ``tests/`` pytest sweep is intentionally out of scope here;
-# run it locally when changing behaviour covered by the suite.
 
 on:
   push:
-    branches: [main, master]
+    branches: [main, master, "release/**"]
+    tags:
+      - "v*"
   pull_request:
-    branches: [main, master]
+    branches: [main, master, "release/**"]
   workflow_dispatch:
 
 jobs:
@@ -48,6 +50,47 @@ jobs:
       - name: Build docs (strict)
         shell: bash
         run: mkdocs build --strict
+
+  pytest-suite:
+    name: Pytest (regression suite)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: Install Linux build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libpcsclite-dev pcscd swig pkg-config gpg libudev-dev build-essential
+
+      - name: Install Python dependencies (full + test extras)
+        shell: bash
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e '.[full]'
+
+      - name: Run pytest suite
+        shell: bash
+        env:
+          PYTHONUNBUFFERED: "1"
+          YGGDRASIM_ALLOW_PLUGINS: "0"
+        # ``-q --tb=short`` keeps the log small; ``--maxfail=5`` stops after
+        # a handful of failures so CI aborts fast on systemic regressions
+        # without dumping the whole failure report. pySim-dependent tests
+        # auto-skip via ``tests/conftest.py`` when the optional on-disk
+        # ``pysim/`` checkout is absent, which is the default on a fresh
+        # checkout (pySim is upstream, not vendored). Override by cloning
+        # ``git clone https://gitlab.com/osmocom/pysim.git pysim`` into the
+        # workspace prior to the pytest step.
+        run: |
+          python -m pytest -q --tb=short --disable-warnings --no-header --maxfail=5 tests/
 
   build-linux-x86_64:
     name: Linux x86_64 (${{ matrix.flavor }})
@@ -91,14 +134,14 @@ jobs:
         shell: bash
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -e '.[build,test]'
+          python -m pip install -e '.[build,test,gui]'
 
       - name: Install Python dependencies (full)
         if: matrix.flavor == 'full'
         shell: bash
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -e '.[full]'
+          python -m pip install -e '.[full,gui]'
 
       - name: Build Linux bundle
         env:
@@ -111,15 +154,20 @@ jobs:
           YGGDRASIM_FLAVOR: ${{ matrix.flavor }}
         run: |
           BIN="dist/yggdrasim-${{ matrix.flavor }}"
+          GUI_BIN="dist/yggdrasim-gui-${{ matrix.flavor }}"
           chmod +x "${BIN}"
+          chmod +x "${GUI_BIN}"
           "${BIN}" --version
+          "${GUI_BIN}" --version
           "${BIN}" --doctor || true
 
       - name: Upload Linux bundle artifact
         uses: actions/upload-artifact@v6
         with:
           name: ${{ steps.meta.outputs.artifact_name }}
-          path: dist/yggdrasim-${{ matrix.flavor }}
+          path: |
+            dist/yggdrasim-${{ matrix.flavor }}
+            dist/yggdrasim-gui-${{ matrix.flavor }}
           if-no-files-found: error
 
   build-linux-arm64-clean:
@@ -166,17 +214,21 @@ jobs:
               python3 -m venv /opt/venv
               . /opt/venv/bin/activate
               python -m pip install --upgrade pip
-              python -m pip install -e ".[build,test]"
+              python -m pip install -e ".[build,test,gui]"
               python -m PyInstaller --noconfirm --clean yggdrasim_main.spec
               chmod +x dist/yggdrasim-clean
+              chmod +x dist/yggdrasim-gui-clean
               dist/yggdrasim-clean --version
+              dist/yggdrasim-gui-clean --version
             '
 
       - name: Upload arm64 bundle artifact
         uses: actions/upload-artifact@v6
         with:
           name: ${{ steps.meta.outputs.artifact_name }}
-          path: dist/yggdrasim-clean
+          path: |
+            dist/yggdrasim-clean
+            dist/yggdrasim-gui-clean
           if-no-files-found: error
 
   build-linux-arm64-full:
@@ -220,17 +272,21 @@ jobs:
               python3 -m venv /opt/venv
               . /opt/venv/bin/activate
               python -m pip install --upgrade pip
-              python -m pip install -e ".[full]"
+              python -m pip install -e ".[full,gui]"
               python -m PyInstaller --noconfirm --clean yggdrasim_main.spec
               chmod +x dist/yggdrasim-full
+              chmod +x dist/yggdrasim-gui-full
               dist/yggdrasim-full --version
+              dist/yggdrasim-gui-full --version
             '
 
       - name: Upload arm64 full bundle artifact
         uses: actions/upload-artifact@v6
         with:
           name: ${{ steps.meta.outputs.artifact_name }}
-          path: dist/yggdrasim-full
+          path: |
+            dist/yggdrasim-full
+            dist/yggdrasim-gui-full
           if-no-files-found: error
 
   build-windows-clean:
@@ -262,7 +318,7 @@ jobs:
         shell: pwsh
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -e '.[build,test]'
+          python -m pip install -e '.[build,test,gui]'
 
       - name: Build Windows bundle
         shell: pwsh
@@ -274,17 +330,26 @@ jobs:
         shell: pwsh
         run: |
           .\dist\yggdrasim-clean.exe --version
+          .\dist\yggdrasim-gui-clean.exe --version
 
       - name: Upload Windows bundle artifact
         uses: actions/upload-artifact@v6
         with:
           name: ${{ steps.meta.outputs.artifact_name }}
-          path: dist/yggdrasim-clean.exe
+          path: |
+            dist/yggdrasim-clean.exe
+            dist/yggdrasim-gui-clean.exe
           if-no-files-found: error
 
   build-macos-clean:
-    name: macOS arm64 clean
-    runs-on: macos-15
+    name: macOS ${{ matrix.arch }} clean
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: arm64
+            runner: macos-14
+    runs-on: ${{ matrix.runner }}
 
     steps:
       - name: Checkout code
@@ -301,7 +366,7 @@ jobs:
         run: |
           VERSION=$(python -c "import tomllib; from pathlib import Path; data = tomllib.loads(Path('pyproject.toml').read_text(encoding='utf-8')); print(data['project']['version'])")
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
-          echo "artifact_name=yggdrasim-macos-arm64-clean-${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "artifact_name=yggdrasim-macos-${{ matrix.arch }}-clean-${VERSION}" >> "$GITHUB_OUTPUT"
 
       - name: Install macOS build dependencies
         shell: bash
@@ -313,7 +378,7 @@ jobs:
         shell: bash
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -e '.[build,test]'
+          python -m pip install -e '.[build,test,gui]'
 
       - name: Build macOS bundle
         shell: bash
@@ -325,13 +390,17 @@ jobs:
         shell: bash
         run: |
           chmod +x dist/yggdrasim-clean
+          chmod +x dist/yggdrasim-gui-clean
           dist/yggdrasim-clean --version
+          dist/yggdrasim-gui-clean --version
 
       - name: Upload macOS bundle artifact
         uses: actions/upload-artifact@v6
         with:
           name: ${{ steps.meta.outputs.artifact_name }}
-          path: dist/yggdrasim-clean
+          path: |
+            dist/yggdrasim-clean
+            dist/yggdrasim-gui-clean
           if-no-files-found: error
 
   build-linux-deb-clean:
@@ -357,7 +426,9 @@ jobs:
           DEB_NAME="yggdrasim-clean_${VERSION}_${ARCH}.deb"
           mkdir -p "$PKGROOT/DEBIAN" "$PKGROOT/usr/lib/yggdrasim" "$PKGROOT/usr/bin"
           install -m 0755 dist/yggdrasim-clean "$PKGROOT/usr/lib/yggdrasim/yggdrasim"
+          install -m 0755 dist/yggdrasim-gui-clean "$PKGROOT/usr/lib/yggdrasim/yggdrasim-gui"
           ln -s ../lib/yggdrasim/yggdrasim "$PKGROOT/usr/bin/yggdrasim"
+          ln -s ../lib/yggdrasim/yggdrasim-gui "$PKGROOT/usr/bin/yggdrasim-gui"
           cat > "$PKGROOT/DEBIAN/control" <<EOF
           Package: yggdrasim-clean
           Version: ${VERSION}
@@ -379,3 +450,172 @@ jobs:
           path: ${{ steps.deb.outputs.artifact_path }}
           if-no-files-found: error
 
+  publish-release:
+    name: Publish GitHub Release
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    needs:
+      - docs-strict
+      - pytest-suite
+      - build-linux-x86_64
+      - build-linux-arm64-clean
+      - build-linux-arm64-full
+      - build-windows-clean
+      - build-macos-clean
+      - build-linux-deb-clean
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Resolve release metadata
+        id: meta
+        shell: bash
+        run: |
+          VERSION=$(python3 -c "import tomllib; from pathlib import Path; data = tomllib.loads(Path('pyproject.toml').read_text(encoding='utf-8')); print(data['project']['version'])")
+          TAG="${GITHUB_REF#refs/tags/}"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+
+      - name: Stage release directory
+        shell: bash
+        run: |
+          mkdir -p release-assets
+          mkdir -p dl
+
+      - name: Download Linux x86_64 clean
+        uses: actions/download-artifact@v6
+        with:
+          name: yggdrasim-linux-x86_64-clean-${{ steps.meta.outputs.version }}
+          path: dl/linux-x86_64-clean
+
+      - name: Download Linux x86_64 full
+        uses: actions/download-artifact@v6
+        with:
+          name: yggdrasim-linux-x86_64-full-${{ steps.meta.outputs.version }}
+          path: dl/linux-x86_64-full
+
+      - name: Download Linux arm64 clean
+        uses: actions/download-artifact@v6
+        with:
+          name: yggdrasim-linux-arm64-clean-${{ steps.meta.outputs.version }}
+          path: dl/linux-arm64-clean
+
+      - name: Download Linux arm64 full
+        uses: actions/download-artifact@v6
+        with:
+          name: yggdrasim-linux-arm64-full-${{ steps.meta.outputs.version }}
+          path: dl/linux-arm64-full
+
+      - name: Download Windows x86_64 clean
+        uses: actions/download-artifact@v6
+        with:
+          name: yggdrasim-windows-x86_64-clean-${{ steps.meta.outputs.version }}
+          path: dl/windows-x86_64-clean
+
+      - name: Download macOS arm64 clean
+        uses: actions/download-artifact@v6
+        with:
+          name: yggdrasim-macos-arm64-clean-${{ steps.meta.outputs.version }}
+          path: dl/macos-arm64-clean
+
+      - name: Download Linux Debian package (clean)
+        uses: actions/download-artifact@v6
+        with:
+          name: yggdrasim-linux-deb-clean-${{ steps.meta.outputs.version }}
+          path: dl/linux-deb-clean
+
+      # The install scripts (scripts/install/_common.sh::yg_asset_name and
+      # install-windows.ps1::Install-YgFromRelease) consume the assets at
+      # ``yggdrasim-{os}-{arch}-{flavor}[.exe]``. The build matrix uploads
+      # them as ``yggdrasim-{flavor}[.exe]`` inside per-platform artefact
+      # bundles, so this step renames + sets +x on the way to the Release.
+      - name: Rename artefacts to install-script asset names
+        shell: bash
+        run: |
+          set -eu
+          install -m 0755 dl/linux-x86_64-clean/yggdrasim-clean   release-assets/yggdrasim-linux-x86_64-clean
+          install -m 0755 dl/linux-x86_64-clean/yggdrasim-gui-clean release-assets/yggdrasim-gui-linux-x86_64-clean
+          install -m 0755 dl/linux-x86_64-full/yggdrasim-full     release-assets/yggdrasim-linux-x86_64-full
+          install -m 0755 dl/linux-x86_64-full/yggdrasim-gui-full release-assets/yggdrasim-gui-linux-x86_64-full
+          install -m 0755 dl/linux-arm64-clean/yggdrasim-clean    release-assets/yggdrasim-linux-arm64-clean
+          install -m 0755 dl/linux-arm64-clean/yggdrasim-gui-clean release-assets/yggdrasim-gui-linux-arm64-clean
+          install -m 0755 dl/linux-arm64-full/yggdrasim-full      release-assets/yggdrasim-linux-arm64-full
+          install -m 0755 dl/linux-arm64-full/yggdrasim-gui-full  release-assets/yggdrasim-gui-linux-arm64-full
+          install -m 0755 dl/macos-arm64-clean/yggdrasim-clean    release-assets/yggdrasim-macos-arm64-clean
+          install -m 0755 dl/macos-arm64-clean/yggdrasim-gui-clean release-assets/yggdrasim-gui-macos-arm64-clean
+          install -m 0755 dl/windows-x86_64-clean/yggdrasim-clean.exe release-assets/yggdrasim-windows-x86_64-clean.exe
+          install -m 0755 dl/windows-x86_64-clean/yggdrasim-gui-clean.exe release-assets/yggdrasim-gui-windows-x86_64-clean.exe
+          cp dl/linux-deb-clean/yggdrasim-clean_${{ steps.meta.outputs.version }}_amd64.deb release-assets/
+
+      - name: Generate SHA256 manifest
+        shell: bash
+        working-directory: release-assets
+        run: |
+          set -eu
+          : > SHA256SUMS
+          for f in $(ls | grep -v '^SHA256SUMS$' | sort); do
+            sha256sum "${f}" >> SHA256SUMS
+          done
+          echo '--- SHA256SUMS ---'
+          cat SHA256SUMS
+
+      # Guard the Release publish step against a silent matrix drift: if a new
+      # platform is added to the build matrix without the matching install-
+      # script asset name, this gate fires before ``gh release create``.
+      - name: Verify release-asset names match the install-script pattern
+        shell: bash
+        run: |
+          set -eu
+          required="
+            yggdrasim-linux-x86_64-clean
+            yggdrasim-gui-linux-x86_64-clean
+            yggdrasim-linux-x86_64-full
+            yggdrasim-gui-linux-x86_64-full
+            yggdrasim-linux-arm64-clean
+            yggdrasim-gui-linux-arm64-clean
+            yggdrasim-linux-arm64-full
+            yggdrasim-gui-linux-arm64-full
+            yggdrasim-macos-arm64-clean
+            yggdrasim-gui-macos-arm64-clean
+            yggdrasim-windows-x86_64-clean.exe
+            yggdrasim-gui-windows-x86_64-clean.exe
+            SHA256SUMS
+          "
+          missing=
+          for asset in ${required}; do
+            if [ ! -f "release-assets/${asset}" ]; then
+              missing="${missing} ${asset}"
+            fi
+          done
+          if [ -n "${missing}" ]; then
+            echo "missing release assets:${missing}" >&2
+            exit 1
+          fi
+          echo 'all required release assets present'
+          ls -la release-assets/
+
+      # ``--notes-from-tag`` reuses the annotated tag message we shipped with
+      # v1.0.0 (BCD EID marker + HIL fix + audit rectifications). Future tags
+      # should keep the annotation pattern; ``release-checklist.md`` documents
+      # this contract.
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        shell: bash
+        run: |
+          set -eu
+          TAG="${{ steps.meta.outputs.tag }}"
+          PRERELEASE_FLAG=""
+          case "${TAG}" in
+            *-rc*|*-alpha*|*-beta*|*-pre*) PRERELEASE_FLAG="--prerelease" ;;
+          esac
+          gh release create "${TAG}" \
+            --title "YggdraSIM ${TAG}" \
+            --notes-from-tag \
+            --verify-tag \
+            ${PRERELEASE_FLAG} \
+            release-assets/*

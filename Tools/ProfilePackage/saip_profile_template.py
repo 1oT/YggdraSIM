@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """SAIP profile template engine: placeholder resolution and batch application.
 
@@ -101,7 +104,7 @@ def parse_placeholder_assignment_tokens(tokens: Sequence[str]) -> dict[str, str]
         if match is None:
             raise ValueError(
                 "Placeholder assignments must use NAME=value, for example "
-                "ICCID=89461111111111111112 or {IMSI}=123456781234567."
+                "ICCID=89881111111111111112 or {IMSI}=123456781234567."
             )
         name = normalize_placeholder_name(match.group("name"))
         value = str(match.group("value") or "").strip()

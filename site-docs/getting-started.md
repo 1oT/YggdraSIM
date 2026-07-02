@@ -1,3 +1,8 @@
+<!--
+SPDX-License-Identifier: GPL-3.0-or-later
+Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+-->
+
 # Getting Started
 
 ## Prerequisites
@@ -6,6 +11,8 @@
 - a PC/SC-compatible smart-card reader for card-facing flows
 - optional `gpg` when encrypted inventory payloads are enabled
 - optional Wireshark, `osmo-remsim-client-st2`, and SIMtrace2 for HIL work
+- optional `Tools.CardBridge` + SSH tunnel when the card reader is on a
+  different host than the YggdraSIM process
 - optional on-disk `pysim/` checkout when you need SAIP ASN.1 compile or
   the SCP11 local / eIM-local flows (see the *Optional pySim checkout*
   section below)
@@ -47,10 +54,36 @@ in `site-docs/`.
 python main/main.py
 python main/main.py --debug
 python main/main.py --card-backend sim --sim-eim-identity /path/to/card_side_eim_identity.json
+python main/main.py --gui
+python main/main.py --web-server --host 127.0.0.1 --port 8765
 ```
 
 Use `--debug` or `--verbose` on the wrapper when debug output should become the
-global default for launched modules.
+global default for launched modules. Use `--gui` for the desktop Universal GUI
+Command Center (requires the `[gui]` extra) or `--web-server` for the FastAPI
+loopback variant (requires the `[gui-server]` extra).
+
+### Launch the GUI safely
+
+```bash
+python -m pip install -e '.[gui]'
+python main/main.py --gui
+```
+
+For a remote lab server, keep the bind on loopback and tunnel it:
+
+```bash
+python -m pip install -e '.[gui-server]'
+python main/main.py --web-server \
+  --host 127.0.0.1 \
+  --port 8765 \
+  --token-file ~/.config/yggdrasim/gui.token
+
+ssh -fN -L 8765:127.0.0.1:8765 user@lab-host
+```
+
+See [Universal GUI Command Center](subsystems/gui-command-center.md) for the
+token, APDU stream, remote-card, and host-shell posture.
 
 ## Direct module entry points
 
@@ -62,7 +95,6 @@ python -m SCP03
 python -m SCP80
 python -m SCP11
 python -m SCP11.live
-python -m SCP11.test
 python -m SCP11.relay
 python -m SCP11.local_access
 python -m SCP11.eim_local
@@ -81,7 +113,6 @@ yggdrasim-scp03
 yggdrasim-scp80
 yggdrasim-scp11
 yggdrasim-scp11-live
-yggdrasim-scp11-test
 yggdrasim-scp11-relay
 yggdrasim-scp11-local-access
 yggdrasim-scp11-eim-local
@@ -138,9 +169,14 @@ vendored.
 ## Read next
 
 - Use [Operator Surfaces](operator-surfaces.md) to choose the right module.
+- Use [Universal GUI Command Center](subsystems/gui-command-center.md) when
+  you want a browser/desktop workbench with live APDU streaming.
+- Use [Remote APDU Streaming](how-to/remote-apdu-streaming.md) when the
+  reader or HIL rig is on another host.
+- Use [Install RemSIM / APDU Streaming](how-to/install-remsim-apdu-streaming.md)
+  before bringing up a SIMtrace2/RemSIM lab host.
 - Use the SCP11 subsystem pages for relay, local-access, and eIM-local execution paths:
-  [SCP11 Live Relay](subsystems/scp11-live.md),
-  [SCP11 Test Relay](subsystems/scp11-test.md),
+  [SCP11 eSIM Management Relay](subsystems/scp11-live.md),
   [SCP11 Local Access](subsystems/scp11-local-access.md),
   [SCP11 eIM Local](subsystems/scp11-eim-local.md).
 - Use [Build and Packaging](build-and-packaging.md) for Docker and bundled distribution guidance.

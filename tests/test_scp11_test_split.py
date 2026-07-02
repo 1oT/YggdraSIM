@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 import datetime
 import os
 import tempfile
@@ -82,7 +85,7 @@ class RecordingEimClient(Es9LikeClient):
     def __init__(self, ca_bundle_path: str):
         super().__init__(
             base_url="https://rsp.example.com",
-            eim_base_url="https://eim1.esim.tst.1ot.mobi",
+            eim_base_url="https://eim1.esim.example.test",
             ca_bundle_path=ca_bundle_path,
         )
         self.use_configured_ca_bundle_flags = []
@@ -234,10 +237,42 @@ class DrainRoundSkipProvider:
 
 
 class TestSplitPinningTests(unittest.TestCase):
+    def test_test_eim_poll_request_uses_fqdn_eim_id_when_fqdn_field_absent(self):
+        eim_configuration = wrap_tlv(
+            "BF55",
+            wrap_tlv(
+                "A0",
+                wrap_tlv(
+                    "30",
+                    b"".join(
+                        [
+                            wrap_tlv("80", b"eim1.example.test"),
+                            wrap_tlv("82", b"\x02"),
+                        ]
+                    ),
+                ),
+            ),
+        )
+        configured_data = wrap_tlv("BF3C", wrap_tlv("80", b"rsp.example.test"))
+        orchestrator = SGP22Orchestrator(cfg=DummyCfg(), apdu_channel=None, profile_provider=None)
+        orchestrator.cache_eim_poll_metadata(
+            eid="89044045930000000000001492294428",
+            euicc_configured_data=configured_data,
+            eim_configuration_data=eim_configuration,
+            euicc_info1=wrap_tlv("BF20", b"\x82\x03\x02\x05\x00"),
+            euicc_info2=wrap_tlv("BF22", b"\x81\x03\x02\x03\x01"),
+        )
+
+        request = orchestrator._build_eim_poll_request(matching_id="MATCH-1", entry_index=0)
+
+        self.assertEqual(request.eim_fqdn, "eim1.example.test")
+        self.assertEqual(request.eim_id, "eim1.example.test")
+        self.assertEqual(request.eim_id_type, "eimIdTypeFqdn (2)")
+
     def _run_test_orchestrator_single_entry(self, provider):
         orchestrator = SGP22Orchestrator(cfg=DummyCfg(), apdu_channel=None, profile_provider=provider)
         request = EimPollRequest(
-            eim_fqdn="eim1.esim.tst.1ot.mobi",
+            eim_fqdn="eim1.esim.example.test",
             eim_id="manager-1",
             eim_id_type="1",
             counter_value="0",
@@ -259,7 +294,6 @@ class TestSplitPinningTests(unittest.TestCase):
         relayed_packages = []
 
         orchestrator._phase_connect = lambda: None
-        orchestrator._phase_eim_card_challenge = lambda: None
         orchestrator._resolve_eim_poll_entry_indices = lambda entry_index=None: [0]
         orchestrator._build_eim_poll_request = lambda matching_id="", entry_index=0: request
 
@@ -278,7 +312,6 @@ class TestSplitPinningTests(unittest.TestCase):
         relayed_packages = []
 
         orchestrator._phase_connect = lambda: None
-        orchestrator._phase_eim_card_challenge = lambda: None
         orchestrator._resolve_eim_poll_entry_indices = (
             lambda entry_index=None: list(range(len(entry_requests)))
         )
@@ -378,7 +411,7 @@ class TestSplitPinningTests(unittest.TestCase):
             client = RecordingEimClient(str(bundle_path))
 
             client._post_eim_binary(
-                "https://eim1.esim.tst.1ot.mobi",
+                "https://eim1.esim.example.test",
                 bytes.fromhex("BF4F125A1089049032118427504800000000006079"),
                 b"",
             )

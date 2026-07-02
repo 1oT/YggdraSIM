@@ -1,3 +1,8 @@
+<!--
+SPDX-License-Identifier: GPL-3.0-or-later
+Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+-->
+
 # Guide Topics
 
 This page mirrors the topic-oriented `GUIDE [Topic]` surface from the SCP03
@@ -174,6 +179,29 @@ The shell guide calls out the main wizard choices:
 7. install and make selectable
 8. full CAP install sequence
 
+### One-shot CAP install
+
+`INSTALL <cap/ijc> <INSTALL-for-install APDU>` parses the CAP/IJC, sends
+`INSTALL [for load]` and `LOAD`, then sends the supplied `INSTALL [for install]`
+or `INSTALL [for install and make selectable]` APDU unchanged. The command
+checks that the APDU Load File AID matches the CAP package AID before loading.
+
+`INSTALL-CAP <cap/ijc> --privs 00 --params C900 --applet <AID> --module <AID>`
+builds the complete CAP load and instantiate sequence from command arguments.
+The command also accepts positional compatibility:
+`INSTALL-CAP <cap/ijc> [Priv] [Params] [AppletAID] [ModuleAID]`.
+
+Direct scriptable INSTALL verbs are available for the remaining GP variants:
+
+- `LOAD <cap/ijc>`
+- `INSTALL-LOAD <LoadFileAID> [SecurityDomainAID] [LoadFileHash] [Params] [Token]`
+- `INSTALL-APP <PkgAID> <AppAID> [ModAID] [Priv] [Params]`
+- `INSTALL-INSTANCE <PkgAID> <AppAID> [ModAID] [Priv] [Params]`
+- `MAKE-SELECTABLE <AID> [Priv] [Params] [Token]`
+- `EXTRADITE <App_AID> <SD_AID> [Token]`
+- `REGISTRY-UPDATE <AID> [Priv] [Params]`
+- `PERSONALIZE <AID>`
+
 ### APDU structure and privileges
 
 Representative structure:
@@ -202,7 +230,8 @@ The in-shell guide distinguishes:
 - legacy SIM file-access parameters such as `CA`
 
 It also notes that `CA` and `EA` must not be mixed in the same install
-parameter set.
+parameter set. The install-parameter builder accepts `C900` or any other
+complete `C9` TLV unchanged, and wraps non-TLV C9 values as `C9`.
 
 ## SECURITY
 
@@ -388,6 +417,8 @@ Representative examples:
 
 ```bash
 python3 -m SCP03 --cmd "SCP03-SD; LIST" --out report.yaml
+python3 -m SCP03 --cmd "SCP03-SD; INSTALL-CAP app.cap --privs 00 --params C900; APPS; PKGS"
+printf 'SCP03-SD\nINSTALL-CAP app.cap --privs 00 --params C900\nAPPS\nQ\n' | python3 -m SCP03
 printf 'HELP\nQ\n' | python3 -m SCP03
 python3 -m Tools.ProfilePackage --cmd "USE reference_test_profile.txt; INFO" > saip_stdout.txt
 ```

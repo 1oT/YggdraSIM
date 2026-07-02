@@ -1,3 +1,8 @@
+<!--
+SPDX-License-Identifier: GPL-3.0-or-later
+Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+-->
+
 # Security Policy
 
 YggdraSIM is a **secure-element research and auditing toolkit**. The
@@ -22,7 +27,7 @@ Security fixes are accepted on the actively-maintained line:
 private channels below.
 
 - Preferred: GitHub private vulnerability report on
-  `https://github.com/1oT/YggdraSIM/security/advisories/new`.
+  `https://github.com/hampushellsberg-dev/YggdraSIM/security/advisories/new`.
 - Alternative: email **`security@1ot.com`** with the subject prefix
   `[YggdraSIM][SECURITY]` and a descriptive title.
 - For reports involving GSMA, SGP.02 / 22 / 32, or any disclosure that
@@ -106,5 +111,3 @@ For context, the following hardening landed before `v1.0.0`:
   excluded from the published wheel and Docker image (see
   `.gitignore`, `.dockerignore`, `MANIFEST.in`).
 
-See `CHANGELOG.md` and tracked issues for the current security
-remediation list.

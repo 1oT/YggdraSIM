@@ -18,3 +18,7 @@ pip install -r requirements.txt
 ```
 
 Then run the EIM test or `tests/eim-sh/run_10_times.sh`; the script will use `.venv/bin/python3` when `asn1crypto` is available there.
+<!--
+SPDX-License-Identifier: GPL-3.0-or-later
+Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+-->

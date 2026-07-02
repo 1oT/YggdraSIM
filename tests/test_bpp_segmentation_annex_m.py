@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 """Regression guard for SGP.22 Annex M BPP segmentation.
 
 Real eUICCs have been observed to misinterpret the first bare 86 TLV

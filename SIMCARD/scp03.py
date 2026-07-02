@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """SCP03 card-side crypto: INITIALIZE-UPDATE / EXTERNAL AUTHENTICATE response and per-APDU MAC+ENC envelope (GlobalPlatform Card Specification v2.3)."""
 from __future__ import annotations

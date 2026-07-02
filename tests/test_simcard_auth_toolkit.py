@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 from __future__ import annotations
 
 import tempfile
@@ -289,7 +292,7 @@ class SimCardAuthAndToolkitTests(unittest.TestCase):
         _send_response_data, send_response_sw1, send_response_sw2 = self.engine.transmit(send_response_apdu)
         self.assertEqual((_send_response_data, send_response_sw1, send_response_sw2), (b"", 0x90, 0x00))
 
-        dns_response = _build_dns_response(dns_query, "194.29.54.4")
+        dns_response = _build_dns_response(dns_query, "198.51.100.4")
         data_available_data, data_available_sw1, data_available_sw2 = self.engine.transmit(
             _envelope_apdu(_data_available_envelope(len(dns_response)))
         )
@@ -340,6 +343,7 @@ class SimCardAuthAndToolkitTests(unittest.TestCase):
         self.assertIn(bytes.fromhex("3E0521C21D3604"), tcp_open_command_data)
 
     def test_verify_and_unblock_queries_use_stateful_retry_counters(self) -> None:
+        self.engine.state.chv_references[0x01].enabled = True
         data, sw1, sw2 = self.engine.transmit(bytes.fromhex("0020000100"))
         self.assertEqual(data, b"")
         self.assertEqual((sw1, sw2), (0x63, 0xC3))
@@ -352,6 +356,15 @@ class SimCardAuthAndToolkitTests(unittest.TestCase):
         data, sw1, sw2 = self.engine.transmit(bytes.fromhex("002C000100"))
         self.assertEqual(data, b"")
         self.assertEqual((sw1, sw2), (0x63, 0xCA))
+
+    def test_default_pin_status_probe_does_not_block_headless_attach(self) -> None:
+        data, sw1, sw2 = self.engine.transmit(bytes.fromhex("0020000100"))
+        self.assertEqual(data, b"")
+        self.assertEqual((sw1, sw2), (0x90, 0x00))
+
+        data, sw1, sw2 = self.engine.transmit(bytes.fromhex("0020008100"))
+        self.assertEqual(data, b"")
+        self.assertEqual((sw1, sw2), (0x90, 0x00))
 
     def test_profile_store_round_trip_preserves_auth_config(self) -> None:
         store_path = Path(self._temp_dir.name) / "profile_store_roundtrip"

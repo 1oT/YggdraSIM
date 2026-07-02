@@ -1,0 +1,66 @@
+/*
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+ */
+
+/* TLV tree */
+
+.tlv-tree {
+  margin-top: 12px;
+  padding: 12px 14px;
+  background: var(--code-bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.tlv-node-list {
+  list-style: none;
+  margin: 0;
+  padding-left: 14px;
+  border-left: 1px dashed var(--border-strong);
+}
+
+.tlv-node-list > li {
+  margin: 5px 0;
+  padding-left: 4px;
+  border-radius: var(--radius-sm);
+  transition: background-color var(--transition-fast);
+}
+
+.tlv-node-list > li:hover {
+  background: var(--bg-hover);
+}
+
+.tlv-node-head {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  flex-wrap: wrap;
+  padding: 2px 4px;
+}
+
+.tlv-tag {
+  color: var(--accent-fg);
+  background: var(--accent-soft);
+  border: 1px solid var(--accent-soft);
+  padding: 1px 8px;
+  border-radius: var(--radius-sm);
+  font-weight: 700;
+  font-size: 11px;
+  color: var(--accent);
+}
+
+.tlv-len {
+  color: var(--fg-dim);
+  font-size: 11px;
+  letter-spacing: 0.02em;
+}
+
+.tlv-val {
+  color: var(--fg);
+  word-break: break-all;
+  opacity: 0.92;
+}
+

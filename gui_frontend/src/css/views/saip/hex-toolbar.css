@@ -1,0 +1,164 @@
+/*
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+ */
+
+/* ---- Hex-dump and decoded-hex toolbars (Data tab) ------------------ */
+
+.saip-hexdump-tools,
+.saip-decoded-hex-tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  justify-content: flex-end;
+  margin-bottom: 8px;
+}
+
+.saip-hexdump-tools .btn.is-copied,
+.saip-decoded-hex-tools .btn.is-copied {
+  outline: 2px solid var(--ok, #a3be8c);
+  outline-offset: 2px;
+}
+
+.saip-hexdump {
+  font-family: var(--mono, "JetBrains Mono", monospace);
+  font-size: 11px;
+  line-height: 1.5;
+  background: var(--surface, rgba(0, 0, 0, 0.18));
+  color: var(--fg);
+  padding: 10px 12px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  max-height: 480px;
+  overflow: auto;
+  white-space: pre;
+  margin: 0;
+  letter-spacing: 0.02em;
+}
+
+.saip-detail-body--data-view {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.saip-file-data-viewbar {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  align-self: flex-end;
+  padding: 2px;
+  margin: 0 0 6px;
+  border: 1px solid var(--border, #3b4252);
+  border-radius: 5px;
+  background: var(--surface-alt, rgba(255, 255, 255, 0.03));
+}
+
+.saip-file-data-viewbtn {
+  min-width: 58px;
+  padding: 3px 8px;
+  border: 0;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--fg-muted, #888);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.saip-file-data-viewbtn:hover {
+  color: var(--fg, #eceff4);
+  background: var(--surface, rgba(255, 255, 255, 0.04));
+}
+
+.saip-file-data-viewbtn.is-active {
+  color: var(--accent, #88c0d0);
+  background: var(--accent-soft, rgba(136, 192, 208, 0.14));
+}
+
+.saip-file-data-view {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 8px;
+  overflow: auto;
+}
+
+.saip-file-data-view--stack {
+  display: flex;
+  flex-direction: column;
+  overflow: auto;
+}
+
+.saip-file-data-view--hex,
+.saip-file-data-view--decoded {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.saip-file-data-view--hex .saip-file-data-pane--decoded,
+.saip-file-data-view--decoded .saip-file-data-pane--hex {
+  display: none;
+}
+
+.saip-file-data-pane {
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border, #3b4252);
+  border-radius: 6px;
+  background: var(--surface-alt, rgba(255, 255, 255, 0.03));
+  overflow: hidden;
+}
+
+.saip-file-data-pane-head {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  min-height: 28px;
+  padding: 5px 8px;
+  border-bottom: 1px solid var(--border, #3b4252);
+  background: var(--surface, rgba(255, 255, 255, 0.02));
+}
+
+.saip-file-data-pane-title {
+  margin: 0;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--fg-muted, #888);
+}
+
+.saip-file-data-pane-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  overflow: auto;
+  padding: 8px;
+}
+
+.saip-file-data-pane .saip-rawbytes-card,
+.saip-file-data-pane .saip-decoded-card,
+.saip-file-data-pane .saip-edit-card,
+.saip-file-data-pane .saip-record-nav {
+  margin-top: 0;
+}
+
+.saip-file-data-view--stack .saip-file-data-pane {
+  min-height: 260px;
+}
+
+@media (max-width: 1200px) {
+  .saip-file-data-view {
+    display: flex;
+    flex-direction: column;
+    overflow: auto;
+  }
+
+  .saip-file-data-pane {
+    min-height: 260px;
+  }
+}

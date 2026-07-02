@@ -58,6 +58,8 @@ class OtaBuildPlan :
 class OtaPacketBuilder :
     SMS_TPDU_PREFIX =bytes .fromhex ("4005811250F341F6222222222222222502")
     SINGLE_SMS_TPDU_PREFIX =bytes .fromhex ("4005811250F341F62222222222222225027000")
+    TPDU_PID_OFFSET =6
+    TPDU_DCS_OFFSET =7
     ENVELOPE_PREFIX =bytes .fromhex ("0202828106028001")
     CONCAT_UDH_PREFIX =bytes .fromhex ("050003")
     SINGLE_UDH =b"\x00"
@@ -169,16 +171,20 @@ class OtaPacketBuilder :
         ct ,
         )
 
-    @classmethod
-    def _build_single_sms_tpdu (cls ,block_0348 :bytes )->tuple :
-        sms_tpdu =cls .SINGLE_SMS_TPDU_PREFIX +block_0348 
+    def _tpdu_prefix (self ,template :bytes )->bytes :
+        prefix =bytearray (template )
+        prefix [self .TPDU_PID_OFFSET ]=int (self .cfg .get ("pid"),16 )&0xFF
+        prefix [self .TPDU_DCS_OFFSET ]=int (self .cfg .get ("dcs"),16 )&0xFF
+        return bytes (prefix )
+
+    def _build_single_sms_tpdu (self ,block_0348 :bytes )->tuple :
+        sms_tpdu =self ._tpdu_prefix (self .SINGLE_SMS_TPDU_PREFIX )+block_0348 
         tp_ud_length =1 +len (block_0348 )
         return sms_tpdu ,tp_ud_length 
 
-    @classmethod
-    def _build_concat_sms_tpdu (cls ,fragment :bytes ,concat_ref :int ,total :int ,sequence :int )->tuple :
-        tp_ud =cls .CONCAT_UDH_PREFIX +bytes ([concat_ref ,total ,sequence ])+fragment 
-        sms_tpdu =cls .SMS_TPDU_PREFIX +bytes ([len (tp_ud )])+tp_ud 
+    def _build_concat_sms_tpdu (self ,fragment :bytes ,concat_ref :int ,total :int ,sequence :int )->tuple :
+        tp_ud =self .CONCAT_UDH_PREFIX +bytes ([concat_ref ,total ,sequence ])+fragment 
+        sms_tpdu =self ._tpdu_prefix (self .SMS_TPDU_PREFIX )+bytes ([len (tp_ud )])+tp_ud 
         return sms_tpdu ,len (tp_ud )
 
     def _wrap_sms_tpdu (self ,sms_tpdu :bytes ,allow_extended_apdu :bool =False )->str :
@@ -316,7 +322,7 @@ class OtaPacketBuilder :
     def _print_verbose (self ,plan :OtaBuildPlan ,chi ,cpl ,chl ,params ,cntr ,pcntr ,cc ,ct ):
         print (f"\n{Colors.CYAN}[=== 03.48 BLOCK BREAKDOWN ===]{Colors.ENDC}")
         print (f"ALG:    {plan.cipher_mode} / {plan.mac_mode}")
-        print (f"CNTR:   {cntr.hex().upper()}")
+        print (f"CNTR:   {plan.cntr_hex}")
         if plan .is_concatenated :
             print (f"SMS:    {len(plan.apdus)} concatenated segments")
         else :

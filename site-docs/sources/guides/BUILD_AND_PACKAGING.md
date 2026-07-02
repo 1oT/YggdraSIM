@@ -1,3 +1,8 @@
+<!--
+SPDX-License-Identifier: GPL-3.0-or-later
+Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+-->
+
 # Build and Packaging Guide
 
 This repository supports three practical distribution models:
@@ -8,10 +13,10 @@ This repository supports three practical distribution models:
 
 Each of those is published in two **flavors**:
 
-| Flavor | HIL bridge included | Platforms                                   | Dependencies                         |
-|--------|---------------------|---------------------------------------------|--------------------------------------|
-| `clean` | No                 | Windows / macOS / Linux / Raspberry Pi arm64 | core only, no `pyudev`, no SIMtrace2 |
-| `full`  | Yes                | Linux x86_64                                | core + `pyudev` + `osmo-remsim-client-st2` on host |
+| Flavor | Card Bridge / remote APDU | Direct SIMtrace2 HIL | Platforms | Dependencies |
+|--------|---------------------------|----------------------|-----------|--------------|
+| `clean` | Yes | No | Windows / macOS arm64 / Linux / Raspberry Pi arm64 | core only, no `pyudev`, no SIMtrace2 |
+| `full`  | Yes | Yes | Linux x86_64 | core + `pyudev` + `osmo-remsim-client-st2` on host |
 
 The active flavor is controlled by the `YGGDRASIM_FLAVOR` environment
 variable at **build time**. The spec writes the resolved flavor into
@@ -29,19 +34,37 @@ Operator install notes for each flavor live in dedicated guides:
 
 ## Optional extras orthogonal to the flavor split
 
-The `clean` / `full` split only controls whether the HIL bridge stack
-is bundled. Several feature surfaces sit on **opt-in extras** that are
+The `clean` / `full` split only controls whether the local
+SIMtrace2/RemSIM HIL stack is bundled. Card Bridge and remote APDU
+streaming are part of the clean cross-platform surface. Several feature
+surfaces sit on **opt-in extras** that are
 declared in `pyproject.toml` and are not pulled in by either default
 flavor:
 
-| Extra      | Pulls in                                      | Used by                                        |
-|------------|-----------------------------------------------|------------------------------------------------|
-| `[saip]`   | (empty back-compat alias; `pySim` already in base deps) | Onboarding scripts that reference the old name |
-| `[hil]`    | `pyudev` (Linux only)                         | HIL bridge supervisor / event-driven hotplug   |
-| `[build]`  | `pyinstaller`                                 | Producing `dist/yggdrasim-*` bundles           |
-| `[test]`   | `pytest`                                      | Running the `tests/` suite                     |
-| `[docs]`   | `mkdocs`, `mkdocs-material`, `pymdown-extensions` | Building / serving `site-docs/`            |
-| `[full]`   | `pyudev`, `pyinstaller`, `pytest`             | Full Linux maintainer profile                  |
+| Extra          | Pulls in                                      | Used by                                        |
+|----------------|-----------------------------------------------|------------------------------------------------|
+| `[saip]`       | `pySim` from the upstream osmocom mirror      | SAIP transcode TUI, SCP11-local / eIM-local    |
+| `[hil]`        | `pyudev` (Linux only)                         | HIL bridge supervisor / event-driven hotplug   |
+| `[gui]`        | `fastapi`, `uvicorn[standard]`, `pywebview`, `websockets` | Desktop Universal GUI Command Center (`--gui`) |
+| `[gui-server]` | `fastapi`, `uvicorn[standard]`, `websockets`  | Headless web Command Center (`--web-server`)   |
+| `[open5gs]` *(post-v1 staging)* | `pymongo>=4.5,<5.0`                           | YggdraCore BYO-Open5GS subscriber bridge       |
+| `[build]`      | `pyinstaller`                                 | Producing `dist/yggdrasim-*` bundles           |
+| `[test]`       | `pytest`, `httpx`                             | Running the `tests/` suite                     |
+| `[docs]`       | `mkdocs`, `mkdocs-material`, `pymdown-extensions` | Building / serving `site-docs/`             |
+| `[full]`       | `pyudev`, `pyinstaller`, `pytest`, `fastapi`, `uvicorn`, `websockets`, `pySim` | Full Linux maintainer profile |
+
+Notes:
+
+- `[full]` includes the headless GUI server dependencies, but not
+  `pywebview`. An operator who wants the desktop window on a `full`
+  source install must add `[gui]`: `pip install -e '.[full,gui]'`.
+- The PyInstaller spec builds a paired CLI and desktop-GUI executable
+  when the build environment has the `[gui]` extra installed. The CLI
+  executable remains the shell/TUI surface; the GUI executable starts
+  desktop mode by default.
+- `[gui]` is a strict superset of `[gui-server]`; you only need
+  `[gui-server]` on headless servers where `pywebview` would just fail
+  to import a desktop toolkit.
 
 ## Current structure status
 
@@ -119,16 +142,17 @@ Container notes:
 - do not assume smart-card USB passthrough is portable across hosts without
   reader-specific validation
 
-## Single bundled launcher
+## Bundled launchers
 
 The committed `yggdrasim_main.spec` builds the unified `main/main.py`
-launcher as one flavored executable.
+launcher as a CLI executable plus a desktop GUI companion for the same
+flavor.
 
 Install the build dependencies first:
 
 ```bash
-python -m pip install -e '.[build,test]'       # clean
-python -m pip install -e '.[full]'             # full (Linux)
+python -m pip install -e '.[build,test,gui]'   # clean + GUI companion
+python -m pip install -e '.[full,gui]'         # full + GUI companion (Linux)
 ```
 
 Build a clean bundle:
@@ -145,9 +169,12 @@ YGGDRASIM_FLAVOR=full python -m PyInstaller --noconfirm --clean yggdrasim_main.s
 
 Expected outputs:
 
-- Linux:   `dist/yggdrasim-clean`   or   `dist/yggdrasim-full`
-- Windows: `dist/yggdrasim-clean.exe`   (full flavor is not published for Windows)
-- macOS:   `dist/yggdrasim-clean`   (full flavor is not published for macOS)
+- Linux:   `dist/yggdrasim-clean` / `dist/yggdrasim-gui-clean`, or
+  `dist/yggdrasim-full` / `dist/yggdrasim-gui-full`
+- Windows: `dist/yggdrasim-clean.exe` / `dist/yggdrasim-gui-clean.exe`
+  (full flavor is not published for Windows)
+- macOS:   `dist/yggdrasim-clean` / `dist/yggdrasim-gui-clean`
+  (full flavor is not published for macOS)
 
 Build notes:
 
@@ -157,9 +184,14 @@ Build notes:
 - The spec writes `yggdrasim_common/_build_flavor.py` so the resulting
   executable reports its own flavor in `--version`, in the banner, and
   in `--doctor`. The stamp file is git-ignored.
-- The clean bundle explicitly excludes `Tools/HilBridge`,
-  `yggdrasim_common.hil_bridge_runtime`, and `pyudev`. Tests and
-  launcher logic already handle those surfaces being absent at runtime.
+- The clean bundle explicitly excludes the local HIL supervisor/runtime
+  (`yggdrasim_common.hil_bridge_runtime`, `pyudev`, and the Linux
+  SIMtrace2/RemSIM modules) while retaining `Tools.CardBridge` plus the
+  minimal APDU relay/PCSC helpers it uses. Tests and launcher logic handle
+  direct HIL being absent at runtime.
+- `yggdrasim-gui-*` prepends `--gui` unless the operator explicitly
+  passes `--web-server`; flags such as `--port`, `--token-file`, and
+  `--allow-origin` are still parsed by the shared launcher.
 - Console-script entry points such as `yggdrasim-scp11-live` remain the
   simpler operator surface for editable installs and Docker usage.
 
@@ -178,7 +210,9 @@ Minimal skeleton (clean bundle):
 ```bash
 mkdir -p pkg/DEBIAN pkg/usr/lib/yggdrasim pkg/usr/bin
 cp dist/yggdrasim-clean pkg/usr/lib/yggdrasim/yggdrasim
+cp dist/yggdrasim-gui-clean pkg/usr/lib/yggdrasim/yggdrasim-gui
 ln -sf /usr/lib/yggdrasim/yggdrasim pkg/usr/bin/yggdrasim
+ln -sf /usr/lib/yggdrasim/yggdrasim-gui pkg/usr/bin/yggdrasim-gui
 ```
 
 Example `pkg/DEBIAN/control`:
@@ -209,8 +243,10 @@ For Windows publication:
 
 - build the executable on Windows with
   `YGGDRASIM_FLAVOR=clean python -m PyInstaller --noconfirm --clean yggdrasim_main.spec`
-- Windows only ships the `clean` flavor; the HIL bridge is Linux-only
-- validate bundled smart-card and TLS flows on a reader-equipped Windows host
+- Windows only ships the `clean` flavor; direct SIMtrace2 HIL is Linux-only,
+  but Card Bridge / remote APDU streaming is included
+- validate bundled smart-card, Card Bridge, SSH tunnel, and TLS flows on a
+  reader-equipped Windows host
 - treat `.exe` publication as a packaging layer, not as a substitute for host
   driver installation
 
@@ -220,7 +256,8 @@ For macOS publication:
 
 - build per architecture on that architecture (`x86_64` and `arm64`
   separately); CI runs both
-- only `clean` is published; the HIL bridge is Linux-only
+- only `clean` is published; direct SIMtrace2 HIL is Linux-only, but Card
+  Bridge / remote APDU streaming is included
 - operators need Xcode command-line tools to run editable installs on
   source checkouts
 

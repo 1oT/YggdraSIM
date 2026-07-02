@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 name: Security report (non-exploitable / hardening)
 description: Report a hardening gap, audit finding, or non-exploitable security concern. For exploitable vulnerabilities, use GitHub Security Advisories instead.
 title: "[sec] <short, specific summary>"
@@ -17,7 +20,7 @@ body:
         - Hardening proposals (defence-in-depth)
         - Audit findings that do not have a proof-of-concept
         - Questions about threat model and security posture
-        - Follow-ups to items tracked in `V1_RELEASE_AUDIT.md`
+        - Follow-ups to previously disclosed hardening items
 
   - type: dropdown
     id: category

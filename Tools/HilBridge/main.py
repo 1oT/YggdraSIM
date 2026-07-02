@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """HIL-Bridge package entry point."""
 from __future__ import annotations
@@ -11,9 +14,9 @@ from typing import Any
 from yggdrasim_common.process_debug import add_debug_argument, set_global_debug
 from yggdrasim_common.quit_control import QuitAllRequested
 
-from .pcsc import PcscBridgeError, PcscCardChannel
+from .pcsc import APDU_TIMEOUT_ENV, PcscBridgeError, PcscCardChannel, resolve_apdu_timeout_ms
 from .protocol import GSMTAP_COMPAT_MODES, GSMTAP_COMPAT_NATIVE
-from .router import BridgeConfig, HilBridgeServer
+from .router import CARD_TRACE_ENV, BridgeConfig, HilBridgeServer, resolve_card_trace_enabled
 
 
 def add_bridge_runtime_arguments(
@@ -51,6 +54,38 @@ def add_bridge_runtime_arguments(
         type=str,
         default="",
         help="Case-insensitive substring match for the PC/SC reader name",
+    )
+    parser.add_argument(
+        "--remote-card-url",
+        type=str,
+        default="",
+        help=(
+            "Stream APDUs from a remote 'yggdrasim-card-bridge' instance "
+            "(e.g. http://127.0.0.1:8642/apdu after opening an SSH "
+            "LocalForward from the rig, or a RemoteForward from the "
+            "reader host). When set, the "
+            "local --reader-index / --reader-name flags are ignored. "
+            "Mirrors the YGGDRASIM_HIL_REMOTE_CARD_URL environment variable."
+        ),
+    )
+    parser.add_argument(
+        "--remote-card-token-file",
+        type=str,
+        default="",
+        help=(
+            "Path to a 0600-mode bearer-token file matching the token "
+            "the remote 'yggdrasim-card-bridge' wrote on startup. "
+            "Mirrors YGGDRASIM_HIL_REMOTE_CARD_TOKEN_FILE."
+        ),
+    )
+    parser.add_argument(
+        "--apdu-timeout-ms",
+        type=int,
+        default=None,
+        help=(
+            "Maximum APDU wait time in milliseconds for HIL card traffic "
+            f"(default from {APDU_TIMEOUT_ENV}, fallback 5000)."
+        ),
     )
     if include_list_readers:
         parser.add_argument("--list-readers", action="store_true", help="List available PC/SC readers and exit")
@@ -91,6 +126,15 @@ def add_bridge_runtime_arguments(
         help="GSMTAP compatibility mode. Use wireshark44 for legacy Wireshark SIM dissectors.",
     )
     parser.add_argument("--no-gsmtap", action="store_true", help="Disable GSMTAP Wireshark mirroring")
+    parser.add_argument(
+        "--card-trace",
+        action="store_true",
+        default=resolve_card_trace_enabled(),
+        help=(
+            "Log every APDU at the physical-card boundary. "
+            f"Can also be enabled with {CARD_TRACE_ENV}=1."
+        ),
+    )
 
 
 def build_bridge_config_from_args(args: argparse.Namespace) -> BridgeConfig:
@@ -104,6 +148,13 @@ def build_bridge_config_from_args(args: argparse.Namespace) -> BridgeConfig:
         apdu_relay_enabled=not bool(args.no_apdu_relay),
         reader_index=int(args.reader_index),
         reader_name=str(args.reader_name or ""),
+        remote_card_url=str(getattr(args, "remote_card_url", "") or "").strip(),
+        remote_card_token_file=str(
+            getattr(args, "remote_card_token_file", "") or ""
+        ).strip(),
+        apdu_timeout_ms=resolve_apdu_timeout_ms(
+            getattr(args, "apdu_timeout_ms", None)
+        ),
         client_id=int(args.client_id),
         client_slot=int(args.client_slot),
         bank_id=int(args.bank_id),
@@ -119,6 +170,7 @@ def build_bridge_config_from_args(args: argparse.Namespace) -> BridgeConfig:
         gsmtap_capture_mirror_fifo_path=str(
             getattr(args, "gsmtap_capture_mirror_fifo_path", "") or ""
         ).strip(),
+        card_trace_enabled=bool(getattr(args, "card_trace", False)),
     )
 
 

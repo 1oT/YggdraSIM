@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """Process debug helpers: thread-dump signal handler and memory-usage reporter for long-running daemon processes."""
 import argparse
@@ -5,6 +8,8 @@ import contextlib
 import os
 import sys
 import warnings
+
+from yggdrasim_common.terminal_output import colorize_status_text
 
 
 GLOBAL_DEBUG_ENV = "YGGDRASIM_GLOBAL_DEBUG"
@@ -29,7 +34,22 @@ def is_global_debug_enabled(default: bool = False) -> bool:
 
 
 def set_global_debug(enabled: bool) -> None:
-    os.environ[GLOBAL_DEBUG_ENV] = "1" if bool(enabled) else "0"
+    """Set the global debug flag and persist it across sessions.
+
+    The persistence path is controlled by the ``EnvFlag.persist_scope`` of
+    ``YGGDRASIM_GLOBAL_DEBUG`` (currently ``PERSIST_FILE``, which writes to
+    ``<runtime_root>/state/env_overrides.json``). The import is lazy to
+    avoid adding a hard dependency from every early-import consumer.
+    """
+    value = "1" if bool(enabled) else "0"
+    os.environ[GLOBAL_DEBUG_ENV] = value
+    try:
+        from yggdrasim_common import env_flags
+    except ImportError:
+        return
+    flag = env_flags.get_flag(GLOBAL_DEBUG_ENV)
+    if flag is not None:
+        env_flags.set_flag_value(flag, value, persist=True)
 
 
 def add_debug_argument(
@@ -59,7 +79,8 @@ def debug_print(message: str, *, stream=None) -> None:
         return
     target = stream if stream is not None else sys.stdout
     try:
-        target.write(f"{message}\n")
+        rendered = colorize_status_text(str(message), stream=target)
+        target.write(f"{rendered}\n")
         flush = getattr(target, "flush", None)
         if callable(flush):
             flush()

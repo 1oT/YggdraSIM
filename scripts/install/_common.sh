@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 # Shared helpers for the YggdraSIM POSIX install scripts.
 #
 # This file is sourced by install-linux.sh, install-macos.sh, and
@@ -159,22 +162,9 @@ yg_asset_name() {
     printf 'yggdrasim-%s-%s-%s' "${1}" "${2}" "${3}"
 }
 
-yg_resolve_latest_tag() {
-    # Write the tag name of the latest GitHub release to stdout.
-    # Prefers gh CLI when available; falls back to an unauthenticated API
-    # call (subject to tighter rate-limiting).
-    if command -v gh >/dev/null 2>&1; then
-        gh release view --repo "${YGGDRASIM_REPO}" --json tagName --jq .tagName 2>/dev/null && return 0
-    fi
-    yg_need_cmd curl
-    local tag
-    tag="$(curl --fail --silent --show-error --proto '=https' --tlsv1.2 \
-        "https://api.github.com/repos/${YGGDRASIM_REPO}/releases/latest" \
-        | grep -o '"tag_name": *"[^"]*"' | head -1 | sed 's/.*"tag_name": *"\([^"]*\)".*/\1/')"
-    if [ -z "${tag}" ]; then
-        yg_die "could not resolve latest release tag for ${YGGDRASIM_REPO}"
-    fi
-    printf '%s' "${tag}"
+yg_gui_asset_name() {
+    # $1 = os (linux|macos), $2 = arch (x86_64|arm64), $3 = flavor (clean|full)
+    printf 'yggdrasim-gui-%s-%s-%s' "${1}" "${2}" "${3}"
 }
 
 yg_download_release_asset() {
@@ -184,42 +174,6 @@ yg_download_release_asset() {
     local dest="${2}"
     yg_emit "downloading ${url}"
     curl --fail --location --max-redirs 5 --proto '=https' --tlsv1.2 --silent --show-error --output "${dest}" "${url}"
-}
-
-yg_extract_release_zip() {
-    # $1 = path to downloaded asset, $2 = destination directory
-    # If the asset is a zip archive it is extracted and the path to the
-    # first regular file inside is written to stdout.  Otherwise the
-    # asset is treated as a bare binary and its path is echoed as-is so
-    # the same caller works with both layouts.
-    local zip_path="${1}"
-    local dest_dir="${2}"
-
-    local is_zip=0
-    if command -v unzip >/dev/null 2>&1 && unzip -tq "${zip_path}" 2>/dev/null; then
-        is_zip=1
-    elif command -v python3 >/dev/null 2>&1 && python3 -c "import zipfile; zipfile.ZipFile('${zip_path}').close()" 2>/dev/null; then
-        is_zip=1
-    fi
-
-    if [ "${is_zip}" -eq 1 ]; then
-        mkdir -p "${dest_dir}"
-        if command -v unzip >/dev/null 2>&1; then
-            unzip -o -d "${dest_dir}" "${zip_path}" >/dev/null 2>&1
-        else
-            python3 -c "import zipfile; zipfile.ZipFile('${zip_path}').extractall('${dest_dir}')"
-        fi
-        local binary
-        binary="$(find "${dest_dir}" -type f -not -name '*.zip' | head -1)"
-        if [ -z "${binary}" ]; then
-            yg_die "no binary found in downloaded archive ${zip_path}"
-        fi
-        printf '%s' "${binary}"
-        return 0
-    fi
-
-    # Not a zip — bare binary, pass through as-is
-    printf '%s' "${zip_path}"
 }
 
 yg_install_executable() {
@@ -244,10 +198,11 @@ yg_install_executable() {
 # ---------------------------------------------------------------------------
 
 yg_source_install() {
-    # $1 = repo root, $2 = flavor, $3 = venv path ("" to skip venv creation)
+    # $1 = repo root, $2 = flavor, $3 = venv path ("" to skip venv creation), $4 = with GUI (0|1)
     local repo_root="${1}"
     local flavor="${2}"
     local venv_dir="${3}"
+    local with_gui="${4:-0}"
     yg_need_cmd "${YGGDRASIM_PYTHON}"
     if [ -n "${venv_dir}" ]; then
         if [ ! -d "${venv_dir}" ]; then
@@ -260,11 +215,19 @@ yg_source_install() {
     (
         cd "${repo_root}"
         python -m pip install --upgrade pip
-        case "${flavor}" in
-            clean) python -m pip install -e '.[saip]' ;;
-            full)  python -m pip install -e '.[full]' ;;
-            *)     yg_die "internal: unexpected flavor ${flavor}" ;;
-        esac
+        if [ "${with_gui}" = "1" ]; then
+            case "${flavor}" in
+                clean) python -m pip install -e '.[saip,gui]' ;;
+                full)  python -m pip install -e '.[full,gui]' ;;
+                *)     yg_die "internal: unexpected flavor ${flavor}" ;;
+            esac
+        else
+            case "${flavor}" in
+                clean) python -m pip install -e '.[saip]' ;;
+                full)  python -m pip install -e '.[full]' ;;
+                *)     yg_die "internal: unexpected flavor ${flavor}" ;;
+            esac
+        fi
     )
     yg_emit "editable install complete (flavor=${flavor})"
 }
@@ -290,6 +253,7 @@ Options:
   --venv <path>               Virtualenv path for source mode
                               (default: <repo-root>/.venv)
   --no-deps                   Skip host package-manager prerequisites
+  --with-gui                  Also install GUI extras / GUI release binary
   --no-venv                   Source mode: install into the current Python
                               environment instead of creating a venv
   -h, --help                  Show this help and exit
@@ -309,6 +273,7 @@ yg_parse_posix_args() {
     YG_VENV_DIR=""
     YG_SKIP_DEPS="0"
     YG_SKIP_VENV="0"
+    YG_WITH_GUI="0"
 
     while [ "${#}" -gt 0 ]; do
         case "${1}" in
@@ -338,6 +303,10 @@ yg_parse_posix_args() {
                 ;;
             --no-deps)
                 YG_SKIP_DEPS="1"
+                shift 1
+                ;;
+            --with-gui)
+                YG_WITH_GUI="1"
                 shift 1
                 ;;
             --no-venv)
@@ -372,21 +341,13 @@ yg_parse_posix_args() {
 
 yg_resolve_release_url() {
     # $1 = version tag ("latest" or explicit tag)
-    # $2 = asset base name from yg_asset_name (os-arch-flavor, no version)
+    # $2 = asset name (without extension)
     # Writes the download URL to stdout.
     local version="${1}"
     local asset_name="${2}"
-
-    local tag="${version}"
-    if [ "${tag}" = "latest" ]; then
-        tag="$(yg_resolve_latest_tag)"
+    if [ "${version}" = "latest" ]; then
+        printf '%s/latest/download/%s' "${YGGDRASIM_RELEASE_BASE}" "${asset_name}"
+    else
+        printf '%s/download/%s/%s' "${YGGDRASIM_RELEASE_BASE}" "${version}" "${asset_name}"
     fi
-
-    # Strip leading v/V so the asset filename carries the plain semver
-    # (v1.2.3 → 1.2.3) while the URL path uses the real tag.
-    local asset_ver="${tag#v}"
-    asset_ver="${asset_ver#V}"
-
-    printf '%s/download/%s/%s-%s.zip' \
-        "${YGGDRASIM_RELEASE_BASE}" "${tag}" "${asset_name}" "${asset_ver}"
 }

@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 import importlib
 import os
 import sys
@@ -68,7 +71,7 @@ class FrozenRuntimePathTests(unittest.TestCase):
                     / "Variant O"
                     / "SM-DP+"
                     / "SM_DPauth"
-                    / "CERT_S_SM_DPauth_VARO_SIG_NIST.der"
+                    / "SM_DPauth-csr.cnf"
                 ).exists()
             )
             self.assertTrue((runtime_root / "Workspace" / "LocalSMDPP" / "profile" / "test_profile.txt").exists())
@@ -107,7 +110,7 @@ class FrozenRuntimePathTests(unittest.TestCase):
             finally:
                 importlib.reload(scp03_config)
 
-    def test_scp11_relay_configs_seed_workspace_cert_paths_when_frozen(self) -> None:
+    def test_scp11_relay_configs_use_system_trust_without_seeding_test_certs_when_frozen(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             runtime_root = Path(temp_dir) / "runtime"
             patch_frozen, patch_executable, patch_env = self._frozen_patches(runtime_root)
@@ -117,13 +120,14 @@ class FrozenRuntimePathTests(unittest.TestCase):
                 test_cfg = TestRelayConfig()
             self.assertEqual(relay_cfg.CERT_PATH_AUTH, str(runtime_root / "Workspace" / "SCP11" / "CERT.DPauth.ECDSA.der"))
             self.assertEqual(live_cfg.CERT_PATH_AUTH, str(runtime_root / "Workspace" / "SCP11" / "live" / "CERT.DPauth.ECDSA.der"))
-            self.assertEqual(test_cfg.CERT_PATH_AUTH, str(runtime_root / "Workspace" / "SCP11" / "test" / "CERT.DPauth.ECDSA.der"))
-            self.assertTrue((runtime_root / "Workspace" / "SCP11" / "ES9_TEST_CI_CA.pem").exists())
-            self.assertTrue((runtime_root / "Workspace" / "SCP11" / "SK.DPauth.ECDSA.pem").exists())
-            self.assertTrue((runtime_root / "Workspace" / "SCP11" / "live" / "ES9_TEST_CI_CA.pem").exists())
-            self.assertTrue((runtime_root / "Workspace" / "SCP11" / "live" / "SK.DPauth.ECDSA.pem").exists())
-            self.assertTrue((runtime_root / "Workspace" / "SCP11" / "test" / "ES9_TEST_CI_CA.pem").exists())
-            self.assertTrue((runtime_root / "Workspace" / "SCP11" / "test" / "SK.DPauth.ECDSA.pem").exists())
+            self.assertEqual(test_cfg.CERT_PATH_AUTH, live_cfg.CERT_PATH_AUTH)
+            self.assertEqual(relay_cfg.ES9_CA_BUNDLE_PATH, "")
+            self.assertEqual(live_cfg.ES9_CA_BUNDLE_PATH, "")
+            self.assertEqual(test_cfg.ES9_CA_BUNDLE_PATH, "")
+            self.assertFalse((runtime_root / "Workspace" / "SCP11" / "ES9_TEST_CI_CA.pem").exists())
+            self.assertFalse((runtime_root / "Workspace" / "SCP11" / "SK.DPauth.ECDSA.pem").exists())
+            self.assertFalse((runtime_root / "Workspace" / "SCP11" / "live" / "ES9_TEST_CI_CA.pem").exists())
+            self.assertFalse((runtime_root / "Workspace" / "SCP11" / "live" / "SK.DPauth.ECDSA.pem").exists())
 
     def test_eim_local_config_seeds_writable_runtime_tree_when_frozen(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

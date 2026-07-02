@@ -1,4 +1,7 @@
-"""Phase B regression coverage for ``decode_fcp_attributes``.
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
+"""Regression coverage for ``decode_fcp_attributes``.
 
 The adapter routes FCP descriptor parsing through pySim's
 ``File.from_fileDescriptor`` so the simulator stays aligned with the

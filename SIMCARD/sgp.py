@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """SGP.22 / SGP.32 BPP consumer: ES8+ APDU-sequence delivery, IccidMismatch / DuplicateIccid guard, and profile-install lifecycle."""
 from __future__ import annotations
@@ -52,8 +55,8 @@ from yggdrasim_common.runtime_paths import ensure_seeded_workspace_file, runtime
 DEFAULT_SIM_EIM_IDENTITY: dict[str, str] = {
     "eim_id": "2.25.311782205282738360923618091971140414400",
     "eim_id_type": "oid",
-    "eim_fqdn": "yggdrasim.eim.test.1ot.com",
-    "eim_endpoint": "https://yggdrasim.eim.test.1ot.com/gsma/rsp2/asn1",
+    "eim_fqdn": "eim.example.test",
+    "eim_endpoint": "https://eim.example.test/gsma/rsp2/asn1",
     "euicc_ci_pk_id": "F54172BDF98A95D65CBEB88A38A1C11D800A85C3",
     "eim_public_key_cert_path": "",
     "trusted_tls_cert_path": "",
@@ -114,7 +117,7 @@ class SgpLogic:
         self.state.sgp_session = SimSgpSession()
 
     def handle_store_data(self, payload: bytes) -> tuple[bytes, int, int]:
-        """Handle STORE DATA (SGP.22 §3.1.1 / GP Card Spec v2.3 §11.11): accumulate, decode, and dispatch IPA-poll payloads."""
+        """Handle STORE DATA (SGP.22 §3.1.1 / GP Card Spec v2.3 §11.11): accumulate and decode payloads."""
         normalized = bytes(payload or b"")
         if normalized == bytes.fromhex("BF2000"):
             return self._build_euicc_info1_response(), 0x90, 0x00
@@ -3489,6 +3492,7 @@ class SgpLogic:
             auth_config=profile_auth_config,
         )
         self.state.profiles.append(profile)
+        rebuild_runtime_filesystem(self.state)
         self._sync_profile_store()
         return profile
 
@@ -3549,7 +3553,7 @@ class SgpLogic:
         used = {profile.iccid for profile in self.state.profiles}
         suffix = len(self.state.profiles) + 11
         while True:
-            candidate = f"894611111111111111{suffix:02d}"
+            candidate = f"898811111111111111{suffix:02d}"
             if candidate not in used:
                 return candidate
             suffix += 1

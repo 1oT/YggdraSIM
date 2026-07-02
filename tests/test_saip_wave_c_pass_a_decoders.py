@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 """
 Wave C Pass A — semantic decoder coverage for DF.5GS / DF.5G_ProSe /
 DF.SNPN / ADF.USIM ePDG EFs.
@@ -264,9 +267,9 @@ class TestIpdIps:
 
 class TestEpdgId:
     def test_ipv4_address(self) -> None:
-        decoded = _roundtrip("ef-epdgid", "800501C0A8A001")
+        decoded = _roundtrip("ef-epdgid", "800501C0000201")
         assert decoded["addressType"] == "IPv4"
-        assert decoded["address"] == "192.168.160.1"
+        assert decoded["address"] == "192.0.2.1"
 
     def test_ipv6_address(self) -> None:
         decoded = _roundtrip(
@@ -277,15 +280,15 @@ class TestEpdgId:
 
     def test_fqdn_address(self) -> None:
         decoded = _roundtrip(
-            "ef-epdgid", "801100657064672E6F736D6F636F6D2E6F7267",
+            "ef-epdgid", "801100657064672E6578616D706C652E6F7267",
         )
         assert decoded["addressType"] == "FQDN"
-        assert decoded["address"] == "epdg.osmocom.org"
+        assert decoded["address"] == "epdg.example.org"
 
     def test_emergency_uses_emergency_format_name(self) -> None:
-        decoded = _roundtrip("ef-epdgidem", "800501C0A8A002")
+        decoded = _roundtrip("ef-epdgidem", "800501C0000202")
         assert decoded["format"] == "Emergency ePDG Identifier"
-        assert decoded["address"] == "192.168.160.2"
+        assert decoded["address"] == "192.0.2.2"
 
 
 class TestEpdgSelection:

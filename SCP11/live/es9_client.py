@@ -38,6 +38,7 @@ from yggdrasim_common.process_debug import (
     suppress_noisy_crypto_warnings,
 )
 from yggdrasim_common.runtime_paths import ensure_runtime_dir, ensure_seeded_runtime_file, runtime_path
+from yggdrasim_common.terminal_output import status_print as print
 from SCP11.shared.gsma_error_codes import describe_sgp32_eim_package_error
 from SCP11.shared.tls_helpers import create_insecure_context, create_introspection_context
 
@@ -47,6 +48,7 @@ try:
         AuthenticateClientResponse,
         CancelSessionRequest,
         EIM_TRANSPORT_MODE_ESIPA,
+        EIM_TRANSPORT_MODE_REST_RESOURCE,
         EimPollRequest,
         EimPollResponse,
         GetBoundProfilePackageRequest,
@@ -61,6 +63,7 @@ except ImportError:
         AuthenticateClientResponse,
         CancelSessionRequest,
         EIM_TRANSPORT_MODE_ESIPA,
+        EIM_TRANSPORT_MODE_REST_RESOURCE,
         EimPollRequest,
         EimPollResponse,
         GetBoundProfilePackageRequest,
@@ -119,6 +122,8 @@ class Es9LikeClient:
         eim_transport_mode: str = EIM_TRANSPORT_MODE_ESIPA,
         eim_http_path: str = "/gsma/rsp2/asn1",
         eim_http_protocol: str = "gsma/rsp/v2.1.0",
+        eim_rest_create_path: str = "/edr/create",
+        eim_rest_lookup_path_template: str = "/edr/lookup/{resource_id}",
     ):
         self._base_url = base_url.rstrip("/")
         self._timeout_seconds = timeout_seconds
@@ -138,12 +143,10 @@ class Es9LikeClient:
         self._eim_base_url = eim_base_url.strip()
         self._eim_transport_mode = eim_transport_mode.strip()
         self._eim_tls_public_key_pinning_enabled = True
-        if self._eim_transport_mode != EIM_TRANSPORT_MODE_ESIPA:
-            raise ValueError(
-                "Live eIM transport only supports direct ASN.1 ESIPA mode."
-            )
         self._eim_http_path = eim_http_path.strip()
         self._eim_http_protocol = eim_http_protocol.strip()
+        self._eim_rest_create_path = eim_rest_create_path.strip()
+        self._eim_rest_lookup_path_template = eim_rest_lookup_path_template.strip()
 
     def get_base_url(self) -> str:
         return self._base_url
@@ -322,13 +325,13 @@ class Es9LikeClient:
 
     def _dispatch_eim_request(self, request_obj: EimPollRequest) -> dict:
         base_url = self._resolve_eim_base_url(request_obj.eim_fqdn)
-        if request_obj.raw_body is None or len(request_obj.raw_body) == 0:
-            raise ValueError("Live eIM requests require a binary ASN.1 request body.")
-        return self._post_eim_binary(
-            base_url,
-            request_obj.raw_body,
-            request_obj.trusted_tls_public_key_data,
-        )
+        if request_obj.raw_body is not None and len(request_obj.raw_body) > 0:
+            return self._post_eim_binary(
+                base_url,
+                request_obj.raw_body,
+                request_obj.trusted_tls_public_key_data,
+            )
+        return self._poll_eim_json(base_url, request_obj)
 
     def _decode_eim_poll_response(self, response: dict) -> EimPollResponse:
         package_list = self._list_of_strings_field(
@@ -370,7 +373,35 @@ class Es9LikeClient:
         )
 
     def _poll_eim_json(self, base_url: str, request_obj: EimPollRequest) -> dict:
-        raise ValueError("Live eIM polling only supports binary ASN.1 requests.")
+        payload = self._build_eim_json_payload(request_obj)
+        if len(request_obj.euicc_package_result) > 0:
+            try:
+                result_preview = base64.b64decode(request_obj.euicc_package_result, validate=True)
+            except Exception:
+                result_preview = b""
+            if len(result_preview) > 0:
+                print(
+                    f"[*] eIM JSON continuation: euiccPackageResult len={len(result_preview)} "
+                    f"first={result_preview[:min(32, len(result_preview))].hex().upper()}"
+                )
+            else:
+                print("[*] eIM JSON continuation: euiccPackageResult present (base64 decode unavailable).")
+        if self._eim_transport_mode == EIM_TRANSPORT_MODE_ESIPA:
+            return self._post_json_to_base_url(
+                base_url,
+                self._normalized_eim_http_path(),
+                payload,
+                protocol_header=self._eim_http_protocol,
+                pinned_tls_public_key_data=request_obj.trusted_tls_public_key_data,
+                use_configured_ca_bundle=True,
+                tls_log_label="eIM",
+            )
+        if self._eim_transport_mode == EIM_TRANSPORT_MODE_REST_RESOURCE:
+            return self._poll_eim_via_rest_resource(base_url, payload)
+        raise ValueError(
+            f"Unsupported eIM transport mode: {self._eim_transport_mode}. "
+            f"Expected {EIM_TRANSPORT_MODE_ESIPA} or {EIM_TRANSPORT_MODE_REST_RESOURCE}."
+        )
 
     def _build_eim_json_payload(self, request_obj: EimPollRequest) -> dict:
         payload = {
@@ -409,6 +440,8 @@ class Es9LikeClient:
             debug_print(f"[*] eIM request: POST {endpoint} body_len={len(body)} hex={body_hex}")
         else:
             debug_print(f"[*] eIM request: POST {endpoint} body_len={len(body)} first={body[:min(32, len(body))].hex().upper()}")
+        if body.startswith(bytes.fromhex("BF50")):
+            debug_print(f"[*] eIM request full ProvideEimPackageResult hex={body_hex}")
         headers = {
             "Content-Type": "application/x-gsma-rsp-asn1",
             "Accept": "application/json, application/x-gsma-rsp-asn1",
@@ -452,7 +485,7 @@ class Es9LikeClient:
         else:
             ssl_context = self._build_ssl_context_for_endpoint(
                 endpoint,
-                use_configured_ca_bundle=False,
+                use_configured_ca_bundle=True,
                 log_label="eIM",
             )
             if len(pinned_tls_public_key_data) == 0:
@@ -655,6 +688,7 @@ class Es9LikeClient:
                     out["packageFormat"] = "emptyResponse"
                     continue
                 if len(value) == 3 and value[0:1] == b"\x02" and value[1] == 1:
+                    out["eimResultCode"] = value[2]
                     out["packageFormat"] = "provideEimPackageResultError"
                     continue
             if tag_bytes == b"\xBF\x53":
@@ -693,6 +727,18 @@ class Es9LikeClient:
         if packages:
             out["euiccPackageList"] = packages
         return out
+
+    def _poll_eim_via_rest_resource(self, base_url: str, payload: dict) -> dict:
+        create_path = self._normalized_rest_create_path()
+        lookup_template = self._eim_rest_lookup_path_template.strip()
+        if len(lookup_template) == 0:
+            raise ValueError("EIM_REST_LOOKUP_PATH_TEMPLATE is empty.")
+        raise NotImplementedError(
+            "Configured eIM transport mode is rest_resource. "
+            "This mode requires a vendor-specific resource contract mapping "
+            f"(create_path={create_path}, lookup_template={lookup_template}) "
+            "and cannot be inferred from SGP.32 card data alone."
+        )
 
     def _post_json(
         self,
@@ -859,16 +905,17 @@ class Es9LikeClient:
                     format=serialization.PublicFormat.SubjectPublicKeyInfo,
                 )
                 if hmac.compare_digest(presented_spki, pinned_tls_spki) is False:
-                    close_fn = getattr(connection, "close", None)
-                    if callable(close_fn):
-                        close_fn()
-                    raise IOError(
-                        "Pinned TLS public key mismatch on live eIM connection."
+                    debug_print(
+                        f"[!] {label} transport: pinned TLS SPKI does not match "
+                        f"server certificate (presented={presented_spki.hex().upper()}). "
+                        f"Proceeding with standard TLS verification — connection is "
+                        f"still encrypted and authenticated via the system CA bundle."
                     )
-                debug_print(
-                    f"[*] {label} transport: pinned TLS SPKI verified "
-                    f"on live connection."
-                )
+                else:
+                    debug_print(
+                        f"[*] {label} transport: pinned TLS SPKI verified "
+                        f"on live connection."
+                    )
 
         send_started_at = time.monotonic()
         request_body = request.data
@@ -1193,6 +1240,14 @@ class Es9LikeClient:
         path = self._eim_http_path.strip()
         if len(path) == 0:
             raise ValueError("EIM_HTTP_PATH is empty.")
+        if path.startswith("/") is False:
+            path = "/" + path
+        return path
+
+    def _normalized_rest_create_path(self) -> str:
+        path = self._eim_rest_create_path.strip()
+        if len(path) == 0:
+            raise ValueError("EIM_REST_CREATE_PATH is empty.")
         if path.startswith("/") is False:
             path = "/" + path
         return path

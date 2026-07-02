@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 from __future__ import annotations
 
 import os
@@ -13,6 +16,14 @@ INCLUDED_TOP_LEVEL_DIRS = {
     "scripts",
     "SCP11",
     "tests",
+}
+
+EXCLUDED_SOURCE_PARTS = {
+    ("plugins", "polling"),
+}
+
+EXCLUDED_SOURCE_FILES = {
+    "tests/eim-sh/" + "EIM_" + "POLL" + "_SEQUENCE.md",
 }
 
 # Top-level Markdown files that should be mirrored alongside the README so
@@ -78,7 +89,15 @@ def iter_markdown_sources() -> list[Path]:
     matches: list[Path] = []
     for path in root.rglob("*.md"):
         relative_path = path.relative_to(root)
+        relative_posix = relative_path.as_posix()
         if any(part.startswith(".") for part in relative_path.parts):
+            continue
+        if relative_posix in EXCLUDED_SOURCE_FILES:
+            continue
+        if any(
+            tuple(relative_path.parts[: len(excluded_parts)]) == excluded_parts
+            for excluded_parts in EXCLUDED_SOURCE_PARTS
+        ):
             continue
         if len(relative_path.parts) == 1:
             if relative_path.name not in ROOT_MARKDOWN_FILES:

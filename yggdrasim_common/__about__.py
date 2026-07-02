@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 """
 Single-source version metadata for the YggdraSIM suite.
 
@@ -74,7 +77,7 @@ def get_version() -> str:
 
     Resolution order:
 
-    1. Build stamp written by ``yggdrasim_main.spec`` -- used by frozen
+    1. Build stamp written by ``yggdrasim_main.spec`` — used by frozen
        PyInstaller bundles that do not ship ``pyproject.toml``.
     2. ``pyproject.toml`` of the source checkout.
     3. Installed distribution metadata (wheel / editable install).

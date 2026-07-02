@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """
 CLI entry point for the APDU mutation fuzzer.
@@ -63,7 +66,7 @@ def _build_null_transport(args: argparse.Namespace) -> _NullTransport:
     iccid = str(args.null_iccid or "").strip()
     imsi = str(args.null_imsi or "").strip()
     if len(iccid) == 0 and len(imsi) == 0:
-        iccid = "8900000000000000TEST"
+        iccid = "8988000000000000TEST"
     return _NullTransport(iccid=iccid, imsi=imsi)
 
 
@@ -98,9 +101,9 @@ def _build_pcsc_transport(args: argparse.Namespace):
     class _PcscTransport:
         def probe_card_identity(self) -> tuple[str, str]:
             # ICCID read is delegated; a full ETSI SELECT dance is
-            # beyond the scope of the MVP. The operator must supply
-            # the identity through --probe-iccid / --probe-imsi when
-            # the card is locked and cannot be queried.
+            # outside the scope of this fuzzer. The operator must
+            # supply the identity through --probe-iccid / --probe-imsi
+            # when the card is locked and cannot be queried.
             """Read the ATR and ICCID from the target card and return a summary dict."""
             probe_iccid = str(args.probe_iccid or "").strip()
             probe_imsi = str(args.probe_imsi or "").strip()

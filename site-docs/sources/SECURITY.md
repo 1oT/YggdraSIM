@@ -1,3 +1,8 @@
+<!--
+SPDX-License-Identifier: GPL-3.0-or-later
+Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+-->
+
 # Security Policy
 
 YggdraSIM is a **secure-element research and auditing toolkit**. The
@@ -105,6 +110,3 @@ For context, the following hardening landed before `v1.0.0`:
 - `pyscard`, `pysim`, and operator-only state directories are
   excluded from the published wheel and Docker image (see
   `.gitignore`, `.dockerignore`, `MANIFEST.in`).
-
-See `CHANGELOG.md` and tracked issues for the current security
-remediation list.

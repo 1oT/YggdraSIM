@@ -1,3 +1,8 @@
+<!--
+SPDX-License-Identifier: GPL-3.0-or-later
+Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+-->
+
 # SCP11 Shared Helper Layer
 
 `SCP11/shared` is the common helper layer for the split `SCP11` codebase. It is

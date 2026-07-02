@@ -1,11 +1,16 @@
+<!--
+SPDX-License-Identifier: GPL-3.0-or-later
+Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+-->
+
 # YggdraSIM Simulated eIM – AddEim Identity Sheet
 
 This document is the concrete, vendor-neutral identity record for the
-YggdraSIM simulated eIM. It contains **every field** that a real-world eIM
-portal (or any other GSMA SGP.32-compliant eIM operator) needs in
-order to accept YggdraSIM's simulated eIM as a peer / indirect profile
-download source, and to bind the resulting eIM Configuration Data to a
-real eUICC via ES25 `AddEim`.
+YggdraSIM simulated eIM. It contains **every field** that a real-world
+GSMA SGP.32-compliant eIM portal needs in order to accept YggdraSIM's
+simulated eIM as a peer / indirect profile download source, and to
+bind the resulting eIM Configuration Data to a real eUICC via ES25
+`AddEim`.
 
 The structure mirrors the GSMA SGP.32 `EimConfigurationData` ASN.1 shape
 (section 2.10.1, "eIM Configuration Data"). All values are hardcoded so
@@ -20,8 +25,8 @@ the sheet can be pasted straight into a vendor registration form.
 
 ## 2. Field matrix
 
-| ASN.1 field               | Portal policy | Strict eIM policy | Notes                                                  |
-|---------------------------|-----------|-------------------|--------------------------------------------------------|
+| ASN.1 field               | Common policy | Strict eIM policy | Notes                                                  |
+|---------------------------|---------------|-------------------|--------------------------------------------------------|
 | `eimId`                   | Mandatory | Mandatory         | UTF8String, up to 128 chars, unique per eIM instance.  |
 | `eimIdType`               | Mandatory | Mandatory         | `Oid`, `Fqdn`, or `ProprietaryId`.                     |
 | `eimFqdn`                 | Mandatory | Mandatory         | Must match TLS leaf CN/SAN and AddEim endpoint.        |
@@ -34,7 +39,7 @@ the sheet can be pasted straight into a vendor registration form.
 > Policy note. Some eIM registration portals enforce that every field
 > listed above be non-empty **except** `euiccCiPkId` — i.e. they treat
 > `euiccCiPkId` as the single optional field and everything else as
-> mandatory. A strict eIM portal follows the same superset and will accept
+> mandatory. Other portals follow the same superset but will accept
 > a profile even if further optional fields are omitted. The record
 > below satisfies both policies.
 
@@ -159,7 +164,7 @@ Identity breakdown:
 1. `eimId` uses the private enterprise OID arc
    `1.3.6.1.4.1.53775.99.*`. The `.99.1.0` leaf marks this as a
    YggdraSIM-issued test identity, deliberately distinct from any
-   real production OID.
+   real operator production OID.
 2. `eimFqdn` is the SGP.26 Variant O default (`eim.example.com`), which
    matches the TLS leaf SAN and the signing leaf CN shipped with the
    test vectors.
@@ -206,8 +211,8 @@ Profile 3 or Profile 4 depending on which naming you picked.
 4. The `eimId` values above are test identifiers. Do not reuse them
    against a production eIM or against a customer's live RSP chain.
 5. YggdraSIM operates all of the above against self-signed / SGP.26
-   test trust. Production interop requires HSM-backed signing
-   material that is out of scope for this release.
+   test trust. Production interop (HSM-backed signer seam for the
+   local SMDPp) is not part of this release.
 
 ## 7. Verification cheatsheet
 
@@ -221,11 +226,11 @@ openssl x509 -in <paste-trustedPublicKeyDataTls> -noout -subject -issuer -serial
 
 Expected output for Profile 3:
 
-1. Signing leaf subject: `C=XX, CN=eim.example.test`
+1. Signing leaf subject: `C=DE, CN=eim.example.test`
 2. Signing leaf issuer:  `CN=Test CI, OU=TESTCERT, O=RSPTEST, C=IT`
 3. Signing leaf serial:  `6ABC01D36775D4B1BA6C263A9B33A441BF6731CF`
 4. Signing leaf validity: `Mar 23 19:50:51 2026 GMT – Mar 22 19:50:51 2033 GMT`
-5. TLS leaf subject:     `C=XX, CN=eim.example.test`
+5. TLS leaf subject:     `C=DE, CN=eim.example.test`
 6. TLS leaf issuer:      `CN=Test CI, OU=TESTCERT, O=RSPTEST, C=IT`
 7. TLS leaf serial:      `5D0BCDE2C9060B8C94F3D298DC02DF22B3E86C2C`
 8. TLS leaf validity:    `Mar 23 19:50:51 2026 GMT – Mar 23 19:50:51 2029 GMT`
@@ -234,11 +239,11 @@ Expected output for Profile 3:
 
 Expected output for Profile 4:
 
-1. Signing leaf subject: `C=XX, CN=eim.example.com`
+1. Signing leaf subject: `C=DE, CN=eim.example.com`
 2. Signing leaf issuer:  `CN=Test CI, OU=TESTCERT, O=RSPTEST, C=IT`
 3. Signing leaf serial:  `03FF0AFF0009990101FF01`
 4. Signing leaf validity: `Jul 16 10:09:49 2024 GMT – Jul 15 10:09:49 2031 GMT`
-5. TLS leaf subject:     `C=XX, CN=eim.example.com`
+5. TLS leaf subject:     `C=DE, CN=eim.example.com`
 6. TLS leaf issuer:      `CN=Test CI, OU=TESTCERT, O=RSPTEST, C=IT`
 7. TLS leaf serial:      `03FF0AFF0009990100FF00FF01`
 8. TLS leaf validity:    `Jun 30 13:18:10 2025 GMT – Aug  2 13:18:10 2026 GMT`
@@ -254,5 +259,6 @@ the scalar fields.
 
 1. Initial hardcoded sheet. Covers Profile 3 (YggdraSIM
    branded), Profile 4 (SGP.26 Variant O neutral), Profile 5 (BRP
-   swap). Matches strict registration form expectations and the common
-   "all-mandatory-except-`euiccCiPkId`" eIM intake policy.
+   swap). Matches the common operator registration form
+   expectations and the "all-mandatory-except-`euiccCiPkId`" eIM
+   intake policy.

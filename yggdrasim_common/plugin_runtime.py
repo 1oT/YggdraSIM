@@ -1,5 +1,8 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
-"""Plugin runtime gate: enforces the absence of optional hardware-dependent plugins in environments that declare them unavailable."""
+
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+"""Plugin runtime gate for optional, operator-supplied extension code."""
 from __future__ import annotations
 
 import importlib.util
@@ -29,32 +32,46 @@ def _env_falsy(name: str) -> bool:
 
 
 def _plugin_loading_allowed() -> bool:
-    """Plugins load by default unless explicitly hard-locked.
+    """Return whether runtime plugins may be imported.
 
-    The posture mirrors the TLS-introspection gate in
-    ``SCP11/shared/tls_helpers.py``:
+    Plugins are executable Python loaded from the active runtime root,
+    so the secure default is opt-in:
 
-    * Default: **on**. If the active runtime root has a ``plugins/``
-      directory with loadable modules, they are loaded. This matches
-      the shipped reality that ``plugins/polling_plugin.py`` is
-      first-party, tracked code backing the ``POLL`` / ``IPAE-LIVE`` /
-      ``IPAE-TEST`` command families.
-    * ``YGGDRASIM_DISALLOW_PLUGINS=1`` → hard-lock. Refuse every
-      plugin even if ``YGGDRASIM_ALLOW_PLUGINS=1`` is also set.
-      Intended for attestation / CI / air-gapped deployments where no
-      out-of-tree code may execute.
-    * ``YGGDRASIM_ALLOW_PLUGINS=0`` (or ``false``/``no``/``off``) →
-      explicit opt-out, equivalent to setting the disallow flag.
-      Kept for backward compat with prior opt-in-only deployments
-      that want to keep loading disabled after the default flip.
-    * ``YGGDRASIM_ALLOW_PLUGINS=1`` (or truthy) → explicit opt-in.
-      Redundant now that the default is on, but still honoured.
+    * ``YGGDRASIM_DISALLOW_PLUGINS=1`` hard-locks the loader and wins
+      over every other flag.
+    * ``YGGDRASIM_ALLOW_PLUGINS=1`` explicitly enables plugin imports.
+    * unset, false, or unrecognised ``YGGDRASIM_ALLOW_PLUGINS`` values
+      leave plugin imports disabled.
     """
     if _env_truthy(_DISALLOW_PLUGINS_ENV):
         return False
+    return _env_truthy(_ALLOW_PLUGINS_ENV)
+
+
+def _plugin_loading_block_reason() -> str:
+    if _env_truthy(_DISALLOW_PLUGINS_ENV):
+        return (
+            f"Plugin loading hard-locked via {_DISALLOW_PLUGINS_ENV}=1. "
+            f"Clear {_DISALLOW_PLUGINS_ENV} and set {_ALLOW_PLUGINS_ENV}=1 "
+            "to allow plugins from the runtime root."
+        )
+    raw_allow = os.environ.get(_ALLOW_PLUGINS_ENV, "")
+    allow_text = raw_allow.strip()
+    if len(allow_text) == 0:
+        return (
+            f"Plugin loading disabled by default. Set {_ALLOW_PLUGINS_ENV}=1 "
+            "to allow plugins from the runtime root."
+        )
     if _env_falsy(_ALLOW_PLUGINS_ENV):
-        return False
-    return True
+        return (
+            f"Plugin loading disabled via {_ALLOW_PLUGINS_ENV}={allow_text!r}. "
+            f"Set {_ALLOW_PLUGINS_ENV}=1 to allow plugins from the runtime root."
+        )
+    return (
+        f"Plugin loading disabled because {_ALLOW_PLUGINS_ENV}={allow_text!r} "
+        f"is not truthy. Set {_ALLOW_PLUGINS_ENV}=1 to allow plugins from "
+        "the runtime root."
+    )
 
 
 class PluginManager:
@@ -91,15 +108,8 @@ class PluginManager:
                     self._loaded = True
                     return
                 if _plugin_loading_allowed() is False:
-                    lock_source = (
-                        _DISALLOW_PLUGINS_ENV
-                        if _env_truthy(_DISALLOW_PLUGINS_ENV)
-                        else _ALLOW_PLUGINS_ENV
-                    )
                     self._load_errors["__gate__"] = (
-                        f"Plugin loading hard-locked via {lock_source}. "
-                        f"Unset or clear the variable to allow plugins from "
-                        f"{plugins_dir}."
+                        f"{_plugin_loading_block_reason()} Directory: {plugins_dir}."
                     )
                     self._loaded = True
                     return
@@ -149,8 +159,7 @@ class PluginManager:
         # Quiet info line so operators can eyeball which modules are
         # actually executing at startup. Matches the COMMON-P4-02
         # audit intent ("print a banner listing every loaded plugin
-        # path") without becoming a noisy warning for the default
-        # first-party ``polling_plugin.py`` case.
+        # path").
         label_parts: list[str] = []
         for path in loaded_paths:
             base = os.path.basename(path)
@@ -163,7 +172,8 @@ class PluginManager:
         labels = ", ".join(label_parts)
         sys.stderr.write(
             f"[plugins] loaded {len(loaded_paths)}: {labels} "
-            f"(hard-lock with {_DISALLOW_PLUGINS_ENV}=1).\n"
+            f"({_ALLOW_PLUGINS_ENV}=1; set {_DISALLOW_PLUGINS_ENV}=1 "
+            "to hard-lock plugin loading).\n"
         )
 
     def _load_plugin_module(
@@ -300,8 +310,8 @@ def reset_plugin_manager_for_tests() -> None:
     """Drop the cached ``PluginManager`` so the next call re-scans.
 
     Intended for unit tests that need to re-evaluate
-    ``YGGDRASIM_DISALLOW_PLUGINS`` / plugin directory contents after a
-    dynamic environment change. Not safe for concurrent use.
+    plugin gate flags / plugin directory contents after a dynamic
+    environment change. Not safe for concurrent use.
     """
     global _PLUGIN_MANAGER
     with _PLUGIN_MANAGER_LOCK:

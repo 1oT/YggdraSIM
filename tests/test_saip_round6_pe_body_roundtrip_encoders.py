@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 """
 Round-6 Sweep 4 — structured round-trip encoder coverage for the
 Round-4 / Round-5 PE-body decoders.

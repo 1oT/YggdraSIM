@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """HIL-Bridge live-decode state: accumulates captured APDU frames and maintains the decoded protocol tree for the TUI."""
 from __future__ import annotations
@@ -106,6 +109,14 @@ class StatefulFrameAnnotation:
     channel_number: int | None = None
     channel_poll_index: int | None = None
     state_event: bool = False
+    trace_group: str = ""
+    trace_label: str = ""
+    trace_operation: str = ""
+    trace_path: str = ""
+    trace_status: str = ""
+    trace_parent_frame: int | None = None
+    trace_related_frames: tuple[int, ...] = ()
+    trace_reason: str = ""
     # card_session_index tags every frame with a monotonically increasing
     # session ordinal. Each detected card reset (REFRESH proactive command
     # with a reset qualifier, or a long idle gap suggesting a reboot)
@@ -177,6 +188,14 @@ class _PendingProactiveState:
     timer_id: int | None = None
 
 
+@dataclass(frozen=True, slots=True)
+class _FileTraceEvent:
+    frame_number: int
+    operation_text: str
+    path_text: str
+    status: str
+
+
 def annotate_packet_summary(row: PacketSummary, annotation: StatefulFrameAnnotation | None) -> PacketSummary:
     """Annotate a single packet summary line with decoded APDU or ATR information."""
     if annotation is None:
@@ -230,6 +249,7 @@ _REFRESH_QUALIFIER_NAMES: dict[int, str] = {
 # to catch a deliberate reboot while staying well clear of normal poll
 # cadences (5-15 s on the live traces we've seen).
 _CARD_SESSION_IDLE_GAP_SECONDS = 30.0
+_MAX_FILE_TRACE_EVENTS = 12
 
 
 class LiveDecodeStateTracker:
@@ -253,6 +273,7 @@ class LiveDecodeStateTracker:
         self._current_file_path: tuple[str, ...] = ("MF",)
         self._current_file_kind = "mf"
         self._recent_file_operations: list[str] = []
+        self._recent_file_trace_events: list[_FileTraceEvent] = []
         # Card-session tracking. The counter starts at 1; every detected
         # reset increments it. `_pending_card_session_bump_reason` is set
         # when we need the *next* frame to open a new session (the REFRESH
@@ -351,6 +372,7 @@ class LiveDecodeStateTracker:
         # A fresh card session cannot carry channel state across: the
         # card was reset, so any still-open BIP sessions are invalid.
         self._force_close_stale_sessions_on_card_reset()
+        self._reset_file_trace_context()
         return reason
 
     def _detect_and_apply_idle_gap_bump(
@@ -372,6 +394,7 @@ class LiveDecodeStateTracker:
         self._card_session_reset_reasons[self._card_session_index] = reason
         self._card_session_iccids[self._card_session_index] = ""
         self._force_close_stale_sessions_on_card_reset()
+        self._reset_file_trace_context()
         return reason
 
     def _force_close_stale_sessions_on_card_reset(self) -> None:
@@ -383,6 +406,29 @@ class LiveDecodeStateTracker:
                 session.status = "closed-on-reset"
         self._active_session_id = None
         self._pending_session_id = None
+
+    def _reset_file_trace_context(self) -> None:
+        self._current_file_path = ("MF",)
+        self._current_file_kind = "mf"
+        self._recent_file_operations = []
+        self._recent_file_trace_events = []
+
+    def _trace_frames_from_meta(self, frame_meta: dict[str, object]) -> tuple[int, ...]:
+        raw_frames = frame_meta.get("trace_related_frames", ())
+        if isinstance(raw_frames, (list, tuple)) is False:
+            return ()
+        frames: list[int] = []
+        seen: set[int] = set()
+        for raw_frame in raw_frames:
+            try:
+                frame_number = int(raw_frame)
+            except (TypeError, ValueError):
+                continue
+            if frame_number <= 0 or frame_number in seen:
+                continue
+            frames.append(frame_number)
+            seen.add(frame_number)
+        return tuple(frames)
 
     def channel_session_frame_ranges(self) -> list[tuple[int, int, int]]:
         # Expose the observed OPEN->CLOSE frame windows so higher layers
@@ -459,21 +505,63 @@ class LiveDecodeStateTracker:
                     frame_meta,
                 )
             elif exchange.ins == SELECT_INS:
-                self._handle_file_select(frame_number, exchange, summary_parts, frame_lines)
+                self._handle_file_select(
+                    frame_number,
+                    exchange,
+                    summary_parts,
+                    frame_lines,
+                    frame_meta,
+                )
             elif exchange.ins == READ_BINARY_INS:
-                self._handle_file_read_binary(exchange, summary_parts, frame_lines)
+                self._handle_file_read_binary(
+                    frame_number,
+                    exchange,
+                    summary_parts,
+                    frame_lines,
+                    frame_meta,
+                )
             elif exchange.ins == READ_RECORD_INS:
-                self._handle_file_read_record(exchange, summary_parts, frame_lines)
+                self._handle_file_read_record(
+                    frame_number,
+                    exchange,
+                    summary_parts,
+                    frame_lines,
+                    frame_meta,
+                )
             elif exchange.ins == ENVELOPE_INS:
                 self._handle_envelope(frame_number, exchange, summary_parts, frame_lines, frame_meta)
             elif exchange.ins == GET_RESPONSE_INS:
-                self._handle_file_get_response(exchange, summary_parts, frame_lines)
+                self._handle_file_get_response(
+                    frame_number,
+                    exchange,
+                    summary_parts,
+                    frame_lines,
+                    frame_meta,
+                )
             elif exchange.ins == UPDATE_BINARY_INS:
-                self._handle_file_update_binary(exchange, summary_parts, frame_lines)
+                self._handle_file_update_binary(
+                    frame_number,
+                    exchange,
+                    summary_parts,
+                    frame_lines,
+                    frame_meta,
+                )
             elif exchange.ins == UPDATE_RECORD_INS:
-                self._handle_file_update_record(exchange, summary_parts, frame_lines)
+                self._handle_file_update_record(
+                    frame_number,
+                    exchange,
+                    summary_parts,
+                    frame_lines,
+                    frame_meta,
+                )
             elif exchange.ins == STATUS_INS:
-                self._handle_status(exchange, summary_parts, frame_lines, frame_meta)
+                self._handle_status(
+                    frame_number,
+                    exchange,
+                    summary_parts,
+                    frame_lines,
+                    frame_meta,
+                )
             self._try_scp_replay_unwrap(
                 frame_number,
                 exchange,
@@ -483,6 +571,10 @@ class LiveDecodeStateTracker:
 
         context_lines = tuple(self._build_context_lines(frame_lines, frame_time_seconds))
         channel_session_id = self._frame_channel_session_id(row, exchange, summary_parts)
+        trace_parent_frame = frame_meta.get("trace_parent_frame")
+        if not isinstance(trace_parent_frame, int):
+            trace_parent_frame = None
+        trace_related_frames = self._trace_frames_from_meta(frame_meta)
         # Record the frame's capture time so the next call can evaluate
         # the idle-gap heuristic; even FETCH-less packets update this.
         if frame_time_seconds is not None:
@@ -497,6 +589,14 @@ class LiveDecodeStateTracker:
             capture_time_seconds=frame_time_seconds,
             channel_session_id=channel_session_id,
             state_event=bool(frame_meta.get("state_event", False)),
+            trace_group=str(frame_meta.get("trace_group", "") or ""),
+            trace_label=str(frame_meta.get("trace_label", "") or ""),
+            trace_operation=str(frame_meta.get("trace_operation", "") or ""),
+            trace_path=str(frame_meta.get("trace_path", "") or ""),
+            trace_status=str(frame_meta.get("trace_status", "") or ""),
+            trace_parent_frame=trace_parent_frame,
+            trace_related_frames=trace_related_frames,
+            trace_reason=str(frame_meta.get("trace_reason", "") or ""),
             card_session_index=int(self._card_session_index),
             card_session_reset_reason=str(frame_reset_reason or ""),
         )
@@ -1019,13 +1119,20 @@ class LiveDecodeStateTracker:
 
     def _handle_status(
         self,
+        frame_number: int,
         exchange: ParsedApduExchange,
         summary_parts: list[str],
         frame_lines: list[str],
         frame_meta: dict[str, object],
     ) -> None:
         if exchange.sw1 != 0x91:
-            self._handle_file_status(exchange, summary_parts, frame_lines)
+            self._handle_file_status(
+                frame_number,
+                exchange,
+                summary_parts,
+                frame_lines,
+                frame_meta,
+            )
             return
         frame_meta["state_event"] = True
         summary_parts.append(f"FETCH PENDING {exchange.sw2}B")
@@ -1057,13 +1164,102 @@ class LiveDecodeStateTracker:
             return known_path
         return self._current_file_parent_path() + (f"FID {fid_hex}",)
 
-    def _remember_file_operation(self, operation_text: str) -> None:
+    def _file_trace_chain(self, frame_number: int) -> tuple[int, ...]:
+        frames: list[int] = []
+        seen: set[int] = set()
+        window_start = max(
+            0,
+            len(self._recent_file_trace_events) - (_MAX_FILE_TRACE_EVENTS - 1),
+        )
+        for event in self._recent_file_trace_events[window_start:]:
+            event_frame = int(event.frame_number)
+            if event_frame <= 0 or event_frame in seen:
+                continue
+            frames.append(event_frame)
+            seen.add(event_frame)
+        if frame_number > 0 and frame_number not in seen:
+            frames.append(int(frame_number))
+        return tuple(frames)
+
+    def _file_trace_parent_frame(self) -> int | None:
+        for event in reversed(self._recent_file_trace_events):
+            event_frame = int(event.frame_number)
+            if event_frame > 0:
+                return event_frame
+        return None
+
+    def _remember_file_operation(
+        self,
+        operation_text: str,
+        *,
+        frame_number: int | None = None,
+        path_text: str = "",
+        status: str = "",
+    ) -> None:
         normalized = str(operation_text or "").strip()
         if len(normalized) == 0:
             return
         self._recent_file_operations.append(normalized)
         if len(self._recent_file_operations) > 6:
             self._recent_file_operations = self._recent_file_operations[-6:]
+        if frame_number is None:
+            return
+        frame_number_i = int(frame_number)
+        if frame_number_i <= 0:
+            return
+        self._recent_file_trace_events.append(
+            _FileTraceEvent(
+                frame_number=frame_number_i,
+                operation_text=normalized,
+                path_text=str(path_text or "").strip(),
+                status=str(status or "").strip(),
+            )
+        )
+        if len(self._recent_file_trace_events) > _MAX_FILE_TRACE_EVENTS:
+            self._recent_file_trace_events = self._recent_file_trace_events[
+                -_MAX_FILE_TRACE_EVENTS:
+            ]
+
+    def _record_file_trace(
+        self,
+        frame_number: int,
+        frame_meta: dict[str, object],
+        *,
+        operation_text: str,
+        operation: str,
+        path_text: str,
+        status: str,
+        reason: str = "",
+    ) -> None:
+        normalized_operation = str(operation_text or "").strip()
+        if len(normalized_operation) == 0:
+            return
+        frame_meta["trace_group"] = "filesystem"
+        frame_meta["trace_label"] = normalized_operation
+        frame_meta["trace_operation"] = str(operation or "").strip()
+        frame_meta["trace_path"] = str(path_text or "").strip()
+        frame_meta["trace_status"] = str(status or "").strip()
+        frame_meta["trace_parent_frame"] = self._file_trace_parent_frame()
+        frame_meta["trace_related_frames"] = self._file_trace_chain(frame_number)
+        frame_meta["trace_reason"] = str(reason or "").strip()
+        self._remember_file_operation(
+            normalized_operation,
+            frame_number=frame_number,
+            path_text=path_text,
+            status=status,
+        )
+
+    def _select_failure_reason(self, selected_path: tuple[str, ...]) -> str:
+        current_text = _path_text(self._current_file_path)
+        selected_text = _path_text(selected_path)
+        context_path = self._current_file_parent_path()
+        context_text = _path_text(context_path)
+        if _path_is_under(selected_path, context_path) is False:
+            return (
+                f"Current selection stayed {current_text}; requested file resolved to "
+                f"{selected_text}, outside active context {context_text}."
+            )
+        return f"Current selection stayed {current_text}; requested file resolved to {selected_text}."
 
     def _handle_file_select(
         self,
@@ -1071,11 +1267,13 @@ class LiveDecodeStateTracker:
         exchange: ParsedApduExchange,
         summary_parts: list[str],
         frame_lines: list[str],
+        frame_meta: dict[str, object],
     ) -> None:
         selector = _extract_command_body(exchange.command)
         selected_path = self._resolve_select_path(selector)
         selected_text = _path_text(selected_path)
         sw_text = _status_word_text(exchange.sw1, exchange.sw2)
+        previous_text = _path_text(self._current_file_path)
         # Track AID context for the replay engine. ETSI TS 102 221 §11.1.1
         # specifies SELECT P1 bit 0x04 = "select by DF name" (AID). When the
         # select is successful the AID becomes the current applet context
@@ -1095,17 +1293,37 @@ class LiveDecodeStateTracker:
                 frame_lines.append(
                     f"SELECT announced {exchange.sw2} response byte(s) pending on GET RESPONSE."
                 )
-            self._remember_file_operation(f"Frame {frame_number}: SELECT {selected_text}")
+            self._record_file_trace(
+                frame_number,
+                frame_meta,
+                operation_text=f"Frame {frame_number}: SELECT {selected_text}",
+                operation="SELECT",
+                path_text=selected_text,
+                status="ok",
+                reason=f"Current selection changed from {previous_text} to {selected_text}.",
+            )
             return
         summary_parts.append(f"FS {selected_text} SELECT FAIL {sw_text}")
+        failure_reason = self._select_failure_reason(selected_path)
         frame_lines.append(f"SELECT failed for {selected_text} with status word {sw_text}.")
-        self._remember_file_operation(f"Frame {frame_number}: SELECT {selected_text} FAIL {sw_text}")
+        frame_lines.append(f"  {failure_reason}")
+        self._record_file_trace(
+            frame_number,
+            frame_meta,
+            operation_text=f"Frame {frame_number}: SELECT {selected_text} FAIL {sw_text}",
+            operation="SELECT",
+            path_text=selected_text,
+            status=f"fail {sw_text}",
+            reason=failure_reason,
+        )
 
     def _handle_file_read_binary(
         self,
+        frame_number: int,
         exchange: ParsedApduExchange,
         summary_parts: list[str],
         frame_lines: list[str],
+        frame_meta: dict[str, object],
     ) -> None:
         if len(exchange.command) < 4:
             return
@@ -1118,7 +1336,15 @@ class LiveDecodeStateTracker:
             frame_lines.append(
                 f"READ BINARY returned {byte_count} byte(s) from {target_text} at offset {offset}."
             )
-            self._remember_file_operation(f"READ BINARY {target_text} {byte_count}B @{offset}")
+            self._record_file_trace(
+                frame_number,
+                frame_meta,
+                operation_text=f"READ BINARY {target_text} {byte_count}B @{offset}",
+                operation="READ BINARY",
+                path_text=target_text,
+                status="ok",
+                reason=f"READ BINARY used current selection {target_text}.",
+            )
             # ETSI TS 102.221 §13.2: EF.ICCID is 10 bytes of swapped-
             # nibble BCD at offset 0. Capture it for the current card
             # session so the TUI can label the session wrapper.
@@ -1135,13 +1361,23 @@ class LiveDecodeStateTracker:
             return
         summary_parts.append(f"FS {target_text} READ BINARY FAIL {sw_text}")
         frame_lines.append(f"READ BINARY failed for {target_text} with status word {sw_text}.")
-        self._remember_file_operation(f"READ BINARY {target_text} FAIL {sw_text}")
+        self._record_file_trace(
+            frame_number,
+            frame_meta,
+            operation_text=f"READ BINARY {target_text} FAIL {sw_text}",
+            operation="READ BINARY",
+            path_text=target_text,
+            status=f"fail {sw_text}",
+            reason=f"READ BINARY used current selection {target_text}.",
+        )
 
     def _handle_file_read_record(
         self,
+        frame_number: int,
         exchange: ParsedApduExchange,
         summary_parts: list[str],
         frame_lines: list[str],
+        frame_meta: dict[str, object],
     ) -> None:
         if len(exchange.command) < 3:
             return
@@ -1154,17 +1390,35 @@ class LiveDecodeStateTracker:
             frame_lines.append(
                 f"READ RECORD returned {byte_count} byte(s) from {target_text}, record {record_number}."
             )
-            self._remember_file_operation(f"READ RECORD {target_text} R{record_number} {byte_count}B")
+            self._record_file_trace(
+                frame_number,
+                frame_meta,
+                operation_text=f"READ RECORD {target_text} R{record_number} {byte_count}B",
+                operation="READ RECORD",
+                path_text=target_text,
+                status="ok",
+                reason=f"READ RECORD used current selection {target_text}.",
+            )
             return
         summary_parts.append(f"FS {target_text} READ RECORD FAIL {sw_text}")
         frame_lines.append(f"READ RECORD failed for {target_text} with status word {sw_text}.")
-        self._remember_file_operation(f"READ RECORD {target_text} FAIL {sw_text}")
+        self._record_file_trace(
+            frame_number,
+            frame_meta,
+            operation_text=f"READ RECORD {target_text} FAIL {sw_text}",
+            operation="READ RECORD",
+            path_text=target_text,
+            status=f"fail {sw_text}",
+            reason=f"READ RECORD used current selection {target_text}.",
+        )
 
     def _handle_file_update_binary(
         self,
+        frame_number: int,
         exchange: ParsedApduExchange,
         summary_parts: list[str],
         frame_lines: list[str],
+        frame_meta: dict[str, object],
     ) -> None:
         if len(exchange.command) < 4:
             return
@@ -1177,17 +1431,35 @@ class LiveDecodeStateTracker:
             frame_lines.append(
                 f"UPDATE BINARY wrote {len(payload)} byte(s) to {target_text} at offset {offset}."
             )
-            self._remember_file_operation(f"UPDATE BINARY {target_text} {len(payload)}B @{offset}")
+            self._record_file_trace(
+                frame_number,
+                frame_meta,
+                operation_text=f"UPDATE BINARY {target_text} {len(payload)}B @{offset}",
+                operation="UPDATE BINARY",
+                path_text=target_text,
+                status="ok",
+                reason=f"UPDATE BINARY used current selection {target_text}.",
+            )
             return
         summary_parts.append(f"FS {target_text} UPDATE BINARY FAIL {sw_text}")
         frame_lines.append(f"UPDATE BINARY failed for {target_text} with status word {sw_text}.")
-        self._remember_file_operation(f"UPDATE BINARY {target_text} FAIL {sw_text}")
+        self._record_file_trace(
+            frame_number,
+            frame_meta,
+            operation_text=f"UPDATE BINARY {target_text} FAIL {sw_text}",
+            operation="UPDATE BINARY",
+            path_text=target_text,
+            status=f"fail {sw_text}",
+            reason=f"UPDATE BINARY used current selection {target_text}.",
+        )
 
     def _handle_file_update_record(
         self,
+        frame_number: int,
         exchange: ParsedApduExchange,
         summary_parts: list[str],
         frame_lines: list[str],
+        frame_meta: dict[str, object],
     ) -> None:
         if len(exchange.command) < 3:
             return
@@ -1200,19 +1472,35 @@ class LiveDecodeStateTracker:
             frame_lines.append(
                 f"UPDATE RECORD wrote {len(payload)} byte(s) to {target_text}, record {record_number}."
             )
-            self._remember_file_operation(
-                f"UPDATE RECORD {target_text} R{record_number} {len(payload)}B"
+            self._record_file_trace(
+                frame_number,
+                frame_meta,
+                operation_text=f"UPDATE RECORD {target_text} R{record_number} {len(payload)}B",
+                operation="UPDATE RECORD",
+                path_text=target_text,
+                status="ok",
+                reason=f"UPDATE RECORD used current selection {target_text}.",
             )
             return
         summary_parts.append(f"FS {target_text} UPDATE RECORD FAIL {sw_text}")
         frame_lines.append(f"UPDATE RECORD failed for {target_text} with status word {sw_text}.")
-        self._remember_file_operation(f"UPDATE RECORD {target_text} FAIL {sw_text}")
+        self._record_file_trace(
+            frame_number,
+            frame_meta,
+            operation_text=f"UPDATE RECORD {target_text} FAIL {sw_text}",
+            operation="UPDATE RECORD",
+            path_text=target_text,
+            status=f"fail {sw_text}",
+            reason=f"UPDATE RECORD used current selection {target_text}.",
+        )
 
     def _handle_file_get_response(
         self,
+        frame_number: int,
         exchange: ParsedApduExchange,
         summary_parts: list[str],
         frame_lines: list[str],
+        frame_meta: dict[str, object],
     ) -> None:
         target_text = _path_text(self._current_file_path)
         sw_text = _status_word_text(exchange.sw1, exchange.sw2)
@@ -1220,17 +1508,35 @@ class LiveDecodeStateTracker:
             byte_count = len(exchange.response_data)
             summary_parts.append(f"FS {target_text} GET RESPONSE {byte_count}B")
             frame_lines.append(f"GET RESPONSE returned {byte_count} byte(s) for {target_text}.")
-            self._remember_file_operation(f"GET RESPONSE {target_text} {byte_count}B")
+            self._record_file_trace(
+                frame_number,
+                frame_meta,
+                operation_text=f"GET RESPONSE {target_text} {byte_count}B",
+                operation="GET RESPONSE",
+                path_text=target_text,
+                status="ok",
+                reason=f"GET RESPONSE used current selection {target_text}.",
+            )
             return
         summary_parts.append(f"FS {target_text} GET RESPONSE FAIL {sw_text}")
         frame_lines.append(f"GET RESPONSE failed for {target_text} with status word {sw_text}.")
-        self._remember_file_operation(f"GET RESPONSE {target_text} FAIL {sw_text}")
+        self._record_file_trace(
+            frame_number,
+            frame_meta,
+            operation_text=f"GET RESPONSE {target_text} FAIL {sw_text}",
+            operation="GET RESPONSE",
+            path_text=target_text,
+            status=f"fail {sw_text}",
+            reason=f"GET RESPONSE used current selection {target_text}.",
+        )
 
     def _handle_file_status(
         self,
+        frame_number: int,
         exchange: ParsedApduExchange,
         summary_parts: list[str],
         frame_lines: list[str],
+        frame_meta: dict[str, object],
     ) -> None:
         target_text = _path_text(self._current_file_path)
         sw_text = _status_word_text(exchange.sw1, exchange.sw2)
@@ -1238,11 +1544,27 @@ class LiveDecodeStateTracker:
             byte_count = len(exchange.response_data)
             summary_parts.append(f"FS {target_text} STATUS {byte_count}B")
             frame_lines.append(f"STATUS returned {byte_count} byte(s) for {target_text}.")
-            self._remember_file_operation(f"STATUS {target_text} {byte_count}B")
+            self._record_file_trace(
+                frame_number,
+                frame_meta,
+                operation_text=f"STATUS {target_text} {byte_count}B",
+                operation="STATUS",
+                path_text=target_text,
+                status="ok",
+                reason=f"STATUS used current selection {target_text}.",
+            )
             return
         summary_parts.append(f"FS {target_text} STATUS FAIL {sw_text}")
         frame_lines.append(f"STATUS failed for {target_text} with status word {sw_text}.")
-        self._remember_file_operation(f"STATUS {target_text} FAIL {sw_text}")
+        self._record_file_trace(
+            frame_number,
+            frame_meta,
+            operation_text=f"STATUS {target_text} FAIL {sw_text}",
+            operation="STATUS",
+            path_text=target_text,
+            status=f"fail {sw_text}",
+            reason=f"STATUS used current selection {target_text}.",
+        )
 
     def _allocate_channel_session(
         self,
@@ -2269,6 +2591,14 @@ def _path_text(path: tuple[str, ...]) -> str:
     if len(normalized) == 0:
         return "MF"
     return "/".join(normalized)
+
+
+def _path_is_under(path: tuple[str, ...], parent_path: tuple[str, ...]) -> bool:
+    if len(parent_path) == 0:
+        return True
+    if len(path) < len(parent_path):
+        return False
+    return tuple(path[:len(parent_path)]) == tuple(parent_path)
 
 
 def _path_kind(path: tuple[str, ...]) -> str:

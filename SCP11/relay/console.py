@@ -1,5 +1,8 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
-"""SCP11-relay operator console: REPL exposing ES2+/ES9+ commands routed through the relay transport."""
+
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+"""SCP11-relay operator console: compatibility REPL exposing ES2+/ES9+ commands."""
 try:
     from ..console import SCP11Console
 except ImportError:

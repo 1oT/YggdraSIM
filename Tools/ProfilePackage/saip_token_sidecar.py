@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """Token sidecar I/O.
 
@@ -251,6 +254,206 @@ def write_sidecar(
     )
 
 
+# ---------------------------------------------------------------------------
+# CSV variable-definition interop (TCA SAIP personalisation CSV format)
+# ---------------------------------------------------------------------------
+#
+# The TCA Profile Package personalisation-data convention used by most
+# issuance tools is a simple two-column CSV:
+#
+#     <variable_name>,<hex_value>
+#
+# where each line carries one variable. Comment lines start with ``#`` and
+# fully blank lines separate independent personalisation-data sets for
+# different profile packages stored together in one file. YggdraSIM
+# sidecars use a JSON shape, but operators routinely receive CSV personal-
+# isation data straight from issuance tooling — these helpers let the two
+# round-trip without losing variable values.
+
+_CSV_COMMENT_PREFIXES = ("#", ";")
+
+
+def parse_csv_personalisation(text: str) -> list[dict[str, dict[str, str]]]:
+    """Parse a personalisation-data CSV into one defs-dict per block.
+
+    ``text`` is the raw CSV content. Blank lines (or lines that contain
+    only a comment) terminate a personalisation-data block. Each block
+    becomes one entry in the returned list, shaped like the
+    ``__ygg_token_defs__`` payload of a YggdraSIM sidecar
+    (``{token_name: {"hex": "..."}, ...}``).
+
+    Whitespace around the variable name and the hex value is trimmed.
+    Hex values are accepted with or without ``0x`` prefix and may carry
+    grouping spaces; the canonical stored form is uppercase compact hex.
+    """
+    blocks: list[dict[str, dict[str, str]]] = []
+    current: dict[str, dict[str, str]] = {}
+    line_number = 0
+    for raw_line in text.splitlines():
+        line_number += 1
+        line = raw_line.strip()
+        if line == "":
+            if len(current) > 0:
+                blocks.append(current)
+                current = {}
+            continue
+        if line.startswith(_CSV_COMMENT_PREFIXES):
+            if len(current) > 0:
+                # A comment line inside a block is treated as a soft
+                # separator (e.g. a ``# Profile Package 2`` divider
+                # between two adjacent personalisation blocks).
+                blocks.append(current)
+                current = {}
+            continue
+        if "," not in line:
+            raise TokenSidecarError(
+                f"CSV line {line_number}: expected 'name,hex' but got {raw_line!r}."
+            )
+        name_raw, value_raw = line.split(",", 1)
+        name = name_raw.strip()
+        if len(name) == 0:
+            raise TokenSidecarError(
+                f"CSV line {line_number}: variable name is empty."
+            )
+        if name in current:
+            raise TokenSidecarError(
+                f"CSV line {line_number}: variable {name!r} declared more than "
+                "once in the same personalisation-data block."
+            )
+        value = _normalise_csv_hex_value(value_raw, line_number=line_number)
+        current[name] = {"hex": value}
+    if len(current) > 0:
+        blocks.append(current)
+    return blocks
+
+
+def _normalise_csv_hex_value(raw: str, *, line_number: int) -> str:
+    """Strip whitespace / ``0x`` prefix from a CSV hex cell and uppercase it."""
+    cleaned = raw.strip().replace(" ", "").replace("_", "")
+    if cleaned.lower().startswith("0x"):
+        cleaned = cleaned[2:]
+    if cleaned == "":
+        raise TokenSidecarError(
+            f"CSV line {line_number}: hex value is empty."
+        )
+    if len(cleaned) % 2 != 0:
+        raise TokenSidecarError(
+            f"CSV line {line_number}: hex value has odd length ({len(cleaned)} chars)."
+        )
+    try:
+        bytes.fromhex(cleaned)
+    except ValueError as error:
+        raise TokenSidecarError(
+            f"CSV line {line_number}: hex value is not valid hex: {error}."
+        ) from error
+    return cleaned.upper()
+
+
+def load_sidecar_from_csv(
+    path: Path,
+    *,
+    style: str = "brace",
+    source_label: str | None = None,
+) -> list[dict[str, Any]]:
+    """Load a personalisation-data CSV file and return one sidecar dict per block.
+
+    Each sidecar shares the same placeholder style; multi-block files
+    (one CSV with several profile-package variable sets) produce one
+    sidecar per block in declaration order. The returned dicts pass
+    ``validate_sidecar_document``.
+    """
+    resolved = Path(path)
+    if resolved.is_file() is False:
+        raise TokenSidecarError(f"CSV personalisation file not found: {resolved}")
+    try:
+        text = resolved.read_text(encoding="utf-8-sig")
+    except OSError as error:
+        raise TokenSidecarError(
+            f"Cannot read CSV personalisation file {resolved}: {error}"
+        ) from error
+
+    normalized_style = normalize_style(style)
+    block_defs = parse_csv_personalisation(text)
+    sidecars: list[dict[str, Any]] = []
+    for index, defs in enumerate(block_defs):
+        for name, entry in defs.items():
+            _validate_token_def_entry(name, entry)
+        meta: dict[str, Any] = {"schema": _SIDECAR_SCHEMA_ID, "source_format": "csv"}
+        if source_label is not None:
+            label_text = str(source_label).strip()
+            if len(label_text) > 0:
+                meta["created_from"] = label_text
+        if len(block_defs) > 1:
+            meta["csv_block_index"] = index
+        sidecars.append(
+            {
+                _META_PLACEHOLDER_STYLE: normalized_style,
+                _META_TOKEN_DEFS: copy.deepcopy(defs),
+                _SIDECAR_META_KEY: meta,
+            }
+        )
+    return sidecars
+
+
+def dump_sidecar_to_csv(
+    path: Path,
+    sidecars: dict[str, Any] | list[dict[str, Any]],
+    *,
+    block_labels: list[str] | None = None,
+) -> None:
+    """Write one or more sidecars out as a personalisation-data CSV.
+
+    Single sidecar input emits a single block. List input emits one block
+    per sidecar separated by a blank line and an optional ``# <label>``
+    comment line (when ``block_labels`` is supplied). Only token defs that
+    carry a literal ``hex`` value participate; pattern-only defs (which
+    have no fixed value) are silently skipped because the CSV column
+    shape has no way to encode a placeholder pattern.
+    """
+    if isinstance(sidecars, dict):
+        items: list[dict[str, Any]] = [sidecars]
+    elif isinstance(sidecars, list):
+        items = list(sidecars)
+    else:
+        raise TokenSidecarError(
+            "dump_sidecar_to_csv expects a sidecar dict or a list of sidecars."
+        )
+    if block_labels is not None and len(block_labels) != len(items):
+        raise TokenSidecarError(
+            f"block_labels length ({len(block_labels)}) does not match number "
+            f"of sidecars ({len(items)})."
+        )
+
+    lines: list[str] = []
+    for idx, sidecar in enumerate(items):
+        validated = validate_sidecar_document(sidecar)
+        if idx > 0:
+            lines.append("")
+        if block_labels is not None:
+            label_text = str(block_labels[idx]).strip()
+            if len(label_text) > 0:
+                lines.append(f"# {label_text}")
+        for name, entry in validated[_META_TOKEN_DEFS].items():
+            hex_value: str | None = None
+            if isinstance(entry, str):
+                hex_value = entry
+            elif isinstance(entry, dict):
+                raw = entry.get("hex")
+                if isinstance(raw, str) and raw != "":
+                    hex_value = raw
+            if hex_value is None:
+                # Pattern-only defs cannot round-trip through the CSV
+                # shape; leave the entry out of the export so the file
+                # stays valid.
+                continue
+            lines.append(f"{name},{hex_value.upper()}")
+
+    payload = "\n".join(lines) + "\n"
+    resolved = Path(path)
+    resolved.parent.mkdir(parents=True, exist_ok=True)
+    resolved.write_text(payload, encoding="utf-8")
+
+
 def merge_sidecar_into_template(
     template: dict[str, Any],
     sidecar: dict[str, Any],
@@ -391,7 +594,7 @@ def read_token_defs_from_file(
     ``__ygg_token_defs__`` key. Sidecar files and full template files
     are both acceptable inputs; only the two metadata keys are read.
     Never raises on malformed input — missing/invalid data yields
-    ``None`` so callers can treat "no usable defs found" as a first-class
+    ``None`` so callers can treat "no usable defs found" as an explicit
     case.
     """
 
@@ -431,7 +634,7 @@ def parse_token_value_argument(raw: str) -> Any:
 
     - A JSON object starting with ``{`` (e.g. ``{"zero_len": 10}``).
     - A hex string (whitespace tolerated) for the convenience of CLI users.
-      Example: ``89461111111111111112``.
+      Example: ``89881111111111111112``.
 
     Empty / pure whitespace input is rejected to avoid silent misconfiguration.
     """

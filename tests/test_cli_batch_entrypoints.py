@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 import contextlib
 import io
 import os
@@ -8,7 +11,6 @@ import SCP03.main as scp03_main
 import SCP11.live.main as scp11_live_main
 import SCP11.local_access.main as scp11_local_access_main
 import SCP11.relay.main as scp11_relay_main
-import SCP11.test.main as scp11_test_main
 import SCP11.eim_local.main as scp11_eim_local_main
 import SCP80.main as scp80_main
 import Tools.ProfilePackage.main as profile_package_main
@@ -97,30 +99,6 @@ class CliBatchEntrypointTests(unittest.TestCase):
     def test_scp11_live_entry_without_flags_routes_to_shell(self) -> None:
         self._assert_scp11_entry_route(
             scp11_live_main,
-            ["prog"],
-            "shell",
-            patch_plugins=True,
-        )
-
-    def test_scp11_test_entry_routes_cmd_to_batch_mode(self) -> None:
-        self._assert_scp11_entry_route(
-            scp11_test_main,
-            ["prog", "--cmd", "HELP; EXIT"],
-            "commands",
-            patch_plugins=True,
-        )
-
-    def test_scp11_test_entry_routes_flow_to_one_shot_mode(self) -> None:
-        self._assert_scp11_entry_route(
-            scp11_test_main,
-            ["prog", "--flow"],
-            "flow",
-            patch_plugins=True,
-        )
-
-    def test_scp11_test_entry_without_flags_routes_to_shell(self) -> None:
-        self._assert_scp11_entry_route(
-            scp11_test_main,
             ["prog"],
             "shell",
             patch_plugins=True,

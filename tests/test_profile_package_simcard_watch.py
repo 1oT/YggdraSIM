@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 """Unit tests for ``Tools.ProfilePackage.simcard_watch``.
 
 The tests never touch a live simulator engine or a real TUI process.
@@ -72,7 +75,7 @@ class ProfileStoreWatcherTests(unittest.TestCase):
     def test_seed_on_start_skips_existing_iccid(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
-            _write_profile_dir(root, iccid="8900001111222233334444")
+            _write_profile_dir(root, iccid="8988001111222233334444")
             events: list[simcard_watch.ProfileArrival] = []
             watcher = simcard_watch.ProfileStoreWatcher(
                 root,
@@ -82,7 +85,7 @@ class ProfileStoreWatcherTests(unittest.TestCase):
             fresh = watcher.poll_once()
             self.assertEqual(fresh, [])
             self.assertEqual(events, [])
-            self.assertEqual(watcher._seen_iccids, {"8900001111222233334444"})
+            self.assertEqual(watcher._seen_iccids, {"8988001111222233334444"})
 
     def test_arrival_detected_on_second_poll(self) -> None:
         with tempfile.TemporaryDirectory() as td:
@@ -96,12 +99,12 @@ class ProfileStoreWatcherTests(unittest.TestCase):
             watcher.poll_once()
             _write_profile_dir(
                 root,
-                iccid="8900009999000000111122",
+                iccid="8988009999000000111122",
                 include_image=True,
             )
             fresh = watcher.poll_once()
             self.assertEqual(len(fresh), 1)
-            self.assertEqual(fresh[0].iccid, "8900009999000000111122")
+            self.assertEqual(fresh[0].iccid, "8988009999000000111122")
             self.assertIsNotNone(fresh[0].profile_image_path)
             self.assertEqual(fresh[0].preferred_profile_path, fresh[0].profile_image_path)
             self.assertEqual(len(events), 1)
@@ -116,7 +119,7 @@ class ProfileStoreWatcherTests(unittest.TestCase):
                 poll_interval_seconds=0.01,
             )
             watcher.poll_once()
-            _write_profile_dir(root, iccid="8900001000000000000001")
+            _write_profile_dir(root, iccid="8988001000000000000001")
             watcher.poll_once()
             watcher.poll_once()
             self.assertEqual(len(events), 1)
@@ -124,7 +127,7 @@ class ProfileStoreWatcherTests(unittest.TestCase):
     def test_no_seed_fires_on_first_poll_when_seed_on_start_disabled(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
-            _write_profile_dir(root, iccid="8900002000000000000002")
+            _write_profile_dir(root, iccid="8988002000000000000002")
             events: list[simcard_watch.ProfileArrival] = []
             watcher = simcard_watch.ProfileStoreWatcher(
                 root,
@@ -134,7 +137,7 @@ class ProfileStoreWatcherTests(unittest.TestCase):
             )
             fresh = watcher.poll_once()
             self.assertEqual(len(fresh), 1)
-            self.assertEqual(fresh[0].iccid, "8900002000000000000002")
+            self.assertEqual(fresh[0].iccid, "8988002000000000000002")
 
     def test_callback_error_does_not_break_state(self) -> None:
         with tempfile.TemporaryDirectory() as td:
@@ -149,9 +152,9 @@ class ProfileStoreWatcherTests(unittest.TestCase):
                 poll_interval_seconds=0.01,
             )
             watcher.poll_once()
-            _write_profile_dir(root, iccid="8900003000000000000003")
+            _write_profile_dir(root, iccid="8988003000000000000003")
             watcher.poll_once()
-            self.assertIn("8900003000000000000003", watcher._seen_iccids)
+            self.assertIn("8988003000000000000003", watcher._seen_iccids)
 
     def test_missing_store_root_yields_empty_scan(self) -> None:
         with tempfile.TemporaryDirectory() as td:
@@ -203,7 +206,7 @@ class WatchAndLaunchTuiTests(unittest.TestCase):
                 return ["/bin/true"]
 
             def _schedule_arrival() -> None:
-                _write_profile_dir(root, iccid="8900000000000000000777")
+                _write_profile_dir(root, iccid="8988000000000000000777")
 
             with patch.object(simcard_watch, "_spawn_launcher", side_effect=_fake_spawn):
                 # Manually build the watcher so we can interleave the
@@ -223,7 +226,7 @@ class WatchAndLaunchTuiTests(unittest.TestCase):
                 watcher.poll_once()
 
             self.assertEqual(len(launched), 1)
-            self.assertEqual(arrivals[-1].iccid, "8900000000000000000777")
+            self.assertEqual(arrivals[-1].iccid, "8988000000000000000777")
 
     def test_run_cli_creates_missing_store_and_short_circuits_zero_max(self) -> None:
         with tempfile.TemporaryDirectory() as td:
@@ -271,7 +274,7 @@ class LauncherTemplateTests(unittest.TestCase):
 
     def test_expand_handles_whitespace_paths_and_all_tokens(self) -> None:
         with tempfile.TemporaryDirectory(prefix="space dir ") as td:
-            arrival = self._arrival(Path(td), "8900004000000000000004")
+            arrival = self._arrival(Path(td), "8988004000000000000004")
             template = (
                 "{python} -m Tools.ProfilePackage --cmd "
                 "\"USE '{profile}'; INFO; TREE; EXIT\" "
@@ -281,7 +284,7 @@ class LauncherTemplateTests(unittest.TestCase):
         self.assertGreater(len(argv), 0)
         self.assertIn("--iccid", argv)
         iccid_position = argv.index("--iccid")
-        self.assertEqual(argv[iccid_position + 1], "8900004000000000000004")
+        self.assertEqual(argv[iccid_position + 1], "8988004000000000000004")
         # The profile path (with whitespace) must survive as a single argv
         # entry — that is exactly what shlex.split guarantees for quoted
         # substrings after format_map expansion.
@@ -292,7 +295,7 @@ class LauncherTemplateTests(unittest.TestCase):
 
     def test_expand_unknown_placeholder_warns_and_substitutes_empty(self) -> None:
         with tempfile.TemporaryDirectory() as td:
-            arrival = self._arrival(Path(td), "8900005000000000000005")
+            arrival = self._arrival(Path(td), "8988005000000000000005")
             # Quote the placeholder so shlex preserves the empty
             # positional after substitution; if the operator did not
             # quote we keep the current behaviour (shlex drops the
@@ -301,13 +304,13 @@ class LauncherTemplateTests(unittest.TestCase):
             with self.assertLogs(simcard_watch._LOGGER, level="WARNING") as logs:
                 argv = simcard_watch._expand_launcher_template(template, arrival)
         self.assertEqual(argv[0], "/bin/echo")
-        self.assertEqual(argv[1], "8900005000000000000005")
+        self.assertEqual(argv[1], "8988005000000000000005")
         self.assertEqual(argv[2], "")
         self.assertTrue(any("unknown_token" in msg for msg in logs.output))
 
     def test_default_launcher_hands_profile_to_profile_package_shell(self) -> None:
         with tempfile.TemporaryDirectory() as td:
-            arrival = self._arrival(Path(td), "8900006000000000000006")
+            arrival = self._arrival(Path(td), "8988006000000000000006")
             argv = simcard_watch._build_default_tui_command(arrival)
         self.assertIn("Tools.ProfilePackage", argv)
         self.assertIn("--cmd", argv)

@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """
 Pair-encoder module: inverse of ``saip_asn1_decode``.
@@ -882,6 +885,73 @@ def encode_ef_plmn_list_no_act(
     return encode_ef_plmn_list(payload, with_act=False, target_length=target_length)
 
 
+def encode_ef_wlan_plmn_list(
+    payload: dict[str, Any],
+    *,
+    target_length: int | None = None,
+) -> bytes:
+    """Encode EF.UPLMNWLAN / EF.OPLMNWLAN records (TS 31.102 §4.2.82/83)."""
+
+    entries = payload.get("entries")
+    if isinstance(entries, list) is False:
+        if "raw" in payload and isinstance(payload["raw"], str):
+            return _pad_ff(
+                _hex_to_bytes(_require_hex(payload, "raw")),
+                target_length=target_length,
+            )
+        raise RoundtripEncoderError("I-WLAN PLMN list: 'entries' must be a list")
+    accumulator = bytearray()
+    for entry in entries:
+        if isinstance(entry, dict) is False:
+            raise RoundtripEncoderError("I-WLAN PLMN list: each entry must be a dict")
+        if "raw" in entry and isinstance(entry["raw"], str):
+            raw_record = _hex_to_bytes(_require_hex(entry, "raw"))
+            if len(raw_record) != 5:
+                raise RoundtripEncoderError(
+                    "I-WLAN PLMN list: raw record must be exactly 5 bytes"
+                )
+            accumulator.extend(raw_record)
+            continue
+        plmn_value = entry.get("plmn")
+        if isinstance(plmn_value, str) is False:
+            raise RoundtripEncoderError("I-WLAN PLMN list: entry missing 'plmn'")
+        reserved_hex = str(entry.get("reserved", "FFFF") or "FFFF").strip().upper()
+        if len(reserved_hex) != 4:
+            raise RoundtripEncoderError(
+                "I-WLAN PLMN list: reserved must be exactly 2 bytes"
+            )
+        try:
+            reserved = bytes.fromhex(reserved_hex)
+        except ValueError as exc:
+            raise RoundtripEncoderError(
+                "I-WLAN PLMN list: reserved must be hex"
+            ) from exc
+        accumulator.extend(_encode_plmn_hex(plmn_value))
+        accumulator.extend(reserved)
+    return _pad_ff(bytes(accumulator), target_length=target_length)
+
+
+def encode_ef_wlrplmn(
+    payload: dict[str, Any],
+    *,
+    target_length: int | None = None,
+) -> bytes:
+    """Encode EF.WLRPLMN (TS 31.102 §4.2.91)."""
+
+    plmn_value = payload.get("plmn")
+    if isinstance(plmn_value, str) and len(plmn_value.strip()) > 0:
+        data = _encode_plmn_hex(plmn_value)
+    elif "hex" in payload and isinstance(payload["hex"], str):
+        data = _hex_to_bytes(_require_hex(payload, "hex"))
+    elif "raw" in payload and isinstance(payload["raw"], str):
+        data = _hex_to_bytes(_require_hex(payload, "raw"))
+    else:
+        data = b"\xFF\xFF\xFF"
+    if len(data) < 3:
+        raise RoundtripEncoderError("EF.WLRPLMN: value must contain at least 3 bytes")
+    return _pad_ff(data[:3], target_length=target_length)
+
+
 # ---------------------------------------------------------------------------
 # Lossy splicers (ADN / SMSP / EF.ARR)
 #
@@ -895,7 +965,7 @@ def encode_ef_plmn_list_no_act(
 # - SMSP:         same alpha-id roundtrip pitfall.
 # - EF.ARR:       sub-TLVs inside ``A4`` groups and any vendor tags outside
 #                 the small whitelist (80/90/97/84/A4) are exposed as opaque
-#                 ``items`` lists rather than first-class semantic fields.
+#                 ``items`` lists rather than explicit semantic fields.
 #
 # The strategy is to carry the original bytes through the editor model under
 # the ``_ygg_original_hex`` key (populated by
@@ -2445,6 +2515,15 @@ def _encode_decoded_ber_items(items: list[Any], *, field_label: str) -> bytes:
 
 
 def _decoded_ber_inner_bytes(item: dict[str, Any], *, field_label: str) -> bytes:
+    # When the operator edited the semantic 'decoded' fields (e.g.
+    # PID decimal), synthesise bytes from those fields. The encoding
+    # mirrors the value decoders in saip_asn1_decode so the round-trip
+    # is lossless when only decoded fields are changed.
+    decoded = item.get("decoded")
+    if isinstance(decoded, dict) and len(decoded) > 0:
+        raw_bytes = _encode_decoded_connectivity_primitive(decoded, field_label=field_label)
+        if raw_bytes is not None:
+            return raw_bytes
     raw_value = item.get("raw")
     if isinstance(raw_value, str) and len(raw_value) > 0:
         hex_text = str(raw_value).strip()
@@ -2459,6 +2538,28 @@ def _decoded_ber_inner_bytes(item: dict[str, Any], *, field_label: str) -> bytes
     if isinstance(nested, list):
         return _encode_decoded_ber_items(nested, field_label=field_label)
     return b""
+
+
+def _encode_decoded_connectivity_primitive(
+    decoded: dict[str, Any],
+    *,
+    field_label: str,
+) -> bytes | None:
+    """Encode a connectivity sub-field from its semantic decoded form.
+
+    Handles the value-decoders declared in ``_decode_connectivity_parameters``:
+    PID (single-byte integer), DCS (single-byte integer), SMSC address, bearer
+    description, and small integer. Returns ``None`` when the decoded shape is
+    not recognised, signalling the caller to fall back to ``raw``.
+    """
+    if "decimal" in decoded:
+        value = int(decoded["decimal"])
+        if value < 0 or value > 255:
+            raise RoundtripEncoderError(
+                f"{field_label}: 'decimal' must be in 0..255 for a connectivity primitive"
+            )
+        return bytes([value])
+    return None
 
 
 def encode_sd_install_parameters(payload: dict[str, Any]) -> bytes:
@@ -3967,6 +4068,9 @@ _EF_CONTENT_DISPATCHER: dict[str, Any] = {
     "ef-plmnwact": encode_ef_plmn_list_with_act,
     "ef-oplmnwact": encode_ef_plmn_list_with_act,
     "ef-hplmnwact": encode_ef_plmn_list_with_act,
+    "ef-uplmnwlan": encode_ef_wlan_plmn_list,
+    "ef-oplmnwlan": encode_ef_wlan_plmn_list,
+    "ef-wlrplmn": encode_ef_wlrplmn,
     "ef-adn": encode_ef_adn_record,
     "ef-fdn": encode_ef_adn_record,
     "ef-sdn": encode_ef_adn_record,

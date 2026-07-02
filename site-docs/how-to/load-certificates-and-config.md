@@ -6,6 +6,11 @@ tags:
   - certificates
   - configuration
 ---
+<!--
+SPDX-License-Identifier: GPL-3.0-or-later
+Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+-->
+
 
 # Load Certificates and Configuration
 
@@ -42,9 +47,10 @@ common flows and walks through them as numbered recipes.
 | your own simulated default eIM identity used on first boot                    | [Recipe 5](#recipe-5-replace-the-simulator-default-eim-identity)         |
 | your own SCP03 / SCP80 keysets                                                | [Recipe 6](#recipe-6-load-scp03-and-scp80-keysets)                       |
 | SUCI Profile A / B home-network keys                                          | [Recipe 7](#recipe-7-load-suci-keys)                                     |
-| ShS-ENC / ShS-MAC / DEK from an EUM database for a failing PCAP               | [Recipe 8](#recipe-8-attach-eum-session-keys-to-a-pcap)                  |
-| a need to encrypt every persisted secret at rest                              | [Recipe 9](#recipe-9-turn-on-inventory-encryption)                       |
-| a need to relocate or freeze the writable runtime root                        | [Recipe 10](#recipe-10-relocate-the-runtime-root)                        |
+| K / OPc / AMF / SQN / MCC / MNC / RID for a 5G AKA test subscriber            | [Recipe 8](#recipe-8-seed-a-yggdracore-subscription)                     |
+| ShS-ENC / ShS-MAC / DEK from an EUM database for a failing PCAP               | [Recipe 9](#recipe-9-attach-eum-session-keys-to-a-pcap)                  |
+| a need to encrypt every persisted secret at rest                              | [Recipe 10](#recipe-10-turn-on-inventory-encryption)                     |
+| a need to relocate or freeze the writable runtime root                        | [Recipe 11](#recipe-11-relocate-the-runtime-root)                        |
 
 ## Prerequisites
 
@@ -176,7 +182,7 @@ list, and on-card SCP03 / SCP80 keysets used by the **simulated** card.
       "scp80_security": { "spi": "1621", "kic": "15", "kid": "15", "tar": "B00000",
                           "key_enc_hex": "...", "key_mac_hex": "..." },
       "configured_data": {
-        "root_smds_address": "lpa.ds.gsma.com",
+        "root_smds_address": "root-smds.example.com",
         "additional_root_smds_addresses": ["smds2.example", "smds3.example"],
         "allowed_ci_pkids_hex":            ["F54172BDF98A95D65CBEB88A38A1C11D800A85C3"],
         "ci_list_hex":                     ["F54172BDF98A95D65CBEB88A38A1C11D800A85C3"]
@@ -211,7 +217,7 @@ the override env var `YGGDRASIM_SIM_EIM_IDENTITY` and the schema below:
 
 ```json
 {
-  "display_name": "Operator alpha lab",
+  "display_name": "Example lab",
   "eim_id": "2.25....",
   "eim_id_type": "oid",
   "eim_fqdn": "eim.operator.example",
@@ -283,7 +289,7 @@ Two stages: file-based defaults, then the per-card SQLite inventory
     `Workspace/SCP80/ota_config.ini` on the next bind.
 
 4. **Encrypt the inventory at rest.** Continue with [Recipe
-   9](#recipe-9-turn-on-inventory-encryption).
+   10](#recipe-10-turn-on-inventory-encryption).
 
 ## Recipe 7: Load SUCI keys
 
@@ -307,7 +313,40 @@ search.
     encryption envelope — they are operator key material, not stored
     application state.
 
-## Recipe 8: Attach EUM session keys to a pcap
+## Recipe 8: Seed a YggdraCore subscription
+
+> **Status: post-v1 staging.** Not part of the v1.0.0 frozen release tag.
+
+The in-process AUSF / AAnF stub holds subscribers in memory only.
+There is no on-disk format.
+
+```python
+from Tools.YggdraCore.subscription_store import get_default_subscription_store
+
+store = get_default_subscription_store()
+store.upsert(
+    supi="imsi-001010000000001",
+    k=bytes.fromhex("0123456789ABCDEFFEDCBA9876543210"),
+    opc=bytes.fromhex("CD63CB71954A155A5DC83A7BFD11A41C"),
+    amf=b"\x80\x00",
+    sqn=b"\x00\x00\x00\x00\x00\x01",
+    mcc="001",
+    mnc="01",
+    routing_indicator="0",
+    akma_enabled=True,
+)
+```
+
+`K` and `OPc` are exactly 16 bytes; `AMF` is 2; `SQN` is 6; `MCC` is
+3 digits; `MNC` is 2 or 3 digits; `RID` is 1..4 digits. The store
+auto-bumps `SQN` on every successful authentication (TS 33.102 Annex
+C) and refuses overflow.
+
+For BYO Open5GS (`YGGDRASIM_5GCORE_MODE=byo`), the same record shape
+provisions a real subscriber DB through `pymongo`; pass the Mongo URI
+and database name to `Open5gsBridge` directly.
+
+## Recipe 9: Attach EUM session keys to a pcap
 
 Use this to drive the bundled Lua dissector against a stuck profile
 download.
@@ -316,7 +355,7 @@ download.
 
     ```bash
     yggdrasim-eum-diag store-keys \
-        --iccid 8988201234567890123 \
+        --iccid 8988000000000000001 \
         --shs-enc AABBCCDDEEFF00112233445566778899 \
         --shs-mac 00112233445566778899AABBCCDDEEFF \
         --dek    0F0E0D0C0B0A09080706050403020100 \
@@ -355,7 +394,7 @@ download.
 The repository is keyed by ICCID, so a single file may carry every
 session under investigation.
 
-## Recipe 9: Turn on inventory encryption
+## Recipe 10: Turn on inventory encryption
 
 The full step-by-step recipe lives at
 [`enable-inventory-encryption.md`](enable-inventory-encryption.md). The
@@ -384,7 +423,7 @@ short form:
 `false` so the writer refuses to drop plaintext on disk while the GPG
 provider is ready.
 
-## Recipe 10: Relocate the runtime root
+## Recipe 11: Relocate the runtime root
 
 ```bash
 export YGGDRASIM_RUNTIME_ROOT=/var/lib/operator-alpha/yggdra
@@ -422,14 +461,17 @@ non-test environment:
    `ota_config.ini`.
 6. **SUCI keys.** Author per home-network. Never reuse across
    operators.
-7. **EUM session keys.** Author with `yggdrasim-eum-diag store-keys`,
+7. **YggdraCore subscribers.** Provision through `upsert(...)` or the
+   BYO Open5GS bridge. Stub state is intentionally non-persistent. (post-v1 staging — not part of this release.)
+8. **EUM session keys.** Author with `yggdrasim-eum-diag store-keys`,
    chmod 0600, point `YGGDRASIM_EUM_SESSION_KEYS` at the file.
-8. **HIL keybags.** Drop next to the pcap; auto-discovery picks them
+9. **HIL keybags.** Drop next to the pcap; auto-discovery picks them
    up. Delete after use.
-9. **Inventory crypto.** Turn on before any non-test card is bound.
-10. **Plugins.** Disable in attestation builds with
-    `YGGDRASIM_DISALLOW_PLUGINS=1`.
-11. **Workspace seed material.** Treat every committed sample as a
+10. **Inventory crypto.** Turn on before any non-test card is bound.
+11. **Plugins.** Leave disabled unless a local plugin is required. Opt
+    in with `YGGDRASIM_ALLOW_PLUGINS=1`; hard-lock attestation builds
+    with `YGGDRASIM_DISALLOW_PLUGINS=1`.
+12. **Workspace seed material.** Treat every committed sample as a
     test fixture. Replace, override, or relocate before non-test use.
 
 ## Validation

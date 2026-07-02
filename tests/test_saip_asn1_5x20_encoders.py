@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 """Tests for the 5×20 decoded-edit sweep.
 
 Covers 100 additional EF tokens across:
@@ -246,7 +249,7 @@ class PassAOpaqueTests(unittest.TestCase):
 
 class VsuriTests(unittest.TestCase):
     def test_uri_tlv_roundtrip(self) -> None:
-        body = b"sip:voicemail@carrier.net"
+        body = b"sip:voicemail@example.com"
         raw = bytes([0x80, len(body)]) + body
         self.assertEqual(
             _roundtrip(ef_key="ef-vsuri", fid="6FE9", raw=raw), raw

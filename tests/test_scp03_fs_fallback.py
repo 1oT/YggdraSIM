@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 import contextlib
 import io
 import tempfile
@@ -263,6 +266,50 @@ class _WildcardReportTransport:
         return b"", 0x6A, 0x82
 
 
+class _ArrRestoreTrailTransport:
+    session = None
+    usim_aid = "A0000000871002FF34FF0789312E30FF"
+
+    def __init__(self) -> None:
+        self.calls: list[str] = []
+        self.selected = ""
+
+    def transmit(self, cmd: str, silent: bool = False):
+        del silent
+        command = str(cmd or "").strip().upper()
+        self.calls.append(command)
+
+        usim_select = f"00A40400{len(self.usim_aid)//2:02X}{self.usim_aid}"
+
+        if command == "00A40004023F00":
+            self.selected = "3F00"
+            return bytes.fromhex("620782013883023F00"), 0x90, 0x00
+        if command == usim_select:
+            self.selected = "USIM"
+            return bytes.fromhex(f"621D8202782183027FF08410{self.usim_aid}8A0105"), 0x90, 0x00
+        if command == "00A40004025F3B" and self.selected == "USIM":
+            self.selected = "5F3B"
+            return bytes.fromhex("620B8202782183025F3B8A0105"), 0x90, 0x00
+        if command == "00A40004024F20" and self.selected == "5F3B":
+            self.selected = "4F20"
+            return bytes.fromhex("62178202412183024F208A01058B036F060580020009880108"), 0x90, 0x00
+        if command == "00A4030000" and self.selected in ("4F20", "5F3B", "6F06"):
+            self.selected = "USIM"
+            return bytes.fromhex(f"621D8202782183027FF08410{self.usim_aid}8A0105"), 0x90, 0x00
+        if command == "00A40004026F06" and self.selected == "USIM":
+            self.selected = "6F06"
+            return bytes.fromhex("621A8205422100371783026F068A01058B036F060A800204F18801B8"), 0x90, 0x00
+        if command == "00B2050400" and self.selected == "6F06":
+            return bytes.fromhex(
+                "800103A406830101950108800158A40683010A950108"
+            ), 0x90, 0x00
+        if command == "00B2010400" and self.selected == "6F06":
+            return bytes.fromhex("8001019000"), 0x90, 0x00
+        if command == "00B2010400" and self.selected == "4F20":
+            return b"", 0x69, 0x81
+        return b"", 0x6A, 0x82
+
+
 class FileSystemControllerAdfFallbackTests(unittest.TestCase):
     def setUp(self) -> None:
         self._temp_dir = tempfile.TemporaryDirectory()
@@ -311,7 +358,7 @@ class FileSystemControllerAdfFallbackTests(unittest.TestCase):
         transport = _EfDirFallbackTransport(
             legacy_aid,
             discovered_aid,
-            label_text="Tele2 USIM",
+            label_text="Example USIM",
         )
         controller = FileSystemController(transport, aid_registry=aid_registry)
 
@@ -369,9 +416,43 @@ class FileSystemControllerAdfFallbackTests(unittest.TestCase):
         )
         self.assertEqual(transport.calls.count("00A40004022F00"), 1)
 
+    def test_arr_resolution_restores_nested_selection_by_full_trail(self) -> None:
+        transport = _ArrRestoreTrailTransport()
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            fids_path = Path(temp_dir) / "fids.txt"
+            fids_path.write_text(
+                f"USIM:{transport.usim_aid}\n"
+                " GSM_ACCESS:5F3B\n"
+                "  EF_KC:4F20\n",
+                encoding="utf-8",
+            )
+
+            with mock.patch.object(Config, "FIDS_FILE", str(fids_path)):
+                controller = FileSystemController(
+                    transport,
+                    aid_registry={"USIM": transport.usim_aid},
+                )
+                selected = controller.select("USIM/GSM_ACCESS/EF_KC", silent=True)
+
+        self.assertTrue(selected)
+        self.assertEqual(controller.current_fid, "4F20")
+        self.assertEqual(controller.current_fcp.get("structure"), "Transparent")
+        self.assertEqual(transport.selected, "4F20")
+
+        arr_read_index = transport.calls.index("00B2050400")
+        usim_select = f"00A40400{len(transport.usim_aid)//2:02X}{transport.usim_aid}"
+        self.assertEqual(
+            transport.calls[arr_read_index + 1 : arr_read_index + 4],
+            [usim_select, "00A40004025F3B", "00A40004024F20"],
+        )
+
+        _data, sw1, sw2 = transport.transmit("00B2010400", silent=True)
+        self.assertEqual((sw1, sw2), (0x69, 0x81))
+
     def test_scan_tree_uses_live_ef_dir_aid_for_usim_and_keeps_alias_paths(self) -> None:
         discovered_aid = "A0000000871002FF86FF112233445566"
-        transport = _ScanTreeEfDirTransport(discovered_aid, "Tele2 USIM")
+        transport = _ScanTreeEfDirTransport(discovered_aid, "Example USIM")
         controller = FileSystemController(transport, aid_registry={})
 
         rendered = io.StringIO()
@@ -379,7 +460,7 @@ class FileSystemControllerAdfFallbackTests(unittest.TestCase):
             controller.scan_tree()
 
         output = rendered.getvalue()
-        self.assertIn("USIM [Tele2 USIM]", output)
+        self.assertIn("USIM [Example USIM]", output)
         self.assertIn(f"({discovered_aid})", output)
         self.assertIn("EF_IMSI", output)
         self.assertIn("USIM", controller.scan_cache.values())
@@ -389,7 +470,7 @@ class FileSystemControllerAdfFallbackTests(unittest.TestCase):
 
     def test_scan_tree_always_renders_mf_root_entry(self) -> None:
         discovered_aid = "A0000000871002FF86FF112233445566"
-        transport = _ScanTreeEfDirTransport(discovered_aid, "Tele2 USIM")
+        transport = _ScanTreeEfDirTransport(discovered_aid, "Example USIM")
         controller = FileSystemController(transport, aid_registry={})
 
         rendered = io.StringIO()
@@ -506,7 +587,7 @@ class FileSystemControllerAdfFallbackTests(unittest.TestCase):
 
     def test_scan_tree_persists_live_ef_dir_aid_candidate_to_fids_registry(self) -> None:
         discovered_aid = "A0000000871002FF86FF112233445566"
-        transport = _ScanTreeEfDirTransport(discovered_aid, "Tele2 USIM")
+        transport = _ScanTreeEfDirTransport(discovered_aid, "Example USIM")
 
         with tempfile.TemporaryDirectory() as temp_dir:
             fids_path = Path(temp_dir) / "fids.txt"
