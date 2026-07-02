@@ -5,7 +5,7 @@
 """
 Safety gate for the APDU mutation fuzzer.
 
-Fuzzing a physical eUICC can permanently brick the card — some vendor
+Fuzzing a physical eUICC can permanently brick the card — some deployed
 OS images refuse to re-enter the post-INSTALL secure channel if a
 reader disconnect happens mid-session, others panic on BER-TLV length
 mismatches and lock the ISD-R. This module exists to make sure nobody

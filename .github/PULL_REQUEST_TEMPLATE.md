@@ -57,6 +57,9 @@ pytest -q --tb=short --disable-warnings --no-header --maxfail=1 tests/...
 - [ ] No new `verify=False` / `check_hostname=False` TLS sites outside
       the existing pinning-gated paths.
 - [ ] No new `datetime.utcnow()` or tz-naive `datetime.now()`.
+- [ ] SAIP GUI/TUI/docs changes use only standards-cited or YggdraSIM-owned
+      labels, and a binary-aware label-origin sweep covered generated metadata,
+      caches, and local audit notes.
 - [ ] `pyproject.toml` version bumped if this is a release-worthy change.
 - [ ] Relevant docs under `docs/` / `site-docs/` updated.
 

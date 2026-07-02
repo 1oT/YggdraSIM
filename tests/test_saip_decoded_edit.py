@@ -674,11 +674,11 @@ class EnumeratePeDecodableFieldsTests(unittest.TestCase):
         """
         Fields that have no hand-written editor, no round-trip encoder,
         and no semantic decoder must still be editable — the raw-hex
-        fallback keeps the whole PE usable even for legacy / vendor
+        fallback keeps the whole PE usable even for legacy / opaque
         blobs the project has not decoded yet.
         """
         pe_value = {
-            "vendorExtensionFoo": {_TAG_BYTES: "DEADBEEF"},
+            "opaqueExtensionFoo": {_TAG_BYTES: "DEADBEEF"},
         }
         entries = enumerate_pe_decodable_fields(
             pe_value,
@@ -712,10 +712,10 @@ class EnumeratePeDecodableFieldsTests(unittest.TestCase):
         """
         An unknown tagged-bytes field with no registered decoder must
         be surfaced via the raw-hex editor so the bulk PE form still
-        accepts edits on legacy / vendor blobs.
+        accepts edits on legacy / opaque blobs.
         """
         model = _resolve_pe_editor_model_for_enumeration(
-            field_name="vendorOpaqueExtension",
+            field_name="opaqueExtension",
             raw_value={_TAG_BYTES: "CAFEBABE"},
             last_ef_key=None,
             pe_section_key="nonStandard",

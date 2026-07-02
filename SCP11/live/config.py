@@ -100,14 +100,14 @@ class SGPConfig:
     EIM_REST_CREATE_PATH: str = "/edr/create"
     EIM_REST_LOOKUP_PATH_TEMPLATE: str = "/edr/lookup/{resource_id}"
     REMOTE_DP_ALLOW_LOCAL_FALLBACK: bool = False
-    # FQDN suffix allow-list that gates vendor-specific GetEimPackage
+    # FQDN suffix allow-list that gates implementation-specific GetEimPackage
     # timeout/retry probing. The shipped tree carries the mechanism only;
-    # operators populate the targets via EIM_VENDOR_QUIRK_FQDN_SUFFIXES so
+    # operators populate the targets via EIM_IMPLEMENTATION_QUIRK_FQDN_SUFFIXES so
     # production endpoint names stay out of the public source. Comma- or
     # space-separated.
-    EIM_VENDOR_QUIRK_FQDN_SUFFIXES: tuple = ()
+    EIM_IMPLEMENTATION_QUIRK_FQDN_SUFFIXES: tuple = ()
     # Prefer ES10b STORE DATA on a dedicated logical channel, matching the
-    # channel layout used by commercial LPAs on physical cards.
+    # channel layout used by deployed LPAs on physical cards.
     ES10B_USE_LOGICAL_CHANNEL: bool = True
     # Preserve top-level BPP section framing during ES10b install for physical
     # cards that reject flattened member-only A0/A1/A2/A3 payloads.
@@ -159,14 +159,14 @@ class SGPConfig:
         ev_pd_reason = os.environ.get("EIM_PROFILE_DOWNLOAD_ERROR_REASON", "").strip()
         if ev_pd_reason != "":
             object.__setattr__(self, "EIM_PROFILE_DOWNLOAD_ERROR_REASON", ev_pd_reason)
-        ev_quirk = os.environ.get("EIM_VENDOR_QUIRK_FQDN_SUFFIXES", "").strip()
+        ev_quirk = os.environ.get("EIM_IMPLEMENTATION_QUIRK_FQDN_SUFFIXES", "").strip()
         if ev_quirk != "":
             normalized_suffixes = tuple(
                 suffix.lower().lstrip(".")
                 for suffix in ev_quirk.replace(",", " ").split()
                 if len(suffix.strip()) > 0
             )
-            object.__setattr__(self, "EIM_VENDOR_QUIRK_FQDN_SUFFIXES", normalized_suffixes)
+            object.__setattr__(self, "EIM_IMPLEMENTATION_QUIRK_FQDN_SUFFIXES", normalized_suffixes)
         if self.CAPABILITIES is None:
             object.__setattr__(
                 self,

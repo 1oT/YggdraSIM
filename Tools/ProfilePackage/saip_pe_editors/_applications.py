@@ -104,7 +104,7 @@ class ApplicationsView(Vertical):
         yield Static(
             "Double-click an entry to focus the JSON pane on the matching PE. "
             "PE-SecurityDomain shows the ISD/SSD installation parameters; "
-            "PE-Application shows third-party applet AIDs.",
+            "PE-Application shows external applet AIDs.",
             classes="apps_note",
         )
 

@@ -291,7 +291,7 @@ class FakeCfg:
     EIM_REQUEST_VARIANT: int = 0
     EIM_GET_PACKAGE_NOTIFY_STATE_CHANGE: bool = False
     EIM_GET_PACKAGE_RPLMN: str = ""
-    EIM_VENDOR_QUIRK_FQDN_SUFFIXES: tuple = ("example.test",)
+    EIM_IMPLEMENTATION_QUIRK_FQDN_SUFFIXES: tuple = ("example.test",)
 
 
 class FakeProvider:
@@ -1605,7 +1605,7 @@ class OrchestratorFlowTests(unittest.TestCase):
         self.assertEqual(request.eim_id, "eim1.example.test")
         self.assertEqual(request.eim_id_type, "eimIdTypeFqdn (2)")
 
-    def test_build_eim_poll_request_omits_challenge_for_vendor_quirk_endpoint(self):
+    def test_build_eim_poll_request_omits_challenge_for_implementation_quirk_endpoint(self):
         configured_data = wrap_tlv("BF3C", wrap_tlv("80", b"rsp.example.com"))
         eim_configuration = wrap_tlv(
             "BF55",

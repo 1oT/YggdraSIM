@@ -15,7 +15,7 @@ a reader would otherwise produce noisy errors from ``pyscard``.
 
 Differences are reported both as a status-word delta (SW1 SW2) and as
 a structural diff (length, hash, first-N prefix) of the response body.
-Some divergences are legitimate (T=0 vs T=1 shaping, vendor-specific
+Some divergences are legitimate (T=0 vs T=1 shaping, implementation-specific
 file sets) so the harness only fails the test on hard mismatches:
 
 - a hard SW divergence for the core ETSI TS 102 221 commands

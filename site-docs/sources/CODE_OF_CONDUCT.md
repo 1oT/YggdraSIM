@@ -31,7 +31,7 @@ and orientation.
   silently.
 - Treat newcomers gently. Smart-card stacks have a steep onboarding
   curve; help people level up rather than dismissing them.
-- Disclose conflicts of interest. If a contribution touches a vendor
+- Disclose conflicts of interest. If a contribution touches an external supplier
   or operator you are affiliated with, say so in the issue / PR.
 
 ## Unacceptable behaviour
@@ -43,7 +43,7 @@ and orientation.
   permission.
 - Submitting operator secrets, real subscriber identities (`IMSI`,
   `ICCID`, `EID`), production `AES` / `DES` / `ECC` keys, certified
-  profile bundles, or vendor-confidential APDU traces — see
+  profile bundles, or confidential APDU traces — see
   `CONTRIBUTING.md` for the data-hygiene rules.
 - Using the project to attack, surveil, or compromise live mobile
   network infrastructure or third-party subscribers. YggdraSIM is a

@@ -2,9 +2,9 @@
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
-"""Static wiring checks for the PE-GenericFileManagement add-file bar.
+"""Static wiring checks for the PE-GenericFileManagement append-file bar.
 
-The bar implements the *Add file element* affordance for TCA SAIP
+The bar appends ``filePath`` and ``createFCP`` operations for TCA SAIP
 ``genericFileManagement`` PEs (§6.6.7). These checks guarantee the
 JS / CSS symbols stay in lockstep with the registered
 ``saip.gfm_add_file_element`` backend action so a renamed input or

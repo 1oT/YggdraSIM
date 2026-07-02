@@ -5,7 +5,7 @@ Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
 # YggdraSIM Simulated eIM – AddEim Identity Sheet
 
-This document is the concrete, vendor-neutral identity record for the
+This document is the concrete, implementation-neutral identity record for the
 YggdraSIM simulated eIM. It contains **every field** that a real-world
 GSMA SGP.32-compliant eIM portal needs in order to accept YggdraSIM's
 simulated eIM as a peer / indirect profile download source, and to
@@ -14,7 +14,7 @@ bind the resulting eIM Configuration Data to a real eUICC via ES25
 
 The structure mirrors the GSMA SGP.32 `EimConfigurationData` ASN.1 shape
 (section 2.10.1, "eIM Configuration Data"). All values are hardcoded so
-the sheet can be pasted straight into a vendor registration form.
+the sheet can be pasted straight into an operator registration form.
 
 ## 1. Spec anchors
 

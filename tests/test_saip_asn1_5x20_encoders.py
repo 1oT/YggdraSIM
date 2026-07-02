@@ -7,7 +7,7 @@ Covers 100 additional EF tokens across:
 - Pass A (20): Mailbox / CF / VGCS / VBS / eMLPP / DCK / CNL family.
 - Pass B (20): CSIM (CDMA SIM) EFs — opaque namespace ``ef-csim-*``.
 - Pass C (20): Specialized (ISIM / MCPTT / V2X / ProSe / MCS) EFs.
-- Pass D (20): Operator / vendor customs + SCP/OTA auxiliary EFs.
+- Pass D (20): operator/reserved custom + SCP/OTA auxiliary EFs.
 - Pass E: registration + structured-recomposition integration.
 """
 
@@ -347,7 +347,7 @@ class SpecializedOpaqueTests(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# Pass D — Operator / vendor / auxiliary.
+# Pass D — operator/reserved custom + auxiliary.
 
 
 class OperatorCustomTests(unittest.TestCase):
@@ -357,11 +357,11 @@ class OperatorCustomTests(unittest.TestCase):
         ("ef-opcust3", "4F92"),
         ("ef-opcust4", "4F93"),
         ("ef-opcust5", "4F94"),
-        ("ef-vendor1", "4F95"),
-        ("ef-vendor2", "4F96"),
-        ("ef-vendor3", "4F97"),
-        ("ef-vendor4", "4F98"),
-        ("ef-vendor5", "4F99"),
+        ("ef-rescust1", "4F95"),
+        ("ef-rescust2", "4F96"),
+        ("ef-rescust3", "4F97"),
+        ("ef-rescust4", "4F98"),
+        ("ef-rescust5", "4F99"),
         ("ef-scp11key", "4F61"),
         ("ef-scp80ctr", "4F62"),
         ("ef-simlock-state", "4F67"),
@@ -441,7 +441,7 @@ class SweepIntegrationTests(unittest.TestCase):
     def test_operator_custom_hex_hinted(self) -> None:
         for key in (
             "ef-opcust1",
-            "ef-vendor5",
+            "ef-rescust5",
             "ef-scp11key",
             "ef-tui",
         ):

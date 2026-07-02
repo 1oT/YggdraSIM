@@ -2672,7 +2672,7 @@ def _dispatch_remote_rig_status(
             "remote_hil": remote_hil,
             "remote_error": remote_error,
         },
-        "note": str(remote_hil.get("note") or "Remote rig status snapshot."),
+        "note": str(remote_hil.get("note") or "Remote host status snapshot."),
     }
 
 
@@ -2716,7 +2716,7 @@ LOCAL_STOP_SPEC = ActionSpec(
 REMOTE_RIG_START_SPEC = ActionSpec(
     id="card_bridge.remote_rig_start",
     subsystem="Card Bridge",
-    title="Start remote HIL rig",
+    title="Start remote host onboarding",
     description=(
         "Start or verify the PC Card Bridge, open the SSH reverse tunnel, "
         "sync the bearer token, verify the RPi can authenticate to the PC "
@@ -2744,7 +2744,7 @@ REMOTE_RIG_START_SPEC = ActionSpec(
         ActionField(name="forward_gui", label="Also forward RPi GUI", kind="bool", required=False, default=False),
         ActionField(name="restart_processes", label="Restart owned processes", kind="bool", required=False, default=True),
         ActionField(name="install_service", label="Install service", kind="bool", required=False, default=True),
-        ActionField(name="confirm", label="Start remote rig", kind="bool", required=True, default=False),
+        ActionField(name="confirm", label="Start onboarding", kind="bool", required=True, default=False),
     ),
     output_kind="json",
     dispatcher=_dispatch_remote_rig_start,
@@ -2757,7 +2757,7 @@ REMOTE_RIG_START_SPEC = ActionSpec(
 REMOTE_RIG_STOP_SPEC = ActionSpec(
     id="card_bridge.remote_rig_stop",
     subsystem="Card Bridge",
-    title="Stop remote HIL rig",
+    title="Stop remote host",
     description=(
         "Stop the RPi HIL service when an SSH target is known, close the "
         "GUI-owned SSH tunnel and PC Card Bridge process, and clear stale "
@@ -2770,7 +2770,7 @@ REMOTE_RIG_STOP_SPEC = ActionSpec(
         ActionField(name="local_gui_port", label="Local GUI port", kind="int", required=False, default=_DEFAULT_GUI_PORT, min_value=1),
         ActionField(name="remote_workdir", label="Remote repo directory", kind="string", required=False, default=_DEFAULT_REMOTE_WORKDIR),
         ActionField(name="remote_python", label="Remote Python", kind="string", required=False, default=_DEFAULT_REMOTE_PYTHON),
-        ActionField(name="confirm", label="Stop full rig", kind="bool", required=True, default=False),
+        ActionField(name="confirm", label="Stop host", kind="bool", required=True, default=False),
     ),
     output_kind="json",
     dispatcher=_dispatch_remote_rig_stop,
@@ -2890,7 +2890,7 @@ REMOTE_SERVICE_CONTROL_SPEC = ActionSpec(
 REMOTE_RIG_STATUS_SPEC = ActionSpec(
     id="card_bridge.remote_rig_status",
     subsystem="Card Bridge",
-    title="Remote rig status",
+    title="Remote host status",
     description="Show local CardBridge/tunnel state and, when an SSH target is supplied, the RPi service state.",
     inputs=(
         ActionField(name="ssh_target", label="SSH target", kind="string", required=False, placeholder="pi@rpi-host"),

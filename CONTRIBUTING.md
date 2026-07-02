@@ -15,12 +15,20 @@ below.
 - The repository is a **secure-element research and auditing toolkit**. Do not
   submit material that embeds operator secrets, real subscriber identities
   (`IMSI`, `ICCID`, `EID`), production `AES`/`DES`/`ECC` keys, certified
-  profile bundles, or vendor-confidential APDU traces.
+  profile bundles, or confidential APDU traces.
 - Only specification-grade references are acceptable in code, tests, or
   documentation. When in doubt, cite the public section of the relevant
   `GSMA SGP.02 / SGP.22 / SGP.32`, `GlobalPlatform Card Specification`,
   `ETSI TS 102 221 / 102 222`, `3GPP TS 31.102 / 31.115 / 31.116`, or
   `ISO/IEC 7816` document.
+- SAIP GUI, TUI, CLI, docs, tests, generated indexes, and package metadata
+  must use standards-sourced or project-owned wording for names, labels,
+  workflow titles, filenames, comments, and feature groupings. Use a published
+  standards term with a citation, or a YggdraSIM-owned label listed in
+  `guides/NAMING_CONVENTIONS.md`. Imported standards text under
+  `docs/tel-docs/` may retain standards terminology, but that wording must
+  not leak into YggdraSIM operator surfaces or implementation metadata unless
+  it is independently standards-anchored.
 - All source files in the repository must preserve the standing header:
   `# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.`
   Do not remove or rewrite this header in submitted patches.
@@ -46,6 +54,11 @@ below.
    relevant `pytest` target. Do not run the full suite in CI-at-a-glance
    mode; see
    [Testing Guide](https://github.com/hampushellsberg-dev/YggdraSIM/blob/main/site-docs/internals/testing-guide.md).
+   For SAIP UI/TUI or documentation changes, also run a binary-aware
+   label-origin sweep across source, tests, docs, generated indexes, package
+   metadata, caches, and local audit notes. Treat generated metadata and
+   bytecode caches as in scope; stale strings there are still repository
+   artifacts.
 6. Update documentation in the same PR. If you change a CLI surface or an
    operator flow, update at minimum:
    - the subsystem page under `site-docs/subsystems/`

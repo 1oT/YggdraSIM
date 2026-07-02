@@ -104,7 +104,7 @@ baseline to talk to smart-card readers and optional encryption tooling:
 ### Windows
 
 - A working PC/SC stack (built in to Windows 10 / 11).
-- Vendor driver for your smart-card reader.
+- Reader driver for your smart-card reader.
 - OpenSSH client when Card Bridge traffic is tunneled to or from another host.
 - Optional: `gpg4win` when `state/inventory_crypto.json` is enabled.
 

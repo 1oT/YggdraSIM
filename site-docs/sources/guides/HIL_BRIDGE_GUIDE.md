@@ -18,8 +18,8 @@ This guide covers the YggdraSIM hardware-in-the-loop path built around:
 > **Naming note.** "sysmocom SIMtrace2" is the USB product identifier
 > that the Linux `lsusb` tool reports for VID:PID `1d50:60e3`. It is
 > referenced in this guide solely as a device identifier so the HIL
-> supervisor can find the physical hardware; it is not a vendor
-> endorsement, partnership, or certification. The same applies to
+> supervisor can find the physical hardware; it is not an endorsement,
+> partnership, or certification. The same applies to
 > `osmo-remsim-client-st2`, which is the upstream tool name.
 
 > **Build flavor note.** The direct SIMtrace2/RemSIM HIL bridge is

@@ -484,7 +484,7 @@ class ToolkitLogic:
     # info-object TLVs, and appends the resulting D0 envelope to
     # ``state.pending_fetch_queue`` so the next STATUS announces 91xx and
     # the next FETCH delivers it. Tag values follow the comprehension-
-    # required forms used by commercial UICCs (see TS 102 223 Annex A).
+    # required forms used by deployed UICCs (see TS 102 223 Annex A).
     # ------------------------------------------------------------------
 
     def queue_setup_call(
@@ -2647,7 +2647,7 @@ class ToolkitLogic:
             elif code_int == 0x09:
                 # §7.4.9 Browser Termination -- cache the cause so an
                 # STK applet can decide whether to re-launch. The
-                # same opcode is reused by some vendors for §7.4.10
+                # same opcode is reused by some profiles for §7.4.10
                 # Data Available; that path is signalled by the
                 # presence of TLV 0x37 (Channel Data Length) instead
                 # of the browser-termination-cause TLV. Both TLVs
@@ -3973,14 +3973,14 @@ class ToolkitLogic:
                 # the §7.4.x Display Parameters Change event; the
                 # simulator stashes the raw TLV value because the
                 # internal structure (rows / columns / chars) varies
-                # across vendors.
+                # across implementations.
                 fields["display_parameters"] = value_bytes
                 continue
             if tag_bytes in (b"\x49", b"\xC9"):
                 # TS 102 223 §8.81 Frames Information carried by the
                 # §7.4.16 Frames Information Change Event. The TLV
                 # body lays out the new frame partitioning chosen by
-                # the user; we keep the raw bytes because vendors
+                # the user; we keep the raw bytes because implementations
                 # encode the layout differently and the apply layer
                 # only needs the blob plus a transition counter.
                 fields["frames_information"] = value_bytes

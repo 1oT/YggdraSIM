@@ -4,9 +4,7 @@
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """Integration tests for ``saip.batch_lint_paths`` and ``saip.batch_personalize``.
 
-These dispatchers are the GUI-side equivalents of the CLI verbs
-``LINT-BATCH`` / ``GENERATE-BATCH`` and the ``epcval -p`` workflow
-the manual documents under "Batch Validation" / "Batch Personalization".
+These dispatchers back the GUI batch lint and batch generation flows.
 """
 
 from __future__ import annotations

@@ -51,7 +51,7 @@ def _to_byte(value: Any, *, label: str) -> int:
 # Access Domain Parameter (ADP) is a single byte selecting the access
 # regime the toolkit / RFM application enjoys against the target file
 # system. The values below cover the four regimes called out by the
-# spec; vendor-specific values pass through as ``CUSTOM`` so an audit
+# spec; custom values pass through as ``CUSTOM`` so an audit
 # trace still preserves the byte.
 # ----------------------------------------------------------------------
 

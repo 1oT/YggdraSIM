@@ -267,7 +267,7 @@ class SuspendUiccTests(_EngineHarness):
         )
         self.assertEqual((sw1, sw2), (0x69, 0x85))
         # Token must remain so a second RESUME attempt with the right
-        # value can still succeed; commercial cards do not invalidate
+        # value can still succeed; deployed cards do not invalidate
         # the resume context on a single mismatch.
         self.assertNotEqual(self.engine.state.last_suspend_token, b"")
 

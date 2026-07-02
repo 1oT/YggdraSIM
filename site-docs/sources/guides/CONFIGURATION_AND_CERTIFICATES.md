@@ -781,7 +781,7 @@ fields are:
 | `profile_path`        | BPP path for download triggers.                                                |
 | `bip_endpoints`       | `eim`, `smdpp` HTTPS endpoints.                                                |
 | `optional_tags`       | `include`, `tag_hex`, `value_hex` triples for spec-defined optional TLVs.      |
-| `additional_tlvs`     | Same shape as `optional_tags`, used for vendor-specific extensions.            |
+| `additional_tlvs`     | Same shape as `optional_tags`, used for operator-specific extensions.          |
 
 **Queueing rules.** The effective hotfolder queue merges package
 fixtures with any `.json` files under the hotfolder directory, ordered

@@ -490,7 +490,7 @@ class SimulatedSimCardEngine:
         if ins == 0x78 and (cla & 0x80):
             # TS 31.102 §7.1.2.4 GET IDENTITY (CLA=80 INS=78). Wrapped
             # behind the 0x80 CLA proprietary bit because that is what
-            # commercial UICCs require; ETSI TS 102 221 reserves the
+            # deployed UICCs require; ETSI TS 102 221 reserves the
             # base CLA for ISO 7816-4 commands only.
             return self.identity.handle_get_identity(p1, p2, data)
         if ins == 0x50 and (cla & 0x80):
@@ -712,7 +712,7 @@ class SimulatedSimCardEngine:
             return bytes.fromhex(node.aid), 0x90, 0x00
 
         # P2 == 0x00 -- full FCP. EFs are rare for STATUS targets but
-        # the spec allows it; commercial cards return their FCP.
+        # the spec allows it; deployed cards return their FCP.
         try:
             fcp = self.fs.build_fcp(node)
         except Exception:

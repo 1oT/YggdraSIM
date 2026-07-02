@@ -154,9 +154,9 @@ def _patch_pysim_profile_element() -> None:
 
 
 # Suffixes that the SAIP GUI treats as ASCII hex-text rather than
-# binary DER. ``.varder`` is a vendor template convention: it is still
-# hex text, but may carry placeholder literals instead of concrete
-# bytes.
+# binary DER. ``.varder`` is a typed hex-template convention: it is
+# still hex text, but may carry placeholder literals instead of
+# concrete bytes.
 _TEMPLATE_HEX_INPUT_SUFFIXES = {".varder"}
 _HEX_INPUT_SUFFIXES = {".hex", ".txt"} | _TEMPLATE_HEX_INPUT_SUFFIXES
 _ASN_VALUE_INPUT_SUFFIXES = {".asn", ".asn1"}
@@ -2755,7 +2755,7 @@ def _emit_template_filesystem_rows(
     DF.5GS) used to mis-anchor child DFs as siblings under MF.
 
     A position-based cursor is kept as a fallback for files whose
-    ``pe_name`` does not appear in the template (e.g. profile vendor
+    ``pe_name`` does not appear in the template (e.g. profile issuer
     extensions, or the section is missing a ``templateID``). The
     fallback prepends ``3F00`` so the row is still addressable.
     """
@@ -3904,10 +3904,10 @@ def _dispatch_show_pe(
 # Template-driven file catalog.
 #
 # pySim's ``ProfileTemplateRegistry`` (TCA SAIP §9 / Annex A) carries
-# the full catalog of DFs/EFs each filesystem-bearing PE can hold. The
-# eUICC Profile Creator surfaces this catalog as a checkable tree so
-# operators see *all* files defined by the template — not just the
-# ones currently materialised in the PE.
+# the full catalog of DFs/EFs each filesystem-bearing PE can hold.
+# The GUI exposes that catalog as a checkable tree so operators see
+# *all* files defined by the template — not just the ones currently
+# materialised in the PE.
 #
 # These three actions expose:
 #   * list_pe_template — read the catalog, with ``in_pe`` flags so the
@@ -4052,8 +4052,7 @@ def _dispatch_list_pe_template(
     The catalog is exhaustive: every DF/EF defined by the template is
     surfaced, with an ``in_pe`` flag indicating whether the PE currently
     carries a materialised entry for that ``pe_name``. Operators can
-    use this to drive an "Add file"-style checkable tree, mirroring
-    the eUICC Profile Creator's *File System Template* group.
+    use this to drive a checkable file-template tree.
     """
     from yggdrasim_common.gui_server.sessions import get_manager
 
@@ -4136,7 +4135,7 @@ def _dispatch_list_pe_template(
         for ft in getattr(template, "files", []) or ()
     ]
     response["tree"] = _build_template_tree(template, materialized)
-    # Surface any materialised keys that are NOT in the template (vendor
+    # Surface any materialised keys that are NOT in the template (source-specific
     # / out-of-spec entries) so the GUI can warn about them rather than
     # silently hiding them.
     template_pe_names = {row["pe_name"] for row in response["files"]}
@@ -4454,16 +4453,12 @@ def _dispatch_add_template_subtree(
 
 
 # ----------------------------------------------------------------------
-# Generic File Management — Add file element
+# Generic File Management — file creation
 #
-# The eUICC Profile Creator manual ("Profile Elements for File System
-# Creation" → "File System Creation by Generic File Management")
-# documents two affordances inside a PE-GFM editor:
+# A PE-GFM file addition is represented by two SAIP operations:
 #
-#   * Add select element — appends a ``filePath`` SELECT that moves
-#     the cursor to an existing DF/ADF.
-#   * Add file element — appends a ``createFCP`` that defines a new
-#     file at the current cursor.
+#   * ``filePath`` — SELECT that moves the cursor to an existing DF/ADF.
+#   * ``createFCP`` — file definition at the current cursor.
 #
 # Template PEs (USIM / ISIM / OPT-USIM / MF / Telecom / Phonebook /
 # GSM-Access / 5GS / SAIP / SNPN / 5GProSe / EAP / CD) use the
@@ -4472,12 +4467,12 @@ def _dispatch_add_template_subtree(
 # everything else, so we expose an equivalent dispatcher here.
 #
 # The single ``saip.gfm_add_file_element`` action below merges the
-# "select + create" pair into one atomic operation: the operator
-# supplies a parent path (the DF that owns the new file) plus the
-# new file's FID and File-Descriptor Byte, and a fresh transaction
-# is appended to ``fileManagementCMD``. Treating each addition as a
-# self-contained transaction keeps the GFM section's diff readable
-# and avoids stitching ambiguity against existing transactions.
+# select/create pair into one atomic operation: the operator supplies
+# a parent path (the DF that owns the new file) plus the new file's FID
+# and File-Descriptor Byte, and a fresh transaction is appended to
+# ``fileManagementCMD``. Treating each addition as a self-contained
+# transaction keeps the GFM section's diff readable and avoids stitching
+# ambiguity against existing transactions.
 # ----------------------------------------------------------------------
 
 
@@ -4778,9 +4773,8 @@ def _dispatch_list_files(
 ) -> dict[str, Any]:
     """List every file across all FS-bearing PEs, optionally re-sorted.
 
-    ``sort_by`` keys mirror the manual's "Sorting the File Tree"
-    dropdown: ``natural`` (decode order), ``file_id``, ``name``,
-    ``kind``, ``parent_path``, ``size``.
+    ``sort_by`` accepts ``natural`` (decode order), ``file_id``,
+    ``name``, ``kind``, ``parent_path``, or ``size``.
     """
     from yggdrasim_common.gui_server.sessions import get_manager
 
@@ -4892,13 +4886,11 @@ def _dispatch_search_files(
 ) -> dict[str, Any]:
     """Filter the filesystem-tree rows by name / FID / description.
 
-    Mirrors the eUICC Profile Creator manual's ``Find File`` dialog
-    (``ePC_02/Finding_Files_in_the_File_System.htm``). The default
-    ``mode`` is ``all`` which scans every haystack the matrix supports;
-    ``name`` / ``fid`` / ``description`` / ``translation`` narrow the
-    scan. Regex mode honours the same flag the manual exposes ("Regular
-    expression mode") and uses Python ``re.IGNORECASE`` by default so
-    operators don't have to spell ``(?i)`` themselves.
+    The default ``mode`` is ``all`` which scans every haystack the
+    matrix supports; ``name`` / ``fid`` / ``description`` /
+    ``translation`` narrow the scan. Regex mode uses Python
+    ``re.IGNORECASE`` by default so operators don't have to spell
+    ``(?i)`` themselves.
     """
     import re as _re
 
@@ -4955,8 +4947,8 @@ def _dispatch_search_files(
 # Remote File / App Management surfaces (``rfm`` / ``ram``). For each
 # row we surface the canonical GP bookkeeping fields — Instance AID,
 # Class AID, Load Package AID, decoded privileges, decoded lifecycle
-# state, key-list size — so the GUI can render a Comprion-style
-# Applications view without re-decoding the JSON tree client-side.
+# state, key-list size — so the GUI can render an Applications view
+# without re-decoding the JSON tree client-side.
 # ---------------------------------------------------------------------
 
 def _dispatch_list_applications(
@@ -6337,7 +6329,7 @@ def _dispatch_save_package(
 ) -> dict[str, Any]:
     """Write the current in-memory package out to disk.
 
-    ``format`` choices (manual's "Save As" dialog):
+    ``format`` choices:
       * ``der`` — binary DER, default extension ``.der``.
       * ``hex`` — ASCII hex of the DER, default ``.hex``. Round-
         trippable through ``saip.open_package``.
@@ -7187,7 +7179,7 @@ def _dispatch_diff_against_path(
 ) -> dict[str, Any]:
     """Diff a session against an arbitrary on-disk SAIP package.
 
-    Useful for "compare current edits to a known-good vendor DER" or
+    Useful for "compare current edits to a known-good DER" or
     "compare two profiles where only one is open in a session". The
     target path is loaded via :func:`_load_package_from_path` so the
     same DER / hex-text / JSON ingestion rules apply as
@@ -7428,8 +7420,8 @@ def _dispatch_reset_variable(
 # dispatchers refuse to displace either one (TCA SAIP §A.2).
 
 
-# Minimal default decoded payloads for the PE types the manual lists
-# under "Add Profile Element". Each new PE gets an empty header (the
+# Minimal default decoded payloads for the PE types this editor can
+# scaffold directly. Each new PE gets an empty header (the
 # operator fills name + identification afterwards). Keys not listed
 # here can still be added via ``saip.import_pe`` from disk.
 _PE_ADD_DEFAULTS: dict[str, dict[str, Any]] = {
@@ -7674,9 +7666,9 @@ def _apply_pe_add_preset(pe: Any, pe_type: str, preset: str) -> str:
 
 # File extensions ``saip.import_pe`` accepts. The matching pySim
 # ProfileElement parser handles plain DER for everything else; XML
-# (the legacy "File Tree Express" container) needs a separate
-# converter we do not bundle, so the dispatcher fails fast with a
-# clear message rather than silently dropping the input.
+# containers need a separate converter we do not bundle, so the
+# dispatcher fails fast with a clear message rather than silently
+# dropping the input.
 _IMPORT_PE_HEX_SUFFIXES: frozenset[str] = frozenset({".asn", ".asn1", ".txt", ".hex"})
 _IMPORT_PE_JSON_SUFFIXES: frozenset[str] = frozenset({".json"})
 
@@ -7941,8 +7933,8 @@ def _decode_imported_pe_bytes(input_path: Path) -> Any:
     suffix = input_path.suffix.lower()
     if suffix == ".xml":
         raise ValueError(
-            "XML imports (File Tree Express) are not implemented in this "
-            "release; convert to .der or .asn1 hex before reloading.",
+            "XML imports are not implemented in this release; convert to "
+            ".der or .asn1 hex before reloading.",
         )
     raw = input_path.read_bytes()
     if suffix in _IMPORT_PE_JSON_SUFFIXES:
@@ -8007,8 +7999,7 @@ def _dispatch_import_pe(
       * ``.der`` — binary DER (default).
       * ``.asn`` / ``.asn1`` / ``.txt`` / ``.hex`` — ASCII hex of DER.
       * ``.json`` — single-PE JSON snippet (transcoded form).
-      * ``.xml`` — legacy File Tree Express container; not handled
-        in this release (no bundled converter).
+      * ``.xml`` — not handled in this release (no bundled converter).
     """
     from yggdrasim_common.gui_server.sessions import get_manager
     from Tools.ProfilePackage.saip_json_codec import (
@@ -8332,10 +8323,9 @@ def _parse_sidecar_variables_csv(csv_path: Path) -> list[tuple[str, str]]:
     The bench convention places ``profile.csv`` next to ``profile.der``
     using the bare 2-column form (no header row). Blank lines and ``#``
     comment lines split logical record sets — the first set is what
-    the open dispatcher applies (mirrors the documented appendix
-    "Profile Personalization of Variables"). This is intentionally a
-    different parser to ``saip.import_variables_csv`` which uses a
-    header-row DictReader CSV.
+    the open dispatcher applies. This is intentionally a different
+    parser to ``saip.import_variables_csv`` which uses a header-row
+    DictReader CSV.
     """
     import csv as _csv
 
@@ -8344,8 +8334,8 @@ def _parse_sidecar_variables_csv(csv_path: Path) -> list[tuple[str, str]]:
         reader = _csv.reader(stream)
         for raw_row in reader:
             row = [str(cell).strip() for cell in (raw_row or [])]
-            # Skip blank lines and comment lines — these are the
-            # separators between record sets in the manual's format.
+            # Skip blank lines and comment lines — these separate
+            # logical record sets in sidecar files.
             if len(row) == 0 or all(cell == "" for cell in row):
                 if len(pairs) > 0:
                     break
@@ -8365,14 +8355,12 @@ def _parse_sidecar_variables_csv(csv_path: Path) -> list[tuple[str, str]]:
 # ----------------------------------------------------------------------
 # Token-list ↔ filename mapping store
 #
-# The eUICC Profile Creator manual auto-loads ``<package>.csv`` next to
-# the profile package (see "Importing a Variable Definitions File").
-# That sibling convention is too rigid for a real bench where one CSV
-# is shared across many packages, or kept in a different directory
-# from the .der it personalises. This store lets the operator pin
-# any token-list path to any package basename; the open dispatcher
-# consults the map first and only falls back to the sibling
-# convention when no explicit mapping exists.
+# A sibling ``<package>.csv`` convention is useful for small benches
+# but too rigid when one CSV is shared across many packages, or kept in
+# a different directory from the .der it personalises. This store lets
+# the operator pin any token-list path to any package basename; the
+# open dispatcher consults the map first and only falls back to the
+# sibling convention when no explicit mapping exists.
 #
 # Persisted as JSON under ``<runtime>/state/saip_token_mappings.json``
 # so the binding survives process restarts and is shared across
@@ -8565,16 +8553,14 @@ def _dispatch_open_package_with_variables(
          operator-driven binding for token lists that don't sit
          next to the .der file.
       2. **Sibling convention** — ``<package_basename>.csv`` next
-         to the package, as documented in the manual's "Importing a
-         Variable Definitions File".
+         to the package.
 
     The returned shape extends ``saip.open_package``'s output with
     a ``variables_loaded`` summary so the GUI can report exactly
     which CSV (if any) was applied and via which resolution path.
 
-    CSV format is the bare 2-column ``NAME,VALUE`` per line per the
-    appendix "Profile Personalization of Variables". Blank lines
-    and ``#`` comments split record sets; only the first set is
+    CSV format is the bare 2-column ``NAME,VALUE`` per line. Blank
+    lines and ``#`` comments split record sets; only the first set is
     applied here (use ``saip.batch_personalize`` to fan out the
     remaining sets across multiple output packages).
     """
@@ -8696,7 +8682,7 @@ def _dispatch_add_variable_definition(
 
     The name lands in ``__ygg_token_defs__`` ready for a later
     ``saip.add_variable_to_pe`` call (or for picking up by an
-    external personalisation CSV). By default refuses to clobber an
+    operator token CSV). By default refuses to clobber an
     existing entry; pass ``overwrite=true`` to replace one in place.
     """
     from yggdrasim_common.gui_server.sessions import get_manager
@@ -8786,8 +8772,8 @@ def _dispatch_remove_variable_definition(
     }
     # Also walk for the YggdraSIM dict-shaped marker that
     # ``saip.add_variable_to_pe`` stamps into typed PE slots
-    # (``{"__ygg_placeholder__": NAME, ...}``); the manual's
-    # bracket scanner above only matches string placeholders.
+    # (``{"__ygg_placeholder__": NAME, ...}``); the bracket scanner
+    # above only matches string placeholders.
     bound_names |= _walk_for_dict_placeholder_bindings(
         handle["decoded_document"].get("sections") or {}
     )
@@ -9281,8 +9267,8 @@ def _dispatch_add_variable_to_pe(
     }
 
     # Replace the field with a placeholder reference. We use the
-    # bracket-style notation (``[NAME]``) the manual specifies, and
-    # mark the parent slot with the YggdraSIM placeholder marker
+    # bracket-style notation (``[NAME]``), and mark the parent slot
+    # with the YggdraSIM placeholder marker
     # ``__ygg_placeholder__`` so the encoder substitutes at re-encode
     # time. Falls back to a bare string when the parent slot can't
     # carry the marker.
@@ -9377,7 +9363,7 @@ def _dispatch_list_template_oids(
 
 # -- PE info + reorder ------------------------------------------------
 #
-# Two small UX dispatchers the manual references:
+# Two small UX dispatchers for contextual SAIP editing:
 #   * "PE Info" pane — describes the PE type, ASN.1 module, and the
 #     spec section that defines it.
 #   * "Reorder PEs" — moves a PE in the sequence. Header MUST stay at
@@ -9846,12 +9832,10 @@ def _dispatch_reorder_pes(
 
 # -- Variable export / import (CSV) -----------------------------------
 #
-# The eUICC Profile Creator manual surfaces variables as a CSV view
-# (see "Editing the Variable Definitions" / "Profile Personalization
-# of Variables"). The GUI's "Variables" panel already lets the
-# operator edit one variable at a time via ``saip.set_variable``;
-# these two dispatchers cover the bulk import / export workflow so
-# operators can edit large variable sets in a spreadsheet.
+# The GUI's token panel already lets the operator edit one variable at
+# a time via ``saip.set_variable``; these two dispatchers cover the bulk
+# import / export workflow so operators can edit large variable sets in
+# a spreadsheet.
 
 
 def _dispatch_export_variables_csv(
@@ -10002,8 +9986,8 @@ def _format_html_diff_report(report: dict[str, Any]) -> str:
 
     The CSS is intentionally inline so the artefact survives being
     e-mailed / opened on a spec-review laptop without an internet
-    connection. No JavaScript — the manual's PDF-style report works
-    the same way.
+    connection. No JavaScript, so the report remains portable across
+    offline review environments.
     """
     import html as _html
 
@@ -12539,9 +12523,8 @@ SEARCH_FILES_SPEC = ActionSpec(
     title="Find files",
     description=(
         "Filter the unified filesystem tree by name, FID, description, "
-        "or translation — mirrors the eUICC Profile Creator's File "
-        "System tab Find dialog. Set ``regex`` to interpret ``query`` "
-        "as a Python regex (case-insensitive)."
+        "or translation. Set ``regex`` to interpret ``query`` as a "
+        "Python regex (case-insensitive)."
     ),
     inputs=(
         _SESSION_FIELD,
@@ -12591,8 +12574,8 @@ LIST_PE_TEMPLATE_SPEC = ActionSpec(
     description=(
         "Return the TCA SAIP file template catalog for one PE — every "
         "DF/EF defined by the PE's template, marked with whether it is "
-        "currently materialised in the PE. Drives the eUICC Profile "
-        "Creator-style 'File System Template' tree."
+        "currently materialised in the PE. Drives the file-template "
+        "tree in the editor."
     ),
     inputs=(
         _SESSION_FIELD,
@@ -12714,12 +12697,11 @@ ADD_TEMPLATE_SUBTREE_SPEC = ActionSpec(
 GFM_ADD_FILE_ELEMENT_SPEC = ActionSpec(
     id="saip.gfm_add_file_element",
     subsystem="SAIP",
-    title="GFM — add file element",
+    title="GFM — append file",
     description=(
         "Append a ``filePath`` + ``createFCP`` pair to a PE-GenericFile"
-        "Management section. Mirrors the eUICC Profile Creator's "
-        "*Add file element* affordance: the operator supplies the "
-        "parent DF path plus the new file's FID and FCP byte; the "
+        "Management section. The operator supplies the parent DF path "
+        "plus the new file's FID and FCP byte; the "
         "addition lands as a fresh transaction at the tail of "
         "``fileManagementCMD`` unless ``transaction_index`` selects "
         "an existing block. Marks the owning PE dirty so "
@@ -14699,7 +14681,7 @@ def _dispatch_batch_lint_paths(
     paths: Any = None,
     strict: Any = None,
 ) -> dict[str, Any]:
-    """Lint multiple SAIP packages in one call (mirrors ``epcval -p``).
+    """Lint multiple SAIP packages in one call.
 
     Accepts a comma-separated string or JSON array of paths. Each entry
     may be a literal file path or a glob pattern (e.g. ``Workspace/*.der``).
@@ -14797,10 +14779,8 @@ def _dispatch_batch_personalize(
 ) -> dict[str, Any]:
     """Materialise N personalised DER profiles from one template + a data file.
 
-    Mirrors the eUICC Profile Creator "Batch Personalization" dialog
-    (and the ``GENERATE-BATCH`` shell verb). Data file may be CSV /
-    JSON / JSONL / YAML; column / key names must match template
-    placeholder names 1:1.
+    Data file may be CSV / JSON / JSONL / YAML; column / key names must
+    match template placeholder names 1:1.
     """
     import copy as _copy
 
@@ -15455,7 +15435,7 @@ PE_INFO_SPEC = ActionSpec(
     description=(
         "Return PE-type metadata for the contextual info pane: title, "
         "ASN.1 module name, spec citation, and a one-paragraph summary. "
-        "Useful as the F1-style help dialog the manual references."
+        "Useful as local contextual help in the editor."
     ),
     inputs=(
         _SESSION_FIELD,
@@ -15592,8 +15572,7 @@ COMPARE_REPORT_HTML_SPEC = ActionSpec(
     description=(
         "Diff the in-session profile against another package on disk "
         "and write the report as a self-contained HTML file (one "
-        "table per section, colour-coded rows). Mirrors the manual's "
-        "'Comparing File Systems' dialog -> Export."
+        "table per section, colour-coded rows)."
     ),
     inputs=(
         _SESSION_FIELD,
@@ -15669,11 +15648,10 @@ BATCH_LINT_PATHS_SPEC = ActionSpec(
     subsystem="SAIP",
     title="Batch lint packages",
     description=(
-        "Lint multiple SAIP packages in one call (mirrors ``epcval -p`` "
-        "and the ``LINT-BATCH`` shell verb). Accepts a comma-separated "
-        "string or JSON array of paths; each entry may be a literal "
-        "file path or a glob pattern. Returns one row per matched "
-        "file plus an aggregate severity tally."
+        "Lint multiple SAIP packages in one call. Accepts a "
+        "comma-separated string or JSON array of paths; each entry may "
+        "be a literal file path or a glob pattern. Returns one row per "
+        "matched file plus an aggregate severity tally."
     ),
     inputs=(
         ActionField(
@@ -15808,8 +15786,8 @@ IMPORT_PE_SPEC = ActionSpec(
         "Decode a single-PE blob from disk and splice it into the "
         "sequence. Accepts .der (binary), .asn / .asn1 / .txt / .hex "
         "(ASCII hex of the same DER), and .json (transcoded single-PE "
-        "snippet). The legacy XML File-Tree-Express container has no "
-        "bundled converter and is rejected with a clear error."
+        "snippet). XML input has no bundled converter and is rejected "
+        "with a clear error."
     ),
     inputs=(
         _SESSION_FIELD,
@@ -16006,7 +15984,7 @@ ADD_VARIABLE_DEFINITION_SPEC = ActionSpec(
         "Register a placeholder definition without binding it to "
         "any PE. The name lands in __ygg_token_defs__ ready for a "
         "later saip.add_variable_to_pe call (or for pickup by an "
-        "external personalisation CSV). Refuses to clobber an "
+        "operator token CSV). Refuses to clobber an "
         "existing entry unless overwrite=true."
     ),
     inputs=(
@@ -16142,13 +16120,11 @@ EXPORT_PE_SPEC = ActionSpec(
 BATCH_PERSONALIZE_SPEC = ActionSpec(
     id="saip.batch_personalize",
     subsystem="SAIP",
-    title="Batch personalize profiles",
+    title="Batch generate profiles",
     description=(
         "Materialise N personalised DER profiles from one transcoded "
         "JSON template + a CSV / JSON / JSONL / YAML data file. "
-        "Mirrors the eUICC Profile Creator Batch Personalization "
-        "dialog and the ``GENERATE-BATCH`` shell verb. Filenames are "
-        "derived from the per-record placeholder values."
+        "Filenames are derived from the per-record placeholder values."
     ),
     inputs=(
         ActionField(

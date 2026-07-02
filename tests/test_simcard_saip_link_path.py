@@ -391,8 +391,8 @@ class UsimOnlyEfPreservedTests(unittest.TestCase):
                     label="USIM",
                 ),
                 SimProfileFsNode(
-                    path=("MF", "ADF.USIM", "EF.OPVENDOR"),
-                    name="EF.OPVENDOR",
+                    path=("MF", "ADF.USIM", "EF.OPCUSTOM"),
+                    name="EF.OPCUSTOM",
                     kind="ef",
                     fid="6F30",
                     structure="transparent",

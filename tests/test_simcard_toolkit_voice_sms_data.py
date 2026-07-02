@@ -13,7 +13,7 @@ operations. Each test:
    envelope, command type, qualifier and info-object TLVs match the
    spec.
 
-The point is to lock the wire shape against what a commercial
+The point is to lock the wire shape against what a deployed
 terminal (or a Wireshark TS 102 223 dissector) would expect when the
 simulator emits the command, so a HIL bridge sees the same bytes a
 real card would put on the line.

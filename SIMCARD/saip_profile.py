@@ -203,7 +203,7 @@ _SECTION_SPECS: dict[str, dict[str, Any]] = {
 # materialises a ``SimProfileFsNode`` for a recognised file slot. FIDs are
 # aligned with ``Tools/ProfilePackage/saip_asn1_decode._EF_KEY_TO_FID`` so
 # both the simulator filesystem and the SAIP inspector agree on the
-# anchor; where no authoritative FID exists (vendor / reserved entries)
+# anchor; where no authoritative FID exists (reserved entries)
 # the file key is intentionally left out so ``_consume_profile_element``
 # silently drops it without materialising a bogus node.
 #
@@ -561,7 +561,7 @@ _FILE_SPECS: dict[str, dict[str, Any]] = {
     "ef-puri": {"name": "EF.PURI", "fid": "4F4D", "structure": "linear-fixed", "sfi": None},
     "ef-uid": {"name": "EF.UID", "fid": "4F10", "structure": "linear-fixed", "sfi": None},
     # DF.MULTIMEDIA / DF.MMSS / DF.MCS / DF.V2X (SAIP-specific, FIDs are
-    # vendor-dependent outside TS 31.102 Annex H). Materialise with a
+    # operator-specific outside TS 31.102 Annex H). Materialise with a
     # blank FID so the node anchors at the correct hierarchical slot.
     "ef-mml": {"name": "EF.MML", "fid": "", "structure": "linear-fixed", "sfi": None},
     "ef-mmdf": {"name": "EF.MMDF", "fid": "", "structure": "transparent", "sfi": None},

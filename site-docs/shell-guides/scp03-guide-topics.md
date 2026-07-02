@@ -96,7 +96,7 @@ privilege:
 
 - `CREATE FILE`
 - `DELETE FILE`
-- vendor-specific resize paths when supported
+- implementation-specific resize paths when supported
 - `DEACTIVATE FILE`
 - `ACTIVATE FILE`
 

@@ -385,9 +385,8 @@
 }
 
 /* Per-record navigator — dropdown + prev/next + keyboard (PageUp /
- * PageDown / Home / End). Mirrors the eUICC Profile Creator
- * §"File Content" record stepper so 22-record EF.ARRs / phonebooks
- * surface one record at a time instead of flooding the Data tab. */
+ * PageDown / Home / End). Keeps 22-record EF.ARRs / phonebooks to
+ * one visible record instead of flooding the Data tab. */
 
 .saip-record-nav {
   display: flex;
@@ -790,7 +789,7 @@
   margin-top: 6px;
 }
 
-/* Comprion-style structured wizards (EF.IMSI / EF.AD / EF.UST / …). */
+/* Structured EF wizards (EF.IMSI / EF.AD / EF.UST / …). */
 
 .saip-wizard-card {
   border-color: var(--accent-soft, var(--border));

@@ -226,7 +226,7 @@ class SimProfileApplicationInstance:
 
 @dataclass
 class SimProfileNonStandardBlob:
-    """SAIP ``nonStandard`` vendor extension payload."""
+    """SAIP ``nonStandard`` operator-specific extension payload."""
 
     issuer_oid: str = ""
     content: bytes = b""
@@ -891,7 +891,7 @@ class SimToolkitState:
     # (08/88), Capability Configuration Parameters (07/87) and
     # the calling-area Location Information (13/93). The envelope
     # response remains the canned "Allowed, no modification" reply
-    # because vendor-specific call-control logic belongs in an
+    # because operator-specific call-control logic belongs in an
     # applet, not the simulator core.
     last_cc_address: str = ""
     last_cc_address_ton_npi: int = 0
@@ -1097,7 +1097,7 @@ class SimCardState:
     # quirk layer rewrites a 9000 reply into 61 LL). GET RESPONSE
     # consumes this buffer and clears it on read; an empty buffer
     # responds with 6985 ("conditions of use not satisfied") just
-    # like a commercial UICC after the response window has elapsed.
+    # like a deployed UICC after the response window has elapsed.
     last_response_buffer: bytes = b""
     # ETSI TS 102 221 §11.1.14 / §11.1.15 RETRIEVE DATA / SET DATA
     # registry. Keyed by the 16-bit data-object tag (P1||P2) carried

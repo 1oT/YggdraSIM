@@ -963,7 +963,7 @@ def encode_ef_wlrplmn(
 #                 between the 10-byte BCD number and the extension record id
 #                 is not exposed by the decoder.
 # - SMSP:         same alpha-id roundtrip pitfall.
-# - EF.ARR:       sub-TLVs inside ``A4`` groups and any vendor tags outside
+# - EF.ARR:       sub-TLVs inside ``A4`` groups and any unknown tags outside
 #                 the small whitelist (80/90/97/84/A4) are exposed as opaque
 #                 ``items`` lists rather than explicit semantic fields.
 #
@@ -1476,7 +1476,7 @@ def encode_ef_ecc(
         accumulator.extend(_encode_bcd_swapped_digits(code_text, byte_length=3))
 
     # Pad any untouched trailing blocks with the original bytes when we
-    # have them — preserves the vendor's category byte layout for the
+    # have them — preserves the source category byte layout for the
     # common R99+ MSISDN-style footer.
     consumed_blocks = len(codes)
     while consumed_blocks < len(original_blocks):
@@ -1914,7 +1914,7 @@ def encode_ef_spdi(
     strings; when present and non-empty the encoder rebuilds the TLV
     stream verbatim. If ``_ygg_original_hex`` is provided and the decoded
     list still matches, the original bytes are returned byte-for-byte
-    (which also keeps any vendor ``items`` the re-encoder cannot model)."""
+    (which also keeps any unknown ``items`` the re-encoder cannot model)."""
 
     plmn_list = payload.get("serviceProviderPlmnList")
     original_hex = str(payload.get("_ygg_original_hex", "") or "").strip().upper()
@@ -3471,7 +3471,7 @@ def encode_ef_gbanl(
     target_length: int | None = None,
 ) -> bytes:
     """Encode EF.GBANL (TS 31.102 §4.2.93): ``80 <NAF-Id> 81 <B-TID>`` TLV
-    stream. Raw hex passthrough is supported for vendor-extended records.
+    stream. Raw hex passthrough is supported for extension-bearing records.
     """
 
     if "raw" in payload and ("nafId" not in payload and "bTid" not in payload):
@@ -3512,7 +3512,7 @@ def encode_ef_dir_record(
 ) -> bytes:
     """Encode an EF.DIR record (TS 102 221 §13.1). The decoded form carries
     the TLV stream verbatim under ``items`` (each with its own ``tag`` and
-    ``raw`` bytes). Unknown / vendor tags round-trip through their ``raw``
+    ``raw`` bytes). Unknown / extension tags round-trip through their ``raw``
     payload; constructed templates may recurse via a child ``items`` list.
 
     When ``_ygg_original_hex`` is provided and the decoded items match the
@@ -4248,17 +4248,17 @@ _EF_CONTENT_DISPATCHER: dict[str, Any] = {
     "ef-mcs-keyset": encode_ef_opaque,
     "ef-mcs-stat": encode_ef_opaque,
     "ef-mcs-sec-profile": encode_ef_opaque,
-    # 5x20 Pass D — Operator / vendor / auxiliary extensions.
+    # 5x20 Pass D — operator/reserved custom + auxiliary extensions.
     "ef-opcust1": encode_ef_opaque,
     "ef-opcust2": encode_ef_opaque,
     "ef-opcust3": encode_ef_opaque,
     "ef-opcust4": encode_ef_opaque,
     "ef-opcust5": encode_ef_opaque,
-    "ef-vendor1": encode_ef_opaque,
-    "ef-vendor2": encode_ef_opaque,
-    "ef-vendor3": encode_ef_opaque,
-    "ef-vendor4": encode_ef_opaque,
-    "ef-vendor5": encode_ef_opaque,
+    "ef-rescust1": encode_ef_opaque,
+    "ef-rescust2": encode_ef_opaque,
+    "ef-rescust3": encode_ef_opaque,
+    "ef-rescust4": encode_ef_opaque,
+    "ef-rescust5": encode_ef_opaque,
     "ef-scp11key": encode_ef_opaque,
     "ef-scp80ctr": encode_ef_opaque,
     "ef-simlock-state": encode_ef_opaque,
@@ -4473,7 +4473,7 @@ def encode_notification_address_field(payload: dict[str, Any]) -> bytes:
 #
 # Each entry here pairs with a ``_summarize_binary_blob`` dispatch entry
 # in ``_decode_special_field`` (see ``saip_asn1_decode.py``). Length
-# bounds are intentionally left open because the fields target vendor /
+# bounds are intentionally left open because the fields target extension /
 # profile-specific payloads whose upper bound is not standardised.
 
 
@@ -4490,7 +4490,7 @@ _PASSTHROUGH_BYTES_FIELD_NAMES: tuple[str, ...] = (
     # ``_BYTES_DISPATCHER`` further down.
     # PE-Application load block binary.
     "loadBlockObject",
-    # PE-NonStandard opaque vendor content.
+    # PE-NonStandard opaque profile-specific content.
     "content",
     # PE-CDMAParameter — GSMA SAIP Annex D authentication material.
     # These are security credentials; we only pass-through the hex on

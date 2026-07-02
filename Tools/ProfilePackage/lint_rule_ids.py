@@ -6,7 +6,7 @@
 YggdraSIM-native lint rule identifiers (``YRL-*``).
 
 These IDs are owned by this tree and are not meant to track external lab or
-vendor rule catalogs. Spec references stay in each finding's ``spec`` field.
+external rule catalogs. Spec references stay in each finding's ``spec`` field.
 
 Pattern: ``YRL-<domain>-<suffix>``
 

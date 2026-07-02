@@ -10,8 +10,8 @@ SIM driver layer was originally written for plain GSM SIMs and the
 boot path was never re-targeted at ETSI TS 102 221's ``CLA=00`` family.
 
 The script below mirrors the byte sequence captured live on the HIL
-bridge against a Telna BPP-provisioned UICC. Two failures observed
-there motivate this test:
+bridge against a BPP-provisioned UICC. Two failures observed there
+motivate this test:
 
 1. ``A0 B0 00 00 0A`` (READ BINARY of EF.ICCID under legacy CLA) used
    to fall through ``SimulatedSimCardEngine._is_supported_cla`` and

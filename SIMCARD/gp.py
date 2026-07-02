@@ -89,7 +89,7 @@ class GpLogic:
         if tag_hex == "0042":
             # GP Card Spec v2.3.1 §H.4 IIN. Derived from the first
             # 4 bytes (8 hex digits) of the EID; the simulator does not
-            # expose a separate IIN slot but commercial cards almost
+            # expose a separate IIN slot but deployed cards almost
             # always carry the eUICC manufacturer/issuer prefix here.
             iin_bytes = self._issuer_identification_bytes()
             return tlv("42", iin_bytes), 0x90, 0x00
@@ -527,7 +527,7 @@ class GpLogic:
 
         Returns a 42-byte CPLC seeded from the EID + ICCID so the value
         is deterministic per simulator instance. None of the fields are
-        meaningful for production but the layout matches commercial
+        meaningful for production but the layout matches deployed
         UICCs so probing tools (PCSC scriptors, modem fingerprinters)
         accept the response.
         """

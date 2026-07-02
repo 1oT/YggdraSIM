@@ -208,7 +208,7 @@ class TS31102AnnexHSharedEfMirrorTests(unittest.TestCase):
             nodes,
             SimFileNode(
                 node_id="DFGSM_PROPRIETARY",
-                name="EF.OPVENDOR",
+                name="EF.OPCUSTOM",
                 kind="ef",
                 fid="6F30",
                 parent_id=df_gsm_id,
@@ -220,7 +220,7 @@ class TS31102AnnexHSharedEfMirrorTests(unittest.TestCase):
             nodes,
             SimFileNode(
                 node_id="USIM_PROPRIETARY",
-                name="EF.OPVENDOR",
+                name="EF.OPCUSTOM",
                 kind="ef",
                 fid="6F30",
                 parent_id=usim_id,

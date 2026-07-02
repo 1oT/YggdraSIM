@@ -22,8 +22,7 @@ ASN.1 reference: ``PE-CDMAParameter`` in
       mobileIPAuthenticationData OCTET STRING (SIZE(5..957)) OPTIONAL
     }
 
-External references for the optional fields (manual cites these as
-3GPP2 [S0016]):
+3GPP2 cross-references for the optional fields:
   * SSD: bytes 1..8 = SSD-A, bytes 9..16 = SSD-B (CAVE).
   * HRPD: 3GPP2 S0016 §4.5.7.10 (HRPD CHAP SS).
   * Simple IP: 3GPP2 S0016 §4.5.7.7 (SimpleIP CHAP SS).

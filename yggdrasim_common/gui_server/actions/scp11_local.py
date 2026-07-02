@@ -1486,7 +1486,7 @@ STORE_METADATA_CUSTOM_SPEC = ActionSpec(
     title="Store metadata (custom tag)",
     description=(
         "Push a StoreMetadata variant targeting an explicit custom "
-        "tag (hex). Useful for vendor-specific metadata extensions."
+        "tag (hex). Useful for operator-specific metadata extensions."
     ),
     inputs=(
         _reader_input_field(),
@@ -1572,7 +1572,7 @@ STORE_METADATA_CUSTOM_ALL_SPEC = ActionSpec(
     description=(
         "Read every enabled custom metadata entry from the metadata "
         "JSON and push each one to the card as a StoreMetadata command. "
-        "Useful for vendor-specific extension tags that must be sent "
+        "Useful for operator-specific extension tags that must be sent "
         "in a batch."
     ),
     inputs=(

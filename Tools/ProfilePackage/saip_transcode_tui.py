@@ -291,7 +291,7 @@ def run_saip_transcode_tui(bridge: SaipToolBridge) -> None:
         if len(stripped) == 0:
             return ValidationIssue("JSON buffer is empty.")
 
-        # Vendor-style inline typed placeholders (``{var:TYPE:N[:mod]}``)
+        # Inline typed placeholders (``{var:TYPE:N[:mod]}``)
         # would otherwise trip ``parse_editor_json`` with "odd hex length"
         # or "non-hexadecimal character" errors. Substitute them with
         # deterministic sentinel hex so the parse/encode round-trip sees
@@ -3501,12 +3501,12 @@ def run_saip_transcode_tui(bridge: SaipToolBridge) -> None:
             self._decoded_pane_dirty = False
             self._outline_visible = True
             # Fold consecutive-duplicate ``filePath`` rows in the
-            # ``fileManagementCMD`` outline. Vendors (notably Telna)
-            # encode an explicit SELECT ahead of every single EF even
-            # when the selected DF has not changed, which makes the
-            # outline visually alternate 1:1 between "(File path)" and
-            # EF rows. Folding hides the redundant SELECT so the outline
-            # reads as "DF header → run of EFs". Toggle via Ctrl+F6.
+            # ``fileManagementCMD`` outline. Some packages encode an
+            # explicit SELECT ahead of every single EF even when the
+            # selected DF has not changed, which makes the outline
+            # visually alternate 1:1 between "(File path)" and EF rows.
+            # Folding hides the redundant SELECT so the outline reads
+            # as "DF header → run of EFs". Toggle via Ctrl+F6.
             self._outline_fold_redundant_file_paths: bool = True
             self._outline_search_query = ""
             self._outline_search_index = -1
@@ -5893,11 +5893,11 @@ def run_saip_transcode_tui(bridge: SaipToolBridge) -> None:
                             "inline_placeholder_hex": _hex_text,
                             "title": title,
                             "note": (
-                                "Field carries vendor-style inline typed "
+                                "Field carries inline typed "
                                 "placeholders. They are preserved verbatim "
                                 "through decode and will be re-substituted "
                                 "to sentinel bytes on save. Resolve via the "
-                                "vendor template pipeline before shipping."
+                                "typed-template pipeline before shipping."
                             ),
                             "editor_kind": "readonly_json",
                             "payload": copy.deepcopy(inline_payload),
@@ -8396,7 +8396,7 @@ def run_saip_transcode_tui(bridge: SaipToolBridge) -> None:
             if len(_save_inline_records) > 0:
                 # Splice sentinel runs back to their original placeholder
                 # literals so the on-disk transcode JSON and the refreshed
-                # editor buffer both carry the vendor-facing text rather
+                # editor buffer both carry the source-file text rather
                 # than the sentinel bytes that materialised in the DER.
                 _splice_save_literals(post_tagged, _save_inline_records)
             pretty = json.dumps(post_tagged, indent=2, ensure_ascii=False) + "\n"

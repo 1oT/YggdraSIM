@@ -148,7 +148,7 @@ through the wrapper menu.
   ``state.nodes`` so the runtime tree never holds an orphan.
   MF deletion is rejected with `69 86`; non-operational targets
   (lifecycle byte ≠ `0x05`) are rejected with `62 83` to mirror
-  commercial-card guard rails.
+  deployed-card guard rails.
 - ETSI TS 102 222 §6.3 `CREATE FILE` (`INS 0xE0`) and §6.4
   `RESIZE FILE` (`INS 0xD4`). Both are gated behind an
   authenticated SCP03 session (`6982` otherwise) so secure-channel
@@ -166,7 +166,7 @@ through the wrapper menu.
   EFs are truncated or padded with `0xFF`) or the record list
   (record EFs grow / shrink in record-count units); when the
   body omits a `83` FID the simulator targets the current EF,
-  matching commercial-card behaviour.
+  matching deployed-card behaviour.
 - 3GPP TS 31.102 §7.1.2.1.2 / §7.1.2.1.3 `AUTHENTICATE` GBA
   variants. `P2=0x84` (GBA Bootstrap) reuses the regular UMTS
   AKA Milenage path, including AUTS / sync-failure recovery, and
@@ -373,7 +373,7 @@ probed by management tools and modems:
 | `9F 7F` | CPLC (`9F7F`) | 42-byte ETSI TS 102 226 / GP §H lifecycle blob seeded from EID + ICCID. |
 | `00 E0` | Key Information Template | KVN-aware AES-128 record set (`C0 04 ID KVN 88 10`). |
 | `FF 21` | Extended Card Resources (`FF21`) | GP §H.6 template carrying `81` system-app count (1 byte), `82` free NVM (3 bytes), `83` free RAM (2 bytes), seeded from `state.euicc_info.ext_card_resources`. RAM management tools probe this before issuing INSTALL [for load] to size CAP files. |
-| `FF 40` | Vendor reserved | Empty TLV; kept for legacy probes. |
+| `FF 40` | Reserved | Empty TLV; kept for legacy probes. |
 
 Anything else returns `6A 88` per ISO 7816-4. Each tag is deterministic
 across reboots so external fingerprinters key off a stable signature.
@@ -897,7 +897,7 @@ envelopes to fully decoded latches:
     pages, low nibble = current page).
   - `last_cb_content` (bytes 6..; padding `0x0D` retained).
   - `last_cb_page_raw` always carries the full TLV value so an
-    STK applet can re-decode using a vendor-specific path.
+    STK applet can re-decode using a implementation-specific path.
   - `cb_pages_received` increments per envelope so a
     multi-page broadcast can be tallied.
 - **ETSI TS 102 223 §7.5.6 Menu Selection (`D3`).** The Item
@@ -1071,7 +1071,7 @@ implements that mirror as a final pass inside
 The USIM-side payload is never overwritten when the issuer
 explicitly populated it, so an operator that ships distinct
 USIM-side bytes keeps full authority. Unknown 6Fxx FIDs that
-happen to coexist under both DFs (vendor-private EFs, repurposed
+happen to coexist under both DFs (issuer-private EFs, repurposed
 slots) are left untouched because they are not in the shared-EF
 table.
 
@@ -1393,7 +1393,7 @@ intercept without parsing `envelope_history` by hand:
 
 The reply path is unchanged -- each envelope continues to return
 the canned `80 01 00` Result TLV ("Allowed, no modification")
-because vendor-specific override logic belongs in an STK applet
+because operator-specific override logic belongs in an STK applet
 rather than the simulator core.
 
 ### Cyclic record I/O + EF.LND (round 19)
@@ -1410,7 +1410,7 @@ Round-19 brings the implementation in line with TS 102 221
 - UPDATE RECORD on a cyclic EF accepts only mode `03`
   ("previous"). The card overwrites what was the oldest slot and
   rotates the ring so the new record becomes the most-recent
-  entry. Other modes return `69 81` to mirror commercial UICC
+  entry. Other modes return `69 81` to mirror deployed UICC
   behaviour.
 
 `EF.LND` (FID `6F44`, TS 31.102 §4.2.32) is now seeded under
@@ -1462,7 +1462,7 @@ envelope, and `_handle_event_download` ships the values into
 | `0x10` Frames Information Change | TS 102 223 §7.4.16 | `last_frames_information` is overwritten with the new TLV `49` blob and `frames_information_changes` increments on every event (including empty payloads, mirroring `display_parameters_changes`). |
 
 The `0x09` overlay accepts envelopes that carry both
-`browser_termination_cause` and `channel_length`, so a vendor that
+`browser_termination_cause` and `channel_length`, so a implementation that
 overloads the same opcode for both purposes does not lose either
 side of the dispatch.
 
@@ -1484,7 +1484,7 @@ six previously-queueable proactives gained dedicated latches:
 
 The Text String decoder honours the standard DCS bytes:
 `0x00` / `0x04` 8-bit ASCII, `0x08` UCS-2/BE, falling back to a
-best-effort UTF-8 decode for vendor-specific values.
+best-effort UTF-8 decode for operator-specific values.
 
 ### Voice / SMS USIM EFs (round 15)
 

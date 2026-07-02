@@ -43,7 +43,7 @@ class DecodedEfCoverageTests(unittest.TestCase):
         result = self._actions._dispatch_list_interpreted_efs(ctx=None)
         round_trip = set(result["round_trip"])
         # Spot-check: every profile carries these and they all need
-        # structured editors per the manual.
+        # structured editors.
         for required in (
             "ef-spn",
             "ef-pnn",

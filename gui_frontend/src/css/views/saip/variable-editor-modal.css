@@ -98,8 +98,8 @@
   background: var(--surface-alt, rgba(255, 255, 255, 0.03));
 }
 
-/* Generic ribbon form modal (Batch personalize, Import PE, Export PE,
- * Batch validate, ARR sync). Stacked rows with label-on-top so picker
+/* Generic ribbon form modal (Batch generate, Import PE, Export PE,
+ * Batch lint, ARR sync). Stacked rows with label-on-top so picker
  * buttons sit beside the path field at any width. */
 .saip-form-row {
   display: flex;
@@ -153,4 +153,3 @@
   font-size: 11px;
   color: var(--fg-muted, #888);
 }
-

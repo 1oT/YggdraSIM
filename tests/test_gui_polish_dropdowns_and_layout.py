@@ -67,7 +67,7 @@ def test_meta_group_retains_overview_and_about() -> None:
 
 
 def test_remote_bridge_lives_under_advanced_before_environment() -> None:
-    """Remote Bridge belongs in Advanced, and Advanced renders before Environment."""
+    """Remote Host Onboarding belongs in Advanced, before Environment."""
     js = _read("app.js")
     advanced_pos = js.index('id: "group-advanced"')
     environment_pos = js.index('id: "group-env"')
@@ -75,9 +75,9 @@ def test_remote_bridge_lives_under_advanced_before_environment() -> None:
 
     assert advanced_pos < environment_pos
     assert 'id: "leaf-adv-card-bridge"' in advanced_block
-    assert 'label: "Remote Bridge"' in advanced_block
+    assert 'label: "Remote Host Onboarding"' in advanced_block
     assert 'inspectView: "card_bridge"' in advanced_block
-    assert 'card_bridge: "Advanced · Remote Bridge"' in js
+    assert 'card_bridge: "Advanced · Remote Host Onboarding"' in js
 
 
 def test_duplicated_flat_nav_entries_are_gone() -> None:
@@ -469,10 +469,42 @@ def test_hil_modem_shell_tab_contract() -> None:
     assert '"/api/host-shell/capabilities?scope=hil-modem"' in js
     assert '"&scope=hil-modem"' in js
     assert '"&command="' in js
+    assert "HIL_MODEM_STANDARD_COMMANDS" in js
+    assert "hilSendModemShellInput" in js
+    assert "hilSendAtCommand" in js
+    assert "hilNormalizeAtHex" in js
+    assert "hilSendSelectedStandardAtCommand" in js
+    assert 'hilRunModemQuickAction("reboot")' in js
+    assert 'hilRunModemQuickAction("refresh")' in js
+    assert 'hilRunModemQuickAction("auth")' in js
+    assert 'hilRunModemQuickAction("ceer")' in js
+    assert 'hilRunModemQuickAction("answer")' in js
+    assert 'hilRunModemQuickAction("hangup")' in js
+    assert "hilDialModemCall" in js
+    assert "hilSendModemCsim" in js
+    assert "hilSendModemCrsm" in js
+    assert 'hilSendAtCommand("AT+CFUN=1,1", "sent AT+CFUN=1,1")' in js
+    assert '"AT+CFUN=0\\r"' in js
+    assert '"AT+CFUN=1\\r"' in js
+    assert 'hilSendAtCommand("AT+CREG?", "sent AT+CREG?")' in js
+    assert 'command: "AT+CEER"' in js
+    assert 'hilSendAtCommand("ATA", "sent ATA")' in js
+    assert 'hilSendAtCommand("ATH", "sent ATH")' in js
+    assert '"AT+CSIM="' in js
+    assert '"AT+CRSM="' in js
+    assert 'command: "AT+CEREG?"' in js
+    assert 'command: "AT+CGREG?"' in js
+    assert 'command: "AT+CPIN?"' in js
+    assert 'command: "AT+CGDCONT?"' in js
+    assert '"AT+CMGF=1\\r"' in js
+    assert 'AT+CMGS=\\"' in js
+    assert '"\\x1a"' in js
     assert 'state.activeTab === "dissector"' in js
 
     for selector in (
         ".cc-hil-modem-shell",
+        ".cc-hil-modem-actions",
+        ".cc-hil-modem-standard",
         ".cc-hil-modem-command",
         ".cc-hil-modem-terminal-frame",
         ".cc-hil-modem-terminal",
@@ -872,7 +904,7 @@ def test_drop_hover_visual_state_styled() -> None:
 def test_card_bridge_remote_rig_promotes_one_click_start() -> None:
     """The Card Bridge rig UI must keep the full sequence as the primary path."""
     html = _read("index.html")
-    assert 'id="cb-rig-start-all">Start full rig</button>' in html
+    assert 'id="cb-rig-start-all">Start onboarding</button>' in html
     assert '<details class="cb-override cb-rig-manual">' in html
     primary_pos = html.index('id="cb-rig-start-all"')
     manual_pos = html.index('<details class="cb-override cb-rig-manual">')
@@ -980,7 +1012,7 @@ def test_card_bridge_remote_rig_profiles_are_keyed_by_ssh_target() -> None:
 
 
 def test_remote_bridge_running_state_surfaces_globally() -> None:
-    """A live Remote Bridge should be visible outside the Remote Bridge page."""
+    """A live host-onboarding bridge should be visible outside its page."""
     html = _read("index.html")
     assert 'id="topbar-hil-bridge"' in html
     assert re.search(r'<button\s+type="button"\s+class="topbar-card-bridge"\s+id="topbar-hil-bridge"', html)
@@ -988,9 +1020,9 @@ def test_remote_bridge_running_state_surfaces_globally() -> None:
     assert 'id="topbar-hil-bridge-value">idle</span>' in html
     assert 'id="topbar-card-bridge"' in html
     assert re.search(r'<button\s+type="button"\s+class="topbar-card-bridge"\s+id="topbar-card-bridge"', html)
-    assert 'title="Remote Bridge status"' in html
-    assert '<span class="topbar-card-bridge-label">Remote bridge</span>' in html
-    assert 'id="topbar-card-bridge-value">idle</span>' in html
+    assert 'title="Remote Lab status"' in html
+    assert '<span class="topbar-card-bridge-label">Remote Lab</span>' in html
+    assert 'id="topbar-card-bridge-value">stopped</span>' in html
 
     css = _read("app.css")
     assert '.topbar-card-bridge[data-state="running"]' in css
@@ -1003,12 +1035,17 @@ def test_remote_bridge_running_state_surfaces_globally() -> None:
     js = _read("app.js")
     assert "function cbSetGlobalBridgeStatus(state, label)" in js
     assert "function cbSyncCommandCenterBridgeIndicators()" in js
-    assert 'pill.title = "Remote Bridge status: " + nextLabel' in js
-    assert '"leaf-adv-card-bridge"' in js
+    assert "function remoteLabRenderGlobalSessionIndicators()" in js
+    assert "function remoteLabStartSessionPoll()" in js
+    assert 'apiFetch("/api/remote-lab/sessions")' in js
+    assert "var count = remoteLabState.activeSessionCount || 0" in js
+    assert '"Remote Lab active session"' in js
+    assert "remoteLabRenderGlobalSessionIndicators();" in js
+    assert '"leaf-adv-remote-lab"' in js
     assert '"cc-nav-card-bridge-state"' in js
-    assert 'leaf.inspectView === "card_bridge"' in js
+    assert 'leaf.inspectView === "remote_lab"' in js
     assert 'loadCardBridgeStatus();' in js
-    assert 'cbSetGlobalBridgeStatus("running", "running")' in js
+    assert 'ccOpenInspectView("remote_lab", "leaf-adv-remote-lab")' in js
 
 
 def test_hil_trace_running_state_surfaces_in_command_center_list() -> None:
@@ -1048,7 +1085,7 @@ def test_card_bridge_launch_success_flashes_note_green() -> None:
 
 
 def test_hil_toolbar_can_launch_saved_remote_bridge_rig() -> None:
-    """HIL should expose the saved Remote Bridge one-click launch path."""
+    """HIL should expose the saved remote host onboarding launch path."""
     js = _read("app.js")
     assert "function cbRigStartAllFromSavedSettings()" in js
     assert "function cbRigStopAllFromSavedSettings()" in js
@@ -1060,26 +1097,29 @@ def test_hil_toolbar_can_launch_saved_remote_bridge_rig() -> None:
     block = js.split("function renderHilWorkbench(container, actions, leaf)", 1)[1]
     block = block.split("function hilToolbarButton", 1)[0]
     assert 'state.cardBridgeLaunchInFlight ? "..." : "⇄"' in block
-    assert 'state.cardBridgeLaunchInFlight ? "Starting bridge" : "Remote Bridge"' in block
+    assert 'state.cardBridgeLaunchInFlight ? "Starting host" : "Host onboarding"' in block
     assert "hilLaunchCardBridgeRig(actions, container, leaf);" in block
 
     launch_block = js.split("function hilLaunchCardBridgeRig(actions, container, leaf)", 1)[1]
     launch_block = launch_block.split("function renderHilDissectorTab", 1)[0]
     assert "cbRigStartAllFromSavedSettings()" in launch_block
-    assert 'state.actionStatusText = "starting Remote Bridge rig"' in launch_block
-    assert "Remote Bridge rig start failed." in launch_block
+    assert 'state.actionStatusText = "starting remote host onboarding"' in launch_block
+    assert "Remote host onboarding failed." in launch_block
 
 
-def test_topbar_bridge_pills_toggle_start_stop_actions() -> None:
-    """Top-bar bridge pills should act as global start/stop controls."""
+def test_topbar_bridge_pills_route_to_actual_consumers() -> None:
+    """Top-bar bridge pills should control HIL and route remote streams to Remote Lab."""
     js = _read("app.js")
     assert "function wireTopbarBridgeControls()" in js
     assert "function hilToggleTopbarBridge()" in js
     assert "function cbToggleTopbarRemoteBridge()" in js
     assert 'hil.addEventListener("click"' in js
     assert 'remote.addEventListener("click"' in js
-    assert 'cbRigStartAllFromSavedSettings()' in js
-    assert 'cbRigStopAllFromSavedSettings()' in js
+    remote_block = js.split("function cbToggleTopbarRemoteBridge()", 1)[1]
+    remote_block = remote_block.split("function wireTopbarBridgeControls()", 1)[0]
+    assert 'ccOpenInspectView("remote_lab", "leaf-adv-remote-lab")' in remote_block
+    assert "cbRigStartAllFromSavedSettings()" not in remote_block
+    assert "cbRigStopAllFromSavedSettings()" not in remote_block
     assert 'openCommandSubsystem("HIL", { scope: "all", leafId: "leaf-adv-hil" });' in js
     assert 'hilStartLiveSession(actions, container, leaf)' in js
     assert 'hilStopLiveSession(actions, container, leaf)' in js

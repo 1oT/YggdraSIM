@@ -31,12 +31,11 @@
       packageSeq: 1,
       packageDrawerCollapsed: false,
       // SA-G1: ribbon + top-tab shell. The ribbon is the always-visible
-      // command bar that mirrors Comprion's grouped Profile Package /
-      // Profile Element / File System / Variables / Validation / Help
-      // groups (re-themed for our palette). The variable editor moved
-      // out of the left pane into a modal launched from the ribbon, so
-      // the per-pkg ``activeTopTab`` only ever toggles between the
-      // three structural surfaces of the package itself.
+      // command bar grouped around Profile Package / Profile Element /
+      // File System / Variables / Validation / Help tasks. The variable
+      // editor moved out of the left pane into a modal launched from the
+      // ribbon, so the per-pkg ``activeTopTab`` only ever toggles between
+      // the three structural surfaces of the package itself.
       variableModalOpen: false,
       variableModalPackageId: null,
     },
@@ -10143,7 +10142,7 @@
           || typeof value.active_count === "number");
   }
 
-  // Manual-aligned label translations for SAIP field keys. The keys
+  // Standards-aligned label translations for SAIP field keys. The keys
   // pySim emits are spec-faithful camelCase (``applicationLoadPackageAID``,
   // ``minimumSecurityLevel``) which is fine for API surfaces but
   // unhelpful inside an editor — operators recognise the wording from

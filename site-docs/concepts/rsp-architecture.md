@@ -53,7 +53,7 @@ flowchart LR
 - **IPAd** is the IoT-device-side agent in SGP.32. It is similar to LPAd but
   assumes no UI and expects a remote orchestrator.
 - **eIM** is the SGP.32 orchestrator. It drives an IPAd remotely through a
-  bearer such as HTTPS, MQTT, or a vendor channel, and talks to SM-DP+ on the
+  bearer such as HTTPS, MQTT, or a private channel, and talks to SM-DP+ on the
   IPAd's behalf.
 - **SM-DP+** prepares and delivers profiles. It is the source of truth for
   `BPP` generation and for notification acknowledgement.

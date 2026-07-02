@@ -100,12 +100,12 @@ class SGPConfig:
     EIM_REST_CREATE_PATH: str = "/edr/create"
     EIM_REST_LOOKUP_PATH_TEMPLATE: str = "/edr/lookup/{resource_id}"
     REMOTE_DP_ALLOW_LOCAL_FALLBACK: bool = False
-    # FQDN suffix allow-list that gates vendor-specific GetEimPackage
+    # FQDN suffix allow-list that gates implementation-specific GetEimPackage
     # timeout/retry probing. The shipped tree carries the mechanism only;
     # operators populate the targets via the env var so production endpoint
     # names stay out of the public source. Comma- or space-separated.
     # Matched case-folded against the trailing label sequence of the eIM FQDN.
-    EIM_VENDOR_QUIRK_FQDN_SUFFIXES: tuple = ()
+    EIM_IMPLEMENTATION_QUIRK_FQDN_SUFFIXES: tuple = ()
 
     LOCAL_SGP26_TRUST_ANCHOR_PATH: str = field(
         default_factory=lambda: os.path.join(_get_config_dir(), "SGP26_TRUST_ANCHOR.pem")
@@ -153,14 +153,14 @@ class SGPConfig:
         ev_pd_reason = os.environ.get("EIM_PROFILE_DOWNLOAD_ERROR_REASON", "").strip()
         if ev_pd_reason != "":
             object.__setattr__(self, "EIM_PROFILE_DOWNLOAD_ERROR_REASON", ev_pd_reason)
-        ev_quirk = os.environ.get("EIM_VENDOR_QUIRK_FQDN_SUFFIXES", "").strip()
+        ev_quirk = os.environ.get("EIM_IMPLEMENTATION_QUIRK_FQDN_SUFFIXES", "").strip()
         if ev_quirk != "":
             normalized_suffixes = tuple(
                 suffix.lower().lstrip(".")
                 for suffix in ev_quirk.replace(",", " ").split()
                 if len(suffix.strip()) > 0
             )
-            object.__setattr__(self, "EIM_VENDOR_QUIRK_FQDN_SUFFIXES", normalized_suffixes)
+            object.__setattr__(self, "EIM_IMPLEMENTATION_QUIRK_FQDN_SUFFIXES", normalized_suffixes)
         if self.CAPABILITIES is None:
             object.__setattr__(
                 self,

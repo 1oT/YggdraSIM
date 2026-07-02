@@ -377,8 +377,8 @@ class DecodedEditBundleWiringTests(unittest.TestCase):
         # detail view split into File Control Parameters / Data / JSON
         # tabs. The General tab hosts the FCP-metadata editor; the
         # Data tab folds both the hexadecimal view and the interpreted
-        # view (ePC §"File Content") so the decoded-field editors
-        # surface alongside the byte image.
+        # view so the decoded-field editors surface alongside the byte
+        # image.
         self.assertIn("FCP metadata (editable)", self.app_js)
         self.assertIn('fn === "filedescriptor"', self.app_js)
         self.assertIn("fillFileContents", self.app_js)
@@ -537,8 +537,7 @@ class DecodedEditPolishWiringTests(unittest.TestCase):
     def test_file_detail_tabs_define_tooltips(self) -> None:
         # Tooltip strings for the three detail tabs (FCP / Data /
         # JSON). The "Decoded" sibling tab was merged into Data so the
-        # interpreted + hex views land in the same panel (ePC §"File
-        # Content").
+        # interpreted + hex views land in the same panel.
         self.assertIn("FCP metadata + access rules", self.app_js)
         self.assertIn("EF body bytes plus decoded view", self.app_js)
         self.assertIn("JSON projection of the ASN.1 CHOICE list", self.app_js)
@@ -557,9 +556,8 @@ class DecodedEditPolishWiringTests(unittest.TestCase):
 
     def test_pe_detail_tabs_have_tooltips(self) -> None:
         # Two-tab world: "Decoded view" (typed editor + hex) and "JSON".
-        # The legacy "PE-<Type> Editor" / "ASN.1 Value Notation" / "block
-        # tree" labels were retired so YggdraSIM's surface text is its
-        # own and not a Comprion ePC echo.
+        # Retired tab labels stay out of the app surface so YggdraSIM's
+        # text remains local and task-focused.
         self.assertIn("Typed PE layout and decoded-field editors", self.app_js)
         self.assertIn(
             "Flat JSON projection of the decoded PE document",
@@ -661,7 +659,7 @@ class DecodedEditPolishWiringTests(unittest.TestCase):
 
     def test_variable_modal_chrome(self) -> None:
         # "Variable editor" was renamed to "Token editor" so the surface
-        # text is YggdraSIM's own and not a Comprion ePC echo.
+        # text stays local and task-focused.
         self.assertIn("Close token editor (same as Esc).", self.app_js)
         self.assertIn("overrideWord", self.app_js)
         self.assertIn("placeholderWord", self.app_js)
@@ -824,7 +822,7 @@ class PeLevelDecodedPanelWiringTests(unittest.TestCase):
         self.assertIn("forceCollapsible: true", body)
         self.assertIn("startCollapsed: true", body)
 
-    def test_direct_pe_dropdowns_cover_manual_constrained_fields(self) -> None:
+    def test_direct_pe_dropdowns_cover_standards_constrained_fields(self) -> None:
         self.assertIn("var _SAIP_PE_TYPES_BY_HINT = {", self.app_js)
         self.assertIn("var _SAIP_KEY_IDENTIFIER_OPTIONS = [", self.app_js)
         self.assertIn("var _SAIP_KEY_VERSION_OPTIONS = [", self.app_js)
@@ -1881,10 +1879,10 @@ class BackendDecodedTreeAndDecodedTabEditWiringTests(unittest.TestCase):
 
     def test_record_fixed_data_tab_mounts_record_local_decoded_editors(self) -> None:
         # Decoded-field editors were merged into the Data tab when the
-        # separate Decoded sibling tab was retired (ePC §"File
-        # Content"). Record-fixed EFs render those editors inside the
-        # selected record block so EF.DIR-style nested TLVs follow the
-        # same single-record workflow as EF.ARR.
+        # separate Decoded sibling tab was retired. Record-fixed EFs
+        # render those editors inside the selected record block so
+        # EF.DIR-style nested TLVs follow the same single-record
+        # workflow as EF.ARR.
         nav_anchor = self.app_js.find("function saipBuildRecordNavigator(")
         self.assertGreater(nav_anchor, 0)
         nav_body = self.app_js[nav_anchor: nav_anchor + 9000]

@@ -788,7 +788,7 @@ class SGP22Orchestrator:
 
     @staticmethod
     def _is_notification_list_empty_status_word(error: Exception) -> bool:
-        # ``6A88`` (SW_REFERENCED_DATA_NOT_FOUND) -- some eUICC vendors
+        # ``6A88`` (SW_REFERENCED_DATA_NOT_FOUND) -- some eUICC implementations
         # return it from ES10b.ListNotifications when the pending queue
         # is empty rather than encoding the empty notificationMetadataList
         # the spec suggests. Treat as a synonymous ``empty list`` marker.
@@ -798,7 +798,7 @@ class SGP22Orchestrator:
     @staticmethod
     def _should_retry_with_retrieve_notifications_fallback(error: Exception) -> bool:
         # SGP.22 §5.7.10 ListNotifications (BF28) is mandatory in v2.x+,
-        # but some commercial eUICC OS revisions reject BF28 after a
+        # but some deployed eUICC OS revisions reject BF28 after a
         # profile state change with 6E00 ``CLA not supported'' on the
         # basic channel and 6985 ``conditions of use not satisfied''
         # even on a clean supplementary channel. The same cards still
@@ -928,12 +928,12 @@ class SGP22Orchestrator:
             return [entry_index]
         return list(range(len(entries)))
 
-    def _matches_vendor_quirk_fqdn(self, eim_fqdn: str) -> bool:
+    def _matches_implementation_quirk_fqdn(self, eim_fqdn: str) -> bool:
         # Some operator endpoints require longer timeout/retry probing.
         # The target FQDN suffixes are operator-configured via
-        # EIM_VENDOR_QUIRK_FQDN_SUFFIXES so production endpoint names
+        # EIM_IMPLEMENTATION_QUIRK_FQDN_SUFFIXES so production endpoint names
         # never appear in the public source.
-        suffixes = getattr(self.cfg, "EIM_VENDOR_QUIRK_FQDN_SUFFIXES", ()) or ()
+        suffixes = getattr(self.cfg, "EIM_IMPLEMENTATION_QUIRK_FQDN_SUFFIXES", ()) or ()
         if len(suffixes) == 0:
             return False
         normalized = str(eim_fqdn).strip().lower().rstrip(".")
@@ -1651,7 +1651,7 @@ class SGP22Orchestrator:
         error_text = str(error).lower()
         if "timed out" not in error_text:
             return False
-        if self._matches_vendor_quirk_fqdn(request.eim_fqdn):
+        if self._matches_implementation_quirk_fqdn(request.eim_fqdn):
             return True
         if len(str(getattr(request, "euicc_info2", "") or "").strip()) > 0:
             return True

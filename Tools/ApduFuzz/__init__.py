@@ -6,7 +6,7 @@ APDU mutation fuzzer for physical eUICC vulnerability research.
 
 This package deliberately sits behind a hard safety gate. Running it
 against the wrong card can permanently brick a production UICC (some
-vendors refuse to re-enter VPP training on reader disconnects during
+implementations refuse to re-enter VPP training on reader disconnects during
 a post-INSTALL flow, others panic on BER-TLV length mismatches in
 proprietary tags). See :mod:`Tools.ApduFuzz.safety` for the required
 opt-in tokens and ICCID/IMSI whitelist semantics.

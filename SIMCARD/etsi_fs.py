@@ -1249,7 +1249,7 @@ def _encode_isim_uri_record(uri_bytes: bytes, *, record_length: int = 64) -> byt
     SIP / TEL URI as UTF-8 bytes. Records are padded to a fixed
     width (default 64 bytes) with ``0xFF`` so the linear-fixed EF
     has predictable record boundaries that match the way
-    commercial cards lay them out.
+    deployed cards lay them out.
     """
     payload = bytes(uri_bytes or b"")
     if len(payload) > 0xFE:
@@ -1813,7 +1813,7 @@ def rebuild_runtime_filesystem(state: SimCardState) -> None:
         # Pad every slot with 0xFF to the longest application record so
         # READ RECORD returns a deterministic record_length regardless of
         # which slot the terminal reads. This matches the zero-padded
-        # record layout observed on commercial UICC references.
+        # record layout seen in deployed UICC behavior.
         max_record_length = max(len(record) for record in dir_records)
         padded_records = [
             record + b"\xFF" * (max_record_length - len(record))
@@ -2044,7 +2044,7 @@ def _mirror_shared_efs_between_df_gsm_and_adf_usim(
     The list of mirrorable FIDs is gated by
     ``_TS_31_102_ANNEX_H_SHARED_EFS`` so unrelated 6Fxx EFs that
     happen to coexist under both DFs (e.g. operator-private files
-    that the card vendor placed in DF.GSM but reused with different
+    that the card issuer placed in DF.GSM but reused with different
     semantics in USIM) are left alone.
     """
     df_gsm_node_id = path_index.get(("MF", "DF.GSM"))
@@ -2444,7 +2444,7 @@ def _apply_chv_table_from_profile(
     encoding stores both max-attempts and remaining attempts in a
     single byte (high / low nibble). The ``pinAttributes`` byte's
     bit-0 toggles the "PIN enabled" state; SAIP §5.6.1 reserves the
-    other bits for vendor flags so the simulator keeps them in
+    other bits for issuer flags so the simulator keeps them in
     ``SimChvReference`` only as the ``enabled`` flag.
     """
     if len(pin_entries) == 0 and len(puk_entries) == 0:
@@ -3256,7 +3256,7 @@ class EtsiFileSystem:
           P1 is ignored per spec.
 
         Other modes return ``69 81`` ("command incompatible with
-        file structure") to mirror commercial UICC behaviour.
+        file structure") to mirror deployed UICC behaviour.
         """
         p2_value = int(p2) & 0xFF
         sfi = (p2_value >> 3) & 0x1F
@@ -3315,7 +3315,7 @@ class EtsiFileSystem:
         invalidated) until ACTIVATE FILE is issued. The lifecycle
         change is persisted into the active profile image so a
         restart preserves the deactivated state, mirroring how a
-        commercial UICC retains the lifecycle byte across resets.
+        deployed UICC retains the lifecycle byte across resets.
         """
         node = self.current_node()
         if node.kind not in ("ef", "df", "adf", "mf"):
@@ -3337,7 +3337,7 @@ class EtsiFileSystem:
         A terminated file (lifecycle 0x0C) cannot be re-activated --
         TERMINATE EF/DF is irreversible by design. Real cards return
         ``69 85`` for the request. Already-activated files succeed
-        idempotently to match commercial UICC behaviour.
+        idempotently to match deployed UICC behaviour.
         """
         node = self.current_node()
         if node.kind not in ("ef", "df", "adf", "mf"):
@@ -3508,7 +3508,7 @@ class EtsiFileSystem:
         Removes the EF or DF identified by the FID carried in TLV
         ``83`` of the C-APDU body. When the body is empty the
         currently selected EF / DF is targeted (matching the
-        commercial-card "implicit" form). Deleting a DF cascades
+        deployed-card "implicit" form). Deleting a DF cascades
         through every child node so the runtime tree never holds
         an orphaned EF after the operation.
 
@@ -3525,7 +3525,7 @@ class EtsiFileSystem:
         - ``62 83`` -- target file is already terminated
           (lifecycle ``0x0C`` / ``0x04``); deletion is permitted
           only on operational files in this simulator to mirror
-          commercial-card behaviour.
+          deployed-card behaviour.
         """
         del p1
         del p2
@@ -3588,7 +3588,7 @@ class EtsiFileSystem:
         records is adjusted (records added at the end are
         ``0xFF``-filled; surplus records are dropped). P1 and P2
         are reserved per §6.4.2 and currently ignored to mirror
-        commercial-card tolerance for vendor extensions.
+        deployed-card tolerance for operator-specific extensions.
         """
         del p1
         del p2
@@ -3741,7 +3741,7 @@ class EtsiFileSystem:
         The body is the byte sequence to look for. Successful search
         returns the matching record numbers (1 byte each) under SW
         ``90 00``; an empty match returns ``6A 83`` (record not found),
-        which is what commercial UICCs report when the pattern is
+        which is what deployed UICCs report when the pattern is
         absent.
         """
         p1_value = int(p1) & 0xFF
@@ -3942,7 +3942,7 @@ class EtsiFileSystem:
         """Build FCP per ETSI TS 102 221 §11.1.1.4.
 
         Descriptor bytes use the shareable flag (bit 7) so the FCP
-        structure matches the response of commercial UICC references
+        structure matches deployed UICC responses
         where MF/DF/ADF advertise 0x78 and EFs advertise 0x41 (transparent)
         or 0x42 (linear fixed), both with data-coding byte 0x21. The
         previous 0x38/0x01/0x02 encoding was a valid subset but strict
@@ -4000,7 +4000,7 @@ class EtsiFileSystem:
         # non-SD ADF) advertises its security attributes via 8B
         # (referenced) so the terminal can resolve access conditions
         # without having to walk the file tree. EF FCPs from
-        # commercial cards always include 8B even though strict
+        # deployed cards always include 8B even though strict
         # readers seldom dereference EF_ARR during normal boot --
         # leaving 8B out causes some basebands to assume "no rules =
         # default-deny" and skip the file silently.
@@ -4010,7 +4010,7 @@ class EtsiFileSystem:
             size = node.total_size
             if size > 0:
                 # 80 always emits 2-byte file size for transparent EFs
-                # to match commercial UICC FCPs; the previous 1-byte
+                # to match deployed UICC FCPs; the previous 1-byte
                 # encoding was legal but unusual and confused some
                 # modem TLV walkers that hard-coded the 2-byte length.
                 body += tlv("80", size.to_bytes(2, "big", signed=False))
@@ -4029,7 +4029,7 @@ class EtsiFileSystem:
         The MF/DF/ADF FCP advertises:
             80 01 71               UICC Characteristics: clock-stop
                                    high/low allowed, max 5 MHz; matches
-                                   the value commercial UICCs use when
+                                   the value deployed UICCs use when
                                    the ATR's TA1=0x96 declares Fi=512
                                    Di=32 (~5 MHz).
             83 04 00 03 79 70      Application Power Consumption:
@@ -4052,7 +4052,7 @@ class EtsiFileSystem:
         """ETSI TS 102 221 §11.1.1.4.7 referenced security attributes.
 
         Tag 8B references EF_ARR with FID + record number. Two
-        conventions co-exist on commercial UICCs:
+        conventions co-exist on deployed UICCs:
 
         * The *global* EF_ARR at MF/2F06 -- this is the anchor used by
           MF, every DF, every ADF top-level FCP, and every EF that
@@ -4113,7 +4113,7 @@ class EtsiFileSystem:
           means the PIN at that reference is currently *enabled*
           (VERIFY required); 0 means disabled.
 
-        * At the MF level commercial UICCs declare PIN1 (key ref 0x01)
+        * At the MF level deployed UICCs declare PIN1 (key ref 0x01)
           + ADM1 (0x0A) with PIN1 disabled and ADM1 enabled, because
           PIN1 verification happens at ADF level, not MF. We mirror
           that so terminals proceed past MF to TERMINAL CAPABILITY

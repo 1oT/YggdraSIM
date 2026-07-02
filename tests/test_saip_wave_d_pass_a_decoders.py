@@ -33,7 +33,7 @@ Spec references:
   ef-term            3GPP2 C.S0023 §3.4.68
   ef-hidden-key      3GPP2 C.S0023 §3.4.75
   ef-csspr           3GPP2 C.S0023 §3.4.37
-  ef-rma             TS 31.102 (vendor-specific RMA)
+  ef-rma             TS 31.102 (operator-specific RMA)
 """
 
 from __future__ import annotations

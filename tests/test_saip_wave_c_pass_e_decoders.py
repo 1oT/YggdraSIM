@@ -27,7 +27,7 @@ Spec references:
   ef-img              TS 31.102 §4.6.1.2  (Image)
   ef-iidf             TS 31.102 §4.6.1.3  (Image Instance Data File)
   ef-launch-scws      TS 31.102 §4.4.8    (Launch SCWS)
-  ef-launchpad        Operator Launchpad  (vendor-specific)
+  ef-launchpad        Operator Launchpad  (operator-specific)
   ef-mcs-config       TS 31.102 §4.6.4.2  (MCS Configuration)
   ef-v2x-config       TS 31.102 §4.6.5.3  (V2X Configuration)
   ef-v2xp-Uu          TS 31.102 §4.6.5.4  (V2X Uu Parameters)

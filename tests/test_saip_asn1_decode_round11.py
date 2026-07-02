@@ -6,8 +6,7 @@
 
 Targets the field-level enrichments to EF.AD, EF.IMSI, EF.ICCID,
 EF.Routing_Indicator, and the EF.UST service catalogue so the GUI
-editor surfaces the same atomic fields the reference profile-creator
-exposes per the 3GPP TS 31.102 v18.4 layout.
+editor exposes atomic fields from the 3GPP TS 31.102 v18.4 layout.
 """
 from __future__ import annotations
 

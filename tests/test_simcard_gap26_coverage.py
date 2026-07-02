@@ -14,7 +14,7 @@ linear-fixed; each record carries a TLV-formatted SIP URI:
 EF.UST advertises this via **service 91 ("Support for
 SM-over-IP")**. Modems keying SIP/IMS messaging discovery off
 that service bit need both pieces -- otherwise discovery
-falls back to a hard-coded vendor default (or fails outright
+falls back to a hard-coded implementation default (or fails outright
 on locked builds). Round-26 closes the gap by enabling the
 service bit and seeding a record rooted in the simulator's
 reserved test PLMN (MCC 001 / MNC 01).

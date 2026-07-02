@@ -4,7 +4,7 @@ description: Engage 1oT OÜ for custom secure-element tooling, eUICC / eSIM inte
 tags:
   - about
   - consultancy
-  - commercial
+  - consultancy
   - contact
 ---
 <!--
@@ -34,7 +34,7 @@ team directly for tailored work.
   `ETSI TS 102 221` and GlobalPlatform
 - **SCP80 OTA** — campaign design, PoR handling, crypto review, and
   production-grade key management
-- **Private forks** — a named feature branch where commercial work
+- **Private forks** — a named feature branch where client-funded work
   is performed, with back-porting to YggdraSIM main where it does not
   conflict with customer confidentiality
 - **Training** — focused sessions on the secure-element stack for
@@ -52,7 +52,7 @@ team directly for tailored work.
 ## Working model
 
 1. **Intro call.** A 30-minute scoping conversation to understand the
-   target standards, the card stack, and the commercial envelope.
+   target standards, the card stack, and the business envelope.
 2. **Proposal.** A written scope with acceptance criteria, a delivery
    plan referencing the relevant YggdraSIM subsystems, and a fixed
    price or a capped time-and-material rate.
@@ -65,7 +65,7 @@ team directly for tailored work.
 
 ## Contact
 
-- **Commercial conversations** — reach out via the contact form on
+- **Client conversations** — reach out via the contact form on
   [1ot.com](https://www.1ot.com/) or through the inbound channel your
   1oT account manager has provided.
 - **Public bugs and feature requests** — open a GitHub issue at
@@ -74,7 +74,7 @@ team directly for tailored work.
   [`.github/SECURITY.md`](https://github.com/hampushellsberg-dev/YggdraSIM/blob/main/.github/SECURITY.md)
   rather than opening a public issue.
 
-Consultancy engagements are covered by a separate commercial
+Consultancy engagements are covered by a separate services
 agreement between 1oT OÜ and the customer. The public YggdraSIM
 license (`GPL-3.0-or-later`) continues to govern the open source code
 itself, including any changes that are merged back to the public

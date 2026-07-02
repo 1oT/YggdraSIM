@@ -13,7 +13,7 @@ dicts. In practice the operator will point it at either:
 * a ``*.der`` / ``*.pp`` / ``*.upp`` raw SAIP profile package, which
   can only be decoded via ``pySim.esim.saip.ProfileElementSequence``,
 * a ``*.txt`` / ``*.hex`` / ``*.varder`` ASCII hex-dump of a DER package
-  or vendor template — the same shape ``OPEN`` / ``USE`` accept via
+  or typed source template — the same shape ``OPEN`` / ``USE`` accept via
   :meth:`Tools.ProfilePackage.saip_tool.SaipToolBridge._prepare_input_for_tool`.
   Whitespace and case are normalised before the bytes are handed to
   the DER decoder.
@@ -174,7 +174,7 @@ def _normalise_simulator_manifest(payload: dict[str, Any], *, source: Path) -> d
     The simulator emits manifests via ``SIMCARD.profile_store``. We wrap
     the content in the ``{"intro": [...], "sections": {...}}`` skeleton
     the diff engine expects. This keeps the diff paths self-descriptive
-    even when comparing a live sim-card profile against a vendor DER.
+    even when comparing a live sim-card profile against a source DER.
     """
     intro_lines: list[str] = []
     name = str(payload.get("profile_name") or "").strip()

@@ -534,7 +534,7 @@ its pane layout in the workspace, supports OS clipboard copy/paste, and writes
 - `guides/CARD_BRIDGE_GUIDE.md` - remote reader / APDU streaming setup over SSH
 - `guides/TEMPLATE_AND_TOKENS.md` - SAIP profile-template token reference
 - `guides/systemd/yggdrasim-hil-supervisor.service.example` - example `systemd --user` unit for the HIL supervisor
-- `docs/` - vendor / standards reference workspace (GPC v2.3.1, SGP.02 / 22 / 32, ETSI TS 102 221 / 222 / 223 / 225 / 226, TS 31.102, RSPRO.asn, AKMA overview). The only schema the tool needs at runtime (`RSPRO.asn`) is redistributed inside `Tools/HilBridge/RSPRO.asn` as package data, so a fresh `pip install yggdrasim` works without a `docs/` tree on disk. The folder is gitignored so the verbatim standards copies stay out of the published wheel; operators doing offline reference reading can populate `docs/` themselves.
+- `docs/` - standards/reference workspace (GPC v2.3.1, SGP.02 / 22 / 32, ETSI TS 102 221 / 222 / 223 / 225 / 226, TS 31.102, RSPRO.asn, AKMA overview). The only schema the tool needs at runtime (`RSPRO.asn`) is redistributed inside `Tools/HilBridge/RSPRO.asn` as package data, so a fresh `pip install yggdrasim` works without a `docs/` tree on disk. The folder is gitignored so the verbatim standards copies stay out of the published wheel; operators doing offline reference reading can populate `docs/` themselves.
 - `NOTICE` - standards and third-party notice
 - `AUTHORS` - project attribution
 - `CONTRIBUTING.md` - contributor checklist (style, scope, sign-off)

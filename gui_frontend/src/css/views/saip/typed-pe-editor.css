@@ -501,8 +501,7 @@
 }
 
 /* Template catalog tree — TCA SAIP §9 file-template registry projected
-   into a checkable tree. Mirrors the eUICC Profile Creator's *File
-   System Template* group. */
+   into a checkable tree. */
 
 .saip-template-tree,
 .saip-template-children,

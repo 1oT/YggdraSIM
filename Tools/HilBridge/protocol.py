@@ -48,7 +48,7 @@ def _resolve_rspro_asn_path() -> Path:
     # both source checkouts (where the canonical copy lives in ``docs/``)
     # and installed wheels (where the schema is packaged next to this
     # module). The ``YGGDRASIM_RSPRO_ASN`` override is intentional: it
-    # lets downstream packagers vendor the schema into a non-standard
+    # lets downstream packagers bundle the schema into a non-standard
     # layout without patching code.
     here = Path(__file__).resolve()
     candidates = [

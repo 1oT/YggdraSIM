@@ -87,7 +87,7 @@ DEFAULT_NESTED_TAG_NAMES: dict[str, dict[str, str]] = {
 # Common GlobalPlatform Amendment A DGI codes seen in SAIP profile
 # personalization. The tag list is intentionally short — anything not
 # in this map renders as a bare DGI hex with no name annotation,
-# which is how operators expect the output to read for vendor-private
+# which is how operators expect the output to read for issuer-private
 # DGIs.
 DEFAULT_DGI_NAMES: dict[str, str] = {
     "0070": "Card Recognition Data / IIN",

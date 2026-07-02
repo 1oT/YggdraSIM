@@ -762,7 +762,7 @@ class Es9LikeClient:
             raise ValueError("EIM_REST_LOOKUP_PATH_TEMPLATE is empty.")
         raise NotImplementedError(
             "Configured eIM transport mode is rest_resource. "
-            "This mode requires a vendor-specific resource contract mapping "
+            "This mode requires an endpoint-specific resource contract mapping "
             f"(create_path={create_path}, lookup_template={lookup_template}) "
             "and cannot be inferred from SGP.32 card data alone."
         )

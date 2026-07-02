@@ -57,7 +57,7 @@ from Tools.ProfilePackage.saip_profile_diff import (
 
 def _baseline_document() -> dict:
     return {
-        "intro": ["Profile A", "Vendor=ACME"],
+        "intro": ["Profile A", "Issuer=Example"],
         "sections": {
             "header": {
                 "iccid": "8901001234567890123F",

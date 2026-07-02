@@ -276,8 +276,8 @@ _EF_KEY_TO_FID: dict[str, str] = {
     # (Provider Host List) are not anchored in TS 31.102 and previously
     # stomped on EF.BDNURI (6FEE) / EF.SDNURI (6FEF). They remain token-
     # routable via _decode_known_ef_payload but no longer pollute the
-    # flat FID map. If a profile vendor assigns a concrete FID it should
-    # go in its own vendor namespace.
+    # flat FID map. If a profile issuer assigns a concrete FID it should
+    # go in its own reserved namespace.
     # TS 31.102 §4.2.96-§4.2.106 Rel-13/14/15 ADF.USIM singletons that
     # were missing from the FID map — needed so both token-based and
     # FID-based lookups route to their semantic decoders.
@@ -356,17 +356,17 @@ _EF_KEY_TO_FID: dict[str, str] = {
     "ef-mcs-stat": "6FAC",
     "ef-mcs-sec-profile": "6FAF",
     "ef-ice-dn": "6FE0",
-    # 5x20 Pass D — Operator / vendor extensions + auxiliary EFs.
+    # 5x20 Pass D — operator/reserved custom extensions + auxiliary EFs.
     "ef-opcust1": "4F90",
     "ef-opcust2": "4F91",
     "ef-opcust3": "4F92",
     "ef-opcust4": "4F93",
     "ef-opcust5": "4F94",
-    "ef-vendor1": "4F95",
-    "ef-vendor2": "4F96",
-    "ef-vendor3": "4F97",
-    "ef-vendor4": "4F98",
-    "ef-vendor5": "4F99",
+    "ef-rescust1": "4F95",
+    "ef-rescust2": "4F96",
+    "ef-rescust3": "4F97",
+    "ef-rescust4": "4F98",
+    "ef-rescust5": "4F99",
     "ef-scp11key": "4F61",
     "ef-scp80ctr": "4F62",
     "ef-simlock-state": "4F67",
@@ -5697,7 +5697,7 @@ _EF_PST_SERVICE_NAMES: dict[int, str] = {
     2: "ProSe direct discovery (restricted)",
     3: "ProSe direct communication (one-to-many)",
     4: "ProSe direct communication (one-to-one)",
-    5: "EPC-level ProSe discovery",
+    5: "Evolved Packet Core ProSe discovery",
     6: "ProSe UE-to-network relay (Layer-3)",
     7: "ProSe UE-to-UE relay (Layer-3)",
     8: "ProSe UE-to-network relay (Layer-2)",
@@ -6482,7 +6482,7 @@ def _decode_ef_csim_tmsi(hex_clean: str) -> dict[str, object] | None:
 #   ef-img              TS 31.102 §4.6.1.2  (Image)
 #   ef-iidf             TS 31.102 §4.6.1.3  (Image Instance Data File)
 #   ef-launch-scws      TS 31.102 §4.4.8    (Launch SCWS)
-#   ef-launchpad        Operator Launchpad  (vendor-specific)
+#   ef-launchpad        Operator Launchpad  (operator-specific)
 #   ef-mcs-config       TS 31.102 §4.6.4.2  (MCS Configuration)
 #   ef-v2x-config       TS 31.102 §4.6.5.3  (V2X Configuration)
 #   ef-v2xp-Uu          TS 31.102 §4.6.5.4  (V2X Uu Parameters)
@@ -6721,7 +6721,7 @@ def _decode_ef_launch_scws(hex_clean: str) -> dict[str, object] | None:
 
 
 def _decode_ef_launchpad(hex_clean: str) -> dict[str, object] | None:
-    """Decode EF.LAUNCHPAD (vendor/operator-specific)."""
+    """Decode EF.LAUNCHPAD (operator-specific)."""
 
     return _decode_spec_opaque_ef(
         hex_clean,
@@ -7053,7 +7053,7 @@ def _decode_ef_eap_realm(hex_clean: str) -> dict[str, object] | None:
 #   ef-term             3GPP2 C.S0023 §3.4.68 (Terminal Capability)
 #   ef-hidden-key       3GPP2 C.S0023 §3.4.75 (Hidden Key)
 #   ef-csspr            3GPP2 C.S0023 §3.4.37 (CSSPR)
-#   ef-rma              TS 31.102          (Operator RMA / vendor-specific)
+#   ef-rma              TS 31.102          (operator-specific RMA)
 
 
 def _decode_ef_imsi(hex_clean: str) -> dict[str, object] | None:
@@ -7403,12 +7403,12 @@ def _decode_ef_csspr(hex_clean: str) -> dict[str, object] | None:
 
 
 def _decode_ef_rma(hex_clean: str) -> dict[str, object] | None:
-    """Decode EF.RMA (TS 31.102 — operator/vendor-specific RMA data)."""
+    """Decode EF.RMA (TS 31.102 — operator-specific RMA data)."""
 
     return _decode_spec_opaque_ef(
         hex_clean,
         format_name="Remote Management Application",
-        spec_reference="TS 31.102 (vendor-specific RMA)",
+        spec_reference="TS 31.102 (operator-specific RMA)",
         summary_prefix="RMA",
     )
 
@@ -8790,7 +8790,7 @@ def _decode_ef_mexe_st(hex_clean: str) -> dict[str, object] | None:
 
 
 # ---------------------------------------------------------------------------
-# Round-2 Pass 1 — operator / vendor control primitives.
+# Round-2 Pass 1 — operator/reserved control primitives.
 # ---------------------------------------------------------------------------
 
 
@@ -9968,14 +9968,14 @@ def _decode_known_ef_payload(
             summary_prefix=f"CSIM-{token[len('ef-csim-'):].upper()}",
         )
     if token.startswith("ef-opcust"):
-        # Operator-custom tokens are vendor-defined and carry no 3GPP /
-        # ETSI spec reference; keep them as generic opaques.
+        # Operator-custom tokens carry no 3GPP / ETSI spec reference;
+        # keep them as generic opaques.
         return _decode_opaque_ef(
             hex_clean, format_name=f"Operator Custom {token[len('ef-opcust'):]}"
         )
-    if token.startswith("ef-vendor"):
+    if token.startswith("ef-rescust"):
         return _decode_opaque_ef(
-            hex_clean, format_name=f"Vendor Custom {token[len('ef-vendor'):]}"
+            hex_clean, format_name=f"Reserved Custom {token[len('ef-rescust'):]}"
         )
     # NOTE: The ef-prose-*/ef-v2x-*/ef-mexe-st/ef-scp11key/ef-scp80ctr/
     # ef-simlock-state/ef-ota-state/ef-ota-keys/ef-provconfig/ef-selfservice/
@@ -10936,7 +10936,7 @@ def _decode_known_ef_payload(
             spec_reference="TS 51.011 §10.3.29 / TS 31.102 §4.2.23",
             summary_prefix="LOCIGPRS",
         )
-    # SAIP vendor-side tokens must be resolved via ``token`` alone before the
+    # SAIP reserved/custom tokens must be resolved via ``token`` alone before the
     # FID-based URI dispatches fire, because legacy test fixtures (and older
     # profiles) still pass 6FEE/6FEF alongside ``ef-fcst`` / ``ef-phist``.
     if token == "ef-fcst":
@@ -11313,14 +11313,14 @@ def _decode_known_ef_payload(
                 spec_reference="TS 31.102 §4.4.13 / TS 24.483",
                 summary_prefix=_mcs_prefix,
             )
-    # 5x20 Pass D — Operator / vendor / SCP80/SCP11 extensions.
+    # 5x20 Pass D — operator/reserved custom + SCP80/SCP11 extensions.
     if token.startswith("ef-opcust"):
         return _decode_opaque_ef(
             hex_clean, format_name=f"Operator Custom {token[len('ef-opcust'):]}"
         )
-    if token.startswith("ef-vendor"):
+    if token.startswith("ef-rescust"):
         return _decode_opaque_ef(
-            hex_clean, format_name=f"Vendor Custom {token[len('ef-vendor'):]}"
+            hex_clean, format_name=f"Reserved Custom {token[len('ef-rescust'):]}"
         )
     if token == "ef-scp11key":
         decoded = _decode_ef_scp11_key(hex_clean)
@@ -11373,7 +11373,7 @@ def _decode_known_ef_payload(
             summary_prefix="OTA-KEYS",
         )
     # ``ef-provconfig``, ``ef-selfservice``, ``ef-appconfig``, ``ef-acmp``,
-    # ``ef-tui`` are vendor-specific SAIP tokens with no 3GPP / ETSI spec
+    # ``ef-tui`` are reserved/custom SAIP tokens with no 3GPP / ETSI spec
     # reference; keep them as generic opaques so the tree pane does not
     # claim a fabricated §-reference.
     if token == "ef-provconfig":
@@ -11454,7 +11454,7 @@ def dispatcher_routes_ef_key(token: str) -> bool:
     """``True`` if the dispatcher has a branch for the given ef-key.
 
     Honours both exact-match tokens and the ``ef-csim-*`` /
-    ``ef-opcust*`` / ``ef-vendor*`` prefix-match short-circuits.
+    ``ef-opcust*`` / ``ef-rescust*`` reserved-range prefix-match short-circuits.
     """
 
     canonical = str(token or "").strip().lower()
@@ -12878,7 +12878,7 @@ def _decode_fill_pattern(value_bytes: bytes, *, repeat_pattern: bool) -> dict[st
     if len(value_bytes) == 1:
         decoded["byteValue"] = f"0x{value_bytes[0]:02X}"
     # SAIP ``fillPattern`` / ``repeatPattern`` are intentionally opaque byte
-    # sequences — typically 0xFF padding, 0x00 zero-fill, or a vendor marker.
+    # sequences — typically 0xFF padding, 0x00 zero-fill, or a private marker.
     # Historic builds attempted an ASCII decode here which would yield
     # false-positive strings (e.g. "hello" because the test profile happened
     # to use ASCII). Only surface a printable form when the pattern is long
@@ -13278,7 +13278,7 @@ def _decode_uicc_toolkit_layout(
     """Decode one TS 102 226 §8.2.1.3.2.1 toolkit parameter layout.
 
     pySim emits the canonical form with an explicit menu-entry count
-    byte. Some commercial tools omit that byte when no menu entries are
+    byte. Some source encoders omit that byte when no menu entries are
     present; that compact form is still field-aligned as
     ``maxChannels | len(MSL) | MSL | len(TARs) | TARs``. The decoder
     tries both forms and the encoder keeps emitting the canonical
@@ -13582,7 +13582,7 @@ def _decode_ts102226_sim_file_access_toolkit_parameter(
         1 byte  : length N2 of SIM File Access Parameters
         N2 bytes: SIM File Access Parameters (opaque)
 
-    The inner payloads carry vendor-specific sub-fields so the decoder
+    The inner payloads carry operator-specific sub-fields so the decoder
     surfaces them as hex blobs with their declared length. When the outer
     structure does not parse cleanly, return ``None`` so the caller can
     fall back to the opaque blob view instead of emitting a misleading
@@ -13645,8 +13645,8 @@ def _decode_uicc_access_application_specific_parameters(
         1 byte   : length N of the UICC File System Access Domain payload
         N bytes  : Access Domain record (see :func:`_decode_access_domain_record`)
 
-    When a trailing length + access-domain pair is present (some vendor
-    profiles concatenate a second Access Domain record for DAP / shared
+    When a trailing length + access-domain pair is present (some profiles
+    concatenate a second Access Domain record for DAP / shared
     access), decode it as an additional record rather than dropping the
     bytes on the floor.
     """
@@ -14230,7 +14230,7 @@ def _decode_inline_placeholder_blob(raw_text: str) -> list[str]:
     """Produce an INSPECT ``Field semantics`` block for hex with inline placeholders.
 
     ``raw_text`` is the tagged hex-leaf content the walker refused to
-    canonicalise because it embeds vendor-style typed placeholders such
+    canonicalise because it embeds inline typed placeholders such
     as ``{iccid:ICCID:10:nibble_swap}``. The block lists each literal
     with its declared metadata and the surrounding hex runs so the
     operator still gets a field-level decode for template scaffolding.

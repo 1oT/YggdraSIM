@@ -4,7 +4,7 @@
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """SAIP ASN.1 value-notation import.
 
-Vendor profile templates sometimes ship a text file containing one
+Source profile templates sometimes ship a text file containing one
 ``ProfileElement ::= choice : { ... }`` assignment per PE. This parser
 supports the value-notation subset emitted by those templates and builds
 the same pySim ``ProfileElementSequence`` used by DER imports.

@@ -878,7 +878,7 @@ class SGP22Orchestrator:
         # then STATUS / TERMINAL PROFILE so eUICC stacks that gate
         # ES10b on the proactive-UICC handshake (TS 102 223 §5.4) drop
         # their 6985 ``conditions of use not satisfied'' guard. Without
-        # the TERMINAL PROFILE step some commercial eUICC OSes reject
+        # the TERMINAL PROFILE step some deployed eUICC OSes reject
         # BF28 on a freshly-opened channel even after a clean
         # SELECT ISD-R. The handshake calls are wrapped in best-effort
         # try/except so cards that have already accepted a session-
@@ -1144,7 +1144,7 @@ class SGP22Orchestrator:
     @staticmethod
     def _is_notification_list_empty_status_word(error: Exception) -> bool:
         """
-        ``6A88`` is ``SW_REFERENCED_DATA_NOT_FOUND``. Some eUICC vendors
+        ``6A88`` is ``SW_REFERENCED_DATA_NOT_FOUND``. Some eUICC implementations
         return it from ``ES10b.ListNotifications`` when the pending queue
         is empty rather than the empty ``notificationMetadataList`` the
         spec suggests. Treat it as a synonymous ``empty list`` marker so
@@ -1156,7 +1156,7 @@ class SGP22Orchestrator:
     @staticmethod
     def _should_retry_with_retrieve_notifications_fallback(error: Exception) -> bool:
         # SGP.22 §5.7.10 ListNotifications (BF28) is mandatory in v2.x+,
-        # but some commercial eUICC OS revisions reject BF28 after a
+        # but some deployed eUICC OS revisions reject BF28 after a
         # profile state change with
         # 6E00 ``CLA not supported`` on the basic channel and 6985
         # ``conditions of use not satisfied'' even on a clean
@@ -1336,7 +1336,7 @@ class SGP22Orchestrator:
         return exchange(apdu, log_name)
 
     def _should_include_initial_eim_notify_state_change(self, eim_fqdn: str) -> bool:
-        suffixes = tuple(getattr(self.cfg, "EIM_VENDOR_QUIRK_FQDN_SUFFIXES", ()) or ())
+        suffixes = tuple(getattr(self.cfg, "EIM_IMPLEMENTATION_QUIRK_FQDN_SUFFIXES", ()) or ())
         normalized_fqdn = str(eim_fqdn or "").strip().lower().rstrip(".")
         if len(normalized_fqdn) == 0:
             return False

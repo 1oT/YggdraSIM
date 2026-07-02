@@ -4,9 +4,9 @@
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """Round-10 EF-decoder coverage tests.
 
-Exercises the manual-list parity decoders added so the GUI editor
-matches the reference profile-creator's "interpreted EF" surface for
-EF.PST, EF.BST, EF.UPLMNWLAN, EF.OPLMNWLAN, and EF.WLRPLMN.
+Exercises the structured EF decoders added so the GUI editor can show
+typed views for EF.PST, EF.BST, EF.UPLMNWLAN, EF.OPLMNWLAN, and
+EF.WLRPLMN.
 """
 from __future__ import annotations
 

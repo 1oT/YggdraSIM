@@ -4910,7 +4910,7 @@ class SaipProfileLinter:
     # 3GPP2 C.S0023 CDMA authentication material widths used as a sanity
     # heuristic. A-Key is 64-bit (8 B); SSD is 128-bit (16 B, packed
     # SSD_A || SSD_B). The remaining HRPD / Simple-IP / Mobile-IP
-    # credentials are vendor-shaped and only get a non-empty check.
+    # credentials are issuer-shaped and only get a non-empty check.
     _CDMA_FIXED_BYTE_LENGTHS: dict[str, int] = {
         "authenticationKey": 8,
         "ssd": 16,

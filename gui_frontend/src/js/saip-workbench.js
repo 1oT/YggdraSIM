@@ -1027,7 +1027,7 @@
   }
 
   // ─────────────────────────────────────────────────────────────────
-  // P0.2 — Batch personalization.
+  // P0.2 — Batch profile generation.
   //   Collects template + data + output dir, calls saip.batch_personalize,
   //   surfaces the per-record outcome through the action log.
   // ─────────────────────────────────────────────────────────────────
@@ -1035,7 +1035,7 @@
   async function saipRibbonBatchPersonalize(pkg) {
     var defaultTemplate = pkg && pkg.sourcePath ? pkg.sourcePath : "";
     var result = await saipShowFormModal({
-      title: "Batch personalize",
+      title: "Batch generate",
       intro: "Materialise N personalised DER profiles from one template + a data file. Column / key names must match template placeholder names 1:1.",
       submitLabel: "Generate",
       fields: [
@@ -1109,7 +1109,7 @@
   }
 
   // ─────────────────────────────────────────────────────────────────
-  // P1.4 — Import / Export PE, Move PE up/down, Batch validate.
+  // P1.4 — Import / Export PE, Move PE up/down, Batch lint.
   // ─────────────────────────────────────────────────────────────────
 
   async function saipRibbonImportPe(pkg, peList, detail, validation) {
@@ -1314,9 +1314,9 @@
 
   async function saipRibbonBatchValidate() {
     var result = await saipShowFormModal({
-      title: "Batch validate",
-      intro: "Lint multiple profile packages in one pass (mirrors epcval -p).",
-      submitLabel: "Validate",
+      title: "Batch lint",
+      intro: "Lint multiple profile packages in one pass.",
+      submitLabel: "Lint",
       fields: [
         {
           key: "paths", label: "Path / glob", type: "text", required: true,
@@ -2338,7 +2338,7 @@
     }));
     ribbon.appendChild(fsGrp.group);
 
-    // -- Token bindings ([NAME] placeholders, YggdraSIM-coined) ------
+    // -- Token bindings ([NAME] placeholders, YggdraSIM-owned) ------
     var varsGrp = mkGroup("Tokens");
     varsGrp.inner.appendChild(mkBtn({
       icon: "{ }", label: "Token editor",
@@ -2352,7 +2352,7 @@
       },
     }));
     varsGrp.inner.appendChild(mkBtn({
-      icon: "📋", label: "Batch personalize",
+      icon: "📋", label: "Batch generate",
       disabled: !hasPkg,
       title: hasPkg
         ? "Materialise N personalised DER profiles from one template + a data file (CSV / JSON / JSONL / YAML)."
@@ -2378,7 +2378,7 @@
       },
     }));
     valGrp.inner.appendChild(mkBtn({
-      icon: "📁", label: "Batch validate",
+      icon: "📁", label: "Batch lint",
       title: "Lint multiple SAIP packages by path / glob in one call.",
       onClick: function () {
         saipRibbonBatchValidate();
@@ -2594,7 +2594,7 @@
       // SA-G1: ``activeTopTab`` replaces the legacy ``activeDetailTab``
       // tri-state ("pe" | "file" | "vars"). Variables now live in a
       // ribbon-launched modal so the package itself only has the three
-      // structural views Comprion exposes as siblings.
+      // structural package surfaces.
       activeTopTab: "profile_elements",  // "profile_elements" | "file_system" | "applications"
       // SA-G3: file detail sub-tab + file-tree expand/collapse memory.
       // ``fileTreeCollapsed`` keys are the synthetic node ids minted in
@@ -4414,10 +4414,8 @@
     // ``parent_path`` is the same chain minus the file's own FID,
     // ``kind`` carries the file type (mf/df/adf/ef-trans/...). We
     // render that as a single tree rooted at MF so template files
-    // and GFM-created files mix structurally — matching the
-    // ``File System tab`` described in the eUICC Profile Creator
-    // manual ("combined file system for the selected profile
-    // package and its file system-related profile elements").
+    // and GFM-created files mix structurally in one package-level
+    // filesystem view.
     var nodesByChain = {};
     function _ensureNode(chain, label, kind, row) {
       if (!chain) chain = "";
@@ -4515,8 +4513,7 @@
       }
     });
     // Deterministic ordering: containers (DF / MF / ADF) before EFs,
-    // then lexical by hex FID. Matches the eUICC Profile Creator
-    // ordering (DFs grouped, then EFs in numeric order).
+    // then lexical by hex FID.
     function _sortKey(node) {
       if (sortMode === "name") {
         return String(node.label || "").toLowerCase() + "::" + String(node.chain || "");
@@ -4768,8 +4765,7 @@
   // TCA SAIP §9 file template catalog for one PE. Loaded on demand
   // so the PE Editor can render a checkable tree of ALL DFs/EFs the
   // template defines, not just the ones the package currently
-  // materialises. Mirrors the eUICC Profile Creator's *File System
-  // Template* group.
+  // materialises.
   async function saipLoadPeTemplate(pkg, sectionKey) {
     if (!pkg || !pkg.sessionId) return;
     if (!pkg.peTemplateCache) pkg.peTemplateCache = {};
@@ -4981,8 +4977,7 @@
     var bodyHost = document.createElement("div");
     bodyHost.className = "saip-detail-body";
 
-    // PE detail tabs — YggdraSIM voice, deliberately not the
-    // "PE-<Type> Editor" label the Comprion ePC ribbon ships.
+    // PE detail tabs — YggdraSIM voice with local labels.
     var editorLabel = "Decoded view";
     var tabEditor = document.createElement("button");
     tabEditor.type = "button";
@@ -6352,7 +6347,7 @@
       // Byte 1 is the data-coding byte. Default 0x21 ("compact" coding,
       // tolerated by all SAIP-aware eUICC stacks observed). Preserve
       // any prior value the package carried so we don't clobber a
-      // vendor-specific byte (e.g. 0x42 on some cards).
+      // implementation-specific byte (e.g. 0x42 on some cards).
       var byte1 = 0x21;
       if (initialHex) {
         var raw = String(initialHex).replace(/\s+/g, "");
@@ -8041,8 +8036,8 @@
   // pySim only emits inline ``fileID`` when the package overrides the
   // template default; for files that match the template, the FID lives
   // implicitly in the template OID. We surface the spec-known FID with
-  // a "(template)" badge so the FILES table reads the way a Comprion /
-  // Telna operator expects.
+  // a "(template)" badge so the FILES table distinguishes template
+  // defaults from explicit package overrides.
   //
   // Sources: ETSI TS 102 221 §13 (MF / DF.TELECOM), 3GPP TS 31.102 §4
   // (ADF.USIM EFs), 3GPP TS 31.103 §4 (ADF.ISIM EFs), 3GPP TS 31.121 §4
@@ -10182,9 +10177,8 @@
   // ``ProfileTemplateRegistry``). Lists every DF/EF the active
   // template defines, with checkboxes that route into
   // ``saip.add_template_file`` / ``saip.remove_template_file``.
-  // Mirrors the eUICC Profile Creator's *File System Template* group
-  // so operators can see the full catalog and add/remove files
-  // without hand-editing the JSON tree.
+  // Gives operators the full catalog and add/remove controls without
+  // hand-editing the JSON tree.
   // ─────────────────────────────────────────────────────────────────
 
   function saipEditorRenderTemplateCatalogCard(host, pkg, sectionKey, peIndex) {
@@ -14151,14 +14145,13 @@
     };
   }
 
-  // SA-G9: PE-GenericFileManagement "Add file element" inline form.
-  // The eUICC Profile Creator manual splits this into "Add select
-  // element" (filePath) + "Add file element" (createFCP). The backend
-  // dispatcher merges them into a single atomic transaction. When
-  // the GFM is already bound to a single parent path the bar omits
-  // the parent input entirely — every Add file then lands under
-  // that parent. To use a different parent path the operator adds a
-  // new GFM PE (Profile Element ribbon → Add below → genericFileManagement).
+  // SA-G9: PE-GenericFileManagement inline file-creation form.
+  // The backend dispatcher appends a ``filePath`` selector and a
+  // ``createFCP`` payload as one atomic transaction. When the GFM is
+  // already bound to a single parent path the bar omits the parent
+  // input entirely — every Add file then lands under that parent.
+  // To use a different parent path the operator adds a new GFM PE
+  // (Profile Element ribbon -> Add below -> genericFileManagement).
   // This keeps each GFM's diff readable as "files added under one DF".
   // defaults that the FCP editor can refine afterwards.
   function saipGfmBuildAddFileBar(pkg, sectionKey, summary) {
@@ -14170,11 +14163,11 @@
     var heading = document.createElement("div");
     heading.className = "saip-gfm-addbar-heading";
     if (pState === "bound") {
-      heading.textContent = "Add file under " + summary.pretty;
+      heading.textContent = "Append GFM file under " + summary.pretty;
     } else if (pState === "mixed") {
-      heading.textContent = "Add file element (mixed parents — pick one)";
+      heading.textContent = "Append GFM file (mixed parents — pick one)";
     } else {
-      heading.textContent = "Add file element (sets the GFM parent path)";
+      heading.textContent = "Append GFM file (sets the GFM parent path)";
     }
     bar.appendChild(heading);
 
@@ -14447,11 +14440,10 @@
     }
     card.appendChild(summaryChip);
 
-    // "Add file element" affordance per the manual's "File System
-    // Creation by Generic File Management" flow. Inline form invoking
-    // saip.gfm_add_file_element. The bar is parent-aware: when the
-    // GFM is bound it reuses ``parentSummary.path`` and hides the
-    // input entirely; otherwise it accepts a free-form parent path.
+    // Inline form invoking saip.gfm_add_file_element. The bar is
+    // parent-aware: when the GFM is bound it reuses
+    // ``parentSummary.path`` and hides the input entirely; otherwise
+    // it accepts a free-form parent path.
     if (pkg && sectionKey) {
       var addBar = saipGfmBuildAddFileBar(pkg, sectionKey, parentSummary);
       if (addBar) {
@@ -15777,8 +15769,7 @@
       "File Control Parameters",
       "FCP metadata + access rules (TS 102 221 §11.1.1 / §9.2.4). Decoded-first controls — pick structure / file type from dropdowns instead of editing the descriptor byte directly.",
     );
-    // ePC §"File Content" → "Edit the file content in hexadecimal or
-    // interpreted representation." The Data tab folds both views so
+    // The Data tab folds raw hexadecimal and interpreted views so
     // operators do not bounce between two siblings to read the same
     // bytes. Record-fixed files expose a single-record navigator
     // (dropdown + prev/next, PageUp / PageDown keys) instead of a
@@ -17464,9 +17455,8 @@
     // need to enumerate each row — that is what the Data and Hex
     // tabs are for. Render a one-line summary instead and surface a
     // clickable "show all" toggle for the rare operator who wants
-    // the full list inline. This matches the eUICC Profile Creator
-    // UX where the FCP / metadata column never carries a full
-    // record dump.
+    // the full list inline. The FCP / metadata column stays compact
+    // instead of carrying a full record dump.
     var COMPACT_THRESHOLD = 5;
     var compactMode = totalRecords > COMPACT_THRESHOLD;
     var summaryRow = null;
@@ -17785,10 +17775,10 @@
     }
 
     // Per-record structured wizard hook. EFs registered in
-    // ``_SAIP_RECORD_WIZARDS`` get a Comprion-style form for each
-    // record. The wizard owns layout + encoding and routes Apply
-    // through ``saip.update_record_bytes`` (same write path as the
-    // raw-hex editor below).
+    // ``_SAIP_RECORD_WIZARDS`` get a local form for each record. The
+    // wizard owns layout + encoding and routes Apply through
+    // ``saip.update_record_bytes`` (same write path as the raw-hex
+    // editor below).
     var recWizardKey = saipNormalizeEfKey(opts.efKey);
     var recWizard = (typeof _SAIP_RECORD_WIZARDS !== "undefined")
       ? (_SAIP_RECORD_WIZARDS[recWizardKey] || _SAIP_RECORD_WIZARD_GENERIC) : null;
@@ -17903,9 +17893,9 @@
   //
   // Replaces the legacy "drop every record card into the host" pattern
   // that flooded the Data tab on phonebooks and EF.ARRs with 22+ slots
-  // open at once. Operator workflow now matches eUICC Profile Creator
-  // §"File Content" — pick the record from the dropdown, page through
-  // with prev/next, PageUp / PageDown keys also jump records.
+  // open at once. Operators pick the record from the dropdown, page
+  // through with prev/next, and can use PageUp / PageDown as keyboard
+  // shortcuts.
   //
   // ``opts`` accepts:
   //   { records, recordSize, efKey, sectionKey, fieldPath,
@@ -18156,7 +18146,7 @@
     return wrap;
   }
 
-  // ── Comprion-style wizard framework ────────────────────────────
+  // ── Structured EF wizard framework ─────────────────────────────
   //
   // Each wizard targets a single transparent EF and exposes a
   // ``render(host, currentHex, applyHex)`` function. The wizard
@@ -22416,12 +22406,11 @@
   _SAIP_RECORD_WIZARDS["ef-ext4"] = _SAIP_RECORD_WIZARD_EXT;
   _SAIP_RECORD_WIZARDS["ef-ext5"] = _SAIP_RECORD_WIZARD_EXT;
 
-  // ── Manual-list parity wizards. Reference: TCA eUICC Profile
-  // Creator manual §"Interpreted EFs with GUI Editor". Each EF
-  // below was previously surfaced as a typed payload through the
-  // generic decoded-edit panel; the wizards below replace that with
-  // a structured form so the operator never sees opaque hex for a
-  // reference-listed EF.
+  // ── Structured EF wizards.
+  // Each EF below was previously surfaced as a typed payload through
+  // the generic decoded-edit panel; the wizards below replace that
+  // with a structured form so the operator does not have to edit
+  // opaque hex for a known EF layout.
 
   // EF.SUCI-CALC-INFO-USIM (TS 31.102 §4.4.11.13). The 4F01 USIM-
   // computed variant uses the same protection-scheme + HNPK + key
@@ -23031,7 +23020,7 @@
       2: "ProSe direct discovery (restricted)",
       3: "ProSe direct communication (one-to-many)",
       4: "ProSe direct communication (one-to-one)",
-      5: "EPC-level ProSe discovery",
+      5: "Evolved Packet Core ProSe discovery",
       6: "ProSe UE-to-network relay (Layer-3)",
       7: "ProSe UE-to-UE relay (Layer-3)",
       8: "ProSe UE-to-network relay (Layer-2)",
@@ -28440,8 +28429,8 @@
     return String(text || "").replace(/\s+/g, "").replace(/^0[xX]/, "").toUpperCase();
   }
 
-  // Enum registries for fields that the manual / TCA SAIP spec
-  // restricts to a fixed set of string tokens. Disambiguation between
+  // Enum registries for fields that TCA SAIP or related standards
+  // restrict to a fixed set of string tokens. Disambiguation between
   // overlapping field names (e.g. ``keyReference`` carries different
   // tokens for PIN vs PUK PEs) goes through ``peTypeHint`` which is
   // derived from the section key. Lookup is case-insensitive.
@@ -29462,8 +29451,8 @@
       || fn === "highupdateactivity"
       || fn === "readwhendeactivated"
       || fn === "readwhendeactived"
-      // PE-PINcodes / PE-PUKcodes — single-bit knobs the manual
-      // models as booleans even though SAIP encodes them as bytes.
+      // PE-PINcodes / PE-PUKcodes — single-bit knobs modelled as
+      // booleans even though SAIP encodes them as bytes.
       || fn === "userverificationpin"
       || fn === "ondemandverification"
     ) {
@@ -31701,8 +31690,8 @@
   // Detect a placeholder marker. SAIP carries two shapes:
   //   * dict-marker {"__ygg_placeholder__": NAME, "encoding": ENC}
   //     — the form stamps this when ``saip.add_variable_to_pe`` runs;
-  //   * bracket-string "[NAME]" — the manual's textual placeholder
-  //     syntax used in CSV personalisation lists.
+  //   * bracket-string "[NAME]" — textual placeholder syntax used
+  //     in CSV personalisation lists.
   function saipFormPlaceholderInfo(value) {
     if (value && typeof value === "object" && !Array.isArray(value)) {
       if (typeof value.__ygg_placeholder__ === "string"

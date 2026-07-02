@@ -187,7 +187,7 @@ class AuthLogic:
 
         Returns ``Le`` random bytes; ``Le=0`` requests 256 bytes per
         ISO 7816-4 mapping. P1/P2 are reserved as ``00 00`` -- anything
-        else is rejected with 6A 86 to mirror commercial UICC behaviour.
+        else is rejected with 6A 86 to mirror deployed UICC behaviour.
         The challenge is also persisted in
         ``state.last_challenge_bytes`` so STORE-DATA / OTA paths that
         feed it back as freshness can be exercised by tests.

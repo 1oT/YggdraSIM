@@ -5,9 +5,9 @@
 """Regression tests for ``saip.gfm_add_file_element``.
 
 The TCA SAIP profile element family for filesystem creation
-(genericFileManagement, §6.6.7) defines two affordances inside a
-PE-GFM editor: *Add select element* and *Add file element*. Template
-PEs (USIM / ISIM / OPT-USIM / MF / …)
+(genericFileManagement, §6.6.7) defines ``filePath`` selection and
+``createFCP`` operations inside a PE-GFM editor. Template PEs
+(USIM / ISIM / OPT-USIM / MF / …)
 are served by ``saip.add_template_file`` /
 ``saip.add_template_subtree``; PE-GFM is the free-form fallback and
 needed its own dispatcher.

@@ -112,7 +112,7 @@ The command refuses to overwrite an existing non-empty
 
 ### 3b. Round-trip with personalisation-data CSV files
 
-Personalisation data shipped from third-party issuance tooling is
+Personalisation data shipped from external issuance tooling is
 commonly distributed as a plain two-column CSV — the convention used
 across the TCA SAIP ecosystem. One line per variable, `name,hex`, with
 `#`-prefixed comment lines separating independent personalisation-data
@@ -259,9 +259,9 @@ length is recomputed automatically, or run `RETOKENISE-LENGTHS` /
 `TOKENS RETOKENISE-LENGTHS` to migrate existing literal-length sites
 to the companion form.
 
-## Inline typed hex placeholders (vendor templates)
+## Inline typed hex placeholders
 
-Some vendor templates ship a profile as ASCII hex with typed
+Some source templates carry a profile as ASCII hex with typed
 placeholders baked directly into the hex body:
 
 ```
@@ -289,7 +289,7 @@ Nothing in this path *resolves* the placeholder to real bytes — that
 surface stays with the JSON template / `__ygg_token_defs__`
 machinery. Saving the template round-trips the literals:
 
-1. The editor JSON buffer carries the vendor literal text inside every
+1. The editor JSON buffer carries the placeholder literal text inside every
    `"hex"` leaf (e.g. `"hex": "0908{imsi:IMSI:8:encode_imsi}"`).
 2. On save, the literal is substituted back to its sentinel bytes,
    the buffer is DER-encoded, re-decoded, and re-jsonified, then the

@@ -136,7 +136,7 @@ class ProfilePackageShell:
             "gate_prefixes": ["YRL-FIL"],
             "min_score": 90,
             "fail_on_warn": True,
-            "description": "Aggressive file-definition gate (YRL-FIL; best for profile authoring).",
+            "description": "Aggressive file-definition gate (YRL-FIL; best for profile-package construction).",
         },
         "RELEASE-GATE": {
             "strict": True,
@@ -3954,7 +3954,7 @@ class ProfilePackageShell:
         Usage: ``EXPORT-TOKENS-CSV <template_or_sidecar.json> [<out.csv>]``
 
         The CSV layout follows the TCA SAIP personalisation-data
-        convention used by most third-party issuance tooling: one
+        convention used by most external issuance tooling: one
         ``<variable_name>,<hex>`` line per token, with optional ``#``
         comment lines separating multi-package blocks.
         """

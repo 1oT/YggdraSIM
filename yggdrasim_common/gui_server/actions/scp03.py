@@ -209,65 +209,50 @@ def _restore_fs_root_best_effort(session_or_transporter: Any) -> dict[str, Any]:
 # ----------------------------------------------------------------------
 
 
-def _dispatch_scan(ctx: ActionContext, *, reader: Any = None) -> dict[str, Any]:
+def _scan_transporter_to_session(
+    transporter: Any,
+    *,
+    reader_index: int,
+    reader_label: str,
+    close_callback: Any | None = None,
+    metadata_extra: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Scan a connected transporter and park it in the GUI session manager."""
     from SCP03.logic.fs import FileSystemController
     from yggdrasim_common.gui_server.sessions import get_manager
 
-    requested_reader_name = str(reader or "")
-    reader_index, resolved_reader_name = _resolve_reader_binding(requested_reader_name)
-    reader_label = resolved_reader_name or requested_reader_name or "(default)"
-
-    # Catch the "reader exists but slot is empty" class of errors here
-    # instead of letting them bubble into the FastAPI 500 path. The GUI
-    # used to see a raw traceback ("NoCardException: Unable to connect"),
-    # fall into recover-session + rescan, fail that too, and chew a whole
-    # extra second per file click. Now we raise a well-known RuntimeError
-    # whose message the route converts into ``{ok:false, error:...}`` —
-    # the frontend pattern-matches ``no_card:`` and skips recovery.
-    try:
-        transporter = _open_card_transporter(reader_index)
-    except Exception as error:  # noqa: BLE001
-        if _is_no_card_error(error):
-            raise RuntimeError(
-                f"{NO_CARD_ERROR_PREFIX} no smart card inserted in reader "
-                f"{reader_label!r} (hresult 0x8010000C)"
-            ) from error
-        raise
-
-    # Build the FS controller and run the scan. ``scan_tree(return_tree=True)``
-    # prints its usual tree to stdout; we throw that away for the API path
-    # and keep the structured return value.
     fs_controller = FileSystemController(transporter)
     stdout_sink = io.StringIO()
     try:
         with contextlib.redirect_stdout(stdout_sink):
             structured = fs_controller.scan_tree(return_tree=True)
-    except Exception as error:  # noqa: BLE001
-        _close_transporter(transporter)
-        if _is_no_card_error(error):
-            raise RuntimeError(
-                f"{NO_CARD_ERROR_PREFIX} card removed during scan on reader "
-                f"{reader_label!r}"
-            ) from error
+    except Exception:
+        if close_callback is not None:
+            close_callback()
+        else:
+            _close_transporter(transporter)
         raise
 
     atr_hex = _get_atr_hex(transporter)
+    close_fn = close_callback if close_callback is not None else (lambda t=transporter: _close_transporter(t))
+    metadata = {
+        "reader_index": reader_index,
+        "reader_name": reader_label,
+        "atr_hex": atr_hex,
+    }
+    if metadata_extra:
+        metadata.update(dict(metadata_extra))
 
     manager = get_manager()
     session = manager.open(
         kind="scp03",
         handle={"transporter": transporter, "fs": fs_controller},
-        close=lambda t=transporter: _close_transporter(t),
-        metadata={
-            "reader_index": reader_index,
-            "reader_name": reader_label,
-            "atr_hex": atr_hex,
-        },
+        close=close_fn,
+        metadata=metadata,
     )
 
     tree_payload = structured or {"tree": [], "scan_cache": {}}
     raw_tree = tree_payload.get("tree", [])
-    raw_cache = tree_payload.get("scan_cache", {})
 
     # --- Promote ADFs to root-level tree nodes ---
     # The CLI scan nests ADFs under MF as children. For the GUI tree,
@@ -277,12 +262,10 @@ def _dispatch_scan(ctx: ActionContext, *, reader: Any = None) -> dict[str, Any]:
     # is SELECTed directly via AID, never reached by walking through MF.
     promoted_tree = []
     adf_roots = []
-    mf_node = None
     for node in raw_tree:
         if node.get("kind") == "mf" or node.get("name", "").upper() == "MF":
             mf_node = dict(node)
             mf_children = list(mf_node.get("children", []))
-            # Extract ADF children from MF
             kept_children = []
             for child in mf_children:
                 if child.get("kind") == "adf":
@@ -318,6 +301,43 @@ def _dispatch_scan(ctx: ActionContext, *, reader: Any = None) -> dict[str, Any]:
         "scan_cache": new_cache,
         "raw_trace": stdout_sink.getvalue(),
     }
+
+
+def _dispatch_scan(ctx: ActionContext, *, reader: Any = None) -> dict[str, Any]:
+    requested_reader_name = str(reader or "")
+    reader_index, resolved_reader_name = _resolve_reader_binding(requested_reader_name)
+    reader_label = resolved_reader_name or requested_reader_name or "(default)"
+
+    # Catch the "reader exists but slot is empty" class of errors here
+    # instead of letting them bubble into the FastAPI 500 path. The GUI
+    # used to see a raw traceback ("NoCardException: Unable to connect"),
+    # fall into recover-session + rescan, fail that too, and chew a whole
+    # extra second per file click. Now we raise a well-known RuntimeError
+    # whose message the route converts into ``{ok:false, error:...}`` —
+    # the frontend pattern-matches ``no_card:`` and skips recovery.
+    try:
+        transporter = _open_card_transporter(reader_index)
+    except Exception as error:  # noqa: BLE001
+        if _is_no_card_error(error):
+            raise RuntimeError(
+                f"{NO_CARD_ERROR_PREFIX} no smart card inserted in reader "
+                f"{reader_label!r} (hresult 0x8010000C)"
+            ) from error
+        raise
+
+    try:
+        return _scan_transporter_to_session(
+            transporter,
+            reader_index=reader_index,
+            reader_label=reader_label,
+        )
+    except Exception as error:  # noqa: BLE001
+        if _is_no_card_error(error):
+            raise RuntimeError(
+                f"{NO_CARD_ERROR_PREFIX} card removed during scan on reader "
+                f"{reader_label!r}"
+            ) from error
+        raise
 
 
 def _strip_ansi(text: str) -> str:

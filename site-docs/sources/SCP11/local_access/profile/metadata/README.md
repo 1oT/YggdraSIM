@@ -11,7 +11,7 @@ Supported metadata command encoders:
 
 - `StoreMetadataRequest` (`BF25`)
 - `UpdateMetadataRequest` (`BF2A`)
-- custom re-tagged `StoreMetadataRequest` payloads (for vendor/AOSP wrappers such as `BF76`)
+- custom re-tagged `StoreMetadataRequest` payloads (for AOSP-style wrappers such as `BF76`)
 
 ## Canonical metadata file
 

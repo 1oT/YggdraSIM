@@ -10,7 +10,7 @@ YggdraSIM. The repository root keeps project-level entry files such as
 `README.md`, `LICENSE`, `NOTICE`, and `AUTHORS`.
 
 `docs/` is an **optional** local developer workspace (gitignored) for
-vendor PDFs and extracted standards text. It is not redistributed in
+standards PDFs and extracted standards text. It is not redistributed in
 the wheel or the clean bundle. The one schema the toolkit actually
 needs at runtime (`RSPRO.asn`) is shipped as package data under
 `Tools/HilBridge/RSPRO.asn`. Operators who want offline reference
@@ -37,7 +37,7 @@ reading can populate `docs/` themselves from the issuing body.
 - `TEMPLATE_AND_TOKENS.md` - SAIP template authoring, token sidecars, placeholder lifecycle
 - `GUI_HOST_SHELL_GUIDE.md` - GUI `Advanced > Host shell` opt-in PTY surface, AT-decode overlay, threat model
 - `CONFIGURATION_AND_CERTIFICATES.md` - canonical operator guide for every certificate, keyset, identity, and configuration drop-in surface
-- `NAMING_CONVENTIONS.md` - source of truth for every operator-visible label, with the spec citation or YggdraSIM-coined provenance for each
+- `NAMING_CONVENTIONS.md` - source of truth for every operator-visible label, with the spec citation or YggdraSIM-owned origin for each
 
 ## Supporting Examples
 

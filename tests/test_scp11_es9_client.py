@@ -451,7 +451,7 @@ class Es9LikeClientEimTests(unittest.TestCase):
         self.assertEqual(client.post_calls[0]["protocol_header"], "gsma/rsp/v9.9.9")
         self.assertEqual(client.post_calls[0]["pinned_tls_public_key_data"], b"\x01\x02")
 
-    def test_poll_eim_accepts_vendor_style_response_fields(self):
+    def test_poll_eim_accepts_provider_style_response_fields(self):
         client = RecordingEs9Client(
             base_url="https://rsp.example.com",
             eim_base_url="https://eim1.esim.example.test",
@@ -595,7 +595,7 @@ class Es9LikeClientEimTests(unittest.TestCase):
                 )
             )
 
-        self.assertIn("vendor-specific resource contract mapping", str(raised.exception))
+        self.assertIn("endpoint-specific resource contract mapping", str(raised.exception))
 
     def test_post_eim_binary_uses_direct_pinned_path_when_key_available(self):
         client = RecordingEimBinaryClient(base_url="https://rsp.example.com")

@@ -30,7 +30,7 @@ class NaaLogic:
         reference reports the retry counter (63 Cx / 69 83). Lc=8
         attempts a verification. Any other Lc is rejected with 67 00
         and does NOT consume a retry, matching the behaviour of
-        commercial UICC references. Previously non-8-byte payloads
+        deployed UICC behavior. Previously non-8-byte payloads
         were silently compared against the padded stored value and
         therefore consumed a retry on mismatch, which could lock a CHV
         after a handful of malformed probes.
@@ -110,7 +110,7 @@ class NaaLogic:
         The terminal supplies the current PIN and the new one in a single
         16-byte payload (8 bytes padded with FF each). Lc=0 is a retry-
         counter probe identical to VERIFY. CHANGE PIN does not work if the
-        reference is disabled (subclause 11.1.11) -- commercial UICCs
+        reference is disabled (subclause 11.1.11) -- deployed UICCs
         return 69 84 (referenced data invalidated) in that case.
         """
         reference = int(p2) & 0xFF
@@ -176,7 +176,7 @@ class NaaLogic:
         if reference_state.enabled == target_enabled:
             # ETSI TS 102 221 §11.1.11/12: "command may be successfully
             # processed even if the PIN was already in the requested
-            # state". Most commercial UICCs return 9000 in that case.
+            # state". Most deployed UICCs return 9000 in that case.
             if hmac.compare_digest(
                 normalized_payload, self._pad_chv_value(reference_state.value)
             ) is False:

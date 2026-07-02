@@ -463,7 +463,7 @@ def _dispatch_list_notifications(
 def _collect_nested_entries(payload: dict[int, Any]) -> list[Any]:
     """Extract every BF2F notification metadata block from an A0 wrapper.
 
-    Some eUICC vendors wrap each entry in BF2F (as per SGP.22), others
+    Some eUICC implementations wrap each entry in BF2F (as per SGP.22), others
     emit the entry directly. Accept both shapes.
     """
     entries = _tlv_as_list(payload.get(0xBF2F))

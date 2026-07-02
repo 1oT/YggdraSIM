@@ -102,8 +102,8 @@ class ApplyPySimAugmentationsTests(unittest.TestCase):
                 "sfi": None,
             },
             # Local-only entry that pySim has no record of -- left untouched.
-            "ef-vendor-private": {
-                "name": "EF.VENDOR-PRIVATE",
+            "ef-issuer-private": {
+                "name": "EF.ISSUER-PRIVATE",
                 "fid": "DEAD",
                 "structure": "transparent",
                 "sfi": None,
@@ -139,7 +139,7 @@ class ApplyPySimAugmentationsTests(unittest.TestCase):
         specs = self._build_specs()
         apply_pysim_augmentations(specs)
 
-        local_only = specs["ef-vendor-private"]
+        local_only = specs["ef-issuer-private"]
         self.assertEqual(local_only["fid"], "DEAD")
         self.assertEqual(local_only["sfi"], None)
         self.assertNotIn("arr", local_only)

@@ -13,7 +13,7 @@ and a sysmocom SIMtrace2 board running the **relay / cardem** firmware.
 > reported by Linux for USB VID:PID `1d50:60e3`; `osmo-remsim-client-st2`
 > is the upstream Osmocom tool name. Both names appear here only as
 > device / tool identifiers so operators can locate the hardware and
-> the software on their host. No vendor endorsement, partnership, or
+> the software on their host. No endorsement, partnership, or
 > certification is implied by these references.
 This guide covers three scenarios:
 

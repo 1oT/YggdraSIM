@@ -8,13 +8,12 @@ Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 YggdraSIM is a public-release SAIP / SIM / eUICC workbench. Every
 operator-visible label in the GUI, TUI and CLI is either anchored
 in a published standard (3GPP, ETSI, GSMA, ISO 7816, GlobalPlatform,
-TCA SAIP) or is YggdraSIM-coined and deliberately distinct from any
-commercial SIM-tooling vendor's surface text.
+TCA SAIP) or is YggdraSIM-owned wording documented here.
 
 This document is the source of truth for that lineage. When adding a
-new operator-visible label, pick a row in the table below — or
+new operator-visible label, pick a row in the table below, or
 extend the table with a fresh entry citing the spec or, if no spec
-applies, flagging the label as YggdraSIM-coined.
+applies, flagging the label as YggdraSIM-owned.
 
 ## Ribbon group labels (SAIP workbench, web GUI)
 
@@ -23,9 +22,9 @@ applies, flagging the label as YggdraSIM-coined.
 | Package     | TCA SAIP §3 `ProfilePackage`; SGP.22 §2.5                    |
 | Element     | SGP.22 §2.5.4 `ProfileElement` / TCA SAIP §6                 |
 | Filesystem  | ETSI TS 102 221 §8 (file system); one word, YggdraSIM voice  |
-| Tokens      | YggdraSIM-coined; binds `[NAME]` placeholders in a SAIP doc  |
-| Lint        | YggdraSIM-coined; backed by `Tools/ProfilePackage/lint_engine` |
-| Reference   | YggdraSIM-coined; surfaces spec citations + shipped guides   |
+| Tokens      | YggdraSIM-owned; binds `[NAME]` placeholders in a SAIP doc   |
+| Lint        | YggdraSIM-owned; backed by `Tools/ProfilePackage/lint_engine` |
+| Reference   | YggdraSIM-owned; surfaces spec citations + shipped guides    |
 
 ## Top-tab labels (SAIP workbench)
 
@@ -43,8 +42,8 @@ applies, flagging the label as YggdraSIM-coined.
 | JSON         | Generic data-format name; the projection is a flat JSON tree  |
 
 The PE type travels in the tab's `data-pe-type` attribute and tooltip
-(e.g. `PE-USIM`) so the operator can see the underlying class without
-the label echoing any vendor's "PE-<Type> Editor" tab convention.
+(e.g. `PE-USIM`) so the operator can see the underlying class while
+the visible tab label remains YggdraSIM-owned wording.
 
 ## File-detail tabs (FS tree → leaf EF)
 
@@ -109,11 +108,11 @@ PE-CRT, PE-ARA-M, genericFileManagement, ...
 | Life Cycle State      | GP CardSpec v2.3 §11.1.1                                |
 | OPEN                  | GP CardSpec v2.3 §6 GlobalPlatform Environment          |
 
-## YggdraSIM-coined surface terms
+## YggdraSIM-Owned Surface Terms
 
 These terms are not defined by any external standard. They live in
-YggdraSIM's own surface and are documented here so they remain
-distinct from any vendor's vocabulary.
+YggdraSIM's own surface and are documented here so their origin is
+clear during review.
 
 | Term            | Meaning                                                   |
 | --------------- | --------------------------------------------------------- |
@@ -130,12 +129,10 @@ distinct from any vendor's vocabulary.
 
 1. If the underlying concept has a spec name, use that spec name and
    cite the section in the tooltip / hint text.
-2. If no spec applies, pick a YggdraSIM-coined term that is clearly
-   distinct from any commercial SIM-tooling vendor's surface text
-   and add it to the YggdraSIM-coined table above.
-3. Never replicate a vendor's tab-naming convention
-   (e.g. `PE-<Type> Editor Tab`, `Variable Editor`,
-   `ASN.1 Value Notation Tab`) verbatim.
+2. If no spec applies, pick a YggdraSIM-owned term and add it to the
+   YggdraSIM-owned table above.
+3. Do not introduce labels, filenames, comments, or workflow names
+   unless their origin is either standards-cited or YggdraSIM-owned.
 4. Comments and docstrings in source code follow the same rule —
    prefer `# TCA SAIP §6.6.7 genericFileManagement …` over a
-   prose paraphrase that quotes a vendor's manual.
+   prose paraphrase that has no standards citation.

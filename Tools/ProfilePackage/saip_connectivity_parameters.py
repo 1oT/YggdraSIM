@@ -491,7 +491,7 @@ def decode_connectivity_parameters(hex_value: Any) -> dict[str, Any]:
 
     Returns ``{"bearers": [...], "trailing_hex": "..."}``. Bearer tags
     not in ``_BEARER_DECODERS`` round-trip as ``{"bearer": "unknown",
-    "tag_hex": "Ax", "value_hex": "..."}`` so a vendor extension is
+    "tag_hex": "Ax", "value_hex": "..."}`` so a operator-specific extension is
     surfaced rather than silently lost.
     """
     raw = _to_bytes(hex_value, label="connectivityParameters")

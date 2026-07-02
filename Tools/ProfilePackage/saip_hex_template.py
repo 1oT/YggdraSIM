@@ -2,16 +2,15 @@
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
-"""Inline typed hex placeholder handling for vendor SAIP templates.
+"""Inline typed hex placeholder handling for SAIP source templates.
 
-Vendor templates (Telna and similar) ship SAIP payloads as ASCII hex
-with typed placeholders baked in at byte-aligned positions inside TLV
-values:
+Some source templates carry SAIP payloads as ASCII hex with typed
+placeholders baked in at byte-aligned positions inside TLV values:
 
     62128202412183026F078B036F06068001098800810908{imsi:IMSI:8:encode_imsi}80027F20
 
 The ``{name:TYPE:length[:modifier]}`` form declares the byte length of
-the region each placeholder occupies. Some vendor templates use a compact
+the region each placeholder occupies. Some source templates use a compact
 form where the type and length are folded into the token name, for example
 ``{imsiIMSI8EncodeIMSI}`` or ``[iccidICCID10]``. YggdraSIM keeps every
 placeholder literal intact through ``OPEN`` / ``INSPECT`` but still needs
