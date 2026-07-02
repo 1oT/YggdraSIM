@@ -1,3 +1,8 @@
+<!--
+SPDX-License-Identifier: GPL-3.0-or-later
+Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+-->
+
 # Documentation Map
 
 This MkDocs site is a curated entry point for the repository. The original
@@ -20,10 +25,13 @@ subsystems.
 | `subsystems/scp11-eim-local.md` | `SCP11/eim_local/README.md`, `SCP11/eim_local/GUIDE.md` |
 | `subsystems/profile-package.md` | `Tools/ProfilePackage/` sources |
 | `subsystems/hil-bridge.md` | `guides/HIL_BRIDGE_GUIDE.md`, `guides/SIMTRACE2_CARDEM_GUIDE.md` |
+| `subsystems/gui-command-center.md` | `gui_frontend/`, `yggdrasim_common/gui_server/`, `guides/GUI_HOST_SHELL_GUIDE.md` |
 | `subsystems/apdu-fuzzer.md` | `Tools/ApduFuzz/` sources |
 | `subsystems/eum-diagnostics.md` | `Tools/EumDiag/` sources |
 | `subsystems/simcard-simulator.md` | `SIMCARD/` sources, `guides/CAPABILITIES.md` |
 | `subsystems/suci-tool.md` | `Tools/SuciTool/` sources |
+| `how-to/remote-apdu-streaming.md` | `guides/CARD_BRIDGE_GUIDE.md`, `guides/HIL_BRIDGE_GUIDE.md` |
+| `how-to/install-remsim-apdu-streaming.md` | `guides/INSTALL_FULL.md`, `guides/INSTALL_FROM_SOURCE.md`, `guides/INSTALL_RASPBERRYPI.md`, `guides/CARD_BRIDGE_GUIDE.md` |
 | `how-to/diagnostics-toolbox.md` | `guides/DIAGNOSTICS_TOOLBOX.md` |
 | `reference/state-schema.md` | `plugins/README.md`, `guides/ARCHITECTURE.md` |
 | `build-and-packaging.md` | `guides/BUILD_AND_PACKAGING.md` |
@@ -37,9 +45,10 @@ subsystems.
 | `guides/CAPABILITIES.md` | suite-level capability reference grouped by subsystem |
 | `guides/ARCHITECTURE.md` | system structure, dependency map, runtime state, and flow charts |
 | `guides/CLI_AND_PIPING_GUIDE.md` | non-interactive command, piping, and automation patterns |
-| `guides/PROFILE_LIFECYCLE_CLI_CHEATSHEET.md` | ready-to-run lifecycle, polling, and logging recipes |
+| `guides/PROFILE_LIFECYCLE_CLI_CHEATSHEET.md` | ready-to-run profile lifecycle and logging recipes |
 | `guides/BUILD_AND_PACKAGING.md` | Docker, PyInstaller, `.deb`, and packaging guidance |
 | `guides/HIL_BRIDGE_GUIDE.md` | SIMtrace2 and PCSC HIL bridge setup and operation |
+| `guides/CARD_BRIDGE_GUIDE.md` | Card Bridge and remote APDU streaming setup |
 | `guides/SIMTRACE2_CARDEM_GUIDE.md` | SIMtrace2 cardem hardware bring-up notes |
 | `guides/DIAGNOSTICS_TOOLBOX.md` | SAIP diff, simulator-to-TUI, fuzzer, and EUM diag |
 | `guides/INSTALL_CLEAN.md` | clean (no-HIL) install path |
@@ -47,7 +56,6 @@ subsystems.
 | `guides/INSTALL_FROM_SOURCE.md` | source-checkout install with optional extras |
 | `guides/INSTALL_RASPBERRYPI.md` | Raspberry Pi install notes |
 | `guides/TEMPLATE_AND_TOKENS.md` | template and token contract used by the launcher and shells |
-| `CHANGELOG.md` | release history |
 | `SCP11/README.md` | SCP11 family selection guide |
 | `SCP11/live/README.md` | live relay operator guide |
 | `SCP11/test/README.md` | test relay operator guide |

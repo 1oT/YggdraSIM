@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 import io
 import tempfile
 import unittest
@@ -45,7 +48,8 @@ class HexUtilsAndTlvParserTests(unittest.TestCase):
 class EuiccInfo2HelperTests(unittest.TestCase):
     def test_basic_decoders_render_human_readable_values(self) -> None:
         self.assertEqual(format_version_bytes(b"\x01\x02\x03"), "v1.2.3 (010203)")
-        self.assertEqual(decode_ipa_mode(b"\x01"), "ipae (IPAe is active) (1)")
+        self.assertEqual(decode_ipa_mode(b"\x00"), "IPAd active (0)")
+        self.assertEqual(decode_ipa_mode(b"\x01"), "Mode 1 active (1)")
 
     def test_build_detail_lines_includes_iot_and_validation_sections(self) -> None:
         response = bytes.fromhex(
@@ -58,8 +62,10 @@ class EuiccInfo2HelperTests(unittest.TestCase):
 
         lines = build_euicc_info2_detail_lines(response)
 
-        self.assertTrue(any(label == "IPA Mode" and "ipae" in value for _, label, value in lines))
-        self.assertTrue(any(label == "IoT Specific Info" for _, label, _ in lines))
+        self.assertTrue(any(label == "IPA Mode" and "Mode 1 active" in value for _, label, value in lines))
+        self.assertTrue(any(label == "IoT Specific Info" and value == "true" for _, label, value in lines))
+        self.assertTrue(any(label == "eCall Supported" and value == "true" for _, label, value in lines))
+        self.assertTrue(any(label == "Fallback Supported" and value == "true" for _, label, value in lines))
         self.assertTrue(any(label == "SGP.32 Validation" for _, label, _ in lines))
 
     def test_validation_lines_warn_when_iot_fields_are_incomplete(self) -> None:
@@ -67,6 +73,13 @@ class EuiccInfo2HelperTests(unittest.TestCase):
 
         self.assertTrue(any(label == "SGP.32 Validation" and value == "WARN" for _, label, value in lines))
         self.assertTrue(any("Missing mandatory fields" in value for _, _, value in lines))
+
+    def test_iot_presence_flags_render_as_boolean_values(self) -> None:
+        detail_lines = build_euicc_info2_detail_lines(bytes.fromhex("BF2205900101B400"))
+
+        self.assertTrue(any(label == "IoT Specific Info" and value == "true" for _, label, value in detail_lines))
+        self.assertTrue(any(label == "eCall Supported" and value == "false" for _, label, value in detail_lines))
+        self.assertTrue(any(label == "Fallback Supported" and value == "false" for _, label, value in detail_lines))
 
 
 class ProfileSnapshotDiffTests(unittest.TestCase):

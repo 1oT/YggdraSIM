@@ -1,3 +1,8 @@
+<!--
+SPDX-License-Identifier: GPL-3.0-or-later
+Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+-->
+
 # site-docs tooling
 
 Scripts under `site-docs/_tools/` support the MkDocs site. They do not run

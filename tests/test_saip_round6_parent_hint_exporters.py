@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 """
 Round-6 Sweeps 2 & 3 — parent_hint threading through the offline JSON
 inspectors and the decoded-editor audit.

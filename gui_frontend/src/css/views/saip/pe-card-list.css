@@ -1,0 +1,251 @@
+/*
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+ */
+
+/* ---- SA-G2: PE card list ------------------------------------------- */
+/*
+ * Vertical stacked list of PE cards. Each card is icon | body | id-badge.
+ * The icon glyph is colour-coded per PE family (template / domain /
+ * security / auth / fs / remote / meta / access / app / default) so a
+ * dense package is scannable by family at a glance.
+ */
+.saip-pe-cards {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.saip-pe-card {
+  display: grid;
+  grid-template-columns: 36px 1fr auto;
+  column-gap: 10px;
+  align-items: center;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  cursor: pointer;
+  background: var(--surface, rgba(255, 255, 255, 0.02));
+  transition: border-color 0.12s ease, background-color 0.12s ease;
+}
+
+.saip-pe-card:hover {
+  background: var(--surface-alt, rgba(255, 255, 255, 0.04));
+  border-color: var(--accent-soft);
+}
+
+.saip-pe-card[draggable="true"] {
+  cursor: grab;
+}
+
+.saip-pe-card[draggable="true"]:active {
+  cursor: grabbing;
+}
+
+.saip-pe-card.is-dragging {
+  opacity: 0.55;
+}
+
+.saip-pe-card.is-drop-before {
+  border-top-color: var(--accent);
+  box-shadow: 0 -3px 0 var(--accent);
+}
+
+.saip-pe-card.is-drop-after {
+  border-bottom-color: var(--accent);
+  box-shadow: 0 3px 0 var(--accent);
+}
+
+.saip-pe-card.is-active {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+}
+
+.saip-pe-card.is-dirty {
+  border-left: 3px solid var(--warning, #d08770);
+  padding-left: 7px;
+}
+
+.saip-pe-card.is-active.is-dirty {
+  border-left-width: 3px;
+  border-left-color: var(--warning, #d08770);
+}
+
+.saip-pe-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 6px;
+  font-family: var(--mono, "JetBrains Mono", monospace);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: none;
+  border: 1px solid var(--border);
+  background: var(--surface-alt, rgba(255, 255, 255, 0.04));
+  color: var(--fg, #d8dee9);
+  flex-shrink: 0;
+  user-select: none;
+}
+
+.saip-pe-icon--lg {
+  width: 38px;
+  height: 38px;
+  font-size: 13px;
+}
+
+/*
+ * Icon family colours — non-semantic deliberate choices so the eye
+ * groups USIM/ISIM/CSIM as one family even when several PE-OPT
+ * variants are sprinkled in. ``default`` carries the same accent
+ * tone as the rest of the workbench so unknown PE types still feel
+ * native.
+ */
+.saip-pe-icon--template {
+  background: rgba(94, 129, 172, 0.18);
+  border-color: rgba(94, 129, 172, 0.45);
+  color: #8fa6cc;
+}
+
+.saip-pe-icon--domain {
+  background: rgba(163, 190, 140, 0.16);
+  border-color: rgba(163, 190, 140, 0.45);
+  color: #b4cf99;
+}
+
+.saip-pe-icon--security {
+  background: rgba(208, 135, 112, 0.16);
+  border-color: rgba(208, 135, 112, 0.45);
+  color: #e2a288;
+}
+
+.saip-pe-icon--auth {
+  background: rgba(180, 142, 173, 0.18);
+  border-color: rgba(180, 142, 173, 0.45);
+  color: #c5a4be;
+}
+
+.saip-pe-icon--fs {
+  background: rgba(136, 192, 208, 0.16);
+  border-color: rgba(136, 192, 208, 0.45);
+  color: #9fc8d6;
+}
+
+.saip-pe-icon--remote {
+  background: rgba(235, 203, 139, 0.16);
+  border-color: rgba(235, 203, 139, 0.45);
+  color: #ddc485;
+}
+
+.saip-pe-icon--meta,
+.saip-pe-icon--app,
+.saip-pe-icon--access,
+.saip-pe-icon--sparse,
+.saip-pe-icon--default {
+  background: var(--surface-alt, rgba(255, 255, 255, 0.04));
+  border-color: var(--border);
+  color: var(--fg-muted, #888);
+}
+
+.saip-pe-card-body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.saip-pe-card-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--fg, #d8dee9);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.saip-pe-card-sub {
+  font-size: 11px;
+  color: var(--fg-muted, #888);
+  font-family: var(--mono, "JetBrains Mono", monospace);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.saip-pe-card-chips {
+  display: flex;
+  gap: 4px;
+  margin-top: 3px;
+}
+
+.saip-pe-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 9px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--surface-alt, rgba(255, 255, 255, 0.05));
+  border: 1px solid var(--border);
+  color: var(--fg-muted, #888);
+  font-family: var(--mono, "JetBrains Mono", monospace);
+}
+
+.saip-pe-chip--fs {
+  border-color: rgba(136, 192, 208, 0.45);
+  color: #9fc8d6;
+}
+
+.saip-pe-chip--app {
+  border-color: rgba(163, 190, 140, 0.45);
+  color: #b4cf99;
+}
+
+.saip-pe-chip--dirty {
+  border-color: rgba(208, 135, 112, 0.5);
+  color: #e2a288;
+  background: rgba(208, 135, 112, 0.08);
+}
+
+.saip-pe-chip--lint-fail {
+  border-color: rgba(191, 97, 106, 0.55);
+  color: #d08090;
+  background: rgba(191, 97, 106, 0.10);
+  font-weight: 600;
+}
+
+.saip-pe-chip--lint-warn {
+  border-color: rgba(235, 180, 50, 0.50);
+  color: #d4aa3a;
+  background: rgba(235, 180, 50, 0.08);
+}
+
+.saip-pe-chip--lint-info {
+  border-color: rgba(143, 188, 187, 0.40);
+  color: #8fbcbb;
+}
+
+.saip-pe-card-id {
+  font-family: var(--mono, "JetBrains Mono", monospace);
+  font-size: 11px;
+  color: var(--fg-muted, #888);
+  background: var(--surface-alt, rgba(255, 255, 255, 0.05));
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 2px 8px;
+  min-width: 28px;
+  text-align: center;
+}
+
+.saip-pe-card.is-active .saip-pe-card-id {
+  background: var(--accent);
+  color: var(--accent-fg, #0b1015);
+  border-color: var(--accent);
+}

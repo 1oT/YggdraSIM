@@ -1,0 +1,156 @@
+/*
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+ */
+
+/* ---- SA-G1: variable editor modal ---------------------------------- */
+
+.saip-modal-host {
+  position: fixed;
+  inset: 0;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  z-index: 80;
+  pointer-events: none;
+}
+
+.saip-modal-host.is-open {
+  display: flex;
+  pointer-events: auto;
+}
+
+.saip-modal-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(2px);
+}
+
+.saip-modal-card {
+  position: relative;
+  z-index: 1;
+  background: var(--surface, #1d2128);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.55);
+  width: min(720px, 92vw);
+  max-height: 82vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.saip-modal-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-alt, rgba(255, 255, 255, 0.03));
+}
+
+.saip-modal-header h3 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--fg);
+}
+
+.saip-modal-sub {
+  font-size: 11px;
+  color: var(--fg-muted, #888);
+  font-family: var(--mono, "JetBrains Mono", monospace);
+}
+
+.saip-modal-close {
+  margin-left: auto;
+  width: 26px;
+  height: 26px;
+  border: 1px solid var(--border);
+  background: transparent;
+  border-radius: 4px;
+  color: var(--fg-muted, #888);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.saip-modal-close:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.saip-modal-body {
+  padding: 14px;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.saip-modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 10px 14px;
+  border-top: 1px solid var(--border);
+  background: var(--surface-alt, rgba(255, 255, 255, 0.03));
+}
+
+/* Generic ribbon form modal (Batch personalize, Import PE, Export PE,
+ * Batch validate, ARR sync). Stacked rows with label-on-top so picker
+ * buttons sit beside the path field at any width. */
+.saip-form-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.saip-form-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--fg);
+}
+
+.saip-form-required {
+  color: var(--danger, #d97070);
+  margin-left: 2px;
+}
+
+.saip-form-input-wrap {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.saip-form-text,
+.saip-form-select {
+  flex: 1 1 auto;
+  min-width: 0;
+  background: var(--surface-alt, rgba(255, 255, 255, 0.04));
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--fg);
+  padding: 6px 8px;
+  font-family: var(--mono, "JetBrains Mono", monospace);
+  font-size: 12px;
+}
+
+.saip-form-text:focus,
+.saip-form-select:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.saip-form-text--invalid {
+  border-color: var(--danger, #d97070);
+  background: rgba(217, 112, 112, 0.08);
+}
+
+.saip-form-hint {
+  margin: 2px 0 0 0;
+  font-size: 11px;
+  color: var(--fg-muted, #888);
+}
+

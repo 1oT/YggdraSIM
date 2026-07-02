@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 """ISO 7816-4 APDU parser regression tests for ``SIMCARD/utils.py``.
 
 These cover all four cases from §5.1 in both short and extended

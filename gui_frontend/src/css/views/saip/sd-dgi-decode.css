@@ -1,0 +1,62 @@
+/*
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+ */
+
+/* ---- SA-G3: SD perso-data DGI decode table ----------------------- */
+
+.saip-dgi-rec-title {
+  margin: 10px 0 4px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--fg-muted, #888);
+}
+
+.saip-dgi-empty {
+  font-size: 11px;
+  color: var(--fg-muted, #888);
+  margin: 2px 0 8px;
+}
+
+.saip-dgi-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 11px;
+  margin-bottom: 10px;
+}
+
+.saip-dgi-table thead th {
+  text-align: left;
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--fg-muted, #888);
+  padding: 3px 6px;
+  border-bottom: 1px solid var(--border);
+}
+
+.saip-dgi-table td {
+  padding: 3px 6px;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+}
+
+.saip-dgi-col-dgi,
+.saip-dgi-col-tag {
+  white-space: nowrap;
+  font-family: var(--mono, "JetBrains Mono", monospace);
+  color: var(--fg-muted, #888);
+}
+
+.saip-dgi-col-name {
+  color: var(--fg);
+}
+
+.saip-dgi-col-val {
+  font-family: var(--mono, "JetBrains Mono", monospace);
+  word-break: break-all;
+  max-width: 320px;
+}
+

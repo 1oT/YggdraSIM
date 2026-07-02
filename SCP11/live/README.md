@@ -1,21 +1,24 @@
-# SCP11 Live Relay
+<!--
+SPDX-License-Identifier: GPL-3.0-or-later
+Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+-->
 
-`SCP11/live` is the primary relay-oriented eSIM shell with live-default
-certificate and endpoint assumptions. Use it when the workflow should model a
-real relay path rather than direct local `ISD-R` access.
+# SCP11 eSIM Management Relay
+
+`SCP11/live` is the eSIM management relay shell. Use it when the
+workflow should model a real relay path rather than direct local `ISD-R`
+access.
 
 ## Use this module when
 
 - the operator flow is relay-first rather than card-local
-- `LPAd`, `IPAd`, or `IPAe` behavior is the primary concern
 - the active transport should be local PC/SC or an HTTP APDU relay
 - the backend should speak to remote ES9+ / eIM endpoints
 
 ## Do not use this module when
 
 - the task is direct local `ISD-R` provisioning or metadata upload
-- the task is eIM-side package generation, localized polling, or handover
-- the work depends on lab-only request variants better suited to `SCP11/test`
+- the task is eIM-side package generation, hotfolder execution, or handover
 
 ## Launch
 
@@ -36,7 +39,6 @@ Batch automation examples:
 ```bash
 python -m SCP11.live --cmd "DISCOVER; STATUS; LIST; EXIT"
 python -m SCP11.live --cmd "DOWNLOAD-PROFILE LPA:1$SMDP.EXAMPLE$TOKEN; STATUS; EXIT"
-python -m SCP11.live --cmd "POLL 3 30 --debug; EXIT"
 ```
 
 See `../../guides/PROFILE_LIFECYCLE_CLI_CHEATSHEET.md` for ready-to-paste lifecycle
@@ -58,7 +60,7 @@ opening a partially usable session.
 
 ## Runtime model
 
-The live relay shell is stateful while the shell is open:
+The eSIM management relay shell is stateful while the shell is open:
 
 - it establishes the relay/runtime context once at startup
 - it renders a session snapshot with `EID`, default SM-DP+, queued
@@ -107,16 +109,7 @@ IPAd:
 - `DISCOVER`
 - `DOWNLOAD`
 
-IPAe:
 
-- `POLL [attempts] [timer-window] [-t 20s] [-s 5] [--debug]`
-- alias: `EIM-POLL`
-
-Plugin note:
-
-- `POLL` / `EIM-POLL` is provided by the optional `polling` plugin
-- when the plugin is absent, the command is not exposed by the core shell
-- see `plugins/README.md` for the capability contract and publication model
 
 ## Expert commands
 
@@ -175,26 +168,14 @@ DOWNLOAD
 STATUS
 ```
 
-IPAe polling run:
-
-```text
-POLL
-```
-
-For long-running or timing-sensitive cases:
-
-```text
-POLL 3 30 --debug
-```
 
 ## Configuration fields to know first
 
-The live shell reads its defaults from `SCP11/live/config.py`. The most
+The eSIM management shell reads its defaults from `SCP11/live/config.py`. The most
 operator-relevant fields are:
 
 - `TRANSPORT_MODE`
 - `READER_INDEX`
-- `RELAY_URL`
 - `BACKEND_MODE`
 - `RSP_SERVER_URL`
 - `ES9_BASE_URL`
@@ -208,15 +189,15 @@ Practical rule:
 
 - if the task is a real relay exchange, confirm `RSP_SERVER_URL`,
   `ES9_BASE_URL`, and TLS settings before issuing profile downloads
-- if the task is a lab replay, confirm whether `TRANSPORT_MODE` should be
-  `pcsc` or `relay`
+- `ES9_CA_BUNDLE_PATH` is empty by default, which means platform TLS trust;
+  set it only when the target requires an explicit CA bundle
+- if the task is a lab replay, keep `TRANSPORT_MODE` set to `pcsc`
 
 ## Related guides
 
 - `SCP11/README.md`
 - `../../guides/CLI_AND_PIPING_GUIDE.md`
 - `../../guides/PROFILE_LIFECYCLE_CLI_CHEATSHEET.md`
-- `SCP11/test/README.md`
 - `SCP11/local_access/README.md`
 - `SCP11/eim_local/README.md`
 - `SCP11/relay/README.md`

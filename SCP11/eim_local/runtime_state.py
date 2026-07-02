@@ -1,5 +1,8 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
-"""eIM runtime state store: persists per-EID session state between IPA-poll rounds."""
+
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+"""eIM runtime state store: persists per-EID session state between package rounds."""
 import json
 import os
 import sys
@@ -72,7 +75,7 @@ class EimRuntimeStateStore:
         return dict(self.state)
 
     def get_next_counter(self, eim_id: str, default_value: int = 1) -> int:
-        """Return the next available IPA-poll transaction counter value."""
+        """Return the next available transaction counter value."""
         key = str(eim_id or "default").strip()
         inventory_payload = self.inventory.get_namespace("eim_id", key, self.INVENTORY_NAMESPACE)
         if isinstance(inventory_payload, dict):

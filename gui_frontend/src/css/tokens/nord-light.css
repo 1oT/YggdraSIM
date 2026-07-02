@@ -1,0 +1,69 @@
+/*
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+ */
+
+/* -- Theme: Nord Light --------------------------------------------------- */
+html[data-theme="nord-light"] {
+  --bg: #eceff4;
+  --bg-elev: #ffffff;
+  --bg-elev-2: #e5e9f0;
+  --surface: #ffffff;
+  --surface-alt: rgba(0, 0, 0, 0.04);
+  --bg-hover: rgba(46, 52, 64, 0.05);
+  --border: rgba(76, 86, 106, 0.18);
+  --border-strong: rgba(76, 86, 106, 0.32);
+  --fg: #2e3440;
+  --fg-dim: #4c566a;
+  --accent: #5e81ac;
+  --accent-strong: #81a1c1;
+  --accent-soft: rgba(94, 129, 172, 0.12);
+  --accent-fg: #ffffff;
+  --accent-glow: rgba(94, 129, 172, 0.35);
+  --gradient-accent: linear-gradient(135deg, #5e81ac 0%, #81a1c1 60%, #88c0d0 100%);
+  --gradient-brand: linear-gradient(135deg, #5e81ac 0%, #b48ead 100%);
+  --ok: #7ca063;
+  --ok-soft: rgba(124, 160, 99, 0.16);
+  --warn: #d08770;
+  --warn-soft: rgba(208, 135, 112, 0.18);
+  --fail: #bf616a;
+  --fail-soft: rgba(191, 97, 106, 0.18);
+  --code-bg: #eceff4;
+  --kbd-bg: rgba(236, 239, 244, 0.96);
+  --shadow-card: 0 10px 26px rgba(46, 52, 64, 0.08);
+  --shadow-card-hover: 0 20px 44px rgba(46, 52, 64, 0.14);
+  --shadow-glow-accent: 0 0 0 1px var(--accent-soft), 0 14px 36px -12px var(--accent-glow);
+  --topbar-bg: rgba(255, 255, 255, 0.78);
+
+  /* Yggdrasil weave (Nord-Light). Same semantics as nord-dark, hues
+   * shifted darker so they still read against the pale Polar-Night
+   * surfaces. Naming is identical so the rest of the UI is theme-
+   * agnostic. */
+  --ygg-frost: #5e81ac;
+  --ygg-amber: #b9863f;
+  --ygg-runic: #7e6fa0;
+  --ygg-leaf:  #6f8d57;
+  --ygg-bark:  #6f5e4a;
+  --ygg-ember: #b46748;
+  --ygg-mist:  #7d8da3;
+
+  --tree-mf-fg:    var(--ygg-frost);
+  --tree-mf-bg:    rgba(94, 129, 172, 0.12);
+  --tree-mf-edge:  rgba(94, 129, 172, 0.55);
+  --tree-adf-fg:   var(--ygg-amber);
+  --tree-adf-bg:   rgba(185, 134, 63, 0.13);
+  --tree-adf-edge: rgba(185, 134, 63, 0.55);
+  --tree-df-fg:    var(--ygg-runic);
+  --tree-df-bg:    rgba(126, 111, 160, 0.13);
+  --tree-df-edge:  rgba(126, 111, 160, 0.55);
+  --tree-ef-fg:    var(--ygg-leaf);
+  --tree-ef-bg:    rgba(111, 141, 87, 0.12);
+  --tree-ef-edge:  rgba(111, 141, 87, 0.50);
+
+  --theme-tint:
+    radial-gradient(circle at top left,     rgba(136, 192, 208, 0.22), transparent 36%),
+    radial-gradient(circle at bottom right, rgba(163, 190, 140, 0.16), transparent 34%),
+    radial-gradient(circle at 70% 20%,      rgba(126, 111, 160, 0.10), transparent 40%),
+    radial-gradient(circle at 20% 80%,      rgba(185, 134, 63, 0.07), transparent 42%);
+}
+

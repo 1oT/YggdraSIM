@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 """Unit tests for the round 1-4 pair-encoders (file structure, PKCS#15,
 PIN/key material, install parameters).
 
@@ -383,6 +386,31 @@ class UiccToolkitParametersEncoderTests(unittest.TestCase):
         redecoded = _decode_uicc_toolkit_parameters(encoded)
         self.assertEqual(redecoded["accessDomain"], decoded["accessDomain"])
         self.assertEqual(redecoded["tarValues"], decoded["tarValues"])
+
+    def test_compact_no_menu_count_layout_decodes_tar(self) -> None:
+        raw = bytes.fromhex("01001000000201120300000000")
+
+        decoded = _decode_uicc_toolkit_parameters(raw)
+
+        self.assertEqual(decoded["layout"], "compact-no-menu-entry-count")
+        self.assertFalse(decoded["menuEntryCountPresent"])
+        self.assertEqual(decoded["accessDomain"], "00")
+        self.assertEqual(decoded["priorityLevelOfToolkitAppInstance"], 0x10)
+        self.assertEqual(decoded["maxNumberOfChannels"], 2)
+        self.assertEqual(decoded["minimumSecurityLevelRaw"], "12")
+        self.assertEqual(decoded["tarValues"], ["000000"])
+        self.assertEqual(decoded["trailingPadding"], "00")
+        self.assertIn("fieldMap", decoded)
+
+        encoded_passthrough = encode_uicc_toolkit_parameters(dict(decoded))
+        self.assertEqual(encoded_passthrough, raw)
+        decoded["rawHex"] = ""
+        encoded_canonical = encode_uicc_toolkit_parameters(dict(decoded))
+        self.assertNotEqual(encoded_canonical, raw)
+        self.assertEqual(
+            _decode_uicc_toolkit_parameters(encoded_canonical)["tarValues"],
+            ["000000"],
+        )
 
 
 # ---------------------------------------------------------------------------

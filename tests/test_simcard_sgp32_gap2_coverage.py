@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 """Second-pass gap-coverage suite for SGP.32 / SGP.22 v3 ES10 surfaces.
 
 The first gap pass (``test_simcard_sgp32_gap_coverage``) closed the

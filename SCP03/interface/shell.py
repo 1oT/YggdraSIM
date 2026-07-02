@@ -226,69 +226,6 @@ class ShellDispatcher :
 
         self .transport .transmit =_verbose_transmit 
 
-    def _handle_decode (self ,arg_line :str ):
-        is_empty =False 
-        if len (arg_line )==0 :
-            is_empty =True 
-
-        if is_empty :
-            print (f"{Config.Colors.FAIL}[-] Usage: DECODE <Hex>{Config.Colors.ENDC}")
-            return 
-
-        hex_data =arg_line .replace (" ","")
-
-        try :
-            data =bytes .fromhex (hex_data )
-            parse_info =TlvParser .parse_detailed (data )
-            parsed =parse_info ["parsed"]
-            if parse_info ["complete"]==False or len (parsed )==0 :
-                if self ._try_decode_simple_registry_stream (data ):
-                    return 
-                print (f"{Config.Colors.WARNING}[!] Input does not appear to be valid BER-TLV.{Config.Colors.ENDC}")
-                if parse_info ["error"]:
-                    print (f"{Config.Colors.WARNING}[!] Parser note: {parse_info['error']}{Config.Colors.ENDC}")
-                consumed =parse_info .get ("consumed",0 )
-                print (f"{Config.Colors.WARNING}[!] Consumed {consumed} of {len(data)} bytes before stopping.{Config.Colors.ENDC}")
-                return 
-            self .gp_ctrl .print_tlv_data (parsed )
-        except ValueError :
-            print (f"{Config.Colors.FAIL}[!] Invalid Hex string provided.{Config.Colors.ENDC}")
-        except Exception as e :
-            print (f"{Config.Colors.FAIL}[!] Decode Error: {e}{Config.Colors.ENDC}")
-
-    def _try_decode_simple_registry_stream (self ,data :bytes )->bool :
-        entries =[]
-        i =0 
-        while i <len (data ):
-            if i +3 >len (data ):
-                return False 
-            aid_len =data [i ]
-            if aid_len <5 or aid_len >16 :
-                return False 
-            i +=1 
-            if i +aid_len +2 >len (data ):
-                return False 
-            aid =data [i :i +aid_len ]
-            if len (aid )==0 or aid [0 ]!=0xA0 :
-                return False 
-            i +=aid_len 
-            state_byte =data [i ]
-            extra_byte =data [i +1 ]
-            i +=2 
-            entries .append ((aid .hex ().upper (),state_byte ,extra_byte ))
-
-        if len (entries )==0 :
-            return False 
-
-        print (f"{Config.Colors.CYAN}[i] Detected simple LV registry stream (not BER-TLV).{Config.Colors.ENDC}")
-        print (f"{Config.Colors.HEADER}--- Decoded Registry Stream ---{Config.Colors.ENDC}")
-        print (f"{'AID':<34} | {'State':<12} | Extra")
-        print ("-"*65 )
-        for aid_hex ,state_byte ,extra_byte in entries :
-            state_str =self .gp_ctrl ._state_to_string (state_byte )
-            print (f"{aid_hex:<34} | {state_str:<12} | {extra_byte:02X}")
-        return True 
-
     def _handle_dump_fs (self ,arg_line :str =""):
         target ="ALL"
         has_arg =False 
@@ -548,47 +485,112 @@ class ShellDispatcher :
         if is_unknown :
             print (f"{Config.Colors.FAIL}[!] Unknown topic. Available: {', '.join(self.guide_topics)}{Config.Colors.ENDC}")
 
+    @staticmethod
+    def _split_command_args (arg_line :str ,usage :str )->list [str ]:
+        try :
+            return shlex .split (str (arg_line or ""))
+        except ValueError as e :
+            print (f"{Config.Colors.FAIL}[!] {e}. Usage: {usage}{Config.Colors.ENDC}")
+            return []
+
+    @staticmethod
+    def _option_value (parts :list [str ],index :int ,usage :str )->tuple [str ,int ]:
+        if index +1 >=len (parts ):
+            raise ValueError (f"Missing value for {parts[index]}. Usage: {usage}")
+        return parts [index +1 ],index +2
+
     def _handle_install_file (self ,arg_line ):
-        parts =arg_line .split ()
+        usage ="INSTALL-CAP <cap/ijc> [Privileges] [Params] [AppletAID] [ModuleAID] [--privs HEX] [--params HEX] [--applet AID] [--module AID] [--load-only]"
+        parts =self ._split_command_args (arg_line ,usage )
         is_short =False 
         if len (parts )<1 :
             is_short =True 
 
         if is_short :
-            print (f"{Config.Colors.FAIL}Usage: INSTALL-INSTALL <cap/ijc> [Privileges] [Params] [AppletAID] [ModuleAID]{Config.Colors.ENDC}")
+            print (f"{Config.Colors.FAIL}Usage: {usage}{Config.Colors.ENDC}")
             return 
 
-        f =parts [0 ]
-
+        positional =[]
         p ="00"
-        has_p =False 
-        if len (parts )>1 :
-            has_p =True 
-        if has_p :
-            p =parts [1 ]
-
         par ="C900"
-        has_par =False 
-        if len (parts )>2 :
-            has_par =True 
-        if has_par :
-            par =parts [2 ]
+        app_aid =None
+        mod_aid =None
+        instantiate =True
+        p_from_flag =False
+        par_from_flag =False
+        app_from_flag =False
+        mod_from_flag =False
 
-        app_aid =None 
-        has_app =False 
-        if len (parts )>3 :
-            has_app =True 
-        if has_app :
-            app_aid =parts [3 ]
+        i =0
+        try :
+            while i <len (parts ):
+                token =parts [i ]
+                token_l =token .lower ()
+                if token_l in ("--privs","--privileges","-privs"):
+                    p ,i =self ._option_value (parts ,i ,usage )
+                    p_from_flag =True
+                    continue
+                if token_l in ("--params","--parameters","-params"):
+                    par ,i =self ._option_value (parts ,i ,usage )
+                    par_from_flag =True
+                    continue
+                if token_l in ("--applet","--app","-applet","-applet-aid"):
+                    app_aid ,i =self ._option_value (parts ,i ,usage )
+                    app_from_flag =True
+                    continue
+                if token_l in ("--module","--mod","-module","-module-aid"):
+                    mod_aid ,i =self ._option_value (parts ,i ,usage )
+                    mod_from_flag =True
+                    continue
+                if token_l in ("--load-only","--no-install","-load"):
+                    instantiate =False
+                    i +=1
+                    continue
+                positional .append (token )
+                i +=1
+        except ValueError as e :
+            print (f"{Config.Colors.FAIL}[!] {e}{Config.Colors.ENDC}")
+            return
 
-        mod_aid =None 
-        has_mod =False 
-        if len (parts )>4 :
-            has_mod =True 
-        if has_mod :
-            mod_aid =parts [4 ]
+        if len (positional )<1 :
+            print (f"{Config.Colors.FAIL}Usage: {usage}{Config.Colors.ENDC}")
+            return
 
-        self .gp_ctrl .install_cap_file (f ,privileges =p ,install_params =par ,target_app_aid =app_aid ,target_module_aid =mod_aid ,instantiate =True )
+        f =positional [0 ]
+
+        if len (positional )>1 and p_from_flag ==False :
+            p =positional [1 ]
+        if len (positional )>2 and par_from_flag ==False :
+            par =positional [2 ]
+        if len (positional )>3 and app_from_flag ==False :
+            app_aid =positional [3 ]
+        if len (positional )>4 and mod_from_flag ==False :
+            mod_aid =positional [4 ]
+
+        self .gp_ctrl .install_cap_file (f ,privileges =p ,install_params =par ,target_app_aid =app_aid ,target_module_aid =mod_aid ,instantiate =instantiate )
+
+    def _handle_load_cap (self ,arg_line :str )->None :
+        usage ="LOAD <cap/ijc>"
+        parts =self ._split_command_args (arg_line ,usage )
+        if len (parts )<1 :
+            print (f"{Config.Colors.FAIL}Usage: {usage}{Config.Colors.ENDC}")
+            return
+        self .gp_ctrl .install_cap_file (parts [0 ],instantiate =False )
+
+    def _handle_install_one_shot (self ,arg_line :str )->None :
+        usage ="INSTALL <cap/ijc> <INSTALL-for-install APDU>"
+        parts =self ._split_command_args (arg_line ,usage )
+        is_short =False
+        if len (parts )<2 :
+            is_short =True
+
+        if is_short :
+            print (f"{Config.Colors.FAIL}Usage: {usage}{Config.Colors.ENDC}")
+            return
+
+        filename =parts [0 ]
+        install_apdu ="".join (parts [1 :])
+        self .gp_ctrl .install_cap_file_with_install_apdu (filename ,install_apdu )
 
     def _handle_install_wizard (self ,arg :str ="")->None :
         target_aid ="A000000151000000"
@@ -637,50 +639,114 @@ class ShellDispatcher :
 
         InteractiveWizards .run_wizard_menu (transport_ctrl ,target_aid ,gp_ctrl )
 
-    def _handle_install_app (self ,arg_line ):
-        parts =arg_line .split ()
+    def _handle_install_load (self ,arg_line :str )->None :
+        usage ="INSTALL-LOAD <LoadFileAID> [SecurityDomainAID] [LoadFileHash] [Params] [Token]"
+        parts =self ._split_command_args (arg_line ,usage )
+        if len (parts )<1 :
+            print (f"{Config.Colors.FAIL}Usage: {usage}{Config.Colors.ENDC}")
+            return
+
+        sd_aid =""
+        lf_hash =""
+        params =""
+        token =""
+        if len (parts )>1 :
+            sd_aid =parts [1 ]
+        if len (parts )>2 :
+            lf_hash =parts [2 ]
+        if len (parts )>3 :
+            params =parts [3 ]
+        if len (parts )>4 :
+            token =parts [4 ]
+
+        self .gp_ctrl .install_for_load (parts [0 ],sd_aid ,lf_hash ,params ,token )
+
+    def _handle_install_app_common (self ,arg_line :str ,make_selectable_default :bool ,usage :str )->None :
+        parts =self ._split_command_args (arg_line ,usage )
         is_short =False 
         if len (parts )<2 :
             is_short =True 
 
         if is_short :
-            print (f"{Config.Colors.FAIL}Usage: INSTALL-APP <PkgAID> <AppAID> [ModAID] [Priv] [Params]{Config.Colors.ENDC}")
+            print (f"{Config.Colors.FAIL}Usage: {usage}{Config.Colors.ENDC}")
             return 
 
-        pkg =parts [0 ]
-        app =parts [1 ]
-
-        mod =app 
-        has_mod =False 
-        if len (parts )>2 :
-            has_mod =True 
-        if has_mod :
-            mod =parts [2 ]
-
+        positional =[]
+        mod =None
         priv ="00"
-        has_priv =False 
-        if len (parts )>3 :
-            has_priv =True 
-        if has_priv :
-            priv =parts [3 ]
-
         param ="C900"
-        has_param =False 
-        if len (parts )>4 :
-            has_param =True 
-        if has_param :
-            param =parts [4 ]
+        make_selectable =make_selectable_default
+        mod_from_flag =False
+        priv_from_flag =False
+        param_from_flag =False
 
-        self .gp_ctrl .install_app (pkg ,app ,mod ,priv ,param ,make_selectable =True )
+        i =0
+        try :
+            while i <len (parts ):
+                token =parts [i ]
+                token_l =token .lower ()
+                if token_l in ("--module","--mod","-module","-module-aid"):
+                    mod ,i =self ._option_value (parts ,i ,usage )
+                    mod_from_flag =True
+                    continue
+                if token_l in ("--privs","--privileges","-privs"):
+                    priv ,i =self ._option_value (parts ,i ,usage )
+                    priv_from_flag =True
+                    continue
+                if token_l in ("--params","--parameters","-params"):
+                    param ,i =self ._option_value (parts ,i ,usage )
+                    param_from_flag =True
+                    continue
+                if token_l in ("--make-selectable","-make-selectable"):
+                    make_selectable =True
+                    i +=1
+                    continue
+                if token_l in ("--no-make-selectable","--install-only","-install-only"):
+                    make_selectable =False
+                    i +=1
+                    continue
+                positional .append (token )
+                i +=1
+        except ValueError as e :
+            print (f"{Config.Colors.FAIL}[!] {e}{Config.Colors.ENDC}")
+            return
+
+        if len (positional )<2 :
+            print (f"{Config.Colors.FAIL}Usage: {usage}{Config.Colors.ENDC}")
+            return
+
+        pkg =positional [0 ]
+        app =positional [1 ]
+
+        if mod is None :
+            mod =app
+
+        if len (positional )>2 and mod_from_flag ==False :
+            mod =positional [2 ]
+        if len (positional )>3 and priv_from_flag ==False :
+            priv =positional [3 ]
+        if len (positional )>4 and param_from_flag ==False :
+            param =positional [4 ]
+
+        self .gp_ctrl .install_app (pkg ,app ,mod ,priv ,param ,make_selectable =make_selectable )
+
+    def _handle_install_app (self ,arg_line ):
+        usage ="INSTALL-APP <PkgAID> <AppAID> [ModAID] [Priv] [Params] [--no-make-selectable]"
+        self ._handle_install_app_common (arg_line ,True ,usage )
+
+    def _handle_install_instance (self ,arg_line :str )->None :
+        usage ="INSTALL-INSTANCE <PkgAID> <AppAID> [ModAID] [Priv] [Params] [--make-selectable]"
+        self ._handle_install_app_common (arg_line ,False ,usage )
 
     def _handle_install_registry (self ,arg_line ):
-        parts =arg_line .split ()
+        usage ="REGISTRY-UPDATE <AID> [Priv] [Params]"
+        parts =self ._split_command_args (arg_line ,usage )
         is_short =False 
         if len (parts )<1 :
             is_short =True 
 
         if is_short :
-            print (f"{Config.Colors.FAIL}Usage: INSTALL-REGISTRY <AID> [Priv] [Params]{Config.Colors.ENDC}")
+            print (f"{Config.Colors.FAIL}Usage: {usage}{Config.Colors.ENDC}")
             return 
 
         aid =parts [0 ]
@@ -1122,13 +1188,14 @@ class ShellDispatcher :
         self ._set_prompt_context_from_fs_state (path_hint )
 
     def _handle_install_selectable (self ,arg_line ):
-        parts =arg_line .split ()
+        usage ="MAKE-SELECTABLE <AID> [Privileges] [Params] [Token]"
+        parts =self ._split_command_args (arg_line ,usage )
         is_short =False 
         if len (parts )<1 :
             is_short =True 
 
         if is_short :
-            print (f"{Config.Colors.FAIL}Usage: INSTALL-SELECTABLE <AID> [Privileges] [Params] [Token]{Config.Colors.ENDC}")
+            print (f"{Config.Colors.FAIL}Usage: {usage}{Config.Colors.ENDC}")
             return 
 
         aid =parts [0 ]
@@ -1158,13 +1225,14 @@ class ShellDispatcher :
         self .gp_ctrl .install_make_selectable (aid ,privs ,params ,token )
 
     def _handle_install_extradition (self ,arg_line ):
-        parts =arg_line .split ()
+        usage ="EXTRADITE <App_AID> <SD_AID> [Token]"
+        parts =self ._split_command_args (arg_line ,usage )
         is_short =False 
         if len (parts )<2 :
             is_short =True 
 
         if is_short :
-            print (f"{Config.Colors.FAIL}Usage: INSTALL-EXTRADITION <App_AID> <SD_AID> [Token]{Config.Colors.ENDC}")
+            print (f"{Config.Colors.FAIL}Usage: {usage}{Config.Colors.ENDC}")
             return 
 
         token =""
@@ -1175,6 +1243,14 @@ class ShellDispatcher :
             token =parts [2 ]
 
         self .gp_ctrl .install_extradition (parts [0 ],parts [1 ],token )
+
+    def _handle_install_personalization (self ,arg_line :str )->None :
+        usage ="PERSONALIZE <AID>"
+        parts =self ._split_command_args (arg_line ,usage )
+        if len (parts )<1 :
+            print (f"{Config.Colors.FAIL}Usage: {usage}{Config.Colors.ENDC}")
+            return
+        self .gp_ctrl .install_personalization (parts [0 ])
 
     def _handle_keys (self ,arg :Optional [str ]=None ):
         target =None 
@@ -2269,6 +2345,9 @@ class ShellDispatcher :
 
         if is_a4 :
             selected_hex =None 
+            restore_commands =None
+            previous_restore_commands =list (getattr (self .fs_ctrl ,"_selection_restore_commands",[])or [])
+            previous_fcp =dict (getattr (self .fs_ctrl ,"current_fcp",{})or {})
             has_len =False 
             if len (apdu )>5 :
                 has_len =True 
@@ -2281,7 +2360,16 @@ class ShellDispatcher :
 
                 if has_payload :
                     selected_hex =apdu [5 :5 +lc ].hex ().upper ()
+                    if hasattr (self .fs_ctrl ,"_build_restore_command_trail"):
+                        restore_commands =self .fs_ctrl ._build_restore_command_trail (
+                        selected_hex ,
+                        apdu .hex ().upper (),
+                        previous_restore_commands ,
+                        previous_fcp ,
+                        )
                     self .fs_ctrl .current_fid =selected_hex 
+                    if restore_commands is not None :
+                        self .fs_ctrl ._selection_restore_commands =restore_commands
                     context_label =self ._context_label_from_selection (selected_hex )
                     self .fs_ctrl .current_path_hint =context_label 
                     self ._set_prompt_context (context_label )
@@ -2291,7 +2379,11 @@ class ShellDispatcher :
                 has_data =True 
 
             if has_data :
-                self .fs_ctrl ._parse_fcp_internal (data ,selected_hex )
+                self .fs_ctrl ._parse_fcp_internal (
+                data ,
+                selected_hex ,
+                restore_commands =restore_commands ,
+                )
                 self .fs_ctrl .print_fcp_info ()
 
         is_b0 =False 

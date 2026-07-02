@@ -1,8 +1,12 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 import tempfile
 import unittest
 from pathlib import Path
 
 from Tools.ProfilePackage.saip_transcode_tui_prefs import (
+    THEME_CYCLE,
     load_outline_prefs,
     load_pane_layout_prefs,
     load_split_size_prefs,
@@ -13,6 +17,16 @@ from Tools.ProfilePackage.saip_transcode_tui_prefs import (
     persist_theme,
     save_transcode_tui_prefs,
 )
+from Tools.ProfilePackage.saip_transcode_tui import (
+    _next_available_saip_transcode_theme,
+    _resolve_saip_transcode_theme,
+)
+
+
+class _ThemeApp:
+    def __init__(self, theme_names: list[str], *, theme: str = "textual-dark") -> None:
+        self.available_themes = {name: object() for name in theme_names}
+        self.theme = theme
 
 
 class SaipTranscodeTuiPrefsTests(unittest.TestCase):
@@ -180,6 +194,30 @@ class SaipTranscodeTuiPrefsTests(unittest.TestCase):
             },
         )
         self.assertEqual(load_outline_prefs(self.workspace_root), {})
+
+    def test_resolve_theme_falls_back_when_textual_ansi_is_missing(self) -> None:
+        app = _ThemeApp(["textual-dark", "nord", "textual-light"])
+
+        self.assertEqual(
+            _resolve_saip_transcode_theme(app, "textual-ansi"),
+            "textual-dark",
+        )
+
+    def test_resolve_theme_preserves_textual_ansi_when_registered(self) -> None:
+        app = _ThemeApp(["textual-dark", "textual-ansi", "nord"])
+
+        self.assertEqual(
+            _resolve_saip_transcode_theme(app, "textual-dark"),
+            "textual-ansi",
+        )
+
+    def test_cycle_theme_skips_unregistered_textual_ansi(self) -> None:
+        app = _ThemeApp(["textual-dark", "nord", "textual-light"], theme="catppuccin-latte")
+
+        self.assertEqual(
+            _next_available_saip_transcode_theme(app, "catppuccin-latte", THEME_CYCLE),
+            "textual-dark",
+        )
 
 
 if __name__ == "__main__":

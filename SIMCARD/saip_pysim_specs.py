@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """pySim profile-template registry adapter.
 
@@ -230,7 +233,7 @@ def apply_pysim_augmentations(specs: dict[str, dict[str, Any]]) -> dict[str, dic
 
     Aliases (pe_names that pySim knows about but our table does not)
     are NOT injected here; that disambiguation requires parent-context
-    awareness which is handled in Phase B/D.
+    awareness which is handled by the FCP-decoder and GFM-walker layers.
     """
     registry = pysim_file_template_registry()
     if not registry:
@@ -414,6 +417,8 @@ def decode_fcp_attributes(fcp: Any) -> FcpAttributes:
     except (TypeError, ValueError):
         file_size_int = None
     raw_lcsi = getattr(instance, "lcsi", None)
+    if raw_lcsi is None:
+        raw_lcsi = descriptor.get("lcsi")
     # asn1tools decodes ``lcsi`` as an OCTET STRING (single byte); pySim
     # stores the raw bytes verbatim. Normalise to the integer life-cycle
     # status indicator so consumers do not have to repeat the conversion.
@@ -653,7 +658,7 @@ def _gfm_collect_link_path(file_elements: Any) -> tuple[str, ...]:
     """Pull the PRIVATE 7 ``linkPath`` extension from a GFM tuple list.
 
     pySim's ``File.from_fileDescriptor`` does not yet recognise the
-    SAIP §8.3.5 ``linkPath`` extension; we mirror Phase B's logic
+    SAIP §8.3.5 ``linkPath`` extension; we mirror the FCP-decoder's logic
     against the same descriptor blob so GFM-routed EFs still surface
     their explicit link target.
     """
@@ -702,6 +707,16 @@ def _gfm_entry_from_file(
         else b""
     )
     raw_lcsi = getattr(instance, "lcsi", None)
+    if raw_lcsi is None:
+        for element_name, element_value in file_elements:
+            if str(element_name) == "lcsi":
+                raw_lcsi = element_value
+                break
+            if str(element_name) == "fileDescriptor":
+                descriptor = _coerce_descriptor_dict(element_value)
+                if "lcsi" in descriptor:
+                    raw_lcsi = descriptor.get("lcsi")
+                    break
     if isinstance(raw_lcsi, (bytes, bytearray, memoryview)) and len(raw_lcsi) >= 1:
         lcsi_int: int | None = int(bytes(raw_lcsi)[0])
     elif isinstance(raw_lcsi, int):
@@ -824,6 +839,90 @@ def pysim_gfm_walk(decoded: dict[str, Any]) -> tuple[GfmEntry, ...]:
     return tuple(entries)
 
 
+# ---------------------------------------------------------------------------
+# GFM block splitter (GUI helper)
+#
+# Mirrors ``pysim_gfm_walk``'s iteration pattern but returns raw
+# operation blocks instead of fully-decoded ``GfmEntry`` objects.
+# Each block groups one ``createFCP`` with the ``filePath`` (SELECT)
+# that preceded it and any ``fillFileOffset`` / ``fillFileContent``
+# ops that follow it. The frontend's GFM card maps over these blocks
+# to produce one row per file in the left-pane list.
+# ---------------------------------------------------------------------------
+
+
+def pysim_gfm_split_blocks(decoded: dict[str, Any]) -> list[list[tuple]]:
+    """Split ``fileManagementCMD`` sequences into per-file operation blocks.
+
+    Returns a flat list of blocks. Each block is a list of ``(tag, value)``
+    tuples representing one file: an optional leading ``filePath``,
+    the ``createFCP``, and trailing ``fillFileOffset`` /
+    ``fillFileContent`` ops. The frontend's ``saipGfmBuildCommandView``
+    processes each block independently.
+    """
+    if isinstance(decoded, dict) is False:
+        return []
+    cmd_list = decoded.get("fileManagementCMD")
+    if isinstance(cmd_list, list) is False:
+        return []
+
+    blocks: list[list[tuple]] = []
+
+    for sequence in cmd_list:
+        if isinstance(sequence, list) is False:
+            continue
+        pending_path: tuple | None = None
+        current: list[tuple] | None = None
+
+        for command in sequence:
+            if isinstance(command, (tuple, list)) is False:
+                continue
+            # Flatten tagged-tuple wrappers (``{"@": [name, payload]}``)
+            # that may arrive from the JSON codec.
+            if isinstance(command, list) and len(command) >= 2:
+                tag = str(command[0] or "")
+                value = command[1]
+            elif isinstance(command, tuple) and len(command) >= 2:
+                tag = str(command[0] or "")
+                value = command[1]
+            else:
+                continue
+
+            if tag == "filePath":
+                if current is not None:
+                    blocks.append(current)
+                    current = None
+                pending_path = (tag, value)
+                continue
+
+            if tag == "createFCP":
+                if current is not None:
+                    blocks.append(current)
+                    current = None
+                current = ([pending_path, (tag, value)]
+                           if pending_path is not None
+                           else [(tag, value)])
+                pending_path = None
+                continue
+
+            if tag in ("fillFileOffset", "fillFileContent", "fillFileContents"):
+                if current is not None:
+                    current.append((tag, value))
+                elif pending_path is not None:
+                    current = [pending_path, (tag, value)]
+                    pending_path = None
+                continue
+
+            if current is not None:
+                current.append((tag, value))
+
+        if current is not None:
+            blocks.append(current)
+            current = None
+
+    return blocks
+
+
 def pysim_normalize_aka_decoded(decoded: dict[str, Any]) -> dict[str, Any]:
     """Apply pySim's ``ProfileElementAKA._fixup_sqnInit_dec`` normalisation.
 
@@ -886,7 +985,7 @@ def pysim_alias_specs_for(
 
 
 # ---------------------------------------------------------------------------
-# Phase E: service-bit-table maps lifted from pySim
+# Service-bit-table maps lifted from pySim
 # ---------------------------------------------------------------------------
 #
 # pySim ships authoritative bit -> service-name dictionaries inside its

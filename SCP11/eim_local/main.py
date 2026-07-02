@@ -1,5 +1,8 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
-"""eIM-local shell: operator REPL for the local eIM simulator exposing IPA-poll, package delivery, and audit commands."""
+
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+"""eIM-local shell: operator REPL for the local eIM simulator exposing package delivery and audit commands."""
 import argparse
 import atexit
 import os
@@ -15,7 +18,6 @@ from yggdrasim_common.process_debug import (
     is_global_debug_enabled,
     set_global_debug,
 )
-from yggdrasim_common.card_backend import trigger_card_relay_modem_refresh
 from yggdrasim_common.hil_bridge_runtime import hil_bridge_warning_text
 from yggdrasim_common.quit_control import quit_all, QuitAllRequested
 from yggdrasim_common.session_recording import ShellSessionRecorder
@@ -45,12 +47,6 @@ except Exception:
 from .config import EimLocalConfig
 from .eim_package_codec import resolve_package_runtime_hints
 from .session import EimLocalSession
-from yggdrasim_common.polling_plugin_support import (
-    dispatch_poll_command,
-    dispatch_poll_method,
-    has_polling_plugin,
-    parse_eim_local_ipae_args,
-)
 from SCP11.shared.gsma_error_codes import (
     SGP22_DOWNLOAD_ERROR_CODE,
     SGP22_ES10B_PROFILE_STATE_RESULT,
@@ -108,7 +104,6 @@ class EimLocalShell:
             "ENABLE-PROFILE": self._cmd_enable_profile,
             "DISABLE-PROFILE": self._cmd_disable_profile,
             "DELETE-PROFILE": self._cmd_delete_profile,
-            "REFRESH-MODEM": self._cmd_refresh_modem,
             "PROFILE": self._cmd_profile,
             "PROFILE-CLEAR": self._cmd_profile_clear,
             "METADATA": self._cmd_metadata,
@@ -124,8 +119,6 @@ class EimLocalShell:
             "IPAD-DISCOVER": self._cmd_ipad_discover,
             "IPAD-LIVE": self._cmd_ipad_live,
             "IPAD-TEST": self._cmd_ipad_test,
-            "IPAE-AUTHENTICATE": self._cmd_ipae_authenticate,
-            "IPAE-DOWNLOAD": self._cmd_ipae_download,
             "HANDOVER-SET": self._cmd_handover_set,
             "HANDOVER-STATUS": self._cmd_handover_status,
             "EIM-PACKAGE": self._cmd_eim_package,
@@ -138,11 +131,12 @@ class EimLocalShell:
             "HOTFOLDER": self._cmd_hotfolder,
             "HOTFOLDER-CLEAR": self._cmd_hotfolder_clear,
             "HOTFOLDER-LIST": self._cmd_hotfolder_list,
-            "HOTFOLDER-POLL": self._cmd_hotfolder_poll,
+            "HOTFOLDER-METADATA": self._cmd_hotfolder_metadata,
             "HOTFOLDER-FETCH": self._cmd_hotfolder_fetch,
-            "POLL-CAMPAIGN": self._cmd_poll_campaign,
-            "POLL-EXPORT": self._cmd_poll_export,
-            "POLL-AGGREGATE": self._cmd_poll_aggregate,
+            "HOTFOLDER-CAMPAIGN": self._cmd_hotfolder_campaign,
+            "POLL-CAMPAIGN": self._cmd_hotfolder_campaign,
+            "HOTFOLDER-EXPORT": self._cmd_hotfolder_export,
+            "HOTFOLDER-AGGREGATE": self._cmd_hotfolder_aggregate,
             "ADD-INITIAL-EIM": self._cmd_add_initial_eim,
             "ADD-EIM": self._cmd_add_eim,
             "ISDR-ADD-INITIAL-EIM": self._cmd_isdr_add_initial_eim,
@@ -169,7 +163,6 @@ class EimLocalShell:
             "ENABLE": "ENABLE-PROFILE",
             "DISABLE": "DISABLE-PROFILE",
             "DELETE": "DELETE-PROFILE",
-            "MODEM-REFRESH": "REFRESH-MODEM",
             "GET-METADATA": "METADATA",
             "EIM-ACK": "EIM-ACKNOWLEDGE",
             "ISDR-PACKAGE": "LOAD-EIM-PACKAGE",
@@ -188,7 +181,7 @@ class EimLocalShell:
             },
             "PATHS": {
                 "usage": "PATHS",
-                "summary": "Show Direct Auth, IPAd polling, IPAe polling, and localized bridge endpoints.",
+                "summary": "Show Direct Auth, IPAd, and localized bridge endpoints.",
                 "examples": ["PATHS"],
             },
             "RECORD": {
@@ -216,11 +209,6 @@ class EimLocalShell:
             "ENABLE-PROFILE": {"usage": "ENABLE-PROFILE <iccid|aid|alias>", "summary": "Enable profile by ICCID, AID, or alias.", "examples": ["ENABLE-PROFILE ISDP1", "ENABLE-PROFILE 8904903200000000000F"]},
             "DISABLE-PROFILE": {"usage": "DISABLE-PROFILE <iccid|aid|alias>", "summary": "Disable profile by ICCID, AID, or alias.", "examples": ["DISABLE-PROFILE ISDP1"]},
             "DELETE-PROFILE": {"usage": "DELETE-PROFILE <iccid|aid|alias>", "summary": "Delete profile by ICCID, AID, or alias.", "examples": ["DELETE-PROFILE ISDP1"]},
-            "REFRESH-MODEM": {
-                "usage": "REFRESH-MODEM [mode]",
-                "summary": "Queue a proactive REFRESH toward the attached modem via the active HIL bridge.",
-                "examples": ["REFRESH-MODEM", "REFRESH-MODEM euicc-profile-state-change", "REFRESH-MODEM uicc-reset"],
-            },
             "PROFILE": {"usage": "PROFILE [profilePath]", "summary": "Show active profile target or set override path.", "examples": ["PROFILE", "PROFILE test_profile.txt"]},
             "PROFILE-CLEAR": {"usage": "PROFILE-CLEAR", "summary": "Clear profile override path.", "examples": ["PROFILE-CLEAR"]},
             "METADATA": {"usage": "METADATA [metadataPath]", "summary": "Show active metadata target or set override path.", "examples": ["METADATA", "METADATA default_profile_metadata.json"]},
@@ -243,16 +231,14 @@ class EimLocalShell:
             "IPAD-DISCOVER": {"usage": "IPAD-DISCOVER [packagePath]", "summary": "Run IPAd discovery and optional package selection.", "examples": ["IPAD-DISCOVER"]},
             "IPAD-LIVE": {
                 "usage": "IPAD-LIVE [matchingId] [--debug]",
-                "summary": "Run localized IPAd polling through the SCP11 live orchestrator and local bridge.",
+                "summary": "Run localized IPAd relay through the SCP11 live orchestrator and local bridge.",
                 "examples": ["IPAD-LIVE", "IPAD-LIVE EIM-FIRST-TEST", "IPAD-LIVE --debug"],
             },
             "IPAD-TEST": {
                 "usage": "IPAD-TEST [matchingId] [--debug]",
-                "summary": "Run localized IPAd polling through the SCP11 test orchestrator and local bridge.",
+                "summary": "Run localized IPAd relay through the SCP11 test orchestrator and local bridge.",
                 "examples": ["IPAD-TEST", "IPAD-TEST EIM-FIRST-TEST", "IPAD-TEST --debug"],
             },
-            "IPAE-AUTHENTICATE": {"usage": "IPAE-AUTHENTICATE [matchingId]", "summary": "Seed handover context with transactionId.", "examples": ["IPAE-AUTHENTICATE", "IPAE-AUTHENTICATE EIM-TEST-001"]},
-            "IPAE-DOWNLOAD": {"usage": "IPAE-DOWNLOAD [profilePath] [matchingId]", "summary": "Run handover-linked download/load profile sequence.", "examples": ["IPAE-DOWNLOAD", "IPAE-DOWNLOAD test_profile.txt EIM-TEST-001"]},
             "HANDOVER-SET": {"usage": "HANDOVER-SET <transactionIdHex> [matchingId]", "summary": "Manually seed handover context.", "examples": ["HANDOVER-SET 01020304AABBCCDD MID-1"]},
             "HANDOVER-STATUS": {"usage": "HANDOVER-STATUS [--json|--yaml]", "summary": "Print the current handover context.", "examples": ["HANDOVER-STATUS", "HANDOVER-STATUS --yaml"]},
             "EIM-PACKAGE": {"usage": "EIM-PACKAGE [packagePath]", "summary": "Show active package or set package override.", "examples": ["EIM-PACKAGE", "EIM-PACKAGE default_eim_package.json"]},
@@ -264,17 +250,15 @@ class EimLocalShell:
             "EIM-CERTS": {"usage": "EIM-CERTS [--json|--yaml] [packagePath] [certPath]", "summary": "List signing cert inventory and preview the auto-selected match for the card.", "examples": ["EIM-CERTS", "EIM-CERTS --json", "EIM-CERTS --yaml", "EIM-CERTS Workspace/LocalEIM/eim_packages/templates/template_add_initial_eim.json"]},
             "HOTFOLDER": {"usage": "HOTFOLDER [directory]", "summary": "Show active hotfolder or set hotfolder override.", "examples": ["HOTFOLDER", "HOTFOLDER Workspace/LocalEIM/eim_packages/hotfolder"]},
             "HOTFOLDER-CLEAR": {"usage": "HOTFOLDER-CLEAR", "summary": "Clear hotfolder override path.", "examples": ["HOTFOLDER-CLEAR"]},
-            "HOTFOLDER-LIST": {"usage": "HOTFOLDER-LIST [directory] [--json|--yaml]", "summary": "Preview the effective poll queue (fixed fixtures + hotfolder) without issuing.", "examples": ["HOTFOLDER-LIST", "HOTFOLDER-LIST --json", "HOTFOLDER-LIST --yaml", "HOTFOLDER-LIST Workspace/LocalEIM/eim_packages/hotfolder --json"]},
-            "HOTFOLDER-POLL": {"usage": "HOTFOLDER-POLL [directory] [--json|--yaml]", "summary": "Return effective poll metadata for harnesses.", "examples": ["HOTFOLDER-POLL", "HOTFOLDER-POLL --yaml"]},
-            "HOTFOLDER-FETCH": {"usage": "HOTFOLDER-FETCH [directory] [--json|--yaml]", "summary": "Issue the effective poll queue in deterministic order.", "examples": ["HOTFOLDER-FETCH", "HOTFOLDER-FETCH --json", "HOTFOLDER-FETCH --yaml"]},
-            "POLL-CAMPAIGN": {"usage": "POLL-CAMPAIGN [cycles] [intervalMs] [hotfolderDir] [--until-empty] [--max-cycles <n>] [--json|--yaml]", "summary": "Run the effective poll queue campaign (fixed fixtures + hotfolder) and issue one package per cycle.", "examples": ["POLL-CAMPAIGN", "POLL-CAMPAIGN 10 1000", "POLL-CAMPAIGN --until-empty --max-cycles 50 --json", "POLL-CAMPAIGN --yaml"]},
-            "POLL-EXPORT": {"usage": "POLL-EXPORT [cycles] [intervalMs] [hotfolderDir] [--until-empty] [--max-cycles <n>] [outputPath]", "summary": "Run poll campaign and export JSON report file.", "examples": ["POLL-EXPORT", "POLL-EXPORT --until-empty --max-cycles 200", "POLL-EXPORT 20 250 reports/my_campaign.json"]},
-            "POLL-AGGREGATE": {"usage": "POLL-AGGREGATE [reportsDir] [--json|--yaml] [--export [outputPath]]", "summary": "Aggregate exported poll campaign reports.", "examples": ["POLL-AGGREGATE", "POLL-AGGREGATE reports --json", "POLL-AGGREGATE reports --yaml", "POLL-AGGREGATE reports --export reports/aggregate.json"]},
+            "HOTFOLDER-LIST": {"usage": "HOTFOLDER-LIST [directory] [--json|--yaml]", "summary": "Preview the effective package queue without issuing.", "examples": ["HOTFOLDER-LIST", "HOTFOLDER-LIST --json", "HOTFOLDER-LIST --yaml", "HOTFOLDER-LIST Workspace/LocalEIM/eim_packages/hotfolder --json"]},
+            "HOTFOLDER-FETCH": {"usage": "HOTFOLDER-FETCH [directory] [--json|--yaml]", "summary": "Issue the effective package queue in deterministic order.", "examples": ["HOTFOLDER-FETCH", "HOTFOLDER-FETCH --json", "HOTFOLDER-FETCH --yaml"]},
+            "POLL-CAMPAIGN": {"usage": "POLL-CAMPAIGN [cycles] [intervalMs] [hotfolderDir] [--until-empty] [--max-cycles n] [--json|--yaml]", "summary": "Run a deterministic hotfolder queue campaign and print cycle results.", "examples": ["POLL-CAMPAIGN", "POLL-CAMPAIGN 5 0 --until-empty", "POLL-CAMPAIGN 10 1000 Workspace/LocalEIM/eim_packages/hotfolder"]},
+            "HOTFOLDER-CAMPAIGN": {"usage": "HOTFOLDER-CAMPAIGN [cycles] [intervalMs] [hotfolderDir] [--until-empty] [--max-cycles n] [--json|--yaml]", "summary": "Run a deterministic hotfolder queue campaign and print cycle results.", "examples": ["HOTFOLDER-CAMPAIGN", "HOTFOLDER-CAMPAIGN 5 0 --until-empty"]},
             "ADD-INITIAL-EIM": {"usage": "ADD-INITIAL-EIM [package|isdr] [certPath] [packagePath]", "summary": "Issue AddInitialEim using package or ISDR mode, with card-aware cert auto-selection when certPath is omitted.", "examples": ["ADD-INITIAL-EIM isdr", "ADD-INITIAL-EIM package Workspace/LocalEIM/eim_packages/templates/template_add_initial_eim.json"]},
             "ADD-EIM": {"usage": "ADD-EIM [package|isdr] [certPath] [packagePath]", "summary": "Issue AddEim using package or ISDR mode, with card-aware cert auto-selection when certPath is omitted.", "examples": ["ADD-EIM package", "ADD-EIM package Workspace/LocalEIM/eim_packages/templates/template_add_eim.json"]},
             "ISDR-ADD-INITIAL-EIM": {"usage": "ISDR-ADD-INITIAL-EIM [certPath] [packagePath]", "summary": "Validate AddInitialEim directly on-card, with package-through-local-auth when packagePath is supplied.", "examples": ["ISDR-ADD-INITIAL-EIM /path/to/local_eim_signing_cert.pem", "ISDR-ADD-INITIAL-EIM Workspace/LocalEIM/eim_packages/templates/template_add_initial_eim.json"]},
             "ISDR-ADD-EIM": {"usage": "ISDR-ADD-EIM [certPath] [packagePath]", "summary": "Validate AddEim directly on-card, with package-through-local-auth when packagePath is supplied.", "examples": ["ISDR-ADD-EIM /path/to/local_eim_signing_cert.pem", "ISDR-ADD-EIM Workspace/LocalEIM/eim_packages/fake_eim_add_eim_package.json"]},
-            "LOAD-EIM-PACKAGE": {"usage": "LOAD-EIM-PACKAGE [packagePath] [certPath]", "summary": "Execute a card-facing package directly toward ISD-R, bypassing poll/hotfolder routing.", "examples": ["LOAD-EIM-PACKAGE Workspace/LocalEIM/eim_packages/fake_eim_add_eim_package.json", "LOAD-EIM-PACKAGE Workspace/LocalEIM/eim_packages/templates/template_add_initial_eim.json /path/to/local_eim_signing_cert.pem"]},
+            "LOAD-EIM-PACKAGE": {"usage": "LOAD-EIM-PACKAGE [packagePath] [certPath]", "summary": "Execute a card-facing package directly toward ISD-R, bypassing hotfolder routing.", "examples": ["LOAD-EIM-PACKAGE Workspace/LocalEIM/eim_packages/fake_eim_add_eim_package.json", "LOAD-EIM-PACKAGE Workspace/LocalEIM/eim_packages/templates/template_add_initial_eim.json /path/to/local_eim_signing_cert.pem"]},
             "EIM-ACKNOWLEDGE": {"usage": "EIM-ACKNOWLEDGE [transactionIdHex] [matchingId]", "summary": "Close pending eIM operations and sync notifications.", "examples": ["EIM-ACKNOWLEDGE", "EIM-ACKNOWLEDGE 01020304AABBCCDD MID-1"]},
             "ERROR-CODES": {"usage": "ERROR-CODES [SGP.02|SGP.22|SGP.32|ALL]", "summary": "List known GSMA error code tables.", "examples": ["ERROR-CODES", "ERROR-CODES SGP.32"]},
             "ERROR-CODE-SET": {"usage": "ERROR-CODE-SET <family> <code|name> [packagePath]", "summary": "Apply resolved symbolic/numeric error code into package JSON.", "examples": ["ERROR-CODE-SET sgp32_profile_download_error_reason ecallActive", "ERROR-CODE-SET sgp32_eim_package_result_error 1 Workspace/LocalEIM/eim_packages/templates/template_provide_eim_package_result.json"]},
@@ -663,7 +647,7 @@ class EimLocalShell:
         print(f"  Metadata target     : {self._format_target_value(active_metadata)}")
         print(f"  eIM package target  : {self._format_target_value(active_package)}")
         print(f"  Hotfolder target    : {self._format_target_value(active_hotfolder)}")
-        print(f"  Poll queue next file: {self._format_target_value(next_hotfolder_package)}")
+        print(f"  Package queue next file: {self._format_target_value(next_hotfolder_package)}")
         print(f"  eIM cert target     : {self._format_target_value(active_cert)}")
         print(f"  eIM identity file   : {self._format_target_value(identity.get('identity_file', '-'))}")
         print(f"  eIM ID              : {self._format_target_value(identity.get('eim_id', '-'))}")
@@ -672,7 +656,7 @@ class EimLocalShell:
         print(f"  eIM TLS cert        : {self._format_target_value(identity.get('trusted_tls_cert_path', '-'))}")
         print(f"  eIM TLS key         : {self._format_target_value(identity.get('tls_private_key_path', '-'))}")
         print("")
-        print(f"{ShellStyle.CYAN}--- Poll Session Queue Preview ---{ShellStyle.END}")
+        print(f"{ShellStyle.CYAN}--- Package Queue Preview ---{ShellStyle.END}")
         if isinstance(active_hotfolder, str) and active_hotfolder.lower().startswith("error:"):
             print(f"  {self._format_target_value(active_hotfolder)}")
         elif len(hotfolder_preview_rows) == 0:
@@ -699,24 +683,6 @@ class EimLocalShell:
             return text
         return f"{text[:max_chars]}..."
 
-    def _queue_modem_refresh(self, action_label: str, mode: str = "") -> None:
-        try:
-            payload = trigger_card_relay_modem_refresh(
-                mode=mode,
-                source=f"scp11-eim-local:{action_label}",
-            )
-        except Exception as error:
-            print(f"[*] {action_label}: modem REFRESH queue failed ({error}).")
-            return
-        if payload is None:
-            return
-        status = str(payload.get("status", "queued") or "queued")
-        mode_name = str(payload.get("mode", "") or "")
-        print(
-            f"[*] {action_label}: modem REFRESH {status} "
-            f"({mode_name or 'euicc-profile-state-change'})."
-        )
-
     def _format_target_value(self, value: Any) -> str:
         text = str(value or "").strip()
         if len(text) == 0:
@@ -738,12 +704,11 @@ class EimLocalShell:
         if len(private_key_path) > 0:
             print(f"    cert_key  : {private_key_path}")
 
-    # Bridge / orchestrator lifecycle is installed by the polling plugin
-    # via ``PollingCapability.extend_target`` (see
-    # ``plugins/polling/shell_lifecycle.py``). When the plugin is absent
-    # every IPAD / IPAE / PATHS-bridge-section code path that tries to
-    # reach a bridge must fail loudly, so we keep tiny stubs here that
-    # either raise or return neutral placeholders.
+    # Bridge / orchestrator lifecycle is installed by a trusted local
+    # extension. When no extension attaches, every IPAD /
+    # PATHS-bridge-section code path that tries to reach a bridge must
+    # fail loudly, so we keep tiny stubs here that either raise or return
+    # neutral placeholders.
 
     def _stop_poll_bridge(self) -> None:
         return
@@ -758,15 +723,15 @@ class EimLocalShell:
         close_session()
 
     def _bridge_status_payload(self) -> dict[str, Any]:
-        # Fallback stub — the polling plugin overrides this with the
-        # real bridge status through ``extend_target``. Absent plugin ⇒
+        # Fallback stub — a local extension overrides this with the real
+        # bridge status through ``extend_target``. Absent extension means
         # STATUS / PATHS print ``-`` / ``no``.
         return {}
 
     def _ensure_poll_bridge(self, reset_runtime: bool = True) -> Any:
         raise RuntimeError(
-            "Localized polling bridge is provided by the polling plugin and "
-            "is not available in this build."
+            "Localized relay bridge is provided by a trusted local command "
+            "extension and is not available in this build."
         )
 
     def _close_network_runtime(self, orchestrator: Any) -> None:
@@ -785,7 +750,7 @@ class EimLocalShell:
     def _load_network_orchestrator(self, profile_name: str) -> Any:
         raise RuntimeError(
             "Networked orchestrator with localized bridge is provided by the "
-            "polling plugin and is not available in this build."
+            "trusted local command extension and is not available in this build."
         )
 
     def _cmd_paths(self, _: str = "") -> None:
@@ -805,8 +770,8 @@ class EimLocalShell:
         print("\n--- Localized Path Families ---")
         print("1. Direct Auth")
         print("   flow      : Local SCP11 authenticate -> card command -> close session")
-        print("   purpose   : Direct ISD-R validation without eIM / SM-DP+ polling")
-        print("2. IPAd Polling")
+        print("   purpose   : Direct ISD-R validation without eIM / SM-DP+ transport")
+        print("2. Localized IPAd Relay")
         print("   live cmd  : IPAD-LIVE [matchingId] [--debug]")
         print("   test cmd  : IPAD-TEST [matchingId] [--debug]")
         print("   route     : SIM <-> IPAd <-> eIM/SM-DP+")
@@ -1030,7 +995,6 @@ class EimLocalShell:
             self._help_row("ENABLE-PROFILE <id>", "ENABLE-PROFILE"),
             self._help_row("DISABLE-PROFILE <id>", "DISABLE-PROFILE"),
             self._help_row("DELETE-PROFILE <id>", "DELETE-PROFILE"),
-            self._help_row("REFRESH-MODEM [mode]", "REFRESH-MODEM"),
             self._help_row("STORE-METADATA [path]", "STORE-METADATA"),
             self._help_row("UPDATE-METADATA [path]", "UPDATE-METADATA"),
         ]
@@ -1046,8 +1010,6 @@ class EimLocalShell:
             self._help_row("IPAD-DISCOVER [package]", "IPAD-DISCOVER"),
             self._help_row("IPAD-LIVE [matchingId] [--debug]", "IPAD-LIVE"),
             self._help_row("IPAD-TEST [matchingId] [--debug]", "IPAD-TEST"),
-            self._help_row("IPAE-AUTHENTICATE [matchingId]", "IPAE-AUTHENTICATE"),
-            self._help_row("IPAE-DOWNLOAD [profile] [matchingId]", "IPAE-DOWNLOAD"),
         ]
         localized_rows.extend(list(self._plugin_localized_help_rows))
         localized_rows.extend(
@@ -1080,11 +1042,8 @@ class EimLocalShell:
             self._help_row("HOTFOLDER [dir]", "HOTFOLDER"),
             self._help_row("HOTFOLDER-CLEAR", "HOTFOLDER-CLEAR"),
             self._help_row("HOTFOLDER-LIST [dir] [--json|--yaml]", "HOTFOLDER-LIST"),
-            self._help_row("HOTFOLDER-POLL [dir] [--yaml]", "HOTFOLDER-POLL"),
             self._help_row("HOTFOLDER-FETCH [dir] [--json|--yaml]", "HOTFOLDER-FETCH"),
-            self._help_row("POLL-CAMPAIGN [cycles] [intervalMs] [...] [--yaml]", "POLL-CAMPAIGN"),
-            self._help_row("POLL-EXPORT [cycles] [intervalMs] [...] [out]", "POLL-EXPORT"),
-            self._help_row("POLL-AGGREGATE [dir] [--json|--yaml] [--export ...]", "POLL-AGGREGATE"),
+            self._help_row("POLL-CAMPAIGN [cycles] [intervalMs] [...]", "POLL-CAMPAIGN"),
         ]
         diagnostic_rows = [
             self._help_row("STATUS", "STATUS"),
@@ -1159,7 +1118,6 @@ class EimLocalShell:
         print(f"eUICC CI PKId      : {identity.get('euicc_ci_pk_id', '-')}")
         print(f"Legacy state file   : {runtime_state.get('state_file', '-')}")
         print(f"Response log file   : {runtime_state.get('response_log_file', '-')}")
-        print(f"Poll audit DB file  : {runtime_state.get('poll_audit_db_file', '-')}")
         counter_map = runtime_state.get("counter_by_eim_id", {})
         if isinstance(counter_map, dict):
             print(f"Tracked counters    : {len(counter_map)}")
@@ -1281,7 +1239,6 @@ class EimLocalShell:
                 lambda: self.session.delete_profile(target),
             ),
             policy_allow_auto_disable=None,
-            modem_refresh=self._queue_modem_refresh,
             describe_profile=self._describe_profile_metadata,
             profile_identifier=self._profile_metadata_identifier,
         )
@@ -1329,9 +1286,6 @@ class EimLocalShell:
             self._safe_collect_profile_metadata(),
             identifier,
         )
-
-    def _cmd_refresh_modem(self, argument: str = "") -> None:
-        self._queue_modem_refresh("RefreshModem", mode=argument.strip())
 
     def _cmd_profile(self, argument: str = "") -> None:
         path_text = argument.strip()
@@ -1418,56 +1372,24 @@ class EimLocalShell:
             print(f"    | Bytes: {len(response)}")
             print(f"    | HEX  : {self._hex_preview(response, 120)}")
 
-    def _cmd_ipae_authenticate(self, argument: str = "") -> None:
-        handover = self.session.ipae_authenticate(matching_id=argument.strip())
-        print("[+] IPAe authentication seeded.")
-        print(f"    transactionId: {handover.transaction_id.hex().upper()}")
-        print(f"    matchingId   : {handover.matching_id or '-'}")
-
-    def _cmd_ipae_download(self, argument: str = "") -> None:
-        parts = argument.split()
-        profile_path = ""
-        matching_id = ""
-        if len(parts) >= 1:
-            profile_path = parts[0]
-        if len(parts) >= 2:
-            matching_id = parts[1]
-        response = self.session.ipae_download(profile_path=profile_path, matching_id=matching_id)
-        print("[+] IPAe download flow completed with handover transaction.")
-        print(f"    bytes: {len(response)}")
-        print(f"    head : {self._hex_preview(response)}")
-
-    # IPAD-LIVE / IPAD-TEST are installed by the polling plugin. When
-    # the plugin is absent the command table still has neutral fallback
-    # stubs that surface a clear error, keeping the shell runnable
-    # without exposing bridge internals.
+    # IPAD-LIVE / IPAD-TEST are installed by a trusted local extension.
+    # When the extension is absent the command table still has neutral
+    # fallback stubs that surface a clear error, keeping the shell
+    # runnable without exposing bridge internals.
 
     def _cmd_ipad_live(self, argument: str = "") -> None:
         raise RuntimeError(
-            "IPAD-LIVE requires the polling plugin (plugins/polling/). "
-            "Install it or use IPAE-AUTHENTICATE + IPAE-DOWNLOAD instead."
+            "IPAD-LIVE requires a trusted local command extension. Enable "
+            "local plugins with YGGDRASIM_ALLOW_PLUGINS=1."
         )
 
     def _cmd_ipad_test(self, argument: str = "") -> None:
         raise RuntimeError(
-            "IPAD-TEST requires the polling plugin (plugins/polling/). "
-            "Install it or use IPAE-AUTHENTICATE + IPAE-DOWNLOAD instead."
+            "IPAD-TEST requires a trusted local command extension. Enable "
+            "local plugins with YGGDRASIM_ALLOW_PLUGINS=1."
         )
 
-    @staticmethod
-    def _parse_localized_ipae_args(argument: str = "") -> tuple[int, int, bool]:
-        return parse_eim_local_ipae_args(argument)
-
-    def _run_localized_ipae(self, profile_name: str, argument: str = "") -> None:
-        dispatch_poll_method(self, "_run_localized_ipae", profile_name, argument)
-
-    def _cmd_ipae_live(self, argument: str = "") -> None:
-        dispatch_poll_command("scp11.eim_local", "IPAE-LIVE", self, argument)
-
-    def _cmd_ipae_test(self, argument: str = "") -> None:
-        dispatch_poll_command("scp11.eim_local", "IPAE-TEST", self, argument)
-
-    def _cmd_poll_campaign(self, argument: str = "") -> None:
+    def _cmd_hotfolder_campaign(self, argument: str = "") -> None:
         parts, output_mode = self._parse_output_mode_argument(argument)
         until_empty = False
         max_cycles = None
@@ -1481,7 +1403,7 @@ class EimLocalShell:
                 continue
             if part.strip().lower() == "--max-cycles":
                 if index + 1 >= len(parts):
-                    raise ValueError("POLL-CAMPAIGN --max-cycles requires an integer value.")
+                    raise ValueError("Hotfolder campaign --max-cycles requires an integer value.")
                 max_cycles = int(parts[index + 1], 10)
                 index += 2
                 continue
@@ -1496,7 +1418,7 @@ class EimLocalShell:
             interval_ms = int(filtered[1], 10)
         if len(filtered) > 2:
             hotfolder_dir = " ".join(filtered[2:]).strip()
-        report = self.session.poll_hotfolder_campaign(
+        report = self.session.run_hotfolder_campaign(
             cycles=cycles,
             interval_ms=interval_ms,
             hotfolder_dir=hotfolder_dir,
@@ -1510,19 +1432,19 @@ class EimLocalShell:
         if isinstance(rows, list) is False:
             rows = []
         summary = report.get("summary", {})
-        print(f"[+] POLL-CAMPAIGN completed: {len(rows)} cycle(s).")
+        print(f"[+] Hotfolder campaign completed: {len(rows)} cycle(s).")
         print(
             f"[*] Summary: issued={summary.get('issued_cycles', 0)} "
             f"no_package={summary.get('no_package_cycles', 0)} "
             f"errors={summary.get('error_cycles', 0)} "
             f"stop={summary.get('stop_reason', '-')}"
         )
-        self._print_poll_campaign_rows(rows)
+        self._print_hotfolder_campaign_rows(rows)
 
     # Short codes for well-known SGP.32 eIM package types. Anything not
     # in this map falls through verbatim so we never silently alias an
     # unexpected category.
-    _POLL_CAMPAIGN_TYPE_CODES = {
+    _HOTFOLDER_CAMPAIGN_TYPE_CODES = {
         "profile_download_trigger_request": "trigger_req",
         "provide_eim_package_result": "eim_result",
         "eim_acknowledgements": "ack",
@@ -1536,13 +1458,16 @@ class EimLocalShell:
         "set_nickname": "nickname",
     }
 
-    def _compact_poll_campaign_type(self, kind: str) -> str:
+    def _compact_hotfolder_campaign_type(self, kind: str) -> str:
         normalized = str(kind or "").strip()
         if len(normalized) == 0:
             return "-"
-        return self._POLL_CAMPAIGN_TYPE_CODES.get(normalized, normalized)
+        return self._HOTFOLDER_CAMPAIGN_TYPE_CODES.get(normalized, normalized)
 
-    def _poll_campaign_common_base(self, rows: list[dict[str, Any]]) -> str:
+    def _compact_poll_campaign_type(self, kind: str) -> str:
+        return self._compact_hotfolder_campaign_type(kind)
+
+    def _hotfolder_campaign_common_base(self, rows: list[dict[str, Any]]) -> str:
         paths: list[str] = []
         for row in rows:
             if isinstance(row, dict) is False:
@@ -1560,10 +1485,13 @@ class EimLocalShell:
         except ValueError:
             return ""
 
-    def _print_poll_campaign_rows(self, rows: list[dict[str, Any]]) -> None:
+    def _poll_campaign_common_base(self, rows: list[dict[str, Any]]) -> str:
+        return self._hotfolder_campaign_common_base(rows)
+
+    def _print_hotfolder_campaign_rows(self, rows: list[dict[str, Any]]) -> None:
         if len(rows) == 0:
             return
-        base_path = self._poll_campaign_common_base(rows)
+        base_path = self._hotfolder_campaign_common_base(rows)
         if len(base_path) > 0:
             print(f"[*] Base: {base_path}")
         cycle_width = max(2, len(str(len(rows))))
@@ -1573,7 +1501,7 @@ class EimLocalShell:
             issued = bool(row.get("issued", False))
             error_text = str(row.get("error", "")).strip()
             if issued:
-                kind_code = self._compact_poll_campaign_type(str(row.get("issued_type", "")))
+                kind_code = self._compact_hotfolder_campaign_type(str(row.get("issued_type", "")))
                 length = int(row.get("issued_result_len", 0))
                 file_path = str(row.get("issued_file", "") or "-")
                 if len(base_path) > 0 and file_path.startswith(base_path + os.sep):
@@ -1587,7 +1515,10 @@ class EimLocalShell:
             if len(error_text) > 0:
                 print(f"    {' ' * cycle_width}  [error] {error_text}")
 
-    def _cmd_poll_export(self, argument: str = "") -> None:
+    def _print_poll_campaign_rows(self, rows: list[dict[str, Any]]) -> None:
+        self._print_hotfolder_campaign_rows(rows)
+
+    def _cmd_hotfolder_export(self, argument: str = "") -> None:
         parts = argument.split()
         until_empty = False
         max_cycles = None
@@ -1601,7 +1532,7 @@ class EimLocalShell:
                 continue
             if part.strip().lower() == "--max-cycles":
                 if index + 1 >= len(parts):
-                    raise ValueError("POLL-EXPORT --max-cycles requires an integer value.")
+                    raise ValueError("Hotfolder export --max-cycles requires an integer value.")
                 max_cycles = int(parts[index + 1], 10)
                 index += 2
                 continue
@@ -1629,7 +1560,7 @@ class EimLocalShell:
                 hotfolder_dir = filtered[0]
                 if len(filtered) > 1:
                     output_path = " ".join(filtered[1:]).strip()
-        report = self.session.poll_hotfolder_campaign(
+        report = self.session.run_hotfolder_campaign(
             cycles=cycles,
             interval_ms=interval_ms,
             hotfolder_dir=hotfolder_dir,
@@ -1638,7 +1569,7 @@ class EimLocalShell:
         )
         saved_path = self.session.export_campaign_report(report, output_path=output_path)
         summary = report.get("summary", {})
-        print("[+] Poll campaign exported.")
+        print("[+] Hotfolder campaign exported.")
         print(f"    file : {saved_path}")
         print(
             f"    stats: cycles={report.get('executed_cycles', 0)} "
@@ -1647,7 +1578,7 @@ class EimLocalShell:
             f"stop={summary.get('stop_reason', '-')}"
         )
 
-    def _cmd_poll_aggregate(self, argument: str = "") -> None:
+    def _cmd_hotfolder_aggregate(self, argument: str = "") -> None:
         parts, output_mode = self._parse_output_mode_argument(argument)
         do_export = False
         export_path = ""
@@ -1678,7 +1609,7 @@ class EimLocalShell:
         if output_mode != "text":
             self._print_structured_payload(report, output_mode)
             return
-        print("[+] Poll campaign aggregate:")
+        print("[+] Hotfolder campaign aggregate:")
         print(f"    directory      : {report.get('reports_dir', '-')}")
         print(f"    campaign_count : {report.get('campaign_count', 0)}")
         print(f"    total_cycles   : {report.get('total_cycles', 0)}")
@@ -1853,9 +1784,9 @@ class EimLocalShell:
             self._print_structured_payload(payload, output_mode)
             return
         if len(rows) == 0:
-            print("[*] Effective poll queue is empty.")
+            print("[*] Effective package queue is empty.")
             return
-        print(f"[+] Effective poll queue preview ({len(rows)} file(s)):")
+        print(f"[+] Effective package queue preview ({len(rows)} file(s)):")
         for row in rows:
             order = int(row.get("order", 0))
             queue_order = int(row.get("queue_order", 0))
@@ -1879,14 +1810,14 @@ class EimLocalShell:
             if len(error_text) > 0:
                 print(f"        [error] {error_text}")
 
-    def _cmd_hotfolder_poll(self, argument: str = "") -> None:
+    def _cmd_hotfolder_metadata(self, argument: str = "") -> None:
         filtered_parts, output_mode = self._parse_output_mode_argument(argument)
         target_dir = " ".join(filtered_parts).strip()
-        payload = self.session.hotfolder_poll_metadata(hotfolder_dir=target_dir)
+        payload = self.session.hotfolder_queue_metadata(hotfolder_dir=target_dir)
         if output_mode != "text":
             self._print_structured_payload(payload, output_mode)
             return
-        print("[+] Hotfolder poll metadata")
+        print("[+] Hotfolder queue metadata")
         print(f"    hotfolder_dir   : {payload.get('hotfolder_dir', '-')}")
         print(f"    queue_count     : {payload.get('queue_count', 0)}")
         print(f"    eim_result_code : {payload.get('eim_result_code', '-')}")
@@ -1896,7 +1827,7 @@ class EimLocalShell:
     def _cmd_hotfolder_fetch(self, argument: str = "") -> None:
         filtered_parts, output_mode = self._parse_output_mode_argument(argument)
         target_dir = " ".join(filtered_parts).strip()
-        poll_meta = self.session.hotfolder_poll_response_meta(hotfolder_dir=target_dir)
+        poll_meta = self.session.hotfolder_queue_response_meta(hotfolder_dir=target_dir)
         eim_result_code = poll_meta.get("eim_result_code")
         if eim_result_code == self.cfg.EIM_NO_PACKAGE_RESULT_CODE:
             response_tlv_hex = str(poll_meta.get("response_tlv_hex", "")).strip().upper()
@@ -1919,7 +1850,7 @@ class EimLocalShell:
                 }
                 self._print_structured_payload(payload, output_mode)
                 return
-            print("[*] Effective poll queue is empty.")
+            print("[*] Effective package queue is empty.")
             print("[*] eIM response to card: noEimPackageAvailable(1) per SGP.32 GetEimPackageResponse.")
             if len(response_tlv_hex) > 0:
                 print(f"    TLV: {response_tlv_hex}")
@@ -1944,7 +1875,7 @@ class EimLocalShell:
             }
             self._print_structured_payload(payload, output_mode)
             return
-        print(f"[+] Effective poll queue fetched {len(results)} package file(s).")
+        print(f"[+] Effective package queue fetched {len(results)} package file(s).")
         print(
             f"[*] Summary: total={summary.get('total', 0)} "
             f"success={summary.get('success', 0)} "
@@ -2031,7 +1962,6 @@ class EimLocalShell:
             transport="isdr_store_data",
         )
         print(f"    package   : {package_path}")
-        self._queue_modem_refresh("eUICCMemoryReset")
         self._invalidate_poll_target_cache()
         self._print_post_eim_configuration_snapshot(
             title="ISDR post-reset GetEimConfigurationData",
@@ -2318,8 +2248,6 @@ class EimLocalShell:
         return {
             "IPAD-LIVE",
             "IPAD-TEST",
-            "IPAE-LIVE",
-            "IPAE-TEST",
         }
 
     @staticmethod

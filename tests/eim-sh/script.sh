@@ -1,4 +1,7 @@
 #!/usr/bin/env zsh
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 # EIM-DOWNLOAD test: runs main menu option 3 then EIM-DOWNLOAD.
 # Exit 0 = success, 1 = failure. Prints EIM_TEST_RESULT=SUCCESS or EIM_TEST_RESULT=FAIL for agent parsing.
 set -e
@@ -65,7 +68,7 @@ if echo "$OUTPUT" | grep -q "eIM poll flow completed"; then
     echo "$OUTPUT"
     exit 0
 fi
-if echo "$OUTPUT" | grep -q "eIM polling completed"; then
+if echo "$OUTPUT" | grep -q "eIM package exchange completed"; then
     echo "EIM_TEST_RESULT=SUCCESS"
     echo "$OUTPUT"
     exit 0

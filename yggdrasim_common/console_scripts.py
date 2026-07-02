@@ -1,4 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 """Console-script entry points: thin wrappers that delegate each named tool to its module's main function."""
 from __future__ import annotations
 
@@ -22,23 +24,52 @@ def _invoke(module_name: str, attribute_name: str) -> int:
     return 0
 
 
+def _invoke_launcher(default_mode: str | None = None) -> int:
+    module = importlib.import_module("main.main")
+    argv = list(sys.argv[1:])
+    if default_mode is not None and not any(
+        arg in ("--gui", "--web-server") for arg in argv
+    ):
+        argv.insert(0, default_mode)
+    try:
+        result: Any = module.run_cli(argv)
+    except QuitAllRequested:
+        return 0
+    if isinstance(result, int):
+        return int(result)
+    return 0
+
+
 def _guard_hil_bridge() -> int:
-    """Short-circuit HIL bridge entries when they are not available.
+    """Short-circuit local SIMtrace2 HIL entries when they are unavailable.
 
     Returns a non-zero exit code and writes a friendly message to stderr
-    when the current build flavor omits the HIL bridge, or when the host
-    platform does not support it. Returns ``0`` when the caller may
-    continue into the real entry point.
+    when the current build flavor omits the local SIMtrace2/RemSIM bridge,
+    or when the host platform does not support it. Card Bridge remains a
+    separate cross-platform entry point.
     """
     reason = hil_bridge_unavailable_reason()
     if len(reason) == 0:
         return 0
     sys.stderr.write(f"yggdrasim-hil: {reason}\n")
     sys.stderr.write(
-        "See guides/INSTALL_FULL.md and guides/SIMTRACE2_CARDEM_GUIDE.md "
-        "for the HIL-capable install path.\n"
+        "Use yggdrasim-card-bridge or main.py --card-bridge for cross-platform "
+        "remote APDU streaming. See guides/INSTALL_FULL.md and "
+        "guides/SIMTRACE2_CARDEM_GUIDE.md for direct SIMtrace2 HIL on Linux.\n"
     )
     return 2
+
+
+def launcher() -> int:
+    return _invoke_launcher()
+
+
+def gui() -> int:
+    return _invoke_launcher("--gui")
+
+
+def web_server() -> int:
+    return _invoke_launcher("--web-server")
 
 
 def scp03() -> int:
@@ -55,10 +86,6 @@ def scp11() -> int:
 
 def scp11_live() -> int:
     return _invoke("SCP11.live.main", "entry")
-
-
-def scp11_test() -> int:
-    return _invoke("SCP11.test.main", "entry")
 
 
 def scp11_relay() -> int:
@@ -87,6 +114,17 @@ def hil_bridge_supervisor() -> int:
     return _invoke("Tools.HilBridge.supervisor", "entry")
 
 
+def card_bridge() -> int:
+    """Reader-side APDU bridge CLI entry.
+
+    The Card Bridge is useful from clean and source installs as a
+    standalone PC/SC publisher. It intentionally does not use the HIL
+    flavor guard; missing ``pyscard`` / PCSC support is reported by
+    ``Tools.CardBridge.server`` when the reader is opened.
+    """
+    return _invoke("Tools.CardBridge.server", "main")
+
+
 def profile_package() -> int:
     return _invoke("Tools.ProfilePackage.main", "run_standalone")
 
@@ -105,3 +143,7 @@ def apdu_fuzzer() -> int:
 
 def eum_diag() -> int:
     return _invoke("Tools.EumDiag.main", "run_cli")
+
+
+def asn1_tlv_decode() -> int:
+    return _invoke("Tools.Asn1TlvDecode.main", "run_cli")

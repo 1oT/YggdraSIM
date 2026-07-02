@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 """Generate the CLI matrix page from pyproject.toml and the registry.
 
 Reads the ``[project.scripts]`` table from ``pyproject.toml`` and the
@@ -43,6 +46,7 @@ MODULE_TO_COMMAND_PREFIX = "yggdrasim_common.console_scripts:"
 # map to a registry CLI_MODULES entry. Keep these minimal; add new rows here
 # whenever a release introduces a new command.
 MANUAL_COMMAND_MODULE_OVERRIDES: dict[str, str] = {
+    "yggdrasim-card-bridge": "Tools.CardBridge",
     "yggdrasim-profile-package": "Tools.ProfilePackage",
     "yggdrasim-suci-tool": "Tools.SuciTool",
     "yggdrasim-hil-bridge": "Tools.HilBridge.main",
@@ -52,6 +56,7 @@ MANUAL_COMMAND_MODULE_OVERRIDES: dict[str, str] = {
 # Subsystems that are not in the registry get a local description table so
 # the rendered matrix stays useful without forcing registry changes.
 LOCAL_SUBSYSTEM_DESCRIPTIONS: dict[str, str] = {
+    "Tools.CardBridge": "Loopback PC/SC-to-HTTP APDU bridge for SSH-forwarded remote-card workflows.",
     "Tools.HilBridge.main": "SIMtrace2-backed HIL bridge (direct).",
     "Tools.HilBridge.supervisor": "HIL supervisor that manages the bridge and remsim-client lifecycle.",
 }

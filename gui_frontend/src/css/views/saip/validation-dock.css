@@ -1,0 +1,361 @@
+/*
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+ */
+
+/* ---- SA-G5: Collapsible validation dock --------------------------- */
+/*
+ * The validation surface mounts in the bottom console's Validation
+ * tab and renders as a single collapsible dock. Click the header
+ * button to expand / collapse the body. Severity summary chips
+ * remain visible in the collapsed state so the package status stays
+ * visible in the console panel.
+ */
+
+.saip-val-dock {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-alt, rgba(255, 255, 255, 0.03));
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.saip-validation--logdock .saip-val-dock {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.saip-val-dock-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 12px;
+  border: none;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  color: var(--fg);
+  width: 100%;
+  border-bottom: 1px solid var(--border);
+  font: inherit;
+  letter-spacing: inherit;
+}
+
+.saip-val-dock.is-collapsed .saip-val-dock-header {
+  border-bottom-color: transparent;
+}
+
+.saip-val-dock-header:hover {
+  background: var(--surface, rgba(255, 255, 255, 0.04));
+}
+
+.saip-val-dock-caret {
+  width: 14px;
+  text-align: center;
+  font-size: 10px;
+  color: var(--fg-muted, #888);
+  flex-shrink: 0;
+}
+
+.saip-val-dock-title {
+  font-weight: 600;
+  font-size: 13px;
+  flex-shrink: 0;
+}
+
+.saip-val-dock-spacer {
+  flex-grow: 1;
+}
+
+.saip-val-score.is-err {
+  color: #ff6680;
+}
+
+.saip-val-dock-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 10px 12px 12px 12px;
+  max-height: 48vh;
+  overflow-y: auto;
+}
+
+.saip-validation--logdock .saip-val-dock-body {
+  flex: 1 1 auto;
+  max-height: none;
+  min-height: 0;
+}
+
+.saip-val-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.saip-val-filters-label {
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--fg-muted, #888);
+  margin-right: 4px;
+}
+
+.saip-val-filter {
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  padding: 3px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--surface, rgba(255, 255, 255, 0.03));
+  color: var(--fg-muted, #888);
+  cursor: pointer;
+  transition: opacity 0.12s ease, background-color 0.12s ease;
+  opacity: 0.4;
+}
+
+.saip-val-filter.is-on {
+  opacity: 1;
+}
+
+.saip-val-filter--fail.is-on {
+  background: rgba(255, 102, 128, 0.16);
+  color: #ff6680;
+  border-color: rgba(255, 102, 128, 0.5);
+}
+
+.saip-val-filter--warn.is-on {
+  background: rgba(255, 200, 80, 0.16);
+  color: #ffc850;
+  border-color: rgba(255, 200, 80, 0.5);
+}
+
+.saip-val-filter--info.is-on {
+  background: var(--accent-soft);
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.saip-val-filter--pass.is-on {
+  background: rgba(120, 220, 130, 0.16);
+  color: #78dc82;
+  border-color: rgba(120, 220, 130, 0.5);
+}
+
+.saip-val-jump-col {
+  width: 1%;
+  white-space: nowrap;
+}
+
+.saip-val-jump-cell {
+  text-align: right;
+  white-space: nowrap;
+}
+
+.saip-val-jump {
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  padding: 2px 8px;
+}
+
+.saip-val-sev {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  border: 1px solid var(--border);
+}
+
+.saip-val-sev--fail {
+  background: rgba(255, 102, 128, 0.18);
+  color: #ff6680;
+  border-color: rgba(255, 102, 128, 0.5);
+}
+
+.saip-val-sev--warn {
+  background: rgba(255, 200, 80, 0.18);
+  color: #ffc850;
+  border-color: rgba(255, 200, 80, 0.5);
+}
+
+.saip-val-sev--info {
+  background: var(--accent-soft);
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.saip-val-sev--pass {
+  background: rgba(120, 220, 130, 0.18);
+  color: #78dc82;
+  border-color: rgba(120, 220, 130, 0.5);
+}
+
+.saip-val-path {
+  font-size: 10px;
+  color: var(--fg-muted, #888);
+  word-break: break-all;
+}
+
+.saip-val-code-cell {
+  white-space: nowrap;
+}
+
+.saip-val-copy-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-left: 4px;
+  padding: 0 3px;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  color: var(--fg-muted, #888);
+  font-size: 11px;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.12s;
+  vertical-align: middle;
+}
+
+.saip-val-code-cell:hover .saip-val-copy-btn {
+  opacity: 1;
+}
+
+.saip-val-msg-cell--expandable {
+  cursor: pointer;
+}
+
+.saip-val-msg-cell--expandable:hover {
+  color: var(--accent);
+}
+
+.saip-val-expand-caret {
+  color: var(--fg-muted, #888);
+  font-size: 10px;
+  user-select: none;
+}
+
+.saip-val-row--expanded > td {
+  background: var(--bg-card, var(--bg-secondary));
+}
+
+.saip-val-detail-row {
+  background: var(--bg-card, var(--bg-secondary));
+}
+
+.saip-val-detail-row--hidden {
+  display: none;
+}
+
+.saip-val-detail-cell {
+  padding: 6px 12px 8px 36px;
+  font-size: 11px;
+  border-bottom: 1px solid var(--border);
+}
+
+.saip-val-rec {
+  margin-bottom: 4px;
+  color: var(--fg);
+}
+
+.saip-val-evidence {
+  color: var(--fg-muted, #888);
+}
+
+.saip-val-rec-label {
+  font-weight: 600;
+  color: var(--fg-muted, #888);
+}
+
+.saip-val-evidence code {
+  font-size: 10px;
+  word-break: break-all;
+}
+
+.saip-val-clean {
+  margin: 8px 0 0;
+  font-size: 12px;
+  color: #78dc82;
+  font-style: italic;
+}
+
+/* Domain-grouped validation tables */
+.saip-val-domain-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+  margin-bottom: 4px;
+}
+
+.saip-val-domain-header {
+  cursor: pointer;
+  user-select: none;
+}
+
+.saip-val-domain-header th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--surface-raised, #252830);
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  padding: 5px 8px;
+  text-align: left;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--fg, #cdd6f4);
+  letter-spacing: 0.04em;
+}
+
+.saip-val-domain-header:hover th {
+  background: var(--surface-hover, #2a2d3a);
+}
+
+.saip-val-domain-header:focus-visible th {
+  outline: 2px solid var(--accent, #89b4fa);
+  outline-offset: -2px;
+}
+
+.saip-val-domain-caret {
+  display: inline-block;
+  width: 14px;
+  font-size: 10px;
+  color: var(--fg-muted, #888);
+  margin-right: 4px;
+  transition: transform 0.15s;
+}
+
+.saip-val-domain-label {
+  font-family: var(--mono, monospace);
+  font-size: 11px;
+  margin-right: 8px;
+}
+
+.saip-val-domain-chips {
+  display: inline-flex;
+  gap: 4px;
+  vertical-align: middle;
+}
+
+.saip-val-domain-chip {
+  font-size: 9px;
+  padding: 1px 5px;
+  border-radius: 3px;
+  vertical-align: middle;
+}
+
+.saip-val-col-header th {
+  background: var(--surface, #1e2128);
+  text-align: left;
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--fg-muted, #888);
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--border);
+}

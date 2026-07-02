@@ -1,0 +1,87 @@
+/*
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+ */
+
+/* Context menu (G-3) ---------------------------------------------------- */
+
+.ctx-menu {
+  position: fixed;
+  z-index: 1000;
+  display: none;
+  flex-direction: column;
+  min-width: 200px;
+  padding: 4px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow:
+    0 8px 24px -8px rgba(0, 0, 0, 0.45),
+    0 0 0 1px var(--accent-soft);
+  font-size: 12px;
+}
+
+.ctx-menu.is-open {
+  display: flex;
+}
+
+.ctx-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 10px;
+  border: none;
+  background: transparent;
+  color: var(--fg);
+  font-family: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  text-align: left;
+  border-radius: var(--radius-sm, 4px);
+  transition: background-color var(--transition-fast),
+    color var(--transition-fast);
+}
+
+.ctx-menu-item:hover:not(:disabled) {
+  background: var(--accent-soft);
+}
+
+.ctx-menu-item:disabled {
+  color: var(--fg-dim);
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.ctx-menu-item--danger {
+  color: var(--fail);
+}
+
+.ctx-menu-item--danger:hover:not(:disabled) {
+  background: color-mix(in oklab, var(--fail) 18%, transparent);
+}
+
+.ctx-menu-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  flex: 0 0 18px;
+  color: var(--accent);
+  font-size: 13px;
+}
+
+.ctx-menu-item--danger .ctx-menu-icon {
+  color: var(--fail);
+}
+
+.ctx-menu-label {
+  flex: 1 1 auto;
+  white-space: nowrap;
+}
+
+.ctx-menu-sep {
+  height: 1px;
+  background: var(--border);
+  margin: 4px 4px;
+}
+

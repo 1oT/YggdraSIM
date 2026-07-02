@@ -1,0 +1,248 @@
+/*
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+ */
+
+/* ---- SA-G3: file system tree -------------------------------------- */
+/*
+ * Hierarchical tree view for the File System tab. Section roots
+ * (MF / DF.TELECOM / ADF.USIM / …) sit at depth 0; mf / df-* / adf-*
+ * containers sit at depth 1; EFs sit at depth 2 (or depth 1 in
+ * sections without an explicit container row). Each row is a thin
+ * 22 px lane with a caret + glyph + label + optional FID / sFID
+ * badges; the active row picks up the accent ring in the same way
+ * the PE cards do.
+ */
+.saip-file-tree {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.saip-file-tree-controls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
+  min-width: 0;
+}
+
+.saip-file-tree-search {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 26px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg, transparent);
+  color: var(--fg, #eceff4);
+  padding: 3px 7px;
+  font-size: 11px;
+}
+
+.saip-file-tree-search:focus {
+  outline: 1px solid var(--accent, #88c0d0);
+  outline-offset: -1px;
+}
+
+.saip-file-tree-sort {
+  flex: 0 0 auto;
+  height: 26px;
+  max-width: 98px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg, transparent);
+  color: var(--fg-muted, #aaa);
+  font-size: 11px;
+  padding: 2px 4px;
+}
+
+.saip-file-tree-clear {
+  height: 26px;
+  flex: 0 0 auto;
+}
+
+.saip-file-tree-count {
+  flex: 0 0 auto;
+  color: var(--fg-muted, #888);
+  font-family: var(--mono, "JetBrains Mono", monospace);
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+.saip-file-tree-host {
+  min-width: 0;
+}
+
+.saip-file-tree--root {
+  font-size: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.saip-file-node {
+  margin: 0;
+  padding: 0;
+}
+
+.saip-file-node-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px 3px 0;
+  border-radius: 4px;
+  transition: background-color 0.12s ease;
+  user-select: none;
+}
+
+.saip-file-node-row--depth-0 { padding-left: 8px; }
+.saip-file-node-row--depth-1 { padding-left: 24px; }
+.saip-file-node-row--depth-2 { padding-left: 40px; }
+.saip-file-node-row--depth-3 { padding-left: 56px; }
+.saip-file-node-row--depth-4 { padding-left: 72px; }
+.saip-file-node-row--depth-5 { padding-left: 88px; }
+.saip-file-node-row--depth-6 { padding-left: 104px; }
+.saip-file-node-row--depth-7 { padding-left: 120px; }
+.saip-file-node-row--depth-8 { padding-left: 136px; }
+
+.saip-file-node-row:hover {
+  background: var(--surface-alt, rgba(255, 255, 255, 0.04));
+}
+
+.saip-file-node-row.is-active {
+  background: var(--accent-soft);
+  color: var(--fg);
+  outline: 1px solid var(--accent);
+}
+
+.saip-file-node-row--search-match {
+  background: rgba(136, 192, 208, 0.11);
+  box-shadow: inset 2px 0 0 var(--accent, #88c0d0);
+}
+
+.saip-file-node-row--search-match:hover {
+  background: rgba(136, 192, 208, 0.16);
+}
+
+.saip-file-node-row--template-default {
+  background:
+    linear-gradient(90deg, rgba(180, 207, 153, 0.10), transparent 62%);
+}
+
+.saip-file-node-row--template-default:hover {
+  background:
+    linear-gradient(90deg, rgba(180, 207, 153, 0.16), transparent 68%),
+    var(--surface-alt, rgba(255, 255, 255, 0.04));
+}
+
+.saip-file-caret {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  font-size: 9px;
+  border: none;
+  background: transparent;
+  color: var(--fg-muted, #888);
+  cursor: pointer;
+  padding: 0;
+  user-select: none;
+  flex-shrink: 0;
+}
+
+.saip-file-caret:hover {
+  color: var(--accent);
+}
+
+.saip-file-caret--leaf {
+  cursor: default;
+  pointer-events: none;
+  opacity: 0;
+}
+
+.saip-file-glyph {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  font-size: 11px;
+  flex-shrink: 0;
+}
+
+.saip-file-glyph--section { color: var(--accent); }
+.saip-file-glyph--mf      { color: #9fc8d6; }
+.saip-file-glyph--adf     { color: #b4cf99; }
+.saip-file-glyph--df      { color: #88c0d0; }
+.saip-file-glyph--ef      { color: var(--fg-muted, #888); }
+
+.saip-file-label {
+  font-size: 12px;
+  color: var(--fg);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex-grow: 1;
+  min-width: 0;
+}
+
+.saip-file-node--section > .saip-file-node-row > .saip-file-label {
+  font-weight: 600;
+  text-transform: none;
+  letter-spacing: 0.02em;
+  color: var(--fg);
+}
+
+.saip-file-fid,
+.saip-file-sfid {
+  font-family: var(--mono, "JetBrains Mono", monospace);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  background: var(--surface-alt, rgba(255, 255, 255, 0.05));
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0 4px;
+  color: var(--fg-muted, #888);
+  flex-shrink: 0;
+}
+
+.saip-file-sfid {
+  color: var(--accent);
+  border-color: var(--accent-soft);
+}
+
+.saip-file-node-row.is-active .saip-file-fid,
+.saip-file-node-row.is-active .saip-file-sfid {
+  border-color: var(--accent);
+  color: var(--fg);
+}
+
+/* SA-G6 unified tree: GFM-created files carry a tiny lineage chip
+   so the operator can tell at a glance which files come from
+   pe-GenericFileManagement (vs from a template PE). */
+.saip-file-gfm {
+  font-family: var(--mono, "JetBrains Mono", monospace);
+  font-size: 9px;
+  letter-spacing: 0.06em;
+  background: var(--accent-soft, rgba(125, 200, 255, 0.12));
+  border: 1px solid var(--accent-soft);
+  border-radius: 4px;
+  padding: 0 4px;
+  color: var(--accent);
+  flex-shrink: 0;
+  text-transform: uppercase;
+}
+
+.saip-file-template-default {
+  font-family: var(--mono, "JetBrains Mono", monospace);
+  font-size: 9px;
+  letter-spacing: 0.06em;
+  background: rgba(180, 207, 153, 0.14);
+  border: 1px solid rgba(180, 207, 153, 0.38);
+  border-radius: 4px;
+  padding: 0 4px;
+  color: #b4cf99;
+  flex-shrink: 0;
+  text-transform: uppercase;
+}

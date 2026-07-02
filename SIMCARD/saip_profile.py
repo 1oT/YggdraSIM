@@ -1,13 +1,11 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """SAIP profile applicator: walks a decoded pySim profile document and writes each PE to the simulated FS."""
 from __future__ import annotations
 
-import ctypes
-import io
-import os
 import sys
-import threading
-import time
 from pathlib import Path
 from typing import Any
 
@@ -25,863 +23,29 @@ from SIMCARD.saip_pysim_specs import (
     pysim_sd_keys,
 )
 
-# Phase E: when pySim is installed, use its TS-aligned service-name maps
+# When pySim is installed, use its TS-aligned service-name maps
 # in place of the inspector's hand-curated copies. The call is a no-op
 # in stripped deployments without pySim.
 apply_pysim_service_table_overlay_to_inspector()
 from SIMCARD.state import (
+    SimProfileApplicationInstance,
+    SimProfileApplicationPackage,
     SimProfileAuthConfig,
+    SimProfileCdmaParameter,
     SimProfileFsNode,
     SimProfileImage,
+    SimProfileNonStandardBlob,
     SimProfilePinEntry,
     SimProfilePukEntry,
     SimProfileRfmInstance,
     SimProfileSecurityDomain,
     SimProfileSecurityDomainKey,
+    SimProfileSsimEaptlsBundle,
 )
 from SIMCARD.utils import decode_imsi_ef, encode_iccid_ef, encode_imsi_ef, read_tlv
 
 _SAIP_ASN1 = None
 _SAIP_ASN1_FAILED = False
-
-# pySim's SAIP ASN.1 decoder can loop for an unbounded amount of time on
-# malformed or pathological ProfileElement payloads (see asn1tools DER
-# decoder ``decode_content`` in ``codecs/der.py``). That hang has been
-# observed to wedge the simulator in the middle of ``STORE DATA`` while
-# processing the final ``A3`` member of a LoadBoundProfilePackage, which
-# blocks the APDU response and leaks memory because the DER decoder keeps
-# appending entries to an inner list on every iteration. Keep a short
-# per-element budget so a bad element is skipped rather than stalling the
-# whole install; operators that specifically need the heavy decode to run
-# can raise the budget via the env var below.
-_SAIP_DECODE_TIMEOUT_ENV = "YGGDRASIM_SIM_SAIP_DECODE_TIMEOUT_SECONDS"
-_SAIP_DECODE_DEFAULT_TIMEOUT = 2.5
-
-
-def _resolve_saip_decode_timeout_seconds() -> float:
-    raw_value = str(os.environ.get(_SAIP_DECODE_TIMEOUT_ENV, "") or "").strip()
-    if len(raw_value) == 0:
-        return _SAIP_DECODE_DEFAULT_TIMEOUT
-    try:
-        parsed = float(raw_value)
-    except ValueError:
-        return _SAIP_DECODE_DEFAULT_TIMEOUT
-    if parsed <= 0.0:
-        return _SAIP_DECODE_DEFAULT_TIMEOUT
-    return parsed
-
-
-# Grace period after the soft deadline during which the worker thread is
-# polled for a cooperative exit. If it is still alive when the grace
-# period elapses, we escalate to an async-exception injection (see
-# ``_stop_runaway_decode_thread``).
-_SAIP_DECODE_WORKER_GRACE_SECONDS = 1.0
-
-
-def _stop_runaway_decode_thread(worker: threading.Thread) -> None:
-    """Force a looping ``asn1tools`` decoder thread to unwind.
-
-    The pathological path in ``asn1tools`` stays in pure-Python bytecode
-    inside the DER ``decode_content`` loop, so ``PyThreadState_SetAsyncExc``
-    is reliable at breaking it. We raise ``SystemExit`` rather than a
-    ``BaseException`` subclass so any lingering references held by the
-    decoder's local list are dropped promptly and the several-GB memory
-    growth observed on repeated installs is avoided. If the ctypes entry
-    point is unavailable (extremely stripped interpreter) we simply give
-    up and let the daemon thread die with the process; we never want the
-    fallback to itself wedge the simulator.
-    """
-    if worker.is_alive() is False:
-        return
-    thread_id = worker.ident
-    if thread_id is None:
-        return
-    try:
-        set_async_exc = ctypes.pythonapi.PyThreadState_SetAsyncExc
-    except AttributeError:
-        return
-    set_async_exc.argtypes = (ctypes.c_ulong, ctypes.py_object)
-    set_async_exc.restype = ctypes.c_int
-    # The first call delivers SystemExit to the worker. If it happens to be
-    # stuck in a C extension call at that exact moment the runtime will not
-    # honour the async exception until it returns to Python bytecode; asn1tools
-    # is implemented in Python so the common case completes immediately.
-    delivered = set_async_exc(ctypes.c_ulong(thread_id), ctypes.py_object(SystemExit))
-    if delivered == 0:
-        return
-    if delivered > 1:
-        # PyThreadState_SetAsyncExc returns the number of threads affected;
-        # >1 means we accidentally hit more than one thread with the same
-        # ident (can only happen if we raced with thread teardown). Undo the
-        # delivery so we don't leak SystemExit into an unrelated thread.
-        set_async_exc(ctypes.c_ulong(thread_id), ctypes.c_long(0))
-        return
-    # Give the worker a short, bounded window to unwind after the exception
-    # is queued; we must not block the install path indefinitely.
-    deadline = time.monotonic() + _SAIP_DECODE_WORKER_GRACE_SECONDS
-    while worker.is_alive() and time.monotonic() < deadline:
-        time.sleep(0.05)
-
-
-def _decode_profile_element_bounded(
-    asn1: Any,
-    raw_tlv: bytes,
-    timeout_seconds: float,
-) -> tuple[Any, dict[str, Any]] | None:
-    """Execute ``asn1.decode('ProfileElement', raw_tlv)`` under a hard deadline.
-
-    Returns the ``(pe_type, decoded)`` tuple on success, or ``None`` on
-    timeout / exception. When the deadline elapses the worker thread is
-    actively killed via ``PyThreadState_SetAsyncExc`` so the asn1 decoder
-    state (including the unbounded inner list that caused the original
-    multi-GB leak) is released promptly instead of being held for the
-    remainder of the process lifetime.
-    """
-    result_slot: list[Any] = [None]
-    exc_slot: list[BaseException | None] = [None]
-
-    def _worker() -> None:
-        try:
-            result_slot[0] = asn1.decode("ProfileElement", raw_tlv)
-        except BaseException as error:
-            exc_slot[0] = error
-
-    worker = threading.Thread(
-        target=_worker,
-        name="saip-profile-element-decode",
-        daemon=True,
-    )
-    worker.start()
-    worker.join(timeout=max(0.5, float(timeout_seconds)))
-    if worker.is_alive():
-        _stop_runaway_decode_thread(worker)
-        return None
-    if exc_slot[0] is not None:
-        return None
-    return result_slot[0]
-
-
-# ---------------------------------------------------------------------------
-# Native ProfileElement salvage
-#
-# When ``asn1tools`` cannot decode a ``ProfileElement`` (either because it
-# hits the DER ``decode_content`` infinite loop or raises on a malformed
-# inner TLV), we still want to extract the file contents that the SIM
-# simulator needs at runtime. The walkers below implement a hand-rolled
-# DER parser driven by a table of SAIP ``ProfileElement`` alternatives; for
-# every file-based section (PE-MF, PE-CD, PE-TELECOM, PE-USIM, PE-OPT-USIM,
-# PE-ISIM, PE-OPT-ISIM, PE-PHONEBOOK, PE-GSM-ACCESS, PE-CSIM, PE-OPT-CSIM,
-# PE-EAP, PE-DF-5GS, PE-DF-SAIP, PE-DF-SNPN, PE-DF-5GPROSE) the walker
-# recovers every ``File`` slot declared in the schema even when asn1tools
-# stalls on a pathological sibling.
-#
-# The hybrid IoT sections (PE-IoT / PE-OPT-IoT) are intentionally omitted:
-# their SEQUENCE fields interleave files from multiple parent containers
-# (MF + ADF.USIM + DF.5GS + DF.SAIP), which the flat
-# ``_consume_profile_element`` dispatch path cannot express without a
-# per-field parent override table. Operators that install IoT Minimal
-# profiles must rely on the asn1tools path until that refactor lands.
-#
-# References:
-#   * pySim ``esim/asn1/saip/PE_Definitions-3.3.1.asn`` (AUTOMATIC TAGS,
-#     IMPLICIT by default, EXTENSIBILITY IMPLIED) — the canonical schema.
-#   * 3GPP TS 31.102 / TS 31.103 / TS 51.011 / ETSI TS 102 221 for file
-#     identifiers and per-EF record structures.
-#   * ``Tools/ProfilePackage/saip_asn1_decode._EF_KEY_TO_FID`` for the
-#     authoritative token-to-FID mapping used by the rest of the tool.
-# ---------------------------------------------------------------------------
-
-
-def _decode_asn1_tag_number(tag_bytes: bytes) -> tuple[int, int, bool]:
-    """Return ``(class_code, tag_number, constructed)`` from a BER/DER tag.
-
-    ``class_code`` follows ITU-T X.690 section 8.1.2.2:
-    0=universal, 1=application, 2=context-specific, 3=private.
-    ``tag_number`` is the decoded long-form value when the low five bits
-    of the first byte are all set; otherwise it is the literal low five
-    bits. ``constructed`` reflects bit 6 of the first byte.
-    """
-    if len(tag_bytes) == 0:
-        raise ValueError("Empty ASN.1 tag.")
-    first = tag_bytes[0]
-    class_code = (first >> 6) & 0x03
-    constructed = bool(first & 0x20)
-    low_five = first & 0x1F
-    if low_five != 0x1F:
-        return class_code, low_five, constructed
-    number = 0
-    continuation_seen = False
-    for byte in tag_bytes[1:]:
-        continuation_seen = True
-        number = (number << 7) | (byte & 0x7F)
-        if byte & 0x80 == 0:
-            return class_code, number, constructed
-    if continuation_seen is False:
-        raise ValueError("Long-form tag missing continuation bytes.")
-    raise ValueError("Long-form tag is not terminated.")
-
-
-# ProfileElement CHOICE member index → outer tag bytes. AUTOMATIC TAGS
-# IMPLICIT encodes context-specific constructed alternatives as 0xA0 + N
-# for single-byte tags (N < 31) and as ``BF <N>`` for long-form tags
-# (N >= 31). The mapping below covers the whole CHOICE and is used both
-# by the dispatcher below and by the regression tests that assert every
-# file-based section has a matching section spec.
-_PE_CHOICE_OUTER_TAGS: dict[int, bytes] = {}
-for _choice_index in range(0, 256):
-    if _choice_index < 31:
-        _PE_CHOICE_OUTER_TAGS[_choice_index] = bytes([0xA0 + _choice_index])
-        continue
-    if _choice_index < 0x80:
-        _PE_CHOICE_OUTER_TAGS[_choice_index] = bytes([0xBF, _choice_index])
-        continue
-    # Long-form tags >= 128 would need multi-byte base-128 encoding; the
-    # current SAIP schema does not use any and we stop the precomputation
-    # once we hit that boundary rather than emit bogus bytes.
-    break
-del _choice_index
-
-
-# PE section schemas: outer tag bytes → {pe_type, fields}. ``pe_type`` is
-# the key used by ``_SECTION_SPECS`` / ``_consume_profile_element`` and
-# matches the asn1tools member name. ``fields`` maps the AUTOMATIC TAGS
-# SEQUENCE field index (starting at 0) to the asn1tools-style field name
-# that the rest of the pipeline expects in the decoded dict.
-#
-# Every section here is a pure "file" section whose SEQUENCE members are
-# either metadata (``*-header`` / ``templateID``) or ``File`` types. The
-# salvage walker produces a ``{field_name: bytes}`` dict that is shape-
-# compatible with the asn1tools-success path.
-_PE_SECTION_SCHEMAS: dict[bytes, dict[str, Any]] = {
-    # PE-MF → [16]
-    _PE_CHOICE_OUTER_TAGS[16]: {
-        "pe_type": "mf",
-        "fields": {
-            0: "mf-header",
-            1: "templateID",
-            2: "mf",
-            3: "ef-pl",
-            4: "ef-iccid",
-            5: "ef-dir",
-            6: "ef-arr",
-            7: "ef-umpc",
-        },
-    },
-    # PE-CD → [17]
-    _PE_CHOICE_OUTER_TAGS[17]: {
-        "pe_type": "cd",
-        "fields": {
-            0: "cd-header",
-            1: "templateID",
-            2: "df-cd",
-            3: "ef-launchpad",
-            4: "ef-icon",
-        },
-    },
-    # PE-TELECOM → [18]
-    _PE_CHOICE_OUTER_TAGS[18]: {
-        "pe_type": "telecom",
-        "fields": {
-            0: "telecom-header",
-            1: "templateID",
-            2: "df-telecom",
-            3: "ef-arr",
-            4: "ef-rma",
-            5: "ef-sume",
-            6: "ef-ice-dn",
-            7: "ef-ice-ff",
-            8: "ef-psismsc",
-            9: "df-graphics",
-            10: "ef-img",
-            11: "ef-iidf",
-            12: "ef-ice-graphics",
-            13: "ef-launch-scws",
-            14: "ef-icon",
-            15: "df-phonebook",
-            16: "ef-pbr",
-            17: "ef-ext1",
-            18: "ef-aas",
-            19: "ef-gas",
-            20: "ef-psc",
-            21: "ef-cc",
-            22: "ef-puid",
-            23: "ef-iap",
-            24: "ef-adn",
-            25: "ef-pbc",
-            26: "ef-anr",
-            27: "ef-puri",
-            28: "ef-email",
-            29: "ef-sne",
-            30: "ef-uid",
-            31: "ef-grp",
-            32: "ef-ccp1",
-            33: "df-multimedia",
-            34: "ef-mml",
-            35: "ef-mmdf",
-            36: "df-mmss",
-            37: "ef-mlpl",
-            38: "ef-mspl",
-            39: "ef-mmssmode",
-            40: "df-mcs",
-            41: "ef-mst",
-            42: "ef-mcs-config",
-            43: "df-v2x",
-            44: "ef-vst",
-            45: "ef-v2x-config",
-            46: "ef-v2xp-pc5",
-            47: "ef-v2xp-Uu",
-        },
-    },
-    # PE-USIM → [19]
-    _PE_CHOICE_OUTER_TAGS[19]: {
-        "pe_type": "usim",
-        "fields": {
-            0: "usim-header",
-            1: "templateID",
-            2: "adf-usim",
-            3: "ef-imsi",
-            4: "ef-arr",
-            5: "ef-keys",
-            6: "ef-keysPS",
-            7: "ef-hpplmn",
-            8: "ef-ust",
-            9: "ef-fdn",
-            10: "ef-sms",
-            11: "ef-smsp",
-            12: "ef-smss",
-            13: "ef-spn",
-            14: "ef-est",
-            15: "ef-start-hfn",
-            16: "ef-threshold",
-            17: "ef-psloci",
-            18: "ef-acc",
-            19: "ef-fplmn",
-            20: "ef-loci",
-            21: "ef-ad",
-            22: "ef-ecc",
-            23: "ef-netpar",
-            24: "ef-epsloci",
-            25: "ef-epsnsc",
-        },
-    },
-    # PE-OPT-USIM → [20]
-    _PE_CHOICE_OUTER_TAGS[20]: {
-        "pe_type": "opt-usim",
-        "fields": {
-            0: "optusim-header",
-            1: "templateID",
-            2: "ef-li",
-            3: "ef-acmax",
-            4: "ef-acm",
-            5: "ef-gid1",
-            6: "ef-gid2",
-            7: "ef-msisdn",
-            8: "ef-puct",
-            9: "ef-cbmi",
-            10: "ef-cbmid",
-            11: "ef-sdn",
-            12: "ef-ext2",
-            13: "ef-ext3",
-            14: "ef-cbmir",
-            15: "ef-plmnwact",
-            16: "ef-oplmnwact",
-            17: "ef-hplmnwact",
-            18: "ef-dck",
-            19: "ef-cnl",
-            20: "ef-smsr",
-            21: "ef-bdn",
-            22: "ef-ext5",
-            23: "ef-ccp2",
-            24: "ef-ext4",
-            25: "ef-acl",
-            26: "ef-cmi",
-            27: "ef-ici",
-            28: "ef-oci",
-            29: "ef-ict",
-            30: "ef-oct",
-            31: "ef-vgcs",
-            32: "ef-vgcss",
-            33: "ef-vbs",
-            34: "ef-vbss",
-            35: "ef-emlpp",
-            36: "ef-aaem",
-            37: "ef-hiddenkey",
-            38: "ef-pnn",
-            39: "ef-opl",
-            40: "ef-mbdn",
-            41: "ef-ext6",
-            42: "ef-mbi",
-            43: "ef-mwis",
-            44: "ef-cfis",
-            45: "ef-ext7",
-            46: "ef-spdi",
-            47: "ef-mmsn",
-            48: "ef-ext8",
-            49: "ef-mmsicp",
-            50: "ef-mmsup",
-            51: "ef-mmsucp",
-            52: "ef-nia",
-            53: "ef-vgcsca",
-            54: "ef-vbsca",
-            55: "ef-gbabp",
-            56: "ef-msk",
-            57: "ef-muk",
-            58: "ef-ehplmn",
-            59: "ef-gbanl",
-            60: "ef-ehplmnpi",
-            61: "ef-lrplmnsi",
-            62: "ef-nafkca",
-            63: "ef-spni",
-            64: "ef-pnni",
-            65: "ef-ncp-ip",
-            66: "ef-ufc",
-            67: "ef-nasconfig",
-            68: "ef-uicciari",
-            69: "ef-pws",
-            70: "ef-fdnuri",
-            71: "ef-bdnuri",
-            72: "ef-sdnuri",
-            73: "ef-ial",
-            74: "ef-ips",
-            75: "ef-ipd",
-            76: "ef-epdgid",
-            77: "ef-epdgselection",
-            78: "ef-epdgidem",
-            79: "ef-epdgselectionem",
-            80: "ef-frompreferred",
-            81: "ef-imsconfigdata",
-            82: "ef-3gpppsdataoff",
-            83: "ef-3gpppsdataoffservicelist",
-            84: "ef-xcapconfigdata",
-            85: "ef-earfcnlist",
-            86: "ef-mudmidconfigdata",
-            87: "ef-eaka",
-        },
-    },
-    # PE-ISIM → [21]
-    _PE_CHOICE_OUTER_TAGS[21]: {
-        "pe_type": "isim",
-        "fields": {
-            0: "isim-header",
-            1: "templateID",
-            2: "adf-isim",
-            3: "ef-impi",
-            4: "ef-impu",
-            5: "ef-domain",
-            6: "ef-ist",
-            7: "ef-ad",
-            8: "ef-arr",
-        },
-    },
-    # PE-OPT-ISIM → [22]
-    _PE_CHOICE_OUTER_TAGS[22]: {
-        "pe_type": "opt-isim",
-        "fields": {
-            0: "optisim-header",
-            1: "templateID",
-            2: "ef-pcscf",
-            3: "ef-sms",
-            4: "ef-smsp",
-            5: "ef-smss",
-            6: "ef-smsr",
-            7: "ef-gbabp",
-            8: "ef-gbanl",
-            9: "ef-nafkca",
-            10: "ef-uicciari",
-            11: "ef-frompreferred",
-            12: "ef-imsconfigdata",
-            13: "ef-xcapconfigdata",
-            14: "ef-webrtcuri",
-            15: "ef-mudmidconfigdata",
-        },
-    },
-    # PE-PHONEBOOK → [23]
-    _PE_CHOICE_OUTER_TAGS[23]: {
-        "pe_type": "phonebook",
-        "fields": {
-            0: "phonebook-header",
-            1: "templateID",
-            2: "df-phonebook",
-            3: "ef-pbr",
-            4: "ef-ext1",
-            5: "ef-aas",
-            6: "ef-gas",
-            7: "ef-psc",
-            8: "ef-cc",
-            9: "ef-puid",
-            10: "ef-iap",
-            11: "ef-adn",
-            12: "ef-pbc",
-            13: "ef-anr",
-            14: "ef-puri",
-            15: "ef-email",
-            16: "ef-sne",
-            17: "ef-uid",
-            18: "ef-grp",
-            19: "ef-ccp1",
-        },
-    },
-    # PE-GSM-ACCESS → [24]
-    _PE_CHOICE_OUTER_TAGS[24]: {
-        "pe_type": "gsm-access",
-        "fields": {
-            0: "gsm-access-header",
-            1: "templateID",
-            2: "df-gsm-access",
-            3: "ef-kc",
-            4: "ef-kcgprs",
-            5: "ef-cpbcch",
-            6: "ef-invscan",
-        },
-    },
-    # PE-CSIM → [25]
-    _PE_CHOICE_OUTER_TAGS[25]: {
-        "pe_type": "csim",
-        "fields": {
-            0: "csim-header",
-            1: "templateID",
-            2: "adf-csim",
-            3: "ef-arr",
-            4: "ef-call-count",
-            5: "ef-imsi-m",
-            6: "ef-imsi-t",
-            7: "ef-tmsi",
-            8: "ef-ah",
-            9: "ef-aop",
-            10: "ef-aloc",
-            11: "ef-cdmahome",
-            12: "ef-znregi",
-            13: "ef-snregi",
-            14: "ef-distregi",
-            15: "ef-accolc",
-            16: "ef-term",
-            17: "ef-acp",
-            18: "ef-prl",
-            19: "ef-ruimid",
-            20: "ef-csim-st",
-            21: "ef-spc",
-            22: "ef-otapaspc",
-            23: "ef-namlock",
-            24: "ef-ota",
-            25: "ef-sp",
-            26: "ef-esn-meid-me",
-            27: "ef-li",
-            28: "ef-usgind",
-            29: "ef-ad",
-            30: "ef-max-prl",
-            31: "ef-spcs",
-            32: "ef-mecrp",
-            33: "ef-home-tag",
-            34: "ef-group-tag",
-            35: "ef-specific-tag",
-            36: "ef-call-prompt",
-        },
-    },
-    # PE-OPT-CSIM → [26]
-    _PE_CHOICE_OUTER_TAGS[26]: {
-        "pe_type": "opt-csim",
-        "fields": {
-            0: "optcsim-header",
-            1: "templateID",
-            2: "ef-ssci",
-            3: "ef-fdn",
-            4: "ef-sms",
-            5: "ef-smsp",
-            6: "ef-smss",
-            7: "ef-ssfc",
-            8: "ef-spn",
-            9: "ef-mdn",
-            10: "ef-ecc",
-            11: "ef-me3gpdopc",
-            12: "ef-3gpdopm",
-            13: "ef-sipcap",
-            14: "ef-mipcap",
-            15: "ef-sipupp",
-            16: "ef-mipupp",
-            17: "ef-sipsp",
-            18: "ef-mipsp",
-            19: "ef-sippapss",
-            20: "ef-puzl",
-            21: "ef-maxpuzl",
-            22: "ef-hrpdcap",
-            23: "ef-hrpdupp",
-            24: "ef-csspr",
-            25: "ef-atc",
-            26: "ef-eprl",
-            27: "ef-bcsmscfg",
-            28: "ef-bcsmspref",
-            29: "ef-bcsmstable",
-            30: "ef-bcsmsp",
-            31: "ef-bakpara",
-            32: "ef-upbakpara",
-            33: "ef-mmsn",
-            34: "ef-ext8",
-            35: "ef-mmsicp",
-            36: "ef-mmsup",
-            37: "ef-mmsucp",
-            38: "ef-auth-capability",
-            39: "ef-3gcik",
-            40: "ef-dck",
-            41: "ef-gid1",
-            42: "ef-gid2",
-            43: "ef-cdmacnl",
-            44: "ef-sf-euimid",
-            45: "ef-est",
-            46: "ef-hidden-key",
-            47: "ef-lcsver",
-            48: "ef-lcscp",
-            49: "ef-sdn",
-            50: "ef-ext2",
-            51: "ef-ext3",
-            52: "ef-ici",
-            53: "ef-oci",
-            54: "ef-ext5",
-            55: "ef-ccp2",
-            56: "ef-applabels",
-            57: "ef-model",
-            58: "ef-rc",
-            59: "ef-smscap",
-            60: "ef-mipflags",
-            61: "ef-3gpduppext",
-            62: "ef-ipv6cap",
-            63: "ef-tcpconfig",
-            64: "ef-dgc",
-            65: "ef-wapbrowsercp",
-            66: "ef-wapbrowserbm",
-            67: "ef-mmsconfig",
-            68: "ef-jdl",
-        },
-    },
-    # PE-EAP → [27]
-    _PE_CHOICE_OUTER_TAGS[27]: {
-        "pe_type": "eap",
-        "fields": {
-            0: "eap-header",
-            1: "templateID",
-            2: "df-eap",
-            3: "ef-eapkeys",
-            4: "ef-eapstatus",
-            5: "ef-puid",
-            6: "ef-ps",
-            7: "ef-curid",
-            8: "ef-reid",
-            9: "ef-realm",
-        },
-    },
-    # PE-DF-5GS → [28]
-    _PE_CHOICE_OUTER_TAGS[28]: {
-        "pe_type": "df-5gs",
-        "fields": {
-            0: "df-5gs-header",
-            1: "templateID",
-            2: "df-df-5gs",
-            3: "ef-5gs3gpploci",
-            4: "ef-5gsn3gpploci",
-            5: "ef-5gs3gppnsc",
-            6: "ef-5gsn3gppnsc",
-            7: "ef-5gauthkeys",
-            8: "ef-uac-aic",
-            9: "ef-suci-calc-info",
-            10: "ef-opl5g",
-            11: "ef-supinai",
-            12: "ef-routing-indicator",
-            13: "ef-ursp",
-            14: "ef-tn3gppsnn",
-            15: "ef-cag",
-            16: "ef-sor-cmci",
-            17: "ef-dri",
-            18: "ef-5gsedrx",
-            19: "ef-5gnswo-conf",
-            20: "ef-mchpplmn",
-            21: "ef-kausf-derivation",
-        },
-    },
-    # PE-DF-SAIP → [29]
-    _PE_CHOICE_OUTER_TAGS[29]: {
-        "pe_type": "df-saip",
-        "fields": {
-            0: "df-saip-header",
-            1: "templateID",
-            2: "df-df-saip",
-            3: "ef-suci-calc-info-usim",
-        },
-    },
-    # PE-DF-SNPN → [30]
-    _PE_CHOICE_OUTER_TAGS[30]: {
-        "pe_type": "df-snpn",
-        "fields": {
-            0: "df-snpn-header",
-            1: "templateID",
-            2: "df-df-snpn",
-            3: "ef-pws-snpn",
-        },
-    },
-    # PE-DF-5GPROSE → [31] (long-form tag BF 1F)
-    _PE_CHOICE_OUTER_TAGS[31]: {
-        "pe_type": "df-5gprose",
-        "fields": {
-            0: "df-5g-prose-header",
-            1: "templateID",
-            2: "df-df-5g-prose",
-            3: "ef-5g-prose-st",
-            4: "ef-5g-prose-dd",
-            5: "ef-5g-prose-dc",
-            6: "ef-5g-prose-u2nru",
-            7: "ef-5g-prose-ru",
-            8: "ef-5g-prose-uir",
-        },
-    },
-}
-
-
-def _collect_file_content_bytes(value_bytes: bytes) -> bytes | None:
-    """Extract the concatenated ``fillFileContent`` payload from a File.
-
-    ``File ::= SEQUENCE OF CHOICE { doNotCreate NULL, fileDescriptor Fcp,
-    fillFileOffset UInt16, fillFileContent OCTET STRING }``
-
-    AUTOMATIC TAGS assigns the alternatives the context tags ``[0]``
-    (``0x80``), ``[1]`` (``0xA1``), ``[2]`` (``0x82``) and ``[3]``
-    (``0x83``) respectively. Returns ``None`` when any alternative is
-    ``doNotCreate`` (the file is explicitly suppressed), otherwise the
-    accumulated bytes with ``fillFileOffset`` treated as an absolute seek
-    in the output stream.
-    """
-    stream = io.BytesIO()
-    offset = 0
-    while offset < len(value_bytes):
-        try:
-            child_tag, child_value, _, next_offset = read_tlv(value_bytes, offset)
-        except Exception:
-            return stream.getvalue()
-        if len(child_tag) == 0:
-            break
-        first = child_tag[0]
-        if first == 0x80:
-            return None
-        if first == 0xA1:
-            offset = next_offset
-            continue
-        if first == 0x82:
-            try:
-                seek_target = int.from_bytes(child_value, "big", signed=False)
-                stream.seek(seek_target, io.SEEK_SET)
-            except Exception:
-                pass
-            offset = next_offset
-            continue
-        if first == 0x83:
-            try:
-                stream.write(bytes(child_value))
-            except Exception:
-                pass
-            offset = next_offset
-            continue
-        offset = next_offset
-    return stream.getvalue()
-
-
-def _salvage_file_profile_element(
-    section_schema: dict[str, Any],
-    value_bytes: bytes,
-) -> dict[str, Any] | None:
-    """Generic ``File``-section decoder driven by ``_PE_SECTION_SCHEMAS``.
-
-    Walks the SEQUENCE content inside the outer CHOICE envelope and
-    returns a dict keyed by asn1tools-style field names whose values are
-    the concatenated ``fillFileContent`` bytes for each ``File`` slot.
-    Fields named ``*-header``, ``templateID`` or prefixed with ``df-`` /
-    ``adf-`` / ``mf`` are recognised (the section itself still counts as
-    salvaged) but do not contribute file bytes. Returns ``None`` only
-    when no known slot was recognised, so the caller can skip the
-    element entirely rather than emit an empty node.
-    """
-    fields = section_schema.get("fields") or {}
-    if isinstance(fields, dict) is False or len(fields) == 0:
-        return None
-
-    decoded: dict[str, Any] = {}
-    offset = 0
-    produced_any_slot = False
-    while offset < len(value_bytes):
-        try:
-            tag_bytes, field_value, _, next_offset = read_tlv(value_bytes, offset)
-        except Exception:
-            break
-        try:
-            class_code, tag_number, constructed = _decode_asn1_tag_number(tag_bytes)
-        except Exception:
-            offset = next_offset
-            continue
-        if class_code != 2:
-            offset = next_offset
-            continue
-        field_name = fields.get(tag_number)
-        if field_name is None:
-            offset = next_offset
-            continue
-
-        normalized = str(field_name)
-        if normalized.endswith("-header") or normalized == "templateID":
-            produced_any_slot = True
-            offset = next_offset
-            continue
-
-        # Container markers (``mf``, ``df-*``, ``adf-*``) carry an empty
-        # File by convention and never have an installable payload; they
-        # exist in the schema to advertise the presence of the DF/ADF.
-        if (
-            normalized == "mf"
-            or normalized.startswith("df-")
-            or normalized.startswith("adf-")
-        ):
-            produced_any_slot = True
-            offset = next_offset
-            continue
-
-        if constructed is False:
-            offset = next_offset
-            continue
-
-        payload = _collect_file_content_bytes(bytes(field_value))
-        if payload is None:
-            # ``doNotCreate`` marker – skip without synthesising a node.
-            produced_any_slot = True
-            offset = next_offset
-            continue
-        decoded[normalized] = payload
-        produced_any_slot = True
-        offset = next_offset
-    if produced_any_slot is False:
-        return None
-    return decoded
-
-
-def _salvage_profile_element_natively(raw_tlv: bytes) -> tuple[str, dict[str, Any]] | None:
-    """Dispatch entry for the native ProfileElement salvage path.
-
-    ``raw_tlv`` is the full TLV (tag + length + value) of a single
-    ``ProfileElement`` that ``asn1tools`` refused to decode. File-based
-    sections listed in ``_PE_SECTION_SCHEMAS`` are walked with
-    ``_salvage_file_profile_element``; every other outer tag (including
-    non-file sections such as ``header`` / ``pinCodes`` / ``akaParameter``
-    and the reserved ``rfu`` slots) returns ``None`` and the element is
-    skipped by the caller.
-    """
-    try:
-        outer_tag, outer_value, _, _ = read_tlv(raw_tlv, 0)
-    except Exception:
-        return None
-    if len(outer_tag) == 0:
-        return None
-    section_schema = _PE_SECTION_SCHEMAS.get(bytes(outer_tag))
-    if section_schema is None:
-        return None
-    decoded = _salvage_file_profile_element(section_schema, bytes(outer_value))
-    if decoded is None:
-        return None
-    return str(section_schema.get("pe_type") or "").strip(), decoded
-
 
 # Per-section container placement. ``base_path`` is the tuple prefix that
 # ``_consume_profile_element`` prepends to every EF name it materialises;
@@ -1382,7 +546,7 @@ _FILE_SPECS: dict[str, dict[str, Any]] = {
         "structure": "transparent",
         "sfi": None,
     },
-    "ef-ice-dn": {"name": "EF.ICE-DN", "fid": "6FE1", "structure": "linear-fixed", "sfi": None},
+    "ef-ice-dn": {"name": "EF.ICE-DN", "fid": "6FE0", "structure": "linear-fixed", "sfi": None},
     "ef-ice-ff": {"name": "EF.ICE-FF", "fid": "6FE2", "structure": "linear-fixed", "sfi": None},
     "ef-ice-graphics": {
         "name": "EF.ICE-GRAPHICS",
@@ -1591,7 +755,7 @@ _FILE_SPECS: dict[str, dict[str, Any]] = {
 }
 
 
-# Phase A: overlay pySim's TCA Profile-Interoperability §9 templates on
+# Overlay pySim's TCA Profile-Interoperability §9 templates on
 # top of the literal table. Augmentation is in-place, FID-anchored
 # (parent context preserved) and only fills gaps. The follow-up alias
 # pass surfaces pySim spellings (e.g. V2 ``ef-supi-nai``) onto the same
@@ -1608,6 +772,30 @@ def _install_pysim_aliases(specs: dict[str, dict[str, Any]]) -> None:
 
 
 _install_pysim_aliases(_FILE_SPECS)
+
+
+_NOOP_PE_TYPES = frozenset({"end", "iot", "opt-iot", "ssim"})
+
+
+def known_profile_element_types() -> frozenset[str]:
+    """Return ProfileElement names understood by the SAIP loader."""
+
+    return frozenset(_SECTION_SPECS) | _NOOP_PE_TYPES | frozenset(
+        {
+            "header",
+            "genericFileManagement",
+            "pinCodes",
+            "pukCodes",
+            "akaParameter",
+            "cdmaParameter",
+            "securityDomain",
+            "rfm",
+            "application",
+            "nonStandard",
+            "ssimEaptls",
+            "ssim-eaptls",
+        }
+    )
 
 
 def decode_profile_image(
@@ -1639,36 +827,17 @@ def decode_profile_image(
     if asn1 is None:
         return _finalize_image(image)
 
-    timeout_seconds = _resolve_saip_decode_timeout_seconds()
     offset = 0
     while offset < len(raw):
         try:
             _, _, raw_tlv, next_offset = read_tlv(raw, offset)
         except Exception:
             break
-        decode_result = _decode_profile_element_bounded(
-            asn1,
-            raw_tlv,
-            timeout_seconds=timeout_seconds,
-        )
-        if decode_result is None:
-            # Either the decoder raised or blew past the deadline. Try a
-            # narrow, hand-rolled walker for the handful of PE sections we
-            # know how to salvage (PE-TELECOM in particular, which is the
-            # usual asn1tools hang site). If the salvage path also cannot
-            # make sense of the bytes, skip the element entirely; the raw
-            # UPP is still persisted verbatim so no information is lost.
-            salvage = _salvage_profile_element_natively(raw_tlv)
-            if salvage is not None:
-                salvage_type, salvage_decoded = salvage
-                _consume_profile_element(
-                    image,
-                    str(salvage_type or "").strip(),
-                    salvage_decoded,
-                )
+        try:
+            pe_type, decoded = asn1.decode("ProfileElement", raw_tlv)
+        except Exception:
             offset = next_offset
             continue
-        pe_type, decoded = decode_result
         if isinstance(decoded, dict):
             _consume_profile_element(image, str(pe_type or "").strip(), decoded)
         offset = next_offset
@@ -1725,25 +894,18 @@ def _extract_profile_identity_from_header_tlv(profile_bytes: bytes) -> tuple[str
 
 def _consume_profile_element(image: SimProfileImage, pe_type: str, decoded: dict[str, Any]) -> None:
     if pe_type == "header":
-        profile_name = decoded.get("profileType")
-        if isinstance(profile_name, str) and len(profile_name.strip()) > 0:
-            image.profile_name = profile_name.strip()
-        header_iccid = decoded.get("iccid")
-        if isinstance(header_iccid, (bytes, bytearray, memoryview)) and len(header_iccid) > 0:
-            image.iccid = bytes(header_iccid).hex().upper().rstrip("F")
-        # TCA Profile Interoperability §3.4.2 connectivityParameters.
-        # The SAIP header carries an optional TLV stream describing the
-        # MNO bearer (BIP / RAM-HTTP). The bytes are kept verbatim so
-        # SGP.32 ES10b.GetConnectivityParameters can return them
-        # unmodified; conversion to the [1] httpParams OCTET STRING is
-        # done by the SGP layer.
-        connectivity_value = decoded.get("connectivityParameters")
-        if isinstance(connectivity_value, (bytes, bytearray, memoryview)):
-            image.connectivity_params_http = bytes(connectivity_value)
+        _consume_profile_header(image, decoded)
+        return
+
+    if pe_type in _NOOP_PE_TYPES:
         return
 
     if pe_type == "akaParameter":
         _consume_aka_parameter(image, decoded)
+        return
+
+    if pe_type == "cdmaParameter":
+        _consume_cdma_parameter(image, decoded)
         return
 
     if pe_type == "pinCodes":
@@ -1760,6 +922,18 @@ def _consume_profile_element(image: SimProfileImage, pe_type: str, decoded: dict
 
     if pe_type == "rfm":
         _consume_rfm(image, decoded)
+        return
+
+    if pe_type == "application":
+        _consume_application(image, decoded)
+        return
+
+    if pe_type == "nonStandard":
+        _consume_non_standard(image, decoded)
+        return
+
+    if pe_type in ("ssimEaptls", "ssim-eaptls"):
+        _consume_ssim_eaptls(image, decoded)
         return
 
     if pe_type == "genericFileManagement":
@@ -1837,7 +1011,7 @@ def _consume_profile_element(image: SimProfileImage, pe_type: str, decoded: dict
             continue
         payload, ef_descriptor = materialised
         structure = str(file_spec.get("structure", "transparent") or "transparent")
-        # Phase B: route descriptor parsing through pySim's
+        # FCP-decoder layer: route descriptor parsing through pySim's
         # File.from_fileDescriptor so record_len / efFileSize / lcsi /
         # ARR / fillPattern stay aligned with TS 102 222 + SAIP §5.1.
         attrs = decode_fcp_attributes(ef_descriptor)
@@ -1866,7 +1040,7 @@ def _consume_profile_element(image: SimProfileImage, pe_type: str, decoded: dict
         # here: pySim's ``from_fileDescriptor`` stores the raw
         # ``shortEFID`` byte without unpacking the TS 102 221 §13.2
         # SFI bits (bits 7..3), so the value cannot be used as-is.
-        # The Phase A registry already aligns template SFIs with
+        # The template-overlay registry already aligns template SFIs with
         # pySim's authoritative TCA Profile-Interoperability §9 maps.
         image.nodes.append(
             SimProfileFsNode(
@@ -1882,6 +1056,235 @@ def _consume_profile_element(image: SimProfileImage, pe_type: str, decoded: dict
                 link_path=attrs.link_path,
             )
         )
+
+
+def _consume_profile_header(image: SimProfileImage, decoded: dict[str, Any]) -> None:
+    profile_name = decoded.get("profileType")
+    if isinstance(profile_name, str) and len(profile_name.strip()) > 0:
+        image.profile_name = profile_name.strip()
+    image.header_major_version = _coerce_uint8(decoded.get("major-version"))
+    image.header_minor_version = _coerce_uint8(decoded.get("minor-version"))
+    header_iccid = decoded.get("iccid")
+    if isinstance(header_iccid, (bytes, bytearray, memoryview)) and len(header_iccid) > 0:
+        image.iccid = bytes(header_iccid).hex().upper().rstrip("F")
+    image.header_pol = _coerce_octet_string(decoded.get("pol"))
+    image.header_mandatory_services = _coerce_service_names(
+        decoded.get("eUICC-Mandatory-services")
+    )
+    image.header_mandatory_gfste = _coerce_string_tuple(
+        decoded.get("eUICC-Mandatory-GFSTEList")
+    )
+    image.header_mandatory_aids = _coerce_header_aids(
+        decoded.get("eUICC-Mandatory-AIDs")
+    )
+    iot_options = decoded.get("iotOptions")
+    if isinstance(iot_options, dict):
+        image.header_iot_pix = _coerce_octet_string(iot_options.get("pix"))
+    # TCA Profile Interoperability §3.4.2 connectivityParameters.
+    # The SAIP header carries an optional TLV stream describing the
+    # MNO bearer (BIP / RAM-HTTP). The bytes are kept verbatim so
+    # SGP.32 ES10b.GetConnectivityParameters can return them
+    # unmodified; conversion to the [1] httpParams OCTET STRING is
+    # done by the SGP layer.
+    connectivity_value = decoded.get("connectivityParameters")
+    if isinstance(connectivity_value, (bytes, bytearray, memoryview)):
+        image.connectivity_params_http = bytes(connectivity_value)
+
+
+def _consume_cdma_parameter(image: SimProfileImage, decoded: dict[str, Any]) -> None:
+    authentication_key = _coerce_octet_string(decoded.get("authenticationKey"))
+    # 3GPP2 C.S0023 fixes the CDMA A-Key at 64 bits.
+    if len(authentication_key) != 8:
+        return
+    image.cdma_parameter = SimProfileCdmaParameter(
+        authentication_key=authentication_key,
+        ssd=_coerce_octet_string(decoded.get("ssd")),
+        hrpd_access_authentication_data=_coerce_octet_string(
+            decoded.get("hrpdAccessAuthenticationData")
+        ),
+        simple_ip_authentication_data=_coerce_octet_string(
+            decoded.get("simpleIPAuthenticationData")
+        ),
+        mobile_ip_authentication_data=_coerce_octet_string(
+            decoded.get("mobileIPAuthenticationData")
+        ),
+    )
+
+
+def _consume_application(image: SimProfileImage, decoded: dict[str, Any]) -> None:
+    load_block = decoded.get("loadBlock")
+    if isinstance(load_block, dict):
+        load_package_aid = _coerce_aid_hex(load_block.get("loadPackageAID"))
+        if len(load_package_aid) > 0:
+            image.application_packages.append(
+                SimProfileApplicationPackage(
+                    load_package_aid=load_package_aid,
+                    security_domain_aid=_coerce_aid_hex(
+                        load_block.get("securityDomainAID")
+                    ),
+                    non_volatile_code_limit=_coerce_octet_string(
+                        load_block.get("nonVolatileCodeLimitC6")
+                    ),
+                    load_block_object=_coerce_octet_string(
+                        load_block.get("loadBlockObject")
+                    ),
+                )
+            )
+
+    instance_list = decoded.get("instanceList")
+    if isinstance(instance_list, list) is False:
+        return
+    for entry in instance_list:
+        if isinstance(entry, dict) is False:
+            continue
+        instance_aid = _coerce_aid_hex(entry.get("instanceAID"))
+        if len(instance_aid) == 0:
+            continue
+        application_parameters = entry.get("applicationParameters")
+        toolkit_parameters = b""
+        access_parameters = b""
+        if isinstance(application_parameters, dict):
+            toolkit_parameters = _coerce_octet_string(
+                application_parameters.get("uiccToolkitApplicationSpecificParametersField")
+            )
+            access_parameters = _coerce_octet_string(
+                application_parameters.get("uiccAccessApplicationSpecificParametersField")
+            )
+        image.application_instances.append(
+            SimProfileApplicationInstance(
+                application_load_package_aid=_coerce_aid_hex(
+                    entry.get("applicationLoadPackageAID")
+                ),
+                class_aid=_coerce_aid_hex(entry.get("classAID")),
+                instance_aid=instance_aid,
+                privileges=_coerce_octet_string(entry.get("applicationPrivileges")),
+                lifecycle_state=_coerce_byte(entry.get("lifeCycleState")) or 0x07,
+                application_specific_parameters=_coerce_octet_string(
+                    entry.get("applicationSpecificParametersC9")
+                ),
+                uicc_toolkit_parameters=toolkit_parameters,
+                uicc_access_parameters=access_parameters,
+                process_data=_coerce_octet_string_list(entry.get("processData")),
+            )
+        )
+
+
+def _consume_non_standard(image: SimProfileImage, decoded: dict[str, Any]) -> None:
+    issuer_oid = _coerce_oid_text(decoded.get("issuerID"))
+    if len(issuer_oid) == 0:
+        return
+    image.non_standard_blobs.append(
+        SimProfileNonStandardBlob(
+            issuer_oid=issuer_oid,
+            content=_coerce_octet_string(decoded.get("content")),
+        )
+    )
+
+
+def _consume_ssim_eaptls(image: SimProfileImage, decoded: dict[str, Any]) -> None:
+    bundle = SimProfileSsimEaptlsBundle(
+        instance_aid=_coerce_aid_hex(_get_any(decoded, "instanceAID", "instance-aid")),
+        ca_certificate=_coerce_octet_string(
+            _get_any(decoded, "caCertificate", "ca-certificate")
+        ),
+        client_certificate=_coerce_octet_string(
+            _get_any(decoded, "clientCertificate", "client-certificate")
+        ),
+        client_certificate_chain=_coerce_octet_string(
+            _get_any(decoded, "clientCertificateChain", "client-certificate-chain")
+        ),
+        client_private_key=_coerce_octet_string(
+            _get_any(decoded, "clientPrivateKey", "client-private-key")
+        ),
+    )
+    if (
+        len(bundle.instance_aid) == 0
+        and len(bundle.ca_certificate) == 0
+        and len(bundle.client_certificate) == 0
+        and len(bundle.client_certificate_chain) == 0
+        and len(bundle.client_private_key) == 0
+    ):
+        return
+    image.ssim_eaptls_bundles.append(bundle)
+
+
+def _coerce_uint8(value: Any) -> int:
+    try:
+        return max(0, min(0xFF, int(value)))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _coerce_aid_hex(value: Any) -> str:
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        return bytes(value).hex().upper()
+    if isinstance(value, str):
+        return value.strip().replace(" ", "").replace(":", "").replace("-", "").upper()
+    return ""
+
+
+def _coerce_service_names(value: Any) -> tuple[str, ...]:
+    if isinstance(value, dict):
+        names = [str(item or "").strip() for item in value.keys()]
+    elif isinstance(value, (list, tuple, set)):
+        names = [str(item or "").strip() for item in value]
+    else:
+        return tuple()
+    return tuple(sorted(name for name in names if len(name) > 0))
+
+
+def _coerce_string_tuple(value: Any) -> tuple[str, ...]:
+    if isinstance(value, (list, tuple, set)) is False:
+        return tuple()
+    return tuple(str(item or "").strip() for item in value if len(str(item or "").strip()) > 0)
+
+
+def _coerce_header_aids(value: Any) -> tuple[tuple[str, str], ...]:
+    if isinstance(value, list) is False:
+        return tuple()
+    entries: list[tuple[str, str]] = []
+    for item in value:
+        if isinstance(item, dict) is False:
+            continue
+        aid_hex = _coerce_aid_hex(item.get("aid"))
+        if len(aid_hex) == 0:
+            continue
+        entries.append((aid_hex, _coerce_octet_string(item.get("version")).hex().upper()))
+    return tuple(entries)
+
+
+def _coerce_octet_string_list(value: Any) -> list[bytes]:
+    if isinstance(value, list) is False:
+        return []
+    return [
+        data
+        for data in (_coerce_octet_string(item) for item in value)
+        if len(data) > 0
+    ]
+
+
+def _coerce_oid_text(value: Any) -> str:
+    if isinstance(value, str):
+        return value.strip()
+    if isinstance(value, (list, tuple)):
+        parts: list[str] = []
+        for item in value:
+            try:
+                number = int(item)
+            except (TypeError, ValueError):
+                return ""
+            if number < 0:
+                return ""
+            parts.append(str(number))
+        return ".".join(parts)
+    return ""
+
+
+def _get_any(mapping: dict[str, Any], *keys: str) -> Any:
+    for key in keys:
+        if key in mapping:
+            return mapping.get(key)
+    return None
 
 
 def _extract_file_descriptor_dict(value: Any) -> dict[str, Any]:
@@ -1977,7 +1380,7 @@ def _consume_pin_codes(image: SimProfileImage, decoded: dict[str, Any]) -> None:
     byte so VERIFY PIN can update both fields independently.
 
     The decoded dict is routed through pySim's
-    ``ProfileElementPin`` wrapper (Phase C) so any future pySim-side
+    ``ProfileElementPin`` wrapper so any future pySim-side
     schema validation surfaces here uniformly. The wrapper is purely
     interpretive -- the local parser remains the authoritative path.
     """
@@ -2051,7 +1454,7 @@ def _consume_puk_codes(image: SimProfileImage, decoded: dict[str, Any]) -> None:
     decimal digit -- 0xAA decodes to "10/10 attempts remaining".
 
     The decoded dict is routed through pySim's ``ProfileElementPuk``
-    wrapper (Phase C) for forward-compat with upstream validation.
+    wrapper for forward-compat with upstream validation.
     """
     wrapper = pysim_pe_wrapper("pukCodes", decoded)
     source = getattr(wrapper, "decoded", decoded) if wrapper is not None else decoded
@@ -2107,7 +1510,7 @@ def _consume_security_domain(image: SimProfileImage, decoded: dict[str, Any]) ->
     Card Spec v2.3.1 Amendment D §7.5.
 
     Key parsing routes through pySim's ``ProfileElementSD`` wrapper
-    (Phase C) -- ``SecurityDomainKey.from_saip_dict`` handles the
+    -- ``SecurityDomainKey.from_saip_dict`` handles the
     ``KeyType`` enum and the ``KeyUsageQualifier`` BitStruct so we
     surface a properly packed usage byte even when the BPP encodes
     the OPTIONAL ``keyUsageQualifier`` as a multi-byte BitStruct.
@@ -2263,7 +1666,7 @@ def _consume_rfm(image: SimProfileImage, decoded: dict[str, Any]) -> None:
     226 §8.4 prohibits more than one ADF binding per RFM instance, so
     the optional ``adfRFMAccess`` is materialised verbatim.
 
-    Routes through pySim's ``ProfileElementRFM`` wrapper (Phase C);
+    Routes through pySim's ``ProfileElementRFM`` wrapper;
     the wrapper currently does no extra post-decoding but lets future
     upstream invariants surface here without re-touching the parser.
     """
@@ -2323,7 +1726,7 @@ _PYSIM_GFM_FILE_TYPE_TO_STRUCTURE: dict[str, str] = {
 def _consume_generic_file_management(image: SimProfileImage, decoded: dict[str, Any]) -> None:
     """SAIP §5.4 -- materialise a ``genericFileManagement`` PE.
 
-    Phase D: routes the PE through pySim's typed ``File`` / GFM
+    Routes the PE through pySim's typed ``File`` / GFM
     walker (see ``pysim_gfm_walk``). pySim handles the FCP decode,
     fill-pattern expansion (TS 102 222 §6.3.2.2.2) and content
     accumulation; this consumer maps the resulting ``GfmEntry`` items
@@ -2875,7 +2278,7 @@ def _consume_aka_parameter(image: SimProfileImage, decoded: dict[str, Any]) -> N
     """SAIP §5.8 -- materialise an ``akaParameter`` PE.
 
     Routes the decoded dict through pySim's ``ProfileElementAKA``
-    wrapper (Phase C). The wrapper's ``_post_decode`` runs
+    wrapper. The wrapper's ``_post_decode`` runs
     ``_fixup_sqnInit_dec``, which substitutes the asn1tools default
     placeholder ``'0x000000000000'`` with a 32-element list of 6-byte
     zeros (TS 33.102 §6.3.7 / 3GPP TS 35.205 Annex E SQN init layout).

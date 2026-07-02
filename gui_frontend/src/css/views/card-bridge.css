@@ -1,0 +1,99 @@
+/*
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+ */
+
+/* ============================================================
+ * Top-bar reader strip
+ *
+ * Moved out of the left sidebar into the top-bar runtime controls.
+ * One pill per PC/SC
+ * reader; clicking a pill activates the session bound to that
+ * reader across subsystems. Status dots are a traffic-light:
+ *   green  = reader is in an active session
+ *   yellow = reader has a card but no active session
+ *   red    = reader plugged in, no card, no session
+ * The strip is horizontally scrollable so a 15-reader bench still
+ * fits on a 13" display.
+ * ============================================================ */
+
+.topbar-readers {
+  display: flex;
+  flex: 1 1 280px;
+  align-items: center;
+  gap: 6px;
+  min-width: 180px;
+  max-width: min(36vw, 440px);
+  padding: 4px 6px;
+  background: var(--bg-elev, rgba(255, 255, 255, 0.03));
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill, 999px);
+  overflow: hidden;
+}
+
+.topbar-readers-scroll {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scroll-behavior: smooth;
+  scrollbar-width: thin;
+  padding: 2px 2px;
+}
+
+.topbar-readers-scroll::-webkit-scrollbar {
+  height: 6px;
+}
+
+.topbar-readers-scroll::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 3px;
+}
+
+.topbar-readers-hint {
+  font-size: 12px;
+  color: var(--fg-dim, var(--fg-muted));
+  padding: 4px 10px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.topbar-readers-refresh {
+  flex: 0 0 auto;
+  width: 28px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--fg);
+  cursor: pointer;
+  font-size: 14px;
+  transition: background var(--transition-fast, 120ms);
+}
+
+.topbar-readers-refresh:hover {
+  background: var(--bg-hover, var(--bg-elev));
+}
+
+.topbar-readers-refresh.is-spinning {
+  animation: topbar-readers-spin 1s linear infinite;
+}
+
+@keyframes topbar-readers-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+@media (max-width: 1040px) {
+  .topbar-readers {
+    flex-basis: 210px;
+    max-width: 260px;
+  }
+}

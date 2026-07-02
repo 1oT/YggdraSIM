@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 """Regression tests for two QoL fixes in ``Tools.ProfilePackage.saip_tool``:
 
 1. ``_prune_profile_package_cache`` caps ``.profilepackage-cache/`` to

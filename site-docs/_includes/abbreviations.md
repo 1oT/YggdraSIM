@@ -1,3 +1,8 @@
+<!--
+SPDX-License-Identifier: GPL-3.0-or-later
+Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+-->
+
 *[AID]: Application Identifier
 *[APDU]: Application Protocol Data Unit (ISO 7816-4)
 *[ARA-M]: Access Rule Application Master
@@ -30,7 +35,6 @@
 *[ICCID]: Integrated Circuit Card Identifier
 *[IJC]: Intermediate Java Card
 *[IPAd]: IoT Profile Assistant, device-side
-*[IPAe]: IoT Profile Assistant, eUICC-side
 *[ISD-R]: Issuer Security Domain - Root
 *[ISD-P]: Issuer Security Domain - Profile
 *[ISIM]: IP Multimedia Services Identity Module

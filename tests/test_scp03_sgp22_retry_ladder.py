@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 import datetime
 import io
 import unittest
@@ -113,7 +116,7 @@ class StkBasicRetryTransport:
             return bytes.fromhex(PROFILE_LIST_HEX), 0x90, 0x00
         if normalized == "0070000001":
             return b"", 0x68, 0x81
-        if normalized == "80AA00000DA90B8100820101830107840101":
+        if normalized == "80AA000005A903840101":
             return b"", 0x90, 0x00
         if normalized == "80100000010C":
             return b"", 0x90, 0x00
@@ -232,7 +235,7 @@ class Sgp22RetryLadderTests(unittest.TestCase):
         )
         self.assertEqual(
             self.manager._decode_value(0x90, bytes.fromhex("01"), 0xBF22),
-            "ipae (IPAe is active) (1)",
+            "Mode 1 active (1)",
         )
         self.assertIn(
             "ppr1",
@@ -550,7 +553,7 @@ class Sgp22RetryLadderTests(unittest.TestCase):
         buffer = io.StringIO()
         with redirect_stdout(buffer):
             self.manager._print_pipe_line("EuiccConfiguredData", "Present", 0)
-            self.manager._print_pipe_line("SM-DP+ Address", "smdpplus2.esim.tst.1ot.mobi", 1)
+            self.manager._print_pipe_line("SM-DP+ Address", "smdpplus2.smdpp.example.test", 1)
 
         rendered_lines = buffer.getvalue().splitlines()
         self.assertEqual(len(rendered_lines), 2)

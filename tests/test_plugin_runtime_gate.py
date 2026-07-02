@@ -1,9 +1,11 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 """Tests for the plugin-loading gate in ``yggdrasim_common.plugin_runtime``.
 
-The gate is intentionally default-on so first-party plugins shipped in
-the tracked tree (``plugins/polling_plugin.py`` — the ``POLL`` and
-``IPAE-*`` watchdog backers) load without an env dance. This module
-pins the exact tri-state semantics and the one-shot announce banner.
+The gate is intentionally default-deny because plugins are executable
+operator-supplied Python loaded from the active runtime root. This module
+pins the exact opt-in semantics and the one-shot announce banner.
 """
 
 from __future__ import annotations
@@ -60,8 +62,8 @@ def _write_demo_plugin(target_dir: Path) -> Path:
     return plugin_path
 
 
-class PluginGateDefaultOnTests(unittest.TestCase):
-    def test_loads_without_any_env_flag(self) -> None:
+class PluginGateDefaultDenyTests(unittest.TestCase):
+    def test_blocks_without_any_env_flag(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             plugin_dir = Path(temp_dir)
             _write_demo_plugin(plugin_dir)
@@ -72,10 +74,13 @@ class PluginGateDefaultOnTests(unittest.TestCase):
                 return_value=str(plugin_dir),
             ):
                 manager.ensure_loaded()
-            self.assertTrue(manager.has_capability("demo"))
-            self.assertNotIn("__gate__", manager.load_errors())
+            self.assertFalse(manager.has_capability("demo"))
+            errors = manager.load_errors()
+            self.assertIn("__gate__", errors)
+            self.assertIn("disabled by default", errors["__gate__"])
+            self.assertIn(_ALLOW, errors["__gate__"])
 
-    def test_explicit_allow_truthy_still_loads(self) -> None:
+    def test_explicit_allow_truthy_loads(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             plugin_dir = Path(temp_dir)
             _write_demo_plugin(plugin_dir)
@@ -135,6 +140,22 @@ class PluginGateHardLockTests(unittest.TestCase):
             self.assertIn("__gate__", errors)
             self.assertIn(_ALLOW, errors["__gate__"])
 
+    def test_unrecognised_allow_value_blocks_loading(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            plugin_dir = Path(temp_dir)
+            _write_demo_plugin(plugin_dir)
+            manager = plugin_runtime.PluginManager()
+            with _EnvScope(**{_ALLOW: "maybe", _DISALLOW: None}), mock.patch.object(
+                plugin_runtime,
+                "ensure_runtime_dir",
+                return_value=str(plugin_dir),
+            ):
+                manager.ensure_loaded()
+            self.assertFalse(manager.has_capability("demo"))
+            errors = manager.load_errors()
+            self.assertIn("__gate__", errors)
+            self.assertIn("not truthy", errors["__gate__"])
+
 
 class PluginGateAnnounceBannerTests(unittest.TestCase):
     def test_announce_banner_fires_once_for_first_party_plugin(self) -> None:
@@ -148,7 +169,7 @@ class PluginGateAnnounceBannerTests(unittest.TestCase):
                 banner_stream.append(message)
                 return len(message)
 
-            with _EnvScope(**{_ALLOW: None, _DISALLOW: None}), mock.patch.object(
+            with _EnvScope(**{_ALLOW: "1", _DISALLOW: None}), mock.patch.object(
                 plugin_runtime,
                 "ensure_runtime_dir",
                 return_value=str(plugin_dir),
@@ -159,7 +180,9 @@ class PluginGateAnnounceBannerTests(unittest.TestCase):
             announce_lines = [line for line in banner_stream if line.startswith("[plugins]")]
             self.assertEqual(len(announce_lines), 1)
             self.assertIn("demo_plugin.py", announce_lines[0])
-            self.assertIn(_DISALLOW, announce_lines[0])
+            self.assertIn(f"{_ALLOW}=1", announce_lines[0])
+            self.assertIn(f"set {_DISALLOW}=1", announce_lines[0])
+            self.assertIn("hard-lock plugin loading", announce_lines[0])
 
 
 if __name__ == "__main__":

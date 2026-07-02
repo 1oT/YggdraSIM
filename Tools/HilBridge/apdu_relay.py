@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """HIL-Bridge APDU relay: forwards C-APDUs from a network client to the connected physical SIM and returns R-APDUs."""
 from __future__ import annotations
@@ -21,7 +24,7 @@ from yggdrasim_common.card_bridge_auth import (
 APDU_RELAY_PATH = "/apdu"
 APDU_RELAY_PING_PATH = "/ping"
 APDU_RELAY_STATUS_PATH = "/status"
-APDU_RELAY_MODEM_REFRESH_PATH = "/modem/refresh"
+APDU_RELAY_CARD_RESET_PATH = "/card/reset"
 
 # Reject request bodies larger than this. An extended APDU tops out at
 # ~65 KiB of payload; the hex-encoded JSON envelope still fits
@@ -166,10 +169,10 @@ class _ApduRelayHandler(BaseHTTPRequestHandler):
                 return
             self._handle_apdu_post()
             return
-        if normalized_path == APDU_RELAY_MODEM_REFRESH_PATH:
+        if normalized_path == APDU_RELAY_CARD_RESET_PATH:
             if self._enforce_authorization() is False:
                 return
-            self._handle_modem_refresh_post()
+            self._handle_card_reset_post()
             return
         self._send_text_response(HTTPStatus.NOT_FOUND, b"not found\n")
 
@@ -324,17 +327,16 @@ class _ApduRelayHandler(BaseHTTPRequestHandler):
             },
         )
 
-    def _handle_modem_refresh_post(self) -> None:
+    def _handle_card_reset_post(self) -> None:
         try:
             request_json = self._read_request_json()
         except ValueError as exc:
             self._send_json_response(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
             return
 
-        mode = str(request_json.get("mode", "") or "").strip()
         session_id = str(request_json.get("sessionId", "") or "").strip()
         try:
-            payload = self.server.service.request_modem_refresh(mode=mode, session_id=session_id)
+            payload = self.server.service.request_card_reset(session_id=session_id)
         except Exception as exc:
             self._send_json_response(HTTPStatus.SERVICE_UNAVAILABLE, {"error": str(exc)})
             return
@@ -348,12 +350,12 @@ class HilBridgeApduRelayService:
         *,
         exchange_callback: Callable[[bytes], tuple[bytes, int, int]] | Callable[..., tuple[bytes, int, int]],
         status_callback: Callable[[], dict[str, Any]],
-        modem_refresh_callback: Callable[[str], dict[str, Any]] | Callable[..., dict[str, Any]] | None = None,
+        card_reset_callback: Callable[[], dict[str, Any]] | Callable[..., dict[str, Any]] | None = None,
     ) -> None:
         self._config = config
         self._exchange_callback = exchange_callback
         self._status_callback = status_callback
-        self._modem_refresh_callback = modem_refresh_callback
+        self._card_reset_callback = card_reset_callback
         self._server: _ApduRelayHttpServer | None = None
         self._thread: threading.Thread | None = None
         self._peer_throttle = _PeerThrottle(
@@ -388,8 +390,8 @@ class HilBridgeApduRelayService:
         return self.base_url + APDU_RELAY_STATUS_PATH
 
     @property
-    def modem_refresh_url(self) -> str:
-        return self.base_url + APDU_RELAY_MODEM_REFRESH_PATH
+    def card_reset_url(self) -> str:
+        return self.base_url + APDU_RELAY_CARD_RESET_PATH
 
     @property
     def expected_token(self) -> str:
@@ -469,8 +471,8 @@ class HilBridgeApduRelayService:
         payload.setdefault("url", self.apdu_url)
         payload.setdefault("apduUrl", self.apdu_url)
         payload.setdefault("statusUrl", self.status_url)
-        if self._modem_refresh_callback is not None:
-            payload.setdefault("modemRefreshUrl", self.modem_refresh_url)
+        if self._card_reset_callback is not None:
+            payload.setdefault("cardResetUrl", self.card_reset_url)
         # Surface auth posture so SSH-tunnelled consumers can confirm
         # they're hitting a daemon that requires a token. We never
         # publish the token itself — the fingerprint is enough for an
@@ -483,10 +485,10 @@ class HilBridgeApduRelayService:
     def exchange_apdu(self, apdu: bytes, *, session_id: str = "") -> tuple[bytes, int, int]:
         return self._exchange_callback(apdu, session_id=session_id)
 
-    def request_modem_refresh(self, *, mode: str = "", session_id: str = "") -> dict[str, Any]:
-        if self._modem_refresh_callback is None:
-            raise RuntimeError("Modem REFRESH control is not enabled.")
-        return self._modem_refresh_callback(mode, session_id=session_id)
+    def request_card_reset(self, *, session_id: str = "") -> dict[str, Any]:
+        if self._card_reset_callback is None:
+            raise RuntimeError("Card reset control is not enabled.")
+        return self._card_reset_callback(session_id=session_id)
 
     def record_apdu_audit(
         self,

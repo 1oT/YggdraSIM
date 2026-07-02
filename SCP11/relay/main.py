@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """SCP11-relay entry point: initialises relay runtime components and starts the operator REPL."""
 import argparse
@@ -124,7 +127,7 @@ class SGP22Client:
             print(f"[*] {warning}")
 
     def run_flow(self):
-        """Execute a single profile-download flow over the relay transport."""
+        """Execute a single profile-download flow through the compatibility namespace."""
         try:
             self._run_startup_preflight()
             self._build_runtime()

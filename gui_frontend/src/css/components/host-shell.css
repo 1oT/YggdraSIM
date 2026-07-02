@@ -1,0 +1,129 @@
+/*
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+ */
+
+/* Advanced > Host shell -------------------------------------------------- */
+
+.host-shell-disabled {
+  margin-top: 12px;
+  padding: 14px 16px;
+  background: var(--bg-elev-2);
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-md);
+}
+
+.host-shell-disabled strong {
+  display: block;
+  margin-bottom: 6px;
+  color: var(--text-secondary);
+}
+
+.host-shell-controls {
+  align-items: center;
+}
+
+.host-shell-controls .tool-meta {
+  margin: 0 0 0 auto;
+  padding: 3px 10px;
+  background: var(--bg-elev-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  font-size: 11px;
+  letter-spacing: 0.05em;
+  text-transform: lowercase;
+}
+
+.host-shell-device-strip {
+  align-items: center;
+  gap: 8px;
+}
+
+.host-shell-device-strip select {
+  min-width: 280px;
+}
+
+.host-shell-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.host-shell-decoded {
+  margin-top: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-elev-1);
+}
+
+.host-shell-decoded-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+
+.host-shell-decoded-rows {
+  max-height: 220px;
+  overflow-y: auto;
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.host-shell-decoded-row {
+  display: grid;
+  grid-template-columns: 16px 120px 1fr;
+  gap: 8px;
+  padding: 4px 10px;
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+  align-items: start;
+}
+
+.host-shell-decoded-row:hover {
+  background: var(--bg-elev-2);
+}
+
+.host-shell-decoded-row.dir-tx .host-shell-decoded-glyph {
+  color: var(--accent);
+}
+
+.host-shell-decoded-row.dir-rx .host-shell-decoded-glyph {
+  color: var(--success, #4caf50);
+}
+
+.host-shell-decoded-kind {
+  font-weight: 600;
+  color: var(--text-secondary);
+  text-transform: lowercase;
+}
+
+.host-shell-decoded-raw {
+  color: var(--text-primary);
+  word-break: break-all;
+}
+
+.host-shell-decoded-detail {
+  grid-column: 1 / -1;
+  margin: 4px 0 0 24px;
+  padding: 6px 10px;
+  background: var(--bg-elev-2);
+  border-radius: var(--radius-sm);
+  white-space: pre-wrap;
+  font-size: 11px;
+  color: var(--text-secondary);
+  display: none;
+}
+
+.host-shell-decoded-row:hover .host-shell-decoded-detail {
+  display: block;
+}
+

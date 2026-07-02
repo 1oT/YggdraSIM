@@ -1,14 +1,24 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 name: Docker Image
 
 on:
   push:
-    branches: [main, master]
+    branches: [main, master, "release/**"]
+    tags:
+      - "v*"
   pull_request:
-    branches: [main, master]
+    branches: [main, master, "release/**"]
   workflow_dispatch:
 
 permissions:
   contents: read
+  packages: write
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository_owner }}/yggdrasim
 
 jobs:
   docker:
@@ -40,3 +50,40 @@ jobs:
           docker run --rm yggdrasim-ci:local yggdrasim-scp11 --version
           docker run --rm yggdrasim-ci:local sh -c 'id -u && test "$(id -u)" = "1000"'
 
+      - name: Log in to GHCR
+        if: github.event_name == 'push'
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ env.REGISTRY }}
+          # GITHUB_TOKEN works when the package is linked to this repo and
+          # Actions access is granted. GHCR_TOKEN/GHCR_USERNAME are optional
+          # fallbacks for private or pre-existing user packages that return
+          # 403 during blob HEAD checks even though this workflow requests
+          # ``packages: write``.
+          username: ${{ secrets.GHCR_USERNAME != '' && secrets.GHCR_USERNAME || github.actor }}
+          password: ${{ secrets.GHCR_TOKEN != '' && secrets.GHCR_TOKEN || github.token }}
+
+      - name: Extract Docker metadata
+        if: github.event_name == 'push'
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=tag
+            type=sha,prefix=sha-
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Build and push Docker image
+        if: github.event_name == 'push'
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: ./Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

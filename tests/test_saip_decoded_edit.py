@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 import unittest
 
 from Tools.ProfilePackage.saip_decoded_edit import (
@@ -440,7 +443,7 @@ class EnumeratePeDecodableFieldsTests(unittest.TestCase):
     def test_enumerates_fillFileContent_for_iccid_and_imsi(self) -> None:
         pe_value = {
             "ef-iccid": [
-                {"@": ["fillFileContent", {_TAG_BYTES: "98880000000000000000"}]},
+                {"@": ["fillFileContent", {_TAG_BYTES: "98640000000000000000"}]},
             ],
             "ef-imsi": [
                 {"@": ["fillFileContent", {_TAG_BYTES: "0829012345678901234F"}]},
@@ -455,6 +458,118 @@ class EnumeratePeDecodableFieldsTests(unittest.TestCase):
             self.assertEqual(entry["pe_section_key"], "usim")
             self.assertIn(entry["last_ef_key"], ("ef-iccid", "ef-imsi"))
             self.assertIsInstance(entry["model"], dict)
+
+    def test_gfm_df_gsm_fill_content_resolves_to_imsi_editor(self) -> None:
+        pe_value = {
+            "fileManagementCMD": [
+                [
+                    {"@": ["filePath", {_TAG_BYTES: "7F20"}]},
+                    {"@": [
+                        "createFCP",
+                        {
+                            "fileDescriptor": {_TAG_BYTES: "4121"},
+                            "fileID": {_TAG_BYTES: "6F07"},
+                        },
+                    ]},
+                    {"@": ["fillFileContent", {_TAG_BYTES: "0829012345678901234F"}]},
+                ],
+            ],
+        }
+
+        entries = enumerate_pe_decodable_fields(
+            pe_value,
+            pe_section_key="genericFileManagement",
+        )
+        content = next(
+            entry for entry in entries if entry["field_name"] == "fillFileContent"
+        )
+        self.assertEqual(content["last_ef_key"], "ef-imsi")
+        self.assertEqual(content["gfm_file_path"], "fileManagementCMD[0][1]")
+        self.assertIn("imsi", content["model"]["payload"])
+
+    def test_gfm_adf_usim_fill_content_resolves_to_service_table_editor(self) -> None:
+        pe_value = {
+            "fileManagementCMD": [
+                [
+                    {"@": ["filePath", {_TAG_BYTES: "7FF0"}]},
+                    {"@": [
+                        "createFCP",
+                        {
+                            "fileDescriptor": {_TAG_BYTES: "4121"},
+                            "fileID": {_TAG_BYTES: "6F38"},
+                        },
+                    ]},
+                    {"@": ["fillFileContent", {_TAG_BYTES: "FFFE"}]},
+                ],
+            ],
+        }
+
+        entries = enumerate_pe_decodable_fields(
+            pe_value,
+            pe_section_key="genericFileManagement",
+        )
+        content = next(
+            entry for entry in entries if entry["field_name"] == "fillFileContent"
+        )
+        self.assertEqual(content["last_ef_key"], "ef-ust")
+        self.assertEqual(content["gfm_file_path"], "fileManagementCMD[0][1]")
+        self.assertEqual(content["model"]["editor_kind"], "service_table")
+
+    def test_gfm_df_wlan_fill_content_resolves_to_wlan_editor(self) -> None:
+        pe_value = {
+            "fileManagementCMD": [
+                [
+                    {"@": ["filePath", {_TAG_BYTES: "7FF05F40"}]},
+                    {"@": [
+                        "createFCP",
+                        {
+                            "fileDescriptor": {_TAG_BYTES: "4121"},
+                            "fileID": {_TAG_BYTES: "4F41"},
+                        },
+                    ]},
+                    {"@": ["fillFileContent", {_TAG_BYTES: "32F410FFFF"}]},
+                ],
+            ],
+        }
+
+        entries = enumerate_pe_decodable_fields(
+            pe_value,
+            pe_section_key="genericFileManagement",
+        )
+        content = next(
+            entry for entry in entries if entry["field_name"] == "fillFileContent"
+        )
+        self.assertEqual(content["last_ef_key"], "ef-uplmnwlan")
+        self.assertEqual(content["gfm_file_path"], "fileManagementCMD[0][1]")
+        self.assertEqual(content["model"]["editor_kind"], "roundtrip_decoded")
+
+    def test_gfm_adf_isim_duplicate_fid_resolves_to_ist_editor(self) -> None:
+        pe_value = {
+            "fileManagementCMD": [
+                [
+                    {"@": ["filePath", {_TAG_BYTES: "3F007FF2"}]},
+                    {"@": [
+                        "createFCP",
+                        {
+                            "fileDescriptor": {_TAG_BYTES: "4121"},
+                            "fileID": {_TAG_BYTES: "6F07"},
+                        },
+                    ]},
+                    {"@": ["fillFileContent", {_TAG_BYTES: "00"}]},
+                ],
+            ],
+        }
+
+        entries = enumerate_pe_decodable_fields(
+            pe_value,
+            pe_section_key="genericFileManagement",
+        )
+        content = next(
+            entry for entry in entries if entry["field_name"] == "fillFileContent"
+        )
+        self.assertEqual(content["last_ef_key"], "ef-ist")
+        self.assertEqual(content["gfm_file_path"], "fileManagementCMD[0][1]")
+        self.assertEqual(content["model"]["editor_kind"], "service_table")
 
     def test_descends_into_file_descriptor_subfields(self) -> None:
         pe_value = {
@@ -491,7 +606,7 @@ class EnumeratePeDecodableFieldsTests(unittest.TestCase):
     def test_rel_path_round_trips_back_to_raw_value(self) -> None:
         pe_value = {
             "ef-iccid": [
-                {"@": ["fillFileContent", {_TAG_BYTES: "98880000000000000000"}]},
+                {"@": ["fillFileContent", {_TAG_BYTES: "98640000000000000000"}]},
             ],
         }
         entries = enumerate_pe_decodable_fields(pe_value, pe_section_key="usim")

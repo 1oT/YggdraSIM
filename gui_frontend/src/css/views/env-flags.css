@@ -1,0 +1,158 @@
+/*
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+ */
+
+/* ============================================================
+ * Contextual FS-Admin action bar
+ *
+ * Lives inside the FCP preview header (``.cc-fcp-header``) —
+ * renders right after the ``path:`` and ``fid:`` chips, gated by
+ * the selected-file kind. Replaces the old ribbon-hosted "Files"
+ * tab: operators now see exactly the actions that apply to the
+ * node they just clicked, and nothing else. Disabled buttons
+ * stay visible (as opposed to hidden) so operators can *discover*
+ * the rule — the tooltip explains *why* the button is greyed out
+ * ("CREATE FILE is issued under a DF — select MF / a DF / an ADF
+ * first").
+ * ============================================================ */
+
+.cc-fcp-header {
+  gap: 8px 12px;
+  align-items: center;
+  row-gap: 8px;
+}
+
+/* Selected-file kind chip. Echoes the classifier label next to
+   the fid chip so operators know what type of node they're
+   staring at without reading the FCP block. Colour-coded lightly
+   so DFs vs EFs are scannable at a glance. */
+.cc-fs-kind {
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+.cc-fs-kind.cc-fs-kind--df {
+  background: rgba(74, 144, 226, 0.18);
+  border-color: rgba(74, 144, 226, 0.4);
+}
+
+.cc-fs-kind.cc-fs-kind--application {
+  background: rgba(170, 110, 220, 0.18);
+  border-color: rgba(170, 110, 220, 0.4);
+}
+
+.cc-fs-kind.cc-fs-kind--transparent,
+.cc-fs-kind.cc-fs-kind--linear,
+.cc-fs-kind.cc-fs-kind--cyclic {
+  background: rgba(63, 185, 80, 0.15);
+  border-color: rgba(63, 185, 80, 0.35);
+}
+
+.cc-fs-kind.cc-fs-kind--unknown {
+  background: var(--bg-hover);
+  border-color: var(--border);
+  color: var(--fg-muted);
+}
+
+/* Action strip wrapper — pushes itself to the right when the
+   header has room (margin-left:auto), otherwise wraps under the
+   chips. Two sub-groups inside: file-scoped actions + a small
+   "Card" group for SUSPEND so it can't be confused for a file op. */
+.cc-fs-actions {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-left: auto;
+  padding: 2px 0;
+}
+
+.cc-fs-actions-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 6px;
+  background: var(--bg-elev, rgba(255, 255, 255, 0.03));
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill, 999px);
+}
+
+.cc-fs-actions-group--card {
+  background: var(--bg-danger-soft, rgba(217, 83, 79, 0.08));
+  border-color: var(--err-soft, rgba(217, 83, 79, 0.25));
+}
+
+.cc-fs-actions-hint {
+  font-size: 12px;
+  color: var(--fg-muted);
+  padding: 3px 10px;
+  font-style: italic;
+}
+
+/* The pill buttons themselves. Enabled state mirrors the compact
+   ``.btn`` small variant — tight padding, subtle hover. Danger
+   variants (DELETE / RESIZE / SUSPEND / TERMINATE-via-Lifecycle)
+   tint red on hover so fat-fingering is visually loud. */
+.cc-fs-action-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 12px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill, 999px);
+  color: var(--fg);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.25;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background var(--transition-fast, 120ms),
+              border-color var(--transition-fast, 120ms),
+              color var(--transition-fast, 120ms);
+}
+
+.cc-fs-action-btn:hover:not(.is-disabled) {
+  background: var(--bg-hover, var(--bg-elev));
+  border-color: var(--accent-soft, var(--border));
+}
+
+.cc-fs-action-btn:focus-visible {
+  outline: 2px solid var(--accent, #4a90e2);
+  outline-offset: 2px;
+}
+
+.cc-fs-action-btn.is-danger {
+  color: var(--err, #d9534f);
+  border-color: rgba(217, 83, 79, 0.35);
+}
+
+.cc-fs-action-btn.is-danger:hover:not(.is-disabled) {
+  background: rgba(217, 83, 79, 0.12);
+  border-color: var(--err, #d9534f);
+  color: var(--err, #d9534f);
+}
+
+/* Disabled state — greyed out but still visible. Keeping the
+   button in the DOM is deliberate: it's a teaching aid, not noise.
+   Operators who used to hunt the ribbon for "where is CREATE FILE?"
+   can now *see* the button sitting dimmed with a tooltip that
+   explains what selection to make first. */
+.cc-fs-action-btn.is-disabled,
+.cc-fs-action-btn[disabled] {
+  color: var(--fg-muted);
+  background: transparent;
+  border-color: var(--border);
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.cc-fs-action-btn.is-disabled.is-danger {
+  /* A disabled danger button has no "red" meaning — fall back
+     to the neutral dim look so the red doesn't falsely suggest
+     it's armed. */
+  color: var(--fg-muted);
+  border-color: var(--border);
+}
+

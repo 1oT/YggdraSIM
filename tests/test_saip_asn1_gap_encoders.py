@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 """Roundtrip tests for the tier-1 and tier-2 gap encoders.
 
 Each encoder is validated against two invariants:
@@ -55,19 +58,19 @@ from Tools.ProfilePackage.saip_asn1_encode import (
 
 class SpnEncoderTests(unittest.TestCase):
     def test_identity_roundtrip(self) -> None:
-        raw = bytes([0x01]) + b"Acme Mobile"
+        raw = bytes([0x01]) + b"Example Mobile"
         decoded = _decode_spn(raw.hex())
         self.assertIsNotNone(decoded)
         encoded = encode_ef_spn(dict(decoded), target_length=len(raw))
         self.assertEqual(encoded[: len(raw)], raw)
 
     def test_change_provider_name(self) -> None:
-        raw = bytes([0x01]) + b"Acme" + (b"\xFF" * 10)
+        raw = bytes([0x01]) + b"Example" + (b"\xFF" * 10)
         decoded = _decode_spn(raw.hex())
-        decoded["serviceProviderName"] = "NewCo"
+        decoded["serviceProviderName"] = "LabName"
         encoded = encode_ef_spn(dict(decoded), target_length=len(raw))
         redecoded = _decode_spn(encoded.hex())
-        self.assertEqual(redecoded["serviceProviderName"], "NewCo")
+        self.assertEqual(redecoded["serviceProviderName"], "LabName")
 
     def test_dispatcher_routes_ef_spn(self) -> None:
         self.assertIn("ef-spn", roundtrip_capable_ef_keys())
@@ -204,7 +207,7 @@ class PnnEncoderTests(unittest.TestCase):
         # byte (0x80). The encoder can't synthesize that prefix, so we
         # rely on the original-hex shortcut to preserve the record byte
         # for byte when the decoded text matches.
-        raw = bytes.fromhex("43" + "06" + "80") + b"Acme " + bytes.fromhex("45" + "03") + b"AcM"
+        raw = bytes.fromhex("43" + "09" + "80") + b"Example " + bytes.fromhex("45" + "03") + b"ExM"
         decoded = _decode_pnn_record(raw.hex())
         payload = dict(decoded)
         payload["_ygg_original_hex"] = raw.hex().upper()
@@ -212,10 +215,10 @@ class PnnEncoderTests(unittest.TestCase):
         self.assertEqual(encoded, raw)
 
     def test_synthesized_record_roundtrips(self) -> None:
-        encoded = encode_ef_pnn_record({"fullName": "Acme", "shortName": "Ac"})
+        encoded = encode_ef_pnn_record({"fullName": "Example", "shortName": "Ex"})
         redecoded = _decode_pnn_record(encoded.hex())
-        self.assertEqual(redecoded["fullName"], "Acme")
-        self.assertEqual(redecoded["shortName"], "Ac")
+        self.assertEqual(redecoded["fullName"], "Example")
+        self.assertEqual(redecoded["shortName"], "Ex")
 
     def test_dispatcher_routes_ef_pnn(self) -> None:
         self.assertIn("ef-pnn", roundtrip_capable_ef_keys())
@@ -462,7 +465,7 @@ class DispatcherIntegrationTests(unittest.TestCase):
     def test_dispatcher_returns_bytes_for_spn(self) -> None:
         result = encode_decoded_roundtrip_ef_content(
             "ef-spn",
-            {"displayCondition": "0x01", "serviceProviderName": "Acme"},
+            {"displayCondition": "0x01", "serviceProviderName": "Example"},
             target_length=16,
         )
         self.assertIsInstance(result, bytes)

@@ -1,43 +1,15 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """Simulated SIM persistent state: profile FS nodes, auth config, PIN/PUK entries, and SD key records serialised to JSON."""
 from __future__ import annotations
 
-import os
 from dataclasses import dataclass, field
 from typing import Any
 
 
 DEFAULT_SIM_ATR = bytes.fromhex("3B9F96801FC78031A073BE21136743200718000001A5")
-
-
-# SGP.32 §3.5 IPA-poll bearer defaults. The simulator ships an APN of
-# ``internet.apn`` because every commercial test SIM has at least that
-# context activated; ``8.8.8.8`` is the public Google resolver used to
-# translate the eIM FQDN to an IPv4 address before OPEN CHANNEL is
-# emitted (ETSI TS 102 223 §8.59 "Other address" requires a literal
-# IPv4/IPv6 destination, not an FQDN). Both knobs are env-overridable
-# at process start so a CI lab or operator harness can pin a different
-# APN / DNS server without editing source.
-_DEFAULT_IPA_POLL_APN: str = "internet.apn"
-_DEFAULT_IPA_POLL_DNS_SERVER: str = "8.8.8.8"
-
-
-def _env_str(name: str, fallback: str) -> str:
-    value = os.environ.get(name, "")
-    if value is None:
-        return fallback
-    cleaned = str(value).strip()
-    if len(cleaned) == 0:
-        return fallback
-    return cleaned
-
-
-def _resolve_default_ipa_poll_apn() -> str:
-    return _env_str("YGGDRASIM_SIM_IPA_POLL_APN", _DEFAULT_IPA_POLL_APN)
-
-
-def _resolve_default_ipa_poll_dns_server() -> str:
-    return _env_str("YGGDRASIM_SIM_IPA_POLL_DNS_SERVER", _DEFAULT_IPA_POLL_DNS_SERVER)
 
 
 def _default_stk_imei_bcd() -> bytes:
@@ -64,10 +36,11 @@ def _default_stk_imei_bcd() -> bytes:
 def _default_stk_location_information() -> bytes:
     """ETSI TS 102 223 §8.19 / 3GPP TS 24.008 §10.5.1.3 GSM Location.
 
-    7 bytes: 3-byte packed-BCD PLMN (MCC=262 / MNC=01 / Telekom DE)
-    + 2-byte LAC (0x0001) + 2-byte Cell ID (0x0001).
+    7 bytes: 3-byte packed-BCD PLMN (MCC=001 / MNC=01, the 3GPP TS
+    23.003 §2.2 test PLMN) + 2-byte LAC (0x0001) + 2-byte Cell ID
+    (0x0001).
     """
-    return bytes.fromhex("62F210000100 01".replace(" ", ""))
+    return bytes.fromhex("00F110000100 01".replace(" ", ""))
 
 
 @dataclass
@@ -216,6 +189,61 @@ class SimProfileRfmInstance:
 
 
 @dataclass
+class SimProfileCdmaParameter:
+    """SAIP ``cdmaParameter`` ProfileElement projection."""
+
+    authentication_key: bytes = b""
+    ssd: bytes = b""
+    hrpd_access_authentication_data: bytes = b""
+    simple_ip_authentication_data: bytes = b""
+    mobile_ip_authentication_data: bytes = b""
+
+
+@dataclass
+class SimProfileApplicationPackage:
+    """SAIP ``application.loadBlock`` package payload."""
+
+    load_package_aid: str = ""
+    security_domain_aid: str = ""
+    non_volatile_code_limit: bytes = b""
+    load_block_object: bytes = b""
+
+
+@dataclass
+class SimProfileApplicationInstance:
+    """SAIP ``application.instanceList`` application registry entry."""
+
+    application_load_package_aid: str = ""
+    class_aid: str = ""
+    instance_aid: str = ""
+    privileges: bytes = b""
+    lifecycle_state: int = 0x07
+    application_specific_parameters: bytes = b""
+    uicc_toolkit_parameters: bytes = b""
+    uicc_access_parameters: bytes = b""
+    process_data: list[bytes] = field(default_factory=list)
+
+
+@dataclass
+class SimProfileNonStandardBlob:
+    """SAIP ``nonStandard`` vendor extension payload."""
+
+    issuer_oid: str = ""
+    content: bytes = b""
+
+
+@dataclass
+class SimProfileSsimEaptlsBundle:
+    """SAIP 3.4 ``ssimEaptls`` certificate/key bundle."""
+
+    instance_aid: str = ""
+    ca_certificate: bytes = b""
+    client_certificate: bytes = b""
+    client_certificate_chain: bytes = b""
+    client_private_key: bytes = b""
+
+
+@dataclass
 class SimProfileImage:
     profile_name: str = ""
     iccid: str = ""
@@ -242,6 +270,20 @@ class SimProfileImage:
     # but available to ``SIMCARD.scp80`` so OTA dispatch can be wired
     # up without re-parsing the BPP.
     rfm_instances: list[SimProfileRfmInstance] = field(default_factory=list)
+    # ProfileHeader metadata not already projected to top-level fields.
+    header_major_version: int = 0
+    header_minor_version: int = 0
+    header_pol: bytes = b""
+    header_mandatory_services: tuple[str, ...] = field(default_factory=tuple)
+    header_mandatory_gfste: tuple[str, ...] = field(default_factory=tuple)
+    header_mandatory_aids: tuple[tuple[str, str], ...] = field(default_factory=tuple)
+    header_iot_pix: bytes = b""
+    # SAIP metadata PEs that do not directly materialise EF nodes.
+    cdma_parameter: SimProfileCdmaParameter | None = None
+    application_packages: list[SimProfileApplicationPackage] = field(default_factory=list)
+    application_instances: list[SimProfileApplicationInstance] = field(default_factory=list)
+    non_standard_blobs: list[SimProfileNonStandardBlob] = field(default_factory=list)
+    ssim_eaptls_bundles: list[SimProfileSsimEaptlsBundle] = field(default_factory=list)
 
 
 @dataclass
@@ -433,7 +475,7 @@ class SimEuiccInfoConfig:
 
 @dataclass
 class SimEuiccConfiguredData:
-    root_smds_address: str = "lpa.ds.gsma.com"
+    root_smds_address: str = "root-smds.example.com"
     additional_root_smds_addresses: list[str] = field(
         default_factory=lambda: ["smds2.yggdrasim.test", "smds3.yggdrasim.test"]
     )
@@ -492,6 +534,10 @@ class SimToolkitState:
         ]
     )
     event_list: list[int] = field(default_factory=lambda: [0x03, 0x09, 0x0A, 0x12])
+    poll_strategy: str = "timer"
+    timer_management_seconds: int = 30
+    timer_management_id: int = 1
+    timer_management_auto_rearm: bool = True
     poll_interval_seconds: int = 60
     language: bytes = b"en"
     location_information: bytes = field(default_factory=_default_stk_location_information)
@@ -530,6 +576,9 @@ class SimToolkitState:
     open_channel_endpoint: str = ""
     open_channel_network_access_name: str = ""
     open_channel_transport_protocol_type: int = 0
+    bip_bootstrap_phase: str = ""
+    bip_bootstrap_dns_query: bytes = b""
+    bip_bootstrap_resolved_address: str = ""
     # ETSI TS 102 223 §8.7 / §8.56 — channel identifier reported by
     # the terminal in the OPEN CHANNEL TR channel-status TLV
     # (``38 02 [byte1] [byte2]``, channel id = byte1 & 0x07). Stored
@@ -570,208 +619,8 @@ class SimToolkitState:
     # "not running".
     timer_table: dict[int, int] = field(default_factory=dict)
     last_expired_timer_id: int = 0
-    # SGP.32 §3.5 IPA polling needs the modem to deliver an ENVELOPE
-    # (Timer Expiration / D7) at a deterministic cadence. POLL INTERVAL
-    # alone only schedules STATUS heartbeats and never produces the D7
-    # envelope, so the eIM poll trigger never fires. The
-    # bring-up therefore prefers TIMER MANAGEMENT START with a
-    # spec-shaped Timer Identifier (A4) + Timer Value (A5) pair; the
-    # legacy POLL INTERVAL path is retained as a fallback strategy for
-    # paired tests / older harnesses that asserted the old wire shape.
-    #
-    # ``poll_strategy`` controls what ``_bootstrap_commands`` enqueues
-    # right after TERMINAL PROFILE:
-    #   - "timer"         (default) -- TIMER MANAGEMENT START only.
-    #   - "poll_interval"            -- POLL INTERVAL only (legacy).
-    #   - "both"                     -- TIMER MANAGEMENT START *and*
-    #                                   POLL INTERVAL (defensive when
-    #                                   the modem rejects one of the
-    #                                   two qualifiers but still
-    #                                   honours the other).
-    #   - "off"                      -- neither command is queued.
-    # ``timer_management_seconds`` / ``timer_management_id`` define the
-    # initial timer setpoint; ``timer_management_auto_rearm`` controls
-    # whether the simulator re-enqueues the same TIMER MANAGEMENT START
-    # when the matching D7 envelope arrives, so the poll loop keeps
-    # firing without external orchestration.
-    poll_strategy: str = "timer"
-    timer_management_seconds: int = 30
-    timer_management_id: int = 1
-    timer_management_auto_rearm: bool = True
-    # SGP.32 §3.5 IPA-poll BIP trigger. When ``ipa_poll_enabled`` is
-    # True, every D7 TIMER EXPIRATION envelope auto-rearms the timer
-    # *and* enqueues a BIP poll sequence -- OPEN CHANNEL, SEND DATA,
-    # RECEIVE DATA, CLOSE CHANNEL -- towards the configured eIM
-    # endpoint. The modem services the bearer (DNS resolution, TLS
-    # handshake, HTTP) so the simulator only needs to publish the
-    # proactive commands. Empty FQDN falls back to the first
-    # ``state.eim_entries`` entry, then to the workspace eIM identity
-    # default. See ETSI TS 102 223 §6.4.27 / §6.4.29 / §6.4.30 / §6.4.28.
-    ipa_poll_enabled: bool = True
-    ipa_poll_eim_fqdn: str = ""
-    ipa_poll_eim_port: int = 443
-    # ETSI TS 102 223 §8.70 transport-level type. 0x02 is TCP CLIENT
-    # REMOTE which the modem upgrades to TLS based on port 443; this
-    # is the SGP.32 IPA-poll convention. Override to 0x06 (TLS over
-    # TCP) only if the modem firmware demands explicit signalling.
-    ipa_poll_transport_type: int = 0x02
-    ipa_poll_buffer_size: int = 0x0400
-    ipa_poll_receive_size: int = 0xFA
-    ipa_poll_alpha_id: str = ""
-    ipa_poll_request_payload: bytes = b""
-    # SGP.32 §3.5 / ETSI TS 102 223 §8.59 / §8.70 BIP destination wiring.
-    # Real eUICC IPAs build OPEN CHANNEL with:
-    #   tag 47 = APN (Network Access Name, label-list encoded)
-    #   tag 3C = transport type + port
-    #   tag 3E = literal IPv4/IPv6 destination
-    # The eIM is published via FQDN, so the IPA first opens a UDP/53
-    # bearer to a public resolver (defaults to Google ``8.8.8.8``)
-    # and asks for the eIM A-record. Once the resolved IPv4 lands in
-    # ``ipa_poll_resolved_ip`` the next timer expiry opens a TCP/443
-    # bearer to that address with the same APN. ``ipa_poll_apn`` is
-    # seeded from (in order):
-    #   1. the active SAIP profile's APN (BPP override) — see
-    #      ``state.toolkit.ipa_poll_apn_source == "bpp"``
-    #   2. ``YGGDRASIM_SIM_IPA_POLL_APN`` env override
-    #   3. ``"internet.apn"`` workspace fallback
-    # ``ipa_poll_dns_server`` accepts an env override via
-    # ``YGGDRASIM_SIM_IPA_POLL_DNS_SERVER``.
-    ipa_poll_apn: str = field(default_factory=_resolve_default_ipa_poll_apn)
-    ipa_poll_apn_source: str = "default"
-    ipa_poll_dns_server: str = field(default_factory=_resolve_default_ipa_poll_dns_server)
-    ipa_poll_dns_port: int = 53
-    ipa_poll_dns_query_id: int = 0
-    ipa_poll_resolved_ip: str = ""
-    ipa_poll_resolved_ip_family: int = 0
-    ipa_poll_last_resolution_error: str = ""
-    ipa_poll_resolution_pending: bool = False
-    # IPA-poll phase machine. The simulator advances through:
-    #   "idle"          -> nothing in flight
-    #   "dns_open"      -> OPEN CHANNEL UDP (resolver:53) queued
-    #   "dns_query"     -> SEND DATA (DNS questions) queued
-    #   "dns_recv"      -> RECEIVE DATA queued; awaiting answers
-    #   "dns_close"     -> CLOSE CHANNEL queued; resolved IP cached
-    #   "eim_open"      -> OPEN CHANNEL TCP (eim_ip:443) queued
-    #   "eim_request"   -> SEND DATA carrying ESipa request body
-    #   "eim_recv"      -> RECEIVE DATA awaiting ESipa response
-    #   "eim_close"     -> CLOSE CHANNEL queued; cycle complete
-    # ``ipa_poll_phase_history`` keeps a bounded log of recent transitions
-    # so a polling tool can confirm the order without diffing FETCH bytes.
-    ipa_poll_phase: str = "idle"
-    ipa_poll_phase_history: list[str] = field(default_factory=list)
-    # Channel-id bookkeeping. When OPEN CHANNEL succeeds the modem TR
-    # echoes a ``B1 01 <id>`` channel-status TLV; the IPA caches it so
-    # subsequent SEND/RECEIVE DATA channel data can be routed to the
-    # right bearer (see TS 102 223 §8.56).
-    ipa_poll_dns_channel_id: int = 0
-    ipa_poll_eim_channel_id: int = 0
-    # DNS payload buffers. ``ipa_poll_dns_pending_questions`` is the
-    # ordered list of (qname, qtype) tuples the IPA still needs to ship
-    # under the current UDP bearer. ``ipa_poll_dns_response_buffer``
-    # accumulates RECEIVE DATA bytes until a complete DNS message is
-    # parsed (some modems split a single response across two RECEIVE
-    # DATA TRs). ``ipa_poll_dns_a_pending`` / ``ipa_poll_dns_aaaa_pending``
-    # mirror the dual-stack-first behaviour of real cards.
-    ipa_poll_dns_pending_questions: list[tuple[str, int]] = field(default_factory=list)
-    ipa_poll_dns_response_buffer: bytes = b""
-    ipa_poll_dns_a_pending: bool = False
-    ipa_poll_dns_aaaa_pending: bool = False
-    # Counter that increments every time a complete IPA poll cycle
-    # finishes (whether successfully delivering an EuiccPackage or
-    # bailing on a bearer error). Used by tests / status renderers.
-    ipa_poll_cycle_count: int = 0
-    # SGP.32 §3.5 — consecutive cycle-failure tally. Bumps when a
-    # SEND DATA or RECEIVE DATA inside the IPA-poll cycle returns a
-    # non-success TR (general result 0x3A "BIP error", 0x20 "no
-    # service", etc.); resets when a cycle completes with at least
-    # one EuiccPackage successfully dispatched into ISD-R. Operators
-    # use this to suppress noisy retries on a modem whose UDP/TCP
-    # bearer is broken end-to-end. ``ipa_poll_last_cycle_error``
-    # records the last failure context (phase + result code +
-    # additional-info byte) for diagnostics.
-    ipa_poll_consecutive_failures: int = 0
-    ipa_poll_last_cycle_error: str = ""
-    # ETSI TS 102 223 §6.4.27 / §8.38 -- watchdog timer used between the
-    # SEND DATA burst and the RECEIVE DATA flight inside an IPA-poll
-    # cycle. Reference IPA cards arm timer 02 with ~65 s before yielding
-    # for the network response and deactivate it once the response has
-    # been drained, so the modem reports the elapsed wait back in the
-    # Timer Value (25) TLV. The wait is what lets the modem actually
-    # receive bytes from the network before the eUICC issues
-    # RECEIVE DATA -- skipping it triggers general result 0x3A
-    # ("Bearer Independent Protocol error") and additional info 0x00
-    # ("no specific cause") on every RECEIVE DATA.
-    ipa_poll_wait_timer_id: int = 2
-    ipa_poll_wait_timer_seconds: int = 65
-    # Tracks whether the watchdog timer is currently armed inside the
-    # IPA-poll cycle. Used by the TLS reactive loop to avoid arming
-    # the same timer twice across an interleaved SEND/RECV burst and
-    # to guarantee a deactivate is queued before CLOSE CHANNEL.
-    ipa_poll_wait_timer_armed: bool = False
-    # SGP.32 §3.5 / TS 102 223 §6.4.27: real eUICC IPAs run TLS-1.2
-    # ECDHE-ECDSA-AES128-GCM-SHA256 entirely inside the card; the
-    # modem becomes a transparent byte pipe between the card and the
-    # eIM. ``ipa_poll_tls_enabled`` toggles that path -- ``True`` is
-    # the production default (matches reference hardware), ``False``
-    # restores the Stage-1 plain-HTTP fallback used by the IPA dispatch
-    # tests that exercise the SGP.32 envelope wiring without spinning a
-    # full TLS engine. ``ipa_poll_tls_state`` holds the
-    # ``CardTlsClientState`` (memory BIOs + SSLObject) for the cycle in
-    # flight; ``ipa_poll_tls_inbound_buffer`` accumulates RECEIVE DATA
-    # bytes until a full TLS record is parsed (some modems split a
-    # single record across two RECEIVE DATA TRs).
-    # ``ipa_poll_tls_idle_receives`` is a small safety counter: once a
-    # bounded number of RECEIVE DATAs come back with zero bytes the
-    # IPA aborts the cycle so a stuck bearer cannot loop forever.
-    ipa_poll_tls_enabled: bool = True
-    ipa_poll_tls_state: Any = None
-    ipa_poll_tls_inbound_buffer: bytes = b""
-    ipa_poll_tls_idle_receives: int = 0
-    ipa_poll_tls_max_idle_receives: int = 16
-    ipa_poll_tls_last_error: str = ""
-    # Buffered plaintext application data once the handshake completes
-    # -- used by tests that want to confirm the bytes the card decrypted
-    # from the eIM, separate from the dispatcher's per-package fan-out.
-    ipa_poll_tls_decrypted_payload: bytes = b""
-    # SGP.32 §3.5 IPA-poll session bookkeeping. ``ipa_poll_session_active``
-    # tracks whether the simulator is currently mid-cycle (OPEN CHANNEL
-    # accepted, SEND/RECEIVE pending). Cleared when CLOSE CHANNEL TR
-    # comes back or when the bearer fails. ``ipa_poll_last_response_payload``
-    # caches the bytes the modem returned via RECEIVE DATA so an
-    # operator can introspect what the eIM said even after the
-    # session is torn down. ``ipa_poll_dispatched_packages`` records
-    # the outer tag of each EuiccPackage the IPA dispatched into ISD-R
-    # this cycle -- useful for tests that need to assert "the eIM's
-    # ProfileDownloadTrigger was forwarded".
-    ipa_poll_session_active: bool = False
-    ipa_poll_last_request_payload: bytes = b""
-    ipa_poll_last_response_payload: bytes = b""
-    ipa_poll_dispatched_packages: list[bytes] = field(default_factory=list)
-    # SGP.32 §6.5.2.1 ProvideEimPackageResult (BF50) bookkeeping.
-    # ``ipa_poll_pending_result_payload`` is the BF50 body the IPA
-    # built after dispatching the eIM's EuiccPackages into ISD-R --
-    # it is shipped back to the eIM in a follow-up SEND DATA so the
-    # eIM sees the per-package execution result. ``ipa_poll_last_result_payload``
-    # caches the most recent body for introspection. ``ipa_poll_dispatched_responses``
-    # holds the raw R-APDU bytes the dispatcher returned for each
-    # forwarded package so tests can confirm the ISD-R reply chain.
-    ipa_poll_pending_result_payload: bytes = b""
-    ipa_poll_last_result_payload: bytes = b""
-    ipa_poll_dispatched_responses: list[bytes] = field(default_factory=list)
-    # SGP.32 §6.5.2.1 per-cycle failure bookkeeping. Each entry is
-    # ``(outer_tag, error_code)`` where ``outer_tag`` is the BFxx
-    # tag the dispatcher could not handle and ``error_code`` is the
-    # SGP.32 EimPackageResultErrorCode (1 invalidPackageFormat,
-    # 2 unknownPackage, 127 undefinedError) the IPA attached to its
-    # outgoing BF50. Cleared at the start of every IPA-poll cycle.
-    ipa_poll_failed_packages: list[tuple[bytes, int]] = field(default_factory=list)
-    # Latch: True between the moment the IPA injected a follow-up
-    # ProvideEimPackageResult SEND DATA and the cycle teardown
-    # (CLOSE CHANNEL TR). Prevents a cascading injection if the eIM
-    # replies to the BF50 with another package -- real eIMs ack
-    # with an empty body or a single BF50 acknowledgement, which
-    # the IPA must consume but not re-mirror.
-    ipa_poll_followup_emitted: bool = False
+    # TIMER MANAGEMENT can be used as the primary proactive bring-up,
+    # with POLL INTERVAL retained as a legacy fallback.
     # ETSI TS 102 223 §6.4.7 POLLING OFF state. Set when the terminal
     # acknowledges POLLING OFF; cleared by SET UP IDLE MODE / new
     # POLL INTERVAL.

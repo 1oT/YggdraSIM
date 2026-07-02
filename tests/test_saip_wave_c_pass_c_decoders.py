@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 """
 Wave C Pass C — semantic decoder coverage for ADF.ISIM / DF.MULTIMEDIA /
 DF.MCS / MMS family EFs.

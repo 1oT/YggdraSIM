@@ -1,0 +1,41 @@
+/*
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+ */
+
+/* -- Theme: Matrix (original) -------------------------------------------- */
+html[data-theme="matrix"] {
+  --bg: #000604;
+  --bg-elev: #041010;
+  --bg-elev-2: #0a1a16;
+  --surface: #041010;
+  --surface-alt: rgba(255, 255, 255, 0.04);
+  --bg-hover: rgba(0, 255, 136, 0.06);
+  --border: rgba(0, 255, 136, 0.14);
+  --border-strong: rgba(0, 255, 136, 0.38);
+  --fg: #c1ffd9;
+  --fg-dim: #4bb078;
+  --accent: #00ff88;
+  --accent-strong: #00cc6a;
+  --accent-soft: rgba(0, 255, 136, 0.12);
+  --accent-fg: #000604;
+  --accent-glow: rgba(0, 255, 136, 0.6);
+  --gradient-accent: linear-gradient(135deg, #00ff88 0%, #00cc6a 60%, #009944 100%);
+  --gradient-brand: linear-gradient(135deg, #00ff88 0%, #00e8ff 100%);
+  --ok: #00ff88;
+  --ok-soft: rgba(0, 255, 136, 0.14);
+  --warn: #ffd866;
+  --warn-soft: rgba(255, 216, 102, 0.14);
+  --fail: #ff4d4d;
+  --fail-soft: rgba(255, 77, 77, 0.16);
+  --code-bg: #020805;
+  --kbd-bg: #050f0a;
+  --shadow-card: 0 10px 26px rgba(0, 0, 0, 0.55);
+  --shadow-card-hover: 0 18px 40px rgba(0, 255, 136, 0.18);
+  --shadow-glow-accent: 0 0 0 1px var(--accent-soft), 0 18px 44px -12px var(--accent-glow);
+  --topbar-bg: rgba(4, 16, 16, 0.82);
+  --theme-tint:
+    radial-gradient(circle at top right, rgba(0, 255, 136, 0.10), transparent 42%),
+    radial-gradient(circle at 20% 80%, rgba(0, 255, 136, 0.04), transparent 46%);
+}
+

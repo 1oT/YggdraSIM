@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """
 Unified profile-document loader for the SAIP diff engine.
@@ -9,8 +12,8 @@ dicts. In practice the operator will point it at either:
   which needs no external dependencies,
 * a ``*.der`` / ``*.pp`` / ``*.upp`` raw SAIP profile package, which
   can only be decoded via ``pySim.esim.saip.ProfileElementSequence``,
-* a ``*.txt`` / ``*.hex`` ASCII hex-dump of a DER package — the same
-  shape ``OPEN`` / ``USE`` accept via
+* a ``*.txt`` / ``*.hex`` / ``*.varder`` ASCII hex-dump of a DER package
+  or vendor template — the same shape ``OPEN`` / ``USE`` accept via
   :meth:`Tools.ProfilePackage.saip_tool.SaipToolBridge._prepare_input_for_tool`.
   Whitespace and case are normalised before the bytes are handed to
   the DER decoder.
@@ -66,7 +69,7 @@ _SIMULATOR_MANIFEST_MARKERS = ("profile_name", "iccid", "nodes")
 # ``SaipToolBridge._prepare_input_for_tool``. Mirroring the same set
 # here keeps the diff command in lock-step with OPEN / USE so an
 # operator can compare the exact files the inspector accepts.
-_HEX_INPUT_SUFFIXES = {".hex", ".txt"}
+_HEX_INPUT_SUFFIXES = {".hex", ".txt", ".varder"}
 
 _HEX_ALPHABET = frozenset("0123456789ABCDEFabcdef")
 _HEX_WHITESPACE = frozenset(" \t\r\n\v\f")
@@ -306,7 +309,7 @@ def load_profile_document(path: Path, *, workspace_root: Path) -> LoadedDocument
     raw_text: str | None = None
     parse_error: Exception | None = None
     try:
-        raw_text = path.read_text(encoding="utf-8")
+        raw_text = path.read_text(encoding="utf-8-sig")
     except UnicodeDecodeError:
         raw_text = None
     except OSError as exc:
@@ -327,7 +330,7 @@ def load_profile_document(path: Path, *, workspace_root: Path) -> LoadedDocument
                 "JSON does not match transcode or simulator-manifest shape"
             )
 
-        # Hex-text fallback. ``.txt`` / ``.hex`` profiles are ASCII
+        # Hex-text fallback. ``.txt`` / ``.hex`` / ``.varder`` profiles are ASCII
         # hex dumps of a DER package — the same shape OPEN / USE
         # accept. We honour the explicit suffix unconditionally and
         # fall back to a content sniff for extension-less inputs so a

@@ -234,6 +234,7 @@ class FileSystemController :
         self .current_fid =None 
         self .scan_cache ={}
         self .current_path_hint =""
+        self ._selection_restore_commands =[]
 
         ContentDecoder .init_registry ()
 
@@ -456,6 +457,61 @@ class FileSystemController :
         time .sleep (0.01 )
         retry_data ,retry_sw1 ,retry_sw2 =self .tp .transmit (cmd ,silent =True )
         return retry_data ,retry_sw1 ,retry_sw2
+
+    def _build_restore_command_trail (
+    self ,
+    selected_fid :str ,
+    select_command :str ,
+    previous_commands :List [str ],
+    previous_fcp :Dict [str ,Any ],
+    )->List [str ]:
+        selected_text =str (selected_fid or "").strip ().upper ()
+        command_text =str (select_command or "").strip ().upper ()
+        if len (command_text )==0 :
+            return []
+        if selected_text =="3F00":
+            return [command_text ]
+        if len (selected_text )>4 :
+            return [command_text ]
+
+        base_commands =list (previous_commands or [])
+        previous_type =str ((previous_fcp or {}).get ('type',"")).strip ()
+        previous_structure =str ((previous_fcp or {}).get ('structure',"")).strip ()
+        previous_is_ef =False
+        if previous_type =="EF":
+            previous_is_ef =True
+        if previous_structure in ("Transparent","Linear Fixed","Cyclic"):
+            previous_is_ef =True
+        if previous_is_ef and len (base_commands )>0 :
+            base_commands =base_commands [:-1 ]
+        if len (base_commands )>0 :
+            return base_commands +[command_text ]
+        return [command_text ]
+
+    def _restore_selection_after_arr_probe (
+    self ,
+    restore_fid :str ,
+    restore_commands :Optional [List [str ]]=None ,
+    )->None :
+        normalized_commands =[]
+        for command in restore_commands or []:
+            command_text =str (command or "").strip ().upper ()
+            if len (command_text )>0 :
+                normalized_commands .append (command_text )
+
+        if len (normalized_commands )>0 :
+            final_data =b""
+            final_sw1 =0x00
+            final_sw2 =0x00
+            for command in normalized_commands :
+                final_data ,final_sw1 ,final_sw2 =self .tp .transmit (command ,silent =True )
+            if self ._is_successful_select_response (final_sw1 ,final_data ):
+                return
+
+        restore_text =str (restore_fid or "").strip ().upper ()
+        if len (restore_text )==0 :
+            return
+        self .tp .transmit (self ._build_select_command (restore_text ),silent =True )
 
     def _select_parent_for_live_traversal (self ,parent_fid :str )->Tuple [bytes ,int ,int ]:
         parent_text =str (parent_fid or "").strip ().upper ()
@@ -1076,6 +1132,8 @@ class FileSystemController :
         resolve=True means we will try to resolve ARR security rules for the selected file.
         """
         target =target .upper ()
+        previous_restore_commands =list (getattr (self ,"_selection_restore_commands",[])or [])
+        previous_fcp =dict (getattr (self ,"current_fcp",{})or {})
         candidates =[]
         alias_candidate =str (self .aid_registry .get (target ,"")).strip ().upper ()
         if self ._is_hex_identifier (alias_candidate ):
@@ -1099,12 +1157,24 @@ class FileSystemController :
             data ,sw1 ,sw2 =self .tp .transmit (cmd ,silent =True )
 
             if self ._is_successful_select_response (sw1 ,data ):
+                restore_commands =self ._build_restore_command_trail (
+                fid ,
+                cmd ,
+                previous_restore_commands ,
+                previous_fcp ,
+                )
                 self .current_fid =fid 
                 self .current_path_hint =target 
+                self ._selection_restore_commands =restore_commands
                 self ._cache_selected_application_aliases (target ,fid )
                 if data :
 
-                    self ._parse_fcp_internal (data ,target_fid =fid ,resolve =resolve )
+                    self ._parse_fcp_internal (
+                    data ,
+                    target_fid =fid ,
+                    resolve =resolve ,
+                    restore_commands =restore_commands ,
+                    )
 
                 if not silent :
                     print (f"{Config.Colors.BLUE}[<--]{Config.Colors.ENDC} {data.hex().upper()} {sw1:02X}{sw2:02X}")
@@ -1134,11 +1204,23 @@ class FileSystemController :
                 data ,sw1 ,sw2 =self .tp .transmit (retry_cmd ,silent =True )
 
                 if self ._is_successful_select_response (sw1 ,data ):
+                    restore_commands =self ._build_restore_command_trail (
+                    discovered_aid ,
+                    retry_cmd ,
+                    previous_restore_commands ,
+                    previous_fcp ,
+                    )
                     self .current_fid =discovered_aid 
                     self .current_path_hint =target 
+                    self ._selection_restore_commands =restore_commands
                     self ._cache_selected_application_aliases (target ,discovered_aid )
                     if data :
-                        self ._parse_fcp_internal (data ,target_fid =discovered_aid ,resolve =resolve )
+                        self ._parse_fcp_internal (
+                        data ,
+                        target_fid =discovered_aid ,
+                        resolve =resolve ,
+                        restore_commands =restore_commands ,
+                        )
                     if not silent :
                         print (f"{Config.Colors.BLUE}[<--]{Config.Colors.ENDC} {data.hex().upper()} {sw1:02X}{sw2:02X}")
                         print (f"{Config.Colors.GREEN}[+] Selected {target} ({discovered_aid}){Config.Colors.ENDC}")
@@ -1149,7 +1231,13 @@ class FileSystemController :
             print (f"{Config.Colors.FAIL}[-] Select Failed: '{target}' (Tried: {candidates}){Config.Colors.ENDC}")
         return False 
 
-    def _parse_fcp_internal (self ,data :bytes ,target_fid :str =None ,resolve :bool =True ):
+    def _parse_fcp_internal (
+    self ,
+    data :bytes ,
+    target_fid :str =None ,
+    resolve :bool =True ,
+    restore_commands :Optional [List [str ]]=None ,
+    ):
         try :
             parsed =TlvParser .parse (data )
 
@@ -1209,20 +1297,36 @@ class FileSystemController :
                     if resolve :
 
                         restore_fid =target_fid if target_fid else self .current_fid 
+                        restore_trail =list (restore_commands or getattr (self ,"_selection_restore_commands",[])or [])
                         if restore_fid :
                             if len (sec )>=3 :
 
                                 arr_fid =sec [0 :2 ].hex ().upper ()
                                 rec_num =sec [2 ]
-                                self .current_fcp ['rules']=self ._resolve_arr_rules (arr_fid ,rec_num ,restore_fid )
+                                self .current_fcp ['rules']=self ._resolve_arr_rules (
+                                arr_fid ,
+                                rec_num ,
+                                restore_fid ,
+                                restore_commands =restore_trail ,
+                                )
                             elif len (sec )==1 :
 
                                 rec_num =sec [0 ]
 
-                                rules =self ._resolve_arr_rules ("6F06",rec_num ,restore_fid )
+                                rules =self ._resolve_arr_rules (
+                                "6F06",
+                                rec_num ,
+                                restore_fid ,
+                                restore_commands =restore_trail ,
+                                )
                                 if not rules or "Empty"in rules :
 
-                                    rules =self ._resolve_arr_rules ("2F06",rec_num ,restore_fid )
+                                    rules =self ._resolve_arr_rules (
+                                    "2F06",
+                                    rec_num ,
+                                    restore_fid ,
+                                    restore_commands =restore_trail ,
+                                    )
                                 self .current_fcp ['rules']=rules 
 
 
@@ -1237,7 +1341,13 @@ class FileSystemController :
         except Exception :
             pass 
 
-    def _resolve_arr_rules (self ,arr_fid :str ,record_num :int ,restore_fid :str )->Optional [str ]:
+    def _resolve_arr_rules (
+    self ,
+    arr_fid :str ,
+    record_num :int ,
+    restore_fid :str ,
+    restore_commands :Optional [List [str ]]=None ,
+    )->Optional [str ]:
 
         cmd_sel =f"00A4000402{arr_fid}"
         _ ,sw1 ,sw2 =self .tp .transmit (cmd_sel ,silent =True )
@@ -1279,21 +1389,7 @@ class FileSystemController :
             is_fatal =True 
 
         if is_fatal :
-
-            is_long =False 
-            if len (restore_fid )>4 :
-                is_long =True 
-
-            if is_long :
-                self .tp .transmit (f"00A40400{len(restore_fid)//2:02X}{restore_fid}",silent =True )
-
-            is_short =False 
-            if is_long ==False :
-                is_short =True 
-
-            if is_short :
-                self .tp .transmit (f"00A4000402{restore_fid}",silent =True )
-
+            self ._restore_selection_after_arr_probe (restore_fid ,restore_commands )
             return None 
 
 
@@ -1301,19 +1397,7 @@ class FileSystemController :
         data ,sw1 ,sw2 =self .tp .transmit (cmd_read ,silent =True )
 
 
-        is_long_res =False 
-        if len (restore_fid )>4 :
-            is_long_res =True 
-
-        if is_long_res :
-            self .tp .transmit (f"00A40400{len(restore_fid)//2:02X}{restore_fid}",silent =True )
-
-        is_short_res =False 
-        if is_long_res ==False :
-            is_short_res =True 
-
-        if is_short_res :
-            self .tp .transmit (f"00A4000402{restore_fid}",silent =True )
+        self ._restore_selection_after_arr_probe (restore_fid ,restore_commands )
 
         is_read_success =False 
         if sw1 ==0x90 :

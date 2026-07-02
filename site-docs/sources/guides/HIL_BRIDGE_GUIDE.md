@@ -1,3 +1,8 @@
+<!--
+SPDX-License-Identifier: GPL-3.0-or-later
+Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+-->
+
 # HIL Bridge Guide
 
 This guide covers the YggdraSIM hardware-in-the-loop path built around:
@@ -8,6 +13,7 @@ This guide covers the YggdraSIM hardware-in-the-loop path built around:
 - the YggdraSIM HIL bridge on `127.0.0.1:9997`
 - GSMTAP mirroring to Wireshark on UDP `4729`
 - brokered side access from YggdraSIM through the local APDU relay
+- optional remote-card input from Card Bridge over an SSH tunnel
 
 > **Naming note.** "sysmocom SIMtrace2" is the USB product identifier
 > that the Linux `lsusb` tool reports for VID:PID `1d50:60e3`. It is
@@ -16,12 +22,13 @@ This guide covers the YggdraSIM hardware-in-the-loop path built around:
 > endorsement, partnership, or certification. The same applies to
 > `osmo-remsim-client-st2`, which is the upstream tool name.
 
-> **Build flavor note.** The HIL bridge is Linux-only and is only
-> bundled in the **full** executable and in source checkouts installed
-> with the `[hil]` / `[full]` extras. The **clean** executable shipped
-> for Windows, macOS, Linux, and Raspberry Pi intentionally omits this
-> path; the launcher still renders a menu entry explaining where to
-> find the full build. See
+> **Build flavor note.** The direct SIMtrace2/RemSIM HIL bridge is
+> Linux-only and is bundled in the **full** executable and in source
+> checkouts installed with the `[hil]` / `[full]` extras. The **clean**
+> executable shipped for Windows, macOS, Linux, and Raspberry Pi still
+> includes Card Bridge / remote APDU streaming, but intentionally omits
+> this direct local rig path; the launcher still renders a menu entry
+> explaining where to find the full build. See
 > [`INSTALL_FULL.md`](INSTALL_FULL.md),
 > [`INSTALL_FROM_SOURCE.md`](INSTALL_FROM_SOURCE.md), and
 > [`SIMTRACE2_CARDEM_GUIDE.md`](SIMTRACE2_CARDEM_GUIDE.md).
@@ -54,6 +61,103 @@ YggdraSIM HIL bridge
   -> GSMTAP UDP 127.0.0.1:4729 -> Wireshark
   -> HTTP APDU relay on localhost -> YggdraSIM side access
 ```
+
+### Optional: stream the card from a remote workstation over SSH
+
+The default topology assumes the physical card sits in the same host
+that runs `pcscd` + `simtrace2` + the modem. When the rig lives in a
+different room (or a different building) than the operator's
+workstation, the card itself can be moved off the rig and streamed
+back over the SSH tunnel that already terminates the bridge's HTTP
+endpoints. The modem, GSMTAP capture, and `osmo-remsim-client-st2`
+keep running on the rig exactly as today; only the card moves.
+
+```text
+operator workstation                          rig (modem + simtrace2)
+--------------------------                    -------------------------
+physical card in PC/SC reader ─┐              ┌─ modem
+                               │              │
+yggdrasim-card-bridge          │── SSH ─────  YggdraSIM HIL bridge
+(publishes /apdu over HTTP)    │  SSH forward (RemoteRelayCardChannel)
+                               │              │
+                              :8642 ←──────── /apdu
+                                              │
+                                              ├─ GSMTAP UDP -> Wireshark
+                                              └─ HTTP APDU relay
+                                                 (rig-side surface
+                                                  unchanged: any
+                                                  SCP03 / SAIP
+                                                  consumer keeps
+                                                  using the same
+                                                  endpoint)
+```
+
+Setup, end-to-end:
+
+1. **On the operator workstation**, plug the card into a local PC/SC
+   reader and start the publisher. The first run prints a bearer-
+   token fingerprint and writes the actual token under
+   `${XDG_CONFIG_HOME:-~/.config}/yggdrasim/card_bridge/<port>.token`
+   with mode 0600:
+
+   ```bash
+   yggdrasim-card-bridge --port 8642
+   ```
+
+2. Open the SSH tunnel so the publisher's loopback port is reachable
+   on the rig's loopback interface. Use one of these two equivalent
+   forms, depending on where you run the `ssh` command:
+
+   ```bash
+   # Run on the rig, connecting to the reader workstation:
+   ssh -fN -L 8642:127.0.0.1:8642 operator@workstation
+
+   # Or run on the reader workstation, connecting to the rig:
+   ssh -fN -R 8642:127.0.0.1:8642 operator@rig-host
+   ```
+
+   Copy the token file to the rig, or read it via `scp` and stash it
+   with `chmod 600`:
+
+   ```bash
+   scp operator@workstation:~/.config/yggdrasim/card_bridge/8642.token \
+       ~/.config/yggdrasim/card_bridge/8642.token
+   chmod 600 ~/.config/yggdrasim/card_bridge/8642.token
+   ```
+
+3. **On the rig**, start the HIL bridge with the remote-card flags.
+   The local `--reader-index` / `--reader-name` flags are ignored in
+   this mode — the card lives at the other end of the tunnel:
+
+   ```bash
+   yggdrasim-hil-bridge \
+     --remote-card-url http://127.0.0.1:8642/apdu \
+     --remote-card-token-file ~/.config/yggdrasim/card_bridge/8642.token \
+     --apdu-timeout-ms 30000
+   ```
+
+   The bridge logs its card source on startup
+   (`Card source: remote (remote: <reader>)`) so the topology is
+   visible at a glance. Equivalent env vars are
+   `YGGDRASIM_HIL_REMOTE_CARD_URL` and
+   `YGGDRASIM_HIL_REMOTE_CARD_TOKEN_FILE`. `--apdu-timeout-ms` is
+   optional; raise it for slow eUICC operations or high-latency SSH
+   paths.
+
+GSMTAP capture, the bridge's own HTTP `/apdu` relay, the supervisor,
+and every YggdraSIM consumer keep working unchanged — they all sit
+upstream of the card-source decision and don't observe the swap.
+The rig-side relay exposes `apduUrl`, `statusUrl`, and `cardResetUrl`;
+YggdraSIM tools on the rig discover that relay through the runtime
+marker while the bridge is active.
+Drop the `--remote-card-url` flag to fall back to the local PC/SC
+path; the existing physically-connected topology is preserved
+byte-for-byte.
+
+For a shorter recipe with only the Card Bridge, SSH, and HIL flags,
+see `site-docs/how-to/remote-apdu-streaming.md`. For the full Linux /
+Raspberry Pi package checklist, RemSIM setup, and service install
+flow, see `site-docs/how-to/install-remsim-apdu-streaming.md`.
 
 ## Prerequisites
 
@@ -148,8 +252,8 @@ python -m Tools.HilBridge.main --list-readers
 Example:
 
 ```text
-0: HID Global OMNIKEY 3x21 Smart Card Reader [OMNIKEY 3x21 Smart Card Reader] 00 00
-1: Broadcom Corp 58200 [Contacted SmartCard] (0123456789ABCD) 01 00
+0: Example USB Smart Card Reader [Example Reader] 00 00
+1: Example Contacted SmartCard Reader (0123456789ABCD) 01 00
 ```
 
 Use either:
@@ -265,7 +369,7 @@ Relay state should show:
 - `status: ok`
 - `apduUrl`
 - `statusUrl`
-- `modemRefreshUrl`
+- `cardResetUrl`
 - the selected `reader`
 - the card `atr`
 
@@ -296,7 +400,7 @@ Practical consequences:
   the bridge serves APDUs from the simulator instead of the PC/SC
   reader.
 - Sim mode without SIMtrace2 attached still serves the YggdraSIM-side
-  HTTP relay (`apduUrl`, `statusUrl`, `modemRefreshUrl`); REMSIM is
+  HTTP relay (`apduUrl`, `statusUrl`, `cardResetUrl`); REMSIM is
   intentionally absent because there is nothing for it to connect
   to.
 - Yanking the SIMtrace2 cable while sim mode is active drops REMSIM
@@ -441,6 +545,9 @@ Current behaviour:
 - `raw APDU flow only` disables GSMTAP and shows only the journal-derived APDU stream in the terminal
 - `raw APDU flow + Wireshark` keeps the raw journal-derived APDU stream in the terminal and launches Wireshark for GSMTAP decode
 - `decoded APDU view` keeps GSMTAP enabled and opens the in-terminal decoded viewer instead of the raw APDU stream
+- the GUI HIL dissector links decoded fields to the selected packet's
+  byte dump when `tshark` exposes PDML offsets; hover a decoded row or
+  byte to highlight the matching range, and click to pin that range
 
 That means the operator flow is now:
 
@@ -454,38 +561,11 @@ The local relay status JSON still exposes bridge health such as:
 - `status`
 - `apduUrl`
 - `statusUrl`
-- `modemRefreshUrl`
+- `cardResetUrl`
 - `controlConnected`
 - `bankdConnected`
 
-## 9. Refresh the modem after card-side changes
-
-The bridge exposes a modem REFRESH path and the SCP11 local shells can use it.
-
-Manual examples:
-
-```bash
-python -m SCP11.local_access --cmd "REFRESH-MODEM; EXIT"
-python -m SCP11.local_access --cmd "REFRESH-MODEM uicc-reset; EXIT"
-python -m SCP11.eim_local --cmd "REFRESH-MODEM euicc-profile-state-change; EXIT"
-```
-
-Current default mode is the eUICC-oriented profile state change refresh:
-
-- `euicc-profile-state-change`
-
-More aggressive manual override:
-
-- `uicc-reset`
-
-Automatic queueing is also wired into the relevant local SCP11 flows after successful state changes such as:
-
-- `ENABLE-PROFILE`
-- `DISABLE-PROFILE`
-- `DELETE-PROFILE`
-- `EUICC-MEMORY-RESET`
-
-## 10. Shutdown behavior
+## 9. Shutdown behavior
 
 Expected safe deactivation behavior:
 
@@ -496,7 +576,7 @@ Expected safe deactivation behavior:
 
 This is the main reason to prefer `yggdrasim-hil-supervisor` over the manual bridge command.
 
-## 11. Offline pcap replay and session-key unwrap
+## 10. Offline pcap replay and session-key unwrap
 
 The decoded-APDU TUI doubles as an offline review surface. Offline mode
 reuses the same `run_live_decode_tui` entry point as the live capture
@@ -515,7 +595,7 @@ python main/main.py \
     --keybag    /path/to/session.keys.json
 ```
 
-From the `[B]` HIL Bridge Session menu, pick `[3] Open saved .pcap
+From the `[B]` Local SIMtrace2 HIL Bridge Session menu, pick `[3] Open saved .pcap
 (offline review, no bridge)`. The prompt first offers a native file
 picker, then falls back to manual path entry, and finally asks for an
 optional keybag JSON path.
@@ -614,7 +694,7 @@ Matched APDUs gain a `[plaintext]` row in
 The engine is instantiated fresh on every annotation rebuild, so
 moving between frames in the TUI does not drift the counters.
 
-## 12. Troubleshooting
+## 11. Troubleshooting
 
 ### SIMtrace2 not detected
 
@@ -674,5 +754,4 @@ If the bridge is running but Wireshark sees nothing:
 3. Start `osmo-remsim-client-st2`.
 4. Open Wireshark on UDP `4729`.
 5. Use YggdraSIM side commands only through normal module entry points, not raw direct `pyscard`.
-6. After card-side state changes, queue `REFRESH-MODEM` if the shell did not already do it for you.
-7. Stop the supervisor when you want the reader fully released.
+6. Stop the supervisor when you want the reader fully released.

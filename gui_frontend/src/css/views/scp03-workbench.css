@@ -1,0 +1,151 @@
+/*
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+ */
+
+/* -- Command Center: SCP03 Workbench (multi-reader tabs) ---------------- */
+
+.cc-workbench {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 18px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.16);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.cc-wb-header h3 {
+  margin: 0 0 4px;
+  font-size: 16px;
+  letter-spacing: 0.01em;
+}
+
+.cc-wb-lead {
+  margin: 0;
+  color: var(--fg-muted);
+  font-size: 13px;
+}
+
+.cc-wb-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 8px;
+  align-items: center;
+}
+
+.cc-wb-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--surface-alt, rgba(255, 255, 255, 0.03));
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 6px 14px;
+  font-size: 13px;
+  cursor: pointer;
+  transition: background-color 0.12s ease, border-color 0.12s ease;
+}
+
+.cc-wb-tab:hover {
+  border-color: var(--accent, #6fa8dc);
+}
+
+.cc-wb-tab.active {
+  background: var(--accent, #6fa8dc);
+  color: #0b1220;
+  border-color: transparent;
+  font-weight: 600;
+}
+
+.cc-wb-tab-label {
+  pointer-events: none;
+}
+
+.cc-wb-tab-meta {
+  font-family: var(--mono, "JetBrains Mono", monospace);
+  font-size: 11px;
+  opacity: 0.75;
+  pointer-events: none;
+}
+
+.cc-wb-tab-close {
+  font-size: 16px;
+  line-height: 1;
+  padding: 0 4px;
+  border-radius: 4px;
+}
+
+.cc-wb-tab-close:hover {
+  background: rgba(255, 0, 0, 0.18);
+}
+
+.cc-wb-tab-add {
+  background: transparent;
+  border: 1px dashed var(--border);
+  color: var(--fg-muted);
+  border-radius: 999px;
+  padding: 6px 12px;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.cc-wb-tab-add:hover {
+  color: var(--fg);
+  border-color: var(--accent, #6fa8dc);
+}
+
+.cc-wb-body {
+  min-height: 280px;
+}
+
+.cc-wb-new {
+  max-width: 640px;
+}
+
+.cc-wb-new .cc-form-row {
+  margin-bottom: 8px;
+}
+
+.cc-wb-error {
+  margin-top: 10px;
+}
+
+.cc-wb-session {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.cc-wb-session .cc-scan-header {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.cc-wb-session-tools {
+  margin-left: auto;
+  display: inline-flex;
+  gap: 6px;
+}
+
+.cc-wb-session-tools .btn {
+  padding: 4px 10px;
+  font-size: 12px;
+}
+
+.cc-wb-session-tools .btn-danger {
+  background: rgba(255, 70, 85, 0.16);
+  color: #ff8a95;
+  border-color: rgba(255, 70, 85, 0.4);
+}
+
+.cc-wb-session-tools .btn-danger:hover {
+  background: rgba(255, 70, 85, 0.26);
+}
+

@@ -1,0 +1,34 @@
+/*
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+ */
+
+/* --- breadcrumbs squish when the strip is wide ------------------------ */
+
+.topbar > .breadcrumbs {
+  flex: 0 0 auto;
+  max-width: 260px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Hide the legacy SCP03 per-tab session strip and left reader pane.
+   The top-bar reader strip is now the single source of truth for
+   "which reader / session am I driving?". Keeping these rules at the
+   bottom so they win on cascade order. */
+
+.cc-wb-tabs.scp03-topbar {
+  display: none !important;
+}
+
+.scp03-shell > .scp03-reader-pane {
+  display: none !important;
+}
+
+/* With the left reader pane gone, the main column stretches full
+   width of the workbench shell. */
+.scp03-shell {
+  grid-template-columns: 1fr !important;
+}
+

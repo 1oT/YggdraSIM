@@ -1,0 +1,194 @@
+/*
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+ */
+
+/* -- Command Center: Records viewer (transparent + linear/cyclic) ------ */
+
+.cc-payload {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.cc-payload-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.cc-payload-head .cc-sw {
+  margin: 0;
+}
+
+.cc-payload-update-btn {
+  min-height: 28px;
+  padding: 4px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm, 6px);
+  background: var(--surface);
+  color: var(--fg);
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.cc-payload-update-btn:hover:not(:disabled) {
+  background: var(--bg-hover, var(--bg-elev));
+  border-color: var(--accent-soft, var(--border));
+}
+
+.cc-payload-update-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.cc-records-meta {
+  margin: 0;
+  font-family: var(--mono, "JetBrains Mono", monospace);
+  font-size: 12px;
+  color: var(--fg-muted);
+}
+
+.cc-records {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.cc-record {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0;
+  background: rgba(255, 255, 255, 0.015);
+  overflow: hidden;
+}
+
+.cc-record[open] {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.cc-record--empty {
+  opacity: 0.6;
+}
+
+.cc-record-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 12px;
+  font-family: var(--mono, "JetBrains Mono", monospace);
+  font-size: 12px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.cc-record-head::-webkit-details-marker {
+  display: none;
+}
+
+.cc-record-num {
+  font-weight: 700;
+  color: var(--accent, #6fa8dc);
+  min-width: 40px;
+}
+
+.cc-record-sw {
+  color: var(--fg-muted);
+}
+
+.cc-record-len {
+  color: var(--fg-muted);
+  margin-left: auto;
+}
+
+.cc-record-empty-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--fg-muted);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.cc-record .cc-decoded,
+.cc-record .cc-hex-block {
+  margin: 0 12px 12px;
+}
+
+.cc-record-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin: 0 12px 8px;
+}
+
+.markdown-block {
+  white-space: pre-wrap;
+  word-break: break-word;
+  background: var(--code-bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 12px 14px;
+  color: var(--fg);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.45;
+  max-height: 640px;
+  overflow: auto;
+}
+
+.cc-decoded {
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 10px 12px;
+}
+
+.cc-decoded-head {
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--fg-muted);
+  margin-bottom: 6px;
+}
+
+.cc-decoded-body {
+  margin: 0;
+  display: grid;
+  grid-template-columns: minmax(120px, auto) 1fr;
+  gap: 4px 12px;
+  font-family: var(--mono, "JetBrains Mono", monospace);
+  font-size: 12px;
+}
+
+.cc-decoded-body.cc-pv-object {
+  display: flex;
+  flex-direction: column;
+  grid-template-columns: minmax(96px, 200px) 1fr;
+  gap: 8px;
+}
+
+.cc-decoded-body dt {
+  color: var(--fg-muted);
+}
+
+.cc-decoded-body dd {
+  margin: 0;
+  color: var(--fg);
+  word-break: break-all;
+}
+
+.cc-decoded-json {
+  margin: 0;
+  padding: 6px 8px;
+  background: rgba(0, 0, 0, 0.25);
+  border-radius: 4px;
+  font-size: 11px;
+  white-space: pre-wrap;
+  word-break: break-all;
+}

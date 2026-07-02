@@ -6,6 +6,11 @@ tags:
   - attribution
   - license
 ---
+<!--
+SPDX-License-Identifier: GPL-3.0-or-later
+Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+-->
+
 
 # About YggdraSIM
 
@@ -73,6 +78,7 @@ bodies.
 
 ## Related pages
 
+- [Forum](https://github.com/1oT/YggdraSIM/discussions)
 - [Authors & Attribution](authors.md)
 - [License (GPL-3.0-or-later)](license.md)
 - [NOTICE (Attribution & Third-Party)](notice.md)

@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
 from __future__ import annotations
@@ -89,6 +92,40 @@ class Scp80EnvelopeDispatchTests(unittest.TestCase):
         self.assertEqual((sw1b, sw2b), (0x90, 0x00))
         self.assertGreater(len(por), 10)
 
+    def test_d1_envelope_accepts_configured_sms_pid_and_dcs(self) -> None:
+        from SCP80.builder import OtaPacketBuilder
+        from SCP80.config import ConfigManager
+
+        os.environ["YGGDRASIM_ALLOW_DEMO_KEYS"] = "1"
+        cfg = ConfigManager()
+        cfg.set("kic", "1122334455667788AABBCCDDEEFF0011")
+        cfg.set("kid", "1122334455667788AABBCCDDEEFF0011")
+        cfg.set("spi", "1621")
+        cfg.set("kic_indicator", "22")
+        cfg.set("kid_indicator", "22")
+        cfg.set("tar", "B00001")
+        cfg.set("cntr", "0000000316")
+        cfg.set("pid", "7F")
+        cfg.set("dcs", "F5")
+        plan = OtaPacketBuilder(cfg).build_plan(override_payload="00A40004023F00")
+        self.assertIn("4005811250F37FF5", plan.reader_apdus[0])
+        apdu = bytes.fromhex(plan.reader_apdus[0])
+        engine = SimulatedSimCardEngine()
+        engine.state.scp80_security.key_enc = bytes.fromhex("1122334455667788AABBCCDDEEFF0011")
+        engine.state.scp80_security.key_mac = bytes.fromhex("1122334455667788AABBCCDDEEFF0011")
+        engine.state.scp80_security.spi = "1621"
+        engine.state.scp80_security.kic = "22"
+        engine.state.scp80_security.kid = "22"
+        engine.state.scp80_security.tar = "B00001"
+
+        _data, sw1, sw2 = engine.transmit(apdu)
+
+        self.assertEqual(sw1, 0x91)
+        fetch = bytes([0x80, 0x12, 0x00, 0x00, sw2 & 0xFF])
+        por, sw1b, sw2b = engine.transmit(fetch)
+        self.assertEqual((sw1b, sw2b), (0x90, 0x00))
+        self.assertGreater(len(por), 10)
+
 
 class ApduSplitTests(unittest.TestCase):
     def test_split_select_then_read_binary(self) -> None:
@@ -120,9 +157,9 @@ class Scp8061xxChainTests(unittest.TestCase):
 
 
 def _build_concat_tpdu_for_test(fragment: bytes, ref: int, total: int, sequence: int) -> bytes:
-    prefix = bytes.fromhex("4005811250F341F6222222222222222502")
+    header = bytes.fromhex("4005811250F341F6222222222222222502")
     tp_ud = bytes.fromhex("050003") + bytes([ref & 0xFF, total & 0xFF, sequence & 0xFF]) + fragment
-    return prefix + bytes([len(tp_ud) & 0xFF]) + tp_ud
+    return header + bytes([len(tp_ud) & 0xFF]) + tp_ud
 
 
 class Scp80ConcatSmsTests(unittest.TestCase):
@@ -137,3 +174,22 @@ class Scp80ConcatSmsTests(unittest.TestCase):
         self.assertIsNone(logic._resolve_0348_block(tpdu_a))
         merged = logic._resolve_0348_block(tpdu_b)
         self.assertEqual(merged, frag_a + frag_b)
+
+    def test_single_sms_udh_header_strips_0348_block(self) -> None:
+        from SIMCARD.etsi_fs import build_default_state
+
+        block = bytes.fromhex("00281516212222B00000")
+        tpdu = bytes.fromhex("4005811250F341F62222222222222225027000") + block
+        logic = Scp80Logic(build_default_state(), lambda _apdu: (b"", 0x90, 0x00))
+
+        self.assertEqual(logic._resolve_0348_block(tpdu), block)
+
+    def test_plain_single_sms_header_is_rejected(self) -> None:
+        from SIMCARD.etsi_fs import build_default_state
+
+        block = bytes.fromhex("00281516212222B00000")
+        tpdu = bytes.fromhex("0005811250F341F62222222222222222") + bytes([len(block)]) + block
+        logic = Scp80Logic(build_default_state(), lambda _apdu: (b"", 0x90, 0x00))
+
+        with self.assertRaisesRegex(ValueError, "unsupported SMS TPDU layout"):
+            logic._resolve_0348_block(tpdu)

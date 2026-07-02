@@ -1,3 +1,8 @@
+<!--
+SPDX-License-Identifier: GPL-3.0-or-later
+Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+-->
+
 # Installation — Raspberry Pi (arm64)
 
 YggdraSIM runs on Raspberry Pi 4 / 5 boards using Raspberry Pi OS 64-bit
@@ -43,6 +48,7 @@ arm64 clean bundle:
 
 ```text
 yggdrasim-linux-arm64-clean-<version>
+yggdrasim-gui-linux-arm64-clean-<version>
 ```
 
 Install and smoke-test it:
@@ -56,13 +62,20 @@ chmod +x yggdrasim-linux-arm64-clean-<version>
 `--doctor` should report:
 
 ```text
-[+] Build flavor: clean (no HIL bridge) (source: build-stamp)
+[+] Build flavor: clean (no local SIMtrace2 HIL bridge) (source: build-stamp)
 ```
 
 Move the binary to somewhere on `PATH` if you want a persistent install:
 
 ```bash
 sudo install -m 0755 yggdrasim-linux-arm64-clean-<version> /usr/local/bin/yggdrasim
+```
+
+If you also want the desktop GUI on the Pi, install the companion binary:
+
+```bash
+sudo install -m 0755 yggdrasim-gui-linux-arm64-clean-<version> /usr/local/bin/yggdrasim-gui
+yggdrasim-gui
 ```
 
 That is it for SCP03, SCP11, SCP11 local, eIM local, SAIP, and SUCI work
@@ -75,6 +88,7 @@ for `linux-arm64`:
 
 ```text
 yggdrasim-linux-arm64-full-<version>
+yggdrasim-gui-linux-arm64-full-<version>
 ```
 
 ```bash
@@ -86,7 +100,9 @@ chmod +x yggdrasim-linux-arm64-full-<version>
 The HIL probes will only pass once `osmo-remsim-client-st2` is
 installed (see section 4) and the SIMtrace2 firmware is flashed (see
 [`SIMTRACE2_CARDEM_GUIDE.md`](SIMTRACE2_CARDEM_GUIDE.md)). Move the
-binary onto `PATH` the same way as the clean bundle.
+binary onto `PATH` the same way as the clean bundle. Install the
+`yggdrasim-gui-linux-arm64-full-<version>` companion as
+`/usr/local/bin/yggdrasim-gui` when you want the GUI on the same Pi.
 
 ## 4. Option C — source install with optional HIL on the Pi
 
@@ -115,8 +131,8 @@ python main/main.py --version
 python main/main.py --doctor
 ```
 
-The doctor report should now include `HIL bridge readiness: OK` once the
-prerequisites below are in place.
+The doctor report should now include `Local HIL bridge readiness: OK` once
+the prerequisites below are in place.
 
 ## Scripted install on the Pi
 
@@ -185,16 +201,17 @@ section 3. The Pi-specific differences are:
 The on-device build produces an arm64 binary you can copy to another Pi:
 
 ```bash
-# inside the cloned repo with .[build] or .[full] installed
+# inside the cloned repo with .[build,gui] or .[full,gui] installed
 YGGDRASIM_FLAVOR=clean python -m PyInstaller --noconfirm --clean yggdrasim_main.spec
 # or, with HIL:
 YGGDRASIM_FLAVOR=full python -m PyInstaller --noconfirm --clean yggdrasim_main.spec
 ```
 
-The resulting `dist/yggdrasim-clean` or `dist/yggdrasim-full` is an
-arm64 onefile. There is no cross-build story: each architecture must be
-built on a host of that architecture (the CI workflow uses QEMU
-emulation to do this under `docker buildx`).
+The resulting CLI/GUI pairs are `dist/yggdrasim-clean` plus
+`dist/yggdrasim-gui-clean`, or `dist/yggdrasim-full` plus
+`dist/yggdrasim-gui-full`. There is no cross-build story: each
+architecture must be built on a host of that architecture (the CI
+workflow uses QEMU emulation to do this under `docker buildx`).
 
 ## Related guides
 

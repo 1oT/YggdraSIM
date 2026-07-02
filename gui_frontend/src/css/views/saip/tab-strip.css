@@ -1,0 +1,73 @@
+/*
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+ */
+
+/* ---- SA-G1: top-level tab strip ------------------------------------ */
+
+.saip-top-tabs {
+  display: flex;
+  gap: 4px;
+  padding: 0;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 4px;
+}
+
+.saip-top-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-bottom-color: transparent;
+  border-radius: 6px 6px 0 0;
+  color: var(--fg-muted, #888);
+  padding: 6px 14px;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  position: relative;
+  bottom: -1px;
+}
+
+.saip-top-tab:hover:not(.is-disabled):not([disabled]) {
+  color: var(--fg);
+  background: var(--surface-alt, rgba(255, 255, 255, 0.04));
+}
+
+.saip-top-tab.is-active {
+  color: var(--accent);
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  border-bottom-color: var(--accent-soft);
+}
+
+.saip-top-tab.is-disabled,
+.saip-top-tab[disabled] {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.saip-top-tab-label {
+  letter-spacing: 0.02em;
+}
+
+.saip-top-tab-badge {
+  font-size: 10px;
+  font-family: var(--mono, "JetBrains Mono", monospace);
+  background: var(--surface-alt, rgba(255, 255, 255, 0.05));
+  border: 1px solid var(--border);
+  color: var(--fg-muted, #888);
+  border-radius: 999px;
+  padding: 0 7px;
+  line-height: 18px;
+  min-width: 18px;
+  text-align: center;
+}
+
+.saip-top-tab.is-active .saip-top-tab-badge {
+  background: var(--accent);
+  color: var(--accent-fg, #0b1015);
+  border-color: var(--accent);
+}
+

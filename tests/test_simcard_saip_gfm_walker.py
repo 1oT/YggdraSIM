@@ -1,4 +1,7 @@
-"""Phase D regression coverage for ``ProfileElementGFM`` integration.
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
+"""Regression coverage for ``ProfileElementGFM`` integration.
 
 The simulator now routes ``genericFileManagement`` PEs through
 pySim's typed walker (``pysim_gfm_walk``). These tests pin:

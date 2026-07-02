@@ -1,8 +1,13 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """Shared bearer-token utilities for the YggdraSIM card relay.
 
 Used by:
 
+* ``Tools/CardBridge/server.py`` — the standalone daemon that publishes
+  a local PC/SC reader over loopback HTTP.
 * ``Tools/HilBridge/apdu_relay.HilBridgeApduRelayService`` — the in-tree
   relay handler that sits inside the HIL bridge.
 * ``yggdrasim_common.card_backend.RelayCardConnection`` — the

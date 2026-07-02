@@ -1,3 +1,8 @@
+<!--
+SPDX-License-Identifier: GPL-3.0-or-later
+Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+-->
+
 # SIMtrace2 — cardem firmware and osmo-remsim toolchain
 
 The YggdraSIM HIL bridge sits on top of Osmocom's
@@ -16,8 +21,8 @@ This guide covers three scenarios:
 2. Updating an existing SIMtrace2 to the latest cardem build.
 3. Installing or refreshing the `osmo-remsim` toolchain on the host.
 
-The YggdraSIM launcher reads all bridge configuration from the main
-menu entry `[B] HIL Bridge Session`. This document only covers the
+The YggdraSIM launcher reads local rig configuration from the main
+menu entry `[B] Local SIMtrace2 HIL Bridge Session`. This document only covers the
 hardware and host-side prerequisites — see
 [`HIL_BRIDGE_GUIDE.md`](HIL_BRIDGE_GUIDE.md) for the operator flow once
 everything is in place.
@@ -184,7 +189,7 @@ python main/main.py --doctor
 Expected rows once the host is ready:
 
 ```text
-[+] HIL bridge readiness: pyudev present; osmo-remsim-client-st2 at /usr/local/bin/osmo-remsim-client-st2
+[+] Local HIL bridge readiness: pyudev present; osmo-remsim-client-st2 at /usr/local/bin/osmo-remsim-client-st2
 [+] dfu-util (SIMtrace2 flashing): /usr/bin/dfu-util
 [+] lsusb (USB identity): /usr/bin/lsusb
 ```

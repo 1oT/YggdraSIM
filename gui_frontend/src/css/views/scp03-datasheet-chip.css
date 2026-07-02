@@ -1,0 +1,151 @@
+/*
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+ */
+
+/* datasheet chip row (Reader / EID / Input / SW / note chips) */
+.cc-datasheet-chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+}
+
+.cc-datasheet-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: var(--bg-hover);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  padding: 3px 10px;
+  font-size: 12px;
+  color: var(--fg-muted);
+}
+
+.cc-datasheet-chip-label {
+  font-size: 10.5px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--fg-dim);
+  font-weight: 600;
+}
+
+.cc-datasheet-chip-label::after {
+  content: ":";
+}
+
+.cc-datasheet-chip-value {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--fg);
+}
+
+.cc-datasheet-chip--warn {
+  background: color-mix(in oklab, var(--warn, #f0a030) 10%, var(--bg-hover));
+  border-color: color-mix(in oklab, var(--warn, #f0a030) 35%, var(--border));
+  color: var(--warn, #f0a030);
+}
+
+.cc-action-datasheet-main--decoded > .cc-decoded {
+  margin-top: 4px;
+  background: color-mix(in oklab, var(--bg-elev), transparent 28%);
+  border: 1px solid color-mix(in oklab, var(--border), var(--accent) 18%);
+  box-shadow: 0 1px 0 color-mix(in oklab, var(--fg), transparent 94%);
+}
+
+.cc-action-datasheet-main--decoded .cc-pv-object--depth-0 > .cc-pv-field {
+  border-left: 3px solid color-mix(in oklab, var(--accent), transparent 55%);
+}
+
+.cc-action-datasheet-main--decoded .cc-decoded-tools {
+  padding-bottom: 8px;
+  margin-bottom: 6px;
+  border-bottom: 1px dashed color-mix(in oklab, var(--border), transparent 15%);
+}
+
+.cc-getcerts-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 10px;
+}
+
+.cc-getcerts-cert {
+  border: 1px solid var(--border);
+  border-left: 3px solid color-mix(in oklab, var(--accent), transparent 45%);
+  border-radius: var(--radius-md);
+  padding: 10px;
+  background: color-mix(in oklab, var(--bg-elev), transparent 32%);
+}
+
+.cc-getcerts-cert-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.cc-getcerts-cert-title {
+  margin: 0;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--fg-dim);
+}
+
+.cc-getcerts-cert-list,
+.cc-getcerts-cert-raw {
+  margin-top: 8px;
+}
+
+.cc-getcerts-cert-item {
+  margin-top: 6px;
+}
+
+.cc-action-datasheet-main > .cc-log-inline {
+  margin: 0;
+  border: none;
+  border-radius: 0;
+  max-height: min(52vh, 560px);
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
+.cc-action-datasheet-main > .cc-empty {
+  margin: 0;
+  padding: 14px 16px;
+}
+
+.cc-action-datasheet-raw.cc-details {
+  margin-top: 2px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md, 8px);
+  padding: 0 12px 10px;
+  background: color-mix(in oklab, var(--bg-hover) 45%, transparent);
+}
+
+.cc-action-datasheet-raw.cc-details > summary {
+  padding: 10px 4px 8px;
+  font-weight: 600;
+  color: var(--fg-muted);
+}
+
+.cc-action-datasheet-raw .cc-hex {
+  margin: 0;
+  border: none;
+  border-radius: 0 0 6px 6px;
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+  white-space: pre;
+  overflow-x: auto;
+}
+
+.cc-action-datasheet-raw .cc-json {
+  margin: 8px 0 0;
+  max-height: min(40vh, 420px);
+}
+

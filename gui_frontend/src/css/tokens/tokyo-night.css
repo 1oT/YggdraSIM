@@ -1,0 +1,43 @@
+/*
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+ */
+
+/* -- Theme: Tokyo Night (storm-inflected dark, blue-violet accent) ------- */
+html[data-theme="tokyo-night"] {
+  --bg: #1a1b26;
+  --bg-elev: #24283b;
+  --bg-elev-2: #292e42;
+  --surface: #24283b;
+  --surface-alt: rgba(255, 255, 255, 0.04);
+  --bg-hover: rgba(192, 202, 245, 0.06);
+  --border: rgba(192, 202, 245, 0.12);
+  --border-strong: rgba(192, 202, 245, 0.28);
+  --fg: #c0caf5;
+  --fg-dim: #a9b1d6;
+  --fg-muted: #565f89;
+  --accent: #7aa2f7;
+  --accent-strong: #5d81e8;
+  --accent-soft: rgba(122, 162, 247, 0.14);
+  --accent-fg: #1a1b26;
+  --accent-glow: rgba(122, 162, 247, 0.48);
+  --gradient-accent: linear-gradient(135deg, #7aa2f7 0%, #7dcfff 50%, #bb9af7 100%);
+  --gradient-brand: linear-gradient(135deg, #7aa2f7 0%, #bb9af7 100%);
+  --ok: #9ece6a;
+  --ok-soft: rgba(158, 206, 106, 0.16);
+  --warn: #e0af68;
+  --warn-soft: rgba(224, 175, 104, 0.16);
+  --fail: #f7768e;
+  --fail-soft: rgba(247, 118, 142, 0.16);
+  --code-bg: #16161e;
+  --kbd-bg: rgba(22, 22, 30, 0.96);
+  --shadow-card: 0 10px 28px rgba(0, 0, 0, 0.38);
+  --shadow-card-hover: 0 20px 48px rgba(0, 0, 0, 0.52);
+  --shadow-glow-accent: 0 0 0 1px var(--accent-soft), 0 16px 42px -12px var(--accent-glow);
+  --topbar-bg: rgba(36, 40, 59, 0.82);
+  --theme-tint:
+    radial-gradient(circle at 92% 6%, rgba(122, 162, 247, 0.13), transparent 46%),
+    radial-gradient(circle at 8% 96%, rgba(187, 154, 247, 0.10), transparent 48%),
+    radial-gradient(circle at 50% 45%, rgba(125, 207, 255, 0.04), transparent 56%);
+}
+

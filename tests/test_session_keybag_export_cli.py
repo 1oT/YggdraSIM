@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 from __future__ import annotations
 
 import io
@@ -69,6 +72,16 @@ class _Scp03ShellExportKeybagTests(unittest.TestCase):
             _handle_list_profiles=lambda *args, **kwargs: None,
             _handle_profile_scan=lambda *args, **kwargs: None,
             _handle_registry=lambda *args, **kwargs: None,
+            _handle_install_one_shot=lambda *args, **kwargs: None,
+            _handle_install_file=lambda *args, **kwargs: None,
+            _handle_load_cap=lambda *args, **kwargs: None,
+            _handle_install_load=lambda *args, **kwargs: None,
+            _handle_install_app=lambda *args, **kwargs: None,
+            _handle_install_instance=lambda *args, **kwargs: None,
+            _handle_install_selectable=lambda *args, **kwargs: None,
+            _handle_install_extradition=lambda *args, **kwargs: None,
+            _handle_install_registry=lambda *args, **kwargs: None,
+            _handle_install_personalization=lambda *args, **kwargs: None,
             _handle_store_data=lambda *args, **kwargs: None,
             _handle_install_wizard=lambda *args, **kwargs: None,
             _handle_scan_tree=lambda *args, **kwargs: None,
@@ -85,7 +98,6 @@ class _Scp03ShellExportKeybagTests(unittest.TestCase):
             _set_defaults=lambda *args, **kwargs: None,
             do_manage_binds=lambda *args, **kwargs: None,
             _toggle_debug=lambda *args, **kwargs: None,
-            _handle_decode=lambda *args, **kwargs: None,
             _handle_export_euicc=lambda *args, **kwargs: None,
             _handle_set_gold_profile=lambda *args, **kwargs: None,
             _handle_show_gold_profile=lambda *args, **kwargs: None,
@@ -101,8 +113,10 @@ class _Scp03ShellExportKeybagTests(unittest.TestCase):
             gp_ctrl=SimpleNamespace(set_status=lambda *a, **k: None, delete_object=lambda *a, **k: None),
         ))
         self.assertIn("EXPORT-KEYBAG", command_map)
+        self.assertNotIn("DECODE", command_map)
         _required, optional = CommandRegistry.get_arg_requirements()
         self.assertIn("EXPORT-KEYBAG", optional)
+        self.assertNotIn("DECODE", _required)
 
     def test_handler_refuses_when_session_missing(self) -> None:
         shell = self._make_shell(transport=None)

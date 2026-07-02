@@ -5,6 +5,11 @@ tags:
   - ota
   - scp80
 ---
+<!--
+SPDX-License-Identifier: GPL-3.0-or-later
+Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+-->
+
 
 # SCP80 OTA
 
@@ -85,8 +90,8 @@ A minimal send path in the shell is:
 
 ```text
 [SCP80] > iccid <ICCID>
-[SCP80] > set KIc 0x15
-[SCP80] > set KID 0x15
+[SCP80] > set kic_indicator 15
+[SCP80] > set kid_indicator 15
 [SCP80] > set TAR 000000
 [SCP80] > build A0D600...
 [SCP80] > send

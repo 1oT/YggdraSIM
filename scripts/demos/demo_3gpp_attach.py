@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 """YggdraSIM — 3GPP cold-attach + USIM-AKA live demo.
 
 Walks an empty modem through a fresh attach against the in-process
@@ -157,7 +160,6 @@ def main() -> int:
     )
     engine.state.toolkit.provide_imei = False
     engine.state.toolkit.timer_management_auto_rearm = False
-    engine.state.toolkit.ipa_poll_enabled = False
 
     step(f"EID  = {engine.state.eid}")
     step(f"ATR  = {engine.get_atr().hex().upper()}",

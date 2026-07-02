@@ -1,3 +1,8 @@
+<!--
+SPDX-License-Identifier: GPL-3.0-or-later
+Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+-->
+
 # Command Reference
 
 This page mirrors the grouped `HELP` surface from the SCP03 admin shell.
@@ -26,9 +31,19 @@ This page mirrors the grouped `HELP` surface from the SCP03 admin shell.
 - `APPS`: shortcut for the applications registry
 - `PKGS`: shortcut for the packages registry
 - `SD`: shortcut for the security domains registry
+- `INSTALL <cap/ijc> <80E604/0C...>`: load a CAP/IJC package, then send the supplied `INSTALL [for install]` APDU
+- `INSTALL-CAP <cap/ijc> [--privs HEX] [--params HEX] [--applet AID] [--module AID]`: build and execute a full CAP load plus instantiate sequence
+- `LOAD <cap/ijc>`: send `INSTALL [for load]` and `LOAD` blocks without instantiating
+- `INSTALL-LOAD <LoadFileAID> [SDAID] [Hash] [Params] [Token]`: send a standalone `INSTALL [for load]`
+- `INSTALL-APP <PkgAID> <AppAID> [ModAID] [Priv] [Params]`: instantiate and make selectable
+- `INSTALL-INSTANCE <PkgAID> <AppAID> [ModAID] [Priv] [Params]`: instantiate only
+- `MAKE-SELECTABLE <AID> [Priv] [Params] [Token]`: make an installed applet selectable
+- `EXTRADITE <App_AID> <SD_AID> [Token]`: send `INSTALL [for extradition]`
+- `REGISTRY-UPDATE <AID> [Priv] [Params]`: send `INSTALL [for registry update]`
+- `PERSONALIZE <AID>`: send `INSTALL [for personalization]`
 - `LOCK <AID>`: set state to locked
 - `UNLOCK <AID>`: set state to selectable
-- `DEL <AID>`: delete an object
+- `DEL <AID>` / `DELETE <AID>`: delete an object
 - `STORE-DATA <hex> [P1] [P2]`: send a raw `STORE DATA` payload
 
 ## Telecom and eSIM retrieval
@@ -58,7 +73,7 @@ SCP11 README pages.
 
 ## Security and PIN management
 
-- `MANAGE-PIN`: unified wizard to verify, change, enable, disable, or unblock PINs
+- `MANAGE-PIN`: unified wizard to verify, change, enable, disable, or unblock PINs; PIN references accept hex or names such as `PIN-APP1`, `UPIN`, and `ADM1`; use `--hex` or `--binary` in macro form to send raw hex bytes instead of the default ASCII PIN block
 
 ## Environment configuration
 
@@ -88,7 +103,6 @@ SCP11 README pages.
 ## System and developer
 
 - `GUIDE [Topic]`: show in-shell documentation for `GP`, `ETSI`, `GSMA`, `INSTALL`, `SECURITY`, `OTA`, `CONFIG`, `SAIP`, `SUCI`, or `CLI`
-- `DECODE <Hex>`: parse and decode a raw BER-TLV string
 - `RUN` or `SCRIPT <File> [Out.yaml]`: execute a batch script of APDU commands
 - `DEBUG` or `VERBOSE`: toggle raw APDU logging
 - `EXPORT-KEYBAG [Path.keys.json] [Label]`: dump the active SCP03 session keys (S-ENC, S-MAC, S-RMAC, SSC, chaining value) and the target AID into a keybag JSON for offline HIL pcap decryption; refuses cleanly when no authenticated session is present

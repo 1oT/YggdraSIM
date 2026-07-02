@@ -1,6 +1,11 @@
+<!--
+SPDX-License-Identifier: GPL-3.0-or-later
+Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+-->
+
 # Diagnostics Toolbox
 
-Four v1-era capabilities ship as first-class tooling next to the
+Four v1-era capabilities ship as standalone tooling next to the
 core YggdraSIM subsystems. Each is additive — nothing existing
 changes behaviour unless the new command is explicitly invoked.
 
@@ -207,7 +212,7 @@ timestamped subdirectory. The dump root itself is created `0o700`.
 yggdrasim-apdu-fuzzer \
     --corpus /path/to/session.json \
     --transport pcsc \
-    --allow-iccid 89000012345678901234 \
+    --allow-iccid 89880012345678901234 \
     --seed 0xCAFEBABE \
     --max-apdus 500 \
     --i-mean-it
@@ -241,7 +246,7 @@ ICCID.
 ```
 # Write keys + launch tshark against a capture:
 yggdrasim-eum-diag inject-keys \
-    --iccid 89000012345678901234 \
+    --iccid 89880012345678901234 \
     --shs-enc <32 hex chars> \
     --shs-mac <32 hex chars> \
     --dek     <32 hex chars> \
@@ -250,7 +255,7 @@ yggdrasim-eum-diag inject-keys \
 # Write keys only (useful when a separate tshark/wireshark session
 # already has the dissector loaded):
 yggdrasim-eum-diag store-keys \
-    --iccid 89000012345678901234 \
+    --iccid 89880012345678901234 \
     --shs-enc ... --shs-mac ... \
     --keys-out /tmp/session-keys.json
 
@@ -267,8 +272,8 @@ on POSIX. Format:
 {
     "format": "yggdrasim-eum-session-keys/v1",
     "entries": {
-        "89000012345678901234": {
-            "iccid": "89000012345678901234",
+        "89880012345678901234": {
+            "iccid": "89880012345678901234",
             "shs_enc_hex": "...",
             "shs_mac_hex": "...",
             "dek_hex": "...",
@@ -294,6 +299,12 @@ guides because they sit on top of larger subsystems:
   are unwrapped on the fly when a keybag JSON is supplied (sidecars
   named `<pcap>.keys.json` are auto-discovered). Full write-up:
   `HIL_BRIDGE_GUIDE.md` §11.
+- **YggdraCore 5G AKA / AKMA stub AUSF.** `Tools/YggdraCore/` ships an
+  in-process `AusfStub` + `AAnFStub` that can drive a complete
+  `Nausf_UEAuthentication_Authenticate` round trip against the
+  simulated USIM without standing up Open5GS. The opt-in FastAPI
+  loopback is gated by `YGGDRASIM_5GCORE_MODE=stub`. See
+  `guides/CAPABILITIES.md` §11. (post-v1 staging — not part of this release.)
 - **`main/main.py --doctor`.** Read-only preflight covering Python
   version, `cryptography`, `pycryptodomex`, `asn1tools`, optional
   on-disk `pysim/` clone, SQLite, optional `textual` (TUI), PC/SC

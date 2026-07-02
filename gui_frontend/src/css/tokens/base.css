@@ -1,0 +1,64 @@
+/*
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+ */
+
+/* YggdraSIM Universal GUI — theme stylesheet.
+ *
+ * All surface colours resolve via CSS custom properties. A theme is
+ * applied by setting `data-theme` on the <html> element; see
+ * `theme-init.js` for how the persisted choice is restored before
+ * first paint.
+ *
+ * Palettes are ported from the site-docs Material build (extra.css:
+ * Nord, and oneot.css: 1oT brand). `matrix` is an original tribute
+ * to the secure-element roots of the project.
+ *
+ * `gruv-dark`, `ink-light`, and `ocean-dark` are standalone bundles in
+ * the same token vocabulary (no `--ygg-*`; tree icons fall back via
+ * `var(--tree-*-*, legacy)` defaults). */
+
+:root {
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-xl: 20px;
+  --radius-pill: 999px;
+
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "Inter", Roboto,
+    "Helvetica Neue", Arial, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", "JetBrains Mono", Menlo,
+    Consolas, "Liberation Mono", monospace;
+
+  --transition-fast: 140ms cubic-bezier(0.25, 0.8, 0.4, 1);
+  --transition-mid: 220ms cubic-bezier(0.25, 0.8, 0.4, 1);
+  --transition-slow: 340ms cubic-bezier(0.25, 0.8, 0.4, 1);
+
+  --ease-out-bounce: cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+@keyframes ygg-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 var(--accent-glow, rgba(136, 192, 208, 0.5)); }
+  50%      { box-shadow: 0 0 0 6px rgba(136, 192, 208, 0); }
+}
+
+@keyframes ygg-fade-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes ygg-shimmer {
+  0%   { background-position: -200px 0; }
+  100% { background-position: calc(200px + 100%) 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}
+

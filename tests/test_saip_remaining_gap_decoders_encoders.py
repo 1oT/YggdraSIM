@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 """
 Remaining-gap closure tests — structured decoders + round-trip encoders
 for the ``_PASSTHROUGH_BYTES_FIELD_NAMES`` entries that were previously

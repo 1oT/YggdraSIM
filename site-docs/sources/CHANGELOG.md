@@ -1,3 +1,8 @@
+<!--
+SPDX-License-Identifier: GPL-3.0-or-later
+Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+-->
+
 # Changelog
 
 All notable changes to YggdraSIM are recorded here. The format follows
@@ -7,48 +12,39 @@ the public API surface — the launcher, the documented CLI shells, the
 SCP03 / SCP11 / SCP80 / SIMCARD module entry points, and the
 `yggdrasim_common` helpers consumed by external integrators.
 
-Internal helpers (modules under leading-underscore names and
-undocumented SAIP wrappers) may change without notice between minor
-releases.
+Internal helpers (modules under leading-underscore names, undocumented
+SAIP wrappers, and any path explicitly marked post-v1 staging in this
+file) may change without notice between minor releases.
 
-## [1.0.2]
+## [Unreleased]
+
+### Added
+
+- Post-v1 Tools tier staging (not part of this release):
+  in-process `Tools/YggdraCore/` stubs (subscription store, AUSF
+  stub, AAnF stub, FastAPI loopback, BYO Open5GS bridge);
+  local-loopback `Tools/CardBridge/` HTTP card-relay daemon. The HTTP / CLI surface
+  hardening, BYO-Open5GS resilience checks, and the public docs
+  pass for these modules are still pending — they are not part of
+  the v1.0.0 promise.
+
+## [1.0.1] — 2026-06-05
 
 ### Fixed
 
-- SCP11 notification metadata and pending-notification extraction fall back
-  to manual BER-TLV parsing when pySim returns an empty list or rejects
-  long-form notification TLVs.
-- SCP11 notification sequence values are encoded as positive ASN.1 INTEGERs
-  for retrieve and local notification requests, including values with the
-  high bit set.
-- Source checkouts report the `pyproject.toml` version even when stale
-  installed distribution metadata is present.
-
-## [1.0.1]
-
-### Changed
-
-- Project tree pruned to the SCP03 / SCP80 / SCP11 / SAIP /
-  HilBridge / SIMCARD operator surfaces. GUI server, V2-staging
-  scaffolding, and the unrelated documentation entries that
-  referenced them have been removed so the v1 line ships only the
-  modules it actually carries.
-- Repository URLs in `pyproject.toml`, `mkdocs*.yml`, and the
-  install scripts now point at `github.com/1oT/YggdraSIM` rather
-  than the maintainer's personal fork.
-- `card_bridge_auth` docstring trimmed to the in-tree HilBridge
-  relay surface; the standalone CardBridge daemon is not part of
-  this release.
-
-### Removed
-
-- Optional `[gui]` / `[gui-server]` / `[open5gs]` / `[sunrise6g]`
-  extras and every register entry that targeted
-  `yggdrasim_common.gui_server.*`.
-- `--gui` / `--web-server` argparse surface from the launcher.
-- `_probe_gui_stack` / `_detect_webview_backends` from the doctor
-  flow.
-- `YGGDRASIM_GUI_*` environment-flag block from the registry.
+- SCP11 live and relay notification sync now encode
+  `seqNumber >= 0x80` as positive ASN.1 INTEGER values before
+  `RetrieveNotification`, `RemoveNotificationFromList`, and local-access
+  notification requests. This avoids cards interpreting values such as
+  `188` as a negative INTEGER.
+- SCP11 notification sync now reports
+  `notificationsListResultError` responses such as `undefinedError(127)`
+  directly, instead of treating the response as an undecodable pending
+  notification.
+- SCP11 live notification listing now preserves active-channel recovery
+  context and falls back through active logical channel priming, fresh
+  logical-channel recovery, and STK-mode bootstrap for recoverable
+  `6E00` / `6985` style failures after profile-state changes.
 
 ## [1.0.0] — 2026-04-29
 
@@ -57,15 +53,13 @@ exposes a frozen v1 footprint; the v2 staging continues on `main`.
 
 ### Added
 
-- Default eUICC identity is now the BCD-clean self-documenting marker
-  `89045967676472615349763031303005` (decodes as
-  `\x89\x04YggdraSIv0100\x05` in any hex viewer; SGP.02 §2.2.2 telecom
-  MII `89` retained; ITU-T E.118 / SGP.22 §4.11.2 Luhn = 5).
+- Default eUICC identity is now the reserved SGP.22 Annex A.2 test EID
+  `89049032123451234512345678901234`, with prefix `89049032` and a valid
+  Luhn check digit.
 - SIMCARD 5G core: TS 33.501 Annex A AKA helpers (`SIMCARD/aka_5g.py`),
   TS 33.535 AKMA (`SIMCARD/akma.py`), TS 33.501 §C.3 SUCI Profile A & B
   with EF.SUCI_Calc_Info codec (`SIMCARD/suci.py`), TS 31.102 §7.1.2.4
   `GET IDENTITY` handler (`SIMCARD/identity.py`).
-- IPA poll over DNS resolution (`SIMCARD/ipa_poll_dns.py`) and TLS
   transport (`SIMCARD/ipa_tls.py`); SAIP pySIM specs bridge
   (`SIMCARD/saip_pysim_specs.py`); SGP.32 package surfaces
   (`SIMCARD/sgp32_packages.py`); modem write persistence; shared EF
@@ -82,11 +76,11 @@ exposes a frozen v1 footprint; the v2 staging continues on `main`.
 - yggdrasim_common: APDU recorder + WebSocket stream, card-bridge
   bearer-token helper (`card_bridge_auth.py`), Nord palette,
   remote-card argument parsing.
-- Documentation: configuration & certificates guide, "Load
-  certificates and config" how-to recipe.
+- Documentation: configuration & certificates guide, GUI host shell
+  guide, "Load certificates and config" how-to recipe.
 - `tests/live_scp03/` golden inputs for the SCP03 admin shell.
-- Demo scripts under `scripts/demos/` covering 3GPP attach, eIM
-  polling, and profile lifecycle.
+- Demo scripts under `scripts/demos/` covering 3GPP attach and profile
+  lifecycle.
 
 ### Changed
 
@@ -115,6 +109,6 @@ exposes a frozen v1 footprint; the v2 staging continues on `main`.
   values; pushing them to a shared remote was a foot-gun. The
   `reports/.gitkeep` placeholder documents the intended layout.
 
-[1.0.2]: https://github.com/1oT/YggdraSIM/compare/v1.0.1...v1.0.2
-[1.0.1]: https://github.com/1oT/YggdraSIM/compare/v1.0.0...v1.0.1
-[1.0.0]: https://github.com/1oT/YggdraSIM/releases/tag/v1.0.0
+[Unreleased]: https://example.invalid/yggdrasim/compare/v1.0.1...HEAD
+[1.0.1]: https://example.invalid/yggdrasim/releases/tag/v1.0.1
+[1.0.0]: https://example.invalid/yggdrasim/releases/tag/v1.0.0

@@ -3,6 +3,11 @@ title: How-To
 tags:
   - how-to
 ---
+<!--
+SPDX-License-Identifier: GPL-3.0-or-later
+Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+-->
+
 
 # How-To
 
@@ -52,6 +57,33 @@ subsystem page that contains the full surface.
 
 <div class="grid cards" markdown>
 
+-   :material-monitor-dashboard: __Universal GUI Command Center__
+
+    ---
+
+    Run the desktop or web-server workbench with a live APDU dock and
+    remote-card diagnostics.
+
+    [Open guide](../subsystems/gui-command-center.md)
+
+-   :material-access-point-network: __Remote APDU Streaming__
+
+    ---
+
+    Stream a PC/SC reader through Card Bridge and SSH, including HIL
+    remote-card mode.
+
+    [Open recipe](remote-apdu-streaming.md)
+
+-   :material-lan: __Install RemSIM / APDU Streaming__
+
+    ---
+
+    Prepare Linux or Raspberry Pi hosts for SIMtrace2, RemSIM, GSMTAP,
+    and remote-card HIL.
+
+    [Open recipe](install-remsim-apdu-streaming.md)
+
 -   :material-bridge: __Run a HIL Capture__
 
     ---
@@ -91,7 +123,7 @@ subsystem page that contains the full surface.
 
     ---
 
-    Author a runtime plugin against the reserved `polling` capability.
+    Author a runtime plugin against a private capability contract.
 
     [Open recipe](write-a-plugin.md)
 

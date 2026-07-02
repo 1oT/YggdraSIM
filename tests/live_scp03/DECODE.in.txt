@@ -1,4 +1,0 @@
-# BER-TLV decoder smoke test. Decodes a synthetic FCI template containing
-# a file descriptor (82) and FID (83) — both well-formed.
-DECODE 6F0A8204004141008302DEAD
-EXIT

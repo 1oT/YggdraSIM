@@ -1,7 +1,10 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
-"""Shared profile-management helpers for the four SCP11 shells.
 
-The eSIM Live, eSIM Test, Local SMDP+, and Local eIM shells all expose the
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+"""Shared profile-management helpers for SCP11 shells.
+
+The eSIM Management, Local SMDP+, and Local eIM shells all expose the
 same ``ENABLE-PROFILE`` / ``DISABLE-PROFILE`` / ``DELETE-PROFILE`` family of
 commands. Without a shared helper, the safety semantics — auto-disabling the
 currently-active profile before enabling a new one, auto-disabling an
@@ -47,9 +50,6 @@ class ProfileActionAdapter:
     on PPR rules (``ppr1-disable-not-allowed``). When the callback
     returns ``False`` the helper aborts without attempting the disable.
 
-    ``modem_refresh`` is invoked once after every accepted state change so
-    the calling shell can queue the proactive ``REFRESH`` toward the
-    attached modem (the existing ``_queue_modem_refresh`` plumbing).
     """
 
     enable_profile: Callable[[Any], Any]
@@ -58,7 +58,6 @@ class ProfileActionAdapter:
     policy_allow_auto_disable: Optional[
         Callable[[Any, Optional[Any]], bool]
     ] = None
-    modem_refresh: Optional[Callable[[str], None]] = None
     describe_profile: Callable[[Any], str] = lambda profile: ""
     profile_identifier: Callable[[Any], Any] = lambda profile: profile
     info: Callable[[str], None] = print
@@ -75,7 +74,7 @@ class ProfileActionAdapter:
 def is_enabled(profile: Any) -> bool:
     """Return True when the metadata row's state is ENABLED.
 
-    All four shells store the state as an upper / mixed-case string on a
+    Shells store the state as an upper / mixed-case string on a
     ``ProfileMetadataView``-shaped object. Compare case-insensitively so
     ``"Enabled"``, ``"ENABLED"``, and the rare ``"ENABLED "`` (trailing
     whitespace) variants all resolve to the same answer.
@@ -173,8 +172,7 @@ def run_enable_profile(
     3. Issue ``DisableProfile`` against the active profile. Abort on
        failure (we don't want to leave the card in a wedged state where
        the caller assumes the target was enabled but it wasn't).
-    4. Issue ``EnableProfile`` against the target. Queue the modem
-       refresh on success.
+    4. Issue ``EnableProfile`` against the target.
 
     Returns ``True`` when the target ends up ENABLED at the end of the
     sequence (or already was). ``False`` when any step failed.
@@ -208,8 +206,6 @@ def run_enable_profile(
     enable_response = adapter.enable_profile(enable_target)
     if not _is_success(enable_response):
         return False
-    if adapter.modem_refresh is not None:
-        adapter.modem_refresh("EnableProfile")
     return True
 
 
@@ -237,8 +233,6 @@ def run_disable_profile(
     response = adapter.disable_profile(disable_target)
     if not _is_success(response):
         return False
-    if adapter.modem_refresh is not None:
-        adapter.modem_refresh("DisableProfile")
     return True
 
 
@@ -281,8 +275,6 @@ def run_delete_profile(
     response = adapter.delete_profile(delete_target)
     if not _is_success(response):
         return False
-    if adapter.modem_refresh is not None:
-        adapter.modem_refresh("DeleteProfile")
     return True
 
 

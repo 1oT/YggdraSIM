@@ -1,0 +1,410 @@
+/*
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+ */
+
+/* ============================================================
+ * FCP cache status banners
+ *
+ * Status strip rendered at the top of the FCP preview when we are
+ * either showing optimistically-cached data during a fresh read,
+ * running a recovery (cold reset + rescan), or stuck on stale data
+ * after a failed retry. Three visual variants, all compact and
+ * non-intrusive so they don't push the FCP header off-screen:
+ *
+ *   --refresh : blue / accent tint for "in-flight, will update".
+ *   --recover : amber for "we're resetting the card, hold on".
+ *   --stale   : red for "retry failed, this is stale".
+ *
+ * Spinner glyph is a unicode arrow rotated via @keyframes; stale
+ * variant uses a warning triangle so it doesn't look like it's
+ * still working on recovery.
+ * ============================================================ */
+
+.cc-stale-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 8px 0;
+  padding: 6px 12px;
+  font-size: 12px;
+  font-weight: 500;
+  border-radius: var(--radius-pill, 999px);
+  border: 1px solid var(--border);
+  background: var(--bg-elev, rgba(255, 255, 255, 0.04));
+  color: var(--fg-muted);
+  max-width: 100%;
+  line-height: 1.3;
+}
+
+.cc-stale-chip-spinner {
+  display: inline-block;
+  font-size: 13px;
+  line-height: 1;
+}
+
+.cc-stale-chip--refresh,
+.cc-stale-chip--recover {
+  /* Animated spinner only while we are working. */
+}
+
+.cc-stale-chip--refresh .cc-stale-chip-spinner,
+.cc-stale-chip--recover .cc-stale-chip-spinner {
+  animation: cc-stale-chip-spin 1.1s linear infinite;
+}
+
+@keyframes cc-stale-chip-spin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+
+.cc-stale-chip--refresh {
+  color: var(--accent, #4a90e2);
+  background: rgba(74, 144, 226, 0.10);
+  border-color: rgba(74, 144, 226, 0.30);
+}
+
+.cc-stale-chip--recover {
+  color: var(--warn, #d9a441);
+  background: rgba(217, 164, 65, 0.12);
+  border-color: rgba(217, 164, 65, 0.35);
+}
+
+.cc-stale-chip--stale {
+  color: var(--err, #d9534f);
+  background: rgba(217, 83, 79, 0.10);
+  border-color: rgba(217, 83, 79, 0.35);
+}
+
+/* -- About · guide catalogue ------------------------------------------- */
+
+.about-guides {
+  margin-top: 28px;
+  padding-top: 18px;
+  border-top: 1px solid var(--border);
+}
+
+.about-guides-header h2 {
+  margin: 0 0 4px 0;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--fg);
+}
+
+.about-guides-header .hint {
+  margin: 0 0 14px 0;
+  color: var(--fg-muted);
+  font-size: 13px;
+}
+
+.about-guides-status {
+  font-size: 12.5px;
+  color: var(--fg-muted);
+  margin-bottom: 12px;
+  min-height: 1em;
+}
+
+.about-guides-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+}
+
+.about-guides-group h3 {
+  margin: 0 0 10px 0;
+  font-size: 13px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--fg-muted);
+}
+
+.about-guides-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 12px;
+}
+
+.about-guides-card {
+  text-align: left;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 12px 14px;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  transition: border-color var(--transition-fast),
+    background var(--transition-fast),
+    transform var(--transition-fast);
+  font-family: inherit;
+  color: var(--fg);
+}
+
+.about-guides-card:hover:not(:disabled) {
+  border-color: var(--accent);
+  background: var(--accent-soft, rgba(99, 169, 255, 0.10));
+  transform: translateY(-1px);
+}
+
+.about-guides-card:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.about-guides-card-title {
+  font-weight: 600;
+  font-size: 14px;
+  color: var(--fg);
+}
+
+.about-guides-card-blurb {
+  font-size: 12.5px;
+  line-height: 1.4;
+  color: var(--fg-muted);
+}
+
+.about-guides-card-meta {
+  font-size: 11px;
+  color: var(--fg-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+/* -- Document viewer modal --------------------------------------------- */
+
+.cc-doc-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 9000;
+  display: none;
+  align-items: stretch;
+  justify-content: center;
+}
+
+.cc-doc-modal[data-state="open"] {
+  display: flex;
+}
+
+.cc-doc-modal-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(2px);
+}
+
+.cc-doc-modal-card {
+  position: relative;
+  margin: 4vh auto;
+  width: min(900px, 92vw);
+  max-height: 92vh;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg, 8px);
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.45);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.cc-doc-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-elev);
+}
+
+.cc-doc-modal-titles h2 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--fg);
+}
+
+.cc-doc-modal-path {
+  display: block;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--fg-muted);
+  margin-top: 2px;
+}
+
+.cc-doc-modal-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.cc-doc-modal-btn {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--fg);
+  padding: 4px 10px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 12px;
+  transition: background var(--transition-fast);
+}
+
+.cc-doc-modal-btn:hover {
+  background: var(--bg-hover);
+}
+
+.cc-doc-modal-btn.is-copied {
+  background: var(--ok, #22c55e);
+  color: var(--bg);
+  border-color: var(--ok, #22c55e);
+}
+
+.cc-doc-modal-close {
+  font-size: 18px;
+  line-height: 1;
+  padding: 0 10px;
+}
+
+.cc-doc-modal-body {
+  flex: 1;
+  overflow: auto;
+  padding: 18px 22px;
+  color: var(--fg);
+  line-height: 1.55;
+}
+
+.cc-doc-modal-body h1.cc-doc-h1,
+.cc-doc-modal-body h2.cc-doc-h2,
+.cc-doc-modal-body h3.cc-doc-h3,
+.cc-doc-modal-body h4.cc-doc-h4,
+.cc-doc-modal-body h5.cc-doc-h5,
+.cc-doc-modal-body h6.cc-doc-h6 {
+  margin: 18px 0 10px 0;
+  color: var(--fg);
+  border-bottom: none;
+}
+
+.cc-doc-modal-body h1.cc-doc-h1 { font-size: 22px; font-weight: 600; }
+.cc-doc-modal-body h2.cc-doc-h2 { font-size: 18px; font-weight: 600; }
+.cc-doc-modal-body h3.cc-doc-h3 { font-size: 15px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--fg-muted); }
+
+.cc-doc-modal-body p {
+  margin: 8px 0;
+}
+
+.cc-doc-modal-body ul.cc-doc-list,
+.cc-doc-modal-body ol.cc-doc-list {
+  margin: 8px 0;
+  padding-left: 24px;
+}
+
+.cc-doc-modal-body code {
+  background: var(--code-bg, var(--bg-hover));
+  border-radius: 3px;
+  padding: 1px 6px;
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+}
+
+.cc-doc-modal-body pre.cc-doc-pre {
+  background: var(--code-bg, var(--bg-hover));
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 12px 14px;
+  overflow: auto;
+  margin: 12px 0;
+}
+
+.cc-doc-modal-body pre.cc-doc-pre code {
+  background: transparent;
+  padding: 0;
+  font-size: 12.5px;
+  display: block;
+  white-space: pre;
+}
+
+.cc-doc-modal-body blockquote {
+  border-left: 3px solid var(--accent);
+  margin: 10px 0;
+  padding: 4px 12px;
+  color: var(--fg-muted);
+  background: var(--accent-soft, rgba(99, 169, 255, 0.08));
+}
+
+.cc-doc-modal-body a {
+  color: var(--accent);
+}
+
+.cc-doc-modal-body hr {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 16px 0;
+}
+
+/* GitHub-flavoured tables in the doc / README modal — operators were
+ * seeing raw pipe / dash glyphs because the renderer fell through to
+ * paragraph mode. The renderer now emits real <table>s; the styling
+ * keeps them visually consistent with the doc body (zebra striping,
+ * subtle borders, theme-aware backgrounds). */
+.cc-doc-modal-body table.cc-doc-table {
+  width: 100%;
+  margin: 12px 0;
+  border-collapse: collapse;
+  font-size: 13px;
+  display: block;
+  overflow-x: auto;
+}
+
+.cc-doc-modal-body table.cc-doc-table thead tr {
+  background: var(--bg-elev, var(--bg-hover));
+}
+
+.cc-doc-modal-body table.cc-doc-table th,
+.cc-doc-modal-body table.cc-doc-table td {
+  border: 1px solid var(--border);
+  padding: 6px 10px;
+  text-align: left;
+  vertical-align: top;
+  white-space: normal;
+}
+
+.cc-doc-modal-body table.cc-doc-table th {
+  font-weight: 600;
+  color: var(--fg);
+}
+
+.cc-doc-modal-body table.cc-doc-table .cc-doc-align-left {
+  text-align: left;
+}
+
+.cc-doc-modal-body table.cc-doc-table .cc-doc-align-center {
+  text-align: center;
+}
+
+.cc-doc-modal-body table.cc-doc-table .cc-doc-align-right {
+  text-align: right;
+}
+
+.cc-doc-modal-body table.cc-doc-table tbody tr:nth-child(even) td {
+  background: var(--bg-elev, rgba(255, 255, 255, 0.02));
+}
+
+.cc-doc-modal-body table.cc-doc-table code {
+  background: var(--code-bg, var(--bg-hover));
+  padding: 1px 4px;
+  border-radius: 3px;
+  font-size: 12px;
+}
+
+.cc-doc-loading,
+.cc-doc-error {
+  padding: 16px;
+  font-size: 13px;
+  color: var(--fg-muted);
+}
+
+.cc-doc-error {
+  color: var(--err, #d9534f);
+}
+

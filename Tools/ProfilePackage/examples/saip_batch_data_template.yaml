@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 # SAIP Tool batch data template
 #
 # One mapping entry generates one concrete DER profile.
@@ -10,8 +13,8 @@
 #     Tools/ProfilePackage/examples/saip_batch_data_template.yaml \
 #     reports/generated_profiles
 #
-- ICCID: "89461111111111111112"
+- ICCID: "89881111111111111112"
   IMSI: "123456781234567"
 
-- ICCID: "89461111111111111113"
+- ICCID: "89881111111111111113"
   IMSI: "123456781234568"

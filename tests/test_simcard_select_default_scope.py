@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 """ETSI TS 102 221 §8.4.2 SELECT default-scope conformance tests.
 
 These lock the simulator's behaviour when the terminal issues

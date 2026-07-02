@@ -1,3 +1,8 @@
+<!--
+SPDX-License-Identifier: GPL-3.0-or-later
+Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+-->
+
 # eIM Package Template Library
 
 This directory holds the canonical package templates for the eIM local shell
@@ -26,7 +31,6 @@ eIM local shell and localized bridge.
 - `template_add_initial_eim.json`
 - `template_add_eim.json`
 - `template_get_eim_package.json`
-- `template_ipae_authenticate.json`
 - `template_profile_download_trigger_request.json`
 - `template_provide_eim_package_result.json`
 - `template_bound_profile_package.json`
@@ -38,8 +42,6 @@ eIM local shell and localized bridge.
 - `template_euicc_package_request_ecos.json`
 - `template_euicc_package_request_psmos.json`
 - `template_euicc_package_result.json`
-- `template_ipa_euicc_data_request.json`
-- `template_ipa_euicc_data_response.json`
 - `template_profile_download_trigger_result.json`
 
 ## Template Notes
@@ -48,7 +50,6 @@ eIM local shell and localized bridge.
 - `template_add_eim.json` aligns to eCO `AddEim`.
 - `template_get_eim_package.json` aligns to ESipa `GetEimPackageRequest` (`BF4F`).
 - `template_provide_eim_package_result.json` aligns to ESipa `ProvideEimPackageResult` (`BF50`).
-- `template_ipae_authenticate.json` seeds the handover transaction context used by `IPAE-DOWNLOAD`.
 - `template_profile_download_trigger_request.json` models the indirect SM-DP+ handover request path.
 - `template_bound_profile_package.json` models the direct BF36 profile relay path.
 - `template_euicc_memory_reset.json` defaults to selective `reset_eim_config_data` only.
@@ -63,7 +64,6 @@ eIM local shell and localized bridge.
   - `add_initial_eim`
   - `add_eim`
   - `get_eim_package`
-  - `ipae_authenticate`
   - `profile_download_trigger_request`
   - `provide_eim_package_result`
   - `bound_profile_package`

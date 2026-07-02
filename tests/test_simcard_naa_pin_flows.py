@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 from __future__ import annotations
 
 import tempfile
@@ -34,6 +37,7 @@ class SimCardPinFlowTests(unittest.TestCase):
             euicc_store_root=str(temp_root / "euicc_store"),
             profile_store_path=str(temp_root / "profile_store"),
         )
+        self.engine.state.chv_references[0x01].enabled = True
         self._select_usim_adf()
 
     def tearDown(self) -> None:

@@ -1,0 +1,85 @@
+/*
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+ */
+
+/* Findings (SAIP + eIM) */
+
+.data-table tr.severity-error td,
+.data-table tr.severity-fail td {
+  color: var(--fail);
+}
+
+.data-table tr.severity-warning td,
+.data-table tr.severity-warn td {
+  color: var(--warn);
+}
+
+.tool-findings {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 14px;
+}
+
+.tool-finding-block {
+  position: relative;
+  padding: 12px 14px 12px 18px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-strong);
+  background: var(--bg-elev-2);
+  overflow: hidden;
+}
+
+.tool-finding-block::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 4px;
+  background: var(--fg-dim);
+}
+
+.tool-finding-block h4 {
+  margin: 0 0 8px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-weight: 700;
+}
+
+.tool-finding-block ul {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--fg);
+}
+
+.tool-finding-block.severity-fail {
+  border-color: var(--fail-soft);
+  background: var(--fail-soft);
+}
+
+.tool-finding-block.severity-fail::before { background: var(--fail); }
+.tool-finding-block.severity-fail h4 { color: var(--fail); }
+
+.tool-finding-block.severity-warn {
+  border-color: var(--warn-soft);
+  background: var(--warn-soft);
+}
+
+.tool-finding-block.severity-warn::before { background: var(--warn); }
+.tool-finding-block.severity-warn h4 { color: var(--warn); }
+
+.tool-finding-block.severity-ok {
+  border-color: var(--ok-soft);
+  background: var(--ok-soft);
+  color: var(--ok);
+  text-align: center;
+  font-weight: 600;
+}
+
+.tool-finding-block.severity-ok::before { background: var(--ok); }
+

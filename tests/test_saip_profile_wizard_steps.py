@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """Tests for interactive steps in ``Tools.ProfilePackage.saip_profile_wizard.NewProfileWizard``
 not covered by test_saip_profile_wizard_utils.py.

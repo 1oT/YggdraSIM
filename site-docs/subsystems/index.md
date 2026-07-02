@@ -3,10 +3,15 @@ title: Subsystems
 tags:
   - subsystems
 ---
+<!--
+SPDX-License-Identifier: GPL-3.0-or-later
+Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+-->
+
 
 # Subsystems
 
-Subsystem pages are the operator-facing deep dives. Each page covers:
+Subsystem pages are the operator-facing guides. Each page covers:
 
 - what the shell is for, phrased as when to use it and when not to
 - command surface, grouped
@@ -36,21 +41,13 @@ Subsystem pages are the operator-facing deep dives. Each page covers:
 
     [Open SCP80](scp80.md)
 
--   :material-sim: __SCP11 Live Relay__
+-   :material-sim: __SCP11 eSIM Management Relay__
 
     ---
 
-    Production-like relay shell for LPAd, IPAd, and optional plugin-backed IPAe.
+    Relay shell for LPAd, IPAd, and optional local extensions.
 
-    [Open Live](scp11-live.md)
-
--   :material-flask-outline: __SCP11 Test Relay__
-
-    ---
-
-    Live-shaped relay with test-default trust and lab-only request shaping.
-
-    [Open Test](scp11-test.md)
+    [Open Management](scp11-live.md)
 
 -   :material-lan-connect: __SCP11 Local Access__
 
@@ -64,7 +61,7 @@ Subsystem pages are the operator-facing deep dives. Each page covers:
 
     ---
 
-    SGP.32 eIM-local package authoring, hotfolders, poll campaigns, handover.
+    SGP.32 eIM-local package authoring, hotfolders, handover, response tracking.
 
     [Open eIM Local](scp11-eim-local.md)
 
@@ -76,11 +73,21 @@ Subsystem pages are the operator-facing deep dives. Each page covers:
 
     [Open Profile Package](profile-package.md)
 
+-   :material-monitor-dashboard: __Universal GUI Command Center__
+
+    ---
+
+    Desktop/web workbench with typed actions, reader selection, live APDU dock,
+    and remote-rig controls.
+
+    [Open GUI](gui-command-center.md)
+
 -   :material-bridge: __HIL Bridge__
 
     ---
 
-    SIMtrace2-backed physical-card bridge and supervisor workflow.
+    SIMtrace2-backed physical-card bridge, RemSIM lifecycle, remote-card input,
+    and supervisor workflow.
 
     [Open HIL Bridge](hil-bridge.md)
 
@@ -116,6 +123,16 @@ Subsystem pages are the operator-facing deep dives. Each page covers:
 
     [Open EUM Diagnostics](eum-diagnostics.md)
 
+-   :material-server-network: __YggdraCore (5G core stubs)__
+
+    ---
+
+    > **Status: post-v1 staging.** Not part of the v1.0.0 frozen release tag.
+
+    In-process AUSF and AAnF stubs for 5G AKA, EAP-AKA', and AKMA round-trips, plus a BYO-Open5GS provisioning bridge.
+
+    Library + FastAPI loopback (`YGGDRASIM_5GCORE_MODE=stub`).
+
 </div>
 
 ## Subsystem to concept map
@@ -124,12 +141,14 @@ Subsystem pages are the operator-facing deep dives. Each page covers:
 | --- | --- |
 | SCP03 | [GlobalPlatform](../concepts/globalplatform.md), [ETSI UICC](../concepts/etsi-uicc.md) |
 | SCP80 | [SCP80 OTA](../concepts/ota-scp80.md) |
-| SCP11 Live / Test | [RSP Architecture](../concepts/rsp-architecture.md) |
+| SCP11 eSIM Management | [RSP Architecture](../concepts/rsp-architecture.md) |
 | SCP11 Local Access | [RSP Architecture](../concepts/rsp-architecture.md) |
 | SCP11 eIM Local | [RSP Architecture](../concepts/rsp-architecture.md) |
 | Profile Package | [SAIP Profiles](../concepts/saip-profiles.md) |
+| Universal GUI Command Center | [Secure Element Primer](../concepts/secure-element-primer.md), [HIL Model](../concepts/hil-model.md) |
 | HIL Bridge | [HIL Model](../concepts/hil-model.md) |
 | SIMCARD Simulator | [Secure Element Primer](../concepts/secure-element-primer.md) |
 | SUCI Tool | [3GPP NAA](../concepts/3gpp-naa.md) |
 | APDU Mutation Fuzzer | [Secure Element Primer](../concepts/secure-element-primer.md) |
 | EUM Diagnostics | [RSP Architecture](../concepts/rsp-architecture.md), [SAIP Profiles](../concepts/saip-profiles.md) |
+| YggdraCore (5G core stubs) *(post-v1 staging)* | [3GPP NAA](../concepts/3gpp-naa.md) |

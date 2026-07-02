@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 """
 Regression tests for parent-context-aware FID label resolution.
 
@@ -26,6 +29,7 @@ from Tools.ProfilePackage.saip_asn1_decode import (
     parent_token_for_container_fid,
     parent_token_from_file_path_hex,
 )
+from yggdrasim_common.gui_server.actions.saip import _saip_reverse_fid_friendly
 
 
 class ParentHintNormalisationTests(unittest.TestCase):
@@ -35,6 +39,9 @@ class ParentHintNormalisationTests(unittest.TestCase):
         self.assertEqual(_normalize_parent_hint("usim_2"), "adf-usim")
         self.assertEqual(_normalize_parent_hint("csim_3"), "adf-csim")
         self.assertEqual(_normalize_parent_hint("telecom"), "df-telecom")
+        self.assertEqual(_normalize_parent_hint("wlan"), "df-wlan")
+        self.assertEqual(_normalize_parent_hint("mcs"), "df-mcs")
+        self.assertEqual(_normalize_parent_hint("v2x"), "df-v2x")
 
     def test_tokens_are_accepted_verbatim(self) -> None:
         self.assertEqual(_normalize_parent_hint("adf-usim"), "adf-usim")
@@ -56,7 +63,7 @@ class FidNameResolutionTests(unittest.TestCase):
         self.assertEqual(fid_name("6F07", parent_hint="usim"), "EF.IMSI")
         self.assertEqual(fid_name("6F07", parent_hint="isim"), "EF.IST")
 
-    def test_4f01_three_way_collision_resolves_with_specific_parent(self) -> None:
+    def test_4f01_collision_resolves_with_specific_parent(self) -> None:
         self.assertEqual(
             fid_name("4F01", parent_hint="adf-usim"),
             "EF.SUCI-CALC-INFO-USIM",
@@ -66,8 +73,50 @@ class FidNameResolutionTests(unittest.TestCase):
             "EF.5GS3GPPLOCI",
         )
         self.assertEqual(
+            fid_name("4F01", parent_hint="df-mcs"),
+            "EF.MST",
+        )
+        self.assertEqual(
+            fid_name("4F01", parent_hint="df-v2x"),
+            "EF.VST",
+        )
+        self.assertEqual(
             fid_name("4F01", parent_hint="adf-v2x"),
             "EF.V2X-CFG",
+        )
+
+    def test_manual_service_table_fids_resolve_by_parent(self) -> None:
+        self.assertEqual(_resolve_ef_key_for_fid("6F32", "adf-csim"), "ef-csim-st")
+        self.assertEqual(_resolve_ef_key_for_fid("4F10", "df-prose"), "ef-pst")
+        self.assertEqual(_resolve_ef_key_for_fid("4F01", "df-5gprose"), "ef-5g-prose-st")
+        self.assertEqual(_resolve_ef_key_for_fid("4F01", "df-mcs"), "ef-mst")
+        self.assertEqual(_resolve_ef_key_for_fid("4F01", "df-v2x"), "ef-vst")
+        self.assertEqual(_resolve_ef_key_for_fid("6FE0", "df-telecom"), "ef-ice-dn")
+
+    def test_df_graphics_dynamic_fids_resolve_by_parent(self) -> None:
+        self.assertEqual(fid_name("4F01", parent_hint="df-graphics"), "EF.LAUNCH_SCWS")
+        self.assertEqual(fid_name("4F20", parent_hint="df-graphics"), "EF.IMG")
+        self.assertEqual(fid_name("4F21", parent_hint="df-graphics"), "EF.ICE_GRAPHICS")
+        for fid in ("4F40", "4F59", "4F60", "4F61", "4F67", "4F7F"):
+            self.assertEqual(fid_name(fid, parent_hint="df-graphics"), "EF.IIDF", fid)
+
+    def test_gui_reverse_lookup_prefers_df_graphics_context(self) -> None:
+        parent = "3F00/7F10/5F50"
+        self.assertEqual(
+            _saip_reverse_fid_friendly("4F20", parent_fid_hex=parent),
+            "EF.IMG",
+        )
+        self.assertEqual(
+            _saip_reverse_fid_friendly("4F21", parent_fid_hex=parent),
+            "EF.ICE_GRAPHICS",
+        )
+        self.assertEqual(
+            _saip_reverse_fid_friendly("4F61", parent_fid_hex=parent),
+            "EF.IIDF",
+        )
+        self.assertEqual(
+            _saip_reverse_fid_friendly("4F67", parent_fid_hex=parent),
+            "EF.IIDF",
         )
 
     def test_unknown_parent_falls_back_to_disambiguated_label(self) -> None:
@@ -174,6 +223,7 @@ class ContainerFidAndPathHelpersTests(unittest.TestCase):
         self.assertEqual(parent_token_for_container_fid("7FF2"), "adf-isim")
         self.assertEqual(parent_token_for_container_fid("7FF3"), "adf-csim")
         self.assertEqual(parent_token_for_container_fid("7F10"), "df-telecom")
+        self.assertEqual(parent_token_for_container_fid("5F50"), "df-graphics")
         self.assertIsNone(parent_token_for_container_fid("6F40"))
 
     def test_parent_token_from_file_path_prefers_trailing_container(self) -> None:
@@ -275,6 +325,13 @@ class DecodeKnownEfPayloadParentHintTests(unittest.TestCase):
             _resolve_ef_key_for_fid("6F27", "adf-csim"),
             "ef-csim-curr-sidnid",
         )
+        self.assertEqual(_resolve_ef_key_for_fid("4F20", "df-graphics"), "ef-img")
+        self.assertEqual(
+            _resolve_ef_key_for_fid("4F21", "df-graphics"),
+            "ef-ice-graphics",
+        )
+        self.assertEqual(_resolve_ef_key_for_fid("4F61", "df-graphics"), "ef-iidf")
+        self.assertEqual(_resolve_ef_key_for_fid("4F67", "df-graphics"), "ef-iidf")
         self.assertIsNone(_resolve_ef_key_for_fid("6F40", "df-telecom"))
         self.assertIsNone(_resolve_ef_key_for_fid("", "adf-usim"))
 

@@ -1,0 +1,115 @@
+/*
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+ */
+
+/* --- reader pill ----------------------------------------------------- */
+
+.topbar-reader-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 4px 10px 4px 8px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill, 999px);
+  color: var(--fg);
+  font-size: 12.5px;
+  line-height: 1.2;
+  cursor: pointer;
+  white-space: nowrap;
+  max-width: 220px;
+  flex: 0 0 auto;
+  transition: background var(--transition-fast, 120ms),
+              border-color var(--transition-fast, 120ms),
+              box-shadow var(--transition-fast, 120ms);
+  position: relative;
+}
+
+.topbar-reader-pill:hover {
+  background: var(--bg-hover, var(--bg-elev));
+  border-color: var(--accent-soft, var(--border));
+}
+
+.topbar-reader-pill.is-active {
+  background: var(--bg-selected, var(--bg-elev));
+  border-color: var(--accent, #4a90e2);
+  box-shadow: 0 0 0 1px var(--accent, #4a90e2) inset,
+              0 2px 8px -3px var(--accent-glow, rgba(74, 144, 226, 0.35));
+}
+
+.topbar-reader-pill-dot {
+  flex: 0 0 auto;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--fg-dim, #999);
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.08) inset;
+}
+
+/* Traffic-light colours. We use explicit palette entries rather than
+   the semantic --ok / --warn / --err so the dots stay vivid across
+   every theme (Nord / 1oT / Matrix) regardless of token overrides. */
+.topbar-reader-pill-dot--green {
+  background: #3fb950;
+  box-shadow:
+    0 0 0 1px rgba(63, 185, 80, 0.35),
+    0 0 6px 1px rgba(63, 185, 80, 0.55);
+}
+
+.topbar-reader-pill-dot--yellow {
+  background: #d4a54a;
+  box-shadow:
+    0 0 0 1px rgba(212, 165, 74, 0.35),
+    0 0 6px 1px rgba(212, 165, 74, 0.55);
+}
+
+.topbar-reader-pill-dot--red {
+  background: #d9534f;
+  box-shadow:
+    0 0 0 1px rgba(217, 83, 79, 0.35),
+    0 0 5px 1px rgba(217, 83, 79, 0.45);
+}
+
+.topbar-reader-pill-dot--gray {
+  background: var(--fg-dim, #6a7380);
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.1) inset;
+}
+
+.topbar-reader-pill-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 160px;
+  font-weight: 500;
+}
+
+.topbar-reader-pill-close {
+  flex: 0 0 auto;
+  width: 16px;
+  height: 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  border: none;
+  background: transparent;
+  color: var(--fg-muted);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0;
+  margin-left: 2px;
+}
+
+.topbar-reader-pill-close:hover {
+  background: var(--bg-hover, rgba(255, 255, 255, 0.08));
+  color: var(--err, #d9534f);
+}
+
+.topbar-reader-pill[data-session="inactive"] .topbar-reader-pill-close {
+  display: none;
+}
+
+/* Short status tooltip strip below the pill — rendered on :hover via
+   the ``title`` attribute instead of a floating tooltip to keep focus
+   mgmt simple. Reserved class for future native tooltip styling. */

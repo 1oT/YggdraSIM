@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """ProfilePackage interactive shell: REPL loop wiring the bridge commands to the Textual TUI and CLI surfaces."""
 import atexit
@@ -16,7 +19,11 @@ import yaml
 from yggdrasim_common.progress import progress_session
 from yggdrasim_common.quit_control import quit_all
 from yggdrasim_common.nord_palette import NORD
-from .saip_asn1_decode import _FID_TO_NAME, fid_name as _fid_name_lookup
+from .saip_asn1_decode import (
+    _FID_TO_NAME,
+    _decode_special_field as _asn1_decode_special_field,
+    fid_name as _fid_name_lookup,
+)
 from .saip_dgi_decode import (
     decode_compact_binary_value as _dgi_decode_compact_binary_value,
     decode_dgi_records as _dgi_decode_records,
@@ -59,9 +66,11 @@ from .saip_token_sidecar import (
     candidate_sidecar_paths,
     count_token_references,
     default_sidecar_path_for,
+    dump_sidecar_to_csv,
     first_available_sidecar,
     list_token_definitions,
     load_sidecar,
+    load_sidecar_from_csv,
     merge_sidecar_into_template,
     parse_token_value_argument,
     remove_token_definition,
@@ -182,6 +191,8 @@ class ProfilePackageShell:
             "APPLY-TEMPLATE": self._cmd_apply_template,
             "APPLY-TOKENS": self._cmd_apply_tokens,
             "EXPORT-TOKENS": self._cmd_export_tokens,
+            "EXPORT-TOKENS-CSV": self._cmd_export_tokens_csv,
+            "IMPORT-TOKENS-CSV": self._cmd_import_tokens_csv,
             "LIST-TOKENS": self._cmd_list_tokens,
             "ADD-TOKEN": self._cmd_add_token,
             "SET-TOKEN": self._cmd_set_token,
@@ -411,6 +422,8 @@ class ProfilePackageShell:
         "RETOKENISE-LENGTHS": (_SLOT_PATH, _SLOT_PATH),
         "RETOKENIZE-LENGTHS": (_SLOT_PATH, _SLOT_PATH),
         "EXPORT-TOKENS": (_SLOT_PATH, _SLOT_PATH),
+        "EXPORT-TOKENS-CSV": (_SLOT_PATH, _SLOT_PATH),
+        "IMPORT-TOKENS-CSV": (_SLOT_PATH, _SLOT_PATH),
         "APPLY-TOKENS": (_SLOT_PATH, _SLOT_PATH, _SLOT_PATH),
         "ENCODE-JSON": (_SLOT_PATH, _SLOT_PATH),
         "GENERATE-TEMPLATE": (_SLOT_PATH,),
@@ -474,6 +487,8 @@ class ProfilePackageShell:
             "_cmd_rename_token": "RENAME-TOKEN",
             "_cmd_retokenise_lengths": "RETOKENISE-LENGTHS",
             "_cmd_export_tokens": "EXPORT-TOKENS",
+            "_cmd_export_tokens_csv": "EXPORT-TOKENS-CSV",
+            "_cmd_import_tokens_csv": "IMPORT-TOKENS-CSV",
             "_cmd_apply_tokens": "APPLY-TOKENS",
         }
         flat = flat_aliases.get(handler_name)
@@ -1061,6 +1076,9 @@ class ProfilePackageShell:
         value_bytes = self._value_to_bytes(value)
         if value_bytes is None:
             return None
+        decoded = _asn1_decode_special_field("connectivityParameters", value_bytes)
+        if decoded is not None:
+            return decoded
 
         tag_names = {
             "A0": "Transport / Remote Parameters",
@@ -1403,9 +1421,9 @@ class ProfilePackageShell:
 
         key_id = value_bytes[0]
         common_roles = {
-            0x01: "ENC (common SCP02/SCP03 convention)",
-            0x02: "MAC (common SCP02/SCP03 convention)",
-            0x03: "DEK (common SCP02/SCP03 convention)",
+            0x01: "KIC (SCP80) / ENC (common SCP02/SCP03 convention)",
+            0x02: "KID (SCP80) / MAC (common SCP02/SCP03 convention)",
+            0x03: "KIK (SCP80) / DEK (common SCP02/SCP03 convention)",
         }
         decoded: dict[str, object] = {
             "hex": value_bytes.hex(),
@@ -2759,7 +2777,7 @@ class ProfilePackageShell:
         print("    PRESETS USIM")
         print("    PREVIEW-PRESET USIM-ISIM")
         print("    DIFF-PRESET USIM FULL")
-        print("    NEW-TEMPLATE reports/scaffold_template.json PRESET=USIM ICCID=89461111111111111112 IMSI=123456781234567")
+        print("    NEW-TEMPLATE reports/scaffold_template.json PRESET=USIM ICCID=89881111111111111112 IMSI=123456781234567")
         print("    NEW-TEMPLATE PRESET=MINIMAL")
         print("    NEW-PROFILE reports/scaffold_profile.der PRESET=MINIMAL")
         print("    NEW-PROFILE PRESET=USIM ICCID=AUTO IMSI=AUTO VERIFY")
@@ -2769,8 +2787,8 @@ class ProfilePackageShell:
         print("    RANDOMIZE-AKA reports/dev_profile.der ALGORITHM=tuak INCLUDE-AUTH-COUNTER-MAX")
         print("    NEW-PROFILE-WIZARD")
         print("    APPLY-TEMPLATE reports/scaffold_template.json reports/apply_out.der ICCID=AUTO VERIFY")
-        print("    GENERATE-TEMPLATE reports/profile_template.json ICCID=89461111111111111112 IMSI=123456781234567")
-        print("    GENERATE-PROFILE reports/profile_template.json reports/profile.der ICCID=89461111111111111112")
+        print("    GENERATE-TEMPLATE reports/profile_template.json ICCID=89881111111111111112 IMSI=123456781234567")
+        print("    GENERATE-PROFILE reports/profile_template.json reports/profile.der ICCID=89881111111111111112")
         print("    GENERATE-BATCH reports/profile_template.json Workspace/SAIP/examples/saip_batch_data_template.yaml reports/generated_profiles")
         print("    EXPORT-TOKENS reports/profile_template.json")
         print("    APPLY-TOKENS reports/imported_template.json reports/imported_template.tokens.json")
@@ -2820,7 +2838,7 @@ class ProfilePackageShell:
         print("    [NAME] / [#NAME] are accepted when __ygg_placeholder_style__ is 'bracket'")
         print("")
         print("  Token value forms:")
-        print("    hex string                   literal bytes, e.g. 89461111111111111112")
+        print("    hex string                   literal bytes, e.g. 89881111111111111112")
         print('    {"hex":"FF"}                 same, JSON object form')
         print('    {"zero_len":10}              a fixed-length block of 0x00 octets')
         print('    {"pattern_hex":"FF","byte_len":4}')
@@ -3930,6 +3948,136 @@ class ProfilePackageShell:
                 f"{ShellStyle.CYAN}[*] All template placeholders now have defs.{ShellStyle.END}"
             )
 
+    def _cmd_export_tokens_csv(self, arg: str) -> None:
+        """Export token defs from a template or sidecar as a personalisation CSV.
+
+        Usage: ``EXPORT-TOKENS-CSV <template_or_sidecar.json> [<out.csv>]``
+
+        The CSV layout follows the TCA SAIP personalisation-data
+        convention used by most third-party issuance tooling: one
+        ``<variable_name>,<hex>`` line per token, with optional ``#``
+        comment lines separating multi-package blocks.
+        """
+        tokens = shlex.split(str(arg or "").strip())
+        if len(tokens) < 1 or len(tokens) > 2:
+            raise ValueError(
+                "Usage: EXPORT-TOKENS-CSV <template_or_sidecar.json> [<out.csv>]"
+            )
+        source_path = self.bridge.resolve_workspace_path(tokens[0], must_exist=True)
+        if len(tokens) == 2:
+            csv_path = self.bridge.resolve_workspace_path(tokens[1], must_exist=False)
+        else:
+            csv_path = source_path.with_suffix(".csv")
+
+        raw_text = source_path.read_text(encoding="utf-8")
+        try:
+            loaded = json.loads(raw_text)
+        except json.JSONDecodeError as error:
+            raise ValueError(
+                f"File {source_path.name} is not valid JSON: {error}"
+            ) from error
+        if isinstance(loaded, dict) is False:
+            raise ValueError("Source root JSON value must be an object.")
+
+        try:
+            if "__ygg_token_defs__" in loaded and "sections" not in loaded:
+                sidecar_payload = loaded
+            else:
+                sidecar_payload = build_sidecar_from_template(
+                    loaded,
+                    source_label=source_path.name,
+                )
+            dump_sidecar_to_csv(
+                csv_path,
+                sidecar_payload,
+                block_labels=[source_path.stem],
+            )
+        except TokenSidecarError as error:
+            raise ValueError(str(error)) from error
+
+        defs = sidecar_payload.get("__ygg_token_defs__", {})
+        emitted = sum(
+            1
+            for entry in defs.values()
+            if (isinstance(entry, str) and entry != "")
+            or (isinstance(entry, dict) and isinstance(entry.get("hex"), str))
+        )
+        print(
+            f"{ShellStyle.GREEN}[+] Wrote {emitted}/{len(defs)} token defs to "
+            f"{csv_path}{ShellStyle.END}"
+        )
+        if emitted < len(defs):
+            print(
+                f"{ShellStyle.CYAN}[*] {len(defs) - emitted} pattern-only defs "
+                "skipped (CSV format has no pattern column)."
+                f"{ShellStyle.END}"
+            )
+
+    def _cmd_import_tokens_csv(self, arg: str) -> None:
+        """Convert a personalisation-data CSV into YggdraSIM sidecars.
+
+        Usage: ``IMPORT-TOKENS-CSV <input.csv> [<out.tokens.json>]``
+
+        Single-block CSVs produce one sidecar at ``<out>`` (defaulting to
+        ``<csv-stem>.tokens.json``). Multi-block CSVs (multiple profile
+        packages in one file) produce ``<stem>_1.tokens.json``,
+        ``<stem>_2.tokens.json``, ... — one per block — so each set can be
+        applied independently via ``APPLY-TOKENS``.
+        """
+        tokens = shlex.split(str(arg or "").strip())
+        if len(tokens) < 1 or len(tokens) > 2:
+            raise ValueError(
+                "Usage: IMPORT-TOKENS-CSV <input.csv> [<out.tokens.json>]"
+            )
+        csv_path = self.bridge.resolve_workspace_path(tokens[0], must_exist=True)
+        if len(tokens) == 2:
+            base_out = self.bridge.resolve_workspace_path(tokens[1], must_exist=False)
+        else:
+            base_out = csv_path.with_suffix(".tokens.json")
+
+        try:
+            sidecars = load_sidecar_from_csv(csv_path, source_label=csv_path.name)
+        except TokenSidecarError as error:
+            raise ValueError(str(error)) from error
+
+        if len(sidecars) == 0:
+            raise ValueError(
+                f"CSV file {csv_path.name} contained no variable definitions."
+            )
+
+        if len(sidecars) == 1:
+            sidecar = sidecars[0]
+            defs = sidecar.get("__ygg_token_defs__", {})
+            style = str(sidecar.get("__ygg_placeholder_style__", "brace"))
+            write_sidecar(
+                base_out,
+                style=style,
+                token_defs=defs,
+                source_label=csv_path.name,
+            )
+            print(
+                f"{ShellStyle.GREEN}[+] Wrote {len(defs)} token defs to "
+                f"{base_out}{ShellStyle.END}"
+            )
+            return
+
+        for index, sidecar in enumerate(sidecars, start=1):
+            target = base_out.with_name(
+                f"{base_out.stem}_{index}{base_out.suffix}"
+            )
+            defs = sidecar.get("__ygg_token_defs__", {})
+            style = str(sidecar.get("__ygg_placeholder_style__", "brace"))
+            write_sidecar(
+                target,
+                style=style,
+                token_defs=defs,
+                source_label=csv_path.name,
+            )
+            print(
+                f"{ShellStyle.GREEN}[+] Block {index}: {len(defs)} defs -> "
+                f"{target}{ShellStyle.END}"
+            )
+
     _TOKEN_SUBCOMMANDS: dict[str, str] = {
         "LIST": "_cmd_list_tokens",
         "ADD": "_cmd_add_token",
@@ -3943,8 +4091,10 @@ class ProfilePackageShell:
         "RETOKENIZE": "_cmd_retokenise_lengths",
         "EXPORT": "_cmd_export_tokens",
         "EXPORT-SIDECAR": "_cmd_export_tokens",
+        "EXPORT-CSV": "_cmd_export_tokens_csv",
         "APPLY": "_cmd_apply_tokens",
         "APPLY-SIDECAR": "_cmd_apply_tokens",
+        "IMPORT-CSV": "_cmd_import_tokens_csv",
         "HELP": "_cmd_help_tokens",
     }
 
@@ -4086,7 +4236,7 @@ class ProfilePackageShell:
         if len(tokens) != 3:
             raise ValueError(
                 f"Usage: {verb} <file.json> <NAME> <VALUE>\n"
-                "       VALUE may be a hex string (e.g. 89461111111111111112)\n"
+                "       VALUE may be a hex string (e.g. 89881111111111111112)\n"
                 "       or a JSON object (e.g. '{\"zero_len\":10}')."
             )
         path, loaded = self._load_token_host_document(tokens[0])

@@ -1,0 +1,42 @@
+/*
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+ */
+
+/* Legacy card styling — still referenced by a handful of callers that
+ * haven't migrated yet. Harmless: if no ``.cc-wb-extras-card`` ever gets
+ * created, these rules have no effect. */
+.cc-wb-extras-card {
+  padding: 14px;
+}
+
+.cc-wb-extras-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  border-bottom: 1px solid var(--border);
+  margin: -14px -14px 10px;
+  padding: 10px 14px;
+}
+
+.cc-wb-extras-head h4 {
+  margin: 0;
+  font-size: 13px;
+  letter-spacing: 0.03em;
+}
+
+.cc-wb-extras-out {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.cc-wb-extras-out--stretch {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+}
+

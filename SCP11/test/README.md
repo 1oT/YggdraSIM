@@ -1,42 +1,40 @@
-# SCP11 Test Relay
+<!--
+SPDX-License-Identifier: GPL-3.0-or-later
+Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+-->
 
-`SCP11/test` is the lab-oriented relay shell with test-default certificate and
-endpoint assumptions. It mirrors the live relay layout, but keeps extra
-request-shaping and compatibility controls available for controlled testing.
+# SCP11 Test Compatibility Namespace
+
+`SCP11/test` is a compatibility namespace for older imports. It imports the
+same implementation as `SCP11/live`, but it is no longer exposed as a separate
+operator entrypoint. Use `SCP11/live` for the eSIM management relay.
 
 ## Use this module when
 
-- the workflow is relay-first but should use test-default settings
-- the operator needs a safer lab surface than `SCP11/live`
+- an older import path still references `SCP11.test.*`
 - the task depends on compatibility toggles or synthetic eIM request variants
-- the shell should still look and behave like the standard relay operator model
 
 ## Do not use this module when
 
+- you need an operator shell or CLI entrypoint
 - the task is direct local `ISD-R` provisioning or metadata upload
-- the work is eIM-side package orchestration, hotfolder polling, or handover
-- the goal is to validate live-default relay settings instead of lab defaults
+- the work is eIM-side package orchestration, hotfolder execution, or handover
+- the goal is to select a different certificate trust mode; use `SET-ES9-CA`
+  or `ES9_CA_BUNDLE_PATH` instead
 
 ## Launch
 
-From the repository root:
+No standalone launch surface is provided. Use the consolidated relay instead:
 
 ```bash
-python -m SCP11.test
+python -m SCP11.live
 ```
 
-One-shot flow mode is also available:
+One-shot and batch modes are available there:
 
 ```bash
-python -m SCP11.test --flow
-```
-
-Batch automation examples:
-
-```bash
-python -m SCP11.test --cmd "DISCOVER; STATUS; LIST; EXIT"
-python -m SCP11.test --cmd "DOWNLOAD-PROFILE LPA:1$SMDP.TEST$TOKEN; STATUS; EXIT"
-python -m SCP11.test --cmd "POLL 3 30 --debug; EXIT"
+python -m SCP11.live --flow
+python -m SCP11.live --cmd "DISCOVER; STATUS; LIST; EXIT"
 ```
 
 See `../../guides/PROFILE_LIFECYCLE_CLI_CHEATSHEET.md` for ready-to-paste lifecycle
@@ -63,18 +61,15 @@ The shell keeps the standard relay snapshot and command layout:
 
 Simulator card note:
 
-- when the shared card backend is set to `sim`, the relay shell still exercises the normal card-facing test flow but against the simulator
+- when the shared card backend is set to `sim`, the relay shell still exercises the normal card-facing relay flow but against the simulator
 - the simulated card's default BF55 eIM identity comes from `Workspace/SIMCARD/eim_identity.json`
 - this is separate from `Workspace/LocalEIM/eim_identity.json`, which belongs to the Local eIM shell
 
-Difference from `SCP11/live`:
+Compatibility behavior:
 
-- the primary relay command surface now tracks `SCP11/live`, including the
-  `POLL` watchdog command shape
-- the operational difference is primarily certificate/trust defaults and the
-  availability of extra lab-oriented request/result shaping
-- the configuration layer exposes more eIM test controls for request and result
-  shaping
+- no separate implementation is loaded
+- no test CA bundle is selected implicitly
+- lab request-shaping knobs remain available through the shared relay config
 
 ## Primary command groups
 
@@ -100,17 +95,6 @@ IPAd:
 
 - `DISCOVER`
 - `DOWNLOAD`
-
-Compatibility polling:
-
-- `POLL [attempts] [timer-window] [-t 20s] [-s 5] [--debug]`
-- alias: `EIM-POLL`
-
-Plugin note:
-
-- `POLL` / `EIM-POLL` is provided by the optional `polling` plugin
-- when the plugin is absent, the command is not exposed by the core shell
-- see `plugins/README.md` for the capability contract and publication model
 
 ## Expert commands
 
@@ -165,22 +149,11 @@ DISCOVER
 DOWNLOAD
 ```
 
-Compatibility polling:
+## Compatibility configuration knobs
 
-```text
-POLL
-```
-
-For long-running or timing-sensitive cases:
-
-```text
-POLL 3 30 --debug
-```
-
-## Test-only configuration knobs
-
-The test shell reads defaults from `SCP11/test/config.py`. In addition to the
-usual transport and ES9 fields, it supports extra eIM controls such as:
+The compatibility namespace imports the live relay config. In addition to the usual
+transport and ES9 fields, the shared config supports extra eIM controls such
+as:
 
 - `EIM_TRANSPORT_MODE`
 - `EIM_REQUEST_VARIANT`

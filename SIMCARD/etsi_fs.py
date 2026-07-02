@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """ETSI TS 102 221 elementary-file emulation: transparent, linear-fixed, and cyclic record access on in-memory byte arrays."""
 from __future__ import annotations
@@ -35,6 +38,7 @@ PROFILE_AID_PREFIX = "A0000005591010FFFFFFFF890000"
 PROFILE_AID_SUFFIX_START = 0x1100
 PROFILE_AID_SUFFIX_STEP = 0x0100
 PROFILE_AID_SUFFIX_MAX = 0xFF00
+DEFAULT_ARR_RECORD = bytes.fromhex("800101A40683010190A004840132")
 
 
 def next_generated_profile_aid(profiles: list[SimProfileEntry]) -> str:
@@ -483,8 +487,6 @@ def _attach_ready_usim_nodes(
     ef_ust_bytes = _encode_ef_ust_default()
     ef_spn_bytes = _encode_ef_spn(service_provider)
     ef_ad_bytes = bytes((0x00, 0x00, 0x00, mnc_length & 0x0F))
-    ef_arr_record = bytes.fromhex("800101A40683010190A004840132")
-
     base: list[SimProfileFsNode] = [
         SimProfileFsNode(
             path=("MF", "ADF.USIM", "EF.ARR"),
@@ -492,7 +494,7 @@ def _attach_ready_usim_nodes(
             kind="ef",
             fid="6F06",
             structure="linear-fixed",
-            records=[ef_arr_record],
+            records=[DEFAULT_ARR_RECORD],
         ),
         SimProfileFsNode(
             path=("MF", "ADF.USIM", "EF.LI"),
@@ -1366,7 +1368,7 @@ def _default_profile_image(
             kind="ef",
             fid="2F06",
             structure="linear-fixed",
-            records=[bytes.fromhex("800101A40683010190A004840132")],
+            records=[DEFAULT_ARR_RECORD],
             sfi=0x06,
         ),
         SimProfileFsNode(
@@ -1386,7 +1388,7 @@ def _default_profile_image(
             kind="ef",
             fid="6F06",
             structure="linear-fixed",
-            records=[bytes.fromhex("800101A40683010190A004840132")],
+            records=[DEFAULT_ARR_RECORD],
         ),
         # 3GPP TS 31.102 §4.4.2 / TS 31.103 §4.4.3 phonebook tree
         # rooted under DF.TELECOM. The DF.PHONEBOOK shell plus a
@@ -1874,6 +1876,8 @@ def rebuild_runtime_filesystem(state: SimCardState) -> None:
             )
             path_index[("MF", "DF.GSM")] = df_gsm_node_id
 
+    _ensure_default_local_arr_nodes(nodes, path_index)
+
     # 3GPP TS 31.102 Annex H "EFs shared between SIM and USIM" /
     # TCA Profile Interoperability §3.5.5: an issuer is free to
     # ship a single physical copy of any of the listed EFs (FID
@@ -1924,14 +1928,6 @@ def rebuild_runtime_filesystem(state: SimCardState) -> None:
         _apply_security_domains_from_profile(state, active_image.security_domains)
         _apply_rfm_instances_from_profile(state, active_image.rfm_instances)
 
-    # SGP.32 §3.5 / TS 31.102 §4.2.48: the active SAIP profile may ship
-    # an EF.ACL (FID 6F57) carrying one or more APNs. The first record
-    # there outranks the env / workspace fallbacks for the IPA-poll
-    # bearer description so the IPA polls the eIM through the cellular
-    # context the BPP commissioned. ``_extract_acl_apn`` is idempotent
-    # and silently no-ops when the EF is missing or malformed.
-    _apply_profile_apn_to_ipa_poll(state, nodes, path_index)
-
     state.current_node_id = previous_node_id if previous_node_id in nodes else "3F00"
 
 
@@ -1973,6 +1969,61 @@ _TS_31_102_ANNEX_H_SHARED_EFS: frozenset[str] = frozenset(
         "6FE4",  # EF.EPSNSC
     }
 )
+
+
+def _ensure_default_local_arr_nodes(
+    nodes: dict[str, SimFileNode],
+    path_index: dict[tuple[str, ...], str],
+) -> None:
+    """Materialise local EF.ARR files referenced by generated FCPs.
+
+    Operator BPPs may supply an ADF/DF subtree without an explicit
+    EF.ARR, while the runtime FCP still points access-rule references
+    at ``6F06``. Real UICC operating systems provide a default ARR for
+    those template roots. Synthesize the same one-record EF for the
+    active profile roots the modem probes during cold attach.
+    """
+    for parent_path in (
+        ("MF", "ADF.USIM"),
+        ("MF", "ADF.ISIM"),
+        ("MF", "DF.TELECOM"),
+    ):
+        parent_id = path_index.get(parent_path)
+        if parent_id is None:
+            continue
+        parent = nodes.get(parent_id)
+        if parent is None or parent.kind not in ("adf", "df"):
+            continue
+        arr_path = parent_path + ("EF.ARR",)
+        existing_id = path_index.get(arr_path)
+        if existing_id is not None and existing_id in nodes:
+            continue
+        existing_child = None
+        for child_id in parent.children:
+            child = nodes.get(child_id)
+            if child is not None and child.fid.upper() == "6F06":
+                existing_child = child
+                break
+        if existing_child is not None:
+            path_index[arr_path] = existing_child.node_id
+            continue
+        node_id = f"{parent_id}::AUTO_EF_ARR"
+        if node_id in nodes:
+            path_index[arr_path] = node_id
+            continue
+        _register_node(
+            nodes,
+            SimFileNode(
+                node_id=node_id,
+                name="EF.ARR",
+                kind="ef",
+                fid="6F06",
+                parent_id=parent_id,
+                structure="linear-fixed",
+                records=[DEFAULT_ARR_RECORD],
+            ),
+        )
+        path_index[arr_path] = node_id
 
 
 def _mirror_shared_efs_between_df_gsm_and_adf_usim(
@@ -2613,91 +2664,6 @@ def _apply_rfm_instances_from_profile(
     state.rfm_instances = list(rfm_entries)
 
 
-def _apply_profile_apn_to_ipa_poll(
-    state: SimCardState,
-    nodes: dict[str, SimFileNode],
-    path_index: dict[tuple[str, ...], str],
-) -> None:
-    """Project the SAIP-supplied APN onto ``state.toolkit.ipa_poll_apn``.
-
-    The APN lives in EF.ACL (FID 6F57, transparent) per
-    3GPP TS 31.102 §4.2.48: byte 0 is the APN count followed by N
-    BER-TLVs with tag ``0xDD``, length, then ASCII APN bytes. The
-    first APN wins because that is what real IPA implementations use
-    for the eIM-poll bearer. When the EF is missing or empty the
-    helper preserves whatever the env / workspace fallback already
-    placed in ``ipa_poll_apn``.
-    """
-
-    apn = _extract_apn_from_ef_acl(nodes, path_index)
-    if len(apn) == 0:
-        # Reset BPP override only if the previously active source was
-        # itself a BPP override -- env / default sources persist.
-        if str(getattr(state.toolkit, "ipa_poll_apn_source", "") or "") == "bpp":
-            from SIMCARD.state import _resolve_default_ipa_poll_apn  # local to avoid cycles
-            state.toolkit.ipa_poll_apn = _resolve_default_ipa_poll_apn()
-            state.toolkit.ipa_poll_apn_source = "default"
-        return
-    state.toolkit.ipa_poll_apn = apn
-    state.toolkit.ipa_poll_apn_source = "bpp"
-    # Invalidate any previously cached resolved IP -- a new APN may
-    # route to a different cellular context whose carrier-grade NAT
-    # answers DNS differently.
-    state.toolkit.ipa_poll_resolved_ip = ""
-    state.toolkit.ipa_poll_resolved_ip_family = 0
-
-
-def _extract_apn_from_ef_acl(
-    nodes: dict[str, SimFileNode],
-    path_index: dict[tuple[str, ...], str],
-) -> str:
-    """Return the first APN in EF.ACL (FID 6F57), or an empty string."""
-
-    candidate_paths: list[tuple[str, ...]] = [
-        ("MF", "ADF.USIM", "EF.ACL"),
-        ("MF", "DF.GSM", "EF.ACL"),
-        ("MF", "EF.ACL"),
-    ]
-    payload: bytes = b""
-    for path in candidate_paths:
-        node_id = path_index.get(path)
-        if node_id is None:
-            continue
-        node = nodes.get(node_id)
-        if node is None:
-            continue
-        data = bytes(getattr(node, "data", b"") or b"")
-        if len(data) > 0:
-            payload = data
-            break
-    if len(payload) == 0:
-        # Fall back to a raw FID scan -- some profile images do not
-        # name EF.ACL via the canonical (MF, ADF.USIM, EF.ACL) path.
-        for node in nodes.values():
-            fid = str(getattr(node, "fid", "") or "").upper()
-            if fid == "6F57":
-                data = bytes(getattr(node, "data", b"") or b"")
-                if len(data) > 0:
-                    payload = data
-                    break
-    if len(payload) < 2:
-        return ""
-    # Byte 0 is APN count (often 0x01 for single-APN profiles); the
-    # remaining bytes are TLV-encoded.
-    offset = 1
-    if payload[offset] != 0xDD:
-        return ""
-    offset += 1
-    if offset >= len(payload):
-        return ""
-    length = payload[offset]
-    offset += 1
-    if length == 0 or offset + length > len(payload):
-        return ""
-    apn_bytes = payload[offset : offset + length]
-    return apn_bytes.decode("ascii", errors="ignore").strip()
-
-
 def build_default_state() -> SimCardState:
     """Construct a fully-initialised ``SimCardState`` from the built-in default UICC profile.
 
@@ -2722,7 +2688,7 @@ def build_default_state() -> SimCardState:
         sqn=bytes.fromhex("000000000001"),
     )
     configured_data = SimEuiccConfiguredData(
-        root_smds_address="lpa.ds.gsma.com",
+        root_smds_address="root-smds.example.com",
         additional_root_smds_addresses=["smds2.yggdrasim.test", "smds3.yggdrasim.test"],
         allowed_ci_pkids=[root_ci_pkid],
         ci_list=[root_ci_pkid],
@@ -2737,12 +2703,12 @@ def build_default_state() -> SimCardState:
             service_provider=primary_service_provider,
             profile_name="Yggdrasil Primary",
             imsi=imsi,
-            impi="user@yggdrasim.test",
+            impi="user@example.test",
             notification_address="rsp.example.com",
             profile_image=_default_profile_image(
                 iccid,
                 imsi,
-                "user@yggdrasim.test",
+                "user@example.test",
                 service_provider=primary_service_provider,
                 mnc_length=mnc_length_default,
             ),
@@ -2751,19 +2717,19 @@ def build_default_state() -> SimCardState:
         ),
         SimProfileEntry(
             aid=ISDP2_AID,
-            iccid="89461111111111111129",
+            iccid="89881111111111111129",
             state="disabled",
             profile_class="test",
             nickname="Lab (EU 02)",
             service_provider=secondary_service_provider,
             profile_name="Yggdrasil Secondary",
             imsi=secondary_imsi,
-            impi="user-secondary@yggdrasim.test",
+            impi="user-secondary@example.test",
             notification_address="rsp.example.com",
             profile_image=_default_profile_image(
-                "89461111111111111129",
+                "89881111111111111129",
                 secondary_imsi,
-                "user-secondary@yggdrasim.test",
+                "user-secondary@example.test",
                 service_provider=secondary_service_provider,
                 mnc_length=mnc_length_default,
             ),
@@ -2773,7 +2739,7 @@ def build_default_state() -> SimCardState:
     ]
     state = SimCardState(
         atr=DEFAULT_SIM_ATR,
-        eid="89045967676472615349763031303005",
+        eid="89049032123451234512345678901234",
         iccid=iccid,
         imsi=imsi,
         default_dp_address="rsp.example.com",
@@ -2788,7 +2754,7 @@ def build_default_state() -> SimCardState:
         eim_entries=[
             SimEimEntry(
                 eim_id="2.25.311782205282738360923618091971140414400",
-                eim_fqdn="yggdrasim.eim.test.1ot.com",
+                eim_fqdn="eim.example.test",
                 eim_id_type=1,
                 counter_value=1,
                 association_token=16,
@@ -2800,8 +2766,18 @@ def build_default_state() -> SimCardState:
         profiles=profiles,
         active_profile_aid=profiles[0].aid,
         chv_references={
-            0x01: SimChvReference(reference=0x01, value="1234", unblock_value="12345678"),
-            0x81: SimChvReference(reference=0x81, value="1234", unblock_value="12345678"),
+            0x01: SimChvReference(
+                reference=0x01,
+                value="1234",
+                unblock_value="12345678",
+                enabled=False,
+            ),
+            0x81: SimChvReference(
+                reference=0x81,
+                value="1234",
+                unblock_value="12345678",
+                enabled=False,
+            ),
         },
     )
     state.toolkit.menu_title = "YggdraSIM"
@@ -3993,9 +3969,9 @@ class EtsiFileSystem:
             )
         else:
             descriptor = b"\x41\x21"
-        # Tag order mirrors commercial UICCs (sysmoUSIM-SJS1 reference
-        # trace): 82 83 [84] [A5] 8A 8B [80] [88] [C6]. Strict baseband
-        # parsers (e.g. Qualcomm RIL) walk the FCP linearly and
+        # Tag order mirrors commonly observed UICC FCP traces:
+        # 82 83 [84] [A5] 8A 8B [80] [88] [C6]. Strict baseband
+        # parsers can walk the FCP linearly and
         # tolerate missing tags but reject unexpected ordering, so we
         # keep this identical to the on-the-wire format observed.
         body = tlv("82", descriptor)

@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 """
 Unit tests for ``yggdrasim_common.flavor``.
 
@@ -62,6 +65,8 @@ class FlavorPredicateTests(unittest.TestCase):
             self.assertFalse(flavor.is_hil_bridge_included())
             reason = flavor.hil_bridge_unavailable_reason()
             self.assertIn("clean", reason.lower())
+            self.assertIn("Card Bridge", reason)
+            self.assertIn("remote-card", reason)
 
     def test_full_includes_hil_bridge_on_linux(self) -> None:
         with mock.patch.dict(os.environ, {flavor.FLAVOR_ENV: "full"}, clear=False):
@@ -76,6 +81,7 @@ class FlavorPredicateTests(unittest.TestCase):
                 self.assertFalse(flavor.is_hil_bridge_supported_platform())
                 reason = flavor.hil_bridge_unavailable_reason()
                 self.assertIn("Linux", reason)
+                self.assertIn("Card Bridge", reason)
 
     def test_source_includes_hil_bridge(self) -> None:
         with mock.patch.dict(os.environ, {flavor.FLAVOR_ENV: "source"}, clear=False):

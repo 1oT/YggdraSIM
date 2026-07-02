@@ -1,0 +1,57 @@
+/*
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+ */
+
+/* Dense headers (title + ``.cc-badge`` row) sit inside ``.card``; the
+   global lift reads as the chips moving. Keep a static frame. */
+.cc-action-card.card:hover {
+  transform: none;
+}
+
+.cc-action-card.card:hover::before {
+  opacity: 0;
+}
+
+.cc-action-card.card:hover:not(.is-busy) {
+  box-shadow: var(--shadow-card);
+  border-color: var(--border);
+}
+
+.cc-action-card.card.is-busy:hover {
+  border-color: var(--accent);
+  box-shadow:
+    0 0 0 1px var(--accent-soft),
+    0 0 18px -4px var(--accent-glow);
+}
+
+.cc-action-card.is-busy {
+  border-color: var(--accent);
+  box-shadow:
+    0 0 0 1px var(--accent-soft),
+    0 0 18px -4px var(--accent-glow);
+}
+
+.cc-action-card.is-busy::before {
+  content: "";
+  position: absolute;
+  left: 0; right: 0; top: 0;
+  height: 2px;
+  border-top-left-radius: var(--radius-md, 6px);
+  border-top-right-radius: var(--radius-md, 6px);
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    var(--accent) 40%,
+    var(--accent-strong, var(--accent)) 60%,
+    transparent 100%);
+  background-size: 200% 100%;
+  animation: ygg-busy-sweep 1.4s linear infinite;
+  pointer-events: none;
+}
+
+@keyframes ygg-busy-sweep {
+  0%   { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+

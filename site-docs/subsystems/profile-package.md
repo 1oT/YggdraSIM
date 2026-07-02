@@ -5,6 +5,11 @@ tags:
   - saip
   - profile-package
 ---
+<!--
+SPDX-License-Identifier: GPL-3.0-or-later
+Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+-->
+
 
 # Profile Package
 
@@ -86,6 +91,22 @@ card directly; its output is what the card-facing shells consume.
 | --- | --- |
 | `TUI` | launch the split-pane transcode UI |
 
+### Variable defs / token sidecars
+
+| Verb | Purpose |
+| --- | --- |
+| `EXPORT-TOKENS <template.json> [<sidecar.json>]` | extract `__ygg_token_defs__` from a template into a standalone JSON sidecar |
+| `APPLY-TOKENS <template.json> <sidecar.json> [<out.json>] [OVERWRITE]` | merge a sidecar back into a template |
+| `EXPORT-TOKENS-CSV <template_or_sidecar.json> [<out.csv>]` | emit a `name,hex` personalisation CSV |
+| `IMPORT-TOKENS-CSV <input.csv> [<out.tokens.json>]` | convert a personalisation-data CSV into one or more YggdraSIM sidecars (multi-block CSVs produce `<stem>_<n>.tokens.json` per block) |
+
+The CSV format follows the TCA SAIP personalisation-data convention
+used across the SAIP ecosystem: one variable per line, `name,hex`,
+with optional `#`-prefix comment lines used to separate independent
+personalisation-data sets when multiple profile packages share one CSV
+file. The interop is symmetric — exporting and re-importing produces
+an identical sidecar payload modulo casing.
+
 ### Diff and simulator-pipeline
 
 | Verb | Purpose |
@@ -141,8 +162,12 @@ Editor coverage today:
 All edits are committed back through `saip_decoded_edit`, so the JSON and
 DER previews refresh on every change.
 
-The file-system and applications views are read-only navigation aids:
-selecting a file or application jumps the JSON outline to the matching PE.
+The file-system view exposes FCP, decoded, data, and JSON panels for each
+materialised EF. Record-fixed files derive row windows from the FCP record
+layout and reconstructed EF image, so EF.ARR and similar EFs still show every
+record slot when a backend response does not include per-record decode rows.
+The applications view is a read-only navigation aid: selecting an application
+jumps the JSON outline to the matching PE.
 
 ## Runtime dependencies
 

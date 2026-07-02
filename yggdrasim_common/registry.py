@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """Plugin registry: maps capability tokens to provider callables and enforces single-registration invariants."""
 # -----------------------------------------------------------------------------
@@ -28,14 +31,15 @@ SUBSYSTEMS: dict[str, str] = {
     "SCP03": "GlobalPlatform-style admin shell, card transport, TLV/CAP decoders, SGP.22 helpers.",
     "SCP80": "OTA SMS-SC / CAT-TP style scripting and smart decoding.",
     "SCP11": "Thin facade; live SGP.22 types re-exported from SCP11.live.",
-    "SCP11.live": "Production SGP.22 client: orchestrator, PC/SC or relay APDU, ES9+, STK polling.",
-    "SCP11.test": "Lab/test harness console and orchestrator (mirrors live layout).",
-    "SCP11.relay": "ES9 relay / remote APDU front-end built on shared SCP11 patterns.",
+    "SCP11.live": "eSIM management relay: orchestrator, PC/SC or relay APDU, ES9+, STK/proactive handling.",
+    "SCP11.relay": "Compatibility SCP11 entry point built on direct PC/SC.",
     "SCP11.local_access": "Local ISD-R / metadata codec / certificate helpers for on-card flows.",
-    "SCP11.eim_local": "eIM-local package, polling, handover, and direct-card tooling.",
+    "SCP11.eim_local": "eIM-local package authoring, hotfolders, handover, and direct-card tooling.",
     "SCP11.shared": "Cross-flavour crypto, transport helpers, ASN.1 registry, GSMA error codes.",
+    "Tools.CardBridge": "Loopback PC/SC-to-HTTP APDU bridge for SSH-forwarded remote-card workflows.",
     "Tools.ProfilePackage": "SAIP / UPP shell, saip-tool bridge, lint engine, JSON↔DER transcode.",
     "Tools.SuciTool": "SUCI-related helper shell.",
+    "gui_server": "Optional universal GUI layer: FastAPI API + pywebview desktop window + headless lab server.",
     "tests": "pytest modules under tests/ (not registered as symbols; discover by filename).",
     "pysim": "Optional on-disk pySim checkout (upstream osmocom, gitignored). Clone https://gitlab.com/osmocom/pysim.git when the SAIP ASN.1 compile / SCP11-local flows are needed; prefer Tools.ProfilePackage for SAIP glue.",
 }
@@ -46,10 +50,10 @@ CLI_MODULES: list[str] = [
     "SCP80",
     "SCP11",
     "SCP11.live",
-    "SCP11.test",
     "SCP11.relay",
     "SCP11.local_access",
     "SCP11.eim_local",
+    "Tools.CardBridge",
     "Tools.ProfilePackage",
     "Tools.SuciTool",
 ]
@@ -66,7 +70,6 @@ SYMBOL_REGISTRY: dict[str, str] = {
     "main.launcher.scp80": "main.main:run_scp80",
     "main.launcher.scp80_script": "main.main:run_scp80_script",
     "main.launcher.scp11_live": "main.main:run_scp11_live",
-    "main.launcher.scp11_test": "main.main:run_scp11_test",
     "main.launcher.scp11_local": "main.main:run_scp11_local",
     "main.launcher.scp11_eim_local": "main.main:run_scp11_eim_local",
     "main.launcher.profile_package": "main.main:run_profile_package",
@@ -112,7 +115,6 @@ SYMBOL_REGISTRY: dict[str, str] = {
     "scp11.live.config": "SCP11.live.config:SGPConfig",
     "scp11.live.console": "SCP11.live.console:SCP11Console",
     "scp11.live.transport.pcsc": "SCP11.live.transport:PcscApduChannel",
-    "scp11.live.transport.relay": "SCP11.live.transport:RelayApduChannel",
     "scp11.live.transport.sgp22": "SCP11.live.transport:SGP22Transport",
     "scp11.live.factory.apdu": "SCP11.live.factory:build_apdu_channel",
     "scp11.live.factory.profile": "SCP11.live.factory:build_profile_provider",
@@ -121,12 +123,6 @@ SYMBOL_REGISTRY: dict[str, str] = {
     "scp11.live.payload_builder": "SCP11.live.payload_builder:PayloadBuilder",
     "scp11.live.asn1_registry": "SCP11.live.asn1_registry:ASN1Registry",
     "scp11.live.eim_packages": "SCP11.live.eim_packages:ParsedEimPackage",
-    # --- SCP11 test ---
-    "scp11.test.entry": "SCP11.test.main:entry",
-    "scp11.test.orchestrator": "SCP11.test.orchestrator:SGP22Orchestrator",
-    "scp11.test.console": "SCP11.test.console:SCP11Console",
-    "scp11.test.transport.pcsc": "SCP11.test.transport:PcscApduChannel",
-    "scp11.test.factory.apdu": "SCP11.test.factory:build_apdu_channel",
     # --- SCP11 relay ---
     "scp11.relay.entry": "SCP11.relay.main:entry",
     "scp11.relay.orchestrator": "SCP11.relay.orchestrator:SGP22Orchestrator",
@@ -169,6 +165,21 @@ SYMBOL_REGISTRY: dict[str, str] = {
     "tools.suci.entry": "Tools.SuciTool.main:entry",
     "tools.suci.entry_cmd": "Tools.SuciTool.main:entry_cmd",
     "tools.suci.run_standalone": "Tools.SuciTool.main:run_standalone",
+    # --- Universal GUI (optional) ---
+    # These targets only resolve when the `gui` / `gui-server` extra is
+    # installed (fastapi + uvicorn, plus pywebview for desktop mode).
+    # They are listed here for discoverability; importing them without
+    # the extra raises ModuleNotFoundError.
+    "gui.config.build_desktop": "yggdrasim_common.gui_server.config:build_desktop_config",
+    "gui.config.build_server": "yggdrasim_common.gui_server.config:build_web_server_config",
+    "gui.config.dataclass": "yggdrasim_common.gui_server.config:GuiServerConfig",
+    "gui.auth.rate_limiter": "yggdrasim_common.gui_server.auth:FailureRateLimiter",
+    "gui.app.run_desktop": "yggdrasim_common.gui_server.app:run_desktop",
+    "gui.app.run_web_server": "yggdrasim_common.gui_server.app:run_web_server",
+    "gui.app.create_app": "yggdrasim_common.gui_server.app:create_app",
+    "gui.actions.registry": "yggdrasim_common.gui_server.actions.registry:get_registry",
+    "gui.actions.load_builtins": "yggdrasim_common.gui_server.actions.registry:ensure_builtin_actions_loaded",
+    "gui.sessions.manager": "yggdrasim_common.gui_server.sessions:get_manager",
 }
 
 
