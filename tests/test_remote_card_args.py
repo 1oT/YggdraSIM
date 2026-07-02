@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 """Unit tests for ``yggdrasim_common.remote_card_args`` (CB-3).
 
 Covers:
@@ -201,7 +204,7 @@ def test_describe_configured_with_token_flag():
 def test_describe_configured_with_env_file_token():
     line = describe_remote_card_state(
         {
-            "url": "http://10.0.0.5:8642/apdu",
+            "url": "http://192.0.2.5:8642/apdu",
             "url_source": "env",
             "token_file": "/etc/cardtok",
             "token_source": "env-file",
@@ -214,7 +217,7 @@ def test_describe_configured_with_env_file_token():
 def test_describe_configured_with_raw_env_token():
     line = describe_remote_card_state(
         {
-            "url": "http://10.0.0.5:8642/apdu",
+            "url": "http://192.0.2.5:8642/apdu",
             "url_source": "env",
             "token_file": "",
             "token_source": "env-raw",

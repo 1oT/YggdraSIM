@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 """Gap-coverage suite for SGP.32 IoT-deployment-grade conformance.
 
 The suites below complement ``test_simcard_sgp32_load_euicc_package`` by

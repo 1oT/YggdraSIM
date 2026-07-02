@@ -1,3 +1,8 @@
+<!--
+SPDX-License-Identifier: GPL-3.0-or-later
+Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+-->
+
 # eIM Package JSON Templates
 
 This directory stores JSON package objects used by the eIM local shell.
@@ -52,12 +57,11 @@ Simulator distinction:
 - `EIM-PACKAGE-ISSUE <path>` executes one package based on `package_type`.
 - `EIM-PACKAGE-ISSUE-ALL [dir]` executes all `.json` package files in a directory.
 - `HOTFOLDER-LIST [dir]` previews effective queue order and order source.
-- `HOTFOLDER-POLL [dir]` emits queue metadata as JSON for external harness integration.
 - `HOTFOLDER-FETCH [dir]` executes the effective queue in resolved order.
 
 Effective queue note:
 
-- the effective queue is the merged set of fixed poll fixtures plus any `.json`
+- the effective queue is the merged set of package fixtures plus any `.json`
   files present in the hotfolder directory
 - ordering follows `runtime.queue_id`, top-level `queue_id`,
   `runtime.transaction_id_hex`, numeric filename prefix, then lexical fallback

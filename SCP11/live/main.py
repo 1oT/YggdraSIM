@@ -1,5 +1,8 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
-"""SCP11-live entry point: initialises runtime components and starts the live-reader operator REPL."""
+
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+"""SCP11 eSIM management relay entry point."""
 import argparse
 import sys
 
@@ -41,7 +44,7 @@ def _load_runtime_components():
 
 
 class SGP22Client:
-    """Live-certificate SCP11 relay entrypoint."""
+    """SCP11 eSIM management relay entrypoint."""
 
     def __init__(self):
         (
@@ -86,8 +89,7 @@ class SGP22Client:
                         f"({error.__class__.__name__}: {error}). "
                         "Is pcscd running and reachable on this host? "
                         "Headless / containerised hosts can set "
-                        "YGGDRASIM_CARD_BACKEND=sim to bypass PC/SC, "
-                        "or supply a remote card relay endpoint."
+                        "YGGDRASIM_CARD_BACKEND=sim to bypass PC/SC."
                     )
                 else:
                     if len(reader_list) == 0:
@@ -102,7 +104,7 @@ class SGP22Client:
             if warnings:
                 combined.append("Warnings detected:")
                 combined.extend(warnings)
-            self._raise_startup_error("SCP11 live startup preflight failed.", combined)
+            self._raise_startup_error("SCP11 eSIM management startup preflight failed.", combined)
 
         self.startup_warnings = warnings
 
@@ -113,13 +115,13 @@ class SGP22Client:
         try:
             self.apdu_channel = self._build_apdu_channel(self.cfg)
         except Exception as error:
-            raise SCP11StartupError(f"SCP11 live transport initialization failed: {error}") from error
+            raise SCP11StartupError(f"SCP11 eSIM management transport initialization failed: {error}") from error
         self._apply_global_debug()
 
         try:
             self.profile_provider = self._build_profile_provider(self.cfg)
         except Exception as error:
-            raise SCP11StartupError(f"SCP11 live backend initialization failed: {error}") from error
+            raise SCP11StartupError(f"SCP11 eSIM management backend initialization failed: {error}") from error
 
         self.orchestrator = self._orchestrator_cls(
             cfg=self.cfg,
@@ -164,9 +166,9 @@ class SGP22Client:
 
 
 def entry() -> None:
-    """Initialise live-reader runtime components and start the operator REPL."""
+    """Initialise eSIM management relay runtime components and start the operator REPL."""
     ensure_plugins_loaded()
-    parser = argparse.ArgumentParser(description="SCP11 live relay orchestration shell")
+    parser = argparse.ArgumentParser(description="SCP11 eSIM management relay shell")
     parser.add_argument(
         "--version",
         action="version",
@@ -174,12 +176,12 @@ def entry() -> None:
     )
     add_debug_argument(
         parser,
-        help_text="Enable verbose debug output for this SCP11 live session.",
+        help_text="Enable verbose debug output for this SCP11 eSIM management session.",
     )
     parser.add_argument(
         "--flow",
         action="store_true",
-        help="Run one-shot SCP11 live relay flow instead of interactive shell",
+        help="Run one-shot SCP11 eSIM management relay flow instead of interactive shell",
     )
     parser.add_argument(
         "--cmd",
@@ -197,7 +199,7 @@ def entry() -> None:
         type=str,
         default=None,
         help=(
-            "Not supported in live mode: SCP11c BSP keys are derived inside the "
+            "Not supported in relay mode: SCP11c BSP keys are derived inside the "
             "eUICC during BPP processing and never reach the host. Use "
             "`python -m SCP11.local_access --dump-keybag PATH` to dump BSP "
             "keys for flows that derive them locally, or EXPORT-KEYBAG in the "
@@ -209,7 +211,7 @@ def entry() -> None:
 
     if getattr(args, "dump_keybag", None):
         print(
-            "[-] --dump-keybag is a no-op in SCP11 live mode: session keys are "
+            "[-] --dump-keybag is a no-op in SCP11 eSIM management relay mode: session keys are "
             "derived inside the eUICC and never leave the card. Use "
             "SCP11.local_access for host-derived BSP keybag dumps, or "
             "EXPORT-KEYBAG in the SCP03 shell for SCP03 sessions."

@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 """Unit tests for ``Tools.EumDiag``.
 
 Covers:
@@ -48,13 +51,13 @@ _DEK_HEX = "FEDCBA9876543210FEDCBA9876543210"
 class SessionKeyBundleTests(unittest.TestCase):
     def test_from_hex_normalises_case_and_validates_length(self) -> None:
         bundle = SessionKeyBundle.from_hex(
-            iccid="8900000000000000aaaa",
+            iccid="8988000000000000aaaa",
             shs_enc=_ENC_HEX.lower(),
             shs_mac=_MAC_HEX,
             dek=_DEK_HEX,
             comment="case=12345",
         )
-        self.assertEqual(bundle.iccid, "8900000000000000AAAA")
+        self.assertEqual(bundle.iccid, "8988000000000000AAAA")
         self.assertEqual(bundle.shs_enc_hex, _ENC_HEX.upper())
         self.assertEqual(bundle.shs_mac_hex, _MAC_HEX.upper())
         self.assertEqual(bundle.dek_hex, _DEK_HEX.upper())
@@ -137,7 +140,7 @@ class SessionKeyRepositoryTests(unittest.TestCase):
 
     def test_round_trip_json(self) -> None:
         bundle = SessionKeyBundle.from_hex(
-            iccid="89000012345678901234",
+            iccid="89880012345678901234",
             shs_enc=_ENC_HEX,
             shs_mac=_MAC_HEX,
             dek=_DEK_HEX,
@@ -256,7 +259,7 @@ class CliTests(unittest.TestCase):
                     td,
                     "store-keys",
                     "--iccid",
-                    "89000012345678901234",
+                    "89880012345678901234",
                     "--shs-enc",
                     _ENC_HEX,
                     "--shs-mac",
@@ -268,7 +271,7 @@ class CliTests(unittest.TestCase):
             self.assertEqual(rc, 0)
             self.assertTrue(out.is_file())
             repo = load_repository(out)
-            self.assertIsNotNone(repo.lookup("89000012345678901234"))
+            self.assertIsNotNone(repo.lookup("89880012345678901234"))
 
     def test_store_keys_rejects_missing_shs_enc(self) -> None:
         with tempfile.TemporaryDirectory() as td:

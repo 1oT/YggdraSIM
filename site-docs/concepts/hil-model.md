@@ -5,6 +5,11 @@ tags:
   - hil
   - simtrace2
 ---
+<!--
+SPDX-License-Identifier: GPL-3.0-or-later
+Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+-->
+
 
 # HIL Model
 
@@ -27,9 +32,19 @@ flowchart LR
     Bridge --> YggdraSide["YggdraSIM operator shells<br/>via local relay"]
 ```
 
-The card is physically in a reader attached to the host. The SIMtrace2 exposes
-it to a modem as if it were a locally-inserted SIM. The bridge is the coupler
-and the telemetry source.
+The card can be in a reader attached to the rig, or it can be published
+from an operator workstation through Card Bridge and an SSH tunnel. The
+SIMtrace2 exposes the card to a modem as if it were locally inserted. The
+HIL bridge remains the coupler and telemetry source in both modes.
+
+```mermaid
+flowchart LR
+    RemoteCard["Remote PC/SC reader<br/>Card Bridge :8642"] --> SSH["SSH forward"]
+    SSH --> Bridge["YggdraSIM HIL bridge<br/>remote-card source"]
+    Bridge --> Remsim["osmo-remsim-client-st2"]
+    Remsim --> SIMtrace2["SIMtrace2 device"]
+    SIMtrace2 --> Modem["Modem / DUT"]
+```
 
 ## Responsibility split
 
@@ -37,6 +52,7 @@ and the telemetry source.
 | --- | --- |
 | `pcscd` | reader arbitration |
 | HIL bridge | exclusive PC/SC ownership while active |
+| Card Bridge | optional workstation-side PC/SC ownership and `/apdu` publication |
 | HIL bridge | GSMTAP mirror of every APDU on UDP 4729 |
 | HIL bridge | local APDU relay on 127.0.0.1:9997 |
 | supervisor | lifecycle of bridge + remsim-client |
@@ -48,6 +64,8 @@ and the telemetry source.
 
 - The HIL bridge keeps **exclusive ownership** of the physical reader while
   active. A second PC/SC client cannot open the same reader at the same time.
+- In remote-card mode, Card Bridge owns the reader on the workstation and the
+  rig-side HIL bridge consumes its authenticated `/apdu` endpoint over SSH.
 - YggdraSIM operator shells reach the card through the bridge's **relay
   side-channel**, not through a second direct PC/SC handle.
 - Modem APDUs and YggdraSIM APDUs are **serialized**, not isolated. They
@@ -87,7 +105,7 @@ Healthy state looks like:
 
 - `status: running` and `usbPresent: true` in supervisor state
 - non-zero `bridgePid`
-- `status: ok`, `apduUrl`, `statusUrl`, `modemRefreshUrl`, selected `reader`,
+- `status: ok`, `apduUrl`, `statusUrl`, `cardResetUrl`, selected `reader`,
   and an `atr` in relay state
 
 Any of the following means the stack is not fully armed:
@@ -105,10 +123,16 @@ Any of the following means the stack is not fully armed:
   you, without losing administrative access to the card
 - run a HIL capture that includes both the modem side and the YggdraSIM side
   in one Wireshark trace
+- keep a noisy Linux rig near the modem while the operator controls the card
+  and GUI from a workstation
 
 ## Where to look in YggdraSIM
 
 - [HIL Bridge](../subsystems/hil-bridge.md) for the operator surface
 - [Run a HIL Capture](../how-to/run-hil-capture.md) for a recipe-style
   walkthrough
+- [Remote APDU Streaming](../how-to/remote-apdu-streaming.md) for the
+  Card Bridge over SSH topology
+- [Install RemSIM / APDU Streaming](../how-to/install-remsim-apdu-streaming.md)
+  for the Linux / Raspberry Pi rig checklist
 - `guides/HIL_BRIDGE_GUIDE.md` for the full authored procedure

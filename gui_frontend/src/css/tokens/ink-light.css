@@ -1,0 +1,43 @@
+/*
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+ */
+
+/* -- Theme: Ink · light (paper field + steel blue accent) ---------------- */
+html[data-theme="ink-light"] {
+  --bg: #f5f4f1;
+  --bg-elev: #ffffff;
+  --bg-elev-2: #ebe8e2;
+  --surface: #ffffff;
+  --surface-alt: rgba(0, 0, 0, 0.04);
+  --bg-hover: rgba(61, 90, 128, 0.07);
+  --border: rgba(40, 48, 60, 0.14);
+  --border-strong: rgba(40, 48, 60, 0.28);
+  --fg: #1e2430;
+  --fg-dim: #4f5d6e;
+  --fg-muted: #6b7582;
+  --accent: #34507a;
+  --accent-strong: #284064;
+  --accent-soft: rgba(52, 80, 122, 0.12);
+  --accent-fg: #ffffff;
+  --accent-glow: rgba(52, 80, 122, 0.35);
+  --gradient-accent: linear-gradient(135deg, #34507a 0%, #486899 58%, #5c80b3 100%);
+  --gradient-brand: linear-gradient(135deg, #34507a 0%, #3d6868 100%);
+  --ok: #346c48;
+  --ok-soft: rgba(52, 108, 72, 0.14);
+  --warn: #b8620a;
+  --warn-soft: rgba(184, 98, 10, 0.14);
+  --fail: #b33a3a;
+  --fail-soft: rgba(179, 58, 58, 0.14);
+  --code-bg: #eceae6;
+  --kbd-bg: rgba(248, 247, 244, 0.98);
+  --shadow-card: 0 10px 26px rgba(28, 35, 48, 0.08);
+  --shadow-card-hover: 0 20px 44px rgba(28, 35, 48, 0.13);
+  --shadow-glow-accent: 0 0 0 1px var(--accent-soft), 0 14px 36px -12px var(--accent-glow);
+  --topbar-bg: rgba(255, 255, 255, 0.85);
+  --theme-tint:
+    radial-gradient(circle at 8% 0%, rgba(52, 80, 122, 0.10), transparent 42%),
+    radial-gradient(circle at 85% 95%, rgba(61, 104, 104, 0.08), transparent 46%),
+    radial-gradient(circle at 55% 35%, rgba(184, 98, 10, 0.04), transparent 50%);
+}
+

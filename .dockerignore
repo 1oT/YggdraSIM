@@ -1,12 +1,9 @@
-# Agent, IDE, and SCM metadata not needed inside the image.
-.cursor/
-.git/
-.github/
-.mypy_cache/
-.pytest_cache/
-.ruff_cache/
-.venv/
-agent-transcripts/
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
+# Hidden local metadata, SCM metadata, and caches not needed inside the image.
+.*
+*-transcripts/
 venv/
 
 # Python bytecode and local caches.
@@ -22,17 +19,40 @@ YggdraSIM-data/
 Workspace/
 state/
 Latjo/
+Legal/
 *.db
 *.sqlite3
+*.jsonl
+*.pem
+*.der
+*.crt
+*.csr
+*.key
+*.p8
+*.p12
+*.pfx
+*.jks
+*.keystore
+*.srl
+*.secret
+*.secrets
+eim_last_response.bin
+eim_last_response_hex.txt
+SCP11/eim_local/eim_last_response.bin
+SCP11/eim_local/eim_last_response_hex.txt
+SCP11/eim_local/eim_response_log.jsonl
+SCP11/eim_local/eim_poll_audit.sqlite3
+SCP11/eim_local/eim_runtime_state.json
+SCP11/local_access/debug/
 
 # Developer capture / scratch trees that can balloon context size.
 trace/
 .profilepackage-cache/
-.pytest_agent_log*.txt
+docs/
+scripts/docs/
 .pytest_chunk_log*.txt
 .pytest_last_run*.log
 .pytest_pre_log*.txt
-.unittest_agent_log*.txt
 .unittest_last_run*.log
 .run_*.txt
 .smoke_*
@@ -60,6 +80,11 @@ yggdrasim.egg-info/
 # excluded from the build context to keep layers small.
 pysim/
 pyscard/
+
+# Runtime plugin implementations are local-only and must not enter the
+# Docker build context. The public loader contract remains in source docs.
+plugins/
+tests/plugins/
 
 # Documentation output and ephemeral reports.
 reports/

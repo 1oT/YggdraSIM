@@ -1,0 +1,113 @@
+/*
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+ */
+
+/* Pretty primitives — type chips help an operator read a row without
+   parsing it. Hex strings get their own monospace pill so an ICCID or
+   IMSI is byte-grouped exactly like the hex dump panes. */
+
+.cc-pv {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  word-break: break-word;
+  color: var(--fg);
+}
+
+.cc-pv--str {
+  color: var(--fg);
+}
+
+.cc-pv--num {
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
+}
+
+.cc-pv--bool {
+  font-weight: 600;
+  text-transform: uppercase;
+  font-size: 10.5px;
+  padding: 1px 8px;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--border);
+}
+
+.cc-pv--bool-true {
+  color: var(--ok, #4caf50);
+  background: rgba(76, 175, 80, 0.12);
+  border-color: rgba(76, 175, 80, 0.35);
+}
+
+.cc-pv--bool-false {
+  color: var(--err, #d9534f);
+  background: rgba(217, 83, 79, 0.10);
+  border-color: rgba(217, 83, 79, 0.35);
+}
+
+.cc-pv--null {
+  color: var(--fg-muted);
+  font-style: italic;
+}
+
+.cc-pv--hex {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.cc-pv--hex code {
+  background: var(--code-bg, var(--bg-hover));
+  border-radius: 3px;
+  padding: 2px 6px;
+  font-size: 11.5px;
+  color: var(--accent);
+  letter-spacing: 0.04em;
+}
+
+.cc-pv-meta {
+  font-size: 10px;
+  color: var(--fg-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  padding: 0 6px;
+}
+
+/* Pretty containers — arrays of primitives become chip rows; arrays of
+   objects become a numbered stack; nested objects recurse into their
+   own dl. */
+
+.cc-pv-array {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.cc-pv-array--chips {
+  flex-direction: row;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+/* Vertical "one item per line" layout — used for arrays of
+   human-readable strings (EF.ARR decoded rules, multi-line lint
+   findings, etc.). Each line stays on its own row so the operator
+   can scan the values without parsing whitespace. */
+.cc-pv-array--lines {
+  flex-direction: column;
+  gap: 2px;
+}
+
+.cc-pv-array-line {
+  display: block;
+  line-height: 1.45;
+  padding: 6px 8px;
+  border-radius: var(--radius-sm);
+  border: 1px solid color-mix(in oklab, var(--border), transparent 12%);
+  background: color-mix(in oklab, var(--bg-hover), transparent 55%);
+}
+

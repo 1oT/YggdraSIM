@@ -1,0 +1,25 @@
+/*
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+ */
+
+/* Sidebar nav pulse when the open subsystem has an in-flight action. */
+#command-center-nav .subsystem-entry.is-busy::after {
+  content: "";
+  position: absolute;
+  right: 10px;
+  top: 50%;
+  width: 8px;
+  height: 8px;
+  transform: translateY(-50%);
+  border-radius: 999px;
+  background: var(--accent);
+  box-shadow: 0 0 8px var(--accent-glow);
+  animation: ygg-busy-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes ygg-busy-pulse {
+  0%, 100% { transform: translateY(-50%) scale(1);   opacity: 1; }
+  50%      { transform: translateY(-50%) scale(1.4); opacity: 0.55; }
+}
+

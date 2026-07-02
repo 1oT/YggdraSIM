@@ -5,6 +5,11 @@ tags:
   - hil
   - simtrace2
 ---
+<!--
+SPDX-License-Identifier: GPL-3.0-or-later
+Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+-->
+
 
 # HIL Bridge
 
@@ -25,6 +30,8 @@ to the same card.
 - observing a live relay or local-access session while the modem is
   interacting with the same card
 - serving a SIMtrace2 in card-emulation mode for a DUT
+- driving a rig whose physical card is streamed from another workstation
+  through Card Bridge and SSH
 - re-opening a previously saved `.pcap` / `.pcapng` in the decoded-APDU
   TUI without bringing the bridge stack back up (offline review mode)
 - layering SCP03 / SCP11c plaintext onto ciphered APDUs in either live
@@ -105,6 +112,29 @@ The supervisor:
 | `state/hil_bridge_supervisor.json` | supervisor status, bridge PID, USB presence |
 | `state/hil_bridge_card_relay.json` | relay status, URLs, reader name, ATR |
 
+## Remote-card mode
+
+The bridge can use a local PC/SC reader or a remote Card Bridge endpoint as
+its card source. Remote-card mode is useful when the SIMtrace2/modem rig is
+on a Raspberry Pi or lab host, but the card should stay plugged into the
+operator workstation.
+
+```bash
+yggdrasim-hil-supervisor \
+  --remote-card-url http://127.0.0.1:8642/apdu \
+  --remote-card-token-file ~/.config/yggdrasim/card_bridge/8642.token \
+  --apdu-timeout-ms 30000 \
+  --usb-vidpid 1d50:60e3
+```
+
+The remote endpoint is normally reached through SSH forwarding. The rig-side
+HIL relay, GSMTAP mirror, and state files do not change; only the source of
+card APDUs changes.
+
+Use [Remote APDU Streaming](../how-to/remote-apdu-streaming.md) for the
+end-to-end setup and [Install RemSIM / APDU Streaming](../how-to/install-remsim-apdu-streaming.md)
+for host preparation.
+
 ## Health signals
 
 Healthy state reads:
@@ -113,7 +143,7 @@ Healthy state reads:
 - supervisor `usbPresent: true`
 - supervisor `bridgePid` non-zero
 - relay `status: ok`
-- relay exposes `apduUrl`, `statusUrl`, `modemRefreshUrl`
+- relay exposes `apduUrl`, `statusUrl`, `cardResetUrl`
 - relay shows a non-empty `reader` and a non-empty `atr`
 
 Anything else means the stack is not fully armed.
@@ -135,6 +165,13 @@ cat state/hil_bridge_card_relay.json
 Once the relay reports `status: ok`, open any SCP11 or SCP03 shell that can
 be pointed at the relay URLs. The card will see both modem APDUs and
 YggdraSIM APDUs on one session, serialized through the bridge.
+
+### Drive it from the GUI
+
+The [Universal GUI Command Center](gui-command-center.md) can start the
+PC-side Card Bridge, open SSH forwards, sync the token to a rig, install the
+remote `systemd --user` service, and verify the HIL relay. Use that path for
+repeatable remote lab sessions.
 
 ### Use Wireshark to watch GSMTAP
 
@@ -253,7 +290,7 @@ card without a direct PC/SC handle:
 | `AT+CSIM=<length>,"<hex>"` | raw `CLA INS P1 P2 P3 …` |
 | `AT+CRSM=<command>,<fileid>,<P1>,<P2>,<P3>[,"<data>"][,"<path>"]` | `CLA=0x00`, `INS` from the §8.18 command table |
 
-Common modem REFRESH and AT-only flows can therefore be replayed
+Common AT-only flows can therefore be replayed
 through the same simulator backend the SCP shells use, with no host
 PC/SC involvement on the modem side.
 
@@ -266,6 +303,9 @@ control.
 ## Related pages
 
 - [HIL Model](../concepts/hil-model.md)
+- [Universal GUI Command Center](gui-command-center.md)
+- [Remote APDU Streaming](../how-to/remote-apdu-streaming.md)
+- [Install RemSIM / APDU Streaming](../how-to/install-remsim-apdu-streaming.md)
 - [Run a HIL Capture](../how-to/run-hil-capture.md)
 - [Replay a HIL pcap offline](../how-to/replay-hil-pcap-offline.md)
 - [SCP03 Admin Shell — EXPORT-KEYBAG](scp03.md#session-key-export)

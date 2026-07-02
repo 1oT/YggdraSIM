@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """SAIP profile linter: static analysis of decoded profile documents emitting YRL-* findings (TS.48 / SGP.22 / ETSI TS 102 221)."""
 import re
@@ -69,6 +72,10 @@ class SaipProfileLinter:
         # originate from template-placeholder-bearing fields.
         self._placeholder_paths: frozenset[str] = frozenset()
         self._undefined_tokens: frozenset[str] = frozenset()
+        # Populated at the start of each ``lint_decoded_document`` call so
+        # PE-level checks can reach into the wider profile (e.g. AKA
+        # cross-references resolving against NAA AIDs).
+        self._sections_cache: dict[str, Any] = {}
 
     def lint_decoded_document(
         self,
@@ -102,6 +109,11 @@ class SaipProfileLinter:
         ordered_types = [self._base_type_from_key(key) for key in sections.keys()]
         section_items = list(sections.items())
         file_definitions = self._extract_file_definitions(section_items)
+        # Stash the section map so per-PE checks that need a wider view
+        # (e.g. AKA mappingSource resolving against NAA AIDs) can reach
+        # back into the document without threading sections through every
+        # method signature.
+        self._sections_cache = sections
 
         self._emit_template_mode_banner()
         self._check_parser_health(section_items)
@@ -137,8 +149,13 @@ class SaipProfileLinter:
         self._check_fs_core_constraints(file_definitions)
         self._check_arr_references(file_definitions)
         self._check_pin_puk_encoding(sections)
+        self._check_pin_puk_cross_references(sections)
+        self._check_naa_presence(sections)
+        self._check_naa_has_aka_parameter(sections)
         self._check_sd_key_list(sections)
         self._check_aka_parameter_encoding(sections)
+        self._check_cdma_parameter_encoding(sections)
+        self._check_ssim_eaptls_parameters(sections)
         self._check_ber_tlv_constraints(section_items, file_definitions)
         self._check_gfm_sequences(sections)
         self._check_rfm_tar_coherence(sections)
@@ -525,6 +542,10 @@ class SaipProfileLinter:
         self._check_dependency_after(index_map, "phonebook", "usim", "YRL-DEP-PBOOK-001")
         self._check_dependency_after(index_map, "df-5gs", "usim", "YRL-DEP-5GS-001")
         self._check_dependency_after(index_map, "df-saip", "usim", "YRL-DEP-SAIP-001")
+        # TCA PP TS DF-SNPN-001 / DF-5GPROSE-001: both DF templates shall come
+        # once after the creation of an ADF USIM.
+        self._check_dependency_after(index_map, "df-snpn", "usim", "YRL-DEP-SNPN-001")
+        self._check_dependency_after(index_map, "df-5gprose", "usim", "YRL-DEP-5GPROSE-001")
 
     def _check_dependency_after(
         self,
@@ -817,7 +838,7 @@ class SaipProfileLinter:
 
         EF.AD is identified by FID 6FAD (3GPP TS 31.102 §4.2.18);
         EF.IMSI by FID 6F07.  Both are resolved from ``_extract_file_definitions``
-        so the check is robust to any nesting shape.
+        so the check is tolerant of any nesting shape.
         """
         # FID 6FAD = EF.AD, FID 6F07 = EF.IMSI (3GPP TS 31.102).
         _EF_AD_FID   = "6FAD"
@@ -1971,6 +1992,268 @@ class SaipProfileLinter:
                 recommendation="Populate mandatory and interoperability-relevant header fields.",
             )
 
+        self._check_mandatory_aids_entries(header)
+        self._check_profile_version_coherence(header)
+        self._check_profile_header_profile_type(header)
+        self._check_mandatory_gfste_list(header)
+
+    # TCA Profile Package TS versions published as of writing. The
+    # SAIP grammar bound to each (major, minor) version differs in the
+    # set of permitted PEs (e.g. IoT-options, SSIM-EAPTLS, df-5gprose);
+    # an unknown version pair will not parse against any shipped pySim
+    # ASN.1 schema.
+    _SAIP_VERSIONS_SUPPORTED: tuple[tuple[int, int], ...] = (
+        (2, 1), (2, 2), (2, 3),
+        (3, 0), (3, 1), (3, 2), (3, 3),
+    )
+
+    def _check_profile_version_coherence(self, header: dict[str, Any]) -> None:
+        """YRL-HDR-006: profile-version pair + version-gated feature presence.
+
+        Validates ``(major-version, minor-version)`` against the TCA PP TS
+        published version set and flags features that only exist in newer
+        SAIP grammars when they appear under an older version. ``iotOptions``
+        is the only such gating field at the moment — it is grammar-defined
+        only from TCA SAIP 3.3 onward.
+        """
+        major = header.get("major-version")
+        minor = header.get("minor-version")
+        if isinstance(major, int) is False or isinstance(minor, int) is False:
+            return
+        version_pair = (int(major), int(minor))
+        if version_pair not in self._SAIP_VERSIONS_SUPPORTED:
+            self._add(
+                code="YRL-HDR-006",
+                severity="FAIL",
+                spec="TCA PP TS §3.1",
+                path="header.major-version / header.minor-version",
+                message=(
+                    f"SAIP version {version_pair[0]}.{version_pair[1]} is not in the "
+                    "set of TCA-published Profile Package TS versions."
+                ),
+                recommendation=(
+                    "Set major/minor-version to one of "
+                    + ", ".join(f"{m}.{n}" for m, n in self._SAIP_VERSIONS_SUPPORTED)
+                    + "."
+                ),
+                evidence={"version": f"{version_pair[0]}.{version_pair[1]}"},
+            )
+            return
+        if "iotOptions" in header and version_pair < (3, 3):
+            self._add(
+                code="YRL-HDR-006",
+                severity="WARN",
+                spec="TCA PP TS §A.2 (iotOptions)",
+                path="header.iotOptions",
+                message=(
+                    f"iotOptions is set on a SAIP {version_pair[0]}.{version_pair[1]} "
+                    "profile; iotOptions is grammar-defined only from SAIP 3.3."
+                ),
+                recommendation=(
+                    "Bump major/minor-version to 3.3, or drop iotOptions if the "
+                    "profile must remain compatible with older eUICCs."
+                ),
+                evidence={"version": f"{version_pair[0]}.{version_pair[1]}"},
+            )
+
+    def _check_profile_header_profile_type(self, header: dict[str, Any]) -> None:
+        """YRL-HDR-008: ``profileType`` UTF-8 length 1..100 (TCA SAIP §A.2)."""
+        value = header.get("profileType")
+        if value is None:
+            return
+        if isinstance(value, str) is False:
+            return
+        # The TCA SAIP grammar caps profileType at 100 UTF-8 characters.
+        # Beyond that the field will not round-trip through pySim's ASN.1
+        # SIZE constraint and is rejected by most production loaders.
+        byte_length = len(value.encode("utf-8"))
+        if byte_length == 0:
+            self._add(
+                code="YRL-HDR-008",
+                severity="WARN",
+                spec="TCA SAIP §A.2",
+                path="header.profileType",
+                message="profileType is set but empty; the operator-facing name is blank.",
+                recommendation="Set profileType to a 1..100 UTF-8 character description.",
+            )
+        elif byte_length > 100:
+            self._add(
+                code="YRL-HDR-008",
+                severity="FAIL",
+                spec="TCA SAIP §A.2",
+                path="header.profileType",
+                message=(
+                    f"profileType is {byte_length} UTF-8 bytes; SAIP grammar caps "
+                    "this field at 100 bytes."
+                ),
+                recommendation="Shorten profileType to ≤ 100 UTF-8 bytes.",
+                evidence={"byte_length": byte_length},
+            )
+
+    _OID_COMPONENT_RE = re.compile(r"^(0|[1-9]\d*)$")
+
+    def _check_mandatory_gfste_list(self, header: dict[str, Any]) -> None:
+        """YRL-HDR-007: ``eUICC-Mandatory-GFSTEList`` dotted-OID validity.
+
+        TCA PP TS §A.2 declares the field as a SEQUENCE OF OBJECT
+        IDENTIFIER. Each entry must be a syntactically valid dotted-OID
+        (e.g. ``2.23.143.1.2.3``), with each component being a non-negative
+        integer and no leading zeros except for the literal ``0``.
+        """
+        entries = header.get("eUICC-Mandatory-GFSTEList")
+        if isinstance(entries, list) is False or len(entries) == 0:
+            return
+        seen: set[str] = set()
+        for index, entry in enumerate(entries):
+            base_path = f"header.eUICC-Mandatory-GFSTEList[{index}]"
+            text = "" if entry is None else str(entry).strip()
+            if len(text) == 0:
+                self._add(
+                    code="YRL-HDR-007",
+                    severity="FAIL",
+                    spec="TCA SAIP §A.2 / ITU-T X.660",
+                    path=base_path,
+                    message="GFSTE entry is empty.",
+                    recommendation="Populate the OID or drop the entry.",
+                )
+                continue
+            parts = text.split(".")
+            if len(parts) < 2:
+                self._add(
+                    code="YRL-HDR-007",
+                    severity="FAIL",
+                    spec="TCA SAIP §A.2 / ITU-T X.660",
+                    path=base_path,
+                    message=f"GFSTE entry {text!r} is not a dotted OID.",
+                    recommendation="Use a dotted-OID form such as 2.23.143.1.2.3.",
+                    evidence={"value": text},
+                )
+                continue
+            invalid_component = False
+            for component in parts:
+                if self._OID_COMPONENT_RE.match(component) is None:
+                    self._add(
+                        code="YRL-HDR-007",
+                        severity="FAIL",
+                        spec="TCA SAIP §A.2 / ITU-T X.660",
+                        path=base_path,
+                        message=(
+                            f"GFSTE entry {text!r} has invalid OID component "
+                            f"{component!r}; each component must be a non-negative "
+                            "integer without leading zeros."
+                        ),
+                        recommendation="Re-encode the OID with decimal components.",
+                        evidence={"value": text, "component": component},
+                    )
+                    invalid_component = True
+                    break
+            if invalid_component:
+                continue
+            if text in seen:
+                self._add(
+                    code="YRL-HDR-007",
+                    severity="WARN",
+                    spec="TCA SAIP §A.2",
+                    path=base_path,
+                    message=f"GFSTE OID {text} is declared more than once.",
+                    recommendation="Keep each mandatory GFSTE OID listed once.",
+                )
+            seen.add(text)
+
+    def _check_mandatory_aids_entries(self, header: dict[str, Any]) -> None:
+        """YRL-HDR-005: ``eUICC-Mandatory-AIDs`` entry shape (TCA SAIP §A.2).
+
+        Each entry must declare both ``aid`` (5..16 bytes per ISO 7816-5
+        §8.5) and ``version`` (exactly 2 bytes per TCA SAIP §A.2). An
+        entry without an ``aid`` or ``version`` field cannot be encoded
+        per the SAIP grammar and will be rejected by a conformant
+        profile validator at load time.
+        """
+        entries = header.get("eUICC-Mandatory-AIDs")
+        if isinstance(entries, list) is False or len(entries) == 0:
+            return
+        seen_aids: set[str] = set()
+        for index, entry in enumerate(entries):
+            base_path = f"header.eUICC-Mandatory-AIDs[{index}]"
+            if isinstance(entry, dict) is False:
+                self._add(
+                    code="YRL-HDR-005",
+                    severity="FAIL",
+                    spec="TCA SAIP §A.2",
+                    path=base_path,
+                    message="eUICC-Mandatory-AIDs entry is not a dict.",
+                    recommendation="Encode each entry as {aid: <hex>, version: <2 bytes hex>}.",
+                )
+                continue
+            aid_value = entry.get("aid") if "aid" in entry else entry.get("aid_hex")
+            version_value = (
+                entry.get("version") if "version" in entry else entry.get("version_hex")
+            )
+            aid_hex = self._coerce_hex_string(aid_value) if aid_value is not None else None
+            version_hex = (
+                self._coerce_hex_string(version_value) if version_value is not None else None
+            )
+            if aid_hex is None or len(aid_hex) == 0:
+                self._add(
+                    code="YRL-HDR-005",
+                    severity="FAIL",
+                    spec="TCA SAIP §A.2 / ISO 7816-5 §8.5",
+                    path=f"{base_path}.aid",
+                    message="eUICC-Mandatory-AIDs entry is missing the AID field.",
+                    recommendation="Populate the AID (5..16 byte hex).",
+                )
+            else:
+                aid_len = len(aid_hex) // 2
+                if aid_len < 5 or aid_len > 16:
+                    self._add(
+                        code="YRL-HDR-005",
+                        severity="FAIL",
+                        spec="ISO 7816-5 §8.5",
+                        path=f"{base_path}.aid",
+                        message=(
+                            f"AID byte length {aid_len} is outside the ISO 7816-5 "
+                            "range 5..16."
+                        ),
+                        recommendation="Encode the AID as 5..16 bytes.",
+                        evidence={"aid": aid_hex},
+                    )
+                else:
+                    key = aid_hex.upper()
+                    if key in seen_aids:
+                        self._add(
+                            code="YRL-HDR-005",
+                            severity="WARN",
+                            spec="TCA SAIP §A.2",
+                            path=f"{base_path}.aid",
+                            message=(
+                                f"Duplicate AID {key} declared in eUICC-Mandatory-AIDs."
+                            ),
+                            recommendation="Keep each mandatory library AID listed once.",
+                        )
+                    seen_aids.add(key)
+            if version_hex is None or len(version_hex) == 0:
+                self._add(
+                    code="YRL-HDR-005",
+                    severity="FAIL",
+                    spec="TCA SAIP §A.2",
+                    path=f"{base_path}.version",
+                    message="eUICC-Mandatory-AIDs entry is missing the version field.",
+                    recommendation="Populate the package version (exactly 2 bytes hex).",
+                )
+            elif len(version_hex) != 4:
+                self._add(
+                    code="YRL-HDR-005",
+                    severity="FAIL",
+                    spec="TCA SAIP §A.2",
+                    path=f"{base_path}.version",
+                    message=(
+                        f"eUICC-Mandatory-AIDs version byte length "
+                        f"{len(version_hex) // 2} is not 2."
+                    ),
+                    recommendation="Encode the package version as exactly 2 bytes hex.",
+                    evidence={"version": version_hex},
+                )
+
     def _check_connectivity_parameters(self, sections: dict[str, Any]) -> None:
         """YRL-HDR-002/-003/-004: profile header connectivityParameters checks.
 
@@ -2567,11 +2850,31 @@ class SaipProfileLinter:
                 if isinstance(candidate_list, list):
                     instance_list = candidate_list
 
+            # TCA PP TS APP-004: a PE-Application shall contain either a
+            # ``loadBlock`` field, an ``instanceList`` field, or both. An
+            # empty Application PE personalises nothing and is rejected by
+            # the eUICC loader.
+            has_load_block = isinstance(load_block, dict) and len(load_block) > 0
+            if has_load_block is False and len(instance_list) == 0:
+                self._add(
+                    code="YRL-JCA-004",
+                    severity="FAIL",
+                    spec="TCA PP TS APP-004",
+                    path=key_text,
+                    message="Application PE has neither loadBlock nor instanceList.",
+                    recommendation=(
+                        "Populate loadBlock for a CAP-loading Application or "
+                        "instanceList for a make-selectable-only Application."
+                    ),
+                )
+
             for index, instance in enumerate(instance_list):
                 if isinstance(instance, dict) is False:
                     continue
-                instance_aid = str(instance.get("instanceAID", "")).strip().upper()
-                app_load_aid = str(instance.get("applicationLoadPackageAID", "")).strip().upper()
+                instance_aid = self._normalize_aid_hex(instance.get("instanceAID"))
+                app_load_aid = self._normalize_aid_hex(
+                    instance.get("applicationLoadPackageAID")
+                )
                 if instance_aid == "":
                     self._add(
                         code="YRL-JCI-001",
@@ -2616,6 +2919,127 @@ class SaipProfileLinter:
                                 "actual": app_load_aid,
                             },
                         )
+
+                # YRL-JCA-005: applicationLoadPackageAID on an instance
+                # must reference either the parent PE-Application
+                # loadBlock.loadPackageAID or a load-package declared by
+                # a preceding PE-Application. An orphan reference cannot
+                # be installed by the eUICC loader.
+                if app_load_aid != "" and self._looks_like_hex(app_load_aid):
+                    if load_aid is None and app_load_aid not in load_package_aids:
+                        self._add(
+                            code="YRL-JCA-005",
+                            severity="WARN",
+                            spec="ETSI TS 102 226 / GP CS §11.5",
+                            path=(
+                                f"{key_text}.instanceList[{index}]"
+                                ".applicationLoadPackageAID"
+                            ),
+                            message=(
+                                "Instance applicationLoadPackageAID does not match any "
+                                "PE-Application loadBlock declared earlier in the profile."
+                            ),
+                            recommendation=(
+                                "Declare the load package in a preceding PE-Application "
+                                "before instantiating it, or correct the AID."
+                            ),
+                            evidence={"applicationLoadPackageAID": app_load_aid},
+                        )
+
+                # YRL-JCI-005: instance applicationModule entries must
+                # reference a 5..16 byte AID per ISO 7816-4 §8.2.1.
+                module_entries = instance.get("applicationModule") or instance.get(
+                    "applicationModules"
+                )
+                if isinstance(module_entries, list):
+                    for mod_idx, module in enumerate(module_entries):
+                        if isinstance(module, dict) is False:
+                            continue
+                        mod_aid = self._normalize_aid_hex(
+                            module.get("applicationModuleAID")
+                        )
+                        if mod_aid == "":
+                            continue
+                        if self._looks_like_hex(mod_aid) is False:
+                            continue
+                        mod_bytes = len(mod_aid) // 2
+                        if mod_bytes < 5 or mod_bytes > 16:
+                            self._add(
+                                code="YRL-JCI-005",
+                                severity="WARN",
+                                spec="ISO 7816-4 §8.2.1",
+                                path=(
+                                    f"{key_text}.instanceList[{index}]"
+                                    f".applicationModule[{mod_idx}]"
+                                    ".applicationModuleAID"
+                                ),
+                                message=(
+                                    f"applicationModuleAID is {mod_bytes} byte(s); "
+                                    "valid AID range is 5–16 bytes."
+                                ),
+                                recommendation=(
+                                    "Correct the module AID to a 5–16 byte value."
+                                ),
+                                evidence={"applicationModuleAID": mod_aid},
+                            )
+
+                # TCA PP TS PP-004: if ``extraditeSecurityDomainAID`` is set
+                # on an Application instance, it shall match the AID of a
+                # PE-SecurityDomain that has already been declared earlier
+                # in the profile.
+                extradite_aid = self._normalize_aid_hex(
+                    instance.get("extraditeSecurityDomainAID")
+                )
+                if extradite_aid != "":
+                    if self._looks_like_hex(extradite_aid) is False:
+                        self._add(
+                            code="YRL-SDM-005",
+                            severity="FAIL",
+                            spec="TCA PP TS PP-004",
+                            path=f"{key_text}.instanceList[{index}].extraditeSecurityDomainAID",
+                            message="extraditeSecurityDomainAID is not hex-encoded.",
+                            recommendation="Encode extraditeSecurityDomainAID as 5..16 byte AID hex.",
+                            evidence={"extraditeSecurityDomainAID": extradite_aid},
+                        )
+                    elif extradite_aid not in security_domain_aids:
+                        self._add(
+                            code="YRL-SDM-005",
+                            severity="FAIL",
+                            spec="TCA PP TS PP-004",
+                            path=f"{key_text}.instanceList[{index}].extraditeSecurityDomainAID",
+                            message=(
+                                "extraditeSecurityDomainAID does not match the AID of any "
+                                "preceding PE-SecurityDomain."
+                            ),
+                            recommendation=(
+                                "Declare the target security domain in a PE-SecurityDomain "
+                                "before the extraditing Application PE, or drop the field."
+                            ),
+                            evidence={"extraditeSecurityDomainAID": extradite_aid},
+                        )
+
+    @staticmethod
+    def _normalize_aid_hex(value: Any) -> str:
+        """Return the uppercase compact hex string for an AID-shaped value.
+
+        SAIP decoded payloads encode AIDs either as a raw hex string
+        (``"A000000003000000"``) or as a wrapper dict
+        (``{"hex": "A000000003000000"}`` / ``{"__ygg_saip_bytes__": ...}``).
+        This helper accepts both and returns ``""`` when no candidate hex
+        can be located.
+        """
+        if value is None:
+            return ""
+        if isinstance(value, bytes):
+            return value.hex().upper()
+        if isinstance(value, dict):
+            inner = value.get("hex")
+            if inner is None:
+                inner = value.get("__ygg_saip_bytes__")
+            if inner is None:
+                return ""
+            return str(inner).strip().upper().replace(" ", "")
+        return str(value).strip().upper().replace(" ", "")
 
     def _check_hex_fields(self, section_items: list[tuple[str, Any]]) -> None:
         for key_text, payload in section_items:
@@ -2721,7 +3145,13 @@ class SaipProfileLinter:
             self._validate_short_efid(file_def, short_efid_by_scope[scope])
             self._validate_ef_file_size(file_def)
             self._validate_link_path(file_def)
+            self._validate_link_path_target(file_def)
+            self._validate_link_path_forbidden_fields(file_def)
             self._validate_security_attributes_reference(file_def)
+            self._validate_file_descriptor_kind(file_def)
+            self._validate_life_cycle_status(file_def)
+            self._validate_security_attributes_mutex(file_def)
+            self._validate_df_name_placement(file_def)
 
     def _check_gfm_sequences(self, sections: dict[str, Any]) -> None:
         """YRL-GFM-*: GFM command-block sequence coherence checks.
@@ -2935,6 +3365,67 @@ class SaipProfileLinter:
                         evidence={"keyReference": kref_hex},
                     )
 
+            # YRL-RFM-004: minimumSecurityLevel must be a single byte and
+            # the cryptographic-checksum / cipher bits must not both be
+            # unset on remote-management traffic (ETSI TS 102 225 §5.1.1).
+            self._check_minimum_security_level(
+                section_key=section_key,
+                payload=payload,
+                code="YRL-RFM-004",
+            )
+
+    def _check_minimum_security_level(
+        self,
+        *,
+        section_key: str,
+        payload: dict[str, Any],
+        code: str,
+    ) -> None:
+        """Validate a ``minimumSecurityLevel`` (MSL) field per TS 102 225 §5.1.1.
+
+        MSL is a single byte; the upper nibble selects the encryption
+        algorithm (DES / AES) and the lower nibble selects the integrity
+        algorithm. A zero byte means "no security required" — almost
+        always a personalisation error on a remote-management PE.
+        """
+        msl_candidates = self._find_key_values(payload, "minimumSecurityLevel")
+        for msl_raw in msl_candidates:
+            msl_hex = self._normalise_hex_field(msl_raw)
+            if msl_hex is None or self._looks_like_hex(msl_hex) is False:
+                continue
+            byte_length = len(msl_hex) // 2
+            if byte_length != 1:
+                self._add(
+                    code=code,
+                    severity="WARN",
+                    spec="ETSI TS 102 225 §5.1.1",
+                    path=f"{section_key}.minimumSecurityLevel",
+                    message=(
+                        f"minimumSecurityLevel is {byte_length} byte(s); the SPI "
+                        "MSL is a single byte."
+                    ),
+                    recommendation="Encode minimumSecurityLevel as exactly 1 byte.",
+                    evidence={"minimumSecurityLevel": msl_hex},
+                )
+                continue
+            byte = int(msl_hex, 16)
+            if byte == 0:
+                self._add(
+                    code=code,
+                    severity="WARN",
+                    spec="ETSI TS 102 225 §5.1.1",
+                    path=f"{section_key}.minimumSecurityLevel",
+                    message=(
+                        "minimumSecurityLevel = 0x00 disables both integrity and "
+                        "ciphering on remote management; almost always unintended."
+                    ),
+                    recommendation=(
+                        "Set the MSL to require at least a cryptographic checksum "
+                        "(e.g. 0x12 for DES-CC, 0x16 for AES-CMAC + AES-CBC)."
+                    ),
+                    evidence={"minimumSecurityLevel": msl_hex},
+                )
+
     def _normalise_hex_field(self, raw: Any) -> str | None:
         """Coerce a raw decoded field to a plain uppercase hex string, or None."""
         if raw is None:
@@ -3015,6 +3506,13 @@ class SaipProfileLinter:
                             recommendation="Correct the load-package AID to a 5- to 16-byte value.",
                             evidence={"aid": lpa_hex, "byte_length": lpa_bytes},
                         )
+
+            # YRL-RAM-004: minimumSecurityLevel sanity (TS 102 225 §5.1.1).
+            self._check_minimum_security_level(
+                section_key=section_key,
+                payload=payload,
+                code="YRL-RAM-004",
+            )
 
     def _check_ber_tlv_constraints(
         self,
@@ -3707,6 +4205,94 @@ class SaipProfileLinter:
                 recommendation="Limit linkPath length to 8 bytes.",
             )
 
+    def _validate_link_path_target(self, file_def: FileDefinition) -> None:
+        """YRL-FIL-024: linkPath shall not be set on an ADF (TCA FS-024).
+
+        ``linkPath`` is the symlink-target field of an EF entry; it has no
+        defined meaning on an ADF and is rejected by the TCA SAIP grammar
+        (TCA PP TS, FS-024).
+        """
+        link_path = file_def.link_path
+        if link_path is None or link_path == "":
+            return
+        field_path_lower = file_def.field_path.lower()
+        section_lower = file_def.section_key.lower()
+        is_adf = False
+        if "adf" in field_path_lower:
+            is_adf = True
+        if section_lower.startswith(("usim", "isim", "csim", "ssim")):
+            if "adf" in field_path_lower or field_path_lower.endswith("adf"):
+                is_adf = True
+        if is_adf is False:
+            return
+        self._add(
+            code="YRL-FIL-024",
+            severity="FAIL",
+            spec="TCA PP TS FS-024",
+            path=f"{file_def.section_key}.{file_def.field_path}.linkPath",
+            message="linkPath is set on an ADF; only EFs and DFs may declare linkPath.",
+            recommendation="Drop linkPath from the ADF FCP and place it on the linked EF instead.",
+        )
+
+    def _validate_link_path_forbidden_fields(self, file_def: FileDefinition) -> None:
+        """YRL-FIL-015: a linked file shall not also carry size / pattern fields.
+
+        Per TCA PP TS FS-015 and the underlying file-management semantics
+        in ETSI TS 102 222, a linked entry inherits its size and
+        proprietary information from the link target. ``efFileSize``,
+        ``maximumFileSize``, ``fillFileContent``, ``fillFilePattern``,
+        and ``proprietaryEFInfo`` must therefore stay unset on the
+        linking entry — declaring them is either ignored by the loader
+        or rejected as a duplicate / conflicting field.
+        """
+        link_path = file_def.link_path
+        if link_path is None or link_path == "":
+            return
+        forbidden = (
+            ("efFileSize", file_def.ef_file_size),
+            ("maximumFileSize", file_def.maximum_file_size),
+        )
+        for field_name, value in forbidden:
+            if value is None or value == "":
+                continue
+            self._add(
+                code="YRL-FIL-015",
+                severity="FAIL",
+                spec="TCA PP TS FS-015",
+                path=f"{file_def.section_key}.{file_def.field_path}.{field_name}",
+                message=(
+                    f"Linked file declares {field_name}; the link target owns "
+                    "size information."
+                ),
+                recommendation=(
+                    f"Drop {field_name} from the linking entry, or remove "
+                    "linkPath to declare a non-linked file."
+                ),
+                evidence={"linkPath": link_path, field_name: value},
+            )
+        payload = file_def.payload if isinstance(file_def.payload, dict) else {}
+        for field_name in ("fillFileContent", "fillFileOffset", "fillFilePattern"):
+            if field_name not in payload:
+                continue
+            value = payload.get(field_name)
+            if value in (None, "", {}, []):
+                continue
+            self._add(
+                code="YRL-FIL-015",
+                severity="FAIL",
+                spec="TCA PP TS FS-015",
+                path=f"{file_def.section_key}.{file_def.field_path}.{field_name}",
+                message=(
+                    f"Linked file declares {field_name}; the link target owns "
+                    "the file content."
+                ),
+                recommendation=(
+                    f"Drop {field_name} from the linking entry, or remove "
+                    "linkPath to declare a non-linked file."
+                ),
+                evidence={"linkPath": link_path},
+            )
+
     def _validate_security_attributes_reference(self, file_def: FileDefinition) -> None:
         security_attributes_referenced = file_def.security_attributes_referenced
         if security_attributes_referenced is None:
@@ -3732,6 +4318,214 @@ class SaipProfileLinter:
                 message="securityAttributesReferenced must be 1..3 bytes.",
                 recommendation="Use EF(ARR) reference coding with proper length.",
             )
+
+    @staticmethod
+    def _file_kind_from_field_path(field_path: str) -> str:
+        """Classify a file-definition node as ADF / DF / EF / MF / unknown.
+
+        The pySim / saip-tool decoded shape uses lower-cased path tokens —
+        ``adf`` for an ADF FCP, ``df`` for a DF FCP, ``ef`` for an EF
+        FCP, ``mf`` for the master file. Walks the right-most non-index
+        token of the path so nested ``ef[3]`` style entries are still
+        classified by the parent collection name.
+        """
+        tokens = [
+            part for part in field_path.lower().replace("[", ".").replace("]", "").split(".")
+            if part and not part.isdigit()
+        ]
+        for token in reversed(tokens):
+            if token in ("adf", "df", "ef", "mf"):
+                return token
+            if token.startswith("ef-"):
+                return "ef"
+        return "unknown"
+
+    # ETSI TS 102 222 §6.2 / ISO 7816-4 §5.4.2 Table 12 file-descriptor
+    # byte 0 encodes the broad file class in bits b5..b3:
+    #   0b111 (7) = DF / ADF (shareable variant 0x38 is the canonical value).
+    #   0b000 (0) = working EF (transparent/linear/cyclic/BER-TLV — bits
+    #              b2..b1 pick the structure).
+    #   0b001 (1) = internal EF.
+    # Bit b7 carries the shareable flag and is orthogonal to file class.
+    @staticmethod
+    def _file_descriptor_kind_bits(file_descriptor_hex: str) -> int:
+        return (int(file_descriptor_hex[:2], 16) >> 3) & 0x07
+
+    def _validate_file_descriptor_kind(self, file_def: FileDefinition) -> None:
+        """YRL-FIL-040: fileDescriptor byte 0 must match the file kind.
+
+        DF / ADF / MF nodes carry byte 0 with bits b5..b3 = ``111`` (the
+        canonical shareable encoding is ``0x38``). EF nodes use bits
+        b5..b3 of ``000`` (working EF) or ``001`` (internal EF). A
+        mismatch flips ISO 7816-4 file-class decoding on the card and is
+        rejected by SELECT.
+        """
+        descriptor = file_def.file_descriptor
+        if descriptor is None or self._looks_like_hex(descriptor) is False:
+            return
+        if len(descriptor) < 2:
+            return
+        kind = self._file_kind_from_field_path(file_def.field_path)
+        if kind not in ("adf", "df", "ef", "mf"):
+            return
+        class_bits = self._file_descriptor_kind_bits(descriptor)
+        path = f"{file_def.section_key}.{file_def.field_path}.fileDescriptor"
+        if kind in ("adf", "df", "mf") and class_bits != 0b111:
+            self._add(
+                code="YRL-FIL-040",
+                severity="FAIL",
+                spec="ETSI TS 102 222 §6.2 / ISO 7816-4 §5.4.2",
+                path=path,
+                message=(
+                    f"{kind.upper()} fileDescriptor byte 0 = 0x{descriptor[:2]} "
+                    f"(class bits 0b{class_bits:03b}); DF / ADF requires "
+                    "class bits 0b111 (canonical value 0x38)."
+                ),
+                recommendation="Set fileDescriptor byte 0 to 0x38 for DF / ADF.",
+                evidence={"fileDescriptor": descriptor, "kind": kind},
+            )
+        elif kind == "ef" and class_bits == 0b111:
+            self._add(
+                code="YRL-FIL-040",
+                severity="FAIL",
+                spec="ETSI TS 102 222 §6.2 / ISO 7816-4 §5.4.2",
+                path=path,
+                message=(
+                    f"EF fileDescriptor byte 0 = 0x{descriptor[:2]} encodes a DF; "
+                    "EFs must use class bits 0b000 (working EF) or 0b001 "
+                    "(internal EF)."
+                ),
+                recommendation=(
+                    "Use 0x41 (transparent), 0x42 (linear), 0x46 (cyclic), or "
+                    "0x49 (BER-TLV) for a working EF."
+                ),
+                evidence={"fileDescriptor": descriptor, "kind": kind},
+            )
+
+    # ETSI TS 102 221 §11.1.1.1 / TS 102 222 §6.10: life cycle status byte
+    # 0x00 = no information, 0x01 = creation, 0x03 = initialisation,
+    # 0x04 / 0x05 = operational (deactivated / activated),
+    # 0x0C..0x0F = termination state. All other values are RFU.
+    _LCS_VALID_BYTES: frozenset[int] = frozenset(
+        [0x00, 0x01, 0x03, 0x04, 0x05, 0x0C, 0x0D, 0x0E, 0x0F]
+    )
+
+    def _validate_life_cycle_status(self, file_def: FileDefinition) -> None:
+        """YRL-FIL-041: lifeCycleStatus byte must be in the ETSI registry.
+
+        Most personalised files ship in life-cycle state 0x05 (operational
+        activated). Values outside the registered set leave the file in
+        an undefined state that some loaders refuse to accept.
+        """
+        payload = file_def.payload if isinstance(file_def.payload, dict) else {}
+        if "lifeCycleStatus" not in payload:
+            return
+        value_hex = self._normalize_file_definition_value(payload.get("lifeCycleStatus"))
+        if value_hex is None or self._looks_like_hex(value_hex) is False:
+            return
+        if len(value_hex) < 2:
+            return
+        byte = int(value_hex[:2], 16)
+        path = f"{file_def.section_key}.{file_def.field_path}.lifeCycleStatus"
+        if byte not in self._LCS_VALID_BYTES:
+            self._add(
+                code="YRL-FIL-041",
+                severity="WARN",
+                spec="ETSI TS 102 221 §11.1.1.1 / TS 102 222 §6.10",
+                path=path,
+                message=(
+                    f"lifeCycleStatus byte = 0x{byte:02X} is not in the ETSI "
+                    "registered set (0x00 / 0x01 / 0x03 / 0x04 / 0x05 / 0x0C..0x0F)."
+                ),
+                recommendation=(
+                    "Use 0x05 for operational-activated personalisation; reserve "
+                    "0x0C..0x0F for terminated files."
+                ),
+                evidence={"lifeCycleStatus": value_hex},
+            )
+
+    def _validate_security_attributes_mutex(self, file_def: FileDefinition) -> None:
+        """YRL-FIL-042: securityAttributesReferenced and -Compact are mutually
+        exclusive on a single FCP.
+
+        ETSI TS 102 221 §11.1.1.4 (Table 11.5) defines the FCP as
+        carrying *one* of the two forms — referenced via EF(ARR) or
+        compact inline. Declaring both leaves the access-rule resolver
+        with two conflicting sources of truth.
+        """
+        payload = file_def.payload if isinstance(file_def.payload, dict) else {}
+        has_referenced = file_def.security_attributes_referenced is not None
+        compact_value = self._normalize_file_definition_value(
+            payload.get("securityAttributesCompact")
+        )
+        has_compact = compact_value is not None and compact_value != ""
+        if has_referenced and has_compact:
+            self._add(
+                code="YRL-FIL-042",
+                severity="FAIL",
+                spec="ETSI TS 102 221 §11.1.1.4",
+                path=f"{file_def.section_key}.{file_def.field_path}",
+                message=(
+                    "FCP declares both securityAttributesReferenced and "
+                    "securityAttributesCompact; the two forms are mutually exclusive."
+                ),
+                recommendation=(
+                    "Keep either the EF(ARR) reference or the compact inline form, "
+                    "not both."
+                ),
+            )
+
+    def _validate_df_name_placement(self, file_def: FileDefinition) -> None:
+        """YRL-FIL-043: dfName (AID) is restricted to ADF nodes.
+
+        ETSI TS 102 222 §6.4 reserves the FCP ``dfName`` element for ADF
+        creation — it is the AID returned by SELECT BY NAME. EFs and MFs
+        do not carry a `dfName`; some DFs may (TS 102 222 §6.5) but the
+        common shape is ADF-only and the lint reflects that.
+        """
+        payload = file_def.payload if isinstance(file_def.payload, dict) else {}
+        df_name = payload.get("dfName")
+        df_name_hex = self._normalize_file_definition_value(df_name)
+        if df_name_hex is None or df_name_hex == "":
+            return
+        kind = self._file_kind_from_field_path(file_def.field_path)
+        if kind == "ef":
+            self._add(
+                code="YRL-FIL-043",
+                severity="FAIL",
+                spec="ETSI TS 102 222 §6.4 / TS 102 221 §11.1.1.2",
+                path=f"{file_def.section_key}.{file_def.field_path}.dfName",
+                message="EF FCP declares dfName; dfName is an ADF-only AID.",
+                recommendation=(
+                    "Move dfName onto the parent ADF FCP, or drop it from this EF."
+                ),
+            )
+            return
+        if kind == "mf":
+            self._add(
+                code="YRL-FIL-043",
+                severity="WARN",
+                spec="ETSI TS 102 222 §6.4",
+                path=f"{file_def.section_key}.{file_def.field_path}.dfName",
+                message="MF FCP declares dfName; the MF AID is fixed and is not personalised.",
+                recommendation="Drop dfName from the MF FCP.",
+            )
+            return
+        if kind == "adf":
+            byte_length = len(df_name_hex) // 2
+            if byte_length < 5 or byte_length > 16:
+                self._add(
+                    code="YRL-FIL-043",
+                    severity="WARN",
+                    spec="ISO 7816-4 §8.2.1",
+                    path=f"{file_def.section_key}.{file_def.field_path}.dfName",
+                    message=(
+                        f"ADF dfName is {byte_length} byte(s); valid AID range is "
+                        "5–16 bytes."
+                    ),
+                    recommendation="Encode the ADF AID as a 5–16 byte value.",
+                    evidence={"dfName": df_name_hex, "byte_length": byte_length},
+                )
 
     # GP CPS v2.3 §11.1.8 valid key component type codes.
     _GP_VALID_KEY_TYPES: frozenset[int] = frozenset([
@@ -3854,12 +4648,16 @@ class SaipProfileLinter:
                         evidence={"keyType": kt_hex},
                     )
 
-    # Algorithm-ID → (key_bytes, op_field, op_bytes, name)
+    # Algorithm-ID → (allowed_key_bytes, op_field, op_bytes, name)
     # MILENAGE: 3GPP TS 35.206; TUAK: 3GPP TS 35.231.
-    _AKA_ALGO_SPECS: dict[int, tuple[int, str, int, str]] = {
-        1: (16, "opc",  16, "MILENAGE"),
-        2: (32, "topc", 32, "TUAK"),
-        3: (16, "opc",  16, "USIM-TEST-XOR"),
+    #
+    # TS 35.231 Annex F.1 defines TUAK K as 128 or 256 bits, so the linter
+    # accepts both 16-byte and 32-byte K material. TOPc tracks K width
+    # (128-bit TUAK -> 16-byte TOPc, 256-bit TUAK -> 32-byte TOPc).
+    _AKA_ALGO_SPECS: dict[int, tuple[tuple[int, ...], str, tuple[int, ...], str]] = {
+        1: ((16,), "opc",  (16,), "MILENAGE"),
+        2: ((16, 32), "topc", (16, 32), "TUAK"),
+        3: ((16,), "opc",  (16,), "USIM-TEST-XOR"),
     }
 
     # Fixed-length SGP.22 §B.3 fields common to all algorithms.
@@ -3878,7 +4676,7 @@ class SaipProfileLinter:
         Validates ``PE-AKAParameter`` / ``PE-AKAParameter2`` key material:
 
         - ``YRL-AKA-001``: K field (``key``) must be 16 B for MILENAGE /
-          XOR-test, 32 B for TUAK (3GPP TS 35.206 §8, TS 35.231 §8).
+          XOR-test, 16 or 32 B for TUAK (3GPP TS 35.206 §8, TS 35.231 §8).
         - ``YRL-AKA-002``: OP(c) / TOP(c) byte length must match algorithm.
         - ``YRL-AKA-003``: Fixed-length SGP.22 §B.3 fields out of spec
           (``algorithmOptions`` 1 B, ``authCounterMax`` 3 B, ``sqnDelta``
@@ -3944,42 +4742,84 @@ class SaipProfileLinter:
             )
             return
 
-        key_bytes, op_field, op_bytes, algo_name = spec
+        key_bytes_allowed, op_field, op_bytes_allowed, algo_name = spec
 
         # K field
         key_hex = self._aka_extract_hex(algo_params.get("key"))
+        actual_key_bytes: int | None = None
         if key_hex and self._looks_like_hex(key_hex):
-            actual = len(key_hex) // 2
-            if actual != key_bytes:
+            actual_key_bytes = len(key_hex) // 2
+            if actual_key_bytes not in key_bytes_allowed:
+                allowed_key_bytes = sorted(set(key_bytes_allowed))
+                evidence = {
+                    "algorithm": algo_name,
+                    "actual_bytes": actual_key_bytes,
+                    "allowed_bytes": allowed_key_bytes,
+                }
+                if len(allowed_key_bytes) == 1:
+                    evidence["expected_bytes"] = allowed_key_bytes[0]
                 self._add(
                     code="YRL-AKA-001",
                     severity="FAIL",
                     spec="3GPP TS 35.206 §8" if algo_id == 1 else "3GPP TS 35.231 §8",
                     path=f"{section_key}.algoConfiguration.key",
                     message=(
-                        f"{algo_name} K field is {actual} B; must be {key_bytes} B."
+                        f"{algo_name} K field is {actual_key_bytes} B; allowed "
+                        f"sizes: {allowed_key_bytes} B."
                     ),
-                    recommendation=f"Re-encode K as exactly {key_bytes} bytes.",
-                    evidence={"algorithm": algo_name, "actual_bytes": actual, "expected_bytes": key_bytes},
+                    recommendation=(
+                        f"Re-encode K as one of {allowed_key_bytes} bytes."
+                    ),
+                    evidence=evidence,
                 )
 
-        # OP(c) / TOP(c)
+        # OP(c) / TOP(c). When TUAK K and TOPc widths must match, prefer the
+        # width that aligns with the key actually shipped.
         op_val = algo_params.get(op_field) or algo_params.get(op_field.replace("c", ""))
         op_hex = self._aka_extract_hex(op_val)
         if op_hex and self._looks_like_hex(op_hex):
-            actual = len(op_hex) // 2
-            if actual != op_bytes:
+            actual_op_bytes = len(op_hex) // 2
+            if actual_op_bytes not in op_bytes_allowed:
                 self._add(
                     code="YRL-AKA-002",
                     severity="FAIL",
                     spec="3GPP TS 35.206 §8" if algo_id == 1 else "3GPP TS 35.231 §8",
                     path=f"{section_key}.algoConfiguration.{op_field}",
                     message=(
-                        f"{algo_name} {op_field} field is {actual} B; must be {op_bytes} B."
+                        f"{algo_name} {op_field} field is {actual_op_bytes} B; "
+                        f"allowed sizes: {sorted(set(op_bytes_allowed))} B."
                     ),
-                    recommendation=f"Re-encode {op_field} as exactly {op_bytes} bytes.",
-                    evidence={"algorithm": algo_name, "actual_bytes": actual, "expected_bytes": op_bytes},
+                    recommendation=(
+                        f"Re-encode {op_field} as one of "
+                        f"{sorted(set(op_bytes_allowed))} bytes."
+                    ),
+                    evidence={
+                        "algorithm": algo_name,
+                        "actual_bytes": actual_op_bytes,
+                        "allowed_bytes": sorted(set(op_bytes_allowed)),
+                    },
                 )
+            elif algo_id == 2 and actual_key_bytes is not None:
+                if actual_op_bytes != actual_key_bytes:
+                    self._add(
+                        code="YRL-AKA-002",
+                        severity="WARN",
+                        spec="3GPP TS 35.231 Annex F",
+                        path=f"{section_key}.algoConfiguration.{op_field}",
+                        message=(
+                            f"TUAK TOPc is {actual_op_bytes} B but K is "
+                            f"{actual_key_bytes} B; TS 35.231 expects TOPc and K "
+                            "to share the same width (both 16 or both 32)."
+                        ),
+                        recommendation=(
+                            "Encode TOPc and K with the same byte width "
+                            "(16-byte K → 16-byte TOPc; 32-byte K → 32-byte TOPc)."
+                        ),
+                        evidence={
+                            "k_bytes": actual_key_bytes,
+                            "topc_bytes": actual_op_bytes,
+                        },
+                    )
 
         # Fixed-length fields (common + MILENAGE-specific)
         for field_name, expected_bytes in self._AKA_FIXED_FIELD_BYTES.items():
@@ -4006,6 +4846,187 @@ class SaipProfileLinter:
                             "actual_bytes": actual,
                             "expected_bytes": expected_bytes,
                         },
+                    )
+
+        # YRL-AKA-005: when this AKA PE inherits parameters from another
+        # NAA (mappingSource is set), the referenced AID must match the
+        # instance AID of a USIM / ISIM / CSIM / SSIM declared earlier in
+        # the profile. Per TCA PP TS PE-AKAParameter, mappingSource is the
+        # AID of the source application supplying the shared K / OPc.
+        mapping_src = payload.get("mappingSource")
+        mapping_src_hex = self._aka_extract_hex(mapping_src)
+        if mapping_src_hex and self._looks_like_hex(mapping_src_hex):
+            normalized = mapping_src_hex.upper()
+            known_aids = self._collect_naa_instance_aids()
+            if normalized not in known_aids:
+                self._add(
+                    code="YRL-AKA-005",
+                    severity="WARN",
+                    spec="TCA PP TS PE-AKAParameter / ISO 7816-5 §8.5",
+                    path=f"{section_key}.mappingSource",
+                    message=(
+                        f"AKA mappingSource AID {normalized} does not match the "
+                        "instance AID of any USIM / ISIM / CSIM / SSIM declared "
+                        "earlier in the profile."
+                    ),
+                    recommendation=(
+                        "Set mappingSource to the AID of the NAA whose AKA "
+                        "parameters this PE is mapped onto, or drop the field "
+                        "to declare standalone AKA parameters."
+                    ),
+                    evidence={
+                        "mappingSource": normalized,
+                        "known_naa_aids": sorted(known_aids),
+                    },
+                )
+
+    def _collect_naa_instance_aids(self) -> set[str]:
+        """Gather every NAA instance AID present in the current document.
+
+        Walks the decoded ``sections`` map for USIM / ISIM / CSIM / SSIM
+        PEs and pulls the AID out of their ADF FCP (``dfName``) or the
+        ``aid`` field on the PE root, whichever the profile carries.
+        """
+        sections = self._sections_cache if isinstance(self._sections_cache, dict) else {}
+        out: set[str] = set()
+        for section_key, payload in sections.items():
+            base = self._base_type_from_key(section_key)
+            if base not in ("usim", "isim", "csim", "ssim"):
+                continue
+            if not isinstance(payload, dict):
+                continue
+            for candidate_field in ("dfName", "aid"):
+                hex_value = self._aka_extract_hex(payload.get(candidate_field))
+                if hex_value and self._looks_like_hex(hex_value):
+                    out.add(hex_value.upper())
+            adf = payload.get("adf")
+            if isinstance(adf, dict):
+                for candidate_field in ("dfName", "aid"):
+                    hex_value = self._aka_extract_hex(adf.get(candidate_field))
+                    if hex_value and self._looks_like_hex(hex_value):
+                        out.add(hex_value.upper())
+        return out
+
+    # 3GPP2 C.S0023 CDMA authentication material widths used as a sanity
+    # heuristic. A-Key is 64-bit (8 B); SSD is 128-bit (16 B, packed
+    # SSD_A || SSD_B). The remaining HRPD / Simple-IP / Mobile-IP
+    # credentials are vendor-shaped and only get a non-empty check.
+    _CDMA_FIXED_BYTE_LENGTHS: dict[str, int] = {
+        "authenticationKey": 8,
+        "ssd": 16,
+    }
+
+    def _check_cdma_parameter_encoding(self, sections: dict[str, Any]) -> None:
+        """YRL-CDMA-001/-002: PE-CDMAParameter material sanity checks.
+
+        - ``YRL-CDMA-001`` (FAIL): ``authenticationKey`` (CAVE A-Key) must
+          be 8 bytes per 3GPP2 C.S0023 §3.4. ``ssd`` (SSD_A||SSD_B) must
+          be 16 bytes.
+        - ``YRL-CDMA-002`` (WARN): the HRPD / Simple-IP / Mobile-IP
+          authentication-data fields must be present and non-empty when
+          the CDMA capability is declared.
+        """
+        for section_key, payload in sections.items():
+            if self._base_type_from_key(section_key) != "cdmaParameter":
+                continue
+            if isinstance(payload, dict) is False:
+                continue
+            for field_name, expected_bytes in self._CDMA_FIXED_BYTE_LENGTHS.items():
+                hex_value = self._aka_extract_hex(payload.get(field_name))
+                if hex_value is None or self._looks_like_hex(hex_value) is False:
+                    continue
+                actual = len(hex_value) // 2
+                if actual == expected_bytes:
+                    continue
+                self._add(
+                    code="YRL-CDMA-001",
+                    severity="FAIL",
+                    spec="3GPP2 C.S0023 §3.4",
+                    path=f"{section_key}.{field_name}",
+                    message=(
+                        f"CDMA {field_name} is {actual} B; CAVE specifies "
+                        f"{expected_bytes} B."
+                    ),
+                    recommendation=(
+                        f"Re-encode {field_name} as exactly {expected_bytes} bytes."
+                    ),
+                    evidence={"field": field_name, "actual_bytes": actual, "expected_bytes": expected_bytes},
+                )
+            for field_name in (
+                "hrpdAccessAuthenticationData",
+                "simpleIPAuthenticationData",
+                "mobileIPAuthenticationData",
+            ):
+                if field_name not in payload:
+                    continue
+                hex_value = self._aka_extract_hex(payload.get(field_name))
+                if hex_value is None or len(hex_value) == 0:
+                    self._add(
+                        code="YRL-CDMA-002",
+                        severity="WARN",
+                        spec="3GPP2 C.S0023 / GSMA SAIP Annex D",
+                        path=f"{section_key}.{field_name}",
+                        message=(
+                            f"CDMA {field_name} is declared but empty; "
+                            "the field will not personalise the CSIM."
+                        ),
+                        recommendation=(
+                            f"Drop {field_name} from the PE or populate it with "
+                            "the operator-supplied credentials."
+                        ),
+                    )
+
+    # PE-SSIM-EAPTLSParameters required cert / key fields. The TCA PP TS
+    # NAA chapter (covering SSIM EAP-TLS personalisation per RFC 9190 /
+    # RFC 9048) declares the SSIM certificate, the TLS server root CA,
+    # and the SSIM private key as mandatory. The optional intermediate
+    # chain is not validated for presence here.
+    _SSIM_EAPTLS_REQUIRED_FIELDS: tuple[str, ...] = (
+        "ssimTLSCert",
+        "ssimTLSPrivateKey",
+        "serverRootCACert",
+    )
+
+    def _check_ssim_eaptls_parameters(self, sections: dict[str, Any]) -> None:
+        """YRL-SSIM-001/-002: PE-SSIM-EAPTLSParameters cert / key presence.
+
+        - ``YRL-SSIM-001`` (FAIL): required cert / key field missing.
+        - ``YRL-SSIM-002`` (FAIL): required cert / key field empty.
+        """
+        for section_key, payload in sections.items():
+            if self._base_type_from_key(section_key) != "ssim-EAPTLSParameters":
+                continue
+            if isinstance(payload, dict) is False:
+                continue
+            for field_name in self._SSIM_EAPTLS_REQUIRED_FIELDS:
+                if field_name not in payload:
+                    self._add(
+                        code="YRL-SSIM-001",
+                        severity="FAIL",
+                        spec="TCA PP TS PE-SSIM-EAPTLSParameters / RFC 9190",
+                        path=f"{section_key}.{field_name}",
+                        message=(
+                            f"SSIM-EAPTLSParameters is missing required field {field_name}."
+                        ),
+                        recommendation=(
+                            f"Populate {field_name} with the operator-supplied "
+                            "PEM / DER material."
+                        ),
+                    )
+                    continue
+                hex_value = self._aka_extract_hex(payload.get(field_name))
+                if hex_value is None or len(hex_value) == 0:
+                    self._add(
+                        code="YRL-SSIM-002",
+                        severity="FAIL",
+                        spec="TCA PP TS PE-SSIM-EAPTLSParameters / RFC 9190",
+                        path=f"{section_key}.{field_name}",
+                        message=(
+                            f"SSIM-EAPTLSParameters {field_name} is declared but empty."
+                        ),
+                        recommendation=(
+                            f"Populate {field_name} with the corresponding cert / key bytes."
+                        ),
                     )
 
     def _check_pin_puk_encoding(self, sections: dict[str, Any]) -> None:
@@ -4066,6 +5087,36 @@ class SaipProfileLinter:
 
             path_base = f"{section_key}.{label.lower()}Codes[{idx}]"
 
+            # YRL-PIN-007: keyReference must lie in ETSI TS 102 221 §9.5
+            # Table 9.3. Global PINs use 0x01..0x08 (PIN1 / PIN2 / ADM keys);
+            # local / application-specific PINs use 0x81..0x88 (USIM PIN /
+            # USIM PIN2 / ...). The unblocking key for a local PIN sits at
+            # the matching 0x80-bit position (e.g. 0x81 unblocked by 0x81
+            # PUK via the unblockingPINReference cross-reference). Values
+            # outside these two windows cannot be referenced by the VERIFY
+            # PIN / CHANGE PIN / UNBLOCK PIN APDUs.
+            key_ref = rec.get("keyReference")
+            if isinstance(key_ref, int):
+                in_global_range = 0x01 <= key_ref <= 0x08
+                in_local_range = 0x81 <= key_ref <= 0x88
+                if not (in_global_range or in_local_range):
+                    self._add(
+                        code="YRL-PIN-007",
+                        severity="FAIL",
+                        spec="ETSI TS 102 221 §9.5 Table 9.3",
+                        path=f"{path_base}.keyReference",
+                        message=(
+                            f"{label} slot {idx}: keyReference=0x{key_ref:02X} "
+                            "is outside the valid PIN key-reference ranges "
+                            "(global 0x01..0x08, local 0x81..0x88)."
+                        ),
+                        recommendation=(
+                            "Use 0x01 for the global PIN1, 0x02..0x08 for ADM / PIN2, "
+                            "or 0x81..0x88 for application-local PINs (USIM PIN / PIN2)."
+                        ),
+                        evidence={"keyReference": f"0x{key_ref:02X}"},
+                    )
+
             # Packed retry byte
             retry_raw = rec.get("maxNumOfAttemps-retryNumLeft")
             if retry_raw is None:
@@ -4104,6 +5155,27 @@ class SaipProfileLinter:
                                 "remaining = max at personalisation.",
                             evidence={"packed_byte": hex(n), "max_att": max_att, "remaining": remaining},
                         )
+                    elif remaining == 0:
+                        # TCA PIN-006: remaining attempts of 0 ships the PIN /
+                        # PUK in a locked state — the card returns 6983 on the
+                        # very first attempt, which is almost never the
+                        # operator's intent.
+                        self._add(
+                            code="YRL-PIN-006",
+                            severity="WARN",
+                            spec="TCA PP TS PIN-006",
+                            path=f"{path_base}.maxNumOfAttemps-retryNumLeft",
+                            message=(
+                                f"{label} slot {idx}: remaining-attempts nibble is 0 "
+                                f"(packed byte 0x{n:02X}); profile ships the {label} "
+                                "blocked at personalisation."
+                            ),
+                            recommendation=(
+                                "Set the remaining-attempts nibble equal to the "
+                                f"max-attempts nibble (e.g. 0x{max_att:X}{max_att:X})."
+                            ),
+                            evidence={"packed_byte": hex(n), "max_att": max_att, "remaining": remaining},
+                        )
 
             # PIN / PUK value length — must be exactly 8 bytes (SGP.22 §B.2)
             val_raw = rec.get(value_field)
@@ -4136,6 +5208,170 @@ class SaipProfileLinter:
                             ),
                             evidence={"byte_length": byte_len},
                         )
+
+    def _check_pin_puk_cross_references(self, sections: dict[str, Any]) -> None:
+        """YRL-PIN-005: PIN unblockingPINReference must resolve to a PUK keyReference.
+
+        TCA PP TS PIN-007 mandates that every ``unblockingPINReference``
+        present in any PE-PINCodes entry name a PIN slot that is itself
+        defined in a PE-PUKCodes block. A dangling reference produces a
+        card that cannot be unblocked once the PIN attempts counter hits
+        zero — operationally indistinguishable from a hard-locked card.
+        """
+        puk_key_refs: set[int] = set()
+        pin_unblock_refs: list[tuple[str, int]] = []
+
+        for section_key, payload in sections.items():
+            base_type = self._base_type_from_key(section_key)
+            if base_type == "pukCodes":
+                if not isinstance(payload, dict):
+                    continue
+                raw = payload.get("pukCodes")
+                entries = raw if isinstance(raw, list) else []
+                for entry in entries:
+                    rec = entry
+                    if isinstance(entry, dict) and "@" in entry:
+                        tpl = entry["@"]
+                        if isinstance(tpl, list) and len(tpl) >= 2:
+                            rec = tpl[1]
+                    if isinstance(rec, dict) is False:
+                        continue
+                    key_ref = rec.get("keyReference")
+                    if isinstance(key_ref, int):
+                        puk_key_refs.add(key_ref)
+            elif base_type == "pinCodes":
+                if not isinstance(payload, dict):
+                    continue
+                raw = payload.get("pinCodes")
+                entries: list[Any] = []
+                if isinstance(raw, dict):
+                    inner = raw.get("@", raw.get("__ygg_saip_tuple__"))
+                    if isinstance(inner, list) and len(inner) >= 2:
+                        entries = inner[1] if isinstance(inner[1], list) else []
+                elif isinstance(raw, list):
+                    entries = raw
+                for idx, entry in enumerate(entries):
+                    rec = entry
+                    if isinstance(entry, dict) and "@" in entry:
+                        tpl = entry["@"]
+                        if isinstance(tpl, list) and len(tpl) >= 2:
+                            rec = tpl[1]
+                    if isinstance(rec, dict) is False:
+                        continue
+                    unblock = rec.get("unblockingPINReference")
+                    if isinstance(unblock, int):
+                        pin_unblock_refs.append(
+                            (f"{section_key}.pinCodes[{idx}]", unblock)
+                        )
+
+        for path_base, ref in pin_unblock_refs:
+            if ref in puk_key_refs:
+                continue
+            self._add(
+                code="YRL-PIN-005",
+                severity="FAIL",
+                spec="TCA PP TS PIN-007",
+                path=f"{path_base}.unblockingPINReference",
+                message=(
+                    f"unblockingPINReference={ref} has no matching PUK keyReference."
+                ),
+                recommendation=(
+                    "Define a PE-PUKCodes entry with keyReference={ref}, or remove "
+                    "the unblockingPINReference field from this PIN slot."
+                ).format(ref=ref),
+                evidence={
+                    "unblockingPINReference": ref,
+                    "puk_keyReferences": sorted(puk_key_refs),
+                },
+            )
+
+    def _check_naa_presence(self, sections: dict[str, Any]) -> None:
+        """YRL-PID-003: profile must declare at least one NAA.
+
+        A profile package with no USIM / CSIM / ISIM / SSIM PE personalises
+        nothing that an MNO can use as a subscription. The Trusted
+        Connectivity Alliance Profile Package Technical Specification
+        (TCA PP TS §4.4) defines PE-USIM / PE-CSIM / PE-ISIM / PE-SSIM
+        and GSMA TS.48 §6 requires the resulting profile to carry the
+        relevant NAA application. Profiles that only contain MF +
+        TELECOM are usually templates and should be flagged as not
+        shippable.
+        """
+        naa_types = ("usim", "csim", "isim", "ssim")
+        has_naa = False
+        for key_text in sections.keys():
+            if self._base_type_from_key(key_text) in naa_types:
+                has_naa = True
+                break
+        if has_naa:
+            return
+        self._add(
+            code="YRL-PID-003",
+            severity="WARN",
+            spec="TCA PP TS §4.4 / GSMA TS.48 §6",
+            path="profile",
+            message="Profile package declares no NAA (USIM / CSIM / ISIM / SSIM).",
+            recommendation=(
+                "Add at least one NAA PE; an NAA-free profile is normally a template "
+                "fragment and not deployable as-is."
+            ),
+        )
+
+    def _check_naa_has_aka_parameter(self, sections: dict[str, Any]) -> None:
+        """YRL-NAA-005: every NAA needs a set of AKA parameters.
+
+        TCA PP TS §4.4.1 (PE-AKAParameter) binds the AKA algorithm
+        configuration — required by 3GPP TS 33.102 §6.3 for USIM /
+        ISIM access — to its parent NAA PE. SSIM may instead carry
+        ``SSIM-EAPTLSParameters`` per the TCA PP TS NAA rules covering
+        EAP-TLS authentication (RFC 9190 / RFC 9048).
+        """
+        aka_count = 0
+        ssim_eaptls_count = 0
+        naa_keys: list[tuple[str, str]] = []
+        for key_text, _ in sections.items():
+            base_type = self._base_type_from_key(key_text)
+            if base_type in ("usim", "csim", "isim", "ssim"):
+                naa_keys.append((key_text, base_type))
+            elif base_type == "akaParameter":
+                aka_count += 1
+            elif base_type == "ssim-EAPTLSParameters":
+                ssim_eaptls_count += 1
+
+        if len(naa_keys) == 0:
+            return
+        # Aggregate availability: count both akaParameter and EAP-TLS for SSIM.
+        for key_text, base_type in naa_keys:
+            if base_type == "ssim":
+                if aka_count == 0 and ssim_eaptls_count == 0:
+                    self._add(
+                        code="YRL-NAA-005",
+                        severity="WARN",
+                        spec="TCA PP TS §4.4.1 / 3GPP TS 33.102 §6.3",
+                        path=key_text,
+                        message=(
+                            f"SSIM PE declared without an akaParameter or "
+                            "SSIM-EAPTLSParameters PE."
+                        ),
+                        recommendation=(
+                            "Add an akaParameter PE or SSIM-EAPTLSParameters PE for the SSIM."
+                        ),
+                    )
+                continue
+            if aka_count == 0:
+                self._add(
+                    code="YRL-NAA-005",
+                    severity="WARN",
+                    spec="TCA PP TS §4.4.1 / 3GPP TS 33.102 §6.3",
+                    path=key_text,
+                    message=(
+                        f"NAA '{base_type}' declared without any akaParameter PE."
+                    ),
+                    recommendation=(
+                        "Add an akaParameter PE (or a shared-mapping akaParameter) "
+                        "for this NAA."
+                    ),
+                )
 
     def _check_arr_references(self, file_definitions: list[FileDefinition]) -> None:
         """YRL-ARR-001/002: securityAttributesReferenced rule-index vs EF.ARR record count.

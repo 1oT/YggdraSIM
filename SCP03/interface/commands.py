@@ -69,9 +69,29 @@ class CommandRegistry :
         'GET-DATA':(lambda :ShellInteractiveWizards .run_get_data_wizard (shell ),""),
 
 
+        'INSTALL':(shell ._handle_install_one_shot ,"<cap/ijc> <INSTALL-for-install APDU>"),
+        'INSTALL-CAP':(shell ._handle_install_file ,"<cap/ijc> [--privs HEX] [--params HEX] [--applet AID] [--module AID]"),
+        'INSTALL-FILE':(shell ._handle_install_file ,"<cap/ijc> [Priv] [Params] [AppletAID] [ModuleAID]"),
+        'INSTALL-INSTALL':(shell ._handle_install_file ,"<cap/ijc> [--privs HEX] [--params HEX]"),
+        'LOAD':(shell ._handle_load_cap ,"<cap/ijc>"),
+        'LOAD-CAP':(shell ._handle_load_cap ,"<cap/ijc>"),
+        'INSTALL-LOAD':(shell ._handle_install_load ,"<LoadFileAID> [SecurityDomainAID] [LoadFileHash] [Params] [Token]"),
+        'INSTALL-FOR-LOAD':(shell ._handle_install_load ,"<LoadFileAID> [SecurityDomainAID] [LoadFileHash] [Params] [Token]"),
+        'INSTALL-APP':(shell ._handle_install_app ,"<PkgAID> <AppAID> [ModAID] [Priv] [Params]"),
+        'INSTALL-INSTANCE':(shell ._handle_install_instance ,"<PkgAID> <AppAID> [ModAID] [Priv] [Params]"),
+        'INSTALL-FOR-INSTALL':(shell ._handle_install_instance ,"<PkgAID> <AppAID> [ModAID] [Priv] [Params]"),
+        'MAKE-SELECTABLE':(shell ._handle_install_selectable ,"<AID> [Privileges] [Params] [Token]"),
+        'INSTALL-SELECTABLE':(shell ._handle_install_selectable ,"<AID> [Privileges] [Params] [Token]"),
+        'EXTRADITE':(shell ._handle_install_extradition ,"<App_AID> <SD_AID> [Token]"),
+        'INSTALL-EXTRADITION':(shell ._handle_install_extradition ,"<App_AID> <SD_AID> [Token]"),
+        'REGISTRY-UPDATE':(shell ._handle_install_registry ,"<AID> [Priv] [Params]"),
+        'INSTALL-REGISTRY':(shell ._handle_install_registry ,"<AID> [Priv] [Params]"),
+        'PERSONALIZE':(shell ._handle_install_personalization ,"<AID>"),
+        'INSTALL-PERSONALIZE':(shell ._handle_install_personalization ,"<AID>"),
         'LOCK':(lambda x :shell .gp_ctrl .set_status (x ,0x80 ),"<AID>"),
         'UNLOCK':(lambda x :shell .gp_ctrl .set_status (x ,0x07 ),"<AID>"),
         'DEL':(lambda x :shell .gp_ctrl .delete_object (x ,True ),"<AID>"),
+        'DELETE':(lambda x :shell .gp_ctrl .delete_object (x ,True ),"<AID>"),
         'STORE-DATA':(shell ._handle_store_data ,"<Hex> [P1] [P2]"),
         'PUT-KEY':(lambda :ShellInteractiveWizards .run_put_key_wizard (shell ),""),
         'SET-STATUS':(lambda :ShellInteractiveWizards .run_set_status (shell ),""),
@@ -110,7 +130,6 @@ class CommandRegistry :
 
         'DEBUG':(shell ._toggle_debug ,""),
         'VERBOSE':(shell ._toggle_debug ,""),
-        'DECODE':(shell ._handle_decode ,"<Hex>"),
 
 
         'EXPORT-EUICC':(shell ._handle_export_euicc ,"[OutputPath.yaml]"),
@@ -154,9 +173,28 @@ class CommandRegistry :
         'DEL',
         'SCRIPT',
         'STORE-DATA',
-        'DECODE',
         'DERIVE-OPC',
         'SET-GOLD-PROFILE',
+        'INSTALL',
+        'INSTALL-CAP',
+        'INSTALL-FILE',
+        'INSTALL-INSTALL',
+        'LOAD',
+        'LOAD-CAP',
+        'INSTALL-LOAD',
+        'INSTALL-FOR-LOAD',
+        'INSTALL-APP',
+        'INSTALL-INSTANCE',
+        'INSTALL-FOR-INSTALL',
+        'MAKE-SELECTABLE',
+        'INSTALL-SELECTABLE',
+        'EXTRADITE',
+        'INSTALL-EXTRADITION',
+        'REGISTRY-UPDATE',
+        'INSTALL-REGISTRY',
+        'PERSONALIZE',
+        'INSTALL-PERSONALIZE',
+        'DELETE',
         ]
         args_optional =[
         'REPORT',
@@ -179,4 +217,4 @@ class CommandRegistry :
         'PROFILE-DIFF',
         ]
 
-        return args_required ,args_optional 
+        return args_required ,args_optional

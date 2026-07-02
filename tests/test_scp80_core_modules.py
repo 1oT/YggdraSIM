@@ -1,3 +1,8 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
+import contextlib
+import io
 import sys
 import tempfile
 import types
@@ -126,8 +131,30 @@ class ConfigManagerTests(unittest.TestCase):
             scp80_config.ConfigManager.DEFAULTS["tp_ud_max"],
         )
         self.assertEqual(manager._normalize_value("cntr", "00 00 00 00 0A", strict=True), "000000000A")
+        self.assertEqual(manager._normalize_value("pid", "7f", strict=True), "7F")
+        self.assertEqual(manager._normalize_value("dcs", "f6", strict=True), "F6")
         with self.assertRaisesRegex(ValueError, "spi must be exactly 4 hex chars"):
             manager._normalize_value("spi", "AB", strict=True)
+        with self.assertRaisesRegex(ValueError, "pid must be exactly 2 hex chars"):
+            manager._normalize_value("pid", "1234", strict=True)
+        with self.assertRaisesRegex(ValueError, "kic must be 8, 16, 24, 32 bytes"):
+            manager._normalize_value("kic", "11" * 17, strict=True)
+        self.assertEqual(manager._normalize_value("kid", "11" * 16, strict=True), "11" * 16)
+
+    def test_set_rejects_unknown_keys(self) -> None:
+        manager = self._make_manager()
+
+        with self.assertRaisesRegex(ValueError, "Unknown SCP80 config key: nope"):
+            manager.set("nope", "32")
+
+    def test_set_updates_indicator_slots(self) -> None:
+        manager = self._make_manager()
+
+        manager.set("kic_indicator", "32")
+        manager.set("kid_indicator", "32")
+
+        self.assertEqual(manager.data["kic_indicator"], "32")
+        self.assertEqual(manager.data["kid_indicator"], "32")
 
     def test_bind_iccid_profile_applies_inventory_payload(self) -> None:
         manager = self._make_manager()
@@ -296,6 +323,17 @@ class OtaPacketBuilderTests(unittest.TestCase):
         self.assertEqual(len(plan.apdus), 1)
         self.assertEqual(len(plan.reader_apdus), 1)
         self.assertEqual(plan.payload_hex, "AA" * 10)
+        self.assertIn("02028281060280018B", plan.apdus[0].apdu_hex)
+        self.assertNotIn("820283818B", plan.apdus[0].apdu_hex)
+        self.assertIn("4005811250F341F62222222222222225027000", plan.apdus[0].apdu_hex)
+
+    def test_build_plan_uses_configured_pid_and_dcs(self) -> None:
+        config = DummyBuilderConfig({"payload": "AA" * 10, "pid": "7F", "dcs": "F5"})
+        builder = scp80_builder.OtaPacketBuilder(config)
+
+        plan = builder.build_plan()
+
+        self.assertIn("4005811250F37FF52222222222222225027000", plan.apdus[0].apdu_hex)
 
     def test_build_plan_concatenated_and_build_rejects_single_apdu_api(self) -> None:
         config = DummyBuilderConfig(
@@ -312,6 +350,7 @@ class OtaPacketBuilderTests(unittest.TestCase):
         self.assertTrue(plan.is_concatenated)
         self.assertGreater(len(plan.apdus), 1)
         self.assertEqual(len(plan.reader_apdus), 1)
+        self.assertIn("4005811250F341F6", plan.apdus[0].apdu_hex)
         with self.assertRaisesRegex(ValueError, "concatenated SMS"):
             builder.build()
 
@@ -322,6 +361,8 @@ class TransportTests(unittest.TestCase):
         transport.cfg = DummyBuilderConfig({"transport": transport_mode, "reader_idx": "0"})
         transport.conn = None
         transport.active_protocol = None
+        transport._stk_bootstrap_trace = []
+        transport._stk_bootstrap_trace_printed = False
         return transport
 
     def test_decode_iccid_and_protocol_helpers(self) -> None:
@@ -380,14 +421,113 @@ class TransportTests(unittest.TestCase):
         self.assertEqual(por, b"\xAA\xBB\xCC")
         self.assertEqual(calls, ["8012000001", "00C0000002"])
 
+    def test_decode_por_success_response_packet(self) -> None:
+        por = bytes.fromhex(
+            "D02E810301130082028183050086028001"
+            "8B1D410005811250F341F613"
+            "027100000E0AB00001000000FFFF0000019000"
+        )
+
+        decoded = scp80_transport.Transport.decode_por(por, 0x9130)
+
+        self.assertTrue(decoded["valid"])
+        self.assertEqual(decoded["status_code"], "00")
+        self.assertEqual(decoded["status_meaning"], "PoR OK")
+        self.assertEqual(decoded["tar"], "B00001")
+        self.assertEqual(decoded["cntr"], "000000FFFF")
+        self.assertEqual(decoded["pcntr"], "00")
+        self.assertEqual(decoded["command_count"], 1)
+        self.assertEqual(decoded["command_response"], "9000")
+        self.assertEqual(decoded["command_sw"], "9000")
+        self.assertEqual(decoded["fetch_sw"], "9130")
+
+    def test_decode_por_error_response_packet(self) -> None:
+        por = bytes.fromhex(
+            "D02B810301130082028183050086028001"
+            "8B1A410005811250F341F610"
+            "027100000B0AB0000100000000000002"
+        )
+
+        decoded = scp80_transport.Transport.decode_por(por, "912D")
+
+        self.assertTrue(decoded["valid"])
+        self.assertEqual(decoded["status_code"], "02")
+        self.assertEqual(decoded["status_meaning"], "CNTR low")
+        self.assertEqual(decoded["tar"], "B00001")
+        self.assertEqual(decoded["cntr"], "0000000000")
+        self.assertEqual(decoded["pcntr"], "00")
+        self.assertIsNone(decoded["command_count"])
+        self.assertEqual(decoded["response_data"], "")
+        self.assertEqual(decoded["fetch_sw"], "912D")
+
     def test_send_single_ota_apdu_reports_missing_por_on_plain_9000(self) -> None:
         transport = self._make_transport()
-        transport.transmit = lambda *args, **kwargs: (b"", 0x9000)
+        calls: list[str] = []
+
+        def fake_transmit(apdu_hex: str, **kwargs):
+            del kwargs
+            calls.append(apdu_hex)
+            return b"", 0x9000
+
+        transport.transmit = fake_transmit
 
         result = transport._send_single_ota_apdu("80C2000000")
 
-        self.assertFalse(result["delivered"])
-        self.assertIn("No POR received", str(result["error"]))
+        self.assertTrue(result["delivered"])
+        self.assertIn("No POR returned by card", str(result["error"]))
+        self.assertEqual(calls, ["80C2000000"])
+
+    def test_recv_por_acknowledges_fetched_send_short_message(self) -> None:
+        transport = self._make_transport()
+        calls: list[str] = []
+        send_sms = bytes.fromhex(
+            "D00C"
+            "8103051300"
+            "82028183"
+            "8B0100"
+        )
+
+        def fake_transmit(apdu_hex: str, **kwargs):
+            del kwargs
+            calls.append(apdu_hex)
+            if apdu_hex.startswith("80120000"):
+                return send_sms, 0x9000
+            return b"", 0x9000
+
+        transport.transmit = fake_transmit
+
+        por = transport._recv_por(0x910E)
+
+        self.assertEqual(por, send_sms)
+        self.assertEqual(
+            calls,
+            [
+                "801200000E",
+                "801400000C810305130082028281030100",
+            ],
+        )
+
+    def test_recv_por_does_not_ack_non_sms_proactive_command(self) -> None:
+        transport = self._make_transport()
+        calls: list[str] = []
+        open_channel = bytes.fromhex(
+            "D00C"
+            "8103014003"
+            "82028182"
+            "350101"
+        )
+
+        def fake_transmit(apdu_hex: str, **kwargs):
+            del kwargs
+            calls.append(apdu_hex)
+            return open_channel, 0x9000
+
+        transport.transmit = fake_transmit
+
+        por = transport._recv_por(0x910E)
+
+        self.assertEqual(por, open_channel)
+        self.assertEqual(calls, ["801200000E"])
 
     def test_send_ota_sequence_print_mode_increments_counter(self) -> None:
         transport = self._make_transport(transport_mode="print")
@@ -397,15 +537,125 @@ class TransportTests(unittest.TestCase):
         self.assertTrue(result["delivered"])
         self.assertEqual(transport.cfg.increment_counter_calls, 1)
 
+    def test_stk_bootstrap_closes_fetched_command_with_terminal_response(self) -> None:
+        transport = self._make_transport()
+        calls: list[str] = []
+        display_text = bytes.fromhex(
+            "D00D"
+            "8103010500"
+            "82028182"
+            "8D020441"
+        )
+
+        def fake_transmit(apdu_hex: str, **kwargs):
+            del kwargs
+            calls.append(apdu_hex)
+            if len(calls) == 1:
+                return b"", 0x910F
+            if len(calls) == 2:
+                return display_text, 0x9000
+            return b"", 0x9000
+
+        transport.transmit = fake_transmit
+
+        transport._stk_bootstrap()
+
+        self.assertEqual(
+            calls,
+            [
+                "8010000015FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF00",
+                "801200000F",
+                "801400000C810301050082028281030100",
+            ],
+        )
+        self.assertFalse(transport._stk_bootstrap_trace_printed)
+        self.assertEqual(
+            [entry["label"] for entry in transport._stk_bootstrap_trace],
+            ["TERMINAL PROFILE", "FETCH", "TERMINAL RESPONSE"],
+        )
+
+    def test_verbose_send_replays_silent_stk_bootstrap_trace_once(self) -> None:
+        transport = self._make_transport(transport_mode="reader")
+        transport._stk_bootstrap_trace = [
+            {
+                "label": "TERMINAL PROFILE",
+                "apdu": "8010000001FF",
+                "data": "",
+                "sw": "9000",
+            }
+        ]
+        transport._stk_bootstrap_trace_printed = False
+        transmit_calls: list[str] = []
+
+        def fake_transmit(apdu_hex: str, **kwargs):
+            del kwargs
+            transmit_calls.append(apdu_hex)
+            return b"\x01\x02", 0x9000
+
+        transport._ensure_reader_protocol = lambda apdus, verbose=False: True
+        transport.transmit = fake_transmit
+
+        buffer = io.StringIO()
+        with contextlib.redirect_stdout(buffer):
+            result = transport.send_ota_sequence(["80C2000000"], verbose=True)
+
+        self.assertTrue(result["delivered"])
+        self.assertIn("[STK]", buffer.getvalue())
+        self.assertIn("TERMINAL PROFILE", buffer.getvalue())
+        self.assertTrue(transport._stk_bootstrap_trace_printed)
+        self.assertEqual(transmit_calls, ["80C2000000"])
+
+        buffer = io.StringIO()
+        with contextlib.redirect_stdout(buffer):
+            transport.send_ota_sequence(["80C2000000"], verbose=True)
+
+        self.assertNotIn("[STK]", buffer.getvalue())
+
     def test_send_ota_sequence_reader_mode_reports_protocol_failure(self) -> None:
         transport = self._make_transport(transport_mode="reader")
-        transport._ensure_reader_protocol = lambda apdus: False
+        transport._ensure_reader_protocol = lambda apdus, verbose=False: False
         transport._requires_extended_apdu = lambda apdu_hex: True
 
         result = transport.send_ota_sequence(["AA" * 300])
 
         self.assertFalse(result["delivered"])
         self.assertIn("requires T=1", str(result["error"]))
+
+    def test_send_ota_sequence_does_not_emit_fixed_me_response_after_por(self) -> None:
+        transport = self._make_transport(transport_mode="reader")
+        transmit_calls: list[tuple[str, dict]] = []
+
+        def fake_transmit(apdu_hex: str, **kwargs):
+            transmit_calls.append((apdu_hex, dict(kwargs)))
+            return b"\x01\x02", 0x9000
+
+        transport._ensure_reader_protocol = lambda apdus, verbose=False: True
+        transport.transmit = fake_transmit
+
+        result = transport.send_ota_sequence(["80C2000000"])
+
+        self.assertTrue(result["delivered"])
+        self.assertEqual(result["por"], "0102")
+        self.assertEqual([call[0] for call in transmit_calls], ["80C2000000"])
+        self.assertEqual(transport.cfg.increment_counter_calls, 1)
+
+    def test_send_ota_sequence_surfaces_delivered_segment_warnings(self) -> None:
+        transport = self._make_transport(transport_mode="reader")
+        transmit_calls: list[str] = []
+
+        def fake_transmit(apdu_hex: str, **kwargs):
+            del kwargs
+            transmit_calls.append(apdu_hex)
+            return b"", 0x9000
+
+        transport._ensure_reader_protocol = lambda apdus, verbose=False: True
+        transport.transmit = fake_transmit
+
+        result = transport.send_ota_sequence(["80C2000000"])
+
+        self.assertTrue(result["delivered"])
+        self.assertIn("No POR returned", str(result["error"]))
+        self.assertEqual(transmit_calls, ["80C2000000"])
 
 
 if __name__ == "__main__":

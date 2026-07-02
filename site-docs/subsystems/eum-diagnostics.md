@@ -7,6 +7,11 @@ tags:
   - saip
   - wireshark
 ---
+<!--
+SPDX-License-Identifier: GPL-3.0-or-later
+Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+-->
+
 
 # EUM Diagnostics "God-Mode"
 
@@ -56,7 +61,7 @@ launches `tshark` with the Lua dissector attached to the capture.
 
 ```bash
 yggdrasim-eum-diag inject-keys \
-    --iccid 89000012345678901234 \
+    --iccid 89880012345678901234 \
     --shs-enc <32 hex chars> \
     --shs-mac <32 hex chars> \
     --dek     <32 hex chars> \
@@ -71,7 +76,7 @@ and just needs the key file to be created.
 
 ```bash
 yggdrasim-eum-diag store-keys \
-    --iccid 89000012345678901234 \
+    --iccid 89880012345678901234 \
     --shs-enc ... --shs-mac ... \
     --keys-out /tmp/session-keys.json
 ```
@@ -92,8 +97,8 @@ yggdrasim-eum-diag decode-bpp --bpp /path/to/bpp.bin
 {
     "format": "yggdrasim-eum-session-keys/v1",
     "entries": {
-        "89000012345678901234": {
-            "iccid": "89000012345678901234",
+        "89880012345678901234": {
+            "iccid": "89880012345678901234",
             "shs_enc_hex": "...",
             "shs_mac_hex": "...",
             "dek_hex": "...",

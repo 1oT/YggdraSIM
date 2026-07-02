@@ -1,9 +1,13 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 """Regression tests for ``Tools.ProfilePackage.saip_diff_loader``.
 
 The loader is the entry point used by both the SAIP shell ``DIFF``
 command and the diff TUI. It needs to accept exactly the same inputs
 the inspector accepts via ``OPEN`` / ``USE``: transcode JSON, simulator
-manifest JSON, raw DER, and hex-dump ``*.txt`` / ``*.hex`` profiles.
+manifest JSON, raw DER, and hex-dump ``*.txt`` / ``*.hex`` / ``*.varder``
+profiles.
 The hex branch is the one that motivated this test module — the
 shell previously reported ``"not recognised as transcode JSON ... and
 DER decode failed"`` for hex-text inputs because the loader fed ASCII
@@ -167,6 +171,15 @@ class LoadHexTextProfileTests(_LoaderFixture):
         self.assertEqual(loaded.shape, "saip-hex")
         self.assertEqual(observed, [bytes.fromhex(self._DER_HEX)])
 
+    def test_varder_extension_routes_through_hex_branch_and_strips_bom(self) -> None:
+        path = self.workspace_root / "profile.varder"
+        path.write_text(self._DER_HEX, encoding="utf-8-sig")
+        fake_decode, observed = self._stub_der_decode()
+        with patch.object(loader_module, "_decode_der_bytes", fake_decode):
+            loaded = load_profile_document(path, workspace_root=self.workspace_root)
+        self.assertEqual(loaded.shape, "saip-hex")
+        self.assertEqual(observed, [bytes.fromhex(self._DER_HEX)])
+
     def test_extensionless_ascii_hex_is_sniffed(self) -> None:
         path = self.workspace_root / "profile_dump"
         path.write_text(self._DER_HEX, encoding="utf-8")
@@ -220,7 +233,7 @@ class LoadProfileDocumentRoutingTests(_LoaderFixture):
     def test_transcode_json_is_routed_unchanged(self) -> None:
         payload = {
             "intro": ["round-trip canonical"],
-            "sections": {"profileHeader": {"iccid": "8910300000046631124"}},
+            "sections": {"profileHeader": {"iccid": "8988300000046631124"}},
         }
         path = self.workspace_root / "profile.json"
         path.write_text(json.dumps(payload), encoding="utf-8")
@@ -231,7 +244,7 @@ class LoadProfileDocumentRoutingTests(_LoaderFixture):
     def test_simulator_manifest_is_routed_unchanged(self) -> None:
         payload = {
             "profile_name": "demo-profile",
-            "iccid": "8910300000046631124",
+            "iccid": "8988300000046631124",
             "imsi": "001010000004663",
             "nodes": [],
         }

@@ -1,3 +1,8 @@
+<!--
+SPDX-License-Identifier: GPL-3.0-or-later
+Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+-->
+
 # SAIP Templates and Tokens
 
 This guide describes how YggdraSIM authors placeholder-bearing SAIP
@@ -35,7 +40,7 @@ Token definitions live in a sibling metadata key:
 
 ```json
 "__ygg_token_defs__": {
-  "ICCID": "8988201234567890123",
+  "ICCID": "89881111111111111112",
   "IMSI": { "pattern_hex": "FF", "byte_len": 8 }
 }
 ```
@@ -104,6 +109,53 @@ TOKENS APPLY template_without_defs.json my_template.tokens.json
 
 The command refuses to overwrite an existing non-empty
 `__ygg_token_defs__` block, protecting against accidental merges.
+
+### 3b. Round-trip with personalisation-data CSV files
+
+Personalisation data shipped from third-party issuance tooling is
+commonly distributed as a plain two-column CSV — the convention used
+across the TCA SAIP ecosystem. One line per variable, `name,hex`, with
+`#`-prefixed comment lines separating independent personalisation-data
+sets when multiple profile packages share a single file. YggdraSIM
+round-trips between the JSON sidecar and this CSV via:
+
+```
+EXPORT-TOKENS-CSV my_template.json my_template.csv
+IMPORT-TOKENS-CSV personalisation.csv personalisation.tokens.json
+```
+
+Multi-block CSV input produces `personalisation_1.tokens.json`,
+`personalisation_2.tokens.json`, ... — one sidecar per CSV block — so
+each set can be fed to `APPLY-TOKENS` independently. Pattern-only token
+definitions (defs that carry only `pattern_hex` / `byte_len`) are
+silently skipped on export, because the CSV format has no column shape
+for placeholder patterns.
+
+### 3c. Transformation functions inside hex templates
+
+Both placeholder styles accept a transformation-function form:
+
+```
+[Func(NAME)]    bracket style
+{Func(NAME)}    brace style
+[#Func(NAME)]   companion that emits the BER-TLV length of Func(NAME)
+```
+
+Two functions are bundled:
+
+- `SwapNibbles(NAME)` — byte-wise nibble swap, mirroring the
+  ETSI TS 102 221 §13.2 (EF.ICCID) and 3GPP TS 31.102 BCD encodings.
+  Example: token value `8949001304080000016F` expands to
+  `989400314080000010F6`. Useful for feeding nibble-swapped EF.ICCID
+  content from an upright ICCID source.
+- `EncodeEfImsi(NAME)` — wraps an ASCII IMSI (1..15 digits) into the
+  EF.IMSI body per 3GPP TS 31.102 §4.2.2: length byte, then a
+  parity-tagged digit-1 byte (low nibble `0x9` for odd digit counts,
+  `0x1` for even per the spec's bit-4 parity flag), then 7
+  nibble-swapped digit-pair bytes (`F`-padded for odd counts).
+
+These transformations resolve against the same `__ygg_token_defs__`
+table; nothing else in the template surface changes.
 
 ### 4. Edit tokens in-place
 

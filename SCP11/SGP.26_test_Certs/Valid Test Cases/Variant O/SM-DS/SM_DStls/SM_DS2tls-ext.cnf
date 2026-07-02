@@ -8,7 +8,7 @@ subjectKeyIdentifier = hash
 authorityKeyIdentifier = keyid:always,issuer
 
 # RID shall be aligend different to SGP.23 value S_SM_DS_OID (2.999.15): use 2.999.15.2
-# DNS name shall be aligned with SGP.23 value #TEST_DS_ADDRESS1	= testsmds1.gsma.com
+# DNS name shall be aligned with SGP.23 value #TEST_DS_ADDRESS1	= testsmds1.example.com
 subjectAltName =  DNS:testsmds1.example.com, RID:2.999.15.2
 
 crlDistributionPoints=URI:http://ci.test.example.com/CRL-1.crl, URI:http://ci.test.example.com/CRL-2.crl

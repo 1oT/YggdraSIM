@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 """Regression coverage for SAIP / TCA Profile Interoperability §8.3.5
 explicit ``Fcp.linkPath`` aliases.
 
@@ -70,7 +73,7 @@ from SIMCARD.state import (
 )
 
 
-_BPP_PATH = Path("Workspace/LocalSMDPP/profile/89103000000466311335_test.txt")
+_BPP_PATH = Path("Workspace/LocalSMDPP/profile/89880000000466311335_test.txt")
 
 
 def _walk_efs(state, root_node_id: str):
@@ -168,8 +171,8 @@ class _LinkRuntimeFixture(unittest.TestCase):
     def _build_state(self) -> SimCardState:
         state = SimCardState(
             atr=DEFAULT_SIM_ATR,
-            eid="89000000000000000000000000000000",
-            iccid="89000000000000000000",
+            eid="89049032000000000000000000000000",
+            iccid="89880000000000000000",
             imsi="001010000000001",
             default_dp_address="rsp.example.com",
             root_ci_pkid=b"\x00" * 20,

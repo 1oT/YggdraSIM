@@ -1,3 +1,8 @@
+<!--
+SPDX-License-Identifier: GPL-3.0-or-later
+Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+-->
+
 # Local profile metadata
 
 This folder contains JSON files used to build metadata ASN.1 payloads at runtime.

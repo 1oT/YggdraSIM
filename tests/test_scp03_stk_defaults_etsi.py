@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 """ETSI TS 102 223 default-encoding conformance for STK state.
 
 Locks the byte layout of the simulator-side and controller-side
@@ -59,10 +62,10 @@ class LocationInformationEncodingTests(unittest.TestCase):
     """3GPP TS 24.008 §10.5.1.3 PLMN encoding inside §8.19 layout."""
 
     def test_gsm_2digit_mnc_emits_seven_bytes(self) -> None:
-        encoded = _encode_location_information_gsm("262", "01", 0x0001, 0x0001)
+        encoded = _encode_location_information_gsm("001", "01", 0x0001, 0x0001)
         self.assertEqual(len(encoded), 7)
-        # MCC=262, MNC=01 (Telekom DE) → packed BCD 62 F2 10
-        self.assertEqual(encoded[:3], bytes.fromhex("62F210"))
+        # 3GPP TS 23.003 §2.2 test PLMN MCC=001 MNC=01 → packed BCD 00 F1 10
+        self.assertEqual(encoded[:3], bytes.fromhex("00F110"))
         self.assertEqual(encoded[3:5], b"\x00\x01")
         self.assertEqual(encoded[5:], b"\x00\x01")
 

@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 """Twenty-seventh-pass gap-coverage suite.
 
 Round-27 closes a real spec-correctness bug introduced in

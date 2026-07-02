@@ -1,0 +1,382 @@
+/*
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+ */
+
+/* Bottom log dock (G-1) ------------------------------------------------- */
+
+.log-dock {
+  grid-area: logdock;
+  background: var(--bg-elev);
+  border-top: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  min-height: 0;
+}
+
+.app-shell[data-log-collapsed="true"] .log-dock-body {
+  display: none;
+}
+
+.log-dock-resize-handle {
+  flex: 0 0 7px;
+  position: relative;
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+  cursor: ns-resize;
+  touch-action: none;
+  outline: none;
+}
+
+.log-dock-resize-handle::before {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 42px;
+  height: 2px;
+  border-radius: var(--radius-pill, 999px);
+  background: var(--border-strong, rgba(216, 222, 233, 0.28));
+  opacity: 0.72;
+  transform: translate(-50%, -50%);
+  transition: background-color var(--transition-fast),
+    opacity var(--transition-fast),
+    width var(--transition-fast);
+}
+
+.log-dock-resize-handle:hover::before,
+.log-dock-resize-handle:focus-visible::before,
+.log-dock-resize-handle.is-dragging::before {
+  width: 58px;
+  background: var(--accent);
+  opacity: 1;
+}
+
+.log-dock-resize-handle:focus-visible {
+  box-shadow: inset 0 0 0 2px var(--accent);
+}
+
+.app-shell[data-log-collapsed="true"] .log-dock-resize-handle {
+  display: none;
+}
+
+body.log-dock-resizing {
+  cursor: ns-resize;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+body.log-dock-resizing * {
+  cursor: ns-resize !important;
+}
+
+.log-dock-tabs {
+  display: flex;
+  align-items: stretch;
+  gap: 0;
+  flex: 0 0 28px;
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+  overflow-x: auto;
+}
+
+.log-dock-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 12px;
+  border: none;
+  background: transparent;
+  color: var(--fg-dim);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  font-family: inherit;
+  transition: color var(--transition-fast),
+    border-bottom-color var(--transition-fast),
+    background-color var(--transition-fast);
+}
+
+.log-dock-tab:hover {
+  background: var(--bg-hover);
+  color: var(--fg);
+}
+
+.log-dock-tab.is-active {
+  color: var(--fg);
+  border-bottom-color: var(--accent);
+  background: var(--bg-elev);
+}
+
+.log-dock-tab-label {
+  font-weight: 600;
+}
+
+.log-dock-tab-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  padding: 0 5px;
+  height: 16px;
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  border-radius: var(--radius-pill, 999px);
+  background: var(--bg);
+  color: var(--fg-dim);
+  border: 1px solid var(--border);
+}
+
+.log-dock-tab.has-items .log-dock-tab-count {
+  color: var(--fg);
+  background: var(--accent-soft);
+  border-color: var(--accent-soft);
+}
+
+.log-dock-tab[data-log-tab="errors"].has-items .log-dock-tab-count {
+  background: color-mix(in oklab, var(--fail, #ef4444) 30%, transparent);
+  border-color: color-mix(in oklab, var(--fail, #ef4444) 40%, transparent);
+  color: var(--fail, #ef4444);
+}
+
+.log-dock-tab[data-log-tab="warnings"].has-items .log-dock-tab-count {
+  background: color-mix(in oklab, var(--warn, #f59e0b) 30%, transparent);
+  border-color: color-mix(in oklab, var(--warn, #f59e0b) 40%, transparent);
+  color: var(--warn, #f59e0b);
+}
+
+.log-dock-tab[data-log-tab="validation"].has-items .log-dock-tab-count {
+  background: color-mix(in oklab, var(--accent, #3b82f6) 24%, transparent);
+  border-color: color-mix(in oklab, var(--accent, #3b82f6) 38%, transparent);
+  color: var(--accent, #3b82f6);
+}
+
+.log-dock-tab-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--fg-dim);
+  flex: 0 0 auto;
+}
+
+.log-dock-tab-dot--info  { background: var(--accent, #3b82f6); }
+.log-dock-tab-dot--warn  { background: var(--warn, #f59e0b); }
+.log-dock-tab-dot--error { background: var(--fail, #ef4444); }
+.log-dock-tab-dot--apdu  { background: var(--fg-dim); }
+.log-dock-tab-dot--validation { background: var(--accent, #3b82f6); }
+
+.log-dock-spacer {
+  flex: 1 1 auto;
+}
+
+.log-dock-action {
+  border: none;
+  background: transparent;
+  color: var(--fg-dim);
+  font-size: 11px;
+  padding: 0 10px;
+  cursor: pointer;
+  font-family: inherit;
+  letter-spacing: 0.04em;
+  transition: color var(--transition-fast),
+    background-color var(--transition-fast);
+}
+
+.log-dock-action:hover {
+  color: var(--fg);
+  background: var(--bg-hover);
+}
+
+.log-dock-toggle {
+  padding: 0 12px;
+  font-size: 13px;
+  transition: transform var(--transition-fast),
+    color var(--transition-fast);
+}
+
+.app-shell[data-log-collapsed="true"] .log-dock-toggle {
+  transform: rotate(180deg);
+}
+
+.log-dock-body {
+  flex: 1 1 auto;
+  display: flex;
+  min-height: 0;
+  position: relative;
+}
+
+.log-dock-panel {
+  flex: 1 1 auto;
+  display: none;
+  overflow-y: auto;
+  position: relative;
+  min-height: 0;
+}
+
+.log-dock-panel.is-active {
+  display: flex;
+  flex-direction: column;
+}
+
+.log-dock-panel[data-log-panel="validation"] {
+  overflow: hidden;
+}
+
+.log-dock-rows {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  padding: 4px 0;
+  gap: 0;
+  font-size: 11px;
+  overflow-y: auto;
+  min-height: 0;
+}
+
+.log-dock-rows--mono {
+  font-family: var(--font-mono, "JetBrains Mono", ui-monospace, monospace);
+}
+
+.log-dock-row {
+  position: relative;
+  display: grid;
+  grid-template-columns: 74px 68px minmax(0, 1fr);
+  gap: 10px;
+  align-items: baseline;
+  padding: 2px 14px;
+  line-height: 1.35;
+  border-left: 3px solid transparent;
+  word-break: break-word;
+  /* Default browser behaviour is to allow text selection, but a
+     handful of upstream rules (panel chrome, container `user-select`)
+     can leak in via cascade. Force selectable text on every row so
+     operators can drag-select substrings reliably. */
+  user-select: text;
+  -webkit-user-select: text;
+  cursor: text;
+  outline: none;
+  transition: background-color 140ms ease;
+}
+
+.log-dock-row:hover {
+  background: color-mix(in oklab, var(--bg), var(--accent, #3b82f6) 10%);
+}
+
+.log-dock-row:focus-visible {
+  background: color-mix(in oklab, var(--bg), var(--accent, #3b82f6) 14%);
+  box-shadow: inset 0 0 0 1px var(--accent, #3b82f6);
+}
+
+.log-dock-row.is-copied {
+  background: color-mix(in oklab, var(--bg), var(--ok, #22c55e) 22%);
+  transition: background-color 220ms ease;
+}
+
+.log-dock-row:nth-child(even) {
+  background: color-mix(in oklab, var(--bg), var(--bg-elev) 35%);
+}
+
+.log-dock-row:nth-child(even):hover {
+  background: color-mix(in oklab, var(--bg), var(--accent, #3b82f6) 12%);
+}
+
+.log-dock-row-copy {
+  position: absolute;
+  top: 50%;
+  right: 6px;
+  transform: translateY(-50%);
+  padding: 2px 8px;
+  font-size: 10px;
+  line-height: 1.2;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  background: var(--bg-elev, #2b303b);
+  color: var(--fg, #eceff4);
+  border: 1px solid var(--border-strong, rgba(216, 222, 233, 0.22));
+  border-radius: 4px;
+  cursor: pointer;
+  opacity: 0;
+  pointer-events: none;
+  transition:
+    opacity 140ms ease,
+    background-color 140ms ease,
+    color 140ms ease,
+    border-color 140ms ease;
+  /* The button itself shouldn't be selectable text — it would steal
+     selection clicks meant for the row. Keep cursor pointer to match. */
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.log-dock-row:hover .log-dock-row-copy,
+.log-dock-row:focus-within .log-dock-row-copy,
+.log-dock-row:focus-visible .log-dock-row-copy {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.log-dock-row-copy:hover {
+  background: var(--accent, #3b82f6);
+  color: var(--bg, #1b1f27);
+  border-color: var(--accent, #3b82f6);
+}
+
+.log-dock-row.is-copied .log-dock-row-copy {
+  background: var(--ok, #22c55e);
+  color: var(--bg, #1b1f27);
+  border-color: var(--ok, #22c55e);
+}
+
+.log-dock-action.is-copied {
+  background: var(--ok, #22c55e);
+  color: var(--bg, #1b1f27);
+  border-color: var(--ok, #22c55e);
+  transition: background-color 220ms ease, color 220ms ease;
+}
+
+.log-dock-row--info  { border-left-color: var(--accent, #3b82f6); }
+.log-dock-row--warn  { border-left-color: var(--warn, #f59e0b); }
+.log-dock-row--error { border-left-color: var(--fail, #ef4444); }
+.log-dock-row--apdu  { border-left-color: var(--fg-dim); }
+.log-dock-row--done  { border-left-color: var(--ok, #22c55e); }
+
+.log-dock-row-ts {
+  color: var(--fg-dim);
+  font-variant-numeric: tabular-nums;
+  font-size: 10px;
+}
+
+.log-dock-row-src {
+  color: var(--fg-dim);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.log-dock-row-msg {
+  color: var(--fg);
+  white-space: pre-wrap;
+}
+
+.log-dock-placeholder {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--fg-dim);
+  font-size: 11px;
+  pointer-events: none;
+  font-style: italic;
+  padding: 16px;
+  text-align: center;
+}
+
+.log-dock-placeholder.is-hidden {
+  display: none;
+}

@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """BSP (Bearer-Service Profile) crypto layer: key derivation and AES-CBC+MAC for SCP11 BPP channel protection."""
 from __future__ import annotations

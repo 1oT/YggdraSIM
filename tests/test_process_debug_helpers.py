@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 import io
 import os
 import unittest
@@ -12,6 +15,7 @@ from yggdrasim_common.process_debug import (
     set_global_debug,
     suppress_noisy_crypto_warnings,
 )
+from yggdrasim_common.nord_palette import NORD
 
 
 class DebugPrintGatingTests(unittest.TestCase):
@@ -40,6 +44,15 @@ class DebugPrintGatingTests(unittest.TestCase):
         with mock.patch("sys.stdout", new_callable=io.StringIO) as patched_stdout:
             debug_print("[*] default stream path")
         self.assertEqual(patched_stdout.getvalue(), "[*] default stream path\n")
+
+    def test_debug_print_can_emit_colored_status(self) -> None:
+        env = {GLOBAL_DEBUG_ENV: "1", "YGGDRASIM_FORCE_COLOR": "1"}
+        with mock.patch.dict(os.environ, env, clear=True):
+            buffer = io.StringIO()
+            debug_print("[+] surfaced in debug mode", stream=buffer)
+
+        expected = f"{NORD.GREEN}[+] surfaced in debug mode{NORD.RESET}\n"
+        self.assertEqual(buffer.getvalue(), expected)
 
     def test_debug_print_tolerates_broken_streams(self) -> None:
         set_global_debug(True)

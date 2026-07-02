@@ -1,3 +1,8 @@
+<!--
+SPDX-License-Identifier: GPL-3.0-or-later
+Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+-->
+
 # Configuration and Certificates
 
 Operator guide for every place YggdraSIM consumes operator-owned material:
@@ -32,6 +37,7 @@ read next.
 | your own SCP03 keyset / KVN / AID / ADM PIN                                   | [§ SCP03 keysets and admin parameters](#scp03-keysets-and-admin-parameters)             |
 | OTA / SCP80 secrets keyed per ICCID                                           | [§ SCP80 OTA parameters](#scp80-ota-parameters)                                         |
 | SUCI Profile A / B home-network keys for the simulated USIM                   | [§ SUCI key files](#suci-key-files)                                                     |
+| K / OPc / AMF / SQN / MCC / MNC / RID for a 5G AKA test subscriber *(post-v1 staging)* | [§ YggdraCore subscription material](#yggdracore-subscription-material)                 |
 | ShS-ENC / ShS-MAC / DEK from an EUM database for a failing PCAP               | [§ EUM session-key bundles](#eum-session-key-bundles)                                   |
 | an SCP03 / SCP11c session you want re-decoded from a saved pcap               | [§ HIL pcap keybags](#hil-pcap-keybags)                                                 |
 | an `ADD-EIM` / profile-download trigger JSON package                          | [§ eIM packages and hotfolder](#eim-packages-and-hotfolder)                             |
@@ -243,10 +249,9 @@ before any non-test use.
 2. Production GSMA CI roots must not be dropped here. Use the SGP.26
    Test CI under `Variant O/CI/` for test trust, or your own private
    CI for closed labs.
-3. Keys that must stay outside the filesystem altogether are not
-   handled by this release. Operators with a hardware security module
-   should keep the signing material on the HSM and feed only the
-   resulting signatures into YggdraSIM.
+3. The HSM-backed signer seam (planned, not part of this release) is the
+   future home for keys that must stay outside the filesystem
+   altogether.
 
 ## Simulator personality (ISD-R config)
 
@@ -264,7 +269,7 @@ keyset, see [§ SCP03 keysets and admin parameters](#scp03-keysets-and-admin-par
 
 ```json
 {
-  "eid": "89045967676472615349763031303005",
+  "eid": "89049032123451234512345678901234",
   "atr_hex": "3B9F96801FC78031A073BE21136743200718000001A5",
   "default_dp_address": "rsp.example.com",
   "root_ci_pkid_hex": "F54172BDF98A95D65CBEB88A38A1C11D800A85C3",
@@ -275,7 +280,7 @@ keyset, see [§ SCP03 keysets and admin parameters](#scp03-keysets-and-admin-par
   "scp80_security": { "spi": "1621", "kic": "15", "kid": "15", "tar": "B00000",
                       "key_enc_hex": "...", "key_mac_hex": "..." },
   "configured_data": {
-    "root_smds_address": "lpa.ds.gsma.com",
+    "root_smds_address": "root-smds.example.com",
     "additional_root_smds_addresses": ["smds2.example", "smds3.example"],
     "allowed_ci_pkids_hex":            ["F54172BDF98A95D65CBEB88A38A1C11D800A85C3"],
     "ci_list_hex":                     ["F54172BDF98A95D65CBEB88A38A1C11D800A85C3"]
@@ -287,7 +292,6 @@ keyset, see [§ SCP03 keysets and admin parameters](#scp03-keysets-and-admin-par
     "timer_management_auto_rearm": true,
     "poll_interval_seconds":       60,
     "provide_imei":                true,
-    "ipa_poll": {
       "enabled":             true,
       "eim_fqdn":            "",
       "eim_port":            443,
@@ -296,7 +300,7 @@ keyset, see [§ SCP03 keysets and admin parameters](#scp03-keysets-and-admin-par
       "receive_size":        250,
       "alpha_id":            "",
       "apn":                 "internet.apn",
-      "dns_server":          "8.8.8.8",
+      "dns_server":          "192.0.2.53",
       "request_payload_hex": ""
     }
   }
@@ -307,11 +311,9 @@ keyset, see [§ SCP03 keysets and admin parameters](#scp03-keysets-and-admin-par
 
 1. `eid` is the 32-hex-digit eUICC identifier (TS 23.003 §10). Choose a
    namespace your lab does not collide with. The shipped default
-   `89045967676472615349763031303005` keeps the SGP.02 §2.2.2 telecom MII
-   prefix `89`, decodes to `\x89\x04YggdraSIv0100\x05` in any hex viewer
-   (so `xxd`/Wireshark captures self-document the build), and carries a
-   correct ITU-T E.118 / SGP.22 §4.11.2 Luhn check digit (`5`). Replace
-   it before any production-adjacent run.
+   `89049032123451234512345678901234` uses the SGP.22 Annex A.2 test
+   EID prefix `89049032` and a valid Luhn check digit. Replace it before
+   any production-adjacent run.
 2. `atr_hex` is replayed verbatim by the simulated reader. Match the
    profile under test (a USIM-only card without a NAA selector should
    not advertise EAP-AKA' capability bits).
@@ -332,7 +334,6 @@ keyset, see [§ SCP03 keysets and admin parameters](#scp03-keysets-and-admin-par
      `"off"`. Default `"timer"` arms an ME timer per ETSI TS 102 223
      §6.6.21 (TIMER MANAGEMENT START) so the modem returns a TIMER
      EXPIRATION (D7) envelope on cadence; this is the trigger SGP.32
-     IPA-poll relies on. `"poll_interval"` falls back to the legacy
      §6.6.5 POLL INTERVAL heartbeat. `"both"` queues both proactive
      commands at TERMINAL PROFILE. `"off"` emits no proactive bring-up.
    - `timer_management_seconds` — initial timer value (1..86399 s).
@@ -346,7 +347,6 @@ keyset, see [§ SCP03 keysets and admin parameters](#scp03-keysets-and-admin-par
    - `provide_imei` — when `true` (default) the bootstrap also queues
      a PROVIDE LOCAL INFORMATION (IMEI) proactive command after the
      timer/poll trigger, mirroring real eUICC bring-up.
-   - `ipa_poll` — SGP.32 §3.5 IPA-poll BIP trigger. When enabled
      (default), every TIMER EXPIRATION (`D7`) envelope drives a
      two-leg BIP exchange before the timer re-arms:
      1. **DNS leg** — OPEN CHANNEL UDP_REMOTE → `dns_server:53`,
@@ -357,7 +357,6 @@ keyset, see [§ SCP03 keysets and admin parameters](#scp03-keysets-and-admin-par
         RECEIVE DATA, CLOSE CHANNEL.
 
      The eIM leg is only queued once the DNS leg writes a usable
-     A-record into `toolkit.ipa_poll_resolved_ip`. The cache
      persists across cycles, so steady-state polling skips the
      DNS leg until the operator clears the cache or a new APN
      forces a re-resolve.
@@ -384,13 +383,9 @@ keyset, see [§ SCP03 keysets and admin parameters](#scp03-keysets-and-admin-par
        `"internet.apn"`. Active SAIP profile EF.ACL (`6F57`)
        overrides this when the profile gets enabled (the
        filesystem rebuild copies the first APN into
-       `toolkit.ipa_poll_apn` and sets
-       `toolkit.ipa_poll_apn_source = "bpp"`). The env override
-       `YGGDRASIM_SIM_IPA_POLL_APN` wins when no profile-side APN
        is published.
-     - `dns_server` — IPv4 of the public resolver the IPA targets
-       in the DNS leg. Default `"8.8.8.8"` (Google). Override via
-       env flag `YGGDRASIM_SIM_IPA_POLL_DNS_SERVER` for closed-lab
+     - `dns_server` — IPv4 of the resolver the IPA targets in the
+       DNS leg. Default `"192.0.2.53"`. Override via
        deployments with a captive resolver.
      - `request_payload_hex` — explicit hex-encoded body delivered
        under SEND DATA TLV `36` on the eIM leg. Empty (default)
@@ -411,7 +406,6 @@ keyset, see [§ SCP03 keysets and admin parameters](#scp03-keysets-and-admin-par
    wire bytes for diagnostics; operators tighten the chain by
    populating the eIM identity JSON. Disable the in-card TLS
    path (e.g. when the modem itself terminates TLS) by setting
-   `toolkit.ipa_poll.tls_enabled = false`.
 
 **Verification.**
 
@@ -543,17 +537,22 @@ deleting the `[KEYS]` section once a per-card record exists.
 
 **Per-card primary store.** `state/device_inventory.sqlite3`. Every
 ICCID gets its own SCP80 record (SPI / `kic_indicator` / `kid_indicator`
-/ TAR / `kic` / `kid` / static counter / `cla` / `sender` / SMS sizing)
+/ TAR / `kic` / `kid` / static counter / `cla` / `sender` / `pid` /
+`dcs` / SMS sizing)
 under namespace `iccid/<ICCID>/scp80`. Slot semantics follow ETSI TS
 102 225 §5.1.1: `kic` / `kid` hold the 16-byte ciphering and integrity
 keys; `kic_indicator` / `kid_indicator` hold the 1-byte indicator bytes
-that select algorithm + key index in the Command Packet header. The
+that select algorithm + key index in the Command Packet header. `pid`
+and `dcs` set the SMS TP-PID and TP-DCS bytes in the SMS-PP TPDU. The
 SCP80 admin shell uses lowercase verbs (`iccid`, `set`, `show`, `quit`)
 to manage it:
 
 ```bash
 yggdrasim-scp80 --cmd "iccid <ICCID>; set kic <16-byte-hex>; set kid <16-byte-hex>; set kic_indicator <hex>; set kid_indicator <hex>; show; quit"
 ```
+
+The shell also accepts `kic_identifier` / `kid_identifier` as aliases for
+the indicator bytes.
 
 Pre-rename ini files using `key_enc` / `key_mac` (and `kic` / `kid` for
 the indicator bytes) are auto-migrated on load and rewritten to the
@@ -605,6 +604,61 @@ yggdrasim-suci-tool --cmd "USE keys/operator-alpha.key; STATUS; DUMP; EXIT"
    home-network identity than the SUCI tool's active key, downstream
    verifiers will reject the resulting SUCI.
 
+## YggdraCore subscription material
+
+> **Status: post-v1 staging.** Not part of the v1.0.0 frozen release tag.
+
+**Consumer.** The in-process AUSF / AAnF stubs under `Tools/YggdraCore/`.
+
+**Storage.** Process-local
+([`Tools/YggdraCore/subscription_store.py`](../Tools/YggdraCore/subscription_store.py)).
+There is no on-disk format; subscriber records live for the lifetime of
+the launcher.
+
+**Schema.** `SubscriptionRecord` requires:
+
+| Field               | Type   | Length     | Notes                                                                |
+| ------------------- | ------ | ---------- | -------------------------------------------------------------------- |
+| `supi`              | string | 1..256     | Identifies the subscriber (`imsi-MCCMNCMSIN` form is conventional).  |
+| `k`                 | bytes  | 16         | Subscriber key (TS 35.205).                                          |
+| `opc`               | bytes  | 16         | Operator-variant constant.                                           |
+| `amf`               | bytes  | 2          | Authentication management field.                                     |
+| `sqn`               | bytes  | 6          | Sequence number; bumped per successful authentication.               |
+| `mcc`               | string | 3 digits   | Mobile country code.                                                 |
+| `mnc`               | string | 2..3 digit | Mobile network code.                                                 |
+| `routing_indicator` | string | 1..4 digit | RID for SUCI / SUPI routing (TS 23.003).                             |
+| `akma_enabled`      | bool   | -          | Mirrors the AKMA indication the UDM would send the AUSF.             |
+
+**Seeding from a script.**
+
+```python
+from Tools.YggdraCore.subscription_store import get_default_subscription_store
+
+store = get_default_subscription_store()
+store.upsert(
+    supi="imsi-001010000000001",
+    k=bytes.fromhex("0123456789ABCDEFFEDCBA9876543210"),
+    opc=bytes.fromhex("CD63CB71954A155A5DC83A7BFD11A41C"),
+    amf=b"\x80\x00",
+    sqn=b"\x00\x00\x00\x00\x00\x01",
+    mcc="001",
+    mnc="01",
+    routing_indicator="0",
+    akma_enabled=True,
+)
+```
+
+**Bring-your-own Open5GS.** When `YGGDRASIM_5GCORE_MODE=byo`, the
+[`open5gs_bridge`](../Tools/YggdraCore/open5gs_bridge.py) provisions the
+same record into a real Open5GS subscriber database via `pymongo`. The
+caller selects the Mongo URI and database name through the bridge's
+constructor; no environment file is consulted.
+
+**Custody.** `K` and `OPc` are long-term subscriber secrets. The stub
+keeps them in process memory only; `public_view()` redacts both. When
+moving to the BYO bridge, the destination Mongo database is the
+authoritative store — protect it accordingly.
+
 ## EUM session-key bundles
 
 **Consumer.** `Tools/EumDiag` (the EUM / SM-DP+ diagnostic tool) and
@@ -620,12 +674,12 @@ locates it through `YGGDRASIM_EUM_SESSION_KEYS=<absolute path>`.
 {
   "format": "yggdrasim-eum-session-keys/v1",
   "entries": {
-    "8988201234567890123": {
-      "iccid": "8988201234567890123",
+    "8988000000000000001": {
+      "iccid": "8988000000000000001",
       "shs_enc_hex": "AABBCCDDEEFF00112233445566778899",
       "shs_mac_hex": "00112233445566778899AABBCCDDEEFF",
       "dek_hex":     "0F0E0D0C0B0A09080706050403020100",
-      "comment":     "Operator alpha — failing download 2026-04-12"
+      "comment":     "Example lab download"
     }
   }
 }
@@ -644,7 +698,7 @@ locates it through `YGGDRASIM_EUM_SESSION_KEYS=<absolute path>`.
 
 ```bash
 yggdrasim-eum-diag store-keys \
-    --iccid 8988201234567890123 \
+    --iccid 8988000000000000001 \
     --shs-enc AABBCCDDEEFF00112233445566778899 \
     --shs-mac 00112233445566778899AABBCCDDEEFF \
     --dek 0F0E0D0C0B0A09080706050403020100 \
@@ -729,7 +783,7 @@ fields are:
 | `optional_tags`       | `include`, `tag_hex`, `value_hex` triples for spec-defined optional TLVs.      |
 | `additional_tlvs`     | Same shape as `optional_tags`, used for vendor-specific extensions.            |
 
-**Queueing rules.** The effective hotfolder queue merges fixed poll
+**Queueing rules.** The effective hotfolder queue merges package
 fixtures with any `.json` files under the hotfolder directory, ordered
 by `runtime.queue_id`, then top-level `queue_id`, then
 `runtime.transaction_id_hex`, then numeric filename prefix, then
@@ -737,7 +791,6 @@ lexical fallback. Exposure verbs:
 
 ```text
 HOTFOLDER-LIST [dir]   # preview
-HOTFOLDER-POLL [dir]   # JSON for external harness integration
 HOTFOLDER-FETCH [dir]  # execute the queue
 ```
 
@@ -912,17 +965,19 @@ non-test environment.
    then drop the legacy `ota_config.ini`.
 6. **SUCI keys.** Author per home-network. Never reuse a Profile A / B
    key file across operators.
-7. **EUM session keys.** Author with `yggdrasim-eum-diag store-keys`,
+7. **YggdraCore subscribers.** Provision through `upsert(...)` or the
+   BYO Open5GS bridge. Stub state is intentionally non-persistent. (post-v1 staging — not part of this release.)
+8. **EUM session keys.** Author with `yggdrasim-eum-diag store-keys`,
    chmod 0600, point `YGGDRASIM_EUM_SESSION_KEYS` at the file.
-8. **HIL keybags.** Drop next to the pcap; auto-discovery picks them
+9. **HIL keybags.** Drop next to the pcap; auto-discovery picks them
    up. Delete after use.
-9. **Inventory crypto.** Turn on before any non-test card is bound. A
-   cleanly-encrypted inventory is the difference between a stolen
-   laptop and a stolen lab.
-10. **Plugins.** Disable in attestation builds with
+10. **Inventory crypto.** Turn on before any non-test card is bound. A
+    cleanly-encrypted inventory is the difference between a stolen
+    laptop and a stolen lab.
+11. **Plugins.** Disable in attestation builds with
     `YGGDRASIM_DISALLOW_PLUGINS=1`. Audit every plugin you do load;
     the runtime executes plugin code.
-11. **Workspace seed material.** Treat every committed sample as test
+12. **Workspace seed material.** Treat every committed sample as test
     fixtures. Replace, override, or relocate before non-test use.
 
 ## What lives where (cross-reference)
@@ -935,5 +990,7 @@ non-test environment.
 | Inventory crypto envelope           | [`yggdrasim_common/inventory_crypto.py`](../yggdrasim_common/inventory_crypto.py)           |
 | EUM session-key contract            | [`Tools/EumDiag/session_keys.py`](../Tools/EumDiag/session_keys.py)                         |
 | HIL keybag schema                   | [`Tools/HilBridge/scp_keybag_export.py`](../Tools/HilBridge/scp_keybag_export.py)           |
+| YggdraCore subscriber store *(post-v1 staging)* | [`Tools/YggdraCore/subscription_store.py`](../Tools/YggdraCore/subscription_store.py)       |
 | Runtime root resolution             | [`yggdrasim_common/runtime_paths.py`](../yggdrasim_common/runtime_paths.py)                 |
 | AddEim identity sheet               | [`Workspace/LocalEIM/certs/addeim/SIMULATED_EIM_IDENTITY.md`](../Workspace/LocalEIM/certs/addeim/SIMULATED_EIM_IDENTITY.md) |
+| HSM seam (planned)                  | not part of this release                                          |

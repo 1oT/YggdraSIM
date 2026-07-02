@@ -1,3 +1,8 @@
+<!--
+SPDX-License-Identifier: GPL-3.0-or-later
+Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+-->
+
 # Local-Access RSP Certificate Drop Zone
 
 Drop operator-owned `DPauth` / `DPpb` certificates and matching private

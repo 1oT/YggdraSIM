@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """HIL-Bridge live-decode view: scrollable Rich panel rendering the current decoded APDU tree."""
 from __future__ import annotations
@@ -12,6 +15,7 @@ import time
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
+from xml.etree import ElementTree
 
 DEFAULT_DECODE_RULE = "udp.port==4729,gsmtap"
 SUMMARY_REFRESH_SECONDS = 0.35
@@ -75,9 +79,10 @@ def build_summary_command(
     *,
     tshark_binary: str = "tshark",
     decode_rule: str = DEFAULT_DECODE_RULE,
+    frame_filter: str = "",
 ) -> list[str]:
     """Build the tshark command-line args list for the packet-summary view."""
-    return [
+    command = [
         str(tshark_binary or "tshark"),
         "-r",
         str(capture_path or ""),
@@ -107,9 +112,12 @@ def build_summary_command(
         "_ws.col.Info",
         "-e",
         "udp.payload",
-        "-d",
-        str(decode_rule or DEFAULT_DECODE_RULE),
     ]
+    normalized_filter = str(frame_filter or "").strip()
+    if len(normalized_filter) > 0:
+        command.extend(["-Y", normalized_filter])
+    command.extend(["-d", str(decode_rule or DEFAULT_DECODE_RULE)])
+    return command
 
 
 def build_packet_detail_command(
@@ -149,6 +157,29 @@ def build_packet_hex_command(
         "-r",
         str(capture_path or ""),
         "-x",
+        "-Y",
+        frame_filter,
+        "-d",
+        str(decode_rule or DEFAULT_DECODE_RULE),
+    ]
+
+
+def build_packet_field_range_command(
+    capture_path: str,
+    frame_number: int,
+    *,
+    tshark_binary: str = "tshark",
+    decode_rule: str = DEFAULT_DECODE_RULE,
+) -> list[str]:
+    """Build the tshark command-line args list for selected-frame PDML ranges."""
+    frame_number_int = int(frame_number)
+    frame_filter = f"(frame.number >= {frame_number_int}) and (frame.number < {frame_number_int + 1})"
+    return [
+        str(tshark_binary or "tshark"),
+        "-r",
+        str(capture_path or ""),
+        "-T",
+        "pdml",
         "-Y",
         frame_filter,
         "-d",
@@ -209,6 +240,76 @@ def parse_summary_output(output_text: str) -> list[PacketSummary]:
             )
         )
     return rows
+
+
+def parse_packet_field_ranges(pdml_text: str) -> list[dict[str, object]]:
+    """Parse tshark PDML field byte ranges for Wireshark-style highlighting."""
+    normalized = str(pdml_text or "").strip()
+    if len(normalized) == 0:
+        return []
+    try:
+        root = ElementTree.fromstring(normalized)
+    except ElementTree.ParseError:
+        return []
+
+    ranges: list[dict[str, object]] = []
+
+    def _walk(node: ElementTree.Element, depth: int) -> None:
+        tag = _xml_local_name(node.tag)
+        if tag in {"proto", "field"}:
+            parsed = _pdml_node_range(node, depth)
+            if parsed is not None:
+                ranges.append(parsed)
+            next_depth = depth + 1 if tag == "field" else depth
+        else:
+            next_depth = depth
+        for child in list(node):
+            _walk(child, next_depth)
+
+    _walk(root, 0)
+    ranges.sort(
+        key=lambda item: (
+            int(item.get("start", 0) or 0),
+            int(item.get("size", 0) or 0),
+            str(item.get("name", "") or ""),
+        )
+    )
+    return ranges
+
+
+def _xml_local_name(tag: str) -> str:
+    text = str(tag or "")
+    if "}" in text:
+        return text.rsplit("}", 1)[1]
+    return text
+
+
+def _pdml_node_range(node: ElementTree.Element, depth: int) -> dict[str, object] | None:
+    attrs = dict(node.attrib or {})
+    if str(attrs.get("hide", "")).lower() == "yes":
+        return None
+    try:
+        start = int(str(attrs.get("pos", "")).strip())
+        size = int(str(attrs.get("size", "")).strip())
+    except (TypeError, ValueError):
+        return None
+    if start < 0 or size <= 0:
+        return None
+    name = str(attrs.get("name", "") or "").strip()
+    show = str(attrs.get("show", "") or "").strip()
+    showname = str(attrs.get("showname", "") or "").strip()
+    value = str(attrs.get("value", "") or "").strip()
+    label = showname or (f"{name}: {show}" if name and show else name or show)
+    return {
+        "name": name,
+        "label": label,
+        "show": show,
+        "value": value.upper(),
+        "start": start,
+        "end": start + size,
+        "size": size,
+        "depth": max(0, int(depth or 0)),
+    }
 
 
 def _format_wall_clock_text(epoch_text: str) -> str:
@@ -306,6 +407,7 @@ def read_packet_summaries(
     *,
     tshark_binary: str = "tshark",
     decode_rule: str = DEFAULT_DECODE_RULE,
+    after_frame: int | None = None,
 ) -> tuple[list[PacketSummary], str]:
     """Read packet summaries from the active capture source and return a list of dicts."""
     normalized_path = str(capture_path or "").strip()
@@ -316,11 +418,15 @@ def read_packet_summaries(
         return ([], "")
     if target_path.stat().st_size <= 24:
         return ([], "")
+    frame_filter = ""
+    if after_frame is not None and after_frame > 0:
+        frame_filter = f"frame.number > {int(after_frame)}"
     stdout_text, stderr_text = _run_tshark_text_command(
         build_summary_command(
             normalized_path,
             tshark_binary=tshark_binary,
             decode_rule=decode_rule,
+            frame_filter=frame_filter,
         ),
         capture_path=normalized_path,
     )
@@ -363,6 +469,26 @@ def read_packet_hex(
         ),
         capture_path=capture_path,
     )
+
+
+def read_packet_field_ranges(
+    capture_path: str,
+    frame_number: int,
+    *,
+    tshark_binary: str = "tshark",
+    decode_rule: str = DEFAULT_DECODE_RULE,
+) -> tuple[list[dict[str, object]], str]:
+    """Read selected-frame PDML and return field byte ranges."""
+    stdout_text, stderr_text = _run_tshark_text_command(
+        build_packet_field_range_command(
+            capture_path,
+            frame_number,
+            tshark_binary=tshark_binary,
+            decode_rule=decode_rule,
+        ),
+        capture_path=capture_path,
+    )
+    return (parse_packet_field_ranges(stdout_text), stderr_text)
 
 
 def _clip_text(text: str, width: int) -> str:

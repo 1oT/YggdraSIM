@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """HIL-Bridge runtime helpers: process lifecycle, signal handling, and supervisor IPC for the hardware-in-loop bridge."""
 from __future__ import annotations
@@ -24,6 +27,10 @@ DEFAULT_HTTP_TIMEOUT_SECONDS = 5.0
 DEFAULT_SYSTEMCTL_TIMEOUT_SECONDS = 20.0
 DEFAULT_BRIDGE_READY_TIMEOUT_SECONDS = 12.0
 DEFAULT_BRIDGE_READY_POLL_SECONDS = 0.25
+REMSIM_BINARY_ENV = "YGGDRASIM_HIL_REMSIM_BINARY"
+REMSIM_ARGS_ENV = "YGGDRASIM_HIL_REMSIM_ARGS"
+CARD_TRACE_ENV = "YGGDRASIM_HIL_CARD_TRACE"
+_TRUE_ENV_VALUES = {"1", "true", "yes", "on", "debug"}
 _REMSIM_VALUE_FLAGS = {"-i", "-p", "-c", "-n", "-V", "-P", "-C", "-I", "-S", "-A", "-H"}
 
 
@@ -32,12 +39,17 @@ class HilBridgeUserServiceOptions:
     python_executable: str
     working_directory: str
     reader_index: int = 0
+    reader_name: str = ""
     host: str = "127.0.0.1"
     port: int = 9997
     advertise_host: str = "127.0.0.1"
     usb_vidpid: str = DEFAULT_USB_VIDPID
     gsmtap_enabled: bool = True
     gsmtap_capture_path: str = ""
+    card_trace_enabled: bool = False
+    remote_card_url: str = ""
+    remote_card_token_file: str = ""
+    remsim_binary: str = ""
     remsim_args: tuple[str, ...] = ()
     service_name: str = DEFAULT_SERVICE_NAME
     documentation_path: str = ""
@@ -134,6 +146,12 @@ def split_shell_like_arguments(argument_text: str) -> tuple[str, ...]:
     return tuple(shlex.split(normalized_text))
 
 
+def resolve_card_trace_enabled(value: Any = None) -> bool:
+    if value is not None:
+        return bool(value)
+    return str(os.environ.get(CARD_TRACE_ENV, "") or "").strip().lower() in _TRUE_ENV_VALUES
+
+
 def _systemd_quote(value: str) -> str:
     text = str(value or "")
     escaped = text.replace("\\", "\\\\").replace('"', '\\"')
@@ -175,8 +193,19 @@ def render_user_service_unit(options: HilBridgeUserServiceOptions) -> str:
         "--usb-vidpid",
         str(options.usb_vidpid or "").strip(),
     ]
+    reader_name = str(options.reader_name or "").strip()
+    if len(reader_name) > 0:
+        command.extend(["--reader-name", reader_name])
     if bool(options.gsmtap_enabled) is False:
         command.append("--no-gsmtap")
+    if bool(options.card_trace_enabled):
+        command.append("--card-trace")
+    remote_card_url = str(options.remote_card_url or "").strip()
+    if len(remote_card_url) > 0:
+        command.extend(["--remote-card-url", remote_card_url])
+    remote_card_token_file = str(options.remote_card_token_file or "").strip()
+    if len(remote_card_token_file) > 0:
+        command.extend(["--remote-card-token-file", remote_card_token_file])
     capture_path = str(options.gsmtap_capture_path or "").strip()
     if len(capture_path) > 0:
         command.extend(
@@ -185,6 +214,9 @@ def render_user_service_unit(options: HilBridgeUserServiceOptions) -> str:
                 capture_path,
             ]
         )
+    remsim_binary = str(options.remsim_binary or "").strip()
+    if len(remsim_binary) > 0:
+        command.extend(["--remsim-binary", remsim_binary])
     for remsim_arg in options.remsim_args:
         command.append(f"--remsim-arg={str(remsim_arg or '').strip()}")
 
@@ -473,6 +505,9 @@ def read_bridge_status() -> dict[str, Any]:
 def is_hil_bridge_running() -> bool:
     supervisor_state = read_supervisor_state()
     if bool(supervisor_state.get("bridgeRunning", False)) is False:
+        return False
+    service_state = query_user_service_state()
+    if str(service_state.get("activeState", "") or "").strip() != "active":
         return False
     return True
 

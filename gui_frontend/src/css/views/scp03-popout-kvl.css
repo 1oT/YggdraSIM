@@ -1,0 +1,106 @@
+/*
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+ */
+
+/* SCP03 action popouts: KVL meta strip + primary block (table / JSON /
+   trace) + optional ``details`` raw hex. Mirrors ``Profiles (ES10c)``.
+   Used by registry, keys, GET DATA, GetCerts, eUICC scan, etc. */
+.cc-action-datasheet {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+}
+
+.cc-action-datasheet-meta {
+  border-radius: var(--radius-md, 8px);
+  border: 1px solid var(--border);
+  background: linear-gradient(
+    135deg,
+    color-mix(in oklab, var(--accent) 10%, var(--bg-elev)) 0%,
+    var(--bg-elev) 60%
+  );
+  padding: 2px 0;
+}
+
+.cc-action-datasheet-meta .cc-kvl-block {
+  margin: 0;
+  border: none;
+  background: transparent;
+  border-radius: 0;
+  padding: 10px 14px;
+}
+
+.cc-action-datasheet-main {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md, 8px);
+  overflow: hidden;
+  background: var(--surface, rgba(255, 255, 255, 0.02));
+}
+
+.cc-action-datasheet-main .data-table {
+  margin: 0;
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.cc-action-datasheet-main > .cc-json {
+  margin: 0;
+  border: none;
+  border-radius: 0;
+  max-height: min(48vh, 520px);
+}
+
+.cc-action-tree {
+  max-height: min(58vh, 680px);
+  overflow: auto;
+  padding: 12px;
+}
+
+.cc-action-datasheet--tree .cc-pv-object--depth-0 {
+  gap: 6px;
+}
+
+.cc-action-datasheet-main-head {
+  padding: 9px 14px;
+  font-size: 11px;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  font-weight: 700;
+  color: var(--fg-muted);
+  background: color-mix(in oklab, var(--bg-hover) 90%, transparent);
+  border-bottom: 1px solid var(--border);
+}
+
+.cc-action-datasheet-main-head--split {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.cc-action-datasheet-main-title {
+  font-size: 12.5px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--fg);
+}
+
+.cc-action-datasheet-main-sub {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--fg-muted);
+}
+
+.cc-action-datasheet-main--decoded {
+  border-left: 3px solid color-mix(in oklab, var(--ok, #3ec67a) 65%, var(--border));
+}

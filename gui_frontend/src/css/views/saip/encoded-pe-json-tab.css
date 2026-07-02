@@ -1,0 +1,67 @@
+/*
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+ */
+
+/* ---- PE Editor: encoded-PE-bytes card + JSON tab ------------------- */
+
+.saip-pe-bytes-fold {
+  margin-bottom: 12px;
+}
+
+.saip-pe-bytes-summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+}
+
+.saip-pe-bytes-chip {
+  font-family: var(--mono, "JetBrains Mono", monospace);
+  font-size: 10px;
+  color: var(--fg-muted, #888);
+  background: var(--surface-alt, rgba(255, 255, 255, 0.04));
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 1px 6px;
+  margin-left: auto;
+  letter-spacing: 0.02em;
+}
+
+.saip-pe-bytes-dump {
+  font-family: var(--mono, "JetBrains Mono", monospace);
+  font-size: 11px;
+  line-height: 1.55;
+  background: var(--surface, rgba(0, 0, 0, 0.18));
+  color: var(--fg);
+  padding: 10px 12px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  margin: 0;
+  white-space: pre;
+  overflow: auto;
+  max-height: 320px;
+}
+
+.saip-pe-json-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.saip-pe-json-size {
+  font-family: var(--mono, "JetBrains Mono", monospace);
+  font-size: 10px;
+  color: var(--fg-muted, #888);
+  align-self: center;
+  margin-left: 8px;
+}
+
+.saip-pe-json-text {
+  width: 100%;
+  min-height: 240px;
+  font-family: var(--mono, "JetBrains Mono", monospace);
+  font-size: 11px;
+  line-height: 1.5;
+}
+

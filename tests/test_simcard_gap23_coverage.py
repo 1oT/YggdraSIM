@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 """Twenty-third-pass gap-coverage suite for ISIM-side GBA EFs.
 
 3GPP TS 31.103 §4.2.7 lists the ISIM Service Table; the

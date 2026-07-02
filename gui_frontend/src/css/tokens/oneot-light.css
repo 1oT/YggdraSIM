@@ -1,0 +1,42 @@
+/*
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+ */
+
+/* -- Theme: 1oT Light ---------------------------------------------------- */
+html[data-theme="oneot-light"] {
+  --bg: #f5f8fb;
+  --bg-elev: #ffffff;
+  --bg-elev-2: #e8f4ef;
+  --surface: #ffffff;
+  --surface-alt: rgba(0, 0, 0, 0.04);
+  --bg-hover: rgba(1, 215, 153, 0.06);
+  --border: rgba(194, 204, 215, 0.55);
+  --border-strong: rgba(194, 204, 215, 0.95);
+  --fg: #0d1926;
+  --fg-dim: #576675;
+  --accent: #02b480;
+  --accent-strong: #01d799;
+  --accent-soft: rgba(2, 180, 128, 0.12);
+  --accent-fg: #001b38;
+  --accent-glow: rgba(1, 215, 153, 0.45);
+  --gradient-accent: linear-gradient(135deg, #01d799 0%, #02b480 100%);
+  --gradient-brand: linear-gradient(135deg, #02b480 0%, #6382ee 100%);
+  --ok: #02b480;
+  --ok-soft: rgba(2, 180, 128, 0.14);
+  --warn: #e89e00;
+  --warn-soft: rgba(232, 158, 0, 0.16);
+  --fail: #ee5d1f;
+  --fail-soft: rgba(238, 93, 31, 0.14);
+  --code-bg: #f5f8fb;
+  --kbd-bg: #ffffff;
+  --shadow-card: 0 14px 38px rgba(13, 25, 38, 0.08);
+  --shadow-card-hover: 0 24px 48px rgba(13, 25, 38, 0.14);
+  --shadow-glow-accent: 0 0 0 1px var(--accent-soft), 0 18px 40px -14px var(--accent-glow);
+  --topbar-bg: rgba(255, 255, 255, 0.82);
+  --theme-tint:
+    radial-gradient(circle at 88% 0%, rgba(1, 215, 153, 0.16), transparent 48%),
+    radial-gradient(circle at 8% 100%, rgba(99, 130, 238, 0.12), transparent 50%),
+    radial-gradient(circle at 60% 40%, rgba(232, 158, 0, 0.06), transparent 46%);
+}
+

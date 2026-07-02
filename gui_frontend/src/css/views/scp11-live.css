@@ -1,0 +1,438 @@
+/*
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+ */
+
+/* ============================================================
+ * SCP03 APDU console
+ *
+ * Rendered in the ribbon-v2 tab "APDU" as a full-width workbench
+ * panel (instead of the usual icon strip). The panel replaces the
+ * ribbon-section content while the tab is active; the scan tree
+ * and preview area below it continue to render normally so the
+ * operator can click a file to pivot and then hop back to type
+ * a raw APDU.
+ *
+ * Colour language mirrors the SGP.32 section cards: a green left
+ * border for SW=9000, amber for 61xx (more data), and red for
+ * every other failure. Monospace everywhere in the response area
+ * because the whole point of this panel is wire-level clarity.
+ * ============================================================ */
+
+.scp03-ribbon-section--panel {
+  display: block;
+  padding: 14px 18px 18px;
+}
+
+.scp03-apdu-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 100%;
+}
+
+.scp03-apdu-header {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 2px;
+}
+
+.scp03-apdu-title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  color: var(--fg);
+}
+
+.scp03-apdu-subtitle {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--fg-muted);
+  max-width: 920px;
+}
+
+.scp03-apdu-topbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 10px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.scp03-apdu-preset {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12.5px;
+  color: var(--fg-muted);
+}
+
+.scp03-apdu-preset-select {
+  padding: 4px 8px;
+  padding-right: 30px;
+  font-size: 12.5px;
+  background-color: var(--bg-elev);
+  color: var(--fg);
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  min-width: 320px;
+}
+
+.scp03-apdu-options {
+  display: inline-flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.scp03-apdu-opt {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12.5px;
+  color: var(--fg);
+  user-select: none;
+  cursor: pointer;
+}
+
+.scp03-apdu-input-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.scp03-apdu-input-label {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--fg-muted);
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.scp03-apdu-input {
+  width: 100%;
+  padding: 10px 12px;
+  background: var(--code-bg, rgba(0, 0, 0, 0.25));
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-family: var(--font-mono, ui-monospace, "SF Mono", Menlo, monospace);
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--fg);
+  resize: vertical;
+  min-height: 48px;
+}
+
+.scp03-apdu-input:focus {
+  outline: none;
+  border-color: var(--accent, #4a90e2);
+  box-shadow: 0 0 0 2px rgba(74, 144, 226, 0.25);
+}
+
+.scp03-apdu-breakdown {
+  padding: 8px 10px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  min-height: 44px;
+}
+
+.scp03-apdu-breakdown-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12.5px;
+  font-family: var(--font-mono, ui-monospace, "SF Mono", Menlo, monospace);
+}
+
+.scp03-apdu-breakdown-table th {
+  padding: 4px 8px;
+  text-align: left;
+  font-weight: 600;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--fg-muted);
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+}
+
+.scp03-apdu-breakdown-table td {
+  padding: 5px 8px;
+  border: 1px solid var(--border);
+  color: var(--fg);
+  word-break: break-all;
+}
+
+.scp03-apdu-ascii-mirror {
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--fg-muted);
+}
+
+.scp03-apdu-ascii-mirror code {
+  font-family: var(--font-mono, ui-monospace, "SF Mono", Menlo, monospace);
+  color: var(--fg);
+  background: var(--code-bg, rgba(0, 0, 0, 0.25));
+  padding: 1px 6px;
+  border-radius: 4px;
+  margin-left: 4px;
+}
+
+.scp03-apdu-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.scp03-apdu-send {
+  min-width: 140px;
+}
+
+.scp03-apdu-output {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.scp03-apdu-result {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-left-width: 4px;
+  border-radius: 6px;
+}
+
+.scp03-apdu-result--ok {
+  border-left-color: var(--ok, #3fb950);
+}
+
+.scp03-apdu-result--warn {
+  border-left-color: var(--warn, #d29922);
+}
+
+.scp03-apdu-result-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.scp03-apdu-sw-chip {
+  font-family: var(--font-mono, ui-monospace, "SF Mono", Menlo, monospace);
+  font-size: 12.5px;
+  font-weight: 600;
+  padding: 3px 10px;
+  border-radius: 12px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  color: var(--fg);
+}
+
+.scp03-apdu-sw-chip--ok {
+  background: rgba(63, 185, 80, 0.18);
+  border-color: rgba(63, 185, 80, 0.55);
+  color: var(--ok, #3fb950);
+}
+
+.scp03-apdu-sw-chip--info {
+  background: rgba(74, 144, 226, 0.18);
+  border-color: rgba(74, 144, 226, 0.55);
+  color: var(--accent, #4a90e2);
+}
+
+.scp03-apdu-sw-chip--err {
+  background: rgba(217, 83, 79, 0.18);
+  border-color: rgba(217, 83, 79, 0.55);
+  color: var(--err, #d9534f);
+}
+
+.scp03-apdu-sw-meaning {
+  font-size: 12.5px;
+  color: var(--fg);
+}
+
+.scp03-apdu-result-len {
+  margin-left: auto;
+  font-size: 11.5px;
+  color: var(--fg-muted);
+  font-family: var(--font-mono, ui-monospace, "SF Mono", Menlo, monospace);
+}
+
+.scp03-apdu-result-echo {
+  margin: 0;
+  font-size: 12px;
+  color: var(--fg-muted);
+  font-family: var(--font-mono, ui-monospace, "SF Mono", Menlo, monospace);
+  word-break: break-all;
+}
+
+.scp03-apdu-result-echo code {
+  color: var(--fg);
+  background: var(--code-bg, rgba(0, 0, 0, 0.25));
+  padding: 1px 6px;
+  border-radius: 4px;
+}
+
+.scp03-apdu-chain-head {
+  font-size: 11.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--fg-muted);
+  margin-top: 4px;
+}
+
+.scp03-apdu-chain-row {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  flex-wrap: wrap;
+  padding: 4px 8px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  font-size: 12px;
+  font-family: var(--font-mono, ui-monospace, "SF Mono", Menlo, monospace);
+}
+
+.scp03-apdu-chain-idx {
+  color: var(--fg-muted);
+  font-weight: 600;
+}
+
+.scp03-apdu-chain-reason {
+  color: var(--fg-muted);
+  font-family: var(--font-sans, system-ui);
+  font-size: 11.5px;
+}
+
+.scp03-apdu-chain-sw,
+.scp03-apdu-chain-len {
+  margin-left: auto;
+  font-size: 11.5px;
+  color: var(--fg-muted);
+}
+
+.scp03-apdu-response-head {
+  font-size: 11.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--fg-muted);
+  margin-top: 4px;
+}
+
+.scp03-apdu-response-hex,
+.scp03-apdu-response-ascii {
+  margin: 0;
+}
+
+.scp03-apdu-response-ascii {
+  opacity: 0.85;
+}
+
+.scp03-apdu-history {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 4px;
+  padding: 10px 12px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.scp03-apdu-history-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.scp03-apdu-history-title {
+  font-size: 12.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--fg-muted);
+}
+
+.scp03-apdu-history-clear {
+  margin-left: auto;
+  font-size: 11.5px;
+  padding: 3px 10px;
+}
+
+.scp03-apdu-history-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 280px;
+  overflow: auto;
+}
+
+.scp03-apdu-history-item {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 5px 10px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-left-width: 3px;
+  border-radius: 5px;
+  font-size: 12px;
+}
+
+.scp03-apdu-history-item--ok {
+  border-left-color: var(--ok, #3fb950);
+}
+
+.scp03-apdu-history-item--warn {
+  border-left-color: var(--warn, #d29922);
+}
+
+.scp03-apdu-history-meta {
+  font-family: var(--font-mono, ui-monospace, "SF Mono", Menlo, monospace);
+  color: var(--fg-muted);
+  min-width: 170px;
+}
+
+.scp03-apdu-history-apdu {
+  font-family: var(--font-mono, ui-monospace, "SF Mono", Menlo, monospace);
+  font-size: 12px;
+  color: var(--fg);
+  background: var(--code-bg, rgba(0, 0, 0, 0.25));
+  padding: 1px 6px;
+  border-radius: 4px;
+  word-break: break-all;
+}
+
+.scp03-apdu-history-note {
+  color: var(--fg-muted);
+  font-size: 11.5px;
+}
+
+.scp03-apdu-history-actions {
+  margin-left: auto;
+  display: inline-flex;
+  gap: 4px;
+}
+
+.scp03-apdu-history-reuse,
+.scp03-apdu-history-copy {
+  padding: 2px 10px;
+  font-size: 11px;
+}
+

@@ -1,0 +1,247 @@
+/*
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+ */
+
+/* ---- SA-G6: Variable editor polish ---------------------------------- */
+
+.saip-vars-head-tools {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.saip-vars-reset-all {
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  padding: 3px 9px;
+}
+
+.saip-vars-row.is-overridden {
+  background: rgba(255, 200, 80, 0.05);
+}
+
+.saip-vars-row.is-overridden td:first-child {
+  border-left: 2px solid rgba(255, 200, 80, 0.5);
+}
+
+.saip-vars-kind {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  border: 1px solid var(--border);
+  background: var(--surface, rgba(255, 255, 255, 0.03));
+  color: var(--fg-muted, #888);
+}
+
+.saip-vars-kind--iccid {
+  background: rgba(120, 220, 130, 0.12);
+  color: #78dc82;
+  border-color: rgba(120, 220, 130, 0.4);
+}
+
+.saip-vars-kind--imsi {
+  background: rgba(120, 180, 240, 0.12);
+  color: #78b4f0;
+  border-color: rgba(120, 180, 240, 0.4);
+}
+
+.saip-vars-kind--hex,
+.saip-vars-kind--bcd {
+  background: var(--accent-soft);
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.saip-vars-kind--text {
+  background: rgba(255, 200, 80, 0.12);
+  color: #ffc850;
+  border-color: rgba(255, 200, 80, 0.4);
+}
+
+.saip-vars-state {
+  white-space: nowrap;
+}
+
+.saip-vars-state-chip {
+  display: inline-flex;
+  align-items: center;
+  margin-right: 4px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  border: 1px solid var(--border);
+  color: var(--fg-muted, #888);
+}
+
+.saip-vars-state-chip.is-override {
+  background: rgba(255, 200, 80, 0.16);
+  color: #ffc850;
+  border-color: rgba(255, 200, 80, 0.5);
+}
+
+.saip-vars-state-chip.is-defined {
+  background: var(--accent-soft);
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.saip-vars-state-chip.is-used {
+  background: rgba(120, 220, 130, 0.12);
+  color: #78dc82;
+  border-color: rgba(120, 220, 130, 0.4);
+}
+
+.saip-vars-actions-col {
+  width: 1%;
+  white-space: nowrap;
+}
+
+.saip-vars-actions-cell {
+  text-align: right;
+  white-space: nowrap;
+}
+
+.saip-vars-reset {
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  padding: 2px 8px;
+}
+
+.saip-vars-actions {
+  align-items: center;
+  gap: 10px;
+  margin-top: 4px;
+}
+
+.saip-vars-hint {
+  font-size: 10px;
+  color: var(--fg-muted, #888);
+  font-style: italic;
+}
+
+/* SA-G6: modal title row gets a stats chip strip next to the title. */
+
+.saip-modal-title-wrap {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  flex-grow: 1;
+}
+
+.saip-modal-stats {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.saip-modal-stat-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 9px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  border: 1px solid var(--border);
+  background: var(--surface, rgba(255, 255, 255, 0.03));
+  color: var(--fg);
+}
+
+.saip-modal-stat-chip--mono {
+  font-family: var(--mono, "JetBrains Mono", monospace);
+  font-weight: 500;
+  text-transform: lowercase;
+}
+
+.saip-modal-stat-chip--muted {
+  color: var(--fg-muted, #888);
+  background: transparent;
+}
+
+/* Compare pane */
+
+.saip-compare-head {
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.saip-compare-head .btn-small {
+  margin-left: auto;
+}
+
+.saip-cmp-summary {
+  margin: 8px 0;
+  font-size: 12px;
+}
+
+.saip-cmp-summary p {
+  margin: 0 0 4px 0;
+}
+
+.saip-cmp-h5 {
+  margin: 14px 0 6px;
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--fg-muted, #888);
+}
+
+.saip-cmp-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 11px;
+}
+
+.saip-cmp-table thead th {
+  text-align: left;
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--fg-muted, #888);
+  padding: 4px 6px;
+  border-bottom: 1px solid var(--border);
+}
+
+.saip-cmp-row td {
+  padding: 4px 6px;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+}
+
+.saip-cmp-row--changed {
+  background: rgba(255, 200, 80, 0.06);
+}
+
+.saip-cmp-a {
+  color: #ff9a6a;
+  font-family: var(--mono, "JetBrains Mono", monospace);
+}
+
+.saip-cmp-b {
+  color: #78dc82;
+  font-family: var(--mono, "JetBrains Mono", monospace);
+}
+
+.saip-cmp-keys {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.saip-cmp-keys li {
+  font-size: 11px;
+  color: var(--fg-muted, #888);
+}
+

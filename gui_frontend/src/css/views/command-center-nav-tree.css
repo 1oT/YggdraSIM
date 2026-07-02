@@ -1,0 +1,102 @@
+/*
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+ */
+
+/* -- Command Center nav tree (Card Admin / eSIM / Tools / Env) --------- */
+
+#command-center-nav {
+  gap: 2px;
+}
+
+.cc-nav-group {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.cc-nav-group + .cc-nav-group {
+  margin-top: 2px;
+}
+
+.cc-nav-group-header {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px 6px 8px;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-md);
+  color: var(--fg-dim);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  cursor: pointer;
+  transition: background-color var(--transition-fast),
+    color var(--transition-fast);
+}
+
+.cc-nav-group-header:hover {
+  background: var(--bg-hover);
+  color: var(--fg);
+}
+
+.cc-nav-caret {
+  display: inline-block;
+  font-size: 10px;
+  line-height: 1;
+  color: var(--fg-dim);
+  transition: transform var(--transition-fast);
+  transform: rotate(0deg);
+}
+
+.cc-nav-group.is-open > .cc-nav-group-header .cc-nav-caret {
+  transform: rotate(90deg);
+}
+
+.cc-nav-group-label {
+  flex: 1;
+  text-align: left;
+}
+
+.cc-nav-children {
+  list-style: none;
+  margin: 0;
+  padding: 0 0 4px 4px;
+  display: none;
+  flex-direction: column;
+  gap: 1px;
+  border-left: 1px dashed var(--border);
+  margin-left: 10px;
+}
+
+.cc-nav-group.is-open > .cc-nav-children {
+  display: flex;
+}
+
+#command-center-nav .cc-nav-leaf {
+  /* Indent the leaf row so the group header reads as the parent. Keep
+     the existing active-bar (``.subsystem-entry::before``) on the left
+     edge of the leaf so the activation affordance is consistent with
+     the Inspect / Advanced flat groups. */
+  padding-left: 22px;
+  font-size: 13px;
+}
+
+#command-center-nav .cc-nav-leaf::before {
+  left: 8px;
+}
+
+#command-center-nav .cc-nav-leaf.is-stub {
+  /* Reserved-but-not-wired surfaces — hint at it without making the
+     entry look broken. Still clickable; shows a placeholder card. */
+  opacity: 0.65;
+  font-style: italic;
+}
+
+#command-center-nav .cc-nav-leaf.is-stub:hover {
+  opacity: 0.85;
+}
+

@@ -54,6 +54,9 @@ __all__ = [
     "wrap_connection",
 ]
 
+_DEFAULT_APDU_BUFFER_CAP = 5000
+_DEFAULT_ASYNC_QUEUE_CAP = 8
+
 
 @dataclass(frozen=True)
 class ApduExchange:
@@ -91,14 +94,21 @@ class ApduExchange:
 class _ApduRecorder:
     """Thread-safe singleton holding subscribers + a recent-events buffer."""
 
-    def __init__(self, max_buffer: int = 5000) -> None:
+    def __init__(
+        self,
+        max_buffer: int = _DEFAULT_APDU_BUFFER_CAP,
+        max_async_queues: int = _DEFAULT_ASYNC_QUEUE_CAP,
+    ) -> None:
         self._lock = threading.RLock()
-        self._buffer: deque[ApduExchange] = deque(maxlen=max_buffer)
+        self._buffer: deque[ApduExchange] = deque(maxlen=max(1, max_buffer))
         self._sync_subs: list[Callable[[ApduExchange], None]] = []
         # Queues are paired with the loop they were created on so
         # ``put_nowait`` from a worker thread can be relayed via
         # ``call_soon_threadsafe`` instead of crashing on a foreign loop.
-        self._async_queues: list[tuple[asyncio.Queue, asyncio.AbstractEventLoop]] = []
+        self._async_queues: list[
+            tuple[asyncio.Queue[ApduExchange], asyncio.AbstractEventLoop]
+        ] = []
+        self._max_async_queues = max(1, max_async_queues)
         self._dropped: int = 0
 
     # ---------------------------------------------------------------- record
@@ -116,21 +126,43 @@ class _ApduRecorder:
             sync_subs = list(self._sync_subs)
             async_queues = list(self._async_queues)
 
+        dropped = 0
+        stale_queues: list[
+            tuple[asyncio.Queue[ApduExchange], asyncio.AbstractEventLoop]
+        ] = []
+
         for fn in sync_subs:
             try:
                 fn(exchange)
             except Exception:  # noqa: BLE001 — never trust subscribers
-                self._dropped += 1
+                dropped += 1
 
         for queue, loop in async_queues:
+            if loop.is_closed():
+                stale_queues.append((queue, loop))
+                dropped += 1
+                continue
             try:
                 loop.call_soon_threadsafe(self._safe_put, queue, exchange)
             except RuntimeError:
                 # Loop has shut down (websocket closed mid-emit).
-                self._dropped += 1
+                stale_queues.append((queue, loop))
+                dropped += 1
+
+        if dropped > 0 or stale_queues:
+            with self._lock:
+                self._dropped += dropped
+                for binding in stale_queues:
+                    try:
+                        self._async_queues.remove(binding)
+                    except ValueError:
+                        pass
 
     @staticmethod
-    def _safe_put(queue: asyncio.Queue, exchange: ApduExchange) -> None:
+    def _safe_put(
+        queue: asyncio.Queue[ApduExchange],
+        exchange: ApduExchange,
+    ) -> None:
         try:
             queue.put_nowait(exchange)
         except asyncio.QueueFull:
@@ -142,6 +174,20 @@ class _ApduRecorder:
                 pass
 
     # ---------------------------------------------------------- subscribers
+    def _prune_async_queues_locked(self) -> None:
+        live: list[
+            tuple[asyncio.Queue[ApduExchange], asyncio.AbstractEventLoop]
+        ] = []
+        removed = 0
+        for queue, loop in self._async_queues:
+            if loop.is_closed():
+                removed += 1
+            else:
+                live.append((queue, loop))
+        if removed > 0:
+            self._async_queues = live
+            self._dropped += removed
+
     def subscribe(
         self, fn: Callable[[ApduExchange], None]
     ) -> Callable[[], None]:
@@ -160,7 +206,7 @@ class _ApduRecorder:
 
     def attach_queue(
         self,
-        queue: asyncio.Queue,
+        queue: asyncio.Queue[ApduExchange],
         loop: asyncio.AbstractEventLoop | None = None,
     ) -> Callable[[], None]:
         """Register *queue* for live event delivery.
@@ -171,7 +217,12 @@ class _ApduRecorder:
         """
         owning_loop = loop or asyncio.get_event_loop()
         with self._lock:
+            self._prune_async_queues_locked()
             self._async_queues.append((queue, owning_loop))
+            overflow = len(self._async_queues) - self._max_async_queues
+            if overflow > 0:
+                del self._async_queues[:overflow]
+                self._dropped += overflow
 
         def _detach() -> None:
             with self._lock:
@@ -198,6 +249,16 @@ class _ApduRecorder:
     @property
     def dropped(self) -> int:
         return self._dropped
+
+    @property
+    def async_queue_count(self) -> int:
+        with self._lock:
+            self._prune_async_queues_locked()
+            return len(self._async_queues)
+
+    @property
+    def async_queue_cap(self) -> int:
+        return self._max_async_queues
 
 
 _RECORDER = _ApduRecorder()

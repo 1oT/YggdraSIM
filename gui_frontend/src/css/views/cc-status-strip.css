@@ -1,0 +1,425 @@
+/*
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+ */
+
+/* =====================================================================
+   SCP03 Workbench v2 — full-height session tabs + reader sidebar.
+   Overrides the older inline "ribbon + card" layout defined earlier.
+   ===================================================================== */
+
+.cc-workbench[data-wb="scp03"] {
+  padding: 0;
+  gap: 0;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  overflow: hidden;
+  min-height: calc(100vh - 180px);
+}
+
+/* 1. Top session-tab bar ------------------------------------------------ */
+
+.cc-workbench[data-wb="scp03"] > .cc-wb-header {
+  display: none;
+}
+
+.scp03-topbar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 12px 0;
+  background: linear-gradient(180deg,
+    color-mix(in oklab, var(--bg-elev), transparent 20%) 0%,
+    var(--bg) 100%);
+  border-bottom: 1px solid var(--border);
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+
+.scp03-topbar .cc-wb-tab {
+  border-radius: 8px 8px 0 0;
+  border-bottom: 1px solid transparent;
+  background: transparent;
+  padding: 8px 14px 9px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--fg-muted);
+  min-width: 160px;
+  max-width: 280px;
+  margin-bottom: -1px;
+}
+
+.scp03-topbar .cc-wb-tab .cc-wb-tab-label {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.scp03-topbar .cc-wb-tab:hover {
+  color: var(--fg);
+  background: color-mix(in oklab, var(--bg-elev), transparent 30%);
+}
+
+.scp03-topbar .cc-wb-tab.active {
+  color: var(--fg);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-bottom-color: var(--bg);
+  box-shadow: 0 -2px 6px -4px color-mix(in oklab, var(--accent) 50%, transparent);
+}
+
+.scp03-topbar .cc-wb-tab.active .cc-wb-tab-label {
+  color: var(--fg);
+}
+
+.scp03-topbar .cc-wb-tab .cc-wb-tab-meta {
+  font-size: 10.5px;
+  color: var(--fg-dim);
+}
+
+.scp03-topbar .cc-wb-tab-add {
+  border-radius: 8px 8px 0 0;
+  border: 1px dashed var(--border);
+  border-bottom: none;
+  margin-bottom: -1px;
+  padding: 6px 14px;
+  font-size: 16px;
+}
+
+/* 2. Full-window tab body: sidebar + main column ------------------------ */
+
+.scp03-shell {
+  display: grid;
+  grid-template-columns: minmax(200px, 240px) 1fr;
+  min-height: calc(100vh - 260px);
+  background: var(--bg);
+}
+
+@media (max-width: 1100px) {
+  .scp03-shell {
+    grid-template-columns: 180px 1fr;
+  }
+}
+
+@media (max-width: 900px) {
+  .scp03-shell {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* 2a. Reader sidebar ---------------------------------------------------- */
+
+.scp03-reader-pane {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px 12px;
+  border-right: 1px solid var(--border);
+  background: color-mix(in oklab, var(--bg-elev), transparent 40%);
+  min-width: 0;
+}
+
+.scp03-reader-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  padding: 0 2px 4px;
+  border-bottom: 1px solid var(--border);
+}
+
+.scp03-reader-head h4 {
+  margin: 0;
+  font-size: 11.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--fg-muted);
+}
+
+.scp03-reader-refresh {
+  background: transparent;
+  border: none;
+  color: var(--fg-dim);
+  cursor: pointer;
+  font-size: 14px;
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+  transition: color var(--transition-fast), background var(--transition-fast);
+}
+
+.scp03-reader-refresh:hover {
+  color: var(--accent);
+  background: color-mix(in oklab, var(--accent) 18%, transparent);
+}
+
+.scp03-reader-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.scp03-reader-item {
+  display: grid;
+  grid-template-columns: 14px 1fr;
+  gap: 8px;
+  align-items: start;
+  padding: 8px 10px;
+  border-radius: var(--radius-md);
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--fg);
+  cursor: pointer;
+  text-align: left;
+  font-family: inherit;
+  transition: background var(--transition-fast),
+    border-color var(--transition-fast),
+    color var(--transition-fast);
+}
+
+.scp03-reader-item:hover {
+  background: color-mix(in oklab, var(--bg-elev), transparent 10%);
+  border-color: var(--border);
+}
+
+.scp03-reader-item.is-active {
+  background: color-mix(in oklab, var(--accent) 14%, transparent);
+  border-color: color-mix(in oklab, var(--accent) 45%, transparent);
+}
+
+.scp03-reader-item.is-pending {
+  border-color: color-mix(in oklab, var(--accent-warning, #f0c674) 45%, transparent);
+  background: color-mix(in oklab, var(--accent-warning, #f0c674) 8%, transparent);
+}
+
+.scp03-reader-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  margin-top: 4px;
+  background: var(--border);
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--fg) 20%, transparent);
+}
+
+.scp03-reader-item.is-active .scp03-reader-dot {
+  background: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--accent) 25%, transparent);
+}
+
+.scp03-reader-item.is-pending .scp03-reader-dot {
+  background: var(--accent-warning, #f0c674);
+}
+
+.scp03-reader-body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.scp03-reader-name {
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--fg);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.scp03-reader-atr {
+  font-size: 10.5px;
+  font-family: var(--font-mono);
+  color: var(--fg-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.scp03-reader-state {
+  font-size: 10.5px;
+  color: var(--fg-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.scp03-reader-state--open {
+  color: var(--ok, #8bd17c);
+}
+
+.scp03-reader-state--idle {
+  color: var(--fg-dim);
+}
+
+.scp03-reader-state--error {
+  color: var(--fail, #ff8a95);
+}
+
+.scp03-reader-empty {
+  color: var(--fg-muted);
+  font-size: 12px;
+  padding: 10px 6px;
+  font-style: italic;
+  text-align: center;
+}
+
+.scp03-reader-hint {
+  margin-top: auto;
+  padding-top: 8px;
+  border-top: 1px dashed var(--border);
+  font-size: 10.5px;
+  line-height: 1.5;
+  color: var(--fg-dim);
+}
+
+.scp03-reader-hint strong {
+  color: var(--fg-muted);
+  display: block;
+  margin-bottom: 3px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 10px;
+}
+
+/* 2b. Main session column ----------------------------------------------- */
+
+.scp03-session-main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  padding: 12px 16px 18px;
+  gap: 12px;
+  overflow-x: hidden;
+}
+
+.scp03-session-main .cc-scan-header {
+  margin: 0;
+  gap: 6px;
+}
+
+/* 3. Ribbon v2 — tab strip + active section ---------------------------- */
+
+.scp03-ribbon-v2 {
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  box-shadow: 0 4px 14px -10px rgba(0, 0, 0, 0.4);
+}
+
+.scp03-ribbon-tabstrip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  padding: 4px 6px 0;
+  background: color-mix(in oklab, var(--bg-elev-2, var(--bg-elev)), transparent 10%);
+  border-bottom: 1px solid var(--border);
+}
+
+.scp03-ribbon-tabbtn {
+  background: transparent;
+  border: 1px solid transparent;
+  border-bottom: none;
+  color: var(--fg-muted);
+  padding: 6px 14px 7px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  cursor: pointer;
+  border-radius: 6px 6px 0 0;
+  margin-bottom: -1px;
+  transition: color var(--transition-fast), background var(--transition-fast);
+}
+
+.scp03-ribbon-tabbtn:hover {
+  color: var(--fg);
+  background: color-mix(in oklab, var(--bg-elev), transparent 20%);
+}
+
+.scp03-ribbon-tabbtn.active {
+  color: var(--fg);
+  background: var(--bg-elev);
+  border-color: var(--border);
+  border-bottom-color: var(--bg-elev);
+}
+
+.scp03-ribbon-section {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 10px 12px;
+  align-items: stretch;
+  min-height: 74px;
+}
+
+.scp03-ribbon-section .ribbon-group {
+  border-right-color: color-mix(in oklab, var(--border), transparent 40%);
+}
+
+/* 4. Collapsible raw-trace disclosure ---------------------------------- */
+
+.cc-trace-block {
+  margin: 10px 0 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: color-mix(in oklab, var(--bg-elev), transparent 20%);
+  overflow: hidden;
+}
+
+.cc-trace-block > summary {
+  cursor: pointer;
+  padding: 6px 10px;
+  font-size: 11.5px;
+  color: var(--fg-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  user-select: none;
+  background: color-mix(in oklab, var(--bg-elev), transparent 10%);
+  border-bottom: 1px solid transparent;
+  transition: background var(--transition-fast), color var(--transition-fast);
+}
+
+.cc-trace-block > summary::-webkit-details-marker {
+  display: none;
+}
+
+.cc-trace-block > summary::before {
+  content: "\25B8";
+  display: inline-block;
+  transition: transform var(--transition-fast);
+  color: var(--fg-dim);
+  font-size: 10px;
+}
+
+.cc-trace-block[open] > summary::before {
+  transform: rotate(90deg);
+}
+
+.cc-trace-block > summary:hover {
+  background: color-mix(in oklab, var(--accent) 10%, var(--bg-elev));
+  color: var(--fg);
+}
+
+.cc-trace-block[open] > summary {
+  border-bottom-color: var(--border);
+  color: var(--fg);
+}
+
+.cc-trace-block pre,
+.cc-trace-block .cc-log,
+.cc-trace-block .cc-json,
+.cc-trace-block .cc-hex {
+  margin: 0;
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+  background: var(--code-bg, rgba(0, 0, 0, 0.25));
+}
+

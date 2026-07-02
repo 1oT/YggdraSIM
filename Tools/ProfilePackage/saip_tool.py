@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """SAIP tool bridge: GUI-facing adapter over the pySim saip_tool subprocess.
 
@@ -302,13 +305,14 @@ class SaipToolBridge:
     ``default_profile_dir``; absolute paths outside the workspace boundary
     raise ``ValueError`` (workspace sandbox invariant).
 
-    Hex-format input (``*.hex``, ``*.txt``) is converted to DER on first use
-    and cached in ``.profilepackage-cache/`` keyed by content digest.
+    Hex-format input (``*.hex``, ``*.txt``, ``*.varder``) is converted to
+    DER on first use and cached in ``.profilepackage-cache/`` keyed by
+    content digest.
     """
 
-    _HEX_INPUT_SUFFIXES = {".hex", ".txt"}
+    _HEX_INPUT_SUFFIXES = {".hex", ".txt", ".varder"}
     _INPUT_FILE_PICKER_LABEL = "SAIP profile files"
-    _INPUT_FILE_PICKER_GLOB = "*.der *.txt *.hex *.upp *.bin"
+    _INPUT_FILE_PICKER_GLOB = "*.der *.txt *.hex *.varder *.upp *.bin"
     _RAW_INPUT_PATH_FLAGS = {
         "--applet-file": True,
         "--output-dir": False,
@@ -858,7 +862,7 @@ class SaipToolBridge:
         if resolved_input.suffix.lower() not in self._HEX_INPUT_SUFFIXES:
             return resolved_input
 
-        text_payload = resolved_input.read_text(encoding="utf-8")
+        text_payload = resolved_input.read_text(encoding="utf-8-sig")
         placeholder_records: list[InlinePlaceholderRecord] = []
         if detect_inline_placeholders(text_payload):
             substituted_text, placeholder_records = substitute_inline_placeholders(

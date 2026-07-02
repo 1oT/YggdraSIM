@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 name: Bug report
 description: Report incorrect behaviour in YggdraSIM (shell, wizard, APDU, SCP session, TUI, installer, etc.)
 title: "[bug] <short, specific summary>"
@@ -68,7 +71,6 @@ body:
         - SIMCARD engine / NAA / profile store
         - SAIP profile package tooling
         - HIL bridge
-        - Polling plugin
         - Device inventory / envelope encryption
         - Installer / Dockerfile / CI
         - Docs (mkdocs)

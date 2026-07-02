@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 """Coverage for the two "disable simulator quirks" opt-out surfaces.
 
 The simulator quirks system has three independent layers:

@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 """Regression tests for the POSIX permission hardening added to
 
 ``yggdrasim_common.inventory_crypto.write_secret_file_bytes``.

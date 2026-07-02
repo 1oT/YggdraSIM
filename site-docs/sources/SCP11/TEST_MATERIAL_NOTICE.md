@@ -1,3 +1,8 @@
+<!--
+SPDX-License-Identifier: GPL-3.0-or-later
+Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+-->
+
 # SCP11 — Test Material Notice (GSMA SGP.26)
 
 > **`*.pem`, `*.der`, `*.crt`, and `*.key` files in `SCP11/` and
@@ -25,10 +30,15 @@ The following files are GSMA SGP.26 public test material:
   ES9+/ES10 certificate chain inside the local test mode.
 - Everything below `SCP11/SGP.26_test_Certs/` — the OpenSSL `*.cnf`
   inputs (CSR / extension config) that build the corresponding
-  `.pem` / `.der` material on demand. The generated key and
-  certificate files themselves are gitignored and rebuilt locally
-  (see `SCP11/SGP.26_test_Certs/Valid Test Cases/build.sh` and the
+  `.pem` / `.der` material on demand. Most generated key and
+  certificate files remain gitignored and are rebuilt locally (see
+  `SCP11/SGP.26_test_Certs/Valid Test Cases/build.sh` and the
   matching invalid-case helpers).
+- The minimal NIST Variant O CI / EUM / eUICC / SM-DP+ auth / SM-DP+
+  profile-binding fixture set under `SCP11/SGP.26_test_Certs/Valid Test
+  Cases/` is intentionally tracked so clean CI checkouts can run the
+  local-access and simulated-backend regression suite without a
+  certificate generation step.
 
 The `SCP11/local_access/certs/`, `SCP11/eim_local/certs/`, and
 `SCP11/test/certs/` subtrees follow the same posture: they hold either
@@ -38,9 +48,10 @@ but the same rule applies — **do not deploy on production keys.**
 
 ## Why it ships in the repository
 
-- `SCP11/test/`, `SCP11/local_access/`, and `SCP11/eim_local/` shells
-  default to the SGP.26 test profile so that operators can exercise
-  end-to-end ES9+/ES10 flows offline without rebuilding a full PKI.
+- `SCP11/local_access` and `SCP11/eim_local` use SGP.26-style local
+  fixtures so operators can exercise end-to-end flows offline without
+  rebuilding a full PKI. The relay `SCP11/test` entrypoint is a
+  compatibility alias and does not select the SGP.26 test CA implicitly.
 - `tests/test_scp11_sgp26_provider.py` validates the loader against
   the published SGP.26 test fixtures.
 - The published `SK.*.pem` keys are the only cryptographic material

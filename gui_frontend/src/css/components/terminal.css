@@ -1,0 +1,137 @@
+/*
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+ */
+
+/* Terminal (B-2) --------------------------------------------------------- */
+/*
+ * The PTY canvas itself is unavoidably text-mode (xterm.js), but the
+ * surrounding chrome belongs to the workbench shell now: no faux-macOS
+ * traffic-light, no hand-rolled card border. The xterm canvas is hosted
+ * inside ``.cc-wb-frame`` and inherits its border, shadow, and theme
+ * tokens. ``.terminal-host`` keeps responsibility only for the inner
+ * canvas surface (background, font, focus glow).
+ */
+
+.terminal-host {
+  position: relative;
+  background: var(--code-bg);
+  border-radius: var(--radius-md);
+  min-height: 420px;
+  padding: 10px 12px;
+  color: var(--fg);
+  font-family: var(--font-mono);
+  transition: box-shadow var(--transition-mid),
+    border-color var(--transition-fast);
+}
+
+.terminal-pane {
+  display: block;
+  min-height: 404px;
+  padding: 10px 0 0;
+}
+
+.terminal-pane.hidden {
+  display: none;
+}
+
+.terminal-tab-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 14px;
+  min-height: 30px;
+  align-items: center;
+}
+
+.terminal-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 6px 4px 12px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.2;
+  color: var(--fg-muted);
+  background: var(--bg-elev-1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  cursor: pointer;
+  user-select: none;
+  transition: background var(--transition-fast),
+    color var(--transition-fast),
+    border-color var(--transition-fast);
+}
+
+.terminal-tab:hover {
+  color: var(--fg);
+  border-color: var(--border-strong);
+}
+
+.terminal-tab.active {
+  color: var(--fg);
+  background: var(--bg-elev-2);
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent-soft) inset;
+}
+
+.terminal-tab.exited {
+  opacity: 0.6;
+}
+
+.terminal-tab .tt-pid {
+  font-size: 10.5px;
+  color: var(--fg-muted);
+  letter-spacing: 0.04em;
+}
+
+.terminal-tab .tt-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  font-size: 13px;
+  line-height: 1;
+  color: var(--fg-muted);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+}
+
+.terminal-tab .tt-close:hover {
+  color: var(--fail);
+  background: rgba(255, 120, 120, 0.12);
+}
+
+.terminal-host .xterm {
+  padding: 0;
+  background: transparent;
+}
+
+.cc-wb-frame--canvas:focus-within,
+.cc-wb-frame:focus-within > .terminal-host {
+  outline: none;
+}
+
+.cc-wb-frame--canvas:focus-within {
+  border-color: var(--accent);
+  box-shadow: var(--shadow-glow-accent);
+}
+
+.terminal-controls {
+  align-items: center;
+}
+
+.terminal-controls .tool-meta {
+  margin: 0 0 0 auto;
+  padding: 3px 10px;
+  background: var(--bg-elev-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  font-size: 11px;
+  letter-spacing: 0.05em;
+  text-transform: lowercase;
+}
+

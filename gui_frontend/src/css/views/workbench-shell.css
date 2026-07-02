@@ -1,0 +1,116 @@
+/*
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+ */
+
+/* ----------------------------------------------------------------------- */
+/* Workbench shell — unified module layout contract                        */
+/* ----------------------------------------------------------------------- */
+/*
+ * Every subsystem view (Shell, Host shell, SCP11 live, SAIP, SCP80, …)
+ * renders against the same skeleton:
+ *
+ *   .cc-wb-shell                             // outer flex column
+ *     .cc-wb-page-header                     // title + lead paragraph
+ *       h1
+ *       p.cc-wb-lead
+ *     .cc-wb-status-strip                    // horizontal chip row (state)
+ *       span.cc-chip+
+ *     .ribbon (existing G-2 ribbon)          // grouped action toolbar
+ *       .ribbon-group [.ribbon-group-label .ribbon-btn …]
+ *     .cc-wb-frame                           // main content card
+ *       (tree + detail, terminal canvas, table, etc.)
+ *     .cc-wb-extras                          // auxiliary cards on demand
+ *     .cc-wb-foot-hint                       // muted footer hint
+ *
+ * The Filesystem and Application tabs (SCP03 workbench, ``cc-wb-session``)
+ * are the reference implementation. New surfaces should reuse these
+ * primitives instead of inventing per-module containers.
+ */
+
+.cc-wb-shell {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  width: 100%;
+}
+
+.cc-wb-page-header {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.cc-wb-page-header h1 {
+  margin: 0;
+  font-size: 22px;
+  letter-spacing: 0.005em;
+  font-weight: 600;
+}
+
+.cc-wb-page-header .cc-wb-lead,
+.cc-wb-page-header p.lead {
+  margin: 0;
+  color: var(--fg-dim);
+  font-size: 13.5px;
+  line-height: 1.55;
+  max-width: 70ch;
+}
+
+.cc-wb-status-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.cc-wb-frame {
+  position: relative;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 14px 16px;
+  box-shadow: var(--shadow-card);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.cc-wb-frame--canvas {
+  padding: 0;
+  overflow: hidden;
+}
+
+.cc-wb-frame--padded-tight {
+  padding: 10px 12px;
+}
+
+.cc-wb-foot-hint {
+  margin: 0;
+  color: var(--fg-muted);
+  font-size: 12px;
+  font-style: italic;
+}
+
+.cc-wb-disabled-card {
+  margin: 0;
+  padding: 14px 16px;
+  background: var(--warn-soft);
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius-md);
+  color: var(--fg);
+}
+
+.cc-wb-disabled-card strong {
+  display: block;
+  margin-bottom: 4px;
+  font-size: 14px;
+  letter-spacing: 0.005em;
+}
+
+.cc-wb-disabled-card .hint {
+  margin: 0;
+  color: var(--fg-dim);
+  font-size: 12.5px;
+}
+

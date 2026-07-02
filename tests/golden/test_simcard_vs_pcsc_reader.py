@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 """SIMCARD ↔ physical reader cross-check harness.
 
 This module compares the response of every APDU in a small regression

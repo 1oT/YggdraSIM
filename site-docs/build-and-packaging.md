@@ -1,3 +1,8 @@
+<!--
+SPDX-License-Identifier: GPL-3.0-or-later
+Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+-->
+
 # Build and Packaging
 
 ## Distribution models
@@ -18,16 +23,21 @@ Each of those is published in two flavors:
 
 ### Optional extras (orthogonal to the flavor split)
 
-These extras are independently selectable on a source install.
+These extras are independently selectable on a source install. The
+PyInstaller flavors do not bundle the GUI extras, so a frozen build cannot
+launch the Universal GUI Command Center.
 
 | Extra | Adds | Use when |
 | --- | --- | --- |
-| `[saip]` | (empty back-compat alias; pySim is already in base deps) | onboarding scripts that reference the old name |
-| `[hil]` | `pyudev` (Linux only) | enabling the HIL bridge supervisor on a source install |
+| `[saip]` | upstream pySim | SAIP ASN.1 compile / transcode is required |
+| `[hil]` | `pyudev`, `pyserial`, etc. | enabling the HIL bridge on a source install |
+| `[gui]` | `pywebview` | desktop Universal GUI (`--gui`) |
+| `[gui-server]` | `fastapi`, `uvicorn` | web-served Universal GUI (`--web-server`) |
+| `[open5gs]` | `pymongo` | BYO-Open5GS provisioning bridge |
 | `[build]` | `pyinstaller` | building flavored launcher artifacts |
-| `[test]` | `pytest` | running the test suite |
+| `[test]` | `pytest`, helpers | running the test suite |
 | `[docs]` | `mkdocs-material`, plugins | building / serving this site locally |
-| `[full]` | `[hil]` + `[build]` + `[test]` | one-shot install of the HIL-capable source flavor |
+| `[full]` | `[hil]` + `[saip]` | one-shot install of the HIL-capable source flavor (does **not** include `[gui]` / `[gui-server]`) |
 
 The active flavor is selected at build time through the
 `YGGDRASIM_FLAVOR` environment variable. The PyInstaller spec writes a
@@ -37,6 +47,17 @@ SKU even when the variable is not exported afterwards.
 
 External host dependencies still matter for real card workflows,
 especially PC/SC libraries, reader drivers, and optional `gpg`.
+
+For GUI-driven remote labs, install from source with combined extras:
+
+```bash
+python -m pip install -e '.[full,gui]'
+```
+
+That profile gives the local workstation the GUI and Card Bridge pieces while
+keeping the Linux-only HIL/RemSIM dependencies available for local rigs. A
+headless Raspberry Pi rig normally uses `.[full]` plus the RemSIM/SIMtrace2
+system packages documented in [Install RemSIM / APDU Streaming](how-to/install-remsim-apdu-streaming.md).
 
 ## Docker
 
@@ -152,6 +173,8 @@ Validate these before publication:
 - smart-card flows are tested on each target OS that will be supported
 - on `full` builds, the HIL bridge can acquire the reader, launch
   `osmo-remsim-client-st2`, and mirror GSMTAP to Wireshark
+- on GUI/source lab installs, the live APDU dock connects and Card Bridge
+  `/status` probes succeed through the intended SSH tunnel
 
 ## Deep reference
 
@@ -163,3 +186,5 @@ Use these authored guides for the complete reference:
 - `guides/INSTALL_FROM_SOURCE.md` - source install matrix
 - `guides/INSTALL_RASPBERRYPI.md` - Raspberry Pi notes
 - `guides/SIMTRACE2_CARDEM_GUIDE.md` - SIMtrace2 firmware / toolchain
+- [Universal GUI Command Center](subsystems/gui-command-center.md)
+- [Remote APDU Streaming](how-to/remote-apdu-streaming.md)

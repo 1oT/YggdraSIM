@@ -1,3 +1,8 @@
+<!--
+SPDX-License-Identifier: GPL-3.0-or-later
+Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+-->
+
 # YggdraSIM Architecture
 
 This document explains how YggdraSIM is organized, which subsystems depend on
@@ -30,12 +35,11 @@ The architecture favors:
 
 ```mermaid
 flowchart LR
-    Operator["Operator"] --> Launcher["main/main.py<br/>launcher (--card-backend)"]
+    Operator["Operator"] --> Launcher["main/main.py<br/>launcher (--card-backend, --gui, --web-server)"]
 
     Launcher --> SCP03["SCP03<br/>admin shell"]
     Launcher --> SCP80["SCP80<br/>OTA shell"]
     Launcher --> Live["SCP11.live"]
-    Launcher --> Test["SCP11.test"]
     Launcher --> Local["SCP11.local_access"]
     Launcher --> EimLocal["SCP11.eim_local"]
     Launcher --> ProfileTool["Tools.ProfilePackage"]
@@ -43,6 +47,7 @@ flowchart LR
     Launcher --> Hil["Tools.HilBridge"]
     Launcher --> Fuzz["Tools.ApduFuzz"]
     Launcher --> Eum["Tools.EumDiag"]
+    Launcher --> Gui["yggdrasim_common.gui_server"]
 
     SCP03 --> Backend["card backend<br/>--card-backend reader|sim"]
     SCP80 --> Backend
@@ -61,11 +66,19 @@ flowchart LR
     Test --> Network
     EimLocal --> LocalServices["Localized eIM / SM-DP+ endpoints"]
 
+    Sim --> YggdraCore["Tools.YggdraCore<br/>AUSF / AAnF / Open5GS bridge<br/>(post-v1 staging)"]
+    YggdraCore --> Open5gs["BYO Open5GS<br/>(optional)"]
 
     ProfileTool --> Files["Profile / JSON / DER files"]
     Suci --> Files
     EimLocal --> Files
 
+    Gui --> SCP03
+    Gui --> Live
+    Gui --> Local
+    Gui --> ProfileTool
+    Gui --> Sim
+    Gui --> Hil
 ```
 
 ## 3. Repository structure
@@ -82,7 +95,8 @@ flowchart TB
         SCP80["SCP80/"]
         SCP11["SCP11/"]
         SIMCARD["SIMCARD/"]
-        Tools["Tools/<br/>(HilBridge, ApduFuzz, EumDiag, ProfilePackage, SuciTool)"]
+        Tools["Tools/<br/>(HilBridge, ApduFuzz, EumDiag, ProfilePackage, SuciTool, YggdraCore)"]
+        GuiServer["yggdrasim_common/gui_server/"]
     end
 
     subgraph SharedRuntime["Shared runtime"]
@@ -103,10 +117,12 @@ flowchart TB
     Main --> SCP11
     Main --> SIMCARD
     Main --> Tools
+    Main --> GuiServer
     Registry --> SCP03
     Registry --> SCP80
     Registry --> SCP11
     Registry --> Tools
+    Registry --> GuiServer
 
     SCP03 --> CardBackend
     SCP80 --> CardBackend
@@ -122,6 +138,7 @@ flowchart TB
     PluginRuntime --> RuntimePaths
     Crypto --> StateDir
     CardBackend --> ApduRecorder
+    GuiServer --> ApduRecorder
     SCP03 --> PySim
     SCP11 --> PySim
     Tools --> PySim
@@ -130,6 +147,7 @@ flowchart TB
     Tests --> SCP11
     Tests --> SIMCARD
     Tests --> Tools
+    Tests --> GuiServer
 ```
 
 ## 4. Interdependency matrix
@@ -140,17 +158,18 @@ The table below shows the operational dependency shape of each major subsystem.
 |-----------|----------|-------|---------|----------|------------------|--------------------------|-------|
 | `SCP03` | Primary | Primary | No | Optional | Primary | Primary | GlobalPlatform admin shell and filesystem tools |
 | `SCP80` | Primary | Optional | Optional | No | Primary | Primary | OTA builder / send / decode shell |
-| `SCP11.live` | Primary | Primary | Primary | Primary | Primary | Primary | Live relay-oriented shell; plugin-backed `POLL` surface |
-| `SCP11.test` | Primary | Primary | Primary | Primary | Primary | Primary | Test relay shell; plugin-backed `POLL` surface |
+| `SCP11.live` | Primary | Primary | Primary | Primary | Primary | Primary | eSIM management relay shell; LPAd / eIM endpoint control |
 | `SCP11.relay` | Optional | Optional | Primary | Primary | Optional | Optional | Compatibility namespace |
 | `SCP11.local_access` | Primary | Primary | No | Primary | Primary | Primary | Direct `ISD-R` local flow |
-| `SCP11.eim_local` | Primary | Primary | Primary | Primary | Primary | Primary | eIM-local package, localized polling, handover shell, and standalone `IPAd` export |
+| `SCP11.eim_local` | Primary | Primary | Primary | Primary | Primary | Primary | eIM-local package authoring, hotfolders, response logging, and handover shell |
 | `SIMCARD` | Backend | No | No | No | Primary | Primary | In-process simulated UICC / eUICC; selected via `--card-backend sim` for SCP03 / SCP80 / SCP11.local_access |
 | `Tools.HilBridge` | Primary (Linux) | Primary | Optional | No | No | No | SIMtrace2 bridge (`pyudev`, `osmo-remsim-client-st2`); RSPRO 9997, GSMTAP 4729, AT+CSIM transcoder |
 | `Tools.ProfilePackage` | Primary | No | No | Primary | No | No | SAIP tooling and transcode UI |
 | `Tools.SuciTool` | Primary | No | No | No | No | No | File and stdin helper shell built around the external `suci-keytool` tool |
 | `Tools.ApduFuzz` | Primary | Primary | No | No | No | No | Opt-in eUICC APDU mutation fuzzer with hard `--i-mean-it` + allow-list gates |
 | `Tools.EumDiag` | Primary | No | No | No | No | No | EUM / SM-DP+ session-key injection + Wireshark/tshark Lua dissector for BF36 BPPs |
+| `Tools.YggdraCore` *(post-v1 staging)* | Library | No | Optional | No | No | No | In-process AUSF / AAnF stubs + BYO-Open5GS bridge; opt-in FastAPI loopback (`YGGDRASIM_5GCORE_MODE=stub`) |
+| `yggdrasim_common.gui_server` | Optional | No | Primary | No | Primary | Primary | Universal GUI Command Center (`--gui` desktop / `--web-server` remote-lab); requires the `gui` or `gui-server` extra |
 
 ## 5. Complete dependency graph
 
@@ -159,7 +178,6 @@ flowchart LR
     Main["main/main.py"] --> SCP03["SCP03"]
     Main --> SCP80["SCP80"]
     Main --> Live["SCP11.live"]
-    Main --> Test["SCP11.test"]
     Main --> Relay["SCP11.relay"]
     Main --> Local["SCP11.local_access"]
     Main --> EimLocal["SCP11.eim_local"]
@@ -216,7 +234,6 @@ Direct module entry points:
 - `python -m SCP80`
 - `python -m SCP11`
 - `python -m SCP11.live`
-- `python -m SCP11.test`
 - `python -m SCP11.relay`
 - `python -m SCP11.local_access`
 - `python -m SCP11.eim_local`
@@ -225,9 +242,10 @@ Direct module entry points:
 - `python -m Tools.ProfilePackage`
 - `python -m Tools.SuciTool`
 
-`SIMCARD` is a library package with no `__main__`; it is reached
-through the launcher (`--card-backend sim`) or imported directly from
-operator scripts.
+`SIMCARD` and `Tools.YggdraCore` are library packages with no
+`__main__`; they are reached through the launcher (`--card-backend
+sim`), through the GUI Command Center, or imported directly from
+operator scripts. (`Tools.YggdraCore` is post-v1 staging — not part of this release.)
 
 The menu launcher in `main/main.py` remains the umbrella entry point for
 interactive use. The launcher's flag matrix now includes:
@@ -238,6 +256,9 @@ interactive use. The launcher's flag matrix now includes:
   `--sim-import-enable`)
 - `--open-pcap <path>` and `--keybag <path>` for offline HIL pcap
   review
+- `--gui` and `--web-server` (with `--host`, `--port`, `--token-file`,
+  `--tls-cert`, `--tls-key`, `--tls-self-signed`) for the optional
+  Universal GUI Command Center
 - `--doctor` and `--version` diagnostic shortcuts
 
 ## 7. Runtime state and secret flow
@@ -356,29 +377,27 @@ flowchart TB
     Shared --> Transport
 ```
 
-Relay flavors:
+Relay surfaces:
 
-- `SCP11.live` is the production-oriented relay shell.
-- `SCP11.test` mirrors the live shell with test-certificate defaults.
+- `SCP11.live` is the eSIM management relay shell.
+- `SCP11.test` is an import compatibility namespace, not a launcher surface.
 - `SCP11.relay` is mainly a compatibility namespace.
 
 Local flavors:
 
 - `SCP11.local_access` performs direct local `ISD-R` flows such as
   `DISCOVER`, metadata operations, and `LOAD-PROFILE`.
-- `SCP11.eim_local` layers eIM package authoring, localized polling,
-  hotfolder execution, response logging, handover orchestration, and an
-  adapter-first standalone `IPAd` runner on top of the local SCP11 stack.
+- `SCP11.eim_local` layers eIM package authoring, hotfolder execution,
+  response logging, handover orchestration, and local eIM command helpers on
+  top of the local SCP11 stack.
 
 Shared state in SCP11:
 
 - relay shells persist per-card settings by `EID`
 - local access persists selected certificate, profile, and metadata state by
   `EID`
-- relay and eIM-local polling surfaces depend on the optional `polling`
-  capability when that plugin is present
 - eIM local persists eIM identity counters and runtime markers in the shared
-  inventory and keeps poll-result evidence in SQLite and JSONL logs
+  inventory and keeps response evidence in SQLite and JSONL logs
 - the Local eIM endpoint identity in `Workspace/LocalEIM/eim_identity.json` is
   intentionally separate from the simulated card's default BF55 identity in
   `Workspace/SIMCARD/eim_identity.json`
@@ -390,23 +409,16 @@ Optional plugin extension path:
 ```mermaid
 flowchart LR
     Live["SCP11.live"] --> PluginRuntime["yggdrasim_common/plugin_runtime.py"]
-    Test["SCP11.test"] --> PluginRuntime
     EimLocal["SCP11.eim_local"] --> PluginRuntime
     PluginRuntime --> Plugins["plugins/"]
-    Plugins --> Polling["polling capability"]
-    Polling --> Live
-    Polling --> Test
-    Polling --> EimLocal
 ```
 
 Plugin notes:
 
 - `yggdrasim_common/plugin_runtime.py` scans `plugins/` from the active runtime root
-- the current shipped contract reserves the `polling` capability name
-- `SCP11.live` and `SCP11.test` use that capability to expose relay `POLL`
-- `SCP11.eim_local` uses the same capability for localized `IPAE-*` polling
-- `SCP11.eim_local/ipad_standalone.py` is intentionally separate from the
-  plugin runtime so it can be exported into external Python environments
+- shipped source code does not assume a plugin capability is present
+- eIM-local standalone exports stay separate from the plugin runtime so they
+  can be moved into external Python environments when needed
 - seeded fake-eIM peer-provisioning artifacts live under
   `Workspace/LocalEIM/eim_packages/` and remain file-based rather than plugin-owned
 - the wrapper-level simulator override surface owns card-side defaults such as
@@ -488,7 +500,81 @@ the PC/SC reader and exposes:
 - a `supervisor.py` health-checker / restarter, suitable for
   `systemd --user` deployment (see `guides/systemd/`)
 
-## 13. Profile package tooling architecture
+## 13. YggdraCore 5G core stub architecture
+
+> **Status: post-v1 staging.** Not part of the v1.0.0 frozen release tag.
+
+`Tools/YggdraCore/` is a library-only package that wraps the SIMCARD
+5G AKA / AKMA primitives so an operator can drive a complete
+`Nausf_UEAuthentication_Authenticate` round trip without standing up
+Open5GS. It is opt-in: nothing in the default install path imports
+FastAPI, uvicorn, or pymongo until the operator explicitly turns the
+HTTP loopback or the Open5GS bridge on.
+
+```mermaid
+flowchart LR
+    Subscriber["SubscriptionStore<br/>(SUPI, K, OPc, AMF, SQN, MCC/MNC, RID)"] --> Ausf["AusfStub<br/>start_ue_authentication / confirm_5g_aka"]
+    Ausf --> Aka5g["SIMCARD.aka_5g<br/>derive_res_star / derive_k_ausf / derive_k_seaf"]
+    Ausf --> Akma["SIMCARD.akma<br/>derive_k_akma / derive_a_tid / format_a_kid"]
+    Ausf --> Aanf["AAnFStub<br/>register / application_key_get"]
+    Ausf --> Http["http_app.py<br/>FastAPI loopback (opt-in)"]
+    Subscriber --> Bridge["open5gs_bridge.py<br/>BYO Open5GS provisioning"]
+    Bridge --> Mongo["MongoDB<br/>open5gs.subscribers"]
+```
+
+Safety gates:
+
+- `YGGDRASIM_5GCORE_MODE=stub` must be set before `http_app.py` will
+  bind a socket. Anything else is a no-op with a friendly stderr
+  message.
+- `http_app.py` rejects non-loopback bind addresses unless
+  `YGGDRASIM_5GCORE_ALLOW_NONLOOPBACK=1` is set, so a typo can never
+  surface a stub AUSF on a public NIC.
+- `open5gs_bridge.py` is a no-op on hosts without an `open5gs-*`
+  binary on `$PATH`. Every YggdraSIM-provisioned subscriber doc
+  carries a `_yggdrasim_provisioned` marker so a later
+  `purge_yggdrasim` removes only its own entries.
+
+## 14. Universal GUI architecture
+
+`yggdrasim_common/gui_server/` is the optional Universal GUI
+Command Center. It is installed via the `gui` or `gui-server` extra
+and never imported until the operator passes `--gui` or
+`--web-server`.
+
+```mermaid
+flowchart LR
+    Cli["main.main --gui | --web-server"] --> AppFactory["gui_server/app.py<br/>create_app / run_desktop / run_web_server"]
+    AppFactory --> Routes["gui_server/routes/*"]
+    Routes --> Actions["gui_server/actions/*<br/>typed action registry"]
+    Actions --> SCP03["SCP03.logic.*"]
+    Actions --> Live["SCP11.live.*"]
+    Actions --> Local["SCP11.local_access.*"]
+    Actions --> Profile["Tools.ProfilePackage.*"]
+    Actions --> Sim["SIMCARD.*"]
+    Actions --> Hil["Tools.HilBridge.*"]
+    AppFactory --> Sessions["gui_server/sessions.py<br/>SessionManager"]
+    AppFactory --> Recorder["yggdrasim_common.apdu_recorder<br/>get_recorder()"]
+    Sessions --> Recorder
+    AppFactory --> Auth["gui_server/auth.py<br/>FailureRateLimiter"]
+```
+
+Properties:
+
+- the action registry is typed: every action declares its inputs,
+  output renderer, and confirmation policy so the SPA auto-builds the
+  form
+- the bottom-dock APDU tab subscribes to the process-wide recorder
+  via WebSocket, so any module that goes through
+  `card_backend.create_card_connection` shows up live
+- `--web-server` requires a bearer token (`--token-file`) and supports
+  BYO TLS (`--tls-cert` / `--tls-key`) or generated self-signed
+  (`--tls-self-signed`, persisted under `state/gui_tls/`)
+- xterm.js per-tab PTY bridges back the C-6 sub-shell handoffs so an
+  operator can drop into `STK-SHELL` or `python -m SCP80` without
+  leaving the browser
+
+## 15. Profile package tooling architecture
 
 `Tools/ProfilePackage` is a file-oriented tooling surface rather than a card
 session shell.
@@ -570,7 +656,7 @@ Adding a new structured editor:
    `_drive_with_callback` so assertions run while the editor is mounted —
    queries against widget DOM state must execute inside the active pilot.
 
-## 14. Dependencies
+## 16. Dependencies
 
 High-signal Python dependencies:
 
@@ -594,7 +680,7 @@ Non-Python operational dependencies:
 - network access for relay and eIM endpoint workflows
 - `gpg` only when encrypted inventory storage is enabled
 
-## 15. Tests and maintenance
+## 17. Tests and maintenance
 
 Documentation and architecture changes should stay aligned with:
 
@@ -621,6 +707,8 @@ Documentation and architecture changes should stay aligned with:
 - `../SCP11/shared/README.md`
 - `../SIMCARD/`
 - `../Tools/HilBridge/`
+- `../Tools/YggdraCore/` (post-v1 staging — not part of this release.)
+- `../yggdrasim_common/gui_server/`
 - `../plugins/README.md`
 
 When a new cross-module dependency is added, update both:

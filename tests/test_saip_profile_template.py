@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 import tempfile
 import unittest
 from pathlib import Path
@@ -20,22 +23,22 @@ class SaipProfileTemplateTests(unittest.TestCase):
     def test_parse_placeholder_assignment_tokens_accepts_wrapped_names(self) -> None:
         assignments = parse_placeholder_assignment_tokens(
             [
-                "{ICCID}=89881111111111111112",
+                "{ICCID}=89461111111111111112",
                 "[IMSI]=1234567812345678",
             ]
         )
 
-        self.assertEqual(assignments["ICCID"], "89881111111111111112")
+        self.assertEqual(assignments["ICCID"], "89461111111111111112")
         self.assertEqual(assignments["IMSI"], "1234567812345678")
 
     def test_encode_iccid_helpers(self) -> None:
         self.assertEqual(
-            encode_iccid_header_hex("89881111111111111112"),
-            "89881111111111111112",
+            encode_iccid_header_hex("89461111111111111112"),
+            "89461111111111111112",
         )
         self.assertEqual(
-            encode_iccid_ef_hex("89881111111111111112"),
-            "98881111111111111121",
+            encode_iccid_ef_hex("89461111111111111112"),
+            "98641111111111111121",
         )
 
     def test_encode_imsi_helper_accepts_even_digit_count(self) -> None:
@@ -49,11 +52,11 @@ class SaipProfileTemplateTests(unittest.TestCase):
             "intro": ["Read 3 PEs from file '/tmp/demo.der'"],
             "sections": {
                 "header": {
-                    "iccid": bytes.fromhex("89881111111111111112"),
+                    "iccid": bytes.fromhex("89461111111111111112"),
                 },
                 "mf": {
                     "ef-iccid": [
-                        ("fillFileContent", bytes.fromhex("98881111111111111121")),
+                        ("fillFileContent", bytes.fromhex("98641111111111111121")),
                     ],
                 },
                 "usim": {
@@ -67,7 +70,7 @@ class SaipProfileTemplateTests(unittest.TestCase):
         tagged, summaries = build_placeholder_template_document(
             document,
             {
-                "ICCID": "89881111111111111112",
+                "ICCID": "89461111111111111112",
                 "IMSI": "1234567812345678",
             },
         )
@@ -75,8 +78,8 @@ class SaipProfileTemplateTests(unittest.TestCase):
         self.assertIn("ICCID", tagged["__ygg_token_defs__"])
         self.assertIn("ICCID_EF", tagged["__ygg_token_defs__"])
         self.assertIn("IMSI", tagged["__ygg_token_defs__"])
-        self.assertEqual(tagged["__ygg_token_defs__"]["ICCID"]["hex"], "89881111111111111112")
-        self.assertEqual(tagged["__ygg_token_defs__"]["ICCID_EF"]["hex"], "98881111111111111121")
+        self.assertEqual(tagged["__ygg_token_defs__"]["ICCID"]["hex"], "89461111111111111112")
+        self.assertEqual(tagged["__ygg_token_defs__"]["ICCID_EF"]["hex"], "98641111111111111121")
         self.assertEqual(tagged["__ygg_token_defs__"]["IMSI"]["hex"], "091132547618325476F8")
         self.assertEqual(tagged["__ygg_placeholder_style__"], "brace")
         self.assertEqual(tagged["sections"]["header"]["iccid"]["hex"], "{ICCID}")
@@ -106,13 +109,13 @@ class SaipProfileTemplateTests(unittest.TestCase):
         summaries = apply_placeholder_overrides_to_loaded_document(
             loaded,
             {
-                "ICCID": "89881111111111111112",
+                "ICCID": "89461111111111111112",
                 "PAYLOAD": "FEED",
             },
         )
 
-        self.assertEqual(loaded["__ygg_token_defs__"]["ICCID"]["hex"], "89881111111111111112")
-        self.assertEqual(loaded["__ygg_token_defs__"]["ICCID_EF"]["hex"], "98881111111111111121")
+        self.assertEqual(loaded["__ygg_token_defs__"]["ICCID"]["hex"], "89461111111111111112")
+        self.assertEqual(loaded["__ygg_token_defs__"]["ICCID_EF"]["hex"], "98641111111111111121")
         self.assertEqual(loaded["__ygg_token_defs__"]["PAYLOAD"]["hex"], "FEED")
         self.assertEqual(loaded["__ygg_placeholder_style__"], "brace")
         self.assertIn("ICCID override -> ICCID + ICCID_EF", summaries)
@@ -151,12 +154,12 @@ class SaipProfileTemplateTests(unittest.TestCase):
 
     def test_validate_batch_record_assignments_accepts_typed_iccid_mapping(self) -> None:
         assignments = validate_batch_record_assignments(
-            {"ICCID": "89881111111111111112", "IMSI": "1234567812345678"},
+            {"ICCID": "89461111111111111112", "IMSI": "1234567812345678"},
             template_placeholders={"ICCID", "ICCID_EF", "IMSI"},
             template_token_defs={},
         )
 
-        self.assertEqual(assignments["ICCID"], "89881111111111111112")
+        self.assertEqual(assignments["ICCID"], "89461111111111111112")
         self.assertEqual(assignments["IMSI"], "1234567812345678")
 
     def test_load_batch_placeholder_records_csv(self) -> None:
@@ -164,8 +167,8 @@ class SaipProfileTemplateTests(unittest.TestCase):
             data_path = Path(temp_dir) / "batch.csv"
             data_path.write_text(
                 "ICCID,IMSI\n"
-                "89881111111111111112,1234567812345678\n"
-                "89881111111111111113,1234567812345679\n",
+                "89461111111111111112,1234567812345678\n"
+                "89461111111111111113,1234567812345679\n",
                 encoding="utf-8",
             )
 
@@ -173,16 +176,16 @@ class SaipProfileTemplateTests(unittest.TestCase):
 
         self.assertEqual(len(records), 2)
         self.assertEqual(records[0].label, "csv row 2")
-        self.assertEqual(records[0].values["ICCID"], "89881111111111111112")
+        self.assertEqual(records[0].values["ICCID"], "89461111111111111112")
         self.assertEqual(records[1].values["IMSI"], "1234567812345679")
 
     def test_batch_output_stem_prefers_iccid(self) -> None:
         stem = batch_output_stem(
-            {"ICCID": "89881111111111111112", "IMSI": "1234567812345678"},
+            {"ICCID": "89461111111111111112", "IMSI": "1234567812345678"},
             index=7,
         )
 
-        self.assertEqual(stem, "profile_iccid_89881111111111111112")
+        self.assertEqual(stem, "profile_iccid_89461111111111111112")
 
 
 if __name__ == "__main__":

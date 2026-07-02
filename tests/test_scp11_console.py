@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 import unittest
 import importlib.util
 import sys
@@ -121,7 +124,7 @@ class SCP11ConsoleStatusDecodeTests(unittest.TestCase):
 
     def test_decode_euicc_configured_data_extracts_addresses(self):
         default_smdp = b"rsp.example.com"
-        primary_smds = b"lpa.ds.gsma.com"
+        primary_smds = b"root-smds.example.com"
         additional_smds_1 = b"smds1.example.com"
         additional_smds_2 = b"smds2.example.com"
         allowed_ci_pkid = b"\xAA\xBB\xCC\xDD"
@@ -141,7 +144,7 @@ class SCP11ConsoleStatusDecodeTests(unittest.TestCase):
         decoded = self.console._decode_euicc_configured_data(payload)
 
         self.assertEqual(decoded["default_smdp"], "rsp.example.com")
-        self.assertEqual(decoded["root_smds_primary"], "lpa.ds.gsma.com")
+        self.assertEqual(decoded["root_smds_primary"], "root-smds.example.com")
         self.assertEqual(
             decoded["root_smds_additional"],
             ["smds1.example.com", "smds2.example.com"],
@@ -172,12 +175,31 @@ class SCP11ConsoleStatusDecodeTests(unittest.TestCase):
         self.assertIn("PP Version", rendered)
         self.assertIn("v255.255.255 (FFFFFF)", rendered)
         self.assertIn("IPA Mode", rendered)
-        self.assertIn("ipae (IPAe is active)", rendered)
+        self.assertIn("Mode 1 active", rendered)
         self.assertIn("IoT Specific Info", rendered)
         self.assertIn("eCall Supported", rendered)
         self.assertIn("SGP.32 Validation", rendered)
         self.assertNotIn("PP Rules", rendered)
         self.assertNotIn("eUICC Category       : v2.3.0", rendered)
+
+    def test_print_get_certs_compact_includes_full_der_hex(self):
+        eum = bytes.fromhex("3003020101")
+        euicc = bytes.fromhex("3003020102")
+        response = tlv(
+            bytes.fromhex("BF56"),
+            tlv(bytes.fromhex("A5"), eum) + tlv(bytes.fromhex("A6"), euicc),
+        )
+
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            self.console._print_get_certs_compact(response)
+
+        rendered = output.getvalue()
+
+        self.assertIn("EUM Cert Bytes", rendered)
+        self.assertIn("eUICC Cert Bytes", rendered)
+        self.assertIn(f"EUM Cert DER Hex     : {eum.hex().upper()}", rendered)
+        self.assertIn(f"eUICC Cert DER Hex   : {euicc.hex().upper()}", rendered)
 
     def test_build_enable_profile_payload_matches_expected_shape(self):
         payload = self.console._build_profile_command_payload(
@@ -194,14 +216,6 @@ class SCP11ConsoleStatusDecodeTests(unittest.TestCase):
             value_hex="A0000005591010FFFFFFFF8900001100",
         )
         self.assertEqual(payload.hex().upper(), "BF33124F10A0000005591010FFFFFFFF8900001100")
-
-    def test_queue_modem_refresh_stays_silent_when_hil_bridge_is_unavailable(self):
-        output = io.StringIO()
-        with contextlib.redirect_stdout(output):
-            with mock.patch.object(console_module, "trigger_card_relay_modem_refresh", return_value=None):
-                self.console._queue_modem_refresh("DeleteProfile")
-
-        self.assertEqual(output.getvalue(), "")
 
     def test_build_remove_notification_payload(self):
         payload = self.console._build_remove_notification_payload(7)
@@ -238,7 +252,7 @@ class SCP11ConsoleStatusDecodeTests(unittest.TestCase):
     def test_resolve_profile_target_by_decimal_iccid_prefers_encoded_metadata_value(self):
         self.console._fetch_profiles = lambda: [
             console_module.ProfileMetadataView(
-                iccid="89880811111111111112",
+                iccid="89460811111111111112",
                 aid="A0000005591010FFFFFFFF8900001303",
                 state="DISABLED",
                 profile_class="OPER",
@@ -249,11 +263,11 @@ class SCP11ConsoleStatusDecodeTests(unittest.TestCase):
             )
         ]
 
-        resolved = self.console._resolve_profile_target("89880811111111111112")
+        resolved = self.console._resolve_profile_target("89460811111111111112")
 
         self.assertEqual(
             resolved,
-            (self.console.TAG_ICCID, "98888011111111111121"),
+            (self.console.TAG_ICCID, "98648011111111111121"),
         )
 
     def test_live_and_test_console_resolve_decimal_and_encoded_iccid_consistently(self):
@@ -267,7 +281,7 @@ class SCP11ConsoleStatusDecodeTests(unittest.TestCase):
             }
             console._fetch_profiles = lambda module=module: [
                 module.ProfileMetadataView(
-                    iccid="89880811111111111112",
+                    iccid="89460811111111111112",
                     aid="A0000005591010FFFFFFFF8900001303",
                     state="DISABLED",
                     profile_class="OPER",
@@ -279,12 +293,12 @@ class SCP11ConsoleStatusDecodeTests(unittest.TestCase):
             ]
 
             self.assertEqual(
-                console._resolve_profile_target("89880811111111111112"),
-                (console.TAG_ICCID, "98888011111111111121"),
+                console._resolve_profile_target("89460811111111111112"),
+                (console.TAG_ICCID, "98648011111111111121"),
             )
             self.assertEqual(
-                console._resolve_profile_target("98888011111111111121"),
-                (console.TAG_ICCID, "98888011111111111121"),
+                console._resolve_profile_target("98648011111111111121"),
+                (console.TAG_ICCID, "98648011111111111121"),
             )
             self.assertEqual(
                 console._resolve_profile_target("A0000005591010FFFFFFFF8900001303"),
@@ -470,7 +484,7 @@ class SCP11ConsoleStatusDecodeTests(unittest.TestCase):
             ],
         )
 
-    def test_enable_profile_sequence_queues_single_modem_refresh_after_success(self):
+    def test_enable_profile_sequence_runs_without_refresh_side_effect(self):
         profiles = [
             console_module.ProfileMetadataView(
                 iccid="8901000000000000001",
@@ -494,12 +508,10 @@ class SCP11ConsoleStatusDecodeTests(unittest.TestCase):
             ),
         ]
         executed = []
-        refreshes = []
         self.console._collect_profile_metadata = lambda: profiles
         self.console._execute_profile_state_command = lambda resolved, func_tag, action_label: executed.append(
             (resolved, func_tag, action_label)
         ) or True
-        self.console._queue_modem_refresh = lambda action_label, mode="": refreshes.append((action_label, mode))
 
         self.console._run_profile_state_command(
             identifier="8901000000000000002",
@@ -515,16 +527,6 @@ class SCP11ConsoleStatusDecodeTests(unittest.TestCase):
                 ((self.console.TAG_ICCID, "981000000000000000F2"), self.console.TAG_ENABLE_PROFILE, "EnableProfile"),
             ],
         )
-        self.assertEqual(refreshes, [("EnableProfile", "")])
-
-    def test_refresh_modem_command_delegates_to_queue_helper(self):
-        calls = []
-        self.console._queue_modem_refresh = lambda action_label, mode="": calls.append((action_label, mode))
-
-        keep_running = self.console._cmd_refresh_modem("uicc-reset")
-
-        self.assertTrue(keep_running)
-        self.assertEqual(calls, [("RefreshModem", "uicc-reset")])
 
     def test_execute_result_command_syncs_notifications_on_success(self):
         self.console._execute_result_command(
@@ -543,12 +545,12 @@ class SCP11ConsoleStatusDecodeTests(unittest.TestCase):
     def test_set_smdp_address_uses_verified_card_value(self):
         self.console.apdu_channel.configured_data_response = tlv(
             bytes.fromhex("BF3C"),
-            tlv(bytes.fromhex("80"), b"smdpplus2.esim.tst.1ot.mobi"),
+            tlv(bytes.fromhex("80"), b"smdpplus2.smdpp.example.test"),
         )
 
         self.console._set_smdp_address("smdpplus2.esim.tst.1ot")
 
-        self.assertEqual(self.console.current_smdp_address, "smdpplus2.esim.tst.1ot.mobi")
+        self.assertEqual(self.console.current_smdp_address, "smdpplus2.smdpp.example.test")
 
     def test_eim_download_routes_into_orchestrator_flow(self):
         self.console._cmd_eim_download("MATCH-55")
@@ -556,17 +558,17 @@ class SCP11ConsoleStatusDecodeTests(unittest.TestCase):
         self.assertEqual(self.console.orchestrator.eim_poll_calls, [("MATCH-55", 0)])
 
     def test_download_activation_code_updates_es9_base_url_from_server(self):
-        self.console._download_activation_code("1$smdpplus2.esim.tst.1ot.mobi$MATCH-55$1.2.3")
+        self.console._download_activation_code("1$smdpplus2.smdpp.example.test$MATCH-55$1.2.3")
 
-        self.assertEqual(self.console.current_smdp_address, "smdpplus2.esim.tst.1ot.mobi")
-        self.assertEqual(self.console.current_es9_base_url, "https://smdpplus2.esim.tst.1ot.mobi")
+        self.assertEqual(self.console.current_smdp_address, "smdpplus2.smdpp.example.test")
+        self.assertEqual(self.console.current_es9_base_url, "https://smdpplus2.smdpp.example.test")
         self.assertEqual(
             self.console.orchestrator.run_flow_calls,
-            [("MATCH-55", "smdpplus2.esim.tst.1ot.mobi")],
+            [("MATCH-55", "smdpplus2.smdpp.example.test")],
         )
         self.assertEqual(
             self.console.orchestrator.profile_provider.base_url,
-            "https://smdpplus2.esim.tst.1ot.mobi",
+            "https://smdpplus2.smdpp.example.test",
         )
 
 

@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 """Unit tests for ``yggdrasim_common.card_bridge_auth``.
 
 Pure-function module; no network, no card. Every test runs against a
@@ -179,7 +182,7 @@ class LoopbackHostTests(unittest.TestCase):
         self.assertTrue(auth.is_loopback_host("127.5.5.5"))
 
     def test_rejects_public_addresses(self) -> None:
-        for candidate in ("0.0.0.0", "192.168.1.1", "10.0.0.5", "8.8.8.8"):
+        for candidate in ("0.0.0.0", "192.0.2.11", "192.0.2.5", "192.0.2.53"):
             self.assertFalse(auth.is_loopback_host(candidate))
 
     def test_handles_empty_or_whitespace(self) -> None:

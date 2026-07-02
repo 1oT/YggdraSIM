@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 """Twenty-sixth-pass gap-coverage suite for EF.PSISMSC.
 
 3GPP TS 31.102 §4.2.81 places ``EF.PSISMSC`` (FID ``6FE5``)

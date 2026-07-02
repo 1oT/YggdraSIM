@@ -1352,11 +1352,14 @@ class ContentDecoder :
     def decode_imsi (hex_str :str )->dict :
         """Decode EF.IMSI: International Mobile Subscriber Identity (3GPP TS 31.102 §4.2.2).
 
-        Strips the length byte and ODD/EVEN parity nibble; returns the 15-digit IMSI string.
+        The first byte after the length carries the parity / odd-even
+        indicator in its low nibble and the first IMSI digit in its high
+        nibble (see ``SIMCARD.utils.encode_imsi_ef``).  We pick the high
+        nibble as the leading digit and drop the low (parity) nibble.
         """
         try :
             imsi_hex =hex_str [2 :]
-            res =[imsi_hex [1 ]]
+            res =[imsi_hex [0 ]]
             for i in range (2 ,len (imsi_hex ),2 ):
                 res .append (imsi_hex [i +1 ]+imsi_hex [i ])
             return {"imsi":"".join (res ).replace ('F','')}
@@ -1377,36 +1380,207 @@ class ContentDecoder :
         except Exception :
             return {"Error":"AD Decode Error"}
 
-    @staticmethod 
-    def decode_sms_params (hex_str :str )->dict :
-        """Decode EF.SMSP: SMS Parameters record (3GPP TS 23.040 §9.2.12).
+    # TS 24.008 §10.5.4.7 / TS 23.040 §9.1.2.5
+    _TON_LABELS: dict[int, str] = {
+        0: "Unknown",
+        1: "International",
+        2: "National",
+        3: "Network Specific",
+        4: "Subscriber Number",
+        5: "Alphanumeric",
+        6: "Abbreviated",
+        7: "Reserved",
+    }
 
-        Returns indicator flags, SMSC address, destination address, protocol ID, and DCS.
+    _NPI_LABELS: dict[int, str] = {
+        0: "Unknown",
+        1: "ISDN / E.164",
+        3: "Data / X.121",
+        4: "Telex / F.69",
+        5: "SC Specific (6)",
+        8: "National",
+        9: "Private",
+        10: "ERMES",
+        15: "Reserved",
+    }
+
+    # TS 23.040 §9.2.3.9
+    _TP_PID_LABELS: dict[int, str] = {
+        0x00: "Default (SME-to-SME)",
+        0x01: "Short Message Type 0",
+        0x02: "Replace Short Message Type 1",
+        0x03: "Replace Short Message Type 2",
+        0x04: "Replace Short Message Type 3",
+        0x05: "Replace Short Message Type 4",
+        0x06: "Replace Short Message Type 5",
+        0x07: "Replace Short Message Type 6",
+        0x08: "Replace Short Message Type 7",
+        0x1F: "Return Call Message",
+        0x3F: "ANSI-136 R-DATA",
+        0x3E: "ME Data download",
+        0x3D: "ME De-personalization",
+        0x3C: "USIM Data download",
+        0x7F: "SIM Data download",
+    }
+
+    # TS 23.038 §4
+    _TP_DCS_LABELS: dict[int, str] = {
+        0x00: "7-bit default alphabet",
+        0x01: "7-bit default alphabet, class 1",
+        0x02: "7-bit default alphabet, class 2",
+        0x03: "7-bit default alphabet, class 3",
+        0x04: "8-bit data, class 0",
+        0x05: "8-bit data, class 1",
+        0x06: "8-bit data, class 2",
+        0x07: "8-bit data, class 3",
+        0x08: "UCS-2 (16-bit), class 0",
+        0x09: "UCS-2 (16-bit), class 1",
+        0x0A: "UCS-2 (16-bit), class 2",
+        0x0B: "UCS-2 (16-bit), class 3",
+        0x0C: "7-bit, discard (class 0)",
+        0x0D: "7-bit, discard (class 1)",
+        0x0E: "7-bit, discard (class 2)",
+        0x0F: "7-bit, discard (class 3)",
+        0xF0: "7-bit (msg-wait), class 0",
+        0xF1: "7-bit (msg-wait), class 1",
+        0xF2: "7-bit (msg-wait), class 2",
+        0xF3: "7-bit (msg-wait), class 3",
+        0xF4: "8-bit (msg-wait), class 0",
+        0xF5: "8-bit (msg-wait), class 1",
+        0xF6: "8-bit (msg-wait), class 2",
+        0xF7: "8-bit (msg-wait), class 3",
+    }
+
+    @classmethod
+    def _decode_address_field(cls, raw: bytes, sc_addr: bool = False) -> dict[str, object]:
+        """Decode an address field per TS 24.008 §10.5.4.7.
+
+        For SC addresses (TS 24.011 §8.2.5.2) the length byte counts
+        octets including TON/NPI; for destination addresses (TS 23.040
+        §9.1.2.5) the length byte counts digits. 0xFF in either case
+        means the address is not set.
         """
-        try :
-            data =bytes .fromhex (hex_str )
-            if len (data )<12 :
-                return {"SMS Params (Raw)":hex_str }
-            alpha_len =max (0 ,len (data )-28 )
-            alpha =""
-            if alpha_len >0 :
-                alpha =data [:alpha_len ].decode ("utf-8","ignore").strip ("\x00").strip ()
-            p_ind =data [alpha_len ]
-            tp_da =data [alpha_len +1 :alpha_len +13 ]
-            sca =data [alpha_len +13 :alpha_len +25 ]
-            out ={
-            "Parameter Indicators":f"{p_ind:02X}",
-            "TP-Destination Address":tp_da .hex ().upper (),
-            "Service Center Address":sca .hex ().upper (),
-            "TP-PID":f"{data[alpha_len + 25]:02X}",
-            "TP-DCS":f"{data[alpha_len + 26]:02X}",
-            "TP-Validity":f"{data[alpha_len + 27]:02X}",
+        if len(raw) < 2:
+            return {"raw": raw.hex().upper(), "error": "too short for address field"}
+
+        addr_len = raw[0]
+        if addr_len == 0xFF:
+            return {"length": addr_len, "present": False, "call_number": ""}
+
+        ton_npi = raw[1]
+        ext = bool(ton_npi & 0x80)
+        ton = (ton_npi >> 4) & 0x07
+        npi = ton_npi & 0x0F
+
+        bcd_bytes = raw[2:12]
+        nibbles: list[str] = []
+        for byte_val in bcd_bytes:
+            lo = byte_val & 0x0F
+            hi = (byte_val >> 4) & 0x0F
+            nibbles.append(f"{lo:X}")
+            nibbles.append(f"{hi:X}")
+
+        if sc_addr:
+            digits_expected = (addr_len - 1) * 2
+        else:
+            digits_expected = addr_len
+
+        digits = "".join(nibbles[:digits_expected])
+        digits = digits.rstrip("Ff")
+
+        return {
+            "present": True,
+            "call_number": digits,
+            "ton": cls._TON_LABELS.get(ton, f"Reserved ({ton})"),
+            "npi": cls._NPI_LABELS.get(npi, f"Reserved ({npi})"),
+            "ton_npi_raw": f"0x{ton_npi:02X}",
+        }
+
+    @classmethod
+    def _decode_validity_period(cls, vp_byte: int) -> dict[str, object]:
+        """Decode TP-Validity Period relative format per TS 23.040 §9.2.3.12."""
+        if vp_byte == 0xFF:
+            return {"format": "not set", "minutes": 0}
+        if vp_byte <= 143:
+            minutes = (vp_byte + 1) * 5
+            return {"format": "relative (5-min steps)", "minutes": minutes}
+        if vp_byte <= 167:
+            minutes = 12 * 60 + (vp_byte - 143) * 30
+            return {"format": "relative (30-min steps)", "minutes": minutes}
+        if vp_byte <= 196:
+            days = vp_byte - 166
+            return {"format": "relative (days)", "days": days, "minutes": days * 24 * 60}
+        if vp_byte <= 255:
+            weeks = vp_byte - 192
+            return {"format": "relative (weeks)", "weeks": weeks, "minutes": weeks * 7 * 24 * 60}
+        return {"format": "unknown", "raw": vp_byte}
+
+    @classmethod
+    def decode_sms_params(cls, hex_str: str) -> dict:
+        """Decode EF.SMSP per 3GPP TS 31.102 §4.2.6.
+
+        Parses the Parameter Indicators bitmask, TON/NPI + BCD-encoded
+        addresses (TS 24.008 §10.5.4.7), TP-PID, TP-DCS, and TP-Validity
+        Period into structured fields.
+        """
+        try:
+            data = bytes.fromhex(hex_str)
+        except ValueError:
+            return {"SMS Params (Raw)": hex_str}
+
+        if len(data) < 12:
+            return {"SMS Params (Raw)": hex_str}
+
+        try:
+            alpha_len = max(0, len(data) - 28)
+            alpha = ""
+            if alpha_len > 0:
+                alpha = data[:alpha_len].decode("utf-8", "ignore").strip("\x00").strip()
+
+            p_ind = data[alpha_len]
+
+            # Parameter Indicators — inverted bitmask: each bit 0 = field
+            # present, 1 = field absent. Bit 0 (LSB) = TP-DA, bit 1 =
+            # TP-SCA, bit 2 = TP-PID, bit 3 = TP-DCS, bit 4 = TP-VP.
+            pi_flags: dict[str, bool] = {}
+            for idx, label in enumerate(("TP-Destination Address", "TP-Service Centre Address",
+                                          "TP-Protocol Identifier", "TP-Data Coding Scheme",
+                                          "TP-Validity Period")):
+                pi_flags[label] = not bool(p_ind & (1 << idx))
+
+            tp_da_raw = data[alpha_len + 1 : alpha_len + 13]
+            sca_raw = data[alpha_len + 13 : alpha_len + 25]
+            tp_pid = data[alpha_len + 25]
+            tp_dcs = data[alpha_len + 26]
+            tp_vp = data[alpha_len + 27]
+
+            tp_da = cls._decode_address_field(tp_da_raw, sc_addr=False)
+            sca = cls._decode_address_field(sca_raw, sc_addr=True)
+            vp_decoded = cls._decode_validity_period(tp_vp)
+
+            pid_label = cls._TP_PID_LABELS.get(tp_pid, "")
+            dcs_label = cls._TP_DCS_LABELS.get(tp_dcs, "")
+
+            out: dict[str, object] = {
+                "Parameter Indicators": {
+                    "raw": f"0x{p_ind:02X}",
+                    "flags": pi_flags,
+                },
+                "TP-Destination Address": tp_da,
+                "Service Center Address": sca,
+                "TP-PID": f"0x{tp_pid:02X}",
+                "TP-DCS": f"0x{tp_dcs:02X}",
+                "TP-Validity Period": vp_decoded,
             }
-            if alpha :
-                out ["Alpha ID"]=alpha 
-            return out 
-        except Exception :
-            return {"SMS Params (Raw)":f"{hex_str[:64]}..."}
+            if pid_label:
+                out["TP-PID Label"] = pid_label
+            if dcs_label:
+                out["TP-DCS Label"] = dcs_label
+            if alpha:
+                out["Alpha ID"] = alpha
+            return out
+        except Exception:
+            return {"SMS Params (Raw)": hex_str}
 
     @staticmethod 
     def decode_puct (hex_str :str )->dict :

@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """Profile store: tracks enabled/disabled profiles and maps EID profile slots to on-disk state files."""
 from __future__ import annotations
@@ -8,15 +11,20 @@ from typing import Any
 
 from SIMCARD.saip_profile import decode_profile_image
 from SIMCARD.state import (
+    SimProfileApplicationInstance,
+    SimProfileApplicationPackage,
     SimProfileAuthConfig,
+    SimProfileCdmaParameter,
     SimProfileEntry,
     SimProfileFsNode,
     SimProfileImage,
+    SimProfileNonStandardBlob,
     SimProfilePinEntry,
     SimProfilePukEntry,
     SimProfileRfmInstance,
     SimProfileSecurityDomain,
     SimProfileSecurityDomainKey,
+    SimProfileSsimEaptlsBundle,
 )
 from yggdrasim_common.inventory_crypto import (
     read_secret_file_bytes,
@@ -300,6 +308,32 @@ def _load_profile_image_from_json(
         puk_codes=_deserialize_puk_codes(image_data.get("puk_codes")),
         security_domains=_deserialize_security_domains(image_data.get("security_domains")),
         rfm_instances=_deserialize_rfm_instances(image_data.get("rfm_instances")),
+        header_major_version=_coerce_int(image_data.get("header_major_version")) & 0xFF,
+        header_minor_version=_coerce_int(image_data.get("header_minor_version")) & 0xFF,
+        header_pol=_coerce_hex_bytes(image_data.get("header_pol_hex", "")),
+        header_mandatory_services=_coerce_string_tuple(
+            image_data.get("header_mandatory_services")
+        ),
+        header_mandatory_gfste=_coerce_string_tuple(
+            image_data.get("header_mandatory_gfste")
+        ),
+        header_mandatory_aids=_deserialize_header_aids(
+            image_data.get("header_mandatory_aids")
+        ),
+        header_iot_pix=_coerce_hex_bytes(image_data.get("header_iot_pix_hex", "")),
+        cdma_parameter=_deserialize_cdma_parameter(image_data.get("cdma_parameter")),
+        application_packages=_deserialize_application_packages(
+            image_data.get("application_packages")
+        ),
+        application_instances=_deserialize_application_instances(
+            image_data.get("application_instances")
+        ),
+        non_standard_blobs=_deserialize_non_standard_blobs(
+            image_data.get("non_standard_blobs")
+        ),
+        ssim_eaptls_bundles=_deserialize_ssim_eaptls_bundles(
+            image_data.get("ssim_eaptls_bundles")
+        ),
     )
 
 
@@ -338,6 +372,29 @@ def _serialize_profile_image(image: SimProfileImage) -> dict[str, Any]:
         "puk_codes": _serialize_puk_codes(image.puk_codes),
         "security_domains": _serialize_security_domains(image.security_domains),
         "rfm_instances": _serialize_rfm_instances(image.rfm_instances),
+        "header_major_version": int(getattr(image, "header_major_version", 0) or 0) & 0xFF,
+        "header_minor_version": int(getattr(image, "header_minor_version", 0) or 0) & 0xFF,
+        "header_pol_hex": bytes(getattr(image, "header_pol", b"") or b"").hex().upper(),
+        "header_mandatory_services": list(getattr(image, "header_mandatory_services", ()) or ()),
+        "header_mandatory_gfste": list(getattr(image, "header_mandatory_gfste", ()) or ()),
+        "header_mandatory_aids": [
+            {"aid": str(aid or "").strip().upper(), "version_hex": str(version or "").strip().upper()}
+            for aid, version in getattr(image, "header_mandatory_aids", ()) or ()
+        ],
+        "header_iot_pix_hex": bytes(getattr(image, "header_iot_pix", b"") or b"").hex().upper(),
+        "cdma_parameter": _serialize_cdma_parameter(getattr(image, "cdma_parameter", None)),
+        "application_packages": _serialize_application_packages(
+            getattr(image, "application_packages", [])
+        ),
+        "application_instances": _serialize_application_instances(
+            getattr(image, "application_instances", [])
+        ),
+        "non_standard_blobs": _serialize_non_standard_blobs(
+            getattr(image, "non_standard_blobs", [])
+        ),
+        "ssim_eaptls_bundles": _serialize_ssim_eaptls_bundles(
+            getattr(image, "ssim_eaptls_bundles", [])
+        ),
         "nodes": [
             {
                 "path": list(node.path),
@@ -421,6 +478,33 @@ def _coerce_hex_bytes(value: Any) -> bytes:
         return bytes.fromhex(text)
     except ValueError:
         return b""
+
+
+def _coerce_int(value: Any, default: int = 0) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return int(default)
+
+
+def _coerce_string_tuple(value: Any) -> tuple[str, ...]:
+    if isinstance(value, (list, tuple)) is False:
+        return tuple()
+    return tuple(str(item or "").strip() for item in value if len(str(item or "").strip()) > 0)
+
+
+def _deserialize_header_aids(value: Any) -> tuple[tuple[str, str], ...]:
+    if isinstance(value, list) is False:
+        return tuple()
+    decoded: list[tuple[str, str]] = []
+    for item in value:
+        if isinstance(item, dict) is False:
+            continue
+        aid = str(item.get("aid", "") or "").strip().upper()
+        version = str(item.get("version_hex", "") or "").strip().upper()
+        if len(aid) > 0:
+            decoded.append((aid, version))
+    return tuple(decoded)
 
 
 def _coerce_optional_int(value: Any) -> int | None:
@@ -705,6 +789,227 @@ def _deserialize_rfm_instances(value: Any) -> list[SimProfileRfmInstance]:
                 adf_aid=str(item.get("adf_aid", "") or "").strip().upper(),
                 adf_access_domain=_coerce_hex_bytes(item.get("adf_access_domain_hex", "")),
                 adf_admin_access_domain=_coerce_hex_bytes(item.get("adf_admin_access_domain_hex", "")),
+            )
+        )
+    return decoded
+
+
+def _serialize_cdma_parameter(entry: SimProfileCdmaParameter | None) -> dict[str, Any] | None:
+    if entry is None:
+        return None
+    return {
+        "authentication_key_hex": bytes(entry.authentication_key or b"").hex().upper(),
+        "ssd_hex": bytes(entry.ssd or b"").hex().upper(),
+        "hrpd_access_authentication_data_hex": bytes(
+            entry.hrpd_access_authentication_data or b""
+        ).hex().upper(),
+        "simple_ip_authentication_data_hex": bytes(
+            entry.simple_ip_authentication_data or b""
+        ).hex().upper(),
+        "mobile_ip_authentication_data_hex": bytes(
+            entry.mobile_ip_authentication_data or b""
+        ).hex().upper(),
+    }
+
+
+def _deserialize_cdma_parameter(value: Any) -> SimProfileCdmaParameter | None:
+    if isinstance(value, dict) is False:
+        return None
+    authentication_key = _coerce_hex_bytes(value.get("authentication_key_hex", ""))
+    if len(authentication_key) == 0:
+        return None
+    return SimProfileCdmaParameter(
+        authentication_key=authentication_key,
+        ssd=_coerce_hex_bytes(value.get("ssd_hex", "")),
+        hrpd_access_authentication_data=_coerce_hex_bytes(
+            value.get("hrpd_access_authentication_data_hex", "")
+        ),
+        simple_ip_authentication_data=_coerce_hex_bytes(
+            value.get("simple_ip_authentication_data_hex", "")
+        ),
+        mobile_ip_authentication_data=_coerce_hex_bytes(
+            value.get("mobile_ip_authentication_data_hex", "")
+        ),
+    )
+
+
+def _serialize_application_packages(
+    entries: list[SimProfileApplicationPackage],
+) -> list[dict[str, Any]]:
+    return [
+        {
+            "load_package_aid": str(entry.load_package_aid or "").strip().upper(),
+            "security_domain_aid": str(entry.security_domain_aid or "").strip().upper(),
+            "non_volatile_code_limit_hex": bytes(
+                entry.non_volatile_code_limit or b""
+            ).hex().upper(),
+            "load_block_object_hex": bytes(entry.load_block_object or b"").hex().upper(),
+        }
+        for entry in entries or []
+    ]
+
+
+def _deserialize_application_packages(value: Any) -> list[SimProfileApplicationPackage]:
+    decoded: list[SimProfileApplicationPackage] = []
+    if isinstance(value, list) is False:
+        return decoded
+    for item in value:
+        if isinstance(item, dict) is False:
+            continue
+        load_package_aid = str(item.get("load_package_aid", "") or "").strip().upper()
+        if len(load_package_aid) == 0:
+            continue
+        decoded.append(
+            SimProfileApplicationPackage(
+                load_package_aid=load_package_aid,
+                security_domain_aid=str(
+                    item.get("security_domain_aid", "") or ""
+                ).strip().upper(),
+                non_volatile_code_limit=_coerce_hex_bytes(
+                    item.get("non_volatile_code_limit_hex", "")
+                ),
+                load_block_object=_coerce_hex_bytes(item.get("load_block_object_hex", "")),
+            )
+        )
+    return decoded
+
+
+def _serialize_application_instances(
+    entries: list[SimProfileApplicationInstance],
+) -> list[dict[str, Any]]:
+    return [
+        {
+            "application_load_package_aid": str(
+                entry.application_load_package_aid or ""
+            ).strip().upper(),
+            "class_aid": str(entry.class_aid or "").strip().upper(),
+            "instance_aid": str(entry.instance_aid or "").strip().upper(),
+            "privileges_hex": bytes(entry.privileges or b"").hex().upper(),
+            "lifecycle_state": int(entry.lifecycle_state) & 0xFF,
+            "application_specific_parameters_hex": bytes(
+                entry.application_specific_parameters or b""
+            ).hex().upper(),
+            "uicc_toolkit_parameters_hex": bytes(
+                entry.uicc_toolkit_parameters or b""
+            ).hex().upper(),
+            "uicc_access_parameters_hex": bytes(
+                entry.uicc_access_parameters or b""
+            ).hex().upper(),
+            "process_data_hex": [
+                bytes(chunk or b"").hex().upper() for chunk in entry.process_data
+            ],
+        }
+        for entry in entries or []
+    ]
+
+
+def _deserialize_application_instances(value: Any) -> list[SimProfileApplicationInstance]:
+    decoded: list[SimProfileApplicationInstance] = []
+    if isinstance(value, list) is False:
+        return decoded
+    for item in value:
+        if isinstance(item, dict) is False:
+            continue
+        instance_aid = str(item.get("instance_aid", "") or "").strip().upper()
+        if len(instance_aid) == 0:
+            continue
+        decoded.append(
+            SimProfileApplicationInstance(
+                application_load_package_aid=str(
+                    item.get("application_load_package_aid", "") or ""
+                ).strip().upper(),
+                class_aid=str(item.get("class_aid", "") or "").strip().upper(),
+                instance_aid=instance_aid,
+                privileges=_coerce_hex_bytes(item.get("privileges_hex", "")),
+                lifecycle_state=_coerce_int(item.get("lifecycle_state"), 0x07) & 0xFF,
+                application_specific_parameters=_coerce_hex_bytes(
+                    item.get("application_specific_parameters_hex", "")
+                ),
+                uicc_toolkit_parameters=_coerce_hex_bytes(
+                    item.get("uicc_toolkit_parameters_hex", "")
+                ),
+                uicc_access_parameters=_coerce_hex_bytes(
+                    item.get("uicc_access_parameters_hex", "")
+                ),
+                process_data=[
+                    _coerce_hex_bytes(chunk)
+                    for chunk in item.get("process_data_hex", []) or []
+                    if chunk is not None
+                ],
+            )
+        )
+    return decoded
+
+
+def _serialize_non_standard_blobs(
+    entries: list[SimProfileNonStandardBlob],
+) -> list[dict[str, Any]]:
+    return [
+        {
+            "issuer_oid": str(entry.issuer_oid or "").strip(),
+            "content_hex": bytes(entry.content or b"").hex().upper(),
+        }
+        for entry in entries or []
+        if len(str(entry.issuer_oid or "").strip()) > 0
+    ]
+
+
+def _deserialize_non_standard_blobs(value: Any) -> list[SimProfileNonStandardBlob]:
+    decoded: list[SimProfileNonStandardBlob] = []
+    if isinstance(value, list) is False:
+        return decoded
+    for item in value:
+        if isinstance(item, dict) is False:
+            continue
+        issuer_oid = str(item.get("issuer_oid", "") or "").strip()
+        if len(issuer_oid) == 0:
+            continue
+        decoded.append(
+            SimProfileNonStandardBlob(
+                issuer_oid=issuer_oid,
+                content=_coerce_hex_bytes(item.get("content_hex", "")),
+            )
+        )
+    return decoded
+
+
+def _serialize_ssim_eaptls_bundles(
+    entries: list[SimProfileSsimEaptlsBundle],
+) -> list[dict[str, Any]]:
+    return [
+        {
+            "instance_aid": str(entry.instance_aid or "").strip().upper(),
+            "ca_certificate_hex": bytes(entry.ca_certificate or b"").hex().upper(),
+            "client_certificate_hex": bytes(entry.client_certificate or b"").hex().upper(),
+            "client_certificate_chain_hex": bytes(
+                entry.client_certificate_chain or b""
+            ).hex().upper(),
+            "client_private_key_hex": bytes(entry.client_private_key or b"").hex().upper(),
+        }
+        for entry in entries or []
+    ]
+
+
+def _deserialize_ssim_eaptls_bundles(value: Any) -> list[SimProfileSsimEaptlsBundle]:
+    decoded: list[SimProfileSsimEaptlsBundle] = []
+    if isinstance(value, list) is False:
+        return decoded
+    for item in value:
+        if isinstance(item, dict) is False:
+            continue
+        decoded.append(
+            SimProfileSsimEaptlsBundle(
+                instance_aid=str(item.get("instance_aid", "") or "").strip().upper(),
+                ca_certificate=_coerce_hex_bytes(item.get("ca_certificate_hex", "")),
+                client_certificate=_coerce_hex_bytes(
+                    item.get("client_certificate_hex", "")
+                ),
+                client_certificate_chain=_coerce_hex_bytes(
+                    item.get("client_certificate_chain_hex", "")
+                ),
+                client_private_key=_coerce_hex_bytes(
+                    item.get("client_private_key_hex", "")
+                ),
             )
         )
     return decoded

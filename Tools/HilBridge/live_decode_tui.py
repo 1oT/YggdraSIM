@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """HIL-Bridge live-decode TUI: Textual app displaying a real-time decoded APDU transcript with protocol annotations."""
 from __future__ import annotations
@@ -226,6 +229,9 @@ _LIGHT_THEME_NAMES = frozenset({
 
 _SUMMARY_GROUP_ORDER = (
     "Channels",
+    "OTA SMS",
+    "SMS",
+    "Voice",
     "STK",
     "ETSI FS",
     "Timer",
@@ -261,6 +267,44 @@ _SUMMARY_STK_MARKERS = (
     "LOCATION STATUS",
     "ACCESS TECHNOLOGY CHANGE",
     "NETWORK SEARCH MODE CHANGE",
+)
+
+_SUMMARY_OTA_SMS_MARKERS = (
+    "SMS-PP DOWNLOAD",
+    "SMS PP DOWNLOAD",
+    "SMS_PP_DOWNLOAD",
+    "OTA SMS",
+    "SCP80",
+)
+
+_SUMMARY_SMS_MARKERS = (
+    "SMS-SUBMIT",
+    "SMS-DELIVER",
+    "SMS-STATUS-REPORT",
+    "SMS-COMMAND",
+    "SMS TPDU",
+    "TPDU SMS",
+    "GSM SMS",
+    "3GPP SMS",
+    "CP-DATA",
+    "RP-DATA",
+    "SEND SHORT MESSAGE",
+    "SHORT MESSAGE SERVICE",
+)
+
+_SUMMARY_VOICE_MARKERS = (
+    "SET UP CALL",
+    "SETUP CALL",
+    "CALL SETUP",
+    "CALL CONTROL",
+    "CALL CONNECTED",
+    "CALL DISCONNECTED",
+    "CALL DISCONNECT",
+    "CALL RELEASE",
+    "MT CALL",
+    "MO CALL",
+    "VOICE CALL",
+    "GSM VOICE",
 )
 
 _SUMMARY_FS_MARKERS = (
@@ -467,6 +511,25 @@ def _summary_matches_marker(summary_text: str, markers: tuple[str, ...]) -> bool
     return False
 
 
+def _summary_telephony_group_name(summary_text: str) -> str | None:
+    normalized = str(summary_text or "").upper()
+    if _summary_matches_marker(normalized, _SUMMARY_OTA_SMS_MARKERS):
+        return "OTA SMS"
+    if _summary_matches_marker(normalized, _SUMMARY_VOICE_MARKERS):
+        return "Voice"
+    if _summary_matches_marker(normalized, _SUMMARY_SMS_MARKERS):
+        return "SMS"
+    if re.search(r"\b(?:MO|MT)-SMS\b", normalized) is not None:
+        return "SMS"
+    if re.search(r"\bSMS\b.*\bTPDU\b|\bTPDU\b.*\bSMS\b", normalized) is not None:
+        return "SMS"
+    if re.search(r"\bCC (?:SETUP|CONNECT|DISCONNECT|RELEASE)\b", normalized) is not None:
+        return "Voice"
+    if re.search(r"\bEVENT DOWNLOAD\b.*\bCALL\b", normalized) is not None:
+        return "Voice"
+    return None
+
+
 def _summary_group_name(
     row: PacketSummary,
     annotation: StatefulFrameAnnotation | None,
@@ -479,10 +542,13 @@ def _summary_group_name(
     timer_context = _summary_timer_context(annotation)
     if timer_context is not None:
         return "Timer"
+    summary_text = _summary_grouping_text(row, annotation)
+    telephony_group = _summary_telephony_group_name(summary_text)
+    if telephony_group is not None:
+        return telephony_group
     stk_context = _summary_stk_context(annotation)
     if stk_context is not None:
         return "STK"
-    summary_text = _summary_grouping_text(row, annotation)
     # ISO/IEC 7816-4 MANAGE CHANNEL (INS=0x70) advertises itself in
     # the tshark info column as "MANAGE CHANNEL Operation=Open
     # Channel ...", whose "OPEN CHANNEL" substring would otherwise
@@ -1092,6 +1158,14 @@ def _summary_group_poll_key(poll_index: int) -> str:
     return f"Channels::POLL{int(poll_index)}"
 
 
+def _summary_poll_root_key() -> str:
+    return "POLL"
+
+
+def _summary_poll_root_title() -> str:
+    return "Poll"
+
+
 def _summary_poll_top_level_key(poll_index: int) -> str:
     return f"POLL::{int(poll_index)}"
 
@@ -1170,12 +1244,43 @@ def _summary_channel_poll_title(poll_index: int) -> str:
     return f"Poll {int(poll_index)}"
 
 
-def _summary_poll_top_level_title(poll_index: int, poll_fqdn: str) -> str:
-    base_title = _summary_channel_poll_title(int(poll_index))
-    normalized_fqdn = str(poll_fqdn or "").strip()
-    if len(normalized_fqdn) == 0:
-        return base_title
-    return f"{base_title} - {normalized_fqdn}"
+def _summary_poll_target_title(
+    legacy_poll_index: int,
+    poll_sessions: list[tuple[int, str, list[PacketSummary]]],
+    annotations: dict[int, StatefulFrameAnnotation],
+) -> str:
+    normalized_fqdn = str(_resolve_poll_fqdn(poll_sessions, annotations) or "").strip()
+    if len(normalized_fqdn) > 0:
+        return normalized_fqdn
+    for _session_id, _session_title, session_rows in poll_sessions:
+        endpoint_text, _apn_text = _extract_session_endpoint_and_apn(
+            session_rows,
+            annotations,
+        )
+        endpoint_text = str(endpoint_text or "").strip()
+        if len(endpoint_text) > 0:
+            return endpoint_text
+    return f"Target {int(legacy_poll_index)}"
+
+
+def _summary_poll_target_identity(
+    target_title: str,
+    legacy_poll_index: int,
+) -> str:
+    normalized = _normalized_summary_label_text(target_title).lower()
+    if normalized.startswith("target ") and normalized.endswith(str(int(legacy_poll_index))):
+        return f"legacy-target:{int(legacy_poll_index)}"
+    if len(normalized) == 0:
+        return f"legacy-target:{int(legacy_poll_index)}"
+    return normalized
+
+
+def _summary_poll_target_key(target_title: str, fallback_index: int) -> str:
+    normalized = _normalized_summary_label_text(target_title).lower()
+    slug = re.sub(r"[^a-z0-9_.:-]+", "_", normalized).strip("_")
+    if len(slug) == 0:
+        slug = f"target_{int(fallback_index)}"
+    return f"TARGET::{slug}"
 
 
 _SESSION_ENDPOINT_APN_PATTERN = re.compile(
@@ -1387,6 +1492,41 @@ def _resolve_poll_fqdn(
         if len(candidate) > 0:
             return candidate
     return ""
+
+
+def _summary_partition_poll_cycles_with_targets(
+    poll_buckets: list[tuple[int, list[tuple[int, str, list[PacketSummary]]]]],
+    annotations: dict[int, StatefulFrameAnnotation],
+) -> list[tuple[int, list[tuple[str, str, list[tuple[int, str, list[PacketSummary]]]]]]]:
+    target_occurrences: dict[str, int] = {}
+    cycle_targets_by_index: dict[
+        int,
+        list[tuple[str, str, list[tuple[int, str, list[PacketSummary]]]]],
+    ] = {}
+    ordered_cycle_indices: list[int] = []
+    for legacy_poll_index, poll_sessions in poll_buckets:
+        target_title = _summary_poll_target_title(
+            legacy_poll_index,
+            poll_sessions,
+            annotations,
+        )
+        target_identity = _summary_poll_target_identity(
+            target_title,
+            legacy_poll_index,
+        )
+        target_occurrences[target_identity] = target_occurrences.get(target_identity, 0) + 1
+        cycle_index = target_occurrences[target_identity]
+        if cycle_index not in cycle_targets_by_index:
+            cycle_targets_by_index[cycle_index] = []
+            ordered_cycle_indices.append(cycle_index)
+        target_key = _summary_poll_target_key(target_title, legacy_poll_index)
+        cycle_targets_by_index[cycle_index].append(
+            (target_key, target_title, list(poll_sessions))
+        )
+    return [
+        (cycle_index, cycle_targets_by_index[cycle_index])
+        for cycle_index in ordered_cycle_indices
+    ]
 
 
 def _summary_channel_session_role_title(
@@ -1654,10 +1794,81 @@ def _summary_visible_text_parts(
     return (primary_text, None)
 
 
+def _summary_filter_tokens(filter_text: str) -> tuple[str, ...]:
+    normalized = _normalized_summary_label_text(filter_text).lower()
+    if len(normalized) == 0:
+        return ()
+    return tuple(part for part in normalized.split(" ") if len(part) > 0)
+
+
+def _summary_filter_haystack(
+    row: PacketSummary,
+    annotation: StatefulFrameAnnotation | None,
+    *,
+    show_expert_details: bool,
+) -> str:
+    primary_text, secondary_text = _summary_visible_text_parts(
+        row,
+        annotation,
+        show_expert_details=show_expert_details,
+    )
+    parts = [
+        row.info,
+        primary_text,
+        secondary_text or "",
+        str(row.protocol or ""),
+    ]
+    if annotation is not None:
+        parts.append(str(annotation.summary_suffix or ""))
+    return _normalized_summary_label_text(" ".join(parts)).lower()
+
+
+def _summary_row_matches_filter(
+    row: PacketSummary,
+    annotation: StatefulFrameAnnotation | None,
+    filter_text: str,
+    *,
+    show_expert_details: bool,
+) -> bool:
+    tokens = _summary_filter_tokens(filter_text)
+    if len(tokens) == 0:
+        return True
+    haystack = _summary_filter_haystack(
+        row,
+        annotation,
+        show_expert_details=show_expert_details,
+    )
+    return all(token in haystack for token in tokens)
+
+
+def _filter_summary_rows(
+    rows: list[PacketSummary],
+    annotations: dict[int, StatefulFrameAnnotation],
+    filter_text: str,
+    *,
+    show_expert_details: bool,
+) -> list[PacketSummary]:
+    if len(_summary_filter_tokens(filter_text)) == 0:
+        return list(rows)
+    return [
+        row
+        for row in rows
+        if _summary_row_matches_filter(
+            row,
+            annotations.get(int(row.number)),
+            filter_text,
+            show_expert_details=show_expert_details,
+        )
+    ]
+
+
 def _summary_group_color(group_name: str, palette: TuiThemePalette) -> str:
     return {
         "Channels": palette.bip,
         "BIP": palette.bip,
+        "OTA SMS": palette.security,
+        "SMS": palette.protocol,
+        "Voice": palette.frame,
         "STK": palette.stk,
         "ETSI FS": palette.fs,
         "Timer": palette.timer,
@@ -1978,6 +2189,13 @@ def _classify_queued_row_bucket(row) -> str:
     combined = f"{protocol_text} {info_text}".lower()
     if len(combined.strip()) == 0:
         return "OTHER"
+    telephony_group = _summary_telephony_group_name(combined.upper())
+    if telephony_group == "OTA SMS":
+        return "OTA"
+    if telephony_group == "SMS":
+        return "SMS"
+    if telephony_group == "Voice":
+        return "VOICE"
     if "sat" in combined or "stk" in combined or "proactive" in combined or " bip" in f" {combined}":
         return "STK"
     if "apdu" in combined or "sim" in combined or "uicc" in combined or "gsmtap" in combined:
@@ -2029,6 +2247,8 @@ def _reset_capture_runtime_state(app_like) -> None:
     app_like._displayed_selected_frame_number = None
     if hasattr(app_like, "_highlighted_node_key"):
         app_like._highlighted_node_key = None
+    if hasattr(app_like, "_summary_filter_text"):
+        app_like._summary_filter_text = ""
     app_like._last_parse_completed_monotonic = None
     app_like._last_parse_row_count = 0
     app_like._requested_detail_frame = None
@@ -2129,6 +2349,8 @@ def _hil_decode_keybind_help_text() -> str:
             "Ctrl+F8    Toggle expert details",
             "F9          Toggle bytes pane",
             "F10         Open pane layout menu",
+            "/           Search summary",
+            "Ctrl+G      Clear summary search",
             "F11         Export trace snapshot",
             "Shift+F11  Export clipped to current context",
             "Ctrl+F11   Clear current view",
@@ -2952,6 +3174,7 @@ def _populate_summary_tree(
     expanded_group_names: set[str],
     palette: TuiThemePalette,
     show_expert_details: bool,
+    empty_label: str = "",
 ) -> dict[int, object]:
     from rich.text import Text
     normalized_view_mode = _normalize_summary_view_mode(view_mode)
@@ -2961,11 +3184,15 @@ def _populate_summary_tree(
     root.expand()
     frame_nodes: dict[int, object] = {}
     if len(rows) == 0:
-        waiting_label = "Waiting for packet summaries before building the context tree."
-        if normalized_view_mode == _SUMMARY_VIEW_FLAT:
+        custom_empty_label = str(empty_label or "").strip()
+        if len(custom_empty_label) > 0:
+            waiting_label = custom_empty_label
+        elif normalized_view_mode == _SUMMARY_VIEW_FLAT:
             waiting_label = "Waiting for packet summaries before building the flat packet list."
         elif normalized_view_mode == _SUMMARY_VIEW_POLL:
             waiting_label = "Waiting for packet summaries before building the poll cycle view."
+        else:
+            waiting_label = "Waiting for packet summaries before building the context tree."
         root.add(
             Text(waiting_label, style=f"dim {palette.waiting}"),
             allow_expand=False,
@@ -3054,16 +3281,18 @@ def _populate_summary_tree(
             group_bucket_local = grouped_rows_local.setdefault(group_name_local, [])
             group_bucket_local.append(section_row)
 
-        # Render every channel Poll at the section's top level. The
-        # legacy "Channels" wrapper is dropped entirely so the tree
-        # reads: Poll 1 - FQDN -> DNS - IP - APN / eIM - IP - APN,
-        # with STK, ETSI FS, Timer, etc. appearing as siblings below
-        # the polls. When a key_prefix is supplied (multiple card
-        # sessions), every expand_key is scoped so collapsing Poll 1
-        # in Card Session 1 doesn't collapse Poll 1 in Card Session 2.
+        # Render channel traffic as Poll -> Poll N -> target -> DNS/eIM ->
+        # frames. The legacy "Channels" wrapper is dropped entirely, so
+        # STK, ETSI FS, Timer, etc. appear as siblings of Poll. When a
+        # key_prefix is supplied (multiple card sessions), every expand_key
+        # is scoped so collapsing Poll 1 in Card Session 1 doesn't collapse
+        # Poll 1 in Card Session 2.
         channel_group_rows = grouped_rows_local.get("Channels", [])
         poll_buckets: list[
             tuple[int, list[tuple[int, str, list[PacketSummary]]]]
+        ] = []
+        poll_cycles: list[
+            tuple[int, list[tuple[str, str, list[tuple[int, str, list[PacketSummary]]]]]]
         ] = []
         unbound_channel_rows: list[PacketSummary] = []
         if len(channel_group_rows) > 0:
@@ -3075,14 +3304,67 @@ def _populate_summary_tree(
                 session_buckets,
                 annotations,
             )
-        for poll_index, poll_sessions in poll_buckets:
-            poll_frame_count = 0
-            for _session_id, _session_title, session_rows in poll_sessions:
-                poll_frame_count += len(session_rows)
-            poll_key = f"{key_prefix}{_summary_poll_top_level_key(poll_index)}"
-            poll_fqdn = _resolve_poll_fqdn(poll_sessions, annotations)
-            poll_title = _summary_poll_top_level_title(poll_index, poll_fqdn)
-            poll_node = parent_node.add(
+            poll_cycles = _summary_partition_poll_cycles_with_targets(
+                poll_buckets,
+                annotations,
+            )
+        if len(poll_cycles) > 0:
+            poll_root_frame_count = sum(
+                len(session_rows)
+                for _cycle_index, poll_targets in poll_cycles
+                for _target_key, _target_title, poll_sessions in poll_targets
+                for _session_id, _session_title, session_rows in poll_sessions
+            )
+            poll_root_key = f"{key_prefix}{_summary_poll_root_key()}"
+            poll_child_keys = [
+                f"{key_prefix}{_summary_poll_top_level_key(cycle_index)}"
+                for cycle_index, _poll_targets in poll_cycles
+            ]
+            poll_child_keys.extend(
+                f"{key_prefix}{_summary_poll_top_level_key(cycle_index)}/{target_key}"
+                for cycle_index, poll_targets in poll_cycles
+                for target_key, _target_title, _poll_sessions in poll_targets
+            )
+            poll_child_keys.extend(
+                f"{key_prefix}{_summary_channel_session_key(session_id)}"
+                for _cycle_index, poll_targets in poll_cycles
+                for _target_key, _target_title, poll_sessions in poll_targets
+                for session_id, _session_title, _session_rows in poll_sessions
+            )
+            poll_root_should_expand = poll_root_key in expanded_group_names or any(
+                poll_key in expanded_group_names for poll_key in poll_child_keys
+            )
+            poll_root_node = parent_node.add(
+                Text.assemble(
+                    (_summary_poll_root_title(), f"bold {palette.bip}"),
+                    (f" ({poll_root_frame_count} frames)", f"dim {palette.secondary}"),
+                ),
+                data={
+                    "kind": "poll_group",
+                    "group_name": "Channels",
+                    "expand_key": poll_root_key,
+                },
+                expand=bool(poll_root_should_expand),
+            )
+        else:
+            poll_root_node = None
+        for cycle_index, poll_targets in poll_cycles:
+            poll_frame_count = sum(
+                len(session_rows)
+                for _target_key, _target_title, poll_sessions in poll_targets
+                for _session_id, _session_title, session_rows in poll_sessions
+            )
+            poll_key = f"{key_prefix}{_summary_poll_top_level_key(cycle_index)}"
+            poll_title = _summary_channel_poll_title(cycle_index)
+            poll_should_expand = poll_key in expanded_group_names or any(
+                f"{poll_key}/{target_key}" in expanded_group_names
+                for target_key, _target_title, _poll_sessions in poll_targets
+            ) or any(
+                f"{key_prefix}{_summary_channel_session_key(session_id)}" in expanded_group_names
+                for _target_key, _target_title, poll_sessions in poll_targets
+                for session_id, _session_title, _session_rows in poll_sessions
+            )
+            poll_node = (poll_root_node or parent_node).add(
                 Text.assemble(
                     (poll_title, f"bold {palette.bip}"),
                     (f" ({poll_frame_count} frames)", f"dim {palette.secondary}"),
@@ -3091,49 +3373,73 @@ def _populate_summary_tree(
                     "kind": "poll",
                     "group_name": "Channels",
                     "expand_key": poll_key,
-                    "poll_index": int(poll_index),
+                    "poll_index": int(cycle_index),
                 },
-                expand=(poll_key in expanded_group_names),
+                expand=bool(poll_should_expand),
             )
-            for session_id, session_title, session_rows in poll_sessions:
-                session_key = (
-                    f"{key_prefix}{_summary_channel_session_key(session_id)}"
+            for target_key, target_title, poll_sessions in poll_targets:
+                target_frame_count = sum(
+                    len(session_rows)
+                    for _session_id, _session_title, session_rows in poll_sessions
                 )
-                session_node = poll_node.add(
+                target_expand_key = f"{poll_key}/{target_key}"
+                target_should_expand = target_expand_key in expanded_group_names or any(
+                    f"{key_prefix}{_summary_channel_session_key(session_id)}" in expanded_group_names
+                    for session_id, _session_title, _session_rows in poll_sessions
+                )
+                target_node = poll_node.add(
                     Text.assemble(
-                        (session_title, f"bold {palette.bip}"),
-                        (f" ({len(session_rows)} frames)", f"dim {palette.secondary}"),
+                        (target_title, f"bold {palette.bip}"),
+                        (f" ({target_frame_count} frames)", f"dim {palette.secondary}"),
                     ),
                     data={
-                        "kind": "session",
+                        "kind": "poll_target",
                         "group_name": "Channels",
-                        "expand_key": session_key,
-                        "session_id": int(session_id),
-                        "poll_index": int(poll_index),
+                        "expand_key": target_expand_key,
+                        "poll_index": int(cycle_index),
+                        "target": target_title,
                     },
-                    expand=(session_key in expanded_group_names),
+                    expand=bool(target_should_expand),
                 )
-                for session_row in session_rows:
-                    session_annotation = annotations.get(int(session_row.number))
-                    frame_node = session_node.add(
-                        _summary_tree_leaf_label(
-                            session_row,
-                            session_annotation,
-                            group_name="Channels",
-                            palette=palette,
-                            show_expert_details=show_expert_details,
+                for session_id, session_title, session_rows in poll_sessions:
+                    session_key = (
+                        f"{key_prefix}{_summary_channel_session_key(session_id)}"
+                    )
+                    session_node = target_node.add(
+                        Text.assemble(
+                            (session_title, f"bold {palette.bip}"),
+                            (f" ({len(session_rows)} frames)", f"dim {palette.secondary}"),
                         ),
                         data={
-                            "kind": "frame",
-                            "frame_number": int(session_row.number),
+                            "kind": "session",
                             "group_name": "Channels",
                             "expand_key": session_key,
                             "session_id": int(session_id),
-                            "poll_index": int(poll_index),
+                            "poll_index": int(cycle_index),
                         },
-                        allow_expand=False,
+                        expand=(session_key in expanded_group_names),
                     )
-                    frame_nodes[int(session_row.number)] = frame_node
+                    for session_row in session_rows:
+                        session_annotation = annotations.get(int(session_row.number))
+                        frame_node = session_node.add(
+                            _summary_tree_leaf_label(
+                                session_row,
+                                session_annotation,
+                                group_name="Channels",
+                                palette=palette,
+                                show_expert_details=show_expert_details,
+                            ),
+                            data={
+                                "kind": "frame",
+                                "frame_number": int(session_row.number),
+                                "group_name": "Channels",
+                                "expand_key": session_key,
+                                "session_id": int(session_id),
+                                "poll_index": int(cycle_index),
+                            },
+                            allow_expand=False,
+                        )
+                        frame_nodes[int(session_row.number)] = frame_node
 
         ordered_groups = [
             group for group in _SUMMARY_GROUP_ORDER if group in grouped_rows_local
@@ -3689,6 +3995,66 @@ def run_live_decode_tui(
         def action_cancel_pick(self) -> None:
             self.dismiss(None)
 
+    class SummaryFilterPrompt(ModalScreen[str | None]):
+        BINDINGS = [
+            Binding("escape", "cancel_pick", "Close", priority=True),
+            Binding("enter", "submit_form", "Search", show=False, priority=True),
+            Binding("ctrl+g", "clear_filter", "Clear", show=False, priority=True),
+        ]
+
+        def __init__(self, current_filter: str = "") -> None:
+            super().__init__()
+            self._current_filter = str(current_filter or "")
+
+        def compose(self) -> ComposeResult:
+            """Compose the summary-filter prompt modal layout."""
+            with Vertical(id="summary_filter_shell"):
+                yield Static("Search packets")
+                yield Static(
+                    "[dim]Filters the summary pane by displayed summary / Info text. Enter applies · Ctrl+G clears · Esc closes.[/dim]"
+                )
+                yield Input(
+                    value=self._current_filter,
+                    placeholder="summary text",
+                    id="summary_filter_text",
+                )
+                with Horizontal(id="summary_filter_buttons"):
+                    yield Button("Cancel", id="summary_filter_cancel")
+                    yield Button("Clear", id="summary_filter_clear")
+                    yield Button("Search", id="summary_filter_apply", variant="primary")
+
+        def on_mount(self) -> None:
+            self.query_one("#summary_filter_text", Input).focus()
+
+        def _submit_form(self) -> None:
+            widget = self.query_one("#summary_filter_text", Input)
+            self.dismiss(str(widget.value or "").strip())
+
+        def on_button_pressed(self, event: Button.Pressed) -> None:
+            """Handle button presses in the summary-filter prompt."""
+            button_id = str(event.button.id or "").strip()
+            if button_id == "summary_filter_cancel":
+                self.dismiss(None)
+                return
+            if button_id == "summary_filter_clear":
+                self.dismiss("")
+                return
+            if button_id == "summary_filter_apply":
+                self._submit_form()
+
+        def on_input_submitted(self, event: Input.Submitted) -> None:
+            del event
+            self._submit_form()
+
+        def action_submit_form(self) -> None:
+            self._submit_form()
+
+        def action_clear_filter(self) -> None:
+            self.dismiss("")
+
+        def action_cancel_pick(self) -> None:
+            self.dismiss(None)
+
     class KeybindHelpScreen(ModalScreen[None]):
         BINDINGS = [
             Binding("escape", "close_help", "Close", priority=True),
@@ -3745,6 +4111,24 @@ def run_live_decode_tui(
             self.release_mouse()
             event.stop()
 
+    class ChromeExitButton(Static):
+        can_focus = True
+
+        def on_click(self, event: events.Click) -> None:
+            self._quit_view()
+            event.stop()
+
+        def on_key(self, event: events.Key) -> None:
+            if event.key not in {"enter", "space"}:
+                return
+            self._quit_view()
+            event.stop()
+
+        def _quit_view(self) -> None:
+            app = self.app
+            if hasattr(app, "action_quit_view"):
+                app.action_quit_view()
+
     class HilDecodeApp(App):
         TITLE = "HIL Terminal Decode"
         SUB_TITLE = "Mode 3 live APDU TUI"
@@ -3771,6 +4155,8 @@ def run_live_decode_tui(
             Binding("ctrl+f8", "toggle_expert_detail_lines", "Expert details", show=False, priority=True),
             Binding("f9", "toggle_bytes_pane", "Bytes", priority=True),
             Binding("f10", "open_pane_layout_menu", "Pane menu", priority=True),
+            Binding("/", "open_summary_filter", "Search", priority=True),
+            Binding("ctrl+g", "clear_summary_filter", "Clear search", show=False, priority=True),
             Binding("f11", "save_trace_snapshot", "Export trace", priority=True),
             Binding(
                 "shift+f11",
@@ -3802,7 +4188,14 @@ def run_live_decode_tui(
             background: $surface;
             padding: 0;
         }
+        #chrome_bar {
+            width: 100%;
+            height: 1;
+            min-height: 1;
+            background: $panel;
+        }
         #chrome_title {
+            width: 1fr;
             height: 1;
             padding: 0 1;
             background: $panel;
@@ -3813,6 +4206,25 @@ def run_live_decode_tui(
             background: $warning;
             color: $text;
             border-bottom: solid $warning;
+        }
+        #chrome_exit_button {
+            width: 8;
+            height: 1;
+            padding: 0 1;
+            background: $panel;
+            color: $text;
+            border-bottom: solid $primary;
+            text-style: bold;
+        }
+        #chrome_exit_button:hover {
+            background: $error;
+            color: $surface;
+            border-bottom: solid $error;
+        }
+        #chrome_exit_button:focus {
+            background: $primary;
+            color: $surface;
+            border-bottom: solid $primary;
         }
         #body {
             width: 100%;
@@ -3886,7 +4298,7 @@ def run_live_decode_tui(
             color: $error;
             text-style: bold;
         }
-        PaneLayoutPicker, TraceSavePicker, CaptureOpenPicker, KeybindHelpScreen {
+        PaneLayoutPicker, TraceSavePicker, CaptureOpenPicker, SummaryFilterPrompt, KeybindHelpScreen {
             align: center middle;
         }
         #pane_picker_shell {
@@ -3961,6 +4373,24 @@ def run_live_decode_tui(
             margin-top: 1;
         }
         #capture_open_buttons {
+            width: 100%;
+            height: auto;
+            margin-top: 1;
+            align-horizontal: right;
+        }
+        #summary_filter_shell {
+            width: 72;
+            height: auto;
+            max-height: 90%;
+            padding: 1 2;
+            border: thick $primary;
+            background: $surface;
+        }
+        #summary_filter_text {
+            width: 100%;
+            margin-top: 1;
+        }
+        #summary_filter_buttons {
             width: 100%;
             height: auto;
             margin-top: 1;
@@ -4091,6 +4521,7 @@ def run_live_decode_tui(
             self._bytes_cache: dict[int, str] = {}
             self._follow_tail = True
             self._show_expert_detail_lines = True
+            self._summary_filter_text = ""
             self._last_capture_size = -1
             self._last_error = ""
             self._latest_capture_time_seconds: float | None = None
@@ -4173,17 +4604,19 @@ def run_live_decode_tui(
 
         def compose(self) -> ComposeResult:
             """Compose the main live-decode TUI chrome with capture pane and detail tree."""
-            yield Static(
-                (
-                    "HIL Decode TUI · Browse frames in the summary pane · F1 keybinds · "
-                    "F2 pause (Ctrl+F2 discard) · F3 cycle theme · "
-                    "F4 cycle summary view · "
-                    "Tab switches pane focus · F5/F8/F9 show-hide panes · F6 follow tail · "
-                    "F7 state hop · F10 pane menu · F11 export (Shift+F11 clipped) · "
-                    "Ctrl+F11 clear view · F12 open capture · Ctrl+Q quits"
-                ),
-                id="chrome_title",
-            )
+            with Horizontal(id="chrome_bar"):
+                yield Static(
+                    (
+                        "HIL Decode TUI · Browse frames in the summary pane · F1 keybinds · "
+                        "F2 pause (Ctrl+F2 discard) · F3 cycle theme · "
+                        "F4 cycle summary view · "
+                        "Tab switches pane focus · F5/F8/F9 show-hide panes · F6 follow tail · "
+                        "F7 state hop · F10 pane menu · / search · F11 export (Shift+F11 clipped) · "
+                        "Ctrl+F11 clear view · F12 open capture · Ctrl+Q quits"
+                    ),
+                    id="chrome_title",
+                )
+                yield ChromeExitButton("Exit", id="chrome_exit_button")
             with Vertical(id="chrome"):
                 with Vertical(id="body"):
                     with Vertical(id="upper"):
@@ -4306,6 +4739,29 @@ def run_live_decode_tui(
                     stop()
                 except Exception:
                     pass
+
+        def _event_widget_id(self, event: object) -> str:
+            for attribute_name in ("widget", "control"):
+                widget = getattr(event, attribute_name, None)
+                widget_id = str(getattr(widget, "id", "") or "").strip()
+                if len(widget_id) > 0:
+                    return widget_id
+            return ""
+
+        def _mark_summary_mouse_scroll(self, event: object) -> None:
+            if self._event_widget_id(event) != "summary_tree":
+                return
+            if self._follow_tail is False:
+                return
+            self._follow_tail = False
+            self._refresh_captions()
+            self._refresh_status_line()
+
+        def on_mouse_scroll_up(self, event: events.MouseScrollUp) -> None:
+            self._mark_summary_mouse_scroll(event)
+
+        def on_mouse_scroll_down(self, event: events.MouseScrollDown) -> None:
+            self._mark_summary_mouse_scroll(event)
 
         def action_cycle_theme(self) -> None:
             """Rotate the TUI colour theme to the next entry in the theme cycle."""
@@ -4508,6 +4964,48 @@ def run_live_decode_tui(
                 PaneLayoutPicker(self._visibility),
                 callback=self._on_pane_layout_choice,
             )
+
+        def action_open_summary_filter(self) -> None:
+            self.push_screen(
+                SummaryFilterPrompt(self._summary_filter_text),
+                callback=self._on_summary_filter_choice,
+            )
+
+        def action_clear_summary_filter(self) -> None:
+            self._apply_summary_filter("")
+
+        def _on_summary_filter_choice(self, choice: str | None) -> None:
+            if choice is None:
+                return
+            self._apply_summary_filter(choice)
+
+        def _apply_summary_filter(self, filter_text: str) -> None:
+            normalized_filter = _normalized_summary_label_text(filter_text)
+            previous_filter = str(self._summary_filter_text or "").strip()
+            self._summary_filter_text = normalized_filter
+            visible_rows = self._summary_rows_for_view()
+            if self._summary_filter_active():
+                self._follow_tail = False
+                self._ensure_summary_filter_selection(visible_rows)
+                message = (
+                    f"Summary filter '{self._summary_filter_text}' matched "
+                    f"{len(visible_rows)}/{len(self._base_rows)} packet(s)."
+                )
+            else:
+                if self._selected_frame_number is None and len(self._rows) > 0:
+                    self._selected_frame_number = int(self._rows[-1].number)
+                message = "Summary filter cleared."
+                if len(previous_filter) == 0:
+                    message = "No summary filter is active."
+            self._refresh_summary_tree_visual(
+                scroll=False,
+                force=True,
+            )
+            if len(visible_rows) > 0:
+                self._sync_summary_selection(scroll=True)
+            self._schedule_detail_refresh()
+            self._refresh_captions()
+            self._refresh_status_line(message=message, error=False)
 
         def action_save_trace_snapshot(self) -> None:
             self._force_clip_next_save = False
@@ -4998,6 +5496,46 @@ def run_live_decode_tui(
             latest_frame_number = int(self._base_rows[-1].number)
             return self._state_annotations.get(latest_frame_number)
 
+        def _summary_filter_active(self) -> bool:
+            return len(str(self._summary_filter_text or "").strip()) > 0
+
+        def _summary_rows_for_view(self) -> list[PacketSummary]:
+            return _filter_summary_rows(
+                self._base_rows,
+                self._state_annotations,
+                self._summary_filter_text,
+                show_expert_details=self._show_expert_detail_lines,
+            )
+
+        def _ensure_summary_filter_selection(self, visible_rows: list[PacketSummary]) -> None:
+            if self._summary_filter_active() is False:
+                return
+            if len(visible_rows) == 0:
+                self._selected_frame_number = None
+                self._highlighted_node_key = None
+                return
+            if self._selected_frame_number is not None:
+                selected_frame = int(self._selected_frame_number)
+                if any(int(row.number) == selected_frame for row in visible_rows):
+                    return
+            self._selected_frame_number = int(visible_rows[0].number)
+            self._highlighted_node_key = None
+
+        def _summary_filter_caption_suffix(self) -> str:
+            if self._summary_filter_active() is False:
+                return ""
+            visible_count = len(self._summary_rows_for_view())
+            total_count = len(self._base_rows)
+            return (
+                f" · filter '{self._summary_filter_text}' "
+                f"{visible_count}/{total_count}"
+            )
+
+        def _summary_packet_count_text(self) -> str:
+            if self._summary_filter_active() is False:
+                return f"{len(self._rows)} packet(s)"
+            return f"{len(self._summary_rows_for_view())}/{len(self._rows)} packet(s)"
+
         def _selected_summary_row(self) -> PacketSummary | None:
             if self._selected_frame_number is None:
                 return None
@@ -5152,7 +5690,7 @@ def run_live_decode_tui(
                 f"F1 keybinds · F2 pause (Ctrl+F2 discard) · F3 cycle theme ({self._theme_name}) · "
                 "F4 cycle summary view · Tab switches pane focus · F5/F8/F9 show-hide panes · "
                 "F6 follow tail · F7 state hop · F10 pane menu · "
-                "F11 export (Shift+F11 clipped) · Ctrl+F11 clear view · "
+                "/ search · F11 export (Shift+F11 clipped) · Ctrl+F11 clear view · "
                 "F12 open capture · Ctrl+Q quits"
             )
             try:
@@ -5201,11 +5739,14 @@ def run_live_decode_tui(
                     style=f"bold reverse {palette.timer}",
                 )
             summary_caption.append(
-                f"{summary_view_title} · {len(self._rows)} packet(s) · "
+                f"{summary_view_title} · {self._summary_packet_count_text()} · "
                 f"{state_event_count} state event(s) · "
                 f"{'follow tail' if self._follow_tail else 'manual browse'}",
                 style=palette.primary,
             )
+            filter_suffix = self._summary_filter_caption_suffix()
+            if len(filter_suffix) > 0:
+                summary_caption.append(filter_suffix, style=f"bold {palette.timer}")
             if latest_state is not None:
                 summary_caption.append(
                     f" · {latest_state.active_channel_count} channel(s) active",
@@ -5307,14 +5848,21 @@ def run_live_decode_tui(
             live_stream_suffix = self._live_stream_status_suffix()
             ingest_pause_suffix = self._ingest_pause_status_suffix()
             replay_suffix = self._scp_replay_status_suffix()
+            packet_count_text = str(len(self._rows))
+            filter_suffix = ""
+            if self._summary_filter_active():
+                visible_count = len(self._summary_rows_for_view())
+                packet_count_text = f"{visible_count}/{len(self._rows)}"
+                filter_suffix = f" | Summary filter '{self._summary_filter_text}'"
             return (
-                f"Packets {len(self._rows)} | "
+                f"Packets {packet_count_text} | "
                 f"Selected #{self._selected_frame_number if self._selected_frame_number is not None else '-'} | "
                 f"Capture {self._capture_label_text()} | "
                 f"File {max(0, file_size)} bytes{parse_age_suffix} | "
                 f"View {_summary_view_title(self._summary_view_mode)} | "
                 f"{'follow tail' if self._follow_tail else 'manual browse'} | "
                 f"Service {self._service_name} | Filter {self._capture_filter}"
+                f"{filter_suffix}"
                 f"{live_stream_suffix}"
                 f"{ingest_pause_suffix}"
                 f"{replay_suffix}"
@@ -5718,7 +6266,10 @@ def run_live_decode_tui(
                 self._refresh_status_line()
                 self._seed_live_stream_from_base_rows()
                 return
-            if previous_selected is None and self._selected_frame_number is None:
+            if self._follow_tail:
+                self._selected_frame_number = int(self._rows[-1].number)
+                self._highlighted_node_key = None
+            elif previous_selected is None and self._selected_frame_number is None:
                 self._selected_frame_number = int(self._rows[-1].number)
             elif previous_selected is not None:
                 if any(int(row.number) == int(previous_selected) for row in self._rows):
@@ -5733,7 +6284,13 @@ def run_live_decode_tui(
             else:
                 self._latest_capture_time_seconds = None
                 self._latest_capture_monotonic = None
-            self._refresh_summary_tree_visual(scroll=self._follow_tail)
+            force_context_render = (
+                _normalize_summary_view_mode(self._summary_view_mode) == _SUMMARY_VIEW_CONTEXT
+            )
+            self._refresh_summary_tree_visual(
+                scroll=self._follow_tail,
+                force=force_context_render,
+            )
             self._refresh_captions()
             self._schedule_detail_refresh()
             self._refresh_status_line()
@@ -6010,13 +6567,22 @@ def run_live_decode_tui(
             self._base_rows = list(self._base_rows) + list(new_rows)
             self._rebuild_state_annotations()
             self._rows = self._decorate_summary_rows(self._base_rows)
-            if self._selected_frame_number is None and len(self._rows) > 0:
+            if self._follow_tail and len(self._rows) > 0:
+                self._selected_frame_number = int(self._rows[-1].number)
+                self._highlighted_node_key = None
+            elif self._selected_frame_number is None and len(self._rows) > 0:
                 self._selected_frame_number = int(self._rows[-1].number)
             latest_state = self._latest_state_annotation()
             if latest_state is not None and latest_state.capture_time_seconds is not None:
                 self._latest_capture_time_seconds = float(latest_state.capture_time_seconds)
                 self._latest_capture_monotonic = time.monotonic()
-            self._refresh_summary_tree_visual(scroll=self._follow_tail)
+            force_context_render = (
+                _normalize_summary_view_mode(self._summary_view_mode) == _SUMMARY_VIEW_CONTEXT
+            )
+            self._refresh_summary_tree_visual(
+                scroll=self._follow_tail,
+                force=force_context_render,
+            )
             self._refresh_captions()
             self._refresh_status_line()
             self._schedule_detail_refresh()
@@ -6027,15 +6593,21 @@ def run_live_decode_tui(
             self._summary_tree_sync_inflight = True
             try:
                 tree_widget = self._summary_widget()
+                visible_rows = self._summary_rows_for_view()
+                self._ensure_summary_filter_selection(visible_rows)
+                empty_label = ""
+                if self._summary_filter_active() and len(visible_rows) == 0:
+                    empty_label = f"No packets match summary filter: {self._summary_filter_text}"
                 self._summary_tree_frame_nodes = _populate_summary_tree(
                     tree_widget,
-                    self._base_rows,
+                    visible_rows,
                     self._state_annotations,
                     view_mode=self._summary_view_mode,
                     selected_frame_number=self._selected_frame_number,
                     expanded_group_names=preserved_expanded_groups,
                     palette=self._active_palette(),
                     show_expert_details=self._show_expert_detail_lines,
+                    empty_label=empty_label,
                 )
                 self._summary_tree_header_nodes = _collect_summary_tree_header_nodes(
                     tree_widget
@@ -6090,15 +6662,16 @@ def run_live_decode_tui(
             selection_target_changed = (
                 self._selected_frame_number != self._displayed_selected_frame_number
             )
+            should_sync_scroll = bool(scroll)
             with _summary_tree_batch_update_context(tree_widget):
                 self._rebuild_summary_view()
                 self._sync_summary_selection(
-                    scroll=selection_target_changed,
-                    selection_target_changed=selection_target_changed,
+                    scroll=should_sync_scroll,
+                    selection_target_changed=selection_target_changed if should_sync_scroll else False,
                 )
             if bool(scroll):
                 self._scroll_summary_tree_to_tail(tree_widget)
-            elif selection_target_changed is False:
+            else:
                 _restore_summary_tree_scroll_offset(tree_widget, preserved_scroll_offset)
             self._displayed_selected_frame_number = self._selected_frame_number
 

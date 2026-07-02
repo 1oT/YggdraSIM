@@ -1,20 +1,23 @@
+<!--
+SPDX-License-Identifier: GPL-3.0-or-later
+Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+-->
+
 # YggdraSIM marketing demo scripts
 
-Three short, self-contained scripts intended to drive 30–60 s screen-recordings.
+Two short, self-contained scripts intended to drive 30-60 s screen-recordings.
 Each one boots a real `SimulatedSimCardEngine` (no PCSC, no mocks) inside a
 throwaway temp directory, drives a deliberate scenario, and narrates each step
 with ANSI-coloured banners.
 
 | Script | Scenario | Key surfaces exercised |
 | --- | --- | --- |
-| `demo_eim_polling_cycle.py` | SGP.32 IPA-poll BIP cycle, end to end. | TIMER MANAGEMENT bring-up, ENVELOPE D7, BIP OPEN/SEND/RECEIVE/CLOSE, BF4F GetEimPackageRequest, BF58 AddEim dispatch, BF50 ProvideEimPackageResult. |
 | `demo_3gpp_attach.py` | 3GPP cold-attach + USIM-AKA Milenage authentication. | SELECT MF, SELECT ADF.USIM, GET CHALLENGE, AUTHENTICATE P2=0x81, RES/CK/IK/Kc extraction, AUTS resync against a stale SQN. |
 | `demo_profile_lifecycle.py` | SGP.32 profile-state machine over the ISD-R surface. | BF20 GetEuiccInfo1, BF2E GetEuiccChallenge, BF2D GetProfilesInfo, BF31/BF32 enable+disable, BF2B notification drain, BF35 LoadCRL. |
 
 ## Running
 
 ```bash
-python3 scripts/demos/demo_eim_polling_cycle.py
 python3 scripts/demos/demo_3gpp_attach.py
 python3 scripts/demos/demo_profile_lifecycle.py
 ```

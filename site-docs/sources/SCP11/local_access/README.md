@@ -1,3 +1,8 @@
+<!--
+SPDX-License-Identifier: GPL-3.0-or-later
+Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+-->
+
 # SCP11 Local SMDPP
 
 `SCP11/local_access` is the Local SMDPP shell and direct local `ISD-R` shell. Use it when the task is
@@ -13,8 +18,7 @@ on-card and local-first rather than relay-first.
 
 ## Do not use this module when
 
-- the workflow should model relay behavior through `LPAd`, `IPAd`, or `IPAe`
-- the task is eIM-side package authoring, localized polling, or handover
+- the task is eIM-side package authoring, hotfolder execution, or handover
 - the operator needs the live/test relay shells rather than direct card access
 
 ## Launch

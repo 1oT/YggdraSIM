@@ -4,6 +4,11 @@ tags:
   - internals
   - plugins
 ---
+<!--
+SPDX-License-Identifier: GPL-3.0-or-later
+Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+-->
+
 
 # Plugin Contract
 
@@ -50,17 +55,14 @@ The manager exposes:
 | `ensure_loaded()` | force-load plugins (idempotent) |
 | `load_errors()` | surface any per-plugin load errors |
 
-Consumers generally call `get_capability("polling")` and branch on whether
+Consumers call `get_capability("<capability-name>")` and branch on whether
 it returns a provider.
 
 ## Reserved capability names
 
-| Capability | Consumers |
-| --- | --- |
-| `polling` | `SCP11/live` `POLL`, `SCP11/test` `POLL`, `SCP11/eim_local` `IPAE-LIVE` / `IPAE-TEST` |
-
-New capabilities should be added to this list only after the consumer side
-is ready to use them cleanly.
+Reserved names are private extension contracts. Public distributions should
+document only the generic loader behavior and keep undistributed capability
+names out of shipped docs.
 
 ## Absent-plugin behavior
 

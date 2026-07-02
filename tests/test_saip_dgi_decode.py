@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """Tests for ``Tools.ProfilePackage.saip_dgi_decode``.
 
@@ -42,7 +45,7 @@ _SD_PERSO_FIXTURE_HEX: str = (
     "350103"
     "390205dc"
     "3c030227be"
-    "3e05210a0a0a0a"
+    "3e0521c000020a"
     "8517"
     "133839343435303136303532343637363333363202400186070003a503002000"
     "8936"
@@ -133,9 +136,9 @@ class StkLeafDecoderTests(unittest.TestCase):
         self.assertEqual(decoded["port"], 10174)
 
     def test_other_address_ipv4(self) -> None:
-        decoded = decode_other_address(b"\x21\x0a\x0a\x0a\x0a")
+        decoded = decode_other_address(b"\x21\xc0\x00\x02\x0a")
         self.assertEqual(decoded["typeName"], "IPv4")
-        self.assertEqual(decoded["address"], "10.10.10.10")
+        self.assertEqual(decoded["address"], "192.0.2.10")
 
 
 class DgiRecordsHighLevelTests(unittest.TestCase):

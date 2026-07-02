@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """eUICC profile store: on-disk JSON persistence for installed profiles and associated metadata."""
 from __future__ import annotations
@@ -24,7 +27,33 @@ def resolve_euicc_store_path(root_path: str, eid: str) -> str:
     eid_text = str(eid or "").strip().upper()
     if len(eid_text) == 0:
         eid_text = "UNKNOWN"
-    return os.path.join(normalized_root, f"EID_{eid_text}")
+    preferred_path = os.path.join(normalized_root, f"EID_{eid_text}")
+    if os.path.exists(preferred_path):
+        return preferred_path
+    discovered_path = _single_existing_euicc_store_path(normalized_root)
+    if len(discovered_path) > 0:
+        return discovered_path
+    return preferred_path
+
+
+def _single_existing_euicc_store_path(root_path: str) -> str:
+    try:
+        entries = os.listdir(root_path)
+    except OSError:
+        return ""
+    matches: list[str] = []
+    for entry in entries:
+        if entry.upper().startswith("EID_") is False:
+            continue
+        candidate = os.path.join(root_path, entry)
+        if os.path.isdir(candidate) is False:
+            continue
+        manifest_path = os.path.join(candidate, EUICC_MANIFEST_FILENAME)
+        if os.path.isfile(manifest_path):
+            matches.append(candidate)
+    if len(matches) == 1:
+        return matches[0]
+    return ""
 
 
 def default_profile_store_path(euicc_store_path: str) -> str:
@@ -75,13 +104,14 @@ def load_euicc_store_into_state(store_path: str, state: SimCardState) -> bool:
     )
     if isinstance(payload, dict) is False:
         return False
-    # The runtime cache must not shadow card-identity fields. Identity
-    # (ATR, EID, default DP address, root CI PKID, ISDR/ECASD/MNO_SD AIDs
+    # The runtime cache must not shadow operator card-identity fields.
+    # Identity (ATR, EID, default DP address, ISDR/ECASD/MNO_SD AIDs
     # and labels) is operator configuration and comes from
     # ``isdr_config.json`` / quirks. Persisting it back here would mean a
     # stale cache pins a value forever and silently overrides any later
     # change in ``isdr_config.json`` — which is what bit the simulated
-    # ATR after the ISO 7816-3 fix landed.
+    # ATR after the ISO 7816-3 fix landed. Root CI PKID is protected key
+    # material for the eUICC store, so it is still restored below.
     apply_euicc_state_payload(state, payload, apply_identity=False)
     return True
 
@@ -192,11 +222,7 @@ def _serialize_state(state: SimCardState) -> dict[str, Any]:
             "active": bool(state.emergency_profile_active),
             "pre_aid": str(state.emergency_pre_aid).strip().upper(),
         },
-        # ETSI TS 102 223 STK polling configuration. ``poll_strategy``
-        # selects the proactive bring-up shape ("timer" /
-        # "poll_interval" / "both" / "off"); ``timer_management_*``
-        # parameters drive the §6.6.21 TIMER MANAGEMENT START used by
-        # the SGP.32 IPA-poll trigger.
+        # ETSI TS 102 223 STK polling configuration.
         "toolkit": {
             "poll_strategy": str(state.toolkit.poll_strategy or "timer"),
             "timer_management_seconds": int(state.toolkit.timer_management_seconds),
@@ -204,16 +230,6 @@ def _serialize_state(state: SimCardState) -> dict[str, Any]:
             "timer_management_auto_rearm": bool(state.toolkit.timer_management_auto_rearm),
             "poll_interval_seconds": int(state.toolkit.poll_interval_seconds),
             "provide_imei": bool(state.toolkit.provide_imei),
-            "ipa_poll": {
-                "enabled": bool(state.toolkit.ipa_poll_enabled),
-                "eim_fqdn": str(state.toolkit.ipa_poll_eim_fqdn or ""),
-                "eim_port": int(state.toolkit.ipa_poll_eim_port),
-                "transport_type": int(state.toolkit.ipa_poll_transport_type),
-                "buffer_size": int(state.toolkit.ipa_poll_buffer_size),
-                "receive_size": int(state.toolkit.ipa_poll_receive_size),
-                "alpha_id": str(state.toolkit.ipa_poll_alpha_id or ""),
-                "request_payload_hex": bytes(state.toolkit.ipa_poll_request_payload or b"").hex().upper(),
-            },
         },
     }
 
@@ -243,8 +259,6 @@ def apply_euicc_state_payload(
             state.atr = _hex_bytes(payload.get("atr_hex"), fallback=bytes(state.atr))
         if "default_dp_address" in payload:
             state.default_dp_address = str(payload.get("default_dp_address", state.default_dp_address)).strip()
-        if "root_ci_pkid_hex" in payload:
-            state.root_ci_pkid = _hex_bytes(payload.get("root_ci_pkid_hex"), fallback=bytes(state.root_ci_pkid))
         isdr = payload.get("isdr")
         if isinstance(isdr, dict):
             if "aid" in isdr:
@@ -263,6 +277,9 @@ def apply_euicc_state_payload(
                 state.mno_sd_aid = str(mno_sd.get("aid", state.mno_sd_aid)).strip().upper() or state.mno_sd_aid
             if "label" in mno_sd:
                 state.mno_sd_label = str(mno_sd.get("label", state.mno_sd_label)).strip() or state.mno_sd_label
+
+    if "root_ci_pkid_hex" in payload:
+        state.root_ci_pkid = _hex_bytes(payload.get("root_ci_pkid_hex"), fallback=bytes(state.root_ci_pkid))
 
     euicc_info = payload.get("euicc_info")
     if isinstance(euicc_info, dict):
@@ -478,11 +495,7 @@ def apply_euicc_state_payload(
     toolkit = payload.get("toolkit")
     if isinstance(toolkit, dict):
         # ETSI TS 102 223 §6.6.21 TIMER MANAGEMENT vs §6.6.5 POLL
-        # INTERVAL bring-up selector. The default ``"timer"`` strategy
-        # arms an ME timer that the modem expires into a TIMER
-        # EXPIRATION (D7) envelope so SGP.32 IPA-poll triggers fire on
-        # cadence. Operators that need the legacy POLL INTERVAL
-        # heartbeat can flip the strategy here without code edits.
+        # INTERVAL bring-up selector.
         if "poll_strategy" in toolkit:
             strategy = str(toolkit.get("poll_strategy", state.toolkit.poll_strategy) or "").strip().lower()
             if strategy in {"timer", "poll_interval", "both", "off"}:
@@ -516,57 +529,6 @@ def apply_euicc_state_payload(
             state.toolkit.provide_imei = bool(
                 toolkit.get("provide_imei", state.toolkit.provide_imei)
             )
-        ipa_poll = toolkit.get("ipa_poll")
-        if isinstance(ipa_poll, dict):
-            # SGP.32 §3.5 IPA-poll BIP trigger configuration. Each
-            # field maps onto a TLV inside the OPEN CHANNEL / SEND
-            # DATA / RECEIVE DATA proactive commands enqueued on
-            # every D7 TIMER EXPIRATION envelope.
-            if "enabled" in ipa_poll:
-                state.toolkit.ipa_poll_enabled = bool(
-                    ipa_poll.get("enabled", state.toolkit.ipa_poll_enabled)
-                )
-            if "eim_fqdn" in ipa_poll:
-                state.toolkit.ipa_poll_eim_fqdn = str(
-                    ipa_poll.get("eim_fqdn", state.toolkit.ipa_poll_eim_fqdn) or ""
-                ).strip()
-            if "eim_port" in ipa_poll:
-                try:
-                    port_value = int(ipa_poll.get("eim_port", state.toolkit.ipa_poll_eim_port))
-                    state.toolkit.ipa_poll_eim_port = max(1, min(0xFFFF, port_value))
-                except (TypeError, ValueError):
-                    pass
-            if "transport_type" in ipa_poll:
-                try:
-                    transport = int(ipa_poll.get("transport_type", state.toolkit.ipa_poll_transport_type))
-                    state.toolkit.ipa_poll_transport_type = transport & 0xFF
-                except (TypeError, ValueError):
-                    pass
-            if "buffer_size" in ipa_poll:
-                try:
-                    state.toolkit.ipa_poll_buffer_size = max(
-                        0x40,
-                        min(0xFFFF, int(ipa_poll.get("buffer_size", state.toolkit.ipa_poll_buffer_size))),
-                    )
-                except (TypeError, ValueError):
-                    pass
-            if "receive_size" in ipa_poll:
-                try:
-                    state.toolkit.ipa_poll_receive_size = max(
-                        1,
-                        min(0xFF, int(ipa_poll.get("receive_size", state.toolkit.ipa_poll_receive_size))),
-                    )
-                except (TypeError, ValueError):
-                    pass
-            if "alpha_id" in ipa_poll:
-                state.toolkit.ipa_poll_alpha_id = str(
-                    ipa_poll.get("alpha_id", state.toolkit.ipa_poll_alpha_id) or ""
-                )
-            if "request_payload_hex" in ipa_poll:
-                state.toolkit.ipa_poll_request_payload = _hex_bytes(
-                    ipa_poll.get("request_payload_hex", b""),
-                    fallback=state.toolkit.ipa_poll_request_payload,
-                )
 
     apply_security_domain_config(state)
 

@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 """
 Unit tests for the ``yggdrasim_common.doctor`` preflight helper.
 
@@ -76,9 +79,10 @@ class DoctorHilProbeTests(unittest.TestCase):
             doctor._probe_hil_bridge(report)
             self.assertEqual(len(report.checks), 1)
             check = report.checks[0]
-            self.assertEqual(check.name, "HIL bridge readiness")
+            self.assertEqual(check.name, "Local HIL bridge readiness")
             self.assertEqual(check.status, "info")
             self.assertIn("clean", check.detail.lower())
+            self.assertIn("Card Bridge", check.detail)
 
     def test_non_linux_full_reports_platform_info(self) -> None:
         with mock.patch.dict(os.environ, {flavor.FLAVOR_ENV: "full"}, clear=False):
@@ -86,8 +90,10 @@ class DoctorHilProbeTests(unittest.TestCase):
                 report = DoctorReport()
                 doctor._probe_hil_bridge(report)
                 self.assertEqual(len(report.checks), 1)
+                self.assertEqual(report.checks[0].name, "Local HIL bridge readiness")
                 self.assertEqual(report.checks[0].status, "info")
                 self.assertIn("Linux", report.checks[0].detail)
+                self.assertIn("Card Bridge", report.checks[0].detail)
 
     def test_optional_helpers_skipped_on_clean(self) -> None:
         with mock.patch.dict(os.environ, {flavor.FLAVOR_ENV: "clean"}, clear=False):

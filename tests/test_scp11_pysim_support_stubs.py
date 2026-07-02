@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """Tests for SCP11/pysim_support.py public functions.
 
@@ -9,6 +12,9 @@ fully; the remainder verify the no-pySim fallback paths.
 
 from __future__ import annotations
 
+import subprocess
+import sys
+from pathlib import Path
 import unittest
 
 from SCP11.pysim_support import (
@@ -32,6 +38,9 @@ from SCP11.pysim_support import (
 )
 
 
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+
+
 # ---------------------------------------------------------------------------
 # pysim_available / pysim_rsp_asn1
 # ---------------------------------------------------------------------------
@@ -46,6 +55,48 @@ class PysimAvailableTests(unittest.TestCase):
         if pysim_available():
             self.skipTest("pySim available in this environment")
         self.assertIsNone(pysim_rsp_asn1())
+
+    def test_imports_tolerate_frozen_pysim_rsp_resource_failure(self) -> None:
+        code = r'''
+import sys
+import types
+
+fake_pysim = types.ModuleType("pySim")
+fake_esim = types.ModuleType("pySim.esim")
+fake_pysim.__path__ = []
+fake_esim.__path__ = []
+
+def missing_resource(*_args, **_kwargs):
+    raise FileNotFoundError("[WinError 3] The system cannot find the path specified: 'tmp/rsp/files'")
+
+def esim_getattr(name):
+    if name in {"compile_asn1_subdir", "rsp", "x509_cert"}:
+        missing_resource()
+    raise AttributeError(name)
+
+fake_esim.__getattr__ = esim_getattr
+fake_pysim.esim = fake_esim
+sys.modules["pySim"] = fake_pysim
+sys.modules["pySim.esim"] = fake_esim
+
+import SCP11.pysim_support as pysim_support
+import SCP11.live.pysim_support as live_pysim_support
+import SCP11.payload_builder as payload_builder
+import SCP11.live.payload_builder as live_payload_builder
+
+assert pysim_support.pysim_available() is False
+assert live_pysim_support.pysim_available() is False
+assert payload_builder._PY_SIM_RSP_ASN1 is None
+assert live_payload_builder._PY_SIM_RSP_ASN1 is None
+'''
+        result = subprocess.run(
+            [sys.executable, "-c", code],
+            cwd=str(_REPO_ROOT),
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, msg=result.stderr or result.stdout)
 
 
 # ---------------------------------------------------------------------------

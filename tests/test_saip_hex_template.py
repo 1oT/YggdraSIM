@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 """Unit tests for inline typed hex placeholder handling."""
 
 from __future__ import annotations
@@ -54,6 +57,9 @@ class TestInlinePlaceholderParsing(unittest.TestCase):
         # typed-placeholder regex — that surface is handled elsewhere.
         self.assertFalse(detect_inline_placeholders("AA{IMSI}BB"))
 
+    def test_detect_returns_true_for_compact_typed_placeholder(self) -> None:
+        self.assertTrue(detect_inline_placeholders("AA{imsiIMSI8EncodeIMSI}BB"))
+
     def test_substitute_produces_pure_hex(self) -> None:
         substituted, records = substitute_inline_placeholders(_TELNA_STYLE_SAMPLE)
         cleaned = substituted.replace(" ", "").replace("\n", "").upper()
@@ -75,6 +81,24 @@ class TestInlinePlaceholderParsing(unittest.TestCase):
         self.assertEqual(first.literal, "{iccid:ICCID:10}")
         self.assertEqual(second.modifier, "nibble_swap")
         self.assertEqual(second.literal, "{smsc:MSISDN:5:nibble_swap}")
+
+    def test_substitute_captures_compact_record_fields(self) -> None:
+        substituted, records = substitute_inline_placeholders(
+            "AA{iccidICCID10NibbleSwap}BB[pin1TEXT4utf8]CC"
+        )
+        cleaned = substituted.upper()
+        self.assertEqual(len(records), 2)
+        self.assertNotIn("{iccidICCID10NibbleSwap}", cleaned)
+        self.assertEqual(records[0].variable_name, "iccid")
+        self.assertEqual(records[0].type_name, "ICCID")
+        self.assertEqual(records[0].byte_length, 10)
+        self.assertEqual(records[0].modifier, "NibbleSwap")
+        self.assertEqual(records[0].literal, "{iccidICCID10NibbleSwap}")
+        self.assertEqual(records[1].variable_name, "pin1")
+        self.assertEqual(records[1].type_name, "TEXT")
+        self.assertEqual(records[1].byte_length, 4)
+        self.assertEqual(records[1].modifier, "utf8")
+        self.assertEqual(records[1].literal, "[pin1TEXT4utf8]")
 
     def test_substitute_sentinels_unique_per_index(self) -> None:
         raw = (
@@ -592,6 +616,22 @@ class TestPrepareInputForTool(unittest.TestCase):
         self.assertTrue(cache_path.exists())
         sidecar = sidecar_path_for_cache(cache_path)
         self.assertFalse(sidecar.exists())
+
+    def test_varder_hex_input_strips_bom_and_writes_der(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_root:
+            source = self.workspace_root / "Tools" / "ProfilePackage" / "profile" / "reference_test_profile.txt"
+            staging = Path(tmp_root) / "profile.varder"
+            staging.write_text(
+                source.read_text(encoding="utf-8").strip(),
+                encoding="utf-8-sig",
+            )
+
+            bridge = SaipToolBridge(self.workspace_root)
+            cache_path = bridge._prepare_input_for_tool(staging)
+            sidecar = sidecar_path_for_cache(cache_path)
+
+            self.assertTrue(cache_path.exists())
+            self.assertFalse(sidecar.exists())
 
     def test_inline_placeholder_input_writes_sidecar(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_root:

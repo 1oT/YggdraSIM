@@ -1,0 +1,43 @@
+/*
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+ */
+
+/* -- Theme: GitHub · dark (Primer dark default, blue accent) ------------- */
+html[data-theme="github-dark"] {
+  --bg: #0d1117;
+  --bg-elev: #161b22;
+  --bg-elev-2: #21262d;
+  --surface: #161b22;
+  --surface-alt: rgba(255, 255, 255, 0.04);
+  --bg-hover: rgba(177, 186, 196, 0.07);
+  --border: rgba(201, 209, 217, 0.12);
+  --border-strong: rgba(201, 209, 217, 0.30);
+  --fg: #c9d1d9;
+  --fg-dim: #8b949e;
+  --fg-muted: #6e7681;
+  --accent: #58a6ff;
+  --accent-strong: #1f6feb;
+  --accent-soft: rgba(56, 139, 253, 0.14);
+  --accent-fg: #0d1117;
+  --accent-glow: rgba(56, 139, 253, 0.42);
+  --gradient-accent: linear-gradient(135deg, #58a6ff 0%, #1f6feb 60%, #388bfd 100%);
+  --gradient-brand: linear-gradient(135deg, #58a6ff 0%, #d2a8ff 100%);
+  --ok: #3fb950;
+  --ok-soft: rgba(63, 185, 80, 0.16);
+  --warn: #d29922;
+  --warn-soft: rgba(210, 153, 34, 0.16);
+  --fail: #f85149;
+  --fail-soft: rgba(248, 81, 73, 0.16);
+  --code-bg: #010409;
+  --kbd-bg: rgba(1, 4, 9, 0.96);
+  --shadow-card: 0 10px 26px rgba(0, 0, 0, 0.38);
+  --shadow-card-hover: 0 18px 44px rgba(0, 0, 0, 0.52);
+  --shadow-glow-accent: 0 0 0 1px var(--accent-soft), 0 14px 38px -12px var(--accent-glow);
+  --topbar-bg: rgba(22, 27, 34, 0.84);
+  --theme-tint:
+    radial-gradient(circle at 92% 4%, rgba(88, 166, 255, 0.10), transparent 44%),
+    radial-gradient(circle at 6% 96%, rgba(63, 185, 80, 0.06), transparent 48%);
+}
+
+/* -- Theme: GitHub · light (Primer light default, blue accent) ----------- */

@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 """Tests for ``yggdrasim_common.doctor._probe_card_relay`` (CB-3).
 
 A minimal stub bridge — built on the stdlib's ``http.server`` — answers
@@ -226,7 +229,7 @@ class DoctorCardRelayProbeTests(unittest.TestCase):
         bridge = _StubBridge(
             status_payload={
                 "authRequired": False,
-                "host": "10.0.0.5",
+                "host": "192.0.2.5",
             },
         )
         try:

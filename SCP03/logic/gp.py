@@ -69,6 +69,19 @@ class GlobalPlatformManager :
             return f"{self.scp02_kvn:02X}"
         return f"{self.scp03_kvn:02X}"
 
+    @staticmethod
+    def _encode_apdu_lc (data_len :int )->str :
+        if data_len <=0xFF :
+            return f"{data_len:02X}"
+        if data_len <=0xFFFF :
+            return f"00{data_len:04X}"
+        raise ValueError ("APDU data field exceeds extended length capability.")
+
+    @staticmethod
+    def _build_case3_apdu (cla :int ,ins :int ,p1 :int ,p2 :int ,data :bytes )->str :
+        lc_hex =GlobalPlatformManager ._encode_apdu_lc (len (data ))
+        return f"{cla:02X}{ins:02X}{p1:02X}{p2:02X}{lc_hex}{data.hex()}"
+
     def get_config_key_fields_for_protocol (self ,protocol_name :str =None )->Tuple [str ,str ,str ,str ]:
         """Return (ENC-key-hex, MAC-key-hex, DEK-key-hex, KVN-hex) from the keyset config for *protocol_name*."""
         protocol =self .active_scp_protocol 
@@ -86,7 +99,7 @@ class GlobalPlatformManager :
 
         if not target_key :
             print (f"{Config.Colors.FAIL}[-] Error: No ADM key provided.{Config.Colors.ENDC}")
-            return 
+            return
 
         target_key =target_key .replace (' ','')
         if len (target_key )!=16 :
@@ -241,7 +254,7 @@ class GlobalPlatformManager :
         """
         if not self .tp .session or not self .tp .session .is_authenticated :
             print (f"{Config.Colors.FAIL}[!] Error: Must be authenticated.{Config.Colors.ENDC}")
-            return 
+            return
 
         payload =HexUtils .to_bytes (data_hex )
 
@@ -306,7 +319,7 @@ class GlobalPlatformManager :
 
             if valid_len ==False :
                 print (f"[-] Error: Key {i+1} length invalid for crypto operations.")
-                return False 
+                return False
 
             encrypted_key =raw_key 
 
@@ -380,29 +393,25 @@ class GlobalPlatformManager :
         print (f"[-] PUT KEY Failed: {sw1:02X}{sw2:02X}")
         return False 
 
-    def install_cap_file (self ,filename :str ,privileges :str ="00",install_params :str ="C900",instantiate :bool =True ,target_app_aid :str =None ,target_module_aid :str =None ,load_chunk_size :Optional [int ]=None ):
-        """
-        GlobalPlatform INSTALL (GPCS 11.5).
-        Handles INSTALL [for load], LOAD (80 E8), and INSTALL [for install].
-        """
-        if not self .tp .session or not self .tp .session .is_authenticated :
-            print (f"{Config.Colors.FAIL}[!] Error: Must be authenticated (AUTH) first.{Config.Colors.ENDC}")
-            return 
-
+    def _parse_cap_file_for_install (self ,filename :str ):
         if not os .path .exists (filename ):
             print (f"{Config.Colors.FAIL}[!] File not found: {filename}{Config.Colors.ENDC}")
-            return 
+            return None
 
         print (f"{Config.Colors.CYAN}[*] Parsing CAP file: {filename}...{Config.Colors.ENDC}")
         try :
             parsed_cap =CapFileParser .parse_with_metadata (filename )
         except Exception as e :
             print (f"{Config.Colors.FAIL}[-] Parse Error: {e}{Config.Colors.ENDC}")
-            return 
+            return None
+
+        return parsed_cap
+
+    def _load_cap_file_to_card (self ,parsed_cap ,load_chunk_size :Optional [int ]=None )->bool :
+        """Run INSTALL [for load] and LOAD for a parsed CAP/IJC package."""
 
         load_data =parsed_cap .load_block 
         pkg_aid =parsed_cap .package_aid 
-        app_aids =parsed_cap .applet_aids 
 
         print (f"    Package AID: {pkg_aid.hex().upper()}")
         print (f"    Size: {len(load_data)} bytes")
@@ -418,7 +427,7 @@ class GlobalPlatformManager :
 
         if sw1 !=0x90 :
             print (f"{Config.Colors.FAIL}[-] Install [for load] Failed: {sw1:02X}{sw2:02X}{Config.Colors.ENDC}")
-            return 
+            return False
 
         print (f"{Config.Colors.CYAN}[*] Loading {len(load_data)} bytes...{Config.Colors.ENDC}")
         chunk_size =240 
@@ -439,7 +448,7 @@ class GlobalPlatformManager :
             load_chunks =CapFileParser .plan_load_chunks (parsed_cap ,chunk_size )
         except Exception as e :
             print (f"{Config.Colors.FAIL}[-] Chunk Plan Error: {e}{Config.Colors.ENDC}")
-            return 
+            return False
 
         total_chunks =len (load_chunks )
 
@@ -459,17 +468,139 @@ class GlobalPlatformManager :
 
             if sw1 !=0x90 :
                 print (f"\n{Config.Colors.FAIL}[-] LOAD Failed at block {i}: {sw1:02X}{sw2:02X}{Config.Colors.ENDC}")
-                return 
+                return False
 
         print (f"\n{Config.Colors.GREEN}[+] Load Complete.{Config.Colors.ENDC}")
+        return True
+
+    @staticmethod
+    def _extract_install_apdu_data (apdu :bytes )->bytes :
+        if len (apdu )<5 :
+            raise ValueError ("INSTALL APDU must include CLA INS P1 P2 Lc.")
+
+        lc_byte =apdu [4 ]
+        data_offset =5
+        data_len =lc_byte
+        max_trailing =1
+
+        if lc_byte ==0x00 :
+            if len (apdu )<7 :
+                raise ValueError ("Extended-length INSTALL APDU is missing the two-byte Lc.")
+            data_len =int .from_bytes (apdu [5 :7 ],"big")
+            data_offset =7
+            max_trailing =2
+
+        data_end =data_offset +data_len
+        if len (apdu )<data_end :
+            raise ValueError ("INSTALL APDU Lc exceeds the supplied APDU length.")
+
+        trailing_len =len (apdu )-data_end
+        if trailing_len >max_trailing :
+            raise ValueError ("INSTALL APDU has extra bytes after the data field.")
+
+        return apdu [data_offset :data_end ]
+
+    @staticmethod
+    def _first_lv_value (data :bytes ,field_name :str )->bytes :
+        if len (data )<1 :
+            raise ValueError (f"INSTALL APDU data is missing {field_name} length.")
+
+        value_len =data [0 ]
+        value_end =1 +value_len
+        if len (data )<value_end :
+            raise ValueError (f"INSTALL APDU {field_name} LV overruns the data field.")
+
+        return data [1 :value_end ]
+
+    @staticmethod
+    def _normalize_install_for_install_apdu (install_apdu :str )->Tuple [str ,bytes ]:
+        try :
+            apdu =HexUtils .to_bytes (install_apdu )
+        except ValueError :
+            raise ValueError ("INSTALL APDU is not valid hexadecimal data.")
+
+        if len (apdu )<5 :
+            raise ValueError ("INSTALL APDU must include CLA INS P1 P2 Lc.")
+
+        if apdu [1 ]!=0xE6 :
+            raise ValueError ("Supplied APDU must use INSTALL instruction E6.")
+
+        if apdu [2 ]not in (0x04 ,0x0C ):
+            raise ValueError ("Supplied APDU must be INSTALL [for install] P1=04 or P1=0C.")
+
+        if apdu [3 ]!=0x00 :
+            raise ValueError ("Supplied INSTALL APDU must use P2=00.")
+
+        data =GlobalPlatformManager ._extract_install_apdu_data (apdu )
+        load_file_aid =GlobalPlatformManager ._first_lv_value (data ,"Load File AID")
+        return apdu .hex ().upper (),load_file_aid
+
+    def install_cap_file_with_install_apdu (self ,filename :str ,install_apdu :str ,load_chunk_size :Optional [int ]=None )->bool :
+        """Load a CAP/IJC package and send a caller-supplied INSTALL [for install] APDU."""
+        if not self .tp .session or not self .tp .session .is_authenticated :
+            print (f"{Config.Colors.FAIL}[!] Error: Must be authenticated (AUTH) first.{Config.Colors.ENDC}")
+            return False
+
+        try :
+            final_apdu ,install_load_file_aid =self ._normalize_install_for_install_apdu (install_apdu )
+        except ValueError as e :
+            print (f"{Config.Colors.FAIL}[!] Invalid INSTALL APDU: {e}{Config.Colors.ENDC}")
+            return False
+
+        parsed_cap =self ._parse_cap_file_for_install (filename )
+        if parsed_cap is None :
+            return False
+
+        pkg_aid =parsed_cap .package_aid
+        if install_load_file_aid !=pkg_aid :
+            print (
+            f"{Config.Colors.FAIL}[!] INSTALL APDU Load File AID "
+            f"{install_load_file_aid.hex().upper()} does not match CAP package AID "
+            f"{pkg_aid.hex().upper()}.{Config.Colors.ENDC}"
+            )
+            return False
+
+        loaded =self ._load_cap_file_to_card (parsed_cap ,load_chunk_size =load_chunk_size )
+        if loaded ==False :
+            return False
+
+        print (f"{Config.Colors.CYAN}[*] INSTALL [for install] from supplied APDU...{Config.Colors.ENDC}")
+        _ ,sw1 ,sw2 =self .tp .transmit (final_apdu ,silent =True )
+
+        if sw1 ==0x90 :
+            print (f"{Config.Colors.GREEN}[+] Applet Installed Successfully.{Config.Colors.ENDC}")
+            return True
+
+        print (f"{Config.Colors.FAIL}[-] Install Failed: {sw1:02X}{sw2:02X}{Config.Colors.ENDC}")
+        return False
+
+    def install_cap_file (self ,filename :str ,privileges :str ="00",install_params :str ="C900",instantiate :bool =True ,target_app_aid :str =None ,target_module_aid :str =None ,load_chunk_size :Optional [int ]=None ):
+        """
+        GlobalPlatform INSTALL (GPCS 11.5).
+        Handles INSTALL [for load], LOAD (80 E8), and INSTALL [for install].
+        """
+        if not self .tp .session or not self .tp .session .is_authenticated :
+            print (f"{Config.Colors.FAIL}[!] Error: Must be authenticated (AUTH) first.{Config.Colors.ENDC}")
+            return
+
+        parsed_cap =self ._parse_cap_file_for_install (filename )
+        if parsed_cap is None :
+            return
+
+        pkg_aid =parsed_cap .package_aid
+        app_aids =parsed_cap .applet_aids
+
+        loaded =self ._load_cap_file_to_card (parsed_cap ,load_chunk_size =load_chunk_size )
+        if loaded ==False :
+            return
 
         if not instantiate :
             print (f"{Config.Colors.CYAN}[*] Skipping instantiation (LOAD only mode).{Config.Colors.ENDC}")
-            return 
+            return
 
         if not app_aids and not target_app_aid :
             print (f"{Config.Colors.GREEN}[+] Library Loaded (No Applets to install).{Config.Colors.ENDC}")
-            return 
+            return
 
         applet_aid =app_aids [0 ]
         if target_app_aid :
@@ -501,7 +632,7 @@ class GlobalPlatformManager :
         install_data .extend (param_bytes )
         install_data .append (0x00 )
 
-        cmd =f"80E60C00{len(install_data):02X}{install_data.hex()}"
+        cmd =self ._build_case3_apdu (0x80 ,0xE6 ,0x0C ,0x00 ,bytes (install_data ))
         _ ,sw1 ,sw2 =self .tp .transmit (cmd ,silent =True )
 
         if sw1 ==0x90 :
@@ -596,7 +727,7 @@ class GlobalPlatformManager :
         full_data =bytearray ()
 
         while True :
-            cmd =f"80F2{p1:02X}{p2:02X}024F00"
+            cmd =f"80F2{p1:02X}{p2:02X}024F0000"
             data ,sw1 ,sw2 =self .tp .transmit (cmd ,silent =False )
 
             if (sw1 ==0x90 or sw1 ==0x63 )and data :
@@ -626,68 +757,16 @@ class GlobalPlatformManager :
         print (f"{'AID':<34} | {'State':<12} | {last_col}")
         print ("-"*65 )
 
-        if any (b ==0xE3 for b in data ):
-            i =0 
-            while i <len (data ):
-                if data [i ]!=0xE3 :
-                    i +=1 
-                    continue 
-                tag_len =data [i +1 ]
-                entry =data [i +2 :i +2 +tag_len ]
-                i +=2 +tag_len 
-                parsed =TlvParser .parse (entry )
+        rows =self ._registry_rows_from_data (bytes (data ),kind )
+        if not rows :
+            if len (data )>0 and data [0 ]==0x62 :
+                print (f"{Config.Colors.WARNING}[!] Response is an FCP template, not a GP registry response.{Config.Colors.ENDC}")
+            else :
+                print (f"{Config.Colors.WARNING}[!] No GP registry entries decoded from response.{Config.Colors.ENDC}")
+            return
 
-                aid =""
-                if 0x4F in parsed :
-                    aid =parsed [0x4F ].hex ().upper ()
-
-                lcs_byte =0 
-                if 0x9F70 in parsed :
-                    lcs_byte =parsed [0x9F70 ][0 ]
-
-                privs =""
-                if 0xC5 in parsed :
-                    privs =parsed [0xC5 ].hex ().upper ()
-
-                self ._print_registry_row (aid ,lcs_byte ,privs )
-            return 
-
-        i =0 
-        while i <len (data ):
-            try :
-                if i <len (data )-1 :
-                    length_byte =data [i ]
-                    next_byte =data [i +1 ]
-                    if not ((5 <=length_byte <=16 )and (next_byte ==0xA0 )):
-                        i +=1 
-                        continue 
-
-                aid_len =data [i ]
-                i +=1 
-                if i +aid_len >len (data ):
-                    break 
-                aid =data [i :i +aid_len ].hex ().upper ()
-                i +=aid_len 
-
-                state_byte =0 
-                if i <len (data ):
-                    state_byte =data [i ]
-                i +=1 
-
-                extra_byte =0 
-                if i <len (data ):
-                    extra_byte =data [i ]
-                i +=1 
-
-                extra_str =f"{extra_byte:02X}"
-
-                if kind =='PACKAGES'and extra_byte >0 :
-                    extra_str =f"Len={extra_byte}"
-                    i +=extra_byte 
-
-                self ._print_registry_row (aid ,state_byte ,extra_str )
-            except IndexError :
-                break 
+        for aid ,state_byte ,extra in rows :
+            self ._print_registry_row (aid ,state_byte ,extra )
 
     def _print_registry_row (self ,aid ,lcs_byte ,extra ):
         state_map ={
@@ -715,17 +794,51 @@ class GlobalPlatformManager :
         }
         return state_map .get (lcs_byte ,f"0x{lcs_byte:02X}")
 
-    def _registry_entries_from_data (self ,data :bytes ,kind :str )->List [Dict [str ,Any ]]:
-        entries :List [Dict [str ,Any ]]=[]
-        if any (b ==0xE3 for b in data ):
+    @staticmethod
+    def _compact_registry_entry_at (data :bytes ,offset :int ,kind :str )->Optional [Tuple [str ,int ,str ,int ]]:
+        if offset >=len (data ):
+            return None
+
+        aid_len =data [offset ]
+        if not (5 <=aid_len <=16 ):
+            return None
+
+        aid_start =offset +1
+        aid_end =aid_start +aid_len
+        min_end =aid_end +2
+        if min_end >len (data ):
+            return None
+
+        state_byte =data [aid_end ]
+        known_states ={0x00 ,0x01 ,0x03 ,0x07 ,0x0F ,0x80 ,0x83 }
+        if state_byte not in known_states :
+            return None
+
+        extra_byte =data [aid_end +1 ]
+        next_offset =aid_end +2
+        extra =f"{extra_byte:02X}"
+
+        if kind =='PACKAGES'and extra_byte >0 :
+            if extra_byte >16 :
+                return None
+            if next_offset +extra_byte >len (data ):
+                return None
+            extra =data [next_offset :next_offset +extra_byte ].hex ().upper ()
+            next_offset +=extra_byte
+
+        aid =data [aid_start :aid_end ].hex ().upper ()
+        return aid ,state_byte ,extra ,next_offset
+
+    def _registry_rows_from_data (self ,data :bytes ,kind :str )->List [Tuple [str ,int ,str ]]:
+        rows :List [Tuple [str ,int ,str ]]=[]
+        if len (data )>0 and data [0 ]==0xE3 :
             i =0 
             while i <len (data ):
                 is_e3 =False 
                 if data [i ]==0xE3 :
                     is_e3 =True 
                 if is_e3 ==False :
-                    i +=1 
-                    continue 
+                    return rows 
                 has_len =False 
                 if i +1 <len (data ):
                     has_len =True 
@@ -754,67 +867,30 @@ class GlobalPlatformManager :
                 if 0xC5 in parsed :
                     extra =parsed [0xC5 ].hex ().upper ()
 
-                entries .append (
-                {
-                "aid":aid ,
-                "state":self ._state_to_string (lcs_byte ),
-                "extra":extra 
-                }
-                )
-            return entries 
+                rows .append ((aid ,lcs_byte ,extra ))
+            return rows 
 
         i =0 
         while i <len (data ):
-            try :
-                has_pair =False 
-                if i <len (data )-1 :
-                    has_pair =True 
-                if has_pair :
-                    length_byte =data [i ]
-                    next_byte =data [i +1 ]
-                    valid_prefix =False 
-                    if 5 <=length_byte <=16 :
-                        if next_byte ==0xA0 :
-                            valid_prefix =True 
-                    if valid_prefix ==False :
-                        i +=1 
-                        continue 
+            entry =self ._compact_registry_entry_at (data ,i ,kind )
+            if entry is None :
+                return rows
 
-                aid_len =data [i ]
-                i +=1 
-                if i +aid_len >len (data ):
-                    break 
-                aid =data [i :i +aid_len ].hex ().upper ()
-                i +=aid_len 
+            aid ,lcs_byte ,extra ,next_i =entry
+            rows .append ((aid ,lcs_byte ,extra ))
+            i =next_i
+        return rows 
 
-                lcs_byte =0 
-                if i <len (data ):
-                    lcs_byte =data [i ]
-                i +=1 
-
-                extra_byte =0 
-                if i <len (data ):
-                    extra_byte =data [i ]
-                i +=1 
-
-                extra =f"{extra_byte:02X}"
-                is_pkg =False 
-                if kind =='PACKAGES':
-                    is_pkg =True 
-                if is_pkg :
-                    if extra_byte >0 :
-                        extra =f"Len={extra_byte}"
-                        i +=extra_byte 
-
-                entries .append (
-                {
-                "aid":aid ,
-                "state":self ._state_to_string (lcs_byte ),
-                "extra":extra 
-                }
-                )
-            except Exception :
-                break 
+    def _registry_entries_from_data (self ,data :bytes ,kind :str )->List [Dict [str ,Any ]]:
+        entries :List [Dict [str ,Any ]]=[]
+        for aid ,lcs_byte ,extra in self ._registry_rows_from_data (data ,kind ):
+            entries .append (
+            {
+            "aid":aid ,
+            "state":self ._state_to_string (lcs_byte ),
+            "extra":extra
+            }
+            )
         return entries 
 
     def get_registry_data (self ,kind :str ='APPS')->Dict [str ,Any ]:
@@ -828,7 +904,7 @@ class GlobalPlatformManager :
         last_sw2 =0x00 
 
         while True :
-            cmd =f"80F2{p1:02X}{p2:02X}024F00"
+            cmd =f"80F2{p1:02X}{p2:02X}024F0000"
             data ,sw1 ,sw2 =self .tp .transmit (cmd ,silent =True )
             last_sw1 =sw1 
             last_sw2 =sw2 
@@ -1014,7 +1090,7 @@ class GlobalPlatformManager :
     def _send_install_cmd (self ,p1 :int ,data :bytes ,description :str )->bool :
         """Generic helper for INSTALL commands."""
         print (f"{Config.Colors.CYAN}[*] INSTALL [{description}]...{Config.Colors.ENDC}")
-        cmd =f"80E6{p1:02X}00{len(data):02X}{data.hex()}"
+        cmd =self ._build_case3_apdu (0x80 ,0xE6 ,p1 ,0x00 ,data )
         _ ,sw1 ,sw2 =self .tp .transmit (cmd ,silent =True )
 
         if sw1 ==0x90 :
@@ -1023,6 +1099,40 @@ class GlobalPlatformManager :
         else :
             print (f"{Config.Colors.FAIL}[-] Failed: {sw1:02X}{sw2:02X}{Config.Colors.ENDC}")
             return False 
+
+    def install_for_load (self ,load_file_aid_hex :str ,security_domain_aid_hex :str ="",load_file_hash_hex :str ="",params :str ="",token :str =""):
+        """GP INSTALL [for load] (P1=0x02) with explicit LV fields."""
+        if not self .tp .session or not self .tp .session .is_authenticated :
+            print (f"{Config.Colors.FAIL}[!] Error: Must be authenticated.{Config.Colors.ENDC}")
+            return
+
+        load_file_aid =HexUtils .to_bytes (load_file_aid_hex )
+        security_domain_aid =b''
+        if security_domain_aid_hex :
+            security_domain_aid =HexUtils .to_bytes (security_domain_aid_hex )
+        load_file_hash =b''
+        if load_file_hash_hex :
+            load_file_hash =HexUtils .to_bytes (load_file_hash_hex )
+        param_bytes =b''
+        if params :
+            param_bytes =HexUtils .to_bytes (params )
+        token_bytes =b''
+        if token :
+            token_bytes =HexUtils .to_bytes (token )
+
+        payload =bytearray ()
+        payload .append (len (load_file_aid ))
+        payload .extend (load_file_aid )
+        payload .append (len (security_domain_aid ))
+        payload .extend (security_domain_aid )
+        payload .append (len (load_file_hash ))
+        payload .extend (load_file_hash )
+        payload .append (len (param_bytes ))
+        payload .extend (param_bytes )
+        payload .append (len (token_bytes ))
+        payload .extend (token_bytes )
+
+        self ._send_install_cmd (0x02 ,payload ,"For Load")
 
     def install_make_selectable (self ,aid_hex :str ,privileges :str ="00",params :str ="",token :str =""):
         """GP INSTALL [for make selectable] (P1=0x08)."""

@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """eIM-local configuration: resolves cert, profile, and state directory paths for the local eIM simulator."""
 import os
@@ -77,10 +80,6 @@ def _eim_response_log_file() -> str:
     return os.path.join(_module_dir(), "eim_response_log.jsonl")
 
 
-def _eim_poll_audit_db_file() -> str:
-    return os.path.join(_module_dir(), "eim_poll_audit.sqlite3")
-
-
 @dataclass(frozen=True)
 class EimLocalConfig(LocalAccessConfig):
     """Configuration for isolated eIM-enabled local SCP11 experimentation."""
@@ -99,7 +98,6 @@ class EimLocalConfig(LocalAccessConfig):
     EIM_CERTS_DIR: str = field(default_factory=_eim_certs_dir)
     EIM_RUNTIME_STATE_FILE: str = field(default_factory=_eim_runtime_state_file)
     EIM_RESPONSE_LOG_FILE: str = field(default_factory=_eim_response_log_file)
-    EIM_POLL_AUDIT_DB_FILE: str = field(default_factory=_eim_poll_audit_db_file)
     EIM_IDENTITY_FILE: str = field(default_factory=_eim_identity_file)
     EIM_DEFAULT_PACKAGE_FILE: str = "default_eim_package.json"
     EIM_ADD_INITIAL_TAG_HEX: str = "BF57"

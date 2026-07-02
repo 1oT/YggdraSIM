@@ -1,0 +1,60 @@
+/*
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+ */
+
+/* datasheet decoded + GetCerts folded trace: soften the monospace slab */
+.cc-action-datasheet-trace {
+  margin-top: 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: color-mix(in oklab, var(--bg-elev), transparent 15%);
+  overflow: hidden;
+}
+
+.cc-action-datasheet-trace > summary {
+  list-style: none;
+  cursor: pointer;
+  padding: 8px 12px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--fg-dim);
+  background: color-mix(in oklab, var(--bg-hover), transparent 30%);
+  border-bottom: 1px solid transparent;
+}
+
+.cc-action-datasheet-trace[open] > summary {
+  border-bottom-color: var(--border);
+  color: var(--fg-muted);
+}
+
+.cc-action-datasheet-trace > summary::-webkit-details-marker {
+  display: none;
+}
+
+.cc-action-datasheet-trace > summary::after {
+  content: " ▸";
+  float: right;
+  opacity: 0.55;
+  font-weight: 400;
+}
+
+.cc-action-datasheet-trace[open] > summary::after {
+  content: " ▾";
+}
+
+.cc-action-datasheet-trace > .cc-log-inline {
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+  background: linear-gradient(
+    165deg,
+    color-mix(in oklab, var(--bg-deep, var(--bg)), transparent 8%) 0%,
+    var(--code-bg, var(--bg-elev)) 100%);
+  padding: 12px 14px;
+  font-size: 11.5px;
+  line-height: 1.5;
+}
+

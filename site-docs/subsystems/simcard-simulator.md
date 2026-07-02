@@ -5,6 +5,11 @@ tags:
   - simulator
   - simcard
 ---
+<!--
+SPDX-License-Identifier: GPL-3.0-or-later
+Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+-->
+
 
 # SIMCARD Simulator
 
@@ -491,29 +496,23 @@ through the `toolkit` block in
 
 | Field | Meaning |
 | --- | --- |
-| `poll_strategy` | `"timer"` (default) / `"poll_interval"` / `"both"` / `"off"`. `"timer"` uses TS 102 223 §6.6.21 TIMER MANAGEMENT START — the trigger SGP.32 IPA-poll relies on. `"poll_interval"` falls back to the §6.6.5 POLL INTERVAL heartbeat. `"both"` emits both; `"off"` emits no proactive bring-up. |
 | `timer_management_seconds` | Initial timer setpoint, encoded as BCD HH/MM/SS in TLV `A5`. |
 | `timer_management_id` | Timer identifier carried in TLV `A4`. Clamped to the ETSI 1..8 range. |
-| `timer_management_auto_rearm` | When `true` (default) every received `D7` TIMER EXPIRATION envelope re-queues a fresh TIMER MANAGEMENT START so the IPA-poll cadence keeps running without applet-side housekeeping. |
 | `poll_interval_seconds` | Setpoint used when the strategy includes the legacy POLL INTERVAL heartbeat. |
 | `provide_imei` | When `true` (default) the bootstrap also queues a PROVIDE LOCAL INFORMATION (IMEI) proactive command after the polling trigger, mirroring real eUICC bring-up. |
-| `ipa_poll` | Nested object that controls the SGP.32 §3.5 IPA-poll BIP trigger emitted on every D7 TIMER EXPIRATION envelope (see below). |
 
 Defaults (`SimToolkitState`) match the JSON template, so a fresh
-workspace boots straight into timer-driven IPA-poll without any
 manual configuration.
 
-### IPA-poll BIP trigger on TIMER EXPIRATION
 
 `_apply_timer_expiration` drives the SGP.32 §3.5 polling
 cadence. Each `D7` envelope queues a two-leg BIP cycle followed
 by a TIMER MANAGEMENT START re-arm. The first leg is a DNS
-resolution against a public resolver (default `8.8.8.8`); the
+resolution against a public resolver (default `192.0.2.53`); the
 second is the ESipa exchange against the resolved eIM IP.
 
 #### Cold-cache cycle (no resolved IP yet)
 
-1. **OPEN CHANNEL** UDP_REMOTE → `toolkit.ipa_poll_dns_server:53`
    with qualifier `0x03` (immediate + automatic reconnection).
    The cellular APN travels under TLV `47` (Network Access Name,
    §8.70 label-list encoding), the resolver IPv4 under TLV `3E`
@@ -522,16 +521,13 @@ second is the ESipa exchange against the resolved eIM IP.
    the bearer in its UI without forcing user-visible text.
 2. **SEND DATA** with the AAAA query for the eIM FQDN (RFC 1035
    wire format, transaction id seeded from
-   `toolkit.ipa_poll_dns_query_id`).
 3. **SEND DATA** with the A query for the same FQDN.
 4. **RECEIVE DATA** drains the resolver's first answer.
 5. **RECEIVE DATA** drains the resolver's second answer. The
    first usable A-record lands in
-   `toolkit.ipa_poll_resolved_ip`.
 6. **CLOSE CHANNEL** tears the resolver bearer down. If the DNS
    leg produced an IPv4 address, the toolkit chains directly
    into the eIM leg below; otherwise the cycle returns to idle
-   and `toolkit.ipa_poll_last_resolution_error` records why.
 7. **TIMER MANAGEMENT START** re-arms the cadence.
 
 #### Warm-cache cycle (resolved IP already cached)
@@ -550,10 +546,8 @@ second is the ESipa exchange against the resolved eIM IP.
 The DNS and eIM legs share the same APN. APN priority is:
 1. SAIP profile EF.ACL (`6F57`) — set automatically by the
    filesystem rebuild whenever a profile is enabled.
-2. `YGGDRASIM_SIM_IPA_POLL_APN` env override.
 3. `internet.apn` workspace fallback.
 
-`toolkit.ipa_poll_apn_source` records which input won
 (`"bpp"` / `"env"` / `"default"`).
 
 #### OPEN CHANNEL failure recovery
@@ -564,7 +558,6 @@ SEND DATA / RECEIVE DATA / TIMER MANAGEMENT / CLOSE CHANNEL
 commands the IPA had already queued behind it so the modem does
 not have to FETCH guaranteed-failure commands (`0x3A03` "channel
 id not valid") before the next timer expires.
-`ipa_poll_session_active`, `ipa_poll_followup_emitted` and the
 phase machine all reset on the same code path.
 
 When the modem fails a SEND DATA or RECEIVE DATA TR mid-cycle
@@ -572,16 +565,13 @@ When the modem fails a SEND DATA or RECEIVE DATA TR mid-cycle
 the common case for misbehaving UDP/TCP stacks), the toolkit
 drains the still-pending SEND/RECEIVE/TIMER follow-ups but
 preserves the trailing CLOSE CHANNEL so the bearer is torn down
-cleanly, increments `toolkit.ipa_poll_consecutive_failures` and
 records a `phase|origin|result|info` summary into
-`toolkit.ipa_poll_last_cycle_error` for status renderers. The
 counter resets to zero on the next cycle that successfully
 dispatches at least one EuiccPackage into ISD-R.
 
 #### TIMER MANAGEMENT yield between SEND and RECEIVE DATA
 
 ETSI TS 102 223 §6.6.21 + reference IPA traces show that real
-eUICC IPAs arm a watchdog timer (timer `02`, ~65 s) right after
 the SEND DATA burst and deactivate it once the matching
 RECEIVE DATA flight has been drained. The proactive yield gives
 the modem its FETCH/STATUS polling window so bytes from the
@@ -596,13 +586,9 @@ The simulator now mirrors this behaviour:
   `OPEN/SEND/SEND/TIMER(start)/RECV/RECV/TIMER(stop)/CLOSE`.
 * The plain-HTTP eIM leg queues
   `OPEN/SEND/TIMER(start)/RECV/TIMER(stop)/CLOSE`.
-* The TLS reactive loop arms the watchdog right before each
   RECEIVE DATA dispatch and disarms it before the next SEND
   DATA flight (or CLOSE CHANNEL).
 
-`toolkit.ipa_poll_wait_timer_id` (default `2`) and
-`toolkit.ipa_poll_wait_timer_seconds` (default `65`) override
-the timer parameters; `toolkit.ipa_poll_wait_timer_armed`
 tracks the runtime arm state for the TLS path.
 
 All TIMER MANAGEMENT proactives use the comprehension-clear
@@ -623,7 +609,6 @@ identifier (`0x82`) instead causes the modem to reject every
 follow-up with general-result `0x3A` / additional-info `0x03`
 ("Channel identifier not valid").
 
-Because the IPA-poll cycle queues the full
 OPEN/SEND/RECEIVE/CLOSE batch up-front, the destination byte on
 the follow-ups is initially encoded as `0x82`. Once the
 OPEN CHANNEL TR returns the assigned channel id in the
@@ -636,7 +621,6 @@ extensions is left untouched. The field resets to `0` on
 CLOSE CHANNEL (success or failure) and on OPEN CHANNEL failure
 so the next cycle starts clean.
 
-The trigger is gated by `ipa_poll.enabled`. When no FQDN can be
 resolved (no override, no `state.eim_entries[*].eim_fqdn`, no
 workspace eIM identity) the BIP sequence is skipped and only the
 timer re-arm is queued so the cadence keeps running while a test
@@ -644,7 +628,6 @@ fixture is being staged.
 
 #### In-card TLS-1.2 handshake (Stage 2)
 
-When `toolkit.ipa_poll_tls_enabled` is `True` (the production
 default) the eIM leg above runs the TLS-1.2
 **ECDHE-ECDSA-AES128-GCM-SHA256** handshake entirely inside the
 card. The modem stays a transparent byte pipe -- no MITM, no
@@ -692,22 +675,18 @@ Trust-anchor priority for the chain validator:
 Aborts:
 
 * TLS handshake failure (`SSLError` from `do_handshake()`)
-  records the reason in `toolkit.ipa_poll_tls_last_error`,
   drains any queued follow-ups and queues a single CLOSE CHANNEL
   so the bearer is shut cleanly.
-* Idle-receive cap (`toolkit.ipa_poll_tls_max_idle_receives`,
   default 16) prevents an unresponsive eIM from looping the
   RECEIVE DATA polls forever; on overflow the cycle aborts with
   the same CLOSE CHANNEL teardown.
 
 The Stage-1 plain-HTTP fallback is preserved for tests and lab
-debugging: setting `toolkit.ipa_poll_tls_enabled = False`
 restores the linear OPEN/SEND/RECEIVE/CLOSE queue from before
 the TLS engine was wired in.
 
 ### ESipa request body — `BF4F` GetEimPackageRequest
 
-The first SEND DATA in every IPA-poll cycle carries an
 SGP.32 v1.2 §6.5.2.1 `GetEimPackageRequest` (BF4F) wrapped in
 HTTP/1.1 framing:
 
@@ -718,19 +697,15 @@ HTTP/1.1 framing:
 `Content-Type` is `application/x-gsma-rsp-asn1` and
 `X-Admin-Protocol` is `gsma/rsp/v2.2.0` so the modem's HTTP
 client routes it to `/gsma/rsp2/asn1`. The body can still be
-overridden by setting `state.toolkit.ipa_poll_request_payload`;
 that escape hatch is the way an integration test injects a
 `BF39` InitiateAuthenticationRequestEsipa or any other ESipa
 opener.
 
 ### ESipa response dispatch on RECEIVE DATA
 
-When an IPA-poll cycle is in flight, the bytes the modem returns
 through the **RECEIVE DATA** terminal response are the eIM's
 ESipa payload (SGP.32 §6.5). The toolkit:
 
-1. Tracks the cycle via `state.toolkit.ipa_poll_session_active`,
-   set when `_queue_ipa_poll_sequence()` enqueues the BIP burst
    and cleared on the **CLOSE CHANNEL** TR (success *or* failure;
    the bearer is gone either way).
 2. Strips any leading HTTP envelope (`HTTP/1.1 ...\r\n\r\n`) the
@@ -742,9 +717,7 @@ ESipa payload (SGP.32 §6.5). The toolkit:
    which is exactly the path a real terminal would take when the
    IPA fans the eIM payload out as STORE DATA on ISD-R.
 4. Records the outer tag of every successfully dispatched package
-   in `state.toolkit.ipa_poll_dispatched_packages` and the raw
    R-APDU bytes the SGP layer returned in
-   `state.toolkit.ipa_poll_dispatched_responses`.
 
 The dispatcher allow-list covers the full SGP.32/SGP.22 tag range
 the SGP layer can handle (BF21/25/29/2A/2B/2D/2E/30/31/32/33/34/
@@ -783,14 +756,11 @@ CHANNEL. The injected SEND DATA carries an SGP.32 v1.2 §6.5.2.1
   of those tags are wrapped in `BF51` (`LoadEuiccPackage` result)
   per the default-CHOICE rule.
 
-The follow-up is gated by `state.toolkit.ipa_poll_followup_emitted`
 so the IPA cannot cascade itself if the eIM's acknowledgement
 happens to contain BF50 bytes -- real eIMs reply with an empty
 body or a tiny ack TLV and the latch resets only on the next
 cycle (CLOSE CHANNEL TR).
 
-`state.toolkit.ipa_poll_pending_result_payload` and
-`state.toolkit.ipa_poll_last_result_payload` cache the body for
 operator introspection; the latter survives the cycle teardown
 so a test can confirm "the IPA shipped the eIM the expected
 result for cycle N".
@@ -810,9 +780,7 @@ where `XX` is the EimPackageResultErrorCode the IPA inferred.
 The `_sw_to_eim_package_error_code()` static maps the card's
 SW pair to `1` (invalidPackageFormat — `6A80`/`6A82`/`6985`),
 `2` (unknownPackage — `6A88`), or `127` (undefinedError —
-everything else). `state.toolkit.ipa_poll_failed_packages` is a
 parallel `[(outer_tag, error_code), ...]` audit trail to the
-existing `ipa_poll_dispatched_packages` success list.
 
 #### PendingNotification piggyback
 
@@ -824,9 +792,7 @@ cleared from the eUICC; the eIM is expected to acknowledge them
 via a follow-up `RemoveNotificationFromList` (BF30) before they
 go away. This mirrors a real card: notifications stay pinned
 until explicitly cleared, so the eIM and eUICC share the same
-view if the IPA-poll BIP cycle drops mid-flight.
 
-### IPA-poll loopback validation (Mode A + Mode B)
 
 Two integration suites pin the IPA contract end-to-end:
 
@@ -842,8 +808,6 @@ Two integration suites pin the IPA contract end-to-end:
   entry in `state.eim_entries`.
 
 - **Mode B (RECEIVE DATA dispatch / fake-modem)** --
-  `tests/test_simcard_ipa_poll_dispatch.py` and
-  `tests/test_simcard_ipa_poll_engine_loopback.py`. A small
   in-test FETCH/TR loop impersonates the modem, returns a canned
   ESipa payload through RECEIVE DATA, and asserts that the
   payload is fan-out into ISD-R. The engine-level test runs
@@ -1006,7 +970,7 @@ wrapper.
 ### SAIP §8.3.5 explicit `Fcp.linkPath` aliases
 
 The TCA Profile Interoperability v2.3.1 specification carries a
-first-class encoding for cross-DF aliases inside the Bound Profile
+explicit encoding for cross-DF aliases inside the Bound Profile
 Package. Every `Fcp` SEQUENCE may include a
 `linkPath [PRIVATE 7] OCTET STRING (SIZE (0..8))` field whose body
 is the concatenation of 2-byte File Identifiers walking from the MF
@@ -1117,7 +1081,7 @@ via SFI=0x07 selection mode) used to return `9000` with no body
 once the operator BPP overrode the lab default. Regression
 coverage lives in `tests/test_simcard_shared_ef_mirror.py`,
 including a slot that replays the SFI READ BINARY against the
-real `89103000000466311335` BPP fixture.
+real `89880000000466311335` BPP fixture.
 
 ### TCA Profile Interoperability §3.5 / §9 template default fill-in
 
@@ -1183,7 +1147,7 @@ Regression coverage in
 `tests/test_simcard_saip_template_defaults.py` pins the registry
 shape, the fill-in invariants (issuer wins, `content_rqd=True`
 never auto-populated, SFIs always synced), and an end-to-end
-replay of the `89103000000466311335` cold-attach SFI `READ BINARY`
+replay of the `89880000000466311335` cold-attach SFI `READ BINARY`
 sequence (`00B0830004` -> EF.AD `00000002`, `00B0870009` ->
 EF.IMSI from BPP, `00B0920001` -> EF.HPPLMN).
 
@@ -1203,7 +1167,7 @@ deployments.
 | D     | `genericFileManagement` walker   | `pysim_gfm_walk` + `_materialize_gfm_via_pysim` + local fallback                | `tests/test_simcard_saip_gfm_walker.py`         |
 | E     | TS service-name tables           | `pysim_service_table`, `apply_pysim_service_table_overlay_to_inspector`         | `tests/test_simcard_saip_service_tables.py`     |
 
-**Phase A** lifts pySim's `ProfileTemplateRegistry` snapshots
+The template-overlay layer lifts pySim's `ProfileTemplateRegistry` snapshots
 (`FilesAtMF`, `FilesUsimMandatory[V2]`, `FilesUsimOptional[V2|V3]`,
 `FilesIsimMandatory`, `FilesIsimOptional[v2]`, `FilesUsimDfGsmAccess`,
 `FilesUsimDf5GS[v2|v3|v4]`, `FilesUsimDfSaip`, `FilesTelecom`)
@@ -1213,16 +1177,16 @@ keys aliases by `(FID, canonical EF name)` so files that share a
 FID across DFs (`ef-pbc` 4F09 in DF.PHONEBOOK vs `ef-supinai`
 4F09 in DF.5GS) cannot collide.
 
-**Phase B** routes every BPP / GFM `fileDescriptor` blob through
+The FCP-decoder layer routes every BPP / GFM `fileDescriptor` blob through
 `pySim.esim.saip.File.from_fileDescriptor`, then projects the
 result onto `FcpAttributes` (typed dataclass with `fid_hex`,
 `structure`, `arr`, `lcsi`, `fill_pattern`, `link_path`, ...).
-SFI assignments still flow from the Phase A template overlay --
+SFI assignments still flow from the template-overlay layer --
 pySim stores the raw `shortEFID` byte rather than the unpacked
 SFI defined by TS 102 221 §13.2, so descriptor-derived SFIs are
 deliberately not used to populate `SimProfileFsNode.sfi`.
 
-**Phase C** wraps `pinCodes`, `pukCodes`, `securityDomain`,
+The PE-wrapper layer wraps `pinCodes`, `pukCodes`, `securityDomain`,
 `rfm` and `akaParameter` PEs through `pysim_pe_wrapper`, which
 constructs the matching pySim subclass and runs `_post_decode`.
 `pysim_sd_keys` returns frozen `PySimSdKeySnapshot`s with the
@@ -1233,7 +1197,7 @@ the `KeyType` enum string mapped to the GP §11.1.8 byte (e.g.
 `'0x000000000000'` default for `sqnInit` materialises into the
 TS 33.102 §6.3.7 32-element list of 6-byte zeros.
 
-**Phase D** rewrites `_consume_generic_file_management` on top
+The GFM-walker layer rewrites `_consume_generic_file_management` on top
 of `ProfileElementGFM`. `pysim_gfm_walk` replicates pySim's
 stream processing (`filePath`, `createFCP`, `fillFileOffset`,
 `fillFileContent`, `linkPath` extension) and emits a tuple of
@@ -1245,7 +1209,7 @@ an explicit `filePath` resolve under it). The original local
 walker is retained as `_consume_generic_file_management_local`
 fallback for when pySim is absent or returns an empty walk.
 
-**Phase E** replaces the inspector's hand-curated bit -> name
+The service-table layer replaces the inspector's hand-curated bit -> name
 dictionaries (`Tools/ProfilePackage/saip_asn1_decode._UST_SERVICE_NAMES`,
 `_EST_SERVICE_NAMES`, `_ISIM_SERVICE_NAMES`) with the
 authoritative pySim maps (`pySim.ts_31_102.EF_UST_map`,
@@ -1807,9 +1771,11 @@ modules:
 | `SIMCARD/suci.py` | TS 33.501 §C.3 SUCI Profile A and Profile B encoders |
 | `SIMCARD/identity.py` | TS 31.102 §7.1.2.4 `GET IDENTITY` SUCI build path |
 
-The complementary network-side AUSF / AAnF surfaces are out of scope
-for this release; this release ships the SIM-side primitives only.
-Operators who need a network-side counterpart wire it up themselves.
+The complementary core-side surface lives under `Tools/YggdraCore/`,
+which exposes an in-process AUSF / AAnF pair plus a FastAPI loopback
+launcher (`YGGDRASIM_5GCORE_MODE=stub`). See the operator-surfaces
+table on the [home page](../index.md) for the entry points.
+*(post-v1 staging — not part of this release.)*
 
 ## Identity files
 

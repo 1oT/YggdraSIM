@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 import importlib.util
 import sys
 import unittest
@@ -13,6 +16,7 @@ sys.modules[spec.name] = eim_packages_module
 spec.loader.exec_module(eim_packages_module)
 
 TYPE_PROFILE_STATE_MANAGEMENT = eim_packages_module.TYPE_PROFILE_STATE_MANAGEMENT
+TYPE_EIM_CONFIGURATION_OBJECT = eim_packages_module.TYPE_EIM_CONFIGURATION_OBJECT
 TYPE_EUICC_CONFIGURATION = eim_packages_module.TYPE_EUICC_CONFIGURATION
 TYPE_PROFILE_DOWNLOAD_TRIGGER = eim_packages_module.TYPE_PROFILE_DOWNLOAD_TRIGGER
 TYPE_GENERIC = eim_packages_module.TYPE_GENERIC
@@ -42,7 +46,7 @@ class EimPackageParsingTests(unittest.TestCase):
             b"".join(
                 [
                     wrap_tlv("80", DUMMY_TEST_EIM_OID.encode("utf-8")),
-                    wrap_tlv("5A", bytes.fromhex("89044045930000000000001492294428")),
+                    wrap_tlv("5A", bytes.fromhex("89049032123456789012345678901234")),
                     wrap_tlv("81", b"\x34"),
                     wrap_tlv("82", b"\x00\x00\x00\x00\x00\x00\x04\x9D"),
                     wrap_tlv("A0", wrap_tlv("BF2D", b"")),
@@ -55,6 +59,26 @@ class EimPackageParsingTests(unittest.TestCase):
 
         self.assertEqual(parsed.package_type, TYPE_PROFILE_STATE_MANAGEMENT)
         self.assertEqual(parsed.card_request, bytes.fromhex("BF2D00"))
+
+    def test_bf51_with_inner_eim_configuration_object_is_classified_as_eco(self):
+        signed_request = wrap_tlv(
+            "30",
+            b"".join(
+                [
+                    wrap_tlv("80", DUMMY_TEST_EIM_OID.encode("utf-8")),
+                    wrap_tlv("5A", bytes.fromhex("89049032123456789012345678901234")),
+                    wrap_tlv("81", b"\x34"),
+                    wrap_tlv("82", b"\x00\x00\x00\x00\x00\x00\x04\x9E"),
+                    wrap_tlv("A0", wrap_tlv("A8", wrap_tlv("80", b"1.3.6.1.4.1"))),
+                ]
+            ),
+        )
+        raw = wrap_tlv("BF51", signed_request + wrap_tlv("5F37", b"\xAA" * 64))
+
+        parsed = parse_eim_package(raw)
+
+        self.assertEqual(parsed.package_type, TYPE_EIM_CONFIGURATION_OBJECT)
+        self.assertEqual(parsed.card_request, wrap_tlv("A8", wrap_tlv("80", b"1.3.6.1.4.1")))
 
     def test_euicc_configuration_extracts_inner_card_request(self):
         signed_request = wrap_tlv(
@@ -119,6 +143,34 @@ class EimPackageParsingTests(unittest.TestCase):
         self.assertEqual(parsed.notification_seq_number, 2)
         self.assertEqual(parsed.euicc_package_result_seq_number, 9)
         self.assertEqual(parsed.request_token, bytes.fromhex("00000000000004A2"))
+
+    def test_signed_euicc_configuration_extracts_outer_eim_id_and_nested_request(self):
+        inner_request = wrap_tlv(
+            "BF52",
+            wrap_tlv("5C", bytes.fromhex("84"))
+            + wrap_tlv("83", bytes.fromhex("00000000000004A3")),
+        )
+        signed_request = wrap_tlv(
+            "30",
+            b"".join(
+                [
+                    wrap_tlv("80", b"manager-2"),
+                    wrap_tlv("5A", bytes.fromhex("89044045930000000000001492294428")),
+                    wrap_tlv("81", b"\x35"),
+                    wrap_tlv("82", b"\x00\x00\x00\x00\x00\x00\x04\xA3"),
+                    wrap_tlv("A0", inner_request),
+                ]
+            ),
+        )
+        raw = wrap_tlv("BF52", signed_request + wrap_tlv("5F37", b"\xCC" * 64))
+
+        parsed = parse_eim_package(raw)
+
+        self.assertEqual(parsed.package_type, TYPE_EUICC_CONFIGURATION)
+        self.assertEqual(parsed.eim_id, "manager-2")
+        self.assertEqual(parsed.requested_tags, (bytes.fromhex("84"),))
+        self.assertEqual(parsed.request_token, bytes.fromhex("00000000000004A3"))
+        self.assertEqual(parsed.card_request, inner_request)
 
     def test_profile_download_trigger_extracts_activation_code(self):
         trigger = wrap_tlv(

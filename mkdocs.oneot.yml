@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 # --------------------------------------------------------------------------
 # mkdocs.oneot.yml
 # Second visual variant of the YggdraSIM docs. Shares the same source tree
@@ -15,16 +18,13 @@
 site_name: YggdraSIM — A 1oT OSS initiative
 site_description: Secure-element, eUICC, OTA, SCP11, HIL bridge, and SAIP toolkit documentation.
 site_author: Hampus Hellsberg
-site_url: https://1oT.github.io/YggdraSIM/oneot/
-repo_url: https://github.com/1oT/YggdraSIM
-repo_name: 1oT/YggdraSIM
+site_url: https://hampushellsberg-dev.github.io/YggdraSIM/oneot/
+repo_url: https://github.com/hampushellsberg-dev/YggdraSIM
+repo_name: hampushellsberg-dev/YggdraSIM
 edit_uri: edit/main/site-docs/
 docs_dir: site-docs
 site_dir: site-oneot
 strict: true
-validation:
-  nav:
-    omitted_files: ignore
 copyright: Copyright &copy; 2026 1oT OÜ. Authored by Hampus Hellsberg. Documentation released under the project license.
 
 extra_css:
@@ -37,8 +37,11 @@ extra_javascript:
 extra:
   social:
     - icon: fontawesome/brands/github
-      link: https://github.com/1oT/YggdraSIM
+      link: https://github.com/hampushellsberg-dev/YggdraSIM
       name: YggdraSIM source repository
+    - icon: fontawesome/solid/comments
+      link: https://github.com/1oT/YggdraSIM/discussions
+      name: Forum
   generator: false
 
 theme:
@@ -134,7 +137,7 @@ markdown_extensions:
       emoji_generator: !!python/name:material.extensions.emoji.to_svg
   - pymdownx.magiclink:
       repo_url_shorthand: true
-      user: 1oT
+      user: hampushellsberg-dev
       repo: YggdraSIM
 
 nav:
@@ -163,6 +166,7 @@ nav:
       - SCP11 Local Access: subsystems/scp11-local-access.md
       - SCP11 eIM Local: subsystems/scp11-eim-local.md
       - Profile Package: subsystems/profile-package.md
+      - Universal GUI Command Center: subsystems/gui-command-center.md
       - HIL Bridge: subsystems/hil-bridge.md
       - SUCI Tool: subsystems/suci-tool.md
       - SIMCARD Simulator: subsystems/simcard-simulator.md
@@ -174,6 +178,8 @@ nav:
       - Download a Profile (Local Access): how-to/download-a-profile-local.md
       - Enable, Disable, Delete a Profile: how-to/enable-disable-delete-profile.md
       - Inspect and Transcode SAIP: how-to/inspect-and-transcode-saip.md
+      - Remote APDU Streaming: how-to/remote-apdu-streaming.md
+      - Install RemSIM / APDU Streaming: how-to/install-remsim-apdu-streaming.md
       - Run a HIL Capture: how-to/run-hil-capture.md
       - Replay a HIL pcap offline: how-to/replay-hil-pcap-offline.md
       - Enable Inventory Encryption: how-to/enable-inventory-encryption.md

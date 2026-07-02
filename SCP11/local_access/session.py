@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """SCP11 local-access session: drives a full SGP.26 local-delivery exchange without network dependencies."""
 import hashlib
@@ -41,6 +44,7 @@ _SMPP_STUB_MODULES = [
     "smpp.pdu.pdu_types",
     "smpp.pdu.operations",
 ]
+_DEFAULT_PCSC_CHANNEL = object()
 
 
 def _install_minimal_smartcard_stubs() -> None:
@@ -328,6 +332,7 @@ try:
         encode_notification_sent_request,
         extract_euicc_signed1,
     )
+    from ..shared.trace_dump import print_hex_payload, print_store_data_chunk_plan, split_tlv_aware_chunks
     from ..shared.transport import PcscApduChannel
     from .cert_store import LocalSgp26CertStore, SmdpCertificateRecord
     from .config import LocalAccessConfig
@@ -355,6 +360,7 @@ except ImportError:
         encode_notification_sent_request,
         extract_euicc_signed1,
     )
+    from SCP11.shared.trace_dump import print_hex_payload, print_store_data_chunk_plan, split_tlv_aware_chunks
     from SCP11.shared.transport import PcscApduChannel
     from SCP11.local_access.cert_store import LocalSgp26CertStore, SmdpCertificateRecord
     from SCP11.local_access.config import LocalAccessConfig
@@ -453,9 +459,13 @@ class LocalIsdrSession:
     TAG_CTX_0 = b"\xA0"
     TAG_RESULT = b"\x80"
 
-    def __init__(self, cfg: Optional[LocalAccessConfig] = None, apdu_channel: Optional[Any] = None):
+    def __init__(self, cfg: Optional[LocalAccessConfig] = None, apdu_channel: Any = _DEFAULT_PCSC_CHANNEL):
         self.cfg = cfg or LocalAccessConfig()
-        self.apdu_channel = apdu_channel or PcscApduChannel(reader_index=self.cfg.READER_INDEX)
+        self.apdu_channel = (
+            PcscApduChannel(reader_index=self.cfg.READER_INDEX)
+            if apdu_channel is _DEFAULT_PCSC_CHANNEL
+            else apdu_channel
+        )
         set_raw_logging = getattr(self.apdu_channel, "set_raw_apdu_logging", None)
         if callable(set_raw_logging):
             set_raw_logging(False)
@@ -780,6 +790,7 @@ class LocalIsdrSession:
                 log_name,
                 chunk_size=chunk_size,
             )
+        print_hex_payload(f"{log_name} full payload", payload)
         apdu = self._build_store_data_apdu(payload)
         return self.apdu_channel.send(apdu, log_name)
 
@@ -1410,7 +1421,19 @@ class LocalIsdrSession:
                     self.prepare_download()
                 bar.advance("bind / wrap bpp")
                 if build_session_bound_bpp:
-                    bpp_bytes = self._build_session_bound_profile_package(bpp_bytes)
+                    try:
+                        bpp_bytes = self._build_session_bound_profile_package(bpp_bytes)
+                    except ValueError as error:
+                        if self.cfg.WRAP_SEGMENT_IN_BOOTSTRAP and self._is_local_bpp_metadata_error(error):
+                            bpp_bytes, _ = self._wrap_segment_in_bootstrap(
+                                bpp_bytes,
+                                transaction_id=self.state.transaction_id,
+                            )
+                            self.state.last_bpp_crypto_debug_lines.append(
+                                "Session-bound BPP metadata unavailable; used legacy BF36/BF23 wrapper."
+                            )
+                        else:
+                            raise
                 elif defer_bind:
                     bpp_bytes, _ = self._wrap_segment_in_bootstrap(
                         bpp_bytes,
@@ -1427,6 +1450,16 @@ class LocalIsdrSession:
                     except Exception:
                         pass
                     self.close_session()
+
+    @staticmethod
+    def _is_local_bpp_metadata_error(error: BaseException) -> bool:
+        current: BaseException | None = error
+        while current is not None:
+            message = str(current)
+            if "Metadata field " in message and "local BPP generation" in message:
+                return True
+            current = current.__cause__ or current.__context__
+        return False
 
     def _extract_transaction_id_from_bpp(self, bpp_bytes: bytes) -> Optional[bytes]:
         """Extract transactionId (tag 0x80) from BF23 so session can use it.
@@ -2435,19 +2468,17 @@ class LocalIsdrSession:
         if isinstance(decoded, tuple) is True and len(decoded) == 2:
             choice_name, choice_value = decoded
             if choice_name == "notificationMetadataList" and isinstance(choice_value, list):
-                decoded_entries: list[dict[str, Optional[int]]] = []
                 for entry in choice_value:
                     if isinstance(entry, dict) is False:
                         continue
                     seq_number = entry.get("seqNumber")
-                    decoded_entries.append(
+                    entries.append(
                         {
                             "seqNumber": int(seq_number) if isinstance(seq_number, int) else None,
                         }
                     )
-                if len(decoded_entries) > 0:
-                    return decoded_entries
-        # pySim decoder returned nothing usable -- fall back to manual BER-TLV
+                return entries
+        # pySim decoder returned nothing usable — fall back to manual BER-TLV
         # parsing so that notifications queued on the eUICC are never missed.
         try:
             root_tag, root_value, _, _ = self._read_tlv(raw_response, 0)
@@ -2516,25 +2547,25 @@ class LocalIsdrSession:
         if len(raw_response) == 0:
             return b""
         try:
-            decode_retrieve_notifications_list_response(raw_response)
+            decoded = decode_retrieve_notifications_list_response(raw_response)
         except Exception:
-            pass
-        try:
-            root_tag, root_value, _, _ = self._read_tlv(raw_response, 0)
-            if root_tag != bytes.fromhex("BF2B"):
-                return b""
-            choice_tag, choice_bytes, _, _ = self._read_tlv(root_value, 0)
-            if choice_tag not in [b"\xA0", b"\x60"]:
-                return b""
-            pending_tag, _, pending_raw, _ = self._read_tlv(choice_bytes, 0)
-            if pending_tag in [b"\x30", bytes.fromhex("BF37")]:
+            decoded = None
+        if isinstance(decoded, tuple) and len(decoded) == 2:
+            choice_name, _choice_value = decoded
+            if choice_name == "notificationList":
                 try:
-                    decode_pending_notification(pending_raw)
+                    root_tag, root_value, _, _ = self._read_tlv(raw_response, 0)
+                    if root_tag != bytes.fromhex("BF2B"):
+                        return b""
+                    choice_tag, choice_bytes, _, _ = self._read_tlv(root_value, 0)
+                    if choice_tag not in [b"\xA0", b"\x60"]:
+                        return b""
+                    pending_tag, _, pending_raw, _ = self._read_tlv(choice_bytes, 0)
+                    if pending_tag in [b"\x30", bytes.fromhex("BF37")]:
+                        decode_pending_notification(pending_raw)
+                        return pending_raw
                 except Exception:
-                    pass
-                return pending_raw
-        except Exception:
-            return b""
+                    return b""
         return b""
 
     def _remove_notification_from_list(self, seq_number: Optional[int]) -> None:
@@ -4018,20 +4049,28 @@ class LocalIsdrSession:
             offset = next_offset
         return members
 
-    def _send_personalization_store_data(self, payload: bytes, log_name: str, chunk_size: int = 120) -> bytes:
+    def _send_personalization_store_data(self, payload: bytes, log_name: str, chunk_size: int = 0xFF) -> bytes:
         total = len(payload)
-        offset = 0
         block = 0
         response = b""
-        while offset < total:
-            end_offset = offset + chunk_size
-            chunk = payload[offset:end_offset]
-            is_last_chunk = end_offset >= total
+        chunks = split_tlv_aware_chunks(payload, chunk_size)
+        print_store_data_chunk_plan(
+            log_name,
+            payload,
+            cla=0x80,
+            ins=0xE2,
+            final_p1=0x91,
+            p2_start=0,
+            chunk_size=chunk_size,
+            p2_wrap=True,
+            chunks=chunks,
+        )
+        for chunk_index, chunk in enumerate(chunks, start=1):
+            is_last_chunk = chunk_index == len(chunks)
             p1 = 0x11
             if is_last_chunk:
                 p1 = 0x91
             apdu = bytes([0x80, 0xE2, p1, block & 0xFF, len(chunk)]) + chunk
             response = self.apdu_channel.send(apdu, f"{log_name} [Block {block}]")
-            offset += chunk_size
             block += 1
         return response

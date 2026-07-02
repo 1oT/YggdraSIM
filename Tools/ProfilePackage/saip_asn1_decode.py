@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """
 Pure-Python ASN.1 / TLV decode helpers for tagged SAIP JSON.
@@ -107,6 +110,11 @@ _EF_KEY_TO_FID: dict[str, str] = {
     "ef-oplmnwact": "6F61",
     "ef-hplmnwact": "6F62",
     "ef-fplmn": "6F7B",
+    # DF.WLAN (5F40) — TS 31.102 §4.2.82 / §4.2.83 / §4.2.91.
+    "ef-uplmnwlan": "4F41",
+    "ef-oplmnwlan": "4F42",
+    "ef-wlrplmn": "4F47",
+    "ef-pst": "4F10",
     "ef-gid1": "6F3E",
     "ef-gid2": "6F3F",
     "ef-smsp": "6F42",
@@ -171,6 +179,7 @@ _EF_KEY_TO_FID: dict[str, str] = {
     "ef-ici": "6F80",
     "ef-oci": "6F81",
     "ef-keysPS": "6F09",
+    "ef-keysps": "6F09",
     "ef-pcscf": "6F09",
     # ISIM extras (TS 31.103 §4.2.22 / §4.2.23).
     "ef-gbauapi": "6F0A",
@@ -192,6 +201,7 @@ _EF_KEY_TO_FID: dict[str, str] = {
     "ef-opl5g": "4F08",
     "ef-routing-indicator": "4F0A",
     "ef-ursp": "4F0B",
+    "ef-5g-prose-st": "4F01",
     # 5x10 Pass C — 5G extras.
     "ef-tn3gppsnn": "4F0C",
     # Rel-17 additions (TS 31.102 §4.4.11.14-22). Previously
@@ -321,7 +331,10 @@ _EF_KEY_TO_FID: dict[str, str] = {
     "ef-csim-ssci": "6F4E",
     "ef-csim-mlpl": "6F4F",
     "ef-csim-meruiid": "6F5D",
+    "ef-csim-st": "6F32",
     # 5x20 Pass C — Specialized (ISIM + MCPTT + V2X + ProSe + MCS).
+    "ef-mst": "4F01",
+    "ef-vst": "4F01",
     "ef-prose-pfidg": "4F04",
     "ef-prose-pfddn": "4F05",
     "ef-v2x-cfg": "4F01",
@@ -342,6 +355,7 @@ _EF_KEY_TO_FID: dict[str, str] = {
     "ef-mcs-keyset": "6FAB",
     "ef-mcs-stat": "6FAC",
     "ef-mcs-sec-profile": "6FAF",
+    "ef-ice-dn": "6FE0",
     # 5x20 Pass D — Operator / vendor extensions + auxiliary EFs.
     "ef-opcust1": "4F90",
     "ef-opcust2": "4F91",
@@ -400,10 +414,12 @@ _EF_KEY_TO_PARENT_TOKEN: dict[str, str] = {
     "ef-iccid": "mf",
     "ef-dir": "mf",
     "ef-pl": "mf",
+    "ef-arr": "adf-usim",
     # ADF.USIM (TS 31.102).
     "ef-imsi": "adf-usim",
     "ef-keys": "adf-usim",
     "ef-keysPS": "adf-usim",
+    "ef-keysps": "adf-usim",
     "ef-ad": "adf-usim",
     "ef-msisdn": "adf-usim",
     "ef-puct": "adf-usim",
@@ -419,6 +435,9 @@ _EF_KEY_TO_PARENT_TOKEN: dict[str, str] = {
     "ef-oplmnwact": "adf-usim",
     "ef-hplmnwact": "adf-usim",
     "ef-fplmn": "adf-usim",
+    "ef-uplmnwlan": "df-wlan",
+    "ef-oplmnwlan": "df-wlan",
+    "ef-wlrplmn": "df-wlan",
     "ef-gid1": "adf-usim",
     "ef-gid2": "adf-usim",
     "ef-smsp": "adf-usim",
@@ -517,6 +536,7 @@ _EF_KEY_TO_PARENT_TOKEN: dict[str, str] = {
     "ef-psc": "df-phonebook",
     "ef-cc": "df-phonebook",
     "ef-puid": "df-phonebook",
+    "ef-ice-dn": "df-telecom",
     # DF.GSM / DF.GSM-ACCESS (TS 51.011 legacy + TS 31.102 §4.4.2).
     "ef-kc": "df-gsm",
     "ef-kcgprs": "df-gsm",
@@ -609,14 +629,18 @@ _EF_KEY_TO_PARENT_TOKEN: dict[str, str] = {
     "ef-csim-ssci": "adf-csim",
     "ef-csim-mlpl": "adf-csim",
     "ef-csim-meruiid": "adf-csim",
+    "ef-csim-st": "adf-csim",
     # ProSe / V2X / MCS application-specific EFs.
+    "ef-pst": "df-prose",
     "ef-prose-pfidg": "adf-prose-ue",
     "ef-prose-pfddn": "adf-prose-ue",
     "ef-prose-pfsr": "df-prose",
+    "ef-vst": "df-v2x",
     "ef-v2x-cfg": "adf-v2x",
     "ef-v2x-pre-cfg": "adf-v2x",
     "ef-v2x-cert": "adf-v2x",
     "ef-v2x-auth-keys": "adf-v2x",
+    "ef-mst": "df-mcs",
     "ef-mcs-root": "df-mcs",
     "ef-mcptt-cfg": "adf-mcptt",
     "ef-mcptt-sip": "adf-mcptt",
@@ -646,12 +670,20 @@ _PE_TYPE_TO_PARENT_TOKEN: dict[str, str] = {
     "opt-telecom": "df-telecom",
     "phonebook": "df-phonebook",
     "gsm-access": "df-gsm-access",
+    "wlan": "df-wlan",
+    "df-wlan": "df-wlan",
     "df-5gs": "df-5gs",
     "df-5g-prose": "df-5gprose",
+    "df-prose": "df-prose",
     "df-snpn": "df-snpn",
     "df-5mbsueconfig": "df-5mbsueconfig",
     "df-hnb": "df-hnb",
     "df-saip": "df-saip",
+    "df-oma-bcast": "df-oma-bcast",
+    "df-mcs": "df-mcs",
+    "mcs": "df-mcs",
+    "df-v2x": "df-v2x",
+    "v2x": "df-v2x",
     "isim": "adf-isim",
     "opt-isim": "adf-isim",
     "csim": "adf-csim",
@@ -815,6 +847,43 @@ def parent_token_from_file_path_hex(path_hex: str | None) -> str | None:
     return None
 
 
+def _df_graphics_name_for_fid(fid_hex: str) -> str | None:
+    """
+    Resolve the DF.GRAPHICS dynamic FID space.
+
+    PEDocumentation §PE-Telecom lists DF.GRAPHICS (5F50) children as
+    EF.IMG (4F20), EF.ICE_GRAPHICS (4F21), EF.LAUNCH_SCWS (4F01), and
+    EF.IIDF over the range 4F40..4F7F.
+    """
+    fid_upper = str(fid_hex or "").strip().upper()
+    if fid_upper == "4F20":
+        return "EF.IMG"
+    if fid_upper == "4F21":
+        return "EF.ICE_GRAPHICS"
+    if fid_upper == "4F01":
+        return "EF.LAUNCH_SCWS"
+    try:
+        fid_int = int(fid_upper, 16)
+    except ValueError:
+        return None
+    if 0x4F40 <= fid_int <= 0x4F7F:
+        return "EF.IIDF"
+    return None
+
+
+def _df_graphics_ef_key_for_fid(fid_hex: str) -> str | None:
+    label = _df_graphics_name_for_fid(fid_hex)
+    if label == "EF.IMG":
+        return "ef-img"
+    if label == "EF.ICE_GRAPHICS":
+        return "ef-ice-graphics"
+    if label == "EF.LAUNCH_SCWS":
+        return "ef-launch-scws"
+    if label == "EF.IIDF":
+        return "ef-iidf"
+    return None
+
+
 def _resolve_ef_key_for_fid(
     fid_hex: str, parent_token: str | None
 ) -> str | None:
@@ -831,6 +900,10 @@ def _resolve_ef_key_for_fid(
     fid_upper = str(fid_hex or "").strip().upper()
     if len(fid_upper) == 0 or parent_token is None:
         return None
+    if parent_token == "df-graphics":
+        graphics_key = _df_graphics_ef_key_for_fid(fid_upper)
+        if graphics_key is not None:
+            return graphics_key
     candidates: list[str] = []
     for ef_key, fid in _EF_KEY_TO_FID.items():
         if fid.upper() != fid_upper:
@@ -858,6 +931,10 @@ def fid_name(fid_hex: str, *, parent_hint: str | None = None) -> str | None:
     if len(fid_upper) == 0:
         return None
     hint_token = _normalize_parent_hint(parent_hint)
+    if hint_token == "df-graphics":
+        graphics_name = _df_graphics_name_for_fid(fid_upper)
+        if graphics_name is not None:
+            return graphics_name
     entries = _FID_TO_PARENTED_NAMES.get(fid_upper)
     if entries is not None and hint_token is not None:
         matches = [label for parent, label in entries if parent == hint_token]
@@ -1049,6 +1126,10 @@ _UST_SERVICE_NAMES: dict[int, str] = {
     144: "Multiplier Coefficient for Higher Priority PLMN search via NG-RAN satellite access",
     145: "K_AUSF derivation configuration",
     146: "Network Identifier for SNPN (NID)",
+    147: "5MBS support",
+    148: "SENSE support",
+    149: "A2X support",
+    150: "IMS Data Channel indication",
 }
 
 # USIM Enabled Services Table (TS 31.102 §4.2.47). Aligned with pySim's
@@ -1143,9 +1224,9 @@ _KEY_ACCESS_NAMES = {
 }
 
 _KEY_ID_COMMON_ROLES = {
-    0x01: "ENC (common SCP02/SCP03 convention)",
-    0x02: "MAC (common SCP02/SCP03 convention)",
-    0x03: "DEK (common SCP02/SCP03 convention)",
+    0x01: "KIC (SCP80) / ENC (common SCP02/SCP03 convention)",
+    0x02: "KID (SCP80) / MAC (common SCP02/SCP03 convention)",
+    0x03: "KIK (SCP80) / DEK (common SCP02/SCP03 convention)",
 }
 
 _KEY_TYPE_NAMES = {
@@ -1157,6 +1238,20 @@ _KEY_TYPE_NAMES = {
     0xA0: "RSA Public Exponent",
     0xA1: "RSA Modulus (cleartext)",
     0xA2: "RSA Modulus",
+    0xA3: "RSA Private Exponent",
+    0xA4: "RSA CRT P",
+    0xA5: "RSA CRT Q",
+    0xA6: "RSA CRT PQ",
+    0xA7: "RSA CRT DP1",
+    0xA8: "RSA CRT DQ1",
+    0xB0: "ECC public key",
+    0xB1: "ECC private key",
+    0xB2: "ECC parameter P",
+    0xB3: "ECC parameter A",
+    0xB4: "ECC parameter B",
+    0xB5: "ECC parameter G",
+    0xB6: "ECC parameter N",
+    0xB7: "ECC parameter k",
 }
 
 _AID_FIELD_NAMES = {
@@ -1823,11 +1918,35 @@ def _decode_iccid(hex_clean: str) -> dict[str, object] | None:
         iccid = _swap_nibbles(hex_clean).rstrip("F")
     except ValueError:
         return None
+    luhn_valid = False
+    if iccid.isdigit() and len(iccid) > 1:
+        total = 0
+        for index, digit in enumerate(reversed(iccid)):
+            value = int(digit)
+            if index % 2 == 1:
+                value *= 2
+                if value > 9:
+                    value -= 9
+            total += value
+        luhn_valid = (total % 10) == 0
+    major_industry_identifier = iccid[:2]
+    mii_labels = {
+        "89": "Telecommunications administrations and private operating agencies",
+    }
     return {
         "iccid": iccid,
         "encoding": "BCD swapped nibbles",
         "digitCount": len(iccid),
+        "majorIndustryIdentifier": major_industry_identifier,
+        "majorIndustryIdentifierLabel": mii_labels.get(
+            major_industry_identifier,
+            "Unknown",
+        ),
+        "luhnValid": luhn_valid,
     }
+
+
+_THREE_DIGIT_MNC_MCCS: set[str] = {"001"}
 
 
 def _decode_imsi(hex_clean: str) -> dict[str, object] | None:
@@ -1844,11 +1963,28 @@ def _decode_imsi(hex_clean: str) -> dict[str, object] | None:
         imsi = swapped[1:]
         if digit_length > 0 and digit_length <= len(imsi):
             imsi = imsi[:digit_length]
-        return {
+        decoded: dict[str, object] = {
             "imsi": imsi,
             "digitCount": len(imsi),
             "oddDigitCount": odd_even == 1,
         }
+        if len(imsi) >= 5:
+            mcc = imsi[:3]
+            mnc_length = 3 if mcc in _THREE_DIGIT_MNC_MCCS else 2
+            mnc = imsi[3 : 3 + mnc_length]
+            alternate_length = 2 if mnc_length == 3 else 3
+            decoded.update(
+                {
+                    "mcc": mcc,
+                    "mnc": mnc,
+                    "mncLengthAssumed": mnc_length,
+                    "mncAlternate": {
+                        "length": alternate_length,
+                        "mnc": imsi[3 : 3 + alternate_length],
+                    },
+                }
+            )
+        return decoded
     except Exception:
         return None
 
@@ -2079,6 +2215,9 @@ def _decode_spn(hex_clean: str) -> dict[str, object] | None:
     decoded: dict[str, object] = {
         "serviceProviderName": provider_name,
         "displayCondition": f"0x{display_condition:02X}",
+        "displayPlmnNameRequiredOnHomePlmn": (display_condition & 0x01) != 0,
+        "spnDisplayNotRequiredOnNonHomePlmn": (display_condition & 0x02) != 0,
+        "displayConditionRfuBits": f"0x{display_condition & 0xFC:02X}",
         "displayInHplmnRequired": (display_condition & 0x01) == 0,
         "hideInOplmnIfEquivalentPlmn": (display_condition & 0x02) != 0,
     }
@@ -3323,15 +3462,22 @@ def _decode_routing_indicator(hex_clean: str) -> dict[str, object] | None:
         return None
     ri_digits = _decode_bcd_digits(raw[:2])
     flag_byte = raw[2]
+    rfu_tail = raw[2:4]
+    rfu_non_default = rfu_tail != b"\xFF\xFF"
     decoded: dict[str, object] = {
         "format": "5G Routing Indicator",
         "hex": raw.hex().upper(),
         "routingIndicator": ri_digits,
+        "routingIndicatorDigitCount": len(ri_digits),
         "flagByte": f"0x{flag_byte:02X}",
         "flagByteDecimal": int(flag_byte),
         "reservedByte": f"0x{raw[3]:02X}",
+        "rfuTrailingHex": rfu_tail.hex().upper(),
+        "rfuNonDefault": rfu_non_default,
         "summary": f"RI={ri_digits or '-'} flag=0x{flag_byte:02X}",
     }
+    if rfu_non_default is True:
+        decoded["summary"] = f"{decoded['summary']} rfu={rfu_tail.hex().upper()}"
     return decoded
 
 
@@ -4091,8 +4237,12 @@ def _decode_kausf_derivation(hex_clean: str) -> dict[str, object] | None:
 _5GS_UPDATE_STATUS_LABELS: dict[int, str] = {
     0x00: "updated",
     0x01: "not updated",
-    0x02: "PLMN not allowed",
-    0x03: "roaming not allowed in this tracking area",
+    0x02: "5U3 ROAMING NOT ALLOWED",
+    0x03: "reserved",
+    0x04: "reserved",
+    0x05: "reserved",
+    0x06: "reserved",
+    0x07: "reserved",
 }
 
 
@@ -5520,14 +5670,168 @@ def _decode_ef_mst(hex_clean: str) -> dict[str, object] | None:
         return None
     if len(raw) == 0:
         return None
-    table = _decode_service_table(hex_clean, _EF_MST_SERVICE_NAMES)
+    service_bytes = raw[1:] if raw[0] in (0x00, 0xFF) else raw
+    table = _decode_service_table(service_bytes.hex(), _EF_MST_SERVICE_NAMES)
     if table is None:
         return None
+    coding_byte = raw[0]
+    coding_name = "XML coding" if coding_byte == 0x00 else "Reserved"
     return {
         "format": "MCS Service Table",
         "hex": raw.hex().upper(),
         "length": len(raw),
+        "codingOfMcsObjects": {
+            "hex": f"{coding_byte:02X}",
+            "decimal": coding_byte,
+            "name": coding_name,
+        },
         **table,
+    }
+
+
+# TS 24.334 §6.1 — ProSe Service Table service numbers. Each bit selects
+# one Direct Communication / Direct Discovery service from the ProSe
+# capability table. Bit 1 of byte 1 is service number 1.
+_EF_PST_SERVICE_NAMES: dict[int, str] = {
+    1: "ProSe direct discovery (open)",
+    2: "ProSe direct discovery (restricted)",
+    3: "ProSe direct communication (one-to-many)",
+    4: "ProSe direct communication (one-to-one)",
+    5: "EPC-level ProSe discovery",
+    6: "ProSe UE-to-network relay (Layer-3)",
+    7: "ProSe UE-to-UE relay (Layer-3)",
+    8: "ProSe UE-to-network relay (Layer-2)",
+    9: "ProSe UE-to-UE relay (Layer-2)",
+    10: "ProSe per-PLMN authorisation",
+}
+
+
+def _decode_ef_pst(hex_clean: str) -> dict[str, object] | None:
+    """Decode EF.PST (TS 31.102 §4.4.6.3 — ProSe Service Table)."""
+
+    try:
+        raw = bytes.fromhex(hex_clean)
+    except ValueError:
+        return None
+    if len(raw) == 0:
+        return None
+    table = _decode_service_table(hex_clean, _EF_PST_SERVICE_NAMES)
+    if table is None:
+        return None
+    return {
+        "format": "ProSe Service Table",
+        "hex": raw.hex().upper(),
+        "length": len(raw),
+        **table,
+    }
+
+
+# OMA-TS-BCAST_Service_Guide §5.1 + TS 31.102 §4.2.86 — BCAST service
+# capability bits. The full table covers 32+ services; the canonical
+# names below are sufficient for operator review. Unknown bits fall
+# through to ``Service N`` so future revisions still parse cleanly.
+_EF_BST_SERVICE_NAMES: dict[int, str] = {
+    1: "BCAST Service Provider activation",
+    2: "BCAST notification reception",
+    3: "BCAST file delivery",
+    4: "BCAST streaming",
+    5: "BCAST Service Guide",
+    6: "BCAST Service Protection (DRM Profile)",
+    7: "BCAST Service Protection (Smartcard Profile)",
+    8: "BCAST Roaming",
+}
+
+
+def _decode_ef_bst(hex_clean: str) -> dict[str, object] | None:
+    """Decode EF.BST (TS 31.102 §4.2.86 — BCAST Service Table)."""
+
+    try:
+        raw = bytes.fromhex(hex_clean)
+    except ValueError:
+        return None
+    if len(raw) == 0:
+        return None
+    table = _decode_service_table(hex_clean, _EF_BST_SERVICE_NAMES)
+    if table is None:
+        return None
+    return {
+        "format": "BCAST Service Table",
+        "hex": raw.hex().upper(),
+        "length": len(raw),
+        **table,
+    }
+
+
+def _decode_wlan_plmn_list(
+    hex_clean: str,
+    *,
+    format_name: str,
+    spec_reference: str,
+) -> dict[str, object] | None:
+    """Decode the I-WLAN PLMN selector lists (5-byte records).
+
+    TS 31.102 §4.2.82 / §4.2.83 specify the record as ``MCC/MNC (3 B)``
+    followed by two reserved bytes filled with 'FF'. The shape mirrors
+    `_decode_plmn_list(with_act=True)` but the trailing bytes are
+    reserved-for-future-use rather than Access Technology, so we
+    surface them as ``reserved`` instead of decoding them as AcT.
+    """
+
+    if len(hex_clean) == 0:
+        return None
+    try:
+        raw = bytes.fromhex(hex_clean)
+    except ValueError:
+        return None
+    if len(raw) < 5 or len(raw) % 5 != 0:
+        return None
+    entries: list[dict[str, object]] = []
+    for offset in range(0, len(raw), 5):
+        plmn_bytes = raw[offset : offset + 3]
+        reserved = raw[offset + 3 : offset + 5]
+        if plmn_bytes == b"\xFF\xFF\xFF":
+            continue
+        entries.append(
+            {
+                "plmn": _decode_plmn_hex(plmn_bytes.hex().upper())
+                or plmn_bytes.hex().upper(),
+                "reserved": reserved.hex().upper(),
+            }
+        )
+    return {
+        "format": format_name,
+        "reference": spec_reference,
+        "entries": entries,
+        "entryCount": len(entries),
+    }
+
+
+def _decode_ef_wlrplmn(hex_clean: str) -> dict[str, object] | None:
+    """Decode EF.WLRPLMN (TS 31.102 §4.2.91 — I-WLAN Last Registered PLMN).
+
+    A single 3-byte PLMN identifying the last successfully registered
+    operator over the I-WLAN access. All-FF means "no PLMN registered".
+    """
+
+    if len(hex_clean) == 0:
+        return None
+    try:
+        raw = bytes.fromhex(hex_clean)
+    except ValueError:
+        return None
+    if len(raw) != 3:
+        return None
+    head = raw[:3]
+    plmn_label: str | None
+    if head == b"\xFF\xFF\xFF":
+        plmn_label = None
+    else:
+        plmn_label = _decode_plmn_hex(head.hex().upper()) or head.hex().upper()
+    return {
+        "format": "I-WLAN Last Registered PLMN",
+        "reference": "TS 31.102 §4.2.91",
+        "plmn": plmn_label,
+        "hex": raw.hex().upper(),
     }
 
 
@@ -9044,15 +9348,36 @@ def _decode_ad(hex_clean: str) -> dict[str, object] | None:
         return None
     mode_map = {
         0x00: "Normal",
-        0x01: "Type Approval",
+        0x01: "Normal + specific facilities",
         0x02: "Normal/Internal",
         0x04: "Normal/Internal",
         0x80: "Proprietary",
     }
-    return {
+    decoded: dict[str, object] = {
         "administrativeMode": mode_map.get(raw[0], f"0x{raw[0]:02X}"),
-        "raw": hex_clean,
+        "raw": raw.hex().upper(),
     }
+    if len(raw) >= 3:
+        flags = raw[2]
+        decoded["additionalInfoFlags"] = {
+            "cipheringIndicatorEnabled": bool(flags & 0x01),
+            "csgDisplayControl": bool(flags & 0x02),
+            "proseForPublicSafetyAuthorized": bool(flags & 0x04),
+            "extendedDrxAuthorized": bool(flags & 0x08),
+            "fiveGProseAuthorized": bool(flags & 0x10),
+        }
+    if len(raw) >= 4:
+        mnc_length = raw[3]
+        decoded["mncLengthDigits"] = mnc_length
+        if mnc_length in (2, 3):
+            decoded["mncLengthSource"] = "explicit"
+        elif mnc_length == 0:
+            decoded["mncLengthSource"] = "service-driven"
+        else:
+            decoded["mncLengthSource"] = "reserved"
+    if len(raw) > 4:
+        decoded["rfuTrailingHex"] = raw[4:].hex().upper()
+    return decoded
 
 
 def _decode_puct(hex_clean: str) -> dict[str, object] | None:
@@ -9766,6 +10091,28 @@ def _decode_known_ef_payload(
         return _decode_plmn_list(hex_clean, with_act=True)
     if token == "ef-fplmn" or fid_upper == "6F7B":
         return _decode_plmn_list(hex_clean, with_act=False)
+    # DF.WLAN (5F40) — I-WLAN configuration files. TS 31.102 §4.2.82
+    # (UPLMNWLAN @ 4F41), §4.2.83 (OPLMNWLAN @ 4F42), §4.2.91
+    # (WLRPLMN @ 4F47). Token wins over FID; the FIDs are kept for
+    # legacy callers that strip the token.
+    if token == "ef-oplmnwlan" or fid_upper == "4F42":
+        return _decode_wlan_plmn_list(
+            hex_clean,
+            format_name="Operator-controlled I-WLAN PLMN selector",
+            spec_reference="TS 31.102 §4.2.83",
+        )
+    if token == "ef-uplmnwlan" or fid_upper == "4F41":
+        return _decode_wlan_plmn_list(
+            hex_clean,
+            format_name="User-controlled I-WLAN PLMN selector",
+            spec_reference="TS 31.102 §4.2.82",
+        )
+    if token == "ef-wlrplmn" or fid_upper == "4F47":
+        return _decode_ef_wlrplmn(hex_clean)
+    if token == "ef-bst":
+        return _decode_ef_bst(hex_clean)
+    if token == "ef-pst":
+        return _decode_ef_pst(hex_clean)
     if token in {"ef-loci", "ef-psloci", "ef-epsloci"}:
         return _decode_loci(hex_clean)
     if fid_upper in {"6F7E", "6F73", "6FE3"}:
@@ -9819,7 +10166,7 @@ def _decode_known_ef_payload(
         )
     if token == "ef-keys" or fid_upper == "6F08":
         return _decode_usim_keys_record(hex_clean, format_name="USIM CS ciphering/integrity keys")
-    if token == "ef-keysPS" or fid_upper == "6F09":
+    if token == "ef-keysps" or fid_upper == "6F09":
         return _decode_usim_keys_record(hex_clean, format_name="USIM PS ciphering/integrity keys")
     if token == "ef-kc" or fid_upper == "4F20":
         return _decode_gsm_kc_record(hex_clean, format_name="Kc ciphering key")
@@ -9957,6 +10304,9 @@ def _decode_known_ef_payload(
     if token == "ef-routing-indicator" or fid_upper == "4F0A":
         return _decode_routing_indicator(hex_clean)
     if token == "ef-ursp" or fid_upper == "4F0B":
+        decoded = _decode_ef_ursp(hex_clean)
+        if decoded is not None:
+            return decoded
         decoded = _decode_generic_tlv_ef(
             hex_clean,
             format_name="UE Route Selection Policy",
@@ -11047,6 +11397,77 @@ def _decode_known_ef_payload(
     return None
 
 
+# Tokens that ``_decode_known_ef_payload`` routes to a semantic
+# decoder. Built once via static introspection of the dispatcher
+# source so the manifest stays in sync as new branches are added.
+# Read by Tools/ProfilePackage/saip_ef_wizard_gui_audit (the PE/EF
+# decoded-edit gap helpers) to identify EFs that fall through to the
+# opaque / raw-byte path.
+_TOKEN_EQUALS_RE = re.compile(r'token\s*==\s*"([a-z0-9-]+)"')
+_TOKEN_IN_SET_RE = re.compile(r'token\s+in\s+\{([^}]+)\}')
+_TOKEN_STARTSWITH_RE = re.compile(r'token\.startswith\("([a-z0-9-]+)"\)')
+
+
+def _scan_dispatcher_tokens() -> tuple[frozenset[str], frozenset[str]]:
+    import inspect
+
+    try:
+        source = inspect.getsource(_decode_known_ef_payload)
+    except (OSError, TypeError):
+        return frozenset(), frozenset()
+    exact: set[str] = set()
+    for match in _TOKEN_EQUALS_RE.finditer(source):
+        token = match.group(1)
+        if token.startswith("ef-"):
+            exact.add(token)
+    for match in _TOKEN_IN_SET_RE.finditer(source):
+        for inner in re.finditer(r'"([a-z0-9-]+)"', match.group(1)):
+            token = inner.group(1)
+            if token.startswith("ef-"):
+                exact.add(token)
+    prefixes: set[str] = set()
+    for match in _TOKEN_STARTSWITH_RE.finditer(source):
+        token = match.group(1)
+        if token.startswith("ef-"):
+            prefixes.add(token)
+    exact.update(_PLMN_WITH_ACT_KEYS)
+    return frozenset(exact), frozenset(prefixes)
+
+
+_DISPATCHER_EXACT_KEYS, _DISPATCHER_PREFIX_KEYS = _scan_dispatcher_tokens()
+
+
+def known_dispatcher_ef_keys() -> frozenset[str]:
+    """Return the set of ef-key tokens routed by ``_decode_known_ef_payload``.
+
+    Static introspection of the dispatcher source. Membership means the
+    dispatcher emits a populated ``decoded`` dict (semantic or opaque-
+    annotated). Used by the GUI-coverage audit; do not rely on this
+    as the public decode entry point — call ``decode_known_ef_payload``
+    or the per-EF helper instead.
+    """
+
+    return _DISPATCHER_EXACT_KEYS
+
+
+def dispatcher_routes_ef_key(token: str) -> bool:
+    """``True`` if the dispatcher has a branch for the given ef-key.
+
+    Honours both exact-match tokens and the ``ef-csim-*`` /
+    ``ef-opcust*`` / ``ef-vendor*`` prefix-match short-circuits.
+    """
+
+    canonical = str(token or "").strip().lower()
+    if canonical == "":
+        return False
+    if canonical in _DISPATCHER_EXACT_KEYS:
+        return True
+    for prefix in _DISPATCHER_PREFIX_KEYS:
+        if canonical.startswith(prefix):
+            return True
+    return False
+
+
 def _decode_oid(value_bytes: bytes) -> str | None:
     if len(value_bytes) == 0:
         return None
@@ -11328,12 +11749,13 @@ def _decode_small_integer(value_bytes: bytes) -> dict[str, object] | None:
     if len(value_bytes) == 0 or len(value_bytes) > 4:
         return None
     return {
+        "raw": value_bytes.hex().upper(),
         "hex": value_bytes.hex().upper(),
         "decimal": int.from_bytes(value_bytes, "big"),
     }
 
 
-def _decode_network_access_name(value_bytes: bytes) -> str:
+def _decode_network_access_name(value_bytes: bytes) -> dict[str, object]:
     labels: list[str] = []
     cursor = 0
     while cursor < len(value_bytes):
@@ -11347,7 +11769,10 @@ def _decode_network_access_name(value_bytes: bytes) -> str:
             labels.append(label_bytes.decode("ascii"))
         except UnicodeDecodeError:
             labels.append(label_bytes.hex().upper())
-    return ".".join(labels)
+    return {
+        "raw": value_bytes.hex().upper(),
+        "name": ".".join(labels),
+    }
 
 
 def _decode_other_address(value_bytes: bytes) -> dict[str, object] | str:
@@ -11375,7 +11800,23 @@ def _describe_bearer_description(value_bytes: bytes) -> dict[str, object]:
         "bytes": [f"0x{byte_value:02X}" for byte_value in value_bytes],
     }
     if len(value_bytes) > 0:
-        description["bearerType"] = f"0x{value_bytes[0]:02X}"
+        bearer_type = value_bytes[0]
+        bearer_names = {
+            0x01: "GSM/3GPP",
+            0x02: "GSM/3GPP",
+            0x03: "Default bearer for requested transport",
+            0x04: "Local link (technology independent)",
+            0x05: "Bluetooth",
+            0x06: "IrDA",
+            0x07: "RS232",
+            0x08: "cdma2000 packet data",
+            0x09: "GSM/3GPP",
+            0x0A: "3GPP I-WLAN",
+            0x0B: "3GPP E-UTRAN / Mapped UTRAN",
+            0x10: "USB",
+        }
+        description["bearerType"] = bearer_names.get(bearer_type, f"0x{bearer_type:02X}")
+        description["bearerTypeHex"] = f"0x{bearer_type:02X}"
     return description
 
 
@@ -11557,6 +11998,13 @@ def _decode_field_ber_tlv_stream(
     out: list[dict[str, object]] = []
     cursor = 0
     while cursor < len(value_bytes):
+        # Tolerate trailing 0xFF padding emitted by personalisation
+        # (ETSI TS 102 221 §10.1.5 EF-fill convention). A real BER-TLV
+        # tag is never 0xFF (long-form continuation that never
+        # terminates), so once we hit an all-FF tail the record is
+        # complete and the remainder is template fill.
+        if value_bytes[cursor] == 0xFF and all(b == 0xFF for b in value_bytes[cursor:]):
+            break
         parsed = _parse_ber_tlv_item(value_bytes, cursor)
         if parsed is None:
             out.append({"parseErrorOffset": cursor, "remaining": value_bytes[cursor:].hex().upper()})
@@ -12562,35 +13010,206 @@ def _decode_file_descriptor(value_bytes: bytes) -> dict[str, object] | None:
 
 def _decode_connectivity_parameters(value_bytes: bytes) -> dict[str, object]:
     tag_names = {
-        "A0": "Transport / Remote Parameters",
-        "A1": "Bearer / Access Parameters",
-        "06": "Object Identifier",
+        "A0": "SMS Connectivity (A0)",
+        "A1": "HTTP Connectivity (A1)",
+        "A2": "CAT_TP Connectivity (A2)",
+        "06": "SMSC Address",
         "35": "Bearer Description",
         "39": "Buffer Size",
         "3C": "Transport Level",
         "3E": "Other Address",
         "47": "Network Access Name",
-        "81": "Parameter 81",
-        "82": "Parameter 82",
+        "81": "PID",
+        "82": "DCS",
+        "0D": "Login / Password",
     }
     items = _decode_field_ber_tlv_stream(
         value_bytes,
         tag_names=tag_names,
         force_primitive_tags={"35", "39", "3C", "3E", "47"},
         value_decoders={
+            "06": _decode_smsc_address,
             "35": _describe_bearer_description,
             "39": _decode_small_integer,
             "3C": _describe_transport_level,
             "3E": _decode_other_address,
             "47": _decode_network_access_name,
-            "81": _decode_small_integer,
-            "82": _decode_small_integer,
+            "81": _decode_connectivity_pid,
+            "82": _decode_connectivity_dcs,
         },
     )
     return {
-        "format": "BER-TLV",
+        "format": "TCA SAIP Connectivity Parameters",
+        "hex": value_bytes.hex().upper(),
         "items": items,
     }
+
+
+def _decode_ef_ursp(hex_clean: str) -> dict[str, object] | None:
+    """Decode EF.URSP per-PLMN entries from TS 31.102 §4.4.11.12."""
+
+    try:
+        raw = bytes.fromhex(hex_clean)
+    except ValueError:
+        return None
+    parsed = _parse_ber_tlv_item(raw, 0)
+    if parsed is None:
+        return None
+    envelope, end_offset = parsed
+    if end_offset != len(raw) or envelope.get("tag") != "80":
+        return None
+    value_bytes = bytes(envelope.get("valueBytes") or b"")
+    entries: list[dict[str, object]] = []
+    cursor = 0
+    while cursor < len(value_bytes):
+        if cursor + 5 > len(value_bytes):
+            return None
+        plmn_bytes = value_bytes[cursor : cursor + 3]
+        rules_length = int.from_bytes(
+            value_bytes[cursor + 3 : cursor + 5],
+            "big",
+            signed=False,
+        )
+        cursor += 5
+        if cursor + rules_length > len(value_bytes):
+            return None
+        rules_bytes = value_bytes[cursor : cursor + rules_length]
+        cursor += rules_length
+        entries.append(
+            {
+                "plmnHex": plmn_bytes.hex().upper(),
+                "rulesLength": rules_length,
+                "rulesHex": rules_bytes.hex().upper(),
+            }
+        )
+    return {
+        "format": "UE Route Selection Policy",
+        "hex": raw.hex().upper(),
+        "specReference": "3GPP TS 31.102 §4.4.11.12 / TS 24.526",
+        "perPlmnEntryCount": len(entries),
+        "perPlmnEntries": entries,
+        "summary": f"{len(entries)} per-PLMN URSP entr{'y' if len(entries) == 1 else 'ies'}",
+    }
+
+
+def _decode_smsc_address(value_bytes: bytes) -> dict[str, object]:
+    """Decode SMSC Address per ETSI TS 102 223 / 3GPP TS 31.102 (EF.ADN)."""
+    if len(value_bytes) < 1:
+        return {"raw": value_bytes.hex().upper()}
+    ton_npi = value_bytes[0]
+    ton = (ton_npi >> 4) & 0x7
+    npi = ton_npi & 0xF
+    ton_names = {0x0: "Unknown", 0x1: "International", 0x2: "National", 0x3: "Network-specific"}
+    npi_names = {0x0: "Unknown", 0x1: "ISDN/Telephony (E.164/E.163)", 0x3: "Data (X.121)", 0x4: "Telex (F.69)", 0x9: "Private", 0xF: "Reserved for extension"}
+    digits_raw = value_bytes[1:] if len(value_bytes) > 1 else b""
+    digits_str = "".join(f"{b & 0x0F:X}{(b >> 4) & 0x0F:X}" for b in digits_raw).rstrip("F")
+    return {
+        "tonNpi": f"0x{ton_npi:02X}",
+        "ton": ton_names.get(ton, f"0x{ton:1X}"),
+        "npi": npi_names.get(npi, f"0x{npi:1X}"),
+        "dialingDigits": digits_str,
+        "raw": value_bytes.hex().upper(),
+    }
+
+
+def _decode_connectivity_pid(value_bytes: bytes) -> dict[str, object]:
+    """Decode Protocol Identifier per 3GPP TS 23.040 §9.2.3.9."""
+    if len(value_bytes) != 1:
+        return _decode_small_integer(value_bytes) or {"hex": value_bytes.hex().upper()}
+    pid = value_bytes[0]
+    pid_names = {
+        0x00: "SME-to-SME (no interworking)",
+        0x20: "Telematic — implicit",
+        0x21: "Telematic — Telex",
+        0x22: "Telematic — Group 3 Telefax",
+        0x23: "Telematic — Group 4 Telefax",
+        0x24: "Telematic — Voice Telephone",
+        0x25: "Telematic — ERMES",
+        0x26: "Telematic — National Paging",
+        0x27: "Telematic — Videotex",
+        0x28: "Telematic — Teletex (unspecified carrier)",
+        0x29: "Telematic — Teletex (PSPDN)",
+        0x2A: "Telematic — Teletex (CSPDN)",
+        0x2B: "Telematic — Teletex (analog PSTN)",
+        0x2C: "Telematic — Teletex (digital ISDN)",
+        0x2D: "Telematic — UCI",
+        0x30: "Message Handling Facility",
+        0x31: "Any public X.400",
+        0x32: "Internet Electronic Mail",
+        0x38: "SC-specific (mutual agreement)",
+        0x3F: "GSM/UMTS Mobile Station",
+        0x40: "Short Message Type 0",
+        0x41: "Replace Short Message Type 1",
+        0x42: "Replace Short Message Type 2",
+        0x43: "Replace Short Message Type 3",
+        0x44: "Replace Short Message Type 4",
+        0x45: "Replace Short Message Type 5",
+        0x46: "Replace Short Message Type 6",
+        0x47: "Replace Short Message Type 7",
+        0x48: "Device Triggering Short Message",
+        0x5E: "Enhanced Message Service (Obsolete)",
+        0x5F: "Return Call Message",
+        0x7C: "ANSI-136 R-DATA",
+        0x7D: "ME Data Download",
+        0x7E: "ME De-personalization",
+        0x7F: "(U)SIM Data Download",
+    }
+    return {
+        "hex": value_bytes.hex().upper(),
+        "decimal": pid,
+        "name": pid_names.get(pid, f"0x{pid:02X}"),
+    }
+
+
+def _decode_connectivity_dcs(value_bytes: bytes) -> dict[str, object]:
+    """Decode Data Coding Scheme per 3GPP TS 23.038 / TS 23.040 §9.2.3.10."""
+    if len(value_bytes) != 1:
+        return _decode_small_integer(value_bytes) or {"hex": value_bytes.hex().upper()}
+    dcs = value_bytes[0]
+    group = (dcs >> 4) & 0xF
+    detail = dcs & 0xF
+    alphabet_names = {
+        0x0: "GSM 7-bit default alphabet",
+        0x4: "8-bit data",
+        0x8: "UCS2",
+    }
+    class_names = {0b00: "Class 0", 0b01: "Class 1 (ME-specific)", 0b10: "Class 2 (U)SIM-specific", 0b11: "Class 3 (TE-specific)"}
+    decoded: dict[str, object] = {"hex": value_bytes.hex().upper(), "decimal": dcs}
+    if group in (0x0, 0x1, 0x2, 0x3):
+        compressed = (dcs >> 5) & 1
+        alphabet_bits = (dcs >> 2) & 3
+        message_class = dcs & 3
+        alphabet_map = {0: "GSM 7-bit default", 1: "8-bit data", 2: "UCS2"}
+        decoded["alphabet"] = alphabet_map.get(alphabet_bits, f"reserved({alphabet_bits})")
+        decoded["compressed"] = bool(compressed)
+        decoded["messageClass"] = class_names.get(message_class, f"class {message_class}")
+    elif group == 0x8 or group == 0x9:
+        decoded["codingGroup"] = "Reserved"
+    elif group == 0xB:
+        decoded["codingGroup"] = "Reserved"
+    elif group == 0xC:
+        decoded["action"] = "Discard Message"
+        decoded["codingGroup"] = "Message Waiting — Discard"
+    elif group == 0xD:
+        indication_names = {
+            0x00: "Voicemail (inactive)", 0x01: "Fax (inactive)",
+            0x02: "Email (inactive)", 0x03: "Other (inactive)",
+            0x08: "Voicemail (active)", 0x09: "Fax (active)",
+            0x0A: "Email (active)", 0x0B: "Other (active)",
+        }
+        decoded["indication"] = indication_names.get(detail, f"0x{detail:01X}")
+        decoded["codingGroup"] = "Message Waiting — Store"
+    elif group == 0xE:
+        decoded["codingGroup"] = "Message Waiting — Store (UCS2)"
+    elif group == 0xF:
+        class_map = {0: "Class 0", 1: "Class 1 (ME-specific)", 2: "Class 2 (U)SIM-specific", 3: "Class 3 (TE-specific)"}
+        alphabet_map = {0: "GSM 7-bit default", 4: "8-bit data"}
+        decoded["messageClass"] = class_map.get(detail & 3, f"class {detail & 3}")
+        decoded["alphabet"] = alphabet_map.get(detail & 0xC, f"unknown({(detail>>2)&3})")
+        decoded["codingGroup"] = "Data coding / message class"
+    else:
+        decoded["codingGroup"] = f"group 0x{group:X}"
+    return decoded
 
 
 def _decode_sd_install_scp(value_bytes: bytes) -> dict[str, object] | None:
@@ -12635,104 +13254,205 @@ def _decode_sd_install_parameters(value_bytes: bytes) -> dict[str, object]:
     }
 
 
+def _uicc_toolkit_field_map(
+    name: str,
+    offset: int,
+    value: bytes,
+    *,
+    role: str = "value",
+) -> dict[str, object]:
+    return {
+        "name": name,
+        "offset": offset,
+        "length": len(value),
+        "role": role,
+        "raw": value.hex().upper(),
+    }
+
+
+def _decode_uicc_toolkit_layout(
+    value_bytes: bytes,
+    *,
+    menu_count_present: bool,
+) -> dict[str, object]:
+    """Decode one TS 102 226 §8.2.1.3.2.1 toolkit parameter layout.
+
+    pySim emits the canonical form with an explicit menu-entry count
+    byte. Some commercial tools omit that byte when no menu entries are
+    present; that compact form is still field-aligned as
+    ``maxChannels | len(MSL) | MSL | len(TARs) | TARs``. The decoder
+    tries both forms and the encoder keeps emitting the canonical
+    pySim-compatible form.
+    """
+
+    fields: list[dict[str, object]] = []
+
+    def take(offset: int, length: int, name: str, role: str = "value") -> tuple[bytes, int]:
+        if offset + length > len(value_bytes):
+            raise ValueError(f"truncated {name}")
+        chunk = value_bytes[offset : offset + length]
+        fields.append(_uicc_toolkit_field_map(name, offset, chunk, role=role))
+        return chunk, offset + length
+
+    offset = 0
+    access_len_bytes, offset = take(offset, 1, "accessDomainLength", "length")
+    access_domain_length = access_len_bytes[0]
+    access_domain, offset = take(offset, access_domain_length, "accessDomain")
+    priority_level_bytes, offset = take(
+        offset,
+        1,
+        "priorityLevelOfToolkitAppInstance",
+    )
+    max_timers_bytes, offset = take(offset, 1, "maxNumberOfTimers")
+    max_text_bytes, offset = take(offset, 1, "maxTextLengthForMenuEntry")
+
+    menu_entries: list[dict[str, int]] = []
+    if menu_count_present:
+        menu_count_bytes, offset = take(offset, 1, "menuEntryCount", "length")
+        menu_entry_count = menu_count_bytes[0]
+        for index in range(menu_entry_count):
+            entry_bytes, offset = take(offset, 2, f"menuEntry[{index}]")
+            menu_entries.append(
+                {
+                    "id": entry_bytes[0],
+                    "position": entry_bytes[1],
+                }
+            )
+
+    max_channels_bytes, offset = take(offset, 1, "maxNumberOfChannels")
+    msl_len_bytes, offset = take(offset, 1, "minimumSecurityLevelLength", "length")
+    msl_length = msl_len_bytes[0]
+    msl_value_bytes, offset = take(offset, msl_length, "minimumSecurityLevel")
+    tar_len_bytes, offset = take(offset, 1, "tarDataLength", "length")
+    tar_data_length = tar_len_bytes[0]
+    if tar_data_length % 3 != 0:
+        raise ValueError("TAR values must be 3-byte aligned")
+    tar_bytes, offset = take(offset, tar_data_length, "tarValues")
+
+    trailing_padding = b""
+    if offset != len(value_bytes):
+        trailing_padding = value_bytes[offset:]
+        fields.append(
+            _uicc_toolkit_field_map(
+                "trailingPadding",
+                offset,
+                trailing_padding,
+                role="padding",
+            )
+        )
+        if any(byte_value != 0x00 for byte_value in trailing_padding):
+            raise ValueError("invalid non-zero toolkit trailing bytes")
+
+    tar_values = [
+        tar_bytes[index : index + 3].hex().upper()
+        for index in range(0, len(tar_bytes), 3)
+    ]
+    layout = (
+        "canonical-with-menu-entry-count"
+        if menu_count_present
+        else "compact-no-menu-entry-count"
+    )
+    decoded: dict[str, object] = {
+        "format": "ETSI TS 102 226 toolkit app specific parameters",
+        "reference": "ETSI TS 102 226 §8.2.1.3.2.1",
+        "layout": layout,
+        "rawHex": value_bytes.hex().upper(),
+        "length": len(value_bytes),
+        "consumedLength": offset,
+        "fieldMap": fields,
+        "accessDomain": access_domain.hex().upper(),
+        "priorityLevelOfToolkitAppInstance": priority_level_bytes[0],
+        "maxNumberOfTimers": max_timers_bytes[0],
+        "maxTextLengthForMenuEntry": max_text_bytes[0],
+        "menuEntryCountPresent": menu_count_present,
+        "menuEntries": menu_entries,
+        "maxNumberOfChannels": max_channels_bytes[0],
+        "minimumSecurityLevelRaw": msl_value_bytes.hex().upper(),
+        "tarValues": tar_values,
+    }
+    if len(msl_value_bytes) >= 1:
+        decoded["minimumSecurityLevelInferred"] = f"0x{msl_value_bytes[-1]:02X}"
+        decoded["minimumSecurityLevelDecimal"] = msl_value_bytes[-1]
+    if len(tar_values) > 0:
+        decoded["tarInferred"] = tar_values[0]
+    if len(trailing_padding) > 0:
+        decoded["trailingPadding"] = trailing_padding.hex().upper()
+    return decoded
+
+
+def _score_uicc_toolkit_layout(decoded: dict[str, object]) -> int:
+    score = 0
+    tar_values = decoded.get("tarValues")
+    if isinstance(tar_values, list):
+        score += len(tar_values) * 100
+    msl_raw = str(decoded.get("minimumSecurityLevelRaw") or "")
+    msl_len = len(msl_raw) // 2
+    if 1 <= msl_len <= 3:
+        score += 20
+    elif msl_len == 0:
+        score += 2
+    if decoded.get("menuEntryCountPresent") is True:
+        score += 3
+    return score
+
+
+def _infer_tar_values_from_length_fields(value_bytes: bytes) -> list[str]:
+    values: list[str] = []
+    for index in range(0, len(value_bytes)):
+        length = value_bytes[index]
+        if length == 0 or length % 3 != 0:
+            continue
+        end = index + 1 + length
+        if end > len(value_bytes):
+            continue
+        block = value_bytes[index + 1 : end]
+        for offset in range(0, len(block), 3):
+            tar = block[offset : offset + 3].hex().upper()
+            if tar not in values:
+                values.append(tar)
+    return values
+
+
 def _decode_uicc_toolkit_parameters(value_bytes: bytes) -> dict[str, object]:
     decoded: dict[str, object] = {
         "format": "ETSI TS 102 226 toolkit app specific parameters",
+        "reference": "ETSI TS 102 226 §8.2.1.3.2.1",
         "rawHex": value_bytes.hex().upper(),
         "length": len(value_bytes),
     }
-    try:
-        offset = 0
-        if offset >= len(value_bytes):
-            return decoded
-        access_domain_length = value_bytes[offset]
-        offset += 1
-        if offset + access_domain_length > len(value_bytes):
-            raise ValueError("invalid access domain length")
-        access_domain = value_bytes[offset : offset + access_domain_length]
-        offset += access_domain_length
-        if offset + 4 > len(value_bytes):
-            raise ValueError("missing toolkit fixed header")
-        priority_level = value_bytes[offset]
-        offset += 1
-        max_num_of_timers = value_bytes[offset]
-        offset += 1
-        max_text_length = value_bytes[offset]
-        offset += 1
-        menu_entry_count = value_bytes[offset]
-        offset += 1
-        menu_entries: list[dict[str, int]] = []
-        for _ in range(menu_entry_count):
-            if offset + 2 > len(value_bytes):
-                raise ValueError("truncated toolkit menu entry")
-            menu_entries.append(
-                {
-                    "id": value_bytes[offset],
-                    "position": value_bytes[offset + 1],
-                }
+    if len(value_bytes) == 0:
+        return decoded
+
+    candidates: list[dict[str, object]] = []
+    errors: list[str] = []
+    for menu_count_present in (True, False):
+        try:
+            candidates.append(
+                _decode_uicc_toolkit_layout(
+                    value_bytes,
+                    menu_count_present=menu_count_present,
+                )
             )
-            offset += 2
-        if offset >= len(value_bytes):
-            raise ValueError("missing channel count")
-        max_num_of_channels = value_bytes[offset]
-        offset += 1
-        if offset >= len(value_bytes):
-            raise ValueError("missing MSL length")
-        msl_length = value_bytes[offset]
-        offset += 1
-        if offset + msl_length > len(value_bytes):
-            raise ValueError("invalid MSL length")
-        msl_value_bytes = value_bytes[offset : offset + msl_length]
-        offset += msl_length
-        if offset >= len(value_bytes):
-            raise ValueError("missing TAR length")
-        tar_data_length = value_bytes[offset]
-        offset += 1
-        if offset + tar_data_length > len(value_bytes):
-            raise ValueError("invalid TAR length")
-        tar_end = offset + tar_data_length
-        if tar_data_length % 3 != 0:
-            raise ValueError("TAR values must be 3-byte aligned")
-        tar_values: list[str] = []
-        while offset < tar_end:
-            tar_values.append(value_bytes[offset : offset + 3].hex().upper())
-            offset += 3
-        trailing_padding = b""
-        if offset != len(value_bytes):
-            trailing_padding = value_bytes[offset:]
-            if any(byte_value != 0x00 for byte_value in trailing_padding):
-                raise ValueError("invalid non-zero toolkit trailing bytes")
-        decoded.update(
-            {
-                "accessDomain": access_domain.hex().upper(),
-                "priorityLevelOfToolkitAppInstance": priority_level,
-                "maxNumberOfTimers": max_num_of_timers,
-                "maxTextLengthForMenuEntry": max_text_length,
-                "menuEntries": menu_entries,
-                "maxNumberOfChannels": max_num_of_channels,
-                "minimumSecurityLevelRaw": msl_value_bytes.hex().upper(),
-                "tarValues": tar_values,
-            }
-        )
-        if len(msl_value_bytes) >= 1:
-            decoded["minimumSecurityLevelInferred"] = f"0x{msl_value_bytes[-1]:02X}"
-            decoded["minimumSecurityLevelDecimal"] = msl_value_bytes[-1]
-        if len(tar_values) > 0:
-            decoded["tarInferred"] = tar_values[0]
-        if len(trailing_padding) > 0:
-            decoded["trailingPadding"] = trailing_padding.hex().upper()
-        return decoded
-    except Exception:
-        decoded["bytes"] = [f"0x{byte_value:02X}" for byte_value in value_bytes]
-        for index in range(0, max(0, len(value_bytes) - 2)):
-            if value_bytes[index] == 0x02 and value_bytes[index + 1] == 0x01:
-                decoded["minimumSecurityLevelInferred"] = f"0x{value_bytes[index + 2]:02X}"
-                decoded["minimumSecurityLevelDecimal"] = value_bytes[index + 2]
-                break
-        tar_index = value_bytes.find(bytes.fromhex("B20100"))
-        if tar_index != -1:
-            decoded["tarInferred"] = value_bytes[tar_index : tar_index + 3].hex().upper()
-        return decoded
+        except Exception as error:
+            errors.append(str(error))
+
+    if candidates:
+        candidates.sort(key=_score_uicc_toolkit_layout, reverse=True)
+        return candidates[0]
+
+    decoded["bytes"] = [f"0x{byte_value:02X}" for byte_value in value_bytes]
+    if errors:
+        decoded["parseErrors"] = errors
+    for index in range(0, max(0, len(value_bytes) - 2)):
+        if value_bytes[index] == 0x02 and value_bytes[index + 1] == 0x01:
+            decoded["minimumSecurityLevelInferred"] = f"0x{value_bytes[index + 2]:02X}"
+            decoded["minimumSecurityLevelDecimal"] = value_bytes[index + 2]
+            break
+    inferred_tars = _infer_tar_values_from_length_fields(value_bytes)
+    if inferred_tars:
+        decoded["tarValues"] = inferred_tars
+        decoded["tarInferred"] = inferred_tars[0]
+    return decoded
 
 
 _RESTRICT_PARAMETER_BITS: dict[int, str] = {

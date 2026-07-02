@@ -5,6 +5,11 @@ tags:
   - scp11
   - local-access
 ---
+<!--
+SPDX-License-Identifier: GPL-3.0-or-later
+Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+-->
+
 
 # SCP11 Local Access
 

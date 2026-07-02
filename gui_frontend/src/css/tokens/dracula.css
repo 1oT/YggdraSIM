@@ -1,0 +1,43 @@
+/*
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+ */
+
+/* -- Theme: Dracula (canonical purple/cyan dark, zenodb / vim) ----------- */
+html[data-theme="dracula"] {
+  --bg: #282a36;
+  --bg-elev: #21222c;
+  --bg-elev-2: #44475a;
+  --surface: #21222c;
+  --surface-alt: rgba(255, 255, 255, 0.04);
+  --bg-hover: rgba(248, 248, 242, 0.06);
+  --border: rgba(248, 248, 242, 0.12);
+  --border-strong: rgba(248, 248, 242, 0.28);
+  --fg: #f8f8f2;
+  --fg-dim: #d8d8c8;
+  --fg-muted: #6272a4;
+  --accent: #bd93f9;
+  --accent-strong: #ff79c6;
+  --accent-soft: rgba(189, 147, 249, 0.14);
+  --accent-fg: #282a36;
+  --accent-glow: rgba(189, 147, 249, 0.50);
+  --gradient-accent: linear-gradient(135deg, #bd93f9 0%, #ff79c6 60%, #8be9fd 100%);
+  --gradient-brand: linear-gradient(135deg, #bd93f9 0%, #50fa7b 100%);
+  --ok: #50fa7b;
+  --ok-soft: rgba(80, 250, 123, 0.14);
+  --warn: #f1fa8c;
+  --warn-soft: rgba(241, 250, 140, 0.14);
+  --fail: #ff5555;
+  --fail-soft: rgba(255, 85, 85, 0.16);
+  --code-bg: #1e1f29;
+  --kbd-bg: rgba(30, 31, 41, 0.96);
+  --shadow-card: 0 10px 28px rgba(0, 0, 0, 0.40);
+  --shadow-card-hover: 0 20px 48px rgba(0, 0, 0, 0.55);
+  --shadow-glow-accent: 0 0 0 1px var(--accent-soft), 0 16px 44px -12px var(--accent-glow);
+  --topbar-bg: rgba(33, 34, 44, 0.82);
+  --theme-tint:
+    radial-gradient(circle at 90% 6%, rgba(189, 147, 249, 0.13), transparent 46%),
+    radial-gradient(circle at 8% 94%, rgba(255, 121, 198, 0.10), transparent 48%),
+    radial-gradient(circle at 50% 45%, rgba(139, 233, 253, 0.05), transparent 56%);
+}
+

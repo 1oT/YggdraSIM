@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 import contextlib
 import io
 import json
@@ -181,7 +184,7 @@ class ProfilePackageShellTests(unittest.TestCase):
                 "====================================================================== header",
                 "{'connectivityParameters': 'a118350702000003000002470d085465726d696e616c0361706ea00f0607918406010092f88101008201f6'}",
                 "====================================================================== securityDomain",
-                "{'instance': {'applicationSpecificParametersC9': '81028000810203708201f08701f0', 'applicationParameters': {'uiccToolkitApplicationSpecificParametersField': '0100010100000202011606b2010000000000'}}, 'sdPersoData': ['00707a8578841c010301400102028182350103390205dc3c030227be3e05210a0a0a0a8517133839343435303136303532343637363333363202400186070003a50300200089368a0d3133392e3136322e31352e36338b13383931303330303030303030363835333633338c102f67736d612f61646d696e6167656e74']}",
+                "{'instance': {'applicationSpecificParametersC9': '81028000810203708201f08701f0', 'applicationParameters': {'uiccToolkitApplicationSpecificParametersField': '0100010100000202011606b2010000000000'}}, 'sdPersoData': ['00707a8578841c010301400102028182350103390205dc3c030227be3e0521c000020a8517133839343435303136303532343637363333363202400186070003a50300200089368a0d3133392e3136322e31352e36338b13383931303330303030303030363835333633338c102f67736d612f61646d696e6167656e74']}",
             ]
         )
         result = SaipCommandResult(
@@ -200,7 +203,7 @@ class ProfilePackageShellTests(unittest.TestCase):
         self.assertIn("SCP03", rendered)
         self.assertIn("minimumSecurityLevelInferred", rendered)
         self.assertIn("b20100", rendered)
-        self.assertIn("10.10.10.10", rendered)
+        self.assertIn("192.0.2.10", rendered)
         self.assertIn("Remote Endpoint", rendered)
         self.assertIn("identifierAscii", rendered)
         self.assertIn("8944501605246763362", rendered)
@@ -354,7 +357,7 @@ class ProfilePackageShellTests(unittest.TestCase):
                     }
                 ],
                 "sdPersoData": [
-                    "00707a8578841c010301400102028182350103390205dc3c030227be3e05210a0a0a0a8517133839343435303136303532343637363333363202400186070003a50300200089368a0d3133392e3136322e31352e36338b13383931303330303030303030363835333633338c102f67736d612f61646d696e6167656e74"
+                    "00707a8578841c010301400102028182350103390205dc3c030227be3e0521c000020a8517133839343435303136303532343637363333363202400186070003a50300200089368a0d3133392e3136322e31352e36338b13383931303330303030303030363835333633338c102f67736d612f61646d696e6167656e74"
                 ],
                 "applicationParameters": {
                     "uiccToolkitApplicationSpecificParametersField": "0100010100000202011606b2010000000000"
@@ -364,18 +367,18 @@ class ProfilePackageShellTests(unittest.TestCase):
 
         connectivity = normalized["connectivityParameters"]
         self.assertEqual(connectivity["raw"], "a118350702000003000002470d085465726d696e616c0361706ea00f0607918406010092f88101008201f6")
-        self.assertEqual(connectivity["decoded"]["format"], "BER-TLV")
+        self.assertEqual(connectivity["decoded"]["format"], "TCA SAIP Connectivity Parameters")
         self.assertEqual(
-            connectivity["decoded"]["items"][0]["items"][1]["decoded"],
+            connectivity["decoded"]["items"][0]["items"][1]["decoded"]["name"],
             "Terminal.apn",
         )
         self.assertEqual(
             connectivity["decoded"]["items"][1]["name"],
-            "Transport / Remote Parameters",
+            "SMS Connectivity (A0)",
         )
         self.assertEqual(
             connectivity["decoded"]["items"][1]["items"][0]["raw"],
-            "918406010092f8",
+            "918406010092F8",
         )
         self.assertEqual(
             connectivity["decoded"]["items"][1]["items"][1]["decoded"]["decimal"],
@@ -404,7 +407,7 @@ class ProfilePackageShellTests(unittest.TestCase):
         )
         self.assertEqual(
             key_entry["keyIdentifier"]["decoded"]["commonRole"],
-            "ENC (common SCP02/SCP03 convention)",
+            "KIC (SCP80) / ENC (common SCP02/SCP03 convention)",
         )
         self.assertEqual(key_entry["keyVersionNumber"]["decoded"]["reservedFor"], "SCP03")
         self.assertEqual(key_entry["keyCounterValue"]["decoded"]["decimal"], 0)
@@ -421,7 +424,7 @@ class ProfilePackageShellTests(unittest.TestCase):
         self.assertEqual(puk_retry["decoded"]["remainingAttempts"], 10)
 
         sd_perso = normalized["sdPersoData"]
-        self.assertEqual(sd_perso["raw"][0], "00707a8578841c010301400102028182350103390205dc3c030227be3e05210a0a0a0a8517133839343435303136303532343637363333363202400186070003a50300200089368a0d3133392e3136322e31352e36338b13383931303330303030303030363835333633338c102f67736d612f61646d696e6167656e74")
+        self.assertEqual(sd_perso["raw"][0], "00707a8578841c010301400102028182350103390205dc3c030227be3e0521c000020a8517133839343435303136303532343637363333363202400186070003a50300200089368a0d3133392e3136322e31352e36338b13383931303330303030303030363835333633338c102f67736d612f61646d696e6167656e74")
         transport_parameters = sd_perso["decoded"][0]["items"][0]["decoded"][0]["decoded"][0]["decoded"]
         self.assertEqual(transport_parameters[0]["decoded"]["decimal"], 81921)
         self.assertEqual(transport_parameters[1]["decoded"]["hex"], "8182")
@@ -775,11 +778,11 @@ class ProfilePackageShellTests(unittest.TestCase):
             "intro": ["Read 3 PEs from file '/tmp/demo.der'"],
             "sections": {
                 "header": {
-                    "iccid": bytes.fromhex("89881111111111111112"),
+                    "iccid": bytes.fromhex("89461111111111111112"),
                 },
                 "mf": {
                     "ef-iccid": [
-                        ("fillFileContent", bytes.fromhex("98881111111111111121")),
+                        ("fillFileContent", bytes.fromhex("98641111111111111121")),
                     ],
                 },
                 "usim": {
@@ -796,7 +799,7 @@ class ProfilePackageShellTests(unittest.TestCase):
             output_path = Path(temp_dir) / "profile_template.json"
             with contextlib.redirect_stdout(io.StringIO()) as captured:
                 self.shell._cmd_generate_template(
-                    f'"{output_path}" ICCID=89881111111111111112 IMSI=1234567812345678'
+                    f'"{output_path}" ICCID=89461111111111111112 IMSI=1234567812345678'
                 )
 
             rendered = json.loads(output_path.read_text(encoding="utf-8"))
@@ -810,8 +813,8 @@ class ProfilePackageShellTests(unittest.TestCase):
             rendered["sections"]["usim"]["ef-imsi"][0]["@"][1]["hex"],
             "{IMSI}",
         )
-        self.assertEqual(rendered["__ygg_token_defs__"]["ICCID"]["hex"], "89881111111111111112")
-        self.assertEqual(rendered["__ygg_token_defs__"]["ICCID_EF"]["hex"], "98881111111111111121")
+        self.assertEqual(rendered["__ygg_token_defs__"]["ICCID"]["hex"], "89461111111111111112")
+        self.assertEqual(rendered["__ygg_token_defs__"]["ICCID_EF"]["hex"], "98641111111111111121")
         self.assertEqual(rendered["__ygg_token_defs__"]["IMSI"]["hex"], "091132547618325476F8")
         self.assertIn("Placeholder injection summary", captured.getvalue())
 
@@ -860,23 +863,23 @@ class ProfilePackageShellTests(unittest.TestCase):
                     with contextlib.redirect_stdout(io.StringIO()) as captured:
                         self.shell._cmd_generate_profile(
                             f'"{template_path}" "{output_path}" '
-                            "ICCID=89881111111111111112 IMSI=1234567812345678"
+                            "ICCID=89461111111111111112 IMSI=1234567812345678"
                         )
                     written_bytes = output_path.read_bytes()
 
         mocked_ensure.assert_called_once_with(self.shell.bridge.workspace_root)
         document = mocked_encode.call_args.args[0]
-        self.assertEqual(document["sections"]["header"]["iccid"], bytes.fromhex("89881111111111111112"))
+        self.assertEqual(document["sections"]["header"]["iccid"], bytes.fromhex("89461111111111111112"))
         self.assertEqual(
             document["sections"]["mf"]["ef-iccid"][0][1],
-            bytes.fromhex("98881111111111111121"),
+            bytes.fromhex("98641111111111111121"),
         )
         self.assertEqual(
             document["sections"]["usim"]["ef-imsi"][0][1],
             bytes.fromhex("091132547618325476F8"),
         )
-        self.assertEqual(document["__ygg_token_defs__"]["ICCID"]["hex"], "89881111111111111112")
-        self.assertEqual(document["__ygg_token_defs__"]["ICCID_EF"]["hex"], "98881111111111111121")
+        self.assertEqual(document["__ygg_token_defs__"]["ICCID"]["hex"], "89461111111111111112")
+        self.assertEqual(document["__ygg_token_defs__"]["ICCID_EF"]["hex"], "98641111111111111121")
         self.assertEqual(document["__ygg_token_defs__"]["IMSI"]["hex"], "091132547618325476F8")
         self.assertEqual(written_bytes, b"\xAA\xBB")
         self.assertIn("Placeholder override summary", captured.getvalue())

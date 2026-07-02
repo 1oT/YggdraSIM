@@ -34,7 +34,6 @@ try:
         EIM_TRANSPORT_MODE_ESIPA,
         EIM_TRANSPORT_MODE_REST_RESOURCE,
         TRANSPORT_MODE_PCSC,
-        TRANSPORT_MODE_RELAY,
     )
 except ImportError:
     from models import (
@@ -43,7 +42,6 @@ except ImportError:
         EIM_TRANSPORT_MODE_ESIPA,
         EIM_TRANSPORT_MODE_REST_RESOURCE,
         TRANSPORT_MODE_PCSC,
-        TRANSPORT_MODE_RELAY,
     )
 
 
@@ -53,7 +51,7 @@ def _get_config_dir():
 
 @dataclass(frozen=True)
 class SGPConfig:
-    """Configuration constants for SCP11 relay flow and SGP.26 local mode."""
+    """Configuration constants for SCP11 physical-reader flow and SGP.26 local mode."""
 
     CERT_PATH_AUTH: str = field(
         default_factory=lambda: os.path.join(_get_config_dir(), "CERT.DPauth.ECDSA.der")
@@ -80,24 +78,17 @@ class SGPConfig:
 
     READER_INDEX: int = 0
     TRANSPORT_MODE: str = TRANSPORT_MODE_PCSC
-    RELAY_URL: str = "http://127.0.0.1:8080/apdu"
-    RELAY_TIMEOUT_SECONDS: int = 30
-    RELAY_VERIFY_TLS: bool = True
-    RELAY_SESSION_ID: str = ""
 
     BACKEND_MODE: str = BACKEND_MODE_REMOTE_DP
     ES9_BASE_URL: str = "https://rsp.example.com"
     ES9_TIMEOUT_SECONDS: int = 15
     ES9_VERIFY_TLS: bool = True
-    ES9_CA_BUNDLE_PATH: str = field(
-        default_factory=lambda: os.path.join(_get_config_dir(), "ES9_TEST_CI_CA.pem")
-    )
+    ES9_CA_BUNDLE_PATH: str = ""
     EIM_BASE_URL: str = ""
     EIM_TIMEOUT_SECONDS: int = 30
     EIM_TRANSPORT_MODE: str = EIM_TRANSPORT_MODE_ESIPA
     EIM_HTTP_PATH: str = "/gsma/rsp2/asn1"
     EIM_HTTP_PROTOCOL: str = "gsma/rsp/v2.1.0"
-    EIM_EUICC_CHALLENGE_ASN1: bool = True
     EIM_REQUEST_VARIANT: int = 0
     EIM_GET_PACKAGE_NOTIFY_STATE_CHANGE: bool = False
     EIM_GET_PACKAGE_STATE_CHANGE_CAUSE: str = ""
@@ -109,6 +100,12 @@ class SGPConfig:
     EIM_REST_CREATE_PATH: str = "/edr/create"
     EIM_REST_LOOKUP_PATH_TEMPLATE: str = "/edr/lookup/{resource_id}"
     REMOTE_DP_ALLOW_LOCAL_FALLBACK: bool = False
+    # FQDN suffix allow-list that gates vendor-specific GetEimPackage
+    # timeout/retry probing. The shipped tree carries the mechanism only;
+    # operators populate the targets via the env var so production endpoint
+    # names stay out of the public source. Comma- or space-separated.
+    # Matched case-folded against the trailing label sequence of the eIM FQDN.
+    EIM_VENDOR_QUIRK_FQDN_SUFFIXES: tuple = ()
 
     LOCAL_SGP26_TRUST_ANCHOR_PATH: str = field(
         default_factory=lambda: os.path.join(_get_config_dir(), "SGP26_TRUST_ANCHOR.pem")
@@ -156,6 +153,14 @@ class SGPConfig:
         ev_pd_reason = os.environ.get("EIM_PROFILE_DOWNLOAD_ERROR_REASON", "").strip()
         if ev_pd_reason != "":
             object.__setattr__(self, "EIM_PROFILE_DOWNLOAD_ERROR_REASON", ev_pd_reason)
+        ev_quirk = os.environ.get("EIM_VENDOR_QUIRK_FQDN_SUFFIXES", "").strip()
+        if ev_quirk != "":
+            normalized_suffixes = tuple(
+                suffix.lower().lstrip(".")
+                for suffix in ev_quirk.replace(",", " ").split()
+                if len(suffix.strip()) > 0
+            )
+            object.__setattr__(self, "EIM_VENDOR_QUIRK_FQDN_SUFFIXES", normalized_suffixes)
         if self.CAPABILITIES is None:
             object.__setattr__(
                 self,
@@ -167,19 +172,20 @@ class SGPConfig:
                 },
             )
 
-        for filename in [
-            "CERT.DPauth.ECDSA.der",
-            "SK.DPauth.ECDSA.pem",
-            "CERT.DPpb.ECDSA.der",
-            "SK.DPpb.ECDSA.pem",
-            "ES9_TEST_CI_CA.pem",
-            "SGP26_TRUST_ANCHOR.pem",
-            "SGP26_ISSUER.pem",
-        ]:
-            try:
-                ensure_seeded_workspace_file(("SCP11", filename), "SCP11", filename)
-            except Exception as error:
-                print(f"Warning: Could not copy default {filename} to {_get_config_dir()}: {error}")
+        require_local_credentials = self.BACKEND_MODE == BACKEND_MODE_LOCAL_SGP26 or self.REMOTE_DP_ALLOW_LOCAL_FALLBACK
+        if require_local_credentials:
+            for filename in [
+                "CERT.DPauth.ECDSA.der",
+                "SK.DPauth.ECDSA.pem",
+                "CERT.DPpb.ECDSA.der",
+                "SK.DPpb.ECDSA.pem",
+                "SGP26_TRUST_ANCHOR.pem",
+                "SGP26_ISSUER.pem",
+            ]:
+                try:
+                    ensure_seeded_workspace_file(("SCP11", filename), "SCP11", filename)
+                except Exception as error:
+                    print(f"Warning: Could not copy default {filename} to {_get_config_dir()}: {error}")
 
     def local_credential_paths(self):
         """Return a dict of resolved certificate and key file paths for this session variant."""
@@ -195,7 +201,7 @@ class SGPConfig:
         errors = []
         warnings = []
 
-        supported_transports = [TRANSPORT_MODE_PCSC, TRANSPORT_MODE_RELAY]
+        supported_transports = [TRANSPORT_MODE_PCSC]
         if self.TRANSPORT_MODE not in supported_transports:
             errors.append(
                 f"Unsupported TRANSPORT_MODE '{self.TRANSPORT_MODE}'. Supported values: {', '.join(supported_transports)}."
@@ -216,13 +222,6 @@ class SGPConfig:
 
         if self.READER_INDEX < 0:
             errors.append("READER_INDEX must be zero or greater.")
-
-        relay_url = str(self.RELAY_URL).strip()
-        if self.TRANSPORT_MODE == TRANSPORT_MODE_RELAY:
-            if len(relay_url) == 0:
-                errors.append("RELAY_URL is empty while TRANSPORT_MODE is set to relay.")
-            elif relay_url.startswith(("http://", "https://")) is False:
-                errors.append("RELAY_URL must start with http:// or https://.")
 
         es9_url = str(self.ES9_BASE_URL).strip()
         smdp_address = str(self.RSP_SERVER_URL).strip()

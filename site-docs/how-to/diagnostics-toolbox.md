@@ -8,6 +8,11 @@ tags:
   - fuzzing
   - scp11
 ---
+<!--
+SPDX-License-Identifier: GPL-3.0-or-later
+Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+-->
+
 
 # Diagnostics Toolbox
 
@@ -99,7 +104,7 @@ From inside the profile-package shell:
 yggdrasim-apdu-fuzzer \
     --corpus /path/to/session.json \
     --transport pcsc \
-    --allow-iccid 89000012345678901234 \
+    --allow-iccid 89880012345678901234 \
     --seed 0xCAFEBABE \
     --max-apdus 500 \
     --i-mean-it
@@ -124,7 +129,7 @@ and launches `tshark` with the shipped Lua dissector.
 
 ```bash
 yggdrasim-eum-diag inject-keys \
-    --iccid 89000012345678901234 \
+    --iccid 89880012345678901234 \
     --shs-enc <32 hex chars> \
     --shs-mac <32 hex chars> \
     --dek     <32 hex chars> \
@@ -136,7 +141,7 @@ handling the capture):
 
 ```bash
 yggdrasim-eum-diag store-keys \
-    --iccid 89000012345678901234 \
+    --iccid 89880012345678901234 \
     --shs-enc ... --shs-mac ... \
     --keys-out /tmp/session-keys.json
 ```

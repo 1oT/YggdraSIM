@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 <#
 .SYNOPSIS
     YggdraSIM installer for Windows x86_64.
@@ -37,12 +40,16 @@
 .PARAMETER NoDeps
     Skip Chocolatey prerequisite installation.
 
+.PARAMETER WithGui
+    Also install the GUI release binary, or include the [gui] extra in
+    source mode.
+
 .PARAMETER NoVenv
     Source mode: install into the current Python environment instead of
     creating a virtualenv.
 
 .EXAMPLE
-    powershell -ExecutionPolicy Bypass -File scripts\install\install-windows.ps1
+    powershell -ExecutionPolicy Bypass -File scripts\install\install-windows.ps1 -WithGui
 
 .EXAMPLE
     powershell -ExecutionPolicy Bypass -File scripts\install\install-windows.ps1 -Mode source
@@ -65,6 +72,8 @@ param(
     [string] $Venv = '',
 
     [switch] $NoDeps,
+
+    [switch] $WithGui,
 
     [switch] $NoVenv
 )
@@ -132,99 +141,62 @@ function Install-YgWindowsPrereqs {
     }
 }
 
-function Resolve-YgLatestTag {
-    $apiUrl = "https://api.github.com/repos/$RepoOwner/releases/latest"
-    try {
-        $release = Invoke-RestMethod -Uri $apiUrl -UseBasicParsing -MaximumRedirection 2
-        return $release.tag_name
-    }
-    catch {
-        Stop-YgError "could not resolve latest release tag for $RepoOwner : $_"
-    }
-}
-
 function Resolve-YgReleaseUrl {
     param(
         [string] $VersionTag,
-        [string] $AssetBaseName
+        [string] $AssetName
     )
-    $tag = $VersionTag
-    if ($tag -eq 'latest') {
-        $tag = Resolve-YgLatestTag
+    if ($VersionTag -eq 'latest') {
+        return "$ReleaseBase/latest/download/$AssetName"
     }
-
-    # Strip leading v/V so the asset filename carries plain semver while the
-    # URL path uses the real tag.
-    $assetVer = $tag -replace '^[vV]', ''
-
-    return "$ReleaseBase/download/$tag/$AssetBaseName-$assetVer.zip"
-}
-
-function Expand-YgReleaseZip {
-    param(
-        [string] $ZipPath,
-        [string] $DestDir
-    )
-    # If the asset is a zip archive, extract it.  Otherwise treat it as a
-    # bare binary and return the original path.
-    $isZip = $false
-    try {
-        # .NET will throw if the file is not a valid zip
-        $null = [System.IO.Compression.ZipFile]::OpenRead($ZipPath)
-        $isZip = $true
-    }
-    catch {
-        $isZip = $false
-    }
-
-    if ($isZip) {
-        if (-not (Test-Path -LiteralPath $DestDir)) {
-            New-Item -ItemType Directory -Force -Path $DestDir | Out-Null
-        }
-        Expand-Archive -LiteralPath $ZipPath -DestinationPath $DestDir -Force
-        $extracted = Get-ChildItem -Path $DestDir -File -Recurse |
-            Where-Object { $_.Extension -ne '.zip' } |
-            Select-Object -First 1
-        if (-not $extracted) {
-            Stop-YgError "no binary found in downloaded archive $ZipPath"
-        }
-        return $extracted.FullName
-    }
-
-    # Not a zip — bare binary, pass through
-    return $ZipPath
+    return "$ReleaseBase/download/$VersionTag/$AssetName"
 }
 
 function Install-YgFromRelease {
     $assetBase = "yggdrasim-windows-$Arch-$Flavor"
-    $url = Resolve-YgReleaseUrl -VersionTag $Version -AssetBaseName $assetBase
-    $tempZip = New-TemporaryFile
-    $extractDir = Join-Path ([System.IO.Path]::GetTempPath()) "yggdrasim-extract-$([System.Guid]::NewGuid())"
+    $assetName = "$assetBase.exe"
+    $url = Resolve-YgReleaseUrl -VersionTag $Version -AssetName $assetName
+    $tempFile = New-TemporaryFile
     try {
         Write-YgInfo "downloading $url"
-        Invoke-WebRequest -Uri $url -OutFile $tempZip -UseBasicParsing -MaximumRedirection 5
-
-        $binaryPath = Expand-YgReleaseZip -ZipPath $tempZip -DestDir $extractDir
+        Invoke-WebRequest -Uri $url -OutFile $tempFile -UseBasicParsing -MaximumRedirection 5
 
         if (-not (Test-Path -LiteralPath $InstallDir)) {
             New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
         }
 
         $targetPath = Join-Path $InstallDir 'yggdrasim.exe'
-        Copy-Item -LiteralPath $binaryPath -Destination $targetPath -Force
+        Copy-Item -LiteralPath $tempFile -Destination $targetPath -Force
         Write-YgInfo "installed $targetPath"
+
+        if ($WithGui.IsPresent) {
+            $guiAssetBase = "yggdrasim-gui-windows-$Arch-$Flavor"
+            $guiAssetName = "$guiAssetBase.exe"
+            $guiUrl = Resolve-YgReleaseUrl -VersionTag $Version -AssetName $guiAssetName
+            $guiTempFile = New-TemporaryFile
+            try {
+                Write-YgInfo "downloading $guiUrl"
+                Invoke-WebRequest -Uri $guiUrl -OutFile $guiTempFile -UseBasicParsing -MaximumRedirection 5
+                $guiTargetPath = Join-Path $InstallDir 'yggdrasim-gui.exe'
+                Copy-Item -LiteralPath $guiTempFile -Destination $guiTargetPath -Force
+                Write-YgInfo "installed $guiTargetPath"
+            }
+            finally {
+                Remove-Item -LiteralPath $guiTempFile -Force -ErrorAction SilentlyContinue
+            }
+        }
 
         $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
         if (-not ($userPath -split ';' -contains $InstallDir)) {
             Write-YgWarn "'$InstallDir' is not on your user PATH; add it to keep 'yggdrasim' on $Env:PATH"
         }
         Write-YgInfo 'run: yggdrasim.exe --version'
+        if ($WithGui.IsPresent) {
+            Write-YgInfo 'run: yggdrasim-gui.exe'
+        }
     }
     finally {
-        Remove-Item -LiteralPath $tempZip -Force -ErrorAction SilentlyContinue
-        if (Test-Path -LiteralPath $extractDir) {
-            Remove-Item -LiteralPath $extractDir -Force -Recurse -ErrorAction SilentlyContinue
-        }
+        Remove-Item -LiteralPath $tempFile -Force -ErrorAction SilentlyContinue
     }
 }
 
@@ -256,7 +228,12 @@ function Install-YgFromSource {
     Push-Location -LiteralPath $RepoRoot
     try {
         python -m pip install --upgrade pip
-        python -m pip install -e '.[saip]'
+        if ($WithGui.IsPresent) {
+            python -m pip install -e '.[saip,gui]'
+        }
+        else {
+            python -m pip install -e '.[saip]'
+        }
     }
     finally {
         Pop-Location
@@ -268,7 +245,7 @@ function Install-YgFromSource {
 }
 
 Write-YgInfo "target host: windows/$Arch"
-Write-YgInfo "flavor=$Flavor, mode=$Mode, version=$Version"
+Write-YgInfo "flavor=$Flavor, mode=$Mode, version=$Version, with_gui=$($WithGui.IsPresent)"
 
 Install-YgWindowsPrereqs
 

@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 """
 UX-layer tests for the SAIP profile scaffold surface: randomizer, wizard,
 detail view / preview / diff commands, AUTO expansion, VERIFY, default output

@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """GlobalPlatform card-side logic: SSD secure session emulation, INSTALL/LOAD/DELETE command dispatch (GP Card Spec v2.3)."""
 from __future__ import annotations

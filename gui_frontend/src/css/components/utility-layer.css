@@ -1,0 +1,21 @@
+/*
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+ */
+
+/* Utility layer --------------------------------------------------------- */
+
+h2, h3, h4 {
+  letter-spacing: -0.005em;
+}
+
+kbd {
+  background: var(--kbd-bg);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  padding: 1px 6px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  box-shadow: 0 1px 0 var(--border);
+}
+

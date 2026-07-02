@@ -1,0 +1,190 @@
+/*
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+ */
+
+/* Reader pane (G-1) ----------------------------------------------------- */
+
+.sidebar-title-readers {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-right: 8px;
+}
+
+.sidebar-title-readers .sidebar-title-text {
+  flex: 0 0 auto;
+}
+
+.sidebar-title-readers::after {
+  display: none;
+}
+
+.sidebar-iconbtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border-radius: var(--radius-sm, 4px);
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--fg-dim);
+  cursor: pointer;
+  font-size: 13px;
+  line-height: 1;
+  transition: background-color var(--transition-fast),
+    color var(--transition-fast),
+    border-color var(--transition-fast);
+}
+
+.sidebar-iconbtn:hover {
+  background: var(--bg-hover);
+  color: var(--fg);
+  border-color: var(--border);
+}
+
+.sidebar-iconbtn:active {
+  transform: translateY(1px);
+}
+
+.sidebar-iconbtn.is-spinning {
+  animation: sidebar-icon-spin 0.9s linear infinite;
+}
+
+@keyframes sidebar-icon-spin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+
+.reader-pane {
+  padding: 0 4px 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.reader-pane-search input {
+  width: 100%;
+  box-sizing: border-box;
+  background: var(--bg);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm, 4px);
+  font-size: 11px;
+  padding: 5px 8px;
+}
+
+.reader-pane-search input:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-soft);
+}
+
+.reader-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  max-height: 160px;
+  overflow-y: auto;
+}
+
+.reader-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  font-size: 12px;
+  color: var(--fg);
+  border-radius: var(--radius-sm, 4px);
+  cursor: pointer;
+  transition: background-color var(--transition-fast),
+    transform var(--transition-fast);
+  user-select: none;
+}
+
+.reader-row:hover {
+  background: var(--bg-hover);
+  transform: translateX(1px);
+}
+
+.reader-row.is-selected {
+  background: var(--accent-soft);
+  color: var(--fg);
+  font-weight: 600;
+}
+
+.reader-row-dot {
+  flex: 0 0 auto;
+  width: 9px;
+  height: 9px;
+  border-radius: 999px;
+  background: var(--fg-dim);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.15) inset;
+}
+
+.reader-row-dot--card {
+  background: var(--ok, #4ade80);
+  box-shadow: 0 0 6px var(--ok, #4ade80);
+}
+
+.reader-row-dot--empty {
+  background: var(--warn, #facc15);
+  box-shadow: 0 0 5px var(--warn, #facc15);
+}
+
+.reader-row-dot--error {
+  background: var(--fail, #f87171);
+  box-shadow: 0 0 5px var(--fail, #f87171);
+}
+
+.reader-row-dot--unknown {
+  background: var(--fg-dim);
+}
+
+.reader-row-body {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.reader-row-name {
+  font-size: 12px;
+  line-height: 1.2;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.reader-row-sub {
+  font-size: 10px;
+  color: var(--fg-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.reader-empty {
+  padding: 8px;
+  font-size: 11px;
+  color: var(--fg-dim);
+  font-style: italic;
+}
+
+.reader-pane-note {
+  font-size: 10px;
+  color: var(--fg-dim);
+  padding: 2px 8px;
+  min-height: 14px;
+}
+
+.reader-pane-note.is-error {
+  color: var(--fail);
+}
+

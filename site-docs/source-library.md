@@ -23,17 +23,21 @@ Notes:
 
 ## Authored Guides
 
+- [`guides/AGENT_SECURE_ELEMENT.md`](sources/guides/AGENT_SECURE_ELEMENT.md)
 - [`guides/ARCHITECTURE.md`](sources/guides/ARCHITECTURE.md)
 - [`guides/BUILD_AND_PACKAGING.md`](sources/guides/BUILD_AND_PACKAGING.md)
 - [`guides/CAPABILITIES.md`](sources/guides/CAPABILITIES.md)
+- [`guides/CARD_BRIDGE_GUIDE.md`](sources/guides/CARD_BRIDGE_GUIDE.md)
 - [`guides/CLI_AND_PIPING_GUIDE.md`](sources/guides/CLI_AND_PIPING_GUIDE.md)
 - [`guides/CONFIGURATION_AND_CERTIFICATES.md`](sources/guides/CONFIGURATION_AND_CERTIFICATES.md)
 - [`guides/DIAGNOSTICS_TOOLBOX.md`](sources/guides/DIAGNOSTICS_TOOLBOX.md)
+- [`guides/GUI_HOST_SHELL_GUIDE.md`](sources/guides/GUI_HOST_SHELL_GUIDE.md)
 - [`guides/HIL_BRIDGE_GUIDE.md`](sources/guides/HIL_BRIDGE_GUIDE.md)
 - [`guides/INSTALL_CLEAN.md`](sources/guides/INSTALL_CLEAN.md)
 - [`guides/INSTALL_FROM_SOURCE.md`](sources/guides/INSTALL_FROM_SOURCE.md)
 - [`guides/INSTALL_FULL.md`](sources/guides/INSTALL_FULL.md)
 - [`guides/INSTALL_RASPBERRYPI.md`](sources/guides/INSTALL_RASPBERRYPI.md)
+- [`guides/NAMING_CONVENTIONS.md`](sources/guides/NAMING_CONVENTIONS.md)
 - [`guides/PROFILE_LIFECYCLE_CLI_CHEATSHEET.md`](sources/guides/PROFILE_LIFECYCLE_CLI_CHEATSHEET.md)
 - [`guides/README.md`](sources/guides/README.md)
 - [`guides/SIMTRACE2_CARDEM_GUIDE.md`](sources/guides/SIMTRACE2_CARDEM_GUIDE.md)
@@ -75,6 +79,5 @@ Notes:
 ## Test And Harness Docs
 
 - [`tests/eim-sh/EIM_ESIPA_ASN1_REFERENCE.md`](sources/tests/eim-sh/EIM_ESIPA_ASN1_REFERENCE.md)
-- [`tests/eim-sh/EIM_POLL_SEQUENCE.md`](sources/tests/eim-sh/EIM_POLL_SEQUENCE.md)
 - [`tests/eim-sh/README_venv.md`](sources/tests/eim-sh/README_venv.md)
 - [`tests/live_scp03/README.md`](sources/tests/live_scp03/README.md)

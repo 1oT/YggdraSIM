@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 """Interactive editor for the YGGDRASIM_* environment flag registry.
 
 Launched from the top-level launcher via the ``[E]`` menu entry. The

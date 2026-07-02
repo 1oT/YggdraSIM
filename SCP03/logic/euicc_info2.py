@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """EUICCInfo2 TLV decoder: parses tag BF22 into a structured dict (SGP.22 §2.6.2)."""
 from typing import Dict, List, Optional, Tuple
@@ -196,9 +199,9 @@ def decode_euicc_info2_value(tag: int, value: bytes, parent_tag: Optional[int]) 
         return format_version_bytes(value)
     if parent_tag == 0xB4:
         if tag == 0x81:
-            return "Present (eCall supported)"
+            return "true"
         if tag == 0x82:
-            return "Present (fallback supported)"
+            return "true"
     if parent_tag == 0x8D:
         return format_named_bit_string(value, TRE_PROPERTY_FLAGS)
     return None
@@ -328,8 +331,8 @@ def decode_ipa_mode(value: bytes) -> str:
     if len(value) != 1:
         return value.hex().upper()
     ipa_modes = {
-        0: "ipad (IPAd is active)",
-        1: "ipae (IPAe is active)",
+        0: "IPAd active",
+        1: "Mode 1 active",
     }
     ipa_value = value[0]
     ipa_name = ipa_modes.get(ipa_value, "unknown")
@@ -436,7 +439,7 @@ def _build_root_detail_lines(tag: int, label: str, value: bytes) -> List[Tuple[i
         return lines
 
     if tag == 0xB4:
-        lines.append((0, label, "Present"))
+        lines.append((0, label, "true"))
         nested_map = parse_tlv_simple(value)
         version_list_value = _first_bytes(nested_map.get(0xA0))
         if version_list_value is not None:
@@ -450,13 +453,13 @@ def _build_root_detail_lines(tag: int, label: str, value: bytes) -> List[Tuple[i
                 lines.append((1, f"{child_label} {version_index}", child_rendered))
                 version_index += 1
         if 0x81 in nested_map:
-            lines.append((1, "eCall Supported", "Present"))
+            lines.append((1, "eCall Supported", "true"))
         else:
-            lines.append((1, "eCall Supported", "Missing"))
+            lines.append((1, "eCall Supported", "false"))
         if 0x82 in nested_map:
-            lines.append((1, "Fallback Supported", "Present"))
+            lines.append((1, "Fallback Supported", "true"))
         else:
-            lines.append((1, "Fallback Supported", "Absent"))
+            lines.append((1, "Fallback Supported", "false"))
         return lines
 
     if tag == 0xAC:

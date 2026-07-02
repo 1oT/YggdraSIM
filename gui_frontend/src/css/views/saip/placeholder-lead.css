@@ -1,0 +1,17 @@
+/*
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+ */
+
+/* ---- SA-G1: placeholder lead sentence in empty tab body ------------ */
+
+.saip-placeholder--lead {
+  font-size: 13px;
+  color: var(--fg-muted, #888);
+  text-align: center;
+  padding: 36px 12px;
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+  margin: 12px;
+}
+

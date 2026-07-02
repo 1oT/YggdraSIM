@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 /*
  * mermaid-zoom.js
  *
@@ -42,7 +45,7 @@
 (function () {
   "use strict";
 
-  var BUILD = "2026-04-16-v3-shadow-aware";
+  var BUILD = "v3-shadow-aware";
 
   try {
     console.log("[mermaid-zoom] script loaded, build=" + BUILD);

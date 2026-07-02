@@ -6,6 +6,11 @@ tags:
   - sgp22
   - sgp32
 ---
+<!--
+SPDX-License-Identifier: GPL-3.0-or-later
+Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+-->
+
 
 # RSP Architecture
 
@@ -61,7 +66,7 @@ flowchart LR
 | ES10b | LPAd/IPAd and ISD-R | AuthenticateServer, PrepareDownload, LoadBoundProfilePackage |
 | ES10c | LPAd/IPAd and ISD-R | profile enable, disable, delete, notifications |
 | ES9+ | LPAd/IPAd and SM-DP+ | InitiateAuthentication, AuthenticateClient, GetBoundProfilePackage |
-| ES9+' | eIM and SM-DP+ | IPAe-variant handover flows |
+| ES9+' | eIM and SM-DP+ | handover flows |
 
 ## Consumer download flow
 
@@ -100,7 +105,8 @@ of instructions. The IPAd pulls or receives packages and executes them.
 - `ADD-INITIAL-EIM` primes an ISD-R with the eIM identity fields in BF55.
 - `ADD-EIM` authorizes additional eIMs or rotates entries.
 - `LOAD-EIM-PACKAGE` is the card-side consumption step.
-- Polling loops let the IPAd ask the eIM for work, execute, and acknowledge.
+- Package exchange lets the IPAd receive work, execute it, and acknowledge
+  the result.
 
 ```mermaid
 flowchart LR
@@ -151,11 +157,11 @@ the Local eIM endpoint side can be tuned independently. See
 
 ## Where to look in YggdraSIM
 
-- [SCP11 Live Relay](../subsystems/scp11-live.md) and
-  [Test Relay](../subsystems/scp11-test.md) for consumer-style ES9+ flows
+- [SCP11 eSIM Management Relay](../subsystems/scp11-live.md) for
+  consumer-style ES9+ flows
 - [SCP11 Local Access](../subsystems/scp11-local-access.md) for direct
   ES10b / ES10c without relay
 - [SCP11 eIM Local](../subsystems/scp11-eim-local.md) for SGP.32
-  orchestration with localized eIM and IPAd/IPAe flows
+  orchestration with localized eIM and IPAd flows
 - [Standards Map](../reference/standards-map.md) for the specific GSMA
   sections mapped to implementation

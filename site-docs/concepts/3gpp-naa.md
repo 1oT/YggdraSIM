@@ -6,6 +6,11 @@ tags:
   - usim
   - isim
 ---
+<!--
+SPDX-License-Identifier: GPL-3.0-or-later
+Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+-->
+
 
 # 3GPP NAA
 
@@ -103,9 +108,10 @@ USIM `AUTHENTICATE`:
 - **AKMA** (3GPP TS 33.535) — application-layer keys derived from
   `Kausf`, surfaced as `K_AKMA` and the `A-KID` identifier.
 
-The simulated UICC implements all three. The matching network-side
-AUSF / AAnF surfaces are the operator's responsibility — this release
-ships the SIM-side primitives only.
+The simulated UICC implements all three; the in-process YggdraCore stubs
+(`Tools/YggdraCore/`) close the loop on the network side with AUSF and
+AAnF surfaces so the round-trips can be exercised without an external 5G
+core. *(YggdraCore stubs: post-v1 staging — not part of this release.)*
 
 ## Where to look in YggdraSIM
 

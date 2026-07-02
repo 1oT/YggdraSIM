@@ -2,6 +2,11 @@
 title: YggdraSIM
 description: Secure-element, eUICC, OTA, SCP11, HIL bridge, and SAIP toolkit documentation.
 ---
+<!--
+SPDX-License-Identifier: GPL-3.0-or-later
+Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+-->
+
 
 <div class="oneot-only oneot-partner-strip" markdown="0">
   <span class="oneot-partner-strip__badge">Crafted at</span>
@@ -86,9 +91,17 @@ exercised without switching projects.
 
     ---
 
-    Deep dives for every operator surface in the repository.
+    Operator-surface guides for every subsystem in the repository.
 
     [Open](subsystems/index.md)
+
+-   :material-monitor-dashboard: __GUI Command Center__
+
+    ---
+
+    Desktop and web-server workbench, live APDU dock, remote-card controls.
+
+    [Open](subsystems/gui-command-center.md)
 
 -   :material-lightbulb-on-outline: __How-To Runbooks__
 
@@ -118,29 +131,33 @@ exercised without switching projects.
 
 ## Subsystem summary
 
-| Subsystem | Role | Deep dive |
+| Subsystem | Role | Guide |
 | --- | --- | --- |
 | `main/` | Unified launcher, path setup, and in-process dispatch | [Architecture](architecture.md) |
 | `SCP03/` | GlobalPlatform admin shell, filesystem work, retrieval | [SCP03 Admin Shell](subsystems/scp03.md) |
 | `SCP80/` | OTA packet build, wrap, transport, and decode | [SCP80 OTA Shell](subsystems/scp80.md) |
-| `SCP11/live/` | Live relay shell for LPAd, IPAd, and IPAe | [SCP11 Live Relay](subsystems/scp11-live.md) |
-| `SCP11/test/` | Test relay shell with lab-default trust | [SCP11 Test Relay](subsystems/scp11-test.md) |
+| `SCP11/live/` | eSIM management relay shell for LPAd and IPAd | [SCP11 eSIM Management Relay](subsystems/scp11-live.md) |
+| `SCP11/test/` | Compatibility namespace for older imports | [SCP11 Test Compatibility Namespace](subsystems/scp11-test.md) |
 | `SCP11/local_access/` | Direct local `ISD-R` shell | [SCP11 Local Access](subsystems/scp11-local-access.md) |
-| `SCP11/eim_local/` | SGP.32 eIM-local package and polling shell | [SCP11 eIM Local](subsystems/scp11-eim-local.md) |
+| `SCP11/eim_local/` | SGP.32 eIM-local package, hotfolder, and response-tracking shell | [SCP11 eIM Local](subsystems/scp11-eim-local.md) |
 | `SIMCARD/` | Simulated UICC / eUICC backend (ETSI / GP / SCP03 / SCP80 / Toolkit / 5G AKA / AKMA / SUCI / `GET IDENTITY`) | [SIMCARD Simulator](subsystems/simcard-simulator.md) |
 | `Tools/ProfilePackage/` | SAIP shell, lint engine, transcode TUI | [Profile Package](subsystems/profile-package.md) |
-| `Tools/HilBridge/` | SIMtrace2-backed HIL bridge, supervisor, GSMTAP, AT+CSIM/CRSM transcoder | [HIL Bridge](subsystems/hil-bridge.md) |
+| `Tools/HilBridge/` | SIMtrace2-backed HIL bridge, RemSIM lifecycle, GSMTAP, remote-card input, AT+CSIM/CRSM transcoder | [HIL Bridge](subsystems/hil-bridge.md) |
+| `Tools/CardBridge/` | Loopback HTTP bridge that streams a PC/SC reader to another host over SSH | [Remote APDU Streaming](how-to/remote-apdu-streaming.md) |
 | `Tools/ApduFuzz/` | Opt-in eUICC APDU mutation fuzzer (allow-listed, hard-gated) | [APDU Fuzzer](subsystems/apdu-fuzzer.md) |
 | `Tools/EumDiag/` | EUM / SM-DP+ session-key injection + Wireshark Lua dissector | [EUM Diagnostics](subsystems/eum-diagnostics.md) |
 | `Tools/SuciTool/` | SUCI key management shell | [SUCI Tool](subsystems/suci-tool.md) |
+| `Tools/YggdraCore/` *(post-v1 staging)* | In-process 5G core stubs (AUSF / AAnF) + BYO-Open5GS bridge | [Subsystems index](subsystems/index.md) |
+| `yggdrasim_common/gui_server/` | Optional Universal GUI Command Center (`--gui` / `--web-server`) with live APDU dock and remote-rig controls | [Universal GUI Command Center](subsystems/gui-command-center.md) |
 
 ## What this site covers
 
 - install and launch paths for every operator surface
 - architecture, shared state, runtime root, and plugin model
 - concepts pages that summarize the underlying standards
-- subsystem deep dives with command surfaces and pitfalls
+- subsystem guides with command surfaces and pitfalls
 - how-to runbooks for the most common workflows
+- dedicated GUI and remote APDU streaming setup guides
 - a reference layer with CLI matrix, state schema, glossary, troubleshooting
 - internals pages for contributors
 - a mirrored source library with the authored guide files

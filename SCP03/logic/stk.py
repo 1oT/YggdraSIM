@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """SIM Toolkit logic: proactive command encoding/decoding and TERMINAL RESPONSE handling (ETSI TS 102 223)."""
 from __future__ import annotations
@@ -90,11 +93,12 @@ class StkState:
     trigger_history: list[str] = field(default_factory=list)
     poll_interval_seconds: int = 0
     polling_off: bool = False
-    # ETSI TS 102 223 §8.19 GSM Location Information value: MCC=262,
-    # MNC=01 (Germany / Telekom), LAC=0x0001, Cell ID=0x0001. Layout:
-    # 3 bytes packed-BCD PLMN + 2 byte LAC + 2 byte Cell ID = 7 bytes.
+    # ETSI TS 102 223 §8.19 GSM Location Information value:
+    # MCC=001, MNC=01 (3GPP TS 23.003 §2.2 test PLMN),
+    # LAC=0x0001, Cell ID=0x0001. Layout: 3 bytes packed-BCD PLMN +
+    # 2 byte LAC + 2 byte Cell ID = 7 bytes.
     location_information: bytes = field(
-        default_factory=lambda: _encode_location_information_gsm("262", "01", 0x0001, 0x0001)
+        default_factory=lambda: _encode_location_information_gsm("001", "01", 0x0001, 0x0001)
     )
     # ETSI TS 102 223 §8.20 IMEI: 8-byte BCD encoding of a 15-digit
     # IMEI. The default is "086543245654321" (Type Allocation Code

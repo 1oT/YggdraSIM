@@ -1,0 +1,235 @@
+/*
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+ */
+
+/* ----------------------------------------------------------------------
+   SGP.32 bulk telemetry — structured report
+   One titled sub-card per ES10 retrieval (scan, RAT, notifications,
+   eIM config, certs). Replaces the old raw-stdout `<pre>` dump.
+   ---------------------------------------------------------------------- */
+
+.cc-sgp32-header {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 12px;
+  padding: 10px 12px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md, 8px);
+}
+
+.cc-sgp32-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 14px;
+}
+
+@media (min-width: 1100px) {
+  .cc-sgp32-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+.cc-sgp32-section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px 16px 16px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent);
+  border-radius: var(--radius-md, 8px);
+}
+
+.cc-sgp32-section.cc-sgp32-status-ok {
+  border-left-color: var(--ok, #3ec67a);
+}
+
+.cc-sgp32-section.cc-sgp32-status-empty {
+  border-left-color: var(--warn, #d9a12c);
+}
+
+.cc-sgp32-section.cc-sgp32-status-error {
+  border-left-color: var(--err, #d9534f);
+}
+
+.cc-sgp32-section-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.cc-sgp32-section-title {
+  margin: 0;
+  font-size: 13.5px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  color: var(--fg);
+}
+
+.cc-sgp32-section-chips {
+  display: inline-flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.cc-sgp32-section-chips .cc-chip {
+  margin-right: 0;
+  margin-bottom: 0;
+}
+
+.cc-sgp32-section-note {
+  margin: 0;
+  font-style: italic;
+  color: var(--fg-muted);
+  font-size: 12px;
+}
+
+/* Inline trace block — rendered directly in the card body (no
+   <details> wrapper). Used by scp03RenderTrace() across every SCP03
+   action that previously hid a "Show trace" disclosure. Operators
+   wanted the captured stdout visible at a glance, matching CLI
+   screen output byte-for-byte. Long traces get a max-height scroller
+   so they can't push other UI off-screen. */
+.cc-log-inline {
+  margin: 8px 0 0;
+  padding: 10px 12px;
+  background: var(--code-bg, rgba(0, 0, 0, 0.25));
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-family: var(--font-mono, ui-monospace, "SF Mono", Menlo, monospace);
+  font-size: 12px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 520px;
+  overflow: auto;
+  color: var(--fg);
+}
+
+/* When the inline trace sits inside an SGP.32 section card it's
+   already inside a bordered panel — tighten spacing so it doesn't
+   look nested-in-nested. */
+.cc-sgp32-section > .cc-log-inline {
+  margin: 4px 0 0;
+}
+
+/* Status-coloured chip variants reused by the header + section chips. */
+.cc-chip.cc-chip-ok,
+.cc-sgp32-status-chip.cc-sgp32-status-chip-ok {
+  background: color-mix(in oklab, var(--ok, #3ec67a) 18%, var(--bg-hover));
+  border-color: color-mix(in oklab, var(--ok, #3ec67a) 38%, var(--border));
+  color: var(--fg);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-weight: 600;
+  font-size: 10.5px;
+}
+
+.cc-chip.cc-chip-warn,
+.cc-sgp32-status-chip.cc-sgp32-status-chip-empty {
+  background: color-mix(in oklab, var(--warn, #d9a12c) 18%, var(--bg-hover));
+  border-color: color-mix(in oklab, var(--warn, #d9a12c) 38%, var(--border));
+  color: var(--fg);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-weight: 600;
+  font-size: 10.5px;
+}
+
+.cc-chip.cc-chip-err,
+.cc-sgp32-status-chip.cc-sgp32-status-chip-error {
+  background: color-mix(in oklab, var(--err, #d9534f) 18%, var(--bg-hover));
+  border-color: color-mix(in oklab, var(--err, #d9534f) 38%, var(--border));
+  color: var(--fg);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-weight: 600;
+  font-size: 10.5px;
+}
+
+.cc-sgp32-footer {
+  margin-top: 14px;
+  padding-top: 10px;
+  border-top: 1px dashed var(--border);
+}
+
+/* 5. New-session placeholder inside the main column -------------------- */
+
+.scp03-session-welcome {
+  padding: 26px 30px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  max-width: 640px;
+  margin: 20px auto;
+  text-align: center;
+  box-shadow: 0 6px 20px -12px rgba(0, 0, 0, 0.35);
+}
+
+.scp03-session-welcome h3 {
+  margin: 0 0 8px;
+  font-size: 18px;
+}
+
+.scp03-session-welcome .hint {
+  margin: 0 auto 14px;
+  max-width: 440px;
+}
+
+.scp03-session-welcome .btn {
+  min-width: 160px;
+}
+
+.scp03-session-welcome .cc-wb-error {
+  margin-top: 14px;
+  text-align: left;
+}
+
+/* "No card in reader" notice — styled as an informational banner
+   (amber/warn, not red/error) because it's a routine operator
+   condition, not a crash. Keeps the scan error channel free for
+   real regressions. */
+.cc-no-card-notice {
+  padding: 14px 16px;
+  border: 1px solid var(--warn-border, #a67100);
+  background: var(--warn-bg, rgba(255, 170, 0, 0.08));
+  border-radius: 8px;
+  color: var(--fg);
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.cc-no-card-notice strong {
+  display: block;
+  font-size: 13.5px;
+  margin-bottom: 6px;
+  color: var(--warn-strong, #d38f00);
+}
+
+.cc-no-card-notice p {
+  margin: 0 0 8px 0;
+  color: var(--fg-muted);
+}
+
+.cc-no-card-notice details {
+  margin-top: 8px;
+}
+
+.cc-no-card-notice details summary {
+  cursor: pointer;
+  color: var(--fg-muted);
+  font-size: 12px;
+  user-select: none;
+}
+
+.cc-no-card-notice pre.cc-log-inline {
+  margin-top: 8px;
+  max-height: 140px;
+  overflow: auto;
+}
+

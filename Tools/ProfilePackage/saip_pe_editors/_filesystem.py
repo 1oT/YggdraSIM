@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """Filesystem tree for SAIP sections that carry MF/DF/EF tuples.
 
@@ -30,7 +33,7 @@ _PE_SECTION_TO_DF_LABEL = {
     "phonebook": "DF.PHONEBOOK (5F3A)",
     "graphics": "DF.GRAPHICS (5F50)",
     "multimedia": "DF.MMSS (5F3B)",
-    "gsm-access": "DF.GSM-ACCESS (5F3C)",
+    "gsm-access": "DF.GSM-ACCESS (5F3B)",
     "df-5gs": "DF.5GS (5FC0)",
     "df-saip": "DF.SAIP",
     "df-snpn": "DF.SNPN (5FE0)",
@@ -345,7 +348,7 @@ class FileSystemView(Vertical):
     def compose(self) -> ComposeResult:
         with Horizontal():
             with Vertical():
-                yield Static("File System", classes="fs_caption")
+                yield Static("Filesystem", classes="fs_caption")
                 yield Tree("Profile filesystem", id="fs_tree", classes="fs_tree")
             with Vertical():
                 yield Static("Selection", classes="fs_caption")

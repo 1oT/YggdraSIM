@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 import builtins
 import json
 import unittest
@@ -110,7 +113,7 @@ class SaipAsn1DecodeTests(unittest.TestCase):
         )
 
         self.assertIn("Field semantics", text)
-        self.assertIn("Transport / Remote Parameters", text)
+        self.assertIn("SMS Connectivity (A0)", text)
         self.assertIn("Network Access Name", text)
         self.assertIn("Terminal.apn", text)
 
@@ -786,7 +789,7 @@ class SaipAsn1DecodeTests(unittest.TestCase):
                     _TAG_TUPLE: [
                         "fillFileContent",
                         {
-                            _TAG_BYTES: "800F7461676765644073696D2E74657374",
+                            _TAG_BYTES: "8013746167676564406578616D706C652E74657374",
                         },
                     ]
                 }
@@ -806,7 +809,7 @@ class SaipAsn1DecodeTests(unittest.TestCase):
                     _TAG_TUPLE: [
                         "fillFileContent",
                         {
-                            _TAG_BYTES: "80137369703A7461676765644073696D2E74657374",
+                            _TAG_BYTES: "80177369703A746167676564406578616D706C652E74657374",
                         },
                     ]
                 }
@@ -826,7 +829,7 @@ class SaipAsn1DecodeTests(unittest.TestCase):
                     _TAG_TUPLE: [
                         "fillFileContent",
                         {
-                            _TAG_BYTES: "800501C0A80C22",
+                            _TAG_BYTES: "800501C0000222",
                         },
                     ]
                 }
@@ -911,16 +914,16 @@ class SaipAsn1DecodeTests(unittest.TestCase):
         )
 
         self.assertIn("ISIM private user identity", text)
-        self.assertIn("tagged@sim.test", text)
+        self.assertIn("tagged@example.test", text)
         self.assertIn("ISIM home network domain", text)
         self.assertIn("ims.example", text)
         self.assertIn("ISIM public user identity", text)
-        self.assertIn("sip:tagged@sim.test", text)
+        self.assertIn("sip:tagged@example.test", text)
         self.assertIn("ISIM service table", text)
         self.assertIn("P-CSCF address", text)
         self.assertIn("activeCount", text)
         self.assertIn("ISIM P-CSCF address", text)
-        self.assertIn("192.168.12.34", text)
+        self.assertIn("192.0.2.34", text)
         self.assertIn("recordIdentifier", text)
         self.assertIn("AABB", text)
         self.assertIn("Equivalent HPLMN presentation indication", text)

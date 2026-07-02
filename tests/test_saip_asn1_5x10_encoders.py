@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
 """Tests for the 5×10 decoded-edit sweep.
 
 Covers the 40+ EF tokens added in the fifth sweep (5G EFs in DF.5GS,
