@@ -4788,6 +4788,28 @@ kbd {
   background: var(--bg);
 }
 
+.cc-hil-modem-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--border);
+  background: color-mix(in oklab, var(--bg), var(--bg-elev) 42%);
+}
+
+.cc-hil-modem-actions .cc-hil-action-btn {
+  flex: 0 0 auto;
+}
+
+.cc-hil-modem-standard {
+  flex: 0 1 260px;
+  min-width: 180px;
+  max-width: 320px;
+  height: 30px;
+  font-size: 11.5px;
+}
+
 .cc-hil-modem-command {
   flex: 1 1 360px;
   min-width: 220px;
@@ -11116,8 +11138,8 @@ kbd {
   background: var(--surface-alt, rgba(255, 255, 255, 0.03));
 }
 
-/* Generic ribbon form modal (Batch personalize, Import PE, Export PE,
- * Batch validate, ARR sync). Stacked rows with label-on-top so picker
+/* Generic ribbon form modal (Batch generate, Import PE, Export PE,
+ * Batch lint, ARR sync). Stacked rows with label-on-top so picker
  * buttons sit beside the path field at any width. */
 .saip-form-row {
   display: flex;
@@ -12323,8 +12345,7 @@ kbd {
 }
 
 /* Template catalog tree — TCA SAIP §9 file-template registry projected
-   into a checkable tree. Mirrors the eUICC Profile Creator's *File
-   System Template* group. */
+   into a checkable tree. */
 
 .saip-template-tree,
 .saip-template-children,
@@ -13495,12 +13516,9 @@ kbd {
   font-style: italic;
 }
 
-/* "Add file element" inline form mounted at the top of the GFM card.
-   See eUICC Profile Creator manual, "Profile Elements for File
-   System Creation" → "File System Creation by Generic File
-   Management" for the affordance this mirrors. The bar's parent
-   field hides automatically when the parent chip above shows
-   ``data-state="bound"`` — the dispatcher then reuses that path. */
+/* Inline file-creation form mounted at the top of the GFM card. The
+   bar's parent field hides automatically when the parent chip above
+   shows ``data-state="bound"`` — the dispatcher then reuses that path. */
 .saip-gfm-addbar {
   display: flex;
   flex-wrap: wrap;
@@ -14988,9 +15006,8 @@ kbd {
 }
 
 /* Per-record navigator — dropdown + prev/next + keyboard (PageUp /
- * PageDown / Home / End). Mirrors the eUICC Profile Creator
- * §"File Content" record stepper so 22-record EF.ARRs / phonebooks
- * surface one record at a time instead of flooding the Data tab. */
+ * PageDown / Home / End). Keeps 22-record EF.ARRs / phonebooks to
+ * one visible record instead of flooding the Data tab. */
 
 .saip-record-nav {
   display: flex;
@@ -15393,7 +15410,7 @@ kbd {
   margin-top: 6px;
 }
 
-/* Comprion-style structured wizards (EF.IMSI / EF.AD / EF.UST / …). */
+/* structured structured wizards (EF.IMSI / EF.AD / EF.UST / …). */
 
 .saip-wizard-card {
   border-color: var(--accent-soft, var(--border));
@@ -19714,6 +19731,14 @@ kbd {
   min-width: 0;
 }
 
+.cb-rig-port-plan {
+  margin-top: 8px;
+  min-height: 20px;
+  color: var(--fg-dim);
+  font-size: 0.84rem;
+  line-height: 1.45;
+}
+
 .cb-rig-advanced {
   margin-top: 14px;
 }
@@ -19982,4 +20007,107 @@ kbd {
 .btn-small {
   padding: 4px 10px;
   font-size: 0.78rem;
+}
+
+/* -- Remote Lab --------------------------------------------------------- */
+
+.remote-lab-toolbar,
+.remote-lab-import-actions,
+.remote-lab-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.remote-lab-import-panel {
+  margin: 12px 0;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel);
+}
+
+.remote-lab-import-panel label {
+  display: block;
+  margin-bottom: 6px;
+  color: var(--fg-dim);
+  font-size: 0.82rem;
+}
+
+.remote-lab-import-panel textarea {
+  width: 100%;
+  min-height: 180px;
+  resize: vertical;
+  margin-bottom: 10px;
+  font-family: "JetBrains Mono", "Fira Mono", monospace;
+}
+
+.remote-lab-devices {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 12px;
+}
+
+.remote-lab-card {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px;
+  background: var(--panel);
+}
+
+.remote-lab-card-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.remote-lab-title {
+  font-weight: 700;
+  line-height: 1.25;
+}
+
+.remote-lab-status {
+  flex: 0 0 auto;
+  border-radius: 999px;
+  padding: 3px 8px;
+  font-size: 0.74rem;
+  border: 1px solid var(--border);
+  color: var(--fg);
+}
+
+.remote-lab-status--available {
+  color: var(--ok);
+  border-color: rgba(64, 160, 112, 0.4);
+}
+
+.remote-lab-status--busy,
+.remote-lab-status--reserved {
+  color: var(--warn);
+  border-color: rgba(208, 152, 80, 0.45);
+}
+
+.remote-lab-status--error,
+.remote-lab-status--offline {
+  color: var(--fail);
+  border-color: rgba(191, 97, 106, 0.4);
+}
+
+.remote-lab-meta,
+.remote-lab-detail {
+  color: var(--fg-dim);
+  font-size: 0.84rem;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.remote-lab-detail {
+  margin-top: 4px;
+  font-family: "JetBrains Mono", "Fira Mono", monospace;
+}
+
+.remote-lab-actions {
+  margin-top: 12px;
 }

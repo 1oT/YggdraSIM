@@ -193,6 +193,7 @@ def create_app(config: GuiServerConfig) -> Any:
     from .routes import guides as guides_routes
     from .routes import fs_browse as fs_browse_routes
     from .routes import host_shell as host_shell_routes
+    from .routes import remote_lab as remote_lab_routes
 
     app.include_router(health_routes.router)
     app.include_router(registry_routes.router)
@@ -205,6 +206,7 @@ def create_app(config: GuiServerConfig) -> Any:
     app.include_router(apdu_event_routes.router)
     app.include_router(guides_routes.router)
     app.include_router(fs_browse_routes.router)
+    app.include_router(remote_lab_routes.router)
     # Host shell is a free-form RCE-equivalent surface, registered
     # unconditionally so /api/host-shell/capabilities can answer 200
     # with ``enabled=false`` and the SPA can hide the sidebar entry.
