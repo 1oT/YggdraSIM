@@ -163,7 +163,10 @@ yggdrasim.egg-info/
 # the published footprint stays stable. Drop these rules when the GUI
 # graduates to a public release.
 gui_frontend/
-yggdrasim_common/gui_server/
+yggdrasim_common/gui_server/*
+!yggdrasim_common/gui_server/routes/
+yggdrasim_common/gui_server/routes/*
+!yggdrasim_common/gui_server/routes/remote_lab.py
 tests/test_gui_*.py
 
 # --- Internal planning / audit / handoff docs ----------------------------
