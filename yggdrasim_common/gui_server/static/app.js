@@ -244,6 +244,7 @@
       host_shell: "Advanced · Host shell",
       live_readers: "Inspect · PC/SC readers",
       card_bridge: "Advanced · Remote Bridge",
+      remote_lab: "Advanced · Remote Lab",
       command_center: (options && options.crumb) || "Command Center",
     }[name] || "Overview");
     highlightSidebar(name);
@@ -603,6 +604,8 @@
           loadLiveReaders();
         } else if (view === "card_bridge") {
           loadCardBridge();
+        } else if (view === "remote_lab") {
+          loadRemoteLab();
         }
         // Pause the Card Bridge auto-refresh whenever the operator
         // navigates away so we never poll in the background.
@@ -1112,6 +1115,363 @@
     if (btn) btn.addEventListener("click", loadLiveReaders);
   }
 
+  // -- Remote Lab dashboard -------------------------------------------------
+
+  var remoteLabState = {
+    devices: [],
+    statuses: {},
+    activeSessions: [],
+    activeSessionCount: 0,
+    sessionPollTimer: null,
+    loading: false,
+    connectInFlight: "",
+  };
+
+  function wireRemoteLabPanel() {
+    var refresh = $("remote-lab-refresh");
+    if (refresh) {
+      refresh.addEventListener("click", function () {
+        loadRemoteLab();
+      });
+    }
+    var importBtn = $("remote-lab-import");
+    var panel = $("remote-lab-import-panel");
+    if (importBtn && panel) {
+      importBtn.addEventListener("click", function () {
+        panel.hidden = !panel.hidden;
+      });
+    }
+    var cancel = $("remote-lab-import-cancel");
+    if (cancel && panel) {
+      cancel.addEventListener("click", function () {
+        panel.hidden = true;
+      });
+    }
+    var submit = $("remote-lab-import-submit");
+    if (submit) {
+      submit.addEventListener("click", remoteLabSubmitImport);
+    }
+  }
+
+  function remoteLabSetState(text) {
+    setText("remote-lab-state", text || "idle");
+  }
+
+  function remoteLabLocalActiveSessions() {
+    var sessions = [];
+    var wb = commandState && commandState.scp03Workbench;
+    var tabs = wb && Array.isArray(wb.tabs) ? wb.tabs : [];
+    tabs.forEach(function (tab) {
+      if (!tab || !tab.sessionId) return;
+      var scan = tab.scanData || {};
+      var meta = scan.remote_lab || {};
+      if (!meta || !meta.remote_session_id) return;
+      sessions.push({
+        session_id: tab.sessionId,
+        device_id: meta.device_id || "",
+        rig_id: meta.rig_id || "",
+        remote_session_id: meta.remote_session_id || "",
+        agent: meta.agent || "",
+        reader_name: tab.readerName || "",
+      });
+    });
+    return sessions;
+  }
+
+  function remoteLabSetActiveSessions(sessions) {
+    var rows = Array.isArray(sessions) ? sessions.filter(function (item) {
+      return item && (item.session_id || item.remote_session_id);
+    }) : [];
+    remoteLabState.activeSessions = rows;
+    remoteLabState.activeSessionCount = rows.length;
+    remoteLabRenderGlobalSessionIndicators();
+  }
+
+  function remoteLabRenderGlobalSessionIndicators() {
+    var count = remoteLabState.activeSessionCount || 0;
+    var state = count > 0 ? "running" : "idle";
+    var label = count > 0 ? "running" : "stopped";
+    document.querySelectorAll('#command-center-nav [data-cc-leaf-id="leaf-adv-remote-lab"]').forEach(function (entry) {
+      entry.setAttribute("data-cb-state", state);
+      entry.classList.toggle("is-cb-active", state === "running");
+      var marker = entry.querySelector(".cc-nav-card-bridge-state");
+      if (marker) marker.textContent = state === "running" ? "running" : "";
+    });
+    document.querySelectorAll('.overview-module-card[data-cc-view="remote_lab"]').forEach(function (card) {
+      card.setAttribute("data-cb-state", state);
+      card.classList.toggle("is-cb-active", state === "running");
+      var badge = card.querySelector('[data-cb-role="overview-status"]');
+      if (badge) badge.textContent = label;
+    });
+  }
+
+  async function remoteLabRefreshSessionState() {
+    try {
+      var data = await apiFetch("/api/remote-lab/sessions");
+      remoteLabSetActiveSessions((data && Array.isArray(data.sessions)) ? data.sessions : []);
+    } catch (_err) {
+      remoteLabSetActiveSessions(remoteLabLocalActiveSessions());
+    }
+  }
+
+  function remoteLabStartSessionPoll() {
+    if (remoteLabState.sessionPollTimer != null) return;
+    remoteLabState.sessionPollTimer = window.setInterval(function () {
+      if (document.hidden) return;
+      remoteLabRefreshSessionState();
+    }, 10000);
+  }
+
+  async function loadRemoteLab() {
+    if (remoteLabState.loading) return;
+    remoteLabState.loading = true;
+    remoteLabSetState("loading");
+    try {
+      var data = await apiFetch("/api/remote-lab/devices");
+      remoteLabState.devices = (data && Array.isArray(data.devices)) ? data.devices : [];
+      var statusData = await apiFetch("/api/remote-lab/status").catch(function () {
+        return { devices: [] };
+      });
+      remoteLabState.statuses = {};
+      ((statusData && statusData.devices) || []).forEach(function (status) {
+        if (status && status.id) remoteLabState.statuses[String(status.id)] = status;
+      });
+      await remoteLabRefreshSessionState();
+      renderRemoteLab();
+      remoteLabSetState("ready");
+    } catch (err) {
+      remoteLabSetState("error");
+      var host = $("remote-lab-devices");
+      if (host) {
+        host.innerHTML = '<p class="loading">Remote Lab unavailable: '
+          + escapeHtml(String(err && err.message || err)) + "</p>";
+      }
+    } finally {
+      remoteLabState.loading = false;
+    }
+  }
+
+  function renderRemoteLab() {
+    setText("remote-lab-count", "devices: " + String(remoteLabState.devices.length));
+    var host = $("remote-lab-devices");
+    if (!host) return;
+    host.innerHTML = "";
+    if (remoteLabState.devices.length === 0) {
+      var empty = document.createElement("p");
+      empty.className = "loading";
+      empty.textContent = "No Remote Lab devices imported.";
+      host.appendChild(empty);
+      return;
+    }
+    remoteLabState.devices.forEach(function (device) {
+      host.appendChild(remoteLabBuildCard(device));
+    });
+  }
+
+  function remoteLabBuildCard(device) {
+    var id = String(device && device.id || "");
+    var status = remoteLabState.statuses[id] || {};
+    var card = document.createElement("article");
+    card.className = "remote-lab-card";
+    card.setAttribute("data-device-id", id);
+
+    var head = document.createElement("div");
+    head.className = "remote-lab-card-head";
+    var title = document.createElement("div");
+    title.className = "remote-lab-title";
+    title.textContent = String(device.name || id || "Remote Lab device");
+    head.appendChild(title);
+    var badge = document.createElement("span");
+    var state = String(status.status || "offline");
+    badge.className = "remote-lab-status remote-lab-status--" + state;
+    badge.textContent = state;
+    head.appendChild(badge);
+    card.appendChild(head);
+
+    var meta = document.createElement("div");
+    meta.className = "remote-lab-meta";
+    var location = String(device.location || status.location || "");
+    var tags = Array.isArray(device.tags) ? device.tags : [];
+    meta.textContent = [
+      location || "no location",
+      tags.length ? tags.join(", ") : "no tags",
+    ].join(" · ");
+    card.appendChild(meta);
+
+    var detail = document.createElement("div");
+    detail.className = "remote-lab-detail";
+    var agent = device.agent || {};
+    detail.textContent = String((agent.host || "") + ":" + (agent.control_port || ""));
+    if (status.stream_port) {
+      detail.textContent += " · stream " + String(status.stream_port);
+    }
+    if (status.locked_by) {
+      detail.textContent += " · busy by " + String(status.locked_by);
+    }
+    if (status.error) {
+      detail.textContent += " · " + String(status.error);
+    }
+    card.appendChild(detail);
+
+    var actions = document.createElement("div");
+    actions.className = "remote-lab-actions";
+    var connect = document.createElement("button");
+    connect.type = "button";
+    connect.className = "btn btn-primary";
+    connect.textContent = remoteLabState.connectInFlight === id ? "Connecting..." : "Connect";
+    connect.disabled = remoteLabState.connectInFlight === id || state === "busy" || state === "reserved";
+    connect.addEventListener("click", function () { remoteLabConnect(id); });
+    actions.appendChild(connect);
+
+    var refresh = document.createElement("button");
+    refresh.type = "button";
+    refresh.className = "btn";
+    refresh.textContent = "Refresh";
+    refresh.addEventListener("click", function () { remoteLabRefreshOne(id); });
+    actions.appendChild(refresh);
+
+    var exportBtn = document.createElement("button");
+    exportBtn.type = "button";
+    exportBtn.className = "btn";
+    exportBtn.textContent = "Export";
+    exportBtn.addEventListener("click", function () { remoteLabExport(id); });
+    actions.appendChild(exportBtn);
+
+    var remove = document.createElement("button");
+    remove.type = "button";
+    remove.className = "btn btn-danger";
+    remove.textContent = "Remove";
+    remove.addEventListener("click", function () { remoteLabRemove(id); });
+    actions.appendChild(remove);
+
+    card.appendChild(actions);
+    return card;
+  }
+
+  async function remoteLabRefreshOne(id) {
+    try {
+      var status = await apiFetch("/api/remote-lab/devices/" + encodeURIComponent(id) + "/status");
+      remoteLabState.statuses[id] = status || {};
+      renderRemoteLab();
+    } catch (err) {
+      remoteLabState.statuses[id] = { id: id, status: "offline", error: String(err && err.message || err) };
+      renderRemoteLab();
+    }
+  }
+
+  async function remoteLabConnect(id) {
+    if (!id) return;
+    remoteLabState.connectInFlight = id;
+    remoteLabSetState("connecting " + id);
+    renderRemoteLab();
+    try {
+      var resp = await apiFetch("/api/remote-lab/devices/" + encodeURIComponent(id) + "/connect", {
+        method: "POST",
+        body: JSON.stringify({ user: "", requested_ttl_seconds: 3600 }),
+      });
+      var data = resp && resp.data ? resp.data : {};
+      remoteLabAdoptScp03Session(data);
+      remoteLabSetState("connected");
+      logBus.emit({
+        level: "info",
+        source: "remote-lab",
+        message: "connected " + id + " as session " + String(data.session_id || "").substring(0, 8),
+      });
+    } catch (err) {
+      remoteLabSetState("connect failed");
+      logBus.emit({
+        level: "error",
+        source: "remote-lab",
+        message: "connect failed for " + id + ": " + String(err && err.message || err),
+      });
+    } finally {
+      remoteLabState.connectInFlight = "";
+      await loadRemoteLab();
+    }
+  }
+
+  function remoteLabAdoptScp03Session(data) {
+    if (!data || !data.session_id) return;
+    openCommandSubsystem("SCP03", { scope: "filesystem", leafId: "leaf-scp03-filesystem" });
+    var wb = commandState.scp03Workbench;
+    var tab = null;
+    for (var i = 0; i < wb.tabs.length; i++) {
+      if (!wb.tabs[i].sessionId) { tab = wb.tabs[i]; break; }
+    }
+    if (!tab) {
+      tab = scp03CreateEmptyTab();
+      wb.tabs.push(tab);
+    }
+    wb.activeTabId = tab.id;
+    tab.sessionId = data.session_id || null;
+    tab.readerName = data.reader_name || "Remote Lab";
+    tab.atrHex = data.atr_hex || "";
+    tab.scanData = data;
+    tab.status = "open";
+    tab.pendingReader = "";
+    tab.error = null;
+      tab.errorKind = "";
+    commandState.scp03Session = tab.sessionId;
+    scp03PersistTab(tab);
+    readerBarSetActiveReaderOnly(tab.readerName);
+    remoteLabSetActiveSessions(remoteLabLocalActiveSessions());
+    remoteLabRefreshSessionState();
+    var tabBar = document.querySelector(".cc-wb-tabs.scp03-topbar");
+    var tabBody = document.querySelector(".cc-wb-body");
+    if (tabBar && tabBody) renderScp03Tabs(tabBar, tabBody);
+    if (typeof readerBarNotifySessionChanged === "function") {
+      readerBarNotifySessionChanged();
+    }
+  }
+
+  async function remoteLabSubmitImport() {
+    var input = $("remote-lab-import-json");
+    if (!input) return;
+    try {
+      var invite = JSON.parse(String(input.value || ""));
+      await apiFetch("/api/remote-lab/import", {
+        method: "POST",
+        body: JSON.stringify({ invite: invite, replace: true }),
+      });
+      input.value = "";
+      var panel = $("remote-lab-import-panel");
+      if (panel) panel.hidden = true;
+      await loadRemoteLab();
+      remoteLabSetState("imported");
+    } catch (err) {
+      remoteLabSetState("import failed");
+      logBus.emit({
+        level: "error",
+        source: "remote-lab",
+        message: "import failed: " + String(err && err.message || err),
+      });
+    }
+  }
+
+  async function remoteLabExport(id) {
+    try {
+      var invite = await apiFetch("/api/remote-lab/devices/" + encodeURIComponent(id) + "/export");
+      var input = $("remote-lab-import-json");
+      var panel = $("remote-lab-import-panel");
+      if (input) input.value = JSON.stringify(invite, null, 2);
+      if (panel) panel.hidden = false;
+      remoteLabSetState("exported " + id);
+    } catch (err) {
+      remoteLabSetState("export failed");
+    }
+  }
+
+  async function remoteLabRemove(id) {
+    if (!window.confirm("Remove Remote Lab device '" + id + "' from this GUI?")) return;
+    try {
+      await apiFetch("/api/remote-lab/devices/" + encodeURIComponent(id), { method: "DELETE" });
+      await loadRemoteLab();
+      remoteLabSetState("removed " + id);
+    } catch (err) {
+      remoteLabSetState("remove failed");
+    }
+  }
+
   // -- Card Bridge panel (CB-4 frontend) -----------------------------------
   //
   // Wraps the read-only ``card_bridge.status`` / ``card_bridge.probe``
@@ -1156,8 +1516,7 @@
     var pill = $("topbar-card-bridge");
     if (pill) {
       pill.setAttribute("data-state", nextState);
-      pill.title = "Remote Bridge status: " + nextLabel
-        + ". Click to " + (nextState === "running" ? "stop" : "start") + ".";
+      pill.title = "Remote Bridge status: " + nextLabel;
       pill.setAttribute("aria-label", pill.title);
     }
     setText("topbar-card-bridge-value", nextLabel);
@@ -1166,7 +1525,7 @@
 
   function cbSyncCommandCenterBridgeIndicators() {
     var state = cbState.globalState || "idle";
-    var label = cbState.globalLabel || state;
+    var label = cbState.globalLabel || cbBridgeDisplayLabel(state, "");
     document.querySelectorAll('#command-center-nav [data-cc-leaf-id="leaf-adv-card-bridge"]').forEach(function (entry) {
       entry.setAttribute("data-cb-state", state);
       entry.classList.toggle("is-cb-active", state === "running");
@@ -1314,7 +1673,7 @@
       } else {
         summary.innerHTML =
           "Not configured — set <code>YGGDRASIM_CARD_RELAY_URL</code> or pass " +
-          "<code>--remote-card-url</code> to talk to a Remote Bridge over SSH.";
+          "<code>--remote-card-url</code> to talk to a Card Bridge stream.";
       }
     }
 
@@ -1614,6 +1973,9 @@
 
   var CB_RIG_STORAGE_KEY = "yggdrasim.card_bridge.remote_rig";
   var CB_RIG_PROFILES_STORAGE_KEY = "yggdrasim.card_bridge.remote_rig.profiles";
+  var CB_RIG_DEFAULT_CARD_PORT = 8642;
+  var CB_RIG_DEFAULT_GUI_PORT = 27854;
+  var CB_RIG_DEFAULT_HIL_PORT = 9997;
   var CB_RIG_FIELD_IDS = [
     "cb-rig-ssh-target",
     "cb-rig-identity-file",
@@ -1641,6 +2003,97 @@
 	    if (!el || value == null) return;
 	    el.value = String(value);
 	  }
+
+  function cbRigDefaultTokenFileForPort(port) {
+    return "~/.config/yggdrasim/card_bridge/" + String(port || CB_RIG_DEFAULT_CARD_PORT) + ".token";
+  }
+
+  function cbRigIsDefaultTokenFile(value) {
+    var text = String(value || "").trim();
+    if (!text) return true;
+    return /^~\/\.config\/yggdrasim\/card_bridge\/[0-9]+\.token$/.test(text);
+  }
+
+  function cbRigHashTarget(target) {
+    var text = String(target || "").trim();
+    var hash = 2166136261;
+    for (var i = 0; i < text.length; i++) {
+      hash ^= text.charCodeAt(i);
+      hash = Math.imul(hash, 16777619) >>> 0;
+    }
+    return hash >>> 0;
+  }
+
+  function cbRigSuggestedPortsForTarget(target) {
+    var normalized = String(target || "").trim();
+    if (!normalized) {
+      return {
+        card: CB_RIG_DEFAULT_CARD_PORT,
+        gui: CB_RIG_DEFAULT_GUI_PORT,
+        hil: CB_RIG_DEFAULT_HIL_PORT,
+      };
+    }
+    var slot = cbRigHashTarget(normalized) % 160;
+    return {
+      card: 8600 + (slot * 4),
+      gui: 27000 + (slot * 4),
+      hil: 9900 + slot,
+    };
+  }
+
+  function cbRigFieldIsAutoOrDefault(id, defaultValue) {
+    var el = $(id);
+    if (!el) return false;
+    var value = String(el.value || "").trim();
+    return !value || value === String(defaultValue) || el.dataset.autoPort === "true";
+  }
+
+  function cbRigWriteAutoPort(id, value) {
+    var el = $(id);
+    if (!el) return;
+    el.value = String(value);
+    el.dataset.autoPort = "true";
+  }
+
+  function cbRigClearAutoPortFlag(id) {
+    var el = $(id);
+    if (el) el.dataset.autoPort = "false";
+  }
+
+  function cbRigSyncTokenFileToCardPort(options) {
+    var token = $("cb-rig-remote-token");
+    if (!token) return;
+    var force = !!(options && options.force);
+    if (!force && token.dataset.autoPort !== "true" && !cbRigIsDefaultTokenFile(token.value)) {
+      return;
+    }
+    token.value = cbRigDefaultTokenFileForPort(cbRigNumber("cb-rig-card-port", CB_RIG_DEFAULT_CARD_PORT));
+    token.dataset.autoPort = "true";
+  }
+
+  function cbRigApplySuggestedPortsForTarget(target) {
+    var normalized = String(target || "").trim();
+    if (!normalized) return false;
+    var ports = cbRigSuggestedPortsForTarget(normalized);
+    var changed = false;
+    if (cbRigFieldIsAutoOrDefault("cb-rig-card-port", CB_RIG_DEFAULT_CARD_PORT)) {
+      cbRigWriteAutoPort("cb-rig-card-port", ports.card);
+      changed = true;
+    }
+    if (cbRigFieldIsAutoOrDefault("cb-rig-gui-port", CB_RIG_DEFAULT_GUI_PORT)) {
+      cbRigWriteAutoPort("cb-rig-gui-port", ports.gui);
+      changed = true;
+    }
+    if (cbRigFieldIsAutoOrDefault("cb-rig-hil-port", CB_RIG_DEFAULT_HIL_PORT)) {
+      cbRigWriteAutoPort("cb-rig-hil-port", ports.hil);
+      changed = true;
+    }
+    if (changed) {
+      cbRigSyncTokenFileToCardPort();
+    }
+    cbRigUpdatePortPlan();
+    return changed;
+  }
 
 	  function cbRigSyncReaderFieldsToActiveReader() {
 	    var activeReader = ccActiveReaderName();
@@ -1732,10 +2185,14 @@
     CB_RIG_FIELD_IDS.forEach(function (id) {
       if (Object.prototype.hasOwnProperty.call(profile, id)) {
         cbRigWriteField(id, profile[id]);
+        if (id === "cb-rig-card-port" || id === "cb-rig-gui-port" || id === "cb-rig-hil-port" || id === "cb-rig-remote-token") {
+          cbRigClearAutoPortFlag(id);
+        }
       }
     });
 	    cbRigApplyingProfile = false;
 	    cbRigUpdateGuiUrl();
+      cbRigUpdatePortPlan();
 	    cbRigSyncReaderFieldsToActiveReader();
 	    return true;
 	  }
@@ -1749,6 +2206,7 @@
 	    });
 	    cbRigSyncReaderFieldsToActiveReader();
 	    cbRigUpdateGuiUrl();
+      cbRigUpdatePortPlan();
 	  }
 
   function cbRigSaveSettings(options) {
@@ -1778,8 +2236,8 @@
   }
 
   function cbRigInputsFromPayload(payload) {
-	    var cardPort = cbRigPayloadNumber(payload, "cb-rig-card-port", 8642);
-	    var guiPort = cbRigPayloadNumber(payload, "cb-rig-gui-port", 27854);
+	    var cardPort = cbRigPayloadNumber(payload, "cb-rig-card-port", CB_RIG_DEFAULT_CARD_PORT);
+	    var guiPort = cbRigPayloadNumber(payload, "cb-rig-gui-port", CB_RIG_DEFAULT_GUI_PORT);
 	    return ccApplyActiveReaderBindingInputs({
 	      ssh_target: cbRigPayloadValue(payload, "cb-rig-ssh-target"),
 	      identity_file: cbRigPayloadValue(payload, "cb-rig-identity-file"),
@@ -1791,12 +2249,12 @@
 	      remote_gui_port: guiPort,
       service_name: cbRigPayloadValue(payload, "cb-rig-service-name") || "yggdrasim-hil-supervisor.service",
       remote_card_url: "http://127.0.0.1:" + cardPort + "/apdu",
-      remote_token_file: cbRigPayloadValue(payload, "cb-rig-remote-token") || "~/.config/yggdrasim/card_bridge/" + cardPort + ".token",
+      remote_token_file: cbRigPayloadValue(payload, "cb-rig-remote-token") || cbRigDefaultTokenFileForPort(cardPort),
       remote_workdir: cbRigPayloadValue(payload, "cb-rig-remote-workdir") || "~/YggdraSIM",
       remote_python: cbRigPayloadValue(payload, "cb-rig-remote-python") || "~/YggdraSIM/python/bin/python",
       remsim_binary: cbRigPayloadValue(payload, "cb-rig-remsim-binary") || "osmo-remsim-client-st2",
 	      usb_vidpid: cbRigPayloadValue(payload, "cb-rig-usb-vidpid") || "1d50:60e3",
-	      hil_port: cbRigPayloadNumber(payload, "cb-rig-hil-port", 9997),
+	      hil_port: cbRigPayloadNumber(payload, "cb-rig-hil-port", CB_RIG_DEFAULT_HIL_PORT),
 	      apdu_timeout_ms: 30000,
 	    });
 	  }
@@ -1900,8 +2358,24 @@
   }
 
   function cbRigUpdateGuiUrl() {
-    var port = cbRigNumber("cb-rig-gui-port", 27854);
+    var port = cbRigNumber("cb-rig-gui-port", CB_RIG_DEFAULT_GUI_PORT);
     setText("cb-rig-gui-url", "http://127.0.0.1:" + port);
+  }
+
+  function cbRigUpdatePortPlan() {
+    var host = $("cb-rig-port-plan");
+    if (!host) return;
+    var target = cbRigReadField("cb-rig-ssh-target");
+    var card = cbRigNumber("cb-rig-card-port", CB_RIG_DEFAULT_CARD_PORT);
+    var gui = cbRigNumber("cb-rig-gui-port", CB_RIG_DEFAULT_GUI_PORT);
+    var hil = cbRigNumber("cb-rig-hil-port", CB_RIG_DEFAULT_HIL_PORT);
+    var token = cbRigReadField("cb-rig-remote-token") || cbRigDefaultTokenFileForPort(card);
+    if (!target) {
+      host.textContent = "Port plan: card " + card + " · GUI " + gui + " · HIL " + hil + ".";
+      return;
+    }
+    host.textContent = "Port plan for " + target + ": card " + card
+      + " · GUI " + gui + " · HIL " + hil + " · token " + token + ".";
   }
 
   function cbRigRenderStatus(data, options) {
@@ -1947,7 +2421,7 @@
 	      cbSetGlobalBridgeStatus(global.state, global.label);
 	    }
     cbRigSetNote(
-      cbRigDescribeAction(data, "Remote rig status refreshed."),
+      cbRigDescribeAction(data, "Remote host status refreshed."),
       !!(state.remote_error || (hil && hil.ok === false) || (data && data.ok === false)),
       options && options.flashOk ? { flashOk: true } : null
     );
@@ -2035,7 +2509,7 @@
   }
 
 	  async function cbRigStartAll(button) {
-	    if (!cbRigRequireActiveReader("the Remote Bridge rig")) return;
+	    if (!cbRigRequireActiveReader("remote host onboarding")) return;
 	    if (!cbRigRequireSshTarget()) return;
 	    var cfg = cbRigCommonInputs();
     var data = await cbRigRun(
@@ -2052,12 +2526,12 @@
   }
 
 	  async function cbRigStartAllFromSavedSettings() {
-	    if (!cbRigRequireActiveReader("the Remote Bridge rig")) {
-	      return { ok: false, note: "Select a top-bar reader before starting the Remote Bridge rig." };
+	    if (!cbRigRequireActiveReader("remote host onboarding")) {
+	      return { ok: false, note: "Select a top-bar reader before starting remote host onboarding." };
 	    }
 	    var cfg = cbRigInputsFromSavedSettings();
     if (!cfg.ssh_target) {
-      var missing = "Remote Bridge SSH target is required. Configure it once in Remote Bridge.";
+      var missing = "Remote host SSH target is required. Configure it once in Remote Host Onboarding.";
       cbRigSetNote(missing, true);
       return { ok: false, note: missing };
     }
@@ -2095,7 +2569,7 @@
   async function cbRigStopAllFromSavedSettings() {
     var cfg = cbRigInputsFromSavedSettings();
     if (!cfg.ssh_target) {
-      var missing = "Remote Bridge SSH target is required. Configure it once in Remote Bridge.";
+      var missing = "Remote host SSH target is required. Configure it once in Remote Host Onboarding.";
       cbRigSetNote(missing, true);
       return { ok: false, note: missing };
     }
@@ -2221,19 +2695,35 @@
       if (!el) return;
       el.addEventListener("change", function () {
         if (id === "cb-rig-ssh-target") {
-          cbRigApplyProfileForTarget(cbRigReadField(id));
+          var applied = cbRigApplyProfileForTarget(cbRigReadField(id));
+          if (!applied) cbRigApplySuggestedPortsForTarget(cbRigReadField(id));
+        } else if (id === "cb-rig-card-port") {
+          cbRigClearAutoPortFlag(id);
+          cbRigSyncTokenFileToCardPort();
+        } else if (id === "cb-rig-gui-port" || id === "cb-rig-hil-port" || id === "cb-rig-remote-token") {
+          cbRigClearAutoPortFlag(id);
         }
         cbRigSaveSettings();
         cbRigUpdateGuiUrl();
+        cbRigUpdatePortPlan();
       });
       el.addEventListener("input", function () {
         if (id === "cb-rig-ssh-target") {
           var applied = cbRigApplyProfileForTarget(cbRigReadField(id));
+          if (!applied) cbRigApplySuggestedPortsForTarget(cbRigReadField(id));
           cbRigSaveSettings({ updateProfile: applied });
+        } else if (id === "cb-rig-card-port") {
+          cbRigClearAutoPortFlag(id);
+          cbRigSyncTokenFileToCardPort();
+          cbRigSaveSettings();
+        } else if (id === "cb-rig-gui-port" || id === "cb-rig-hil-port" || id === "cb-rig-remote-token") {
+          cbRigClearAutoPortFlag(id);
+          cbRigSaveSettings();
         } else if (!cbRigApplyingProfile) {
           cbRigSaveSettings();
         }
         cbRigUpdateGuiUrl();
+        cbRigUpdatePortPlan();
       });
     });
 
@@ -2339,7 +2829,7 @@
       packageSeq: 1,
       packageDrawerCollapsed: false,
       // SA-G1: ribbon + top-tab shell. The ribbon is the always-visible
-      // command bar that mirrors Comprion's grouped Profile Package /
+      // command bar that is grouped around Profile Package /
       // Profile Element / File System / Variables / Validation / Help
       // groups (re-themed for our palette). The variable editor moved
       // out of the left pane into a modal launched from the ribbon, so
@@ -2483,6 +2973,30 @@
 
   var HIL_MODEM_COMMAND_KEY = "ygg.hil.modemShellCommand";
   var HIL_MODEM_DEFAULT_COMMAND = "sudo tio /dev/ttyUSB2";
+  var HIL_MODEM_STANDARD_COMMANDS = [
+    { id: "at", label: "AT", command: "AT" },
+    { id: "ati", label: "ATI", command: "ATI" },
+    { id: "pin", label: "SIM PIN status", command: "AT+CPIN?" },
+    { id: "imsi", label: "IMSI", command: "AT+CIMI" },
+    { id: "iccid", label: "ICCID", command: "AT+CCID" },
+    { id: "imei", label: "IMEI", command: "AT+CGSN" },
+    { id: "manufacturer", label: "Manufacturer", command: "AT+CGMI" },
+    { id: "model", label: "Model", command: "AT+CGMM" },
+    { id: "firmware", label: "Firmware", command: "AT+CGMR" },
+    { id: "creg", label: "CS registration", command: "AT+CREG?" },
+    { id: "cgreg", label: "GPRS registration", command: "AT+CGREG?" },
+    { id: "cereg", label: "EPS registration", command: "AT+CEREG?" },
+    { id: "csq", label: "Signal quality", command: "AT+CSQ" },
+    { id: "cesq", label: "Extended signal", command: "AT+CESQ" },
+    { id: "cops", label: "Current operator", command: "AT+COPS?" },
+    { id: "cops-scan", label: "Scan operators", command: "AT+COPS=?" },
+    { id: "ceer", label: "Last modem error", command: "AT+CEER" },
+    { id: "cgatt", label: "Packet attach", command: "AT+CGATT?" },
+    { id: "cgdcont", label: "PDP contexts", command: "AT+CGDCONT?" },
+    { id: "cgact", label: "PDP active", command: "AT+CGACT?" },
+    { id: "cmgf", label: "SMS mode", command: "AT+CMGF?" },
+    { id: "csca", label: "SMS center", command: "AT+CSCA?" },
+  ];
   var HIL_PACKET_FETCH_LIMIT = 5000;
 	  var HIL_PACKET_RENDER_LIMIT = 750;
 	  var HIL_PACKET_VIRTUAL_ROW_HEIGHT = 26;
@@ -2815,6 +3329,8 @@
       loadLiveReaders();
     } else if (viewName === "card_bridge") {
       loadCardBridge();
+    } else if (viewName === "remote_lab") {
+      loadRemoteLab();
     }
     if (viewName !== "card_bridge") {
       cbStopAutoRefresh();
@@ -2839,53 +3355,8 @@
     return (data && data.note) || fallback || "";
   }
 
-  async function cbToggleTopbarRemoteBridge() {
-    var pill = $("topbar-card-bridge");
-    if (pill && pill.getAttribute("data-busy") === "true") return;
-    var previousState = (typeof cbState !== "undefined" && cbState.globalState)
-      || (pill && pill.getAttribute("data-state"))
-      || "idle";
-    var value = $("topbar-card-bridge-value");
-	    var previousLabel = cbBridgeDisplayLabel(
-	      previousState,
-	      (typeof cbState !== "undefined" && cbState.globalLabel)
-	        || (value && value.textContent)
-	        || ""
-	    );
-    var running = previousState === "running";
-    ccSetTopbarBridgeBusy("topbar-card-bridge", true);
-    setText("topbar-card-bridge-value", running ? "stopping" : "starting");
-    try {
-      var data;
-      if (running) {
-        if (typeof cbRigStopAllFromSavedSettings !== "function") {
-          throw new Error("Remote Bridge stop helper is unavailable.");
-        }
-        data = await cbRigStopAllFromSavedSettings();
-      } else {
-        if (typeof cbRigStartAllFromSavedSettings !== "function") {
-          throw new Error("Remote Bridge start helper is unavailable.");
-        }
-        data = await cbRigStartAllFromSavedSettings();
-      }
-      if (!data || data.ok === false) {
-        if (typeof cbSetGlobalBridgeStatus === "function" && (!data || !data.state)) {
-          cbSetGlobalBridgeStatus(previousState, previousLabel);
-        }
-        setStatusAction(ccDescribeTopbarBridgeAction(
-          data,
-          running ? "Remote Bridge stop failed." : "Remote Bridge start failed."
-        ));
-      }
-    } catch (err) {
-      if (typeof cbSetGlobalBridgeStatus === "function") {
-        cbSetGlobalBridgeStatus(previousState, previousLabel);
-      }
-      setStatusAction(String((err && err.message) || err));
-    } finally {
-      ccSetTopbarBridgeBusy("topbar-card-bridge", false);
-      if (typeof loadCardBridgeStatus === "function") loadCardBridgeStatus();
-    }
+  function cbToggleTopbarRemoteBridge() {
+    ccOpenInspectView("remote_lab", "leaf-adv-remote-lab");
   }
 
   function hilTopbarActions() {
@@ -3789,6 +4260,9 @@
     if (bar.openPopover && bar.openPopoverFor) {
       readerBarRefreshPopover();
     }
+    if (typeof remoteLabRefreshSessionState === "function") {
+      remoteLabRefreshSessionState();
+    }
   }
 
   // -------------------------------------------------------------------
@@ -4193,10 +4667,16 @@
       defaultOpen: false,
       children: [
         {
+          id: "leaf-adv-remote-lab",
+          label: "Remote Lab",
+          inspectView: "remote_lab",
+          hint: "Self-hosted modem/card rig registry and one-click lab sessions",
+        },
+        {
           id: "leaf-adv-card-bridge",
           label: "Remote Bridge",
           inspectView: "card_bridge",
-          hint: "Remote card relay diagnostics and remote HIL rig controls",
+          hint: "Prepare remote hosts for Remote Lab access",
         },
         {
           id: "leaf-adv-hil",
@@ -8976,7 +9456,7 @@
         state.actionStatusText = failure;
       } else {
         state.errorText = "";
-        state.actionStatusText = describe(data, "Remote Bridge rig is active.");
+        state.actionStatusText = describe(data, "Remote host is active.");
       }
     } catch (err) {
       var message = String((err && err.message) || err);
@@ -10413,6 +10893,110 @@
 
     shell.appendChild(bar);
 
+    var actionsBar = document.createElement("div");
+    actionsBar.className = "cc-hil-modem-actions";
+    actionsBar.setAttribute("role", "toolbar");
+    actionsBar.setAttribute("aria-label", "Modem quick actions");
+
+    var authButton = hilToolbarButton("auth", "Auth status", "Send AT+CREG?", function () {
+      hilRunModemQuickAction("auth");
+    });
+    authButton.id = "hil-modem-action-auth";
+    authButton.setAttribute("data-hil-modem-action", "auth");
+    actionsBar.appendChild(authButton);
+
+    var ceerButton = hilToolbarButton("report", "Last error", "Send AT+CEER", function () {
+      hilRunModemQuickAction("ceer");
+    });
+    ceerButton.id = "hil-modem-action-ceer";
+    ceerButton.setAttribute("data-hil-modem-action", "ceer");
+    actionsBar.appendChild(ceerButton);
+
+    var signalButton = hilToolbarButton("live", "Signal", "Send AT+CSQ", function () {
+      hilRunModemQuickAction("signal");
+    });
+    signalButton.id = "hil-modem-action-signal";
+    signalButton.setAttribute("data-hil-modem-action", "signal");
+    actionsBar.appendChild(signalButton);
+
+    var operatorButton = hilToolbarButton("find", "Operator", "Send AT+COPS?", function () {
+      hilRunModemQuickAction("operator");
+    });
+    operatorButton.id = "hil-modem-action-operator";
+    operatorButton.setAttribute("data-hil-modem-action", "operator");
+    actionsBar.appendChild(operatorButton);
+
+    var dialButton = hilToolbarButton("shell", "Dial", "Send ATD", hilDialModemCall);
+    dialButton.id = "hil-modem-action-dial";
+    dialButton.setAttribute("data-hil-modem-action", "dial");
+    actionsBar.appendChild(dialButton);
+
+    var answerButton = hilToolbarButton("run", "Answer", "Send ATA", function () {
+      hilRunModemQuickAction("answer");
+    });
+    answerButton.id = "hil-modem-action-answer";
+    answerButton.setAttribute("data-hil-modem-action", "answer");
+    actionsBar.appendChild(answerButton);
+
+    var hangupButton = hilToolbarButton("stop", "Hang up", "Send ATH", function () {
+      hilRunModemQuickAction("hangup");
+    });
+    hangupButton.id = "hil-modem-action-hangup";
+    hangupButton.setAttribute("data-hil-modem-action", "hangup");
+    actionsBar.appendChild(hangupButton);
+
+    var csimButton = hilToolbarButton("token", "CSIM", "Send AT+CSIM", hilSendModemCsim);
+    csimButton.id = "hil-modem-action-csim";
+    csimButton.setAttribute("data-hil-modem-action", "csim");
+    actionsBar.appendChild(csimButton);
+
+    var crsmButton = hilToolbarButton("read", "CRSM", "Send AT+CRSM", hilSendModemCrsm);
+    crsmButton.id = "hil-modem-action-crsm";
+    crsmButton.setAttribute("data-hil-modem-action", "crsm");
+    actionsBar.appendChild(crsmButton);
+
+    var refreshModemButton = hilToolbarButton("refresh", "Refresh", "Send AT+CFUN=0 then AT+CFUN=1", function () {
+      hilRunModemQuickAction("refresh");
+    });
+    refreshModemButton.id = "hil-modem-action-refresh";
+    refreshModemButton.setAttribute("data-hil-modem-action", "refresh");
+    actionsBar.appendChild(refreshModemButton);
+
+    var rebootButton = hilToolbarButton("enable", "Reboot", "Send AT+CFUN=1,1", function () {
+      hilRunModemQuickAction("reboot");
+    });
+    rebootButton.id = "hil-modem-action-reboot";
+    rebootButton.setAttribute("data-hil-modem-action", "reboot");
+    actionsBar.appendChild(rebootButton);
+
+    var smsButton = hilToolbarButton("notification", "Send SMS", "Send AT+CMGF=1 and AT+CMGS", hilSendModemSms);
+    smsButton.id = "hil-modem-action-sms";
+    smsButton.setAttribute("data-hil-modem-action", "sms");
+    actionsBar.appendChild(smsButton);
+
+    var standardSelect = document.createElement("select");
+    standardSelect.id = "hil-modem-standard-command";
+    standardSelect.className = "cc-hil-modem-standard";
+    standardSelect.setAttribute("aria-label", "Standard AT command");
+    var standardBlank = document.createElement("option");
+    standardBlank.value = "";
+    standardBlank.textContent = "Standard AT...";
+    standardSelect.appendChild(standardBlank);
+    HIL_MODEM_STANDARD_COMMANDS.forEach(function (item) {
+      var opt = document.createElement("option");
+      opt.value = item.id;
+      opt.textContent = item.label + " (" + item.command + ")";
+      standardSelect.appendChild(opt);
+    });
+    actionsBar.appendChild(standardSelect);
+
+    var standardButton = hilToolbarButton("shell", "Send", "Send selected standard AT command", hilSendSelectedStandardAtCommand);
+    standardButton.id = "hil-modem-standard-send";
+    standardButton.setAttribute("data-hil-modem-action", "standard");
+    actionsBar.appendChild(standardButton);
+
+    shell.appendChild(actionsBar);
+
     var terminalFrame = document.createElement("div");
     terminalFrame.className = "cc-hil-modem-terminal-frame";
     var terminalHost = document.createElement("div");
@@ -10460,6 +11044,8 @@
     var stop = $("hil-modem-stop");
     var select = $("hil-modem-device");
     var useDevice = $("hil-modem-device-use");
+    var quickActions = document.querySelectorAll("[data-hil-modem-action]");
+    var standardSelect = $("hil-modem-standard-command");
 
     if (select) {
       var current = select.value;
@@ -10493,9 +11079,14 @@
     var capability = state.modemShellCapability || null;
     var capDisabled = capability && capability.enabled === false;
     var running = !!state.modemShellRunning;
+    var ready = !!(state.modemShellSocket && state.modemShellSocket.readyState === 1);
     if (start) start.disabled = running || !!capDisabled;
     if (stop) stop.disabled = !running && !state.modemShellSocket;
     if (useDevice) useDevice.disabled = !select || !select.value;
+    quickActions.forEach(function (button) {
+      button.disabled = !ready || !!capDisabled;
+    });
+    if (standardSelect) standardSelect.disabled = !ready || !!capDisabled;
     var input = $("hil-modem-command");
     if (input) input.placeholder = hilPreferredModemShellCommand();
 
@@ -10536,6 +11127,171 @@
     state.modemShellStatusText = String(text || "");
     state.modemShellErrorText = String(errorText || "");
     hilRenderModemShellMetadata();
+  }
+
+  function hilSendModemShellInput(data, labelText) {
+    var state = commandState.hilWorkbench;
+    var sock = state.modemShellSocket;
+    if (!sock || sock.readyState !== 1) {
+      hilSetModemShellStatus("not connected", "start modem shell first");
+      return false;
+    }
+    sock.send(JSON.stringify({ type: "stdin", data: String(data || "") }));
+    if (labelText) {
+      state.modemShellStatusText = String(labelText);
+      state.modemShellErrorText = "";
+      hilRenderModemShellMetadata();
+      setStatusAction("modem shell: " + String(labelText));
+    }
+    if (state.modemShellTerm && typeof state.modemShellTerm.focus === "function") {
+      try { state.modemShellTerm.focus(); } catch (_err) {}
+    }
+    return true;
+  }
+
+  function hilSendAtCommand(command, labelText) {
+    var line = String(command || "").replace(/[\r\n]/g, "").trim();
+    if (!line) {
+      hilSetModemShellStatus("empty command", "");
+      return false;
+    }
+    return hilSendModemShellInput(line + "\r", labelText || ("sent " + line));
+  }
+
+  function hilSanitizeAtLine(value) {
+    return String(value || "").replace(/[\r\n]/g, "").trim();
+  }
+
+  function hilNormalizeAtHex(value, labelText) {
+    var hex = String(value || "").replace(/[\s:]/g, "").toUpperCase();
+    if (!hex) {
+      hilSetModemShellStatus("missing " + String(labelText || "hex").toLowerCase(), "");
+      return "";
+    }
+    if (!/^[0-9A-F]+$/.test(hex)) {
+      hilSetModemShellStatus("invalid " + String(labelText || "hex").toLowerCase(), "");
+      return "";
+    }
+    if (hex.length % 2 !== 0) {
+      hilSetModemShellStatus("odd-length " + String(labelText || "hex").toLowerCase(), "");
+      return "";
+    }
+    return hex;
+  }
+
+  function hilFindStandardAtCommand(commandId) {
+    var id = String(commandId || "");
+    for (var i = 0; i < HIL_MODEM_STANDARD_COMMANDS.length; i++) {
+      if (HIL_MODEM_STANDARD_COMMANDS[i].id === id) {
+        return HIL_MODEM_STANDARD_COMMANDS[i];
+      }
+    }
+    return null;
+  }
+
+  function hilSendSelectedStandardAtCommand() {
+    var select = $("hil-modem-standard-command");
+    var item = select ? hilFindStandardAtCommand(select.value) : null;
+    if (!item) {
+      hilSetModemShellStatus("pick command", "");
+      return;
+    }
+    if (hilSendAtCommand(item.command, "sent " + item.command) && select) {
+      select.value = "";
+    }
+  }
+
+  function hilRunModemQuickAction(actionId) {
+    var action = String(actionId || "");
+    if (action === "auth") {
+      hilSendAtCommand("AT+CREG?", "sent AT+CREG?");
+      return;
+    }
+    if (action === "ceer") {
+      hilSendAtCommand("AT+CEER", "sent AT+CEER");
+      return;
+    }
+    if (action === "signal") {
+      hilSendAtCommand("AT+CSQ", "sent AT+CSQ");
+      return;
+    }
+    if (action === "operator") {
+      hilSendAtCommand("AT+COPS?", "sent AT+COPS?");
+      return;
+    }
+    if (action === "answer") {
+      hilSendAtCommand("ATA", "sent ATA");
+      return;
+    }
+    if (action === "hangup") {
+      hilSendAtCommand("ATH", "sent ATH");
+      return;
+    }
+    if (action === "refresh") {
+      if (!hilSendModemShellInput("AT+CFUN=0\r", "refresh: AT+CFUN=0")) return;
+      window.setTimeout(function () {
+        hilSendModemShellInput("AT+CFUN=1\r", "refresh: AT+CFUN=1");
+      }, 1200);
+      return;
+    }
+    if (action === "reboot") {
+      hilSendAtCommand("AT+CFUN=1,1", "sent AT+CFUN=1,1");
+    }
+  }
+
+  function hilDialModemCall() {
+    var target = window.prompt("Dial string after ATD", "");
+    if (target === null) return;
+    target = hilSanitizeAtLine(target);
+    if (!target) {
+      hilSetModemShellStatus("dial needs target", "");
+      return;
+    }
+    var command = /^ATD/i.test(target) ? target : ("ATD" + target);
+    hilSendAtCommand(command, "sent " + command);
+  }
+
+  function hilSendModemCsim() {
+    var value = window.prompt("CSIM APDU hex", "");
+    if (value === null) return;
+    var hex = hilNormalizeAtHex(value, "CSIM APDU");
+    if (!hex) return;
+    hilSendAtCommand("AT+CSIM=" + hex.length + ",\"" + hex + "\"", "sent AT+CSIM");
+  }
+
+  function hilSendModemCrsm() {
+    var value = window.prompt("CRSM arguments", "176,28423,0,0,10");
+    if (value === null) return;
+    var args = hilSanitizeAtLine(value);
+    if (!args) {
+      hilSetModemShellStatus("missing CRSM args", "");
+      return;
+    }
+    var command = /^AT\+CRSM/i.test(args) ? args : ("AT+CRSM=" + args);
+    hilSendAtCommand(command, "sent AT+CRSM");
+  }
+
+  function hilSendModemSms() {
+    var number = window.prompt("SMS recipient number", "");
+    if (number === null) return;
+    number = String(number || "").replace(/[\r\n"]/g, "").trim();
+    if (!number) {
+      hilSetModemShellStatus("sms needs number", "");
+      setStatusAction("modem shell: SMS recipient number is required");
+      return;
+    }
+
+    var body = window.prompt("SMS body", "");
+    if (body === null) return;
+    body = String(body || "").replace(/\x1a/g, "");
+
+    if (!hilSendModemShellInput("AT+CMGF=1\r", "sms: text mode")) return;
+    window.setTimeout(function () {
+      if (!hilSendModemShellInput("AT+CMGS=\"" + number + "\"\r", "sms: recipient")) return;
+      window.setTimeout(function () {
+        hilSendModemShellInput(body + "\x1a", "sms submitted");
+      }, 700);
+    }, 250);
   }
 
   function hilEnsureModemShellTerminal() {
@@ -14020,7 +14776,7 @@
           || typeof value.active_count === "number");
   }
 
-  // Manual-aligned label translations for SAIP field keys. The keys
+  // Standards-aligned label translations for SAIP field keys. The keys
   // pySim emits are spec-faithful camelCase (``applicationLoadPackageAID``,
   // ``minimumSecurityLevel``) which is fine for API surfaces but
   // unhelpful inside an editor — operators recognise the wording from
@@ -14958,6 +15714,9 @@
     tab.fcpCache = {};
     tab.lastRecoverAt = 0;
     refreshSessionStatusMetric();
+    if (typeof readerBarNotifySessionChanged === "function") {
+      readerBarNotifySessionChanged();
+    }
   }
 
   // ---------------------------------------------------------------
@@ -24019,7 +24778,7 @@
   }
 
   // ─────────────────────────────────────────────────────────────────
-  // P0.2 — Batch personalization.
+  // P0.2 — Batch profile generation.
   //   Collects template + data + output dir, calls saip.batch_personalize,
   //   surfaces the per-record outcome through the action log.
   // ─────────────────────────────────────────────────────────────────
@@ -24027,7 +24786,7 @@
   async function saipRibbonBatchPersonalize(pkg) {
     var defaultTemplate = pkg && pkg.sourcePath ? pkg.sourcePath : "";
     var result = await saipShowFormModal({
-      title: "Batch personalize",
+      title: "Batch generate",
       intro: "Materialise N personalised DER profiles from one template + a data file. Column / key names must match template placeholder names 1:1.",
       submitLabel: "Generate",
       fields: [
@@ -24101,7 +24860,7 @@
   }
 
   // ─────────────────────────────────────────────────────────────────
-  // P1.4 — Import / Export PE, Move PE up/down, Batch validate.
+  // P1.4 — Import / Export PE, Move PE up/down, Batch lint.
   // ─────────────────────────────────────────────────────────────────
 
   async function saipRibbonImportPe(pkg, peList, detail, validation) {
@@ -24306,8 +25065,8 @@
 
   async function saipRibbonBatchValidate() {
     var result = await saipShowFormModal({
-      title: "Batch validate",
-      intro: "Lint multiple profile packages in one pass (mirrors epcval -p).",
+      title: "Batch lint",
+      intro: "Lint multiple profile packages in one pass (runs the batch linter).",
       submitLabel: "Validate",
       fields: [
         {
@@ -25330,7 +26089,7 @@
     }));
     ribbon.appendChild(fsGrp.group);
 
-    // -- Token bindings ([NAME] placeholders, YggdraSIM-coined) ------
+    // -- Token bindings ([NAME] placeholders, YggdraSIM-owned) ------
     var varsGrp = mkGroup("Tokens");
     varsGrp.inner.appendChild(mkBtn({
       icon: "token", label: "Token editor",
@@ -25344,7 +26103,7 @@
       },
     }));
     varsGrp.inner.appendChild(mkBtn({
-      icon: "personalize", label: "Batch personalize",
+      icon: "personalize", label: "Batch generate",
       disabled: !hasPkg,
       title: hasPkg
         ? "Materialise N personalised DER profiles from one template + a data file (CSV / JSON / JSONL / YAML)."
@@ -25370,7 +26129,7 @@
       },
     }));
     valGrp.inner.appendChild(mkBtn({
-      icon: "batch", label: "Batch validate",
+      icon: "batch", label: "Batch lint",
       title: "Lint multiple SAIP packages by path / glob in one call.",
       onClick: function () {
         saipRibbonBatchValidate();
@@ -25586,7 +26345,7 @@
       // SA-G1: ``activeTopTab`` replaces the legacy ``activeDetailTab``
       // tri-state ("pe" | "file" | "vars"). Variables now live in a
       // ribbon-launched modal so the package itself only has the three
-      // structural views Comprion exposes as siblings.
+      // structural package surfaces.
       activeTopTab: "profile_elements",  // "profile_elements" | "file_system" | "applications"
       // SA-G3: file detail sub-tab + file-tree expand/collapse memory.
       // ``fileTreeCollapsed`` keys are the synthetic node ids minted in
@@ -27406,10 +28165,8 @@
     // ``parent_path`` is the same chain minus the file's own FID,
     // ``kind`` carries the file type (mf/df/adf/ef-trans/...). We
     // render that as a single tree rooted at MF so template files
-    // and GFM-created files mix structurally — matching the
-    // ``File System tab`` described in the eUICC Profile Creator
-    // manual ("combined file system for the selected profile
-    // package and its file system-related profile elements").
+    // and GFM-created files mix structurally in one package-level
+    // filesystem view.
     var nodesByChain = {};
     function _ensureNode(chain, label, kind, row) {
       if (!chain) chain = "";
@@ -27507,8 +28264,7 @@
       }
     });
     // Deterministic ordering: containers (DF / MF / ADF) before EFs,
-    // then lexical by hex FID. Matches the eUICC Profile Creator
-    // ordering (DFs grouped, then EFs in numeric order).
+    // then lexical by hex FID.
     function _sortKey(node) {
       if (sortMode === "name") {
         return String(node.label || "").toLowerCase() + "::" + String(node.chain || "");
@@ -27760,8 +28516,7 @@
   // TCA SAIP §9 file template catalog for one PE. Loaded on demand
   // so the PE Editor can render a checkable tree of ALL DFs/EFs the
   // template defines, not just the ones the package currently
-  // materialises. Mirrors the eUICC Profile Creator's *File System
-  // Template* group.
+  // materialises.
   async function saipLoadPeTemplate(pkg, sectionKey) {
     if (!pkg || !pkg.sessionId) return;
     if (!pkg.peTemplateCache) pkg.peTemplateCache = {};
@@ -27973,8 +28728,7 @@
     var bodyHost = document.createElement("div");
     bodyHost.className = "saip-detail-body";
 
-    // PE detail tabs — YggdraSIM voice, deliberately not the
-    // "PE-<Type> Editor" label the Comprion ePC ribbon ships.
+    // PE detail tabs — YggdraSIM voice with local labels.
     var editorLabel = "Decoded view";
     var tabEditor = document.createElement("button");
     tabEditor.type = "button";
@@ -29344,7 +30098,7 @@
       // Byte 1 is the data-coding byte. Default 0x21 ("compact" coding,
       // tolerated by all SAIP-aware eUICC stacks observed). Preserve
       // any prior value the package carried so we don't clobber a
-      // vendor-specific byte (e.g. 0x42 on some cards).
+      // implementation-specific byte (e.g. 0x42 on some cards).
       var byte1 = 0x21;
       if (initialHex) {
         var raw = String(initialHex).replace(/\s+/g, "");
@@ -31033,8 +31787,7 @@
   // pySim only emits inline ``fileID`` when the package overrides the
   // template default; for files that match the template, the FID lives
   // implicitly in the template OID. We surface the spec-known FID with
-  // a "(template)" badge so the FILES table reads the way a Comprion /
-  // Telna operator expects.
+  // a "(template)" badge so the FILES table reads the way a operator can scan.
   //
   // Sources: ETSI TS 102 221 §13 (MF / DF.TELECOM), 3GPP TS 31.102 §4
   // (ADF.USIM EFs), 3GPP TS 31.103 §4 (ADF.ISIM EFs), 3GPP TS 31.121 §4
@@ -33174,9 +33927,8 @@
   // ``ProfileTemplateRegistry``). Lists every DF/EF the active
   // template defines, with checkboxes that route into
   // ``saip.add_template_file`` / ``saip.remove_template_file``.
-  // Mirrors the eUICC Profile Creator's *File System Template* group
-  // so operators can see the full catalog and add/remove files
-  // without hand-editing the JSON tree.
+  // Gives operators the full catalog and add/remove controls without
+  // hand-editing the JSON tree.
   // ─────────────────────────────────────────────────────────────────
 
   function saipEditorRenderTemplateCatalogCard(host, pkg, sectionKey, peIndex) {
@@ -37143,14 +37895,13 @@
     };
   }
 
-  // SA-G9: PE-GenericFileManagement "Add file element" inline form.
-  // The eUICC Profile Creator manual splits this into "Add select
-  // element" (filePath) + "Add file element" (createFCP). The backend
-  // dispatcher merges them into a single atomic transaction. When
-  // the GFM is already bound to a single parent path the bar omits
-  // the parent input entirely — every Add file then lands under
-  // that parent. To use a different parent path the operator adds a
-  // new GFM PE (Profile Element ribbon → Add below → genericFileManagement).
+  // SA-G9: PE-GenericFileManagement inline file-creation form.
+  // The backend dispatcher appends a ``filePath`` selector and a
+  // ``createFCP`` payload as one atomic transaction. When the GFM is
+  // already bound to a single parent path the bar omits the parent
+  // input entirely — every Add file then lands under that parent.
+  // To use a different parent path the operator adds a new GFM PE
+  // (Profile Element ribbon -> Add below -> genericFileManagement).
   // This keeps each GFM's diff readable as "files added under one DF".
   // defaults that the FCP editor can refine afterwards.
   function saipGfmBuildAddFileBar(pkg, sectionKey, summary) {
@@ -37162,11 +37913,11 @@
     var heading = document.createElement("div");
     heading.className = "saip-gfm-addbar-heading";
     if (pState === "bound") {
-      heading.textContent = "Add file under " + summary.pretty;
+      heading.textContent = "Append GFM file under " + summary.pretty;
     } else if (pState === "mixed") {
-      heading.textContent = "Add file element (mixed parents — pick one)";
+      heading.textContent = "Append GFM file (mixed parents — pick one)";
     } else {
-      heading.textContent = "Add file element (sets the GFM parent path)";
+      heading.textContent = "Append GFM file (sets the GFM parent path)";
     }
     bar.appendChild(heading);
 
@@ -37439,11 +38190,10 @@
     }
     card.appendChild(summaryChip);
 
-    // "Add file element" affordance per the manual's "File System
-    // Creation by Generic File Management" flow. Inline form invoking
-    // saip.gfm_add_file_element. The bar is parent-aware: when the
-    // GFM is bound it reuses ``parentSummary.path`` and hides the
-    // input entirely; otherwise it accepts a free-form parent path.
+    // Inline form invoking saip.gfm_add_file_element. The bar is
+    // parent-aware: when the GFM is bound it reuses
+    // ``parentSummary.path`` and hides the input entirely; otherwise
+    // it accepts a free-form parent path.
     if (pkg && sectionKey) {
       var addBar = saipGfmBuildAddFileBar(pkg, sectionKey, parentSummary);
       if (addBar) {
@@ -38769,8 +39519,7 @@
       "File Control Parameters",
       "FCP metadata + access rules (TS 102 221 §11.1.1 / §9.2.4). Decoded-first controls — pick structure / file type from dropdowns instead of editing the descriptor byte directly.",
     );
-    // ePC §"File Content" → "Edit the file content in hexadecimal or
-    // interpreted representation." The Data tab folds both views so
+    // The Data tab folds raw hexadecimal and interpreted views The Data tab folds both views so
     // operators do not bounce between two siblings to read the same
     // bytes. Record-fixed files expose a single-record navigator
     // (dropdown + prev/next, PageUp / PageDown keys) instead of a
@@ -40456,9 +41205,8 @@
     // need to enumerate each row — that is what the Data and Hex
     // tabs are for. Render a one-line summary instead and surface a
     // clickable "show all" toggle for the rare operator who wants
-    // the full list inline. This matches the eUICC Profile Creator
-    // UX where the FCP / metadata column never carries a full
-    // record dump.
+    // the full list inline. The FCP / metadata column stays compact
+    // instead of carrying a full record dump.
     var COMPACT_THRESHOLD = 5;
     var compactMode = totalRecords > COMPACT_THRESHOLD;
     var summaryRow = null;
@@ -40777,7 +41525,7 @@
     }
 
     // Per-record structured wizard hook. EFs registered in
-    // ``_SAIP_RECORD_WIZARDS`` get a Comprion-style form for each
+    // ``_SAIP_RECORD_WIZARDS`` get a structured form for each
     // record. The wizard owns layout + encoding and routes Apply
     // through ``saip.update_record_bytes`` (same write path as the
     // raw-hex editor below).
@@ -40895,9 +41643,9 @@
   //
   // Replaces the legacy "drop every record card into the host" pattern
   // that flooded the Data tab on phonebooks and EF.ARRs with 22+ slots
-  // open at once. Operator workflow now matches eUICC Profile Creator
-  // §"File Content" — pick the record from the dropdown, page through
-  // with prev/next, PageUp / PageDown keys also jump records.
+  // open at once. Operators pick the record from the dropdown, page
+  // through with prev/next, and can use PageUp / PageDown as keyboard
+  // shortcuts.
   //
   // ``opts`` accepts:
   //   { records, recordSize, efKey, sectionKey, fieldPath,
@@ -41148,7 +41896,7 @@
     return wrap;
   }
 
-  // ── Comprion-style wizard framework ────────────────────────────
+  // ── structured wizard framework ────────────────────────────
   //
   // Each wizard targets a single transparent EF and exposes a
   // ``render(host, currentHex, applyHex)`` function. The wizard
@@ -45408,12 +46156,11 @@
   _SAIP_RECORD_WIZARDS["ef-ext4"] = _SAIP_RECORD_WIZARD_EXT;
   _SAIP_RECORD_WIZARDS["ef-ext5"] = _SAIP_RECORD_WIZARD_EXT;
 
-  // ── Manual-list parity wizards. Reference: TCA eUICC Profile
-  // Creator manual §"Interpreted EFs with GUI Editor". Each EF
-  // below was previously surfaced as a typed payload through the
-  // generic decoded-edit panel; the wizards below replace that with
-  // a structured form so the operator never sees opaque hex for a
-  // reference-listed EF.
+  // ── Structured EF wizards.
+  // Each EF below was previously surfaced as a typed payload through
+  // the generic decoded-edit panel; the wizards below replace that
+  // with a structured form so the operator does not have to edit
+  // opaque hex for a known EF layout.
 
   // EF.SUCI-CALC-INFO-USIM (TS 31.102 §4.4.11.13). The 4F01 USIM-
   // computed variant uses the same protection-scheme + HNPK + key
@@ -46023,7 +46770,7 @@
       2: "ProSe direct discovery (restricted)",
       3: "ProSe direct communication (one-to-many)",
       4: "ProSe direct communication (one-to-one)",
-      5: "EPC-level ProSe discovery",
+      5: "Evolved Packet Core ProSe discovery",
       6: "ProSe UE-to-network relay (Layer-3)",
       7: "ProSe UE-to-UE relay (Layer-3)",
       8: "ProSe UE-to-network relay (Layer-2)",
@@ -51432,8 +52179,8 @@
     return String(text || "").replace(/\s+/g, "").replace(/^0[xX]/, "").toUpperCase();
   }
 
-  // Enum registries for fields that the manual / TCA SAIP spec
-  // restricts to a fixed set of string tokens. Disambiguation between
+  // Enum registries for fields that TCA SAIP or related standards
+  // restrict to a fixed set of string tokens. Disambiguation between
   // overlapping field names (e.g. ``keyReference`` carries different
   // tokens for PIN vs PUK PEs) goes through ``peTypeHint`` which is
   // derived from the section key. Lookup is case-insensitive.
@@ -52454,8 +53201,8 @@
       || fn === "highupdateactivity"
       || fn === "readwhendeactivated"
       || fn === "readwhendeactived"
-      // PE-PINcodes / PE-PUKcodes — single-bit knobs the manual
-      // models as booleans even though SAIP encodes them as bytes.
+      // PE-PINcodes / PE-PUKcodes — single-bit knobs modelled as
+      // booleans even though SAIP encodes them as bytes.
       || fn === "userverificationpin"
       || fn === "ondemandverification"
     ) {
@@ -54693,8 +55440,8 @@
   // Detect a placeholder marker. SAIP carries two shapes:
   //   * dict-marker {"__ygg_placeholder__": NAME, "encoding": ENC}
   //     — the form stamps this when ``saip.add_variable_to_pe`` runs;
-  //   * bracket-string "[NAME]" — the manual's textual placeholder
-  //     syntax used in CSV personalisation lists.
+  //   * bracket-string "[NAME]" — textual placeholder syntax used
+  //     in CSV personalisation lists.
   function saipFormPlaceholderInfo(value) {
     if (value && typeof value === "object" && !Array.isArray(value)) {
       if (typeof value.__ygg_placeholder__ === "string"
@@ -62164,6 +62911,7 @@
     wireHostShellPanel();
     wireLiveReadersPanel();
     wireCardBridgePanel();
+    wireRemoteLabPanel();
     wireCommandCenter();
     wireReaderPane();
     wireLogDock();
@@ -62183,6 +62931,8 @@
     loadBackend();
     loadCommandCatalogue();
     loadCardBridgeStatus();
+    remoteLabRefreshSessionState();
+    remoteLabStartSessionPoll();
     scheduleHealthPoll();
     refreshReaderPane();
     // Top-bar reader strip — installs its own refresh button handler,

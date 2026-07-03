@@ -125,6 +125,10 @@ def card_bridge() -> int:
     return _invoke("Tools.CardBridge.server", "main")
 
 
+def lab_agent() -> int:
+    return _invoke("yggdrasim_common.remote_lab.agent", "main")
+
+
 def profile_package() -> int:
     return _invoke("Tools.ProfilePackage.main", "run_standalone")
 

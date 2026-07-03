@@ -231,6 +231,38 @@
           </div>
         </section>
 
+        <section data-view="remote_lab" class="view">
+          <div class="cc-wb-shell remote-lab-shell">
+            <header class="cc-wb-page-header">
+              <div>
+                <h1>Remote Lab</h1>
+                <p class="cc-wb-lead">
+                  Self-hosted modem/card rigs imported from .ygglab invites.
+                </p>
+              </div>
+              <div class="remote-lab-toolbar">
+                <button class="btn" id="remote-lab-refresh">Refresh</button>
+                <button class="btn" id="remote-lab-import">Import</button>
+              </div>
+            </header>
+            <div class="cc-wb-status-strip">
+              <span class="cc-chip" id="remote-lab-count">devices: 0</span>
+              <span class="cc-chip" id="remote-lab-state">idle</span>
+            </div>
+            <div class="remote-lab-import-panel" id="remote-lab-import-panel" hidden>
+              <label for="remote-lab-import-json">Invite JSON</label>
+              <textarea id="remote-lab-import-json" rows="8" spellcheck="false"></textarea>
+              <div class="remote-lab-import-actions">
+                <button class="btn btn-primary" id="remote-lab-import-submit">Save invite</button>
+                <button class="btn" id="remote-lab-import-cancel">Cancel</button>
+              </div>
+            </div>
+            <div id="remote-lab-devices" class="remote-lab-devices">
+              <p class="loading">loading Remote Lab devices...</p>
+            </div>
+          </div>
+        </section>
+
         <section data-view="registry" class="view">
           <h1>Registry browser</h1>
           <p class="lead">
@@ -380,7 +412,7 @@
         </section>
 
         <!--
-          Remote Bridge panel — wraps the read-only card_bridge.status /
+          Remote Host Onboarding panel — wraps the read-only card_bridge.status /
           card_bridge.probe actions in a focused diagnostics surface.
           Polls /api/actions/card_bridge.status/run every 5 s while the
           view is active so operators see auth posture + latency change
@@ -389,20 +421,16 @@
           server-side helper returns.
         -->
         <section data-view="card_bridge" class="view">
-          <h1>Remote bridge</h1>
+          <h1>Remote host onboarding</h1>
           <p class="lead">
-            Inspect and probe the remote card bridge configured for this
-            YggdraSIM session. Talks exclusively through the
-            <code>card_bridge.status</code> and <code>card_bridge.probe</code>
-            actions — no separate wire format. Useful when a card sits in
-            a reader on a different host (for example a Raspberry Pi) and
-            this YggdraSIM is consuming it over an SSH
-            <code>LocalForward</code>.
+            Prepare a remote host for Remote Lab access. Card Bridge remains
+            the APDU data plane; this view configures the host, tunnel, token,
+            and HIL service that make the host reachable.
           </p>
 
           <div class="cb-panel">
             <header class="cb-panel-header">
-              <h2>Configured target</h2>
+              <h2>Card Bridge data plane</h2>
               <div class="cb-panel-controls">
                 <label class="cb-toggle">
                   <input type="checkbox" id="cb-auto-refresh" checked />
@@ -442,13 +470,13 @@
 
             <div class="cb-status-summary" id="cb-status-summary">
               not configured — set <code>YGGDRASIM_CARD_RELAY_URL</code> or pass
-              <code>--remote-card-url</code> to talk to a Remote Bridge over SSH.
+              <code>--remote-card-url</code> to talk to a Card Bridge stream.
             </div>
           </div>
 
           <div class="cb-panel cb-rig-panel">
             <header class="cb-panel-header">
-              <h2>Remote HIL rig</h2>
+              <h2>Remote host onboarding</h2>
               <div class="cb-panel-controls">
                 <button class="btn btn-small" id="cb-rig-refresh">Refresh</button>
                 <button class="btn btn-small" id="cb-rig-open-gui">Open RPi GUI</button>
@@ -482,6 +510,7 @@
                 <input type="text" id="cb-rig-gui-port" inputmode="numeric" pattern="[0-9]*" value="27854" autocomplete="off" />
               </div>
             </div>
+            <div class="cb-rig-port-plan" id="cb-rig-port-plan"></div>
 
             <details class="cb-override cb-rig-advanced">
               <summary>RPi service settings</summary>
@@ -519,7 +548,7 @@
 
             <div class="cb-rig-primary-actions">
               <button class="btn btn-primary" id="cb-rig-start-all">Start full rig</button>
-              <button class="btn" id="cb-rig-stop-all">Stop full rig</button>
+              <button class="btn" id="cb-rig-stop-all">Stop host</button>
             </div>
 
             <details class="cb-override cb-rig-manual">

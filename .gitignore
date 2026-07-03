@@ -132,7 +132,10 @@ reports/*
 yggdrasim.egg-info/
 
 gui_frontend/
-yggdrasim_common/gui_server/
+yggdrasim_common/gui_server/*
+!yggdrasim_common/gui_server/routes/
+yggdrasim_common/gui_server/routes/*
+!yggdrasim_common/gui_server/routes/remote_lab.py
 tests/test_gui_*.py
 
 V1_*.md
